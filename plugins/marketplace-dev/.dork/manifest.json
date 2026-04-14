@@ -1,0 +1,13 @@
+{
+  "schemaVersion": 1,
+  "name": "marketplace-dev",
+  "version": "0.1.0",
+  "type": "skill-pack",
+  "description": "Guides AI agents through developing, validating, and publishing DorkOS marketplace packages",
+  "author": "Dork Labs",
+  "license": "MIT",
+  "tags": ["marketplace", "development", "authoring", "packaging"],
+  "category": "development",
+  "icon": "📦",
+  "layers": ["skills"]
+}

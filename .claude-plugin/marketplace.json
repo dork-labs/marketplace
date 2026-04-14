@@ -99,6 +99,18 @@
       "license": "MIT",
       "category": "integration",
       "tags": ["discord", "adapter"]
+    },
+    {
+      "name": "marketplace-dev",
+      "source": "./plugins/marketplace-dev",
+      "description": "Guides AI agents through developing, validating, and publishing DorkOS marketplace packages",
+      "author": {
+        "name": "Dork Labs"
+      },
+      "license": "MIT",
+      "category": "development",
+      "tags": ["marketplace", "development", "authoring"],
+      "keywords": ["marketplace", "plugin", "skill-pack", "packaging"]
     }
   ]
 }

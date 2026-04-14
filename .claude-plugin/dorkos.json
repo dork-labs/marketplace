@@ -52,6 +52,13 @@
       "layers": ["adapters"],
       "icon": "💬",
       "pricing": { "model": "free" }
+    },
+    "marketplace-dev": {
+      "type": "skill-pack",
+      "layers": ["skills"],
+      "icon": "📦",
+      "featured": true,
+      "pricing": { "model": "free" }
     }
   }
 }

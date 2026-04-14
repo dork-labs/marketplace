@@ -1,0 +1,31 @@
+{
+  "id": "01KNZFR6S3C3VXK8M3TMKQXV9E",
+  "name": "DorkOS Marketplace",
+  "description": "",
+  "runtime": "claude-code",
+  "capabilities": [],
+  "behavior": {
+    "responseMode": "always"
+  },
+  "budget": {
+    "maxHopsPerMessage": 5,
+    "maxCallsPerHour": 100
+  },
+  "registeredAt": "2026-04-11T23:59:04.484Z",
+  "registeredBy": "dorkos-ui",
+  "personaEnabled": true,
+  "traits": {
+    "tone": 3,
+    "autonomy": 3,
+    "caution": 3,
+    "communication": 3,
+    "creativity": 3
+  },
+  "conventions": {
+    "soul": true,
+    "nope": true,
+    "dorkosKnowledge": true
+  },
+  "isSystem": false,
+  "enabledToolGroups": {}
+}
