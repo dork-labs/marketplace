@@ -59,6 +59,13 @@
       "icon": "📦",
       "featured": true,
       "pricing": { "model": "free" }
+    },
+    "lifeos-starter": {
+      "type": "agent",
+      "layers": ["skills", "tasks", "agents", "commands", "hooks"],
+      "icon": "🧬",
+      "featured": true,
+      "pricing": { "model": "free" }
     }
   }
 }
