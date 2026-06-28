@@ -1,0 +1,21 @@
+{
+  "name": "flow",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Dev tooling for the /flow plugin: authoring the Zod config schema, running the engine oracle tests, and regenerating config.schema.json. The shipped runtime (scripts/*.ts, run via `node --experimental-strip-types`) is dependency-free and needs none of this.",
+  "scripts": {
+    "test": "vitest run",
+    "typecheck": "tsc --noEmit",
+    "generate:schema": "tsx scripts/generate-config-schema.ts"
+  },
+  "devDependencies": {
+    "@types/node": "^25.6.0",
+    "ajv": "^8.18.0",
+    "ajv-formats": "^3.0.1",
+    "prettier": "^3.8.3",
+    "tsx": "^4.20.3",
+    "vitest": "^3.2.4",
+    "zod": "^4.3.6"
+  }
+}
