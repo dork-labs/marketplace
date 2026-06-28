@@ -14,7 +14,7 @@ on dorkos.ai for the user-facing reference. These three docs and the guides ship
 > [!IMPORTANT]
 > **Autonomous mode depends on a running DorkOS server (Pulse). Manual mode does
 > not.** `/flow`, `/flow:<stage>`, and `/flow auto` (terminal draining) run
-> without the server. The autonomous Pulse-seated loop (`.dork/tasks/flow-drain/`)
+> without the server. The autonomous Pulse-seated loop (`${CLAUDE_PLUGIN_ROOT}/skills/flow-drain/`)
 > requires the DorkOS server running to host the chokidar watcher + croner.
 
 ## Stages
@@ -163,7 +163,7 @@ surface supports it), never a bare key.
 ## Autonomous mode & the server dependency
 
 The autonomous loop is seated on **DorkOS Pulse** via a file-based schedule
-(`.dork/tasks/flow-drain/SKILL.md`). Pulse already provides a contextless
+(`${CLAUDE_PLUGIN_ROOT}/skills/flow-drain/SKILL.md`). Pulse already provides a contextless
 code-loop (croner) that dispatches a fresh, isolated, resumable, runtime-agnostic
 agent session per run — so there is no scheduler to build.
 

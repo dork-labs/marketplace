@@ -44,11 +44,11 @@
  * - <promise>PHASE_COMPLETE:<phase></promise>
  * - <promise>ABORT</promise>
  *
- * @module .claude/hooks/flow-loop
+ * @module flow/hooks/flow-loop
  */
 
-import { readFileSync } from 'node:fs';
-import { join } from 'node:path';
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
 
 /**
  * The `/flow auto` active-run sentinel. `/flow auto` writes it on start and
@@ -74,12 +74,12 @@ import { join } from 'node:path';
  *              pass), not done: the hook still allows the stop but says so in the reason.
  *              `0`/absent: the drain is genuinely done.
  */
-const AUTO_RUN_RELATIVE_PATH = join('.dork', 'flow', 'auto-run.json');
+const AUTO_RUN_RELATIVE_PATH = join(".dork", "flow", "auto-run.json");
 
 /** Marker that ends a phase cleanly — the orchestrator emitted it; allow stop. */
-const PHASE_COMPLETE_MARKER = '<promise>PHASE_COMPLETE:';
+const PHASE_COMPLETE_MARKER = "<promise>PHASE_COMPLETE:";
 /** Marker that aborts the drain — the operator emitted it; allow stop. */
-const ABORT_MARKER = '<promise>ABORT</promise>';
+const ABORT_MARKER = "<promise>ABORT</promise>";
 
 /**
  * The pure stop decision — exported and dependency-free so the fail-open
@@ -98,20 +98,23 @@ const ABORT_MARKER = '<promise>ABORT</promise>';
 export function decideStop(output, autoRun) {
   // Explicit signals win over everything — the orchestrator/operator said stop.
   if (output.includes(PHASE_COMPLETE_MARKER)) {
-    return { decision: 'allow-stop', reason: 'phase-complete signal' };
+    return { decision: "allow-stop", reason: "phase-complete signal" };
   }
   if (output.includes(ABORT_MARKER)) {
-    return { decision: 'allow-stop', reason: 'abort signal' };
+    return { decision: "allow-stop", reason: "abort signal" };
   }
 
   // No sentinel (the normal case for every session) → strict no-op, allow stop.
-  if (autoRun === null || typeof autoRun !== 'object') {
-    return { decision: 'allow-stop', reason: 'no active /flow auto run' };
+  if (autoRun === null || typeof autoRun !== "object") {
+    return { decision: "allow-stop", reason: "no active /flow auto run" };
   }
 
   // Sentinel present but not an active drain → allow stop.
   if (autoRun.active !== true) {
-    return { decision: 'allow-stop', reason: 'sentinel present but not active' };
+    return {
+      decision: "allow-stop",
+      reason: "sentinel present but not active",
+    };
   }
 
   // Active drain, but the ready queue is empty. Distinguish a STARVED queue
@@ -119,20 +122,27 @@ export function decideStop(output, autoRun) {
   // from a genuinely DRAINED one. Both ALLOW the stop (a terminal drain cannot
   // triage itself), but the reason tells the operator what to do next instead of
   // the misleading "drain complete".
-  const ready = typeof autoRun.ready === 'number' ? autoRun.ready : 0;
+  const ready = typeof autoRun.ready === "number" ? autoRun.ready : 0;
   if (ready <= 0) {
-    const shapeable = typeof autoRun.shapeable === 'number' ? autoRun.shapeable : 0;
+    const shapeable =
+      typeof autoRun.shapeable === "number" ? autoRun.shapeable : 0;
     if (shapeable > 0) {
       return {
-        decision: 'allow-stop',
+        decision: "allow-stop",
         reason: `drain starved: ${shapeable} shapeable item(s) need triage (/flow:triage)`,
       };
     }
-    return { decision: 'allow-stop', reason: 'drain complete — no ready work remaining' };
+    return {
+      decision: "allow-stop",
+      reason: "drain complete — no ready work remaining",
+    };
   }
 
   // The one blocking path: an explicitly active /flow auto run with ready work.
-  return { decision: 'block-stop', reason: `${ready} ready issue(s) remaining` };
+  return {
+    decision: "block-stop",
+    reason: `${ready} ready issue(s) remaining`,
+  };
 }
 
 /**
@@ -145,9 +155,9 @@ export function decideStop(output, autoRun) {
  */
 function readAutoRun(cwd) {
   try {
-    const raw = readFileSync(join(cwd, AUTO_RUN_RELATIVE_PATH), 'utf8');
+    const raw = readFileSync(join(cwd, AUTO_RUN_RELATIVE_PATH), "utf8");
     const parsed = JSON.parse(raw);
-    return parsed && typeof parsed === 'object' ? parsed : null;
+    return parsed && typeof parsed === "object" ? parsed : null;
   } catch {
     // Missing/unreadable/malformed → fail open (no active run).
     return null;
@@ -162,7 +172,7 @@ function readAutoRun(cwd) {
  */
 async function readStdin() {
   return new Promise((resolve) => {
-    let data = '';
+    let data = "";
     let resolved = false;
 
     const done = () => {
@@ -173,12 +183,12 @@ async function readStdin() {
       resolve(data);
     };
 
-    process.stdin.setEncoding('utf8');
-    process.stdin.on('data', (chunk) => {
+    process.stdin.setEncoding("utf8");
+    process.stdin.on("data", (chunk) => {
       data += chunk;
     });
-    process.stdin.on('end', done);
-    process.stdin.on('error', done);
+    process.stdin.on("end", done);
+    process.stdin.on("error", done);
     // Hard timeout — proceed with what we have if stdin stays open.
     setTimeout(done, 500).unref();
   });
@@ -186,16 +196,30 @@ async function readStdin() {
 
 /** Print the block message box, mirroring the legacy hook's affordances. */
 function printBlockMessage(reason) {
-  console.error('');
-  console.error('┌─────────────────────────────────────────────────────────────┐');
-  console.error('│  /flow auto — DRAINING THE READY QUEUE                       │');
-  console.error('├─────────────────────────────────────────────────────────────┤');
+  console.error("");
+  console.error(
+    "┌─────────────────────────────────────────────────────────────┐",
+  );
+  console.error(
+    "│  /flow auto — DRAINING THE READY QUEUE                       │",
+  );
+  console.error(
+    "├─────────────────────────────────────────────────────────────┤",
+  );
   console.error(`│  ${reason.padEnd(58)} │`);
-  console.error('├─────────────────────────────────────────────────────────────┤');
-  console.error('│  To stop: output <promise>ABORT</promise>                   │');
-  console.error('│  Or finish the active /flow auto drain                      │');
-  console.error('└─────────────────────────────────────────────────────────────┘');
-  console.error('');
+  console.error(
+    "├─────────────────────────────────────────────────────────────┤",
+  );
+  console.error(
+    "│  To stop: output <promise>ABORT</promise>                   │",
+  );
+  console.error(
+    "│  Or finish the active /flow auto drain                      │",
+  );
+  console.error(
+    "└─────────────────────────────────────────────────────────────┘",
+  );
+  console.error("");
 }
 
 async function main() {
@@ -204,7 +228,7 @@ async function main() {
   const autoRun = readAutoRun(cwd);
   const { decision, reason } = decideStop(output, autoRun);
 
-  if (decision === 'block-stop') {
+  if (decision === "block-stop") {
     printBlockMessage(reason);
     process.exit(2);
   }
@@ -219,7 +243,8 @@ async function main() {
 
 // Only run the hook when invoked directly, not when imported by a test.
 const invokedDirectly =
-  process.argv[1] && import.meta.url === new URL(`file://${process.argv[1]}`).href;
+  process.argv[1] &&
+  import.meta.url === new URL(`file://${process.argv[1]}`).href;
 if (invokedDirectly) {
   main();
 }

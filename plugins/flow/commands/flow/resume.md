@@ -32,4 +32,4 @@ via the ownership policy, hand it back the same way (reassign on the tracker via
 
 If you silenced one loop via `loops.<id>.enabled: false` (see `/flow:pause`), flip
 it back to `true` in `${CLAUDE_PLUGIN_ROOT}/config/config.json`. See the dials guide
-(`docs/guides/flow/the-dials.mdx`).
+(`${CLAUDE_PLUGIN_ROOT}/docs/the-dials.mdx`).

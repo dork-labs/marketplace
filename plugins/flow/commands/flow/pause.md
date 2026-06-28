@@ -36,5 +36,5 @@ instead, use the ownership-policy reassignment (reassign on the tracker via the
 To disable or reprioritize ONE reconciler loop rather than pausing everything, edit
 the `loops` config in `${CLAUDE_PLUGIN_ROOT}/config/config.json`: `loops.<id>.enabled: false`
 silences that loop (e.g. `loops.triage`, `loops.hygiene`), and `loops.<id>.priority`
-reorders the tick. See the dials guide (`docs/guides/flow/the-dials.mdx`). Resume
+reorders the tick. See the dials guide (`${CLAUDE_PLUGIN_ROOT}/docs/the-dials.mdx`). Resume
 everything with `/flow:resume`.

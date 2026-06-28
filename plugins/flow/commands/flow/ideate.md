@@ -9,7 +9,7 @@ argument-hint: "<task-brief-or-path-to-notes>"
 
 IDEATE the work described by: $ARGUMENTS
 
-Read `.claude/skills/ideating-features/SKILL.md` and follow its process exactly.
+Read `${CLAUDE_PLUGIN_ROOT}/skills/ideating-features/SKILL.md` and follow its process exactly.
 It is the IDEATE stage of the `/flow` engine; the next stage is SPECIFY
 (`/flow:specify`).
 

@@ -3,17 +3,18 @@ title: Turning on the automatic loop
 description: Three ways to let /flow carry work to your review gate on its own — the attended terminal drain, the scheduled Pulse seat, and a portable watcher you build. What is real today, and what is still the server build.
 ---
 
-import { Steps, Step } from 'fumadocs-ui/components/steps';
-import { Callout } from 'fumadocs-ui/components/callout';
-import { Cards, Card } from 'fumadocs-ui/components/card';
+import { Steps, Step } from "fumadocs-ui/components/steps";
+import { Callout } from "fumadocs-ui/components/callout";
+import { Cards, Card } from "fumadocs-ui/components/card";
 
 # Turning on the automatic loop
 
 <Callout type="info">
-  **"Automatic" means the loop carries work to your review gate on its own. It does not mean it
-  merges without you.** The human-review gate (after VERIFY) and the calibration floor are *always
-  on*, in every setup on this page. The loop claims a ready item, drives it to a PR with evidence,
-  parks at the review gate, and waits. You approve and merge. Nothing reaches `main` that you did
+  **"Automatic" means the loop carries work to your review gate on its own. It
+  does not mean it merges without you.** The human-review gate (after VERIFY)
+  and the calibration floor are *always on*, in every setup on this page. The
+  loop claims a ready item, drives it to a PR with evidence, parks at the review
+  gate, and waits. You approve and merge. Nothing reaches `main` that you did
   not choose.
 </Callout>
 
@@ -47,10 +48,11 @@ whichever way you schedule it:
   picked up _before_ new work is claimed.
 
 <Callout type="warn">
-  The loop respects the **calibration floor** unconditionally. An action that is irreversible or
-  destructive, outward-facing, spends money or touches secrets, or materially changes scope stops
-  for you *even at full confidence*. The floor is non-trimmable: a config that tries to empty it
-  fails to load. Autonomy can never be widened past the floor by editing a file.
+  The loop respects the **calibration floor** unconditionally. An action that is
+  irreversible or destructive, outward-facing, spends money or touches secrets,
+  or materially changes scope stops for you *even at full confidence*. The floor
+  is non-trimmable: a config that tries to empty it fails to load. Autonomy can
+  never be widened past the floor by editing a file.
 </Callout>
 
 ## The three setups
@@ -63,16 +65,19 @@ whichever way you schedule it:
 
 <Cards>
   <Card title="A — Terminal drain (/flow auto)">
-    The attended, server-free path. Run it in your terminal and watch the queue drain to the review
-    gate, item by item. Nothing to install. Stops when you close the session.
+    The attended, server-free path. Run it in your terminal and watch the queue
+    drain to the review gate, item by item. Nothing to install. Stops when you
+    close the session.
   </Card>
   <Card title="B — The Pulse seat">
-    The scheduled background loop. A file-based cron on the DorkOS server fires a fresh per-item
-    session each tick. Tracker-driven; survives you closing your terminal. Off by default.
+    The scheduled background loop. A file-based cron on the DorkOS server fires
+    a fresh per-item session each tick. Tracker-driven; survives you closing
+    your terminal. Off by default.
   </Card>
   <Card title="C — The claude -p watcher">
-    A portable poller you build for non-DorkOS repos: a headless `claude -p` tick per ready issue,
-    no server required. Designed, not shipped — `autonomy.seat` accepts only `pulse` today.
+    A portable poller you build for non-DorkOS repos: a headless `claude -p`
+    tick per ready issue, no server required. Designed, not shipped —
+    `autonomy.seat` accepts only `pulse` today.
   </Card>
 </Cards>
 
@@ -120,7 +125,7 @@ fastest way to put the loop to work and the easiest to watch.
 ## B — the Pulse seat (the scheduled background loop)
 
 The Pulse seat moves the same drain off your terminal and onto the DorkOS server. It is a
-**file-based schedule** at `.dork/tasks/flow-drain/`: DorkOS Pulse already provides a contextless
+**file-based schedule** at `skills/flow-drain/` (in the plugin): DorkOS Pulse already provides a contextless
 code-loop (a croner) that dispatches a fresh, isolated, runtime-agnostic agent session per run, so
 there is no scheduler to build. **One tick equals one issue:** each croner fire is a fresh
 run-session (`sessionId = run.id`) that claims and works exactly one ready item to its review gate,
@@ -132,26 +137,27 @@ This is real today, but it ships **disabled by default** and depends on a runnin
 
 <Steps>
   <Step>
-    **Start the DorkOS server.** Pulse hosts the watcher and the croner that fire the schedule. No
-    server means no background ticks.
+    **Start the DorkOS server.** Pulse hosts the watcher and the croner that
+    fire the schedule. No server means no background ticks.
   </Step>
   <Step>
-    **Register the project's DorkOS agent.** A global `~/.dork/tasks/` task is watched
-    unconditionally; the project agent is what the tick operates as.
+    **Register the project's DorkOS agent.** A global `~/.dork/tasks/` task is
+    watched unconditionally; the project agent is what the tick operates as.
   </Step>
   <Step>
-    **Enable the flow-drain task.** The schedule at `.dork/tasks/flow-drain/` ships `enabled:
-    false`. Turn it on. There is no build step and no migration: enabling the file is picked up
-    live.
+    **Enable the flow-drain task.** The schedule at `skills/flow-drain/` (in the
+    plugin) ships `enabled: false`. Turn it on. There is no build step and no
+    migration: enabling the file is picked up live.
   </Step>
   <Step>
-    **Tune cadence and limits.** Set the per-loop intervals in the `loops` config block and the
-    work-in-progress caps in `autonomy.wipCap`. See [The dials](/docs/guides/flow/the-dials).
+    **Tune cadence and limits.** Set the per-loop intervals in the `loops`
+    config block and the work-in-progress caps in `autonomy.wipCap`. See [The
+    dials](/docs/guides/flow/the-dials).
   </Step>
   <Step>
-    **Watch and steer.** `/flow:status` shows every in-flight item, every parked question, and the
-    rationale behind each decision. `/flow pause` halts every mode from one place; `/flow resume`
-    lifts it.
+    **Watch and steer.** `/flow:status` shows every in-flight item, every parked
+    question, and the rationale behind each decision. `/flow pause` halts every
+    mode from one place; `/flow resume` lifts it.
   </Step>
 </Steps>
 
@@ -172,12 +178,13 @@ This is real today, but it ships **disabled by default** and depends on a runnin
   deferred).
 
 <Callout type="info">
-  **What the Pulse seat is, precisely.** Today it is a *per-tick* scheduled drain: each fire is a
-  fresh session that runs `recovery → inbox/resume → dispatch` in prose and carries one item to its
-  gate. The **always-on server runner** that executes the typed reconciler registry as one
-  continuous process, plus **approval detection and auto-merge execution**, are the P5 server build
-  (see [Still the server build](#still-the-server-build)). The seat gives you unattended progress to
-  the gate; it does not yet merge for you.
+  **What the Pulse seat is, precisely.** Today it is a *per-tick* scheduled
+  drain: each fire is a fresh session that runs `recovery → inbox/resume →
+  dispatch` in prose and carries one item to its gate. The **always-on server
+  runner** that executes the typed reconciler registry as one continuous
+  process, plus **approval detection and auto-merge execution**, are the P5
+  server build (see [Still the server build](#still-the-server-build)). The seat
+  gives you unattended progress to the gate; it does not yet merge for you.
 </Callout>
 
 ## C — the `claude -p` watcher (portable, you build it)
@@ -189,25 +196,27 @@ the same normalized event stream the Pulse seat does. Because the inbound event 
 infrastructure: it is the portable promotion of the same loop.
 
 <Callout type="warn">
-  **Not shipped in v1.** The watcher seat is designed but not built. `autonomy.seat` accepts only
-  `pulse` today; setting it to `watcher` is rejected by config. `watcher` rejoins the enum when the
-  seat ships. The steps below describe the intended shape, not a working feature.
+  **Not shipped in v1.** The watcher seat is designed but not built.
+  `autonomy.seat` accepts only `pulse` today; setting it to `watcher` is
+  rejected by config. `watcher` rejoins the enum when the seat ships. The steps
+  below describe the intended shape, not a working feature.
 </Callout>
 
 ### What it would look like
 
 <Steps>
   <Step>
-    **Run an external poller** on whatever cadence you choose (a cron entry, a CI loop, a small
-    daemon). It is the scheduler; there is no DorkOS server in this picture.
+    **Run an external poller** on whatever cadence you choose (a cron entry, a
+    CI loop, a small daemon). It is the scheduler; there is no DorkOS server in
+    this picture.
   </Step>
   <Step>
-    **Each tick, fetch ready work** through the same `PollingTransport` seam and claim the
-    top-ranked `agent/ready` item.
+    **Each tick, fetch ready work** through the same `PollingTransport` seam and
+    claim the top-ranked `agent/ready` item.
   </Step>
   <Step>
-    **Fire one headless `claude -p` tick** that carries that single item to its review gate, then
-    exits. One tick, one issue, a fresh session each time.
+    **Fire one headless `claude -p` tick** that carries that single item to its
+    review gate, then exits. One tick, one issue, a fresh session each time.
   </Step>
 </Steps>
 

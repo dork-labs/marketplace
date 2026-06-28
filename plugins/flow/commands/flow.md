@@ -287,7 +287,7 @@ The operator always outranks the loop. Three override surfaces, coarse to fine:
 - **Disable or reorder one loop.** Per-reconciler control is a `loops` config edit,
   not a command: `loops.<id>.enabled: false` silences a single reconciler (e.g.
   `loops.triage`, `loops.hygiene`) and `loops.<id>.priority` reorders the tick. Edit
-  `${CLAUDE_PLUGIN_ROOT}/config/config.json`; see the dials guide (`docs/guides/flow/the-dials.mdx`).
+  `${CLAUDE_PLUGIN_ROOT}/config/config.json`; see the dials guide (`${CLAUDE_PLUGIN_ROOT}/docs/the-dials.mdx`).
 - **Reclaim or redirect one item.** Via the `linear-adapter`, apply the
   **`agent/paused`** marker to an item. The running tick honors `agent/paused` **at
   stage boundaries**: it advances the item no further, releases the claim cleanly

@@ -67,13 +67,13 @@ skip.
 
 ### 3. Structured code review (absorbs `requesting-code-review`)
 
-For non-trivial changes, dispatch the `code-reviewer` subagent rather than
-self-reviewing. Follow the `requesting-code-review` skill to obtain the base/head
-SHAs, assemble the review context (what was implemented · the task spec from
-`03-tasks.json` · base/head SHAs · a summary), dispatch the subagent, and act on
-its feedback. The reviewer reads actual code against the spec and DorkOS
-standards (FSD layers, SDK import confinement, architecture boundaries, test
-coverage) — it never trusts the implementer's narrative.
+For non-trivial changes, dispatch a fresh reviewing subagent (or your harness's
+code-review skill or agent if it has one) rather than self-reviewing. Obtain the
+base/head SHAs, assemble the review context (what was implemented · the task spec
+from `03-tasks.json` · base/head SHAs · a summary), dispatch the subagent, and act
+on its feedback. The reviewer reads actual code against the spec and the project's
+standards (architecture boundaries, layering, import rules, test coverage) — it
+never trusts the implementer's narrative.
 
 ### 4. Proof-of-completion bundle (browser proof)
 

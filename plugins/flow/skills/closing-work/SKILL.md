@@ -86,10 +86,12 @@ Driven by the item's type and its `## On Completion` routing:
 If the work ran in a dedicated git worktree (recorded in the spec's
 `04-implementation.md`, or detected when `git rev-parse --git-dir
 --git-common-dir` prints two different paths) and its branch is merged, offer
-`/worktree:remove <branch> --delete-branch`. If the session is currently inside
-that worktree, **leave it first** (ExitWorktree, or return to the main checkout)
-before removing. Follow the `working-in-worktrees` cleanup safety — never remove
-a worktree with uncommitted, untracked, or unpushed work; confirm first.
+to remove the worktree (e.g. `git worktree remove` + delete the branch), or use
+your harness's worktree cleanup if it has one. If the session is currently inside
+that worktree, **leave it first** (return to the main checkout, using your
+harness's worktree-exit tool if it has one) before removing. Apply the usual
+worktree cleanup safety — never remove a worktree with uncommitted, untracked, or
+unpushed work; confirm first.
 
 ### 7. Report
 

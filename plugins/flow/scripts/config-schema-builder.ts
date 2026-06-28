@@ -1,5 +1,5 @@
 /**
- * JSON Schema generation for `.agents/flow/config.json`.
+ * JSON Schema generation for the plugin's `config/config.json`.
  *
  * `buildConfigJsonSchema()` bridges the authoritative {@link FlowConfigSchema}
  * Zod source to a JSON Schema (via `z.toJSONSchema`, mirroring
@@ -13,11 +13,11 @@
  * @module @dorkos/flow/generate-config-schema
  */
 
-import { z } from 'zod';
-import { FlowConfigSchema } from './config-schema.ts';
+import { z } from "zod";
+import { FlowConfigSchema } from "./config-schema.ts";
 
-/** Path (relative to the repo root) where the generated artifact lives. */
-export const CONFIG_SCHEMA_RELATIVE_PATH = '.agents/flow/config.schema.json';
+/** Path (relative to a script in `scripts/`) of the generated artifact. */
+export const CONFIG_SCHEMA_RELATIVE_PATH = "../config/config.schema.json";
 
 /**
  * Build the JSON Schema for `.agents/flow/config.json` from the authoritative
@@ -28,6 +28,6 @@ export const CONFIG_SCHEMA_RELATIVE_PATH = '.agents/flow/config.schema.json';
  */
 export function buildConfigJsonSchema(): Record<string, unknown> {
   return z.toJSONSchema(FlowConfigSchema, {
-    target: 'jsonSchema2019-09',
+    target: "jsonSchema2019-09",
   }) as Record<string, unknown>;
 }

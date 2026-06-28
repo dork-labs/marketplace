@@ -142,9 +142,9 @@ never to "blocked".
 
 ### Step 3 - Generate the concrete adapter SKILL.md
 
-Write the adapter as a skill into the adopter's skill home:
-`${CLAUDE_PLUGIN_ROOT}/skills/<tracker>-adapter/SKILL.md` (the harness symlinks it into the
-adopter's `.claude/skills/`). It must contain:
+Write the adapter as a skill into the plugin's skill home:
+`${CLAUDE_PLUGIN_ROOT}/skills/<tracker>-adapter/SKILL.md` (your harness loads it as
+a skill from there). It must contain:
 
 1. **Frontmatter.** `name: <tracker>-adapter` and a `description` that triggers
    whenever a stage skill or the loop needs to read or write the tracker.

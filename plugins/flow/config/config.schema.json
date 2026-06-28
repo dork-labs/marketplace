@@ -107,7 +107,13 @@
             },
             "stateCategory": {
               "type": "string",
-              "enum": ["backlog", "unstarted", "started", "completed", "canceled"]
+              "enum": [
+                "backlog",
+                "unstarted",
+                "started",
+                "completed",
+                "canceled"
+              ]
             },
             "humanGate": {
               "type": "boolean"
@@ -130,7 +136,13 @@
             },
             "stateCategory": {
               "type": "string",
-              "enum": ["backlog", "unstarted", "started", "completed", "canceled"]
+              "enum": [
+                "backlog",
+                "unstarted",
+                "started",
+                "completed",
+                "canceled"
+              ]
             },
             "humanGate": {
               "type": "boolean"
@@ -153,7 +165,13 @@
             },
             "stateCategory": {
               "type": "string",
-              "enum": ["backlog", "unstarted", "started", "completed", "canceled"]
+              "enum": [
+                "backlog",
+                "unstarted",
+                "started",
+                "completed",
+                "canceled"
+              ]
             },
             "humanGate": {
               "type": "boolean"
@@ -176,7 +194,13 @@
             },
             "stateCategory": {
               "type": "string",
-              "enum": ["backlog", "unstarted", "started", "completed", "canceled"]
+              "enum": [
+                "backlog",
+                "unstarted",
+                "started",
+                "completed",
+                "canceled"
+              ]
             },
             "humanGate": {
               "type": "boolean"
@@ -199,7 +223,13 @@
             },
             "stateCategory": {
               "type": "string",
-              "enum": ["backlog", "unstarted", "started", "completed", "canceled"]
+              "enum": [
+                "backlog",
+                "unstarted",
+                "started",
+                "completed",
+                "canceled"
+              ]
             },
             "humanGate": {
               "type": "boolean"
@@ -223,7 +253,13 @@
             },
             "stateCategory": {
               "type": "string",
-              "enum": ["backlog", "unstarted", "started", "completed", "canceled"]
+              "enum": [
+                "backlog",
+                "unstarted",
+                "started",
+                "completed",
+                "canceled"
+              ]
             },
             "humanGate": {
               "type": "boolean"
@@ -247,7 +283,13 @@
             },
             "stateCategory": {
               "type": "string",
-              "enum": ["backlog", "unstarted", "started", "completed", "canceled"]
+              "enum": [
+                "backlog",
+                "unstarted",
+                "started",
+                "completed",
+                "canceled"
+              ]
             },
             "humanGate": {
               "type": "boolean"
@@ -270,7 +312,13 @@
             },
             "stateCategory": {
               "type": "string",
-              "enum": ["backlog", "unstarted", "started", "completed", "canceled"]
+              "enum": [
+                "backlog",
+                "unstarted",
+                "started",
+                "completed",
+                "canceled"
+              ]
             },
             "humanGate": {
               "type": "boolean"
@@ -294,7 +342,13 @@
             },
             "stateCategory": {
               "type": "string",
-              "enum": ["backlog", "unstarted", "started", "completed", "canceled"]
+              "enum": [
+                "backlog",
+                "unstarted",
+                "started",
+                "completed",
+                "canceled"
+              ]
             },
             "humanGate": {
               "type": "boolean"
@@ -499,7 +553,14 @@
           "additionalProperties": false
         }
       },
-      "required": ["recovery", "inbox", "review", "dispatch", "triage", "hygiene"],
+      "required": [
+        "recovery",
+        "inbox",
+        "review",
+        "dispatch",
+        "triage",
+        "hygiene"
+      ],
       "additionalProperties": false
     },
     "ingestion": {
@@ -592,7 +653,12 @@
               "additionalProperties": false
             }
           },
-          "required": ["proceedSilentlyWhen", "alwaysAsk", "stageBias", "assumptionLog"],
+          "required": [
+            "proceedSilentlyWhen",
+            "alwaysAsk",
+            "stageBias",
+            "assumptionLog"
+          ],
           "additionalProperties": false
         },
         "nudge": {
@@ -618,11 +684,25 @@
       "type": "object",
       "properties": {
         "rank": {
-          "default": ["unblockers", "priority", "projectStatus", "type", "size", "age"],
+          "default": [
+            "unblockers",
+            "priority",
+            "projectStatus",
+            "type",
+            "size",
+            "age"
+          ],
           "type": "array",
           "items": {
             "type": "string",
-            "enum": ["unblockers", "priority", "projectStatus", "type", "size", "age"]
+            "enum": [
+              "unblockers",
+              "priority",
+              "projectStatus",
+              "type",
+              "size",
+              "age"
+            ]
           }
         },
         "sizeOrder": {
@@ -659,7 +739,11 @@
             "onConflict": {
               "default": "resolve-if-mechanical",
               "type": "string",
-              "enum": ["resolve-if-mechanical", "always-bounce", "never-resolve"]
+              "enum": [
+                "resolve-if-mechanical",
+                "always-bounce",
+                "never-resolve"
+              ]
             },
             "ciRetries": {
               "default": 1,
@@ -768,14 +852,24 @@
           "additionalProperties": false
         },
         "externalize": {
-          "default": ["flow-state.json", "execution.log.jsonl", "flow-history.tsv"],
+          "default": [
+            "flow-state.json",
+            "execution.log.jsonl",
+            "flow-history.tsv"
+          ],
           "type": "array",
           "items": {
             "type": "string"
           }
         }
       },
-      "required": ["perIssue", "perStage", "compactionTrigger", "stageBudgets", "externalize"],
+      "required": [
+        "perIssue",
+        "perStage",
+        "compactionTrigger",
+        "stageBudgets",
+        "externalize"
+      ],
       "additionalProperties": false
     },
     "workspace": {
