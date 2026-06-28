@@ -4,7 +4,7 @@ Fill-in tables for Step 2: turn the adopter's tracker concepts into the generic
 `WorkItem` model. Copy these tables into your working notes, fill the right-hand
 columns from your tracker, then transcribe the result into the generated adapter's
 normalization section. Authoritative rules live in
-[`.agents/flow/adapters/SPEC.md`](../../../adapters/SPEC.md) section 2.
+[`${CLAUDE_PLUGIN_ROOT}/adapters/SPEC.md`](../../../adapters/SPEC.md) section 2.
 
 ---
 

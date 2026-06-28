@@ -2,7 +2,7 @@
 description: Halt every autonomous /flow mode from one place (drain sentinel + Pulse cron)
 category: flow
 allowed-tools: Read, Edit, Write, Glob
-argument-hint: '[issue-id to reclaim, or empty to halt all autonomy]'
+argument-hint: "[issue-id to reclaim, or empty to halt all autonomy]"
 ---
 
 # /flow:pause — halt autonomy
@@ -15,7 +15,7 @@ so nothing keeps running behind your back:
 1. **The drain sentinel.** If `.dork/flow/auto-run.json` exists (a live `/flow auto`
    terminal drain), set its `active` to `false`. The `flow-loop.mjs` Stop hook then
    allows the session to stop at the next gate instead of looping to the next item.
-2. **The Pulse cron.** Set `enabled: false` in the `.dork/tasks/flow-drain`
+2. **The Pulse cron.** Set `enabled: false` in the `${CLAUDE_PLUGIN_ROOT}/skills/flow-drain/SKILL.md`
    frontmatter, so the Pulse seat stops claiming work on its schedule.
 
 Report what changed (sentinel paused, cron disabled) and what was in flight. To see
@@ -34,7 +34,7 @@ instead, use the ownership-policy reassignment (reassign on the tracker via the
 ## Finer-grained control (a config edit, not a command)
 
 To disable or reprioritize ONE reconciler loop rather than pausing everything, edit
-the `loops` config in `.agents/flow/config.json`: `loops.<id>.enabled: false`
+the `loops` config in `${CLAUDE_PLUGIN_ROOT}/config/config.json`: `loops.<id>.enabled: false`
 silences that loop (e.g. `loops.triage`, `loops.hygiene`), and `loops.<id>.priority`
 reorders the tick. See the dials guide (`docs/guides/flow/the-dials.mdx`). Resume
 everything with `/flow:resume`.

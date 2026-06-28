@@ -2,7 +2,7 @@
 description: The /flow engine — one PM-agnostic workflow from capture to done. Routes to a stage, advances a work item or project, or (P2) drives the autonomous loop.
 category: flow
 allowed-tools: Read, Glob, Grep, SlashCommand, Task, TaskList, TaskGet, AskUserQuestion
-argument-hint: '[stage | work-item | project | continue | auto]'
+argument-hint: "[stage | work-item | project | continue | auto]"
 ---
 
 # /flow — the workflow engine
@@ -56,8 +56,8 @@ PM-driven-autonomous cell is the Pulse seat, a fresh session per tick.
 ## Routing
 
 **First-run guard (before any routing).** On any `/flow` invocation, confirm flow
-is configured: if `.agents/flow/config.json` is absent, or fails validation when run
-through `node .agents/flow/scripts/validate-config.mjs` (config JSON in, the
+is configured: if `${CLAUDE_PLUGIN_ROOT}/config/config.json` is absent, or fails validation when run
+through `node --experimental-strip-types "${CLAUDE_PLUGIN_ROOT}/scripts/validate-config.ts"` (config JSON in, the
 `FlowConfigSchema` parse result JSON out), route straight to `/flow:init` to scaffold
 it and stop, before any stage or dispatch work. With a valid config present, behave
 exactly as below.
@@ -77,7 +77,7 @@ operator five intents via `AskUserQuestion`, then route the choice:
 
 **Recommended default (starvation-aware).** Before presenting the five intents,
 peek at the dispatch outcome by feeding the `linear-adapter` candidate set to
-`node .agents/flow/scripts/dispatch.mjs` (candidate set + policy as JSON in,
+`node --experimental-strip-types "${CLAUDE_PLUGIN_ROOT}/scripts/dispatch.ts"` (candidate set + policy as JSON in,
 `classifyDispatchOutcome`'s `{ picked, eligibleCount, starved, shapeableCount }` as
 JSON out; act on the counts). When the ready queue is empty but shapeable work waits
 behind the readiness gate (`eligibleCount === 0 && shapeableCount > 0`), the queue
@@ -124,7 +124,7 @@ resolves the project, then routes by where it sits on the spine:
 - **Has dispatchable children** (one or more `agent/ready` items in a non-terminal state):
   **project-scoped single-item dispatch**. Via the `linear-adapter`, pull the project's
   candidate set with `getProjectWork(projectId)`, rank it with the dispatch ladder by
-  running `node .agents/flow/scripts/dispatch.mjs` (candidate set as JSON in, the ranked
+  running `node --experimental-strip-types "${CLAUDE_PLUGIN_ROOT}/scripts/dispatch.ts"` (candidate set as JSON in, the ranked
   `selectDispatch` result as JSON out; it already honors the `projectStatus` tier and the
   `perProject` WIP cap), claim the top-ranked item, and carry it to its human-review gate,
   then **stop**. One item, never looping, no `auto` sentinel.
@@ -145,7 +145,7 @@ resolves the project, then routes by where it sits on the spine:
 
 - **`continue`** (or the cold-start "Continue the queue" choice): **single-item dispatch**
   across the whole ready queue. Via the `linear-adapter`, rank the ready queue with the
-  dispatch ladder by running `node .agents/flow/scripts/dispatch.mjs` (candidate set as
+  dispatch ladder by running `node --experimental-strip-types "${CLAUDE_PLUGIN_ROOT}/scripts/dispatch.ts"` (candidate set as
   JSON in, the ranked `selectDispatch` result as JSON out), claim the top-ranked eligible
   item, and
   carry it to its human-review gate, then **stop**. This is one tick of `auto`: server-free,
@@ -160,7 +160,7 @@ When the stage is still ambiguous after this, ask.
 
 Drain the ready queue **sequentially from the terminal**, server-free. Each
 issue is carried to its human-review gate; involvement is uncertainty-gated
-(the calibration ladder: run `node .agents/flow/scripts/involvement.mjs` with the
+(the calibration ladder: run `node --experimental-strip-types "${CLAUDE_PLUGIN_ROOT}/scripts/involvement.ts"` with the
 decision context as JSON in for the `resolveInvolvement` verdict as JSON out), and comms route
 through the live terminal — `AskUserQuestion` inline, never a parked tracker
 comment (`resolveCommsChannel(trigger, identityMode, involvement)` returns
@@ -177,7 +177,7 @@ run record (the session↔issue association, recovery ladder).
 
 1. **Start.** Write `.dork/flow/auto-run.json` =
    `{ "active": true, "ready": <N>, "shapeable": <M>, "startedAt": "<ISO>", "pid": <pid> }`.
-   Both counts come from `node .agents/flow/scripts/dispatch.mjs` (candidate set as
+   Both counts come from `node --experimental-strip-types "${CLAUDE_PLUGIN_ROOT}/scripts/dispatch.ts"` (candidate set as
    JSON in, `classifyDispatchOutcome`'s `{ picked, eligibleCount, starved, shapeableCount }`
    as JSON out):
    `<N>` is `eligibleCount` (ready, eligible issues from the dispatch policy) and
@@ -214,7 +214,7 @@ run record (the session↔issue association, recovery ladder).
      the `linear-adapter`, list `agent/claimed` + started-category +
      not-`agent/needs-input` items. For each, take its `FlowRun` from the run map,
      probe whether its `workerPid` is alive and the worktree/session checkpoint
-     survives, and run the recovery oracle `node .agents/flow/scripts/recovery.mjs`
+     survives, and run the recovery oracle `node --experimental-strip-types "${CLAUDE_PLUGIN_ROOT}/scripts/recovery.ts"`
      (the run record + liveness probe as JSON in, the `recoverOrphan` `RecoveryAction`
      as JSON out): on `resume`, re-attach the worktree at HEAD and **resume** the captured
      `sessionId` rather than re-claim from scratch; otherwise act on the returned
@@ -236,7 +236,7 @@ run record (the session↔issue association, recovery ladder).
    - **(3) Dispatch pass** (`loops.dispatch`, priority 30) — claim the top-ranked
      ready item and carry it to its gate. Via the `linear-adapter`, fetch eligible
      work and classify the dispatch outcome by running
-     `node .agents/flow/scripts/dispatch.mjs` (candidate set as JSON in,
+     `node --experimental-strip-types "${CLAUDE_PLUGIN_ROOT}/scripts/dispatch.ts"` (candidate set as JSON in,
      `classifyDispatchOutcome`'s `{ picked, eligibleCount, starved, shapeableCount }`
      as JSON out), which both ranks the ready queue (`selectDispatch`) and counts the
      shapeable backlog behind the readiness gate. - **If `picked` is empty, do not stop silently.** Branch on `shapeableCount`: - **Starved** (`shapeableCount > 0`): the queue is starved, not done. Write
@@ -281,13 +281,13 @@ The operator always outranks the loop. Three override surfaces, coarse to fine:
 
 - **Halt everything.** `/flow:pause` stops every autonomous mode from one place: it
   sets `active: false` in the `.dork/flow/auto-run.json` drain sentinel AND
-  `enabled: false` in the `.dork/tasks/flow-drain` Pulse cron frontmatter, so no
+  `enabled: false` in the `${CLAUDE_PLUGIN_ROOT}/skills/flow-drain/SKILL.md` Pulse cron frontmatter, so no
   mode keeps claiming. `/flow:resume` restores both. Halting and restoring autonomy
   is always one action, never a hunt across files.
 - **Disable or reorder one loop.** Per-reconciler control is a `loops` config edit,
   not a command: `loops.<id>.enabled: false` silences a single reconciler (e.g.
   `loops.triage`, `loops.hygiene`) and `loops.<id>.priority` reorders the tick. Edit
-  `.agents/flow/config.json`; see the dials guide (`docs/guides/flow/the-dials.mdx`).
+  `${CLAUDE_PLUGIN_ROOT}/config/config.json`; see the dials guide (`docs/guides/flow/the-dials.mdx`).
 - **Reclaim or redirect one item.** Via the `linear-adapter`, apply the
   **`agent/paused`** marker to an item. The running tick honors `agent/paused` **at
   stage boundaries**: it advances the item no further, releases the claim cleanly

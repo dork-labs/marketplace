@@ -2,17 +2,17 @@
 description: Capture a thought as a low-commitment work item (the /flow CAPTURE stage)
 category: flow
 allowed-tools: Read, Glob, Skill
-argument-hint: '<idea or work description, or a file path>'
+argument-hint: "<idea or work description, or a file path>"
 ---
 
 # /flow:capture — CAPTURE stage
 
 Capture this into the tracker: $ARGUMENTS
 
-Read `.agents/flow/skills/capturing-work/SKILL.md` and follow its process exactly.
+Read `${CLAUDE_PLUGIN_ROOT}/skills/capturing-work/SKILL.md` and follow its process exactly.
 
 That skill is PM-agnostic: it routes every tracker read or write through the
-`linear-adapter` skill (`.agents/flow/skills/linear-adapter/SKILL.md`), which it
+`linear-adapter` skill (`${CLAUDE_PLUGIN_ROOT}/skills/linear-adapter/SKILL.md`), which it
 reads on demand. Do not touch a tracker directly from this command — the skill
 owns the whole flow.
 

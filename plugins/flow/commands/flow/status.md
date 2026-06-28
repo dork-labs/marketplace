@@ -2,7 +2,7 @@
 description: Show every in-flight item, parked question, and assumption trail across the /flow loop
 category: flow
 allowed-tools: Read, Glob, Skill, AskUserQuestion
-argument-hint: '[issue-id to focus on, or empty for the whole loop]'
+argument-hint: "[issue-id to focus on, or empty for the whole loop]"
 ---
 
 # /flow:status — observe the loop
@@ -18,7 +18,7 @@ a single pane:
 2. **`.dork/flow/auto-run.json`**: the `/flow auto` drain sentinel, if a drain is
    live (`active`, `ready`, `shapeable`, `startedAt`, `pid`).
 3. **The tracker, via the `linear-adapter`**: titles, labels, parked questions, and
-   assumption comments. Read `.agents/flow/skills/linear-adapter/SKILL.md` and use
+   assumption comments. Read `${CLAUDE_PLUGIN_ROOT}/skills/linear-adapter/SKILL.md` and use
    its verbs; never touch a tracker string directly from this command.
 
 Render, in this order:

@@ -19,10 +19,10 @@ description: First-run setup for the /flow engine in a new repo - detect or reco
 
 Setup never names a tracker API, a tool string, or a tracker-specific field. The
 **only** tracker-aware artifact this procedure produces is the generated adapter
-under `.agents/flow/skills/<tracker>-adapter/`. Everything else you touch (the
+under `${CLAUDE_PLUGIN_ROOT}/skills/<tracker>-adapter/`. Everything else you touch (the
 config triad, the dispatch check) stays generic. When you need adapter-generation
 detail, read the `building-adapters` skill
-(`.agents/flow/skills/building-adapters/SKILL.md`); it owns the generate-and-verify
+(`${CLAUDE_PLUGIN_ROOT}/skills/building-adapters/SKILL.md`); it owns the generate-and-verify
 contract. This skill owns the **setup orchestration** around it.
 
 ## Calibration: ask when a human is present, default when headless
@@ -50,8 +50,8 @@ confirms before overwriting committed config.
 
 ### Step 1 - Detect: fresh install or re-run
 
-Check whether `.agents/flow/config.json` exists and parses as valid JSON
-(`node -e "require('./.agents/flow/config.json')"` exits `0`).
+Check whether `${CLAUDE_PLUGIN_ROOT}/config/config.json` exists and parses as valid JSON
+(`node -e "require('${CLAUDE_PLUGIN_ROOT}/config/config.json')"` exits `0`).
 
 - **No file, or invalid JSON → fresh install.** Proceed to Step 2 with defaults
   seeded from the committed `config.json` template if one is present, otherwise
@@ -65,7 +65,7 @@ Check whether `.agents/flow/config.json` exists and parses as valid JSON
   already exists.
 
 Also confirm the toolchain is present: `node` is on PATH and
-`.agents/flow/scripts/validate-adapter.mjs` exists (it is the Step 3 gate). If either is
+`${CLAUDE_PLUGIN_ROOT}/scripts/validate-adapter.ts` exists (it is the Step 3 gate). If either is
 missing, stop and say so plainly rather than proceeding to a setup that cannot be
 verified.
 
@@ -86,8 +86,8 @@ interactively, or apply the headless default.
    This choice picks the adapter's **transport** and its closest reference
    starting point in Step 3 (an MCP transport resembles the MCP reference
    adapter; a CLI or REST transport resembles the CLI/REST reference adapter;
-   see `.agents/flow/adapters/SPEC.md` and the reference adapters under
-   `.agents/flow/adapters/reference/`). Capture the tracker's short name (used as
+   see `${CLAUDE_PLUGIN_ROOT}/adapters/SPEC.md` and the reference adapters under
+   `${CLAUDE_PLUGIN_ROOT}/adapters/reference/`). Capture the tracker's short name (used as
    `<tracker>` in the adapter path and the `tracker` config field) and the
    connection/account handle the adapter authenticates through.
    _Headless default: keep the template's `tracker` value and its matching
@@ -127,18 +127,22 @@ and the final report.
 Hand off to the `building-adapters` skill and follow it to produce the concrete
 adapter for the chosen tracker. In brief:
 
-1. Read `.agents/flow/adapters/SPEC.md` (the contract) and pick the closest
+1. Read `${CLAUDE_PLUGIN_ROOT}/adapters/SPEC.md` (the contract) and pick the closest
    reference adapter for the transport chosen in Step 2 (or from-scratch for a
    tracker no reference fits).
 2. Generate the adapter as a skill into
-   `.agents/flow/skills/<tracker>-adapter/SKILL.md`, mapping the tracker onto the
+   `${CLAUDE_PLUGIN_ROOT}/skills/<tracker>-adapter/SKILL.md`, mapping the tracker onto the
    generic `WorkItem` model and all 16 capability verbs, with the durability and
    graceful-degradation notes the SPEC requires.
 3. Build a representative fixture and run the conformance gate until it is green:
 
    ```bash
-   node .agents/flow/scripts/validate-adapter.mjs --fixture <path-to-your-fixture.json>
+   node --experimental-strip-types "${CLAUDE_PLUGIN_ROOT}/scripts/validate-adapter.ts" --fixture <path-to-your-fixture.json>
    ```
+
+   > Node < 22.6 lacks `--experimental-strip-types`; on those runtimes invoke any
+   > `${CLAUDE_PLUGIN_ROOT}/scripts/*.ts` oracle with `tsx` instead (e.g.
+   > `tsx "${CLAUDE_PLUGIN_ROOT}/scripts/validate-adapter.ts" --fixture <fixture.json>`).
 
    Exit code `0` with `{ "ok": true }` is the pass. A nonzero exit names the
    failed invariant (`INV-1 .. INV-5`); fix the **mapping** that produced it in the
@@ -152,7 +156,7 @@ regenerating from scratch, and only regenerate if validation fails.
 ### Step 4 - Scaffold the config triad
 
 Write the two config files. The triad and its precedence are documented in
-`.agents/flow/CONFIG.md`; honor it.
+`${CLAUDE_PLUGIN_ROOT}/config/CONFIG.md`; honor it.
 
 1. **`config.json`** (committed, no secrets). Set the resolved behavioral policy
    from Step 2: `tracker` (the chosen tracker's short name), `identity.agent`
@@ -167,7 +171,7 @@ Write the two config files. The triad and its precedence are documented in
    it from the template if it does not already exist:
 
    ```bash
-   test -f .agents/flow/config.local.json || cp .agents/flow/config.local.example.json .agents/flow/config.local.json
+   test -f ${CLAUDE_PLUGIN_ROOT}/config/config.local.json || cp ${CLAUDE_PLUGIN_ROOT}/config/config.local.example.json ${CLAUDE_PLUGIN_ROOT}/config/config.local.json
    ```
 
    Fill in `secrets.trackerAccount` (the connection/account handle from Step 2)
@@ -186,7 +190,7 @@ Write the two config files. The triad and its precedence are documented in
 Prove the wiring end to end with a dry dispatch against an empty queue:
 
 ```bash
-node .agents/flow/scripts/dispatch.mjs
+node --experimental-strip-types "${CLAUDE_PLUGIN_ROOT}/scripts/dispatch.ts"
 ```
 
 A clean, no-work outcome (the dispatcher reaches the adapter, finds nothing
@@ -209,7 +213,7 @@ can change them with another `/flow:init`.
 - **Re-runnable.** Running `/flow:init` again never clobbers committed config
   without the Step 1 confirmation; a headless re-run defaults to cancel.
 - **The verify gate is non-negotiable.** Step 3 does not complete until
-  `validate-adapter.mjs` returns green. Setup that skips the gate ships an adapter
+  `validate-adapter.ts` returns green. Setup that skips the gate ships an adapter
   that "looks right" but may not conform.
 - **No secret ever lands in a committed file.** Credentials live only in
   `config.local.json` (gitignored) or a `FLOW_`-prefixed environment variable.
@@ -220,11 +224,11 @@ can change them with another `/flow:init`.
 
 ## References
 
-- `.agents/flow/CONFIG.md` - the config triad, precedence, and the secrets/policy
+- `${CLAUDE_PLUGIN_ROOT}/config/CONFIG.md` - the config triad, precedence, and the secrets/policy
   split.
-- `.agents/flow/skills/building-adapters/SKILL.md` - the generate-and-verify
+- `${CLAUDE_PLUGIN_ROOT}/skills/building-adapters/SKILL.md` - the generate-and-verify
   procedure Step 3 invokes.
-- `.agents/flow/adapters/SPEC.md` - the tracker-neutral adapter contract the
+- `${CLAUDE_PLUGIN_ROOT}/adapters/SPEC.md` - the tracker-neutral adapter contract the
   generated adapter conforms to.
-- `.agents/flow/config.json` / `.agents/flow/config.local.example.json` - the
+- `${CLAUDE_PLUGIN_ROOT}/config/config.json` / `${CLAUDE_PLUGIN_ROOT}/config/config.local.example.json` - the
   committed policy template and the local-secrets template Step 4 scaffolds from.

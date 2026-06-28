@@ -1,6 +1,6 @@
 ---
 name: building-adapters
-description: Guided procedure for generating and verifying a concrete /flow tracker adapter that conforms to the adapter contract. Use when building, porting, or scaffolding a tracker adapter for a new tracker (Jira, GitHub Issues, or another), or when /flow:init must produce one for an adopter. Teaches the generate-and-verify loop, maps the tracker onto the WorkItem model and the 16 capability verbs, then loops on validate-adapter.mjs until the conformance invariants pass.
+description: Guided procedure for generating and verifying a concrete /flow tracker adapter that conforms to the adapter contract. Use when building, porting, or scaffolding a tracker adapter for a new tracker (Jira, GitHub Issues, or another), or when /flow:init must produce one for an adopter. Teaches the generate-and-verify loop, maps the tracker onto the WorkItem model and the 16 capability verbs, then loops on validate-adapter.ts until the conformance invariants pass.
 ---
 
 # building-adapters - generate a conforming `/flow` tracker adapter
@@ -12,14 +12,14 @@ description: Guided procedure for generating and verifying a concrete /flow trac
 > model and the 16 capability verbs, write the adapter, then prove it conforms.
 >
 > **This is a generate-AND-verify procedure, and the verify half is a gate.** An
-> adapter is not done when it "looks right." It is done when `validate-adapter.mjs`
+> adapter is not done when it "looks right." It is done when `validate-adapter.ts`
 > returns a green verdict against a representative fixture. Generating without
 > verifying is the failure mode this skill exists to prevent.
 
 ## The authoritative source
 
 The contract you are conforming to is
-[`.agents/flow/adapters/SPEC.md`](../../adapters/SPEC.md). **Read it first and keep
+[`${CLAUDE_PLUGIN_ROOT}/adapters/SPEC.md`](../../adapters/SPEC.md). **Read it first and keep
 it open.** This skill is the _procedure_; the SPEC is the _contract_. Where they
 ever disagree, the SPEC wins. The SPEC defines, and you will satisfy:
 
@@ -29,7 +29,7 @@ ever disagree, the SPEC wins. The SPEC defines, and you will satisfy:
 - the **16 capability verbs** (SPEC section 3): **8 reads** + **8 writes**, each
   with its must-do, durability, and graceful-degradation requirements;
 - the **conformance invariants** `INV-1 .. INV-5` (SPEC section 4) that
-  `validate-adapter.mjs` checks;
+  `validate-adapter.ts` checks;
 - the **contract version** (SPEC section 5) your adapter declares and re-validates
   against.
 
@@ -54,7 +54,7 @@ adapter's own skill, not this one.
   │
   ├─ 3 GENERATE the concrete adapter SKILL.md (all 16 verbs) into the adopter's skill home
   │
-  └─ 4 VERIFY with validate-adapter.mjs  ──┐
+  └─ 4 VERIFY with validate-adapter.ts  ──┐
              ▲                              │  verdict.ok ? -> DONE
              └────── fix the failed invariant, re-run ──┘  (loop until green)
 ```
@@ -66,12 +66,12 @@ conforming adapter. Expect to loop between 3 and 4.
 
 ### Step 1 - Read the contract, pick a starting point
 
-1. Read [`.agents/flow/adapters/SPEC.md`](../../adapters/SPEC.md) end to end. You
+1. Read [`${CLAUDE_PLUGIN_ROOT}/adapters/SPEC.md`](../../adapters/SPEC.md) end to end. You
    cannot map a tracker you have not measured against the contract.
 2. Choose the closest starting point:
    - **Start from a reference adapter** when your access shape matches one. Two
      reference adapters live under
-     [`.agents/flow/adapters/reference/`](../../adapters/reference/) and are the
+     [`${CLAUDE_PLUGIN_ROOT}/adapters/reference/`](../../adapters/reference/) and are the
      worked, concrete-tracker wiring for the _same_ tracker via two access paths:
      - `linear-mcp` - the in-session MCP path (an authenticated MCP server exposes
        tracker tools the agent calls directly).
@@ -143,7 +143,7 @@ never to "blocked".
 ### Step 3 - Generate the concrete adapter SKILL.md
 
 Write the adapter as a skill into the adopter's skill home:
-`.agents/flow/skills/<tracker>-adapter/SKILL.md` (the harness symlinks it into the
+`${CLAUDE_PLUGIN_ROOT}/skills/<tracker>-adapter/SKILL.md` (the harness symlinks it into the
 adopter's `.claude/skills/`). It must contain:
 
 1. **Frontmatter.** `name: <tracker>-adapter` and a `description` that triggers
@@ -167,7 +167,7 @@ adopter's `.claude/skills/`). It must contain:
      unrecoverable.
 6. **The declared contract version** (SPEC section 5): export a `CONTRACT_VERSION`
    constant or a manifest field naming the contract version you generated against,
-   so `validate-adapter.mjs` can check the declaration and so drift is caught at
+   so `validate-adapter.ts` can check the declaration and so drift is caught at
    validation time on a future contract bump.
 
 ---
@@ -180,8 +180,11 @@ category, both an `agent/ready` and a not-ready item, and at least one relation
 that resolves in-set plus one that is terminal/out-of-set). Then run the harness:
 
 ```bash
-node .agents/flow/scripts/validate-adapter.mjs --fixture <path-to-your-fixture.json>
+node --experimental-strip-types "${CLAUDE_PLUGIN_ROOT}/scripts/validate-adapter.ts" --fixture <path-to-your-fixture.json>
 ```
+
+> Node < 22.6 lacks `--experimental-strip-types`; on those runtimes invoke the oracle
+> with `tsx` instead: `tsx "${CLAUDE_PLUGIN_ROOT}/scripts/validate-adapter.ts" --fixture <path-to-your-fixture.json>`.
 
 The harness reads JSON in and prints a JSON **verdict**:
 
@@ -225,7 +228,7 @@ cases that prove the harness bites are in
 
 An adapter is done only when **all** of these hold:
 
-- [ ] Read [`.agents/flow/adapters/SPEC.md`](../../adapters/SPEC.md) and chose a
+- [ ] Read [`${CLAUDE_PLUGIN_ROOT}/adapters/SPEC.md`](../../adapters/SPEC.md) and chose a
       starting point (a reference adapter or from-scratch).
 - [ ] State -> `stateCategory` table complete; only the five categories; holding
       state mapped to `backlog`.
@@ -239,7 +242,7 @@ An adapter is done only when **all** of these hold:
 - [ ] The adapter is the single audit surface: no tracker API string lives in any
       other flow skill or command.
 - [ ] `CONTRACT_VERSION` declared and matches the SPEC's current version.
-- [ ] `node .agents/flow/scripts/validate-adapter.mjs --fixture <fixture>` returns a verdict
+- [ ] `node --experimental-strip-types "${CLAUDE_PLUGIN_ROOT}/scripts/validate-adapter.ts" --fixture <fixture>` returns a verdict
       with `ok: true` and exit code `0`.
 
 ---
@@ -253,5 +256,5 @@ An adapter is done only when **all** of these hold:
   per-verb checklist for all 16 verbs (must-do, durability, degradation), generic
   and tracker-neutral.
 - [`references/conformance-harness.md`](references/conformance-harness.md) - the
-  `validate-adapter.mjs` interface, fixture construction, the verify loop, and
+  `validate-adapter.ts` interface, fixture construction, the verify loop, and
   per-invariant troubleshooting with negative cases.

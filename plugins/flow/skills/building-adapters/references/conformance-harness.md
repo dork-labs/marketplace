@@ -1,8 +1,8 @@
-# Conformance harness (`validate-adapter.mjs`)
+# Conformance harness (`validate-adapter.ts`)
 
 Step 4 in detail: the harness interface, how to build a fixture, the verify loop,
 and per-invariant troubleshooting. The invariants themselves are normative in
-[`.agents/flow/adapters/SPEC.md`](../../../adapters/SPEC.md) section 4; this file is
+[`${CLAUDE_PLUGIN_ROOT}/adapters/SPEC.md`](../../../adapters/SPEC.md) section 4; this file is
 the operational guide to passing them.
 
 ---
@@ -10,7 +10,7 @@ the operational guide to passing them.
 ## Interface
 
 ```bash
-node .agents/flow/scripts/validate-adapter.mjs --fixture <path-to-fixture.json>
+node --experimental-strip-types "${CLAUDE_PLUGIN_ROOT}/scripts/validate-adapter.ts" --fixture <path-to-fixture.json>
 ```
 
 - **In:** `--fixture <path>` points at a JSON file of the normalized `WorkItem`s
@@ -22,7 +22,10 @@ node .agents/flow/scripts/validate-adapter.mjs --fixture <path-to-fixture.json>
     "ok": true, // false when any invariant failed
     "failures": [
       // empty when ok
-      { "invariant": "INV-4", "detail": "human-readable explanation of the breach" },
+      {
+        "invariant": "INV-4",
+        "detail": "human-readable explanation of the breach",
+      },
     ],
   }
   ```
@@ -90,7 +93,7 @@ trusting any pass.
 build/refresh fixture
    │
    ▼
-run: node .agents/flow/scripts/validate-adapter.mjs --fixture <fixture.json>
+run: node --experimental-strip-types "${CLAUDE_PLUGIN_ROOT}/scripts/validate-adapter.ts" --fixture <fixture.json>
    │
    ├─ exit 0 / ok:true  ──────────────▶  DONE (adapter conforms)
    │

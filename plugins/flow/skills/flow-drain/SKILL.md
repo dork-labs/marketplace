@@ -2,7 +2,7 @@
 name: flow-drain
 display-name: /flow drain ready queue
 description: Claim the top-ranked eligible issue and carry it to its review gate.
-cron: '0 * * * *'
+cron: "0 * * * *"
 timezone: America/Los_Angeles
 enabled: false
 max-runtime: 2h
@@ -18,17 +18,17 @@ bring-your-own-scheduler).
 Each firing runs exactly **one `/flow continue` tick** and then stops; the
 scheduler provides the repetition. This is NOT `/flow auto` (which loops a single
 session via the Stop-hook sentinel). The canonical tick procedure lives in the
-`/flow` orchestrator (`.claude/commands/flow.md`); this task is only the scheduled
+`/flow` orchestrator (`${CLAUDE_PLUGIN_ROOT}/commands/flow.md`); this task is only the scheduled
 trigger over it. In reconciler-registry order, one tick:
 
 1. **Recovery.** Re-adopt any orphaned claimed work: read
    `.dork/flow/flow-state.json`, GC closed-issue records, probe the worker, and
    resume / restart-clean / escalate per the recovery script
-   (`node .agents/flow/scripts/recovery.mjs`).
+   (`node --experimental-strip-types "${CLAUDE_PLUGIN_ROOT}/scripts/recovery.ts"`).
 2. **Inbox / resume.** Un-park items whose `agent/needs-input` question was
    answered, and resume the parked run.
 3. **Dispatch.** Rank the adapter's eligible work
-   (`node .agents/flow/scripts/dispatch.mjs`, JSON in, JSON out), claim the
+   (`node --experimental-strip-types "${CLAUDE_PLUGIN_ROOT}/scripts/dispatch.ts"`, JSON in, JSON out), claim the
    top-ranked item (durable label plus state), provision its worktree, persist a
    `FlowRun` to `.dork/flow/flow-state.json`, and carry it to its human-review
    gate.
@@ -43,5 +43,5 @@ through **the adapter**; this tick never names a tracker directly.
 
 > The final discovery home for this tick (a skill that carries `cron` + `enabled`
 > frontmatter, surfaced wherever skills live) lands with the tasks-as-skills
-> capability model (DOR-150). The interim `.dork/tasks/flow-drain/` home keeps
+> capability model (DOR-150). The interim `${CLAUDE_PLUGIN_ROOT}/skills/flow-drain/` home keeps
 > autonomy available now.

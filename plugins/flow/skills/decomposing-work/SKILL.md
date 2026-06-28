@@ -140,7 +140,7 @@ Project the decomposition onto the work item — never authored independently:
   durable `agent/ready` label to the execute-ready work item (and to any task
   promoted to its own sub-issue in step 6). The work item carrying the decomposed
   plan becomes dispatchable **only once `agent/ready` is applied**: the dispatch
-  eligibility gate (the `agent/ready` constant `node .agents/flow/scripts/dispatch.mjs`
+  eligibility gate (the `agent/ready` constant `node --experimental-strip-types "${CLAUDE_PLUGIN_ROOT}/scripts/dispatch.ts"`
   matches on, unconditionally) holds out anything lacking it. This is the **second readiness
   producer** after TRIAGE (the first, on accept; see `triaging-work`): DECOMPOSE
   readies the work it hands to EXECUTE so the dispatch loop has fuel.

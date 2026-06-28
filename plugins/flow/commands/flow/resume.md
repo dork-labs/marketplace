@@ -2,7 +2,7 @@
 description: Restore autonomous /flow operation that /flow:pause halted
 category: flow
 allowed-tools: Read, Edit, Write, Glob, SlashCommand
-argument-hint: '[issue-id to un-pause, or empty to restore all autonomy]'
+argument-hint: "[issue-id to un-pause, or empty to restore all autonomy]"
 ---
 
 # /flow:resume — restore autonomy
@@ -11,7 +11,7 @@ Undo a `/flow:pause`: $ARGUMENTS
 
 Resume is the inverse of pause: it restores the autonomous surfaces pause halted:
 
-1. **The Pulse cron.** Set `enabled: true` in the `.dork/tasks/flow-drain`
+1. **The Pulse cron.** Set `enabled: true` in the `${CLAUDE_PLUGIN_ROOT}/skills/flow-drain/SKILL.md`
    frontmatter so the Pulse seat resumes claiming work on its schedule. (Pulse is
    the one mode that needs a running DorkOS server; the terminal drain does not.)
 2. **The terminal drain.** If a paused `.dork/flow/auto-run.json` sentinel is still
@@ -31,5 +31,5 @@ via the ownership policy, hand it back the same way (reassign on the tracker via
 ## Re-enabling a single reconciler loop
 
 If you silenced one loop via `loops.<id>.enabled: false` (see `/flow:pause`), flip
-it back to `true` in `.agents/flow/config.json`. See the dials guide
+it back to `true` in `${CLAUDE_PLUGIN_ROOT}/config/config.json`. See the dials guide
 (`docs/guides/flow/the-dials.mdx`).

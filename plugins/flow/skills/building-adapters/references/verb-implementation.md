@@ -1,7 +1,7 @@
 # Verb implementation checklist (all 16)
 
 The per-verb checklist for the adapter you generate in Step 3. It restates the
-contract ([`.agents/flow/adapters/SPEC.md`](../../../adapters/SPEC.md) section 3)
+contract ([`${CLAUDE_PLUGIN_ROOT}/adapters/SPEC.md`](../../../adapters/SPEC.md) section 3)
 as an implementation worksheet, **tracker-neutral**: each verb lists its binding
 placeholder (the concrete tracker call _you_ fill in), its durability requirement,
 and its graceful degradation. Where the SPEC and this file disagree, the SPEC wins.

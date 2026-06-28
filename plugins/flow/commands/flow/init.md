@@ -2,14 +2,14 @@
 description: First-run setup for /flow - pick your tracker, generate its adapter, and scaffold config
 category: flow
 allowed-tools: Read, Glob, AskUserQuestion, Write, Edit, Skill, Bash(node:*), Bash(cp:*), Bash(test:*), Bash(grep:*), Bash(cat:*)
-argument-hint: '[--reconfigure]'
+argument-hint: "[--reconfigure]"
 ---
 
 # /flow:init - first-run setup
 
 Set up `/flow` in this repo: $ARGUMENTS
 
-Read `.agents/flow/skills/initializing-flow/SKILL.md` and follow its process
+Read `${CLAUDE_PLUGIN_ROOT}/skills/initializing-flow/SKILL.md` and follow its process
 exactly. It is the one-time setup entry point: it detects whether `/flow` is
 already configured, gathers your setup choices (tracker + connection, identity
 mode, project routing), generates the concrete adapter for your tracker, writes

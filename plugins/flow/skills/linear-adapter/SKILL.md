@@ -122,7 +122,7 @@ storedInFile: true, outputFilePath, tokenCount }` with **no inline data** — re
   `needs-input` (not `agent/*`), `verify`/`ideate` (not `stage/*`),
   `task`/`research`/`idea`/`meta` (not `type/*`). The group prefix is a separate
   parent label that is **not** present on `labels.nodes`. This is a real
-  normalization trap: the dispatch policy (`node .agents/flow/scripts/dispatch.mjs`)
+  normalization trap: the dispatch policy (`node --experimental-strip-types "${CLAUDE_PLUGIN_ROOT}/scripts/dispatch.ts"`)
   matches the literal `agent/ready`, so a raw Composio `ready` will **silently
   fail eligibility**. The adapter MUST re-namespace leaf → group before handing
   `labels[]` to the policy. Recover the group↔leaf map from
