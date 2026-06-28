@@ -1,0 +1,57 @@
+{
+  "spec": "specs/example-feature/02-specification.md",
+  "slug": "example-feature",
+  "generatedAt": "2026-06-14T00:00:00.000Z",
+  "mode": "full",
+  "lastDecomposeDate": null,
+  "tasks": [
+    {
+      "id": "1.1",
+      "phase": 1,
+      "phaseName": "P1 — Foundation",
+      "subject": "Define the core schema",
+      "description": "Author the Zod schema for the feature config and export the inferred types.",
+      "activeForm": "Defining the core schema",
+      "size": "medium",
+      "priority": "high",
+      "dependencies": [],
+      "parallelWith": []
+    },
+    {
+      "id": "1.2",
+      "phase": 1,
+      "phaseName": "P1 — Foundation",
+      "subject": "Add the CLI validator",
+      "description": "Write a dependency-free CLI that validates a config object against the committed schema.",
+      "activeForm": "Adding the CLI validator",
+      "size": "small",
+      "priority": "medium",
+      "dependencies": ["1.1"],
+      "parallelWith": []
+    },
+    {
+      "id": "2.1",
+      "phase": 2,
+      "phaseName": "P2 — Wire-up",
+      "subject": "Wire the validator into the engine loop",
+      "description": "Call the validator at startup and surface schema violations as actionable errors.",
+      "activeForm": "Wiring the validator into the engine loop",
+      "size": "large",
+      "priority": "high",
+      "dependencies": ["1.1", "1.2"],
+      "parallelWith": []
+    },
+    {
+      "id": "2.2",
+      "phase": 2,
+      "phaseName": "P2 — Wire-up",
+      "subject": "Document the config surface",
+      "description": "Write CONFIG.md covering every field, its default, and its allowed values.",
+      "activeForm": "Documenting the config surface",
+      "size": "small",
+      "priority": "low",
+      "dependencies": ["1.1"],
+      "parallelWith": ["2.1"]
+    }
+  ]
+}
