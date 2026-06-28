@@ -66,6 +66,13 @@
       "icon": "🧬",
       "featured": true,
       "pricing": { "model": "free" }
+    },
+    "flow": {
+      "type": "plugin",
+      "layers": ["commands", "skills", "hooks"],
+      "icon": "🌊",
+      "featured": true,
+      "pricing": { "model": "free" }
     }
   }
 }
