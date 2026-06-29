@@ -1,2 +1,13 @@
+# Dev dependencies (the shipped runtime is dependency-free).
 node_modules/
-config.local.json
+
+# /flow runtime config.
+#
+# The committed TEMPLATES are config/config.example.json and
+# config/config.local.example.json. The resolved config and any secret/local
+# overrides (config.json, *.local.json) are generated per install by /flow:init
+# and must never be committed: when this plugin is dogfooded via
+# `claude --plugin-dir`, the plugin dir IS a working tree, so an un-ignored
+# config.json would leak the host's personal config back into this repo.
+config/config.json
+*.local.json
