@@ -53,9 +53,12 @@ confirms before overwriting committed config.
 Check whether `${CLAUDE_PLUGIN_ROOT}/config/config.json` exists and parses as valid JSON
 (`node -e "require('${CLAUDE_PLUGIN_ROOT}/config/config.json')"` exits `0`).
 
-- **No file, or invalid JSON → fresh install.** Proceed to Step 2 with defaults
-  seeded from the committed `config.json` template if one is present, otherwise
-  from schema defaults.
+- **No file, or invalid JSON → fresh install.** This is the _expected_ state of a
+  clean install: the plugin ships `config.example.json` (the committed template),
+  never a `config.json` (that file is gitignored and generated right here, so it
+  cannot leak a host's config back into the plugin when dogfooded via
+  `--plugin-dir`). Proceed to Step 2 with defaults seeded from
+  `config.example.json` if present, otherwise from schema defaults.
 - **Valid file exists → re-run (reconfigure).** Do **not** clobber it silently.
   Tell the operator `/flow` is already configured (name the current `tracker` and
   `identity.agent`), and ask whether to **reconfigure** (re-gather choices and
