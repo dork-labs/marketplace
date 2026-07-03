@@ -40,7 +40,7 @@ filling the `{placeholders}` rather than copying a template into prose:
 | ---------------------------------- | ------------------------------------------------------------------------------------------------------------------- |
 | `specs/<slug>/02-specification.md` | [`templates/docs/specification.md`](../../templates/docs/specification.md)                                          |
 | `specs/<slug>/03-tasks.json`       | [`templates/docs/tasks.json`](../../templates/docs/tasks.json) (DECOMPOSE seeds it; referenced here for provenance) |
-| `decisions/NNNN-<slug>.md`         | [`templates/docs/adr.md`](../../templates/docs/adr.md)                                                              |
+| `decisions/<id>-<slug>.md`         | [`templates/docs/adr.md`](../../templates/docs/adr.md)                                                              |
 
 (The IDEATE input scaffold is [`templates/docs/ideation.md`](../../templates/docs/ideation.md),
 owned by the `ideating-features` skill.)
@@ -86,10 +86,12 @@ Before acting, read:
    - Scan ideation + spec for decision signals (technology choices, pattern
      adoption, trade-off resolutions, rejected alternatives, deliberate
      exclusions — see the `writing-adrs` skill). For each, write a draft ADR
-     from the [`adr.md`](../../templates/docs/adr.md) scaffold, numbered from
-     `decisions/manifest.json` `nextNumber`, and add a manifest entry
-     (`status: draft`, `extractedFrom: <slug>`). Skip if ADRs were already
-     extracted for this slug.
+     from the [`adr.md`](../../templates/docs/adr.md) scaffold (`status: draft`,
+     `extractedFrom: <slug>`). Allocate the ADR's identifier and add its
+     `decisions/` manifest entry via your harness's manifest-maintenance
+     command or script if it provides one; otherwise write the entry directly.
+     (Skip if your project has no `decisions/` manifest.) Skip too if ADRs were
+     already extracted for this slug.
 8. **Update the manifest**
    - Ensure `specs/manifest.json` has an entry for `<slug>` at status
      `specified` (add if missing; promote from `ideation` if present).
