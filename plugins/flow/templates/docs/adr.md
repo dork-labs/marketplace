@@ -1,19 +1,20 @@
 <!--
-  /flow draft-ADR doc scaffold — `decisions/NNNN-<kebab-slug>.md`.
+  /flow draft-ADR doc scaffold — `decisions/<id>-<kebab-slug>.md`.
   Externalized from the legacy `/ideate-to-spec` auto-extract step so the
   SPECIFY stage skill (`specifying-work`) carries no inline ADR template.
   This is the canonical draft-ADR scaffold of the `/flow` doc-template set
   (`templates/docs/`). One ADR per architectural decision surfaced during
   SPECIFY.
 
-  `NNNN` comes from `decisions/manifest.json` `nextNumber`; increment it per
-  ADR and add a manifest entry with `"status": "draft"` and
-  `"extractedFrom": "<slug>"`.
+  `<id>` is assigned by the host's tooling (use your harness's
+  manifest-maintenance command or script if it provides one; otherwise write
+  the `decisions/` manifest entry directly). Whatever id scheme the host uses,
+  add a manifest entry with `"status": "draft"` and `"extractedFrom": "<slug>"`.
 -->
 
 ---
 
-number: NNNN
+id: <host-assigned>
 title: { Title }
 status: draft
 created: { current-date }
@@ -22,7 +23,7 @@ superseded-by: null
 
 ---
 
-# NNNN. {Title}
+# {id}. {Title}
 
 ## Status
 
