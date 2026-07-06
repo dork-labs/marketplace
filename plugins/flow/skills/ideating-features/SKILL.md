@@ -5,15 +5,17 @@ description: Turns a feature brief, rough notes, or an existing partial design i
 
 # Ideating Features
 
+> **Flow root.** This skill lives at `<flow-root>/skills/ideating-features/SKILL.md`. If you reached it via a symlink (`.claude/skills/flow__*` or `.agents/skills/flow__*`), resolve the real path first (`realpath <path>`): the flow root is two directories above the skill directory. Every `<flow-root>/...` reference below is relative to that root.
+
 > **Stage: IDEATE in the `/flow` model.** This is the IDEATE stage skill of the
 > unified `/flow` engine (spec §5.1, the stage spine: capture · triage ·
 > **ideate** · specify · decompose · execute · verify · review · done). The
 > `/flow:ideate` command and a PM `stage/ideate` transition are two triggers for
 > this one skill; the next stage is SPECIFY (`specifying-work`). When the work is
 > tracked, route any tracker I/O through the **tracker adapter** skill
-> (your repo's configured adapter under `${CLAUDE_PLUGIN_ROOT}/skills/`) — never a tracker call from
+> (your repo's configured adapter under `<flow-root>/skills/`) — never a tracker call from
 > here. The ideation document scaffold is externalized at
-> `${CLAUDE_PLUGIN_ROOT}/templates/docs/ideation.md`; produce that shape.
+> `<flow-root>/templates/docs/ideation.md`; produce that shape.
 
 ## Overview
 

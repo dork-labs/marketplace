@@ -6,6 +6,8 @@ disable-model-invocation: true
 
 # Executing Specifications
 
+> **Flow root.** This skill lives at `<flow-root>/skills/executing-specs/SKILL.md`. If you reached it via a symlink (`.claude/skills/flow__*` or `.agents/skills/flow__*`), resolve the real path first (`realpath <path>`): the flow root is two directories above the skill directory. Every `<flow-root>/...` reference below is relative to that root.
+
 Implement a specification by orchestrating parallel background agents across dependency-aware batches, with incremental persistence to survive context compaction.
 
 ## Stage: EXECUTE in the `/flow` model
@@ -89,7 +91,7 @@ This is the critical behavioral change: scaffold the implementation file NOW, be
 
 **If `IMPL_FILE` does NOT exist (new session):**
 
-1. Read `${CLAUDE_PLUGIN_ROOT}/skills/executing-specs/implementation-summary-template.md`
+1. Read `<flow-root>/skills/executing-specs/implementation-summary-template.md`
 2. Extract the feature name from the spec's title (first `# heading` in `02-specification.md`)
 3. Substitute variables:
    - `[FEATURE_NAME]` → feature name from spec
@@ -126,7 +128,7 @@ Quick validation:
 
 ## Phase 2: Spawn Analysis Agent
 
-1. Read `${CLAUDE_PLUGIN_ROOT}/skills/executing-specs/analysis-agent-prompt.md`
+1. Read `<flow-root>/skills/executing-specs/analysis-agent-prompt.md`
 2. Substitute `[SPEC_PATH]` and `[SLUG]` in the prompt text
 3. Launch background agent:
 
@@ -202,7 +204,7 @@ For each batch in the execution plan:
 
 **Step A: Read prompt and launch agents**
 
-1. Read `${CLAUDE_PLUGIN_ROOT}/skills/executing-specs/implementation-agent-prompt.md`
+1. Read `<flow-root>/skills/executing-specs/implementation-agent-prompt.md`
 2. For each task in the batch:
    - Substitute `[TASK_ID]` with the task's ID
    - Substitute `[CROSS_SESSION_CONTEXT]` with context from the analysis agent (or "N/A - first session")

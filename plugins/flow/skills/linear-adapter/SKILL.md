@@ -5,6 +5,8 @@ description: The /flow engine's tracker adapter — the single skill that owns E
 
 # Linear Adapter — the v1 `PMClient`
 
+> **Flow root.** This skill lives at `<flow-root>/skills/linear-adapter/SKILL.md`. If you reached it via a symlink (`.claude/skills/flow__*` or `.agents/skills/flow__*`), resolve the real path first (`realpath <path>`): the flow root is two directories above the skill directory. Every `<flow-root>/...` reference below is relative to that root.
+
 > **What this is.** The `/flow` engine's **work model + tracker adapter**. It is
 > the v1 realization of the `PMClient` contract (spec §3): it normalizes Linear
 > into one generic `WorkItem` shape and fulfils 13 capability verbs, so every
@@ -122,7 +124,7 @@ storedInFile: true, outputFilePath, tokenCount }` with **no inline data** — re
   `needs-input` (not `agent/*`), `verify`/`ideate` (not `stage/*`),
   `task`/`research`/`idea`/`meta` (not `type/*`). The group prefix is a separate
   parent label that is **not** present on `labels.nodes`. This is a real
-  normalization trap: the dispatch policy (`node --experimental-strip-types "${CLAUDE_PLUGIN_ROOT}/scripts/dispatch.ts"`)
+  normalization trap: the dispatch policy (`node --experimental-strip-types "<flow-root>/scripts/dispatch.ts"`)
   matches the literal `agent/ready`, so a raw Composio `ready` will **silently
   fail eligibility**. The adapter MUST re-namespace leaf → group before handing
   `labels[]` to the policy. Recover the group↔leaf map from
