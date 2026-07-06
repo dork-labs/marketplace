@@ -2,7 +2,7 @@
 
 Step 4 in detail: the harness interface, how to build a fixture, the verify loop,
 and per-invariant troubleshooting. The invariants themselves are normative in
-[`${CLAUDE_PLUGIN_ROOT}/adapters/SPEC.md`](../../../adapters/SPEC.md) section 4; this file is
+[`<flow-root>/adapters/SPEC.md`](../../../adapters/SPEC.md) section 4; this file is
 the operational guide to passing them.
 
 ---
@@ -10,7 +10,7 @@ the operational guide to passing them.
 ## Interface
 
 ```bash
-node --experimental-strip-types "${CLAUDE_PLUGIN_ROOT}/scripts/validate-adapter.ts" --fixture <path-to-fixture.json>
+node --experimental-strip-types "<flow-root>/scripts/validate-adapter.ts" --fixture <path-to-fixture.json>
 ```
 
 - **In:** `--fixture <path>` points at a JSON file of the normalized `WorkItem`s
@@ -93,7 +93,7 @@ trusting any pass.
 build/refresh fixture
    │
    ▼
-run: node --experimental-strip-types "${CLAUDE_PLUGIN_ROOT}/scripts/validate-adapter.ts" --fixture <fixture.json>
+run: node --experimental-strip-types "<flow-root>/scripts/validate-adapter.ts" --fixture <fixture.json>
    │
    ├─ exit 0 / ok:true  ──────────────▶  DONE (adapter conforms)
    │

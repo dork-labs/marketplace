@@ -5,6 +5,8 @@ description: The /flow engine's DECOMPOSE stage — break a validated specificat
 
 # Decomposing Work — the DECOMPOSE stage
 
+> **Flow root.** This skill lives at `<flow-root>/skills/decomposing-work/SKILL.md`. If you reached it via a symlink (`.claude/skills/flow__*` or `.agents/skills/flow__*`), resolve the real path first (`realpath <path>`): the flow root is two directories above the skill directory. Every `<flow-root>/...` reference below is relative to that root.
+
 > **Stage:** DECOMPOSE (spec §1). One generic, PM-agnostic stage skill.
 > **Absorbs:** today's `/spec:decompose` and `/spec:tasks-sync`.
 > **PM projection (tracker):** `stage/decompose` label + the active-phase plan
@@ -140,7 +142,7 @@ Project the decomposition onto the work item — never authored independently:
   durable `agent/ready` label to the execute-ready work item (and to any task
   promoted to its own sub-issue in step 6). The work item carrying the decomposed
   plan becomes dispatchable **only once `agent/ready` is applied**: the dispatch
-  eligibility gate (the `agent/ready` constant `node --experimental-strip-types "${CLAUDE_PLUGIN_ROOT}/scripts/dispatch.ts"`
+  eligibility gate (the `agent/ready` constant `node --experimental-strip-types "<flow-root>/scripts/dispatch.ts"`
   matches on, unconditionally) holds out anything lacking it. This is the **second readiness
   producer** after TRIAGE (the first, on accept; see `triaging-work`): DECOMPOSE
   readies the work it hands to EXECUTE so the dispatch loop has fuel.

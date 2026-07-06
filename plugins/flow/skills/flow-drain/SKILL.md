@@ -9,6 +9,8 @@ max-runtime: 2h
 permissions: acceptEdits
 ---
 
+> **Flow root.** This skill lives at `<flow-root>/skills/flow-drain/SKILL.md`. If you reached it via a symlink (`.claude/skills/flow__*` or `.agents/skills/flow__*`), resolve the real path first (`realpath <path>`): the flow root is two directories above the skill directory. Every `<flow-root>/...` reference below is relative to that root.
+
 This is the schedulable **Pulse tick**: one tick of the `/flow` autonomous loop,
 fired by an external scheduler (the DorkOS server's task-scheduler, OS-cron, or
 CI). It is `enabled: false` by default. Turning on autonomy is the explicit
@@ -18,17 +20,17 @@ bring-your-own-scheduler).
 Each firing runs exactly **one `/flow continue` tick** and then stops; the
 scheduler provides the repetition. This is NOT `/flow auto` (which loops a single
 session via the Stop-hook sentinel). The canonical tick procedure lives in the
-`/flow` orchestrator (`${CLAUDE_PLUGIN_ROOT}/commands/flow.md`); this task is only the scheduled
+`/flow` orchestrator (`<flow-root>/commands/flow.md`); this task is only the scheduled
 trigger over it. In reconciler-registry order, one tick:
 
 1. **Recovery.** Re-adopt any orphaned claimed work: read
    `.dork/flow/flow-state.json`, GC closed-issue records, probe the worker, and
    resume / restart-clean / escalate per the recovery script
-   (`node --experimental-strip-types "${CLAUDE_PLUGIN_ROOT}/scripts/recovery.ts"`).
+   (`node --experimental-strip-types "<flow-root>/scripts/recovery.ts"`).
 2. **Inbox / resume.** Un-park items whose `agent/needs-input` question was
    answered, and resume the parked run.
 3. **Dispatch.** Rank the adapter's eligible work
-   (`node --experimental-strip-types "${CLAUDE_PLUGIN_ROOT}/scripts/dispatch.ts"`, JSON in, JSON out), claim the
+   (`node --experimental-strip-types "<flow-root>/scripts/dispatch.ts"`, JSON in, JSON out), claim the
    top-ranked item (durable label plus state), provision its worktree, persist a
    `FlowRun` to `.dork/flow/flow-state.json`, and carry it to its human-review
    gate.
@@ -43,5 +45,5 @@ through **the adapter**; this tick never names a tracker directly.
 
 > The final discovery home for this tick (a skill that carries `cron` + `enabled`
 > frontmatter, surfaced wherever skills live) lands with the tasks-as-skills
-> capability model (DOR-150). The interim `${CLAUDE_PLUGIN_ROOT}/skills/flow-drain/` home keeps
+> capability model (DOR-150). The interim `<flow-root>/skills/flow-drain/` home keeps
 > autonomy available now.

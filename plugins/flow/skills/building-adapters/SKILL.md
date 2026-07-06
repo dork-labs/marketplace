@@ -5,6 +5,8 @@ description: Guided procedure for generating and verifying a concrete /flow trac
 
 # building-adapters - generate a conforming `/flow` tracker adapter
 
+> **Flow root.** This skill lives at `<flow-root>/skills/building-adapters/SKILL.md`. If you reached it via a symlink (`.claude/skills/flow__*` or `.agents/skills/flow__*`), resolve the real path first (`realpath <path>`): the flow root is two directories above the skill directory. Every `<flow-root>/...` reference below is relative to that root.
+
 > **What this is.** The procedure an adopter (or `/flow:init`) follows to produce
 > one concrete **tracker adapter**: the single tracker-aware component that lets
 > the whole `/flow` engine run against a new tracker without changing one line of
@@ -19,7 +21,7 @@ description: Guided procedure for generating and verifying a concrete /flow trac
 ## The authoritative source
 
 The contract you are conforming to is
-[`${CLAUDE_PLUGIN_ROOT}/adapters/SPEC.md`](../../adapters/SPEC.md). **Read it first and keep
+[`<flow-root>/adapters/SPEC.md`](../../adapters/SPEC.md). **Read it first and keep
 it open.** This skill is the _procedure_; the SPEC is the _contract_. Where they
 ever disagree, the SPEC wins. The SPEC defines, and you will satisfy:
 
@@ -66,12 +68,12 @@ conforming adapter. Expect to loop between 3 and 4.
 
 ### Step 1 - Read the contract, pick a starting point
 
-1. Read [`${CLAUDE_PLUGIN_ROOT}/adapters/SPEC.md`](../../adapters/SPEC.md) end to end. You
+1. Read [`<flow-root>/adapters/SPEC.md`](../../adapters/SPEC.md) end to end. You
    cannot map a tracker you have not measured against the contract.
 2. Choose the closest starting point:
    - **Start from a reference adapter** when your access shape matches one. Two
      reference adapters live under
-     [`${CLAUDE_PLUGIN_ROOT}/adapters/reference/`](../../adapters/reference/) and are the
+     [`<flow-root>/adapters/reference/`](../../adapters/reference/) and are the
      worked, concrete-tracker wiring for the _same_ tracker via two access paths:
      - `linear-mcp` - the in-session MCP path (an authenticated MCP server exposes
        tracker tools the agent calls directly).
@@ -143,7 +145,7 @@ never to "blocked".
 ### Step 3 - Generate the concrete adapter SKILL.md
 
 Write the adapter as a skill into the plugin's skill home:
-`${CLAUDE_PLUGIN_ROOT}/skills/<tracker>-adapter/SKILL.md` (your harness loads it as
+`<flow-root>/skills/<tracker>-adapter/SKILL.md` (your harness loads it as
 a skill from there). It must contain:
 
 1. **Frontmatter.** `name: <tracker>-adapter` and a `description` that triggers
@@ -180,11 +182,11 @@ category, both an `agent/ready` and a not-ready item, and at least one relation
 that resolves in-set plus one that is terminal/out-of-set). Then run the harness:
 
 ```bash
-node --experimental-strip-types "${CLAUDE_PLUGIN_ROOT}/scripts/validate-adapter.ts" --fixture <path-to-your-fixture.json>
+node --experimental-strip-types "<flow-root>/scripts/validate-adapter.ts" --fixture <path-to-your-fixture.json>
 ```
 
 > Node < 22.6 lacks `--experimental-strip-types`; on those runtimes invoke the oracle
-> with `tsx` instead: `tsx "${CLAUDE_PLUGIN_ROOT}/scripts/validate-adapter.ts" --fixture <path-to-your-fixture.json>`.
+> with `tsx` instead: `tsx "<flow-root>/scripts/validate-adapter.ts" --fixture <path-to-your-fixture.json>`.
 
 The harness reads JSON in and prints a JSON **verdict**:
 
@@ -228,7 +230,7 @@ cases that prove the harness bites are in
 
 An adapter is done only when **all** of these hold:
 
-- [ ] Read [`${CLAUDE_PLUGIN_ROOT}/adapters/SPEC.md`](../../adapters/SPEC.md) and chose a
+- [ ] Read [`<flow-root>/adapters/SPEC.md`](../../adapters/SPEC.md) and chose a
       starting point (a reference adapter or from-scratch).
 - [ ] State -> `stateCategory` table complete; only the five categories; holding
       state mapped to `backlog`.
@@ -242,7 +244,7 @@ An adapter is done only when **all** of these hold:
 - [ ] The adapter is the single audit surface: no tracker API string lives in any
       other flow skill or command.
 - [ ] `CONTRACT_VERSION` declared and matches the SPEC's current version.
-- [ ] `node --experimental-strip-types "${CLAUDE_PLUGIN_ROOT}/scripts/validate-adapter.ts" --fixture <fixture>` returns a verdict
+- [ ] `node --experimental-strip-types "<flow-root>/scripts/validate-adapter.ts" --fixture <fixture>` returns a verdict
       with `ok: true` and exit code `0`.
 
 ---

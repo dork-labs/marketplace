@@ -5,6 +5,8 @@ description: The /flow engine's TRIAGE stage — classify and route incoming wor
 
 # Triaging Work — the TRIAGE stage
 
+> **Flow root.** This skill lives at `<flow-root>/skills/triaging-work/SKILL.md`. If you reached it via a symlink (`.claude/skills/flow__*` or `.agents/skills/flow__*`), resolve the real path first (`realpath <path>`): the flow root is two directories above the skill directory. Every `<flow-root>/...` reference below is relative to that root.
+
 > **What this is.** The second stage on the `/flow` spine
 > (`CAPTURE → TRIAGE → IDEATE → …`, spec §1). TRIAGE is where raw work earns its
 > shape: an incoming brief is **classified** into the right work-item type, and an
@@ -115,7 +117,7 @@ freeform and take path A.
    full-autonomy posture (decisions A0/A1) every accepted item is readied for
    dispatch on both routes. Whichever route you take, **via the adapter,
    apply `agent/ready` + the `stage/*` label** so the dispatch eligibility gate
-   (the `agent/ready` constant `node --experimental-strip-types "${CLAUDE_PLUGIN_ROOT}/scripts/dispatch.ts"` matches on) can
+   (the `agent/ready` constant `node --experimental-strip-types "<flow-root>/scripts/dispatch.ts"` matches on) can
    pick the work up; without `agent/ready`
    the item sits behind the gate and never dispatches (the keystone fix).
    - **Simple** (single-session, clear scope — roughly: single file / one

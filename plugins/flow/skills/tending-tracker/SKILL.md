@@ -5,6 +5,8 @@ description: The /flow engine's agent-as-team-member loop — the agent particip
 
 # Tending the Tracker — the agent-as-team-member loop
 
+> **Flow root.** This skill lives at `<flow-root>/skills/tending-tracker/SKILL.md`. If you reached it via a symlink (`.claude/skills/flow__*` or `.agents/skills/flow__*`), resolve the real path first (`realpath <path>`): the flow root is two directories above the skill directory. Every `<flow-root>/...` reference below is relative to that root.
+
 > **What this is.** The behaviors that let the `/flow` agent operate inside a
 > **shared** tracker the way a good teammate does (spec §5, §7; Phase 3
 > acceptance): watch its inbox, speak only when it should, claim work durably,
@@ -17,7 +19,7 @@ description: The /flow engine's agent-as-team-member loop — the agent particip
 > pieces: the adapter verbs (the only place that touches a tracker) and
 > three pinned flow-engine oracles: `classifyOwnership`,
 > `shouldRespondToComment`, and `resolveInvolvement` (the calibration ladder,
-> runnable as `node --experimental-strip-types "${CLAUDE_PLUGIN_ROOT}/scripts/involvement.ts"`: decision context JSON
+> runnable as `node --experimental-strip-types "<flow-root>/scripts/involvement.ts"`: decision context JSON
 > in, verdict JSON out). The agent reasons in the agent layer;
 > the oracles are the tested source of truth for _what_ the rules decide.
 
@@ -182,7 +184,7 @@ The agent's outbound moves on the board, all via the adapter:
 **Any time the agent is genuinely stuck, it stops, comments, and assigns to the
 human** (spec Decision #2a) rather than guessing. This is not stage-gated — it is
 **uncertainty-gated**, driven by the calibration ladder (the `resolveInvolvement`
-oracle, `node --experimental-strip-types "${CLAUDE_PLUGIN_ROOT}/scripts/involvement.ts"`):
+oracle, `node --experimental-strip-types "<flow-root>/scripts/involvement.ts"`):
 
 - Walk the ladder for the decision at hand. A `stop-and-ask` outcome (the floor —
   irreversible / outward-facing / secrets-or-spend / scope-change — or sticky +

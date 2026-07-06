@@ -5,6 +5,8 @@ description: The /flow engine's VERIFY stage — trace recent work for correctne
 
 # Verifying Work — the VERIFY stage
 
+> **Flow root.** This skill lives at `<flow-root>/skills/verifying-work/SKILL.md`. If you reached it via a symlink (`.claude/skills/flow__*` or `.agents/skills/flow__*`), resolve the real path first (`realpath <path>`): the flow root is two directories above the skill directory. Every `<flow-root>/...` reference below is relative to that root.
+
 > **Stage:** VERIFY (spec §1). One generic, PM-agnostic stage skill.
 > **Absorbs:** today's `/review-recent-work`, browser proof-of-completion, and
 > code review (the `browser-testing`, `requesting-code-review`, and
@@ -79,7 +81,7 @@ never trusts the implementer's narrative.
 
 Gather proof **scaled to the surface touched** (spec §13), following the
 `browser-testing` skill for the methodology. The format and attach target are
-**config-driven from the `evidence` block** of `${CLAUDE_PLUGIN_ROOT}/config/config.json` — never
+**config-driven from the `evidence` block** of `<flow-root>/config/config.json` — never
 hand-picked. The pinned oracle for that decision is the flow engine's
 `selectEvidence`: given the change `kind`, the
 run's trigger (`liveSession`), and the resolved `evidence` config, it returns an

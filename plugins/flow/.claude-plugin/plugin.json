@@ -1,5 +1,5 @@
 {
   "name": "flow",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "The /flow workflow engine: PM-agnostic, dual-mode product workflow from capture to done. Stage commands, stage skills, a runnable-TypeScript engine, the tracker adapter contract, and a bring-your-own-scheduler tick."
 }
