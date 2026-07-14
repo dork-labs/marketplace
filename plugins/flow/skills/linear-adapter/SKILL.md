@@ -139,6 +139,24 @@ storedInFile: true, outputFilePath, tokenCount }` with **no inline data** — re
   returns `{ id, name, state: null }` — the project workflow-state category is not
   populated, so the dead-project dispatch tier degrades to a no-op (the documented
   graceful-degradation behavior; here it is always neutral).
+- **Comment-writes on ARCHIVED issues fail with a misleading error.**
+  `commentCreate` (via `LINEAR_CREATE_LINEAR_COMMENT` or raw GraphQL) on an
+  archived issue returns `Entity not found: Issue` — while `issue(id:)` reads and
+  even `issueUpdate` on the same UUID still succeed, so the error looks like a
+  bad id or a missing OAuth scope. It is neither (verified 2026-07-13, DOR-306).
+  When a comment-write returns "Entity not found" on a UUID that reads fine,
+  check the issue's `archivedAt` via GraphQL before suspecting scopes or
+  transposed UUIDs. Archived issues stay out of normal flow via the
+  `includeArchived: false` hygiene rule; this bites only when an item is
+  addressed directly by identifier.
+- **`LINEAR_CREATE_LINEAR_COMMENT` wants camelCase `issueId`** — unlike
+  `LINEAR_GET_LINEAR_ISSUE`'s snake_case `issue_id`. Allowed keys: `body,
+issueId`. The casing convention varies per slug; trust the validation error's
+  allowed-keys list.
+- **`LINEAR_LIST_COMMENTS` cannot filter by issue.** Its only keys are `after,
+first, before, includeArchived`. To read one issue's comments back (the
+  round-trip check), use `LINEAR_GET_LINEAR_ISSUE` — its `comments.nodes` carries
+  them — or a GraphQL `issue(id:){ comments { nodes { id body } } }`.
 
 ---
 
