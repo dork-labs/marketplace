@@ -4,6 +4,7 @@
   "plugins": {
     "code-reviewer": {
       "type": "agent",
+      "categories": ["code-review"],
       "layers": ["agents", "tasks"],
       "icon": "🔍",
       "featured": true,
@@ -11,6 +12,7 @@
     },
     "security-auditor": {
       "type": "agent",
+      "categories": ["security"],
       "layers": ["agents", "tasks"],
       "icon": "🛡️",
       "featured": true,
@@ -18,6 +20,7 @@
     },
     "docs-keeper": {
       "type": "agent",
+      "categories": ["documentation"],
       "layers": ["agents"],
       "icon": "📚",
       "featured": true,
@@ -25,36 +28,42 @@
     },
     "linear-integration": {
       "type": "plugin",
+      "categories": ["project-management", "integrations"],
       "layers": ["extensions", "adapters"],
       "icon": "📋",
       "pricing": { "model": "free" }
     },
     "posthog-monitor": {
       "type": "plugin",
+      "categories": ["observability"],
       "layers": ["extensions", "tasks"],
       "icon": "📊",
       "pricing": { "model": "free" }
     },
     "security-audit-pack": {
       "type": "skill-pack",
+      "categories": ["security"],
       "layers": ["tasks"],
       "icon": "🔐",
       "pricing": { "model": "free" }
     },
     "release-pack": {
       "type": "skill-pack",
+      "categories": ["release-ops"],
       "layers": ["tasks", "skills"],
       "icon": "🚀",
       "pricing": { "model": "free" }
     },
     "discord-adapter": {
       "type": "adapter",
+      "categories": ["integrations"],
       "layers": ["adapters"],
       "icon": "💬",
       "pricing": { "model": "free" }
     },
     "marketplace-dev": {
       "type": "skill-pack",
+      "categories": ["dev-tools"],
       "layers": ["skills"],
       "icon": "📦",
       "featured": true,
@@ -62,6 +71,7 @@
     },
     "lifeos-starter": {
       "type": "agent",
+      "categories": ["productivity"],
       "layers": ["skills", "tasks", "agents", "commands", "hooks"],
       "icon": "🧬",
       "featured": true,
@@ -69,6 +79,7 @@
     },
     "flow": {
       "type": "plugin",
+      "categories": ["agent-ops", "project-management"],
       "layers": ["commands", "skills", "hooks"],
       "icon": "🌊",
       "featured": true,
