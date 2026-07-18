@@ -147,6 +147,16 @@
         "autonomous",
         "pm-agnostic"
       ]
+    },
+    {
+      "name": "linear-ops",
+      "source": "./plugins/linear-ops",
+      "description": "Your Linear issues on the dashboard, tended by an agent on a 15-minute inbox check.",
+      "author": { "name": "Dork Labs" },
+      "license": "MIT",
+      "category": "project-management",
+      "tags": ["linear", "issues", "shape", "project-management"],
+      "keywords": ["linear", "shape", "project-management", "tending-agent"]
     }
   ]
 }

@@ -84,6 +84,14 @@
       "icon": "🌊",
       "featured": true,
       "pricing": { "model": "free" }
+    },
+    "linear-ops": {
+      "type": "shape",
+      "categories": ["project-management"],
+      "layers": ["extensions", "agents", "tasks"],
+      "icon": "📋",
+      "featured": true,
+      "pricing": { "model": "free" }
     }
   }
 }
