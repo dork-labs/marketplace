@@ -21,7 +21,9 @@ Linear Ops reads your issues through Linear's API. The first time you turn it on
 
 ## Turning it on
 
-Shape switching is still rolling out. A Shape switcher (a button in DorkOS to pick your setup) is on the way. For now, you apply Linear Ops through the DorkOS API.
+Install Linear Ops from the Marketplace in DorkOS. Then press Cmd+K to open the command menu, choose "Switch Shape," pick Linear Ops, and apply it. DorkOS rearranges itself: the Linear board shows up on your dashboard, a Linear tab appears in your sidebar, and DorkOS offers to set up the Linear Tender agent — your call whether to accept.
+
+You can also ask an agent to do this switch for you, if you'd rather not do it yourself.
 
 ## What's inside
 
