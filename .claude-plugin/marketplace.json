@@ -119,7 +119,7 @@
         "repo": "doriancollier/lifeos-starter",
         "ref": "main"
       },
-      "description": "AI-coached personal chief-of-staff — Obsidian-powered planning, coaching, and life management with 56 skills and a personal board of advisors",
+      "description": "Coaches your planning, habits, and goals like a personal chief-of-staff, built in Obsidian.",
       "author": { "name": "Dorian Collier" },
       "license": "MIT",
       "category": "productivity",
