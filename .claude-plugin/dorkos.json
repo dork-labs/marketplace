@@ -4,6 +4,7 @@
   "plugins": {
     "code-reviewer": {
       "type": "agent",
+      "displayName": "Code Reviewer",
       "categories": ["code-review"],
       "layers": ["agents", "tasks"],
       "icon": "🔍",
@@ -12,6 +13,7 @@
     },
     "security-auditor": {
       "type": "agent",
+      "displayName": "Security Auditor",
       "categories": ["security"],
       "layers": ["agents", "tasks"],
       "icon": "🛡️",
@@ -20,6 +22,7 @@
     },
     "docs-keeper": {
       "type": "agent",
+      "displayName": "Docs Keeper",
       "categories": ["documentation"],
       "layers": ["agents"],
       "icon": "📚",
@@ -71,6 +74,7 @@
     },
     "lifeos-starter": {
       "type": "agent",
+      "displayName": "LifeOS Starter",
       "categories": ["productivity"],
       "layers": ["skills", "tasks", "agents", "commands", "hooks"],
       "icon": "🧬",
