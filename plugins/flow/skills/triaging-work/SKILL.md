@@ -139,6 +139,13 @@ freeform and take path A.
    and **estimate/size** if missing (these drive dispatch and the circuit
    breaker), and convert any prose blocker claims to typed relations — all via the
    adapter.
+
+   Write the estimate in whatever shape the tracker's own estimate field takes —
+   the adapter passes it through unconverted, so never reshape it by hand. Never
+   write `0` to mean "I don't know": `0` is a real, smallest estimate that ranks
+   the item AHEAD of everything, while leaving the field unset ranks it neutral
+   (behind every concrete estimate). If you cannot size it honestly, leave it
+   empty.
 6. **Leave a provenance trail and report** (see _Provenance_ below).
 
 ## Provenance (both paths)

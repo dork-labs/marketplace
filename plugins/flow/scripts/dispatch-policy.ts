@@ -4,12 +4,25 @@
  *
  * 1. **Eligibility** ({@link filterEligible}) — filter OUT items that cannot be
  *    dispatched right now (wrong state, not ready, blocked, in a dead project,
- *    over the WIP cap, or not claimable per the ownership policy).
+ *    or not claimable per the ownership policy).
  * 2. **Ranking** ({@link rankEligible}) — order the survivors by the 7-tier
  *    ladder, with later tiers breaking ties left by earlier ones.
+ * 3. **WIP cap** ({@link applyWipCap}) — truncate the ranked list to the global
+ *    and per-project concurrency budgets, walking it in RANK order.
  *
- * {@link selectDispatch} runs both passes and returns the ordered, eligible
- * survivors.
+ * {@link selectDispatch} runs all three passes and returns the ordered, eligible,
+ * cap-bounded survivors.
+ *
+ * ## Why the WIP cap comes LAST
+ *
+ * The cap answers "how many things may be in flight?"; the ladder answers "which
+ * things?". Enforcing the cap during eligibility conflates the two: the first
+ * item that happens to arrive fills the budget, so with the default
+ * `perProject: 1` the ladder only ever sorts a single survivor and the pick
+ * becomes a function of adapter query order rather than of priority, unblockers,
+ * size, or age. Ranking first and truncating after keeps both properties: the
+ * cap still bounds concurrency exactly as before, and the pick is now
+ * input-order independent.
  *
  * ## This is the library core, not dead code
  *
@@ -35,6 +48,14 @@
  * WorkItem.createdAt} are treated as **NEUTRAL** in their respective tiers —
  * never fabricated into a real value. A neutral value sorts *after* every
  * concrete value, so a real estimate always outranks a missing one.
+ *
+ * Degradation is **total**, not just `undefined`-shaped. A conformant adapter
+ * omits what it lacks, but the oracle is the runtime and must not crash on a
+ * non-conformant one: `null`, a wrong-typed value, an unrecognized vocabulary,
+ * and (for `relations`) a missing object all degrade to neutral rather than
+ * throwing. "Neutral" stays strictly distinguishable from "smallest" — a real
+ * `0`-point estimate is the smallest concrete size, an ABSENT estimate is
+ * neutral and sorts behind every concrete one.
  *
  * @see specs/unified-workflow-system/02-specification.md §4 (dispatch policy)
  * @see .agents/flow/skills/linear-adapter/SKILL.md (the WorkItem contract + degradation rules)
@@ -68,27 +89,42 @@ const DEAD_PROJECT_STATE_CATEGORIES = new Set(['completed', 'canceled']);
 const AGENT_READY_LABEL = 'agent/ready';
 
 /**
- * Lenient ordinal scale for the size tier. Maps both t-shirt sizes and Fibonacci
- * estimate points onto a single ascending ordinal (smaller index = smaller
- * work). Any unrecognized estimate is treated as NEUTRAL (see {@link sizeRank}).
+ * Ordinal scale for **t-shirt** estimates — the vocabulary trackers that have no
+ * numeric estimate field use. Smaller ordinal = smaller work. An unrecognized
+ * word is NEUTRAL (see {@link sizeOrdinal}).
  */
 const SIZE_SCALE: Record<string, number> = {
   xs: 0,
-  '1': 0,
   sm: 1,
   small: 1,
-  '2': 1,
   md: 2,
   medium: 2,
-  '3': 2,
   lg: 3,
   large: 3,
-  '5': 3,
   xl: 4,
-  '8': 4,
   xxl: 5,
-  '13': 5,
 };
+
+/**
+ * Ascending `[points, ordinal]` breakpoints mapping a **numeric** estimate onto
+ * the same ordinal scale as {@link SIZE_SCALE}, so the two vocabularies are
+ * directly comparable in one tier.
+ *
+ * A numeric estimate takes the ordinal of the largest breakpoint at or below it.
+ * That keeps estimate scales this table does not enumerate — Linear's
+ * exponential (1·2·4·8·16), a linear 1–5 scale, a 21-point epic — monotonic
+ * instead of silently degrading to neutral the moment a team picks a scale other
+ * than Fibonacci.
+ */
+const NUMERIC_SIZE_BREAKPOINTS: readonly (readonly [number, number])[] = [
+  [0, 0],
+  [1, 0],
+  [2, 1],
+  [3, 2],
+  [5, 3],
+  [8, 4],
+  [13, 5],
+];
 
 /** Priority ordinal: lower sorts first. Urgent (1) → high (2) → … → none (0/∞). */
 const PRIORITY_RANK: Record<number, number> = {
@@ -178,7 +214,22 @@ function resolveOwnership(item: WorkItem, opts: DispatchOptions): OwnershipClass
  * @param openIdentifiers - Identifiers of all open candidate items.
  */
 function hasOpenBlocker(item: WorkItem, openIdentifiers: Set<string>): boolean {
-  return item.relations.blockedBy.some((id) => openIdentifiers.has(id));
+  return relationIds(item, 'blockedBy').some((id) => openIdentifiers.has(id));
+}
+
+/**
+ * Reads one edge list off an item's relation graph, degrading an absent or
+ * wrong-typed `relations` object to "no edges" rather than throwing. An adapter
+ * that omits the graph loses the blocker/unblocker tiers, which is the neutral
+ * outcome — it does not take the whole dispatch pass down with it.
+ *
+ * @param item - The item under evaluation.
+ * @param edge - Which edge list to read.
+ * @returns The identifiers on that edge, or `[]` when unavailable.
+ */
+function relationIds(item: WorkItem, edge: 'blocks' | 'blockedBy'): readonly string[] {
+  const ids = item.relations?.[edge];
+  return Array.isArray(ids) ? ids : [];
 }
 
 /**
@@ -186,60 +237,83 @@ function hasOpenBlocker(item: WorkItem, openIdentifiers: Set<string>): boolean {
  * right now (§4). An item survives only if ALL hold: its `stateCategory` is
  * dispatchable; it carries the `agent/ready` label (PM-driven mode); it is not
  * `blockedBy` any open item; its `project.stateCategory` is not
- * completed/canceled; admitting it would not exceed the global or per-project
- * WIP cap; and its ownership class is claimable per the `ownership` policy.
+ * completed/canceled; and its ownership class is claimable per the `ownership`
+ * policy.
  *
- * The WIP cap is enforced **greedily in input order**: items are admitted until
- * a cap is hit, after which further items for that project (or globally) are
- * filtered. Caller should pass items in a stable order if cap-edge determinism
- * matters; {@link selectDispatch} ranks survivors afterward regardless.
+ * Eligibility is a **per-item predicate** — every check here is a property of
+ * the item alone, so the result is independent of input order and of how many
+ * other items are in the set. The WIP cap is deliberately NOT here: it is a
+ * property of the QUEUE, and enforcing it during this pass would let arrival
+ * order decide the pick. It runs after ranking, in {@link applyWipCap}.
  *
  * @param items - The candidate work items.
  * @param ownership - The resolved ownership claim policy.
- * @param wipCap - The resolved global + per-project WIP caps.
- * @param opts - Ownership resolution + live in-progress counts.
+ * @param opts - Ownership resolution inputs.
  * @returns The eligible survivors, in input order.
  */
 export function filterEligible(
   items: readonly WorkItem[],
   ownership: OwnershipConfig,
-  wipCap: WipCap,
   opts: DispatchOptions
 ): WorkItem[] {
-  const openIdentifiers = new Set(
-    items
-      .filter((it) => DISPATCHABLE_STATE_CATEGORIES.has(it.stateCategory))
-      .map((it) => it.identifier)
-  );
+  const openIdentifiers = buildOpenSet(items);
 
-  // Running WIP budget seeded from existing in-progress load.
-  let globalCount = opts.inProgressTotal ?? 0;
-  const perProjectCount: Record<string, number> = { ...(opts.inProgressByProject ?? {}) };
-
-  const survivors: WorkItem[] = [];
-  for (const item of items) {
-    if (!DISPATCHABLE_STATE_CATEGORIES.has(item.stateCategory)) continue;
-    if (!item.labels.includes(AGENT_READY_LABEL)) continue;
-    if (hasOpenBlocker(item, openIdentifiers)) continue;
+  return items.filter((item) => {
+    if (!DISPATCHABLE_STATE_CATEGORIES.has(item.stateCategory)) return false;
+    if (!item.labels.includes(AGENT_READY_LABEL)) return false;
+    if (hasOpenBlocker(item, openIdentifiers)) return false;
     if (
       item.project?.stateCategory &&
       DEAD_PROJECT_STATE_CATEGORIES.has(item.project.stateCategory)
     )
-      continue;
-    if (!isClaimable(resolveOwnership(item, opts), ownership)) continue;
+      return false;
+    return isClaimable(resolveOwnership(item, opts), ownership);
+  });
+}
 
-    // WIP cap — enforced last so it only counts otherwise-eligible items.
+/**
+ * **Pass 3 — WIP cap.** Truncates an already-RANKED list to the global and
+ * per-project concurrency budgets, seeded from the live in-progress load.
+ *
+ * Walks the list in rank order and admits each item while both budgets allow it.
+ * A project that is already at its cap is skipped without ending the walk, so a
+ * lower-ranked item in a *different* project can still be admitted under the
+ * global budget; hitting the global cap ends the walk entirely, since nothing
+ * after it could be admitted.
+ *
+ * Because the input is ranked, "which items get cut" is decided by the ladder —
+ * the cap only decides *how many* survive.
+ *
+ * @param ranked - The eligible survivors in ladder order ({@link rankEligible}).
+ * @param wipCap - The resolved global + per-project WIP caps.
+ * @param opts - Live in-progress counts (the existing load the cap measures).
+ * @returns The highest-ranked items that fit inside the caps, in rank order.
+ */
+export function applyWipCap(
+  ranked: readonly WorkItem[],
+  wipCap: WipCap,
+  opts: DispatchOptions
+): WorkItem[] {
+  // Running WIP budget seeded from existing in-progress load.
+  let globalCount = opts.inProgressTotal ?? 0;
+  const perProjectCount: Record<string, number> = {
+    ...(opts.inProgressByProject ?? {}),
+  };
+
+  const admitted: WorkItem[] = [];
+  for (const item of ranked) {
+    if (globalCount >= wipCap.global) break;
+
     const projectId = item.project?.id;
     const projectCount = projectId ? (perProjectCount[projectId] ?? 0) : 0;
-    if (globalCount >= wipCap.global) continue;
     if (projectId && projectCount >= wipCap.perProject) continue;
 
-    survivors.push(item);
+    admitted.push(item);
     globalCount += 1;
     if (projectId) perProjectCount[projectId] = projectCount + 1;
   }
 
-  return survivors;
+  return admitted;
 }
 
 /** A pre-resolved set of open candidate identifiers, for the unblockers tier. */
@@ -253,12 +327,17 @@ function buildOpenSet(items: readonly WorkItem[]): Set<string> {
 
 /** Tier 1 — how many OPEN items this item blocks (more = ranks first). */
 function unblockerScore(item: WorkItem, openIdentifiers: Set<string>): number {
-  return item.relations.blocks.filter((id) => openIdentifiers.has(id)).length;
+  return relationIds(item, 'blocks').filter((id) => openIdentifiers.has(id)).length;
 }
 
-/** Tier 2 — priority ordinal; missing priority is NEUTRAL (sorts last). */
+/**
+ * Tier 2 — priority ordinal; a missing, `null`, or off-scale priority is NEUTRAL
+ * (sorts last). The `typeof` guard is what makes that promise true rather than
+ * accidental: without it, degradation would rest on `PRIORITY_RANK[null]`
+ * happening to miss.
+ */
 function priorityRank(item: WorkItem): number {
-  if (item.priority === undefined) return NEUTRAL;
+  if (typeof item.priority !== 'number') return NEUTRAL;
   return PRIORITY_RANK[item.priority] ?? NEUTRAL;
 }
 
@@ -267,18 +346,68 @@ function projectStatusRank(item: WorkItem): number {
   return item.project?.stateCategory === 'started' ? 0 : 1;
 }
 
+/**
+ * Maps a numeric estimate onto the shared ordinal scale via
+ * {@link NUMERIC_SIZE_BREAKPOINTS}. Non-finite or negative points are not an
+ * estimate at all → `undefined` (neutral).
+ *
+ * @param points - The numeric estimate.
+ * @returns The shared ordinal, or `undefined` when the value is not an estimate.
+ */
+function numericSizeOrdinal(points: number): number | undefined {
+  if (!Number.isFinite(points) || points < 0) return undefined;
+  // points >= 0 always matches the leading [0, 0] breakpoint.
+  let ordinal = 0;
+  for (const [breakpoint, value] of NUMERIC_SIZE_BREAKPOINTS) {
+    if (points < breakpoint) break;
+    ordinal = value;
+  }
+  return ordinal;
+}
+
+/**
+ * Resolves an item's estimate to the shared ordinal scale, accepting BOTH shapes
+ * the adapter contract allows: a numeric estimate (Linear's native `estimate`
+ * field and every other points-based tracker) and a t-shirt string (trackers
+ * with no numeric field). Anything else — absent, `null`, a wrong type, an
+ * unrecognized word, an empty string — is `undefined`, i.e. NEUTRAL.
+ *
+ * A real `0`-point estimate returns ordinal `0` (the smallest concrete size) and
+ * is therefore never confused with a missing one.
+ *
+ * @param size - The item's raw estimate.
+ * @returns The shared ordinal, or `undefined` for neutral.
+ */
+function sizeOrdinal(size: WorkItem['size']): number | undefined {
+  if (typeof size === 'number') return numericSizeOrdinal(size);
+  if (typeof size !== 'string') return undefined; // undefined, null, or wrong-typed
+  const token = size.trim().toLowerCase();
+  if (token === '') return undefined;
+  // A numeric estimate that arrived as a string ("8", "21") is still numeric.
+  const asNumber = Number(token);
+  if (!Number.isNaN(asNumber)) return numericSizeOrdinal(asNumber);
+  return SIZE_SCALE[token];
+}
+
 /** Tier 5 — size ordinal honoring `sizeOrder`; missing/unknown size is NEUTRAL. */
 function sizeRank(item: WorkItem, sizeOrder: DispatchConfig['sizeOrder']): number {
-  if (item.size === undefined) return NEUTRAL;
-  const ordinal = SIZE_SCALE[item.size.toLowerCase()];
+  const ordinal = sizeOrdinal(item.size);
   if (ordinal === undefined) return NEUTRAL;
   // large-first inverts the ascending scale; NEUTRAL stays last either way.
   return sizeOrder === 'large-first' ? -ordinal : ordinal;
 }
 
-/** Tier 6 — creation time ordinal (oldest first); missing time is NEUTRAL. */
+/**
+ * Tier 6 — creation time ordinal (oldest first); a missing, `null`, or
+ * non-ISO-8601 time is NEUTRAL.
+ *
+ * The `typeof` guard is load-bearing, not defensive noise: `Date.parse` coerces
+ * its argument to a string first, so a numeric epoch (`1234`) would parse as the
+ * YEAR 1234 and silently rank as the oldest item in the queue. The contract
+ * promises an ISO-8601 string; anything else is neutral, never guessed at.
+ */
 function ageRank(item: WorkItem): number {
-  if (item.createdAt === undefined) return NEUTRAL;
+  if (typeof item.createdAt !== 'string') return NEUTRAL;
   const ms = Date.parse(item.createdAt);
   return Number.isNaN(ms) ? NEUTRAL : ms;
 }
@@ -349,22 +478,28 @@ export function rankEligible(items: readonly WorkItem[], config: DispatchConfig)
 }
 
 /**
- * Run the full dispatch policy: {@link filterEligible} then {@link rankEligible}.
- * Returns the eligible survivors ordered by the 7-tier ladder — the engine's
- * pick list (head = "work on this next").
+ * Run the full dispatch policy: {@link filterEligible} → {@link rankEligible} →
+ * {@link applyWipCap}. Returns the eligible survivors ordered by the 7-tier
+ * ladder and truncated to the concurrency budget — the engine's pick list
+ * (head = "work on this next").
+ *
+ * The cap runs LAST so the ladder decides *which* items survive it; see the
+ * module header for why enforcing it earlier made the pick a function of adapter
+ * query order.
  *
  * @param items - The candidate work items (from the adapter's `getEligibleWork`).
  * @param config - The resolved `dispatch`, `ownership`, and `wipCap` config.
  * @param opts - Ownership resolution (the task 3.1 seam) + live WIP counts.
- * @returns The ordered, eligible survivors.
+ * @returns The ordered, eligible, cap-bounded survivors.
  */
 export function selectDispatch(
   items: readonly WorkItem[],
   config: { dispatch: DispatchConfig; ownership: OwnershipConfig; wipCap: WipCap },
   opts: DispatchOptions
 ): WorkItem[] {
-  const eligible = filterEligible(items, config.ownership, config.wipCap, opts);
-  return rankEligible(eligible, config.dispatch);
+  const eligible = filterEligible(items, config.ownership, opts);
+  const ranked = rankEligible(eligible, config.dispatch);
+  return applyWipCap(ranked, config.wipCap, opts);
 }
 
 /**

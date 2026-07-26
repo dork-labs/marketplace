@@ -180,12 +180,16 @@ stages (`execution`) → `proceed-with-trail`. Types: `DecisionDescriptor`,
 
 ### Dispatch policy — `dispatch.ts` (§4)
 
-`selectDispatch(items, options)` = `filterEligible` then `rankEligible`.
-Eligibility removes non-dispatchable state, missing `agent/ready` (PM-driven),
-open blockers, completed/canceled projects, WIP-capped items, and items the
-`ownership` policy doesn't permit (`isClaimable`). Ranking applies the ordered
-7-tier ladder (`unblockers → priority → projectStatus → type → size → age →
-identifier`). Types: `DispatchConfig`, `OwnershipConfig`, `WipCap`, `RankFactor`.
+`selectDispatch(items, options)` = `filterEligible` → `rankEligible` →
+`applyWipCap`. Eligibility removes non-dispatchable state, missing `agent/ready`
+(PM-driven), open blockers, completed/canceled projects, and items the
+`ownership` policy doesn't permit (`isClaimable`) — every check is a per-item
+predicate, so the survivor set never depends on input order. Ranking applies the
+ordered 7-tier ladder (`unblockers → priority → projectStatus → type → size →
+age → identifier`). The WIP cap runs **last**, truncating the ranked list to the
+global + per-project budgets: the ladder decides *which* items survive, the cap
+only decides *how many*. Types: `DispatchConfig`, `OwnershipConfig`, `WipCap`,
+`RankFactor`.
 
 ### Gates + auto-merge recovery — `gates.ts` (§5, §6)
 

@@ -58,7 +58,7 @@ native representation into these fields is the adapter's core job.
 | `stateCategory`    | `'backlog' \| 'unstarted' \| 'started' \| 'completed' \| 'canceled'`                | The workflow-state **category**. **The only state field the engine branches on** (see the hard rule below).                                                                                      |
 | `stateName`        | `string`                                                                            | Display-only state name (for example "In Progress", "Triage", "Shipped"). Carried for rendering; **never matched on**.                                                                           |
 | `priority`         | `0 \| 1 \| 2 \| 3 \| 4` (optional)                                                  | `0` none, `1` urgent, `2` high, `3` medium, `4` low. A missing priority is `undefined` (neutral), never `0`.                                                                                     |
-| `size`             | `string` (optional)                                                                 | Estimate, as points or a t-shirt size. Drives sub-issue promotion and the dispatch size tier. Missing is `undefined` (neutral), never `0` or smallest.                                           |
+| `size`             | `number \| string` (optional)                                                       | Estimate: a **number** (points, any scale) from trackers with a numeric estimate field, or a **t-shirt string** (`xs`–`xxl`) from those without. Pass the tracker's native shape through unconverted. Drives sub-issue promotion and the dispatch size tier. Missing is `undefined` (neutral), never `0` or smallest — `0` is a real, smallest estimate. |
 | `project`          | `WorkItemProject` (optional)                                                        | `{ id, name, stateCategory?, lead? }`. The project the item belongs to, or `undefined` when unset.                                                                                               |
 | `parent`           | `string \| null`                                                                    | `identifier` of the parent item (sub-issue), or `null` for a top-level item.                                                                                                                     |
 | `relations`        | `WorkItemRelations`                                                                 | `{ blocks[], blockedBy[], children[], relatedTo[], duplicateOf? }`. Arrays carry **identifiers** (human keys), never native ids. Read from the tracker's typed relation graph, never from prose. |
@@ -375,7 +375,8 @@ the seven `WorkItemType` values), `stateCategory` (one of the five categories),
 `blocks`/`blockedBy`/`children`/`relatedTo` are `string[]` and whose `duplicateOf`
 is an optional `string`), and `labels` (`string[]`). Optional fields (`priority`,
 `size`, `project`, `assignee`, `agentDisposition`, `createdAt`) are either absent
-or correctly typed (`priority` in `{0,1,2,3,4}`; `size` a `string`;
+or correctly typed (`priority` in `{0,1,2,3,4}`; `size` a non-empty `string` or a
+non-negative finite `number`;
 `agentDisposition` one of its four values). A missing optional MUST be `undefined`,
 never a fabricated value (neutral is not "smallest" or "lowest").
 

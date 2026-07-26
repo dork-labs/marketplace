@@ -9,6 +9,7 @@
 import { describe, expect, it } from 'vitest';
 import { DispatchSchema, OwnershipSchema, WipCapSchema } from '../scripts/config-schema.ts';
 import {
+  applyWipCap,
   filterEligible,
   isClaimable,
   rankEligible,
@@ -80,7 +81,7 @@ describe('isClaimable', () => {
 describe('filterEligible', () => {
   it('keeps a fully-eligible item', () => {
     const items = [makeItem({ identifier: 'DOR-1' })];
-    const survivors = filterEligible(items, OWNERSHIP, WIP, ownershipOpts());
+    const survivors = filterEligible(items, OWNERSHIP, ownershipOpts());
     expect(ids(survivors)).toEqual(['DOR-1']);
   });
 
@@ -90,7 +91,7 @@ describe('filterEligible', () => {
       makeItem({ identifier: 'DOR-2', stateCategory: 'canceled' }),
       makeItem({ identifier: 'DOR-3', stateCategory: 'started' }),
     ];
-    const survivors = filterEligible(items, OWNERSHIP, WIP, ownershipOpts());
+    const survivors = filterEligible(items, OWNERSHIP, ownershipOpts());
     expect(ids(survivors)).toEqual(['DOR-3']);
   });
 
@@ -100,7 +101,7 @@ describe('filterEligible', () => {
       makeItem({ identifier: 'DOR-2', labels: ['stage/triage'] }),
       makeItem({ identifier: 'DOR-3' }), // has agent/ready
     ];
-    const survivors = filterEligible(items, OWNERSHIP, WIP, ownershipOpts());
+    const survivors = filterEligible(items, OWNERSHIP, ownershipOpts());
     expect(ids(survivors)).toEqual(['DOR-3']);
   });
 
@@ -109,21 +110,29 @@ describe('filterEligible', () => {
       // blocked by an open item → filtered
       makeItem({
         identifier: 'DOR-1',
-        relations: { blocks: [], blockedBy: ['DOR-2'], children: [], relatedTo: [] },
+        relations: {
+          blocks: [],
+          blockedBy: ['DOR-2'],
+          children: [],
+          relatedTo: [],
+        },
       }),
       // the open blocker
       makeItem({ identifier: 'DOR-2', stateCategory: 'started' }),
       // blocked only by a completed item (not in open set) → eligible
       makeItem({
         identifier: 'DOR-3',
-        relations: { blocks: [], blockedBy: ['DOR-DONE'], children: [], relatedTo: [] },
+        relations: {
+          blocks: [],
+          blockedBy: ['DOR-DONE'],
+          children: [],
+          relatedTo: [],
+        },
       }),
       // the closed blocker
       makeItem({ identifier: 'DOR-DONE', stateCategory: 'completed' }),
     ];
-    // Wide cap so the shared default project's perProject:1 doesn't shadow the
-    // blocker logic under test.
-    const survivors = filterEligible(items, OWNERSHIP, WIDE_WIP, ownershipOpts());
+    const survivors = filterEligible(items, OWNERSHIP, ownershipOpts());
     expect(ids(survivors).sort()).toEqual(['DOR-2', 'DOR-3']);
   });
 
@@ -139,7 +148,7 @@ describe('filterEligible', () => {
       }),
       makeItem({ identifier: 'DOR-3' }), // started project
     ];
-    const survivors = filterEligible(items, OWNERSHIP, WIP, ownershipOpts());
+    const survivors = filterEligible(items, OWNERSHIP, ownershipOpts());
     expect(ids(survivors)).toEqual(['DOR-3']);
   });
 
@@ -150,12 +159,9 @@ describe('filterEligible', () => {
       makeItem({ identifier: 'DOR-3' }), // reviewer
       makeItem({ identifier: 'DOR-4' }), // unassigned
     ];
-    // Wide cap so the shared default project's perProject:1 doesn't shadow the
-    // ownership filter under test.
     const survivors = filterEligible(
       items,
       OWNERSHIP,
-      WIDE_WIP,
       ownershipOpts({
         'DOR-1': 'mine',
         'DOR-2': 'other',
@@ -167,6 +173,26 @@ describe('filterEligible', () => {
     expect(ids(survivors).sort()).toEqual(['DOR-1', 'DOR-4']);
   });
 
+  it('does NOT apply the WIP cap — eligibility is a per-item predicate', () => {
+    // Three items in ONE project with perProject: 1. Eligibility keeps all
+    // three; bounding concurrency is applyWipCap's job, after ranking.
+    const items = ['DOR-1', 'DOR-2', 'DOR-3'].map((identifier) =>
+      makeItem({
+        identifier,
+        project: { id: 'proj_a', name: 'A', stateCategory: 'started' },
+      })
+    );
+    const survivors = filterEligible(items, OWNERSHIP, ownershipOpts());
+    expect(ids(survivors)).toEqual(['DOR-1', 'DOR-2', 'DOR-3']);
+  });
+
+  it('throws when no ownership source is provided', () => {
+    const items = [makeItem({ identifier: 'DOR-1' })];
+    expect(() => filterEligible(items, OWNERSHIP, {})).toThrow(/ownership/);
+  });
+});
+
+describe('applyWipCap — bounds concurrency over an already-ranked list', () => {
   it('enforces the per-project WIP cap (perProject: 1)', () => {
     const items = [
       makeItem({
@@ -182,29 +208,19 @@ describe('filterEligible', () => {
         project: { id: 'proj_b', name: 'B', stateCategory: 'started' },
       }),
     ];
-    const survivors = filterEligible(items, OWNERSHIP, WIP, ownershipOpts());
-    // proj_a capped at 1 (DOR-1 admitted, DOR-2 dropped); proj_b admits DOR-3.
+    // proj_a capped at 1 (DOR-1 admitted, DOR-2 skipped); proj_b admits DOR-3.
     // global cap is 2 → both admitted survivors fit.
-    expect(ids(survivors)).toEqual(['DOR-1', 'DOR-3']);
+    expect(ids(applyWipCap(items, WIP, {}))).toEqual(['DOR-1', 'DOR-3']);
   });
 
   it('enforces the global WIP cap (global: 2) across projects', () => {
-    const items = [
+    const items = ['p1', 'p2', 'p3'].map((p, i) =>
       makeItem({
-        identifier: 'DOR-1',
-        project: { id: 'p1', name: 'p1', stateCategory: 'started' },
-      }),
-      makeItem({
-        identifier: 'DOR-2',
-        project: { id: 'p2', name: 'p2', stateCategory: 'started' },
-      }),
-      makeItem({
-        identifier: 'DOR-3',
-        project: { id: 'p3', name: 'p3', stateCategory: 'started' },
-      }),
-    ];
-    const survivors = filterEligible(items, OWNERSHIP, WIP, ownershipOpts());
-    expect(ids(survivors)).toEqual(['DOR-1', 'DOR-2']); // 3rd hits global cap
+        identifier: `DOR-${i + 1}`,
+        project: { id: p, name: p, stateCategory: 'started' },
+      })
+    );
+    expect(ids(applyWipCap(items, WIP, {}))).toEqual(['DOR-1', 'DOR-2']); // 3rd hits global cap
   });
 
   it('counts existing in-progress load against the caps', () => {
@@ -214,18 +230,43 @@ describe('filterEligible', () => {
         project: { id: 'proj_a', name: 'A', stateCategory: 'started' },
       }),
     ];
-    // proj_a already has 1 in progress → at its perProject cap → filtered.
-    const survivors = filterEligible(items, OWNERSHIP, WIP, {
-      ...ownershipOpts(),
-      inProgressByProject: { proj_a: 1 },
-      inProgressTotal: 1,
-    });
-    expect(survivors).toEqual([]);
+    // proj_a already has 1 in progress → at its perProject cap → dropped.
+    expect(
+      applyWipCap(items, WIP, {
+        inProgressByProject: { proj_a: 1 },
+        inProgressTotal: 1,
+      })
+    ).toEqual([]);
   });
 
-  it('throws when no ownership source is provided', () => {
-    const items = [makeItem({ identifier: 'DOR-1' })];
-    expect(() => filterEligible(items, OWNERSHIP, WIP, {})).toThrow(/ownership/);
+  it('admits a lower-ranked item from another project when one project is capped', () => {
+    const items = [
+      makeItem({
+        identifier: 'DOR-1',
+        project: { id: 'proj_a', name: 'A', stateCategory: 'started' },
+      }),
+      makeItem({
+        identifier: 'DOR-2',
+        project: { id: 'proj_a', name: 'A', stateCategory: 'started' },
+      }),
+      makeItem({
+        identifier: 'DOR-3',
+        project: { id: 'proj_b', name: 'B', stateCategory: 'started' },
+      }),
+    ];
+    // A full project SKIPS its item; it does not end the walk.
+    expect(ids(applyWipCap(items, WIP, {}))).toEqual(['DOR-1', 'DOR-3']);
+  });
+
+  it('preserves rank order — it truncates, it never reorders', () => {
+    const items = ['DOR-C', 'DOR-A', 'DOR-B'].map((identifier) =>
+      makeItem({
+        identifier,
+        project: { id: identifier, name: identifier, stateCategory: 'started' },
+      })
+    );
+    // Input is the ranked order; the cap keeps the first two AS GIVEN.
+    expect(ids(applyWipCap(items, WIP, {}))).toEqual(['DOR-C', 'DOR-A']);
   });
 });
 
@@ -236,7 +277,12 @@ describe('rankEligible — 7-tier ladder', () => {
       makeItem({
         identifier: 'DOR-B',
         priority: 3,
-        relations: { blocks: ['DOR-A'], blockedBy: [], children: [], relatedTo: [] },
+        relations: {
+          blocks: ['DOR-A'],
+          blockedBy: [],
+          children: [],
+          relatedTo: [],
+        },
       }),
     ];
     // Same priority; DOR-B blocks an open item so it leads despite identifier order.
@@ -268,7 +314,11 @@ describe('rankEligible — 7-tier ladder', () => {
       }),
       makeItem({
         identifier: 'DOR-PROG',
-        project: { id: 'p_prog', name: 'In Progress', stateCategory: 'started' },
+        project: {
+          id: 'p_prog',
+          name: 'In Progress',
+          stateCategory: 'started',
+        },
       }),
     ];
     // Equal on tiers 1–2; tier 3 promotes the started-project item.
@@ -305,9 +355,18 @@ describe('rankEligible — 7-tier ladder', () => {
 
   it('tier 6: age — oldest created first', () => {
     const items = [
-      makeItem({ identifier: 'DOR-NEW', createdAt: '2026-03-01T00:00:00.000Z' }),
-      makeItem({ identifier: 'DOR-OLD', createdAt: '2026-01-01T00:00:00.000Z' }),
-      makeItem({ identifier: 'DOR-MID', createdAt: '2026-02-01T00:00:00.000Z' }),
+      makeItem({
+        identifier: 'DOR-NEW',
+        createdAt: '2026-03-01T00:00:00.000Z',
+      }),
+      makeItem({
+        identifier: 'DOR-OLD',
+        createdAt: '2026-01-01T00:00:00.000Z',
+      }),
+      makeItem({
+        identifier: 'DOR-MID',
+        createdAt: '2026-02-01T00:00:00.000Z',
+      }),
     ];
     expect(ids(rankEligible(items, DISPATCH))).toEqual(['DOR-OLD', 'DOR-MID', 'DOR-NEW']);
   });
@@ -363,7 +422,10 @@ describe('rankEligible — graceful degradation (missing fields are neutral)', (
   it('treats missing createdAt as neutral in the age tier', () => {
     const items = [
       makeItem({ identifier: 'DOR-NOAGE', createdAt: undefined }),
-      makeItem({ identifier: 'DOR-DATED', createdAt: '2026-01-01T00:00:00.000Z' }),
+      makeItem({
+        identifier: 'DOR-DATED',
+        createdAt: '2026-01-01T00:00:00.000Z',
+      }),
     ];
     expect(ids(rankEligible(items, DISPATCH))).toEqual(['DOR-DATED', 'DOR-NOAGE']);
   });
@@ -400,12 +462,21 @@ describe('selectDispatch — full policy (filter then rank)', () => {
       makeItem({
         identifier: 'DOR-BLOCKED',
         priority: 1,
-        relations: { blocks: [], blockedBy: ['DOR-URGENT'], children: [], relatedTo: [] },
+        relations: {
+          blocks: [],
+          blockedBy: ['DOR-URGENT'],
+          children: [],
+          relatedTo: [],
+        },
       }),
       // Filtered: other-owned.
       makeItem({ identifier: 'DOR-OTHER', priority: 1 }),
       // Filtered: completed state.
-      makeItem({ identifier: 'DOR-DONE', priority: 1, stateCategory: 'completed' }),
+      makeItem({
+        identifier: 'DOR-DONE',
+        priority: 1,
+        stateCategory: 'completed',
+      }),
     ];
     const result = selectDispatch(
       items,
@@ -428,7 +499,12 @@ describe('selectDispatch — full policy (filter then rank)', () => {
         identifier: 'DOR-UNBLOCKER',
         priority: 3,
         project: { id: 'p1', name: 'p1', stateCategory: 'started' },
-        relations: { blocks: ['DOR-MED'], blockedBy: [], children: [], relatedTo: [] },
+        relations: {
+          blocks: ['DOR-MED'],
+          blockedBy: [],
+          children: [],
+          relatedTo: [],
+        },
       }),
       makeItem({
         identifier: 'DOR-URGENT',
@@ -450,6 +526,161 @@ describe('selectDispatch — full policy (filter then rank)', () => {
     );
     // Tier 1: DOR-UNBLOCKER blocks an open item → first. Then priority orders the rest.
     expect(ids(result)).toEqual(['DOR-UNBLOCKER', 'DOR-URGENT', 'DOR-MED']);
+  });
+});
+
+describe('sizeRank — the estimate type the adapter actually emits', () => {
+  it('ranks a NUMERIC Fibonacci estimate (what Linear natively returns)', () => {
+    const items = [
+      makeItem({ identifier: 'DOR-8', size: 8 }),
+      makeItem({ identifier: 'DOR-1', size: 1 }),
+      makeItem({ identifier: 'DOR-3', size: 3 }),
+    ];
+    expect(ids(rankEligible(items, DISPATCH))).toEqual(['DOR-1', 'DOR-3', 'DOR-8']);
+  });
+
+  it('ranks numeric and t-shirt estimates on one shared scale', () => {
+    const items = [
+      makeItem({ identifier: 'DOR-XL', size: 'xl' }),
+      makeItem({ identifier: 'DOR-2', size: 2 }),
+      makeItem({ identifier: 'DOR-LG', size: 'lg' }),
+    ];
+    // 2 pts (sm) < lg < xl
+    expect(ids(rankEligible(items, DISPATCH))).toEqual(['DOR-2', 'DOR-LG', 'DOR-XL']);
+  });
+
+  it('treats a numeric 0-point estimate as SMALLEST, not neutral', () => {
+    const items = [
+      makeItem({ identifier: 'DOR-ZERO', size: 0 }),
+      makeItem({ identifier: 'DOR-NEUTRAL', size: undefined }),
+      makeItem({ identifier: 'DOR-SM', size: 'sm' }),
+    ];
+    // 0 points is a real estimate (smallest); only an ABSENT estimate is neutral.
+    expect(ids(rankEligible(items, DISPATCH))).toEqual(['DOR-ZERO', 'DOR-SM', 'DOR-NEUTRAL']);
+  });
+
+  it('degrades a NULL estimate to neutral instead of throwing', () => {
+    const items = [
+      // `null` is non-conformant (a missing optional must be absent), but the
+      // oracle must degrade, not crash — the module header promises exactly this.
+      makeItem({ identifier: 'DOR-NULL', size: null as unknown as undefined }),
+      makeItem({ identifier: 'DOR-XL', size: 'xl' }),
+    ];
+    expect(() => rankEligible(items, DISPATCH)).not.toThrow();
+    expect(ids(rankEligible(items, DISPATCH))).toEqual(['DOR-XL', 'DOR-NULL']);
+  });
+
+  it('degrades a NaN / non-finite estimate to neutral', () => {
+    const items = [
+      makeItem({ identifier: 'DOR-NAN', size: Number.NaN }),
+      makeItem({ identifier: 'DOR-XL', size: 'xl' }),
+    ];
+    expect(ids(rankEligible(items, DISPATCH))).toEqual(['DOR-XL', 'DOR-NAN']);
+  });
+});
+
+describe('priorityRank / ageRank — same defect shape as sizeRank', () => {
+  it('degrades a NULL priority to neutral instead of throwing', () => {
+    const items = [
+      makeItem({
+        identifier: 'DOR-AAA',
+        priority: null as unknown as undefined,
+      }),
+      makeItem({ identifier: 'DOR-ZZZ', priority: 4 }),
+    ];
+    expect(() => rankEligible(items, DISPATCH)).not.toThrow();
+    // Identifiers are chosen so the tier-7 identifier tiebreak would put the
+    // NEUTRAL item FIRST: this only passes if the priority tier really ran.
+    expect(ids(rankEligible(items, DISPATCH))).toEqual(['DOR-ZZZ', 'DOR-AAA']);
+  });
+
+  it('degrades a NULL createdAt to neutral instead of throwing', () => {
+    const items = [
+      makeItem({
+        identifier: 'DOR-AAA',
+        createdAt: null as unknown as undefined,
+      }),
+      makeItem({
+        identifier: 'DOR-ZZZ',
+        createdAt: '2026-01-01T00:00:00.000Z',
+      }),
+    ];
+    expect(() => rankEligible(items, DISPATCH)).not.toThrow();
+    // As above: the identifier tiebreak favours the neutral item, so this only
+    // passes if the age tier actually ranked the dated item ahead of it.
+    expect(ids(rankEligible(items, DISPATCH))).toEqual(['DOR-ZZZ', 'DOR-AAA']);
+  });
+
+  it('degrades a NON-STRING createdAt to neutral instead of misreading it as an ancient date', () => {
+    const items = [
+      // `Date.parse(1234)` stringifies to "1234" and parses as the YEAR 1234 —
+      // a number the adapter contract never promised, silently ranked as the
+      // oldest item in the queue. Neutral is the honest answer.
+      makeItem({
+        identifier: 'DOR-AAA',
+        createdAt: 1234 as unknown as string,
+      }),
+      makeItem({
+        identifier: 'DOR-ZZZ',
+        createdAt: '2026-01-01T00:00:00.000Z',
+      }),
+    ];
+    expect(ids(rankEligible(items, DISPATCH))).toEqual(['DOR-ZZZ', 'DOR-AAA']);
+  });
+
+  it('degrades missing relations to neutral instead of throwing', () => {
+    const items = [
+      makeItem({
+        identifier: 'DOR-NOREL',
+        relations: undefined as unknown as WorkItem['relations'],
+      }),
+      makeItem({ identifier: 'DOR-BLOCKER' }),
+    ];
+    expect(() =>
+      selectDispatch(
+        items,
+        { dispatch: DISPATCH, ownership: OWNERSHIP, wipCap: WIDE_WIP },
+        ownershipOpts()
+      )
+    ).not.toThrow();
+  });
+});
+
+describe('WIP cap — bounds concurrency without overriding the ladder', () => {
+  it('picks the higher-ranked item under perProject:1 REGARDLESS of input order', () => {
+    // Two identical, equally-eligible items in ONE project; only priority differs.
+    const high = makeItem({
+      identifier: 'DOR-502',
+      priority: 2,
+      project: { id: 'proj_a', name: 'A', stateCategory: 'started' },
+    });
+    const low = makeItem({
+      identifier: 'DOR-514',
+      priority: 3,
+      project: { id: 'proj_a', name: 'A', stateCategory: 'started' },
+    });
+    const config = { dispatch: DISPATCH, ownership: OWNERSHIP, wipCap: WIP }; // perProject: 1
+
+    const forward = selectDispatch([high, low], config, ownershipOpts());
+    const reversed = selectDispatch([low, high], config, ownershipOpts());
+
+    // The cap still admits exactly one — but RANK decides which, not input order.
+    expect(ids(forward)).toEqual(['DOR-502']);
+    expect(ids(reversed)).toEqual(['DOR-502']);
+    expect(ids(forward)).toEqual(ids(reversed));
+  });
+
+  it('is input-order independent across every tier of the ladder', () => {
+    const items = [
+      makeItem({ identifier: 'DOR-A', priority: 4, size: 'xl' }),
+      makeItem({ identifier: 'DOR-B', priority: 1, size: 'lg' }),
+      makeItem({ identifier: 'DOR-C', priority: 2, size: 'sm' }),
+    ];
+    const config = { dispatch: DISPATCH, ownership: OWNERSHIP, wipCap: WIP };
+    const forward = ids(selectDispatch(items, config, ownershipOpts()));
+    const reversed = ids(selectDispatch([...items].reverse(), config, ownershipOpts()));
+    expect(forward).toEqual(['DOR-B']); // urgent wins the ladder
+    expect(reversed).toEqual(forward);
   });
 });
 

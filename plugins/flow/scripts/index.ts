@@ -114,6 +114,7 @@ export {
   classifyDispatchOutcome,
   filterEligible,
   rankEligible,
+  applyWipCap,
   isClaimable,
 } from './dispatch-policy.ts';
 export type {

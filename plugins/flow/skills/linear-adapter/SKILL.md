@@ -177,7 +177,7 @@ WorkItem {
                    //   MATCHED ON CATEGORY, NEVER ON DISPLAY NAME (see below)
   stateName,       // display only ("In Progress", "Triage", …) — never matched on
   priority,        // 0–4  (0 none · 1 urgent · 2 high · 3 medium · 4 low)
-  size,            // points / t-shirt — drives sub-issue promotion + ranking
+  size,            // number (points, native) | string (t-shirt) — promotion + ranking
   project,         // { id, name, stateCategory, lead }
   parent,          // parent WorkItem id (sub-issue) or null
   relations {      // the dependency graph — read from typed Linear relations
@@ -240,9 +240,17 @@ five values.
   `plan`/checklist field, which does not survive a restart.
 - **`priority`** ← Linear's native priority field (`0` none, `1` urgent, `2`
   high, `3` medium, `4` low). Native field, never a `priority/*` label.
-- **`size`** ← Linear's native estimate field (Fibonacci points). Native field,
-  never a label. Drives sub-issue promotion (`size ≥ decomposition.subIssueThreshold`)
-  and the dispatch size tier.
+- **`size`** ← Linear's native estimate field, passed through **as the number
+  Linear gives you** (Linear's estimate is numeric on every scale it offers —
+  Fibonacci, exponential, linear). Native field, never a label. Do **not**
+  stringify it and do **not** convert it to a t-shirt letter. Drives sub-issue
+  promotion (`size ≥ decomposition.subIssueThreshold`) and the dispatch size tier.
+
+  `size` is a **union** by design: `number | string`. A tracker with a numeric
+  estimate emits the number; a tracker with no numeric field emits a t-shirt
+  string (`xs` · `sm` · `md` · `lg` · `xl` · `xxl`). The dispatch policy maps
+  both onto one shared ordinal scale, so an adapter never has to invent a
+  conversion. Emit your tracker's native shape unconverted.
 
 ---
 
@@ -394,7 +402,10 @@ same contract:
 - **No `size`** → treated as neutral in the size tier; sub-issue promotion simply
   never fires (no size to exceed the threshold).
 - **No native estimate/points** → `size` is `undefined`, not `0`; "neutral" must
-  never be confused with "smallest".
+  never be confused with "smallest". A `0`-point estimate is a REAL, smallest
+  estimate and ranks ahead of every larger one; an item with no estimate at all
+  ranks BEHIND every concrete one. Omit the field — never send `null`, never
+  send `0` to mean "unset", never send `""`.
 
 The adapter populates every field it _can_ from the underlying tracker and leaves
 the rest `undefined`; it never fabricates a value to satisfy the shape.
