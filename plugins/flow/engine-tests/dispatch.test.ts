@@ -9,11 +9,13 @@
 import { describe, expect, it } from 'vitest';
 import { DispatchSchema, OwnershipSchema, WipCapSchema } from '../scripts/config-schema.ts';
 import {
-  applyWipCap,
+  classifyDispatchOutcome,
   filterEligible,
   isClaimable,
   rankEligible,
   selectDispatch,
+  sizeOrdinal,
+  truncateRankedToWipCap,
   type DispatchOptions,
 } from '../scripts/dispatch-policy.ts';
 import type { OwnershipClass, WorkItem, WorkItemPriority } from '../scripts/work-item.ts';
@@ -175,7 +177,7 @@ describe('filterEligible', () => {
 
   it('does NOT apply the WIP cap — eligibility is a per-item predicate', () => {
     // Three items in ONE project with perProject: 1. Eligibility keeps all
-    // three; bounding concurrency is applyWipCap's job, after ranking.
+    // three; bounding concurrency is truncateRankedToWipCap's job, after ranking.
     const items = ['DOR-1', 'DOR-2', 'DOR-3'].map((identifier) =>
       makeItem({
         identifier,
@@ -192,7 +194,7 @@ describe('filterEligible', () => {
   });
 });
 
-describe('applyWipCap — bounds concurrency over an already-ranked list', () => {
+describe('truncateRankedToWipCap — bounds concurrency over an already-ranked list', () => {
   it('enforces the per-project WIP cap (perProject: 1)', () => {
     const items = [
       makeItem({
@@ -210,7 +212,7 @@ describe('applyWipCap — bounds concurrency over an already-ranked list', () =>
     ];
     // proj_a capped at 1 (DOR-1 admitted, DOR-2 skipped); proj_b admits DOR-3.
     // global cap is 2 → both admitted survivors fit.
-    expect(ids(applyWipCap(items, WIP, {}))).toEqual(['DOR-1', 'DOR-3']);
+    expect(ids(truncateRankedToWipCap(items, WIP, {}))).toEqual(['DOR-1', 'DOR-3']);
   });
 
   it('enforces the global WIP cap (global: 2) across projects', () => {
@@ -220,7 +222,7 @@ describe('applyWipCap — bounds concurrency over an already-ranked list', () =>
         project: { id: p, name: p, stateCategory: 'started' },
       })
     );
-    expect(ids(applyWipCap(items, WIP, {}))).toEqual(['DOR-1', 'DOR-2']); // 3rd hits global cap
+    expect(ids(truncateRankedToWipCap(items, WIP, {}))).toEqual(['DOR-1', 'DOR-2']); // 3rd hits global cap
   });
 
   it('counts existing in-progress load against the caps', () => {
@@ -232,7 +234,7 @@ describe('applyWipCap — bounds concurrency over an already-ranked list', () =>
     ];
     // proj_a already has 1 in progress → at its perProject cap → dropped.
     expect(
-      applyWipCap(items, WIP, {
+      truncateRankedToWipCap(items, WIP, {
         inProgressByProject: { proj_a: 1 },
         inProgressTotal: 1,
       })
@@ -255,7 +257,7 @@ describe('applyWipCap — bounds concurrency over an already-ranked list', () =>
       }),
     ];
     // A full project SKIPS its item; it does not end the walk.
-    expect(ids(applyWipCap(items, WIP, {}))).toEqual(['DOR-1', 'DOR-3']);
+    expect(ids(truncateRankedToWipCap(items, WIP, {}))).toEqual(['DOR-1', 'DOR-3']);
   });
 
   it('preserves rank order — it truncates, it never reorders', () => {
@@ -266,7 +268,7 @@ describe('applyWipCap — bounds concurrency over an already-ranked list', () =>
       })
     );
     // Input is the ranked order; the cap keeps the first two AS GIVEN.
-    expect(ids(applyWipCap(items, WIP, {}))).toEqual(['DOR-C', 'DOR-A']);
+    expect(ids(truncateRankedToWipCap(items, WIP, {}))).toEqual(['DOR-C', 'DOR-A']);
   });
 });
 
@@ -580,6 +582,15 @@ describe('sizeRank — the estimate type the adapter actually emits', () => {
 });
 
 describe('priorityRank / ageRank — same defect shape as sizeRank', () => {
+  // NOTE ON WHAT THESE TWO `null` TESTS DEFEND. `null` was never a crash on
+  // either field — `PRIORITY_RANK[null]` misses the record and `?? NEUTRAL`
+  // catches it, and `Date.parse(null)` stringifies to `"null"` → `NaN` →
+  // already neutral. So NO seed that only removes the `typeof` guard can turn
+  // either of them red. They assert that the TIER RAN (the identifiers are
+  // chosen so the tier-7 tiebreak would order them the other way), not that the
+  // guard exists. The guards are defended by the two wrong-TYPE tests below,
+  // which are the only cases in this block that a guard-only seed can fail.
+
   it('degrades a NULL priority to neutral instead of throwing', () => {
     const items = [
       makeItem({
@@ -591,6 +602,22 @@ describe('priorityRank / ageRank — same defect shape as sizeRank', () => {
     expect(() => rankEligible(items, DISPATCH)).not.toThrow();
     // Identifiers are chosen so the tier-7 identifier tiebreak would put the
     // NEUTRAL item FIRST: this only passes if the priority tier really ran.
+    expect(ids(rankEligible(items, DISPATCH))).toEqual(['DOR-ZZZ', 'DOR-AAA']);
+  });
+
+  it('degrades a NON-NUMBER priority to neutral instead of reading it as urgent', () => {
+    const items = [
+      // The `typeof` guard's real job, and the only priority case that fails
+      // without it. `PRIORITY_RANK` is a JS object, so its keys are STRINGS:
+      // `PRIORITY_RANK["1"]` returns `0` — the urgent ordinal. A string priority
+      // the contract never promised would silently outrank a genuinely urgent
+      // item. Neutral is the honest answer.
+      makeItem({
+        identifier: 'DOR-AAA',
+        priority: '1' as unknown as undefined,
+      }),
+      makeItem({ identifier: 'DOR-ZZZ', priority: 4 }),
+    ];
     expect(ids(rankEligible(items, DISPATCH))).toEqual(['DOR-ZZZ', 'DOR-AAA']);
   });
 
@@ -628,21 +655,69 @@ describe('priorityRank / ageRank — same defect shape as sizeRank', () => {
     expect(ids(rankEligible(items, DISPATCH))).toEqual(['DOR-ZZZ', 'DOR-AAA']);
   });
 
-  it('degrades missing relations to neutral instead of throwing', () => {
+  it('degrades missing relations without throwing AND keeps the item dispatchable', () => {
     const items = [
       makeItem({
         identifier: 'DOR-NOREL',
         relations: undefined as unknown as WorkItem['relations'],
       }),
-      makeItem({ identifier: 'DOR-BLOCKER' }),
+      // Ranks BEHIND DOR-NOREL on priority, so surviving is not enough — the
+      // assertion below also pins where the graph-less item lands.
+      makeItem({ identifier: 'DOR-BLOCKER', priority: 4 }),
     ];
-    expect(() =>
-      selectDispatch(
-        items,
-        { dispatch: DISPATCH, ownership: OWNERSHIP, wipCap: WIDE_WIP },
-        ownershipOpts()
-      )
-    ).not.toThrow();
+    const config = {
+      dispatch: DISPATCH,
+      ownership: OWNERSHIP,
+      wipCap: WIDE_WIP,
+    };
+
+    expect(() => selectDispatch(items, config, ownershipOpts())).not.toThrow();
+    // Not throwing is the floor, not the contract. The `blockedBy` filter FAILS
+    // OPEN (no graph ⇒ nothing blocks it, so it stays eligible) and the tier-1
+    // unblocker score falls to a true neutral `0`, leaving priority to decide.
+    expect(ids(selectDispatch(items, config, ownershipOpts()))).toEqual([
+      'DOR-NOREL',
+      'DOR-BLOCKER',
+    ]);
+  });
+
+  it('degrades missing labels without throwing — in BOTH the filter and the G3 detector', () => {
+    // `labels` is required under the adapter contract, exactly as `relations`
+    // is, and the same argument applies: the oracle is the runtime and must not
+    // crash on a non-conformant adapter. This one is worse — an unguarded
+    // dereference also takes down classifyDispatchOutcome, the charter G3
+    // starvation detector, so the loop cannot even report WHY it stopped.
+    const items = [
+      makeItem({
+        identifier: 'DOR-NOLABELS',
+        labels: undefined as unknown as string[],
+      }),
+      makeItem({ identifier: 'DOR-READY' }),
+    ];
+    const config = {
+      dispatch: DISPATCH,
+      ownership: OWNERSHIP,
+      wipCap: WIDE_WIP,
+    };
+
+    // No labels ⇒ no `agent/ready` ⇒ held out of dispatch, but counted as
+    // shapeable: work a triage pass could ready. That is the honest reading.
+    const outcome = classifyDispatchOutcome(items, config, ownershipOpts());
+    expect(ids(outcome.picked)).toEqual(['DOR-READY']);
+    expect(outcome.shapeableCount).toBe(1);
+  });
+
+  it('rejects a bare-string labels scalar instead of substring-matching it', () => {
+    // `"agent/ready".includes("agent/ready")` is TRUE — a scalar `labels` would
+    // sail through the readiness gate on a shape the contract never allowed,
+    // and `filterEligible` would dispatch it. Array-shaped or nothing.
+    const items = [
+      makeItem({
+        identifier: 'DOR-STRINGLABEL',
+        labels: 'agent/ready' as unknown as string[],
+      }),
+    ];
+    expect(filterEligible(items, OWNERSHIP, ownershipOpts())).toEqual([]);
   });
 });
 
@@ -681,6 +756,241 @@ describe('WIP cap — bounds concurrency without overriding the ladder', () => {
     const reversed = ids(selectDispatch([...items].reverse(), config, ownershipOpts()));
     expect(forward).toEqual(['DOR-B']); // urgent wins the ladder
     expect(reversed).toEqual(forward);
+  });
+});
+
+describe('rankEligible — two NEUTRALs in one tier are a TIE, not a NaN', () => {
+  // The ladder subtracts tier ordinals, and NEUTRAL is `Infinity`. A bare
+  // `Infinity - Infinity` is `NaN`; `NaN !== 0` is true, so the comparator used
+  // to RETURN NaN the moment two items were both neutral in the same tier —
+  // skipping every later tier AND the tier-7 identifier tiebreak, and leaving
+  // V8 to treat the pair as equal, i.e. in INPUT ORDER. Both `size: undefined`
+  // (the default state of an untriaged queue) and `priority: undefined` land
+  // there, so this was reachable on real data, not a contrived shape.
+  //
+  // Each case pairs two items neutral in the SAME tier with identifiers whose
+  // sorted order is the OPPOSITE of the input order, so the assertion fails
+  // unless tier 7 was actually reached.
+  const bothNeutral: [name: string, overrides: Partial<WorkItem>][] = [
+    ['size: null on both', { size: null as unknown as undefined }],
+    ['size: undefined on both', { size: undefined }],
+    ['size: an unrecognized word on both', { size: 'gigantic' }],
+    ['priority: null on both', { priority: null as unknown as undefined }],
+    ['priority: undefined on both', { priority: undefined }],
+    ['createdAt: undefined on both', { createdAt: undefined }],
+  ];
+
+  it.each(bothNeutral)('sorts by identifier from either input order — %s', (_name, overrides) => {
+    const zzz = makeItem({ identifier: 'DOR-ZZZ', ...overrides });
+    const aaa = makeItem({ identifier: 'DOR-AAA', ...overrides });
+
+    expect(ids(rankEligible([zzz, aaa], DISPATCH))).toEqual(['DOR-AAA', 'DOR-ZZZ']);
+    expect(ids(rankEligible([aaa, zzz], DISPATCH))).toEqual(['DOR-AAA', 'DOR-ZZZ']);
+  });
+
+  it('still falls through to a LATER tier when an earlier one is neutral on both', () => {
+    // Both neutral on priority; the size tier must still get to decide. Under
+    // the NaN comparator the priority tier aborted the ladder and size never ran.
+    const items = [
+      makeItem({ identifier: 'DOR-AAA', priority: undefined, size: 'xl' }),
+      makeItem({ identifier: 'DOR-ZZZ', priority: undefined, size: 'xs' }),
+    ];
+    expect(ids(rankEligible(items, DISPATCH))).toEqual(['DOR-ZZZ', 'DOR-AAA']);
+  });
+});
+
+describe('rankEligible — input-order independence as a PROPERTY, not two hand-picked orders', () => {
+  /**
+   * Deterministic 32-bit PRNG (mulberry32). Seeded so a failure reproduces
+   * exactly; no dependency, no flake.
+   */
+  function rng(seed: number): () => number {
+    let a = seed >>> 0;
+    return () => {
+      a = (a + 0x6d2b79f5) >>> 0;
+      let t = Math.imul(a ^ (a >>> 15), 1 | a);
+      t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+      return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+    };
+  }
+
+  /** Fisher-Yates over a copy, driven by the seeded PRNG. */
+  function shuffle<T>(input: readonly T[], next: () => number): T[] {
+    const out = [...input];
+    for (let i = out.length - 1; i > 0; i -= 1) {
+      const j = Math.floor(next() * (i + 1));
+      [out[i], out[j]] = [out[j] as T, out[i] as T];
+    }
+    return out;
+  }
+
+  /**
+   * A queue drawn from the values that actually occur in production, INCLUDING
+   * the degraded ones — that mix is the point. Two hand-written orders cannot
+   * find an order-dependence that needs a particular pair to be adjacent.
+   */
+  function generateQueue(next: () => number, size: number): WorkItem[] {
+    const priorities = [0, 1, 2, 3, 4, undefined, null];
+    const sizes = [0, 1, 3, 8, 21, 'xs', 'lg', 'xl', 'gigantic', '', undefined, null, Number.NaN];
+    const createdAts = [
+      '2026-01-01T00:00:00.000Z',
+      '2026-06-15T00:00:00.000Z',
+      'not-a-date',
+      undefined,
+      null,
+      1234,
+    ];
+    const projects = [
+      { id: 'p1', name: 'p1', stateCategory: 'started' as const },
+      { id: 'p2', name: 'p2', stateCategory: 'unstarted' as const },
+      undefined,
+    ];
+    const pick = <T>(pool: readonly T[]): T => pool[Math.floor(next() * pool.length)] as T;
+
+    return Array.from({ length: size }, (_unused, i) =>
+      makeItem({
+        // Zero-padded so identifier order is total and unambiguous.
+        identifier: `DOR-${String(i).padStart(3, '0')}`,
+        priority: pick(priorities) as WorkItem['priority'],
+        size: pick(sizes) as WorkItem['size'],
+        createdAt: pick(createdAts) as WorkItem['createdAt'],
+        project: pick(projects),
+      })
+    );
+  }
+
+  it.each([1, 2, 3, 4, 5, 6, 7, 8])(
+    'ranks a shuffled 24-item queue identically to the canonical order (seed %i)',
+    (seed) => {
+      const next = rng(seed);
+      const queue = generateQueue(next, 24);
+      const canonical = ids(rankEligible(queue, DISPATCH));
+
+      // Ten independent shuffles per seed: order-dependence that only shows up
+      // for a particular adjacency has ten chances to surface.
+      for (let attempt = 0; attempt < 10; attempt += 1) {
+        expect(ids(rankEligible(shuffle(queue, next), DISPATCH))).toEqual(canonical);
+      }
+    }
+  );
+
+  it('is a TOTAL order — the canonical ranking is a permutation, never a truncation', () => {
+    const queue = generateQueue(rng(99), 24);
+    const ranked = ids(rankEligible(queue, DISPATCH));
+    expect(ranked).toHaveLength(queue.length);
+    expect([...ranked].sort()).toEqual(ids(queue).sort());
+  });
+});
+
+describe('non-conformance sweep — the runtime never crashes on a bad adapter (G3 + G12)', () => {
+  // "Degrade, never throw" is a CONFORMANCE CRITERION, not a per-field habit.
+  // Guarding fields one at a time is how `size`, `createdAt`, `relations` and
+  // `labels` each shipped broken in turn: each was fixed only once someone
+  // thought of it. This sweep substitutes a hostile value into EVERY WorkItem
+  // field mechanically, so the next field added is covered without anyone
+  // remembering to think of it.
+  const HOSTILE_VALUES: [label: string, value: unknown][] = [
+    ['undefined', undefined],
+    ['null', null],
+    ['a number', 42],
+    ['a string', 'nonsense'],
+    ['an empty object', {}],
+    ['an empty array', []],
+  ];
+
+  // Every field of the WorkItem contract. `identifier` is excluded: it is the
+  // relation key and the tier-7 tiebreak, so a queue without one is not a
+  // degraded queue, it is a different problem (and the sweep would then be
+  // asserting on an unidentifiable item).
+  const FIELDS: (keyof WorkItem)[] = [
+    'id',
+    'title',
+    'description',
+    'type',
+    'stateCategory',
+    'stateName',
+    'priority',
+    'size',
+    'project',
+    'parent',
+    'relations',
+    'labels',
+    'assignee',
+    'agentDisposition',
+    'createdAt',
+  ];
+
+  const CONFIG = { dispatch: DISPATCH, ownership: OWNERSHIP, wipCap: WIDE_WIP };
+
+  const cases = FIELDS.flatMap((field) =>
+    HOSTILE_VALUES.map(([label, value]) => [field, label, value] as const)
+  );
+
+  it.each(cases)(
+    'survives %s = %s on one item while the rest of the queue still ranks',
+    (field, _label, value) => {
+      // A conformant control item that MUST still be picked and MUST still rank
+      // first: the assertion is not merely "no throw", it is that one bad item
+      // does not degrade the ranking of its neighbours.
+      const control = makeItem({ identifier: 'DOR-CONTROL', priority: 1 });
+      const hostile = {
+        ...makeItem({ identifier: 'DOR-HOSTILE', priority: 4 }),
+        [field]: value,
+      };
+      const items = [hostile, control];
+
+      const outcome = classifyDispatchOutcome(items, CONFIG, ownershipOpts());
+
+      // G3: the starvation detector must answer even on a non-conformant queue.
+      expect(outcome.picked).toContain(control);
+      expect(outcome.picked[0]).toBe(control);
+      expect(outcome.eligibleCount).toBe(outcome.picked.length);
+      expect(Number.isInteger(outcome.shapeableCount)).toBe(true);
+      // G12: a degraded item is either eligible or shapeable — never silently
+      // vanished from both counts, which is how a queue starves without saying so.
+      expect(outcome.picked.length + outcome.shapeableCount).toBeGreaterThanOrEqual(1);
+    }
+  );
+
+  it('survives EVERY field hostile at once', () => {
+    const control = makeItem({ identifier: 'DOR-CONTROL', priority: 1 });
+    const wrecked = { identifier: 'DOR-WRECKED' } as unknown as WorkItem;
+    expect(() =>
+      classifyDispatchOutcome([wrecked, control], CONFIG, ownershipOpts())
+    ).not.toThrow();
+    expect(
+      ids(classifyDispatchOutcome([wrecked, control], CONFIG, ownershipOpts()).picked)
+    ).toEqual(['DOR-CONTROL']);
+  });
+});
+
+describe('sizeOrdinal — the one sanctioned way to compare a size against a t-shirt threshold', () => {
+  it('puts both estimate vocabularies on the SAME scale, so a threshold comparison is honest', () => {
+    // `size` is a union (`number | string`), so `8 >= "xl"` is not a comparison
+    // any adapter can make. Comparing ordinals is: `subIssueThreshold` is a
+    // t-shirt word, and it resolves onto the same scale a points estimate does.
+    const threshold = sizeOrdinal('xl');
+    expect(threshold).toBe(4);
+    expect(sizeOrdinal(8)).toBe(threshold); // an 8-point estimate promotes
+    expect(sizeOrdinal(21)).toBeGreaterThan(threshold as number);
+    expect(sizeOrdinal(3)).toBeLessThan(threshold as number); // and a 3-point one does not
+  });
+
+  it('is monotonic but NOT injective — distinct estimates can share an ordinal', () => {
+    // Documented rather than assumed: on a linear 1–5 scale `3` and `4` collapse
+    // to the same ordinal, and everything at or above 13 collapses to the top.
+    expect(sizeOrdinal(3)).toBe(sizeOrdinal(4));
+    expect(sizeOrdinal(13)).toBe(sizeOrdinal(100));
+    // Monotonic: a larger estimate never gets a SMALLER ordinal.
+    const ascending = [0, 1, 2, 3, 5, 8, 13, 21, 100].map((p) => sizeOrdinal(p) as number);
+    expect([...ascending].sort((a, b) => a - b)).toEqual(ascending);
+  });
+
+  it('returns undefined (neutral) for every non-estimate, but 0 for a real 0-point one', () => {
+    expect(sizeOrdinal(0)).toBe(0);
+    for (const bad of [undefined, null, '', '   ', 'gigantic', Number.NaN, -1, {}, []]) {
+      expect(sizeOrdinal(bad as WorkItem['size'])).toBeUndefined();
+    }
   });
 });
 

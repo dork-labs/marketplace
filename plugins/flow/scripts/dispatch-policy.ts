@@ -7,7 +7,7 @@
  *    or not claimable per the ownership policy).
  * 2. **Ranking** ({@link rankEligible}) — order the survivors by the 7-tier
  *    ladder, with later tiers breaking ties left by earlier ones.
- * 3. **WIP cap** ({@link applyWipCap}) — truncate the ranked list to the global
+ * 3. **WIP cap** ({@link truncateRankedToWipCap}) — truncate the ranked list to the global
  *    and per-project concurrency budgets, walking it in RANK order.
  *
  * {@link selectDispatch} runs all three passes and returns the ordered, eligible,
@@ -52,10 +52,17 @@
  * Degradation is **total**, not just `undefined`-shaped. A conformant adapter
  * omits what it lacks, but the oracle is the runtime and must not crash on a
  * non-conformant one: `null`, a wrong-typed value, an unrecognized vocabulary,
- * and (for `relations`) a missing object all degrade to neutral rather than
- * throwing. "Neutral" stays strictly distinguishable from "smallest" — a real
- * `0`-point estimate is the smallest concrete size, an ABSENT estimate is
- * neutral and sorts behind every concrete one.
+ * and (for `relations` and `labels`) a missing or wrong-shaped collection all
+ * degrade rather than throwing. "Neutral" stays strictly distinguishable from
+ * "smallest" — a real `0`-point estimate is the smallest concrete size, an
+ * ABSENT estimate is neutral and sorts behind every concrete one.
+ *
+ * This is a **conformance criterion, not a per-field habit** (charter G3 + G12):
+ * substituting `undefined`, `null`, or a wrong type into ANY `WorkItem` field
+ * must leave {@link selectDispatch} and {@link classifyDispatchOutcome} both
+ * non-throwing and correctly ranked. `engine-tests/dispatch.test.ts` asserts it
+ * as one table-driven sweep over every field, so a field added later is covered
+ * without anyone remembering to think of it.
  *
  * @see specs/unified-workflow-system/02-specification.md §4 (dispatch policy)
  * @see .agents/flow/skills/linear-adapter/SKILL.md (the WorkItem contract + degradation rules)
@@ -161,22 +168,12 @@ export function isClaimable(cls: OwnershipClass, ownership: OwnershipConfig): bo
 }
 
 /**
- * Options for the dispatch passes. Supplies the runtime inputs the policy cannot
- * derive from a {@link WorkItem} alone: ownership classification (task 3.1) and
- * the live in-progress WIP counts.
+ * The live in-progress load the WIP cap measures — the only inputs
+ * {@link truncateRankedToWipCap} reads. Split out of {@link DispatchOptions} so
+ * the cap's signature names exactly what it uses and cannot be read as needing
+ * ownership resolution too.
  */
-export interface DispatchOptions {
-  /**
-   * Resolves an item's {@link OwnershipClass}. The task 3.1 integration point —
-   * pass the real `classifyOwnership`; tests pass a stub. Either this or
-   * {@link ownershipOf} must be provided.
-   */
-  classifyOwnership?: (item: WorkItem) => OwnershipClass;
-  /**
-   * Precomputed ownership by item `identifier`, used when ownership was resolved
-   * upstream. Takes precedence over {@link classifyOwnership} for a given item.
-   */
-  ownershipOf?: Record<string, OwnershipClass>;
+export interface WipLoad {
   /**
    * Count of items already in progress (claimed), keyed by project id, used for
    * the per-project WIP cap. Defaults to all-zero. The candidate items
@@ -188,6 +185,25 @@ export interface DispatchOptions {
    * WIP cap. Defaults to `0`.
    */
   inProgressTotal?: number;
+}
+
+/**
+ * Options for the dispatch passes. Supplies the runtime inputs the policy cannot
+ * derive from a {@link WorkItem} alone: ownership classification (task 3.1) and
+ * the live in-progress WIP counts ({@link WipLoad}).
+ */
+export interface DispatchOptions extends WipLoad {
+  /**
+   * Resolves an item's {@link OwnershipClass}. The task 3.1 integration point —
+   * pass the real `classifyOwnership`; tests pass a stub. Either this or
+   * {@link ownershipOf} must be provided.
+   */
+  classifyOwnership?: (item: WorkItem) => OwnershipClass;
+  /**
+   * Precomputed ownership by item `identifier`, used when ownership was resolved
+   * upstream. Takes precedence over {@link classifyOwnership} for a given item.
+   */
+  ownershipOf?: Record<string, OwnershipClass>;
 }
 
 /**
@@ -219,9 +235,20 @@ function hasOpenBlocker(item: WorkItem, openIdentifiers: Set<string>): boolean {
 
 /**
  * Reads one edge list off an item's relation graph, degrading an absent or
- * wrong-typed `relations` object to "no edges" rather than throwing. An adapter
- * that omits the graph loses the blocker/unblocker tiers, which is the neutral
- * outcome — it does not take the whole dispatch pass down with it.
+ * wrong-typed `relations` object to "no edges" rather than throwing.
+ *
+ * The two graph-derived behaviors then degrade **differently**, and the words
+ * are not interchangeable:
+ *
+ * - the tier-1 unblocker score falls to `0` — genuinely **neutral**, the item
+ *   neither gains nor loses rank;
+ * - the `blockedBy` eligibility check **fails open** — the item is treated as
+ *   unblocked and stays dispatchable.
+ *
+ * Fail-open is the deliberate choice (and what {@link
+ * ../skills/building-adapters/SKILL.md | `building-adapters`} documents): a
+ * non-conformant adapter must not silently starve the whole queue. Either way it
+ * does not take the dispatch pass down with it.
  *
  * @param item - The item under evaluation.
  * @param edge - Which edge list to read.
@@ -230,6 +257,30 @@ function hasOpenBlocker(item: WorkItem, openIdentifiers: Set<string>): boolean {
 function relationIds(item: WorkItem, edge: 'blocks' | 'blockedBy'): readonly string[] {
   const ids = item.relations?.[edge];
   return Array.isArray(ids) ? ids : [];
+}
+
+/**
+ * Reads an item's label set, degrading an absent or wrong-typed `labels` value
+ * to "no labels" rather than throwing.
+ *
+ * The `Array.isArray` check is load-bearing twice over. It stops a missing
+ * `labels` array from crashing BOTH the eligibility filter and {@link
+ * classifyDispatchOutcome} — the charter G3 starvation detector, which must be
+ * able to report *why* the loop stopped even when the adapter is
+ * non-conformant. And it rejects a bare string: `'agent/ready'.includes(…)` is a
+ * SUBSTRING test, so a scalar `labels: "agent/ready"` would otherwise sail
+ * through the readiness gate on a shape the contract never allowed.
+ *
+ * @param item - The item under evaluation.
+ * @returns The item's labels, or `[]` when unavailable.
+ */
+function labelsOf(item: WorkItem): readonly string[] {
+  return Array.isArray(item.labels) ? item.labels : [];
+}
+
+/** Whether an item carries the durable `agent/ready` dispatch gate label. */
+function isAgentReady(item: WorkItem): boolean {
+  return labelsOf(item).includes(AGENT_READY_LABEL);
 }
 
 /**
@@ -244,7 +295,7 @@ function relationIds(item: WorkItem, edge: 'blocks' | 'blockedBy'): readonly str
  * the item alone, so the result is independent of input order and of how many
  * other items are in the set. The WIP cap is deliberately NOT here: it is a
  * property of the QUEUE, and enforcing it during this pass would let arrival
- * order decide the pick. It runs after ranking, in {@link applyWipCap}.
+ * order decide the pick. It runs after ranking, in {@link truncateRankedToWipCap}.
  *
  * @param items - The candidate work items.
  * @param ownership - The resolved ownership claim policy.
@@ -260,7 +311,7 @@ export function filterEligible(
 
   return items.filter((item) => {
     if (!DISPATCHABLE_STATE_CATEGORIES.has(item.stateCategory)) return false;
-    if (!item.labels.includes(AGENT_READY_LABEL)) return false;
+    if (!isAgentReady(item)) return false;
     if (hasOpenBlocker(item, openIdentifiers)) return false;
     if (
       item.project?.stateCategory &&
@@ -284,20 +335,28 @@ export function filterEligible(
  * Because the input is ranked, "which items get cut" is decided by the ladder —
  * the cap only decides *how many* survive.
  *
+ * **The "already ranked" precondition is in the name on purpose.** This function
+ * is exported from the package barrel, and truncating an UNRANKED list is
+ * exactly the defect this module was rewritten to remove (DOR-515): the cap
+ * would silently answer "which?" in arrival order. A `@param` note is too easy
+ * to skip past for an invariant that regresses the whole policy, so the call
+ * reads `truncateRankedToWipCap(rankEligible(…), …)` and a caller who has not
+ * ranked can see it.
+ *
  * @param ranked - The eligible survivors in ladder order ({@link rankEligible}).
  * @param wipCap - The resolved global + per-project WIP caps.
- * @param opts - Live in-progress counts (the existing load the cap measures).
+ * @param load - Live in-progress counts (the existing load the cap measures).
  * @returns The highest-ranked items that fit inside the caps, in rank order.
  */
-export function applyWipCap(
+export function truncateRankedToWipCap(
   ranked: readonly WorkItem[],
   wipCap: WipCap,
-  opts: DispatchOptions
+  load: WipLoad
 ): WorkItem[] {
   // Running WIP budget seeded from existing in-progress load.
-  let globalCount = opts.inProgressTotal ?? 0;
+  let globalCount = load.inProgressTotal ?? 0;
   const perProjectCount: Record<string, number> = {
-    ...(opts.inProgressByProject ?? {}),
+    ...(load.inProgressByProject ?? {}),
   };
 
   const admitted: WorkItem[] = [];
@@ -366,19 +425,34 @@ function numericSizeOrdinal(points: number): number | undefined {
 }
 
 /**
- * Resolves an item's estimate to the shared ordinal scale, accepting BOTH shapes
- * the adapter contract allows: a numeric estimate (Linear's native `estimate`
- * field and every other points-based tracker) and a t-shirt string (trackers
- * with no numeric field). Anything else — absent, `null`, a wrong type, an
- * unrecognized word, an empty string — is `undefined`, i.e. NEUTRAL.
+ * Resolves an estimate to the shared ordinal scale, accepting BOTH shapes the
+ * adapter contract allows: a numeric estimate (Linear's native `estimate` field
+ * and every other points-based tracker) and a t-shirt string (trackers with no
+ * numeric field). Anything else — absent, `null`, a wrong type, an unrecognized
+ * word, an empty string — is `undefined`, i.e. NEUTRAL.
  *
  * A real `0`-point estimate returns ordinal `0` (the smallest concrete size) and
  * is therefore never confused with a missing one.
  *
- * @param size - The item's raw estimate.
+ * **Exported because it is the only sanctioned way to compare a `size` against a
+ * t-shirt threshold.** Since `size` became the union `number | string`, any rule
+ * phrased as `size ≥ decomposition.subIssueThreshold` — a t-shirt word — is a
+ * comparison between two different vocabularies. Compare ordinals instead:
+ * `sizeOrdinal(item.size) >= sizeOrdinal(threshold)`. Without this export every
+ * generated adapter and every prose rule has to invent its own numeric→t-shirt
+ * conversion, which is exactly the class of contradiction DOR-515 was.
+ *
+ * **Monotonic, not injective.** The numeric breakpoints are coarser than the
+ * point scales they accept, so distinct estimates can share an ordinal: on a
+ * linear 1–5 scale `3` and `4` both map to `2`, and every value `≥ 13` maps to
+ * `5`. Order is always preserved (a larger estimate never gets a smaller
+ * ordinal), but two different estimates may tie in the size tier and fall
+ * through to a later one.
+ *
+ * @param size - The raw estimate (a {@link WorkItem.size} or a t-shirt threshold).
  * @returns The shared ordinal, or `undefined` for neutral.
  */
-function sizeOrdinal(size: WorkItem['size']): number | undefined {
+export function sizeOrdinal(size: WorkItem['size']): number | undefined {
   if (typeof size === 'number') return numericSizeOrdinal(size);
   if (typeof size !== 'string') return undefined; // undefined, null, or wrong-typed
   const token = size.trim().toLowerCase();
@@ -423,6 +497,27 @@ function typeRank(_item: WorkItem): number {
 }
 
 /**
+ * Subtracts two tier ordinals **NaN-safely**, which a bare `a - b` is not.
+ *
+ * {@link NEUTRAL} is `Infinity`, and `Infinity - Infinity` is `NaN`. A `NaN`
+ * delta is not `0`, so {@link rankEligible}'s `if (delta !== 0) return delta`
+ * would return it — aborting the ladder before every later tier AND before the
+ * tier-7 identifier tiebreak, and leaving V8 to treat the pair as "equal", i.e.
+ * in input order. Two items that are both neutral in the SAME tier is not an
+ * edge case: `size: undefined` is the default state of an untriaged queue.
+ *
+ * Equal ordinals — including two NEUTRALs — are a genuine tie, so the ladder
+ * must fall through to the next tier.
+ *
+ * @param a - `a`'s ordinal in this tier.
+ * @param b - `b`'s ordinal in this tier.
+ * @returns Negative if `a` ranks first, positive if `b` does, `0` when tied.
+ */
+function compareOrdinals(a: number, b: number): number {
+  return a === b ? 0 : a - b;
+}
+
+/**
  * Comparator for two items under one ranking factor. Returns a negative number
  * if `a` should rank before `b`, positive if after, `0` if tied (deferred to a
  * later tier).
@@ -437,17 +532,20 @@ function compareByFactor(
   switch (factor) {
     case 'unblockers':
       // More blocked-open-items first → descending score.
-      return unblockerScore(b, openIdentifiers) - unblockerScore(a, openIdentifiers);
+      return compareOrdinals(
+        unblockerScore(b, openIdentifiers),
+        unblockerScore(a, openIdentifiers)
+      );
     case 'priority':
-      return priorityRank(a) - priorityRank(b);
+      return compareOrdinals(priorityRank(a), priorityRank(b));
     case 'projectStatus':
-      return projectStatusRank(a) - projectStatusRank(b);
+      return compareOrdinals(projectStatusRank(a), projectStatusRank(b));
     case 'type':
-      return typeRank(a) - typeRank(b);
+      return compareOrdinals(typeRank(a), typeRank(b));
     case 'size':
-      return sizeRank(a, config.sizeOrder) - sizeRank(b, config.sizeOrder);
+      return compareOrdinals(sizeRank(a, config.sizeOrder), sizeRank(b, config.sizeOrder));
     case 'age':
-      return ageRank(a) - ageRank(b);
+      return compareOrdinals(ageRank(a), ageRank(b));
   }
 }
 
@@ -479,7 +577,7 @@ export function rankEligible(items: readonly WorkItem[], config: DispatchConfig)
 
 /**
  * Run the full dispatch policy: {@link filterEligible} → {@link rankEligible} →
- * {@link applyWipCap}. Returns the eligible survivors ordered by the 7-tier
+ * {@link truncateRankedToWipCap}. Returns the eligible survivors ordered by the 7-tier
  * ladder and truncated to the concurrency budget — the engine's pick list
  * (head = "work on this next").
  *
@@ -499,7 +597,7 @@ export function selectDispatch(
 ): WorkItem[] {
   const eligible = filterEligible(items, config.ownership, opts);
   const ranked = rankEligible(eligible, config.dispatch);
-  return applyWipCap(ranked, config.wipCap, opts);
+  return truncateRankedToWipCap(ranked, config.wipCap, opts);
 }
 
 /**
@@ -560,7 +658,7 @@ export function classifyDispatchOutcome(
       !(
         item.project?.stateCategory && DEAD_PROJECT_STATE_CATEGORIES.has(item.project.stateCategory)
       ) &&
-      !item.labels.includes(AGENT_READY_LABEL)
+      !isAgentReady(item)
   ).length;
 
   return {

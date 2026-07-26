@@ -210,9 +210,10 @@ Two universal rules apply to every verb:
 
 - **Binding.** `<create-item with parent set>`.
 - **Must do.** Create a child item under `parent` (sub-issue promotion, which fires
-  when `size` meets or exceeds the configured threshold). Return the created item
-  **normalized as a `WorkItem`**, so the caller records its `identifier` as the
-  task's canonical home.
+  when `sizeOrdinal(size) >= sizeOrdinal(decomposition.subIssueThreshold)` — an
+  ordinal comparison, because the threshold is a t-shirt word and `size` may be a
+  number). Return the created item **normalized as a `WorkItem`**, so the caller
+  records its `identifier` as the task's canonical home.
 - **Durability.** Durable. Guard against duplicate creation on retry (idempotency
   by a stable key where the tracker supports one).
 - **Degradation.** A tracker without parent/child nesting falls back to a

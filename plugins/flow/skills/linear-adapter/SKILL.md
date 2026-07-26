@@ -243,14 +243,30 @@ five values.
 - **`size`** ← Linear's native estimate field, passed through **as the number
   Linear gives you** (Linear's estimate is numeric on every scale it offers —
   Fibonacci, exponential, linear). Native field, never a label. Do **not**
-  stringify it and do **not** convert it to a t-shirt letter. Drives sub-issue
-  promotion (`size ≥ decomposition.subIssueThreshold`) and the dispatch size tier.
+  stringify it and do **not** convert it to a t-shirt letter. Drives the dispatch
+  size tier and the sub-issue promotion rule.
 
   `size` is a **union** by design: `number | string`. A tracker with a numeric
   estimate emits the number; a tracker with no numeric field emits a t-shirt
   string (`xs` · `sm` · `md` · `lg` · `xl` · `xxl`). The dispatch policy maps
   both onto one shared ordinal scale, so an adapter never has to invent a
   conversion. Emit your tracker's native shape unconverted.
+
+  **Never compare a `size` to a threshold directly.** `decomposition.subIssueThreshold`
+  is a t-shirt word (`"xl"` by default), so on a numeric estimate `size ≥ threshold`
+  would be comparing two different vocabularies — `8 ≥ "xl"` is not a question
+  either side can answer. Compare **ordinals**, which is the whole point of the
+  shared scale:
+
+  ```
+  sizeOrdinal(item.size) >= sizeOrdinal(decomposition.subIssueThreshold)
+  ```
+
+  `sizeOrdinal` is exported from `@dorkos/flow` (`dispatch-policy.ts`) and
+  resolves both vocabularies onto one scale — `sizeOrdinal(8)` and
+  `sizeOrdinal("xl")` are both `4`. An absent or non-conformant estimate returns
+  `undefined` (neutral), and a neutral size never promotes. Use it rather than
+  inventing a numeric→t-shirt conversion in your adapter.
 
 ---
 
@@ -318,7 +334,7 @@ call.
 | **`attachEvidence(item, evidence)`** | Attaches proof-of-completion (browser recording, test summary, PR link) to the issue via its external URLs / attachment links per `evidence.attachTo`.                                                                                                                                                | `save_issue` (links/attachments)                               | `LINEAR_UPDATE_ISSUE`                                  |
 | **`needsInput(item, question)`**     | The elicitation primitive — **four atomic effects**: (1) post the question as a `comment` (multiple-choice when possible, carrying the marker); (2) apply the `agent/needs-input` label; (3) `assignToHuman`; (4) **stop** (the loop parks here). Resumes only on a non-agent reply (see `getInbox`). | `save_comment` + `save_issue` (label + assignee)               | `LINEAR_CREATE_LINEAR_COMMENT` + `LINEAR_UPDATE_ISSUE` |
 | **`link(a, b, type)`**               | Creates a typed relation (`blocks`, `related`, `duplicate`, …) between two items. Typed relations live in the graph, never in description prose.                                                                                                                                                      | `save_issue` (relation)                                        | `LINEAR_UPDATE_ISSUE`                                  |
-| **`createSubIssue(parent, spec)`**   | Creates a child issue under `parent` (sub-issue promotion: fires only when `size ≥ decomposition.subIssueThreshold`, default `"xl"`). The new issue's canonical home is the per-task `issue` field in `03-tasks.json`.                                                                                | `mcp__plugin_linear_linear__save_issue` (parentId set)         | `LINEAR_CREATE_LINEAR_ISSUE`                           |
+| **`createSubIssue(parent, spec)`**   | Creates a child issue under `parent` (sub-issue promotion: fires only when `sizeOrdinal(size) >= sizeOrdinal(decomposition.subIssueThreshold)`, threshold default `"xl"`). The new issue's canonical home is the per-task `issue` field in `03-tasks.json`.                                           | `mcp__plugin_linear_linear__save_issue` (parentId set)         | `LINEAR_CREATE_LINEAR_ISSUE`                           |
 
 > Slugs shown in the Composio column follow the `LINEAR_*` convention; confirm
 > the exact slug with `composio search "<intent>" --toolkits linear` if a call
