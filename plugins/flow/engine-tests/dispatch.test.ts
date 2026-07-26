@@ -6,7 +6,7 @@
  * @see specs/unified-workflow-system/02-specification.md §4
  */
 
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import { DispatchSchema, OwnershipSchema, WipCapSchema } from '../scripts/config-schema.ts';
 import {
   classifyDispatchOutcome,
@@ -864,15 +864,55 @@ describe('rankEligible — input-order independence as a PROPERTY, not two hand-
     (seed) => {
       const next = rng(seed);
       const queue = generateQueue(next, 24);
-      const canonical = ids(rankEligible(queue, DISPATCH));
 
       // Ten independent shuffles per seed: order-dependence that only shows up
-      // for a particular adjacency has ten chances to surface.
+      // for a particular adjacency has ten chances to surface. The shuffles are
+      // compared against EACH OTHER as well as against the canonical order, and
+      // the canonical is computed AFTER the loop — so the canonical is not the
+      // call that happens to establish the answer everything else is checked
+      // against.
+      const results: string[][] = [];
       for (let attempt = 0; attempt < 10; attempt += 1) {
-        expect(ids(rankEligible(shuffle(queue, next), DISPATCH))).toEqual(canonical);
+        results.push(ids(rankEligible(shuffle(queue, next), DISPATCH)));
+      }
+      const canonical = ids(rankEligible(queue, DISPATCH));
+      for (const result of results) {
+        expect(result).toEqual(results[0]);
+        expect(result).toEqual(canonical);
       }
     }
   );
+
+  it('is a PURE function of its input — two fresh module instances agree', async () => {
+    // Shuffling inside one process cannot see shared mutable state, and adding
+    // seeds does not help. Verified, not assumed: a first-seen memo seeded into
+    // `typeRank` left every shuffle-based assertion above GREEN 8/8. The reason
+    // is structural — the first call in the process warms the state, and every
+    // later call then agrees with it, whichever call came first. Comparing the
+    // shuffles against each other does not fix that either; that was measured
+    // too, and it was also green.
+    //
+    // The only observable difference is WHICH order the state converged to, so
+    // the check has to span two processes' worth of state. `vi.resetModules()`
+    // plus a dynamic import gives exactly that: instance A is warmed by the
+    // SHUFFLED order, instance B by the canonical one. A pure ladder returns
+    // the same answer from both; anything carrying state across calls diverges.
+    //
+    // Worth having because `buildOpenSet` is rebuilt on every call and is the
+    // obvious future memoization target in this exact file.
+    const queue = generateQueue(rng(4242), 24);
+    const shuffled = shuffle(queue, rng(7));
+
+    vi.resetModules();
+    const instanceA = await import('../scripts/dispatch-policy.ts');
+    const fromShuffled = ids(instanceA.rankEligible(shuffled, DISPATCH));
+
+    vi.resetModules();
+    const instanceB = await import('../scripts/dispatch-policy.ts');
+    const fromCanonical = ids(instanceB.rankEligible(queue, DISPATCH));
+
+    expect(fromShuffled).toEqual(fromCanonical);
+  });
 
   it('is a TOTAL order — the canonical ranking is a permutation, never a truncation', () => {
     const queue = generateQueue(rng(99), 24);
@@ -898,27 +938,36 @@ describe('non-conformance sweep — the runtime never crashes on a bad adapter (
     ['an empty array', []],
   ];
 
-  // Every field of the WorkItem contract. `identifier` is excluded: it is the
-  // relation key and the tier-7 tiebreak, so a queue without one is not a
-  // degraded queue, it is a different problem (and the sweep would then be
-  // asserting on an unidentifiable item).
-  const FIELDS: (keyof WorkItem)[] = [
-    'id',
-    'title',
-    'description',
-    'type',
-    'stateCategory',
-    'stateName',
-    'priority',
-    'size',
-    'project',
-    'parent',
-    'relations',
-    'labels',
-    'assignee',
-    'agentDisposition',
-    'createdAt',
-  ];
+  // The field list is DERIVED AT RUNTIME from the fixture, never hand-written.
+  //
+  // A literal `(keyof WorkItem)[]` would not do the job it looks like it does:
+  // TypeScript constrains list MEMBERSHIP, never EXHAUSTIVENESS, so adding a
+  // `WorkItem` field and forgetting the list produces no error anywhere — and
+  // `tsc` cannot run in this package at all right now (DOR-537), so even a
+  // type-level guard would be inert today. Deriving from `makeItem` means there
+  // is no second list to keep in sync: `makeItem` returns `WorkItem`, so a new
+  // REQUIRED field cannot be added to the contract without appearing here too.
+  // (A new OPTIONAL field left out of the fixture would still be missed — that
+  // is the honest residual, and it is why `makeItem` populates every field
+  // rather than only the required ones.)
+  //
+  // `identifier` is excluded deliberately: it is the relation key and the tier-7
+  // tiebreak, so a queue without one is not a degraded queue, it is a different
+  // problem — the sweep would be asserting on an unidentifiable item.
+  const FIELDS = (Object.keys(makeItem({ identifier: 'DOR-PROBE' })) as (keyof WorkItem)[]).filter(
+    (field) => field !== 'identifier'
+  );
+
+  it('derives its field list from the fixture, and the fixture is complete', () => {
+    // Guards the derivation itself, in both directions. If `makeItem` stops
+    // populating a field the sweep silently SHRINKS; if a field is added the
+    // sweep GROWS (verified: adding one field to the fixture alone took the
+    // sweep from 90 cases to 96, with no list edited anywhere). Either way the
+    // count below makes the change deliberate and announced rather than silent.
+    expect(FIELDS).toHaveLength(15);
+    expect(FIELDS).not.toContain('identifier');
+    expect(FIELDS).toEqual(expect.arrayContaining(['relations', 'labels', 'size', 'createdAt']));
+  });
 
   const CONFIG = { dispatch: DISPATCH, ownership: OWNERSHIP, wipCap: WIDE_WIP };
 
@@ -991,6 +1040,68 @@ describe('sizeOrdinal — the one sanctioned way to compare a size against a t-s
     for (const bad of [undefined, null, '', '   ', 'gigantic', Number.NaN, -1, {}, []]) {
       expect(sizeOrdinal(bad as WorkItem['size'])).toBeUndefined();
     }
+  });
+});
+
+describe('prototype-key coercion — a plain object is not a lookup table', () => {
+  // The string-priority defect (`PRIORITY_RANK["1"]` returning the urgent
+  // ordinal) was not a one-off: it is what a plain `{}` does when tracker data
+  // is used as a key. Every inherited `Object.prototype` member answers a
+  // lookup that should have missed. This block pins all three remaining sites.
+  // The realistic likelihood on Linear data is nil (UUID project ids, `DOR-nnn`
+  // identifiers) — these are fixed because a `Map` retires the entire class
+  // permanently, and this is the fourth silent-wrong-answer found in one file.
+  const PROTOTYPE_KEYS = ['constructor', '__proto__', 'toString', 'valueOf', 'hasOwnProperty'];
+
+  it.each(PROTOTYPE_KEYS)('holds the per-project WIP cap for project id %s (G7)', (key) => {
+    // The worst of the three: `perProjectCount[projectId]` inherits a function
+    // from Object.prototype, `>= wipCap.perProject` is false against it, and
+    // EVERY item is admitted. That silently OVER-admits — worse than the
+    // original DOR-515 bug, which merely picked the wrong single item — and it
+    // breaches charter G7 (concurrent work is WIP-capped).
+    const items = ['DOR-1', 'DOR-2', 'DOR-3'].map((identifier) =>
+      makeItem({
+        identifier,
+        project: { id: key, name: key, stateCategory: 'started' },
+      })
+    );
+    // perProject: 1 — exactly one item from this project may be in flight.
+    expect(ids(truncateRankedToWipCap(items, WIP, {}))).toEqual(['DOR-1']);
+  });
+
+  it.each(PROTOTYPE_KEYS)('treats the prototype-key size %s as neutral, not as a rank', (key) => {
+    // `SIZE_SCALE[token]` returns a FUNCTION for `constructor`, so the size tier
+    // compares against `Object` itself and garbage outranks a real `xs`.
+    // `toString`/`valueOf`/`hasOwnProperty` are shielded only by accident —
+    // `sizeOrdinal` lowercases, so `"tostring"` misses — but `constructor` and
+    // `__proto__` are already lowercase, so the accident does not cover them.
+    expect(sizeOrdinal(key)).toBeUndefined();
+    const items = [
+      makeItem({ identifier: 'DOR-A', size: key }),
+      makeItem({ identifier: 'DOR-Z', size: 'xs' }),
+    ];
+    // A real xs beats a neutral, even though the identifier tiebreak favours A.
+    expect(ids(rankEligible(items, DISPATCH))).toEqual(['DOR-Z', 'DOR-A']);
+  });
+
+  it.each(PROTOTYPE_KEYS)('resolves ownership for an item identified %s', (key) => {
+    // `ownershipOf[identifier]` returns the inherited member, which is `!==
+    // undefined`, so the precomputed branch wins and `classifyOwnership` never
+    // runs. `isClaimable` then falls off the end of its switch and returns
+    // `undefined`, so the item is silently filtered. Fail-closed, so mild — but
+    // the same coercion, and a dropped item is still a wrong answer.
+    const items = [makeItem({ identifier: key })];
+    // The map is EMPTY: nothing was precomputed, so the callback must decide.
+    expect(ids(filterEligible(items, OWNERSHIP, ownershipOpts({})))).toEqual([key]);
+  });
+
+  it('fails CLOSED on an ownership class outside the union', () => {
+    // The exhaustiveness guard's runtime half. `isClaimable` had no `default`,
+    // so an off-union value returned `undefined` — falsy, and therefore
+    // accidentally fail-closed. Now it is deliberately `false`, and the `never`
+    // assignment makes a NEW OwnershipClass member a compile error rather than
+    // a silently unclaimable one.
+    expect(isClaimable('nonsense' as OwnershipClass, OWNERSHIP)).toBe(false);
   });
 });
 

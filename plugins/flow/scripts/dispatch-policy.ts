@@ -61,8 +61,10 @@
  * substituting `undefined`, `null`, or a wrong type into ANY `WorkItem` field
  * must leave {@link selectDispatch} and {@link classifyDispatchOutcome} both
  * non-throwing and correctly ranked. `engine-tests/dispatch.test.ts` asserts it
- * as one table-driven sweep over every field, so a field added later is covered
- * without anyone remembering to think of it.
+ * as one table-driven sweep whose field list is **derived at runtime** from the
+ * test fixture rather than hand-written — so there is no second list to keep in
+ * sync, and a newly required `WorkItem` field is swept without anyone
+ * remembering to think of it.
  *
  * @see specs/unified-workflow-system/02-specification.md §4 (dispatch policy)
  * @see .agents/flow/skills/linear-adapter/SKILL.md (the WorkItem contract + degradation rules)
@@ -99,18 +101,29 @@ const AGENT_READY_LABEL = 'agent/ready';
  * Ordinal scale for **t-shirt** estimates — the vocabulary trackers that have no
  * numeric estimate field use. Smaller ordinal = smaller work. An unrecognized
  * word is NEUTRAL (see {@link sizeOrdinal}).
+ *
+ * ## Every lookup table in this module is a `Map`, never a plain object
+ *
+ * Tracker data is the KEY here, and a plain `{}` answers a lookup for every
+ * member it inherits from `Object.prototype`. `SIZE_SCALE['constructor']` would
+ * return the `Object` function — a truthy non-number that the size tier then
+ * compares against, so garbage outranks a real `xs`. This is the same defect as
+ * `PRIORITY_RANK["1"]` reading a string priority as *urgent*: an object used as
+ * a lookup table is not a lookup table. A `Map` only answers for keys actually
+ * put in it, which retires the whole class rather than guarding one key at a
+ * time.
  */
-const SIZE_SCALE: Record<string, number> = {
-  xs: 0,
-  sm: 1,
-  small: 1,
-  md: 2,
-  medium: 2,
-  lg: 3,
-  large: 3,
-  xl: 4,
-  xxl: 5,
-};
+const SIZE_SCALE = new Map<string, number>([
+  ['xs', 0],
+  ['sm', 1],
+  ['small', 1],
+  ['md', 2],
+  ['medium', 2],
+  ['lg', 3],
+  ['large', 3],
+  ['xl', 4],
+  ['xxl', 5],
+]);
 
 /**
  * Ascending `[points, ordinal]` breakpoints mapping a **numeric** estimate onto
@@ -133,14 +146,19 @@ const NUMERIC_SIZE_BREAKPOINTS: readonly (readonly [number, number])[] = [
   [13, 5],
 ];
 
-/** Priority ordinal: lower sorts first. Urgent (1) → high (2) → … → none (0/∞). */
-const PRIORITY_RANK: Record<number, number> = {
-  1: 0, // urgent
-  2: 1, // high
-  3: 2, // medium
-  4: 3, // low
-  0: 4, // none — explicitly last among concrete values
-};
+/**
+ * Priority ordinal: lower sorts first. Urgent (1) → high (2) → … → none (0/∞).
+ * A `Map` for the reason given on {@link SIZE_SCALE}, and additionally because a
+ * `Map` keyed by `number` does not answer for the STRING `"1"` — the coercion
+ * that made a non-conformant string priority read as *urgent*.
+ */
+const PRIORITY_RANK = new Map<number, number>([
+  [1, 0], // urgent
+  [2, 1], // high
+  [3, 2], // medium
+  [4, 3], // low
+  [0, 4], // none — explicitly last among concrete values
+]);
 
 /** A neutral rank: sorts AFTER every concrete value in a tier. */
 const NEUTRAL = Number.POSITIVE_INFINITY;
@@ -149,6 +167,13 @@ const NEUTRAL = Number.POSITIVE_INFINITY;
  * Maps a config {@link OwnershipClass} onto the {@link OwnershipConfig} flag that
  * declares whether the agent may claim it. `'mine'` is always claimable (the
  * agent's own work); the other three are policy-gated.
+ *
+ * The `default` case is a **compile-time** exhaustiveness guard, not runtime
+ * noise: assigning `cls` to `never` makes adding a fifth {@link OwnershipClass}
+ * a type error here rather than a silently unclaimable class. Its runtime half
+ * matters too — without a `default` this function fell off the end and returned
+ * `undefined` for any off-union value, which is falsy and so *accidentally*
+ * fail-closed. Now it is deliberately `false`.
  *
  * @param cls - The item's ownership class.
  * @param ownership - The resolved ownership claim policy.
@@ -164,6 +189,12 @@ export function isClaimable(cls: OwnershipClass, ownership: OwnershipConfig): bo
       return ownership.claimAssignedToHuman;
     case 'other':
       return ownership.claimAssignedToOthers;
+    default: {
+      const unhandled: never = cls;
+      void unhandled;
+      // Unknown class: never claim. Fail closed, deliberately.
+      return false;
+    }
   }
 }
 
@@ -210,10 +241,22 @@ export interface DispatchOptions extends WipLoad {
  * Resolves an item's ownership class from {@link DispatchOptions}, preferring a
  * precomputed entry over the callback.
  *
+ * `Object.hasOwn` rather than a bare lookup: `ownershipOf` is a caller-supplied
+ * plain object keyed by tracker data, so an item identified `constructor`
+ * matched an INHERITED `Object.prototype` member. That is `!== undefined`, so
+ * the precomputed branch won, `classifyOwnership` never ran, and a function was
+ * returned as an `OwnershipClass` — leaving {@link isClaimable} to drop the item
+ * silently. Only an OWN key is a real precomputed entry. The public shape stays
+ * a `Record` so callers are unaffected; see {@link SIZE_SCALE} for why the
+ * module's own tables are `Map`s instead.
+ *
  * @throws If neither `ownershipOf[id]` nor `classifyOwnership` is available.
  */
 function resolveOwnership(item: WorkItem, opts: DispatchOptions): OwnershipClass {
-  const precomputed = opts.ownershipOf?.[item.identifier];
+  const precomputed =
+    opts.ownershipOf && Object.hasOwn(opts.ownershipOf, item.identifier)
+      ? opts.ownershipOf[item.identifier]
+      : undefined;
   if (precomputed !== undefined) return precomputed;
   if (opts.classifyOwnership) return opts.classifyOwnership(item);
   throw new Error(
@@ -353,23 +396,26 @@ export function truncateRankedToWipCap(
   wipCap: WipCap,
   load: WipLoad
 ): WorkItem[] {
-  // Running WIP budget seeded from existing in-progress load.
+  // Running WIP budget seeded from existing in-progress load. A Map, not a
+  // plain object: `projectId` is tracker data, and an object keyed by it
+  // answers every lookup inherited from Object.prototype. A project id of
+  // `"constructor"` made `perProjectCount[projectId]` a function, `>=
+  // wipCap.perProject` false against it, and EVERY item admitted — the cap
+  // silently defeated (charter G7). See {@link SIZE_SCALE}.
   let globalCount = load.inProgressTotal ?? 0;
-  const perProjectCount: Record<string, number> = {
-    ...(load.inProgressByProject ?? {}),
-  };
+  const perProjectCount = new Map<string, number>(Object.entries(load.inProgressByProject ?? {}));
 
   const admitted: WorkItem[] = [];
   for (const item of ranked) {
     if (globalCount >= wipCap.global) break;
 
     const projectId = item.project?.id;
-    const projectCount = projectId ? (perProjectCount[projectId] ?? 0) : 0;
+    const projectCount = projectId ? (perProjectCount.get(projectId) ?? 0) : 0;
     if (projectId && projectCount >= wipCap.perProject) continue;
 
     admitted.push(item);
     globalCount += 1;
-    if (projectId) perProjectCount[projectId] = projectCount + 1;
+    if (projectId) perProjectCount.set(projectId, projectCount + 1);
   }
 
   return admitted;
@@ -392,12 +438,14 @@ function unblockerScore(item: WorkItem, openIdentifiers: Set<string>): number {
 /**
  * Tier 2 — priority ordinal; a missing, `null`, or off-scale priority is NEUTRAL
  * (sorts last). The `typeof` guard is what makes that promise true rather than
- * accidental: without it, degradation would rest on `PRIORITY_RANK[null]`
- * happening to miss.
+ * accidental: without it, degradation would rest on a lookup happening to miss,
+ * and it did NOT miss for a string — a plain-object `PRIORITY_RANK["1"]` read a
+ * string priority as *urgent*. The guard and the {@link SIZE_SCALE | `Map`} now
+ * close that from both sides.
  */
 function priorityRank(item: WorkItem): number {
   if (typeof item.priority !== 'number') return NEUTRAL;
-  return PRIORITY_RANK[item.priority] ?? NEUTRAL;
+  return PRIORITY_RANK.get(item.priority) ?? NEUTRAL;
 }
 
 /** Tier 3 — `started` projects (in progress) before `unstarted`/`backlog`. */
@@ -460,7 +508,7 @@ export function sizeOrdinal(size: WorkItem['size']): number | undefined {
   // A numeric estimate that arrived as a string ("8", "21") is still numeric.
   const asNumber = Number(token);
   if (!Number.isNaN(asNumber)) return numericSizeOrdinal(asNumber);
-  return SIZE_SCALE[token];
+  return SIZE_SCALE.get(token);
 }
 
 /** Tier 5 — size ordinal honoring `sizeOrder`; missing/unknown size is NEUTRAL. */
@@ -592,7 +640,11 @@ export function rankEligible(items: readonly WorkItem[], config: DispatchConfig)
  */
 export function selectDispatch(
   items: readonly WorkItem[],
-  config: { dispatch: DispatchConfig; ownership: OwnershipConfig; wipCap: WipCap },
+  config: {
+    dispatch: DispatchConfig;
+    ownership: OwnershipConfig;
+    wipCap: WipCap;
+  },
   opts: DispatchOptions
 ): WorkItem[] {
   const eligible = filterEligible(items, config.ownership, opts);
@@ -647,7 +699,11 @@ export interface DispatchOutcome {
  */
 export function classifyDispatchOutcome(
   items: readonly WorkItem[],
-  config: { dispatch: DispatchConfig; ownership: OwnershipConfig; wipCap: WipCap },
+  config: {
+    dispatch: DispatchConfig;
+    ownership: OwnershipConfig;
+    wipCap: WipCap;
+  },
   opts: DispatchOptions
 ): DispatchOutcome {
   const picked = selectDispatch(items, config, opts);

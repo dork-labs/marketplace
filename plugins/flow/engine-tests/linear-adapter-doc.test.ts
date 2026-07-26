@@ -12,6 +12,7 @@ import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import path from "node:path";
 import { describe, it, expect } from "vitest";
+import { sizeOrdinal } from "../scripts/dispatch-policy.ts";
 
 // engine-tests -> plugins/flow (the plugin bundle root)
 const pluginRoot = path.resolve(
@@ -125,6 +126,32 @@ describe("linear-adapter SKILL.md — prose-contract completeness", () => {
     expect(skill).toMatch(/composio/i);
     expect(skill).toContain("--account personal");
     expect(skill).toMatch(/artblocks/); // the never-touch warning is present
+  });
+
+  it("states the sub-issue promotion rule as an ORDINAL comparison, and states it truly", () => {
+    // `size` is the union `number | string`, so `size >= "xl"` is a comparison
+    // between two vocabularies — the contradiction DOR-515 closed. The prose
+    // must carry the ordinal form, and the concrete values it quotes must
+    // actually be what the oracle computes: the rule now lives in 8 prose sites
+    // across 7 files, and moving a breakpoint would otherwise update the unit
+    // test while every one of those went quietly wrong.
+    expect(skill).toContain("sizeOrdinal(size) >= sizeOrdinal(");
+    expect(skill).not.toMatch(
+      /`size\s*[><≥]=?\s*decomposition\.subIssueThreshold`/,
+    );
+
+    // The prose states `sizeOrdinal(8)` and `sizeOrdinal("xl")` are both 4.
+    // Bind that literal claim to the oracle, so the two cannot drift apart.
+    const claimed = skill.match(
+      /`sizeOrdinal\(8\)`\s*and\s*\n?\s*`sizeOrdinal\("xl"\)`\s*are\s*both\s*`(\d+)`/,
+    );
+    expect(
+      claimed,
+      "the SKILL must state the concrete shared-scale value",
+    ).not.toBeNull();
+    const stated = Number(claimed?.[1]);
+    expect(sizeOrdinal("xl")).toBe(stated);
+    expect(sizeOrdinal(8)).toBe(stated);
   });
 
   it("frames itself as a prose contract that P5 promotes into a typed PMClient", () => {
