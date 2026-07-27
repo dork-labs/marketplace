@@ -114,7 +114,9 @@ export {
   classifyDispatchOutcome,
   filterEligible,
   rankEligible,
+  truncateRankedToWipCap,
   isClaimable,
+  sizeOrdinal,
 } from './dispatch-policy.ts';
 export type {
   DispatchOptions,
@@ -122,6 +124,7 @@ export type {
   DispatchConfig,
   OwnershipConfig,
   WipCap,
+  WipLoad,
   RankFactor,
 } from './dispatch-policy.ts';
 

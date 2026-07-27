@@ -100,6 +100,56 @@ describe("validate-adapter", () => {
     });
   });
 
+  describe("the `size` union (numeric estimate or t-shirt string)", () => {
+    /** The good fixture with the first item's `size` replaced. */
+    function fixtureWithSize(size: unknown): string {
+      const items = JSON.parse(readFileSync(GOOD_FIXTURE, "utf8"));
+      const list = Array.isArray(items) ? items : items.items;
+      if (size === undefined) delete list[0].size;
+      else list[0].size = size;
+      return JSON.stringify(Array.isArray(items) ? list : items);
+    }
+
+    it("accepts a NUMERIC estimate — the shape a points-based tracker emits", () => {
+      const { status, stdout } = runHarness({ stdin: fixtureWithSize(8) });
+      expect(status).toBe(0);
+      expect((JSON.parse(stdout) as Verdict).ok).toBe(true);
+    });
+
+    it("accepts a 0-point estimate (a real, smallest size)", () => {
+      const { status, stdout } = runHarness({ stdin: fixtureWithSize(0) });
+      expect(status).toBe(0);
+      expect((JSON.parse(stdout) as Verdict).ok).toBe(true);
+    });
+
+    it("still accepts a t-shirt string", () => {
+      const { status, stdout } = runHarness({ stdin: fixtureWithSize("xl") });
+      expect(status).toBe(0);
+      expect((JSON.parse(stdout) as Verdict).ok).toBe(true);
+    });
+
+    it("still rejects NULL — a missing optional must be absent, not null", () => {
+      const { status, stdout } = runHarness({ stdin: fixtureWithSize(null) });
+      expect(status).not.toBe(0);
+      const verdict = JSON.parse(stdout) as Verdict;
+      expect(verdict.failures.map((f) => f.invariant)).toContain("INV-2");
+    });
+
+    it("rejects a negative estimate — widening the type is not a blanket pass", () => {
+      const { status, stdout } = runHarness({ stdin: fixtureWithSize(-3) });
+      expect(status).not.toBe(0);
+      const verdict = JSON.parse(stdout) as Verdict;
+      expect(verdict.failures.map((f) => f.invariant)).toContain("INV-2");
+    });
+
+    it("rejects an empty-string estimate", () => {
+      const { status, stdout } = runHarness({ stdin: fixtureWithSize("") });
+      expect(status).not.toBe(0);
+      const verdict = JSON.parse(stdout) as Verdict;
+      expect(verdict.failures.map((f) => f.invariant)).toContain("INV-2");
+    });
+  });
+
   describe("--help", () => {
     it("prints the contract and exits 0", () => {
       const { status, stdout } = runHarness({ args: ["--help"] });

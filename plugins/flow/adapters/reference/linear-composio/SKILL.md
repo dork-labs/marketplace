@@ -166,10 +166,18 @@ mandatory, not cosmetic.
 - **`priority`** <- Linear's native priority field (`0` none, `1` urgent, `2`
   high, `3` medium, `4` low; on `LINEAR_GET_LINEAR_ISSUE` / the GraphQL read, not
   LIST). Native field, never a label. Missing -> `undefined` (neutral), never `0`.
-- **`size`** <- Linear's native `estimate` field (Fibonacci points / t-shirt;
-  same caveat - absent from LIST). Native field, never a label. Drives sub-issue
-  promotion and the dispatch size tier. Missing -> `undefined`, never `0` or
-  smallest.
+- **`size`** <- Linear's native `estimate` field, emitted **unconverted** (same
+  caveat - absent from LIST). Linear's estimate is a NUMBER on every scale it
+  offers (Fibonacci, exponential, linear), so emit the number: `size` is the
+  union `number | string`, and only a tracker with no numeric estimate field
+  emits a t-shirt string (`xs`-`xxl`). Do not stringify it; do not convert it to
+  a t-shirt letter. Native field, never a label. Missing -> `undefined`, never
+  `0` or smallest.
+  - Drives the dispatch size tier and the sub-issue promotion rule. Promotion
+    compares **ordinals**, never raw values -
+    `sizeOrdinal(size) >= sizeOrdinal(decomposition.subIssueThreshold)` - because
+    the threshold is a t-shirt word and the estimate may be a number. Never write
+    `size >= "xl"`.
 
 ---
 

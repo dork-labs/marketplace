@@ -93,7 +93,7 @@ interface PMClient {
   attachEvidence(item: WorkItem, evidence: EvidencePlan): Promise<void>;
   needsInput(item: WorkItem, question: string): Promise<void>; // park on human
   link(a: WorkItem, b: WorkItem, type: RelationType): Promise<void>;
-  createSubIssue(parent: WorkItem, body: string): Promise<WorkItem>; // size ≥ "xl"
+  createSubIssue(parent: WorkItem, body: string): Promise<WorkItem>; // sizeOrdinal ≥ threshold
 }
 ```
 
@@ -109,7 +109,7 @@ WorkItem {
   stateCategory,   // matched on CATEGORY, never name
   stateName,       // display only
   priority,        // 0–4
-  size,            // points / t-shirt (drives sub-issue promotion + ranking)
+  size,            // number (points, native) | string (t-shirt) — promotion + ranking
   project,         // { id, name, stateCategory, lead }
   parent, relations { blocks[], blockedBy[], children[], relatedTo[], duplicateOf? },
   labels[],        // includes stage/* and agent/*
@@ -180,12 +180,20 @@ stages (`execution`) → `proceed-with-trail`. Types: `DecisionDescriptor`,
 
 ### Dispatch policy — `dispatch.ts` (§4)
 
-`selectDispatch(items, options)` = `filterEligible` then `rankEligible`.
-Eligibility removes non-dispatchable state, missing `agent/ready` (PM-driven),
-open blockers, completed/canceled projects, WIP-capped items, and items the
-`ownership` policy doesn't permit (`isClaimable`). Ranking applies the ordered
-7-tier ladder (`unblockers → priority → projectStatus → type → size → age →
-identifier`). Types: `DispatchConfig`, `OwnershipConfig`, `WipCap`, `RankFactor`.
+`selectDispatch(items, options)` = `filterEligible` → `rankEligible` →
+`truncateRankedToWipCap`. Eligibility removes non-dispatchable state, missing
+`agent/ready` (PM-driven), open blockers, completed/canceled projects, and items
+the `ownership` policy doesn't permit (`isClaimable`) — every check is a per-item
+predicate, so the survivor set never depends on input order. Ranking applies the
+ordered 7-tier ladder (`unblockers → priority → projectStatus → type → size →
+age → identifier`), a **total** order: a tier where both items are neutral is a
+tie that falls through, so the identifier tiebreak is always reached and the
+result is independent of input order. The WIP cap runs **last**, truncating the
+ranked list to the global + per-project budgets: the ladder decides *which* items
+survive, the cap only decides *how many* (its name carries that precondition).
+`sizeOrdinal(size)` is exported as the one sanctioned way to compare a `size` —
+a `number | string` union — against a t-shirt threshold. Types: `DispatchConfig`,
+`OwnershipConfig`, `WipCap`, `WipLoad`, `RankFactor`.
 
 ### Gates + auto-merge recovery — `gates.ts` (§5, §6)
 
@@ -232,8 +240,12 @@ capture per class (`ui` → GIF/WebM/none by interactive-vs-unattended trigger;
 `TasksFileSchema` / `TaskSchema` extend `03-tasks.json` with optional per-task
 `issue` / `parentIssue` fields and the PM-agnostic `ProvenanceSchema` block (one
 issue **or** project, never a flat `issues: []` list). `isPromotableToSubIssue`
-fires only at `size ≥ subIssueThreshold` (default `"xl"`). Types: `TasksFile`,
-`Task`, `TaskSize`, `Provenance`.
+fires only at `size ≥ subIssueThreshold` (default `"xl"`), comparing a **task's**
+`size` — the t-shirt `TaskSize` enum on disk, not the `WorkItem.size` union. A
+`WorkItem.size` is compared against the same threshold through
+`sizeOrdinal(size) >= sizeOrdinal(threshold)`, since a points estimate and a
+t-shirt word are not directly comparable. Types: `TasksFile`, `Task`, `TaskSize`,
+`Provenance`.
 
 ## Config schema reference
 

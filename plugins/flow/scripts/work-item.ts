@@ -26,7 +26,9 @@
  * never fabricates a value to satisfy the shape. The dispatch policy treats
  * missing {@link WorkItem.priority} / {@link WorkItem.size} as **neutral**
  * (never as a real value) — "neutral" must never be confused with "smallest" or
- * "lowest priority".
+ * "lowest priority". A missing optional is **absent**, never `null`: the
+ * conformance harness rejects `null`, and the dispatch oracle degrades it to
+ * neutral rather than trusting the shape.
  *
  * @see specs/unified-workflow-system/02-specification.md §3 (PMClient contract), §4 (dispatch)
  * @see .agents/flow/skills/linear-adapter/SKILL.md (the prose WorkItem contract)
@@ -158,11 +160,26 @@ export interface WorkItem {
    */
   priority?: WorkItemPriority;
   /**
-   * Tracker-native estimate (points / t-shirt size), or `undefined` (neutral)
-   * when unset. Drives sub-issue promotion and the dispatch size tier. Never
-   * fabricated — "neutral" is not "smallest".
+   * Tracker-native estimate, or `undefined` (neutral) when unset. Drives
+   * sub-issue promotion and the dispatch size tier.
+   *
+   * Both shapes real trackers emit are canonical, and the adapter passes its
+   * tracker's native one through **unconverted**:
+   *
+   * - a **number** — points, from Linear's native `estimate` field and every
+   *   other points-based tracker (any scale: Fibonacci, exponential, linear);
+   * - a **string** — a t-shirt size (`xs` · `sm` · `md` · `lg` · `xl` · `xxl`)
+   *   for trackers with no numeric estimate field.
+   *
+   * The dispatch policy maps both onto one shared ordinal scale, so the two
+   * vocabularies rank against each other correctly.
+   *
+   * Never fabricated — "neutral" is not "smallest". A `0`-point estimate is a
+   * real, smallest-concrete size; an item with no estimate leaves this
+   * `undefined` (absent, never `null` and never `0`) and ranks neutral, behind
+   * every concrete estimate.
    */
-  size?: string;
+  size?: string | number;
   /** The project this item belongs to, or `undefined` when unset. */
   project?: WorkItemProject;
   /** Identifier of the parent item (sub-issue), or `null` for a top-level item. */

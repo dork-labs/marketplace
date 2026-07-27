@@ -296,8 +296,17 @@ function checkInv2(items: readonly unknown[]): string[] {
         details.push(
           `${label} optional "priority" must be an integer in {0,1,2,3,4}`,
         );
-      if (field === "size" && !isNonEmptyString(value))
-        details.push(`${label} optional "size" must be a non-empty string`);
+      // `size` is a union by design: a numeric estimate (points, any scale) or a
+      // t-shirt string. The adapter passes its tracker's native shape through
+      // unconverted; the dispatch policy maps both onto one ordinal scale.
+      if (
+        field === "size" &&
+        !isNonEmptyString(value) &&
+        !(typeof value === "number" && Number.isFinite(value) && value >= 0)
+      )
+        details.push(
+          `${label} optional "size" must be a non-empty string (t-shirt size) or a non-negative finite number (points)`,
+        );
       if (field === "assignee" && !isNonEmptyString(value))
         details.push(`${label} optional "assignee" must be a non-empty string`);
       if (field === "createdAt" && typeof value !== "string")
