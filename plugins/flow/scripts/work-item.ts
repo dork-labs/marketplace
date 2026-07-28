@@ -50,13 +50,7 @@ export type StateCategory = z.infer<typeof StateCategorySchema>;
  * exclusive — exactly one per issue.
  */
 export type WorkItemType =
-  | 'idea'
-  | 'research'
-  | 'hypothesis'
-  | 'task'
-  | 'monitor'
-  | 'signal'
-  | 'meta';
+  'idea' | 'research' | 'hypothesis' | 'task' | 'monitor' | 'signal' | 'meta';
 
 /**
  * Tracker-native priority, normalized to the canonical 0–4 scale:
@@ -202,4 +196,101 @@ export interface WorkItem {
    * neutral age tier.
    */
   createdAt?: string;
+}
+
+/**
+ * Reads an item's label set, degrading an absent or wrong-typed `labels`
+ * value to "no labels" rather than throwing.
+ *
+ * The `Array.isArray` check is load-bearing twice over. It stops a missing
+ * `labels` array from crashing every reader of this shape — the dispatch
+ * eligibility filter, the charter G3 starvation detector, and the
+ * comment-response rules (§5) all key off a durable label. And it rejects a
+ * bare string: `'agent/ready'.includes(…)` is a SUBSTRING test, so a scalar
+ * `labels: "agent/ready"` would otherwise sail through a readiness or
+ * needs-input check on a shape the contract never allowed.
+ *
+ * The canonical accessor for {@link WorkItem.labels}: every module that reads
+ * labels imports this (and {@link hasLabel}) rather than re-deriving the
+ * guard, so a non-conformant `labels` value is fixed once, here, next to the
+ * contract it defends.
+ *
+ * @param item - The item under evaluation.
+ * @returns The item's labels, or `[]` when unavailable.
+ */
+export function labelsOf(item: WorkItem): readonly string[] {
+  return Array.isArray(item.labels) ? item.labels : [];
+}
+
+/**
+ * Whether an item carries a given durable label (e.g. `agent/ready`,
+ * `agent/needs-input`), degrading gracefully via {@link labelsOf} rather than
+ * throwing on a non-conformant `labels` value.
+ *
+ * @param item - The item under evaluation.
+ * @param label - The exact label to test for (membership, never substring).
+ * @returns `true` if `label` is present in the item's label set.
+ */
+export function hasLabel(item: WorkItem, label: string): boolean {
+  return labelsOf(item).includes(label);
+}
+
+/**
+ * A single tracker comment as the adapter's `getInbox` normalizes it (the
+ * `InboxEntry.comment` shape). The generic layer reads only these fields; the
+ * adapter owns the tracker-native mapping.
+ *
+ * This is an adapter output exactly like {@link WorkItem}, and lives beside it
+ * for the same reason {@link hasLabel} lives beside {@link WorkItem.labels}:
+ * every reader of a non-conformant `InboxComment` — the comment-response rules
+ * (§5) AND {@link PollingTransport | the inbound transport} that produces the
+ * events those rules consume — must degrade the same way, not re-derive its
+ * own guard. `PollingTransport` is strictly upstream of `shouldRespondToComment`
+ * (`transport.ts` maps `InboxEntry.comment` onto a `TrackerEvent` before the
+ * comment-response rules ever see it), so a guard that only lives downstream
+ * leaves the unhardened producer reachable first (DOR-535 follow-up).
+ */
+export interface InboxComment {
+  /**
+   * Account id of the comment author, compared against `identity.agent` (rule 1)
+   * and used to detect non-agent replies (rule 3).
+   */
+  author: string;
+  /**
+   * Account ids @mentioned in the comment. An @mention of the agent account is a
+   * "directly addressed" signal (rule 2).
+   */
+  mentions: string[];
+  /**
+   * The comment text. Carries the `identity.marker` on the agent's own comments
+   * (rule 1, shared-account mode) and may carry an explicit `/flow` / `@flow`
+   * token that directly addresses the engine (rule 2).
+   */
+  body: string;
+}
+
+/**
+ * Reads a comment's @mention list, degrading an absent or wrong-typed
+ * `mentions` value to "no mentions" rather than throwing. `mentions` is
+ * required under the adapter's `getInbox` contract, but every reader —
+ * {@link PollingTransport}'s bare-mention detection as much as the
+ * comment-response rules — must survive a non-conformant one.
+ *
+ * @param comment - The inbound comment under evaluation.
+ * @returns The comment's mentions, or `[]` when unavailable.
+ */
+export function mentionsOf(comment: InboxComment): readonly string[] {
+  return Array.isArray(comment.mentions) ? comment.mentions : [];
+}
+
+/**
+ * Reads a comment's body text, degrading an absent or wrong-typed `body`
+ * value to the empty string rather than throwing. Same rationale as
+ * {@link mentionsOf}.
+ *
+ * @param comment - The inbound comment under evaluation.
+ * @returns The comment's body, or `''` when unavailable.
+ */
+export function bodyOf(comment: InboxComment): string {
+  return typeof comment.body === 'string' ? comment.body : '';
 }

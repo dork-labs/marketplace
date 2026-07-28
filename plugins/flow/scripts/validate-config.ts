@@ -18,8 +18,8 @@
  * @module @dorkos/flow/cli/validate-config
  */
 
-import { readFileSync } from "node:fs";
-import { invokedDirectly, parseArgs, readRawInput } from "./_shared.ts";
+import { readFileSync } from 'node:fs';
+import { invokedDirectly, parseArgs, readRawInput } from './_shared.ts';
 
 const HELP = `validate-config — validate a /flow config object against config/config.schema.json.
 
@@ -45,34 +45,32 @@ interface ValidationError {
 
 /** Render a path segment list as a JSON-pointer-style string (`(root)` when empty). */
 function pointer(segments: readonly (string | number)[]): string {
-  return segments.length === 0 ? "(root)" : `/${segments.join("/")}`;
+  return segments.length === 0 ? '(root)' : `/${segments.join('/')}`;
 }
 
 /** Name the JSON type of a value the way the schema's `type` keyword spells it. */
 function typeName(value: unknown): string {
-  if (value === null) return "null";
-  if (Array.isArray(value)) return "array";
+  if (value === null) return 'null';
+  if (Array.isArray(value)) return 'array';
   return typeof value;
 }
 
 /** Whether `value` satisfies a single JSON-Schema `type` keyword token. */
 function matchesType(value: unknown, type: string): boolean {
   switch (type) {
-    case "object":
-      return (
-        typeof value === "object" && value !== null && !Array.isArray(value)
-      );
-    case "array":
+    case 'object':
+      return typeof value === 'object' && value !== null && !Array.isArray(value);
+    case 'array':
       return Array.isArray(value);
-    case "string":
-      return typeof value === "string";
-    case "boolean":
-      return typeof value === "boolean";
-    case "number":
-      return typeof value === "number" && Number.isFinite(value);
-    case "integer":
-      return typeof value === "number" && Number.isInteger(value);
-    case "null":
+    case 'string':
+      return typeof value === 'string';
+    case 'boolean':
+      return typeof value === 'boolean';
+    case 'number':
+      return typeof value === 'number' && Number.isFinite(value);
+    case 'integer':
+      return typeof value === 'number' && Number.isInteger(value);
+    case 'null':
       return value === null;
     default:
       // An unsupported `type` token: don't manufacture a failure.
@@ -82,14 +80,10 @@ function matchesType(value: unknown, type: string): boolean {
 
 /** Resolve a local `#/$defs/...` `$ref` against the root schema, or `undefined`. */
 function resolveRef(ref: string, root: SchemaNode): SchemaNode | undefined {
-  if (!ref.startsWith("#/")) return undefined;
+  if (!ref.startsWith('#/')) return undefined;
   let cursor: unknown = root;
-  for (const part of ref.slice(2).split("/")) {
-    if (
-      cursor &&
-      typeof cursor === "object" &&
-      part in (cursor as Record<string, unknown>)
-    ) {
+  for (const part of ref.slice(2).split('/')) {
+    if (cursor && typeof cursor === 'object' && part in (cursor as Record<string, unknown>)) {
       cursor = (cursor as Record<string, unknown>)[part];
     } else {
       return undefined;
@@ -111,10 +105,10 @@ function validate(
   schema: SchemaNode,
   segments: readonly (string | number)[],
   root: SchemaNode,
-  errors: ValidationError[],
+  errors: ValidationError[]
 ): void {
   // $ref — resolve into the root schema's $defs and validate against the target.
-  if (typeof schema.$ref === "string") {
+  if (typeof schema.$ref === 'string') {
     const resolved = resolveRef(schema.$ref, root);
     if (!resolved) {
       errors.push({
@@ -147,7 +141,7 @@ function validate(
 
   // type — a structural mismatch makes deeper keyword checks meaningless, so stop.
   const type = schema.type;
-  if (typeof type === "string") {
+  if (typeof type === 'string') {
     if (!matchesType(value, type)) {
       errors.push({
         path: pointer(segments),
@@ -168,9 +162,7 @@ function validate(
   // enum — value must deep-equal one allowed entry (entries are JSON-safe).
   if (Array.isArray(schema.enum)) {
     const allowed = schema.enum as unknown[];
-    const ok = allowed.some(
-      (entry) => JSON.stringify(entry) === JSON.stringify(value),
-    );
+    const ok = allowed.some((entry) => JSON.stringify(entry) === JSON.stringify(value));
     if (!ok) {
       errors.push({
         path: pointer(segments),
@@ -180,32 +172,26 @@ function validate(
   }
 
   // numeric bounds
-  if (typeof value === "number") {
-    if (typeof schema.minimum === "number" && value < schema.minimum) {
+  if (typeof value === 'number') {
+    if (typeof schema.minimum === 'number' && value < schema.minimum) {
       errors.push({
         path: pointer(segments),
         message: `must be >= ${schema.minimum} (got ${value})`,
       });
     }
-    if (typeof schema.maximum === "number" && value > schema.maximum) {
+    if (typeof schema.maximum === 'number' && value > schema.maximum) {
       errors.push({
         path: pointer(segments),
         message: `must be <= ${schema.maximum} (got ${value})`,
       });
     }
-    if (
-      typeof schema.exclusiveMinimum === "number" &&
-      value <= schema.exclusiveMinimum
-    ) {
+    if (typeof schema.exclusiveMinimum === 'number' && value <= schema.exclusiveMinimum) {
       errors.push({
         path: pointer(segments),
         message: `must be > ${schema.exclusiveMinimum} (got ${value})`,
       });
     }
-    if (
-      typeof schema.exclusiveMaximum === "number" &&
-      value >= schema.exclusiveMaximum
-    ) {
+    if (typeof schema.exclusiveMaximum === 'number' && value >= schema.exclusiveMaximum) {
       errors.push({
         path: pointer(segments),
         message: `must be < ${schema.exclusiveMaximum} (got ${value})`,
@@ -214,10 +200,9 @@ function validate(
   }
 
   // object — required, declared properties, and additionalProperties: false.
-  if (matchesType(value, "object")) {
+  if (matchesType(value, 'object')) {
     const obj = value as Record<string, unknown>;
-    const props =
-      (schema.properties as Record<string, SchemaNode> | undefined) ?? {};
+    const props = (schema.properties as Record<string, SchemaNode> | undefined) ?? {};
     const required = (schema.required as string[] | undefined) ?? [];
     for (const key of required) {
       if (!(key in obj) || obj[key] === undefined) {
@@ -241,22 +226,16 @@ function validate(
 
   // array — minItems and a single `items` subschema applied to every element.
   if (Array.isArray(value)) {
-    if (typeof schema.minItems === "number" && value.length < schema.minItems) {
+    if (typeof schema.minItems === 'number' && value.length < schema.minItems) {
       errors.push({
         path: pointer(segments),
         message: `must have at least ${schema.minItems} item(s) (got ${value.length})`,
       });
     }
     const items = schema.items;
-    if (items && typeof items === "object" && !Array.isArray(items)) {
+    if (items && typeof items === 'object' && !Array.isArray(items)) {
       value.forEach((element, index) =>
-        validate(
-          element,
-          items as SchemaNode,
-          [...segments, index],
-          root,
-          errors,
-        ),
+        validate(element, items as SchemaNode, [...segments, index], root, errors)
       );
     }
   }
@@ -264,8 +243,8 @@ function validate(
 
 /** Load and parse the committed JSON Schema next to this script (no imports). */
 function loadSchema(): SchemaNode {
-  const schemaUrl = new URL("../config/config.schema.json", import.meta.url);
-  return JSON.parse(readFileSync(schemaUrl, "utf8")) as SchemaNode;
+  const schemaUrl = new URL('../config/config.schema.json', import.meta.url);
+  return JSON.parse(readFileSync(schemaUrl, 'utf8')) as SchemaNode;
 }
 
 /**
@@ -290,11 +269,9 @@ export function main(argv: readonly string[]): number {
   try {
     parsed = JSON.parse(readRawInput(args.inputPath));
   } catch (err) {
-    process.stderr.write(
-      `validate-config: invalid input — ${(err as Error).message}\n`,
-    );
+    process.stderr.write(`validate-config: invalid input — ${(err as Error).message}\n`);
     process.stdout.write(
-      `${JSON.stringify({ ok: false, errors: [{ path: "(root)", message: `invalid JSON: ${(err as Error).message}` }] })}\n`,
+      `${JSON.stringify({ ok: false, errors: [{ path: '(root)', message: `invalid JSON: ${(err as Error).message}` }] })}\n`
     );
     return 1;
   }
@@ -308,9 +285,7 @@ export function main(argv: readonly string[]): number {
     return 0;
   }
 
-  process.stderr.write(
-    `validate-config: config is invalid — ${errors.length} error(s)\n`,
-  );
+  process.stderr.write(`validate-config: config is invalid — ${errors.length} error(s)\n`);
   process.stdout.write(`${JSON.stringify({ ok: false, errors })}\n`);
   return 1;
 }

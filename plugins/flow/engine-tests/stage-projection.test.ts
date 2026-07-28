@@ -16,18 +16,19 @@
  *     (the human gate is not agent-driven).
  *   - `done` → `stateCategory: "completed"`.
  */
-import { readFileSync } from "node:fs";
-import { fileURLToPath } from "node:url";
-import path from "node:path";
-import { describe, it, expect } from "vitest";
-import { StagesSchema, type Stage } from "../scripts/config-schema.ts";
+import { existsSync, readFileSync } from 'node:fs';
+import { fileURLToPath } from 'node:url';
+import path from 'node:path';
+import { describe, it, expect } from 'vitest';
+import { StagesSchema, type Stage } from '../scripts/config-schema.ts';
 
 // engine-tests -> plugins/flow (the plugin bundle root)
-const pluginRoot = path.resolve(
-  path.dirname(fileURLToPath(import.meta.url)),
-  "..",
-);
-const configPath = path.join(pluginRoot, "config", "config.json");
+const pluginRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
+const configPath = path.join(pluginRoot, 'config', 'config.json');
+// `config.json` is gitignored (generated per install by `/flow:init`); a fresh
+// clone falls back to the committed, un-customized `config.example.json` — see
+// `config-schema.test.ts`'s `readConfigJson` for the full rationale.
+const configExamplePath = path.join(pluginRoot, 'config', 'config.example.json');
 
 /**
  * The projection a stage transition writes onto a work item. Mirrors the
@@ -36,7 +37,7 @@ const configPath = path.join(pluginRoot, "config", "config.json");
  */
 interface StageProjection {
   label?: string;
-  stateCategory?: Stage["stateCategory"];
+  stateCategory?: Stage['stateCategory'];
   command?: string;
   humanGate: boolean;
 }
@@ -62,32 +63,32 @@ const PROJECTION_TABLE: Record<
   keyof typeof stages,
   {
     label: string | null;
-    stateCategory: Stage["stateCategory"] | null;
+    stateCategory: Stage['stateCategory'] | null;
     humanGate: boolean;
   }
 > = {
-  capture: { label: "stage/capture", stateCategory: null, humanGate: false },
-  triage: { label: "stage/triage", stateCategory: null, humanGate: false },
-  ideate: { label: "stage/ideate", stateCategory: null, humanGate: false },
-  specify: { label: "stage/specify", stateCategory: null, humanGate: false },
+  capture: { label: 'stage/capture', stateCategory: null, humanGate: false },
+  triage: { label: 'stage/triage', stateCategory: null, humanGate: false },
+  ideate: { label: 'stage/ideate', stateCategory: null, humanGate: false },
+  specify: { label: 'stage/specify', stateCategory: null, humanGate: false },
   decompose: {
-    label: "stage/decompose",
+    label: 'stage/decompose',
     stateCategory: null,
     humanGate: false,
   },
   execute: {
-    label: "stage/execute",
-    stateCategory: "started",
+    label: 'stage/execute',
+    stateCategory: 'started',
     humanGate: false,
   },
-  verify: { label: "stage/verify", stateCategory: "started", humanGate: false },
-  review: { label: null, stateCategory: "started", humanGate: true },
-  done: { label: "stage/done", stateCategory: "completed", humanGate: false },
+  verify: { label: 'stage/verify', stateCategory: 'started', humanGate: false },
+  review: { label: null, stateCategory: 'started', humanGate: true },
+  done: { label: 'stage/done', stateCategory: 'completed', humanGate: false },
 };
 
-describe("stage → projection round-trip (config-driven)", () => {
+describe('stage → projection round-trip (config-driven)', () => {
   it.each(Object.keys(PROJECTION_TABLE) as Array<keyof typeof stages>)(
-    "projects `%s` to its documented stage/* label + stateCategory",
+    'projects `%s` to its documented stage/* label + stateCategory',
     (name) => {
       const expected = PROJECTION_TABLE[name];
       const actual = project(stages[name]);
@@ -105,40 +106,34 @@ describe("stage → projection round-trip (config-driven)", () => {
       }
 
       expect(actual.humanGate).toBe(expected.humanGate);
-    },
+    }
   );
 
-  it("execute and verify both transition into the `started` category with a driving command", () => {
-    for (const name of ["execute", "verify"] as const) {
+  it('execute and verify both transition into the `started` category with a driving command', () => {
+    for (const name of ['execute', 'verify'] as const) {
       const p = project(stages[name]);
-      expect(p.stateCategory).toBe("started");
+      expect(p.stateCategory).toBe('started');
       expect(p.command).toBe(`/flow:${name}`);
       expect(p.humanGate).toBe(false);
     }
   });
 
-  it("review is the human gate: `started` + humanGate, with NO command and NO stage label", () => {
+  it('review is the human gate: `started` + humanGate, with NO command and NO stage label', () => {
     const p = project(stages.review);
-    expect(p.stateCategory).toBe("started");
+    expect(p.stateCategory).toBe('started');
     expect(p.humanGate).toBe(true);
     expect(p.command).toBeUndefined();
     expect(p.label).toBeUndefined();
   });
 
-  it("done projects into the `completed` category", () => {
+  it('done projects into the `completed` category', () => {
     const p = project(stages.done);
-    expect(p.stateCategory).toBe("completed");
-    expect(p.command).toBe("/flow:done");
+    expect(p.stateCategory).toBe('completed');
+    expect(p.command).toBe('/flow:done');
   });
 
-  it("every projected stateCategory is a valid tracker state category", () => {
-    const valid = new Set([
-      "backlog",
-      "unstarted",
-      "started",
-      "completed",
-      "canceled",
-    ]);
+  it('every projected stateCategory is a valid tracker state category', () => {
+    const valid = new Set(['backlog', 'unstarted', 'started', 'completed', 'canceled']);
     for (const stage of Object.values(stages)) {
       if (stage.stateCategory !== undefined) {
         expect(valid.has(stage.stateCategory)).toBe(true);
@@ -146,8 +141,9 @@ describe("stage → projection round-trip (config-driven)", () => {
     }
   });
 
-  it("the resolved defaults match the on-disk .agents/flow/config.json stages", () => {
-    const onDisk = JSON.parse(readFileSync(configPath, "utf8")) as {
+  it('the resolved defaults match the on-disk .agents/flow/config.json stages', () => {
+    const resolvedPath = existsSync(configPath) ? configPath : configExamplePath;
+    const onDisk = JSON.parse(readFileSync(resolvedPath, 'utf8')) as {
       stages: Record<string, unknown>;
     };
     const fromDisk = StagesSchema.parse(onDisk.stages);

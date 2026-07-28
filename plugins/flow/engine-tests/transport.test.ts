@@ -120,6 +120,89 @@ describe('PollingTransport — maps inbox entries to events + advances the water
   });
 });
 
+// ─── PollingTransport non-conformance sweep (DOR-535 follow-up) ──────────────
+
+describe('PollingTransport — non-conformance sweep (InboxComment fields)', () => {
+  // `PollingTransport` is strictly upstream of `shouldRespondToComment`: it
+  // produces the exact `InboxComment` payload the comment-response rules
+  // consume (`entryToEvent` reads `entry.comment.body`/`.mentions` before the
+  // comment-response rules ever see the comment). DOR-535 hardened
+  // `shouldRespondToComment` against a non-conformant `labels`/`mentions`/
+  // `body`, but the same crash shape was still reachable HERE, one hop
+  // upstream and unguarded — an adapter's `getInbox` need only misbehave once
+  // for the hardened downstream path to never be reached. Same sweep shape as
+  // `engine-tests/dispatch.test.ts` (DOR-515) and
+  // `engine-tests/comment-response.test.ts` (DOR-535): substitute a hostile
+  // value into every `InboxComment` field mechanically, field list derived at
+  // runtime from the fixture.
+  const HOSTILE_VALUES: [label: string, value: unknown][] = [
+    ['undefined', undefined],
+    ['null', null],
+    ['a number', 42],
+    ['a string', 'nonsense'],
+    ['an empty object', {}],
+    ['an empty array', []],
+  ];
+
+  const COMMENT_FIELDS = Object.keys(entry().comment) as (keyof InboxEntry['comment'])[];
+
+  it('derives its field list from the fixture, and the fixture is complete', () => {
+    expect(COMMENT_FIELDS).toHaveLength(3);
+    expect(COMMENT_FIELDS).toEqual(expect.arrayContaining(['author', 'mentions', 'body']));
+  });
+
+  const cases = COMMENT_FIELDS.flatMap((field) =>
+    HOSTILE_VALUES.map(([label, value]) => [field, label, value] as const)
+  );
+
+  it.each(cases)(
+    'PollingTransport.poll survives InboxComment.%s = %s without throwing',
+    async (field, _label, value) => {
+      // `entryToEvent`'s bare-mention check is `bodyOf(comment).trim() === '' &&
+      // mentions.length > 0` — a short-circuit `&&`. A hostile `mentions` value
+      // is only ever READ if `body` is empty; the fixture forces `body: ''` here
+      // (rather than reusing the suite's default non-empty body) so sweeping
+      // `mentions` actually exercises the crash site instead of silently
+      // short-circuiting past it. The `body` case below then overrides this
+      // forced-empty default with its own hostile value.
+      const hostileEntry = entry({
+        comment: { author: 'human', mentions: ['acct-agent'], body: '', [field]: value },
+      });
+      const transport = new PollingTransport(async () => [hostileEntry]);
+
+      // Not throwing (awaiting the promise resolving, rather than rejecting) is
+      // the whole assertion. `events[0].kind` is typed to `'comment.added' |
+      // 'mention'`, so a `.toContain` check against its full range cannot fail
+      // for any value the return type permits — see comment-response.test.ts's
+      // non-conformance sweeps for the same lesson (DOR-535 review).
+      const { events } = await transport.poll();
+      expect(events).toHaveLength(1);
+    }
+  );
+
+  it('a bare-string mentions scalar does NOT become a MentionEvent (silent-garbage regression)', async () => {
+    // `'@agent'.length > 0` is TRUE — a scalar `mentions` would otherwise sail
+    // through the bare-mention check (`mentionsOf(comment).length > 0`) and
+    // `mentioned: mentions[0]` would silently emit a MentionEvent naming '@'
+    // (the string's first CHARACTER, not an account id): a person who does not
+    // exist. This is the transport-layer echo of the DOR-535 bare-string
+    // `labels` false positive, and — unlike that one — the sweep above cannot
+    // catch it: one right event and one wrong event both satisfy
+    // `toHaveLength(1)` identically. `mentionsOf`'s `Array.isArray` guard
+    // degrades the scalar to `[]`, so the bare-mention check reads
+    // `mentions.length > 0` as false and this correctly falls through to a
+    // normal `comment.added` event instead.
+    const transport = new PollingTransport(async () => [
+      entry({
+        comment: { author: 'human', mentions: '@agent' as unknown as string[], body: '' },
+      }),
+    ]);
+    const { events } = await transport.poll();
+    expect(events).toHaveLength(1);
+    expect(events[0].kind).toBe('comment.added');
+  });
+});
+
 // ─── (b) THE interchangeability test (G9) ─────────────────────────────────────
 
 /**

@@ -34,8 +34,8 @@
  * @module @dorkos/flow/calibration
  */
 
-import type { z } from "zod";
-import type { CalibrationSchema } from "./config-schema.ts";
+import type { z } from 'zod';
+import type { CalibrationSchema } from './config-schema.ts';
 
 /**
  * The resolved `involvement.calibration` config block (§5) that drives every
@@ -50,17 +50,14 @@ export type Calibration = z.infer<typeof CalibrationSchema>;
  * `alwaysAsk` config tags ({@link Calibration.alwaysAsk}).
  */
 export type FloorTrigger =
-  | "irreversible-or-destructive"
-  | "outward-facing"
-  | "secrets-or-spend"
-  | "scope-change";
+  'irreversible-or-destructive' | 'outward-facing' | 'secrets-or-spend' | 'scope-change';
 
 /**
  * Reversibility of the decision (§5). `reversible` = cheap to undo inside the
  * loop (code edit, worktree file, draft comment). `sticky` = costly or visible
  * to undo.
  */
-export type Reversibility = "reversible" | "sticky";
+export type Reversibility = 'reversible' | 'sticky';
 
 /**
  * Confidence in the decision (§5). `confident` means the answer is determined
@@ -68,14 +65,14 @@ export type Reversibility = "reversible" | "sticky";
  * human answer — not a hunch. Anything requiring guessing intent or choosing
  * between materially-different approaches with no steer is `not-confident`.
  */
-export type Confidence = "confident" | "not-confident";
+export type Confidence = 'confident' | 'not-confident';
 
 /**
  * Stage class that routes the ambiguous middle (row 3). Intent stages
  * (CAPTURE/TRIAGE/IDEATE/SPECIFY) are `intake`; execution stages
  * (DECOMPOSE/EXECUTE/VERIFY) are `execution`.
  */
-export type DecisionStage = "intake" | "execution";
+export type DecisionStage = 'intake' | 'execution';
 
 /**
  * The three — and only three — behaviors the ladder can produce (§5):
@@ -84,10 +81,7 @@ export type DecisionStage = "intake" | "execution";
  *   `agent/assumption` trail (rows 3-proceed and 4).
  * - `stop-and-ask` — call `needsInput()` and block the loop (rows 0, 2, 3-ask).
  */
-export type InvolvementBehavior =
-  | "proceed-silently"
-  | "proceed-with-trail"
-  | "stop-and-ask";
+export type InvolvementBehavior = 'proceed-silently' | 'proceed-with-trail' | 'stop-and-ask';
 
 /**
  * The ladder row that matched, top-down (first-match-wins). Exposed so callers
@@ -111,8 +105,7 @@ export const CalibrationRow = {
 } as const;
 
 /** The matched ladder row value (`0`–`4`), the companion type to {@link CalibrationRow}. */
-export type CalibrationRow =
-  (typeof CalibrationRow)[keyof typeof CalibrationRow];
+export type CalibrationRow = (typeof CalibrationRow)[keyof typeof CalibrationRow];
 
 /**
  * A decision descriptor — the evidence-based facts about a single decision
@@ -157,7 +150,7 @@ export interface InvolvementDecision {
  */
 function hasActiveFloorTrigger(
   floorTriggers: readonly FloorTrigger[],
-  alwaysAsk: Calibration["alwaysAsk"],
+  alwaysAsk: Calibration['alwaysAsk']
 ): boolean {
   if (floorTriggers.length === 0) return false;
   const active = new Set<string>(alwaysAsk);
@@ -168,12 +161,9 @@ function hasActiveFloorTrigger(
  * Build the resolved decision for a `proceed-with-trail` outcome, deciding
  * whether to write an assumption trail from the config's `assumptionLog`.
  */
-function proceedWithTrail(
-  row: CalibrationRow,
-  calibration: Calibration,
-): InvolvementDecision {
+function proceedWithTrail(row: CalibrationRow, calibration: Calibration): InvolvementDecision {
   return {
-    behavior: "proceed-with-trail",
+    behavior: 'proceed-with-trail',
     blocks: false,
     row,
     logAssumption: calibration.assumptionLog.artifact,
@@ -206,7 +196,7 @@ function proceedWithTrail(
  */
 export function resolveInvolvement(
   decision: DecisionDescriptor,
-  calibration: Calibration,
+  calibration: Calibration
 ): InvolvementDecision {
   const floorTriggers = decision.floorTriggers ?? [];
 
@@ -214,27 +204,22 @@ export function resolveInvolvement(
   // full confidence on a reversible decision.
   if (hasActiveFloorTrigger(floorTriggers, calibration.alwaysAsk)) {
     return {
-      behavior: "stop-and-ask",
+      behavior: 'stop-and-ask',
       blocks: true,
       row: CalibrationRow.Floor,
       logAssumption: false,
     };
   }
 
-  const isReversible = decision.reversibility === "reversible";
-  const isConfident = decision.confidence === "confident";
+  const isReversible = decision.reversibility === 'reversible';
+  const isConfident = decision.confidence === 'confident';
 
   // Row 1 — reversible + confident → proceed silently. Both axes must be in the
   // config's proceedSilentlyWhen allow-list to qualify for the silent path.
   const silentTags = new Set<string>(calibration.proceedSilentlyWhen);
-  if (
-    isReversible &&
-    isConfident &&
-    silentTags.has("reversible") &&
-    silentTags.has("confident")
-  ) {
+  if (isReversible && isConfident && silentTags.has('reversible') && silentTags.has('confident')) {
     return {
-      behavior: "proceed-silently",
+      behavior: 'proceed-silently',
       blocks: false,
       row: CalibrationRow.ReversibleConfident,
       logAssumption: false,
@@ -244,7 +229,7 @@ export function resolveInvolvement(
   // Row 2 — sticky + not-confident → stop & ask.
   if (!isReversible && !isConfident) {
     return {
-      behavior: "stop-and-ask",
+      behavior: 'stop-and-ask',
       blocks: true,
       row: CalibrationRow.StickyNotConfident,
       logAssumption: false,
@@ -255,9 +240,9 @@ export function resolveInvolvement(
   // bias. The frozen spec is the cut line: intake asks, execution proceeds + logs.
   if (isReversible && !isConfident) {
     const bias = calibration.stageBias[decision.stage];
-    if (bias === "ask") {
+    if (bias === 'ask') {
       return {
-        behavior: "stop-and-ask",
+        behavior: 'stop-and-ask',
         blocks: true,
         row: CalibrationRow.AmbiguousMiddle,
         logAssumption: false,

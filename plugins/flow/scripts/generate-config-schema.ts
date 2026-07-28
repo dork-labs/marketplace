@@ -11,20 +11,15 @@
  * artifact is in sync.
  */
 
-import { writeFileSync } from "node:fs";
-import { fileURLToPath } from "node:url";
-import path from "node:path";
-import prettier from "prettier";
-import {
-  CONFIG_SCHEMA_RELATIVE_PATH,
-  buildConfigJsonSchema,
-} from "./config-schema-builder.ts";
+import { writeFileSync } from 'node:fs';
+import { fileURLToPath } from 'node:url';
+import path from 'node:path';
+import prettier from 'prettier';
+import { CONFIG_SCHEMA_RELATIVE_PATH, buildConfigJsonSchema } from './config-schema-builder.ts';
 
 // Resolve the artifact relative to THIS script (plugins/flow/scripts/) so it
 // lands at plugins/flow/config/config.schema.json regardless of the cwd.
-const outputPath = fileURLToPath(
-  new URL(CONFIG_SCHEMA_RELATIVE_PATH, import.meta.url),
-);
+const outputPath = fileURLToPath(new URL(CONFIG_SCHEMA_RELATIVE_PATH, import.meta.url));
 
 /**
  * Serialize the generated JSON Schema as Prettier-formatted JSON so the
@@ -37,14 +32,11 @@ const outputPath = fileURLToPath(
 export async function serializeConfigJsonSchema(): Promise<string> {
   const raw = JSON.stringify(buildConfigJsonSchema(), null, 2);
   const config = await prettier.resolveConfig(outputPath);
-  return prettier.format(raw, { ...config, parser: "json" });
+  return prettier.format(raw, { ...config, parser: 'json' });
 }
 
 // Only write when invoked directly (not when imported by tests).
-if (
-  process.argv[1] &&
-  path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)
-) {
-  writeFileSync(outputPath, await serializeConfigJsonSchema(), "utf8");
+if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
+  writeFileSync(outputPath, await serializeConfigJsonSchema(), 'utf8');
   process.stdout.write(`Wrote ${outputPath}\n`);
 }
