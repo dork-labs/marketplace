@@ -73,6 +73,7 @@
 
 import type { DispatchSchema, OwnershipSchema, WipCapSchema } from './config-schema.ts';
 import type { z } from 'zod';
+import { hasLabel } from './work-item.ts';
 import type { OwnershipClass, WorkItem } from './work-item.ts';
 
 /** Resolved {@link DispatchSchema} config — the ranking factors + size order. */
@@ -303,27 +304,14 @@ function relationIds(item: WorkItem, edge: 'blocks' | 'blockedBy'): readonly str
 }
 
 /**
- * Reads an item's label set, degrading an absent or wrong-typed `labels` value
- * to "no labels" rather than throwing.
- *
- * The `Array.isArray` check is load-bearing twice over. It stops a missing
- * `labels` array from crashing BOTH the eligibility filter and {@link
- * classifyDispatchOutcome} — the charter G3 starvation detector, which must be
- * able to report *why* the loop stopped even when the adapter is
- * non-conformant. And it rejects a bare string: `'agent/ready'.includes(…)` is a
- * SUBSTRING test, so a scalar `labels: "agent/ready"` would otherwise sail
- * through the readiness gate on a shape the contract never allowed.
- *
- * @param item - The item under evaluation.
- * @returns The item's labels, or `[]` when unavailable.
+ * Whether an item carries the durable `agent/ready` dispatch gate label.
+ * Delegates to the shared {@link hasLabel} accessor (`work-item.ts`), which
+ * degrades an absent or wrong-typed `labels` value to "no labels" rather than
+ * throwing — the eligibility filter and {@link classifyDispatchOutcome} (the
+ * charter G3 starvation detector) must both survive a non-conformant adapter.
  */
-function labelsOf(item: WorkItem): readonly string[] {
-  return Array.isArray(item.labels) ? item.labels : [];
-}
-
-/** Whether an item carries the durable `agent/ready` dispatch gate label. */
 function isAgentReady(item: WorkItem): boolean {
-  return labelsOf(item).includes(AGENT_READY_LABEL);
+  return hasLabel(item, AGENT_READY_LABEL);
 }
 
 /**
@@ -421,7 +409,19 @@ export function truncateRankedToWipCap(
   return admitted;
 }
 
-/** A pre-resolved set of open candidate identifiers, for the unblockers tier. */
+/**
+ * A pre-resolved set of open candidate identifiers, shared by the `blockedBy`
+ * eligibility check ({@link hasOpenBlocker}) and the tier-1 unblockers score
+ * ({@link unblockerScore}).
+ *
+ * Both readers MUST be built from the same pool — the **full candidate set**
+ * `filterEligible` receives, never a filtered subset — or "open" silently
+ * means two different things depending which pass asks (DOR-531). An item
+ * that is `backlog`/`unstarted`/`started` but still lacks `agent/ready` is
+ * "open" here: this set is a STATE-CATEGORY filter only, deliberately blind to
+ * the readiness label, so an untriaged item still counts as something a
+ * `blocks` edge can point at.
+ */
 function buildOpenSet(items: readonly WorkItem[]): Set<string> {
   return new Set(
     items
@@ -430,7 +430,19 @@ function buildOpenSet(items: readonly WorkItem[]): Set<string> {
   );
 }
 
-/** Tier 1 — how many OPEN items this item blocks (more = ranks first). */
+/**
+ * Tier 1 — how many OPEN items this item blocks (more = ranks first).
+ *
+ * "Open" here is the same full-candidate-set definition {@link
+ * hasOpenBlocker} uses for the `blockedBy` eligibility check (DOR-531): an
+ * item that unblocks work still stuck behind triage — `backlog`/`unstarted`/
+ * `started` but not yet `agent/ready` — scores for it. That is deliberate: the
+ * whole point of the unblocker tier is to surface work whose completion
+ * releases OTHER work, and untriaged work is precisely the work most likely to
+ * stay stuck without a nudge. Scoping the score to already-ready items would
+ * make the tier highest for items whose dependents were going to get picked up
+ * anyway, which defeats its purpose.
+ */
 function unblockerScore(item: WorkItem, openIdentifiers: Set<string>): number {
   return relationIds(item, 'blocks').filter((id) => openIdentifiers.has(id)).length;
 }
@@ -607,12 +619,31 @@ function compareByFactor(
  * input. Tier weights live entirely in {@link DispatchConfig} — re-prioritizing
  * is a config edit, never a code change.
  *
+ * **`candidatePool` and DOR-531.** The tier-1 unblockers score
+ * ({@link unblockerScore}) needs the full "open" universe — every dispatchable
+ * item, ready or not — to agree with {@link filterEligible}'s `blockedBy`
+ * check on what "open" means. Left to default to `items` alone, a caller that
+ * ranks only the (already-filtered) eligible survivors silently shrinks
+ * "open" to "ready", and an item that unblocks three untriaged issues scores
+ * `0` instead of `3`. {@link selectDispatch} passes the pre-filter candidate
+ * set explicitly so the two passes can never drift apart again; a caller that
+ * ranks standalone (as most of this module's own tests do) gets the same
+ * items back by default, which is correct when nothing was filtered out.
+ *
  * @param items - The eligible survivors (output of {@link filterEligible}).
  * @param config - The resolved dispatch config (`rank` order + `sizeOrder`).
+ * @param candidatePool - The full candidate set "open" is resolved against for
+ *   the tier-1 unblockers score — the SAME set {@link filterEligible} used for
+ *   its `blockedBy` check. Defaults to `items` for a standalone caller that has
+ *   not filtered (rank-only usage, e.g. this module's own test suite).
  * @returns A new array ordered by the ladder.
  */
-export function rankEligible(items: readonly WorkItem[], config: DispatchConfig): WorkItem[] {
-  const openIdentifiers = buildOpenSet(items);
+export function rankEligible(
+  items: readonly WorkItem[],
+  config: DispatchConfig,
+  candidatePool: readonly WorkItem[] = items
+): WorkItem[] {
+  const openIdentifiers = buildOpenSet(candidatePool);
   return [...items].sort((a, b) => {
     for (const factor of config.rank) {
       const delta = compareByFactor(factor, a, b, openIdentifiers, config);
@@ -648,7 +679,9 @@ export function selectDispatch(
   opts: DispatchOptions
 ): WorkItem[] {
   const eligible = filterEligible(items, config.ownership, opts);
-  const ranked = rankEligible(eligible, config.dispatch);
+  // Rank against the FULL candidate pool, not just the eligible survivors —
+  // see rankEligible's `candidatePool` doc and DOR-531.
+  const ranked = rankEligible(eligible, config.dispatch, items);
   return truncateRankedToWipCap(ranked, config.wipCap, opts);
 }
 

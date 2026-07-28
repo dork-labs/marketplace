@@ -22,19 +22,16 @@
  * `LINEAR_[A-Z_]+` / `composio` I/O patterns below, so it passes the guard
  * naturally with no allowlist entry.
  */
-import { readdirSync, readFileSync, statSync, existsSync } from "node:fs";
-import { fileURLToPath } from "node:url";
-import path from "node:path";
-import { describe, it, expect } from "vitest";
+import { readdirSync, readFileSync, statSync, existsSync } from 'node:fs';
+import { fileURLToPath } from 'node:url';
+import path from 'node:path';
+import { describe, it, expect } from 'vitest';
 
 // engine-tests -> plugins/flow (the plugin bundle root)
-const pluginRoot = path.resolve(
-  path.dirname(fileURLToPath(import.meta.url)),
-  "..",
-);
+const pluginRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 
 /** The one skill dir permitted to contain tracker strings. */
-const ADAPTER_SKILL_DIR = path.join(pluginRoot, "skills", "linear-adapter");
+const ADAPTER_SKILL_DIR = path.join(pluginRoot, 'skills', 'linear-adapter');
 
 /**
  * The reference adapter implementations (`linear-composio`, `linear-mcp`) live
@@ -43,7 +40,7 @@ const ADAPTER_SKILL_DIR = path.join(pluginRoot, "skills", "linear-adapter");
  * carved out alongside `linear-adapter`. Included so the carve-out stays correct
  * even if the reference adapters are ever swept into a scanned bundle root.
  */
-const REFERENCE_ADAPTERS_DIR = path.join(pluginRoot, "adapters", "reference");
+const REFERENCE_ADAPTERS_DIR = path.join(pluginRoot, 'adapters', 'reference');
 
 /**
  * The adapter-authoring meta-skill. Like the concrete adapter skill, it
@@ -51,11 +48,7 @@ const REFERENCE_ADAPTERS_DIR = path.join(pluginRoot, "adapters", "reference");
  * while teaching adapter-building, so it is carved out of the bundle scan. The
  * GENERIC stage skills stay strictly guarded by the G8 scan below.
  */
-const BUILDING_ADAPTERS_SKILL_DIR = path.join(
-  pluginRoot,
-  "skills",
-  "building-adapters",
-);
+const BUILDING_ADAPTERS_SKILL_DIR = path.join(pluginRoot, 'skills', 'building-adapters');
 
 /**
  * Roots that make up the flow plugin bundle this guard scopes to. Each is a
@@ -63,10 +56,10 @@ const BUILDING_ADAPTERS_SKILL_DIR = path.join(
  * the runnable engine oracles, so tracker I/O can't leak into any shipped layer.
  */
 const FLOW_BUNDLE_ROOTS = [
-  path.join(pluginRoot, "skills"),
-  path.join(pluginRoot, "commands"),
-  path.join(pluginRoot, "hooks"),
-  path.join(pluginRoot, "scripts"),
+  path.join(pluginRoot, 'skills'),
+  path.join(pluginRoot, 'commands'),
+  path.join(pluginRoot, 'hooks'),
+  path.join(pluginRoot, 'scripts'),
 ];
 
 /**
@@ -85,9 +78,9 @@ const SCAN_EXCLUSIONS = new Set<string>();
  * prose may capitalize); the MCP/slug families are matched as written.
  */
 const TRACKER_PATTERNS: { label: string; re: RegExp }[] = [
-  { label: "linear MCP tool", re: /mcp__(plugin_)?linear[_a-z]*__/ },
-  { label: "composio invocation", re: /\bcomposio\b/i },
-  { label: "Composio LINEAR_ slug", re: /\bLINEAR_[A-Z_]+\b/ },
+  { label: 'linear MCP tool', re: /mcp__(plugin_)?linear[_a-z]*__/ },
+  { label: 'composio invocation', re: /\bcomposio\b/i },
+  { label: 'Composio LINEAR_ slug', re: /\bLINEAR_[A-Z_]+\b/ },
 ];
 
 /** Recursively collect every file path under `dir` (skips nothing — flow dirs are small). */
@@ -113,21 +106,17 @@ function collectFiles(root: string): string[] {
 /** Whether `file` sits inside `dir` (path-prefix containment, no `..` escape). */
 function isInside(dir: string, file: string): boolean {
   const rel = path.relative(dir, file);
-  return !rel.startsWith("..") && !path.isAbsolute(rel);
+  return !rel.startsWith('..') && !path.isAbsolute(rel);
 }
 
 /** Whether `file` is one of the adapter homes allowed to carry tracker strings. */
 function isInsideAdapter(file: string): boolean {
-  return (
-    isInside(ADAPTER_SKILL_DIR, file) || isInside(REFERENCE_ADAPTERS_DIR, file)
-  );
+  return isInside(ADAPTER_SKILL_DIR, file) || isInside(REFERENCE_ADAPTERS_DIR, file);
 }
 
 /** The tracker-pattern labels a given content blob trips, in pattern order. */
 function trackerOffenses(content: string): string[] {
-  return TRACKER_PATTERNS.filter(({ re }) => re.test(content)).map(
-    ({ label }) => label,
-  );
+  return TRACKER_PATTERNS.filter(({ re }) => re.test(content)).map(({ label }) => label);
 }
 
 /**
@@ -136,18 +125,14 @@ function trackerOffenses(content: string): string[] {
  * planted-offender unit both run through this one function so they exercise the
  * same matching + exclusion logic.
  */
-function scanForOffenders(
-  files: { file: string; content: string }[],
-): string[] {
+function scanForOffenders(files: { file: string; content: string }[]): string[] {
   const offenders: string[] = [];
   for (const { file, content } of files) {
     if (isInsideAdapter(file)) continue;
     if (isInside(BUILDING_ADAPTERS_SKILL_DIR, file)) continue;
     if (SCAN_EXCLUSIONS.has(file)) continue;
     for (const label of trackerOffenses(content)) {
-      offenders.push(
-        `${path.relative(pluginRoot, file)} — contains a ${label}`,
-      );
+      offenders.push(`${path.relative(pluginRoot, file)} — contains a ${label}`);
     }
   }
   return offenders;
@@ -165,7 +150,7 @@ function scanForOffenders(
 // ---------------------------------------------------------------------------
 
 /** The flow skills dir whose generic stage skills G8 governs. */
-const FLOW_SKILLS_DIR = path.join(pluginRoot, "skills");
+const FLOW_SKILLS_DIR = path.join(pluginRoot, 'skills');
 
 /**
  * Non-generic skills exempt from G8. The adapter + adapter-authoring skills
@@ -177,11 +162,7 @@ const FLOW_SKILLS_DIR = path.join(pluginRoot, "skills");
  * the strict name-level G8 rule. Excluded by literal name so a newly added
  * generic STAGE skill is never accidentally exempted.
  */
-const G8_EXEMPT_SKILLS = new Set([
-  "linear-adapter",
-  "building-adapters",
-  "flow-drain",
-]);
+const G8_EXEMPT_SKILLS = new Set(['linear-adapter', 'building-adapters', 'flow-drain']);
 
 /**
  * The generic stage skills — derived dynamically (NOT hardcoded) so a newly
@@ -190,7 +171,7 @@ const G8_EXEMPT_SKILLS = new Set([
  */
 const GENERIC_STAGE_SKILL_DIRS: string[] = readdirSync(FLOW_SKILLS_DIR)
   .filter((entry) => statSync(path.join(FLOW_SKILLS_DIR, entry)).isDirectory())
-  .filter((name) => !G8_EXEMPT_SKILLS.has(name) && !name.endsWith("-adapter"))
+  .filter((name) => !G8_EXEMPT_SKILLS.has(name) && !name.endsWith('-adapter'))
   .map((name) => path.join(FLOW_SKILLS_DIR, name));
 
 /**
@@ -201,16 +182,14 @@ const GENERIC_STAGE_SKILL_DIRS: string[] = readdirSync(FLOW_SKILLS_DIR)
  */
 const GENERIC_FORBIDDEN_PATTERNS: { label: string; re: RegExp }[] = [
   ...TRACKER_PATTERNS,
-  { label: "linear-adapter name", re: /linear-adapter/ },
+  { label: 'linear-adapter name', re: /linear-adapter/ },
   { label: 'tracker name "Linear"', re: /\bLinear\b/ },
-  { label: "DOR ticket id", re: /\bDOR-[0-9]+/ },
+  { label: 'DOR ticket id', re: /\bDOR-[0-9]+/ },
 ];
 
 /** The generic-forbidden-pattern labels a given content blob trips, in order. */
 function genericOffenses(content: string): string[] {
-  return GENERIC_FORBIDDEN_PATTERNS.filter(({ re }) => re.test(content)).map(
-    ({ label }) => label,
-  );
+  return GENERIC_FORBIDDEN_PATTERNS.filter(({ re }) => re.test(content)).map(({ label }) => label);
 }
 
 /**
@@ -219,141 +198,114 @@ function genericOffenses(content: string): string[] {
  * allowlist (the generic skills carry none). Offender format mirrors
  * scanForOffenders so failure messages read the same way.
  */
-function scanGenericSkills(
-  files: { file: string; content: string }[],
-): string[] {
+function scanGenericSkills(files: { file: string; content: string }[]): string[] {
   const offenders: string[] = [];
   for (const { file, content } of files) {
     for (const label of genericOffenses(content)) {
-      offenders.push(
-        `${path.relative(pluginRoot, file)} — contains a ${label}`,
-      );
+      offenders.push(`${path.relative(pluginRoot, file)} — contains a ${label}`);
     }
   }
   return offenders;
 }
 
-describe("tracker confinement — the flow plugin keeps all tracker I/O in linear-adapter", () => {
-  it("the adapter skill exists and is the single confinement target", () => {
-    expect(existsSync(path.join(ADAPTER_SKILL_DIR, "SKILL.md"))).toBe(true);
+describe('tracker confinement — the flow plugin keeps all tracker I/O in linear-adapter', () => {
+  it('the adapter skill exists and is the single confinement target', () => {
+    expect(existsSync(path.join(ADAPTER_SKILL_DIR, 'SKILL.md'))).toBe(true);
   });
 
-  it("no tracker string appears in the flow bundle OUTSIDE the linear-adapter skill", () => {
+  it('no tracker string appears in the flow bundle OUTSIDE the linear-adapter skill', () => {
     const files = FLOW_BUNDLE_ROOTS.flatMap((root) =>
       collectFiles(root).map((file) => ({
         file,
-        content: readFileSync(file, "utf8"),
-      })),
+        content: readFileSync(file, 'utf8'),
+      }))
     );
     const offenders = scanForOffenders(files);
 
     expect(
       offenders,
-      `tracker strings leaked outside linear-adapter:\n${offenders.join("\n")}`,
+      `tracker strings leaked outside linear-adapter:\n${offenders.join('\n')}`
     ).toEqual([]);
   });
 
-  it("the scan is non-vacuous — it actually visits files in every bundle root", () => {
+  it('the scan is non-vacuous — it actually visits files in every bundle root', () => {
     // Guard against an empty or mis-rooted scan silently passing: each bundle
     // root must contribute at least one scanned file.
     for (const root of FLOW_BUNDLE_ROOTS) {
-      expect(
-        collectFiles(root).length,
-        `root produced no files: ${root}`,
-      ).toBeGreaterThan(0);
+      expect(collectFiles(root).length, `root produced no files: ${root}`).toBeGreaterThan(0);
     }
   });
 
-  it("a planted mcp__linear__ string in any bundle root fails the guard", () => {
+  it('a planted mcp__linear__ string in any bundle root fails the guard', () => {
     // Unit on the matcher + scan logic, not real files: plant an offender directly
     // under the engine scripts, the commands, and the Stop hook, and assert each
     // is caught (proving the roots are genuinely scanned, not allowlisted).
     const planted = 'await mcp__linear__create_issue({ title: "x" });';
     const plantedRoots = [
-      path.join(pluginRoot, "scripts", "__planted-offender__.ts"),
-      path.join(pluginRoot, "commands", "flow", "__planted-offender__.md"),
-      path.join(pluginRoot, "hooks", "flow-loop.mjs"),
+      path.join(pluginRoot, 'scripts', '__planted-offender__.ts'),
+      path.join(pluginRoot, 'commands', 'flow', '__planted-offender__.md'),
+      path.join(pluginRoot, 'hooks', 'flow-loop.mjs'),
     ];
     for (const file of plantedRoots) {
       const offenders = scanForOffenders([{ file, content: planted }]);
-      expect(
-        offenders.length,
-        `planted offender not caught at ${file}`,
-      ).toBeGreaterThan(0);
+      expect(offenders.length, `planted offender not caught at ${file}`).toBeGreaterThan(0);
     }
   });
 
-  it("the adapter skill DOES carry tracker strings (proves the guard is meaningful, not vacuous)", () => {
-    const skill = readFileSync(
-      path.join(ADAPTER_SKILL_DIR, "SKILL.md"),
-      "utf8",
-    );
+  it('the adapter skill DOES carry tracker strings (proves the guard is meaningful, not vacuous)', () => {
+    const skill = readFileSync(path.join(ADAPTER_SKILL_DIR, 'SKILL.md'), 'utf8');
     // If the adapter had no tracker strings, the "zero outside" assertion would be
     // trivially true. Pin that the adapter is where they actually live.
     expect(TRACKER_PATTERNS.some(({ re }) => re.test(skill))).toBe(true);
   });
 });
 
-describe("charter goal G8 — generic stage skills name no tracker (stricter than the bundle rule)", () => {
-  it("no generic stage skill contains any tracker NAME or API string", () => {
+describe('charter goal G8 — generic stage skills name no tracker (stricter than the bundle rule)', () => {
+  it('no generic stage skill contains any tracker NAME or API string', () => {
     const files = GENERIC_STAGE_SKILL_DIRS.flatMap((dir) =>
       collectFiles(dir).map((file) => ({
         file,
-        content: readFileSync(file, "utf8"),
-      })),
+        content: readFileSync(file, 'utf8'),
+      }))
     );
     const offenders = scanGenericSkills(files);
 
     expect(
       offenders,
-      `generic stage skills must name no tracker (G8):\n${offenders.join("\n")}`,
+      `generic stage skills must name no tracker (G8):\n${offenders.join('\n')}`
     ).toEqual([]);
   });
 
-  it("the generic scan is non-vacuous — the set is non-empty and every dir contributes a file", () => {
+  it('the generic scan is non-vacuous — the set is non-empty and every dir contributes a file', () => {
     // Guard against a mis-rooted or over-filtered set silently passing: the
     // generic set must be non-empty AND each dir must yield at least one file.
     expect(GENERIC_STAGE_SKILL_DIRS.length).toBeGreaterThan(0);
     for (const dir of GENERIC_STAGE_SKILL_DIRS) {
       expect(
         collectFiles(dir).length,
-        `generic skill dir produced no files: ${dir}`,
+        `generic skill dir produced no files: ${dir}`
       ).toBeGreaterThan(0);
     }
   });
 
-  it("the stricter patterns catch a planted tracker NAME (not just an API string)", () => {
+  it('the stricter patterns catch a planted tracker NAME (not just an API string)', () => {
     // Mirrors the bundle-wide planted-offender unit, but proves the *name*-level
     // patterns bite: a bare adapter-skill name and a bare "Linear" product name —
     // neither of which trips the looser TRACKER_PATTERNS — must each be flagged.
     const adapterName = scanGenericSkills([
       {
-        file: path.join(
-          FLOW_SKILLS_DIR,
-          "capturing-work",
-          "__planted-offender__.md",
-        ),
-        content: "route this through the linear-adapter skill",
+        file: path.join(FLOW_SKILLS_DIR, 'capturing-work', '__planted-offender__.md'),
+        content: 'route this through the linear-adapter skill',
       },
     ]);
-    expect(
-      adapterName.length,
-      'planted "linear-adapter" name not caught',
-    ).toBeGreaterThan(0);
+    expect(adapterName.length, 'planted "linear-adapter" name not caught').toBeGreaterThan(0);
 
     const productName = scanGenericSkills([
       {
-        file: path.join(
-          FLOW_SKILLS_DIR,
-          "capturing-work",
-          "__planted-offender__.md",
-        ),
-        content: "create the issue in Linear",
+        file: path.join(FLOW_SKILLS_DIR, 'capturing-work', '__planted-offender__.md'),
+        content: 'create the issue in Linear',
       },
     ]);
-    expect(
-      productName.length,
-      'planted "Linear" product name not caught',
-    ).toBeGreaterThan(0);
+    expect(productName.length, 'planted "Linear" product name not caught').toBeGreaterThan(0);
   });
 });

@@ -86,12 +86,7 @@ export type EvidenceKind = 'ui' | 'temporal' | 'logic';
  * - `none` — no capture for this class (the `"off"` modes).
  */
 export type EvidenceCapture =
-  | 'annotated-gif'
-  | 'webm'
-  | 'screenshot'
-  | 'test-summary'
-  | 'full-output'
-  | 'none';
+  'annotated-gif' | 'webm' | 'screenshot' | 'test-summary' | 'full-output' | 'none';
 
 /**
  * The trigger that started the VERIFY run — the input the capture *format* infers

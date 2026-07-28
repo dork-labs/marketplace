@@ -16,7 +16,12 @@
  */
 
 import { classifyDispatchOutcome } from './dispatch-policy.ts';
-import type { DispatchConfig, DispatchOptions, OwnershipConfig, WipCap } from './dispatch-policy.ts';
+import type {
+  DispatchConfig,
+  DispatchOptions,
+  OwnershipConfig,
+  WipCap,
+} from './dispatch-policy.ts';
 import type { WorkItem } from './work-item.ts';
 import { invokedDirectly, isPlainObject, parseArgs, readRawInput } from './_shared.ts';
 

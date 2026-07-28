@@ -529,6 +529,46 @@ describe('selectDispatch — full policy (filter then rank)', () => {
     // Tier 1: DOR-UNBLOCKER blocks an open item → first. Then priority orders the rest.
     expect(ids(result)).toEqual(['DOR-UNBLOCKER', 'DOR-URGENT', 'DOR-MED']);
   });
+
+  it('DOR-531: tier 1 credits unblocking an item that is open but not yet agent/ready', () => {
+    // DOR-UNTRIAGED sits in the backlog (a dispatchable state CATEGORY) but was
+    // never triaged onto agent/ready, so filterEligible drops it. It is still
+    // "open" by the same definition filterEligible's blockedBy check uses —
+    // buildOpenSet is a state-category filter only, blind to the readiness
+    // label. DOR-UNBLOCKER's `blocks` edge points at it.
+    const untriaged = makeItem({
+      identifier: 'DOR-UNTRIAGED',
+      stateCategory: 'backlog',
+      labels: [], // no agent/ready — filtered out of eligibility, still "open"
+    });
+    const unblocker = makeItem({
+      identifier: 'DOR-UNBLOCKER',
+      priority: 4, // LOW priority — must win on tier 1 alone, not tier 2
+      relations: {
+        blocks: ['DOR-UNTRIAGED'],
+        blockedBy: [],
+        children: [],
+        relatedTo: [],
+      },
+    });
+    const plain = makeItem({
+      identifier: 'DOR-PLAIN',
+      priority: 1, // urgent — would outrank DOR-UNBLOCKER on tier 2 alone
+    });
+
+    const result = selectDispatch(
+      [untriaged, unblocker, plain],
+      { dispatch: DISPATCH, ownership: OWNERSHIP, wipCap: WIDE_WIP },
+      ownershipOpts()
+    );
+
+    // DOR-UNTRIAGED itself never dispatches (not agent/ready). DOR-UNBLOCKER
+    // leads DOR-PLAIN despite its lower priority, because unblocking work that
+    // is not yet ready is exactly what the tier-1 unblocker score rewards
+    // (TSDoc: "how many OPEN items this item blocks" — the full open set, the
+    // same one the blockedBy filter reads, not just the ready survivors).
+    expect(ids(result)).toEqual(['DOR-UNBLOCKER', 'DOR-PLAIN']);
+  });
 });
 
 describe('sizeRank — the estimate type the adapter actually emits', () => {

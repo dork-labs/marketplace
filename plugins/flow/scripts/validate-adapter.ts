@@ -25,48 +25,37 @@
  * Diagnostics go to stderr; stdout is always the JSON verdict.
  */
 
-import { readFileSync, realpathSync } from "node:fs";
-import { fileURLToPath } from "node:url";
+import { readFileSync, realpathSync } from 'node:fs';
+import { fileURLToPath } from 'node:url';
 
 /** The five workflow-state categories - the ONLY categories an adapter may emit (INV-1). */
-const STATE_CATEGORIES: string[] = [
-  "backlog",
-  "unstarted",
-  "started",
-  "completed",
-  "canceled",
-];
+const STATE_CATEGORIES: string[] = ['backlog', 'unstarted', 'started', 'completed', 'canceled'];
 
 /** The seven mutually-exclusive WorkItem types, sourced from the `type/*` label family. */
 const WORK_ITEM_TYPES: string[] = [
-  "idea",
-  "research",
-  "hypothesis",
-  "task",
-  "monitor",
-  "signal",
-  "meta",
+  'idea',
+  'research',
+  'hypothesis',
+  'task',
+  'monitor',
+  'signal',
+  'meta',
 ];
 
 /** The four agent dispositions, derived from the durable `agent/*` label family. */
-const AGENT_DISPOSITIONS: string[] = [
-  "ready",
-  "claimed",
-  "completed",
-  "needs-input",
-];
+const AGENT_DISPOSITIONS: string[] = ['ready', 'claimed', 'completed', 'needs-input'];
 
 /** The literal, re-namespaced readiness label that gates dispatch (INV-5). */
-const AGENT_READY_LABEL = "agent/ready";
+const AGENT_READY_LABEL = 'agent/ready';
 
 /** The optional WorkItem fields. A missing optional MUST be absent (undefined), never null/fabricated. */
 const OPTIONAL_FIELDS: string[] = [
-  "priority",
-  "size",
-  "project",
-  "assignee",
-  "agentDisposition",
-  "createdAt",
+  'priority',
+  'size',
+  'project',
+  'assignee',
+  'agentDisposition',
+  'createdAt',
 ];
 
 /** A single breached invariant in the verdict. */
@@ -129,25 +118,22 @@ Invariants:
 
 /** True for a non-array, non-null object. */
 function isPlainObject(value: unknown): value is Record<string, unknown> {
-  return typeof value === "object" && value !== null && !Array.isArray(value);
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
 }
 
 /** True for a string with at least one character. */
 function isNonEmptyString(value: unknown): value is string {
-  return typeof value === "string" && value.length > 0;
+  return typeof value === 'string' && value.length > 0;
 }
 
 /** True for an array whose every element is a string. */
 function isStringArray(value: unknown): value is string[] {
-  return (
-    Array.isArray(value) && value.every((entry) => typeof entry === "string")
-  );
+  return Array.isArray(value) && value.every((entry) => typeof entry === 'string');
 }
 
 /** A short, safe label for an item in failure details (its human key, or its index). */
 function itemLabel(item: unknown, index: number): string {
-  if (isPlainObject(item) && isNonEmptyString(item.identifier))
-    return item.identifier;
+  if (isPlainObject(item) && isNonEmptyString(item.identifier)) return item.identifier;
   return `item[${index}]`;
 }
 
@@ -165,16 +151,10 @@ function itemLabel(item: unknown, index: number): string {
  */
 function looksLikeNativeId(value: string, items: readonly unknown[]): boolean {
   for (const it of items) {
-    if (isPlainObject(it) && it.id === value && it.identifier !== value)
-      return true;
+    if (isPlainObject(it) && it.id === value && it.identifier !== value) return true;
   }
-  if (value.includes("_")) return true;
-  if (
-    /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(
-      value,
-    )
-  )
-    return true;
+  if (value.includes('_')) return true;
+  if (/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(value)) return true;
   if (/^[0-9a-f]{24,}$/i.test(value)) return true;
   return false;
 }
@@ -189,21 +169,18 @@ function checkInv1(items: readonly unknown[]): string[] {
   const details: string[] = [];
   items.forEach((item, index) => {
     if (!isPlainObject(item)) return;
-    if (
-      typeof item.stateCategory === "string" &&
-      !STATE_CATEGORIES.includes(item.stateCategory)
-    ) {
+    if (typeof item.stateCategory === 'string' && !STATE_CATEGORIES.includes(item.stateCategory)) {
       details.push(
-        `${itemLabel(item, index)} has stateCategory "${item.stateCategory}", not one of ${STATE_CATEGORIES.join(" | ")}`,
+        `${itemLabel(item, index)} has stateCategory "${item.stateCategory}", not one of ${STATE_CATEGORIES.join(' | ')}`
       );
     }
     if (
       isPlainObject(item.project) &&
-      typeof item.project.stateCategory === "string" &&
+      typeof item.project.stateCategory === 'string' &&
       !STATE_CATEGORIES.includes(item.project.stateCategory)
     ) {
       details.push(
-        `${itemLabel(item, index)} has project.stateCategory "${item.project.stateCategory}", not one of the five`,
+        `${itemLabel(item, index)} has project.stateCategory "${item.project.stateCategory}", not one of the five`
       );
     }
   });
@@ -226,52 +203,40 @@ function checkInv2(items: readonly unknown[]): string[] {
     }
 
     // Required string fields.
-    if (!isNonEmptyString(item.id))
-      details.push(`${label} field "id" must be a non-empty string`);
+    if (!isNonEmptyString(item.id)) details.push(`${label} field "id" must be a non-empty string`);
     if (!isNonEmptyString(item.identifier))
       details.push(`${label} field "identifier" must be a non-empty string`);
-    if (typeof item.title !== "string")
-      details.push(`${label} field "title" must be a string`);
-    if (typeof item.description !== "string")
+    if (typeof item.title !== 'string') details.push(`${label} field "title" must be a string`);
+    if (typeof item.description !== 'string')
       details.push(`${label} field "description" must be a string`);
-    if (typeof item.stateName !== "string")
+    if (typeof item.stateName !== 'string')
       details.push(`${label} field "stateName" must be a string`);
 
     // Required enums (membership owned by INV-1 for stateCategory; here we check presence + enum for type).
-    if (!(typeof item.type === "string" && WORK_ITEM_TYPES.includes(item.type)))
-      details.push(
-        `${label} field "type" must be one of ${WORK_ITEM_TYPES.join(" | ")}`,
-      );
-    if (typeof item.stateCategory !== "string")
+    if (!(typeof item.type === 'string' && WORK_ITEM_TYPES.includes(item.type)))
+      details.push(`${label} field "type" must be one of ${WORK_ITEM_TYPES.join(' | ')}`);
+    if (typeof item.stateCategory !== 'string')
       details.push(`${label} field "stateCategory" must be a string`);
 
     // parent: string | null (never "" - an empty string is a fabricated stand-in for null).
     if (!(item.parent === null || isNonEmptyString(item.parent)))
-      details.push(
-        `${label} field "parent" must be a non-empty string or null`,
-      );
+      details.push(`${label} field "parent" must be a non-empty string or null`);
 
     // relations: object with string[] arrays + optional string duplicateOf.
     if (!isPlainObject(item.relations)) {
       details.push(`${label} field "relations" must be an object`);
     } else {
       const relations = item.relations;
-      for (const key of ["blocks", "blockedBy", "children", "relatedTo"]) {
+      for (const key of ['blocks', 'blockedBy', 'children', 'relatedTo']) {
         if (!isStringArray(relations[key]))
           details.push(`${label} relations.${key} must be a string[]`);
       }
-      if (
-        relations.duplicateOf !== undefined &&
-        typeof relations.duplicateOf !== "string"
-      )
-        details.push(
-          `${label} relations.duplicateOf must be a string when present`,
-        );
+      if (relations.duplicateOf !== undefined && typeof relations.duplicateOf !== 'string')
+        details.push(`${label} relations.duplicateOf must be a string when present`);
     }
 
     // labels: string[].
-    if (!isStringArray(item.labels))
-      details.push(`${label} field "labels" must be a string[]`);
+    if (!isStringArray(item.labels)) details.push(`${label} field "labels" must be a string[]`);
 
     // Optionals: when present, never null (a missing optional is absent, not null) and correctly typed.
     for (const field of OPTIONAL_FIELDS) {
@@ -279,52 +244,45 @@ function checkInv2(items: readonly unknown[]): string[] {
       const value = item[field];
       if (value === null) {
         details.push(
-          `${label} optional "${field}" is null; a missing optional must be absent, not null`,
+          `${label} optional "${field}" is null; a missing optional must be absent, not null`
         );
         continue;
       }
       if (value === undefined) continue;
       if (
-        field === "priority" &&
-        !(
-          typeof value === "number" &&
-          Number.isInteger(value) &&
-          value >= 0 &&
-          value <= 4
-        )
+        field === 'priority' &&
+        !(typeof value === 'number' && Number.isInteger(value) && value >= 0 && value <= 4)
       )
-        details.push(
-          `${label} optional "priority" must be an integer in {0,1,2,3,4}`,
-        );
+        details.push(`${label} optional "priority" must be an integer in {0,1,2,3,4}`);
       // `size` is a union by design: a numeric estimate (points, any scale) or a
       // t-shirt string. The adapter passes its tracker's native shape through
       // unconverted; the dispatch policy maps both onto one ordinal scale.
       if (
-        field === "size" &&
+        field === 'size' &&
         !isNonEmptyString(value) &&
-        !(typeof value === "number" && Number.isFinite(value) && value >= 0)
+        !(typeof value === 'number' && Number.isFinite(value) && value >= 0)
       )
         details.push(
-          `${label} optional "size" must be a non-empty string (t-shirt size) or a non-negative finite number (points)`,
+          `${label} optional "size" must be a non-empty string (t-shirt size) or a non-negative finite number (points)`
         );
-      if (field === "assignee" && !isNonEmptyString(value))
+      if (field === 'assignee' && !isNonEmptyString(value))
         details.push(`${label} optional "assignee" must be a non-empty string`);
-      if (field === "createdAt" && typeof value !== "string")
+      if (field === 'createdAt' && typeof value !== 'string')
         details.push(`${label} optional "createdAt" must be a string`);
       if (
-        field === "agentDisposition" &&
-        !(typeof value === "string" && AGENT_DISPOSITIONS.includes(value))
+        field === 'agentDisposition' &&
+        !(typeof value === 'string' && AGENT_DISPOSITIONS.includes(value))
       )
         details.push(
-          `${label} optional "agentDisposition" must be one of ${AGENT_DISPOSITIONS.join(" | ")}`,
+          `${label} optional "agentDisposition" must be one of ${AGENT_DISPOSITIONS.join(' | ')}`
         );
-      if (field === "project") {
+      if (field === 'project') {
         if (!isPlainObject(value)) {
           details.push(`${label} optional "project" must be an object`);
         } else {
           if (!isNonEmptyString(value.id))
             details.push(`${label} project.id must be a non-empty string`);
-          if (typeof value.name !== "string")
+          if (typeof value.name !== 'string')
             details.push(`${label} project.name must be a string`);
         }
       }
@@ -348,22 +306,22 @@ function checkInv3(items: readonly unknown[]): string[] {
     if (!isPlainObject(item) || !isPlainObject(item.relations)) return;
     const label = itemLabel(item, index);
     const relations = item.relations;
-    for (const key of ["blocks", "blockedBy", "children", "relatedTo"]) {
+    for (const key of ['blocks', 'blockedBy', 'children', 'relatedTo']) {
       const refs = relations[key];
       if (!isStringArray(refs)) continue; // structural typing is INV-2's job
       for (const ref of refs) {
         if (looksLikeNativeId(ref, items))
           details.push(
-            `${label} relations.${key} contains "${ref}", which has a native-id shape (relations must carry human-key identifiers, never native ids)`,
+            `${label} relations.${key} contains "${ref}", which has a native-id shape (relations must carry human-key identifiers, never native ids)`
           );
       }
     }
     if (
-      typeof relations.duplicateOf === "string" &&
+      typeof relations.duplicateOf === 'string' &&
       looksLikeNativeId(relations.duplicateOf, items)
     )
       details.push(
-        `${label} relations.duplicateOf "${relations.duplicateOf}" has a native-id shape (must be a human-key identifier)`,
+        `${label} relations.duplicateOf "${relations.duplicateOf}" has a native-id shape (must be a human-key identifier)`
       );
   });
   return details;
@@ -388,28 +346,28 @@ function checkInv4(items: readonly unknown[]): string[] {
     for (const lbl of labels) {
       if (!/^[^/]+\/.+$/.test(lbl))
         details.push(
-          `${label} carries bare label "${lbl}" (labels must be re-namespaced into a generic family/leaf form, e.g. agent/ready)`,
+          `${label} carries bare label "${lbl}" (labels must be re-namespaced into a generic family/leaf form, e.g. agent/ready)`
         );
     }
 
     // type must trace to a type/<type> label.
     if (
-      typeof item.type === "string" &&
+      typeof item.type === 'string' &&
       WORK_ITEM_TYPES.includes(item.type) &&
       !labels.includes(`type/${item.type}`)
     )
       details.push(
-        `${label} has type "${item.type}" but no matching "type/${item.type}" label (type must derive from the type/* family)`,
+        `${label} has type "${item.type}" but no matching "type/${item.type}" label (type must derive from the type/* family)`
       );
 
     // agentDisposition, when present, must trace to the matching agent/<disposition> label.
     if (
-      typeof item.agentDisposition === "string" &&
+      typeof item.agentDisposition === 'string' &&
       AGENT_DISPOSITIONS.includes(item.agentDisposition) &&
       !labels.includes(`agent/${item.agentDisposition}`)
     )
       details.push(
-        `${label} has agentDisposition "${item.agentDisposition}" but no matching "agent/${item.agentDisposition}" label (disposition must derive from the agent/* family)`,
+        `${label} has agentDisposition "${item.agentDisposition}" but no matching "agent/${item.agentDisposition}" label (disposition must derive from the agent/* family)`
       );
   });
   return details;
@@ -435,18 +393,15 @@ function checkInv5(items: readonly unknown[]): string[] {
     const labels = item.labels;
 
     // (a) Readiness must be the label, not just the field.
-    if (
-      item.agentDisposition === "ready" &&
-      !labels.includes(AGENT_READY_LABEL)
-    )
+    if (item.agentDisposition === 'ready' && !labels.includes(AGENT_READY_LABEL))
       details.push(
-        `${label} presents as ready (agentDisposition "ready") but lacks the "${AGENT_READY_LABEL}" label; readiness must be the label, never a separate field (the gate matches the label and would silently skip this item)`,
+        `${label} presents as ready (agentDisposition "ready") but lacks the "${AGENT_READY_LABEL}" label; readiness must be the label, never a separate field (the gate matches the label and would silently skip this item)`
       );
 
     // (b) The readiness signal must never appear as a bare leaf.
-    if (labels.includes("ready"))
+    if (labels.includes('ready'))
       details.push(
-        `${label} carries the bare-leaf label "ready"; the readiness signal must be the re-namespaced "${AGENT_READY_LABEL}" label, or the dispatch gate silently fails to match it`,
+        `${label} carries the bare-leaf label "ready"; the readiness signal must be the re-namespaced "${AGENT_READY_LABEL}" label, or the dispatch gate silently fails to match it`
       );
   });
   return details;
@@ -461,17 +416,16 @@ function checkInv5(items: readonly unknown[]): string[] {
  */
 function validate(items: readonly unknown[]): Verdict {
   const checks: Array<[string, (items: readonly unknown[]) => string[]]> = [
-    ["INV-1", checkInv1],
-    ["INV-2", checkInv2],
-    ["INV-3", checkInv3],
-    ["INV-4", checkInv4],
-    ["INV-5", checkInv5],
+    ['INV-1', checkInv1],
+    ['INV-2', checkInv2],
+    ['INV-3', checkInv3],
+    ['INV-4', checkInv4],
+    ['INV-5', checkInv5],
   ];
   const failures: Failure[] = [];
   for (const [invariant, check] of checks) {
     const details = check(items);
-    if (details.length > 0)
-      failures.push({ invariant, detail: details.join("; ") });
+    if (details.length > 0) failures.push({ invariant, detail: details.join('; ') });
   }
   return { ok: failures.length === 0, failures };
 }
@@ -487,13 +441,13 @@ function parseArgs(argv: readonly string[]): HarnessArgs {
   const out: HarnessArgs = { help: false };
   for (let i = 0; i < argv.length; i += 1) {
     const arg = argv[i];
-    if (arg === "--help" || arg === "-h") {
+    if (arg === '--help' || arg === '-h') {
       out.help = true;
-    } else if (arg === "--fixture") {
+    } else if (arg === '--fixture') {
       out.fixturePath = argv[i + 1];
       i += 1;
-    } else if (arg.startsWith("--fixture=")) {
-      out.fixturePath = arg.slice("--fixture=".length);
+    } else if (arg.startsWith('--fixture=')) {
+      out.fixturePath = arg.slice('--fixture='.length);
     }
   }
   return out;
@@ -506,7 +460,7 @@ function parseArgs(argv: readonly string[]): HarnessArgs {
  * @returns The raw fixture text.
  */
 function readRawInput(fixturePath?: string): string {
-  return readFileSync(fixturePath ?? 0, "utf8");
+  return readFileSync(fixturePath ?? 0, 'utf8');
 }
 
 /**
@@ -519,9 +473,7 @@ function readRawInput(fixturePath?: string): string {
 function extractItems(parsed: unknown): unknown[] {
   if (Array.isArray(parsed)) return parsed;
   if (isPlainObject(parsed) && Array.isArray(parsed.items)) return parsed.items;
-  throw new Error(
-    'fixture must be a JSON array of WorkItems, or an object { "items": [ ... ] }',
-  );
+  throw new Error('fixture must be a JSON array of WorkItems, or an object { "items": [ ... ] }');
 }
 
 /**
@@ -560,7 +512,7 @@ function main(argv: readonly string[]): number {
     const detail = `invalid input - could not read or parse the fixture: ${(err as Error).message}`;
     process.stderr.write(`validate-adapter: ${detail}\n`);
     process.stdout.write(
-      `${JSON.stringify({ ok: false, failures: [{ invariant: "INPUT", detail }] }, null, 2)}\n`,
+      `${JSON.stringify({ ok: false, failures: [{ invariant: 'INPUT', detail }] }, null, 2)}\n`
     );
     return 2;
   }
@@ -572,7 +524,7 @@ function main(argv: readonly string[]): number {
     const detail = `invalid input - ${(err as Error).message}`;
     process.stderr.write(`validate-adapter: ${detail}\n`);
     process.stdout.write(
-      `${JSON.stringify({ ok: false, failures: [{ invariant: "INPUT", detail }] }, null, 2)}\n`,
+      `${JSON.stringify({ ok: false, failures: [{ invariant: 'INPUT', detail }] }, null, 2)}\n`
     );
     return 2;
   }
@@ -583,7 +535,7 @@ function main(argv: readonly string[]): number {
     process.stderr.write(
       `validate-adapter: ${verdict.failures.length} invariant(s) failed: ${verdict.failures
         .map((f) => f.invariant)
-        .join(", ")}\n`,
+        .join(', ')}\n`
     );
   }
   return verdict.ok ? 0 : 1;

@@ -50,13 +50,7 @@ export type StateCategory = z.infer<typeof StateCategorySchema>;
  * exclusive — exactly one per issue.
  */
 export type WorkItemType =
-  | 'idea'
-  | 'research'
-  | 'hypothesis'
-  | 'task'
-  | 'monitor'
-  | 'signal'
-  | 'meta';
+  'idea' | 'research' | 'hypothesis' | 'task' | 'monitor' | 'signal' | 'meta';
 
 /**
  * Tracker-native priority, normalized to the canonical 0–4 scale:
@@ -202,4 +196,41 @@ export interface WorkItem {
    * neutral age tier.
    */
   createdAt?: string;
+}
+
+/**
+ * Reads an item's label set, degrading an absent or wrong-typed `labels`
+ * value to "no labels" rather than throwing.
+ *
+ * The `Array.isArray` check is load-bearing twice over. It stops a missing
+ * `labels` array from crashing every reader of this shape — the dispatch
+ * eligibility filter, the charter G3 starvation detector, and the
+ * comment-response rules (§5) all key off a durable label. And it rejects a
+ * bare string: `'agent/ready'.includes(…)` is a SUBSTRING test, so a scalar
+ * `labels: "agent/ready"` would otherwise sail through a readiness or
+ * needs-input check on a shape the contract never allowed.
+ *
+ * The canonical accessor for {@link WorkItem.labels}: every module that reads
+ * labels imports this (and {@link hasLabel}) rather than re-deriving the
+ * guard, so a non-conformant `labels` value is fixed once, here, next to the
+ * contract it defends.
+ *
+ * @param item - The item under evaluation.
+ * @returns The item's labels, or `[]` when unavailable.
+ */
+export function labelsOf(item: WorkItem): readonly string[] {
+  return Array.isArray(item.labels) ? item.labels : [];
+}
+
+/**
+ * Whether an item carries a given durable label (e.g. `agent/ready`,
+ * `agent/needs-input`), degrading gracefully via {@link labelsOf} rather than
+ * throwing on a non-conformant `labels` value.
+ *
+ * @param item - The item under evaluation.
+ * @param label - The exact label to test for (membership, never substring).
+ * @returns `true` if `label` is present in the item's label set.
+ */
+export function hasLabel(item: WorkItem, label: string): boolean {
+  return labelsOf(item).includes(label);
 }

@@ -1,6 +1,10 @@
 import { describe, it, expect } from 'vitest';
 import { InvolvementSchema } from '../scripts/config-schema.ts';
-import { resolveCommsChannel, type CommsTrigger, type InvolvementConfig } from '../scripts/comms.ts';
+import {
+  resolveCommsChannel,
+  type CommsTrigger,
+  type InvolvementConfig,
+} from '../scripts/comms.ts';
 import type { IdentityMode } from '../scripts/identity.ts';
 
 /** The §9 resolved default involvement config — the oracle the spec ships. */

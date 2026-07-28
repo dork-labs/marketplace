@@ -19,7 +19,12 @@
  */
 
 import { describe, expect, it } from 'vitest';
-import { DispatchSchema, OwnershipSchema, RecoverySchema, WipCapSchema } from '../scripts/config-schema.ts';
+import {
+  DispatchSchema,
+  OwnershipSchema,
+  RecoverySchema,
+  WipCapSchema,
+} from '../scripts/config-schema.ts';
 import type { DispatchOptions } from '../scripts/dispatch-policy.ts';
 import type { FlowRun, RecoveryConfig, RecoveryContext } from '../scripts/flow-run.ts';
 import type { WorkItem } from '../scripts/work-item.ts';

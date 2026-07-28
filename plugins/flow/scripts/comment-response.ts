@@ -53,6 +53,7 @@
 
 import type { z } from 'zod';
 import type { CommentsSchema } from './config-schema.ts';
+import { hasLabel } from './work-item.ts';
 import type { OwnershipClass, WorkItem } from './work-item.ts';
 
 /** Resolved {@link CommentsSchema} config — `respondWhen` + `ambiguousBias`. */
@@ -145,6 +146,35 @@ const NEEDS_INPUT_LABEL = 'agent/needs-input';
 const FLOW_ADDRESS_TOKENS = ['/flow', '@flow'];
 
 /**
+ * Reads a comment's @mention list, degrading an absent or wrong-typed
+ * `mentions` value to "no mentions" rather than throwing.
+ *
+ * `InboxComment` is an adapter output exactly like {@link WorkItem}, and the
+ * same graceful-degradation argument applies (see `work-item.ts`'s {@link
+ * hasLabel}): the generic layer is the runtime and must not crash on a
+ * non-conformant `getInbox` shape, even though `mentions` is required under
+ * the adapter contract.
+ *
+ * @param comment - The inbound comment under evaluation.
+ * @returns The comment's mentions, or `[]` when unavailable.
+ */
+function mentionsOf(comment: InboxComment): readonly string[] {
+  return Array.isArray(comment.mentions) ? comment.mentions : [];
+}
+
+/**
+ * Reads a comment's body text, degrading an absent or wrong-typed `body`
+ * value to the empty string rather than throwing. Same rationale as {@link
+ * mentionsOf}.
+ *
+ * @param comment - The inbound comment under evaluation.
+ * @returns The comment's body, or `''` when unavailable.
+ */
+function bodyOf(comment: InboxComment): string {
+  return typeof comment.body === 'string' ? comment.body : '';
+}
+
+/**
  * Whether the comment is the agent's own (rule 1): authored by the agent account,
  * or — in shared-account mode — carrying the `identity.marker`. The marker check
  * is the only signal when multiple agents share one tracker account.
@@ -153,7 +183,7 @@ function isAgentsOwnComment(comment: InboxComment, identity: CommentIdentity): b
   if (comment.author === identity.agent) return true;
   // Shared-account mode: the marker is the only authorship signal. A non-empty
   // marker present in the body means the agent wrote it.
-  return identity.marker.length > 0 && comment.body.includes(identity.marker);
+  return identity.marker.length > 0 && bodyOf(comment).includes(identity.marker);
 }
 
 /**
@@ -162,8 +192,9 @@ function isAgentsOwnComment(comment: InboxComment, identity: CommentIdentity): b
  * address). A directly-addressed comment overrides ownership.
  */
 function isDirectlyAddressed(comment: InboxComment, identity: CommentIdentity): boolean {
-  if (comment.mentions.includes(identity.agent)) return true;
-  return FLOW_ADDRESS_TOKENS.some((token) => comment.body.includes(token));
+  if (mentionsOf(comment).includes(identity.agent)) return true;
+  const body = bodyOf(comment);
+  return FLOW_ADDRESS_TOKENS.some((token) => body.includes(token));
 }
 
 /**
@@ -208,8 +239,12 @@ export function shouldRespondToComment(
 
   // Rule 3 — resume when a parked `agent/needs-input` item gets a non-agent
   // comment (rule 1 already excluded the agent's own comments). That reply is
-  // the answer the agent parked for via `needsInput`.
-  if (ctx.item.labels.includes(NEEDS_INPUT_LABEL)) {
+  // the answer the agent parked for via `needsInput`. `hasLabel` (the shared
+  // `work-item.ts` accessor) degrades a missing, `null`, or bare-string
+  // `labels` value instead of crashing — see DOR-535: `labels` is required
+  // under the adapter contract, but the runtime must not crash on a
+  // non-conformant adapter, and a bare string would otherwise substring-match.
+  if (hasLabel(ctx.item, NEEDS_INPUT_LABEL)) {
     return { action: 'resume', rule: 3 };
   }
 

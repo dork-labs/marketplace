@@ -30,10 +30,19 @@ import {
   OwnershipSchema,
   WipCapSchema,
 } from '../scripts/config-schema.ts';
-import { classifyDispatchOutcome, selectDispatch, type DispatchOptions } from '../scripts/dispatch-policy.ts';
+import {
+  classifyDispatchOutcome,
+  selectDispatch,
+  type DispatchOptions,
+} from '../scripts/dispatch-policy.ts';
 import type { MergeState } from '../scripts/gates-policy.ts';
 import type { WorkItem } from '../scripts/work-item.ts';
-import type { ReconcileContext, ReconcileResult, Reconciler, ReconcilerId } from '../scripts/reconciler.ts';
+import type {
+  ReconcileContext,
+  ReconcileResult,
+  Reconciler,
+  ReconcilerId,
+} from '../scripts/reconciler.ts';
 import {
   createReconcilerRegistry,
   isCadenceDue,

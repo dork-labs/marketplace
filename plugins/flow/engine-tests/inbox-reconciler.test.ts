@@ -22,7 +22,12 @@
  */
 
 import { describe, expect, it } from 'vitest';
-import { CommentsSchema, DispatchSchema, OwnershipSchema, WipCapSchema } from '../scripts/config-schema.ts';
+import {
+  CommentsSchema,
+  DispatchSchema,
+  OwnershipSchema,
+  WipCapSchema,
+} from '../scripts/config-schema.ts';
 import type { CommentIdentity, CommentsConfig } from '../scripts/comment-response.ts';
 import type { CommentAddedEvent } from '../scripts/events.ts';
 import { trackerEventDedupeKey } from '../scripts/events.ts';
