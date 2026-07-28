@@ -245,10 +245,11 @@ describe('shouldRespondToComment — non-conformance sweep (WorkItem fields)', (
     const item = { ...makeItem({ identifier: 'DOR-HOSTILE' }), [field]: value };
     const c = comment({ author: 'human-account', body: 'a plain comment' });
 
+    // `.not.toThrow()` is the whole assertion: `decision.action`/`.rule` are
+    // typed to `CommentAction`/`1 | 2 | 3 | 4 | 5`, so a `.toContain` check
+    // against their full range cannot fail for any value the return type
+    // permits — it would read as coverage it is not.
     expect(() => shouldRespondToComment(c, ctx('mine', item), DEFAULT_COMMENTS)).not.toThrow();
-    const decision = shouldRespondToComment(c, ctx('mine', item), DEFAULT_COMMENTS);
-    expect(['respond', 'resume', 'ignore']).toContain(decision.action);
-    expect([1, 2, 3, 4, 5]).toContain(decision.rule);
   });
 });
 
@@ -284,9 +285,6 @@ describe('shouldRespondToComment — non-conformance sweep (InboxComment fields)
       const item = makeItem({ identifier: 'DOR-1' });
 
       expect(() => shouldRespondToComment(c, ctx('mine', item), DEFAULT_COMMENTS)).not.toThrow();
-      const decision = shouldRespondToComment(c, ctx('mine', item), DEFAULT_COMMENTS);
-      expect(['respond', 'resume', 'ignore']).toContain(decision.action);
-      expect([1, 2, 3, 4, 5]).toContain(decision.rule);
     }
   );
 });

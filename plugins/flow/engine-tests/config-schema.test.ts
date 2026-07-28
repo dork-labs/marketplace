@@ -1,4 +1,4 @@
-import { readFileSync } from 'node:fs';
+import { existsSync, readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import path from 'node:path';
 import { describe, it, expect } from 'vitest';
@@ -12,32 +12,58 @@ import { serializeConfigJsonSchema } from '../scripts/generate-config-schema.ts'
 // engine-tests -> plugins/flow (the plugin bundle root)
 const pluginRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const configPath = path.join(pluginRoot, 'config', 'config.json');
+const configExamplePath = path.join(pluginRoot, 'config', 'config.example.json');
 const generatedSchemaPath = path.join(pluginRoot, 'config', 'config.schema.json');
 
+/**
+ * Reads the resolved config these tests validate against. `config/config.json`
+ * is gitignored by design (`.gitignore`: "generated per install by
+ * `/flow:init`... must never be committed") — a fresh clone has no
+ * `config.json` at all, only the checked-in `config.example.json` template.
+ * Falling back to the template rather than requiring a local `config.json`
+ * keeps the suite reproducible from a bare `git clone && npm ci && npm test`
+ * (DOR-537 follow-up: `681/681` was previously only reproducible with an
+ * untracked local `config.json` an unwitting reviewer wouldn't have).
+ *
+ * This is also the semantically correct fallback, not merely a convenient
+ * one: `config.example.json` is committed as the un-customized default
+ * config, and the tests that consume this function assert the on-disk config
+ * round-trips through `FlowConfigSchema` identically to `FlowConfigSchema.
+ * parse({})` — i.e. they were always testing "the default template", whether
+ * that template arrived via a real local `config.json` or the example.
+ */
 function readConfigJson(): unknown {
-  return JSON.parse(readFileSync(configPath, 'utf8'));
+  const resolvedPath = existsSync(configPath) ? configPath : configExamplePath;
+  return JSON.parse(readFileSync(resolvedPath, 'utf8'));
 }
 
 /**
  * Constructs a fresh Ajv 2019-draft validator with `ajv-formats` registered.
  *
- * The two `@ts-expect-error` waivers below are a known upstream typings gap
- * (DOR-537), not a bug in this test: `ajv` and `ajv-formats` ship CJS output
+ * The two casts below route around a known upstream typings gap (DOR-537),
+ * not a bug in this test: `ajv` (8.20.0) and `ajv-formats` ship CJS output
  * (`module.exports = exports = X; exports.default = X`, the standard
  * esModuleInterop-compatible shape) but their `.d.ts` files declare it with
- * ESM `export default` syntax rather than CJS `export =`. Under
- * `moduleResolution: NodeNext`, `tsc` resolves `ajv/dist/2019.js` — a deep
- * import outside ajv's package.json `exports` map — against the raw CJS
- * module namespace instead of unwrapping the default, so it sees no
- * construct/call signature. Every real consumer (Node's
- * `--experimental-strip-types`, esbuild, Vitest) unwraps the CJS interop
- * correctly at runtime; only this static check is fooled.
+ * ESM `export default` syntax rather than CJS `export =`, and neither package
+ * has a package.json `exports` map at all — so under `moduleResolution:
+ * NodeNext`, `tsc` resolves the deep import `ajv/dist/2019.js` (and the `.`
+ * entry point for `ajv-formats`) against the raw CJS module namespace instead
+ * of unwrapping the default, and sees no construct/call signature. Every real
+ * consumer (Node's `--experimental-strip-types`, esbuild, Vitest) unwraps the
+ * CJS interop correctly at runtime; only this static check is fooled.
+ *
+ * A `@ts-expect-error` waiver would be reverse-load-bearing here: it silently
+ * starts FAILING the build the day ajv/ajv-formats fix their typings (an
+ * "unused '@ts-expect-error' directive" error), turning an upstream fix into
+ * an outage for this repo. An explicit cast to the declared-but-unreachable
+ * default type has no such failure mode — it just becomes redundant, not
+ * broken, once the typings catch up.
  */
 function newAjv() {
-  // @ts-expect-error — ajv/NodeNext CJS interop gap, see doc comment above.
-  const ajv = new Ajv2019({ strict: false });
-  // @ts-expect-error — same interop gap, ajv-formats.
-  addFormats(ajv);
+  const Ajv2019Ctor = Ajv2019 as unknown as typeof import('ajv/dist/2019.js').default;
+  const addFormatsFn = addFormats as unknown as typeof import('ajv-formats').default;
+  const ajv = new Ajv2019Ctor({ strict: false });
+  addFormatsFn(ajv);
   return ajv;
 }
 

@@ -234,3 +234,63 @@ export function labelsOf(item: WorkItem): readonly string[] {
 export function hasLabel(item: WorkItem, label: string): boolean {
   return labelsOf(item).includes(label);
 }
+
+/**
+ * A single tracker comment as the adapter's `getInbox` normalizes it (the
+ * `InboxEntry.comment` shape). The generic layer reads only these fields; the
+ * adapter owns the tracker-native mapping.
+ *
+ * This is an adapter output exactly like {@link WorkItem}, and lives beside it
+ * for the same reason {@link hasLabel} lives beside {@link WorkItem.labels}:
+ * every reader of a non-conformant `InboxComment` — the comment-response rules
+ * (§5) AND {@link PollingTransport | the inbound transport} that produces the
+ * events those rules consume — must degrade the same way, not re-derive its
+ * own guard. `PollingTransport` is strictly upstream of `shouldRespondToComment`
+ * (`transport.ts` maps `InboxEntry.comment` onto a `TrackerEvent` before the
+ * comment-response rules ever see it), so a guard that only lives downstream
+ * leaves the unhardened producer reachable first (DOR-535 follow-up).
+ */
+export interface InboxComment {
+  /**
+   * Account id of the comment author, compared against `identity.agent` (rule 1)
+   * and used to detect non-agent replies (rule 3).
+   */
+  author: string;
+  /**
+   * Account ids @mentioned in the comment. An @mention of the agent account is a
+   * "directly addressed" signal (rule 2).
+   */
+  mentions: string[];
+  /**
+   * The comment text. Carries the `identity.marker` on the agent's own comments
+   * (rule 1, shared-account mode) and may carry an explicit `/flow` / `@flow`
+   * token that directly addresses the engine (rule 2).
+   */
+  body: string;
+}
+
+/**
+ * Reads a comment's @mention list, degrading an absent or wrong-typed
+ * `mentions` value to "no mentions" rather than throwing. `mentions` is
+ * required under the adapter's `getInbox` contract, but every reader —
+ * {@link PollingTransport}'s bare-mention detection as much as the
+ * comment-response rules — must survive a non-conformant one.
+ *
+ * @param comment - The inbound comment under evaluation.
+ * @returns The comment's mentions, or `[]` when unavailable.
+ */
+export function mentionsOf(comment: InboxComment): readonly string[] {
+  return Array.isArray(comment.mentions) ? comment.mentions : [];
+}
+
+/**
+ * Reads a comment's body text, degrading an absent or wrong-typed `body`
+ * value to the empty string rather than throwing. Same rationale as
+ * {@link mentionsOf}.
+ *
+ * @param comment - The inbound comment under evaluation.
+ * @returns The comment's body, or `''` when unavailable.
+ */
+export function bodyOf(comment: InboxComment): string {
+  return typeof comment.body === 'string' ? comment.body : '';
+}

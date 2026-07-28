@@ -619,29 +619,33 @@ function compareByFactor(
  * input. Tier weights live entirely in {@link DispatchConfig} — re-prioritizing
  * is a config edit, never a code change.
  *
- * **`candidatePool` and DOR-531.** The tier-1 unblockers score
- * ({@link unblockerScore}) needs the full "open" universe — every dispatchable
- * item, ready or not — to agree with {@link filterEligible}'s `blockedBy`
- * check on what "open" means. Left to default to `items` alone, a caller that
- * ranks only the (already-filtered) eligible survivors silently shrinks
- * "open" to "ready", and an item that unblocks three untriaged issues scores
- * `0` instead of `3`. {@link selectDispatch} passes the pre-filter candidate
- * set explicitly so the two passes can never drift apart again; a caller that
- * ranks standalone (as most of this module's own tests do) gets the same
- * items back by default, which is correct when nothing was filtered out.
+ * **`candidatePool` is REQUIRED, not defaulted (DOR-531).** The tier-1
+ * unblockers score ({@link unblockerScore}) needs the full "open" universe —
+ * every dispatchable item, ready or not — to agree with {@link
+ * filterEligible}'s `blockedBy` check on what "open" means. An earlier version
+ * of this function defaulted `candidatePool` to `items`, which is exactly the
+ * DOR-531 bug: `rankEligible(filterEligible(items, …), config)` — the natural
+ * way to compose the two passes — silently ranked against the already-filtered
+ * survivors, and an item that unblocks three untriaged issues scored `0`
+ * instead of `3`. A default here would keep reproducing that bug at every new
+ * call site (this function is exported from the barrel), so callers must pass
+ * `candidatePool` explicitly: `items` again for a standalone/rank-only caller
+ * that has not filtered (this module's own test suite), or the pre-filter set
+ * for a caller that composes with {@link filterEligible} (as
+ * {@link selectDispatch} does).
  *
  * @param items - The eligible survivors (output of {@link filterEligible}).
  * @param config - The resolved dispatch config (`rank` order + `sizeOrder`).
  * @param candidatePool - The full candidate set "open" is resolved against for
  *   the tier-1 unblockers score — the SAME set {@link filterEligible} used for
- *   its `blockedBy` check. Defaults to `items` for a standalone caller that has
- *   not filtered (rank-only usage, e.g. this module's own test suite).
+ *   its `blockedBy` check. Pass `items` again for a standalone caller that has
+ *   not filtered.
  * @returns A new array ordered by the ladder.
  */
 export function rankEligible(
   items: readonly WorkItem[],
   config: DispatchConfig,
-  candidatePool: readonly WorkItem[] = items
+  candidatePool: readonly WorkItem[]
 ): WorkItem[] {
   const openIdentifiers = buildOpenSet(candidatePool);
   return [...items].sort((a, b) => {

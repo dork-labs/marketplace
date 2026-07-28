@@ -32,13 +32,14 @@
  * @module @dorkos/flow/transport
  */
 
-import type { InboxComment } from './comment-response.ts';
 import {
   trackerEventDedupeKey,
   type CommentAddedEvent,
   type MentionEvent,
   type TrackerEvent,
 } from './events.ts';
+import { bodyOf, mentionsOf } from './work-item.ts';
+import type { InboxComment } from './work-item.ts';
 
 /**
  * A durable cursor marking the high-water point of consumed events — an opaque
@@ -131,10 +132,19 @@ export type InboxReader = () => Promise<readonly InboxEntry[]>;
  * a real comment — becomes a {@link CommentAddedEvent} carrying the
  * {@link InboxComment}. Pure and deterministic so the poll producer keys and
  * shapes events identically to the future webhook producer.
+ *
+ * Reads `entry.comment` through {@link bodyOf} / {@link mentionsOf} (the
+ * `work-item.ts` accessors also used by the comment-response rules) rather
+ * than direct property access: `PollingTransport` is strictly upstream of
+ * `shouldRespondToComment` — it produces the exact `InboxComment` payload the
+ * comment-response rules consume — so a non-conformant `getInbox` entry must
+ * degrade here first, not crash before the hardened path is ever reached
+ * (DOR-535 follow-up).
  */
 function entryToEvent(entry: InboxEntry): CommentAddedEvent | MentionEvent {
   const actor = entry.actor ?? entry.comment.author;
-  const isBareMention = entry.comment.body.trim().length === 0 && entry.comment.mentions.length > 0;
+  const mentions = mentionsOf(entry.comment);
+  const isBareMention = bodyOf(entry.comment).trim().length === 0 && mentions.length > 0;
 
   if (isBareMention) {
     return {
@@ -145,7 +155,7 @@ function entryToEvent(entry: InboxEntry): CommentAddedEvent | MentionEvent {
       receivedVia: 'poll',
       dedupeKey: trackerEventDedupeKey('mention', entry.itemId, entry.occurredAt),
       raw: entry.raw,
-      mentioned: entry.comment.mentions[0],
+      mentioned: mentions[0],
     };
   }
 

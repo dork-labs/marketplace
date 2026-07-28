@@ -16,7 +16,7 @@
  *     (the human gate is not agent-driven).
  *   - `done` → `stateCategory: "completed"`.
  */
-import { readFileSync } from 'node:fs';
+import { existsSync, readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import path from 'node:path';
 import { describe, it, expect } from 'vitest';
@@ -25,6 +25,10 @@ import { StagesSchema, type Stage } from '../scripts/config-schema.ts';
 // engine-tests -> plugins/flow (the plugin bundle root)
 const pluginRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const configPath = path.join(pluginRoot, 'config', 'config.json');
+// `config.json` is gitignored (generated per install by `/flow:init`); a fresh
+// clone falls back to the committed, un-customized `config.example.json` — see
+// `config-schema.test.ts`'s `readConfigJson` for the full rationale.
+const configExamplePath = path.join(pluginRoot, 'config', 'config.example.json');
 
 /**
  * The projection a stage transition writes onto a work item. Mirrors the
@@ -138,7 +142,8 @@ describe('stage → projection round-trip (config-driven)', () => {
   });
 
   it('the resolved defaults match the on-disk .agents/flow/config.json stages', () => {
-    const onDisk = JSON.parse(readFileSync(configPath, 'utf8')) as {
+    const resolvedPath = existsSync(configPath) ? configPath : configExamplePath;
+    const onDisk = JSON.parse(readFileSync(resolvedPath, 'utf8')) as {
       stages: Record<string, unknown>;
     };
     const fromDisk = StagesSchema.parse(onDisk.stages);

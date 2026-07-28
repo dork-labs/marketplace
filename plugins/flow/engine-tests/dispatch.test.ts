@@ -288,7 +288,7 @@ describe('rankEligible — 7-tier ladder', () => {
       }),
     ];
     // Same priority; DOR-B blocks an open item so it leads despite identifier order.
-    expect(ids(rankEligible(items, DISPATCH))).toEqual(['DOR-B', 'DOR-A']);
+    expect(ids(rankEligible(items, DISPATCH, items))).toEqual(['DOR-B', 'DOR-A']);
   });
 
   it('tier 2: priority orders urgent → high → medium → low → none', () => {
@@ -299,7 +299,7 @@ describe('rankEligible — 7-tier ladder', () => {
       makeItem({ identifier: 'DOR-MED', priority: 3 }),
       makeItem({ identifier: 'DOR-HIGH', priority: 2 }),
     ];
-    expect(ids(rankEligible(items, DISPATCH))).toEqual([
+    expect(ids(rankEligible(items, DISPATCH, items))).toEqual([
       'DOR-URGENT',
       'DOR-HIGH',
       'DOR-MED',
@@ -324,7 +324,7 @@ describe('rankEligible — 7-tier ladder', () => {
       }),
     ];
     // Equal on tiers 1–2; tier 3 promotes the started-project item.
-    expect(ids(rankEligible(items, DISPATCH))).toEqual(['DOR-PROG', 'DOR-PLANNED']);
+    expect(ids(rankEligible(items, DISPATCH, items))).toEqual(['DOR-PROG', 'DOR-PLANNED']);
   });
 
   it('tier 5: size — small-first orders smaller estimates ahead', () => {
@@ -333,7 +333,7 @@ describe('rankEligible — 7-tier ladder', () => {
       makeItem({ identifier: 'DOR-SM', size: 'sm' }),
       makeItem({ identifier: 'DOR-XL', size: 'xl' }),
     ];
-    expect(ids(rankEligible(items, DISPATCH))).toEqual(['DOR-SM', 'DOR-LG', 'DOR-XL']);
+    expect(ids(rankEligible(items, DISPATCH, items))).toEqual(['DOR-SM', 'DOR-LG', 'DOR-XL']);
   });
 
   it('tier 5: size — large-first inverts the order', () => {
@@ -343,7 +343,7 @@ describe('rankEligible — 7-tier ladder', () => {
       makeItem({ identifier: 'DOR-LG', size: 'lg' }),
       makeItem({ identifier: 'DOR-XL', size: 'xl' }),
     ];
-    expect(ids(rankEligible(items, largeFirst))).toEqual(['DOR-XL', 'DOR-LG', 'DOR-SM']);
+    expect(ids(rankEligible(items, largeFirst, items))).toEqual(['DOR-XL', 'DOR-LG', 'DOR-SM']);
   });
 
   it('tier 5: Fibonacci point estimates rank alongside t-shirt sizes', () => {
@@ -352,7 +352,7 @@ describe('rankEligible — 7-tier ladder', () => {
       makeItem({ identifier: 'DOR-1', size: '1' }),
       makeItem({ identifier: 'DOR-3', size: '3' }),
     ];
-    expect(ids(rankEligible(items, DISPATCH))).toEqual(['DOR-1', 'DOR-3', 'DOR-8']);
+    expect(ids(rankEligible(items, DISPATCH, items))).toEqual(['DOR-1', 'DOR-3', 'DOR-8']);
   });
 
   it('tier 6: age — oldest created first', () => {
@@ -370,7 +370,7 @@ describe('rankEligible — 7-tier ladder', () => {
         createdAt: '2026-02-01T00:00:00.000Z',
       }),
     ];
-    expect(ids(rankEligible(items, DISPATCH))).toEqual(['DOR-OLD', 'DOR-MID', 'DOR-NEW']);
+    expect(ids(rankEligible(items, DISPATCH, items))).toEqual(['DOR-OLD', 'DOR-MID', 'DOR-NEW']);
   });
 
   it('tier 7: identifier breaks an otherwise-total tie deterministically', () => {
@@ -380,7 +380,7 @@ describe('rankEligible — 7-tier ladder', () => {
       makeItem({ identifier: 'DOR-20' }),
     ];
     // All fields identical → only the identifier tiebreak distinguishes them.
-    expect(ids(rankEligible(items, DISPATCH))).toEqual(['DOR-10', 'DOR-20', 'DOR-30']);
+    expect(ids(rankEligible(items, DISPATCH, items))).toEqual(['DOR-10', 'DOR-20', 'DOR-30']);
   });
 
   it('later tiers break ties left by earlier ones (priority then size)', () => {
@@ -390,7 +390,7 @@ describe('rankEligible — 7-tier ladder', () => {
       makeItem({ identifier: 'DOR-C', priority: 1, size: 'xl' }),
     ];
     // C wins on priority; A vs B tie on priority → size (small-first) puts B first.
-    expect(ids(rankEligible(items, DISPATCH))).toEqual(['DOR-C', 'DOR-B', 'DOR-A']);
+    expect(ids(rankEligible(items, DISPATCH, items))).toEqual(['DOR-C', 'DOR-B', 'DOR-A']);
   });
 });
 
@@ -401,7 +401,7 @@ describe('rankEligible — graceful degradation (missing fields are neutral)', (
       makeItem({ identifier: 'DOR-LOW', priority: 4 }),
     ];
     // A real "low" still outranks a missing priority.
-    expect(ids(rankEligible(items, DISPATCH))).toEqual(['DOR-LOW', 'DOR-NEUTRAL']);
+    expect(ids(rankEligible(items, DISPATCH, items))).toEqual(['DOR-LOW', 'DOR-NEUTRAL']);
   });
 
   it('treats missing size as neutral, not as smallest', () => {
@@ -410,7 +410,7 @@ describe('rankEligible — graceful degradation (missing fields are neutral)', (
       makeItem({ identifier: 'DOR-XL', size: 'xl' }),
     ];
     // Even the largest concrete size beats a missing one (neutral sorts last).
-    expect(ids(rankEligible(items, DISPATCH))).toEqual(['DOR-XL', 'DOR-NEUTRAL']);
+    expect(ids(rankEligible(items, DISPATCH, items))).toEqual(['DOR-XL', 'DOR-NEUTRAL']);
   });
 
   it('treats an unrecognized size estimate as neutral', () => {
@@ -418,7 +418,7 @@ describe('rankEligible — graceful degradation (missing fields are neutral)', (
       makeItem({ identifier: 'DOR-WEIRD', size: 'gigantic' }),
       makeItem({ identifier: 'DOR-SM', size: 'sm' }),
     ];
-    expect(ids(rankEligible(items, DISPATCH))).toEqual(['DOR-SM', 'DOR-WEIRD']);
+    expect(ids(rankEligible(items, DISPATCH, items))).toEqual(['DOR-SM', 'DOR-WEIRD']);
   });
 
   it('treats missing createdAt as neutral in the age tier', () => {
@@ -429,7 +429,7 @@ describe('rankEligible — graceful degradation (missing fields are neutral)', (
         createdAt: '2026-01-01T00:00:00.000Z',
       }),
     ];
-    expect(ids(rankEligible(items, DISPATCH))).toEqual(['DOR-DATED', 'DOR-NOAGE']);
+    expect(ids(rankEligible(items, DISPATCH, items))).toEqual(['DOR-DATED', 'DOR-NOAGE']);
   });
 
   it('does not mutate the input array', () => {
@@ -438,7 +438,7 @@ describe('rankEligible — graceful degradation (missing fields are neutral)', (
       makeItem({ identifier: 'DOR-A', priority: 1 }),
     ];
     const before = ids(items);
-    rankEligible(items, DISPATCH);
+    rankEligible(items, DISPATCH, items);
     expect(ids(items)).toEqual(before);
   });
 });
@@ -578,7 +578,7 @@ describe('sizeRank — the estimate type the adapter actually emits', () => {
       makeItem({ identifier: 'DOR-1', size: 1 }),
       makeItem({ identifier: 'DOR-3', size: 3 }),
     ];
-    expect(ids(rankEligible(items, DISPATCH))).toEqual(['DOR-1', 'DOR-3', 'DOR-8']);
+    expect(ids(rankEligible(items, DISPATCH, items))).toEqual(['DOR-1', 'DOR-3', 'DOR-8']);
   });
 
   it('ranks numeric and t-shirt estimates on one shared scale', () => {
@@ -588,7 +588,7 @@ describe('sizeRank — the estimate type the adapter actually emits', () => {
       makeItem({ identifier: 'DOR-LG', size: 'lg' }),
     ];
     // 2 pts (sm) < lg < xl
-    expect(ids(rankEligible(items, DISPATCH))).toEqual(['DOR-2', 'DOR-LG', 'DOR-XL']);
+    expect(ids(rankEligible(items, DISPATCH, items))).toEqual(['DOR-2', 'DOR-LG', 'DOR-XL']);
   });
 
   it('treats a numeric 0-point estimate as SMALLEST, not neutral', () => {
@@ -598,7 +598,11 @@ describe('sizeRank — the estimate type the adapter actually emits', () => {
       makeItem({ identifier: 'DOR-SM', size: 'sm' }),
     ];
     // 0 points is a real estimate (smallest); only an ABSENT estimate is neutral.
-    expect(ids(rankEligible(items, DISPATCH))).toEqual(['DOR-ZERO', 'DOR-SM', 'DOR-NEUTRAL']);
+    expect(ids(rankEligible(items, DISPATCH, items))).toEqual([
+      'DOR-ZERO',
+      'DOR-SM',
+      'DOR-NEUTRAL',
+    ]);
   });
 
   it('degrades a NULL estimate to neutral instead of throwing', () => {
@@ -608,8 +612,8 @@ describe('sizeRank — the estimate type the adapter actually emits', () => {
       makeItem({ identifier: 'DOR-NULL', size: null as unknown as undefined }),
       makeItem({ identifier: 'DOR-XL', size: 'xl' }),
     ];
-    expect(() => rankEligible(items, DISPATCH)).not.toThrow();
-    expect(ids(rankEligible(items, DISPATCH))).toEqual(['DOR-XL', 'DOR-NULL']);
+    expect(() => rankEligible(items, DISPATCH, items)).not.toThrow();
+    expect(ids(rankEligible(items, DISPATCH, items))).toEqual(['DOR-XL', 'DOR-NULL']);
   });
 
   it('degrades a NaN / non-finite estimate to neutral', () => {
@@ -617,7 +621,7 @@ describe('sizeRank — the estimate type the adapter actually emits', () => {
       makeItem({ identifier: 'DOR-NAN', size: Number.NaN }),
       makeItem({ identifier: 'DOR-XL', size: 'xl' }),
     ];
-    expect(ids(rankEligible(items, DISPATCH))).toEqual(['DOR-XL', 'DOR-NAN']);
+    expect(ids(rankEligible(items, DISPATCH, items))).toEqual(['DOR-XL', 'DOR-NAN']);
   });
 });
 
@@ -639,10 +643,10 @@ describe('priorityRank / ageRank — same defect shape as sizeRank', () => {
       }),
       makeItem({ identifier: 'DOR-ZZZ', priority: 4 }),
     ];
-    expect(() => rankEligible(items, DISPATCH)).not.toThrow();
+    expect(() => rankEligible(items, DISPATCH, items)).not.toThrow();
     // Identifiers are chosen so the tier-7 identifier tiebreak would put the
     // NEUTRAL item FIRST: this only passes if the priority tier really ran.
-    expect(ids(rankEligible(items, DISPATCH))).toEqual(['DOR-ZZZ', 'DOR-AAA']);
+    expect(ids(rankEligible(items, DISPATCH, items))).toEqual(['DOR-ZZZ', 'DOR-AAA']);
   });
 
   it('degrades a NON-NUMBER priority to neutral instead of reading it as urgent', () => {
@@ -658,7 +662,7 @@ describe('priorityRank / ageRank — same defect shape as sizeRank', () => {
       }),
       makeItem({ identifier: 'DOR-ZZZ', priority: 4 }),
     ];
-    expect(ids(rankEligible(items, DISPATCH))).toEqual(['DOR-ZZZ', 'DOR-AAA']);
+    expect(ids(rankEligible(items, DISPATCH, items))).toEqual(['DOR-ZZZ', 'DOR-AAA']);
   });
 
   it('degrades a NULL createdAt to neutral instead of throwing', () => {
@@ -672,10 +676,10 @@ describe('priorityRank / ageRank — same defect shape as sizeRank', () => {
         createdAt: '2026-01-01T00:00:00.000Z',
       }),
     ];
-    expect(() => rankEligible(items, DISPATCH)).not.toThrow();
+    expect(() => rankEligible(items, DISPATCH, items)).not.toThrow();
     // As above: the identifier tiebreak favours the neutral item, so this only
     // passes if the age tier actually ranked the dated item ahead of it.
-    expect(ids(rankEligible(items, DISPATCH))).toEqual(['DOR-ZZZ', 'DOR-AAA']);
+    expect(ids(rankEligible(items, DISPATCH, items))).toEqual(['DOR-ZZZ', 'DOR-AAA']);
   });
 
   it('degrades a NON-STRING createdAt to neutral instead of misreading it as an ancient date', () => {
@@ -692,7 +696,7 @@ describe('priorityRank / ageRank — same defect shape as sizeRank', () => {
         createdAt: '2026-01-01T00:00:00.000Z',
       }),
     ];
-    expect(ids(rankEligible(items, DISPATCH))).toEqual(['DOR-ZZZ', 'DOR-AAA']);
+    expect(ids(rankEligible(items, DISPATCH, items))).toEqual(['DOR-ZZZ', 'DOR-AAA']);
   });
 
   it('degrades missing relations without throwing AND keeps the item dispatchable', () => {
@@ -824,8 +828,8 @@ describe('rankEligible — two NEUTRALs in one tier are a TIE, not a NaN', () =>
     const zzz = makeItem({ identifier: 'DOR-ZZZ', ...overrides });
     const aaa = makeItem({ identifier: 'DOR-AAA', ...overrides });
 
-    expect(ids(rankEligible([zzz, aaa], DISPATCH))).toEqual(['DOR-AAA', 'DOR-ZZZ']);
-    expect(ids(rankEligible([aaa, zzz], DISPATCH))).toEqual(['DOR-AAA', 'DOR-ZZZ']);
+    expect(ids(rankEligible([zzz, aaa], DISPATCH, [zzz, aaa]))).toEqual(['DOR-AAA', 'DOR-ZZZ']);
+    expect(ids(rankEligible([aaa, zzz], DISPATCH, [aaa, zzz]))).toEqual(['DOR-AAA', 'DOR-ZZZ']);
   });
 
   it('still falls through to a LATER tier when an earlier one is neutral on both', () => {
@@ -835,7 +839,7 @@ describe('rankEligible — two NEUTRALs in one tier are a TIE, not a NaN', () =>
       makeItem({ identifier: 'DOR-AAA', priority: undefined, size: 'xl' }),
       makeItem({ identifier: 'DOR-ZZZ', priority: undefined, size: 'xs' }),
     ];
-    expect(ids(rankEligible(items, DISPATCH))).toEqual(['DOR-ZZZ', 'DOR-AAA']);
+    expect(ids(rankEligible(items, DISPATCH, items))).toEqual(['DOR-ZZZ', 'DOR-AAA']);
   });
 });
 
@@ -911,11 +915,16 @@ describe('rankEligible — input-order independence as a PROPERTY, not two hand-
       // the canonical is computed AFTER the loop — so the canonical is not the
       // call that happens to establish the answer everything else is checked
       // against.
+      // candidatePool is `queue` (not the shuffled array) throughout: shuffling
+      // reorders the SAME item objects, so `queue` and every shuffled draw carry
+      // an identical open-set regardless of order — and reusing `queue` here
+      // avoids drawing an extra `next()` from the shared PRNG, which would
+      // desync every later shuffle in this loop from its seed.
       const results: string[][] = [];
       for (let attempt = 0; attempt < 10; attempt += 1) {
-        results.push(ids(rankEligible(shuffle(queue, next), DISPATCH)));
+        results.push(ids(rankEligible(shuffle(queue, next), DISPATCH, queue)));
       }
-      const canonical = ids(rankEligible(queue, DISPATCH));
+      const canonical = ids(rankEligible(queue, DISPATCH, queue));
       for (const result of results) {
         expect(result).toEqual(results[0]);
         expect(result).toEqual(canonical);
@@ -945,18 +954,18 @@ describe('rankEligible — input-order independence as a PROPERTY, not two hand-
 
     vi.resetModules();
     const instanceA = await import('../scripts/dispatch-policy.ts');
-    const fromShuffled = ids(instanceA.rankEligible(shuffled, DISPATCH));
+    const fromShuffled = ids(instanceA.rankEligible(shuffled, DISPATCH, queue));
 
     vi.resetModules();
     const instanceB = await import('../scripts/dispatch-policy.ts');
-    const fromCanonical = ids(instanceB.rankEligible(queue, DISPATCH));
+    const fromCanonical = ids(instanceB.rankEligible(queue, DISPATCH, queue));
 
     expect(fromShuffled).toEqual(fromCanonical);
   });
 
   it('is a TOTAL order — the canonical ranking is a permutation, never a truncation', () => {
     const queue = generateQueue(rng(99), 24);
-    const ranked = ids(rankEligible(queue, DISPATCH));
+    const ranked = ids(rankEligible(queue, DISPATCH, queue));
     expect(ranked).toHaveLength(queue.length);
     expect([...ranked].sort()).toEqual(ids(queue).sort());
   });
@@ -1121,7 +1130,7 @@ describe('prototype-key coercion — a plain object is not a lookup table', () =
       makeItem({ identifier: 'DOR-Z', size: 'xs' }),
     ];
     // A real xs beats a neutral, even though the identifier tiebreak favours A.
-    expect(ids(rankEligible(items, DISPATCH))).toEqual(['DOR-Z', 'DOR-A']);
+    expect(ids(rankEligible(items, DISPATCH, items))).toEqual(['DOR-Z', 'DOR-A']);
   });
 
   it.each(PROTOTYPE_KEYS)('resolves ownership for an item identified %s', (key) => {
@@ -1149,6 +1158,6 @@ describe('type sanity', () => {
   it('accepts the full WorkItemPriority range', () => {
     const priorities: WorkItemPriority[] = [0, 1, 2, 3, 4];
     const items = priorities.map((p, i) => makeItem({ identifier: `DOR-${i}`, priority: p }));
-    expect(rankEligible(items, DISPATCH)).toHaveLength(5);
+    expect(rankEligible(items, DISPATCH, items)).toHaveLength(5);
   });
 });

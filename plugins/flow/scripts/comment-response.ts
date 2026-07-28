@@ -53,35 +53,20 @@
 
 import type { z } from 'zod';
 import type { CommentsSchema } from './config-schema.ts';
-import { hasLabel } from './work-item.ts';
-import type { OwnershipClass, WorkItem } from './work-item.ts';
+import { bodyOf, hasLabel, mentionsOf } from './work-item.ts';
+import type { InboxComment, OwnershipClass, WorkItem } from './work-item.ts';
 
 /** Resolved {@link CommentsSchema} config — `respondWhen` + `ambiguousBias`. */
 export type CommentsConfig = z.infer<typeof CommentsSchema>;
 
 /**
- * A single tracker comment as the adapter's `getInbox` normalizes it (the
- * `InboxEntry.comment` shape). The generic layer reads only these fields; the
- * adapter owns the tracker-native mapping.
+ * The `InboxComment` shape lives in `work-item.ts`, beside `WorkItem` and the
+ * other adapter-output accessors (`hasLabel`, `mentionsOf`, `bodyOf`) it
+ * shares with `PollingTransport` (`transport.ts`). Re-exported here so
+ * existing imports from this module
+ * (`import { type InboxComment } from './comment-response.ts'`) keep working.
  */
-export interface InboxComment {
-  /**
-   * Account id of the comment author, compared against `identity.agent` (rule 1)
-   * and used to detect non-agent replies (rule 3).
-   */
-  author: string;
-  /**
-   * Account ids @mentioned in the comment. An @mention of the agent account is a
-   * "directly addressed" signal (rule 2).
-   */
-  mentions: string[];
-  /**
-   * The comment text. Carries the `identity.marker` on the agent's own comments
-   * (rule 1, shared-account mode) and may carry an explicit `/flow` / `@flow`
-   * token that directly addresses the engine (rule 2).
-   */
-  body: string;
-}
+export type { InboxComment } from './work-item.ts';
 
 /**
  * The resolved authorship identity the rules compare against (§7). Supplied by
@@ -144,35 +129,6 @@ export interface CommentDecision {
 const NEEDS_INPUT_LABEL = 'agent/needs-input';
 /** Explicit in-body tokens that directly address the engine (rule 2, shared mode). */
 const FLOW_ADDRESS_TOKENS = ['/flow', '@flow'];
-
-/**
- * Reads a comment's @mention list, degrading an absent or wrong-typed
- * `mentions` value to "no mentions" rather than throwing.
- *
- * `InboxComment` is an adapter output exactly like {@link WorkItem}, and the
- * same graceful-degradation argument applies (see `work-item.ts`'s {@link
- * hasLabel}): the generic layer is the runtime and must not crash on a
- * non-conformant `getInbox` shape, even though `mentions` is required under
- * the adapter contract.
- *
- * @param comment - The inbound comment under evaluation.
- * @returns The comment's mentions, or `[]` when unavailable.
- */
-function mentionsOf(comment: InboxComment): readonly string[] {
-  return Array.isArray(comment.mentions) ? comment.mentions : [];
-}
-
-/**
- * Reads a comment's body text, degrading an absent or wrong-typed `body`
- * value to the empty string rather than throwing. Same rationale as {@link
- * mentionsOf}.
- *
- * @param comment - The inbound comment under evaluation.
- * @returns The comment's body, or `''` when unavailable.
- */
-function bodyOf(comment: InboxComment): string {
-  return typeof comment.body === 'string' ? comment.body : '';
-}
 
 /**
  * Whether the comment is the agent's own (rule 1): authored by the agent account,

@@ -301,12 +301,17 @@ describe('recovery', () => {
 describe('validate-config', () => {
   // The oracle VALIDATES a config object against the committed
   // config/config.schema.json — it never applies Zod defaults. So a complete,
-  // valid config (the bundled config/config.json) is accepted and echoed back
+  // valid config (the bundled config/config.json, falling back to the
+  // committed config.example.json template on a fresh clone — config.json is
+  // gitignored, generated per install by `/flow:init`; see
+  // config-schema.test.ts's `readConfigJson`) is accepted and echoed back
   // verbatim, while an empty or incomplete object is rejected for missing
   // required fields.
-  const fullConfig = JSON.parse(
-    readFileSync(path.join(PLUGIN_DIR, 'config', 'config.json'), 'utf8')
-  );
+  const configJsonPath = path.join(PLUGIN_DIR, 'config', 'config.json');
+  const configPath = existsSync(configJsonPath)
+    ? configJsonPath
+    : path.join(PLUGIN_DIR, 'config', 'config.example.json');
+  const fullConfig = JSON.parse(readFileSync(configPath, 'utf8'));
 
   it('accepts a complete valid config and echoes it back unchanged (exit 0)', () => {
     const { status, stdout } = runScript('validate-config', {
