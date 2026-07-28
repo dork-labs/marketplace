@@ -179,6 +179,28 @@ describe('PollingTransport — non-conformance sweep (InboxComment fields)', () 
       expect(events).toHaveLength(1);
     }
   );
+
+  it('a bare-string mentions scalar does NOT become a MentionEvent (silent-garbage regression)', async () => {
+    // `'@agent'.length > 0` is TRUE — a scalar `mentions` would otherwise sail
+    // through the bare-mention check (`mentionsOf(comment).length > 0`) and
+    // `mentioned: mentions[0]` would silently emit a MentionEvent naming '@'
+    // (the string's first CHARACTER, not an account id): a person who does not
+    // exist. This is the transport-layer echo of the DOR-535 bare-string
+    // `labels` false positive, and — unlike that one — the sweep above cannot
+    // catch it: one right event and one wrong event both satisfy
+    // `toHaveLength(1)` identically. `mentionsOf`'s `Array.isArray` guard
+    // degrades the scalar to `[]`, so the bare-mention check reads
+    // `mentions.length > 0` as false and this correctly falls through to a
+    // normal `comment.added` event instead.
+    const transport = new PollingTransport(async () => [
+      entry({
+        comment: { author: 'human', mentions: '@agent' as unknown as string[], body: '' },
+      }),
+    ]);
+    const { events } = await transport.poll();
+    expect(events).toHaveLength(1);
+    expect(events[0].kind).toBe('comment.added');
+  });
 });
 
 // ─── (b) THE interchangeability test (G9) ─────────────────────────────────────

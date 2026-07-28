@@ -52,12 +52,15 @@ function readConfigJson(): unknown {
  * consumer (Node's `--experimental-strip-types`, esbuild, Vitest) unwraps the
  * CJS interop correctly at runtime; only this static check is fooled.
  *
- * A `@ts-expect-error` waiver would be reverse-load-bearing here: it silently
- * starts FAILING the build the day ajv/ajv-formats fix their typings (an
- * "unused '@ts-expect-error' directive" error), turning an upstream fix into
- * an outage for this repo. An explicit cast to the declared-but-unreachable
- * default type has no such failure mode — it just becomes redundant, not
- * broken, once the typings catch up.
+ * A `@ts-expect-error` waiver was tried first and rejected: it fails the build
+ * the day ajv/ajv-formats fix their typings (an opaque "unused
+ * '@ts-expect-error' directive" error, unlocalized to what actually changed).
+ * The cast below still fails when that day comes — simulating the fix
+ * reproduces `TS2694: Namespace '…ajv/dist/2019.Ajv2019' has no exported
+ * member 'default'` — but that failure is strictly better: it is a clear,
+ * localized error pointing at the exact cast to fix or delete, not an opaque
+ * directive failure, and — unlike `@ts-expect-error` — it cannot silently
+ * swallow an unrelated new error that lands on this same line.
  */
 function newAjv() {
   const Ajv2019Ctor = Ajv2019 as unknown as typeof import('ajv/dist/2019.js').default;
