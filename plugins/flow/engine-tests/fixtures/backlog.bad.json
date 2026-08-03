@@ -1,0 +1,35 @@
+{
+  "items": [
+    {
+      "id": "uuid-0101",
+      "identifier": "GRM-200",
+      "title": "Marked ready while its blocker is still open",
+      "description": "Ship it.\n\n## Validation criteria\n\n- It shipped.\n\n## On Completion\n\n- Nothing further.",
+      "type": "task",
+      "stateCategory": "unstarted",
+      "stateName": "Todo",
+      "parent": null,
+      "relations": { "blocks": [], "blockedBy": ["GRM-201"], "children": [], "relatedTo": [] },
+      "labels": ["type/task", "stage/execute", "agent/ready"],
+      "priority": 2,
+      "size": 2,
+      "project": { "id": "proj-1", "name": "Widgets", "stateCategory": "started" },
+      "createdAt": "2026-08-01T00:00:00.000Z"
+    },
+    {
+      "id": "uuid-0102",
+      "identifier": "GRM-201",
+      "title": "The still-open blocker",
+      "description": "The prerequisite.",
+      "type": "task",
+      "stateCategory": "started",
+      "stateName": "In Progress",
+      "parent": null,
+      "relations": { "blocks": ["GRM-200"], "blockedBy": [], "children": [], "relatedTo": [] },
+      "labels": ["type/task", "stage/execute"],
+      "priority": 2,
+      "project": { "id": "proj-1", "name": "Widgets", "stateCategory": "started" },
+      "createdAt": "2026-08-01T00:00:00.000Z"
+    }
+  ]
+}

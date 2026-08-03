@@ -189,8 +189,8 @@ ordered 7-tier ladder (`unblockers → priority → projectStatus → type → s
 age → identifier`), a **total** order: a tier where both items are neutral is a
 tie that falls through, so the identifier tiebreak is always reached and the
 result is independent of input order. The WIP cap runs **last**, truncating the
-ranked list to the global + per-project budgets: the ladder decides *which* items
-survive, the cap only decides *how many* (its name carries that precondition).
+ranked list to the global + per-project budgets: the ladder decides _which_ items
+survive, the cap only decides _how many_ (its name carries that precondition).
 `sizeOrdinal(size)` is exported as the one sanctioned way to compare a `size` —
 a `number | string` union — against a t-shirt threshold. Types: `DispatchConfig`,
 `OwnershipConfig`, `WipCap`, `WipLoad`, `RankFactor`.
@@ -246,6 +246,22 @@ fires only at `size ≥ subIssueThreshold` (default `"xl"`), comparing a **task'
 `sizeOrdinal(size) >= sizeOrdinal(threshold)`, since a points estimate and a
 t-shirt word are not directly comparable. Types: `TasksFile`, `Task`, `TaskSize`,
 `Provenance`.
+
+### Backlog-groom invariants — `audit-backlog.ts` (the GROOM oracle)
+
+The whole-tracker health oracle behind `/flow:groom` (`grooming-backlog`).
+Where `validate-adapter.ts` asserts one adapter's normalization is well-formed
+(INV-1..5, per-item shape), `audit-backlog.ts` asserts the **backlog itself**
+is honestly dispatchable: fourteen invariants (GRM-1..14) over a full
+`getBacklogSnapshot()` — exactly one `type/*` label, a project, and a real
+priority on every open item; size, both engine-read description sections, no
+open blocker, no foreign assignee, a live project, and a `stage/*` label on
+every READY item; no dead project holding open work; namespaced labels; a
+single-valued `agent/*` state machine; no live item with an unresolved
+`duplicateOf`. Same harness contract as the conformance script (stdin or
+`--fixture`, `{ ok, failures }`, exit 0/1/2, dependency-free); the
+engine-tests seed a violation per invariant and assert the verdict goes red,
+so a groom verification that cannot fail cannot ship.
 
 ## Config schema reference
 

@@ -508,7 +508,7 @@ export const hygieneReconciler: Reconciler<FlowReconcileInput> = {
     if (slice === undefined) return Promise.resolve(noOp('hygiene', 'no queue to inspect'));
     const outcome = classifyDispatchOutcome(slice.items, slice.config, slice.opts);
     const summary = outcome.starved
-      ? `starved: 0 ready, ${outcome.shapeableCount} shapeable — run a triage pass`
+      ? `starved: 0 ready, ${outcome.shapeableCount} shapeable — run /flow:groom (or a triage pass)`
       : `${outcome.eligibleCount} ready, ${outcome.shapeableCount} shapeable`;
     return Promise.resolve({ id: 'hygiene', acted: outcome.starved, summary });
   },

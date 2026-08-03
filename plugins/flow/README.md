@@ -108,6 +108,16 @@ from the active projects) · **Continue the queue** (claim the next-ranked item,
 its gate, then stop) · **Triage** the backlog, with a specific item or `auto` (drain the
 whole queue) reachable as free text. "Continue the queue" is one tick of `auto`.
 
+Beside the stages sits the whole-backlog sweep: **`/flow:groom`**
+(`grooming-backlog`) audits every open item against the fourteen groom
+invariants (`scripts/audit-backlog.ts`), closes shipped/duplicate/junk work
+with cited evidence behind a human gate, reconciles projects with reality, and
+applies the readiness gate honestly — then proves the result with a
+before/after run of the dispatch oracle. `/flow:groom check` is the read-only
+audit half. Run it when the queue starves, after a large programme lands, or
+before turning on autonomy: the dispatch policy is only as truthful as the
+labels it reads, and a ready label nobody audits decays into noise.
+
 ## Gates
 
 Involvement is **uncertainty-gated, not stage-gated** (the calibration ladder,
