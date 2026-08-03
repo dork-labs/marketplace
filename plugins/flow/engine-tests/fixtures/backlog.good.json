@@ -1,0 +1,74 @@
+{
+  "items": [
+    {
+      "id": "uuid-0001",
+      "identifier": "GRM-100",
+      "title": "A fully groomed, dispatch-ready task",
+      "description": "Fix the widget.\n\n## Validation criteria\n\n- The widget renders.\n\n## On Completion\n\n- Nothing further.",
+      "type": "task",
+      "stateCategory": "unstarted",
+      "stateName": "Todo",
+      "parent": null,
+      "relations": { "blocks": [], "blockedBy": [], "children": [], "relatedTo": [] },
+      "labels": ["type/task", "stage/execute", "agent/ready", "origin/human"],
+      "priority": 2,
+      "size": 3,
+      "project": { "id": "proj-1", "name": "Widgets", "stateCategory": "started" },
+      "createdAt": "2026-08-01T00:00:00.000Z"
+    },
+    {
+      "id": "uuid-0002",
+      "identifier": "GRM-101",
+      "title": "A parked idea, organized but deliberately not ready",
+      "description": "What if widgets could sing?",
+      "type": "idea",
+      "stateCategory": "backlog",
+      "stateName": "Backlog",
+      "parent": null,
+      "relations": { "blocks": [], "blockedBy": ["GRM-103"], "children": [], "relatedTo": [] },
+      "labels": ["type/idea", "origin/human"],
+      "priority": 3,
+      "project": { "id": "proj-1", "name": "Widgets", "stateCategory": "started" },
+      "createdAt": "2026-08-01T00:00:00.000Z"
+    },
+    {
+      "id": "uuid-0003",
+      "identifier": "GRM-102",
+      "title": "A ready item assigned to the dispatch agent itself",
+      "description": "Design the singing widget.\n\n## Validation criteria\n\n- A spec exists.\n\n## On Completion\n\n- File the follow-up build task.",
+      "type": "research",
+      "stateCategory": "backlog",
+      "stateName": "Backlog",
+      "parent": null,
+      "relations": { "blocks": [], "blockedBy": [], "children": [], "relatedTo": [] },
+      "labels": ["type/research", "stage/ideate", "agent/ready"],
+      "priority": 3,
+      "size": "md",
+      "assignee": "flow-bot",
+      "project": { "id": "proj-2", "name": "Music", "stateCategory": "backlog" },
+      "createdAt": "2026-08-02T00:00:00.000Z"
+    },
+    {
+      "id": "uuid-0004",
+      "identifier": "GRM-103",
+      "title": "A resolved duplicate, correctly terminal",
+      "description": "Same as GRM-100.",
+      "type": "task",
+      "stateCategory": "canceled",
+      "stateName": "Canceled",
+      "parent": null,
+      "relations": {
+        "blocks": [],
+        "blockedBy": [],
+        "children": [],
+        "relatedTo": [],
+        "duplicateOf": "GRM-100"
+      },
+      "labels": ["type/task"],
+      "priority": 3,
+      "project": { "id": "proj-1", "name": "Widgets", "stateCategory": "started" },
+      "createdAt": "2026-07-30T00:00:00.000Z"
+    }
+  ],
+  "opts": { "agentIdentity": "flow-bot" }
+}

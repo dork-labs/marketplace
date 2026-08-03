@@ -158,6 +158,51 @@ first, before, includeArchived`. To read one issue's comments back (the
   round-trip check), use `LINEAR_GET_LINEAR_ISSUE` — its `comments.nodes` carries
   them — or a GraphQL `issue(id:){ comments { nodes { id body } } }`.
 
+#### Building the groom snapshot (`getBacklogSnapshot()` via Composio)
+
+Verified against the live workspace during the first groom (2026-08-03):
+
+- **The GraphQL complexity cap is 10000, and `relations` are expensive.** A
+  plain-field issues query paginates fine at `first: 150-250`; adding
+  `relations` + `inverseRelations` + `children` costs roughly 230 points per
+  issue, so the relation pull needs `first: 40` or less. Build the snapshot as
+  **two paginated pulls merged by identifier** — core fields at 150, the
+  relation graph at 40 — rather than one query that trips the cap.
+- Pull closed items separately as titles only
+  (`filter: { state: { type: { in: ["completed","canceled"] } } }`, `first: 250`)
+  — the duplicate/shipped matching passes need names, not full bodies.
+- Re-namespace labels (leaf → `family/leaf`) and resolve state categories
+  exactly as for `getEligibleWork`; project `state` DOES come back on a direct
+  GraphQL `projects` query (unlike `LINEAR_LIST_LINEAR_PROJECTS`), so prefer
+  GraphQL here — the groom's dead-project checks (GRM-9/GRM-11) need it.
+
+#### Bulk-write traps (the groom write pass)
+
+Each of these cost a failed batch on 2026-08-03; none produces a helpful error:
+
+- **A literal `$word` anywhere in an inlined mutation string breaks the call.**
+  Composio scans the whole query text for `$identifier` and demands a matching
+  GraphQL variable, so a description containing a shell snippet or template
+  literal (`$sessionId`, `${client}`) fails with "Query contains variable
+  syntax for: X". **Pass all prose through real GraphQL variables** —
+  `mutation($id: String!, $desc: String!) { issueUpdate(id: $id, input: { description: $desc }) { success } }`
+  — never string-interpolated into the query body.
+- **A label write REPLACES the entire label set.** `issueUpdate`'s `labelIds`
+  is not additive. Compute the union against a **fresh read taken immediately
+  before the write** — a union computed from an earlier snapshot silently
+  deletes labels a concurrent session added in between (observed live: another
+  session's labels appeared mid-groom).
+- **Aliased mutations partially apply.** A failed alias does not roll back its
+  siblings. Batch 5-10 aliases per call, check each alias's `success` in the
+  response, and re-read a sample after every batch.
+- **Project `state` accepts only** `backlog | planned | started | completed |
+canceled`. `paused` is rejected with "No project status found for type
+  paused" even though Linear the product has the concept. Use `backlog` for
+  "real work, not shipped, not active".
+- **Never move a project to `completed`/`canceled` while it holds open
+  issues** — eligibility rule 4 hides them from dispatch permanently. Verify
+  the open-issue count from live data first; refuse the close-out otherwise.
+
 ---
 
 ## The `WorkItem` normalization shape
@@ -211,6 +256,7 @@ carried for display only. The adapter resolves a state to its category via
 | `started`           | `started`       |
 | `completed`         | `completed`     |
 | `canceled`          | `canceled`      |
+| `duplicate`         | unprojectable ‡ |
 
 † Linear's **Triage** feature adds a sixth state `type`, `triage`, beyond the
 five `StateCategorySchema` values. It is the un-triaged holding state (an item
@@ -228,6 +274,26 @@ signal that lets `filterEligible` pick the work up is the stage skills' job, so 
 item lacking it is held out of dispatch by the **absent label**, never by its
 category. Never fabricate a distinct `triage` category — the typed enum has only
 five values.
+
+‡ Linear's **Duplicate** workflow state has type `duplicate` — a seventh state
+type that maps onto NOTHING in the generic model. An item parked there is
+**unprojectable**: neither open nor closed, invisible to the dispatch policy,
+the loop, and every backlog view (the first DorkOS groom, 2026-08-03, found six
+items stranded this way). The adapter must never normalize `duplicate` to a
+real category; it must **flag** these items so a groom routes them out.
+
+**Snapshot-time obligations (the two Linear-only groom checks).** The generic
+`audit-backlog.ts` oracle is tracker-neutral, so two Linear-specific conditions
+are this adapter's job to surface whenever it builds a `getBacklogSnapshot()`:
+
+1. **Items in a `triage`-type state** are un-triaged intake. A groom must route
+   every one of them out (to a real backlog/todo state, with a `type/*` label)
+   — nothing stays in Triage after a groom.
+2. **Items in the `duplicate`-type state** must leave it: verify the duplicate
+   target still makes sense, create a real `duplicate` relation via `link`,
+   then move the item to a **canceled**-category state. If verification shows
+   the item is actually live unfinished work, move it to a real open state
+   instead — never leave anything in the unmappable state either way.
 
 ### `type`, `agentDisposition`, `priority`, `size` mappings
 
@@ -304,24 +370,26 @@ DOR-157 - Connect Claude Code account
 
 ---
 
-## The 13 capability verbs
+## The 17 capability verbs
 
 Each verb is mapped to its concrete Linear MCP call (primary) and Composio
 fallback. The generic layer only ever names these verbs; the adapter owns the
-call.
+call. (Nine reads + eight writes; an earlier revision titled this section "13"
+while the table already held more — the table is authoritative.)
 
 ### Reads
 
-| Verb                            | What it returns                                                                                                                                                                                                           | Linear MCP (primary)                                                                       | Composio fallback (`--account personal`)                                                  |
-| ------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------ | ----------------------------------------------------------------------------------------- |
-| **`getCurrentUser()`**          | the authenticated account (resolves `identity.agent: "auto"`, drives `classifyOwnership`)                                                                                                                                 | `mcp__plugin_linear_linear__get_authenticated_user`                                        | `LINEAR_GET_AUTHENTICATED_USER`                                                           |
-| **`getProjects()`**             | projects normalized to `{ id, name, stateCategory, lead }`                                                                                                                                                                | `mcp__plugin_linear_linear__list_projects` (no `includeMembers`)                           | `LINEAR_LIST_LINEAR_PROJECTS`                                                             |
-| **`resolveProject(nameOrId)`**  | one `WorkItemProject` for a fuzzy name / spec slug / umbrella identifier (case-insensitive). Returns ALL matches when more than one, so the caller disambiguates. The project-addressing primitive for `/flow <project>`. | `list_projects` then match on name; resolve an umbrella id via `get_issue` → its `project` | `LINEAR_LIST_LINEAR_PROJECTS` then match (+ `LINEAR_GET_LINEAR_ISSUE` for an umbrella id) |
-| **`getProject(id)`**            | one project with its `children[]` (project issues), its umbrella issue (the `type/meta` anchor), and a progress rollup (`done`/`total`, current stage).                                                                   | `list_projects` (the one) + `list_issues` (project filter, `includeArchived: false`)       | `LINEAR_GET_LINEAR_PROJECT` + `LINEAR_LIST_LINEAR_ISSUES` (project filter)                |
-| **`getProjectWork(projectId)`** | `getEligibleWork` **scoped to one project**: the candidate `WorkItem[]` for project-scoped dispatch (same normalization + graceful-degradation rules as `getEligibleWork`).                                               | `list_issues` (project filter, `includeArchived: false`)                                   | `LINEAR_LIST_LINEAR_ISSUES` (project filter)                                              |
-| **`getEligibleWork()`**         | `WorkItem[]` of candidate work for the dispatch policy (issues for the DOR team, `includeArchived: false`)                                                                                                                | `mcp__plugin_linear_linear__list_issues`                                                   | `LINEAR_LIST_LINEAR_ISSUES`                                                               |
-| **`getInbox(agent)`**           | the agent's inbox (see shape below) — assigned-to-me + @mentions + new comments since the last tick                                                                                                                       | `list_issues` (assignee filter) + `mcp__plugin_linear_linear__list_comments`               | `LINEAR_LIST_LINEAR_ISSUES` + `LINEAR_LIST_COMMENTS`                                      |
-| **`getRelations(item)`**        | the typed relation graph (`blocks/blockedBy/children/relatedTo/duplicateOf`) for a single item                                                                                                                            | `mcp__plugin_linear_linear__get_issue` (returns relations)                                 | `LINEAR_GET_LINEAR_ISSUE`                                                                 |
+| Verb                            | What it returns                                                                                                                                                                                                                                                                                                                                                                                                                                                                 | Linear MCP (primary)                                                                                                             | Composio fallback (`--account personal`)                                                  |
+| ------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------- |
+| **`getCurrentUser()`**          | the authenticated account (resolves `identity.agent: "auto"`, drives `classifyOwnership`)                                                                                                                                                                                                                                                                                                                                                                                       | `mcp__plugin_linear_linear__get_authenticated_user`                                                                              | `LINEAR_GET_AUTHENTICATED_USER`                                                           |
+| **`getProjects()`**             | projects normalized to `{ id, name, stateCategory, lead }`                                                                                                                                                                                                                                                                                                                                                                                                                      | `mcp__plugin_linear_linear__list_projects` (no `includeMembers`)                                                                 | `LINEAR_LIST_LINEAR_PROJECTS`                                                             |
+| **`resolveProject(nameOrId)`**  | one `WorkItemProject` for a fuzzy name / spec slug / umbrella identifier (case-insensitive). Returns ALL matches when more than one, so the caller disambiguates. The project-addressing primitive for `/flow <project>`.                                                                                                                                                                                                                                                       | `list_projects` then match on name; resolve an umbrella id via `get_issue` → its `project`                                       | `LINEAR_LIST_LINEAR_PROJECTS` then match (+ `LINEAR_GET_LINEAR_ISSUE` for an umbrella id) |
+| **`getProject(id)`**            | one project with its `children[]` (project issues), its umbrella issue (the `type/meta` anchor), and a progress rollup (`done`/`total`, current stage).                                                                                                                                                                                                                                                                                                                         | `list_projects` (the one) + `list_issues` (project filter, `includeArchived: false`)                                             | `LINEAR_GET_LINEAR_PROJECT` + `LINEAR_LIST_LINEAR_ISSUES` (project filter)                |
+| **`getProjectWork(projectId)`** | `getEligibleWork` **scoped to one project**: the candidate `WorkItem[]` for project-scoped dispatch (same normalization + graceful-degradation rules as `getEligibleWork`).                                                                                                                                                                                                                                                                                                     | `list_issues` (project filter, `includeArchived: false`)                                                                         | `LINEAR_LIST_LINEAR_ISSUES` (project filter)                                              |
+| **`getEligibleWork()`**         | `WorkItem[]` of candidate work for the dispatch policy (issues for the DOR team, `includeArchived: false`)                                                                                                                                                                                                                                                                                                                                                                      | `mcp__plugin_linear_linear__list_issues`                                                                                         | `LINEAR_LIST_LINEAR_ISSUES`                                                               |
+| **`getInbox(agent)`**           | the agent's inbox (see shape below) — assigned-to-me + @mentions + new comments since the last tick                                                                                                                                                                                                                                                                                                                                                                             | `list_issues` (assignee filter) + `mcp__plugin_linear_linear__list_comments`                                                     | `LINEAR_LIST_LINEAR_ISSUES` + `LINEAR_LIST_COMMENTS`                                      |
+| **`getRelations(item)`**        | the typed relation graph (`blocks/blockedBy/children/relatedTo/duplicateOf`) for a single item                                                                                                                                                                                                                                                                                                                                                                                  | `mcp__plugin_linear_linear__get_issue` (returns relations)                                                                       | `LINEAR_GET_LINEAR_ISSUE`                                                                 |
+| **`getBacklogSnapshot()`**      | the GROOM input (`grooming-backlog`): EVERY non-archived item regardless of state — open items fully normalized (relations, re-namespaced labels, project `stateCategory`), plus closed items at least as `{ identifier, title, stateCategory }` for duplicate/shipped matching. Unlike `getEligibleWork`, nothing is filtered toward dispatch; the snapshot feeds `scripts/audit-backlog.ts` as `{ items, opts: { agentIdentity } }`. See "Building the groom snapshot" below. | `list_issues` paginated with **no state filter** + `list_projects` + `list_issue_statuses` (category map) + label-group recovery | `LINEAR_RUN_QUERY_OR_MUTATION`, paginated (see the snapshot notes)                        |
 
 ### Writes (all confined here; the single audit surface)
 
