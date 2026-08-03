@@ -85,13 +85,32 @@ Driven by the item's type and its `## On Completion` routing:
 
 If the work ran in a dedicated git worktree (recorded in the spec's
 `04-implementation.md`, or detected when `git rev-parse --git-dir
---git-common-dir` prints two different paths) and its branch is merged, offer
-to remove the worktree (e.g. `git worktree remove` + delete the branch), or use
-your harness's worktree cleanup if it has one. If the session is currently inside
-that worktree, **leave it first** (return to the main checkout, using your
-harness's worktree-exit tool if it has one) before removing. Apply the usual
-worktree cleanup safety — never remove a worktree with uncommitted, untracked, or
-unpushed work; confirm first.
+--git-common-dir` prints two different paths), clean it up here.
+
+**Remove it without asking when all three of these hold:**
+
+- its branch is merged,
+- its working tree has no uncommitted and no untracked files, and
+- it holds no commit that is missing from the remote.
+
+That combination makes removal lossless, and asking costs more than it protects.
+If any one of them fails, leave the worktree alone and say which one failed —
+never remove a worktree with uncommitted, untracked, or unpushed work.
+
+If the session is currently inside that worktree, **leave it first** (return to
+the main checkout, using your harness's worktree-exit tool if it has one) before
+removing. Prefer your harness's own worktree cleanup command over bare
+`git worktree remove` when it has one, since it may also tear down provisioning
+that git does not know about.
+
+**When the branch is not merged yet, do not promise to clean it up "once it
+merges."** Nobody will be there. Where merging is automated — an auto-merge
+setting, a merge queue, a scheduled merge bot — the merge lands minutes to hours
+after this stage runs, and the session that would have done the cleanup is gone
+by then. So the reliable habit is a sweep at the START of a session, not a
+promise at the end of one: a periodic pass that removes every worktree whose
+branch has since merged. Tell the person that, once, instead of leaving a
+worktree behind with no owner.
 
 ### 7. Report
 
