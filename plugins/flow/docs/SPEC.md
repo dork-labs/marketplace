@@ -282,7 +282,8 @@ spec's load-bearing decisions:
 
 Top-level blocks: `tracker`, `connection`, `identity`, `ownership`, `comments`,
 `stages`, `autonomy`, `loops`, `ingestion`, `involvement`, `dispatch`, `gates`,
-`review`, `context`, `workspace`, `recovery`, `decomposition`, `evidence`. The
+`review`, `context`, `models`, `workspace`, `recovery`, `decomposition`,
+`evidence`. The
 full annotated default set is in spec
 §9; the authoritative shape is the Zod schema.
 

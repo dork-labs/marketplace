@@ -16,6 +16,12 @@
   "identity": {
     "reviewer": "REPLACE_WITH_YOUR_TRACKER_ACCOUNT_HANDLE_FOR_REVIEW_HANDOFF"
   },
+  "models": {
+    "bindings": {
+      "workhorse": "<your-strong-general-model>",
+      "fast": "<your-cheap-fast-model>"
+    }
+  },
   "autonomy": {
     "default": "manual"
   }

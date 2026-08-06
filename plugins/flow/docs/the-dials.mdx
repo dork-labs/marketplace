@@ -163,6 +163,54 @@ A reviewer gets the diff, the rubric, and the work item's intent — never the i
 
 Raising `reviewers` above `1` pools findings rather than polling them: every reviewer's findings are unioned, and **any blocking finding blocks unless it is rebutted.** A second reviewer missing a real defect is not a vote against the one who found it.
 
+## Context and resuming
+
+How long a session lives, and how hard the engine tries to get back into the one that started the work, under `context`:
+
+| Dial                | What it does                                                                     | Default             | Notes                                                                                |
+| ------------------- | -------------------------------------------------------------------------------- | ------------------- | ------------------------------------------------------------------------------------ |
+| `perIssue`          | Session lifetime per work item.                                                  | `"fresh-session"`   | `"sticky-session"` sends follow-ups and rework back to the session that started it.  |
+| `perStage`          | Subagent lifetime per stage.                                                     | `"fresh-subagent"`  | A fresh subagent per stage keeps each stage's context clean.                         |
+| `resume`            | How hard to try continuing the originating worker before starting a fresh one.   | `"prefer"`          | `"require"` stops rather than degrading; `"never"` always starts from the artifacts. |
+| `compactionTrigger` | Fraction of the context window that triggers compaction.                         | `0.65`              | Lower it if long runs lose detail before compaction fires.                           |
+| `stageBudgets.*`    | Per-stage token budgets (`specify`, `decompose`, `execute`, `verify`, `review`). | `40000`–`80000`     | EXECUTE gets the largest budget; REVIEW the smallest.                                |
+| `externalize`       | The durable artifacts context is written out to.                                 | the three run files | These are what a fresh worker reads when it cannot continue the original.            |
+
+`perIssue: "sticky-session"` and `resume` are two halves of one idea: work an agent has already reasoned about is cheaper and better to continue than to re-derive. Sticky sessions decide **where a follow-up goes**; `resume` decides **what happens when it cannot get there** — a session can only be continued from the machine that still holds its transcript, so "the same session" is not always available.
+
+<Callout type="warn">
+  `resume: "require"` is a stop, not a preference. When the originating worker
+  cannot be reached, the run says so loudly and halts, rather than quietly
+  starting a fresh worker that has lost the reasoning. Use it when a silent
+  restart would be worse than a paused item; leave it `"prefer"` otherwise.
+</Callout>
+
+## Models
+
+Which model each delegated worker runs on, under `models`. The block is split across two files on purpose:
+
+| Dial                   | What it does                                                             | Default       | Lives in            |
+| ---------------------- | ------------------------------------------------------------------------ | ------------- | ------------------- |
+| `tiers.implementation` | Tier for agents that write the change.                                   | `"workhorse"` | `config.json`       |
+| `tiers.review`         | Tier for reviewer agents.                                                | `"workhorse"` | `config.json`       |
+| `tiers.analysis`       | Tier for planning and analysis agents.                                   | `"workhorse"` | `config.json`       |
+| `tiers.mechanical`     | Tier for searches, scaffolds, renames, and log triage.                   | `"fast"`      | `config.json`       |
+| `bindings.workhorse`   | The real strong general-purpose model this machine's harness should use. | none          | `config.local.json` |
+| `bindings.fast`        | The real cheap fast model this machine's harness should use.             | none          | `config.local.json` |
+
+A tier is a role, not a model. `workhorse` means "the strong general-purpose model this machine can reach" and `fast` means "the cheap quick one" — and which models those actually are is a property of your machine, not of the repo, so the committed half names none and ships no binding. `/flow:init` asks you to rank what your harness can reach and writes the answer to the local file.
+
+The judgment classes default to `workhorse` and mechanical work to `fast` for one reason: mechanical work has a checkable answer, so a cheap model that gets it wrong gets caught. A weak reviewer just misses things quietly.
+
+There is a third tier the config deliberately cannot name: `frontier`, the model your orchestrating session is itself running on. Flow never selects it, which is why it is absent from the enum. What flow does insist on is that **every delegated worker names its model explicitly** — because on a harness that inherits the parent's model when you omit one, an orchestrator running at frontier that omits it runs every delegate at frontier cost, silently.
+
+<Callout type="info">
+  Nothing here fails closed. One model available? Bind both tiers to it and the
+  policy becomes a no-op. No binding at all? The delegate falls back to your
+  harness's own default model **and the run says so** — a silent fallback is
+  indistinguishable from a policy that worked.
+</Callout>
+
 ## Loops
 
 The reconciler registry. Each loop is one reconciler; the map is the extension seam (add a loop by registering it, retire one with `enabled: false`). Every loop takes the same three dials, under `loops.<id>`:
@@ -225,6 +273,10 @@ The producer is a swappable seam: the inbox reconciler consumes a normalized `Tr
 | Throttle tracker reads                      | `ingestion.pollIntervalMs` (raise it)                                                            |
 | Turn a reconciler off                       | `loops.<id>.enabled: false`                                                                      |
 | Reorder which reconciler wins contention    | `loops.<id>.priority`                                                                            |
+| Send follow-ups back to the same session    | `context.perIssue: "sticky-session"`                                                             |
+| Stop instead of restarting a lost session   | `context.resume: "require"`                                                                      |
+| Point flow at this machine's models         | `models.bindings` in `config.local.json`                                                         |
+| Run mechanical work on a stronger model     | `models.tiers.mechanical: "workhorse"`                                                           |
 
 ## Next steps
 

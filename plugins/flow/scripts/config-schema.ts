@@ -439,10 +439,36 @@ export const ReviewSchema = z
   })
   .prefault({});
 
-/** Context lifetime per issue (§7.7). */
-export const PerIssueSchema = z.enum(['fresh-session', 'shared-session']);
+/**
+ * Context lifetime per issue (§7.7).
+ *
+ * - `fresh-session` (the default) — every claim starts a new session.
+ * - `shared-session` — one session carries several issues.
+ * - `sticky-session` — an issue's follow-ups and rework return to the session and
+ *   worker that originated it, rather than starting cold. The originating session
+ *   is recorded on the run's `provenance` block (`flow-state.ts`), so a later tick
+ *   can find it; when it cannot be reached, {@link ResumePolicySchema} decides
+ *   whether to fall back or stop.
+ */
+export const PerIssueSchema = z.enum(['fresh-session', 'shared-session', 'sticky-session']);
 /** Context lifetime per stage (§7.7). */
 export const PerStageSchema = z.enum(['fresh-subagent', 'shared-subagent']);
+
+/**
+ * How hard the engine tries to continue the **originating** worker before
+ * settling for a fresh one (§7.7) — the policy behind the resume ladder
+ * documented in the EXECUTE stage skill.
+ *
+ * - `prefer` (the default) — continue the originating worker when it is
+ *   reachable; otherwise seed a fresh worker from the durable artifacts and say
+ *   so.
+ * - `require` — continuing is mandatory. When the originating worker cannot be
+ *   reached, surface loudly and stop rather than silently degrading to a fresh
+ *   worker that has lost the reasoning.
+ * - `never` — always start from the durable artifacts, even when the originating
+ *   worker is reachable.
+ */
+export const ResumePolicySchema = z.enum(['prefer', 'require', 'never']);
 
 /** Per-stage context-window budgets in tokens (§11). */
 export const StageBudgetsSchema = z
@@ -467,6 +493,8 @@ export const ContextSchema = z
     perIssue: PerIssueSchema.default('fresh-session'),
     /** Context lifetime per stage. */
     perStage: PerStageSchema.default('fresh-subagent'),
+    /** How hard to try continuing the originating worker before starting fresh. */
+    resume: ResumePolicySchema.default('prefer'),
     /** Fraction of the window that triggers compaction. */
     compactionTrigger: z.number().min(0).max(1).default(0.65),
     /** Per-stage token budgets. */
@@ -475,6 +503,86 @@ export const ContextSchema = z
     externalize: z
       .array(z.string())
       .default(['flow-state.json', 'execution.log.jsonl', 'flow-history.tsv']),
+  })
+  .prefault({});
+
+/**
+ * The **delegate** model tiers a class of work may be bound to.
+ *
+ * Deliberately only two, and deliberately NOT three: the orchestrating seat
+ * (`frontier`) is not a bindable tier, because flow never selects the model it is
+ * itself running on. It only ever chooses the model a **delegated** worker runs
+ * on, and the choice is between the strong general-purpose model (`workhorse`)
+ * and the cheap fast one (`fast`).
+ *
+ * These are **roles, not models**. No model identifier ever appears in committed
+ * config — the machine-specific mapping from role to a real model lives in
+ * {@link ModelBindingsSchema}, in the gitignored local file.
+ */
+export const ModelTierSchema = z.enum(['workhorse', 'fast']);
+
+/**
+ * Which tier each class of delegated work runs on — **committed policy**, shared
+ * by everyone on the repo, and free of model identifiers by construction.
+ *
+ * The three judgment classes default to `workhorse` because getting them wrong is
+ * expensive: implementation writes the code, review is the gate that catches what
+ * implementation got wrong, and analysis picks the plan both follow. `mechanical`
+ * work — searches, scaffolds, renames, log triage — has a checkable answer, so it
+ * defaults to `fast`.
+ */
+export const ModelTiersSchema = z
+  .object({
+    /** Tier for agents that write the change. */
+    implementation: ModelTierSchema.default('workhorse'),
+    /** Tier for reviewer agents (the pre-PR adversarial gate and spec-compliance passes). */
+    review: ModelTierSchema.default('workhorse'),
+    /** Tier for planning/analysis agents that decide what the others do. */
+    analysis: ModelTierSchema.default('workhorse'),
+    /** Tier for mechanical work with a checkable answer (searches, scaffolds, renames, log triage). */
+    mechanical: ModelTierSchema.default('fast'),
+  })
+  .prefault({});
+
+/**
+ * The machine-specific map from a tier to a real model — **the local side**.
+ *
+ * Both entries are optional and have **no default**, because a default would have
+ * to name a vendor's model, and the committed plugin names none: which models a
+ * machine's harness can reach is a property of that machine, not of the repo. So
+ * bindings belong in the gitignored `config.local.json` (or a `FLOW_`-prefixed
+ * environment variable), exactly like the tracker coordinates; `/flow:init` asks
+ * for them and writes them there.
+ *
+ * A binding that is absent is not an error: the delegate falls back to the
+ * harness's own default model and the run says that it did. A single-model
+ * harness binds both tiers to the same model, and the whole policy degrades to a
+ * no-op.
+ */
+export const ModelBindingsSchema = z
+  .object({
+    /** The strong general-purpose model this machine's harness should use for judgment work. */
+    workhorse: z.string().optional(),
+    /** The cheap fast model this machine's harness should use for mechanical work. */
+    fast: z.string().optional(),
+  })
+  .prefault({});
+
+/**
+ * Model-tier delegation policy — **which class of delegated work runs on which
+ * tier** (committed) and **which real model each tier means here** (local).
+ *
+ * The split is the whole point of the block. `tiers` is portable policy: it
+ * survives a vendor's model lineup changing, and it reviews as a decision rather
+ * than as a string. `bindings` is the per-machine binding that policy resolves
+ * through, and it is the only half that ever names a model.
+ */
+export const ModelsSchema = z
+  .object({
+    /** Committed policy: the tier each class of delegated work runs on. */
+    tiers: ModelTiersSchema,
+    /** Per-machine bindings: the real model behind each tier. Belongs in `config.local.json`. */
+    bindings: ModelBindingsSchema,
   })
   .prefault({});
 
@@ -680,6 +788,8 @@ export const FlowConfigSchema = z
     review: ReviewSchema,
     /** Context strategy. */
     context: ContextSchema,
+    /** Model-tier delegation policy (committed tiers + per-machine bindings). */
+    models: ModelsSchema,
     /** Workspace provisioning policy. */
     workspace: WorkspaceSchema,
     /** Crash & stall recovery policy. */
