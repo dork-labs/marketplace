@@ -234,7 +234,7 @@ from. Carry the run's `provenance` block (written at EXECUTE Phase 0.5, in
   ```
 
   It is a comment, so a human reading the PR never sees it, and a later session
-  can read it back without parsing prose. `templates/pr.md` carries the same line.
+  can read it back without parsing prose. `templates/pr.md` carries the same marker.
 
   **This is the one artifact a machine parses, so it has to be valid JSON.**
   JSON-escape every value — quotes, backslashes, newlines, control characters —
