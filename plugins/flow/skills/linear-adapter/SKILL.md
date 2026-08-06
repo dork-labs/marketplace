@@ -50,13 +50,19 @@ Two interchangeable access paths reach the **same** workspace and DorkOS team
    `mcp__linear__*`.
 2. **Composio CLI (fallback).** Works even when the MCP server is
    unauthenticated (see the `composio-cli` skill). Linear slugs are `LINEAR_*`.
-   **Two Linear accounts are connected in Composio — always pass
-   `--account personal`** (the DorkOS + Dunny workspace). The other account,
-   `artblocks`, is unrelated work and must **never** receive DorkOS issues.
+   **Always pass `--account <handle>`, where `<handle>` is read from
+   `config.local.json` → `secrets.trackerAccount`** — the Composio connection the
+   adapter authenticates through (set by `/flow:init`). Read it fresh from config;
+   **never hardcode an account name here.** Any other connected account — a
+   maintainer's personal login, or unrelated `artblocks` work — must **never**
+   receive DorkOS writes; only the configured `trackerAccount` does. (This is how
+   an adopter points flow at a dedicated bot account instead of a personal one:
+   they set `trackerAccount`, not edit this skill.) Examples below write
+   `<trackerAccount>` to stand in for that configured value.
 
    ```bash
-   composio execute LINEAR_LIST_LINEAR_TEAMS    --account personal -d '{}'
-   composio execute LINEAR_LIST_LINEAR_PROJECTS --account personal -d '{}'
+   composio execute LINEAR_LIST_LINEAR_TEAMS    --account "<trackerAccount>" -d '{}'
+   composio execute LINEAR_LIST_LINEAR_PROJECTS --account "<trackerAccount>" -d '{}'
    # Discover other slugs by intent:
    composio search "list linear issues" "create a linear issue" --toolkits linear
    ```
@@ -107,9 +113,10 @@ name } } }` to recover the namespace (reconstruct `agent/ready` as
 original_cursor, include_transitions, cursor_was_corrupted`. There is **no
   `team_id`** (passing it is silently dropped on the first call and hard-errors on
   a paginated one) and **no `include_archived`**. Scope to a project with
-  `project_id`; there is no team scoping, but the `personal` account's workspace
-  is effectively DorkOS-only, so the unfiltered list is already team-correct (the
-  `--account personal` guard is what keeps `artblocks` out, not a filter).
+  `project_id`; there is no team scoping, but the configured `trackerAccount`
+  connects to a single DorkOS-only workspace, so the unfiltered list is already
+  team-correct (the `--account <trackerAccount>` guard is what keeps `artblocks`
+  out, not a filter).
 - **Response shapes:** list → `.data.issues[]` + `.data.page_info{ hasNextPage,
 endCursor }` (**not** `.data.items`); get → `.data.issue`; projects →
   `.data.projects[]`; teams → `.data.teams[]`. DorkOS `team_id` is
@@ -379,7 +386,7 @@ while the table already held more — the table is authoritative.)
 
 ### Reads
 
-| Verb                            | What it returns                                                                                                                                                                                                                                                                                                                                                                                                                                                                 | Linear MCP (primary)                                                                                                             | Composio fallback (`--account personal`)                                                  |
+| Verb                            | What it returns                                                                                                                                                                                                                                                                                                                                                                                                                                                                 | Linear MCP (primary)                                                                                                             | Composio fallback (`--account <trackerAccount>`)                                          |
 | ------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------- |
 | **`getCurrentUser()`**          | the authenticated account (resolves `identity.agent: "auto"`, drives `classifyOwnership`)                                                                                                                                                                                                                                                                                                                                                                                       | `mcp__plugin_linear_linear__get_authenticated_user`                                                                              | `LINEAR_GET_AUTHENTICATED_USER`                                                           |
 | **`getProjects()`**             | projects normalized to `{ id, name, stateCategory, lead }`                                                                                                                                                                                                                                                                                                                                                                                                                      | `mcp__plugin_linear_linear__list_projects` (no `includeMembers`)                                                                 | `LINEAR_LIST_LINEAR_PROJECTS`                                                             |
@@ -393,7 +400,7 @@ while the table already held more — the table is authoritative.)
 
 ### Writes (all confined here; the single audit surface)
 
-| Verb                                 | Durable effect                                                                                                                                                                                                                                                                                        | Linear MCP (primary)                                           | Composio fallback (`--account personal`)               |
+| Verb                                 | Durable effect                                                                                                                                                                                                                                                                                        | Linear MCP (primary)                                           | Composio fallback (`--account <trackerAccount>`)       |
 | ------------------------------------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------- | ------------------------------------------------------ |
 | **`claim(item)`**                    | Writes the `agent/claimed` **label** AND moves state into a `started`-category state — both, in that order, so the claim survives a restart. The label is the durable claim signal (state machine = labels, not the plan field).                                                                      | `mcp__plugin_linear_linear__save_issue` (set labels + stateId) | `LINEAR_UPDATE_ISSUE`                                  |
 | **`transition(item, stage)`**        | Sets the stage's `stage/*` label and, when the stage carries one, its `stateCategory` (resolved to a concrete state of that category for the team). Drives the stage→projection round-trip.                                                                                                           | `save_issue` (labels + stateId)                                | `LINEAR_UPDATE_ISSUE`                                  |
