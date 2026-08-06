@@ -99,6 +99,15 @@ against a superseded diff is not proof.
   change, reviewing from the context it implemented in**. That agent reviews the
   change it remembers intending rather than the diff it produced; that is the
   exact failure this step exists to prevent.
+- **Name each reviewer's model explicitly.** Reviewers are the `review` work
+  class: resolve `models.tiers.review` (default `workhorse`) through
+  `models.bindings` and pass the result. Never dispatch with the model omitted —
+  on a harness that inherits the parent's model on omission, an orchestrator
+  sitting at the frontier tier silently runs every reviewer at frontier cost. An
+  unbound tier falls back to the harness default **with a note in the run**, and a
+  model that errors falls sideways or down, never up to the orchestrator's model.
+  The full policy, including the work-class table, lives in the EXECUTE stage
+  skill; this is the reviewer's half of it.
 - **Give each reviewer three things: the diff, the rubric, and the intent.** The
   diff and the files it touches (via the base/head SHAs); the rubric named by
   `review.rubric`, resolved from the repo root (default `REVIEW.md`), which
@@ -212,6 +221,33 @@ Project the proof onto the work item — the single audit surface. The plan's
 If a class resolved to a `"none"` capture, its `attachTo` is empty — there is no
 bundle to attach, and VERIFY says so rather than inventing one.
 
+#### Stamp the run's provenance
+
+A reviewer or a follow-up session should not have to guess where this change came
+from. Carry the run's `provenance` block (written at EXECUTE's claim, in
+`.dork/flow/flow-state.json`) onto both surfaces:
+
+- **On the PR** — append one hidden, machine-readable line to the body:
+
+  ```
+  <!-- flow:provenance {"harness":"…","sessionId":"…","agentId":"…","host":"…","worktree":"…","branch":"…"} -->
+  ```
+
+  It is a comment, so a human reading the PR never sees it, and a later session
+  can read it back without parsing prose. `templates/pr.md` carries the same line.
+
+- **On the work item** — via the adapter, and **only with verbs that already
+  exist**:
+  - `comment(item, body)` carrying the same block plus the identity `marker`, or
+  - `attachEvidence(item, evidence)` with a link, **when — and only when — the
+    provenance includes a resumable session URL** a person or a later tick can
+    actually open. A link that resolves to nothing is worse than no link.
+
+**Emit only the fields the run actually has.** Omitted is a fact; invented is a
+lie a later session will act on. If provenance is empty because the harness could
+determine nothing, skip both stamps and say so in the run report rather than
+writing an empty block that looks like a stamp.
+
 #### Decide the closing form deliberately
 
 Before composing the title and body, answer one question: **does this PR complete
@@ -290,4 +326,9 @@ logged during EXECUTE/VERIFY surfaces here for the human to approve.
 - A PR that does not complete its work item never carries a closing reference —
   and its item's state is checked again after the merge, because the branch name
   can close it without one.
+- Provenance is stamped from what the run actually knows. An omitted field is
+  honest; a fabricated one sends the next session after a worker that never
+  existed.
+- Every reviewer is dispatched with its model named. An omitted model is not a
+  neutral default — it is the orchestrator's model, at the orchestrator's price.
 - All tracker I/O through the adapter. No tracker strings in this skill.

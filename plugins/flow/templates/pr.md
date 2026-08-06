@@ -10,6 +10,12 @@
   that was skipped or ran degraded has to say so where a human will read it.
   Tracker I/O (linking, assigning) flows through the tracker adapter, never a
   tracker string here.
+
+  The optional `flow:provenance` line at the bottom is the machine-readable
+  record of where this change came from — harness, session, worker, machine,
+  worktree, branch. Emit only the fields the run actually determined and drop the
+  line entirely when it determined none: an omitted field is honest, an invented
+  one sends the next session chasing a worker that never existed.
 -->
 
 ## Summary
@@ -63,3 +69,5 @@ by default, so plan assumptions surface here at the review gate.}
 ---
 
 🤖 Generated with [Claude Code](https://claude.com/claude-code)
+
+<!-- flow:provenance {"harness":"{harness}","sessionId":"{sessionId}","agentId":"{agentId}","host":"{host}","worktree":"{worktree}","branch":"{branch}"} -->
