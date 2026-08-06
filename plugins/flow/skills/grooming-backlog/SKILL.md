@@ -110,7 +110,12 @@ project and a project's state feeds eligibility.
 ### Phase 3 — Closures, evidence first
 
 Run these before the field sweep, so no effort is spent organizing work that
-should not exist. Fan out subagents by kind:
+should not exist. Fan out subagents by kind. These are the **`analysis`** class —
+adjudicating evidence and deciding what closes is judgment work — so name each
+worker's model explicitly, per the Delegation Policy in
+`<flow-root>/skills/executing-specs/SKILL.md`. A purely mechanical lookup fanned
+out beneath one of them (finding a commit, listing files) is the `mechanical`
+class.
 
 - **Shipped verification.** The bar for closing: a commit SHA or PR number AND
   a read of the code or test proving the behavior exists. A ticket (or another
@@ -133,7 +138,10 @@ commenting: ambiguity stays open and gets flagged to the operator.
 
 ### Phase 4 — Fan-out triage sweep
 
-One subagent per phase-2 project. Each reads every one of its items — the full
+One subagent per phase-2 project, dispatched as the **`analysis`** class with its
+model named explicitly (the Delegation Policy in
+`<flow-root>/skills/executing-specs/SKILL.md`) — classifying work and calibrating
+priority is judgment, not lookup. Each reads every one of its items — the full
 body, not the title — and writes a **proposal file** (JSON, fixed schema) to the
 session scratchpad. **Triage agents make no tracker writes.** Per item they
 propose:

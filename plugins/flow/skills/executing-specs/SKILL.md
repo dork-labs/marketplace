@@ -91,7 +91,7 @@ If the two rev-parse paths **differ**, the session is already in a secondary wor
 Read `workspace.isolation` from `<flow-root>/config/config.json`. It has already answered this question; do not re-ask it.
 
 - **`"worktree"` (the default) → isolate, without asking.** Create the isolated worktree and execute there. The rationale is _one checkout, one writer_: a checkout is routinely shared with other agents and sessions, and two writers in one checkout corrupt each other's work. Say in one line that you isolated and why; do not turn it into a question.
-- **`"none"` → execute in place, without asking.** The operator has opted out of isolation deliberately.
+- **`"none"` → execute in place, without asking.** The operator has opted out of isolation deliberately. Still run the contention check from 0.3: if another agent or session is working in this checkout, **warn and proceed** — name the _one checkout, one writer_ hazard and say that config opted out of isolation. Warn, do not block and do not ask; the operator's config already answered, but they should know the hazard is live right now.
 
 To isolate, create an isolated git worktree for this spec (e.g. `git worktree add ../spec-<SLUG> -b spec-<SLUG>`) and work in it; if your harness provides dedicated worktree tooling, prefer that (it can provision dependencies, ports, and env, and switch the session in without a restart). `workspace.flow` names which of the two the operator expects.
 
@@ -125,7 +125,7 @@ Write a `provenance` block onto this issue's record in `.dork/flow/flow-state.js
 | `sessionId` | This session's own id. Some harnesses expose it directly; on others it is derivable from where the session's transcript is written. Derive, never guess. |
 | `agentId`   | The worker/agent id this run is operating as, when the harness assigns one.                                                                              |
 | `host`      | This machine's hostname. Load-bearing: a retained transcript is only reachable from the machine holding it.                                              |
-| `worktree`  | The absolute path this run is executing in (from 0.2/0.3).                                                                                               |
+| `worktree`  | The absolute path this run is executing in (from 0.1, 0.2, or 0.3).                                                                                      |
 | `branch`    | The branch this run is on.                                                                                                                               |
 
 **Omit any field you cannot determine — never fabricate one.** A missing field costs a later session one rung on the resume ladder; a fabricated one sends it chasing a worker that does not exist, and makes the run report a resume that never happened.
@@ -331,7 +331,7 @@ Options:
 - "Stop execution" - Pause for manual intervention
 ```
 
-**Retrying means continuing, not relaunching.** The default is rung 1 of the resume ladder: go back to the worker that failed, hand it the failure, and let it carry on from the context it already has. Relaunching from zero throws away everything it learned and usually reproduces the same failure. Fall to rung 2 — a fresh worker seeded from `04-implementation.md`, the task record, and the diff so far — only when the harness cannot continue that worker, and say so when you do.
+**Retrying means continuing, not relaunching.** The default is rung 1 of the resume ladder: go back to the worker that failed, hand it the failure, and let it carry on from the context it already has. Relaunching from zero throws away everything it learned and usually reproduces the same failure. If that worker cannot be continued, **the resume ladder decides what happens next** — it may permit rung 2, or it may require you to stop. Follow it; do not assume the fallback.
 
 **Step D: Two-Stage Review (per task)**
 
@@ -478,7 +478,7 @@ If an agent reports failure:
 
 1. Display the error details
 2. Offer options: continue that worker (the default — rung 1 of the resume ladder), skip, or stop
-3. If continuing is impossible, seed a fresh worker from `04-implementation.md`, the task record, and the diff so far, and say that you did
+3. If continuing is impossible, take the next step **the resume ladder** gives you for the configured `context.resume` — that is rung 2 under `"prefer"`, and a loud stop under `"require"`. Never pick the fallback yourself
 4. If skipping, mark dependent tasks as blocked
 
 ### Dependency Issues

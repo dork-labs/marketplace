@@ -440,6 +440,14 @@ describe('FlowConfigSchema — the models block (tiers committed, bindings local
     expect(
       validate({ ...resolved, models: { ...resolved.models, bindings: { frontier: 'x' } } })
     ).toBe(false);
+    // And the invalid-VALUE case, not just the unknown key: `frontier` is not a
+    // tier an editor may offer, either.
+    expect(
+      validate({
+        ...resolved,
+        models: { ...resolved.models, tiers: { ...resolved.models.tiers, review: 'frontier' } },
+      })
+    ).toBe(false);
     // The un-doctored resolved config still validates — the guard is not vacuous.
     expect(validate(resolved)).toBe(true);
   });

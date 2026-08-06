@@ -224,7 +224,7 @@ bundle to attach, and VERIFY says so rather than inventing one.
 #### Stamp the run's provenance
 
 A reviewer or a follow-up session should not have to guess where this change came
-from. Carry the run's `provenance` block (written at EXECUTE's claim, in
+from. Carry the run's `provenance` block (written at EXECUTE Phase 0.5, in
 `.dork/flow/flow-state.json`) onto both surfaces:
 
 - **On the PR** — append one hidden, machine-readable line to the body:
@@ -235,6 +235,13 @@ from. Carry the run's `provenance` block (written at EXECUTE's claim, in
 
   It is a comment, so a human reading the PR never sees it, and a later session
   can read it back without parsing prose. `templates/pr.md` carries the same line.
+
+  **This is the one artifact a machine parses, so it has to be valid JSON.**
+  JSON-escape every value — quotes, backslashes, newlines, control characters —
+  and drop any field whose value you cannot escape safely. A missing field
+  degrades one lookup; an unescaped quote invalidates the whole blob, and a
+  parser that silently gets nothing back is exactly the failure this line exists
+  to prevent. If nothing survives escaping, write no line at all and say so.
 
 - **On the work item** — via the adapter, and **only with verbs that already
   exist**:
@@ -247,6 +254,12 @@ from. Carry the run's `provenance` block (written at EXECUTE's claim, in
 lie a later session will act on. If provenance is empty because the harness could
 determine nothing, skip both stamps and say so in the run report rather than
 writing an empty block that looks like a stamp.
+
+**If EXECUTE never ran** — you were triggered straight into VERIFY, so
+`flow-state.json` holds no provenance for this item — stamp what _this_ session
+can determine about itself (its own harness, session, host, worktree, branch) and
+omit the rest. Partial provenance from the verifying session is still a real
+trail; inventing an execution session that never happened is not.
 
 #### Decide the closing form deliberately
 

@@ -145,6 +145,7 @@ FlowRun {
   attemptCount; workerPid;      // v1 single-machine liveness
   heartbeatAt?;                 // v2 (concurrent) liveness — unused in v1
   startedAt, completedAt?;
+  provenance?;                  // harness/session/worker/host — where the run came from
 }
 ```
 
@@ -283,9 +284,8 @@ spec's load-bearing decisions:
 Top-level blocks: `tracker`, `connection`, `identity`, `ownership`, `comments`,
 `stages`, `autonomy`, `loops`, `ingestion`, `involvement`, `dispatch`, `gates`,
 `review`, `context`, `models`, `workspace`, `recovery`, `decomposition`,
-`evidence`. The
-full annotated default set is in spec
-§9; the authoritative shape is the Zod schema.
+`evidence`. The full annotated default set is in spec §9; the authoritative
+shape is the Zod schema.
 
 ## P5 — the Flow Engine — Extension (NOT built here)
 

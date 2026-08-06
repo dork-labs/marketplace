@@ -104,6 +104,11 @@ export type FlowStage =
  * serialized outward (into the PR body's provenance comment and the tracker
  * stamp): a reader outside this repo gets one blob that answers "which harness,
  * on which machine, in which worktree" without having to know the record's shape.
+ *
+ * That overlap is made drift-safe by one rule: **provenance is written once, at
+ * run start, and never reconciled afterwards.** When it disagrees with the
+ * {@link FlowRun} coordinates, the coordinates win and the provenance copy is
+ * stale by definition — it records where the run *began*, not where it is now.
  */
 export interface FlowRunProvenance {
   /** The agent harness that ran the work, as it names itself. */
