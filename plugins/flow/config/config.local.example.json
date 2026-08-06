@@ -4,6 +4,15 @@
     "trackerToken": "REPLACE_WITH_YOUR_TRACKER_API_TOKEN_OR_OMIT_IF_THE_HOST_HANDLES_AUTH",
     "trackerAccount": "REPLACE_WITH_THE_CONNECTION_OR_ACCOUNT_HANDLE_THE_ADAPTER_AUTHENTICATES_THROUGH"
   },
+  "connection": {
+    "team": {
+      "key": "REPLACE_WITH_YOUR_TEAM_KEY_OR_ITEM_PREFIX",
+      "id": "REPLACE_WITH_YOUR_TEAM_ID"
+    },
+    "workspace": {
+      "slug": "REPLACE_WITH_YOUR_WORKSPACE_OR_ORG_SLUG"
+    }
+  },
   "identity": {
     "reviewer": "REPLACE_WITH_YOUR_TRACKER_ACCOUNT_HANDLE_FOR_REVIEW_HANDOFF"
   },

@@ -31,12 +31,21 @@ description: Reference tracker adapter for /flow - Linear reached over an in-ses
 The Linear MCP server is the in-session transport. Tool names are
 `mcp__plugin_linear_linear__*` (for example `list_issues`, `save_issue`,
 `save_comment`, `get_authenticated_user`); the prose shorthand for the family is
-`mcp__linear__*`. It reaches the DorkOS team (team key `DOR`, slug `dorkos`).
+`mcp__linear__*`. It reaches the **configured team** (`connection.team.key`, id
+`connection.team.id`) in the **configured workspace** (`connection.workspace.slug`),
+all read fresh from config — this reference adapter names no team or workspace
+inline.
 
-- **Auth.** The server must be authenticated (OAuth). If it is not, start the
-  flow with `mcp__linear__authenticate`; do not fall back to a second transport
-  from inside this adapter (the Composio reference adapter is the fallback, and
-  the engine picks one transport per run).
+- **Auth — and the identity footgun.** The server must be authenticated (OAuth).
+  If it is not, start the flow with `mcp__linear__authenticate`; do not fall back
+  to a second transport from inside this adapter (the Composio reference adapter is
+  the fallback, and the engine picks one transport per run per
+  `connection.transport`). **Unlike the account-pinned CLI transport, the MCP
+  server takes no `--account` flag: it acts as whoever OAuth'd it.** It must
+  therefore be authenticated as the **same identity** as `secrets.trackerAccount`,
+  or every write silently lands as the OAuth identity instead. Confirm the match
+  with `get_authenticated_user` before writing; if it authenticates as a different
+  account, use the account-pinned Composio reference adapter instead.
 - **Query hygiene (every read).**
   - Always pass `includeArchived: false` on `list_issues`. Linear defaults it to
     `true`, which pulls archived noise from deleted projects into the candidate
@@ -197,8 +206,8 @@ progress }`: `children` are the project's issues normalized, `umbrella` is the
 
 #### `getEligibleWork(): WorkItem[]`
 
-- **Call.** `mcp__plugin_linear_linear__list_issues` for the DOR team,
-  `includeArchived: false`.
+- **Call.** `mcp__plugin_linear_linear__list_issues` for the configured team
+  (`connection.team.key`), `includeArchived: false`.
 - **Normalize.** Fully normalize every item: required fields, re-namespaced
   labels, `stateCategory` resolved via `list_issue_statuses`, relations as
   identifiers. Return the **candidate** set, which is broader than "ready": items

@@ -29,24 +29,30 @@ description: Reference tracker adapter for /flow - Linear reached over the Compo
 ## Reaching Linear over Composio
 
 The Composio CLI is the transport (see the `composio-cli` skill). Linear slugs
-are `LINEAR_*`; it reaches the DorkOS team (team key `DOR`, slug `dorkos`).
+are `LINEAR_*`; it reaches the **configured team** (`connection.team.key`) in the
+**configured workspace** (`connection.workspace.slug`), both read fresh from
+config — this reference adapter names no team or workspace inline.
 
-- **Auth - the account guard is load-bearing.** **Two Linear accounts are
-  connected in Composio - always pass `--account personal`** (the DorkOS + Dunny
-  workspace). The other account, `artblocks`, is unrelated work and must **never**
-  receive DorkOS issues. A bare `composio execute` defaults to `personal` for
-  Linear, but always pass the flag explicitly; it is the only thing keeping
-  `artblocks` out (there is no team filter on the list slug - see below).
+- **Auth - the account guard is load-bearing.** **Always pass
+  `--account "<trackerAccount>"`**, read from `config.local.json` →
+  `secrets.trackerAccount` (set by `/flow:init`); never hardcode an account name.
+  When more than one Linear account is connected in Composio, any account other
+  than the configured one — for example an unrelated `artblocks` work login — must
+  **never** receive this workspace's issues. A bare `composio execute` picks a
+  default account, so always pass the flag explicitly: it is the only thing keeping
+  the wrong account out (there is no team filter on the list slug - see below).
 
   ```bash
-  composio execute LINEAR_LIST_LINEAR_TEAMS    --account personal -d '{}'
-  composio execute LINEAR_LIST_LINEAR_PROJECTS --account personal -d '{}'
+  composio execute LINEAR_LIST_LINEAR_TEAMS    --account "<trackerAccount>" -d '{}'
+  composio execute LINEAR_LIST_LINEAR_PROJECTS --account "<trackerAccount>" -d '{}'
   # Rediscover a slug by intent when one 404s:
   composio search "list linear issues" "create a linear issue" --toolkits linear
   ```
 
-- **DorkOS `team_id`** is `a171dbd5-3ccc-40ab-b58b-1fae7644fba8` (guards against
-  the `artblocks` workspace where a slug accepts a team id).
+- **The team id** is the configured `connection.team.id` (resolve it from
+  `connection.team.key` via `LINEAR_LIST_LINEAR_TEAMS` when unset); pass it where a
+  slug accepts a team id so a call cannot stray into another connected workspace.
+  Never inline a literal id here.
 
 ### Composio transport gotchas (verified, v0.2.31)
 
@@ -80,10 +86,10 @@ empirically verified against the live DorkOS workspace; trust them over a slug's
   Allowed keys are only `after, first, project_id, assignee_id, original_cursor,
 include_transitions, cursor_was_corrupted`. There is **no `team_id`** (passing
   it is silently dropped on the first call and hard-errors on a paginated one) and
-  **no `include_archived`**. Scope to a project with `project_id`; the `personal`
-  account's workspace is effectively DorkOS-only, so the unfiltered list is
-  already team-correct (the `--account personal` guard, not a filter, keeps
-  `artblocks` out).
+  **no `include_archived`**. Scope to a project with `project_id`; the configured
+  `trackerAccount` connects to a single workspace (`connection.workspace.slug`), so
+  the unfiltered list is already team-correct (the `--account "<trackerAccount>"`
+  guard, not a filter, keeps any other connected account out).
 - **Response shapes.** list -> `.data.issues[]` + `.data.page_info{ hasNextPage,
 endCursor }` (**not** `.data.items`); get -> `.data.issue`; projects ->
   `.data.projects[]`; teams -> `.data.teams[]`.
@@ -190,13 +196,13 @@ contract requires. Two degradation rules are universal: a read that cannot reach
 the tracker **throws** (never returns `[]`, so the loop can tell "checked,
 nothing matched" from "could not check"); a write that fails **surfaces loudly
 and never reports success** (the `agent/*` labels are the only recoverable
-state). Every call carries `--account personal`.
+state). Every call carries `--account "<trackerAccount>"`.
 
 ### Reads (8)
 
 #### `getCurrentUser(): Account`
 
-- **Call.** `composio execute LINEAR_GET_AUTHENTICATED_USER --account personal -d '{}'`.
+- **Call.** `composio execute LINEAR_GET_AUTHENTICATED_USER --account "<trackerAccount>" -d '{}'`.
 - **Normalize.** Return `{ id, name }`. Resolves an `identity.agent: "auto"`
   identity and supplies the actor that ownership classification and the
   comment-response rules compare against.

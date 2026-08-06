@@ -37,35 +37,70 @@ ever speaks `WorkItem` + the 13 verbs, that swap is additive, not a rewrite.
 
 ---
 
-## Accessing Linear (primary + fallback)
+## Accessing Linear — the connection is config-driven
 
-Two interchangeable access paths reach the **same** workspace and DorkOS team
-(team key `DOR`, slug `dorkos`). The adapter is the only place either appears.
+**The adapter hardcodes no team, workspace, or account.** It reads WHERE and HOW
+it reaches Linear from config, fresh on every run — so pointing flow at a
+different team, workspace, or account is a config edit, never a change to this
+skill:
 
-1. **Linear MCP tools (primary).** The in-session MCP server. Tool names are
-   `mcp__plugin_linear_linear__*` (e.g. `list_issues`, `save_issue`,
-   `save_comment`, `get_authenticated_user`). Requires the MCP server to be
-   authenticated (OAuth); if it is not, start the flow with
-   `mcp__linear__authenticate`. Spec/prose shorthand for the family is
-   `mcp__linear__*`.
-2. **Composio CLI (fallback).** Works even when the MCP server is
-   unauthenticated (see the `composio-cli` skill). Linear slugs are `LINEAR_*`.
-   **Always pass `--account <handle>`, where `<handle>` is read from
-   `config.local.json` → `secrets.trackerAccount`** — the Composio connection the
-   adapter authenticates through (set by `/flow:init`). Read it fresh from config;
-   **never hardcode an account name here.** Any other connected account — a
-   maintainer's personal login, or unrelated `artblocks` work — must **never**
-   receive DorkOS writes; only the configured `trackerAccount` does. (This is how
-   an adopter points flow at a dedicated bot account instead of a personal one:
-   they set `trackerAccount`, not edit this skill.) Examples below write
-   `<trackerAccount>` to stand in for that configured value.
+| Config value                | What it is                                                   | Where it lives                            |
+| --------------------------- | ------------------------------------------------------------ | ----------------------------------------- |
+| `connection.team.key`       | team key / issue prefix (the token before the dash in an id) | `config.local.json` (null in committed)   |
+| `connection.team.id`        | the team's Linear id, when a call needs to scope by it       | `config.local.json` (null in committed)   |
+| `connection.workspace.slug` | the workspace / org slug                                     | `config.local.json` (null in committed)   |
+| `connection.transport`      | which access path is **primary** — `cli` or `mcp`            | `config.json` (committed policy)          |
+| `secrets.trackerAccount`    | the account handle the CLI acts as                           | `config.local.json` (secret, out-of-band) |
 
-   ```bash
-   composio execute LINEAR_LIST_LINEAR_TEAMS    --account "<trackerAccount>" -d '{}'
-   composio execute LINEAR_LIST_LINEAR_PROJECTS --account "<trackerAccount>" -d '{}'
-   # Discover other slugs by intent:
-   composio search "list linear issues" "create a linear issue" --toolkits linear
-   ```
+`/flow:init` sets all of these. A real team key/id and workspace slug live in the
+gitignored `config.local.json`, never in the shared committed config — a concrete
+id baked into the shipped template would re-hardcode the agnosticism this seam
+exists to preserve. Below, `<teamKey>`, `<teamId>`, `<workspaceSlug>`, and
+`<trackerAccount>` stand in for those configured values.
+
+### Two transports, selected by `connection.transport`
+
+Both paths reach the **same** team and workspace; `connection.transport` decides
+which is primary. The adapter is the only place either path appears.
+
+**`cli` (the default) — the Composio CLI, account-pinned.** Works even when the
+MCP server is unauthenticated (see the `composio-cli` skill). Linear slugs are
+`LINEAR_*`. **Always pass `--account "<trackerAccount>"`**, read fresh from
+`config.local.json` → `secrets.trackerAccount` (set by `/flow:init`); **never
+hardcode an account name here.** This is the safe default precisely because the
+acting identity is pinned by config: any other connected account — a maintainer's
+personal login, or unrelated `artblocks` work — must **never** receive flow's
+writes, and the `--account "<trackerAccount>"` flag is the only thing keeping them
+out (there is no team filter on the list slug — see below). An adopter points flow
+at a dedicated bot account by setting `trackerAccount`, not by editing this skill.
+
+```bash
+composio execute LINEAR_LIST_LINEAR_TEAMS    --account "<trackerAccount>" -d '{}'
+composio execute LINEAR_LIST_LINEAR_PROJECTS --account "<trackerAccount>" -d '{}'
+# Discover other slugs by intent:
+composio search "list linear issues" "create a linear issue" --toolkits linear
+```
+
+**`mcp` — the in-session Linear MCP server.** Tool names are
+`mcp__plugin_linear_linear__*` (e.g. `list_issues`, `save_issue`, `save_comment`,
+`get_authenticated_user`); the prose shorthand for the family is `mcp__linear__*`.
+It is faster and richer than the CLI, but it carries a **real footgun the `cli`
+path does not**:
+
+> **The MCP server acts as whoever authenticated (OAuth'd) it — which is NOT
+> necessarily `secrets.trackerAccount`.** Unlike the CLI, the MCP transport takes
+> no `--account` flag; its acting identity is fixed at OAuth time. If the MCP is
+> authenticated as a different identity than `trackerAccount`, **every flow write
+> silently lands as that OAuth identity** — the exact silent-wrong-account failure
+> the account-pinned `cli` path prevents.
+>
+> So before you use `mcp` for any write: confirm the MCP is authenticated as the
+> **same identity** as `secrets.trackerAccount` — read `get_authenticated_user`
+> and check it matches the configured account. If the server is unauthenticated,
+> run `mcp__linear__authenticate` and complete OAuth **as that account**. If it is
+> authenticated as a **different** account, do not write through MCP — fall back to
+> the `cli` transport (which is account-pinned) rather than acting as the wrong
+> identity.
 
 **Query hygiene** (applies to every read):
 
@@ -114,13 +149,14 @@ original_cursor, include_transitions, cursor_was_corrupted`. There is **no
   `team_id`** (passing it is silently dropped on the first call and hard-errors on
   a paginated one) and **no `include_archived`**. Scope to a project with
   `project_id`; there is no team scoping, but the configured `trackerAccount`
-  connects to a single DorkOS-only workspace, so the unfiltered list is already
-  team-correct (the `--account <trackerAccount>` guard is what keeps `artblocks`
-  out, not a filter).
+  connects to a single workspace (`connection.workspace.slug`), so the unfiltered
+  list is already team-correct (the `--account <trackerAccount>` guard is what
+  keeps any other connected account — e.g. `artblocks` — out, not a filter).
 - **Response shapes:** list → `.data.issues[]` + `.data.page_info{ hasNextPage,
 endCursor }` (**not** `.data.items`); get → `.data.issue`; projects →
-  `.data.projects[]`; teams → `.data.teams[]`. DorkOS `team_id` is
-  `a171dbd5-3ccc-40ab-b58b-1fae7644fba8`.
+  `.data.projects[]`; teams → `.data.teams[]`. When a call needs the team id, use
+  the configured `connection.team.id` (resolve it from `connection.team.key` via
+  `LINEAR_LIST_LINEAR_TEAMS` if it is not set); never inline a literal id here.
 - **Large reads spill to a file.** A big result returns `{ successful: true,
 storedInFile: true, outputFilePath, tokenCount }` with **no inline data** — read
   `outputFilePath` with `jq` (don't slurp it into context). Paginate by passing
@@ -393,7 +429,7 @@ while the table already held more — the table is authoritative.)
 | **`resolveProject(nameOrId)`**  | one `WorkItemProject` for a fuzzy name / spec slug / umbrella identifier (case-insensitive). Returns ALL matches when more than one, so the caller disambiguates. The project-addressing primitive for `/flow <project>`.                                                                                                                                                                                                                                                       | `list_projects` then match on name; resolve an umbrella id via `get_issue` → its `project`                                       | `LINEAR_LIST_LINEAR_PROJECTS` then match (+ `LINEAR_GET_LINEAR_ISSUE` for an umbrella id) |
 | **`getProject(id)`**            | one project with its `children[]` (project issues), its umbrella issue (the `type/meta` anchor), and a progress rollup (`done`/`total`, current stage).                                                                                                                                                                                                                                                                                                                         | `list_projects` (the one) + `list_issues` (project filter, `includeArchived: false`)                                             | `LINEAR_GET_LINEAR_PROJECT` + `LINEAR_LIST_LINEAR_ISSUES` (project filter)                |
 | **`getProjectWork(projectId)`** | `getEligibleWork` **scoped to one project**: the candidate `WorkItem[]` for project-scoped dispatch (same normalization + graceful-degradation rules as `getEligibleWork`).                                                                                                                                                                                                                                                                                                     | `list_issues` (project filter, `includeArchived: false`)                                                                         | `LINEAR_LIST_LINEAR_ISSUES` (project filter)                                              |
-| **`getEligibleWork()`**         | `WorkItem[]` of candidate work for the dispatch policy (issues for the DOR team, `includeArchived: false`)                                                                                                                                                                                                                                                                                                                                                                      | `mcp__plugin_linear_linear__list_issues`                                                                                         | `LINEAR_LIST_LINEAR_ISSUES`                                                               |
+| **`getEligibleWork()`**         | `WorkItem[]` of candidate work for the dispatch policy (issues for the configured team `connection.team.key`, `includeArchived: false`)                                                                                                                                                                                                                                                                                                                                         | `mcp__plugin_linear_linear__list_issues`                                                                                         | `LINEAR_LIST_LINEAR_ISSUES`                                                               |
 | **`getInbox(agent)`**           | the agent's inbox (see shape below) — assigned-to-me + @mentions + new comments since the last tick                                                                                                                                                                                                                                                                                                                                                                             | `list_issues` (assignee filter) + `mcp__plugin_linear_linear__list_comments`                                                     | `LINEAR_LIST_LINEAR_ISSUES` + `LINEAR_LIST_COMMENTS`                                      |
 | **`getRelations(item)`**        | the typed relation graph (`blocks/blockedBy/children/relatedTo/duplicateOf`) for a single item                                                                                                                                                                                                                                                                                                                                                                                  | `mcp__plugin_linear_linear__get_issue` (returns relations)                                                                       | `LINEAR_GET_LINEAR_ISSUE`                                                                 |
 | **`getBacklogSnapshot()`**      | the GROOM input (`grooming-backlog`): EVERY non-archived item regardless of state — open items fully normalized (relations, re-namespaced labels, project `stateCategory`), plus closed items at least as `{ identifier, title, stateCategory }` for duplicate/shipped matching. Unlike `getEligibleWork`, nothing is filtered toward dispatch; the snapshot feeds `scripts/audit-backlog.ts` as `{ items, opts: { agentIdentity } }`. See "Building the groom snapshot" below. | `list_issues` paginated with **no state filter** + `list_projects` + `list_issue_statuses` (category map) + label-group recovery | `LINEAR_RUN_QUERY_OR_MUTATION`, paginated (see the snapshot notes)                        |

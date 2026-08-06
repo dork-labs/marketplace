@@ -32,6 +32,75 @@ import { z } from 'zod';
 export const TrackerSchema = z.enum(['linear']);
 
 /**
+ * Tracker transport — which access path the adapter treats as **primary** (§3).
+ *
+ * The pair is deliberately tracker-neutral (it names no integration provider, so
+ * the generic config layer stays agnostic and the tracker-confinement guard over
+ * `scripts/` passes naturally):
+ *
+ * - `cli` (the default) reaches the tracker through an **external CLI** that acts
+ *   as the configured `secrets.trackerAccount`. Because the acting identity is
+ *   pinned by config, this path can never silently write as the wrong account —
+ *   which is why it is the safe default.
+ * - `mcp` reaches the tracker through an **in-session MCP server**. It is faster
+ *   and richer, but it acts as whoever authenticated (OAuth'd) that server.
+ *   Selecting `mcp` therefore carries a hard requirement: the MCP server MUST be
+ *   authenticated as the **same identity** as `secrets.trackerAccount`, or flow
+ *   silently acts as the OAuth identity instead. The concrete adapter documents
+ *   this caveat where it binds the transport.
+ */
+export const TransportSchema = z.enum(['cli', 'mcp']);
+
+/**
+ * Tracker team coordinates (§3) — the team/prefix flow reads and writes.
+ *
+ * Both default to `null` in committed config. A concrete team key or id is
+ * deployment-specific, so it belongs in the gitignored `config.local.json` (or a
+ * `FLOW_`-prefixed env var), never the shared shipped template — baking a real id
+ * into the committed default would re-hardcode agnosticism away. `/flow:init`
+ * discovers them (via the adapter's "list teams" read) and writes the real values
+ * to the local file.
+ */
+export const ConnectionTeamSchema = z
+  .object({
+    /** Team key / work-item prefix (the token before the dash in an item id). */
+    key: z.string().nullable().default(null),
+    /** Team id — the tracker-native identifier used to scope reads/writes. */
+    id: z.string().nullable().default(null),
+  })
+  .prefault({});
+
+/** Tracker workspace / organization coordinates (§3). */
+export const ConnectionWorkspaceSchema = z
+  .object({
+    /** Workspace / org slug. `null` in committed config; set per deployment at init. */
+    slug: z.string().nullable().default(null),
+  })
+  .prefault({});
+
+/**
+ * Tracker-connection coordinates + transport (§3) — the **non-secret** sibling of
+ * `secrets.trackerAccount`. Holds WHERE flow reads and writes (team, workspace)
+ * and HOW it reaches the tracker (transport). The concrete adapter reads every
+ * value here instead of hardcoding a team key, a team id, or a workspace slug, so
+ * pointing flow at a different team/workspace is a config edit, not a skill edit.
+ *
+ * Committed defaults are `null` placeholders; real coordinates live in
+ * `config.local.json`. `transport` is shared policy and stays in committed config
+ * (default `cli`, the account-pinned path).
+ */
+export const ConnectionSchema = z
+  .object({
+    /** Team coordinates (key + id). */
+    team: ConnectionTeamSchema,
+    /** Workspace / organization coordinates (slug). */
+    workspace: ConnectionWorkspaceSchema,
+    /** Primary access path — account-pinned `cli` (default) or in-session `mcp`. */
+    transport: TransportSchema.default('cli'),
+  })
+  .prefault({});
+
+/**
  * Agent identity & authorship marker (§7). No personal identity ships in the
  * package — `agent: "auto"` and `reviewer: null` are resolved at runtime from
  * the installer's account; the marker is the durable authorship signal.
@@ -557,6 +626,8 @@ export const FlowConfigSchema = z
     $schema: z.string().optional(),
     /** Active project tracker. */
     tracker: TrackerSchema.default('linear'),
+    /** Tracker-connection coordinates (team, workspace) + transport preference. */
+    connection: ConnectionSchema,
     /** Agent identity & authorship marker. */
     identity: IdentitySchema,
     /** Ownership claim policy. */

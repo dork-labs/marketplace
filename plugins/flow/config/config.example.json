@@ -1,6 +1,11 @@
 {
   "$schema": "./config.schema.json",
   "tracker": "linear",
+  "connection": {
+    "team": { "key": null, "id": null },
+    "workspace": { "slug": null },
+    "transport": "cli"
+  },
   "identity": { "agent": "auto", "reviewer": null, "marker": "— 🤖 /flow" },
   "ownership": {
     "claimAssignedToAgent": true,

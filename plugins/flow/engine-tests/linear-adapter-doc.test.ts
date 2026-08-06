@@ -107,11 +107,33 @@ describe('linear-adapter SKILL.md — prose-contract completeness', () => {
     expect(skill).toMatch(/neutral/i);
   });
 
-  it('documents both Linear access paths (MCP primary + Composio fallback, personal account)', () => {
+  it('documents both Linear access paths as a config-driven transport (cli + mcp), account never hardcoded', () => {
     expect(skill).toMatch(/mcp__(plugin_)?linear/);
     expect(skill).toMatch(/composio/i);
-    expect(skill).toContain('--account personal');
+    // The account is read from config, never hardcoded (no literal `--account personal`).
+    expect(skill).not.toContain('--account personal');
+    expect(skill).toContain('trackerAccount');
+    expect(skill).toMatch(/--account\s+"?<trackerAccount>"?/);
+    // The transport is an explicit config knob, not an implicit MCP-first default.
+    expect(skill).toContain('connection.transport');
     expect(skill).toMatch(/artblocks/); // the never-touch warning is present
+  });
+
+  it('reads team + workspace from config instead of hardcoding them', () => {
+    // The three connection coordinates are config reads, not inline literals.
+    expect(skill).toContain('connection.team.key');
+    expect(skill).toContain('connection.team.id');
+    expect(skill).toContain('connection.workspace.slug');
+    // The old hardcoded DorkOS team id must be gone from the adapter prose.
+    expect(skill).not.toContain('a171dbd5');
+  });
+
+  it('calls out the MCP-must-be-authenticated-as-trackerAccount footgun', () => {
+    // Selecting the `mcp` transport silently acts as whoever OAuth'd the server
+    // unless it is the same identity as trackerAccount — the adapter must warn.
+    expect(skill).toMatch(/mcp/i);
+    expect(skill).toMatch(/same identity|authenticated as|OAuth/i);
+    expect(skill).toContain('get_authenticated_user');
   });
 
   it('states the sub-issue promotion rule as an ORDINAL comparison, and states it truly', () => {
