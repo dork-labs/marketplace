@@ -1,6 +1,6 @@
 ---
 name: initializing-flow
-description: First-run setup for the /flow engine in a new repo - detect or reconfigure an existing install, gather setup choices (tracker + connection, identity mode, project routing, adversarial review) via the calibration ladder, generate and verify the concrete tracker adapter, scaffold the committed config.json plus the gitignored config.local.json and a review rubric, and confirm the install with a dry dispatch. Use when running /flow:init, configuring flow for the first time, adopting a new tracker, or reconfiguring an existing flow install.
+description: First-run setup for the /flow engine in a new repo - detect or reconfigure an existing install, gather setup choices (tracker + connection, identity mode, project routing, adversarial review, model tiers) via the calibration ladder, generate and verify the concrete tracker adapter, scaffold the committed config.json plus the gitignored config.local.json and a review rubric, and confirm the install with a dry dispatch. Use when running /flow:init, configuring flow for the first time, adopting a new tracker, or reconfiguring an existing flow install.
 ---
 
 # Initializing Flow - first-run setup
@@ -44,7 +44,7 @@ confirms before overwriting committed config.
 
 ```
   1 DETECT     does a valid config.json already exist?  (fresh vs re-run)
-  2 GATHER     tracker + connection · identity mode · project routing · review
+  2 GATHER     tracker + connection · identity · routing · review · model tiers
   3 ADAPTER    generate the concrete adapter, then validate until green (the gate)
   4 CONFIG     write config.json + config.local.json (secrets) + the review rubric
   5 CONFIRM    dry dispatch on an empty queue → "/flow is ready"
@@ -76,7 +76,7 @@ verified.
 
 ### Step 2 - Gather setup choices (the calibration ladder)
 
-Four choices drive the rest of setup. Gather them with `AskUserQuestion`
+Five choices drive the rest of setup. Gather them with `AskUserQuestion`
 interactively, or apply the headless default.
 
 1. **Tracker + connection.** Which tracker, and how the adapter reaches it. Offer:
@@ -169,6 +169,32 @@ interactively, or apply the headless default.
    signal. It is a one-time change flow cannot make for them, and without it
    VERIFY has to re-check the item's state after every partial merge.
 
+5. **Model tiers.** Which models this machine's harness can actually reach, so
+   every delegated worker is dispatched on purpose rather than by accident. Ask
+   the operator to rank the models available to them and name two:
+   - **Workhorse** — the strong general-purpose model. Implementation, review,
+     and analysis work run here by default.
+   - **Fast** — the cheap quick one. Mechanical work (searches, scaffolds,
+     renames, log triage) runs here by default.
+
+   Two, deliberately. The model the orchestrating session is itself running on is
+   **not** a delegate tier: flow never names it, never binds it, and never routes
+   a worker onto it, so setup does not ask for it.
+
+   Write both answers to `models.bindings` in `config.local.json`. A model name is
+   machine-specific, so it never goes in the committed file — that one carries
+   only `models.tiers`, the class-to-tier policy, which names no model at all.
+   Explain the split while you ask; it is the same split as the tracker
+   coordinates. Two special cases, both fine:
+   - **Only one model available** → bind both tiers to it. The policy becomes a
+     no-op, which is a valid configuration and not a failure.
+   - **The operator does not know** → leave the bindings out. Each unbound tier
+     falls back to the harness's own default model, and every run that does so
+     says it did.
+
+   _Headless default: write no bindings, and record the assumption — delegates
+   fall back to the harness default until someone runs `/flow:init` again._
+
 Record each chosen value and each headless assumption; they feed Steps 3 and 4
 and the final report.
 
@@ -214,7 +240,10 @@ honor it.
    (the transport choice — `cli` or `mcp`), `identity.agent` (`"auto"` for shared,
    the agent handle for two-account), `ownership.scope` (the project-routing
    choice), and the `review` block (`adversarial`, `reviewers`, `rubric` — the
-   adversarial-review choice). **Leave `connection.team` and
+   adversarial-review choice). **Leave `models.bindings` empty here** — the tier
+   policy in `models.tiers` is shared and stays, but the models it binds to are
+   per-machine and go in the local file, for the same reason no credential does.
+   **Leave `connection.team` and
    `connection.workspace` at their `null`
    placeholders here** — a concrete team key/id or workspace slug is
    deployment-specific and goes in the gitignored local file, never the shared
@@ -236,8 +265,10 @@ honor it.
    Put the resolved **team** coordinates from Step 2 under `connection.team`
    (`key` + `id`) and the **workspace** slug under `connection.workspace.slug` —
    these deep-merge over the committed file's `null` placeholders. Put the human
-   reviewer handle under `identity.reviewer` here. Delete any template block you do
-   not need. If an existing `config.local.json` is present, merge the new values in
+   reviewer handle under `identity.reviewer` here, and the two model answers from
+   Step 2 under `models.bindings` (`workhorse` + `fast`) — a model name is
+   per-machine and belongs here, never in the committed file. Delete any template
+   block you do not need. If an existing `config.local.json` is present, merge the new values in
    rather than overwriting the operator's other overrides.
 
 3. **Confirm the ignore.** Verify the repo `.gitignore` already ignores the local
@@ -289,7 +320,8 @@ than reporting success.
 On a green dry dispatch, tell the operator `/flow` is ready: name the configured
 tracker, the identity mode, the project-routing scope, the adversarial-review
 posture (and the rubric path, flagging it if you just scaffolded one that still
-needs filling in), and the entry points
+needs filling in), the model bound to each delegate tier (or that a tier is
+unbound and will fall back to the harness default), and the entry points
 (`/flow` to orchestrate, `/flow:<stage>` for a single stage, `/flow auto` for the
 autonomous drain). Surface any headless assumptions you applied so the operator
 can change them with another `/flow:init`.
