@@ -84,7 +84,7 @@ Execution changes code — decide where it runs before any agent starts.
 git rev-parse --git-dir --git-common-dir && git branch --show-current && git status --porcelain
 ```
 
-If the two rev-parse paths **differ**, the session is already in a secondary worktree — skip the rest of this phase and execute here.
+If the two rev-parse paths **differ**, the session is already in a secondary worktree — the workspace question is settled, so skip 0.2 through 0.4 and execute here. Still do **0.5**: a run always records where it came from.
 
 ### 0.2 The Config Decides — Read `workspace.isolation`
 
