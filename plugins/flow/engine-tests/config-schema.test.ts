@@ -119,6 +119,42 @@ describe('FlowConfigSchema — parsing the §9 config.json', () => {
   });
 });
 
+describe('FlowConfigSchema — the tracker-connection block (team, workspace, transport)', () => {
+  it('resolves null/placeholder coordinates and the cli transport default from {}', () => {
+    const { connection } = FlowConfigSchema.parse({});
+    // Committed defaults must NOT carry a concrete team/workspace (agnosticism).
+    expect(connection.team).toEqual({ key: null, id: null });
+    expect(connection.workspace).toEqual({ slug: null });
+    // The account-pinned CLI is the safe default transport.
+    expect(connection.transport).toBe('cli');
+  });
+
+  it('accepts the mcp transport and real coordinate overrides (a config edit, not code)', () => {
+    const cfg = FlowConfigSchema.parse({
+      connection: {
+        team: { key: 'ABC', id: 'team-uuid' },
+        workspace: { slug: 'acme' },
+        transport: 'mcp',
+      },
+    });
+    expect(cfg.connection.transport).toBe('mcp');
+    expect(cfg.connection.team).toEqual({ key: 'ABC', id: 'team-uuid' });
+    expect(cfg.connection.workspace.slug).toBe('acme');
+  });
+
+  it('a partial override keeps the other coordinates at their null defaults', () => {
+    const cfg = FlowConfigSchema.parse({ connection: { team: { key: 'ABC' } } });
+    expect(cfg.connection.team).toEqual({ key: 'ABC', id: null });
+    expect(cfg.connection.workspace.slug).toBeNull();
+    expect(cfg.connection.transport).toBe('cli');
+  });
+
+  it('rejects an out-of-enum transport', () => {
+    const result = FlowConfigSchema.safeParse({ connection: { transport: 'rest' } });
+    expect(result.success).toBe(false);
+  });
+});
+
 describe('FlowConfigSchema — the loops config block (task 2.4)', () => {
   it('resolves the full per-reconciler loops map from {}', () => {
     const { loops } = FlowConfigSchema.parse({});
@@ -282,6 +318,7 @@ describe('z.toJSONSchema bridge', () => {
     const properties = json.properties as Record<string, unknown>;
     for (const key of [
       'tracker',
+      'connection',
       'identity',
       'ownership',
       'comments',

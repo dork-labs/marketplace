@@ -85,3 +85,13 @@ resolves at runtime (`agent: "auto"`, `reviewer: null`) rather than shipping a
 real account, and there is no credential field anywhere in the committed config.
 Anything secret or machine-specific belongs in `config.local.json` (gitignored)
 or in a `FLOW_`-prefixed environment variable.
+
+The same rule covers the **tracker-connection coordinates**. `connection.team`
+(`key` + `id`) and `connection.workspace.slug` are non-secret, but they are
+deployment-specific, so the committed default ships them as `null` placeholders —
+a real team id in the shared template would re-hardcode the very agnosticism the
+adapter is built to preserve. `/flow:init` discovers the real values and writes
+them to `config.local.json`. Only `connection.transport` (which access path is
+primary — `cli` or `mcp`) is shared policy and stays in the committed file. The
+concrete tracker adapter reads all of these from config rather than naming a team
+or workspace inline.

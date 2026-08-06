@@ -151,7 +151,8 @@ routes each failure through the calibration ladder (mechanical conflict → reso
 ## Adapter interface
 
 The `linear-adapter` skill is the v1 **`PMClient`**: it owns **every** tracker
-call (Linear MCP primary, Composio `--account personal` fallback) and fulfils the
+call over a config-driven transport (`connection.transport`: an account-pinned
+Composio CLI or the in-session Linear MCP) and fulfils the
 capability verbs as a **documented prose contract**. Generic stage skills call it
 by naming a verb (e.g. _"via the linear-adapter, transition the item …"_) and
 never touch a tracker string — a grep guard enforces zero `mcp__linear__*` /

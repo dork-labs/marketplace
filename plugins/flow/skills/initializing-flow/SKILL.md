@@ -92,11 +92,29 @@ interactively, or apply the headless default.
    starting point in Step 3 (an MCP transport resembles the MCP reference
    adapter; a CLI or REST transport resembles the CLI/REST reference adapter;
    see `<flow-root>/adapters/SPEC.md` and the reference adapters under
-   `<flow-root>/adapters/reference/`). Capture the tracker's short name (used as
-   `<tracker>` in the adapter path and the `tracker` config field) and the
-   connection/account handle the adapter authenticates through.
+   `<flow-root>/adapters/reference/`). Capture, into the config the adapter reads:
+   - the tracker's short name → the `tracker` config field (and `<tracker>` in the
+     adapter path),
+   - the transport → `connection.transport`, one of `cli` (an account-pinned
+     external CLI — the **safe default**, since the acting identity is fixed by the
+     account handle) or `mcp` (an in-session MCP server),
+   - the connection/account handle the adapter authenticates through →
+     `secrets.trackerAccount`,
+   - the **team** the engine reads and writes → `connection.team` (`key` + `id`);
+     the adapter can discover the id from the key with a "list teams" read during
+     Step 3,
+   - the **workspace/org** slug → `connection.workspace.slug`.
+
+   **If the operator picks the `mcp` transport, warn about the identity footgun:**
+   an MCP server acts as whoever authenticated (OAuth'd) it, with no per-call
+   account flag, so it must be authenticated as the **same identity** as
+   `secrets.trackerAccount` or the engine silently writes as the OAuth identity.
+   The `cli` transport has no such hazard (every call carries the account handle),
+   which is why it is the default.
    _Headless default: keep the template's `tracker` value and its matching
-   reference transport._
+   reference transport (`connection.transport: "cli"`), and leave
+   `connection.team` / `connection.workspace` at their `null` placeholders for the
+   operator to fill in a later `/flow:init`._
 
 2. **Identity mode.** Whether the agent shares the human's tracker account or has
    its own (charter G10). Offer:
@@ -164,9 +182,13 @@ Write the two config files. The triad and its precedence are documented in
 `<flow-root>/config/CONFIG.md`; honor it.
 
 1. **`config.json`** (committed, no secrets). Set the resolved behavioral policy
-   from Step 2: `tracker` (the chosen tracker's short name), `identity.agent`
-   (`"auto"` for shared, the agent handle for two-account), and `ownership.scope`
-   (the project-routing choice). Leave every other field at its template/schema
+   from Step 2: `tracker` (the chosen tracker's short name), `connection.transport`
+   (the transport choice — `cli` or `mcp`), `identity.agent` (`"auto"` for shared,
+   the agent handle for two-account), and `ownership.scope` (the project-routing
+   choice). **Leave `connection.team` and `connection.workspace` at their `null`
+   placeholders here** — a concrete team key/id or workspace slug is
+   deployment-specific and goes in the gitignored local file, never the shared
+   committed one (see CONFIG.md). Leave every other field at its template/schema
    default. **Never write a token, API key, or account handle into this file**:
    the schema is strict and credential-free by design. On a re-run, only rewrite
    this file after the Step 1 confirmation; never overwrite committed config
@@ -181,9 +203,12 @@ Write the two config files. The triad and its precedence are documented in
 
    Fill in `secrets.trackerAccount` (the connection/account handle from Step 2)
    and, when the host does not already supply tracker auth, `secrets.trackerToken`.
-   Put the human reviewer handle under `identity.reviewer` here. Delete any
-   template block you do not need. If an existing `config.local.json` is present,
-   merge the new values in rather than overwriting the operator's other overrides.
+   Put the resolved **team** coordinates from Step 2 under `connection.team`
+   (`key` + `id`) and the **workspace** slug under `connection.workspace.slug` —
+   these deep-merge over the committed file's `null` placeholders. Put the human
+   reviewer handle under `identity.reviewer` here. Delete any template block you do
+   not need. If an existing `config.local.json` is present, merge the new values in
+   rather than overwriting the operator's other overrides.
 
 3. **Confirm the ignore.** Verify the repo `.gitignore` already ignores the local
    file (`grep -q 'config.local.json' .gitignore`). It does in this repo; if a
