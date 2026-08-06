@@ -88,6 +88,48 @@ export type FlowStage =
   | 'signal';
 
 /**
+ * **Where this run came from** — the origin the next session needs in order to
+ * decide whether it can *continue* the worker that started the work, or must
+ * start a fresh one from the durable artifacts.
+ *
+ * Every field is optional, and the rule is **omit, never fabricate**: a harness
+ * that cannot tell you its own session id simply leaves `sessionId` out. A
+ * fabricated value is worse than a missing one — a later tick would try to
+ * continue a worker that never existed, and report a resume it did not perform.
+ *
+ * This block overlaps, on purpose, with the run's own {@link FlowRun.sessionId},
+ * {@link FlowRun.worktreePath} and {@link FlowRun.branch}. Those three are flow's
+ * **required coordinates** — always present, always flow's own values. Provenance
+ * is the **self-contained, harness-reported origin**, which is why it is what gets
+ * serialized outward (into the PR body's provenance comment and the tracker
+ * stamp): a reader outside this repo gets one blob that answers "which harness,
+ * on which machine, in which worktree" without having to know the record's shape.
+ */
+export interface FlowRunProvenance {
+  /** The agent harness that ran the work, as it names itself. */
+  harness?: string;
+  /**
+   * The harness's own session/conversation id for this run — the handle a later
+   * tick would use to continue the same worker. Some harnesses do not expose one
+   * directly but do write a transcript whose location encodes it; deriving it
+   * from there is fine, guessing is not.
+   */
+  sessionId?: string;
+  /** The delegated worker/agent id or name the harness assigned, when it assigns one. */
+  agentId?: string;
+  /**
+   * The machine the run happened on. Load-bearing for the resume ladder: a
+   * retained transcript is only reachable from the machine that holds it, so a
+   * host mismatch is what rules rung 1 out.
+   */
+  host?: string;
+  /** Absolute worktree path the run used, as the harness saw it. */
+  worktree?: string;
+  /** Git branch the run worked on. */
+  branch?: string;
+}
+
+/**
  * The **durable run record** (§12) — the session↔issue association, keyed by
  * issue, written to `flow-state.json` (v1, disk) → server SQLite (v2). Follows
  * the ADR-0043 **file-first write-through** pattern: disk is the source of
@@ -152,6 +194,13 @@ export interface FlowRun {
   startedAt: string;
   /** ISO-8601 timestamp the run completed, or `undefined` while in flight. */
   completedAt?: string;
+  /**
+   * Where this run came from — harness, session, worker, machine, worktree,
+   * branch. Written at claim with whatever the running harness can actually
+   * determine, and absent entirely on a harness that can determine nothing. See
+   * {@link FlowRunProvenance}.
+   */
+  provenance?: FlowRunProvenance;
 }
 
 /** The inferred {@link RecoverySchema} config type (`maxRetries`/`onExhausted`/`staleAfter`). */
