@@ -1,6 +1,6 @@
 ---
 name: verifying-work
-description: The /flow engine's VERIFY stage — trace recent work for correctness, run the verification gate, gather proof-of-completion scaled to the change, attach it to the work item, and hand off to the human-review gate. Use when running /flow:verify or advancing a work item into the VERIFY stage.
+description: The /flow engine's VERIFY stage — trace recent work for correctness, run the verification gate, put the branch through an independent adversarial review before any PR opens, gather proof-of-completion scaled to the change, attach it to the work item under a deliberately chosen closing or non-closing reference, and hand off to the human-review gate. Use when running /flow:verify or advancing a work item into the VERIFY stage.
 ---
 
 # Verifying Work — the VERIFY stage
@@ -236,8 +236,10 @@ identifier the branch key on _every_ branch, so a partial PR is exposed to this 
 default. Two things follow, and a partial PR needs both:
 
 - **Check after the merge, not before.** Read the item's state once the PR lands;
-  if branch automation closed it while work remains, reopen it (via the adapter)
-  and say that automation, not a human, closed it.
+  if branch automation closed it while work remains, reopen it via the adapter's
+  `transition` — back to the stage projection the remaining work actually sits at,
+  not merely out of the terminal state — and say that automation, not a human,
+  closed it.
 - **Tell the adopter about the durable fix.** The reliable cure is a setting, not
   a habit: most trackers let you disable branch-name-based auto-close in their
   git-integration settings, leaving the body reference as the only closing signal.
