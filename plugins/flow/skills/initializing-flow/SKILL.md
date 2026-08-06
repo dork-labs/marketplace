@@ -1,6 +1,6 @@
 ---
 name: initializing-flow
-description: First-run setup for the /flow engine in a new repo - detect or reconfigure an existing install, gather setup choices (tracker + connection, identity mode, project routing) via the calibration ladder, generate and verify the concrete tracker adapter, scaffold the committed config.json plus the gitignored config.local.json, and confirm the install with a dry dispatch. Use when running /flow:init, configuring flow for the first time, adopting a new tracker, or reconfiguring an existing flow install.
+description: First-run setup for the /flow engine in a new repo - detect or reconfigure an existing install, gather setup choices (tracker + connection, identity mode, project routing, adversarial review) via the calibration ladder, generate and verify the concrete tracker adapter, scaffold the committed config.json plus the gitignored config.local.json and a review rubric, and confirm the install with a dry dispatch. Use when running /flow:init, configuring flow for the first time, adopting a new tracker, or reconfiguring an existing flow install.
 ---
 
 # Initializing Flow - first-run setup
@@ -44,9 +44,9 @@ confirms before overwriting committed config.
 
 ```
   1 DETECT     does a valid config.json already exist?  (fresh vs re-run)
-  2 GATHER     tracker + connection · identity mode · project routing
+  2 GATHER     tracker + connection · identity mode · project routing · review
   3 ADAPTER    generate the concrete adapter, then validate until green (the gate)
-  4 CONFIG     write config.json (committed) + config.local.json (gitignored secrets)
+  4 CONFIG     write config.json + config.local.json (secrets) + the review rubric
   5 CONFIRM    dry dispatch on an empty queue → "/flow is ready"
 ```
 
@@ -76,7 +76,7 @@ verified.
 
 ### Step 2 - Gather setup choices (the calibration ladder)
 
-Three choices drive the rest of setup. Gather them with `AskUserQuestion`
+Four choices drive the rest of setup. Gather them with `AskUserQuestion`
 interactively, or apply the headless default.
 
 1. **Tracker + connection.** Which tracker, and how the adapter reaches it. Offer:
@@ -142,6 +142,33 @@ interactively, or apply the headless default.
    choice only sets what the loop sweeps by default. _Headless default:
    `["issues", "projects"]` (the template default)._
 
+4. **Adversarial review.** Whether a branch faces an independent machine review
+   before its PR opens, and how hard. This maps to the `review` block. Offer:
+   - **On** (recommended): VERIFY dispatches a separate reviewer agent that reads
+     the diff against a rubric file and blocks the PR until the findings converge.
+     It spends more tokens per item and buys materially higher output quality —
+     the implementing agent is the worst reviewer of its own branch, because it
+     reviews the change it remembers intending rather than the diff it produced.
+     Sets `review.adversarial: true`.
+   - **Off**: VERIFY opens the PR straight from the evidence bundle. Cheaper and
+     faster; the first eye on the diff is the human's. Sets
+     `review.adversarial: false`.
+
+   When it is on, also capture **how many reviewers run** (`review.reviewers`,
+   default `1`) — raise it only for changes with a wide blast radius, since every
+   extra reviewer is another full read of the diff — and **which rubric file**
+   they read (`review.rubric`, default `REVIEW.md`, resolved from the repo root).
+   _Headless default: on, one reviewer, `REVIEW.md`._
+
+   **Recommend one tracker setting while you are here:** most trackers close a
+   work item when a branch carrying its identifier merges, on top of any closing
+   keyword in the PR body. Since flow puts the identifier in every branch name,
+   that setting closes items on partial PRs that deliberately used a non-closing
+   reference. Tell the operator to disable branch-name-based auto-close in their
+   tracker's git-integration settings, so the PR body stays the only closing
+   signal. It is a one-time change flow cannot make for them, and without it
+   VERIFY has to re-check the item's state after every partial merge.
+
 Record each chosen value and each headless assumption; they feed Steps 3 and 4
 and the final report.
 
@@ -176,16 +203,19 @@ If the chosen tracker already has a conforming adapter (the "regenerate" or
 re-run path), re-validate it against the current contract version rather than
 regenerating from scratch, and only regenerate if validation fails.
 
-### Step 4 - Scaffold the config triad
+### Step 4 - Scaffold the config triad and the review rubric
 
-Write the two config files. The triad and its precedence are documented in
-`<flow-root>/config/CONFIG.md`; honor it.
+Write the two config files, confirm the ignore, then scaffold the review rubric.
+The triad and its precedence are documented in `<flow-root>/config/CONFIG.md`;
+honor it.
 
 1. **`config.json`** (committed, no secrets). Set the resolved behavioral policy
    from Step 2: `tracker` (the chosen tracker's short name), `connection.transport`
    (the transport choice — `cli` or `mcp`), `identity.agent` (`"auto"` for shared,
-   the agent handle for two-account), and `ownership.scope` (the project-routing
-   choice). **Leave `connection.team` and `connection.workspace` at their `null`
+   the agent handle for two-account), `ownership.scope` (the project-routing
+   choice), and the `review` block (`adversarial`, `reviewers`, `rubric` — the
+   adversarial-review choice). **Leave `connection.team` and
+   `connection.workspace` at their `null`
    placeholders here** — a concrete team key/id or workspace slug is
    deployment-specific and goes in the gitignored local file, never the shared
    committed one (see CONFIG.md). Leave every other field at its template/schema
@@ -215,6 +245,32 @@ Write the two config files. The triad and its precedence are documented in
    future adopter's `.gitignore` lacks it, surface that loudly: a committed
    credential file is the one outcome setup must never allow.
 
+4. **The review rubric** (only when `review.adversarial` resolves true). If no
+   file exists at the repo-root-relative path in `review.rubric` (default
+   `REVIEW.md`), copy the scaffold there:
+
+   ```bash
+   TARGET="$(git rev-parse --show-toplevel)/REVIEW.md"
+   mkdir -p "$(dirname "$TARGET")"
+   test -f "$TARGET" || cp <flow-root>/templates/review-rubric.md "$TARGET"
+   ```
+
+   The `mkdir -p` matters because `review.rubric` may be a nested path (for
+   example `docs/code-review.md`) whose directory does not exist yet; `cp` into a
+   missing directory fails, and a setup step that fails here would leave the
+   adversarial gate pointed at nothing. Your harness may prompt for approval on
+   the `git rev-parse` call even though the command only reads — approve it; there
+   is no other tracker-neutral way to resolve the repo root.
+
+   Substitute the configured `review.rubric` path for `REVIEW.md` if the operator
+   chose a different one. **Never overwrite an existing rubric** — an adopter who
+   already has one has already calibrated it. When you create the file, tell the
+   operator to fill in its two **FILL IN** sections (the repo's hard rules and its
+   always-check list): the scaffold reviews generically until those are written,
+   which is the difference between a reviewer that knows the codebase and one
+   guessing at severity. This file is committed, not gitignored — a rubric is
+   shared policy, and it holds no secrets.
+
 ### Step 5 - Confirm the install
 
 Prove the wiring end to end with a dry dispatch against an empty queue:
@@ -231,7 +287,9 @@ connection or credential gap: point the operator at the specific file
 than reporting success.
 
 On a green dry dispatch, tell the operator `/flow` is ready: name the configured
-tracker, the identity mode, the project-routing scope, and the entry points
+tracker, the identity mode, the project-routing scope, the adversarial-review
+posture (and the rubric path, flagging it if you just scaffolded one that still
+needs filling in), and the entry points
 (`/flow` to orchestrate, `/flow:<stage>` for a single stage, `/flow auto` for the
 autonomous drain). Surface any headless assumptions you applied so the operator
 can change them with another `/flow:init`.
@@ -262,3 +320,5 @@ can change them with another `/flow:init`.
   generated adapter conforms to.
 - `<flow-root>/config/config.json` / `<flow-root>/config/config.local.example.json` - the
   committed policy template and the local-secrets template Step 4 scaffolds from.
+- `<flow-root>/templates/review-rubric.md` - the review-rubric scaffold Step 4
+  copies to the repo root when `review.adversarial` is on.
