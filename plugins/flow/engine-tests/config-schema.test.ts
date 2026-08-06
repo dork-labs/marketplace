@@ -104,6 +104,7 @@ describe('FlowConfigSchema — parsing the §9 config.json', () => {
     expect(cfg.involvement.calibration.alwaysAsk).toContain('secrets-or-spend');
     expect(cfg.dispatch.sizeOrder).toBe('small-first');
     expect(cfg.gates.circuitBreaker.tokenBudget).toBe(2_000_000);
+    expect(cfg.review).toEqual({ adversarial: true, rubric: 'REVIEW.md', reviewers: 1 });
     expect(cfg.context.compactionTrigger).toBe(0.65);
     expect(cfg.workspace.isolation).toBe('worktree');
     expect(cfg.recovery.staleAfter).toBe('5m');
@@ -270,6 +271,52 @@ describe('CalibrationSchema — the calibration floor is non-trimmable (task 5.4
   });
 });
 
+describe('FlowConfigSchema — the adversarial review block', () => {
+  it('resolves the review defaults from {} (adversarial on, one reviewer, REVIEW.md)', () => {
+    const { review } = FlowConfigSchema.parse({});
+    // Adversarial review is ON by default: an implementing agent is the worst
+    // reviewer of its own branch.
+    expect(review.adversarial).toBe(true);
+    expect(review.rubric).toBe('REVIEW.md');
+    expect(review.reviewers).toBe(1);
+  });
+
+  it('a partial override keeps the other review defaults', () => {
+    const cfg = FlowConfigSchema.parse({ review: { reviewers: 3 } });
+    expect(cfg.review.reviewers).toBe(3);
+    expect(cfg.review.adversarial).toBe(true);
+    expect(cfg.review.rubric).toBe('REVIEW.md');
+  });
+
+  it('accepts turning the adversarial review off and repointing the rubric', () => {
+    const cfg = FlowConfigSchema.parse({
+      review: { adversarial: false, rubric: 'docs/code-review.md' },
+    });
+    expect(cfg.review.adversarial).toBe(false);
+    expect(cfg.review.rubric).toBe('docs/code-review.md');
+  });
+
+  it('rejects a reviewer count below one (a review with zero reviewers is not a review)', () => {
+    expect(FlowConfigSchema.safeParse({ review: { reviewers: 0 } }).success).toBe(false);
+    expect(FlowConfigSchema.safeParse({ review: { reviewers: -1 } }).success).toBe(false);
+  });
+
+  it('rejects a fractional reviewer count', () => {
+    expect(FlowConfigSchema.safeParse({ review: { reviewers: 1.5 } }).success).toBe(false);
+  });
+
+  it('the block is distinct from gates.review (auto-merge) — both resolve independently', () => {
+    // Three things are named "review" in this config: `review` (adversarial,
+    // pre-PR), `gates.review` (auto-merge, post-approval) and `stages.review`
+    // (the human gate). Pin that they are separate so a future edit to one
+    // cannot silently be read as an edit to another.
+    const cfg = FlowConfigSchema.parse({ review: { adversarial: false } });
+    expect(cfg.review.adversarial).toBe(false);
+    expect(cfg.gates.review.mergeOnApproval).toBe(true);
+    expect(cfg.stages.review.humanGate).toBe(true);
+  });
+});
+
 describe('FlowConfigSchema — rejecting invalid config', () => {
   it('rejects an unknown top-level key (strict)', () => {
     const result = FlowConfigSchema.safeParse({ trackerr: 'linear' });
@@ -316,7 +363,12 @@ describe('z.toJSONSchema bridge', () => {
     expect(json.type).toBe('object');
     expect(json).toHaveProperty('properties');
     const properties = json.properties as Record<string, unknown>;
-    for (const key of [
+    // The complete top-level block set, in schema order. Kept exhaustive (not a
+    // sampling) so a block silently added to — or dropped from — the Zod source
+    // fails here rather than passing unnoticed. Regeneration drift is a
+    // different guarantee, owned by the sibling "committed artifact is in sync
+    // with the Zod source" test; this one only pins the bridge's output.
+    const topLevelBlocks = [
       'tracker',
       'connection',
       'identity',
@@ -324,17 +376,27 @@ describe('z.toJSONSchema bridge', () => {
       'comments',
       'stages',
       'autonomy',
+      'loops',
+      'ingestion',
       'involvement',
       'dispatch',
       'gates',
+      'review',
       'context',
       'workspace',
       'recovery',
       'decomposition',
       'evidence',
-    ]) {
+    ];
+    for (const key of topLevelBlocks) {
       expect(properties).toHaveProperty(key);
     }
+    // `$schema` is the only property outside the block set.
+    expect(
+      Object.keys(properties)
+        .filter((k) => k !== '$schema')
+        .sort()
+    ).toEqual([...topLevelBlocks].sort());
   });
 
   it('round-trips: every value the Zod schema accepts, the JSON Schema accepts', () => {

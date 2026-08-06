@@ -411,6 +411,34 @@ export const GatesSchema = z
   })
   .prefault({});
 
+/**
+ * Adversarial pre-PR review policy (§6) — the independent review a branch faces
+ * **before** its PR exists, distinct from two neighbors it is easy to confuse:
+ * `gates.review` is the auto-merge policy that runs *after* a human approves,
+ * and `stages.review` is the human gate itself. This block governs the machine
+ * review in between.
+ *
+ * The default is on. An implementing agent is the worst reviewer of its own
+ * branch — it reviews the story it remembers writing rather than the diff it
+ * actually produced — so a separate reviewer reading the real diff against a
+ * written rubric is what makes the PR's first human read cheap.
+ */
+export const ReviewSchema = z
+  .object({
+    /** Dispatch an independent adversarial review before any PR opens. */
+    adversarial: z.boolean().default(true),
+    /** Repo-root-relative path to the review rubric the reviewer reads. */
+    rubric: z.string().default('REVIEW.md'),
+    /**
+     * Independent reviewer agents dispatched per review. Raise for risky or
+     * wide-blast-radius changes. Findings from all of them are pooled: any
+     * blocking finding blocks unless it is rebutted, so more reviewers can only
+     * ever find more, never out-vote a real defect.
+     */
+    reviewers: z.number().int().positive().default(1),
+  })
+  .prefault({});
+
 /** Context lifetime per issue (§7.7). */
 export const PerIssueSchema = z.enum(['fresh-session', 'shared-session']);
 /** Context lifetime per stage (§7.7). */
@@ -648,6 +676,8 @@ export const FlowConfigSchema = z
     dispatch: DispatchSchema,
     /** Gates — plan approval, review/auto-merge, circuit breakers. */
     gates: GatesSchema,
+    /** Adversarial pre-PR review policy. */
+    review: ReviewSchema,
     /** Context strategy. */
     context: ContextSchema,
     /** Workspace provisioning policy. */
