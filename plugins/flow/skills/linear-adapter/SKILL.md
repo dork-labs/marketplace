@@ -9,7 +9,7 @@ description: The /flow engine's tracker adapter — the single skill that owns E
 
 > **What this is.** The `/flow` engine's **work model + tracker adapter**. It is
 > the v1 realization of the `PMClient` contract (spec §3): it normalizes Linear
-> into one generic `WorkItem` shape and fulfils 13 capability verbs, so every
+> into one generic `WorkItem` shape and fulfils every capability verb, so every
 > generic stage skill and the dispatch policy can work _without ever touching a
 > Linear-specific field or a tracker API string_.
 >
@@ -33,7 +33,7 @@ flow bundle.
 
 The P5 server build swaps this skill for a typed `PMClient`; a second adapter
 (Jira / GitHub Issues) proves the agnosticism. Because the generic layer only
-ever speaks `WorkItem` + the 13 verbs, that swap is additive, not a rewrite.
+ever speaks `WorkItem` + the verbs, that swap is additive, not a rewrite.
 
 ---
 
@@ -242,9 +242,11 @@ Each of these cost a failed batch on 2026-08-03; none produces a helpful error:
 canceled`. `paused` is rejected with "No project status found for type
   paused" even though Linear the product has the concept. Use `backlog` for
   "real work, not shipped, not active".
-- **Never move a project to `completed`/`canceled` while it holds open
-  issues** — eligibility rule 4 hides them from dispatch permanently. Verify
-  the open-issue count from live data first; refuse the close-out otherwise.
+- **Never close a project out by hand.** Moving a project to
+  `completed`/`canceled` goes through the **`completeProject`** verb (writes
+  table above), which owns the open-issues guardrail and the live-data check
+  that goes with it. Bulk passes are exactly where that check gets skipped, and
+  a wrongly-closed project hides its open issues from dispatch permanently.
 
 ---
 
@@ -413,12 +415,15 @@ DOR-157 - Connect Claude Code account
 
 ---
 
-## The 17 capability verbs
+## The 18 capability verbs
 
 Each verb is mapped to its concrete Linear MCP call (primary) and Composio
 fallback. The generic layer only ever names these verbs; the adapter owns the
-call. (Nine reads + eight writes; an earlier revision titled this section "13"
-while the table already held more — the table is authoritative.)
+call. Nine reads + nine writes: the contract's **16 required** verbs
+([`../../adapters/SPEC.md`](../../adapters/SPEC.md) section 3), the groom-only
+`getBacklogSnapshot` read this adapter adds on top, and the contract's **optional**
+`completeProject`, which this adapter **supports**. (An earlier revision titled
+this section "13" while the table already held more — the table is authoritative.)
 
 ### Reads
 
@@ -447,10 +452,20 @@ while the table already held more — the table is authoritative.)
 | **`link(a, b, type)`**               | Creates a typed relation (`blocks`, `related`, `duplicate`, …) between two items. Typed relations live in the graph, never in description prose.                                                                                                                                                      | `save_issue` (relation)                                        | `LINEAR_UPDATE_ISSUE`                                  |
 | **`createSubIssue(parent, spec)`**   | Creates a child issue under `parent` (sub-issue promotion: fires only when `sizeOrdinal(size) >= sizeOrdinal(decomposition.subIssueThreshold)`, threshold default `"xl"`). The new issue's canonical home is the per-task `issue` field in `03-tasks.json`.                                           | `mcp__plugin_linear_linear__save_issue` (parentId set)         | `LINEAR_CREATE_LINEAR_ISSUE`                           |
 
+| **`completeProject(project, outcome)`** _(optional verb — **supported** here)_ | Moves a whole **project** (not an issue) into a terminal state: `outcome: 'completed'` when its work shipped, `'canceled'` when it was abandoned. Linear's project `state` accepts only `backlog \| planned \| started \| completed \| canceled`. **Never move a project to `completed`/`canceled` while it holds open issues** — dispatch drops the issues of a terminal project, so an open issue left inside one vanishes from the ready queue and the starvation count permanently, and only a human reading the tracker ever finds it. So **verify from live data at call time**: list the project's issues (project filter, `includeArchived: false`), resolve each category, and if any is `backlog`/`unstarted`/`started`, **refuse loudly** and name them — never trust an issue list the caller passed in. Idempotent: already in the requested terminal state is a no-op; the _other_ terminal state is a real change and re-runs the check. **Degradation:** via Composio the project's own `state` reads back `null` on `LINEAR_LIST_LINEAR_PROJECTS`, so read it from a GraphQL `projects` query, where it is populated; if neither the state nor the issue list can be read, **refuse** rather than guess that an unseen project is empty. | `save_project` (project `state`) | `LINEAR_RUN_QUERY_OR_MUTATION` (`projectUpdate`, id + state as real GraphQL variables; check `success`) |
+
+`completeProject` is the contract's one **optional** verb (contract `1.1.0`, SPEC
+section 3, _Optional verbs_). This adapter declaring it **supported** is what lets
+a caller name it — and a caller must still carry its own fallback, since another
+tracker's adapter may not support it.
+
 > Slugs shown in the Composio column follow the `LINEAR_*` convention; confirm
 > the exact slug with `composio search "<intent>" --toolkits linear` if a call
 > errors — Composio occasionally revises slug names. `LIST_LINEAR_TEAMS` and
-> `LIST_LINEAR_PROJECTS` are confirmed in use today.
+> `LIST_LINEAR_PROJECTS` are confirmed in use today. The same caution applies to
+> the MCP project-write tool: `save_project` is the `save_*` sibling of
+> `save_issue`, and an older server may expose it as `update_project` — confirm
+> it against your server's tool list before the first write.
 
 ---
 
@@ -543,7 +558,7 @@ the rest `undefined`; it never fabricates a value to satisfy the shape.
 
 This prose contract is the **promotion surface**. The P5 server-side Flow Engine
 — Extension promotes it into a typed `interface PMClient` (documented in
-[`../../SPEC.md`](../../SPEC.md)) with the same 13 verbs and the same `WorkItem`
+[`../../SPEC.md`](../../SPEC.md)) with the same verbs and the same `WorkItem`
 shape, backed by the Linear Agent Accounts API and a webhook relay instead of
 in-session MCP calls. A second adapter (Jira / GitHub Issues) proves the
 agnosticism. Because the generic layer speaks only `WorkItem` + verbs, the swap

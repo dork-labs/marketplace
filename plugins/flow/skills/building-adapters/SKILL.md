@@ -1,6 +1,6 @@
 ---
 name: building-adapters
-description: Guided procedure for generating and verifying a concrete /flow tracker adapter that conforms to the adapter contract. Use when building, porting, or scaffolding a tracker adapter for a new tracker (Jira, GitHub Issues, or another), or when /flow:init must produce one for an adopter. Teaches the generate-and-verify loop, maps the tracker onto the WorkItem model and the 16 capability verbs, then loops on validate-adapter.ts until the conformance invariants pass.
+description: Guided procedure for generating and verifying a concrete /flow tracker adapter that conforms to the adapter contract. Use when building, porting, or scaffolding a tracker adapter for a new tracker (Jira, GitHub Issues, or another), or when /flow:init must produce one for an adopter. Teaches the generate-and-verify loop, maps the tracker onto the WorkItem model and the 16 required capability verbs (plus any optional ones), then loops on validate-adapter.ts until the conformance invariants pass.
 ---
 
 # building-adapters - generate a conforming `/flow` tracker adapter
@@ -11,7 +11,8 @@ description: Guided procedure for generating and verifying a concrete /flow trac
 > one concrete **tracker adapter**: the single tracker-aware component that lets
 > the whole `/flow` engine run against a new tracker without changing one line of
 > the generic layer. You map the adopter's tracker onto the generic `WorkItem`
-> model and the 16 capability verbs, write the adapter, then prove it conforms.
+> model and the 16 required capability verbs, write the adapter, then prove it
+> conforms.
 >
 > **This is a generate-AND-verify procedure, and the verify half is a gate.** An
 > adapter is not done when it "looks right." It is done when `validate-adapter.ts`
@@ -28,8 +29,9 @@ ever disagree, the SPEC wins. The SPEC defines, and you will satisfy:
 - the **`WorkItem` model** (SPEC section 2): the normalized shape every read verb
   returns, plus the hard rule (match on the state **category**, never the display
   name) and the label re-namespacing rule;
-- the **16 capability verbs** (SPEC section 3): **8 reads** + **8 writes**, each
-  with its must-do, durability, and graceful-degradation requirements;
+- the **16 required capability verbs** (SPEC section 3): **8 reads** + **8
+  writes**, each with its must-do, durability, and graceful-degradation
+  requirements — plus any **optional** verbs, which you may skip but must declare;
 - the **conformance invariants** `INV-1 .. INV-5` (SPEC section 4) that
   `validate-adapter.ts` checks;
 - the **contract version** (SPEC section 5) your adapter declares and re-validates
@@ -54,7 +56,7 @@ adapter's own skill, not this one.
   ├─ 2 MAP the tracker to the model
   │        state -> stateCategory  ·  native labels -> generic families  ·  native fields
   │
-  ├─ 3 GENERATE the concrete adapter SKILL.md (all 16 verbs) into the adopter's skill home
+  ├─ 3 GENERATE the concrete adapter SKILL.md (all 16 required verbs) into the adopter's skill home
   │
   └─ 4 VERIFY with validate-adapter.ts  ──┐
              ▲                              │  verdict.ok ? -> DONE
@@ -157,20 +159,27 @@ a skill from there). It must contain:
    or a REST client), auth, and any primary plus fallback path.
 4. **The `WorkItem` normalization shape** with your **2a / 2b / 2c** mappings
    inlined, so a reader sees exactly how each native field becomes a generic one.
-5. **All 16 verbs.** A table or section per verb binding it to the concrete
-   tracker call, with its **durability** and **graceful-degradation** notes. Use
+5. **All 16 required verbs.** A table or section per verb binding it to the
+   concrete tracker call, with its **durability** and **graceful-degradation**
+   notes. Use
    [`references/verb-implementation.md`](references/verb-implementation.md) as the
-   per-verb checklist - implement **every** verb; a partial adapter does not
-   conform. The two universal degradation rules:
+   per-verb checklist - implement **every** required verb; a partial adapter does
+   not conform. The two universal degradation rules:
    - **A read that cannot reach the tracker MUST throw**, never return `[]`. Empty
      is a real signal ("checked, nothing matched"); a throw is "could not check".
    - **A write that fails MUST surface loudly and never report success.** The
      `agent/*` labels are the only recoverable state; a false success is
      unrecoverable.
-6. **The declared contract version** (SPEC section 5): export a `CONTRACT_VERSION`
+6. **A line per optional verb** (SPEC section 3, _Optional verbs_) saying
+   **supported** or **not supported**. You may skip an optional verb; you may not
+   stay silent about it, because callers branch on the declaration and silence
+   reads as an oversight. An unsupported optional verb costs nothing: the caller
+   falls back to its documented path.
+7. **The declared contract version** (SPEC section 5): export a `CONTRACT_VERSION`
    constant or a manifest field naming the contract version you generated against,
-   so `validate-adapter.ts` can check the declaration and so drift is caught at
-   validation time on a future contract bump.
+   so drift is caught when you re-validate on a future contract bump. (The
+   declaration is yours to keep honest — `validate-adapter.ts` reads a fixture of
+   normalized `WorkItem`s, so it checks your output, not your declaration.)
 
 ---
 
@@ -238,9 +247,11 @@ An adapter is done only when **all** of these hold:
       `stage/*`, `type/*` (no bare leaves).
 - [ ] `priority`/`size`/`assignee`/`relations`/`createdAt` mapped from native
       fields; missing optionals are `undefined`, never fabricated.
-- [ ] **All 16 verbs** implemented (8 reads + 8 writes) with their durability and
-      degradation notes; reads throw on unreachable, writes never report a false
-      success.
+- [ ] **All 16 required verbs** implemented (8 reads + 8 writes) with their
+      durability and degradation notes; reads throw on unreachable, writes never
+      report a false success.
+- [ ] **Every optional verb declared** supported or not supported — never left
+      unmentioned.
 - [ ] The adapter is the single audit surface: no tracker API string lives in any
       other flow skill or command.
 - [ ] `CONTRACT_VERSION` declared and matches the SPEC's current version.
@@ -255,8 +266,8 @@ An adapter is done only when **all** of these hold:
   tables for state -> category and native-label -> generic-family, the native-field
   plan, and a generic worked example.
 - [`references/verb-implementation.md`](references/verb-implementation.md) - the
-  per-verb checklist for all 16 verbs (must-do, durability, degradation), generic
-  and tracker-neutral.
+  per-verb checklist for the 16 required verbs and the optional ones (must-do,
+  durability, degradation), generic and tracker-neutral.
 - [`references/conformance-harness.md`](references/conformance-harness.md) - the
   `validate-adapter.ts` interface, fixture construction, the verify loop, and
   per-invariant troubleshooting with negative cases.

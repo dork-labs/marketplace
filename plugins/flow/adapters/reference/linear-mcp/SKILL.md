@@ -1,13 +1,13 @@
 ---
 name: linear-mcp-adapter
-description: Reference tracker adapter for /flow - Linear reached over an in-session MCP server. A concrete, forkable realization of the adapter contract (../../SPEC.md) built on the Linear MCP tools (the mcp__linear__* / mcp__plugin_linear_linear__* family). Implements all 16 capability verbs and normalizes Linear into the generic WorkItem shape. Adopters fork this directory at /flow:init when their tracker is Linear reached over MCP.
+description: Reference tracker adapter for /flow - Linear reached over an in-session MCP server. A concrete, forkable realization of the adapter contract (../../SPEC.md) built on the Linear MCP tools (the mcp__linear__* / mcp__plugin_linear_linear__* family). Implements all 16 required capability verbs plus the optional completeProject, and normalizes Linear into the generic WorkItem shape. Adopters fork this directory at /flow:init when their tracker is Linear reached over MCP.
 ---
 
 # Reference adapter: Linear over MCP
 
 > **What this is.** A **reference tracker adapter** for the `/flow` engine: a
 > concrete realization of the neutral contract in [`../../SPEC.md`](../../SPEC.md)
-> (contract version `1.0.0`) over **one transport - the in-session Linear MCP
+> (contract version `1.1.0`) over **one transport - the in-session Linear MCP
 > server**. It owns every Linear call and normalizes Linear into the generic
 > `WorkItem` shape so the dispatch policy and the stage skills run unchanged.
 >
@@ -139,9 +139,10 @@ literal `agent/ready`): re-namespacing is mandatory, not cosmetic.
 
 ---
 
-## The 16 verbs
+## The 16 required verbs, plus 1 optional
 
-Eight reads and eight writes (SPEC section 3). The generic layer only ever names
+Eight reads and eight writes, then the optional `completeProject` (SPEC section
+3). The generic layer only ever names
 a verb; this adapter owns the MCP call. Each block gives the **call**, the
 **normalization** into `WorkItem`, and the **durability + degradation** the
 contract requires. Two degradation rules are universal: a read that cannot reach
@@ -333,6 +334,27 @@ The elicitation primitive - **four atomic effects, in order**:
 - **Durability + degradation.** Durable; guard against duplicate creation on
   retry. Failed creation surfaces loudly and returns no fabricated item.
 
+### Optional writes (1)
+
+#### `completeProject(project, outcome): void` — **supported**
+
+Closes out a whole project: `outcome: 'completed'` when its work shipped,
+`'canceled'` when it was abandoned.
+
+- **Call.** `mcp__plugin_linear_linear__save_project` setting the project's
+  `state` to a state of the requested terminal category (`completed` /
+  `canceled`). Confirm the exact tool name against your server's tool list — the
+  project-write tool is the `save_*` sibling of `save_issue`, and older servers
+  expose it as `update_project`.
+- **Check first (the contract's guardrail).** Read the project's items through
+  `get_project` / `list_issues` (project filter, `includeArchived: false`) **at
+  call time** and confirm none is in a non-terminal category (`backlog`,
+  `unstarted`, `started`). If any open item remains, **refuse loudly** and name
+  them — a terminal project hides its open items from dispatch permanently.
+- **Durability + degradation.** **Durable and idempotent** — a project already in
+  the requested terminal state is a no-op. If the project's state or its item list
+  cannot be read, **refuse** rather than guess. A failed write surfaces loudly.
+
 ---
 
 ## `getInbox` entry shape
@@ -402,4 +424,5 @@ typed), **INV-3** (relation references in human-key form, resolving in-set or
 provably closed), **INV-4** (labels re-namespaced into the generic families), and
 **INV-5** (the readiness gate is the literal `agent/ready` label, and
 `getEligibleWork` / `getProjectWork` return the broader candidate set, never
-pre-filtered). It targets contract version `1.0.0`.
+pre-filtered). It targets contract version `1.1.0`, and **declares
+`completeProject` supported** (SPEC section 3, _Optional verbs_).

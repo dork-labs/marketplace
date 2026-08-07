@@ -3,8 +3,8 @@
  *
  * The v1 `PMClient` is a PROSE contract — a SKILL.md the agent reads and follows,
  * not executable code. A prose contract has no compiler to keep it complete, so
- * this cheap structural test pins that the contract documents all 13 capability
- * verbs, the core `WorkItem` fields, and the load-bearing invariants. If the
+ * this cheap structural test pins that the contract documents every capability
+ * verb, the core `WorkItem` fields, and the load-bearing invariants. If the
  * adapter shape (spec §3) changes, this test is the early warning that the prose
  * drifted.
  */
@@ -20,13 +20,21 @@ const skillPath = path.join(pluginRoot, 'skills', 'linear-adapter', 'SKILL.md');
 
 const skill = readFileSync(skillPath, 'utf8');
 
-/** The 13 capability verbs the generic layer knows (spec §3). */
+/**
+ * The capability verbs the generic layer knows (spec §3): the contract's
+ * required verbs, the groom-only `getBacklogSnapshot` read this adapter adds,
+ * and `completeProject` — the contract's one OPTIONAL verb, which this adapter
+ * declares supported (adapters/SPEC.md 1.1.0). An optional verb is only listed
+ * here because THIS adapter supports it; an adapter that did not would say so
+ * instead, and would not carry the name.
+ */
 const VERBS = [
   'getCurrentUser',
   'getProjects',
   'getEligibleWork',
   'getInbox',
   'getRelations',
+  'getBacklogSnapshot',
   'claim',
   'transition',
   'comment',
@@ -35,6 +43,7 @@ const VERBS = [
   'needsInput',
   'link',
   'createSubIssue',
+  'completeProject',
 ] as const;
 
 /** The core `WorkItem` normalization fields (spec §3). */

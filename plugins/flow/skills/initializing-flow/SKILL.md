@@ -208,8 +208,9 @@ adapter for the chosen tracker. In brief:
    tracker no reference fits).
 2. Generate the adapter as a skill into
    `<flow-root>/skills/<tracker>-adapter/SKILL.md`, mapping the tracker onto the
-   generic `WorkItem` model and all 16 capability verbs, with the durability and
-   graceful-degradation notes the SPEC requires.
+   generic `WorkItem` model and all 16 required capability verbs, with the
+   durability and graceful-degradation notes the SPEC requires, and a
+   supported/not-supported line for each optional verb.
 3. Build a representative fixture and run the conformance gate until it is green:
 
    ```bash
