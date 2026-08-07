@@ -392,9 +392,11 @@ abandoned (`outcome: 'canceled'`).
 
 - **Must do.** Move `project` into a state of the requested terminal category.
   **First, verify from live data that the project holds no open items** — no item
-  in a non-terminal category (`backlog`, `unstarted`, `started`) — reading them
-  through `getProject` / `getProjectWork` at call time, never from a snapshot the
-  caller passed in. If any open item remains, **refuse loudly**: report the open
+  in a non-terminal category (`backlog`, `unstarted`, `started`) — read at call
+  time, never from a snapshot the caller passed in. Read them the exhaustive way:
+  `getProject(id).children` is every item in the project, whereas
+  `getProjectWork` is the dispatch-shaped **candidate** set and may legitimately
+  omit an open item. If any open item remains, **refuse loudly**: report the open
   items and make no write.
 
   The guardrail is in the contract rather than in a caller because the failure it
