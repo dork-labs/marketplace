@@ -82,6 +82,11 @@ dorkos package validate       # Validates individual package manifests
 dorkos marketplace validate   # Validates the full registry (CC compat + sidecar schema)
 ```
 
+**CI:** any pull request touching `plugins/flow/**` runs `.github/workflows/flow-tests.yml`
+— it checks that `config/config.schema.json` still matches the Zod schema it is generated
+from, then runs the flow plugin's typecheck, tests, and format check. No other plugin has
+automated checks yet.
+
 ## Related Resources
 
 - **Core codebase:** `../core/` — The DorkOS monorepo (apps, packages, services)
