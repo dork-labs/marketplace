@@ -138,6 +138,7 @@ The checkpoints between stages, under `gates`:
 | `review.reapproveOnFunctionalChange` | Re-request approval if the change shifts functionally after review. | `true`    | Keeps a stale approval from carrying a changed diff.                            |
 | `circuitBreaker.estimateMultiplier`  | Trip the breaker when actual work exceeds the estimate by N times.  | `2`       | Lower to fail fast on runaway items.                                            |
 | `circuitBreaker.tokenBudget`         | Hard token ceiling per item before the breaker trips.               | `2000000` | Raise for genuinely large items; lower to cap spend.                            |
+| `projectCompletion`                  | Whether DONE closes a finished project itself or recommends it.     | `"advisory"` | `"auto"` also needs an adapter supporting the optional `completeProject` verb.  |
 
 <Callout type="info">
   The **human-review gate** (after VERIFY) is always on and is not a dial: there
@@ -146,6 +147,8 @@ The checkpoints between stages, under `gates`:
   carries auto-merge dials, `mergeOnApproval` and the recovery ladder, whose
   unattended execution is part of the deferred P5 build.)
 </Callout>
+
+`projectCompletion` is a ceiling on what the engine may do, not a promise that it will. On `"auto"`, the DONE stage closes a project out itself only when nothing is still open inside it, its progress is complete, no active spec still points at it, and your tracker adapter supports closing projects at all — that last part is optional in the adapter contract, so not every tracker can. Miss any one of those and you get the `"advisory"` behavior instead, plus a line saying which condition stopped it. The strictness is the point: a closed project hides every issue left open inside it from the work queue, permanently, and nothing else in the loop will ever raise its hand about them.
 
 ## Review
 
@@ -277,6 +280,7 @@ The producer is a swappable seam: the inbox reconciler consumes a normalized `Tr
 | Stop instead of restarting a lost session   | `context.resume: "require"`                                                                      |
 | Point flow at this machine's models         | `models.bindings` in `config.local.json`                                                         |
 | Run mechanical work on a stronger model     | `models.tiers.mechanical: "workhorse"`                                                           |
+| Close a finished project without being asked | `gates.projectCompletion: "auto"`                                                                |
 
 ## Next steps
 

@@ -1,6 +1,6 @@
 # Tracker Adapter Contract
 
-> **Contract version: 1.0.0** (semver). See [Versioning](#5-versioning).
+> **Contract version: 1.1.0** (semver). See [Versioning](#5-versioning).
 >
 > This is the **generic, tracker-neutral** contract every `/flow` tracker adapter
 > must satisfy. It names no tracker, no API, and no slug. Reference adapters
@@ -112,8 +112,9 @@ is a real normalization trap: re-namespacing is mandatory, not cosmetic.
 
 ## 3. The capability verbs
 
-There are **16 verbs**: **8 reads** and **8 writes**. The generic layer only ever
-names a verb; the adapter owns the call. Signatures below use the typed
+There are **16 required verbs** — **8 reads** and **8 writes** — plus **1
+optional write** (see [Optional verbs](#optional-verbs)). The generic layer only
+ever names a verb; the adapter owns the call. Signatures below use the typed
 promotion-surface form (the `PMClient` port); the prose realization fulfils the
 same verbs by hand.
 
@@ -138,6 +139,9 @@ interface TrackerAdapter {
   needsInput(item: WorkItem, question: string): Promise<void>;
   link(a: WorkItem, b: WorkItem, type: RelationType): Promise<void>;
   createSubIssue(parent: WorkItem, spec: SubIssueSpec): Promise<WorkItem>;
+
+  // Optional writes — an adapter may omit these entirely (see "Optional verbs")
+  completeProject?(project: WorkItemProject, outcome: ProjectOutcome): Promise<void>;
 }
 ```
 
@@ -148,6 +152,7 @@ Supporting types: `Account` is the acting account `{ id, name? }`.
 `RelationType = 'blocks' | 'related' | 'duplicate' | ...`.
 `SubIssueSpec = { title, description, type, size? }`.
 `InboxEntry = { item: WorkItem, comment: { author: string, mentions: string[], body: string } }`.
+`ProjectOutcome = 'completed' | 'canceled'` — the two terminal project states.
 
 Each verb below states: what it must do, its **durability** requirement (which
 writes must be durable and idempotent), and its **graceful degradation** (what to
@@ -354,12 +359,85 @@ universal and worth stating once:
   still recoverable. Failed creation surfaces loudly and returns no fabricated
   item.
 
+### Optional verbs
+
+The **16 required verbs listed above** must all be implemented: an adapter that
+omits one does not conform, because some part of the engine will name it and find
+nothing there. An **optional** verb is different — it may be absent, and an adapter
+without it is still fully conforming. Three rules make absence safe:
+
+1. **An adapter declares support, one way or the other.** In the **prose
+   realization**, the adapter skill states it per verb — a "**supported**" or
+   "**not supported**" line in its verb table, never silence (silence reads as an
+   oversight, and a caller cannot act on an oversight). In the **typed
+   realization**, the declaration is the method's presence: the field is optional
+   (`completeProject?`), so `typeof adapter.completeProject === 'function'` is the
+   check.
+
+   The duty to declare binds adapters **authored or re-validated against 1.1.0 or
+   later**. An adapter pinned to an earlier minor is necessarily silent about a
+   verb that postdates it, and that silence is legitimate — so the reading rule
+   covers it: **a caller that finds no declaration treats the verb as NOT
+   supported** and takes its fallback path. Absent and undeclared resolve the same
+   way; neither is an error.
+
+2. **Every caller has a documented degradation for absence.** A caller that names
+   an optional verb must say, in its own skill, what it does when the verb is not
+   there. The degradation is always a real fallback path, not a stall.
+3. **Absence is never an error.** A missing optional verb is not a failed write,
+   not a thrown read, and not a reason to stop the loop. The caller takes its
+   fallback path and **says which path it took**, so a human can tell "the adapter
+   closed the project" from "the adapter cannot, so here is the recommendation".
+
+Adding an optional verb is additive and therefore a **MINOR** bump (section 5).
+An adapter pinned to an earlier minor stays conforming without implementing it.
+
+#### `completeProject(project: WorkItemProject, outcome: ProjectOutcome): Promise<void>` — OPTIONAL
+
+The only verb whose subject is a **project** rather than a `WorkItem`: it closes
+out a whole project once its work is finished (`outcome: 'completed'`) or
+abandoned (`outcome: 'canceled'`).
+
+Worth knowing while you implement it: **the engine never produces `'canceled'`.**
+Its DONE-stage oracle only ever resolves to completing a finished project, so
+`'canceled'` is reachable only through a human-directed call. Implement the branch
+— the guardrail and the idempotency rules apply to it identically — but do not
+expect the loop to exercise it, and do not let it go untested for that reason.
+
+- **Must do.** Move `project` into a state of the requested terminal category.
+  **First, verify from live data that the project holds no open items** — no item
+  in a non-terminal category (`backlog`, `unstarted`, `started`) — read at call
+  time, never from a snapshot the caller passed in. Read them the exhaustive way:
+  `getProject(id).children` is every item in the project, whereas
+  `getProjectWork` is the dispatch-shaped **candidate** set and may legitimately
+  omit an open item. If any open item remains, **refuse loudly**: report the open
+  items and make no write.
+
+  The guardrail is in the contract rather than in a caller because the failure it
+  prevents is silent and permanent: **a terminal project hides its open items
+  from dispatch forever.** Eligibility drops items in `completed`/`canceled`
+  projects, so an item stranded inside a wrongly-closed project stops appearing in
+  the ready queue, stops appearing in starvation counts, and nothing in the loop
+  ever raises its hand about it. It is only found by a human reading the tracker.
+
+- **Durability.** **Durable and idempotent.** A project already in the requested
+  terminal state is a **no-op**, not an error — re-running converges. A project in
+  the _other_ terminal state (asked to complete a canceled project, or the
+  reverse) is a real state change and re-runs the open-items check like any other.
+
+- **Degradation.** If the adapter cannot read the project's state, or cannot
+  enumerate the project's items, it **refuses** — it never guesses that a project
+  it cannot see is empty. A failed write surfaces loudly and never reports
+  success. When the verb is **absent** entirely, callers fall back to their
+  advisory path (recommend the close-out to the human and let them run it) and say
+  that is what happened.
+
 ---
 
 ## 4. Conformance invariants
 
-These are the checkable rules `validate-adapter.mjs` (built later) asserts against
-an adapter's normalized output. Each carries a short id the validator references.
+These are the checkable rules `scripts/validate-adapter.ts` asserts against an
+adapter's normalized output. Each carries a short id the validator references.
 
 **INV-1 - All five state categories are representable.** Every `stateCategory` the
 adapter emits is one of exactly `backlog | unstarted | started | completed |
@@ -421,8 +499,11 @@ bare leaf label, which would silently fail the gate.
 
 This contract carries a **semver version** (see the top of this file). An adapter
 **declares the contract version it targets** (an exported `CONTRACT_VERSION`
-constant or a manifest field), and `validate-adapter.mjs` checks that declaration
-against the contract's current version.
+constant or a manifest field). That declaration is checked when the adapter is
+authored or re-validated against a bumped contract (the `building-adapters`
+definition of done), not by `validate-adapter.ts` — the harness reads a fixture of
+normalized `WorkItem`s, so it can assert an adapter's **output**, never its
+declaration.
 
 - **MAJOR bump** - a breaking change to the `WorkItem` shape, a verb signature, or
   an invariant. Adopters MUST re-validate and likely regenerate their adapter; an
@@ -431,6 +512,16 @@ against the contract's current version.
   rule). Existing adapters keep working but SHOULD re-validate to adopt the
   addition.
 - **PATCH bump** - clarification or wording only; no behavioral change.
+
+### What each version added
+
+- **1.1.0** - added the first **optional** verb, `completeProject` (section 3),
+  and the [optional-verb semantics](#optional-verbs) that make absence safe:
+  declared support, a documented caller degradation, and absence-is-never-an-error.
+  Additive: an adapter declaring `1.0.0` still conforms, since the 16 required
+  verbs and every invariant are unchanged.
+- **1.0.0** - the initial contract: the `WorkItem` model, 16 required verbs, and
+  invariants INV-1 .. INV-5.
 
 Adopters **pin** the contract version they generated against and **re-validate on
 every contract bump**, so drift between the engine and a concrete adapter is caught

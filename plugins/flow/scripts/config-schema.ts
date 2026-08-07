@@ -399,6 +399,20 @@ export const CircuitBreakerSchema = z
   })
   .prefault({});
 
+/**
+ * What the DONE stage's project pulse does when the project it just closed work
+ * in looks finished.
+ *
+ * - `advisory` (the default) — report the project state and offer the close-out;
+ *   a human runs it. Safe on every adapter, including one that cannot close a
+ *   project at all.
+ * - `auto` — close the project through the adapter's **optional**
+ *   `completeProject` verb when every condition holds. Any unmet condition — an
+ *   adapter that does not support the verb included — falls back to `advisory`,
+ *   so this is a ceiling on autonomy, never a promise of it.
+ */
+export const ProjectCompletionSchema = z.enum(['advisory', 'auto']);
+
 /** Gates — plan approval, review/auto-merge, and circuit breakers (§6, §7.4). */
 export const GatesSchema = z
   .object({
@@ -408,6 +422,8 @@ export const GatesSchema = z
     review: ReviewGateSchema,
     /** Circuit-breaker thresholds. */
     circuitBreaker: CircuitBreakerSchema,
+    /** Whether the DONE project pulse advises a project close-out or performs it. */
+    projectCompletion: ProjectCompletionSchema.default('advisory'),
   })
   .prefault({});
 

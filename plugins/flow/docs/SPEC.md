@@ -94,6 +94,8 @@ interface PMClient {
   needsInput(item: WorkItem, question: string): Promise<void>; // park on human
   link(a: WorkItem, b: WorkItem, type: RelationType): Promise<void>;
   createSubIssue(parent: WorkItem, body: string): Promise<WorkItem>; // sizeOrdinal ≥ threshold
+  // OPTIONAL (adapter contract 1.1.0) — an adapter may omit it; callers degrade
+  completeProject?(project: WorkItemProject, outcome: 'completed' | 'canceled'): Promise<void>;
 }
 ```
 
@@ -203,6 +205,17 @@ a `number | string` union — against a t-shirt threshold. Types: `DispatchConfi
 mergeable? · CI green? · functionally unchanged? → resolve / bounce / re-approve).
 Types: `GatesConfig`, `ReviewGateConfig`, `CircuitBreakerConfig`, `MergeState`,
 `MergeDisposition`, `CircuitBreakerTrip`.
+`resolveProjectCompletion(pulse) → { disposition, reason }` joins them as a
+post-DONE disposition (not a gate), asking two questions in order. **May the
+project be closed at all?** An empty project, an incomplete rollup, any open
+item (the contract's guardrail), or an active spec still pointing at it each
+yield `skip` — not `advise`, since recommending a close-out that must not happen
+is the same mistake one human click later. **May the ENGINE close it?** Only
+under `gates.projectCompletion: "auto"` with an adapter that supports the
+OPTIONAL `completeProject` verb; either missing yields `advise`. The `reason`
+names the deciding condition, so no skip is silent. Types: `ProjectPulse`,
+`ProjectCompletionOutcome`, `ProjectCompletionDisposition`,
+`ProjectCompletionReason`.
 
 ### Comms routing + comment-response — `comms.ts`, `comment-response.ts` (§5)
 
@@ -280,6 +293,10 @@ spec's load-bearing decisions:
 | `autonomy.seat`                   | `"pulse"` — sole v1 seat (`watcher` planned) | §10      |
 | `identity.agent` / `.reviewer`    | `"auto"` / `null` — resolved at runtime      | §7       |
 | `gates.review.mergeOnApproval`    | `true` + the §6 recovery ladder              | §6       |
+| `gates.projectCompletion`         | `"advisory"` — recommend, never auto-close   | 1.1.0†  |
+
+† The adapter contract's version, not a spec section: this dial exists to drive
+the optional `completeProject` verb added in `adapters/SPEC.md` 1.1.0.
 
 Top-level blocks: `tracker`, `connection`, `identity`, `ownership`, `comments`,
 `stages`, `autonomy`, `loops`, `ingestion`, `involvement`, `dispatch`, `gates`,

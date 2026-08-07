@@ -5,6 +5,8 @@ description: The /flow engine's DONE stage — report completion on a work item,
 
 # Closing Work — the DONE stage
 
+> **Flow root.** This skill lives at `<flow-root>/skills/closing-work/SKILL.md`. If you reached it via a symlink (`.claude/skills/flow__*` or `.agents/skills/flow__*`), resolve the real path first (`realpath <path>`): the flow root is two directories above the skill directory. Every `<flow-root>/...` reference below is relative to that root.
+
 > **Stage:** DONE (spec §1). One generic, PM-agnostic stage skill.
 > **Absorbs:** the legacy `/linear:done` close flow (retired in spec #257).
 > **PM projection (tracker):** Done state + `agent/completed` label.
@@ -23,8 +25,10 @@ This is a generic stage skill. **It never touches a tracker API string.** The
 completion comment, the Done transition, the `agent/completed` label, follow-up
 creation, relation links, and the project pulse-check reads all go through the
 **adapter** skill by naming its verbs (`comment`, `transition`,
-`createSubIssue`, `link`, `getProjects`, `getEligibleWork`, `getRelations`). No
-raw tracker tool name, CLI invocation, or slug lives here. (The
+`createSubIssue`, `link`, `getProjects`, `getEligibleWork`, `getRelations`, and —
+only in `auto` mode, and only when the adapter declares it supported — the
+optional `completeProject`). No raw tracker tool name, CLI invocation, or slug
+lives here. (The
 `tracker-confinement` Vitest guard enforces this for the whole flow bundle.)
 
 ## Process
@@ -75,11 +79,43 @@ Driven by the item's type and its `## On Completion` routing:
   - All research Done, no hypothesis/spec → recommend `/flow:ideate` (complex) or
     creating `type/task` sub-issues (simple).
   - All tasks under a hypothesis Done → recommend closing the parent hypothesis.
-  - All monitors cleared → recommend moving the project to Completed.
-  - Zero remaining active items → check `specs/manifest.json` for an active spec
-    linked to this project; if one exists, do **not** recommend closing.
-- Present the project state, the recommended next action, and offer to run it. If
-  no transition is detected, report the project status briefly.
+  - All monitors cleared → the project itself may be finished; take the close-out
+    decision below.
+  - Zero remaining active items → gather the facts the close-out decision needs
+    (below) rather than deciding here.
+- **The close-out decision.** Gather five facts about the project and let the
+  oracle decide — do not re-derive the rules here:
+  - `gates.projectCompletion` (`"advisory"` or `"auto"`),
+  - the project's progress rollup (`done` of `total`),
+  - its **open item count, read live** through the adapter (never inferred from
+    the rollup — the two disagree exactly when it matters),
+  - whether `specs/manifest.json` still holds an active spec for the project, and
+  - whether the adapter declares the optional **`completeProject`** verb supported.
+
+  Feed them to `resolveProjectCompletion` in
+  `<flow-root>/scripts/gates-policy.ts`, which returns a `disposition` and the
+  `reason` that decided it. Act on the disposition:
+  - `complete` → close the project via the adapter's **`completeProject`** verb,
+    then report that you did it and with which outcome.
+  - `advise` → recommend the close-out, offer to run it, and leave the decision
+    with the human.
+  - `skip` → do **not** close it and do **not** recommend closing it. Report the
+    project's status and move on.
+
+  **Always report the `reason` verbatim** alongside what you did. It is the whole
+  point of the shape: "I did not close it" is only useful to a person paired with
+  which condition stopped it. That oracle is the source of truth if this prose and
+  that code ever drift.
+
+  One condition is worth knowing by name even though the oracle enforces it: a
+  project with **open items** is never closed, in either mode. A project in a
+  terminal state hides its open items from dispatch permanently, so closing one
+  early strands that work where nothing will ever surface it again. The adapter's
+  verb re-checks this itself and refuses loudly; do not treat its refusal as a
+  failure to route around.
+- Present the project state, the action taken or the action recommended, and offer
+  to run a recommendation. If no transition is detected, report the project status
+  briefly.
 
 ### 6. Clean up the workspace
 

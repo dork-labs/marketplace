@@ -186,8 +186,10 @@ started | completed | canceled`; states of each native category map to one of th
 ## Versioning
 
 Your adapter declares the contract version it targets (`CONTRACT_VERSION` constant
-or a manifest field; SPEC section 5). The harness checks that declaration against
-the contract's current version. On a contract bump, re-run the harness: a MAJOR
+or a manifest field; SPEC section 5). The harness cannot check that declaration —
+it reads a fixture of normalized `WorkItem`s, so it validates your **output** —
+which is why keeping the declaration honest is the author's job. On a contract
+bump, re-run the harness: a MAJOR
 bump may require regenerating the adapter; a MINOR bump is additive but worth
 re-validating; a PATCH bump is wording only. Pin the version you generated against
 so drift is caught at validation time, not at runtime.

@@ -1,13 +1,13 @@
 ---
 name: linear-composio-adapter
-description: Reference tracker adapter for /flow - Linear reached over the Composio CLI. A concrete, forkable realization of the adapter contract (../../SPEC.md) built on `composio execute LINEAR_*` calls. Implements all 16 capability verbs and normalizes Linear into the generic WorkItem shape. Adopters fork this directory at /flow:init when their tracker is Linear reached over Composio (the MCP server unauthenticated).
+description: Reference tracker adapter for /flow - Linear reached over the Composio CLI. A concrete, forkable realization of the adapter contract (../../SPEC.md) built on `composio execute LINEAR_*` calls. Implements all 16 required capability verbs plus the optional completeProject, and normalizes Linear into the generic WorkItem shape. Adopters fork this directory at /flow:init when their tracker is Linear reached over Composio (the MCP server unauthenticated).
 ---
 
 # Reference adapter: Linear over Composio
 
 > **What this is.** A **reference tracker adapter** for the `/flow` engine: a
 > concrete realization of the neutral contract in [`../../SPEC.md`](../../SPEC.md)
-> (contract version `1.0.0`) over **one transport - the Composio CLI**. It owns
+> (contract version `1.1.0`) over **one transport - the Composio CLI**. It owns
 > every Linear call and normalizes Linear into the generic `WorkItem` shape so
 > the dispatch policy and the stage skills run unchanged.
 >
@@ -187,9 +187,10 @@ mandatory, not cosmetic.
 
 ---
 
-## The 16 verbs
+## The 16 required verbs, plus 1 optional
 
-Eight reads and eight writes (SPEC section 3). The generic layer only ever names
+Eight reads and eight writes, then the optional `completeProject` (SPEC section
+3). The generic layer only ever names
 a verb; this adapter owns the Composio call. Each block gives the **call**, the
 **normalization** into `WorkItem`, and the **durability + degradation** the
 contract requires. Two degradation rules are universal: a read that cannot reach
@@ -390,6 +391,39 @@ The elicitation primitive - **four atomic effects, in order**:
 - **Durability + degradation.** Durable; guard against duplicate creation on
   retry. Failed creation surfaces loudly and returns no fabricated item.
 
+### Optional writes (1)
+
+#### `completeProject(project, outcome): void` — **supported, with one Composio-specific caveat**
+
+Closes out a whole project: `outcome: 'completed'` when its work shipped,
+`'canceled'` when it was abandoned.
+
+- **Call.** `LINEAR_RUN_QUERY_OR_MUTATION` running a `projectUpdate` mutation that
+  sets the project's `state` to `"completed"` or `"canceled"`. Pass the id and the
+  state as **real GraphQL variables**, never interpolated into the query text. The
+  project `state` field accepts only `backlog | planned | started | completed |
+canceled` — `paused` is rejected even though Linear the product has the concept.
+  A `LINEAR_UPDATE_PROJECT` slug may also exist; confirm it with
+  `composio search "update a linear project" --toolkits linear` before relying on
+  it, and prefer the mutation, which is verified.
+- **Check first (the contract's guardrail).** Read the project's issues **at call
+  time** — `LINEAR_LIST_LINEAR_ISSUES` with the `project_id` filter, resolving each
+  issue's category (`LINEAR_GET_LINEAR_ISSUE` per item or a
+  `LINEAR_LIST_LINEAR_STATES` map), or one `LINEAR_RUN_QUERY_OR_MUTATION` read
+  requesting `state{ type }` — and confirm none is in a non-terminal category
+  (`backlog`, `unstarted`, `started`). If any open item remains, **refuse loudly**
+  and name them: a terminal project hides its open items from dispatch permanently.
+- **Composio-specific caveat — the project's own state is unreadable via the list
+  slug.** `LINEAR_LIST_LINEAR_PROJECTS` returns `state: null`, so the idempotency
+  check ("already terminal? then no-op") cannot come from there. Read the state
+  with a `LINEAR_RUN_QUERY_OR_MUTATION` `projects` query, where `state` **does**
+  come back. The open-items check never depends on the project's own state anyway
+  — it comes from listing the project's issues, which is always available.
+- **Durability + degradation.** **Durable and idempotent** — a project already in
+  the requested terminal state is a no-op. If neither the project's state nor its
+  issue list can be read, **refuse** rather than guess. A failed write surfaces
+  loudly; check the mutation's `success` field rather than assuming.
+
 ---
 
 ## `getInbox` entry shape
@@ -461,4 +495,5 @@ typed), **INV-3** (relation references in human-key form, resolving in-set or
 provably closed), **INV-4** (labels re-namespaced from the flattened Composio
 leaves into the generic families), and **INV-5** (the readiness gate is the
 literal `agent/ready` label, and `getEligibleWork` / `getProjectWork` return the
-broader candidate set, never pre-filtered). It targets contract version `1.0.0`.
+broader candidate set, never pre-filtered). It targets contract version `1.1.0`,
+and **declares `completeProject` supported** (SPEC section 3, _Optional verbs_).

@@ -1,4 +1,4 @@
-# Verb implementation checklist (all 16)
+# Verb implementation checklist (16 required + 1 optional)
 
 The per-verb checklist for the adapter you generate in Step 3. It restates the
 contract ([`<flow-root>/adapters/SPEC.md`](../../../adapters/SPEC.md) section 3)
@@ -222,6 +222,36 @@ Two universal rules apply to every verb:
 
 ---
 
+## The optional verbs
+
+An optional verb may be **absent** and the adapter still conforms. What is not
+optional is **saying so**: state **supported** or **not supported** for each one,
+because callers branch on that declaration and silence reads as an oversight. An
+unsupported optional verb is never an error — the caller takes its documented
+fallback and says it did.
+
+### `completeProject(project: WorkItemProject, outcome: 'completed' | 'canceled'): void` - OPTIONAL
+
+- **Binding.** `<read-project-items>` + `<update-project-state>`. The one verb
+  whose subject is a **project**, not a `WorkItem`.
+- **Must do.** Move the project into a state of the requested terminal category
+  (`completed` when its work shipped, `canceled` when it was abandoned). **First,
+  read the project's items live** and confirm none is in a non-terminal category
+  (`backlog`, `unstarted`, `started`); if any is, **refuse loudly** and name them.
+  Read the items at call time — never trust a set the caller handed you.
+- **Why the check is mandatory.** Dispatch drops the items of a terminal project,
+  so an open item left inside one is hidden from the queue and from starvation
+  counts **permanently**. Nothing in the loop ever raises its hand about it.
+- **Durability.** Durable and idempotent: already in the requested terminal state
+  is a no-op, not an error. The other terminal state is a real change and re-runs
+  the check.
+- **Degradation.** If the project's state or its item list cannot be read,
+  **refuse** — never guess that an unreadable project is empty. A failed write
+  surfaces loudly. If you do not implement this verb, declare it **not supported**;
+  callers fall back to recommending the close-out to a human.
+
+---
+
 ## Supporting types (SPEC section 3)
 
 - `Account = { id: string, name?: string }`.
@@ -231,4 +261,5 @@ Two universal rules apply to every verb:
 - `EvidencePlan = { attachTo, links: string[], summary? }`.
 - `RelationType = 'blocks' | 'related' | 'duplicate' | ...`.
 - `SubIssueSpec = { title, description, type, size? }`.
+- `ProjectOutcome = 'completed' | 'canceled'`.
 - `InboxEntry = { item: WorkItem, comment: { author: string, mentions: string[], body: string } }`.
