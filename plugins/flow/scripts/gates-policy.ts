@@ -23,6 +23,12 @@
  * 4. **Circuit breaker** — {@link tripsCircuitBreaker} stops + escalates when a
  *    unit exceeds `estimate × estimateMultiplier` wall-clock or the `tokenBudget`.
  *
+ * Alongside them sits one **post-DONE** disposition, not a gate:
+ * {@link resolveProjectCompletion} decides whether the DONE stage's project pulse
+ * closes a finished project out itself (`gates.projectCompletion: "auto"`, and
+ * only when the adapter supports the optional `completeProject` verb) or
+ * recommends the close-out to a human.
+ *
  * ## The auto-merge recovery ladder (§6)
  *
  * Human approval authorizes exactly **one state**: this diff, green, cleanly
@@ -45,7 +51,12 @@
  */
 
 import type { z } from 'zod';
-import type { CircuitBreakerSchema, GatesSchema, ReviewGateSchema } from './config-schema.ts';
+import type {
+  CircuitBreakerSchema,
+  GatesSchema,
+  ProjectCompletionSchema,
+  ReviewGateSchema,
+} from './config-schema.ts';
 import {
   resolveInvolvement,
   type Calibration,
@@ -202,6 +213,76 @@ export type MergeDisposition =
  */
 export function planApprovalRequired(gates: GatesConfig): boolean {
   return gates.planApproval;
+}
+
+/**
+ * What the DONE stage's project pulse should do with the project it just closed
+ * work in — the resolved outcome of {@link resolveProjectCompletion}.
+ *
+ * - `complete` — close the project out through the adapter's optional
+ *   `completeProject` verb, then report what was done.
+ * - `advise` — the project looks finishable, but something stops the engine from
+ *   doing it itself: report the state, recommend the close-out, offer to run it.
+ * - `skip` — the project is plainly not done; report its status and move on.
+ */
+export type ProjectCompletionDisposition = 'complete' | 'advise' | 'skip';
+
+/**
+ * The facts the DONE project pulse gathers about a project, fed to
+ * {@link resolveProjectCompletion}. Every field is an observation, not a
+ * judgement — the oracle owns the judgement.
+ */
+export interface ProjectPulse {
+  /** The resolved `gates.projectCompletion` mode. */
+  mode: z.infer<typeof ProjectCompletionSchema>;
+  /** The project's progress rollup: `done` of `total` items. */
+  rollup: { done: number; total: number };
+  /**
+   * How many of the project's items are still open (in a non-terminal category).
+   * Read live from the tracker, never inferred from `rollup` — the two disagree
+   * exactly when it matters, since an item can be neither counted done nor open.
+   */
+  openItemCount: number;
+  /** Whether a spec in the repo is still active against this project. */
+  hasActiveSpec: boolean;
+  /** Whether the adapter declares the optional `completeProject` verb supported. */
+  verbSupported: boolean;
+}
+
+/**
+ * Resolve what the DONE stage's project pulse does with a project (`gates.
+ * projectCompletion`). The engine closes a project out **only** when every one of
+ * these holds; any single failure degrades to `advise`, never to a silent skip:
+ *
+ * - the operator opted in (`mode: 'auto'`),
+ * - the adapter supports the optional `completeProject` verb,
+ * - the project holds **no** open items (the contract's guardrail — a terminal
+ *   project hides its open items from dispatch permanently),
+ * - the rollup is complete (`done === total`) over a non-empty project, and
+ * - no active spec still points at the project.
+ *
+ * A project that is plainly unfinished — open items with work left in the rollup —
+ * is `skip`: there is nothing to recommend, so the pulse just reports status.
+ * The line between `skip` and `advise` is whether a human would plausibly close
+ * the project right now.
+ *
+ * @param pulse - The live facts about the project (mode, rollup, open items, spec, verb support).
+ * @returns The single disposition the DONE stage acts on.
+ */
+export function resolveProjectCompletion(pulse: ProjectPulse): ProjectCompletionDisposition {
+  const { mode, rollup, openItemCount, hasActiveSpec, verbSupported } = pulse;
+
+  // Nothing to close out: an empty project, or one with work genuinely left.
+  const looksFinished = rollup.total > 0 && rollup.done === rollup.total && openItemCount === 0;
+  if (!looksFinished) return 'skip';
+
+  // Finished-looking, but an active spec still claims it: recommend, never act.
+  if (hasActiveSpec) return 'advise';
+
+  // Finished-looking and unclaimed: act only if the operator opted in AND the
+  // adapter can actually do it.
+  if (mode === 'auto' && verbSupported) return 'complete';
+  return 'advise';
 }
 
 /** Resource usage of a single work unit, measured for the circuit breaker (§5/§6). */

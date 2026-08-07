@@ -71,7 +71,8 @@
       "reapproveOnFunctionalChange": true,
       "maxMergeAttempts": 3
     },
-    "circuitBreaker": { "estimateMultiplier": 2, "tokenBudget": 2000000 }
+    "circuitBreaker": { "estimateMultiplier": 2, "tokenBudget": 2000000 },
+    "projectCompletion": "advisory"
   },
   "review": { "adversarial": true, "rubric": "REVIEW.md", "reviewers": 1 },
   "context": {

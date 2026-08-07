@@ -765,9 +765,14 @@
           },
           "required": ["estimateMultiplier", "tokenBudget"],
           "additionalProperties": false
+        },
+        "projectCompletion": {
+          "default": "advisory",
+          "type": "string",
+          "enum": ["advisory", "auto"]
         }
       },
-      "required": ["planApproval", "review", "circuitBreaker"],
+      "required": ["planApproval", "review", "circuitBreaker", "projectCompletion"],
       "additionalProperties": false
     },
     "review": {

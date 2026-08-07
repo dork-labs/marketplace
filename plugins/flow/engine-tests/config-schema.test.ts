@@ -104,6 +104,7 @@ describe('FlowConfigSchema — parsing the §9 config.json', () => {
     expect(cfg.involvement.calibration.alwaysAsk).toContain('secrets-or-spend');
     expect(cfg.dispatch.sizeOrder).toBe('small-first');
     expect(cfg.gates.circuitBreaker.tokenBudget).toBe(2_000_000);
+    expect(cfg.gates.projectCompletion).toBe('advisory');
     expect(cfg.review).toEqual({ adversarial: true, rubric: 'REVIEW.md', reviewers: 1 });
     expect(cfg.context.compactionTrigger).toBe(0.65);
     expect(cfg.workspace.isolation).toBe('worktree');
@@ -469,6 +470,22 @@ describe('FlowConfigSchema — rejecting invalid config', () => {
       gates: { planApproval: 'no' },
     });
     expect(result.success).toBe(false);
+  });
+
+  it('rejects an out-of-enum gates.projectCompletion', () => {
+    // The mode is a two-value enum on purpose: "auto" is the only opt-in, and a
+    // typo like "automatic" must fail loudly rather than resolve to the default.
+    expect(FlowConfigSchema.safeParse({ gates: { projectCompletion: 'automatic' } }).success).toBe(
+      false
+    );
+    // Both real values parse and survive to the resolved config — the rejection
+    // above is not vacuous, and an opt-in is not silently normalized away.
+    expect(
+      FlowConfigSchema.parse({ gates: { projectCompletion: 'auto' } }).gates.projectCompletion
+    ).toBe('auto');
+    expect(
+      FlowConfigSchema.parse({ gates: { projectCompletion: 'advisory' } }).gates.projectCompletion
+    ).toBe('advisory');
   });
 
   it('rejects a compactionTrigger outside [0, 1]', () => {
