@@ -6,8 +6,10 @@
 
   Fill the {placeholders}; drop a row that genuinely does not apply (and say
   why). The "Proof of completion" section is load-bearing — a PR without it is
-  not review-ready. Tracker I/O (linking, assigning) flows through the
-  linear-adapter, never a tracker string here.
+  not review-ready, and the "Adversarial review" row is never dropped: a review
+  that was skipped or ran degraded has to say so where a human will read it.
+  Tracker I/O (linking, assigning) flows through the tracker adapter, never a
+  tracker string here.
 -->
 
 ## Summary
@@ -17,8 +19,18 @@ the diff.}
 
 ## Linked work item
 
-{The 1:1 tracker anchor for this change, by identifier — e.g. `Closes DOR-123`.
-ID-only back-link; the filesystem (spec/ADR) holds the prose.}
+{The 1:1 tracker anchor for this change, by identifier. ID-only back-link; the
+filesystem (spec/ADR) holds the prose.
+
+**Pick the form on purpose** — merge automation is diff-blind, so this line is
+where "is the item finished?" is actually recorded:
+
+- this PR **completes** the item → a closing form, e.g. `Closes PROJ-123`
+- this PR is **partial** (one of several) → a non-closing form, e.g.
+  `Refs PROJ-123`, and keep the identifier out of the PR title
+
+On a partial PR, re-check the item's state after this merges: a branch name
+carrying the identifier can close it even with a non-closing body reference.}
 
 ## Test / validation summary
 
@@ -28,6 +40,7 @@ ID-only back-link; the filesystem (spec/ADR) holds the prose.}
 | Typecheck           | {`pnpm typecheck` — clean}                              |
 | Lint                | {`pnpm lint` — clean}                                   |
 | Acceptance criteria | {each of the work item's `## Validation criteria`, met} |
+| Adversarial review  | {ran / skipped-by-config / degraded — rubric: `PATH`}   |
 
 ## Proof of completion
 

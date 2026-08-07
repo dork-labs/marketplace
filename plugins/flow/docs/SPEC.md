@@ -280,9 +280,10 @@ spec's load-bearing decisions:
 | `identity.agent` / `.reviewer`    | `"auto"` / `null` — resolved at runtime      | §7       |
 | `gates.review.mergeOnApproval`    | `true` + the §6 recovery ladder              | §6       |
 
-Top-level blocks: `tracker`, `identity`, `ownership`, `comments`, `stages`,
-`autonomy`, `involvement`, `dispatch`, `gates`, `context`, `workspace`,
-`recovery`, `decomposition`, `evidence`. The full annotated default set is in spec
+Top-level blocks: `tracker`, `connection`, `identity`, `ownership`, `comments`,
+`stages`, `autonomy`, `loops`, `ingestion`, `involvement`, `dispatch`, `gates`,
+`review`, `context`, `workspace`, `recovery`, `decomposition`, `evidence`. The
+full annotated default set is in spec
 §9; the authoritative shape is the Zod schema.
 
 ## P5 — the Flow Engine — Extension (NOT built here)

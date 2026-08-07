@@ -73,6 +73,7 @@
     },
     "circuitBreaker": { "estimateMultiplier": 2, "tokenBudget": 2000000 }
   },
+  "review": { "adversarial": true, "rubric": "REVIEW.md", "reviewers": 1 },
   "context": {
     "perIssue": "fresh-session",
     "perStage": "fresh-subagent",

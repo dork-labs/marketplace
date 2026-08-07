@@ -147,6 +147,22 @@ The checkpoints between stages, under `gates`:
   unattended execution is part of the deferred P5 build.)
 </Callout>
 
+## Review
+
+The adversarial review a branch faces **before** its PR is opened, under `review`:
+
+| Dial          | What it does                                                        | Default       | Notes                                                                         |
+| ------------- | ------------------------------------------------------------------- | ------------- | ----------------------------------------------------------------------------- |
+| `adversarial` | Dispatch an independent reviewer on the branch before the PR opens. | `true`        | Turn off for a cheaper, lower-assurance loop.                                 |
+| `rubric`      | Repo-root-relative path to the rubric the reviewer reads.           | `"REVIEW.md"` | `/flow:init` scaffolds one from the template if the path does not exist.      |
+| `reviewers`   | How many independent reviewer agents each review dispatches.        | `1`           | Raise for a wide blast radius; each extra reviewer is another full diff read. |
+
+Three different things in this config are called "review", and they fire at three different moments. `review` (this block) is the **machine** review, before the PR exists. `gates.review` is the **auto-merge** ladder, after a human approves. `stages.review` is the **human gate** itself, which is always on and has no off switch.
+
+A reviewer gets the diff, the rubric, and the work item's intent — never the implementer's account of what it did. That is the whole point: an agent reviewing its own branch from its own working context reviews the story it remembers writing, not the code it produced. The rubric is what keeps the review calibrated (what counts as blocking, what CI already covers, how many nits are worth raising); without it the reviewer still runs on general discipline, so a missing rubric degrades the review rather than skipping it — and the run says which happened.
+
+Raising `reviewers` above `1` pools findings rather than polling them: every reviewer's findings are unioned, and **any blocking finding blocks unless it is rebutted.** A second reviewer missing a real defect is not a vote against the one who found it.
+
 ## Loops
 
 The reconciler registry. Each loop is one reconciler; the map is the extension seam (add a loop by registering it, retire one with `enabled: false`). Every loop takes the same three dials, under `loops.<id>`:
@@ -202,6 +218,8 @@ The producer is a swappable seam: the inbox reconciler consumes a normalized `Tr
 | Cap how much work is in flight              | `autonomy.wipCap.global` / `wipCap.perProject`                                                   |
 | Get pinged when a question parks            | `involvement.nudge.relay` / `nudge.telegram`                                                     |
 | Require sign-off on the plan before EXECUTE | `gates.planApproval: true`                                                                       |
+| Review a branch harder before the PR opens  | `review.reviewers` (raise it)                                                                    |
+| Skip the pre-PR machine review entirely     | `review.adversarial: false`                                                                      |
 | Cap spend per item                          | `gates.circuitBreaker.tokenBudget`                                                               |
 | Make replies resume faster                  | `loops.inbox.intervalMs` (lower it)                                                              |
 | Throttle tracker reads                      | `ingestion.pollIntervalMs` (raise it)                                                            |

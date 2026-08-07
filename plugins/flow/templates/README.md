@@ -45,3 +45,13 @@ of the prose). Externalized from the legacy inline command templates.
 [`pr.md`](./pr.md) is what the **VERIFY** stage fills when it opens/updates the
 PR at the always-on human-review gate: linked work item, test/validation summary,
 and the proof-of-completion evidence bundle (spec §5, §13).
+
+## `review-rubric.md` — the adversarial-review rubric scaffold
+
+[`review-rubric.md`](./review-rubric.md) is the starting rubric `/flow:init`
+copies to the repo root when `review.adversarial` is on and the file named by
+`review.rubric` (default `REVIEW.md`) does not exist yet. VERIFY's pre-PR
+reviewers read the adopter's copy, not this one. It ships deliberately generic,
+with two **FILL IN** sections — the repo's hard rules and its always-check list —
+because those are what separate a reviewer that knows the codebase from one
+guessing at severity.
