@@ -94,6 +94,8 @@ interface PMClient {
   needsInput(item: WorkItem, question: string): Promise<void>; // park on human
   link(a: WorkItem, b: WorkItem, type: RelationType): Promise<void>;
   createSubIssue(parent: WorkItem, body: string): Promise<WorkItem>; // sizeOrdinal ≥ threshold
+  // OPTIONAL (adapter contract 1.1.0) — an adapter may omit it; callers degrade
+  completeProject?(project: WorkItemProject, outcome: 'completed' | 'canceled'): Promise<void>;
 }
 ```
 
@@ -203,6 +205,13 @@ a `number | string` union — against a t-shirt threshold. Types: `DispatchConfi
 mergeable? · CI green? · functionally unchanged? → resolve / bounce / re-approve).
 Types: `GatesConfig`, `ReviewGateConfig`, `CircuitBreakerConfig`, `MergeState`,
 `MergeDisposition`, `CircuitBreakerTrip`.
+`resolveProjectCompletion(pulse) → 'complete' | 'advise' | 'skip'` joins them as a
+post-DONE disposition (not a gate): it closes a finished project through the
+adapter's OPTIONAL `completeProject` verb only when `gates.projectCompletion` is
+`"auto"`, the adapter supports the verb, the project holds zero open items, its
+rollup is complete over a non-empty project, and no active spec still points at
+it — any unmet condition degrades to `advise`. Types: `ProjectPulse`,
+`ProjectCompletionDisposition`.
 
 ### Comms routing + comment-response — `comms.ts`, `comment-response.ts` (§5)
 
@@ -280,6 +289,10 @@ spec's load-bearing decisions:
 | `autonomy.seat`                   | `"pulse"` — sole v1 seat (`watcher` planned) | §10      |
 | `identity.agent` / `.reviewer`    | `"auto"` / `null` — resolved at runtime      | §7       |
 | `gates.review.mergeOnApproval`    | `true` + the §6 recovery ladder              | §6       |
+| `gates.projectCompletion`         | `"advisory"` — recommend, never auto-close   | 1.1.0†  |
+
+† The adapter contract's version, not a spec section: this dial exists to drive
+the optional `completeProject` verb added in `adapters/SPEC.md` 1.1.0.
 
 Top-level blocks: `tracker`, `connection`, `identity`, `ownership`, `comments`,
 `stages`, `autonomy`, `loops`, `ingestion`, `involvement`, `dispatch`, `gates`,

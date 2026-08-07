@@ -161,7 +161,9 @@ Composio strings outside the adapter.
 The verbs: `getCurrentUser`, `getProjects`, `resolveProject`, `getProject`,
 `getProjectWork`, `getEligibleWork`, `getInbox`, `getRelations`, `claim`,
 `transition`, `comment`, `assignToHuman`, `attachEvidence`, `needsInput`, `link`,
-`createSubIssue`. The adapter normalizes
+`createSubIssue`, plus the contract's one **optional** verb, `completeProject`
+(this adapter supports it; another tracker's adapter may not, and callers
+degrade rather than fail when it is absent). The adapter normalizes
 every tracker into one `WorkItem` shape so the dispatch policy and stage skills
 never see a tracker-specific field. Full verb contract: the adapter's
 [`SKILL.md`](./skills/linear-adapter/SKILL.md); the typed `interface PMClient`
