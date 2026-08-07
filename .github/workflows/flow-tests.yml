@@ -1,0 +1,57 @@
+name: flow
+
+# Quality gates for the /flow plugin. `plugins/flow` is the only package in this
+# repo with its own package.json, so this workflow has exactly one job.
+#
+# To cover another plugin later: copy the `flow` job, point every path (the
+# `paths:` filters, `working-directory`, and `cache-dependency-path`) at the new
+# plugin directory, and rename the job. Jobs stay independent so one plugin's
+# red gate never hides another's.
+
+on:
+  pull_request:
+    paths:
+      - "plugins/flow/**"
+      - ".github/workflows/flow-tests.yml"
+  push:
+    branches: [main]
+    paths:
+      - "plugins/flow/**"
+      - ".github/workflows/flow-tests.yml"
+
+jobs:
+  flow:
+    name: flow plugin
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: plugins/flow
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: plugins/flow/package-lock.json
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Config schema is in sync with its Zod source
+        run: |
+          npm run generate:schema
+          if ! git diff --exit-code -- config/config.schema.json; then
+            echo "::error file=plugins/flow/config/config.schema.json::config.schema.json no longer matches the Zod schema it is generated from. Never hand-edit it: run 'npm run generate:schema' in plugins/flow and commit the result."
+            exit 1
+          fi
+
+      - name: Typecheck
+        run: npm run typecheck
+
+      - name: Tests
+        run: npm test
+
+      - name: Format check
+        run: npm run format:check
