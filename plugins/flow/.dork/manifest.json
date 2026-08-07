@@ -1,7 +1,7 @@
 {
   "schemaVersion": 1,
   "name": "flow",
-  "version": "0.3.0",
+  "version": "0.4.0",
   "type": "plugin",
   "description": "The /flow workflow engine: a PM-agnostic, dual-mode (manual and autonomous) system that carries product work across the full stage spine (capture, triage, ideate, specify, decompose, execute, verify, review, done). Ships the stage commands, the stage skills, the runnable-TypeScript engine oracles, the tracker adapter contract, and a bring-your-own-scheduler tick.",
   "displayName": "Flow",
@@ -18,8 +18,15 @@
     "autonomous"
   ],
   "category": "agent-ops",
-  "categories": ["agent-ops", "project-management"],
-  "icon": "🌊",
-  "layers": ["commands", "skills", "hooks"],
+  "categories": [
+    "agent-ops",
+    "project-management"
+  ],
+  "icon": "\ud83c\udf0a",
+  "layers": [
+    "commands",
+    "skills",
+    "hooks"
+  ],
   "extensions": []
 }
