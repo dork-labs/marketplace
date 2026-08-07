@@ -59,40 +59,74 @@ describe('resolveProjectCompletion — the DONE project pulse (gates.projectComp
 
   it('the default mode is advisory — the engine never closes a project unasked', () => {
     expect(GatesSchema.parse({}).projectCompletion).toBe('advisory');
-    expect(resolveProjectCompletion(pulse({ mode: 'advisory' }))).toBe('advise');
+    expect(resolveProjectCompletion(pulse({ mode: 'advisory' }))).toEqual({
+      disposition: 'advise',
+      reason: 'mode-advisory',
+    });
   });
 
   it('closes the project only when EVERY condition holds', () => {
-    expect(resolveProjectCompletion(pulse())).toBe('complete');
-  });
-
-  describe('each auto condition, flipped alone, degrades complete → advise', () => {
-    it('mode: advisory (the operator did not opt in)', () => {
-      expect(resolveProjectCompletion(pulse({ mode: 'advisory' }))).toBe('advise');
-    });
-
-    it('the adapter does not support the optional completeProject verb', () => {
-      expect(resolveProjectCompletion(pulse({ verbSupported: false }))).toBe('advise');
-    });
-
-    it('an active spec still points at the project', () => {
-      expect(resolveProjectCompletion(pulse({ hasActiveSpec: true }))).toBe('advise');
+    expect(resolveProjectCompletion(pulse())).toEqual({
+      disposition: 'complete',
+      reason: 'all-conditions-met',
     });
   });
 
-  describe('a project that is plainly not done is skipped, not advised', () => {
+  describe('question 1 — may it be closed AT ALL? each no is a skip, never a recommendation', () => {
+    it('an active spec still points at the project → skip, NOT advise', () => {
+      // The DONE stage's long-standing rule: an active spec means do not close it
+      // AND do not recommend closing it. A recommendation is the same mistake one
+      // human click later, so this condition may never resolve to `advise`.
+      expect(resolveProjectCompletion(pulse({ hasActiveSpec: true }))).toEqual({
+        disposition: 'skip',
+        reason: 'active-spec',
+      });
+      // It also outranks the engine-may-act questions: still skip under auto.
+      expect(
+        resolveProjectCompletion(pulse({ hasActiveSpec: true, mode: 'auto', verbSupported: true }))
+          .disposition
+      ).toBe('skip');
+    });
+
     it('an open item remains — the contract guardrail, before any mode check', () => {
-      expect(resolveProjectCompletion(pulse({ openItemCount: 1 }))).toBe('skip');
+      expect(resolveProjectCompletion(pulse({ openItemCount: 1 }))).toEqual({
+        disposition: 'skip',
+        reason: 'open-items',
+      });
       // And the guardrail is not a mode preference: advisory mode skips too.
-      expect(resolveProjectCompletion(pulse({ openItemCount: 1, mode: 'advisory' }))).toBe('skip');
+      expect(
+        resolveProjectCompletion(pulse({ openItemCount: 1, mode: 'advisory' })).disposition
+      ).toBe('skip');
     });
 
     it('the rollup still has work left', () => {
-      expect(resolveProjectCompletion(pulse({ rollup: { done: 3, total: 4 } }))).toBe('skip');
+      expect(resolveProjectCompletion(pulse({ rollup: { done: 3, total: 4 } }))).toEqual({
+        disposition: 'skip',
+        reason: 'rollup-incomplete',
+      });
     });
 
     it('an empty project (total 0) is skipped, never "vacuously complete"', () => {
-      expect(resolveProjectCompletion(pulse({ rollup: { done: 0, total: 0 } }))).toBe('skip');
+      expect(resolveProjectCompletion(pulse({ rollup: { done: 0, total: 0 } }))).toEqual({
+        disposition: 'skip',
+        reason: 'empty-project',
+      });
+    });
+  });
+
+  describe('question 2 — may the ENGINE close it? a legitimate close-out it may not perform', () => {
+    it('mode: advisory (the operator did not opt in) → advise', () => {
+      expect(resolveProjectCompletion(pulse({ mode: 'advisory' }))).toEqual({
+        disposition: 'advise',
+        reason: 'mode-advisory',
+      });
+    });
+
+    it('the adapter does not support the optional completeProject verb → advise', () => {
+      expect(resolveProjectCompletion(pulse({ verbSupported: false }))).toEqual({
+        disposition: 'advise',
+        reason: 'verb-unsupported',
+      });
     });
   });
 
@@ -101,7 +135,7 @@ describe('resolveProjectCompletion — the DONE project pulse (gates.projectComp
     // The open count wins: the guardrail exists precisely for this disagreement.
     expect(
       resolveProjectCompletion(pulse({ rollup: { done: 4, total: 4 }, openItemCount: 2 }))
-    ).toBe('skip');
+    ).toEqual({ disposition: 'skip', reason: 'open-items' });
   });
 });
 

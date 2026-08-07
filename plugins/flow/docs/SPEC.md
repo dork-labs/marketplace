@@ -205,13 +205,17 @@ a `number | string` union — against a t-shirt threshold. Types: `DispatchConfi
 mergeable? · CI green? · functionally unchanged? → resolve / bounce / re-approve).
 Types: `GatesConfig`, `ReviewGateConfig`, `CircuitBreakerConfig`, `MergeState`,
 `MergeDisposition`, `CircuitBreakerTrip`.
-`resolveProjectCompletion(pulse) → 'complete' | 'advise' | 'skip'` joins them as a
-post-DONE disposition (not a gate): it closes a finished project through the
-adapter's OPTIONAL `completeProject` verb only when `gates.projectCompletion` is
-`"auto"`, the adapter supports the verb, the project holds zero open items, its
-rollup is complete over a non-empty project, and no active spec still points at
-it — any unmet condition degrades to `advise`. Types: `ProjectPulse`,
-`ProjectCompletionDisposition`.
+`resolveProjectCompletion(pulse) → { disposition, reason }` joins them as a
+post-DONE disposition (not a gate), asking two questions in order. **May the
+project be closed at all?** An empty project, an incomplete rollup, any open
+item (the contract's guardrail), or an active spec still pointing at it each
+yield `skip` — not `advise`, since recommending a close-out that must not happen
+is the same mistake one human click later. **May the ENGINE close it?** Only
+under `gates.projectCompletion: "auto"` with an adapter that supports the
+OPTIONAL `completeProject` verb; either missing yields `advise`. The `reason`
+names the deciding condition, so no skip is silent. Types: `ProjectPulse`,
+`ProjectCompletionOutcome`, `ProjectCompletionDisposition`,
+`ProjectCompletionReason`.
 
 ### Comms routing + comment-response — `comms.ts`, `comment-response.ts` (§5)
 

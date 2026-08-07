@@ -79,44 +79,40 @@ Driven by the item's type and its `## On Completion` routing:
   - All research Done, no hypothesis/spec → recommend `/flow:ideate` (complex) or
     creating `type/task` sub-issues (simple).
   - All tasks under a hypothesis Done → recommend closing the parent hypothesis.
-  - All monitors cleared → the project itself looks finished; take the close-out
+  - All monitors cleared → the project itself may be finished; take the close-out
     decision below.
-  - Zero remaining active items → check `specs/manifest.json` for an active spec
-    linked to this project; if one exists, do **not** close it and do **not**
-    recommend closing.
-- **The close-out decision.** When the pulse says the project itself looks
-  finished, the `gates.projectCompletion` dial decides who acts:
-  - `"advisory"` (the default) — recommend the close-out, offer to run it, and
-    leave the decision with the human.
-  - `"auto"` — close the project yourself, via the adapter's **`completeProject`**
-    verb, and report that you did it and with which outcome (completed, or
-    canceled when the work was abandoned rather than shipped).
+  - Zero remaining active items → gather the facts the close-out decision needs
+    (below) rather than deciding here.
+- **The close-out decision.** Gather five facts about the project and let the
+  oracle decide — do not re-derive the rules here:
+  - `gates.projectCompletion` (`"advisory"` or `"auto"`),
+  - the project's progress rollup (`done` of `total`),
+  - its **open item count, read live** through the adapter (never inferred from
+    the rollup — the two disagree exactly when it matters),
+  - whether `specs/manifest.json` still holds an active spec for the project, and
+  - whether the adapter declares the optional **`completeProject`** verb supported.
 
-  Close it yourself **only** when every one of these holds:
-  - `gates.projectCompletion` is `"auto"`;
-  - the adapter declares **`completeProject` supported** — it is the contract's
-    one _optional_ verb, so an adapter may not have it at all;
-  - the project holds **zero open items**, read live through the adapter rather
-    than inferred from the progress rollup (the two disagree exactly when it
-    matters);
-  - the rollup is complete (`done` equals `total`) over a non-empty project; and
-  - no active spec in `specs/manifest.json` still points at the project.
+  Feed them to `resolveProjectCompletion` in
+  `<flow-root>/scripts/gates-policy.ts`, which returns a `disposition` and the
+  `reason` that decided it. Act on the disposition:
+  - `complete` → close the project via the adapter's **`completeProject`** verb,
+    then report that you did it and with which outcome.
+  - `advise` → recommend the close-out, offer to run it, and leave the decision
+    with the human.
+  - `skip` → do **not** close it and do **not** recommend closing it. Report the
+    project's status and move on.
 
-  **Any unmet condition falls back to the advisory path** — including "the adapter
-  does not support the verb", which is a normal answer and never an error. Say
-  which condition stopped you, so the person can tell "I closed it" from "I could
-  not, and here is why".
+  **Always report the `reason` verbatim** alongside what you did. It is the whole
+  point of the shape: "I did not close it" is only useful to a person paired with
+  which condition stopped it. That oracle is the source of truth if this prose and
+  that code ever drift.
 
-  The open-items condition is not a preference and not yours to skip: a project in
-  a terminal state hides its open items from dispatch permanently, so closing one
+  One condition is worth knowing by name even though the oracle enforces it: a
+  project with **open items** is never closed, in either mode. A project in a
+  terminal state hides its open items from dispatch permanently, so closing one
   early strands that work where nothing will ever surface it again. The adapter's
   verb re-checks this itself and refuses loudly; do not treat its refusal as a
   failure to route around.
-
-  `resolveProjectCompletion` in `<flow-root>/scripts/gates-policy.ts` is the typed
-  oracle for this exact decision (`complete` / `advise` / `skip`) and is the source
-  of truth for these conditions if this prose and that code ever drift.
-
 - Present the project state, the action taken or the action recommended, and offer
   to run a recommendation. If no transition is detected, report the project status
   briefly.

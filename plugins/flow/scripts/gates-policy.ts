@@ -26,8 +26,9 @@
  * Alongside them sits one **post-DONE** disposition, not a gate:
  * {@link resolveProjectCompletion} decides whether the DONE stage's project pulse
  * closes a finished project out itself (`gates.projectCompletion: "auto"`, and
- * only when the adapter supports the optional `completeProject` verb) or
- * recommends the close-out to a human.
+ * only when the adapter supports the optional `completeProject` verb), recommends
+ * the close-out to a human, or refuses both — always naming the condition that
+ * decided it.
  *
  * ## The auto-merge recovery ladder (§6)
  *
@@ -217,15 +218,50 @@ export function planApprovalRequired(gates: GatesConfig): boolean {
 
 /**
  * What the DONE stage's project pulse should do with the project it just closed
- * work in — the resolved outcome of {@link resolveProjectCompletion}.
+ * work in — the disposition half of {@link ProjectCompletionOutcome}.
  *
  * - `complete` — close the project out through the adapter's optional
  *   `completeProject` verb, then report what was done.
- * - `advise` — the project looks finishable, but something stops the engine from
- *   doing it itself: report the state, recommend the close-out, offer to run it.
- * - `skip` — the project is plainly not done; report its status and move on.
+ * - `advise` — the project is closeable and nothing forbids it, but the engine
+ *   may not do it itself: report the state, recommend the close-out, offer to run
+ *   it.
+ * - `skip` — do not close it and do not recommend closing it. Report the project's
+ *   status and move on.
  */
 export type ProjectCompletionDisposition = 'complete' | 'advise' | 'skip';
+
+/**
+ * **Why** the pulse resolved the way it did — the condition that decided it,
+ * carried so the DONE stage can report it verbatim instead of re-deriving it.
+ * This is what keeps a `skip` from being silent.
+ *
+ * - `all-conditions-met` — the only reason paired with `complete`.
+ * - `mode-advisory` / `verb-unsupported` — closeable, but the engine may not act:
+ *   the operator did not opt in, or the adapter does not support the verb. Both
+ *   pair with `advise`.
+ * - `empty-project` / `rollup-incomplete` / `open-items` / `active-spec` — the
+ *   project must not be closed at all yet. All pair with `skip`.
+ */
+export type ProjectCompletionReason =
+  | 'all-conditions-met'
+  | 'mode-advisory'
+  | 'verb-unsupported'
+  | 'empty-project'
+  | 'rollup-incomplete'
+  | 'open-items'
+  | 'active-spec';
+
+/**
+ * The resolved outcome of {@link resolveProjectCompletion}: what to do, and the
+ * one condition that decided it. The reason travels with the disposition because
+ * "I did not close it" is only useful to a human paired with "because…".
+ */
+export interface ProjectCompletionOutcome {
+  /** What the DONE stage does. */
+  disposition: ProjectCompletionDisposition;
+  /** The condition that decided it — reported, never re-derived by the caller. */
+  reason: ProjectCompletionReason;
+}
 
 /**
  * The facts the DONE project pulse gathers about a project, fed to
@@ -250,39 +286,43 @@ export interface ProjectPulse {
 }
 
 /**
- * Resolve what the DONE stage's project pulse does with a project (`gates.
- * projectCompletion`). The engine closes a project out **only** when every one of
- * these holds; any single failure degrades to `advise`, never to a silent skip:
+ * Resolve what the DONE stage's project pulse does with a project
+ * (`gates.projectCompletion`), and why. Two questions, asked in that order:
  *
- * - the operator opted in (`mode: 'auto'`),
- * - the adapter supports the optional `completeProject` verb,
- * - the project holds **no** open items (the contract's guardrail — a terminal
- *   project hides its open items from dispatch permanently),
- * - the rollup is complete (`done === total`) over a non-empty project, and
- * - no active spec still points at the project.
+ * **1. May this project be closed at all?** Four conditions each answer no, and
+ * each produces `skip` — not `advise`, because recommending a close-out that must
+ * not happen is the same mistake as performing it, one human click later:
+ * - `empty-project` — nothing has been done in it yet.
+ * - `rollup-incomplete` — work is still outstanding.
+ * - `open-items` — the contract's guardrail. A terminal project hides its open
+ *   items from dispatch permanently, so this one is never a preference.
+ * - `active-spec` — a spec in the repo still points at the project, so the
+ *   programme is live even if the tracker looks quiet.
  *
- * A project that is plainly unfinished — open items with work left in the rollup —
- * is `skip`: there is nothing to recommend, so the pulse just reports status.
- * The line between `skip` and `advise` is whether a human would plausibly close
- * the project right now.
+ * **2. May the ENGINE be the one to close it?** Only if the operator opted in
+ * (`mode: 'auto'`) and the adapter supports the optional `completeProject` verb.
+ * Either missing is `advise`: the close-out is legitimate, so recommend it and let
+ * the human run it.
+ *
+ * A `skip` here is never silent — the returned {@link ProjectCompletionReason}
+ * names the condition, and the DONE stage reports it.
  *
  * @param pulse - The live facts about the project (mode, rollup, open items, spec, verb support).
- * @returns The single disposition the DONE stage acts on.
+ * @returns The disposition the DONE stage acts on, plus the condition that decided it.
  */
-export function resolveProjectCompletion(pulse: ProjectPulse): ProjectCompletionDisposition {
+export function resolveProjectCompletion(pulse: ProjectPulse): ProjectCompletionOutcome {
   const { mode, rollup, openItemCount, hasActiveSpec, verbSupported } = pulse;
 
-  // Nothing to close out: an empty project, or one with work genuinely left.
-  const looksFinished = rollup.total > 0 && rollup.done === rollup.total && openItemCount === 0;
-  if (!looksFinished) return 'skip';
+  // 1. May it be closed at all? Each no is a skip, carrying its reason.
+  if (rollup.total === 0) return { disposition: 'skip', reason: 'empty-project' };
+  if (rollup.done !== rollup.total) return { disposition: 'skip', reason: 'rollup-incomplete' };
+  if (openItemCount > 0) return { disposition: 'skip', reason: 'open-items' };
+  if (hasActiveSpec) return { disposition: 'skip', reason: 'active-spec' };
 
-  // Finished-looking, but an active spec still claims it: recommend, never act.
-  if (hasActiveSpec) return 'advise';
-
-  // Finished-looking and unclaimed: act only if the operator opted in AND the
-  // adapter can actually do it.
-  if (mode === 'auto' && verbSupported) return 'complete';
-  return 'advise';
+  // 2. May the engine be the one to close it?
+  if (mode !== 'auto') return { disposition: 'advise', reason: 'mode-advisory' };
+  if (!verbSupported) return { disposition: 'advise', reason: 'verb-unsupported' };
+  return { disposition: 'complete', reason: 'all-conditions-met' };
 }
 
 /** Resource usage of a single work unit, measured for the circuit breaker (§5/§6). */

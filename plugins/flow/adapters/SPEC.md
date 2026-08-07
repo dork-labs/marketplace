@@ -361,10 +361,10 @@ universal and worth stating once:
 
 ### Optional verbs
 
-The **16 verbs above are required**: an adapter that omits one does not conform,
-because some part of the engine will name it and find nothing there. An
-**optional** verb is different — it may be absent, and an adapter without it is
-still fully conforming. Three rules make absence safe:
+The **16 required verbs listed above** must all be implemented: an adapter that
+omits one does not conform, because some part of the engine will name it and find
+nothing there. An **optional** verb is different — it may be absent, and an adapter
+without it is still fully conforming. Three rules make absence safe:
 
 1. **An adapter declares support, one way or the other.** In the **prose
    realization**, the adapter skill states it per verb — a "**supported**" or
@@ -373,6 +373,14 @@ still fully conforming. Three rules make absence safe:
    realization**, the declaration is the method's presence: the field is optional
    (`completeProject?`), so `typeof adapter.completeProject === 'function'` is the
    check.
+
+   The duty to declare binds adapters **authored or re-validated against 1.1.0 or
+   later**. An adapter pinned to an earlier minor is necessarily silent about a
+   verb that postdates it, and that silence is legitimate — so the reading rule
+   covers it: **a caller that finds no declaration treats the verb as NOT
+   supported** and takes its fallback path. Absent and undeclared resolve the same
+   way; neither is an error.
+
 2. **Every caller has a documented degradation for absence.** A caller that names
    an optional verb must say, in its own skill, what it does when the verb is not
    there. The degradation is always a real fallback path, not a stall.
@@ -389,6 +397,12 @@ An adapter pinned to an earlier minor stays conforming without implementing it.
 The only verb whose subject is a **project** rather than a `WorkItem`: it closes
 out a whole project once its work is finished (`outcome: 'completed'`) or
 abandoned (`outcome: 'canceled'`).
+
+Worth knowing while you implement it: **the engine never produces `'canceled'`.**
+Its DONE-stage oracle only ever resolves to completing a finished project, so
+`'canceled'` is reachable only through a human-directed call. Implement the branch
+— the guardrail and the idempotency rules apply to it identically — but do not
+expect the loop to exercise it, and do not let it go untested for that reason.
 
 - **Must do.** Move `project` into a state of the requested terminal category.
   **First, verify from live data that the project holds no open items** — no item

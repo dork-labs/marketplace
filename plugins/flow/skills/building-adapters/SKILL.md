@@ -254,7 +254,9 @@ An adapter is done only when **all** of these hold:
       unmentioned.
 - [ ] The adapter is the single audit surface: no tracker API string lives in any
       other flow skill or command.
-- [ ] `CONTRACT_VERSION` declared and matches the SPEC's current version.
+- [ ] `CONTRACT_VERSION` declared. A **newly authored** adapter declares the SPEC's
+      current version; an **existing** one may keep the version it was validated
+      against, which still conforms under the SPEC's MINOR semantics.
 - [ ] `node --experimental-strip-types "<flow-root>/scripts/validate-adapter.ts" --fixture <fixture>` returns a verdict
       with `ok: true` and exit code `0`.
 

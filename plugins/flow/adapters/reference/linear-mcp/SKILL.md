@@ -336,16 +336,22 @@ The elicitation primitive - **four atomic effects, in order**:
 
 ### Optional writes (1)
 
-#### `completeProject(project, outcome): void` — **supported**
+#### `completeProject(project, outcome): void` — **supported — binding unverified against a live server; confirm the project-write tool on first use**
 
 Closes out a whole project: `outcome: 'completed'` when its work shipped,
-`'canceled'` when it was abandoned.
+`'canceled'` when it was abandoned. Unlike the sixteen required verbs above, whose
+tool bindings are verified in use, this one's tool name is written from the
+server's naming convention and has not been exercised against a live server —
+which is why the declaration says so rather than reading like settled fact.
 
 - **Call.** `mcp__plugin_linear_linear__save_project` setting the project's
   `state` to a state of the requested terminal category (`completed` /
-  `canceled`). Confirm the exact tool name against your server's tool list — the
-  project-write tool is the `save_*` sibling of `save_issue`, and older servers
-  expose it as `update_project`.
+  `canceled`).
+- **Confirm the tool name before the first write.** List your server's tools and
+  find the **project-write sibling of `save_issue`** — on this server family the
+  pair is `save_issue` / `save_project`, while an older server exposes it as
+  `update_project`. If neither is present, the server cannot write projects: declare
+  this verb **not supported** in your fork and let callers take their fallback.
 - **Check first (the contract's guardrail).** Read the project's items through
   `get_project` / `list_issues` (project filter, `includeArchived: false`) **at
   call time** and confirm none is in a non-terminal category (`backlog`,
@@ -425,4 +431,6 @@ provably closed), **INV-4** (labels re-namespaced into the generic families), an
 **INV-5** (the readiness gate is the literal `agent/ready` label, and
 `getEligibleWork` / `getProjectWork` return the broader candidate set, never
 pre-filtered). It targets contract version `1.1.0`, and **declares
-`completeProject` supported** (SPEC section 3, _Optional verbs_).
+`completeProject` supported with its binding unverified** (SPEC section 3,
+_Optional verbs_) — confirm the project-write tool on first use, per that verb's
+entry.
