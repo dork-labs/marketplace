@@ -3,26 +3,20 @@ name: flow
 # Quality gates for the /flow plugin. `plugins/flow` is the only package in this
 # repo with its own package.json, so this workflow has exactly one job.
 #
-# To cover another plugin later: copy the `flow` job, point every path (the
-# `paths:` filters, `working-directory`, and `cache-dependency-path`) at the new
-# plugin directory, and rename the job. Jobs stay independent so one plugin's
-# red gate never hides another's.
+# To cover another plugin later: copy the `flow` job, point `working-directory`
+# and `cache-dependency-path` at the new plugin directory, and rename the job.
+# Jobs stay independent so one plugin's red gate never hides another's.
 #
-# Do NOT make this check REQUIRED in branch protection while the `paths:` filter
-# is here: a PR that touches nothing under plugins/flow never triggers the
-# workflow, so the check never reports and the PR waits forever. Requiring it
-# means first dropping the filter (every PR runs the job).
+# This workflow deliberately has NO `paths:` filter: the "flow plugin" check is
+# REQUIRED in branch protection, and a required check must report on every PR —
+# a path-filtered workflow leaves non-matching PRs waiting forever on a check
+# that never runs. The job costs ~25s; that is the price of a check that can
+# actually block. If you re-add a filter, first un-require the check.
 
 on:
   pull_request:
-    paths:
-      - "plugins/flow/**"
-      - ".github/workflows/flow-tests.yml"
   push:
     branches: [main]
-    paths:
-      - "plugins/flow/**"
-      - ".github/workflows/flow-tests.yml"
 
 permissions:
   contents: read
@@ -41,9 +35,9 @@ jobs:
         working-directory: plugins/flow
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v5
         with:
           node-version: "22"
           cache: npm
