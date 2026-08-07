@@ -1,8 +1,8 @@
 ---
 description: Run the EXECUTE stage — implement a validated spec by orchestrating concurrent agents
 category: flow
-allowed-tools: Task, TaskOutput, Read, Write, Edit, Grep, Glob, Bash(jq:*), Bash(grep:*), Bash(cat:*), Bash(echo:*), Bash(date:*), Bash(mkdir:*), Bash(git rev-parse:*), Bash(git branch --show-current:*), Bash(git status:*), EnterWorktree, TaskCreate, TaskList, TaskGet, TaskUpdate, AskUserQuestion
-argument-hint: "<path-to-spec-file>"
+allowed-tools: Task, TaskOutput, Read, Write, Edit, Grep, Glob, Bash(jq:*), Bash(grep:*), Bash(cat:*), Bash(echo:*), Bash(date:*), Bash(mkdir:*), Bash(hostname:*), Bash(git rev-parse:*), Bash(git branch --show-current:*), Bash(git status:*), Bash(git worktree add:*), EnterWorktree, TaskCreate, TaskList, TaskGet, TaskUpdate, AskUserQuestion
+argument-hint: '<path-to-spec-file>'
 ---
 
 # /flow:execute — EXECUTE stage

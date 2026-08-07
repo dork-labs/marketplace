@@ -103,6 +103,34 @@ reviewer costs another full read of the diff. Their findings are **pooled, not
 polled**: any blocking finding blocks unless it is rebutted, so a second reviewer
 who misses a defect never cancels out the one who found it.
 
+## Model tiers are committed; model names are not
+
+The `models` block is split down the same line as everything else here, and for
+the same reason.
+
+| Half              | Lives in            | Holds                                                                                                   |
+| ----------------- | ------------------- | ------------------------------------------------------------------------------------------------------- |
+| `models.tiers`    | `config.json`       | Which class of delegated work runs on which tier: `implementation`, `review`, `analysis`, `mechanical`. |
+| `models.bindings` | `config.local.json` | Which real model each tier means **on this machine**: `workhorse` and `fast`.                           |
+
+Tiers are roles, not models. `workhorse` means "the strong general-purpose model
+this machine can reach"; `fast` means "the cheap quick one". Which models those
+are depends on the machine, the harness, and what a vendor is shipping this
+month — none of which belongs in a file everyone on the repo shares. So the
+committed half names no model, and the plugin ships **no** default binding.
+`/flow:init` asks you to rank the models your harness can reach and writes the
+answer to `config.local.json`.
+
+The defaults put the three judgment classes (`implementation`, `review`,
+`analysis`) on `workhorse` and `mechanical` work — searches, scaffolds, renames,
+log triage — on `fast`. Mechanical work has a checkable answer, so a cheaper
+model that gets it wrong gets caught; a weak reviewer just misses things quietly.
+
+Nothing here fails closed. A machine with only one model binds both tiers to it
+and the policy becomes a no-op. A missing binding falls back to whatever model
+your harness would have used anyway, and the run says that it did — a silent
+fallback would look exactly like a policy that worked.
+
 ## Why `config.json` has no secrets
 
 `config.json` is committed and shared, so it must stay free of tokens, API keys,

@@ -10,6 +10,14 @@
   that was skipped or ran degraded has to say so where a human will read it.
   Tracker I/O (linking, assigning) flows through the tracker adapter, never a
   tracker string here.
+
+  The optional `flow:provenance` line at the bottom is the machine-readable
+  record of where this change came from — harness, session, worker, machine,
+  worktree, branch. Emit only the fields the run actually determined and drop the
+  line entirely when it determined none: an omitted field is honest, an invented
+  one sends the next session chasing a worker that never existed. It is the one
+  thing here a machine parses, so every value is JSON-escaped and any value that
+  cannot be escaped safely is left out rather than shipped broken.
 -->
 
 ## Summary
@@ -63,3 +71,10 @@ by default, so plan assumptions surface here at the review gate.}
 ---
 
 🤖 Generated with [Claude Code](https://claude.com/claude-code)
+
+<!-- Provenance: the line below ships only the two fields any run can determine. Add
+     `harness`, `sessionId`, `agentId`, `worktree` only if you actually determined them.
+     JSON-escape every value, and drop any field you cannot escape safely — this line
+     is machine-parsed, so one stray quote invalidates all of it. Nothing to say? Delete
+     the line rather than shipping empty placeholders. -->
+<!-- flow:provenance {"host":"{host}","branch":"{branch}"} -->

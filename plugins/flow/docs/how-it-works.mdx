@@ -261,6 +261,7 @@ interface FlowRun {
   workerPid; // v1 single-machine liveness
   startedAt;
   completedAt?;
+  provenance?; // harness/session/worker/host/worktree/branch — where the run came from
 }
 ```
 

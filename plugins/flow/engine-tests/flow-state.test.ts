@@ -215,3 +215,82 @@ describe('flow-state serializer — canonical JSON round-trips', () => {
     expect(parseFlowState(serializeFlowState(state))).toEqual(state);
   });
 });
+
+describe('flow-state provenance — where the run came from', () => {
+  /** A fully-populated provenance block: every field a harness could determine. */
+  const fullProvenance = {
+    harness: 'example-harness',
+    sessionId: 'harness-session-77',
+    agentId: 'worker-3',
+    host: 'build-box.local',
+    worktree: '/Users/x/.dork/workspaces/core/DOR-123',
+    branch: 'dork/DOR-123',
+  } as const;
+
+  it('round-trips a full provenance block through write → read', () => {
+    const store = memoryStore();
+    writeFlowRun(store, flowRun({ provenance: { ...fullProvenance } }));
+
+    const run = readFlowState(store)['issue-node-1'];
+    expect(run?.provenance).toEqual(fullProvenance);
+  });
+
+  it('survives the serialize → parse round trip byte-for-byte in content', () => {
+    const state: Record<string, FlowRun> = {
+      'issue-node-1': flowRun({ provenance: { ...fullProvenance } }),
+    };
+    expect(parseFlowState(serializeFlowState(state))).toEqual(state);
+  });
+
+  it('a run with NO provenance is valid — the block is optional (older records still parse)', () => {
+    const store = memoryStore();
+    writeFlowRun(store, flowRun());
+
+    const run = readFlowState(store)['issue-node-1'];
+    expect(run).toBeDefined();
+    expect(run?.provenance).toBeUndefined();
+  });
+
+  it('omits, never fabricates: a harness that knows only some fields writes only those', () => {
+    // The realistic case — a harness that knows its own name and machine but
+    // exposes no session handle. The absent fields must stay absent, not
+    // resolve to empty strings a later tick would try to resume.
+    const store = memoryStore();
+    writeFlowRun(store, flowRun({ provenance: { harness: 'example-harness', host: 'laptop' } }));
+
+    const run = readFlowState(store)['issue-node-1'];
+    expect(run?.provenance).toEqual({ harness: 'example-harness', host: 'laptop' });
+    expect(run?.provenance?.sessionId).toBeUndefined();
+    expect(run?.provenance?.agentId).toBeUndefined();
+  });
+
+  it('an empty provenance object is preserved as empty, not dropped', () => {
+    const store = memoryStore();
+    writeFlowRun(store, flowRun({ provenance: {} }));
+    expect(readFlowState(store)['issue-node-1']?.provenance).toEqual({});
+  });
+
+  it('a mistyped provenance field rejects the whole store (fail-soft to {})', () => {
+    // Same all-or-nothing posture as the rest of the record: a corrupt store
+    // degrades to "no known runs" rather than half a record.
+    const store = memoryStore(
+      JSON.stringify({ 'issue-1': { ...flowRun(), provenance: { host: 42 } } })
+    );
+    expect(readFlowState(store)).toEqual({});
+  });
+
+  it('updateFlowRunStatus can attach provenance to an existing run', () => {
+    const store = memoryStore();
+    writeFlowRun(store, flowRun());
+    updateFlowRunStatus(store, 'issue-node-1', 'running', {
+      provenance: { harness: 'example-harness', sessionId: 'harness-session-77' },
+    });
+
+    const run = readFlowState(store)['issue-node-1'];
+    expect(run?.provenance).toEqual({
+      harness: 'example-harness',
+      sessionId: 'harness-session-77',
+    });
+    expect(run?.status).toBe('running');
+  });
+});

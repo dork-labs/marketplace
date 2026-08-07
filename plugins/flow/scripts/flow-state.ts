@@ -32,7 +32,7 @@
  */
 
 import { z } from 'zod';
-import type { FlowRun, FlowRunStatus, FlowStage } from './flow-run.ts';
+import type { FlowRun, FlowRunProvenance, FlowRunStatus, FlowStage } from './flow-run.ts';
 
 /**
  * The {@link FlowStage} spine as a Zod enum — mirrors the `FlowStage` union in
@@ -64,6 +64,26 @@ const FlowRunStatusSchema: z.ZodType<FlowRunStatus> = z.enum([
 ]);
 
 /**
+ * The on-disk validator for {@link FlowRunProvenance} — the run's origin
+ * (harness, session, worker, machine, worktree, branch).
+ *
+ * **Every field is optional**, which is the schema encoding the omit-never-fabricate
+ * rule: a harness that cannot determine a field leaves it out, and the record
+ * still validates. The whole block is optional too, so records written before
+ * provenance existed keep parsing rather than being rejected wholesale (which,
+ * given {@link parseFlowState}'s all-or-nothing posture, would throw away every
+ * other in-flight run alongside them).
+ */
+const FlowRunProvenanceSchema: z.ZodType<FlowRunProvenance> = z.object({
+  harness: z.string().optional(),
+  sessionId: z.string().optional(),
+  agentId: z.string().optional(),
+  host: z.string().optional(),
+  worktree: z.string().optional(),
+  branch: z.string().optional(),
+});
+
+/**
  * The Zod validator for a single {@link FlowRun} record — the on-disk schema the
  * reader validates against. Drift between this and the `FlowRun` interface is
  * caught at compile time: {@link parseFlowState} returns `Record<string, FlowRun>`,
@@ -82,6 +102,7 @@ export const FlowRunSchema = z.object({
   heartbeatAt: z.string().optional(),
   startedAt: z.string(),
   completedAt: z.string().optional(),
+  provenance: FlowRunProvenanceSchema.optional(),
 });
 
 /**

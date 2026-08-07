@@ -13,6 +13,8 @@
 
 ### Session 1 - [DATE]
 
+**Workers:** _(none yet — the worker ids this session used, so a later session can try to continue one instead of starting over. Write `unknown` for a worker the harness did not name; never invent an id.)_
+
 _(No tasks completed yet)_
 
 ## Files Modified/Created

@@ -317,6 +317,142 @@ describe('FlowConfigSchema — the adversarial review block', () => {
   });
 });
 
+describe('FlowConfigSchema — the context block: sticky sessions and the resume policy', () => {
+  it('resolves the resume default from {} (prefer — try to continue, fall back honestly)', () => {
+    const { context } = FlowConfigSchema.parse({});
+    expect(context.resume).toBe('prefer');
+    expect(context.perIssue).toBe('fresh-session');
+  });
+
+  it('accepts sticky-session as a per-issue lifetime (follow-ups return to the originating session)', () => {
+    const cfg = FlowConfigSchema.parse({ context: { perIssue: 'sticky-session' } });
+    expect(cfg.context.perIssue).toBe('sticky-session');
+    // A partial edit keeps the rest of the block at its defaults.
+    expect(cfg.context.resume).toBe('prefer');
+    expect(cfg.context.perStage).toBe('fresh-subagent');
+  });
+
+  it('accepts the strict and the opted-out ends of the resume policy', () => {
+    expect(FlowConfigSchema.parse({ context: { resume: 'require' } }).context.resume).toBe(
+      'require'
+    );
+    expect(FlowConfigSchema.parse({ context: { resume: 'never' } }).context.resume).toBe('never');
+  });
+
+  it('rejects an out-of-enum resume policy', () => {
+    // "always" reads plausible and is not a policy the ladder implements — a
+    // typo here must fail to parse rather than silently resolve to the default.
+    expect(FlowConfigSchema.safeParse({ context: { resume: 'always' } }).success).toBe(false);
+  });
+
+  it('rejects an out-of-enum perIssue lifetime', () => {
+    expect(FlowConfigSchema.safeParse({ context: { perIssue: 'sticky' } }).success).toBe(false);
+  });
+});
+
+describe('FlowConfigSchema — the models block (tiers committed, bindings local)', () => {
+  it('resolves the tier defaults from {}: judgment on workhorse, mechanical on fast', () => {
+    const { models } = FlowConfigSchema.parse({});
+    expect(models.tiers).toEqual({
+      implementation: 'workhorse',
+      review: 'workhorse',
+      analysis: 'workhorse',
+      mechanical: 'fast',
+    });
+  });
+
+  it('ships NO bindings by default — a model identifier is never committed policy', () => {
+    const { models } = FlowConfigSchema.parse({});
+    expect(models.bindings).toEqual({});
+    expect(models.bindings.workhorse).toBeUndefined();
+    expect(models.bindings.fast).toBeUndefined();
+  });
+
+  it('accepts per-machine bindings (the config.local.json half)', () => {
+    const cfg = FlowConfigSchema.parse({
+      models: { bindings: { workhorse: 'some-strong-model', fast: 'some-fast-model' } },
+    });
+    expect(cfg.models.bindings).toEqual({
+      workhorse: 'some-strong-model',
+      fast: 'some-fast-model',
+    });
+    // Binding a model must not disturb the committed tier policy.
+    expect(cfg.models.tiers.mechanical).toBe('fast');
+  });
+
+  it('accepts a single-model harness binding both tiers to one model (policy degrades to a no-op)', () => {
+    const cfg = FlowConfigSchema.parse({
+      models: { bindings: { workhorse: 'only-model', fast: 'only-model' } },
+    });
+    expect(cfg.models.bindings.workhorse).toBe(cfg.models.bindings.fast);
+  });
+
+  it('accepts re-tiering a class down (mechanical-heavy repos may cheapen analysis)', () => {
+    const cfg = FlowConfigSchema.parse({ models: { tiers: { analysis: 'fast' } } });
+    expect(cfg.models.tiers.analysis).toBe('fast');
+    // A partial tier edit keeps the others calibrated.
+    expect(cfg.models.tiers.implementation).toBe('workhorse');
+    expect(cfg.models.tiers.review).toBe('workhorse');
+  });
+
+  it('rejects `frontier` as a tier — flow never routes a delegate at the orchestrator’s model', () => {
+    // The invariant: a delegate runs on workhorse or fast, never on the
+    // orchestrating seat's model. If `frontier` ever parsed here, one config
+    // edit would route every delegate at frontier cost.
+    expect(FlowConfigSchema.safeParse({ models: { tiers: { review: 'frontier' } } }).success).toBe(
+      false
+    );
+  });
+
+  it('rejects a non-string binding', () => {
+    expect(FlowConfigSchema.safeParse({ models: { bindings: { fast: 3 } } }).success).toBe(false);
+  });
+
+  it('an unknown work class or tier name never reaches the resolved config', () => {
+    // Only the top-level object is `.strict()`; nested blocks strip unknown keys
+    // like every sibling block in this schema. So the guarantee to pin is not
+    // "it throws" but "it cannot take effect": a typo'd class is dropped, and
+    // the resolved tier set stays exactly the four fixed classes.
+    const cfg = FlowConfigSchema.parse({
+      models: { tiers: { documentation: 'fast' }, bindings: { frontier: 'x' } },
+    });
+    expect(Object.keys(cfg.models.tiers).sort()).toEqual([
+      'analysis',
+      'implementation',
+      'mechanical',
+      'review',
+    ]);
+    expect(cfg.models.bindings).toEqual({});
+  });
+
+  it('the generated JSON Schema does reject an unknown class or binding (editor-level guard)', () => {
+    // Where Zod strips, the artifact editors validate against refuses — which is
+    // what turns a silently-ignored typo into a red squiggle at edit time.
+    const validate = newAjv().compile(buildConfigJsonSchema());
+    const resolved = FlowConfigSchema.parse({});
+
+    expect(
+      validate({
+        ...resolved,
+        models: { ...resolved.models, tiers: { ...resolved.models.tiers, documentation: 'fast' } },
+      })
+    ).toBe(false);
+    expect(
+      validate({ ...resolved, models: { ...resolved.models, bindings: { frontier: 'x' } } })
+    ).toBe(false);
+    // And the invalid-VALUE case, not just the unknown key: `frontier` is not a
+    // tier an editor may offer, either.
+    expect(
+      validate({
+        ...resolved,
+        models: { ...resolved.models, tiers: { ...resolved.models.tiers, review: 'frontier' } },
+      })
+    ).toBe(false);
+    // The un-doctored resolved config still validates — the guard is not vacuous.
+    expect(validate(resolved)).toBe(true);
+  });
+});
+
 describe('FlowConfigSchema — rejecting invalid config', () => {
   it('rejects an unknown top-level key (strict)', () => {
     const result = FlowConfigSchema.safeParse({ trackerr: 'linear' });
@@ -383,6 +519,7 @@ describe('z.toJSONSchema bridge', () => {
       'gates',
       'review',
       'context',
+      'models',
       'workspace',
       'recovery',
       'decomposition',
