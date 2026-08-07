@@ -7,6 +7,11 @@ name: flow
 # `paths:` filters, `working-directory`, and `cache-dependency-path`) at the new
 # plugin directory, and rename the job. Jobs stay independent so one plugin's
 # red gate never hides another's.
+#
+# Do NOT make this check REQUIRED in branch protection while the `paths:` filter
+# is here: a PR that touches nothing under plugins/flow never triggers the
+# workflow, so the check never reports and the PR waits forever. Requiring it
+# means first dropping the filter (every PR runs the job).
 
 on:
   pull_request:
@@ -18,6 +23,14 @@ on:
     paths:
       - "plugins/flow/**"
       - ".github/workflows/flow-tests.yml"
+
+permissions:
+  contents: read
+
+# A new push to a branch makes the previous run's answer obsolete.
+concurrency:
+  group: "${{ github.workflow }}-${{ github.ref }}"
+  cancel-in-progress: true
 
 jobs:
   flow:
