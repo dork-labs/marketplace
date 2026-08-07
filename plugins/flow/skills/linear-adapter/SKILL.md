@@ -458,16 +458,16 @@ section 3, _Optional verbs_). This adapter declaring it **supported** is what le
 a caller name it — and a caller must still carry its own fallback, since another
 tracker's adapter may not support it. One honest caveat on that declaration: the
 Composio binding is the verified path, while the **MCP tool name has not been
-exercised against a live server** — confirm it per the note below before the first
-write on that transport.
+exercised against a live server**. Before the first write on the `mcp` transport,
+list the server's tools and find the project-write **sibling of `save_issue`** —
+`save_project` on this server family, `update_project` on an older one. If neither
+is there, the server cannot write projects: treat the verb as unsupported on that
+transport and use the `cli` path instead.
 
 > Slugs shown in the Composio column follow the `LINEAR_*` convention; confirm
 > the exact slug with `composio search "<intent>" --toolkits linear` if a call
 > errors — Composio occasionally revises slug names. `LIST_LINEAR_TEAMS` and
-> `LIST_LINEAR_PROJECTS` are confirmed in use today. The same caution applies to
-> the MCP project-write tool: `save_project` is the `save_*` sibling of
-> `save_issue`, and an older server may expose it as `update_project` — confirm
-> it against your server's tool list before the first write.
+> `LIST_LINEAR_PROJECTS` are confirmed in use today.
 
 ---
 
