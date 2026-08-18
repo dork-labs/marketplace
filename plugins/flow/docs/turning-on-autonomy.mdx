@@ -84,15 +84,16 @@ whichever way you schedule it:
 ## A — `/flow auto` (the attended terminal drain)
 
 `/flow auto` drains the ready queue **sequentially from your terminal**. It is server-free: it talks
-to the tracker through the `linear-adapter` and runs each stage in your current session. This is the
+to the tracker through your `<tracker>-adapter` skill and runs each stage in your current session. This is the
 fastest way to put the loop to work and the easiest to watch.
 
 ### Setup
 
 <Steps>
   <Step>
-    **Be in the repo, with the tracker reachable.** The `linear-adapter` reaches Linear via the
-    Linear MCP tools, or the Composio CLI when MCP is unauthenticated. No server, no install.
+    **Be in the repo, with the tracker reachable.** Your adapter reaches the tracker over the
+    transport you chose at `/flow:init` — an in-session MCP server, or an account-pinned CLI. No
+    server, no install.
   </Step>
   <Step>
     **Run `/flow auto`.** It claims the top-ranked `agent/ready` item, carries it to its review gate,

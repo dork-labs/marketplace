@@ -3,7 +3,7 @@
 > The north star for the `/flow` engine. This document leads with **what `/flow`
 > must be**, as a set of high-level goals, each paired with a **conformance
 > criterion** (how we know the system satisfies it). [`SPEC.md`](./SPEC.md) is the
-> technical contract that implements these goals; [`README.md`](./README.md) is the
+> technical contract that implements these goals; [`README.md`](../README.md) is the
 > operator manual. The system is **audited against this charter**: every goal is
 > either met (with evidence) or has an open gap with a plan to close it.
 >
@@ -121,10 +121,10 @@ the house style) that is discoverable and accurate to current capability.
 
 The `/flow` system is measured against G1-G15. A periodic **conformance audit**
 records, per goal: **met** (with evidence) or **gap** (with the work that closes it).
-The current audit and gap register live in
-[`plans/flow-loop-system-revision.md`](../../plans/flow-loop-system-revision.md); the
-active revision that closes the highest-priority gaps is spec
-[`flow-triage-feeds-loop`](../../specs/flow-triage-feeds-loop/01-ideation.md) (#262).
+The current audit and gap register live in `plans/flow-loop-system-revision.md`;
+the active revision that closes the highest-priority gaps is spec
+`flow-triage-feeds-loop` (#262). Both live in the DorkOS repo, where this plugin
+was developed before extraction — they are not part of this package.
 
 ## Build commitments (not charter goals)
 

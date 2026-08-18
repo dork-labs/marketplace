@@ -5,15 +5,18 @@
  * and emits `{ ok: true, config }` (the validated config, echoed back) on success
  * or `{ ok: false, errors }` (one `{ path, message }` per violation) on failure.
  *
- * Zero-runtime-dep by design: the shipped `/flow` plugin runs its oracles via
- * `node --experimental-strip-types` with NO `node_modules`, so a shipped script
- * may not import any npm package. This validator therefore imports neither the
- * Zod runtime nor the `config-schema.ts` module — it reads the committed schema
- * artifact as a file and walks it directly. Zod remains the DEV-time source of
- * truth: `config-schema.ts` authors the schema and `generate-config-schema.ts`
- * (dev-only) GENERATES `config.schema.json` from it via `z.toJSONSchema`. This
- * oracle validates against that generated artifact, so the two never drift while
- * the runtime stays import-free of third-party modules.
+ * **This validator deliberately avoids `zod`, so it can run before dependencies
+ * are installed.** That is a property of this file, not of the plugin: several
+ * other shipped oracles do need `zod` on disk (see `dispatch.ts`). Keeping the
+ * config validator dependency-free is what lets it answer "is this config valid?"
+ * on a fresh checkout where `npm install --omit=dev` has not run yet.
+ *
+ * So it imports neither the Zod runtime nor the `config-schema.ts` module — it
+ * reads the committed schema artifact as a file and walks it directly. Zod
+ * remains the DEV-time source of truth: `config-schema.ts` authors the schema and
+ * `generate-config-schema.ts` (dev-only) GENERATES `config.schema.json` from it
+ * via `z.toJSONSchema`. This oracle validates against that generated artifact, so
+ * the two never drift while this file stays import-free of third-party modules.
  *
  * @module @dorkos/flow/cli/validate-config
  */

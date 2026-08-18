@@ -108,8 +108,9 @@ they are easy to confuse because both are called `review`:
 | `review`       | in VERIFY, **before** the PR is opened | The adversarial machine review: on/off, which rubric, how many reviewers. |
 | `gates.review` | **after** a human approves             | The auto-merge ladder: CI, conflicts, re-approval.                        |
 
-`review.rubric` (default `REVIEW.md`) is a **repo-root-relative path**, not the
-rubric itself. Keeping the rubric in a file rather than in config is deliberate:
+`review.rubric` (default `REVIEW.md`) is a **path to a file**, not the rubric
+itself. It resolves against the repo root; outside a repo it resolves against the
+current directory, and an absolute path is used as-is. Keeping the rubric in a file rather than in config is deliberate:
 a rubric is prose that grows with the repo — its hard rules, its severity
 calibration, the things its CI already enforces — and prose belongs in a file a
 person edits and reviews, not in a JSON string. `/flow:init` scaffolds one from

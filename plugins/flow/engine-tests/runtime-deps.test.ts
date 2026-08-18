@@ -10,12 +10,21 @@
  *
  * The regression this pins is subtle and shipped for real: `zod` sat in
  * `devDependencies` while `package.json` described the runtime as
- * dependency-free. Most oracles were unaffected, because they import zod only
- * for its types — which is exactly why nobody noticed. Four did not
- * (`dispatch.ts`, `flow-state.ts`, `transport.ts`, `comment-response.ts`), and
- * `dispatch.ts` is the oracle `/flow:init` Step 5 runs to confirm an install. An
- * adopter whose shell carried `NODE_ENV=production` (or `omit=dev`) installed
- * nothing at all, and setup's final check crashed with `ERR_MODULE_NOT_FOUND`.
+ * dependency-free. Many scripts import zod only for its types, which are erased —
+ * which is exactly why nobody noticed. But **four import it as a value**
+ * (`config-schema.ts`, `config-schema-builder.ts`, `flow-state.ts`,
+ * `tasks-schema.ts`), and because `config-schema.ts` sits under most of the
+ * engine, the transitive blast radius is far wider than those four: measured with
+ * `node_modules` removed, **11 of 28 scripts die** at load with
+ * `Cannot find package 'zod'`. `dispatch.ts` is among them — it names no package
+ * anywhere in its own source, and still cannot load — and it is the oracle
+ * `/flow:init` runs to confirm an install. An adopter whose shell carried
+ * `NODE_ENV=production` (or `omit=dev`) installed nothing at all, and setup's own
+ * check crashed with `ERR_MODULE_NOT_FOUND`.
+ *
+ * That gap between "imports zod" and "needs zod" is why this guard checks the
+ * DIRECT importers: fixing those four declarations is what fixes all eleven, and
+ * a direct-import rule is the one a future author can actually comply with.
  *
  * The guard is static rather than empirical on purpose: an empirical version
  * would have to delete `node_modules` to be meaningful, and a test that can pass
@@ -114,13 +123,36 @@ describe('F14 — every runtime import of a shipped oracle is a declared depende
     expect(runtimePackageImports("import Ajv from 'ajv/dist/2019.js';")).toEqual(['ajv']);
   });
 
-  it('finds the value imports that actually break without an install', () => {
-    // Empirically confirmed: with no `node_modules`, exactly these oracles die
-    // with ERR_MODULE_NOT_FOUND while the rest run. If a refactor makes one of
-    // them type-only, this expectation should be updated deliberately, not
-    // silently.
-    expect(runtimeImportsByScript.get('config-schema.ts')).toContain('zod');
-    expect(runtimeImportsByScript.get('flow-state.ts')).toContain('zod');
+  it('names exactly the scripts that import zod as a value', () => {
+    // Measured by deleting `node_modules` and loading every script: these four
+    // are the DIRECT value importers. The set of scripts that actually fail is
+    // larger (11 of 28) because most reach zod transitively through
+    // `config-schema.ts` — `dispatch.ts` and `transport.ts` contain no `zod`
+    // token at all and still die. Pinning the direct set keeps this test honest
+    // about what it measures; if a refactor moves a script in or out of it, that
+    // should be a deliberate edit here, not a silent drift.
+    const directZodImporters = [...runtimeImportsByScript]
+      .filter(([, packages]) => packages.includes('zod'))
+      .map(([file]) => file)
+      .sort();
+
+    expect(directZodImporters).toEqual([
+      'config-schema-builder.ts',
+      'config-schema.ts',
+      'flow-state.ts',
+      'tasks-schema.ts',
+    ]);
+  });
+
+  it('does not mistake a transitive need for a direct import', () => {
+    // The distinction the docblock rests on: `dispatch.ts` cannot load without
+    // zod, yet declares no package import. A guard that conflated the two would
+    // report the wrong file to whoever has to fix it.
+    expect(runtimeImportsByScript.get('dispatch.ts')).toEqual([]);
+    // No import statement of any kind names zod — the only occurrences are in
+    // the header comment explaining precisely this.
+    const dispatchSource = readFileSync(path.join(scriptsDir, 'dispatch.ts'), 'utf8');
+    expect(dispatchSource).not.toMatch(/^\s*import\b[^;]*'zod'/m);
   });
 
   it('declares every runtime package import in `dependencies`', () => {

@@ -462,7 +462,11 @@ export const ReviewSchema = z
   .object({
     /** Dispatch an independent adversarial review before any PR opens. */
     adversarial: z.boolean().default(true),
-    /** Repo-root-relative path to the review rubric the reviewer reads. */
+    /**
+     * Path to the review rubric the reviewer reads. Resolved against the repo
+     * root, or the current directory when flow runs outside a repo; an absolute
+     * path is used as-is.
+     */
     rubric: z.string().default('REVIEW.md'),
     /**
      * Independent reviewer agents dispatched per review. Raise for risky or

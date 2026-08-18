@@ -11,7 +11,7 @@ import { Cards, Card } from 'fumadocs-ui/components/card';
 
 `/flow` is **one** workflow engine for all product work. It runs a single, canonical path from a raw thought to shipped, deletes the old command sprawl (the legacy `/pm`, `/ideate`, `/spec:*`, and `/linear:*` families), and presents that path as one spine you can drive by hand or hand off to run on its own.
 
-It is **PM-agnostic**: the engine speaks a generic work model and generic verbs, and every tracker call is confined to a single adapter. Linear is the tracker today; the engine never embeds a tracker string, so the same spine runs on a different tracker by swapping the adapter, not the workflow.
+It is **PM-agnostic**: the engine speaks a generic work model and generic verbs, and every tracker call is confined to a single adapter skill, `<tracker>-adapter`, named by `tracker` in your config. Linear ships as the reference adapter; `/flow:init` generates and conformance-gates one for whatever tracker you pick. The engine never embeds a tracker string, so running on a different tracker means swapping the adapter, not the workflow.
 
 <Callout type="info">
   One spine is the single source of truth for "where work is." Tracker state, spec status, labels,

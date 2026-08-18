@@ -6,9 +6,9 @@
 > rewrite. The three v1 contracts P5 promotes are the **config schema**, the
 > **`PMClient` verbs**, and the **`FlowRun` record** — all defined below.
 
-See [`README.md`](./README.md) for the operator manual, [`CHARTER.md`](./CHARTER.md)
+See [`README.md`](../README.md) for the operator manual, [`CHARTER.md`](./CHARTER.md)
 for the goals this contract implements, and the published
-[guide series](../../docs/guides/flow/) for the user-facing reference.
+[guide series](./) for the user-facing reference.
 
 ## Stage model
 
@@ -28,7 +28,7 @@ CAPTURE → TRIAGE → IDEATE → SPECIFY → DECOMPOSE → EXECUTE → VERIFY �
   resumes (in P2) only on the human's approval.
 - A thin `/flow:<stage>` command and a PM transition are two **triggers** for the
   same gerund-named stage skill. The mapping is defined by
-  [`config.json`](./config.json) `stages` (and rendered in the README's command↔state
+  [`config.json`](../config/config.example.json) `stages` (and rendered in the README's command↔state
   map).
 
 | Stage     | Skill               | Command           |
@@ -281,9 +281,9 @@ so a groom verification that cannot fail cannot ship.
 ## Config schema reference
 
 The configuration contract is the Zod `FlowConfigSchema` (`@dorkos/flow`
-`config-schema.ts`), generated to [`config.schema.json`](./config.schema.json) via
+`config-schema.ts`), generated to [`config.schema.json`](../config/config.schema.json) via
 `z.toJSONSchema` (`buildConfigJsonSchema`) and referenced from
-[`config.json`](./config.json) via `$schema`. The resolved defaults encode the
+[`config.json`](../config/config.example.json) via `$schema`. The resolved defaults encode the
 spec's load-bearing decisions:
 
 | Block                             | Default                                      | Decision |

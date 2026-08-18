@@ -7,10 +7,17 @@
  * `shapeableCount`) the loop uses to tell "genuinely done" from "starved behind
  * the `agent/ready` gate".
  *
- * Zero-runtime-dep: the oracle's cross-module imports are all `import type`, so
- * this bundles to a dependency-free `.mjs`. Ownership cannot cross the JSON
- * boundary as a callback, so callers pass a precomputed `opts.ownershipOf` map
- * rather than `opts.classifyOwnership`.
+ * **Needs `zod` installed.** This file imports no npm package itself, but it
+ * pulls in `dispatch-policy.ts` for the oracle, which reaches `config-schema.ts`,
+ * which imports `zod` as a value — so with no `node_modules` this script dies at
+ * load with `Cannot find package 'zod'`. That matters here more than anywhere
+ * else: `/flow:init` Step 1 runs exactly this script to detect a missing install,
+ * and this header previously claimed the opposite. Run `npm install --omit=dev`
+ * in the plugin root. (`validate-config.ts` is the one oracle deliberately kept
+ * free of that dependency, so it can run before the install.)
+ *
+ * Ownership cannot cross the JSON boundary as a callback, so callers pass a
+ * precomputed `opts.ownershipOf` map rather than `opts.classifyOwnership`.
  *
  * @module @dorkos/flow-engine/cli/dispatch
  */

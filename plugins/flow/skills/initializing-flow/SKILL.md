@@ -88,11 +88,17 @@ than discovering it at Step 5.
    It should answer `{"picked":[],"eligibleCount":0,"starved":false,"shapeableCount":0}`.
    Any JSON result at all passes this check — even a rejection of the payload —
    because what it proves is that the module graph loaded. What it is looking for
-   is the other outcome: **`ERR_MODULE_NOT_FOUND` naming `zod`**. The shipped
-   `scripts/*.ts` are run by `node --experimental-strip-types`, and most of them
-   import `zod` for its types only (erased before Node sees them) — but
-   `dispatch.ts`, `flow-state.ts`, `transport.ts`, and `comment-response.ts`
-   import it as a value and genuinely need it on disk.
+   is the other outcome: **`ERR_MODULE_NOT_FOUND` naming `zod`**.
+
+   The shipped `scripts/*.ts` run on `node --experimental-strip-types`, which
+   erases `import type` lines but resolves every value import. **Several oracles
+   need `zod` on disk** — mostly transitively, by reaching `config-schema.ts`
+   (`dispatch.ts` is one of them: it names no package itself, and still cannot
+   load without `zod`). `dispatch.ts` is used as the probe precisely because it
+   sits on that transitive path, so a pass here clears the whole config-schema
+   graph the rest of setup depends on. `validate-config.ts` is the deliberate
+   exception — it is kept dependency-free so it can validate a config before
+   anything is installed, which is also why it is no use as this probe.
 
    On `ERR_MODULE_NOT_FOUND`, install it into the plugin and re-run the check:
 
@@ -200,7 +206,8 @@ interactively, or apply the headless default.
    When it is on, also capture **how many reviewers run** (`review.reviewers`,
    default `1`) — raise it only for changes with a wide blast radius, since every
    extra reviewer is another full read of the diff — and **which rubric file**
-   they read (`review.rubric`, default `REVIEW.md`, resolved from the repo root).
+   they read (`review.rubric`, default `REVIEW.md` — resolved against the repo
+   root, or the current directory outside a repo, or used as-is when absolute).
    _Headless default: on, one reviewer, `REVIEW.md`._
 
    **Recommend one tracker setting while you are here:** most trackers close a
@@ -321,29 +328,41 @@ honor it.
    credential file is the one outcome setup must never allow.
 
 4. **The review rubric** (only when `review.adversarial` resolves true). If no
-   file exists at the repo-root-relative path in `review.rubric` (default
+   file exists at the path in `review.rubric` — resolved as the table below
+   describes (default
    `REVIEW.md`), copy the scaffold there:
 
    ```bash
+   RUBRIC="REVIEW.md"   # the configured review.rubric
    ROOT="$(git rev-parse --show-toplevel 2>/dev/null || pwd)"
-   TARGET="$ROOT/REVIEW.md"
+   case "$RUBRIC" in
+     /*) TARGET="$RUBRIC" ;;      # absolute: used as-is
+     *)  TARGET="$ROOT/$RUBRIC" ;;
+   esac
    mkdir -p "$(dirname "$TARGET")"
    test -f "$TARGET" || cp <flow-root>/templates/review-rubric.md "$TARGET"
    echo "rubric: $TARGET"
    ```
 
-   **The `|| pwd` is the point.** `git rev-parse --show-toplevel` fails outside a
-   git repo, and a bare `$(...)` failure silently yields an empty string — so the
-   rubric was written to `/REVIEW.md`, or not at all, and the adversarial gate
-   (which is **on by default**) quietly reviewed every branch without the rubric
-   it was configured to use. Falling back to the current directory keeps the
-   behaviour honest: **inside a repo the rubric lands at the repo root; outside
-   one it lands in the current directory.** Print the resolved path and tell the
-   operator where it went.
+   Set `RUBRIC` to the configured `review.rubric` before running this — the
+   literal above is only the default. The `case` is what makes an absolute
+   `review.rubric` work: joining it onto `$ROOT` would produce a nonsense
+   `$ROOT//Users/you/REVIEW.md`.
 
-   If the resolved location is not where the operator wants it, `review.rubric`
-   may be an **absolute** path — set it in `config.json` and the reviewer reads it
-   from there regardless of where flow is run.
+   **The `|| pwd` is the other half.** `git rev-parse --show-toplevel` fails
+   outside a git repo, and a bare `$(...)` failure silently yields an empty string
+   — so the rubric was written to `/REVIEW.md`, or not at all, and the adversarial
+   gate (which is **on by default**) quietly reviewed every branch without the
+   rubric it was configured to use. Falling back to the current directory keeps
+   the behaviour honest. The resolution rule, in full:
+
+   | `review.rubric`          | resolves against      |
+   | ------------------------ | --------------------- |
+   | absolute (`/…`)          | itself — used as-is   |
+   | relative, inside a repo  | the repo root         |
+   | relative, outside a repo | the current directory |
+
+   Print the resolved path and tell the operator where it went.
 
    The `mkdir -p` matters because `review.rubric` may be a nested path (for
    example `docs/code-review.md`) whose directory does not exist yet; `cp` into a
@@ -352,8 +371,9 @@ honor it.
    the `git rev-parse` call even though the command only reads — approve it; there
    is no other tracker-neutral way to resolve the repo root.
 
-   Substitute the configured `review.rubric` path for `REVIEW.md` if the operator
-   chose a different one. **Never overwrite an existing rubric** — an adopter who
+   Set `RUBRIC` to the configured `review.rubric` when the operator chose one
+   other than the default; the `case` above then places it correctly whether it is
+   relative or absolute. **Never overwrite an existing rubric** — an adopter who
    already has one has already calibrated it. When you create the file, tell the
    operator to fill in its two **FILL IN** sections (the repo's hard rules and its
    always-check list): the scaffold reviews generically until those are written,
