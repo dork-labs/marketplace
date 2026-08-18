@@ -42,12 +42,12 @@
  *    the worse failure, so quiet is the ship default.
  *
  * **This module is the pinned oracle**, mirroring the prose rules the v1
- * `linear-adapter` skill documents (`getInbox` shape) and the P5 promotion
+ * tracker adapter skill documents (`getInbox` shape) and the P5 promotion
  * surface. `comments.respondWhen` and `comments.ambiguousBias` drive the soft
  * zone so re-tuning chattiness is a config edit, never a code change.
  *
  * @see specs/unified-workflow-system/02-specification.md §5 (comment-response)
- * @see .agents/flow/skills/linear-adapter/SKILL.md (`getInbox` shape, the 5 rules)
+ * @see .agents/flow/skills/<tracker>-adapter/SKILL.md (`getInbox` shape, the 5 rules)
  * @module @dorkos/flow/comment-response
  */
 

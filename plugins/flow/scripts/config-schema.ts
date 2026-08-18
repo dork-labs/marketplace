@@ -20,16 +20,35 @@
 import { z } from 'zod';
 
 /**
- * Supported project trackers. Only Linear is wired in v1 (§3).
+ * The active project tracker, as an **adapter slug** (§3).
+ *
+ * This is deliberately an open slug rather than a closed enum. `/flow:init`
+ * offers any tracker, generates the concrete adapter for it at
+ * `<flow-root>/skills/<tracker>-adapter/SKILL.md`, and gates that adapter on the
+ * conformance harness — so the set of trackers flow supports is the set an
+ * adopter can write an adapter for, not a list this file happens to enumerate. A
+ * closed enum rejected the very setup init had just recommended and verified, and
+ * the only workaround was hand-editing plugin source that the next plugin update
+ * overwrote.
+ *
+ * `linear` is the **reference** adapter shipped in-tree (`skills/linear-adapter/`)
+ * and stays the default; any other value names the adapter skill directory
+ * `/flow:init` generated. The pattern is therefore exactly "a usable directory
+ * segment": lowercase alphanumerics and dashes, starting with a letter.
  *
  * Tracker-confinement carve-out (task 5.3): the bare lowercase tracker-name
- * literal here is the generic tracker NAME, not a tracker API string. It does not
+ * default here is the generic tracker NAME, not a tracker API string. It does not
  * match the `tracker-confinement` guard's I/O patterns (which target the uppercase
  * provenance slug, the MCP tool-name prefix, and the CLI invocation word — never
- * the bare tracker name), so this enum site passes the widened guard over
- * `packages/flow/src` naturally — no allowlist entry needed.
+ * the bare tracker name), so this site passes the guard naturally — no allowlist
+ * entry needed.
  */
-export const TrackerSchema = z.enum(['linear']);
+export const TrackerSchema = z
+  .string()
+  .regex(
+    /^[a-z][a-z0-9-]*$/,
+    'tracker must be a lowercase adapter slug (letters, digits and dashes, starting with a letter) — it names the skill directory `skills/<tracker>-adapter/`'
+  );
 
 /**
  * Tracker transport — which access path the adapter treats as **primary** (§3).
@@ -443,7 +462,11 @@ export const ReviewSchema = z
   .object({
     /** Dispatch an independent adversarial review before any PR opens. */
     adversarial: z.boolean().default(true),
-    /** Repo-root-relative path to the review rubric the reviewer reads. */
+    /**
+     * Path to the review rubric the reviewer reads. Resolved against the repo
+     * root, or the current directory when flow runs outside a repo; an absolute
+     * path is used as-is.
+     */
     rubric: z.string().default('REVIEW.md'),
     /**
      * Independent reviewer agents dispatched per review. Raise for risky or

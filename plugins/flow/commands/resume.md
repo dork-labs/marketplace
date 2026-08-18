@@ -23,10 +23,10 @@ Resume is the inverse of pause: it restores the autonomous surfaces pause halted
 ## Un-pausing a specific item
 
 To release a single item that `/flow:pause` parked with `agent/paused`, name its
-identifier: via the `linear-adapter`, remove the `agent/paused` marker so the next
+identifier: via the adapter, remove the `agent/paused` marker so the next
 tick may advance it again. If the item was reassigned to a human or another agent
 via the ownership policy, hand it back the same way (reassign on the tracker via the
-`linear-adapter`).
+adapter).
 
 ## Re-enabling a single reconciler loop
 

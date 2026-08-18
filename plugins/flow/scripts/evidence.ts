@@ -42,7 +42,7 @@
  * This module is a **pure selector**: it decides *what to capture and where to
  * attach*. It does not record, upload, or call a tracker — capture is performed by
  * the skill (`gif_creator` interactively, `apps/e2e` `recordVideo` for WebM) and
- * attachment routes through the `linear-adapter` (`attachEvidence`). The
+ * attachment routes through the adapter (`attachEvidence`). The
  * unattended/server variant (headless `recordVideo` → automated Linear
  * `fileUpload`/`attachmentCreate`) is the **P5 Extension's job (DOR-95)**; v1
  * attaches what an interactive/CLI run produces plus the `apps/e2e` WebM. The
@@ -50,7 +50,7 @@
  *
  * @see specs/unified-workflow-system/02-specification.md §13 (browser proof-of-completion)
  * @see .agents/flow/skills/verifying-work/SKILL.md (the VERIFY stage skill)
- * @see .agents/flow/skills/linear-adapter/SKILL.md (`attachEvidence`)
+ * @see .agents/flow/skills/<tracker>-adapter/SKILL.md (`attachEvidence`)
  * @see research/20260611_agent_browser_video_recording.md (gif_creator vs recordVideo)
  * @module @dorkos/flow/evidence
  */

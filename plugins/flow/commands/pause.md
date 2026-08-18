@@ -24,12 +24,12 @@ the in-flight items before or after pausing, use `/flow:status`.
 ## Reclaiming or redirecting a specific item
 
 To stop ONE running item rather than all autonomy, name its identifier. Via the
-`linear-adapter`, apply the **`agent/paused`** marker to that item. A running tick
+adapter, apply the **`agent/paused`** marker to that item. A running tick
 honors `agent/paused` **at stage boundaries**: it finishes no further stage, stops
 advancing the item, and releases the claim cleanly (drops `agent/claimed`) rather
 than abandoning a half-done stage. To hand the item to a human or another agent
 instead, use the ownership-policy reassignment (reassign on the tracker via the
-`linear-adapter`); the loop's `classifyOwnership` then treats it as not-ours.
+adapter); the loop's `classifyOwnership` then treats it as not-ours.
 
 ## Finer-grained control (a config edit, not a command)
 

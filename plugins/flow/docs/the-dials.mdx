@@ -157,7 +157,7 @@ The adversarial review a branch faces **before** its PR is opened, under `review
 | Dial          | What it does                                                        | Default       | Notes                                                                         |
 | ------------- | ------------------------------------------------------------------- | ------------- | ----------------------------------------------------------------------------- |
 | `adversarial` | Dispatch an independent reviewer on the branch before the PR opens. | `true`        | Turn off for a cheaper, lower-assurance loop.                                 |
-| `rubric`      | Repo-root-relative path to the rubric the reviewer reads.           | `"REVIEW.md"` | `/flow:init` scaffolds one from the template if the path does not exist.      |
+| `rubric`      | Path to the rubric the reviewer reads.                              | `"REVIEW.md"` | Relative to the repo root (or the current directory outside a repo); absolute paths are used as-is. `/flow:init` scaffolds one if it does not exist. |
 | `reviewers`   | How many independent reviewer agents each review dispatches.        | `1`           | Raise for a wide blast radius; each extra reviewer is another full diff read. |
 
 Three different things in this config are called "review", and they fire at three different moments. `review` (this block) is the **machine** review, before the PR exists. `gates.review` is the **auto-merge** ladder, after a human approves. `stages.review` is the **human gate** itself, which is always on and has no off switch.

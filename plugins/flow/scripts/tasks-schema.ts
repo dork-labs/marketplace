@@ -175,13 +175,18 @@ export function isPromotableToSubIssue(
 }
 
 /**
- * Supported provenance trackers (mirrors {@link TrackerSchema}). The bare
- * lowercase tracker-name literal is the generic tracker NAME, not a tracker API
- * string — it does not match the `tracker-confinement` guard's I/O patterns (the
- * uppercase provenance slug, the MCP tool-name prefix, the CLI invocation word),
- * so this enum carve-out passes the widened guard (task 5.3) naturally.
+ * The tracker an artifact is homed in, as an adapter slug (mirrors
+ * {@link TrackerSchema}, and open for the same reason: a spec written against a
+ * generated `<tracker>-adapter` must be able to record which tracker it came
+ * from). The bare lowercase tracker-name value is the generic tracker NAME, not a
+ * tracker API string — it does not match the `tracker-confinement` guard's I/O
+ * patterns (the uppercase provenance slug, the MCP tool-name prefix, the CLI
+ * invocation word), so this carve-out passes the widened guard (task 5.3)
+ * naturally.
  */
-export const ProvenanceTrackerSchema = z.enum(['linear']);
+export const ProvenanceTrackerSchema = z
+  .string()
+  .regex(/^[a-z][a-z0-9-]*$/, 'tracker must be a lowercase adapter slug');
 
 /**
  * PM-agnostic **provenance block** (§8) — a one-line frontmatter block that

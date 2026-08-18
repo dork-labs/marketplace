@@ -110,7 +110,9 @@ against a superseded diff is not proof.
   skill; this is the reviewer's half of it.
 - **Give each reviewer three things: the diff, the rubric, and the intent.** The
   diff and the files it touches (via the base/head SHAs); the rubric named by
-  `review.rubric`, resolved from the repo root (default `REVIEW.md`), which
+  `review.rubric` — resolved from the repo root when there is one and from the
+  current directory when there is not, or taken as-is when it is absolute
+  (default `REVIEW.md`) — which
   carries the severity calibration, the repo's hard rules, and the do-not-report
   list; and the work item's description or its `03-tasks.json` task, so the
   reviewer can judge conformance — did this do what was asked — as well as
@@ -134,9 +136,22 @@ in the run report and in the PR's review-status line — a degraded review that
 reads as a clean one is worse than none.
 
 - **The rubric file is missing** → the reviewer proceeds on general review
-  discipline (correctness, blast radius, data loss, secrets, test coverage) and
-  the run says so. Mention that `/flow:init` scaffolds a rubric at the configured
-  path, so the next review is calibrated rather than generic.
+  discipline (correctness, blast radius, data loss, secrets, test coverage) — and
+  this degradation is **announced, never inferred**. Before dispatching, resolve
+  `review.rubric` to a concrete path and check it exists. If it does not, say so
+  in **both** places a person looks:
+  - **in the run output**, as its own line:
+    `no rubric at <resolved path> — reviewing without one; run /flow:init to scaffold it`
+  - **in the evidence comment and the PR's review-status line**, naming the same
+    resolved path.
+
+  Print the path you actually resolved, not the configured string: the two differ
+  whenever `review.rubric` is relative and flow is running somewhere other than
+  the repo root, and "REVIEW.md is missing" is unactionable when the reader cannot
+  tell which `REVIEW.md` was looked for. Adversarial review is **on by default**,
+  so a silent fallback here reads as a rubric-calibrated review that never
+  happened — which is the failure this whole section exists to prevent.
+
 - **`review.adversarial` is false** → skip this step entirely and say that you
   skipped it. The tradeoff is deliberate and belongs in the report, not hidden:
   the loop is cheaper in tokens and time, and the first eye on the diff is the

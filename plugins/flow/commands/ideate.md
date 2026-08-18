@@ -16,7 +16,8 @@ It is the IDEATE stage of the `/flow` engine; the next stage is SPECIFY
 The ideation document scaffold is externalized at
 `${CLAUDE_PLUGIN_ROOT}/templates/docs/ideation.md` — produce that shape.
 
-When the work is tracked, route every tracker read/write through the
-`linear-adapter` skill (`${CLAUDE_PLUGIN_ROOT}/skills/linear-adapter/SKILL.md`); never
-call a tracker directly from this command. If the work is untracked or no
-adapter is available, skip tracker projection silently.
+When the work is tracked, route every tracker read/write through the tracker
+adapter skill (`${CLAUDE_PLUGIN_ROOT}/skills/<tracker>-adapter/SKILL.md`, where
+`<tracker>` is the `tracker` in `config.json`); never call a tracker directly
+from this command. If the work is untracked or no adapter is available, skip
+tracker projection silently.

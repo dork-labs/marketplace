@@ -341,15 +341,45 @@ describe('validate-config', () => {
 
   it('rejects an out-of-enum value in an otherwise valid config (exit 1)', () => {
     const { status, stdout } = runScript('validate-config', {
-      stdin: JSON.stringify({ ...fullConfig, tracker: 'jira' }),
+      stdin: JSON.stringify({
+        ...fullConfig,
+        connection: { ...fullConfig.connection, transport: 'carrier-pigeon' },
+      }),
     });
     expect(status).toBe(1);
     const out = JSON.parse(stdout);
     expect(out.ok).toBe(false);
     expect(Array.isArray(out.errors)).toBe(true);
     expect(out.errors.length).toBeGreaterThan(0);
-    expect(out.errors.some((e: { path: string }) => e.path === '/tracker')).toBe(true);
+    expect(out.errors.some((e: { path: string }) => e.path === '/connection/transport')).toBe(true);
   });
+
+  // `tracker` is a slug, not an enum (F1). The runtime validator walks the
+  // GENERATED schema artifact rather than Zod, so it has to honour `pattern` —
+  // without it the widened schema would accept anything at all, which is a
+  // strictly worse outcome than the enum it replaced.
+  it('accepts a tracker slug the plugin ships no adapter for (exit 0)', () => {
+    const { status, stdout } = runScript('validate-config', {
+      stdin: JSON.stringify({ ...fullConfig, tracker: 'github' }),
+    });
+    expect(status).toBe(0);
+    const out = JSON.parse(stdout);
+    expect(out.ok).toBe(true);
+    expect(out.config.tracker).toBe('github');
+  });
+
+  it.each(['Linear!', 'GitHub', '1password', '-github', 'git hub', ''])(
+    'rejects the malformed tracker slug %j at /tracker (exit 1)',
+    (bad) => {
+      const { status, stdout } = runScript('validate-config', {
+        stdin: JSON.stringify({ ...fullConfig, tracker: bad }),
+      });
+      expect(status).toBe(1);
+      const out = JSON.parse(stdout);
+      expect(out.ok).toBe(false);
+      expect(out.errors.some((e: { path: string }) => e.path === '/tracker')).toBe(true);
+    }
+  );
 
   it('exits 1 on non-JSON input', () => {
     const { status, stdout } = runScript('validate-config', {

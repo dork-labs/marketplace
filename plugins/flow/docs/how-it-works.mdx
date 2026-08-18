@@ -26,9 +26,9 @@ The whole engine is four ideas stacked:
     A normalized <code>TrackerEvent</code> stream from a swappable transport. Events are triggers,
     not truth.
   </Card>
-  <Card title="The linear-adapter seam">
+  <Card title="The tracker-adapter seam">
     Every tracker call confined to one skill. The engine package stays pure: no fs, no network, no
-    Linear strings.
+    tracker strings.
   </Card>
 </Cards>
 
@@ -53,7 +53,7 @@ inbound signal ─▶ InboundTransport ─▶ TrackerEvent[] ─▶ reconciler (
                                               calls a pure decision oracle
                                                               │
                                                               ▼
-                                              acts via the linear-adapter (claim, comment, transition, …)
+                                              acts via the tracker adapter (claim, comment, transition, …)
 ```
 
 The adapter is the only thing that touches the tracker, at both ends: it produces the inbox the transport reads, and it executes the side effects a reconciler decides on. Everything between is pure and tracker-agnostic.
@@ -275,13 +275,13 @@ This is what the recovery reconciler reads each tick: it lists `agent/claimed` +
   v1 stays `concurrency: sequential`, WIP-1; multi-writer concurrency is not built here.
 </Callout>
 
-## The linear-adapter seam: the engine stays pure
+## The tracker-adapter seam: the engine stays pure
 
-Every fact so far has pointed at one rule (charter G8): **all tracker I/O is confined to the `linear-adapter` skill.** The `@dorkos/flow` package contains zero tracker strings: no `mcp__linear__*`, no Composio call, no Linear field name. A grep guard enforces it across the package, the drain task, and the loop hook.
+Every fact so far has pointed at one rule (charter G8): **all tracker I/O is confined to the tracker adapter skill** — `skills/<tracker>-adapter/`, whichever tracker your config names. Outside that one directory the plugin contains zero tracker strings: no tracker MCP tool name, no CLI invocation, no tracker-specific field name. A grep guard enforces it across the skills, the commands, the engine scripts, and the loop hook.
 
 This confinement is what makes everything above pure and portable:
 
-- The **oracles** see only the normalized `WorkItem`, never a Linear issue.
+- The **oracles** see only the normalized `WorkItem`, never a tracker-native issue.
 - The **transport** wraps the adapter's `getInbox` as an injected reader, never calling the tracker itself.
 - The **`FlowRun` store** injects its fs seam, never importing `fs`.
 - The **reconcilers** decide via an oracle, then act by naming an adapter verb (`claim`, `comment`, `transition`, `needsInput`); they never embed a tracker call.
@@ -290,7 +290,7 @@ In v1 the adapter is realized as a documented **prose contract** (the skill owns
 
 <Callout type="info">
   This is why the agnosticism is testable rather than aspirational. The generic layer is
-  mechanically prevented from knowing it is talking to Linear, so swapping in a second tracker is
+  mechanically prevented from knowing which tracker it is talking to, so swapping in a second tracker is
   implementing one adapter, not editing the engine. The one seam is the single audit surface for
   every tracker side effect.
 </Callout>

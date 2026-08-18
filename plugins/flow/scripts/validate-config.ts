@@ -5,15 +5,18 @@
  * and emits `{ ok: true, config }` (the validated config, echoed back) on success
  * or `{ ok: false, errors }` (one `{ path, message }` per violation) on failure.
  *
- * Zero-runtime-dep by design: the shipped `/flow` plugin runs its oracles via
- * `node --experimental-strip-types` with NO `node_modules`, so a shipped script
- * may not import any npm package. This validator therefore imports neither the
- * Zod runtime nor the `config-schema.ts` module — it reads the committed schema
- * artifact as a file and walks it directly. Zod remains the DEV-time source of
- * truth: `config-schema.ts` authors the schema and `generate-config-schema.ts`
- * (dev-only) GENERATES `config.schema.json` from it via `z.toJSONSchema`. This
- * oracle validates against that generated artifact, so the two never drift while
- * the runtime stays import-free of third-party modules.
+ * **This validator deliberately avoids `zod`, so it can run before dependencies
+ * are installed.** That is a property of this file, not of the plugin: several
+ * other shipped oracles do need `zod` on disk (see `dispatch.ts`). Keeping the
+ * config validator dependency-free is what lets it answer "is this config valid?"
+ * on a fresh checkout where `npm install --omit=dev` has not run yet.
+ *
+ * So it imports neither the Zod runtime nor the `config-schema.ts` module — it
+ * reads the committed schema artifact as a file and walks it directly. Zod
+ * remains the DEV-time source of truth: `config-schema.ts` authors the schema and
+ * `generate-config-schema.ts` (dev-only) GENERATES `config.schema.json` from it
+ * via `z.toJSONSchema`. This oracle validates against that generated artifact, so
+ * the two never drift while this file stays import-free of third-party modules.
  *
  * @module @dorkos/flow/cli/validate-config
  */
@@ -95,8 +98,8 @@ function resolveRef(ref: string, root: SchemaNode): SchemaNode | undefined {
 /**
  * Recursively validate `value` against `schema`, appending a `ValidationError`
  * for each violation. Covers exactly the keyword subset `config.schema.json`
- * uses: `$ref`/`$defs`, `anyOf`, `type`, `enum`, `properties`, `required`,
- * `additionalProperties` (false), `items`, `minItems`, and the numeric bounds
+ * uses: `$ref`/`$defs`, `anyOf`, `type`, `enum`, `pattern`, `properties`,
+ * `required`, `additionalProperties` (false), `items`, `minItems`, and the numeric bounds
  * `minimum` / `maximum` / `exclusiveMinimum` (`exclusiveMaximum` handled too for
  * symmetry). `default` is schema metadata and is intentionally ignored.
  */
@@ -167,6 +170,19 @@ function validate(
       errors.push({
         path: pointer(segments),
         message: `value ${JSON.stringify(value)} is not one of ${JSON.stringify(allowed)}`,
+      });
+    }
+  }
+
+  // pattern — a string must match the schema's regex. Load-bearing since `tracker`
+  // became an open adapter slug (F1): `pattern` is the only keyword still holding
+  // that field to a shape, so skipping it here would turn the widened schema into
+  // no validation at all.
+  if (typeof schema.pattern === 'string' && typeof value === 'string') {
+    if (!new RegExp(schema.pattern).test(value)) {
+      errors.push({
+        path: pointer(segments),
+        message: `value ${JSON.stringify(value)} does not match the required pattern /${schema.pattern}/`,
       });
     }
   }

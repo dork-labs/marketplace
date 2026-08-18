@@ -16,7 +16,7 @@ description: The /flow engine's tracker adapter — the single skill that owns E
 > **This is a prose contract, not code.** In v1 there is no DorkOS server and
 > nothing imports a TypeScript adapter at runtime — the engine is server-free and
 > skill-based. The agent _reads this skill and follows it_. The typed
-> `interface PMClient` documented in [`../../SPEC.md`](../../SPEC.md) is what the
+> `interface PMClient` documented in [`../../SPEC.md`](../../docs/SPEC.md) is what the
 > **P5 server build** promotes this prose contract into. Building a TS adapter
 > class now would be dead code (this repo forbids dead code), so we do not.
 
@@ -560,7 +560,7 @@ the rest `undefined`; it never fabricates a value to satisfy the shape.
 
 This prose contract is the **promotion surface**. The P5 server-side Flow Engine
 — Extension promotes it into a typed `interface PMClient` (documented in
-[`../../SPEC.md`](../../SPEC.md)) with the same verbs and the same `WorkItem`
+[`../../SPEC.md`](../../docs/SPEC.md)) with the same verbs and the same `WorkItem`
 shape, backed by the Linear Agent Accounts API and a webhook relay instead of
 in-session MCP calls. A second adapter (Jira / GitHub Issues) proves the
 agnosticism. Because the generic layer speaks only `WorkItem` + verbs, the swap

@@ -15,5 +15,5 @@ The skill uses supporting files in `${CLAUDE_PLUGIN_ROOT}/skills/executing-specs
 on demand as instructed by the skill, not upfront.
 
 All tracker I/O (the `agent/claimed` claim, the In Progress transition,
-breadcrumbs) routes through the `linear-adapter` skill — this command never
+breadcrumbs) routes through the tracker adapter skill — this command never
 touches a tracker string directly.

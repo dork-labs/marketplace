@@ -12,9 +12,10 @@ Triage this work: $ARGUMENTS
 Read `${CLAUDE_PLUGIN_ROOT}/skills/triaging-work/SKILL.md` and follow its process exactly.
 
 That skill is PM-agnostic: it routes every tracker read or write through the
-`linear-adapter` skill (`${CLAUDE_PLUGIN_ROOT}/skills/linear-adapter/SKILL.md`), which it
-reads on demand. Do not touch a tracker directly from this command — the skill
-owns classification, evaluation, and the simple-vs-complex routing.
+tracker adapter skill (`${CLAUDE_PLUGIN_ROOT}/skills/<tracker>-adapter/SKILL.md`, where
+`<tracker>` is the `tracker` in `config.json`), which it reads on demand. Do not
+touch a tracker directly from this command — the skill owns classification,
+evaluation, and the simple-vs-complex routing.
 
 If no argument is provided, ask the operator for the work to triage (freeform
 input or an item identifier), then follow the skill. TRIAGE classifies and routes

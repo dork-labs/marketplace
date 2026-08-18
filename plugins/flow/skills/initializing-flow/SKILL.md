@@ -1,6 +1,6 @@
 ---
 name: initializing-flow
-description: First-run setup for the /flow engine in a new repo - detect or reconfigure an existing install, gather setup choices (tracker + connection, identity mode, project routing, adversarial review, model tiers) via the calibration ladder, generate and verify the concrete tracker adapter, scaffold the committed config.json plus the gitignored config.local.json and a review rubric, and confirm the install with a dry dispatch. Use when running /flow:init, configuring flow for the first time, adopting a new tracker, or reconfiguring an existing flow install.
+description: First-run setup for the /flow engine in a new repo - detect or reconfigure an existing install, gather setup choices (tracker + connection, identity mode, project routing, adversarial review, model tiers) via the calibration ladder, generate and verify the concrete tracker adapter, scaffold the committed config.json plus the gitignored config.local.json and a review rubric, and confirm the install with a real adapter read plus a policy self-check. Use when running /flow:init, configuring flow for the first time, adopting a new tracker, or reconfiguring an existing flow install.
 ---
 
 # Initializing Flow - first-run setup
@@ -47,7 +47,7 @@ confirms before overwriting committed config.
   2 GATHER     tracker + connection · identity · routing · review · model tiers
   3 ADAPTER    generate the concrete adapter, then validate until green (the gate)
   4 CONFIG     write config.json + config.local.json (secrets) + the review rubric
-  5 CONFIRM    dry dispatch on an empty queue → "/flow is ready"
+  5 CONFIRM    5a connectivity (a real adapter read) + 5b policy self-check
 ```
 
 ### Step 1 - Detect: fresh install or re-run
@@ -69,10 +69,56 @@ Check whether `<flow-root>/config/config.json` exists and parses as valid JSON
   config without a human), and reports that it stopped because a valid config
   already exists.
 
-Also confirm the toolchain is present: `node` is on PATH and
-`<flow-root>/scripts/validate-adapter.ts` exists (it is the Step 3 gate). If either is
-missing, stop and say so plainly rather than proceeding to a setup that cannot be
-verified.
+#### Confirm the toolchain before going further
+
+Setup is about to lean on the engine oracles, so prove they run **now** rather
+than discovering it at Step 5.
+
+1. **`node` is on PATH** and `<flow-root>/scripts/validate-adapter.ts` exists (it is
+   the Step 3 gate). If either is missing, stop and say so plainly rather than
+   proceeding to a setup that cannot be verified.
+
+2. **The oracles' one runtime dependency is installed.** Run the dispatch oracle
+   on an empty candidate set:
+
+   ```bash
+   echo '{"items":[],"config":{},"ownershipOf":{}}' | node --experimental-strip-types "<flow-root>/scripts/dispatch.ts"
+   ```
+
+   It should answer `{"picked":[],"eligibleCount":0,"starved":false,"shapeableCount":0}`.
+   Any JSON result at all passes this check — even a rejection of the payload —
+   because what it proves is that the module graph loaded. What it is looking for
+   is the other outcome: **`ERR_MODULE_NOT_FOUND` naming `zod`**.
+
+   The shipped `scripts/*.ts` run on `node --experimental-strip-types`, which
+   erases `import type` lines but resolves every value import. **Several oracles
+   need `zod` on disk** — mostly transitively, by reaching `config-schema.ts`
+   (`dispatch.ts` is one of them: it names no package itself, and still cannot
+   load without `zod`). `dispatch.ts` is used as the probe precisely because it
+   sits on that transitive path, so a pass here clears the whole config-schema
+   graph the rest of setup depends on. `validate-config.ts` is the deliberate
+   exception — it is kept dependency-free so it can validate a config before
+   anything is installed, which is also why it is no use as this probe.
+
+   On `ERR_MODULE_NOT_FOUND`, install it into the plugin and re-run the check:
+
+   ```bash
+   npm install --omit=dev --prefix "<flow-root>"
+   ```
+
+   **`--omit=dev` is not optional wording.** A shell carrying
+   `NODE_ENV=production` (or an `omit=dev` npm config) installs _nothing_ from a
+   bare `npm install`, which is exactly how an adopter ends up with a plugin whose
+   own validator cannot run. Stating the flag makes the command behave the same
+   in every shell. Contributors who also want the test/lint/schema-generation
+   toolchain use `--include=dev` instead; an adopter never needs it.
+
+   Interactive: report what is missing and ask before installing. Headless: run
+   the install, then re-run the check and record it as an applied assumption.
+
+   If the re-check still fails, **stop**. Name the command that failed and its
+   error. Everything after this point — the Step 3 conformance gate, the Step 5
+   confirmation — depends on these scripts running.
 
 ### Step 2 - Gather setup choices (the calibration ladder)
 
@@ -94,7 +140,10 @@ interactively, or apply the headless default.
    see `<flow-root>/adapters/SPEC.md` and the reference adapters under
    `<flow-root>/adapters/reference/`). Capture, into the config the adapter reads:
    - the tracker's short name → the `tracker` config field (and `<tracker>` in the
-     adapter path),
+     adapter path). It is a slug: lowercase letters, digits and dashes, starting
+     with a letter (`^[a-z][a-z0-9-]*$`) — `github`, `jira`, `github-issues`. Any
+     such value is accepted, because `tracker` names the adapter you are about to
+     generate; it is not a list of trackers flow supports,
    - the transport → `connection.transport`, one of `cli` (an account-pinned
      external CLI — the **safe default**, since the acting identity is fixed by the
      account handle) or `mcp` (an in-session MCP server),
@@ -157,7 +206,8 @@ interactively, or apply the headless default.
    When it is on, also capture **how many reviewers run** (`review.reviewers`,
    default `1`) — raise it only for changes with a wide blast radius, since every
    extra reviewer is another full read of the diff — and **which rubric file**
-   they read (`review.rubric`, default `REVIEW.md`, resolved from the repo root).
+   they read (`review.rubric`, default `REVIEW.md` — resolved against the repo
+   root, or the current directory outside a repo, or used as-is when absolute).
    _Headless default: on, one reviewer, `REVIEW.md`._
 
    **Recommend one tracker setting while you are here:** most trackers close a
@@ -278,14 +328,41 @@ honor it.
    credential file is the one outcome setup must never allow.
 
 4. **The review rubric** (only when `review.adversarial` resolves true). If no
-   file exists at the repo-root-relative path in `review.rubric` (default
+   file exists at the path in `review.rubric` — resolved as the table below
+   describes (default
    `REVIEW.md`), copy the scaffold there:
 
    ```bash
-   TARGET="$(git rev-parse --show-toplevel)/REVIEW.md"
+   RUBRIC="REVIEW.md"   # the configured review.rubric
+   ROOT="$(git rev-parse --show-toplevel 2>/dev/null || pwd)"
+   case "$RUBRIC" in
+     /*) TARGET="$RUBRIC" ;;      # absolute: used as-is
+     *)  TARGET="$ROOT/$RUBRIC" ;;
+   esac
    mkdir -p "$(dirname "$TARGET")"
    test -f "$TARGET" || cp <flow-root>/templates/review-rubric.md "$TARGET"
+   echo "rubric: $TARGET"
    ```
+
+   Set `RUBRIC` to the configured `review.rubric` before running this — the
+   literal above is only the default. The `case` is what makes an absolute
+   `review.rubric` work: joining it onto `$ROOT` would produce a nonsense
+   `$ROOT//Users/you/REVIEW.md`.
+
+   **The `|| pwd` is the other half.** `git rev-parse --show-toplevel` fails
+   outside a git repo, and a bare `$(...)` failure silently yields an empty string
+   — so the rubric was written to `/REVIEW.md`, or not at all, and the adversarial
+   gate (which is **on by default**) quietly reviewed every branch without the
+   rubric it was configured to use. Falling back to the current directory keeps
+   the behaviour honest. The resolution rule, in full:
+
+   | `review.rubric`          | resolves against      |
+   | ------------------------ | --------------------- |
+   | absolute (`/…`)          | itself — used as-is   |
+   | relative, inside a repo  | the repo root         |
+   | relative, outside a repo | the current directory |
+
+   Print the resolved path and tell the operator where it went.
 
    The `mkdir -p` matters because `review.rubric` may be a nested path (for
    example `docs/code-review.md`) whose directory does not exist yet; `cp` into a
@@ -294,8 +371,9 @@ honor it.
    the `git rev-parse` call even though the command only reads — approve it; there
    is no other tracker-neutral way to resolve the repo root.
 
-   Substitute the configured `review.rubric` path for `REVIEW.md` if the operator
-   chose a different one. **Never overwrite an existing rubric** — an adopter who
+   Set `RUBRIC` to the configured `review.rubric` when the operator chose one
+   other than the default; the `case` above then places it correctly whether it is
+   relative or absolute. **Never overwrite an existing rubric** — an adopter who
    already has one has already calibrated it. When you create the file, tell the
    operator to fill in its two **FILL IN** sections (the repo's hard rules and its
    always-check list): the scaffold reviews generically until those are written,
@@ -305,23 +383,60 @@ honor it.
 
 ### Step 5 - Confirm the install
 
-Prove the wiring end to end with a dry dispatch against an empty queue:
+Two checks, and they answer **different questions**. Run both, and report each
+under its own name — never let one stand in for the other.
+
+#### 5a. Connectivity — a real read through the adapter
+
+This is the only check that touches the tracker. Using the adapter skill you
+generated in Step 3, perform two reads:
+
+1. `getCurrentUser()` — proves the credentials in `config.local.json` authenticate,
+   and tells the operator **which account** flow will act as. Show that account
+   back to them: on the `mcp` transport this is the single most likely thing to be
+   wrong, and it fails silently by writing as the wrong person rather than by
+   erroring.
+2. The configured **team / workspace** lookup — proves `connection.team` and
+   `connection.workspace.slug` name something that actually exists and that the
+   authenticated account can see it.
+
+An auth error, an empty/unresolvable team, or any throw is a **connection or
+credential gap**. Name the specific file to fix — `config.local.json` for
+credentials and coordinates, the generated `<tracker>-adapter` skill for
+transport — and **stop**. Do not report `/flow` as ready.
+
+#### 5b. Policy self-check — the dispatch oracle, no tracker call
+
+Now feed the **real** candidate set from the adapter's `getEligibleWork()` into
+the dispatch oracle:
 
 ```bash
 node --experimental-strip-types "<flow-root>/scripts/dispatch.ts"
 ```
 
-A clean, no-work outcome (the dispatcher reaches the adapter, finds nothing
-eligible, and returns a no-work result without error) confirms the adapter,
-config, and credentials all resolve. A throw or an auth error here means a
-connection or credential gap: point the operator at the specific file
-(`config.local.json` for credentials, the generated adapter for transport) rather
-than reporting success.
+(candidate set + policy as JSON on stdin, `{ picked, eligibleCount, starved,
+shapeableCount }` as JSON out).
 
-On a green dry dispatch, tell the operator `/flow` is ready: name the configured
-tracker, the identity mode, the project-routing scope, the adversarial-review
-posture (and the rubric path, flagging it if you just scaffolded one that still
-needs filling in), the model bound to each delegate tier (or that a tier is
+**Label this result honestly: policy oracle only — no tracker call.**
+`dispatch.ts` is a pure function over the items you hand it. It never opens a
+connection, never authenticates, and cannot fail for a credential reason. Its
+`{"picked":[],"eligibleCount":0,"starved":false}` on an empty queue means "the
+ranking policy loaded and agrees there is nothing to pick" — it does **not** mean
+the tracker is reachable, and reading it that way is how an install that never
+connected to anything looks green. If `getEligibleWork()` returned nothing, say
+so explicitly ("empty queue — the oracle ran on zero candidates") rather than
+presenting an empty result as a passing connectivity test.
+
+**5b alone is never a green light.** Only 5a can confirm the adapter, config, and
+credentials resolve.
+
+#### Report
+
+Only when **5a** passed, tell the operator `/flow` is ready: name the configured
+tracker, the **account 5a resolved**, the identity mode, the project-routing
+scope, the adversarial-review posture (and the rubric path — say where it
+resolved to, and flag it if you just scaffolded one that still needs filling in),
+the model bound to each delegate tier (or that a tier is
 unbound and will fall back to the harness default), and the entry points
 (`/flow` to orchestrate, `/flow:<stage>` for a single stage, `/flow auto` for the
 autonomous drain). Surface any headless assumptions you applied so the operator
@@ -338,10 +453,16 @@ can change them with another `/flow:init`.
   that "looks right" but may not conform.
 - **No secret ever lands in a committed file.** Credentials live only in
   `config.local.json` (gitignored) or a `FLOW_`-prefixed environment variable.
-- **Honest failure.** If the toolchain is missing (Step 1), the adapter cannot be
-  verified (Step 3), or the dry dispatch errors (Step 5), stop and say exactly
-  what is wrong and which file to fix. Never report `/flow` as ready on an
-  unverified or unreachable setup.
+- **Honest failure.** If the toolchain is missing or its dependency check cannot
+  be made to pass (Step 1), the adapter cannot be verified (Step 3), or the
+  connectivity read fails (Step 5a), stop and say exactly what is wrong and which
+  file to fix. Never report `/flow` as ready on an unverified or unreachable
+  setup.
+- **Never let a policy check impersonate a connectivity check.** Step 5b runs a
+  pure function over items already in hand; it cannot reach a tracker and cannot
+  fail for a credential reason. Report it under its own label, and never treat its
+  clean empty result as evidence that anything connected. Only Step 5a can say
+  that.
 
 ## References
 
