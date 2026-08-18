@@ -309,3 +309,123 @@ describe('charter goal G8 — generic stage skills name no tracker (stricter tha
     expect(productName.length, 'planted "Linear" product name not caught').toBeGreaterThan(0);
   });
 });
+
+// ---------------------------------------------------------------------------
+// F1 — the COMMANDS layer is held to the same name-level rule as the generic
+// stage skills.
+//
+// The commands were the last shipped layer still hard-coding `linear-adapter`.
+// That was not cosmetic: five of them told the agent to read
+// `${CLAUDE_PLUGIN_ROOT}/skills/linear-adapter/SKILL.md` by literal path, and
+// `/flow:init` generates the adapter at `skills/<tracker>-adapter/SKILL.md` — so
+// for the GitHub adapter init had just recommended, generated and conformance-
+// gated, every one of those was a path that does not exist. DorkOS also
+// regenerates `.claude/commands/flow/*.md` from these files verbatim, so the
+// broken instruction propagates into every install.
+//
+// The rule is therefore the same G8 rule the generic skills already pass, and it
+// is deliberately two-sided: a command may not NAME a tracker (negative), and the
+// command layer as a whole must still route through the adapter by its
+// config-driven `<tracker>-adapter` path (positive). Without the positive half,
+// deleting every mention of the adapter would satisfy the guard while breaking
+// the engine — the test would pass at its most broken.
+// ---------------------------------------------------------------------------
+
+/** The commands dir — every file in it is a generic command; none is adapter-owned. */
+const FLOW_COMMANDS_DIR = path.join(pluginRoot, 'commands');
+
+/** The config-driven adapter reference the commands must use instead of a fixed name. */
+const GENERIC_ADAPTER_PATH = 'skills/<tracker>-adapter/SKILL.md';
+
+describe('F1 — generic commands name no tracker and route through <tracker>-adapter', () => {
+  const commandFiles = collectFiles(FLOW_COMMANDS_DIR).filter((file) => file.endsWith('.md'));
+
+  it('no command contains a tracker NAME or API string', () => {
+    const offenders = scanGenericSkills(
+      commandFiles.map((file) => ({ file, content: readFileSync(file, 'utf8') }))
+    );
+
+    expect(
+      offenders,
+      `generic commands must name no tracker (F1):\n${offenders.join('\n')}`
+    ).toEqual([]);
+  });
+
+  it('the command scan is non-vacuous — every stage command is actually read', () => {
+    // A mis-rooted or over-filtered scan would pass the assertion above while
+    // reading nothing. Pin the real command set by name so a renamed or dropped
+    // command surfaces here rather than silently leaving the guard.
+    const names = commandFiles.map((file) => path.basename(file, '.md')).sort();
+    expect(names).toEqual(
+      [
+        'capture',
+        'decompose',
+        'done',
+        'execute',
+        'flow',
+        'groom',
+        'ideate',
+        'init',
+        'pause',
+        'resume',
+        'specify',
+        'status',
+        'triage',
+        'verify',
+      ].sort()
+    );
+  });
+
+  it('the guard catches a planted tracker name in a command', () => {
+    // The negative half must genuinely bite on the exact regression it exists to
+    // stop: the phrasing every command carried before this change.
+    for (const planted of [
+      'All tracker I/O routes through the `linear-adapter` skill.',
+      'Read `${CLAUDE_PLUGIN_ROOT}/skills/linear-adapter/SKILL.md` first.',
+      'Render any named item as `DOR-123 - Title`.',
+      'create the issue in Linear',
+    ]) {
+      const offenders = scanGenericSkills([
+        { file: path.join(FLOW_COMMANDS_DIR, '__planted-offender__.md'), content: planted },
+      ]);
+      expect(offenders.length, `planted offender not caught: ${planted}`).toBeGreaterThan(0);
+    }
+  });
+
+  it('the commands that read the adapter contract point at the config-driven path', () => {
+    // The positive half. Any command that tells the agent to READ the adapter
+    // skill must name it by the `<tracker>-adapter` path, so the instruction
+    // resolves for whichever adapter `/flow:init` generated.
+    const readers = commandFiles.filter((file) => {
+      const content = readFileSync(file, 'utf8');
+      return content.includes('-adapter/SKILL.md');
+    });
+
+    expect(
+      readers.length,
+      'no command reads the adapter contract by path — the positive half of this guard has nothing to check'
+    ).toBeGreaterThan(0);
+
+    for (const file of readers) {
+      const content = readFileSync(file, 'utf8');
+      expect(
+        content,
+        `${path.relative(pluginRoot, file)} must reference the adapter as ${GENERIC_ADAPTER_PATH}`
+      ).toContain(GENERIC_ADAPTER_PATH);
+    }
+  });
+
+  it('every command still routes tracker work through an adapter at all', () => {
+    // The other positive half: a command that dropped the word "adapter"
+    // entirely would pass the negative rule while losing the routing
+    // instruction. `init` is the one exception — it is setup, and it runs
+    // BEFORE any adapter exists.
+    for (const file of commandFiles) {
+      if (path.basename(file) === 'init.md') continue;
+      expect(
+        readFileSync(file, 'utf8'),
+        `${path.relative(pluginRoot, file)} no longer mentions the adapter at all`
+      ).toMatch(/adapter/i);
+    }
+  });
+});

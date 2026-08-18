@@ -121,6 +121,38 @@ describe('FlowConfigSchema — parsing the §9 config.json', () => {
   });
 });
 
+describe('FlowConfigSchema — `tracker` is an adapter slug, not a closed enum (F1)', () => {
+  /**
+   * `/flow:init` offers any tracker, generates `skills/<tracker>-adapter/SKILL.md`
+   * for it, and gates that adapter on the conformance harness. A closed enum here
+   * therefore rejected the very setup init had just recommended and verified —
+   * the adopter's only workaround was hand-editing plugin source, which the next
+   * plugin update silently overwrote. The slug is the contract instead: it must
+   * be usable as the `<tracker>` segment of that skill directory.
+   */
+  it.each(['linear', 'github', 'jira', 'github-issues', 'shortcut', 'youtrack', 'a', 'a1-b2'])(
+    'accepts the tracker slug %j',
+    (slug) => {
+      const cfg = FlowConfigSchema.parse({ tracker: slug });
+      expect(cfg.tracker).toBe(slug);
+    }
+  );
+
+  it('still defaults to the reference adapter shipped in-tree', () => {
+    expect(FlowConfigSchema.parse({}).tracker).toBe('linear');
+  });
+
+  it('accepts every slug it accepts as a real directory segment', () => {
+    // Non-vacuity: the regex must be tight enough that an accepted slug can
+    // actually name `skills/<tracker>-adapter/` without escaping the dir.
+    for (const slug of ['github', 'github-issues', 'a1-b2']) {
+      const dirName = `${slug}-adapter`;
+      expect(path.basename(dirName)).toBe(dirName);
+      expect(dirName).not.toMatch(/[/\\.]/);
+    }
+  });
+});
+
 describe('FlowConfigSchema — the tracker-connection block (team, workspace, transport)', () => {
   it('resolves null/placeholder coordinates and the cli transport default from {}', () => {
     const { connection } = FlowConfigSchema.parse({});
@@ -460,9 +492,14 @@ describe('FlowConfigSchema — rejecting invalid config', () => {
     expect(result.success).toBe(false);
   });
 
-  it('rejects an out-of-enum tracker', () => {
-    const result = FlowConfigSchema.safeParse({ tracker: 'jira' });
-    expect(result.success).toBe(false);
+  it('rejects a malformed tracker slug', () => {
+    // `tracker` is a slug, not an enum (F1): it names the adapter skill dir
+    // `skills/<tracker>-adapter/`, so anything that cannot be a directory
+    // segment must be refused.
+    for (const bad of ['Linear!', 'Jira', 'GitHub', '1password', '-github', '', 'git hub', 'a_b']) {
+      const result = FlowConfigSchema.safeParse({ tracker: bad });
+      expect(result.success, `expected tracker ${JSON.stringify(bad)} to be rejected`).toBe(false);
+    }
   });
 
   it('rejects a non-boolean gate flag', () => {

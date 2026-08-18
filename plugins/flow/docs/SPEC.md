@@ -66,8 +66,9 @@ narrow the global queue modes to that one project.
 ## `PMClient` interface (promotion surface, P5)
 
 In **v1 the `PMClient` does not exist as code.** It is realized as the
-`linear-adapter` skill — a documented **prose** contract that owns every
-`mcp__linear__*` / Composio call and fulfils the capability verbs below. Generic
+tracker adapter skill (`skills/<tracker>-adapter/`, `linear-adapter` being the
+reference adapter shipped here) — a documented **prose** contract that owns every
+tracker API call and fulfils the capability verbs below. Generic
 stage skills call the adapter by naming a verb and never touch a tracker string
 (a grep guard enforces this). The agnosticism win ("all tracker I/O in one place")
 is real in v1 with no new infrastructure.
@@ -125,8 +126,8 @@ WorkItem {
 fields as neutral.
 
 **Presenting to humans:** any surface that shows a `WorkItem` to a person renders
-`identifier` then `title` (`DOR-157 - Title`), never the bare key; the identifier
-is the link where the surface supports one. The v1 `linear-adapter` skill owns this
+`identifier` then `title` (`PROJ-157 - Title`), never the bare key; the identifier
+is the link where the surface supports one. The v1 tracker adapter skill owns this
 convention (its _Presenting a work item to a human_ section); the P5 `PMClient`
 carries it forward.
 
@@ -316,7 +317,7 @@ plus the typed engine, all of which already exist and are tested.
 **What P5 promotes this harness into** (for context, NOT implementation):
 
 - The server **`PMClient`** — the typed `interface PMClient` above, realized as
-  executable code (the `linear-adapter` prose contract becomes a class).
+  executable code (the tracker adapter's prose contract becomes a class).
 - A webhook / `dorkos.ai` relay + full **Linear Agent Accounts** (true two-account
   identity, push-driven instead of polled).
 - A server-side **`WorkspaceManager`** graduating the v1 `gtr` worktree flow.

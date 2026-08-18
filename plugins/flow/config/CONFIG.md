@@ -61,6 +61,27 @@ deliberately contains no credential fields. So the loader handles
   `config.json` and is validated against the policy schema like the committed
   file.
 
+## `tracker` names an adapter, not a supported product
+
+`tracker` is a **slug**, not a fixed list. It is the `<tracker>` in
+`skills/<tracker>-adapter/SKILL.md` — the adapter skill every stage skill and
+command routes its tracker reads and writes through. So the value has exactly one
+job: name a directory. It must be lowercase letters, digits and dashes, starting
+with a letter (`^[a-z][a-z0-9-]*$`).
+
+The default is `linear`, the **reference adapter shipped in this repo**
+(`skills/linear-adapter/`). Any other value names an adapter `/flow:init`
+generated for you: init picks the tracker with you, writes
+`skills/<tracker>-adapter/SKILL.md`, and does not finish until that adapter passes
+the conformance harness. Setting `tracker` to `github` or `jira` is therefore a
+setup step, not a request for support that has to be added upstream.
+
+The slug is deliberately permissive for that reason. Before, this field was a
+closed list containing only `linear` — so a tracker init had just recommended,
+generated and verified could not be written into the config it was generated for,
+and the only workaround was editing plugin source that the next plugin update
+overwrote.
+
 ## Schema and editor validation
 
 `config.json` references `config.schema.json` through its `$schema` key, which

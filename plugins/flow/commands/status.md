@@ -17,22 +17,23 @@ a single pane:
    branch, stage, and status of every run.
 2. **`.dork/flow/auto-run.json`**: the `/flow auto` drain sentinel, if a drain is
    live (`active`, `ready`, `shapeable`, `startedAt`, `pid`).
-3. **The tracker, via the `linear-adapter`**: titles, labels, parked questions, and
-   assumption comments. Read `${CLAUDE_PLUGIN_ROOT}/skills/linear-adapter/SKILL.md` and use
-   its verbs; never touch a tracker string directly from this command.
+3. **The tracker, via the adapter**: titles, labels, parked questions, and
+   assumption comments. Read `${CLAUDE_PLUGIN_ROOT}/skills/<tracker>-adapter/SKILL.md`
+   (where `<tracker>` is the `tracker` in `config.json`) and use its verbs; never
+   touch a tracker string directly from this command.
 
 Render, in this order:
 
 - **In flight.** Every claimed / in-flight item: each FlowRun in `flow-state.json`
-  plus every `agent/claimed` item on the tracker. For each, show `DOR-123 - Title`
-  (resolve the title via the `linear-adapter`, per its display convention), then its
+  plus every `agent/claimed` item on the tracker. For each, show `PROJ-123 - Title`
+  (resolve the title via the adapter, per its display convention), then its
   worktree path, branch, `sessionId`, and current `stage` / `status` from the
   FlowRun. If a drain is live, head the pane with the `auto-run.json` sentinel
   (`active`, `ready` ready vs `shapeable` behind the readiness gate).
-- **Parked.** Every `agent/needs-input` item: via the `linear-adapter`, list the
+- **Parked.** Every `agent/needs-input` item: via the adapter, list the
   parked items, and for each show the open question text and how long it has waited
   (now minus the parking comment's timestamp).
-- **Why.** The per-item assumption trail: via the `linear-adapter`, read each item's
+- **Why.** The per-item assumption trail: via the adapter, read each item's
   `agent/assumption` comments (or the assumption-log artifact), so the review gate
   stays auditable.
 

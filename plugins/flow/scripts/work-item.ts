@@ -6,7 +6,7 @@
  * classification (§7), and the inbox — never sees a tracker-specific field name.
  *
  * This is the **TypeScript mirror** of the prose `WorkItem` contract documented
- * in `.agents/flow/skills/linear-adapter/SKILL.md` ("The `WorkItem`
+ * in `.agents/flow/skills/<tracker>-adapter/SKILL.md` ("The `WorkItem`
  * normalization shape"). The skill is the runtime contract the agent follows in
  * v1 (server-free, skill-based); this module is the typed shape the dispatch
  * library and downstream tasks (2.4 comms, 3.1 `classifyOwnership`, 3.2 inbox)
@@ -31,7 +31,7 @@
  * neutral rather than trusting the shape.
  *
  * @see specs/unified-workflow-system/02-specification.md §3 (PMClient contract), §4 (dispatch)
- * @see .agents/flow/skills/linear-adapter/SKILL.md (the prose WorkItem contract)
+ * @see .agents/flow/skills/<tracker>-adapter/SKILL.md (the prose WorkItem contract)
  * @module @dorkos/flow/work-item
  */
 
@@ -124,7 +124,7 @@ export interface WorkItemRelations {
  * adapter returns work normalized into this shape; the generic layer never sees
  * a tracker-specific field name.
  *
- * @see .agents/flow/skills/linear-adapter/SKILL.md (the prose contract this mirrors)
+ * @see .agents/flow/skills/<tracker>-adapter/SKILL.md (the prose contract this mirrors)
  */
 export interface WorkItem {
   /** Tracker-native id (e.g. a Linear node id). */

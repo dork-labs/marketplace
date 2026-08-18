@@ -171,7 +171,20 @@ describe('ProvenanceSchema — names exactly one tracker home (§8)', () => {
     expect(ProvenanceSchema.safeParse({ tracker: 'linear' }).success).toBe(false);
   });
 
-  it('rejects an unknown tracker', () => {
-    expect(ProvenanceSchema.safeParse({ tracker: 'jira', issue: 'X-1' }).success).toBe(false);
+  it('accepts any adapter slug as the provenance tracker', () => {
+    // Mirrors `TrackerSchema` (F1): a spec written against a generated
+    // `<tracker>-adapter` must be able to record the tracker it came from, so
+    // this is a slug rather than a closed list.
+    for (const slug of ['linear', 'jira', 'github-issues']) {
+      const result = ProvenanceSchema.safeParse({ tracker: slug, issue: 'X-1' });
+      expect(result.success, `expected tracker ${slug} to be accepted`).toBe(true);
+    }
+  });
+
+  it('rejects a malformed tracker slug', () => {
+    for (const bad of ['Jira', 'git hub', '', '1password']) {
+      const result = ProvenanceSchema.safeParse({ tracker: bad, issue: 'X-1' });
+      expect(result.success, `expected tracker ${JSON.stringify(bad)} to be rejected`).toBe(false);
+    }
   });
 });

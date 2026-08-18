@@ -1,4 +1,7 @@
-# Dev dependencies (the shipped runtime is dependency-free).
+# Installed packages. Never committed — but note that the shipped runtime is NOT
+# dependency-free: `scripts/*.ts` needs `zod` on disk. An adopter gets it with
+# `npm install --omit=dev` in this directory, which /flow:init Step 1 checks for
+# and offers to run.
 node_modules/
 
 # /flow runtime config.

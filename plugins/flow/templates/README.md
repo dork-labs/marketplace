@@ -4,7 +4,7 @@ The templates the `/flow` engine owns. They are **loaded by skills**, not
 projected to any harness — a stage skill reads the scaffold it needs and
 produces that shape (spec §14). Every template is **PM-agnostic**: it names
 stages and the generic `WorkItem` model, never a tracker API or a
-tracker-specific state name. The `linear-adapter` skill projects records onto the
+tracker-specific state name. The tracker adapter skill projects records onto the
 configured tracker.
 
 ## `records/` — tracker work-item bodies, by type

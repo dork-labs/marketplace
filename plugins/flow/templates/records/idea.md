@@ -2,7 +2,7 @@
   /flow record template — TYPE: idea
   The body the CAPTURE / TRIAGE stages write into a tracker work item of
   `type: idea`. PM-agnostic: it names stages and the generic WorkItem model,
-  never a tracker API or a tracker-specific state name — the linear-adapter
+  never a tracker API or a tracker-specific state name — the tracker adapter
   projects this onto the configured tracker. Generalizes the legacy
   Linear-loop idea/intake templates (retired in spec #257).
 

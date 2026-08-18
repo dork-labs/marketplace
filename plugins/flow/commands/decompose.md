@@ -12,5 +12,5 @@ Decompose the specification at: $ARGUMENTS
 Read `${CLAUDE_PLUGIN_ROOT}/skills/decomposing-work/SKILL.md` and follow its process exactly.
 
 All tracker I/O (the plan-checklist mirror, the `stage/decompose` transition,
-breadcrumbs) routes through the `linear-adapter` skill — this command never
+breadcrumbs) routes through the tracker adapter skill — this command never
 touches a tracker string directly.

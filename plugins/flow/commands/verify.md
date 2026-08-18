@@ -13,5 +13,5 @@ Read `${CLAUDE_PLUGIN_ROOT}/skills/verifying-work/SKILL.md` and follow its proce
 
 VERIFY ends by parking at the human-review gate (REVIEW) — it never declares the
 work done itself. All tracker I/O (attaching evidence, assigning the reviewer)
-routes through the `linear-adapter` skill — this command never touches a tracker
+routes through the tracker adapter skill — this command never touches a tracker
 string directly.

@@ -4,9 +4,9 @@
 > identifiable installable unit: manual stages you drive from the terminal, and
 > an autonomous loop seated on DorkOS Pulse.
 
-This README is **the manual**. See [`SPEC.md`](./SPEC.md) for the contract (the
+This README is **the manual**. See [`SPEC.md`](./docs/SPEC.md) for the contract (the
 stage model, the `PMClient` promotion surface, the config schema, the `FlowRun`
-record, and the typed engine), [`CHARTER.md`](./CHARTER.md) for the 15 goals the
+record, and the typed engine), [`CHARTER.md`](./docs/CHARTER.md) for the 15 goals the
 system is audited against, and the published [guide series](../../docs/guides/flow/)
 on dorkos.ai for the user-facing reference. These three docs and the guides ship
 **with** the package (charter G15); the manifest enumerates them as `docs` members.
@@ -17,6 +17,26 @@ on dorkos.ai for the user-facing reference. These three docs and the guides ship
 > without the server. The autonomous Pulse-seated loop (`${CLAUDE_PLUGIN_ROOT}/skills/flow-drain/`)
 > requires the DorkOS server running to host the chokidar watcher + croner.
 
+## Installing
+
+Install the plugin from the marketplace, then run **`/flow:init`** — it picks your
+tracker, generates and conformance-gates the adapter for it, and scaffolds the
+config triad.
+
+The engine oracles under `scripts/` run on `node --experimental-strip-types` and
+need **one** npm package, `zod`. `/flow:init` checks for it and offers to install
+it; to do it yourself, from this directory:
+
+```bash
+npm install --omit=dev
+```
+
+`--omit=dev` is worth stating explicitly: a shell carrying `NODE_ENV=production`
+installs nothing from a bare `npm install`, which leaves the engine unable to run
+its own oracles. Contributors working on the plugin want `--include=dev` instead,
+which adds the Vitest engine-oracle suite, tsc, Prettier, and the
+`config.schema.json` generator.
+
 ## Stages
 
 One canonical spine — the unit of "where work is." Spec status, tracker state,
@@ -26,7 +46,7 @@ authored independently.
 ```
  manual ─▶  CAPTURE → TRIAGE → IDEATE → SPECIFY → DECOMPOSE → EXECUTE →
  PM-driven ─▶        VERIFY → ⟦HUMAN REVIEW⟧ → DONE → (MONITOR → SIGNAL)
-                     ▲ adapter (PMClient): Linear today, swappable
+                     ▲ adapter (PMClient): one per tracker, swappable
 ```
 
 - **CAPTURE** — quick, low-commitment intake of a raw thought as an `idea`. Does
@@ -83,7 +103,7 @@ asks rarely, as an emergent property of one rule.
 
 Each `/flow:<stage>` command is a **thin trigger** (≤ ~40 LOC) over the stage
 skill. A PM transition into a stage and the slash command are two **triggers** for
-the same skill. The mapping is generated from [`config.json`](./config.json)
+the same skill. The mapping is generated from [`config.json`](./config/config.example.json)
 `stages`:
 
 | Stage     | Command           | Skill               | Stage label       | State category    |
@@ -150,13 +170,19 @@ routes each failure through the calibration ladder (mechanical conflict → reso
 
 ## Adapter interface
 
-The `linear-adapter` skill is the v1 **`PMClient`**: it owns **every** tracker
+The **tracker adapter skill** is the v1 **`PMClient`**: it owns **every** tracker
 call over a config-driven transport (`connection.transport`: an account-pinned
-Composio CLI or the in-session Linear MCP) and fulfils the
-capability verbs as a **documented prose contract**. Generic stage skills call it
-by naming a verb (e.g. _"via the linear-adapter, transition the item …"_) and
-never touch a tracker string — a grep guard enforces zero `mcp__linear__*` /
-Composio strings outside the adapter.
+CLI or an in-session MCP server) and fulfils the capability verbs as a
+**documented prose contract**. Generic stage skills and commands call it by naming
+a verb (e.g. _"via the adapter, transition the item …"_) and never touch a tracker
+string — a grep guard enforces zero tracker API strings outside the adapter.
+
+Which adapter is a **config value, not a code path**. `tracker` in `config.json`
+is an adapter slug, and it names the skill directory the engine reads:
+`skills/<tracker>-adapter/SKILL.md`. This repo ships **`linear-adapter`** as the
+reference adapter, and `linear` is the default; `/flow:init` generates the adapter
+for any other tracker you pick and gates it on the same conformance harness, so
+adopting Jira or GitHub Issues is a setup run, not a fork.
 
 The verbs: `getCurrentUser`, `getProjects`, `resolveProject`, `getProject`,
 `getProjectWork`, `getEligibleWork`, `getInbox`, `getRelations`, `claim`,
@@ -165,12 +191,13 @@ The verbs: `getCurrentUser`, `getProjects`, `resolveProject`, `getProject`,
 (this adapter supports it; another tracker's adapter may not, and callers
 degrade rather than fail when it is absent). The adapter normalizes
 every tracker into one `WorkItem` shape so the dispatch policy and stage skills
-never see a tracker-specific field. Full verb contract: the adapter's
-[`SKILL.md`](./skills/linear-adapter/SKILL.md); the typed `interface PMClient`
-the P5 server build promotes it into is in [`SPEC.md`](./SPEC.md).
+never see a tracker-specific field. Full verb contract: the reference adapter's
+[`SKILL.md`](./skills/linear-adapter/SKILL.md) and the tracker-neutral
+[`adapters/SPEC.md`](./adapters/SPEC.md); the typed `interface PMClient`
+the P5 server build promotes it into is in [`SPEC.md`](./docs/SPEC.md).
 
 The adapter also owns the **display convention**: every work item shown to a human
-is rendered as `DOR-157 - Title` (identifier first, the identifier linked where the
+is rendered as `PROJ-157 - Title` (identifier first, the identifier linked where the
 surface supports it), never a bare key.
 
 ## Autonomous mode & the server dependency
@@ -201,12 +228,18 @@ agent session per run — so there is no scheduler to build.
 
 ## Configuration
 
-Defaults live in [`config.json`](./config.json), validated against the
-Zod-generated [`config.schema.json`](./config.schema.json) (authored as the
+Defaults live in [`config.json`](./config/config.example.json), validated against the
+Zod-generated [`config.schema.json`](./config/config.schema.json) (authored as the
 `@dorkos/flow` `FlowConfigSchema`, bridged via `z.toJSONSchema`). The resolved
 defaults encode the key decisions: `planApproval: false`, `subIssueThreshold: "xl"`,
-`perIssue: "fresh-session"`, `seat: "pulse"`. See [`SPEC.md`](./SPEC.md) →
+`perIssue: "fresh-session"`, `seat: "pulse"`. See [`SPEC.md`](./docs/SPEC.md) →
 _Config schema reference_ for the full contract.
+
+`tracker` is an **adapter slug**, not a fixed list: it names the skill directory
+the engine reads (`skills/<tracker>-adapter/`), so it accepts any lowercase slug
+(`^[a-z][a-z0-9-]*$`) `/flow:init` has generated a conforming adapter for. It
+defaults to `linear`, the reference adapter shipped here. Full detail:
+[`config/CONFIG.md`](./config/CONFIG.md).
 
 A per-repo `WORKFLOW.md` override at the repo root is part of the config
 **contract** (Decision #15), but **v1 reads `.agents/flow/config.json` only** —

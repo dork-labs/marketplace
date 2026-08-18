@@ -14,7 +14,7 @@
  * that property permanently). They are tracker-neutral: the two Linear-only
  * checks from that run (nothing left in the Triage state, nothing in the
  * unmappable Duplicate state) are snapshot-time obligations of the ADAPTER,
- * documented in the linear-adapter skill, and never reach this oracle.
+ * documented in the tracker adapter skill, and never reach this oracle.
  *
  * This script is dependency-free by design (no zod, no imports beyond node:fs /
  * node:url) and runs directly under `node --experimental-strip-types`, exactly

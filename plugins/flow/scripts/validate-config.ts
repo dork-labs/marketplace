@@ -95,8 +95,8 @@ function resolveRef(ref: string, root: SchemaNode): SchemaNode | undefined {
 /**
  * Recursively validate `value` against `schema`, appending a `ValidationError`
  * for each violation. Covers exactly the keyword subset `config.schema.json`
- * uses: `$ref`/`$defs`, `anyOf`, `type`, `enum`, `properties`, `required`,
- * `additionalProperties` (false), `items`, `minItems`, and the numeric bounds
+ * uses: `$ref`/`$defs`, `anyOf`, `type`, `enum`, `pattern`, `properties`,
+ * `required`, `additionalProperties` (false), `items`, `minItems`, and the numeric bounds
  * `minimum` / `maximum` / `exclusiveMinimum` (`exclusiveMaximum` handled too for
  * symmetry). `default` is schema metadata and is intentionally ignored.
  */
@@ -167,6 +167,19 @@ function validate(
       errors.push({
         path: pointer(segments),
         message: `value ${JSON.stringify(value)} is not one of ${JSON.stringify(allowed)}`,
+      });
+    }
+  }
+
+  // pattern — a string must match the schema's regex. Load-bearing since `tracker`
+  // became an open adapter slug (F1): `pattern` is the only keyword still holding
+  // that field to a shape, so skipping it here would turn the widened schema into
+  // no validation at all.
+  if (typeof schema.pattern === 'string' && typeof value === 'string') {
+    if (!new RegExp(schema.pattern).test(value)) {
+      errors.push({
+        path: pointer(segments),
+        message: `value ${JSON.stringify(value)} does not match the required pattern /${schema.pattern}/`,
       });
     }
   }
