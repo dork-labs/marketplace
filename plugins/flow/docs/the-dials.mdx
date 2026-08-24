@@ -18,7 +18,7 @@ Almost everything lives in one file, with one exception for the autonomous caden
 | File                                                             | Owns                                                                              | Validated by                                                 |
 | ---------------------------------------------------------------- | --------------------------------------------------------------------------------- | ------------------------------------------------------------ |
 | `.agents/flow/config.json`                                       | The engine contract: autonomy, eligibility, involvement, gates, loops, ingestion. | `.agents/flow/config.schema.json` (`$schema` ref at the top) |
-| `${CLAUDE_PLUGIN_ROOT}/skills/flow-drain/SKILL.md` (frontmatter) | The Pulse cadence: when the autonomous tick fires, and whether it fires at all.   | The Pulse task loader                                        |
+| `${CLAUDE_PLUGIN_ROOT}/skills/flow-drain/SKILL.md` (`schedule:` block)  | The Pulse cadence: when the autonomous tick fires, and whether it fires at all.   | The Pulse task loader                                        |
 
 `config.schema.json` is generated from the Zod `FlowConfigSchema` in `@dorkos/flow` (`config-schema.ts`) via `z.toJSONSchema`. The schema is authoritative: an out-of-enum value or a violated floor fails to parse, so you cannot silently mis-configure the engine. Edit `config.json`; the `$schema` reference gives you completion and validation in any schema-aware editor.
 
@@ -39,21 +39,36 @@ Almost everything lives in one file, with one exception for the autonomous caden
 
 ## Cadence: the Pulse cron
 
-Autonomous mode is seated on DorkOS Pulse via a file-based schedule. The cadence lives in the frontmatter of `${CLAUDE_PLUGIN_ROOT}/skills/flow-drain/SKILL.md`, not in `config.json`:
+Autonomous mode is seated on DorkOS Pulse via a file-based schedule. The cadence lives in the `schedule:` block of `${CLAUDE_PLUGIN_ROOT}/skills/flow-drain/SKILL.md`, not in `config.json`. That block is also what makes the file a scheduled task at all — remove it and the same file is a plain skill:
 
-| Dial          | What it does                                                              | Default                        | When to change                                               |
-| ------------- | ------------------------------------------------------------------------- | ------------------------------ | ------------------------------------------------------------ |
-| `enabled`     | Whether the autonomous tick fires at all.                                 | `false`                        | Set `true` to turn on the loop (it is off until you opt in). |
-| `cron`        | When each tick fires (one tick claims and carries one issue to its gate). | `0 * * * *` (top of each hour) | Tighten for a busier queue; loosen to throttle tracker load. |
-| `timezone`    | The timezone the cron is evaluated in.                                    | `America/Los_Angeles`          | Match your working hours.                                    |
-| `max-runtime` | Hard ceiling on a single tick.                                            | `2h`                           | Raise for large items; lower to fail fast.                   |
-| `permissions` | The tool-permission posture for the unattended session.                   | `acceptEdits`                  | Tighten if you want a more conservative unattended posture.  |
+```yaml
+---
+name: flow-drain
+description: Claim the top-ranked eligible issue and carry it to its review gate.
+schedule:
+  cron: "0 * * * *"
+  timezone: America/Los_Angeles
+  enabled: false
+  max-runtime: 2h
+  permissions: acceptEdits
+---
+```
+
+| Dial                   | What it does                                                              | Default                        | When to change                                               |
+| ---------------------- | ------------------------------------------------------------------------- | ------------------------------ | ------------------------------------------------------------ |
+| `schedule.enabled`     | Whether the autonomous tick fires at all.                                 | `false`                        | Set `true` to turn on the loop (it is off until you opt in). |
+| `schedule.cron`        | When each tick fires (one tick claims and carries one issue to its gate). | `0 * * * *` (top of each hour) | Tighten for a busier queue; loosen to throttle tracker load. |
+| `schedule.timezone`    | The timezone the cron is evaluated in.                                    | `America/Los_Angeles`          | Match your working hours.                                    |
+| `schedule.max-runtime` | Hard ceiling on a single tick.                                            | `2h`                           | Raise for large items; lower to fail fast.                   |
+| `schedule.permissions` | The tool-permission posture for the unattended session.                   | `acceptEdits`                  | Tighten if you want a more conservative unattended posture.  |
 
 <Callout type="warn">
-  The cron ships `enabled: false`. Autonomous mode also depends on a **running
-  DorkOS server** (Pulse hosts the watcher and the croner); manual `/flow` does
-  not. `/flow:pause` flips this `enabled` flag to halt the whole Pulse cron from
-  one place.
+  The cron ships `schedule.enabled: false`, and that flag is your *intent*, not
+  your permission: a schedule DorkOS discovers still waits on the **Schedules**
+  page for you to approve it before it can fire, `true` or not. Autonomous mode
+  also depends on a **running DorkOS server** (Pulse hosts the watcher and the
+  croner); manual `/flow` does not. `/flow:pause` flips this flag to halt the
+  whole Pulse cron from one place.
 </Callout>
 
 ## Autonomy
@@ -263,8 +278,8 @@ The producer is a swappable seam: the inbox reconciler consumes a normalized `Tr
 
 | If you want to...                           | Turn this                                                                                        |
 | ------------------------------------------- | ------------------------------------------------------------------------------------------------ |
-| Turn the autonomous loop on                 | `${CLAUDE_PLUGIN_ROOT}/skills/flow-drain/SKILL.md` frontmatter `enabled: true` (server required) |
-| Make the autonomous tick fire more often    | `flow-drain` frontmatter `cron`                                                                  |
+| Turn the autonomous loop on                 | `${CLAUDE_PLUGIN_ROOT}/skills/flow-drain/SKILL.md` `schedule.enabled: true`, then approve it on the Schedules page (server required) |
+| Make the autonomous tick fire more often    | `flow-drain` `schedule.cron`                                                                     |
 | Run more than one item at a time            | Wait for P5; v1 is `autonomy.concurrency: "sequential"`                                          |
 | Cap how much work is in flight              | `autonomy.wipCap.global` / `wipCap.perProject`                                                   |
 | Get pinged when a question parks            | `involvement.nudge.relay` / `nudge.telegram`                                                     |

@@ -1,6 +1,6 @@
 {
   "name": "flow",
-  "version": "0.5.1",
+  "version": "0.6.0",
   "private": true,
   "type": "module",
   "description": "The /flow plugin. The shipped runtime (scripts/*.ts, run via `node --experimental-strip-types`) needs one package, `zod` — install it with `npm install --omit=dev` in this directory. `--include=dev` additionally installs the contributor toolchain (Vitest engine-oracle tests, tsc, Prettier, and the generator that rebuilds config.schema.json from the Zod source).",

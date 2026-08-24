@@ -1,5 +1,5 @@
 {
   "name": "linear-ops",
-  "version": "1.0.0",
-  "description": "Your Linear issues on the dashboard, tended by an agent on a 15-minute inbox check."
+  "version": "1.2.0",
+  "description": "Your Linear issues on the dashboard. After you approve its schedule, the agent checks your Linear inbox every 15 minutes."
 }

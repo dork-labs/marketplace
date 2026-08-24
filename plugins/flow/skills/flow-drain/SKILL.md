@@ -2,20 +2,22 @@
 name: flow-drain
 display-name: /flow drain ready queue
 description: Claim the top-ranked eligible issue and carry it to its review gate.
-cron: "0 * * * *"
-timezone: America/Los_Angeles
-enabled: false
-max-runtime: 2h
-permissions: acceptEdits
+schedule:
+  cron: "0 * * * *"
+  timezone: America/Los_Angeles
+  enabled: false
+  max-runtime: 2h
+  permissions: acceptEdits
 ---
 
 > **Flow root.** This skill lives at `<flow-root>/skills/flow-drain/SKILL.md`. If you reached it via a symlink (`.claude/skills/flow__*` or `.agents/skills/flow__*`), resolve the real path first (`realpath <path>`): the flow root is two directories above the skill directory. Every `<flow-root>/...` reference below is relative to that root.
 
 This is the schedulable **Pulse tick**: one tick of the `/flow` autonomous loop,
-fired by an external scheduler (the DorkOS server's task-scheduler, OS-cron, or
-CI). It is `enabled: false` by default. Turning on autonomy is the explicit
-opt-in of wiring a scheduler and flipping this flag (ADR-0295,
-bring-your-own-scheduler).
+fired by a scheduler. The `schedule:` block in the frontmatter above is what
+makes this file a scheduled task; DorkOS finds it on its own, and any other
+harness can fire it from OS-cron or CI. It ships `schedule.enabled: false`, and
+installing it arms nothing — under DorkOS a discovered schedule waits for you to
+approve it on the Schedules page before it can ever fire.
 
 Each firing runs exactly **one `/flow continue` tick** and then stops; the
 scheduler provides the repetition. This is NOT `/flow auto` (which loops a single

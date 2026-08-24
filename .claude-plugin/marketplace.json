@@ -151,7 +151,7 @@
     {
       "name": "linear-ops",
       "source": "./plugins/linear-ops",
-      "description": "Your Linear issues on the dashboard, tended by an agent on a 15-minute inbox check.",
+      "description": "Your Linear issues on the dashboard. After you approve its schedule, the agent checks your Linear inbox every 15 minutes.",
       "author": { "name": "Dork Labs" },
       "license": "MIT",
       "category": "project-management",
