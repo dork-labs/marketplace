@@ -1,6 +1,6 @@
 # Linear Ops
 
-Your Linear issues on the dashboard, tended by an agent on a 15-minute inbox check.
+Your Linear issues on the dashboard. After you approve its schedule, the agent checks your Linear inbox every 15 minutes.
 
 Linear Ops is a Shape. A Shape is a saved setup you switch into. When you turn it on, DorkOS rearranges itself for one job: keeping up with your Linear work.
 
@@ -9,11 +9,13 @@ Linear Ops is a Shape. A Shape is a saved setup you switch into. When you turn i
 - A Linear board on your dashboard. It shows your issues, grouped the way the Linear Loop view groups them.
 - A Linear tab in your sidebar, so the board is one click away.
 - An offer to set up a "Linear Keeper" agent. This agent checks your Linear inbox and acts on what it can. You choose whether to add it. Nothing is created without your OK.
-- A check that looks at your Linear inbox every 15 minutes, once the agent is set up.
+- A check that can look at your Linear inbox every 15 minutes. It waits on your Schedules page until you approve it.
 
-## The inbox check waits for the agent
+## The inbox check waits for you
 
-The 15-minute check needs the Linear Keeper agent to run it. If you have not set up that agent yet, DorkOS creates the check but leaves it off. It turns on once the agent exists. That way nothing runs before you say yes.
+Turning on Linear Ops never starts anything by itself. The 15-minute check is created switched off, and it shows up on your Schedules page asking to be approved. Nothing runs until you approve it there.
+
+It also needs the Linear Keeper agent to run it, so set that agent up first — approving a check with no agent behind it does nothing.
 
 ## You will need a Linear API key
 
@@ -31,5 +33,5 @@ Linear Ops does not add new code. It bundles pieces DorkOS already has:
 
 - The built-in Linear issues view (the dashboard board and the sidebar tab).
 - A template for the Linear Keeper agent, built on the `/flow` tending and Linear skills.
-- The every-15-minutes inbox check.
+- The every-15-minutes inbox check, off until you approve it.
 - A request for your Linear API key.

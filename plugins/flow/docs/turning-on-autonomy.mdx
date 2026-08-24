@@ -142,13 +142,22 @@ This is real today, but it ships **disabled by default** and depends on a runnin
     fire the schedule. No server means no background ticks.
   </Step>
   <Step>
-    **Register the project's DorkOS agent.** A global `~/.dork/tasks/` task is
-    watched unconditionally; the project agent is what the tick operates as.
+    **Register the project's DorkOS agent.** DorkOS watches that project's
+    skills root, which is where it finds the tick; the project agent is what the
+    tick operates as.
   </Step>
   <Step>
-    **Enable the flow-drain task.** The schedule at `skills/flow-drain/` (in the
-    plugin) ships `enabled: false`. Turn it on. There is no build step and no
-    migration: enabling the file is picked up live.
+    **Enable the flow-drain tick.** The `schedule:` block in
+    `skills/flow-drain/SKILL.md` ships `enabled: false`. Set it to `true`. There
+    is no build step and no migration: the edit is picked up live.
+  </Step>
+  <Step>
+    **Approve it on the Schedules page.** On a DorkOS release with schedule
+    discovery, a schedule found in a file is never armed for you, so
+    `schedule.enabled: true` by itself still fires nothing. Open **Schedules**,
+    find `flow-drain`, and approve it — that approval is yours to give and yours
+    to withdraw. On a build without discovery, wire an external scheduler
+    instead ([Bring your own scheduler](/docs/guides/flow/bring-your-own-scheduler)).
   </Step>
   <Step>
     **Tune cadence and limits.** Set the per-loop intervals in the `loops`
@@ -266,7 +275,7 @@ guidance, is in [The dials](/docs/guides/flow/the-dials).
 | -------------------------------------------------------------------------- | -------------------------------------------- |
 | Put the loop to work right now and watch it, with no setup                 | **A — `/flow auto`**                         |
 | Run a single tick (claim the next item, carry it to its gate, stop)        | **A — bare `/flow` → Continue the queue**    |
-| Make background progress while your terminal is closed, and you run DorkOS | **B — the Pulse seat** (enable `flow-drain`) |
+| Make background progress while your terminal is closed, and you run DorkOS | **B — the Pulse seat** (enable `flow-drain`, then approve it) |
 | Drive the loop on a non-DorkOS repo with no server                         | **C — the watcher** (when it ships)          |
 
 A short way to decide: **attended and server-free → A. Unattended and you run DorkOS → B.

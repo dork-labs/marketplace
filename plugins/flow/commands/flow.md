@@ -283,9 +283,11 @@ The operator always outranks the loop. Three override surfaces, coarse to fine:
 
 - **Halt everything.** `/flow:pause` stops every autonomous mode from one place: it
   sets `active: false` in the `.dork/flow/auto-run.json` drain sentinel AND
-  `enabled: false` in the `${CLAUDE_PLUGIN_ROOT}/skills/flow-drain/SKILL.md` Pulse cron frontmatter, so no
-  mode keeps claiming. `/flow:resume` restores both. Halting and restoring autonomy
-  is always one action, never a hunt across files.
+  `enabled: false` inside the `schedule:` block of the
+  `${CLAUDE_PLUGIN_ROOT}/skills/flow-drain/SKILL.md` frontmatter, so no mode keeps
+  claiming. It is a nested key (`schedule.enabled`); a top-level `enabled:` is stripped
+  on parse and halts nothing. `/flow:resume` restores both. Halting and restoring
+  autonomy is always one action, never a hunt across files.
 - **Disable or reorder one loop.** Per-reconciler control is a `loops` config edit,
   not a command: `loops.<id>.enabled: false` silences a single reconciler (e.g.
   `loops.triage`, `loops.hygiene`) and `loops.<id>.priority` reorders the tick. Edit

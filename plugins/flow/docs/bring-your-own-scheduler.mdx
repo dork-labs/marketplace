@@ -1,130 +1,51 @@
 ---
 title: Bring your own scheduler
-description: Turn on autonomy for an installed /flow - the bundled flow-drain tick is a schedulable skill, off by default, fired by the DorkOS server (the premium host) or by OS-cron / CI, server-free.
+description: A DorkOS release with schedule discovery picks the /flow tick up from a project-scope install and asks you to approve it. This page is for every other harness, and for the wiring until then.
 ---
 
-import { Steps, Step } from 'fumadocs-ui/components/steps';
 import { Callout } from 'fumadocs-ui/components/callout';
 import { Cards, Card } from 'fumadocs-ui/components/card';
-import { Tabs, Tab } from 'fumadocs-ui/components/tabs';
 
 # Bring your own scheduler
 
-Once you have installed `/flow` and your adapter is green, you can let the loop carry work to your
-review gate on its own. Autonomy is designed as **bring-your-own-scheduler**: the plugin ships a
-single schedulable tick, and _something external fires it_. That something is either the DorkOS server
-(the premium host) or a plain OS-cron / CI entry (server-free). The same tick definition serves both;
-the scheduler is swappable.
+`/flow` ships one schedulable tick: the `flow-drain` skill at
+`${CLAUDE_PLUGIN_ROOT}/skills/flow-drain/SKILL.md`. Each fire claims the top-ranked ready item,
+carries it to your review gate, and stops. One tick, one item, a fresh session each time. Something
+outside the tick has to provide the repetition.
 
-<Callout type="info">
-  **This page is the adopter's autonomy guide.** For the full taxonomy of ways to drive the loop
-  inside DorkOS - the attended `/flow auto` terminal drain, the scheduled Pulse seat, and the
-  portable watcher - and for the invariants that hold across all of them (the always-on human-review
-  gate and the non-trimmable calibration floor), read [Turning on the automatic
-  loop](/docs/guides/flow/turning-on-autonomy). This page focuses on the one decision an adopter
-  faces: *what fires the tick.*
-</Callout>
+## On DorkOS: install at project scope, then approve
 
-## The tick is a schedulable skill, off by default
-
-The autonomy tick ships as a `flow-drain` skill carrying `cron` and `enabled: false` frontmatter. Its
-body delegates to the canonical single tick (`runTick`): walk the reconcilers in priority order
-(`recovery → inbox/resume → dispatch`), claim one ready item, carry it to its review gate, and stop.
-One tick equals one item. It is **not** `/flow auto` (which loops via the drain sentinel and the Stop
-hook); the scheduler - not the skill - provides the repetition.
+Any skill whose frontmatter carries a `schedule:` block is a scheduled task. A DorkOS release that
+has schedule discovery reads that straight out of the skills roots it watches, so **installing
+`/flow` at project scope is the whole setup step** — no file to copy, no scheduler to stand up. The
+tick then appears on your **Schedules** page waiting to be approved.
 
 <Callout type="warn">
-  **The plugin defines the tick but cannot fire itself.** Claude Code has no native scheduler
-  (plugin "monitors" are session-scoped event streams, not crons), so a portable plugin cannot
-  self-schedule. That is by design: the tick ships `enabled: false`, and turning on autonomy is the
-  explicit act of wiring a scheduler to it. Nothing runs in the background until you do.
+  **Check your DorkOS version before relying on this.** Schedule discovery is rolling out; on a build
+  without it, the tick in this plugin is an ordinary skill and nothing will fire it. Until your DorkOS
+  has it, use the OS-cron / CI path below — it works on any version, and on no DorkOS at all.
 </Callout>
-
-## Two ways to fire it
-
-<Tabs items={['DorkOS server (premium host)', 'OS-cron / CI (server-free)']}>
-
-<Tab value="DorkOS server (premium host)">
-
-The DorkOS server is the **premium host** for the tick. It is not a prerequisite for autonomy - it is
-the richest place to run it. Under the server you get a real UI, a token-efficient idle pre-check, and
-the production-grade safety guards.
-
-<Steps>
-  <Step>
-    **Run the DorkOS server and register your project's agent.** The server hosts the watcher and
-    the file-based scheduler that fires `flow-drain`.
-  </Step>
-  <Step>
-    **Enable the tick.** It ships `enabled: false`; turn it on. There is no build step and no
-    migration - enabling the file is picked up live.
-  </Step>
-  <Step>
-    **Tune cadence and limits** in the `loops` and `autonomy` config blocks. See [The
-    dials](/docs/guides/flow/the-dials).
-  </Step>
-  <Step>
-    **Watch and steer** with `/flow:status`, and halt or lift every mode at once with `/flow pause`
-    / `/flow resume`.
-  </Step>
-</Steps>
-
-**What the premium host adds**
-
-- **An idle pre-check.** Before spawning an agent, the server runs the deterministic dispatch oracle
-  (`node scripts/dispatch.mjs`) on the queue. An empty or starved queue costs no agent boot - only a
-  ready item spends tokens.
-- **A UI surface.** `/flow:status` renders every in-flight item, every parked question, and the
-  rationale behind each decision; pause and resume are one control.
-- **Production-grade guards.** A production gate and a leader lock keep a scheduled tick from firing in
-  the wrong environment or from running twice concurrently.
-
-</Tab>
-
-<Tab value="OS-cron / CI (server-free)">
-
-You do not need the DorkOS server to run autonomously. Any external scheduler that can invoke the tick
-works: a `cron` entry, a CI loop, or a small daemon. This is the portable path for a non-DorkOS repo.
-
-<Steps>
-  <Step>
-    **Pick a scheduler you operate** - an OS `cron` line, a scheduled CI job, or a tiny poller. It
-    is the only thing providing repetition.
-  </Step>
-  <Step>
-    **Fire the tick each interval.** Each fire runs one `flow-drain` tick that claims the top-ranked
-    ready item, carries it to its review gate, and exits. One tick, one item, a fresh session each
-    time.
-  </Step>
-  <Step>
-    **Park headless.** With no human at a terminal, a stop-and-ask parks on the tracker and nudges
-    via the `comment-and-nudge` channel; your reply is detected on the next tick's inbox poll and
-    the run resumes where it left off.
-  </Step>
-</Steps>
 
 <Callout type="info">
-  Server-free autonomy is opt-in and self-operated: you own the scheduler, so you also own its
-  cadence and its uptime. Cloud 24/7 progress with your laptop closed needs a hosted runner (a CI
-  loop or a deployed DorkOS server) - that is a property of where the scheduler runs, not of
-  `/flow`.
+  **Installing never starts anything.** A discovered schedule arrives switched off and waits for you
+  to approve it. That holds no matter what the file says: `flow-drain` ships `schedule.enabled:
+  false`, and even a `true` there would still park for your approval. See [Turning on the automatic
+  loop](/docs/guides/flow/turning-on-autonomy) for the full picture, and [The
+  dials](/docs/guides/flow/the-dials) for the cadence.
 </Callout>
 
-</Tab>
+## On any other harness: wire a scheduler
 
-</Tabs>
+Claude Code has no scheduler of its own (plugin "monitors" are session-scoped event streams, not
+crons), so the tick cannot fire itself. This is also the path to use on a DorkOS build that does not
+have schedule discovery yet. Point any external scheduler at it — an OS
+`cron` line, a scheduled CI job, or a small poller — and run one `/flow continue` tick per fire. You
+own that scheduler, so you also own its cadence and its uptime; running with your laptop closed needs
+a scheduler that lives somewhere else, like CI.
 
-## Which should I wire?
-
-| If you…                                                      | Fire the tick from…                  |
-| ------------------------------------------------------------ | ------------------------------------ |
-| Run DorkOS and want a UI, idle pre-checks, and safety guards | **The DorkOS server** (enable it)    |
-| Want autonomy on a non-DorkOS repo with no server            | **OS-cron / CI**                     |
-| Want to watch the queue drain live, attended                 | Neither - use `/flow auto` (no tick) |
-
-Both scheduled paths carry work to the _same_ review gate and stop there; the only difference is who
-keeps the loop ticking and how much surface wraps it. The bundled tick, the `enabled: false` default,
-and the explicit scheduler wiring keep autonomy opt-in by construction.
+With nobody at a terminal, a tick that has to stop and ask parks its question on the tracker and
+nudges through the `comment-and-nudge` channel. Your reply is picked up by the next tick's inbox
+poll, and the run resumes where it left off.
 
 ## Next steps
 

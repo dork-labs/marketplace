@@ -2,20 +2,25 @@
 name: flow-drain
 display-name: /flow drain ready queue
 description: Claim the top-ranked eligible issue and carry it to its review gate.
-cron: "0 * * * *"
-timezone: America/Los_Angeles
-enabled: false
-max-runtime: 2h
-permissions: acceptEdits
+schedule:
+  cron: "0 * * * *"
+  timezone: America/Los_Angeles
+  enabled: false
+  max-runtime: 2h
+  permissions: acceptEdits
 ---
 
 > **Flow root.** This skill lives at `<flow-root>/skills/flow-drain/SKILL.md`. If you reached it via a symlink (`.claude/skills/flow__*` or `.agents/skills/flow__*`), resolve the real path first (`realpath <path>`): the flow root is two directories above the skill directory. Every `<flow-root>/...` reference below is relative to that root.
 
 This is the schedulable **Pulse tick**: one tick of the `/flow` autonomous loop,
-fired by an external scheduler (the DorkOS server's task-scheduler, OS-cron, or
-CI). It is `enabled: false` by default. Turning on autonomy is the explicit
-opt-in of wiring a scheduler and flipping this flag (ADR-0295,
-bring-your-own-scheduler).
+fired by a scheduler. The `schedule:` block in the frontmatter above is what
+makes this file a scheduled task.
+
+Installed at project scope, a DorkOS release that has schedule discovery picks
+this tick up and asks you to approve it on the Schedules page; nothing fires
+until you do. On any other harness, wire your own scheduler to it (OS-cron, CI).
+It ships `schedule.enabled: false` either way — installing a package never arms
+its own cron.
 
 Each firing runs exactly **one `/flow continue` tick** and then stops; the
 scheduler provides the repetition. This is NOT `/flow auto` (which loops a single
@@ -40,10 +45,6 @@ through **the adapter**; this tick never names a tracker directly.
 
 **Operator override.** At each stage boundary, via the adapter, check for the
 `agent/paused` marker: if present, advance no further, release the claim
-(`agent/claimed`) cleanly, and stop. `/flow:pause` sets this task's
-`enabled: false` to halt the cron; `/flow:resume` restores it.
-
-> The final discovery home for this tick (a skill that carries `cron` + `enabled`
-> frontmatter, surfaced wherever skills live) lands with the tasks-as-skills
-> capability model (DOR-150). The interim `<flow-root>/skills/flow-drain/` home keeps
-> autonomy available now.
+(`agent/claimed`) cleanly, and stop. `/flow:pause` sets this schedule's
+`schedule.enabled` to `false` to halt the cron; `/flow:resume` sets it back to
+`true`. It is a nested key inside the `schedule:` block, not a top-level one.

@@ -39,9 +39,11 @@ The flow plugin is one package that contributes a coherent set of layers:
   dedup) ship as dependency-free runnable TypeScript under `scripts/` (executed directly via `node`,
   no build step). The stage skills _call_ them rather than re-deriving the ladders in prose, so the
   logic runs identically every time at ~0 tokens.
-- **The schedulable tick** - a `flow-drain` skill that carries one item to its review gate, shipped
-  `enabled: false`. You wire a scheduler to it when you want autonomy (see
-  [Bring your own scheduler](/docs/guides/flow/bring-your-own-scheduler)).
+- **The schedulable tick** - a `flow-drain` skill that carries one item to its review gate. Its
+  `schedule:` block is what makes it a scheduled task, and it ships `enabled: false`. A DorkOS
+  release with schedule discovery picks it up and asks you to approve it; anywhere else you wire a
+  scheduler to it yourself (see [Bring your own
+  scheduler](/docs/guides/flow/bring-your-own-scheduler)).
 - **`/flow:init`** - the first-run setup that turns a fresh install into a configured, tracker-wired
   workflow.
 
@@ -144,7 +146,7 @@ The plugin is inert until it knows your tracker and identity. You do not configu
 | `config/config.local.json`            | Tracker tokens and account binding.                                         | No (gitignored)            |
 | `scripts/*.ts`                        | The shipped deterministic oracles + `validate-adapter.ts` (run via `node`). | Yes (from the plugin)      |
 | The generated adapter                 | Your tracker-aware code, conforming to the contract; you own it.            | Yes                        |
-| `flow-drain` (schedulable tick skill) | The autonomy tick, `enabled: false` until you wire a scheduler to it.       | Yes                        |
+| `flow-drain` (schedulable tick skill) | The autonomy tick. Ships `schedule.enabled: false`; approve it to arm.      | Yes (from the plugin)      |
 
 ## Next steps
 

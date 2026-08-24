@@ -2,19 +2,24 @@
 name: flow-groom
 display-name: /flow groom health check
 description: Scheduled read-only backlog health check — run the groom oracles and report, never write.
-cron: '0 9 1 * *'
-timezone: America/Los_Angeles
-enabled: false
-max-runtime: 30m
-permissions: default
+schedule:
+  cron: '0 9 1 * *'
+  timezone: America/Los_Angeles
+  enabled: false
+  max-runtime: 30m
+  permissions: default
 ---
 
 > **Flow root.** This skill lives at `<flow-root>/skills/flow-groom/SKILL.md`. If you reached it via a symlink (`.claude/skills/flow__*` or `.agents/skills/flow__*`), resolve the real path first (`realpath <path>`): the flow root is two directories above the skill directory. Every `<flow-root>/...` reference below is relative to that root.
 
 This is the schedulable **groom health check**: a monthly, read-only
-`/flow:groom check` fired by an external scheduler (the DorkOS server's
-task-scheduler, OS-cron, or CI). It is `enabled: false` by default, the same
-explicit opt-in as `flow-drain` (ADR-0295, bring-your-own-scheduler).
+`/flow:groom check`. The `schedule:` block in the frontmatter above is what makes
+this file a scheduled task.
+
+Installed at project scope, a DorkOS release that has schedule discovery picks it
+up and asks you to approve it on the Schedules page; on any other harness you
+wire your own scheduler (OS-cron, CI). It ships `schedule.enabled: false`, the
+same explicit opt-in as `flow-drain`.
 
 Each firing runs the CHECK mode of the grooming-backlog skill
 (`<flow-root>/skills/grooming-backlog/SKILL.md`) and stops:
@@ -32,5 +37,6 @@ restructures projects, which sits behind a human gate by design; a scheduler
 must not walk through it. All tracker reads go through **the adapter**; this
 tick never names a tracker directly.
 
-**Operator override.** `/flow:pause` sets this task's `enabled: false` along
-with the other autonomous surfaces; `/flow:resume` restores it.
+**Operator override.** `/flow:pause` sets this schedule's `schedule.enabled` to
+`false` along with the other autonomous surfaces; `/flow:resume` sets it back to
+`true`. It is a nested key inside the `schedule:` block, not a top-level one.
