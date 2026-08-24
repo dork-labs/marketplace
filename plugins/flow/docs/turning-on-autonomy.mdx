@@ -152,10 +152,12 @@ This is real today, but it ships **disabled by default** and depends on a runnin
     is no build step and no migration: the edit is picked up live.
   </Step>
   <Step>
-    **Approve it on the Schedules page.** DorkOS never arms a schedule it found
-    in a file, so `enabled: true` on its own still does not fire anything. Open
-    **Schedules**, find `flow-drain`, and approve it. That approval is yours to
-    give and yours to withdraw.
+    **Approve it on the Schedules page.** On a DorkOS release with schedule
+    discovery, a schedule found in a file is never armed for you, so
+    `schedule.enabled: true` by itself still fires nothing. Open **Schedules**,
+    find `flow-drain`, and approve it — that approval is yours to give and yours
+    to withdraw. On a build without discovery, wire an external scheduler
+    instead ([Bring your own scheduler](/docs/guides/flow/bring-your-own-scheduler)).
   </Step>
   <Step>
     **Tune cadence and limits.** Set the per-loop intervals in the `loops`

@@ -11,9 +11,23 @@ Undo a `/flow:pause`: $ARGUMENTS
 
 Resume is the inverse of pause: it restores the autonomous surfaces pause halted:
 
-1. **The Pulse cron.** Set `enabled: true` in the `${CLAUDE_PLUGIN_ROOT}/skills/flow-drain/SKILL.md`
-   frontmatter so the Pulse seat resumes claiming work on its schedule. (Pulse is
-   the one mode that needs a running DorkOS server; the terminal drain does not.)
+1. **The Pulse cron.** In `${CLAUDE_PLUGIN_ROOT}/skills/flow-drain/SKILL.md`, set `enabled`
+   to `true` **inside the frontmatter's `schedule:` block**, so the Pulse seat resumes
+   claiming work on its schedule:
+
+   ```yaml
+   schedule:
+     cron: "0 * * * *"
+     enabled: true # <- this line, nested under `schedule:`
+   ```
+
+   `enabled` is a nested key. A top-level `enabled: true` written beside `name:` is
+   stripped when the file is parsed, so autonomy would never actually come back.
+
+   (Pulse is the one mode that needs a running DorkOS server; the terminal drain does
+   not. Under a DorkOS build with schedule discovery, the restored tick also has to be
+   approved on the Schedules page before it fires again.)
+
 2. **The terminal drain.** If a paused `.dork/flow/auto-run.json` sentinel is still
    present (`active: false`), restart the drain with `/flow auto`, which rewrites the
    sentinel to `active: true` and continues from the ready queue. If no sentinel

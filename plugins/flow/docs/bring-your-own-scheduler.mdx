@@ -1,6 +1,6 @@
 ---
 title: Bring your own scheduler
-description: Under DorkOS there is nothing to wire — it finds the /flow tick on its own and asks you to approve it. This page is for every other harness.
+description: A DorkOS release with schedule discovery picks the /flow tick up from a project-scope install and asks you to approve it. This page is for every other harness, and for the wiring until then.
 ---
 
 import { Callout } from 'fumadocs-ui/components/callout';
@@ -13,24 +13,32 @@ import { Cards, Card } from 'fumadocs-ui/components/card';
 carries it to your review gate, and stops. One tick, one item, a fresh session each time. Something
 outside the tick has to provide the repetition.
 
-## On DorkOS: nothing to wire
+## On DorkOS: install at project scope, then approve
 
-DorkOS finds the tick by itself. Any skill whose frontmatter carries a `schedule:` block is a
-scheduled task, and DorkOS reads that from your skills roots — so installing `/flow` at project scope
-is the whole setup step. There is no file to copy and no scheduler to stand up.
+Any skill whose frontmatter carries a `schedule:` block is a scheduled task. A DorkOS release that
+has schedule discovery reads that straight out of the skills roots it watches, so **installing
+`/flow` at project scope is the whole setup step** — no file to copy, no scheduler to stand up. The
+tick then appears on your **Schedules** page waiting to be approved.
+
+<Callout type="warn">
+  **Check your DorkOS version before relying on this.** Schedule discovery is rolling out; on a build
+  without it, the tick in this plugin is an ordinary skill and nothing will fire it. Until your DorkOS
+  has it, use the OS-cron / CI path below — it works on any version, and on no DorkOS at all.
+</Callout>
 
 <Callout type="info">
-  **Installing never starts anything.** A schedule DorkOS discovers arrives switched off and waits on
-  the **Schedules** page for you to approve it. That holds no matter what the file says: `flow-drain`
-  ships `schedule.enabled: false`, and even a `true` there would still park for your approval. See
-  [Turning on the automatic loop](/docs/guides/flow/turning-on-autonomy) for the full picture, and
-  [The dials](/docs/guides/flow/the-dials) for the cadence.
+  **Installing never starts anything.** A discovered schedule arrives switched off and waits for you
+  to approve it. That holds no matter what the file says: `flow-drain` ships `schedule.enabled:
+  false`, and even a `true` there would still park for your approval. See [Turning on the automatic
+  loop](/docs/guides/flow/turning-on-autonomy) for the full picture, and [The
+  dials](/docs/guides/flow/the-dials) for the cadence.
 </Callout>
 
 ## On any other harness: wire a scheduler
 
 Claude Code has no scheduler of its own (plugin "monitors" are session-scoped event streams, not
-crons), so outside DorkOS the tick cannot fire itself. Point any external scheduler at it — an OS
+crons), so the tick cannot fire itself. This is also the path to use on a DorkOS build that does not
+have schedule discovery yet. Point any external scheduler at it — an OS
 `cron` line, a scheduled CI job, or a small poller — and run one `/flow continue` tick per fire. You
 own that scheduler, so you also own its cadence and its uptime; running with your laptop closed needs
 a scheduler that lives somewhere else, like CI.
@@ -50,5 +58,8 @@ poll, and the run resumes where it left off.
   </Card>
   <Card title="Install /flow in your project" href="/docs/guides/flow/installing-in-your-project">
     Where the schedulable tick comes from and how the plugin is laid out after install.
+  </Card>
+  <Card title="Build your tracker adapter" href="/docs/guides/flow/building-your-adapter">
+    The one tracker-aware unit the scheduled loop reads and writes through.
   </Card>
 </Cards>

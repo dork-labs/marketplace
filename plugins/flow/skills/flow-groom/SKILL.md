@@ -14,9 +14,12 @@ schedule:
 
 This is the schedulable **groom health check**: a monthly, read-only
 `/flow:groom check`. The `schedule:` block in the frontmatter above is what makes
-this file a scheduled task; DorkOS finds it on its own, and any other harness can
-fire it from OS-cron or CI. It ships `schedule.enabled: false` and waits for your
-approval on the Schedules page, the same explicit opt-in as `flow-drain`.
+this file a scheduled task.
+
+Installed at project scope, a DorkOS release that has schedule discovery picks it
+up and asks you to approve it on the Schedules page; on any other harness you
+wire your own scheduler (OS-cron, CI). It ships `schedule.enabled: false`, the
+same explicit opt-in as `flow-drain`.
 
 Each firing runs the CHECK mode of the grooming-backlog skill
 (`<flow-root>/skills/grooming-backlog/SKILL.md`) and stops:
@@ -34,5 +37,6 @@ restructures projects, which sits behind a human gate by design; a scheduler
 must not walk through it. All tracker reads go through **the adapter**; this
 tick never names a tracker directly.
 
-**Operator override.** `/flow:pause` sets this task's `enabled: false` along
-with the other autonomous surfaces; `/flow:resume` restores it.
+**Operator override.** `/flow:pause` sets this schedule's `schedule.enabled` to
+`false` along with the other autonomous surfaces; `/flow:resume` sets it back to
+`true`. It is a nested key inside the `schedule:` block, not a top-level one.

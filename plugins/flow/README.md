@@ -210,14 +210,16 @@ agent session per run — so there is no scheduler to build.
 - **One tick = one issue.** Each croner fire is a fresh run-session
   (`sessionId = run.id`) that claims and works exactly one issue to its gate, then
   ends — preserving fresh-session-per-issue.
-- **Activation** is install at project scope, then approve. DorkOS discovers the
-  tick natively: the `schedule:` block in `skills/flow-drain/SKILL.md` is what
-  makes the file a scheduled task, and DorkOS reads it straight out of the skills
-  roots it already watches. Nothing is copied anywhere by hand. The tick then
-  waits on the **Schedules** page until you approve it — installing a package can
-  never arm its own cron. Running it still needs the DorkOS server (it hosts the
-  watcher + croner) and the project's DorkOS agent registered. No build step, no
-  migration; edits to the file are picked up live.
+- **Activation** is install at project scope, then approve. The `schedule:` block
+  in `skills/flow-drain/SKILL.md` is what makes the file a scheduled task; a
+  DorkOS release that has schedule discovery reads it straight out of the skills
+  roots it watches, with nothing copied by hand, and the tick waits on the
+  **Schedules** page until you approve it — installing a package can never arm its
+  own cron. On a DorkOS build without schedule discovery, or on any other harness,
+  wire an external scheduler instead (see `docs/bring-your-own-scheduler.mdx`).
+  Running it still needs the DorkOS server (it hosts the watcher + croner) and the
+  project's DorkOS agent registered. No build step, no migration; edits to the file
+  are picked up live.
 - **Crash/stall recovery** is driven by the durable `FlowRun` record + the
   next-tick recovery ladder (spec §12): a `needs-input` item is never reclaimed;
   an orphaned `agent/claimed` item is adopted + resumed (re-attach the worktree at

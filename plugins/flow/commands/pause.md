@@ -15,8 +15,18 @@ so nothing keeps running behind your back:
 1. **The drain sentinel.** If `.dork/flow/auto-run.json` exists (a live `/flow auto`
    terminal drain), set its `active` to `false`. The `flow-loop.mjs` Stop hook then
    allows the session to stop at the next gate instead of looping to the next item.
-2. **The Pulse cron.** Set `enabled: false` in the `${CLAUDE_PLUGIN_ROOT}/skills/flow-drain/SKILL.md`
-   frontmatter, so the Pulse seat stops claiming work on its schedule.
+2. **The Pulse cron.** In `${CLAUDE_PLUGIN_ROOT}/skills/flow-drain/SKILL.md`, set `enabled`
+   to `false` **inside the frontmatter's `schedule:` block**, so the Pulse seat stops
+   claiming work on its schedule:
+
+   ```yaml
+   schedule:
+     cron: "0 * * * *"
+     enabled: false # <- this line, nested under `schedule:`
+   ```
+
+   `enabled` is a nested key. A top-level `enabled: false` written beside `name:` is
+   stripped when the file is parsed and halts nothing — the cron keeps firing.
 
 Report what changed (sentinel paused, cron disabled) and what was in flight. To see
 the in-flight items before or after pausing, use `/flow:status`.
