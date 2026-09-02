@@ -2,9 +2,9 @@
 
 Repo-wide CI gate. It checks two things about everything in `plugins/`:
 
-1. **Every `SKILL.md` still says what its author meant.** The frontmatter has to
-   parse, and a `schedule:` block has to parse _strictly_ — including its setting
-   names, not just their values.
+1. **Every `SKILL.md` still says what its author meant.** Not just "does it
+   parse" — every line the author wrote has to survive the parse still meaning
+   what they wrote, setting names included.
 2. **Every manifest still validates.** `.claude-plugin/marketplace.json` (against
    the DorkOS schema _and_ the Claude Code standard one), `.claude-plugin/dorkos.json`,
    and any plugin's `.dork/manifest.json`.
@@ -32,18 +32,38 @@ and nothing anywhere goes red. That is DOR-1519, found while reviewing PR #22.
 So this gate parses the same blocks the same way DorkOS does, and then refuses
 what DorkOS would have shrugged off.
 
-Three failure modes, three answers:
+**A passing `safeParse` is not the bar, and this is the part worth understanding
+before changing anything here.** DorkOS frontmatter is built to absorb bad input:
+unknown keys are dropped, and most optional fields end in `.catch(...)`, which
+means zod never reports them as invalid — it swallows the value, substitutes a
+fallback, and returns success. Five of the twelve settings in a `schedule:` block
+work that way (`enabled`, `sticky`, `runtime`, `model`, `effort`), and so does
+most of the top-level frontmatter. `enabled` is the one that bites: an unreadable
+value falls back to **true**, so `enabled: maybe` arms a schedule its author was
+trying to switch off.
 
-| What breaks                                  | What catches it                                        |
-| -------------------------------------------- | ------------------------------------------------------ |
-| A bad **value** (`permissions: acceptEditz`) | Strict `ScheduleBlockSchema` parse                     |
-| A bad **key** (`permissionz: acceptEdits`)   | Comparison against the schema's own key set            |
-| The **whole block** gone, or `schedul:`      | The list in `src/scheduled-skills.ts`                  |
+Four failure modes, four answers:
 
-The third one needs the list because there is nothing left in the file to
-complain about. The list is kept honest in both directions: a skill on it that
-stops being schedulable is an error, and a skill with a schedule block that is
-_not_ on it is also an error.
+| What breaks                                      | What catches it                                          |
+| ------------------------------------------------ | -------------------------------------------------------- |
+| A rejected **value** (`permissions: acceptEditz`) | `ScheduleBlockSchema.safeParse` fails                    |
+| A **swallowed** value (`enabled: maybe`)          | Comparing what was written against what the schema kept  |
+| A bad **key** (`permissionz:`, `modle:`)          | Comparison against the schema's own key set              |
+| The **whole block** gone, or `schedul:`           | The list in `src/scheduled-skills.ts`                    |
+
+The second answer is generic on purpose: it compares the raw mapping to the
+parsed one key by key, so it needs no list of which fields degrade and cannot
+fall behind a schema change. Values are compared through upstream's own
+`coerceYamlBoolean`, so the YAML 1.1 words DorkOS deliberately understands
+(`enabled: no`, `sticky: on`, `enabled: 0`) stay green — this gate is a stricter
+question, never a second opinion about what DorkOS accepts. The one field left
+out is `schedule` itself, the only one carrying a `.transform()`; it gets the
+same comparison one level down, against its own schema.
+
+The fourth needs the list because there is nothing left in the file to complain
+about. The list is kept honest in both directions: a skill on it that stops being
+schedulable is an error, and a skill with a schedule block that is _not_ on it is
+also an error.
 
 ## Where the schemas come from
 

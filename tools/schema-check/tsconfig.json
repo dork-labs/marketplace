@@ -15,6 +15,7 @@
     "paths": {
       "@dorkos/shared/constants": [".upstream/packages/shared/src/constants.ts"],
       "@dorkos/skills/schema": [".upstream/packages/skills/src/schema.ts"],
+      "@dorkos/skills/yaml-boolean": [".upstream/packages/skills/src/yaml-boolean.ts"],
       "@dorkos/skills/schedule-schema": [".upstream/packages/skills/src/schedule-schema.ts"],
       "@dorkos/marketplace/manifest-schema": [
         ".upstream/packages/marketplace/src/manifest-schema.ts"

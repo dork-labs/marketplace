@@ -5,18 +5,28 @@
  * `upstream.json`:
  *
  * - {@link validateSkills} — every `SKILL.md` under `plugins/` parses as skill
- *   frontmatter, every `schedule:` block parses STRICTLY, and every skill in
- *   {@link SCHEDULED_SKILLS} is still schedulable.
+ *   frontmatter, every line the author wrote survives that parse meaning what
+ *   they wrote, and every skill in {@link SCHEDULED_SKILLS} is still schedulable.
  * - {@link validateManifests} — `.claude-plugin/marketplace.json` (against both
  *   the DorkOS schema and the Claude Code standard one), `.claude-plugin/dorkos.json`,
  *   and each plugin's `.dork/manifest.json`.
  *
- * Strictly is the operative word for schedules. DorkOS itself reads a broken
- * block with `readScheduleField`, which never throws: a file whose block will
- * not parse stays a working skill and merely loses its schedule. That is the
- * right answer for a file somebody is editing and the wrong one for a package
- * about to be published, so this gate parses the raw block with
- * `ScheduleBlockSchema` directly and fails on what DorkOS would have shrugged off.
+ * **A passing zod parse is not the bar.** DorkOS frontmatter is built to absorb
+ * bad input rather than reject it: unknown keys are dropped, most optional
+ * fields carry `.catch(...)`, and `readScheduleField` turns an unreadable
+ * `schedule:` block into a complaint the file merely carries. Nothing there
+ * throws, so `safeParse` alone says "fine" to `effort: hihg`, to
+ * `permissionz: acceptEdits`, and — worst of the three — to `enabled: maybe`,
+ * which resolves to `enabled: true` and arms a schedule its author was trying
+ * to switch off.
+ *
+ * All of that is the right trade for a file somebody is editing in their own
+ * vault and the wrong one for a package about to be published. So this gate
+ * asks a stricter question than "did it parse": it compares what the author
+ * WROTE against what the schema KEPT, key by key, and reds on any line that
+ * did not survive with its meaning intact. The comparison reads the schema's
+ * own shape and upstream's own boolean coercion, so it needs no list of fields
+ * here and cannot fall behind a schema change.
  *
  * @module validate
  */
@@ -27,6 +37,7 @@ import matter from 'gray-matter';
 import { z } from 'zod';
 import { SkillFrontmatterSchema } from '@dorkos/skills/schema';
 import { ScheduleBlockSchema, hasSchedule } from '@dorkos/skills/schedule-schema';
+import { coerceYamlBoolean } from '@dorkos/skills/yaml-boolean';
 import { MarketplacePackageManifestSchema } from '@dorkos/marketplace/manifest-schema';
 import { MarketplaceJsonSchema } from '@dorkos/marketplace/marketplace-json-schema';
 import { DorkosSidecarSchema } from '@dorkos/marketplace/dorkos-sidecar-schema';
@@ -60,6 +71,132 @@ const MAX_DEPTH = 6;
  * upstream because it is not a list anybody maintains here.
  */
 const SCHEDULE_KEYS: ReadonlySet<string> = new Set(Object.keys(ScheduleBlockSchema.shape));
+
+/** The top-level frontmatter keys, read off `SkillFrontmatterSchema` the same way. */
+const FRONTMATTER_KEYS: ReadonlySet<string> = new Set(Object.keys(SkillFrontmatterSchema.shape));
+
+/**
+ * The one top-level key left out of the survived-the-parse comparison.
+ *
+ * `schedule` is the only field in `SkillFrontmatterSchema` carrying a
+ * `.transform()`: what comes out is a `ScheduleBlock` with defaults filled in,
+ * never the mapping the author typed, so comparing the two would red on every
+ * scheduled skill in the repo. It is excluded here because it gets a better
+ * check of its own — {@link checkScheduleBlock} runs the same comparison one
+ * level down, against the block's own schema.
+ */
+const TRANSFORMED_KEYS: ReadonlySet<string> = new Set(['schedule']);
+
+/**
+ * Whether two frontmatter values mean the same thing.
+ *
+ * Structural equality, plus upstream's own reading of the YAML 1.1 boolean
+ * words: `enabled: yes` parses to `true` and that is the author getting what
+ * they asked for, not a value being dropped. Reusing `coerceYamlBoolean` rather
+ * than restating the word list is what keeps this from being a second opinion
+ * about what DorkOS accepts.
+ *
+ * @param wrote - The value as it came out of the YAML parser.
+ * @param kept - The value the schema produced.
+ */
+function meansTheSame(wrote: unknown, kept: unknown): boolean {
+  const same = (a: unknown, b: unknown): boolean =>
+    JSON.stringify(a ?? null) === JSON.stringify(b ?? null);
+  return same(wrote, kept) || same(coerceYamlBoolean(wrote), kept);
+}
+
+/** A line the author wrote that the schema quietly replaced or threw away. */
+interface Degraded {
+  /** The key as written. */
+  key: string;
+  /** The value as written. */
+  wrote: unknown;
+  /** What the schema resolved it to instead. */
+  kept: unknown;
+}
+
+/**
+ * Every key the author wrote whose value did not survive the parse.
+ *
+ * This is the check that makes a passing `safeParse` mean something. Most
+ * optional fields in both schemas end in `.catch(...)`, so zod never reports
+ * them as invalid — it substitutes a fallback and returns success. Five fields
+ * of the twelve in a `schedule:` block behave that way (`enabled`, `sticky`,
+ * `runtime`, `model`, `effort`), and most of the top-level frontmatter does
+ * too. Comparing the input against the output finds all of them at once,
+ * without this file holding any opinion about which fields those are.
+ *
+ * @param wrote - The raw mapping from the YAML parser.
+ * @param kept - The same mapping after the schema parsed it.
+ * @param known - The keys the schema declares; anything else is somebody else's
+ * finding (see the unknown-key checks) and is skipped here to avoid saying it twice.
+ * @param skip - Keys whose schema entry transforms its input, so input and
+ * output are not comparable ({@link TRANSFORMED_KEYS}).
+ */
+function degradedKeys(
+  wrote: Record<string, unknown>,
+  kept: Record<string, unknown>,
+  known: ReadonlySet<string>,
+  skip: ReadonlySet<string> = new Set()
+): Degraded[] {
+  const found: Degraded[] = [];
+  for (const [key, value] of Object.entries(wrote)) {
+    if (!known.has(key) || skip.has(key)) continue;
+    if (meansTheSame(value, kept[key])) continue;
+    found.push({ key, wrote: value, kept: kept[key] });
+  }
+  return found;
+}
+
+/**
+ * Render one dropped line as a sentence for whoever typed it.
+ *
+ * @param where - What the line belongs to, e.g. `schedule`.
+ * @param degraded - The line.
+ */
+function describeDegraded(where: string, degraded: Degraded): string {
+  const wrote = JSON.stringify(degraded.wrote);
+  const kept = degraded.kept === undefined ? 'nothing at all' : JSON.stringify(degraded.kept);
+  return (
+    `Its ${where} says ${degraded.key}: ${wrote}, which DorkOS cannot read. ` +
+    `It silently uses ${kept} instead, so this skill would run with a setting nobody chose.`
+  );
+}
+
+/**
+ * How many single-character edits separate two words.
+ *
+ * Used only to guess whether a stray top-level key was meant to be `schedule`,
+ * so the message can say so. Wrong guesses cost nothing: the key is already an
+ * error either way.
+ *
+ * @param a - First word.
+ * @param b - Second word.
+ */
+function editDistance(a: string, b: string): number {
+  let previous = Array.from({ length: b.length + 1 }, (_, index) => index);
+  for (let i = 1; i <= a.length; i += 1) {
+    const current = [i];
+    for (let j = 1; j <= b.length; j += 1) {
+      current[j] = Math.min(
+        previous[j] + 1,
+        current[j - 1] + 1,
+        previous[j - 1] + (a[i - 1] === b[j - 1] ? 0 : 1)
+      );
+    }
+    previous = current;
+  }
+  return previous[b.length];
+}
+
+/**
+ * Whether a key looks like somebody trying to write `schedule`.
+ *
+ * @param key - The unknown key.
+ */
+function looksLikeSchedule(key: string): boolean {
+  return editDistance(key.toLowerCase(), 'schedule') <= 2;
+}
 
 /**
  * Turn zod's account of a rejection into one line naming the field.
@@ -116,6 +253,41 @@ function readFrontmatter(absPath: string): { data: Record<string, unknown> } | {
 }
 
 /**
+ * Check a skill's `schedule:` block: that it parses, that every setting name is
+ * one DorkOS knows, and that every value the author wrote survived the parse.
+ *
+ * @param raw - Whatever sat under the `schedule:` key.
+ * @returns One message per problem.
+ */
+function checkScheduleBlock(raw: unknown): string[] {
+  const block = ScheduleBlockSchema.safeParse(raw);
+  if (!block.success) {
+    return [
+      `Its schedule block is broken — ${describe(block.error)}. ` +
+        'DorkOS installs this file anyway and quietly drops the schedule, so the task would never run.',
+    ];
+  }
+  if (typeof raw !== 'object' || raw === null || Array.isArray(raw)) return [];
+
+  const written = raw as Record<string, unknown>;
+  const messages: string[] = [];
+
+  for (const key of Object.keys(written)) {
+    if (SCHEDULE_KEYS.has(key)) continue;
+    messages.push(
+      `Its schedule block has a setting called "${key}", which DorkOS does not know and ignores. ` +
+        `Did you mean one of: ${[...SCHEDULE_KEYS].join(', ')}?`
+    );
+  }
+
+  for (const degraded of degradedKeys(written, block.data, SCHEDULE_KEYS)) {
+    messages.push(describeDegraded('schedule', degraded));
+  }
+
+  return messages;
+}
+
+/**
  * Check one SKILL.md's frontmatter and, if it has one, its `schedule:` block.
  *
  * @param repoRoot - Absolute path to the repository root.
@@ -126,7 +298,7 @@ function checkSkillFile(
   repoRoot: string,
   file: string
 ): { findings: Finding[]; declaresSchedule: boolean } {
-  const findings: Finding[] = [];
+  const messages: string[] = [];
   const read = readFrontmatter(path.join(repoRoot, file));
   if ('error' in read)
     return { findings: [{ file, message: read.error }], declaresSchedule: false };
@@ -136,43 +308,41 @@ function checkSkillFile(
 
   const frontmatter = SkillFrontmatterSchema.safeParse(raw);
   if (!frontmatter.success) {
-    findings.push({ file, message: `Its frontmatter is invalid — ${describe(frontmatter.error)}` });
-    return { findings, declaresSchedule };
+    return {
+      findings: [{ file, message: `Its frontmatter is invalid — ${describe(frontmatter.error)}` }],
+      declaresSchedule,
+    };
   }
 
-  if (!declaresSchedule) return { findings, declaresSchedule };
+  // Same two checks as the block below, one level up: DorkOS drops a top-level
+  // key it does not know and `.catch(...)`es most of the ones it does, so a
+  // `modle:` or a `background: sometimes` is invisible without them. A key that
+  // is nearly `schedule` gets called out by name — that spelling is the one
+  // that costs a whole scheduled task.
+  for (const key of Object.keys(raw)) {
+    if (FRONTMATTER_KEYS.has(key)) continue;
+    messages.push(
+      looksLikeSchedule(key)
+        ? `Its frontmatter has a "${key}:" key, which DorkOS ignores. Did you mean "schedule:"?`
+        : `Its frontmatter has a "${key}:" key, which DorkOS does not know and ignores.`
+    );
+  }
+  for (const degraded of degradedKeys(raw, frontmatter.data, FRONTMATTER_KEYS, TRANSFORMED_KEYS)) {
+    messages.push(describeDegraded('frontmatter', degraded));
+  }
 
-  const block = ScheduleBlockSchema.safeParse(raw.schedule);
-  if (!block.success) {
-    findings.push({
-      file,
-      message:
-        `Its schedule block is broken — ${describe(block.error)}. ` +
-        'DorkOS installs this file anyway and quietly drops the schedule, so the task would never run.',
-    });
-  } else if (typeof raw.schedule === 'object' && !Array.isArray(raw.schedule)) {
-    for (const key of Object.keys(raw.schedule as Record<string, unknown>)) {
-      if (SCHEDULE_KEYS.has(key)) continue;
-      findings.push({
-        file,
-        message:
-          `Its schedule block has a setting called "${key}", which DorkOS does not know and ignores. ` +
-          `Did you mean one of: ${[...SCHEDULE_KEYS].join(', ')}?`,
-      });
+  if (declaresSchedule) {
+    messages.push(...checkScheduleBlock(raw.schedule));
+
+    // The question every DorkOS scheduler surface actually asks of a skill. It
+    // is implied by the checks above, and asserting it directly is what keeps
+    // this gate honest if the way a block degrades ever changes upstream.
+    if (messages.length === 0 && !hasSchedule(frontmatter.data)) {
+      messages.push('It declares a schedule, but DorkOS does not read it as a scheduled task.');
     }
   }
 
-  // The question every DorkOS scheduler surface actually asks of a skill. It is
-  // implied by the two checks above, and asserting it directly is what keeps
-  // this gate honest if the way a block degrades ever changes upstream.
-  if (findings.length === 0 && !hasSchedule(frontmatter.data)) {
-    findings.push({
-      file,
-      message: 'It declares a schedule, but DorkOS does not read it as a scheduled task.',
-    });
-  }
-
-  return { findings, declaresSchedule };
+  return { findings: messages.map((message) => ({ file, message })), declaresSchedule };
 }
 
 /**
@@ -332,6 +502,9 @@ export function validateManifests(repoRoot: string): Finding[] {
  */
 function checkSourcePaths(repoRoot: string, file: string, value: unknown): Finding[] {
   const findings: Finding[] = [];
+  // A `null` or scalar file already failed the schema above; reading `.plugins`
+  // off it would throw and take every finding gathered so far down with it.
+  if (typeof value !== 'object' || value === null) return findings;
   const plugins = (value as { plugins?: unknown }).plugins;
   if (!Array.isArray(plugins)) return findings;
   for (const entry of plugins) {

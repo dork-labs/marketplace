@@ -116,13 +116,14 @@ describe('a schedule block that disappeared entirely', () => {
     expect(findings[0].message).toContain('must stay scheduled');
   });
 
-  it('rejects a misspelled "schedule:" key, which leaves nothing to complain about', () => {
-    const findings = validateSkills(
+  it('rejects a misspelled "schedule:" key, and says what it was probably meant to be', () => {
+    const messages = validateSkills(
       fixtureRepo(WORKING_SCHEDULE.replace('schedule:', 'schedul:')),
       REQUIRED
-    );
-    expect(findings).toHaveLength(1);
-    expect(findings[0].message).toContain('must stay scheduled');
+    ).map((finding) => finding.message);
+    expect(messages).toHaveLength(2);
+    expect(messages.some((m) => m.includes('must stay scheduled'))).toBe(true);
+    expect(messages.some((m) => m.includes('Did you mean "schedule:"?'))).toBe(true);
   });
 
   it('rejects a required skill whose file is gone', () => {
@@ -130,6 +131,80 @@ describe('a schedule block that disappeared entirely', () => {
       'plugins/demo/skills/not-here',
     ]);
     expect(findings.some((f) => f.message.includes('the file is gone'))).toBe(true);
+  });
+});
+
+// The five schedule fields that end in `.catch(...)` upstream. zod NEVER
+// reports them as invalid: it swallows the bad value, substitutes a fallback,
+// and returns success. `enabled` is the one that bites — an unreadable value
+// falls back to TRUE, so a typo arms a schedule its author was switching off.
+describe('a schedule setting zod silently replaces instead of rejecting', () => {
+  const swallowed: [string, string, string][] = [
+    ['effort', '  effort: hihg', '"hihg"'],
+    ['model', "  model: ''", '""'],
+    ['runtime', '  runtime: 12345', '12345'],
+    ['sticky', '  sticky: sometimes', '"sometimes"'],
+    ['enabled', '  enabled: maybe', '"maybe"'],
+  ];
+
+  for (const [field, line, wrote] of swallowed) {
+    it(`rejects an unreadable ${field}`, () => {
+      const findings = validateSkills(fixtureRepo(`${WORKING_SCHEDULE}\n${line}`), REQUIRED);
+      expect(findings).toHaveLength(1);
+      expect(findings[0].message).toContain(`${field}: ${wrote}`);
+      expect(findings[0].message).toContain('DorkOS cannot read');
+    });
+  }
+
+  it('says what an unreadable "enabled" silently becomes, because it is "true"', () => {
+    const findings = validateSkills(fixtureRepo(`${WORKING_SCHEDULE}\n  enabled: maybe`), REQUIRED);
+    expect(findings[0].message).toContain('silently uses true instead');
+  });
+
+  // The other half of the same check: DorkOS reads the YAML 1.1 boolean words
+  // on purpose, so `enabled: no` is the author getting what they asked for.
+  // Flagging it would make this gate a second opinion about what DorkOS takes.
+  it('accepts the boolean words DorkOS deliberately understands', () => {
+    const words = ['no', 'off', "'false'", '0', 'yes', 'on', '1'];
+    for (const word of words) {
+      const findings = validateSkills(
+        fixtureRepo(`${WORKING_SCHEDULE}\n  enabled: ${word}\n  sticky: ${word}`),
+        REQUIRED
+      );
+      expect(findings, `enabled: ${word}`).toEqual([]);
+    }
+  });
+});
+
+describe('top-level frontmatter, which degrades the same way', () => {
+  it('rejects a key DorkOS does not know', () => {
+    const findings = validateSkills(fixtureRepo(`${WORKING_SCHEDULE}\nmodle: sonnet`), REQUIRED);
+    expect(findings).toHaveLength(1);
+    expect(findings[0].message).toContain('"modle:"');
+  });
+
+  it('rejects a known key whose value is silently thrown away', () => {
+    const findings = validateSkills(
+      fixtureRepo(`${WORKING_SCHEDULE}\nbackground: sometimes`),
+      REQUIRED
+    );
+    expect(findings).toHaveLength(1);
+    expect(findings[0].message).toContain('background: "sometimes"');
+  });
+
+  it('does not flag the schedule block itself, which the schema rewrites on purpose', () => {
+    expect(validateSkills(fixtureRepo(WORKING_SCHEDULE), REQUIRED)).toEqual([]);
+  });
+
+  it('accepts the optional keys the real skills use', () => {
+    const frontmatter = [
+      WORKING_SCHEDULE,
+      'display-name: /demo the thing',
+      'disable-model-invocation: true',
+      'kind: task',
+      "allowed-tools: 'Read, Bash'",
+    ].join('\n');
+    expect(validateSkills(fixtureRepo(frontmatter), REQUIRED)).toEqual([]);
   });
 });
 
@@ -201,6 +276,43 @@ describe('manifests', () => {
       })
     );
     expect(findings.some((f) => f.message.includes('./plugins/ghost'))).toBe(true);
+  });
+
+  // Each of the three schema checks gets its own failing input, because
+  // deleting any one of them left the suite green: `{name:'x'}` is rejected by
+  // the DorkOS schema and the Claude Code one for different reasons, and the
+  // two findings are told apart by the Claude Code wording.
+  it('rejects a marketplace.json the DorkOS schema will not take', () => {
+    const findings = validateManifests(
+      manifestRepo({ '.claude-plugin/marketplace.json': { name: 'x' } })
+    );
+    const dorkos = findings.filter(
+      (f) =>
+        f.file === '.claude-plugin/marketplace.json' &&
+        !f.message.includes('Claude Code marketplace')
+    );
+    expect(dorkos).toHaveLength(1);
+  });
+
+  it('rejects a marketplace.json Claude Code itself would not take', () => {
+    const findings = validateManifests(
+      manifestRepo({ '.claude-plugin/marketplace.json': { name: 'x' } })
+    );
+    expect(findings.some((f) => f.message.includes('Not valid as a Claude Code marketplace'))).toBe(
+      true
+    );
+  });
+
+  it('rejects a dorkos.json sidecar the schema will not take', () => {
+    const findings = validateManifests(
+      manifestRepo({ '.claude-plugin/dorkos.json': { schemaVersion: 'banana', plugins: 'nope' } })
+    );
+    expect(findings.filter((f) => f.file === '.claude-plugin/dorkos.json')).toHaveLength(1);
+  });
+
+  it('survives a registry file that is null rather than crashing', () => {
+    const findings = validateManifests(manifestRepo({ '.claude-plugin/marketplace.json': null }));
+    expect(findings.length).toBeGreaterThan(0);
   });
 
   it('rejects a registry file that is not valid JSON', () => {
