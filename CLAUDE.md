@@ -82,10 +82,18 @@ dorkos package validate       # Validates individual package manifests
 dorkos marketplace validate   # Validates the full registry (CC compat + sidecar schema)
 ```
 
-**CI:** any pull request touching `plugins/flow/**` runs `.github/workflows/flow-tests.yml`
-— it checks that `config/config.schema.json` still matches the Zod schema it is generated
-from, then runs the flow plugin's typecheck, tests, and format check. No other plugin has
-automated checks yet.
+**CI:** two workflows, both on every pull request.
+
+- `.github/workflows/flow-tests.yml` (`flow`) — checks that `plugins/flow/config/config.schema.json`
+  still matches the Zod schema it is generated from, then runs the flow plugin's typecheck,
+  tests, and format check. No other plugin has its own checks yet.
+- `.github/workflows/schema-check.yml` (`schemas`) — repo-wide. Validates every plugin's
+  `SKILL.md` frontmatter and `schedule:` blocks, plus the marketplace/sidecar/package
+  manifests, against the real DorkOS Zod schemas, downloaded from the public dorkos repo at
+  the commit pinned in `tools/schema-check/upstream.json`. It exists because DorkOS
+  deliberately degrades a broken `schedule:` block to no schedule at all, so a one-character
+  typo used to ship a scheduled task that silently never runs (DOR-1519). Read
+  `tools/schema-check/README.md` before touching a schedule block or bumping the pin.
 
 ## Related Resources
 

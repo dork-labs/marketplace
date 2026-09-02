@@ -1,0 +1,63 @@
+name: schemas
+
+# Repo-wide gate: every plugin's SKILL.md schedule blocks and manifest files,
+# checked against the real DorkOS Zod schemas. See tools/schema-check/README.md
+# for why this exists and where the schemas come from.
+#
+# Its own job, separate from `flow`, on the same rule that workflow states: jobs
+# stay independent so one red gate never hides another's. This one is repo-wide
+# rather than per-plugin — adding a plugin does not mean adding a job here.
+#
+# No `paths:` filter, for the same reason the flow workflow has none: this check
+# is a candidate for branch protection, and a required check that never runs on a
+# non-matching PR leaves that PR waiting forever. The job costs well under a
+# minute. If you re-add a filter, first un-require the check.
+#
+# It needs network at run time: it downloads the pinned DorkOS schema sources
+# from the public dorkos repo. The pin is an immutable commit SHA, so an upstream
+# change can never turn this job red on its own.
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+# A new push to a branch makes the previous run's answer obsolete.
+concurrency:
+  group: "${{ github.workflow }}-${{ github.ref }}"
+  cancel-in-progress: true
+
+jobs:
+  schemas:
+    name: skills and manifests
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: tools/schema-check
+
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/setup-node@v5
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: tools/schema-check/package-lock.json
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Skills and manifests match the pinned DorkOS schemas
+        run: npm run check
+
+      - name: Tests
+        run: npm test
+
+      - name: Typecheck
+        run: npm run typecheck
+
+      - name: Format check
+        run: npm run format:check

@@ -1,0 +1,32 @@
+{
+  "compilerOptions": {
+    "target": "ES2022",
+    "module": "NodeNext",
+    "moduleResolution": "NodeNext",
+    "strict": true,
+    "esModuleInterop": true,
+    "skipLibCheck": true,
+    "forceConsistentCasingInFileNames": true,
+    "resolveJsonModule": true,
+    "allowImportingTsExtensions": true,
+    "noEmit": true,
+    "types": ["node"],
+    "baseUrl": ".",
+    "paths": {
+      "@dorkos/shared/constants": [".upstream/packages/shared/src/constants.ts"],
+      "@dorkos/skills/schema": [".upstream/packages/skills/src/schema.ts"],
+      "@dorkos/skills/schedule-schema": [".upstream/packages/skills/src/schedule-schema.ts"],
+      "@dorkos/marketplace/manifest-schema": [
+        ".upstream/packages/marketplace/src/manifest-schema.ts"
+      ],
+      "@dorkos/marketplace/marketplace-json-schema": [
+        ".upstream/packages/marketplace/src/marketplace-json-schema.ts"
+      ],
+      "@dorkos/marketplace/dorkos-sidecar-schema": [
+        ".upstream/packages/marketplace/src/dorkos-sidecar-schema.ts"
+      ],
+      "@dorkos/marketplace/cc-validator": [".upstream/packages/marketplace/src/cc-validator.ts"]
+    }
+  },
+  "include": ["scripts/**/*", "src/**/*", "tests/**/*", "vitest.config.ts"]
+}
