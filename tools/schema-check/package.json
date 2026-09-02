@@ -1,0 +1,26 @@
+{
+  "name": "schema-check",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Repo-wide gate: validates every plugin's SKILL.md schedule blocks and manifest files against the real DorkOS Zod schemas, fetched from the public dorkos repo at the commit pinned in upstream.json.",
+  "scripts": {
+    "fetch:upstream": "tsx scripts/fetch-upstream.ts",
+    "check": "npm run fetch:upstream && tsx src/cli.ts",
+    "test": "npm run fetch:upstream && vitest run",
+    "typecheck": "npm run fetch:upstream && tsc --noEmit",
+    "format": "prettier --write \"scripts/**/*.ts\" \"src/**/*.ts\" \"tests/**/*.ts\" vitest.config.ts",
+    "format:check": "prettier --check \"scripts/**/*.ts\" \"src/**/*.ts\" \"tests/**/*.ts\" vitest.config.ts"
+  },
+  "dependencies": {
+    "gray-matter": "^4.0.3",
+    "zod": "^4.4.3"
+  },
+  "devDependencies": {
+    "@types/node": "^25.6.0",
+    "prettier": "^3.8.3",
+    "tsx": "^4.20.3",
+    "typescript": "^5.9.3",
+    "vitest": "^3.2.4"
+  }
+}

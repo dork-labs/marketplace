@@ -1,0 +1,7 @@
+# Installed packages.
+node_modules/
+
+# DorkOS schema sources, downloaded by scripts/fetch-upstream.ts at the commit
+# pinned in upstream.json. Never edit them, never commit them — the whole point
+# is that this repo holds no copy of a DorkOS schema. See README.md.
+.upstream/
