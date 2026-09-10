@@ -1,6 +1,6 @@
 # Tracker Adapter Contract
 
-> **Contract version: 1.1.0** (semver). See [Versioning](#5-versioning).
+> **Contract version: 1.2.0** (semver). See [Versioning](#5-versioning).
 >
 > This is the **generic, tracker-neutral** contract every `/flow` tracker adapter
 > must satisfy. It names no tracker, no API, and no slug. Reference adapters
@@ -112,9 +112,9 @@ is a real normalization trap: re-namespacing is mandatory, not cosmetic.
 
 ## 3. The capability verbs
 
-There are **16 required verbs** — **8 reads** and **8 writes** — plus **1
-optional write** (see [Optional verbs](#optional-verbs)). The generic layer only
-ever names a verb; the adapter owns the call. Signatures below use the typed
+There are **16 required verbs** — **8 reads** and **8 writes** — plus **4
+optional verbs** (1 read and 3 writes; see [Optional verbs](#optional-verbs)).
+The generic layer only ever names a verb; the adapter owns the call. Signatures below use the typed
 promotion-surface form (the `PMClient` port); the prose realization fulfils the
 same verbs by hand.
 
@@ -140,8 +140,13 @@ interface TrackerAdapter {
   link(a: WorkItem, b: WorkItem, type: RelationType): Promise<void>;
   createSubIssue(parent: WorkItem, spec: SubIssueSpec): Promise<WorkItem>;
 
+  // Optional read — an adapter may omit this entirely (see "Optional verbs")
+  listIntake?(source: IntakeSource): Promise<IntakeReport[]>;
+
   // Optional writes — an adapter may omit these entirely (see "Optional verbs")
   completeProject?(project: WorkItemProject, outcome: ProjectOutcome): Promise<void>;
+  promote?(report: IntakeReport, target: PromotionTarget): Promise<WorkItem>;
+  resolveIntake?(report: IntakeReport, outcome: IntakeOutcome): Promise<void>;
 }
 ```
 
@@ -153,6 +158,21 @@ Supporting types: `Account` is the acting account `{ id, name? }`.
 `SubIssueSpec = { title, description, type, size? }`.
 `InboxEntry = { item: WorkItem, comment: { author: string, mentions: string[], body: string } }`.
 `ProjectOutcome = 'completed' | 'canceled'` — the two terminal project states.
+
+The intake types (used only by the three optional intake verbs):
+`IntakeSource = { id, label?, coordinates: Record<string, string>, promoteTo: { team, project }, outcomes: Partial<Record<IntakeExit, string>> }` — one configured
+source, read straight from `connection.intake[]`.
+`IntakeReport = { id, sourceId, reference, title, body, reporter?, createdAt?, status?, links: string[] }` — one
+report normalized out of a source. `reference` is its human key or URL (what a
+link points at); `links[]` carries the `identifier`s of work items already linked
+to it, which is what makes `promote` idempotent.
+`IntakeExit = 'duplicate' | 'promote' | 'attach' | 'needs-info' | 'decline' | 'junk'` — the
+six bounded exits.
+`PromotionTarget = { create: SubIssueSpec & { priority?, project? } } | { attachTo: string }` — create
+new work, or attach the report to an existing work item by `identifier`.
+`IntakeOutcome = { exit: IntakeExit, workItem?: string, duplicateOf?: string, message?: string }` — what
+the reporter is told: the linked work item's `identifier`, the report this one
+duplicates, and any prose reply.
 
 Each verb below states: what it must do, its **durability** requirement (which
 writes must be durable and idempotent), and its **graceful degradation** (what to
@@ -432,6 +452,81 @@ expect the loop to exercise it, and do not let it go untested for that reason.
   advisory path (recommend the close-out to the human and let them run it) and say
   that is what happened.
 
+### The intake trio — `listIntake`, `promote`, `resolveIntake` — OPTIONAL
+
+Three verbs, one job: let the engine read work that **other people** filed,
+without swallowing what they filed. A **report** (a support message, a public
+issue, a feedback-form submission, a question from a sales queue) belongs to the
+reporter: its state is their receipt, and something outside the engine may be
+reading that state back to them. A **work item** belongs to us. The two have
+different lifecycles, several reports routinely resolve to one work item, and
+most reports are not work at all — so the contract's rule is **link, do not move
+and do not mirror**. No intake verb ever converts a report into a work item, and
+none copies its body into one and calls them the same object.
+
+These verbs exist only because the shape recurs everywhere — a support inbox, a
+public issue queue, a tracker's own triage lane and a sales pipeline all want the
+same three actions: **pull**, **promote-with-link**, **push the outcome back**.
+They are optional as a set: an adapter that supports none of them still conforms
+completely, and a caller that finds them missing takes a documented manual path
+(see `triaging-work`, Path C). They are only ever named when the adopter has
+configured `connection.intake` — with that key absent, which is the default,
+nothing in the engine asks about them at all.
+
+#### `listIntake(source: IntakeSource): Promise<IntakeReport[]>` — OPTIONAL
+
+- **Must do.** Return the reports awaiting triage in one configured `source`,
+  normalized to `IntakeReport`. Resolve WHERE to read from `source.coordinates`
+  (opaque to the engine, the adapter's to interpret) — never from a hardcoded
+  queue. Populate `links[]` from whatever durable links the source already
+  carries, so a caller can tell an untouched report from one already promoted.
+- **Durability.** Read-only.
+- **Degradation.** An empty result is a real signal ("nothing waiting"); an
+  unreachable source MUST **throw**, exactly as `getEligibleWork` does. A source
+  that cannot supply `reporter` or `createdAt` leaves them `undefined`, never
+  fabricated. When the verb is **absent**, the caller's fallback is a person
+  handing the reports in as freeform TRIAGE input.
+
+#### `promote(report: IntakeReport, target: PromotionTarget): Promise<WorkItem>` — OPTIONAL
+
+- **Must do.** Put a report onto the work side and **record the durable link back
+  to it**, in that order, then return the work item normalized as a `WorkItem`.
+  Two targets, one mechanism: `{ create }` creates a new work item (in
+  `source.promoteTo.team` when set, otherwise the team the adapter already works
+  in) and links it to the report; `{ attachTo }` links the report to a work item
+  that already exists and creates nothing. The link is what replaces moving the
+  report, so a promotion that creates work and fails to link is a **failed
+  promotion**, not a partial one — surface it and converge on retry.
+- **Durability.** Durable, and **idempotent against the report**: before
+  creating, check `report.links[]` and the link graph; a report already promoted
+  returns the existing work item rather than a second copy. Many reports mapping
+  onto one work item is normal and must stay cheap — repeated `attachTo` calls
+  for the same pair are a no-op.
+- **Degradation.** A failed create or a failed link surfaces loudly and never
+  reports success. An adapter whose tracker cannot link across the two objects
+  records the link as structured metadata it can read back (never as prose alone,
+  where nothing can recover it). When the verb is **absent**, the caller creates
+  the work item the way TRIAGE Path A creates one and records the link as a
+  comment on both sides, saying that is the path it took.
+
+#### `resolveIntake(report: IntakeReport, outcome: IntakeOutcome): Promise<void>` — OPTIONAL
+
+- **Must do.** Close the loop on the reporter's own object: set the source's
+  reporter-facing status for `outcome.exit` (from `source.outcomes`, the source's
+  own vocabulary — the reporter reads those words) and post
+  `outcome.message` when the exit carries one. **It never moves the report into
+  the backlog and never changes its type**: the report stays the reporter's
+  receipt. All six exits resolve; `junk` is the only one that resolves silently.
+- **Durability.** Durable and idempotent. A report already carrying the requested
+  outcome is a no-op. Re-running after a partial failure converges on
+  status-plus-message without posting the message twice.
+- **Degradation.** A source with no distinct status for an exit falls back to the
+  nearest state it has and says which. A failed write surfaces loudly — a
+  promotion whose outcome never reached the reporter has done the invisible half
+  of the job only. When the verb is **absent**, the caller comments the outcome on
+  the report if the report is reachable as a work item, and otherwise reports the
+  outcome for a person to close by hand.
+
 ---
 
 ## 4. Conformance invariants
@@ -515,6 +610,13 @@ declaration.
 
 ### What each version added
 
+- **1.2.0** - added the **intake trio** (section 3): the optional read
+  `listIntake` and the optional writes `promote` and `resolveIntake`, which let
+  TRIAGE promote other people's reports into work without consuming them. Purely
+  additive: the 16 required verbs and every invariant are unchanged, an adapter
+  declaring `1.0.0` or `1.1.0` still conforms, and the engine only ever names
+  these verbs when the adopter has configured `connection.intake` — which is
+  empty by default.
 - **1.1.0** - added the first **optional** verb, `completeProject` (section 3),
   and the [optional-verb semantics](#optional-verbs) that make absence safe:
   declared support, a documented caller degradation, and absence-is-never-an-error.

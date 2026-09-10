@@ -112,6 +112,8 @@ The thought lands in the tracker as an `idea`. No evaluation, no classification:
 
 Triage evaluates the item (accept / reject / needs-research / needs-refinement) and makes the **simple-vs-complex** routing call. Simple work routes straight toward EXECUTE as a `task`; complex work routes to IDEATE. Either way, accepted work gets the `agent/ready` label, which is the fuel the dispatch queue runs on.
 
+`/flow:triage intake` is the same stage pointed at things **other people** filed — support messages, public issues, feedback submissions — once you have listed where they land under `connection.intake` (see [The dials](/docs/guides/flow/the-dials)). It links each report to the work it produced rather than turning it into work, because the report is the reporter's receipt and five reports often turn into one fix. Without a configured source, the command says so and stops.
+
 </Step>
 
 <Step>

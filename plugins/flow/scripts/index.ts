@@ -65,6 +65,10 @@ export {
   LoopsSchema,
   ProducerSchema,
   IngestionSchema,
+  IntakeSchema,
+  IntakeSourceSchema,
+  IntakePromoteToSchema,
+  IntakeOutcomesSchema,
 } from './config-schema.ts';
 export type { FlowConfig, Stage } from './config-schema.ts';
 
@@ -265,3 +269,33 @@ export type {
   InboxCandidate,
   InboxReconcileInput,
 } from './reconcilers.ts';
+
+// Intake routing (TRIAGE Path C) — the six exits, the pass order, and the
+// off-by-default gate that decides whether intake applies at all.
+export {
+  INTAKE_EXITS,
+  INTAKE_VERBS,
+  INTAKE_ROUTING,
+  INTAKE_STEPS,
+  INTAKE_VERB_FALLBACK,
+  routeIntakeExit,
+  intakeSources,
+  isIntakeConfigured,
+  selectIntakeSource,
+  planIntake,
+} from './intake.ts';
+export type {
+  IntakeExit,
+  IntakeVerb,
+  IntakeWorkEffect,
+  IntakeLinkEffect,
+  IntakeReporterOutcome,
+  IntakeExitRouting,
+  IntakeStep,
+  IntakeSource,
+  IntakeConnectionConfig,
+  IntakeVerbSupport,
+  IntakeDegradation,
+  IntakePlan,
+  IntakePlanReason,
+} from './intake.ts';

@@ -18,6 +18,7 @@
  */
 
 import { z } from 'zod';
+import { INTAKE_EXITS } from './intake.ts';
 
 /**
  * The active project tracker, as an **adapter slug** (§3).
@@ -98,6 +99,92 @@ export const ConnectionWorkspaceSchema = z
   .prefault({});
 
 /**
+ * The reporter-facing outcome vocabulary of one intake source, keyed by the six
+ * bounded exits (`INTAKE_EXITS` in `intake.ts` — the shape is built from that
+ * list, so the two can never drift apart).
+ *
+ * Each value is the name the SOURCE gives that outcome: the status a support
+ * queue moves a ticket to, the label a public issue tracker closes it with, the
+ * state a feedback form's status page reads back. Every key is optional, and an
+ * absent one means "this source has no distinct state for that exit" — the
+ * adapter then falls back to the nearest state it does have and says so.
+ *
+ * The names are deliberately the source's, not flow's: the reporter reads them.
+ */
+export const IntakeOutcomesSchema = z
+  .object(
+    Object.fromEntries(INTAKE_EXITS.map((exit) => [exit, z.string().optional()])) as Record<
+      (typeof INTAKE_EXITS)[number],
+      z.ZodOptional<z.ZodString>
+    >
+  )
+  .prefault({});
+
+/**
+ * Where promoted work lands (§3). Both `null` by default, which means "the team
+ * and project flow already reads and writes" (`connection.team`) — the common
+ * case, where reports arrive somewhere separate but the work joins the normal
+ * backlog. Set them only when promoted work belongs somewhere else.
+ */
+export const IntakePromoteToSchema = z
+  .object({
+    /** Team key / id promoted work is created in. `null` = the configured `connection.team`. */
+    team: z.string().nullable().default(null),
+    /** Project promoted work is assigned to. `null` = whatever TRIAGE's alignment check picks. */
+    project: z.string().nullable().default(null),
+  })
+  .prefault({});
+
+/**
+ * One **intake source** (§3) — a place outside the backlog where other people
+ * file reports: a support inbox, a public issue queue, a feedback form, a sales
+ * pipeline, a tracker's own triage queue.
+ *
+ * A source is coordinates plus vocabulary, and nothing else. It carries no
+ * policy: what happens to a report is TRIAGE's Path C decision, identical for
+ * every source. That is what keeps intake generic — a second source is a config
+ * entry, never a second code path.
+ */
+export const IntakeSourceSchema = z.object({
+  /**
+   * Stable id for this source. Names it in a trigger (`intake <id>`), in
+   * provenance, and in every report the pass produces, so it must be unique
+   * across `intake[]` and usable as a bare word.
+   */
+  id: z
+    .string()
+    .regex(
+      /^[a-z][a-z0-9-]*$/,
+      'an intake source id must be a lowercase slug (letters, digits and dashes, starting with a letter)'
+    ),
+  /** Human name for reports and questions ("user feedback"). Falls back to `id`. */
+  label: z.string().optional(),
+  /**
+   * WHERE the reports live, as flat key/value strings the **adapter** interprets
+   * — a team key, a queue id, a label, a view. Opaque to the generic engine,
+   * exactly like the out-of-band `secrets` block: the engine never branches on a
+   * coordinate, so a new source's shape can never need an engine change. Values
+   * are strings so the block stays reviewable and cannot quietly become a second
+   * home for policy.
+   */
+  coordinates: z.record(z.string(), z.string()).prefault({}),
+  /** Where promoted work lands. Defaults to the team flow already works in. */
+  promoteTo: IntakePromoteToSchema,
+  /** The source's own reporter-facing status per exit. */
+  outcomes: IntakeOutcomesSchema,
+});
+
+/**
+ * The intake source list (§3) — **the switch that makes Path C exist at all**.
+ *
+ * It defaults to `[]`, and an empty list is off: TRIAGE keeps exactly the two
+ * entry shapes it has always had, no optional adapter verb is ever named, and no
+ * adopter who has not asked for intake sees any change. Turning it on is adding
+ * one entry.
+ */
+export const IntakeSchema = z.array(IntakeSourceSchema).default([]);
+
+/**
  * Tracker-connection coordinates + transport (§3) — the **non-secret** sibling of
  * `secrets.trackerAccount`. Holds WHERE flow reads and writes (team, workspace)
  * and HOW it reaches the tracker (transport). The concrete adapter reads every
@@ -116,6 +203,12 @@ export const ConnectionSchema = z
     workspace: ConnectionWorkspaceSchema,
     /** Primary access path — account-pinned `cli` (default) or in-session `mcp`. */
     transport: TransportSchema.default('cli'),
+    /**
+     * Intake sources — other people's reports, which TRIAGE promotes into work
+     * without consuming them (Path C). Empty by default: intake is off unless an
+     * adopter names a source.
+     */
+    intake: IntakeSchema,
   })
   .prefault({});
 

@@ -82,6 +82,62 @@ generated and verified could not be written into the config it was generated for
 and the only workaround was editing plugin source that the next plugin update
 overwrote.
 
+## Intake sources are off until you name one
+
+`connection.intake` is the list of places **other people** file things: a support
+inbox, a public issue queue, a feedback form, a tracker's own triage lane. Name
+one and `/flow:triage intake` can read it, promote what turns out to be real work
+into your backlog, and tell the person who filed it what happened.
+
+It ships **empty**, and empty means off. With no source configured, triage
+behaves exactly as it always has, and nothing ever asks your tracker adapter
+whether it can read an intake queue. Turning it on is adding one entry:
+
+```jsonc
+"connection": {
+  "team": { "key": null, "id": null },
+  "workspace": { "slug": null },
+  "transport": "cli",
+  "intake": [
+    {
+      "id": "user-feedback",
+      "label": "user feedback",
+      // Where the reports live. Your adapter reads these keys; the engine never
+      // looks inside. Which keys are valid is your adapter's business — it says
+      // so in its own skill, and refuses a key it does not know.
+      "coordinates": { "teamKey": "FB" },
+      // Where promoted work lands. null = the team flow already works in.
+      "promoteTo": { "team": null, "project": null },
+      // What the reporter sees, in your queue's own words. Any you leave out,
+      // the adapter falls back on the nearest state it has and says so.
+      "outcomes": {
+        "duplicate": "Merged",
+        "promote": "Accepted",
+        "attach": "Accepted",
+        "needs-info": "Waiting on reporter",
+        "decline": "Declined",
+        "junk": "Closed"
+      }
+    }
+  ]
+}
+```
+
+A report is never moved, retyped, or copied into a work item — it is **linked**.
+That is deliberate: the report is the reporter's receipt, several reports often
+turn into one fix, and most reports are not work at all. The full rulebook is the
+`triaging-work` skill's Path C.
+
+Two things worth knowing before you switch it on:
+
+- **Your adapter needs three optional verbs** (`listIntake`, `promote`,
+  `resolveIntake`) to do this automatically. An adapter without them is not
+  broken and nothing errors — triage falls back to a slower manual path and tells
+  you it did.
+- **Five of the six outcomes reach a real person**, so they sit behind the
+  calibration floor: flow proposes the whole batch and asks before writing
+  anything back. Only "junk" is silent.
+
 ## Schema and editor validation
 
 `config.json` references `config.schema.json` through its `$schema` key, which

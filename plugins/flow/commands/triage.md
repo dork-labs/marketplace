@@ -2,7 +2,7 @@
 description: Classify and route incoming work, simple-vs-complex (the /flow TRIAGE stage)
 category: flow
 allowed-tools: Read, Glob, Skill, AskUserQuestion
-argument-hint: "<freeform brief/idea/bug, a file path, or an existing item identifier>"
+argument-hint: "<freeform brief/idea/bug, a file path, an existing item identifier, or 'intake [source]'>"
 ---
 
 # /flow:triage — TRIAGE stage
@@ -20,3 +20,8 @@ evaluation, and the simple-vs-complex routing.
 If no argument is provided, ask the operator for the work to triage (freeform
 input or an item identifier), then follow the skill. TRIAGE classifies and routes
 only — it does not run the autonomous loop, dispatch work, or audit the workspace.
+
+`intake` (optionally naming one source) runs the skill's intake pass over reports
+other people filed, promoting them into work without consuming them. It needs at
+least one source configured under `connection.intake` in `config.json`; with none
+configured — the default — the command says so and stops.
