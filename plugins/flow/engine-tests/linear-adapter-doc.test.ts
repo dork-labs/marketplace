@@ -23,10 +23,11 @@ const skill = readFileSync(skillPath, 'utf8');
 /**
  * The capability verbs the generic layer knows (spec §3): the contract's
  * required verbs, the groom-only `getBacklogSnapshot` read this adapter adds,
- * and `completeProject` — the contract's one OPTIONAL verb, which this adapter
- * declares supported (adapters/SPEC.md 1.1.0). An optional verb is only listed
- * here because THIS adapter supports it; an adapter that did not would say so
- * instead, and would not carry the name.
+ * and the four OPTIONAL verbs this adapter declares supported —
+ * `completeProject` (adapters/SPEC.md 1.1.0) plus the intake trio
+ * `listIntake` / `promote` / `resolveIntake` (1.2.0). An optional verb is only
+ * listed here because THIS adapter supports it; an adapter that did not would
+ * say so instead, and would not carry the name.
  */
 const VERBS = [
   'getCurrentUser',
@@ -44,6 +45,9 @@ const VERBS = [
   'link',
   'createSubIssue',
   'completeProject',
+  'listIntake',
+  'promote',
+  'resolveIntake',
 ] as const;
 
 /** The core `WorkItem` normalization fields (spec §3). */
@@ -164,6 +168,31 @@ describe('linear-adapter SKILL.md — prose-contract completeness', () => {
     const stated = Number(claimed?.[1]);
     expect(sizeOrdinal('xl')).toBe(stated);
     expect(sizeOrdinal(8)).toBe(stated);
+  });
+
+  it('declares every optional verb supported or not supported — never silently', () => {
+    // A caller branches on the declaration, and the contract's reading rule
+    // turns silence into "not supported". So each optional verb has to carry an
+    // explicit word next to its name, not merely appear in the table.
+    for (const verb of ['completeProject', 'listIntake', 'promote', 'resolveIntake']) {
+      const declaration = new RegExp(
+        `\`${verb}\\([^)]*\\)\`\\*\\*[^|\\n]*optional verb — \\*\\*(supported|not supported)\\*\\*`
+      );
+      expect(skill, `${verb} carries no support declaration`).toMatch(declaration);
+    }
+  });
+
+  it('keeps reports out of the work set and off the spine (link, do not move)', () => {
+    // The intake verbs read a queue that is NOT the backlog. Two ways that goes
+    // wrong silently: reporter prose reaching the dispatch queue, and readiness
+    // landing on a report. The adapter owns both exclusions, so its prose must
+    // state them.
+    expect(skill).toMatch(/never enter the work candidate set/i);
+    expect(skill).toMatch(/carry no `agent\/\*` or `stage\/\*` labels/i);
+    // Coordinates are configuration, never inline — the same rule the team and
+    // workspace coordinates already follow.
+    expect(skill).toContain('source.coordinates');
+    expect(skill).toContain('source.outcomes');
   });
 
   it('frames itself as a prose contract that P5 promotes into a typed PMClient', () => {

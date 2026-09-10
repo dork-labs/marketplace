@@ -161,6 +161,9 @@ describe('FlowConfigSchema — the tracker-connection block (team, workspace, tr
     expect(connection.workspace).toEqual({ slug: null });
     // The account-pinned CLI is the safe default transport.
     expect(connection.transport).toBe('cli');
+    // Intake ships off: no source means TRIAGE keeps exactly the two entry
+    // shapes it has always had (the routing side is pinned in intake.test.ts).
+    expect(connection.intake).toEqual([]);
   });
 
   it('accepts the mcp transport and real coordinate overrides (a config edit, not code)', () => {

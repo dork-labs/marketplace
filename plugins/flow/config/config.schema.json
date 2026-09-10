@@ -63,9 +63,86 @@
           "default": "cli",
           "type": "string",
           "enum": ["cli", "mcp"]
+        },
+        "intake": {
+          "default": [],
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "id": {
+                "type": "string",
+                "pattern": "^[a-z][a-z0-9-]*$"
+              },
+              "label": {
+                "type": "string"
+              },
+              "coordinates": {
+                "type": "object",
+                "additionalProperties": {
+                  "type": "string"
+                }
+              },
+              "promoteTo": {
+                "type": "object",
+                "properties": {
+                  "team": {
+                    "default": null,
+                    "anyOf": [
+                      {
+                        "type": "string"
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  },
+                  "project": {
+                    "default": null,
+                    "anyOf": [
+                      {
+                        "type": "string"
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  }
+                },
+                "required": ["team", "project"],
+                "additionalProperties": false
+              },
+              "outcomes": {
+                "type": "object",
+                "properties": {
+                  "duplicate": {
+                    "type": "string"
+                  },
+                  "promote": {
+                    "type": "string"
+                  },
+                  "attach": {
+                    "type": "string"
+                  },
+                  "needs-info": {
+                    "type": "string"
+                  },
+                  "decline": {
+                    "type": "string"
+                  },
+                  "junk": {
+                    "type": "string"
+                  }
+                },
+                "additionalProperties": false
+              }
+            },
+            "required": ["id", "coordinates", "promoteTo", "outcomes"],
+            "additionalProperties": false
+          }
         }
       },
-      "required": ["team", "workspace", "transport"],
+      "required": ["team", "workspace", "transport", "intake"],
       "additionalProperties": false
     },
     "identity": {

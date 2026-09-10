@@ -51,9 +51,11 @@ authored independently.
 
 - **CAPTURE** — quick, low-commitment intake of a raw thought as an `idea`. Does
   not evaluate or classify. (`capturing-work`)
-- **TRIAGE** — classify freeform input into a type, or evaluate a captured item
+- **TRIAGE** — classify freeform input into a type, evaluate a captured item
   (accept / reject / needs-research / needs-refinement) and make the
-  **simple-vs-complex** routing call. (`triaging-work`)
+  **simple-vs-complex** routing call, or run an intake pass over reports other
+  people filed — promoting them into work and linking back, never consuming
+  them. Intake is off until `connection.intake` names a source. (`triaging-work`)
 - **IDEATE** — shape a complex brief into a structured ideation artifact.
   (`ideating-features`)
 - **SPECIFY** — turn ideation into a frozen specification + draft ADRs.

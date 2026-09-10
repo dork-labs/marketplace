@@ -117,6 +117,30 @@ Dispatch only ever claims an item that is genuinely ready. That gate is the `age
 
 Eligibility also removes non-dispatchable state, items with open blockers, items in completed or canceled projects, WIP-capped items, and items the `ownership` policy does not permit. The `agent/ready` gate is the one you feed; the rest are guards.
 
+## Intake sources
+
+Other people file things too: support messages, public issues, feedback-form
+submissions. `connection.intake` lists the places they land, so triage can read
+them, promote the real work into your backlog, and tell the person who filed it
+what happened.
+
+| Dial                 | What it does                                                                              | Default |
+| -------------------- | ------------------------------------------------------------------------------------------- | ------- |
+| `connection.intake`  | The intake sources triage may pull from. Each entry has an id, coordinates for your adapter, where promoted work lands, and the words your queue shows the reporter. | `[]`    |
+
+The list ships **empty, and empty means off** — triage keeps exactly the two
+entry shapes it has always had. Name a source and a third one appears.
+
+A report is always **linked** to the work it produced, never moved into your
+backlog and never copied. That is the whole design: the report is the reporter's
+receipt, several reports often turn into one fix, and most reports are not work
+at all. Six outcomes, and only one of them creates work: merged as a duplicate,
+promoted to new work, attached to work you already have, asked a question,
+declined with a reason, or closed as junk. Five of the six reach a real person,
+so flow proposes the batch and asks before writing any of it back.
+
+The field-by-field example lives beside the config, in the plugin's `config/CONFIG.md`; the rules triage follows are the `triaging-work` skill's Path C.
+
 ## Involvement
 
 When the engine asks you versus proceeds on its own, under `involvement`:

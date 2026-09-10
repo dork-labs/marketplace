@@ -415,14 +415,15 @@ DOR-157 - Connect Claude Code account
 
 ---
 
-## The 18 capability verbs
+## The 21 capability verbs
 
 Each verb is mapped to its concrete Linear MCP call (primary) and Composio
 fallback. The generic layer only ever names these verbs; the adapter owns the
-call. Nine reads + nine writes: the contract's **16 required** verbs
+call. Ten reads + eleven writes: the contract's **16 required** verbs
 ([`../../adapters/SPEC.md`](../../adapters/SPEC.md) section 3), the groom-only
-`getBacklogSnapshot` read this adapter adds on top, and the contract's **optional**
-`completeProject`, which this adapter **supports**. (An earlier revision titled
+`getBacklogSnapshot` read this adapter adds on top, and all **four optional**
+verbs — `completeProject` plus the intake trio (`listIntake`, `promote`,
+`resolveIntake`) — which this adapter **supports**. (An earlier revision titled
 this section "13" while the table already held more — the table is authoritative.)
 
 ### Reads
@@ -437,6 +438,7 @@ this section "13" while the table already held more — the table is authoritati
 | **`getEligibleWork()`**         | `WorkItem[]` of candidate work for the dispatch policy (issues for the configured team `connection.team.key`, `includeArchived: false`)                                                                                                                                                                                                                                                                                                                                         | `mcp__plugin_linear_linear__list_issues`                                                                                         | `LINEAR_LIST_LINEAR_ISSUES`                                                               |
 | **`getInbox(agent)`**           | the agent's inbox (see shape below) — assigned-to-me + @mentions + new comments since the last tick                                                                                                                                                                                                                                                                                                                                                                             | `list_issues` (assignee filter) + `mcp__plugin_linear_linear__list_comments`                                                     | `LINEAR_LIST_LINEAR_ISSUES` + `LINEAR_LIST_COMMENTS`                                      |
 | **`getRelations(item)`**        | the typed relation graph (`blocks/blockedBy/children/relatedTo/duplicateOf`) for a single item                                                                                                                                                                                                                                                                                                                                                                                  | `mcp__plugin_linear_linear__get_issue` (returns relations)                                                                       | `LINEAR_GET_LINEAR_ISSUE`                                                                 |
+| **`listIntake(source)`** _(optional verb — **supported** here)_ | the reports waiting in one configured intake source, normalized to `IntakeReport` (`{ id, sourceId, reference, title, body, reporter, createdAt, status, links[] }`). `reference` is the issue identifier; `status` is the display state name (the reporter's own vocabulary, never matched on); `links[]` is the identifiers of work items already related to the report, which is what makes `promote` idempotent. Where to read is `source.coordinates` — see the intake note below. | `list_issues` (team/project/label filter from `source.coordinates`, `includeArchived: false`) | `LINEAR_RUN_QUERY_OR_MUTATION` (team-scoped issues query — the list slug has no team filter) |
 | **`getBacklogSnapshot()`**      | the GROOM input (`grooming-backlog`): EVERY non-archived item regardless of state — open items fully normalized (relations, re-namespaced labels, project `stateCategory`), plus closed items at least as `{ identifier, title, stateCategory }` for duplicate/shipped matching. Unlike `getEligibleWork`, nothing is filtered toward dispatch; the snapshot feeds `scripts/audit-backlog.ts` as `{ items, opts: { agentIdentity } }`. See "Building the groom snapshot" below. | `list_issues` paginated with **no state filter** + `list_projects` + `list_issue_statuses` (category map) + label-group recovery | `LINEAR_RUN_QUERY_OR_MUTATION`, paginated (see the snapshot notes)                        |
 
 ### Writes (all confined here; the single audit surface)
@@ -451,13 +453,55 @@ this section "13" while the table already held more — the table is authoritati
 | **`needsInput(item, question)`**                                               | The elicitation primitive — **four atomic effects**: (1) post the question as a `comment` (multiple-choice when possible, carrying the marker); (2) apply the `agent/needs-input` label; (3) `assignToHuman`; (4) **stop** (the loop parks here). Resumes only on a non-agent reply (see `getInbox`).                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                     | `save_comment` + `save_issue` (label + assignee)               | `LINEAR_CREATE_LINEAR_COMMENT` + `LINEAR_UPDATE_ISSUE`                                                  |
 | **`link(a, b, type)`**                                                         | Creates a typed relation (`blocks`, `related`, `duplicate`, …) between two items. Typed relations live in the graph, never in description prose.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                          | `save_issue` (relation)                                        | `LINEAR_UPDATE_ISSUE`                                                                                   |
 | **`createSubIssue(parent, spec)`**                                             | Creates a child issue under `parent` (sub-issue promotion: fires only when `sizeOrdinal(size) >= sizeOrdinal(decomposition.subIssueThreshold)`, threshold default `"xl"`). The new issue's canonical home is the per-task `issue` field in `03-tasks.json`.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                               | `mcp__plugin_linear_linear__save_issue` (parentId set)         | `LINEAR_CREATE_LINEAR_ISSUE`                                                                            |
+| **`promote(report, target)`** _(optional verb — **supported** here)_ | Puts a report onto the work side and **records the link back**, in that order. `{ create }` creates a new issue in `source.promoteTo.team` (or the configured `connection.team` when it is `null`) and then relates it to the report issue; `{ attachTo }` relates the report to an existing issue and creates nothing. **Idempotent against the report:** read the report's relations first — a report already related to a work issue returns that issue rather than creating a second. Never moves, retypes, or copies the report. | `save_issue` (create) + `save_issue` (relation) | `LINEAR_CREATE_LINEAR_ISSUE` + `LINEAR_RUN_QUERY_OR_MUTATION` (`issueRelationCreate`) |
+| **`resolveIntake(report, outcome)`** _(optional verb — **supported** here)_ | Closes the loop on the reporter's own issue: moves it to the state named by `source.outcomes[outcome.exit]` (resolved by display name on the report's team, since these are the reporter's words) and posts `outcome.message` as a comment when the exit carries one. `duplicate` additionally creates a `duplicate` relation to the original report. All six exits resolve; `junk` resolves silently (state only, no comment). **Degradation:** a source with no configured state for an exit falls back to the nearest state of the right category (`canceled` for decline/junk, `completed` for duplicate) and says which it used. Never moves the report to the work team and never relabels it as work. | `save_issue` (stateId) + `save_comment` | `LINEAR_UPDATE_ISSUE` + `LINEAR_CREATE_LINEAR_COMMENT` |
 | **`completeProject(project, outcome)`** _(optional verb — **supported** here)_ | Moves a whole **project** (not an issue) into a terminal state: `outcome: 'completed'` when its work shipped, `'canceled'` when it was abandoned. Linear's project `state` accepts only `backlog \| planned \| started \| completed \| canceled`. **Never move a project to `completed`/`canceled` while it holds open issues** — dispatch drops the issues of a terminal project, so an open issue left inside one vanishes from the ready queue and the starvation count permanently, and only a human reading the tracker ever finds it. So **verify from live data at call time**: list the project's issues (project filter, `includeArchived: false`), resolve each category, and if any is `backlog`/`unstarted`/`started`, **refuse loudly** and name them — never trust an issue list the caller passed in. Idempotent: already in the requested terminal state is a no-op; the _other_ terminal state is a real change and re-runs the check. **Degradation:** via Composio the project's own `state` reads back `null` on `LINEAR_LIST_LINEAR_PROJECTS`, so read it from a GraphQL `projects` query, where it is populated; if neither the state nor the issue list can be read, **refuse** rather than guess that an unseen project is empty. | `save_project` (project `state`)                               | `LINEAR_RUN_QUERY_OR_MUTATION` (`projectUpdate`, id + state as real GraphQL variables; check `success`) |
 
-`completeProject` is the contract's one **optional** verb (contract `1.1.0`, SPEC
-section 3, _Optional verbs_). This adapter declaring it **supported** is what lets
-a caller name it — and a caller must still carry its own fallback, since another
-tracker's adapter may not support it. One honest caveat on that declaration: the
-Composio binding is the verified path, while the **MCP tool name has not been
+#### The intake trio — reading a queue that is NOT the backlog
+
+`listIntake` / `promote` / `resolveIntake` (contract `1.2.0`) serve TRIAGE's
+intake path, and the whole point of them is that a **report is not a work item**:
+it belongs to whoever filed it, its state is their receipt, and this adapter must
+link to it rather than move it. Four things this adapter owns:
+
+- **Coordinates are config, never inline.** `source.coordinates` is a flat
+  string map, and this adapter understands exactly four keys: `teamKey`, `teamId`
+  (the team the reports live in), `projectId`, and `label` (either narrowing the
+  set further). An unrecognized key is a **configuration error — refuse loudly**
+  rather than quietly pulling the wrong queue. There is no default: a source
+  with no coordinates cannot be read, and saying so beats guessing.
+- **Reports must never enter the work candidate set.** `getEligibleWork` and
+  `getBacklogSnapshot` are scoped to `connection.team`; when an intake source
+  lives in its **own** team (the clean arrangement) that separation is automatic.
+  When a source is a narrowed slice of the SAME team (a label, a project), this
+  adapter must **exclude that slice** from both reads — otherwise raw reporter
+  prose reaches the dispatch queue, which is the exact failure the intake path
+  exists to prevent.
+- **Reports carry no `agent/*` or `stage/*` labels.** They are not on the spine.
+  Do not apply readiness to a report, ever; readiness belongs to the work item
+  `promote` created.
+- **The state vocabulary belongs to the source.** `source.outcomes` names the
+  reporter-facing states by **display name** — the one place in this adapter
+  where a display name is the right thing to match on, because those words are
+  what the reporter reads. Resolve them against the report team's states
+  (`list_issue_statuses`), and if a named state does not exist, refuse rather
+  than picking something adjacent and silently telling the reporter the wrong
+  thing.
+
+Honest caveat on the declaration: the bindings above reuse calls this adapter
+already verifies elsewhere (issue list/create/update, comment create, relation
+create), and the pass they implement was run by hand once end to end before it
+was written down — but the three verbs have **not** been exercised as verbs
+against a live workspace. Treat the first run of each as a verification run: read
+back the report and the created issue after the first promote and the first
+resolve, and confirm the link and the state landed.
+
+`completeProject` and the intake trio are the contract's four **optional** verbs
+(contract `1.2.0`, SPEC section 3, _Optional verbs_). This adapter declaring them
+**supported** is what lets a caller name them — and a caller must still carry its
+own fallback, since another tracker's adapter may not support them. One honest
+caveat on `completeProject` specifically: the Composio binding is the verified
+path, while the **MCP tool name has not been
 exercised against a live server**. Before the first write on the `mcp` transport,
 list the server's tools and find the project-write **sibling of `save_issue`** —
 `save_project` on this server family, `update_project` on an older one. If neither

@@ -4,7 +4,8 @@
   "connection": {
     "team": { "key": null, "id": null },
     "workspace": { "slug": null },
-    "transport": "cli"
+    "transport": "cli",
+    "intake": []
   },
   "identity": { "agent": "auto", "reviewer": null, "marker": "— 🤖 /flow" },
   "ownership": {
