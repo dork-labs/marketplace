@@ -84,8 +84,26 @@ const FlowRunStatusSchema: z.ZodType<FlowRunStatus> = z.enum([
  * fourth surface would discard EVERY in-flight run on the machine. The vocabulary
  * is pinned in prose where the emitter reads it; the schema only refuses the wrong
  * *type*.
+ *
+ * **`looseObject`, not `object`, and that is load-bearing.** A strict object
+ * STRIPS unknown keys, and this store is read-modify-write: `writeFlowRun` parses
+ * the whole file, mutates one run, and writes all of them back. Under a strict
+ * schema, a v1 reader touching one run would silently DELETE a v2 field from every
+ * OTHER run on disk — a signature field destroyed by a process that never looked at
+ * that run. Passing unknown keys through makes the store forward-compatible with
+ * writers newer than the reader, which on a machine where several sessions share
+ * one file is the normal case, not the exotic one. It also means an unknown field
+ * is preserved rather than validated: that is the trade, and it is the right one
+ * here, because the alternative is not "reject it" but "destroy it".
+ *
+ * The same reasoning is why `v` is a strict number and not coerced from a numeric
+ * string. `v` is written by THIS code (it is the one field no harness derives), so
+ * a string `v` is a malformed record rather than a version this reader is too old
+ * to understand — and quietly coercing it would hide the writer that is getting the
+ * format wrong. Forward compatibility is about unknown FIELDS, not mistyped known
+ * ones.
  */
-const FlowRunProvenanceSchema: z.ZodType<FlowRunProvenance> = z.object({
+const FlowRunProvenanceSchema: z.ZodType<FlowRunProvenance> = z.looseObject({
   v: z.number().int().positive().optional(),
   harness: z.string().optional(),
   sessionId: z.string().optional(),
@@ -104,8 +122,14 @@ const FlowRunProvenanceSchema: z.ZodType<FlowRunProvenance> = z.object({
  * reader validates against. Drift between this and the `FlowRun` interface is
  * caught at compile time: {@link parseFlowState} returns `Record<string, FlowRun>`,
  * so any field this schema omits (or mistypes) fails that assignment to compile.
+ *
+ * `looseObject` for the same reason the provenance schema uses it, one level up:
+ * the store is read-modify-write over a file several sessions share, so a reader
+ * older than the writer must pass unknown fields THROUGH rather than strip them.
+ * Stripping here would mean writing one run silently deletes a newer field from
+ * every other run in the file.
  */
-export const FlowRunSchema = z.object({
+export const FlowRunSchema = z.looseObject({
   issueId: z.string(),
   identifier: z.string(),
   sessionId: z.string(),

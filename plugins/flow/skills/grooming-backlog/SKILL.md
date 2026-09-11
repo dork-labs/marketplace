@@ -248,3 +248,9 @@ respecting its bulk-write guidance:
 - **The engine reads descriptions.** `## Validation criteria` and
   `## On Completion` are load-bearing (DONE routes follow-ups from the
   latter); write them specific to the item or do not mark it ready.
+- **A description rewrite re-signs, it does not accumulate.** Any description
+  this sweep rewrites carries the provenance signature as its last line, and
+  **replaces** the signature already there rather than appending a second one —
+  a description write replaces the whole field, and two signatures in one body
+  leave a reader picking arbitrarily. The sweep rewrites descriptions in bulk, so
+  it is the single likeliest place to grow duplicates.

@@ -218,13 +218,14 @@ describe('flow-state serializer — canonical JSON round-trips', () => {
 
 describe('flow-state provenance — where the run came from', () => {
   /**
-   * A fully-populated provenance block: every field a harness could determine.
+   * A fully-populated provenance block: every field a harness could determine,
+   * including the outward-signature fields (`v`, `account`, `instanceId`,
+   * `surface`, `resumeUrl`).
    *
-   * This is also the round-trip proof for the outward-signature fields (`v`,
-   * `account`, `instanceId`, `surface`, `resumeUrl`). Zod objects STRIP unknown
-   * keys, so a field the emitter writes but the schema omits vanishes silently on
-   * read — the block would look stamped and come back half-empty. Keeping this
-   * fixture exhaustive is what makes that failure loud.
+   * Keeping it exhaustive is what proves the DECLARED set round-trips with its
+   * types intact. Undeclared fields are a separate guarantee, covered by the
+   * forward-compatibility test below — the schema is a `looseObject`, so an
+   * unknown field survives rather than being stripped.
    */
   const fullProvenance = {
     v: 1,
@@ -290,6 +291,30 @@ describe('flow-state provenance — where the run came from', () => {
       JSON.stringify({ 'issue-1': { ...flowRun(), provenance: { host: 42 } } })
     );
     expect(readFlowState(store)).toEqual({});
+  });
+
+  it('a v1 reader does not DESTROY a newer field written by a v2 writer', () => {
+    // The store is read-modify-write over a file several sessions share. Under a
+    // strict schema, touching ONE run would strip an unknown field from every
+    // OTHER run in the file — a signature field deleted by a process that never
+    // looked at that run. This is the regression that would reintroduce it.
+    const store = memoryStore(
+      JSON.stringify({
+        'issue-future': {
+          ...flowRun({ issueId: 'issue-future' }),
+          futureRunField: 'kept',
+          provenance: { harness: 'future-harness', futureSignatureField: 'kept-too' },
+        },
+      })
+    );
+
+    // A v1 reader writes a DIFFERENT run, rewriting the whole file as it goes.
+    writeFlowRun(store, flowRun({ issueId: 'issue-node-1' }));
+
+    const untouched = JSON.parse(store.dump() ?? '{}')['issue-future'];
+    expect(untouched.futureRunField).toBe('kept');
+    expect(untouched.provenance.futureSignatureField).toBe('kept-too');
+    expect(untouched.provenance.harness).toBe('future-harness');
   });
 
   it('updateFlowRunStatus can attach provenance to an existing run', () => {

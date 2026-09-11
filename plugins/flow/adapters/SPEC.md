@@ -1,6 +1,6 @@
 # Tracker Adapter Contract
 
-> **Contract version: 1.1.0** (semver). See [Versioning](#5-versioning).
+> **Contract version: 1.2.0** (semver). See [Versioning](#5-versioning).
 >
 > This is the **generic, tracker-neutral** contract every `/flow` tracker adapter
 > must satisfy. It names no tracker, no API, and no slug. Reference adapters
@@ -292,7 +292,17 @@ universal and worth stating once:
 
 - **Must do.** Post a comment on the item. The agent's own comments **must carry
   the agent identity marker** so the comment-response rules recognize them (and
-  never answer themselves) in shared-account mode.
+  never answer themselves) in shared-account mode, **and must carry the
+  `agent:provenance` signature** ([`../docs/provenance.md`](../docs/provenance.md))
+  as the body's last line, so a later reader can route a reply back to the session
+  that wrote it. The two are not substitutes: the marker is visible and answers
+  "did I write this?", the signature is hidden and answers "which runtime, session,
+  account and machine wrote this?".
+- **Degradation (signature).** A tracker that mangles or strips HTML comments
+  cannot carry the signature. Such an adapter **says so in its skill** and posts
+  the comment unsigned — routing degrades to "unsigned thread", which readers
+  already handle. It never ships a mangled line, and it never omits the marker,
+  which is plain text and survives everywhere.
 - **Durability.** Durable (a posted comment persists). Idempotency is best-effort:
   avoid duplicate posts on retry (for example by checking recent comments), since a
   comment is user-visible.
@@ -323,9 +333,10 @@ universal and worth stating once:
 
 - **Must do.** The elicitation primitive: **four atomic effects** in order: (1)
   post the `question` as a comment (multiple-choice when possible, carrying the
-  marker); (2) apply the `agent/needs-input` label; (3) `assignToHuman`; (4)
-  **stop** (the loop parks here). Resumes only on a non-agent reply surfaced by
-  `getInbox`.
+  marker **and the `agent:provenance` signature** — this is the write whose entire
+  purpose is to be replied to, so the reply has to be routable); (2) apply the
+  `agent/needs-input` label; (3) `assignToHuman`; (4) **stop** (the loop parks
+  here). Resumes only on a non-agent reply surfaced by `getInbox`.
 - **Durability.** **Durable park, idempotent.** "Parked on a human" is a distinct
   durable state the stall sweep must never reclaim. Order the effects so the
   durable label lands before the stop, and a retry after a partial failure
@@ -351,7 +362,10 @@ universal and worth stating once:
 - **Must do.** Create a child item under `parent` (sub-issue promotion, which
   fires when `size` meets or exceeds the configured threshold). Return the created
   item **normalized as a `WorkItem`**, so the caller records its `identifier` as
-  the task's canonical home.
+  the task's canonical home. The description it authors **carries the
+  `agent:provenance` signature** as its last line, under the same degradation rule
+  as `comment`. A later write to that description **replaces** the signature rather
+  than appending a second one — there is no ordering rule inside one body.
 - **Durability.** Durable. Should guard against duplicate creation on retry
   (idempotency by a stable key where the tracker supports one).
 - **Degradation.** A tracker without parent/child nesting falls back to a
@@ -515,6 +529,13 @@ declaration.
 
 ### What each version added
 
+- **1.2.0** - outward writes carry the **`agent:provenance` signature**
+  ([`../docs/provenance.md`](../docs/provenance.md)) alongside the identity marker:
+  `comment`, `needsInput`'s question, and the description `createSubIssue` authors.
+  Additive, with a documented degradation (a tracker that mangles HTML comments
+  posts unsigned and says so), so an adapter declaring `1.1.0` still conforms — it
+  simply produces threads that route as unsigned. Adopters SHOULD re-validate to
+  adopt it.
 - **1.1.0** - added the first **optional** verb, `completeProject` (section 3),
   and the [optional-verb semantics](#optional-verbs) that make absence safe:
   declared support, a documented caller degradation, and absence-is-never-an-error.

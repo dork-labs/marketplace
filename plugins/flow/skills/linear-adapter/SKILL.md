@@ -289,6 +289,13 @@ Each of these cost a failed batch on 2026-08-03; none produces a helpful error:
   syntax for: X". **Pass all prose through real GraphQL variables** —
   `mutation($id: String!, $desc: String!) { issueUpdate(id: $id, input: { description: $desc }) { success } }`
   — never string-interpolated into the query body.
+- **A description write REPLACES the whole field — including any signature
+  already in it.** Read the current description, strip any `agent:provenance` /
+  `flow:provenance` line, then write the new body with exactly one signature as
+  its last line. Appending without stripping leaves two signatures in one field
+  and no rule for which a reader should believe. Note that the signature's JSON
+  can legitimately contain a `$`, so it goes through a real GraphQL variable like
+  any other description prose (see the trap above).
 - **A label write REPLACES the entire label set.** `issueUpdate`'s `labelIds`
   is not additive. Compute the union against a **fresh read taken immediately
   before the write** — a union computed from an earlier snapshot silently
@@ -517,7 +524,7 @@ this section "13" while the table already held more — the table is authoritati
 | **`attachEvidence(item, evidence)`**                                           | Attaches proof-of-completion (browser recording, test summary, PR link) to the issue via its external URLs / attachment links per `evidence.attachTo`.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                    | `save_issue` (links/attachments)                               | `LINEAR_UPDATE_ISSUE`                                                                                   |
 | **`needsInput(item, question)`**                                               | The elicitation primitive — **four atomic effects**: (1) post the question as a `comment` (multiple-choice when possible, carrying the marker **and the `agent:provenance` line** — this is the one write whose whole purpose is to be replied to, so the reply has to be routable); (2) apply the `agent/needs-input` label; (3) `assignToHuman`; (4) **stop** (the loop parks here). Resumes only on a non-agent reply (see `getInbox`).                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                     | `save_comment` + `save_issue` (label + assignee)               | `LINEAR_CREATE_LINEAR_COMMENT` + `LINEAR_UPDATE_ISSUE`                                                  |
 | **`link(a, b, type)`**                                                         | Creates a typed relation (`blocks`, `related`, `duplicate`, …) between two items. Typed relations live in the graph, never in description prose.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                          | `save_issue` (relation)                                        | `LINEAR_UPDATE_ISSUE`                                                                                   |
-| **`createSubIssue(parent, spec)`**                                             | Creates a child issue under `parent` (sub-issue promotion: fires only when `sizeOrdinal(size) >= sizeOrdinal(decomposition.subIssueThreshold)`, threshold default `"xl"`). The new issue's canonical home is the per-task `issue` field in `03-tasks.json`.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                               | `mcp__plugin_linear_linear__save_issue` (parentId set)         | `LINEAR_CREATE_LINEAR_ISSUE`                                                                            |
+| **`createSubIssue(parent, spec)`**                                             | Creates a child issue under `parent` (sub-issue promotion: fires only when `sizeOrdinal(size) >= sizeOrdinal(decomposition.subIssueThreshold)`, threshold default `"xl"`). The new issue's canonical home is the per-task `issue` field in `03-tasks.json`. The description it authors carries the **`agent:provenance` signature** as its last line; a later rewrite of that description **replaces** the signature rather than appending a second one.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                               | `mcp__plugin_linear_linear__save_issue` (parentId set)         | `LINEAR_CREATE_LINEAR_ISSUE`                                                                            |
 | **`completeProject(project, outcome)`** _(optional verb — **supported** here)_ | Moves a whole **project** (not an issue) into a terminal state: `outcome: 'completed'` when its work shipped, `'canceled'` when it was abandoned. Linear's project `state` accepts only `backlog \| planned \| started \| completed \| canceled`. **Never move a project to `completed`/`canceled` while it holds open issues** — dispatch drops the issues of a terminal project, so an open issue left inside one vanishes from the ready queue and the starvation count permanently, and only a human reading the tracker ever finds it. So **verify from live data at call time**: list the project's issues (project filter, `includeArchived: false`), resolve each category, and if any is `backlog`/`unstarted`/`started`, **refuse loudly** and name them — never trust an issue list the caller passed in. Idempotent: already in the requested terminal state is a no-op; the _other_ terminal state is a real change and re-runs the check. **Degradation:** via Composio the project's own `state` reads back `null` on `LINEAR_LIST_LINEAR_PROJECTS`, so read it from a GraphQL `projects` query, where it is populated; if neither the state nor the issue list can be read, **refuse** rather than guess that an unseen project is empty. | `save_project` (project `state`)                               | `LINEAR_RUN_QUERY_OR_MUTATION` (`projectUpdate`, id + state as real GraphQL variables; check `success`) |
 
 `completeProject` is the contract's one **optional** verb (contract `1.1.0`, SPEC
@@ -540,122 +547,41 @@ transport and use the `cli` path instead.
 
 ## Provenance: signing outward writes
 
-**This section is the canonical spec for the provenance signature. Every other
-flow skill references it and none redefines it.** It lives here because this
-skill is the single audit surface for tracker writes — but the convention itself
-is **runtime-agnostic on purpose**: any harness, inside DorkOS or not, can emit
-it, and any reader can parse it without knowing flow exists.
-
-### Why
-
-An outward write is a dead end today. A human reads an agent's comment, replies
-with a question, and nothing in the thread says _which session_ could answer it —
-so the reply either waits for a human or gets picked up by a fresh session that
-has to rebuild the context from scratch. One machine-readable line fixes that: a
-later reader can **route a follow-up back to the originating session**.
-
-### The marker line
-
-Append **one line, as the LAST line** of any body the agent writes outward:
+Every body this adapter writes outward — every `comment`, the `needsInput`
+question, any description it authors — carries a hidden, machine-readable
+signature line as its **last** line, so a later reader can route a follow-up back
+to the session that wrote it:
 
 ```
-<!-- agent:provenance {"v":1,"harness":"claude-code","sessionId":"…","account":"work","host":"build-box.local","surface":"dorkos","instanceId":"…","resumeUrl":"…"} -->
+<!-- agent:provenance {"v":1,"harness":"claude-code","sessionId":"…","account":"work","host":"…","surface":"dorkos"} -->
 ```
 
-It is an HTML comment, so a human reading the thread never sees it while a
-machine reads it back without parsing prose. Both surfaces this engine writes to
-preserve HTML comments **byte-for-byte** — verified by API round-trip on both
-tracker **issue descriptions and comment bodies**, and long established on the
-forge (PR bodies and PR comments).
+**The canonical spec is [`../../docs/provenance.md`](../../docs/provenance.md) —
+read it there and do not redefine it here.** It owns the marker name, the eight
+wire fields, the per-write cadence, the omit-never-fabricate and valid-JSON
+discipline, the never-an-email rule, the public-repository rules, the emission
+list, and the reader rules. It is tracker-neutral on purpose: every adapter signs
+the same way, so a reader can parse a signature without knowing which tracker
+produced it. Readers also accept the legacy `flow:provenance` name; this adapter
+never emits it.
 
-**Emit `agent:provenance`. Accept `flow:provenance` on READ.** The prefix is
-`agent:` because non-flow sessions emit this too; `flow:provenance` is the
-**legacy name** an earlier revision emitted (same field shape, **no `v` field**).
-A reader must accept both names and treat a missing `v` as `v: 1`. Never emit the
-legacy name.
+What belongs **here** is the part that is specific to this tracker:
 
-### Fields
-
-| Field        | What it is                                                                                                                                                                                                                                                                                                        |
-| ------------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `v`          | Schema version. `1` today. A reader that does not know a higher version reads the fields it recognizes and ignores the rest.                                                                                                                                                                                      |
-| `harness`    | The agent harness, as one of `claude-code` \| `codex` \| `opencode` \| `other:<name>`. The `other:` form keeps the vocabulary open without letting a new harness masquerade as a known one.                                                                                                                        |
-| `sessionId`  | The harness's own session id — the handle a later reader resumes with. Derive it (some harnesses expose it; on others the transcript path encodes it); never guess.                                                                                                                                                |
-| `account`    | A short, **non-PII** handle for the harness account the run authenticated as, so a reader can tell "same machine, different account" from "same session". For claude-code, derive it from the `CLAUDE_CONFIG_DIR` basename, defaulting to `claude` when the variable is unset. **NEVER an email address** (below). |
-| `host`       | This machine's hostname. Load-bearing: a retained transcript is only reachable from the machine holding it, so a host mismatch is what rules local resume out.                                                                                                                                                     |
-| `instanceId` | The DorkOS install's UUID, when the run is under DorkOS. **Omit it outside DorkOS** — it is what tells a reader "this session lives in the install I am talking to" rather than an identically-named one elsewhere.                                                                                                |
-| `surface`    | Where the run was driven from: `dorkos` \| `bare-cli` \| `ci`. It decides the resume _mechanism_, not whether resume is possible.                                                                                                                                                                                  |
-| `resumeUrl`  | A URL that actually opens the session, when one exists **and the session is meaningfully resumable**. A link that resolves to nothing is worse than no link — omit it instead.                                                                                                                                     |
-
-**Emit only what the run actually has.** An omitted field is a fact; an invented
-one is a lie a later reader acts on — it will chase a session that never existed
-and then report a resume it did not perform. If nothing survives, write no line
-at all and say so in the run report rather than shipping an empty blob that looks
-like a stamp.
-
-**This is the one artifact a machine parses, so it has to be valid JSON.**
-JSON-escape every value — quotes, backslashes, newlines, control characters — and
-drop any field whose value you cannot escape safely. A missing field costs one
-lookup; an unescaped quote invalidates the whole blob, and a parser that silently
-gets nothing back is exactly the failure this line exists to prevent.
-
-### `account` is never an email address
-
-**Never put an email address in `account`, or in any other field.** These bodies
-land in trackers and on **public forges**, where a comment is world-readable and
-permanent. `account` exists to _distinguish_ accounts, not to identify a person:
-a stable short handle (`claude`, `work`, `alt`) does the whole job. Same rule for
-every other field — `host` is a hostname, not a person, and nothing here carries
-a real name, an email, or a token.
-
-### In a public repo, a prefix is enough
-
-In a **public** repository an emitter MAY replace `sessionId` with its **first 8
-characters** rather than omitting it. A reader treats any `sessionId` as an
-**opaque token matched locally**: prefix-match it against the sessions this
-machine holds, and if exactly one matches, that is the session. Ambiguous or no
-match degrades to the same place a missing `sessionId` does — a fresh session
-seeded with the thread.
-
-### Which writes carry it
-
-| Write                                                      | Carries the line                                                              |
-| ---------------------------------------------------------- | ----------------------------------------------------------------------------- |
-| `comment(item, body)`                                      | **Yes** — every agent-authored comment, beside `identity.marker`.             |
-| `needsInput(item, question)` (its comment)                 | **Yes** — the write whose entire purpose is to be replied to.                 |
-| A tracker **issue description the agent authors**          | **Yes** — appended as the last line of the description it writes.             |
-| A **PR body**                                              | **Yes** — the once-per-run stamp the VERIFY stage writes (`templates/pr.md`). |
-| A **PR comment**                                           | **Yes**.                                                                      |
-| `claim`, `transition`, `assignToHuman`, `link`             | **No** — a label, state, or assignee write has no body to sign.               |
-| `attachEvidence`                                           | **No** — it writes links, not prose. The PR body it links to is signed.       |
-| A human's text the agent relays **verbatim** on their behalf | **No** — signing someone else's words as the agent's own is a lie.           |
-
-### Provenance and `identity.marker` are different things
-
-They coexist on the same comment and neither replaces the other:
-
-- **`identity.marker`** (`— 🤖 /flow`) is **human- and self-facing**: it is
-  visible, and it is how the comment-response rules recognize the agent's own
-  writes in shared-account mode (rule 1). It stays exactly as it is.
-- **`agent:provenance`** is **machine-facing**: invisible, structured, and about
-  _routing_ — which runtime, which session, which account, which machine.
-
-A comment stripped of its marker breaks self-recognition; a comment stripped of
-its provenance breaks routing. Write both.
-
-### Reading it back
-
-Scan the body for **either** accepted marker name and parse the JSON. In a thread
-with several signed comments, **the newest signature wins** — it is the session
-most likely to still be alive. A blob that fails to parse is treated as absent,
-never as partially trusted: half a parsed line is how a reader ends up resuming
-the wrong session.
-
-The routing decision itself — deliver into that session, start a fresh one, or
-handle it here and say so — belongs to the team-member loop
-(`tending-tracker`, "Routing a reply back to its originating session"), not to
-this adapter. This skill defines the signature; that skill decides what to do
-with it.
+- **Round-trip verified.** This tracker preserves HTML comments **byte-for-byte**
+  in both issue descriptions and comment bodies — confirmed by API round-trip on
+  both surfaces. So the signature survives a write→read cycle intact and the
+  reader rules can rely on it.
+- **A human editing in the rich-text editor can strip the line.** The tracker's
+  editor is rich-text, not raw markdown, and a person editing around a hidden
+  comment can drop it without noticing. That is expected, and it is why the reader
+  rule treats a missing signature as "route as unsigned" rather than as evidence
+  about the session.
+- **Description writes go through the `$word` and replace-whole-field traps**
+  documented under "Bulk-write traps" above. The signature is prose inside the
+  description field, so it is passed as a real GraphQL variable like any other
+  description text, and a description write **replaces** the field — which is why
+  the canonical spec requires dropping an existing signature before appending a
+  new one rather than accumulating two.
 
 ---
 

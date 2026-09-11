@@ -89,7 +89,7 @@ interface PMClient {
   getRelations(item: WorkItem): Promise<WorkItemRelations>;
   claim(item: WorkItem): Promise<void>; // durable agent/claimed label + state
   transition(item: WorkItem, toCategory: StateCategory): Promise<void>;
-  comment(item: WorkItem, body: string): Promise<void>; // carries identity.marker
+  comment(item: WorkItem, body: string): Promise<void>; // carries identity.marker + the agent:provenance signature
   assignToHuman(item: WorkItem): Promise<void>;
   attachEvidence(item: WorkItem, evidence: EvidencePlan): Promise<void>;
   needsInput(item: WorkItem, question: string): Promise<void>; // park on human
@@ -149,9 +149,15 @@ FlowRun {
   heartbeatAt?;                 // v2 (concurrent) liveness — unused in v1
   startedAt, completedAt?;
   provenance?;                  // v/harness/session/account/worker/host/instance/surface/resumeUrl
-                                //   — where the run came from, and the block signed outward
+                                //   — where the run came from; its wire subset is the
+                                //   agent:provenance signature (docs/provenance.md)
 }
 ```
+
+The eight-field **wire subset** of `provenance` is the `agent:provenance`
+signature every outward write carries — specified, tracker-neutrally, in
+[`provenance.md`](./provenance.md). `worktreePath` and the delegated worker id
+stay local: they are a run record, not a wire format.
 
 The **checkpoint is the git commit + the JSONL session**, so the next-tick
 recovery ladder **resumes** (re-attach the worktree at HEAD, `resume` the

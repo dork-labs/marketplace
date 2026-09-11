@@ -13,9 +13,10 @@
 
   The optional `agent:provenance` line at the bottom is the machine-readable
   record of where this change came from — schema version, harness, session,
-  account, machine, and (under DorkOS) install, surface, and a resume URL. Its
-  shape is defined once, by the tracker adapter skill's "Provenance: signing
-  outward writes" section; this template only carries it. Emit only the fields
+  account, machine, surface, and (under DorkOS) install and a resume URL. Its
+  shape is defined once, in docs/provenance.md; this template only carries it,
+  and this PR-body stamp is the one place the signature is written ONCE PER RUN
+  rather than per write. Emit only the fields
   the run actually determined and drop the line entirely when it determined none:
   an omitted field is honest, an invented one sends the next session chasing a
   worker that never existed. It is the one thing here a machine parses, so every
@@ -77,11 +78,17 @@ by default, so plan assumptions surface here at the review gate.}
 🤖 Generated with [Claude Code](https://claude.com/claude-code)
 
 <!-- Provenance: the line below ships `v` (always 1) plus the two fields any run can
-     determine. Add `harness`, `sessionId`, `account`, `agentId`, `worktree`, and — only
-     under DorkOS — `instanceId`, `surface`, `resumeUrl`, if you actually determined them.
+     determine. Add `harness`, `sessionId`, `account`, `surface`, and — under DorkOS only —
+     `instanceId` and `resumeUrl`, if you actually determined them. Those eight fields are
+     the WHOLE wire format: `worktree`, `branch` and the worker id stay in flow-state.json —
+     an absolute worktree path is /Users/<real name>/… and this body can be public forever,
+     and the PR already shows its own branch.
      JSON-escape every value, and drop any field you cannot escape safely — this line
      is machine-parsed, so one stray quote invalidates all of it. Nothing to say? Delete
-     the line rather than shipping empty placeholders. `account` is a short non-PII handle,
-     never an email address. Readers also accept the legacy `flow:provenance` name; emit
-     `agent:provenance`. -->
-<!-- agent:provenance {"v":1,"host":"{host}","branch":"{branch}"} -->
+     the line rather than shipping empty placeholders. `account` is a short non-PII handle
+     for the HARNESS account, never an email address and never the tracker account. In a
+     PUBLIC repo: truncate `sessionId` to 8 chars, omit `resumeUrl`, and consider omitting
+     `host` (a stock macOS hostname is Firstname-Lastname-MacBook-Pro.local). Readers also
+     accept the legacy `flow:provenance` name; emit `agent:provenance`. Full spec:
+     docs/provenance.md. -->
+<!-- agent:provenance {"v":1,"host":"{host}","surface":"{surface}"} -->
