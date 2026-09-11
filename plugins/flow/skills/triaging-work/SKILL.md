@@ -39,17 +39,28 @@ skill's.
 
 Read the adapter skill's contract before acting.
 
-## Two entry shapes
+## Three entry shapes
 
-TRIAGE handles two shapes of input. Decide which one applies first.
+TRIAGE handles three shapes of input. Decide which one applies first.
 
-| Input                                                                                        | Path                                  |
-| -------------------------------------------------------------------------------------------- | ------------------------------------- |
-| **Freeform text / a file** that is not yet a work item (a brief, idea, bug, question)        | **A. Intake** — classify, then create |
-| **An existing captured item** awaiting evaluation (e.g. an `idea` sitting in intake/backlog) | **B. Evaluate** — judge, then route   |
+| Input                                                                                         | Path                                  |
+| --------------------------------------------------------------------------------------------- | ------------------------------------- |
+| **Freeform text / a file** that is not yet a work item (a brief, idea, bug, question)         | **A. Intake** — classify, then create |
+| **An existing captured item** awaiting evaluation (e.g. an `idea` sitting in intake/backlog)  | **B. Evaluate** — judge, then route   |
+| **A report from an outside party**, sitting in a configured intake source (see _Path C_)      | **C. Report** — promote, do not move  |
 
-If the trigger names a specific item, take path B. Otherwise treat the input as
-freeform and take path A.
+If the input came from a configured intake source, take path C. Otherwise, if the
+trigger names a specific item, take path B. Otherwise treat the input as freeform
+and take path A.
+
+**Path C is off unless it is configured**, so an adopter who has not set up an
+intake source behaves exactly as before — two paths, unchanged. See _Path C_ for
+the config key and the optional adapter verbs it needs.
+
+> **On the name.** Path A is already called Intake, and it keeps that name: it is
+> where freeform text becomes a work item. Path C is named for what arrives —
+> a **report**, from somebody who is not on the team and who is owed an answer.
+> The two are not variants of one job, and the difference is the next section.
 
 ## Path A — Intake (classify freeform input)
 
@@ -148,7 +159,110 @@ freeform and take path A.
    empty.
 6. **Leave a provenance trail and report** (see _Provenance_ below).
 
-## Provenance (both paths)
+## Path C — Report (promote an outside report into work)
+
+**Off by default.** Path C runs only when the install's flow config carries a
+`connection.intake` list naming one or more intake sources. With no such key
+this path does not exist and TRIAGE behaves exactly as Paths A and B describe.
+Everything install-specific — which queue, which labels, which status
+vocabulary — is config, never this skill.
+
+It also needs three **optional** adapter verbs: `listIntake`, `promote` and
+`resolveIntake`. They are optional in the adapter contract (see
+`building-adapters`), so no existing adapter breaks by not having them; an
+adapter that lacks them simply cannot serve Path C, and says so.
+
+### Why this is a third path and not a setting on Path B
+
+**A report and the work it might cause are two objects with two lifecycles.**
+The report's life belongs to the reporter — received, acknowledged, resolved,
+told. The work's life belongs to the team — backlog, in progress, shipped.
+Three reasons they cannot be one object:
+
+1. **The report is the reporter's receipt.** Something outside the tracker
+   usually watches its state to tell them where it got to. Move it and that
+   promise breaks.
+2. **Many reports, one fix.** Five reports of one bug cannot all become the item
+   that fixes it.
+3. **Most reports are not work at all**, and raw reporter prose is never
+   dispatchable.
+
+So the rule is: **link, do not move, and do not mirror.**
+
+Path B is close but wrong for this, and wrong in a specific way: it **converts in
+place**. Accept there means transitioning *this* item and marking it
+`agent/ready`. Do that to a report and you hand raw user prose, in the wrong
+queue, to a dispatching agent — and you destroy the receipt. Path B also has no
+split (one item in, one out), no "this is more evidence for something we already
+have", and no concept of an outside party owed a reply.
+
+Path C's difference from Path B is one word: **promote, not convert.**
+
+### The six exits
+
+Every report leaves by exactly one of these. The set is not invented here — it is
+what the established triage queues, support desks and product-feedback tools
+independently converged on, which is the reason to trust that it is complete.
+
+| Exit          | Work side                    | Reporter sees                |
+| ------------- | ---------------------------- | ---------------------------- |
+| **Duplicate** | none                         | merged, follows the original |
+| **Promote**   | new work item, linked        | accepted                     |
+| **Attach**    | link to existing work item   | accepted                     |
+| **Needs info**| none                         | question asked               |
+| **Decline**   | none                         | reason given                 |
+| **Junk**      | none                         | silent close                 |
+
+### The order, which is the load-bearing part
+
+Run these in order. The ordering is not stylistic — steps 1, 4 and 7 do not
+exist anywhere else in flow, and step 1 being first is what makes the rest cheap.
+
+1. **Dedupe first.** Before reading the report closely, search both the intake
+   source and the work tracker for the same thing. This is the cheapest filter
+   and it changes the answer to every later step: a hand-run over 12 reports
+   found that dedupe-first shrank one promote from a feature build to a copy fix,
+   and stopped another from being filed as a regression of an item that was
+   already Done. Dedupe is a **set** operation and its cost amortises — one pull
+   serves the whole batch — so **batch the reading and serialise the writing**.
+2. **Validate.** Is it intelligible, reproducible, and about this product? An
+   unintelligible report exits **Needs info**; one that is not about this product
+   exits **Junk**.
+3. **Classify.** What kind of thing is being reported — defect, request,
+   question, praise? Use Path A's rubric for the vocabulary. Note that this is
+   the **reporter's claim**, not the team's verdict; keep the two in separate
+   fields if the tracker allows it, and never overwrite a triage verdict with a
+   reporter's guess.
+4. **Split.** One report may carry several concerns. Each becomes its own exit —
+   a report can Promote once and Attach once. Do not average them into a single
+   outcome.
+5. **Decide whether it is work at all.** Most feedback is not. Praise, a
+   question already answered in the docs, a preference nobody will act on: these
+   exit **Decline** with a reason, and that is a complete, respectful answer.
+6. **Promote and link.** For a Promote, create the work item in the work tracker
+   via the adapter's `promote` verb: a clean imperative title written by you, a
+   description that states the problem rather than pasting the prose, and a
+   **link back to the report**. For an Attach, add the link to the existing item.
+   The new item then enters the ordinary flow — route it simple-vs-complex and
+   ready it exactly as Path B step 4 does. The report itself is **never** given
+   `agent/ready` and never gets a `stage/*` label; it is not work.
+7. **Close the loop.** Resolve the report via `resolveIntake` with the outcome
+   and, for Decline and Needs info, the reason or the question. Somebody outside
+   the team is waiting. A report that was silently actioned reads to them as a
+   report that was ignored.
+
+### Gates
+
+- **Decline, Junk and Needs info are outward-facing** — they are a reply to a
+  person outside the team. That makes them floor-level gates under the standard
+  rule below: present and ask before sending, at any confidence.
+- **Promote and Attach are inward** and need no gate of their own beyond the
+  ordinary ones the created item passes.
+- **Never move, never mirror.** If you find yourself copying the report's body
+  into the work item, or transitioning the report into the work tracker, stop —
+  that is the failure this path exists to prevent.
+
+## Provenance (all three paths)
 
 After any triage action, via the adapter post a structured next-steps
 comment so the item stays self-documenting:
