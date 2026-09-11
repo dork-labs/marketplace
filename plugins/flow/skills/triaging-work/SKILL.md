@@ -19,8 +19,8 @@ description: The /flow engine's TRIAGE stage — classify and route incoming wor
 > legacy `/pm` command bundled seven jobs (intake, triage, the autonomous loop,
 > dispatch, audit, project-status management, the review dashboard); per spec
 > §1/§10 those split apart — the **loop engine** (claim → carry to the review gate)
-> is a later stage's concern, and a separate **audit** skill owns workspace-health
-> checks. TRIAGE does not run the loop, dispatch work, or audit the workspace.
+> is a later stage's concern, and a separate **audit** skill owns backlog-health
+> checks. TRIAGE does not run the loop, dispatch work, or audit the backlog.
 >
 > **This is a prose contract, not code.** The agent reads this skill and follows
 > it. A thin `/flow:triage` command and a PM-driven transition are two **triggers**

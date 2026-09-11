@@ -1,14 +1,14 @@
 ---
 name: grooming-backlog
-description: The /flow engine's backlog GROOM — a whole-tracker corrective sweep that makes the backlog honestly dispatchable. Audits every open item against the fourteen groom invariants, closes shipped/duplicate/junk work with cited evidence, reconciles projects with the repo's real programme structure, classifies and gates every survivor, then verifies the result with the audit-backlog and dispatch oracles. Use when the dispatch queue starves, after a large programme lands, before enabling autonomous mode, or whenever the tracker has drifted from reality. `check` mode is the read-only audit half. PM-agnostic; all tracker I/O routes through the adapter skill.
+description: The /flow engine's backlog GROOM — a whole-backlog corrective sweep that makes the configured team's backlog honestly dispatchable. Audits every open item against the fourteen groom invariants, closes shipped/duplicate/junk work with cited evidence, reconciles projects with the repo's real programme structure, classifies and gates every survivor, then verifies the result with the audit-backlog and dispatch oracles. Use when the dispatch queue starves, after a large programme lands, before enabling autonomous mode, or whenever the tracker has drifted from reality. `check` mode is the read-only audit half. PM-agnostic; all tracker I/O routes through the adapter skill.
 ---
 
-# Grooming the Backlog — the whole-tracker sweep
+# Grooming the Backlog — the whole-backlog sweep
 
 > **Flow root.** This skill lives at `<flow-root>/skills/grooming-backlog/SKILL.md`. If you reached it via a symlink (`.claude/skills/flow__*` or `.agents/skills/flow__*`), resolve the real path first (`realpath <path>`): the flow root is two directories above the skill directory. Every `<flow-root>/...` reference below is relative to that root.
 
 > **What this is.** The periodic corrective sweep over the WHOLE backlog — the
-> workspace-health audit that TRIAGE's scope note reserves for "a separate audit
+> backlog-health audit that TRIAGE's scope note reserves for "a separate audit
 > skill." Where TRIAGE shapes one item and the hygiene loop only _detects_
 > starvation, a groom fixes the tracker itself: it closes work that is already
 > done, merges duplicates, retires dead projects, routes everything un-triaged,
@@ -40,6 +40,20 @@ duplicate state) are the adapter's job to surface, and this skill's job to route
 out of existence during phase 3.
 
 Read the adapter skill's contract before acting.
+
+## Scope: one team, not the whole workspace
+
+The snapshot the adapter hands you covers **one team** — the team the
+configured connection names — not every team the tracker account can reach. That
+boundary is the groom's scope, and it is load-bearing in both directions. An item
+outside it is not yours to relabel, close, or reassign even when it plainly
+violates an invariant: report it as out of scope, exactly as phase 7 reports
+another session's in-flight work. And the cost of getting this wrong is not
+untidiness — a workspace's other teams routinely hold live intake, where the
+items are open conversations with real people rather than backlog, so an
+over-broad write pass sends a stranger a cancellation nobody can take back. If a
+snapshot arrives carrying identifiers from more than one team, **stop and fix the
+read** before grooming anything.
 
 ## Modes
 

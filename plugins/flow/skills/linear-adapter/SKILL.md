@@ -129,6 +129,26 @@ name } } }` to recover the namespace (reconstruct `agent/ready` as
   below for writes and simple lookups; reach for GraphQL when you need the full
   dispatch-ready shape.
 
+- **`LINEAR_RUN_QUERY_OR_MUTATION`'s input key is `query_or_mutation` — not
+  `query`.** The payload is
+  `-d '{"query_or_mutation": "<the query>", "variables": { … }}'`. A `query` key
+  fails Composio's own schema validation with `Unknown key` before the call ever
+  reaches Linear, so the error names your payload, not your GraphQL (verified
+  against `composio` v0.2.31, 2026-09-09).
+
+- **Team scope is the adapter's job on every read — nothing in the API supplies
+  it.** `getBacklogSnapshot` and `getEligibleWork` are **team-scoped** reads: the
+  team is the configured `connection.team.id` / `connection.team.key`, never
+  "whatever the account can see". Via GraphQL, scope through the team node —
+  `team(id: "<teamId>") { issues(…) }` — and never a top-level `issues(…)`. Via
+  the field-poor list slug there is no team filter to pass at all (see below), so
+  **post-filter the results by identifier prefix** (`<teamKey>` + `-`) before any
+  policy or write pass consumes them. A workspace holds many teams — the
+  reference workspace has five, one of them a user-feedback intake team whose
+  issues are live conversations with real people — so an unscoped read hands the
+  groom's write pass items it must never relabel, close, or reassign (verified
+  hazard, 2026-09-10).
+
 - **Slugs are doubly-prefixed; there is no `LINEAR_GET_ISSUE`.** The verbs are
   `LINEAR_LIST_LINEAR_ISSUES`, `LINEAR_GET_LINEAR_ISSUE`,
   `LINEAR_LIST_LINEAR_PROJECTS`, `LINEAR_GET_LINEAR_PROJECT`,
@@ -141,17 +161,36 @@ name } } }` to recover the namespace (reconstruct `agent/ready` as
   category), `estimate` (the `size`), `priority`, `labels.nodes`, `project`,
   `parent`. **Caveat:** its `relations` field comes back `null` via Composio — the
   typed `blocks/blockedBy` graph that feeds dispatch eligibility is **not**
-  reliably populated. Treat a missing graph as "no known blockers" (neutral), and
-  cross-check the dependency graph another way before trusting it.
+  reliably populated. A `null` here means **unknown**, never "no blockers":
+  "neutral" is only how the dispatch policy _ranks_ an absent graph (see
+  _Graceful degradation_), and reading it as a finding is how a blocked item gets
+  claimed. Cross-check the graph the reliable way before any decision rests on
+  it.
+- **The relation graph has exactly one reliable read: GraphQL, through the team
+  node.** For any decision that depends on the graph — dispatch blockers, a
+  duplicate adjudication, a cross-team sweep — request
+  `relations { nodes { type relatedIssue { identifier state { type } } } }`
+  (plus `inverseRelations` for the incoming edges) inside
+  `team(id: "<teamId>") { issues(…) }` via `LINEAR_RUN_QUERY_OR_MUTATION`, and
+  treat every other path's answer as unknown (verified 2026-09-09). The
+  cross-team case is the one that bites: a related issue's `identifier` carries
+  its own team prefix, so an edge can point **out** of the configured team. Read
+  those edges — "blocked by another team's item" is exactly what the graph is for
+  — but never write to the far end of one: the sweep's scope stays the
+  `<teamKey>`-prefixed items, and the related issue is evidence, not work.
 - **`LINEAR_LIST_LINEAR_ISSUES` has a tiny filter schema — no team filter.**
   Allowed top-level keys are only `after, first, project_id, assignee_id,
 original_cursor, include_transitions, cursor_was_corrupted`. There is **no
   `team_id`** (passing it is silently dropped on the first call and hard-errors on
   a paginated one) and **no `include_archived`**. Scope to a project with
-  `project_id`; there is no team scoping, but the configured `trackerAccount`
-  connects to a single workspace (`connection.workspace.slug`), so the unfiltered
-  list is already team-correct (the `--account <trackerAccount>` guard is what
-  keeps any other connected account — e.g. `artblocks` — out, not a filter).
+  `project_id`; there is no team scoping at all, and **the unfiltered list is
+  WORKSPACE-wide, not team-scoped.** One account reaches every team in the
+  workspace it connects to (`connection.workspace.slug`), so
+  `--account "<trackerAccount>"` prevents cross-**account** leakage only — it is
+  what keeps any other connected account (e.g. `artblocks`) out, and it is not a
+  team filter. Post-filter by identifier prefix, per the team-scope rule above
+  (verified against a five-team workspace, 2026-09-10 — an account that connects
+  to one workspace is not thereby scoped to one team).
 - **Response shapes:** list → `.data.issues[]` + `.data.page_info{ hasNextPage,
 endCursor }` (**not** `.data.items`); get → `.data.issue`; projects →
   `.data.projects[]`; teams → `.data.teams[]`. When a call needs the team id, use
@@ -200,24 +239,44 @@ issueId`. The casing convention varies per slug; trust the validation error's
 first, before, includeArchived`. To read one issue's comments back (the
   round-trip check), use `LINEAR_GET_LINEAR_ISSUE` — its `comments.nodes` carries
   them — or a GraphQL `issue(id:){ comments { nodes { id body } } }`.
+- **Text search is GraphQL-only; no `LINEAR_SEARCH*` slug is worth reaching
+  for.** The working pattern is one `LINEAR_RUN_QUERY_OR_MUTATION` read:
+  `searchIssues(term: $q, first: N, includeArchived: false) { nodes { identifier title state { type } } }`
+  (verified 2026-09-09). It searches the whole workspace and **returns cross-team
+  results**, so scope or post-filter it by identifier prefix exactly as for the
+  list slug before a policy or write pass touches the hits — search is the
+  easiest place to pull another team's issues in by accident.
 
 #### Building the groom snapshot (`getBacklogSnapshot()` via Composio)
 
-Verified against the live workspace during the first groom (2026-08-03):
+Verified against the live workspace during the first groom (2026-08-03);
+team-scoping corrected 2026-09-10.
 
+- **Every pull goes through the team node.** All three issue pulls below — core
+  fields, the relation graph, and the closed titles — are
+  `team(id: "<teamId>") { issues(…) }`, never a top-level `issues(…)`. This is
+  not hygiene: the groom's write pass ingests whatever the snapshot contains, so
+  a snapshot carrying a sibling team's items lets it relabel, cancel, or reassign
+  issues that are user-facing communication surfaces — a user-feedback intake
+  team's items are somebody's open conversation, not backlog (verified hazard,
+  2026-09-10). Check the pulled identifiers all carry the `<teamKey>` prefix
+  before handing the snapshot on.
 - **The GraphQL complexity cap is 10000, and `relations` are expensive.** A
-  plain-field issues query paginates fine at `first: 150-250`; adding
-  `relations` + `inverseRelations` + `children` costs roughly 230 points per
-  issue, so the relation pull needs `first: 40` or less. Build the snapshot as
-  **two paginated pulls merged by identifier** — core fields at 150, the
-  relation graph at 40 — rather than one query that trips the cap.
-- Pull closed items separately as titles only
-  (`filter: { state: { type: { in: ["completed","canceled"] } } }`, `first: 250`)
+  plain-field `team(id:) { issues }` query paginates fine at `first: 150-250`;
+  adding `relations` + `inverseRelations` + `children` costs roughly 230 points
+  per issue, so the relation pull needs `first: 40` or less. Build the snapshot
+  as **two paginated team-scoped pulls merged by identifier** — core fields at
+  150, the relation graph at 40 — rather than one query that trips the cap.
+- Pull closed items separately as titles only, through the same team node
+  (`team(id:) { issues(filter: { state: { type: { in: ["completed","canceled"] } } }, first: 250) }`)
   — the duplicate/shipped matching passes need names, not full bodies.
 - Re-namespace labels (leaf → `family/leaf`) and resolve state categories
   exactly as for `getEligibleWork`; project `state` DOES come back on a direct
   GraphQL `projects` query (unlike `LINEAR_LIST_LINEAR_PROJECTS`), so prefer
-  GraphQL here — the groom's dead-project checks (GRM-9/GRM-11) need it.
+  GraphQL here — the groom's dead-project checks (GRM-9/GRM-11) need it. A
+  project is a workspace-level object and can span teams, so narrow the project
+  set to the ones the snapshot's own items reference rather than handing the
+  groom every project the account can see.
 
 #### Bulk-write traps (the groom write pass)
 
@@ -242,6 +301,14 @@ Each of these cost a failed batch on 2026-08-03; none produces a helpful error:
 canceled`. `paused` is rejected with "No project status found for type
   paused" even though Linear the product has the concept. Use `backlog` for
   "real work, not shipped, not active".
+- **`projectCreate` rejects a description longer than 255 characters** —
+  "description must be shorter than or equal to 255 characters" (verified
+  2026-09-10). A project's description is a one-line summary field, not a body,
+  so a programme charter pasted into it fails the whole mutation. Write a single
+  sentence there and put the long prose — the `## Goal` / `## Scope` /
+  `## Anchor & provenance` sections of
+  `<flow-root>/templates/records/project.md` — on the project's **umbrella
+  issue** (the `type/meta` anchor), which has no such cap.
 - **Never close a project out by hand.** Moving a project to
   `completed`/`canceled` goes through the **`completeProject`** verb (writes
   table above), which owns the open-issues guardrail and the live-data check
@@ -437,7 +504,7 @@ this section "13" while the table already held more — the table is authoritati
 | **`getEligibleWork()`**         | `WorkItem[]` of candidate work for the dispatch policy (issues for the configured team `connection.team.key`, `includeArchived: false`)                                                                                                                                                                                                                                                                                                                                         | `mcp__plugin_linear_linear__list_issues`                                                                                         | `LINEAR_LIST_LINEAR_ISSUES`                                                               |
 | **`getInbox(agent)`**           | the agent's inbox (see shape below) — assigned-to-me + @mentions + new comments since the last tick                                                                                                                                                                                                                                                                                                                                                                             | `list_issues` (assignee filter) + `mcp__plugin_linear_linear__list_comments`                                                     | `LINEAR_LIST_LINEAR_ISSUES` + `LINEAR_LIST_COMMENTS`                                      |
 | **`getRelations(item)`**        | the typed relation graph (`blocks/blockedBy/children/relatedTo/duplicateOf`) for a single item                                                                                                                                                                                                                                                                                                                                                                                  | `mcp__plugin_linear_linear__get_issue` (returns relations)                                                                       | `LINEAR_GET_LINEAR_ISSUE`                                                                 |
-| **`getBacklogSnapshot()`**      | the GROOM input (`grooming-backlog`): EVERY non-archived item regardless of state — open items fully normalized (relations, re-namespaced labels, project `stateCategory`), plus closed items at least as `{ identifier, title, stateCategory }` for duplicate/shipped matching. Unlike `getEligibleWork`, nothing is filtered toward dispatch; the snapshot feeds `scripts/audit-backlog.ts` as `{ items, opts: { agentIdentity } }`. See "Building the groom snapshot" below. | `list_issues` paginated with **no state filter** + `list_projects` + `list_issue_statuses` (category map) + label-group recovery | `LINEAR_RUN_QUERY_OR_MUTATION`, paginated (see the snapshot notes)                        |
+| **`getBacklogSnapshot()`**      | the GROOM input (`grooming-backlog`): EVERY non-archived item **of the configured team** regardless of state — open items fully normalized (relations, re-namespaced labels, project `stateCategory`), plus closed items at least as `{ identifier, title, stateCategory }` for duplicate/shipped matching. Unlike `getEligibleWork`, nothing is filtered toward dispatch; the snapshot feeds `scripts/audit-backlog.ts` as `{ items, opts: { agentIdentity } }`. See "Building the groom snapshot" below. | `list_issues` paginated with a **team** filter and **no state filter** + `list_projects` + `list_issue_statuses` (category map) + label-group recovery | `LINEAR_RUN_QUERY_OR_MUTATION`, paginated (see the snapshot notes)                        |
 
 ### Writes (all confined here; the single audit surface)
 

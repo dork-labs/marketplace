@@ -137,6 +137,22 @@ describe('linear-adapter SKILL.md — prose-contract completeness', () => {
     expect(skill).not.toContain('a171dbd5');
   });
 
+  it('states that backlog reads are TEAM-scoped, and that the account flag is not a team filter', () => {
+    // The skill used to say the unfiltered list was "already team-correct"
+    // because the account connects to a single workspace. A workspace holds many
+    // teams (the reference workspace has five, one of them a user-feedback
+    // intake team), so that conflated WORKSPACE with TEAM — and a groom that
+    // ingests a sibling team's items can cancel issues that are live
+    // conversations with real people. The corrected contract must carry both
+    // halves: the GraphQL scoping form, and the post-filter for the list slug
+    // that has no team filter to pass.
+    expect(skill).toContain('team(id:');
+    expect(skill).toMatch(/post-filter[^.]*identifier prefix/i);
+    expect(skill).toMatch(/WORKSPACE-wide, not team-scoped/);
+    // The retired claim must not come back in any form.
+    expect(skill).not.toMatch(/already team-correct/i);
+  });
+
   it('calls out the MCP-must-be-authenticated-as-trackerAccount footgun', () => {
     // Selecting the `mcp` transport silently acts as whoever OAuth'd the server
     // unless it is the same identity as trackerAccount — the adapter must warn.
