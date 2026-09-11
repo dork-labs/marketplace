@@ -148,7 +148,8 @@ FlowRun {
   attemptCount; workerPid;      // v1 single-machine liveness
   heartbeatAt?;                 // v2 (concurrent) liveness — unused in v1
   startedAt, completedAt?;
-  provenance?;                  // harness/session/worker/host — where the run came from
+  provenance?;                  // v/harness/session/account/worker/host/instance/surface/resumeUrl
+                                //   — where the run came from, and the block signed outward
 }
 ```
 

@@ -217,12 +217,25 @@ describe('flow-state serializer — canonical JSON round-trips', () => {
 });
 
 describe('flow-state provenance — where the run came from', () => {
-  /** A fully-populated provenance block: every field a harness could determine. */
+  /**
+   * A fully-populated provenance block: every field a harness could determine.
+   *
+   * This is also the round-trip proof for the outward-signature fields (`v`,
+   * `account`, `instanceId`, `surface`, `resumeUrl`). Zod objects STRIP unknown
+   * keys, so a field the emitter writes but the schema omits vanishes silently on
+   * read — the block would look stamped and come back half-empty. Keeping this
+   * fixture exhaustive is what makes that failure loud.
+   */
   const fullProvenance = {
+    v: 1,
     harness: 'example-harness',
     sessionId: 'harness-session-77',
+    account: 'example-account',
     agentId: 'worker-3',
     host: 'build-box.local',
+    instanceId: '2f9c1e6a-0000-4000-8000-abcdefabcdef',
+    surface: 'dorkos',
+    resumeUrl: 'https://example.invalid/session/harness-session-77',
     worktree: '/Users/x/.dork/workspaces/core/DOR-123',
     branch: 'dork/DOR-123',
   } as const;

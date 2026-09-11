@@ -41,7 +41,9 @@ Run this on each inbox poll. It is a loop, not a one-shot stage:
    below (see "Resolve identity once per tick").
 1. **Poll the inbox** — via the adapter, `getInbox(agent)`.
 2. **For each entry, decide respond / act / ignore** — the five comment-response
-   rules, driven by `classifyOwnership`.
+   rules, driven by `classifyOwnership`. When the verdict is a reply to whoever
+   started the thread, **route it** first (see "Routing a reply back to its
+   originating session").
 3. **Act on what you own** — claim eligible work with a durable label, advance it
    through the stage skills, or resume a parked item.
 4. **When genuinely stuck, hand off** — soft-escalation routed by identity mode:
@@ -141,6 +143,38 @@ Then the rules:
 `comments.respondWhen: "addressed"` and `comments.ambiguousBias: "quiet"` are the
 §9 defaults; re-tuning chattiness is a config edit, never a code change.
 
+#### Routing a reply back to its originating session
+
+A `respond` or `resume` verdict answers _whether_ to reply. This answers **where
+the reply should land** — and it runs **before** you act on the thread, not after
+you have already written into the wrong session.
+
+Every outward write an agent makes is signed with a machine-readable provenance
+line (the shape is defined once, by the adapter skill's "Provenance: signing
+outward writes" section; readers accept both the current `agent:provenance` name
+and the legacy `flow:provenance` one). So: **parse the NEWEST agent provenance in
+the thread** — newest wins, because it is the session most likely to still be
+alive — and route on what it says. A blob that fails to parse counts as absent.
+
+| What the newest signature says                                                                 | Where the follow-up goes                                                                                                                                                                                                                                                                                             |
+| ---------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **(a)** Same `host`, same `harness`, and that `sessionId` is **still resumable**                | **Deliver the follow-up INTO that session.** For `surface: "bare-cli"`, resume the harness session directly (`--resume <sessionId>`). For `surface: "dorkos"` **and an `instanceId` matching this install**, post the follow-up as a message to that session (`POST /api/sessions/<id>/messages`) so it lands in the live run. |
+| **(b)** Same `host`, but the session is **gone** (no transcript, no live run, resume refused)   | **Start a fresh session seeded with the thread** — the item, the full comment thread, and the provenance you read. The context is rebuilt from durable artifacts, which is exactly what they are for.                                                                                                                 |
+| **(c)** A **different `host`**, or a different DorkOS `instanceId`                             | **Handle it in the current session, and say so in the reply.** Cross-machine routing is a **recorded future step, not something to fake**: name in the reply that the originating session lives on another machine and was not reached, so nobody believes a handoff happened.                                        |
+| **No signature at all** (an unsigned or human-authored thread)                                 | Same as **(b)** — fresh session seeded with the thread. Absence of a signature is not evidence of a dead session, so never claim you resumed one.                                                                                                                                                                    |
+
+Two rules bind this:
+
+- **A `sessionId` is an opaque token you match locally.** An emitter in a public
+  repo may have shipped only its first 8 characters, so prefix-match against the
+  sessions this machine holds. Exactly one match is the session; ambiguous or no
+  match degrades to **(b)**.
+- **Silence about which path you took is not allowed.** The tick report **names
+  the path** — `(a)` delivered into session `<id>`, `(b)` fresh session seeded,
+  `(c)` handled here, originating session on `<host>`. A resume that silently
+  became a fresh session is the failure this whole convention exists to prevent,
+  and an unreported one is indistinguishable from a working resume.
+
 ### 3. Act on what you own — durable label claims
 
 When the tick surfaces eligible, unclaimed work the agent should pick up:
@@ -166,7 +200,11 @@ The agent's outbound moves on the board, all via the adapter:
 
 - **`comment(item, body)`** — post a comment. The agent's own comments **always
   carry `identity.marker`** so rule 1 can recognize them next tick (essential in
-  shared mode).
+  shared mode), **and always carry the provenance signature** so the next reader
+  can route a reply back to this session. The two are not substitutes: the marker
+  is visible and answers "did I write this?", the signature is hidden and answers
+  "which runtime, session, account and machine wrote this?". Every reply this loop
+  writes is signed — including the replies it posts on threads it did not start.
 - **`assignToHuman(item)`** — set the assignee to the reviewer / authenticated
   human (fires a tracker notification). Used at handoff and the review gate. In
   **shared-account** mode this notifies no one (agent and human are the same
@@ -245,6 +283,13 @@ re-parking.
 - **Recognize your own writes by the marker**, especially in shared-account mode —
   a missing marker on the agent's own comment can trigger a self-reply or
   self-resume loop.
+- **Sign every outward write, and never sign it with a person.** The provenance
+  line goes on every comment the agent authors; it carries a short non-PII account
+  handle and **never an email address**, because these bodies land on trackers and
+  public forges where a comment is world-readable and permanent.
+- **Never claim a routing path you did not take.** Report `(a)`, `(b)`, or `(c)`
+  honestly. "Resumed the session" when you actually started a fresh one is the one
+  lie that makes the whole signature worthless.
 - **All tracker I/O through the adapter.** No tracker strings in this skill.
   If the tracker is unavailable, explain the limitation clearly rather than
   guessing or fabricating inbox state.

@@ -65,7 +65,10 @@ const FlowRunStatusSchema: z.ZodType<FlowRunStatus> = z.enum([
 
 /**
  * The on-disk validator for {@link FlowRunProvenance} — the run's origin
- * (harness, session, worker, machine, worktree, branch).
+ * (version, harness, session, account, worker, machine, install, surface, resume
+ * URL, worktree, branch). It is the same block that gets signed outward onto every
+ * body the run writes to a tracker or forge, so a field dropped here is a field a
+ * later reader never gets.
  *
  * **Every field is optional**, which is the schema encoding the omit-never-fabricate
  * rule: a harness that cannot determine a field leaves it out, and the record
@@ -73,12 +76,25 @@ const FlowRunStatusSchema: z.ZodType<FlowRunStatus> = z.enum([
  * provenance existed keep parsing rather than being rejected wholesale (which,
  * given {@link parseFlowState}'s all-or-nothing posture, would throw away every
  * other in-flight run alongside them).
+ *
+ * `harness` and `surface` are validated as bare strings even though each has a
+ * documented vocabulary (`claude-code | codex | opencode | other:<name>` and
+ * `dorkos | bare-cli | ci`). A `z.enum` here would be a liability, not rigor: this
+ * reader is all-or-nothing, so one record written by a future harness that names a
+ * fourth surface would discard EVERY in-flight run on the machine. The vocabulary
+ * is pinned in prose where the emitter reads it; the schema only refuses the wrong
+ * *type*.
  */
 const FlowRunProvenanceSchema: z.ZodType<FlowRunProvenance> = z.object({
+  v: z.number().int().positive().optional(),
   harness: z.string().optional(),
   sessionId: z.string().optional(),
+  account: z.string().optional(),
   agentId: z.string().optional(),
   host: z.string().optional(),
+  instanceId: z.string().optional(),
+  surface: z.string().optional(),
+  resumeUrl: z.string().optional(),
   worktree: z.string().optional(),
   branch: z.string().optional(),
 });
