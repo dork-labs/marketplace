@@ -63,9 +63,26 @@
           "default": "cli",
           "type": "string",
           "enum": ["cli", "mcp"]
+        },
+        "intake": {
+          "default": [],
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "id": {
+                "type": "string"
+              },
+              "name": {
+                "type": "string"
+              }
+            },
+            "required": ["id"],
+            "additionalProperties": false
+          }
         }
       },
-      "required": ["team", "workspace", "transport"],
+      "required": ["team", "workspace", "transport", "intake"],
       "additionalProperties": false
     },
     "identity": {

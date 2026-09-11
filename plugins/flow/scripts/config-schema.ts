@@ -108,6 +108,22 @@ export const ConnectionWorkspaceSchema = z
  * `config.local.json`. `transport` is shared policy and stays in committed config
  * (default `cli`, the account-pinned path).
  */
+/**
+ * One intake source — a queue of reports from outside the team that TRIAGE's
+ * Path C may promote into work (`triaging-work`, _Path C — Report_).
+ *
+ * A report is not a work item and never becomes one: Path C links, it does not
+ * move or mirror. The `id` is whatever the adapter's intake verbs address the
+ * queue by; `name` is for saying which queue a report came from when reporting
+ * to a human.
+ */
+export const IntakeSourceSchema = z.object({
+  /** Tracker-native id of the queue, opaque outside the adapter. */
+  id: z.string(),
+  /** Human label for reports and prompts. */
+  name: z.string().optional(),
+});
+
 export const ConnectionSchema = z
   .object({
     /** Team coordinates (key + id). */
@@ -116,6 +132,17 @@ export const ConnectionSchema = z
     workspace: ConnectionWorkspaceSchema,
     /** Primary access path — account-pinned `cli` (default) or in-session `mcp`. */
     transport: TransportSchema.default('cli'),
+    /**
+     * Queues of outside reports TRIAGE's Path C may promote from.
+     *
+     * **Empty by default, and that is the whole opt-in.** With no source
+     * configured Path C does not exist and TRIAGE behaves exactly as it did with
+     * two paths, so an adopter who does not run an intake queue is unaffected.
+     * Populating it also requires an adapter that declares the optional intake
+     * trio (`listIntake`, `promote`, `resolveIntake`); an adapter without them
+     * cannot serve this and says so rather than improvising.
+     */
+    intake: z.array(IntakeSourceSchema).default([]),
   })
   .prefault({});
 
