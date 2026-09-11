@@ -7,9 +7,11 @@
 This README is **the manual**. See [`SPEC.md`](./docs/SPEC.md) for the contract (the
 stage model, the `PMClient` promotion surface, the config schema, the `FlowRun`
 record, and the typed engine), [`CHARTER.md`](./docs/CHARTER.md) for the 15 goals the
-system is audited against, and the published [guide series](./docs/)
-on dorkos.ai for the user-facing reference. These three docs and the guides ship
-**with** the package (charter G15), under [`docs/`](./docs/).
+system is audited against, [`provenance.md`](./docs/provenance.md) for the
+tracker-neutral signature every outward write carries (so a later reader can route a
+follow-up back to the session that wrote it), and the published
+[guide series](./docs/) on dorkos.ai for the user-facing reference. These docs and
+the guides ship **with** the package (charter G15), under [`docs/`](./docs/).
 
 > [!IMPORTANT]
 > **Autonomous mode depends on a running DorkOS server (Pulse). Manual mode does
