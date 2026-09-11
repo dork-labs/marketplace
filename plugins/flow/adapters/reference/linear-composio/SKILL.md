@@ -71,6 +71,11 @@ empirically verified against the live DorkOS workspace; trust them over a slug's
   `.data.data.team` (note the **double** `data`). Reach for the per-verb slugs
   below for writes and simple lookups; reach for GraphQL for the full
   dispatch-ready read shape.
+- **The input key is `query_or_mutation`, not `query`.** The payload is
+  `-d '{"query_or_mutation": "<the query>", "variables": { ... }}'`; a `query` key
+  fails Composio's schema validation with `Unknown key` before the call reaches
+  Linear, so the error names the payload rather than the GraphQL (verified
+  2026-09-09).
 - **Slugs are doubly-prefixed; there is no `LINEAR_GET_ISSUE`.** The verbs are
   `LINEAR_LIST_LINEAR_ISSUES`, `LINEAR_GET_LINEAR_ISSUE`,
   `LINEAR_LIST_LINEAR_PROJECTS`, `LINEAR_GET_LINEAR_PROJECT`,
@@ -86,10 +91,17 @@ empirically verified against the live DorkOS workspace; trust them over a slug's
   Allowed keys are only `after, first, project_id, assignee_id, original_cursor,
 include_transitions, cursor_was_corrupted`. There is **no `team_id`** (passing
   it is silently dropped on the first call and hard-errors on a paginated one) and
-  **no `include_archived`**. Scope to a project with `project_id`; the configured
-  `trackerAccount` connects to a single workspace (`connection.workspace.slug`), so
-  the unfiltered list is already team-correct (the `--account "<trackerAccount>"`
-  guard, not a filter, keeps any other connected account out).
+  **no `include_archived`**. Scope to a project with `project_id`; there is no team
+  scoping at all, and **the unfiltered list is WORKSPACE-wide, not team-scoped**.
+  One account reaches every team in the workspace it connects to
+  (`connection.workspace.slug`), so `--account "<trackerAccount>"` prevents
+  cross-ACCOUNT leakage only - it keeps any other connected account out, and it is
+  not a team filter. Scope reads through the team node in a
+  `LINEAR_RUN_QUERY_OR_MUTATION` read (`team(id: "<teamId>") { issues(...) }`), or
+  post-filter the list slug's results by identifier prefix (`<teamKey>` + `-`),
+  before any policy or write pass consumes them: a workspace holds many teams, and
+  a sibling team's issues can be live user-facing conversations that a sweep must
+  never relabel or close (verified against a five-team workspace, 2026-09-10).
 - **Response shapes.** list -> `.data.issues[]` + `.data.page_info{ hasNextPage,
 endCursor }` (**not** `.data.items`); get -> `.data.issue`; projects ->
   `.data.projects[]`; teams -> `.data.teams[]`.
