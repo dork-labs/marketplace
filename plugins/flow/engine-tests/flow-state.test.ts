@@ -217,12 +217,26 @@ describe('flow-state serializer — canonical JSON round-trips', () => {
 });
 
 describe('flow-state provenance — where the run came from', () => {
-  /** A fully-populated provenance block: every field a harness could determine. */
+  /**
+   * A fully-populated provenance block: every field a harness could determine,
+   * including the outward-signature fields (`v`, `account`, `instanceId`,
+   * `surface`, `resumeUrl`).
+   *
+   * Keeping it exhaustive is what proves the DECLARED set round-trips with its
+   * types intact. Undeclared fields are a separate guarantee, covered by the
+   * forward-compatibility test below — the schema is a `looseObject`, so an
+   * unknown field survives rather than being stripped.
+   */
   const fullProvenance = {
+    v: 1,
     harness: 'example-harness',
     sessionId: 'harness-session-77',
+    account: 'example-account',
     agentId: 'worker-3',
     host: 'build-box.local',
+    instanceId: '2f9c1e6a-0000-4000-8000-abcdefabcdef',
+    surface: 'dorkos',
+    resumeUrl: 'https://example.invalid/session/harness-session-77',
     worktree: '/Users/x/.dork/workspaces/core/DOR-123',
     branch: 'dork/DOR-123',
   } as const;
@@ -277,6 +291,30 @@ describe('flow-state provenance — where the run came from', () => {
       JSON.stringify({ 'issue-1': { ...flowRun(), provenance: { host: 42 } } })
     );
     expect(readFlowState(store)).toEqual({});
+  });
+
+  it('a v1 reader does not DESTROY a newer field written by a v2 writer', () => {
+    // The store is read-modify-write over a file several sessions share. Under a
+    // strict schema, touching ONE run would strip an unknown field from every
+    // OTHER run in the file — a signature field deleted by a process that never
+    // looked at that run. This is the regression that would reintroduce it.
+    const store = memoryStore(
+      JSON.stringify({
+        'issue-future': {
+          ...flowRun({ issueId: 'issue-future' }),
+          futureRunField: 'kept',
+          provenance: { harness: 'future-harness', futureSignatureField: 'kept-too' },
+        },
+      })
+    );
+
+    // A v1 reader writes a DIFFERENT run, rewriting the whole file as it goes.
+    writeFlowRun(store, flowRun({ issueId: 'issue-node-1' }));
+
+    const untouched = JSON.parse(store.dump() ?? '{}')['issue-future'];
+    expect(untouched.futureRunField).toBe('kept');
+    expect(untouched.provenance.futureSignatureField).toBe('kept-too');
+    expect(untouched.provenance.harness).toBe('future-harness');
   });
 
   it('updateFlowRunStatus can attach provenance to an existing run', () => {

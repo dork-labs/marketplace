@@ -7,7 +7,7 @@ description: Reference tracker adapter for /flow - Linear reached over the Compo
 
 > **What this is.** A **reference tracker adapter** for the `/flow` engine: a
 > concrete realization of the neutral contract in [`../../SPEC.md`](../../SPEC.md)
-> (contract version `1.1.0`) over **one transport - the Composio CLI**. It owns
+> (contract version `1.2.0`) over **one transport - the Composio CLI**. It owns
 > every Linear call and normalizes Linear into the generic `WorkItem` shape so
 > the dispatch policy and the stage skills run unchanged.
 >
@@ -340,7 +340,12 @@ duplicateOf? }`, every entry in the **human-key `identifier`** form (for
 #### `comment(item, body): void`
 
 - **Call.** `LINEAR_CREATE_LINEAR_COMMENT` with the issue id and body, the body
-  carrying the agent identity marker (for example `- 🤖 /flow`).
+  carrying the agent identity marker (for example `- 🤖 /flow`) **and, as its last
+  line, the `agent:provenance` signature**
+  ([`../../../docs/provenance.md`](../../../docs/provenance.md)). Linear preserves
+  HTML comments byte-for-byte in comment bodies, so no degradation applies here.
+  Pass the body as a real GraphQL variable, never interpolated — the signature's
+  JSON can legitimately contain a `$`.
 - **Durability + degradation.** Durable (a posted comment persists). Idempotency
   is best-effort: check recent comments to avoid a duplicate post on retry, since
   a comment is user-visible. A failed post surfaces loudly and is never silently
@@ -507,5 +512,5 @@ typed), **INV-3** (relation references in human-key form, resolving in-set or
 provably closed), **INV-4** (labels re-namespaced from the flattened Composio
 leaves into the generic families), and **INV-5** (the readiness gate is the
 literal `agent/ready` label, and `getEligibleWork` / `getProjectWork` return the
-broader candidate set, never pre-filtered). It targets contract version `1.1.0`,
+broader candidate set, never pre-filtered). It targets contract version `1.2.0`,
 and **declares `completeProject` supported** (SPEC section 3, _Optional verbs_).

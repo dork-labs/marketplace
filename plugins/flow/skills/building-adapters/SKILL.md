@@ -250,6 +250,14 @@ An adapter is done only when **all** of these hold:
 - [ ] **All 16 required verbs** implemented (8 reads + 8 writes) with their
       durability and degradation notes; reads throw on unreachable, writes never
       report a false success.
+- [ ] **Outward writes are signed.** `comment`, `needsInput`'s question, and the
+      description `createSubIssue` authors carry the `agent:provenance` signature
+      ([`<flow-root>/docs/provenance.md`](../../docs/provenance.md)) as the body's
+      last line, beside the identity marker. The adapter states whether its tracker
+      **preserves HTML comments byte-for-byte** in descriptions and comment bodies:
+      if it mangles or strips them, the adapter says so and posts unsigned (threads
+      route as unsigned, which readers already handle) rather than shipping a
+      mangled line.
 - [ ] **Every optional verb declared** supported or not supported — never left
       unmentioned.
 - [ ] The adapter is the single audit surface: no tracker API string lives in any

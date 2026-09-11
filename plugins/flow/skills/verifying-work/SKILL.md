@@ -240,16 +240,28 @@ bundle to attach, and VERIFY says so rather than inventing one.
 
 A reviewer or a follow-up session should not have to guess where this change came
 from. Carry the run's `provenance` block (written at EXECUTE Phase 0.5, in
-`.dork/flow/flow-state.json`) onto both surfaces:
+`.dork/flow/flow-state.json`) onto both surfaces.
 
-- **On the PR** — append one hidden, machine-readable line to the body:
+**The signature's shape is defined once, in
+[`<flow-root>/docs/provenance.md`](../../docs/provenance.md) — read it there and
+do not redefine it here.** In short: one hidden last line,
+`<!-- agent:provenance {"v":1,…} -->`, carrying `harness`, `sessionId`,
+`account`, `host`, `surface`, and — under DorkOS only — `instanceId` and
+`resumeUrl`. `flow:provenance` is the **legacy name readers still accept**; what
+you EMIT is always `agent:provenance`.
 
-  ```
-  <!-- flow:provenance {"harness":"…","sessionId":"…","agentId":"…","host":"…","worktree":"…","branch":"…"} -->
-  ```
+**The signature itself is per-write: every body written outward carries it, every
+time.** VERIFY changes nothing about that. The **once-per-run** cadence below
+applies to **the PR-body stamp only** — that one artifact is written here and not
+re-stamped on every later push. The comment this stage posts, and every comment
+any later stage or tick posts, carries its own signature like any other outward
+write.
 
-  It is a comment, so a human reading the PR never sees it, and a later session
-  can read it back without parsing prose. `templates/pr.md` carries the same marker.
+- **On the PR** — append the signature as the last line of the body. It is an
+  HTML comment, so a human reading the PR never sees it, and a later session can
+  read it back without parsing prose. `templates/pr.md` carries the same marker.
+  **This is the once-per-run stamp**: written at this gate, not re-written on
+  every subsequent push to the branch.
 
   **This is the one artifact a machine parses, so it has to be valid JSON.**
   JSON-escape every value — quotes, backslashes, newlines, control characters —
@@ -260,21 +272,31 @@ from. Carry the run's `provenance` block (written at EXECUTE Phase 0.5, in
 
 - **On the work item** — via the adapter, and **only with verbs that already
   exist**:
-  - `comment(item, body)` carrying the same block plus the identity `marker`, or
+  - `comment(item, body)` carrying the same signature plus the identity `marker`
+    (the two are different things and both belong on the comment — the marker is
+    how the agent recognizes its own writes, the signature is how a machine
+    routes a reply), or
   - `attachEvidence(item, evidence)` with a link, **when — and only when — the
     provenance includes a resumable session URL** a person or a later tick can
     actually open. A link that resolves to nothing is worse than no link.
 
 **Emit only the fields the run actually has.** Omitted is a fact; invented is a
-lie a later session will act on. If provenance is empty because the harness could
-determine nothing, skip both stamps and say so in the run report rather than
-writing an empty block that looks like a stamp.
+lie a later session will act on. And **never an email address** in `account` or
+anywhere else — a PR body can be world-readable and permanent, and `account` is
+the **harness** account, never the tracker account. If provenance is empty
+because the harness could determine nothing, skip both stamps and say so in the
+run report rather than writing an empty block that looks like a stamp.
 
 **If EXECUTE never ran** — you were triggered straight into VERIFY, so
-`flow-state.json` holds no provenance for this item — stamp what _this_ session
-can determine about itself (its own harness, session, host, worktree, branch) and
-omit the rest. Partial provenance from the verifying session is still a real
-trail; inventing an execution session that never happened is not.
+`flow-state.json` holds no provenance for this item — apply the general rule
+(canonical spec, "Omit, never fabricate"): stamp what _this_ session can
+determine about itself and omit the rest. Partial provenance from the verifying
+session is still a real trail; inventing an execution session that never happened
+is not.
+
+**If the repository is public**, follow the canonical spec's public-repository
+rules before writing either stamp: truncate `sessionId` and omit `resumeUrl`. A
+PR body is the single most public thing this stage writes.
 
 #### Decide the closing form deliberately
 

@@ -7,7 +7,7 @@ description: Reference tracker adapter for /flow - Linear reached over an in-ses
 
 > **What this is.** A **reference tracker adapter** for the `/flow` engine: a
 > concrete realization of the neutral contract in [`../../SPEC.md`](../../SPEC.md)
-> (contract version `1.1.0`) over **one transport - the in-session Linear MCP
+> (contract version `1.2.0`) over **one transport - the in-session Linear MCP
 > server**. It owns every Linear call and normalizes Linear into the generic
 > `WorkItem` shape so the dispatch policy and the stage skills run unchanged.
 >
@@ -272,7 +272,10 @@ duplicateOf? }`, every entry in the **human-key `identifier`** form (for
 #### `comment(item, body): void`
 
 - **Call.** `mcp__plugin_linear_linear__save_comment` with `{ issueId, body }`,
-  the body carrying the agent identity marker (for example `- 🤖 /flow`).
+  the body carrying the agent identity marker (for example `- 🤖 /flow`) **and,
+  as its last line, the `agent:provenance` signature**
+  ([`../../../docs/provenance.md`](../../../docs/provenance.md)). Linear preserves
+  HTML comments byte-for-byte in comment bodies, so no degradation applies here.
 - **Durability + degradation.** Durable (a posted comment persists). Idempotency
   is best-effort: check recent comments to avoid a duplicate post on retry, since
   a comment is user-visible. A failed post surfaces loudly and is never silently
@@ -430,7 +433,7 @@ typed), **INV-3** (relation references in human-key form, resolving in-set or
 provably closed), **INV-4** (labels re-namespaced into the generic families), and
 **INV-5** (the readiness gate is the literal `agent/ready` label, and
 `getEligibleWork` / `getProjectWork` return the broader candidate set, never
-pre-filtered). It targets contract version `1.1.0`, and **declares
+pre-filtered). It targets contract version `1.2.0`, and **declares
 `completeProject` supported with its binding unverified** (SPEC section 3,
 _Optional verbs_) — confirm the project-write tool on first use, per that verb's
 entry.

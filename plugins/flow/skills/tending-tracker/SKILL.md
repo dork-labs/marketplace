@@ -41,7 +41,9 @@ Run this on each inbox poll. It is a loop, not a one-shot stage:
    below (see "Resolve identity once per tick").
 1. **Poll the inbox** — via the adapter, `getInbox(agent)`.
 2. **For each entry, decide respond / act / ignore** — the five comment-response
-   rules, driven by `classifyOwnership`.
+   rules, driven by `classifyOwnership`. When the verdict is a reply to whoever
+   started the thread, **route it** first (see "Routing a reply back to its
+   originating session").
 3. **Act on what you own** — claim eligible work with a durable label, advance it
    through the stage skills, or resume a parked item.
 4. **When genuinely stuck, hand off** — soft-escalation routed by identity mode:
@@ -127,7 +129,12 @@ Then the rules:
    **identity-mode-agnostic**: in shared mode the `identity.marker` (rule 1) is the
    only thing that distinguishes the human's reply from the agent's own. On
    `resume`, re-attach the worktree at HEAD and resume the captured session via
-   `--resume <sessionId>` (read from the item's `FlowRun`) or thread-replay.
+   `--resume <sessionId>` **read from the item's `FlowRun`** — that record is
+   authoritative whenever it exists, and no thread signature overrides it. **When
+   the item has no `FlowRun`** (this machine never claimed it, or the run record
+   was pruned), fall through to "Routing a reply back to its originating session"
+   below, which recovers the session from the thread's signature and degrades to
+   thread-replay when it cannot.
 4. **Stay out of `other`-owned threads unless mentioned.** Rule 2 already handled
    the mention case; an `other`-owned thread with no address is a teammate's
    conversation. → **ignore**.
@@ -140,6 +147,108 @@ Then the rules:
 
 `comments.respondWhen: "addressed"` and `comments.ambiguousBias: "quiet"` are the
 §9 defaults; re-tuning chattiness is a config edit, never a code change.
+
+#### Routing a reply back to its originating session
+
+A `respond` or `resume` verdict answers _whether_ to reply. This answers **where
+the reply should land** — and it runs **before** you act on the thread, not after
+you have already written into the wrong session.
+
+##### Which session is "the originating session"
+
+Answer this first, in this order. The two sources can disagree, and the local
+record wins:
+
+1. **A durable run record for this item is authoritative.** If `flow-state.json`
+   holds a `FlowRun` for the item, its `sessionId` **is** the session to route to
+   — this is the same handle rule 3 already resumes with, and nothing in a thread
+   overrides it. A local record is first-party; a thread signature is a claim
+   copied onto a surface a human can edit.
+2. **Otherwise, read the thread's signature.** For an item with no run record —
+   work this machine never claimed, a thread started by another install, an item
+   another person filed — the signature is the only pointer there is.
+
+Every outward write an agent makes is signed with a machine-readable provenance
+line (the shape is defined once, in
+[`<flow-root>/docs/provenance.md`](../../docs/provenance.md); readers accept both
+the current `agent:provenance` name and the legacy `flow:provenance` one). Read
+it back with the canonical reader rules, of which one is load-bearing here:
+
+**Take the newest signature that is NOT your own.** Newest wins because it is the
+session most likely to still be alive — but this loop signs its own replies, so
+the newest signature on a thread it has already answered **is its own**, and
+routing on it delivers the follow-up straight back into this session: a
+self-delivery cycle that looks exactly like working resume. **Compare each
+signature's `sessionId` against this session's own id and skip the matches**,
+then take the newest of what remains. In shared-account mode this comparison is
+the only discriminator available — `account`, `host` and `harness` are all
+identical between the agent and itself, and the visible `identity.marker` says
+"an agent wrote this", not "which one".
+
+A blob that fails to parse counts as absent, and so does a signature a human
+stripped while editing.
+
+##### Where the follow-up goes
+
+| What the newest not-your-own signature says                                                   | Where the follow-up goes                                                                                                                                                                                                                                                                                             |
+| ---------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **(a)** Same `host`, same `harness`, and that `sessionId` is **still resumable**                | **Deliver the follow-up INTO that session.** For `surface: "bare-cli"`, resume the harness session directly (`--resume <sessionId>`). For `surface: "dorkos"` **and an `instanceId` matching this install**, post the follow-up as a message to that session (`POST /api/sessions/<id>/messages`) so it lands in the live run. |
+| **(b)** Same `host`, but the session is **gone** (no transcript, no live run, resume refused)   | **Start a fresh session seeded with the thread** — the item, the full comment thread, and the provenance you read. The context is rebuilt from durable artifacts, which is exactly what they are for.                                                                                                                 |
+| **(c)** A **different `host`**, or a different DorkOS `instanceId`                             | **Handle it in the current session, and say so in the reply.** Cross-machine routing is a **recorded future step, not something to fake**: name in the reply that the originating session lives on another machine and was not reached, so nobody believes a handoff happened.                                        |
+| **No signature at all** (unsigned, human-authored, or every signature was your own)            | Same as **(b)** — fresh session seeded with the thread. Absence of a signature is not evidence of a dead session, so never claim you resumed one.                                                                                                                                                                    |
+
+**Anything that does not clearly match (a) is (b).** That is the default row, and
+it is stated so the ladder cannot dead-end: a signature missing `surface`, a
+`harness` this reader does not recognize, a resume that errors for a reason you
+cannot classify — all of it lands on (b), a fresh session seeded with the thread.
+(b) is always safe; it only costs context that the durable artifacts can rebuild.
+
+##### Deciding "still resumable"
+
+Rung (a) hinges on one testable question: does that session still exist on this
+machine? **Derive the answer, never assume it** — and if the probe itself fails,
+that is (b), not (a):
+
+- **claude-code** — the session's transcript lives under
+  `~/.claude/projects/<project-slug>/<sessionId>.jsonl` (honouring
+  `CLAUDE_CONFIG_DIR` when set). Its presence is the cheap check; a
+  `claude --resume <sessionId>` probe is the authoritative one.
+- **codex**, **opencode** — the same question against that harness's own store:
+  its thread store and its sidecar session store respectively. Resolve the
+  location the way the harness itself resolves it.
+- **`surface: "dorkos"`** — the session is the install's, not a bare transcript's:
+  it is resumable when the `instanceId` matches this install and the server
+  answers for that session id.
+
+The set you prefix-match a truncated `sessionId` against is **that same store** —
+the sessions this machine actually holds, enumerated from the harness's session
+directory. Never match against ids you have only seen in tracker threads; that
+set is not local, and a match in it proves nothing about resumability.
+
+**This install's own `instanceId`** comes from the DorkOS install itself (the id
+the running server reports for itself), not from anything in the thread. A reader
+that cannot determine its own `instanceId` cannot prove an install match, so a
+`surface: "dorkos"` signature falls to (c) — different install, as far as it can
+honestly tell.
+
+Two rules bind all of this:
+
+- **A `sessionId` is an opaque token you match locally.** An emitter in a public
+  repo may have shipped only its first 8 characters, so prefix-match against the
+  local session store above. Exactly one match is the session; ambiguous or no
+  match degrades to **(b)**.
+- **Silence about which path you took is not allowed.** The tick report **names
+  the path** — `(a)` delivered into session `<id>`, `(b)` fresh session seeded,
+  `(c)` handled here, originating session on `<host>`. A resume that silently
+  became a fresh session is the failure this whole convention exists to prevent,
+  and an unreported one is indistinguishable from a working resume.
+
+> **One product-specific name, deliberately.** `POST /api/sessions/<id>/messages`
+> is a DorkOS mechanism named inside an otherwise PM-agnostic skill. It is here on
+> purpose and it is not a tracker string: the confinement rule this skill obeys is
+> about **tracker** coupling, and the `dorkos` surface is one branch of a rung that
+> degrades to (b) everywhere else. A reader that is not DorkOS simply never matches
+> that row.
 
 ### 3. Act on what you own — durable label claims
 
@@ -166,7 +275,11 @@ The agent's outbound moves on the board, all via the adapter:
 
 - **`comment(item, body)`** — post a comment. The agent's own comments **always
   carry `identity.marker`** so rule 1 can recognize them next tick (essential in
-  shared mode).
+  shared mode), **and always carry the provenance signature** so the next reader
+  can route a reply back to this session. The two are not substitutes: the marker
+  is visible and answers "did I write this?", the signature is hidden and answers
+  "which runtime, session, account and machine wrote this?". Every reply this loop
+  writes is signed — including the replies it posts on threads it did not start.
 - **`assignToHuman(item)`** — set the assignee to the reviewer / authenticated
   human (fires a tracker notification). Used at handoff and the review gate. In
   **shared-account** mode this notifies no one (agent and human are the same
@@ -245,6 +358,13 @@ re-parking.
 - **Recognize your own writes by the marker**, especially in shared-account mode —
   a missing marker on the agent's own comment can trigger a self-reply or
   self-resume loop.
+- **Sign every outward write, and never sign it with a person.** The provenance
+  line goes on every comment the agent authors; it carries a short non-PII account
+  handle and **never an email address**, because these bodies land on trackers and
+  public forges where a comment is world-readable and permanent.
+- **Never claim a routing path you did not take.** Report `(a)`, `(b)`, or `(c)`
+  honestly. "Resumed the session" when you actually started a fresh one is the one
+  lie that makes the whole signature worthless.
 - **All tracker I/O through the adapter.** No tracker strings in this skill.
   If the tracker is unavailable, explain the limitation clearly rather than
   guessing or fabricating inbox state.

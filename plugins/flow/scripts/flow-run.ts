@@ -111,7 +111,20 @@ export type FlowStage =
  * stale by definition — it records where the run *began*, not where it is now.
  */
 export interface FlowRunProvenance {
-  /** The agent harness that ran the work, as it names itself. */
+  /**
+   * Signature schema version — `1` today. The one field that is not
+   * harness-derived, so it is the one field a run can always write. A reader that
+   * does not recognize a higher version reads the fields it knows and ignores the
+   * rest; a signature with no `v` at all is the legacy `flow:provenance` shape and
+   * reads as `1`.
+   */
+  v?: number;
+  /**
+   * The agent harness that ran the work: `claude-code`, `codex`, `opencode`, or
+   * `other:<name>`. The `other:` form keeps the vocabulary open without letting an
+   * unknown harness masquerade as a known one. Typed as a bare string rather than
+   * a union on purpose — see the schema note in `flow-state.ts`.
+   */
   harness?: string;
   /**
    * The harness's own session/conversation id for this run — the handle a later
@@ -120,6 +133,15 @@ export interface FlowRunProvenance {
    * from there is fine, guessing is not.
    */
   sessionId?: string;
+  /**
+   * A short, NON-PII handle for the harness account the run authenticated as —
+   * enough to tell "same machine, different account" from "same session". For
+   * `claude-code` it is derived from the `CLAUDE_CONFIG_DIR` basename (default
+   * `claude`). **Never an email address, and never a person's name**: this block is
+   * serialized onto tracker comments and PR bodies, which can be world-readable and
+   * permanent.
+   */
+  account?: string;
   /** The delegated worker/agent id or name the harness assigned, when it assigns one. */
   agentId?: string;
   /**
@@ -128,6 +150,25 @@ export interface FlowRunProvenance {
    * host mismatch is what rules rung 1 out.
    */
   host?: string;
+  /**
+   * The DorkOS install's UUID, when the run is under DorkOS; absent otherwise.
+   * Distinct from {@link host} and not substitutable by it: it is what tells a
+   * reader "this session lives in the install I can talk to" rather than an
+   * identically-named session in another install on the same machine.
+   */
+  instanceId?: string;
+  /**
+   * Where the run was driven from — `dorkos`, `bare-cli`, or `ci`. It selects the
+   * resume *mechanism* (post into a live session vs. resume a harness session), not
+   * whether resume is possible at all.
+   */
+  surface?: string;
+  /**
+   * A URL that actually opens the session, present only when one exists AND the
+   * session is meaningfully resumable. Omitted rather than written broken: a link
+   * that resolves to nothing costs a reader more than no link at all.
+   */
+  resumeUrl?: string;
   /** Absolute worktree path the run used, as the harness saw it. */
   worktree?: string;
   /** Git branch the run worked on. */
