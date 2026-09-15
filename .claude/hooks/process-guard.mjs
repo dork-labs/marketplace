@@ -57,17 +57,17 @@
  * find another hole, add it here even if you do not fix it.
  *
  * Contract: a PreToolUse payload on stdin, exit 2 with a message on stderr to
- * block, exit 0 to allow. The fixture suite (scripts/test-process-guard.sh)
- * lives in the DorkOS app repo and was not copied here.
+ * block, exit 0 to allow. Fixtures: scripts/test-process-guard.sh runs every
+ * block/allow case through this entry point.
  */
 
 import path from 'path';
 import {
-  SHELL_WRAPPERS,
   splitSegments,
   extractSubstitutions,
   tokenize,
   stripCommandPrefixes,
+  readWrappedCommand,
 } from './lib/shell-command.mjs';
 
 const { basename } = path;
@@ -172,11 +172,8 @@ function inspectSegment(segment, depth) {
 
   const name = basename(tokens[0]);
 
-  if (SHELL_WRAPPERS.has(name) && depth < 2) {
-    const flagIndex = tokens.indexOf('-c');
-    const inner = flagIndex !== -1 ? tokens[flagIndex + 1] : null;
-    return inner ? inspectCommand(inner, depth + 1) : null;
-  }
+  const wrapped = readWrappedCommand(segment);
+  if (wrapped !== null) return depth < 2 ? inspectCommand(wrapped, depth + 1) : null;
 
   if (KILL_BY_NAME.has(name)) return NAME_MESSAGE;
   if (name === 'kill') return checkKill(tokens.slice(1));
