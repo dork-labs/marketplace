@@ -1,0 +1,8 @@
+{
+  "name": "writing-pack",
+  "version": "0.1.0",
+  "description": "Four skills for writing that people and agents can use: plain-language user copy, architecture decision records, developer guides, and clarifying questions before work starts",
+  "author": {
+    "name": "Dork Labs"
+  }
+}

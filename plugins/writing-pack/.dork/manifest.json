@@ -1,0 +1,14 @@
+{
+  "schemaVersion": 1,
+  "name": "writing-pack",
+  "version": "0.1.0",
+  "type": "skill-pack",
+  "description": "Four skills for writing that people and agents can use: plain-language user copy, architecture decision records, developer guides, and clarifying questions before work starts",
+  "author": "Dork Labs",
+  "license": "MIT",
+  "tags": ["writing", "documentation", "adr", "plain-language", "requirements"],
+  "category": "documentation",
+  "categories": ["documentation", "productivity"],
+  "icon": "✍️",
+  "layers": ["skills"]
+}
