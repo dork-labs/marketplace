@@ -10,3 +10,10 @@
 .agents/skills/*__*
 .claude/skills/*__*
 .claude/settings.local.json
+.claude/commands/flow
+# Hook files Harness Sync generates for other runtimes from .claude/settings.json.
+.codex/hooks.json
+.codex/hooks.json.dorkos-generated
+.cursor/hooks.json.dorkos-generated
+.github/hooks/copilot-hooks.json.dorkos-generated
+*.dorkos-bak-*
