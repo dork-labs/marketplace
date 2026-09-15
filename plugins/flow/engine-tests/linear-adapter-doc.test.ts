@@ -161,6 +161,26 @@ describe('linear-adapter SKILL.md — prose-contract completeness', () => {
     expect(skill).toContain('get_authenticated_user');
   });
 
+  it('names the Composio getCurrentUser slug that exists', () => {
+    // `LINEAR_GET_AUTHENTICATED_USER` is the MCP tool name with a Composio prefix
+    // bolted on, and Composio answers it with `ToolRouterV2_ToolNotFound`. The
+    // real slug is `LINEAR_GET_CURRENT_USER` (composio v0.2.31, 2026-09-15). Both
+    // the shipped adapter and the reference adapter it is generated from carry
+    // the call, so pin both.
+    const reference = readFileSync(
+      path.join(pluginRoot, 'adapters', 'reference', 'linear-composio', 'SKILL.md'),
+      'utf8'
+    );
+    // The verb table and the reference call must use the real slug. The wrong one
+    // may still be NAMED (as the thing not to call), but never as a call.
+    expect(skill).toMatch(/\*\*`getCurrentUser\(\)`\*\*[^\n]*`LINEAR_GET_CURRENT_USER`/);
+    expect(reference).toContain('composio execute LINEAR_GET_CURRENT_USER');
+    for (const doc of [skill, reference]) {
+      expect(doc).not.toMatch(/execute LINEAR_GET_AUTHENTICATED_USER/);
+      expect(doc).not.toMatch(/\|\s*`LINEAR_GET_AUTHENTICATED_USER`\s*\|/);
+    }
+  });
+
   it('states the sub-issue promotion rule as an ORDINAL comparison, and states it truly', () => {
     // `size` is the union `number | string`, so `size >= "xl"` is a comparison
     // between two vocabularies — the contradiction DOR-515 closed. The prose

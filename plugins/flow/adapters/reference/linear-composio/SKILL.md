@@ -215,8 +215,11 @@ state). Every call carries `--account "<trackerAccount>"`.
 
 #### `getCurrentUser(): Account`
 
-- **Call.** `composio execute LINEAR_GET_AUTHENTICATED_USER --account "<trackerAccount>" -d '{}'`.
-- **Normalize.** Return `{ id, name }`. Resolves an `identity.agent: "auto"`
+- **Call.** `composio execute LINEAR_GET_CURRENT_USER --account "<trackerAccount>" -d '{}'`.
+  (`LINEAR_GET_AUTHENTICATED_USER` does not exist in Composio; it returns
+  `ToolRouterV2_ToolNotFound`.)
+- **Normalize.** Return `{ id, name }`. The user usually sits under
+  `.data.user`, but the wrapper can nest it elsewhere: check the keys first. Resolves an `identity.agent: "auto"`
   identity and supplies the actor that ownership classification and the
   comment-response rules compare against.
 - **Durability + degradation.** Read-only. If the account cannot be resolved,
