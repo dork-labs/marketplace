@@ -18,8 +18,12 @@ A message that only mentions a blocked command is usually fine. A commit message
 in single quotes, or a body passed with `-F` or `--body-file`, can say "never run
 `git stash` here" without being refused. One shape stays strict on purpose: a
 quoted heredoc inside `$(...)` whose text has a code span inside parentheses,
-because older bash ends the `$(...)` at that `)`. If a PR body names blocked
-commands in parentheses, pass it with `--body-file`.
+because older bash ends the `$(...)` at that `)`. You will most often meet it in
+`git commit -m "$(cat <<'EOF' ... EOF)"`. The workaround is to put the text in a
+file first:
+
+- commit messages: `git commit -F <file>`
+- PR bodies: `gh pr create --body-file <file>`
 
 ## Setup
 
