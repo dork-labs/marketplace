@@ -167,6 +167,16 @@
       "category": "documentation",
       "tags": ["writing", "documentation", "adr", "plain-language"],
       "keywords": ["writing", "adr", "developer-guides", "requirements", "readability"]
+    },
+    {
+      "name": "safety-hooks",
+      "source": "./plugins/safety-hooks",
+      "description": "Three guards that stop an agent's shell commands from destroying work: no stash or discarding checkout, no killing processes by name, and no reading or writing files your settings deny",
+      "author": { "name": "Dork Labs" },
+      "license": "MIT",
+      "category": "agent-ops",
+      "tags": ["safety", "hooks", "git", "guardrails"],
+      "keywords": ["safety", "hooks", "git-guard", "process-guard", "file-guard", "autonomy"]
     }
   ]
 }

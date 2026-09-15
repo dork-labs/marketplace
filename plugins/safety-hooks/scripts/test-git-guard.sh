@@ -1,0 +1,333 @@
+#!/usr/bin/env bash
+# Fixture suite for hooks/git-guard.mjs, the PreToolUse(Bash) guard that
+# refuses the git commands that destroy work in a shared checkout.
+#
+# It exists because reasoning about what a guard WOULD catch is not evidence
+# about what it DOES catch. Every case below is run through the hook's real
+# entry point (a PreToolUse payload on stdin) and asserted on the real contract
+# (exit 2 to block, exit 0 to allow), so a regression in the matcher shows up
+# as a failing case rather than as a lost afternoon.
+#
+# The allow half matters as much as the block half. A guard that also blocks
+# `git checkout main` or `git stash list` is worse than no guard, because the
+# next person switches it off.
+#
+#   bash scripts/test-git-guard.sh
+#   GUARD=/path/to/other.mjs bash scripts/test-git-guard.sh
+#
+# GUARD exists so a neutered or alternative implementation can be run against
+# the same fixtures to show what it gets wrong.
+
+set -uo pipefail
+
+repo_root=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
+guard=${GUARD:-$repo_root/hooks/git-guard.mjs}
+
+payload_dir=$(mktemp -d -t git-guard-payload.XXXXXX)
+export GIT_GUARD_FIXTURE_PAYLOAD=$payload_dir/payload.json
+trap 'rm -rf "$payload_dir"' EXIT
+
+pass=0
+fail=0
+
+check() {
+  local name=$1 expected=$2 actual=$3
+  if [ "$expected" = "$actual" ]; then
+    pass=$((pass + 1))
+  else
+    fail=$((fail + 1))
+    printf 'FAIL  %s\n        expected: %s\n        actual:   %s\n' \
+      "$name" "$expected" "$actual" >&2
+  fi
+}
+
+# Run one command through the hook exactly as Claude Code would, and report the
+# verdict: allow, or which of the three refusals fired.
+# The payload goes through a file rather than a pipe on purpose: under
+# `pipefail` a guard that exits before draining stdin gives the payload writer
+# EPIPE, and that status masks the guard's own verdict.
+verdict() {
+  local command=$1 stderr status
+  GIT_GUARD_FIXTURE_COMMAND="$command" node -e '
+      require("fs").writeFileSync(
+        process.env.GIT_GUARD_FIXTURE_PAYLOAD,
+        JSON.stringify({
+          tool_name: "Bash",
+          tool_input: { command: process.env.GIT_GUARD_FIXTURE_COMMAND },
+        })
+      );
+    '
+  stderr=$(node "$guard" <"$GIT_GUARD_FIXTURE_PAYLOAD" 2>&1 >/dev/null)
+  status=$?
+
+  if [ "$status" -eq 0 ]; then
+    echo allow
+    return
+  fi
+  if [ "$status" -ne 2 ]; then
+    echo "exit-$status"
+    return
+  fi
+  case "$stderr" in
+    "Blocked: git stash"*) echo block-stash ;;
+    "Blocked: git checkout"*) echo block-checkout ;;
+    "Blocked: git restore"*) echo block-restore ;;
+    *) echo "block-unknown" ;;
+  esac
+}
+
+# Each line is `<expected-verdict> <command>`. The comments record why the case
+# is here, so a future edit that flips one has to argue with the reason.
+# --- Differential: a fixture a real shell RUNS must never be allowed. ---
+# Every fixture naming git is also run through /bin/bash (3.2 on macOS) and zsh
+# in an empty directory with a bare PATH whose `git` is a stand-in: it touches a
+# marker for a mutating `git stash`, and for `git rebase -x` it runs the -x
+# command the way rebase would. If a shell reached the marker, the guard must
+# have blocked the line. Real git is never run. `checkout` and `restore` are
+# left out of the stand-in on purpose: which of their spellings discard work is
+# the guard's own argument logic, and re-deriving it here would test the stand-in.
+diff_dir=$payload_dir/diff
+mkdir -p "$diff_dir/shim" "$diff_dir/run"
+cat >"$diff_dir/shim/git" <<SHIM
+#!/bin/sh
+while [ \$# -gt 0 ]; do case "\$1" in -C | -c) shift 2 ;; -*) shift ;; *) break ;; esac; done
+case "\$1" in
+  stash) case "\$2" in list | show) ;; *) : >"$diff_dir/marker" ;; esac ;;
+  rebase)
+    shift
+    while [ \$# -gt 0 ]; do
+      case "\$1" in -x | --exec) sh -c "\$2"; shift 2 ;; *) shift ;; esac
+    done
+    ;;
+esac
+SHIM
+chmod +x "$diff_dir/shim/git"
+diff_shells=(/bin/bash)
+if command -v zsh >/dev/null 2>&1; then diff_shells+=("$(command -v zsh)"); fi
+
+differential() {
+  local command=$1 actual=$2 shell
+  case "$command" in *git*) ;; *) return ;; esac
+  if printf '%s' "$command" | grep -Eq '(^|[^[:alnum:]_])(kill|sudo)([^[:alnum:]_]|$)'; then
+    return
+  fi
+  for shell in "${diff_shells[@]}"; do
+    rm -f "$diff_dir/marker"
+    (cd "$diff_dir/run" && env -i PATH="$diff_dir/shim:/usr/bin:/bin" HOME="$diff_dir/run" \
+      "$shell" -c "$command" </dev/null >/dev/null 2>&1)
+    if [ -e "$diff_dir/marker" ]; then
+      check "differential: $shell runs it, so it must block: $command" block "${actual%%-*}"
+    fi
+  done
+}
+
+# Run one fixture through the hook, assert its verdict, then cross-check it.
+case_check() {
+  local name=$1 expected=$2 command=$3 actual
+  actual=$(verdict "$command")
+  check "$name" "$expected" "$actual"
+  differential "$command" "$actual"
+}
+
+while read -r expected command; do
+  [ -n "${expected:-}" ] || continue
+  case "$expected" in \#*) continue ;; esac
+  case_check "$command" "$expected" "$command"
+done <<'CASES'
+# --- stash: the shared stack. Bare and every mutating subcommand. ---
+block-stash git stash
+block-stash git stash -u
+block-stash git stash --include-untracked
+block-stash git stash -k
+block-stash git stash push -u src/
+block-stash git stash pop
+block-stash git stash apply
+block-stash git stash apply stash@{2}
+block-stash git stash drop
+block-stash git stash clear
+block-stash git stash store -m note deadbeef
+block-stash git stash branch topic
+block-stash git stash save wip
+block-stash git stash create
+# The three spellings the native prefix matcher cannot see (see PR body).
+block-stash cd /tmp && git stash
+block-stash git  stash
+block-stash git -C /some/dir stash
+block-stash pnpm build && git stash -u && pnpm test
+block-stash sh -c "git stash pop"
+block-stash echo $(git stash pop)
+# Subshells, brace groups and loop bodies. The loop form is the one agents
+# actually write, and it is a plausible spelling of all three incidents.
+block-stash (git stash pop)
+block-stash { git stash pop; }
+block-stash if true; then git stash pop; fi
+block-checkout for f in a b; do git checkout -- $f; done
+block-checkout while read f; do git checkout -- $f; done < list.txt
+block-stash ! git stash pop
+# A read-only command keeps working inside those same wrappers.
+allow (git stash list)
+allow { git stash list; }
+# --- stash: a flag VALUE must never be read as the subcommand. ---
+block-stash git stash -m list
+block-stash git stash --message list
+# --- stash: read-only forms stay usable. This is how you prove nothing was lost. ---
+allow git stash list
+allow git stash list --stat
+allow git stash show stash@{0}
+allow git stash show -p stash@{0}
+allow git -C /some/dir stash list
+# --- checkout: the pathspec form that silently reverts your own edits. ---
+block-checkout git checkout -- src/app.ts
+block-checkout git checkout -- .
+block-checkout git checkout --  src/a.ts src/b.ts
+block-checkout git checkout -f -- src/app.ts
+block-checkout git checkout HEAD -- src/app.ts
+block-checkout git checkout .
+block-checkout git checkout ./src
+block-checkout git checkout ../sibling/file.ts
+block-checkout cd apps/server && git checkout -- src/index.ts
+# HEAD has four more spellings, and every one of them is the same pure discard.
+# The reflog forms matter because `@{0}` is not literally "HEAD" or "@".
+block-checkout git checkout @ -- src/app.ts
+block-checkout git checkout HEAD@{0} -- src/app.ts
+block-checkout git checkout @{0} -- src/app.ts
+block-checkout git checkout @ .
+block-checkout git checkout HEAD~0 -- src/app.ts
+block-checkout git checkout HEAD^0 -- src/app.ts
+block-checkout git checkout @~0 -- src/app.ts
+# Tree-ish + pathspec with no `--`. Two or more positionals and no branch-creating
+# flag cannot be a branch switch, so this is decidable without asking git.
+block-checkout git checkout HEAD src/app.ts
+block-checkout git checkout @ src/app.ts
+block-checkout git checkout HEAD src/a.ts src/b.ts
+block-checkout git checkout HEAD .
+# --- checkout: branch switching must never be touched. ---
+allow git checkout main
+allow git checkout -b chore/guard-destructive-git-commands
+allow git checkout -B topic origin/main
+allow git checkout feature/some-branch
+allow git checkout -
+allow git checkout --detach
+allow git checkout 661ab3156
+# A named source other than HEAD is a deliberate retrieval, not a blind discard.
+allow git checkout HEAD~1 -- src/app.ts
+allow git checkout origin/main -- package.json
+allow git checkout @~1 -- src/app.ts
+allow git checkout HEAD~1 src/app.ts
+allow git checkout main src/app.ts
+# `@{-1}` is the previously checked-out branch, not a spelling of HEAD.
+allow git checkout @{-1} -- src/app.ts
+# Branch-creating flags take two positionals and are never a pathspec.
+allow git checkout --track origin/feature
+allow git checkout --orphan fresh-start
+# Conflict resolution names its side, so it is not a blind discard either.
+allow git checkout --ours -- src/app.ts
+# --- restore: the same discard under a newer name. ---
+block-restore git restore src/app.ts
+block-restore git restore .
+block-restore git restore --staged --worktree src/app.ts
+block-restore git restore -S -W src/app.ts
+block-restore git restore --worktree src/app.ts
+block-restore git restore --source=HEAD src/app.ts
+block-restore git restore -s HEAD src/app.ts
+block-restore git restore --source=@ src/app.ts
+block-restore git restore -s @ src/app.ts
+block-restore git restore --source=HEAD@{0} src/app.ts
+block-restore git restore --source=@{0} src/app.ts
+block-restore git restore --source=HEAD~0 src/app.ts
+# --- restore: unstaging and deliberate retrieval stay usable. ---
+allow git restore --staged src/app.ts
+allow git restore --source=HEAD~1 src/app.ts
+allow git restore --source origin/main -- package.json
+allow git restore --ours src/app.ts
+# --- everything else the repo runs every day. ---
+allow git status
+allow git diff src/app.ts
+allow git worktree add ../wt -b topic
+allow git worktree remove ../wt
+allow git worktree list
+allow git clean -fd
+allow git reset --hard 661ab3156
+allow git reset --hard origin/main
+allow git add -A
+allow git commit -m "wip"
+allow git push -u origin HEAD
+allow git log --oneline -20
+allow git stash-like-tool run
+allow gh pr create --title "chore: guard git stash and git checkout --"
+# --- quoting: bash never expands `...` or $(...) inside single quotes. ---
+allow git commit -m 'never use `git stash` here'
+allow git commit -m 'undo with $(git checkout -- x) is refused'
+allow gh pr create --body 'it'\''s `git stash pop` that ate the tree'
+# Double quotes DO substitute, so the same text there still runs it.
+block-stash git commit -m "never use `git stash` here"
+block-stash git commit -m "$(git stash)"
+block-checkout git commit -m "it's $(git checkout -- x)"
+block-stash git commit -m 'unterminated `git stash`
+# A wrapper or eval runs its single-quoted argument, so the quotes protect nothing.
+block-stash bash -c 'echo $(git stash)'
+block-stash zsh -c 'x=$(git stash)'
+block-stash eval '$(git stash)'
+block-stash eval 'git stash pop'
+# Inside $'...' a \' does not close the quote; read as strict, not modelled.
+block-stash echo $'\'' $(git stash) '\'
+# Inside backticks the next backtick ends the substitution whatever the quotes say.
+block-stash echo `echo it's` $(git stash) `echo ok'`
+# --- Quotes are only trusted on a line made entirely of known text-takers. ---
+# Plenty of commands run their quoted argument, and `git commit` being a
+# text-taker must not make `git rebase -x` one.
+block-stash bash -lc 'echo $(git stash)'
+block-stash sh -xc 'echo `git stash`'
+block-stash exec sh -c 'echo $(git stash)'
+block-stash if bash -c 'echo $(git stash)'; then :; fi
+block-stash nice -n 5 sh -c 'echo $(git stash)'
+block-stash env -i PATH="$PATH" sh -c 'echo $(git stash)'
+block-stash timeout 5 bash -c 'echo $(git stash)'
+block-stash echo a | xargs sh -c 'echo $(git stash)'
+block-stash find . -maxdepth 0 -exec sh -c 'echo $(git stash)' \;
+block-stash trap 'echo $(git stash)' EXIT
+block-stash git rebase -x 'echo $(git stash)' HEAD~1
+block-stash node -e 'require("child_process").execSync("echo $(git stash)")'
+block-stash echo "$(bash -c 'echo $(git stash)')"
+CASES
+
+# --- heredocs: a quoted delimiter turns expansion off, an unquoted one does not. ---
+case_check 'quoted heredoc commit message naming git stash' allow \
+  $'git commit -m "$(cat <<\'EOF\'\nRefuses `git stash` and `git checkout -- x`.\nEOF\n)"'
+case_check 'unquoted heredoc commit message runs its substitution' block-stash \
+  $'git commit -m "$(cat <<EOF\nRefuses `git stash` now.\nEOF\n)"'
+case_check 'apostrophe in a trailing comment' block-stash \
+  $'echo hi # it\'s\necho $(git stash) # \''
+case_check 'apostrophes in whole-line comments' block-stash \
+  $'# don\'t\necho $(git stash)\n# won\'t'
+case_check 'heredoc marker inside a comment' block-stash \
+  $'echo x # <<\'EOF\'\necho $(git stash)\nEOF'
+case_check 'heredoc body closing its substitution early' block-stash \
+  $'x=$(cat <<\'EOF\'\nhi\n)\necho $(git stash)\nEOF\n)'
+# bash 3.2 reads the delimiter LINE inside $(...) as syntax too.
+case_check 'quoted delimiter with an apostrophe inside a substitution' block-stash \
+  $'echo $(cat <<"it\'s"\nhi\nit\'s\n); cat <<\'X\'\n\'); echo $(git stash)\nX'
+
+# Quoted text that merely NAMES a blocked command must not trip the guard, or
+# writing the commit that ships this guard becomes impossible.
+check 'commit message naming git stash' allow \
+  "$(verdict 'git commit -m "refuse git stash and git checkout -- <path>"')"
+check 'commit message with an operator inside quotes' allow \
+  "$(verdict 'git commit -m "git stash && git checkout -- x are blocked"')"
+
+# --- The guard must be able to FAIL. A neutered copy has to break this suite. ---
+# Without this, a matcher that quietly stopped matching would look like 60 green
+# assertions. Here the same fixture is run against a guard that always allows,
+# and the suite records that it gets a different answer.
+neutered_dir=$(mktemp -d -t git-guard-neutered.XXXXXX)
+printf 'process.exit(0);\n' >"$neutered_dir/guard.mjs"
+real_guard=$guard
+guard=$neutered_dir/guard.mjs
+neutered_verdict=$(verdict 'git stash pop')
+guard=$real_guard
+check 'a neutered guard allows what the real one blocks' allow "$neutered_verdict"
+check 'the real guard blocks it' block-stash "$(verdict 'git stash pop')"
+rm -rf "$neutered_dir"
+
+printf 'git-guard fixtures: %d passed, %d failed\n' "$pass" "$fail"
+[ "$fail" -eq 0 ]

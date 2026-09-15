@@ -104,6 +104,14 @@
       "layers": ["skills"],
       "icon": "✍️",
       "pricing": { "model": "free" }
+    },
+    "safety-hooks": {
+      "type": "plugin",
+      "displayName": "Safety Hooks",
+      "categories": ["agent-ops", "security"],
+      "layers": ["hooks"],
+      "icon": "🛟",
+      "pricing": { "model": "free" }
     }
   }
 }
