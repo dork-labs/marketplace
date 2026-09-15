@@ -96,6 +96,14 @@
       "icon": "📋",
       "featured": true,
       "pricing": { "model": "free" }
+    },
+    "writing-pack": {
+      "type": "skill-pack",
+      "displayName": "Writing Pack",
+      "categories": ["documentation", "productivity"],
+      "layers": ["skills"],
+      "icon": "✍️",
+      "pricing": { "model": "free" }
     }
   }
 }

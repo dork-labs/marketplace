@@ -157,6 +157,16 @@
       "category": "project-management",
       "tags": ["linear", "issues", "shape", "project-management"],
       "keywords": ["linear", "shape", "project-management", "keeper"]
+    },
+    {
+      "name": "writing-pack",
+      "source": "./plugins/writing-pack",
+      "description": "Four skills for writing that people and agents can use: plain-language user copy, architecture decision records, developer guides, and clarifying questions before work starts",
+      "author": { "name": "Dork Labs" },
+      "license": "MIT",
+      "category": "documentation",
+      "tags": ["writing", "documentation", "adr", "plain-language"],
+      "keywords": ["writing", "adr", "developer-guides", "requirements", "readability"]
     }
   ]
 }
