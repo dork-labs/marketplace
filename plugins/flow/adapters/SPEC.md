@@ -1,6 +1,6 @@
 # Tracker Adapter Contract
 
-> **Contract version: 1.2.0** (semver). See [Versioning](#5-versioning).
+> **Contract version: 1.3.0** (semver). See [Versioning](#5-versioning).
 >
 > This is the **generic, tracker-neutral** contract every `/flow` tracker adapter
 > must satisfy. It names no tracker, no API, and no slug. Reference adapters
@@ -142,6 +142,13 @@ interface TrackerAdapter {
 
   // Optional writes — an adapter may omit these entirely (see "Optional verbs")
   completeProject?(project: WorkItemProject, outcome: ProjectOutcome): Promise<void>;
+
+  // Optional intake trio — only an adapter serving TRIAGE's Path C needs these.
+  // All three or none: a promote with no way to resolve the report leaves the
+  // reporter waiting, which is the failure Path C exists to prevent.
+  listIntake?(source: IntakeSource): Promise<IntakeReport[]>;
+  promote?(report: IntakeReport, spec: SubIssueSpec): Promise<WorkItem>;
+  resolveIntake?(report: IntakeReport, outcome: IntakeOutcome): Promise<void>;
 }
 ```
 
@@ -153,6 +160,9 @@ Supporting types: `Account` is the acting account `{ id, name? }`.
 `SubIssueSpec = { title, description, type, size? }`.
 `InboxEntry = { item: WorkItem, comment: { author: string, mentions: string[], body: string } }`.
 `ProjectOutcome = 'completed' | 'canceled'` — the two terminal project states.
+`IntakeSource = { id: string, name?: string }` — one configured intake queue, named by the install's `connection.intake` list.
+`IntakeReport = { id: string, source: IntakeSource, title: string, body: string, reporter?: string, receivedAt?: string, url?: string }` — a report from outside the team. Deliberately **not** a `WorkItem`: it has a different lifecycle and is never dispatched.
+`IntakeOutcome = { exit: 'duplicate' | 'promote' | 'attach' | 'needsInfo' | 'decline' | 'junk', linkedItem?: WorkItem, message?: string }` — Path C's six exits. `message` carries the reason for `decline` and the question for `needsInfo`; `linkedItem` is required for `promote`, `attach` and `duplicate`.
 
 Each verb below states: what it must do, its **durability** requirement (which
 writes must be durable and idempotent), and its **graceful degradation** (what to
@@ -446,6 +456,51 @@ expect the loop to exercise it, and do not let it go untested for that reason.
   advisory path (recommend the close-out to the human and let them run it) and say
   that is what happened.
 
+#### The intake trio — `listIntake` / `promote` / `resolveIntake` — OPTIONAL
+
+The three verbs TRIAGE's **Path C** needs (`triaging-work`, _Path C — Report_).
+They exist because a **report from outside the team** and the **work it might
+cause** are two objects with two lifecycles: the report's life belongs to the
+reporter (received, acknowledged, resolved, told), the work's to the team. The
+engine's rule is **link, do not move and do not mirror**, and these verbs are how
+an adapter offers that without the generic layer learning anything about a
+support inbox.
+
+**Declare all three or none.** They are one capability, not three: an adapter
+that can `promote` but cannot `resolveIntake` produces work while leaving the
+reporter waiting forever, which is the exact failure Path C exists to prevent. A
+caller finding a partial trio treats the capability as **not supported**.
+
+`listIntake(source)` — **read.** Every unresolved report in one configured
+source. Returns `IntakeReport[]`, never `WorkItem[]`: a report is not
+dispatchable and must not be able to reach a dispatch queue by type confusion.
+
+`promote(report, spec)` — **durable write.** Create a work item from `spec` in
+the WORK tracker and link it to `report`. It **must not** move, re-parent, or
+re-label the report itself, and **must not** copy the report's body into the new
+item — the caller writes a clean description on purpose. Returns the created
+`WorkItem`. Should guard against duplicate creation on retry where the tracker
+offers a stable key.
+
+`resolveIntake(report, outcome)` — **durable write.** Record one of Path C's six
+exits on the report and, where the source supports it, say so to the reporter.
+Idempotent: resolving an already-resolved report to the same outcome is a no-op.
+
+- **Provenance.** Both writes author outward text, so both sign it exactly as
+  the required writes do: the description `promote` creates carries the
+  `agent:provenance` signature as its last line (as `createSubIssue`'s does), and
+  any message `resolveIntake` leaves on the report carries the identity marker and
+  the signature (as `comment` does), under the same degradation rule as `comment`.
+  A reporter's reply to a decline or a question is then routable like any other.
+- **Durability.** `listIntake` is a read. The other two are durable.
+- **Degradation.** When the trio is **absent or partial**, Path C is
+  unavailable: the caller says the install has no intake capability and stops
+  rather than improvising one — it never falls back to Path B, because Path B
+  converts in place and would destroy the receipt. A failed `promote` surfaces
+  loudly and returns no fabricated item. A failed `resolveIntake` is reported
+  **with the work item that was already created**, so a human can close the loop
+  by hand rather than the promotion being silently orphaned.
+
 ---
 
 ## 4. Conformance invariants
@@ -529,6 +584,13 @@ declaration.
 
 ### What each version added
 
+- **1.3.0** - added the optional **intake trio** — `listIntake`, `promote` and
+  `resolveIntake` (section 3) — plus the `IntakeSource`, `IntakeReport` and
+  `IntakeOutcome` types they carry. They serve TRIAGE's Path C, which promotes a
+  report from outside the team into work without moving or mirroring it. Their
+  outward text carries the 1.2.0 marker and signature. Additive and declared
+  all-or-none: an adapter declaring `1.2.0`, `1.1.0` or `1.0.0` still conforms,
+  and an install with no `connection.intake` source never reaches them.
 - **1.2.0** - outward writes carry the **`agent:provenance` signature**
   ([`../docs/provenance.md`](../docs/provenance.md)) alongside the identity marker:
   `comment`, `needsInput`'s question, and the description `createSubIssue` authors.

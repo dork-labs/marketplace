@@ -189,6 +189,42 @@ describe('FlowConfigSchema — the tracker-connection block (team, workspace, tr
   });
 });
 
+describe('FlowConfigSchema — the Path C intake sources (DOR-1978)', () => {
+  it('is EMPTY by default — Path C does not exist until somebody configures it', () => {
+    // This is the whole opt-in. An adopter who does not run an intake queue must
+    // get exactly the two-path TRIAGE they had before, so a non-empty default
+    // here would quietly turn a third path on for every install in the world.
+    const { connection } = FlowConfigSchema.parse({});
+    expect(connection.intake).toEqual([]);
+  });
+
+  it('accepts one or more named sources', () => {
+    const cfg = FlowConfigSchema.parse({
+      connection: { intake: [{ id: 'queue-uuid', name: 'Feedback intake' }, { id: 'second' }] },
+    });
+    expect(cfg.connection.intake).toEqual([
+      { id: 'queue-uuid', name: 'Feedback intake' },
+      { id: 'second' },
+    ]);
+  });
+
+  it('leaves an unnamed source unnamed rather than inventing a label', () => {
+    const cfg = FlowConfigSchema.parse({ connection: { intake: [{ id: 'bare' }] } });
+    expect(cfg.connection.intake[0]?.name).toBeUndefined();
+  });
+
+  it('rejects a source with no id — an unaddressable queue is a config error', () => {
+    const result = FlowConfigSchema.safeParse({ connection: { intake: [{ name: 'No id' }] } });
+    expect(result.success).toBe(false);
+  });
+
+  it('configuring intake does not disturb the rest of the connection block', () => {
+    const cfg = FlowConfigSchema.parse({ connection: { intake: [{ id: 'q' }] } });
+    expect(cfg.connection.transport).toBe('cli');
+    expect(cfg.connection.team).toEqual({ key: null, id: null });
+  });
+});
+
 describe('FlowConfigSchema — the loops config block (task 2.4)', () => {
   it('resolves the full per-reconciler loops map from {}', () => {
     const { loops } = FlowConfigSchema.parse({});
