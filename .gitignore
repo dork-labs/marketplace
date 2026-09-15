@@ -1,1 +1,12 @@
 .temp/
+.DS_Store
+.worktrees/
+
+# DorkOS agent-local state. `.dork/agent.json`, SOUL.md and NOPE.md are committed.
+# Kept in sync with EPHEMERAL_GITIGNORE_PATTERNS in @dorkos/harness.
+.dork/flow/
+.dork/MEMORY.md
+.dork/plugins/
+.agents/skills/*__*
+.claude/skills/*__*
+.claude/settings.local.json
