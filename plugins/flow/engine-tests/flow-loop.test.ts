@@ -82,3 +82,97 @@ describe('flow-loop decideStop — explicit signals override the sentinel (alway
     expect(result.decision).toBe('allow-stop');
   });
 });
+
+describe('flow-loop decideStop — a sentinel is only as good as its owner (DOR-1679)', () => {
+  const HOUR = 60 * 60 * 1000;
+  const NOW = Date.parse('2026-09-20T12:00:00.000Z');
+  const fresh = (agoMs: number) => new Date(NOW - agoMs).toISOString();
+
+  it('keeps the pre-DOR-1679 behavior when the sentinel records no usable pid', () => {
+    // 'unknown' liveness is the default, so a sentinel without a pid decides on
+    // active/ready alone — exactly as it did before owner liveness existed.
+    const live = { active: true, ready: 3, startedAt: fresh(HOUR) };
+    expect(decideStop('', live, 'unknown', NOW).decision).toBe('block-stop');
+    expect(decideStop('', live).decision).toBe('block-stop');
+  });
+
+  it('allows the stop and reaps when the drain owner is dead', () => {
+    // The reported bug: pid 49658 was gone, the file still said active, and the
+    // banner re-fired on every Stop of every later session in the repo.
+    const result = decideStop(
+      '',
+      { active: true, ready: 6, shapeable: 108, startedAt: fresh(HOUR), pid: 49658 },
+      'dead',
+      NOW
+    );
+    expect(result.decision).toBe('allow-stop');
+    expect(result.reap).toBe(true);
+    expect(result.reason).toContain('49658');
+  });
+
+  it('still blocks for a live owner with ready work inside the TTL', () => {
+    const result = decideStop(
+      '',
+      { active: true, ready: 3, startedAt: fresh(2 * HOUR), pid: 1234 },
+      'alive',
+      NOW
+    );
+    expect(result.decision).toBe('block-stop');
+    expect(result.reap).toBeFalsy();
+  });
+
+  it('presumes a recycled pid once an active sentinel outlives the TTL', () => {
+    // A live probe is not proof: a recycled pid looks alive. Age bounds belief.
+    const result = decideStop(
+      '',
+      { active: true, ready: 3, startedAt: fresh(30 * HOUR), pid: 1234 },
+      'alive',
+      NOW
+    );
+    expect(result.decision).toBe('allow-stop');
+    expect(result.reap).toBe(true);
+    expect(result.reason).toContain('presumed gone');
+  });
+
+  it('ignores an unparseable or absent startedAt rather than reaping on it', () => {
+    const noStamp = { active: true, ready: 3, pid: 1234 };
+    expect(decideStop('', noStamp, 'alive', NOW).decision).toBe('block-stop');
+    const junkStamp = { active: true, ready: 3, pid: 1234, startedAt: 'whenever' };
+    expect(decideStop('', junkStamp, 'alive', NOW).decision).toBe('block-stop');
+  });
+
+  it('never reaps a paused sentinel, even when its owner is dead', () => {
+    // active:false is what /flow:pause writes and /flow:resume reads back.
+    // Deleting it would silently discard the operator's paused drain.
+    const result = decideStop('', { active: false, ready: 5, pid: 49658 }, 'dead', NOW);
+    expect(result.decision).toBe('allow-stop');
+    expect(result.reap).toBeFalsy();
+  });
+});
+
+describe('flow-loop decideStop — the advertised escape hatch actually clears the sentinel', () => {
+  it('reaps the sentinel on ABORT, so the banner does not re-fire on the next Stop', () => {
+    const result = decideStop('<promise>ABORT</promise>', { active: true, ready: 3 });
+    expect(result.decision).toBe('allow-stop');
+    expect(result.reap).toBe(true);
+  });
+
+  it('reaps the sentinel on PHASE_COMPLETE too', () => {
+    const result = decideStop('<promise>PHASE_COMPLETE:auto</promise>', {
+      active: true,
+      ready: 3,
+    });
+    expect(result.decision).toBe('allow-stop');
+    expect(result.reap).toBe(true);
+  });
+
+  it('has nothing to reap when a signal fires with no sentinel or a paused one', () => {
+    expect(decideStop('<promise>ABORT</promise>', null).reap).toBeFalsy();
+    expect(decideStop('<promise>ABORT</promise>', { active: false }).reap).toBeFalsy();
+  });
+
+  it('reaps a drain that finished or starved, so it cannot outlive its owner', () => {
+    expect(decideStop('', { active: true, ready: 0, shapeable: 0 }).reap).toBe(true);
+    expect(decideStop('', { active: true, ready: 0, shapeable: 4 }).reap).toBe(true);
+  });
+});
