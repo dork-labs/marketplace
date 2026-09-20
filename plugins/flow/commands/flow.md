@@ -177,6 +177,16 @@ session, every `/flow:<stage>` step run) the hook is a strict no-op and the
 session stops. This sentinel is distinct from the per-issue `flow-state.json`
 run record (the session↔issue association, recovery ladder).
 
+**A sentinel is only as good as its owner.** The `pid` written at
+start is checked, not just recorded: on every Stop the hook probes it, and a
+sentinel whose owner is gone — or one still claiming `active` more than 24 hours
+later, where the number may have been recycled onto an unrelated process — is
+treated as an orphan, allowed to stop, and **deleted**. So a drain that dies
+without tearing down no longer traps every later session in that repo. Two
+consequences for anything that reads this file: a MISSING sentinel does not prove
+the queue drained, and a PAUSED one (`active: false`, written by `/flow:pause`)
+is never reaped, because `/flow:resume` reads it back.
+
 1. **Start.** Write `.dork/flow/auto-run.json` =
    `{ "active": true, "ready": <N>, "shapeable": <M>, "startedAt": "<ISO>", "pid": <pid> }`.
    Both counts come from `node --experimental-strip-types "${CLAUDE_PLUGIN_ROOT}/scripts/dispatch.ts"` (candidate set as
@@ -271,11 +281,15 @@ attemptCount, workerPid, startedAt }`, with `status` starting at `queued`
 3. **Loop continuation.** While `active: true` and `ready > 0`, the `flow-loop`
    Stop hook blocks the stop (exit 2) and the drain continues to the next issue.
    Output `<promise>ABORT</promise>` to stop early, or `<promise>PHASE_COMPLETE:auto</promise>`
-   to end the drain cleanly — either overrides the sentinel and allows the stop.
+   to end the drain cleanly — either overrides the sentinel and allows the stop,
+   and the hook deletes the sentinel on its way out, so the advertised hatch is
+   real rather than advisory.
 4. **Stop / teardown.** When the queue is drained (or on abort), **delete**
    `.dork/flow/auto-run.json`. With the sentinel gone the Stop hook fails open
    and the session ends. Never leave a stale sentinel — it would trap the next
-   session in the drain loop.
+   session in the drain loop. The hook now reaps an orphan it finds, but that is
+   a backstop for a drain that DIED, not a licence to skip this step: an owner
+   that is still alive is believed.
 
 ## Operator override (pause / resume / reclaim)
 

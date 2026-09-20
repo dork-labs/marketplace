@@ -16,7 +16,11 @@ a single pane:
    the flow engine's `readFlowState` shape). The session↔issue association, worktree,
    branch, stage, and status of every run.
 2. **`.dork/flow/auto-run.json`**: the `/flow auto` drain sentinel, if a drain is
-   live (`active`, `ready`, `shapeable`, `startedAt`, `pid`).
+   live (`active`, `ready`, `shapeable`, `startedAt`, `pid`). **A sentinel is not
+   a live drain until its owner is checked.** Before reporting one, verify the
+   recorded `pid` is still running (`kill -0 <pid>`); treat a dead owner, or an
+   `active` sentinel whose `startedAt` is more than 24 hours old (the pid may
+   have been recycled onto an unrelated process), as an ORPHAN, not a drain.
 3. **The tracker, via the adapter**: titles, labels, parked questions, and
    assumption comments. Read `${CLAUDE_PLUGIN_ROOT}/skills/<tracker>-adapter/SKILL.md`
    (where `<tracker>` is the `tracker` in `config.json`) and use its verbs; never
@@ -29,7 +33,9 @@ Render, in this order:
   (resolve the title via the adapter, per its display convention), then its
   worktree path, branch, `sessionId`, and current `stage` / `status` from the
   FlowRun. If a drain is live, head the pane with the `auto-run.json` sentinel
-  (`active`, `ready` ready vs `shapeable` behind the readiness gate).
+  (`active`, `ready` ready vs `shapeable` behind the readiness gate). If the
+  sentinel is an orphan, say so instead — "stale drain sentinel (pid N gone)" —
+  and note that the next Stop in that repo reaps it automatically.
 - **Parked.** Every `agent/needs-input` item: via the adapter, list the
   parked items, and for each show the open question text and how long it has waited
   (now minus the parking comment's timestamp).

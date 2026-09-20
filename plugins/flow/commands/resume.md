@@ -34,6 +34,12 @@ Resume is the inverse of pause: it restores the autonomous surfaces pause halted
    exists, there is no terminal drain to resume; start one with `/flow auto` when you
    want it.
 
+   A paused sentinel is never reaped — `/flow:pause` writes `active: false`
+   precisely so this command can read it back, and the Stop hook leaves that state
+   alone. A MISSING sentinel, though, can mean the hook reaped an orphan whose owner
+   had died, so it is not evidence the queue drained: check the ready
+   queue rather than assuming.
+
 ## Un-pausing a specific item
 
 To release a single item that `/flow:pause` parked with `agent/paused`, name its
