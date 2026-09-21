@@ -177,6 +177,18 @@
       "category": "agent-ops",
       "tags": ["safety", "hooks", "git", "guardrails"],
       "keywords": ["safety", "hooks", "git-guard", "process-guard", "file-guard", "autonomy"]
+    },
+    {
+      "name": "ephemeral-infra",
+      "source": "./plugins/ephemeral-infra",
+      "description": "Label throwaway containers, VMs and sandboxes, and sweep them from the next run: exit handlers do not survive a kill",
+      "author": {
+        "name": "Dork Labs"
+      },
+      "license": "MIT",
+      "category": "dev-tools",
+      "tags": ["docker", "cleanup"],
+      "keywords": ["docker", "containers", "disk"]
     }
   ]
 }

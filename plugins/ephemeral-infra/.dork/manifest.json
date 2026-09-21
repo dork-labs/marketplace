@@ -1,0 +1,14 @@
+{
+  "schemaVersion": 1,
+  "name": "ephemeral-infra",
+  "version": "0.1.0",
+  "type": "skill-pack",
+  "description": "One skill for throwaway infrastructure an agent starts outside its own process: label it, sweep it from the next run, and never trust an exit handler to survive a kill",
+  "author": "Dork Labs",
+  "license": "MIT",
+  "tags": ["docker", "containers", "cleanup", "testing", "disk"],
+  "category": "dev-tools",
+  "categories": ["dev-tools", "productivity"],
+  "icon": "🧹",
+  "layers": ["skills"]
+}

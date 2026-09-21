@@ -112,6 +112,14 @@
       "layers": ["hooks"],
       "icon": "🛟",
       "pricing": { "model": "free" }
+    },
+    "ephemeral-infra": {
+      "type": "skill-pack",
+      "displayName": "Ephemeral Infra",
+      "categories": ["dev-tools", "productivity"],
+      "layers": ["skills"],
+      "icon": "🧹",
+      "pricing": { "model": "free" }
     }
   }
 }

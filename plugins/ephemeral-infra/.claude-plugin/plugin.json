@@ -1,0 +1,8 @@
+{
+  "name": "ephemeral-infra",
+  "version": "0.1.0",
+  "description": "One skill for throwaway infrastructure an agent starts outside its own process: label it, sweep it from the next run, and never trust an exit handler to survive a kill",
+  "author": {
+    "name": "Dork Labs"
+  }
+}
