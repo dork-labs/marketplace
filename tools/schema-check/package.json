@@ -7,6 +7,7 @@
   "scripts": {
     "fetch:upstream": "tsx scripts/fetch-upstream.ts",
     "check": "npm run fetch:upstream && tsx src/cli.ts",
+    "check:bump": "tsx src/bump-cli.ts",
     "test": "npm run fetch:upstream && vitest run",
     "typecheck": "npm run fetch:upstream && tsc --noEmit",
     "format": "prettier --write \"scripts/**/*.ts\" \"src/**/*.ts\" \"tests/**/*.ts\" vitest.config.ts",
@@ -14,10 +15,12 @@
   },
   "dependencies": {
     "gray-matter": "^4.0.3",
+    "semver": "^7.8.5",
     "zod": "^4.4.3"
   },
   "devDependencies": {
     "@types/node": "^25.6.0",
+    "@types/semver": "^7.8.0",
     "prettier": "^3.8.3",
     "tsx": "^4.20.3",
     "typescript": "^5.9.3",

@@ -17,6 +17,7 @@ cd tools/schema-check
 npm ci
 npm run check   # the gate
 npm test        # its own tests
+npm run check:bump -- <base> <head>   # every changed package raised its version
 ```
 
 ## Why this exists
@@ -86,6 +87,28 @@ flow shipped with its manifest saying 0.6.0 while `plugin.json` said 0.7.2, so
 DorkOS showed one version while Claude Code ran another. The check lives in
 `src/versions.ts` and needs no DorkOS schema, so bumping the pin has nothing to do
 with it.
+
+## Bump on change
+
+`npm run check:bump -- <base> <head>` fails when a package's files changed
+between the two commits but its version did not go up. Claude Code reads a
+package's version from `plugin.json` (then the manifest), and once there is one,
+an install only updates when that number rises. A change without a bump never
+reaches anyone.
+
+- The change is measured from where `head` branched off `base`, so commits that
+  landed on `main` in the meantime never count.
+- Every file counts, a README or `docs/` page included: it ships in the install.
+- A new package passes, and so does a deleted one. Removing a version fails.
+- A package that declares no version at either commit is exempt, with a note:
+  Claude Code serves it by commit, so every change already reaches people.
+- A package is its `marketplace.json` entry name, the name people install. A
+  moved directory whose entry keeps its name is still one package; a renamed
+  entry is a new package plus a deleted one.
+
+CI runs it on every pull request (base against head) and on every push to `main`
+(`before` against `after`), which catches two PRs that each bumped to the same
+version.
 
 ## Where the schemas come from
 
