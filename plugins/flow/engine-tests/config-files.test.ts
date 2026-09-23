@@ -955,23 +955,21 @@ describe('resolveAdapter', () => {
     expect(resolveAdapter(roots(repo, outside))).toMatchObject({ origin: 'legacy', shared: true });
   });
 
-  // A moved adapter belongs to the project it moved to; a declined one is not
-  // this project's. Neither is read, and a move is reported.
-  it('skips a moved or declined legacy adapter', () => {
+  // A declined adapter is not this project's, so it is not read, but it is
+  // remembered as a place a copy could come from. Another project still sees it.
+  it('skips an adapter this project declined, and only for this project', () => {
     const repo = makeRepo();
     projectConfig(repo);
     const plugin = makePlugin(path.join(base, 'p'));
     const adapterDir = path.dirname(pluginAdapter(plugin));
     write(path.join(adapterDir, DECLINED_MARKER), `${repo}\n`);
-    expect(resolveAdapter(roots(repo, plugin)).origin).toBe('none');
+    expect(resolveAdapter(roots(repo, plugin))).toMatchObject({
+      origin: 'none',
+      declined: [adapterDir],
+    });
     const other = makeRepo('other');
     projectConfig(other);
-    expect(resolveAdapter(roots(other, plugin)).origin).toBe('legacy');
-    write(path.join(adapterDir, MIGRATED_MARKER), '/somewhere/else\n');
-    expect(resolveAdapter(roots(other, plugin))).toMatchObject({
-      origin: 'none',
-      moved: [{ folder: adapterDir, movedTo: '/somewhere/else' }],
-    });
+    expect(resolveAdapter(roots(other, plugin))).toMatchObject({ origin: 'legacy', declined: [] });
   });
 
   // The target sits beside the config.json in use, so a generated adapter is
@@ -1018,7 +1016,8 @@ describe('migrateAdapter', () => {
     ]);
     expect(readFileSync(path.join(dest, 'SKILL.md'), 'utf8')).toBe(JIRA_ADAPTER);
     expect(readFileSync(path.join(dest, 'references', 'mapping.md'), 'utf8')).toBe('# mapping\n');
-    expect(readFileSync(path.join(legacy, MIGRATED_MARKER), 'utf8')).toBe(`${repo}\n`);
+    // An adapter holds no credentials and may serve other projects: never locked.
+    expect(existsSync(path.join(legacy, MIGRATED_MARKER))).toBe(false);
     expect(existsSync(path.join(legacy, 'SKILL.md'))).toBe(true);
     expect(resolveAdapter(r)).toMatchObject({
       origin: 'project',
@@ -1051,7 +1050,7 @@ describe('migrateAdapter', () => {
       ok: true,
       migrated: false,
       needsConfirmation: true,
-      found: { folder: legacy, tracker: 'jira' },
+      found: { folder: legacy, tracker: 'jira', name: 'jira-adapter', excerpt: '# jira adapter' },
       wrote: [],
     });
     expect(existsSync(path.join(repo, '.agents/flow/adapters'))).toBe(false);
@@ -1074,6 +1073,38 @@ describe('migrateAdapter', () => {
     expect(existsSync(path.join(repo, '.agents/flow/adapters/jira', DECLINED_MARKER))).toBe(false);
   });
 
+  // The review's lock-out case: on a shared install, the first project to
+  // confirm must not take the adapter away from the others. A third project is
+  // still offered it, and can confirm it for itself.
+  it('keeps a shared adapter available to every project after one confirms', () => {
+    const plugin = makePlugin(path.join(base, 'p'));
+    pluginAdapter(plugin);
+    const a = makeRepo('a');
+    const b = makeRepo('b');
+    projectConfig(a);
+    projectConfig(b);
+    expect(migrateAdapter(roots(a, plugin), { confirm: true }).migrated).toBe(true);
+    expect(resolveAdapter(roots(b, plugin))).toMatchObject({ origin: 'legacy', shared: true });
+    expect(migrateAdapter(roots(b, plugin)).needsConfirmation).toBe(true);
+    expect(migrateAdapter(roots(b, plugin), { confirm: true }).migrated).toBe(true);
+    expect(resolveAdapter(roots(b, plugin)).origin).toBe('project');
+  });
+
+  // The excerpt a person is shown is the adapter's own opening lines, never
+  // the frontmatter, and at most a few of them.
+  it('summarises an adapter by its name and first lines', () => {
+    const repo = makeRepo();
+    projectConfig(repo);
+    const plugin = makePlugin(path.join(base, 'p'));
+    const body = Array.from({ length: 10 }, (_, i) => `line ${i + 1}`).join('\n\n');
+    pluginAdapter(plugin, 'jira', `---\nname: acme-jira\ndescription: x\n---\n\n${body}\n`);
+    const { found } = migrateAdapter(roots(repo, plugin));
+    expect(found).toMatchObject({ name: 'acme-jira' });
+    expect(found?.excerpt).toBe(
+      ['line 1', 'line 2', 'line 3', 'line 4', 'line 5', 'line 6'].join('\n')
+    );
+  });
+
   // A different adapter already in the project is never overwritten.
   it('stops without overwriting a different adapter already in the project', () => {
     const { repo, legacy, r } = inProject();
@@ -1083,7 +1114,6 @@ describe('migrateAdapter', () => {
     expect(result.reason).toContain(existing);
     expect(readFileSync(existing, 'utf8')).toBe('[1]\n');
     expect(existsSync(path.join(repo, '.agents/flow/adapters/jira/SKILL.md'))).toBe(false);
-    expect(existsSync(path.join(legacy, MIGRATED_MARKER))).toBe(false);
   });
 
   // A symlink in the old folder could point anywhere on the machine; it is not
@@ -1110,6 +1140,28 @@ describe('migrateAdapter', () => {
 });
 
 describe('migrateAll', () => {
+  // Settings already in the project, adapter still in a shared folder: the
+  // top-level answer must still say a person has to confirm, and a stopped
+  // adapter copy must still make the whole migration not ok. Fails if either
+  // top-level field looks at the settings half alone.
+  it('reports the adapter half at the top level', () => {
+    const repo = makeRepo();
+    projectConfig(repo);
+    const plugin = makePlugin(path.join(base, 'p'));
+    pluginAdapter(plugin);
+    expect(migrateAll(roots(repo, plugin))).toMatchObject({
+      ok: true,
+      needsConfirmation: true,
+      reason: 'already in the project',
+    });
+    write(path.join(repo, '.agents/flow/adapters/jira/extra.md'), 'x');
+    write(path.join(path.dirname(pluginAdapter(plugin)), 'extra.md'), 'y');
+    expect(migrateAll(roots(repo, plugin), { confirm: true })).toMatchObject({
+      ok: false,
+      adapter: { ok: false },
+    });
+  });
+
   /** Settings and a generated adapter, both still in a shared plugin folder. */
   function sharedLegacy() {
     const repo = makeRepo();
@@ -1168,12 +1220,43 @@ describe('pause', () => {
     const result = pauseFlow(roots(wt, plugin, repo), now);
     const file = path.join(repo, '.agents/flow', PAUSE_FILE);
     expect(result).toMatchObject({ ok: true, file, alreadyPaused: false, ignored: true });
-    expect(pauseState(roots(wt, plugin, repo))).toEqual({
-      file,
-      pausedAt: '2026-09-23T12:00:00.000Z',
-    });
-    expect(pauseState(roots(repo, plugin))).toEqual({ file, pausedAt: '2026-09-23T12:00:00.000Z' });
+    const expected = { file, pausedAt: '2026-09-23T12:00:00.000Z', hostSchedules: [] };
+    expect(pauseState(roots(wt, plugin, repo))).toEqual(expected);
+    expect(pauseState(roots(repo, plugin))).toEqual(expected);
     expect(untracked(repo)).toBe('');
+  });
+
+  // The review's repro: a worktree with its own config.local.json used to get
+  // its own flag, which the main checkout (where the scheduler runs) never saw,
+  // and a resume there removed nothing. The flag belongs to the project.
+  it('uses the main checkout even when the worktree has its own local settings', () => {
+    const repo = makeRepo();
+    const wt = path.join(base, 'wt');
+    git(repo, 'worktree', 'add', '-q', wt, '-b', 'wt');
+    write(path.join(wt, '.agents/flow/config.json'), '{}');
+    write(path.join(wt, '.agents/flow/config.local.json'), '{}');
+    const plugin = makePlugin(path.join(base, 'p'));
+    const w = roots(wt, plugin, repo);
+    const m = roots(repo, plugin);
+    pauseFlow(w);
+    expect(pauseState(m)?.file).toBe(path.join(repo, '.agents/flow', PAUSE_FILE));
+    expect(existsSync(path.join(wt, '.agents/flow', PAUSE_FILE))).toBe(false);
+    expect(resumeFlow(m).wasPaused).toBe(true);
+    expect(pauseState(w)).toBeNull();
+  });
+
+  // Host schedule rows the pause switched off are recorded, merged across
+  // calls without duplicates, and handed back by resume, so exactly those are
+  // switched back on.
+  it('records host schedules and hands them back on resume', () => {
+    const repo = makeRepo();
+    const r = roots(repo, makePlugin(path.join(base, 'p')));
+    pauseFlow(r);
+    expect(pauseFlow(r, new Date(), ['s1', 's2']).hostSchedules).toEqual(['s1', 's2']);
+    expect(pauseFlow(r, new Date(), ['s2', 's3']).hostSchedules).toEqual(['s1', 's2', 's3']);
+    expect(pauseState(r)?.hostSchedules).toEqual(['s1', 's2', 's3']);
+    expect(resumeFlow(r).hostSchedules).toEqual(['s1', 's2', 's3']);
+    expect(resumeFlow(r)).toEqual({ ok: true, wasPaused: false, removed: [], hostSchedules: [] });
   });
 
   // An install set up by flow 0.8.0 has a .gitignore without the pause line;
@@ -1207,24 +1290,24 @@ describe('pause', () => {
     expect(pauseState(roots(repo, makePlugin(path.join(base, 'p'))))).toEqual({
       file,
       pausedAt: null,
+      hostSchedules: [],
     });
   });
 
-  // Resume lifts every flag this project has, in either checkout.
-  it('resume removes the flag from both checkouts', () => {
+  // Resume from a worktree lifts the project's one flag.
+  it('resume from a worktree removes the main checkout’s flag', () => {
     const repo = makeRepo();
     const wt = path.join(base, 'wt');
     git(repo, 'worktree', 'add', '-q', wt, '-b', 'wt');
     const r = roots(wt, makePlugin(path.join(base, 'p')), repo);
     pauseFlow(r);
-    const inWorktree = write(path.join(wt, '.agents/flow', PAUSE_FILE), '{}');
     expect(resumeFlow(r)).toEqual({
       ok: true,
       wasPaused: true,
-      removed: [inWorktree, path.join(repo, '.agents/flow', PAUSE_FILE)],
+      removed: [path.join(repo, '.agents/flow', PAUSE_FILE)],
+      hostSchedules: [],
     });
     expect(pauseState(r)).toBeNull();
-    expect(resumeFlow(r)).toEqual({ ok: true, wasPaused: false, removed: [] });
   });
 });
 
@@ -1294,7 +1377,7 @@ describe('config-files CLI', () => {
         path: path.join(plugin, 'skills', 'linear-adapter', 'SKILL.md'),
         target: path.join(repo, '.agents/flow/adapters/linear/SKILL.md'),
         shared: false,
-        moved: [],
+        declined: [],
       },
       paused: null,
       errors: [],
@@ -1363,6 +1446,36 @@ describe('config-files CLI', () => {
       origin: 'project',
       path: path.join(repo, '.agents/flow/adapters/jira/SKILL.md'),
     });
+  });
+
+  // Settings already moved, adapter still shared: migrate must ask, at the top
+  // level the /flow guard reads, and show the adapter's opening lines.
+  it('migrate asks about a shared adapter when the settings are already in the project', () => {
+    const repo = makeRepo();
+    projectConfig(repo, 'jira');
+    const plugin = shared();
+    pluginAdapter(plugin);
+    const asked = run(plugin, repo, ['migrate']);
+    expect(asked.status).toBe(0);
+    expect(asked.out).toMatchObject({ ok: true, needsConfirmation: true });
+    expect(asked.stderr).toContain('# jira adapter');
+    const declined = run(plugin, repo, ['migrate', '--decline']);
+    expect(declined.status).toBe(0);
+    const resolved = run(plugin, repo);
+    expect(resolved.status).toBe(1);
+    expect(resolved.out.errors[0].message).toContain(
+      `if the one in ${path.join(plugin, 'skills', 'jira-adapter')} is this project's after all`
+    );
+  });
+
+  // --host-schedule only makes sense with pause; elsewhere it is a usage error.
+  it('pause records --host-schedule ids; other commands refuse the flag', () => {
+    const repo = makeRepo();
+    const plugin = shared();
+    const paused = run(plugin, repo, ['pause', '--host-schedule', 'a', '--host-schedule', 'b']);
+    expect(paused.out.hostSchedules).toEqual(['a', 'b']);
+    expect(run(plugin, repo, ['resume']).out.hostSchedules).toEqual(['a', 'b']);
+    expect(run(plugin, repo, ['resolve', '--host-schedule', 'a']).status).toBe(2);
   });
 
   // pause and resume round trip through resolve, which reports the flag without

@@ -341,10 +341,22 @@ const FLOW_COMMANDS_DIR = path.join(pluginRoot, 'commands');
 const RESOLVED_ADAPTER = '`adapter.path`';
 
 /**
- * The adapter path flow used before DOR-2285. For a generated adapter it names a
- * folder a plugin update erases, so no command or skill may send the agent there.
+ * An adapter inside the plugin's `skills/` folder, the place flow used before
+ * DOR-2285: the `<tracker>` placeholder or any concrete tracker. For a generated
+ * adapter it names a folder a plugin update erases, so no command, skill or doc
+ * may send the agent or a reader there. The shipped reference adapter,
+ * `skills/linear-adapter/`, really does live there and is the one exception.
  */
-const PLUGIN_ADAPTER_PATH = 'skills/<tracker>-adapter/';
+const PLUGIN_ADAPTER_PATH = /skills\/(?:<tracker>|(?!linear-adapter\/)[a-z0-9-]+)-adapter\//g;
+
+/** Every place the old plugin path is named, as `file: match`. */
+function pluginAdapterPaths(files: { file: string; content: string }[]): string[] {
+  return files.flatMap(({ file, content }) =>
+    [...content.matchAll(PLUGIN_ADAPTER_PATH)].map(
+      (m) => `${path.relative(pluginRoot, file)}: ${m[0]}`
+    )
+  );
+}
 
 describe('F1 — generic commands name no tracker and route through the resolved adapter', () => {
   const commandFiles = collectFiles(FLOW_COMMANDS_DIR).filter((file) => file.endsWith('.md'));
@@ -416,21 +428,27 @@ describe('F1 — generic commands name no tracker and route through the resolved
     }
   });
 
-  it('no command or skill sends the agent to the adapter by its old plugin path', () => {
+  it('no command, skill or doc points at a generated adapter inside the plugin', () => {
     // A generated adapter no longer lives in the plugin, so this path would point
-    // at nothing (or at a stale copy an update is about to erase). The shipped
-    // adapter's own file is exempt: it names where it itself lives.
+    // at nothing (or at a stale copy an update is about to erase).
     const files = [
       ...commandFiles,
-      ...collectFiles(FLOW_SKILLS_DIR).filter(
-        (file) => file.endsWith('.md') && !isInside(ADAPTER_SKILL_DIR, file)
-      ),
-    ];
-    const offenders = files.filter((file) =>
-      readFileSync(file, 'utf8').includes(PLUGIN_ADAPTER_PATH)
-    );
-    expect(offenders.map((file) => path.relative(pluginRoot, file))).toEqual([]);
-    expect(files.length).toBeGreaterThan(commandFiles.length);
+      ...collectFiles(FLOW_SKILLS_DIR).filter((file) => file.endsWith('.md')),
+      ...collectFiles(path.join(pluginRoot, 'docs')).filter((file) => /\.mdx?$/.test(file)),
+    ].map((file) => ({ file, content: readFileSync(file, 'utf8') }));
+    expect(pluginAdapterPaths(files)).toEqual([]);
+    expect(files.length).toBeGreaterThan(commandFiles.length + 20);
+  });
+
+  it('the old-path guard catches every spelling, and spares the shipped adapter', () => {
+    // Plant-a-break: the guard must bite on the placeholder and on a concrete
+    // generated tracker, and must not flag the reference adapter that ships.
+    const at = (content: string) =>
+      pluginAdapterPaths([{ file: path.join(pluginRoot, 'docs', 'planted.mdx'), content }]);
+    expect(at('read `skills/<tracker>-adapter/SKILL.md`')).toHaveLength(1);
+    expect(at('see <flow-root>/skills/jira-adapter/SKILL.md')).toHaveLength(1);
+    expect(at('see skills/github-issues-adapter/')).toHaveLength(1);
+    expect(at('the shipped `skills/linear-adapter/SKILL.md`')).toEqual([]);
   });
 
   it('every stage skill that routes through the adapter says where to find it', () => {

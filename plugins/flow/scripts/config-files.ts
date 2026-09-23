@@ -10,8 +10,8 @@
  *   kept out of git by a `.agents/flow/.gitignore` flow writes.
  * - `.agents/flow/adapters/<tracker>/SKILL.md`: a tracker adapter `/flow:init`
  *   generated, committed as the team's code (see {@link resolveAdapter}).
- * - `.agents/flow/paused.json`: this machine's pause, kept out of git (see
- *   {@link pauseFlow}).
+ * - `.agents/flow/paused.json`: this machine's pause, kept out of git, always in
+ *   the main checkout (see {@link pauseFlow}).
  *
  * They used to live in `<flow-root>/config/`, inside the plugin. A host that
  * installs each plugin version into its own folder (Claude Code's plugin cache)
@@ -263,8 +263,12 @@ export interface AdapterFiles {
   target: string | null;
   /** Origin `legacy` from a plugin folder outside this project, so only moved once a person confirms. */
   shared: boolean;
-  /** Legacy adapter folders skipped because they were moved to a project. */
-  moved: MovedSettings[];
+  /**
+   * Legacy adapter folders for this tracker that this project said are not its
+   * own. They are not read, but they are where a copy could come from if that
+   * answer was wrong.
+   */
+  declined: string[];
 }
 
 /** Non-secret facts about an adapter found in a plugin folder, shown before moving it. */
@@ -273,6 +277,10 @@ export interface AdapterSummary {
   folder: string;
   /** The tracker it is for. */
   tracker: string;
+  /** The `name` in its frontmatter, or `null`. */
+  name: string | null;
+  /** Its first few lines after the frontmatter, so a person can recognise it. */
+  excerpt: string;
 }
 
 /** The outcome of copying a legacy adapter into the project. */
@@ -309,6 +317,12 @@ export interface PauseState {
   file: string;
   /** When the pause began, or `null` when the flag cannot be read (it still pauses). */
   pausedAt: string | null;
+  /**
+   * The ids of the host's schedule rows `/flow:pause` switched off (DorkOS), so
+   * `/flow:resume` switches back on exactly those and nothing a person turned off
+   * themselves.
+   */
+  hostSchedules: string[];
 }
 
 /** The outcome of pausing. */
@@ -319,6 +333,8 @@ export interface PauseResult {
   file: string;
   /** When the pause in effect began. */
   pausedAt: string | null;
+  /** The host schedule ids recorded in the flag. */
+  hostSchedules: string[];
   /** flow was already paused; the earlier flag was kept. */
   alreadyPaused: boolean;
   /** Whether git ignores the flag; `false` means it could be committed by mistake. */
@@ -333,6 +349,8 @@ export interface ResumeResult {
   wasPaused: boolean;
   /** The flag files removed. */
   removed: string[];
+  /** The host schedule ids the pause had switched off: switch these, and only these, back on. */
+  hostSchedules: string[];
 }
 
 /** Run git in `cwd`, returning trimmed stdout, or `null` when it fails. */
@@ -606,8 +624,10 @@ export function trackerOf(files: Pick<ConfigFiles, 'committed' | 'local'>): stri
  * 2. Shipped: `<flow-root>/skills/<tracker>-adapter/SKILL.md`, for a tracker in
  *    {@link SHIPPED_ADAPTERS}.
  * 3. Legacy: an adapter an older flow generated into a plugin folder
- *    ({@link legacyAdapterDirs}), skipping one marked as moved or declined by this
- *    project, and `shared` unless the plugin sits inside this project.
+ *    ({@link legacyAdapterDirs}), skipping one this project declined, and `shared`
+ *    unless the plugin sits inside this project. A legacy adapter carries no
+ *    credentials, so it is never locked to the first project that copies it:
+ *    each project on a shared install confirms it for itself.
  * 4. None.
  *
  * The adapter is committed team code, so it is never a harness skill in the
@@ -621,10 +641,10 @@ export function resolveAdapter(
   roots: ConfigRoots,
   files: ConfigFiles = resolveConfigFiles(roots)
 ): AdapterFiles {
-  const moved: MovedSettings[] = [];
+  const declined: string[] = [];
   const tracker = files.committed === null ? null : trackerOf(files);
   if (tracker === null) {
-    return { tracker: null, origin: 'none', path: null, target: null, shared: false, moved };
+    return { tracker: null, origin: 'none', path: null, target: null, shared: false, declined };
   }
   const target = path.join(files.committedDir, ADAPTERS_DIR, tracker, ADAPTER_FILE);
   const found = (origin: AdapterOrigin, file: string | null, shared = false): AdapterFiles => ({
@@ -633,7 +653,7 @@ export function resolveAdapter(
     path: file,
     target,
     shared,
-    moved,
+    declined,
   });
 
   const project = projectDirs(roots)
@@ -647,12 +667,10 @@ export function resolveAdapter(
   for (const dir of legacyAdapterDirs(roots.pluginRoot, tracker)) {
     const file = path.join(dir, ADAPTER_FILE);
     if (!isFile(file)) continue;
-    const destination = movedTo(dir);
-    if (destination !== null) {
-      moved.push({ folder: dir, movedTo: destination });
+    if (declinedBy(dir, roots)) {
+      declined.push(dir);
       continue;
     }
-    if (declinedBy(dir, roots)) continue;
     return found('legacy', file, !inProject(dir, roots));
   }
   return found('none', null);
@@ -988,7 +1006,9 @@ function adapterFilesIn(dir: string, rel = ''): string[] {
  * copied without asking; one anywhere else only with `confirm: true`, and
  * `decline: true` records that it is not this project's. Every file is copied
  * byte for byte and never overwrites anything; `SKILL.md` goes last. The old
- * folder is never deleted and gets a {@link MIGRATED_MARKER} naming this project.
+ * folder is never deleted and, unlike settings, never marked as moved: an
+ * adapter holds no credentials, and another project on a shared install may use
+ * the same one, so each project confirms it for itself.
  *
  * @param roots - The checkout, main checkout and plugin root to look in.
  * @param options - `confirm` / `decline`: a person's answer about a shared folder.
@@ -1016,7 +1036,7 @@ export function migrateAdapter(
   }
 
   const from = path.dirname(adapter.path);
-  const found = { folder: from, tracker: adapter.tracker as string };
+  const found = summariseAdapter(from, adapter.tracker as string);
   const sources = adapterFilesIn(from);
   const wrote: string[] = [];
   const unchanged: string[] = [];
@@ -1073,13 +1093,34 @@ export function migrateAdapter(
     return stop(`copying the adapter failed: ${(err as Error).message}`);
   }
 
-  let reason = `the ${found.tracker} adapter was copied into ${targetDir}; commit it. The old copy in ${from} was left in place, and can be deleted once the new one is committed`;
-  try {
-    writeFileSync(path.join(from, MIGRATED_MARKER), `${projectKey(roots)}\n`);
-  } catch (err) {
-    reason += `, but ${from} could not be marked as moved (${(err as Error).message}), so another project on this install could still read it`;
-  }
+  const reason = `the ${found.tracker} adapter was copied into ${targetDir}; commit it. The old copy in ${from} was left in place for any other project that uses it`;
   return { ok: true, migrated: true, ...outcome, reason };
+}
+
+/** How many lines of an adapter a person is shown before confirming it. */
+const EXCERPT_LINES = 6;
+
+/** The frontmatter `name` and first lines of the adapter in `folder`. */
+function summariseAdapter(folder: string, tracker: string): AdapterSummary {
+  const text = readOrNull(path.join(folder, ADAPTER_FILE))?.toString('utf8') ?? '';
+  const lines = text.split(/\r?\n/);
+  let body = lines;
+  let name: string | null = null;
+  if (lines[0]?.trim() === '---') {
+    const end = lines.indexOf('---', 1);
+    const front = end === -1 ? [] : lines.slice(1, end);
+    name =
+      front
+        .find((line) => /^name:/.test(line))
+        ?.replace(/^name:\s*/, '')
+        .trim() || null;
+    body = end === -1 ? lines : lines.slice(end + 1);
+  }
+  const excerpt = body
+    .filter((line) => line.trim() !== '')
+    .slice(0, EXCERPT_LINES)
+    .join('\n');
+  return { folder, tracker, name, excerpt };
 }
 
 /**
@@ -1113,86 +1154,109 @@ export function migrateAll(
   };
 }
 
-/**
- * Whether flow is paused on this machine: the first {@link PAUSE_FILE} in the
- * checkout's, then the main checkout's, `.agents/flow/`. The flag's presence is
- * the pause; one that cannot be read still pauses, the safe direction for
- * autonomy.
- *
- * @param roots - The checkouts to look in.
- * @returns The pause, or `null` when flow is not paused.
- */
-export function pauseState(roots: ConfigRoots): PauseState | null {
-  const file = projectDirs(roots)
-    .map((dir) => path.join(dir, PAUSE_FILE))
-    .find(isFile);
-  if (file === undefined) return null;
-  const value = parseOrUndefined(readOrNull(file));
-  const pausedAt =
-    isPlainObject(value) && typeof value.pausedAt === 'string' ? value.pausedAt : null;
-  return { file, pausedAt };
+/** The one `.agents/flow/` that holds this project's pause: the main checkout's, else the checkout's. */
+function pauseFile(roots: ConfigRoots): string {
+  return path.join(projectKey(roots), PROJECT_CONFIG_DIR, PAUSE_FILE);
+}
+
+/** The host schedule ids a flag records, dropping anything that is not a non-empty string. */
+function recordedSchedules(value: unknown): string[] {
+  if (!isPlainObject(value) || !Array.isArray(value.hostSchedules)) return [];
+  return value.hostSchedules.filter((id): id is string => typeof id === 'string' && id !== '');
 }
 
 /**
- * Pause flow's autonomy on this machine: write {@link PAUSE_FILE} beside the
- * local settings (the main checkout's `.agents/flow/` from a worktree), after
- * keeping it out of git. Every autonomous entry point (the scheduled ticks,
- * `/flow continue`, `/flow auto`) checks it first and stops. An existing pause is
- * kept, so its start time stays true. Works whether or not flow is configured.
+ * Whether flow is paused on this machine: whether {@link PAUSE_FILE} exists in
+ * the project's own `.agents/flow/` (the main checkout's, from a linked
+ * worktree), the one place every checkout and the scheduler's session look. The
+ * flag's presence is the pause; one that cannot be read still pauses, the safe
+ * direction for autonomy.
+ *
+ * @param roots - The checkouts to act for.
+ * @returns The pause, or `null` when flow is not paused.
+ */
+export function pauseState(roots: ConfigRoots): PauseState | null {
+  const file = pauseFile(roots);
+  if (!isFile(file)) return null;
+  const value = parseOrUndefined(readOrNull(file));
+  const pausedAt =
+    isPlainObject(value) && typeof value.pausedAt === 'string' ? value.pausedAt : null;
+  return { file, pausedAt, hostSchedules: recordedSchedules(value) };
+}
+
+/**
+ * Pause flow's autonomy on this machine: write {@link PAUSE_FILE} into the
+ * project's own `.agents/flow/` (the main checkout's from a worktree, whatever
+ * settings the worktree has), after keeping it out of git. Every autonomous entry
+ * point (the scheduled ticks, the tracker tick, `/flow continue`, `/flow auto`)
+ * checks it first and stops. An existing pause is kept, so its start time stays
+ * true. Works whether or not flow is configured.
+ *
+ * `hostSchedules` adds the ids of host schedule rows the caller just switched
+ * off, so `/flow:resume` can switch those back on; they merge into the flag.
  *
  * It is a file flow owns in the project, not an edit to the shipped schedule: an
  * update cannot undo it, and it works under any scheduler.
  *
  * @param roots - The checkouts to act for.
  * @param now - The time to record.
+ * @param hostSchedules - Host schedule ids to record in the flag.
  * @returns The flag in effect, and whether git ignores it.
  */
-export function pauseFlow(roots: ConfigRoots, now: Date = new Date()): PauseResult {
-  const dir = resolveConfigFiles(roots).localDir;
-  keepOutOfGit(roots, dir);
-  const ignored = (file: string) => !inGitRepo(path.dirname(file)) || gitIgnores(file);
-  const existing = pauseState(roots);
-  if (existing !== null)
-    return { ok: true, ...existing, alreadyPaused: true, ignored: ignored(existing.file) };
+export function pauseFlow(
+  roots: ConfigRoots,
+  now: Date = new Date(),
+  hostSchedules: readonly string[] = []
+): PauseResult {
+  const file = pauseFile(roots);
+  keepOutOfGit(roots, path.dirname(file));
+  const ignored = !inGitRepo(path.dirname(file)) || gitIgnores(file);
 
-  const file = path.join(dir, PAUSE_FILE);
-  const pausedAt = now.toISOString();
+  let alreadyPaused = true;
   try {
-    writeFileSync(file, `${JSON.stringify({ pausedAt }, null, 2)}\n`, { flag: 'wx' });
+    const pausedAt = now.toISOString();
+    writeFileSync(file, `${JSON.stringify({ pausedAt, hostSchedules: [] }, null, 2)}\n`, {
+      flag: 'wx',
+    });
+    alreadyPaused = false;
   } catch (err) {
-    // Another session paused in between: theirs stands.
+    // Already paused (perhaps by another session a moment ago): that pause stands.
     if ((err as NodeJS.ErrnoException).code !== 'EEXIST') throw err;
-    const raced = pauseState(roots) ?? { file, pausedAt: null };
-    return { ok: true, ...raced, alreadyPaused: true, ignored: ignored(raced.file) };
   }
-  return { ok: true, file, pausedAt, alreadyPaused: false, ignored: ignored(file) };
+  const state = pauseState(roots) ?? { file, pausedAt: null, hostSchedules: [] };
+  const merged = [...new Set([...state.hostSchedules, ...hostSchedules])];
+  if (merged.length !== state.hostSchedules.length) {
+    const next = { pausedAt: state.pausedAt, hostSchedules: merged };
+    writeFileSync(file, `${JSON.stringify(next, null, 2)}\n`);
+  }
+  return { ok: true, ...state, hostSchedules: merged, alreadyPaused, ignored };
 }
 
 /**
- * Lift a pause: remove {@link PAUSE_FILE} from the checkout's and the main
- * checkout's `.agents/flow/`.
+ * Lift a pause: remove the project's {@link PAUSE_FILE}.
  *
  * @param roots - The checkouts to act for.
- * @returns Whether flow was paused, and the flags removed.
+ * @returns Whether flow was paused, the flag removed, and the host schedule ids
+ *   the pause had switched off.
  */
 export function resumeFlow(roots: ConfigRoots): ResumeResult {
-  const removed = projectDirs(roots)
-    .map((dir) => path.join(dir, PAUSE_FILE))
-    .filter(isFile);
-  for (const file of removed) rmSync(file, { force: true });
-  return { ok: true, wasPaused: removed.length > 0, removed };
+  const state = pauseState(roots);
+  if (state === null) return { ok: true, wasPaused: false, removed: [], hostSchedules: [] };
+  rmSync(state.file, { force: true });
+  return { ok: true, wasPaused: true, removed: [state.file], hostSchedules: state.hostSchedules };
 }
 
 const HELP = `config-files — find, migrate and prepare flow's project files.
 
-Usage: config-files.ts [resolve|migrate|prepare|pause|resume] [--confirm|--decline] [--project <dir>]
+Usage: config-files.ts [resolve|migrate|prepare|pause|resume] [--confirm|--decline]
+                      [--host-schedule <id>]... [--project <dir>]
 
   resolve   (default) Which config.json and config.local.json flow reads, with
             config.json checked against config.schema.json, which tracker adapter
             it reads, and whether flow is paused. Prints
             { ok, origin, committed, local, committedDir, localDir, shared, moved,
               flowRoot, adapter, paused, errors, warnings }; adapter is
-            { tracker, origin, path, target, shared, moved }. Exit 0 when
+            { tracker, origin, path, target, shared, declined }. Exit 0 when
             configured, valid and with an adapter to read, 1 otherwise. Being
             paused is not an error: act on "paused".
   migrate   Copy settings, and the tracker adapter they name, from inside the
@@ -1206,9 +1270,13 @@ Usage: config-files.ts [resolve|migrate|prepare|pause|resume] [--confirm|--decli
   prepare   Create the .agents/flow/ folders and make git ignore config.local.json
             in each. Prints { ok, committed, local, ignoreFiles }: write the files to
             exactly those paths. Exit 1 when git would still track the local file.
-  pause     Pause flow's autonomy on this machine (.agents/flow/paused.json, kept
-            out of git). Prints { ok, file, pausedAt, alreadyPaused, ignored }.
-  resume    Lift the pause. Prints { ok, wasPaused, removed }.
+  pause     Pause flow's autonomy on this machine (the project's
+            .agents/flow/paused.json, in the main checkout from a worktree, kept
+            out of git). --host-schedule <id> records a host schedule row the
+            caller switched off, so resume can switch it back on. Prints
+            { ok, file, pausedAt, hostSchedules, alreadyPaused, ignored }.
+  resume    Lift the pause. Prints { ok, wasPaused, removed, hostSchedules }:
+            switch those host schedule rows, and only those, back on.
 
 --project <dir> is the folder to act for (default: the current directory).
 Only paths and non-secret facts are printed, never a credential.
@@ -1311,9 +1379,13 @@ function adapterIssues(
   }
   const targetDir = path.dirname(adapter.target as string);
   if (adapter.origin === 'none') {
+    const copyFrom =
+      adapter.declined.length === 0
+        ? ''
+        : `, or, if the one in ${adapter.declined[0]} is this project's after all, copy that folder into ${targetDir}`;
     errors.push({
       path: at,
-      message: `no adapter for tracker "${adapter.tracker}"; run /flow:init to generate one into ${targetDir}`,
+      message: `no adapter for tracker "${adapter.tracker}"; run /flow:init to generate one into ${targetDir}${copyFrom}`,
     });
   } else if (adapter.origin === 'legacy') {
     const folder = path.dirname(adapter.path as string);
@@ -1330,12 +1402,6 @@ function adapterIssues(
       });
     }
   }
-  for (const moved of adapter.moved) {
-    warnings.push({
-      path: at,
-      message: `the adapter in ${moved.folder} was moved to ${moved.movedTo} and belongs to that project; flow did not use it here`,
-    });
-  }
 }
 
 /**
@@ -1349,6 +1415,7 @@ export function main(argv: readonly string[]): number {
   let project = process.cwd();
   let confirm = false;
   let decline = false;
+  const hostSchedules: string[] = [];
   for (let i = 0; i < argv.length; i += 1) {
     const arg = argv[i];
     if (arg === '--help' || arg === '-h') {
@@ -1363,6 +1430,9 @@ export function main(argv: readonly string[]): number {
       confirm = true;
     } else if (arg === '--decline') {
       decline = true;
+    } else if (arg === '--host-schedule' && argv[i + 1] !== undefined && argv[i + 1] !== '') {
+      hostSchedules.push(argv[i + 1]);
+      i += 1;
     } else if ((COMMANDS as readonly string[]).includes(arg) && i === 0) {
       command = arg as Command;
     } else {
@@ -1379,6 +1449,10 @@ export function main(argv: readonly string[]): number {
     return 1;
   }
 
+  if (hostSchedules.length > 0 && command !== 'pause') {
+    process.stderr.write(`config-files: --host-schedule only goes with pause\n`);
+    return 2;
+  }
   let output: { result: object; ok: boolean };
   if (command === 'migrate') {
     if (confirm && decline) {
@@ -1390,10 +1464,16 @@ export function main(argv: readonly string[]): number {
     if (result.needsConfirmation && result.found !== null) {
       process.stderr.write(`config-files: found ${describe(result.found)}\n`);
     }
+    if (result.adapter.needsConfirmation && result.adapter.found !== null) {
+      const { folder, name, excerpt } = result.adapter.found;
+      process.stderr.write(
+        `config-files: found the adapter ${name ?? '(unnamed)'} in ${folder}:\n${excerpt}\n`
+      );
+    }
     process.stderr.write(`config-files: adapter: ${result.adapter.reason}\n`);
     output = { result, ok: result.ok };
   } else if (command === 'pause') {
-    const result = pauseFlow(roots);
+    const result = pauseFlow(roots, new Date(), hostSchedules);
     if (!result.ignored) {
       process.stderr.write(
         `config-files: warning — git does not ignore ${result.file}, so the pause could be committed by mistake\n`

@@ -70,7 +70,8 @@ into the plugin along with the settings (its result's `adapter` part); when it p
 `"migrated": true` (at the top or in `adapter`), tell the operator which files it
 wrote. When it prints `"needsConfirmation": true`, the old settings or adapter sit in
 a plugin folder several projects may share: show the operator its `found` and
-`adapter.found` (folder, tracker, team, workspace) and ask **"Are these this
+`adapter.found` (folder, tracker, team, workspace; the adapter's `name` and first
+lines) and ask **"Are these this
 project's settings?"** (one answer covers both). On yes, run `config-files.ts migrate --confirm`. On no, run
 `config-files.ts migrate --decline` (flow records the answer, so neither `/flow`
 nor a later `/flow:init` asks this project again, even if this setup is abandoned)

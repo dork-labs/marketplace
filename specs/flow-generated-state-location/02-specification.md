@@ -109,9 +109,14 @@ export interface AdapterFiles {
   path: string | null;   // the SKILL.md to read
   target: string | null; // <committedDir>/adapters/<tracker>/SKILL.md: where one is generated or moved
   shared: boolean;
-  moved: MovedSettings[];
+  declined: string[];    // legacy folders this project declined: not read, named by the "none" error
 }
 ```
+
+Unlike settings, a legacy adapter is never locked to the first project that copies it
+(review round 1, finding 3): it holds no credentials, and on a shared install several
+projects may use the same one. So there is no `MIGRATED_TO` for adapters; each project
+confirms (or declines) it for itself.
 
 `legacyConfigDirs` and `legacyAdapterDirs` share one helper that lists Claude Code cache
 siblings, so the cache-layout rule lives once.
@@ -123,13 +128,14 @@ paused, errors, warnings }`. New `errors` (at path `(adapter)`), only when a `co
 found:
 
 - `tracker` not a slug: "tracker "<value>" cannot name an adapter".
-- origin `none`: `no adapter for tracker "<t>"; run /flow:init to generate one into <target>`.
+- origin `none`: `no adapter for tracker "<t>"; run /flow:init to generate one into <target>`,
+  plus, when this project declined a legacy adapter for that tracker, "or, if the one in
+  <dir> is this project's after all, copy that folder into <target dir>".
 - origin `legacy`, shared (fail closed, as for settings): "the <t> adapter in <dir> may belong to
   another project; run /flow in this project to confirm".
 
 New `warnings`: legacy in-project ("the <t> adapter is still inside the plugin at <dir>, where an
-update can erase it; run config-files.ts migrate to copy it into <target dir>"), and one per
-moved adapter folder. `paused` is `{ file, pausedAt }` or `null`; it is state, not an error, so
+update can erase it; run config-files.ts migrate to copy it into <target dir>"). `paused` is `{ file, pausedAt }` or `null`; it is state, not an error, so
 `ok` ignores it and each caller decides.
 
 ### `migrate`
@@ -137,7 +143,8 @@ moved adapter folder. `paused` is `{ file, pausedAt }` or `null`; it is state, n
 Unchanged for settings, then the adapter, with the same `--confirm` / `--decline` applying to
 both (one question: they come from the same plugin folder). Output adds
 `adapter: { ok, migrated, needsConfirmation, found, from, wrote, unchanged, leftInPlace, reason }`
-where `found` is `{ folder, tracker }`. Top-level `ok` is false when either stopped;
+where `found` is `{ folder, tracker, name, excerpt }`: the frontmatter `name` and the first six
+non-empty lines after the frontmatter, so a person can recognise the adapter before saying yes. Top-level `ok` is false when either stopped;
 top-level `needsConfirmation` is true when either needs a person.
 
 `migrateAdapter(roots, options)`:
@@ -151,23 +158,26 @@ top-level `needsConfirmation` is true when either needs a person.
   file, byte for byte, recursively, skipping the two marker files and anything that is not a
   regular file or folder (a symlink). `SKILL.md` goes last, because its presence makes the project
   the source. Each file goes through `placeFile`: never overwrites, identical content counts as
-  `unchanged`, anything else stops the migration with nothing overwritten. Then `MIGRATED_TO` in
-  the old folder. Old files are never deleted; the reason tells the person the old copy can be
-  deleted once they have committed the new one, since a host may still offer it as a skill.
+  `unchanged`, anything else stops the migration with nothing overwritten. The old folder is
+  neither deleted nor marked: it stays available to other projects on the install.
 
 ### `pause` and `resume`
 
-- `pause`: writes `<localDir>/paused.json` = `{ "pausedAt": "<ISO>" }` (created exclusively; an
-  existing flag is kept, `alreadyPaused: true`), after keeping it out of git the same way as the
-  local settings file (`.gitignore` in the current checkout, `info/exclude` for the main checkout).
-  Prints `{ ok, file, pausedAt, alreadyPaused, ignored }`. `ignored: false` (git would track it)
-  still pauses: a pause must never fail for a reason that is not about pausing; the CLI warns.
-  Works whether or not flow is configured.
-- `resume`: removes `paused.json` from the checkout's and the main checkout's `.agents/flow/`.
-  Prints `{ ok, wasPaused, removed }`.
-- `paused` in `resolve`: the first `paused.json` found in the checkout's, then the main
-  checkout's `.agents/flow/`. Its presence is the pause; `pausedAt` is informational and `null`
-  when unreadable (an unreadable flag still pauses: the safe direction for autonomy).
+The flag has exactly one home: `<main checkout, else checkout>/.agents/flow/paused.json`
+(review round 1, finding 1: following `localDir` put it in a worktree that had its own
+`config.local.json`, where the main checkout and the scheduler never saw it).
+
+- `pause [--host-schedule <id>]...`: writes the flag = `{ "pausedAt": "<ISO>", "hostSchedules": [] }`
+  (created exclusively; an existing flag is kept, `alreadyPaused: true`), after keeping it out
+  of git (`.gitignore` in the current checkout, `info/exclude` for the main checkout from a
+  worktree). Each `--host-schedule` id is merged into `hostSchedules` without duplicates.
+  Prints `{ ok, file, pausedAt, hostSchedules, alreadyPaused, ignored }`. `ignored: false` still
+  pauses: a pause must never fail for a reason that is not about pausing; the CLI warns. Works
+  whether or not flow is configured. `--host-schedule` with any other command is a usage error.
+- `resume`: removes the flag. Prints `{ ok, wasPaused, removed, hostSchedules }`.
+- `paused` in `resolve`: `{ file, pausedAt, hostSchedules }` when the flag exists, else `null`.
+  Its presence is the pause; `pausedAt` is `null` when unreadable (an unreadable flag still
+  pauses: the safe direction for autonomy).
 
 Why ignored and per machine: a committed flag would reach other machines only after a commit and
 merge, which is the wrong latency for "stop now", and a flag merged by mistake would silently stop
@@ -179,13 +189,24 @@ every teammate's autonomy. A scheduler on another machine (CI) is paused where i
 | ------------------------------------ | ------------------------------------------------------------------------------------------ |
 | `skills/flow-drain` (scheduled tick) | Step 0: run `config-files.ts`; if `paused`, stop and report, touching nothing.            |
 | `skills/flow-groom` (scheduled check)| Same step 0.                                                                               |
+| `skills/tending-tracker` (tracker tick) | Same check before anything else on every poll: it claims and advances work (review round 1, finding 2). |
 | `/flow continue`                     | The guard stops with "flow is paused (since …); /flow:resume lifts it".                   |
 | `/flow auto`                         | Same at start, and re-checked at the start of every iteration; a pause tears the drain down. |
 | Manual stage commands, `/flow:status`| Unaffected: pause halts autonomy, never the operator.                                      |
 
-A scheduler still starts a session on schedule while paused; the session ends at step 0. On
-DorkOS, switching the tick off on the Schedules page stops it starting at all, and that switch
-survives updates; `/flow:pause` says so.
+Every check fails closed: if it cannot run, or its output cannot be read, the entry point stops.
+A tick already running when the pause lands finishes its current item to the review gate; the
+per-item `agent/paused` marker stops it sooner.
+
+**DorkOS schedule rows (review round 1, decision 9).** When the `tasks_list` and `tasks_update`
+tools are available (DorkOS: `mcp__dorkos__tasks_*`), `/flow:pause` also switches off every
+schedule row named `flow-drain` or `flow-groom` whose `filePath` is inside this project and
+whose `enabled` is `true`, then records those ids with `pause --host-schedule <id>`.
+`/flow:resume` switches back on exactly the ids `resume` printed, nothing else, so a schedule a
+person had switched off stays off. Where the tools are absent the step is skipped with a plain
+note, and the scheduler keeps starting the tick, which stops at step 0. The flag stays the
+authority: a failed row switch never undoes or blocks the pause. Rows outside this project
+(a user-scope install's file) are never touched: they may serve other projects.
 
 ### Consumers
 
@@ -225,22 +246,30 @@ flow 0.8.0 → **0.9.0** in `plugin.json`, `.dork/manifest.json`, `package.json`
 - adapter resolution: project beats shipped; checkout beats main checkout; shipped `linear` needs
   no copy; shipped but missing → none; a legacy adapter for a non-shipped tracker; a
   `skills/linear-adapter` in a legacy cache sibling is never legacy; cache sibling newest first;
-  moved folder skipped and reported; declined folder skipped for this project only;
+  declined folder skipped for this project only and listed in `declined`;
   in-project vs shared; none with a target.
 - `SHIPPED_ADAPTERS` equals the `skills/*-adapter` folders this plugin ships (non-vacuous).
-- adapter migration: in-project copies the whole folder without asking (bytes identical, marker
-  written, old files kept, `SKILL.md` placed last); shared asks, copies nothing; `--confirm` copies;
-  `--decline` remembered; conflict stops with nothing overwritten; re-run is a no-op; lands beside
-  the `config.json` in use; a symlink in the folder is not followed.
-- pause: writes into the main checkout from a worktree; ignored by git (new and pre-0.9
-  `.gitignore`); idempotent; resolve reports it from either checkout; resume removes both;
-  unreadable flag still pauses; works unconfigured.
+- adapter migration: in-project copies the whole folder without asking (bytes identical, no
+  marker, old files kept, `SKILL.md` placed last); shared asks with name + excerpt, copies
+  nothing; `--confirm` copies; `--decline` remembered and named by the "none" error; a second
+  project on a shared install is still offered it after the first confirmed; conflict stops with
+  nothing overwritten; re-run is a no-op; a symlink in the folder is not followed; `migrateAll`
+  reports the adapter half at the top level (settings already in the project).
+- pause: always the main checkout, also from a worktree with its own local settings; ignored by
+  git (new and pre-0.9 `.gitignore`); idempotent; host schedule ids merged and handed back by
+  resume; unreadable flag still pauses; works unconfigured.
+
+`engine-tests/pause-contract.test.ts`: the drain, groom and tracker ticks and `/flow continue`,
+`/flow auto` (start and each iteration) each hold a pause check that fails closed; pause/resume
+state the schedule-row contract; each guard shown to bite on a planted break.
 - CLI: `resolve` full output (adapter, `flowRoot`, `paused`), adapter errors and warnings,
   `migrate` with a legacy adapter round trip, `pause`/`resume` exit codes.
 
-`engine-tests/tracker-confinement.test.ts`: F1 positive half pins `adapter.path`; a new guard that
-no command or stage skill tells the agent to read `skills/<tracker>-adapter/SKILL.md`, and every
-stage skill that routes through the adapter names `adapter.path`.
+`engine-tests/tracker-confinement.test.ts`: F1 positive half pins `adapter.path`; a guard that no
+command, skill or doc names `skills/<tracker>-adapter/` or a concrete `skills/<name>-adapter/`
+other than the shipped `linear-adapter`; every stage skill that routes through the adapter names
+`adapter.path`. The shipped `linear-adapter` defers to a different `adapter.path` (a project
+override) before acting.
 
 Critical lines are mutation-checked.
 
@@ -267,9 +296,13 @@ turning-on-autonomy,bring-your-own-scheduler,how-it-works,driving-it-manually}.m
    braces?~~ (RESOLVED) **No.** On an approved DorkOS schedule the row owns the switch, so the edit
    does nothing; under DOR-2245 it turns every update into a conflict copy. The flag is the only
    pause; the Schedules switch is the host's own.
-2. ~~Should flow flip the DorkOS row itself?~~ (RESOLVED) **No.** flow would call a host API it
-   cannot address portably, and it would still do nothing for any other scheduler. The pause
-   message tells the person where the switch is.
+2. ~~Should flow flip the DorkOS row itself?~~ (RESOLVED, revised in review round 1)
+   **Yes, as a courtesy on top of the flag, only through DorkOS's own agent tools.** The first
+   draft said no, because calling a host HTTP API is not portable. Review pointed out DorkOS
+   already gives the session `tasks_list` / `tasks_update`, so no address or credential is
+   needed, and stopping the tick from starting beats a session that starts only to stop. The
+   flag remains the authority and the only mechanism elsewhere; ids are recorded so resume
+   restores exactly what pause changed.
 3. ~~Should the migrated adapter's old copy be deleted?~~ (RESOLVED) **No**, copy-only as in
    DOR-2274; the old folder is marked and the person is told they may delete it. A host may still
    list it as a skill until its next update, but flow itself only ever reads `adapter.path`.

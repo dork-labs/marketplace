@@ -79,8 +79,9 @@ adapter }`, where `adapter` has the same fields for the adapter:
   any `.agents/flow/adapters/` folder it wrote (never `config.local.json`).
 - **`"needsConfirmation": true`**: the old settings or adapter sit in a plugin folder
   outside this project, which several projects may share, so they may be another project's
-  (credentials included). Nothing was copied. Show the operator `found` and `adapter.found`
-  (the folders, tracker, team and workspace; never a credential) and ask with
+  (credentials included). Nothing was copied. Show the operator `found` (the folder,
+  tracker, team and workspace; never a credential) and `adapter.found` (the adapter's
+  folder, its `name` and its first lines, `excerpt`) and ask with
   `AskUserQuestion`: **"Are these this project's settings?"** The one answer covers both.
   On yes, run the same command with `migrate --confirm` and report
   it as above. On no, run `migrate --decline` (flow remembers the answer and never asks
@@ -112,7 +113,7 @@ stops instead of routing, and reports the first error's message; one at `(file)`
 has to run `/flow` in this project to confirm them. **Warnings never
 do.** Most are an unknown key in `config.json` (a typo, or a setting this version of flow no
 longer has) that flow ignores; the rest are about the files themselves (settings or an
-adapter still inside the plugin, or moved to another project, or team settings git
+adapter still inside the plugin, settings moved to another project, or team settings git
 ignores). Show every warning to the operator, naming its path,
 then carry on. Show a warning at `/secrets` first, and make it stand out: it means tracker
 credentials are sitting in the committed `config.json`, so tell the operator plainly to move
@@ -126,7 +127,8 @@ plugin, so wherever it says `<flow-root>`, that means `flowRoot` from the same o
 whatever the adapter's own note says about where it lives.
 
 **The pause.** When `paused` is not `null`, flow's autonomy is halted on this machine: never
-start `continue` or `auto` (below), and never run a scheduled tick. Say "flow is paused
+start `continue` or `auto` (below), and never run a scheduled tick or a tracker tick
+(`tending-tracker`). Say "flow is paused
 (since `<pausedAt>`); `/flow:resume` lifts it" and stop. Everything else (a stage command, a
 named work item, `status`, `pause`, `resume`) runs as usual: a pause stops the loop, never
 the operator. With a valid config present, behave exactly as below.
@@ -218,8 +220,9 @@ resolves the project, then routes by where it sits on the spine:
   JSON in, the ranked `selectDispatch` result as JSON out), claim the top-ranked eligible
   item, and
   carry it to its human-review gate, then **stop**. This is one tick of `auto`: server-free,
-  a single item, never looping. Refused while flow is paused (see **The pause** above). It
-  writes **no** `.dork/flow/auto-run.json` sentinel (that
+  a single item, never looping. **Pause check** first: if the guard's `paused` is not
+  `null`, do not start (see **The pause** above). If the check cannot run or its output
+  cannot be read, stop. It writes **no** `.dork/flow/auto-run.json` sentinel (that
   file is `auto` only), so the `flow-loop` Stop hook stays a strict no-op and the session
   ends after the one item.
 - **`auto`**: drain the whole ready queue autonomously to the human-review gate (below).
@@ -261,7 +264,8 @@ consequences for anything that reads this file: a MISSING sentinel does not prov
 the queue drained, and a PAUSED one (`active: false`, written by `/flow:pause`)
 is never reaped, because `/flow:resume` reads it back.
 
-0. **Not while paused.** If the guard's `paused` is set, do not start (see **The pause**).
+0. **Pause check.** If the guard's `paused` is not `null`, do not start (see **The
+   pause**). If the check cannot run or its output cannot be read, stop.
 1. **Start.** Write `.dork/flow/auto-run.json` =
    `{ "active": true, "ready": <N>, "shapeable": <M>, "startedAt": "<ISO>", "pid": <pid>, "sessionId": "${CLAUDE_SESSION_ID}" }`.
    `sessionId` is this session's id, filled in when this command loads; copy it
@@ -278,10 +282,11 @@ is never reaped, because `/flow:resume` reads it back.
    `flow-loop` Stop hook tell a **starved** queue (work waiting on a triage pass)
    from a genuinely **drained** one (task 1.7). (Inline assumption: the auto-run
    sentinel gains `shapeable: <N>`.)
-2. **Each iteration first re-checks the pause**, by running
+2. **Pause check at the start of every iteration**, by running
    `node --experimental-strip-types "${CLAUDE_PLUGIN_ROOT}/scripts/config-files.ts"` again:
-   a `/flow:pause` from any session writes the flag. A drain that sees it claims nothing
-   more and stops. It does not delete the sentinel: `/flow:pause` set it to
+   a `/flow:pause` from any session writes the flag. A drain whose `paused` is not `null`
+   claims nothing more and stops; if the check cannot run or its output cannot be read,
+   stop too. It does not delete the sentinel: `/flow:pause` set it to
    `active: false`, which lets the session stop and lets `/flow:resume` restart the drain.
    (If the sentinel still says `active: true`, set it to `false` yourself first.)
    **Then it runs the reconciler registry order: recovery → inbox/resume → dispatch.**

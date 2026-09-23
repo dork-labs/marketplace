@@ -25,7 +25,8 @@ Each firing runs the CHECK mode of the grooming-backlog skill
 (`<flow-root>/skills/grooming-backlog/SKILL.md`) and stops:
 
 0. **Pause check, before anything else.** Run
-   `node --experimental-strip-types "<flow-root>/scripts/config-files.ts"`. When its
+   `node --experimental-strip-types "<flow-root>/scripts/config-files.ts"`. If the check cannot run or its output cannot be read, stop: never act without knowing
+   whether flow is paused. When its
    `paused` is not `null`, report "flow is paused (since `<pausedAt>`); `/flow:resume`
    lifts it" and stop. When it says `"ok": false`, report its first error and stop.
    Otherwise the adapter is the `SKILL.md` at its `adapter.path` (inside it,

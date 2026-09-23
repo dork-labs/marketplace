@@ -227,7 +227,9 @@ agent session per run — so there is no scheduler to build.
   page, which outlasts updates; the file is the package's and an update replaces it.
 - **Pausing** is `/flow:pause`: it writes `.agents/flow/paused.json` in the project,
   and every tick checks it first and stops, so an update cannot undo it and it works
-  under any scheduler. `/flow:resume` removes it.
+  under any scheduler. On DorkOS it also switches this project's flow schedules off
+  when it can reach them. `/flow:resume` removes the flag and switches back on only
+  the schedules the pause switched off.
 - **Crash/stall recovery** is driven by the durable `FlowRun` record + the
   next-tick recovery ladder (spec §12): a `needs-input` item is never reclaimed;
   an orphaned `agent/claimed` item is adopted + resumed (re-attach the worktree at

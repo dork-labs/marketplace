@@ -29,7 +29,8 @@ session via the Stop-hook sentinel). The canonical tick procedure lives in the
 trigger over it. In reconciler-registry order, one tick:
 
 0. **Pause check, before anything else.** Run
-   `node --experimental-strip-types "<flow-root>/scripts/config-files.ts"`. When its
+   `node --experimental-strip-types "<flow-root>/scripts/config-files.ts"`. If the check cannot run or its output cannot be read, stop: never act without knowing
+   whether flow is paused. When its
    `paused` is not `null`, flow is paused on this machine: report "flow is paused
    (since `<pausedAt>`); `/flow:resume` lifts it" and stop, touching nothing else. When
    it says `"ok": false`, report its first error and stop. Otherwise the tracker adapter

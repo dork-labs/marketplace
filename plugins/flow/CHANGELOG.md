@@ -16,21 +16,27 @@ you until you **reinstall it** (Marketplace → flow → reinstall, or re-run yo
   same rules as your settings in 0.8.0. It moves it without asking when flow is
   installed inside your project. When flow is installed somewhere several
   projects share, it asks first, with one question that covers both your settings
-  and the adapter. It never overwrites a file and never deletes the old copy. You
-  can delete the old copy once you have committed the new one.
+  and the adapter, and shows you the adapter's name and first lines. It never
+  overwrites a file and never deletes the old copy. An adapter holds no tokens, so
+  unlike your settings it stays available to every other project using the same
+  install: each one is asked for itself.
 - `/flow:pause` used to switch off the `flow-drain` schedule by editing a file
   inside the plugin. On DorkOS that did not stop a schedule you had already
   approved, because DorkOS keeps an approved schedule's on/off switch itself, on
   the Schedules page. So a pause there may never have stopped anything. And an
   update replaced the file.
 - `/flow:pause` now writes `.agents/flow/paused.json` in your project. Every
-  scheduled run, `/flow continue` and `/flow auto` check it first and stop, with
-  any scheduler. It stays out of git, and it applies to every worktree of the
-  project. `/flow:resume` removes it. Stage commands like `/flow:specify` still work
-  while flow is paused.
-- A scheduler still starts each scheduled run on time while flow is paused. The run
-  just stops at its first step. To stop DorkOS from starting them at all, switch
-  `flow-drain` off on the Schedules page. That switch stays through updates.
+  scheduled run, the tracker check-in, `/flow continue` and `/flow auto` check it
+  first and stop, with any scheduler. It stays out of git, and it applies to every
+  worktree of the project. `/flow:resume` removes it. Stage commands like
+  `/flow:specify` still work while flow is paused. A run already going when you
+  pause finishes the item it is on first.
+- On DorkOS, `/flow:pause` also switches off this project's `flow-drain` and
+  `flow-groom` schedules, when it can reach DorkOS's schedule tools, and
+  `/flow:resume` switches back on only the ones it switched off. Anywhere else, a
+  scheduler still starts each scheduled run on time while flow is paused, and the
+  run stops at its first step. To stop it starting them, switch the schedule off
+  where it runs.
 - To turn the scheduled run on in DorkOS, approve `flow-drain` on the Schedules
   page. Approving switches it on, so there is no need to edit the file first.
 - The instructions inside the `flow-drain` and `flow-groom` scheduled runs

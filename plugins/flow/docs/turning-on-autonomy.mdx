@@ -84,7 +84,8 @@ whichever way you schedule it:
 ## A — `/flow auto` (the attended terminal drain)
 
 `/flow auto` drains the ready queue **sequentially from your terminal**. It is server-free: it talks
-to the tracker through your `<tracker>-adapter` skill and runs each stage in your current session. This is the
+to the tracker through your tracker adapter (the one flow ships, or the one `/flow:init` generated
+into your project) and runs each stage in your current session. This is the
 fastest way to put the loop to work and the easiest to watch.
 
 ### Setup
@@ -289,8 +290,10 @@ Autonomy is never a loss of control, in any setup:
 - **`/flow pause`** halts every mode from one place; **`/flow resume`** lifts it. It pauses the
   terminal drain and writes a pause flag into your project (`.agents/flow/paused.json`) that every
   scheduled tick checks first, so the tick stops at once under any scheduler and a plugin update
-  cannot undo the pause. The scheduler still starts each tick on time; to stop it starting them at
-  all, switch the tick off on the Schedules page (or disable your cron or CI job).
+  cannot undo the pause. On DorkOS it also switches this project's flow schedules off on the
+  Schedules page when it can reach them, and resume switches back on only those. Elsewhere the
+  scheduler still starts each tick on time and the tick stops at its first step; disable your cron
+  or CI job to stop it starting at all.
 - **Reprioritize or disable a loop** by editing its `loops.<id>` block.
 - **Reclaim or redirect an item** by reassigning it; the running tick honors the change at the next
   stage boundary.

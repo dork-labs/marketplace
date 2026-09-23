@@ -1,7 +1,7 @@
 ---
 description: Restore autonomous /flow operation that /flow:pause halted
 category: flow
-allowed-tools: Read, Edit, Write, Glob, SlashCommand, Bash(node:*)
+allowed-tools: Read, Edit, Write, Glob, SlashCommand, Bash(node:*), mcp__dorkos__tasks_update
 argument-hint: "[issue-id to un-pause, or empty to restore all autonomy]"
 ---
 
@@ -17,12 +17,20 @@ Resume is the inverse of pause: it restores the autonomous surfaces pause halted
    node --experimental-strip-types "${CLAUDE_PLUGIN_ROOT}/scripts/config-files.ts" resume
    ```
 
-   It removes this machine's `.agents/flow/paused.json` (from this checkout and the main
-   checkout) and prints `{ ok, wasPaused, removed }`. The next scheduled tick then does
-   its work again. If the operator also switched the tick off where it is scheduled (the
-   **Schedules** page on DorkOS, or a cron or CI job), remind them to switch it back on
-   there; flow does not touch that switch. (Pulse is the one mode that needs a running
-   DorkOS server; the terminal drain does not.)
+   It removes the project's `.agents/flow/paused.json` (always in the main checkout)
+   and prints `{ ok, wasPaused, removed, hostSchedules }`. The next scheduled tick then
+   does its work again. (Pulse is the one mode that needs a running DorkOS server; the
+   terminal drain does not.)
+
+   **The DorkOS schedules `/flow:pause` switched off.** `hostSchedules` lists exactly
+   those, by id. When the `tasks_update` tool is available (`mcp__dorkos__tasks_update`
+   on DorkOS), call it with `{ "id": <id>, "enabled": true }` for each id in the list,
+   and for nothing else: a schedule that was off before the pause stays off. If a call
+   fails (the schedule was removed, or needs approval again after an update), say which
+   one and tell the operator to check it on the **Schedules** page. When the tool is not
+   available and the list is not empty, tell the operator to switch those schedules on
+   there. If the operator switched a tick off themselves (the Schedules page, or a cron
+   or CI job), remind them to switch it back on where they did.
 
 2. **The terminal drain.** If a paused `.dork/flow/auto-run.json` sentinel is still
    present (`active: false`), restart the drain with `/flow auto`, which rewrites the

@@ -104,7 +104,11 @@ them yourself once no project needs them. Commit `.agents/flow/config.json` and
 The same move, under the same question, carries a tracker adapter an older flow
 generated into the plugin into `.agents/flow/adapters/<tracker>/` (see
 [`tracker` names an adapter](#tracker-names-an-adapter-not-a-supported-product)).
-Commit that folder too.
+Commit that folder too. An adapter holds no credentials, so it gets no
+`MIGRATED_TO`: other projects on the same install are still offered it, each asked
+for itself, and the question shows its name and first lines. A no is remembered in
+the adapter folder's `DECLINED_BY`; if flow then has no adapter for this project,
+its error names that folder, so you can copy it in if the answer was wrong.
 
 To use settings that already moved in another project too, copy that project's
 `.agents/flow/config.json` into this one (and write this machine's
@@ -114,12 +118,15 @@ again. To be asked again after saying no, remove this project's line from
 
 ### The pause flag
 
-`/flow:pause` writes `.agents/flow/paused.json` beside `config.local.json` (in the
-main checkout when you are in a worktree), and `/flow:resume` removes it. It is this
-machine's, so the same `.gitignore` (or `info/exclude`) keeps it out of git. Every
-scheduled tick, `/flow continue` and `/flow auto` check it first and stop, so it
-works under any scheduler and a plugin update cannot undo it. It is not a setting:
-nothing in `config.json` turns it on.
+`/flow:pause` writes `.agents/flow/paused.json` in the project's main checkout (the
+same file from every worktree), and `/flow:resume` removes it. It is this machine's,
+so the same `.gitignore` (or `info/exclude`) keeps it out of git. Every scheduled
+tick, the tracker tick, `/flow continue` and `/flow auto` check it first and stop, so
+it works under any scheduler and a plugin update cannot undo it. It is not a setting:
+nothing in `config.json` turns it on. On DorkOS, when the schedule tools are
+available, `/flow:pause` also switches this project's `flow-drain` and `flow-groom`
+schedules off and records their ids in the flag (`hostSchedules`), so `/flow:resume`
+switches back on exactly those.
 
 ## Precedence
 
@@ -184,7 +191,8 @@ prints it as `adapter.path`:
    `/flow` moves it into the project, under the same rules as settings: without
    asking when the plugin is inside the project, only after a person confirms when it
    is somewhere several projects may share, and never at all by a headless run until
-   someone has.
+   someone has. Unlike settings, it is never locked to the first project that copies
+   it.
 
 Nothing loads the project's adapter as a harness skill (no harness reads
 `.agents/flow/`); flow reads it by that path.
