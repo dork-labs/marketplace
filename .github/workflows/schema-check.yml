@@ -1,8 +1,10 @@
 name: schemas
 
 # Repo-wide gate: every plugin's SKILL.md schedule blocks and manifest files,
-# checked against the real DorkOS Zod schemas. See tools/schema-check/README.md
-# for why this exists and where the schemas come from.
+# checked against the real DorkOS Zod schemas; every package's version files
+# agreeing with each other; and every package whose files changed raising its
+# version (bump on change). See tools/schema-check/README.md for why each exists
+# and where the schemas come from.
 #
 # Its own job, separate from `flow`, on the same rule that workflow states: jobs
 # stay independent so one red gate never hides another's. This one is repo-wide
@@ -15,7 +17,8 @@ name: schemas
 #
 # It needs network at run time: it downloads the pinned DorkOS schema sources
 # from the public dorkos repo. The pin is an immutable commit SHA, so an upstream
-# change can never turn this job red on its own.
+# change can never turn this job red on its own. It needs no secrets and runs on
+# the default read-only token.
 
 on:
   pull_request:
@@ -25,10 +28,13 @@ on:
 permissions:
   contents: read
 
-# A new push to a branch makes the previous run's answer obsolete.
+# A new push to a PR branch makes the previous run's answer obsolete, so that
+# run is cancelled. A push to main is different: its bump check compares that
+# push's `before..after`, and a quick second merge must never cancel it, or the
+# first merge's comparison is lost for good.
 concurrency:
   group: "${{ github.workflow }}-${{ github.ref }}"
-  cancel-in-progress: true
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
   schemas:
@@ -39,7 +45,10 @@ jobs:
         working-directory: tools/schema-check
 
     steps:
+      # Full history: the bump check needs the merge base of base and head.
       - uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
 
       - uses: actions/setup-node@v5
         with:
@@ -52,6 +61,16 @@ jobs:
 
       - name: Skills and manifests match the pinned DorkOS schemas
         run: npm run check
+
+      # On a PR: the PR's base against its head. On a push to main: the commit
+      # before the push against the one after, which catches two PRs that each
+      # bumped to the same version and merged one after the other. The SHAs go
+      # through env, never into the script text.
+      - name: Every changed package raised its version
+        env:
+          BASE: ${{ github.event_name == 'pull_request' && github.event.pull_request.base.sha || github.event.before }}
+          HEAD: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.event.after }}
+        run: npm run check:bump -- "$BASE" "$HEAD"
 
       - name: Tests
         run: npm test

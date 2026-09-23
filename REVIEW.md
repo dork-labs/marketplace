@@ -84,8 +84,9 @@ found is a nit, open with "No blocking issues."
   could fail.
 - Claims about a tracker or CLI ("verified against …") name the version and date
   they were checked, and nothing un-verified is stated as fact.
-- A package version bump in `plugin.json` matches `package.json` and the sidecar
-  where both carry one.
+- Version agreement and bump-on-change are enforced by `tools/schema-check`
+  (`npm run check` and `npm run check:bump`, run by the `schemas` workflow), so
+  don't re-check by hand that a package's version files match or went up.
 - Removed or renamed things leave no surviving references, in prose and config as
   well as code.
 

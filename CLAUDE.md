@@ -82,7 +82,7 @@ dorkos package validate       # Validates individual package manifests
 dorkos marketplace validate   # Validates the full registry (CC compat + sidecar schema)
 ```
 
-**CI:** two workflows, both on every pull request.
+**CI:** two workflows, both on every pull request. `schemas` also runs on every push to `main`.
 
 - `.github/workflows/flow-tests.yml` (`flow`) — checks that `plugins/flow/config/config.schema.json`
   still matches the Zod schema it is generated from, then runs the flow plugin's typecheck,
@@ -94,6 +94,12 @@ dorkos marketplace validate   # Validates the full registry (CC compat + sidecar
   deliberately degrades a broken `schedule:` block to no schedule at all, so a one-character
   typo used to ship a scheduled task that silently never runs (DOR-1519). Read
   `tools/schema-check/README.md` before touching a schedule block or bumping the pin.
+  It also fails when a package's `.dork/manifest.json`, `.claude-plugin/plugin.json` and
+  root `package.json` versions disagree, or the manifest has a version and `plugin.json`
+  has none. And on every PR and every push to `main`, it fails when a package's files
+  changed without its declared version going up (`npm run check:bump`). A package that
+  declares no version is exempt; declaring one opts in. So any change under `plugins/<name>/`
+  needs a version bump in the same PR.
 
 ## Related Resources
 

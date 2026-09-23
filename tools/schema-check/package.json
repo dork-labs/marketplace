@@ -3,7 +3,7 @@
   "version": "1.0.0",
   "private": true,
   "type": "module",
-  "description": "Repo-wide gate: validates every plugin's SKILL.md schedule blocks and manifest files against the real DorkOS Zod schemas, fetched from the public dorkos repo at the commit pinned in upstream.json.",
+  "description": "Repo-wide gate: validates every plugin's SKILL.md schedule blocks and manifest files against the real DorkOS Zod schemas (fetched from the public dorkos repo at the commit pinned in upstream.json), checks each package's version files agree, and checks a changed package raised its version.",
   "scripts": {
     "fetch:upstream": "tsx scripts/fetch-upstream.ts",
     "check": "npm run fetch:upstream && tsx src/cli.ts",
