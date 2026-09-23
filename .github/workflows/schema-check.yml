@@ -11,9 +11,12 @@ name: schemas
 # rather than per-plugin — adding a plugin does not mean adding a job here.
 #
 # No `paths:` filter, for the same reason the flow workflow has none: this check
-# is a candidate for branch protection, and a required check that never runs on a
-# non-matching PR leaves that PR waiting forever. The job costs well under a
-# minute. If you re-add a filter, first un-require the check.
+# is REQUIRED on `main`, and a required check that never runs on a non-matching
+# PR leaves that PR waiting forever. The job costs well under a minute. If you
+# re-add a filter, first un-require the check. It listens for `merge_group`, and
+# its job has no `if:`, for the reason flow-tests.yml gives: `main` merges
+# through a merge queue, and a required check that never reports on the queue's
+# run stalls every pull request behind it.
 #
 # It needs network at run time: it downloads the pinned DorkOS schema sources
 # from the public dorkos repo. The pin is an immutable commit SHA, so an upstream
@@ -22,6 +25,7 @@ name: schemas
 
 on:
   pull_request:
+  merge_group:
   push:
     branches: [main]
 
@@ -34,7 +38,8 @@ permissions:
 # merge may cancel it, or that merge's comparison is lost for good. GitHub keeps
 # only one pending run per group (a third quick push would still cancel the
 # second, even with cancel-in-progress off), so every push to main gets a group
-# of its own, keyed by its commit.
+# of its own, keyed by its commit. A merge group is keyed the same way: each one
+# is its own commit, and none may cancel another.
 concurrency:
   group: "${{ github.workflow }}-${{ github.event_name == 'pull_request' && github.ref || github.sha }}"
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
@@ -68,15 +73,29 @@ jobs:
       - name: Skills and manifests match the pinned DorkOS schemas
         run: npm run check
 
-      # On a PR: the PR's base against its head. On a push to main: the commit
-      # before the push against the one after, which catches two PRs that each
-      # bumped to the same version and merged one after the other. The SHAs go
-      # through env, never into the script text.
+      # Which two commits to compare depends on the event, and each event
+      # carries its own pair, so the `||` chains below pick whichever pair this
+      # event has: the other events' fields are absent, which is empty, which
+      # `||` skips. If none is set the check prints its usage and fails, rather
+      # than comparing nothing and passing.
+      #
+      # - pull_request: the PR's base against its head.
+      # - merge_group: the queue entry's base against the commit the queue built.
+      #   The base is the commit this entry sits on: `main` for the first entry,
+      #   and the entry ahead of it for every later one (so the range holds this
+      #   PR's change and nothing else). That is what catches two PRs that each
+      #   bumped a package to the same version: whichever is queued second sees
+      #   the first's bump already in its base, and fails before it merges.
+      # - push to main: the commit before the push against the one after. With
+      #   the queue in place this repeats the queue's answer; it stays as the
+      #   check on anything that reaches `main` some other way.
+      #
+      # The SHAs go through env, never into the script text.
       - name: Every changed package raised its version
         if: ${{ !cancelled() && steps.install.outcome == 'success' }}
         env:
-          BASE: ${{ github.event_name == 'pull_request' && github.event.pull_request.base.sha || github.event.before }}
-          HEAD: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.event.after }}
+          BASE: ${{ github.event.pull_request.base.sha || github.event.merge_group.base_sha || github.event.before }}
+          HEAD: ${{ github.event.pull_request.head.sha || github.event.merge_group.head_sha || github.event.after }}
         run: npm run check:bump -- "$BASE" "$HEAD"
 
       - name: Tests

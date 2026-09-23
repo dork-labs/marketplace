@@ -8,20 +8,31 @@ name: flow
 # Jobs stay independent so one plugin's red gate never hides another's.
 #
 # This workflow deliberately has NO `paths:` filter: the "flow plugin" check is
-# REQUIRED in branch protection, and a required check must report on every PR —
+# REQUIRED on `main`, and a required check must report on every PR —
 # a path-filtered workflow leaves non-matching PRs waiting forever on a check
 # that never runs. The job costs ~25s; that is the price of a check that can
 # actually block. If you re-add a filter, first un-require the check.
+#
+# `merge_group` is here for the same reason. `main` merges through a merge queue,
+# which runs every required check again on the combined tree (main plus every
+# pull request ahead in the queue) before it merges. A required check that does
+# not listen for `merge_group` never reports there, and the queue waits on it
+# until it times out, for every pull request behind it. The job has no `if:`
+# for the same reason. `pull_request` stays too: a required check has to pass
+# on the pull request before the queue will take it.
 
 on:
   pull_request:
+  merge_group:
   push:
     branches: [main]
 
 permissions:
   contents: read
 
-# A new push to a branch makes the previous run's answer obsolete.
+# A new push to a branch makes the previous run's answer obsolete. Every merge
+# group runs on a ref of its own (`gh-readonly-queue/main/pr-<n>-<base sha>`), so
+# queue runs never cancel each other.
 concurrency:
   group: "${{ github.workflow }}-${{ github.ref }}"
   cancel-in-progress: true

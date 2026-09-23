@@ -1,0 +1,77 @@
+name: scripts
+
+# Runs the fixture suites for every guard or gate that decides something on
+# its own:
+#
+# - test-should-arm-automerge.sh pins the gate that decides whether a pull
+#   request may be armed to merge by itself (a merge-tail workflow runs it once
+#   the dorkos-merge-tail app is set up here, DOR-2270). Its dangerous failure is
+#   silent: a refusal that stops matching keeps answering ARM, and the first
+#   symptom is unreviewed code on `main`.
+# - test-git-guard.sh, test-process-guard.sh and test-merge-guard.sh pin the
+#   three .claude/hooks guards: the git and process commands that have
+#   destroyed work, and admin merges that skip the merge queue.
+# - test-run-node-hook.sh pins the wrapper those guards start through, which
+#   refuses the tool call when node cannot be found instead of letting it
+#   through unguarded, and checks settings.json wires all three that way.
+# - .claude/skills/creating-pull-requests/scripts/test-watch-prs.sh pins the
+#   PR watcher's classifications, which agents act on when a PR stalls.
+#
+# Each suite runs as its own step, and every step runs even when an earlier one
+# failed, so one red suite never hides another.
+#
+# No `paths:` filter and no job-level `if:`, and it listens for `merge_group`,
+# for the reason flow-tests.yml gives: this is meant to be a required check, and
+# a required check has to report on every pull request and on every merge-queue
+# run. The job costs a few seconds.
+
+on:
+  pull_request:
+  merge_group:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: "${{ github.workflow }}-${{ github.ref }}"
+  cancel-in-progress: true
+
+jobs:
+  fixtures:
+    name: script fixtures
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+
+    steps:
+      - uses: actions/checkout@v5
+
+      # The guards are Node scripts; the gate and every suite need jq, which
+      # the runner image ships.
+      - uses: actions/setup-node@v5
+        with:
+          node-version: "22"
+
+      - name: Auto-merge arming gate
+        run: bash scripts/test-should-arm-automerge.sh
+
+      - name: Git guard
+        if: ${{ !cancelled() }}
+        run: bash scripts/test-git-guard.sh
+
+      - name: Process guard
+        if: ${{ !cancelled() }}
+        run: bash scripts/test-process-guard.sh
+
+      - name: Merge guard
+        if: ${{ !cancelled() }}
+        run: bash scripts/test-merge-guard.sh
+
+      - name: Guards fail closed without node
+        if: ${{ !cancelled() }}
+        run: bash scripts/test-run-node-hook.sh
+
+      - name: PR watcher
+        if: ${{ !cancelled() }}
+        run: bash .claude/skills/creating-pull-requests/scripts/test-watch-prs.sh
