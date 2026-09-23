@@ -1,5 +1,5 @@
 import { execFileSync } from 'node:child_process';
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
@@ -246,15 +246,15 @@ describe('checkVersionBumps', () => {
     const head = repo.write({ 'plugins/loose/x.md': 'x\n' }).commit();
     expect(checkVersionBumps(repo.root, base, head)).toEqual([
       {
-        pkg: 'loose',
+        pkg: 'plugins/loose',
         level: 'error',
-        message: `loose changed but its version stayed 1.0.0. ${REASON}`,
+        message: `plugins/loose changed but its version stayed 1.0.0. ${REASON}`,
       },
     ]);
   });
 
   it('uses the manifest version when plugin.json has none', () => {
-    // Claude Code's order: plugin.json first, then the manifest.
+    // The check's order: plugin.json first, then the manifest DorkOS falls back to.
     const repo = new Repo()
       .marketplace({ a: 'a' })
       .write({ 'plugins/a/.dork/manifest.json': { name: 'a', version: '0.5.0' } });
@@ -263,5 +263,97 @@ describe('checkVersionBumps', () => {
     expect(errors(checkVersionBumps(repo.root, base, head))[0]!.message).toBe(
       `a changed but its version stayed 0.5.0. ${REASON}`
     );
+  });
+  it('checks an unlisted directory even when an entry shares its name', () => {
+    // Entry `foo` points at plugins/bar; the unlisted plugins/foo is a different package.
+    const repo = new Repo().marketplace({ foo: 'bar' }).plugin('bar', '1.0.0', 'foo');
+    repo.plugin('foo', '2.0.0');
+    const base = repo.commit('base');
+    // Both change; `foo` the entry (at plugins/bar) is bumped, the folder plugins/foo is not.
+    const head = repo.write({ 'plugins/foo/x.md': 'x\n' }).plugin('bar', '1.0.1', 'foo').commit();
+    expect(checkVersionBumps(repo.root, base, head)).toEqual([
+      {
+        pkg: 'plugins/foo',
+        level: 'error',
+        message: `plugins/foo changed but its version stayed 2.0.0. ${REASON}`,
+      },
+    ]);
+  });
+
+  it('compares by directory when an unlisted directory gains an entry', () => {
+    // The files were already there to be installed from the folder; listing them is not a new package.
+    const repo = new Repo().marketplace({}).plugin('a', '0.1.0');
+    const base = repo.commit('base');
+    const head = repo.marketplace({ a: 'a' }).write({ 'plugins/a/x.md': 'x\n' }).commit();
+    expect(errors(checkVersionBumps(repo.root, base, head))).toEqual([
+      { pkg: 'a', level: 'error', message: `a changed but its version stayed 0.1.0. ${REASON}` },
+    ]);
+  });
+
+  it('compares by directory when an entry is dropped but its directory stays', () => {
+    // A package whose files are still here has not been deleted; it still needs a bump.
+    const { repo, base } = baseWithA();
+    const head = repo.marketplace({}).write({ 'plugins/a/x.md': 'x\n' }).commit();
+    expect(checkVersionBumps(repo.root, base, head)).toEqual([
+      { pkg: 'a', level: 'error', message: `a changed but its version stayed 0.1.0. ${REASON}` },
+    ]);
+  });
+
+  it('compares by directory when marketplace.json at head is unparseable', () => {
+    // A broken index must not turn every package into a "deleted" one that skips the check.
+    const { repo, base } = baseWithA();
+    const head = repo
+      .write({ '.claude-plugin/marketplace.json': '{ broken', 'plugins/a/x.md': 'x\n' })
+      .commit();
+    expect(errors(checkVersionBumps(repo.root, base, head))).toHaveLength(1);
+  });
+
+  it('reads a nested source from its own directory', () => {
+    // ./plugins/group/a is the package; plugins/group is just a folder around it.
+    const repo = new Repo().marketplace({ a: 'group/a' }).plugin('group/a', '0.1.0', 'a');
+    const base = repo.commit('base');
+    const failing = repo.write({ 'plugins/group/a/x.md': 'x\n' }).commit();
+    expect(checkVersionBumps(repo.root, base, failing)).toEqual([
+      { pkg: 'a', level: 'error', message: `a changed but its version stayed 0.1.0. ${REASON}` },
+    ]);
+    const passing = repo.plugin('group/a', '0.1.1', 'a').commit();
+    expect(checkVersionBumps(repo.root, base, passing)).toEqual([]);
+  });
+
+  it('gives a file to the deepest entry when sources nest', () => {
+    // plugins/group/a/x.md belongs to `a`, not to the `group` entry around it.
+    const repo = new Repo()
+      .marketplace({ a: 'group/a', group: 'group' })
+      .plugin('group', '1.0.0')
+      .plugin('group/a', '0.1.0', 'a');
+    const base = repo.commit('base');
+    const head = repo.plugin('group/a', '0.1.1', 'a').commit();
+    expect(checkVersionBumps(repo.root, base, head)).toEqual([]);
+  });
+
+  it('says the version cannot be read when plugin.json at head is not valid JSON', () => {
+    // "Its version was removed" would send the author looking for the wrong mistake.
+    const { repo, base } = baseWithA();
+    const head = repo.write({ 'plugins/a/.claude-plugin/plugin.json': '{ "name": ' }).commit();
+    expect(checkVersionBumps(repo.root, base, head)).toEqual([
+      {
+        pkg: 'a',
+        level: 'error',
+        message: `a: plugins/a/.claude-plugin/plugin.json is not valid JSON, so its version can't be read and the bump can't be checked. ${REASON}`,
+      },
+    ]);
+  });
+
+  it('refuses a revision that is not a commit, and never hands git an option', () => {
+    // `--output=<file>` as a "revision" once wrote a file and printed success.
+    const { repo, base } = baseWithA();
+    const out = path.join(repo.root, 'written-by-git');
+    expect(() => checkVersionBumps(repo.root, `--output=${out}`, base)).toThrow(
+      /is not a commit in this repository/
+    );
+    expect(() => checkVersionBumps(repo.root, base, 'no-such-ref')).toThrow(
+      /"no-such-ref" is not a commit in this repository/
+    );
+    expect(existsSync(out)).toBe(false);
   });
 });

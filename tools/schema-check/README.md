@@ -75,6 +75,8 @@ A package can state its version in up to three files:
 - `.claude-plugin/plugin.json`, which Claude Code reads,
 - `package.json`, but only one at the package root that has a `version` field. A
   nested one, like flow's `engine-tests/package.json`, is never read.
+- `package-lock.json` next to that `package.json`, so a hand-edited
+  `package.json` can't drift from its lockfile.
 
 Every version that is there must be the same. And when the manifest has a version,
 a `plugin.json` that exists must have one too: otherwise Claude Code identifies
@@ -92,9 +94,11 @@ with it.
 
 `npm run check:bump -- <base> <head>` fails when a package's files changed
 between the two commits but its version did not go up. Claude Code reads a
-package's version from `plugin.json` (then the manifest), and once there is one,
-an install only updates when that number rises. A change without a bump never
-reaches anyone.
+package's version from `plugin.json` (then the marketplace entry, then the
+commit); DorkOS reads the same, falling back to `.dork/manifest.json`. Once a
+package has a version, an install only updates when that number rises, so a
+change without a bump never reaches anyone. The check takes the version from
+`plugin.json`, then the manifest.
 
 - The change is measured from where `head` branched off `base`, so commits that
   landed on `main` in the meantime never count.
@@ -104,7 +108,11 @@ reaches anyone.
   Claude Code serves it by commit, so every change already reaches people.
 - A package is its `marketplace.json` entry name, the name people install. A
   moved directory whose entry keeps its name is still one package; a renamed
-  entry is a new package plus a deleted one.
+  entry is a new package plus a deleted one. An entry whose directory is still
+  there after the entry was dropped (or before it was added) is compared by
+  directory, and a directory no entry lists is judged as `plugins/<dir>`.
+- A `plugin.json` or manifest at `head` that is not valid JSON fails, naming the file.
+- Both commits must be real commits; anything else fails before git sees it.
 
 CI runs it on every pull request (base against head) and on every push to `main`
 (`before` against `after`), which catches two PRs that each bumped to the same

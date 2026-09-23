@@ -33,7 +33,7 @@ try {
   findings = checkVersionBumps(repoRoot, base, head);
 } catch (cause) {
   const detail = (cause as { stderr?: string }).stderr?.trim() || (cause as Error).message;
-  console.log(`✗ Could not compare ${base} with ${head}: ${detail}`);
+  console.log(`✗ Could not compare the two commits: ${detail}`);
   process.exit(1);
 }
 

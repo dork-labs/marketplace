@@ -3,7 +3,7 @@
  *
  * A package can state its version in up to three files: `.dork/manifest.json`
  * (what DorkOS reads), `.claude-plugin/plugin.json` (what Claude Code reads),
- * and a root `package.json`. Nothing used to compare them, and flow shipped with
+ * and a root `package.json`, whose `package-lock.json` has to follow it. Nothing used to compare them, and flow shipped with
  * its manifest saying 0.6.0 while Claude Code ran 0.7.2. DorkOS now rejects a
  * package whose manifest and `plugin.json` disagree (`VERSION_MISMATCH`); this
  * applies that rule here, at the source, before a package is ever published.
@@ -42,17 +42,23 @@ export interface PackageVersions {
   /** `<dir>/package.json`, only at the package root and only when it has a string `version`. */
   packageJson?: DeclaredVersionFile;
   /**
+   * `<dir>/package-lock.json`'s top-level `version`, only when `packageJson` is
+   * collected: npm keeps the two in step, and a hand-edited `package.json` does not.
+   */
+  packageLock?: DeclaredVersionFile;
+  /**
    * Repo-relative paths of version files that exist but are not valid JSON, so
    * their version can't be read. Such a file is otherwise treated as absent.
    */
   unreadable?: string[];
 }
 
-/** The three version files, in the order they are reported. */
+/** The version files, in the order they are reported. */
 const VERSION_FILES = [
   { key: 'manifest', rel: '.dork/manifest.json' },
   { key: 'plugin', rel: '.claude-plugin/plugin.json' },
   { key: 'packageJson', rel: 'package.json' },
+  { key: 'packageLock', rel: 'package-lock.json' },
 ] as const;
 
 /**
@@ -92,6 +98,8 @@ export function collectPackageVersions(read: ReadRepoFile, pkgDir: string): Pack
   const result: PackageVersions = {};
   for (const { key, rel } of VERSION_FILES) {
     const file = path.posix.join(pkgDir, rel);
+    // The lockfile only follows a package.json that is itself a declaration.
+    if (key === 'packageLock' && result.packageJson === undefined) continue;
     const raw = read(file);
     if (raw === undefined) continue;
     let parsed: unknown;
@@ -106,8 +114,8 @@ export function collectPackageVersions(read: ReadRepoFile, pkgDir: string): Pack
         ? (parsed as Record<string, unknown>).version
         : undefined;
     const version = typeof value === 'string' ? value : undefined;
-    // A package.json without a version is a scripts-and-deps file, not a declaration.
-    if (key === 'packageJson' && version === undefined) continue;
+    // A package.json (or lockfile) without a version is not a declaration.
+    if ((key === 'packageJson' || key === 'packageLock') && version === undefined) continue;
     result[key] = { file, version };
   }
   return result;

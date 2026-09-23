@@ -161,6 +161,42 @@ describe('checkVersionAgreement', () => {
     expect(checkVersionAgreement(root)).toEqual([]);
   });
 
+  it('passes a package-lock.json that agrees with package.json', () => {
+    // npm writes the lockfile's version alongside package.json's; agreeing is the normal case.
+    const root = fixtureRepo({
+      [PLUGIN]: { name: 'demo', version: '0.3.0' },
+      [PACKAGE]: { name: 'demo', version: '0.3.0' },
+      'plugins/demo/package-lock.json': { name: 'demo', version: '0.3.0', lockfileVersion: 3 },
+    });
+    expect(checkVersionAgreement(root)).toEqual([]);
+  });
+
+  it('fails a package-lock.json that drifted from a hand-edited package.json', () => {
+    // Bumping package.json by hand leaves the lockfile behind; npm ci then disagrees with the source.
+    const root = fixtureRepo({
+      [PLUGIN]: { name: 'demo', version: '0.3.1' },
+      [PACKAGE]: { name: 'demo', version: '0.3.1' },
+      'plugins/demo/package-lock.json': { name: 'demo', version: '0.3.0', lockfileVersion: 3 },
+    });
+    expect(checkVersionAgreement(root)).toEqual([
+      {
+        file: 'plugins/demo',
+        message:
+          'Versions disagree: .claude-plugin/plugin.json says 0.3.1, package.json says 0.3.1, package-lock.json says 0.3.0. Set every file to the same version.',
+      },
+    ]);
+  });
+
+  it('ignores a package-lock.json when package.json declares no version', () => {
+    // The lockfile only has to follow a package.json that is itself a version declaration.
+    const root = fixtureRepo({
+      [PLUGIN]: { name: 'demo', version: '0.3.0' },
+      [PACKAGE]: { name: 'demo', private: true },
+      'plugins/demo/package-lock.json': { name: 'demo', version: '9.9.9', lockfileVersion: 3 },
+    });
+    expect(checkVersionAgreement(root)).toEqual([]);
+  });
+
   it('checks every package independently', () => {
     // A broken package must not hide, or be hidden by, a healthy one beside it.
     const root = fixtureRepo({

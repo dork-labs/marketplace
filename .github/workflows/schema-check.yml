@@ -28,12 +28,15 @@ on:
 permissions:
   contents: read
 
-# A new push to a PR branch makes the previous run's answer obsolete, so that
-# run is cancelled. A push to main is different: its bump check compares that
-# push's `before..after`, and a quick second merge must never cancel it, or the
-# first merge's comparison is lost for good.
+# A new push to a PR branch makes the previous run's answer obsolete, so PR runs
+# share one group per branch and the older run is cancelled. A push to main is
+# different: its bump check compares that push's `before..after`, and no later
+# merge may cancel it, or that merge's comparison is lost for good. GitHub keeps
+# only one pending run per group (a third quick push would still cancel the
+# second, even with cancel-in-progress off), so every push to main gets a group
+# of its own, keyed by its commit.
 concurrency:
-  group: "${{ github.workflow }}-${{ github.ref }}"
+  group: "${{ github.workflow }}-${{ github.event_name == 'pull_request' && github.ref || github.sha }}"
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
@@ -57,8 +60,11 @@ jobs:
           cache-dependency-path: tools/schema-check/package-lock.json
 
       - name: Install dependencies
+        id: install
         run: npm ci
 
+      # From here on, every gate runs even when an earlier one failed, so one red
+      # gate never hides another. They all still need the install to have worked.
       - name: Skills and manifests match the pinned DorkOS schemas
         run: npm run check
 
@@ -67,16 +73,20 @@ jobs:
       # bumped to the same version and merged one after the other. The SHAs go
       # through env, never into the script text.
       - name: Every changed package raised its version
+        if: ${{ !cancelled() && steps.install.outcome == 'success' }}
         env:
           BASE: ${{ github.event_name == 'pull_request' && github.event.pull_request.base.sha || github.event.before }}
           HEAD: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.event.after }}
         run: npm run check:bump -- "$BASE" "$HEAD"
 
       - name: Tests
+        if: ${{ !cancelled() && steps.install.outcome == 'success' }}
         run: npm test
 
       - name: Typecheck
+        if: ${{ !cancelled() && steps.install.outcome == 'success' }}
         run: npm run typecheck
 
       - name: Format check
+        if: ${{ !cancelled() && steps.install.outcome == 'success' }}
         run: npm run format:check

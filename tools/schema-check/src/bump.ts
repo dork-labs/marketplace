@@ -10,7 +10,11 @@
  * Packages are identified by their `.claude-plugin/marketplace.json` entry name,
  * the name people install. A directory move whose entry keeps its name is one
  * package; a changed entry name is a new package plus a deleted one, which is
- * exactly what anyone who installed it sees.
+ * exactly what anyone who installed it sees. When an entry is missing at one
+ * commit but its directory is still there and unclaimed (an entry dropped, a
+ * folder newly listed, an unreadable `marketplace.json`), the package is
+ * compared by directory instead. A directory no entry lists is judged by its
+ * `plugins/<dir>` folder, under that path as its name.
  *
  * Every git call goes through `execFileSync` with an argv array, never a shell.
  *
@@ -125,23 +129,72 @@ function entriesAt(read: ReadRepoFile): Map<string, string> {
 }
 
 /**
- * The package directories (`plugins/<dir>`) touched between the merge base of
- * `base` and `head`, and `head`. Three-dot, so commits that landed on the base
- * branch after this branch forked never count.
+ * Resolve a revision to a commit SHA, refusing anything that is not one. The
+ * revision is never handed to git where it could be read as an option.
  *
  * @param repoRoot - Absolute path to the repository root.
- * @param base - The base revision.
- * @param head - The head revision.
+ * @param rev - The revision the caller named.
+ * @throws When `rev` is not a commit in this repository.
  */
-function changedPackageDirs(repoRoot: string, base: string, head: string): Set<string> {
-  const out = git(repoRoot, ['diff', '--name-only', '-z', '--no-renames', `${base}...${head}`]);
-  const dirs = new Set<string>();
-  for (const file of out.split('\0')) {
-    const parts = file.split('/');
-    if (parts.length < 3 || parts[0] !== PLUGINS_DIR) continue;
-    dirs.add(`${PLUGINS_DIR}/${parts[1]}`);
+function resolveCommit(repoRoot: string, rev: string): string {
+  // `--end-of-options` makes git read even `--output=<file>` as a revision name.
+  const refused = new Error(`"${rev}" is not a commit in this repository.`);
+  try {
+    return git(repoRoot, [
+      'rev-parse',
+      '--verify',
+      '--quiet',
+      '--end-of-options',
+      `${rev}^{commit}`,
+    ]).trim();
+  } catch {
+    throw refused;
   }
-  return dirs;
+}
+
+/**
+ * The files under `plugins/` touched between the merge base of `base` and
+ * `head`, and `head`. Three-dot, so commits that landed on the base branch after
+ * this branch forked never count.
+ *
+ * @param repoRoot - Absolute path to the repository root.
+ * @param base - The base commit.
+ * @param head - The head commit.
+ */
+function changedPluginFiles(repoRoot: string, base: string, head: string): string[] {
+  const out = git(repoRoot, ['diff', '--name-only', '-z', '--no-renames', `${base}...${head}`]);
+  return out.split('\0').filter((file) => file.startsWith(`${PLUGINS_DIR}/`));
+}
+
+/**
+ * The entry whose source directory holds `file`, the deepest one when sources
+ * nest.
+ *
+ * @param entries - Entry name to source directory, at one revision.
+ * @param file - A repo-relative file path.
+ */
+function ownerOf(entries: Map<string, string>, file: string): string | undefined {
+  let owner: string | undefined;
+  let depth = -1;
+  for (const [name, dir] of entries) {
+    if (file.startsWith(`${dir}/`) && dir.length > depth) {
+      owner = name;
+      depth = dir.length;
+    }
+  }
+  return owner;
+}
+
+/** Whether any entry points at `dir`. */
+function lists(entries: Map<string, string>, dir: string): boolean {
+  return [...entries.values()].includes(dir);
+}
+
+/** One package to judge: how it is named, and where it lives at each revision. */
+interface ChangedPackage {
+  pkg: string;
+  baseDir?: string;
+  headDir?: string;
 }
 
 /**
@@ -154,47 +207,82 @@ function changedPackageDirs(repoRoot: string, base: string, head: string): Set<s
  * @param head - The revision holding the change.
  * @returns One finding per changed package that failed the rule (`error`) or is
  *   exempt from it (`note`); packages that passed are not listed.
+ * @throws When `base` or `head` is not a commit in the repository.
  */
 export function checkVersionBumps(repoRoot: string, base: string, head: string): BumpFinding[] {
-  const changedDirs = changedPackageDirs(repoRoot, base, head);
-  if (changedDirs.size === 0) return [];
+  const baseSha = resolveCommit(repoRoot, base);
+  const headSha = resolveCommit(repoRoot, head);
+  const files = changedPluginFiles(repoRoot, baseSha, headSha);
+  if (files.length === 0) return [];
 
-  const readBase = readerAt(repoRoot, base);
-  const readHead = readerAt(repoRoot, head);
+  const readBase = readerAt(repoRoot, baseSha);
+  const readHead = readerAt(repoRoot, headSha);
   const baseEntries = entriesAt(readBase);
   const headEntries = entriesAt(readHead);
 
-  // Every changed directory resolves to the entry name(s) pointing at it at
-  // either revision; a directory neither revision lists falls back to its name.
-  const dirsByName = new Map<string, { baseDir?: string; headDir?: string }>();
-  const nameFor = (entries: Map<string, string>, dir: string) =>
-    [...entries].filter(([, d]) => d === dir).map(([name]) => name);
-  for (const dir of changedDirs) {
-    const names = new Set([...nameFor(baseEntries, dir), ...nameFor(headEntries, dir)]);
-    if (names.size > 0) {
-      for (const name of names) {
-        dirsByName.set(name, { baseDir: baseEntries.get(name), headDir: headEntries.get(name) });
-      }
-      continue;
+  // A listed package is its entry name. Where its entry is missing at one
+  // revision, it is new or deleted, unless its directory is still there and no
+  // other entry claims it (an entry dropped, a folder newly listed, or an
+  // unreadable marketplace.json): then it is compared by directory. A renamed
+  // entry keeps its directory claimed, so it stays a new package plus a deleted one.
+  const entryPackage = (name: string): ChangedPackage => {
+    let baseDir = baseEntries.get(name);
+    let headDir = headEntries.get(name);
+    if (headDir === undefined && baseDir !== undefined && !lists(headEntries, baseDir)) {
+      if (dirExistsAt(repoRoot, headSha, baseDir)) headDir = baseDir;
     }
-    const name = dir.slice(PLUGINS_DIR.length + 1);
-    if (dirsByName.has(name)) continue;
-    dirsByName.set(name, {
-      baseDir: dirExistsAt(repoRoot, base, dir) ? dir : undefined,
-      headDir: dirExistsAt(repoRoot, head, dir) ? dir : undefined,
+    if (baseDir === undefined && headDir !== undefined && !lists(baseEntries, headDir)) {
+      if (dirExistsAt(repoRoot, baseSha, headDir)) baseDir = headDir;
+    }
+    return { pkg: name, baseDir, headDir };
+  };
+
+  // Keyed by kind, so an unlisted folder can never be mistaken for an entry
+  // that happens to share its name.
+  const packages = new Map<string, ChangedPackage>();
+  for (const file of files) {
+    const owners = new Set(
+      [ownerOf(baseEntries, file), ownerOf(headEntries, file)].filter(
+        (name): name is string => name !== undefined
+      )
+    );
+    for (const name of owners) {
+      if (!packages.has(`entry:${name}`)) packages.set(`entry:${name}`, entryPackage(name));
+    }
+    if (owners.size > 0) continue;
+    // Listed nowhere: judge it by its folder, `plugins/<dir>`.
+    const dir = file.split('/').slice(0, 2).join('/');
+    if (dir === file || packages.has(`dir:${dir}`)) continue;
+    packages.set(`dir:${dir}`, {
+      pkg: dir,
+      baseDir: dirExistsAt(repoRoot, baseSha, dir) ? dir : undefined,
+      headDir: dirExistsAt(repoRoot, headSha, dir) ? dir : undefined,
     });
   }
 
   const findings: BumpFinding[] = [];
-  for (const [pkg, { baseDir, headDir }] of [...dirsByName].sort(([a], [b]) =>
-    a.localeCompare(b)
-  )) {
+  const sorted = [...packages.values()].sort((a, b) => a.pkg.localeCompare(b.pkg));
+  for (const { pkg, baseDir, headDir } of sorted) {
     // A new package has nothing to bump past; a deleted one has nothing to raise.
     if (baseDir === undefined || headDir === undefined) continue;
 
-    const before = declaredVersionOf(collectPackageVersions(readBase, baseDir));
-    const after = declaredVersionOf(collectPackageVersions(readHead, headDir));
+    const headVersions = collectPackageVersions(readHead, headDir);
+    const broken = (headVersions.unreadable ?? []).find(
+      (file) =>
+        file.endsWith('/.claude-plugin/plugin.json') || file.endsWith('/.dork/manifest.json')
+    );
+    if (broken !== undefined) {
+      findings.push({
+        pkg,
+        level: 'error',
+        message: `${pkg}: ${broken} is not valid JSON, so its version can't be read and the bump can't be checked. ${REASON}`,
+      });
+      continue;
+    }
 
+    // An unreadable file at base reads as "no version": fixing it is opting in.
+    const before = declaredVersionOf(collectPackageVersions(readBase, baseDir));
+    const after = declaredVersionOf(headVersions);
     if (before === undefined && after === undefined) {
       findings.push({
         pkg,
