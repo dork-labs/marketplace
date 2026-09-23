@@ -140,7 +140,7 @@ CLI: `node --experimental-strip-types "<flow-root>/scripts/config-files.ts" [res
     and hard-linked into place so an existing file is never overwritten. The copy is verified by
     reading it back and comparing bytes.
   - `config.json` last, because its presence is what makes the project the source. Content is
-    the legacy object with a relative `$schema` replaced by `CONFIG_SCHEMA_URL` (a relative path
+    the legacy object with any `$schema` that is not a URL replaced by `CONFIG_SCHEMA_URL` (a relative path
     to the plugin cannot work from the project, and an absolute one would name one machine's
     cache in a committed file), serialised with two-space indent and a trailing newline. Same
     temp-and-link write; verified by parsing it back and comparing deeply.
@@ -211,7 +211,7 @@ flow 0.7.4 → **0.8.0** (where settings live changes) in `plugin.json`, `.dork/
 - resolve: project beats legacy; checkout beats main checkout; a worktree finds the main
   checkout's local file; legacy own dir beats a cache sibling; newest sibling wins; a sibling is
   never consulted outside the cache layout; `local` never mixes directories; `none` when nothing.
-- migrate: copies both files, local bytes identical and mode `0o600`, `$schema` rewritten,
+- migrate: copies both files, local bytes identical and mode `0o600`, `$schema` rewritten (a URL kept),
   `.gitignore` written and effective; second run is a no-op; a crash-shaped state (local copied,
   committed not) completes; a differing destination stops with nothing overwritten; invalid legacy
   JSON writes nothing; legacy files still exist after; two projects migrating from one shared
