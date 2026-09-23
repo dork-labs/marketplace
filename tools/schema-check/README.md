@@ -1,6 +1,6 @@
 # schema-check
 
-Repo-wide CI gate. It checks two things about everything in `plugins/`:
+Repo-wide CI gate. It checks three things about everything in `plugins/`:
 
 1. **Every `SKILL.md` still says what its author meant.** Not just "does it
    parse" — every line the author wrote has to survive the parse still meaning
@@ -8,6 +8,7 @@ Repo-wide CI gate. It checks two things about everything in `plugins/`:
 2. **Every manifest still validates.** `.claude-plugin/marketplace.json` (against
    the DorkOS schema _and_ the Claude Code standard one), `.claude-plugin/dorkos.json`,
    and any plugin's `.dork/manifest.json`.
+3. **Every package states one version.** See [Version agreement](#version-agreement).
 
 Run it:
 
@@ -64,6 +65,27 @@ The fourth needs the list because there is nothing left in the file to complain
 about. The list is kept honest in both directions: a skill on it that stops being
 schedulable is an error, and a skill with a schedule block that is _not_ on it is
 also an error.
+
+## Version agreement
+
+A package can state its version in up to three files:
+
+- `.dork/manifest.json`, which DorkOS reads,
+- `.claude-plugin/plugin.json`, which Claude Code reads,
+- `package.json`, but only one at the package root that has a `version` field. A
+  nested one, like flow's `engine-tests/package.json`, is never read.
+
+Every version that is there must be the same. And when the manifest has a version,
+a `plugin.json` that exists must have one too: otherwise Claude Code identifies
+the package by commit while DorkOS reports the manifest's number. A package with
+only one of these files, or with no version anywhere, passes.
+
+This is DorkOS's own rule, applied before publishing: DorkOS refuses a package
+whose manifest and `plugin.json` disagree (`VERSION_MISMATCH`). It exists because
+flow shipped with its manifest saying 0.6.0 while `plugin.json` said 0.7.2, so
+DorkOS showed one version while Claude Code ran another. The check lives in
+`src/versions.ts` and needs no DorkOS schema, so bumping the pin has nothing to do
+with it.
 
 ## Where the schemas come from
 

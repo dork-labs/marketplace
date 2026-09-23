@@ -1,5 +1,6 @@
 /**
- * `npm run check` — validates this repository against the pinned DorkOS schemas
+ * `npm run check` — validates this repository against the pinned DorkOS schemas,
+ * and checks that every package's version files agree,
  * and prints what is wrong. Exits 1 when anything is.
  *
  * @module cli
@@ -16,7 +17,7 @@ const pin = readPin();
 const findings = validateRepo(repoRoot);
 
 if (findings.length === 0) {
-  console.log(`✓ Skills and manifests match DorkOS ${pin.repo}@${pin.ref.slice(0, 12)}`);
+  console.log(`✓ Skills, manifests and versions match DorkOS ${pin.repo}@${pin.ref.slice(0, 12)}`);
   process.exit(0);
 }
 
