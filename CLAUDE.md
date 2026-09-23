@@ -82,13 +82,19 @@ dorkos package validate       # Validates individual package manifests
 dorkos marketplace validate   # Validates the full registry (CC compat + sidecar schema)
 ```
 
-**CI:** two workflows, both on every pull request. `schemas` also runs on every push to `main`.
+## CI
 
-- `.github/workflows/flow-tests.yml` (`flow`) — checks that `plugins/flow/config/config.schema.json`
-  still matches the Zod schema it is generated from, then runs the flow plugin's typecheck,
-  tests, and format check. No other plugin has its own checks yet.
-- `.github/workflows/schema-check.yml` (`schemas`) — repo-wide. Validates every plugin's
-  `SKILL.md` frontmatter and `schedule:` blocks, plus the marketplace/sidecar/package
+The three checks below run on every pull request, every merge-queue run (`merge_group`) and
+every push to `main`, with no `paths:` filter and no job-level `if:`. That is what lets a
+check be required: a required check that skips a PR, or never reports on the queue's run,
+leaves the PR waiting forever. Keep it that way, or un-require the check first.
+
+- `flow-tests.yml`, check **`flow plugin`** (required). Checks that
+  `plugins/flow/config/config.schema.json` still matches the Zod schema it is generated from,
+  then runs the flow plugin's typecheck, tests and format check. No other plugin has its own
+  checks yet.
+- `schema-check.yml`, check **`skills and manifests`** (required). Repo-wide. Validates every
+  plugin's `SKILL.md` frontmatter and `schedule:` blocks, plus the marketplace/sidecar/package
   manifests, against the real DorkOS Zod schemas, downloaded from the public dorkos repo at
   the commit pinned in `tools/schema-check/upstream.json`. It exists because DorkOS
   deliberately degrades a broken `schedule:` block to no schedule at all, so a one-character
@@ -96,10 +102,42 @@ dorkos marketplace validate   # Validates the full registry (CC compat + sidecar
   `tools/schema-check/README.md` before touching a schedule block or bumping the pin.
   It also fails when a package's `.dork/manifest.json`, `.claude-plugin/plugin.json` and
   root `package.json` versions disagree, or the manifest has a version and `plugin.json`
-  has none. And on every PR and every push to `main`, it fails when a package's files
-  changed without its declared version going up (`npm run check:bump`). A package that
-  declares no version is exempt; declaring one opts in. So any change under `plugins/<name>/`
-  needs a version bump in the same PR.
+  has none; and when a package's files changed without its declared version going up
+  (`npm run check:bump`). A package that declares no version is exempt; declaring one opts in.
+- `scripts-test.yml`, check **`script fixtures`**. Runs the fixture suites in `scripts/`:
+  the auto-merge arming gate and the two `.claude/hooks` guards.
+- `merge-tail.yml`, scheduled. Arms auto-merge on finished pull requests nobody armed (see
+  below). It needs the `dorkos-merge-tail` GitHub App's secrets and fails loudly without them.
+
+## Landing changes
+
+- **One checkout, one writer.** Several agents work this repo at once. Make every code change
+  in its own worktree (`/worktree:create <branch>`, from `origin/main`), never in the shared
+  `main` checkout, and never create a worktree from inside one. The `working-in-worktrees`
+  skill has the mechanics.
+- **Nothing lands on `main` except through a pull request**, squash-merged. Never push to
+  `main` directly; force pushes and deleting `main` are refused.
+- **Review the pushed branch, then open the PR.** The adversarial review runs against the
+  branch before a PR exists, calibrated by `REVIEW.md`; open the PR once it converges. The
+  `creating-pull-requests` skill has the order, the local gates and the PR watcher.
+- **Bump what you change.** Any change under `plugins/<name>/`, a README or doc included,
+  raises that package's version in every file that declares it (`plugin.json`,
+  `.dork/manifest.json`, `package.json`) and adds a `CHANGELOG.md` entry where the package
+  keeps one. `skills and manifests` fails the PR otherwise.
+- **Arm your own PR once it is open and reviewed:** `gh pr merge --auto --squash <n>`.
+  It merges by itself when the required checks pass. While `main` requires branches to be up
+  to date, a PR that falls behind waits until you run `gh pr update-branch <n>`.
+- **What merges by itself, and what does not.** `merge-tail.yml` arms a PR only when every
+  signal is good (the rules are `scripts/should-arm-automerge.sh`, pinned by its fixtures). It
+  never arms a draft; a PR labelled `hold`, `do-not-merge`, `wip` or `blocked`; a conflicting
+  PR or one whose mergeability GitHub has not worked out yet; a PR with changes requested or
+  an unresolved review thread; or a PR with any check failing, cancelled or still running. The
+  labels mean the same in dork-labs/dorkos. Put `hold` on a green PR you do not want landed.
+  Never admin-merge past a red or missing check.
+- **Tracker routing.** Work for this repo is tracked in Linear team DOR (the same team as
+  dorkos), and an item that lands here carries the **`repo/marketplace`** label (group `repo`).
+  An item with no `repo` label lands in dork-labs/dorkos. This repo is public: nothing from a
+  private repo belongs in a commit, a PR body or an issue here.
 
 ## Related Resources
 
