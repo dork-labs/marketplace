@@ -4,7 +4,8 @@
 # The rules for arming auto-merge on a finished pull request, so a green,
 # reviewed PR lands without a person pressing the button. Authors apply them by
 # hand today (CLAUDE.md); a scheduled merge-tail workflow will run this script
-# over every open PR once the dorkos-merge-tail GitHub App is set up here.
+# over every open PR once the dorkos-merge-tail GitHub App is set up here
+# (DOR-2270).
 #
 # Ported from dork-labs/dorkos (scripts/should-arm-automerge.sh), where the same
 # gate has run since 2026-07; keep the two in step, including the hold labels,

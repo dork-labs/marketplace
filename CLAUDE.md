@@ -79,8 +79,9 @@ dorkos marketplace validate   # Validates the full registry (CC compat + sidecar
 
 ## CI
 
-The three checks below run on every pull request, every merge-queue run (`merge_group`) and
-every push to `main`, with no `paths:` filter and no job-level `if:`. That is what lets a
+All three checks below are required on `main`. Each runs on every pull request, every
+merge-queue run (`merge_group`) and every push to `main`, with no `paths:` filter and no
+job-level `if:`. That is what lets a
 check be required: a required check that skips a PR, or never reports on the queue's run,
 leaves the PR waiting forever. Keep it that way, or un-require the check first.
 
@@ -99,8 +100,10 @@ leaves the PR waiting forever. Keep it that way, or un-require the check first.
   root `package.json` versions disagree, or the manifest has a version and `plugin.json`
   has none; and when a package's files changed without its declared version going up
   (`npm run check:bump`). A package that declares no version is exempt; declaring one opts in.
-- `scripts-test.yml`, check **`script fixtures`**. Runs the fixture suites in `scripts/`:
-  the auto-merge arming gate and the two `.claude/hooks` guards.
+- `scripts-test.yml`, check **`script fixtures`** (required). Runs the fixture suites for
+  the auto-merge arming gate, the three `.claude/hooks` guards (git, process, admin merge),
+  the wrapper that makes those guards refuse rather than skip when node is missing, and the
+  PR watcher.
 
 ## Landing changes
 
@@ -111,9 +114,9 @@ leaves the PR waiting forever. Keep it that way, or un-require the check first.
 - **Nothing lands on `main` except through a pull request and the merge queue**, squash-merged.
   Never push to `main` directly; force pushes and deleting `main` are refused. The queue runs
   the required checks again on your PR on top of `main` and everything ahead of it, then
-  merges. Being behind `main` blocks nothing, so never update a branch just to satisfy a gate.
-  Until the queue is switched on, `main` instead requires branches to be up to date: a PR
-  that falls behind waits until you run `gh pr update-branch <n>`.
+  merges. Being behind `main` blocks nothing, so never update a branch to satisfy a gate.
+  Never admin-merge: `.claude/hooks/merge-guard.mjs` refuses the admin flag on `gh pr merge`
+  and the other direct-merge spellings.
 - **Review the pushed branch, then open the PR.** The adversarial review runs against the
   branch before a PR exists, calibrated by `REVIEW.md`; open the PR once it converges. The
   `creating-pull-requests` skill has the order, the local gates and the PR watcher.
@@ -123,15 +126,15 @@ leaves the PR waiting forever. Keep it that way, or un-require the check first.
   keeps one. `skills and manifests` fails the PR otherwise.
 - **Arm your own PR once it is open and reviewed:** `gh pr merge --auto --squash <n>`.
   It goes into the queue and merges by itself when the required checks pass. Nothing else
-  arms PRs yet, so an unarmed PR sits open. Never admin-merge past a red or missing check.
+  arms PRs yet, so an unarmed PR sits open.
 - **What may merge by itself.** The rules are `scripts/should-arm-automerge.sh`, pinned by its
   fixtures: a PR is armed only when every signal is good. Never arm a draft; a PR labelled
   `hold`, `do-not-merge`, `wip` or `blocked`; a conflicting PR or one whose mergeability GitHub
   has not worked out yet; a PR with changes requested or an unresolved review thread; or a PR
   with any check failing, cancelled or still running. The labels mean the same in
   dork-labs/dorkos. A scheduled `merge-tail` workflow that applies these rules to every open
-  PR arrives once the `dorkos-merge-tail` GitHub App is set up on this repo; until then,
-  authors arm their own.
+  PR arrives once the `dorkos-merge-tail` GitHub App is set up on this repo (DOR-2270);
+  until then, authors arm their own.
 - **Tracker routing.** Work for this repo is tracked in Linear team DOR (the same team as
   dorkos), and an item that lands here carries the **`repo/marketplace`** label (group `repo`).
   An item with no `repo` label lands in dork-labs/dorkos. This repo is public: nothing from a

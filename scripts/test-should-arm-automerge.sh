@@ -89,6 +89,7 @@ check "queued and armed"          "SKIP already-armed"        '.mergeQueueEntry 
 check "hold label (object)"       "SKIP held-by-label"        '.labels = [{"name": "hold"}]'
 check "hold label (string)"       "SKIP held-by-label"        '.labels = ["do-not-merge"]'
 check "hold label (mixed case)"   "SKIP held-by-label"        '.labels = [{"name": "WIP"}]'
+check "hold label (spaced)"       "SKIP held-by-label"        '.labels = [{"name": "Do Not Merge"}]'
 check "hold among others"         "SKIP held-by-label"        '.labels = [{"name": "bug"}, {"name": "blocked"}]'
 check "unrelated label is fine"   "ARM"                       '.labels = [{"name": "review:light"}]'
 

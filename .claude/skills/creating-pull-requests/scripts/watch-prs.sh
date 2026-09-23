@@ -27,11 +27,11 @@
 #                              NO automated review, so after the rebase re-arm
 #                              auto-merge AND add the re-review label
 #   FAILING(name,...)          required-check failures (standing Vercel reds
-#                              excluded); a rerun of a pull_request job reuses
-#                              the ORIGINAL merge snapshot, so if main has
-#                              moved since, push an empty commit instead of
-#                              rerunning; a check red on main's last commits
-#                              too is a standing condition, not yours
+#                              excluded); read the log first; a check that is
+#                              plainly not yours gets one rerun, never an
+#                              empty commit (the merge queue re-tests on top
+#                              of main anyway); a check red on main's last
+#                              commits too is a standing condition, not yours
 #   EJECTED(reason)            the merge queue silently dropped the PR; nothing
 #                              else reports this (no webhook, no check goes red)
 #   STUCK_UNMERGEABLE          in the queue with entry state UNMERGEABLE — a

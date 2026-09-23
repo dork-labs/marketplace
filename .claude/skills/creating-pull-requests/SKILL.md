@@ -18,26 +18,29 @@ How marketplace PRs are opened, gated, and landed. This repo is worked by severa
 Ask the repo rather than trusting this list, because settings change:
 
 ```bash
-gh api repos/{owner}/{repo}/rulesets                    # the merge queue lives here once it is on
-gh api repos/{owner}/{repo}/branches/main/protection --jq '.required_status_checks'
+gh api repos/{owner}/{repo}/rules/branches/main \
+  --jq '[.[] | select(.type=="required_status_checks") | .parameters.required_status_checks[].context]'
+gh api repos/{owner}/{repo}/rules/branches/main --jq '[.[].type]'   # merge_queue, deletion, non_fast_forward, ...
 gh api repos/{owner}/{repo} --jq '{allow_auto_merge, delete_branch_on_merge, allow_squash_merge}'
 ```
 
+A repository ruleset protects `main`, so read the rules API. The older
+`branches/main/protection` endpoint reads classic branch protection only, which this repo
+no longer uses, and it would miss required checks.
+
 As of this writing:
 
-| Setting                  | Value                                                                                                      |
-| ------------------------ | ---------------------------------------------------------------------------------------------------------- |
-| Required checks          | `flow plugin` (`.github/workflows/flow-tests.yml`) and `skills and manifests` (`.github/workflows/schema-check.yml`) |
-| Other CI                 | `script fixtures` (`.github/workflows/scripts-test.yml`), not required but must pass                        |
-| Branch up to date        | Required (`strict: true`) until the merge queue is on: a PR behind `main` waits until it is updated         |
-| Force push to `main`     | Not allowed                                                                                                |
-| Merge style              | Squash via PR                                                                                              |
-| Auto-merge               | On. Arm your own PR; nothing else arms PRs yet                                                              |
-| Merge queue              | Being switched on (a repository ruleset like dork-labs/dorkos's); check `rulesets` above                   |
-| Delete branch on merge   | On. GitHub deletes the head branch when the PR merges                                                      |
-| Automated Claude review  | None configured. Review is a code-reviewer subagent or a human, before the PR opens                        |
+| Setting                 | Value                                                                                  |
+| ----------------------- | -------------------------------------------------------------------------------------- |
+| Required checks         | `flow plugin` (`flow-tests.yml`), `skills and manifests` (`schema-check.yml`), `script fixtures` (`scripts-test.yml`) |
+| Merge queue             | On, squash. It runs the required checks on your PR on top of `main` and everything ahead of it |
+| Branch up to date       | Not required: the queue tests the combined tree, so being behind blocks nothing        |
+| Force push / delete `main` | Not allowed                                                                         |
+| Auto-merge              | On. Arm your own PR; nothing else arms PRs yet (merge-tail: DOR-2270)                  |
+| Delete branch on merge  | On. GitHub deletes the head branch when the PR merges                                  |
+| Automated Claude review | None configured (DOR-2270). Review is a code-reviewer subagent or a human, before the PR opens |
 
-Every check runs on **every** PR and every merge-queue run, with no `paths:` filter and no job-level `if:`: a required check that skips a PR, or never reports on the queue's run, leaves that PR waiting forever. Do not add a filter without un-requiring the check first.
+Every check runs on **every** PR and every merge-queue run (`merge_group`), with no `paths:` filter and no job-level `if:`: a required check that skips a PR, or never reports on the queue's run, leaves that PR waiting forever. Do not add a filter without un-requiring the check first.
 
 ## The order: review the branch, then open the PR
 
@@ -69,14 +72,18 @@ Commit conventions and the pre-push gate live in the `/git:commit` and `/git:pus
 CI runs these; run the ones your diff touches before you push:
 
 ```bash
-# flow plugin (the required check) — from plugins/flow, after npm ci
+# flow plugin (required) — from plugins/flow, after npm ci
 npm run generate:schema && git diff --exit-code -- config/config.schema.json   # schema drift
 npm run typecheck
 npm test
 npm run format:check
 
-# skills and manifests — from tools/schema-check, after npm ci (needs network)
+# skills and manifests (required) — from tools/schema-check, after npm ci (needs network)
 npm run check
+npm run check:bump -- origin/main HEAD      # every package you changed raised its version
+
+# script fixtures (required) — from the repo root; one suite per run, so loop
+for t in scripts/test-*.sh .claude/skills/creating-pull-requests/scripts/test-watch-prs.sh; do bash "$t" || echo "FAILED: $t"; done
 
 # Claude Code manifest validity — from the repo root
 claude plugin validate .
@@ -138,9 +145,13 @@ Once review has converged and the PR is open, arm it and let it land itself:
 gh pr merge --auto --squash <number>
 ```
 
-It joins the merge queue and merges as soon as the required checks pass there. The queue tests your PR on top of `main` and everything ahead of it, so being behind blocks nothing: never update a branch to satisfy a gate. Until the queue is on, `main` requires branches to be up to date instead, and a PR that falls behind sits armed until you run `gh pr update-branch <number>`. Never admin-merge past a red or missing check.
+It joins the merge queue and merges as soon as the required checks pass there. The queue tests your PR on top of `main` and everything ahead of it, so being behind blocks nothing: **never update a branch to satisfy a gate** (no `gh pr update-branch`, no merging `main` in). The queue owns the merge method, so gh may print `! The merge strategy for main is set by the merge queue`; that is not a refusal. Confirm with `gh pr view <number>`.
 
-Arm only when every signal is good; `scripts/should-arm-automerge.sh` (pinned by `scripts/test-should-arm-automerge.sh`) is the rule, so never a draft, a conflicting PR, a PR with changes requested or an unresolved thread, or one with a check failing, cancelled or still running. **A PR labelled `hold`, `do-not-merge`, `wip` or `blocked` is not armed**; the labels mean the same in dork-labs/dorkos. Nothing arms PRs automatically yet: a scheduled `merge-tail` workflow that runs that rule over every open PR arrives once the `dorkos-merge-tail` GitHub App is set up here. A label does not disarm a PR that is already armed: `gh pr merge --disable-auto <number>` does.
+**A new commit disarms auto-merge.** GitHub drops the armed state on every push to the PR branch, silently. Re-arm once the new commit's checks are green.
+
+**Never an admin merge.** `gh pr merge` with the admin flag, a REST `PUT .../pulls/<n>/merge` and the `mergePullRequest` mutation each land a change without the queue's checks, and every agent on this machine runs as an admin. In Claude Code the PreToolUse guard `.claude/hooks/merge-guard.mjs` refuses them; other harnesses may not run it, so there treat this sentence as the whole rule. If the queue itself is broken, say so and leave the PR alone.
+
+Arm only when every signal is good; `scripts/should-arm-automerge.sh` (pinned by `scripts/test-should-arm-automerge.sh`) is the rule, so never a draft, a conflicting PR, a PR with changes requested or an unresolved thread, or one with a check failing, cancelled or still running. **A PR labelled `hold`, `do-not-merge`, `wip` or `blocked` is not armed**; the labels mean the same in dork-labs/dorkos. Nothing arms PRs automatically yet: a scheduled `merge-tail` workflow that runs that rule over every open PR arrives once the `dorkos-merge-tail` GitHub App is set up here (DOR-2270). A label does not disarm a PR that is already armed: `gh pr merge --disable-auto <number>` does.
 
 GitHub deletes the head branch when the PR merges. Remove your worktree afterwards:
 
@@ -173,7 +184,7 @@ gh pr view <number> --json statusCheckRollup --jq \
 # pipe it into the Monitor tool for hands-free notification; --once for a single cycle
 ```
 
-It reports state **transitions**, and its event vocabulary is pinned by `scripts/test-watch-prs.sh` (run it after touching the script). The events that matter in this repo are `MERGED`, `CLOSED`, `CONFLICTING`, `FAILING(names)`, `UNRESOLVED_THREADS(n)`, and `UNARMED_CLEAN` (green and mergeable but nobody armed it: arm it). The merge-queue events (`QUEUED`, `EJECTED`, `STUCK_UNMERGEABLE`, `STALLED_IN_QUEUE`) cannot fire while the queue is off. It also knows that `mergeStateStatus: UNKNOWN` is retry-not-terminal, and that a rerun of a failed `pull_request` job reuses the original merge snapshot, so when `main` has moved the fix is an empty commit, not another rerun.
+It reports state **transitions**, and its event vocabulary is pinned by `scripts/test-watch-prs.sh` (run it after touching the script). The events that matter in this repo are `MERGED`, `CLOSED`, `CONFLICTING`, `FAILING(names)`, `UNRESOLVED_THREADS(n)`, and `UNARMED_CLEAN` (green and mergeable but nobody armed it: arm it). The merge-queue events are live too: `QUEUED(pos)` is informational; `EJECTED(reason)` means the queue dropped the PR, which nothing else reports (read the failing job; if it is plainly not yours, re-arm once with `gh pr merge --auto --squash <number>`); `STUCK_UNMERGEABLE` is a dead entry that keeps its place (dequeue it with the `dequeuePullRequest` GraphQL mutation, then re-arm); `STALLED_IN_QUEUE` means no checks reported on the queue's run, usually a required check missing its `merge_group` trigger. It also knows that `mergeStateStatus: UNKNOWN` is retry-not-terminal. A red check that is not yours gets one rerun (`gh run rerun <run-id> --failed`), never an empty commit.
 
 Three rules for any PR watcher:
 
