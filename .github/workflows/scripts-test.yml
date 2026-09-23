@@ -3,10 +3,11 @@ name: scripts
 # Runs the fixture suites in scripts/, one per guard or gate that decides
 # something on its own:
 #
-# - test-should-arm-automerge.sh pins the gate merge-tail.yml uses to decide
-#   whether a pull request may be armed to merge by itself. Its dangerous
-#   failure is silent: a refusal that stops matching keeps answering ARM, and
-#   the first symptom is unreviewed code on `main`.
+# - test-should-arm-automerge.sh pins the gate that decides whether a pull
+#   request may be armed to merge by itself (a merge-tail workflow runs it once
+#   the dorkos-merge-tail app is set up here). Its dangerous failure is
+#   silent: a refusal that stops matching keeps answering ARM, and the first
+#   symptom is unreviewed code on `main`.
 # - test-git-guard.sh and test-process-guard.sh pin the two .claude/hooks guards
 #   that refuse the git and process commands that have destroyed work.
 #

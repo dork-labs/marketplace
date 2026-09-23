@@ -1,14 +1,16 @@
 #!/usr/bin/env bash
 # Decide whether one pull request may have auto-merge armed on it.
 #
-# .github/workflows/merge-tail.yml arms auto-merge on pull requests that are
-# finished, so a green, reviewed PR lands without a person pressing the button.
-# This script is the decision it makes. Ported from dork-labs/dorkos
-# (scripts/should-arm-automerge.sh), where the same gate has run since 2026-07;
-# keep the two in step, including the hold labels, so a label means the same
-# thing in both repos.
+# The rules for arming auto-merge on a finished pull request, so a green,
+# reviewed PR lands without a person pressing the button. Authors apply them by
+# hand today (CLAUDE.md); a scheduled merge-tail workflow will run this script
+# over every open PR once the dorkos-merge-tail GitHub App is set up here.
 #
-# It is a separate script with fixtures, rather than jq inline in the workflow,
+# Ported from dork-labs/dorkos (scripts/should-arm-automerge.sh), where the same
+# gate has run since 2026-07; keep the two in step, including the hold labels,
+# so a label means the same thing in both repos.
+#
+# It is a separate script with fixtures, rather than jq inline in a workflow,
 # because this is the gate that decides to LAND CODE without a human in the loop.
 # The failure that matters is not a crash, it is arming something that should not
 # have been armed, which is invisible until it merges. Every SKIP branch is

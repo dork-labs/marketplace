@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Fixture suite for scripts/should-arm-automerge.sh, the gate that decides
-# whether .github/workflows/merge-tail.yml may arm auto-merge on a pull request.
+# whether a pull request may have auto-merge armed on it.
 #
 # It exists because the failure this gate can produce is silent. A crash is
 # obvious and harmless: nothing gets armed. The dangerous bug is a SKIP branch
