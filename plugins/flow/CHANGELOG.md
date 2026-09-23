@@ -4,6 +4,39 @@ Installs of this plugin are pinned to a commit SHA, so a fix here does not reach
 you until you **reinstall it** (Marketplace → flow → reinstall, or re-run your
 `--plugin-dir` checkout's `git pull`). Each entry below says whether that matters.
 
+## 0.9.0
+
+**A tracker adapter `/flow:init` made for you, and `/flow:pause`, now live in your project, so updating flow can't undo them. Update, then run `/flow` once. If you rely on `/flow:pause`, pause again after updating.**
+
+- If you use a tracker flow has no built-in adapter for (anything but Linear),
+  `/flow:init` wrote the adapter it made for you into the plugin's own folder. An
+  update could erase it. It now goes into your project, in
+  `.agents/flow/adapters/<tracker>/`. It is your team's code, so commit it.
+- The first `/flow` after updating moves an adapter from the old place, with the
+  same rules as your settings in 0.8.0. It moves it without asking when flow is
+  installed inside your project. When flow is installed somewhere several
+  projects share, it asks first, with one question that covers both your settings
+  and the adapter. It never overwrites a file and never deletes the old copy. You
+  can delete the old copy once you have committed the new one.
+- `/flow:pause` used to switch off the `flow-drain` schedule by editing a file
+  inside the plugin. On DorkOS that did not stop a schedule you had already
+  approved, because DorkOS keeps an approved schedule's on/off switch itself, on
+  the Schedules page. So a pause there may never have stopped anything. And an
+  update replaced the file.
+- `/flow:pause` now writes `.agents/flow/paused.json` in your project. Every
+  scheduled run, `/flow continue` and `/flow auto` check it first and stop, with
+  any scheduler. It stays out of git, and it applies to every worktree of the
+  project. `/flow:resume` removes it. Stage commands like `/flow:specify` still work
+  while flow is paused.
+- A scheduler still starts each scheduled run on time while flow is paused. The run
+  just stops at its first step. To stop DorkOS from starting them at all, switch
+  `flow-drain` off on the Schedules page. That switch stays through updates.
+- To turn the scheduled run on in DorkOS, approve `flow-drain` on the Schedules
+  page. Approving switches it on, so there is no need to edit the file first.
+- The instructions inside the `flow-drain` and `flow-groom` scheduled runs
+  changed, so DorkOS will ask you to approve them again after this update. That is
+  expected.
+
 ## 0.8.0
 
 **Your flow settings now live in your project, so updating flow can never erase them again. Update, then run `/flow` once.**
