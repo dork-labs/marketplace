@@ -4,6 +4,16 @@ Installs of this plugin are pinned to a commit SHA, so a fix here does not reach
 you until you **reinstall it** (Marketplace → flow → reinstall, or re-run your
 `--plugin-dir` checkout's `git pull`). Each entry below says whether that matters.
 
+## 0.7.3
+
+**DorkOS now shows the right version for this plugin. Reinstall if you want DorkOS and Claude Code to agree.**
+
+- This plugin states its version in three files, and they disagreed: one said
+  0.6.0 while the plugin itself was 0.7.2. So DorkOS listed flow as 0.6.0 while
+  Claude Code was running 0.7.2. All three files now say 0.7.3.
+- Nothing about how flow works has changed. Reinstalling just moves you onto a
+  version that DorkOS and Claude Code both report the same way.
+
 ## 0.7.2
 
 **Other sessions no longer get pulled into a `/flow auto` drain. Reinstall is recommended.**
