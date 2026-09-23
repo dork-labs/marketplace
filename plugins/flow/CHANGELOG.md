@@ -4,6 +4,27 @@ Installs of this plugin are pinned to a commit SHA, so a fix here does not reach
 you until you **reinstall it** (Marketplace → flow → reinstall, or re-run your
 `--plugin-dir` checkout's `git pull`). Each entry below says whether that matters.
 
+## 0.8.0
+
+**Your flow settings now live in your project, so updating flow can never erase them again. Update, then run `/flow` once.**
+
+- flow used to keep its settings inside the plugin's own folder. Some tools, Claude
+  Code among them, replace that folder when the plugin updates, so every update
+  could lose your settings and send you back to `/flow:init`.
+- Your settings now live in your project, in `.agents/flow/`. `config.json` holds
+  your team's settings and is meant to be committed. `config.local.json` holds this
+  computer's tokens and overrides, and flow adds a `.agents/flow/.gitignore` so it
+  is never committed. flow checks that git really ignores it before writing
+  anything secret there.
+- The first `/flow` after updating copies your old settings over by itself, even
+  when Claude Code has already moved flow to a new folder. It tells you which files
+  it wrote. Commit `.agents/flow/config.json` and `.agents/flow/.gitignore`.
+- The copy never overwrites a file that is already there, and it never deletes the
+  old files, because another project may still use them. Once your project has its
+  own settings, flow stops reading the old ones for it.
+- In a git worktree, flow finds the settings in your main checkout, so a new
+  worktree needs nothing copied into it.
+
 ## 0.7.4
 
 **Updating flow no longer makes a working config "invalid". Reinstall if `/flow` keeps sending you back to `/flow:init`.**
