@@ -147,17 +147,14 @@ This is real today, but it ships **disabled by default** and depends on a runnin
     tick operates as.
   </Step>
   <Step>
-    **Enable the flow-drain tick.** The `schedule:` block in
-    `skills/flow-drain/SKILL.md` ships `enabled: false`. Set it to `true`. There
-    is no build step and no migration: the edit is picked up live.
-  </Step>
-  <Step>
-    **Approve it on the Schedules page.** On a DorkOS release with schedule
-    discovery, a schedule found in a file is never armed for you, so
-    `schedule.enabled: true` by itself still fires nothing. Open **Schedules**,
-    find `flow-drain`, and approve it — that approval is yours to give and yours
-    to withdraw. On a build without discovery, wire an external scheduler
-    instead ([Bring your own scheduler](/docs/guides/flow/bring-your-own-scheduler)).
+    **Approve the flow-drain tick on the Schedules page.** On a DorkOS release
+    with schedule discovery, a schedule found in a file is never armed for you:
+    `skills/flow-drain/SKILL.md` ships `enabled: false`, and the tick waits on
+    **Schedules** until you approve it. Approving switches it on. That switch is
+    yours to flip and it outlasts updates. Do not edit the file itself: it is
+    the package's, and an update replaces it. On a build without discovery,
+    wire an external scheduler instead ([Bring your own
+    scheduler](/docs/guides/flow/bring-your-own-scheduler)).
   </Step>
   <Step>
     **Tune cadence and limits.** Set the per-loop intervals in the `loops`
@@ -289,8 +286,11 @@ Autonomy is never a loss of control, in any setup:
 - **`/flow:status`** renders one pane from the tracker plus `flow-state.json`: every claimed and
   in-flight item (worktree, branch, session), every parked `needs-input` question, and the
   assumption trail behind each autonomous decision.
-- **`/flow pause`** halts every mode from one place; **`/flow resume`** lifts it. The same control
-  toggles both the terminal drain sentinel and the Pulse cron.
+- **`/flow pause`** halts every mode from one place; **`/flow resume`** lifts it. It pauses the
+  terminal drain and writes a pause flag into your project (`.agents/flow/paused.json`) that every
+  scheduled tick checks first, so the tick stops at once under any scheduler and a plugin update
+  cannot undo the pause. The scheduler still starts each tick on time; to stop it starting them at
+  all, switch the tick off on the Schedules page (or disable your cron or CI job).
 - **Reprioritize or disable a loop** by editing its `loops.<id>` block.
 - **Reclaim or redirect an item** by reassigning it; the running tick honors the change at the next
   stage boundary.

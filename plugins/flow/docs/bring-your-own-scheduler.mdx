@@ -29,7 +29,8 @@ tick then appears on your **Schedules** page waiting to be approved.
 <Callout type="info">
   **Installing never starts anything.** A discovered schedule arrives switched off and waits for you
   to approve it. That holds no matter what the file says: `flow-drain` ships `schedule.enabled:
-  false`, and even a `true` there would still park for your approval. See [Turning on the automatic
+  false`, and even a `true` there would still park for your approval. Approving switches it on, and
+  that switch on the Schedules page is the one that counts from then on. See [Turning on the automatic
   loop](/docs/guides/flow/turning-on-autonomy) for the full picture, and [The
   dials](/docs/guides/flow/the-dials) for the cadence.
 </Callout>
@@ -42,6 +43,11 @@ have schedule discovery yet. Point any external scheduler at it — an OS
 `cron` line, a scheduled CI job, or a small poller — and run one `/flow continue` tick per fire. You
 own that scheduler, so you also own its cadence and its uptime; running with your laptop closed needs
 a scheduler that lives somewhere else, like CI.
+
+`/flow:pause` works with any scheduler: it writes a pause flag into your project
+(`.agents/flow/paused.json`) and every tick checks it first and stops, so your scheduler keeps
+firing but nothing is claimed until `/flow:resume`. The flag belongs to the machine that wrote it; a
+scheduler on another machine, such as CI, is paused by disabling that job.
 
 With nobody at a terminal, a tick that has to stop and ask parks its question on the tracker and
 nudges through the `comment-and-nudge` channel. Your reply is picked up by the next tick's inbox

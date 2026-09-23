@@ -43,8 +43,8 @@ contract, and a conformance test must pass before the engine will use it.
     The `building-adapters` skill walks the generate-and-verify loop: pick a tracker, generate from
     the contract plus the closest reference, then validate until green.
   </Card>
-  <Card title="The check - validate-adapter.mjs">
-    `node scripts/validate-adapter.mjs` feeds your adapter known fixtures and asserts the `WorkItem`
+  <Card title="The check - validate-adapter.ts">
+    `node --experimental-strip-types scripts/validate-adapter.ts` feeds your adapter known fixtures and asserts the `WorkItem`
     invariants. It must pass before the adapter is used.
   </Card>
 </Cards>
@@ -66,14 +66,17 @@ The `building-adapters` skill drives this; you do not write an adapter from a bl
     from-scratch implementation.
   </Step>
   <Step>
-    **Run the conformance test until green.** `node scripts/validate-adapter.mjs` is the gate. The
+    **Run the conformance test until green.** `node --experimental-strip-types scripts/validate-adapter.ts` is the gate. The
     builder loops - generate, run, read the failures, fix - until the script exits clean. A
     malformed adapter fails loudly here instead of corrupting dispatch later.
   </Step>
   <Step>
-    **Commit the adapter as your code.** The generated adapter is user-owned code that conforms to
-    the contract. It is the single tracker-write audit surface for your `/flow` install - every
-    claim, transition, comment, and relation read flows through it.
+    **Commit the adapter as your code.** `/flow:init` writes it into your project at
+    `.agents/flow/adapters/<tracker>/SKILL.md`, never into the plugin, so updating flow never touches
+    it. The generated adapter is user-owned code that conforms to the contract. It is the single
+    tracker-write audit surface for your `/flow` install - every claim, transition, comment, and
+    relation read flows through it. flow reads it by that path; it is not loaded as a separate
+    skill.
   </Step>
 </Steps>
 
@@ -95,13 +98,13 @@ verbs the stage skills call. The conformance test asserts the invariants the eng
 <Callout type="warn">
   The engine trusts the adapter. The conformance test is what *earns* that trust: it is the boundary
   that keeps a generated adapter safe to depend on. Do not wire an adapter the engine has not
-  validated - that is what `validate-adapter.mjs` is for, and why it must be green before use.
+  validated - that is what `validate-adapter.ts` is for, and why it must be green before use.
 </Callout>
 
 ## Keeping it current
 
 The adapter is yours to maintain. When the contract version changes, re-run
-`node scripts/validate-adapter.mjs`; if it fails against the new contract, re-run the
+`node --experimental-strip-types scripts/validate-adapter.ts`; if it fails against the new contract, re-run the
 `building-adapters` loop to bring the adapter back into conformance. One artifact stays canonical (the
 contract and builder); you never hand-maintain N adapters.
 

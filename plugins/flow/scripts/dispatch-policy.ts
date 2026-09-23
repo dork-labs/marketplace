@@ -67,7 +67,7 @@
  * remembering to think of it.
  *
  * @see specs/unified-workflow-system/02-specification.md §4 (dispatch policy)
- * @see <flow-root>/skills/<tracker>-adapter/SKILL.md (the WorkItem contract + degradation rules)
+ * @see the tracker adapter's SKILL.md, at `adapter.path` from `config-files.ts` (the WorkItem contract + degradation rules)
  * @module @dorkos/flow/dispatch
  */
 

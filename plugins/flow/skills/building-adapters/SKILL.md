@@ -146,12 +146,19 @@ never to "blocked".
 
 ### Step 3 - Generate the concrete adapter SKILL.md
 
-Write the adapter as a skill into the plugin's skill home:
-`<flow-root>/skills/<tracker>-adapter/SKILL.md` (your harness loads it as
-a skill from there). It must contain:
+Write the adapter into the project, never into the plugin:
+`<committedDir>/adapters/<tracker>/SKILL.md`, where `committedDir` is the folder
+`node --experimental-strip-types "<flow-root>/scripts/config-files.ts"` prints (the
+project's `.agents/flow/`). It is the team's code and is committed. A plugin update
+replaces the plugin folder, so an adapter written there is lost. Nothing loads it as
+a harness skill: every flow command and skill reads it by the `adapter.path` that
+same script prints. It must contain:
 
-1. **Frontmatter.** `name: <tracker>-adapter` and a `description` that triggers
-   whenever a stage skill or the loop needs to read or write the tracker.
+1. **Frontmatter.** `name: <tracker>-adapter` and a `description` saying it is the
+   tracker adapter every `/flow` stage skill and the loop read and write the
+   tracker through. Right below it, a **flow root** note: the adapter lives in the
+   project, so `<flow-root>` in it means the flow plugin folder, the `flowRoot` in
+   `config-files.ts`'s output, never a folder relative to the adapter's own file.
 2. **The one rule, stated up top.** _All_ `/flow` tracker I/O lives in this
    adapter. No other flow skill or command may contain one of this tracker's API
    strings. The adapter is the **single audit surface** for every read and write.

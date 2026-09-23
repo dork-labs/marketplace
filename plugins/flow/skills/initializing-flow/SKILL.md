@@ -20,8 +20,10 @@ description: First-run setup for the /flow engine in a new repo - detect or reco
 ## The one rule: stay tracker-neutral until the adapter exists
 
 Setup never names a tracker API, a tool string, or a tracker-specific field. The
-**only** tracker-aware artifact this procedure produces is the generated adapter
-under `<flow-root>/skills/<tracker>-adapter/`. Everything else you touch (the
+**only** tracker-aware artifact this procedure produces is the generated adapter,
+in the project at `.agents/flow/adapters/<tracker>/SKILL.md` (committed: it is the
+team's code, and a plugin update never touches it). Never write it into the plugin
+folder. Everything else you touch (the
 config triad, the dispatch check) stays generic. When you need adapter-generation
 detail, read the `building-adapters` skill
 (`<flow-root>/skills/building-adapters/SKILL.md`); it owns the generate-and-verify
@@ -63,17 +65,20 @@ node --experimental-strip-types "<flow-root>/scripts/config-files.ts" migrate
 node --experimental-strip-types "<flow-root>/scripts/config-files.ts"
 ```
 
-`migrate` never overwrites or deletes; when it prints `"migrated": true`, tell the
-operator which files it wrote. When it prints `"needsConfirmation": true`, the old
-settings sit in a plugin folder several projects may share: show the operator its
-`found` (folder, tracker, team, workspace) and ask **"Are these this project's
-settings?"** On yes, run `config-files.ts migrate --confirm`. On no, run
+`migrate` never overwrites or deletes, and moves an adapter an older flow generated
+into the plugin along with the settings (its result's `adapter` part); when it prints
+`"migrated": true` (at the top or in `adapter`), tell the operator which files it
+wrote. When it prints `"needsConfirmation": true`, the old settings or adapter sit in
+a plugin folder several projects may share: show the operator its `found` and
+`adapter.found` (folder, tracker, team, workspace) and ask **"Are these this
+project's settings?"** (one answer covers both). On yes, run `config-files.ts migrate --confirm`. On no, run
 `config-files.ts migrate --decline` (flow records the answer, so neither `/flow`
 nor a later `/flow:init` asks this project again, even if this setup is abandoned)
 and continue as a **fresh install** below. Headless, never answer for a person:
 stop and report that the settings may belong to another project and someone must
 run `/flow` in this project to confirm. The second command prints
-`{ ok, origin, committed, local, committedDir, localDir, shared, moved, errors, warnings }`.
+`{ ok, origin, committed, local, committedDir, localDir, shared, moved, flowRoot, adapter,
+paused, errors, warnings }`.
 
 - **`"origin": "none"` (declined settings are no longer found), or a `committed`
   file that is not valid JSON → fresh install.** This is the _expected_ state of a clean install: the plugin ships
@@ -86,7 +91,9 @@ run `/flow` in this project to confirm. The second command prints
   rewrite), **regenerate the adapter only** (skip Steps 2 and 4, jump to Step 3),
   or **cancel**. Headless re-run defaults to **cancel** (never rewrite committed
   config without a human), and reports that it stopped because a valid config
-  already exists.
+  already exists. When `adapter.origin` is `"none"` (no adapter for the configured
+  tracker, for example one a plugin update erased before flow kept adapters in the
+  project), say so and recommend **regenerate the adapter only**.
 
 #### Confirm the toolchain before going further
 
@@ -275,8 +282,11 @@ adapter for the chosen tracker. In brief:
 1. Read `<flow-root>/adapters/SPEC.md` (the contract) and pick the closest
    reference adapter for the transport chosen in Step 2 (or from-scratch for a
    tracker no reference fits).
-2. Generate the adapter as a skill into
-   `<flow-root>/skills/<tracker>-adapter/SKILL.md`, mapping the tracker onto the
+2. Generate the adapter into the project, at
+   `<committedDir>/adapters/<tracker>/SKILL.md` (`committedDir` from Step 1's
+   output: the folder `config.json` is in or goes to; on a re-run with the same
+   tracker this is `adapter.target`). Commit it with `config.json`. Never write it
+   into `<flow-root>`: a plugin update replaces that folder. Map the tracker onto the
    generic `WorkItem` model and all 16 required capability verbs, with the
    durability and graceful-degradation notes the SPEC requires, and a
    supported/not-supported line for each optional verb.
@@ -297,7 +307,10 @@ adapter for the chosen tracker. In brief:
 
 If the chosen tracker already has a conforming adapter (the "regenerate" or
 re-run path), re-validate it against the current contract version rather than
-regenerating from scratch, and only regenerate if validation fails.
+regenerating from scratch, and only regenerate if validation fails. A tracker flow
+ships an adapter for (`adapter.origin: "shipped"`, today `linear`) needs no
+generated one: validate the shipped adapter and move on. Generate a project adapter
+for it only to override the shipped one on purpose; the project's copy then wins.
 
 ### Step 4 - Scaffold the config triad and the review rubric
 
@@ -443,7 +456,7 @@ generated in Step 3, perform two reads:
 
 An auth error, an empty/unresolvable team, or any throw is a **connection or
 credential gap**. Name the specific file to fix — `config.local.json` for
-credentials and coordinates, the generated `<tracker>-adapter` skill for
+credentials and coordinates, the adapter at `adapter.path` for
 transport — and **stop**. Do not report `/flow` as ready.
 
 #### 5b. Policy self-check — the dispatch oracle, no tracker call
@@ -480,7 +493,8 @@ resolved to, and flag it if you just scaffolded one that still needs filling in)
 the model bound to each delegate tier (or that a tier is
 unbound and will fall back to the harness default), and the entry points
 (`/flow` to orchestrate, `/flow:<stage>` for a single stage, `/flow auto` for the
-autonomous drain). Surface any headless assumptions you applied so the operator
+autonomous drain). When you generated an adapter, remind them to commit
+`.agents/flow/adapters/<tracker>/` with `config.json`. Surface any headless assumptions you applied so the operator
 can change them with another `/flow:init`.
 
 ---

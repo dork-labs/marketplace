@@ -278,7 +278,7 @@ This is what the recovery reconciler reads each tick: it lists `agent/claimed` +
 
 ## The tracker-adapter seam: the engine stays pure
 
-Every fact so far has pointed at one rule (charter G8): **all tracker I/O is confined to the tracker adapter skill** — `skills/<tracker>-adapter/`, whichever tracker your config names. Outside that one directory the plugin contains zero tracker strings: no tracker MCP tool name, no CLI invocation, no tracker-specific field name. A grep guard enforces it across the skills, the commands, the engine scripts, and the loop hook.
+Every fact so far has pointed at one rule (charter G8): **all tracker I/O is confined to the tracker adapter skill** — the shipped `skills/linear-adapter/`, or the one `/flow:init` generated into your project at `.agents/flow/adapters/<tracker>/`, whichever tracker your config names. Outside the shipped adapter the plugin contains zero tracker strings: no tracker MCP tool name, no CLI invocation, no tracker-specific field name. A grep guard enforces it across the skills, the commands, the engine scripts, and the loop hook.
 
 This confinement is what makes everything above pure and portable:
 

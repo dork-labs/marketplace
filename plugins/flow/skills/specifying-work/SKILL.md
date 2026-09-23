@@ -25,7 +25,10 @@ Use it to:
    (breadcrumb comments, stage transitions, evidence) route through the
    **adapter** skill by reference —
    e.g. "via the adapter, `transition` the item to `stage/specify`". The
-   adapter is the single audit surface for tracker I/O.
+   adapter is the single audit surface for tracker I/O. **Finding the adapter.** It is the `SKILL.md` at the `adapter.path` that
+   `node --experimental-strip-types "<flow-root>/scripts/config-files.ts"` prints: the
+   project's own (`.agents/flow/adapters/<tracker>/`), or the one flow ships. Inside it,
+   `<flow-root>` means that output's `flowRoot`.
 2. **Generic over PMs.** Branch only on the adapter's `WorkItem`
    `stateCategory`, never on a tracker's state display name. The skill works
    unchanged whether the tracker is Jira, GitHub Issues, or any other.

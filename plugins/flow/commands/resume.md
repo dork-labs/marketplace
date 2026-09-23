@@ -1,7 +1,7 @@
 ---
 description: Restore autonomous /flow operation that /flow:pause halted
 category: flow
-allowed-tools: Read, Edit, Write, Glob, SlashCommand
+allowed-tools: Read, Edit, Write, Glob, SlashCommand, Bash(node:*)
 argument-hint: "[issue-id to un-pause, or empty to restore all autonomy]"
 ---
 
@@ -11,22 +11,18 @@ Undo a `/flow:pause`: $ARGUMENTS
 
 Resume is the inverse of pause: it restores the autonomous surfaces pause halted:
 
-1. **The Pulse cron.** In `${CLAUDE_PLUGIN_ROOT}/skills/flow-drain/SKILL.md`, set `enabled`
-   to `true` **inside the frontmatter's `schedule:` block**, so the Pulse seat resumes
-   claiming work on its schedule:
+1. **The pause flag.** Run
 
-   ```yaml
-   schedule:
-     cron: "0 * * * *"
-     enabled: true # <- this line, nested under `schedule:`
+   ```bash
+   node --experimental-strip-types "${CLAUDE_PLUGIN_ROOT}/scripts/config-files.ts" resume
    ```
 
-   `enabled` is a nested key. A top-level `enabled: true` written beside `name:` is
-   stripped when the file is parsed, so autonomy would never actually come back.
-
-   (Pulse is the one mode that needs a running DorkOS server; the terminal drain does
-   not. Under a DorkOS build with schedule discovery, the restored tick also has to be
-   approved on the Schedules page before it fires again.)
+   It removes this machine's `.agents/flow/paused.json` (from this checkout and the main
+   checkout) and prints `{ ok, wasPaused, removed }`. The next scheduled tick then does
+   its work again. If the operator also switched the tick off where it is scheduled (the
+   **Schedules** page on DorkOS, or a cron or CI job), remind them to switch it back on
+   there; flow does not touch that switch. (Pulse is the one mode that needs a running
+   DorkOS server; the terminal drain does not.)
 
 2. **The terminal drain.** If a paused `.dork/flow/auto-run.json` sentinel is still
    present (`active: false`), restart the drain with `/flow auto`, which rewrites the

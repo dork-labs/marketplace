@@ -12,7 +12,7 @@ Implement a specification by orchestrating parallel background agents across dep
 
 ## Stage: EXECUTE in the `/flow` model
 
-This skill is the **EXECUTE stage** of the unified `/flow` stage model (the spec's stage spine: … DECOMPOSE → **EXECUTE** → VERIFY → ⟦HUMAN REVIEW⟧ → DONE …). A PM transition into the EXECUTE stage and the thin `/flow:execute` command are two triggers for this same skill; its PM projection is In Progress + the `agent/claimed` label. When tracker I/O is needed (claiming the work item, the In Progress transition, breadcrumbs), route it through the **tracker adapter** skill by naming its capability verbs — this skill never touches a tracker string directly. The behavior below is unchanged.
+This skill is the **EXECUTE stage** of the unified `/flow` stage model (the spec's stage spine: … DECOMPOSE → **EXECUTE** → VERIFY → ⟦HUMAN REVIEW⟧ → DONE …). A PM transition into the EXECUTE stage and the thin `/flow:execute` command are two triggers for this same skill; its PM projection is In Progress + the `agent/claimed` label. When tracker I/O is needed (claiming the work item, the In Progress transition, breadcrumbs), route it through the **tracker adapter** skill by naming its capability verbs — this skill never touches a tracker string directly. The adapter is the `SKILL.md` at the `adapter.path` that `node --experimental-strip-types "<flow-root>/scripts/config-files.ts"` prints; inside it, `<flow-root>` means that output's `flowRoot`. The behavior below is unchanged.
 
 ## Supporting Files
 

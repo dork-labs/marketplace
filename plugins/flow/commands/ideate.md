@@ -1,7 +1,7 @@
 ---
 description: "/flow IDEATE stage — shape a brief into a structured ideation artifact"
 category: workflow
-allowed-tools: Read, Grep, Glob, Task, TaskOutput, Write, Edit, AskUserQuestion, Bash(git:*), Bash(npx:*), Bash(python3:*), Bash(mkdir:*)
+allowed-tools: Read, Grep, Glob, Task, TaskOutput, Write, Edit, AskUserQuestion, Bash(git:*), Bash(node:*), Bash(npx:*), Bash(python3:*), Bash(mkdir:*)
 argument-hint: "<task-brief-or-path-to-notes>"
 ---
 
@@ -17,7 +17,7 @@ The ideation document scaffold is externalized at
 `${CLAUDE_PLUGIN_ROOT}/templates/docs/ideation.md` — produce that shape.
 
 When the work is tracked, route every tracker read/write through the tracker
-adapter skill (`${CLAUDE_PLUGIN_ROOT}/skills/<tracker>-adapter/SKILL.md`, where
-`<tracker>` is the `tracker` in `config.json`); never call a tracker directly
+adapter skill (the `SKILL.md` at the `adapter.path` that
+`node --experimental-strip-types "${CLAUDE_PLUGIN_ROOT}/scripts/config-files.ts"` prints); never call a tracker directly
 from this command. If the work is untracked or no adapter is available, skip
 tracker projection silently.

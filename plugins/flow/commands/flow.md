@@ -24,9 +24,10 @@ autonomously through a PM tool. Resolve and route: $ARGUMENTS
 | REVIEW    | — (human gate)    | —                   |
 | DONE      | `/flow:done`      | `closing-work`      |
 
-All tracker I/O routes through the tracker adapter skill —
-`${CLAUDE_PLUGIN_ROOT}/skills/<tracker>-adapter/SKILL.md`, where `<tracker>` is the
-`tracker` in `config.json`. When this command names a work item to the operator
+All tracker I/O routes through the tracker adapter skill: the `SKILL.md` at the
+`adapter.path` that `config-files.ts` prints (see the first-run guard below). It is the
+project's own adapter (`.agents/flow/adapters/<tracker>/SKILL.md`), else the one flow
+ships for that tracker. When this command names a work item to the operator
 (the dispatch pick, the ready-queue list, the resumed item), render it as
 identifier with title (`PROJ-157 - Title`), per the adapter's display convention;
 never a bare key.
@@ -37,7 +38,7 @@ they observe or steer the loop, never advance a stage:
 | Verb     | Command        | What it does                                                      |
 | -------- | -------------- | ----------------------------------------------------------------- |
 | `status` | `/flow:status` | One pane: in-flight items, parked questions, the assumption trail |
-| `pause`  | `/flow:pause`  | Halt every autonomous mode (drain sentinel + Pulse cron) at once  |
+| `pause`  | `/flow:pause`  | Halt every autonomous mode (drain sentinel + pause flag) at once  |
 | `resume` | `/flow:resume` | Restore what `pause` halted                                       |
 
 ## Trigger doors × execution modes (orthogonal)
@@ -60,23 +61,28 @@ PM-driven-autonomous cell is the Pulse seat, a fresh session per tick.
 **First-run guard (before any routing).** flow's settings live in the project, not in
 the plugin: `.agents/flow/config.json` (committed team policy) and
 `.agents/flow/config.local.json` (this machine's credentials and overrides, ignored by git).
+So does a tracker adapter `/flow:init` generated (`.agents/flow/adapters/<tracker>/`,
+committed) and this machine's pause (`.agents/flow/paused.json`, ignored by git).
 One script knows where they are; never guess a path. On any `/flow` invocation, first run
 
 ```bash
 node --experimental-strip-types "${CLAUDE_PLUGIN_ROOT}/scripts/config-files.ts" migrate
 ```
 
-It moves settings an older flow kept inside the plugin into the project. It never
-overwrites or deletes anything, and it prints
-`{ ok, migrated, needsConfirmation, found, from, wrote, unchanged, leftInPlace, reason }`:
+It moves settings, and the tracker adapter they name, that an older flow kept inside the
+plugin into the project. It never overwrites or deletes anything, and it prints
+`{ ok, migrated, needsConfirmation, found, from, wrote, unchanged, leftInPlace, reason,
+adapter }`, where `adapter` has the same fields for the adapter:
 
-- **`"migrated": true`**: tell the operator which files it wrote and ask them to commit
-  `.agents/flow/config.json` and `.agents/flow/.gitignore` (never `config.local.json`).
-- **`"needsConfirmation": true`**: the old settings sit in a plugin folder outside this
-  project, which several projects may share, so they may be another project's (credentials
-  included). Nothing was copied. Show the operator `found` (the folder, tracker, team and
-  workspace; never a credential) and ask with `AskUserQuestion`: **"Are these this
-  project's settings?"** On yes, run the same command with `migrate --confirm` and report
+- **`"migrated": true`** (at the top or in `adapter`): tell the operator which files it
+  wrote and ask them to commit `.agents/flow/config.json`, `.agents/flow/.gitignore` and
+  any `.agents/flow/adapters/` folder it wrote (never `config.local.json`).
+- **`"needsConfirmation": true`**: the old settings or adapter sit in a plugin folder
+  outside this project, which several projects may share, so they may be another project's
+  (credentials included). Nothing was copied. Show the operator `found` and `adapter.found`
+  (the folders, tracker, team and workspace; never a credential) and ask with
+  `AskUserQuestion`: **"Are these this project's settings?"** The one answer covers both.
+  On yes, run the same command with `migrate --confirm` and report
   it as above. On no, run `migrate --decline` (flow remembers the answer and never asks
   this project again), then route to `/flow:init` to set this project up fresh, and stop.
   With no human to ask (a headless run, such as a scheduled tick), never answer for them:
@@ -92,24 +98,38 @@ Then run
 node --experimental-strip-types "${CLAUDE_PLUGIN_ROOT}/scripts/config-files.ts"
 ```
 
-which prints `{ ok, origin, committed, local, committedDir, localDir, shared, moved, errors,
-warnings }`: the
+which prints `{ ok, origin, committed, local, committedDir, localDir, shared, moved,
+flowRoot, adapter, paused, errors, warnings }`: the
 `config.json` and `config.local.json` in use (`local` may be `null`), with `config.json`
 checked against `config/config.schema.json` (a field the schema gives a default may be left
-out). When `"ok": false` (no `config.json` anywhere, or an `errors` entry), route straight to
+out); the tracker adapter to read, `adapter.path` (`adapter.origin` says whether it is the
+project's own, one flow ships, or one still inside the plugin); and this machine's pause,
+`paused` (`null` when not paused). When `"ok": false` (no `config.json` anywhere, no adapter
+for the tracker, or another `errors` entry), route straight to
 `/flow:init` to scaffold it and stop, before any stage or dispatch work. A headless run
-stops instead of routing, and reports the first error's message; one at `(file)` saying the
-settings "may belong to another project" means a person has to run `/flow` in this project
-to confirm them. **Warnings never
+stops instead of routing, and reports the first error's message; one at `(file)` or
+`(adapter)` saying the settings or adapter "may belong to another project" means a person
+has to run `/flow` in this project to confirm them. **Warnings never
 do.** Most are an unknown key in `config.json` (a typo, or a setting this version of flow no
-longer has) that flow ignores; the rest are about the file itself (settings still inside the
-plugin, settings moved to another project, or team settings git ignores). Show every warning to the operator, naming its path,
+longer has) that flow ignores; the rest are about the files themselves (settings or an
+adapter still inside the plugin, or moved to another project, or team settings git
+ignores). Show every warning to the operator, naming its path,
 then carry on. Show a warning at `/secrets` first, and make it stand out: it means tracker
 credentials are sitting in the committed `config.json`, so tell the operator plainly to move
 that block to `config.local.json` before anything is committed. Every skill reads settings
 from the two files this printed, with `config.local.json` overriding `config.json`. A field
 missing from both means its `default` in `config/config.schema.json`; read that value
-wherever a skill reads the raw field. With a valid config present, behave exactly as below.
+wherever a skill reads the raw field.
+
+Read the adapter from `adapter.path` and nowhere else. A project adapter lives outside the
+plugin, so wherever it says `<flow-root>`, that means `flowRoot` from the same output,
+whatever the adapter's own note says about where it lives.
+
+**The pause.** When `paused` is not `null`, flow's autonomy is halted on this machine: never
+start `continue` or `auto` (below), and never run a scheduled tick. Say "flow is paused
+(since `<pausedAt>`); `/flow:resume` lifts it" and stop. Everything else (a stage command, a
+named work item, `status`, `pause`, `resume`) runs as usual: a pause stops the loop, never
+the operator. With a valid config present, behave exactly as below.
 
 **No arguments (cold start).** When `$ARGUMENTS` is empty, do not guess. Offer the
 operator five intents via `AskUserQuestion`, then route the choice:
@@ -198,7 +218,8 @@ resolves the project, then routes by where it sits on the spine:
   JSON in, the ranked `selectDispatch` result as JSON out), claim the top-ranked eligible
   item, and
   carry it to its human-review gate, then **stop**. This is one tick of `auto`: server-free,
-  a single item, never looping. It writes **no** `.dork/flow/auto-run.json` sentinel (that
+  a single item, never looping. Refused while flow is paused (see **The pause** above). It
+  writes **no** `.dork/flow/auto-run.json` sentinel (that
   file is `auto` only), so the `flow-loop` Stop hook stays a strict no-op and the session
   ends after the one item.
 - **`auto`**: drain the whole ready queue autonomously to the human-review gate (below).
@@ -240,6 +261,7 @@ consequences for anything that reads this file: a MISSING sentinel does not prov
 the queue drained, and a PAUSED one (`active: false`, written by `/flow:pause`)
 is never reaped, because `/flow:resume` reads it back.
 
+0. **Not while paused.** If the guard's `paused` is set, do not start (see **The pause**).
 1. **Start.** Write `.dork/flow/auto-run.json` =
    `{ "active": true, "ready": <N>, "shapeable": <M>, "startedAt": "<ISO>", "pid": <pid>, "sessionId": "${CLAUDE_SESSION_ID}" }`.
    `sessionId` is this session's id, filled in when this command loads; copy it
@@ -256,7 +278,13 @@ is never reaped, because `/flow:resume` reads it back.
    `flow-loop` Stop hook tell a **starved** queue (work waiting on a triage pass)
    from a genuinely **drained** one (task 1.7). (Inline assumption: the auto-run
    sentinel gains `shapeable: <N>`.)
-2. **Each iteration runs the reconciler registry order: recovery → inbox/resume → dispatch.**
+2. **Each iteration first re-checks the pause**, by running
+   `node --experimental-strip-types "${CLAUDE_PLUGIN_ROOT}/scripts/config-files.ts"` again:
+   a `/flow:pause` from any session writes the flag. A drain that sees it claims nothing
+   more and stops. It does not delete the sentinel: `/flow:pause` set it to
+   `active: false`, which lets the session stop and lets `/flow:resume` restart the drain.
+   (If the sentinel still says `active: true`, set it to `false` yourself first.)
+   **Then it runs the reconciler registry order: recovery → inbox/resume → dispatch.**
    This mirrors the flow engine's `runTick` walking the `loops` config (the typed
    source of truth) in ascending priority — `loops.recovery` (10) before
    `loops.inbox` (20) before `loops.dispatch` (30). The continuous unattended
@@ -354,12 +382,14 @@ attemptCount, workerPid, startedAt }`, with `status` starting at `queued`
 The operator always outranks the loop. Three override surfaces, coarse to fine:
 
 - **Halt everything.** `/flow:pause` stops every autonomous mode from one place: it
-  sets `active: false` in the `.dork/flow/auto-run.json` drain sentinel AND
-  `enabled: false` inside the `schedule:` block of the
-  `${CLAUDE_PLUGIN_ROOT}/skills/flow-drain/SKILL.md` frontmatter, so no mode keeps
-  claiming. It is a nested key (`schedule.enabled`); a top-level `enabled:` is stripped
-  on parse and halts nothing. `/flow:resume` restores both. Halting and restoring
-  autonomy is always one action, never a hunt across files.
+  sets `active: false` in the `.dork/flow/auto-run.json` drain sentinel AND writes this
+  machine's pause flag (`config-files.ts pause`, `.agents/flow/paused.json`), which every
+  scheduled tick, `continue` and `auto` check before doing anything, so no mode keeps
+  claiming. The flag is in the project, so a plugin update cannot undo it, and it works
+  under any scheduler. `/flow:resume` restores both. Halting and restoring autonomy is
+  always one action, never a hunt across files. flow never edits the shipped
+  `flow-drain` schedule: on DorkOS a schedule's on/off switch is the one on the Schedules
+  page.
 - **Disable or reorder one loop.** Per-reconciler control is a `loops` config edit,
   not a command: `loops.<id>.enabled: false` silences a single reconciler (e.g.
   `loops.triage`, `loops.hygiene`) and `loops.<id>.priority` reorders the tick. Edit

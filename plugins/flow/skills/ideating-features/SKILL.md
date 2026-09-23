@@ -13,7 +13,9 @@ description: Turns a feature brief, rough notes, or an existing partial design i
 > `/flow:ideate` command and a PM `stage/ideate` transition are two triggers for
 > this one skill; the next stage is SPECIFY (`specifying-work`). When the work is
 > tracked, route any tracker I/O through the **tracker adapter** skill
-> (your repo's configured adapter under `<flow-root>/skills/`) — never a tracker call from
+> (the `SKILL.md` at the `adapter.path` that
+> `node --experimental-strip-types "<flow-root>/scripts/config-files.ts"` prints; inside it,
+> `<flow-root>` means that output's `flowRoot`) — never a tracker call from
 > here. The ideation document scaffold is externalized at
 > `<flow-root>/templates/docs/ideation.md`; produce that shape.
 

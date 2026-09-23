@@ -28,6 +28,13 @@ session via the Stop-hook sentinel). The canonical tick procedure lives in the
 `/flow` orchestrator (`<flow-root>/commands/flow.md`); this task is only the scheduled
 trigger over it. In reconciler-registry order, one tick:
 
+0. **Pause check, before anything else.** Run
+   `node --experimental-strip-types "<flow-root>/scripts/config-files.ts"`. When its
+   `paused` is not `null`, flow is paused on this machine: report "flow is paused
+   (since `<pausedAt>`); `/flow:resume` lifts it" and stop, touching nothing else. When
+   it says `"ok": false`, report its first error and stop. Otherwise the tracker adapter
+   for the steps below is the `SKILL.md` at its `adapter.path` (inside it, `<flow-root>`
+   means the output's `flowRoot`).
 1. **Recovery.** Re-adopt any orphaned claimed work: read
    `.dork/flow/flow-state.json`, GC closed-issue records, probe the worker, and
    resume / restart-clean / escalate per the recovery script
@@ -45,6 +52,8 @@ through **the adapter**; this tick never names a tracker directly.
 
 **Operator override.** At each stage boundary, via the adapter, check for the
 `agent/paused` marker: if present, advance no further, release the claim
-(`agent/claimed`) cleanly, and stop. `/flow:pause` sets this schedule's
-`schedule.enabled` to `false` to halt the cron; `/flow:resume` sets it back to
-`true`. It is a nested key inside the `schedule:` block, not a top-level one.
+(`agent/claimed`) cleanly, and stop. `/flow:pause` halts every tick through the
+project's pause flag that step 0 reads; `/flow:resume` lifts it. Neither edits
+this file: it is the package's, and an update replaces it. To stop the scheduler
+starting the tick at all, switch it off where it is scheduled (on DorkOS, the
+Schedules page).

@@ -28,7 +28,7 @@
  *
  * @see specs/flow-triage-feeds-loop/02-specification.md §4 (the inbound event seam)
  * @see ./events.ts ({@link TrackerEvent} — the seam's currency — task 4.1)
- * @see <flow-root>/skills/<tracker>-adapter/SKILL.md (`getInbox` — the reader the adapter supplies)
+ * @see the tracker adapter's SKILL.md, at `adapter.path` from `config-files.ts` (`getInbox` — the reader the adapter supplies)
  * @module @dorkos/flow/transport
  */
 

@@ -224,7 +224,7 @@ Renders one pane from the tracker, `flow-state.json`, and the auto-run sentinel:
 /flow:resume
 ```
 
-`/flow:pause` halts every mode from one place. It is the operator override: autonomy is never a loss of control. `/flow:resume` lifts the pause. To disable or reprioritize an individual loop instead of halting everything, edit the `loops` block in config rather than pausing (see [The dials](/docs/guides/flow/the-dials)).
+`/flow:pause` halts every mode from one place. It is the operator override: autonomy is never a loss of control. `/flow:resume` lifts the pause. The pause is a file in your project (`.agents/flow/paused.json`), so updating flow never undoes it, and every stage command in this guide still works while it is on: a pause stops the loop, never you. To disable or reprioritize an individual loop instead of halting everything, edit the `loops` block in config rather than pausing (see [The dials](/docs/guides/flow/the-dials)).
 
 ## Which command should I use?
 

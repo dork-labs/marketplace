@@ -114,12 +114,12 @@ describe('FlowConfigSchema — parsing the §9 config.json', () => {
 
 describe('FlowConfigSchema — `tracker` is an adapter slug, not a closed enum (F1)', () => {
   /**
-   * `/flow:init` offers any tracker, generates `skills/<tracker>-adapter/SKILL.md`
+   * `/flow:init` offers any tracker, generates `.agents/flow/adapters/<tracker>/SKILL.md`
    * for it, and gates that adapter on the conformance harness. A closed enum here
    * therefore rejected the very setup init had just recommended and verified —
    * the adopter's only workaround was hand-editing plugin source, which the next
    * plugin update silently overwrote. The slug is the contract instead: it must
-   * be usable as the `<tracker>` segment of that skill directory.
+   * be usable as the `<tracker>` segment of that adapter folder.
    */
   it.each(['linear', 'github', 'jira', 'github-issues', 'shortcut', 'youtrack', 'a', 'a1-b2'])(
     'accepts the tracker slug %j',
@@ -135,11 +135,13 @@ describe('FlowConfigSchema — `tracker` is an adapter slug, not a closed enum (
 
   it('accepts every slug it accepts as a real directory segment', () => {
     // Non-vacuity: the regex must be tight enough that an accepted slug can
-    // actually name `skills/<tracker>-adapter/` without escaping the dir.
+    // actually name `.agents/flow/adapters/<tracker>/` (and the shipped
+    // `skills/<tracker>-adapter/`) without escaping the dir.
     for (const slug of ['github', 'github-issues', 'a1-b2']) {
-      const dirName = `${slug}-adapter`;
-      expect(path.basename(dirName)).toBe(dirName);
-      expect(dirName).not.toMatch(/[/\\.]/);
+      for (const dirName of [slug, `${slug}-adapter`]) {
+        expect(path.basename(dirName)).toBe(dirName);
+        expect(dirName).not.toMatch(/[/\\.]/);
+      }
     }
   });
 });
@@ -520,8 +522,8 @@ describe('FlowConfigSchema — rejecting invalid config', () => {
   });
 
   it('rejects a malformed tracker slug', () => {
-    // `tracker` is a slug, not an enum (F1): it names the adapter skill dir
-    // `skills/<tracker>-adapter/`, so anything that cannot be a directory
+    // `tracker` is a slug, not an enum (F1): it names the adapter folder
+    // `.agents/flow/adapters/<tracker>/`, so anything that cannot be a directory
     // segment must be refused.
     for (const bad of ['Linear!', 'Jira', 'GitHub', '1password', '-github', '', 'git hub', 'a_b']) {
       const result = FlowConfigSchema.safeParse({ tracker: bad });

@@ -24,6 +24,12 @@ same explicit opt-in as `flow-drain`.
 Each firing runs the CHECK mode of the grooming-backlog skill
 (`<flow-root>/skills/grooming-backlog/SKILL.md`) and stops:
 
+0. **Pause check, before anything else.** Run
+   `node --experimental-strip-types "<flow-root>/scripts/config-files.ts"`. When its
+   `paused` is not `null`, report "flow is paused (since `<pausedAt>`); `/flow:resume`
+   lifts it" and stop. When it says `"ok": false`, report its first error and stop.
+   Otherwise the adapter is the `SKILL.md` at its `adapter.path` (inside it,
+   `<flow-root>` means the output's `flowRoot`).
 1. Via the adapter, take a full backlog snapshot.
 2. Run the groom oracle
    (`node --experimental-strip-types "<flow-root>/scripts/audit-backlog.ts"`)
@@ -37,6 +43,7 @@ restructures projects, which sits behind a human gate by design; a scheduler
 must not walk through it. All tracker reads go through **the adapter**; this
 tick never names a tracker directly.
 
-**Operator override.** `/flow:pause` sets this schedule's `schedule.enabled` to
-`false` along with the other autonomous surfaces; `/flow:resume` sets it back to
-`true`. It is a nested key inside the `schedule:` block, not a top-level one.
+**Operator override.** `/flow:pause` halts this check along with the other
+autonomous surfaces, through the project's pause flag that step 0 reads;
+`/flow:resume` lifts it. Neither edits this file: it is the package's, and an
+update replaces it.

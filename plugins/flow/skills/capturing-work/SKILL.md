@@ -25,7 +25,10 @@ capability verbs — e.g. _"via the adapter, create the work item …"_. The
 adapter owns all the tracker tooling and the projection of the generic
 `WorkItem` shape onto the tracker; CAPTURE only speaks `WorkItem` + verbs.
 
-Read the adapter skill's contract before acting.
+Read the adapter skill's contract before acting. It is the `SKILL.md` at the `adapter.path` that
+`node --experimental-strip-types "<flow-root>/scripts/config-files.ts"` prints: the
+project's own (`.agents/flow/adapters/<tracker>/`), or the one flow ships. Inside it,
+`<flow-root>` means that output's `flowRoot`.
 
 ## Process
 
