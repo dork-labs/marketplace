@@ -66,8 +66,9 @@ narrow the global queue modes to that one project.
 ## `PMClient` interface (promotion surface, P5)
 
 In **v1 the `PMClient` does not exist as code.** It is realized as the
-tracker adapter skill (`skills/<tracker>-adapter/`, `linear-adapter` being the
-reference adapter shipped here) — a documented **prose** contract that owns every
+tracker adapter skill (the project's `.agents/flow/adapters/<tracker>/SKILL.md`, or
+`skills/linear-adapter/`, the reference adapter shipped here; `scripts/config-files.ts`
+prints which one as `adapter.path`) — a documented **prose** contract that owns every
 tracker API call and fulfils the capability verbs below. Generic
 stage skills call the adapter by naming a verb and never touch a tracker string
 (a grep guard enforces this). The agnosticism win ("all tracker I/O in one place")

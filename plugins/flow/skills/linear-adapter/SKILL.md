@@ -5,6 +5,12 @@ description: The /flow engine's tracker adapter — the single skill that owns E
 
 # Linear Adapter — the v1 `PMClient`
 
+> **Is this the adapter to use?** A project can override this shipped adapter with its
+> own, at `.agents/flow/adapters/linear/SKILL.md`. Before acting on anything below, run
+> `node --experimental-strip-types "<flow-root>/scripts/config-files.ts"`: if the
+> `adapter.path` it prints is not this file, stop reading this one and read that file
+> instead. If the check cannot run or its output cannot be read, stop.
+
 > **Flow root.** This skill lives at `<flow-root>/skills/linear-adapter/SKILL.md`. If you reached it via a symlink (`.claude/skills/flow__*` or `.agents/skills/flow__*`), resolve the real path first (`realpath <path>`): the flow root is two directories above the skill directory. Every `<flow-root>/...` reference below is relative to that root.
 
 > **What this is.** The `/flow` engine's **work model + tracker adapter**. It is

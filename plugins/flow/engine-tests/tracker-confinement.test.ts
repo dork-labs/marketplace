@@ -316,28 +316,49 @@ describe('charter goal G8 — generic stage skills name no tracker (stricter tha
 //
 // The commands were the last shipped layer still hard-coding `linear-adapter`.
 // That was not cosmetic: five of them told the agent to read
-// `${CLAUDE_PLUGIN_ROOT}/skills/linear-adapter/SKILL.md` by literal path, and
-// `/flow:init` generates the adapter at `skills/<tracker>-adapter/SKILL.md` — so
-// for the GitHub adapter init had just recommended, generated and conformance-
-// gated, every one of those was a path that does not exist. DorkOS also
-// regenerates `.claude/commands/flow/*.md` from these files verbatim, so the
-// broken instruction propagates into every install.
+// `${CLAUDE_PLUGIN_ROOT}/skills/linear-adapter/SKILL.md` by literal path, so for
+// the GitHub adapter init had just recommended, generated and conformance-gated,
+// every one of those was a path that does not exist. DorkOS also regenerates
+// `.claude/commands/flow/*.md` from these files verbatim, so the broken
+// instruction propagates into every install.
 //
 // The rule is therefore the same G8 rule the generic skills already pass, and it
 // is deliberately two-sided: a command may not NAME a tracker (negative), and the
-// command layer as a whole must still route through the adapter by its
-// config-driven `<tracker>-adapter` path (positive). Without the positive half,
-// deleting every mention of the adapter would satisfy the guard while breaking
-// the engine — the test would pass at its most broken.
+// command layer as a whole must still route through the adapter by the path
+// `config-files.ts` resolves, `adapter.path` (positive). Without the positive
+// half, deleting every mention of the adapter would satisfy the guard while
+// breaking the engine — the test would pass at its most broken.
+//
+// DOR-2285 moved a generated adapter out of the plugin (an update erased it) into
+// the project, `.agents/flow/adapters/<tracker>/`, so the old config-driven path
+// `skills/<tracker>-adapter/SKILL.md` is now wrong for every generated adapter.
 // ---------------------------------------------------------------------------
 
 /** The commands dir — every file in it is a generic command; none is adapter-owned. */
 const FLOW_COMMANDS_DIR = path.join(pluginRoot, 'commands');
 
-/** The config-driven adapter reference the commands must use instead of a fixed name. */
-const GENERIC_ADAPTER_PATH = 'skills/<tracker>-adapter/SKILL.md';
+/** The resolved adapter reference commands and stage skills must use instead of a fixed path. */
+const RESOLVED_ADAPTER = '`adapter.path`';
 
-describe('F1 — generic commands name no tracker and route through <tracker>-adapter', () => {
+/**
+ * An adapter inside the plugin's `skills/` folder, the place flow used before
+ * DOR-2285: the `<tracker>` placeholder or any concrete tracker. For a generated
+ * adapter it names a folder a plugin update erases, so no command, skill or doc
+ * may send the agent or a reader there. The shipped reference adapter,
+ * `skills/linear-adapter/`, really does live there and is the one exception.
+ */
+const PLUGIN_ADAPTER_PATH = /skills\/(?:<tracker>|(?!linear-adapter\/)[a-z0-9-]+)-adapter\//g;
+
+/** Every place the old plugin path is named, as `file: match`. */
+function pluginAdapterPaths(files: { file: string; content: string }[]): string[] {
+  return files.flatMap(({ file, content }) =>
+    [...content.matchAll(PLUGIN_ADAPTER_PATH)].map(
+      (m) => `${path.relative(pluginRoot, file)}: ${m[0]}`
+    )
+  );
+}
+
+describe('F1 — generic commands name no tracker and route through the resolved adapter', () => {
   const commandFiles = collectFiles(FLOW_COMMANDS_DIR).filter((file) => file.endsWith('.md'));
 
   it('no command contains a tracker NAME or API string', () => {
@@ -392,26 +413,57 @@ describe('F1 — generic commands name no tracker and route through <tracker>-ad
     }
   });
 
-  it('the commands that read the adapter contract point at the config-driven path', () => {
-    // The positive half. Any command that tells the agent to READ the adapter
-    // skill must name it by the `<tracker>-adapter` path, so the instruction
-    // resolves for whichever adapter `/flow:init` generated.
-    const readers = commandFiles.filter((file) => {
-      const content = readFileSync(file, 'utf8');
-      return content.includes('-adapter/SKILL.md');
-    });
-
-    expect(
-      readers.length,
-      'no command reads the adapter contract by path — the positive half of this guard has nothing to check'
-    ).toBeGreaterThan(0);
-
-    for (const file of readers) {
-      const content = readFileSync(file, 'utf8');
+  it('the commands that read the adapter contract point at the resolved path', () => {
+    // The positive half. The commands that send the agent to the adapter must
+    // name it by `adapter.path`, so the instruction resolves for the project's
+    // own adapter as well as a shipped one. Pinned by name so dropping the line
+    // from any of them fails here.
+    const readers = ['capture', 'flow', 'groom', 'ideate', 'specify', 'status', 'triage'];
+    for (const name of readers) {
+      const content = readFileSync(path.join(FLOW_COMMANDS_DIR, `${name}.md`), 'utf8');
       expect(
         content,
-        `${path.relative(pluginRoot, file)} must reference the adapter as ${GENERIC_ADAPTER_PATH}`
-      ).toContain(GENERIC_ADAPTER_PATH);
+        `commands/${name}.md must reference the adapter as ${RESOLVED_ADAPTER}`
+      ).toContain(RESOLVED_ADAPTER);
+    }
+  });
+
+  it('no command, skill or doc points at a generated adapter inside the plugin', () => {
+    // A generated adapter no longer lives in the plugin, so this path would point
+    // at nothing (or at a stale copy an update is about to erase).
+    const files = [
+      ...commandFiles,
+      ...collectFiles(FLOW_SKILLS_DIR).filter((file) => file.endsWith('.md')),
+      ...collectFiles(path.join(pluginRoot, 'docs')).filter((file) => /\.mdx?$/.test(file)),
+    ].map((file) => ({ file, content: readFileSync(file, 'utf8') }));
+    expect(pluginAdapterPaths(files)).toEqual([]);
+    expect(files.length).toBeGreaterThan(commandFiles.length + 20);
+  });
+
+  it('the old-path guard catches every spelling, and spares the shipped adapter', () => {
+    // Plant-a-break: the guard must bite on the placeholder and on a concrete
+    // generated tracker, and must not flag the reference adapter that ships.
+    const at = (content: string) =>
+      pluginAdapterPaths([{ file: path.join(pluginRoot, 'docs', 'planted.mdx'), content }]);
+    expect(at('read `skills/<tracker>-adapter/SKILL.md`')).toHaveLength(1);
+    expect(at('see <flow-root>/skills/jira-adapter/SKILL.md')).toHaveLength(1);
+    expect(at('see skills/github-issues-adapter/')).toHaveLength(1);
+    expect(at('the shipped `skills/linear-adapter/SKILL.md`')).toEqual([]);
+  });
+
+  it('every stage skill that routes through the adapter says where to find it', () => {
+    // Stage skills used to lean on the harness having the adapter loaded as a
+    // skill. A project adapter is not a harness skill (nothing scans
+    // `.agents/flow/`), so each skill names the resolved path itself.
+    const routers = GENERIC_STAGE_SKILL_DIRS.filter((dir) =>
+      /\badapter\b/i.test(readFileSync(path.join(dir, 'SKILL.md'), 'utf8'))
+    );
+    expect(routers.length).toBeGreaterThan(5);
+    for (const dir of [...routers, path.join(FLOW_SKILLS_DIR, 'flow-drain')]) {
+      expect(
+        readFileSync(path.join(dir, 'SKILL.md'), 'utf8'),
+        `${path.relative(pluginRoot, dir)}/SKILL.md must say the adapter is at ${RESOLVED_ADAPTER}`
+      ).toContain(RESOLVED_ADAPTER);
     }
   });
 
@@ -427,5 +479,43 @@ describe('F1 — generic commands name no tracker and route through <tracker>-ad
         `${path.relative(pluginRoot, file)} no longer mentions the adapter at all`
       ).toMatch(/adapter/i);
     }
+  });
+});
+
+// ---------------------------------------------------------------------------
+// DOR-2285: a project may override the shipped adapter with its own. An agent
+// that reached the shipped file directly (it is still a harness skill) must be
+// sent to the project's override, or the override is silently bypassed.
+// ---------------------------------------------------------------------------
+
+describe('the shipped adapter defers to a project override', () => {
+  /** What the preface must say, before anything else in the skill. */
+  function prefaceGaps(content: string): string[] {
+    const head = content.slice(0, content.indexOf('> **What this is.**'));
+    const needs: [string, RegExp][] = [
+      ['has the preface', /\*\*Is this the adapter to use\?\*\*/],
+      ['runs the resolver', /scripts\/config-files\.ts/],
+      ['names adapter.path', /`adapter\.path`/],
+      ['reads the override instead', /is not this file, stop reading this one and read that file/],
+      ['fails closed', /cannot run or its output cannot be read, stop/],
+    ];
+    return needs.filter(([, re]) => !re.test(head)).map(([label]) => label);
+  }
+
+  const skill = () => readFileSync(path.join(ADAPTER_SKILL_DIR, 'SKILL.md'), 'utf8');
+
+  it('opens with the override check', () => {
+    expect(prefaceGaps(skill())).toEqual([]);
+  });
+
+  it('the guard bites when the preface is removed or loses adapter.path', () => {
+    const withoutPreface = skill().replace(
+      /> \*\*Is this the adapter to use\?\*\*[\s\S]*?\n\n/,
+      ''
+    );
+    expect(prefaceGaps(withoutPreface)).toContain('has the preface');
+    expect(prefaceGaps(skill().replace('`adapter.path`', '`adapter`'))).toEqual([
+      'names adapter.path',
+    ]);
   });
 });

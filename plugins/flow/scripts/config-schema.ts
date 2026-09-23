@@ -24,8 +24,8 @@ import { z } from 'zod';
  * The active project tracker, as an **adapter slug** (§3).
  *
  * This is deliberately an open slug rather than a closed enum. `/flow:init`
- * offers any tracker, generates the concrete adapter for it at
- * `<flow-root>/skills/<tracker>-adapter/SKILL.md`, and gates that adapter on the
+ * offers any tracker, generates the concrete adapter for it into the project at
+ * `.agents/flow/adapters/<tracker>/SKILL.md`, and gates that adapter on the
  * conformance harness — so the set of trackers flow supports is the set an
  * adopter can write an adapter for, not a list this file happens to enumerate. A
  * closed enum rejected the very setup init had just recommended and verified, and
@@ -33,9 +33,10 @@ import { z } from 'zod';
  * overwrote.
  *
  * `linear` is the **reference** adapter shipped in-tree (`skills/linear-adapter/`)
- * and stays the default; any other value names the adapter skill directory
- * `/flow:init` generated. The pattern is therefore exactly "a usable directory
- * segment": lowercase alphanumerics and dashes, starting with a letter.
+ * and stays the default; any other value names the adapter folder `/flow:init`
+ * generated (`scripts/config-files.ts` resolves which adapter is read). The
+ * pattern is therefore exactly "a usable directory segment": lowercase
+ * alphanumerics and dashes, starting with a letter.
  *
  * Tracker-confinement carve-out (task 5.3): the bare lowercase tracker-name
  * default here is the generic tracker NAME, not a tracker API string. It does not
@@ -48,7 +49,7 @@ export const TrackerSchema = z
   .string()
   .regex(
     /^[a-z][a-z0-9-]*$/,
-    'tracker must be a lowercase adapter slug (letters, digits and dashes, starting with a letter) — it names the skill directory `skills/<tracker>-adapter/`'
+    'tracker must be a lowercase adapter slug (letters, digits and dashes, starting with a letter) — it names the adapter folder `.agents/flow/adapters/<tracker>/`'
   );
 
 /**

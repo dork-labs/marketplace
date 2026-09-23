@@ -143,11 +143,12 @@ The plugin is inert until it knows your tracker and identity. You do not configu
 | ------------------------------------- | --------------------------------------------------------------------------- | -------------------------- |
 | `.agents/flow/config.json`            | Your dials, in your project. Shared with your team.                         | Yes                        |
 | `.agents/flow/config.local.json`      | Tracker tokens and account binding for this machine.                        | No (ignored by git)        |
-| `.agents/flow/.gitignore`             | Keeps `config.local.json` out of git.                                       | Yes                        |
+| `.agents/flow/.gitignore`             | Keeps `config.local.json` and the pause flag out of git.                    | Yes                        |
+| `.agents/flow/adapters/<tracker>/`    | The tracker adapter `/flow:init` generated, when flow does not ship one.    | Yes                        |
+| `.agents/flow/paused.json`            | Present while `/flow:pause` has this machine's autonomy stopped.            | No (ignored by git)        |
 | `config/config.example.json`          | The config template in the plugin (`/flow:init` seeds from it).             | Yes (from the plugin)      |
 | `scripts/*.ts`                        | The shipped deterministic oracles + `validate-adapter.ts` (run via `node`). | Yes (from the plugin)      |
-| The generated adapter                 | Your tracker-aware code, conforming to the contract; you own it.            | Yes                        |
-| `flow-drain` (schedulable tick skill) | The autonomy tick. Ships `schedule.enabled: false`; approve it to arm.      | Yes (from the plugin)      |
+| `flow-drain` (schedulable tick skill) | The autonomy tick. Ships switched off; approve it to arm.                   | Yes (from the plugin)      |
 
 ## Next steps
 

@@ -32,9 +32,22 @@ inbox read, comment, claim, label change, assignment, and link goes through the
 CLI invocation, or slug lives here — the `tracker-confinement` Vitest guard
 enforces this for the whole flow bundle.
 
+**Finding the adapter.** It is the `SKILL.md` at the `adapter.path` that
+`node --experimental-strip-types "<flow-root>/scripts/config-files.ts"` prints: the
+project's own (`.agents/flow/adapters/<tracker>/`), or the one flow ships. Inside it,
+`<flow-root>` means that output's `flowRoot`.
+
 ## The team-member tick
 
-Run this on each inbox poll. It is a loop, not a one-shot stage:
+Run this on each inbox poll. It is a loop, not a one-shot stage, and it claims and
+advances work, so it honours the pause like every other autonomous entry point:
+
+- **Pause check, before anything else, on every poll.** Run
+   `node --experimental-strip-types "<flow-root>/scripts/config-files.ts"`. If the check cannot run or its output cannot be read, stop: never act without knowing
+   whether flow is paused. When its
+   `paused` is not `null`, flow is paused on this machine: report "flow is paused
+   (since `<pausedAt>`); `/flow:resume` lifts it" and stop, claiming, commenting and
+   advancing nothing. When it says `"ok": false`, report its first error and stop.
 
 0. **Resolve identity for the tick** — via the adapter, `getCurrentUser` once;
    build the resolved `Identity` and derive the mode. This feeds the three oracles

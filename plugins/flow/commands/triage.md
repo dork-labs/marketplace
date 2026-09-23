@@ -1,7 +1,7 @@
 ---
 description: Classify and route incoming work, simple-vs-complex (the /flow TRIAGE stage)
 category: flow
-allowed-tools: Read, Glob, Skill, AskUserQuestion
+allowed-tools: Read, Glob, Skill, AskUserQuestion, Bash(node:*)
 argument-hint: "<freeform brief/idea/bug, a file path, or an existing item identifier>"
 ---
 
@@ -12,8 +12,8 @@ Triage this work: $ARGUMENTS
 Read `${CLAUDE_PLUGIN_ROOT}/skills/triaging-work/SKILL.md` and follow its process exactly.
 
 That skill is PM-agnostic: it routes every tracker read or write through the
-tracker adapter skill (`${CLAUDE_PLUGIN_ROOT}/skills/<tracker>-adapter/SKILL.md`, where
-`<tracker>` is the `tracker` in `config.json`), which it reads on demand. Do not
+tracker adapter skill (the `SKILL.md` at the `adapter.path` that
+`node --experimental-strip-types "${CLAUDE_PLUGIN_ROOT}/scripts/config-files.ts"` prints), which it reads on demand. Do not
 touch a tracker directly from this command — the skill owns classification,
 evaluation, and the simple-vs-complex routing.
 

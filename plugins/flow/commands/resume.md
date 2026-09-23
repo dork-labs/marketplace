@@ -1,7 +1,7 @@
 ---
 description: Restore autonomous /flow operation that /flow:pause halted
 category: flow
-allowed-tools: Read, Edit, Write, Glob, SlashCommand
+allowed-tools: Read, Edit, Write, Glob, SlashCommand, Bash(node:*), mcp__dorkos__tasks_update
 argument-hint: "[issue-id to un-pause, or empty to restore all autonomy]"
 ---
 
@@ -11,22 +11,28 @@ Undo a `/flow:pause`: $ARGUMENTS
 
 Resume is the inverse of pause: it restores the autonomous surfaces pause halted:
 
-1. **The Pulse cron.** In `${CLAUDE_PLUGIN_ROOT}/skills/flow-drain/SKILL.md`, set `enabled`
-   to `true` **inside the frontmatter's `schedule:` block**, so the Pulse seat resumes
-   claiming work on its schedule:
+1. **The pause flag.** Run
 
-   ```yaml
-   schedule:
-     cron: "0 * * * *"
-     enabled: true # <- this line, nested under `schedule:`
+   ```bash
+   node --experimental-strip-types "${CLAUDE_PLUGIN_ROOT}/scripts/config-files.ts" resume
    ```
 
-   `enabled` is a nested key. A top-level `enabled: true` written beside `name:` is
-   stripped when the file is parsed, so autonomy would never actually come back.
+   It removes the project's `.agents/flow/paused.json` (always in the main checkout)
+   and prints `{ ok, wasPaused, removed, hostSchedules }`. The next scheduled tick then
+   does its work again. (Pulse is the one mode that needs a running DorkOS server; the
+   terminal drain does not.)
 
-   (Pulse is the one mode that needs a running DorkOS server; the terminal drain does
-   not. Under a DorkOS build with schedule discovery, the restored tick also has to be
-   approved on the Schedules page before it fires again.)
+   **The DorkOS schedules `/flow:pause` switched off.** `hostSchedules` lists exactly
+   those, by id. DorkOS tools may be deferred behind tool search: if `tasks_update` is
+   not loaded, load it with ToolSearch first, and treat it as absent only when that
+   finds nothing. When the `tasks_update` tool is available (`mcp__dorkos__tasks_update`
+   on DorkOS), call it with `{ "id": <id>, "enabled": true }` for each id in the list,
+   and for nothing else: a schedule that was off before the pause stays off. If a call
+   fails (the schedule was removed, or needs approval again after an update), say which
+   one and tell the operator to check it on the **Schedules** page. When the tool is not
+   available and the list is not empty, tell the operator to switch those schedules on
+   there. If the operator switched a tick off themselves (the Schedules page, or a cron
+   or CI job), remind them to switch it back on where they did.
 
 2. **The terminal drain.** If a paused `.dork/flow/auto-run.json` sentinel is still
    present (`active: false`), restart the drain with `/flow auto`, which rewrites the

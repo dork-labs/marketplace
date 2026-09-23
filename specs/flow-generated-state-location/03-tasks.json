@@ -1,0 +1,51 @@
+{
+  "spec": "specs/flow-generated-state-location/02-specification.md",
+  "slug": "flow-generated-state-location",
+  "generatedAt": "2026-09-23T23:30:00.000Z",
+  "mode": "full",
+  "lastDecomposeDate": null,
+  "tasks": [
+    {
+      "id": "1.1",
+      "phase": 1,
+      "phaseName": "Adapter and pause in the project",
+      "subject": "[flow-generated-state-location] [P1] Resolve, migrate and pause in scripts/config-files.ts, test-first",
+      "description": "Per 02-specification.md 'Detailed Design': constants, trackerOf, a shared Claude Code cache-sibling helper behind legacyConfigDirs and legacyAdapterDirs, resolveAdapter, migrateAdapter (whole-folder copy via placeFile, SKILL.md last, markers, confirm/decline shared with settings), pauseState/pauseFlow/resumeFlow with paused.json in GITIGNORE_LINES, and the CLI (resolve gains flowRoot/adapter/paused and the adapter errors/warnings; migrate gains adapter; new pause and resume). Tests in engine-tests/config-files.test.ts per the Testing Strategy. Acceptance: tests pass, typecheck and prettier clean, critical lines mutation-checked.",
+      "activeForm": "Adding adapter and pause resolution",
+      "size": "medium",
+      "priority": "high",
+      "dependencies": [],
+      "parallelWith": [],
+      "issue": null,
+      "parentIssue": null
+    },
+    {
+      "id": "1.2",
+      "phase": 1,
+      "phaseName": "Adapter and pause in the project",
+      "subject": "[flow-generated-state-location] [P1] Point every command, skill and doc at adapter.path and the pause flag",
+      "description": "Apply the 'Consumers' table: commands (flow guard, capture, triage, ideate, specify, groom, status, pause, resume), stage skills' adapter line, flow-drain and flow-groom step 0, initializing-flow and building-adapters generation target, CONFIG.md, README, docs, config-schema.ts tracker doc/message, @see lines. Update tracker-confinement F1 to pin adapter.path and guard against the old plugin path. Acceptance: grep finds no instruction to read or write skills/<tracker>-adapter/ as the adapter, and none to edit schedule.enabled; tests pass.",
+      "activeForm": "Pointing consumers at adapter.path and the pause flag",
+      "size": "medium",
+      "priority": "high",
+      "dependencies": ["1.1"],
+      "parallelWith": [],
+      "issue": null,
+      "parentIssue": null
+    },
+    {
+      "id": "1.3",
+      "phase": 1,
+      "phaseName": "Adapter and pause in the project",
+      "subject": "[flow-generated-state-location] [P1] Bump flow to 0.9.0 with a CHANGELOG entry",
+      "description": "Set 0.9.0 in plugin.json, .dork/manifest.json, package.json and both package-lock.json fields. CHANGELOG '## 0.9.0' in plain words: where a generated adapter lives now and what to commit, that /flow moves it, that pause now really stops scheduled ticks (and did not before on an approved DorkOS schedule, so pause again if you relied on it), the Schedules switch, and that DorkOS asks to approve the ticks again. Acceptance: tools/schema-check check and check:bump pass.",
+      "activeForm": "Bumping flow to 0.9.0",
+      "size": "small",
+      "priority": "high",
+      "dependencies": ["1.2"],
+      "parallelWith": [],
+      "issue": null,
+      "parentIssue": null
+    }
+  ]
+}

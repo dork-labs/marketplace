@@ -11,7 +11,7 @@ credentials and overrides are never committed.
 | --------------------------------------------------------- | ---------------- | --------------------------------------------------------------------------------------------------------------- |
 | `.agents/flow/config.json`                                | yes              | Shared team defaults. Pure behavioral policy: stages, autonomy, gates, dispatch, and so on. Carries NO secrets. |
 | `.agents/flow/config.local.json`                          | no (git ignores) | Per-machine secrets and overrides. Holds your tracker credentials plus any field you want to override locally.  |
-| `.agents/flow/.gitignore`                                 | yes              | Written by flow. Makes git ignore `config.local.json`.                                                          |
+| `.agents/flow/.gitignore`                                 | yes              | Written by flow. Makes git ignore `config.local.json` and the pause flag, `paused.json`.                        |
 | `config.example.json`, `config.local.example.json` (here) | from the plugin  | The templates `/flow:init` fills in.                                                                            |
 
 ### Getting started
@@ -101,11 +101,32 @@ reading the old ones until you decide. The old files are never deleted; delete
 them yourself once no project needs them. Commit `.agents/flow/config.json` and
 `.agents/flow/.gitignore`.
 
+The same move, under the same question, carries a tracker adapter an older flow
+generated into the plugin into `.agents/flow/adapters/<tracker>/` (see
+[`tracker` names an adapter](#tracker-names-an-adapter-not-a-supported-product)).
+Commit that folder too. An adapter holds no credentials, so it gets no
+`MIGRATED_TO`: other projects on the same install are still offered it, each asked
+for itself, and the question shows its name and first lines. A no is remembered in
+the adapter folder's `DECLINED_BY`; if flow then has no adapter for this project,
+its error names that folder, so you can copy it in if the answer was wrong.
+
 To use settings that already moved in another project too, copy that project's
 `.agents/flow/config.json` into this one (and write this machine's
 `config.local.json`), or delete the folder's `MIGRATED_TO` file to be offered them
 again. To be asked again after saying no, remove this project's line from
 `DECLINED_BY`.
+
+### The pause flag
+
+`/flow:pause` writes `.agents/flow/paused.json` in the project's main checkout (the
+same file from every worktree), and `/flow:resume` removes it. It is this machine's,
+so the same `.gitignore` (or `info/exclude`) keeps it out of git. Every scheduled
+tick, the tracker tick, `/flow continue` and `/flow auto` check it first and stop, so
+it works under any scheduler and a plugin update cannot undo it. It is not a setting:
+nothing in `config.json` turns it on. On DorkOS, when the schedule tools are
+available, `/flow:pause` also switches this project's `flow-drain` and `flow-groom`
+schedules off and records their ids in the flag (`hostSchedules`), so `/flow:resume`
+switches back on exactly those.
 
 ## Precedence
 
@@ -143,18 +164,38 @@ credential fields, so the loader handles `config.local.json` in two parts:
 
 ## `tracker` names an adapter, not a supported product
 
-`tracker` is a **slug**, not a fixed list. It is the `<tracker>` in
-`skills/<tracker>-adapter/SKILL.md` — the adapter skill every stage skill and
-command routes its tracker reads and writes through. So the value has exactly one
-job: name a directory. It must be lowercase letters, digits and dashes, starting
-with a letter (`^[a-z][a-z0-9-]*$`).
+`tracker` is a **slug**, not a fixed list. It names the adapter every stage skill
+and command routes its tracker reads and writes through. So the value has exactly
+one job: name a directory. It must be lowercase letters, digits and dashes,
+starting with a letter (`^[a-z][a-z0-9-]*$`).
 
 The default is `linear`, the **reference adapter shipped in this repo**
 (`skills/linear-adapter/`). Any other value names an adapter `/flow:init`
-generated for you: init picks the tracker with you, writes
-`skills/<tracker>-adapter/SKILL.md`, and does not finish until that adapter passes
-the conformance harness. Setting `tracker` to `github` or `jira` is therefore a
-setup step, not a request for support that has to be added upstream.
+generated for you: init picks the tracker with you, writes it into your project at
+`.agents/flow/adapters/<tracker>/SKILL.md`, and does not finish until that adapter
+passes the conformance harness. Commit it: it is your team's code. Setting
+`tracker` to `github` or `jira` is therefore a setup step, not a request for
+support that has to be added upstream.
+
+`scripts/config-files.ts` decides which adapter is read, first found wins, and
+prints it as `adapter.path`:
+
+1. **Your project's**: `.agents/flow/adapters/<tracker>/SKILL.md` in this checkout,
+   then in the main checkout when this is a git worktree. It may override a shipped
+   adapter on purpose.
+2. **Shipped**: `<flow-root>/skills/<tracker>-adapter/SKILL.md`, for a tracker flow
+   ships an adapter for (`linear`).
+3. **Legacy**: before 0.9.0, `/flow:init` wrote a generated adapter into the plugin's
+   own `skills/` folder, where an update erased it. flow still reads one found there
+   (or in the previous version's folder in Claude Code's plugin cache) until the first
+   `/flow` moves it into the project, under the same rules as settings: without
+   asking when the plugin is inside the project, only after a person confirms when it
+   is somewhere several projects may share, and never at all by a headless run until
+   someone has. Unlike settings, it is never locked to the first project that copies
+   it.
+
+Nothing loads the project's adapter as a harness skill (no harness reads
+`.agents/flow/`); flow reads it by that path.
 
 The slug is deliberately permissive for that reason. Before, this field was a
 closed list containing only `linear` — so a tracker init had just recommended,

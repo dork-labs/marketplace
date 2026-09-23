@@ -39,7 +39,10 @@ generic model cannot represent (an un-triaged holding state, an unmappable
 duplicate state) are the adapter's job to surface, and this skill's job to route
 out of existence during phase 3.
 
-Read the adapter skill's contract before acting.
+Read the adapter skill's contract before acting. It is the `SKILL.md` at the `adapter.path` that
+`node --experimental-strip-types "<flow-root>/scripts/config-files.ts"` prints: the
+project's own (`.agents/flow/adapters/<tracker>/`), or the one flow ships. Inside it,
+`<flow-root>` means that output's `flowRoot`.
 
 ## Scope: one team, not the whole workspace
 

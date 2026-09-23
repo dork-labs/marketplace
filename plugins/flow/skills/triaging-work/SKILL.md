@@ -37,7 +37,10 @@ shape onto the tracker (the type-label set; a `backlog`/`unstarted` state —
 the tracker's Backlog/Todo); those mappings are the _adapter's_ concern, not this
 skill's.
 
-Read the adapter skill's contract before acting.
+Read the adapter skill's contract before acting. It is the `SKILL.md` at the `adapter.path` that
+`node --experimental-strip-types "<flow-root>/scripts/config-files.ts"` prints: the
+project's own (`.agents/flow/adapters/<tracker>/`), or the one flow ships. Inside it,
+`<flow-root>` means that output's `flowRoot`.
 
 ## Three entry shapes
 

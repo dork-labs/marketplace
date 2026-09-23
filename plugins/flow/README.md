@@ -180,11 +180,14 @@ a verb (e.g. _"via the adapter, transition the item …"_) and never touch a tra
 string — a grep guard enforces zero tracker API strings outside the adapter.
 
 Which adapter is a **config value, not a code path**. `tracker` in `config.json`
-is an adapter slug, and it names the skill directory the engine reads:
-`skills/<tracker>-adapter/SKILL.md`. This repo ships **`linear-adapter`** as the
-reference adapter, and `linear` is the default; `/flow:init` generates the adapter
-for any other tracker you pick and gates it on the same conformance harness, so
-adopting Jira or GitHub Issues is a setup run, not a fork.
+is an adapter slug. This repo ships **`linear-adapter`** as the reference adapter
+(`skills/linear-adapter/SKILL.md`), and `linear` is the default; `/flow:init`
+generates the adapter for any other tracker you pick into your project, at
+`.agents/flow/adapters/<tracker>/SKILL.md` (committed, so a plugin update never
+touches it), and gates it on the same conformance harness, so adopting Jira or
+GitHub Issues is a setup run, not a fork. `scripts/config-files.ts` decides which
+adapter is read (the project's, then the shipped one) and prints its path as
+`adapter.path`; every command and skill reads it from there.
 
 The verbs: `getCurrentUser`, `getProjects`, `resolveProject`, `getProject`,
 `getProjectWork`, `getEligibleWork`, `getInbox`, `getRelations`, `claim`,
@@ -220,8 +223,13 @@ agent session per run — so there is no scheduler to build.
   own cron. On a DorkOS build without schedule discovery, or on any other harness,
   wire an external scheduler instead (see `docs/bring-your-own-scheduler.mdx`).
   Running it still needs the DorkOS server (it hosts the watcher + croner) and the
-  project's DorkOS agent registered. No build step, no migration; edits to the file
-  are picked up live.
+  project's DorkOS agent registered. The on/off switch is the one on the Schedules
+  page, which outlasts updates; the file is the package's and an update replaces it.
+- **Pausing** is `/flow:pause`: it writes `.agents/flow/paused.json` in the project,
+  and every tick checks it first and stops, so an update cannot undo it and it works
+  under any scheduler. On DorkOS it also switches this project's flow schedules off
+  when it can reach them. `/flow:resume` removes the flag and switches back on only
+  the schedules the pause switched off.
 - **Crash/stall recovery** is driven by the durable `FlowRun` record + the
   next-tick recovery ladder (spec §12): a `needs-input` item is never reclaimed;
   an orphaned `agent/claimed` item is adopted + resumed (re-attach the worktree at
@@ -247,8 +255,9 @@ defaults encode the key decisions: `planApproval: false`, `subIssueThreshold: "x
 `perIssue: "fresh-session"`, `seat: "pulse"`. See [`SPEC.md`](./docs/SPEC.md) →
 _Config schema reference_ for the full contract.
 
-`tracker` is an **adapter slug**, not a fixed list: it names the skill directory
-the engine reads (`skills/<tracker>-adapter/`), so it accepts any lowercase slug
+`tracker` is an **adapter slug**, not a fixed list: it names the adapter the engine
+reads (`.agents/flow/adapters/<tracker>/`, or the shipped `skills/<tracker>-adapter/`),
+so it accepts any lowercase slug
 (`^[a-z][a-z0-9-]*$`) `/flow:init` has generated a conforming adapter for. It
 defaults to `linear`, the reference adapter shipped here. Full detail:
 [`config/CONFIG.md`](./config/CONFIG.md).

@@ -29,6 +29,11 @@ transition, any breadcrumb comment, sub-issue promotion — goes through the
 invocation, or slug lives here. (The `tracker-confinement` Vitest guard enforces
 this for the whole flow bundle.)
 
+**Finding the adapter.** It is the `SKILL.md` at the `adapter.path` that
+`node --experimental-strip-types "<flow-root>/scripts/config-files.ts"` prints: the
+project's own (`.agents/flow/adapters/<tracker>/`), or the one flow ships. Inside it,
+`<flow-root>` means that output's `flowRoot`.
+
 ## Process
 
 ### 1. Resolve the spec and slug

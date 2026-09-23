@@ -1,7 +1,7 @@
 ---
 description: Show every in-flight item, parked question, and assumption trail across the /flow loop
 category: flow
-allowed-tools: Read, Glob, Skill, AskUserQuestion
+allowed-tools: Read, Glob, Skill, AskUserQuestion, Bash(node:*)
 argument-hint: "[issue-id to focus on, or empty for the whole loop]"
 ---
 
@@ -9,7 +9,7 @@ argument-hint: "[issue-id to focus on, or empty for the whole loop]"
 
 Render one status pane for the `/flow` loop: $ARGUMENTS
 
-This is an OBSERVE command: it reads, never advances. It joins three sources into
+This is an OBSERVE command: it reads, never advances. It joins four sources into
 a single pane:
 
 1. **`.dork/flow/flow-state.json`**: the durable per-issue run records (the typed
@@ -23,9 +23,12 @@ a single pane:
    `active` sentinel whose `startedAt` is more than 24 hours old (the pid may
    have been recycled onto an unrelated process), as an ORPHAN, not a drain.
 3. **The tracker, via the adapter**: titles, labels, parked questions, and
-   assumption comments. Read `${CLAUDE_PLUGIN_ROOT}/skills/<tracker>-adapter/SKILL.md`
-   (where `<tracker>` is the `tracker` in `config.json`) and use its verbs; never
-   touch a tracker string directly from this command.
+   assumption comments. Read the adapter, the `SKILL.md` at the `adapter.path` that
+   `node --experimental-strip-types "${CLAUDE_PLUGIN_ROOT}/scripts/config-files.ts"`
+   prints, and use its verbs; never touch a tracker string directly from this command.
+4. **The pause**: the `paused` that the same command prints. When it is not `null`,
+   head the pane with "Paused since `<pausedAt>`: scheduled ticks, `/flow continue` and
+   `/flow auto` stop at their first step; `/flow:resume` lifts it".
 
 Render, in this order:
 
