@@ -46,6 +46,18 @@ function entryPoints(flow: string, files: Record<string, string>): Record<string
   };
 }
 
+/** What the general "The pause." paragraph of flow.md must cover. */
+function generalPauseGaps(flow: string): string[] {
+  const text = between(flow, '**The pause.**', 'With a valid config present');
+  const needs: [string, RegExp][] = [
+    ['reads `paused`', /When `paused` is not `null`/],
+    ['never starts continue or auto', /never\s+start `continue` or `auto`/],
+    ['covers scheduled and tracker ticks', /scheduled tick or a tracker tick/],
+    ['leaves the operator free', /a pause stops the loop, never\s+the operator/],
+  ];
+  return needs.filter(([, re]) => !re.test(text)).map(([label]) => label);
+}
+
 const shipped = () => ({
   drain: read('skills/flow-drain/SKILL.md'),
   groom: read('skills/flow-groom/SKILL.md'),
@@ -79,6 +91,20 @@ describe('every autonomous entry point checks the pause first', () => {
   });
 });
 
+describe('the general pause rule in /flow', () => {
+  it('states who stops and who does not', () => {
+    expect(generalPauseGaps(read('commands/flow.md'))).toEqual([]);
+  });
+
+  it('the guard bites when the tracker tick is dropped from it', () => {
+    const flow = read('commands/flow.md').replace(
+      'scheduled tick or a tracker tick',
+      'scheduled tick'
+    );
+    expect(generalPauseGaps(flow)).toEqual(['covers scheduled and tracker ticks']);
+  });
+});
+
 describe('/flow:pause and /flow:resume switch DorkOS schedules only as agreed', () => {
   /** What the pause command must say about host schedule rows. */
   function pauseGaps(text: string): string[] {
@@ -96,6 +122,10 @@ describe('/flow:pause and /flow:resume switch DorkOS schedules only as agreed', 
         /When the tools are not available[\s\S]*?skip this step and say so/,
       ],
       ['the flag stays the authority', /The\s+flag is the pause/],
+      [
+        'loads deferred tools first',
+        /deferred behind tool search[\s\S]*?load them with ToolSearch first/,
+      ],
     ];
     return needs.filter(([, re]) => !re.test(text)).map(([label]) => label);
   }
@@ -105,6 +135,10 @@ describe('/flow:pause and /flow:resume switch DorkOS schedules only as agreed', 
     const needs: [string, RegExp][] = [
       ['switches back only the recorded ids', /for each id in the list,\s+and for nothing else/],
       ['reads hostSchedules', /`hostSchedules`/],
+      [
+        'loads a deferred tool first',
+        /deferred behind tool search[\s\S]*?load it with ToolSearch first/,
+      ],
     ];
     return needs.filter(([, re]) => !re.test(text)).map(([label]) => label);
   }
@@ -119,6 +153,11 @@ describe('/flow:pause and /flow:resume switch DorkOS schedules only as agreed', 
     expect(pauseGaps(pause)).toEqual(['only rows in this project']);
     const resume = read('commands/resume.md').replace('and for nothing else', 'x');
     expect(resumeGaps(resume)).toEqual(['switches back only the recorded ids']);
+  });
+
+  it('the guard bites when the deferred-tool rule is dropped', () => {
+    const pause = read('commands/pause.md').replace('load them with ToolSearch first', 'x');
+    expect(pauseGaps(pause)).toEqual(['loads deferred tools first']);
   });
 
   it('a running tick is not interrupted, and pause says so', () => {

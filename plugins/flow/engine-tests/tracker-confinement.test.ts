@@ -481,3 +481,41 @@ describe('F1 — generic commands name no tracker and route through the resolved
     }
   });
 });
+
+// ---------------------------------------------------------------------------
+// DOR-2285: a project may override the shipped adapter with its own. An agent
+// that reached the shipped file directly (it is still a harness skill) must be
+// sent to the project's override, or the override is silently bypassed.
+// ---------------------------------------------------------------------------
+
+describe('the shipped adapter defers to a project override', () => {
+  /** What the preface must say, before anything else in the skill. */
+  function prefaceGaps(content: string): string[] {
+    const head = content.slice(0, content.indexOf('> **What this is.**'));
+    const needs: [string, RegExp][] = [
+      ['has the preface', /\*\*Is this the adapter to use\?\*\*/],
+      ['runs the resolver', /scripts\/config-files\.ts/],
+      ['names adapter.path', /`adapter\.path`/],
+      ['reads the override instead', /is not this file, stop reading this one and read that file/],
+      ['fails closed', /cannot run or its output cannot be read, stop/],
+    ];
+    return needs.filter(([, re]) => !re.test(head)).map(([label]) => label);
+  }
+
+  const skill = () => readFileSync(path.join(ADAPTER_SKILL_DIR, 'SKILL.md'), 'utf8');
+
+  it('opens with the override check', () => {
+    expect(prefaceGaps(skill())).toEqual([]);
+  });
+
+  it('the guard bites when the preface is removed or loses adapter.path', () => {
+    const withoutPreface = skill().replace(
+      /> \*\*Is this the adapter to use\?\*\*[\s\S]*?\n\n/,
+      ''
+    );
+    expect(prefaceGaps(withoutPreface)).toContain('has the preface');
+    expect(prefaceGaps(skill().replace('`adapter.path`', '`adapter`'))).toEqual([
+      'names adapter.path',
+    ]);
+  });
+});

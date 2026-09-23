@@ -32,7 +32,9 @@ so nothing keeps running behind your back:
    file, so it could be committed by mistake.
 3. **DorkOS schedules, only when the `tasks_list` and `tasks_update` tools are
    available** (DorkOS names them `mcp__dorkos__tasks_list` and
-   `mcp__dorkos__tasks_update`). Call `tasks_list`. For every schedule whose `name` is
+   `mcp__dorkos__tasks_update`). DorkOS tools may be deferred behind tool search: if
+   `tasks_list` or `tasks_update` is not loaded, load them with ToolSearch first, and
+   treat them as absent only when that finds nothing. Call `tasks_list`. For every schedule whose `name` is
    `flow-drain` or `flow-groom`, whose `filePath` is inside this project (the main
    checkout or this checkout), and whose `enabled` is `true`, call `tasks_update` with
    `{ "id": <its id>, "enabled": false }`. Then record each id you switched off:

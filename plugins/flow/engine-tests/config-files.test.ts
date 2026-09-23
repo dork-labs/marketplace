@@ -1294,6 +1294,19 @@ describe('pause', () => {
     });
   });
 
+  // A hand-edited flag may hold junk ids. Only non-empty strings are schedule
+  // ids; anything else would make resume call the host with nonsense.
+  it('reads only non-empty string ids from a hand-edited flag', () => {
+    const repo = makeRepo();
+    write(
+      path.join(repo, '.agents/flow', PAUSE_FILE),
+      JSON.stringify({ pausedAt: 'x', hostSchedules: ['', 3, 'ok', null] })
+    );
+    const r = roots(repo, makePlugin(path.join(base, 'p')));
+    expect(pauseState(r)?.hostSchedules).toEqual(['ok']);
+    expect(resumeFlow(r).hostSchedules).toEqual(['ok']);
+  });
+
   // Resume from a worktree lifts the project's one flag.
   it('resume from a worktree removes the main checkout’s flag', () => {
     const repo = makeRepo();

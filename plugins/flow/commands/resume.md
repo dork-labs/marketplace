@@ -23,7 +23,9 @@ Resume is the inverse of pause: it restores the autonomous surfaces pause halted
    terminal drain does not.)
 
    **The DorkOS schedules `/flow:pause` switched off.** `hostSchedules` lists exactly
-   those, by id. When the `tasks_update` tool is available (`mcp__dorkos__tasks_update`
+   those, by id. DorkOS tools may be deferred behind tool search: if `tasks_update` is
+   not loaded, load it with ToolSearch first, and treat it as absent only when that
+   finds nothing. When the `tasks_update` tool is available (`mcp__dorkos__tasks_update`
    on DorkOS), call it with `{ "id": <id>, "enabled": true }` for each id in the list,
    and for nothing else: a schedule that was off before the pause stays off. If a call
    fails (the schedule was removed, or needs approval again after an update), say which
