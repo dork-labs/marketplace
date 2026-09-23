@@ -49,17 +49,32 @@
  * dead one because it looks fine — so an active sentinel older than
  * {@link STALE_AFTER_MS} is presumed orphaned regardless of what the probe says.
  *
+ * ## Only the drain's own session is held
+ *
+ * A LIVE sentinel used to be read the same way by every session in the repo:
+ * while a drain ran, an unrelated session that tried to stop got the banner and
+ * spent a turn working out what to do with it. The sentinel now records the
+ * `sessionId` of the session that started the drain, and Claude Code hands every
+ * Stop hook the `session_id` of the session that is stopping. Only a match is
+ * ever held; any other session stops silently. When either id is missing the
+ * owner cannot be told apart from anyone else, so the hook fails open for
+ * everyone, the owner included: an early end to a drain is recoverable, a
+ * stranger trapped in one is the bug.
+ *
  * Exit codes:
- * - 0: Allow stop (no active `/flow auto` run, explicit stop/abort signal, a
- *      dead or presumed-recycled owner, or the drain is complete — the queue is
- *      empty / parked on a gate).
- * - 2: Block stop (an active `/flow auto` run, with a live owner, reports ready
- *      work remaining).
+ * - 0: Allow stop (no active `/flow auto` run, a drain owned by another
+ *      session, explicit stop/abort signal, a dead or presumed-recycled owner, or
+ *      the drain is complete — the queue is empty / parked on a gate).
+ * - 2: Block stop (the session that owns an active `/flow auto` run, with a
+ *      live owner process, and ready work remaining).
  *
  * Completion signals (override the sentinel — always allow stop, and REAP it so
  * the advertised escape hatch is true rather than advisory):
  * - <promise>PHASE_COMPLETE:<phase></promise>
  * - <promise>ABORT</promise>
+ *
+ * Only the owning session's markers count: another session cannot end a drain
+ * it never started.
  *
  * @module flow/hooks/flow-loop
  */
@@ -80,7 +95,7 @@ import { join } from 'node:path';
  *
  * Shape (all fields optional — the decision fails open on any absence):
  * ```json
- * { "active": true, "ready": 3, "shapeable": 0, "startedAt": "2026-06-14T…Z", "pid": 12345 }
+ * { "active": true, "ready": 3, "shapeable": 0, "startedAt": "2026-06-14T…Z", "pid": 12345, "sessionId": "af93…" }
  * ```
  * - `active` — whether a `/flow auto` drain is in progress. `false`/absent → allow stop.
  * - `ready`  — count of ready, eligible issues still to drain (from
@@ -99,6 +114,10 @@ import { join } from 'node:path';
  *              is believed: past {@link STALE_AFTER_MS} the number may have been
  *              recycled onto an unrelated live process, so the sentinel is
  *              presumed orphaned and reaped even if the probe says `alive`.
+ * - `sessionId` — the id of the session that started the drain (`/flow auto`
+ *              writes `${CLAUDE_SESSION_ID}`). Only a Stop from this session is
+ *              ever held. Absent → nobody is held, since the owner cannot be
+ *              told apart from any other session.
  */
 const AUTO_RUN_RELATIVE_PATH = join('.dork', 'flow', 'auto-run.json');
 
@@ -126,38 +145,38 @@ const STALE_AFTER_MS = 24 * 60 * 60 * 1000;
  * the session to stop (exit 0) or block it to continue draining (exit 2).
  *
  * Fails OPEN on EVERY uncertain input: an explicit completion/abort signal, an
- * absent sentinel, a sentinel that is not an active run, or one with no ready
- * work all yield `allow-stop`. The ONLY path that blocks is an explicitly active
- * `/flow auto` run reporting `ready > 0` with no completion signal in the output.
+ * absent sentinel, a sentinel that is not an active run, a session that is not
+ * the drain's owner, or one with no ready work all yield `allow-stop`. The ONLY
+ * path that blocks is the owning session of an explicitly active `/flow auto`
+ * run reporting `ready > 0` with no completion signal in the output.
  *
- * Owner liveness is INJECTED rather than probed here, so this stays a pure
- * function with no syscalls: the caller runs {@link probeOwner} and passes the
- * verdict in. A result carrying `reap: true` asks the caller to delete the
- * sentinel; the pure function never touches the disk itself.
+ * Owner liveness and the stopping session's id are INJECTED rather than read
+ * here, so this stays a pure function with no syscalls: the caller runs
+ * {@link probeOwner} and parses stdin, and passes both in. A result carrying
+ * `reap: true` asks the caller to delete the sentinel; the pure function never
+ * touches the disk itself.
+ *
+ * Garbage (a dead or presumed-recycled owner) is reaped by whichever session
+ * finds it. Everything else about a live drain — its markers, its ready count,
+ * the one blocking path — belongs to the owning session alone.
  *
  * @param output - Claude's Stop-event output (stdin), scanned for promise markers.
  * @param autoRun - The parsed sentinel, or `null` when absent/unreadable/malformed.
- * @param ownerLiveness - `'alive'`, `'dead'`, or `'unknown'` when the sentinel
- *   records no usable pid. Defaults to `'unknown'` (the pre-DOR-1679 behavior).
- * @param now - Current epoch ms, injected so the staleness TTL is testable.
+ * @param context - What the caller learned outside the sentinel.
+ * @param context.sessionId - The `session_id` of the session trying to stop, or
+ *   `undefined` when stdin did not carry one.
+ * @param context.ownerLiveness - `'alive'`, `'dead'`, or `'unknown'` when the
+ *   sentinel records no usable pid. Defaults to `'unknown'`.
+ * @param context.now - Current epoch ms, injected so the staleness TTL is testable.
  * @returns `'allow-stop'` (exit 0) or `'block-stop'` (exit 2), a reason, and
  *   `reap: true` when the sentinel should be deleted.
  */
-export function decideStop(output, autoRun, ownerLiveness = 'unknown', now = Date.now()) {
+export function decideStop(
+  output,
+  autoRun,
+  { sessionId, ownerLiveness = 'unknown', now = Date.now() } = {}
+) {
   const hasSentinel = autoRun !== null && typeof autoRun === 'object';
-  // An explicit signal ends the drain, so the sentinel that gated it is spent.
-  // Reaping it here is what makes the banner's advertised escape hatch TRUE: the
-  // markers are a signal to the MODEL, but the hook decides from the FILE, so
-  // without this a complying model got the banner again on its very next Stop.
-  const spent = hasSentinel && autoRun.active === true;
-
-  // Explicit signals win over everything — the orchestrator/operator said stop.
-  if (output.includes(PHASE_COMPLETE_MARKER)) {
-    return { decision: 'allow-stop', reason: 'phase-complete signal', reap: spent };
-  }
-  if (output.includes(ABORT_MARKER)) {
-    return { decision: 'allow-stop', reason: 'abort signal', reap: spent };
-  }
 
   // No sentinel (the normal case for every session) → strict no-op, allow stop.
   if (!hasSentinel) {
@@ -193,6 +212,30 @@ export function decideStop(output, autoRun, ownerLiveness = 'unknown', now = Dat
       reason: `drain started ${hours}h ago — owner presumed gone, stale sentinel reaped`,
       reap: true,
     };
+  }
+
+  // A live drain that belongs to another session is none of this session's
+  // business: let it stop, touch nothing. Both ids must be present strings for a
+  // match, so a missing one on either side lets everybody stop.
+  const owner = typeof autoRun.sessionId === 'string' ? autoRun.sessionId : '';
+  if (owner === '' || typeof sessionId !== 'string' || sessionId !== owner) {
+    return {
+      decision: 'allow-stop',
+      reason: owner === '' ? 'drain records no owning session' : 'drain belongs to another session',
+      quiet: true,
+    };
+  }
+
+  // An explicit signal from the owner ends the drain, so the sentinel that gated
+  // it is spent. Reaping it here is what makes the banner's advertised escape
+  // hatch TRUE: the markers are a signal to the MODEL, but the hook decides from
+  // the FILE, so without this a complying model got the banner again on its very
+  // next Stop.
+  if (output.includes(PHASE_COMPLETE_MARKER)) {
+    return { decision: 'allow-stop', reason: 'phase-complete signal', reap: true };
+  }
+  if (output.includes(ABORT_MARKER)) {
+    return { decision: 'allow-stop', reason: 'abort signal', reap: true };
   }
 
   // Active drain, but the ready queue is empty. Distinguish a STARVED queue
@@ -284,6 +327,24 @@ function reapAutoRun(cwd) {
 }
 
 /**
+ * Pull the stopping session's id out of the Stop-event payload. Claude Code
+ * sends a JSON object carrying `session_id`; anything else (older clients,
+ * another harness, a truncated read) yields `undefined`, which the decision
+ * treats as "cannot be the owner". Never throws.
+ *
+ * @param stdin - The raw Stop-event payload.
+ * @returns The session id, or `undefined`.
+ */
+export function readSessionId(stdin) {
+  try {
+    const id = JSON.parse(stdin)?.session_id;
+    return typeof id === 'string' && id !== '' ? id : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+/**
  * Read Claude's Stop-event output from stdin with a hard timeout so the hook
  * never hangs a session. Resolves with whatever arrived if stdin does not close.
  *
@@ -331,16 +392,20 @@ async function main() {
   const cwd = process.cwd();
   const output = await readStdin();
   const autoRun = readAutoRun(cwd);
-  const { decision, reason, reap } = decideStop(output, autoRun, probeOwner(autoRun));
+  const { decision, reason, reap, quiet } = decideStop(output, autoRun, {
+    sessionId: readSessionId(output),
+    ownerLiveness: probeOwner(autoRun),
+  });
 
   if (decision === 'block-stop') {
     printBlockMessage(reason);
     process.exit(2);
   }
 
-  // Fail open — allow the session to stop. The common case is silent; only an
-  // explicitly-resolved active drain announces why it let go.
-  if (autoRun?.active === true) {
+  // Fail open — allow the session to stop. The common case is silent, and so is
+  // a stranger's Stop during someone else's drain; only the owner's own drain
+  // (or an orphan being reaped) announces why it let go.
+  if (autoRun?.active === true && !quiet) {
     console.error(`[flow-loop] allowing stop — ${reason}`);
   }
   // A spent sentinel is deleted here, not left for the next session to trip on.

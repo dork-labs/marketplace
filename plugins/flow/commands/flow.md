@@ -182,13 +182,24 @@ start is checked, not just recorded: on every Stop the hook probes it, and a
 sentinel whose owner is gone — or one still claiming `active` more than 24 hours
 later, where the number may have been recycled onto an unrelated process — is
 treated as an orphan, allowed to stop, and **deleted**. So a drain that dies
-without tearing down no longer traps every later session in that repo. Two
+without tearing down no longer traps every later session in that repo.
+
+**Only the session that started the drain is held.** The sentinel records that
+session's `sessionId`, and the hook compares it with the id of whichever session
+is stopping. Every other session in the repo stops silently, never sees the
+banner, and cannot end the drain with a marker. A sentinel with no `sessionId`
+holds nobody, the owner included, so the drain would end after one item. Two
 consequences for anything that reads this file: a MISSING sentinel does not prove
 the queue drained, and a PAUSED one (`active: false`, written by `/flow:pause`)
 is never reaped, because `/flow:resume` reads it back.
 
 1. **Start.** Write `.dork/flow/auto-run.json` =
-   `{ "active": true, "ready": <N>, "shapeable": <M>, "startedAt": "<ISO>", "pid": <pid> }`.
+   `{ "active": true, "ready": <N>, "shapeable": <M>, "startedAt": "<ISO>", "pid": <pid>, "sessionId": "${CLAUDE_SESSION_ID}" }`.
+   `sessionId` is this session's id, filled in when this command loads; copy it
+   exactly. If the value above is not a session id (it still reads as a `${…}`
+   placeholder, as it does on a harness that does not fill it in), say so: the
+   hook cannot tell this session apart from any other, so the drain will stop
+   after each item instead of looping.
    Both counts come from `node --experimental-strip-types "${CLAUDE_PLUGIN_ROOT}/scripts/dispatch.ts"` (candidate set as
    JSON in, `classifyDispatchOutcome`'s `{ picked, eligibleCount, starved, shapeableCount }`
    as JSON out):
