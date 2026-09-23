@@ -1,8 +1,8 @@
 /**
  * The checks behind `npm run check` in `tools/schema-check`.
  *
- * Two halves, both run against the real DorkOS Zod schemas pinned in
- * `upstream.json`:
+ * Three checks. The first two run against the real DorkOS Zod schemas pinned
+ * in `upstream.json`:
  *
  * - {@link validateSkills} — every `SKILL.md` under `plugins/` parses as skill
  *   frontmatter, every line the author wrote survives that parse meaning what
@@ -10,6 +10,11 @@
  * - {@link validateManifests} — `.claude-plugin/marketplace.json` (against both
  *   the DorkOS schema and the Claude Code standard one), `.claude-plugin/dorkos.json`,
  *   and each plugin's `.dork/manifest.json`.
+ *
+ * The third, {@link checkVersionAgreement} (in `versions.ts`), needs no schema:
+ * every package's `.dork/manifest.json`, `.claude-plugin/plugin.json` and root
+ * `package.json` must declare the same version, and a manifest with a version
+ * needs a `plugin.json` that has one too.
  *
  * **A passing zod parse is not the bar.** DorkOS frontmatter is built to absorb
  * bad input rather than reject it: unknown keys are dropped, most optional
@@ -43,6 +48,7 @@ import { MarketplaceJsonSchema } from '@dorkos/marketplace/marketplace-json-sche
 import { DorkosSidecarSchema } from '@dorkos/marketplace/dorkos-sidecar-schema';
 import { validateAgainstCcSchema } from '@dorkos/marketplace/cc-validator';
 import { SCHEDULED_SKILLS } from './scheduled-skills.ts';
+import { PLUGINS_DIR, checkVersionAgreement, pluginDirs } from './versions.ts';
 
 /** One thing that is wrong, in terms of the file it is wrong in. */
 export interface Finding {
@@ -54,9 +60,6 @@ export interface Finding {
 
 /** The filename DorkOS and Claude Code both look for. */
 const SKILL_FILENAME = 'SKILL.md';
-
-/** Directory holding every package in this marketplace. */
-const PLUGINS_DIR = 'plugins';
 
 /** How deep to descend under `plugins/` looking for SKILL.md files. */
 const MAX_DEPTH = 6;
@@ -419,20 +422,6 @@ function readJson(repoRoot: string, file: string): { value: unknown } | { findin
 }
 
 /**
- * Plugin directory names under `plugins/`, sorted.
- *
- * @param repoRoot - Absolute path to the repository root.
- */
-function pluginDirs(repoRoot: string): string[] {
-  const abs = path.join(repoRoot, PLUGINS_DIR);
-  if (!existsSync(abs)) return [];
-  return readdirSync(abs, { withFileTypes: true })
-    .filter((entry) => entry.isDirectory() && !entry.name.startsWith('.'))
-    .map((entry) => entry.name)
-    .sort();
-}
-
-/**
  * Validate the registry files and each plugin's package manifest.
  *
  * A plugin without a `.dork/manifest.json` is skipped rather than failed: most
@@ -527,5 +516,9 @@ function checkSourcePaths(repoRoot: string, file: string, value: unknown): Findi
  * @returns Every problem found, skills first.
  */
 export function validateRepo(repoRoot: string): Finding[] {
-  return [...validateSkills(repoRoot), ...validateManifests(repoRoot)];
+  return [
+    ...validateSkills(repoRoot),
+    ...validateManifests(repoRoot),
+    ...checkVersionAgreement(repoRoot),
+  ];
 }
