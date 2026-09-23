@@ -5,6 +5,7 @@
  * worktree belongs to, what git ignores, and which files already exist.
  *
  * @see specs/flow-config-location/02-specification.md
+ * @see specs/flow-generated-state-location/02-specification.md (adapters and the pause, DOR-2285)
  */
 
 import { execFileSync, spawnSync } from 'node:child_process';
@@ -31,12 +32,22 @@ import {
   CONFIG_SCHEMA_URL,
   DECLINED_MARKER,
   MIGRATED_MARKER,
+  PAUSE_FILE,
+  SHIPPED_ADAPTERS,
   findConfigRoots,
+  legacyAdapterDirs,
   legacyConfigDirs,
+  migrateAdapter,
+  migrateAll,
   migrateConfig,
+  pauseFlow,
+  pauseState,
   prepareConfigDirs,
   refusalFor,
+  resolveAdapter,
   resolveConfigFiles,
+  resumeFlow,
+  trackerOf,
   type ConfigRoots,
 } from '../scripts/config-files.ts';
 
@@ -772,6 +783,451 @@ describe('migrateConfig', () => {
   });
 });
 
+// ---------------------------------------------------------------------------
+// DOR-2285: the adapter /flow:init generates, and the pause, live in the project.
+// ---------------------------------------------------------------------------
+
+const JIRA_ADAPTER = '---\nname: jira-adapter\ndescription: jira\n---\n\n# jira adapter\n';
+
+/** Write the project's committed settings naming `tracker`. */
+function projectConfig(checkout: string, tracker = 'jira'): string {
+  return write(path.join(checkout, '.agents/flow/config.json'), JSON.stringify({ tracker }));
+}
+
+/** A legacy generated adapter inside a plugin folder, as flow before 0.9.0 wrote it. */
+function pluginAdapter(plugin: string, tracker = 'jira', content = JIRA_ADAPTER): string {
+  return write(path.join(plugin, 'skills', `${tracker}-adapter`, 'SKILL.md'), content);
+}
+
+/** A plugin folder that ships the reference adapter, like a real install. */
+function shippingPlugin(dir: string): string {
+  makePlugin(dir);
+  write(path.join(dir, 'skills', 'linear-adapter', 'SKILL.md'), '# shipped linear\n');
+  return dir;
+}
+
+describe('trackerOf', () => {
+  // The tracker names the adapter, so it must follow the documented precedence:
+  // config.local.json over config.json, then the schema default. Fails if the
+  // local override is ignored or the default is not the reference tracker.
+  it('reads the local file over the committed one, then defaults to linear', () => {
+    const repo = makeRepo();
+    const committed = projectConfig(repo, 'jira');
+    const local = write(path.join(repo, '.agents/flow/config.local.json'), '{"tracker":"github"}');
+    expect(trackerOf({ committed, local })).toBe('github');
+    expect(trackerOf({ committed, local: null })).toBe('jira');
+    write(committed, '{}');
+    expect(trackerOf({ committed, local: null })).toBe('linear');
+  });
+
+  // The tracker is joined into a path. A value that is not a slug must never
+  // get that far, or `../x` would read an adapter from anywhere.
+  it('is null for a value that cannot name a folder', () => {
+    const repo = makeRepo();
+    for (const bad of ['../evil', 'Jira', 'a/b', '', 42]) {
+      const committed = write(
+        path.join(repo, '.agents/flow/config.json'),
+        JSON.stringify({ tracker: bad })
+      );
+      expect(trackerOf({ committed, local: null }), JSON.stringify(bad)).toBeNull();
+    }
+  });
+});
+
+describe('SHIPPED_ADAPTERS', () => {
+  // The list decides whether `<flow-root>/skills/<tracker>-adapter/` is flow's
+  // own adapter or one an older flow generated there. It must match what this
+  // plugin really ships, or a shipped adapter is "migrated" out of the plugin, or
+  // a generated one is mistaken for flow's own.
+  it('is exactly the adapter skills this plugin ships', () => {
+    const shipped = readdirSync(path.join(PLUGIN_DIR, 'skills'))
+      .filter((name) => name.endsWith('-adapter'))
+      .map((name) => name.slice(0, -'-adapter'.length))
+      .sort();
+    expect(shipped.length).toBeGreaterThan(0);
+    expect([...SHIPPED_ADAPTERS].sort()).toEqual(shipped);
+  });
+});
+
+describe('legacyAdapterDirs', () => {
+  // A shipped adapter is never legacy: it belongs to the plugin, in every
+  // version folder. Fails if a cache sibling's linear-adapter is offered.
+  it('is empty for a tracker flow ships', () => {
+    const flowDir = path.join(base, '.claude', 'plugins', 'cache', 'dork-labs', 'flow');
+    const current = shippingPlugin(path.join(flowDir, '0.9.0'));
+    shippingPlugin(path.join(flowDir, '0.8.0'));
+    expect(legacyAdapterDirs(current, 'linear')).toEqual([]);
+  });
+
+  // After a Claude Code update the generated adapter is in the previous version
+  // folder; the newest copy is tried first.
+  it('lists the plugin’s own folder, then cache siblings newest first', () => {
+    const flowDir = path.join(base, '.claude', 'plugins', 'cache', 'dork-labs', 'flow');
+    const current = makePlugin(path.join(flowDir, '0.9.0'));
+    const older = makePlugin(path.join(flowDir, '0.7.0'));
+    const newer = makePlugin(path.join(flowDir, '0.8.0'));
+    makePlugin(path.join(flowDir, '0.6.0'));
+    const t = Date.now() / 1000;
+    utimesSync(pluginAdapter(older), t - 100, t - 100);
+    utimesSync(pluginAdapter(newer), t, t);
+    expect(legacyAdapterDirs(current, 'jira')).toEqual([
+      path.join(current, 'skills', 'jira-adapter'),
+      path.join(newer, 'skills', 'jira-adapter'),
+      path.join(older, 'skills', 'jira-adapter'),
+    ]);
+  });
+});
+
+describe('resolveAdapter', () => {
+  // With no settings there is no tracker, so no adapter to look for.
+  it('is none with no tracker when flow is not configured', () => {
+    const repo = makeRepo();
+    expect(resolveAdapter(roots(repo, shippingPlugin(path.join(base, 'p'))))).toMatchObject({
+      tracker: null,
+      origin: 'none',
+      path: null,
+      target: null,
+    });
+  });
+
+  // The reference adapter needs no copy in the project: it is read from the
+  // plugin, and a new version brings its own.
+  it('reads a shipped adapter from the plugin', () => {
+    const repo = makeRepo();
+    const plugin = shippingPlugin(path.join(base, 'p'));
+    projectConfig(repo, 'linear');
+    expect(resolveAdapter(roots(repo, plugin))).toMatchObject({
+      tracker: 'linear',
+      origin: 'shipped',
+      path: path.join(plugin, 'skills', 'linear-adapter', 'SKILL.md'),
+      target: path.join(repo, '.agents/flow/adapters/linear/SKILL.md'),
+      shared: false,
+    });
+  });
+
+  // A broken install that lost its shipped adapter is reported, not papered over
+  // with a path that does not exist.
+  it('is none when a shipped adapter is missing from the plugin', () => {
+    const repo = makeRepo();
+    projectConfig(repo, 'linear');
+    expect(resolveAdapter(roots(repo, makePlugin(path.join(base, 'p')))).origin).toBe('none');
+  });
+
+  // The project's own adapter wins, over a shipped one too, so a team can
+  // override the reference adapter on purpose.
+  it('prefers the project’s adapter, even over a shipped one', () => {
+    const repo = makeRepo();
+    const plugin = shippingPlugin(path.join(base, 'p'));
+    projectConfig(repo, 'linear');
+    const own = write(path.join(repo, '.agents/flow/adapters/linear/SKILL.md'), '# ours\n');
+    expect(resolveAdapter(roots(repo, plugin))).toMatchObject({ origin: 'project', path: own });
+  });
+
+  // A worktree reads its own branch's adapter first, then the main checkout's.
+  it('reads the checkout first, then the main checkout', () => {
+    const repo = makeRepo();
+    const wt = path.join(base, 'wt');
+    git(repo, 'worktree', 'add', '-q', wt, '-b', 'wt');
+    const plugin = makePlugin(path.join(base, 'p'));
+    projectConfig(repo);
+    const mainAdapter = write(path.join(repo, '.agents/flow/adapters/jira/SKILL.md'), 'main');
+    expect(resolveAdapter(roots(wt, plugin, repo)).path).toBe(mainAdapter);
+    const branchAdapter = write(path.join(wt, '.agents/flow/adapters/jira/SKILL.md'), 'branch');
+    expect(resolveAdapter(roots(wt, plugin, repo)).path).toBe(branchAdapter);
+  });
+
+  // An adapter an older flow generated into the plugin keeps working until it
+  // is moved. One inside the project is the project's; anywhere else it may be
+  // another project's.
+  it('falls back to a legacy adapter, shared unless the plugin is in the project', () => {
+    const repo = makeRepo();
+    projectConfig(repo);
+    const inside = makePlugin(path.join(repo, '.dork', 'plugins', 'flow'));
+    pluginAdapter(inside);
+    expect(resolveAdapter(roots(repo, inside))).toMatchObject({
+      origin: 'legacy',
+      path: path.join(inside, 'skills', 'jira-adapter', 'SKILL.md'),
+      target: path.join(repo, '.agents/flow/adapters/jira/SKILL.md'),
+      shared: false,
+    });
+    const outside = makePlugin(path.join(base, 'p'));
+    pluginAdapter(outside);
+    expect(resolveAdapter(roots(repo, outside))).toMatchObject({ origin: 'legacy', shared: true });
+  });
+
+  // A moved adapter belongs to the project it moved to; a declined one is not
+  // this project's. Neither is read, and a move is reported.
+  it('skips a moved or declined legacy adapter', () => {
+    const repo = makeRepo();
+    projectConfig(repo);
+    const plugin = makePlugin(path.join(base, 'p'));
+    const adapterDir = path.dirname(pluginAdapter(plugin));
+    write(path.join(adapterDir, DECLINED_MARKER), `${repo}\n`);
+    expect(resolveAdapter(roots(repo, plugin)).origin).toBe('none');
+    const other = makeRepo('other');
+    projectConfig(other);
+    expect(resolveAdapter(roots(other, plugin)).origin).toBe('legacy');
+    write(path.join(adapterDir, MIGRATED_MARKER), '/somewhere/else\n');
+    expect(resolveAdapter(roots(other, plugin))).toMatchObject({
+      origin: 'none',
+      moved: [{ folder: adapterDir, movedTo: '/somewhere/else' }],
+    });
+  });
+
+  // The target sits beside the config.json in use, so a generated adapter is
+  // committed with the settings that name it.
+  it('targets the folder of the config.json in use', () => {
+    const repo = makeRepo();
+    const wt = path.join(base, 'wt');
+    git(repo, 'worktree', 'add', '-q', wt, '-b', 'wt');
+    projectConfig(repo);
+    expect(resolveAdapter(roots(wt, makePlugin(path.join(base, 'p')), repo)).target).toBe(
+      path.join(repo, '.agents/flow/adapters/jira/SKILL.md')
+    );
+  });
+});
+
+describe('migrateAdapter', () => {
+  /** A project whose settings are already its own, on a plugin inside it holding a legacy adapter. */
+  function inProject() {
+    const repo = makeRepo();
+    projectConfig(repo);
+    const plugin = makePlugin(path.join(repo, '.dork', 'plugins', 'flow'));
+    const skill = pluginAdapter(plugin);
+    write(path.join(path.dirname(skill), 'references', 'mapping.md'), '# mapping\n');
+    write(path.join(path.dirname(skill), 'fixture.json'), '[]\n');
+    return { repo, plugin, legacy: path.dirname(skill), r: roots(repo, plugin) };
+  }
+
+  // The whole folder reaches the project byte for byte, the old one is marked
+  // and kept, and the project's copy is what flow reads from then on.
+  it('copies the whole adapter folder from a plugin inside the project, without asking', () => {
+    const { repo, legacy, r } = inProject();
+    const result = migrateAdapter(r);
+    const dest = path.join(repo, '.agents/flow/adapters/jira');
+    expect(result).toMatchObject({
+      ok: true,
+      migrated: true,
+      needsConfirmation: false,
+      from: legacy,
+    });
+    expect(result.wrote).toEqual([
+      path.join(dest, 'fixture.json'),
+      path.join(dest, 'references', 'mapping.md'),
+      path.join(dest, 'SKILL.md'),
+    ]);
+    expect(readFileSync(path.join(dest, 'SKILL.md'), 'utf8')).toBe(JIRA_ADAPTER);
+    expect(readFileSync(path.join(dest, 'references', 'mapping.md'), 'utf8')).toBe('# mapping\n');
+    expect(readFileSync(path.join(legacy, MIGRATED_MARKER), 'utf8')).toBe(`${repo}\n`);
+    expect(existsSync(path.join(legacy, 'SKILL.md'))).toBe(true);
+    expect(resolveAdapter(r)).toMatchObject({
+      origin: 'project',
+      path: path.join(dest, 'SKILL.md'),
+    });
+    expect(readdirSync(dest).filter((name) => name.endsWith('.tmp'))).toEqual([]);
+    // Nothing of the adapter is ignored: it is team code, committed.
+    expect(untracked(repo)).toContain('.agents/flow/adapters/jira/SKILL.md');
+  });
+
+  // A second run finds the project's copy and does nothing.
+  it('is a no-op once the adapter is in the project', () => {
+    const { r } = inProject();
+    migrateAdapter(r);
+    expect(migrateAdapter(r)).toMatchObject({
+      ok: true,
+      migrated: false,
+      reason: 'already in the project',
+    });
+  });
+
+  // A shared plugin folder's adapter may be another project's; nothing moves
+  // until a person says it is this one's, and "no" is remembered.
+  it('asks before copying from a shared folder; confirm copies, decline is remembered', () => {
+    const repo = makeRepo();
+    projectConfig(repo);
+    const plugin = makePlugin(path.join(base, 'p'));
+    const legacy = path.dirname(pluginAdapter(plugin));
+    expect(migrateAdapter(roots(repo, plugin))).toMatchObject({
+      ok: true,
+      migrated: false,
+      needsConfirmation: true,
+      found: { folder: legacy, tracker: 'jira' },
+      wrote: [],
+    });
+    expect(existsSync(path.join(repo, '.agents/flow/adapters'))).toBe(false);
+
+    const other = makeRepo('other');
+    projectConfig(other);
+    expect(migrateAdapter(roots(other, plugin), { decline: true })).toMatchObject({
+      ok: true,
+      migrated: false,
+    });
+    expect(readFileSync(path.join(legacy, DECLINED_MARKER), 'utf8')).toBe(`${other}\n`);
+    expect(resolveAdapter(roots(other, plugin)).origin).toBe('none');
+
+    expect(migrateAdapter(roots(repo, plugin), { confirm: true }).migrated).toBe(true);
+    expect(readFileSync(path.join(repo, '.agents/flow/adapters/jira/SKILL.md'), 'utf8')).toBe(
+      JIRA_ADAPTER
+    );
+    // The other project's "not mine" stays with the old folder; it is not this
+    // project's file and must not be committed into it.
+    expect(existsSync(path.join(repo, '.agents/flow/adapters/jira', DECLINED_MARKER))).toBe(false);
+  });
+
+  // A different adapter already in the project is never overwritten.
+  it('stops without overwriting a different adapter already in the project', () => {
+    const { repo, legacy, r } = inProject();
+    const existing = write(path.join(repo, '.agents/flow/adapters/jira/fixture.json'), '[1]\n');
+    const result = migrateAdapter(r);
+    expect(result.ok).toBe(false);
+    expect(result.reason).toContain(existing);
+    expect(readFileSync(existing, 'utf8')).toBe('[1]\n');
+    expect(existsSync(path.join(repo, '.agents/flow/adapters/jira/SKILL.md'))).toBe(false);
+    expect(existsSync(path.join(legacy, MIGRATED_MARKER))).toBe(false);
+  });
+
+  // A symlink in the old folder could point anywhere on the machine; it is not
+  // followed, so nothing outside the adapter folder is copied into the project.
+  it('does not follow a symlink out of the adapter folder', () => {
+    const { repo, legacy, r } = inProject();
+    const secret = write(path.join(base, 'secret.txt'), 'secret');
+    symlinkSync(secret, path.join(legacy, 'link.txt'));
+    migrateAdapter(r);
+    expect(existsSync(path.join(repo, '.agents/flow/adapters/jira/link.txt'))).toBe(false);
+  });
+
+  // A shipped adapter stays in the plugin; nothing to move.
+  it('leaves a shipped adapter alone', () => {
+    const repo = makeRepo();
+    projectConfig(repo, 'linear');
+    const plugin = shippingPlugin(path.join(repo, '.dork', 'plugins', 'flow'));
+    expect(migrateAdapter(roots(repo, plugin))).toMatchObject({
+      migrated: false,
+      reason: 'flow ships this adapter',
+    });
+    expect(existsSync(path.join(repo, '.agents/flow/adapters'))).toBe(false);
+  });
+});
+
+describe('migrateAll', () => {
+  /** Settings and a generated adapter, both still in a shared plugin folder. */
+  function sharedLegacy() {
+    const repo = makeRepo();
+    const plugin = makePlugin(path.join(base, 'p'), {
+      config: `${JSON.stringify({ tracker: 'jira' })}\n`,
+      local: LEGACY_LOCAL,
+    });
+    const legacy = path.dirname(pluginAdapter(plugin));
+    return { repo, plugin, legacy, r: roots(repo, plugin) };
+  }
+
+  // One question covers both: nothing moves until a person confirms.
+  it('asks once for settings and adapter from a shared folder', () => {
+    const { repo, r } = sharedLegacy();
+    const result = migrateAll(r);
+    expect(result).toMatchObject({ ok: true, needsConfirmation: true, migrated: false });
+    expect(result.adapter).toMatchObject({ needsConfirmation: true, found: { tracker: 'jira' } });
+    expect(existsSync(path.join(repo, '.agents'))).toBe(false);
+  });
+
+  // Yes moves both, the adapter beside the settings.
+  it('moves both on confirm', () => {
+    const { repo, r } = sharedLegacy();
+    const result = migrateAll(r, { confirm: true });
+    expect(result).toMatchObject({ ok: true, migrated: true, needsConfirmation: false });
+    expect(result.adapter.migrated).toBe(true);
+    expect(resolveAdapter(r)).toMatchObject({
+      origin: 'project',
+      path: path.join(repo, '.agents/flow/adapters/jira/SKILL.md'),
+    });
+  });
+
+  // No declines both, so neither /flow nor a fresh /flow:init asks about the
+  // old adapter again. Fails if the settings decline hides the adapter before
+  // it is declined too.
+  it('declines both on decline', () => {
+    const { repo, legacy, plugin, r } = sharedLegacy();
+    migrateAll(r, { decline: true });
+    expect(readFileSync(path.join(legacy, DECLINED_MARKER), 'utf8')).toBe(`${repo}\n`);
+    expect(readFileSync(path.join(plugin, 'config', DECLINED_MARKER), 'utf8')).toBe(`${repo}\n`);
+    projectConfig(repo);
+    expect(resolveAdapter(r).origin).toBe('none');
+  });
+});
+
+describe('pause', () => {
+  // The pause is one machine's decision about the autonomy running there. It
+  // lives beside the local settings, in the main checkout, so the scheduler's
+  // checkout and every worktree see one flag. Fails if it lands in the worktree.
+  it('writes the flag into the main checkout from a worktree, where both see it', () => {
+    const repo = makeRepo();
+    const wt = path.join(base, 'wt');
+    git(repo, 'worktree', 'add', '-q', wt, '-b', 'wt');
+    const plugin = makePlugin(path.join(base, 'p'));
+    const now = new Date('2026-09-23T12:00:00.000Z');
+    const result = pauseFlow(roots(wt, plugin, repo), now);
+    const file = path.join(repo, '.agents/flow', PAUSE_FILE);
+    expect(result).toMatchObject({ ok: true, file, alreadyPaused: false, ignored: true });
+    expect(pauseState(roots(wt, plugin, repo))).toEqual({
+      file,
+      pausedAt: '2026-09-23T12:00:00.000Z',
+    });
+    expect(pauseState(roots(repo, plugin))).toEqual({ file, pausedAt: '2026-09-23T12:00:00.000Z' });
+    expect(untracked(repo)).toBe('');
+  });
+
+  // An install set up by flow 0.8.0 has a .gitignore without the pause line;
+  // pausing adds it rather than leaving the flag to be committed.
+  it('keeps the flag out of git in a folder an older flow prepared', () => {
+    const repo = makeRepo();
+    write(
+      path.join(repo, '.agents/flow/.gitignore'),
+      'config.local.json\n.config.local.json.*.tmp\n'
+    );
+    projectConfig(repo);
+    expect(pauseFlow(roots(repo, makePlugin(path.join(base, 'p')))).ignored).toBe(true);
+    expect(untracked(repo)).not.toContain(PAUSE_FILE);
+  });
+
+  // Pausing twice keeps the first time, so "paused since" stays true.
+  it('is idempotent and keeps when it started', () => {
+    const repo = makeRepo();
+    const r = roots(repo, makePlugin(path.join(base, 'p')));
+    pauseFlow(r, new Date('2026-01-01T00:00:00.000Z'));
+    expect(pauseFlow(r, new Date('2026-02-02T00:00:00.000Z'))).toMatchObject({
+      alreadyPaused: true,
+      pausedAt: '2026-01-01T00:00:00.000Z',
+    });
+  });
+
+  // A flag nobody can read is still a pause: when in doubt, autonomy stays off.
+  it('treats an unreadable flag as paused', () => {
+    const repo = makeRepo();
+    const file = write(path.join(repo, '.agents/flow', PAUSE_FILE), 'not json');
+    expect(pauseState(roots(repo, makePlugin(path.join(base, 'p'))))).toEqual({
+      file,
+      pausedAt: null,
+    });
+  });
+
+  // Resume lifts every flag this project has, in either checkout.
+  it('resume removes the flag from both checkouts', () => {
+    const repo = makeRepo();
+    const wt = path.join(base, 'wt');
+    git(repo, 'worktree', 'add', '-q', wt, '-b', 'wt');
+    const r = roots(wt, makePlugin(path.join(base, 'p')), repo);
+    pauseFlow(r);
+    const inWorktree = write(path.join(wt, '.agents/flow', PAUSE_FILE), '{}');
+    expect(resumeFlow(r)).toEqual({
+      ok: true,
+      wasPaused: true,
+      removed: [inWorktree, path.join(repo, '.agents/flow', PAUSE_FILE)],
+    });
+    expect(pauseState(r)).toBeNull();
+    expect(resumeFlow(r)).toEqual({ ok: true, wasPaused: false, removed: [] });
+  });
+});
+
 describe('config-files CLI', () => {
   /**
    * A copy of the flow scripts in a throwaway install folder, so the CLI's own
@@ -788,6 +1244,7 @@ describe('config-files CLI', () => {
       path.join(PLUGIN_DIR, 'config', 'config.schema.json'),
       path.join(plugin, 'config', 'config.schema.json')
     );
+    write(path.join(plugin, 'skills', 'linear-adapter', 'SKILL.md'), '# shipped linear\n');
     return plugin;
   }
 
@@ -818,7 +1275,8 @@ describe('config-files CLI', () => {
   it('resolve exits 0 with the project files', () => {
     const repo = makeRepo();
     write(path.join(repo, '.agents/flow/config.json'), '{"tracker":"linear"}');
-    const { status, out } = run(shared(), repo);
+    const plugin = shared();
+    const { status, out } = run(plugin, repo);
     expect(status).toBe(0);
     expect(out).toEqual({
       ok: true,
@@ -829,9 +1287,108 @@ describe('config-files CLI', () => {
       localDir: path.join(repo, '.agents/flow'),
       shared: false,
       moved: [],
+      flowRoot: plugin,
+      adapter: {
+        tracker: 'linear',
+        origin: 'shipped',
+        path: path.join(plugin, 'skills', 'linear-adapter', 'SKILL.md'),
+        target: path.join(repo, '.agents/flow/adapters/linear/SKILL.md'),
+        shared: false,
+        moved: [],
+      },
+      paused: null,
       errors: [],
       warnings: [],
     });
+  });
+
+  // A tracker with no adapter anywhere is not configured: /flow routes to
+  // /flow:init, which generates one. Fails if resolve says ok with nothing to read.
+  it('resolve refuses a tracker with no adapter', () => {
+    const repo = makeRepo();
+    projectConfig(repo, 'jira');
+    const { status, out } = run(shared(), repo);
+    expect(status).toBe(1);
+    expect(out.adapter).toMatchObject({ origin: 'none', path: null });
+    expect(out.errors).toEqual([
+      {
+        path: '(adapter)',
+        message: `no adapter for tracker "jira"; run /flow:init to generate one into ${path.join(repo, '.agents/flow/adapters/jira')}`,
+      },
+    ]);
+  });
+
+  // Fail closed, as for settings: an adapter nobody confirmed may be another
+  // project's, so a headless run stops. One inside the project still works,
+  // with a nudge to move it.
+  it('resolve refuses a shared legacy adapter and warns about an in-project one', () => {
+    const repo = makeRepo();
+    projectConfig(repo, 'jira');
+    const outside = shared();
+    pluginAdapter(outside);
+    const refused = run(outside, repo);
+    expect(refused.status).toBe(1);
+    expect(refused.out.errors.map((e: { message: string }) => e.message).join('\n')).toContain(
+      'may belong to another project; run /flow in this project to confirm'
+    );
+    const inside = installCopy(path.join(repo, '.dork', 'plugins', 'flow'));
+    pluginAdapter(inside);
+    const accepted = run(inside, repo);
+    expect(accepted.status).toBe(0);
+    expect(accepted.out.adapter).toMatchObject({ origin: 'legacy', shared: false });
+    expect(accepted.out.warnings.map((w: { message: string }) => w.message).join('\n')).toContain(
+      'run config-files.ts migrate'
+    );
+  });
+
+  // migrate carries the adapter too, under the same one confirmation.
+  it('migrate moves a legacy adapter with the settings, after one confirmation', () => {
+    const repo = makeRepo();
+    const plugin = installCopy(path.join(base, 'install'), {
+      config: `${JSON.stringify({ tracker: 'jira' })}\n`,
+    });
+    pluginAdapter(plugin);
+    const asked = run(plugin, repo, ['migrate']);
+    expect(asked.status).toBe(0);
+    expect(asked.out).toMatchObject({
+      needsConfirmation: true,
+      adapter: { needsConfirmation: true, found: { tracker: 'jira' } },
+    });
+    const moved = run(plugin, repo, ['migrate', '--confirm']);
+    expect(moved.status).toBe(0);
+    expect(moved.out).toMatchObject({ migrated: true, adapter: { migrated: true } });
+    const resolved = run(plugin, repo);
+    expect(resolved.status).toBe(0);
+    expect(resolved.out.adapter).toMatchObject({
+      origin: 'project',
+      path: path.join(repo, '.agents/flow/adapters/jira/SKILL.md'),
+    });
+  });
+
+  // pause and resume round trip through resolve, which reports the flag without
+  // failing: being paused is state each caller acts on, not a broken setup.
+  it('pause and resume round trip, and resolve reports the pause', () => {
+    const repo = makeRepo();
+    write(path.join(repo, '.agents/flow/config.json'), '{"tracker":"linear"}');
+    const plugin = shared();
+    const paused = run(plugin, repo, ['pause']);
+    expect(paused.status).toBe(0);
+    expect(paused.out).toMatchObject({ ok: true, alreadyPaused: false, ignored: true });
+    const resolved = run(plugin, repo);
+    expect(resolved.status).toBe(0);
+    expect(resolved.out.paused).toMatchObject({
+      file: path.join(repo, '.agents/flow', PAUSE_FILE),
+    });
+    expect(run(plugin, repo, ['resume']).out).toMatchObject({ ok: true, wasPaused: true });
+    expect(run(plugin, repo).out.paused).toBeNull();
+  });
+
+  // A pause is a safety control: it works before flow is configured.
+  it('pause works when flow is not configured', () => {
+    const repo = makeRepo();
+    const { status, out } = run(shared(), repo, ['pause']);
+    expect(status).toBe(0);
+    expect(out.file).toBe(path.join(repo, '.agents/flow', PAUSE_FILE));
   });
 
   // Fail closed: settings nobody has confirmed are this project's must not drive
