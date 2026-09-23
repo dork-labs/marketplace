@@ -2,17 +2,19 @@
 
 ## What This Is
 
-The official DorkOS marketplace repository — a catalog of packages (agents, plugins, skill-packs, adapters) that extend DorkOS. Currently in bootstrap phase (v0.1.0) with 9 seed packages. Serves as both the canonical regression fixture for the marketplace validator and the publication hub for DorkOS packages.
+The official DorkOS marketplace repository — a catalog of packages (agents, plugins, skill-packs, adapters) that extend DorkOS. Currently at marketplace version 0.1.0, listing 15 packages in `.claude-plugin/marketplace.json`. Serves as both the canonical regression fixture for the marketplace validator and the publication hub for DorkOS packages.
 
 This repo is also the workspace for the `dork-os-marketing` agent, which handles DorkOS marketing tasks.
 
 ## What DorkOS Is
 
-DorkOS is the operating system for autonomous AI agents. It provides scheduling, communication, discovery, and a control center so that AI coding agents (Claude Code, Cursor, Codex) can work autonomously — overnight, across projects, coordinated with each other.
+DorkOS is the operating system for autonomous AI agents. It provides scheduling, communication, discovery, memory, and one place for every AI agent you run, so coding agents (Claude Code, Codex, OpenCode, side by side) can work autonomously — overnight, across projects, coordinated with each other.
 
-**Core thesis:** "Intelligence doesn't scale. Coordination does."
+**Tagline:** "You, Multiplied." (hero surfaces)
 
-**Tagline:** "You slept. They shipped."
+**Manifesto line:** "Intelligence doesn't scale. Coordination does." (essays and anti-positioning only, never a hero opening)
+
+**Banned in user-facing prose:** "mission control" and "cockpit" (retired 2026-08, DOR-1517). Say "one place" or "one window".
 
 **Four pillars:**
 - **Tasks** — Schedule and dispatch agent work (cron-based)
@@ -20,20 +22,20 @@ DorkOS is the operating system for autonomous AI agents. It provides scheduling,
 - **Mesh** — Agent discovery and coordination across projects
 - **Console** — Web dashboard to chat with and control all agents
 
-**Two upcoming modules:**
-- **Loop** — Continuous improvement engine (agents spot what's working, test ideas)
-- **Wing** — Personal productivity pack (cross-session context persistence)
+**Related products:**
+- **Loop** — a separate product, the autonomous improvement engine (github.com/dork-labs/loop)
+- **Wing** — vision only, with no code yet; never market it as "coming soon"
 
 **Key facts:**
-- Open source, MIT licensed, self-hosted, no telemetry
-- Built on Claude Agent SDK + MCP
+- Open source, MIT licensed, self-hosted; telemetry is off unless you turn it on
+- Runs Claude Code, Codex and OpenCode agents; speaks MCP
 - Tech stack: TypeScript, React 19, Vite 6, Express, SQLite, Turborepo monorepo
 - Website: https://dorkos.ai
 - GitHub: https://github.com/dork-labs/dorkos
 - npm: `dorkos`
 - Contact: hey@dorkos.ai
 - Creator: Dorian Collier / Dork Labs
-- Current version: v0.37.0
+- Current version: v0.81.0 (check `git tag` in the dorkos repo; this line goes stale)
 
 ## Repository Structure
 
@@ -45,19 +47,12 @@ marketplace/
 │   ├── marketplace.json     # CC-standard marketplace index (all plugins listed)
 │   └── dorkos.json          # DorkOS sidecar (type, layers, icon, pricing per plugin)
 ├── .dork/
-│   ├── manifest.json        # Agent manifest for this project
+│   ├── agent.json           # Agent manifest for this project
 │   ├── SOUL.md              # Agent personality traits
 │   └── NOPE.md              # Agent safety boundaries
-└── plugins/                 # Individual packages
-    ├── code-reviewer/       # Agent: PR reviews, Slack notifications
-    ├── security-auditor/    # Agent: Security audits, vulnerability checks
-    ├── docs-keeper/         # Agent: Keeps docs in sync with code
-    ├── linear-integration/  # Plugin: Two-way sync with Linear
-    ├── posthog-monitor/     # Plugin: Analytics for agent runs
-    ├── security-audit-pack/ # Skill-pack: Security audit tasks
-    ├── release-pack/        # Skill-pack: Release management workflows
-    ├── discord-adapter/     # Adapter: Discord notifications/commands
-    └── marketplace-dev/     # Skill-pack: How to develop marketplace packages
+├── scripts/                 # Fixture-pinned guard and gate scripts (run by scripts-test.yml)
+├── tools/schema-check/      # The `skills and manifests` gate
+└── plugins/<name>/          # One folder per package; marketplace.json is the list
 ```
 
 ## Package Types
@@ -106,8 +101,6 @@ leaves the PR waiting forever. Keep it that way, or un-require the check first.
   (`npm run check:bump`). A package that declares no version is exempt; declaring one opts in.
 - `scripts-test.yml`, check **`script fixtures`**. Runs the fixture suites in `scripts/`:
   the auto-merge arming gate and the two `.claude/hooks` guards.
-- `merge-tail.yml`, scheduled. Arms auto-merge on finished pull requests nobody armed (see
-  below). It needs the `dorkos-merge-tail` GitHub App's secrets and fails loudly without them.
 
 ## Landing changes
 
@@ -115,8 +108,12 @@ leaves the PR waiting forever. Keep it that way, or un-require the check first.
   in its own worktree (`/worktree:create <branch>`, from `origin/main`), never in the shared
   `main` checkout, and never create a worktree from inside one. The `working-in-worktrees`
   skill has the mechanics.
-- **Nothing lands on `main` except through a pull request**, squash-merged. Never push to
-  `main` directly; force pushes and deleting `main` are refused.
+- **Nothing lands on `main` except through a pull request and the merge queue**, squash-merged.
+  Never push to `main` directly; force pushes and deleting `main` are refused. The queue runs
+  the required checks again on your PR on top of `main` and everything ahead of it, then
+  merges. Being behind `main` blocks nothing, so never update a branch just to satisfy a gate.
+  Until the queue is switched on, `main` instead requires branches to be up to date: a PR
+  that falls behind waits until you run `gh pr update-branch <n>`.
 - **Review the pushed branch, then open the PR.** The adversarial review runs against the
   branch before a PR exists, calibrated by `REVIEW.md`; open the PR once it converges. The
   `creating-pull-requests` skill has the order, the local gates and the PR watcher.
@@ -125,15 +122,16 @@ leaves the PR waiting forever. Keep it that way, or un-require the check first.
   `.dork/manifest.json`, `package.json`) and adds a `CHANGELOG.md` entry where the package
   keeps one. `skills and manifests` fails the PR otherwise.
 - **Arm your own PR once it is open and reviewed:** `gh pr merge --auto --squash <n>`.
-  It merges by itself when the required checks pass. While `main` requires branches to be up
-  to date, a PR that falls behind waits until you run `gh pr update-branch <n>`.
-- **What merges by itself, and what does not.** `merge-tail.yml` arms a PR only when every
-  signal is good (the rules are `scripts/should-arm-automerge.sh`, pinned by its fixtures). It
-  never arms a draft; a PR labelled `hold`, `do-not-merge`, `wip` or `blocked`; a conflicting
-  PR or one whose mergeability GitHub has not worked out yet; a PR with changes requested or
-  an unresolved review thread; or a PR with any check failing, cancelled or still running. The
-  labels mean the same in dork-labs/dorkos. Put `hold` on a green PR you do not want landed.
-  Never admin-merge past a red or missing check.
+  It goes into the queue and merges by itself when the required checks pass. Nothing else
+  arms PRs yet, so an unarmed PR sits open. Never admin-merge past a red or missing check.
+- **What may merge by itself.** The rules are `scripts/should-arm-automerge.sh`, pinned by its
+  fixtures: a PR is armed only when every signal is good. Never arm a draft; a PR labelled
+  `hold`, `do-not-merge`, `wip` or `blocked`; a conflicting PR or one whose mergeability GitHub
+  has not worked out yet; a PR with changes requested or an unresolved review thread; or a PR
+  with any check failing, cancelled or still running. The labels mean the same in
+  dork-labs/dorkos. A scheduled `merge-tail` workflow that applies these rules to every open
+  PR arrives once the `dorkos-merge-tail` GitHub App is set up on this repo; until then,
+  authors arm their own.
 - **Tracker routing.** Work for this repo is tracked in Linear team DOR (the same team as
   dorkos), and an item that lands here carries the **`repo/marketplace`** label (group `repo`).
   An item with no `repo` label lands in dork-labs/dorkos. This repo is public: nothing from a
@@ -141,20 +139,24 @@ leaves the PR waiting forever. Keep it that way, or un-require the check first.
 
 ## Related Resources
 
-- **Core codebase:** `../core/` — The DorkOS monorepo (apps, packages, services)
-- **Meta docs:** `../core/meta/` — Brand foundation, personas, value architecture, website copy
-- **Decisions:** `../core/decisions/` — Architecture Decision Records
-- **Contributing:** `../core/contributing/` — Internal dev guides
-- **Research:** `../core/research/` — 140+ research reports
-- **Website:** `../core/apps/site/` — Next.js 16 marketing site + Fumadocs docs
-- **Docs content:** `../core/docs/` — MDX documentation for the docs site
+Paths assume the dorkos repo is checked out beside this one, as `../dorkos/`.
+
+- **Core codebase:** `../dorkos/` — The DorkOS monorepo (apps, packages, services)
+- **Meta docs:** `../dorkos/meta/` — Brand foundation, personas, value architecture, website copy
+- **Decisions:** `../dorkos/decisions/` — Architecture Decision Records
+- **Contributing:** `../dorkos/contributing/` — Internal dev guides
+- **Research:** `../dorkos/research/` — 370+ research reports
+- **Website:** `../dorkos/apps/site/` — Next.js 16 marketing site + Fumadocs docs
+- **Docs content:** `../dorkos/docs/` — MDX documentation for the docs site
 
 ## Brand & Marketing Context
 
 ### Target Personas
 - **Kai Nakamura** (Primary) — 28-35, senior full-stack / indie hacker. Ships daily, runs 10-20 agent sessions/week. Frustrated by session isolation, agents forgetting context, can't run overnight.
 - **Priya Sharma** (Secondary) — 30-40, staff engineer / technical architect. Manages architecture across services. Frustrated by context-switching, no cross-client session visibility.
-- **Jordan Wells** (Anti-persona) — Non-technical PM/marketing. Wants pretty ChatGPT. Explicitly out of scope.
+- **Ikechi** (Secondary) — non-developer founder who ships apps by directing agents; an operator, not a programmer.
+- **Lil** (Horizon, not a launch target) — privacy-first non-technical professional.
+- **Jordan Wells** (Anti-persona) — wants a hosted chat app. The line is operator mentality (won't own and run their own system), not technical skill.
 - **AI-Native Dev Shop** (ICP) — 1-10 devs, bootstrapped/seed-stage, already paying for Claude Pro/Team API.
 
 ### Brand Voice
@@ -177,4 +179,4 @@ DorkOS is NOT: an agent, a wrapper, a hosted service, a replacement for Claude C
 DorkOS IS: the infrastructure layer that makes agents autonomous — the coordination system, not the intelligence.
 
 ### Website Creative Process
-Uses "The Panel" — 5 advertising/design legends as creative agent personas (Ogilvy, Jobs, Godin, Ive, Wieden) to develop copy through structured rounds. Decisions documented in `../core/meta/website-copy/decisions.md`.
+Uses "The Panel" — 5 advertising/design legends as creative agent personas (Ogilvy, Jobs, Godin, Ive, Wieden) to develop copy through structured rounds. Decisions documented in `../dorkos/meta/website-copy/decisions.md`.
