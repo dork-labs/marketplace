@@ -1,32 +1,80 @@
 # `/flow` configuration
 
-The `/flow` engine reads its runtime configuration from three files in this
-directory. Two are committed and shared by everyone on the repo; one is
-per-machine and never committed. This split keeps behavioral policy in version
-control while keeping credentials and per-machine overrides off it.
+Your `/flow` settings live in your project, in `.agents/flow/`. This folder in the
+plugin holds only the templates, the schema and this guide. Settings split in two:
+team policy is committed and shared by everyone on the repo, and this machine's
+credentials and overrides are never committed.
 
 ## The config triad
 
-| File                        | Committed?      | Purpose                                                                                                         |
-| --------------------------- | --------------- | --------------------------------------------------------------------------------------------------------------- |
-| `config.json`               | yes             | Shared team defaults. Pure behavioral policy: stages, autonomy, gates, dispatch, and so on. Carries NO secrets. |
-| `config.local.json`         | no (gitignored) | Per-machine secrets and overrides. Holds your tracker credentials plus any field you want to override locally.  |
-| `config.local.example.json` | yes             | Committed template for `config.local.json`. Copy it, rename it, fill in your values.                            |
-
-`config.local.json` is listed in the repo `.gitignore` so real credentials never
-land in a commit. Only the `.example` template is tracked.
+| File                                                      | Committed?       | Purpose                                                                                                         |
+| --------------------------------------------------------- | ---------------- | --------------------------------------------------------------------------------------------------------------- |
+| `.agents/flow/config.json`                                | yes              | Shared team defaults. Pure behavioral policy: stages, autonomy, gates, dispatch, and so on. Carries NO secrets. |
+| `.agents/flow/config.local.json`                          | no (git ignores) | Per-machine secrets and overrides. Holds your tracker credentials plus any field you want to override locally.  |
+| `.agents/flow/.gitignore`                                 | yes              | Written by flow. Makes git ignore `config.local.json`.                                                          |
+| `config.example.json`, `config.local.example.json` (here) | from the plugin  | The templates `/flow:init` fills in.                                                                            |
 
 ### Getting started
 
+Run `/flow:init`. It writes both files for you. By hand:
+
 ```bash
-cp .agents/flow/config.local.example.json .agents/flow/config.local.json
+node --experimental-strip-types "<flow-root>/scripts/config-files.ts" prepare
+cp "<flow-root>/config/config.local.example.json" .agents/flow/config.local.json
 # then edit config.local.json and fill in your values
 ```
+
+`prepare` creates `.agents/flow/`, writes the `.gitignore`, and asks git to prove
+the local file is ignored before you put a token in it.
 
 Delete any block in `config.local.json` you do not need. If your host already
 supplies tracker auth (for example through a connected MCP server or CLI
 connection), you can omit `secrets.trackerToken` entirely and keep only the
 account handle.
+
+## Where the files live, and why
+
+Plugin hosts replace a plugin's folder when they update it. Claude Code installs
+each version into its own cache folder, so anything written inside the plugin is
+left behind on the next update. Your settings therefore never live in the plugin.
+
+The project is the one place that works everywhere:
+
+- **It survives every update**, under DorkOS, Claude Code, or anything else.
+- **Team policy can be committed** with the code it governs.
+- **Each project keeps its own settings**, even when one flow install serves
+  several projects (each names its own tracker team).
+- **Scripts can find it** from the project folder alone. Claude Code's
+  `${CLAUDE_PLUGIN_DATA}` is none of these: it is one folder per user shared by
+  every project, it is never in the repo, and the shell commands a skill runs
+  cannot see it.
+
+`scripts/config-files.ts` is the one place that decides which files flow reads.
+It looks in this order, and the first `config.json` wins:
+
+1. **Your checkout's** `.agents/flow/`.
+2. **The main checkout's** `.agents/flow/`, when you are in a linked git worktree.
+   `config.local.json` is ignored by git, so it never reaches a new worktree;
+   flow finds it in the main checkout instead, and new files are written there.
+3. **Inside the plugin** (settings from flow before 0.8.0): its own `config/`
+   folder, or, right after a Claude Code update, the previous version's folder.
+   Both files are read from the same folder.
+
+If none of these has a `config.json`, flow is not configured yet and `/flow`
+sends you to `/flow:init`.
+
+### Moving settings out of the plugin
+
+The first `/flow` or `/flow:init` after updating runs
+`config-files.ts migrate`. It copies `config.local.json` byte for byte (readable
+only by you) and then `config.json` into `.agents/flow/`, pointing the copy's
+`$schema` at the published schema so your editor still checks it. It never
+overwrites a file already in `.agents/flow/`: if one differs, it stops and names
+both files, and flow keeps reading the old ones until you decide. It never
+deletes the old files either, because another project may use the same install.
+Once your project has its own `config.json`, the old files are no longer read
+for it; delete them when no project needs them. Commit `.agents/flow/config.json`
+and `.agents/flow/.gitignore`.
 
 ## Precedence
 
@@ -86,7 +134,12 @@ overwrote.
 ## Schema and editor validation
 
 `config.json` references `config.schema.json` through its `$schema` key, which
-gives editors inline validation and autocomplete for the behavioral policy.
+gives editors inline validation and autocomplete for the behavioral policy. The
+key is the schema's published URL
+(`https://raw.githubusercontent.com/dork-labs/marketplace/main/plugins/flow/config/config.schema.json`),
+because a path into the plugin would not resolve from your project and would name
+one machine's install folder in a committed file. `/flow` itself checks the file
+against the copy of the schema in the plugin you have installed.
 
 `config.schema.json` is **generated**, not hand-written. The authoritative schema
 is the engine's `config-schema.ts` (the Zod source of truth); the JSON Schema

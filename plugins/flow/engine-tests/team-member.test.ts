@@ -14,7 +14,7 @@
  * flow suites; the orchestrator wires barrel exports later.
  *
  * @see specs/unified-workflow-system/02-specification.md §5 (comment-response), §7 (ownership)
- * @see .agents/flow/skills/tending-tracker/SKILL.md (the prose loop these pieces back)
+ * @see <flow-root>/skills/tending-tracker/SKILL.md (the prose loop these pieces back)
  */
 
 import { describe, expect, it } from 'vitest';

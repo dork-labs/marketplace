@@ -3,8 +3,8 @@
  * authoritative Zod schema. Run via `node --experimental-strip-types
  * plugins/flow/scripts/generate-config-schema.ts`.
  *
- * The artifact is the JSON Schema that the plugin's `config/config.json`'s
- * `$schema` points at; this module keeps it in sync with `config-schema.ts`.
+ * The artifact is the JSON Schema that a project's `.agents/flow/config.json`
+ * points at through its `$schema` URL; this module keeps it in sync with `config-schema.ts`.
  * Prettier formatting lives here (not in the schema builder) so the engine's
  * runtime surface stays free of build-tooling deps; the unit tests import
  * {@link serializeConfigJsonSchema} from this script to assert the committed

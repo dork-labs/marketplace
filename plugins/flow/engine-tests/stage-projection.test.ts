@@ -8,7 +8,8 @@
  * `@dorkos/flow` (`StagesSchema`), which the adapter reads to know what to
  * project. This test pins that config projection: each stage maps to its
  * documented `{ command, label, stateCategory }`, and the resolved defaults
- * match the on-disk `.agents/flow/config.json` the engine actually runs on.
+ * match the `config.example.json` template a project's
+ * `.agents/flow/config.json` is seeded from.
  *
  * The load-bearing rows (spec §9 / §10):
  *   - `execute` / `verify` → `stateCategory: "started"`, with a driving command.
@@ -16,7 +17,7 @@
  *     (the human gate is not agent-driven).
  *   - `done` → `stateCategory: "completed"`.
  */
-import { existsSync, readFileSync } from 'node:fs';
+import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import path from 'node:path';
 import { describe, it, expect } from 'vitest';
@@ -24,10 +25,8 @@ import { StagesSchema, type Stage } from '../scripts/config-schema.ts';
 
 // engine-tests -> plugins/flow (the plugin bundle root)
 const pluginRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
-const configPath = path.join(pluginRoot, 'config', 'config.json');
-// `config.json` is gitignored (generated per install by `/flow:init`); a fresh
-// clone falls back to the committed, un-customized `config.example.json` — see
-// `config-schema.test.ts`'s `readConfigJson` for the full rationale.
+// The committed, un-customized template (`config-schema.test.ts`'s
+// `readConfigJson` has the rationale).
 const configExamplePath = path.join(pluginRoot, 'config', 'config.example.json');
 
 /**
@@ -141,9 +140,8 @@ describe('stage → projection round-trip (config-driven)', () => {
     }
   });
 
-  it('the resolved defaults match the on-disk .agents/flow/config.json stages', () => {
-    const resolvedPath = existsSync(configPath) ? configPath : configExamplePath;
-    const onDisk = JSON.parse(readFileSync(resolvedPath, 'utf8')) as {
+  it('the resolved defaults match the config.example.json template stages', () => {
+    const onDisk = JSON.parse(readFileSync(configExamplePath, 'utf8')) as {
       stages: Record<string, unknown>;
     };
     const fromDisk = StagesSchema.parse(onDisk.stages);

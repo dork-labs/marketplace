@@ -7,10 +7,11 @@ node_modules/
 # /flow runtime config.
 #
 # The committed TEMPLATES are config/config.example.json and
-# config/config.local.example.json. The resolved config and any secret/local
-# overrides (config.json, *.local.json) are generated per install by /flow:init
-# and must never be committed: when this plugin is dogfooded via
-# `claude --plugin-dir`, the plugin dir IS a working tree, so an un-ignored
-# config.json would leak the host's personal config back into this repo.
+# config/config.local.example.json. A project's settings live in its own
+# .agents/flow/ (scripts/config-files.ts), never in this folder, but flow before
+# 0.8.0 wrote config.json and config.local.json here, and a `claude --plugin-dir`
+# checkout that ran it may still hold them until they are migrated. The plugin
+# dir IS a working tree then, so an un-ignored copy would leak the host's
+# personal config and credentials back into this repo.
 config/config.json
 *.local.json

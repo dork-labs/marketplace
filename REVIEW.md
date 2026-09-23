@@ -48,8 +48,9 @@ Architecture, naming, refactoring, and style preferences are nits at most.
   `plugins/flow/scripts/**` from any other package breaks adopters who install
   with `--omit=dev` (`engine-tests/runtime-deps.test.ts`, `plugins/flow/package.json`).
 - **No secret, account handle, team id or model name in committed config.**
-  Those live in the gitignored `config/config.local.json`; `config.json` and the
-  `*.example.json` templates hold policy only (`plugins/flow/config/CONFIG.md`).
+  Those live in a project's gitignored `.agents/flow/config.local.json`; a project's
+  `.agents/flow/config.json` and the plugin's `*.example.json` templates hold policy
+  only (`plugins/flow/config/CONFIG.md`, `plugins/flow/scripts/config-files.ts`).
 - **The config schema is generated, never hand-edited.** A change to the Zod
   source must ship the regenerated `config/config.schema.json`
   (`npm run generate:schema`; CI fails on drift).

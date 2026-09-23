@@ -1,4 +1,4 @@
-import { existsSync, readFileSync } from 'node:fs';
+import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import path from 'node:path';
 import { describe, it, expect } from 'vitest';
@@ -12,30 +12,20 @@ import { validateConfig } from '../scripts/validate-config.ts';
 
 // engine-tests -> plugins/flow (the plugin bundle root)
 const pluginRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
-const configPath = path.join(pluginRoot, 'config', 'config.json');
 const configExamplePath = path.join(pluginRoot, 'config', 'config.example.json');
 const generatedSchemaPath = path.join(pluginRoot, 'config', 'config.schema.json');
 
 /**
- * Reads the resolved config these tests validate against. `config/config.json`
- * is gitignored by design (`.gitignore`: "generated per install by
- * `/flow:init`... must never be committed") — a fresh clone has no
- * `config.json` at all, only the checked-in `config.example.json` template.
- * Falling back to the template rather than requiring a local `config.json`
- * keeps the suite reproducible from a bare `git clone && npm ci && npm test`
- * (DOR-537 follow-up: `681/681` was previously only reproducible with an
- * untracked local `config.json` an unwitting reviewer wouldn't have).
- *
- * This is also the semantically correct fallback, not merely a convenient
- * one: `config.example.json` is committed as the un-customized default
- * config, and the tests that consume this function assert the on-disk config
- * round-trips through `FlowConfigSchema` identically to `FlowConfigSchema.
- * parse({})` — i.e. they were always testing "the default template", whether
- * that template arrived via a real local `config.json` or the example.
+ * Reads the committed `config.example.json` template these tests validate
+ * against: the un-customized default config `/flow:init` seeds a project's
+ * `.agents/flow/config.json` from. The tests that consume this assert it
+ * round-trips through `FlowConfigSchema` identically to
+ * `FlowConfigSchema.parse({})`. A project's own settings never live in the
+ * plugin folder (DOR-2274), so there is no other file to read here, and the
+ * suite stays reproducible from a bare `git clone && npm ci && npm test`.
  */
 function readConfigJson(): unknown {
-  const resolvedPath = existsSync(configPath) ? configPath : configExamplePath;
-  return JSON.parse(readFileSync(resolvedPath, 'utf8'));
+  return JSON.parse(readFileSync(configExamplePath, 'utf8'));
 }
 
 /**
@@ -72,7 +62,7 @@ function newAjv() {
 }
 
 describe('FlowConfigSchema — parsing the §9 config.json', () => {
-  it('parses the on-disk .agents/flow/config.json', () => {
+  it('parses the config.example.json template', () => {
     const parsed = FlowConfigSchema.parse(readConfigJson());
     expect(parsed.tracker).toBe('linear');
     expect(parsed.identity.marker).toBe('— 🤖 /flow');
@@ -113,7 +103,7 @@ describe('FlowConfigSchema — parsing the §9 config.json', () => {
     expect(cfg.evidence.attachTo).toEqual(['pr', 'tracker']);
   });
 
-  it('the resolved §9 default matches the on-disk config.json (minus $schema)', () => {
+  it('the resolved §9 default matches the config.example.json template (minus $schema)', () => {
     const fromDisk = FlowConfigSchema.parse(readConfigJson());
     const fromDefaults = FlowConfigSchema.parse({});
     // config.json carries $schema; the empty-object resolution does not.
@@ -650,7 +640,7 @@ describe('generated config.schema.json artifact', () => {
     expect(onDisk).toEqual(fresh);
   });
 
-  it('the generated config.schema.json validates the actual config.json', () => {
+  it('the generated config.schema.json validates the config.example.json template', () => {
     const json = JSON.parse(readFileSync(generatedSchemaPath, 'utf8'));
     const ajv = newAjv();
     const validate = ajv.compile(json);

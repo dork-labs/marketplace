@@ -4,8 +4,9 @@
  *
  * This schema is the single home that downstream engine code (calibration
  * ladder, dispatch policy, gates, ownership classification, recovery) imports
- * from and extends. The `config.schema.json` JSON Schema artifact at
- * `.agents/flow/config.json`'s `$schema` target is GENERATED from this module
+ * from and extends. The plugin's `config/config.schema.json` JSON Schema
+ * artifact (the `$schema` target of a project's `.agents/flow/config.json`) is
+ * GENERATED from this module
  * via `z.toJSONSchema` (the `conf` precedent — mirrors
  * `apps/server/src/services/core/config-manager.ts`). Never hand-edit the
  * generated artifact; run `pnpm --filter @dorkos/flow generate:schema`.

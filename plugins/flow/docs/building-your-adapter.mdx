@@ -18,7 +18,7 @@ config-templating gymnastics, and keeps the generic engine tracker-agnostic.
 
 <Callout type="info">
   **This describes the adapter model as designed.** The contract, the builder skill, the conformance
-  script, and the reference adapters are being assembled from `.agents/flow/` under spec #264. The
+  script, and the reference adapters are being assembled in the flow plugin under spec #264. The
   paths below are where these artifacts are intended to live; reference them as the shape of the
   system, not a claim that each file is already in place.
 </Callout>
@@ -36,7 +36,7 @@ contract, and a conformance test must pass before the engine will use it.
 
 <Cards>
   <Card title="The contract - adapters/SPEC.md">
-    `.agents/flow/adapters/SPEC.md` is the authoritative contract: the `WorkItem` schema, the
+    The plugin's `adapters/SPEC.md` is the authoritative contract: the `WorkItem` schema, the
     capability verbs your adapter must implement, and the invariants it must uphold.
   </Card>
   <Card title="The builder - building-adapters skill">
@@ -61,7 +61,7 @@ The `building-adapters` skill drives this; you do not write an adapter from a bl
   </Step>
   <Step>
     **Generate from the contract plus the closest reference.** The builder reads
-    `.agents/flow/adapters/SPEC.md` and starts from the nearest reference adapter (the bundled
+    the plugin's `adapters/SPEC.md` and starts from the nearest reference adapter (the bundled
     references begin with Linear-MCP and Linear-Composio) so common cases are a small edit, not a
     from-scratch implementation.
   </Step>

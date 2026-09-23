@@ -13,8 +13,8 @@
  * `{ ok, failures: [{ invariant, detail }] }` verdict, the exit-code contract)
  * is the one the building-adapters skill documents; keep them in lockstep.
  *
- * @see .agents/flow/adapters/SPEC.md section 4 (the normative invariants)
- * @see .agents/flow/skills/building-adapters/references/conformance-harness.md
+ * @see <flow-root>/adapters/SPEC.md section 4 (the normative invariants)
+ * @see <flow-root>/skills/building-adapters/references/conformance-harness.md
  */
 
 import { spawnSync } from 'node:child_process';

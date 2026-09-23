@@ -44,7 +44,7 @@ adapter); the loop's `classifyOwnership` then treats it as not-ours.
 ## Finer-grained control (a config edit, not a command)
 
 To disable or reprioritize ONE reconciler loop rather than pausing everything, edit
-the `loops` config in `${CLAUDE_PLUGIN_ROOT}/config/config.json`: `loops.<id>.enabled: false`
+the `loops` config in the project's `.agents/flow/config.json`: `loops.<id>.enabled: false`
 silences that loop (e.g. `loops.triage`, `loops.hygiene`), and `loops.<id>.priority`
 reorders the tick. See the dials guide (`${CLAUDE_PLUGIN_ROOT}/docs/the-dials.mdx`). Resume
 everything with `/flow:resume`.

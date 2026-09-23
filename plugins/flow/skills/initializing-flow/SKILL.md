@@ -52,16 +52,27 @@ confirms before overwriting committed config.
 
 ### Step 1 - Detect: fresh install or re-run
 
-Check whether `<flow-root>/config/config.json` exists and parses as valid JSON
-(`node -e "require('<flow-root>/config/config.json')"` exits `0`).
+flow's settings live in the project, never in the plugin: `.agents/flow/config.json`
+(committed team policy) and `.agents/flow/config.local.json` (this machine's
+credentials and overrides, ignored by git). An older flow kept them inside the plugin,
+where an update could erase them, so first copy any such settings over, then ask
+where the settings are:
 
-- **No file, or invalid JSON → fresh install.** This is the _expected_ state of a
-  clean install: the plugin ships `config.example.json` (the committed template),
-  never a `config.json` (that file is gitignored and generated right here, so it
-  cannot leak a host's config back into the plugin when dogfooded via
-  `--plugin-dir`). Proceed to Step 2 with defaults seeded from
-  `config.example.json` if present, otherwise from schema defaults.
-- **Valid file exists → re-run (reconfigure).** Do **not** clobber it silently.
+```bash
+node --experimental-strip-types "<flow-root>/scripts/config-files.ts" migrate
+node --experimental-strip-types "<flow-root>/scripts/config-files.ts"
+```
+
+`migrate` never overwrites or deletes; when it prints `"migrated": true`, tell the
+operator which files it wrote. The second command prints
+`{ ok, origin, committed, local, projectDir, errors, warnings }`.
+
+- **`"origin": "none"`, or a `committed` file that is not valid JSON → fresh
+  install.** This is the _expected_ state of a clean install: the plugin ships
+  only the templates `<flow-root>/config/config.example.json` and
+  `config.local.example.json`, never a `config.json`. Proceed to Step 2 with
+  defaults seeded from `config.example.json`, otherwise from schema defaults.
+- **A `committed` file that parses → re-run (reconfigure).** Do **not** clobber it silently.
   Tell the operator `/flow` is already configured (name the current `tracker` and
   `identity.agent`), and ask whether to **reconfigure** (re-gather choices and
   rewrite), **regenerate the adapter only** (skip Steps 2 and 4, jump to Step 3),
@@ -282,11 +293,28 @@ regenerating from scratch, and only regenerate if validation fails.
 
 ### Step 4 - Scaffold the config triad and the review rubric
 
-Write the two config files, confirm the ignore, then scaffold the review rubric.
-The triad and its precedence are documented in `<flow-root>/config/CONFIG.md`;
-honor it.
+Prepare the project's settings folder, write the two config files, then scaffold
+the review rubric. The triad and its precedence are documented in
+`<flow-root>/config/CONFIG.md`; honor it.
 
-1. **`config.json`** (committed, no secrets). Set the resolved behavioral policy
+0. **Prepare the folder.** Run
+
+   ```bash
+   node --experimental-strip-types "<flow-root>/scripts/config-files.ts" prepare
+   ```
+
+   It creates the project's `.agents/flow/` (in the main checkout when you are in a
+   linked git worktree, so every worktree finds the files), writes
+   `.agents/flow/.gitignore` so git ignores `config.local.json`, asks git to prove
+   it, and prints `{ ok, projectDir, committed, local, gitignore }`. Write the two
+   files below to exactly the `committed` and `local` paths it prints. On
+   `"ok": false`, **stop**: git would commit the credentials file. Show the
+   `reason` and do not write `config.local.json` until the operator fixes it. A
+   committed credential file is the one outcome setup must never allow.
+
+1. **`config.json`** (committed, no secrets). Seed it from
+   `<flow-root>/config/config.example.json`, keeping its `$schema` (a URL, so editors
+   validate the file from the project). Set the resolved behavioral policy
    from Step 2: `tracker` (the chosen tracker's short name), `connection.transport`
    (the transport choice — `cli` or `mcp`), `identity.agent` (`"auto"` for shared,
    the agent handle for two-account), `ownership.scope` (the project-routing
@@ -308,7 +336,8 @@ honor it.
    it from the template if it does not already exist:
 
    ```bash
-   test -f <flow-root>/config/config.local.json || cp <flow-root>/config/config.local.example.json <flow-root>/config/config.local.json
+   LOCAL="<the local path prepare printed>"
+   test -f "$LOCAL" || (umask 077 && cp <flow-root>/config/config.local.example.json "$LOCAL")
    ```
 
    Fill in `secrets.trackerAccount` (the connection/account handle from Step 2)
@@ -322,10 +351,9 @@ honor it.
    block you do not need. If an existing `config.local.json` is present, merge the new values in
    rather than overwriting the operator's other overrides.
 
-3. **Confirm the ignore.** Verify the repo `.gitignore` already ignores the local
-   file (`grep -q 'config.local.json' .gitignore`). It does in this repo; if a
-   future adopter's `.gitignore` lacks it, surface that loudly: a committed
-   credential file is the one outcome setup must never allow.
+3. **Tell the operator what to commit:** `.agents/flow/config.json` and
+   `.agents/flow/.gitignore`. Never `config.local.json`; `prepare` already proved
+   git ignores it.
 
 4. **The review rubric** (only when `review.adversarial` resolves true). If no
    file exists at the path in `review.rubric` — resolved as the table below
@@ -472,7 +500,9 @@ can change them with another `/flow:init`.
   procedure Step 3 invokes.
 - `<flow-root>/adapters/SPEC.md` - the tracker-neutral adapter contract the
   generated adapter conforms to.
-- `<flow-root>/config/config.json` / `<flow-root>/config/config.local.example.json` - the
+- `<flow-root>/config/config.example.json` / `<flow-root>/config/config.local.example.json` - the
   committed policy template and the local-secrets template Step 4 scaffolds from.
+- `<flow-root>/scripts/config-files.ts` - where the project's settings live: `resolve`
+  (default), `migrate` and `prepare`, as Steps 1 and 4 use them.
 - `<flow-root>/templates/review-rubric.md` - the review-rubric scaffold Step 4
   copies to the repo root when `review.adversarial` is on.

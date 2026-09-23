@@ -20,7 +20,7 @@ description: Reference tracker adapter for /flow - Linear reached over an in-ses
 >
 > **Tracker strings live here legitimately.** This file is a concrete adapter, so
 > it names `mcp__linear__*` tool strings on purpose. It sits under
-> `.agents/flow/adapters/reference/`, outside the tracker-confinement guard's
+> `<flow-root>/adapters/reference/`, outside the tracker-confinement guard's
 > scanned roots. No generic stage skill or `/flow:*` command may name a tracker
 > string; this reference adapter is where they are allowed.
 

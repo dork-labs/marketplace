@@ -108,13 +108,13 @@ The plugin is inert until it knows your tracker and identity. You do not configu
 
 <Steps>
   <Step>
-    **Scaffold config from the template.** It seeds a working `config.json` (the
-    dials that govern the loop) from the committed `config.example.json`
-    template, and adds a gitignored `config.local.json` for tracker tokens and
-    any account binding. The plugin never ships a resolved `config.json` or
-    `*.local.json` (both are gitignored), so neither your config nor your
-    secrets can leak back into the plugin when you dogfood it via
-    `--plugin-dir`.
+    **Scaffold config from the template.** It writes your project's
+    `.agents/flow/config.json` (the dials that govern the loop, shared with your
+    team) from the plugin's `config.example.json` template, and adds
+    `.agents/flow/config.local.json` for tracker tokens and any account binding,
+    which a `.agents/flow/.gitignore` keeps out of git. Both live in your
+    project, not in the plugin, so updating or reinstalling the plugin never
+    touches them.
   </Step>
   <Step>
     **Resolve your tracker, identity, and project** through the calibration
@@ -141,9 +141,10 @@ The plugin is inert until it knows your tracker and identity. You do not configu
 
 | Path                                  | What it is                                                                  | Committed?                 |
 | ------------------------------------- | --------------------------------------------------------------------------- | -------------------------- |
-| `config/config.example.json`          | The committed config template (`/flow:init` seeds from it).                 | Yes                        |
-| `config/config.json`                  | Your resolved dials.                                                        | No (gitignored; generated) |
-| `config/config.local.json`            | Tracker tokens and account binding.                                         | No (gitignored)            |
+| `.agents/flow/config.json`            | Your dials, in your project. Shared with your team.                         | Yes                        |
+| `.agents/flow/config.local.json`      | Tracker tokens and account binding for this machine.                        | No (ignored by git)        |
+| `.agents/flow/.gitignore`             | Keeps `config.local.json` out of git.                                       | Yes                        |
+| `config/config.example.json`          | The config template in the plugin (`/flow:init` seeds from it).             | Yes (from the plugin)      |
 | `scripts/*.ts`                        | The shipped deterministic oracles + `validate-adapter.ts` (run via `node`). | Yes (from the plugin)      |
 | The generated adapter                 | Your tracker-aware code, conforming to the contract; you own it.            | Yes                        |
 | `flow-drain` (schedulable tick skill) | The autonomy tick. Ships `schedule.enabled: false`; approve it to arm.      | Yes (from the plugin)      |

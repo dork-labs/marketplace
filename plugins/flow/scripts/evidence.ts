@@ -49,8 +49,8 @@
  * selector's output is identical across v1 and P5 — only the executor changes.
  *
  * @see specs/unified-workflow-system/02-specification.md §13 (browser proof-of-completion)
- * @see .agents/flow/skills/verifying-work/SKILL.md (the VERIFY stage skill)
- * @see .agents/flow/skills/<tracker>-adapter/SKILL.md (`attachEvidence`)
+ * @see <flow-root>/skills/verifying-work/SKILL.md (the VERIFY stage skill)
+ * @see <flow-root>/skills/<tracker>-adapter/SKILL.md (`attachEvidence`)
  * @see research/20260611_agent_browser_video_recording.md (gif_creator vs recordVideo)
  * @module @dorkos/flow/evidence
  */
