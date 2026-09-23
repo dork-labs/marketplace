@@ -15,5 +15,7 @@ node_modules/
 # personal config and credentials back into this repo.
 config/config.json
 *.local.json
-# The marker a migration leaves naming the project the settings moved to.
+# The markers a migration leaves: the project the settings moved to, and the
+# projects that said they are not theirs.
 config/MIGRATED_TO
+config/DECLINED_BY

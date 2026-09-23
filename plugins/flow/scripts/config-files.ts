@@ -37,9 +37,12 @@
  * this project (a DorkOS project-scope install) belongs to it, so its settings
  * are copied without asking. A folder anywhere else may be shared by several
  * projects, so its settings are only copied once a person confirms they are this
- * project's. Nothing is ever overwritten or deleted; after a migration the old
- * folder gets a {@link MIGRATED_MARKER} naming the project, so no other project
- * silently inherits those settings.
+ * project's. Until then they are not used at all: flow reports the project as not
+ * configured rather than act on another project's settings. Nothing is ever
+ * overwritten or deleted; after a migration the old folder gets a
+ * {@link MIGRATED_MARKER} naming the project, so no other project silently
+ * inherits those settings, and a "not mine" answer is kept in its
+ * {@link DECLINED_MARKER} so it is never asked again.
  *
  * Like `validate-config.ts`, this imports nothing outside Node, so it runs before
  * `npm install`.
@@ -81,6 +84,12 @@ export const LOCAL_CONFIG_FILE = 'config.local.json';
  * settings.
  */
 export const MIGRATED_MARKER = 'MIGRATED_TO';
+/**
+ * The file in an old plugin `config/` folder listing, one per line, the projects
+ * whose person said its settings are not theirs. Such a project is never asked
+ * about that folder again and never reads it.
+ */
+export const DECLINED_MARKER = 'DECLINED_BY';
 /**
  * The `$schema` a project's `config.json` points at. A relative path to the
  * plugin cannot resolve from the project, and an absolute one would name one
@@ -151,8 +160,13 @@ export interface PrepareResult {
   committed: string;
   /** Where the project's `config.local.json` goes. */
   local: string;
-  /** The `.gitignore` files that keep the local file out of git. */
-  gitignores: string[];
+  /**
+   * The files that keep the local file out of git: a `.gitignore` in a folder of
+   * the current checkout (it travels with the branch), or the repo's
+   * `info/exclude` for a folder in another checkout (an untracked `.gitignore`
+   * there would block the merge that brings the branch's copy in).
+   */
+  ignoreFiles: string[];
   /** Why `ok` is false. */
   reason?: string;
 }
@@ -334,6 +348,22 @@ export function legacyConfigDirs(pluginRoot: string): string[] {
   return [own, ...siblings];
 }
 
+/** The path that names this project in the old folder's markers. */
+function projectKey(roots: ConfigRoots): string {
+  return roots.mainCheckout ?? roots.checkout;
+}
+
+/** Whether this project's person said the settings in `dir` are not theirs. */
+function declinedBy(dir: string, roots: ConfigRoots): boolean {
+  const marker = readOrNull(path.join(dir, DECLINED_MARKER));
+  if (marker === null) return false;
+  const key = projectKey(roots);
+  return marker
+    .toString('utf8')
+    .split(/\r?\n/)
+    .some((line) => line.trim() === key);
+}
+
 /** The project a legacy folder's settings were moved to, or `null`. */
 function movedTo(dir: string): string | null {
   const marker = readOrNull(path.join(dir, MIGRATED_MARKER));
@@ -373,6 +403,7 @@ export function resolveConfigFiles(roots: ConfigRoots): ConfigFiles {
       base.moved.push({ folder: dir, movedTo: moved });
       continue;
     }
+    if (declinedBy(dir, roots)) continue;
     const local = path.join(dir, LOCAL_CONFIG_FILE);
     const inProject = [roots.checkout, roots.mainCheckout]
       .filter((root): root is string => root !== null)
@@ -405,26 +436,60 @@ function ensureGitignore(dir: string): string {
 }
 
 /**
- * Make the project ready for settings: in the folder `config.json` goes in and
- * the folder `config.local.json` goes in, create the folder and a `.gitignore`
- * that keeps the local file out of git (created, or the lines appended), then ask
- * git to prove the local file would be ignored in each. Safe to repeat.
+ * Keep the local file in `dir` out of git through the repo's `info/exclude`,
+ * which every checkout of the repo reads and none commits. Idempotent.
+ */
+function ensureExclude(dir: string): string {
+  mkdirSync(dir, { recursive: true });
+  const common = gitOutput(dir, ['rev-parse', '--path-format=absolute', '--git-common-dir']);
+  const top = gitOutput(dir, ['rev-parse', '--show-toplevel']);
+  if (common === null || top === null) throw new Error(`${dir} is not in a git checkout`);
+  const rel = path.relative(path.resolve(top), dir).split(path.sep).join('/');
+  const exclude = path.join(common, 'info', 'exclude');
+  mkdirSync(path.dirname(exclude), { recursive: true });
+  const text = existsSync(exclude) ? readFileSync(exclude, 'utf8') : '';
+  const present = new Set(text.split(/\r?\n/).map((line) => line.trim()));
+  const missing = GITIGNORE_LINES.map((line) => `/${rel}/${line}`).filter(
+    (line) => !present.has(line)
+  );
+  if (missing.length > 0) {
+    const separator = text === '' || text.endsWith('\n') ? '' : '\n';
+    writeFileSync(exclude, `${text}${separator}${missing.join('\n')}\n`);
+  }
+  return exclude;
+}
+
+/**
+ * Make the project ready for settings: create the folder `config.json` goes in
+ * and the folder `config.local.json` goes in, keep the local file out of git in
+ * each, then ask git to prove it. A folder in the current checkout (or outside
+ * git) gets a `.gitignore`, which is committed with `config.json`. A folder in
+ * another checkout, the main checkout seen from a linked worktree, gets an entry
+ * in the repo's `info/exclude` instead: an untracked `.gitignore` there would stop
+ * `git merge` / `git pull` from bringing in the branch's committed copy. Safe to
+ * repeat.
  *
+ * @param roots - The checkouts; which one a folder is in decides how it is ignored.
  * @param files - The resolved files, whose `committedDir` and `localDir` are prepared.
  * @returns The paths to write, and `ok: false` when git would still track a local file.
  */
 export function prepareConfigDirs(
+  roots: ConfigRoots,
   files: Pick<ConfigFiles, 'committedDir' | 'localDir'>
 ): PrepareResult {
   const dirs = [...new Set([files.committedDir, files.localDir])];
-  const gitignores = dirs.map(ensureGitignore);
+  const ownCheckout = (dir: string) => !roots.inGit || isWithin(dir, roots.checkout);
+  const ignoreFiles = [
+    ...new Set(dirs.map((dir) => (ownCheckout(dir) ? ensureGitignore(dir) : ensureExclude(dir)))),
+  ];
   const result = {
     committed: path.join(files.committedDir, CONFIG_FILE),
     local: path.join(files.localDir, LOCAL_CONFIG_FILE),
-    gitignores,
+    ignoreFiles,
   };
-  // The line alone proves nothing: a negation rule, or a copy git already
-  // tracks, keeps the file in git. Only git's own answer counts.
+  // The entry alone proves nothing: a negation rule, or a copy git already
+  // tracks, keeps the file in git. Only git's own answer counts, in every folder
+  // that may receive credentials.
   const tracked = dirs
     .map((dir) => path.join(dir, LOCAL_CONFIG_FILE))
     .find((local) => inGitRepo(path.dirname(local)) && !gitIgnores(local));
@@ -526,11 +591,13 @@ function summarise(folder: string): SettingsSummary {
  *
  * @param roots - The checkout, main checkout and plugin root to look in.
  * @param options - `confirm`: a person said these settings are this project's.
+ *   `decline`: a person said they are not; the folder is marked so this project
+ *   never reads it or asks about it again, and nothing is copied.
  * @returns What was written, what already matched, and what was left in place.
  */
 export function migrateConfig(
   roots: ConfigRoots,
-  options: { confirm?: boolean } = {}
+  options: { confirm?: boolean; decline?: boolean } = {}
 ): MigrationResult {
   const files = resolveConfigFiles(roots);
   const none = {
@@ -558,6 +625,22 @@ export function migrateConfig(
     reason,
   });
 
+  if (files.shared && options.decline === true) {
+    const marker = path.join(from, DECLINED_MARKER);
+    const text = readOrNull(marker)?.toString('utf8') ?? '';
+    const separator = text === '' || text.endsWith('\n') ? '' : '\n';
+    try {
+      writeFileSync(marker, `${text}${separator}${projectKey(roots)}\n`);
+    } catch (err) {
+      return stop(`${from} could not be marked as not this project's: ${(err as Error).message}`);
+    }
+    return {
+      ok: true,
+      migrated: false,
+      ...outcome,
+      reason: `the settings in ${from} will not be used or offered for this project again`,
+    };
+  }
   if (files.shared && options.confirm !== true) {
     return {
       ok: true,
@@ -577,7 +660,7 @@ export function migrateConfig(
   }
 
   try {
-    const prepared = prepareConfigDirs(files);
+    const prepared = prepareConfigDirs(roots, files);
     if (files.local !== null) {
       if (!prepared.ok) return stop(prepared.reason ?? 'the project folder could not be prepared');
       const bytes = readFileSync(files.local);
@@ -605,7 +688,7 @@ export function migrateConfig(
     return stop(`copying the settings failed: ${(err as Error).message}`);
   }
 
-  const project = roots.mainCheckout ?? roots.checkout;
+  const project = projectKey(roots);
   let reason = `settings copied into ${files.committedDir}; the old files in ${from} were left in place`;
   try {
     writeFileSync(path.join(from, MIGRATED_MARKER), `${project}\n`);
@@ -617,7 +700,7 @@ export function migrateConfig(
 
 const HELP = `config-files — find, migrate and prepare flow's settings files.
 
-Usage: config-files.ts [resolve|migrate|prepare] [--confirm] [--project <dir>]
+Usage: config-files.ts [resolve|migrate|prepare] [--confirm|--decline] [--project <dir>]
 
   resolve   (default) Which config.json and config.local.json flow reads, with
             config.json checked against config.schema.json. Prints
@@ -625,11 +708,13 @@ Usage: config-files.ts [resolve|migrate|prepare] [--confirm] [--project <dir>]
               errors, warnings }. Exit 0 when configured and valid, 1 otherwise.
   migrate   Copy settings from inside the plugin into the project's .agents/flow/.
             Settings in a plugin folder outside the project are only copied with
-            --confirm, after a person says they are this project's. Never
+            --confirm, after a person says they are this project's; --decline
+            records that they are not, so this project never reads or asks about
+            them again. Never
             overwrites or deletes. Prints { ok, migrated, needsConfirmation, found,
             from, wrote, unchanged, leftInPlace, reason }. Exit 0 unless it stopped.
   prepare   Create the .agents/flow/ folders and make git ignore config.local.json
-            in each. Prints { ok, committed, local, gitignores }: write the files to
+            in each. Prints { ok, committed, local, ignoreFiles }: write the files to
             exactly those paths. Exit 1 when git would still track the local file.
 
 --project <dir> is the folder to act for (default: the current directory).
@@ -670,12 +755,19 @@ function resolveCommand(roots: ConfigRoots): { result: object; ok: boolean } {
   }
   if (files.origin === 'legacy') {
     const folder = path.dirname(files.committed as string);
-    warnings.push({
-      path: '(file)',
-      message: files.shared
-        ? `flow is reading settings from ${folder}, a plugin folder outside this project that other projects may share (${describe(summarise(folder))}); if they are this project's, run config-files.ts migrate --confirm to move them into it, otherwise set this project up with /flow:init`
-        : `flow's settings are still inside the plugin at ${folder}, where a plugin update can erase them; run config-files.ts migrate to copy them into ${files.committedDir}`,
-    });
+    if (files.shared) {
+      // Fail closed: settings nobody has confirmed are this project's must not
+      // drive it (a scheduled run would claim another project's work).
+      errors.push({
+        path: '(file)',
+        message: `these settings may belong to another project; run /flow in this project to confirm. They are in ${folder}, a plugin folder other projects may share (${describe(summarise(folder))})`,
+      });
+    } else {
+      warnings.push({
+        path: '(file)',
+        message: `flow's settings are still inside the plugin at ${folder}, where a plugin update can erase them; run config-files.ts migrate to copy them into ${files.committedDir}`,
+      });
+    }
   }
   for (const moved of files.moved) {
     warnings.push({
@@ -704,6 +796,7 @@ export function main(argv: readonly string[]): number {
   let command: Command = 'resolve';
   let project = process.cwd();
   let confirm = false;
+  let decline = false;
   for (let i = 0; i < argv.length; i += 1) {
     const arg = argv[i];
     if (arg === '--help' || arg === '-h') {
@@ -716,6 +809,8 @@ export function main(argv: readonly string[]): number {
       project = path.resolve(arg.slice('--project='.length));
     } else if (arg === '--confirm') {
       confirm = true;
+    } else if (arg === '--decline') {
+      decline = true;
     } else if ((COMMANDS as readonly string[]).includes(arg) && i === 0) {
       command = arg as Command;
     } else {
@@ -734,14 +829,18 @@ export function main(argv: readonly string[]): number {
 
   let output: { result: object; ok: boolean };
   if (command === 'migrate') {
-    const result = migrateConfig(roots, { confirm });
+    if (confirm && decline) {
+      process.stderr.write(`config-files: --confirm and --decline cannot both be given\n`);
+      return 2;
+    }
+    const result = migrateConfig(roots, { confirm, decline });
     process.stderr.write(`config-files: ${result.reason}\n`);
     if (result.needsConfirmation && result.found !== null) {
       process.stderr.write(`config-files: found ${describe(result.found)}\n`);
     }
     output = { result, ok: result.ok };
   } else if (command === 'prepare') {
-    const result = prepareConfigDirs(resolveConfigFiles(roots));
+    const result = prepareConfigDirs(roots, resolveConfigFiles(roots));
     if (result.reason !== undefined) process.stderr.write(`config-files: ${result.reason}\n`);
     output = { result, ok: result.ok };
   } else {

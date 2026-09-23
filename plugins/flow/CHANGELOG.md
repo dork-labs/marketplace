@@ -23,14 +23,17 @@ you until you **reinstall it** (Marketplace → flow → reinstall, or re-run yo
   installed somewhere several projects can share, the settings there might belong
   to another project, tokens included. flow shows you the tracker, team and folder
   it found and asks whether they are this project's before it moves anything. If
-  you say no, it sets this project up fresh.
+  you say no, it remembers that and sets this project up fresh. Until someone
+  answers, flow does not use those settings at all, so a scheduled run stops and
+  asks for you instead of working on another project's tasks.
 - After a move, flow leaves a note in the old folder saying which project the
   settings went to, so another project using the same install is never handed
   them.
 - The move never overwrites a file that is already there and never deletes the old
   files. Once your project has its own settings, flow stops reading the old ones.
 - In a git worktree, flow finds your machine's settings in your main checkout, so a
-  new worktree needs nothing copied into it.
+  new worktree needs nothing copied into it. flow keeps them out of git there
+  without adding any file to your main checkout, so merging the branch stays easy.
 
 ## 0.7.4
 

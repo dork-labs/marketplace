@@ -77,9 +77,12 @@ overwrites or deletes anything, and it prints
   included). Nothing was copied. Show the operator `found` (the folder, tracker, team and
   workspace; never a credential) and ask with `AskUserQuestion`: **"Are these this
   project's settings?"** On yes, run the same command with `migrate --confirm` and report
-  it as above. On no, route to `/flow:init` to set this project up fresh, and stop. With
-  no human to ask (a headless run), do not confirm: carry on with the old settings, which
-  is what flow did before 0.8.0, and say so in the run's report.
+  it as above. On no, run `migrate --decline` (flow remembers the answer and never asks
+  this project again), then route to `/flow:init` to set this project up fresh, and stop.
+  With no human to ask (a headless run, such as a scheduled tick), never answer for them:
+  stop the run and report, in plain words, "these settings may belong to another project;
+  run /flow in this project to confirm". Acting on another project's settings would claim
+  its work.
 - **`"ok": false`**: show its `reason` and carry on; flow keeps reading the old files until
   the operator resolves it.
 
@@ -94,7 +97,10 @@ warnings }`: the
 `config.json` and `config.local.json` in use (`local` may be `null`), with `config.json`
 checked against `config/config.schema.json` (a field the schema gives a default may be left
 out). When `"ok": false` (no `config.json` anywhere, or an `errors` entry), route straight to
-`/flow:init` to scaffold it and stop, before any stage or dispatch work. **Warnings never
+`/flow:init` to scaffold it and stop, before any stage or dispatch work. A headless run
+stops instead of routing, and reports the first error's message; one at `(file)` saying the
+settings "may belong to another project" means a person has to run `/flow` in this project
+to confirm them. **Warnings never
 do.** Most are an unknown key in `config.json` (a typo, or a setting this version of flow no
 longer has) that flow ignores; the rest are about the file itself (settings still inside the
 plugin, settings moved to another project, or team settings git ignores). Show every warning to the operator, naming its path,

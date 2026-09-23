@@ -80,8 +80,8 @@ Which files are read, first match wins:
 1. **project**: `<checkout>/.agents/flow/config.json`, else `<mainCheckout>/.agents/flow/config.json`.
    `config.local.json` is then looked up the same way (checkout, then main checkout), independently,
    and may be absent. Legacy files are never consulted once the project has a `config.json`.
-2. **legacy**: the first of these directories that holds a `config.json` and no `MIGRATED_TO`
-   marker; `config.local.json` is taken from the same directory or is absent (never mixed with
+2. **legacy**: the first of these directories that holds a `config.json`, no `MIGRATED_TO`
+   marker, and no `DECLINED_BY` line naming this project; `config.local.json` is taken from the same directory or is absent (never mixed with
    the project's, or across directories):
    1. `<flow-root>/config/` (DorkOS installs, `--plugin-dir`, a local-directory marketplace).
    2. When `<flow-root>` is `…/plugins/cache/<marketplace>/<plugin>/<version>` (Claude Code's
@@ -104,7 +104,12 @@ Where files are written (review finding 2):
 - `localDir`: the folder of the `config.local.json` in use; otherwise the **main checkout**
   (`<mainCheckout ?? checkout>`). An ignored file never reaches a new worktree, so the main
   checkout is the one place every worktree of the project finds it.
-- Both folders get the flow-written `.gitignore`, because a local file may be written in either.
+- Both folders keep a local file out of git, because one may be written in either. A folder in
+  the current checkout (or outside git) gets the flow-written `.gitignore`, committed with
+  `config.json`. A folder in another checkout (the main checkout, seen from a worktree) gets
+  entries in the repo's `info/exclude` (`/.agents/flow/config.local.json` and its temp
+  pattern) instead: an untracked `.gitignore` there would block `git merge`/`git pull` once the
+  branch's committed copy lands (review round 2, finding A).
 
 ### `scripts/config-files.ts`
 
@@ -115,6 +120,7 @@ export const PROJECT_CONFIG_DIR = '.agents/flow';
 export const CONFIG_FILE = 'config.json';
 export const LOCAL_CONFIG_FILE = 'config.local.json';
 export const MIGRATED_MARKER = 'MIGRATED_TO';
+export const DECLINED_MARKER = 'DECLINED_BY';
 export const CONFIG_SCHEMA_URL =
   'https://raw.githubusercontent.com/dork-labs/marketplace/main/plugins/flow/config/config.schema.json';
 
@@ -134,11 +140,11 @@ export function findConfigRoots(cwd: string, pluginRoot: string): ConfigRoots;
 export function refusalFor(roots: ConfigRoots): string | null;
 export function legacyConfigDirs(pluginRoot: string): string[];
 export function resolveConfigFiles(roots: ConfigRoots): ConfigFiles;
-export function prepareConfigDirs(files: Pick<ConfigFiles, 'committedDir' | 'localDir'>): PrepareResult;
-export function migrateConfig(roots: ConfigRoots, options?: { confirm?: boolean }): MigrationResult;
+export function prepareConfigDirs(roots: ConfigRoots, files: Pick<ConfigFiles, 'committedDir' | 'localDir'>): PrepareResult;
+export function migrateConfig(roots: ConfigRoots, options?: { confirm?: boolean; decline?: boolean }): MigrationResult;
 ```
 
-CLI: `node --experimental-strip-types "<flow-root>/scripts/config-files.ts" [resolve|migrate|prepare] [--confirm] [--project <dir>]`.
+CLI: `node --experimental-strip-types "<flow-root>/scripts/config-files.ts" [resolve|migrate|prepare] [--confirm|--decline] [--project <dir>]`.
 
 - **`resolve`** (default). Prints
   `{ ok, origin, committed, local, committedDir, localDir, shared, moved, errors, warnings }`
@@ -147,8 +153,11 @@ CLI: `node --experimental-strip-types "<flow-root>/scripts/config-files.ts" [res
   `{ path, message }` issues for the committed file; unreadable JSON is one error at `(root)`.
   More warnings, at path `(file)`:
   - origin `legacy`, not shared: "settings are still inside the plugin at <dir>; run `migrate`".
-  - origin `legacy`, shared: names the folder, tracker, team and workspace, and says to run
-    `migrate --confirm` if they are this project's, otherwise `/flow:init`.
+  - origin `legacy`, shared: **an error, not a warning** (review round 2, finding C: fail
+    closed). "these settings may belong to another project; run /flow in this project to
+    confirm", naming the folder, tracker, team and workspace. `ok` is false, so a headless run
+    stops instead of claiming another project's work; an interactive run has already been asked
+    by `migrate` before it gets here.
   - each `moved` folder: "the settings in <dir> were moved to <project>; flow did not use them".
   - the project's `config.json` is ignored by git: "team settings in <path> are ignored by git,
     so they are not shared" (the file still works).
@@ -161,8 +170,13 @@ CLI: `node --experimental-strip-types "<flow-root>/scripts/config-files.ts" [res
     `needsConfirmation: true` and `found` = `{ folder, tracker, team, workspace }` (team and
     workspace from the local file over the committed one; never a credential). The `/flow` guard
     and `/flow:init` show `found` and ask "Are these this project's settings?"; yes runs
-    `migrate --confirm`, no sets the project up fresh, and a headless run keeps reading the
-    legacy files (the pre-0.8.0 behaviour) without copying.
+    `migrate --confirm`, no runs `migrate --decline` and sets the project up fresh, and a
+    headless run stops and reports (it never answers for a person).
+  - `--decline` (shared only): appends the project's path (main checkout, else checkout) to the
+    folder's `DECLINED_BY`. That folder is then skipped for this project by `resolve` and
+    `migrate`, so neither `/flow` nor `/flow:init` asks again, even after an abandoned setup
+    (review round 2, finding D). The marker lives in the old folder, like `MIGRATED_TO`, so
+    the project gets no extra file. `--confirm` with `--decline` is a usage error.
   - origin `legacy`, not shared or confirmed: the committed file must parse as a JSON object, or
     the migration stops with `ok: false` and writes nothing. Then `prepare`.
   - `config.local.json` first, when the legacy directory has one; a `prepare` that is not `ok`
@@ -186,10 +200,12 @@ CLI: `node --experimental-strip-types "<flow-root>/scripts/config-files.ts" [res
     checkout's, or the checkout's), so the next project on a shared install is told the settings
     belong to that project and is routed to `/flow:init` rather than inheriting them. A folder
     that cannot be written to is reported in `reason`; the migration still succeeds.
-- **`prepare`**. Creates `committedDir` and `localDir`, ensures each has a `.gitignore` holding
-  `config.local.json` and `.config.local.json.*.tmp` (creating the file, or appending the
-  missing lines; review finding 5), and when inside a git repo confirms with `git check-ignore`
-  that `config.local.json` is ignored in each. Prints `{ ok, committed, local, gitignores }`
+- **`prepare`**. Creates `committedDir` and `localDir` and keeps `config.local.json` and
+  `.config.local.json.*.tmp` out of git in each (a `.gitignore` in the current checkout, the
+  repo's `info/exclude` for another checkout; created or appended, never duplicated), and when
+  inside a git repo confirms with `git check-ignore` that `config.local.json` is ignored in each,
+  so the folder that receives the credentials is the one proven. Prints
+  `{ ok, committed, local, ignoreFiles }`
   with the target paths. `ok: false` (exit 1) when git would still track the local file (a
   negation rule, or a copy already committed); nothing secret may be written then.
 
@@ -236,7 +252,9 @@ flow 0.7.4 → **0.8.0** (where settings live changes) in `plugin.json`, `.dork/
   and `.gitignore` (never `config.local.json`, which is ignored).
 - Upgrading, plugin in a shared place (Claude Code cache, `--plugin-dir`, a DorkOS user-scope
   install): `/flow` shows the folder, tracker, team and workspace it found and asks whether they
-  are this project's. Yes moves them as above; no runs `/flow:init` for a fresh setup.
+  are this project's. Yes moves them as above; no is remembered and runs `/flow:init` for a
+  fresh setup. A scheduled run meets them unconfirmed: it stops and says a person must run
+  `/flow` to confirm.
 - A second project on a shared install whose settings already moved: told where they went and
   sent to `/flow:init`.
 - Fresh install: `/flow:init` writes into `.agents/flow/` and says so.
@@ -261,12 +279,16 @@ flow 0.7.4 → **0.8.0** (where settings live changes) in `plugin.json`, `.dork/
   a second project on the shared install gets nothing; legacy files still exist; second run is a
   no-op; an interrupted migration completes; a differing local file stops with nothing
   overwritten; something else at the `config.json` destination stops it; a tracked/negated
-  local file writes nothing; invalid legacy JSON writes nothing; bare-relative `$schema`
+  local file writes nothing (also from a worktree, via the main checkout); a decline is
+  remembered for that project only and never asked again; invalid legacy JSON writes nothing; bare-relative `$schema`
   rewritten and a URL kept; a worktree splits the files between branch and main checkout.
-- prepare: both folders get an effective `.gitignore` (temp copies ignored too); appends to an
-  existing `.gitignore` without duplicating; `ok: false` when a negation rule keeps the file
-  tracked.
-- CLI: `resolve` exit codes and warnings (shared legacy described, ignored committed file,
+- prepare: an effective `.gitignore` in the checkout (temp copies ignored too); the main
+  checkout covered by `info/exclude` with no `.gitignore`, and the branch's committed settings
+  merge into it cleanly; appends to an existing `.gitignore` without duplicating; `ok: false`
+  when a negation rule keeps the file tracked, including one in the main checkout that receives
+  the credentials from a worktree.
+- CLI: `resolve` exit codes and warnings (unconfirmed shared legacy refused with the plain
+  reason, in-project legacy accepted, ignored committed file,
   secrets block, invalid JSON); the migrate → `--confirm` round trip; `prepare` targets; the home
   folder refused; an unknown subcommand is exit 2.
 
@@ -318,7 +340,18 @@ flow's CHANGELOG.
    `config.local.json` next to the one in use, else the main checkout; a `.gitignore` in both.
    **Rationale:** the first draft wrote both to the main checkout while `resolve` read the
    worktree's own `config.json` first, and left the worktree's folder with no `.gitignore`, so a
-   local file placed there by hand was not ignored.
+   local file placed there by hand was not ignored. Round 2 refined it: the main checkout's
+   folder is covered by `info/exclude`, never a `.gitignore`, which would block the merge that
+   brings the branch's committed `.gitignore` in.
+4. ~~What does a headless run do with shared settings nobody confirmed?~~ (RESOLVED in review
+   round 2, orchestrator decision)
+   **Answer:** Fail closed: `resolve` reports not configured with a plain reason, and the run
+   stops. **Rationale:** a scheduled tick in project B acting on project A's settings would claim
+   A's issues. Project-scope installs (auto-moved) are unaffected.
+5. ~~How is a "no" remembered?~~ (RESOLVED in review round 2)
+   **Answer:** `migrate --decline` adds the project to the old folder's `DECLINED_BY`.
+   **Rationale:** the simplest place that survives an abandoned `/flow:init`, needs no extra file
+   or ignore rule in the project, and scopes the answer to one project on a shared install.
 
 ## Related ADRs
 

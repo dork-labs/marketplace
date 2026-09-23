@@ -25,8 +25,10 @@ node --experimental-strip-types "<flow-root>/scripts/config-files.ts" prepare
 # then edit config.local.json and fill in your values
 ```
 
-`prepare` creates the `.agents/flow/` folders, writes a `.gitignore` in each, and
-asks git to prove the local file is ignored before you put a token in it. Copy to
+`prepare` creates the `.agents/flow/` folders, keeps the local file out of git in
+each (a `.gitignore` in your checkout; in a worktree, the main checkout's folder
+through the repo's `.git/info/exclude`, so it never blocks a merge there), and asks
+git to prove it before you put a token in it. Copy to
 the exact `local` path it prints: in a git worktree that is the main checkout's
 folder, not the one you are standing in.
 
@@ -85,8 +87,11 @@ only by you) and then `config.json` into `.agents/flow/`, pointing the copy's
   checkout, a DorkOS install for your whole user) may serve several projects, so
   the settings in it may be another project's, tokens included. flow shows you the
   folder, tracker, team and workspace it found and asks whether they are this
-  project's. Only a yes copies them (`migrate --confirm`); a no sets this project up
-  fresh with `/flow:init`. Until you answer, flow keeps reading them as before.
+  project's. Only a yes copies them (`migrate --confirm`). A no is remembered in a
+  `DECLINED_BY` file in that folder, so this project is never asked again, and it is
+  set up fresh with `/flow:init`. Until someone answers, flow does not use the
+  settings at all: a scheduled run stops and says a person must run `/flow` to
+  confirm, rather than act on another project's settings.
 
 After a move, the old folder gets a `MIGRATED_TO` file naming your project, so
 another project on the same install is never handed your settings; it is told
@@ -95,6 +100,12 @@ where they went and set up fresh. The copy never overwrites a file already in
 reading the old ones until you decide. The old files are never deleted; delete
 them yourself once no project needs them. Commit `.agents/flow/config.json` and
 `.agents/flow/.gitignore`.
+
+To use settings that already moved in another project too, copy that project's
+`.agents/flow/config.json` into this one (and write this machine's
+`config.local.json`), or delete the folder's `MIGRATED_TO` file to be offered them
+again. To be asked again after saying no, remove this project's line from
+`DECLINED_BY`.
 
 ## Precedence
 

@@ -29,6 +29,7 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
 import {
   CONFIG_SCHEMA_URL,
+  DECLINED_MARKER,
   MIGRATED_MARKER,
   findConfigRoots,
   legacyConfigDirs,
@@ -308,6 +309,20 @@ describe('resolveConfigFiles', () => {
     });
   });
 
+  // The other half of never mixing: an old folder with no local file leaves
+  // `local` empty even when the project has one of its own.
+  it('reports no local file when the old folder has none, whatever the project has', () => {
+    const repo = makeRepo();
+    write(path.join(repo, '.agents/flow/config.local.json'), '{}');
+    const plugin = makePlugin(path.join(repo, '.dork', 'plugins', 'flow'), {
+      config: LEGACY_CONFIG,
+    });
+    expect(resolveConfigFiles(roots(repo, plugin))).toMatchObject({
+      origin: 'legacy',
+      local: null,
+    });
+  });
+
   // The upgrade case: the new version folder is empty, the old one has the
   // settings. Fails if the cache siblings are not searched.
   it('finds settings left in the previous cache version folder', () => {
@@ -365,46 +380,86 @@ describe('resolveConfigFiles', () => {
 });
 
 describe('prepareConfigDirs', () => {
+  const one = (repo: string) => {
+    const dir = path.join(repo, '.agents/flow');
+    return { dir, files: { committedDir: dir, localDir: dir } };
+  };
+
   // The local file holds credentials, so the folder must make git ignore it,
   // and the temporary copies a write makes, before anything is written there.
   it('creates the folder and a .gitignore that git honours', () => {
     const repo = makeRepo();
-    const dir = path.join(repo, '.agents/flow');
-    const result = prepareConfigDirs({ committedDir: dir, localDir: dir });
+    const { dir, files } = one(repo);
+    const result = prepareConfigDirs(roots(repo, PLUGIN_DIR), files);
     expect(result).toMatchObject({
       ok: true,
       committed: path.join(dir, 'config.json'),
       local: path.join(dir, 'config.local.json'),
+      ignoreFiles: [path.join(dir, '.gitignore')],
     });
     write(path.join(dir, 'config.local.json'), '{}');
     write(path.join(dir, '.config.local.json.1234.tmp'), '{}');
     expect(untracked(repo)).toBe('?? .agents/flow/.gitignore');
   });
 
-  // In a worktree the two files go to two folders; both get the .gitignore,
-  // because a local file may be written in either. Fails if only one does.
-  it('prepares both folders when they differ', () => {
+  // In a worktree, config.json goes on the branch (a .gitignore travels with it)
+  // and the local file goes to the main checkout, which is kept clean: its
+  // folder is excluded through the repo's info/exclude, never an untracked
+  // .gitignore. Fails if the main checkout gets a .gitignore.
+  it('ignores the main checkout’s local file through info/exclude', () => {
     const repo = makeRepo();
     const wt = path.join(base, 'wt');
     git(repo, 'worktree', 'add', '-q', wt, '-b', 'wt');
-    const result = prepareConfigDirs({
+    const result = prepareConfigDirs(roots(wt, PLUGIN_DIR, repo), {
       committedDir: path.join(wt, '.agents/flow'),
       localDir: path.join(repo, '.agents/flow'),
     });
     expect(result.ok).toBe(true);
+    expect(result.ignoreFiles).toEqual([
+      path.join(wt, '.agents/flow/.gitignore'),
+      path.join(repo, '.git/info/exclude'),
+    ]);
     write(path.join(wt, '.agents/flow/config.local.json'), '{}');
     write(path.join(repo, '.agents/flow/config.local.json'), '{}');
+    write(path.join(repo, '.agents/flow/.config.local.json.99.tmp'), '{}');
     expect(untracked(wt)).toBe('?? .agents/flow/.gitignore');
-    expect(untracked(repo)).toBe('?? .agents/flow/.gitignore');
+    expect(untracked(repo)).toBe('');
+    expect(existsSync(path.join(repo, '.agents/flow/.gitignore'))).toBe(false);
+  });
+
+  // The review's merge case: once the branch's committed .gitignore and
+  // config.json land, the main checkout can merge it, because flow left no
+  // untracked file there in the way; the local file stays ignored after.
+  it('leaves the main checkout free to merge the branch’s settings', () => {
+    const repo = makeRepo();
+    const wt = path.join(base, 'wt');
+    git(repo, 'worktree', 'add', '-q', wt, '-b', 'wt');
+    const r = roots(wt, PLUGIN_DIR, repo);
+    const prepared = prepareConfigDirs(r, {
+      committedDir: path.join(wt, '.agents/flow'),
+      localDir: path.join(repo, '.agents/flow'),
+    });
+    prepareConfigDirs(r, {
+      committedDir: path.join(wt, '.agents/flow'),
+      localDir: path.join(repo, '.agents/flow'),
+    });
+    write(prepared.local, '{"secrets":{}}');
+    write(prepared.committed, '{}');
+    git(wt, 'add', '.agents');
+    git(wt, '-c', 'user.email=t@example.com', '-c', 'user.name=t', 'commit', '-q', '-m', 'flow');
+    git(repo, 'merge', '-q', '--ff-only', 'wt');
+    expect(git(repo, 'status', '--porcelain', '--untracked-files=all')).toBe('');
+    const exclude = readFileSync(path.join(repo, '.git/info/exclude'), 'utf8').split('\n');
+    expect(exclude.filter((l) => l === '/.agents/flow/config.local.json')).toHaveLength(1);
   });
 
   // An existing .gitignore is someone's file: add the lines once, keep the rest.
   it('appends to an existing .gitignore once, keeping its lines', () => {
     const repo = makeRepo();
-    const dir = path.join(repo, '.agents/flow');
+    const { dir, files } = one(repo);
     write(path.join(dir, '.gitignore'), 'notes.md');
-    prepareConfigDirs({ committedDir: dir, localDir: dir });
-    prepareConfigDirs({ committedDir: dir, localDir: dir });
+    prepareConfigDirs(roots(repo, PLUGIN_DIR), files);
+    prepareConfigDirs(roots(repo, PLUGIN_DIR), files);
     const lines = readFileSync(path.join(dir, '.gitignore'), 'utf8').split('\n');
     expect(lines).toContain('notes.md');
     expect(lines.filter((l) => l === 'config.local.json')).toHaveLength(1);
@@ -416,9 +471,25 @@ describe('prepareConfigDirs', () => {
   // trusts the .gitignore line without asking git.
   it('refuses when git would still track the local file', () => {
     const repo = makeRepo();
-    const dir = path.join(repo, '.agents/flow');
+    const { dir, files } = one(repo);
     write(path.join(dir, '.gitignore'), 'config.local.json\n!config.local.json\n');
-    expect(prepareConfigDirs({ committedDir: dir, localDir: dir }).ok).toBe(false);
+    expect(prepareConfigDirs(roots(repo, PLUGIN_DIR), files).ok).toBe(false);
+  });
+
+  // The folder that receives the credentials is the one that must be proven:
+  // a "!config.local.json" rule in the main checkout, where the local file goes
+  // from a worktree, refuses. Fails if only the worktree's folder is checked.
+  it('refuses when the main checkout would track the local file', () => {
+    const repo = makeRepo();
+    const wt = path.join(base, 'wt');
+    git(repo, 'worktree', 'add', '-q', wt, '-b', 'wt');
+    write(path.join(repo, '.agents/flow/.gitignore'), '!config.local.json\n');
+    const result = prepareConfigDirs(roots(wt, PLUGIN_DIR, repo), {
+      committedDir: path.join(wt, '.agents/flow'),
+      localDir: path.join(repo, '.agents/flow'),
+    });
+    expect(result.ok).toBe(false);
+    expect(result.reason).toContain(path.join(repo, '.agents/flow/config.local.json'));
   });
 });
 
@@ -547,7 +618,7 @@ describe('migrateConfig', () => {
   it('finishes a migration interrupted between the two files', () => {
     const { repo, r } = inProjectSetup();
     const dir = path.join(repo, '.agents/flow');
-    prepareConfigDirs({ committedDir: dir, localDir: dir });
+    prepareConfigDirs(r, { committedDir: dir, localDir: dir });
     write(path.join(dir, 'config.local.json'), LEGACY_LOCAL);
     expect(resolveConfigFiles(r).origin).toBe('legacy');
     const result = migrateConfig(r);
@@ -591,6 +662,49 @@ describe('migrateConfig', () => {
     expect(migrateConfig(r).ok).toBe(false);
     expect(existsSync(path.join(dir, 'config.local.json'))).toBe(false);
     expect(existsSync(path.join(dir, 'config.json'))).toBe(false);
+  });
+
+  // From a worktree, the credentials go to the main checkout; a rule there that
+  // keeps them tracked stops the whole migration before anything is written.
+  it('writes nothing from a worktree when the main checkout would track the local file', () => {
+    const repo = makeRepo();
+    const wt = path.join(base, 'wt');
+    git(repo, 'worktree', 'add', '-q', wt, '-b', 'wt');
+    write(path.join(repo, '.agents/flow/.gitignore'), '!config.local.json\n');
+    const plugin = makePlugin(path.join(repo, '.dork', 'plugins', 'flow'), {
+      config: LEGACY_CONFIG,
+      local: LEGACY_LOCAL,
+    });
+    expect(migrateConfig(findConfigRoots(wt, plugin)).ok).toBe(false);
+    expect(existsSync(path.join(repo, '.agents/flow/config.local.json'))).toBe(false);
+    expect(existsSync(path.join(wt, '.agents/flow/config.json'))).toBe(false);
+  });
+
+  // "Not this project's" is remembered in the old folder: the project never
+  // reads those settings, is never asked again (so an abandoned /flow:init does
+  // not re-ask on every /flow), and other projects are unaffected.
+  it('remembers a decline, for this project only', () => {
+    const plugin = makePlugin(path.join(base, 'plugin'), {
+      config: LEGACY_CONFIG,
+      local: LEGACY_LOCAL,
+    });
+    const a = makeRepo('a');
+    const b = makeRepo('b');
+    expect(migrateConfig(roots(a, plugin), { decline: true })).toMatchObject({
+      ok: true,
+      migrated: false,
+      wrote: [],
+    });
+    expect(readFileSync(path.join(plugin, 'config', DECLINED_MARKER), 'utf8')).toBe(`${a}\n`);
+    expect(resolveConfigFiles(roots(a, plugin)).origin).toBe('none');
+    expect(migrateConfig(roots(a, plugin))).toMatchObject({
+      needsConfirmation: false,
+      reason: 'nothing to migrate',
+    });
+    expect(existsSync(path.join(a, '.agents'))).toBe(false);
+    expect(migrateConfig(roots(b, plugin)).needsConfirmation).toBe(true);
+    migrateConfig(roots(b, plugin), { decline: true });
+    expect(readFileSync(path.join(plugin, 'config', DECLINED_MARKER), 'utf8')).toBe(`${a}\n${b}\n`);
   });
 
   // A broken legacy config.json cannot be carried over faithfully; nothing is
@@ -720,21 +834,38 @@ describe('config-files CLI', () => {
     });
   });
 
-  // Shared legacy settings still work, and the warning names what they are, so a
-  // person can tell whether they are this project's.
-  it('resolve describes shared legacy settings in its warning', () => {
+  // Fail closed: settings nobody has confirmed are this project's must not drive
+  // it, so a headless run (a scheduled tick) stops with a plain reason instead
+  // of claiming another project's work. The reason names what was found, never
+  // a credential.
+  it('resolve refuses shared legacy settings nobody confirmed', () => {
     const repo = makeRepo();
     const plugin = installCopy(path.join(base, 'install'), {
       config: LEGACY_CONFIG,
       local: LEGACY_LOCAL,
     });
     const { status, out } = run(plugin, repo);
-    expect(status).toBe(0);
-    expect(out).toMatchObject({ origin: 'legacy', shared: true });
-    const text = out.warnings.map((w: { message: string }) => w.message).join('\n');
+    expect(status).toBe(1);
+    expect(out).toMatchObject({ ok: false, origin: 'legacy', shared: true });
+    const text = out.errors.map((e: { message: string }) => e.message).join('\n');
+    expect(text).toContain('may belong to another project; run /flow in this project to confirm');
     expect(text).toContain('team ACME');
-    expect(text).toContain('migrate --confirm');
     expect(text).not.toContain('tok');
+  });
+
+  // A plugin inside the project (DorkOS project scope) is that project's: its
+  // legacy settings still work before they are moved, with a nudge to move them.
+  it('resolve accepts legacy settings from a plugin inside the project', () => {
+    const repo = makeRepo();
+    const plugin = installCopy(path.join(repo, '.dork', 'plugins', 'flow'), {
+      config: LEGACY_CONFIG,
+    });
+    const { status, out } = run(plugin, repo);
+    expect(status).toBe(0);
+    expect(out).toMatchObject({ ok: true, origin: 'legacy', shared: false, errors: [] });
+    expect(out.warnings.map((w: { message: string }) => w.message).join('\n')).toContain(
+      'run config-files.ts migrate'
+    );
   });
 
   // validate-config's findings come through unchanged: a wrong value is an
@@ -783,6 +914,7 @@ describe('config-files CLI', () => {
     const asked = run(plugin, base, ['migrate', '--project', repo]);
     expect(asked.status).toBe(0);
     expect(asked.out).toMatchObject({ migrated: false, needsConfirmation: true });
+    expect(run(plugin, base, ['migrate', '--confirm', '--decline']).status).toBe(2);
     const moved = run(plugin, base, ['migrate', '--confirm', '--project', repo]);
     expect(moved.out.migrated).toBe(true);
     expect(moved.stderr).not.toContain('tok');
