@@ -51,6 +51,7 @@ marketplace/
 │   ├── SOUL.md              # Agent personality traits
 │   └── NOPE.md              # Agent safety boundaries
 ├── scripts/                 # Fixture-pinned guard and gate scripts (run by scripts-test.yml)
+├── specs/<slug>/            # Design docs for a change: 01-ideation, 02-specification, 03-tasks.json
 ├── tools/schema-check/      # The `skills and manifests` gate
 └── plugins/<name>/          # One folder per package; marketplace.json is the list
 ```

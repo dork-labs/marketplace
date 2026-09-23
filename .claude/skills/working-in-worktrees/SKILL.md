@@ -130,7 +130,7 @@ The `/flow` intent stages — `/flow:ideate`, `/flow:specify`, `/flow:decompose`
 
    Manifest-only or prose-only work needs neither.
 
-   **Local flow config does not come with you.** `plugins/flow/config/config.json` and `*.local.json` are gitignored, so a new worktree does not have the main checkout's copy. Copy it in only if the work needs to run flow against a real tracker, and never commit it.
+   **Local flow config stays in the main checkout.** flow reads its settings from the project's `.agents/flow/`, and from a linked worktree it finds the main checkout's copy, so nothing needs copying in. Never commit `.agents/flow/config.local.json`, or a legacy `plugins/flow/config/config.json` left by flow before 0.8.0.
 
 4. **Verify it exists before you rely on it.**
 

@@ -1,8 +1,9 @@
 /**
  * @dorkos/flow — the `/flow` engine's typed core.
  *
- * Home of the authoritative Zod config schema for `.agents/flow/config.json`
- * and the JSON Schema bridge that generates `.agents/flow/config.schema.json`.
+ * Home of the authoritative Zod config schema for a project's
+ * `.agents/flow/config.json` and the JSON Schema bridge that generates the
+ * plugin's `config/config.schema.json`.
  * Downstream engine code (calibration ladder, dispatch policy, gates,
  * ownership classification, recovery) imports the relevant sub-schemas and the
  * inferred {@link FlowConfig} type from here.

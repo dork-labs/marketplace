@@ -53,7 +53,7 @@
  * re-tuning comms is a config edit, never a code change.
  *
  * @see specs/unified-workflow-system/02-specification.md §5 (comms channel)
- * @see .agents/flow/skills/<tracker>-adapter/SKILL.md (`needsInput`, `getInbox`)
+ * @see <flow-root>/skills/<tracker>-adapter/SKILL.md (`needsInput`, `getInbox`)
  * @module @dorkos/flow/comms
  */
 

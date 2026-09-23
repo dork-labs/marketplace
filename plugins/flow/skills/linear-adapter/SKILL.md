@@ -52,6 +52,8 @@ skill:
 | `connection.transport`      | which access path is **primary** — `cli` or `mcp`            | `config.json` (committed policy)          |
 | `secrets.trackerAccount`    | the account handle the CLI acts as                           | `config.local.json` (secret, out-of-band) |
 
+Both settings files live in the **project**, never in the plugin: `.agents/flow/config.json` (committed policy) and `.agents/flow/config.local.json` (this machine's credentials and coordinates, ignored by git; in a git worktree it may be the main checkout's copy). Run `node --experimental-strip-types "<flow-root>/scripts/config-files.ts"` and read the `committed` and `local` paths it prints; never guess them. Values in the local file override the committed one.
+
 `/flow:init` sets all of these. A real team key/id and workspace slug live in the
 gitignored `config.local.json`, never in the shared committed config — a concrete
 id baked into the shipped template would re-hardcode the agnosticism this seam
@@ -66,7 +68,7 @@ which is primary. The adapter is the only place either path appears.
 **`cli` (the default) — the Composio CLI, account-pinned.** Works even when the
 MCP server is unauthenticated (see the `composio-cli` skill). Linear slugs are
 `LINEAR_*`. **Always pass `--account "<trackerAccount>"`**, read fresh from
-`config.local.json` → `secrets.trackerAccount` (set by `/flow:init`); **never
+`.agents/flow/config.local.json` → `secrets.trackerAccount` (set by `/flow:init`); **never
 hardcode an account name here.** This is the safe default precisely because the
 acting identity is pinned by config: any other connected account — a maintainer's
 personal login, or unrelated `artblocks` work — must **never** receive flow's

@@ -51,5 +51,5 @@ adapter).
 ## Re-enabling a single reconciler loop
 
 If you silenced one loop via `loops.<id>.enabled: false` (see `/flow:pause`), flip
-it back to `true` in `${CLAUDE_PLUGIN_ROOT}/config/config.json`. See the dials guide
+it back to `true` in the project's `.agents/flow/config.json`. See the dials guide
 (`${CLAUDE_PLUGIN_ROOT}/docs/the-dials.mdx`).

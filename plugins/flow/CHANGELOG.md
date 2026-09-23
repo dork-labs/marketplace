@@ -4,6 +4,37 @@ Installs of this plugin are pinned to a commit SHA, so a fix here does not reach
 you until you **reinstall it** (Marketplace → flow → reinstall, or re-run your
 `--plugin-dir` checkout's `git pull`). Each entry below says whether that matters.
 
+## 0.8.0
+
+**Your flow settings now live in your project, so updating flow can never erase them again. Update, then run `/flow` once.**
+
+- flow used to keep its settings inside the plugin's own folder. Some tools, Claude
+  Code among them, replace that folder when the plugin updates, so every update
+  could lose your settings and send you back to `/flow:init`.
+- Your settings now live in your project, in `.agents/flow/`. `config.json` holds
+  your team's settings and is meant to be committed. `config.local.json` holds this
+  computer's tokens and overrides, and flow adds a `.agents/flow/.gitignore` so it
+  is never committed. flow checks that git really ignores it before writing
+  anything secret there.
+- The first `/flow` after updating moves your old settings over, even when Claude
+  Code has already moved flow to a new folder. It tells you which files it wrote.
+  Commit `.agents/flow/config.json` and `.agents/flow/.gitignore`.
+- If flow is installed inside your project, it moves them without asking. If it is
+  installed somewhere several projects can share, the settings there might belong
+  to another project, tokens included. flow shows you the tracker, team and folder
+  it found and asks whether they are this project's before it moves anything. If
+  you say no, it remembers that and sets this project up fresh. Until someone
+  answers, flow does not use those settings at all, so a scheduled run stops and
+  asks for you instead of working on another project's tasks.
+- After a move, flow leaves a note in the old folder saying which project the
+  settings went to, so another project using the same install is never handed
+  them.
+- The move never overwrites a file that is already there and never deletes the old
+  files. Once your project has its own settings, flow stops reading the old ones.
+- In a git worktree, flow finds your machine's settings in your main checkout, so a
+  new worktree needs nothing copied into it. flow keeps them out of git there
+  without adding any file to your main checkout, so merging the branch stays easy.
+
 ## 0.7.4
 
 **Updating flow no longer makes a working config "invalid". Reinstall if `/flow` keeps sending you back to `/flow:init`.**

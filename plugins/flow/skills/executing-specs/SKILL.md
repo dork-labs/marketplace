@@ -88,7 +88,7 @@ If the two rev-parse paths **differ**, the session is already in a secondary wor
 
 ### 0.2 The Config Decides — Read `workspace.isolation`
 
-Read `workspace.isolation` from `<flow-root>/config/config.json`. It has already answered this question; do not re-ask it.
+Read `workspace.isolation` from the project's flow settings (`.agents/flow/config.json`, overridden by `config.local.json`; `node --experimental-strip-types "<flow-root>/scripts/config-files.ts"` prints both paths). It has already answered this question; do not re-ask it.
 
 - **`"worktree"` (the default) → isolate, without asking.** Create the isolated worktree and execute there. The rationale is _one checkout, one writer_: a checkout is routinely shared with other agents and sessions, and two writers in one checkout corrupt each other's work. Say in one line that you isolated and why; do not turn it into a question.
 - **`"none"` → execute in place, without asking.** The operator has opted out of isolation deliberately. Still run the contention check from 0.3: if another agent or session is working in this checkout, **warn and proceed** — name the _one checkout, one writer_ hazard and say that config opted out of isolation. Warn, do not block and do not ask; the operator's config already answered, but they should know the hazard is live right now.

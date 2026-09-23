@@ -287,7 +287,7 @@ This confinement is what makes everything above pure and portable:
 - The **`FlowRun` store** injects its fs seam, never importing `fs`.
 - The **reconcilers** decide via an oracle, then act by naming an adapter verb (`claim`, `comment`, `transition`, `needsInput`); they never embed a tracker call.
 
-In v1 the adapter is realized as a documented **prose contract** (the skill owns the MCP / Composio calls and normalizes every tracker into the `WorkItem` shape). The agnosticism win ("all tracker I/O in one place") is real today with no new infrastructure. The typed `interface PMClient` documented in the flow contract (`.agents/flow/SPEC.md`) is what the P5 server promotes that prose into: same verbs, same normalization, now executable code.
+In v1 the adapter is realized as a documented **prose contract** (the skill owns the MCP / Composio calls and normalizes every tracker into the `WorkItem` shape). The agnosticism win ("all tracker I/O in one place") is real today with no new infrastructure. The typed `interface PMClient` documented in the flow contract (the plugin's `docs/SPEC.md`) is what the P5 server promotes that prose into: same verbs, same normalization, now executable code.
 
 <Callout type="info">
   This is why the agnosticism is testable rather than aspirational. The generic layer is

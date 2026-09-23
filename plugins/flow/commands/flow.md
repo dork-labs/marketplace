@@ -57,20 +57,59 @@ PM-driven-autonomous cell is the Pulse seat, a fresh session per tick.
 
 ## Routing
 
-**First-run guard (before any routing).** On any `/flow` invocation, confirm flow
-is configured: if `${CLAUDE_PLUGIN_ROOT}/config/config.json` is absent, or fails validation when run
-through `node --experimental-strip-types "${CLAUDE_PLUGIN_ROOT}/scripts/validate-config.ts"` (config JSON in,
-`{ "ok": true, "config": …, "warnings": […] }` or `{ "ok": false, "errors": […], "warnings": […] }`
-out; a field the schema gives a default may be left out), route straight to `/flow:init`
-to scaffold it and stop, before any stage or dispatch work. Only `"ok": false` routes
-there. **Warnings never do:** each one is an unknown key in `config.json` (a typo, or a
-setting this version of flow no longer has) that flow ignores. Show every warning to the
-operator, naming its path, then carry on. Show a warning at `/secrets` first, and make it
-stand out: it means tracker credentials are sitting in the committed `config.json`, so tell the
-operator plainly to move that block to the gitignored `config.local.json` before anything
-is committed. A field missing from `config.json` means its `default` in
-`config/config.schema.json`; read that value wherever a skill reads the raw field. With a
-valid config present, behave exactly as below.
+**First-run guard (before any routing).** flow's settings live in the project, not in
+the plugin: `.agents/flow/config.json` (committed team policy) and
+`.agents/flow/config.local.json` (this machine's credentials and overrides, ignored by git).
+One script knows where they are; never guess a path. On any `/flow` invocation, first run
+
+```bash
+node --experimental-strip-types "${CLAUDE_PLUGIN_ROOT}/scripts/config-files.ts" migrate
+```
+
+It moves settings an older flow kept inside the plugin into the project. It never
+overwrites or deletes anything, and it prints
+`{ ok, migrated, needsConfirmation, found, from, wrote, unchanged, leftInPlace, reason }`:
+
+- **`"migrated": true`**: tell the operator which files it wrote and ask them to commit
+  `.agents/flow/config.json` and `.agents/flow/.gitignore` (never `config.local.json`).
+- **`"needsConfirmation": true`**: the old settings sit in a plugin folder outside this
+  project, which several projects may share, so they may be another project's (credentials
+  included). Nothing was copied. Show the operator `found` (the folder, tracker, team and
+  workspace; never a credential) and ask with `AskUserQuestion`: **"Are these this
+  project's settings?"** On yes, run the same command with `migrate --confirm` and report
+  it as above. On no, run `migrate --decline` (flow remembers the answer and never asks
+  this project again), then route to `/flow:init` to set this project up fresh, and stop.
+  With no human to ask (a headless run, such as a scheduled tick), never answer for them:
+  stop the run and report, in plain words, "these settings may belong to another project;
+  run /flow in this project to confirm". Acting on another project's settings would claim
+  its work.
+- **`"ok": false`**: show its `reason` and carry on; flow keeps reading the old files until
+  the operator resolves it.
+
+Then run
+
+```bash
+node --experimental-strip-types "${CLAUDE_PLUGIN_ROOT}/scripts/config-files.ts"
+```
+
+which prints `{ ok, origin, committed, local, committedDir, localDir, shared, moved, errors,
+warnings }`: the
+`config.json` and `config.local.json` in use (`local` may be `null`), with `config.json`
+checked against `config/config.schema.json` (a field the schema gives a default may be left
+out). When `"ok": false` (no `config.json` anywhere, or an `errors` entry), route straight to
+`/flow:init` to scaffold it and stop, before any stage or dispatch work. A headless run
+stops instead of routing, and reports the first error's message; one at `(file)` saying the
+settings "may belong to another project" means a person has to run `/flow` in this project
+to confirm them. **Warnings never
+do.** Most are an unknown key in `config.json` (a typo, or a setting this version of flow no
+longer has) that flow ignores; the rest are about the file itself (settings still inside the
+plugin, settings moved to another project, or team settings git ignores). Show every warning to the operator, naming its path,
+then carry on. Show a warning at `/secrets` first, and make it stand out: it means tracker
+credentials are sitting in the committed `config.json`, so tell the operator plainly to move
+that block to `config.local.json` before anything is committed. Every skill reads settings
+from the two files this printed, with `config.local.json` overriding `config.json`. A field
+missing from both means its `default` in `config/config.schema.json`; read that value
+wherever a skill reads the raw field. With a valid config present, behave exactly as below.
 
 **No arguments (cold start).** When `$ARGUMENTS` is empty, do not guess. Offer the
 operator five intents via `AskUserQuestion`, then route the choice:
@@ -324,7 +363,7 @@ The operator always outranks the loop. Three override surfaces, coarse to fine:
 - **Disable or reorder one loop.** Per-reconciler control is a `loops` config edit,
   not a command: `loops.<id>.enabled: false` silences a single reconciler (e.g.
   `loops.triage`, `loops.hygiene`) and `loops.<id>.priority` reorders the tick. Edit
-  `${CLAUDE_PLUGIN_ROOT}/config/config.json`; see the dials guide (`${CLAUDE_PLUGIN_ROOT}/docs/the-dials.mdx`).
+  the project's `.agents/flow/config.json`; see the dials guide (`${CLAUDE_PLUGIN_ROOT}/docs/the-dials.mdx`).
 - **Reclaim or redirect one item.** Via the adapter, apply the
   **`agent/paused`** marker to an item. The running tick honors `agent/paused` **at
   stage boundaries**: it advances the item no further, releases the claim cleanly

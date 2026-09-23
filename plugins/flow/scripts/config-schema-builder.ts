@@ -1,5 +1,5 @@
 /**
- * JSON Schema generation for the plugin's `config/config.json`.
+ * JSON Schema generation for a project's `.agents/flow/config.json`.
  *
  * `buildConfigJsonSchema()` bridges the authoritative {@link FlowConfigSchema}
  * Zod source to a JSON Schema (via `z.toJSONSchema`, mirroring

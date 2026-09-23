@@ -1,5 +1,5 @@
 {
-  "//": "Template for config.local.json. Copy this file to config.local.json (gitignored), fill in your values, and delete any block you don't need. Holds per-machine secrets and overrides. Precedence: env var > config.local.json > config.json > schema defaults. See .agents/flow/CONFIG.md.",
+  "//": "Template for your project's .agents/flow/config.local.json (ignored by git). /flow:init copies it there; fill in your values and delete any block you don't need. Holds this machine's secrets and overrides. Precedence: env var > config.local.json > config.json > schema defaults. See CONFIG.md beside this file in the flow plugin.",
   "secrets": {
     "trackerToken": "REPLACE_WITH_YOUR_TRACKER_API_TOKEN_OR_OMIT_IF_THE_HOST_HANDLES_AUTH",
     "trackerAccount": "REPLACE_WITH_THE_CONNECTION_OR_ACCOUNT_HANDLE_THE_ADAPTER_AUTHENTICATES_THROUGH"

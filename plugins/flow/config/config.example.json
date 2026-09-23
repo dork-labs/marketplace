@@ -1,5 +1,5 @@
 {
-  "$schema": "./config.schema.json",
+  "$schema": "https://raw.githubusercontent.com/dork-labs/marketplace/main/plugins/flow/config/config.schema.json",
   "tracker": "linear",
   "connection": {
     "team": { "key": null, "id": null },

@@ -20,7 +20,7 @@ description: Reference tracker adapter for /flow - Linear reached over the Compo
 >
 > **Tracker strings live here legitimately.** This file is a concrete adapter, so
 > it names `composio execute LINEAR_*` slugs on purpose. It sits under
-> `.agents/flow/adapters/reference/`, outside the tracker-confinement guard's
+> `<flow-root>/adapters/reference/`, outside the tracker-confinement guard's
 > scanned roots. No generic stage skill or `/flow:*` command may name a tracker
 > string; this reference adapter is where they are allowed.
 
@@ -31,11 +31,16 @@ description: Reference tracker adapter for /flow - Linear reached over the Compo
 The Composio CLI is the transport (see the `composio-cli` skill). Linear slugs
 are `LINEAR_*`; it reaches the **configured team** (`connection.team.key`) in the
 **configured workspace** (`connection.workspace.slug`), both read fresh from
-config — this reference adapter names no team or workspace inline.
+config — this reference adapter names no team or workspace inline. Config is the
+project's `.agents/flow/config.json` with `.agents/flow/config.local.json` over it;
+`node --experimental-strip-types "<flow-root>/scripts/config-files.ts"` prints both
+paths (`committed`, `local`).
 
 - **Auth - the account guard is load-bearing.** **Always pass
-  `--account "<trackerAccount>"`**, read from `config.local.json` →
-  `secrets.trackerAccount` (set by `/flow:init`); never hardcode an account name.
+  `--account "<trackerAccount>"`**, read from the project's
+  `.agents/flow/config.local.json` → `secrets.trackerAccount` (set by
+  `/flow:init`; `node --experimental-strip-types "<flow-root>/scripts/config-files.ts"`
+  prints the file's path as `local`); never hardcode an account name.
   When more than one Linear account is connected in Composio, any account other
   than the configured one — for example an unrelated `artblocks` work login — must
   **never** receive this workspace's issues. A bare `composio execute` picks a

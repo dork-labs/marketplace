@@ -302,17 +302,13 @@ describe('validate-config', () => {
   // The oracle VALIDATES a config object against the committed
   // config/config.schema.json — it never applies Zod defaults, it only decides
   // whether the loader's Zod parse would accept the file. So a complete, valid
-  // config (the bundled config/config.json, falling back to the committed
-  // config.example.json template on a fresh clone — config.json is gitignored,
-  // generated per install by `/flow:init`; see config-schema.test.ts's
-  // `readConfigJson`) is accepted and echoed back verbatim, and so is a config
+  // config (the committed config.example.json template; see
+  // config-schema.test.ts's `readConfigJson`) is accepted and echoed back
+  // verbatim, and so is a config
   // that leaves out fields the schema fills with a default (DOR-2246). An
   // unknown key is reported under `warnings` and never makes a config invalid
   // (DOR-1221's rule: unknown keys must never condemn the file).
-  const configJsonPath = path.join(PLUGIN_DIR, 'config', 'config.json');
-  const configPath = existsSync(configJsonPath)
-    ? configJsonPath
-    : path.join(PLUGIN_DIR, 'config', 'config.example.json');
+  const configPath = path.join(PLUGIN_DIR, 'config', 'config.example.json');
   const fullConfig = JSON.parse(readFileSync(configPath, 'utf8'));
 
   it('accepts a complete valid config and echoes it back unchanged (exit 0)', () => {

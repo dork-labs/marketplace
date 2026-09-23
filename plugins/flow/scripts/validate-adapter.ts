@@ -1,7 +1,7 @@
 /*
  * validate-adapter.ts - the /flow tracker-adapter conformance harness.
  *
- * Asserts the five conformance invariants from .agents/flow/adapters/SPEC.md
+ * Asserts the five conformance invariants from <flow-root>/adapters/SPEC.md
  * section 4 (INV-1 .. INV-5) against a fixture of NORMALIZED WorkItems - the
  * output an adapter's read verbs produce. The fixture is tracker-neutral: it
  * holds only normalized WorkItems, never a tracker API string.
@@ -11,8 +11,8 @@
  * invariants are hand-rolled so the harness ships with the /flow plugin from one
  * canonical source, exactly like the other oracle scripts in this directory
  * (ADR-0294). Keep it in lockstep with:
- *   - .agents/flow/adapters/SPEC.md section 4 (the normative invariants), and
- *   - .agents/flow/skills/building-adapters/references/conformance-harness.md
+ *   - <flow-root>/adapters/SPEC.md section 4 (the normative invariants), and
+ *   - <flow-root>/skills/building-adapters/references/conformance-harness.md
  *     (the operational guide that documents this exact interface).
  *
  * Interface (matches the building-adapters skill doc exactly):
@@ -84,7 +84,7 @@ interface HarnessArgs {
 
 const HELP = `validate-adapter - the /flow tracker-adapter conformance harness.
 
-Asserts the five conformance invariants in .agents/flow/adapters/SPEC.md section 4
+Asserts the five conformance invariants in <flow-root>/adapters/SPEC.md section 4
 against a fixture of NORMALIZED WorkItems (an adapter's read-verb output). The
 fixture is tracker-neutral: normalized WorkItems only, no tracker API strings.
 

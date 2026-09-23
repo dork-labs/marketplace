@@ -1,0 +1,51 @@
+{
+  "spec": "specs/flow-config-location/02-specification.md",
+  "slug": "flow-config-location",
+  "generatedAt": "2026-09-23T17:40:00.000Z",
+  "mode": "full",
+  "lastDecomposeDate": null,
+  "tasks": [
+    {
+      "id": "1.1",
+      "phase": 1,
+      "phaseName": "Settings in the project",
+      "subject": "[flow-config-location] [P1] Add scripts/config-files.ts (resolve, migrate, prepare) test-first",
+      "description": "Create plugins/flow/scripts/config-files.ts exactly per 02-specification.md 'Detailed Design': constants, findConfigRoots, legacyConfigDirs (own config dir, then Claude Code cache siblings by newest config.json mtime), resolveConfigFiles (project pair first, then one legacy dir, then none), prepareProjectDir (.agents/flow/.gitignore with config.local.json, git check-ignore proof), migrateConfig (local first then committed; temp + hard link, never overwrite; byte / deep-equal verification; $schema rewritten to CONFIG_SCHEMA_URL; legacy left in place), and the CLI (resolve default, migrate, prepare; --project). Tests in engine-tests/config-files.test.ts with real temp dirs and git, per the Testing Strategy. Acceptance: all listed scenarios pass, typecheck and prettier clean, critical lines mutation-checked.",
+      "activeForm": "Adding the config-files resolver",
+      "size": "medium",
+      "priority": "high",
+      "dependencies": [],
+      "parallelWith": [],
+      "issue": null,
+      "parentIssue": null
+    },
+    {
+      "id": "1.2",
+      "phase": 1,
+      "phaseName": "Settings in the project",
+      "subject": "[flow-config-location] [P1] Point every command, skill, template and doc at the resolver",
+      "description": "Apply the 'Consumers' table of 02-specification.md: commands/flow.md first-run guard (migrate then resolve) and loops edit path; pause.md, resume.md; initializing-flow Step 1, Step 4 (prepare, then write to printed paths, seed from <flow-root>/config/*.example.json), References; executing-specs and verifying-work config reads; config.example.json $schema URL; config.local.example.json note; CONFIG.md (where the files live, why, worktrees, migration); README contract line; docs/installing-in-your-project.mdx table; docs/the-dials.mdx; scripts/index.ts doc comment; plugin .gitignore comment. Switch config-schema.test.ts, stage-projection.test.ts and scripts-cli.test.ts to read config.example.json only. Acceptance: grep for '<flow-root>/config/config' and 'CLAUDE_PLUGIN_ROOT}/config/config' finds no live-settings reference; tests pass.",
+      "activeForm": "Pointing consumers at the resolver",
+      "size": "medium",
+      "priority": "high",
+      "dependencies": ["1.1"],
+      "parallelWith": [],
+      "issue": null,
+      "parentIssue": null
+    },
+    {
+      "id": "1.3",
+      "phase": 1,
+      "phaseName": "Settings in the project",
+      "subject": "[flow-config-location] [P1] Bump flow to 0.8.0 with a CHANGELOG entry",
+      "description": "Set 0.8.0 in plugins/flow/.claude-plugin/plugin.json, .dork/manifest.json, package.json and both version fields of package-lock.json. Add a '## 0.8.0' CHANGELOG entry in plain words (writing-for-humans): where settings live now, that the first /flow copies them over, what to commit, that the old files are left alone. Acceptance: tools/schema-check 'npm run check' and 'check:bump' pass.",
+      "activeForm": "Bumping flow to 0.8.0",
+      "size": "small",
+      "priority": "high",
+      "dependencies": ["1.2"],
+      "parallelWith": [],
+      "issue": null,
+      "parentIssue": null
+    }
+  ]
+}

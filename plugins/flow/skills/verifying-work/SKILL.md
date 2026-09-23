@@ -167,7 +167,7 @@ reads as a clean one is worse than none.
 
 Gather proof **scaled to the surface touched** (spec §13), following the
 `browser-testing` skill for the methodology. The format and attach target are
-**config-driven from the `evidence` block** of `<flow-root>/config/config.json` — never
+**config-driven from the `evidence` block** of the project's `.agents/flow/config.json` — never
 hand-picked. The pinned oracle for that decision is the flow engine's
 `selectEvidence`: given the change `kind`, the
 run's trigger (`liveSession`), and the resolved `evidence` config, it returns an

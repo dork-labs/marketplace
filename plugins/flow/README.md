@@ -236,7 +236,11 @@ agent session per run — so there is no scheduler to build.
 
 ## Configuration
 
-Defaults live in [`config.json`](./config/config.example.json), validated against the
+Your settings live in your project, not in the plugin, so an update never erases them:
+`.agents/flow/config.json` is the team's policy and is committed; `.agents/flow/config.local.json`
+holds this machine's credentials and overrides and is kept out of git. An older flow kept both
+inside the plugin; the first `/flow` after updating moves them over (asking first when the
+plugin folder may be shared with other projects) and leaves the old files alone. Defaults live in the [`config.example.json`](./config/config.example.json) template, validated against the
 Zod-generated [`config.schema.json`](./config/config.schema.json) (authored as the
 `@dorkos/flow` `FlowConfigSchema`, bridged via `z.toJSONSchema`). The resolved
 defaults encode the key decisions: `planApproval: false`, `subIssueThreshold: "xl"`,
@@ -250,7 +254,9 @@ defaults to `linear`, the reference adapter shipped here. Full detail:
 [`config/CONFIG.md`](./config/CONFIG.md).
 
 A per-repo `WORKFLOW.md` override at the repo root is part of the config
-**contract** (Decision #15), but **v1 reads `.agents/flow/config.json` only** —
+**contract** (Decision #15), but **v1 reads `.agents/flow/config.json` only** (plus its
+per-machine `config.local.json`; `scripts/config-files.ts` finds both, see
+[`config/CONFIG.md`](./config/CONFIG.md)) —
 applying the override is the promoted config loader's job (DOR-90 / the P5 server
 build), not the v1 harness skills. A `WORKFLOW.md` will not take effect yet.
 

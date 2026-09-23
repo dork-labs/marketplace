@@ -20,7 +20,7 @@ description: Reference tracker adapter for /flow - Linear reached over an in-ses
 >
 > **Tracker strings live here legitimately.** This file is a concrete adapter, so
 > it names `mcp__linear__*` tool strings on purpose. It sits under
-> `.agents/flow/adapters/reference/`, outside the tracker-confinement guard's
+> `<flow-root>/adapters/reference/`, outside the tracker-confinement guard's
 > scanned roots. No generic stage skill or `/flow:*` command may name a tracker
 > string; this reference adapter is where they are allowed.
 
@@ -34,7 +34,10 @@ The Linear MCP server is the in-session transport. Tool names are
 `mcp__linear__*`. It reaches the **configured team** (`connection.team.key`, id
 `connection.team.id`) in the **configured workspace** (`connection.workspace.slug`),
 all read fresh from config — this reference adapter names no team or workspace
-inline.
+inline. Config is the project's `.agents/flow/config.json` with
+`.agents/flow/config.local.json` over it, where the team and workspace live;
+`node --experimental-strip-types "<flow-root>/scripts/config-files.ts"` prints both
+paths (`committed`, `local`).
 
 - **Auth — and the identity footgun.** The server must be authenticated (OAuth).
   If it is not, start the flow with `mcp__linear__authenticate`; do not fall back
