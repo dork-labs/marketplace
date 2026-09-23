@@ -1,0 +1,51 @@
+{
+  "spec": "specs/flow-schedule-cadence/02-specification.md",
+  "slug": "flow-schedule-cadence",
+  "generatedAt": "2026-09-24T00:30:00.000Z",
+  "mode": "full",
+  "lastDecomposeDate": null,
+  "tasks": [
+    {
+      "id": "1.1",
+      "phase": 1,
+      "phaseName": "Cadence lives where the tick is scheduled",
+      "subject": "[flow-schedule-cadence] [P1] Guard the cadence contract, test-first",
+      "description": "Per 02-specification.md 'Testing Strategy': engine-tests/cadence-contract.test.ts with the six guards (only the dials Cadence section names schedule.cron/timezone; the Cadence section's required statements; documented defaults equal the shipped frontmatter; the Which-dial row; /flow:status reads and never writes; the Pulse-seat step does not offer loops intervals as cadence), each with a plant-a-break case. Acceptance: the suite fails on today's docs for the right reasons.",
+      "activeForm": "Writing the cadence contract test",
+      "size": "small",
+      "priority": "high",
+      "dependencies": [],
+      "parallelWith": [],
+      "issue": null,
+      "parentIssue": null
+    },
+    {
+      "id": "1.2",
+      "phase": 1,
+      "phaseName": "Cadence lives where the tick is scheduled",
+      "subject": "[flow-schedule-cadence] [P1] Rewrite the cadence docs and add the Schedules section to /flow:status",
+      "description": "Apply 'Detailed Design': the-dials.mdx (where the dials live, Cadence section, Which-dial row), turning-on-autonomy.mdx Pulse step, bring-your-own-scheduler.mdx, commands/status.md (allowed-tools + the schedules source + pane section). Do not touch skills/flow-drain or skills/flow-groom. Acceptance: cadence-contract tests pass; grep finds no instruction to edit a shipped schedule's timing.",
+      "activeForm": "Rewriting the cadence docs",
+      "size": "small",
+      "priority": "high",
+      "dependencies": ["1.1"],
+      "parallelWith": [],
+      "issue": null,
+      "parentIssue": null
+    },
+    {
+      "id": "1.3",
+      "phase": 1,
+      "phaseName": "Cadence lives where the tick is scheduled",
+      "subject": "[flow-schedule-cadence] [P1] Bump flow to 0.10.0 with a CHANGELOG entry",
+      "description": "Set 0.10.0 in plugin.json, .dork/manifest.json, package.json and both package-lock.json fields. CHANGELOG '## 0.10.0' in plain words: where to change how often the scheduled runs fire, what DorkOS does today, /flow:status shows it, no re-approval needed for this update. Acceptance: tools/schema-check check and check:bump pass.",
+      "activeForm": "Bumping flow to 0.10.0",
+      "size": "small",
+      "priority": "high",
+      "dependencies": ["1.2"],
+      "parallelWith": [],
+      "issue": null,
+      "parentIssue": null
+    }
+  ]
+}
