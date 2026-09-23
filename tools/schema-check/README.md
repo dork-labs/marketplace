@@ -114,9 +114,11 @@ change without a bump never reaches anyone. The check takes the version from
 - A `plugin.json` or manifest at `head` that is not valid JSON fails, naming the file.
 - Both commits must be real commits; anything else fails before git sees it.
 
-CI runs it on every pull request (base against head) and on every push to `main`
-(`before` against `after`), which catches two PRs that each bumped to the same
-version.
+CI runs it on every pull request (base against head), on every merge-queue run
+(the entry's base against the commit the queue built), and on every push to
+`main` (`before` against `after`). A queue entry's base is the entry ahead of it
+(or `main` when it is first), so two PRs that each bumped a package to the same
+version cannot both merge: the second one fails in the queue.
 
 ## Where the schemas come from
 
