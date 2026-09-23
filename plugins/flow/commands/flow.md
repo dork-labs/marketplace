@@ -59,10 +59,18 @@ PM-driven-autonomous cell is the Pulse seat, a fresh session per tick.
 
 **First-run guard (before any routing).** On any `/flow` invocation, confirm flow
 is configured: if `${CLAUDE_PLUGIN_ROOT}/config/config.json` is absent, or fails validation when run
-through `node --experimental-strip-types "${CLAUDE_PLUGIN_ROOT}/scripts/validate-config.ts"` (config JSON in, the
-`FlowConfigSchema` parse result JSON out), route straight to `/flow:init` to scaffold
-it and stop, before any stage or dispatch work. With a valid config present, behave
-exactly as below.
+through `node --experimental-strip-types "${CLAUDE_PLUGIN_ROOT}/scripts/validate-config.ts"` (config JSON in,
+`{ "ok": true, "config": …, "warnings": […] }` or `{ "ok": false, "errors": […], "warnings": […] }`
+out; a field the schema gives a default may be left out), route straight to `/flow:init`
+to scaffold it and stop, before any stage or dispatch work. Only `"ok": false` routes
+there. **Warnings never do:** each one is an unknown key in `config.json` (a typo, or a
+setting this version of flow no longer has) that flow ignores. Show every warning to the
+operator, naming its path, then carry on. Show a warning at `/secrets` first, and make it
+stand out: it means tracker credentials are sitting in the committed `config.json`, so tell the
+operator plainly to move that block to the gitignored `config.local.json` before anything
+is committed. A field missing from `config.json` means its `default` in
+`config/config.schema.json`; read that value wherever a skill reads the raw field. With a
+valid config present, behave exactly as below.
 
 **No arguments (cold start).** When `$ARGUMENTS` is empty, do not guess. Offer the
 operator five intents via `AskUserQuestion`, then route the choice:

@@ -8,6 +8,7 @@ import { z } from 'zod';
 import { FlowConfigSchema, type FlowConfig } from '../scripts/config-schema.ts';
 import { buildConfigJsonSchema } from '../scripts/config-schema-builder.ts';
 import { serializeConfigJsonSchema } from '../scripts/generate-config-schema.ts';
+import { validateConfig } from '../scripts/validate-config.ts';
 
 // engine-tests -> plugins/flow (the plugin bundle root)
 const pluginRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
@@ -633,6 +634,10 @@ describe('z.toJSONSchema bridge', () => {
 
     const resolved = FlowConfigSchema.parse({});
     expect(validate(resolved)).toBe(true);
+    // And the other end of the range: the smallest config Zod accepts. Every
+    // field has a default, so a file with none of them must pass the editor's
+    // schema too, or an editor would flag a config the loader reads fine.
+    expect(validate({})).toBe(true);
   });
 });
 
@@ -655,6 +660,70 @@ describe('generated config.schema.json artifact', () => {
     expect(validate.errors).toBeNull();
     expect(valid).toBe(true);
   });
+});
+
+/**
+ * Every path to an object key in `value` (array elements included), e.g.
+ * `['connection', 'intake', 0, 'id']`. Used to delete each field in turn.
+ */
+function keyPaths(value: unknown, prefix: (string | number)[] = []): (string | number)[][] {
+  if (Array.isArray(value)) {
+    return value.flatMap((element, index) => keyPaths(element, [...prefix, index]));
+  }
+  if (value && typeof value === 'object') {
+    return Object.entries(value).flatMap(([key, child]) => [
+      [...prefix, key],
+      ...keyPaths(child, [...prefix, key]),
+    ]);
+  }
+  return [];
+}
+
+/** A deep copy of `value` with the key at `keyPath` removed. */
+function without(value: unknown, keyPath: readonly (string | number)[]): unknown {
+  const copy = structuredClone(value) as Record<string | number, unknown>;
+  let cursor = copy;
+  for (const segment of keyPath.slice(0, -1)) {
+    cursor = cursor[segment] as Record<string | number, unknown>;
+  }
+  delete cursor[keyPath[keyPath.length - 1]];
+  return copy;
+}
+
+describe('validate-config agrees with the Zod schema (DOR-2246)', () => {
+  // validate-config walks the committed JSON Schema, not Zod (it must run
+  // before `zod` is installed), so nothing ties its verdict to the loader's
+  // except the generator. This pins that tie for EVERY field, not just the one
+  // seen in the field (`connection.intake`): take a complete config that also
+  // exercises the one array-of-objects block, delete each key in turn, and the
+  // two verdicts must match. A defaulted field the JSON Schema marks required
+  // fails here; so does a field with no default that the JSON Schema lets go.
+  const complete = {
+    ...FlowConfigSchema.parse({}),
+    connection: {
+      ...FlowConfigSchema.parse({}).connection,
+      intake: [{ id: 'team-uuid', name: 'Triage' }],
+    },
+  };
+  const paths = keyPaths(complete);
+
+  it('covers every field of the config, nested ones included', () => {
+    // Guards the walk itself: a vacuous path list would make the check below
+    // pass for anything. The resolved config has well over a hundred keys.
+    expect(paths.length).toBeGreaterThan(100);
+    expect(paths).toContainEqual(['connection', 'intake']);
+    expect(paths).toContainEqual(['connection', 'intake', 0, 'id']);
+    expect(validateConfig(complete)).toEqual({ errors: [], warnings: [] });
+  });
+
+  it.each(paths.map((keyPath) => [keyPath.join('.'), keyPath] as const))(
+    'omitting %s gets the same verdict from validate-config as from Zod',
+    (_label, keyPath) => {
+      const candidate = without(complete, keyPath);
+      const zodAccepts = FlowConfigSchema.safeParse(candidate).success;
+      expect(validateConfig(candidate).errors.length === 0).toBe(zodAccepts);
+    }
+  );
 });
 
 describe('schema module surface', () => {

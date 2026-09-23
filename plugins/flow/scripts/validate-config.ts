@@ -2,8 +2,17 @@
  * CLI validator for a `/flow` config object — checks it against the committed
  * `config/config.schema.json` JSON Schema using a small, hand-written, recursive
  * JSON-Schema-subset checker. Reads the config from stdin (or `--input <path>`)
- * and emits `{ ok: true, config }` (the validated config, echoed back) on success
- * or `{ ok: false, errors }` (one `{ path, message }` per violation) on failure.
+ * and emits `{ ok: true, config, warnings }` (the validated config, echoed back)
+ * on success or `{ ok: false, errors, warnings }` (one `{ path, message }` per
+ * violation) on failure.
+ *
+ * **An unknown key is a warning, never an error** (the DorkOS config rule from
+ * DOR-1221: unknown keys must never condemn the file). The committed schema
+ * stays strict — `additionalProperties: false` on every block — so an editor
+ * still underlines a typo like `planAproval`; this validator reports that same
+ * violation under `warnings`, naming the key and saying it is ignored, and keeps
+ * `ok: true`. A setting removed by a later flow therefore never sends an
+ * install back to `/flow:init`, and a typo is still surfaced loudly.
  *
  * **This validator deliberately avoids `zod`, so it can run before dependencies
  * are installed.** That is a property of this file, not of the plugin: several
@@ -17,6 +26,10 @@
  * `generate-config-schema.ts` (dev-only) GENERATES `config.schema.json` from it
  * via `z.toJSONSchema`. This oracle validates against that generated artifact, so
  * the two never drift while this file stays import-free of third-party modules.
+ * The artifact describes the parse INPUT, so a field with a default may be absent
+ * (DOR-2246); `config-schema.test.ts` checks this verdict against Zod's for the
+ * omission of every field. Unknown keys are the one deliberate difference from
+ * Zod: its top level is `.strict()`, while this validator only warns.
  *
  * @module @dorkos/flow/cli/validate-config
  */
@@ -29,21 +42,42 @@ const HELP = `validate-config — validate a /flow config object against config/
 Reads a config object as JSON from stdin (or --input <path>).
 
 Writes the result as JSON to stdout:
-  { "ok": true,  "config": <the validated config> }                  // exit 0
-  { "ok": false, "errors": [{ "path": string, "message": string }] } // exit 1
+  { "ok": true,  "config": <the validated config>, "warnings": [...] } // exit 0
+  { "ok": false, "errors": [...], "warnings": [...] }                  // exit 1
+Each error and warning is { "path": string, "message": string }. A warning is an
+unknown key: it is reported and ignored, and never makes the config invalid.
 
 Exit codes: 0 valid | 1 invalid (schema violation or unreadable/non-JSON input).
 `;
 
 /** A JSON Schema node — an open bag of keywords; we read the subset we support. */
-type SchemaNode = Record<string, unknown>;
+export type SchemaNode = Record<string, unknown>;
 
-/** One schema violation: a precise location plus a human-readable reason. */
-interface ValidationError {
+/**
+ * Top-level keys that belong only in the gitignored `config.local.json`. Found in
+ * the committed `config.json` they are still only a warning (unknown keys never
+ * condemn the file), but the message says what is actually wrong: credentials
+ * sitting in a file that gets committed.
+ */
+const LOCAL_ONLY_KEYS: Readonly<Record<string, string>> = {
+  secrets:
+    'credentials never go in the committed config.json; move "secrets" to config.local.json (gitignored). Flow ignores it here',
+};
+
+/** One finding about a config: a precise location plus a human-readable reason. */
+export interface ValidationIssue {
   /** JSON-pointer-style location of the offending value (`(root)` at the top). */
   path: string;
   /** What is wrong, in plain language. */
   message: string;
+}
+
+/** Everything the validator found, split by whether it condemns the config. */
+export interface ValidationReport {
+  /** Violations that make the config invalid (wrong type, enum, pattern, bound, missing required field). */
+  errors: ValidationIssue[];
+  /** Unknown keys: reported, ignored, and never a reason to reject the config. */
+  warnings: ValidationIssue[];
 }
 
 /** Render a path segment list as a JSON-pointer-style string (`(root)` when empty). */
@@ -96,8 +130,9 @@ function resolveRef(ref: string, root: SchemaNode): SchemaNode | undefined {
 }
 
 /**
- * Recursively validate `value` against `schema`, appending a `ValidationError`
- * for each violation. Covers exactly the keyword subset `config.schema.json`
+ * Recursively validate `value` against `schema`, appending a {@link ValidationIssue}
+ * to `report.errors` for each violation and to `report.warnings` for each
+ * unknown key (an `additionalProperties: false` hit). Covers exactly the keyword subset `config.schema.json`
  * uses: `$ref`/`$defs`, `anyOf`, `type`, `enum`, `pattern`, `properties`,
  * `required`, `additionalProperties` (false), `items`, `minItems`, and the numeric bounds
  * `minimum` / `maximum` / `exclusiveMinimum` (`exclusiveMaximum` handled too for
@@ -108,8 +143,9 @@ function validate(
   schema: SchemaNode,
   segments: readonly (string | number)[],
   root: SchemaNode,
-  errors: ValidationError[]
+  report: ValidationReport
 ): void {
+  const { errors } = report;
   // $ref — resolve into the root schema's $defs and validate against the target.
   if (typeof schema.$ref === 'string') {
     const resolved = resolveRef(schema.$ref, root);
@@ -120,18 +156,21 @@ function validate(
       });
       return;
     }
-    validate(value, resolved, segments, root, errors);
+    validate(value, resolved, segments, root, report);
     return;
   }
 
   // anyOf — valid if the value matches at least one branch; siblings are ignored
-  // (in this schema, anyOf nodes carry only a `default` alongside).
+  // (in this schema, anyOf nodes carry only a `default` alongside). Unknown keys
+  // do not disqualify a branch; the first matching branch's warnings are kept.
   if (Array.isArray(schema.anyOf)) {
     const branches = schema.anyOf as SchemaNode[];
     const matched = branches.some((branch) => {
-      const probe: ValidationError[] = [];
+      const probe: ValidationReport = { errors: [], warnings: [] };
       validate(value, branch, segments, root, probe);
-      return probe.length === 0;
+      if (probe.errors.length > 0) return false;
+      report.warnings.push(...probe.warnings);
+      return true;
     });
     if (!matched) {
       errors.push({
@@ -215,7 +254,8 @@ function validate(
     }
   }
 
-  // object — required, declared properties, and additionalProperties: false.
+  // object — required, declared properties, and additionalProperties: false
+  // (an unknown key is a warning, never an error: see the module doc).
   if (matchesType(value, 'object')) {
     const obj = value as Record<string, unknown>;
     const props = (schema.properties as Record<string, SchemaNode> | undefined) ?? {};
@@ -230,11 +270,16 @@ function validate(
     }
     for (const key of Object.keys(obj)) {
       if (Object.prototype.hasOwnProperty.call(props, key)) {
-        validate(obj[key], props[key], [...segments, key], root, errors);
+        validate(obj[key], props[key], [...segments, key], root, report);
       } else if (schema.additionalProperties === false) {
-        errors.push({
+        const localOnly =
+          segments.length === 0 && Object.prototype.hasOwnProperty.call(LOCAL_ONLY_KEYS, key)
+            ? LOCAL_ONLY_KEYS[key]
+            : undefined;
+        report.warnings.push({
           path: pointer([...segments, key]),
-          message: `unexpected property "${key}" (additionalProperties: false)`,
+          message:
+            localOnly ?? `unknown property "${key}" is ignored (check the spelling, or remove it)`,
         });
       }
     }
@@ -251,7 +296,7 @@ function validate(
     const items = schema.items;
     if (items && typeof items === 'object' && !Array.isArray(items)) {
       value.forEach((element, index) =>
-        validate(element, items as SchemaNode, [...segments, index], root, errors)
+        validate(element, items as SchemaNode, [...segments, index], root, report)
       );
     }
   }
@@ -264,12 +309,39 @@ function loadSchema(): SchemaNode {
 }
 
 /**
+ * Check a parsed config object against a given JSON Schema with the
+ * dependency-free checker. The seam the tests use to exercise schema shapes the
+ * committed artifact does not contain today (an object inside `anyOf`).
+ *
+ * @param config - The parsed config object to check.
+ * @param schema - The root JSON Schema; local `$ref`s resolve against it.
+ * @returns The errors (empty when the config is valid) and the unknown-key warnings.
+ */
+export function validateAgainst(config: unknown, schema: SchemaNode): ValidationReport {
+  const report: ValidationReport = { errors: [], warnings: [] };
+  validate(config, schema, [], schema, report);
+  return report;
+}
+
+/**
+ * Check a parsed config object against the committed `config.schema.json`.
+ * Exported so the tests can compare this verdict with the Zod schema's for
+ * every field, in process.
+ *
+ * @param config - The parsed config object to check.
+ * @returns The errors (empty when the config is valid) and the unknown-key warnings.
+ */
+export function validateConfig(config: unknown): ValidationReport {
+  return validateAgainst(config, loadSchema());
+}
+
+/**
  * Run the validate-config CLI: parse args, read the config payload, validate it
  * against the committed `config.schema.json` with the dependency-free checker,
  * and write the typed result to stdout. Returns `0` only when the config is
- * valid; both a schema violation and unreadable / non-JSON input return `1` with
- * `{ ok: false, errors }`. Human diagnostics go to stderr; the JSON result to
- * stdout.
+ * valid (warnings alone never fail it); both a schema violation and unreadable /
+ * non-JSON input return `1` with `{ ok: false, errors, warnings }`. Human
+ * diagnostics, warnings included, go to stderr; the JSON result to stdout.
  *
  * @param argv - Process args after node + script (`process.argv.slice(2)`).
  * @returns The exit code: 0 valid, 1 invalid.
@@ -287,22 +359,23 @@ export function main(argv: readonly string[]): number {
   } catch (err) {
     process.stderr.write(`validate-config: invalid input — ${(err as Error).message}\n`);
     process.stdout.write(
-      `${JSON.stringify({ ok: false, errors: [{ path: '(root)', message: `invalid JSON: ${(err as Error).message}` }] })}\n`
+      `${JSON.stringify({ ok: false, errors: [{ path: '(root)', message: `invalid JSON: ${(err as Error).message}` }], warnings: [] })}\n`
     );
     return 1;
   }
 
-  const schema = loadSchema();
-  const errors: ValidationError[] = [];
-  validate(parsed, schema, [], schema, errors);
+  const { errors, warnings } = validateConfig(parsed);
+  for (const warning of warnings) {
+    process.stderr.write(`validate-config: warning at ${warning.path} — ${warning.message}\n`);
+  }
 
   if (errors.length === 0) {
-    process.stdout.write(`${JSON.stringify({ ok: true, config: parsed })}\n`);
+    process.stdout.write(`${JSON.stringify({ ok: true, config: parsed, warnings })}\n`);
     return 0;
   }
 
   process.stderr.write(`validate-config: config is invalid — ${errors.length} error(s)\n`);
-  process.stdout.write(`${JSON.stringify({ ok: false, errors })}\n`);
+  process.stdout.write(`${JSON.stringify({ ok: false, errors, warnings })}\n`);
   return 1;
 }
 

@@ -10,9 +10,11 @@
       "pattern": "^[a-z][a-z0-9-]*$"
     },
     "connection": {
+      "default": {},
       "type": "object",
       "properties": {
         "team": {
+          "default": {},
           "type": "object",
           "properties": {
             "key": {
@@ -38,10 +40,10 @@
               ]
             }
           },
-          "required": ["key", "id"],
           "additionalProperties": false
         },
         "workspace": {
+          "default": {},
           "type": "object",
           "properties": {
             "slug": {
@@ -56,7 +58,6 @@
               ]
             }
           },
-          "required": ["slug"],
           "additionalProperties": false
         },
         "transport": {
@@ -82,10 +83,10 @@
           }
         }
       },
-      "required": ["team", "workspace", "transport", "intake"],
       "additionalProperties": false
     },
     "identity": {
+      "default": {},
       "type": "object",
       "properties": {
         "agent": {
@@ -108,10 +109,10 @@
           "type": "string"
         }
       },
-      "required": ["agent", "reviewer", "marker"],
       "additionalProperties": false
     },
     "ownership": {
+      "default": {},
       "type": "object",
       "properties": {
         "claimAssignedToAgent": {
@@ -139,16 +140,10 @@
           }
         }
       },
-      "required": [
-        "claimAssignedToAgent",
-        "claimUnassigned",
-        "claimAssignedToHuman",
-        "claimAssignedToOthers",
-        "scope"
-      ],
       "additionalProperties": false
     },
     "comments": {
+      "default": {},
       "type": "object",
       "properties": {
         "respondWhen": {
@@ -162,10 +157,10 @@
           "enum": ["quiet", "engage"]
         }
       },
-      "required": ["respondWhen", "ambiguousBias"],
       "additionalProperties": false
     },
     "stages": {
+      "default": {},
       "type": "object",
       "properties": {
         "capture": {
@@ -379,20 +374,10 @@
           "additionalProperties": false
         }
       },
-      "required": [
-        "capture",
-        "triage",
-        "ideate",
-        "specify",
-        "decompose",
-        "execute",
-        "verify",
-        "review",
-        "done"
-      ],
       "additionalProperties": false
     },
     "autonomy": {
+      "default": {},
       "type": "object",
       "properties": {
         "default": {
@@ -406,6 +391,7 @@
           "enum": ["sequential", "parallel"]
         },
         "wipCap": {
+          "default": {},
           "type": "object",
           "properties": {
             "global": {
@@ -421,7 +407,6 @@
               "maximum": 9007199254740991
             }
           },
-          "required": ["global", "perProject"],
           "additionalProperties": false
         },
         "seat": {
@@ -430,13 +415,14 @@
           "enum": ["pulse"]
         }
       },
-      "required": ["default", "concurrency", "wipCap", "seat"],
       "additionalProperties": false
     },
     "loops": {
+      "default": {},
       "type": "object",
       "properties": {
         "recovery": {
+          "default": {},
           "type": "object",
           "properties": {
             "enabled": {
@@ -456,10 +442,10 @@
               "maximum": 9007199254740991
             }
           },
-          "required": ["enabled", "priority", "intervalMs"],
           "additionalProperties": false
         },
         "inbox": {
+          "default": {},
           "type": "object",
           "properties": {
             "enabled": {
@@ -479,10 +465,10 @@
               "maximum": 9007199254740991
             }
           },
-          "required": ["enabled", "priority", "intervalMs"],
           "additionalProperties": false
         },
         "review": {
+          "default": {},
           "type": "object",
           "properties": {
             "enabled": {
@@ -502,10 +488,10 @@
               "maximum": 9007199254740991
             }
           },
-          "required": ["enabled", "priority", "intervalMs"],
           "additionalProperties": false
         },
         "dispatch": {
+          "default": {},
           "type": "object",
           "properties": {
             "enabled": {
@@ -525,10 +511,10 @@
               "maximum": 9007199254740991
             }
           },
-          "required": ["enabled", "priority", "intervalMs"],
           "additionalProperties": false
         },
         "triage": {
+          "default": {},
           "type": "object",
           "properties": {
             "enabled": {
@@ -548,10 +534,10 @@
               "maximum": 9007199254740991
             }
           },
-          "required": ["enabled", "priority", "intervalMs"],
           "additionalProperties": false
         },
         "hygiene": {
+          "default": {},
           "type": "object",
           "properties": {
             "enabled": {
@@ -571,14 +557,13 @@
               "maximum": 9007199254740991
             }
           },
-          "required": ["enabled", "priority", "intervalMs"],
           "additionalProperties": false
         }
       },
-      "required": ["recovery", "inbox", "review", "dispatch", "triage", "hygiene"],
       "additionalProperties": false
     },
     "ingestion": {
+      "default": {},
       "type": "object",
       "properties": {
         "producer": {
@@ -593,10 +578,10 @@
           "maximum": 9007199254740991
         }
       },
-      "required": ["producer", "pollIntervalMs"],
       "additionalProperties": false
     },
     "involvement": {
+      "default": {},
       "type": "object",
       "properties": {
         "comms": {
@@ -605,6 +590,7 @@
           "enum": ["infer-from-trigger", "concise", "verbose"]
         },
         "calibration": {
+          "default": {},
           "type": "object",
           "properties": {
             "proceedSilentlyWhen": {
@@ -635,6 +621,7 @@
               }
             },
             "stageBias": {
+              "default": {},
               "type": "object",
               "properties": {
                 "intake": {
@@ -648,10 +635,10 @@
                   "enum": ["ask", "proceed-and-log"]
                 }
               },
-              "required": ["intake", "execution"],
               "additionalProperties": false
             },
             "assumptionLog": {
+              "default": {},
               "type": "object",
               "properties": {
                 "artifact": {
@@ -664,14 +651,13 @@
                   "enum": ["pm-driven", "always", "never"]
                 }
               },
-              "required": ["artifact", "ticketComment"],
               "additionalProperties": false
             }
           },
-          "required": ["proceedSilentlyWhen", "alwaysAsk", "stageBias", "assumptionLog"],
           "additionalProperties": false
         },
         "nudge": {
+          "default": {},
           "type": "object",
           "properties": {
             "relay": {
@@ -683,14 +669,13 @@
               "type": "boolean"
             }
           },
-          "required": ["relay", "telegram"],
           "additionalProperties": false
         }
       },
-      "required": ["comms", "calibration", "nudge"],
       "additionalProperties": false
     },
     "dispatch": {
+      "default": {},
       "type": "object",
       "properties": {
         "rank": {
@@ -707,10 +692,10 @@
           "enum": ["small-first", "large-first"]
         }
       },
-      "required": ["rank", "sizeOrder"],
       "additionalProperties": false
     },
     "gates": {
+      "default": {},
       "type": "object",
       "properties": {
         "planApproval": {
@@ -718,6 +703,7 @@
           "type": "boolean"
         },
         "review": {
+          "default": {},
           "type": "object",
           "properties": {
             "mergeOnApproval": {
@@ -754,18 +740,10 @@
               "maximum": 9007199254740991
             }
           },
-          "required": [
-            "mergeOnApproval",
-            "requireCiGreen",
-            "teardownWorktree",
-            "onConflict",
-            "ciRetries",
-            "reapproveOnFunctionalChange",
-            "maxMergeAttempts"
-          ],
           "additionalProperties": false
         },
         "circuitBreaker": {
+          "default": {},
           "type": "object",
           "properties": {
             "estimateMultiplier": {
@@ -780,7 +758,6 @@
               "maximum": 9007199254740991
             }
           },
-          "required": ["estimateMultiplier", "tokenBudget"],
           "additionalProperties": false
         },
         "projectCompletion": {
@@ -789,10 +766,10 @@
           "enum": ["advisory", "auto"]
         }
       },
-      "required": ["planApproval", "review", "circuitBreaker", "projectCompletion"],
       "additionalProperties": false
     },
     "review": {
+      "default": {},
       "type": "object",
       "properties": {
         "adversarial": {
@@ -810,10 +787,10 @@
           "maximum": 9007199254740991
         }
       },
-      "required": ["adversarial", "rubric", "reviewers"],
       "additionalProperties": false
     },
     "context": {
+      "default": {},
       "type": "object",
       "properties": {
         "perIssue": {
@@ -838,6 +815,7 @@
           "maximum": 1
         },
         "stageBudgets": {
+          "default": {},
           "type": "object",
           "properties": {
             "specify": {
@@ -871,7 +849,6 @@
               "maximum": 9007199254740991
             }
           },
-          "required": ["specify", "decompose", "execute", "verify", "review"],
           "additionalProperties": false
         },
         "externalize": {
@@ -882,20 +859,14 @@
           }
         }
       },
-      "required": [
-        "perIssue",
-        "perStage",
-        "resume",
-        "compactionTrigger",
-        "stageBudgets",
-        "externalize"
-      ],
       "additionalProperties": false
     },
     "models": {
+      "default": {},
       "type": "object",
       "properties": {
         "tiers": {
+          "default": {},
           "type": "object",
           "properties": {
             "implementation": {
@@ -919,10 +890,10 @@
               "enum": ["workhorse", "fast"]
             }
           },
-          "required": ["implementation", "review", "analysis", "mechanical"],
           "additionalProperties": false
         },
         "bindings": {
+          "default": {},
           "type": "object",
           "properties": {
             "workhorse": {
@@ -935,10 +906,10 @@
           "additionalProperties": false
         }
       },
-      "required": ["tiers", "bindings"],
       "additionalProperties": false
     },
     "workspace": {
+      "default": {},
       "type": "object",
       "properties": {
         "isolation": {
@@ -956,10 +927,10 @@
           "type": "boolean"
         }
       },
-      "required": ["isolation", "flow", "autoTeardown"],
       "additionalProperties": false
     },
     "recovery": {
+      "default": {},
       "type": "object",
       "properties": {
         "maxRetries": {
@@ -978,10 +949,10 @@
           "type": "string"
         }
       },
-      "required": ["maxRetries", "onExhausted", "staleAfter"],
       "additionalProperties": false
     },
     "decomposition": {
+      "default": {},
       "type": "object",
       "properties": {
         "mode": {
@@ -995,10 +966,10 @@
           "enum": ["xs", "sm", "md", "lg", "xl"]
         }
       },
-      "required": ["mode", "subIssueThreshold"],
       "additionalProperties": false
     },
     "evidence": {
+      "default": {},
       "type": "object",
       "properties": {
         "ui": {
@@ -1025,30 +996,8 @@
           }
         }
       },
-      "required": ["ui", "temporal", "logic", "attachTo"],
       "additionalProperties": false
     }
   },
-  "required": [
-    "tracker",
-    "connection",
-    "identity",
-    "ownership",
-    "comments",
-    "stages",
-    "autonomy",
-    "loops",
-    "ingestion",
-    "involvement",
-    "dispatch",
-    "gates",
-    "review",
-    "context",
-    "models",
-    "workspace",
-    "recovery",
-    "decomposition",
-    "evidence"
-  ],
   "additionalProperties": false
 }
