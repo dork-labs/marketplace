@@ -4,6 +4,20 @@ Installs of this plugin are pinned to a commit SHA, so a fix here does not reach
 you until you **reinstall it** (Marketplace → flow → reinstall, or re-run your
 `--plugin-dir` checkout's `git pull`). Each entry below says whether that matters.
 
+## 0.7.2
+
+**Other sessions no longer get pulled into a `/flow auto` drain. Reinstall is recommended.**
+
+- While a `/flow auto` drain was running, every other session open in the same
+  folder hit the "DRAINING THE READY QUEUE" banner each time it tried to stop,
+  and spent a turn working out what to do about a drain it had nothing to do
+  with. The drain now records which session started it, and only that session
+  is held. Every other session stops as normal and never sees the banner.
+- Another session can no longer end your drain by printing
+  `<promise>ABORT</promise>`. Only the session that started it can.
+- A drain started before this update has no owner on record, so it now ends
+  after its current item. Start it again with `/flow auto`.
+
 ## 0.7.1
 
 **Fixes a bug that could trap every session in a repo. Reinstall is recommended.**

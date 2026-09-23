@@ -16,7 +16,8 @@ a single pane:
    the flow engine's `readFlowState` shape). The session↔issue association, worktree,
    branch, stage, and status of every run.
 2. **`.dork/flow/auto-run.json`**: the `/flow auto` drain sentinel, if a drain is
-   live (`active`, `ready`, `shapeable`, `startedAt`, `pid`). **A sentinel is not
+   live (`active`, `ready`, `shapeable`, `startedAt`, `pid`, and `sessionId`, the
+   session the drain belongs to). **A sentinel is not
    a live drain until its owner is checked.** Before reporting one, verify the
    recorded `pid` is still running (`kill -0 <pid>`); treat a dead owner, or an
    `active` sentinel whose `startedAt` is more than 24 hours old (the pid may
