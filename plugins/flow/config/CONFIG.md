@@ -50,9 +50,10 @@ environment variable  >  config.local.json  >  config.json  >  schema defaults
 
 ### How secrets and overrides coexist
 
-The behavioral policy schema is strict (unknown keys are rejected), and it
-deliberately contains no credential fields. So the loader handles
-`config.local.json` in two parts:
+The behavioral policy schema lists every key flow knows, so it flags unknown
+keys: editors underline them, and flow's config check reports them as warnings
+(it ignores them rather than rejecting the file). It deliberately contains no
+credential fields, so the loader handles `config.local.json` in two parts:
 
 - The `secrets` block is read out-of-band as adapter credentials. It is never
   passed through the policy schema, so it can hold whatever your tracker adapter
@@ -91,6 +92,14 @@ gives editors inline validation and autocomplete for the behavioral policy.
 is the engine's `config-schema.ts` (the Zod source of truth); the JSON Schema
 artifact is produced from it. Never hand-edit `config.schema.json`. To change the
 config shape, edit the Zod schema and regenerate the JSON Schema artifact.
+
+The schema describes the file you write, not the config the loader resolves from
+it: any field with a default may be left out, and takes that default. A
+`config.json` written by an older flow therefore stays valid when a newer flow adds
+a field. An unknown key never makes the file invalid either: flow ignores it and
+reports it as a warning naming its path, so a misspelled field is surfaced rather
+than silently dropped. Editors still underline it, because the schema lists every
+key flow knows.
 
 `config.local.json` and its `.example` intentionally do not reference
 `config.schema.json`: the `secrets` block lives outside the strict policy schema,

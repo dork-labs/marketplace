@@ -4,6 +4,27 @@ Installs of this plugin are pinned to a commit SHA, so a fix here does not reach
 you until you **reinstall it** (Marketplace → flow → reinstall, or re-run your
 `--plugin-dir` checkout's `git pull`). Each entry below says whether that matters.
 
+## 0.7.4
+
+**Updating flow no longer makes a working config "invalid". Reinstall if `/flow` keeps sending you back to `/flow:init`.**
+
+- When a new version of flow added a setting, flow's config check said your
+  existing `config.json` was broken because the new setting was missing, and
+  `/flow` sent you back to `/flow:init` to set everything up again. But the new
+  setting always had a default, and flow would have read your file fine. The
+  check now accepts any setting left out that has a default, the same way flow
+  itself does. A config written by flow 0.5 passes again.
+- A setting flow does not know, such as a misspelling like `planAproval` or a
+  setting a later flow removed, no longer makes your config invalid either.
+  Flow ignores it and shows you a warning that names it, so you can fix the
+  spelling or delete it. A setting with a wrong value, like a word where a
+  number belongs, is still an error.
+- If your shared `config.json` holds a `secrets` block, flow now says so
+  plainly and asks you to move it to `config.local.json`, the file that is
+  never committed. Before, it just called the whole config invalid.
+- Your editor, if it checks `config.json` against flow's schema, now agrees too:
+  it stops underlining settings you left out on purpose.
+
 ## 0.7.3
 
 **DorkOS now shows the right version for this plugin. Reinstall if you want DorkOS and Claude Code to agree.**
