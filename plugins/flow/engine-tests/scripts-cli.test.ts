@@ -300,13 +300,15 @@ describe('recovery', () => {
 
 describe('validate-config', () => {
   // The oracle VALIDATES a config object against the committed
-  // config/config.schema.json — it never applies Zod defaults. So a complete,
-  // valid config (the bundled config/config.json, falling back to the
-  // committed config.example.json template on a fresh clone — config.json is
-  // gitignored, generated per install by `/flow:init`; see
-  // config-schema.test.ts's `readConfigJson`) is accepted and echoed back
-  // verbatim, while an empty or incomplete object is rejected for missing
-  // required fields.
+  // config/config.schema.json — it never applies Zod defaults, it only decides
+  // whether the loader's Zod parse would accept the file. So a complete, valid
+  // config (the bundled config/config.json, falling back to the committed
+  // config.example.json template on a fresh clone — config.json is gitignored,
+  // generated per install by `/flow:init`; see config-schema.test.ts's
+  // `readConfigJson`) is accepted and echoed back verbatim, and so is a config
+  // that leaves out fields the schema fills with a default (DOR-2246). An
+  // unknown key is reported under `warnings` and never makes a config invalid
+  // (DOR-1221's rule: unknown keys must never condemn the file).
   const configJsonPath = path.join(PLUGIN_DIR, 'config', 'config.json');
   const configPath = existsSync(configJsonPath)
     ? configJsonPath
@@ -322,21 +324,138 @@ describe('validate-config', () => {
     expect(out.ok).toBe(true);
     // Validate-only: the input config is echoed back verbatim, no defaults added.
     expect(out.config).toEqual(fullConfig);
+    expect(out.warnings).toEqual([]);
     expect(out.config.tracker).toBe('linear');
     expect(out.config.gates.planApproval).toBe(false);
   });
 
-  it('rejects an empty object for its missing required fields (exit 1)', () => {
+  // DOR-2246: every field in FlowConfigSchema has a default, so the loader's
+  // Zod parse accepts `{}`. The validator used to call it invalid because the
+  // JSON Schema was generated for the parse OUTPUT (where every defaulted field
+  // is present) instead of the INPUT (the file a person writes). Fails if the
+  // schema is ever regenerated with defaulted fields marked required again.
+  it('accepts an empty object, because every field has a default (exit 0)', () => {
     const { status, stdout } = runScript('validate-config', { stdin: '{}' });
+    expect(status).toBe(0);
+    expect(JSON.parse(stdout)).toEqual({ ok: true, config: {}, warnings: [] });
+  });
+
+  // DOR-2246, the case seen in the field: a config written by flow 0.5.1 (the
+  // committed config.example.json of that release, verbatim) predates
+  // `connection.intake`, which shipped later with a default of `[]`. Updating
+  // flow must not turn that install "invalid" and send its owner back to
+  // /flow:init. Fails if a defaulted field added after 0.5.1 is required.
+  it('accepts a flow 0.5.1 config that predates every field added since (exit 0)', () => {
+    const oldConfig = JSON.parse(
+      readFileSync(path.join(here, 'fixtures', 'config-0.5.1.json'), 'utf8')
+    );
+    // Guard the fixture itself: it really is missing the later field.
+    expect(oldConfig.connection).not.toHaveProperty('intake');
+    const { status, stdout } = runScript('validate-config', {
+      stdin: JSON.stringify(oldConfig),
+    });
+    expect(status).toBe(0);
+    expect(JSON.parse(stdout)).toEqual({ ok: true, config: oldConfig, warnings: [] });
+  });
+
+  // The other half of DOR-2246: making defaulted fields optional must not make
+  // the validator permissive. `id` on an intake source has no default, so a
+  // source without one is still refused, at the exact path. Fails if the fix
+  // drops `required` wholesale instead of only for defaulted fields.
+  it('still rejects a missing field that has no default (exit 1)', () => {
+    const { status, stdout } = runScript('validate-config', {
+      stdin: JSON.stringify({
+        ...fullConfig,
+        connection: { ...fullConfig.connection, intake: [{ name: 'Triage' }] },
+      }),
+    });
     expect(status).toBe(1);
     const out = JSON.parse(stdout);
     expect(out.ok).toBe(false);
-    expect(Array.isArray(out.errors)).toBe(true);
-    expect(out.errors.length).toBeGreaterThan(0);
-    // Every error names a missing required top-level property.
-    expect(
-      out.errors.every((e: { message: string }) => e.message.includes('missing required property'))
-    ).toBe(true);
+    expect(out.errors).toEqual([
+      { path: '/connection/intake/0/id', message: 'missing required property "id"' },
+    ]);
+  });
+
+  // A misspelled key is surfaced, loudly, but never blocks: the config stays
+  // valid and the warning names the exact path. Fails if the typo guard is lost
+  // in regeneration (the input-side schema would otherwise drop
+  // `additionalProperties: false` on every nested block, so nothing is reported)
+  // or if an unknown key is ever counted as an error again.
+  it('warns about a misspelled key inside a nested block, naming its path (exit 0)', () => {
+    const config = { ...fullConfig, gates: { ...fullConfig.gates, planAproval: true } };
+    const { status, stdout, stderr } = runScript('validate-config', {
+      stdin: JSON.stringify(config),
+    });
+    expect(status).toBe(0);
+    expect(JSON.parse(stdout)).toEqual({
+      ok: true,
+      config,
+      warnings: [
+        {
+          path: '/gates/planAproval',
+          message: 'unknown property "planAproval" is ignored (check the spelling, or remove it)',
+        },
+      ],
+    });
+    expect(stderr).toContain('/gates/planAproval');
+  });
+
+  // A setting a later flow removes, or one a newer flow wrote, sits at the top
+  // level of an existing config. It must not send the install back to
+  // /flow:init. Fails if the top-level (Zod `.strict()`) block still errors.
+  it('warns about an unknown top-level key rather than rejecting the config (exit 0)', () => {
+    const { status, stdout } = runScript('validate-config', {
+      stdin: JSON.stringify({ ...fullConfig, retiredSetting: 'on' }),
+    });
+    expect(status).toBe(0);
+    const out = JSON.parse(stdout);
+    expect(out.ok).toBe(true);
+    expect(out.warnings).toEqual([
+      {
+        path: '/retiredSetting',
+        message: 'unknown property "retiredSetting" is ignored (check the spelling, or remove it)',
+      },
+    ]);
+  });
+
+  // A credentials block pasted into the committed config.json must not block
+  // /flow (unknown keys never condemn the file), but the operator has to be told
+  // plainly, since that file is shared. Fails if the pointed message is lost.
+  it('warns that a secrets block belongs in config.local.json (exit 0)', () => {
+    const { status, stdout, stderr } = runScript('validate-config', {
+      stdin: JSON.stringify({ ...fullConfig, secrets: { trackerToken: 'lin_api_x' } }),
+    });
+    expect(status).toBe(0);
+    const out = JSON.parse(stdout);
+    expect(out.ok).toBe(true);
+    expect(out.warnings).toHaveLength(1);
+    expect(out.warnings[0].path).toBe('/secrets');
+    expect(out.warnings[0].message).toContain('config.local.json');
+    expect(stderr).toContain('credentials never go in the committed config.json');
+  });
+
+  // Warnings are a separate channel, not a softened verdict: a genuinely wrong
+  // value still fails, and an unknown key beside it stays a warning rather than
+  // being folded into the errors. Fails if the split leaks either way.
+  it('still rejects a wrong type, keeping an unknown key beside it as a warning (exit 1)', () => {
+    const { status, stdout } = runScript('validate-config', {
+      stdin: JSON.stringify({
+        ...fullConfig,
+        autonomy: {
+          ...fullConfig.autonomy,
+          wipCap: { ...fullConfig.autonomy.wipCap, global: 'two' },
+          wipcap: 3,
+        },
+      }),
+    });
+    expect(status).toBe(1);
+    const out = JSON.parse(stdout);
+    expect(out.ok).toBe(false);
+    expect(out.errors).toEqual([
+      { path: '/autonomy/wipCap/global', message: 'expected type "integer" but got "string"' },
+    ]);
+    expect(out.warnings.map((w: { path: string }) => w.path)).toEqual(['/autonomy/wipcap']);
   });
 
   it('rejects an out-of-enum value in an otherwise valid config (exit 1)', () => {
