@@ -334,7 +334,8 @@ the same question is never asked twice**:
 
 - A reusable decision → the **decisions table / an ADR** (`/adr:create`,
   `decisions/`).
-- A durable preference or threshold → **`config.json`** (the engine's config).
+- A durable preference or threshold → **`config.json`** (the engine's config: the project's
+  `.agents/flow/config.json`, whose path `<flow-root>/scripts/config-files.ts` prints).
 - A point answer scoped to one item → back onto the **item** via the adapter's
   `comment` (carrying the marker), plus the relevant label change.
 

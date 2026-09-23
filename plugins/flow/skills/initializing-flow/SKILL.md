@@ -64,11 +64,16 @@ node --experimental-strip-types "<flow-root>/scripts/config-files.ts"
 ```
 
 `migrate` never overwrites or deletes; when it prints `"migrated": true`, tell the
-operator which files it wrote. The second command prints
-`{ ok, origin, committed, local, projectDir, errors, warnings }`.
+operator which files it wrote. When it prints `"needsConfirmation": true`, the old
+settings sit in a plugin folder several projects may share: show the operator its
+`found` (folder, tracker, team, workspace) and ask **"Are these this project's
+settings?"** On yes, run `config-files.ts migrate --confirm`. On no, or headless,
+copy nothing and treat this as a **fresh install** below, whatever the second
+command reports. The second command prints
+`{ ok, origin, committed, local, committedDir, localDir, shared, moved, errors, warnings }`.
 
-- **`"origin": "none"`, or a `committed` file that is not valid JSON → fresh
-  install.** This is the _expected_ state of a clean install: the plugin ships
+- **`"origin": "none"`, a `committed` file that is not valid JSON, or shared
+  settings the operator said are not this project's → fresh install.** This is the _expected_ state of a clean install: the plugin ships
   only the templates `<flow-root>/config/config.example.json` and
   `config.local.example.json`, never a `config.json`. Proceed to Step 2 with
   defaults seeded from `config.example.json`, otherwise from schema defaults.
@@ -303,10 +308,12 @@ the review rubric. The triad and its precedence are documented in
    node --experimental-strip-types "<flow-root>/scripts/config-files.ts" prepare
    ```
 
-   It creates the project's `.agents/flow/` (in the main checkout when you are in a
-   linked git worktree, so every worktree finds the files), writes
-   `.agents/flow/.gitignore` so git ignores `config.local.json`, asks git to prove
-   it, and prints `{ ok, projectDir, committed, local, gitignore }`. Write the two
+   It creates the project's `.agents/flow/` folders and prints
+   `{ ok, committed, local, gitignores }`. `committed` is where the `config.json` in
+   use lives, or the current checkout for a fresh setup; `local` is where the
+   `config.local.json` in use lives, or the main checkout when you are in a linked
+   git worktree, so every worktree finds it. Each folder gets a `.gitignore` that
+   keeps `config.local.json` out of git, and git is asked to prove it. Write the two
    files below to exactly the `committed` and `local` paths it prints. On
    `"ok": false`, **stop**: git would commit the credentials file. Show the
    `reason` and do not write `config.local.json` until the operator fixes it. A

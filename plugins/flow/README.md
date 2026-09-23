@@ -239,8 +239,8 @@ agent session per run — so there is no scheduler to build.
 Your settings live in your project, not in the plugin, so an update never erases them:
 `.agents/flow/config.json` is the team's policy and is committed; `.agents/flow/config.local.json`
 holds this machine's credentials and overrides and is kept out of git. An older flow kept both
-inside the plugin; the first `/flow` after updating copies them over and leaves the old files
-alone. Defaults live in the [`config.example.json`](./config/config.example.json) template, validated against the
+inside the plugin; the first `/flow` after updating moves them over (asking first when the
+plugin folder may be shared with other projects) and leaves the old files alone. Defaults live in the [`config.example.json`](./config/config.example.json) template, validated against the
 Zod-generated [`config.schema.json`](./config/config.schema.json) (authored as the
 `@dorkos/flow` `FlowConfigSchema`, bridged via `z.toJSONSchema`). The resolved
 defaults encode the key decisions: `planApproval: false`, `subIssueThreshold: "xl"`,

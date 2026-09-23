@@ -66,24 +66,38 @@ One script knows where they are; never guess a path. On any `/flow` invocation, 
 node --experimental-strip-types "${CLAUDE_PLUGIN_ROOT}/scripts/config-files.ts" migrate
 ```
 
-It copies settings an older flow kept inside the plugin into the project, once, and never
-overwrites or deletes anything. When it prints `"migrated": true`, tell the operator which
-files it wrote and ask them to commit `.agents/flow/config.json` and `.agents/flow/.gitignore`
-(never `config.local.json`). When it prints `"ok": false`, show its `reason` and carry on: flow
-keeps reading the old files until the operator resolves it. Then run
+It moves settings an older flow kept inside the plugin into the project. It never
+overwrites or deletes anything, and it prints
+`{ ok, migrated, needsConfirmation, found, from, wrote, unchanged, leftInPlace, reason }`:
+
+- **`"migrated": true`**: tell the operator which files it wrote and ask them to commit
+  `.agents/flow/config.json` and `.agents/flow/.gitignore` (never `config.local.json`).
+- **`"needsConfirmation": true`**: the old settings sit in a plugin folder outside this
+  project, which several projects may share, so they may be another project's (credentials
+  included). Nothing was copied. Show the operator `found` (the folder, tracker, team and
+  workspace; never a credential) and ask with `AskUserQuestion`: **"Are these this
+  project's settings?"** On yes, run the same command with `migrate --confirm` and report
+  it as above. On no, route to `/flow:init` to set this project up fresh, and stop. With
+  no human to ask (a headless run), do not confirm: carry on with the old settings, which
+  is what flow did before 0.8.0, and say so in the run's report.
+- **`"ok": false`**: show its `reason` and carry on; flow keeps reading the old files until
+  the operator resolves it.
+
+Then run
 
 ```bash
 node --experimental-strip-types "${CLAUDE_PLUGIN_ROOT}/scripts/config-files.ts"
 ```
 
-which prints `{ ok, origin, committed, local, projectDir, errors, warnings }`: the
+which prints `{ ok, origin, committed, local, committedDir, localDir, shared, moved, errors,
+warnings }`: the
 `config.json` and `config.local.json` in use (`local` may be `null`), with `config.json`
 checked against `config/config.schema.json` (a field the schema gives a default may be left
 out). When `"ok": false` (no `config.json` anywhere, or an `errors` entry), route straight to
 `/flow:init` to scaffold it and stop, before any stage or dispatch work. **Warnings never
 do.** Most are an unknown key in `config.json` (a typo, or a setting this version of flow no
 longer has) that flow ignores; the rest are about the file itself (settings still inside the
-plugin, or team settings git ignores). Show every warning to the operator, naming its path,
+plugin, settings moved to another project, or team settings git ignores). Show every warning to the operator, naming its path,
 then carry on. Show a warning at `/secrets` first, and make it stand out: it means tracker
 credentials are sitting in the committed `config.json`, so tell the operator plainly to move
 that block to `config.local.json` before anything is committed. Every skill reads settings

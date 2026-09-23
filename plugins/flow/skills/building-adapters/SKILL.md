@@ -156,7 +156,12 @@ a skill from there). It must contain:
    adapter. No other flow skill or command may contain one of this tracker's API
    strings. The adapter is the **single audit surface** for every read and write.
 3. **The access path(s).** How the adapter reaches the tracker (MCP tools, a CLI,
-   or a REST client), auth, and any primary plus fallback path.
+   or a REST client), auth, and any primary plus fallback path. Say where each
+   configured value is read from: credentials and the team/workspace coordinates
+   come from the project's `.agents/flow/config.local.json`, policy from
+   `.agents/flow/config.json`, and the adapter finds both paths by running
+   `node --experimental-strip-types "<flow-root>/scripts/config-files.ts"`
+   (`committed`, `local`) rather than naming a path of its own.
 4. **The `WorkItem` normalization shape** with your **2a / 2b / 2c** mappings
    inlined, so a reader sees exactly how each native field becomes a generic one.
 5. **All 16 required verbs.** A table or section per verb binding it to the

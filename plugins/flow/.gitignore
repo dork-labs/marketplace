@@ -15,3 +15,5 @@ node_modules/
 # personal config and credentials back into this repo.
 config/config.json
 *.local.json
+# The marker a migration leaves naming the project the settings moved to.
+config/MIGRATED_TO

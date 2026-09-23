@@ -20,12 +20,15 @@ Run `/flow:init`. It writes both files for you. By hand:
 
 ```bash
 node --experimental-strip-types "<flow-root>/scripts/config-files.ts" prepare
-cp "<flow-root>/config/config.local.example.json" .agents/flow/config.local.json
+# prints { "ok": true, "committed": "…/config.json", "local": "…/config.local.json", … }
+(umask 077 && cp "<flow-root>/config/config.local.example.json" "<the local path it printed>")
 # then edit config.local.json and fill in your values
 ```
 
-`prepare` creates `.agents/flow/`, writes the `.gitignore`, and asks git to prove
-the local file is ignored before you put a token in it.
+`prepare` creates the `.agents/flow/` folders, writes a `.gitignore` in each, and
+asks git to prove the local file is ignored before you put a token in it. Copy to
+the exact `local` path it prints: in a git worktree that is the main checkout's
+folder, not the one you are standing in.
 
 Delete any block in `config.local.json` you do not need. If your host already
 supplies tracker auth (for example through a connected MCP server or CLI
@@ -54,27 +57,44 @@ It looks in this order, and the first `config.json` wins:
 
 1. **Your checkout's** `.agents/flow/`.
 2. **The main checkout's** `.agents/flow/`, when you are in a linked git worktree.
-   `config.local.json` is ignored by git, so it never reaches a new worktree;
-   flow finds it in the main checkout instead, and new files are written there.
 3. **Inside the plugin** (settings from flow before 0.8.0): its own `config/`
    folder, or, right after a Claude Code update, the previous version's folder.
-   Both files are read from the same folder.
+   Both files are read from the same folder. A folder whose settings were already
+   moved to a project is skipped.
 
-If none of these has a `config.json`, flow is not configured yet and `/flow`
-sends you to `/flow:init`.
+`config.local.json` is looked up the same way (1 then 2) on its own. If none of
+these has a `config.json`, flow is not configured yet and `/flow` sends you to
+`/flow:init`.
+
+New files go where they are read from: `config.json` next to the one in use, or
+in your current checkout for a fresh setup (it is committed, so it travels with
+the branch); `config.local.json` next to the one in use, or in the main checkout.
+It is ignored by git, so it would never reach a new worktree; in the main
+checkout every worktree finds it.
 
 ### Moving settings out of the plugin
 
 The first `/flow` or `/flow:init` after updating runs
 `config-files.ts migrate`. It copies `config.local.json` byte for byte (readable
 only by you) and then `config.json` into `.agents/flow/`, pointing the copy's
-`$schema` at the published schema so your editor still checks it. It never
-overwrites a file already in `.agents/flow/`: if one differs, it stops and names
-both files, and flow keeps reading the old ones until you decide. It never
-deletes the old files either, because another project may use the same install.
-Once your project has its own `config.json`, the old files are no longer read
-for it; delete them when no project needs them. Commit `.agents/flow/config.json`
-and `.agents/flow/.gitignore`.
+`$schema` at the published schema so your editor still checks it.
+
+- **A plugin installed inside your project** (DorkOS installs at project scope)
+  holds that project's settings, so they are copied without asking.
+- **A plugin anywhere else** (Claude Code's plugin cache, a `--plugin-dir`
+  checkout, a DorkOS install for your whole user) may serve several projects, so
+  the settings in it may be another project's, tokens included. flow shows you the
+  folder, tracker, team and workspace it found and asks whether they are this
+  project's. Only a yes copies them (`migrate --confirm`); a no sets this project up
+  fresh with `/flow:init`. Until you answer, flow keeps reading them as before.
+
+After a move, the old folder gets a `MIGRATED_TO` file naming your project, so
+another project on the same install is never handed your settings; it is told
+where they went and set up fresh. The copy never overwrites a file already in
+`.agents/flow/`: if one differs, it stops and names both files, and flow keeps
+reading the old ones until you decide. The old files are never deleted; delete
+them yourself once no project needs them. Commit `.agents/flow/config.json` and
+`.agents/flow/.gitignore`.
 
 ## Precedence
 

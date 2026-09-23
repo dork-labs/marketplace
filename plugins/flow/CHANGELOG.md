@@ -16,14 +16,21 @@ you until you **reinstall it** (Marketplace → flow → reinstall, or re-run yo
   computer's tokens and overrides, and flow adds a `.agents/flow/.gitignore` so it
   is never committed. flow checks that git really ignores it before writing
   anything secret there.
-- The first `/flow` after updating copies your old settings over by itself, even
-  when Claude Code has already moved flow to a new folder. It tells you which files
-  it wrote. Commit `.agents/flow/config.json` and `.agents/flow/.gitignore`.
-- The copy never overwrites a file that is already there, and it never deletes the
-  old files, because another project may still use them. Once your project has its
-  own settings, flow stops reading the old ones for it.
-- In a git worktree, flow finds the settings in your main checkout, so a new
-  worktree needs nothing copied into it.
+- The first `/flow` after updating moves your old settings over, even when Claude
+  Code has already moved flow to a new folder. It tells you which files it wrote.
+  Commit `.agents/flow/config.json` and `.agents/flow/.gitignore`.
+- If flow is installed inside your project, it moves them without asking. If it is
+  installed somewhere several projects can share, the settings there might belong
+  to another project, tokens included. flow shows you the tracker, team and folder
+  it found and asks whether they are this project's before it moves anything. If
+  you say no, it sets this project up fresh.
+- After a move, flow leaves a note in the old folder saying which project the
+  settings went to, so another project using the same install is never handed
+  them.
+- The move never overwrites a file that is already there and never deletes the old
+  files. Once your project has its own settings, flow stops reading the old ones.
+- In a git worktree, flow finds your machine's settings in your main checkout, so a
+  new worktree needs nothing copied into it.
 
 ## 0.7.4
 
