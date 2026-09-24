@@ -223,8 +223,10 @@ agent session per run — so there is no scheduler to build.
   own cron. On a DorkOS build without schedule discovery, or on any other harness,
   wire an external scheduler instead (see `docs/bring-your-own-scheduler.mdx`).
   Running it still needs the DorkOS server (it hosts the watcher + croner) and the
-  project's DorkOS agent registered. The on/off switch is the one on the Schedules
-  page, which outlasts updates; the file is the package's and an update replaces it.
+  project's DorkOS agent registered. The on/off switch and the timing are both set
+  on the Schedules page (Edit changes when it runs; "Reset to the package's
+  default" goes back), and both outlast updates; the file is the package's and an
+  update replaces it.
 - **Pausing** is `/flow:pause`: it writes `.agents/flow/paused.json` in the project,
   and every tick checks it first and stops, so an update cannot undo it and it works
   under any scheduler. On DorkOS it also switches this project's flow schedules off
