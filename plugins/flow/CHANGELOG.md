@@ -4,6 +4,27 @@ Installs of this plugin are pinned to a commit SHA, so a fix here does not reach
 you until you **reinstall it** (Marketplace → flow → reinstall, or re-run your
 `--plugin-dir` checkout's `git pull`). Each entry below says whether that matters.
 
+## 0.10.0
+
+**How often flow's scheduled runs fire is now set where they are scheduled, not in a file inside the plugin. Nothing to do after updating, and DorkOS does not ask you to approve anything again.**
+
+- The docs used to tell you to change how often the `flow-drain` tick runs by
+  editing the `cron` line in the plugin's own `flow-drain` file. An update
+  replaces that file, so your change was lost, and on DorkOS every edit (and the
+  update that undid it) made you approve the schedule again.
+- If you start the tick from your own scheduler (a `cron` line, a CI job), that
+  scheduler's own entry decides how often it runs. It never read flow's file, and
+  a flow update never touches it.
+- On DorkOS, the tick runs at flow's default, the top of every hour, and the
+  monthly check at 09:00 on the 1st. DorkOS lets you switch a package's schedule
+  on or off on the Schedules page, but not change when it runs. If you need a
+  different cadence, leave `flow-drain` switched off there and start the tick
+  from your own scheduler.
+- `/flow:status` now shows this project's flow schedules on DorkOS: when each
+  runs, whether it is on, and whether it is waiting for your approval. It only
+  looks; it never changes a schedule.
+- The scheduled runs themselves did not change, so DorkOS keeps your approval.
+
 ## 0.9.0
 
 **A tracker adapter `/flow:init` made for you, and `/flow:pause`, now live in your project, so updating flow can't undo them. Update, then run `/flow` once. If you rely on `/flow:pause`, pause again after updating.**
