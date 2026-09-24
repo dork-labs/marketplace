@@ -50,7 +50,7 @@ import {
   NonMappingFrontmatterError,
   UnsupportedFrontmatterError,
   parseFrontmatter,
-} from './frontmatter.ts';
+} from '@dorkos/skills/frontmatter';
 import { SCHEDULED_SKILLS } from './scheduled-skills.ts';
 import { PLUGINS_DIR, checkVersionAgreement, pluginDirs } from './versions.ts';
 
@@ -246,7 +246,9 @@ export function findSkillFiles(repoRoot: string): string[] {
 
 /**
  * Read a SKILL.md's frontmatter, without ever running it: the file comes from
- * a pull request, and a `---js` block is code (see `frontmatter.ts`).
+ * a pull request, and a `---js` block is code. `parseFrontmatter` is DorkOS's
+ * own reader, fetched at the pin in upstream.json, which refuses anything but
+ * YAML or JSON fields.
  *
  * @param absPath - Absolute path to the file.
  * @returns The frontmatter mapping, or a parse failure message.
