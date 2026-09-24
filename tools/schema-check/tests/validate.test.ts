@@ -60,6 +60,53 @@ describe('the real repository', () => {
   });
 });
 
+describe('a SKILL.md whose frontmatter is code, not data', () => {
+  const SENTINEL = '__schemaCheckValidatePwned';
+
+  afterEach(() => {
+    delete (globalThis as Record<string, unknown>)[SENTINEL];
+  });
+
+  /** A throwaway repo whose one skill is exactly `content`, fence and all. */
+  function rawFixtureRepo(content: string): string {
+    const root = fixtureRepo('name: placeholder');
+    writeFileSync(path.join(root, 'plugins/demo/skills/demo-skill/SKILL.md'), content, 'utf8');
+    return root;
+  }
+
+  // Purpose: DOR-2310. This gate runs on every pull request, so a `---js`
+  // header used to run the PR's own code on the CI runner. It must be reported
+  // as a broken file, and the global it tries to set must never appear.
+  it.each(['js', 'javascript', 'coffee'])('reports `---%s` and runs none of it', (lang) => {
+    const root = rawFixtureRepo(
+      `---${lang}\n{ name: (globalThis.${SENTINEL} = 1, 'demo-skill'), description: 'x' }\n---\nbody\n`
+    );
+    const findings = validateSkills(root, []);
+    expect((globalThis as Record<string, unknown>)[SENTINEL]).toBeUndefined();
+    expect(findings).toEqual([
+      {
+        file: 'plugins/demo/skills/demo-skill/SKILL.md',
+        message: expect.stringContaining(`written as "${lang}"`),
+      },
+    ]);
+  });
+});
+
+describe('a SKILL.md whose frontmatter is a list, not settings', () => {
+  // Purpose: YAML that parses but is not `key: value` lines is reported as
+  // exactly that, not as invalid YAML, which it is not.
+  it('says the frontmatter must be key: value fields', () => {
+    const root = fixtureRepo('- demo-skill\n- runs every hour');
+    expect(validateSkills(root, [])).toEqual([
+      {
+        file: 'plugins/demo/skills/demo-skill/SKILL.md',
+        message:
+          'Its frontmatter cannot be read. Frontmatter must be a list of "key: value" fields, but this one is a list.',
+      },
+    ]);
+  });
+});
+
 describe('a schedule block that DorkOS would silently drop', () => {
   it('accepts the working block it is measured against', () => {
     expect(validateSkills(fixtureRepo(WORKING_SCHEDULE), REQUIRED)).toEqual([]);

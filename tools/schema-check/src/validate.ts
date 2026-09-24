@@ -38,7 +38,6 @@
 
 import { existsSync, readFileSync, readdirSync } from 'node:fs';
 import path from 'node:path';
-import matter from 'gray-matter';
 import { z } from 'zod';
 import { SkillFrontmatterSchema } from '@dorkos/skills/schema';
 import { ScheduleBlockSchema, hasSchedule } from '@dorkos/skills/schedule-schema';
@@ -47,6 +46,11 @@ import { MarketplacePackageManifestSchema } from '@dorkos/marketplace/manifest-s
 import { MarketplaceJsonSchema } from '@dorkos/marketplace/marketplace-json-schema';
 import { DorkosSidecarSchema } from '@dorkos/marketplace/dorkos-sidecar-schema';
 import { validateAgainstCcSchema } from '@dorkos/marketplace/cc-validator';
+import {
+  NonMappingFrontmatterError,
+  UnsupportedFrontmatterError,
+  parseFrontmatter,
+} from './frontmatter.ts';
 import { SCHEDULED_SKILLS } from './scheduled-skills.ts';
 import { PLUGINS_DIR, checkVersionAgreement, pluginDirs } from './versions.ts';
 
@@ -241,16 +245,22 @@ export function findSkillFiles(repoRoot: string): string[] {
 }
 
 /**
- * Read a SKILL.md's frontmatter.
+ * Read a SKILL.md's frontmatter, without ever running it: the file comes from
+ * a pull request, and a `---js` block is code (see `frontmatter.ts`).
  *
  * @param absPath - Absolute path to the file.
  * @returns The frontmatter mapping, or a parse failure message.
  */
 function readFrontmatter(absPath: string): { data: Record<string, unknown> } | { error: string } {
   try {
-    const parsed = matter(readFileSync(absPath, 'utf8'));
-    return { data: parsed.data as Record<string, unknown> };
+    return { data: parseFrontmatter(readFileSync(absPath, 'utf8')).data };
   } catch (cause) {
+    if (
+      cause instanceof UnsupportedFrontmatterError ||
+      cause instanceof NonMappingFrontmatterError
+    ) {
+      return { error: `Its frontmatter cannot be read. ${cause.message}` };
+    }
     return { error: `Its frontmatter is not valid YAML (${(cause as Error).message}).` };
   }
 }
