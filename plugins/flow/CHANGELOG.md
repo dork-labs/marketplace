@@ -4,6 +4,20 @@ Installs of this plugin are pinned to a commit SHA, so a fix here does not reach
 you until you **reinstall it** (Marketplace → flow → reinstall, or re-run your
 `--plugin-dir` checkout's `git pull`). Each entry below says whether that matters.
 
+## 0.10.1
+
+**On DorkOS, you can now change when flow's scheduled runs fire right on the Schedules page. Nothing to do after updating.**
+
+- The dials page and the README now say so. Open `flow-drain` (or `flow-groom`) on
+  the Schedules page, choose Edit, and set a new time or timezone. DorkOS keeps
+  your timing for this install, so a flow update never undoes it, and the
+  schedule stays approved because you made the change. "Reset to the package's
+  default" puts flow's own timing back.
+- On DorkOS 0.82 and earlier, a package's schedule can only be switched on or
+  off, so the dials page keeps the old way for those releases: make your own
+  `/flow continue` schedule and switch `flow-drain` off.
+- Docs only. Reinstalling is not needed.
+
 ## 0.10.0
 
 **How often flow's scheduled runs fire is now set where they are scheduled, not in a file inside the plugin. Nothing to do after updating, and DorkOS does not ask you to approve anything again.**
