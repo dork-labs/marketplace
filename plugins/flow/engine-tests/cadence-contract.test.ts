@@ -3,7 +3,7 @@
  * the shipped `schedule:` block an update replaces (DOR-2300). That is a promise
  * made in prose, so this suite pins the prose: nothing but the dials page's
  * Cadence section names a shipped schedule's timing field, that section says
- * where the cadence really lives, the defaults it documents are the shipped ones,
+ * where the cadence really lives (on DorkOS, the Schedules page, DOR-2302), the defaults it documents are the shipped ones,
  * and `/flow:status` only ever reads DorkOS's schedules. Each guard is shown to
  * bite on a planted break.
  *
@@ -86,7 +86,12 @@ function cadenceGaps(section: string): string[] {
   const needs: [string, RegExp][] = [
     ['calls the shipped block the package default', /package's defaults/],
     ['names your own scheduler entry', /your own scheduler[^.]*its own entry is the cadence/i],
-    ['says DorkOS will not change when it runs', /on or off[^.]*not change when it runs/],
+    // DOR-2302: DorkOS keeps a person's timing for a package's schedule.
+    ['says to change the timing on the Schedules page', /choose \*\*Edit\*\*, and set a new time or timezone/],
+    ['says a flow update never undoes that timing', /a flow update never undoes it/],
+    ['says reset puts flow’s timing back', /\*\*Reset to the package's default\*\* puts flow's own timing back/],
+    ['says an agent’s timing change asks again', /If an agent changes the timing[^.]*approve it/],
+    ['scopes the own-schedule workaround to older DorkOS', /0\.82 and earlier/],
     ['says an update undoes an edit', /undone by the next update/],
     ['says DorkOS asks for approval again', /approve the schedule again/],
     [
@@ -95,7 +100,7 @@ function cadenceGaps(section: string): string[] {
     ],
     ['gives the person-owned schedule on DorkOS', /create a schedule for this project's agent/],
     ['whose prompt runs one /flow continue tick', /prompt is `Run one \/flow continue tick/],
-    ['says its cron is editable and counts as approval', /counts your edit as your approval/],
+    ['says your own timing change keeps it approved', /stays approved, because you made the change/],
     ['warns not to copy the flow-drain text', /do not copy the text of `flow-drain`/],
     ['says the pause flag stops it', /pause flag stops it/],
     ['points at /flow:status', /`\/flow:status` shows/],
