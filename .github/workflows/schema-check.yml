@@ -22,6 +22,13 @@ name: schemas
 # from the public dorkos repo. The pin is an immutable commit SHA, so an upstream
 # change can never turn this job red on its own. It needs no secrets and runs on
 # the default read-only token.
+#
+# Keep it that way. The job reads files the pull request wrote, and a pull
+# request from a fork can put anything in them. `src/frontmatter.ts` is what
+# stops a SKILL.md from running code here (DOR-2310), but the read-only token and
+# the absence of secrets are what limit the damage if something ever gets past
+# it. Never add a secret, a write permission, a `pull_request_target` trigger, or
+# a later step that trusts what this job produced, without revisiting that.
 
 on:
   pull_request:

@@ -120,6 +120,25 @@ CI runs it on every pull request (base against head), on every merge-queue run
 (or `main` when it is first), so two PRs that each bumped a package to the same
 version cannot both merge: the second one fails in the queue.
 
+## Reading a SKILL.md safely
+
+This gate reads every `SKILL.md` a pull request brings, on the CI runner. Left
+to its defaults, gray-matter runs any frontmatter block that opens with `---js`
+or `---javascript` as code, so a pull request could once run its own code here
+(DOR-2310). Every read therefore goes through `src/frontmatter.ts`, which:
+
+- refuses any frontmatter language but YAML or JSON before parsing anything,
+- replaces gray-matter's JavaScript engine with one that refuses to run,
+- parses YAML with js-yaml v4, which cannot build code from a YAML tag,
+- refuses frontmatter that is a single value or a list rather than `key: value` lines.
+
+It is the only file allowed to import gray-matter;
+`tests/frontmatter-confinement.test.ts` fails if anything else in the repo does.
+It is a port of DorkOS's own reader (`packages/skills/src/frontmatter.ts`,
+DOR-2308), so YAML reads the same here as in DorkOS. One visible effect of v4:
+`0123` is the number 123 and `0o17` is 15, where gray-matter's bundled v3 read 83
+and the string `"0o17"`.
+
 ## Where the schemas come from
 
 `@dorkos/skills` and `@dorkos/marketplace` are private workspace packages inside
