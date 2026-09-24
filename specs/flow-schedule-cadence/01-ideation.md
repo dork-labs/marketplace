@@ -80,7 +80,7 @@ status: ideation
   `docs/bring-your-own-scheduler.mdx`, `commands/status.md`.
 - **Not touched on purpose:** the bodies and `schedule:` blocks of `skills/flow-drain` and
   `skills/flow-groom`. On DorkOS the body is the scheduled prompt and the cron is the other half of
-  the approval key, so any edit there makes every DorkOS user approve the tick again; nothing in
+  the approval key, so a change to their body or cron makes every DorkOS user approve the tick again; nothing in
   them tells a person to edit the cron, so nothing needs to change.
 - **Tests:** a new `engine-tests/cadence-contract.test.ts`.
 - **Blast radius:** documentation and one observe-only command. No script, schema or schedule
@@ -121,10 +121,16 @@ status: ideation
 4. **The cadence lives where the tick is scheduled.** Own scheduler: its own entry, which it
    already is, and no update touches it. DorkOS: the schedule row on the Schedules page, with the
    shipped cron as the package default. The person's edit there is a trusted act, so it can carry
-   its own approval. **Recommended.** It needs one DorkOS change: a package schedule's timing has
-   to be something the row may hold, like `enabled` (section 7). Until DorkOS ships it, a DorkOS
-   user who needs a different cadence fires the tick from their own scheduler and leaves
-   `flow-drain` switched off.
+   its own approval. **Recommended.** For flow's own schedule it needs one DorkOS change: a package
+   schedule's timing has to be something the row may hold, like `enabled` (section 7). Until then
+   (review round 1) DorkOS already supports a person-owned schedule: one a person makes on the
+   Schedules page for the project's agent, whose prompt runs one `/flow continue` tick. Its file
+   lands in `<project>/.agents/skills/` (`skills-roots.ts`, `agentSkillsRoot`), a trusted create
+   is active at once (`lifecycle/create-task.ts:431-436`), and a trusted cron edit re-approves in
+   the same act (`routes/tasks.ts:515`). Caveats: its prompt must not copy `flow-drain`'s body
+   (that text finds `<flow-root>` relative to where it sits in the plugin), and `flow-drain` must
+   stay off so the tick does not run twice. `/flow:status` and `/flow:pause` recognise it by its
+   prompt; the pause flag stops it regardless.
 
 ### What flow can do now, without DorkOS
 
@@ -144,28 +150,43 @@ status: ideation
 | 1   | The one source of truth for cadence        | Wherever the tick is scheduled: the person's own scheduler entry, or (on DorkOS) the schedule row                       | Each scheduler already owns when it fires; a second copy in flow would be read by nothing or drift from the real one. |
 | 2   | The shipped `schedule.cron` / `timezone`   | The package default DorkOS starts from; never an instruction to edit                                                     | It is the package's file; an update replaces it and an edit re-parks on DorkOS.                                        |
 | 3   | A flow config field for cadence            | None                                                                                                                    | Nothing would read it (section 5, option 2); the dials promise only real dials.                                        |
-| 4   | DorkOS today                               | Say plainly the tick runs at flow's default there; for another cadence, use your own scheduler and keep `flow-drain` off | True today; the one path that survives updates and needs no re-approval per change.                                   |
+| 4   | DorkOS today                               | flow's own schedules run at flow's default; for another cadence, make a DorkOS schedule of your own whose prompt runs one `/flow continue` tick (its cron is editable on the Schedules page, and a person's edit re-approves in the same act, `routes/tasks.ts:515`), or use any other scheduler; keep `flow-drain` off either way (revised in review) | Both paths already work on DorkOS, survive updates and need no separate approval per change. |
 | 5   | DorkOS change                              | Recommended separate dorkos ticket: a package schedule's cron and timezone may be held by the row, set on the Schedules page | Mirrors the `enabled` precedent (FB-26); the only place a person can tune a package schedule without editing the package. |
 | 6   | `/flow` affordance                          | `/flow:status` shows the cadence in use, read-only                                                                      | Lets a person see what actually fires; survives the DorkOS change unchanged.                                           |
 | 7   | The shipped tick skills                    | Untouched                                                                                                               | Their body and cron are DorkOS's approval key; editing them would make everyone approve again, for no gain.            |
 
-## 7) Recommended DorkOS ticket (not implemented here)
+## 7) Recommended DorkOS ticket (not implemented here; corrected in review round 1)
 
 **Title:** Let a person change when a package's schedule runs on the Schedules page.
 
 - **Today:** a package schedule's `cron` and `timezone` are refused on the row
-  (`task-file-update.ts:176`, `update-task-file.ts:181-208`), and the sync copies the file's cron
-  over the row every time (`task-store.ts:1260, 1338`). The only way to change when a package's
-  schedule runs is to edit the package's file, which the next update replaces and which parks the
-  schedule for approval again.
-- **Minimal change:** treat the timing like the on/off switch. Keep the file's `cron` / `timezone`
-  as the package default, and let the row hold a person's own timing that the sync leaves alone
-  (for example nullable override columns, with the scheduler and the approval key using the
-  effective value, override first). A trusted edit on the Schedules page sets it and re-approves in
-  the same act (as `routes/tasks.ts:515` already does for a person's own schedule); an agent's
-  `tasks_update` timing change still re-parks. A way to go back to the package default.
-- **Why the key must use the effective timing:** so a package update that changes only its default
-  cron does not re-park a schedule whose person already chose their own, while a changed prompt
-  still does.
+  (`task-file-update.ts:176`, `update-task-file.ts:181-208`, 409 `schedule_package_owned`), and the
+  sync copies the file's cron over the row on every pass (`task-store.ts:1260, 1338`). The only way
+  to change when a package's schedule runs is to edit the package's file, which the next update
+  replaces and which parks the schedule for approval again.
+- **Data:** nullable Drizzle columns on `pulse_schedules` for the person's timing (e.g.
+  `cronOverride`, `timezoneOverride`). Existing rows are untouched (both `null`). The sync keeps
+  writing the file's values as the package default and never touches the overrides.
+- **API shape:** `TaskSchema.cron` / `timezone` are the EFFECTIVE values (override, else default),
+  so every current reader keeps working; the package default is exposed separately
+  (`defaultCron` / `defaultTimezone`) for the Schedules page to show and reset to.
+- **Every cron reader uses the effective value:** the registrar that arms the croner job
+  (`task-registrar.ts`, `syncTask`); the arm gate `resolveFileArmStatus`
+  (`schedule-permission-clamp.ts`, fed by `FileSyncGates.resolve`, `file-sync-gates.ts:97`, whose
+  `incoming` becomes the file's prompt with the effective cron); the
+  bypass keep-grant check (`keepsApprovedBypass`, same file, `:139`); the `keepsRowEnabled` path
+  (it trusts `arm.status`, so it follows the arm gate); `recordApproval`
+  (`task-store.ts:397`); `previewNextRuns` for the next-runs preview (`routes/tasks.ts:297`).
+- **Approval key unchanged:** `scheduleContentKey` stays `[prompt, cron]` with `cron` = effective.
+  Timezone is not in the key, so a timezone-only override needs no re-key.
+- **Who may set it:** a trusted edit on the Schedules page sets the override and re-approves in the
+  same act (as `routes/tasks.ts:515` already does for a person's own schedule). An agent's
+  `tasks_update` timing change on a package schedule sets the override and re-parks (the existing
+  `REAPPROVAL_NOTE` behaviour). `landsOnRowAlone` gains `cron` and `timezone`, landing in the
+  override columns.
+- **Reset:** set the override back to `null` (the package default applies again). A trusted reset
+  re-approves in the same act; an agent's reset re-parks when it changes the effective cron.
+- **Updates:** a package update that only changes its default cron does not re-park an overridden
+  row (the effective cron, and so the key, is unchanged); a changed prompt still does.
 - **Follow-up in flow when it ships:** the dials page's DorkOS paragraph points at the Schedules
-  page instead of your own scheduler; `/flow:status` needs no change.
+  page for flow's own `flow-drain`; `/flow:status` needs no change.

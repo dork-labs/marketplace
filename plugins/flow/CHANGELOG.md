@@ -15,14 +15,21 @@ you until you **reinstall it** (Marketplace → flow → reinstall, or re-run yo
 - If you start the tick from your own scheduler (a `cron` line, a CI job), that
   scheduler's own entry decides how often it runs. It never read flow's file, and
   a flow update never touches it.
-- On DorkOS, the tick runs at flow's default, the top of every hour, and the
-  monthly check at 09:00 on the 1st. DorkOS lets you switch a package's schedule
-  on or off on the Schedules page, but not change when it runs. If you need a
-  different cadence, leave `flow-drain` switched off there and start the tick
-  from your own scheduler.
-- `/flow:status` now shows this project's flow schedules on DorkOS: when each
-  runs, whether it is on, and whether it is waiting for your approval. It only
-  looks; it never changes a schedule.
+- On DorkOS, flow's own tick runs at flow's default, the top of every hour, and
+  the monthly check at 09:00 on the 1st. DorkOS lets you switch a package's
+  schedule on or off on the Schedules page, but not change when it runs.
+- To run the tick on DorkOS at a cadence you choose, make the schedule your own:
+  on the Schedules page, create one for this project's agent whose prompt is
+  `Run one /flow continue tick in this project, then stop.`, and leave
+  `flow-drain` switched off. You can change its timing there whenever you like,
+  and a flow update never touches it. The dials page has the details.
+- `/flow:status` now shows this project's flow schedules on DorkOS, your own
+  `/flow continue` one included: when each runs, whether it is on, and whether it
+  is waiting for your approval. It only looks; it never changes a schedule.
+- `/flow:pause` now also switches off your own `/flow continue` schedule. And it
+  only ever touches this project's schedules: before, a project in a folder like
+  `app` could switch off a schedule belonging to a neighbouring folder like
+  `app-2`, because it only checked how the path started.
 - The scheduled runs themselves did not change, so DorkOS keeps your approval.
 
 ## 0.9.0

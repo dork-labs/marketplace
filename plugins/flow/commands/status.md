@@ -32,9 +32,14 @@ a single pane:
 5. **The schedules, only when the `tasks_list` tool is available** (DorkOS names it
    `mcp__dorkos__tasks_list`). DorkOS tools may be deferred behind tool search: if
    `tasks_list` is not loaded, load it with ToolSearch first, and treat it as absent
-   only when that finds nothing. Call `tasks_list`. Keep every schedule whose `name` is
-   `flow-drain` or `flow-groom` and whose `filePath` is inside this project (the main
-   checkout or this checkout); a schedule elsewhere belongs to another project. This
+   only when that finds nothing. Call `tasks_list` and keep **this project's flow
+   schedules**. This project's roots are the `committedDir` and the `localDir` that
+   `config-files.ts` prints (source 3), each with its trailing `/.agents/flow` removed.
+   A schedule is in this project only when its `filePath` starts with one of those
+   roots followed by `/`; a root that is merely the start of another folder's name
+   (`/work/app` against `/work/app-2/...`) is a different project. Of those, keep every
+   schedule whose `name` is `flow-drain` or `flow-groom`, and every schedule a person
+   made whose `prompt` runs `/flow continue` (their own cadence for the tick). This
    command only reads: it never calls `tasks_update` and never changes a schedule.
 
 Render, in this order:

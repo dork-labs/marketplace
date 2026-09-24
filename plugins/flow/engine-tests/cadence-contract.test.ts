@@ -14,6 +14,7 @@ import { readdirSync, readFileSync, statSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
+import { projectFilterGaps } from './schedule-filter.ts';
 
 const pluginRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const read = (rel: string) => readFileSync(path.join(pluginRoot, rel), 'utf8');
@@ -47,6 +48,16 @@ function proseFiles(): Record<string, string> {
 
 const TIMING_FIELD = /schedule\.(cron|timezone)\b/g;
 
+/** A bare `cron:` line or phrase near a shipped schedule's name or file (outside frontmatter). */
+const NEAR_SHIPPED_CRON =
+  /(flow-drain|flow-groom|SKILL\.md)[\s\S]{0,200}?\bcron:|\bcron:[\s\S]{0,200}?(flow-drain|flow-groom|SKILL\.md)/g;
+
+/** A file's text with its leading YAML frontmatter blanked (same length, so offsets hold). */
+function withoutFrontmatter(text: string): string {
+  const match = /^---\n[\s\S]*?\n---\n/.exec(text);
+  return match ? ' '.repeat(match[0].length) + text.slice(match[0].length) : text;
+}
+
 /**
  * Every mention of a shipped schedule's timing field outside the one place
  * allowed to describe it: the dials page's Cadence section.
@@ -56,7 +67,8 @@ function strayTimingMentions(files: Record<string, string>): string[] {
   for (const [file, text] of Object.entries(files)) {
     const allowed = file === DIALS ? between(text, CADENCE_HEADING, '\n## ') : '';
     const allowedStart = allowed ? text.indexOf(allowed) : -1;
-    for (const match of text.matchAll(TIMING_FIELD)) {
+    const body = withoutFrontmatter(text);
+    for (const match of [...body.matchAll(TIMING_FIELD), ...body.matchAll(NEAR_SHIPPED_CRON)]) {
       const at = match.index ?? 0;
       const inside =
         allowedStart !== -1 && at >= allowedStart && at < allowedStart + allowed.length;
@@ -77,7 +89,15 @@ function cadenceGaps(section: string): string[] {
     ['says DorkOS will not change when it runs', /on or off[^.]*not change when it runs/],
     ['says an update undoes an edit', /undone by the next update/],
     ['says DorkOS asks for approval again', /approve the schedule again/],
-    ['gives the way to another cadence on DorkOS', /leave `flow-drain` switched off on DorkOS/],
+    [
+      'says to leave flow-drain off when you run your own',
+      /leave `flow-drain` switched off on DorkOS/,
+    ],
+    ['gives the person-owned schedule on DorkOS', /create a schedule for this project's agent/],
+    ['whose prompt runs one /flow continue tick', /prompt is `Run one \/flow continue tick/],
+    ['says its cron is editable and counts as approval', /counts your edit as your approval/],
+    ['warns not to copy the flow-drain text', /do not copy the text of `flow-drain`/],
+    ['says the pause flag stops it', /pause flag stops it/],
     ['points at /flow:status', /`\/flow:status` shows/],
   ];
   const forbids: [string, RegExp][] = [
@@ -87,7 +107,21 @@ function cadenceGaps(section: string): string[] {
   return [
     ...needs.filter(([, re]) => !re.test(section)).map(([label]) => label),
     ...forbids.filter(([, re]) => re.test(section)).map(([label]) => label),
+    ...editAdvice(section),
   ];
+}
+
+/**
+ * Sentences (and table rows) that pair a shipped timing field with change, edit
+ * or set, other than the table's own "never in this file" answer.
+ */
+function editAdvice(section: string): string[] {
+  return section
+    .split(/(?<=[.!?])\s+|\n/)
+    .filter((sentence) => /schedule\.(cron|timezone)\b/.test(sentence))
+    .filter((sentence) => /\b(change|edit|set)\b/i.test(sentence))
+    .filter((sentence) => !/never in this file/.test(sentence))
+    .map((sentence) => `advises editing a shipped timing field: ${sentence.trim()}`);
 }
 
 /** A frontmatter `schedule:` field of a shipped skill, quotes stripped. */
@@ -129,14 +163,16 @@ function statusGaps(status: string): string[] {
   const gaps: string[] = [];
   if (!allowedTools.includes('mcp__dorkos__tasks_list')) gaps.push('may not call tasks_list');
   if (/tasks_update/.test(allowedTools)) gaps.push('pre-approves tasks_update');
+  // A wildcard or the bare server name would pre-approve every DorkOS tool,
+  // tasks_update included.
+  if (/mcp__dorkos(__\*|(?![_\w]))/.test(allowedTools)) gaps.push('pre-approves every DorkOS tool');
   const sourceNeeds: [string, RegExp][] = [
     ['reads tasks_list', /Call `tasks_list`/],
     ['loads a deferred tool first', /ToolSearch/],
-    ['keeps to flow schedules', /`flow-drain` or\s+`flow-groom`/],
-    ['keeps to this project', /inside this project/],
     ['never changes a schedule', /never calls `tasks_update`/],
   ];
   gaps.push(...sourceNeeds.filter(([, re]) => !re.test(source)).map(([label]) => label));
+  gaps.push(...projectFilterGaps(source));
   const pane = between(status, '- **Schedules.**', '- **Parked.**');
   const paneNeeds: [string, RegExp][] = [
     ['shows the cron and timezone', /the `cron`\s+and its `timezone`/],
@@ -177,7 +213,14 @@ describe('only the dials Cadence section names a shipped schedule timing field',
       '| Make the autonomous tick fire more often | `flow-drain` `schedule.cron` |'
     );
     files['commands/status.md'] += '\nEdit `schedule.cron` in flow-drain to go faster.\n';
-    expect(strayTimingMentions(files)).toHaveLength(2);
+    // A bare `cron:` edit named beside the shipped file, without the dotted field.
+    files['README.md'] +=
+      '\nTo go faster, set `cron: "*/5 * * * *"` in skills/flow-drain/SKILL.md.\n';
+    expect(
+      strayTimingMentions(files)
+        .map((at) => at.split(':')[0])
+        .sort()
+    ).toEqual(['README.md', 'commands/status.md', DIALS]);
   });
 });
 
@@ -193,6 +236,13 @@ describe('the Cadence section says where the cadence lives', () => {
     ]);
     expect(cadenceGaps(section.replace(/undone by the next update/g, 'kept'))).toEqual([
       'says an update undoes an edit',
+    ]);
+    expect(cadenceGaps(section.replace(/do not copy the text of `flow-drain`/, 'x'))).toEqual([
+      'warns not to copy the flow-drain text',
+    ]);
+    const advice = 'You can also change `schedule.cron` in the file if you prefer.';
+    expect(cadenceGaps(`${section}\n${advice}`)).toEqual([
+      `advises editing a shipped timing field: ${advice}`,
     ]);
   });
 });
@@ -240,9 +290,18 @@ describe('/flow:status reads the schedules and never changes them', () => {
         )
       )
     ).toEqual(['pre-approves tasks_update']);
-    expect(statusGaps(status.replace(/inside this project/g, 'anywhere'))).toEqual([
-      'keeps to this project',
+    // A bare string prefix would let `/work/app` claim `/work/app-2`.
+    expect(statusGaps(status.replace('roots followed by `/`', 'roots'))).toEqual([
+      'requires a separator after the root',
     ]);
+    expect(
+      statusGaps(status.replace(/made whose `prompt` runs `\/flow continue`/, 'made'))
+    ).toEqual(['keeps a person-made /flow continue schedule']);
+    for (const wide of ['mcp__dorkos__*', 'mcp__dorkos']) {
+      expect(
+        statusGaps(status.replace('mcp__dorkos__tasks_list', `mcp__dorkos__tasks_list, ${wide}`))
+      ).toEqual(['pre-approves every DorkOS tool']);
+    }
   });
 });
 

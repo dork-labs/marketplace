@@ -58,7 +58,7 @@ when DorkOS's schedule tools are there. A test guards all of it.
 - Implementing the DorkOS change (recommended ticket in the ideation, section 7).
 - A flow config field for cadence (ideation, section 5, option 2: nothing would read it).
 - A cadence gate inside the tick (ideation, section 5, option 3).
-- Changing the shipped tick skills. Their body and cron are DorkOS's approval key; any edit makes
+- Changing the shipped tick skills. Their body and cron are DorkOS's approval key; a change to either makes
   every DorkOS user approve the tick again. Nothing in them tells a person to edit the cron.
 - The `loops.<id>.intervalMs` contract (the deferred P5 runner's).
 
@@ -82,13 +82,19 @@ None new. `/flow:status` gains an optional read through DorkOS's `tasks_list` ag
      scheduler never reads them.
   2. **Your own scheduler**: its own entry is the cadence. Change it there; a flow update never
      touches it.
-  3. **DorkOS**: runs the tick at flow's default. DorkOS lets you switch a package's schedule on
-     or off on the Schedules page but not change when it runs, and the file is the package's: an
-     edit there is undone by the next update, and DorkOS asks you to approve the schedule again
-     after the edit and again after the update. If you need a different cadence, leave
-     `flow-drain` switched off on DorkOS and fire the tick from your own scheduler
-     ([Bring your own scheduler](/docs/guides/flow/bring-your-own-scheduler)).
-  4. `/flow:status` shows the cadence each of this project's flow schedules uses.
+  3. **DorkOS**: flow's own schedules run at flow's default. DorkOS lets you switch a package's
+     schedule on or off on the Schedules page but not change when it runs, and the file is the
+     package's: an edit there is undone by the next update, and DorkOS asks you to approve the
+     schedule again after the edit and again after the update.
+  4. **DorkOS, at a cadence you choose** (revised in review round 1): make the schedule your own on
+     the Schedules page, for this project's agent, with the prompt
+     `Run one /flow continue tick in this project, then stop.`, your cron, and flow's limits (2h,
+     accept edits). A person's own schedule needs no separate approval, and editing its cron there
+     re-approves in the same act. Leave `flow-drain` off. Do not copy `flow-drain`'s text (it finds
+     flow's files relative to the plugin). Any other scheduler works the same way.
+  5. `/flow:status` shows the cadence each of this project's flow schedules uses, the person's own
+     `/flow continue` schedule included; `/flow:pause` switches that one off too, and the pause
+     flag stops it regardless.
   5. The existing YAML example and the `schedule.*` table stay, re-titled as "what the shipped
      block holds", with the `When to change` column rewritten: `cron` and `timezone` say "where it
      is scheduled (above)", never "tighten"/"loosen"; `enabled` keeps "Leave it"; `max-runtime`
@@ -110,14 +116,31 @@ caps are `autonomy.wipCap`. The `loops` intervals are no longer offered as the t
 - The DorkOS callout's pointer "for the cadence" says what the dials page now says: DorkOS runs
   the default; for another cadence, use your own scheduler.
 
+### This project's flow schedules (`/flow:status` and `/flow:pause`)
+
+Both commands pick schedules out of `tasks_list` by one rule (review round 1), pinned by
+`engine-tests/schedule-filter.ts`:
+
+- This project's roots are the `committedDir` and `localDir` that `config-files.ts` prints, each
+  with its trailing `/.agents/flow` removed (the checkout and the main checkout).
+- A schedule is in this project only when its `filePath` starts with one of those roots followed
+  by `/`. A bare string prefix is not enough: `/…/dork-os/dorkos` is a prefix of
+  `/…/dork-os/dorkos-cloud`, and the earlier "inside this project" wording let `/flow:pause`
+  switch off another project's schedule.
+- Of those, flow's schedules are the ones named `flow-drain` or `flow-groom`, and any schedule a
+  person made whose `prompt` runs `/flow continue`.
+
+`/flow:pause` switches off the enabled ones and records their ids (unchanged otherwise);
+`/flow:resume` switches back on exactly the recorded ids, so it needs no change.
+
 ### `commands/status.md`
 
-- `allowed-tools` gains `mcp__dorkos__tasks_list` (never `tasks_update`).
+- `allowed-tools` gains `mcp__dorkos__tasks_list` (never `tasks_update`, a `mcp__dorkos__*`
+  wildcard or the bare server name, each of which would pre-approve `tasks_update`).
 - A fifth source, **The schedules**: only when the `tasks_list` tool is available (DorkOS:
   `mcp__dorkos__tasks_list`; if it is deferred, load it with ToolSearch first, and treat it as
-  absent only when that finds nothing). Call `tasks_list`. For every schedule whose `name` is
-  `flow-drain` or `flow-groom` and whose `filePath` is inside this project (the main checkout or
-  this checkout), show its name, when it runs (the `cron` in plain words and as written, with its
+  absent only when that finds nothing). Call `tasks_list`. For every one of this project's flow
+  schedules (the rule above), show its name, when it runs (the `cron` in plain words and as written, with its
   `timezone`), whether it is on (`enabled`), and its `status` (`pending_approval` = waiting for
   your approval). This command only reads: it never calls `tasks_update` or changes a schedule.
   When the tool is absent: "flow's scheduled runs fire when your own scheduler starts them; its
@@ -149,34 +172,43 @@ flow 0.9.0 → **0.10.0** (`/flow:status` gains a section) in `plugin.json`, `.d
 `engine-tests/cadence-contract.test.ts`, each guard shown to bite on a planted break:
 
 - **Only the dials page's Cadence section names a shipped schedule's timing field.** Every
-  `.md`/`.mdx` under `commands/`, `skills/`, `docs/` plus `README.md` and `config/CONFIG.md` is
-  scanned for `schedule.cron` / `schedule.timezone`; the only allowed occurrences are inside the
-  Cadence section of `docs/the-dials.mdx`. The scan is non-vacuous (it reads a known minimum
-  number of files and does find the allowed occurrences).
-- **The Cadence section says where cadence lives**: it names the package default, your own
-  scheduler's entry, what DorkOS does today (switch on or off, not when it runs), the update and
-  re-approval consequence, and `/flow:status`; it contains no "tighten"/"loosen"/"fire more often"
-  instruction aimed at the shipped block.
+  `.md`/`.mdx` under `commands/`, `skills/`, `docs/` plus `README.md` and `config/CONFIG.md`
+  (frontmatter blanked) is scanned for `schedule.cron` / `schedule.timezone`, and for a bare
+  `cron:` within 200 characters of `flow-drain`, `flow-groom` or `SKILL.md`; the only allowed
+  occurrences are inside the Cadence section of `docs/the-dials.mdx`. The scan is non-vacuous.
+- **The Cadence section says where cadence lives**: the package default, your own scheduler's
+  entry, what DorkOS does today, the update and re-approval consequence, the person-owned
+  `/flow continue` schedule (its prompt, that a cron edit counts as approval, not copying
+  `flow-drain`'s text, the pause flag), and `/flow:status`. It holds no "tighten"/"loosen"/"fire
+  more often", and no sentence or table row that pairs `schedule.cron`/`schedule.timezone` with
+  change, edit or set, except the table's "never in this file" cells.
 - **Documented defaults equal the shipped ones**: `cron` and `timezone` parsed from the frontmatter
   of `skills/flow-drain/SKILL.md` and `skills/flow-groom/SKILL.md` each appear in the Cadence
   section's defaults table on the row for that schedule.
 - **The "Which dial" row** for firing more often points at the Cadence section and does not name
   `schedule.cron`.
 - **`/flow:status` reads and never writes**: its `allowed-tools` holds `mcp__dorkos__tasks_list`
-  and no `tasks_update`; its schedules source names `tasks_list`, the ToolSearch rule, the
-  `flow-drain`/`flow-groom` + inside-this-project filter, the absent-tool sentence, and a
-  never-changes-a-schedule line.
+  and no `tasks_update`, `mcp__dorkos__*` or bare `mcp__dorkos`; its schedules source names
+  `tasks_list`, the ToolSearch rule, the project-schedule rule, and a never-changes-a-schedule
+  line; its pane shows cron and timezone, explains `pending_approval` and the absent tool, and
+  points at the Cadence section.
+- **The project-schedule rule** (`engine-tests/schedule-filter.ts`), applied to both
+  `/flow:status` and `/flow:pause` (`pause-contract.test.ts`): names the roots from `committedDir`
+  and `localDir`, strips `/.agents/flow`, requires `/` after the root, rejects a name prefix, keeps
+  `flow-drain`/`flow-groom` and a person-made `/flow continue` schedule.
 - **The Pulse-seat step** does not offer `loops` intervals as the tick's cadence.
 
 ## Security Considerations
 
 `/flow:status` only reads DorkOS rows; its `allowed-tools` cannot pre-approve `tasks_update`, and
-the test pins that.
+the test pins that. `/flow:pause` touches only this project's rows, matched on a root plus a path
+separator, so it can never switch off a schedule in a sibling folder whose name merely starts with
+this project's (review round 1).
 
 ## Documentation
 
 `docs/the-dials.mdx`, `docs/turning-on-autonomy.mdx`, `docs/bring-your-own-scheduler.mdx`,
-`commands/status.md`, CHANGELOG.
+`commands/status.md`, `commands/pause.md`, CHANGELOG.
 
 ## Implementation Phases
 
