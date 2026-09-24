@@ -1,6 +1,6 @@
 {
   "repo": "dork-labs/dorkos",
-  "ref": "48cc368615713268e41901bb69741666fcb98b76",
+  "ref": "e0befda5b7b671a7850f7beb62e727fd2ac07d57",
   "files": [
     "packages/shared/src/constants.ts",
     "packages/skills/src/duration.ts",
@@ -10,6 +10,8 @@
     "packages/skills/src/frontmatter.ts",
     "packages/marketplace/src/categories.ts",
     "packages/marketplace/src/package-types.ts",
+    "packages/marketplace/src/constants.ts",
+    "packages/marketplace/src/user-editable.ts",
     "packages/marketplace/src/manifest-schema.ts",
     "packages/marketplace/src/marketplace-json-schema.ts",
     "packages/marketplace/src/dorkos-sidecar-schema.ts",

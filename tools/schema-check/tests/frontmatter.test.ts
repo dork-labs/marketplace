@@ -2,7 +2,7 @@ import { afterEach, describe, expect, it } from 'vitest';
 import {
   NonMappingFrontmatterError,
   UnsupportedFrontmatterError,
-  FRONTMATTER_ENGINES,
+  FRONTMATTER_PARSERS,
   parseFrontmatter,
 } from '@dorkos/skills/frontmatter';
 
@@ -83,17 +83,13 @@ describe('each layer holds on its own', () => {
     });
   });
 
-  // Purpose: layer 2 alone, with no language check in front of it. gray-matter
-  // sends both spellings to its eval engine; the replacement must refuse them.
-  it.each(['javascript', 'js'] as const)(
-    'the replaced `%s` engine refuses without evaluating it',
-    (name) => {
-      expect(() =>
-        FRONTMATTER_ENGINES[name].parse(`{ a: (globalThis.${SENTINEL} = 1, 2) }`)
-      ).toThrow(UnsupportedFrontmatterError);
-      expect(sentinel()).toBeUndefined();
-    }
-  );
+  // Purpose: layer 2. DorkOS's reader no longer uses gray-matter (DOR-2311),
+  // so there is no code engine to reach: its only parsers are the two data
+  // languages, and a spelling that slipped past the language check would
+  // have nothing to run it.
+  it('has a parser for YAML and JSON and nothing else', () => {
+    expect(Object.keys(FRONTMATTER_PARSERS).sort()).toEqual(['json', 'yaml']);
+  });
 
   // Purpose: layer 3. js-yaml v4 reads `0123` as 123 and `0o17` as 15, where
   // the v3 that gray-matter bundles reads 83 and the string "0o17". This is

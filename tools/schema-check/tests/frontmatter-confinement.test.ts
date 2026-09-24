@@ -5,21 +5,17 @@ import { describe, expect, it } from 'vitest';
 
 /**
  * `gray-matter` runs `eval` on a `---js` frontmatter block unless every call
- * is configured not to (DOR-2310). DorkOS's own reader,
- * `packages/skills/src/frontmatter.ts`, is the one place that configuration
- * lives; this gate fetches it into `.upstream/` at the pin in upstream.json
- * (DOR-2312) and imports it as `@dorkos/skills/frontmatter`. It must stay the
- * one file that imports the package.
+ * is configured not to (DOR-2310), and strips comments with a regular
+ * expression that is quadratic in the block's length (DOR-2311). This gate
+ * reads frontmatter with DorkOS's own reader, fetched into `.upstream/` at the
+ * pin in upstream.json and imported as `@dorkos/skills/frontmatter`, which no
+ * longer uses gray-matter. Nothing here, fetched code included, may import it.
  */
 const repoRoot = path.resolve(fileURLToPath(new URL('../../..', import.meta.url)));
 
-/** The only file allowed to import gray-matter: DorkOS's reader, as fetched. */
-const ALLOWED = 'tools/schema-check/.upstream/packages/skills/src/frontmatter.ts';
-
 /**
- * Directories that hold no code of ours. `.upstream/` is scanned on purpose:
- * it is the one place the import is allowed, and scanning it proves the
- * pattern still sees that import.
+ * Directories that hold no code of ours. `.upstream/` is scanned on purpose,
+ * so a pin bump that brought gray-matter back would fail here.
  */
 const SKIP_DIRS = new Set(['node_modules', '.git']);
 
@@ -91,14 +87,13 @@ describe('gray-matter confinement', () => {
     }
   );
 
-  // Purpose: a second importer would parse frontmatter with gray-matter's
-  // defaults, which is the code-execution hole this module closes. Asserting
-  // the exact list, not just "nothing else", also proves the pattern still
-  // matches the real import, so the guard cannot go quietly blind.
-  it("is imported by DorkOS's fetched reader and nothing else in the repo", () => {
+  // Purpose: any importer would parse frontmatter with gray-matter's
+  // defaults, which is the hole DOR-2310 closed. The cases above prove the
+  // pattern can match, so an empty list means something.
+  it('is imported by nothing in the repo, fetched code included', () => {
     const importers = codeFiles('.')
       .map((file) => file.split(path.sep).join('/'))
       .filter((file) => SPECIFIER.test(readFileSync(path.join(repoRoot, file), 'utf8')));
-    expect(importers).toEqual([ALLOWED]);
+    expect(importers).toEqual([]);
   });
 });
