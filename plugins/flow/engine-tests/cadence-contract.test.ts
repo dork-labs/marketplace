@@ -87,9 +87,15 @@ function cadenceGaps(section: string): string[] {
     ['calls the shipped block the package default', /package's defaults/],
     ['names your own scheduler entry', /your own scheduler[^.]*its own entry is the cadence/i],
     // DOR-2302: DorkOS keeps a person's timing for a package's schedule.
-    ['says to change the timing on the Schedules page', /choose \*\*Edit\*\*, and set a new time or timezone/],
+    [
+      'says to change the timing on the Schedules page',
+      /choose \*\*Edit\*\*, and set a new time or timezone/,
+    ],
     ['says a flow update never undoes that timing', /a flow update never undoes it/],
-    ['says reset puts flow’s timing back', /\*\*Reset to the package's default\*\* puts flow's own timing back/],
+    [
+      'says reset puts flow’s timing back',
+      /\*\*Reset to the package's default\*\* puts flow's own timing back/,
+    ],
     ['says an agent’s timing change asks again', /If an agent changes the timing[^.]*approve it/],
     ['scopes the own-schedule workaround to older DorkOS', /0\.82 and earlier/],
     ['says an update undoes an edit', /undone by the next update/],
@@ -100,7 +106,10 @@ function cadenceGaps(section: string): string[] {
     ],
     ['gives the person-owned schedule on DorkOS', /create a schedule for this project's agent/],
     ['whose prompt runs one /flow continue tick', /prompt is `Run one \/flow continue tick/],
-    ['says your own timing change keeps it approved', /stays approved, because you made the change/],
+    [
+      'says your own timing change keeps it approved',
+      /stays approved, because you made the change/,
+    ],
     ['warns not to copy the flow-drain text', /do not copy the text of `flow-drain`/],
     ['says the pause flag stops it', /pause flag stops it/],
     ['points at /flow:status', /`\/flow:status` shows/],
