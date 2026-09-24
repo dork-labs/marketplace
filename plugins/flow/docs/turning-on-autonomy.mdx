@@ -158,8 +158,10 @@ This is real today, but it ships **disabled by default** and depends on a runnin
     scheduler](/docs/guides/flow/bring-your-own-scheduler)).
   </Step>
   <Step>
-    **Tune cadence and limits.** Set the per-loop intervals in the `loops`
-    config block and the work-in-progress caps in `autonomy.wipCap`. See [The
+    **Cadence and limits.** DorkOS fires the tick at flow's default, the top
+    of every hour. To run it at another cadence, see [where the cadence is
+    set](/docs/guides/flow/the-dials#cadence-set-it-where-the-tick-is-scheduled).
+    Cap the work in flight with `autonomy.wipCap`; see [The
     dials](/docs/guides/flow/the-dials).
   </Step>
   <Step>

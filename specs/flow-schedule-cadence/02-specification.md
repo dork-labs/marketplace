@@ -123,7 +123,9 @@ caps are `autonomy.wipCap`. The `loops` intervals are no longer offered as the t
   When the tool is absent: "flow's scheduled runs fire when your own scheduler starts them; its
   entry decides how often". When it is there but none of this project's flow schedules are
   listed, say so.
-- The pane renders a **Schedules** section after the pause line.
+- The pane renders a **Schedules** section after **In flight**: name, cron in plain words and as
+  written with its timezone, on/off, status; the absent-tool sentence; to change the cadence it
+  points at the dials page, never at the shipped file.
 
 ### Version
 
