@@ -34,10 +34,16 @@ so nothing keeps running behind your back:
    available** (DorkOS names them `mcp__dorkos__tasks_list` and
    `mcp__dorkos__tasks_update`). DorkOS tools may be deferred behind tool search: if
    `tasks_list` or `tasks_update` is not loaded, load them with ToolSearch first, and
-   treat them as absent only when that finds nothing. Call `tasks_list`. For every schedule whose `name` is
-   `flow-drain` or `flow-groom`, whose `filePath` is inside this project (the main
-   checkout or this checkout), and whose `enabled` is `true`, call `tasks_update` with
-   `{ "id": <its id>, "enabled": false }`. Then record each id you switched off:
+   treat them as absent only when that finds nothing. Call `tasks_list`. This project's
+   roots are the `committedDir` and the `localDir` that
+   `node --experimental-strip-types "${CLAUDE_PLUGIN_ROOT}/scripts/config-files.ts"`
+   prints, each with its trailing `/.agents/flow` removed. A schedule is in this
+   project only when its `filePath` starts with one of those roots followed by `/`; a
+   root that is merely the start of another folder's name (`/work/app` against
+   `/work/app-2/...`) is a different project, and its schedules are never touched.
+   For every schedule in this project whose `name` is `flow-drain` or `flow-groom`, or
+   that a person made and whose `prompt` runs `/flow continue`, and in either case
+   whose `enabled` is `true`, call `tasks_update` with `{ "id": <its id>, "enabled": false }`. Then record each id you switched off:
 
    ```bash
    node --experimental-strip-types "${CLAUDE_PLUGIN_ROOT}/scripts/config-files.ts" pause --host-schedule <id>

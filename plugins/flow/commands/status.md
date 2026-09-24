@@ -1,7 +1,7 @@
 ---
 description: Show every in-flight item, parked question, and assumption trail across the /flow loop
 category: flow
-allowed-tools: Read, Glob, Skill, AskUserQuestion, Bash(node:*)
+allowed-tools: Read, Glob, Skill, AskUserQuestion, Bash(node:*), mcp__dorkos__tasks_list
 argument-hint: "[issue-id to focus on, or empty for the whole loop]"
 ---
 
@@ -9,7 +9,7 @@ argument-hint: "[issue-id to focus on, or empty for the whole loop]"
 
 Render one status pane for the `/flow` loop: $ARGUMENTS
 
-This is an OBSERVE command: it reads, never advances. It joins four sources into
+This is an OBSERVE command: it reads, never advances. It joins five sources into
 a single pane:
 
 1. **`.dork/flow/flow-state.json`**: the durable per-issue run records (the typed
@@ -29,6 +29,18 @@ a single pane:
 4. **The pause**: the `paused` that the same command prints. When it is not `null`,
    head the pane with "Paused since `<pausedAt>`: scheduled ticks, `/flow continue` and
    `/flow auto` stop at their first step; `/flow:resume` lifts it".
+5. **The schedules, only when the `tasks_list` tool is available** (DorkOS names it
+   `mcp__dorkos__tasks_list`). DorkOS tools may be deferred behind tool search: if
+   `tasks_list` is not loaded, load it with ToolSearch first, and treat it as absent
+   only when that finds nothing. Call `tasks_list` and keep **this project's flow
+   schedules**. This project's roots are the `committedDir` and the `localDir` that
+   `config-files.ts` prints (source 3), each with its trailing `/.agents/flow` removed.
+   A schedule is in this project only when its `filePath` starts with one of those
+   roots followed by `/`; a root that is merely the start of another folder's name
+   (`/work/app` against `/work/app-2/...`) is a different project. Of those, keep every
+   schedule whose `name` is `flow-drain` or `flow-groom`, and every schedule a person
+   made whose `prompt` runs `/flow continue` (their own cadence for the tick). This
+   command only reads: it never calls `tasks_update` and never changes a schedule.
 
 Render, in this order:
 
@@ -40,6 +52,16 @@ Render, in this order:
   (`active`, `ready` ready vs `shapeable` behind the readiness gate). If the
   sentinel is an orphan, say so instead — "stale drain sentinel (pid N gone)" —
   and note that the next Stop in that repo reaps it automatically.
+- **Schedules.** How often flow's scheduled runs fire. For each schedule kept in
+  source 5, show its name; when it runs, in plain words and as written (the `cron`
+  and its `timezone`, e.g. "every hour at :00 (`0 * * * *`, America/Los_Angeles)");
+  whether it is on (`enabled`); and its `status` (`pending_approval` means it is
+  waiting for the operator's approval). When `tasks_list` was available but none of
+  this project's flow schedules are listed, say so. When it was not available, say:
+  "flow's scheduled runs fire when your own scheduler starts them; its entry decides
+  how often". To change how often they fire, point to the dials page's Cadence
+  section (`docs/the-dials.mdx`), never to the shipped `flow-drain` or `flow-groom`
+  file.
 - **Parked.** Every `agent/needs-input` item: via the adapter, list the
   parked items, and for each show the open question text and how long it has waited
   (now minus the parking comment's timestamp).

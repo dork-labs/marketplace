@@ -12,6 +12,7 @@ import { readFileSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
+import { projectFilterGaps } from './schedule-filter.ts';
 
 const pluginRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const read = (rel: string) => readFileSync(path.join(pluginRoot, rel), 'utf8');
@@ -113,8 +114,6 @@ describe('/flow:pause and /flow:resume switch DorkOS schedules only as agreed', 
         'only when the tools exist',
         /only when the `tasks_list` and `tasks_update` tools are\s+available/,
       ],
-      ['only flow-drain and flow-groom', /`name` is\s+`flow-drain` or `flow-groom`/],
-      ['only rows in this project', /`filePath` is inside this project/],
       ['only rows that are on', /whose `enabled` is `true`/],
       ['records the ids', /pause --host-schedule <id>/],
       [
@@ -127,7 +126,10 @@ describe('/flow:pause and /flow:resume switch DorkOS schedules only as agreed', 
         /deferred behind tool search[\s\S]*?load them with ToolSearch first/,
       ],
     ];
-    return needs.filter(([, re]) => !re.test(text)).map(([label]) => label);
+    return [
+      ...needs.filter(([, re]) => !re.test(text)).map(([label]) => label),
+      ...projectFilterGaps(text),
+    ];
   }
 
   /** What the resume command must say. */
@@ -149,8 +151,12 @@ describe('/flow:pause and /flow:resume switch DorkOS schedules only as agreed', 
   });
 
   it('the guard bites when a limit is dropped', () => {
-    const pause = read('commands/pause.md').replace('`filePath` is inside this project', 'x');
-    expect(pauseGaps(pause)).toEqual(['only rows in this project']);
+    // A root matched as a bare string prefix would let `/work/app` claim
+    // `/work/app-2`: switching off another project's schedule.
+    const pause = read('commands/pause.md').replace('roots followed by `/`', 'roots');
+    expect(pauseGaps(pause)).toEqual(['requires a separator after the root']);
+    const unrooted = read('commands/pause.md').replace('`committedDir` and the `localDir`', 'x');
+    expect(pauseGaps(unrooted)).toEqual(['names the roots']);
     const resume = read('commands/resume.md').replace('and for nothing else', 'x');
     expect(resumeGaps(resume)).toEqual(['switches back only the recorded ids']);
   });

@@ -31,8 +31,11 @@ tick then appears on your **Schedules** page waiting to be approved.
   to approve it. That holds no matter what the file says: `flow-drain` ships `schedule.enabled:
   false`, and even a `true` there would still park for your approval. Approving switches it on, and
   that switch on the Schedules page is the one that counts from then on. See [Turning on the automatic
-  loop](/docs/guides/flow/turning-on-autonomy) for the full picture, and [The
-  dials](/docs/guides/flow/the-dials) for the cadence.
+  loop](/docs/guides/flow/turning-on-autonomy) for the full picture. DorkOS fires the tick at
+  flow's default cadence, the top of every hour. For another cadence, make a DorkOS schedule of your
+  own that runs `/flow continue`, or use a scheduler of your own (below), and leave `flow-drain`
+  switched off on DorkOS. [The
+  dials](/docs/guides/flow/the-dials#cadence-set-it-where-the-tick-is-scheduled) has the details.
 </Callout>
 
 ## On any other harness: wire a scheduler
@@ -40,9 +43,10 @@ tick then appears on your **Schedules** page waiting to be approved.
 Claude Code has no scheduler of its own (plugin "monitors" are session-scoped event streams, not
 crons), so the tick cannot fire itself. This is also the path to use on a DorkOS build that does not
 have schedule discovery yet. Point any external scheduler at it — an OS
-`cron` line, a scheduled CI job, or a small poller — and run one `/flow continue` tick per fire. You
+`cron` line or a launchd job, a scheduled CI job, or a small poller — and run one `/flow continue` tick per fire. You
 own that scheduler, so you also own its cadence and its uptime; running with your laptop closed needs
-a scheduler that lives somewhere else, like CI.
+a scheduler that lives somewhere else, like CI. Its own entry is the cadence: it never reads the
+timing in flow's shipped `flow-drain` file, and a flow update never changes it.
 
 `/flow:pause` works with any scheduler: it writes a pause flag into your project
 (`.agents/flow/paused.json`) and every tick checks it first and stops, so your scheduler keeps
@@ -60,7 +64,7 @@ poll, and the run resumes where it left off.
     The full seat taxonomy and the invariants every autonomous setup shares.
   </Card>
   <Card title="The dials" href="/docs/guides/flow/the-dials">
-    The cadence, WIP caps, and calibration floor that govern any scheduled run.
+    Where to set the cadence, and the WIP caps and calibration floor that govern any scheduled run.
   </Card>
   <Card title="Install /flow in your project" href="/docs/guides/flow/installing-in-your-project">
     Where the schedulable tick comes from and how the plugin is laid out after install.
