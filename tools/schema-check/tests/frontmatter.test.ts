@@ -2,10 +2,9 @@ import { afterEach, describe, expect, it } from 'vitest';
 import {
   NonMappingFrontmatterError,
   UnsupportedFrontmatterError,
-  checkDataLanguage,
+  FRONTMATTER_ENGINES,
   parseFrontmatter,
-  parseWithSafeEngines,
-} from '../src/frontmatter.ts';
+} from '@dorkos/skills/frontmatter';
 
 /**
  * Every SKILL.md this gate reads comes from a pull request, so none of it can
@@ -75,49 +74,33 @@ describe('parseFrontmatter refuses every non-data language', () => {
 });
 
 describe('each layer holds on its own', () => {
-  // Purpose: layer 1 alone. The language check refuses every code language
-  // before anything is parsed, so it can never evaluate what it refuses.
-  it.each(['js', 'javascript', 'coffee', 'constructor'])(
-    'the language check refuses `---%s` without parsing it',
-    (lang) => {
-      expect(() => checkDataLanguage(payload(lang))).toThrow(UnsupportedFrontmatterError);
-      expect(sentinel()).toBeUndefined();
-    }
-  );
-
-  // Purpose: layer 1 lets data through unchanged, or it would refuse or alter
-  // every real file.
-  it.each(['---\nname: a\n---\n', '---yaml\nname: a\n---\n', '---json\n{}\n---\n', 'no fence\n'])(
-    'the language check lets %j through as it is',
-    (content) => {
-      expect(checkDataLanguage(content)).toBe(content);
-    }
-  );
-
   // Purpose: gray-matter finds `yaml` in any case but `json` only as written,
-  // so the check hands the language on lowercased and leaves the rest alone.
-  it('lowercases a data language and nothing else', () => {
-    expect(checkDataLanguage('---JSON \r\n{"Name": "A"}\n---\nBody')).toBe(
-      '---json \r\n{"Name": "A"}\n---\nBody'
-    );
+  // so the reader lowercases the language before handing the file on.
+  it.each(['JSON', 'Json', ' JSON '])('reads a `---%s` block', (lang) => {
+    expect(parseFrontmatter(`---${lang}\r\n{"Name": "A"}\n---\nBody`)).toEqual({
+      data: { Name: 'A' },
+      content: 'Body',
+    });
   });
 
   // Purpose: layer 2 alone, with no language check in front of it. gray-matter
   // sends both spellings to its eval engine; the replacement must refuse them.
-  it.each(['js', 'javascript', 'JavaScript'])(
-    'the replaced engine refuses `---%s` without evaluating it',
-    (lang) => {
-      expect(() => parseWithSafeEngines(payload(lang))).toThrow(UnsupportedFrontmatterError);
+  it.each(['javascript', 'js'] as const)(
+    'the replaced `%s` engine refuses without evaluating it',
+    (name) => {
+      expect(() =>
+        FRONTMATTER_ENGINES[name].parse(`{ a: (globalThis.${SENTINEL} = 1, 2) }`)
+      ).toThrow(UnsupportedFrontmatterError);
       expect(sentinel()).toBeUndefined();
     }
   );
 
-  // Purpose: layer 3 alone. js-yaml v4 reads `0123` as 123 and `0o17` as 15,
-  // where the v3 that gray-matter bundles reads 83 and the string "0o17". This
-  // is what DorkOS reads with, and it fails if the pinned YAML engine is ever
+  // Purpose: layer 3. js-yaml v4 reads `0123` as 123 and `0o17` as 15, where
+  // the v3 that gray-matter bundles reads 83 and the string "0o17". This is
+  // what DorkOS reads with, and it fails if the pinned YAML engine is ever
   // dropped for gray-matter's default.
   it('reads YAML with js-yaml v4, not the v3 gray-matter bundles', () => {
-    expect(parseWithSafeEngines('---\nn: 0123\nm: 0o17\n---\n').data).toEqual({ n: 123, m: 15 });
+    expect(parseFrontmatter('---\nn: 0123\nm: 0o17\n---\n').data).toEqual({ n: 123, m: 15 });
   });
 });
 

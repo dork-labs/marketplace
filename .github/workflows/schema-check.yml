@@ -30,8 +30,9 @@ name: schemas
 # `pull_request_target`), the read-only token, no secrets, and GitHub's approval
 # step for runs from outside contributors. Never add a secret, a write
 # permission, a `pull_request_target` trigger, or a later step that trusts what
-# this job produced. `src/frontmatter.ts` refusing `---js` frontmatter (DOR-2310)
-# is defense in depth on top of those barriers, not one of them.
+# this job produced. DorkOS's frontmatter reader (fetched at the pin, DOR-2312)
+# refusing `---js` frontmatter (DOR-2310) is defense in depth on top of those
+# barriers, not one of them.
 
 on:
   pull_request:

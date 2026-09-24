@@ -5,17 +5,23 @@ import { describe, expect, it } from 'vitest';
 
 /**
  * `gray-matter` runs `eval` on a `---js` frontmatter block unless every call
- * is configured not to (DOR-2310). `src/frontmatter.ts` is the one place that
- * configuration lives, so it must stay the one place that imports the package.
- * Anything else reading markdown goes through `parseFrontmatter`.
+ * is configured not to (DOR-2310). DorkOS's own reader,
+ * `packages/skills/src/frontmatter.ts`, is the one place that configuration
+ * lives; this gate fetches it into `.upstream/` at the pin in upstream.json
+ * (DOR-2312) and imports it as `@dorkos/skills/frontmatter`. It must stay the
+ * one file that imports the package.
  */
 const repoRoot = path.resolve(fileURLToPath(new URL('../../..', import.meta.url)));
 
-/** The only file allowed to import gray-matter. */
-const ALLOWED = 'tools/schema-check/src/frontmatter.ts';
+/** The only file allowed to import gray-matter: DorkOS's reader, as fetched. */
+const ALLOWED = 'tools/schema-check/.upstream/packages/skills/src/frontmatter.ts';
 
-/** Directories that hold no code of ours, or code we did not write. */
-const SKIP_DIRS = new Set(['node_modules', '.git', '.upstream']);
+/**
+ * Directories that hold no code of ours. `.upstream/` is scanned on purpose:
+ * it is the one place the import is allowed, and scanning it proves the
+ * pattern still sees that import.
+ */
+const SKIP_DIRS = new Set(['node_modules', '.git']);
 
 /** Every extension a script in this repo could be written in. */
 const CODE_FILE = /\.(?:[cm]?[jt]s|[jt]sx)$/;
@@ -89,7 +95,7 @@ describe('gray-matter confinement', () => {
   // defaults, which is the code-execution hole this module closes. Asserting
   // the exact list, not just "nothing else", also proves the pattern still
   // matches the real import, so the guard cannot go quietly blind.
-  it('is imported by src/frontmatter.ts and nothing else in the repo', () => {
+  it("is imported by DorkOS's fetched reader and nothing else in the repo", () => {
     const importers = codeFiles('.')
       .map((file) => file.split(path.sep).join('/'))
       .filter((file) => SPECIFIER.test(readFileSync(path.join(repoRoot, file), 'utf8')));
