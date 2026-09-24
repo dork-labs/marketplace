@@ -14,7 +14,6 @@
     "format:check": "prettier --check \"scripts/**/*.ts\" \"src/**/*.ts\" \"tests/**/*.ts\" vitest.config.ts"
   },
   "dependencies": {
-    "gray-matter": "^4.0.3",
     "js-yaml": "^4.3.2",
     "semver": "^7.8.5",
     "zod": "^4.4.3"

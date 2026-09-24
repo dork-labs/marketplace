@@ -122,14 +122,16 @@ version cannot both merge: the second one fails in the queue.
 
 ## Reading a SKILL.md safely
 
-Left to its defaults, gray-matter runs any frontmatter block that opens with
-`---js` or `---javascript` as code. So every read here goes through DorkOS's own
-reader, `packages/skills/src/frontmatter.ts` (DOR-2308), fetched at the pin in
+The popular `gray-matter` library runs any frontmatter block that opens with
+`---js` or `---javascript` as code, and can take minutes on a long run of blank
+lines. So every read here goes through DorkOS's own reader,
+`packages/skills/src/frontmatter.ts` (DOR-2308, DOR-2311), fetched at the pin in
 `upstream.json` like the schemas and imported as `@dorkos/skills/frontmatter`
-(DOR-2312). It:
+(DOR-2312). It does not use gray-matter. It:
 
 - refuses any frontmatter language but YAML or JSON before parsing anything,
-- replaces gray-matter's JavaScript engine with one that refuses to run,
+- refuses a block over 32 KB, too many YAML aliases, or a value that expands
+  or nests past its limits,
 - parses YAML with js-yaml v4, which cannot build code from a YAML tag,
 - refuses frontmatter that is a single value or a list rather than `key: value` fields.
 
@@ -143,9 +145,9 @@ contributors. `.github/workflows/schema-check.yml` says the same next to its
 untrusted content, and it keeps a `---js` file from ever counting as a valid
 skill (DOR-2310).
 
-It is the only file allowed to import gray-matter;
-`tests/frontmatter-confinement.test.ts` fails if anything else in the repo does.
-Because it is DorkOS's own file, YAML reads the same here as in DorkOS. One
+Nothing in this repo imports gray-matter;
+`tests/frontmatter-confinement.test.ts` fails if anything does. Because the
+reader is DorkOS's own file, YAML reads the same here as in DorkOS. One
 visible effect of v4:
 `0123` is the number 123 and `0o17` is 15, where gray-matter's bundled v3 read 83
 and the string `"0o17"`.
