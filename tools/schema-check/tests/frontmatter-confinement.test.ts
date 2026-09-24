@@ -21,11 +21,13 @@ const SKIP_DIRS = new Set(['node_modules', '.git', '.upstream']);
 const CODE_FILE = /\.(?:[cm]?[jt]s|[jt]sx)$/;
 
 /**
- * A load of the package, however it is written: `import ... from`, a bare
- * `import '...'`, `require(...)` or `import(...)`, with any quote style and any
- * subpath. Prose that merely names the package does not match.
+ * A load of the package, however it is written: `import ... from` or a bare
+ * `import '...'`, or the name as the first argument of any call, which covers
+ * `require(...)`, `import(...)`, `createRequire(...)(...)`, an aliased require
+ * and `require.resolve(...)`. Any quote style, any subpath. Prose that merely
+ * names the package does not match.
  */
-const SPECIFIER = /\b(?:from|import|require)\s*\(?\s*(['"`])gray-matter(?:\/[^'"`]*)?\1/;
+const SPECIFIER = /(?:\b(?:from|import)\s*|\(\s*)(['"`])gray-matter(?:\/[^'"`]*)?\1/;
 
 /** Every repo-relative code file under `dir`. */
 function codeFiles(dir: string): string[] {
@@ -58,6 +60,9 @@ describe('gray-matter confinement', () => {
     `const m = require ( "${PKG}/lib/engines" );`,
     `const m = await import('${PKG}/lib/parse.js');`,
     `const m = await import(\`${PKG}\`);`,
+    `const matter = createRequire(import.meta.url)('${PKG}');`,
+    `const req = createRequire(import.meta.url);\nconst matter = req("${PKG}/lib/parse");`,
+    `const where = require.resolve('${PKG}');`,
   ])('counts %j as an import', (source) => {
     expect(SPECIFIER.test(source)).toBe(true);
   });

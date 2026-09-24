@@ -47,7 +47,7 @@ import { MarketplaceJsonSchema } from '@dorkos/marketplace/marketplace-json-sche
 import { DorkosSidecarSchema } from '@dorkos/marketplace/dorkos-sidecar-schema';
 import { validateAgainstCcSchema } from '@dorkos/marketplace/cc-validator';
 import {
-  FrontmatterShapeError,
+  NonMappingFrontmatterError,
   UnsupportedFrontmatterError,
   parseFrontmatter,
 } from './frontmatter.ts';
@@ -255,7 +255,10 @@ function readFrontmatter(absPath: string): { data: Record<string, unknown> } | {
   try {
     return { data: parseFrontmatter(readFileSync(absPath, 'utf8')).data };
   } catch (cause) {
-    if (cause instanceof UnsupportedFrontmatterError || cause instanceof FrontmatterShapeError) {
+    if (
+      cause instanceof UnsupportedFrontmatterError ||
+      cause instanceof NonMappingFrontmatterError
+    ) {
       return { error: `Its frontmatter cannot be read. ${cause.message}` };
     }
     return { error: `Its frontmatter is not valid YAML (${(cause as Error).message}).` };

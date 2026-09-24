@@ -1,8 +1,8 @@
 import { afterEach, describe, expect, it } from 'vitest';
 import {
-  FrontmatterShapeError,
+  NonMappingFrontmatterError,
   UnsupportedFrontmatterError,
-  assertDataLanguage,
+  checkDataLanguage,
   parseFrontmatter,
   parseWithSafeEngines,
 } from '../src/frontmatter.ts';
@@ -80,18 +80,27 @@ describe('each layer holds on its own', () => {
   it.each(['js', 'javascript', 'coffee', 'constructor'])(
     'the language check refuses `---%s` without parsing it',
     (lang) => {
-      expect(() => assertDataLanguage(payload(lang))).toThrow(UnsupportedFrontmatterError);
+      expect(() => checkDataLanguage(payload(lang))).toThrow(UnsupportedFrontmatterError);
       expect(sentinel()).toBeUndefined();
     }
   );
 
-  // Purpose: layer 1 lets data through, or it would refuse every real file.
+  // Purpose: layer 1 lets data through unchanged, or it would refuse or alter
+  // every real file.
   it.each(['---\nname: a\n---\n', '---yaml\nname: a\n---\n', '---json\n{}\n---\n', 'no fence\n'])(
-    'the language check lets %j through',
+    'the language check lets %j through as it is',
     (content) => {
-      expect(() => assertDataLanguage(content)).not.toThrow();
+      expect(checkDataLanguage(content)).toBe(content);
     }
   );
+
+  // Purpose: gray-matter finds `yaml` in any case but `json` only as written,
+  // so the check hands the language on lowercased and leaves the rest alone.
+  it('lowercases a data language and nothing else', () => {
+    expect(checkDataLanguage('---JSON \r\n{"Name": "A"}\n---\nBody')).toBe(
+      '---json \r\n{"Name": "A"}\n---\nBody'
+    );
+  });
 
   // Purpose: layer 2 alone, with no language check in front of it. gray-matter
   // sends both spellings to its eval engine; the replacement must refuse them.
@@ -116,12 +125,12 @@ describe('parseFrontmatter refuses frontmatter that is not a mapping', () => {
   // Purpose: a block holding one value or a list parses, but its data is then
   // a string, number or array, never the mapping every caller indexes into.
   it.each([
-    ['a single word', '---\nhello\n---\nbody', 'a single value ("hello")'],
-    ['a number', '---\n42\n---\nbody', 'a single value (42)'],
+    ['a single word', '---\nhello\n---\nbody', 'a string'],
+    ['a number', '---\n42\n---\nbody', 'a number'],
     ['a list', '---\n- a\n- b\n---\nbody', 'a list'],
     ['a JSON list', '---json\n["a"]\n---\nbody', 'a list'],
   ])('refuses %s', (_label, content, shape) => {
-    expect(() => parseFrontmatter(content)).toThrow(FrontmatterShapeError);
+    expect(() => parseFrontmatter(content)).toThrow(NonMappingFrontmatterError);
     expect(() => parseFrontmatter(content)).toThrow(`this one is ${shape}`);
   });
 
@@ -148,6 +157,8 @@ describe('parseFrontmatter reads ordinary frontmatter unchanged', () => {
     ['yml', 'name: a'],
     ['YAML', 'name: a'],
     ['json', '{ "name": "a" }'],
+    ['JSON', '{ "name": "a" }'],
+    ['Json', '{ "name": "a" }'],
   ])('parses an explicit `---%s` block', (lang, block) => {
     expect(parseFrontmatter(`---${lang}\n${block}\n---\nbody`).data).toEqual({ name: 'a' });
   });

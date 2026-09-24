@@ -23,12 +23,15 @@ name: schemas
 # change can never turn this job red on its own. It needs no secrets and runs on
 # the default read-only token.
 #
-# Keep it that way. The job reads files the pull request wrote, and a pull
-# request from a fork can put anything in them. `src/frontmatter.ts` is what
-# stops a SKILL.md from running code here (DOR-2310), but the read-only token and
-# the absence of secrets are what limit the damage if something ever gets past
-# it. Never add a secret, a write permission, a `pull_request_target` trigger, or
-# a later step that trusts what this job produced, without revisiting that.
+# Keep it that way. This job runs the pull request's own code by design: its
+# `npm ci` install scripts, the tsx and vitest scripts in tools/schema-check, and
+# whatever DorkOS commit upstream.json points at. The barriers are therefore the
+# job's setup, not its code: the `pull_request` trigger (never
+# `pull_request_target`), the read-only token, no secrets, and GitHub's approval
+# step for runs from outside contributors. Never add a secret, a write
+# permission, a `pull_request_target` trigger, or a later step that trusts what
+# this job produced. `src/frontmatter.ts` refusing `---js` frontmatter (DOR-2310)
+# is defense in depth on top of those barriers, not one of them.
 
 on:
   pull_request:

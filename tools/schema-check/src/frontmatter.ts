@@ -3,9 +3,12 @@
  *
  * gray-matter is a code runner as well as a parser. A block that opens with
  * `---js` or `---javascript` goes to its JavaScript engine, which calls `eval`
- * on the block. This gate reads every `SKILL.md` a pull request brings, on the
- * CI runner, so plain `matter(content)` let a pull request run its own code
- * there (DOR-2310). None of the markdown read here can be trusted to be data.
+ * on the block. This gate reads every `SKILL.md` a pull request brings, so
+ * plain `matter(content)` ran a pull request's frontmatter as code (DOR-2310).
+ * The CI job runs that pull request's own scripts anyway, so the job's setup
+ * (read-only token, no secrets) is the real boundary there. This reader is
+ * defense in depth: a `---js` file never counts as a valid skill, and any
+ * trusted tool that reads untrusted markdown with it cannot be made to run it.
  *
  * This module is therefore the only importer of gray-matter in the repo
  * (`tests/frontmatter-confinement.test.ts` holds that everywhere else) and it
@@ -55,16 +58,19 @@ export class UnsupportedFrontmatterError extends Error {
   }
 }
 
-/** Thrown when a frontmatter block parses to something other than a mapping. */
-export class FrontmatterShapeError extends Error {
+/**
+ * Thrown when a frontmatter block parses to something other than a mapping.
+ * Named and worded as in DorkOS's reader, so this file can be swapped for it.
+ */
+export class NonMappingFrontmatterError extends Error {
   /**
-   * Build the error for one block that is not `key: value` lines.
+   * Build the error for a block that is a scalar or a list.
    *
-   * @param shape - What the block holds instead, e.g. `a list`.
+   * @param kind - What the block parsed to, e.g. `a list` or `a string`.
    */
-  constructor(shape: string) {
-    super(`Frontmatter has to be "key: value" lines, but this one is ${shape}.`);
-    this.name = 'FrontmatterShapeError';
+  constructor(kind: string) {
+    super(`Frontmatter must be a list of "key: value" fields, but this one is ${kind}.`);
+    this.name = 'NonMappingFrontmatterError';
   }
 }
 
@@ -108,16 +114,21 @@ const MATTER_OPTIONS = {
  * with `---`, the fourth character is not another `-`, and whatever follows on
  * that first line is the language. Nothing is parsed.
  *
+ * A data language is admitted in any case, and handed back lowercased: gray-matter
+ * looks `yaml` and `yml` up case-insensitively but `json` only as written, so
+ * `---JSON` would otherwise fail as an unregistered engine rather than parse.
+ *
  * @param content - Raw file content.
+ * @returns The content, BOM stripped, with the language name lowercased.
  * @throws {UnsupportedFrontmatterError} For any language but YAML or JSON.
  */
-export function assertDataLanguage(content: string): void {
+export function checkDataLanguage(content: string): string {
   const text = content.startsWith('\uFEFF') ? content.slice(1) : content;
-  if (!text.startsWith('---') || text.charAt(3) === '-') return;
-  const language = matter.language(text).name;
-  if (language !== '' && !DATA_LANGUAGES.has(language.toLowerCase())) {
-    throw new UnsupportedFrontmatterError(language);
-  }
+  if (!text.startsWith('---') || text.charAt(3) === '-') return text;
+  const { raw, name } = matter.language(text);
+  if (name === '') return text;
+  if (!DATA_LANGUAGES.has(name.toLowerCase())) throw new UnsupportedFrontmatterError(name);
+  return `---${raw.toLowerCase()}${text.slice(3 + raw.length)}`;
 }
 
 /**
@@ -143,16 +154,15 @@ export function parseWithSafeEngines(content: string): { data: unknown; content:
  * @returns The frontmatter data and the untrimmed body.
  * @throws {UnsupportedFrontmatterError} When the block is written in a language
  *   other than YAML or JSON (for example `---js`).
- * @throws {FrontmatterShapeError} When the block is a single value or a list
- *   rather than `key: value` lines.
+ * @throws {NonMappingFrontmatterError} When the block is a single value or a
+ *   list rather than `key: value` fields.
  * @throws The YAML or JSON parser's error when the block is malformed.
  */
 export function parseFrontmatter(content: string): ParsedFrontmatter {
-  assertDataLanguage(content);
-  const parsed = parseWithSafeEngines(content);
-  if (Array.isArray(parsed.data)) throw new FrontmatterShapeError('a list');
-  if (typeof parsed.data !== 'object' || parsed.data === null) {
-    throw new FrontmatterShapeError(`a single value (${JSON.stringify(parsed.data)})`);
+  const parsed = parseWithSafeEngines(checkDataLanguage(content));
+  const data = parsed.data;
+  if (data === null || typeof data !== 'object' || Array.isArray(data)) {
+    throw new NonMappingFrontmatterError(Array.isArray(data) ? 'a list' : `a ${typeof data}`);
   }
-  return { data: parsed.data as Record<string, unknown>, content: parsed.content };
+  return { data: data as Record<string, unknown>, content: parsed.content };
 }

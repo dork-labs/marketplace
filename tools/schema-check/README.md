@@ -122,15 +122,24 @@ version cannot both merge: the second one fails in the queue.
 
 ## Reading a SKILL.md safely
 
-This gate reads every `SKILL.md` a pull request brings, on the CI runner. Left
-to its defaults, gray-matter runs any frontmatter block that opens with `---js`
-or `---javascript` as code, so a pull request could once run its own code here
-(DOR-2310). Every read therefore goes through `src/frontmatter.ts`, which:
+Left to its defaults, gray-matter runs any frontmatter block that opens with
+`---js` or `---javascript` as code. So every read here goes through
+`src/frontmatter.ts`, which:
 
 - refuses any frontmatter language but YAML or JSON before parsing anything,
 - replaces gray-matter's JavaScript engine with one that refuses to run,
 - parses YAML with js-yaml v4, which cannot build code from a YAML tag,
-- refuses frontmatter that is a single value or a list rather than `key: value` lines.
+- refuses frontmatter that is a single value or a list rather than `key: value` fields.
+
+This is defense in depth, not the security boundary. The CI job already runs a
+pull request's own code by design: its install scripts, the scripts in this
+folder, and the DorkOS files `upstream.json` points at. What keeps that safe is
+how the job is set up: the `pull_request` trigger (never `pull_request_target`),
+a read-only token, no secrets, and GitHub's approval step for runs from outside
+contributors. `.github/workflows/schema-check.yml` says the same next to its
+`permissions:`. The reader matters for any setup that runs trusted code over
+untrusted content, and it keeps a `---js` file from ever counting as a valid
+skill (DOR-2310).
 
 It is the only file allowed to import gray-matter;
 `tests/frontmatter-confinement.test.ts` fails if anything else in the repo does.

@@ -95,13 +95,13 @@ describe('a SKILL.md whose frontmatter is code, not data', () => {
 describe('a SKILL.md whose frontmatter is a list, not settings', () => {
   // Purpose: YAML that parses but is not `key: value` lines is reported as
   // exactly that, not as invalid YAML, which it is not.
-  it('says the frontmatter has to be key: value lines', () => {
+  it('says the frontmatter must be key: value fields', () => {
     const root = fixtureRepo('- demo-skill\n- runs every hour');
     expect(validateSkills(root, [])).toEqual([
       {
         file: 'plugins/demo/skills/demo-skill/SKILL.md',
         message:
-          'Its frontmatter cannot be read. Frontmatter has to be "key: value" lines, but this one is a list.',
+          'Its frontmatter cannot be read. Frontmatter must be a list of "key: value" fields, but this one is a list.',
       },
     ]);
   });
