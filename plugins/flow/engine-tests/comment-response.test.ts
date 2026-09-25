@@ -305,4 +305,34 @@ describe('shouldRespondToComment — a missing comment degrades, not throws (DOR
     );
     expect(decision).toEqual({ action: 'ignore', rule: 5 });
   });
+
+  // The case above has no label, so rule 3 never gets a look. On a parked
+  // `agent/needs-input` item, an empty comment used to read as "a non-agent
+  // reply" and un-park the agent's own question with no answer in hand.
+  const PARKED = makeItem({ identifier: 'DOR-2', labels: ['agent/needs-input'] });
+
+  it.each([
+    ['comment = undefined', undefined],
+    ['comment = null', null],
+    ['author missing', { mentions: [], body: 'go with option B' }],
+    ['author empty', { author: '', mentions: [], body: 'go with option B' }],
+    ['author not a string', { author: 42, mentions: [], body: 'go with option B' }],
+  ])('%s never resumes a parked needs-input item', (_label, c) => {
+    const decision = shouldRespondToComment(
+      c as unknown as InboxComment,
+      ctx('mine', PARKED),
+      DEFAULT_COMMENTS
+    );
+    expect(decision.action).not.toBe('resume');
+    expect(decision).toEqual({ action: 'ignore', rule: 5 });
+  });
+
+  it('a named human reply on the same parked item still resumes it', () => {
+    const decision = shouldRespondToComment(
+      comment({ author: 'human-account', body: 'go with option B' }),
+      ctx('mine', PARKED),
+      DEFAULT_COMMENTS
+    );
+    expect(decision).toEqual({ action: 'resume', rule: 3 });
+  });
 });

@@ -144,7 +144,20 @@ export interface PollingTransportOptions {
    * `getInbox` is loud even when the caller never reads `warnings`.
    */
   warn?: (message: string) => void;
+  /**
+   * The current time in epoch milliseconds, read once per poll. Defaults to
+   * `Date.now`; injectable so the future-timestamp guard is testable.
+   */
+  now?: () => number;
 }
+
+/**
+ * How far past `now` an `occurredAt` may be and still count. A small margin
+ * absorbs clock skew between this machine and the tracker; anything later is
+ * dropped, because a far-future watermark (`9999-12-31T23:59:59Z`) is as dead as
+ * `"nonsense"`: no real comment can ever be newer than it.
+ */
+const FUTURE_MARGIN_MS = 60 * 60 * 1000;
 
 /**
  * An ISO-8601 date-time with an explicit zone. `Date.parse` alone is not
@@ -194,12 +207,9 @@ function describeValue(value: unknown): string {
  * (DOR-535 follow-up).
  */
 function entryToEvent(entry: InboxEntry): CommentAddedEvent | MentionEvent {
-  // A missing comment (DOR-638) degrades to an empty one, so the emitted event
-  // stays well formed for a consumer that reads `event.comment.body` directly.
-  const comment: InboxComment =
-    typeof entry.comment === 'object' && entry.comment !== null
-      ? entry.comment
-      : { author: '', mentions: [], body: '' };
+  // `poll` has already dropped an entry whose comment is not an object, so this
+  // is a real comment object, though its fields may still be non-conformant.
+  const comment = entry.comment;
   const actor = entry.actor ?? authorOf(comment);
   const mentions = mentionsOf(comment);
   const isBareMention = bodyOf(comment).trim().length === 0 && mentions.length > 0;
@@ -236,17 +246,19 @@ function entryToEvent(entry: InboxEntry): CommentAddedEvent | MentionEvent {
  *
  * 1. read the current inbox via the injected {@link InboxReader};
  * 2. drop, with a warning, every entry whose `occurredAt` is not an ISO-8601
- *    date-time, then keep only entries strictly newer than the `since`
+ *    date-time, is more than an hour in the future, or whose `comment` is not
+ *    an object; then keep only entries strictly newer than the `since`
  *    watermark (`occurredAt > since`, compared as instants);
  * 3. map each survivor onto a `comment.added` / `mention` event ({@link entryToEvent});
  * 4. advance the watermark to the newest consumed `occurredAt`.
  *
  * Step 2's validation is what keeps the inbox alive (DOR-638). The watermark is
  * the one piece of state that outlives a poll, so a value no real timestamp can
- * exceed (the raw string `"nonsense"`, which sorted after every ISO date) would
- * silence the inbox forever with nothing in any log. Only a parsed instant can
- * reach it now, and a persisted `since` that is not one is discarded (a cold
- * start) rather than obeyed, which also heals a cursor poisoned before the fix.
+ * exceed (the raw string `"nonsense"`, which sorted after every ISO date, or a
+ * far-future date) would silence the inbox forever with nothing in any log.
+ * Only a parsed instant no later than an hour past now can reach it, and a
+ * persisted `since` that is not one is discarded (a cold start) rather than
+ * obeyed, which also heals a cursor poisoned before the fix.
  *
  * Because the watermark is exclusive and advances to the newest entry, a second
  * `poll(watermark)` over the same snapshot returns `[]` — no event is ever
@@ -262,6 +274,8 @@ export class PollingTransport implements InboundTransport {
   private readonly read: InboxReader;
   /** Where dropped-entry warnings go; see {@link PollingTransportOptions.warn}. */
   private readonly warn: (message: string) => void;
+  /** The clock; see {@link PollingTransportOptions.now}. */
+  private readonly now: () => number;
 
   /**
    * Construct a polling transport over an injected inbox reader. The reader is the
@@ -271,11 +285,13 @@ export class PollingTransport implements InboundTransport {
    * type-strips cleanly under `node --experimental-strip-types`.
    *
    * @param read - The injected inbox reader (the adapter's `getInbox`).
-   * @param options - Optional; `warn` redirects dropped-entry warnings.
+   * @param options - Optional; `warn` redirects dropped-entry warnings and
+   *   `now` replaces the clock.
    */
   constructor(read: InboxReader, options: PollingTransportOptions = {}) {
     this.read = read;
     this.warn = options.warn ?? ((message) => console.warn(message));
+    this.now = options.now ?? Date.now;
   }
 
   /**
@@ -295,16 +311,20 @@ export class PollingTransport implements InboundTransport {
       this.warn(message);
     };
 
+    const latest = this.now() + FUTURE_MARGIN_MS;
+
     // An unusable cursor is discarded, not obeyed: `''` is the cold-start value
     // this method itself returns for an empty inbox, and anything else that is
-    // not a timestamp could only have been written by a poisoned poll.
+    // not a timestamp, or names a time that has not happened yet, could only
+    // have been written by a poisoned poll.
     let sinceAt: number | undefined;
     if (since !== undefined && since !== '') {
       sinceAt = instantOf(since);
-      if (sinceAt === undefined) {
+      if (sinceAt === undefined || sinceAt > latest) {
+        sinceAt = undefined;
         report(
-          `flow inbox: the saved watermark ${describeValue(since)} is not a timestamp, ` +
-            'so the whole inbox is read again.'
+          `flow inbox: the saved watermark ${describeValue(since)} is not a past ` +
+            'timestamp, so the whole inbox is read again.'
         );
       }
     }
@@ -313,12 +333,25 @@ export class PollingTransport implements InboundTransport {
     // the consumer processes events in occurrence order.
     const fresh: { entry: InboxEntry; at: number }[] = [];
     for (const entry of entries) {
+      const on = describeValue(entry?.itemId);
       const at = instantOf(entry?.occurredAt);
-      if (at === undefined) {
+      if (at === undefined || at > latest) {
+        const why =
+          at === undefined ? 'is not an ISO-8601 date-time with a zone' : 'is in the future';
         report(
-          `flow inbox: dropped an entry on ${describeValue(entry?.itemId)} because its ` +
-            `occurredAt ${describeValue(entry?.occurredAt)} is not an ISO-8601 date-time ` +
-            "with a zone. Fix the adapter's getInbox."
+          `flow inbox: dropped an entry on ${on} because its occurredAt ` +
+            `${describeValue(entry?.occurredAt)} ${why}. Fix the adapter's getInbox.`
+        );
+        continue;
+      }
+      // No comment means nothing to decide on. Dropped rather than faked as an
+      // empty comment: an empty comment on a parked item reads as an anonymous
+      // reply, and the agent would un-park its own question with no answer.
+      const comment: unknown = entry.comment;
+      if (typeof comment !== 'object' || comment === null || Array.isArray(comment)) {
+        report(
+          `flow inbox: dropped an entry on ${on} because its comment is ` +
+            `${describeValue(comment)}, not a comment object. Fix the adapter's getInbox.`
         );
         continue;
       }

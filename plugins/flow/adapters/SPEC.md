@@ -1,6 +1,6 @@
 # Tracker Adapter Contract
 
-> **Contract version: 1.3.0** (semver). See [Versioning](#5-versioning).
+> **Contract version: 1.3.1** (semver). See [Versioning](#5-versioning).
 >
 > This is the **generic, tracker-neutral** contract every `/flow` tracker adapter
 > must satisfy. It names no tracker, no API, and no slug. Reference adapters
@@ -249,6 +249,13 @@ universal and worth stating once:
   `{ author, mentions[], body }`, so the comment-response rules can decide
   respond/act/ignore and so a parked `agent/needs-input` item resumes on a
   non-agent reply.
+  Every entry also carries `itemId` (the item's human key) and `occurredAt`, the
+  moment the triggering comment was made, as an **ISO-8601 date-time with an
+  explicit zone** (`2026-06-25T14:03:00.000Z` or `…+02:00`). `occurredAt` is the
+  inbox's durable watermark: the engine drops, with a warning, an entry whose
+  `occurredAt` is anything else (a bare date, a zone-less time, a number) or is
+  more than an hour in the future, and an entry with no `comment` object. Emit the
+  tracker's own creation time for the comment, never a formatted or local one.
 - **Durability.** Read-only.
 - **Degradation.** A tracker without a comment or mention surface returns the
   assigned-to-agent subset only; missing mention data degrades to "not mentioned"
@@ -584,6 +591,13 @@ declaration.
 
 ### What each version added
 
+- **1.3.1** - spelled out what `getInbox` always had to return: every entry's
+  `itemId`, and an `occurredAt` that is an ISO-8601 date-time with an explicit
+  zone (section 3). The engine now drops, with a warning, an entry whose
+  `occurredAt` is anything else or lies in the future, or that has no comment,
+  because one such value used to become the inbox watermark and silence it for
+  good. A clarification of the existing shape: an adapter that already emits
+  the tracker's own timestamps still conforms unchanged.
 - **1.3.0** - added the optional **intake trio** — `listIntake`, `promote` and
   `resolveIntake` (section 3) — plus the `IntakeSource`, `IntakeReport` and
   `IntakeOutcome` types they carry. They serve TRIAGE's Path C, which promotes a

@@ -55,10 +55,16 @@ function entry(overrides: Partial<InboxEntry> = {}): InboxEntry {
   };
 }
 
-/** A `PollingTransport` whose warnings land in a spy instead of the console. */
+/** The fixed clock the DOR-638 suites run on, so their 2027 dates are in the past. */
+const NOW = Date.parse('2028-01-01T00:00:00.000Z');
+
+/**
+ * A `PollingTransport` on the fixed {@link NOW} clock, whose warnings land in a
+ * spy instead of the console.
+ */
 function quietTransport(read: () => Promise<readonly InboxEntry[]>) {
   const warn = vi.fn<(message: string) => void>();
-  return { transport: new PollingTransport(read, { warn }), warn };
+  return { transport: new PollingTransport(read, { warn, now: () => NOW }), warn };
 }
 
 // ─── (a) PollingTransport unit ────────────────────────────────────────────────
@@ -264,7 +270,9 @@ describe('PollingTransport — an unusable occurredAt never poisons the watermar
   it('warns on the console by default, so nobody has to remember to read `warnings`', async () => {
     const spy = vi.spyOn(console, 'warn').mockImplementation(() => {});
     try {
-      const transport = new PollingTransport(async () => [entry({ occurredAt: 'nonsense' })]);
+      const transport = new PollingTransport(async () => [entry({ occurredAt: 'nonsense' })], {
+        now: () => NOW,
+      });
       await transport.poll();
       expect(spy).toHaveBeenCalledTimes(1);
     } finally {
@@ -296,8 +304,11 @@ describe('PollingTransport — an unusable occurredAt never poisons the watermar
 
   it('recovers an inbox whose persisted watermark was already poisoned', async () => {
     // A cursor written before this fix may already read "nonsense". Treating an
-    // unusable `since` as a cold start re-delivers the current inbox (events are
-    // triggers, deduped on `dedupeKey`) instead of staying deaf forever.
+    // unusable `since` as a cold start re-delivers the current inbox instead of
+    // staying deaf forever. Nothing stores processed `dedupeKey`s, so what keeps
+    // a re-delivered event harmless is that events are triggers, not truth: the
+    // consumer re-reads each item and the comment-response rules decide again
+    // (an item already un-parked no longer carries `agent/needs-input`).
     const { transport, warn } = quietTransport(async () => [
       entry({ itemId: 'DOR-real', occurredAt: LATER }),
     ]);
@@ -307,6 +318,54 @@ describe('PollingTransport — an unusable occurredAt never poisons the watermar
     expect(events.map((e) => e.itemId)).toEqual(['DOR-real']);
     expect(watermark).toBe(LATER);
     expect(warn).toHaveBeenCalledTimes(1);
+  });
+
+  it('drops a far-future occurredAt, so it cannot become a watermark nothing exceeds', async () => {
+    let inbox: InboxEntry[] = [entry({ itemId: 'DOR-future', occurredAt: '9999-12-31T23:59:59Z' })];
+    const { transport, warn } = quietTransport(async () => inbox);
+
+    const first = await transport.poll('2026-06-25T00:00:00.000Z');
+    expect(first.events).toEqual([]);
+    expect(first.watermark).toBe('2026-06-25T00:00:00.000Z');
+    expect(warn).toHaveBeenCalledWith(expect.stringContaining('in the future'));
+
+    inbox = [entry({ itemId: 'DOR-real', occurredAt: LATER })];
+    const second = await transport.poll(first.watermark);
+    expect(second.events.map((e) => e.itemId)).toEqual(['DOR-real']);
+  });
+
+  it('allows an hour of clock skew, and no more', async () => {
+    const withinSkew = new Date(NOW + 59 * 60 * 1000).toISOString();
+    const pastSkew = new Date(NOW + 61 * 60 * 1000).toISOString();
+    const { transport } = quietTransport(async () => [
+      entry({ itemId: 'DOR-skewed', occurredAt: withinSkew }),
+      entry({ itemId: 'DOR-too-far', occurredAt: pastSkew }),
+    ]);
+    const { events, watermark } = await transport.poll();
+    expect(events.map((e) => e.itemId)).toEqual(['DOR-skewed']);
+    expect(watermark).toBe(withinSkew);
+  });
+
+  it('discards a saved far-future watermark, so an inbox stuck on one recovers', async () => {
+    const { transport, warn } = quietTransport(async () => [
+      entry({ itemId: 'DOR-real', occurredAt: LATER }),
+    ]);
+    const { events, watermark } = await transport.poll('9999-12-31T23:59:59Z');
+    expect(events.map((e) => e.itemId)).toEqual(['DOR-real']);
+    expect(watermark).toBe(LATER);
+    expect(warn).toHaveBeenCalledTimes(1);
+  });
+
+  it('reads the real clock by default', async () => {
+    // No `now` injected: a date a century out is future on any machine running this.
+    const warn = vi.fn<(message: string) => void>();
+    const transport = new PollingTransport(
+      async () => [entry({ occurredAt: '2126-01-01T00:00:00Z' })],
+      { warn }
+    );
+    const { events } = await transport.poll();
+    expect(events).toEqual([]);
+    expect(warn).toHaveBeenCalledWith(expect.stringContaining('in the future'));
   });
 
   it('compares instants, not strings, so a mixed-precision timestamp is not lost', async () => {
@@ -336,28 +395,28 @@ describe('PollingTransport — an entry with no comment is handled, not thrown (
   it.each([
     ['undefined', undefined],
     ['null', null],
-  ])(
-    'comment = %s becomes a comment.added event with an empty comment',
-    async (_label, missing) => {
-      const { transport } = quietTransport(async () => [
-        entry({ comment: missing as unknown as InboxEntry['comment'], actor: undefined }),
-      ]);
+    ['a string', 'go with option B'],
+    ['an array', []],
+  ])('comment = %s is dropped with a warning, not thrown', async (_label, missing) => {
+    // Dropped, never faked as an empty comment: an empty comment on a parked
+    // `agent/needs-input` item reads as an anonymous reply, and the agent would
+    // un-park its own question with no answer in hand.
+    let inbox: InboxEntry[] = [
+      entry({ itemId: 'DOR-empty', comment: missing as unknown as InboxEntry['comment'] }),
+    ];
+    const { transport, warn } = quietTransport(async () => inbox);
 
-      const { events } = await transport.poll();
+    const first = await transport.poll('2026-06-24T00:00:00.000Z');
 
-      expect(events).toHaveLength(1);
-      const [event] = events;
-      expect(event.kind).toBe('comment.added');
-      // The event stays well formed, so a consumer reading `event.comment.body`
-      // directly cannot crash one hop further downstream.
-      expect(event.kind === 'comment.added' && event.comment).toEqual({
-        author: '',
-        mentions: [],
-        body: '',
-      });
-      expect(event.actor).toBe('');
-    }
-  );
+    expect(first.events).toEqual([]);
+    expect(warn).toHaveBeenCalledWith(expect.stringContaining('DOR-empty'));
+    expect(first.warnings?.[0]).toContain('not a comment object');
+
+    // And the inbox is still alive afterwards.
+    inbox = [entry({ itemId: 'DOR-real', occurredAt: '2027-01-01T00:00:00.000Z' })];
+    const second = await transport.poll(first.watermark);
+    expect(second.events.map((e) => e.itemId)).toEqual(['DOR-real']);
+  });
 
   it.each([
     ['undefined', undefined],

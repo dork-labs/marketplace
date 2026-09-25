@@ -227,7 +227,7 @@ interface InboundTransport {
 
 <Steps>
 <Step>read the current inbox via the injected `InboxReader`;</Step>
-<Step>drop, with a warning, any entry whose `occurredAt` is not an ISO-8601 date-time with a zone, then keep only entries strictly newer than the `since` watermark (`occurredAt > since`, compared as instants, exclusive);</Step>
+<Step>drop, with a warning, any entry whose `occurredAt` is not an ISO-8601 date-time with a zone or is more than an hour in the future, or that has no comment, then keep only entries strictly newer than the `since` watermark (`occurredAt > since`, compared as instants, exclusive);</Step>
 <Step>map each survivor onto a `comment.added` or `mention` event;</Step>
 <Step>advance the watermark to the newest consumed `occurredAt` and return it to persist.</Step>
 </Steps>
