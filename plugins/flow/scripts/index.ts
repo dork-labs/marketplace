@@ -85,7 +85,7 @@ export {
 export type { TasksFile, Task, TaskSize, CanonicalSize, Provenance } from './tasks-schema.ts';
 
 // Work model — the normalized WorkItem the adapter produces and the engine consumes.
-export { hasLabel, labelsOf, mentionsOf, bodyOf } from './work-item.ts';
+export { hasLabel, labelsOf, mentionsOf, bodyOf, authorOf } from './work-item.ts';
 export type {
   WorkItem,
   WorkItemProject,
@@ -228,6 +228,7 @@ export { PollingTransport } from './transport.ts';
 export type {
   InboundTransport,
   PollResult,
+  PollingTransportOptions,
   Watermark,
   InboxEntry,
   InboxReader,

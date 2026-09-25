@@ -288,3 +288,21 @@ describe('shouldRespondToComment — non-conformance sweep (InboxComment fields)
     }
   );
 });
+
+describe('shouldRespondToComment — a missing comment degrades, not throws (DOR-638)', () => {
+  // The sweep above substitutes hostile values INSIDE the comment; this is the
+  // level above it, the comment itself. Rule 1 used to read `comment.author`
+  // directly, so an adapter that returned no comment at all crashed here before
+  // any accessor guard was reached.
+  it.each([
+    ['undefined', undefined],
+    ['null', null],
+  ])('comment = %s falls through to the quiet soft zone', (_label, missing) => {
+    const decision = shouldRespondToComment(
+      missing as unknown as InboxComment,
+      ctx('mine'),
+      DEFAULT_COMMENTS
+    );
+    expect(decision).toEqual({ action: 'ignore', rule: 5 });
+  });
+});

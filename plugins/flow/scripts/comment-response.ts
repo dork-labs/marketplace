@@ -53,7 +53,7 @@
 
 import type { z } from 'zod';
 import type { CommentsSchema } from './config-schema.ts';
-import { bodyOf, hasLabel, mentionsOf } from './work-item.ts';
+import { authorOf, bodyOf, hasLabel, mentionsOf } from './work-item.ts';
 import type { InboxComment, OwnershipClass, WorkItem } from './work-item.ts';
 
 /** Resolved {@link CommentsSchema} config — `respondWhen` + `ambiguousBias`. */
@@ -61,7 +61,7 @@ export type CommentsConfig = z.infer<typeof CommentsSchema>;
 
 /**
  * The `InboxComment` shape lives in `work-item.ts`, beside `WorkItem` and the
- * other adapter-output accessors (`hasLabel`, `mentionsOf`, `bodyOf`) it
+ * other adapter-output accessors (`hasLabel`, `mentionsOf`, `bodyOf`, `authorOf`) it
  * shares with `PollingTransport` (`transport.ts`). Re-exported here so
  * existing imports from this module
  * (`import { type InboxComment } from './comment-response.ts'`) keep working.
@@ -136,7 +136,11 @@ const FLOW_ADDRESS_TOKENS = ['/flow', '@flow'];
  * is the only signal when multiple agents share one tracker account.
  */
 function isAgentsOwnComment(comment: InboxComment, identity: CommentIdentity): boolean {
-  if (comment.author === identity.agent) return true;
+  // An unknown author (`''`) is never the agent, even if `identity.agent` is
+  // somehow empty too: silence on a missing author must come from the rules
+  // below, not from mistaking nobody for the agent.
+  const author = authorOf(comment);
+  if (author.length > 0 && author === identity.agent) return true;
   // Shared-account mode: the marker is the only authorship signal. A non-empty
   // marker present in the body means the agent wrote it.
   return identity.marker.length > 0 && bodyOf(comment).includes(identity.marker);
