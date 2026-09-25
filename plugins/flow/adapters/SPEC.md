@@ -260,6 +260,11 @@ universal and worth stating once:
 - **Degradation.** A tracker without a comment or mention surface returns the
   assigned-to-agent subset only; missing mention data degrades to "not mentioned"
   (the quiet-by-default bias keeps this safe). An unreachable tracker throws.
+  A comment with no author (one synced in from chat or email, say) is kept with
+  a warning: set `author` to `''`, never to a guess. On a parked
+  `agent/needs-input` item it still resumes the run when its body has text,
+  because the agent's own question always carries the marker and is ignored
+  first; a comment with neither an author nor text never resumes anything.
 
 #### `getRelations(item: WorkItem): Promise<WorkItemRelations>`
 

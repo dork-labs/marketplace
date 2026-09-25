@@ -314,9 +314,9 @@ describe('shouldRespondToComment — a missing comment degrades, not throws (DOR
   it.each([
     ['comment = undefined', undefined],
     ['comment = null', null],
-    ['author missing', { mentions: [], body: 'go with option B' }],
-    ['author empty', { author: '', mentions: [], body: 'go with option B' }],
-    ['author not a string', { author: 42, mentions: [], body: 'go with option B' }],
+    ['an empty object', {}],
+    ['no author and a blank body', { author: '', mentions: [], body: '   ' }],
+    ['a non-string author and no body', { author: 42, mentions: [] }],
   ])('%s never resumes a parked needs-input item', (_label, c) => {
     const decision = shouldRespondToComment(
       c as unknown as InboxComment,
@@ -325,6 +325,30 @@ describe('shouldRespondToComment — a missing comment degrades, not throws (DOR
     );
     expect(decision.action).not.toBe('resume');
     expect(decision).toEqual({ action: 'ignore', rule: 5 });
+  });
+
+  it.each([
+    ['author missing', { mentions: [], body: 'go with option B' }],
+    ['author empty', { author: '', mentions: [], body: 'go with option B' }],
+    ['author not a string', { author: 42, mentions: [], body: 'go with option B' }],
+  ])('an author-less reply with text (%s) still resumes, so it is not stranded', (_l, c) => {
+    // A reply synced in from chat or email can arrive with no author. Refusing
+    // it would leave the item parked forever with nothing in any log.
+    const decision = shouldRespondToComment(
+      c as unknown as InboxComment,
+      ctx('mine', PARKED),
+      DEFAULT_COMMENTS
+    );
+    expect(decision).toEqual({ action: 'resume', rule: 3 });
+  });
+
+  it("the agent's own author-less question never resumes itself (rule 1 sees the marker)", () => {
+    const decision = shouldRespondToComment(
+      comment({ author: '', body: 'Which option? — 🤖 /flow' }),
+      ctx('mine', PARKED),
+      DEFAULT_COMMENTS
+    );
+    expect(decision).toEqual({ action: 'ignore', rule: 1 });
   });
 
   it('a named human reply on the same parked item still resumes it', () => {

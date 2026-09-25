@@ -32,8 +32,7 @@
  *    ownership** — even on a teammate's (`other`-owned) thread. → `respond`.
  * 3. **Resume an `agent/needs-input` item on a non-agent comment** — that reply
  *    is the answer the agent parked for via `needsInput`. The comment must name
- *    its author; one that does not cannot be told apart from the agent's own.
- *    → `resume`.
+ *    its author or carry text; an empty one is never an answer. → `resume`.
  * 4. **Stay out of `other`-owned threads unless mentioned** — rule 2 already
  *    handled the mention case, so here an `other`-owned thread is left alone.
  *    → `ignore`.
@@ -172,7 +171,7 @@ function isDirectlyAddressed(comment: InboxComment, identity: CommentIdentity): 
  * Precedence (first match wins):
  * 1. own comment (author or marker) → `ignore` — breaks self-reply loops first;
  * 2. directly addressed (@mention or `/flow` token) → `respond` — overrides ownership;
- * 3. `agent/needs-input` item + non-agent comment with a known author → `resume` — the parked answer;
+ * 3. `agent/needs-input` item + non-agent comment with a known author or a non-blank body → `resume` — the parked answer;
  * 4. `other`-owned thread (and not addressed) → `ignore` — stay out;
  * 5. soft zone → `respond` if `ambiguousBias: "engage"`, else `ignore`.
  *
@@ -207,11 +206,18 @@ export function shouldRespondToComment(
   // under the adapter contract, but the runtime must not crash on a
   // non-conformant adapter, and a bare string would otherwise substring-match.
   //
-  // The reply must have a KNOWN author (DOR-638). A comment with no author, or
-  // no comment at all, cannot be shown to be someone other than the agent, so
-  // it never counts as the answer: resuming on it would un-park the agent's own
-  // question with nothing in hand. It falls through to rules 4 and 5 instead.
-  if (hasLabel(ctx.item, NEEDS_INPUT_LABEL) && authorOf(comment).length > 0) {
+  // The reply must say something (DOR-638): a known author, or a non-blank
+  // body. An empty comment, or no comment at all, never counts as the answer,
+  // since resuming on it would un-park the question with nothing in hand. A
+  // real reply that arrives with no author (a comment synced in from chat or
+  // email often has none) still resumes on its text: rule 1 has already
+  // rejected the agent's own question, which always carries the marker, and
+  // stranding a human's answer parks the item forever, silently.
+  // `PollingTransport` warns about every author-less comment it passes on.
+  if (
+    hasLabel(ctx.item, NEEDS_INPUT_LABEL) &&
+    (authorOf(comment).length > 0 || bodyOf(comment).trim().length > 0)
+  ) {
     return { action: 'resume', rule: 3 };
   }
 

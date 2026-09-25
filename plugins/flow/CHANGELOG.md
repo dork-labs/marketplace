@@ -22,8 +22,10 @@ you until you **reinstall it** (Marketplace → flow → reinstall, or re-run yo
   different time zone or precision is no longer missed or put in the wrong order.
 - An inbox entry with no comment attached is skipped with a warning instead of
   crashing the run.
-- A question flow parked for you is only picked back up by a reply that says who
-  wrote it. A reply with no author can no longer wake it with no answer.
+- A question flow parked for you is only picked back up by a reply that has an
+  author or some text. An empty reply can no longer wake it with no answer, and
+  a real reply that arrives with no author (one synced in from Slack or email,
+  say) still does, with a warning.
 
 ## 0.10.1
 

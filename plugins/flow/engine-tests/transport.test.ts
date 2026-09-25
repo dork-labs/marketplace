@@ -430,6 +430,31 @@ describe('PollingTransport — an entry with no comment is handled, not thrown (
   });
 });
 
+describe('PollingTransport — an author-less comment is kept, with a warning (DOR-638)', () => {
+  it('passes the comment on and says it has no author', async () => {
+    const { transport, warn } = quietTransport(async () => [
+      entry({
+        itemId: 'DOR-synced',
+        comment: { author: '', mentions: [], body: 'from Slack: go with B' },
+        actor: undefined,
+      }),
+    ]);
+    const { events, warnings } = await transport.poll();
+    expect(events.map((e) => e.itemId)).toEqual(['DOR-synced']);
+    expect(warnings).toHaveLength(1);
+    expect(warnings?.[0]).toContain('DOR-synced');
+    expect(warnings?.[0]).toContain('no author');
+    expect(warn).toHaveBeenCalledTimes(1);
+  });
+
+  it('says nothing about a comment that names its author', async () => {
+    const { transport, warn } = quietTransport(async () => [entry()]);
+    const { warnings } = await transport.poll();
+    expect(warnings).toEqual([]);
+    expect(warn).not.toHaveBeenCalled();
+  });
+});
+
 // ─── PollingTransport non-conformance sweep (InboxEntry's own fields) ─────────
 
 describe('PollingTransport — non-conformance sweep (InboxEntry fields, DOR-638)', () => {

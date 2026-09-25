@@ -355,7 +355,17 @@ export class PollingTransport implements InboundTransport {
         );
         continue;
       }
-      if (sinceAt === undefined || at > sinceAt) fresh.push({ entry, at });
+      if (sinceAt === undefined || at > sinceAt) {
+        // Kept, but said out loud: with no author, only the comment's text can
+        // wake a parked question (rule 3), and the reply cannot be attributed.
+        if (authorOf(comment as InboxComment).length === 0) {
+          report(
+            `flow inbox: the comment on ${on} has no author. It is still read, and ` +
+              'its text alone can resume a question parked for a reply.'
+          );
+        }
+        fresh.push({ entry, at });
+      }
     }
     fresh.sort((a, b) => a.at - b.at);
 

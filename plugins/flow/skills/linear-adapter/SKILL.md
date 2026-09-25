@@ -611,7 +611,7 @@ act:
 ```
 InboxEntry {
   item,                       // the WorkItem the comment is on
-  occurredAt,                 // the comment's createdAt, as Linear returns it (ISO-8601, `Z`)
+  occurredAt,                 // the comment's createdAt, as Linear returns it (ISO-8601, `Z`; verified 2026-09-25)
   comment: {
     author,                   // who wrote it (compared against identity.agent / marker)
     mentions[],               // @mentioned accounts (drives "directly addressed")
