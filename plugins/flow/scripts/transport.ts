@@ -38,15 +38,16 @@ import {
   type MentionEvent,
   type TrackerEvent,
 } from './events.ts';
-import { bodyOf, mentionsOf } from './work-item.ts';
+import { authorOf, bodyOf, mentionsOf } from './work-item.ts';
 import type { InboxComment } from './work-item.ts';
 
 /**
- * A durable cursor marking the high-water point of consumed events — an opaque
- * string, in v1 the ISO-8601 `occurredAt` of the newest event seen. Durable, not
- * in-memory: persisting it (the run record / `flow-state.json`) keeps the poll
- * stream **gap-free across restarts**. Compared with `>` so a `poll(since)` returns
- * strictly newer events and never re-emits one already consumed.
+ * A durable cursor marking the high-water point of consumed events — in v1 the
+ * ISO-8601 `occurredAt` of the newest event seen, or `''` before any event has
+ * been. Durable, not in-memory: persisting it (the run record /
+ * `flow-state.json`) keeps the poll stream **gap-free across restarts**.
+ * Compared as an **instant**, never as a string, with `>`, so a `poll(since)`
+ * returns strictly newer events and never re-emits one already consumed.
  */
 export type Watermark = string;
 
@@ -65,6 +66,12 @@ export interface PollResult {
    * fresh events arrived.
    */
   watermark: Watermark;
+  /**
+   * One plain-language line per inbox entry this poll dropped, and per unusable
+   * `since` it had to discard. Optional so a producer with nothing to report
+   * need not set it; {@link PollingTransport} always does.
+   */
+  warnings?: readonly string[];
 }
 
 /**
@@ -106,7 +113,11 @@ export interface InboundTransport {
 export interface InboxEntry {
   /** The human key of the item the entry is on (the `WorkItem.identifier`). */
   itemId: string;
-  /** ISO-8601 timestamp the entry occurred — the watermark axis. */
+  /**
+   * ISO-8601 date-time the entry occurred, with an explicit zone (`Z` or
+   * `±hh:mm`) — the watermark axis. An entry whose value is anything else is
+   * dropped with a warning rather than allowed near the watermark (DOR-638).
+   */
   occurredAt: string;
   /** The triggering comment (`author`/`mentions`/`body`), the `comment.added` payload. */
   comment: InboxComment;
@@ -125,6 +136,60 @@ export interface InboxEntry {
  */
 export type InboxReader = () => Promise<readonly InboxEntry[]>;
 
+/** Options for {@link PollingTransport}. */
+export interface PollingTransportOptions {
+  /**
+   * Where a dropped entry is reported, once per line of
+   * {@link PollResult.warnings}. Defaults to `console.warn`, so a broken
+   * `getInbox` is loud even when the caller never reads `warnings`.
+   */
+  warn?: (message: string) => void;
+  /**
+   * The current time in epoch milliseconds, read once per poll. Defaults to
+   * `Date.now`; injectable so the future-timestamp guard is testable.
+   */
+  now?: () => number;
+}
+
+/**
+ * How far past `now` an `occurredAt` may be and still count. A small margin
+ * absorbs clock skew between this machine and the tracker; anything later is
+ * dropped, because a far-future watermark (`9999-12-31T23:59:59Z`) is as dead as
+ * `"nonsense"`: no real comment can ever be newer than it.
+ */
+const FUTURE_MARGIN_MS = 60 * 60 * 1000;
+
+/**
+ * An ISO-8601 date-time with an explicit zone. `Date.parse` alone is not
+ * enough: V8 reads `'42'` as the year 2042 and a zone-less date-time as local
+ * time, and a watermark of 2042 is the same dead inbox as `"nonsense"`, just
+ * with an expiry date.
+ */
+const ISO_DATE_TIME = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}(?::\d{2}(?:\.\d+)?)?(?:Z|[+-]\d{2}:\d{2})$/i;
+
+/**
+ * The instant a timestamp names, in epoch milliseconds, or `undefined` when the
+ * value is not an ISO-8601 date-time with an explicit zone that names a real
+ * date. The one gate between an adapter's `occurredAt` and the watermark.
+ */
+function instantOf(value: unknown): number | undefined {
+  if (typeof value !== 'string' || !ISO_DATE_TIME.test(value)) return undefined;
+  const ms = Date.parse(value);
+  return Number.isNaN(ms) ? undefined : ms;
+}
+
+/**
+ * Render an adapter-supplied value for a warning without ever throwing: a
+ * string is quoted, anything else is named by its type (never stringified, since
+ * a hostile object can throw from `toString` or loop in `JSON.stringify`).
+ */
+function describeValue(value: unknown): string {
+  if (typeof value === 'string') return JSON.stringify(value);
+  if (value === null) return 'null';
+  if (Array.isArray(value)) return 'an array';
+  return typeof value === 'object' ? 'an object' : `${typeof value} ${String(value)}`;
+}
+
 /**
  * Map one {@link InboxEntry} onto a {@link TrackerEvent} (always `receivedVia:
  * 'poll'`). A bare @mention notification (a non-empty `mentions` list with an
@@ -133,7 +198,7 @@ export type InboxReader = () => Promise<readonly InboxEntry[]>;
  * {@link InboxComment}. Pure and deterministic so the poll producer keys and
  * shapes events identically to the future webhook producer.
  *
- * Reads `entry.comment` through {@link bodyOf} / {@link mentionsOf} (the
+ * Reads `entry.comment` through {@link bodyOf} / {@link mentionsOf} / {@link authorOf} (the
  * `work-item.ts` accessors also used by the comment-response rules) rather
  * than direct property access: `PollingTransport` is strictly upstream of
  * `shouldRespondToComment` — it produces the exact `InboxComment` payload the
@@ -142,9 +207,12 @@ export type InboxReader = () => Promise<readonly InboxEntry[]>;
  * (DOR-535 follow-up).
  */
 function entryToEvent(entry: InboxEntry): CommentAddedEvent | MentionEvent {
-  const actor = entry.actor ?? entry.comment.author;
-  const mentions = mentionsOf(entry.comment);
-  const isBareMention = bodyOf(entry.comment).trim().length === 0 && mentions.length > 0;
+  // `poll` has already dropped an entry whose comment is not an object, so this
+  // is a real comment object, though its fields may still be non-conformant.
+  const comment = entry.comment;
+  const actor = entry.actor ?? authorOf(comment);
+  const mentions = mentionsOf(comment);
+  const isBareMention = bodyOf(comment).trim().length === 0 && mentions.length > 0;
 
   if (isBareMention) {
     return {
@@ -167,7 +235,7 @@ function entryToEvent(entry: InboxEntry): CommentAddedEvent | MentionEvent {
     receivedVia: 'poll',
     dedupeKey: trackerEventDedupeKey('comment.added', entry.itemId, entry.occurredAt),
     raw: entry.raw,
-    comment: entry.comment,
+    comment,
   };
 }
 
@@ -177,9 +245,20 @@ function entryToEvent(entry: InboxEntry): CommentAddedEvent | MentionEvent {
  * delta of {@link TrackerEvent}s. Pure transformation around the injected reader:
  *
  * 1. read the current inbox via the injected {@link InboxReader};
- * 2. keep only entries strictly newer than the `since` watermark (`occurredAt > since`);
+ * 2. drop, with a warning, every entry whose `occurredAt` is not an ISO-8601
+ *    date-time, is more than an hour in the future, or whose `comment` is not
+ *    an object; then keep only entries strictly newer than the `since`
+ *    watermark (`occurredAt > since`, compared as instants);
  * 3. map each survivor onto a `comment.added` / `mention` event ({@link entryToEvent});
  * 4. advance the watermark to the newest consumed `occurredAt`.
+ *
+ * Step 2's validation is what keeps the inbox alive (DOR-638). The watermark is
+ * the one piece of state that outlives a poll, so a value no real timestamp can
+ * exceed (the raw string `"nonsense"`, which sorted after every ISO date, or a
+ * far-future date) would silence the inbox forever with nothing in any log.
+ * Only a parsed instant no later than an hour past now can reach it, and a
+ * persisted `since` that is not one is discarded (a cold start) rather than
+ * obeyed, which also heals a cursor poisoned before the fix.
  *
  * Because the watermark is exclusive and advances to the newest entry, a second
  * `poll(watermark)` over the same snapshot returns `[]` — no event is ever
@@ -193,6 +272,10 @@ function entryToEvent(entry: InboxEntry): CommentAddedEvent | MentionEvent {
 export class PollingTransport implements InboundTransport {
   /** The injected inbox reader (the adapter's `getInbox`) — the sole I/O dependency. */
   private readonly read: InboxReader;
+  /** Where dropped-entry warnings go; see {@link PollingTransportOptions.warn}. */
+  private readonly warn: (message: string) => void;
+  /** The clock; see {@link PollingTransportOptions.now}. */
+  private readonly now: () => number;
 
   /**
    * Construct a polling transport over an injected inbox reader. The reader is the
@@ -202,9 +285,13 @@ export class PollingTransport implements InboundTransport {
    * type-strips cleanly under `node --experimental-strip-types`.
    *
    * @param read - The injected inbox reader (the adapter's `getInbox`).
+   * @param options - Optional; `warn` redirects dropped-entry warnings and
+   *   `now` replaces the clock.
    */
-  constructor(read: InboxReader) {
+  constructor(read: InboxReader, options: PollingTransportOptions = {}) {
     this.read = read;
+    this.warn = options.warn ?? ((message) => console.warn(message));
+    this.now = options.now ?? Date.now;
   }
 
   /**
@@ -218,22 +305,78 @@ export class PollingTransport implements InboundTransport {
    */
   async poll(since?: Watermark): Promise<PollResult> {
     const entries = await this.read();
+    const warnings: string[] = [];
+    const report = (message: string): void => {
+      warnings.push(message);
+      this.warn(message);
+    };
+
+    const latest = this.now() + FUTURE_MARGIN_MS;
+
+    // An unusable cursor is discarded, not obeyed: `''` is the cold-start value
+    // this method itself returns for an empty inbox, and anything else that is
+    // not a timestamp, or names a time that has not happened yet, could only
+    // have been written by a poisoned poll.
+    let sinceAt: number | undefined;
+    if (since !== undefined && since !== '') {
+      sinceAt = instantOf(since);
+      if (sinceAt === undefined || sinceAt > latest) {
+        sinceAt = undefined;
+        report(
+          `flow inbox: the saved watermark ${describeValue(since)} is not a past ` +
+            'timestamp, so the whole inbox is read again.'
+        );
+      }
+    }
 
     // Gap-free delta: strictly newer than the cursor (exclusive), oldest-first so
     // the consumer processes events in occurrence order.
-    const fresh = entries
-      .filter((entry) => since === undefined || entry.occurredAt > since)
-      .slice()
-      .sort((a, b) => a.occurredAt.localeCompare(b.occurredAt));
-
-    const events = fresh.map(entryToEvent);
-
-    // Advance to the newest consumed occurredAt; hold at `since` when nothing new.
-    let watermark: Watermark = since ?? '';
-    for (const entry of fresh) {
-      if (entry.occurredAt > watermark) watermark = entry.occurredAt;
+    const fresh: { entry: InboxEntry; at: number }[] = [];
+    for (const entry of entries) {
+      const on = describeValue(entry?.itemId);
+      const at = instantOf(entry?.occurredAt);
+      if (at === undefined || at > latest) {
+        const why =
+          at === undefined ? 'is not an ISO-8601 date-time with a zone' : 'is in the future';
+        report(
+          `flow inbox: dropped an entry on ${on} because its occurredAt ` +
+            `${describeValue(entry?.occurredAt)} ${why}. Fix the adapter's getInbox.`
+        );
+        continue;
+      }
+      // No comment means nothing to decide on. Dropped rather than faked as an
+      // empty comment: an empty comment on a parked item reads as an anonymous
+      // reply, and the agent would un-park its own question with no answer.
+      const comment: unknown = entry.comment;
+      if (typeof comment !== 'object' || comment === null || Array.isArray(comment)) {
+        report(
+          `flow inbox: dropped an entry on ${on} because its comment is ` +
+            `${describeValue(comment)}, not a comment object. Fix the adapter's getInbox.`
+        );
+        continue;
+      }
+      if (sinceAt === undefined || at > sinceAt) {
+        // Kept, but said out loud: with no author, only the comment's text can
+        // wake a parked question (rule 3), and the reply cannot be attributed.
+        if (authorOf(comment as InboxComment).length === 0) {
+          report(
+            `flow inbox: the comment on ${on} has no author. It is still read, and ` +
+              'its text alone can resume a question parked for a reply.'
+          );
+        }
+        fresh.push({ entry, at });
+      }
     }
+    fresh.sort((a, b) => a.at - b.at);
 
-    return { events, watermark };
+    const events = fresh.map(({ entry }) => entryToEvent(entry));
+
+    // Advance to the newest consumed occurredAt; hold at `since` when nothing new
+    // (or fall back to the cold-start `''` when `since` was unusable).
+    const newest = fresh.at(-1);
+    const watermark: Watermark =
+      newest !== undefined ? newest.entry.occurredAt : sinceAt !== undefined ? (since ?? '') : '';
+
+    return { events, watermark, warnings };
   }
 }

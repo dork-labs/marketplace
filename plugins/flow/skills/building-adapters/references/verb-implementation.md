@@ -99,6 +99,13 @@ Two universal rules apply to every verb:
   `{ author, mentions[], body }`, so the comment-response rules decide
   respond/act/ignore and a parked `agent/needs-input` item resumes on a non-agent
   reply.
+  Every entry also carries `itemId` (the item's human key) and `occurredAt`, the
+  moment the triggering comment was made, as an **ISO-8601 date-time with an
+  explicit zone** (`2026-06-25T14:03:00.000Z` or `…+02:00`). `occurredAt` is the
+  inbox's durable watermark: the engine drops, with a warning, an entry whose
+  `occurredAt` is anything else (a bare date, a zone-less time, a number) or is
+  more than an hour in the future, and an entry with no `comment` object. Emit the
+  tracker's own creation time for the comment, never a formatted or local one.
 - **Degradation.** A tracker without a comment or mention surface returns the
   assigned-to-agent subset only; missing mention data degrades to "not mentioned".
   An unreachable tracker throws.

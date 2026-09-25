@@ -213,13 +213,15 @@ export interface WorkItem {
  * The canonical accessor for {@link WorkItem.labels}: every module that reads
  * labels imports this (and {@link hasLabel}) rather than re-deriving the
  * guard, so a non-conformant `labels` value is fixed once, here, next to the
- * contract it defends.
+ * contract it defends. It guards the item itself too (DOR-638): a missing item
+ * reads as "no labels", so the guard one level up cannot be forgotten at a
+ * call site either.
  *
- * @param item - The item under evaluation.
+ * @param item - The item under evaluation; `null` or `undefined` reads as no labels.
  * @returns The item's labels, or `[]` when unavailable.
  */
-export function labelsOf(item: WorkItem): readonly string[] {
-  return Array.isArray(item.labels) ? item.labels : [];
+export function labelsOf(item: WorkItem | null | undefined): readonly string[] {
+  return Array.isArray(item?.labels) ? item.labels : [];
 }
 
 /**
@@ -227,11 +229,11 @@ export function labelsOf(item: WorkItem): readonly string[] {
  * `agent/needs-input`), degrading gracefully via {@link labelsOf} rather than
  * throwing on a non-conformant `labels` value.
  *
- * @param item - The item under evaluation.
+ * @param item - The item under evaluation; `null` or `undefined` has no labels.
  * @param label - The exact label to test for (membership, never substring).
  * @returns `true` if `label` is present in the item's label set.
  */
-export function hasLabel(item: WorkItem, label: string): boolean {
+export function hasLabel(item: WorkItem | null | undefined, label: string): boolean {
   return labelsOf(item).includes(label);
 }
 
@@ -276,21 +278,43 @@ export interface InboxComment {
  * {@link PollingTransport}'s bare-mention detection as much as the
  * comment-response rules — must survive a non-conformant one.
  *
- * @param comment - The inbound comment under evaluation.
+ * The comment itself is guarded as well as its field (DOR-638): an adapter that
+ * returns an inbox entry with no comment at all is as plausible as one whose
+ * comment has no `mentions`, and a guard at every call site is a guard someone
+ * forgets.
+ *
+ * @param comment - The inbound comment under evaluation; `null` or `undefined`
+ *   reads as a comment with no mentions.
  * @returns The comment's mentions, or `[]` when unavailable.
  */
-export function mentionsOf(comment: InboxComment): readonly string[] {
-  return Array.isArray(comment.mentions) ? comment.mentions : [];
+export function mentionsOf(comment: InboxComment | null | undefined): readonly string[] {
+  return Array.isArray(comment?.mentions) ? comment.mentions : [];
 }
 
 /**
- * Reads a comment's body text, degrading an absent or wrong-typed `body`
- * value to the empty string rather than throwing. Same rationale as
- * {@link mentionsOf}.
+ * Reads a comment's body text, degrading an absent comment, or an absent or
+ * wrong-typed `body` value, to the empty string rather than throwing. Same
+ * rationale as {@link mentionsOf}.
  *
- * @param comment - The inbound comment under evaluation.
+ * @param comment - The inbound comment under evaluation; `null` or `undefined`
+ *   reads as an empty body.
  * @returns The comment's body, or `''` when unavailable.
  */
-export function bodyOf(comment: InboxComment): string {
-  return typeof comment.body === 'string' ? comment.body : '';
+export function bodyOf(comment: InboxComment | null | undefined): string {
+  return typeof comment?.body === 'string' ? comment.body : '';
+}
+
+/**
+ * Reads a comment's author account id, degrading an absent comment, or an
+ * absent or wrong-typed `author` value, to the empty string rather than
+ * throwing. Same rationale as {@link mentionsOf}. The empty string never equals
+ * a configured agent account, so an unknown author is never mistaken for the
+ * agent's own comment.
+ *
+ * @param comment - The inbound comment under evaluation; `null` or `undefined`
+ *   reads as an unknown author.
+ * @returns The comment's author, or `''` when unavailable.
+ */
+export function authorOf(comment: InboxComment | null | undefined): string {
+  return typeof comment?.author === 'string' ? comment.author : '';
 }

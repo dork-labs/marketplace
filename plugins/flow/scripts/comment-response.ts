@@ -31,7 +31,8 @@
  *    account, or an explicit `/flow` / `@flow` token in the body. **Overrides
  *    ownership** — even on a teammate's (`other`-owned) thread. → `respond`.
  * 3. **Resume an `agent/needs-input` item on a non-agent comment** — that reply
- *    is the answer the agent parked for via `needsInput`. → `resume`.
+ *    is the answer the agent parked for via `needsInput`. The comment must name
+ *    its author or carry text; an empty one is never an answer. → `resume`.
  * 4. **Stay out of `other`-owned threads unless mentioned** — rule 2 already
  *    handled the mention case, so here an `other`-owned thread is left alone.
  *    → `ignore`.
@@ -53,7 +54,7 @@
 
 import type { z } from 'zod';
 import type { CommentsSchema } from './config-schema.ts';
-import { bodyOf, hasLabel, mentionsOf } from './work-item.ts';
+import { authorOf, bodyOf, hasLabel, mentionsOf } from './work-item.ts';
 import type { InboxComment, OwnershipClass, WorkItem } from './work-item.ts';
 
 /** Resolved {@link CommentsSchema} config — `respondWhen` + `ambiguousBias`. */
@@ -61,7 +62,7 @@ export type CommentsConfig = z.infer<typeof CommentsSchema>;
 
 /**
  * The `InboxComment` shape lives in `work-item.ts`, beside `WorkItem` and the
- * other adapter-output accessors (`hasLabel`, `mentionsOf`, `bodyOf`) it
+ * other adapter-output accessors (`hasLabel`, `mentionsOf`, `bodyOf`, `authorOf`) it
  * shares with `PollingTransport` (`transport.ts`). Re-exported here so
  * existing imports from this module
  * (`import { type InboxComment } from './comment-response.ts'`) keep working.
@@ -136,7 +137,11 @@ const FLOW_ADDRESS_TOKENS = ['/flow', '@flow'];
  * is the only signal when multiple agents share one tracker account.
  */
 function isAgentsOwnComment(comment: InboxComment, identity: CommentIdentity): boolean {
-  if (comment.author === identity.agent) return true;
+  // An unknown author (`''`) is never the agent, even if `identity.agent` is
+  // somehow empty too: silence on a missing author must come from the rules
+  // below, not from mistaking nobody for the agent.
+  const author = authorOf(comment);
+  if (author.length > 0 && author === identity.agent) return true;
   // Shared-account mode: the marker is the only authorship signal. A non-empty
   // marker present in the body means the agent wrote it.
   return identity.marker.length > 0 && bodyOf(comment).includes(identity.marker);
@@ -166,7 +171,7 @@ function isDirectlyAddressed(comment: InboxComment, identity: CommentIdentity): 
  * Precedence (first match wins):
  * 1. own comment (author or marker) → `ignore` — breaks self-reply loops first;
  * 2. directly addressed (@mention or `/flow` token) → `respond` — overrides ownership;
- * 3. `agent/needs-input` item + non-agent comment → `resume` — the parked answer;
+ * 3. `agent/needs-input` item + non-agent comment with a known author or a non-blank body → `resume` — the parked answer;
  * 4. `other`-owned thread (and not addressed) → `ignore` — stay out;
  * 5. soft zone → `respond` if `ambiguousBias: "engage"`, else `ignore`.
  *
@@ -200,7 +205,19 @@ export function shouldRespondToComment(
   // `labels` value instead of crashing — see DOR-535: `labels` is required
   // under the adapter contract, but the runtime must not crash on a
   // non-conformant adapter, and a bare string would otherwise substring-match.
-  if (hasLabel(ctx.item, NEEDS_INPUT_LABEL)) {
+  //
+  // The reply must say something (DOR-638): a known author, or a non-blank
+  // body. An empty comment, or no comment at all, never counts as the answer,
+  // since resuming on it would un-park the question with nothing in hand. A
+  // real reply that arrives with no author (a comment synced in from chat or
+  // email often has none) still resumes on its text: rule 1 has already
+  // rejected the agent's own question, which always carries the marker, and
+  // stranding a human's answer parks the item forever, silently.
+  // `PollingTransport` warns about every author-less comment it passes on.
+  if (
+    hasLabel(ctx.item, NEEDS_INPUT_LABEL) &&
+    (authorOf(comment).length > 0 || bodyOf(comment).trim().length > 0)
+  ) {
     return { action: 'resume', rule: 3 };
   }
 

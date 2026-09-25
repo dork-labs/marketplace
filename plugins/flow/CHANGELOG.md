@@ -4,6 +4,29 @@ Installs of this plugin are pinned to a commit SHA, so a fix here does not reach
 you until you **reinstall it** (Marketplace → flow → reinstall, or re-run your
 `--plugin-dir` checkout's `git pull`). Each entry below says whether that matters.
 
+## 0.10.2
+
+**One badly dated comment can no longer make flow stop hearing new comments for good. Reinstall to get the fix.**
+
+- Flow keeps a bookmark of the newest comment it has read, and only looks at
+  comments after it. If a tracker connection handed over a comment whose date
+  was not a real date, that text became the bookmark, and it sorted after every
+  real date. From then on flow heard nothing, with no error anywhere.
+- Now a comment whose date is not a full date and time, or is more than an hour
+  in the future, is skipped, and flow says so in a warning that names the item.
+  The bookmark only ever holds a real, past date, so the next good comment still
+  gets through.
+- If your saved bookmark was already broken this way, flow notices, warns, and
+  reads the whole inbox again instead of staying silent.
+- Dates are now compared as moments in time, so a comment written with a
+  different time zone or precision is no longer missed or put in the wrong order.
+- An inbox entry with no comment attached is skipped with a warning instead of
+  crashing the run.
+- A question flow parked for you is only picked back up by a reply that has an
+  author or some text. An empty reply can no longer wake it with no answer, and
+  a real reply that arrives with no author (one synced in from Slack or email,
+  say) still does, with a warning.
+
 ## 0.10.1
 
 **On DorkOS, you can now change when flow's scheduled runs fire right on the Schedules page. Nothing to do after updating.**

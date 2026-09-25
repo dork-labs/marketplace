@@ -288,3 +288,75 @@ describe('shouldRespondToComment — non-conformance sweep (InboxComment fields)
     }
   );
 });
+
+describe('shouldRespondToComment — a missing comment degrades, not throws (DOR-638)', () => {
+  // The sweep above substitutes hostile values INSIDE the comment; this is the
+  // level above it, the comment itself. Rule 1 used to read `comment.author`
+  // directly, so an adapter that returned no comment at all crashed here before
+  // any accessor guard was reached.
+  it.each([
+    ['undefined', undefined],
+    ['null', null],
+  ])('comment = %s falls through to the quiet soft zone', (_label, missing) => {
+    const decision = shouldRespondToComment(
+      missing as unknown as InboxComment,
+      ctx('mine'),
+      DEFAULT_COMMENTS
+    );
+    expect(decision).toEqual({ action: 'ignore', rule: 5 });
+  });
+
+  // The case above has no label, so rule 3 never gets a look. On a parked
+  // `agent/needs-input` item, an empty comment used to read as "a non-agent
+  // reply" and un-park the agent's own question with no answer in hand.
+  const PARKED = makeItem({ identifier: 'DOR-2', labels: ['agent/needs-input'] });
+
+  it.each([
+    ['comment = undefined', undefined],
+    ['comment = null', null],
+    ['an empty object', {}],
+    ['no author and a blank body', { author: '', mentions: [], body: '   ' }],
+    ['a non-string author and no body', { author: 42, mentions: [] }],
+  ])('%s never resumes a parked needs-input item', (_label, c) => {
+    const decision = shouldRespondToComment(
+      c as unknown as InboxComment,
+      ctx('mine', PARKED),
+      DEFAULT_COMMENTS
+    );
+    expect(decision.action).not.toBe('resume');
+    expect(decision).toEqual({ action: 'ignore', rule: 5 });
+  });
+
+  it.each([
+    ['author missing', { mentions: [], body: 'go with option B' }],
+    ['author empty', { author: '', mentions: [], body: 'go with option B' }],
+    ['author not a string', { author: 42, mentions: [], body: 'go with option B' }],
+  ])('an author-less reply with text (%s) still resumes, so it is not stranded', (_l, c) => {
+    // A reply synced in from chat or email can arrive with no author. Refusing
+    // it would leave the item parked forever with nothing in any log.
+    const decision = shouldRespondToComment(
+      c as unknown as InboxComment,
+      ctx('mine', PARKED),
+      DEFAULT_COMMENTS
+    );
+    expect(decision).toEqual({ action: 'resume', rule: 3 });
+  });
+
+  it("the agent's own author-less question never resumes itself (rule 1 sees the marker)", () => {
+    const decision = shouldRespondToComment(
+      comment({ author: '', body: 'Which option? — 🤖 /flow' }),
+      ctx('mine', PARKED),
+      DEFAULT_COMMENTS
+    );
+    expect(decision).toEqual({ action: 'ignore', rule: 1 });
+  });
+
+  it('a named human reply on the same parked item still resumes it', () => {
+    const decision = shouldRespondToComment(
+      comment({ author: 'human-account', body: 'go with option B' }),
+      ctx('mine', PARKED),
+      DEFAULT_COMMENTS
+    );
+    expect(decision).toEqual({ action: 'resume', rule: 3 });
+  });
+});

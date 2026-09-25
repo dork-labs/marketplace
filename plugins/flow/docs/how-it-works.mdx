@@ -227,12 +227,12 @@ interface InboundTransport {
 
 <Steps>
 <Step>read the current inbox via the injected `InboxReader`;</Step>
-<Step>keep only entries strictly newer than the `since` watermark (`occurredAt > since`, exclusive);</Step>
+<Step>drop, with a warning, any entry whose `occurredAt` is not an ISO-8601 date-time with a zone or is more than an hour in the future, or that has no comment, then keep only entries strictly newer than the `since` watermark (`occurredAt > since`, compared as instants, exclusive);</Step>
 <Step>map each survivor onto a `comment.added` or `mention` event;</Step>
 <Step>advance the watermark to the newest consumed `occurredAt` and return it to persist.</Step>
 </Steps>
 
-Because the watermark is exclusive and advances to the newest entry, a second `poll(watermark)` over the same snapshot returns `[]`: no event is ever re-emitted, and the cursor (persisted in the run record) keeps the stream gap-free across restarts.
+Because the watermark is exclusive and advances to the newest entry, a second `poll(watermark)` over the same snapshot returns `[]`: no event is ever re-emitted, and the cursor (persisted in the run record) keeps the stream gap-free across restarts. Only a real timestamp can become the watermark, so one malformed entry can never leave the inbox waiting for a time that never comes; a saved watermark that is not a timestamp is discarded and the whole inbox is read again.
 
 <Callout type="info">
   **Poll now, webhook deferred, honestly.** v1 ships `PollingTransport` and the
