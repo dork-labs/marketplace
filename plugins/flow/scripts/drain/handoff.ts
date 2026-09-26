@@ -360,8 +360,12 @@ export function nextHandoffAction(input: HandoffInput): HandoffResult {
       (trigger === undefined || cp.trigger === trigger);
 
     if (w.limit === undefined) {
-      if (signal.level === 'warning') {
-        w.limit = episode(signal, 'warning', 'winding-down', iso);
+      // A warning, or an exhausted reading while a turn still runs (a reserve,
+      // or a rejection the worker has not hit yet): the worker winds down first.
+      // Only a stopped session is ever handed off, so one writer holds the worktree.
+      const busyOut = signal.level === 'exhausted' && !stopped(inp.session);
+      if (signal.level === 'warning' || busyOut) {
+        w.limit = episode(signal, busyOut ? 'exhausted' : 'warning', 'winding-down', iso);
         w.actions.push({
           kind: 'send',
           message: 'wind-down',
@@ -382,7 +386,9 @@ export function nextHandoffAction(input: HandoffInput): HandoffResult {
 
     if (limit.state === 'handing-off') {
       const at = Date.parse(limit.handingOffAt ?? '');
-      if (!Number.isFinite(at) || now.getTime() - at > cfg.startTimeoutMs) {
+      // Twice the start timeout: the mover re-stamps the mark just before it
+      // starts the session, so a live mover is never taken for a dead one.
+      if (!Number.isFinite(at) || now.getTime() - at > 2 * cfg.startTimeoutMs) {
         w.actions.push({ kind: 'adopt-or-revert-handoff' });
       }
       return;
@@ -406,6 +412,10 @@ export function nextHandoffAction(input: HandoffInput): HandoffResult {
         return;
       }
       if (signal.level === 'exhausted') {
+        if (!stopped(inp.session)) {
+          w.limit = escalate(w.limit, signal);
+          return;
+        }
         w.limit = { ...escalate(w.limit, signal), state: 'awaiting-handoff' };
       } else if (newer(inp.checkpoint, w.limit.since, 'limit-warning') && stopped(inp.session)) {
         w.limit = { ...w.limit, state: 'awaiting-handoff' };
@@ -422,14 +432,16 @@ export function nextHandoffAction(input: HandoffInput): HandoffResult {
       } else {
         return;
       }
-      return awaiting(w, inp, iso);
+      return awaiting(w, inp);
     }
     if (state === 'awaiting-handoff') {
       if (signal.level === 'exhausted') w.limit = escalate(w.limit, signal);
-      return awaiting(w, inp, iso);
+      return awaiting(w, inp);
     }
     if (state === 'pending-approval') {
       if (clear(signal)) return resumeHere(w, inp);
+      // The ask comment has not posted yet (a failed post): ask again.
+      if (w.limit.notifiedAt === null) return awaiting(w, inp);
       return;
     }
     if (state === 'waiting-reset') {
@@ -437,12 +449,12 @@ export function nextHandoffAction(input: HandoffInput): HandoffResult {
       if (Number.isFinite(wake) && now.getTime() < wake) return;
       if (clear(signal)) return resumeHere(w, inp);
       if (signal.level === 'exhausted') w.limit = escalate(w.limit, signal);
-      return awaiting(w, inp, iso);
+      return awaiting(w, inp);
     }
   }
 
   /** `awaiting-handoff`: the §5.2a rows first, then checkpoint, then move, ask or wait. */
-  function awaiting(w: Work, inp: HandoffInput, iso: string): void {
+  function awaiting(w: Work, inp: HandoffInput): void {
     const limit = w.limit as RunLimit;
     const resetsMs = limit.resetsAt ? Date.parse(limit.resetsAt) : NaN;
     const soon = cfg.waitIfResetWithinMinutes * 60_000;
@@ -464,6 +476,8 @@ export function nextHandoffAction(input: HandoffInput): HandoffResult {
       sendCleared(w, inp, inp.modelFallback);
       return;
     }
+    // Never move or ask while a turn runs: the old session must have stopped.
+    if (!stopped(inp.session)) return;
     if (!w.checkpointed) {
       w.actions.push({
         kind: 'synthesize-checkpoint',
@@ -483,10 +497,9 @@ export function nextHandoffAction(input: HandoffInput): HandoffResult {
       }
       const key = `${pick.runtime}:${pick.id}`;
       w.limit = { ...limit, state: 'pending-approval', candidate: key };
-      if (limit.notifiedAt === null) {
-        w.limit.notifiedAt = iso;
-        w.actions.push({ kind: 'notify', candidate: pick });
-      }
+      // `notifiedAt` is set by the runner once the comment posted, so a failed
+      // post is asked again next pass, and a posted one never twice.
+      if (limit.notifiedAt === null) w.actions.push({ kind: 'notify', candidate: pick });
       w.drain = { ...w.drain, wakeAfter: null };
       return;
     }

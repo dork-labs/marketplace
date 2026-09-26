@@ -956,7 +956,15 @@ export async function runPass(deps: PassDeps): Promise<PassReport> {
         return outcome.line;
       }
       case 'notify': {
+        // Recorded only once the comment posted: a failed post is asked again
+        // next pass, and a posted one never twice this episode.
         await deps.handoffIo.notify(latest, action.candidate);
+        const stamp = now.toISOString();
+        await supervisorWrite(run.issueId, (r) =>
+          r.limit !== undefined && r.limit.notifiedAt === null
+            ? { ...r, limit: { ...r.limit, notifiedAt: stamp } }
+            : undefined
+        );
         return limitLine(latest.limit, latest.drain?.wakeAfter ?? null) ?? 'asked to move it';
       }
       case 'adopt-or-revert-handoff':
@@ -1147,7 +1155,19 @@ export async function runPass(deps: PassDeps): Promise<PassReport> {
 
     const { facts, offsets } = await gather(run);
     const handed = await handoffStep(run, facts, now);
-    const step = drainStep(handed.run, facts, stepCfg, now);
+    // A pass that clears a limit leaves the worker to the handoff's own message
+    // (limit-cleared): drainStep decides as if the limit still held, so it sends
+    // no second message (a "continue" nudge) in the same pass.
+    const cleared = run.limit !== undefined && handed.run.limit === undefined;
+    const stepped = drainStep(
+      cleared ? { ...handed.run, limit: run.limit } : handed.run,
+      facts,
+      stepCfg,
+      now
+    );
+    const step = { ...stepped, run: { ...stepped.run } };
+    if (handed.run.limit === undefined) delete step.run.limit;
+    else step.run.limit = handed.run.limit;
     const actions: (DrainAction | HandoffAction)[] = [...handed.actions, ...step.actions].sort(
       (a, b) => actionRank(a) - actionRank(b)
     );

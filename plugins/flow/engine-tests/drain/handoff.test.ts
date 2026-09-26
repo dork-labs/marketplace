@@ -175,16 +175,52 @@ describe('no episode yet', () => {
     expect(out.run.limit).toMatchObject({ level: 'exhausted', state: 'awaiting-handoff' });
   });
 
-  it('exhausted in ask: parks as pending-approval and notifies once, naming the candidate', () => {
+  it('exhausted in ask: parks as pending-approval and notifies, naming the candidate', () => {
     // Purpose: in ask mode the run waits and says why, starting nothing.
+    // notifiedAt stays null here: the runner sets it once the comment posted.
     const out = nextHandoffAction(input({ mode: 'ask', signal: OUT }));
     expect(kinds(out.actions)).toEqual(['synthesize-checkpoint', 'notify']);
     expect(out.actions[1]).toEqual({ kind: 'notify', candidate: PICK });
     expect(out.run.limit).toMatchObject({
       state: 'pending-approval',
-      notifiedAt: NOW.toISOString(),
+      notifiedAt: null,
       candidate: 'claude-code:claude4',
     });
+  });
+
+  it.each(MODES)(
+    '(%s) exhausted while the worker is busy winds it down and moves nothing until it stops',
+    (mode) => {
+      // Purpose: one writer per worktree. A ledger-only exhausted (a reserve,
+      // or a rejection the running turn has not hit) must not start a second
+      // session beside a busy one.
+      const first = nextHandoffAction(
+        input({ mode, signal: { ...OUT, cause: 'reserve' }, session: BUSY })
+      );
+      expect(first.run.limit).toMatchObject({ level: 'exhausted', state: 'winding-down' });
+      expect(kinds(first.actions)).toEqual(['send:wind-down']);
+      const still = nextHandoffAction(input({ mode, run: first.run, signal: OUT, session: BUSY }));
+      expect(still.actions).toEqual([]);
+      expect(still.run.limit?.state).toBe('winding-down');
+      const stopped = nextHandoffAction(
+        input({ mode, run: first.run, signal: OUT, session: IDLE })
+      );
+      expect(kinds(stopped.actions)).toEqual([
+        'synthesize-checkpoint',
+        mode === 'auto' ? 'handoff' : 'notify',
+      ]);
+    }
+  );
+
+  it('a busy worker in awaiting-handoff or waiting-reset is never moved', () => {
+    // Purpose: the same guard on every row that hands off or asks.
+    for (const limit of [{}, { state: 'waiting-reset' as const }]) {
+      const out = nextHandoffAction(
+        input({ run: run(limit, { wakeAfter: at(-1) }), signal: OUT, session: BUSY })
+      );
+      expect(kinds(out.actions)).not.toContain('handoff');
+      expect(kinds(out.actions)).not.toContain('synthesize-checkpoint');
+    }
   });
 
   it('a reserve cause runs the same machine', () => {
@@ -397,6 +433,19 @@ describe('pending-approval and waiting-reset', () => {
     }
   });
 
+  it('pending-approval whose comment never posted asks again', () => {
+    // Purpose: a failed post (notifiedAt still null) is retried next pass.
+    const out = nextHandoffAction(
+      input({
+        mode: 'ask',
+        run: run({ state: 'pending-approval', notifiedAt: null }),
+        signal: OUT,
+        checkpoint: WARNED,
+      })
+    );
+    expect(out.actions).toEqual([{ kind: 'notify', candidate: PICK }]);
+  });
+
   it('pending-approval with the account still out does nothing more', () => {
     // Purpose: ask notifies exactly once per episode; a second pass posts nothing.
     const out = nextHandoffAction(
@@ -413,13 +462,15 @@ describe('pending-approval and waiting-reset', () => {
     // Purpose: once per episode, not once ever: a cleared episode resets notifiedAt.
     const first = nextHandoffAction(input({ mode: 'ask', signal: OUT, checkpoint: WARNED }));
     expect(kinds(first.actions).filter((k) => k === 'notify')).toHaveLength(1);
-    const cleared = nextHandoffAction(input({ mode: 'ask', run: first.run, signal: OK }));
+    // The runner records the posted comment.
+    const posted = { ...first.run, limit: { ...first.run.limit!, notifiedAt: NOW.toISOString() } };
+    const cleared = nextHandoffAction(input({ mode: 'ask', run: posted, signal: OK }));
     expect(cleared.run.limit).toBeUndefined();
     const again = nextHandoffAction(
       input({ mode: 'ask', run: cleared.run, signal: OUT, checkpoint: WARNED })
     );
     expect(kinds(again.actions).filter((k) => k === 'notify')).toHaveLength(1);
-    expect(again.run.limit?.notifiedAt).toBe(NOW.toISOString());
+    expect(again.run.limit?.notifiedAt).toBeNull();
   });
 
   it('waiting-reset sleeps until wakeAfter', () => {
@@ -526,8 +577,13 @@ describe('handing-off', () => {
       input({ run: run({ state: 'handing-off', handingOffAt: at(-1) }), signal: OUT })
     );
     expect(fresh.actions).toEqual([]);
-    const stale = nextHandoffAction(
+    // Within twice the start timeout (90 s) a mover may still be starting its session.
+    const starting = nextHandoffAction(
       input({ run: run({ state: 'handing-off', handingOffAt: at(-2) }), signal: OUT })
+    );
+    expect(starting.actions).toEqual([]);
+    const stale = nextHandoffAction(
+      input({ run: run({ state: 'handing-off', handingOffAt: at(-3.1) }), signal: OUT })
     );
     expect(stale.actions).toEqual([{ kind: 'adopt-or-revert-handoff' }]);
   });

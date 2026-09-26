@@ -5,21 +5,24 @@ description: flow drain carries several ready items at once, each on its own acc
 
 # Draining in parallel
 
-`flow drain --parallel 3` carries three ready items at once, each in its own worktree with a worker on the account with the most room. A separate reviewer session reads every push, and `flow pr` opens the PR only after a clean review at the branch head.
+`flow drain --parallel 3` carries three ready items at once, each in its own worktree on the account with the most room. A separate reviewer reads every push; `flow pr` opens the PR only after a clean review at the branch head.
 
 ## Before you start
 
-Allow each account flow may spend with `flow accounts set <id> --role rotation`. With none registered, sessions run on your own login. Each user judges their own use of more than one account against Anthropic's terms.
+Allow each account flow may spend with `flow accounts set <id> --role rotation`; with none, sessions use your own login. Each user judges their own use of more than one account against Anthropic's terms.
 
 ## Where sessions run
 
-`--host` picks `cli` (plain `claude -p`), `cmux` or `dorkos`. `auto` takes cmux when the drain runs inside it, then DorkOS, then the CLI.
+`--host` picks `cli`, `cmux` or `dorkos`; `auto` tries them in the order cmux, DorkOS, CLI.
 
 ## What each line means
 
 - `claimed on <account> (cli)`: a worker started.
+- `reviewer started at 4be1c2d`: a push is under review.
+- `sent review-findings`: the worker got the findings.
+- `sent open-pr`: the review came back clean.
 - `moved to <account>`: an account ran out, so the work moved.
-- `parked: <reason>`: a person is needed; the reason is posted on the item.
+- `parked: <reason>`: a person is needed; the item says why.
 
 ## What happens at a limit
 
@@ -31,11 +34,11 @@ Near a limit, the worker finishes its step, writes `HANDOFF.md` and stops. If th
 
 ## Caps
 
-No new session starts while load per CPU is at `drain.maxLoadPerCpu` or above, or on an account with `drain.maxLivePerAccount` sessions. `drain.maxReviewRounds` reviews asking for changes park the run.
+New sessions wait while load per CPU reaches `drain.maxLoadPerCpu` or an account has `drain.maxLivePerAccount` sessions. `drain.maxReviewRounds` rounds of changes park the run.
 
 ## Terminal or schedule
 
-In a terminal, `flow drain` passes every `drain.pollSeconds` until nothing is left or Ctrl-C, which leaves sessions running. On a schedule, the `flow-drain` tick runs `flow drain --tick`.
+In a terminal, `flow drain` passes every `drain.pollSeconds` until nothing is left or Ctrl-C. On a schedule, the `flow-drain` tick runs `flow drain --tick`.
 
 ## Parts
 

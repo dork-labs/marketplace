@@ -151,6 +151,8 @@ function fakeLaunchers(log: LauncherLog, script: LauncherScript) {
     async stop(handle) {
       log.stops.push(handle);
       await script.onStop?.(handle);
+      // A stopped cli session reads exited, as the real launcher reports it.
+      script.states.set(handle.sessionId, { kind: 'exited', code: null });
       return 'stopped';
     },
   });
@@ -1201,6 +1203,8 @@ describe('flow drain: handoff on a limit (§5)', () => {
     mkdirSync(path.dirname(transcript), { recursive: true });
     writeFileSync(transcript, '{"type":"user"}\n');
     transcriptsBefore = projectsTree();
+    // Between turns: a limit may move it (a busy worker is never moved).
+    world.script.states.set(old, { kind: 'idle' });
     return { from, to, old, transcript, wt: runOf('ACME-1').worktreePath };
   }
 
@@ -1216,12 +1220,23 @@ describe('flow drain: handoff on a limit (§5)', () => {
   /** The comments the fake tracker got. */
   const comments = () => world.tracker.calls.filter((c) => c.method === 'comment');
 
-  it('auto: a rejected account hands off in one pass with no operator call', async () => {
-    // Purpose: DOR-2374's criterion. The next pass writes a synthesized
-    // checkpoint, stops the old session, starts a new one on the other account
-    // in the same worktree with the resume message, and rewrites the run.
+  it('auto: a rejected account hands off with no operator call, but only once the worker stopped', async () => {
+    // Purpose: DOR-2374's criterion. While the worker is still busy (the ledger
+    // says exhausted, the turn runs on) nothing new starts: it is told to wind
+    // down. Once it is idle, the next pass writes a synthesized checkpoint,
+    // stops the old session, starts a new one on the other account in the same
+    // worktree with the resume message, and rewrites the run.
     const { from, to, old, transcript, wt } = await started();
     rejected(from);
+    world.script.states.set(old, { kind: 'busy' });
+    clock += 60_000;
+    const busy = await tick();
+    expect(busy.code, busy.stderr).toBe(0);
+    expect(workers()).toHaveLength(1);
+    expect(world.log.stops.map((h) => h.sessionId)).not.toContain(old);
+    expect(runOf('ACME-1').limit).toMatchObject({ state: 'winding-down', level: 'exhausted' });
+    expect(world.log.sends.at(-1)?.text).toContain('--trigger limit-warning');
+    world.script.states.set(old, { kind: 'idle' });
     clock += 60_000;
     const pass = await tick();
     expect(pass.code, pass.stderr).toBe(0);
@@ -1280,6 +1295,33 @@ describe('flow drain: handoff on a limit (§5)', () => {
     expect(runOf('ACME-1').limit).toBeUndefined();
     expect(header(wt).trigger).toBe('synthesized');
     assertNoTranscriptWrites();
+  });
+
+  it('ask: a comment that failed to post is posted on the next pass, once', async () => {
+    // Purpose: notifiedAt is recorded only after the post, so a failure is retried.
+    const { from } = await started({ handoff: 'ask' });
+    rejected(from);
+    const adapter = world.tracker.adapter;
+    const real = adapter.comment.bind(adapter);
+    let fail = true;
+    adapter.comment = async (...args: Parameters<typeof real>) => {
+      if (fail) {
+        fail = false;
+        throw new Error('the tracker is down');
+      }
+      return real(...args);
+    };
+    clock += 60_000;
+    await tick();
+    expect(comments()).toHaveLength(0);
+    expect(runOf('ACME-1').limit).toMatchObject({ state: 'pending-approval', notifiedAt: null });
+    clock += 60_000;
+    await tick();
+    expect(comments()).toHaveLength(1);
+    expect(runOf('ACME-1').limit?.notifiedAt).toBe(new Date(clock).toISOString());
+    clock += 60_000;
+    await tick();
+    expect(comments()).toHaveLength(1);
   });
 
   it("ask: the account's reset resumes the same session, with no approval", async () => {
@@ -1423,6 +1465,7 @@ describe('flow drain: handoff on a limit (§5)', () => {
       world.log.starts.length = 0;
       await tick();
       expect(runOf('ACME-1').account).toBe('claude3');
+      world.script.states.set(runOf('ACME-1').sessionId, { kind: 'idle' });
       transcriptsBefore = projectsTree();
       rejected('claude3');
       // The machine-wide Claude Code default (rev 6d) is out too: no same-runtime candidate.

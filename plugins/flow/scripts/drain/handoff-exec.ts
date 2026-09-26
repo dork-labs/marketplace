@@ -195,7 +195,14 @@ function manualLimit(run: FlowRun, nowIso: string): RunLimit {
 
 /** The limit with its move cleared, back to `awaiting-handoff`. */
 function reverted(limit: RunLimit): RunLimit {
-  const { handoffTo: _to, handoffReason: _reason, ...rest } = limit;
+  // A failed move leaves no hold behind either: a person's `--to` released it.
+  const {
+    handoffTo: _to,
+    handoffReason: _reason,
+    heldBy: _heldBy,
+    heldUntil: _heldUntil,
+    ...rest
+  } = limit;
   return {
     ...rest,
     state: 'awaiting-handoff',
@@ -262,6 +269,10 @@ export async function executeHandoff(
       why = 'another handoff of this run is in progress';
       return run;
     }
+    if (run.limit?.heldBy === 'person' && reason !== 'manual') {
+      why = 'a person is holding it on its own account (flow handoff --wait)';
+      return run;
+    }
     before = run;
     const limit: RunLimit = {
       ...(run.limit ?? manualLimit(run, nowIso)),
@@ -303,13 +314,25 @@ export async function executeHandoff(
     };
   }
 
-  // 2. One writer per worktree.
+  // 2. One writer per worktree: the old session must be stopped, and seen to
+  // be, before anything starts. cli and cmux stop it (exited); DorkOS leaves it
+  // idle, so there it must read idle or limited. A stop that threw, or a
+  // session still busy, reverts the move and starts nothing.
   const old = run.drain.worker;
   if (old !== null && !old.pending) {
+    const oldLauncher = deps.launcher(old.host);
+    let still: string | null = null;
     try {
-      await deps.launcher(old.host).stop(launchHandle(old));
+      await oldLauncher.stop(launchHandle(old));
+      const state = (await oldLauncher.state(launchHandle(old))).kind;
+      const ok = old.host === 'dorkos' ? state === 'idle' || state === 'limited' : state !== 'busy';
+      if (!ok) still = `the old session is still ${state}`;
     } catch (error) {
-      deps.warn(`${run.identifier}: could not stop the old worker: ${(error as Error).message}`);
+      still = `the old session could not be stopped (${(error as Error).message})`;
+    }
+    if (still !== null) {
+      await revert();
+      return { status: 'failed', line: `not moved: ${still}; the next pass tries again` };
     }
   }
 
@@ -359,6 +382,18 @@ export async function executeHandoff(
     })
   );
   const model = sameRuntime ? (old?.model ?? deps.workerModel ?? undefined) : undefined;
+  // Re-stamp the mark right before the start, so the stale check (twice the
+  // start timeout) never takes this live mover for a dead one.
+  let stamped = false;
+  await deps.store.updateRun(run.issueId, (r) => {
+    stamped = false;
+    if (!ours(r) || !r.limit) return r;
+    stamped = true;
+    return { ...r, limit: { ...r.limit, handingOffAt: deps.now().toISOString() } };
+  });
+  if (!stamped) {
+    return { status: 'lost', line: 'not moved: the run changed hands before the start' };
+  }
   let handle: SessionHandle;
   try {
     handle = await launcher.start({
@@ -393,6 +428,11 @@ export async function executeHandoff(
     return finishMove(r, handle, target, reason, nowIso);
   });
   if (!written) {
+    if (deps.store.read()[run.issueId]?.sessionId === handle.sessionId) {
+      // A pass adopted this very session (the mark looked stale): it is the
+      // run's worker now, so it keeps running; the move just is not ours.
+      return { status: 'lost', line: `the new session ${handle.sessionId} was adopted by a pass` };
+    }
     deps.warn(
       `${run.identifier}: the new session ${handle.sessionId} started, but the run changed hands meanwhile; stopping it`
     );
