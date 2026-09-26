@@ -12,8 +12,6 @@ description: The /flow engine's VERIFY stage — trace recent work for correctne
 > code review (the `browser-testing`, `requesting-code-review`, and
 > `verification-before-completion` skills).
 > **PM projection (tracker):** evidence attached to the work item / PR.
-> **Trigger doors:** the thin `/flow:verify` command _or_ a PM transition into
-> the VERIFY stage are two triggers for this one skill.
 
 VERIFY is the proof stage. It answers one question with evidence, never
 assertion: _does the implementation actually do what the spec asked, and is it
@@ -27,8 +25,7 @@ This is a generic stage skill. **It never touches a tracker API string.**
 Attaching evidence, assigning the reviewer, and any breadcrumb go through the
 **adapter** skill by naming its verbs (`attachEvidence`,
 `assignToHuman`, `comment`, `transition`). No raw tracker tool name, CLI
-invocation, or slug lives here. (The `tracker-confinement` Vitest guard enforces
-this for the whole flow bundle.)
+invocation, or slug lives here.
 
 **Finding the adapter.** It is the `SKILL.md` at the `adapter.path` that
 `node --experimental-strip-types "<flow-root>/scripts/config-files.ts"` prints: the
@@ -36,6 +33,8 @@ project's own (`.agents/flow/adapters/<tracker>/`), or the one flow ships. Insid
 `<flow-root>` means that output's `flowRoot`.
 
 ## Process
+
+**In a `flow drain` run** (its worker brief says so), skip this skill's own review and PR steps: run `flow report <id> pushed`, then wait for the supervisor's message.
 
 ### 1. Correctness trace (absorbs `/review-recent-work`)
 
@@ -101,18 +100,16 @@ against a superseded diff is not proof.
 
 - **Dispatch `review.reviewers` separate reviewer agents** (default one). Each is
   a fresh agent with its own context — **never the agent that implemented the
-  change, reviewing from the context it implemented in**. That agent reviews the
-  change it remembers intending rather than the diff it produced; that is the
-  exact failure this step exists to prevent.
+  change, reviewing from the context it implemented in**: it would review what it
+  meant to write, not the diff.
 - **Name each reviewer's model explicitly.** Reviewers are the `review` work
   class: resolve `models.tiers.review` (default `workhorse`) through
   `models.bindings` and pass the result. Never dispatch with the model omitted —
   on a harness that inherits the parent's model on omission, an orchestrator
   sitting at the frontier tier silently runs every reviewer at frontier cost. An
-  unbound tier falls back to the harness default **with a note in the run**, and a
-  model that errors falls sideways or down, never up to the orchestrator's model.
-  The full policy, including the work-class table, lives in the EXECUTE stage
-  skill; this is the reviewer's half of it.
+  unbound tier falls back to the harness default **with a note in the run**; a
+  failing model falls sideways or down, never up.
+  The full policy is in the EXECUTE stage skill.
 - **Give each reviewer three things: the diff, the rubric, and the intent.** The
   diff and the files it touches (via the base/head SHAs); the rubric named by
   `review.rubric` — resolved from the repo root when there is one and from the
@@ -130,6 +127,8 @@ against a superseded diff is not proof.
 - **Converge.** Fix what the findings justify, rebut in writing what they get
   wrong, then re-review the updated diff. Repeat until a pass returns nothing
   blocking.
+- **Record each pass** with `flow journal record review --item <id> --round <n>
+  --sha7 <sha> --verdict clean|changes` and its finding counts, for the retro.
 - **Re-verify if convergence touched code.** Any fix made during this step
   invalidates the step-2 run, so re-run the verification gate before step 5. The
   proof you attach must describe the diff you are actually shipping.
@@ -346,7 +345,7 @@ documents the tracker's behavior.
 The **human-review gate is always on** (spec §5). VERIFY does not advance to
 DONE. Instead, via the adapter:
 
-- `transition` the work item into the review state (e.g. In Review).
+- `node --experimental-strip-types "<flow-root>/scripts/flow.ts" stage <id> review --checkpoint-file <f>` (the checkpoint body).
 - `assignToHuman(item)` — assign the reviewer, which fires their notification.
 - **Stop.** The engine **parks** at REVIEW. REVIEW is a human gate with **no
   skill** — there is no `reviewing-work`. The loop resumes (in P2) only on the

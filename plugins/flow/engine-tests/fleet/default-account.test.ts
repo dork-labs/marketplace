@@ -234,25 +234,33 @@ describe('launching the default account (rev 6d)', () => {
       v: 1,
       accounts: { 'claude-code:claude3': { role: 'kept-out' } },
     });
+    const rankable = accounts.map((account, index) => ({
+      runtime: account.runtime,
+      id: account.id,
+      path: account.path,
+      implicit: account.implicit,
+      routable: account.routable,
+      policy: policy.accounts[index],
+      windows: null,
+    }));
     const rank = rankAccounts({
       now: '2026-09-26T12:00:00.000Z',
       repo: 'acme/app',
-      accounts: accounts.map((account, index) => ({
-        id: account.id,
-        path: account.path ?? '',
-        routable: account.routable,
-        policy: policy.accounts[index],
-        windows: null,
-      })),
+      accounts: rankable,
+      runtime: 'claude-code',
+      runtimes: [],
+      crossRuntimeFallback: 'off',
       model: null,
       affinity: null,
       exclude: [],
       liveByAccount: {},
       opts: { warnMarginPct: 10, maxLivePerAccount: 2 },
     });
-    expect(rank.pick).toBe('default');
-    const choice = chooseAccount({ identities: accounts, rank });
-    expect(choice).toEqual({ account: { id: 'default', path: work } });
+    expect(rank.pick).toEqual({ runtime: 'claude-code', id: 'default' });
+    const choice = chooseAccount({ accounts: rankable, rank });
+    expect(choice).toEqual({
+      account: { runtime: 'claude-code', id: 'default', path: work, implicit: true },
+    });
 
     const chosen = accounts.find((account) => account.id === 'default') as RuntimeAccount;
     const launch = launchAccountFor(chosen);

@@ -6,15 +6,18 @@
  * told it to.
  */
 
-import { spawnSync } from 'node:child_process';
-import { writeFileSync } from 'node:fs';
+import { execFileSync, spawnSync } from 'node:child_process';
+import { mkdirSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { afterEach, describe, expect, it } from 'vitest';
 
 import { findConfigRoots } from '../../scripts/config-files.ts';
 import { loadConfig } from '../../scripts/config-load.ts';
+import { liveByAccount } from '../../scripts/cli/next.ts';
+import type { DrainState } from '../../scripts/drain/state.ts';
 import { EXIT } from '../../scripts/errors.ts';
+import type { FlowRun } from '../../scripts/flow-run.ts';
 import type { WorkItem } from '../../scripts/tracker/types.ts';
 import type { OwnershipClass } from '../../scripts/work-item.ts';
 import type { FakeBacklog } from '../fixtures/cli/fake-adapter/adapter.ts';
@@ -354,5 +357,351 @@ describe('flow next', () => {
     temp = tempProject(config());
     const open = JSON.parse((await runFlow(['next', '--json'], temp, { items })).stdout);
     expect(open).toMatchObject({ eligibleCount: 1, atWipCap: false });
+  });
+});
+
+describe('flow next: the account each pick runs on (flow-handoff-dispatch §3.5)', () => {
+  const NOW = '2026-09-26T12:00:00.000Z';
+  // One project each, so the per-project WIP cap never trims the picks.
+  const items = ['A-1', 'A-2', 'A-3'].map((id, i) =>
+    readyItem(id, {
+      priority: ([1, 2, 3] as const)[i],
+      project: { id: `p-${id}`, name: id, stateCategory: 'started' },
+    })
+  );
+  const backlog = (): FakeBacklog => ({ user: { id: AGENT }, items });
+
+  /** Write `<dorkHome>/<rel>`: a string as it is, anything else as JSON. */
+  function put(rel: string, value: unknown): void {
+    const file = path.join(temp!.dorkHome, rel);
+    mkdirSync(path.dirname(file), { recursive: true });
+    writeFileSync(file, typeof value === 'string' ? value : JSON.stringify(value));
+  }
+
+  /**
+   * Register Claude Code accounts and give each a fleet policy. DorkOS's
+   * `defaultAccount` names the first one's folder, so `default` is its alias
+   * (rev 6d) and these cases rank only the registered accounts they name.
+   */
+  function fleet(accounts: Record<string, Record<string, unknown>>, extra = {}): void {
+    const first = Object.keys(accounts)[0];
+    put('config.json', {
+      runtimes: {
+        claudeCode: {
+          defaultAccount: first === undefined ? null : path.join(temp!.dorkHome, 'claude', first),
+          accounts: Object.keys(accounts).map((id) => ({
+            id,
+            path: path.join(temp!.dorkHome, 'claude', id),
+            label: `Label ${id}`,
+          })),
+        },
+      },
+    });
+    put('flow/fleet.json', {
+      v: 1,
+      ...extra,
+      accounts: Object.fromEntries(
+        Object.entries(accounts).map(([id, entry]) => [`claude-code:${id}`, entry])
+      ),
+    });
+  }
+
+  /** Store a weekly reading for one account. */
+  function weekly(runtime: string, id: string, usedPct: number, resetsAt: string): void {
+    put(`runtimes/${runtime}/usage/${id}.json`, {
+      v: 1,
+      runtime,
+      accountId: id,
+      updatedAt: NOW,
+      windows: {
+        seven_day: { usedPct, resetsAt, status: 'allowed', observedAt: NOW, source: 'statusline' },
+      },
+    });
+  }
+
+  /** A run record in the project's (git) checkout. */
+  function runs(records: FlowRun[]): void {
+    execFileSync('git', ['init', '-q'], { cwd: temp!.project });
+    const file = path.join(temp!.project, '.dork', 'flow', 'flow-state.json');
+    mkdirSync(path.dirname(file), { recursive: true });
+    writeFileSync(file, JSON.stringify(Object.fromEntries(records.map((r) => [r.issueId, r]))));
+  }
+
+  function run(identifier: string, overrides: Partial<FlowRun>): FlowRun {
+    return {
+      issueId: `id-${identifier}`,
+      identifier,
+      sessionId: 's',
+      worktreePath: temp!.project,
+      branch: identifier,
+      stage: 'execute',
+      status: 'running',
+      attemptCount: 0,
+      workerPid: 1,
+      startedAt: NOW,
+      ...overrides,
+    };
+  }
+
+  async function next(argv: string[], options = {}) {
+    const result = await runFlow(['next', ...argv], temp!, backlog(), options);
+    return { ...result, json: argv.includes('--json') ? JSON.parse(result.stdout) : null };
+  }
+
+  it("with no registry, picks the runtime's default: this computer's own sign-in", async () => {
+    // Purpose: a one-account user needs no fleet setup. `default` is
+    // machine-wide (rev 6d), a real folder, so it is ranked and named by its label.
+    temp = tempProject(config());
+    const { json } = await next(['--json']);
+    expect(json.picked[0].account).toMatchObject({
+      runtime: 'claude-code',
+      pick: { runtime: 'claude-code', id: 'default' },
+      reason: 'ranked',
+    });
+    expect((await next([])).stdout).toMatch(
+      /A-1 - Title of A-1 .* -> Main \(this computer's sign-in\)$/m
+    );
+  });
+
+  it("the operator's shape: picks default as main, never the kept-out registered account", async () => {
+    // Purpose: defaultAccount null and claude3 registered with no policy. The
+    // main sign-in in ~/.claude is its own account, main by default, so it
+    // takes the work; claude3 stays kept out (never spent without a role).
+    temp = tempProject(config());
+    put('config.json', {
+      runtimes: {
+        claudeCode: {
+          defaultAccount: null,
+          accounts: [{ id: 'claude3', path: path.join(temp.osHome, '.claude3'), label: 'Claude3' }],
+        },
+      },
+    });
+    const { json } = await next(['--json']);
+    expect(json.picked[0].account).toMatchObject({
+      pick: { runtime: 'claude-code', id: 'default' },
+      reason: 'ranked',
+    });
+    expect(json.picked[0].account.ranked[0]).toMatchObject({ id: 'default', tier: 2 });
+    expect(json.picked[0].account.ineligible).toEqual([
+      { runtime: 'claude-code', id: 'claude3', reasons: ['out-of-scope'] },
+    ]);
+  });
+
+  it('DOR-2373: an account resetting sooner with less left beats one resetting later with more', async () => {
+    // Purpose: spend what expires soonest; the ranking must reach flow next.
+    temp = tempProject(config());
+    fleet({ later: { role: 'rotation' }, sooner: { role: 'rotation' } });
+    weekly('claude-code', 'later', 40, '2026-10-02T12:00:00.000Z');
+    weekly('claude-code', 'sooner', 60, '2026-09-27T12:00:00.000Z');
+    const { json } = await next(['--json']);
+    expect(json.picked[0].account.pick).toEqual({ runtime: 'claude-code', id: 'sooner' });
+    expect(json.picked[0].account.ranked.map((r: { id: string }) => r.id)).toEqual([
+      'sooner',
+      'later',
+    ]);
+    expect((await next([])).stdout).toMatch(/A-1 .* -> Label sooner$/m);
+  });
+
+  it('-n spreads picks over accounts when maxLivePerAccount is 1, then runs out', async () => {
+    // Purpose: each assignment counts as live, so later picks go elsewhere.
+    temp = tempProject(
+      config({
+        drain: { maxLivePerAccount: 1 },
+        autonomy: { wipCap: { global: 10, perProject: 10 } },
+      })
+    );
+    fleet({ a: { role: 'rotation' }, b: { role: 'rotation' } });
+    weekly('claude-code', 'a', 10, '2026-09-27T12:00:00.000Z');
+    const { json } = await next(['--json', '-n', '3']);
+    const picks = json.picked.map((p: { account: { pick: unknown } }) => p.account.pick);
+    expect(picks).toEqual([
+      { runtime: 'claude-code', id: 'a' },
+      { runtime: 'claude-code', id: 'b' },
+      null,
+    ]);
+    expect(json.picked[2].account.ineligible).toEqual([
+      { runtime: 'claude-code', id: 'a', reasons: ['at-capacity'] },
+      { runtime: 'claude-code', id: 'b', reasons: ['at-capacity'] },
+    ]);
+  });
+
+  it('counts running and queued runs and their drain reviewers as live, by <runtime>:<id>', async () => {
+    // Purpose: work already running on an account fills it; a reviewer bills too.
+    temp = tempProject(config({ drain: { maxLivePerAccount: 1 } }));
+    fleet({ a: { role: 'rotation' }, b: { role: 'rotation' }, c: { role: 'rotation' } });
+    runs([
+      run('X-1', { account: 'a', status: 'queued' }),
+      run('X-2', {
+        account: 'c',
+        status: 'complete',
+      }),
+      run('X-3', {
+        runtime: 'claude-code',
+        account: 'c',
+        status: 'running',
+        drain: {
+          v: 1,
+          rev: 1,
+          phase: 'reviewing',
+          worker: null,
+          reviewer: {
+            host: 'cli',
+            runtime: 'claude-code',
+            sessionId: 'r',
+            account: 'b',
+            cwd: temp.project,
+            sha: 'abc',
+            worktree: temp.project,
+            tokenHash: 'h',
+          },
+          pushedSha: null,
+          reviewedSha: null,
+          verdict: null,
+          reviewRound: 1,
+          pr: null,
+          rearmedFor: null,
+          nudges: 0,
+          wakeAfter: null,
+          handoffs: [],
+          parkedReason: null,
+        },
+      }),
+    ]);
+    const { json, stderr } = await next(['--json']);
+    expect(json.picked[0].account.pick).toBeNull();
+    expect(json.picked[0].account.ineligible.map((e: { reasons: string[] }) => e.reasons)).toEqual([
+      ['at-capacity'],
+      ['at-capacity'],
+      ['at-capacity'],
+    ]);
+    expect(stderr).not.toMatch(/not a valid flow run store/);
+  });
+
+  it('keeps the affinity account when it is eligible', async () => {
+    // Purpose: a follow-up step on the same account resumes a warm prompt cache.
+    temp = tempProject(config());
+    fleet({ warm: { role: 'rotation' }, cold: { role: 'rotation' } });
+    weekly('claude-code', 'warm', 80, '2026-10-02T12:00:00.000Z');
+    weekly('claude-code', 'cold', 0, '2026-09-27T12:00:00.000Z');
+    runs([run('A-1', { account: 'warm', status: 'waiting_for_review' })]);
+    const { json } = await next(['--json']);
+    expect(json.picked[0].account.pick).toEqual({ runtime: 'claude-code', id: 'warm' });
+    expect(json.picked[0].account.ranked[0].tier).toBe(0);
+  });
+
+  it('all accounts kept out: no account, and one stderr block naming the command', async () => {
+    // Purpose: a registered kept-out account is never spent by a fallback; the
+    // operator is told how to allow one.
+    temp = tempProject(config());
+    fleet({ client: {} });
+    const human = await next(['-n', '2']);
+    expect(human.code).toBe(EXIT.ok);
+    expect(human.stdout).toMatch(/A-1 .* -> no account$/m);
+    const blocks = human.stderr.match(/No account may take work/g) ?? [];
+    expect(blocks).toHaveLength(1);
+    expect(human.stderr).toContain(
+      'No account may take work for this checkout (no origin repo): claude-code:client: out-of-scope. Run `flow accounts set <id> --role rotation` to allow one.'
+    );
+    const { json } = await next(['--json']);
+    expect(json.picked[0].account).toMatchObject({ pick: null, reason: 'none' });
+  });
+
+  it("scopes a kept-out account by the checkout's origin repo", async () => {
+    // Purpose: repo comes from the --project checkout's origin, parsed as S1 does.
+    temp = tempProject(config());
+    fleet({ client: { role: 'kept-out', scope: { repos: ['Acme/App'] } } });
+    const origin = async (cmd: string, args: readonly string[]) =>
+      cmd === 'git' && args.join(' ') === 'remote get-url origin'
+        ? { code: 0, stdout: 'git@github.com:acme/app.git\n', stderr: '' }
+        : { code: 1, stdout: '', stderr: '' };
+    const { json } = await next(['--json'], { runProcess: origin });
+    expect(json.picked[0].account.pick).toEqual({ runtime: 'claude-code', id: 'client' });
+  });
+
+  it('ranks for the first of fleet.runtimes when the item has no run', async () => {
+    // Purpose: the item's runtime decides which registry it draws from.
+    temp = tempProject(config());
+    put('flow/fleet.json', { v: 1, runtimes: ['codex'] });
+    const { json, stdout } = await next(['--json']);
+    expect(json.picked[0].account).toMatchObject({
+      runtime: 'codex',
+      pick: { runtime: 'codex', id: 'default' },
+      reason: 'ranked',
+    });
+    expect(stdout).toBeTruthy();
+  });
+
+  it('falls to another runtime only with crossRuntimeFallback on, and says so', async () => {
+    // Purpose: a fully spent runtime blocks work unless the operator allowed a fallback.
+    temp = tempProject(config());
+    fleet({ a: { role: 'rotation' } });
+    put('runtimes/claude-code/usage/a.json', {
+      v: 1,
+      runtime: 'claude-code',
+      accountId: 'a',
+      updatedAt: NOW,
+      windows: {
+        five_hour: {
+          usedPct: 100,
+          resetsAt: '2026-09-26T14:00:00.000Z',
+          status: 'rejected',
+          observedAt: NOW,
+          source: 'statusline',
+        },
+      },
+    });
+    const off = await next(['--json']);
+    expect(off.json.picked[0].account).toMatchObject({ pick: null, reason: 'none' });
+
+    fleet(
+      { a: { role: 'rotation' } },
+      { crossRuntimeFallback: 'on', runtimes: ['claude-code', 'opencode'] }
+    );
+    const on = await next(['--json']);
+    expect(on.json.picked[0].account).toMatchObject({
+      runtime: 'claude-code',
+      pick: { runtime: 'opencode', id: 'default' },
+      reason: 'cross-runtime',
+    });
+    expect((await next([])).stdout).toMatch(/-> opencode ambient account$/m);
+  });
+
+  it('--no-account prints exactly what flow next printed before accounts', async () => {
+    // Purpose: S1's output stays available unchanged, and nothing under DORK_HOME is read.
+    temp = tempProject(config());
+    put('config.json', '{not json');
+    const json = await next(['--json', '-n', '2', '--no-account']);
+    expect(json.json.picked).toEqual(items.slice(0, 2));
+    expect(json.stderr).toBe('');
+    const human = await next(['-n', '2', '--no-account']);
+    expect(human.stdout).not.toContain('->');
+    expect(human.stderr).toBe('');
+  });
+});
+
+describe('liveByAccount', () => {
+  // Purpose: a parked drain run holds no live session, so it must not use up
+  // its account's room; a working one, and its reviewer, still count.
+  it('counts running runs and their reviewers, but not a parked drain run', () => {
+    const base = {
+      identifier: 'X',
+      sessionId: 's',
+      worktreePath: '/w',
+      branch: 'b',
+      stage: 'execute',
+      status: 'running',
+      attemptCount: 0,
+      workerPid: -1,
+      startedAt: '2026-09-26T00:00:00.000Z',
+      account: 'a',
+    } as const;
+    const drain = (phase: DrainState['phase']) =>
+      ({ v: 1, rev: 1, phase, worker: null, reviewer: null }) as unknown as DrainState;
+    const runs: Record<string, FlowRun> = {
+      one: { ...base, issueId: 'one', drain: drain('working') },
+      two: { ...base, issueId: 'two', drain: drain('parked') },
+      three: { ...base, issueId: 'three' },
+    };
+    expect(liveByAccount(runs)).toEqual({ 'claude-code:a': 2 });
   });
 });

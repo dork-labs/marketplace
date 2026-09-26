@@ -127,39 +127,71 @@ function titleFor(): string | null {
   return null;
 }
 
+/** What {@link writeCheckpoint} writes. */
+export interface CheckpointRequest {
+  /** The work item, e.g. `ACME-12`. */
+  identifier: string;
+  /** Why it is written. */
+  trigger: string;
+  /** The body file, relative to `--project`. */
+  bodyFile: string | undefined;
+  /** The task it follows (required with trigger `task`), or `null`. */
+  task: string | null;
+  /** The spec the work follows, or `null`. */
+  spec: string | null;
+  /** Where the next session resumes; default the run's stage. */
+  stage: string | undefined;
+  /** The flag that named `bodyFile`, for messages. Default `--body-file`. */
+  bodyFlag?: string;
+}
+
+/** A written checkpoint. */
+export interface WrittenCheckpoint {
+  /** The worktree's top folder. */
+  root: string;
+  /** The absolute path of `HANDOFF.md`. */
+  path: string;
+  /** Its header. */
+  header: CheckpointHeader;
+}
+
 /**
- * Run `flow checkpoint`.
+ * Write the item's `HANDOFF.md` in the worktree at `--project` and record it on
+ * the item's run (§1). Shared by `flow checkpoint` and `flow stage
+ * --checkpoint-file`.
  *
  * @param ctx - The verb context.
- * @returns `{ path, header }` for `--json`, and one line of text.
- * @throws {UsageError} On a missing or unknown flag value (exit 2).
+ * @param request - The identifier, trigger, body file, task, spec and stage.
+ * @returns Where it was written and its header.
+ * @throws {UsageError} On a missing or unknown value (exit 2).
  * @throws {PreconditionError} Outside a git worktree, or for a body that breaks a rule (exit 5).
  */
-export async function run(ctx: VerbContext): Promise<VerbResult> {
-  const identifier = ctx.args.positionals[0];
-  const trigger = flag(ctx, 'trigger');
-  if (trigger === undefined || !(CHECKPOINT_TRIGGERS as readonly string[]).includes(trigger)) {
+export async function writeCheckpoint(
+  ctx: VerbContext,
+  request: CheckpointRequest
+): Promise<WrittenCheckpoint> {
+  const { identifier, trigger, task } = request;
+  const bodyName = request.bodyFlag ?? '--body-file';
+  if (!(CHECKPOINT_TRIGGERS as readonly string[]).includes(trigger)) {
     throw new UsageError(`--trigger must be one of: ${CHECKPOINT_TRIGGERS.join(', ')}`);
   }
-  const task = flag(ctx, 'task') ?? null;
   if (trigger === 'task' && task === null) {
     throw new UsageError('--trigger task needs --task <id>: the task this checkpoint follows');
   }
-  const stageFlag = flag(ctx, 'stage');
+  const stageFlag = request.stage;
   if (stageFlag !== undefined && !FlowRunSchema.shape.stage.safeParse(stageFlag).success) {
-    throw new UsageError(`--stage "${stageFlag}" is not a flow stage`);
+    throw new UsageError(`stage "${stageFlag}" is not a flow stage`);
   }
-  const bodyFlag = flag(ctx, 'body-file');
-  if (bodyFlag === undefined) {
+  if (request.bodyFile === undefined) {
     throw new UsageError(
-      '--body-file is required: the Done, Next, Open questions and Next command sections'
+      `${bodyName} is required: the Done, Next, Open questions and Next command sections`
     );
   }
   let body: string;
   try {
-    body = readFileSync(path.resolve(ctx.projectDir, bodyFlag), 'utf8');
+    body = readFileSync(path.resolve(ctx.projectDir, request.bodyFile), 'utf8');
   } catch {
-    throw new UsageError(`cannot read --body-file ${bodyFlag}`);
+    throw new UsageError(`cannot read ${bodyName} ${request.bodyFile}`);
   }
   const checked = checkBody(body);
   if (!checked.ok) throw new PreconditionError(`checkpoint refused: ${checked.message}`);
@@ -190,7 +222,7 @@ export async function run(ctx: VerbContext): Promise<VerbResult> {
     headSha: facts.headSha,
     pushedSha: facts.pushedSha,
     dirty: facts.dirty,
-    spec: flag(ctx, 'spec') ?? null,
+    spec: request.spec,
     task,
     pr: existing?.drain?.pr?.url ?? null,
     reviewRound: existing?.drain?.reviewRound ?? null,
@@ -218,10 +250,40 @@ export async function run(ctx: VerbContext): Promise<VerbResult> {
     }
   }
 
-  const short = header.headSha.slice(0, 7);
+  return { root, path: file, header };
+}
+
+/**
+ * One line naming a written checkpoint.
+ *
+ * @param written - The checkpoint.
+ * @returns `Wrote .dork/flow/HANDOFF.md for <id> (<trigger>, at <sha>).`
+ */
+export function checkpointLine(written: WrittenCheckpoint): string {
+  const { header } = written;
   const dirty = header.dirty ? ', with uncommitted changes' : '';
+  return `Wrote ${path.relative(written.root, written.path)} for ${header.identifier} (${header.trigger}, at ${header.headSha.slice(0, 7)}${dirty}).`;
+}
+
+/**
+ * Run `flow checkpoint`.
+ *
+ * @param ctx - The verb context.
+ * @returns `{ path, header }` for `--json`, and one line of text.
+ * @throws {UsageError} On a missing or unknown flag value (exit 2).
+ * @throws {PreconditionError} Outside a git worktree, or for a body that breaks a rule (exit 5).
+ */
+export async function run(ctx: VerbContext): Promise<VerbResult> {
+  const written = await writeCheckpoint(ctx, {
+    identifier: ctx.args.positionals[0],
+    trigger: flag(ctx, 'trigger') ?? '',
+    bodyFile: flag(ctx, 'body-file'),
+    task: flag(ctx, 'task') ?? null,
+    spec: flag(ctx, 'spec') ?? null,
+    stage: flag(ctx, 'stage'),
+  });
   return {
-    json: { path: file, header },
-    text: `Wrote ${path.relative(root, file)} for ${identifier} (${trigger}, at ${short}${dirty}).`,
+    json: { path: written.path, header: written.header },
+    text: checkpointLine(written),
   };
 }

@@ -18,9 +18,13 @@
 import { execFile } from 'node:child_process';
 import path from 'node:path';
 
+import { createGithubForge } from '../forge/github.ts';
+import type { Forge, ForgeFactory, ForgeTarget } from '../forge/types.ts';
+import type { HostName, Launcher } from '../launchers/types.ts';
 import type { CodeAdapter } from '../tracker/types.ts';
 import type { ParsedArgs, VerbSpec } from './args.ts';
 import { realHostIo, type HostIo } from './host-io.ts';
+import type { Runtime } from '../runtime-detect.ts';
 import { RUNTIMES } from '../runtime-detect.ts';
 import { runtimeSession } from './session-id.ts';
 
@@ -99,6 +103,14 @@ export interface CliDeps {
   runProcess: ProcessRunner;
   /** Replaces parts of the machine the usage and fleet verbs touch; the rest are real. */
   io?: Partial<HostIo>;
+  /** Builds the forge for a repository. Default: the GitHub forge over {@link runProcess}. */
+  createForge?: ForgeFactory;
+  /**
+   * Builds the launcher for a host (`flow drain`, `flow status`). Default: the
+   * real launcher (`scripts/launchers/real.ts`), which the verbs load themselves
+   * so no other verb pays for it.
+   */
+  createLauncher?: (host: HostName) => Launcher;
 }
 
 /** What a verb returns on success, or when its check found problems. */
@@ -113,6 +125,12 @@ export interface VerbResult {
   json: Record<string, unknown>;
   /** The human-mode output: plain, aligned, uncolored. Empty prints nothing. */
   text: string;
+  /**
+   * The runtime the verb resolved for itself, when that can differ from the
+   * environment's (`flow claim --runtime`). The run's `verb` journal line uses
+   * it, so it agrees with the verb's own lines. Never printed.
+   */
+  runtime?: Runtime;
 }
 
 /** A verb's own module, loaded lazily with `import()`. */
@@ -163,8 +181,19 @@ export interface VerbContext {
   adapter(): Promise<CodeAdapter>;
   /** Print a warning to stderr (both output modes). */
   warn(message: string): void;
-  /** stdin, the OS home, loopback fetch, streaming children, pid checks, the watchdog. */
+  /** stdin, the OS home, loopback fetch, streaming children, pid checks, the watchdog, sleep. */
   io: HostIo;
+  /** The forge for one repository (GitHub unless a test injects another). */
+  forge(target: ForgeTarget): Forge;
+  /**
+   * Standard output, for a verb that prints as it goes (`flow watch --follow`).
+   * Every other verb returns its result instead.
+   */
+  stdout: TextSink;
+  /** Standard error, for a verb's own progress lines (`flow drain`'s host choice). */
+  stderr: TextSink;
+  /** The injected launcher factory, when a test gives one; else the verb builds real launchers. */
+  createLauncher?: (host: HostName) => Launcher;
 }
 
 /**
@@ -223,6 +252,12 @@ export function createVerbContext(
       })),
     warn,
     io: { ...realHostIo(), ...deps.io },
+    forge: (target) =>
+      deps.createForge?.(target) ??
+      createGithubForge({ target, runProcess: deps.runProcess, now: () => deps.now() }),
+    stdout: deps.stdout,
+    stderr: deps.stderr,
+    createLauncher: deps.createLauncher,
   };
 }
 

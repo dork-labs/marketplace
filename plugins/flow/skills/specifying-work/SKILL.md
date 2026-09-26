@@ -22,9 +22,9 @@ Use it to:
 
 1. **Never touch a tracker directly.** This skill contains no tracker MCP call,
    no CLI-fallback invocation, and no tracker slug. All tracker reads and writes
-   (breadcrumb comments, stage transitions, evidence) route through the
+   (breadcrumb comments, evidence) route through the
    **adapter** skill by reference —
-   e.g. "via the adapter, `transition` the item to `stage/specify`". The
+   e.g. "via the adapter, `comment` a breadcrumb". The
    adapter is the single audit surface for tracker I/O. **Finding the adapter.** It is the `SKILL.md` at the `adapter.path` that
    `node --experimental-strip-types "<flow-root>/scripts/config-files.ts"` prints: the
    project's own (`.agents/flow/adapters/<tracker>/`), or the one flow ships. Inside it,
@@ -104,8 +104,8 @@ Before acting, read:
 When the work is tracked, project the stage through the **adapter** —
 never a tracker call from here:
 
-- **On entry:** via the adapter, `transition` the item to the
-  `stage/specify` label (the adapter resolves the PM-side state category).
+- **On entry:** `node --experimental-strip-types "<flow-root>/scripts/flow.ts" stage <id> specify --checkpoint-file <f>`,
+  where `<f>` holds the checkpoint body (Done, Next, Open questions, Next command).
 - **On completion:** via the adapter, `comment` a breadcrumb on the item
   (spec created, location `specs/<slug>/02-specification.md`, next step
   DECOMPOSE). If the item is untracked or no adapter is available, skip silently

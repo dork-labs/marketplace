@@ -16,15 +16,13 @@ This is the schedulable **Pulse tick**: one tick of the `/flow` autonomous loop,
 fired by a scheduler. The frontmatter's `schedule:` block makes this file a
 scheduled task.
 
-Installed at project scope, a DorkOS release that has schedule discovery picks
-this tick up and asks you to approve it on the Schedules page; nothing fires
-until you do. On any other harness, wire your own scheduler to it (OS-cron, CI).
-It ships `schedule.enabled: false` either way — installing a package never arms
-its own cron.
+Installed at project scope, DorkOS picks this tick up and asks you to approve
+it on the Schedules page. On any other harness, wire your own scheduler to it
+(OS-cron, CI). It ships `schedule.enabled: false`: installing a package never
+arms its own cron.
 
 Each firing runs exactly **one `/flow continue` tick** and then stops; the
-scheduler provides the repetition. This is NOT `/flow auto` (which loops a single
-session via the Stop-hook sentinel). The canonical tick procedure lives in the
+scheduler provides the repetition. This is NOT `/flow auto`. The canonical tick procedure lives in the
 `/flow` orchestrator (`<flow-root>/commands/flow.md`); this task is only the scheduled
 trigger over it. In reconciler-registry order, one tick:
 
@@ -39,18 +37,19 @@ trigger over it. In reconciler-registry order, one tick:
 1. **Recovery.** Re-adopt orphaned claimed work: read
    `.dork/flow/flow-state.json`, GC closed-issue records, probe the worker, and
    resume / restart-clean / escalate per the recovery script
-   (`node --experimental-strip-types "<flow-root>/scripts/recovery.ts"`).
-2. **Inbox / resume.** Un-park items whose `agent/needs-input` question was
-   answered, and resume the parked run.
-3. **Dispatch.** Rank the ready queue with
-   `node --experimental-strip-types "<flow-root>/scripts/flow.ts" next --json`, provision the
-   top item's worktree, claim it with
+   (`node --experimental-strip-types "<flow-root>/scripts/recovery.ts"`). Skip
+   every run with `drain` set: `flow drain` recovers its own.
+2. **Inbox / resume.** Un-park answered `agent/needs-input` items and resume
+   their runs; skip runs with `drain` set.
+3. **Dispatch.** With `drain.parallel` at 1 or more, run
+   `node --experimental-strip-types "<flow-root>/scripts/flow.ts" drain --tick` and stop.
+   At 0, take the top item of `flow.ts next --json`, provision its worktree, claim it with
    `node --experimental-strip-types "<flow-root>/scripts/flow.ts" claim <id> --session <session id> --worktree <path> --branch <branch> --json`
    (Claude Code and Codex supply `--session`)
    and carry it to its human-review gate.
 
 Stop at the review gate or a genuine question. Other tracker reads and writes
-go through **the adapter**; this tick never names a tracker directly.
+go through **the adapter**; this tick never names a tracker.
 
 **Operator override.** At each stage boundary, check for the `agent/paused`
 marker: if present, advance no further, run `flow.ts release <id>

@@ -56,9 +56,9 @@ with two **FILL IN** sections — the repo's hard rules and its always-check lis
 because those are what separate a reviewer that knows the codebase from one
 guessing at severity.
 
-## `drain/` — the parallel-drain recipe
+## `drain/` — the parallel drain's briefs
 
-[`drain/worker-brief.md`](./drain/worker-brief.md),
-[`drain/reviewer-brief.md`](./drain/reviewer-brief.md) and
-[`drain/watch.sh`](./drain/watch.sh) are the hand-run recipe for carrying
-several ready items at once. `docs/parallel-drain.mdx` says how to use them.
+[`drain/worker-brief.md`](./drain/worker-brief.md) and
+[`drain/reviewer-brief.md`](./drain/reviewer-brief.md) are the briefs `flow drain`
+renders for each worker and reviewer, filling every `{{placeholder}}` (an
+unfilled one is an error). `docs/parallel-drain.mdx` says how the drain works.

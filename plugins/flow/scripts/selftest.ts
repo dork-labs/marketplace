@@ -25,7 +25,6 @@
  */
 
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
-import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -43,7 +42,7 @@ import {
   rebaseline,
 } from './selftest/doc-lint.ts';
 import { runFast } from './selftest/fast.ts';
-import { fileFailures, type FilingResult } from './selftest/file.ts';
+import { emptyFiling, fileFailures, filingSetup, type FilingResult } from './selftest/file.ts';
 import {
   buildReport,
   exitCode,
@@ -312,21 +311,10 @@ function journal(report: SelftestReport, run: SelftestRun): void {
  */
 async function file(report: SelftestReport, run: SelftestRun): Promise<FilingResult> {
   const failing = report.checks.filter((check) => check.status === 'fail');
+  if (failing.length === 0) return emptyFiling();
   try {
-    if (failing.length === 0)
-      return { commented: [], declined: [], notRefiled: [], filed: [], wouldFile: [] };
-    const { loadConfig } = await import('./config-load.ts');
-    const { requireCapabilities } = await import('./tracker/load.ts');
-    const { config } = loadConfig(findConfigRoots(run.projectDir, run.flowRoot), run.env);
-    const { marker } = config.identity;
-    const { labels, project } = config.selfImprovement.retro;
-    const adapter = await run.adapter();
-    requireCapabilities(adapter, ['getBacklogSnapshot', 'getItem', 'comment']);
-    const provenance = buildProvenance({
-      env: run.env,
-      sessionId: run.sessionId,
-      hostname: os.hostname(),
-    });
+    const { retro, deps } = await filingSetup(run);
+    const { labels, project } = retro;
     return await fileFailures(
       failing,
       {
@@ -336,17 +324,10 @@ async function file(report: SelftestReport, run: SelftestRun): Promise<FilingRes
         labels,
         project,
       },
-      { adapter, sign: (body) => signBody(body, marker, provenance), unsign: unsignedBody }
+      deps
     );
   } catch (err) {
-    return {
-      commented: [],
-      declined: [],
-      notRefiled: [],
-      filed: [],
-      wouldFile: [],
-      error: (err as Error).message,
-    };
+    return emptyFiling((err as Error).message);
   }
 }
 

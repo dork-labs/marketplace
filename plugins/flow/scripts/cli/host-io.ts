@@ -70,6 +70,10 @@ export interface HostIo {
   pidAlive(pid: number): boolean;
   /** End the whole process with exit 0 after `ms`, whatever it is doing. */
   armWatchdog(ms: number): void;
+  /** Wait `ms` milliseconds (`flow watch` between rounds). */
+  sleep(ms: number): Promise<void>;
+  /** The 1-minute load average and the logical CPU count (`flow drain`'s launch cap). */
+  load(): { load1: number; cpus: number };
 }
 
 /** The real stdin. */
@@ -170,7 +174,7 @@ export function pidExists(pid: number): boolean {
  * The real machine.
  *
  * @returns A {@link HostIo} over process stdin, `os.homedir()`, global `fetch`,
- *   `spawn`, `process.kill(pid, 0)` and a real exit timer.
+ *   `spawn`, `process.kill(pid, 0)`, a real exit timer, a real sleep and `os.loadavg()`.
  */
 export function realHostIo(): HostIo {
   return {
@@ -182,5 +186,7 @@ export function realHostIo(): HostIo {
     armWatchdog(ms) {
       setTimeout(() => process.exit(0), ms).unref();
     },
+    sleep: (ms) => new Promise((resolve) => setTimeout(resolve, ms)),
+    load: () => ({ load1: os.loadavg()[0], cpus: os.availableParallelism() }),
   };
 }

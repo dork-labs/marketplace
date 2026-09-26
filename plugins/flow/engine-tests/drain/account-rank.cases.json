@@ -1,5 +1,5 @@
 {
-  "about": "Account-aware dispatch (spec flow-handoff-dispatch §3), run by account-rank.test.ts. Each group is a list of { name, input, expected }, with now in input where the call takes a clock. Defaults the runner fills in: every rankAccounts account gets path /accounts/<id>, its policy gets id = the account id, and a missing repo, model, affinity, exclude, liveByAccount or opts reads as dork-labs/marketplace, null, null, [], {} and { warnMarginPct: 10, maxLivePerAccount: 2 }. windows is the ledger's raw windows object (null for no ledger); every window is read with readWindow. rankAccounts expected.ranked lists id and tier, plus score (to 2 places) and signal (the level) when given.",
+  "about": "Account-aware dispatch (spec flow-handoff-dispatch §3, runtime-aware per R4), run by account-rank.test.ts. Each group is a list of { name, input, expected }, with now in input where the call takes a clock. Defaults the runner fills in: every rankAccounts account gets path /accounts/<id> (null when implicit), implicit false, and its policy gets runtime, id and key = <runtime>:<id>; a missing repo, runtime, runtimes, crossRuntimeFallback, model, affinity, exclude, liveByAccount or opts reads as dork-labs/marketplace, claude-code, [], off, null, null, [], {} and { warnMarginPct: 10, maxLivePerAccount: 2 }. affinity, exclude and liveByAccount name accounts by <runtime>:<id>. windows is the ledger's raw windows object (null for no ledger) and spend its raw spend; every window is read with readWindow. rankAccounts expected.ranked lists runtime, id and tier, plus score (to 2 places) and signal (the level) when given.",
   "modelBucketsFor": [
     {
       "name": "no model: no buckets",
@@ -19,12 +19,12 @@
       ]
     },
     {
-      "name": "lowercased; runs outside [a-z0-9._-] become one '-'; sonnet adds seven_day_sonnet",
+      "name": "S1's bucketSlug: lowercased, runs outside [a-z0-9._-] become one '-', a trailing '-' trimmed; sonnet adds seven_day_sonnet",
       "input": {
         "model": "Claude Sonnet 4.5 [1m]"
       },
       "expected": [
-        "model:claude-sonnet-4.5-1m-",
+        "model:claude-sonnet-4.5-1m",
         "seven_day_sonnet"
       ]
     },
@@ -42,6 +42,7 @@
     {
       "name": "every checked window has room: ok",
       "input": {
+        "runtime": "claude-code",
         "now": "2026-09-26T16:00:00.000Z",
         "policy": {
           "role": "rotation",
@@ -80,6 +81,7 @@
     {
       "name": "no ledger at all: unknown, which is not a limit",
       "input": {
+        "runtime": "claude-code",
         "now": "2026-09-26T16:00:00.000Z",
         "policy": {
           "role": "rotation",
@@ -103,6 +105,7 @@
     {
       "name": "a weekly reading but no five-hour reading: unknown",
       "input": {
+        "runtime": "claude-code",
         "now": "2026-09-26T16:00:00.000Z",
         "policy": {
           "role": "rotation",
@@ -134,6 +137,7 @@
     {
       "name": "a model with no bucket in the ledger reads as no reading: unknown, never blocking",
       "input": {
+        "runtime": "claude-code",
         "now": "2026-09-26T16:00:00.000Z",
         "policy": {
           "role": "rotation",
@@ -172,6 +176,7 @@
     {
       "name": "five_hour at its ceiling of 100: exhausted by the limit",
       "input": {
+        "runtime": "claude-code",
         "now": "2026-09-26T16:00:00.000Z",
         "policy": {
           "role": "rotation",
@@ -210,6 +215,7 @@
     {
       "name": "seven_day at 100 - reserve (50 of a 50% reserve): exhausted by the reserve",
       "input": {
+        "runtime": "claude-code",
         "now": "2026-09-26T16:00:00.000Z",
         "policy": {
           "role": "main",
@@ -248,6 +254,7 @@
     {
       "name": "seven_day at 100 with a reserve: exhausted by the limit, not the reserve",
       "input": {
+        "runtime": "claude-code",
         "now": "2026-09-26T16:00:00.000Z",
         "policy": {
           "role": "main",
@@ -286,6 +293,7 @@
     {
       "name": "seven_day rejected under the reserve line: the limit, not the reserve",
       "input": {
+        "runtime": "claude-code",
         "now": "2026-09-26T16:00:00.000Z",
         "policy": {
           "role": "main",
@@ -324,6 +332,7 @@
     {
       "name": "reserve reached and five_hour exhausted too: not only the reserve, so the limit",
       "input": {
+        "runtime": "claude-code",
         "now": "2026-09-26T16:00:00.000Z",
         "policy": {
           "role": "main",
@@ -362,6 +371,7 @@
     {
       "name": "inside the spend-down window the reserve is 0, so 60% used is ok",
       "input": {
+        "runtime": "claude-code",
         "now": "2026-09-26T16:00:00.000Z",
         "policy": {
           "role": "main",
@@ -400,6 +410,7 @@
     {
       "name": "five_hour rejected with room left by percent: exhausted",
       "input": {
+        "runtime": "claude-code",
         "now": "2026-09-26T16:00:00.000Z",
         "policy": {
           "role": "rotation",
@@ -438,6 +449,7 @@
     {
       "name": "allowed_warning status: warning",
       "input": {
+        "runtime": "claude-code",
         "now": "2026-09-26T16:00:00.000Z",
         "policy": {
           "role": "rotation",
@@ -476,6 +488,7 @@
     {
       "name": "five_hour at 100 - warnMarginPct (90): warning",
       "input": {
+        "runtime": "claude-code",
         "now": "2026-09-26T16:00:00.000Z",
         "policy": {
           "role": "rotation",
@@ -514,6 +527,7 @@
     {
       "name": "five_hour one point under the margin (89): ok",
       "input": {
+        "runtime": "claude-code",
         "now": "2026-09-26T16:00:00.000Z",
         "policy": {
           "role": "rotation",
@@ -552,6 +566,7 @@
     {
       "name": "the warning margin applies below the reserved ceiling (40 of 50): warning",
       "input": {
+        "runtime": "claude-code",
         "now": "2026-09-26T16:00:00.000Z",
         "policy": {
           "role": "main",
@@ -590,6 +605,7 @@
     {
       "name": "two windows exhausted: the one resetting sooner is named, not the first checked",
       "input": {
+        "runtime": "claude-code",
         "now": "2026-09-26T16:00:00.000Z",
         "policy": {
           "role": "rotation",
@@ -628,6 +644,7 @@
     {
       "name": "exhausted is named before a warning that resets sooner",
       "input": {
+        "runtime": "claude-code",
         "now": "2026-09-26T16:00:00.000Z",
         "policy": {
           "role": "rotation",
@@ -666,6 +683,7 @@
     {
       "name": "seven_day_opus exhausted: an opus model is exhausted",
       "input": {
+        "runtime": "claude-code",
         "now": "2026-09-26T16:00:00.000Z",
         "policy": {
           "role": "rotation",
@@ -718,6 +736,7 @@
     {
       "name": "seven_day_opus exhausted: a sonnet model does not check it",
       "input": {
+        "runtime": "claude-code",
         "now": "2026-09-26T16:00:00.000Z",
         "policy": {
           "role": "rotation",
@@ -777,6 +796,7 @@
     {
       "name": "the model:<slug> bucket is checked against 100",
       "input": {
+        "runtime": "claude-code",
         "now": "2026-09-26T16:00:00.000Z",
         "policy": {
           "role": "rotation",
@@ -822,6 +842,7 @@
     {
       "name": "an expired rejected window reads as allowed with 0 used: ok",
       "input": {
+        "runtime": "claude-code",
         "now": "2026-09-26T16:00:00.000Z",
         "policy": {
           "role": "rotation",
@@ -860,6 +881,7 @@
     {
       "name": "a stale five-hour reading with no reset is no reading: unknown",
       "input": {
+        "runtime": "claude-code",
         "now": "2026-09-26T16:00:00.000Z",
         "policy": {
           "role": "rotation",
@@ -894,6 +916,193 @@
         "resetsAt": null,
         "cause": null
       }
+    },
+    {
+      "name": "opencode local model: no windows, no spend cap: ok (always eligible)",
+      "input": {
+        "runtime": "opencode",
+        "now": "2026-09-26T16:00:00.000Z",
+        "policy": {
+          "role": "rotation",
+          "reservePct": 0,
+          "spendDownWindowHours": 24,
+          "scope": {
+            "repos": []
+          }
+        },
+        "model": null,
+        "warnMarginPct": 10,
+        "windows": null
+      },
+      "expected": {
+        "level": "ok",
+        "window": null,
+        "resetsAt": null,
+        "cause": null
+      }
+    },
+    {
+      "name": "opencode metered: spend under its cap: ok",
+      "input": {
+        "runtime": "opencode",
+        "now": "2026-09-26T16:00:00.000Z",
+        "policy": {
+          "role": "rotation",
+          "reservePct": 0,
+          "spendDownWindowHours": 24,
+          "scope": {
+            "repos": []
+          }
+        },
+        "model": null,
+        "warnMarginPct": 10,
+        "windows": {},
+        "spend": {
+          "periodStart": "2026-09-01T00:00:00.000Z",
+          "costUsd": 40,
+          "limitUsd": 100,
+          "observedAt": "2026-09-26T15:59:00.000Z",
+          "source": "sdk_usage"
+        }
+      },
+      "expected": {
+        "level": "ok",
+        "window": null,
+        "resetsAt": null,
+        "cause": null
+      }
+    },
+    {
+      "name": "opencode metered: spend within warnMarginPct of its cap: warning on spend",
+      "input": {
+        "runtime": "opencode",
+        "now": "2026-09-26T16:00:00.000Z",
+        "policy": {
+          "role": "rotation",
+          "reservePct": 0,
+          "spendDownWindowHours": 24,
+          "scope": {
+            "repos": []
+          }
+        },
+        "model": null,
+        "warnMarginPct": 10,
+        "windows": {},
+        "spend": {
+          "periodStart": "2026-09-01T00:00:00.000Z",
+          "costUsd": 95,
+          "limitUsd": 100,
+          "observedAt": "2026-09-26T15:59:00.000Z",
+          "source": "sdk_usage"
+        }
+      },
+      "expected": {
+        "level": "warning",
+        "window": "spend",
+        "resetsAt": null,
+        "cause": null
+      }
+    },
+    {
+      "name": "opencode metered: spend at its limitUsd: exhausted on spend",
+      "input": {
+        "runtime": "opencode",
+        "now": "2026-09-26T16:00:00.000Z",
+        "policy": {
+          "role": "rotation",
+          "reservePct": 0,
+          "spendDownWindowHours": 24,
+          "scope": {
+            "repos": []
+          }
+        },
+        "model": null,
+        "warnMarginPct": 10,
+        "windows": {},
+        "spend": {
+          "periodStart": "2026-09-01T00:00:00.000Z",
+          "costUsd": 100,
+          "limitUsd": 100,
+          "observedAt": "2026-09-26T15:59:00.000Z",
+          "source": "sdk_usage"
+        }
+      },
+      "expected": {
+        "level": "exhausted",
+        "window": "spend",
+        "resetsAt": null,
+        "cause": "limit"
+      }
+    },
+    {
+      "name": "codex with no ledger: unknown, like claude-code",
+      "input": {
+        "runtime": "codex",
+        "now": "2026-09-26T16:00:00.000Z",
+        "policy": {
+          "role": "rotation",
+          "reservePct": 0,
+          "spendDownWindowHours": 24,
+          "scope": {
+            "repos": []
+          }
+        },
+        "model": null,
+        "warnMarginPct": 10,
+        "windows": null
+      },
+      "expected": {
+        "level": "unknown",
+        "window": null,
+        "resetsAt": null,
+        "cause": null
+      }
+    },
+    {
+      "name": "an account-wide window beyond the two (window:<minutes>) rejected: exhausted on it",
+      "input": {
+        "runtime": "codex",
+        "now": "2026-09-26T16:00:00.000Z",
+        "policy": {
+          "role": "rotation",
+          "reservePct": 0,
+          "spendDownWindowHours": 24,
+          "scope": {
+            "repos": []
+          }
+        },
+        "model": null,
+        "warnMarginPct": 10,
+        "windows": {
+          "five_hour": {
+            "usedPct": 10,
+            "resetsAt": "2026-09-26T19:00:00.000Z",
+            "status": null,
+            "observedAt": "2026-09-26T15:59:00.000Z",
+            "source": "statusline"
+          },
+          "seven_day": {
+            "usedPct": 20,
+            "resetsAt": "2026-10-02T16:00:00.000Z",
+            "status": null,
+            "observedAt": "2026-09-26T15:59:00.000Z",
+            "source": "statusline"
+          },
+          "window:60": {
+            "usedPct": 30,
+            "resetsAt": "2026-09-26T16:30:00.000Z",
+            "status": "rejected",
+            "observedAt": "2026-09-26T15:59:00.000Z",
+            "source": "statusline"
+          }
+        }
+      },
+      "expected": {
+        "level": "exhausted",
+        "window": "window:60",
+        "resetsAt": "2026-09-26T16:30:00.000Z",
+        "cause": "limit"
+      }
     }
   ],
   "rankAccounts": [
@@ -903,6 +1112,7 @@
         "now": "2026-09-26T16:00:00.000Z",
         "accounts": [
           {
+            "runtime": "claude-code",
             "id": "b",
             "routable": true,
             "policy": {
@@ -931,6 +1141,7 @@
             }
           },
           {
+            "runtime": "claude-code",
             "id": "a",
             "routable": true,
             "policy": {
@@ -961,15 +1172,20 @@
         ]
       },
       "expected": {
-        "pick": "a",
+        "pick": {
+          "runtime": "claude-code",
+          "id": "a"
+        },
         "ranked": [
           {
+            "runtime": "claude-code",
             "id": "a",
             "tier": 1,
             "score": 1.67,
             "signal": "ok"
           },
           {
+            "runtime": "claude-code",
             "id": "b",
             "tier": 1,
             "score": 0.42,
@@ -985,6 +1201,7 @@
         "now": "2026-09-26T16:00:00.000Z",
         "accounts": [
           {
+            "runtime": "claude-code",
             "id": "personal",
             "routable": true,
             "policy": {
@@ -1013,6 +1230,7 @@
             }
           },
           {
+            "runtime": "claude-code",
             "id": "spare",
             "routable": true,
             "policy": {
@@ -1043,14 +1261,19 @@
         ]
       },
       "expected": {
-        "pick": "spare",
+        "pick": {
+          "runtime": "claude-code",
+          "id": "spare"
+        },
         "ranked": [
           {
+            "runtime": "claude-code",
             "id": "spare",
             "tier": 1,
             "score": 0.14
           },
           {
+            "runtime": "claude-code",
             "id": "personal",
             "tier": 2,
             "score": 0.69
@@ -1065,6 +1288,7 @@
         "now": "2026-09-26T16:00:00.000Z",
         "accounts": [
           {
+            "runtime": "claude-code",
             "id": "left",
             "routable": true,
             "policy": {
@@ -1093,6 +1317,7 @@
             }
           },
           {
+            "runtime": "claude-code",
             "id": "spent",
             "routable": true,
             "policy": {
@@ -1121,6 +1346,7 @@
             }
           },
           {
+            "runtime": "claude-code",
             "id": "personal",
             "routable": true,
             "policy": {
@@ -1150,25 +1376,31 @@
           }
         ],
         "exclude": [
-          "left"
+          "claude-code:left"
         ]
       },
       "expected": {
-        "pick": "personal",
+        "pick": {
+          "runtime": "claude-code",
+          "id": "personal"
+        },
         "ranked": [
           {
+            "runtime": "claude-code",
             "id": "personal",
             "tier": 2
           }
         ],
         "ineligible": [
           {
+            "runtime": "claude-code",
             "id": "left",
             "reasons": [
               "excluded"
             ]
           },
           {
+            "runtime": "claude-code",
             "id": "spent",
             "reasons": [
               "limited"
@@ -1183,6 +1415,7 @@
         "now": "2026-09-26T16:00:00.000Z",
         "accounts": [
           {
+            "runtime": "claude-code",
             "id": "spare",
             "routable": true,
             "policy": {
@@ -1211,6 +1444,7 @@
             }
           },
           {
+            "runtime": "claude-code",
             "id": "personal",
             "routable": true,
             "policy": {
@@ -1241,14 +1475,19 @@
         ]
       },
       "expected": {
-        "pick": "personal",
+        "pick": {
+          "runtime": "claude-code",
+          "id": "personal"
+        },
         "ranked": [
           {
+            "runtime": "claude-code",
             "id": "personal",
             "tier": 1,
             "score": 3.33
           },
           {
+            "runtime": "claude-code",
             "id": "spare",
             "tier": 1,
             "score": 0.56
@@ -1263,6 +1502,7 @@
         "now": "2026-09-26T16:00:00.000Z",
         "accounts": [
           {
+            "runtime": "claude-code",
             "id": "warm",
             "routable": true,
             "policy": {
@@ -1291,6 +1531,7 @@
             }
           },
           {
+            "runtime": "claude-code",
             "id": "fresh",
             "routable": true,
             "policy": {
@@ -1319,16 +1560,21 @@
             }
           }
         ],
-        "affinity": "warm"
+        "affinity": "claude-code:warm"
       },
       "expected": {
-        "pick": "warm",
+        "pick": {
+          "runtime": "claude-code",
+          "id": "warm"
+        },
         "ranked": [
           {
+            "runtime": "claude-code",
             "id": "warm",
             "tier": 0
           },
           {
+            "runtime": "claude-code",
             "id": "fresh",
             "tier": 1
           }
@@ -1342,6 +1588,7 @@
         "now": "2026-09-26T16:00:00.000Z",
         "accounts": [
           {
+            "runtime": "claude-code",
             "id": "warm",
             "routable": true,
             "policy": {
@@ -1370,6 +1617,7 @@
             }
           },
           {
+            "runtime": "claude-code",
             "id": "fresh",
             "routable": true,
             "policy": {
@@ -1398,18 +1646,23 @@
             }
           }
         ],
-        "affinity": "warm"
+        "affinity": "claude-code:warm"
       },
       "expected": {
-        "pick": "fresh",
+        "pick": {
+          "runtime": "claude-code",
+          "id": "fresh"
+        },
         "ranked": [
           {
+            "runtime": "claude-code",
             "id": "fresh",
             "tier": 1
           }
         ],
         "ineligible": [
           {
+            "runtime": "claude-code",
             "id": "warm",
             "reasons": [
               "near-limit"
@@ -1424,6 +1677,7 @@
         "now": "2026-09-26T16:00:00.000Z",
         "accounts": [
           {
+            "runtime": "claude-code",
             "id": "personal",
             "routable": true,
             "policy": {
@@ -1452,6 +1706,7 @@
             }
           },
           {
+            "runtime": "claude-code",
             "id": "spare",
             "routable": true,
             "policy": {
@@ -1480,16 +1735,21 @@
             }
           }
         ],
-        "affinity": "personal"
+        "affinity": "claude-code:personal"
       },
       "expected": {
-        "pick": "spare",
+        "pick": {
+          "runtime": "claude-code",
+          "id": "spare"
+        },
         "ranked": [
           {
+            "runtime": "claude-code",
             "id": "spare",
             "tier": 1
           },
           {
+            "runtime": "claude-code",
             "id": "personal",
             "tier": 2
           }
@@ -1503,6 +1763,7 @@
         "now": "2026-09-26T16:00:00.000Z",
         "accounts": [
           {
+            "runtime": "claude-code",
             "id": "personal",
             "routable": true,
             "policy": {
@@ -1531,6 +1792,7 @@
             }
           },
           {
+            "runtime": "claude-code",
             "id": "spare",
             "routable": true,
             "policy": {
@@ -1559,16 +1821,21 @@
             }
           }
         ],
-        "affinity": "personal"
+        "affinity": "claude-code:personal"
       },
       "expected": {
-        "pick": "personal",
+        "pick": {
+          "runtime": "claude-code",
+          "id": "personal"
+        },
         "ranked": [
           {
+            "runtime": "claude-code",
             "id": "personal",
             "tier": 0
           },
           {
+            "runtime": "claude-code",
             "id": "spare",
             "tier": 1
           }
@@ -1582,6 +1849,7 @@
         "now": "2026-09-26T16:00:00.000Z",
         "accounts": [
           {
+            "runtime": "claude-code",
             "id": "Bad_Id",
             "routable": false,
             "policy": {
@@ -1616,6 +1884,7 @@
         "ranked": [],
         "ineligible": [
           {
+            "runtime": "claude-code",
             "id": "Bad_Id",
             "reasons": [
               "not-routable"
@@ -1630,6 +1899,7 @@
         "now": "2026-09-26T16:00:00.000Z",
         "accounts": [
           {
+            "runtime": "claude-code",
             "id": "left",
             "routable": true,
             "policy": {
@@ -1659,7 +1929,7 @@
           }
         ],
         "exclude": [
-          "left"
+          "claude-code:left"
         ]
       },
       "expected": {
@@ -1667,6 +1937,7 @@
         "ranked": [],
         "ineligible": [
           {
+            "runtime": "claude-code",
             "id": "left",
             "reasons": [
               "excluded"
@@ -1681,6 +1952,7 @@
         "now": "2026-09-26T16:00:00.000Z",
         "accounts": [
           {
+            "runtime": "claude-code",
             "id": "client",
             "routable": true,
             "policy": {
@@ -1715,6 +1987,7 @@
         "ranked": [],
         "ineligible": [
           {
+            "runtime": "claude-code",
             "id": "client",
             "reasons": [
               "out-of-scope"
@@ -1729,6 +2002,7 @@
         "now": "2026-09-26T16:00:00.000Z",
         "accounts": [
           {
+            "runtime": "claude-code",
             "id": "client",
             "routable": true,
             "policy": {
@@ -1761,9 +2035,13 @@
         ]
       },
       "expected": {
-        "pick": "client",
+        "pick": {
+          "runtime": "claude-code",
+          "id": "client"
+        },
         "ranked": [
           {
+            "runtime": "claude-code",
             "id": "client",
             "tier": 1
           }
@@ -1777,6 +2055,7 @@
         "now": "2026-09-26T16:00:00.000Z",
         "accounts": [
           {
+            "runtime": "claude-code",
             "id": "spent",
             "routable": true,
             "policy": {
@@ -1811,6 +2090,7 @@
         "ranked": [],
         "ineligible": [
           {
+            "runtime": "claude-code",
             "id": "spent",
             "reasons": [
               "limited"
@@ -1825,6 +2105,7 @@
         "now": "2026-09-26T16:00:00.000Z",
         "accounts": [
           {
+            "runtime": "claude-code",
             "id": "close",
             "routable": true,
             "policy": {
@@ -1859,6 +2140,7 @@
         "ranked": [],
         "ineligible": [
           {
+            "runtime": "claude-code",
             "id": "close",
             "reasons": [
               "near-limit"
@@ -1873,6 +2155,7 @@
         "now": "2026-09-26T16:00:00.000Z",
         "accounts": [
           {
+            "runtime": "claude-code",
             "id": "busy",
             "routable": true,
             "policy": {
@@ -1902,7 +2185,7 @@
           }
         ],
         "liveByAccount": {
-          "busy": 2
+          "claude-code:busy": 2
         }
       },
       "expected": {
@@ -1910,6 +2193,7 @@
         "ranked": [],
         "ineligible": [
           {
+            "runtime": "claude-code",
             "id": "busy",
             "reasons": [
               "at-capacity"
@@ -1924,6 +2208,7 @@
         "now": "2026-09-26T16:00:00.000Z",
         "accounts": [
           {
+            "runtime": "claude-code",
             "id": "client",
             "routable": true,
             "policy": {
@@ -1946,10 +2231,10 @@
           }
         ],
         "exclude": [
-          "client"
+          "claude-code:client"
         ],
         "liveByAccount": {
-          "client": 3
+          "claude-code:client": 3
         }
       },
       "expected": {
@@ -1957,6 +2242,7 @@
         "ranked": [],
         "ineligible": [
           {
+            "runtime": "claude-code",
             "id": "client",
             "reasons": [
               "excluded",
@@ -1974,6 +2260,7 @@
         "now": "2026-09-26T16:00:00.000Z",
         "accounts": [
           {
+            "runtime": "claude-code",
             "id": "a",
             "routable": true,
             "policy": {
@@ -2002,6 +2289,7 @@
             }
           },
           {
+            "runtime": "claude-code",
             "id": "b",
             "routable": true,
             "policy": {
@@ -2031,17 +2319,22 @@
           }
         ],
         "liveByAccount": {
-          "a": 1
+          "claude-code:a": 1
         }
       },
       "expected": {
-        "pick": "a",
+        "pick": {
+          "runtime": "claude-code",
+          "id": "a"
+        },
         "ranked": [
           {
+            "runtime": "claude-code",
             "id": "a",
             "tier": 1
           },
           {
+            "runtime": "claude-code",
             "id": "b",
             "tier": 1
           }
@@ -2055,6 +2348,7 @@
         "now": "2026-09-26T16:00:00.000Z",
         "accounts": [
           {
+            "runtime": "claude-code",
             "id": "new",
             "routable": true,
             "policy": {
@@ -2070,9 +2364,13 @@
         ]
       },
       "expected": {
-        "pick": "new",
+        "pick": {
+          "runtime": "claude-code",
+          "id": "new"
+        },
         "ranked": [
           {
+            "runtime": "claude-code",
             "id": "new",
             "tier": 1,
             "score": 0.6,
@@ -2088,6 +2386,7 @@
         "now": "2026-09-26T16:00:00.000Z",
         "accounts": [
           {
+            "runtime": "claude-code",
             "id": "personal",
             "routable": true,
             "policy": {
@@ -2109,6 +2408,7 @@
             }
           },
           {
+            "runtime": "claude-code",
             "id": "spare",
             "routable": true,
             "policy": {
@@ -2124,14 +2424,19 @@
         ]
       },
       "expected": {
-        "pick": "spare",
+        "pick": {
+          "runtime": "claude-code",
+          "id": "spare"
+        },
         "ranked": [
           {
+            "runtime": "claude-code",
             "id": "spare",
             "tier": 1,
             "score": 0.6
           },
           {
+            "runtime": "claude-code",
             "id": "personal",
             "tier": 2,
             "score": 0.24
@@ -2146,6 +2451,7 @@
         "now": "2026-09-26T16:00:00.000Z",
         "accounts": [
           {
+            "runtime": "claude-code",
             "id": "alpha",
             "routable": true,
             "policy": {
@@ -2174,6 +2480,7 @@
             }
           },
           {
+            "runtime": "claude-code",
             "id": "zed",
             "routable": true,
             "policy": {
@@ -2204,13 +2511,18 @@
         ]
       },
       "expected": {
-        "pick": "zed",
+        "pick": {
+          "runtime": "claude-code",
+          "id": "zed"
+        },
         "ranked": [
           {
+            "runtime": "claude-code",
             "id": "zed",
             "tier": 1
           },
           {
+            "runtime": "claude-code",
             "id": "alpha",
             "tier": 1
           }
@@ -2224,6 +2536,7 @@
         "now": "2026-09-26T16:00:00.000Z",
         "accounts": [
           {
+            "runtime": "claude-code",
             "id": "zed",
             "routable": true,
             "policy": {
@@ -2245,6 +2558,7 @@
             }
           },
           {
+            "runtime": "claude-code",
             "id": "alpha",
             "routable": true,
             "policy": {
@@ -2275,13 +2589,18 @@
         ]
       },
       "expected": {
-        "pick": "alpha",
+        "pick": {
+          "runtime": "claude-code",
+          "id": "alpha"
+        },
         "ranked": [
           {
+            "runtime": "claude-code",
             "id": "alpha",
             "tier": 1
           },
           {
+            "runtime": "claude-code",
             "id": "zed",
             "tier": 1
           }
@@ -2295,6 +2614,7 @@
         "now": "2026-09-26T16:00:00.000Z",
         "accounts": [
           {
+            "runtime": "claude-code",
             "id": "a",
             "routable": true,
             "policy": {
@@ -2330,6 +2650,7 @@
             }
           },
           {
+            "runtime": "claude-code",
             "id": "b",
             "routable": true,
             "policy": {
@@ -2361,15 +2682,20 @@
         "model": "claude-opus-4-1"
       },
       "expected": {
-        "pick": "b",
+        "pick": {
+          "runtime": "claude-code",
+          "id": "b"
+        },
         "ranked": [
           {
+            "runtime": "claude-code",
             "id": "b",
             "tier": 1
           }
         ],
         "ineligible": [
           {
+            "runtime": "claude-code",
             "id": "a",
             "reasons": [
               "limited"
@@ -2384,6 +2710,7 @@
         "now": "2026-09-26T16:00:00.000Z",
         "accounts": [
           {
+            "runtime": "claude-code",
             "id": "a",
             "routable": true,
             "policy": {
@@ -2419,6 +2746,7 @@
             }
           },
           {
+            "runtime": "claude-code",
             "id": "b",
             "routable": true,
             "policy": {
@@ -2450,14 +2778,19 @@
         "model": "claude-sonnet-4-5"
       },
       "expected": {
-        "pick": "a",
+        "pick": {
+          "runtime": "claude-code",
+          "id": "a"
+        },
         "ranked": [
           {
+            "runtime": "claude-code",
             "id": "a",
             "tier": 1,
             "signal": "unknown"
           },
           {
+            "runtime": "claude-code",
             "id": "b",
             "tier": 1
           }
@@ -2471,6 +2804,7 @@
         "now": "2026-09-26T16:00:00.000Z",
         "accounts": [
           {
+            "runtime": "claude-code",
             "id": "renewed",
             "routable": true,
             "policy": {
@@ -2499,6 +2833,7 @@
             }
           },
           {
+            "runtime": "claude-code",
             "id": "spare",
             "routable": true,
             "policy": {
@@ -2529,15 +2864,20 @@
         ]
       },
       "expected": {
-        "pick": "renewed",
+        "pick": {
+          "runtime": "claude-code",
+          "id": "renewed"
+        },
         "ranked": [
           {
+            "runtime": "claude-code",
             "id": "renewed",
             "tier": 1,
             "score": 0.6,
             "signal": "ok"
           },
           {
+            "runtime": "claude-code",
             "id": "spare",
             "tier": 1
           }
@@ -2551,6 +2891,7 @@
         "now": "2026-09-26T16:00:00.000Z",
         "accounts": [
           {
+            "runtime": "claude-code",
             "id": "main",
             "routable": true,
             "policy": {
@@ -2579,6 +2920,7 @@
             }
           },
           {
+            "runtime": "claude-code",
             "id": "rot",
             "routable": true,
             "policy": {
@@ -2609,13 +2951,18 @@
         ]
       },
       "expected": {
-        "pick": "rot",
+        "pick": {
+          "runtime": "claude-code",
+          "id": "rot"
+        },
         "ranked": [
           {
+            "runtime": "claude-code",
             "id": "rot",
             "tier": 1
           },
           {
+            "runtime": "claude-code",
             "id": "main",
             "tier": 2,
             "score": 0.3
@@ -2623,41 +2970,881 @@
         ],
         "ineligible": []
       }
+    },
+    {
+      "name": "runtime: the item's runtime ranks first even with the lower score (cross-runtime fallback on)",
+      "input": {
+        "now": "2026-09-26T16:00:00.000Z",
+        "runtime": "claude-code",
+        "crossRuntimeFallback": "on",
+        "accounts": [
+          {
+            "runtime": "codex",
+            "id": "default",
+            "routable": true,
+            "policy": {
+              "role": "rotation",
+              "reservePct": 0,
+              "spendDownWindowHours": 24,
+              "scope": {
+                "repos": []
+              }
+            },
+            "windows": {
+              "five_hour": {
+                "usedPct": 10,
+                "resetsAt": "2026-09-26T19:00:00.000Z",
+                "status": null,
+                "observedAt": "2026-09-26T15:59:00.000Z",
+                "source": "statusline"
+              },
+              "seven_day": {
+                "usedPct": 0,
+                "resetsAt": "2026-09-27T16:00:00.000Z",
+                "status": null,
+                "observedAt": "2026-09-26T15:59:00.000Z",
+                "source": "statusline"
+              }
+            },
+            "implicit": true
+          },
+          {
+            "runtime": "claude-code",
+            "id": "a",
+            "routable": true,
+            "policy": {
+              "role": "rotation",
+              "reservePct": 0,
+              "spendDownWindowHours": 24,
+              "scope": {
+                "repos": []
+              }
+            },
+            "windows": {
+              "five_hour": {
+                "usedPct": 10,
+                "resetsAt": "2026-09-26T19:00:00.000Z",
+                "status": null,
+                "observedAt": "2026-09-26T15:59:00.000Z",
+                "source": "statusline"
+              },
+              "seven_day": {
+                "usedPct": 80,
+                "resetsAt": "2026-10-02T16:00:00.000Z",
+                "status": null,
+                "observedAt": "2026-09-26T15:59:00.000Z",
+                "source": "statusline"
+              }
+            }
+          }
+        ]
+      },
+      "expected": {
+        "pick": {
+          "runtime": "claude-code",
+          "id": "a"
+        },
+        "ranked": [
+          {
+            "runtime": "claude-code",
+            "id": "a",
+            "tier": 1
+          },
+          {
+            "runtime": "codex",
+            "id": "default",
+            "tier": 1
+          }
+        ],
+        "ineligible": []
+      }
+    },
+    {
+      "name": "runtime: with cross-runtime fallback off, another runtime is not a candidate, even when the own runtime has nothing",
+      "input": {
+        "now": "2026-09-26T16:00:00.000Z",
+        "runtime": "claude-code",
+        "accounts": [
+          {
+            "runtime": "claude-code",
+            "id": "a",
+            "routable": true,
+            "policy": {
+              "role": "rotation",
+              "reservePct": 0,
+              "spendDownWindowHours": 24,
+              "scope": {
+                "repos": []
+              }
+            },
+            "windows": {
+              "five_hour": {
+                "usedPct": 10,
+                "resetsAt": "2026-09-26T19:00:00.000Z",
+                "status": null,
+                "observedAt": "2026-09-26T15:59:00.000Z",
+                "source": "statusline"
+              },
+              "seven_day": {
+                "usedPct": 100,
+                "resetsAt": "2026-10-02T16:00:00.000Z",
+                "status": null,
+                "observedAt": "2026-09-26T15:59:00.000Z",
+                "source": "statusline"
+              }
+            }
+          },
+          {
+            "runtime": "codex",
+            "id": "default",
+            "routable": true,
+            "policy": {
+              "role": "rotation",
+              "reservePct": 0,
+              "spendDownWindowHours": 24,
+              "scope": {
+                "repos": []
+              }
+            },
+            "windows": {
+              "five_hour": {
+                "usedPct": 10,
+                "resetsAt": "2026-09-26T19:00:00.000Z",
+                "status": null,
+                "observedAt": "2026-09-26T15:59:00.000Z",
+                "source": "statusline"
+              },
+              "seven_day": {
+                "usedPct": 0,
+                "resetsAt": "2026-10-02T16:00:00.000Z",
+                "status": null,
+                "observedAt": "2026-09-26T15:59:00.000Z",
+                "source": "statusline"
+              }
+            },
+            "implicit": true
+          },
+          {
+            "runtime": "opencode",
+            "id": "default",
+            "routable": true,
+            "policy": {
+              "role": "rotation",
+              "reservePct": 0,
+              "spendDownWindowHours": 24,
+              "scope": {
+                "repos": []
+              }
+            },
+            "windows": null,
+            "implicit": true
+          }
+        ]
+      },
+      "expected": {
+        "pick": null,
+        "ranked": [],
+        "ineligible": [
+          {
+            "runtime": "claude-code",
+            "id": "a",
+            "reasons": [
+              "limited"
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "name": "runtime: with fallback on, an exhausted own runtime falls to another, in fleet.runtimes order",
+      "input": {
+        "now": "2026-09-26T16:00:00.000Z",
+        "runtime": "claude-code",
+        "runtimes": [
+          "claude-code",
+          "opencode",
+          "codex"
+        ],
+        "crossRuntimeFallback": "on",
+        "accounts": [
+          {
+            "runtime": "claude-code",
+            "id": "a",
+            "routable": true,
+            "policy": {
+              "role": "rotation",
+              "reservePct": 0,
+              "spendDownWindowHours": 24,
+              "scope": {
+                "repos": []
+              }
+            },
+            "windows": {
+              "five_hour": {
+                "usedPct": 10,
+                "resetsAt": "2026-09-26T19:00:00.000Z",
+                "status": null,
+                "observedAt": "2026-09-26T15:59:00.000Z",
+                "source": "statusline"
+              },
+              "seven_day": {
+                "usedPct": 100,
+                "resetsAt": "2026-10-02T16:00:00.000Z",
+                "status": null,
+                "observedAt": "2026-09-26T15:59:00.000Z",
+                "source": "statusline"
+              }
+            }
+          },
+          {
+            "runtime": "codex",
+            "id": "default",
+            "routable": true,
+            "policy": {
+              "role": "rotation",
+              "reservePct": 0,
+              "spendDownWindowHours": 24,
+              "scope": {
+                "repos": []
+              }
+            },
+            "windows": {
+              "five_hour": {
+                "usedPct": 10,
+                "resetsAt": "2026-09-26T19:00:00.000Z",
+                "status": null,
+                "observedAt": "2026-09-26T15:59:00.000Z",
+                "source": "statusline"
+              },
+              "seven_day": {
+                "usedPct": 0,
+                "resetsAt": "2026-10-02T16:00:00.000Z",
+                "status": null,
+                "observedAt": "2026-09-26T15:59:00.000Z",
+                "source": "statusline"
+              }
+            },
+            "implicit": true
+          },
+          {
+            "runtime": "opencode",
+            "id": "default",
+            "routable": true,
+            "policy": {
+              "role": "rotation",
+              "reservePct": 0,
+              "spendDownWindowHours": 24,
+              "scope": {
+                "repos": []
+              }
+            },
+            "windows": null,
+            "implicit": true
+          }
+        ]
+      },
+      "expected": {
+        "pick": {
+          "runtime": "opencode",
+          "id": "default"
+        },
+        "ranked": [
+          {
+            "runtime": "opencode",
+            "id": "default",
+            "tier": 1,
+            "signal": "ok"
+          },
+          {
+            "runtime": "codex",
+            "id": "default",
+            "tier": 1
+          }
+        ],
+        "ineligible": [
+          {
+            "runtime": "claude-code",
+            "id": "a",
+            "reasons": [
+              "limited"
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "name": "runtime: a runtime fleet.runtimes leaves out ranks after every listed one",
+      "input": {
+        "now": "2026-09-26T16:00:00.000Z",
+        "runtime": "claude-code",
+        "runtimes": [
+          "opencode"
+        ],
+        "crossRuntimeFallback": "on",
+        "accounts": [
+          {
+            "runtime": "codex",
+            "id": "default",
+            "routable": true,
+            "policy": {
+              "role": "rotation",
+              "reservePct": 0,
+              "spendDownWindowHours": 24,
+              "scope": {
+                "repos": []
+              }
+            },
+            "windows": {
+              "five_hour": {
+                "usedPct": 10,
+                "resetsAt": "2026-09-26T19:00:00.000Z",
+                "status": null,
+                "observedAt": "2026-09-26T15:59:00.000Z",
+                "source": "statusline"
+              },
+              "seven_day": {
+                "usedPct": 0,
+                "resetsAt": "2026-09-27T16:00:00.000Z",
+                "status": null,
+                "observedAt": "2026-09-26T15:59:00.000Z",
+                "source": "statusline"
+              }
+            },
+            "implicit": true
+          },
+          {
+            "runtime": "opencode",
+            "id": "default",
+            "routable": true,
+            "policy": {
+              "role": "rotation",
+              "reservePct": 0,
+              "spendDownWindowHours": 24,
+              "scope": {
+                "repos": []
+              }
+            },
+            "windows": null,
+            "implicit": true
+          }
+        ]
+      },
+      "expected": {
+        "pick": {
+          "runtime": "opencode",
+          "id": "default"
+        },
+        "ranked": [
+          {
+            "runtime": "opencode",
+            "id": "default",
+            "tier": 1
+          },
+          {
+            "runtime": "codex",
+            "id": "default",
+            "tier": 1
+          }
+        ],
+        "ineligible": []
+      }
+    },
+    {
+      "name": "runtime: the model's buckets bind only the item's runtime",
+      "input": {
+        "now": "2026-09-26T16:00:00.000Z",
+        "runtime": "claude-code",
+        "crossRuntimeFallback": "on",
+        "model": "claude-opus-4-1",
+        "accounts": [
+          {
+            "runtime": "claude-code",
+            "id": "a",
+            "routable": true,
+            "policy": {
+              "role": "rotation",
+              "reservePct": 0,
+              "spendDownWindowHours": 24,
+              "scope": {
+                "repos": []
+              }
+            },
+            "windows": {
+              "five_hour": {
+                "usedPct": 10,
+                "resetsAt": "2026-09-26T19:00:00.000Z",
+                "status": null,
+                "observedAt": "2026-09-26T15:59:00.000Z",
+                "source": "statusline"
+              },
+              "seven_day": {
+                "usedPct": 20,
+                "resetsAt": "2026-10-02T16:00:00.000Z",
+                "status": null,
+                "observedAt": "2026-09-26T15:59:00.000Z",
+                "source": "statusline"
+              },
+              "seven_day_opus": {
+                "usedPct": 100,
+                "resetsAt": "2026-10-01T16:00:00.000Z",
+                "status": null,
+                "observedAt": "2026-09-26T15:59:00.000Z",
+                "source": "statusline"
+              }
+            }
+          },
+          {
+            "runtime": "codex",
+            "id": "default",
+            "routable": true,
+            "policy": {
+              "role": "rotation",
+              "reservePct": 0,
+              "spendDownWindowHours": 24,
+              "scope": {
+                "repos": []
+              }
+            },
+            "windows": {
+              "five_hour": {
+                "usedPct": 10,
+                "resetsAt": "2026-09-26T19:00:00.000Z",
+                "status": null,
+                "observedAt": "2026-09-26T15:59:00.000Z",
+                "source": "statusline"
+              },
+              "seven_day": {
+                "usedPct": 20,
+                "resetsAt": "2026-10-02T16:00:00.000Z",
+                "status": null,
+                "observedAt": "2026-09-26T15:59:00.000Z",
+                "source": "statusline"
+              },
+              "seven_day_opus": {
+                "usedPct": 100,
+                "resetsAt": "2026-10-01T16:00:00.000Z",
+                "status": null,
+                "observedAt": "2026-09-26T15:59:00.000Z",
+                "source": "statusline"
+              }
+            },
+            "implicit": true
+          }
+        ]
+      },
+      "expected": {
+        "pick": {
+          "runtime": "codex",
+          "id": "default"
+        },
+        "ranked": [
+          {
+            "runtime": "codex",
+            "id": "default",
+            "tier": 1,
+            "signal": "ok"
+          }
+        ],
+        "ineligible": [
+          {
+            "runtime": "claude-code",
+            "id": "a",
+            "reasons": [
+              "limited"
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "name": "runtime: the same id in two runtimes is two accounts (live counts, exclusions and affinity by key)",
+      "input": {
+        "now": "2026-09-26T16:00:00.000Z",
+        "runtime": "codex",
+        "runtimes": [
+          "codex"
+        ],
+        "crossRuntimeFallback": "on",
+        "affinity": "claude-code:a",
+        "exclude": [
+          "claude-code:b"
+        ],
+        "liveByAccount": {
+          "claude-code:a": 2
+        },
+        "accounts": [
+          {
+            "runtime": "codex",
+            "id": "a",
+            "routable": true,
+            "policy": {
+              "role": "rotation",
+              "reservePct": 0,
+              "spendDownWindowHours": 24,
+              "scope": {
+                "repos": []
+              }
+            },
+            "windows": {
+              "five_hour": {
+                "usedPct": 10,
+                "resetsAt": "2026-09-26T19:00:00.000Z",
+                "status": null,
+                "observedAt": "2026-09-26T15:59:00.000Z",
+                "source": "statusline"
+              },
+              "seven_day": {
+                "usedPct": 50,
+                "resetsAt": "2026-10-02T16:00:00.000Z",
+                "status": null,
+                "observedAt": "2026-09-26T15:59:00.000Z",
+                "source": "statusline"
+              }
+            }
+          },
+          {
+            "runtime": "claude-code",
+            "id": "a",
+            "routable": true,
+            "policy": {
+              "role": "rotation",
+              "reservePct": 0,
+              "spendDownWindowHours": 24,
+              "scope": {
+                "repos": []
+              }
+            },
+            "windows": {
+              "five_hour": {
+                "usedPct": 10,
+                "resetsAt": "2026-09-26T19:00:00.000Z",
+                "status": null,
+                "observedAt": "2026-09-26T15:59:00.000Z",
+                "source": "statusline"
+              },
+              "seven_day": {
+                "usedPct": 0,
+                "resetsAt": "2026-10-02T16:00:00.000Z",
+                "status": null,
+                "observedAt": "2026-09-26T15:59:00.000Z",
+                "source": "statusline"
+              }
+            }
+          },
+          {
+            "runtime": "claude-code",
+            "id": "b",
+            "routable": true,
+            "policy": {
+              "role": "rotation",
+              "reservePct": 0,
+              "spendDownWindowHours": 24,
+              "scope": {
+                "repos": []
+              }
+            },
+            "windows": {
+              "five_hour": {
+                "usedPct": 10,
+                "resetsAt": "2026-09-26T19:00:00.000Z",
+                "status": null,
+                "observedAt": "2026-09-26T15:59:00.000Z",
+                "source": "statusline"
+              },
+              "seven_day": {
+                "usedPct": 0,
+                "resetsAt": "2026-10-02T16:00:00.000Z",
+                "status": null,
+                "observedAt": "2026-09-26T15:59:00.000Z",
+                "source": "statusline"
+              }
+            }
+          },
+          {
+            "runtime": "codex",
+            "id": "b",
+            "routable": true,
+            "policy": {
+              "role": "rotation",
+              "reservePct": 0,
+              "spendDownWindowHours": 24,
+              "scope": {
+                "repos": []
+              }
+            },
+            "windows": {
+              "five_hour": {
+                "usedPct": 10,
+                "resetsAt": "2026-09-26T19:00:00.000Z",
+                "status": null,
+                "observedAt": "2026-09-26T15:59:00.000Z",
+                "source": "statusline"
+              },
+              "seven_day": {
+                "usedPct": 50,
+                "resetsAt": "2026-10-02T16:00:00.000Z",
+                "status": null,
+                "observedAt": "2026-09-26T15:59:00.000Z",
+                "source": "statusline"
+              }
+            }
+          }
+        ]
+      },
+      "expected": {
+        "pick": {
+          "runtime": "codex",
+          "id": "a"
+        },
+        "ranked": [
+          {
+            "runtime": "codex",
+            "id": "a",
+            "tier": 1
+          },
+          {
+            "runtime": "codex",
+            "id": "b",
+            "tier": 1
+          }
+        ],
+        "ineligible": [
+          {
+            "runtime": "claude-code",
+            "id": "a",
+            "reasons": [
+              "at-capacity"
+            ]
+          },
+          {
+            "runtime": "claude-code",
+            "id": "b",
+            "reasons": [
+              "excluded"
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "name": "metered: an opencode account at its spend limit is limited; one under it is eligible",
+      "input": {
+        "now": "2026-09-26T16:00:00.000Z",
+        "runtime": "opencode",
+        "accounts": [
+          {
+            "runtime": "opencode",
+            "id": "capped",
+            "routable": true,
+            "policy": {
+              "role": "rotation",
+              "reservePct": 0,
+              "spendDownWindowHours": 24,
+              "scope": {
+                "repos": []
+              }
+            },
+            "windows": {},
+            "spend": {
+              "periodStart": "2026-09-01T00:00:00.000Z",
+              "costUsd": 50,
+              "limitUsd": 50,
+              "observedAt": "2026-09-26T15:59:00.000Z",
+              "source": "sdk_usage"
+            }
+          },
+          {
+            "runtime": "opencode",
+            "id": "open",
+            "routable": true,
+            "policy": {
+              "role": "rotation",
+              "reservePct": 0,
+              "spendDownWindowHours": 24,
+              "scope": {
+                "repos": []
+              }
+            },
+            "windows": {},
+            "spend": {
+              "periodStart": "2026-09-01T00:00:00.000Z",
+              "costUsd": 10,
+              "limitUsd": 50,
+              "observedAt": "2026-09-26T15:59:00.000Z",
+              "source": "sdk_usage"
+            }
+          }
+        ]
+      },
+      "expected": {
+        "pick": {
+          "runtime": "opencode",
+          "id": "open"
+        },
+        "ranked": [
+          {
+            "runtime": "opencode",
+            "id": "open",
+            "tier": 1,
+            "signal": "ok"
+          }
+        ],
+        "ineligible": [
+          {
+            "runtime": "opencode",
+            "id": "capped",
+            "reasons": [
+              "limited"
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "name": "implicit default: a runtime with no registry ranks its default account (the ambient environment)",
+      "input": {
+        "now": "2026-09-26T16:00:00.000Z",
+        "runtime": "claude-code",
+        "accounts": [
+          {
+            "runtime": "claude-code",
+            "id": "default",
+            "routable": true,
+            "policy": {
+              "role": "rotation",
+              "reservePct": 0,
+              "spendDownWindowHours": 24,
+              "scope": {
+                "repos": []
+              }
+            },
+            "windows": null,
+            "implicit": true
+          }
+        ]
+      },
+      "expected": {
+        "pick": {
+          "runtime": "claude-code",
+          "id": "default"
+        },
+        "ranked": [
+          {
+            "runtime": "claude-code",
+            "id": "default",
+            "tier": 1,
+            "signal": "unknown"
+          }
+        ],
+        "ineligible": []
+      }
+    },
+    {
+      "name": "implicit default: a fleet.json entry still applies to it (kept out: out-of-scope)",
+      "input": {
+        "now": "2026-09-26T16:00:00.000Z",
+        "runtime": "claude-code",
+        "accounts": [
+          {
+            "runtime": "claude-code",
+            "id": "default",
+            "routable": true,
+            "policy": {
+              "role": "kept-out",
+              "reservePct": 0,
+              "spendDownWindowHours": 24,
+              "scope": {
+                "repos": []
+              }
+            },
+            "windows": null,
+            "implicit": true
+          }
+        ]
+      },
+      "expected": {
+        "pick": null,
+        "ranked": [],
+        "ineligible": [
+          {
+            "runtime": "claude-code",
+            "id": "default",
+            "reasons": [
+              "out-of-scope"
+            ]
+          }
+        ]
+      }
     }
   ],
   "chooseAccount": [
     {
-      "name": "no identities registered: the ambient account",
+      "name": "a runtime with no registered row: its default account, in its machine-wide folder (S1 rev 6d)",
       "input": {
-        "identities": [],
+        "accounts": [
+          {
+            "runtime": "claude-code",
+            "id": "default",
+            "path": "/home/op/.claude",
+            "implicit": true
+          }
+        ],
         "rank": {
-          "pick": null,
-          "ranked": [],
+          "pick": {
+            "runtime": "claude-code",
+            "id": "default"
+          },
+          "ranked": [
+            {
+              "runtime": "claude-code",
+              "id": "default",
+              "tier": 1,
+              "score": 1,
+              "signal": {
+                "level": "ok",
+                "window": null,
+                "resetsAt": null,
+                "cause": null
+              }
+            }
+          ],
           "ineligible": []
         }
       },
       "expected": {
-        "account": null,
-        "reason": "no-registry"
+        "account": {
+          "runtime": "claude-code",
+          "id": "default",
+          "path": "/home/op/.claude",
+          "implicit": true
+        }
       }
     },
     {
-      "name": "identities and a pick: that identity",
+      "name": "registered accounts and a pick: that account, with its folder",
       "input": {
-        "identities": [
+        "accounts": [
           {
+            "runtime": "claude-code",
             "id": "a",
-            "path": "/accounts/a"
+            "path": "/accounts/a",
+            "implicit": false
           },
           {
+            "runtime": "claude-code",
             "id": "b",
-            "path": "/accounts/b"
+            "path": "/accounts/b",
+            "implicit": false
           }
         ],
         "rank": {
-          "pick": "b",
+          "pick": {
+            "runtime": "claude-code",
+            "id": "b"
+          },
           "ranked": [
             {
+              "runtime": "claude-code",
               "id": "b",
               "tier": 1,
               "score": 1,
@@ -2671,6 +3858,7 @@
           ],
           "ineligible": [
             {
+              "runtime": "claude-code",
               "id": "a",
               "reasons": [
                 "limited"
@@ -2681,18 +3869,70 @@
       },
       "expected": {
         "account": {
+          "runtime": "claude-code",
           "id": "b",
-          "path": "/accounts/b"
+          "path": "/accounts/b",
+          "implicit": false
         }
       }
     },
     {
-      "name": "identities and nothing eligible: 'none' with the reasons, never the ambient account",
+      "name": "the pick is matched by runtime and id: the same id in another runtime is not it",
       "input": {
-        "identities": [
+        "accounts": [
           {
+            "runtime": "claude-code",
+            "id": "a",
+            "path": "/claude/a",
+            "implicit": false
+          },
+          {
+            "runtime": "codex",
+            "id": "a",
+            "path": "/codex/a",
+            "implicit": false
+          }
+        ],
+        "rank": {
+          "pick": {
+            "runtime": "codex",
+            "id": "a"
+          },
+          "ranked": [
+            {
+              "runtime": "codex",
+              "id": "a",
+              "tier": 1,
+              "score": 1,
+              "signal": {
+                "level": "ok",
+                "window": null,
+                "resetsAt": null,
+                "cause": null
+              }
+            }
+          ],
+          "ineligible": []
+        }
+      },
+      "expected": {
+        "account": {
+          "runtime": "codex",
+          "id": "a",
+          "path": "/codex/a",
+          "implicit": false
+        }
+      }
+    },
+    {
+      "name": "registered accounts and nothing eligible: 'none' with the reasons, never the ambient environment",
+      "input": {
+        "accounts": [
+          {
+            "runtime": "claude-code",
             "id": "client",
-            "path": "/accounts/client"
+            "path": "/accounts/client",
+            "implicit": false
           }
         ],
         "rank": {
@@ -2700,6 +3940,7 @@
           "ranked": [],
           "ineligible": [
             {
+              "runtime": "claude-code",
               "id": "client",
               "reasons": [
                 "out-of-scope"
@@ -2712,6 +3953,7 @@
         "account": "none",
         "reasons": [
           {
+            "runtime": "claude-code",
             "id": "client",
             "reasons": [
               "out-of-scope"
@@ -2721,22 +3963,30 @@
       }
     },
     {
-      "name": "a standalone default from the shared resolver is chosen with its machine-wide folder (rev 6d)",
+      "name": "a standalone default beside registered accounts is chosen with its machine-wide folder (rev 6d)",
       "input": {
-        "identities": [
+        "accounts": [
           {
+            "runtime": "claude-code",
             "id": "claude3",
-            "path": "/home/op/.claude3"
+            "path": "/home/op/.claude3",
+            "implicit": false
           },
           {
+            "runtime": "claude-code",
             "id": "default",
-            "path": "/home/op/.claude"
+            "path": "/home/op/.claude",
+            "implicit": true
           }
         ],
         "rank": {
-          "pick": "default",
+          "pick": {
+            "runtime": "claude-code",
+            "id": "default"
+          },
           "ranked": [
             {
+              "runtime": "claude-code",
               "id": "default",
               "tier": 2,
               "score": 0,
@@ -2750,9 +4000,10 @@
           ],
           "ineligible": [
             {
+              "runtime": "claude-code",
               "id": "claude3",
               "reasons": [
-                "limited"
+                "out-of-scope"
               ]
             }
           ]
@@ -2760,24 +4011,32 @@
       },
       "expected": {
         "account": {
+          "runtime": "claude-code",
           "id": "default",
-          "path": "/home/op/.claude"
+          "path": "/home/op/.claude",
+          "implicit": true
         }
       }
     },
     {
-      "name": "OpenCode's ambient default is chosen with no folder",
+      "name": "OpenCode's ambient default is the only pick with no folder",
       "input": {
-        "identities": [
+        "accounts": [
           {
+            "runtime": "opencode",
             "id": "default",
-            "path": null
+            "path": null,
+            "implicit": true
           }
         ],
         "rank": {
-          "pick": "default",
+          "pick": {
+            "runtime": "opencode",
+            "id": "default"
+          },
           "ranked": [
             {
+              "runtime": "opencode",
               "id": "default",
               "tier": 1,
               "score": 0,
@@ -2794,8 +4053,10 @@
       },
       "expected": {
         "account": {
+          "runtime": "opencode",
           "id": "default",
-          "path": null
+          "path": null,
+          "implicit": true
         }
       }
     }
@@ -2842,6 +4103,45 @@
         "slots": 0,
         "reason": null
       }
+    }
+  ],
+  "itemRuntime": [
+    {
+      "name": "the run's recorded runtime wins",
+      "input": {
+        "recorded": "codex",
+        "runtimes": [
+          "opencode"
+        ]
+      },
+      "expected": "codex"
+    },
+    {
+      "name": "no run: the first of fleet.runtimes",
+      "input": {
+        "recorded": null,
+        "runtimes": [
+          "opencode",
+          "codex"
+        ]
+      },
+      "expected": "opencode"
+    },
+    {
+      "name": "no run and no preference: claude-code",
+      "input": {
+        "recorded": null,
+        "runtimes": []
+      },
+      "expected": "claude-code"
+    },
+    {
+      "name": "a recorded runtime flow does not know falls through",
+      "input": {
+        "recorded": "gemini",
+        "runtimes": []
+      },
+      "expected": "claude-code"
     }
   ]
 }

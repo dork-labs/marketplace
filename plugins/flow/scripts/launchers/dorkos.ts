@@ -12,7 +12,8 @@
  * - **runtimes:** all three. `runtime` rides to `session_start` and the route
  *   body. DorkOS supports accounts for claude-code only today, so for codex and
  *   opencode an account is sent only when it is a registered, non-default one;
- *   the implicit default account is omitted and DorkOS runs its ambient login.
+ *   the `default` account is omitted and DorkOS runs its own default login
+ *   (the same machine-wide `default`, spec `flow-cli-core` §1.1a rev 6d).
  *   A non-default codex or opencode account must still be reported back on the
  *   session (`account`), and fails closed as `wrong-account` until DorkOS does.
  * - **send:** `POST /api/sessions/<id>/messages` (DorkOS queues while a turn runs).

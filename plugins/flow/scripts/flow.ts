@@ -2,12 +2,14 @@
  * The `flow` CLI entry point (spec `flow-cli-core` §2).
  *
  * Run it as `node --experimental-strip-types <flow-root>/scripts/flow.ts <verb>
- * [args] [flags]`. It owns three things and nothing else:
+ * [args] [flags]`. It owns four things and nothing else:
  *
  * - the verb table ({@link VERBS}), which the parser and `--help` read without
  *   loading any verb module;
  * - the run: parse argv, `import()` the one verb asked for, print its result;
- * - the one mapping from a thrown error to an exit code ({@link classifyError}).
+ * - the one mapping from a thrown error to an exit code ({@link classifyError});
+ * - the journal line every verb run gets once its arguments parse (`verb`, and
+ *   `oracle.error` on exit 70), which never changes the run's output or exit.
  *
  * Every top-level import is dependency-free, so `--help`, a usage error and the
  * "run npm install" hint all work before `npm install`. Verbs that need `zod`
@@ -26,11 +28,14 @@ import {
   realProcessRunner,
   type AdapterFactory,
   type CliDeps,
+  type VerbContext,
   type VerbDefinition,
 } from './cli/context.ts';
+import { recordEvent, recordsVerbRun } from './cli/auto-journal.ts';
 import { journalVerb, noteVerb } from './cli/journal-verbs.ts';
 import { Output, renderTopHelp, renderVerbHelp } from './cli/output.ts';
 import { EXIT, FlowError, UsageError, type ExitCode } from './errors.ts';
+import type { Runtime } from './runtime-detect.ts';
 
 /**
  * The verb table. Add a verb with one module under `scripts/cli/` and one entry
@@ -71,7 +76,7 @@ export const VERBS: readonly VerbDefinition[] = [
     name: 'next',
     summary: 'Show the next item to work on, ranked by the dispatch policy.',
     description:
-      'Rank the ready queue with the dispatch policy (the same one dispatch.ts runs), with ownership and work in progress worked out from the backlog. Nothing eligible still exits 0; "atWipCap" says the cap is what blocks; else "starved" says whether a triage pass would help. Exits 7 while flow is paused, unless --manual.',
+      'Rank the ready queue with the dispatch policy (the same one dispatch.ts runs), with ownership and work in progress worked out from the backlog. Each pick also gets the account its session should run on (see flow accounts), spreading -n picks across accounts. Nothing eligible still exits 0; "atWipCap" says the cap is what blocks; else "starved" says whether a triage pass would help. Exits 7 while flow is paused, unless --manual.',
     common: ['project', 'snapshot', 'manual'],
     flags: [
       {
@@ -86,6 +91,11 @@ export const VERBS: readonly VerbDefinition[] = [
         kind: 'string',
         value: 'name|id',
         description: 'Only consider items in this project (its id, or its name in any case).',
+      },
+      {
+        name: 'no-account',
+        kind: 'boolean',
+        description: 'Do not pick the account each item should run on.',
       },
     ],
     load: () => import('./cli/next.ts'),
@@ -279,11 +289,20 @@ export const VERBS: readonly VerbDefinition[] = [
     name: 'stage',
     summary: 'Move an item to another stage.',
     description:
-      'Move an item to a stage from config. A started or completed stage removes every stage/* label; any other stage sets its label. Updates the run record when there is one.',
+      'Move an item to a stage from config. A started or completed stage removes every stage/* label; any other stage sets its label. Updates the run record when there is one. With --checkpoint-file, first writes the HANDOFF.md checkpoint for the new stage; a drain run must pass it.',
     common: ['project', 'dry-run', 'session'],
     positionals: [
       { name: 'identifier', required: true, description: 'The item, e.g. DOR-123.' },
       { name: 'stage', required: true, description: 'A key of stages in config.' },
+    ],
+    flags: [
+      {
+        name: 'checkpoint-file',
+        kind: 'string',
+        value: 'file',
+        description:
+          'The checkpoint body (Done, Next, Open questions, Next command), relative to --project.',
+      },
     ],
     load: () => import('./cli/stage.ts'),
   },
@@ -331,6 +350,142 @@ export const VERBS: readonly VerbDefinition[] = [
       },
     ],
     load: () => import('./cli/checkpoint.ts'),
+  },
+  {
+    name: 'report',
+    summary: 'Tell the drain a push, a review verdict or a question (drain workers and reviewers).',
+    description: [
+      'Record what happened on a drain run. flow checks each claim before recording it.',
+      '  pushed [--sha <sha>]   The commit (default HEAD) is on origin and has a checkpoint. Disarms an armed PR until it is reviewed.',
+      '  verdict --sha <sha> --token <t> (--clean | --changes --findings-file <f>)',
+      "                         The reviewer's verdict. The token comes from the reviewer's brief. A verdict on an older push is ignored.",
+      '  blocked --question-file <f>',
+      '                         Post the question on the item, mark it needs-input, and park the run.',
+    ].join('\n'),
+    common: ['project', 'session'],
+    positionals: [
+      { name: 'identifier', required: true, description: 'The work item, e.g. ACME-12.' },
+      { name: 'kind', required: true, description: 'pushed, verdict or blocked.' },
+    ],
+    flags: [
+      { name: 'sha', kind: 'string', value: 'sha', description: 'The commit pushed or reviewed.' },
+      {
+        name: 'token',
+        kind: 'string',
+        value: 'token',
+        description: "The review token from the reviewer's brief.",
+      },
+      { name: 'clean', kind: 'boolean', description: 'The review found nothing to change.' },
+      { name: 'changes', kind: 'boolean', description: 'The review asks for changes.' },
+      {
+        name: 'findings-file',
+        kind: 'string',
+        value: 'file',
+        description: 'The findings, with --changes.',
+      },
+      {
+        name: 'question-file',
+        kind: 'string',
+        value: 'file',
+        description: 'The question for a person, with blocked.',
+      },
+    ],
+    load: () => import('./cli/report.ts'),
+  },
+  {
+    name: 'pr',
+    summary: "Open a drain run's pull request after a clean review.",
+    description:
+      "Open the run's pull request into origin's default branch. Refuses unless the latest review is CLEAN at the branch head on origin. Adds a provenance line to the body. If a PR is already open for the branch, records it and exits 5.",
+    common: ['project', 'session'],
+    positionals: [
+      { name: 'identifier', required: true, description: 'The work item, e.g. ACME-12.' },
+    ],
+    flags: [
+      { name: 'title', kind: 'string', value: 'text', description: 'The PR title.' },
+      { name: 'body-file', kind: 'string', value: 'file', description: 'The PR body.' },
+      { name: 'arm', kind: 'boolean', description: 'Arm auto-merge on the new PR.' },
+      {
+        name: 'no-arm',
+        kind: 'boolean',
+        description: 'Leave auto-merge off. Default: drain.armAutoMerge (off).',
+      },
+    ],
+    load: () => import('./cli/pr.ts'),
+  },
+  {
+    name: 'drain',
+    summary:
+      'Carry several ready items at once: a worker per item on its own account, and a review before any PR.',
+    description: [
+      'Each pass checks every drain run (sessions, reports, the PR, the tracker item), sends each worker its next message, starts a reviewer for each push, and fills free slots with the next ready items, each on the account with the most room.',
+      'A PR opens only after a clean review at the branch head (flow pr enforces it). No new session starts while the machine is busy.',
+      '--tick runs one pass and exits (for a scheduler); otherwise it passes every drain.pollSeconds until nothing is active or eligible, or Ctrl-C, which leaves every session running. One drain per project (exit 5 while another runs). Exits 7 while flow is paused, unless --manual.',
+    ].join('\n'),
+    common: ['project', 'manual', 'dry-run'],
+    flags: [
+      {
+        name: 'parallel',
+        kind: 'string',
+        value: 'N',
+        description: 'Sessions at once. Default drain.parallel.',
+      },
+      {
+        name: 'host',
+        kind: 'string',
+        value: 'auto|cli|cmux|dorkos',
+        description: 'Where sessions run. Default drain.host, else auto.',
+      },
+      {
+        name: 'items',
+        kind: 'string',
+        value: 'id,...',
+        description: 'Only these items, in this order.',
+      },
+      {
+        name: 'permission-mode',
+        kind: 'string',
+        value: 'mode',
+        description: 'default, acceptEdits or bypassPermissions. Default drain.permissionMode.',
+      },
+      { name: 'tick', kind: 'boolean', description: 'Run one pass, then exit.' },
+    ],
+    load: () => import('./cli/drain.ts'),
+  },
+  {
+    name: 'watch',
+    summary: 'Wait until a watched pull request merges, closes, goes red or leaves the queue.',
+    description:
+      "Watch the named runs' pull requests (default: every run with one), plus any --pr. Prints one line per event: MERGED, CLOSED, FAILING: <checks>, EJECTED (innocent|suspect|unknown) or NOT-ARMED-NOT-QUEUED. Exits 0 on the first event unless --follow. Five failed reads in a row for one PR exit 4.",
+    common: ['project'],
+    positionals: [
+      {
+        name: 'identifier',
+        variadic: true,
+        description: 'Work items whose PRs to watch. Default: every run with a PR.',
+      },
+    ],
+    flags: [
+      {
+        name: 'pr',
+        kind: 'string',
+        value: 'owner/repo#n',
+        repeatable: true,
+        description: 'Also watch this pull request. Repeatable; needs no flow project.',
+      },
+      {
+        name: 'follow',
+        kind: 'boolean',
+        description: 'Keep watching after an event, until every PR merged or closed.',
+      },
+      {
+        name: 'interval',
+        kind: 'string',
+        value: 's',
+        description: 'Seconds between rounds. Default 90.',
+      },
+    ],
+    load: () => import('./cli/watch.ts'),
   },
   {
     name: 'usage',
@@ -457,6 +612,33 @@ export const VERBS: readonly VerbDefinition[] = [
     ],
     load: () => import('./cli/selftest.ts'),
   },
+  {
+    name: 'retro',
+    summary: "Look back over flow's own runs, report the measures, and propose changes.",
+    description:
+      'Reads the journal for the window and the one before, the self-test history, the backlog and the prose word counts. Writes .dork/flow/retro/<date>.json and .md and one journal line. Changes nothing in the tracker unless --file. Proposals over maxItemsPerRun wait for a later run and do not fail it; exits 1 when --file cannot act on a proposal (no create capability, or a tracker error).',
+    common: ['project', 'snapshot', 'session'],
+    flags: [
+      {
+        name: 'since',
+        kind: 'string',
+        value: 'duration',
+        description: 'How far back to look: 7d, 48h, 2w. Default selfImprovement.retro.window.',
+      },
+      {
+        name: 'file',
+        kind: 'boolean',
+        description: 'File the proposals as tracker items, once each, up to maxItemsPerRun.',
+      },
+      {
+        name: 'input',
+        kind: 'string',
+        value: 'proposals.json',
+        description: 'With --file: file this edited list of proposals instead.',
+      },
+    ],
+    load: () => import('./cli/retro.ts'),
+  },
 ];
 
 /** The plugin folder, `<flow-root>`: the parent of `scripts/`. */
@@ -468,6 +650,12 @@ export interface MainDeps extends CliDeps {
   verbs?: readonly VerbDefinition[];
   /** The plugin folder named in the install hint. Default: this file's `..`. */
   flowRoot?: string;
+  /**
+   * A monotonic clock in milliseconds that times a verb run for its journal
+   * line. Default `performance.now`. Kept apart from `now` so timing a run
+   * never reads the clock a verb (or a test's scripted clock) counts on.
+   */
+  elapsedMs?: () => number;
 }
 
 /** An exit code and the plain sentence printed with it. */
@@ -523,6 +711,8 @@ export async function main(argv: readonly string[], deps: MainDeps): Promise<num
   const verbs = deps.verbs ?? VERBS;
   const flowRoot = deps.flowRoot ?? FLOW_ROOT;
   const output = new Output(wantsJson(argv), deps.stdout, deps.stderr);
+  const elapsed = deps.elapsedMs ?? (() => performance.now());
+  let run: VerbRun | undefined;
 
   try {
     const location = locateVerb(argv);
@@ -542,15 +732,72 @@ export async function main(argv: readonly string[], deps: MainDeps): Promise<num
     }
 
     const args = parseVerbArgs(argv, location, verb);
-    const module = await verb.load();
     const ctx = createVerbContext(args, deps, flowRoot, (message) => output.warn(message));
+    // From here the run is a verb run, and it is journaled however it ends.
+    run = { ctx, verb, startedMs: elapsed() };
+    const module = await verb.load();
     const result = await module.run(ctx);
     output.result(result);
-    return result.exitCode ?? EXIT.ok;
+    const code = result.exitCode ?? EXIT.ok;
+    journalRun(run, elapsed, code, { runtime: result.runtime });
+    return code;
   } catch (error) {
     const { code, message } = classifyError(error, flowRoot);
     output.error(code, message);
+    if (run !== undefined) journalRun(run, elapsed, code, { error });
     return code;
+  }
+}
+
+/** A verb run in progress: what {@link journalRun} records once it ends. */
+interface VerbRun {
+  /** The verb's context. */
+  ctx: VerbContext;
+  /** The verb. */
+  verb: VerbDefinition;
+  /** When the run started, from the monotonic clock. */
+  startedMs: number;
+}
+
+/**
+ * Journal a finished verb run: a `verb` line with its time and exit code and,
+ * when it failed with an internal error (a bug in flow or in an oracle it
+ * runs), an `oracle.error` line with the error's first line, whatever the
+ * verb. `note` and `journal` (which write their own lines) get no `verb` line,
+ * and `usage record` gets one only when it fails: see {@link recordsVerbRun}.
+ * The `verb` line's runtime is the one the verb reported (`VerbResult.runtime`),
+ * else the environment's; a verb that threw reports none, so a refused
+ * `flow claim --runtime x` is recorded under the runtime that ran it.
+ * Never throws and never prints: see `cli/auto-journal.ts`.
+ */
+function journalRun(
+  run: VerbRun,
+  elapsed: () => number,
+  code: number,
+  outcome: { error?: unknown; runtime?: Runtime } = {}
+): void {
+  const { ctx, verb } = run;
+  const { error, runtime } = outcome;
+  try {
+    const identifier =
+      verb.positionals?.[0]?.name === 'identifier' ? ctx.args.positionals[0] : undefined;
+    const item = identifier === undefined ? {} : { item: identifier };
+    const ms = Math.max(0, Math.round(elapsed() - run.startedMs));
+    if (recordsVerbRun(verb.name, ctx.args.positionals, code)) {
+      recordEvent(ctx, { kind: 'verb', verb: verb.name, ms, exit: code, ...item }, runtime);
+    }
+    if (code === EXIT.internal) {
+      const message = error instanceof Error ? error.message : String(error);
+      recordEvent(ctx, {
+        kind: 'oracle.error',
+        oracle: verb.name,
+        exit: code,
+        errorClass: message.split(/\r?\n/, 1)[0] ?? '',
+        ...item,
+      });
+    }
+  } catch {
+    // The clock or the error itself misbehaved; the run's outcome stands.
   }
 }
 

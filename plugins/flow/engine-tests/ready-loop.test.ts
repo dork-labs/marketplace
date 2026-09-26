@@ -143,10 +143,14 @@ const CODE_CHECK = /\*\*Check the code, not the ticket\.\*\*/;
 function recipeGaps(doc: string, meta: string, templates: Record<string, string>): string[] {
   const gaps: string[] = [];
   if (!JSON.parse(meta).pages.includes('parallel-drain')) gaps.push('listed in the docs nav');
-  for (const name of ['worker-brief.md', 'reviewer-brief.md', 'watch.sh']) {
+  for (const name of ['worker-brief.md', 'reviewer-brief.md']) {
     if (!templates[name]) gaps.push(`ships templates/drain/${name}`);
     else if (!doc.includes(`templates/drain/${name}`)) gaps.push(`doc names ${name}`);
   }
+  // flow watch replaced watch.sh: the doc points at the command, and the script is gone.
+  if (!doc.includes('flow watch')) gaps.push('doc names flow watch');
+  if (templates['watch.sh'] !== undefined || doc.includes('watch.sh'))
+    gaps.push('watch.sh is gone');
   // Generalized: no machine paths, ticket ids, accounts or session ids left over.
   const leftovers = /\/Users\/|\/private\/tmp|\bDOR-[0-9]+|--account \w|6843b882|Maintenance drain/;
   for (const [name, text] of Object.entries({ doc, ...templates })) {

@@ -60,6 +60,8 @@ export interface DrainWorkerHandle extends Omit<SessionHandle, 'runtime'> {
   runtime?: SessionHandle['runtime'];
   /** `true` while the slot holds the intent and the session is not yet confirmed started. */
   pending?: boolean;
+  /** When the intent was written (ISO); a pending slot older than the start timeout is resolved (§4.3). */
+  pendingSince?: string;
 }
 
 /** A reviewer's session handle: the SHA it reviews, where, and its token's hash. */
@@ -88,9 +90,9 @@ export interface DrainPullRequest {
 
 /** One move of a run between accounts. */
 export interface DrainHandoff {
-  /** The account moved from, or `null` for the ambient account. */
+  /** The account moved from, or `null` for the runtime's standalone `default` account. */
   from: string | null;
-  /** The account moved to, or `null` for the ambient account. */
+  /** The account moved to, or `null` for the runtime's standalone `default` account. */
   to: string | null;
   /** When (ISO). */
   at: string;
@@ -130,13 +132,17 @@ export interface DrainState {
   handoffs: DrainHandoff[];
   /** Why the run parked, when `phase` is `parked`. */
   parkedReason: string | null;
+  /** The phase the run parked from, which an answer resumes; absent on older records. */
+  parkedFrom?: DrainPhase | null;
+  /** When the run parked (ISO): only a reply after it answers the park. */
+  parkedAt?: string | null;
 }
 
 /** A run's account limit episode (§5.1), stored at `FlowRun.limit`. */
 export interface RunLimit {
   /** How bad: close to a ceiling, or at it. */
   level: 'warning' | 'exhausted';
-  /** The account that hit it, or `null` for the ambient account. */
+  /** The account that hit it, or `null` for the runtime's standalone `default` account. */
   account: string | null;
   /** The rate-limit window. */
   window: string | null;
@@ -176,16 +182,9 @@ const nullableString = z.string().nullable();
  */
 const runtimeField = vocabulary<RuntimeName>().optional();
 
-/**
- * The runtime of a stored handle: its own, or `claude-code` for a handle
- * written before launchers were runtime-aware.
- *
- * @param handle - A handle read from the run store.
- * @returns Its runtime.
- */
-export function handleRuntime(handle: { runtime?: RuntimeName }): RuntimeName {
-  return handle.runtime ?? 'claude-code';
-}
+// `handleRuntime` lives in the dependency-free launcher types so the pure
+// reducers can use it without loading zod; re-exported here beside the schema.
+export { handleRuntime } from '../launchers/types.ts';
 const count = z.number().int().nonnegative();
 
 /** The on-disk check for a {@link SessionHandle}. */
@@ -222,6 +221,7 @@ const workerHandleShape = {
   permissionMode: vocabulary<LaunchPermissionMode>().optional(),
   model: z.string().optional(),
   pending: z.boolean().optional(),
+  pendingSince: z.string().optional(),
 };
 
 /** The on-disk check for a {@link DrainWorkerHandle}. */
@@ -268,6 +268,8 @@ const DrainStateV1Schema = z.looseObject({
     })
   ),
   parkedReason: nullableString,
+  parkedFrom: vocabulary<DrainPhase>().nullable().optional(),
+  parkedAt: nullableString.optional(),
 });
 
 /**

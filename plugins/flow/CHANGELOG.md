@@ -4,7 +4,7 @@ Installs of this plugin are pinned to a commit SHA, so a fix here does not reach
 you until you **reinstall it** (Marketplace → flow → reinstall, or re-run your
 `--plugin-dir` checkout's `git pull`). Each entry below says whether that matters.
 
-## 0.28.0
+## 0.31.0
 
 **Your main Claude Code sign-in now shows up in flow, even when you have listed other accounts. Reinstall to get it.**
 
@@ -13,7 +13,43 @@ you until you **reinstall it** (Marketplace → flow → reinstall, or re-run yo
 - If none does, `default` is its own account, "Main (this computer's sign-in)", with its usage in `default.json`. Before this, it was hidden as soon as you listed any account.
 - Next to listed accounts, that sign-in counts as your `main` account: flow keeps half of its weekly limit for you and uses it last. Give another account the `main` role, or give `default` any role, and your choice wins.
 - `flow usage probe default --yes` now checks that sign-in, `flow usage install-statusline` sets up its status line, and the status line records it. A session in a folder that is neither listed nor the default still records nothing.
+- `flow next` and `flow drain` can pick that sign-in, and start its sessions in its own folder, whatever folder the drain itself runs in.
 - The shared test files DorkOS checks itself against are now version 3.0.0: what `default` means changed, so DorkOS must update its side too.
+
+## 0.30.0
+
+**New `flow drain --parallel N`: flow works on several ready items at once, each on the account with the most room, and opens a PR only after an independent review comes back clean. Reinstall to get it.**
+
+- `flow drain --parallel 3` claims ready items and starts one working session per item in its own worktree. Each session goes to the account whose unused weekly allowance runs out soonest, and your main account is used last. The session can be a terminal, cmux or the DorkOS app. New sessions wait while the machine is busy.
+- Each pushed commit gets a separate reviewer session. Its findings go back to the worker, and the loop repeats until the review is clean. Only then can the worker open the PR, with `flow pr`, which refuses otherwise. A push to an open PR turns auto-merge off until that push is reviewed.
+- `flow watch` replaces `templates/drain/watch.sh`. It tells the worker when its PR merges, fails a check or leaves the merge queue. When the queue drops a PR over a check that also failed for other PRs, it puts the PR back once.
+- `flow next` now names the account (and, with Codex or OpenCode, the tool) each item should run on.
+- `flow stage --checkpoint-file` writes a `HANDOFF.md` checkpoint at every stage boundary, and the stage instructions use it.
+- On DorkOS, the scheduled drain runs one `flow drain --tick` per firing once `drain.parallel` is set above 0. At 0 it does what it did before.
+
+## 0.29.0
+
+**New `flow retro`: flow looks back over its own week and suggests fixes to itself. Reinstall to get it.**
+
+- `flow retro` reads flow's notebook for the last week and the week before, the self-test results and your backlog. Today it can show how many items are ready or still untyped, which flow commands failed, and how many words flow's instructions hold. Each number sits beside last week's and is split by agent: Claude Code, Codex and OpenCode. A number with nothing behind it says "no data", never 0.
+- Some numbers wait on notebook lines nothing writes yet: how long new work takes to become ready, and how long agents wait on you, read "no data" for now. Review and merge-queue numbers count only what was recorded with `flow journal record`, and the verifying-work skill now asks agents to record each review.
+- It also shows each account's usage over the week: where it started and ended, its peak, and how often it ran out.
+- It proposes changes to flow by four fixed rules: two or more agent notes about the same thing, the same error twice, a self-test check that passed before and fails now, and a number that got clearly worse.
+- It changes nothing unless you pass `--file`. Then it files each proposal as a tracker item, at most five a run (`selfImprovement.retro.maxItemsPerRun`), never marked ready. It uses the same rules as `flow selftest --file`: a comment on an item it filed before, nothing for one you declined in the last 90 days. `--input` files an edited list instead.
+- Each run saves its report to `.dork/flow/retro/` and adds one line to the notebook.
+- New `flow-retro` weekly schedule (Mondays at 9:00, Los Angeles time) runs the self-test and the retro, rewrites each proposal into one concrete change, and files them. It ships switched off; approve it on the DorkOS Schedules page to turn it on.
+- New docs page, "How flow checks and improves itself".
+- `flow selftest --file` now reports each item under `subject` instead of `checkId`.
+
+## 0.28.0
+
+**flow's notebook now fills itself in as flow's commands run. Reinstall to get it.**
+
+- Every `flow` command adds one line to the notebook (`.dork/flow/journal.jsonl`) saying which command ran, how long it took and how it ended. A later review can then see which steps are slow or keep failing.
+- Claiming an item, letting it go, moving it to a stage and finishing it each add a line of their own, with the item and which tool ran it (Claude Code, Codex or OpenCode).
+- When a command fails because of a bug in flow, the notebook keeps the first line of the error, with tokens, email addresses and your home folder removed.
+- `flow note` and `flow journal` don't add a line about themselves. The usage recorder your status line runs adds one only when it fails. Nothing is written for `--help` or a mistyped command, and running `flow done` again on a finished item doesn't count it twice.
+- The notebook never changes what a command prints or how it ends. If it can't be written, the command works exactly as before, with no warning. Projects with no flow settings get no notebook.
 
 ## 0.27.0
 

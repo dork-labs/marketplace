@@ -5,6 +5,9 @@
  * stdin (or `--input <path>`), then emits the {@link RecoveryAction} the runtime
  * should take (skip / resume / restart-clean / escalate / re-derive).
  *
+ * A run with `drain` set (a `flow drain` run) is always `skip` with reason
+ * `drain-run`: its supervisor is its only recovery.
+ *
  * Zero-runtime-dep: the oracle's imports are all `import type`, so this bundles
  * to a dependency-free `.mjs`. A `claimed-no-worker` (or `needs-input`) signal
  * with a `null` run is an oracle invariant violation (exit 2) — those signals are
@@ -41,6 +44,8 @@ Reads JSON from stdin (or --input <path>):
 
 Writes the RecoveryAction as JSON to stdout (discriminated union over "kind"):
   { "kind": "skip"|"resume"|"restart-clean"|"escalate"|"re-derive", … }
+A run with "drain" set is always { "kind": "skip", "reason": "drain-run" }:
+  flow drain's supervisor is its only recovery.
 
 Exit codes: 0 ok | 1 invalid input | 2 oracle invariant violation
   (a "claimed-no-worker"/"needs-input" signal with run: null trips the invariant -> exit 2).

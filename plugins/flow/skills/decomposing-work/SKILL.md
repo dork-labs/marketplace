@@ -135,8 +135,8 @@ parallel source of truth (spec §8 — collapse the dual task system).
 
 Project the decomposition onto the work item — never authored independently:
 
-- Via the adapter, `transition` the work item into the DECOMPOSE stage (sets the
-  `stage/decompose` label).
+- `node --experimental-strip-types "<flow-root>/scripts/flow.ts" stage <id> decompose --checkpoint-file <f>`
+  (sets `stage/decompose`; `<f>` is the checkpoint body).
 - Mirror the **active phase** as a plan checklist on the work item, **generated
   from `03-tasks.json`, never hand-edited.** This is a projection: regenerate it
   from the canonical file rather than editing it in place.

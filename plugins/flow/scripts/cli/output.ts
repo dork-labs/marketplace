@@ -151,7 +151,9 @@ export function renderTopHelp(verbs: readonly VerbSpec[]): string {
  */
 export function renderVerbHelp(spec: VerbSpec): string {
   const positionals = spec.positionals ?? [];
-  const synopsis = positionals.map((p) => (p.required ? `<${p.name}>` : `[<${p.name}>]`));
+  const synopsis = positionals.map((p) =>
+    p.variadic ? `[<${p.name}>...]` : p.required ? `<${p.name}>` : `[<${p.name}>]`
+  );
   const sections = [
     ['Usage: flow', spec.name, ...synopsis, '[flags]'].join(' '),
     spec.description ?? spec.summary,
