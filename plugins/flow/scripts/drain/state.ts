@@ -200,9 +200,9 @@ export const DrainReviewerHandleSchema: z.ZodType<DrainReviewerHandle> = z.loose
   tokenHash: z.string(),
 });
 
-/** The on-disk check for a {@link DrainState}. */
-export const DrainStateSchema: z.ZodType<DrainState> = z.looseObject({
-  v: z.number().int().positive(),
+/** The full check for a version-1 {@link DrainState}. */
+const DrainStateV1Schema = z.looseObject({
+  v: z.literal(1),
   rev: count,
   phase: vocabulary<DrainPhase>(),
   worker: DrainWorkerHandleSchema.nullable(),
@@ -233,6 +233,17 @@ export const DrainStateSchema: z.ZodType<DrainState> = z.looseObject({
   ),
   parkedReason: nullableString,
 });
+
+/**
+ * The on-disk check for a {@link DrainState}. Only `v: 1` is checked field by
+ * field. A drain written by a newer flow (`v` above 1) passes through as a loose
+ * object: the run-state reader is all-or-nothing, so failing it would make this
+ * version drop every run in the file. The runner leaves such a run alone.
+ */
+export const DrainStateSchema: z.ZodType<DrainState> = z.union([
+  DrainStateV1Schema,
+  z.looseObject({ v: z.number().int().gt(1) }),
+]) as unknown as z.ZodType<DrainState>;
 
 /** The on-disk check for a {@link RunLimit}. */
 export const RunLimitSchema: z.ZodType<RunLimit> = z.looseObject({

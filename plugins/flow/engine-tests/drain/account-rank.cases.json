@@ -13,21 +13,29 @@
       "input": {
         "model": "claude-opus-4-1"
       },
-      "expected": ["model:claude-opus-4-1", "seven_day_opus"]
+      "expected": [
+        "model:claude-opus-4-1",
+        "seven_day_opus"
+      ]
     },
     {
       "name": "lowercased; runs outside [a-z0-9._-] become one '-'; sonnet adds seven_day_sonnet",
       "input": {
         "model": "Claude Sonnet 4.5 [1m]"
       },
-      "expected": ["model:claude-sonnet-4.5-1m-", "seven_day_sonnet"]
+      "expected": [
+        "model:claude-sonnet-4.5-1m-",
+        "seven_day_sonnet"
+      ]
     },
     {
       "name": "neither family: only the model bucket",
       "input": {
         "model": "haiku"
       },
-      "expected": ["model:haiku"]
+      "expected": [
+        "model:haiku"
+      ]
     }
   ],
   "limitSignal": [
@@ -1141,7 +1149,9 @@
             }
           }
         ],
-        "exclude": ["left"]
+        "exclude": [
+          "left"
+        ]
       },
       "expected": {
         "pick": "personal",
@@ -1154,11 +1164,15 @@
         "ineligible": [
           {
             "id": "left",
-            "reasons": ["excluded"]
+            "reasons": [
+              "excluded"
+            ]
           },
           {
             "id": "spent",
-            "reasons": ["limited"]
+            "reasons": [
+              "limited"
+            ]
           }
         ]
       }
@@ -1397,7 +1411,9 @@
         "ineligible": [
           {
             "id": "warm",
-            "reasons": ["near-limit"]
+            "reasons": [
+              "near-limit"
+            ]
           }
         ]
       }
@@ -1601,7 +1617,9 @@
         "ineligible": [
           {
             "id": "Bad_Id",
-            "reasons": ["not-routable"]
+            "reasons": [
+              "not-routable"
+            ]
           }
         ]
       }
@@ -1640,7 +1658,9 @@
             }
           }
         ],
-        "exclude": ["left"]
+        "exclude": [
+          "left"
+        ]
       },
       "expected": {
         "pick": null,
@@ -1648,7 +1668,9 @@
         "ineligible": [
           {
             "id": "left",
-            "reasons": ["excluded"]
+            "reasons": [
+              "excluded"
+            ]
           }
         ]
       }
@@ -1694,7 +1716,9 @@
         "ineligible": [
           {
             "id": "client",
-            "reasons": ["out-of-scope"]
+            "reasons": [
+              "out-of-scope"
+            ]
           }
         ]
       }
@@ -1712,7 +1736,9 @@
               "reservePct": 0,
               "spendDownWindowHours": 24,
               "scope": {
-                "repos": ["Dork-Labs/Marketplace"]
+                "repos": [
+                  "Dork-Labs/Marketplace"
+                ]
               }
             },
             "windows": {
@@ -1786,7 +1812,9 @@
         "ineligible": [
           {
             "id": "spent",
-            "reasons": ["limited"]
+            "reasons": [
+              "limited"
+            ]
           }
         ]
       }
@@ -1832,7 +1860,9 @@
         "ineligible": [
           {
             "id": "close",
-            "reasons": ["near-limit"]
+            "reasons": [
+              "near-limit"
+            ]
           }
         ]
       }
@@ -1881,7 +1911,9 @@
         "ineligible": [
           {
             "id": "busy",
-            "reasons": ["at-capacity"]
+            "reasons": [
+              "at-capacity"
+            ]
           }
         ]
       }
@@ -1913,7 +1945,9 @@
             }
           }
         ],
-        "exclude": ["client"],
+        "exclude": [
+          "client"
+        ],
         "liveByAccount": {
           "client": 3
         }
@@ -1924,7 +1958,12 @@
         "ineligible": [
           {
             "id": "client",
-            "reasons": ["excluded", "out-of-scope", "limited", "at-capacity"]
+            "reasons": [
+              "excluded",
+              "out-of-scope",
+              "limited",
+              "at-capacity"
+            ]
           }
         ]
       }
@@ -2332,7 +2371,9 @@
         "ineligible": [
           {
             "id": "a",
-            "reasons": ["limited"]
+            "reasons": [
+              "limited"
+            ]
           }
         ]
       }
@@ -2425,7 +2466,7 @@
       }
     },
     {
-      "name": "an expired weekly window reads as allowed with 0 used, and its past reset scores on a 1-hour horizon",
+      "name": "an expired weekly window starts a new week: full allowance, unknown reset (168 h horizon)",
       "input": {
         "now": "2026-09-26T16:00:00.000Z",
         "accounts": [
@@ -2493,12 +2534,91 @@
           {
             "id": "renewed",
             "tier": 1,
-            "score": 100,
+            "score": 0.6,
             "signal": "ok"
           },
           {
             "id": "spare",
             "tier": 1
+          }
+        ],
+        "ineligible": []
+      }
+    },
+    {
+      "name": "a main whose weekly reset has passed stays held back behind an eligible rotation account",
+      "input": {
+        "now": "2026-09-26T16:00:00.000Z",
+        "accounts": [
+          {
+            "id": "main",
+            "routable": true,
+            "policy": {
+              "role": "main",
+              "reservePct": 50,
+              "spendDownWindowHours": 24,
+              "scope": {
+                "repos": []
+              }
+            },
+            "windows": {
+              "five_hour": {
+                "usedPct": 10,
+                "resetsAt": "2026-09-26T19:00:00.000Z",
+                "status": null,
+                "observedAt": "2026-09-26T15:59:00.000Z",
+                "source": "statusline"
+              },
+              "seven_day": {
+                "usedPct": 30,
+                "resetsAt": "2026-09-26T10:00:00.000Z",
+                "status": null,
+                "observedAt": "2026-09-25T10:00:00.000Z",
+                "source": "statusline"
+              }
+            }
+          },
+          {
+            "id": "rot",
+            "routable": true,
+            "policy": {
+              "role": "rotation",
+              "reservePct": 0,
+              "spendDownWindowHours": 24,
+              "scope": {
+                "repos": []
+              }
+            },
+            "windows": {
+              "five_hour": {
+                "usedPct": 10,
+                "resetsAt": "2026-09-26T19:00:00.000Z",
+                "status": null,
+                "observedAt": "2026-09-26T15:59:00.000Z",
+                "source": "statusline"
+              },
+              "seven_day": {
+                "usedPct": 20,
+                "resetsAt": "2026-09-27T16:00:00.000Z",
+                "status": null,
+                "observedAt": "2026-09-26T15:59:00.000Z",
+                "source": "statusline"
+              }
+            }
+          }
+        ]
+      },
+      "expected": {
+        "pick": "rot",
+        "ranked": [
+          {
+            "id": "rot",
+            "tier": 1
+          },
+          {
+            "id": "main",
+            "tier": 2,
+            "score": 0.3
           }
         ],
         "ineligible": []
@@ -2552,7 +2672,9 @@
           "ineligible": [
             {
               "id": "a",
-              "reasons": ["limited"]
+              "reasons": [
+                "limited"
+              ]
             }
           ]
         }
@@ -2579,7 +2701,9 @@
           "ineligible": [
             {
               "id": "client",
-              "reasons": ["out-of-scope"]
+              "reasons": [
+                "out-of-scope"
+              ]
             }
           ]
         }
@@ -2589,7 +2713,9 @@
         "reasons": [
           {
             "id": "client",
-            "reasons": ["out-of-scope"]
+            "reasons": [
+              "out-of-scope"
+            ]
           }
         ]
       }

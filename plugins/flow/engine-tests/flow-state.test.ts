@@ -332,3 +332,24 @@ describe('flow-state provenance — where the run came from', () => {
     expect(run?.status).toBe('running');
   });
 });
+
+describe('flow-state reader — a drain record from a newer flow', () => {
+  // Purpose: the reader is all-or-nothing, so a drain block whose version this
+  // flow does not know must pass through, not fail the file. Fails if
+  // DrainStateSchema checks every v1 field for any `v`: parseFlowState would
+  // return {} and every run on the machine would be dropped.
+  it('keeps every run when one carries a drain with a higher version and different fields', () => {
+    const future = { ...flowRun({ issueId: 'a' }), drain: { v: 2, stage2: 'renamed-phase' } };
+    const other = flowRun({ issueId: 'b', identifier: 'ACME-2' });
+    const parsed = parseFlowState(JSON.stringify({ a: future, b: other }));
+    expect(Object.keys(parsed).sort()).toEqual(['a', 'b']);
+    expect(parsed.a).toMatchObject({ drain: { v: 2, stage2: 'renamed-phase' } });
+  });
+
+  // Purpose: v1 is still checked field by field. Fails if the loose branch also
+  // swallows a malformed v1 drain.
+  it('still refuses a malformed version-1 drain', () => {
+    const bad = { ...flowRun({ issueId: 'a' }), drain: { v: 1, phase: 'working' } };
+    expect(parseFlowState(JSON.stringify({ a: bad }))).toEqual({});
+  });
+});

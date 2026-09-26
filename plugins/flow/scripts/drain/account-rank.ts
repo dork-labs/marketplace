@@ -308,13 +308,15 @@ function bucketRoom(windows: LedgerWindows, key: string, now: Instant): boolean 
 
 /**
  * Whether a `main` account is outside its spend-down window: its `seven_day`
- * reset time is unknown, or `now` is earlier than `resetsAt -
- * spendDownWindowHours`. Only then does dispatch hold it back (S1 §1.1b).
+ * reset time is unknown (including an expired reading, whose reset has passed),
+ * or `now` is earlier than `resetsAt - spendDownWindowHours`. Only then does dispatch hold it back (S1 §1.1b).
  */
 function mainHeldBack(account: RankableAccount, now: Instant): boolean {
   if (account.policy.role !== 'main') return false;
   const reading = readWindow(entryOf(account.windows, 'seven_day'), now, 'seven_day');
-  if (reading === null || reading.resetsAt === null) return true;
+  // An expired reading's resetsAt is the week that already ended; the next reset
+  // is unknown, so the main is held back (a rarely used main is usually expired).
+  if (reading === null || reading.resetsAt === null || reading.expired) return true;
   const startsMs = Date.parse(reading.resetsAt) - account.policy.spendDownWindowHours * HOUR_MS;
   return instantMs(now) < startsMs;
 }
@@ -326,8 +328,15 @@ function mainHeldBack(account: RankableAccount, now: Instant): boolean {
  * reset)` (unknown reset: 168). Headroom that expires soonest scores highest.
  */
 function headroomScore(account: RankableAccount, now: Instant): number {
-  const ceiling = 100 - effectiveReservePct(account.policy, account.windows, now);
   const reading = readWindow(entryOf(account.windows, 'seven_day'), now, 'seven_day');
+  if (reading?.expired) {
+    // A new week has begun since this reading: its whole allowance is left, the
+    // reserve applies again, and the next reset is unknown. S1's
+    // effectiveReservePct keeps reading the ended week's resetsAt as "inside the
+    // spend-down window", so it is not used here.
+    return (100 - account.policy.reservePct) / WEEK_HOURS;
+  }
+  const ceiling = 100 - effectiveReservePct(account.policy, account.windows, now);
   const remaining = ceiling - (reading?.usedPct ?? 0);
   const hours =
     reading !== null && reading.resetsAt !== null
