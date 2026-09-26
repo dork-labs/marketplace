@@ -52,6 +52,16 @@ describe('findAnswer', () => {
     expect(findAnswer(ITEM, noted, since, CTX)?.id).toBe('a');
   });
 
+  // Purpose: parkedAt is the local clock and reply times are the tracker's. With
+  // the local clock two minutes ahead, a reply made one minute after the park
+  // comment still counts, because the park comment anchors the search. Fails
+  // if replies are compared with parkedAt alone.
+  it('anchors on the park comment when the local clock runs ahead', () => {
+    const since = c('x', 'x', 10).createdAt;
+    const comments = [c('park', 'bot', 8), c('reply', 'dorian', 9)];
+    expect(findAnswer(ITEM, comments, since, CTX)?.id).toBe('reply');
+  });
+
   // Purpose: the agent's own comment is never an answer, by author or by its marker.
   it('ignores the agent, by account or by marker', () => {
     const since = c('x', 'x', 0).createdAt;

@@ -33,6 +33,12 @@ export interface AnswerContext {
   comments: CommentsConfig;
 }
 
+/** How far from `parkedAt` the park comment may be stamped by the tracker's clock. */
+const PARK_ANCHOR_WINDOW_MS = 2 * 60_000;
+
+/** Tolerated clock skew between this machine and the tracker when no park comment is found. */
+const CLOCK_SKEW_MS = 2 * 60_000;
+
 /**
  * The newest reply that answers a parked item, or `null`.
  *
@@ -57,7 +63,21 @@ export function findAnswer(
   const parkedAt = since === null ? Number.NaN : Date.parse(since);
   let candidates = [...comments];
   if (Number.isFinite(parkedAt)) {
-    candidates = candidates.filter((comment) => Date.parse(comment.createdAt) > parkedAt);
+    // parkedAt is this machine's clock; comment times are the tracker's. Anchor
+    // on the park comment itself (the agent's own comment around parkedAt) when
+    // it is there, and otherwise allow a small skew, so a quick reply is never
+    // missed because the local clock runs ahead.
+    const parkComment = candidates
+      .map((comment, index) => ({ comment, index }))
+      .filter(
+        ({ comment }) =>
+          decide(comment).rule === 1 &&
+          Math.abs(Date.parse(comment.createdAt) - parkedAt) <= PARK_ANCHOR_WINDOW_MS
+      )[0];
+    candidates =
+      parkComment !== undefined
+        ? candidates.slice(parkComment.index + 1)
+        : candidates.filter((comment) => Date.parse(comment.createdAt) > parkedAt - CLOCK_SKEW_MS);
   } else {
     // No park time: only what came after the agent's own latest comment (its question).
     const lastOwn = candidates
