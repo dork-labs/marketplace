@@ -18,8 +18,9 @@
  *   a triage pass would help.
  * - The account (spec `flow-handoff-dispatch` §3.5): each pick gains
  *   `account`, the (runtime, account) pair its session should bill, from
- *   `rankAccounts` over every account of every runtime (implicit `default`s
- *   included), their policy and ledgers, the checkout's origin repo, the
+ *   `rankAccounts` over every account of every runtime (from the shared
+ *   resolver: each runtime's `default` in its machine-wide folder, an alias as
+ *   its registered row), their policy and ledgers, the checkout's origin repo, the
  *   implementation model, and the live runs in `flow-state.json`. Picks are
  *   assigned in order and each adds one to its account's live count, so `-n`
  *   spreads work. `--no-account` skips this. No tracker call is added.
@@ -138,9 +139,10 @@ export interface ItemAccount {
   /** Accounts left out, with every reason. */
   ineligible: IneligibleAccount[];
   /**
-   * `ranked`: a registered account of the item's runtime. `ambient`: the
-   * runtime's implicit `default` account (it has no registry), which runs in the
-   * ambient environment. `cross-runtime`: an account of another runtime
+   * `ranked`: an account of the item's runtime, a standalone `default` in its
+   * machine-wide folder included (spec `flow-cli-core` §1.1a rev 6d).
+   * `ambient`: OpenCode's ambient `default`, which has no folder and runs in
+   * the session's own environment. `cross-runtime`: an account of another runtime
    * (`crossRuntimeFallback: on`). `none`: nothing may take it.
    */
   reason: AccountReason;
@@ -156,8 +158,12 @@ export interface AssignmentInput {
   repo: string | null;
   /** The implementation model, or `null`. */
   model: string | null;
-  /** Every account of every runtime, with policy, windows and spend. */
-  accounts: readonly (RankableAccount & { label: string | null })[];
+  /**
+   * Every account of every runtime, with policy, windows and spend. `isDefault`
+   * marks the account `<runtime>:default` names (rev 6d): an aliased row, or the
+   * standalone `default`.
+   */
+  accounts: readonly (RankableAccount & { label: string | null; isDefault?: boolean })[];
   /** `fleet.runtimes`. */
   runtimes: readonly RuntimeSlug[];
   /** `fleet.crossRuntimeFallback`. */
@@ -168,7 +174,7 @@ export interface AssignmentInput {
   opts: { warnMarginPct: number; maxLivePerAccount: number };
 }
 
-/** `<runtime>:<id>` for a stored account, where no account means the runtime's implicit one. */
+/** `<runtime>:<id>` for a stored account, where no account means the runtime's `default`. */
 function liveKey(runtime: string | undefined, account: string | null | undefined): string {
   return `${runtime ?? 'claude-code'}:${account ?? 'default'}`;
 }
@@ -177,7 +183,8 @@ function liveKey(runtime: string | undefined, account: string | null | undefined
  * Live sessions per `<runtime>:<id>`: every `running` or `queued` run by its
  * account, plus its drain reviewer's handle by the reviewer's account. A parked
  * drain run counts for nothing. A run or
- * handle with no account bills its runtime's implicit `default`.
+ * handle with no account bills its runtime's `default` ({@link assignAccounts}
+ * folds `<runtime>:default` into the row it aliases).
  *
  * @param runs - Every run, keyed by issue id.
  * @returns The counts.
@@ -208,7 +215,18 @@ export function liveByAccount(runs: Readonly<Record<string, FlowRun>>): Record<s
  * @returns One assignment per pick.
  */
 export function assignAccounts(picked: readonly WorkItem[], input: AssignmentInput): ItemAccount[] {
-  const live = liveByAccount(input.runs);
+  // A run or handle with no account (or `default`) bills `default`; when that is
+  // an alias, it is its registered row's session (rev 6d), counted under the row.
+  const aliasOf = new Map(
+    input.accounts
+      .filter((a) => a.isDefault === true && !a.implicit)
+      .map((a) => [accountKey(a.runtime, 'default'), accountKey(a.runtime, a.id)])
+  );
+  const canonical = (key: string): string => aliasOf.get(key) ?? key;
+  const live: Record<string, number> = {};
+  for (const [key, count] of Object.entries(liveByAccount(input.runs))) {
+    live[canonical(key)] = (live[canonical(key)] ?? 0) + count;
+  }
   const runByItem = new Map(Object.values(input.runs).map((run) => [run.issueId, run]));
   return picked.map((item): ItemAccount => {
     const run = runByItem.get(item.id);
@@ -221,7 +239,7 @@ export function assignAccounts(picked: readonly WorkItem[], input: AssignmentInp
       runtimes: input.runtimes,
       crossRuntimeFallback: input.crossRuntimeFallback,
       model: input.model,
-      affinity: run?.account ? liveKey(run.runtime, run.account) : null,
+      affinity: run?.account ? canonical(liveKey(run.runtime, run.account)) : null,
       exclude: [],
       liveByAccount: live,
       opts: input.opts,
@@ -235,7 +253,7 @@ export function assignAccounts(picked: readonly WorkItem[], input: AssignmentInp
     const label =
       input.accounts.find((a) => a.runtime === chosen.runtime && a.id === chosen.id)?.label ?? null;
     const reason: AccountReason =
-      chosen.runtime !== runtime ? 'cross-runtime' : chosen.implicit ? 'ambient' : 'ranked';
+      chosen.runtime !== runtime ? 'cross-runtime' : chosen.path === null ? 'ambient' : 'ranked';
     return { ...base, pick: { runtime: chosen.runtime, id: chosen.id }, reason, label };
   });
 }
@@ -506,7 +524,7 @@ export async function gatherAssignmentInput(
   config: NextConfig
 ): Promise<AssignmentInput> {
   const dorkHome = resolveDorkHome({ ...ctx.env }, ctx.io.osHome);
-  const registry = loadAccounts(dorkHome);
+  const registry = loadAccounts(dorkHome, { home: ctx.io.osHome });
   for (const warning of registry.warnings) ctx.warn(warning.message);
   const policy = loadFleetPolicy(dorkHome, registry.accounts);
   for (const warning of policy.warnings) ctx.warn(warning.message);
@@ -516,7 +534,8 @@ export async function gatherAssignmentInput(
       (entry) => entry.runtime === account.runtime && entry.id === account.id
     );
     if (resolved === undefined) return [];
-    const ledger = account.routable ? readLedger(dorkHome, account.runtime, account.id) : null;
+    const ledger =
+      account.ledgerId === null ? null : readLedger(dorkHome, account.runtime, account.ledgerId);
     for (const warning of ledger?.warnings ?? []) ctx.warn(warning.message);
     return [
       {
@@ -524,6 +543,7 @@ export async function gatherAssignmentInput(
         id: account.id,
         path: account.path,
         implicit: account.implicit,
+        isDefault: account.isDefault,
         routable: account.routable,
         policy: resolved,
         windows: ledger?.ledger?.windows ?? null,

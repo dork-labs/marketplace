@@ -55,9 +55,17 @@ export type LaunchPermissionMode = 'default' | 'acceptEdits' | 'bypassPermission
  * - `opencode`: always `null` today. An OpenCode account is a provider
  *   credential, named by {@link LaunchAccount.provider}, not a folder.
  *
+ * Build it with `launchAccountFor` (`common.ts`) from the shared resolver
+ * (`resolveAccounts`, spec `flow-cli-core` §1.1a rev 6d): then
+ * {@link DEFAULT_ACCOUNT_ID} carries its machine-wide folder (DorkOS
+ * `defaultAccount`, else `~/.claude`; `~/.codex`), or is replaced by the
+ * registered row it aliases, so a session never starts in whatever folder the
+ * supervisor's own `CLAUDE_CONFIG_DIR`/`CODEX_HOME` happens to name.
+ *
  * A `path` of `null` means the ambient environment: the runtime's own home as
- * the supervisor resolves it. The implicit {@link DEFAULT_ACCOUNT_ID} account is
- * `{ runtime, id: 'default', path: null }`.
+ * the supervisor resolves it. Only `{ runtime, id: 'default', path: null }` may
+ * say so, and flow's own callers use it only for OpenCode, whose default has no
+ * folder.
  */
 export interface LaunchAccount {
   /** The runtime this account belongs to; must match the request's runtime. */

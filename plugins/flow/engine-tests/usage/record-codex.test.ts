@@ -160,6 +160,24 @@ describe('flow usage record --runtime codex', () => {
     expect(ledger()).toBeNull();
   });
 
+  it('writes under the registered id when codex:default is its alias (rev 6d)', async () => {
+    // Purpose: a row registered at <os home>/.codex IS codex:default, so a
+    // session with no CODEX_HOME, and --account default, both write that row's
+    // file and never a second default.json for the same account.
+    const ambient = path.join(osHome, '.codex');
+    mkdirSync(ambient);
+    writeFileSync(
+      path.join(dorkHome, 'config.json'),
+      JSON.stringify({ runtimes: { codex: { accounts: [{ id: 'mine', path: `${ambient}/` }] } } })
+    );
+    const plain = await record(bare(), ['--json']);
+    expect(JSON.parse(plain.stdout)).toMatchObject({ account: 'mine' });
+    const named = await record(rolloutLine(), ['--json', '--account', 'default']);
+    expect(JSON.parse(named.stdout)).toMatchObject({ account: 'mine' });
+    expect(ledger('mine')).not.toBeNull();
+    expect(ledger()).toBeNull();
+  });
+
   it('fails only for a terminal on stdin', async () => {
     // Purpose: a person typing it by hand learns what to pipe in.
     const result = await record(bare(), [], { isTTY: true });

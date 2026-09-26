@@ -246,6 +246,65 @@ describe('flow usage probe', () => {
     expect(calls[0].opts.env).not.toHaveProperty('CLAUDE_CONFIG_DIR');
   });
 
+  describe('the default account (rev 6d)', () => {
+    /** The operator's real config shape: defaultAccount null, one registered row. */
+    function operatorConfig(defaultAccount: string | null): void {
+      mkdirSync(path.join(osHome, '.claude3'), { recursive: true });
+      writeFileSync(
+        path.join(dorkHome, 'config.json'),
+        JSON.stringify({
+          runtimes: {
+            claudeCode: {
+              defaultAccount,
+              accounts: [{ id: 'claude3', path: path.join(osHome, '.claude3'), label: 'Claude3' }],
+            },
+          },
+        })
+      );
+    }
+
+    it("probes this computer's own sign-in as default and writes default.json", async () => {
+      // Purpose: the operator's setup (defaultAccount null, only claude3
+      // registered, HOME holding .claude and .claude3, CLAUDE_CONFIG_DIR unset).
+      // `default` is ~/.claude, its own account, so the turn runs in ~/.claude
+      // (Claude Code's own folder, which it uses when CLAUDE_CONFIG_DIR is
+      // absent; setting it would look up another stored sign-in) and the
+      // readings land in default.json, never in claude3's file.
+      operatorConfig(null);
+      const { runner, calls } = fakeRunner([INIT, FIVE_HOUR_EVENT, RESULT]);
+      const run = await flow(
+        ['usage', 'probe', 'default', '--yes', '--json', '--claude', claudeBin],
+        runner,
+        { HOME: osHome }
+      );
+      expect(run.code, run.stderr).toBe(0);
+      expect(run.stderr).toContain("Main (this computer's sign-in)");
+      expect(run.stderr).toContain(`(${path.join(osHome, '.claude')})`);
+      expect(calls).toHaveLength(1);
+      expect(calls[0].opts.env).not.toHaveProperty('CLAUDE_CONFIG_DIR');
+      expect(JSON.parse(run.stdout)).toMatchObject({ account: 'default', changed: true });
+      expect(existsSync(ledgerPath(dorkHome, 'claude-code', 'default'))).toBe(true);
+      expect(existsSync(ledgerPath(dorkHome, 'claude-code', 'claude3'))).toBe(false);
+    });
+
+    it('probes the aliased row when defaultAccount names a registered folder', async () => {
+      // Purpose: with defaultAccount at ~/.claude3, `default` is claude3's alias:
+      // the turn runs with CLAUDE_CONFIG_DIR set to that folder and writes
+      // claude3.json, so one real account never gets two readings.
+      operatorConfig('~/.claude3');
+      const { runner, calls } = fakeRunner([INIT, FIVE_HOUR_EVENT, RESULT]);
+      const run = await flow(
+        ['usage', 'probe', 'default', '--yes', '--json', '--claude', claudeBin],
+        runner
+      );
+      expect(run.code, run.stderr).toBe(0);
+      expect(calls[0].opts.env.CLAUDE_CONFIG_DIR).toBe(path.join(osHome, '.claude3'));
+      expect(JSON.parse(run.stdout)).toMatchObject({ account: 'claude3' });
+      expect(existsSync(ledgerPath(dorkHome, 'claude-code', 'claude3'))).toBe(true);
+      expect(existsSync(ledgerPath(dorkHome, 'claude-code', 'default'))).toBe(false);
+    });
+  });
+
   it('records both rate_limit_event readings as sdk_event, utilization x 100', async () => {
     // Purpose: DOR-2369's probe path. Each event becomes one window in the ledger.
     const { runner } = fakeRunner([

@@ -55,6 +55,7 @@ import type { FlowRun } from '../flow-run.ts';
 import type { FlowStateFile } from '../flow-state-file.ts';
 import { judgeEjection } from '../forge/ejection.ts';
 import type { Forge } from '../forge/types.ts';
+import { launchAccountFor } from '../launchers/common.ts';
 import { findTranscript } from '../launchers/prove-account.ts';
 import {
   handleRuntime,
@@ -130,11 +131,14 @@ export const noHandoff: HandoffStep = (run) => ({ run, actions: [] });
 export interface PlannedAccount {
   /** The runtime. */
   runtime: RuntimeName;
-  /** The registry id (`default` for the runtime's implicit account). */
+  /** The registry id (`default` for the runtime's standalone default account). */
   id: string;
-  /** The account's folder, or `null` for the implicit (ambient) account. */
+  /**
+   * The account's folder: a standalone `default` has its machine-wide one (spec
+   * `flow-cli-core` §1.1a rev 6d). `null` only for OpenCode's ambient default.
+   */
   path: string | null;
-  /** True for the runtime's implicit account. */
+  /** True for the runtime's standalone `default` (its run records no account). */
   implicit: boolean;
   /** The operator's label for it, when set. */
   label: string | null;
@@ -486,9 +490,14 @@ function writeMessage(worktree: string, kind: string, text: string): string {
   return file;
 }
 
-/** The launch account for a planned one: `null` for the ambient (implicit) account. */
+/**
+ * The launch account for a planned one (`launchAccountFor`): a standalone
+ * `default` launches in its machine-wide folder, never in the supervisor's own
+ * `CLAUDE_CONFIG_DIR`/`CODEX_HOME` (rev 6d). Only a folder-less account
+ * (OpenCode's ambient default) is `null`, the ambient environment.
+ */
 function launchAccount(account: PlannedAccount): LaunchAccount | null {
-  return account.implicit ? null : { runtime: account.runtime, id: account.id, path: account.path };
+  return account.path === null ? null : launchAccountFor(account);
 }
 
 /**
@@ -1191,7 +1200,7 @@ export async function runPass(deps: PassDeps): Promise<PassReport> {
         worktree,
         branch,
         flow: deps.flow,
-        accountLabel: account.label ?? (account.implicit ? 'the ambient account' : account.id),
+        accountLabel: account.label ?? (account.path === null ? 'the ambient account' : account.id),
         rubric: deps.settings.rubric,
       })
     );

@@ -20,11 +20,13 @@ status: specified
 - One rule decides what tracker state, `agent/*` and `stage/*` each mean (F10). It lives in `scripts/work-state.ts`; the writers and the audit both use it.
 - Section 1 is the shared contract with DorkOS: the account registry, the usage ledger and the session↔item link. It is written first because DorkOS builds against it in parallel (spec `claude-account-fleet`, dorkos repo).
 
-## 1. Shared contracts (flow ↔ DorkOS), rev 6
+## 1. Shared contracts (flow ↔ DorkOS), rev 6 (with rev 6d)
 
 These contracts are public and tracker-neutral. Both sides implement them independently and prove it with one fixture set (§1.4). A change to any rule here is a contract change: bump `CONTRACT_VERSION` in the fixture folder and change both sides.
 
 **Rev 6 (contract 2.0.0, breaking) makes every contract runtime-neutral.** flow runs from Claude Code, Codex and OpenCode sessions, so everything it records, reads and routes names the runtime. The runtime slug is `claude-code`, `codex` or `opencode`; anything else is refused before it reaches a path. The binding decisions are summarized in [`../flow-fleet/01-ideation.md`](../flow-fleet/01-ideation.md) "Runtimes" (R1-R9).
+
+**Rev 6d (contract 3.0.0) pins what `default` means.** Found against the operator's real `config.json` (`defaultAccount: null`, one registered row in `~/.claude3`): under rev 6 `default` existed only when a runtime had no registered row, so the operator's main account in `~/.claude` was invisible. Now an account is its folder, not its id; `default` always names the runtime's default folder, and is an alias when a registered row has that folder (§1.1a "The default account (rev 6d)"). The meaning of `default` changed, a changed rule, so the version is a major bump.
 
 ### 1.1 Accounts: identity in DorkOS config, routing policy in flow's own file
 
@@ -52,11 +54,11 @@ Every runtime's rows have the same shape and follow the same rules:
 | `color` | string `^#[0-9a-f]{6}$` \| null    | `null`              | **New, DorkOS core.** Display color; `null` = a stable default by position. |
 
 - `id`, `path`, `label` exist today for Claude Code (DorkOS `ClaudeCodeAccountSchema`, spec `claude-code-accounts` D1). `color` is the one new field. The Codex and OpenCode registries are a later DorkOS backlog item; readers read them when present.
-- **The implicit account.** A runtime with no registered row left after the rules below has ONE implicit account, id `default`, with no path: the ambient environment (whatever that runtime is signed in to). It is the only way that runtime runs at all until it has a registry. A runtime with any registered row has no implicit account.
-- **`default` is reserved** for the implicit account. Minting never produces it (a base of `default` counts as taken, so a label "Default" mints `default-2`). A registered row whose `id` is `default` (a hand edit) is listed with an `id-reserved` warning but is not routable: it has no usage file and reads as `kept-out`, so it can never read the implicit account's readings or be spent as if it were that account.
+- **The default account.** Every runtime has a `default` account; which account it is follows "The default account (rev 6d)" below.
+- **`default` is reserved** for the default account. Minting never produces it (a base of `default` counts as taken, so a label "Default" mints `default-2`). A registered row whose `id` is `default` (a hand edit) is listed with an `id-reserved` warning but is not routable: it has no usage file and reads as `kept-out`, so it can never read the default account's readings or be spent as if it were that account. It never takes the name: `<runtime>:default` always resolves to the real default account.
 - A DorkOS row minted as `default` before this rule existed is renamed by DorkOS to the next free `default-N` on its next write of the registry (its config migration), and DorkOS moves any per-account references (agent manifests, launch hints) with it. Until then flow lists it as `id-reserved` and does not route it.
 - No routing policy lives here. DorkOS core never reads or writes flow's policy.
-- A missing file or a missing key means "no accounts" (so, one implicit account per runtime), never an error.
+- A missing file or a missing key means "no registered accounts" (so each runtime has only its default), never an error.
 - A file DorkOS never touched is valid: flow may create it as `{"runtimes":{"claudeCode":{"accounts":[…]}}}` with no other keys.
 - Readers ignore fields they do not know; writers preserve them.
 - A row with a missing or non-absolute `path` is skipped, with a warning.
@@ -65,6 +67,19 @@ Every runtime's rows have the same shape and follow the same rules:
 - A row whose `id` fails the pattern (a hand edit) is listed, with a warning, but has no usage file and cannot be routed: it reads as `kept-out` with `scope.repos: []`.
 - A `color` that fails the pattern reads as `null`, with a warning.
 - flow writes every row it creates with all four keys, `label` and `color` as `null` when not given, so DorkOS's schema (`label` nullable with no default) accepts it. `flow accounts add` registers Claude Code rows only.
+
+**The default account (rev 6d)** (pinned by `accounts.cases.json`)
+
+1. **Identity is the folder, not the id.** Two folders are the same account when their comparable forms match: expand a leading `~` with the OS home, resolve (this normalizes `..` and drops trailing separators), then take the real path when the folder exists (so a symlink finds its target); a folder that does not exist is compared as normalized, never resolved.
+2. **`<runtime>:default` always exists for Claude Code and Codex** and names the runtime's default folder, **machine-wide**:
+   - Claude Code: DorkOS `runtimes.claudeCode.defaultAccount` when it is a non-empty path (absolute, or starting with `~`); else `runtimes.claudeCode.activeAccount` (its name before DorkOS 0.65.0) when `defaultAccount` is null or absent; else `<os home>/.claude`. A `defaultAccount` that is text but not a path is ignored with `default-account-invalid`.
+   - Codex: `<os home>/.codex`.
+   - **Never the process environment** (lead decision after review). A session's own `CLAUDE_CONFIG_DIR` or `CODEX_HOME` must not change which account `default` names: with it, a `flow` command run from a session on claude3 read claude3 as `default`, so `flow usage prune --yes` deleted the main account's live `default.json` and `flow accounts set default` wrote claude3's policy. The variables still say which folder THIS process runs in (`ambientAccountPath`): the status-line recorder uses that to attribute a session, and the launchers to start one, but never to decide identity.
+   - OpenCode keeps its ambient default: a `default` with no folder, only while it has no registered row left.
+3. **Alias.** When a routable registered row of that runtime has the default folder, `default` is another name for that row. It is not a second account: there is one ledger file (under the row's id), one `fleet.json` policy, and never two readings for one real account. The row carries `isDefault: true`; `flow accounts` shows it as "Claude3 (default)".
+4. **Standalone.** When no routable row has the default folder (the operator's case), `default` is its own account, listed after the registered rows: path = the default folder (`~` expanded), label "Main (this computer's sign-in)", ledger `default.json`. No config field names its label today; a later DorkOS field may.
+5. **Resolving an id.** Every reader and writer that takes an account id maps `default` to the account it names before it builds a ledger path or a `fleet.json` key: `ledgerPath`/`readLedger`/`recordUsage` callers, the policy lookup and every policy write, `usage probe`/`record`/`scan`, `usage snapshot`, `prune`, account ranking (`chooseAccount` is given the resolved accounts, a standalone `default` included) and the launchers (`launchAccountFor` gives `default` its machine-wide folder, or its row when it is an alias). flow does this in one place, `resolveAccounts(runtime, { config, home, realpath? })` in `scripts/fleet/accounts.ts`, which returns each account with its canonical folder (`canonicalPath`), the default mark (`isDefault`), its ledger id (`ledgerId`, `null` when not routable) and its label; `resolveAccountRef(accounts, runtime, id)` and `accountForPath(accounts, runtime, dir, env)` answer "which account is this id" and "which account runs in this folder".
+6. **A session's own folder.** A recorder that runs inside every session (the status-line `flow usage record`, and `record --runtime codex`) reads `CLAUDE_CONFIG_DIR`/`CODEX_HOME` as that session's folder and writes for the account whose folder that is. Since `default` is machine-wide, a session in an unregistered folder that is not the default writes nothing rather than mixing another account's readings into `default.json`.
 
 **Minting an id** (identical to DorkOS `claudeAccountId`, pinned by fixtures)
 
@@ -81,6 +96,7 @@ Every runtime's rows have the same shape and follow the same rules:
 - Keep the minting rule, and reserve `default` in it (`claudeAccountId` must never return `default`; skip to `default-2`), and refuse `default` as an id on every write.
 - When it adds `runtimes.codex.accounts` or `runtimes.opencode.accounts`, use the same row shape and rules.
 - When an account is removed from a registry, delete its ledger file (§1.2 "Removing an account").
+- **Rev 6d:** resolve `default` exactly as "The default account (rev 6d)" says, machine-wide, from the same inputs (its config, the OS home, real paths) and never from the DorkOS server's own environment, and run `accounts.cases.json` with `input.realpath` as the real-path lookup and `input.env` ignored. Treat `<runtime>:default` as the row it aliases everywhere: write that row's ledger, read its `fleet.json` entry, never create `default.json` for an aliased default, and show one account. A standalone default is a real account: list it, record its readings in `default.json`, and let the operator pick it.
 
 #### 1.1b Routing policy: `<dorkHome>/flow/fleet.json` (flow-owned)
 
@@ -109,7 +125,7 @@ JSON Schema: `plugins/flow/conformance/fleet/fleet-policy.schema.json`. It is th
 | `handoff`              | `"auto"`                                              | Fleet-wide: move work off an account that runs out automatically, or ask first.           |
 | `runtimes`             | `[]`                                                  | Runtimes in order of preference. `[]` = the runtime the item started on first.            |
 | `crossRuntimeFallback` | `"off"`                                               | `on`: a task whose runtime is out may continue on another runtime from its checkpoint.    |
-| `role`                 | `"rotation"` for an implicit `default`, else `"kept-out"` | `main`: the operator's own, drained last. `rotation`: spent freely. `kept-out`: not spent, except on its scoped repos. |
+| `role`                 | `"kept-out"` for a registered account; for a standalone `default`, see "The default account's role" | `main`: the operator's own, drained last. `rotation`: spent freely. `kept-out`: not spent, except on its scoped repos. |
 | `reservePct`           | `50` for `main`, else `0`                             | Share of the 7-day window kept back for the operator's own use.                           |
 | `spendDownWindowHours` | `24`                                                  | Hours before the 7-day reset in which the reserve drops to 0.                             |
 | `scope.repos`          | `[]`                                                  | For `kept-out` only: the repos it may serve. `[]` = never. Ignored for `main` and `rotation`, which serve any repo. |
@@ -117,7 +133,8 @@ JSON Schema: `plugins/flow/conformance/fleet/fleet-policy.schema.json`. It is th
 **Rules**
 
 - **Opt-in by default for registered accounts.** A registered account with no entry in `fleet.json`, or no `fleet.json` at all, resolves to `role: "kept-out"`, `scope.repos: []`: nothing is spent until the operator says so.
-- **An implicit `default` account resolves to `rotation`.** It is the only way its runtime runs at all, so keeping it out would block the runtime. An entry for it applies like any other.
+- **The default account's role (rev 6d, lead decision).** With no stored role, a standalone `default` resolves to `main` (so a 50% reserve, drained last) when its runtime has at least one routable registered account: the operator's own sign-in sits beside rotation accounts. It resolves to `rotation` when it is the runtime's only routable account, since keeping it out would block the runtime. Precedence: (1) an explicit `role` in `fleet.json` always wins; (2) an explicit `main` on another account of the runtime wins over the default's implied `main`, and `default` then reads as `rotation` (`flow accounts set <id> --role main` is allowed while `default` is main only by default); (3) with explicit mains on two accounts, the first in list order wins as before, and a standalone `default` is listed last. An aliased `default` has no role of its own: it is its row.
+- **An alias's entry.** When `default` is an alias, an entry under `<runtime>:default` is the aliased row's entry (and not an unknown key); when the row's own key is also stored, the row's wins (`entry-duplicate`). A policy write for `default` stores under the row's key and folds the `default` entry into it.
 - **Keys.** An entry's key is `<runtime>:<account-id>`. A bare key with no `:` was written before contract 2.0.0 and reads as `claude-code:<key>`; when both forms are present the prefixed one wins and the bare one is ignored, with a warning. Every write stores the prefixed form (the next write migrates the file).
 - Writers store only what the operator set. Defaults are resolved at read time, never written.
 - Readers ignore fields they do not know; writers preserve them.
@@ -159,7 +176,7 @@ JSON Schema: `plugins/flow/conformance/fleet/fleet-policy.schema.json`. It is th
 
 **Where it lives**
 
-- One file per account: `<dorkHome>/runtimes/<runtime>/usage/<account-id>.json`. The runtime must be a runtime slug and the id must match the id pattern above (`default` for the implicit account); anything else is refused (no path traversal).
+- One file per account: `<dorkHome>/runtimes/<runtime>/usage/<account-id>.json`. The runtime must be a runtime slug and the id must match the id pattern above (`default` for a standalone default account; an aliased default writes its row's file); anything else is refused (no path traversal).
 - Folder mode `0700`, file mode `0600`.
 - The folder sits under `runtimes/<runtime>/` because the ledger is core account observation that DorkOS reads without flow, and it is specific to one runtime's accounts. Readers never read the location used before 2.0.0, `<dorkHome>/usage/`.
 - **Lifecycle.** The ledger is overwrite-only (one small file per account, the newest reading per window), so it never grows; the history of readings goes to the flow journal as sampled `usage.snapshot` events. A reading past its `resetsAt` reads as empty and is never deleted early.
@@ -272,7 +289,7 @@ JSON Schema: `plugins/flow/conformance/fleet/fleet-policy.schema.json`. It is th
 **Removing an account** (`pruneTargets(registered, onDisk)`)
 
 - A ledger file whose id is not a registered account of its runtime is deleted: by DorkOS when the operator removes the account, and by `flow usage prune` for any left behind.
-- `default.json` is kept only while its runtime runs on the implicit account. Once the runtime has registered accounts, its readings describe no account (a registered `default` row is not routable), so it goes like any other.
+- `default.json` is kept only while `default` stands alone (rev 6d). Once a routable row has the default folder, `default.json` would be a second reading of that row's account, so it goes like any other and the row's file stays. For OpenCode it goes once the runtime has registered accounts. `registered` holds each account's ledger id.
 - Deleting takes the file's lock (step 1), so a writer merging at that moment finishes first or starts after. A missing file is not an error. Nothing is deleted when `config.json` cannot be read in full.
 
 ### 1.3 The session ↔ item link
@@ -287,7 +304,7 @@ JSON Schema: `plugins/flow/conformance/fleet/fleet-policy.schema.json`. It is th
 | Field     | Type                               | Meaning                                                                                             |
 | --------- | ---------------------------------- | --------------------------------------------------------------------------------------------------- |
 | `runtime` | string: `claude-code`, `codex` or `opencode` today | The runtime the **current** session runs on. Rewritten on every handoff.            |
-| `account` | string (an id in that runtime's registry, or `default`) | The account the current session bills. Rewritten on every handoff.             |
+| `account` | string (an id in that runtime's registry, or `default`) | The account the current session bills. Rewritten on every handoff. A reader maps `default` to the account it names (rev 6d). |
 | `host`    | string: `cli`, `dorkos` or `cmux` today | The launcher the current session runs under.                                                   |
 
 - `host` is not the machine. The machine is `provenance.host`.
@@ -304,8 +321,8 @@ JSON Schema: `plugins/flow/conformance/fleet/fleet-policy.schema.json`. It is th
 
 ### 1.4 The conformance fixture
 
-- Folder: `plugins/flow/conformance/fleet/`, with `CONTRACT_VERSION` (`2.0.0`), the JSON Schemas (`usage-ledger.schema.json`, `fleet-policy.schema.json`), and case files.
-- Case files: `account-id.cases.json`, `identity.cases.json` (one runtime's rows), `accounts.cases.json` (every runtime, with implicit defaults), `fleet-policy.cases.json` (resolving 1.1b, including key migration, implicit defaults and `mayServe`), `window-read.cases.json`, `room.cases.json`, `eligibility.cases.json` (`accountRoom`, `spendRoom`: metered and local accounts), `ledger-merge.cases.json`, `codex-rate-limits.cases.json`, `prune.cases.json`, `flow-run.cases.json`.
+- Folder: `plugins/flow/conformance/fleet/`, with `CONTRACT_VERSION` (`3.0.0` since rev 6d), the JSON Schemas (`usage-ledger.schema.json`, `fleet-policy.schema.json`), and case files.
+- Case files: `account-id.cases.json`, `identity.cases.json` (one runtime's rows), `accounts.cases.json` (every runtime and its default account: standalone, alias, `defaultAccount` set, with the resolution inputs `home` and a `realpath` map given as case inputs so no runner needs the filesystem, and an `env` that must be ignored), `fleet-policy.cases.json` (resolving 1.1b, including key migration, the default account's role and aliases, and `mayServe`), `window-read.cases.json`, `room.cases.json`, `eligibility.cases.json` (`accountRoom`, `spendRoom`: metered and local accounts), `ledger-merge.cases.json`, `codex-rate-limits.cases.json`, `prune.cases.json`, `flow-run.cases.json`.
 - Every case is `{ "name": string, "input": object, "expected": object }`, and `now` is always an input, never the wall clock.
 - `flow-run.cases.json` gives FlowRun records, some with fields the reader does not know, and the expected read-back (unknown fields preserved).
 - flow runs them in `engine-tests/fleet-conformance.test.ts`. DorkOS vendors the folder at a pinned commit and runs its own implementation against it; the DorkOS spec picks the mechanism.
@@ -314,11 +331,11 @@ JSON Schema: `plugins/flow/conformance/fleet/fleet-policy.schema.json`. It is th
 **What DorkOS must do for rev 6**
 
 - Read and write ledgers at `<dorkHome>/runtimes/<runtime>/usage/<account-id>.json` with the required `runtime`, and never the old `<dorkHome>/usage/`.
-- Read every runtime's registry and give a runtime with none its implicit `default` account.
+- Read every runtime's registry and resolve each runtime's `default` account by the rev 6d rule.
 - Write Codex readings with the Codex rules above, OpenCode `spend` and `credits:*`/`rate_limit:*` signals with the rules above.
 - Delete a removed account's ledger file (§1.2 "Removing an account").
 - Watch the ledger folders (a file watch plus a periodic read), so readings flow writes reach its views.
-- Run the 2.0.0 fixture, including the new case files.
+- Run the 3.0.0 fixture, including the new case files and the rev 6d cases.
 
 ## Background / Problem Statement
 
@@ -600,7 +617,7 @@ interface CodeAdapter {
 
 **`flow accounts [list] | add --path <dir> [--label <text>] [--color <#rrggbb>] | set [<id>] [policy flags]`** (rev 6: per runtime)
 
-- `list` (default): every account of every runtime (§1.1a, implicit `default`s included), grouped by runtime, each with its key, resolved policy (§1.1b), ledger windows via `readWindow`, spend, `effectiveReservePct`, `fiveHourRoom`, `weeklyRoom`, `accountRoom`; then the fleet `handoff`, `runtimes`, `crossRuntimeFallback`, each runtime's main, and every warning.
+- `list` (default): every account of every runtime (§1.1a, each runtime's `default` included: its own row when it stands alone, else marked "(default)" on the row it aliases), grouped by runtime, each with its key, resolved policy (§1.1b), ledger windows via `readWindow`, spend, `effectiveReservePct`, `fiveHourRoom`, `weeklyRoom`, `accountRoom`; then the fleet `handoff`, `runtimes`, `crossRuntimeFallback`, each runtime's main, and every warning.
 - `list` drops the `fleet.json` policy of an account that is no longer registered, and prints a note per key (`dropped` in JSON). With `--dry-run` it only says what it would drop. When `config.json` cannot be read in full it drops nothing.
 - `add` registers an identity in `config.json`: expands `~`, requires an absolute path that exists, refuses a path already registered (exit 5), mints the id, and writes the row with all four keys (`label`, `color` as `null` when not given). It writes no policy, so a new account starts kept-out.
 - `add` reads `config.json` fresh, changes only `runtimes.claudeCode.accounts`, keeps every other key, then temp-file + `rename`; the file keeps its mode (new file: `0600`).

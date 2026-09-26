@@ -432,6 +432,63 @@ describe('flow fleet', () => {
     expect(accounts[4]).toMatchObject({ errors: ['credits:openrouter'], spend: { costUsd: 0.75 } });
   });
 
+  it("shows this computer's own sign-in as default, and never twice (rev 6d)", async () => {
+    // Purpose: with no row in ~/.claude, default is its own account and shows
+    // once it has usage or its folder exists; once a row has that folder,
+    // default is that row's alias and a leftover default.json adds no row.
+    mkdirSync(path.join(home, '.claude'), { recursive: true });
+    const ids = async () => {
+      const jsonRun = run(['--json']);
+      expect(await jsonRun.exec()).toBe(0);
+      return (
+        JSON.parse(jsonRun.stdout.text).accounts as {
+          runtime: string;
+          id: string;
+          label: string | null;
+        }[]
+      )
+        .filter((a) => a.runtime === 'claude-code')
+        .map((a) => [a.id, a.label]);
+    };
+    expect(await ids()).toEqual([
+      ['claude2', 'Claude 2'],
+      ['claude3', null],
+      ['Bad_Id', null],
+      ['default', "Main (this computer's sign-in)"],
+    ]);
+
+    writeJson(path.join(dorkHome, 'config.json'), {
+      runtimes: {
+        claudeCode: {
+          accounts: [
+            { id: 'claude2', path: path.join(home, '.claude2'), label: 'Claude 2' },
+            { id: 'claude3', path: path.join(home, '.claude') },
+          ],
+        },
+      },
+    });
+    await recordUsage(
+      dorkHome,
+      'claude-code',
+      'default',
+      [
+        {
+          key: 'five_hour',
+          usedPct: 5,
+          resetsAt: at(H),
+          status: null,
+          observedAt: at(-M),
+          source: 'statusline',
+        },
+      ],
+      new Date(NOW)
+    );
+    expect(await ids()).toEqual([
+      ['claude2', 'Claude 2'],
+      ['claude3', null],
+    ]);
+  });
+
   it('warns when a run store cannot be read, and still shows the live sessions', async () => {
     // Purpose: a corrupt flow-state.json must say so on stderr, never read silently as "no runs".
     writeFileSync(path.join(project, '.dork', 'flow', 'flow-state.json'), '{ torn');

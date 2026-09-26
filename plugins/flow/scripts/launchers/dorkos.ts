@@ -12,7 +12,8 @@
  * - **runtimes:** all three. `runtime` rides to `session_start` and the route
  *   body. DorkOS supports accounts for claude-code only today, so for codex and
  *   opencode an account is sent only when it is a registered, non-default one;
- *   the implicit default account is omitted and DorkOS runs its ambient login.
+ *   the `default` account is omitted and DorkOS runs its own default login
+ *   (the same machine-wide `default`, spec `flow-cli-core` §1.1a rev 6d).
  *   A non-default codex or opencode account must still be reported back on the
  *   session (`account`), and fails closed as `wrong-account` until DorkOS does.
  * - **send:** `POST /api/sessions/<id>/messages` (DorkOS queues while a turn runs).
@@ -226,15 +227,19 @@ function mintedSessionId(result: Record<string, unknown>): string | null {
 }
 
 /**
- * The account id DorkOS is sent, or `undefined` to omit it: claude-code sends
- * any account that is not the ambient one; codex and opencode send only a
- * registered, non-default account (DorkOS has accounts for claude-code only).
+ * The account id DorkOS is sent, or `undefined` to omit it. A standalone
+ * `default` is never sent: DorkOS resolves its own default the same
+ * machine-wide way (spec §1.1a) and has no registry row by that id, so sending
+ * it only earns an "unregistered id" warning. An aliased default arrives here
+ * under its registered row's id and is sent. Beyond that, claude-code sends any
+ * account that is not the ambient one; codex and opencode send only registered
+ * accounts (DorkOS has accounts for claude-code only).
  */
 function sentAccount(req: LaunchRequest): string | undefined {
   const account = req.account;
-  if (account === null) return undefined;
+  if (account === null || account.id === DEFAULT_ACCOUNT_ID) return undefined;
   if (req.runtime === 'claude-code') return isAmbientAccount(account) ? undefined : account.id;
-  return account.id === DEFAULT_ACCOUNT_ID ? undefined : account.id;
+  return account.id;
 }
 
 /**

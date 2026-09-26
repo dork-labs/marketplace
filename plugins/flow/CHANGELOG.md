@@ -4,6 +4,18 @@ Installs of this plugin are pinned to a commit SHA, so a fix here does not reach
 you until you **reinstall it** (Marketplace → flow → reinstall, or re-run your
 `--plugin-dir` checkout's `git pull`). Each entry below says whether that matters.
 
+## 0.32.0
+
+**Your main Claude Code sign-in now shows up in flow, even when you have listed other accounts. Reinstall to get it.**
+
+- flow now knows an account by its folder, not its name. `default` is this computer's main folder: for Claude Code, the one the DorkOS app is set to, else `~/.claude`; for Codex, `~/.codex`. A session running in another folder never changes what `default` means.
+- If one of your listed accounts uses that folder, `default` is just another name for it. flow keeps one usage file and one set of settings for it, and `flow accounts` shows it once, as "Claude3 (default)".
+- If none does, `default` is its own account, "Main (this computer's sign-in)", with its usage in `default.json`. Before this, it was hidden as soon as you listed any account.
+- Next to listed accounts, that sign-in counts as your `main` account: flow keeps half of its weekly limit for you and uses it last. Give another account the `main` role, or give `default` any role, and your choice wins.
+- `flow usage probe default --yes` now checks that sign-in, `flow usage install-statusline` sets up its status line, and the status line records it. A session in a folder that is neither listed nor the default still records nothing.
+- `flow next` and `flow drain` can pick that sign-in, and start its sessions in its own folder, whatever folder the drain itself runs in.
+- The shared test files DorkOS checks itself against are now version 3.0.0: what `default` means changed, so DorkOS must update its side too.
+
 ## 0.31.0
 
 **flow's self-test can now try a few stage commands on a real Claude session. It costs money and only runs when you ask. Reinstall to get it.**
@@ -61,6 +73,13 @@ you until you **reinstall it** (Marketplace → flow → reinstall, or re-run yo
 - New items land in your tracker's triage state and are never marked ready: triage still decides.
 - Filing the same failure twice, from a retry or from two runs at once, still makes one item.
 - A custom adapter without the create step keeps working: `--file` lists what it would file, as before.
+
+## 0.26.0
+
+**The `flow` command is documented, and the backlog audit can accept a label your team uses without a family. Reinstall to get it.**
+
+- The README, "Driving it manually" and the contract reference (`docs/SPEC.md`) now show the `flow` command and its verbs.
+- New setting `groom.unnamespacedLabels`: bare labels such as `cloud-contract` that the audit should accept without a `family/` prefix. It is empty by default, so every other bare label is still flagged.
 
 ## 0.25.0
 

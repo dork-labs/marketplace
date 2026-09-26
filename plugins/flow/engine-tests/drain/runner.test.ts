@@ -55,6 +55,8 @@ let origin: string;
 let dorkHome: string;
 let clock: number;
 let load: { load1: number; cpus: number };
+/** The supervisor's own extra environment (a test may run it on another account). */
+let supervisorEnv: Record<string, string>;
 
 /** Run git in `cwd` with a fixed identity. */
 function git(cwd: string, ...args: string[]): string {
@@ -249,7 +251,12 @@ async function flow(argv: string[], cwd = project.dir) {
       : verb
   );
   const code = await main([...argv, '--json'], {
-    env: { FLOW_SESSION_ID: 'supervisor-session', CLAUDECODE: '1', DORK_HOME: dorkHome },
+    env: {
+      FLOW_SESSION_ID: 'supervisor-session',
+      CLAUDECODE: '1',
+      DORK_HOME: dorkHome,
+      ...supervisorEnv,
+    },
     cwd,
     now: () => new Date(clock),
     stdout: { write: (c: string) => (out += c) },
@@ -258,7 +265,8 @@ async function flow(argv: string[], cwd = project.dir) {
     runProcess: runner,
     createForge: () => world.forge.forge,
     createLauncher: fakeLaunchers(world.log, world.script),
-    io: { load: () => load, sleep: async () => undefined },
+    // A private OS home, so `default` (machine-wide, rev 6d) never reads the real ~/.claude.
+    io: { load: () => load, sleep: async () => undefined, osHome: path.join(dorkHome, 'os-home') },
     verbs,
   });
   let json: Record<string, unknown> = {};
@@ -412,6 +420,7 @@ beforeEach(() => {
   dorkHome = realpathSync(mkdtempSync(path.join(os.tmpdir(), 'flow-drain-home-')));
   clock = T0;
   load = { load1: 0.5, cpus: 8 };
+  supervisorEnv = {};
   configure();
   world = {
     tracker: createFakeAdapter({
@@ -974,6 +983,40 @@ describe('flow drain: the handoff seam', () => {
     );
     await tick();
     expect(world.log.starts.filter((s) => s.req.role === 'reviewer')).toHaveLength(1);
+  });
+});
+
+describe('flow drain: the default account (S1 rev 6d)', () => {
+  it("ranks and launches the operator's own sign-in as main, in its folder, from a supervisor on another account", async () => {
+    // Purpose: the operator's shape (defaultAccount null, claude3 registered
+    // with no policy, so kept out). `default` is ~/.claude, its own account and
+    // main by default, so the drain must pick it, never spend kept-out claude3,
+    // and start the session in ~/.claude even though the supervisor itself runs
+    // on claude3 (CLAUDE_CONFIG_DIR).
+    const osHome = path.join(dorkHome, 'os-home');
+    mkdirSync(path.join(osHome, '.claude'), { recursive: true });
+    writeFileSync(
+      path.join(dorkHome, 'config.json'),
+      JSON.stringify({
+        runtimes: {
+          claudeCode: {
+            defaultAccount: null,
+            accounts: [{ id: 'claude3', path: path.join(osHome, '.claude3'), label: 'Claude3' }],
+          },
+        },
+      })
+    );
+    supervisorEnv = { CLAUDE_CONFIG_DIR: path.join(osHome, '.claude3') };
+    const pass = await flow(['drain', '--tick', '--parallel', '1', '--host', 'cli']);
+    expect(pass.code, pass.stderr).toBe(0);
+    const workers = world.log.starts.filter((s) => s.req.role === 'worker');
+    expect(workers).toHaveLength(1);
+    expect(workers[0].req.account).toMatchObject({
+      runtime: 'claude-code',
+      id: 'default',
+      path: path.join(osHome, '.claude'),
+    });
+    expect(world.log.starts.map((s) => s.req.account?.id)).not.toContain('claude3');
   });
 });
 

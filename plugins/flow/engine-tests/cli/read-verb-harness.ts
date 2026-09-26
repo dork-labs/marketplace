@@ -24,6 +24,8 @@ export interface TempProject {
   plugin: string;
   /** A private DorkOS home (`DORK_HOME`), so the operator's own accounts never leak in. */
   dorkHome: string;
+  /** A private OS home, so `default` (machine-wide, rev 6d) never reads the real `~/.claude`. */
+  osHome: string;
   /** Delete both folders. */
   cleanup(): void;
 }
@@ -45,6 +47,7 @@ export function tempProject(config: Record<string, unknown>): TempProject {
     project,
     plugin,
     dorkHome: path.join(base, 'dork'),
+    osHome: path.join(base, 'home'),
     cleanup: () => rmSync(base, { recursive: true, force: true }),
   };
 }
@@ -98,6 +101,7 @@ export async function runFlow(
     },
     runProcess: options.runProcess ?? (async () => ({ code: 0, stdout: '', stderr: '' })),
     flowRoot: temp.plugin,
+    io: { osHome: temp.osHome },
     verbs: VERBS,
   });
   return { code, stdout, stderr, adapterBuilds };

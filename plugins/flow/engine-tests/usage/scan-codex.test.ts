@@ -44,7 +44,8 @@ beforeEach(() => {
   root = mkdtempSync(path.join(tmpdir(), 'flow-usage-scan-codex-'));
   dorkHome = path.join(root, 'dork');
   osHome = path.join(root, 'home');
-  codexHome = path.join(root, 'codex-home');
+  // codex:default is machine-wide (rev 6d): <os home>/.codex, whatever CODEX_HOME says.
+  codexHome = path.join(osHome, '.codex');
   mkdirSync(dorkHome, { recursive: true });
   mkdirSync(osHome, { recursive: true });
 });
@@ -260,20 +261,45 @@ describe('flow usage scan --runtime codex', () => {
     expect(JSON.parse(run.stdout).accounts[0]).toMatchObject({ home, files: 1, readings: 4 });
   });
 
-  it('scans registered Codex accounts in place of default', async () => {
-    // Purpose: once config.json lists Codex accounts, the verbs read those rows (A1).
+  it('scans registered Codex accounts, and default beside them only when it stands alone', async () => {
+    // Purpose: once config.json lists Codex accounts, the verbs read those rows
+    // (A1). codex:default is <os home>/.codex (rev 6d, machine-wide): its own
+    // account while no row has that folder, and an alias of the row once one
+    // does, so one real account is scanned once and written to one ledger. A
+    // CODEX_HOME pointing at a registered row never changes that.
     const work = path.join(root, 'codex-work');
     place('rollout-pro.jsonl', 'sessions/rollout-w.jsonl', 0.1, work);
+    mkdirSync(codexHome, { recursive: true });
     writeFileSync(
       path.join(dorkHome, 'config.json'),
       JSON.stringify({ runtimes: { codex: { accounts: [{ id: 'work', path: work }] } } })
     );
-    const out = await scanJson();
-    expect(out.accounts.map((account) => [account.id, account.files])).toEqual([['work', 1]]);
+    const run = await flow(['usage', 'scan', '--runtime', 'codex', '--json'], { CODEX_HOME: work });
+    expect(run.code, run.stderr).toBe(0);
+    const out = JSON.parse(run.stdout) as ScanJson;
+    expect(out.accounts.map((account) => account.id)).toEqual(['work', 'default']);
+    expect(out.accounts[0].files).toBe(1);
+    expect(existsSync(ledgerPath(dorkHome, 'codex', 'work'))).toBe(true);
+
+    rmSync(ledgerFile(), { force: true });
+    rmSync(ledgerPath(dorkHome, 'codex', 'work'), { force: true });
+    writeFileSync(
+      path.join(dorkHome, 'config.json'),
+      JSON.stringify({ runtimes: { codex: { accounts: [{ id: 'work', path: `${codexHome}/` }] } } })
+    );
+    place('rollout-pro.jsonl', 'sessions/rollout-w.jsonl', 0.1);
+    const aliased = await flow([
+      'usage',
+      'scan',
+      '--runtime',
+      'codex',
+      '--account',
+      'default',
+      '--json',
+    ]);
+    expect(aliased.code, aliased.stderr).toBe(0);
+    expect(JSON.parse(aliased.stdout).accounts.map((a: { id: string }) => a.id)).toEqual(['work']);
     expect(existsSync(ledgerPath(dorkHome, 'codex', 'work'))).toBe(true);
     expect(existsSync(ledgerFile())).toBe(false);
-
-    const unknown = await flow(['usage', 'scan', '--runtime', 'codex', '--account', 'default']);
-    expect(unknown.code).toBe(5);
   });
 });

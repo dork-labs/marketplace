@@ -20,10 +20,13 @@ const NOW = new Date('2026-09-26T16:00:00.000Z');
 
 let root: string;
 let dorkHome: string;
+/** `mine` lives in this computer's default Claude Code folder, so `default` is its alias (rev 6d). */
+let mineDir: string;
 
 beforeEach(() => {
   root = mkdtempSync(path.join(tmpdir(), 'flow-usage-prune-'));
   dorkHome = path.join(root, 'dork');
+  mineDir = path.join(root, 'home', '.claude');
   mkdirSync(dorkHome, { recursive: true });
 });
 
@@ -32,11 +35,11 @@ afterEach(() => {
 });
 
 /** Run `flow <argv>` against the temp home. */
-async function flow(argv: string[], now: () => Date = () => NOW) {
+async function flow(argv: string[], now: () => Date = () => NOW, env: Record<string, string> = {}) {
   let stdout = '';
   let stderr = '';
   const deps: MainDeps = {
-    env: { DORK_HOME: dorkHome },
+    env: { DORK_HOME: dorkHome, ...env },
     cwd: root,
     now,
     stdout: { write: (chunk: string) => (stdout += chunk) },
@@ -97,7 +100,7 @@ describe('flow usage prune', () => {
   beforeEach(async () => {
     writeFileSync(
       path.join(dorkHome, 'config.json'),
-      JSON.stringify({ runtimes: { claudeCode: { accounts: [{ id: 'mine', path: '/a/mine' }] } } })
+      JSON.stringify({ runtimes: { claudeCode: { accounts: [{ id: 'mine', path: mineDir }] } } })
     );
     await ledger('claude-code', 'mine');
     await ledger('claude-code', 'gone');
@@ -126,7 +129,8 @@ describe('flow usage prune', () => {
     ['codex', 'old-team.json', 'unregistered', 'listed'],
   ];
 
-  // Purpose: without --yes prune only lists (A6): unregistered ledgers and
+  // Purpose: without --yes prune only lists (A6): unregistered ledgers (and a
+  // claude-code default.json, a second reading of `mine`, which `default` aliases)
   // their corrupt backups at any age, leftovers only past an hour. A known
   // account's ledger, its corrupt backup, a young tmp, a fresh lock and a
   // stamp are never listed, and nothing is deleted.
@@ -189,7 +193,7 @@ describe('flow usage prune', () => {
             runtimes: {
               claudeCode: {
                 accounts: [
-                  { id: 'mine', path: '/a/mine' },
+                  { id: 'mine', path: mineDir },
                   { id: 'gone', path: '/a/gone' },
                 ],
               },
@@ -223,7 +227,7 @@ describe('flow usage prune', () => {
       path.join(dorkHome, 'config.json'),
       JSON.stringify({
         runtimes: {
-          claudeCode: { accounts: [{ id: 'mine', path: '/a/mine' }] },
+          claudeCode: { accounts: [{ id: 'mine', path: mineDir }] },
           opencode: { accounts: [{ id: 'openrouter', path: '/a/or' }] },
         },
       })
@@ -232,6 +236,65 @@ describe('flow usage prune', () => {
     expect(rows(out).filter((r) => r[0] === 'opencode')).toEqual([
       ['opencode', 'default.json', 'unregistered', 'listed'],
     ]);
+  });
+
+  // Purpose: rev 6d. A default that stands alone (no registered row in its
+  // folder) is its own account, so default.json is kept beside the registered
+  // rows' files; once a row takes the default folder, default.json is a second
+  // reading of that row's account and goes, while the row's file stays.
+  it('keeps default.json while default stands alone, and only then', async () => {
+    const elsewhere = { id: 'mine', path: path.join(root, 'elsewhere') };
+    writeFileSync(
+      path.join(dorkHome, 'config.json'),
+      JSON.stringify({ runtimes: { claudeCode: { accounts: [elsewhere] } } })
+    );
+    const standalone = (await flow(['usage', 'prune', '--json'])).json() as PruneJson;
+    const claudeRows = (out: PruneJson) =>
+      rows(out).filter((r) => r[0] === 'claude-code' && String(r[1]).endsWith('.json'));
+    expect(claudeRows(standalone)).toEqual([
+      ['claude-code', 'gone.json', 'unregistered', 'listed'],
+    ]);
+
+    writeFileSync(
+      path.join(dorkHome, 'config.json'),
+      JSON.stringify({
+        runtimes: { claudeCode: { accounts: [{ id: 'mine', path: `${mineDir}/` }] } },
+      })
+    );
+    const aliased = (await flow(['usage', 'prune', '--yes', '--json'])).json() as PruneJson;
+    expect(claudeRows(aliased)).toEqual([
+      ['claude-code', 'default.json', 'unregistered', 'removed'],
+      ['claude-code', 'gone.json', 'unregistered', 'removed'],
+    ]);
+    expect(files('claude-code')).toContain('mine.json');
+  });
+
+  // Purpose: review blocker on rev 6d. `default` is machine-wide: run from a
+  // session on claude3 (CLAUDE_CONFIG_DIR=~/.claude3), prune must still see
+  // default.json as the operator's main ledger and never delete it, and must
+  // keep claude3's own file too.
+  it('never deletes the main default.json from a session on another account', async () => {
+    const osHome = path.join(root, 'home');
+    writeFileSync(
+      path.join(dorkHome, 'config.json'),
+      JSON.stringify({
+        runtimes: {
+          claudeCode: {
+            defaultAccount: null,
+            accounts: [{ id: 'claude3', path: path.join(osHome, '.claude3'), label: 'Claude3' }],
+          },
+        },
+      })
+    );
+    await ledger('claude-code', 'claude3');
+    const result = await flow(['usage', 'prune', '--yes', '--json'], () => NOW, {
+      CLAUDE_CONFIG_DIR: path.join(osHome, '.claude3'),
+    });
+    expect(result.code, result.stderr).toBe(EXIT.ok);
+    const listed = rows(result.json() as PruneJson).map((r) => r[1]);
+    expect(listed).not.toContain('default.json');
+    expect(listed).not.toContain('claude3.json');
+    expect(files('claude-code')).toEqual(expect.arrayContaining(['claude3.json', 'default.json']));
   });
 
   it('lists legacy files by the age rule for non-json', async () => {
