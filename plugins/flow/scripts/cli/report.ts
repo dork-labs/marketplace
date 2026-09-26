@@ -235,7 +235,11 @@ async function blocked(ctx: VerbContext, run: DrainRun): Promise<VerbResult> {
     'comment',
   ]);
   const item = await adapter.getItem(run.identifier, { comments: RECENT_COMMENTS });
-  const body = signBody(question, loaded.config.identity.marker, sessionProvenance(ctx, run.host));
+  const body = signBody(
+    `${question}\n\nReply to this comment to resume the work.`,
+    loaded.config.identity.marker,
+    sessionProvenance(ctx, run.host)
+  );
   const unsigned = unsignedBody(body);
   const alreadyPosted = (item.comments ?? [])
     .slice(-RECENT_COMMENTS)
@@ -252,6 +256,7 @@ async function blocked(ctx: VerbContext, run: DrainRun): Promise<VerbResult> {
       phase: 'parked',
       parkedReason: reason,
       parkedFrom: drain.phase === 'parked' ? (drain.parkedFrom ?? null) : drain.phase,
+      parkedAt: ctx.now().toISOString(),
     }),
     `run "flow report ${run.identifier} blocked" again (the question is posted, so it will not be posted twice)`
   );

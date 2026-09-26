@@ -169,7 +169,7 @@ function fakeForge() {
     },
     async prForBranch() {
       calls.push({ method: 'prForBranch' });
-      return prNumber === null ? null : { number: prNumber, url: `u/${prNumber}`, headSha: null };
+      return prNumber === null ? null : { number: prNumber, url: `u/${prNumber}`, headSha: head() };
     },
     async createPr(input: CreatePrInput) {
       calls.push({ method: 'createPr', arg: input });
@@ -207,7 +207,11 @@ function fakeForge() {
       return [];
     },
   };
-  return { forge, calls, violations, status, head };
+  /** A PR that exists on the forge but no run has recorded yet (flow pr mid-flight). */
+  const openPr = () => {
+    prNumber = 7;
+  };
+  return { forge, calls, violations, status, head, openPr };
 }
 
 /** Real git, except `remote get-url origin` answers a GitHub address. */
@@ -685,6 +689,11 @@ describe('flow drain: adopt before releasing', () => {
     const labels = world.tracker.backlog.items[0].labels;
     expect(labels).toContain('agent/needs-input');
     expect(world.log.starts).toHaveLength(2);
+    // The park comment says how the run resumes.
+    const park = world.tracker.calls.filter((c) => c.method === 'comment').at(-1) as unknown as {
+      body: string;
+    };
+    expect(park.body).toContain('Reply to this comment to resume');
   });
 });
 
@@ -842,6 +851,25 @@ describe('flow drain: arming only the reviewed commit', () => {
 });
 
 describe('flow drain: parked runs', () => {
+  it('a park the drain decides is timed, and stops the worker', async () => {
+    // Purpose: only a reply after the park answers it, so the pass that parks
+    // records when; and a parked run holds no live session.
+    world.tracker = createFakeAdapter({ user: { id: 'agent-1' }, items: [item('ACME-1')] });
+    await tick();
+    const worker = runOf('ACME-1').sessionId;
+    world.script.states.set(worker, { kind: 'idle' });
+    for (const minute of [1, 2, 3]) {
+      clock = T0 + minute * 60_000;
+      await tick();
+    }
+    expect(drainOf('ACME-1')).toMatchObject({
+      phase: 'parked',
+      parkedFrom: 'working',
+      parkedAt: new Date(T0 + 3 * 60_000).toISOString(),
+    });
+    expect(world.log.stops.map((h) => h.sessionId)).toContain(worker);
+  });
+
   it('a parked run holds no slot, and an answered one is picked back up', async () => {
     // Purpose: a run waiting on a person must not block new work, and once the
     // person answers, the drain resumes it instead of leaving it parked forever.
@@ -860,14 +888,57 @@ describe('flow drain: parked runs', () => {
     await tick();
     expect(runOf('ACME-2').status).toBe('running');
 
-    // A person answers: the item is claimed again, without needs-input.
-    const acme1 = world.tracker.backlog.items.find((i) => i.identifier === 'ACME-1')!;
-    acme1.labels = acme1.labels.filter((l) => l !== 'agent/needs-input').concat('agent/claimed');
+    // Neither a comment from before the park nor one by the agent itself is an answer.
+    const comments = ((world.tracker.backlog.comments ??= {})['ACME-1'] ??= []);
+    const at = (minutes: number) => new Date(T0 + minutes * 60_000).toISOString();
+    comments.push({ id: 'old', author: 'dorian', body: 'Earlier note.', createdAt: at(-5) });
+    comments.push({ id: 'own', author: 'agent-1', body: 'Still waiting.', createdAt: at(1) });
+    clock = T0 + 2 * 60_000;
+    await tick();
+    expect(drainOf('ACME-1').phase).toBe('parked');
+    const acme1 = () => world.tracker.backlog.items.find((i) => i.identifier === 'ACME-1')!;
+    expect(acme1().labels).toContain('agent/needs-input');
+
+    // A person replies: the next pass lifts needs-input and resumes the run.
+    comments.push({ id: 'answer', author: 'dorian', body: 'Use CSV.', createdAt: at(3) });
+    clock = T0 + 4 * 60_000;
     await tick();
     expect(drainOf('ACME-1')).toMatchObject({ phase: 'working', parkedReason: null });
+    expect(acme1().labels).toContain('agent/claimed');
+    expect(acme1().labels).not.toContain('agent/needs-input');
     const sent = world.log.sends.at(-1);
     expect(sent?.handle.sessionId).toBe(first.sessionId);
     expect(sent?.text).toContain('answered');
+    expect(sent?.text).toContain('dorian');
+  }, 120_000);
+});
+
+describe('flow drain: a PR from flow pr is not an early one', () => {
+  it('neither parks, disarms nor comments when a pass lands between creating the PR and recording it', async () => {
+    // Purpose: flow pr opens the PR, then records it. A pass that gathers in
+    // between sees a PR on the branch with none recorded; at the clean reviewed
+    // head that is flow pr's own PR and must be left alone.
+    world.tracker = createFakeAdapter({ user: { id: 'agent-1' }, items: [item('ACME-1')] });
+    await tick();
+    const s1 = await workerPushes('ACME-1', 'one');
+    await tick();
+    await reviewerSays('ACME-1', s1, 'clean');
+    await tick();
+    expect(drainOf('ACME-1').phase).toBe('pr-ready');
+    const commentsBefore = world.tracker.calls.filter((c) => c.method === 'comment').length;
+
+    world.forge.openPr();
+    await tick();
+    expect(drainOf('ACME-1')).toMatchObject({ phase: 'pr-ready', pr: null });
+    expect(world.forge.calls.some((c) => c.method === 'disarm')).toBe(false);
+    expect(world.tracker.calls.filter((c) => c.method === 'comment')).toHaveLength(commentsBefore);
+
+    // flow pr, retried, records the PR it opened; the drain watches it.
+    const wt = runOf('ACME-1').worktreePath;
+    writeFileSync(path.join(wt, 'pr-body.md'), 'What changes.\n');
+    await flow(['pr', 'ACME-1', '--title', 'T', '--body-file', path.join(wt, 'pr-body.md')], wt);
+    await tick();
+    expect(drainOf('ACME-1')).toMatchObject({ phase: 'watching', pr: { number: 7 } });
   }, 120_000);
 });
 

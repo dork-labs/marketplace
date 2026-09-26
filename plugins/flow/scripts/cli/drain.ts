@@ -25,6 +25,7 @@
 import path from 'node:path';
 
 import { chooseAccount, rankAccounts } from '../drain/account-rank.ts';
+import { answerPointer, findAnswer } from '../drain/answer.ts';
 import { acquireDrainLock } from '../drain/lock.ts';
 import {
   findMintedSession,
@@ -45,6 +46,7 @@ import {
 import { openFlowStateFile, resolveMainCheckout } from '../flow-state-file.ts';
 import { forgeTargetFor } from '../forge/types.ts';
 import { dorkosBaseUrl } from '../launchers/dorkos.ts';
+import { classifyOwnership } from '../identity.ts';
 import { realLauncher } from '../launchers/real.ts';
 import { hostPreference, resolveHost } from '../launchers/resolve.ts';
 import { DEFAULT_START_TIMEOUT_MS, sessionHome } from '../launchers/common.ts';
@@ -161,6 +163,13 @@ export async function drain(ctx: VerbContext, options: DrainOptions = {}): Promi
 
   const setup = await setupWrite(ctx, CAPABILITIES);
   const { adapter, store, stages } = setup;
+  let agent: string | undefined;
+  /** The agent's account id, resolved once (`identity.agent`, or the tracker's current user for `auto`). */
+  const agentId = async (): Promise<string> =>
+    (agent ??=
+      config.identity.agent === 'auto'
+        ? (await adapter.getCurrentUser()).id
+        : config.identity.agent);
 
   const launchers = new Map<HostName, Launcher>();
   const launcher = (host: HostName): Launcher => {
@@ -239,13 +248,38 @@ export async function drain(ctx: VerbContext, options: DrainOptions = {}): Promi
     launcher,
     hostFor,
     forge,
-    async item(identifier) {
-      const item = await adapter.getItem(identifier);
-      return {
+    async item(identifier, parked) {
+      const item = await adapter.getItem(
+        identifier,
+        parked === undefined ? undefined : { comments: RECENT_COMMENTS }
+      );
+      const facts = {
         closed: !isOpenItem(item),
         claimed: item.labels.includes(AGENT_CLAIMED),
         needsInput: item.labels.includes(AGENT_NEEDS_INPUT),
         title: item.title,
+        answer: null as string | null,
+      };
+      if (parked === undefined || !facts.needsInput || facts.closed) return facts;
+      // The inbox pass leaves drain runs alone, so the drain notices the reply itself.
+      const identity = { agent: await agentId(), marker: config.identity.marker };
+      const scope = config.ownership.scope.includes('issues') ? 'issues' : 'projects';
+      const reply = findAnswer(item, item.comments ?? [], parked.since, {
+        identity,
+        ownership: classifyOwnership(
+          item,
+          { ...identity, reviewer: config.identity.reviewer },
+          scope
+        ),
+        comments: config.comments,
+      });
+      if (reply === null || ctx.dryRun) return facts;
+      await applyAndVerify(adapter, item, projectionFor({ type: 'claim' }, { stages }));
+      return {
+        ...facts,
+        claimed: true,
+        needsInput: false,
+        answer: answerPointer(reply, identifier),
       };
     },
     async plan(slots) {
@@ -308,7 +342,7 @@ export async function drain(ctx: VerbContext, options: DrainOptions = {}): Promi
     async park(identifier, reason) {
       const item = await adapter.getItem(identifier, { comments: RECENT_COMMENTS });
       const body = signBody(
-        `flow drain parked this item: ${reason}.`,
+        `flow drain parked this item: ${reason}. Reply to this comment to resume the work.`,
         config.identity.marker,
         sessionProvenance(ctx, undefined)
       );

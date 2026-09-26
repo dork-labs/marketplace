@@ -188,6 +188,8 @@ export interface ItemFacts {
   claimed: boolean;
   /** Carries `agent/needs-input`: a person has not answered yet. */
   needsInput: boolean;
+  /** For a parked run: a pointer to the reply that answered it (needs-input already lifted), when found. */
+  answer?: string | null;
   /** Its title. */
   title: string;
 }
@@ -243,7 +245,12 @@ export interface PassDeps {
   /** The project's forge. */
   forge: Forge;
   /** The tracker item's facts (one `getItem`). */
-  item(identifier: string): Promise<ItemFacts>;
+  /**
+   * The tracker item's facts (one `getItem`). For a parked run (`parked`), it
+   * also looks for a reply newer than `since` and, finding one, lifts
+   * needs-input through the adapter and returns the answer's pointer.
+   */
+  item(identifier: string, parked?: { since: string | null }): Promise<ItemFacts>;
   /** `flow next`'s logic with account assignment, for `slots` picks. */
   plan(slots: number): Promise<PassPlan>;
   /** The account a reviewer of a `runtime` run bills (ranked with no affinity), or `null`. */
@@ -660,10 +667,15 @@ export async function runPass(deps: PassDeps): Promise<PassReport> {
     } else {
       const open = await deps.forge.prForBranch(run.branch);
       prForBranch =
-        open === null ? null : { repo: deps.forge.repo, number: open.number, url: open.url };
+        open === null
+          ? null
+          : { repo: deps.forge.repo, number: open.number, url: open.url, headSha: open.headSha };
     }
 
-    const item = await deps.item(run.identifier);
+    const item = await deps.item(
+      run.identifier,
+      drain.phase === 'parked' ? { since: drain.parkedAt ?? null } : undefined
+    );
     const pendingSince = Date.parse(drain.worker?.pendingSince ?? run.startedAt);
     const unstarted =
       (run.status === 'queued' && drain.worker === null) || drain.worker?.pending === true;
@@ -732,7 +744,13 @@ export async function runPass(deps: PassDeps): Promise<PassReport> {
       const reason = `the supervisor stopped while starting a DorkOS session; check DorkOS for a session in ${run.worktreePath} whose context names flow id ${probe.sessionId}, then flow release or re-run`;
       await supervisorWrite(run.issueId, (r) => ({
         ...r,
-        drain: { ...r.drain, phase: 'parked', parkedReason: reason },
+        drain: {
+          ...r.drain,
+          phase: 'parked',
+          parkedReason: reason,
+          parkedFrom: r.drain.phase === 'parked' ? (r.drain.parkedFrom ?? null) : r.drain.phase,
+          parkedAt: now.toISOString(),
+        },
       }));
       await deps.park(run.identifier, reason);
       note(current(run.issueId), run.identifier, `parked: ${reason}`);
@@ -1045,6 +1063,10 @@ export async function runPass(deps: PassDeps): Promise<PassReport> {
               ? { ...decided.reviewer, logOffset: offsets.reviewer }
               : decided.reviewer,
         rev: latest.drain.rev + 1,
+        // A new park is timed, so only a reply after it answers it.
+        ...(decided.phase === 'parked' && latest.drain.phase !== 'parked'
+          ? { parkedAt: now.toISOString() }
+          : {}),
       };
       const next: FlowRun = { ...latest, drain };
       if (step.run.limit === undefined) delete next.limit;

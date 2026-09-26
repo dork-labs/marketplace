@@ -516,7 +516,9 @@ describe('drainStep: the phase table', () => {
         pushedSha: S,
         reviewer: phase === 'reviewing' ? reviewer(S) : null,
       });
-      const out = step(d, { prForBranch: { repo: 'acme/app', number: 90, url: 'u' } });
+      const out = step(d, {
+        prForBranch: { repo: 'acme/app', number: 90, url: 'u', headSha: S },
+      });
       expect(out.drain.phase).toBe('parked');
       expect(out.drain.parkedReason).toBe(PARK_REASONS.earlyPr);
       expect(out.actions).toEqual([
@@ -527,6 +529,27 @@ describe('drainStep: the phase table', () => {
       ]);
     }
   );
+
+  // flow pr opens the PR, then records it: a pass in between sees a PR on the
+  // branch with drain.pr still null. At the clean reviewed head that is flow
+  // pr's own PR, not an early one.
+  it('pr-ready + a PR at the clean reviewed head, not yet recorded -> no park, no action', () => {
+    const d = drain('pr-ready', { pushedSha: S, reviewedSha: S, verdict: 'clean', reviewRound: 1 });
+    const legit = step(d, { prForBranch: { repo: 'acme/app', number: 90, url: 'u', headSha: S } });
+    expect(legit.drain.phase).toBe('pr-ready');
+    expect(legit.actions).toEqual([]);
+    // With no head from the forge, origin's head stands in for it.
+    const unknown = step(d, {
+      prForBranch: { repo: 'acme/app', number: 90, url: 'u', headSha: null },
+    });
+    expect(unknown.actions).toEqual([]);
+    // At any other head it is early: disarm and park.
+    const early = step(d, {
+      prForBranch: { repo: 'acme/app', number: 90, url: 'u', headSha: S2 },
+    });
+    expect(early.drain.phase).toBe('parked');
+    expect(early.actions[0]).toEqual({ kind: 'disarm', pr: { repo: 'acme/app', number: 90 } });
+  });
 
   // a queued run with no worker, or a pending one, past the start timeout: adopt or release.
   it.each([
@@ -713,7 +736,11 @@ describe('drainStep: parked runs', () => {
   // Answered (needs-input gone, still claimed and open): back to its phase with a continue.
   it('an answered parked run goes back to its phase and gets a continue', () => {
     const d = drain('parked', { parkedReason: 'q', parkedFrom: 'fixing', nudges: 2 });
-    const out = step(d, { worker: { kind: 'exited', code: 0 } });
+    const answer = 'the comment by dorian at 2026-09-26T12:05:00.000Z';
+    const out = step(d, {
+      worker: { kind: 'exited', code: 0 },
+      item: { closed: false, claimed: true, needsInput: false, title: 't', answer },
+    });
     expect(out.drain).toMatchObject({
       phase: 'fixing',
       parkedReason: null,
@@ -721,8 +748,9 @@ describe('drainStep: parked runs', () => {
       nudges: 0,
     });
     expect(out.actions).toEqual([
-      { kind: 'send', message: 'continue', ctx: { ...BASE, answered: true } },
+      { kind: 'send', message: 'continue', ctx: { ...BASE, answered: true, answer } },
     ]);
+    expect(render('continue', { ...BASE, answered: true, answer })).toContain(answer);
     // With no recorded phase it resumes as working.
     const bare = step(drain('parked', { parkedReason: 'q' }));
     expect(bare.drain.phase).toBe('working');
@@ -787,7 +815,10 @@ describe('drainStep: properties over every row', () => {
         nudges: pick([0, 1, 2]),
       });
       const f = facts(d, {
-        prForBranch: pick([null, { repo: 'acme/app', number: 90, url: 'u' }]),
+        prForBranch: pick([
+          null,
+          { repo: 'acme/app', number: 90, url: 'u', headSha: pick([S, S2, null]) },
+        ]),
         queuedAgeMs: pick([null, 1, 100_000]),
         worker: pick([
           null,

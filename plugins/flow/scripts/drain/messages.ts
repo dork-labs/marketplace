@@ -64,6 +64,8 @@ export interface MessageContexts {
     unreportedPush?: boolean;
     /** `true` when a person answered the question the run parked on. */
     answered?: boolean;
+    /** Where the answer is (e.g. "the comment by dorian on ACME-12 at ..."), when known. */
+    answer?: string;
   };
   /** The review came back clean at the branch head on origin. */
   'open-pr': MessageContextBase & {
@@ -217,7 +219,9 @@ export function render<K extends MessageKind>(kind: K, ctx: MessageContexts[K]):
       if (c.answered) {
         return compose(
           [
-            `A person answered the question ${id} was parked on. Read the newest comments on ${id} through the adapter first.`,
+            c.answer
+              ? `A person answered the question ${id} was parked on: ${c.answer}. Read it through the adapter first.`
+              : `A person answered the question ${id} was parked on. Read the newest comments on ${id} through the adapter first.`,
             'Then continue from `.dork/flow/HANDOFF.md`. ' + pushSteps(ctx, 'task'),
           ],
           reportPushed

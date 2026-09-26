@@ -46,6 +46,8 @@ export interface BranchPullRequest {
   number: number;
   /** The PR's web address. */
   url: string;
+  /** Its head commit, when the forge reported it. */
+  headSha: string | null;
 }
 
 /** The forge's view of the run's pull request (`prStatus`, spec §4.6). */
@@ -100,6 +102,8 @@ export interface DrainFacts {
     claimed: boolean;
     /** Carries `agent/needs-input`: a person has not answered yet. */
     needsInput: boolean;
+    /** For a parked run: a pointer to the reply that answered it, when one was found. */
+    answer?: string | null;
     /** Its title, for the pull request. */
     title: string;
   };
@@ -499,6 +503,23 @@ function phaseStep(step: Step, run: FlowRun, facts: DrainFacts, cfg: DrainStepCo
 }
 
 /**
+ * Whether an unrecorded PR on the branch is the one `flow pr` is opening: in
+ * `pr-ready`, at the clean reviewed head (`flow pr` creates the PR, then
+ * records it, so a pass can land in between). Its head is the forge's, else
+ * origin's. Any other head is a PR opened before a clean review.
+ */
+function isFlowPrsOwn(drain: DrainState, pr: BranchPullRequest, facts: DrainFacts): boolean {
+  const head = pr.headSha ?? facts.originHead;
+  return (
+    drain.phase === 'pr-ready' &&
+    drain.verdict === 'clean' &&
+    drain.reviewedSha !== null &&
+    drain.pushedSha === drain.reviewedSha &&
+    head === drain.reviewedSha
+  );
+}
+
+/**
  * A parked run whose question was answered: its item no longer carries
  * `agent/needs-input` and is still claimed and open. It goes back to the phase
  * it parked from (`working` when unknown) and the worker gets a `continue` that
@@ -523,6 +544,7 @@ function readopt(
         phase,
         parkedReason: null,
         parkedFrom: null,
+        parkedAt: null,
         nudges: 0,
       },
     },
@@ -530,7 +552,12 @@ function readopt(
       {
         kind: 'send',
         message: 'continue',
-        ctx: { flow: cfg.flow, identifier: run.identifier, answered: true },
+        ctx: {
+          flow: cfg.flow,
+          identifier: run.identifier,
+          answered: true,
+          ...(item.answer ? { answer: item.answer } : {}),
+        },
       },
     ],
   };
@@ -596,7 +623,12 @@ export function drainStep(
     return done(idle);
   }
 
-  if (PRE_REVIEW_PHASES.has(recorded.phase) && recorded.pr === null && facts.prForBranch) {
+  if (
+    PRE_REVIEW_PHASES.has(recorded.phase) &&
+    recorded.pr === null &&
+    facts.prForBranch &&
+    !isFlowPrsOwn(recorded, facts.prForBranch, facts)
+  ) {
     const parked = park(idle, PARK_REASONS.earlyPr);
     return done({
       drain: parked.drain,

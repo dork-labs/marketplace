@@ -359,10 +359,13 @@ describe('flow report blocked', () => {
     expect(r.tracker.calls.map((c) => c.method)).toEqual(['comment', 'applyWorkState']);
     const [comment, write] = r.tracker.calls as unknown as [{ body: string }, { change: object }];
     expect(comment.body).toMatch(/^Which export format\?[\s\S]*<!-- agent:provenance \{.*\} -->$/);
+    // It says plainly how the run resumes.
+    expect(comment.body).toContain('Reply to this comment to resume');
     expect(write.change).toEqual({ agentLabel: 'agent/needs-input' });
     expect(stored()).toMatchObject({
       phase: 'parked',
       parkedReason: 'the worker asked a question: Which export format?',
+      parkedAt: '2026-09-26T12:00:00.000Z',
       rev: 4,
     });
   });
