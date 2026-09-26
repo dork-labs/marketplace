@@ -27,11 +27,12 @@
 import { classifyOwnership, type Identity } from '../identity.ts';
 import { isClaimable } from '../dispatch-policy.ts';
 import { PausedError, PreconditionError, UsageError } from '../errors.ts';
-import type { FlowRun } from '../flow-run.ts';
+import type { DrainState } from '../drain/state.ts';
+import type { FlowRun, FlowRunProvenance } from '../flow-run.ts';
 import type { FlowConfig } from '../config-schema.ts';
 import { requireCapabilities } from '../tracker/load.ts';
 import type { CodeAdapter, WorkItem } from '../tracker/types.ts';
-import { AGENT_CLAIMED, AGENT_READY, projectionFor } from '../work-state.ts';
+import { AGENT_CLAIMED, AGENT_READY, projectionFor, type WorkStateChange } from '../work-state.ts';
 import type { VerbContext, VerbResult } from './context.ts';
 import { LAUNCHERS } from './provenance.ts';
 import { RUNTIMES } from '../fleet/usage-ledger.ts';
@@ -47,6 +48,7 @@ import {
   sessionProvenance,
   setupWrite,
   stageForLabel,
+  type WriteSetup,
 } from './work-write.ts';
 
 /**
@@ -119,6 +121,117 @@ async function checkout(ctx: VerbContext): Promise<{ worktreePath: string; branc
   };
 }
 
+/** What {@link claimItem} records on the run. */
+export interface ClaimInput {
+  /** The item, e.g. `ACME-12`. */
+  identifier: string;
+  /** The session the run names: the claiming session, or the id the drain minted. */
+  sessionId: string;
+  /** The worker's pid, or `-1` while no local process is known (a queued drain run). */
+  workerPid: number;
+  /** The worktree the work happens in. */
+  worktreePath: string;
+  /** Its branch. */
+  branch: string;
+  /**
+   * `running` for a session that claims for itself; `queued` for a drain claim,
+   * written before its worker is started (spec `flow-handoff-dispatch` §2.6).
+   */
+  status: 'running' | 'queued';
+  /** The provenance block (its worktree and branch are filled in here). */
+  provenance: FlowRunProvenance;
+  /** The account id the session bills. */
+  account?: string;
+  /** The launcher. */
+  host?: string;
+  /** The runtime. */
+  runtime?: string;
+  /** A drain state to record with the claim (the drain's intent before launch). */
+  drain?: DrainState;
+}
+
+/**
+ * Claim an item and record its run, holding the claim lock from the tracker
+ * read through the run write (see the module comment). Shared by `flow claim`
+ * and `flow drain`, which claims with `status: "queued"` before it starts the
+ * worker. Honors `--dry-run` on `ctx`.
+ *
+ * @param ctx - The verb's context.
+ * @param setup - The loaded config, adapter and run store.
+ * @param input - What the run records.
+ * @returns The change written and the run recorded.
+ * @throws {PreconditionError} When the item is not claimable, or the lock stayed busy.
+ */
+export async function claimItem(
+  ctx: VerbContext,
+  setup: WriteSetup,
+  input: ClaimInput
+): Promise<{ change: WorkStateChange; record: FlowRun }> {
+  const { stages, adapter, store } = setup;
+  const { config } = setup.loaded;
+  const { identifier } = input;
+  const locked = await store.withClaimLock(
+    async () => {
+      const item = await adapter.getItem(identifier);
+      requireOpen(item, 'claim');
+      if (item.labels.includes(AGENT_CLAIMED)) {
+        throw new PreconditionError(`${identifier} is already claimed (${AGENT_CLAIMED})`);
+      }
+      if (!item.labels.includes(AGENT_READY)) {
+        throw new PreconditionError(
+          `${identifier} does not carry ${AGENT_READY}, so it is not ready to claim`
+        );
+      }
+      const identity = await resolveIdentity(adapter, config);
+      const cls = ownershipClass(item, identity, config);
+      if (!isClaimable(cls, config.ownership)) {
+        throw new PreconditionError(
+          `${identifier} is owned by ${cls === 'reviewer' ? 'a person' : 'someone else'} (${cls}), and the ownership settings do not let flow claim it`
+        );
+      }
+
+      const removedLabel = currentStageLabel(item);
+      const change = projectionFor({ type: 'claim' }, { stages, removedStageLabel: removedLabel });
+      const previous = runFor(store, item);
+      const record: FlowRun = {
+        issueId: item.id,
+        identifier: item.identifier,
+        sessionId: input.sessionId,
+        worktreePath: input.worktreePath,
+        branch: input.branch,
+        stage: stageForLabel(stages, removedLabel) ?? 'execute',
+        status: input.status,
+        attemptCount: previous === undefined ? 0 : previous.attemptCount + 1,
+        workerPid: input.workerPid,
+        startedAt: ctx.now().toISOString(),
+        provenance: { ...input.provenance, worktree: input.worktreePath, branch: input.branch },
+        ...(input.account === undefined ? {} : { account: input.account }),
+        ...(input.host === undefined ? {} : { host: input.host }),
+        ...(input.runtime === undefined ? {} : { runtime: input.runtime }),
+        ...(input.drain === undefined ? {} : { drain: input.drain }),
+      };
+
+      if (!ctx.dryRun) {
+        await applyAndVerify(adapter, item, change);
+        const written = await store.upsertRun(record);
+        requireStored(
+          written.status,
+          store.path,
+          `run "flow release ${identifier} --to ready" and claim it again`
+        );
+      }
+      return { change, record };
+    },
+    { giveUpMs: CLAIM_LOCK_WAIT_MS }
+  );
+  if (!locked.held) {
+    throw new PreconditionError(
+      `another claim on this machine held ${store.path}.claim.lock for ${CLAIM_LOCK_WAIT_MS / 1000} s, so ${identifier} was not claimed; try again`
+    );
+  }
+  return locked.value;
+}
+
 /**
  * Run `flow claim`.
  *
@@ -155,69 +268,22 @@ export async function run(ctx: VerbContext): Promise<VerbResult> {
   const { worktreePath, branch } = await checkout(ctx);
   const account = ctx.args.flags.account;
 
-  const locked = await store.withClaimLock(
-    async () => {
-      const item = await adapter.getItem(identifier);
-      requireOpen(item, 'claim');
-      if (item.labels.includes(AGENT_CLAIMED)) {
-        throw new PreconditionError(`${identifier} is already claimed (${AGENT_CLAIMED})`);
-      }
-      if (!item.labels.includes(AGENT_READY)) {
-        throw new PreconditionError(
-          `${identifier} does not carry ${AGENT_READY}, so it is not ready to claim`
-        );
-      }
-      const identity = await resolveIdentity(adapter, config);
-      const cls = ownershipClass(item, identity, config);
-      if (!isClaimable(cls, config.ownership)) {
-        throw new PreconditionError(
-          `${identifier} is owned by ${cls === 'reviewer' ? 'a person' : 'someone else'} (${cls}), and the ownership settings do not let flow claim it`
-        );
-      }
-
-      const removedLabel = currentStageLabel(item);
-      const change = projectionFor({ type: 'claim' }, { stages, removedStageLabel: removedLabel });
-      const previous = runFor(store, item);
-      const record: FlowRun = {
-        issueId: item.id,
-        identifier: item.identifier,
-        sessionId,
-        worktreePath,
-        branch,
-        stage: stageForLabel(stages, removedLabel) ?? 'execute',
-        status: 'running',
-        attemptCount: previous === undefined ? 0 : previous.attemptCount + 1,
-        workerPid: pid,
-        startedAt: ctx.now().toISOString(),
-        provenance: {
-          ...sessionProvenance(ctx, typeof launcher === 'string' ? launcher : undefined),
-          worktree: worktreePath,
-          branch,
-        },
-        ...(typeof account === 'string' ? { account } : {}),
-        ...(typeof launcher === 'string' ? { host: launcher } : {}),
-        ...(runtime === null ? {} : { runtime }),
-      };
-
-      if (!ctx.dryRun) {
-        await applyAndVerify(adapter, item, change);
-        const written = await store.upsertRun(record);
-        requireStored(
-          written.status,
-          store.path,
-          `run "flow release ${identifier} --to ready" and claim it again`
-        );
-      }
-      return { change, record };
-    },
-    { giveUpMs: CLAIM_LOCK_WAIT_MS }
+  const { change, record } = await claimItem(
+    ctx,
+    { loaded, stages, adapter, store },
+    {
+      identifier,
+      sessionId,
+      workerPid: pid,
+      worktreePath,
+      branch,
+      status: 'running',
+      provenance: sessionProvenance(ctx, typeof launcher === 'string' ? launcher : undefined),
+      ...(typeof account === 'string' ? { account } : {}),
+      ...(typeof launcher === 'string' ? { host: launcher } : {}),
+      ...(runtime === null ? {} : { runtime }),
+    }
   );
-  if (!locked.held) {
-    throw new PreconditionError(
-      `another claim on this machine held ${store.path}.claim.lock for ${CLAIM_LOCK_WAIT_MS / 1000} s, so ${identifier} was not claimed; try again`
-    );
-  }
-  const { change, record } = locked.value;
   const journalRuntime = (runtime ?? undefined) as Runtime | undefined;
   if (!ctx.dryRun) {
     recordEvent(ctx, { kind: 'claim', phase: 'claim', item: identifier }, journalRuntime);

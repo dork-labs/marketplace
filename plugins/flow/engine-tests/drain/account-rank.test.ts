@@ -1,7 +1,8 @@
 /**
  * Runs `account-rank.cases.json` against `scripts/drain/account-rank.ts` (spec
  * `flow-handoff-dispatch` §3): the limit signal, eligibility, the three ordering
- * tiers, the ambient-account rule and the machine-load cap.
+ * tiers over (runtime, account) pairs, cross-runtime fallback, the implicit
+ * `default` account and the machine-load cap.
  *
  * The cases carry the DOR-2373 validation: an account resetting sooner with less
  * left beats one resetting later with more, and the main account gets work only
@@ -16,6 +17,7 @@ import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
 import {
   chooseAccount,
+  itemRuntime,
   launchBudget,
   limitSignal,
   modelBucketsFor,
@@ -28,6 +30,7 @@ import {
   type RankAccountsInput,
 } from '../../scripts/drain/account-rank.ts';
 import type { ResolvedAccountPolicy } from '../../scripts/fleet/accounts.ts';
+import type { RuntimeSlug } from '../../scripts/fleet/usage-ledger.ts';
 
 /** One case: `{ name, input, expected }`. */
 interface Case {
@@ -46,8 +49,9 @@ const CASES = JSON.parse(
   )
 ) as CaseFile;
 
-/** One expected ranked row: id and tier always; score and signal level when given. */
+/** One expected ranked row: runtime, id and tier always; score and signal level when given. */
 interface ExpectedRanked {
+  runtime: string;
   id: string;
   tier: number;
   score?: number;
@@ -56,17 +60,33 @@ interface ExpectedRanked {
 
 /** Build a full rank input from a case, filling the documented defaults. */
 function rankInput(input: Record<string, unknown>): RankAccountsInput {
-  const accounts = (input.accounts as Record<string, unknown>[]).map((raw): RankableAccount => ({
-    id: raw.id as string,
-    path: `/accounts/${raw.id as string}`,
-    routable: raw.routable as boolean,
-    policy: { ...(raw.policy as Omit<ResolvedAccountPolicy, 'id'>), id: raw.id as string },
-    windows: raw.windows as Record<string, unknown> | null,
-  }));
+  const accounts = (input.accounts as Record<string, unknown>[]).map((raw): RankableAccount => {
+    const runtime = raw.runtime as RuntimeSlug;
+    const id = raw.id as string;
+    const implicit = (raw.implicit as boolean | undefined) ?? false;
+    return {
+      runtime,
+      id,
+      path: implicit ? null : `/accounts/${id}`,
+      implicit,
+      routable: raw.routable as boolean,
+      policy: {
+        ...(raw.policy as Omit<ResolvedAccountPolicy, 'id' | 'runtime' | 'key'>),
+        runtime,
+        id,
+        key: `${runtime}:${id}`,
+      },
+      windows: raw.windows as Record<string, unknown> | null,
+      spend: raw.spend,
+    };
+  });
   return {
     now: input.now as string,
     repo: (input.repo as string | null | undefined) ?? 'dork-labs/marketplace',
     accounts,
+    runtime: (input.runtime as RuntimeSlug | undefined) ?? 'claude-code',
+    runtimes: (input.runtimes as RuntimeSlug[] | undefined) ?? [],
+    crossRuntimeFallback: (input.crossRuntimeFallback as 'off' | 'on' | undefined) ?? 'off',
     model: (input.model as string | null | undefined) ?? null,
     affinity: (input.affinity as string | null | undefined) ?? null,
     exclude: (input.exclude as string[] | undefined) ?? [],
@@ -89,12 +109,12 @@ const RUNNERS: Record<string, (c: Case) => void> = {
   rankAccounts: (c) => {
     const expected = c.expected as Omit<AccountRank, 'ranked'> & { ranked: ExpectedRanked[] };
     const rank = rankAccounts(rankInput(c.input));
-    expect(rank.pick).toBe(expected.pick);
+    expect(rank.pick).toEqual(expected.pick);
     expect(rank.ineligible).toEqual(expected.ineligible);
     // Project each ranked row down to the fields the case pins, so a case states only what it tests.
     const projected = rank.ranked.map((row, i) => {
       const want = expected.ranked[i] ?? {};
-      const out: ExpectedRanked = { id: row.id, tier: row.tier };
+      const out: ExpectedRanked = { runtime: row.runtime, id: row.id, tier: row.tier };
       if (want.score !== undefined) out.score = Math.round(row.score * 100) / 100;
       if (want.signal !== undefined) out.signal = row.signal.level;
       return out;
@@ -106,6 +126,11 @@ const RUNNERS: Record<string, (c: Case) => void> = {
   },
   launchBudget: (c) => {
     expect(launchBudget(c.input as unknown as LaunchBudgetInput)).toEqual(c.expected);
+  },
+  itemRuntime: (c) => {
+    expect(itemRuntime(c.input.recorded as string | null, c.input.runtimes as RuntimeSlug[])).toBe(
+      c.expected
+    );
   },
 };
 

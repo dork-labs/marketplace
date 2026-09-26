@@ -409,6 +409,15 @@ S1's `flow next` gains, per picked item, `account: { pick, ranked, ineligible, r
 - Else `slots = max(0, parallel − live)`, where `live` counts worker and reviewer sessions of this drain that are not exited.
 - Only new launches wait. Running sessions are never stopped for load.
 
+#### 3.7 Runtimes (contract rev 6)
+
+- Candidates are (runtime, account) pairs: `claude-code:acct-2`, `codex:default`. A runtime with no registered accounts has one implicit `default` account (rotation), which is its ambient environment; it is ranked like any other account, so policy, room and capacity all apply. This replaces §3.4's `no-registry` ambient fallback: there is no fallback outside the ranking.
+- The item's runtime is `FlowRun.runtime`, else the first entry of `fleet.runtimes`, else `claude-code`. Same-runtime candidates always rank first.
+- With `fleet.crossRuntimeFallback: off` (the default) other runtimes are left out entirely. With it `on` they rank after every same-runtime candidate, in `fleet.runtimes` order, then any unlisted runtime. `HANDOFF.md` is runtime-neutral, so a continuation on another runtime reads the same checkpoint.
+- Room follows S1's `accountRoom`: windowed accounts as §3.1; a metered account (OpenCode on an API key) is eligible until `spend.limitUsd`; a local-model account is always eligible.
+- Model buckets apply only within the candidate's own runtime, and use S1's `bucketSlug`.
+- `liveByAccount` is keyed `<runtime>:<id>`.
+
 ### 4. The parallel drain (DOR-2373)
 
 #### 4.1 `flow drain`
@@ -428,6 +437,7 @@ S1's `flow next` gains, per picked item, `account: { pick, ranked, ineligible, r
 3. **Act**, in order: stop sessions, send messages, handoffs, launches, forge calls, tracker writes. Each action is idempotent against the recorded state, so a pass that dies midway is repeated safely next time.
 4. **Fill slots:** `launchBudget` → `flow next -n <slots>` logic (with `--items`) → for each pick with an account: mint an id, provision the worktree, render the brief, claim (`queued`), `start`, record `running`. A pick with no account is skipped and reported.
 5. **Report** one line per run that changed (stdout; `--json` gives `{ v, runs: [{ identifier, phase, account, host, event }] }`).
+6. **Usage for the retro:** each pass writes the journal's usage snapshot for the accounts it considered, at most once per 15 minutes per `<runtime>:<account>`, so trends exist without anyone running `flow usage scan`.
 
 #### 4.3 The run's drain state
 
@@ -766,7 +776,7 @@ Each test carries a purpose comment and is shown to fail against a broken implem
 - `README.md`: the new verbs in S1's verb table.
 - `docs/SPEC.md`: checkpoints, the drain phases, the handoff states, the new `FlowRun` fields.
 - `docs/the-dials.mdx` and `config/CONFIG.md`: the `drain` block.
-- Stage skills (`executing-specs`, `verifying-work`, `specifying-work`, `decomposing-work`, `closing-work`): `flow stage … --checkpoint-file` at their boundaries; `verifying-work`: in a drain run (the worker brief says so), skip its own review and PR steps, `flow report pushed` and wait: the drain's reviewer and `flow pr` replace them; `executing-specs`: `flow checkpoint --trigger task` after each task. `skills/flow-drain/SKILL.md`: the `drain.parallel` branch.
+- Stage skills (`executing-specs`, `verifying-work`, `specifying-work`, `decomposing-work`): `flow stage … --checkpoint-file` at their boundaries (`closing-work` has none: `flow done` ends the run and nothing resumes after it); `verifying-work`: in a drain run (the worker brief says so), skip its own review and PR steps, `flow report pushed` and wait: the drain's reviewer and `flow pr` replace them; `executing-specs`: `flow checkpoint --trigger task` after each task. `skills/flow-drain/SKILL.md`: the `drain.parallel` branch.
 - `CHANGELOG.md` and the version bump in `plugin.json`, `.dork/manifest.json`, `package.json`, per PR.
 
 ## Implementation Phases

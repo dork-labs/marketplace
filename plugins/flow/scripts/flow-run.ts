@@ -361,8 +361,11 @@ export type RecoveryActionKind = 'skip' | 'resume' | 'restart-clean' | 'escalate
 export type RecoveryAction =
   | {
       kind: 'skip';
-      /** Why the sweep left the item untouched (parked on a human). */
-      reason: 'parked-on-human';
+      /**
+       * Why the sweep left the item untouched: parked on a human, or a
+       * `flow drain` run, whose sessions only the drain supervisor recovers.
+       */
+      reason: 'parked-on-human' | 'drain-run';
     }
   | {
       kind: 'resume';
@@ -413,6 +416,10 @@ function checkpointResumable(ctx: RecoveryContext): boolean {
  *
  * The ladder, in order:
  *
+ * 0. **A `flow drain` run ⇒ `skip`.** The drain supervisor is its only
+ *    recovery: a cli worker exits after every turn and a DorkOS worker has no
+ *    pid (`workerPid: -1`), so resuming "the orphan" would start a second
+ *    writer in the worktree the supervisor already manages.
  * 1. **`needs-input` ⇒ `skip`.** Parked on a human is a *distinct* state the
  *    stall sweep never reclaims; `attemptCount` is untouched. Checked first so
  *    nothing below can ever reclaim a parked item.
@@ -445,6 +452,11 @@ export function recoverOrphan(
   ctx: RecoveryContext,
   recovery: RecoveryConfig
 ): RecoveryAction {
+  // 0. A drain run belongs to its supervisor, whatever its pid says.
+  if (run?.drain !== undefined) {
+    return { kind: 'skip', reason: 'drain-run' };
+  }
+
   // 1. Parked on a human — never reclaimed, resumes only on the human's reply.
   if (signal === 'needs-input') {
     return { kind: 'skip', reason: 'parked-on-human' };

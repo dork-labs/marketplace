@@ -315,7 +315,9 @@ is never reaped, because `/flow:resume` reads it back.
      the flow engine's `readFlowState`, then call `gcFlowState` to drop records whose
      issue is closed/terminal (so the store stays honest before any new claim). Via
      the adapter, list `agent/claimed` + started-category +
-     not-`agent/needs-input` items. For each, take its `FlowRun` from the run map,
+     not-`agent/needs-input` items. Skip every run with `drain` set: `flow drain`
+     is its only recovery (its workers exit between turns, so a dead pid is normal).
+     For each other item, take its `FlowRun` from the run map,
      probe whether its `workerPid` is alive and the worktree/session checkpoint
      survives, and run the recovery oracle `node --experimental-strip-types "${CLAUDE_PLUGIN_ROOT}/scripts/recovery.ts"`
      (the run record + liveness probe as JSON in, the `recoverOrphan` `RecoveryAction`
@@ -332,7 +334,8 @@ is never reaped, because `/flow:resume` reads it back.
      `agent/needs-input` items. Events are triggers, not truth: re-read each item's
      current state, then run `shouldRespondToComment` (rule 3 → `resume`; the
      resolved `identity.marker` from step 0 disambiguates a non-agent reply in
-     shared mode, and rule 1 skips the agent's own). On `resume`, re-attach the
+     shared mode, and rule 1 skips the agent's own). A run with `drain` set is the
+     drain's to resume: skip it. On `resume`, re-attach the
      worktree at HEAD and resume the parked run via `--resume <sessionId>` (read
      from the item's `FlowRun`) or thread-replay. The poll↔webhook producer is a
      config edit (`ingestion.producer`), never a code change.

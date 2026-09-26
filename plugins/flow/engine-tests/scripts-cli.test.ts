@@ -284,6 +284,36 @@ describe('recovery', () => {
     expect(JSON.parse(stdout).kind).toBe('skip');
   });
 
+  it('skips a flow drain run whose worker pid is dead, never resuming it', () => {
+    // Purpose: a drain's cli worker exits after every turn (and a DorkOS worker
+    // has pid -1), so a dead pid is normal there; resuming it would put a second
+    // writer in the worktree the drain supervisor manages.
+    const run = {
+      issueId: 'id-ACME-12',
+      identifier: 'ACME-12',
+      sessionId: 'minted-session',
+      worktreePath: '/tmp/wt',
+      branch: 'ACME-12-x',
+      stage: 'execute',
+      status: 'running',
+      attemptCount: 0,
+      workerPid: 999_999_999,
+      startedAt: '2026-09-26T00:00:00.000Z',
+      drain: { v: 1, rev: 1, phase: 'working' },
+    };
+    const { status, stdout } = runScript('recovery', {
+      stdin: JSON.stringify({ signal: 'claimed-no-worker', run, ctx, recovery }),
+    });
+    expect(status).toBe(0);
+    expect(JSON.parse(stdout)).toEqual({ kind: 'skip', reason: 'drain-run' });
+    // Without the drain the same dead pid is resumed: the skip is what the drain buys.
+    const { drain: _drain, ...plain } = run;
+    const resumed = runScript('recovery', {
+      stdin: JSON.stringify({ signal: 'claimed-no-worker', run: plain, ctx, recovery }),
+    });
+    expect(JSON.parse(resumed.stdout).kind).toBe('resume');
+  });
+
   it('exits 2 on an oracle invariant violation (claimed-no-worker with run: null)', () => {
     const { status, stderr } = runScript('recovery', {
       stdin: JSON.stringify({

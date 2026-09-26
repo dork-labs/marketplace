@@ -12,8 +12,6 @@ description: The /flow engine's VERIFY stage — trace recent work for correctne
 > code review (the `browser-testing`, `requesting-code-review`, and
 > `verification-before-completion` skills).
 > **PM projection (tracker):** evidence attached to the work item / PR.
-> **Trigger doors:** the thin `/flow:verify` command _or_ a PM transition into
-> the VERIFY stage are two triggers for this one skill.
 
 VERIFY is the proof stage. It answers one question with evidence, never
 assertion: _does the implementation actually do what the spec asked, and is it
@@ -27,8 +25,7 @@ This is a generic stage skill. **It never touches a tracker API string.**
 Attaching evidence, assigning the reviewer, and any breadcrumb go through the
 **adapter** skill by naming its verbs (`attachEvidence`,
 `assignToHuman`, `comment`, `transition`). No raw tracker tool name, CLI
-invocation, or slug lives here. (The `tracker-confinement` Vitest guard enforces
-this for the whole flow bundle.)
+invocation, or slug lives here.
 
 **Finding the adapter.** It is the `SKILL.md` at the `adapter.path` that
 `node --experimental-strip-types "<flow-root>/scripts/config-files.ts"` prints: the
@@ -36,6 +33,8 @@ project's own (`.agents/flow/adapters/<tracker>/`), or the one flow ships. Insid
 `<flow-root>` means that output's `flowRoot`.
 
 ## Process
+
+**In a `flow drain` run** (its worker brief says so), skip this skill's own review and PR steps: run `flow report <id> pushed`, then wait for the supervisor's message.
 
 ### 1. Correctness trace (absorbs `/review-recent-work`)
 
@@ -346,7 +345,7 @@ documents the tracker's behavior.
 The **human-review gate is always on** (spec §5). VERIFY does not advance to
 DONE. Instead, via the adapter:
 
-- `transition` the work item into the review state (e.g. In Review).
+- `node --experimental-strip-types "<flow-root>/scripts/flow.ts" stage <id> review --checkpoint-file <f>` (the checkpoint body).
 - `assignToHuman(item)` — assign the reviewer, which fires their notification.
 - **Stop.** The engine **parks** at REVIEW. REVIEW is a human gate with **no
   skill** — there is no `reviewing-work`. The loop resumes (in P2) only on the

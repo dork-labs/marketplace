@@ -24,6 +24,19 @@ export type RuntimeName = 'claude-code' | 'codex' | 'opencode';
 export const RUNTIME_NAMES: readonly RuntimeName[] = ['claude-code', 'codex', 'opencode'];
 
 /**
+ * The runtime of a stored handle: its own, or `claude-code` for a handle
+ * written before launchers were runtime-aware (every such session was Claude
+ * Code). Lives here, not beside the on-disk schema, so zero-dependency modules
+ * can read a stored handle without loading zod.
+ *
+ * @param handle - A handle read from the run store.
+ * @returns Its runtime.
+ */
+export function handleRuntime(handle: { runtime?: RuntimeName }): RuntimeName {
+  return handle.runtime ?? 'claude-code';
+}
+
+/**
  * The id of a runtime's implicit account: the ambient environment. A runtime
  * with no registered accounts has exactly this one (RUNTIMES.md R1).
  */

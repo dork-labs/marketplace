@@ -12,7 +12,9 @@
  * - the backlog: the tracker, or a saved `flow snapshot --json` with `--snapshot`.
  *
  * Drift is where these disagree: a running run whose item is not started, a
- * claimed item with no run, a running run whose worker is gone, and any
+ * claimed item with no run, a running run whose worker is gone (for a
+ * `flow drain` run, its launcher reports the sessions instead, since a drain
+ * worker has no long-lived pid), and any
  * `STATE-n` breach (`work-state.ts`) on an in-flight item. `--strict` exits 1
  * on any drift.
  *
@@ -26,6 +28,9 @@ import { findConfigRoots, pauseState } from '../config-files.ts';
 import { PreconditionError } from '../errors.ts';
 import type { FlowRun } from '../flow-run.ts';
 import { openFlowStateFile } from '../flow-state-file.ts';
+import type { DrainWorkerHandle } from '../drain/state.ts';
+import { realLauncher } from '../launchers/real.ts';
+import { handleRuntime, HOST_NAMES } from '../launchers/types.ts';
 import { requireCapabilities } from '../tracker/load.ts';
 import type { ItemComment, WorkItem } from '../tracker/types.ts';
 import { AGENT_CLAIMED, stateCoherence } from '../work-state.ts';
@@ -80,6 +85,17 @@ export interface InFlightEntry {
   workerPid: number | null;
   /** Whether the tracker item carries `agent/claimed`. */
   claimed: boolean;
+  /**
+   * For a `flow drain` run: its phase, and what each session's launcher says it
+   * is doing (`busy`, `idle`, `exited`, `limited`, `unknown`, `starting`), or
+   * `null` for no session. `null` for any other run.
+   */
+  drain: {
+    phase: string;
+    worker: string | null;
+    reviewer: string | null;
+    parkedReason: string | null;
+  } | null;
 }
 
 /** One parked item. */
@@ -226,7 +242,7 @@ export async function run(ctx: VerbContext): Promise<VerbResult> {
     if (run.status === 'complete') continue;
     const item = byIdentifier.get(run.identifier) ?? items.find((i) => i.id === run.issueId);
     seen.add(item?.identifier ?? run.identifier);
-    inFlight.push(entry(run.identifier, item, run));
+    inFlight.push(entry(run.identifier, item, run, await drainSessions(ctx, run)));
     if (run.status === 'running') {
       if (item?.stateCategory !== 'started') {
         drift.push({
@@ -238,7 +254,9 @@ export async function run(ctx: VerbContext): Promise<VerbResult> {
               : `has a running run, but the item is ${item.stateCategory}, not started`,
         });
       }
-      if (pidAlive(run.workerPid) === false) {
+      // A drain run's worker is the supervisor's: a cli worker exits after each
+      // turn and a DorkOS worker has no pid, so its launcher reports it instead.
+      if (run.drain === undefined && pidAlive(run.workerPid) === false) {
         drift.push({
           identifier: run.identifier,
           kind: 'worker-gone',
@@ -250,7 +268,7 @@ export async function run(ctx: VerbContext): Promise<VerbResult> {
   for (const item of items) {
     if (!labels(item).includes(AGENT_CLAIMED) || seen.has(item.identifier)) continue;
     seen.add(item.identifier);
-    inFlight.push(entry(item.identifier, item, undefined));
+    inFlight.push(entry(item.identifier, item, undefined, null));
     if (runFor(item) === undefined) {
       drift.push({
         identifier: item.identifier,
@@ -294,7 +312,8 @@ export async function run(ctx: VerbContext): Promise<VerbResult> {
 function entry(
   identifier: string,
   item: WorkItem | undefined,
-  run: FlowRun | undefined
+  run: FlowRun | undefined,
+  drain: InFlightEntry['drain']
 ): InFlightEntry {
   return {
     identifier,
@@ -309,6 +328,37 @@ function entry(
     sessionId: run?.sessionId ?? null,
     workerPid: run?.workerPid ?? null,
     claimed: Array.isArray(item?.labels) && item.labels.includes(AGENT_CLAIMED),
+    drain,
+  };
+}
+
+/** What one stored drain handle's launcher says it is doing. */
+async function sessionState(
+  ctx: VerbContext,
+  handle: DrainWorkerHandle | null
+): Promise<string | null> {
+  if (handle === null) return null;
+  if (handle.pending) return 'starting';
+  if (!(HOST_NAMES as readonly string[]).includes(handle.host)) return 'unknown';
+  try {
+    const launcher =
+      ctx.createLauncher?.(handle.host) ?? realLauncher(handle.host, ctx.env, ctx.io.osHome);
+    const { pending: _pending, pendingSince: _since, ...rest } = handle;
+    return (await launcher.state({ ...rest, runtime: handleRuntime(handle) })).kind;
+  } catch {
+    return 'unknown';
+  }
+}
+
+/** A drain run's phase and its sessions' states; `null` for a run without a drain. */
+async function drainSessions(ctx: VerbContext, run: FlowRun): Promise<InFlightEntry['drain']> {
+  const drain = run.drain;
+  if (drain === undefined || drain.v !== 1) return null;
+  return {
+    phase: drain.phase,
+    worker: await sessionState(ctx, drain.worker ?? null),
+    reviewer: await sessionState(ctx, drain.reviewer ?? null),
+    parkedReason: drain.parkedReason ?? null,
   };
 }
 
@@ -352,7 +402,9 @@ function render(
       `  ${f.identifier}`,
       f.title ?? '(not in the backlog)',
       f.stage ?? '-',
-      f.status ?? (f.claimed ? 'claimed, no run' : '-'),
+      f.drain !== null
+        ? `drain ${f.drain.phase}${f.drain.worker ? `, worker ${f.drain.worker}` : ''}${f.drain.reviewer ? `, reviewer ${f.drain.reviewer}` : ''}`
+        : (f.status ?? (f.claimed ? 'claimed, no run' : '-')),
       f.account ?? '-',
       f.host ?? '-',
       [f.worktree, f.branch].filter(Boolean).join(' @ ') || '-',

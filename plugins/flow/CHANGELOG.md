@@ -4,6 +4,17 @@ Installs of this plugin are pinned to a commit SHA, so a fix here does not reach
 you until you **reinstall it** (Marketplace → flow → reinstall, or re-run your
 `--plugin-dir` checkout's `git pull`). Each entry below says whether that matters.
 
+## 0.30.0
+
+**New `flow drain --parallel N`: flow works on several ready items at once, each on the account with the most room, and opens a PR only after an independent review comes back clean. Reinstall to get it.**
+
+- `flow drain --parallel 3` claims ready items and starts one working session per item in its own worktree. Each session goes to the account whose unused weekly allowance runs out soonest, and your main account is used last. The session can be a terminal, cmux or the DorkOS app. New sessions wait while the machine is busy.
+- Each pushed commit gets a separate reviewer session. Its findings go back to the worker, and the loop repeats until the review is clean. Only then can the worker open the PR, with `flow pr`, which refuses otherwise. A push to an open PR turns auto-merge off until that push is reviewed.
+- `flow watch` replaces `templates/drain/watch.sh`. It tells the worker when its PR merges, fails a check or leaves the merge queue. When the queue drops a PR over a check that also failed for other PRs, it puts the PR back once.
+- `flow next` now names the account (and, with Codex or OpenCode, the tool) each item should run on.
+- `flow stage --checkpoint-file` writes a `HANDOFF.md` checkpoint at every stage boundary, and the stage instructions use it.
+- On DorkOS, the scheduled drain runs one `flow drain --tick` per firing once `drain.parallel` is set above 0. At 0 it does what it did before.
+
 ## 0.29.0
 
 **New `flow retro`: flow looks back over its own week and suggests fixes to itself. Reinstall to get it.**

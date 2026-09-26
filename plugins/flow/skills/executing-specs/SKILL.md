@@ -399,6 +399,8 @@ for task in batch.successful_tasks:
   TaskUpdate({ taskId: task.id, status: "completed" })
 ```
 
+**Step F2: Checkpoint each task** after its commit: `node --experimental-strip-types "<flow-root>/scripts/flow.ts" checkpoint <id> --trigger task --task <task id> --body-file <f>` (`<f>`: Done, Next, Open questions, Next command).
+
 **Step G: Display batch summary**
 
 ```
@@ -426,6 +428,10 @@ If your project tracks specs in a `specs/manifest.json`, update this spec's entr
 to status `implemented` so the manifest stays in sync. Use your harness's
 manifest-maintenance command or script if it provides one; otherwise edit the
 entry directly. (Skip this step entirely if your project has no spec manifest.)
+
+### 4.1c Hand Off to VERIFY
+
+`node --experimental-strip-types "<flow-root>/scripts/flow.ts" stage <id> verify --checkpoint-file <f>` writes the checkpoint the VERIFY session resumes from, then moves the item.
 
 ### 4.2 Display Completion Summary
 

@@ -19,11 +19,11 @@ package (charter G15).
 ## Installing
 
 Install the plugin from the marketplace, then run **`/flow:init`** — it picks your
-tracker, generates and conformance-gates the adapter for it, and scaffolds the
+tracker, generates and conformance-gates its adapter, and scaffolds the
 config triad.
 
 The engine oracles under `scripts/` run on `node --experimental-strip-types` and
-need **one** npm package, `zod`. `/flow:init` checks for it and offers to install
+need **one** npm package, `zod`. `/flow:init` offers to install
 it; to do it yourself, from this directory:
 
 ```bash
@@ -56,6 +56,7 @@ node --experimental-strip-types "${CLAUDE_PLUGIN_ROOT}/scripts/flow.ts" <verb> -
 | `accounts`        | List, add or set the accounts flow may spend.            |
 | `usage`           | Record each account's usage.                             |
 | `fleet`           | Show every account and running session. Changes nothing. |
+| `drain`           | Carry several items at once.                             |
 | `note`, `journal` | Write to or read flow's journal.                         |
 
 `flow <verb> --help` lists a verb's flags. Exit codes and the `--json` shape are in
@@ -158,8 +159,7 @@ labels it reads, and a ready label nobody audits decays into noise.
 Two schedules keep the ready queue fed, both shipped switched off until you
 approve them: `flow-triage` (daily: readies or parks untriaged work, releases
 stale claims) and `flow-groom` (weekly `/flow:groom check`). See the dials page's
-Cadence section. To carry several items at once by hand, see
-`docs/parallel-drain.mdx`.
+Cadence section. To carry several items at once, see `docs/parallel-drain.mdx`.
 
 ## Gates
 

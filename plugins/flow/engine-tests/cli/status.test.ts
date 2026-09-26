@@ -85,7 +85,11 @@ function writeSentinel(value: unknown): void {
   writeFileSync(path.join(dir, 'auto-run.json'), JSON.stringify(value));
 }
 
-async function status(argv: string[], backlog: FakeBacklog = { items: [] }) {
+async function status(
+  argv: string[],
+  backlog: FakeBacklog = { items: [] },
+  createLauncher?: MainDeps['createLauncher']
+) {
   const fake = createFakeAdapter(backlog);
   let stdout = '';
   let stderr = '';
@@ -97,6 +101,7 @@ async function status(argv: string[], backlog: FakeBacklog = { items: [] }) {
     stderr: { write: (chunk: string) => (stderr += chunk) },
     createAdapter: async () => fake.adapter,
     runProcess: async () => ({ code: 0, stdout: '', stderr: '' }),
+    createLauncher,
   };
   const code = await main(['status', ...argv], deps);
   return { code, stdout, stderr, json: () => JSON.parse(stdout), calls: fake.calls };
@@ -155,6 +160,70 @@ describe('flow status', () => {
     writeRuns([runRecord('FAKE-3', { workerPid: DEAD_PID })]);
     const out = (await status(['--json'], { items: [item('FAKE-3')] })).json();
     expect(kinds(out)).toEqual(['FAKE-3 worker-gone']);
+  });
+
+  it('asks the launcher about a drain run instead of its pid, and shows its phase, account and host', async () => {
+    // Purpose: a drain's cli worker exits between turns and a DorkOS worker has
+    // pid -1, so pid liveness would call every drain run "gone"; its launcher
+    // knows. The pane names the drain phase beside the account and host.
+    const asked: string[] = [];
+    const launcher = (host: 'cli' | 'cmux' | 'dorkos') => ({
+      host,
+      supports: () => ({ ok: true as const }),
+      probe: async () => ({ ok: true as const }),
+      start: async () => {
+        throw new Error('status never starts a session');
+      },
+      send: async () => {
+        throw new Error('status never sends');
+      },
+      state: async (handle: { sessionId: string }) => {
+        asked.push(`${host}:${handle.sessionId}`);
+        return { kind: 'idle' as const };
+      },
+      stop: async () => 'not-running' as const,
+    });
+    const drain = {
+      v: 1,
+      rev: 4,
+      phase: 'reviewing',
+      worker: { host: 'cli', sessionId: 'w-1', account: 'spare', cwd: '/work/FAKE-3' },
+      reviewer: {
+        host: 'cli',
+        sessionId: 'r-1',
+        account: 'spare',
+        cwd: '/review',
+        sha: 'abc',
+        worktree: '/review',
+        tokenHash: 'h',
+        pending: true,
+      },
+      pushedSha: 'abc',
+      reviewedSha: null,
+      verdict: null,
+      reviewRound: 0,
+      pr: null,
+      rearmedFor: null,
+      nudges: 0,
+      wakeAfter: null,
+      handoffs: [],
+      parkedReason: null,
+    } as unknown as FlowRun['drain'];
+    // A cli worker between turns: its last pid is gone, and that is normal.
+    writeRuns([runRecord('FAKE-3', { workerPid: DEAD_PID, host: 'cli', drain })]);
+    const result = await status(['--json'], { items: [item('FAKE-3')] }, launcher);
+    const out = result.json();
+    expect(kinds(out)).toEqual([]);
+    expect(asked).toEqual(['cli:w-1']);
+    expect(out.inFlight[0]).toMatchObject({
+      account: 'spare',
+      host: 'cli',
+      drain: { phase: 'reviewing', worker: 'idle', reviewer: 'starting' },
+    });
+    const text = await status([], { items: [item('FAKE-3')] }, launcher);
+    expect(text.stdout).toMatch(
+      /FAKE-3 .*drain reviewing, worker idle, reviewer starting .*spare .*cli/
+    );
   });
 
   it('flags every STATE-n breach on an in-flight item', async () => {
