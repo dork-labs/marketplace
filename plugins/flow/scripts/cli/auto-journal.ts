@@ -109,5 +109,8 @@ export function recordsVerbRun(
   exit: number
 ): boolean {
   if (verb === 'note' || verb === 'journal') return false;
+  // The limit-check hook runs after every tool call of every session; a line
+  // per call would bury the journal. Its manual form (an identifier) is kept.
+  if (verb === 'limit-check' && positionals.length === 0) return false;
   return !(verb === 'usage' && positionals[0] === 'record' && exit === 0);
 }

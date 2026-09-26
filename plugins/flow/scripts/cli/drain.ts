@@ -62,7 +62,14 @@ import { AGENT_CLAIMED, AGENT_NEEDS_INPUT, projectionFor } from '../work-state.t
 import { loadProjectConfig } from './backlog.ts';
 import { claimItem } from './claim.ts';
 import type { VerbContext, VerbResult } from './context.ts';
-import { gatherAssignmentInput, liveByAccount, noAccountMessage, planNext } from './next.ts';
+import { handoffWiring } from './handoff-wiring.ts';
+import {
+  gatherAssignmentInput,
+  liveByAccount,
+  noAccountMessage,
+  planNext,
+  type NextConfig,
+} from './next.ts';
 import { signBody, unsignedBody } from './provenance.ts';
 import { releaseItem } from './release.ts';
 import { journalUsage } from './usage-journal.ts';
@@ -83,7 +90,7 @@ const CAPABILITIES = ['getItem', 'applyWorkState', 'comment', 'getBacklogSnapsho
 
 /** Options the tests (and only the tests) pass to {@link drain}. */
 export interface DrainOptions {
-  /** The handoff reducer (default: none until the handoff phase ships). */
+  /** The handoff reducer (default: the real one, `handoffWiring(...).step`). */
   handoffStep?: HandoffStep;
   /** Mint session ids. */
   mintId?: () => string;
@@ -91,6 +98,75 @@ export interface DrainOptions {
   mintToken?: () => string;
   /** Look for a session a stopped pass started (default: this machine's files, or DorkOS). */
   findSession?: PassDeps['findSession'];
+}
+
+/**
+ * The tracker half of a park (shared with `flow handoff`): one signed comment
+ * naming the reason, then the needs-input projection.
+ *
+ * @param ctx - The verb's context.
+ * @param setup - The write setup (adapter and stages).
+ * @param config - The project config.
+ * @returns The park function.
+ */
+export function parker(
+  ctx: VerbContext,
+  setup: Awaited<ReturnType<typeof setupWrite>>,
+  config: NextConfig
+): PassDeps['park'] {
+  const { adapter, stages } = setup;
+  return async (identifier, reason) => {
+    const item = await adapter.getItem(identifier, { comments: RECENT_COMMENTS });
+    const body = signBody(
+      `flow drain parked this item: ${reason}. Reply to this comment to resume the work.`,
+      config.identity.marker,
+      sessionProvenance(ctx, undefined)
+    );
+    const unsigned = unsignedBody(body);
+    // Skip only a retry of this same park: the identical comment is still the
+    // item's latest. After anyone has replied, a new park posts a new comment,
+    // which is what findAnswer anchors the next answer on.
+    const last = (item.comments ?? []).at(-1);
+    const posted = last !== undefined && unsignedBody(last.body) === unsigned;
+    if (!posted) await adapter.comment(item, body);
+    await applyAndVerify(adapter, item, projectionFor({ type: 'needs-input' }, { stages }));
+  };
+}
+
+/**
+ * Look for a session a stopped pass or mover started (shared with `flow
+ * handoff`): this machine's files for cli and cmux, `GET /api/sessions/<id>`
+ * for DorkOS.
+ *
+ * @param ctx - The verb's context.
+ * @param dorkHome - The resolved DorkOS home.
+ * @returns The finder.
+ */
+export function sessionFinder(ctx: VerbContext, dorkHome: string): PassDeps['findSession'] {
+  return (probe) => {
+    const configDir =
+      probe.configDir ??
+      sessionHome(
+        probe.runtime ?? 'claude-code',
+        probe.account === null
+          ? null
+          : {
+              runtime: probe.runtime ?? 'claude-code',
+              id: probe.account,
+              path:
+                loadAccounts(dorkHome).accounts.find(
+                  (a) => a.runtime === (probe.runtime ?? 'claude-code') && a.id === probe.account
+                )?.path ?? null,
+            },
+        ctx.env,
+        ctx.io.osHome
+      ) ??
+      undefined;
+    return findMintedSession(
+      { ...probe, ...(configDir === undefined ? {} : { configDir }) },
+      { dorkosUrl: dorkosBaseUrl(ctx.env), fetch: ctx.io.fetch }
+    );
+  };
 }
 
 /** A string flag's value, if given. */
@@ -224,6 +300,20 @@ export async function drain(ctx: VerbContext, options: DrainOptions = {}): Promi
         };
   };
 
+  const handoff = handoffWiring({
+    ctx,
+    config,
+    dorkHome,
+    flow: flowCommand,
+    async comment(identifier, body) {
+      const item = await adapter.getItem(identifier, { comments: RECENT_COMMENTS });
+      // A retry of the same notice (the same words are the latest comment) posts nothing.
+      const last = (item.comments ?? []).at(-1);
+      if (last !== undefined && unsignedBody(last.body) === unsignedBody(body)) return;
+      await adapter.comment(item, body);
+    },
+  });
+
   const deps: PassDeps = {
     store,
     mainCheckout,
@@ -300,7 +390,7 @@ export async function drain(ctx: VerbContext, options: DrainOptions = {}): Promi
         considered: accounts.map((a) => `${a.runtime}:${a.id}`),
       };
     },
-    async reviewerAccount(runtime) {
+    async reviewerAccount(runtime, exclude = []) {
       const input = await gatherAssignmentInput(ctx, config);
       const rank = rankAccounts({
         now: input.now,
@@ -311,7 +401,7 @@ export async function drain(ctx: VerbContext, options: DrainOptions = {}): Promi
         crossRuntimeFallback: input.crossRuntimeFallback,
         model: model('review'),
         affinity: null,
-        exclude: [],
+        exclude,
         liveByAccount: liveByAccount(input.runs),
         opts: input.opts,
       });
@@ -339,49 +429,8 @@ export async function drain(ctx: VerbContext, options: DrainOptions = {}): Promi
     async release(identifier) {
       await releaseItem(ctx, setup, { identifier, to: 'ready' });
     },
-    async park(identifier, reason) {
-      const item = await adapter.getItem(identifier, { comments: RECENT_COMMENTS });
-      const body = signBody(
-        `flow drain parked this item: ${reason}. Reply to this comment to resume the work.`,
-        config.identity.marker,
-        sessionProvenance(ctx, undefined)
-      );
-      const unsigned = unsignedBody(body);
-      // Skip only a retry of this same park: the identical comment is still the
-      // item's latest. After anyone has replied, a new park posts a new comment,
-      // which is what findAnswer anchors the next answer on.
-      const last = (item.comments ?? []).at(-1);
-      const posted = last !== undefined && unsignedBody(last.body) === unsigned;
-      if (!posted) await adapter.comment(item, body);
-      await applyAndVerify(adapter, item, projectionFor({ type: 'needs-input' }, { stages }));
-    },
-    findSession:
-      options.findSession ??
-      ((probe) => {
-        const configDir =
-          probe.configDir ??
-          sessionHome(
-            probe.runtime ?? 'claude-code',
-            probe.account === null
-              ? null
-              : {
-                  runtime: probe.runtime ?? 'claude-code',
-                  id: probe.account,
-                  path:
-                    loadAccounts(dorkHome).accounts.find(
-                      (a) =>
-                        a.runtime === (probe.runtime ?? 'claude-code') && a.id === probe.account
-                    )?.path ?? null,
-                },
-            ctx.env,
-            ctx.io.osHome
-          ) ??
-          undefined;
-        return findMintedSession(
-          { ...probe, ...(configDir === undefined ? {} : { configDir }) },
-          { dorkosUrl: dorkosBaseUrl(ctx.env), fetch: ctx.io.fetch }
-        );
-      }),
+    park: parker(ctx, setup, config),
+    findSession: options.findSession ?? sessionFinder(ctx, dorkHome),
     async ingest(handle) {
       const result = await ingestStreamLog(handle, { dorkHome, now: () => ctx.now() });
       for (const warning of result.warnings) ctx.warn(warning.message);
@@ -397,7 +446,8 @@ export async function drain(ctx: VerbContext, options: DrainOptions = {}): Promi
         })
       );
     },
-    handoffStep: options.handoffStep,
+    handoffStep: options.handoffStep ?? handoff.step,
+    handoffIo: handoff.io,
     mintId: options.mintId,
     mintToken: options.mintToken,
     warn: (message) => ctx.warn(message),

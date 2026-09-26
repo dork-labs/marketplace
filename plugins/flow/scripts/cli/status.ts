@@ -28,6 +28,7 @@ import { findConfigRoots, pauseState } from '../config-files.ts';
 import { PreconditionError } from '../errors.ts';
 import type { FlowRun } from '../flow-run.ts';
 import { openFlowStateFile } from '../flow-state-file.ts';
+import { limitLine } from '../drain/handoff-exec.ts';
 import type { DrainWorkerHandle } from '../drain/state.ts';
 import { realLauncher } from '../launchers/real.ts';
 import { handleRuntime, HOST_NAMES } from '../launchers/types.ts';
@@ -95,6 +96,8 @@ export interface InFlightEntry {
     worker: string | null;
     reviewer: string | null;
     parkedReason: string | null;
+    /** The run's usage-limit line (§5.5), e.g. "limited until Thu 09:00, waiting for approval to move to claude4"; `null` when not limited. */
+    limit: string | null;
   } | null;
 }
 
@@ -359,6 +362,7 @@ async function drainSessions(ctx: VerbContext, run: FlowRun): Promise<InFlightEn
     worker: await sessionState(ctx, drain.worker ?? null),
     reviewer: await sessionState(ctx, drain.reviewer ?? null),
     parkedReason: drain.parkedReason ?? null,
+    limit: limitLine(run.limit, drain.wakeAfter ?? null),
   };
 }
 
@@ -403,7 +407,7 @@ function render(
       f.title ?? '(not in the backlog)',
       f.stage ?? '-',
       f.drain !== null
-        ? `drain ${f.drain.phase}${f.drain.worker ? `, worker ${f.drain.worker}` : ''}${f.drain.reviewer ? `, reviewer ${f.drain.reviewer}` : ''}`
+        ? `drain ${f.drain.phase}${f.drain.worker ? `, worker ${f.drain.worker}` : ''}${f.drain.reviewer ? `, reviewer ${f.drain.reviewer}` : ''}${f.drain.limit ? `; ${f.drain.limit}` : ''}`
         : (f.status ?? (f.claimed ? 'claimed, no run' : '-')),
       f.account ?? '-',
       f.host ?? '-',

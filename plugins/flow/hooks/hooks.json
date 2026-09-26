@@ -9,6 +9,17 @@
           }
         ]
       }
+    ],
+    "PostToolUse": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node --experimental-strip-types \"${CLAUDE_PLUGIN_ROOT}/scripts/flow.ts\" limit-check --hook",
+            "timeout": 5
+          }
+        ]
+      }
     ]
   }
 }

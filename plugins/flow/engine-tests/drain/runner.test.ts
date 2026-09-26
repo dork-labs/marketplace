@@ -15,9 +15,11 @@ import {
   existsSync,
   mkdirSync,
   mkdtempSync,
+  readdirSync,
   readFileSync,
   realpathSync,
   rmSync,
+  statSync,
   writeFileSync,
 } from 'node:fs';
 import os from 'node:os';
@@ -76,7 +78,7 @@ function git(cwd: string, ...args: string[]): string {
 /** Every call a fake launcher saw. */
 interface LauncherLog {
   starts: { host: HostName; req: LaunchRequest; handle: SessionHandle }[];
-  sends: { handle: SessionHandle; file: string; text: string }[];
+  sends: { handle: SessionHandle; file: string; text: string; model?: string }[];
   stops: SessionHandle[];
 }
 
@@ -94,6 +96,8 @@ interface LauncherScript {
   onStop?: (handle: SessionHandle) => Promise<void>;
   /** Session states by session id (default busy). */
   states: Map<string, SessionState>;
+  /** When set, every probe fails with this reason. */
+  probeFail?: string;
 }
 
 /** A launcher per host that records every call and starts nothing real. */
@@ -102,7 +106,8 @@ function fakeLaunchers(log: LauncherLog, script: LauncherScript) {
   return (host: HostName): Launcher => ({
     host,
     supports: () => ({ ok: true }),
-    probe: async () => ({ ok: true }),
+    probe: async () =>
+      script.probeFail === undefined ? { ok: true } : { ok: false, reason: script.probeFail },
     async start(req) {
       if (script.failNext) {
         const error = script.failNext;
@@ -125,9 +130,17 @@ function fakeLaunchers(log: LauncherLog, script: LauncherScript) {
       }
       return handle;
     },
-    async send(handle, file) {
-      log.sends.push({ handle, file, text: readFileSync(file, 'utf8') });
-      return { result: 'delivered', handle };
+    async send(handle, file, opts) {
+      log.sends.push({
+        handle,
+        file,
+        text: readFileSync(file, 'utf8'),
+        ...(opts?.model ? { model: opts.model } : {}),
+      });
+      return {
+        result: 'delivered',
+        handle: opts?.model ? { ...handle, model: opts.model } : handle,
+      };
     },
     async state(handle) {
       script.onState?.(handle);
@@ -364,8 +377,14 @@ async function reviewerSays(identifier: string, sha: string, verdict: 'clean' | 
   expect(result.code, result.stderr).toBe(0);
 }
 
-/** Register Claude Code accounts under the temp DorkOS home, each with a fleet policy. */
-function fleet(accounts: Record<string, Record<string, unknown>>): void {
+/**
+ * Register Claude Code accounts under the temp DorkOS home, each with a fleet
+ * policy; `extra` adds fleet-wide fields (`handoff`, `crossRuntimeFallback`).
+ */
+function fleet(
+  accounts: Record<string, Record<string, unknown>>,
+  extra: Record<string, unknown> = {}
+): void {
   const put = (rel: string, value: unknown) => {
     const file = path.join(dorkHome, rel);
     mkdirSync(path.dirname(file), { recursive: true });
@@ -384,6 +403,7 @@ function fleet(accounts: Record<string, Record<string, unknown>>): void {
   });
   put('flow/fleet.json', {
     v: 1,
+    ...extra,
     accounts: Object.fromEntries(
       Object.entries(accounts).map(([id, e]) => [`claude-code:${id}`, e])
     ),
@@ -1039,5 +1059,418 @@ describe('the briefs', () => {
     expect(() => renderTemplate('a {{x}}', { x: '1', y: '2' })).toThrow(/no placeholder for y/);
     expect(() => renderTemplate('a {{x-y}}', {})).toThrow(/malformed placeholder/);
     expect(renderTemplate('{{x}}', { x: '{{y}}' })).toBe('{{y}}');
+  });
+});
+
+describe('flow drain: handoff on a limit (§5)', () => {
+  /** An ISO time `minutes` from the test clock. */
+  const at = (minutes: number) => new Date(clock + minutes * 60_000).toISOString();
+
+  /** Write a Claude Code account's usage ledger (every window read at the test clock). */
+  function ledger(
+    id: string,
+    windows: Record<string, { usedPct: number; status: string; resetsAt: string | null }>
+  ): void {
+    const file = path.join(dorkHome, 'runtimes', 'claude-code', 'usage', `${id}.json`);
+    mkdirSync(path.dirname(file), { recursive: true });
+    const observedAt = new Date(clock).toISOString();
+    writeFileSync(
+      file,
+      JSON.stringify({
+        v: 1,
+        runtime: 'claude-code',
+        accountId: id,
+        updatedAt: observedAt,
+        windows: Object.fromEntries(
+          Object.entries(windows).map(([key, w]) => [
+            key,
+            { ...w, observedAt, source: 'statusline' },
+          ])
+        ),
+      })
+    );
+  }
+
+  /** Room on both windows. */
+  const healthy = (id: string) =>
+    ledger(id, {
+      five_hour: { usedPct: 10, status: 'allowed', resetsAt: at(200) },
+      seven_day: { usedPct: 10, status: 'allowed', resetsAt: at(5000) },
+    });
+
+  /** The 5-hour window rejected, resetting in `minutes`. */
+  const rejected = (id: string, minutes = 180) =>
+    ledger(id, {
+      five_hour: { usedPct: 100, status: 'rejected', resetsAt: at(minutes) },
+      seven_day: { usedPct: 30, status: 'allowed', resetsAt: at(5000) },
+    });
+
+  /** Every file under any account's `projects/` folder, with its size, time and content hash. */
+  function projectsTree(): Record<string, string> {
+    const out: Record<string, string> = {};
+    const walk = (dir: string, inProjects: boolean) => {
+      let names: string[] = [];
+      try {
+        names = readdirSync(dir);
+      } catch {
+        return;
+      }
+      for (const name of names) {
+        const full = path.join(dir, name);
+        const stat = statSync(full);
+        const under = inProjects || name === 'projects';
+        if (stat.isDirectory()) walk(full, under);
+        else if (under) {
+          const hash = createHash('sha256').update(readFileSync(full)).digest('hex');
+          out[full] = `${stat.size}:${stat.mtimeMs}:${hash}`;
+        }
+      }
+    };
+    walk(dorkHome, false);
+    return out;
+  }
+
+  let transcriptsBefore: Record<string, string> = {};
+
+  /**
+   * NO TRANSCRIPT: flow may resolve the old transcript's path, but nothing
+   * under any account's `projects/` folder may be written, moved or added.
+   */
+  function assertNoTranscriptWrites(): void {
+    expect(projectsTree()).toEqual(transcriptsBefore);
+  }
+
+  /**
+   * Two rotation accounts with room, a worker started on one of them, and a
+   * transcript for its session under that account's `projects/` folder.
+   */
+  async function started(extra: Record<string, unknown> = {}) {
+    fleet({ claude3: { role: 'rotation' }, claude4: { role: 'rotation' } }, extra);
+    healthy('claude3');
+    healthy('claude4');
+    world.tracker = createFakeAdapter({ user: { id: 'agent-1' }, items: [item('ACME-1')] });
+    const pass = await tick();
+    expect(pass.code, pass.stderr).toBe(0);
+    const from = runOf('ACME-1').account as string;
+    const to = from === 'claude3' ? 'claude4' : 'claude3';
+    const old = runOf('ACME-1').sessionId;
+    const transcript = path.join(dorkHome, 'claude', from, 'projects', '-wt', `${old}.jsonl`);
+    mkdirSync(path.dirname(transcript), { recursive: true });
+    writeFileSync(transcript, '{"type":"user"}\n');
+    transcriptsBefore = projectsTree();
+    return { from, to, old, transcript, wt: runOf('ACME-1').worktreePath };
+  }
+
+  /** The worktree checkpoint's header. */
+  function header(wt: string): Record<string, unknown> {
+    const line = readFileSync(path.join(wt, '.dork', 'flow', 'HANDOFF.md'), 'utf8').split('\n')[0];
+    return JSON.parse(line.replace(/^<!-- flow:handoff /, '').replace(/ -->$/, ''));
+  }
+
+  /** Worker starts, in order. */
+  const workers = () => world.log.starts.filter((s) => s.req.role === 'worker');
+
+  /** The comments the fake tracker got. */
+  const comments = () => world.tracker.calls.filter((c) => c.method === 'comment');
+
+  it('auto: a rejected account hands off in one pass with no operator call', async () => {
+    // Purpose: DOR-2374's criterion. The next pass writes a synthesized
+    // checkpoint, stops the old session, starts a new one on the other account
+    // in the same worktree with the resume message, and rewrites the run.
+    const { from, to, old, transcript, wt } = await started();
+    rejected(from);
+    clock += 60_000;
+    const pass = await tick();
+    expect(pass.code, pass.stderr).toBe(0);
+
+    expect(header(wt)).toMatchObject({ trigger: 'synthesized', identifier: 'ACME-1' });
+    expect(world.log.stops.map((h) => h.sessionId)).toContain(old);
+    const next = workers().at(-1);
+    expect(workers()).toHaveLength(2);
+    expect(next?.req).toMatchObject({ role: 'worker', cwd: wt, account: { id: to } });
+    const resume = readFileSync(next?.req.promptFile as string, 'utf8');
+    expect(resume).toContain('You are continuing ACME-1');
+    expect(resume).toContain('.dork/flow/HANDOFF.md');
+    expect(resume).toContain(transcript);
+    const moved = runOf('ACME-1');
+    expect(moved).toMatchObject({ account: to, host: 'cli', sessionId: next?.handle.sessionId });
+    expect(moved.limit).toBeUndefined();
+    expect(moved.drain?.handoffs).toEqual([
+      { from, to, at: new Date(clock).toISOString(), reason: 'rejected' },
+    ]);
+    expect(moved.drain?.phase).toBe('working');
+    expect(comments()).toEqual([]);
+    expect(pass.stdout).toContain(`moved to Label ${to}`);
+    assertNoTranscriptWrites();
+  });
+
+  it('ask: one comment naming the candidate and the command, nothing started; then flow handoff moves it', async () => {
+    // Purpose: in ask mode the run parks and says why, exactly once; the
+    // operator's `flow handoff --to` is the approval.
+    const { from, to, old, wt } = await started({ handoff: 'ask' });
+    rejected(from);
+    clock += 60_000;
+    let pass = await tick();
+    expect(pass.code, pass.stderr).toBe(0);
+    expect(workers()).toHaveLength(1);
+    expect(comments()).toHaveLength(1);
+    const body = (comments()[0] as { body: string }).body;
+    expect(body).toContain(`Label ${from} reached its 5-hour limit`);
+    expect(body).toContain(`handoff ACME-1 --to claude-code:${to}`);
+    expect(runOf('ACME-1').limit).toMatchObject({ state: 'pending-approval' });
+    // No label change: the agent still owns the item.
+    expect(world.tracker.calls.filter((c) => c.method === 'applyWorkState')).toHaveLength(1);
+
+    clock += 60_000;
+    pass = await tick();
+    expect(comments()).toHaveLength(1);
+    expect(pass.stdout).toContain(`waiting for approval to move to claude-code:${to}`);
+    const status = await flow(['status']);
+    expect(status.stdout).toContain(`waiting for approval to move to claude-code:${to}`);
+
+    const moved = await flow(['handoff', 'ACME-1', '--to', to]);
+    expect(moved.code, moved.stderr).toBe(0);
+    expect(workers()).toHaveLength(2);
+    expect(world.log.stops.map((h) => h.sessionId)).toContain(old);
+    expect(runOf('ACME-1')).toMatchObject({ account: to });
+    expect(runOf('ACME-1').drain?.handoffs.at(-1)).toMatchObject({ from, to, reason: 'manual' });
+    expect(runOf('ACME-1').limit).toBeUndefined();
+    expect(header(wt).trigger).toBe('synthesized');
+    assertNoTranscriptWrites();
+  });
+
+  it("ask: the account's reset resumes the same session, with no approval", async () => {
+    // Purpose: Decision D5; the warm session goes on after its own reset.
+    const { from, old } = await started({ handoff: 'ask' });
+    rejected(from, 240);
+    clock += 60_000;
+    await tick();
+    expect(runOf('ACME-1').limit?.state).toBe('pending-approval');
+    clock += 241 * 60_000;
+    const pass = await tick();
+    expect(pass.code, pass.stderr).toBe(0);
+    expect(workers()).toHaveLength(1);
+    const cleared = world.log.sends.at(-1);
+    expect(cleared?.handle.sessionId).toBe(old);
+    expect(cleared?.text).toContain('has reset');
+    expect(runOf('ACME-1').limit).toBeUndefined();
+    expect(runOf('ACME-1').drain?.handoffs.at(-1)).toMatchObject({
+      from,
+      to: from,
+      reason: 'reset',
+    });
+    assertNoTranscriptWrites();
+  });
+
+  it('wait-if-soon: a reset within the threshold waits on the same account, then resumes it', async () => {
+    // Purpose: §5.2a; a handoff would re-bill the whole context, so a short wait wins.
+    const { from, old } = await started();
+    rejected(from, 30);
+    clock += 60_000;
+    await tick();
+    expect(workers()).toHaveLength(1);
+    expect(runOf('ACME-1').limit?.state).toBe('waiting-reset');
+    expect(runOf('ACME-1').drain?.wakeAfter).toBe(at(29));
+    clock += 31 * 60_000;
+    await tick();
+    expect(workers()).toHaveLength(1);
+    expect(world.log.sends.at(-1)).toMatchObject({ handle: { sessionId: old } });
+    expect(world.log.sends.at(-1)?.text).toContain('has reset');
+    expect(runOf('ACME-1').limit).toBeUndefined();
+    assertNoTranscriptWrites();
+  });
+
+  it("model fallback: only the model's bucket is out, so the same session goes on under the next model", async () => {
+    // Purpose: §5.2a; no handoff, the host switches the model for the next turn.
+    project.config({
+      tracker: 'fake',
+      identity: { agent: 'agent-1' },
+      autonomy: { wipCap: { global: 10, perProject: 10 } },
+      models: { bindings: { workhorse: 'claude-opus-x', fast: 'claude-sonnet-x' } },
+      drain: { modelFallback: { 'claude-code': ['workhorse', 'fast'] } },
+    });
+    const { from, old } = await started();
+    ledger(from, {
+      five_hour: { usedPct: 20, status: 'allowed', resetsAt: at(200) },
+      seven_day: { usedPct: 30, status: 'allowed', resetsAt: at(5000) },
+      seven_day_opus: { usedPct: 100, status: 'rejected', resetsAt: at(3000) },
+    });
+    clock += 60_000;
+    const pass = await tick();
+    expect(pass.code, pass.stderr).toBe(0);
+    expect(workers()).toHaveLength(1);
+    expect(world.log.sends.at(-1)).toMatchObject({
+      model: 'claude-sonnet-x',
+      handle: { sessionId: old },
+    });
+    expect(runOf('ACME-1').drain?.worker?.model).toBe('claude-sonnet-x');
+    expect(runOf('ACME-1').limit).toBeUndefined();
+    clock += 60_000;
+    await tick();
+    expect(workers()).toHaveLength(1);
+    expect(runOf('ACME-1').limit).toBeUndefined();
+    assertNoTranscriptWrites();
+  });
+
+  it('--wait holds a limited run against auto until --to releases it', async () => {
+    // Purpose: a person's wait outranks auto handoff (§5.2a).
+    const { from, to } = await started();
+    rejected(from, 500);
+    rejected(to);
+    clock += 60_000;
+    await tick();
+    expect(runOf('ACME-1').limit?.state).toBe('waiting-reset');
+    const held = await flow(['handoff', 'ACME-1', '--wait', '--until', at(600)]);
+    expect(held.code, held.stderr).toBe(0);
+    expect(runOf('ACME-1').limit).toMatchObject({ heldBy: 'person', heldUntil: at(600) });
+
+    healthy(to);
+    clock += 200 * 60_000;
+    await tick();
+    expect(workers()).toHaveLength(1);
+    expect(runOf('ACME-1').limit?.heldBy).toBe('person');
+
+    const released = await flow(['handoff', 'ACME-1', '--to', to]);
+    expect(released.code, released.stderr).toBe(0);
+    expect(workers()).toHaveLength(2);
+    expect(runOf('ACME-1').account).toBe(to);
+    assertNoTranscriptWrites();
+  });
+
+  it('warning: winds down, the worker checkpoints and stops, then it hands off proactively', async () => {
+    // Purpose: DOR-2371's warning path; the worker's own checkpoint is kept, not synthesized.
+    const { from, to, old, wt } = await started();
+    ledger(from, {
+      five_hour: { usedPct: 92, status: 'allowed_warning', resetsAt: at(200) },
+      seven_day: { usedPct: 30, status: 'allowed', resetsAt: at(5000) },
+    });
+    clock += 60_000;
+    await tick();
+    expect(world.log.sends.at(-1)?.text).toContain('--trigger limit-warning');
+    expect(runOf('ACME-1').limit).toMatchObject({ state: 'winding-down', level: 'warning' });
+    expect(workers()).toHaveLength(1);
+
+    clock += 60_000;
+    const body = path.join(wt, '.dork', 'flow', 'drain', 'checkpoint-body.md');
+    mkdirSync(path.dirname(body), { recursive: true });
+    writeFileSync(body, BODY);
+    const cp = await flow(
+      ['checkpoint', 'ACME-1', '--trigger', 'limit-warning', '--body-file', body],
+      wt
+    );
+    expect(cp.code, cp.stderr).toBe(0);
+    world.script.states.set(old, { kind: 'idle' });
+    clock += 60_000;
+    await tick();
+    expect(workers()).toHaveLength(2);
+    expect(runOf('ACME-1')).toMatchObject({ account: to });
+    expect(runOf('ACME-1').drain?.handoffs.at(-1)).toMatchObject({ reason: 'warning' });
+    expect(header(wt).trigger).toBe('limit-warning');
+    assertNoTranscriptWrites();
+  });
+
+  it('cross-runtime: off leaves the run waiting; on moves it to the other runtime', async () => {
+    // Purpose: §5.2a; flow never changes runtime unless the operator turned it on.
+    for (const setting of ['off', 'on'] as const) {
+      fleet({ claude3: { role: 'rotation' } }, { crossRuntimeFallback: setting });
+      healthy('claude3');
+      world.tracker = createFakeAdapter({ user: { id: 'agent-1' }, items: [item('ACME-1')] });
+      world.log.starts.length = 0;
+      await tick();
+      expect(runOf('ACME-1').account).toBe('claude3');
+      transcriptsBefore = projectsTree();
+      rejected('claude3');
+      clock += 60_000;
+      await tick();
+      if (setting === 'off') {
+        expect(workers()).toHaveLength(1);
+        expect(runOf('ACME-1').limit?.state).toBe('waiting-reset');
+        // Clear the run for the second half.
+        await flow(['release', 'ACME-1']);
+        rmSync(path.join(project.dir, '.dork', 'flow', 'flow-state.json'), { force: true });
+      } else {
+        expect(workers()).toHaveLength(2);
+        expect(workers()[1].req).toMatchObject({ runtime: 'codex', account: null });
+        expect(runOf('ACME-1').runtime).toBe('codex');
+        expect(readFileSync(workers()[1].req.promptFile, 'utf8')).toContain(
+          'another tool (claude-code)'
+        );
+      }
+      assertNoTranscriptWrites();
+      clock += 60_000;
+    }
+  });
+
+  it('a failed host probe parks the run with the reason and starts nothing', async () => {
+    // Purpose: Decision D19; a handoff never switches hosts.
+    const { from, to } = await started({ handoff: 'ask' });
+    rejected(from);
+    clock += 60_000;
+    await tick();
+    world.script.probeFail = 'claude is not on PATH';
+    const moved = await flow(['handoff', 'ACME-1', '--to', to]);
+    expect(moved.code).toBe(EXIT.precondition);
+    expect(workers()).toHaveLength(1);
+    expect(runOf('ACME-1').drain).toMatchObject({ phase: 'parked' });
+    expect(runOf('ACME-1').drain?.parkedReason).toContain('claude is not on PATH');
+    expect(runOf('ACME-1').limit?.handoffToken).toBeNull();
+    assertNoTranscriptWrites();
+  });
+
+  it('flow handoff refuses an ineligible --to, and a non-limited run while a live drain holds the lock', async () => {
+    // Purpose: the verb's two refusals (exit 5), each with its reason.
+    const { from } = await started();
+    const own = await flow(['handoff', 'ACME-1', '--to', from]);
+    expect(own.code).toBe(EXIT.precondition);
+    expect(own.stderr).toContain('excluded');
+    const lock = path.join(project.dir, '.dork', 'flow', 'drain.lock');
+    writeFileSync(lock, JSON.stringify({ pid: process.pid, token: 't', startedAt: at(0) }));
+    const busy = await flow(['handoff', 'ACME-1']);
+    expect(busy.code).toBe(EXIT.precondition);
+    expect(busy.stderr).toContain('is not limited');
+    expect(workers()).toHaveLength(1);
+    rmSync(lock);
+  });
+
+  it('the supervisor and flow handoff racing on one limited run start exactly one new session', async () => {
+    // Purpose: the handing-off compare-and-set (§4.3): whichever moves first
+    // wins, and the loser starts nothing. Both orders are driven.
+    const { from, to } = await started();
+    rejected(from);
+    clock += 60_000;
+    let verb: Awaited<ReturnType<typeof flow>> | null = null;
+    world.script.onStop = async (handle) => {
+      if (verb === null && handle.sessionId === runOf('ACME-1').sessionId) {
+        verb = await flow(['handoff', 'ACME-1', '--to', to]);
+      }
+    };
+    await tick();
+    expect(verb).not.toBeNull();
+    expect((verb as unknown as { code: number }).code).toBe(EXIT.precondition);
+    expect((verb as unknown as { stderr: string }).stderr).toContain('in progress');
+    expect(workers()).toHaveLength(2);
+    expect(runOf('ACME-1').account).toBe(to);
+    assertNoTranscriptWrites();
+  });
+
+  it('flow handoff first, the supervisor during its move: still exactly one new session', async () => {
+    // Purpose: the other order of the race.
+    const { from, to } = await started({ handoff: 'ask' });
+    rejected(from);
+    clock += 60_000;
+    await tick();
+    expect(runOf('ACME-1').limit?.state).toBe('pending-approval');
+    let inner = false;
+    world.script.onStop = async () => {
+      if (inner) return;
+      inner = true;
+      // Make the supervisor want to move it too: auto mode and a stale nothing.
+      fleet({ claude3: { role: 'rotation' }, claude4: { role: 'rotation' } }, { handoff: 'auto' });
+      await tick();
+    };
+    const moved = await flow(['handoff', 'ACME-1', '--to', to]);
+    expect(moved.code, moved.stderr).toBe(0);
+    expect(workers()).toHaveLength(2);
+    expect(runOf('ACME-1').account).toBe(to);
   });
 });

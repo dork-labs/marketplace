@@ -162,6 +162,25 @@ export interface RunLimit {
   handoffSessionId: string | null;
   /** When the ask-mode comment was posted, once per episode (ISO). */
   notifiedAt: string | null;
+  /**
+   * `person` while someone ran `flow handoff --wait` (§5.2a): no candidate
+   * moves the run until {@link RunLimit.heldUntil} passes, the account resets,
+   * or `flow handoff --to` releases it. Absent otherwise.
+   */
+  heldBy?: 'person';
+  /** Until when a person's wait holds the run (ISO); `null` means until the account's own reset. */
+  heldUntil?: string | null;
+  /** While `handing-off`: the target (`<runtime>:<id>`), so a stale mark can be adopted (§5.2). */
+  handoffTo?: string;
+  /** While `handing-off`: why the run is moving, recorded with the move when a stale mark is adopted. */
+  handoffReason?: DrainHandoff['reason'];
+  /** The candidate the ask-mode comment named (`<runtime>:<id>`), for the waiting line. */
+  candidate?: string | null;
+  /**
+   * `unsupported` once the host refused to switch the session's model this
+   * episode, so the model-fallback row (§5.2a) is skipped and the run hands off.
+   */
+  modelSwitch?: 'unsupported';
 }
 
 /**
@@ -296,4 +315,10 @@ export const RunLimitSchema: z.ZodType<RunLimit> = z.looseObject({
   handingOffAt: nullableString,
   handoffSessionId: nullableString,
   notifiedAt: nullableString,
+  heldBy: vocabulary<'person'>().optional(),
+  heldUntil: nullableString.optional(),
+  handoffTo: z.string().optional(),
+  handoffReason: vocabulary<DrainHandoff['reason']>().optional(),
+  candidate: nullableString.optional(),
+  modelSwitch: vocabulary<'unsupported'>().optional(),
 });

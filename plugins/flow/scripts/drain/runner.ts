@@ -67,7 +67,7 @@ import {
   type SessionHandle,
   type SessionState,
 } from '../launchers/types.ts';
-import { launchBudget } from './account-rank.ts';
+import { launchBudget, type AccountRef } from './account-rank.ts';
 import { renderBrief } from './briefs.ts';
 import { ensureCheckpointExcludes, WORKER_BRIEF_PATH } from './checkpoint.ts';
 import {
@@ -78,6 +78,14 @@ import {
   type PrStatusFact,
   type SendAction,
 } from './drain-step.ts';
+import type { HandoffAction } from './handoff.ts';
+import {
+  adoptOrRevertHandoff,
+  executeHandoff,
+  limitLine,
+  writeMessage,
+  type HandoffExecDeps,
+} from './handoff-exec.ts';
 import { render as renderMessage } from './messages.ts';
 import type { DrainReviewerHandle, DrainState, DrainWorkerHandle } from './state.ts';
 import { dueForSnapshot, readUsageSampleState, writeUsageSampleState } from './usage-sample.ts';
@@ -100,31 +108,48 @@ export const REVIEWER_BRIEF_PATH = '.dork/flow/drain/briefs/reviewer.md';
 /** Where a reviewer writes its findings, relative to its review worktree. */
 export const REVIEWER_FINDINGS_PATH = '.dork/flow/drain/findings.md';
 
-/** Where the supervisor writes the messages it sends, relative to the worker's worktree. */
-export const MESSAGES_DIR = '.dork/flow/drain/messages';
+export { MESSAGES_DIR } from './handoff-exec.ts';
 
 /** What the handoff reducer returns: the run to hand `drainStep`, and its own actions. */
 export interface HandoffStepResult {
   /** The run after the handoff step. */
   run: FlowRun;
   /** Actions the handoff step asks for (applied after sends, before launches). */
-  actions: DrainAction[];
+  actions: (DrainAction | HandoffAction)[];
 }
 
 /**
  * The handoff reducer's seam (spec §5.2). It runs before `drainStep` on every
- * run, every pass. The handoff phase ships the real one; until then it is
- * {@link noHandoff}.
+ * run, every pass. `flow drain` wires the real one (`createHandoffStep` in
+ * `cli/handoff-wiring.ts`), which gathers the account's signal, the
+ * candidates and the checkpoint, then calls the pure `nextHandoffAction`.
  */
-export type HandoffStep = (run: FlowRun, facts: DrainFacts, now: Date) => HandoffStepResult;
+export type HandoffStep = (
+  run: FlowRun,
+  facts: DrainFacts,
+  now: Date
+) => HandoffStepResult | Promise<HandoffStepResult>;
 
 /**
- * The handoff reducer before the handoff phase ships: the run unchanged, no actions.
+ * No handoff machine: the run unchanged, no actions (for passes that must not
+ * move anything, and the default when none is wired).
  *
  * @param run - The run.
  * @returns The run, and no actions.
  */
 export const noHandoff: HandoffStep = (run) => ({ run, actions: [] });
+
+/** The handoff I/O a pass needs beyond its own deps (see `HandoffExecDeps`). */
+export interface HandoffIo {
+  /** Write a synthesized checkpoint unless one newer than `since` exists. */
+  ensureCheckpoint: HandoffExecDeps['ensureCheckpoint'];
+  /** The old session's transcript path (resolved, never opened), or `null`. */
+  transcriptFor: HandoffExecDeps['transcriptFor'];
+  /** The account a `<runtime>:<id>` names. */
+  resolveAccount: HandoffExecDeps['resolveAccount'];
+  /** Post the ask-mode comment for `run`, naming `candidate` (§5.5). */
+  notify(run: FlowRun, candidate: AccountRef): Promise<void>;
+}
 
 /** An account a session may bill, as the runner launches on it. */
 export interface PlannedAccount {
@@ -253,8 +278,15 @@ export interface PassDeps {
   item(identifier: string, parked?: { since: string | null }): Promise<ItemFacts>;
   /** `flow next`'s logic with account assignment, for `slots` picks. */
   plan(slots: number): Promise<PassPlan>;
-  /** The account a reviewer of a `runtime` run bills (ranked with no affinity), or `null`. */
-  reviewerAccount(runtime: RuntimeName): Promise<PlannedAccount | null>;
+  /**
+   * The account a reviewer of a `runtime` run bills (ranked with no affinity),
+   * or `null`. `exclude` holds `<runtime>:<id>` keys it may not use (a reviewer
+   * restarting off a limited account).
+   */
+  reviewerAccount(
+    runtime: RuntimeName,
+    exclude?: readonly string[]
+  ): Promise<PlannedAccount | null>;
   /** Claim an item with `status: "queued"`. Throws a `PreconditionError` when it cannot. */
   claim(input: DrainClaim): Promise<void>;
   /** Release a claim to ready at its resume stage, deleting the run. */
@@ -269,6 +301,8 @@ export interface PassDeps {
   journalUsage(keys: readonly string[]): void;
   /** The handoff reducer (default {@link noHandoff}). */
   handoffStep?: HandoffStep;
+  /** The handoff I/O; without it the handoff machine's actions are reported, not taken. */
+  handoffIo?: HandoffIo;
   /** Mint a session id (default `randomUUID`). */
   mintId?(): string;
   /** Mint a reviewer token (default 128 random bits, hex). */
@@ -360,7 +394,7 @@ function short(sha: string | null | undefined): string {
 }
 
 /** The order actions are applied in (§4.2 step 3): stop, send, handoffs, launches, forge, tracker. */
-function actionRank(action: DrainAction): number {
+function actionRank(action: DrainAction | HandoffAction): number {
   switch (action.kind) {
     case 'stop':
       return 0;
@@ -397,6 +431,24 @@ function describe(action: DrainAction, reviewerAccount: string | null): string {
       return 'checked a start that never confirmed';
     default:
       return (action as { kind: string }).kind;
+  }
+}
+
+/** A plain phrase for one handoff action, for `--dry-run`. */
+function describeHandoff(action: DrainAction | HandoffAction): string {
+  switch (action.kind) {
+    case 'synthesize-checkpoint':
+      return 'write a checkpoint for the stopped session';
+    case 'handoff':
+      return `move to ${action.to.runtime}:${action.to.id}`;
+    case 'notify':
+      return `ask to move to ${action.candidate.runtime}:${action.candidate.id}`;
+    case 'restart-reviewer':
+      return 'restart the limited reviewer on another account';
+    case 'adopt-or-revert-handoff':
+      return 'resolve a handoff that never finished';
+    default:
+      return describe(action as DrainAction, null);
   }
 }
 
@@ -470,20 +522,6 @@ export async function findMintedSession(
     ...(pid !== undefined && Number.isInteger(pid) ? { pid } : {}),
     ...(probe.host === 'cli' ? { logFile, logOffset: 0 } : {}),
   };
-}
-
-/** Write one message file in the worker's worktree; the path. */
-function writeMessage(worktree: string, kind: string, text: string): string {
-  const dir = path.join(worktree, MESSAGES_DIR);
-  mkdirSync(dir, { recursive: true });
-  let seq = 0;
-  for (const name of readdirSync(dir)) {
-    const n = Number(/^(\d+)-/.exec(name)?.[1]);
-    if (Number.isFinite(n)) seq = Math.max(seq, n);
-  }
-  const file = path.join(dir, `${String(seq + 1).padStart(3, '0')}-${kind}.md`);
-  writeFileSync(file, text);
-  return file;
 }
 
 /** The launch account for a planned one: `null` for the ambient (implicit) account. */
@@ -763,10 +801,11 @@ export async function runPass(deps: PassDeps): Promise<PassReport> {
   /** Mint a reviewer intent for a start-reviewer action; `null` when no account may take it. */
   const reviewerIntent = async (
     run: DrainRun,
-    sha: string
+    sha: string,
+    exclude: readonly string[] = []
   ): Promise<{ handle: DrainReviewerHandle; token: string; account: PlannedAccount } | null> => {
     const runtime = handleRuntime({ runtime: run.runtime as RuntimeName | undefined });
-    const account = await deps.reviewerAccount(runtime);
+    const account = await deps.reviewerAccount(runtime, exclude);
     if (account === null) return null;
     considered.add(`${account.runtime}:${account.id}`);
     const token = mintToken();
@@ -863,13 +902,113 @@ export async function runPass(deps: PassDeps): Promise<PassReport> {
     }
   };
 
+  /** The handoff I/O as `executeHandoff` takes it, or `null` when the verb wired none. */
+  const execDeps: HandoffExecDeps | null =
+    deps.handoffIo === undefined
+      ? null
+      : {
+          store: deps.store,
+          launcher: deps.launcher,
+          now: deps.now,
+          flow: deps.flow,
+          startTimeoutMs: deps.settings.startTimeoutMs,
+          permissionMode: deps.settings.permissionMode,
+          workerModel: deps.settings.workerModel,
+          mintId,
+          mintToken: () => randomBytes(16).toString('hex'),
+          ensureCheckpoint: deps.handoffIo.ensureCheckpoint,
+          transcriptFor: deps.handoffIo.transcriptFor,
+          park: deps.park,
+          findSession: deps.findSession,
+          resolveAccount: deps.handoffIo.resolveAccount,
+          warn: deps.warn,
+        };
+
+  /** The handoff machine's own actions (§5.2, §5.3); a phrase for the report. */
+  const applyHandoff = async (
+    run: DrainRun,
+    action: Exclude<HandoffAction, SendAction | { kind: 'restart-reviewer' }>
+  ): Promise<string> => {
+    if (deps.handoffIo === undefined || execDeps === null) {
+      return `${describeHandoff(action)}: not wired in this pass`;
+    }
+    const latest = current(run.issueId) ?? run;
+    switch (action.kind) {
+      case 'synthesize-checkpoint': {
+        await deps.handoffIo.ensureCheckpoint(
+          latest,
+          latest.limit?.since ?? now.toISOString(),
+          action.reason
+        );
+        return 'wrote a checkpoint for the stopped session';
+      }
+      case 'handoff': {
+        const outcome = await executeHandoff(execDeps, latest, action.to, action.reason);
+        return outcome.line;
+      }
+      case 'notify': {
+        await deps.handoffIo.notify(latest, action.candidate);
+        return limitLine(latest.limit, latest.drain?.wakeAfter ?? null) ?? 'asked to move it';
+      }
+      case 'adopt-or-revert-handoff':
+        return adoptOrRevertHandoff(execDeps, latest);
+    }
+  };
+
+  /**
+   * Continue the same session on another model (§5.2a): send `limit-cleared`
+   * with the model; once the host took it, record the model on the handle and
+   * clear the limit. A host that refuses the switch marks the episode, so the
+   * next pass hands off instead.
+   */
+  const switchModel = async (
+    run: DrainRun,
+    worker: DrainWorkerHandle,
+    file: string,
+    model: string
+  ): Promise<string> => {
+    let sent;
+    try {
+      sent = await deps.launcher(worker.host).send(launchHandle(worker), file, { model });
+    } catch (error) {
+      if (!(error instanceof LaunchError) || error.code !== 'unsupported') throw error;
+      await supervisorWrite(run.issueId, (r) =>
+        r.limit !== undefined
+          ? { ...r, limit: { ...r.limit, modelSwitch: 'unsupported' } }
+          : undefined
+      );
+      return `could not switch to ${model} (${error.message}); it will be handed off instead`;
+    }
+    await supervisorWrite(run.issueId, (r) => {
+      if (r.drain.worker?.sessionId !== worker.sessionId) return undefined;
+      const next: DrainRun = {
+        ...r,
+        sessionId: sent.handle.sessionId,
+        workerPid: sent.handle.pid ?? -1,
+        drain: { ...r.drain, worker: { ...sent.handle, model }, wakeAfter: null },
+      };
+      delete next.limit;
+      return next;
+    });
+    return `continues on ${model} (only that model's allowance ran out)`;
+  };
+
   /** Apply one action after the decision was recorded; a phrase for the report. */
   const apply = async (
     run: DrainRun,
-    action: DrainAction,
+    action: DrainAction | HandoffAction,
     intent: { handle: DrainReviewerHandle; token: string; account: PlannedAccount } | null
   ): Promise<string> => {
     switch (action.kind) {
+      case 'synthesize-checkpoint':
+      case 'handoff':
+      case 'notify':
+      case 'adopt-or-revert-handoff':
+        return applyHandoff(run, action);
+      case 'restart-reviewer': {
+        await apply(run, { kind: 'stop', which: 'reviewer', handle: action.handle }, null);
+        return `the reviewer hit a usage limit; a fresh one starts on another account`;
+      }
       case 'stop': {
         try {
           await deps.launcher(action.handle.host).stop(action.handle);
@@ -897,6 +1036,8 @@ export async function runPass(deps: PassDeps): Promise<PassReport> {
         }
         const text = renderMessage(action.message, (action as SendAction).ctx as never);
         const file = writeMessage(run.worktreePath, action.message, text);
+        const model = action.model;
+        if (model !== undefined) return switchModel(run, worker, file, model);
         const sent = await deps.launcher(worker.host).send(launchHandle(worker), file);
         if (!same(sent.handle, launchHandle(worker))) {
           await supervisorWrite(run.issueId, (r) =>
@@ -996,9 +1137,9 @@ export async function runPass(deps: PassDeps): Promise<PassReport> {
     considered.add(`${run.runtime ?? 'claude-code'}:${run.account ?? 'default'}`);
 
     const { facts, offsets } = await gather(run);
-    const handed = handoffStep(run, facts, now);
+    const handed = await handoffStep(run, facts, now);
     const step = drainStep(handed.run, facts, stepCfg, now);
-    const actions = [...handed.actions, ...step.actions].sort(
+    const actions: (DrainAction | HandoffAction)[] = [...handed.actions, ...step.actions].sort(
       (a, b) => actionRank(a) - actionRank(b)
     );
 
@@ -1014,13 +1155,17 @@ export async function runPass(deps: PassDeps): Promise<PassReport> {
       same(decided, run.drain) &&
       same(step.run.limit, run.limit)
     ) {
+      // A run waiting for approval says so every pass it stays so (§5.5).
+      if (run.limit?.state === 'pending-approval') {
+        note(run, run.identifier, limitLine(run.limit, run.drain.wakeAfter) as string);
+      }
       return;
     }
     if (deps.dryRun) {
       note(
         { ...run, drain: decided },
         run.identifier,
-        `would: ${actions.map((a) => describe(a, null)).join('; ') || 'record the new state'}`
+        `would: ${actions.map((a) => describeHandoff(a)).join('; ') || 'record the new state'}`
       );
       return;
     }
@@ -1029,7 +1174,14 @@ export async function runPass(deps: PassDeps): Promise<PassReport> {
       (action): action is Extract<DrainAction, { kind: 'start-reviewer' }> =>
         action.kind === 'start-reviewer'
     );
-    const intent = start === undefined ? null : await reviewerIntent(run, start.sha);
+    const restart = actions.find(
+      (action): action is Extract<HandoffAction, { kind: 'restart-reviewer' }> =>
+        action.kind === 'restart-reviewer'
+    );
+    const intent =
+      start === undefined
+        ? null
+        : await reviewerIntent(run, start.sha, restart === undefined ? [] : [restart.exclude]);
 
     // The compare-and-set: the decision stands only if no report landed since the gather.
     const gathered = run.drain.rev;
