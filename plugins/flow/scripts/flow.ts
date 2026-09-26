@@ -462,6 +462,33 @@ export const VERBS: readonly VerbDefinition[] = [
     ],
     load: () => import('./cli/selftest.ts'),
   },
+  {
+    name: 'retro',
+    summary: "Look back over flow's own runs, report the measures, and propose changes.",
+    description:
+      'Reads the journal for the window and the one before, the self-test history, the backlog and the prose word counts. Writes .dork/flow/retro/<date>.json and .md and one journal line. Changes nothing in the tracker unless --file. Exits 1 when --file could not file everything.',
+    common: ['project', 'snapshot', 'session'],
+    flags: [
+      {
+        name: 'since',
+        kind: 'string',
+        value: 'duration',
+        description: 'How far back to look: 7d, 48h, 2w. Default selfImprovement.retro.window.',
+      },
+      {
+        name: 'file',
+        kind: 'boolean',
+        description: 'File the proposals as tracker items, once each, up to maxItemsPerRun.',
+      },
+      {
+        name: 'input',
+        kind: 'string',
+        value: 'proposals.json',
+        description: 'With --file: file this edited list of proposals instead.',
+      },
+    ],
+    load: () => import('./cli/retro.ts'),
+  },
 ];
 
 /** The plugin folder, `<flow-root>`: the parent of `scripts/`. */

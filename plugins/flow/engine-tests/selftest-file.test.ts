@@ -168,7 +168,7 @@ describe('fileFailures against the fake tracker', () => {
     });
     expect(result.message).toBe(CREATE_MISSING);
     expect(result.wouldFile).toEqual([
-      expect.objectContaining({ checkId: check.id, title: titleFor(check) }),
+      expect.objectContaining({ subject: check.id, title: titleFor(check) }),
     ]);
     expect(fake.writes).toEqual([]);
   });
@@ -266,7 +266,7 @@ describe('fileFailures against the fake tracker', () => {
     expect(first.wouldFile).toEqual([]);
     expect(first.message).toBeUndefined();
     expect(first.filed).toEqual([
-      { checkId: check.id, identifier: 'FAKE-1', url: 'https://fake.tracker/FAKE-1' },
+      { subject: check.id, identifier: 'FAKE-1', url: 'https://fake.tracker/FAKE-1' },
     ]);
     const created = fake.backlog.items[0];
     expect(created).toMatchObject({
@@ -281,7 +281,7 @@ describe('fileFailures against the fake tracker', () => {
     // The same failure again finds the item by its fingerprint: a comment, no second item.
     const second = await fileFailures([check], META, deps);
     expect(second.filed).toEqual([]);
-    expect(second.commented).toEqual([{ checkId: check.id, identifier: 'FAKE-1', posted: true }]);
+    expect(second.commented).toEqual([{ subject: check.id, identifier: 'FAKE-1', posted: true }]);
     expect(fake.backlog.items).toHaveLength(1);
   });
 
@@ -289,10 +289,10 @@ describe('fileFailures against the fake tracker', () => {
     const fake = tracker({ items: [filed('FAKE-1', check)] });
     const deps = { adapter: fake.adapter, sign, unsign: unsignedBody };
     const first = await fileFailures([check], META, deps);
-    expect(first.commented).toEqual([{ checkId: check.id, identifier: 'FAKE-1', posted: true }]);
+    expect(first.commented).toEqual([{ subject: check.id, identifier: 'FAKE-1', posted: true }]);
     expect(first.wouldFile).toEqual([]);
     const second = await fileFailures([check], META, deps);
-    expect(second.commented).toEqual([{ checkId: check.id, identifier: 'FAKE-1', posted: false }]);
+    expect(second.commented).toEqual([{ subject: check.id, identifier: 'FAKE-1', posted: false }]);
     const comments = fake.backlog.comments?.['FAKE-1'] ?? [];
     expect(comments).toHaveLength(1);
     expect(comments[0].body).toContain(check.detail);
@@ -315,7 +315,7 @@ describe('fileFailures against the fake tracker', () => {
       sign,
       unsign: unsignedBody,
     });
-    expect(result.declined).toEqual([{ checkId: check.id, identifier: 'FAKE-1' }]);
+    expect(result.declined).toEqual([{ subject: check.id, identifier: 'FAKE-1' }]);
     expect(result.wouldFile).toEqual([]);
     expect(fake.writes).toHaveLength(writes);
   });
@@ -329,7 +329,7 @@ describe('fileFailures against the fake tracker', () => {
       unsign: unsignedBody,
     });
     expect(result.filed).toEqual([
-      expect.objectContaining({ checkId: check.id, identifier: 'FAKE-2', regressionOf: 'FAKE-1' }),
+      expect.objectContaining({ subject: check.id, identifier: 'FAKE-2', regressionOf: 'FAKE-1' }),
     ]);
     expect(fake.backlog.items[1].description).toMatch(/^Regressed after FAKE-1\./);
   });
@@ -343,7 +343,7 @@ describe('fileFailures against the fake tracker', () => {
       unsign: unsignedBody,
     });
     expect(result.notRefiled).toEqual([
-      { checkId: check.id, identifier: 'FAKE-1', reason: 'completed after this run started' },
+      { subject: check.id, identifier: 'FAKE-1', reason: 'completed after the newest evidence' },
     ]);
     expect(result.wouldFile).toEqual([]);
   });
@@ -414,12 +414,12 @@ describe('selftest --file, end to end', { timeout: SCENARIOS_TIMEOUT }, () => {
     expect(code).toBe(1);
     const report = JSON.parse(stdout);
     expect(report.filing.commented).toEqual([
-      { checkId: 'scenarios/lifecycle/claude-code', identifier: 'FAKE-7', posted: true },
+      { subject: 'scenarios/lifecycle/claude-code', identifier: 'FAKE-7', posted: true },
     ]);
     // The planted tracker breaks every scenario that claims; only the one with
     // an open item is commented on, the rest are created.
     expect(report.filing.wouldFile).toEqual([]);
-    const filedIds = report.filing.filed.map((f: { checkId: string }) => f.checkId);
+    const filedIds = report.filing.filed.map((f: { subject: string }) => f.subject);
     expect(filedIds).toContain('scenarios/lifecycle/codex');
     expect(filedIds).not.toContain('scenarios/lifecycle/claude-code');
     const created = projectTracker.backlog.items.filter((item) => item.identifier !== 'FAKE-7');

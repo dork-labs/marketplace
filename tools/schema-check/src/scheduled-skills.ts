@@ -27,5 +27,6 @@
 export const SCHEDULED_SKILLS: readonly string[] = [
   'plugins/flow/skills/flow-drain',
   'plugins/flow/skills/flow-groom',
+  'plugins/flow/skills/flow-retro',
   'plugins/flow/skills/flow-triage',
 ];

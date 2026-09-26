@@ -95,6 +95,10 @@
     "baseline": 2056,
     "target": 2056
   },
+  "docs/self-improvement.mdx": {
+    "baseline": 582,
+    "target": 582
+  },
   "docs/SPEC.md": {
     "baseline": 2511,
     "target": 2511
@@ -142,6 +146,10 @@
   "skills/flow-groom/SKILL.md": {
     "baseline": 380,
     "target": 380
+  },
+  "skills/flow-retro/SKILL.md": {
+    "baseline": 269,
+    "target": 269
   },
   "skills/flow-triage/SKILL.md": {
     "baseline": 569,

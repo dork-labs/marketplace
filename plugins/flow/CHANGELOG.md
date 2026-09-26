@@ -4,6 +4,19 @@ Installs of this plugin are pinned to a commit SHA, so a fix here does not reach
 you until you **reinstall it** (Marketplace → flow → reinstall, or re-run your
 `--plugin-dir` checkout's `git pull`). Each entry below says whether that matters.
 
+## 0.29.0
+
+**New `flow retro`: flow looks back over its own week and suggests fixes to itself. Reinstall to get it.**
+
+- `flow retro` reads flow's notebook for the last week and the week before, the self-test results and your backlog. It shows how long new work takes to become ready, how often a first review comes back clean, how much reviews catch, how long agents wait on you, how many words flow's instructions hold, and more. Each number sits beside last week's and is split by agent: Claude Code, Codex and OpenCode. A number with nothing behind it says "no data", never 0.
+- It also shows each account's usage over the week: where it started and ended, its peak, and how often it ran out.
+- It proposes changes to flow by four fixed rules: two or more agent notes about the same thing, the same error twice, a self-test check that passed before and fails now, and a number that got clearly worse.
+- It changes nothing unless you pass `--file`. Then it files each proposal as a tracker item, at most five a run (`selfImprovement.retro.maxItemsPerRun`), never marked ready. It uses the same rules as `flow selftest --file`: a comment on an item it filed before, nothing for one you declined in the last 90 days. `--input` files an edited list instead.
+- Each run saves its report to `.dork/flow/retro/` and adds one line to the notebook.
+- New `flow-retro` weekly schedule (Mondays at 9:00, Los Angeles time) runs the self-test and the retro, rewrites each proposal into one concrete change, and files them. It ships switched off; approve it on the DorkOS Schedules page to turn it on.
+- New docs page, "How flow checks and improves itself".
+- `flow selftest --file` now reports each item under `subject` instead of `checkId`.
+
 ## 0.28.0
 
 **flow's notebook now fills itself in as flow's commands run. Reinstall to get it.**
