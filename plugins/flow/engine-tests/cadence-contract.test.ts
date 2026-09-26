@@ -50,7 +50,7 @@ const TIMING_FIELD = /schedule\.(cron|timezone)\b/g;
 
 /** A bare `cron:` line or phrase near a shipped schedule's name or file (outside frontmatter). */
 const NEAR_SHIPPED_CRON =
-  /(flow-drain|flow-groom|SKILL\.md)[\s\S]{0,200}?\bcron:|\bcron:[\s\S]{0,200}?(flow-drain|flow-groom|SKILL\.md)/g;
+  /(flow-drain|flow-groom|flow-triage|SKILL\.md)[\s\S]{0,200}?\bcron:|\bcron:[\s\S]{0,200}?(flow-drain|flow-groom|flow-triage|SKILL\.md)/g;
 
 /** A file's text with its leading YAML frontmatter blanked (same length, so offsets hold). */
 function withoutFrontmatter(text: string): string {
@@ -207,6 +207,7 @@ const pulseCadenceStep = (doc: string) => between(doc, '**Cadence and limits.**'
 const shippedSchedules = () => ({
   'flow-drain': read('skills/flow-drain/SKILL.md'),
   'flow-groom': read('skills/flow-groom/SKILL.md'),
+  'flow-triage': read('skills/flow-triage/SKILL.md'),
 });
 
 describe('only the dials Cadence section names a shipped schedule timing field', () => {

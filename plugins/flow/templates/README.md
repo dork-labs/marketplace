@@ -55,3 +55,10 @@ reviewers read the adopter's copy, not this one. It ships deliberately generic,
 with two **FILL IN** sections — the repo's hard rules and its always-check list —
 because those are what separate a reviewer that knows the codebase from one
 guessing at severity.
+
+## `drain/` — the parallel-drain recipe
+
+[`drain/worker-brief.md`](./drain/worker-brief.md),
+[`drain/reviewer-brief.md`](./drain/reviewer-brief.md) and
+[`drain/watch.sh`](./drain/watch.sh) are the hand-run recipe for carrying
+several ready items at once. `docs/parallel-drain.mdx` says how to use them.

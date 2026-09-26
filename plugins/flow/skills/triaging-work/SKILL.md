@@ -110,13 +110,14 @@ the config key and the optional adapter verbs it needs.
 
 1. **Read the item fully** via the adapter (description, type, relations,
    project).
-2. **Evaluate** across three quick checks:
+2. **Evaluate** across four quick checks:
    - **Alignment** — does it advance an active project's goals? (Pull projects via
      the adapter.) Note the project for assignment if it aligns.
    - **Feasibility** — is it feasible within the current architecture and known
      constraints? (Check `decisions/` if uncertain.) Estimate rough scope.
    - **Duplication** — search existing items via the adapter; if a near-duplicate
      exists, link it as related and note it.
+   - **Already shipped?** — check the code (see _Guardrails_).
 3. **Decide and route** (drive the tracker side through the adapter):
 
    | Decision             | Criteria                                           | Routing                                                                                                                                       |
@@ -293,6 +294,9 @@ the accept/route decision, and what happens next.
 - **Floor gates always stop**, even at full confidence: creating a project,
   rejecting/cancelling someone's work, or any outward-facing change → present and
   ask first.
+- **Check the code, not the ticket.** Before calling an item open or shipped,
+  read the code or tests it names. A ticket for work that already shipped is closed
+  with the commit or PR as evidence, not triaged.
 - **Stay in your lane.** TRIAGE classifies and routes; it does **not** run the
   autonomous loop, claim/dispatch work for execution, or audit the workspace —
   those are separate concerns (the loop engine and the audit skill).

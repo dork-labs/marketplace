@@ -40,6 +40,7 @@ function entryPoints(flow: string, files: Record<string, string>): Record<string
   return {
     'flow-drain tick': between(files.drain, '0. **Pause check', '1. **Recovery'),
     'flow-groom check': between(files.groom, '0. **Pause check', '1. Via the adapter'),
+    'flow-triage tick': between(files.triage, '0. **Pause check', '1. Via the adapter'),
     'tending-tracker tick': between(files.tending, '**Pause check', '0. **Resolve identity'),
     '/flow continue': between(flow, '- **`continue`**', '- **`auto`**'),
     '/flow auto start': between(flow, '0. **Pause check', '1. **Start'),
@@ -62,6 +63,7 @@ function generalPauseGaps(flow: string): string[] {
 const shipped = () => ({
   drain: read('skills/flow-drain/SKILL.md'),
   groom: read('skills/flow-groom/SKILL.md'),
+  triage: read('skills/flow-triage/SKILL.md'),
   tending: read('skills/tending-tracker/SKILL.md'),
 });
 
@@ -72,7 +74,7 @@ describe('every autonomous entry point checks the pause first', () => {
       pauseCheckGaps(text).map((gap) => `${name}: ${gap}`)
     );
     expect(gaps).toEqual([]);
-    expect(Object.keys(passages)).toHaveLength(6);
+    expect(Object.keys(passages)).toHaveLength(7);
   });
 
   it('the guard bites when a check is removed or loses its fail-closed line', () => {

@@ -3,7 +3,7 @@ name: flow-groom
 display-name: /flow groom health check
 description: Scheduled read-only backlog health check — run the groom oracles and report, never write.
 schedule:
-  cron: '0 9 1 * *'
+  cron: '0 9 * * 1'
   timezone: America/Los_Angeles
   enabled: false
   max-runtime: 30m
@@ -12,14 +12,14 @@ schedule:
 
 > **Flow root.** This skill lives at `<flow-root>/skills/flow-groom/SKILL.md`. If you reached it via a symlink (`.claude/skills/flow__*` or `.agents/skills/flow__*`), resolve the real path first (`realpath <path>`): the flow root is two directories above the skill directory. Every `<flow-root>/...` reference below is relative to that root.
 
-This is the schedulable **groom health check**: a monthly, read-only
+This is the schedulable **groom health check**: a weekly, read-only
 `/flow:groom check`. The `schedule:` block in the frontmatter above is what makes
-this file a scheduled task.
+this file a scheduled task. The full groom closes items, so it stays
+operator-run.
 
-Installed at project scope, a DorkOS release that has schedule discovery picks it
-up and asks you to approve it on the Schedules page; on any other harness you
-wire your own scheduler (OS-cron, CI). It ships `schedule.enabled: false`, the
-same explicit opt-in as `flow-drain`.
+It ships `schedule.enabled: false`, the same explicit opt-in as `flow-drain`. To
+switch it on with DorkOS, approve it on the Schedules page. On any other harness,
+point your own scheduler (OS cron, CI) at it.
 
 Each firing runs the CHECK mode of the grooming-backlog skill
 (`<flow-root>/skills/grooming-backlog/SKILL.md`) and stops:

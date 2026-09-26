@@ -238,6 +238,9 @@ respecting its bulk-write guidance:
   artifact itself. Expect to disagree with your inputs — in the first groom,
   roughly a fifth of the pre-existing ready queue failed verification, and
   every overturned claim was caught by an agent checking rather than trusting.
+- **Check the code, not the ticket.** "Shipped" needs a commit or PR and a read
+  of the code or test (phase 3). "Open" needs the same read: an item the code
+  already satisfies is closed, not readied.
 - **Prove the check can fail.** The oracle's seeded-violation tests pin this
   permanently; if you add an invariant, add its red-fixture row in the same
   change.

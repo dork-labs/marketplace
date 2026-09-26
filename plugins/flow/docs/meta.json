@@ -8,6 +8,7 @@
     "installing-in-your-project",
     "building-your-adapter",
     "bring-your-own-scheduler",
+    "parallel-drain",
     "how-it-works"
   ]
 }
