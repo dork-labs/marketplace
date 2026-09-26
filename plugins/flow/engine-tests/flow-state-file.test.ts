@@ -142,6 +142,22 @@ describe('writing runs', () => {
     expect(existsSync(stateFile())).toBe(false);
   });
 
+  // Purpose: updateRun hands the callback the run as it is on disk under the
+  // lock and writes what it returns, keeping the key; a missing run is left
+  // alone. Fails if the update reads a stale copy or re-keys the run.
+  it('updates a run from its on-disk value', async () => {
+    const store = openFlowStateFile(repo);
+    await store.upsertRun(run('a'));
+    await store.setRunStage('a', 'verify');
+    await store.updateRun('a', (current) => ({
+      ...current,
+      issueId: 'ignored',
+      checkpointSha: `${current.stage}-sha`,
+    }));
+    expect(store.read()).toEqual({ a: run('a', { stage: 'verify', checkpointSha: 'verify-sha' }) });
+    expect((await store.updateRun('nope', (current) => current)).status).toBe('unchanged');
+  });
+
   // Purpose: the store is read-modify-write, so a field this reader does not
   // know (a newer writer's) must survive a write of ANOTHER run, and reads pass
   // it through too.

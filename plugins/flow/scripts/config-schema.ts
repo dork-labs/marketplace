@@ -817,6 +817,43 @@ export const IngestionSchema = z
   })
   .prefault({});
 
+/** The host `flow drain` starts sessions under; `auto` picks one (§2.2). */
+export const DrainHostSchema = z.enum(['auto', 'cli', 'cmux', 'dorkos']);
+
+/** The permission mode drain sessions start in. */
+export const DrainPermissionModeSchema = z.enum(['default', 'acceptEdits', 'bypassPermissions']);
+
+/**
+ * The parallel drain (spec `flow-handoff-dispatch` §6): how many workers
+ * `flow drain` runs at once, the limits it keeps, and how its sessions start.
+ * Committed policy, except `host` and `permissionMode`, which are about this
+ * machine and belong in `config.local.json`.
+ */
+export const DrainSchema = z
+  .object({
+    /** Workers at once. `0`: the scheduled tick carries one item itself, as before. */
+    parallel: z.number().int().nonnegative().default(0),
+    /** No new launch while the 1-minute load average per CPU is at or above this. */
+    maxLoadPerCpu: z.number().positive().default(1.5),
+    /** Sessions (worker or reviewer) on one account at once. */
+    maxLivePerAccount: z.number().int().min(1).default(2),
+    /** Review verdicts before a run parks. */
+    maxReviewRounds: z.number().int().min(1).default(5),
+    /** How close to a usage ceiling, in percent, counts as a warning. */
+    warnMarginPct: z.number().min(0).max(50).default(10),
+    /** Minutes a warned worker has to write its checkpoint before flow writes one for it. */
+    windDownGraceMinutes: z.number().int().min(1).default(20),
+    /** Seconds between passes when `flow drain` runs without `--tick`. */
+    pollSeconds: z.number().int().min(10).default(60),
+    /** Whether `flow pr` arms auto-merge on the PRs it opens. */
+    armAutoMerge: z.boolean().default(false),
+    /** The host sessions start under. Machine-specific: set it in `config.local.json`. */
+    host: DrainHostSchema.default('auto'),
+    /** The permission mode sessions start in. Machine-specific: set it in `config.local.json`. */
+    permissionMode: DrainPermissionModeSchema.default('acceptEdits'),
+  })
+  .prefault({});
+
 /**
  * The authoritative `/flow` engine configuration schema (§9).
  *
@@ -866,6 +903,8 @@ export const FlowConfigSchema = z
     decomposition: DecompositionSchema,
     /** Browser proof-of-completion policy. */
     evidence: EvidenceSchema,
+    /** The parallel drain: workers at once, its limits, and how sessions start. */
+    drain: DrainSchema,
   })
   .strict();
 

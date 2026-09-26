@@ -287,6 +287,28 @@ and the policy becomes a no-op. A missing binding falls back to whatever model
 your harness would have used anyway, and the run says that it did — a silent
 fallback would look exactly like a policy that worked.
 
+## The `drain` block
+
+`drain` sets how `flow drain` runs several items at once. Every field has a
+default, so a config that never mentions it keeps the one-item tick.
+
+| Field                  | Type, default                                                    | Meaning                                                                        |
+| ---------------------- | ---------------------------------------------------------------- | ------------------------------------------------------------------------------ |
+| `parallel`             | whole number ≥ 0, `0`                                            | Workers at once. `0`: the scheduled tick carries one item itself.              |
+| `maxLoadPerCpu`        | number > 0, `1.5`                                                | No new session starts while the 1-minute load per CPU is at or above this.     |
+| `maxLivePerAccount`    | whole number ≥ 1, `2`                                            | Sessions (worker or reviewer) on one account at once.                          |
+| `maxReviewRounds`      | whole number ≥ 1, `5`                                            | Review verdicts before an item parks for a person.                             |
+| `warnMarginPct`        | number 0–50, `10`                                                | How close to a usage ceiling, in percent, counts as a warning.                 |
+| `windDownGraceMinutes` | whole number ≥ 1, `20`                                           | How long a warned worker has to checkpoint before flow writes one for it.      |
+| `pollSeconds`          | whole number ≥ 10, `60`                                          | Seconds between passes when `flow drain` runs on its own.                      |
+| `armAutoMerge`         | boolean, `false`                                                 | Whether the PRs the drain opens are set to merge once checks pass.             |
+| `host`                 | `auto` \| `cli` \| `cmux` \| `dorkos`, `auto`                    | Where sessions start. About this machine: set it in `config.local.json`.       |
+| `permissionMode`       | `default` \| `acceptEdits` \| `bypassPermissions`, `acceptEdits` | The mode sessions start in. About this machine: set it in `config.local.json`. |
+
+Which accounts the drain may use, and whether it moves an item to another account
+by itself when one runs out, is not here: that is `handoff` in the machine's
+`fleet.json`.
+
 ## Why `config.json` has no secrets
 
 `config.json` is committed and shared, so it must stay free of tokens, API keys,

@@ -24,5 +24,9 @@
   },
   "autonomy": {
     "default": "manual"
+  },
+  "drain": {
+    "host": "auto",
+    "permissionMode": "acceptEdits"
   }
 }

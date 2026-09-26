@@ -36,7 +36,53 @@ import { EXIT, FlowError, UsageError, type ExitCode } from './errors.ts';
  * here whose `load` is `() => import('./cli/<verb>.ts')`. An unregistered verb
  * is a usage error, so no placeholder entry ever ships.
  */
-export const VERBS: readonly VerbDefinition[] = [];
+export const VERBS: readonly VerbDefinition[] = [
+  {
+    name: 'checkpoint',
+    summary: "Write the item's HANDOFF.md checkpoint in this worktree.",
+    description:
+      "Write .dork/flow/HANDOFF.md in the item's worktree, keeping the last one as HANDOFF.prev.md. The body file holds four ## sections: Done, Next, Open questions, Next command. flow measures the header (branch, commits, what is pushed) and records the checkpoint on the item's run.",
+    common: ['project', 'session'],
+    positionals: [
+      { name: 'identifier', required: true, description: 'The work item, e.g. ACME-12.' },
+    ],
+    flags: [
+      {
+        name: 'trigger',
+        kind: 'string',
+        value: 'trigger',
+        description:
+          'Why it is written: stage, task, fix, limit-warning, limit-rejected, manual or synthesized.',
+      },
+      {
+        name: 'body-file',
+        kind: 'string',
+        value: 'file',
+        description: 'The body: Done, Next, Open questions, Next command. Relative to --project.',
+      },
+      {
+        name: 'task',
+        kind: 'string',
+        value: 'id',
+        description: 'The task this checkpoint follows. Required with --trigger task.',
+      },
+      {
+        name: 'spec',
+        kind: 'string',
+        value: 'path',
+        description: 'The spec the work follows, relative to the repository.',
+      },
+      {
+        name: 'stage',
+        kind: 'string',
+        value: 'stage',
+        description:
+          "Where the next session resumes. Default: the run's stage; required when the item has no run.",
+      },
+    ],
+    load: () => import('./cli/checkpoint.ts'),
+  },
+];
 
 /** The plugin folder, `<flow-root>`: the parent of `scripts/`. */
 const FLOW_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
