@@ -382,7 +382,7 @@ describe('errors map to exit codes in one place', () => {
   // thrown past main, and says it is a bug.
   it('reports an unexpected error as an internal error', () => {
     expect(classifyError(new TypeError('x is undefined'), '/opt/flow')).toEqual({
-      code: 1,
+      code: 70,
       message: 'internal error: x is undefined',
     });
   });

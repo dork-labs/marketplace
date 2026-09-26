@@ -313,6 +313,7 @@ JSON Schema: `plugins/flow/conformance/fleet/fleet-policy.schema.json`.
 | 5    | Precondition failed: item not found, not eligible to claim, claimed by someone else.         |
 | 6    | Missing runtime dependency (`zod`).                                                          |
 | 7    | Paused (`next`/`claim` without `--manual`).                                                  |
+| 70   | Internal error: a bug in flow (kept apart from 1, so a crash never reads as audit results).  |
 
 ### 3. Config the CLI reads itself
 

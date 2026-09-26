@@ -72,7 +72,7 @@ function isMissingZod(error: unknown): boolean {
  *
  * - A missing `zod` is exit 6 with the install line.
  * - A typed error from `scripts/errors.ts` carries its own code (2, 3, 4, 5, 7).
- * - Anything else is a bug in flow: exit 1, labelled as an internal error.
+ * - Anything else is a bug in flow: exit 70, labelled as an internal error.
  *
  * @param error - What was thrown.
  * @param flowRoot - The plugin folder, named in the install hint.
@@ -84,7 +84,7 @@ export function classifyError(error: unknown, flowRoot: string): ClassifiedError
   }
   if (error instanceof FlowError) return { code: error.exitCode, message: error.message };
   const message = error instanceof Error ? error.message : String(error);
-  return { code: EXIT.findings, message: `internal error: ${message}` };
+  return { code: EXIT.internal, message: `internal error: ${message}` };
 }
 
 /**

@@ -30,6 +30,8 @@ export const EXIT = {
   dependency: 6,
   /** flow is paused and the verb was not run with `--manual`. */
   paused: 7,
+  /** A bug in flow: an error no module expected. Kept apart from `findings` so a crash never reads as audit results. */
+  internal: 70,
 } as const;
 
 /** One of the {@link EXIT} codes. */
