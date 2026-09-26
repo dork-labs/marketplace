@@ -44,7 +44,7 @@ const WIRE_FIELDS = [
 export interface ProvenanceInput {
   /** Environment variables (`CLAUDECODE`, `CLAUDE_CONFIG_DIR`, `CI`). */
   env: Readonly<Record<string, string | undefined>>;
-  /** `--session`, else `FLOW_SESSION_ID`; absent when neither was given. */
+  /** `--session`, else `FLOW_SESSION_ID`, else `CLAUDE_CODE_SESSION_ID`; absent when none was given. */
   sessionId?: string;
   /** The launcher this session runs under, when known (`--host` or the run record). */
   launcher?: string;

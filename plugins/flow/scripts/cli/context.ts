@@ -133,7 +133,7 @@ export interface VerbContext {
   projectDir: string;
   /** `--snapshot` resolved against cwd, when given. */
   snapshotPath?: string;
-  /** `--session`, else a non-empty `FLOW_SESSION_ID`; never invented. */
+  /** `--session`, else a non-empty `FLOW_SESSION_ID`, else Claude Code's `CLAUDE_CODE_SESSION_ID`; never invented. */
   sessionId?: string;
   /** Whether `--dry-run` was given. */
   dryRun: boolean;
@@ -173,7 +173,9 @@ export function createVerbContext(
     return typeof value === 'string' ? path.resolve(deps.cwd, value) : undefined;
   };
   const sessionFlag = args.flags.session;
-  const envSession = deps.env.FLOW_SESSION_ID;
+  // FLOW_SESSION_ID wins; Claude Code sets CLAUDE_CODE_SESSION_ID for every
+  // Bash command it runs, so an agent needs no flag there. Empty means unset.
+  const envSession = deps.env.FLOW_SESSION_ID || deps.env.CLAUDE_CODE_SESSION_ID;
   const projectDir = pathFlag('project') ?? deps.cwd;
 
   let adapter: Promise<CodeAdapter> | undefined;

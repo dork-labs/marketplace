@@ -295,7 +295,7 @@ JSON Schema: `plugins/flow/conformance/fleet/fleet-policy.schema.json`.
 | `--project <dir>`  | all but `accounts`           | The checkout to resolve config and run state from. Default: cwd.                       |
 | `--snapshot <file>`| `next`, `audit`, `status`    | Read this saved `flow snapshot --json` output instead of the tracker.                  |
 | `--dry-run`        | `claim`, `release`, `done`, `stage`, `accounts add`, `accounts set` | Print the planned change; write nothing. |
-| `--session <id>`   | write verbs                  | The harness session id for provenance and `FlowRun.sessionId`. Else `FLOW_SESSION_ID`. |
+| `--session <id>`   | write verbs                  | The harness session id for provenance and `FlowRun.sessionId`. Else `FLOW_SESSION_ID`, else `CLAUDE_CODE_SESSION_ID` (Claude Code sets it for every Bash command). |
 | `--manual`         | `next`, `claim`              | A person is driving: run even while flow is paused.                                    |
 | `--help`, `-h`     | all                          | Usage for the verb (or the verb list). Exit 0.                                         |
 
@@ -480,7 +480,7 @@ interface CodeAdapter {
 - Writes `projectionFor('claim')`, then verifies by re-read.
 - Writes a `FlowRun`: `status: "running"`, `stage` from the removed `stage/*` label (default `execute`), `attemptCount: 0` (or +1 if a record exists), `workerPid`, `startedAt`, `sessionId`, `worktreePath`, `branch`, `account`, `host`, and `provenance` per `docs/provenance.md` (omit what is unknown).
 - `--pid` default: the parent of the shell that ran `flow` (the harness), read with `ps -o ppid= -p <process.ppid>`. If that fails, exit 5 asking for `--pid`.
-- `sessionId` is never invented: with neither `--session` nor `FLOW_SESSION_ID`, the claim still runs, records `sessionId: ""` (unknown; recovery resumes it by thread-replay), and warns on stderr. The plugin's SessionStart hook (`hooks/session-env.mjs`) sets `FLOW_SESSION_ID` through `CLAUDE_ENV_FILE` in Claude Code, and the prose passes `--session <session id>` when the agent knows it.
+- `sessionId` is never invented: with no `--session`, `FLOW_SESSION_ID` or `CLAUDE_CODE_SESSION_ID`, the claim still runs, records `sessionId: ""` (unknown; recovery resumes it by thread-replay), and warns on stderr. The plugin's SessionStart hook (`hooks/session-env.mjs`) sets `FLOW_SESSION_ID` through `CLAUDE_ENV_FILE` in Claude Code, and the prose passes `--session <session id>` when the agent knows it.
 - `--worktree` default: the checkout root of `--project`; `--branch` default: its current branch.
 - No comment is posted: the label is the signal (agent etiquette: mostly quiet).
 - Replaces: the label-swap and state-move steps in the drain, execute and adapter prose.

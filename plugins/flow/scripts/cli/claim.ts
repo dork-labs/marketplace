@@ -122,7 +122,7 @@ export async function run(ctx: VerbContext): Promise<VerbResult> {
   }
   if (ctx.sessionId === undefined) {
     ctx.warn(
-      'no session id: the run records it as unknown, so recovery cannot resume this session; pass --session <id> or set FLOW_SESSION_ID'
+      'no session id: the run records it as unknown, so recovery cannot resume this session; pass --session <id> or set FLOW_SESSION_ID (Claude Code sets CLAUDE_CODE_SESSION_ID itself)'
     );
   }
 

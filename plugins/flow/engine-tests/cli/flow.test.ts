@@ -167,6 +167,27 @@ describe('argv parsing', () => {
     expect(seen[0].sessionId).toBeUndefined();
   });
 
+  // Purpose: under Claude Code no flag is needed: CLAUDE_CODE_SESSION_ID, which
+  // Claude Code sets for every Bash command, is the fallback, and
+  // FLOW_SESSION_ID still wins over it.
+  it('falls back to CLAUDE_CODE_SESSION_ID, below FLOW_SESSION_ID', async () => {
+    const fallback = recordingModule();
+    const a = fakeDeps({
+      verbs: [probeVerb(fallback.module)],
+      env: { FLOW_SESSION_ID: '', CLAUDE_CODE_SESSION_ID: 'cc-session' },
+    });
+    await main(['probe'], a.deps);
+    expect(fallback.seen[0].sessionId).toBe('cc-session');
+
+    const both = recordingModule();
+    const b = fakeDeps({
+      verbs: [probeVerb(both.module)],
+      env: { FLOW_SESSION_ID: 'flow-session', CLAUDE_CODE_SESSION_ID: 'cc-session' },
+    });
+    await main(['probe'], b.deps);
+    expect(both.seen[0].sessionId).toBe('flow-session');
+  });
+
   // Purpose: common flags may come before the verb, and `--` ends flag parsing
   // so a value that looks like a flag can still be a positional.
   it('accepts common flags before the verb and honors --', async () => {
