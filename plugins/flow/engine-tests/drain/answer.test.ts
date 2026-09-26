@@ -48,17 +48,17 @@ describe('findAnswer', () => {
     expect(findAnswer(ITEM, comments, since, CTX)?.id).toBe('b');
     expect(findAnswer(ITEM, comments.slice(0, 2), since, CTX)).toBeNull();
     // An answer stays an answer after the agent's own follow-up note.
-    const noted = [c('a', 'dorian', 12), c('note', 'bot', 13)];
+    const noted = [c('park', 'bot', 10), c('a', 'dorian', 12), c('note', 'bot', 13)];
     expect(findAnswer(ITEM, noted, since, CTX)?.id).toBe('a');
   });
 
   // Purpose: parkedAt is the local clock and reply times are the tracker's. With
-  // the local clock two minutes ahead, a reply made one minute after the park
+  // the local clock four minutes ahead, a reply made one minute after the park
   // comment still counts, because the park comment anchors the search. Fails
   // if replies are compared with parkedAt alone.
   it('anchors on the park comment when the local clock runs ahead', () => {
     const since = c('x', 'x', 10).createdAt;
-    const comments = [c('park', 'bot', 8), c('reply', 'dorian', 9)];
+    const comments = [c('park', 'bot', 6), c('reply', 'dorian', 7)];
     expect(findAnswer(ITEM, comments, since, CTX)?.id).toBe('reply');
   });
 

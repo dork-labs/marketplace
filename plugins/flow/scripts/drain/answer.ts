@@ -34,7 +34,7 @@ export interface AnswerContext {
 }
 
 /** How far from `parkedAt` the park comment may be stamped by the tracker's clock. */
-const PARK_ANCHOR_WINDOW_MS = 2 * 60_000;
+const PARK_ANCHOR_WINDOW_MS = 10 * 60_000;
 
 /** Tolerated clock skew between this machine and the tracker when no park comment is found. */
 const CLOCK_SKEW_MS = 2 * 60_000;
