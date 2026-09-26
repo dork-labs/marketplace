@@ -197,7 +197,7 @@ JSON Schema: `plugins/flow/conformance/fleet/fleet-policy.schema.json`.
 1. Take the lock: create `<id>.json.lock` with exclusive-create (`O_CREAT|O_EXCL`, Node `wx`), writing a fresh token `<pid>:<random 128-bit hex>`. The token, not the pid, identifies the holder, so two writers in one process never mistake each other's lock.
 2. A lock older than 10 s (by mtime) is stale. Read its token, then break it:
    - Rename it to `<id>.json.lock.stale-<random>`.
-   - Read the moved file's token. If it is not the token judged stale (a fresh lock was renamed by mistake), put it back with `link(moved, <id>.json.lock)` (this fails if a newer lock already exists, which is fine), then delete the moved name and retry step 1.
+   - Read the moved file's token. If it is not the token judged stale (a fresh lock was renamed by mistake), put it back with `link(moved, <id>.json.lock)` (this fails if a newer lock already exists; a third writer that locked in that gap then overlaps the mistaken holder, which is accepted like the step 7 race), then delete the moved name and retry step 1.
    - If it is the stale token, delete the moved name and retry step 1.
    - Never delete a lock by its original name.
 3. Retry with 25–100 ms jittered waits; give up after 2 s total. Giving up drops this write with a warning; it never throws into the caller's turn.
