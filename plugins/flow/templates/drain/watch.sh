@@ -2,12 +2,15 @@
 # Watch PRs until one merges, closes, fails a check, or is neither armed nor queued.
 # Usage: watch.sh <owner/repo>:<pr> [<owner/repo>:<pr> ...]
 # Needs: gh (signed in) and jq. Exits with ERROR after 5 failed reads in a row
-# (a mistyped repo or an expired login), instead of waiting forever.
+# for any one PR (a mistyped repo or an expired login), instead of waiting forever.
 set -u
 MAX_ERRORS=5
-errors=0
+# One counter per PR, by argument position (bash 3.2 has no associative arrays).
+errors=()
 while true; do
+  i=0
   for spec in "$@"; do
+    i=$((i + 1))
     repo=${spec%%:*}
     pr=${spec##*:}
     err=$(mktemp)
@@ -17,11 +20,11 @@ while true; do
     # A read that failed, or whose JSON has no state, is an error, never "merged".
     state=$( ((ok == 0)) && jq -r '.state // empty' <<<"$j" 2>/dev/null)
     if [[ -z $state ]]; then
-      errors=$((errors + 1))
-      if ((errors >= MAX_ERRORS)); then echo "$spec ERROR: ${msg:-unreadable response}"; exit 1; fi
+      errors[i]=$((${errors[i]:-0} + 1))
+      if ((errors[i] >= MAX_ERRORS)); then echo "$spec ERROR: ${msg:-unreadable response}"; exit 1; fi
       continue
     fi
-    errors=0
+    errors[i]=0
     # Check runs report `.conclusion`; commit statuses (a deploy preview, say) report `.state`.
     failing=$(jq -r '[.statusCheckRollup[]?
       | select(((.conclusion // "") | test("FAILURE|CANCELLED|TIMED_OUT|ACTION_REQUIRED"))

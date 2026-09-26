@@ -39,6 +39,7 @@ Each firing:
      a human.
    - Its work lives in this repo. If it may live in another (say, a `repo/*`
      label that is not this repo's), skip it and report it.
+   - Match its id in any case (a branch may be `proj-123-…` for `PROJ-123`).
    - No worktree carries its id: `git worktree list --porcelain`.
    - No pushed branch carries its id: `git ls-remote --heads origin`.
    - No open pull request on this repo's host carries its id (`gh pr list
