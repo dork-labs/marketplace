@@ -1,0 +1,2642 @@
+{
+  "about": "Account-aware dispatch (spec flow-handoff-dispatch §3), run by account-rank.test.ts. Each group is a list of { name, input, expected }, with now in input where the call takes a clock. Defaults the runner fills in: every rankAccounts account gets path /accounts/<id>, its policy gets id = the account id, and a missing repo, model, affinity, exclude, liveByAccount or opts reads as dork-labs/marketplace, null, null, [], {} and { warnMarginPct: 10, maxLivePerAccount: 2 }. windows is the ledger's raw windows object (null for no ledger); every window is read with readWindow. rankAccounts expected.ranked lists id and tier, plus score (to 2 places) and signal (the level) when given.",
+  "modelBucketsFor": [
+    {
+      "name": "no model: no buckets",
+      "input": {
+        "model": null
+      },
+      "expected": []
+    },
+    {
+      "name": "an opus model adds seven_day_opus",
+      "input": {
+        "model": "claude-opus-4-1"
+      },
+      "expected": ["model:claude-opus-4-1", "seven_day_opus"]
+    },
+    {
+      "name": "lowercased; runs outside [a-z0-9._-] become one '-'; sonnet adds seven_day_sonnet",
+      "input": {
+        "model": "Claude Sonnet 4.5 [1m]"
+      },
+      "expected": ["model:claude-sonnet-4.5-1m-", "seven_day_sonnet"]
+    },
+    {
+      "name": "neither family: only the model bucket",
+      "input": {
+        "model": "haiku"
+      },
+      "expected": ["model:haiku"]
+    }
+  ],
+  "limitSignal": [
+    {
+      "name": "every checked window has room: ok",
+      "input": {
+        "now": "2026-09-26T16:00:00.000Z",
+        "policy": {
+          "role": "rotation",
+          "reservePct": 0,
+          "spendDownWindowHours": 24,
+          "scope": {
+            "repos": []
+          }
+        },
+        "model": null,
+        "warnMarginPct": 10,
+        "windows": {
+          "five_hour": {
+            "usedPct": 10,
+            "resetsAt": "2026-09-26T19:00:00.000Z",
+            "status": null,
+            "observedAt": "2026-09-26T15:59:00.000Z",
+            "source": "statusline"
+          },
+          "seven_day": {
+            "usedPct": 20,
+            "resetsAt": "2026-10-02T16:00:00.000Z",
+            "status": null,
+            "observedAt": "2026-09-26T15:59:00.000Z",
+            "source": "statusline"
+          }
+        }
+      },
+      "expected": {
+        "level": "ok",
+        "window": null,
+        "resetsAt": null,
+        "cause": null
+      }
+    },
+    {
+      "name": "no ledger at all: unknown, which is not a limit",
+      "input": {
+        "now": "2026-09-26T16:00:00.000Z",
+        "policy": {
+          "role": "rotation",
+          "reservePct": 0,
+          "spendDownWindowHours": 24,
+          "scope": {
+            "repos": []
+          }
+        },
+        "model": null,
+        "warnMarginPct": 10,
+        "windows": null
+      },
+      "expected": {
+        "level": "unknown",
+        "window": null,
+        "resetsAt": null,
+        "cause": null
+      }
+    },
+    {
+      "name": "a weekly reading but no five-hour reading: unknown",
+      "input": {
+        "now": "2026-09-26T16:00:00.000Z",
+        "policy": {
+          "role": "rotation",
+          "reservePct": 0,
+          "spendDownWindowHours": 24,
+          "scope": {
+            "repos": []
+          }
+        },
+        "model": null,
+        "warnMarginPct": 10,
+        "windows": {
+          "seven_day": {
+            "usedPct": 20,
+            "resetsAt": "2026-10-02T16:00:00.000Z",
+            "status": null,
+            "observedAt": "2026-09-26T15:59:00.000Z",
+            "source": "statusline"
+          }
+        }
+      },
+      "expected": {
+        "level": "unknown",
+        "window": null,
+        "resetsAt": null,
+        "cause": null
+      }
+    },
+    {
+      "name": "a model with no bucket in the ledger reads as no reading: unknown, never blocking",
+      "input": {
+        "now": "2026-09-26T16:00:00.000Z",
+        "policy": {
+          "role": "rotation",
+          "reservePct": 0,
+          "spendDownWindowHours": 24,
+          "scope": {
+            "repos": []
+          }
+        },
+        "model": "claude-haiku-4-5",
+        "warnMarginPct": 10,
+        "windows": {
+          "five_hour": {
+            "usedPct": 10,
+            "resetsAt": "2026-09-26T19:00:00.000Z",
+            "status": null,
+            "observedAt": "2026-09-26T15:59:00.000Z",
+            "source": "statusline"
+          },
+          "seven_day": {
+            "usedPct": 20,
+            "resetsAt": "2026-10-02T16:00:00.000Z",
+            "status": null,
+            "observedAt": "2026-09-26T15:59:00.000Z",
+            "source": "statusline"
+          }
+        }
+      },
+      "expected": {
+        "level": "unknown",
+        "window": null,
+        "resetsAt": null,
+        "cause": null
+      }
+    },
+    {
+      "name": "five_hour at its ceiling of 100: exhausted by the limit",
+      "input": {
+        "now": "2026-09-26T16:00:00.000Z",
+        "policy": {
+          "role": "rotation",
+          "reservePct": 0,
+          "spendDownWindowHours": 24,
+          "scope": {
+            "repos": []
+          }
+        },
+        "model": null,
+        "warnMarginPct": 10,
+        "windows": {
+          "five_hour": {
+            "usedPct": 100,
+            "resetsAt": "2026-09-26T19:00:00.000Z",
+            "status": null,
+            "observedAt": "2026-09-26T15:59:00.000Z",
+            "source": "statusline"
+          },
+          "seven_day": {
+            "usedPct": 20,
+            "resetsAt": "2026-10-02T16:00:00.000Z",
+            "status": null,
+            "observedAt": "2026-09-26T15:59:00.000Z",
+            "source": "statusline"
+          }
+        }
+      },
+      "expected": {
+        "level": "exhausted",
+        "window": "five_hour",
+        "resetsAt": "2026-09-26T19:00:00.000Z",
+        "cause": "limit"
+      }
+    },
+    {
+      "name": "seven_day at 100 - reserve (50 of a 50% reserve): exhausted by the reserve",
+      "input": {
+        "now": "2026-09-26T16:00:00.000Z",
+        "policy": {
+          "role": "main",
+          "reservePct": 50,
+          "spendDownWindowHours": 24,
+          "scope": {
+            "repos": []
+          }
+        },
+        "model": null,
+        "warnMarginPct": 10,
+        "windows": {
+          "five_hour": {
+            "usedPct": 10,
+            "resetsAt": "2026-09-26T19:00:00.000Z",
+            "status": null,
+            "observedAt": "2026-09-26T15:59:00.000Z",
+            "source": "statusline"
+          },
+          "seven_day": {
+            "usedPct": 50,
+            "resetsAt": "2026-09-29T16:00:00.000Z",
+            "status": null,
+            "observedAt": "2026-09-26T15:59:00.000Z",
+            "source": "statusline"
+          }
+        }
+      },
+      "expected": {
+        "level": "exhausted",
+        "window": "seven_day",
+        "resetsAt": "2026-09-29T16:00:00.000Z",
+        "cause": "reserve"
+      }
+    },
+    {
+      "name": "seven_day at 100 with a reserve: exhausted by the limit, not the reserve",
+      "input": {
+        "now": "2026-09-26T16:00:00.000Z",
+        "policy": {
+          "role": "main",
+          "reservePct": 50,
+          "spendDownWindowHours": 24,
+          "scope": {
+            "repos": []
+          }
+        },
+        "model": null,
+        "warnMarginPct": 10,
+        "windows": {
+          "five_hour": {
+            "usedPct": 10,
+            "resetsAt": "2026-09-26T19:00:00.000Z",
+            "status": null,
+            "observedAt": "2026-09-26T15:59:00.000Z",
+            "source": "statusline"
+          },
+          "seven_day": {
+            "usedPct": 100,
+            "resetsAt": "2026-09-29T16:00:00.000Z",
+            "status": null,
+            "observedAt": "2026-09-26T15:59:00.000Z",
+            "source": "statusline"
+          }
+        }
+      },
+      "expected": {
+        "level": "exhausted",
+        "window": "seven_day",
+        "resetsAt": "2026-09-29T16:00:00.000Z",
+        "cause": "limit"
+      }
+    },
+    {
+      "name": "seven_day rejected under the reserve line: the limit, not the reserve",
+      "input": {
+        "now": "2026-09-26T16:00:00.000Z",
+        "policy": {
+          "role": "main",
+          "reservePct": 50,
+          "spendDownWindowHours": 24,
+          "scope": {
+            "repos": []
+          }
+        },
+        "model": null,
+        "warnMarginPct": 10,
+        "windows": {
+          "five_hour": {
+            "usedPct": 10,
+            "resetsAt": "2026-09-26T19:00:00.000Z",
+            "status": null,
+            "observedAt": "2026-09-26T15:59:00.000Z",
+            "source": "statusline"
+          },
+          "seven_day": {
+            "usedPct": 30,
+            "resetsAt": "2026-09-29T16:00:00.000Z",
+            "status": "rejected",
+            "observedAt": "2026-09-26T15:59:00.000Z",
+            "source": "statusline"
+          }
+        }
+      },
+      "expected": {
+        "level": "exhausted",
+        "window": "seven_day",
+        "resetsAt": "2026-09-29T16:00:00.000Z",
+        "cause": "limit"
+      }
+    },
+    {
+      "name": "reserve reached and five_hour exhausted too: not only the reserve, so the limit",
+      "input": {
+        "now": "2026-09-26T16:00:00.000Z",
+        "policy": {
+          "role": "main",
+          "reservePct": 50,
+          "spendDownWindowHours": 24,
+          "scope": {
+            "repos": []
+          }
+        },
+        "model": null,
+        "warnMarginPct": 10,
+        "windows": {
+          "five_hour": {
+            "usedPct": 100,
+            "resetsAt": "2026-09-26T19:00:00.000Z",
+            "status": null,
+            "observedAt": "2026-09-26T15:59:00.000Z",
+            "source": "statusline"
+          },
+          "seven_day": {
+            "usedPct": 50,
+            "resetsAt": "2026-09-29T16:00:00.000Z",
+            "status": null,
+            "observedAt": "2026-09-26T15:59:00.000Z",
+            "source": "statusline"
+          }
+        }
+      },
+      "expected": {
+        "level": "exhausted",
+        "window": "five_hour",
+        "resetsAt": "2026-09-26T19:00:00.000Z",
+        "cause": "limit"
+      }
+    },
+    {
+      "name": "inside the spend-down window the reserve is 0, so 60% used is ok",
+      "input": {
+        "now": "2026-09-26T16:00:00.000Z",
+        "policy": {
+          "role": "main",
+          "reservePct": 50,
+          "spendDownWindowHours": 24,
+          "scope": {
+            "repos": []
+          }
+        },
+        "model": null,
+        "warnMarginPct": 10,
+        "windows": {
+          "five_hour": {
+            "usedPct": 10,
+            "resetsAt": "2026-09-26T19:00:00.000Z",
+            "status": null,
+            "observedAt": "2026-09-26T15:59:00.000Z",
+            "source": "statusline"
+          },
+          "seven_day": {
+            "usedPct": 60,
+            "resetsAt": "2026-09-27T04:00:00.000Z",
+            "status": null,
+            "observedAt": "2026-09-26T15:59:00.000Z",
+            "source": "statusline"
+          }
+        }
+      },
+      "expected": {
+        "level": "ok",
+        "window": null,
+        "resetsAt": null,
+        "cause": null
+      }
+    },
+    {
+      "name": "five_hour rejected with room left by percent: exhausted",
+      "input": {
+        "now": "2026-09-26T16:00:00.000Z",
+        "policy": {
+          "role": "rotation",
+          "reservePct": 0,
+          "spendDownWindowHours": 24,
+          "scope": {
+            "repos": []
+          }
+        },
+        "model": null,
+        "warnMarginPct": 10,
+        "windows": {
+          "five_hour": {
+            "usedPct": 40,
+            "resetsAt": "2026-09-26T19:00:00.000Z",
+            "status": "rejected",
+            "observedAt": "2026-09-26T15:59:00.000Z",
+            "source": "statusline"
+          },
+          "seven_day": {
+            "usedPct": 20,
+            "resetsAt": "2026-10-02T16:00:00.000Z",
+            "status": null,
+            "observedAt": "2026-09-26T15:59:00.000Z",
+            "source": "statusline"
+          }
+        }
+      },
+      "expected": {
+        "level": "exhausted",
+        "window": "five_hour",
+        "resetsAt": "2026-09-26T19:00:00.000Z",
+        "cause": "limit"
+      }
+    },
+    {
+      "name": "allowed_warning status: warning",
+      "input": {
+        "now": "2026-09-26T16:00:00.000Z",
+        "policy": {
+          "role": "rotation",
+          "reservePct": 0,
+          "spendDownWindowHours": 24,
+          "scope": {
+            "repos": []
+          }
+        },
+        "model": null,
+        "warnMarginPct": 10,
+        "windows": {
+          "five_hour": {
+            "usedPct": 30,
+            "resetsAt": "2026-09-26T19:00:00.000Z",
+            "status": "allowed_warning",
+            "observedAt": "2026-09-26T15:59:00.000Z",
+            "source": "statusline"
+          },
+          "seven_day": {
+            "usedPct": 20,
+            "resetsAt": "2026-10-02T16:00:00.000Z",
+            "status": null,
+            "observedAt": "2026-09-26T15:59:00.000Z",
+            "source": "statusline"
+          }
+        }
+      },
+      "expected": {
+        "level": "warning",
+        "window": "five_hour",
+        "resetsAt": "2026-09-26T19:00:00.000Z",
+        "cause": null
+      }
+    },
+    {
+      "name": "five_hour at 100 - warnMarginPct (90): warning",
+      "input": {
+        "now": "2026-09-26T16:00:00.000Z",
+        "policy": {
+          "role": "rotation",
+          "reservePct": 0,
+          "spendDownWindowHours": 24,
+          "scope": {
+            "repos": []
+          }
+        },
+        "model": null,
+        "warnMarginPct": 10,
+        "windows": {
+          "five_hour": {
+            "usedPct": 90,
+            "resetsAt": "2026-09-26T19:00:00.000Z",
+            "status": null,
+            "observedAt": "2026-09-26T15:59:00.000Z",
+            "source": "statusline"
+          },
+          "seven_day": {
+            "usedPct": 20,
+            "resetsAt": "2026-10-02T16:00:00.000Z",
+            "status": null,
+            "observedAt": "2026-09-26T15:59:00.000Z",
+            "source": "statusline"
+          }
+        }
+      },
+      "expected": {
+        "level": "warning",
+        "window": "five_hour",
+        "resetsAt": "2026-09-26T19:00:00.000Z",
+        "cause": null
+      }
+    },
+    {
+      "name": "five_hour one point under the margin (89): ok",
+      "input": {
+        "now": "2026-09-26T16:00:00.000Z",
+        "policy": {
+          "role": "rotation",
+          "reservePct": 0,
+          "spendDownWindowHours": 24,
+          "scope": {
+            "repos": []
+          }
+        },
+        "model": null,
+        "warnMarginPct": 10,
+        "windows": {
+          "five_hour": {
+            "usedPct": 89,
+            "resetsAt": "2026-09-26T19:00:00.000Z",
+            "status": null,
+            "observedAt": "2026-09-26T15:59:00.000Z",
+            "source": "statusline"
+          },
+          "seven_day": {
+            "usedPct": 20,
+            "resetsAt": "2026-10-02T16:00:00.000Z",
+            "status": null,
+            "observedAt": "2026-09-26T15:59:00.000Z",
+            "source": "statusline"
+          }
+        }
+      },
+      "expected": {
+        "level": "ok",
+        "window": null,
+        "resetsAt": null,
+        "cause": null
+      }
+    },
+    {
+      "name": "the warning margin applies below the reserved ceiling (40 of 50): warning",
+      "input": {
+        "now": "2026-09-26T16:00:00.000Z",
+        "policy": {
+          "role": "main",
+          "reservePct": 50,
+          "spendDownWindowHours": 24,
+          "scope": {
+            "repos": []
+          }
+        },
+        "model": null,
+        "warnMarginPct": 10,
+        "windows": {
+          "five_hour": {
+            "usedPct": 10,
+            "resetsAt": "2026-09-26T19:00:00.000Z",
+            "status": null,
+            "observedAt": "2026-09-26T15:59:00.000Z",
+            "source": "statusline"
+          },
+          "seven_day": {
+            "usedPct": 40,
+            "resetsAt": "2026-09-29T16:00:00.000Z",
+            "status": null,
+            "observedAt": "2026-09-26T15:59:00.000Z",
+            "source": "statusline"
+          }
+        }
+      },
+      "expected": {
+        "level": "warning",
+        "window": "seven_day",
+        "resetsAt": "2026-09-29T16:00:00.000Z",
+        "cause": null
+      }
+    },
+    {
+      "name": "two windows exhausted: the one resetting sooner is named, not the first checked",
+      "input": {
+        "now": "2026-09-26T16:00:00.000Z",
+        "policy": {
+          "role": "rotation",
+          "reservePct": 0,
+          "spendDownWindowHours": 24,
+          "scope": {
+            "repos": []
+          }
+        },
+        "model": null,
+        "warnMarginPct": 10,
+        "windows": {
+          "five_hour": {
+            "usedPct": 100,
+            "resetsAt": "2026-09-26T19:00:00.000Z",
+            "status": null,
+            "observedAt": "2026-09-26T15:59:00.000Z",
+            "source": "statusline"
+          },
+          "seven_day": {
+            "usedPct": 100,
+            "resetsAt": "2026-09-26T18:00:00.000Z",
+            "status": null,
+            "observedAt": "2026-09-26T15:59:00.000Z",
+            "source": "statusline"
+          }
+        }
+      },
+      "expected": {
+        "level": "exhausted",
+        "window": "seven_day",
+        "resetsAt": "2026-09-26T18:00:00.000Z",
+        "cause": "limit"
+      }
+    },
+    {
+      "name": "exhausted is named before a warning that resets sooner",
+      "input": {
+        "now": "2026-09-26T16:00:00.000Z",
+        "policy": {
+          "role": "rotation",
+          "reservePct": 0,
+          "spendDownWindowHours": 24,
+          "scope": {
+            "repos": []
+          }
+        },
+        "model": null,
+        "warnMarginPct": 10,
+        "windows": {
+          "five_hour": {
+            "usedPct": 95,
+            "resetsAt": "2026-09-26T19:00:00.000Z",
+            "status": null,
+            "observedAt": "2026-09-26T15:59:00.000Z",
+            "source": "statusline"
+          },
+          "seven_day": {
+            "usedPct": 100,
+            "resetsAt": "2026-09-29T16:00:00.000Z",
+            "status": null,
+            "observedAt": "2026-09-26T15:59:00.000Z",
+            "source": "statusline"
+          }
+        }
+      },
+      "expected": {
+        "level": "exhausted",
+        "window": "seven_day",
+        "resetsAt": "2026-09-29T16:00:00.000Z",
+        "cause": "limit"
+      }
+    },
+    {
+      "name": "seven_day_opus exhausted: an opus model is exhausted",
+      "input": {
+        "now": "2026-09-26T16:00:00.000Z",
+        "policy": {
+          "role": "rotation",
+          "reservePct": 0,
+          "spendDownWindowHours": 24,
+          "scope": {
+            "repos": []
+          }
+        },
+        "model": "claude-opus-4-1",
+        "warnMarginPct": 10,
+        "windows": {
+          "five_hour": {
+            "usedPct": 10,
+            "resetsAt": "2026-09-26T19:00:00.000Z",
+            "status": null,
+            "observedAt": "2026-09-26T15:59:00.000Z",
+            "source": "statusline"
+          },
+          "seven_day": {
+            "usedPct": 20,
+            "resetsAt": "2026-10-02T16:00:00.000Z",
+            "status": null,
+            "observedAt": "2026-09-26T15:59:00.000Z",
+            "source": "statusline"
+          },
+          "model:claude-opus-4-1": {
+            "usedPct": 10,
+            "resetsAt": "2026-10-02T16:00:00.000Z",
+            "status": null,
+            "observedAt": "2026-09-26T15:59:00.000Z",
+            "source": "statusline"
+          },
+          "seven_day_opus": {
+            "usedPct": 100,
+            "resetsAt": "2026-09-29T16:00:00.000Z",
+            "status": null,
+            "observedAt": "2026-09-26T15:59:00.000Z",
+            "source": "statusline"
+          }
+        }
+      },
+      "expected": {
+        "level": "exhausted",
+        "window": "seven_day_opus",
+        "resetsAt": "2026-09-29T16:00:00.000Z",
+        "cause": "limit"
+      }
+    },
+    {
+      "name": "seven_day_opus exhausted: a sonnet model does not check it",
+      "input": {
+        "now": "2026-09-26T16:00:00.000Z",
+        "policy": {
+          "role": "rotation",
+          "reservePct": 0,
+          "spendDownWindowHours": 24,
+          "scope": {
+            "repos": []
+          }
+        },
+        "model": "claude-sonnet-4-5",
+        "warnMarginPct": 10,
+        "windows": {
+          "five_hour": {
+            "usedPct": 10,
+            "resetsAt": "2026-09-26T19:00:00.000Z",
+            "status": null,
+            "observedAt": "2026-09-26T15:59:00.000Z",
+            "source": "statusline"
+          },
+          "seven_day": {
+            "usedPct": 20,
+            "resetsAt": "2026-10-02T16:00:00.000Z",
+            "status": null,
+            "observedAt": "2026-09-26T15:59:00.000Z",
+            "source": "statusline"
+          },
+          "model:claude-sonnet-4-5": {
+            "usedPct": 10,
+            "resetsAt": "2026-10-02T16:00:00.000Z",
+            "status": null,
+            "observedAt": "2026-09-26T15:59:00.000Z",
+            "source": "statusline"
+          },
+          "seven_day_sonnet": {
+            "usedPct": 10,
+            "resetsAt": "2026-10-02T16:00:00.000Z",
+            "status": null,
+            "observedAt": "2026-09-26T15:59:00.000Z",
+            "source": "statusline"
+          },
+          "seven_day_opus": {
+            "usedPct": 100,
+            "resetsAt": "2026-09-29T16:00:00.000Z",
+            "status": null,
+            "observedAt": "2026-09-26T15:59:00.000Z",
+            "source": "statusline"
+          }
+        }
+      },
+      "expected": {
+        "level": "ok",
+        "window": null,
+        "resetsAt": null,
+        "cause": null
+      }
+    },
+    {
+      "name": "the model:<slug> bucket is checked against 100",
+      "input": {
+        "now": "2026-09-26T16:00:00.000Z",
+        "policy": {
+          "role": "rotation",
+          "reservePct": 0,
+          "spendDownWindowHours": 24,
+          "scope": {
+            "repos": []
+          }
+        },
+        "model": "claude-haiku-4-5",
+        "warnMarginPct": 10,
+        "windows": {
+          "five_hour": {
+            "usedPct": 10,
+            "resetsAt": "2026-09-26T19:00:00.000Z",
+            "status": null,
+            "observedAt": "2026-09-26T15:59:00.000Z",
+            "source": "statusline"
+          },
+          "seven_day": {
+            "usedPct": 20,
+            "resetsAt": "2026-10-02T16:00:00.000Z",
+            "status": null,
+            "observedAt": "2026-09-26T15:59:00.000Z",
+            "source": "statusline"
+          },
+          "model:claude-haiku-4-5": {
+            "usedPct": 100,
+            "resetsAt": "2026-09-29T16:00:00.000Z",
+            "status": null,
+            "observedAt": "2026-09-26T15:59:00.000Z",
+            "source": "statusline"
+          }
+        }
+      },
+      "expected": {
+        "level": "exhausted",
+        "window": "model:claude-haiku-4-5",
+        "resetsAt": "2026-09-29T16:00:00.000Z",
+        "cause": "limit"
+      }
+    },
+    {
+      "name": "an expired rejected window reads as allowed with 0 used: ok",
+      "input": {
+        "now": "2026-09-26T16:00:00.000Z",
+        "policy": {
+          "role": "rotation",
+          "reservePct": 0,
+          "spendDownWindowHours": 24,
+          "scope": {
+            "repos": []
+          }
+        },
+        "model": null,
+        "warnMarginPct": 10,
+        "windows": {
+          "five_hour": {
+            "usedPct": 100,
+            "resetsAt": "2026-09-26T15:00:00.000Z",
+            "status": "rejected",
+            "observedAt": "2026-09-26T10:00:00.000Z",
+            "source": "statusline"
+          },
+          "seven_day": {
+            "usedPct": 20,
+            "resetsAt": "2026-10-02T16:00:00.000Z",
+            "status": null,
+            "observedAt": "2026-09-26T15:59:00.000Z",
+            "source": "statusline"
+          }
+        }
+      },
+      "expected": {
+        "level": "ok",
+        "window": null,
+        "resetsAt": null,
+        "cause": null
+      }
+    },
+    {
+      "name": "a stale five-hour reading with no reset is no reading: unknown",
+      "input": {
+        "now": "2026-09-26T16:00:00.000Z",
+        "policy": {
+          "role": "rotation",
+          "reservePct": 0,
+          "spendDownWindowHours": 24,
+          "scope": {
+            "repos": []
+          }
+        },
+        "model": null,
+        "warnMarginPct": 10,
+        "windows": {
+          "five_hour": {
+            "usedPct": 100,
+            "resetsAt": null,
+            "status": null,
+            "observedAt": "2026-09-26T09:00:00.000Z",
+            "source": "statusline"
+          },
+          "seven_day": {
+            "usedPct": 20,
+            "resetsAt": "2026-10-02T16:00:00.000Z",
+            "status": null,
+            "observedAt": "2026-09-26T15:59:00.000Z",
+            "source": "statusline"
+          }
+        }
+      },
+      "expected": {
+        "level": "unknown",
+        "window": null,
+        "resetsAt": null,
+        "cause": null
+      }
+    }
+  ],
+  "rankAccounts": [
+    {
+      "name": "DOR-2373: A (40% left, resets in 24 h, 1.67) beats B (60% left, resets in 144 h, 0.42)",
+      "input": {
+        "now": "2026-09-26T16:00:00.000Z",
+        "accounts": [
+          {
+            "id": "b",
+            "routable": true,
+            "policy": {
+              "role": "rotation",
+              "reservePct": 0,
+              "spendDownWindowHours": 24,
+              "scope": {
+                "repos": []
+              }
+            },
+            "windows": {
+              "five_hour": {
+                "usedPct": 10,
+                "resetsAt": "2026-09-26T19:00:00.000Z",
+                "status": null,
+                "observedAt": "2026-09-26T15:59:00.000Z",
+                "source": "statusline"
+              },
+              "seven_day": {
+                "usedPct": 40,
+                "resetsAt": "2026-10-02T16:00:00.000Z",
+                "status": null,
+                "observedAt": "2026-09-26T15:59:00.000Z",
+                "source": "statusline"
+              }
+            }
+          },
+          {
+            "id": "a",
+            "routable": true,
+            "policy": {
+              "role": "rotation",
+              "reservePct": 0,
+              "spendDownWindowHours": 24,
+              "scope": {
+                "repos": []
+              }
+            },
+            "windows": {
+              "five_hour": {
+                "usedPct": 10,
+                "resetsAt": "2026-09-26T19:00:00.000Z",
+                "status": null,
+                "observedAt": "2026-09-26T15:59:00.000Z",
+                "source": "statusline"
+              },
+              "seven_day": {
+                "usedPct": 60,
+                "resetsAt": "2026-09-27T16:00:00.000Z",
+                "status": null,
+                "observedAt": "2026-09-26T15:59:00.000Z",
+                "source": "statusline"
+              }
+            }
+          }
+        ]
+      },
+      "expected": {
+        "pick": "a",
+        "ranked": [
+          {
+            "id": "a",
+            "tier": 1,
+            "score": 1.67,
+            "signal": "ok"
+          },
+          {
+            "id": "b",
+            "tier": 1,
+            "score": 0.42,
+            "signal": "ok"
+          }
+        ],
+        "ineligible": []
+      }
+    },
+    {
+      "name": "main is ranked last while a rotation account is eligible, even with the higher score",
+      "input": {
+        "now": "2026-09-26T16:00:00.000Z",
+        "accounts": [
+          {
+            "id": "personal",
+            "routable": true,
+            "policy": {
+              "role": "main",
+              "reservePct": 50,
+              "spendDownWindowHours": 24,
+              "scope": {
+                "repos": []
+              }
+            },
+            "windows": {
+              "five_hour": {
+                "usedPct": 10,
+                "resetsAt": "2026-09-26T19:00:00.000Z",
+                "status": null,
+                "observedAt": "2026-09-26T15:59:00.000Z",
+                "source": "statusline"
+              },
+              "seven_day": {
+                "usedPct": 0,
+                "resetsAt": "2026-09-29T16:00:00.000Z",
+                "status": null,
+                "observedAt": "2026-09-26T15:59:00.000Z",
+                "source": "statusline"
+              }
+            }
+          },
+          {
+            "id": "spare",
+            "routable": true,
+            "policy": {
+              "role": "rotation",
+              "reservePct": 0,
+              "spendDownWindowHours": 24,
+              "scope": {
+                "repos": []
+              }
+            },
+            "windows": {
+              "five_hour": {
+                "usedPct": 10,
+                "resetsAt": "2026-09-26T19:00:00.000Z",
+                "status": null,
+                "observedAt": "2026-09-26T15:59:00.000Z",
+                "source": "statusline"
+              },
+              "seven_day": {
+                "usedPct": 80,
+                "resetsAt": "2026-10-02T16:00:00.000Z",
+                "status": null,
+                "observedAt": "2026-09-26T15:59:00.000Z",
+                "source": "statusline"
+              }
+            }
+          }
+        ]
+      },
+      "expected": {
+        "pick": "spare",
+        "ranked": [
+          {
+            "id": "spare",
+            "tier": 1,
+            "score": 0.14
+          },
+          {
+            "id": "personal",
+            "tier": 2,
+            "score": 0.69
+          }
+        ],
+        "ineligible": []
+      }
+    },
+    {
+      "name": "main is picked when every rotation account is ineligible",
+      "input": {
+        "now": "2026-09-26T16:00:00.000Z",
+        "accounts": [
+          {
+            "id": "left",
+            "routable": true,
+            "policy": {
+              "role": "rotation",
+              "reservePct": 0,
+              "spendDownWindowHours": 24,
+              "scope": {
+                "repos": []
+              }
+            },
+            "windows": {
+              "five_hour": {
+                "usedPct": 10,
+                "resetsAt": "2026-09-26T19:00:00.000Z",
+                "status": null,
+                "observedAt": "2026-09-26T15:59:00.000Z",
+                "source": "statusline"
+              },
+              "seven_day": {
+                "usedPct": 10,
+                "resetsAt": "2026-10-02T16:00:00.000Z",
+                "status": null,
+                "observedAt": "2026-09-26T15:59:00.000Z",
+                "source": "statusline"
+              }
+            }
+          },
+          {
+            "id": "spent",
+            "routable": true,
+            "policy": {
+              "role": "rotation",
+              "reservePct": 0,
+              "spendDownWindowHours": 24,
+              "scope": {
+                "repos": []
+              }
+            },
+            "windows": {
+              "five_hour": {
+                "usedPct": 10,
+                "resetsAt": "2026-09-26T19:00:00.000Z",
+                "status": null,
+                "observedAt": "2026-09-26T15:59:00.000Z",
+                "source": "statusline"
+              },
+              "seven_day": {
+                "usedPct": 40,
+                "resetsAt": "2026-10-02T16:00:00.000Z",
+                "status": "rejected",
+                "observedAt": "2026-09-26T15:59:00.000Z",
+                "source": "statusline"
+              }
+            }
+          },
+          {
+            "id": "personal",
+            "routable": true,
+            "policy": {
+              "role": "main",
+              "reservePct": 50,
+              "spendDownWindowHours": 24,
+              "scope": {
+                "repos": []
+              }
+            },
+            "windows": {
+              "five_hour": {
+                "usedPct": 10,
+                "resetsAt": "2026-09-26T19:00:00.000Z",
+                "status": null,
+                "observedAt": "2026-09-26T15:59:00.000Z",
+                "source": "statusline"
+              },
+              "seven_day": {
+                "usedPct": 0,
+                "resetsAt": "2026-09-29T16:00:00.000Z",
+                "status": null,
+                "observedAt": "2026-09-26T15:59:00.000Z",
+                "source": "statusline"
+              }
+            }
+          }
+        ],
+        "exclude": ["left"]
+      },
+      "expected": {
+        "pick": "personal",
+        "ranked": [
+          {
+            "id": "personal",
+            "tier": 2
+          }
+        ],
+        "ineligible": [
+          {
+            "id": "left",
+            "reasons": ["excluded"]
+          },
+          {
+            "id": "spent",
+            "reasons": ["limited"]
+          }
+        ]
+      }
+    },
+    {
+      "name": "main inside its spend-down window joins tier 1 and wins on its short horizon",
+      "input": {
+        "now": "2026-09-26T16:00:00.000Z",
+        "accounts": [
+          {
+            "id": "spare",
+            "routable": true,
+            "policy": {
+              "role": "rotation",
+              "reservePct": 0,
+              "spendDownWindowHours": 24,
+              "scope": {
+                "repos": []
+              }
+            },
+            "windows": {
+              "five_hour": {
+                "usedPct": 10,
+                "resetsAt": "2026-09-26T19:00:00.000Z",
+                "status": null,
+                "observedAt": "2026-09-26T15:59:00.000Z",
+                "source": "statusline"
+              },
+              "seven_day": {
+                "usedPct": 20,
+                "resetsAt": "2026-10-02T16:00:00.000Z",
+                "status": null,
+                "observedAt": "2026-09-26T15:59:00.000Z",
+                "source": "statusline"
+              }
+            }
+          },
+          {
+            "id": "personal",
+            "routable": true,
+            "policy": {
+              "role": "main",
+              "reservePct": 50,
+              "spendDownWindowHours": 24,
+              "scope": {
+                "repos": []
+              }
+            },
+            "windows": {
+              "five_hour": {
+                "usedPct": 10,
+                "resetsAt": "2026-09-26T19:00:00.000Z",
+                "status": null,
+                "observedAt": "2026-09-26T15:59:00.000Z",
+                "source": "statusline"
+              },
+              "seven_day": {
+                "usedPct": 60,
+                "resetsAt": "2026-09-27T04:00:00.000Z",
+                "status": null,
+                "observedAt": "2026-09-26T15:59:00.000Z",
+                "source": "statusline"
+              }
+            }
+          }
+        ]
+      },
+      "expected": {
+        "pick": "personal",
+        "ranked": [
+          {
+            "id": "personal",
+            "tier": 1,
+            "score": 3.33
+          },
+          {
+            "id": "spare",
+            "tier": 1,
+            "score": 0.56
+          }
+        ],
+        "ineligible": []
+      }
+    },
+    {
+      "name": "the affinity account goes first when eligible, even with a lower score",
+      "input": {
+        "now": "2026-09-26T16:00:00.000Z",
+        "accounts": [
+          {
+            "id": "warm",
+            "routable": true,
+            "policy": {
+              "role": "rotation",
+              "reservePct": 0,
+              "spendDownWindowHours": 24,
+              "scope": {
+                "repos": []
+              }
+            },
+            "windows": {
+              "five_hour": {
+                "usedPct": 10,
+                "resetsAt": "2026-09-26T19:00:00.000Z",
+                "status": null,
+                "observedAt": "2026-09-26T15:59:00.000Z",
+                "source": "statusline"
+              },
+              "seven_day": {
+                "usedPct": 80,
+                "resetsAt": "2026-10-02T16:00:00.000Z",
+                "status": null,
+                "observedAt": "2026-09-26T15:59:00.000Z",
+                "source": "statusline"
+              }
+            }
+          },
+          {
+            "id": "fresh",
+            "routable": true,
+            "policy": {
+              "role": "rotation",
+              "reservePct": 0,
+              "spendDownWindowHours": 24,
+              "scope": {
+                "repos": []
+              }
+            },
+            "windows": {
+              "five_hour": {
+                "usedPct": 10,
+                "resetsAt": "2026-09-26T19:00:00.000Z",
+                "status": null,
+                "observedAt": "2026-09-26T15:59:00.000Z",
+                "source": "statusline"
+              },
+              "seven_day": {
+                "usedPct": 0,
+                "resetsAt": "2026-09-27T16:00:00.000Z",
+                "status": null,
+                "observedAt": "2026-09-26T15:59:00.000Z",
+                "source": "statusline"
+              }
+            }
+          }
+        ],
+        "affinity": "warm"
+      },
+      "expected": {
+        "pick": "warm",
+        "ranked": [
+          {
+            "id": "warm",
+            "tier": 0
+          },
+          {
+            "id": "fresh",
+            "tier": 1
+          }
+        ],
+        "ineligible": []
+      }
+    },
+    {
+      "name": "the affinity account is skipped when near a limit",
+      "input": {
+        "now": "2026-09-26T16:00:00.000Z",
+        "accounts": [
+          {
+            "id": "warm",
+            "routable": true,
+            "policy": {
+              "role": "rotation",
+              "reservePct": 0,
+              "spendDownWindowHours": 24,
+              "scope": {
+                "repos": []
+              }
+            },
+            "windows": {
+              "five_hour": {
+                "usedPct": 95,
+                "resetsAt": "2026-09-26T19:00:00.000Z",
+                "status": null,
+                "observedAt": "2026-09-26T15:59:00.000Z",
+                "source": "statusline"
+              },
+              "seven_day": {
+                "usedPct": 20,
+                "resetsAt": "2026-10-02T16:00:00.000Z",
+                "status": null,
+                "observedAt": "2026-09-26T15:59:00.000Z",
+                "source": "statusline"
+              }
+            }
+          },
+          {
+            "id": "fresh",
+            "routable": true,
+            "policy": {
+              "role": "rotation",
+              "reservePct": 0,
+              "spendDownWindowHours": 24,
+              "scope": {
+                "repos": []
+              }
+            },
+            "windows": {
+              "five_hour": {
+                "usedPct": 10,
+                "resetsAt": "2026-09-26T19:00:00.000Z",
+                "status": null,
+                "observedAt": "2026-09-26T15:59:00.000Z",
+                "source": "statusline"
+              },
+              "seven_day": {
+                "usedPct": 0,
+                "resetsAt": "2026-09-27T16:00:00.000Z",
+                "status": null,
+                "observedAt": "2026-09-26T15:59:00.000Z",
+                "source": "statusline"
+              }
+            }
+          }
+        ],
+        "affinity": "warm"
+      },
+      "expected": {
+        "pick": "fresh",
+        "ranked": [
+          {
+            "id": "fresh",
+            "tier": 1
+          }
+        ],
+        "ineligible": [
+          {
+            "id": "warm",
+            "reasons": ["near-limit"]
+          }
+        ]
+      }
+    },
+    {
+      "name": "an affinity main outside its spend-down window does not jump a rotation account",
+      "input": {
+        "now": "2026-09-26T16:00:00.000Z",
+        "accounts": [
+          {
+            "id": "personal",
+            "routable": true,
+            "policy": {
+              "role": "main",
+              "reservePct": 50,
+              "spendDownWindowHours": 24,
+              "scope": {
+                "repos": []
+              }
+            },
+            "windows": {
+              "five_hour": {
+                "usedPct": 10,
+                "resetsAt": "2026-09-26T19:00:00.000Z",
+                "status": null,
+                "observedAt": "2026-09-26T15:59:00.000Z",
+                "source": "statusline"
+              },
+              "seven_day": {
+                "usedPct": 0,
+                "resetsAt": "2026-09-29T16:00:00.000Z",
+                "status": null,
+                "observedAt": "2026-09-26T15:59:00.000Z",
+                "source": "statusline"
+              }
+            }
+          },
+          {
+            "id": "spare",
+            "routable": true,
+            "policy": {
+              "role": "rotation",
+              "reservePct": 0,
+              "spendDownWindowHours": 24,
+              "scope": {
+                "repos": []
+              }
+            },
+            "windows": {
+              "five_hour": {
+                "usedPct": 10,
+                "resetsAt": "2026-09-26T19:00:00.000Z",
+                "status": null,
+                "observedAt": "2026-09-26T15:59:00.000Z",
+                "source": "statusline"
+              },
+              "seven_day": {
+                "usedPct": 80,
+                "resetsAt": "2026-10-02T16:00:00.000Z",
+                "status": null,
+                "observedAt": "2026-09-26T15:59:00.000Z",
+                "source": "statusline"
+              }
+            }
+          }
+        ],
+        "affinity": "personal"
+      },
+      "expected": {
+        "pick": "spare",
+        "ranked": [
+          {
+            "id": "spare",
+            "tier": 1
+          },
+          {
+            "id": "personal",
+            "tier": 2
+          }
+        ],
+        "ineligible": []
+      }
+    },
+    {
+      "name": "an affinity main inside its spend-down window is tier 0",
+      "input": {
+        "now": "2026-09-26T16:00:00.000Z",
+        "accounts": [
+          {
+            "id": "personal",
+            "routable": true,
+            "policy": {
+              "role": "main",
+              "reservePct": 50,
+              "spendDownWindowHours": 24,
+              "scope": {
+                "repos": []
+              }
+            },
+            "windows": {
+              "five_hour": {
+                "usedPct": 10,
+                "resetsAt": "2026-09-26T19:00:00.000Z",
+                "status": null,
+                "observedAt": "2026-09-26T15:59:00.000Z",
+                "source": "statusline"
+              },
+              "seven_day": {
+                "usedPct": 60,
+                "resetsAt": "2026-09-27T04:00:00.000Z",
+                "status": null,
+                "observedAt": "2026-09-26T15:59:00.000Z",
+                "source": "statusline"
+              }
+            }
+          },
+          {
+            "id": "spare",
+            "routable": true,
+            "policy": {
+              "role": "rotation",
+              "reservePct": 0,
+              "spendDownWindowHours": 24,
+              "scope": {
+                "repos": []
+              }
+            },
+            "windows": {
+              "five_hour": {
+                "usedPct": 10,
+                "resetsAt": "2026-09-26T19:00:00.000Z",
+                "status": null,
+                "observedAt": "2026-09-26T15:59:00.000Z",
+                "source": "statusline"
+              },
+              "seven_day": {
+                "usedPct": 0,
+                "resetsAt": "2026-09-27T16:00:00.000Z",
+                "status": null,
+                "observedAt": "2026-09-26T15:59:00.000Z",
+                "source": "statusline"
+              }
+            }
+          }
+        ],
+        "affinity": "personal"
+      },
+      "expected": {
+        "pick": "personal",
+        "ranked": [
+          {
+            "id": "personal",
+            "tier": 0
+          },
+          {
+            "id": "spare",
+            "tier": 1
+          }
+        ],
+        "ineligible": []
+      }
+    },
+    {
+      "name": "not-routable alone: an id that fails the pattern",
+      "input": {
+        "now": "2026-09-26T16:00:00.000Z",
+        "accounts": [
+          {
+            "id": "Bad_Id",
+            "routable": false,
+            "policy": {
+              "role": "rotation",
+              "reservePct": 0,
+              "spendDownWindowHours": 24,
+              "scope": {
+                "repos": []
+              }
+            },
+            "windows": {
+              "five_hour": {
+                "usedPct": 10,
+                "resetsAt": "2026-09-26T19:00:00.000Z",
+                "status": null,
+                "observedAt": "2026-09-26T15:59:00.000Z",
+                "source": "statusline"
+              },
+              "seven_day": {
+                "usedPct": 20,
+                "resetsAt": "2026-10-02T16:00:00.000Z",
+                "status": null,
+                "observedAt": "2026-09-26T15:59:00.000Z",
+                "source": "statusline"
+              }
+            }
+          }
+        ]
+      },
+      "expected": {
+        "pick": null,
+        "ranked": [],
+        "ineligible": [
+          {
+            "id": "Bad_Id",
+            "reasons": ["not-routable"]
+          }
+        ]
+      }
+    },
+    {
+      "name": "excluded alone: the account a handoff is leaving",
+      "input": {
+        "now": "2026-09-26T16:00:00.000Z",
+        "accounts": [
+          {
+            "id": "left",
+            "routable": true,
+            "policy": {
+              "role": "rotation",
+              "reservePct": 0,
+              "spendDownWindowHours": 24,
+              "scope": {
+                "repos": []
+              }
+            },
+            "windows": {
+              "five_hour": {
+                "usedPct": 10,
+                "resetsAt": "2026-09-26T19:00:00.000Z",
+                "status": null,
+                "observedAt": "2026-09-26T15:59:00.000Z",
+                "source": "statusline"
+              },
+              "seven_day": {
+                "usedPct": 20,
+                "resetsAt": "2026-10-02T16:00:00.000Z",
+                "status": null,
+                "observedAt": "2026-09-26T15:59:00.000Z",
+                "source": "statusline"
+              }
+            }
+          }
+        ],
+        "exclude": ["left"]
+      },
+      "expected": {
+        "pick": null,
+        "ranked": [],
+        "ineligible": [
+          {
+            "id": "left",
+            "reasons": ["excluded"]
+          }
+        ]
+      }
+    },
+    {
+      "name": "out-of-scope alone: a kept-out account outside its scope (unlisted accounts resolve this way)",
+      "input": {
+        "now": "2026-09-26T16:00:00.000Z",
+        "accounts": [
+          {
+            "id": "client",
+            "routable": true,
+            "policy": {
+              "role": "kept-out",
+              "reservePct": 0,
+              "spendDownWindowHours": 24,
+              "scope": {
+                "repos": []
+              }
+            },
+            "windows": {
+              "five_hour": {
+                "usedPct": 10,
+                "resetsAt": "2026-09-26T19:00:00.000Z",
+                "status": null,
+                "observedAt": "2026-09-26T15:59:00.000Z",
+                "source": "statusline"
+              },
+              "seven_day": {
+                "usedPct": 20,
+                "resetsAt": "2026-10-02T16:00:00.000Z",
+                "status": null,
+                "observedAt": "2026-09-26T15:59:00.000Z",
+                "source": "statusline"
+              }
+            }
+          }
+        ]
+      },
+      "expected": {
+        "pick": null,
+        "ranked": [],
+        "ineligible": [
+          {
+            "id": "client",
+            "reasons": ["out-of-scope"]
+          }
+        ]
+      }
+    },
+    {
+      "name": "a kept-out account serves a repo in its scope, compared case-insensitively",
+      "input": {
+        "now": "2026-09-26T16:00:00.000Z",
+        "accounts": [
+          {
+            "id": "client",
+            "routable": true,
+            "policy": {
+              "role": "kept-out",
+              "reservePct": 0,
+              "spendDownWindowHours": 24,
+              "scope": {
+                "repos": ["Dork-Labs/Marketplace"]
+              }
+            },
+            "windows": {
+              "five_hour": {
+                "usedPct": 10,
+                "resetsAt": "2026-09-26T19:00:00.000Z",
+                "status": null,
+                "observedAt": "2026-09-26T15:59:00.000Z",
+                "source": "statusline"
+              },
+              "seven_day": {
+                "usedPct": 20,
+                "resetsAt": "2026-10-02T16:00:00.000Z",
+                "status": null,
+                "observedAt": "2026-09-26T15:59:00.000Z",
+                "source": "statusline"
+              }
+            }
+          }
+        ]
+      },
+      "expected": {
+        "pick": "client",
+        "ranked": [
+          {
+            "id": "client",
+            "tier": 1
+          }
+        ],
+        "ineligible": []
+      }
+    },
+    {
+      "name": "limited alone: an exhausted signal",
+      "input": {
+        "now": "2026-09-26T16:00:00.000Z",
+        "accounts": [
+          {
+            "id": "spent",
+            "routable": true,
+            "policy": {
+              "role": "rotation",
+              "reservePct": 0,
+              "spendDownWindowHours": 24,
+              "scope": {
+                "repos": []
+              }
+            },
+            "windows": {
+              "five_hour": {
+                "usedPct": 100,
+                "resetsAt": "2026-09-26T19:00:00.000Z",
+                "status": null,
+                "observedAt": "2026-09-26T15:59:00.000Z",
+                "source": "statusline"
+              },
+              "seven_day": {
+                "usedPct": 20,
+                "resetsAt": "2026-10-02T16:00:00.000Z",
+                "status": null,
+                "observedAt": "2026-09-26T15:59:00.000Z",
+                "source": "statusline"
+              }
+            }
+          }
+        ]
+      },
+      "expected": {
+        "pick": null,
+        "ranked": [],
+        "ineligible": [
+          {
+            "id": "spent",
+            "reasons": ["limited"]
+          }
+        ]
+      }
+    },
+    {
+      "name": "near-limit alone: a warning signal",
+      "input": {
+        "now": "2026-09-26T16:00:00.000Z",
+        "accounts": [
+          {
+            "id": "close",
+            "routable": true,
+            "policy": {
+              "role": "rotation",
+              "reservePct": 0,
+              "spendDownWindowHours": 24,
+              "scope": {
+                "repos": []
+              }
+            },
+            "windows": {
+              "five_hour": {
+                "usedPct": 10,
+                "resetsAt": "2026-09-26T19:00:00.000Z",
+                "status": null,
+                "observedAt": "2026-09-26T15:59:00.000Z",
+                "source": "statusline"
+              },
+              "seven_day": {
+                "usedPct": 20,
+                "resetsAt": "2026-10-02T16:00:00.000Z",
+                "status": "allowed_warning",
+                "observedAt": "2026-09-26T15:59:00.000Z",
+                "source": "statusline"
+              }
+            }
+          }
+        ]
+      },
+      "expected": {
+        "pick": null,
+        "ranked": [],
+        "ineligible": [
+          {
+            "id": "close",
+            "reasons": ["near-limit"]
+          }
+        ]
+      }
+    },
+    {
+      "name": "at-capacity alone: live sessions reach maxLivePerAccount",
+      "input": {
+        "now": "2026-09-26T16:00:00.000Z",
+        "accounts": [
+          {
+            "id": "busy",
+            "routable": true,
+            "policy": {
+              "role": "rotation",
+              "reservePct": 0,
+              "spendDownWindowHours": 24,
+              "scope": {
+                "repos": []
+              }
+            },
+            "windows": {
+              "five_hour": {
+                "usedPct": 10,
+                "resetsAt": "2026-09-26T19:00:00.000Z",
+                "status": null,
+                "observedAt": "2026-09-26T15:59:00.000Z",
+                "source": "statusline"
+              },
+              "seven_day": {
+                "usedPct": 20,
+                "resetsAt": "2026-10-02T16:00:00.000Z",
+                "status": null,
+                "observedAt": "2026-09-26T15:59:00.000Z",
+                "source": "statusline"
+              }
+            }
+          }
+        ],
+        "liveByAccount": {
+          "busy": 2
+        }
+      },
+      "expected": {
+        "pick": null,
+        "ranked": [],
+        "ineligible": [
+          {
+            "id": "busy",
+            "reasons": ["at-capacity"]
+          }
+        ]
+      }
+    },
+    {
+      "name": "every reason that applies is listed",
+      "input": {
+        "now": "2026-09-26T16:00:00.000Z",
+        "accounts": [
+          {
+            "id": "client",
+            "routable": true,
+            "policy": {
+              "role": "kept-out",
+              "reservePct": 0,
+              "spendDownWindowHours": 24,
+              "scope": {
+                "repos": []
+              }
+            },
+            "windows": {
+              "five_hour": {
+                "usedPct": 100,
+                "resetsAt": "2026-09-26T19:00:00.000Z",
+                "status": null,
+                "observedAt": "2026-09-26T15:59:00.000Z",
+                "source": "statusline"
+              }
+            }
+          }
+        ],
+        "exclude": ["client"],
+        "liveByAccount": {
+          "client": 3
+        }
+      },
+      "expected": {
+        "pick": null,
+        "ranked": [],
+        "ineligible": [
+          {
+            "id": "client",
+            "reasons": ["excluded", "out-of-scope", "limited", "at-capacity"]
+          }
+        ]
+      }
+    },
+    {
+      "name": "-n spreading: one live session under maxLivePerAccount stays eligible, and live counts cap but never reorder",
+      "input": {
+        "now": "2026-09-26T16:00:00.000Z",
+        "accounts": [
+          {
+            "id": "a",
+            "routable": true,
+            "policy": {
+              "role": "rotation",
+              "reservePct": 0,
+              "spendDownWindowHours": 24,
+              "scope": {
+                "repos": []
+              }
+            },
+            "windows": {
+              "five_hour": {
+                "usedPct": 10,
+                "resetsAt": "2026-09-26T19:00:00.000Z",
+                "status": null,
+                "observedAt": "2026-09-26T15:59:00.000Z",
+                "source": "statusline"
+              },
+              "seven_day": {
+                "usedPct": 60,
+                "resetsAt": "2026-09-27T16:00:00.000Z",
+                "status": null,
+                "observedAt": "2026-09-26T15:59:00.000Z",
+                "source": "statusline"
+              }
+            }
+          },
+          {
+            "id": "b",
+            "routable": true,
+            "policy": {
+              "role": "rotation",
+              "reservePct": 0,
+              "spendDownWindowHours": 24,
+              "scope": {
+                "repos": []
+              }
+            },
+            "windows": {
+              "five_hour": {
+                "usedPct": 10,
+                "resetsAt": "2026-09-26T19:00:00.000Z",
+                "status": null,
+                "observedAt": "2026-09-26T15:59:00.000Z",
+                "source": "statusline"
+              },
+              "seven_day": {
+                "usedPct": 40,
+                "resetsAt": "2026-10-02T16:00:00.000Z",
+                "status": null,
+                "observedAt": "2026-09-26T15:59:00.000Z",
+                "source": "statusline"
+              }
+            }
+          }
+        ],
+        "liveByAccount": {
+          "a": 1
+        }
+      },
+      "expected": {
+        "pick": "a",
+        "ranked": [
+          {
+            "id": "a",
+            "tier": 1
+          },
+          {
+            "id": "b",
+            "tier": 1
+          }
+        ],
+        "ineligible": []
+      }
+    },
+    {
+      "name": "unknown readings are eligible: no ledger scores 100 / 168",
+      "input": {
+        "now": "2026-09-26T16:00:00.000Z",
+        "accounts": [
+          {
+            "id": "new",
+            "routable": true,
+            "policy": {
+              "role": "rotation",
+              "reservePct": 0,
+              "spendDownWindowHours": 24,
+              "scope": {
+                "repos": []
+              }
+            },
+            "windows": null
+          }
+        ]
+      },
+      "expected": {
+        "pick": "new",
+        "ranked": [
+          {
+            "id": "new",
+            "tier": 1,
+            "score": 0.6,
+            "signal": "unknown"
+          }
+        ],
+        "ineligible": []
+      }
+    },
+    {
+      "name": "no reset time: hours is 168; a reserve still comes off remaining",
+      "input": {
+        "now": "2026-09-26T16:00:00.000Z",
+        "accounts": [
+          {
+            "id": "personal",
+            "routable": true,
+            "policy": {
+              "role": "main",
+              "reservePct": 50,
+              "spendDownWindowHours": 24,
+              "scope": {
+                "repos": []
+              }
+            },
+            "windows": {
+              "seven_day": {
+                "usedPct": 10,
+                "resetsAt": null,
+                "status": null,
+                "observedAt": "2026-09-26T15:59:00.000Z",
+                "source": "statusline"
+              }
+            }
+          },
+          {
+            "id": "spare",
+            "routable": true,
+            "policy": {
+              "role": "rotation",
+              "reservePct": 0,
+              "spendDownWindowHours": 24,
+              "scope": {
+                "repos": []
+              }
+            },
+            "windows": null
+          }
+        ]
+      },
+      "expected": {
+        "pick": "spare",
+        "ranked": [
+          {
+            "id": "spare",
+            "tier": 1,
+            "score": 0.6
+          },
+          {
+            "id": "personal",
+            "tier": 2,
+            "score": 0.24
+          }
+        ],
+        "ineligible": []
+      }
+    },
+    {
+      "name": "equal scores: the lower five-hour usage goes first, before id order",
+      "input": {
+        "now": "2026-09-26T16:00:00.000Z",
+        "accounts": [
+          {
+            "id": "alpha",
+            "routable": true,
+            "policy": {
+              "role": "rotation",
+              "reservePct": 0,
+              "spendDownWindowHours": 24,
+              "scope": {
+                "repos": []
+              }
+            },
+            "windows": {
+              "five_hour": {
+                "usedPct": 50,
+                "resetsAt": "2026-09-26T19:00:00.000Z",
+                "status": null,
+                "observedAt": "2026-09-26T15:59:00.000Z",
+                "source": "statusline"
+              },
+              "seven_day": {
+                "usedPct": 40,
+                "resetsAt": "2026-10-02T16:00:00.000Z",
+                "status": null,
+                "observedAt": "2026-09-26T15:59:00.000Z",
+                "source": "statusline"
+              }
+            }
+          },
+          {
+            "id": "zed",
+            "routable": true,
+            "policy": {
+              "role": "rotation",
+              "reservePct": 0,
+              "spendDownWindowHours": 24,
+              "scope": {
+                "repos": []
+              }
+            },
+            "windows": {
+              "five_hour": {
+                "usedPct": 5,
+                "resetsAt": "2026-09-26T19:00:00.000Z",
+                "status": null,
+                "observedAt": "2026-09-26T15:59:00.000Z",
+                "source": "statusline"
+              },
+              "seven_day": {
+                "usedPct": 40,
+                "resetsAt": "2026-10-02T16:00:00.000Z",
+                "status": null,
+                "observedAt": "2026-09-26T15:59:00.000Z",
+                "source": "statusline"
+              }
+            }
+          }
+        ]
+      },
+      "expected": {
+        "pick": "zed",
+        "ranked": [
+          {
+            "id": "zed",
+            "tier": 1
+          },
+          {
+            "id": "alpha",
+            "tier": 1
+          }
+        ],
+        "ineligible": []
+      }
+    },
+    {
+      "name": "equal scores and five-hour usage: id ascending; a missing five-hour reading counts as 0",
+      "input": {
+        "now": "2026-09-26T16:00:00.000Z",
+        "accounts": [
+          {
+            "id": "zed",
+            "routable": true,
+            "policy": {
+              "role": "rotation",
+              "reservePct": 0,
+              "spendDownWindowHours": 24,
+              "scope": {
+                "repos": []
+              }
+            },
+            "windows": {
+              "seven_day": {
+                "usedPct": 40,
+                "resetsAt": "2026-10-02T16:00:00.000Z",
+                "status": null,
+                "observedAt": "2026-09-26T15:59:00.000Z",
+                "source": "statusline"
+              }
+            }
+          },
+          {
+            "id": "alpha",
+            "routable": true,
+            "policy": {
+              "role": "rotation",
+              "reservePct": 0,
+              "spendDownWindowHours": 24,
+              "scope": {
+                "repos": []
+              }
+            },
+            "windows": {
+              "five_hour": {
+                "usedPct": 0,
+                "resetsAt": "2026-09-26T19:00:00.000Z",
+                "status": null,
+                "observedAt": "2026-09-26T15:59:00.000Z",
+                "source": "statusline"
+              },
+              "seven_day": {
+                "usedPct": 40,
+                "resetsAt": "2026-10-02T16:00:00.000Z",
+                "status": null,
+                "observedAt": "2026-09-26T15:59:00.000Z",
+                "source": "statusline"
+              }
+            }
+          }
+        ]
+      },
+      "expected": {
+        "pick": "alpha",
+        "ranked": [
+          {
+            "id": "alpha",
+            "tier": 1
+          },
+          {
+            "id": "zed",
+            "tier": 1
+          }
+        ],
+        "ineligible": []
+      }
+    },
+    {
+      "name": "an opus model: seven_day_opus exhausted makes the account limited",
+      "input": {
+        "now": "2026-09-26T16:00:00.000Z",
+        "accounts": [
+          {
+            "id": "a",
+            "routable": true,
+            "policy": {
+              "role": "rotation",
+              "reservePct": 0,
+              "spendDownWindowHours": 24,
+              "scope": {
+                "repos": []
+              }
+            },
+            "windows": {
+              "five_hour": {
+                "usedPct": 10,
+                "resetsAt": "2026-09-26T19:00:00.000Z",
+                "status": null,
+                "observedAt": "2026-09-26T15:59:00.000Z",
+                "source": "statusline"
+              },
+              "seven_day": {
+                "usedPct": 20,
+                "resetsAt": "2026-10-02T16:00:00.000Z",
+                "status": null,
+                "observedAt": "2026-09-26T15:59:00.000Z",
+                "source": "statusline"
+              },
+              "seven_day_opus": {
+                "usedPct": 100,
+                "resetsAt": "2026-09-29T16:00:00.000Z",
+                "status": null,
+                "observedAt": "2026-09-26T15:59:00.000Z",
+                "source": "statusline"
+              }
+            }
+          },
+          {
+            "id": "b",
+            "routable": true,
+            "policy": {
+              "role": "rotation",
+              "reservePct": 0,
+              "spendDownWindowHours": 24,
+              "scope": {
+                "repos": []
+              }
+            },
+            "windows": {
+              "five_hour": {
+                "usedPct": 10,
+                "resetsAt": "2026-09-26T19:00:00.000Z",
+                "status": null,
+                "observedAt": "2026-09-26T15:59:00.000Z",
+                "source": "statusline"
+              },
+              "seven_day": {
+                "usedPct": 20,
+                "resetsAt": "2026-10-02T16:00:00.000Z",
+                "status": null,
+                "observedAt": "2026-09-26T15:59:00.000Z",
+                "source": "statusline"
+              }
+            }
+          }
+        ],
+        "model": "claude-opus-4-1"
+      },
+      "expected": {
+        "pick": "b",
+        "ranked": [
+          {
+            "id": "b",
+            "tier": 1
+          }
+        ],
+        "ineligible": [
+          {
+            "id": "a",
+            "reasons": ["limited"]
+          }
+        ]
+      }
+    },
+    {
+      "name": "a sonnet model: the same exhausted seven_day_opus does not limit the account",
+      "input": {
+        "now": "2026-09-26T16:00:00.000Z",
+        "accounts": [
+          {
+            "id": "a",
+            "routable": true,
+            "policy": {
+              "role": "rotation",
+              "reservePct": 0,
+              "spendDownWindowHours": 24,
+              "scope": {
+                "repos": []
+              }
+            },
+            "windows": {
+              "five_hour": {
+                "usedPct": 10,
+                "resetsAt": "2026-09-26T19:00:00.000Z",
+                "status": null,
+                "observedAt": "2026-09-26T15:59:00.000Z",
+                "source": "statusline"
+              },
+              "seven_day": {
+                "usedPct": 20,
+                "resetsAt": "2026-10-02T16:00:00.000Z",
+                "status": null,
+                "observedAt": "2026-09-26T15:59:00.000Z",
+                "source": "statusline"
+              },
+              "seven_day_opus": {
+                "usedPct": 100,
+                "resetsAt": "2026-09-29T16:00:00.000Z",
+                "status": null,
+                "observedAt": "2026-09-26T15:59:00.000Z",
+                "source": "statusline"
+              }
+            }
+          },
+          {
+            "id": "b",
+            "routable": true,
+            "policy": {
+              "role": "rotation",
+              "reservePct": 0,
+              "spendDownWindowHours": 24,
+              "scope": {
+                "repos": []
+              }
+            },
+            "windows": {
+              "five_hour": {
+                "usedPct": 10,
+                "resetsAt": "2026-09-26T19:00:00.000Z",
+                "status": null,
+                "observedAt": "2026-09-26T15:59:00.000Z",
+                "source": "statusline"
+              },
+              "seven_day": {
+                "usedPct": 20,
+                "resetsAt": "2026-10-02T16:00:00.000Z",
+                "status": null,
+                "observedAt": "2026-09-26T15:59:00.000Z",
+                "source": "statusline"
+              }
+            }
+          }
+        ],
+        "model": "claude-sonnet-4-5"
+      },
+      "expected": {
+        "pick": "a",
+        "ranked": [
+          {
+            "id": "a",
+            "tier": 1,
+            "signal": "unknown"
+          },
+          {
+            "id": "b",
+            "tier": 1
+          }
+        ],
+        "ineligible": []
+      }
+    },
+    {
+      "name": "an expired weekly window reads as allowed with 0 used, and its past reset scores on a 1-hour horizon",
+      "input": {
+        "now": "2026-09-26T16:00:00.000Z",
+        "accounts": [
+          {
+            "id": "renewed",
+            "routable": true,
+            "policy": {
+              "role": "rotation",
+              "reservePct": 0,
+              "spendDownWindowHours": 24,
+              "scope": {
+                "repos": []
+              }
+            },
+            "windows": {
+              "five_hour": {
+                "usedPct": 10,
+                "resetsAt": "2026-09-26T19:00:00.000Z",
+                "status": null,
+                "observedAt": "2026-09-26T15:59:00.000Z",
+                "source": "statusline"
+              },
+              "seven_day": {
+                "usedPct": 100,
+                "resetsAt": "2026-09-26T15:00:00.000Z",
+                "status": "rejected",
+                "observedAt": "2026-09-20T15:00:00.000Z",
+                "source": "statusline"
+              }
+            }
+          },
+          {
+            "id": "spare",
+            "routable": true,
+            "policy": {
+              "role": "rotation",
+              "reservePct": 0,
+              "spendDownWindowHours": 24,
+              "scope": {
+                "repos": []
+              }
+            },
+            "windows": {
+              "five_hour": {
+                "usedPct": 10,
+                "resetsAt": "2026-09-26T19:00:00.000Z",
+                "status": null,
+                "observedAt": "2026-09-26T15:59:00.000Z",
+                "source": "statusline"
+              },
+              "seven_day": {
+                "usedPct": 20,
+                "resetsAt": "2026-10-02T16:00:00.000Z",
+                "status": null,
+                "observedAt": "2026-09-26T15:59:00.000Z",
+                "source": "statusline"
+              }
+            }
+          }
+        ]
+      },
+      "expected": {
+        "pick": "renewed",
+        "ranked": [
+          {
+            "id": "renewed",
+            "tier": 1,
+            "score": 100,
+            "signal": "ok"
+          },
+          {
+            "id": "spare",
+            "tier": 1
+          }
+        ],
+        "ineligible": []
+      }
+    }
+  ],
+  "chooseAccount": [
+    {
+      "name": "no identities registered: the ambient account",
+      "input": {
+        "identities": [],
+        "rank": {
+          "pick": null,
+          "ranked": [],
+          "ineligible": []
+        }
+      },
+      "expected": {
+        "account": null,
+        "reason": "no-registry"
+      }
+    },
+    {
+      "name": "identities and a pick: that identity",
+      "input": {
+        "identities": [
+          {
+            "id": "a",
+            "path": "/accounts/a"
+          },
+          {
+            "id": "b",
+            "path": "/accounts/b"
+          }
+        ],
+        "rank": {
+          "pick": "b",
+          "ranked": [
+            {
+              "id": "b",
+              "tier": 1,
+              "score": 1,
+              "signal": {
+                "level": "ok",
+                "window": null,
+                "resetsAt": null,
+                "cause": null
+              }
+            }
+          ],
+          "ineligible": [
+            {
+              "id": "a",
+              "reasons": ["limited"]
+            }
+          ]
+        }
+      },
+      "expected": {
+        "account": {
+          "id": "b",
+          "path": "/accounts/b"
+        }
+      }
+    },
+    {
+      "name": "identities and nothing eligible: 'none' with the reasons, never the ambient account",
+      "input": {
+        "identities": [
+          {
+            "id": "client",
+            "path": "/accounts/client"
+          }
+        ],
+        "rank": {
+          "pick": null,
+          "ranked": [],
+          "ineligible": [
+            {
+              "id": "client",
+              "reasons": ["out-of-scope"]
+            }
+          ]
+        }
+      },
+      "expected": {
+        "account": "none",
+        "reasons": [
+          {
+            "id": "client",
+            "reasons": ["out-of-scope"]
+          }
+        ]
+      }
+    }
+  ],
+  "launchBudget": [
+    {
+      "name": "load per CPU at the cap: no launch",
+      "input": {
+        "load1": 21,
+        "cpus": 14,
+        "live": 0,
+        "parallel": 3,
+        "maxLoadPerCpu": 1.5
+      },
+      "expected": {
+        "slots": 0,
+        "reason": "machine-busy"
+      }
+    },
+    {
+      "name": "load under the cap: the free parallel slots, reviewers counted as live",
+      "input": {
+        "load1": 7,
+        "cpus": 14,
+        "live": 1,
+        "parallel": 3,
+        "maxLoadPerCpu": 1.5
+      },
+      "expected": {
+        "slots": 2,
+        "reason": null
+      }
+    },
+    {
+      "name": "more live than parallel: 0 slots, not negative, and not busy",
+      "input": {
+        "load1": 1,
+        "cpus": 14,
+        "live": 4,
+        "parallel": 3,
+        "maxLoadPerCpu": 1.5
+      },
+      "expected": {
+        "slots": 0,
+        "reason": null
+      }
+    }
+  ]
+}
