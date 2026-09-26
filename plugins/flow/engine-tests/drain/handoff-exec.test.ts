@@ -207,6 +207,7 @@ describe('executeHandoff: one writer per worktree', () => {
     ['a stop that threw', 'cli', 'exited', true],
     ['DorkOS still busy (stop only leaves it idle)', 'dorkos', 'busy', false],
     ['DorkOS in an unknown state', 'dorkos', 'unknown', false],
+    ['cli in an unknown state after stop', 'cli', 'unknown', false],
   ] as const)(
     '%s: reverts to awaiting-handoff and starts nothing',
     async (_n, host, after, throws) => {

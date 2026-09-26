@@ -325,7 +325,11 @@ export async function executeHandoff(
     try {
       await oldLauncher.stop(launchHandle(old));
       const state = (await oldLauncher.state(launchHandle(old))).kind;
-      const ok = old.host === 'dorkos' ? state === 'idle' || state === 'limited' : state !== 'busy';
+      // The same bar as the reducer's stopped(): an `unknown` state is not proof.
+      const ok =
+        old.host === 'dorkos'
+          ? state === 'idle' || state === 'limited'
+          : state === 'exited' || state === 'idle' || state === 'limited';
       if (!ok) still = `the old session is still ${state}`;
     } catch (error) {
       still = `the old session could not be stopped (${(error as Error).message})`;
