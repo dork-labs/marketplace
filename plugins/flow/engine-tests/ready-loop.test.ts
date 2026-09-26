@@ -122,9 +122,14 @@ function releaseGaps(triage: string): string[] {
     ],
     ['skips an item in review', /not in the review state/],
     ['skips an item assigned to a human', /not assigned to\s+a human/],
-    ['skips an item with an open PR', /No open pull request/],
-    ['skips an item with a pushed branch', /pushed branch/],
-    ['skips an item with a worktree', /worktree carries its id/],
+    ['skips work that may live in another repo', /lives in this repo[\s\S]*skip it and report it/],
+    ['checks worktrees by command', /git worktree list --porcelain/],
+    ['checks pushed branches by command', /git ls-remote --heads origin/],
+    ['checks open PRs on this host', /No open pull request on this repo's host[\s\S]*gh pr list/],
+    [
+      'skips an item whose links name a PR or branch',
+      /links, attachments and comments[\s\S]*name no pull\s+request or branch in any repo/,
+    ],
     ['does not restore readiness', /Do not restore `agent\/ready`/],
   ]);
   return gaps;
@@ -210,9 +215,14 @@ describe('both schedules ship and are documented', () => {
     ['skips an item with any flow run', /, whatever its worker's state/],
     ['skips an item in review', /not in the review state/],
     ['skips an item assigned to a human', /not assigned to\s+a human/],
-    ['skips an item with an open PR', /No open pull request/],
-    ['skips an item with a pushed branch', /pushed branch/],
-    ['skips an item with a worktree', /worktree carries its id/],
+    ['skips work that may live in another repo', /lives in this repo[\s\S]*skip it and report it/],
+    ['checks worktrees by command', /git worktree list --porcelain/],
+    ['checks pushed branches by command', /git ls-remote --heads origin/],
+    ['checks open PRs on this host', /No open pull request on this repo's host[\s\S]*gh pr list/],
+    [
+      'skips an item whose links name a PR or branch',
+      /links, attachments and comments[\s\S]*name no pull\s+request or branch in any repo/,
+    ],
     ['does not restore readiness', /Do not restore `agent\/ready`/],
   ])('the release guard bites when it drops: %s', (label, cut) => {
     const triage = read('skills/flow-triage/SKILL.md').replace(cut, 'x');

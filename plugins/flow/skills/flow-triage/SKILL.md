@@ -37,7 +37,14 @@ Each firing:
      Recovery owns those.
    - It is not in the review state (the human-review gate) and not assigned to
      a human.
-   - No open pull request, pushed branch or worktree carries its id.
+   - Its work lives in this repo. If it may live in another (say, a `repo/*`
+     label that is not this repo's), skip it and report it.
+   - No worktree carries its id: `git worktree list --porcelain`.
+   - No pushed branch carries its id: `git ls-remote --heads origin`.
+   - No open pull request on this repo's host carries its id (`gh pr list
+     --state open --search <id>`, or the host's equivalent).
+   - Its own links, attachments and comments, read via the adapter, name no pull
+     request or branch in any repo.
 
    Via the adapter, remove `agent/claimed`, move the item to an
    `unstarted`-category state, and comment why. Do not restore `agent/ready`:

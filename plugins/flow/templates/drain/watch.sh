@@ -10,13 +10,18 @@ while true; do
   for spec in "$@"; do
     repo=${spec%%:*}
     pr=${spec##*:}
-    if ! j=$(gh pr view "$pr" -R "$repo" --json state,autoMergeRequest,statusCheckRollup 2>&1); then
+    err=$(mktemp)
+    j=$(gh pr view "$pr" -R "$repo" --json state,autoMergeRequest,statusCheckRollup 2>"$err")
+    ok=$?
+    msg=$(cat "$err"); rm -f "$err"
+    # A read that failed, or whose JSON has no state, is an error, never "merged".
+    state=$( ((ok == 0)) && jq -r '.state // empty' <<<"$j" 2>/dev/null)
+    if [[ -z $state ]]; then
       errors=$((errors + 1))
-      if ((errors >= MAX_ERRORS)); then echo "$spec ERROR: $j"; exit 1; fi
+      if ((errors >= MAX_ERRORS)); then echo "$spec ERROR: ${msg:-unreadable response}"; exit 1; fi
       continue
     fi
     errors=0
-    state=$(jq -r .state <<<"$j")
     # Check runs report `.conclusion`; commit statuses (a deploy preview, say) report `.state`.
     failing=$(jq -r '[.statusCheckRollup[]?
       | select(((.conclusion // "") | test("FAILURE|CANCELLED|TIMED_OUT|ACTION_REQUIRED"))
