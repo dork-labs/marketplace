@@ -83,6 +83,12 @@ export interface ClosedItem {
   title: string;
   /** Which terminal category it closed in. */
   stateCategory: 'completed' | 'canceled';
+  /**
+   * When it closed (ISO), when the tracker says. Optional: an adapter that
+   * cannot tell leaves it out, and a reader treats an unknown date as recent
+   * (the self-test's `--file` never refiles over a close it cannot date).
+   */
+  closedAt?: string;
 }
 
 /**

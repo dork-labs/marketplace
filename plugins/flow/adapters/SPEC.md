@@ -633,8 +633,9 @@ interface WorkStateChange {
 
 - `getBacklogSnapshot(opts)` returns one pull of the configured team's backlog:
   every open item, normalized exactly as `getEligibleWork` normalizes it, plus
-  closed items as titles when `includeClosed` is set, plus only the projects
-  those items reference. It is scoped to the configured team and never returns
+  closed items as titles when `includeClosed` is set (each with `closedAt`, when
+  the tracker can say when it closed), plus only the projects those items
+  reference. It is scoped to the configured team and never returns
   another team's item: an identifier outside the team is dropped with a warning.
   It is also what the backlog groom reads.
 - `getItem(identifier, opts)` returns one item, normalized the same way, with its

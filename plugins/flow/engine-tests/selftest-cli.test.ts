@@ -54,46 +54,61 @@ async function run(argv: string[], env: NodeJS.ProcessEnv = { VITEST: 'true' }) 
   return { code, stdout, stderr };
 }
 
-describe('flow selftest (fast tier)', () => {
-  it('passes on the shipped plugin, with the engine tests skipped inside Vitest', async () => {
+describe('flow selftest', () => {
+  it('runs fast then scenarios by default, and passes on the shipped plugin', async () => {
     const { code, stdout } = await run(['--json']);
     const report = JSON.parse(stdout);
     expect(report).toMatchObject({
       v: 1,
       ok: true,
-      tiers: ['fast'],
+      tiers: ['fast', 'scenarios'],
       flowVersion: expect.any(String),
     });
     expect(report.checks.filter((c: Check) => c.status === 'fail')).toEqual([]);
     const engine = report.checks.find((c: Check) => c.id === 'engine-tests');
     expect(engine).toMatchObject({ status: 'skip', detail: 'already inside a test run' });
+    expect(report.checks.filter((c: Check) => c.tier === 'scenarios').length).toBeGreaterThan(0);
     expect(code).toBe(0);
   });
 
+  it('runs one tier when --tier names it', async () => {
+    const fast = JSON.parse((await run(['--tier', 'fast', '--json', '--no-save'])).stdout);
+    expect(fast.tiers).toEqual(['fast']);
+    expect(fast.checks.every((c: Check) => c.tier === 'fast')).toBe(true);
+    const scenarios = JSON.parse(
+      (await run(['--tier', 'scenarios', '--json', '--no-save'])).stdout
+    );
+    expect(scenarios.tiers).toEqual(['scenarios']);
+    expect(scenarios.checks.every((c: Check) => c.id.startsWith('scenarios/'))).toBe(true);
+  });
+
   it('counts a skip as not passed: --strict fails the run on it', async () => {
-    expect((await run(['--strict', '--no-save'])).code).toBe(1);
+    expect((await run(['--tier', 'fast', '--strict', '--no-save'])).code).toBe(1);
   });
 
   it('lists skips with their reason in the text report', async () => {
-    const { stdout } = await run(['--no-save']);
+    const { stdout } = await run(['--tier', 'fast', '--no-save']);
     expect(stdout).toMatch(
       /Skipped \(not passed\):\n {2}SKIP {2}engine-tests: already inside a test run/
     );
   });
 
-  it('refuses tiers that do not exist yet, and unknown flags, with exit 2', async () => {
-    const scenarios = await run(['--tier', 'scenarios', '--json']);
-    expect(scenarios.code).toBe(2);
-    expect(JSON.parse(scenarios.stdout)).toMatchObject({ v: 1, ok: false, error: { code: 2 } });
-    expect(scenarios.stderr).toMatch(/arrives with the flow CLI/);
+  it('refuses the live tier (not built yet), unknown tiers and unknown flags, with exit 2', async () => {
+    for (const tier of ['live', 'all']) {
+      const refused = await run(['--tier', tier, '--json']);
+      expect(refused.code).toBe(2);
+      expect(JSON.parse(refused.stdout)).toMatchObject({ v: 1, ok: false, error: { code: 2 } });
+      expect(refused.stderr).toMatch(/the live tier is not built yet/);
+    }
+    expect((await run(['--tier', 'slow'])).code).toBe(2);
     expect((await run(['--bogus'])).code).toBe(2);
   });
 
-  it('saves latest.json and one history line, and keeps .dork/flow/ out of git', async () => {
-    await run(['--no-save']);
+  it('saves latest.json, one history line and one journal line, and keeps .dork/flow/ out of git', async () => {
+    await run(['--tier', 'fast', '--no-save']);
     expect(existsSync(path.join(project, SELFTEST_DIR))).toBe(false);
 
-    await run([]);
+    await run(['--tier', 'fast']);
     const dir = path.join(project, SELFTEST_DIR);
     expect(JSON.parse(readFileSync(path.join(dir, 'latest.json'), 'utf8')).v).toBe(1);
     const history = readFileSync(path.join(dir, 'history.jsonl'), 'utf8').trim().split('\n');
@@ -103,9 +118,16 @@ describe('flow selftest (fast tier)', () => {
       status: 'skip',
       fingerprint: expect.stringMatching(/^[0-9a-f]{12}$/),
     });
+    const journal = readFileSync(path.join(project, '.dork', 'flow', 'journal.jsonl'), 'utf8')
+      .trim()
+      .split('\n')
+      .map((l) => JSON.parse(l));
+    expect(journal).toEqual([
+      expect.objectContaining({ kind: 'selftest', tiers: ['fast'], fail: 0, failing: [] }),
+    ]);
     const exclude = readFileSync(path.join(project, '.git', 'info', 'exclude'), 'utf8');
     expect(exclude.split('\n').filter((l) => l === '.dork/flow/')).toHaveLength(1);
-    await run([]);
+    await run(['--tier', 'fast']);
     const again = readFileSync(path.join(project, '.git', 'info', 'exclude'), 'utf8');
     expect(again.split('\n').filter((l) => l === '.dork/flow/')).toHaveLength(1);
   });
@@ -115,7 +137,7 @@ describe('flow selftest (fast tier)', () => {
     mkdirSync(dir, { recursive: true });
     const old = Array.from({ length: HISTORY_CAP + 50 }, (_, i) => JSON.stringify({ n: i }));
     writeFileSync(path.join(dir, 'history.jsonl'), `${old.join('\n')}\n`);
-    await run([]);
+    await run(['--tier', 'fast']);
     const lines = readFileSync(path.join(dir, 'history.jsonl'), 'utf8').trim().split('\n');
     expect(lines).toHaveLength(HISTORY_CAP);
     expect(JSON.parse(lines[0])).toEqual({ n: 51 });
