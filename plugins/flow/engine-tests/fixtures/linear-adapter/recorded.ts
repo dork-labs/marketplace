@@ -11,6 +11,10 @@
  * `position`. The write-read and comment-target answers are stored whole, with
  * the query they were captured with, in the `*.recorded.json` files beside this. The VALUES are synthesized: ids, titles and people are made up,
  * and only a handful of items are kept, so nothing private is in this file.
+ *
+ * One SHAPE is synthesized too: the closed page's `completedAt` and `canceledAt`
+ * (contract 2.1.0) were added after the recording, following Linear's schema;
+ * see {@link CLOSED_PAGE}.
  */
 
 /** The envelope Composio prints for a successful GraphQL read. */
@@ -181,13 +185,30 @@ export const PROJECTS = {
   },
 };
 
-/** Closed titles, one page. */
+/**
+ * Closed titles, one page. `completedAt` and `canceledAt` are SYNTHESIZED for
+ * contract 2.1.0's `closedAt`, not recorded: the recorded page predates the
+ * query asking for them. They follow Linear's schema (an ISO date-time on the
+ * matching field, `null` on the other).
+ */
 export const CLOSED_PAGE = {
   team: {
     issues: {
       nodes: [
-        { identifier: 'DOR-90', title: 'An earlier shipped change', state: { type: 'completed' } },
-        { identifier: 'DOR-91', title: 'A canceled idea', state: { type: 'canceled' } },
+        {
+          identifier: 'DOR-90',
+          title: 'An earlier shipped change',
+          state: { type: 'completed' },
+          completedAt: '2026-09-01T10:00:00.000Z',
+          canceledAt: null,
+        },
+        {
+          identifier: 'DOR-91',
+          title: 'A canceled idea',
+          state: { type: 'canceled' },
+          completedAt: null,
+          canceledAt: '2026-09-02T11:00:00.000Z',
+        },
       ],
       pageInfo: { endCursor: 'cursor-closed-1', hasNextPage: false },
     },

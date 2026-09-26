@@ -40,8 +40,8 @@
     "target": 462
   },
   "commands/self-test.md": {
-    "baseline": 115,
-    "target": 115
+    "baseline": 140,
+    "target": 140
   },
   "commands/specify.md": {
     "baseline": 129,
