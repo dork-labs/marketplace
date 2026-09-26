@@ -20,6 +20,7 @@ import path from 'node:path';
 
 import { createGithubForge } from '../forge/github.ts';
 import type { Forge, ForgeFactory, ForgeTarget } from '../forge/types.ts';
+import type { HostName, Launcher } from '../launchers/types.ts';
 import type { CodeAdapter } from '../tracker/types.ts';
 import type { ParsedArgs, VerbSpec } from './args.ts';
 import { realHostIo, type HostIo } from './host-io.ts';
@@ -103,6 +104,12 @@ export interface CliDeps {
   io?: Partial<HostIo>;
   /** Builds the forge for a repository. Default: the GitHub forge over {@link runProcess}. */
   createForge?: ForgeFactory;
+  /**
+   * Builds the launcher for a host (`flow drain`, `flow status`). Default: the
+   * real launcher (`scripts/launchers/real.ts`), which the verbs load themselves
+   * so no other verb pays for it.
+   */
+  createLauncher?: (host: HostName) => Launcher;
 }
 
 /** What a verb returns on success, or when its check found problems. */
@@ -176,6 +183,10 @@ export interface VerbContext {
    * Every other verb returns its result instead.
    */
   stdout: TextSink;
+  /** Standard error, for a verb's own progress lines (`flow drain`'s host choice). */
+  stderr: TextSink;
+  /** The injected launcher factory, when a test gives one; else the verb builds real launchers. */
+  createLauncher?: (host: HostName) => Launcher;
 }
 
 /**
@@ -238,6 +249,8 @@ export function createVerbContext(
       deps.createForge?.(target) ??
       createGithubForge({ target, runProcess: deps.runProcess, now: () => deps.now() }),
     stdout: deps.stdout,
+    stderr: deps.stderr,
+    createLauncher: deps.createLauncher,
   };
 }
 

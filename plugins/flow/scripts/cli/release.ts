@@ -12,7 +12,7 @@
  */
 
 import { UsageError } from '../errors.ts';
-import { projectionFor } from '../work-state.ts';
+import { projectionFor, type WorkStateChange } from '../work-state.ts';
 import type { VerbContext, VerbResult } from './context.ts';
 import { signBody } from './provenance.ts';
 import {
@@ -23,7 +23,64 @@ import {
   runFor,
   sessionProvenance,
   setupWrite,
+  type WriteSetup,
 } from './work-write.ts';
+
+/** What {@link releaseItem} lets go of, and how. */
+export interface ReleaseInput {
+  /** The item, e.g. `ACME-12`. */
+  identifier: string;
+  /** `ready` hands it back to the queue; `none` leaves it unowned. */
+  to: 'ready' | 'none';
+  /** The stage to resume at, when not the run's. */
+  stage?: string;
+  /** A signed comment to post, when given. */
+  reason?: string;
+}
+
+/**
+ * Release an item: apply the release projection, delete its run record, and
+ * post the reason when one is given. Shared by `flow release` and `flow drain`,
+ * which releases a queued claim whose worker never started (spec
+ * `flow-handoff-dispatch` §2.6). Honors `--dry-run` on `ctx`.
+ *
+ * @param ctx - The verb's context.
+ * @param setup - The loaded config, adapter (with `comment` when a reason is given) and run store.
+ * @param input - The item, where it goes, and why.
+ * @returns The change, whether a run record was removed, and whether a comment was posted.
+ */
+export async function releaseItem(
+  ctx: VerbContext,
+  setup: WriteSetup,
+  input: ReleaseInput
+): Promise<{ change: WorkStateChange; runRemoved: boolean; commented: boolean }> {
+  const { loaded, stages, adapter, store } = setup;
+  const item = await adapter.getItem(input.identifier);
+  requireOpen(item, 'release');
+  const existing = runFor(store, item);
+  const change = projectionFor(
+    { type: 'release', to: input.to, stage: input.stage },
+    { stages, runStage: existing?.stage, removedStageLabel: currentStageLabel(item) }
+  );
+  const body =
+    input.reason === undefined
+      ? undefined
+      : signBody(
+          input.reason,
+          loaded.config.identity.marker,
+          sessionProvenance(ctx, existing?.host)
+        );
+
+  if (!ctx.dryRun) {
+    await applyAndVerify(adapter, item, change);
+    if (existing !== undefined) {
+      const removed = await store.removeRun(item.id);
+      requireStored(removed.status, store.path, `run "flow release ${input.identifier}" again`);
+    }
+    if (body !== undefined) await adapter.comment(item, body);
+  }
+  return { change, runRemoved: existing !== undefined, commented: body !== undefined };
+}
 
 /**
  * Run `flow release`.
@@ -44,35 +101,21 @@ export async function run(ctx: VerbContext): Promise<VerbResult> {
       ? (['getItem', 'applyWorkState', 'comment'] as const)
       : (['getItem', 'applyWorkState'] as const);
 
-  const { loaded, stages, adapter, store } = await setupWrite(ctx, needed);
-  const item = await adapter.getItem(identifier);
-  requireOpen(item, 'release');
-  const existing = runFor(store, item);
-  const change = projectionFor(
-    { type: 'release', to, stage: typeof stageFlag === 'string' ? stageFlag : undefined },
-    { stages, runStage: existing?.stage, removedStageLabel: currentStageLabel(item) }
-  );
-  const body =
-    typeof reason === 'string'
-      ? signBody(reason, loaded.config.identity.marker, sessionProvenance(ctx, existing?.host))
-      : undefined;
-
-  if (!ctx.dryRun) {
-    await applyAndVerify(adapter, item, change);
-    if (existing !== undefined) {
-      const removed = await store.removeRun(item.id);
-      requireStored(removed.status, store.path, `run "flow release ${identifier}" again`);
-    }
-    if (body !== undefined) await adapter.comment(item, body);
-  }
+  const setup = await setupWrite(ctx, needed);
+  const { change, runRemoved, commented } = await releaseItem(ctx, setup, {
+    identifier,
+    to,
+    stage: typeof stageFlag === 'string' ? stageFlag : undefined,
+    reason: typeof reason === 'string' ? reason : undefined,
+  });
   return {
     json: {
       ok: true,
       dryRun: ctx.dryRun,
       identifier,
       change,
-      runRemoved: existing !== undefined,
-      commented: body !== undefined,
+      runRemoved,
+      commented,
     },
     text: `${ctx.dryRun ? 'Would release' : 'Released'} ${identifier} ${to === 'ready' ? `to the ready queue at ${change.stageLabel}` : 'with no owner'}.`,
   };

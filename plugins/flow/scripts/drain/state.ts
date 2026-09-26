@@ -60,6 +60,8 @@ export interface DrainWorkerHandle extends Omit<SessionHandle, 'runtime'> {
   runtime?: SessionHandle['runtime'];
   /** `true` while the slot holds the intent and the session is not yet confirmed started. */
   pending?: boolean;
+  /** When the intent was written (ISO); a pending slot older than the start timeout is resolved (§4.3). */
+  pendingSince?: string;
 }
 
 /** A reviewer's session handle: the SHA it reviews, where, and its token's hash. */
@@ -215,6 +217,7 @@ const workerHandleShape = {
   permissionMode: vocabulary<LaunchPermissionMode>().optional(),
   model: z.string().optional(),
   pending: z.boolean().optional(),
+  pendingSince: z.string().optional(),
 };
 
 /** The on-disk check for a {@link DrainWorkerHandle}. */

@@ -319,23 +319,56 @@ export function renderNext(summary: NextSummary): string {
   ].join('\n');
 }
 
+/** What {@link planNext} is asked for. */
+export interface PlanRequest {
+  /** How many picks to keep. */
+  count: number;
+  /** `--for-project`: only items of this project (id, or name in any case). */
+  forProject?: string;
+  /**
+   * `flow drain --items`: only these identifiers, picked in this order (still
+   * subject to the dispatch policy and the WIP cap).
+   */
+  items?: readonly string[];
+  /** Whether to assign each pick its account (`--no-account` turns it off). */
+  accounts: boolean;
+}
+
+/** What {@link planNext} found. */
+export interface NextPlan {
+  /** The picks, in order. */
+  picked: WorkItem[];
+  /** Each pick's account, in pick order; absent when accounts were not asked for or nothing was picked. */
+  accounts?: ItemAccount[];
+  /** The dispatch outcome over the candidates. */
+  outcome: ReturnType<typeof classifyDispatchOutcome>;
+  /** Nothing is eligible only because work in progress fills the WIP cap. */
+  atWipCap: boolean;
+  /** The WIP load. */
+  wip: WipLoad;
+  /** The checkout's `owner/name`, when accounts were assigned. */
+  repo: string | null;
+  /** What accounts were assigned from (with each account's path), when they were. */
+  assignment?: AssignmentInput;
+}
+
 /**
- * Run `flow next`.
+ * The shared half of `flow next` and `flow drain`'s slot filling (spec
+ * `flow-handoff-dispatch` §4.2 step 4): pull the backlog, rank it with the
+ * dispatch policy, keep the first `count` picks, and assign each its account.
+ * Config warnings are flushed; the no-account message is left to the caller.
  *
  * @param ctx - The verb's context.
- * @returns The picks and the starvation signals.
+ * @param project - The loaded project config.
+ * @param request - The count, filters and whether to assign accounts.
+ * @returns The picks, their accounts and the dispatch signals.
  */
-export async function run(ctx: VerbContext): Promise<VerbResult> {
-  const count = parseCount(ctx.args.flags.count);
-  const project = loadProjectConfig(ctx);
-  const { config, paused } = project.loaded;
-  if (paused !== null && !ctx.manual) {
-    project.flushWarnings();
-    throw new PausedError(
-      `flow is paused${paused.pausedAt ? ` (since ${paused.pausedAt})` : ''}; /flow:resume lifts it, or pass --manual when a person is driving`
-    );
-  }
-
+export async function planNext(
+  ctx: VerbContext,
+  project: ReturnType<typeof loadProjectConfig>,
+  request: PlanRequest
+): Promise<NextPlan> {
+  const { config } = project.loaded;
   const snapshot = await readBacklog(ctx, project.adapter);
   const identity: Identity = {
     agent: await resolveAgentId(project),
@@ -346,13 +379,16 @@ export async function run(ctx: VerbContext): Promise<VerbResult> {
 
   const scope: OwnershipScope = config.ownership.scope.includes('issues') ? 'issues' : 'projects';
   const wip = wipLoad(snapshot.items);
-  const forProject = ctx.args.flags['for-project'];
   const projectId =
-    typeof forProject === 'string' ? resolveProjectFilter(snapshot, forProject) : undefined;
-  const candidates =
-    projectId === undefined
-      ? snapshot.items
-      : snapshot.items.filter((item) => item.project?.id === projectId);
+    request.forProject === undefined
+      ? undefined
+      : resolveProjectFilter(snapshot, request.forProject);
+  const wanted = request.items === undefined ? undefined : new Set(request.items);
+  const candidates = snapshot.items.filter(
+    (item) =>
+      (projectId === undefined || item.project?.id === projectId) &&
+      (wanted === undefined || wanted.has(item.identifier))
+  );
 
   const ownershipOf = Object.fromEntries(
     candidates.map((item) => [item.identifier, classifyOwnership(item, identity, scope)])
@@ -377,14 +413,49 @@ export async function run(ctx: VerbContext): Promise<VerbResult> {
   );
   const atWipCap = outcome.eligibleCount === 0 && uncapped.eligibleCount > 0;
 
-  const picked = outcome.picked.slice(0, count);
+  const order = request.items;
+  const ranked =
+    order === undefined
+      ? outcome.picked
+      : [...outcome.picked].sort(
+          (a, b) => order.indexOf(a.identifier) - order.indexOf(b.identifier)
+        );
+  const picked = ranked.slice(0, request.count);
   let accounts: ItemAccount[] | undefined;
-  if (ctx.args.flags['no-account'] !== true && picked.length > 0) {
-    const input = await gatherAssignmentInput(ctx, config);
-    accounts = assignAccounts(picked, input);
-    const blocked = accounts.find((account) => account.pick === null);
-    if (blocked !== undefined) ctx.warn(noAccountMessage(input.repo, blocked));
+  let assignment: AssignmentInput | undefined;
+  if (request.accounts && picked.length > 0) {
+    assignment = await gatherAssignmentInput(ctx, config);
+    accounts = assignAccounts(picked, assignment);
   }
+  return { picked, accounts, outcome, atWipCap, wip, repo: assignment?.repo ?? null, assignment };
+}
+
+/**
+ * Run `flow next`.
+ *
+ * @param ctx - The verb's context.
+ * @returns The picks and the starvation signals.
+ */
+export async function run(ctx: VerbContext): Promise<VerbResult> {
+  const count = parseCount(ctx.args.flags.count);
+  const project = loadProjectConfig(ctx);
+  const { config, paused } = project.loaded;
+  if (paused !== null && !ctx.manual) {
+    project.flushWarnings();
+    throw new PausedError(
+      `flow is paused${paused.pausedAt ? ` (since ${paused.pausedAt})` : ''}; /flow:resume lifts it, or pass --manual when a person is driving`
+    );
+  }
+
+  const plan = await planNext(ctx, project, {
+    count,
+    forProject:
+      typeof ctx.args.flags['for-project'] === 'string' ? ctx.args.flags['for-project'] : undefined,
+    accounts: ctx.args.flags['no-account'] !== true,
+  });
+  const { picked, accounts, outcome, atWipCap, wip } = plan;
+  const blocked = accounts?.find((account) => account.pick === null);
+  if (blocked !== undefined) ctx.warn(noAccountMessage(plan.repo, blocked));
   return {
     json: {
       picked:
@@ -415,7 +486,7 @@ function jsonAccount(account: ItemAccount): Omit<ItemAccount, 'label'> {
 }
 
 /** The project config `flow next` reads. */
-type NextConfig = ReturnType<typeof loadProjectConfig>['loaded']['config'];
+export type NextConfig = ReturnType<typeof loadProjectConfig>['loaded']['config'];
 
 /**
  * Read what account assignment needs: the registry, `fleet.json` and each
@@ -427,7 +498,7 @@ type NextConfig = ReturnType<typeof loadProjectConfig>['loaded']['config'];
  * @param config - The project config.
  * @returns The assignment input.
  */
-async function gatherAssignmentInput(
+export async function gatherAssignmentInput(
   ctx: VerbContext,
   config: NextConfig
 ): Promise<AssignmentInput> {
