@@ -1,0 +1,34 @@
+{"v":1,"ts":"2026-09-13T09:00:00.000Z","flow":"0.26.0","runtime":"claude-code","harness":"cmux","kind":"verb","verb":"next","ms":120,"exit":0}
+{"v":1,"ts":"2026-09-14T12:00:00.000Z","flow":"0.26.0","runtime":"claude-code","harness":"cmux","kind":"item.readied","item":"FAKE-5","by":"triage"}
+{"v":1,"ts":"2026-09-15T10:00:00.000Z","flow":"0.26.0","runtime":"claude-code","harness":"cmux","kind":"review","round":1,"sha7":"aaaaaaa","verdict":"clean","blocker":0,"shouldFix":0,"nit":1,"categories":[]}
+{"v":1,"ts":"2026-09-16T10:00:00.000Z","flow":"0.26.0","runtime":"claude-code","harness":"cmux","kind":"review","round":1,"sha7":"bbbbbbb","verdict":"clean","blocker":0,"shouldFix":0,"nit":0,"categories":[]}
+{"v":1,"ts":"2026-09-17T08:00:00.000Z","flow":"0.26.0","runtime":"claude-code","harness":"cmux","kind":"usage.snapshot","accountRuntime":"claude-code","account":"default","windows":{"five_hour":{"usedPct":30,"resetsAt":"2026-09-17T12:00:00.000Z"}}}
+{"v":1,"ts":"2026-09-18T08:00:00.000Z","flow":"0.26.0","runtime":"claude-code","harness":"cmux","kind":"note","noteKind":"friction","skill":"flow-usage","text":"an older note from the previous window"}
+{"v":1,"ts":"2026-09-20T09:00:00.000Z","flow":"0.26.0","runtime":"claude-code","harness":"cmux","kind":"verb","verb":"next","ms":90,"exit":0}
+{"v":1,"ts":"2026-09-20T10:00:00.000Z","flow":"0.26.0","runtime":"claude-code","harness":"cmux","kind":"usage.snapshot","accountRuntime":"claude-code","account":"default","windows":{"five_hour":{"usedPct":20,"resetsAt":"2026-09-20T14:00:00.000Z"},"seven_day":{"usedPct":40,"resetsAt":"2026-09-25T00:00:00.000Z"}}}
+{"v":1,"ts":"2026-09-20T11:00:00.000Z","flow":"0.26.0","runtime":"claude-code","harness":"cmux","kind":"usage.snapshot","accountRuntime":"claude-code","account":"default","windows":{"five_hour":{"usedPct":60,"resetsAt":"2026-09-20T14:00:00.000Z"},"seven_day":{"usedPct":55,"resetsAt":"2026-09-25T00:00:00.000Z"}}}
+{"v":1,"ts":"2026-09-20T12:00:00.000Z","flow":"0.26.0","runtime":"claude-code","harness":"cmux","kind":"usage.snapshot","accountRuntime":"claude-code","account":"default","windows":{"five_hour":{"usedPct":100,"resetsAt":"2026-09-20T14:00:00.000Z"}}}
+{"v":1,"ts":"2026-09-20T12:40:00.000Z","flow":"0.26.0","runtime":"claude-code","harness":"cmux","kind":"usage.snapshot","accountRuntime":"claude-code","account":"default","windows":{"five_hour":{"usedPct":100,"resetsAt":"2026-09-20T14:00:00.000Z"}}}
+{"v":1,"ts":"2026-09-20T15:00:00.000Z","flow":"0.26.0","runtime":"claude-code","harness":"cmux","kind":"usage.snapshot","accountRuntime":"claude-code","account":"default","windows":{"five_hour":{"usedPct":10,"resetsAt":"2026-09-20T19:00:00.000Z"}}}
+{"v":1,"ts":"2026-09-20T18:00:00.000Z","flow":"0.26.0","runtime":"claude-code","harness":"cmux","kind":"usage.snapshot","accountRuntime":"claude-code","account":"default","windows":{"five_hour":{"usedPct":100,"resetsAt":"2026-09-20T19:00:00.000Z"}}}
+{"v":1,"ts":"2026-09-21T12:00:00.000Z","flow":"0.26.0","runtime":"claude-code","harness":"cmux","kind":"item.readied","item":"FAKE-1","by":"triage"}
+{"v":1,"ts":"2026-09-21T13:00:00.000Z","flow":"0.26.0","runtime":"claude-code","harness":"cmux","kind":"review","round":1,"sha7":"ccccccc","verdict":"clean","blocker":0,"shouldFix":1,"nit":0,"categories":["docs"]}
+{"v":1,"ts":"2026-09-21T14:00:00.000Z","flow":"0.26.0","runtime":"claude-code","harness":"cmux","kind":"review","round":1,"sha7":"ddddddd","verdict":"changes","blocker":2,"shouldFix":0,"nit":0,"categories":["logic"]}
+{"v":1,"ts":"2026-09-22T09:00:00.000Z","flow":"0.26.0","runtime":"claude-code","harness":"cmux","kind":"note","noteKind":"workaround","skill":"flow-usage","text":"flow usage probe could not see the main Claude Code account because DorkOS registered it as its implicit default account; fixed in rev 6d, but the probe had to be pointed at the account by hand first"}
+{"v":1,"ts":"2026-09-22T10:00:00.000Z","flow":"0.26.0","runtime":"claude-code","harness":"cmux","kind":"oracle.error","oracle":"flow.ts next","exit":4,"errorClass":"tracker unreachable"}
+{"v":1,"ts":"2026-09-22T11:00:00.000Z","flow":"0.26.0","runtime":"opencode","harness":"cmux","kind":"oracle.error","oracle":"flow.ts next","exit":4,"errorClass":"tracker unreachable"}
+{"v":1,"ts":"2026-09-22T12:00:00.000Z","flow":"0.26.0","runtime":"claude-code","harness":"cmux","kind":"oracle.error","oracle":"flow.ts audit","exit":2,"errorClass":"bad snapshot"}
+{"v":1,"ts":"2026-09-23T12:00:00.000Z","flow":"0.26.0","runtime":"codex","harness":"cmux","kind":"item.readied","item":"FAKE-2","by":"decompose"}
+{"v":1,"ts":"2026-09-23T13:00:00.000Z","flow":"0.26.0","runtime":"codex","harness":"cmux","kind":"review","round":1,"sha7":"eeeeeee","verdict":"changes","blocker":1,"shouldFix":2,"nit":0,"categories":["test"]}
+{"v":1,"ts":"2026-09-23T14:00:00.000Z","flow":"0.26.0","runtime":"codex","harness":"cmux","kind":"review","round":2,"sha7":"fffffff","verdict":"clean","blocker":0,"shouldFix":0,"nit":0,"categories":[]}
+{"v":1,"ts":"2026-09-23T15:00:00.000Z","flow":"0.26.0","runtime":"claude-code","harness":"cmux","kind":"ci","pr":11,"event":"ejected","class":"innocent"}
+{"v":1,"ts":"2026-09-23T16:00:00.000Z","flow":"0.26.0","runtime":"claude-code","harness":"cmux","kind":"ci","pr":12,"event":"ejected","class":"innocent"}
+{"v":1,"ts":"2026-09-23T17:00:00.000Z","flow":"0.26.0","runtime":"claude-code","harness":"cmux","kind":"ci","pr":13,"event":"ejected","class":"innocent"}
+{"v":1,"ts":"2026-09-23T18:00:00.000Z","flow":"0.26.0","runtime":"codex","harness":"cmux","kind":"ci","pr":14,"event":"red","class":"own"}
+{"v":1,"ts":"2026-09-24T09:00:00.000Z","flow":"0.26.0","runtime":"codex","harness":"cmux","kind":"note","noteKind":"friction","skill":"flow-usage","text":"flow usage scan skipped the Codex account until FLOW_RUNTIME was set by hand"}
+{"v":1,"ts":"2026-09-24T10:00:00.000Z","flow":"0.26.0","runtime":"claude-code","harness":"cmux","kind":"note","noteKind":"confusion","text":"The verifying-work skill and the review rubric disagree on when to re-arm"}
+{"v":1,"ts":"2026-09-24T11:00:00.000Z","flow":"0.26.0","runtime":"claude-code","harness":"cmux","kind":"operator.wait","phase":"start"}
+{"v":1,"ts":"2026-09-24T12:00:00.000Z","flow":"0.26.0","runtime":"claude-code","harness":"cmux","kind":"operator.wait","phase":"end","waitedMs":3600000}
+{"v":1,"ts":"2026-09-24T13:00:00.000Z","flow":"0.26.0","runtime":"claude-code","harness":"cmux","kind":"operator.wait","phase":"end","waitedMs":10800000}
+{"v":1,"ts":"2026-09-25T00:00:00.000Z","flow":"0.26.0","runtime":"claude-code","harness":"cmux","kind":"item.readied","item":"FAKE-3","by":"human"}
+{"v":1,"ts":"2026-09-25T06:00:00.000Z","flow":"0.26.0","runtime":"claude-code","harness":"cmux","kind":"retro","window":"7d","proposals":0,"filed":0,"commented":0}

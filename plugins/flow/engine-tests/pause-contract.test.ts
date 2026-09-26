@@ -94,6 +94,35 @@ describe('every autonomous entry point checks the pause first', () => {
   });
 });
 
+describe('the flow-retro tick checks the pause through flow-groom', () => {
+  /**
+   * flow-retro does not copy the pause check (the doc lint's duplicate rule
+   * keeps one copy); its step 0 runs flow-groom's step 0, which the suite
+   * above pins. What its step 0 must say for that to hold.
+   */
+  function retroGaps(text: string): string[] {
+    const step = between(text, '0. **Pause check', '1. Run `flow selftest');
+    const needs: [string, RegExp][] = [
+      ['comes before anything else', /\*\*Pause check, before anything else/],
+      ['runs flow-groom step 0', /step 0 of\s+`<flow-root>\/skills\/flow-groom\/SKILL\.md`/],
+      ['stops when it says to', /stop\s+whenever it says to stop/],
+    ];
+    return needs.filter(([, re]) => !re.test(step)).map(([label]) => label);
+  }
+
+  it('its step 0 runs flow-groom step 0 and stops when that says stop', () => {
+    expect(retroGaps(read('skills/flow-retro/SKILL.md'))).toEqual([]);
+  });
+
+  it('the guard bites when the step stops pointing at flow-groom', () => {
+    const planted = read('skills/flow-retro/SKILL.md').replace(
+      'flow-groom/SKILL.md',
+      'flow-retro/SKILL.md'
+    );
+    expect(retroGaps(planted)).toEqual(['runs flow-groom step 0']);
+  });
+});
+
 describe('the general pause rule in /flow', () => {
   it('states who stops and who does not', () => {
     expect(generalPauseGaps(read('commands/flow.md'))).toEqual([]);
