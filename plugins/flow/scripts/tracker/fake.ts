@@ -128,6 +128,11 @@ export interface FakeBacklog {
   labels?: string[];
   /** Idempotency keys `createItem` has seen, and the item each one made. */
   createdKeys?: Record<string, string>;
+  /**
+   * Items the tracker archived: gone from every snapshot (as Linear leaves
+   * archived issues out of team reads), still readable by id.
+   */
+  archived?: WorkItem[];
   /** When set, every read throws a plain `Error` with this message (an unreachable tracker). */
   failReads?: string;
   /** When true, writes report success and change nothing (a tracker that drops writes). */
@@ -305,6 +310,20 @@ export class FakeTracker {
     else dates[item.identifier] = this.now().toISOString();
   }
 
+  /**
+   * The tracker archives a closed item, as Linear does after a team's archive
+   * period: it leaves every snapshot, and a read by id still finds it.
+   *
+   * @param identifier - A closed item of this team.
+   */
+  archive(identifier: string): void {
+    const index = this.backlog.items.findIndex((item) => item.identifier === identifier);
+    if (index < 0) throw new PreconditionError(`${identifier} was not found`);
+    const [item] = this.backlog.items.splice(index, 1);
+    (this.backlog.archived ??= []).push(item);
+    this.persist(this.backlog);
+  }
+
   /** Throw when reads are switched off (an unreachable tracker). */
   private read(): void {
     if (this.backlog.failReads !== undefined) throw new Error(this.backlog.failReads);
@@ -323,7 +342,9 @@ export class FakeTracker {
    * Linear's "Entity not found").
    */
   private find(identifier: string, use: 'read' | 'write' = 'read'): WorkItem {
-    const item = this.backlog.items.find((candidate) => candidate.identifier === identifier);
+    const item =
+      this.backlog.items.find((candidate) => candidate.identifier === identifier) ??
+      (this.backlog.archived ?? []).find((candidate) => candidate.identifier === identifier);
     if (item === undefined) {
       if (use === 'write') {
         throw new TrackerError(`the tracker could not find ${identifier} to write to`);
@@ -384,16 +405,23 @@ export class FakeTracker {
    */
   private createItem(spec: NewItem): CreatedItem {
     this.read();
-    if (spec.key !== undefined) {
-      const existing = this.backlog.createdKeys?.[spec.key];
+    // A key names one OPEN item. A key whose item is closed or archived moves
+    // on to the key chained with that item's identifier, as the Linear adapter
+    // does, so a returning failure gets a new item.
+    let chain = spec.key;
+    while (chain !== undefined) {
+      const existing = this.backlog.createdKeys?.[chain];
+      if (existing === undefined) break;
+      const archived = (this.backlog.archived ?? []).some((i) => i.identifier === existing);
       const item = this.backlog.items.find((candidate) => candidate.identifier === existing);
-      if (item !== undefined) {
+      if (item !== undefined && !archived && isOpen(item.stateCategory)) {
         return {
           id: item.id,
           identifier: item.identifier,
           url: `https://fake.tracker/${item.identifier}`,
         };
       }
+      chain = `${chain}:${existing}`;
     }
     const labels = [...new Set(spec.labels)];
     const agent = labels.find((label) => label.startsWith('agent/'));
@@ -440,6 +468,7 @@ export class FakeTracker {
     const used = [
       ...this.backlog.items.map((item) => item.identifier),
       ...(this.backlog.closed ?? []).map((item) => item.identifier),
+      ...(this.backlog.archived ?? []).map((item) => item.identifier),
     ].filter((identifier) => identifier.startsWith(`${key}-`));
     const next =
       Math.max(
@@ -478,7 +507,7 @@ export class FakeTracker {
     };
     this.backlog.items.push(item);
     parent?.relations.children.push(identifier);
-    if (spec.key !== undefined) (this.backlog.createdKeys ??= {})[spec.key] = identifier;
+    if (chain !== undefined) (this.backlog.createdKeys ??= {})[chain] = identifier;
     this.writes.push({ method: 'createItem', identifier });
     this.persist(this.backlog);
     return created;

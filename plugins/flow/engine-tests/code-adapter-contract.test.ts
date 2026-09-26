@@ -42,6 +42,8 @@ interface Harness {
   id(n: number): string;
   /** An identifier of an item that exists but belongs to another team. */
   foreign: string;
+  /** The tracker archives a closed item: gone from team reads, still readable by id. */
+  archive(identifier: string): void;
 }
 
 const SEEDS: Seed[] = [
@@ -116,6 +118,7 @@ function fakeHarness(): Harness {
     writes: () => tracker.writes.length,
     id: (n) => `FAKE-${n}`,
     foreign: 'OTHER-7',
+    archive: (identifier) => tracker.archive(identifier),
   };
 }
 
@@ -145,7 +148,17 @@ function linearHarness(): Harness {
     transport: sim.transport,
     warn: () => undefined,
   });
-  return { adapter, writes: sim.writes, id: (n) => `${TEAM.key}-${n}`, foreign: 'FB-7' };
+  return {
+    adapter,
+    writes: sim.writes,
+    id: (n) => `${TEAM.key}-${n}`,
+    foreign: 'FB-7',
+    archive: (identifier) => {
+      const issue = sim.issues.find((i) => i.identifier === identifier);
+      if (issue === undefined) throw new Error(`no ${identifier}`);
+      issue.archived = true;
+    },
+  };
 }
 
 async function rejection(promise: Promise<unknown>): Promise<unknown> {
@@ -354,6 +367,32 @@ describe.each([
     const snapshot = await h.adapter.getBacklogSnapshot();
     expect(snapshot.items.filter((i) => i.title === 'Once')).toHaveLength(1);
     expect(h.writes()).toBe(writes);
+  });
+
+  it('a key names one OPEN item: once it is closed, or closed and archived, the same key creates a new one', async () => {
+    const h = make();
+    const spec = { title: 'Keyed', description: 'd', labels: ['type/task'], key: 'fp-return' };
+    const first = await h.adapter.createItem?.(spec);
+    const item = await h.adapter.getItem(first?.identifier ?? '');
+    await h.adapter.applyWorkState(item, {
+      stateCategory: 'completed',
+      agentLabel: 'agent/completed',
+    });
+    const second = await h.adapter.createItem?.(spec);
+    expect(second?.identifier).not.toBe(first?.identifier);
+
+    const secondItem = await h.adapter.getItem(second?.identifier ?? '');
+    await h.adapter.applyWorkState(secondItem, {
+      stateCategory: 'completed',
+      agentLabel: 'agent/completed',
+    });
+    h.archive(second?.identifier ?? '');
+    const snapshot = await h.adapter.getBacklogSnapshot({ includeClosed: true });
+    expect(snapshot.closed.map((c) => c.identifier)).not.toContain(second?.identifier);
+    const third = await h.adapter.createItem?.(spec);
+    expect([first?.identifier, second?.identifier]).not.toContain(third?.identifier);
+    // And the new one is what the key names now: a retry returns it.
+    expect((await h.adapter.createItem?.(spec))?.identifier).toBe(third?.identifier);
   });
 
   it('refuses two labels of one group and any agent label, creating nothing', async () => {

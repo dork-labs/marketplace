@@ -242,6 +242,23 @@ describe('fileFailures against the fake tracker', () => {
     expect(fake.backlog.items.map((i) => i.identifier)).toEqual(['FAKE-1', 'FAKE-2']);
   });
 
+  it('files a failure again even when its old item was archived out of every snapshot', async () => {
+    // The snapshot no longer shows the archived item, so the caller's key is the
+    // same as the first time: the adapter must still make a new item.
+    const fake = new FakeTracker({ items: [] }, { now: () => NOW });
+    const deps = { adapter: fake.adapter, sign, unsign: unsignedBody };
+    const first = await fileFailures([check], META, deps);
+    fake.mergePr({ body: `Closes ${first.filed[0].identifier}` });
+    fake.archive(first.filed[0].identifier);
+    const later = {
+      ...META,
+      evidenceAt: new Date(NOW.getTime() + 200 * DAY).toISOString(),
+      now: new Date(NOW.getTime() + 200 * DAY),
+    };
+    const again = await fileFailures([check], later, deps);
+    expect(again.filed.map((f) => f.identifier)).toEqual(['FAKE-2']);
+  });
+
   it('creates the item after dedupe when the adapter can, and only comments the next time', async () => {
     const fake = tracker({ items: [] });
     const deps = { adapter: fake.adapter, sign, unsign: unsignedBody };

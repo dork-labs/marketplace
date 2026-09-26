@@ -672,8 +672,11 @@ interface WorkStateChange {
 - The item lands where the tracker puts new work (Linear: its triage state).
 - It creates at most one item per call and returns its `id`, `identifier` and a
   `url` a person can open. It throws when the tracker does not confirm.
-- **Idempotent with a `key`.** The same key never makes a second item: the
-  second call returns the first. On Linear the key becomes the issue's
+- **Idempotent with a `key`.** A key names one OPEN item: while that item is
+  open, a second call with the key returns it. Once it is closed or archived,
+  the key moves on (chained with the old item's identifier) and the call makes
+  a new item, so a failure that returns long after its item closed, even one
+  archived out of every snapshot, is filed again. On Linear the key becomes the issue's
   client-chosen id, so a create that times out after Linear accepted it is
   found by that id, and a second run filing the same failure at the same time
   gets "already exists" and returns the first run's item. Callers still dedupe

@@ -1,7 +1,7 @@
 {
   "recordedAt": "2026-09-26",
   "composio": "0.2.31",
-  "note": "The SHAPES are recorded from real Linear calls: read-only reads of a real team, one real create with a client-chosen id (it filed a needed item and landed in Triage), the same create sent again, and one rejected label update. The VALUES are synthesized: label ids, project ids and names, the item's id, identifier and url, and the team id. Only the generic label families and one bare label are kept.",
+  "note": "The SHAPES are recorded from real Linear calls: read-only reads of a real team, one real create with a client-chosen id (it filed a needed item and landed in Triage), the same create sent again, and one rejected label update. The VALUES are synthesized: label ids, project ids and names, the item's id, identifier and url, and the team id. Only the generic label families and one bare label are kept. The created-read answer carries archivedAt and the state type, so a keyed item that closed or was archived is told apart from an open one.",
   "createRead": {
     "query": "query FlowCreateRead($teamId: String!) {\n  team(id: $teamId) {\n    createLabels: labels(first: 250) { nodes { id name isGroup parent { name } } }\n  }\n}",
     "response": {
@@ -364,15 +364,19 @@
     }
   },
   "createdRead": {
-    "query": "query FlowCreatedRead($id: String!) {\n  issue(id: $id) { id identifier url team { id key } }\n}",
+    "query": "query FlowCreatedRead($id: String!) {\n  issue(id: $id) { id identifier url archivedAt state { type } team { id key } }\n}",
     "response": {
       "successful": true,
       "data": {
         "composio_execution_message": null,
         "data": {
           "issue": {
+            "archivedAt": null,
             "id": "00000000-0000-4000-8000-000000000999",
             "identifier": "DOR-999",
+            "state": {
+              "type": "triage"
+            },
             "team": {
               "id": "00000000-0000-4000-8000-00000000team",
               "key": "DOR"
@@ -388,7 +392,7 @@
     }
   },
   "createdReadMissing": {
-    "query": "query FlowCreatedRead($id: String!) {\n  issue(id: $id) { id identifier url team { id key } }\n}",
+    "query": "query FlowCreatedRead($id: String!) {\n  issue(id: $id) { id identifier url archivedAt state { type } team { id key } }\n}",
     "response": {
       "successful": false,
       "data": {

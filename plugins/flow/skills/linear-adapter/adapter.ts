@@ -221,8 +221,11 @@ export const CREATE_ITEM_MUTATION = `mutation FlowCreateItem($input: IssueCreate
 
 /** The read after a create that did not answer: did the issue with that id land? */
 export const CREATED_READ_QUERY = `query FlowCreatedRead($id: String!) {
-  issue(id: $id) { id identifier url team { id key } }
+  issue(id: $id) { id identifier url archivedAt state { type } team { id key } }
 }`;
+
+/** How many closed or archived items one key may pass over before a create gives up. */
+const KEY_CHAIN_MAX = 20;
 
 /** A UUID, for telling a project id from a project name. */
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -639,12 +642,24 @@ export function createAdapter(ctx: AdapterContext): CodeAdapter {
   }
 
   /**
-   * The issue a create with this id made, or `null` when none landed. Linear's
-   * "Entity not found" is the null answer; any other failure throws.
+   * The issue a create with this id made, whether it is still open, or `null`
+   * when none landed. Linear's "Entity not found" is the null answer; any other
+   * failure throws. An archived issue is still readable by id, and counts as
+   * closed.
    */
-  async function createdIssue(id: string, own: Team): Promise<CreatedItem | null> {
+  async function createdIssue(
+    id: string,
+    own: Team
+  ): Promise<(CreatedItem & { open: boolean }) | null> {
     let data: {
-      issue?: { id?: string; identifier?: string; url?: string; team?: RawIssue['team'] } | null;
+      issue?: {
+        id?: string;
+        identifier?: string;
+        url?: string;
+        archivedAt?: string | null;
+        state?: { type?: string | null } | null;
+        team?: RawIssue['team'];
+      } | null;
     };
     try {
       data = await graphql(CREATED_READ_QUERY, { id });
@@ -655,7 +670,9 @@ export function createAdapter(ctx: AdapterContext): CodeAdapter {
     const issue = data.issue;
     if (!issue?.id || !issue.identifier || !issue.url) return null;
     ownIssue(issue as RawIssue, issue.identifier, own);
-    return { id: issue.id, identifier: issue.identifier, url: issue.url };
+    const type = issue.state?.type;
+    const open = !issue.archivedAt && type !== 'completed' && type !== 'canceled';
+    return { id: issue.id, identifier: issue.identifier, url: issue.url, open };
   }
 
   let teamPromise: Promise<Team> | undefined;
@@ -1007,9 +1024,7 @@ export function createAdapter(ctx: AdapterContext): CodeAdapter {
         return label.id;
       });
 
-      const id = createIdFor(spec.key);
       const input: Record<string, unknown> = {
-        id,
         teamId,
         title: spec.title,
         description: spec.description,
@@ -1034,28 +1049,37 @@ export function createAdapter(ctx: AdapterContext): CodeAdapter {
       }
       if (spec.priority !== undefined) input.priority = spec.priority;
 
+      // A key names one OPEN item. When the item a key made is closed or
+      // archived, the create moves on to the key chained with its identifier,
+      // so a returning failure gets a new item, and two runs at once still
+      // derive the same next id and land on one.
+      let chain = spec.key;
       let result: {
         issueCreate?: {
           success?: boolean;
           issue?: { id?: string; identifier?: string; url?: string } | null;
         } | null;
-      };
-      try {
-        result = await graphql(CREATE_ITEM_MUTATION, { input });
-      } catch (error) {
-        // A timeout after Linear accepted the create, or a second create with the
-        // same key ("already exists"): the id says whether the issue landed.
-        let landed: CreatedItem | null;
+      } | null = null;
+      for (let step = 0; result === null; step += 1) {
+        const id = createIdFor(chain);
         try {
-          landed = await createdIssue(id, { id: teamId, key });
-        } catch (readError) {
-          // Report the create's own failure; the check after it failed too.
-          throw new TrackerError(
-            `${(error as Error).message} (and checking whether the item landed failed: ${(readError as Error).message})`
-          );
+          result = await graphql(CREATE_ITEM_MUTATION, { input: { ...input, id } });
+        } catch (error) {
+          let landed: (CreatedItem & { open: boolean }) | null;
+          try {
+            landed = await createdIssue(id, { id: teamId, key });
+          } catch (readError) {
+            // Report the create's own failure; the check after it failed too.
+            throw new TrackerError(
+              `${(error as Error).message} (and checking whether the item landed failed: ${(readError as Error).message})`
+            );
+          }
+          if (landed === null) throw error;
+          const { open, ...item } = landed;
+          if (open) return item;
+          if (chain === undefined || step >= KEY_CHAIN_MAX) throw error;
+          chain = `${chain}:${landed.identifier}`;
         }
-        if (landed !== null) return landed;
-        throw error;
       }
       const created = result.issueCreate?.issue;
       if (

@@ -78,6 +78,8 @@ export interface SimIssue {
   parent?: string;
   /** The issue id, when a create chose it; else `uuid-<identifier>`. */
   id?: string;
+  /** Archived: left out of team reads (as Linear does), still readable by id. */
+  archived?: boolean;
 }
 
 /** What {@link simulateLinear} returns. */
@@ -175,6 +177,8 @@ export function simulateLinear(issues: SimIssue[]): LinearSimulation {
           issue: {
             id: idOf(issue),
             identifier: issue.identifier,
+            archivedAt: issue.archived ? '2026-09-01T00:00:00.000Z' : null,
+            state: { type: state(issue.stateId).type },
             team: issue.team,
             url: `https://linear.app/example/issue/${issue.identifier}/new-item`,
           },
@@ -307,7 +311,7 @@ export function simulateLinear(issues: SimIssue[]): LinearSimulation {
       }
       case 'FlowSnapshotCore': {
         const nodes = issues
-          .filter((issue) => issue.team.key === TEAM.key && isOpen(issue))
+          .filter((issue) => issue.team.key === TEAM.key && !issue.archived && isOpen(issue))
           .map((issue) => {
             const {
               team: _team,
@@ -324,7 +328,7 @@ export function simulateLinear(issues: SimIssue[]): LinearSimulation {
       }
       case 'FlowSnapshotRelations': {
         const nodes = issues
-          .filter((issue) => issue.team.key === TEAM.key && isOpen(issue))
+          .filter((issue) => issue.team.key === TEAM.key && !issue.archived && isOpen(issue))
           .map((issue) => ({
             identifier: issue.identifier,
             relations: { nodes: [] },
@@ -337,7 +341,7 @@ export function simulateLinear(issues: SimIssue[]): LinearSimulation {
       }
       case 'FlowSnapshotClosed': {
         const nodes = issues
-          .filter((issue) => issue.team.key === TEAM.key && !isOpen(issue))
+          .filter((issue) => issue.team.key === TEAM.key && !issue.archived && !isOpen(issue))
           .map((issue) => ({
             identifier: issue.identifier,
             title: issue.title,

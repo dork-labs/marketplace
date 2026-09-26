@@ -156,8 +156,9 @@ export interface NewItem {
   /** `0` none … `4` low, as {@link WorkItem.priority}. */
   priority?: 0 | 1 | 2 | 3 | 4;
   /**
-   * An idempotency key. Two creates with the same key make ONE item: the second
-   * returns the first. Callers pass what makes the item unique (a self-test
+   * An idempotency key. While the item a key made is open, a second create with
+   * the key returns it instead of making another; once that item is closed or
+   * archived, the key makes a new item. Callers pass what makes the item unique (a self-test
    * fingerprint), so a retry after a timeout, or two runs at once, never file
    * twice.
    */

@@ -915,6 +915,41 @@ describe('createItem', () => {
     ]);
   });
 
+  it.each([
+    ['completed', { state: { type: 'completed' } }],
+    ['archived', { archivedAt: '2026-09-01T00:00:00.000Z', state: { type: 'completed' } }],
+  ])(
+    'moves past a keyed item that is %s: a second create with a chained id',
+    async (_name, patch) => {
+      let creates = 0;
+      const { adapter, calls } = build((call) => {
+        if (call.operation === 'FlowCreateItem') {
+          creates += 1;
+          return creates === 1 ? CREATE.createAgain.response : replay(CREATE.create, call);
+        }
+        if (call.operation === 'FlowCreatedRead') {
+          const envelope = replay(CREATE.createdRead, call) as {
+            data: { data: { issue: Record<string, unknown> } };
+          };
+          Object.assign(envelope.data.data.issue, patch);
+          return envelope;
+        }
+        return routeCreate()(call);
+      });
+      const created = await adapter.createItem?.({
+        title: 't',
+        description: 'd',
+        labels: [],
+        key: 'k',
+      });
+      expect(created?.identifier).toBe('DOR-999');
+      const ids = calls
+        .filter((c) => c.operation === 'FlowCreateItem')
+        .map((c) => (c.variables.input as { id: string }).id);
+      expect(ids).toEqual([linear.createIdFor('k'), linear.createIdFor('k:DOR-999')]);
+    }
+  );
+
   it('rethrows when the create fails and nothing landed', async () => {
     const { adapter } = build((call) =>
       call.operation === 'FlowCreatedRead'
