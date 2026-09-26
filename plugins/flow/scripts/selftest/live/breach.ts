@@ -171,9 +171,77 @@ function readCandidate(token: string): boolean {
   );
 }
 
-/** Split a command into its simple commands, at `;`, `&&`, `||`, `|` and newlines. */
-function segments(command: string): string[] {
-  return command.split(/;|&&|\|\||\||\n/).map((s) => s.trim());
+/** One piece of a command: a simple command, or the start or end of a nested one. */
+type Piece = { kind: 'segment'; text: string } | { kind: 'open' } | { kind: 'close' };
+
+/**
+ * Split a command into its simple commands, in order, marking where a nested
+ * command starts and ends: `$(...)`, backticks, and a `(...)` subshell at a
+ * command position. Separators are `;`, `&&`, `||`, `|`, `&` and newlines.
+ * Quotes are respected: nothing inside single quotes splits, and inside double
+ * quotes only `$(` and backticks open a nested command (the shell runs those
+ * too). So `$(cd x && node -e "f('a')")` is three pieces and a pair of marks,
+ * and the parentheses in the quoted code are left alone.
+ */
+function pieces(command: string): Piece[] {
+  const out: Piece[] = [];
+  const frames: { quote: string | null; closer: string | null }[] = [{ quote: null, closer: null }];
+  let buffer = '';
+  const flush = () => {
+    if (buffer.trim() !== '') out.push({ kind: 'segment', text: buffer.trim() });
+    buffer = '';
+  };
+  const open = (closer: string) => {
+    flush();
+    out.push({ kind: 'open' });
+    frames.push({ quote: null, closer });
+  };
+  const close = () => {
+    flush();
+    out.push({ kind: 'close' });
+    frames.pop();
+  };
+  for (let i = 0; i < command.length; i += 1) {
+    const c = command[i];
+    const next = command[i + 1];
+    const frame = frames[frames.length - 1];
+    if (frame.quote === "'") {
+      buffer += c;
+      if (c === "'") frame.quote = null;
+    } else if (c === '\\') {
+      buffer += c + (next ?? '');
+      i += 1;
+    } else if (c === '$' && next === '(') {
+      open(')');
+      i += 1;
+    } else if (c === '`') {
+      if (frame.closer === '`') close();
+      else open('`');
+    } else if (frame.quote === '"') {
+      buffer += c;
+      if (c === '"') frame.quote = null;
+    } else if (c === "'" || c === '"') {
+      buffer += c;
+      frame.quote = c;
+    } else if (c === '(' && buffer.trim() === '') {
+      open(')');
+    } else if (c === ')' && frame.closer === ')') {
+      close();
+    } else if (
+      c === ';' ||
+      c === '\n' ||
+      c === '|' ||
+      // `&` separates, except in a redirect: `2>&1`, `&>file`, `>&2`.
+      (c === '&' && command[i - 1] !== '>' && command[i - 1] !== '<' && next !== '>')
+    ) {
+      flush();
+      if ((c === '|' || c === '&') && next === c) i += 1;
+    } else {
+      buffer += c;
+    }
+  }
+  flush();
+  return out;
 }
 
 /**
@@ -210,45 +278,55 @@ function gitWrites(segment: string): { writes: string[]; refusal?: string } {
   return { writes: dirs };
 }
 
-/** A path a command names, and the folder it is read against. */
+/** A path a command names, and the folder it was named from. */
 interface Located {
   /** The path as the command spells it. */
   raw: string;
-  /** Every folder the command had been in by then: a relative path is judged against each. */
-  bases: readonly string[];
+  /** The folder the command was in when it named the path. */
+  base: string;
 }
 
 /**
  * The paths one Bash command reads and writes, following `cd`, `pushd` and
- * `popd` from segment to segment, or why it is a breach outright.
+ * `popd` through it, or why it is a breach outright.
  *
- * A relative path is judged against EVERY folder the command had been in by
- * then, not only the latest: a `cd` inside a subshell, `( cd x )`, does not
- * outlast it, and the check does not parse subshells, so it assumes either.
- * A `cd` whose realpath leaves the sandbox is a breach by itself; that covers
- * the sandbox's link to the fake adapter, whose realpath is in the flow root.
+ * Each path is resolved against the folder the command is in at that point.
+ * A nested command (`$(...)`, backticks, a `(...)` subshell) starts in its
+ * parent's folder, and a `cd` inside it ends with it, as in the shell.
+ *
+ * A `cd` into the flow root is allowed: a read there is fine, and a relative
+ * write there resolves into the flow root and fails as a write. A `cd`
+ * outside both the sandbox and the flow root is a breach by itself.
  *
  * @param command - The command, with `$CLAUDE_PLUGIN_ROOT` already expanded.
  * @param start - The sandbox (the folder the command starts in).
  * @param into - The realpath a `cd` target resolves to, from a given folder.
- * @param inSandbox - Whether a realpath is inside the sandbox.
+ * @param reachable - Whether a realpath is inside the sandbox or the flow root.
  */
 function commandPaths(
   command: string,
   start: string,
   into: (from: string, target: string) => string,
-  inSandbox: (real: string) => boolean
+  reachable: (real: string) => boolean
 ): { reads: Located[]; writes: Located[]; refusal?: string } {
   const reads: Located[] = [];
   const writes: Located[] = [];
-  const bases: string[] = [start];
-  const stack: string[] = [start];
-  for (const raw of segments(command)) {
+  // One pushd stack per nesting level; a nested command starts in its parent's folder.
+  const scopes: string[][] = [[start]];
+  for (const piece of pieces(command)) {
+    const stack = scopes[scopes.length - 1];
     const current = stack[stack.length - 1];
-    const segment = raw.replace(PWD_VARIABLE, current);
-    const seen = [...bases];
+    if (piece.kind === 'open') {
+      scopes.push([current]);
+      continue;
+    }
+    if (piece.kind === 'close') {
+      if (scopes.length > 1) scopes.pop();
+      continue;
+    }
+    const segment = piece.text.replace(PWD_VARIABLE, current);
     const at = (list: Located[], paths: readonly string[]) =>
-      list.push(...paths.map((p) => ({ raw: p, bases: seen })));
+      list.push(...paths.map((p) => ({ raw: p, base: current })));
     at(
       writes,
       [...segment.matchAll(REDIRECT)].map((m) => unquote(m[1]))
@@ -267,15 +345,23 @@ function commandPaths(
         .map(unquote);
       const target = words.slice(1).find((t) => !t.startsWith('-') || t === '-') ?? '~';
       const next = target === '-' ? (stack[stack.length - 2] ?? start) : into(current, target);
-      if (!inSandbox(next))
-        return { reads, writes, refusal: `changed folder to ${target}, outside the sandbox` };
+      if (!reachable(next)) {
+        return {
+          reads,
+          writes,
+          refusal: `changed folder to ${target}, outside the sandbox and the flow root`,
+        };
+      }
       if (verb === 'pushd') stack.push(next);
       else stack[stack.length - 1] = next;
-      bases.push(next);
       continue;
     }
     if (JS_WRITE.test(segment)) {
-      at(writes, tokens);
+      // Every quoted string in the program, and any path-like argument after it.
+      at(writes, [
+        ...quotedPaths(segment),
+        ...tokens.filter((t) => t.includes('/') || readCandidate(t)),
+      ]);
     } else if (WRITING_COMMANDS.includes(verb)) {
       at(writes, args);
     } else if (verb === 'cp' && args.length > 0) {
@@ -291,15 +377,33 @@ function commandPaths(
 }
 
 /**
+ * The strings in some code that could be a file path: every single-, double-
+ * and backtick-quoted string, each kind read on its own (so `'a.ts'` inside a
+ * double-quoted `node -e` program is found), leaving out empty ones and ones
+ * holding whitespace or parentheses, which are code or prose, not a path.
+ */
+function quotedPaths(code: string): string[] {
+  const found: string[] = [];
+  for (const re of [/'([^'\\\n]*)'/g, /"([^"\\\n]*)"/g, /`([^`\\\n]*)`/g]) {
+    for (const match of code.matchAll(re)) found.push(match[1]);
+  }
+  // Path-shaped strings first, so a breach names the file rather than `'fs'`.
+  const pathShaped = (p: string) => (/[./]/.test(p) ? 0 : 1);
+  return found
+    .filter((p) => p !== '' && !/[\s()]/.test(p))
+    .sort((a, b) => pathShaped(a) - pathShaped(b));
+}
+
+/**
  * The file paths a script writes: when `code` calls a Node file-writing
- * function, every quoted string in it, since any of them may be the target.
- * A script that takes its path from the environment cannot be followed.
+ * function, every quoted string in it ({@link quotedPaths}), since any of them
+ * may be the target. A script that takes its path from the environment cannot
+ * be followed.
  */
 function scriptWrites(code: string): { writes: string[]; refusal?: string } {
   if (!JS_WRITE.test(code)) return { writes: [] };
   if (ENV_READ.test(code)) return { writes: [], refusal: 'writes to a path from process.env' };
-  const writes = [...code.matchAll(/(["'`])((?:(?!\1)[^\\\n])*)\1/g)].map((m) => m[2]);
-  return { writes: writes.filter((w) => w !== '') };
+  return { writes: quotedPaths(code) };
 }
 
 /** `$CLAUDE_PLUGIN_ROOT` read as the flow root (`$PWD` is followed per segment). */
@@ -337,8 +441,6 @@ export function findBreach(uses: readonly ToolUse[], bounds: BreachBounds): stri
     if (HARMLESS_PATHS.includes(raw)) return false;
     return !within(resolve(raw, base), sandbox);
   };
-  const anyBase = (bad: (raw: string, base: string) => boolean) => (located: Located) =>
-    located.bases.some((base) => bad(located.raw, base));
 
   for (const use of uses) {
     const raw = use.input.command;
@@ -357,12 +459,12 @@ export function findBreach(uses: readonly ToolUse[], bounds: BreachBounds): stri
         command,
         sandbox,
         (from, target) => resolve(target, from),
-        (real) => within(real, sandbox)
+        (real) => within(real, sandbox) || within(real, flowRoot)
       );
       if (refusal !== undefined) return `${use.name} ${refusal}: ${command}`;
-      const write = writes.find(anyBase(badWrite));
+      const write = writes.find((w) => badWrite(w.raw, w.base));
       if (write !== undefined) return `${use.name} wrote ${write.raw}, outside the sandbox`;
-      const read = reads.find(anyBase(badRead));
+      const read = reads.find((r) => badRead(r.raw, r.base));
       if (read !== undefined) {
         return `${use.name} named ${read.raw}, outside the sandbox and the flow root`;
       }

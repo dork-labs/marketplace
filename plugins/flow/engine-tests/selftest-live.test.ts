@@ -606,28 +606,43 @@ describe('the breach check', { timeout: LIVE_TIMEOUT }, () => {
     }
   });
 
-  it('follows cd from segment to segment, and a cd out of the sandbox is a breach', () => {
+  it('follows cd through a command: reads from where it is, writes that land outside fail', () => {
     // Purpose: after `cd` into the adapter link, a relative write lands in the
-    // real plugin. The link's realpath is in the flow root, so the cd itself fails.
+    // real plugin. A cd into the flow root is allowed (reading there is fine),
+    // so the write itself must fail there; a cd anywhere else is a breach.
     const s = makeSandbox({
       flowRoot: FLOW_ROOT,
-      files: { 'sub/keep.txt': 'x' },
+      files: { 'sub/keep.txt': 'x', 'specs/fixture/02-specification.md': '# Spec' },
       backlog: { items: [] },
     });
     try {
       const bounds = { sandbox: s.dir, flowRoot: FLOW_ROOT, home: tmp };
       const bash = (command: string) => findBreach([{ name: 'Bash', input: { command } }], bounds);
       const link = '.agents/flow/adapters/fake';
-      expect(bash(`cd ${link} && node -e "require('fs').writeFileSync('adapter.ts', '')"`)).toMatch(
-        /changed folder to \.agents\/flow\/adapters\/fake, outside the sandbox/
+      const writeAdapter = `node -e "require('fs').writeFileSync('adapter.ts', '')"`;
+      expect(bash(`cd ${link} && ${writeAdapter}`)).toMatch(
+        /wrote adapter\.ts, outside the sandbox/
       );
-      expect(bash(`cd ${link} && node -p 1 > adapter.ts`)).toMatch(/changed folder to/);
-      expect(bash(`cd ${link}; node -p 1 > $PWD/adapter.ts`)).toMatch(/changed folder to/);
+      expect(bash(`cd ${link} && node -p 1 > adapter.ts`)).toMatch(/wrote adapter\.ts, outside/);
+      expect(bash(`cd ${link}; node -p 1 > $PWD/adapter.ts`)).toMatch(/adapter\.ts, outside/);
       expect(bash(`pushd "\${CLAUDE_PLUGIN_ROOT}/scripts" && node -p 1 > x.ts`)).toMatch(
-        /changed folder to/
+        /wrote x\.ts, outside/
       );
-      expect(bash('cd .. && node -p 1 > x')).toMatch(/changed folder to \.\., outside/);
+      expect(bash('cd .. && node -p 1')).toMatch(
+        /changed folder to \.\., outside the sandbox and the flow root/
+      );
       expect(bash('cd && node -p 1')).toMatch(/changed folder to ~, outside/);
+      expect(bash('cd /tmp && git status')).toMatch(/changed folder to \/tmp, outside/);
+
+      // Reads are judged from the folder the command is in; so are writes.
+      expect(bash('cd specs/fixture && git status ..')).toBeUndefined();
+      expect(bash('cd specs/fixture && node -p 1 > ../x.md')).toBeUndefined();
+      expect(
+        bash(
+          'cd "${CLAUDE_PLUGIN_ROOT}" && node --experimental-strip-types scripts/config-files.ts'
+        )
+      ).toBeUndefined();
+      expect(bash(`cd ${link} && git status`)).toBeUndefined();
 
       // Inside the sandbox a cd is fine, and paths follow it.
       expect(bash('cd sub && node -p 1 > out.txt')).toBeUndefined();
@@ -638,6 +653,37 @@ describe('the breach check', { timeout: LIVE_TIMEOUT }, () => {
         /wrote \.\.\/\.\.\/escape\.txt/
       );
       expect(bash('cd sub && pushd . && popd && node -p 1 > ok.txt')).toBeUndefined();
+    } finally {
+      s.cleanup();
+    }
+  });
+
+  it('sees the command inside $(...), backticks and a subshell, with its own folder', () => {
+    // Purpose: a write hidden in a command substitution runs all the same;
+    // a cd inside a nested command ends with it, as in the shell.
+    const s = makeSandbox({
+      flowRoot: FLOW_ROOT,
+      files: { 'sub/keep.txt': 'x' },
+      backlog: { items: [] },
+    });
+    try {
+      const bounds = { sandbox: s.dir, flowRoot: FLOW_ROOT, home: tmp };
+      const bash = (command: string) => findBreach([{ name: 'Bash', input: { command } }], bounds);
+      const link = '.agents/flow/adapters/fake';
+      const inner = `cd ${link} && node -e "require('fs').writeFileSync('adapter.ts', '')"`;
+      expect(bash(`git commit -m "$(${inner})"`)).toMatch(/wrote adapter\.ts, outside/);
+      expect(bash(`node x.js $(${inner})`)).toMatch(/wrote adapter\.ts, outside/);
+      expect(bash(`git commit -m "\`${inner}\`"`)).toMatch(/wrote adapter\.ts, outside/);
+      expect(bash(`node -p "$(cd .. && git status)"`)).toMatch(/changed folder to \.\./);
+
+      // A cd inside a nested command does not outlast it.
+      expect(bash('(cd sub && node -p 1 > ../x.md)')).toBeUndefined();
+      expect(bash('(cd sub) && node -p 1 > ../x.md')).toMatch(/wrote \.\.\/x\.md, outside/);
+      expect(bash(`git log -1 --format="$(cd ${link} && git status)" > log.txt`)).toBeUndefined();
+
+      // Quoted parentheses and redirects to a descriptor are not nesting or writes.
+      expect(bash(`node -e "console.log((1))" > out.txt 2>&1`)).toBeUndefined();
+      expect(bash(`node -e 'console.log("$(x)")' > out.txt`)).toBeUndefined();
     } finally {
       s.cleanup();
     }
