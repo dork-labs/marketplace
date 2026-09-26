@@ -336,14 +336,24 @@ export function parseResetText(text: string, observedAt: string, key: string): s
       const date = new Date(
         Date.UTC(observedWall.year, observedWall.month, observedWall.day + offset)
       );
-      const found = instantsFor(format, {
+      const instants = instantsFor(format, {
         year: date.getUTCFullYear(),
         month: date.getUTCMonth(),
         day: date.getUTCDate(),
         hour,
         minute,
-      }).find((ms) => ms > observedMs);
-      if (found !== undefined) result = found;
+      });
+      const later = instants.find((ms) => ms > observedMs);
+      if (later !== undefined) {
+        result = later;
+      } else if (
+        instants.length === 0 &&
+        (offset > 0 || hour * 60 + minute > observedWall.hour * 60 + observedWall.minute)
+      ) {
+        // The next time the clock would show this is skipped by a DST change, so
+        // the message cannot be read. Jumping a day ahead would be a day wrong.
+        break;
+      }
     }
   }
 

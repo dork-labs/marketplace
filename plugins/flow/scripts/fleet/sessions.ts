@@ -348,6 +348,8 @@ export async function fetchDorkosSessions(
     response = await fetchImpl(endpoint, {
       method: 'GET',
       signal: AbortSignal.timeout(deps.timeoutMs ?? 1_500),
+      // A redirect could send the request off this machine; refuse to follow one.
+      redirect: 'error',
     });
   } catch {
     return { url, reachable: false, sessions: [] };
@@ -400,12 +402,41 @@ export async function fetchDorkosSessions(
   return { url, reachable: true, sessions };
 }
 
+/**
+ * Read `<mainCheckout>/.dork/flow/flow-state.json` for the fleet view, without a
+ * lock and without the run-store schema: `{}` when the file is missing, `null`
+ * when it exists but is not a JSON object (so the caller can say so instead of
+ * silently showing fewer runs). {@link collectRuns} checks each run's fields
+ * itself, leniently, so one odd record never hides the others.
+ *
+ * @param mainCheckout - The main checkout folder.
+ * @returns The raw store, `{}`, or `null`.
+ */
+export function readRunStore(mainCheckout: string): Record<string, unknown> | null {
+  const file = path.join(mainCheckout, '.dork', 'flow', 'flow-state.json');
+  let text: string;
+  try {
+    text = readFileSync(file, 'utf8');
+  } catch (error) {
+    return (error as NodeJS.ErrnoException).code === 'ENOENT' ? {} : null;
+  }
+  try {
+    const value: unknown = JSON.parse(text);
+    return isObject(value) ? value : null;
+  } catch {
+    return null;
+  }
+}
+
 /** Dependencies of {@link collectRuns}. */
 export interface RunDeps {
   /** Runs `git`. */
   runProcess: ProcessRunner;
-  /** Reads a main checkout's run store; a missing or unreadable file reads as `{}`. */
-  readRuns(mainCheckout: string): Record<string, unknown>;
+  /**
+   * Reads a main checkout's run store: `{}` when the file is missing, `null`
+   * when it exists but cannot be read as a run store (then a warning names it).
+   */
+  readRuns(mainCheckout: string): Record<string, unknown> | null;
   /** At most this many `git` calls at once. Default 8. */
   concurrency?: number;
 }
@@ -432,9 +463,12 @@ async function mainCheckoutOf(cwd: string, runProcess: ProcessRunner): Promise<s
  *
  * @param cwds - Working folders (the project, and every session's cwd).
  * @param deps - `git` and the run-store reader.
- * @returns The runs, each at most once.
+ * @returns The runs, each at most once, and a warning per unreadable run store.
  */
-export async function collectRuns(cwds: readonly string[], deps: RunDeps): Promise<ActiveRun[]> {
+export async function collectRuns(
+  cwds: readonly string[],
+  deps: RunDeps
+): Promise<{ runs: ActiveRun[]; warnings: FleetWarning[] }> {
   const unique = [...new Set(cwds)];
   const limit = Math.max(1, deps.concurrency ?? 8);
   const checkouts = new Set<string>();
@@ -445,9 +479,17 @@ export async function collectRuns(cwds: readonly string[], deps: RunDeps): Promi
     for (const checkout of batch) if (checkout !== null) checkouts.add(checkout);
   }
   const runs: ActiveRun[] = [];
+  const warnings: FleetWarning[] = [];
   const seen = new Set<string>();
   for (const checkout of [...checkouts].sort()) {
     const store = deps.readRuns(checkout);
+    if (store === null) {
+      warnings.push({
+        code: 'run-store-unreadable',
+        message: `${path.join(checkout, '.dork', 'flow', 'flow-state.json')} is not a readable run store; its runs are not shown.`,
+      });
+      continue;
+    }
     for (const run of Object.values(store)) {
       if (!isObject(run) || typeof run.identifier !== 'string' || typeof run.sessionId !== 'string')
         continue;
@@ -468,7 +510,7 @@ export async function collectRuns(cwds: readonly string[], deps: RunDeps): Promi
       });
     }
   }
-  return runs;
+  return { runs, warnings };
 }
 
 /** The inputs one row's state is decided from. */
@@ -537,12 +579,17 @@ export function accountLimitedNow(windows: Record<string, unknown> | null, now: 
 export interface JoinInput {
   /** The identities in registry order (decides sort order). */
   identities: readonly Pick<AccountIdentity, 'id'>[];
+  /** Live Claude Code sessions. */
   cli: readonly CliSession[];
+  /** Sessions a loopback DorkOS reported. */
   dorkos: readonly DorkosSession[];
+  /** Active flow runs. */
   runs: readonly ActiveRun[];
   /** Each account's ledger windows, by registry id. */
   windowsByAccount: Readonly<Record<string, Record<string, unknown> | null>>;
+  /** The moment to judge limits at. */
   now: Instant;
+  /** Whether a pid exists. */
   pidAlive(pid: number): boolean;
 }
 
@@ -588,7 +635,7 @@ export function joinSessions(input: JoinInput): FleetSession[] {
       host: run?.host ?? (dork ? 'dorkos' : 'cli'),
       pid: cli?.pid ?? null,
       cwd: dork?.cwd ?? cli?.cwd ?? null,
-      startedAt: cli?.startedAt ?? dork?.startedAt ?? null,
+      startedAt: dork?.startedAt ?? cli?.startedAt ?? null,
       sources,
     };
   };
@@ -628,7 +675,7 @@ export function joinSessions(input: JoinInput): FleetSession[] {
   return rows.sort(
     (a, b) =>
       rank(a.account) - rank(b.account) ||
-      (a.item ?? '￿').localeCompare(b.item ?? '￿') ||
+      (a.item ?? '\uffff').localeCompare(b.item ?? '\uffff') ||
       (a.startedAt ?? '\uffff').localeCompare(b.startedAt ?? '\uffff')
   );
 }

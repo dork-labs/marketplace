@@ -261,6 +261,17 @@ describe('parseResetText', () => {
     ).toBeNull();
   });
 
+  it('gives null when the next such time is skipped, rather than a day later', () => {
+    // Purpose: "resets 2:30am" seen just before the spring-forward jump has no reading.
+    expect(
+      parseResetText(
+        "You've hit your weekly limit · resets 2:30am (America/Chicago)",
+        '2027-03-14T06:00:00.000Z',
+        'seven_day'
+      )
+    ).toBeNull();
+  });
+
   it('gives null for an unknown zone, no match, or a reset outside the window', () => {
     // Purpose: a bad parse must be absent, never wrong.
     expect(

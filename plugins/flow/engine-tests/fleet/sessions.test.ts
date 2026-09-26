@@ -19,6 +19,7 @@ import {
   fetchDorkosSessions,
   joinSessions,
   readCliSessions,
+  readRunStore,
   resolveDorkosUrl,
   sessionState,
   type CliSession,
@@ -181,6 +182,16 @@ describe('the DorkOS source', () => {
     expect(down).toEqual({ url: 'http://127.0.0.1:4242', reachable: false, sessions: [] });
   });
 
+  it('never follows a redirect', async () => {
+    // Purpose: something else on the port could redirect the request off this machine.
+    const fetchImpl = respond(200, { sessions: [] });
+    await fetchDorkosSessions('http://127.0.0.1:4242', identities, {
+      fetchImpl: fetchImpl as unknown as typeof fetch,
+    });
+    const [, init] = fetchImpl.mock.calls[0] as unknown as [URL, RequestInit];
+    expect(init.redirect).toBe('error');
+  });
+
   it('refuses a URL that is not on this machine', async () => {
     // Purpose: fleet never sends a request off the machine.
     const fetchImpl = vi.fn();
@@ -220,7 +231,7 @@ describe('collectRuns', () => {
     const readRuns = vi.fn((checkout: string) =>
       checkout === '/work/app' ? (fixture('flow-state.json') as Record<string, unknown>) : {}
     );
-    const runs = await collectRuns(
+    const { runs, warnings } = await collectRuns(
       ['/work/app', '/work/app-wt/feature', '/work/app', '/work/other', '/nowhere'],
       { runProcess: git, readRuns, concurrency: 2 }
     );
@@ -231,7 +242,34 @@ describe('collectRuns', () => {
       ['DOR-9104', 'running', 'dorkos'],
     ]);
     expect(readRuns.mock.calls.map((c) => c[0])).toEqual(['/work/app', '/work/other']);
+    expect(warnings).toEqual([]);
     expect(git).toHaveBeenCalledTimes(4);
+  });
+});
+
+describe('reading a run store', () => {
+  it('warns about an unreadable store instead of hiding its runs silently', async () => {
+    // Purpose: one corrupt run file must be visible, not a quietly shorter list.
+    const { runs, warnings } = await collectRuns(['/work/app'], {
+      runProcess: async () => ({ code: 0, stdout: '/work/app/.git\n', stderr: '' }),
+      readRuns: () => null,
+    });
+    expect(runs).toEqual([]);
+    expect(warnings.map((w) => w.code)).toEqual(['run-store-unreadable']);
+  });
+
+  it('reads a missing store as empty and a broken one as unreadable', () => {
+    // Purpose: missing is normal; broken must be told apart from empty.
+    const checkout = path.join(home, 'repo');
+    expect(readRunStore(checkout)).toEqual({});
+    mkdirSync(path.join(checkout, '.dork', 'flow'), { recursive: true });
+    const file = path.join(checkout, '.dork', 'flow', 'flow-state.json');
+    writeFileSync(file, '{ torn');
+    expect(readRunStore(checkout)).toBeNull();
+    writeFileSync(file, '[]');
+    expect(readRunStore(checkout)).toBeNull();
+    writeFileSync(file, JSON.stringify(fixture('flow-state.json')));
+    expect(Object.keys(readRunStore(checkout) ?? {})).toHaveLength(5);
   });
 });
 
@@ -312,7 +350,7 @@ describe('joinSessions', () => {
           )) as unknown as typeof fetch,
       })
     ).sessions;
-    const runs = await collectRuns(['/work/app'], {
+    const { runs } = await collectRuns(['/work/app'], {
       runProcess: async () => ({ code: 0, stdout: '/work/app/.git\n', stderr: '' }),
       readRuns: () => fixture('flow-state.json') as Record<string, unknown>,
     });
@@ -355,5 +393,9 @@ describe('joinSessions', () => {
       ['88', 'acct-b', null, 'limited', 'dorkos', 'dorkos'],
       ['77', null, null, 'parked', 'dorkos', 'dorkos'],
     ]);
+    // DorkOS fields win for a session both sources report.
+    expect(rows.find((r) => r.sessionId.startsWith('22'))?.startedAt).toBe(
+      '2026-09-26T12:00:00.000Z'
+    );
   });
 });
