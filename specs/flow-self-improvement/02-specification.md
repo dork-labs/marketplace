@@ -106,9 +106,9 @@ Doc-lint rules (`scripts/selftest/doc-lint.ts`, pure over `{ path, text }[]`):
   timezone Node's `Intl` accepts, `enabled: false` (the opt-in convention), `max-runtime`, and
   `permissions`.
 - **`doc-lint/war-stories`**: inside a numbered or bulleted step of a skill or command, a line
-  with a date (`20\d\d-\d\d-\d\d`) or a tracker id fails. A tracker id is `<key>-<n>` where `<key>`
-  is the configured team key (`connection.team.key`) or `DOR`; rule ids such as `INV-3`, `GRM-9`
-  and `UTF-8` never match. `docs/why.md` (created by S7; absent today) and `CHANGELOG.md` are
+  with a date (`20\d\d-\d\d-\d\d`) or an id (`[A-Z]{2,}-\d+`) fails, except ids whose prefix
+  is in the rule-id list in `selftest/war-story-allow.json` (`INV`, `GRM`, `UTF`, `ADR`, and any
+  added with a reason). The answer is the same on every install. `docs/why.md` (created by S7; absent today) and `CHANGELOG.md` are
   exempt. Today's hits are listed in `selftest/war-story-allow.json` so the check
   starts green and only new ones fail; S7 empties the list.
 
@@ -170,8 +170,8 @@ words.
   3. An env stripped of every `*_API_KEY`, `COMPOSIO_*` and `LINEAR_*` other than the one
      credential.
   4. **Breach check** after the case: the runner scans the stream's `tool_use` events. A command
-     naming `composio`, `linear`, `curl`, `wget` or `gh`, or a file path outside the sandbox and the
-     flow root, fails the case as `breach`, whatever the oracle says.
+     naming `composio`, `linear`, `curl`, `wget` or `gh`, or a file path whose `realpath` is outside
+     the `realpath` of the sandbox and of the flow root (macOS temp dirs live under `/private`), fails the case as `breach`, whatever the oracle says.
      A child `node` process could still reach the network; the fences make that a deliberate act a
      stage skill never takes, and the breach check catches the ordinary routes.
 - **Budget:** `--max-usd` (default `selfImprovement.selftest.liveBudgetUsd`, 1.00). The runner sums
@@ -202,9 +202,11 @@ A live run prints per-case pass/fail, cost and turns, and writes the same report
   `selfImprovement.retro.project` when set. The body names the check, its detail, the flow
   version, and a marker line `<!-- flow-selftest:fp=<fingerprint> -->`. Before creating, it reads
   the snapshot (S1) of open items plus items closed in the last 90 days. A fingerprint on an open
-  item gets one comment with the new detail. A fingerprint on a canceled item is not filed again
-  (a person declined it); the report lists it as "declined". A fingerprint on a completed item is
-  filed again only if the check fails again, with "regressed after <id>" in the body. `fingerprint = sha1(checkId + ":" + stableDetailKey)[:12]`
+  item gets one comment with the new detail. A fingerprint on an item canceled in that window is
+  not filed again (a person declined it) and the report lists it as "declined"; after 90 days it
+  may be filed again, on purpose, since the evidence has outlived the decision. A fingerprint on a
+  completed item is filed again only on evidence dated after the item was completed, with
+  "regressed after <id>" in the body. `fingerprint = sha1(checkId + ":" + stableDetailKey)[:12]`
   where `stableDetailKey` omits counts and timestamps (for `doc-lint/words`, the file path).
 - `/flow:self-test` (`commands/self-test.md`, under 150 words): run `flow selftest` with the given
   arguments, show the report, and offer `--file` for failures. It never passes `--tier live`
@@ -258,8 +260,9 @@ reported once on stderr and never changes the verb's exit code or output.
 last. Before appending, if `journal.jsonl` is at or over `journal.maxBytes` (default 5 MB):
 
 1. Create `journal.lock` with `wx`. If it exists, skip rotation and just append (the holder is
-   rotating). A lock whose mtime is over 30 s old is stale: rename it to `journal.lock.<pid>` (only
-   one writer's rename succeeds) and retry once.
+   rotating). A lock whose mtime is over 30 s old is stale: delete it and append without rotating;
+   the next append takes the lock. (Two writers clearing one stale lock at once can, rarely,
+   rotate twice and drop one old file early. That is accepted for a local diagnostics log.)
 2. **Holding the lock, `stat` again.** If the file is now under the cap, another writer already
    rotated: release and append.
 3. Delete `journal.<keep>.jsonl`, rename each `journal.<n>.jsonl` to `journal.<n+1>.jsonl`
@@ -325,8 +328,9 @@ agent rewrites it (below).
 
 **Filing (`--file`):** files `proposals[]` from the report just computed, or from `--input` (an
 edited copy). Same item shape and dedupe as `selftest --file`, with the marker
-`<!-- flow-retro:fp=<fingerprint> -->`: an open match gets one evidence comment, a canceled match
-is never filed again, a completed match is filed again with "regressed after <id>". At most
+`<!-- flow-retro:fp=<fingerprint> -->`: an open match gets one evidence comment, a match canceled in
+the last 90 days is not filed again, and a completed match is filed again only when some of its
+evidence is dated after the item was completed, with "regressed after <id>". At most
 `selfImprovement.retro.maxItemsPerRun` (default 5) new items per run, highest evidence count first;
 the rest are listed as "not filed (cap)". Every filed item and comment is signed per the
 provenance rules.
@@ -445,7 +449,7 @@ Tasks: [`03-tasks.json`](./03-tasks.json).
    5 per retro run; nothing goes to the plugin's public repo automatically.
 10. **Dedupe by fingerprint marker** in the item body, found through a snapshot of open items and
     items closed in the last 90 days (the adapter contract has no search verb). Canceled means
-    declined and is never refiled.
+    declined: not refiled for 90 days.
 11. **Review, CI and handoff events** get a manual `flow journal record` entry point now; S3
     writes them automatically.
 12. **No ADRs:** this repo has no `decisions/` folder.
