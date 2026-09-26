@@ -184,12 +184,17 @@ describe('the DorkOS source', () => {
 
   it('never follows a redirect', async () => {
     // Purpose: something else on the port could redirect the request off this machine.
-    const fetchImpl = respond(200, { sessions: [] });
-    await fetchDorkosSessions('http://127.0.0.1:4242', identities, {
+    const fetchImpl = vi.fn(
+      async () => new Response(null, { status: 302, headers: { location: 'http://example.com/' } })
+    );
+    const result = await fetchDorkosSessions('http://127.0.0.1:4242', identities, {
       fetchImpl: fetchImpl as unknown as typeof fetch,
     });
     const [, init] = fetchImpl.mock.calls[0] as unknown as [URL, RequestInit];
-    expect(init.redirect).toBe('error');
+    expect(init.redirect).toBe('manual');
+    expect(fetchImpl).toHaveBeenCalledTimes(1);
+    expect(result).toMatchObject({ reachable: true, sessions: [] });
+    expect(result.warning).toMatch(/redirect/);
   });
 
   it('refuses a URL that is not on this machine', async () => {
