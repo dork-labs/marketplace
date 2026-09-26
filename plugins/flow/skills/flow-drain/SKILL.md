@@ -13,8 +13,8 @@ schedule:
 > **Flow root.** This skill lives at `<flow-root>/skills/flow-drain/SKILL.md`. If you reached it via a symlink (`.claude/skills/flow__*` or `.agents/skills/flow__*`), resolve the real path first (`realpath <path>`): the flow root is two directories above the skill directory. Every `<flow-root>/...` reference below is relative to that root.
 
 This is the schedulable **Pulse tick**: one tick of the `/flow` autonomous loop,
-fired by a scheduler. The `schedule:` block in the frontmatter above is what
-makes this file a scheduled task.
+fired by a scheduler. The frontmatter's `schedule:` block makes this file a
+scheduled task.
 
 Installed at project scope, a DorkOS release that has schedule discovery picks
 this tick up and asks you to approve it on the Schedules page; nothing fires
@@ -45,7 +45,8 @@ trigger over it. In reconciler-registry order, one tick:
 3. **Dispatch.** Rank the ready queue with
    `node --experimental-strip-types "<flow-root>/scripts/flow.ts" next --json`, provision the
    top item's worktree, claim it with
-   `node --experimental-strip-types "<flow-root>/scripts/flow.ts" claim <id> --worktree <path> --branch <branch> --json`
+   `node --experimental-strip-types "<flow-root>/scripts/flow.ts" claim <id> --session <session id> --worktree <path> --branch <branch> --json`
+   (omit `--session` if unknown)
    and carry it to its human-review gate.
 
 Stop at the review gate or on a genuine question. Other tracker reads and writes

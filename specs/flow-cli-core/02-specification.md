@@ -112,7 +112,7 @@ JSON Schema: `plugins/flow/conformance/fleet/fleet-policy.schema.json`.
 
 **The reserve and the spend-down window**
 
-- `effectiveReservePct = 0` when the account's `seven_day` reading has a `resetsAt` and `now ≥ resetsAt − spendDownWindowHours`.
+- `effectiveReservePct = 0` when the account's `seven_day` reading has a `resetsAt` and `resetsAt − spendDownWindowHours ≤ now < resetsAt`. At or after `resetsAt` the reading has expired (the window reset), so the reserve applies again.
 - Otherwise `effectiveReservePct = reservePct`.
 - With no `seven_day` `resetsAt`, the reserve stays at `reservePct`.
 - **The main-account rule** (operator decision, flow-fleet §8.4): `main` defaults to a 50% reserve, and dispatch offers it work only when no other eligible account has room, or inside its spend-down window. The ordering belongs to dispatch (spec unit S3); the numbers above are the contract.
@@ -469,18 +469,18 @@ interface CodeAdapter {
 - Runs `classifyDispatchOutcome(items, { dispatch, ownership, wipCap: autonomy.wipCap }, opts)`, the same function `dispatch.ts` runs.
 - `--for-project` filters candidates to one project (matched on id, else case-insensitive name) before dispatch; no match exits 5. Its own flag, so the common `--project <dir>` keeps meaning the checkout. The WIP load still counts every project.
 - `-n` (default 1) takes the first N of `picked` (already capped by WIP).
-- JSON: `{ v, picked: WorkItem[], eligibleCount, starved, shapeableCount, wip: { total, byProject } }`.
+- JSON: `{ v, picked: WorkItem[], eligibleCount, starved, shapeableCount, atWipCap, wip: { total, byProject } }`. `atWipCap` is true when nothing is eligible only because work in progress fills `autonomy.wipCap` (ranking again with no cap finds work); `starved` counts claimed in-flight items as shapeable, so a caller checks `atWipCap` first and waits instead of triaging.
 - Exit 0 even when nothing is eligible; `starved` says why.
 - Replaces: every prose step that builds `dispatch.ts` input by hand (`commands/flow.md`, `skills/flow-drain`).
 
 **`flow claim <identifier> [--pid N] [--worktree <path>] [--branch <name>] [--account <id>] [--host cli|dorkos|cmux]`**
 
 - Preconditions (exit 5 on any): the item is open; carries `agent/ready`; is not `agent/claimed`; its ownership class is claimable under `ownership`; not paused (exit 7 unless `--manual`).
-- Takes the `flow-state.json` lock, so two claims on one machine serialize.
+- Holds the `flow-state.json` lock from the `getItem` that checks the preconditions through the `FlowRun` write, so two claims of one item on one machine serialize: the second reads `agent/claimed` and exits 5. Writes to `flow-state.json` inside the hold reuse it (re-entrant); the hold refreshes the lock's mtime so a slow tracker call never lets it go stale.
 - Writes `projectionFor('claim')`, then verifies by re-read.
 - Writes a `FlowRun`: `status: "running"`, `stage` from the removed `stage/*` label (default `execute`), `attemptCount: 0` (or +1 if a record exists), `workerPid`, `startedAt`, `sessionId`, `worktreePath`, `branch`, `account`, `host`, and `provenance` per `docs/provenance.md` (omit what is unknown).
 - `--pid` default: the parent of the shell that ran `flow` (the harness), read with `ps -o ppid= -p <process.ppid>`. If that fails, exit 5 asking for `--pid`.
-- `sessionId` is required on a FlowRun and never invented: with neither `--session` nor `FLOW_SESSION_ID`, exit 5 asking for one.
+- `sessionId` is never invented: with neither `--session` nor `FLOW_SESSION_ID`, the claim still runs, records `sessionId: ""` (unknown; recovery resumes it by thread-replay), and warns on stderr. The plugin's SessionStart hook (`hooks/session-env.mjs`) sets `FLOW_SESSION_ID` through `CLAUDE_ENV_FILE` in Claude Code, and the prose passes `--session <session id>` when the agent knows it.
 - `--worktree` default: the checkout root of `--project`; `--branch` default: its current branch.
 - No comment is posted: the label is the signal (agent etiquette: mostly quiet).
 - Replaces: the label-swap and state-move steps in the drain, execute and adapter prose.

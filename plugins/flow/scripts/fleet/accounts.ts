@@ -730,7 +730,9 @@ function entryOf(windows: Windows, key: string): unknown {
 
 /**
  * The reserve in force now (spec §1.1b): 0 when the `seven_day` reading has a
- * `resetsAt` and `now >= resetsAt - spendDownWindowHours`, else `reservePct`.
+ * `resetsAt` and `resetsAt - spendDownWindowHours <= now < resetsAt`, else
+ * `reservePct`. At or after `resetsAt` the reading has expired (the window
+ * reset), so the reserve applies again.
  *
  * @param policy - The account's resolved policy.
  * @param windows - The account's ledger windows, or `null` with no ledger.
@@ -745,9 +747,9 @@ export function effectiveReservePct(
   const reading = readWindow(entryOf(windows, 'seven_day'), now, 'seven_day');
   if (reading === null || reading.resetsAt === null) return policy.reservePct;
   const nowMs = now instanceof Date ? now.getTime() : Date.parse(now);
-  const spendDownStarts =
-    Date.parse(reading.resetsAt) - policy.spendDownWindowHours * 60 * 60 * 1000;
-  return nowMs >= spendDownStarts ? 0 : policy.reservePct;
+  const resetsAtMs = Date.parse(reading.resetsAt);
+  const spendDownStarts = resetsAtMs - policy.spendDownWindowHours * 60 * 60 * 1000;
+  return nowMs >= spendDownStarts && nowMs < resetsAtMs ? 0 : policy.reservePct;
 }
 
 /** Room in one window against a ceiling: false when rejected or at/over it, null with no reading. */

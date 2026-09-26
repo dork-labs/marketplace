@@ -178,6 +178,15 @@ describe('inboxReconciler — resume on a parked answer (rule 3)', () => {
     expect(result.summary).not.toContain('--resume');
   });
 
+  it('falls back to thread-replay when the run recorded no session id', async () => {
+    // Purpose: a claim whose session was unknown records sessionId "" (never an
+    // invented id); resuming "--resume " with nothing would attach to no session.
+    const ctx = inboxCtx([candidate({ run: flowRun({ sessionId: '' }) })]);
+    const result = await inboxReconciler.run(ctx);
+    expect(result.summary).toMatch(/thread-replay/);
+    expect(result.summary).not.toContain('--resume');
+  });
+
   it('carries the event dedupeKey in the summary for the idempotent audit trail', async () => {
     const ctx = inboxCtx([candidate()]);
     const result = await inboxReconciler.run(ctx);

@@ -337,4 +337,22 @@ describe('flow next', () => {
     const drained = await runFlow(['next'], temp, { user: { id: AGENT }, items: [] });
     expect(drained.stdout).toContain('the queue is drained');
   });
+
+  it('says the WIP cap is full, not that triage would help, when only the cap blocks', async () => {
+    // Purpose: claimed work in flight counts as shapeable, so a full cap reads
+    // as "starved"; telling the loop to triage would ready more work it still
+    // cannot take. The cap, not the gate, is what is blocking.
+    temp = tempProject(config({ autonomy: { wipCap: { global: 1, perProject: 1 } } }));
+    const items = [inFlight('C-1', widgets), readyItem('C-2', { project: gadgets })];
+    const capped = await runFlow(['next'], temp, { user: { id: AGENT }, items });
+    expect(capped.stdout).toContain('work in progress is at its cap');
+    expect(capped.stdout).not.toContain('triage');
+    const json = JSON.parse((await runFlow(['next', '--json'], temp, { items })).stdout);
+    expect(json).toMatchObject({ eligibleCount: 0, atWipCap: true });
+
+    temp.cleanup();
+    temp = tempProject(config());
+    const open = JSON.parse((await runFlow(['next', '--json'], temp, { items })).stdout);
+    expect(open).toMatchObject({ eligibleCount: 1, atWipCap: false });
+  });
 });

@@ -110,6 +110,22 @@ describe('flow claim writes the claim projection and records the run', () => {
     });
   });
 
+  it('claims without a session id, records it as unknown and warns', async () => {
+    // Purpose: an unattended drain may not know its session; that must not
+    // block the claim, and the id is recorded empty, never invented.
+    const result = await runFlow(project, { items: [item('FAKE-1')] }, ['claim', 'FAKE-1'], {
+      env: {},
+    });
+    expect(result.code).toBe(EXIT.ok);
+    expect(result.tracker.calls).toEqual([
+      { method: 'applyWorkState', identifier: 'FAKE-1', change: CLAIM_CHANGE },
+    ]);
+    const run = project.runs()['id-FAKE-1'];
+    expect(run.sessionId).toBe('');
+    expect(run.provenance).not.toHaveProperty('sessionId');
+    expect(result.stderr).toMatch(/--session/);
+  });
+
   it('posts no comment', async () => {
     // Purpose: the label is the signal (agent etiquette: mostly quiet).
     const result = await runFlow(project, { items: [item('FAKE-1')] }, ['claim', 'FAKE-1']);
@@ -171,16 +187,6 @@ describe('flow claim refuses what it must not claim (exit 5)', () => {
     // Purpose: a typo must not claim anything.
     const result = await runFlow(project, { items: [] }, ['claim', 'FAKE-9']);
     expect(result.code).toBe(EXIT.precondition);
-  });
-
-  it('refuses without a session id, and never invents one', async () => {
-    // Purpose: sessionId is the resume handle; a made-up one sends recovery chasing nothing.
-    const result = await runFlow(project, { items: [item('FAKE-1')] }, ['claim', 'FAKE-1'], {
-      env: {},
-    });
-    expect(result.code).toBe(EXIT.precondition);
-    expect(String((result.json.error as { message: string }).message)).toMatch(/--session/);
-    expect(result.tracker.calls).toEqual([]);
   });
 
   it('asks for --pid when the worker process cannot be found', async () => {

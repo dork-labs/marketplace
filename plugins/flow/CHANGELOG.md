@@ -13,6 +13,7 @@ Run it as `node --experimental-strip-types <flow-root>/scripts/flow.ts <command>
 - `flow next` shows the next item to work on. It reads your settings itself, so nobody builds the ranking's input by hand.
 - `flow claim`, `flow release`, `flow done` and `flow stage` move an item along: they change its labels and state, check that the change landed, and keep the run record up to date.
 - `flow snapshot` pulls the backlog once. `flow audit` checks it and exits with an error when something is wrong, and `flow status` shows what is in flight, what is parked, and anything that disagrees.
+- In Claude Code, flow now notes each session's id when the session starts, so `flow claim` can record which session is working an item. Without it the claim still goes ahead and says the session is unknown.
 - `flow accounts` lists your Claude Code accounts with the share of each one flow may spend, and lets you add one or change that share.
 - A new audit rule: an item's state, its `agent/*` label and its `stage/*` label must agree, and a `stage/*` label now appears only on work nobody has started. Items that break this show up in `flow audit`.
 - The Linear adapter now carries the code these commands use. The adapter contract is now version 2.0.0; a custom adapter that still sets `stage/*` labels on started work should be regenerated.

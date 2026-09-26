@@ -33,7 +33,14 @@
 import { execFileSync } from 'node:child_process';
 import { readFileSync } from 'node:fs';
 import path from 'node:path';
-import { updateJsonFile, type AtomicUpdateResult, type LockOptions } from './atomic-json.ts';
+import {
+  updateJsonFile,
+  withFileLock,
+  type AtomicUpdateResult,
+  type LockOptions,
+  type WithFileLockOptions,
+  type WithFileLockResult,
+} from './atomic-json.ts';
 import { ConfigError } from './errors.ts';
 import type { FlowRun, FlowRunStatus, FlowStage } from './flow-run.ts';
 import {
@@ -100,6 +107,12 @@ export interface FlowStateFile {
     patch?: Partial<FlowRun>,
     options?: FlowStateWriteOptions
   ): Promise<AtomicUpdateResult>;
+  /**
+   * Run `fn` holding the store's lock, so a check and the run written after it
+   * see no other writer in between. The store's writes inside `fn` reuse the
+   * held lock (see `withFileLock` in `atomic-json.ts`).
+   */
+  withLock<T>(fn: () => Promise<T>, options?: WithFileLockOptions): Promise<WithFileLockResult<T>>;
   /** Set a run's stage, keeping its status; nothing happens when there is no run for `issueId`. */
   setRunStage(
     issueId: string,
@@ -173,6 +186,9 @@ export function openFlowStateFile(project: string): FlowStateFile {
         raw = undefined;
       }
       return parseFlowState(raw);
+    },
+    withLock(fn, options) {
+      return withFileLock(file, fn, options);
     },
     upsertRun(run, options) {
       return writeUnderLock(file, (store) => writeFlowRun(store, run), options);

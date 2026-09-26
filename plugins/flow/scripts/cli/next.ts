@@ -14,7 +14,8 @@
  *   name) before dispatch; the WIP load still counts every project.
  * - `-n` (default 1) keeps the first N picks, already capped by WIP.
  * - Paused: exit 7 unless `--manual`. Nothing eligible is still exit 0, with
- *   `starved` saying whether a triage pass would help.
+ *   `atWipCap` saying the WIP cap is what blocks, else `starved` saying whether
+ *   a triage pass would help.
  *
  * @module @dorkos/flow/cli/next
  */
@@ -101,6 +102,8 @@ interface NextSummary {
   eligibleCount: number;
   starved: boolean;
   shapeableCount: number;
+  /** Nothing is eligible only because work in progress fills the WIP cap. */
+  atWipCap: boolean;
   wip: WipLoad;
   wipCap: { global: number; perProject: number };
 }
@@ -115,9 +118,11 @@ interface NextSummary {
 export function renderNext(summary: NextSummary): string {
   const wipLine = `In progress: ${summary.wip.total} (cap ${summary.wipCap.global} in total, ${summary.wipCap.perProject} per project).`;
   if (summary.picked.length === 0) {
-    const why = summary.starved
-      ? `Nothing is eligible, but ${summary.shapeableCount} item(s) wait behind the agent/ready gate: a triage pass would ready them.`
-      : 'Nothing is eligible, and nothing waits behind the agent/ready gate: the queue is drained.';
+    const why = summary.atWipCap
+      ? 'Nothing is eligible now: ready work waits because work in progress is at its cap. Finish or release an item first.'
+      : summary.starved
+        ? `Nothing is eligible, but ${summary.shapeableCount} item(s) wait behind the agent/ready gate: a triage pass would ready them.`
+        : 'Nothing is eligible, and nothing waits behind the agent/ready gate: the queue is drained.';
     return [why, wipLine].join('\n');
   }
   const rows = summary.picked.map((item) => [
@@ -169,17 +174,28 @@ export async function run(ctx: VerbContext): Promise<VerbResult> {
       ? snapshot.items
       : snapshot.items.filter((item) => item.project?.id === projectId);
 
+  const ownershipOf = Object.fromEntries(
+    candidates.map((item) => [item.identifier, classifyOwnership(item, identity, scope)])
+  );
   const outcome = classifyDispatchOutcome(
     candidates,
     { dispatch: config.dispatch, ownership: config.ownership, wipCap: config.autonomy.wipCap },
-    {
-      ownershipOf: Object.fromEntries(
-        candidates.map((item) => [item.identifier, classifyOwnership(item, identity, scope)])
-      ),
-      inProgressByProject: wip.byProject,
-      inProgressTotal: wip.total,
-    }
+    { ownershipOf, inProgressByProject: wip.byProject, inProgressTotal: wip.total }
   );
+
+  // Starvation counts claimed in-flight items as shapeable, so a full WIP cap
+  // also reads as "starved". Rank again with no cap: if that finds work, the
+  // cap is the only thing in the way, and triage would not help.
+  const uncapped = classifyDispatchOutcome(
+    candidates,
+    {
+      dispatch: config.dispatch,
+      ownership: config.ownership,
+      wipCap: { global: Infinity, perProject: Infinity },
+    },
+    { ownershipOf, inProgressByProject: wip.byProject, inProgressTotal: wip.total }
+  );
+  const atWipCap = outcome.eligibleCount === 0 && uncapped.eligibleCount > 0;
 
   const picked = outcome.picked.slice(0, count);
   return {
@@ -188,8 +204,9 @@ export async function run(ctx: VerbContext): Promise<VerbResult> {
       eligibleCount: outcome.eligibleCount,
       starved: outcome.starved,
       shapeableCount: outcome.shapeableCount,
+      atWipCap,
       wip,
     },
-    text: renderNext({ ...outcome, picked, wip, wipCap: config.autonomy.wipCap }),
+    text: renderNext({ ...outcome, picked, atWipCap, wip, wipCap: config.autonomy.wipCap }),
   };
 }

@@ -180,6 +180,18 @@ describe('flow status', () => {
     expect((await status([], { items: [item('FAKE-2')] })).code).toBe(0);
   });
 
+  it('--strict --json reports ok:false when it exits 1 on drift', async () => {
+    // Purpose: a caller reading the JSON must not see ok:true for a failed check.
+    const failed = await status(['--strict', '--json'], { items: [item('FAKE-2')] });
+    expect(failed.code).toBe(1);
+    expect(failed.json().ok).toBe(false);
+    const lenient = await status(['--json'], { items: [item('FAKE-2')] });
+    expect(lenient.json().ok).toBe(true);
+    writeRuns([runRecord('FAKE-1')]);
+    const clean = await status(['--strict', '--json'], { items: [item('FAKE-1')] });
+    expect(clean.json().ok).toBe(true);
+  });
+
   it('reports a live drain, and an orphan sentinel by dead pid or age', async () => {
     // Purpose: a sentinel is not a live drain until its owner is checked.
     writeSentinel({
@@ -278,6 +290,20 @@ describe('flow status', () => {
     });
     expect(result.code).toBe(0);
     expect(kinds(result.json())).toEqual(['FAKE-8 claimed-no-run']);
+  });
+
+  it('reads --snapshot the way next and audit do: a file without v:1 or an unreadable one is a usage error', async () => {
+    // Purpose: one reader for every verb's --snapshot, so status never accepts
+    // a file next and audit refuse, and a bad path exits 2 everywhere.
+    const file = path.join(project, 'old.json');
+    writeFileSync(file, JSON.stringify({ items: [item('FAKE-8')] }));
+    const noVersion = await status(['--snapshot', file, '--json'], { items: [] });
+    expect(noVersion.code).toBe(2);
+    expect(String(noVersion.json().error.message)).toMatch(/"v": 1/);
+    const missing = await status(['--snapshot', path.join(project, 'nope.json'), '--json'], {
+      items: [],
+    });
+    expect(missing.code).toBe(2);
   });
 
   it('says so plainly when nothing is in flight', async () => {

@@ -36,11 +36,21 @@
  * Reading needs no lock: `rename` is atomic, so a reader sees the old file or the
  * new one, never half of one.
  *
+ * **Holding the lock across more than one write** ({@link withFileLock}). A
+ * caller that must check something and then write (`flow claim` reads the
+ * tracker, checks the item is still unclaimed, writes it, then records the run)
+ * holds the lock for the whole sequence. The hold is re-entrant along its own
+ * async call chain: an {@link updateJsonFile} of the same file inside it uses the
+ * held lock instead of waiting on itself. While held, the lock's mtime is
+ * refreshed every few seconds, so a long hold is never judged stale; that
+ * changes nothing for other writers, which see a live lock and wait as usual.
+ *
  * Dependency-free (node builtins only), like every fleet-contract module.
  *
  * @module @dorkos/flow/atomic-json
  */
 
+import { AsyncLocalStorage } from 'node:async_hooks';
 import { randomBytes } from 'node:crypto';
 import {
   closeSync,
@@ -52,6 +62,7 @@ import {
   readFileSync,
   renameSync,
   unlinkSync,
+  utimesSync,
   writeSync,
 } from 'node:fs';
 import path from 'node:path';
@@ -284,6 +295,77 @@ export function releaseLock(lockPath: string, token: string): void {
   }
 }
 
+/**
+ * The locks the current async call chain holds, by lock path, with their
+ * tokens. Set only inside {@link withFileLock}.
+ */
+const heldLocks = new AsyncLocalStorage<ReadonlyMap<string, string>>();
+
+/** Options for {@link withFileLock}. */
+export interface WithFileLockOptions extends LockOptions {
+  /**
+   * How often to refresh the held lock's mtime, in ms. Default a third of the
+   * stale age.
+   */
+  heartbeatMs?: number;
+}
+
+/** What {@link withFileLock} did: ran the callback under the lock, or could not take it. */
+export type WithFileLockResult<T> =
+  { held: true; value: T } | { held: false; warning: AtomicJsonWarning };
+
+/**
+ * Run `fn` holding `file`'s lock, so a check and the writes that depend on it
+ * happen with no other writer in between. Every {@link updateJsonFile} of `file`
+ * inside `fn` reuses the held lock. The lock's mtime is refreshed while held,
+ * and the lock is released when `fn` settles, also when it throws.
+ *
+ * @param file - The shared JSON file whose lock to hold.
+ * @param fn - The work to do under the lock.
+ * @param options - Give-up and stale ages, and the refresh interval.
+ * @returns `held: true` with `fn`'s value, or `held: false` with a
+ *   `lock-timeout` warning when the lock never freed (then `fn` did not run).
+ */
+export async function withFileLock<T>(
+  file: string,
+  fn: () => Promise<T>,
+  options: WithFileLockOptions = {}
+): Promise<WithFileLockResult<T>> {
+  const lockPath = `${file}.lock`;
+  const outer = heldLocks.getStore();
+  if (outer?.has(lockPath)) return { held: true, value: await fn() };
+  mkdirSync(path.dirname(file), { recursive: true, mode: 0o700 });
+  const held = await acquireLock(lockPath, options);
+  if (held === null) {
+    return {
+      held: false,
+      warning: {
+        code: 'lock-timeout',
+        message: `Could not lock ${file} within ${options.giveUpMs ?? LOCK_GIVE_UP_MS} ms.`,
+      },
+    };
+  }
+  const heartbeatMs = options.heartbeatMs ?? Math.floor((options.staleMs ?? LOCK_STALE_MS) / 3);
+  const heartbeat = setInterval(() => {
+    try {
+      if (readFileSync(lockPath, 'utf8') !== held.token) return;
+      const now = new Date();
+      utimesSync(lockPath, now, now);
+    } catch {
+      // The lock is gone or unreadable; release below handles what is left.
+    }
+  }, heartbeatMs);
+  heartbeat.unref();
+  const chain = new Map(outer ?? []);
+  chain.set(lockPath, held.token);
+  try {
+    return { held: true, value: await heldLocks.run(chain, fn) };
+  } finally {
+    clearInterval(heartbeat);
+    releaseLock(lockPath, held.token);
+  }
+}
+
 /** Parse outcome for one file read. */
 type ParsedFile = { kind: 'missing' } | { kind: 'ok'; value: unknown } | { kind: 'corrupt' };
 
@@ -353,6 +435,8 @@ function writeAtomically(file: string, contents: string): void {
  * Read-merge-write `file` under its lock (steps 1-7). Creates the folder
  * (`0700`) when missing; the file is written `0600`.
  *
+ * Inside {@link withFileLock} for the same file, it uses the held lock.
+ *
  * Never throws for a lock it could not take: that returns `status: 'dropped'`
  * with a `lock-timeout` warning. An error thrown by `merge` (or the `throw`
  * choice of `onUnparsable`) propagates after the lock is released.
@@ -370,8 +454,11 @@ export async function updateJsonFile(
   const warnings: AtomicJsonWarning[] = [];
   mkdirSync(path.dirname(file), { recursive: true, mode: 0o700 });
   const lockPath = `${file}.lock`;
-  const held = await acquireLock(lockPath, options);
-  if (held === null) {
+  // Inside withFileLock for this file: the lock is already ours, so neither
+  // take it again nor release it here.
+  const reentrant = heldLocks.getStore()?.has(lockPath) === true;
+  const held = reentrant ? null : await acquireLock(lockPath, options);
+  if (!reentrant && held === null) {
     warnings.push({
       code: 'lock-timeout',
       message: `Could not lock ${file} within ${options.giveUpMs ?? LOCK_GIVE_UP_MS} ms; this write was dropped.`,
@@ -403,6 +490,6 @@ export async function updateJsonFile(
     writeAtomically(file, serialize(next));
     return { status: 'written', value: next, warnings };
   } finally {
-    releaseLock(lockPath, held.token);
+    if (held !== null) releaseLock(lockPath, held.token);
   }
 }

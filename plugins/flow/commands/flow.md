@@ -150,10 +150,10 @@ operator five intents via `AskUserQuestion`, then route the choice:
 peek at the dispatch outcome with
 `node --experimental-strip-types "${CLAUDE_PLUGIN_ROOT}/scripts/flow.ts" next --json`
 (act on its counts). When the ready queue is empty but shapeable work waits
-behind the readiness gate (`eligibleCount === 0 && shapeableCount > 0`), the queue
+behind the readiness gate (`starved` and not `atWipCap`), the queue
 is **starved**, so default the recommended `AskUserQuestion` intent to **"Triage
 the backlog"** (intent 4) and note "0 ready, <N> shapeable: run a triage pass?".
-When ready work exists, default instead to **"Continue the queue"** (intent 3).
+When ready work exists, or `atWipCap` says the work-in-progress cap is full, default instead to **"Continue the queue"** (intent 3).
 Render any named item as `PROJ-123 - Title` (the adapter's display convention).
 
 `AskUserQuestion` auto-appends an **"Other"** free-text option: a stage name, a specific
@@ -331,7 +331,7 @@ is never reaped, because `/flow:resume` reads it back.
    - **(3) Dispatch pass** (`loops.dispatch`, priority 30) — claim the top-ranked
      ready item and carry it to its gate. Run
      `node --experimental-strip-types "${CLAUDE_PLUGIN_ROOT}/scripts/flow.ts" next --json`: it ranks the ready
-     queue and counts the shapeable backlog behind the readiness gate. - **If `picked` is empty, do not stop silently.** Branch on `shapeableCount`: - **Starved** (`shapeableCount > 0`): the queue is starved, not done. Write
+     queue and counts the shapeable backlog behind the readiness gate. - **If `picked` is empty, do not stop silently.** Branch: - **At the WIP cap** (`atWipCap`): ready work waits for a free slot, so offer no triage; carry the in-flight items, or stop. - **Starved** (`shapeableCount > 0`): the queue is starved, not done. Write
      `ready: 0, shapeable: <M>` to the sentinel, then surface it: report
      "Queue starved: 0 ready, <M> shapeable: run a triage pass?" and offer, via
      `AskUserQuestion`, to run `/flow:triage` to ready that backlog (then resume
@@ -340,7 +340,7 @@ is never reaped, because `/flow:resume` reads it back.
      display convention). - **Done** (`shapeableCount === 0`): the queue is genuinely drained (or the
      only remaining work is parked on a human or a gate). Set
      `ready: 0, shapeable: 0` and go to **Stop**. - Otherwise provision the top-ranked issue's (`picked[0]`) worktree and claim
-     it: `node --experimental-strip-types "${CLAUDE_PLUGIN_ROOT}/scripts/flow.ts" claim <id> --worktree <path> --branch <branch> --json`
+     it: `node --experimental-strip-types "${CLAUDE_PLUGIN_ROOT}/scripts/flow.ts" claim <id> --session <session id> --worktree <path> --branch <branch> --json`
      writes the label, the state and the `FlowRun` (the record the recovery pass
      adopts). Carry the item to its human-review gate, moving stages with
      `flow.ts stage <id> <stage> --json` (DONE is `flow.ts done`). At each stage

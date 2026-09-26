@@ -23,12 +23,13 @@ import { readFileSync } from 'node:fs';
 import path from 'node:path';
 
 import { findConfigRoots, pauseState } from '../config-files.ts';
-import { ConfigError, PreconditionError } from '../errors.ts';
+import { PreconditionError } from '../errors.ts';
 import type { FlowRun } from '../flow-run.ts';
 import { openFlowStateFile } from '../flow-state-file.ts';
 import { requireCapabilities } from '../tracker/load.ts';
-import type { BacklogSnapshot, ItemComment, WorkItem } from '../tracker/types.ts';
+import type { ItemComment, WorkItem } from '../tracker/types.ts';
 import { AGENT_CLAIMED, stateCoherence } from '../work-state.ts';
+import { readSnapshotFile } from './backlog.ts';
 import { formatColumns } from './output.ts';
 import type { VerbContext, VerbResult } from './context.ts';
 
@@ -160,23 +161,6 @@ function readDrain(checkouts: readonly string[], now: Date): DrainStatus | null 
   return null;
 }
 
-/** Read a saved `flow snapshot --json`. */
-function readSnapshotFile(file: string): Pick<BacklogSnapshot, 'items'> {
-  let parsed: unknown;
-  try {
-    parsed = JSON.parse(readFileSync(file, 'utf8'));
-  } catch (error) {
-    throw new ConfigError(
-      `cannot read the snapshot ${file}: ${(error as Error).message}. Save one with "flow snapshot --out <file>".`
-    );
-  }
-  const items = (parsed as { items?: unknown } | null)?.items;
-  if (!Array.isArray(items)) {
-    throw new ConfigError(`${file} is not a "flow snapshot --json" file (it has no items list).`);
-  }
-  return { items: items as WorkItem[] };
-}
-
 /** The last comment the agent posted (it carries a provenance line), or `null`. */
 function lastQuestion(comments: readonly ItemComment[] | undefined): ParkedEntry['question'] {
   const signed = (comments ?? []).filter((comment) =>
@@ -297,9 +281,11 @@ export async function run(ctx: VerbContext): Promise<VerbResult> {
     }));
 
   const paused = pause === null ? null : { since: pause.pausedAt, file: pause.file };
+  // `ok` matches the exit code: false only when --strict found drift.
+  const failed = strict && drift.length > 0;
   return {
-    exitCode: strict && drift.length > 0 ? 1 : 0,
-    json: { ok: true, paused, drain, inFlight, parked, drift },
+    exitCode: failed ? 1 : 0,
+    json: { ok: !failed, paused, drain, inFlight, parked, drift },
     text: render({ paused, drain, inFlight, parked, drift }, now),
   };
 }

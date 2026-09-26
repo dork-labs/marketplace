@@ -70,7 +70,7 @@ export const VERBS: readonly VerbDefinition[] = [
     name: 'next',
     summary: 'Show the next item to work on, ranked by the dispatch policy.',
     description:
-      'Rank the ready queue with the dispatch policy (the same one dispatch.ts runs), with ownership and work in progress worked out from the backlog. Nothing eligible still exits 0; "starved" says whether a triage pass would help. Exits 7 while flow is paused, unless --manual.',
+      'Rank the ready queue with the dispatch policy (the same one dispatch.ts runs), with ownership and work in progress worked out from the backlog. Nothing eligible still exits 0; "atWipCap" says the cap is what blocks; else "starved" says whether a triage pass would help. Exits 7 while flow is paused, unless --manual.',
     common: ['project', 'snapshot', 'manual'],
     flags: [
       {
