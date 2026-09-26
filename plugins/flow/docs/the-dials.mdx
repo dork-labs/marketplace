@@ -3,9 +3,9 @@ title: The dials
 description: Every /flow config knob in one place — what it does, its default, and when to turn it.
 ---
 
-import { Steps, Step } from "fumadocs-ui/components/steps";
-import { Callout } from "fumadocs-ui/components/callout";
-import { Cards, Card } from "fumadocs-ui/components/card";
+import { Steps, Step } from 'fumadocs-ui/components/steps';
+import { Callout } from 'fumadocs-ui/components/callout';
+import { Cards, Card } from 'fumadocs-ui/components/card';
 
 # The dials
 
@@ -15,37 +15,35 @@ import { Cards, Card } from "fumadocs-ui/components/card";
 
 Almost everything lives in one file. The one exception is how often the scheduled runs fire:
 
-| File                                                                   | Owns                                                                              | Validated by                                                 |
-| ---------------------------------------------------------------------- | --------------------------------------------------------------------------------- | ------------------------------------------------------------ |
-| `.agents/flow/config.json`                                             | The engine contract: autonomy, eligibility, involvement, gates, loops, ingestion. | The plugin's `config/config.schema.json` (`$schema` URL at the top) |
-| Where the tick is scheduled (your own scheduler's entry, or the schedule on DorkOS's Schedules page) | How often the scheduled runs fire.                                                | That scheduler                                               |
+| File                                                                                                 | Owns                                                                              | Validated by                                                        |
+| ---------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------- | ------------------------------------------------------------------- |
+| `.agents/flow/config.json`                                                                           | The engine contract: autonomy, eligibility, involvement, gates, loops, ingestion. | The plugin's `config/config.schema.json` (`$schema` URL at the top) |
+| Where the tick is scheduled (your own scheduler's entry, or the schedule on DorkOS's Schedules page) | How often the scheduled runs fire.                                                | That scheduler                                                      |
 
 `config.schema.json` is generated from the Zod `FlowConfigSchema` in `@dorkos/flow` (`config-schema.ts`) via `z.toJSONSchema`. The schema is authoritative: an out-of-enum value or a violated floor fails to parse, so you cannot silently mis-configure the engine. Any field you leave out takes its default, so a config written by an older flow stays valid after an update. Edit `config.json`; the `$schema` reference gives you completion and validation in any schema-aware editor.
 
 <Callout type="info">
-  The v1 harness reads `.agents/flow/config.json` only. A per-repo `WORKFLOW.md`
-  override is part of the config contract, but applying it is the promoted
-  config loader's job (the deferred P5 server build), not the v1 skills. A
-  `WORKFLOW.md` will not take effect yet.
+  The v1 harness reads `.agents/flow/config.json` only. A per-repo `WORKFLOW.md` override is part of
+  the config contract, but applying it is the promoted config loader's job (the deferred P5 server
+  build), not the v1 skills. A `WORKFLOW.md` will not take effect yet.
 </Callout>
 
 <Callout type="warn">
-  Some dials configure a typed contract whose continuous runner is the deferred
-  P5 server. They are real and validated today, and the v1 harness honors them
-  in prose (the Pulse tick walks the loops in priority order). What is **not**
-  built is the always-on process that fires each loop on its own `intervalMs`
-  unattended. Each such dial is flagged below.
+  Some dials configure a typed contract whose continuous runner is the deferred P5 server. They are
+  real and validated today, and the v1 harness honors them in prose (the Pulse tick walks the loops
+  in priority order). What is **not** built is the always-on process that fires each loop on its own
+  `intervalMs` unattended. Each such dial is flagged below.
 </Callout>
 
 ## Cadence: set it where the tick is scheduled
 
 flow ships three scheduled runs, all switched off until you approve them. Their timing in the plugin's files is the package's defaults:
 
-| Scheduled run | What each run does                                                                    | Default cron                        | Default timezone      |
-| ------------- | ------------------------------------------------------------------------------------- | ----------------------------------- | --------------------- |
-| `flow-drain`  | Claims the top-ranked ready item and carries it to its review gate.                   | `0 * * * *` (top of every hour)     | `America/Los_Angeles` |
-| `flow-triage` | Readies or parks every untriaged item, and releases claims untouched for 7+ days.     | `0 8 * * *` (08:00 every day)       | `America/Los_Angeles` |
-| `flow-groom`  | A read-only backlog health check (`/flow:groom check`). The full groom stays yours.   | `0 9 * * 1` (09:00 every Monday)    | `America/Los_Angeles` |
+| Scheduled run | What each run does                                                                  | Default cron                     | Default timezone      |
+| ------------- | ----------------------------------------------------------------------------------- | -------------------------------- | --------------------- |
+| `flow-drain`  | Claims the top-ranked ready item and carries it to its review gate.                 | `0 * * * *` (top of every hour)  | `America/Los_Angeles` |
+| `flow-triage` | Readies or parks every untriaged item, and releases claims untouched for 7+ days.   | `0 8 * * *` (08:00 every day)    | `America/Los_Angeles` |
+| `flow-groom`  | A read-only backlog health check (`/flow:groom check`). The full groom stays yours. | `0 9 * * 1` (09:00 every Monday) | `America/Los_Angeles` |
 
 How often they actually fire is decided by whatever starts them, so that is where you change it:
 
@@ -62,7 +60,7 @@ For reference, this is what the shipped `schedule:` block of `flow-drain` holds.
 name: flow-drain
 description: Claim the top-ranked eligible issue and carry it to its review gate.
 schedule:
-  cron: "0 * * * *"
+  cron: '0 * * * *'
   timezone: America/Los_Angeles
   enabled: false
   max-runtime: 2h
@@ -70,24 +68,22 @@ schedule:
 ---
 ```
 
-| Field                  | What it does                                                              | Default                        | To change it                                                                 |
-| ---------------------- | ------------------------------------------------------------------------- | ------------------------------ | ---------------------------------------------------------------------------- |
-| `schedule.enabled`     | The package's default switch: installing never arms the tick.            | `false`                        | Leave it. On DorkOS, approving the tick on the Schedules page switches it on. |
-| `schedule.cron`        | When each tick fires (one tick claims and carries one issue to its gate). | `0 * * * *` (top of each hour) | Where the tick is scheduled (above), never in this file.                     |
-| `schedule.timezone`    | The timezone the cron is evaluated in.                                    | `America/Los_Angeles`          | Where the tick is scheduled (above), never in this file.                     |
-| `schedule.max-runtime` | Hard ceiling on a single tick.                                            | `2h`                           | The package's choice; an edit here is undone by the next update.            |
-| `schedule.permissions` | The tool-permission posture for the unattended session.                   | `acceptEdits`                  | The package's choice; an edit here is undone by the next update.            |
+| Field                  | What it does                                                              | Default                        | To change it                                                                  |
+| ---------------------- | ------------------------------------------------------------------------- | ------------------------------ | ----------------------------------------------------------------------------- |
+| `schedule.enabled`     | The package's default switch: installing never arms the tick.             | `false`                        | Leave it. On DorkOS, approving the tick on the Schedules page switches it on. |
+| `schedule.cron`        | When each tick fires (one tick claims and carries one issue to its gate). | `0 * * * *` (top of each hour) | Where the tick is scheduled (above), never in this file.                      |
+| `schedule.timezone`    | The timezone the cron is evaluated in.                                    | `America/Los_Angeles`          | Where the tick is scheduled (above), never in this file.                      |
+| `schedule.max-runtime` | Hard ceiling on a single tick.                                            | `2h`                           | The package's choice; an edit here is undone by the next update.              |
+| `schedule.permissions` | The tool-permission posture for the unattended session.                   | `acceptEdits`                  | The package's choice; an edit here is undone by the next update.              |
 
 <Callout type="warn">
-  The tick ships `schedule.enabled: false`, so installing never arms it. A
-  schedule DorkOS discovers waits on the **Schedules** page until you approve it,
-  and approving switches it on; from then on the switch on that page is the one
-  that counts, and it outlasts updates. This file is the package's: an update
-  replaces it, so do not edit it. Autonomous mode also depends on a
-  **running DorkOS server** (Pulse hosts the watcher and the croner); manual
-  `/flow` does not. `/flow:pause` halts every tick through a flag in your project
-  (`.agents/flow/paused.json`) that each tick checks first, so a pause survives
-  updates and works under any scheduler.
+  The tick ships `schedule.enabled: false`, so installing never arms it. A schedule DorkOS discovers
+  waits on the **Schedules** page until you approve it, and approving switches it on; from then on
+  the switch on that page is the one that counts, and it outlasts updates. This file is the
+  package's: an update replaces it, so do not edit it. Autonomous mode also depends on a **running
+  DorkOS server** (Pulse hosts the watcher and the croner); manual `/flow` does not. `/flow:pause`
+  halts every tick through a flag in your project (`.agents/flow/paused.json`) that each tick checks
+  first, so a pause survives updates and works under any scheduler.
 </Callout>
 
 ## Autonomy
@@ -103,9 +99,9 @@ How aggressively the engine takes work, under `autonomy`:
 | `seat`              | Which autonomous runner hosts the loop.                | `"pulse"`      | `"pulse"` is the sole v1 seat; a generic `watcher` seat is planned.   |
 
 <Callout type="info">
-  `concurrency: "parallel"` parses, but the v1 harness runs the dispatch tick
-  one item at a time (atomic multi-claim and fencing are deferred to P5). Leave
-  it `"sequential"` until the server build lands.
+  `concurrency: "parallel"` parses, but the v1 harness runs the dispatch tick one item at a time
+  (atomic multi-claim and fencing are deferred to P5). Leave it `"sequential"` until the server
+  build lands.
 </Callout>
 
 ## Eligibility
@@ -114,27 +110,25 @@ Dispatch only ever claims an item that is genuinely ready. That gate is the `age
 
 <Steps>
   <Step>
-    **TRIAGE** applies `agent/ready` (and the `stage/*` label) when it accepts
-    work, on both routes (simple to EXECUTE, complex to IDEATE).
+    **TRIAGE** applies `agent/ready` (and the `stage/*` label) when it accepts work, on both routes
+    (simple to EXECUTE, complex to IDEATE).
   </Step>
+  <Step>**DECOMPOSE** applies `agent/ready` to the execute-ready tasks it emits.</Step>
   <Step>
-    **DECOMPOSE** applies `agent/ready` to the execute-ready tasks it emits.
-  </Step>
-  <Step>
-    **Dispatch** filters to ready items only, then ranks them. An empty queue
-    with shapeable-but-not-ready work behind it reports "0 ready, N shapeable:
-    run a triage pass?" rather than stopping silently.
+    **Dispatch** filters to ready items only, then ranks them. An empty queue with
+    shapeable-but-not-ready work behind it reports "0 ready, N shapeable: run a triage pass?" rather
+    than stopping silently.
   </Step>
 </Steps>
 
-`agent/ready` is a label, not a `config.json` field: it is fuel the shaping stages produce, not a dial you set. What you _can_ tune is how the ready pool is ordered once it exists, under `dispatch`:
+`agent/ready` is a label the shaping stages produce, not a dial. What you _can_ tune is how the ready pool is ordered once it exists, under `dispatch`:
 
 | Dial                 | What it does                                                      | Default                                                              |
 | -------------------- | ----------------------------------------------------------------- | -------------------------------------------------------------------- |
 | `dispatch.rank`      | The ordered ladder dispatch ranks eligible items by.              | `["unblockers", "priority", "projectStatus", "type", "size", "age"]` |
 | `dispatch.sizeOrder` | Whether smaller or larger items are preferred at the `size` tier. | `"small-first"`                                                      |
 
-Eligibility also removes non-dispatchable state, items with open blockers, items in completed or canceled projects, WIP-capped items, and items the `ownership` policy does not permit. The `agent/ready` gate is the one you feed; the rest are guards.
+Eligibility also removes non-dispatchable state, items with open blockers, items in completed or canceled projects, WIP-capped items, and items the `ownership` policy does not permit.
 
 ## Involvement
 
@@ -153,10 +147,9 @@ When the engine asks you versus proceeds on its own, under `involvement`:
 `comms: "infer-from-trigger"` is the key dial for tone: involvement is uncertainty-gated, not stage-gated. The engine reads the trigger (a live `/flow` session versus an unattended tick) and the calibration ladder, so IDEATE asks freely and EXECUTE asks rarely as an emergent property of one rule, not a per-stage switch.
 
 <Callout type="warn">
-  `calibration.alwaysAsk` is a **floor, not a preference**. The schema enforces
-  at least one entry (`alwaysAsk: []` fails to parse), so autonomy can never be
-  silently widened past the four irreversible-or-outward classes. You can add to
-  the floor; you cannot empty it.
+  `calibration.alwaysAsk` is a **floor, not a preference**. The schema enforces at least one entry
+  (`alwaysAsk: []` fails to parse), so autonomy can never be silently widened past the four
+  irreversible-or-outward classes. You can add to the floor; you cannot empty it.
 </Callout>
 
 The `nudge` flags are the only out-of-band attention channel. In shared-account mode (the common case, where there is no separate reviewer identity), a parked question's only durable signal is a tracker comment plus the `agent/needs-input` label; turning on `nudge.relay` or `nudge.telegram` promotes that to a real ping so a parked question is seen, not buried.
@@ -165,21 +158,20 @@ The `nudge` flags are the only out-of-band attention channel. In shared-account 
 
 The checkpoints between stages, under `gates`:
 
-| Dial                                 | What it does                                                        | Default   | Notes                                                                           |
-| ------------------------------------ | ------------------------------------------------------------------- | --------- | ------------------------------------------------------------------------------- |
-| `planApproval`                       | Stop after DECOMPOSE for human sign-off before EXECUTE.             | `false`   | Off by default: the engine flows DECOMPOSE to EXECUTE. Turn on for a plan gate. |
-| `review.requireCiGreen`              | Require green CI before the review gate clears.                     | `true`    | Part of the review gate, which is **always on**.                                |
-| `review.reapproveOnFunctionalChange` | Re-request approval if the change shifts functionally after review. | `true`    | Keeps a stale approval from carrying a changed diff.                            |
-| `circuitBreaker.estimateMultiplier`  | Trip the breaker when actual work exceeds the estimate by N times.  | `2`       | Lower to fail fast on runaway items.                                            |
-| `circuitBreaker.tokenBudget`         | Hard token ceiling per item before the breaker trips.               | `2000000` | Raise for genuinely large items; lower to cap spend.                            |
+| Dial                                 | What it does                                                        | Default      | Notes                                                                           |
+| ------------------------------------ | ------------------------------------------------------------------- | ------------ | ------------------------------------------------------------------------------- |
+| `planApproval`                       | Stop after DECOMPOSE for human sign-off before EXECUTE.             | `false`      | Off by default: the engine flows DECOMPOSE to EXECUTE. Turn on for a plan gate. |
+| `review.requireCiGreen`              | Require green CI before the review gate clears.                     | `true`       | Part of the review gate, which is **always on**.                                |
+| `review.reapproveOnFunctionalChange` | Re-request approval if the change shifts functionally after review. | `true`       | Keeps a stale approval from carrying a changed diff.                            |
+| `circuitBreaker.estimateMultiplier`  | Trip the breaker when actual work exceeds the estimate by N times.  | `2`          | Lower to fail fast on runaway items.                                            |
+| `circuitBreaker.tokenBudget`         | Hard token ceiling per item before the breaker trips.               | `2000000`    | Raise for genuinely large items; lower to cap spend.                            |
 | `projectCompletion`                  | Whether DONE closes a finished project itself or recommends it.     | `"advisory"` | `"auto"` also needs an adapter supporting the optional `completeProject` verb.  |
 
 <Callout type="info">
-  The **human-review gate** (after VERIFY) is always on and is not a dial: there
-  is no field that disables it. The **plan-approval gate** (after DECOMPOSE) is
-  the one you toggle, and it is `false` by default. (The review block also
-  carries auto-merge dials, `mergeOnApproval` and the recovery ladder, whose
-  unattended execution is part of the deferred P5 build.)
+  The **human-review gate** (after VERIFY) is always on and is not a dial: there is no field that
+  disables it. The **plan-approval gate** (after DECOMPOSE) is the one you toggle, and it is `false`
+  by default. (The review block also carries auto-merge dials, `mergeOnApproval` and the recovery
+  ladder, whose unattended execution is part of the deferred P5 build.)
 </Callout>
 
 `projectCompletion` is a ceiling on what the engine may do, not a promise that it will. On `"auto"`, the DONE stage closes a project out itself only when nothing is still open inside it, its progress is complete, no active spec still points at it, and your tracker adapter supports closing projects at all — that last part is optional in the adapter contract, so not every tracker can. Miss any one of those and you get the `"advisory"` behavior instead, plus a line saying which condition stopped it. The strictness is the point: a closed project hides every issue left open inside it from the work queue, permanently, and nothing else in the loop will ever raise its hand about them.
@@ -188,11 +180,11 @@ The checkpoints between stages, under `gates`:
 
 The adversarial review a branch faces **before** its PR is opened, under `review`:
 
-| Dial          | What it does                                                        | Default       | Notes                                                                         |
-| ------------- | ------------------------------------------------------------------- | ------------- | ----------------------------------------------------------------------------- |
-| `adversarial` | Dispatch an independent reviewer on the branch before the PR opens. | `true`        | Turn off for a cheaper, lower-assurance loop.                                 |
+| Dial          | What it does                                                        | Default       | Notes                                                                                                                                                |
+| ------------- | ------------------------------------------------------------------- | ------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `adversarial` | Dispatch an independent reviewer on the branch before the PR opens. | `true`        | Turn off for a cheaper, lower-assurance loop.                                                                                                        |
 | `rubric`      | Path to the rubric the reviewer reads.                              | `"REVIEW.md"` | Relative to the repo root (or the current directory outside a repo); absolute paths are used as-is. `/flow:init` scaffolds one if it does not exist. |
-| `reviewers`   | How many independent reviewer agents each review dispatches.        | `1`           | Raise for a wide blast radius; each extra reviewer is another full diff read. |
+| `reviewers`   | How many independent reviewer agents each review dispatches.        | `1`           | Raise for a wide blast radius; each extra reviewer is another full diff read.                                                                        |
 
 Three different things in this config are called "review", and they fire at three different moments. `review` (this block) is the **machine** review, before the PR exists. `gates.review` is the **auto-merge** ladder, after a human approves. `stages.review` is the **human gate** itself, which is always on and has no off switch.
 
@@ -216,10 +208,10 @@ How long a session lives, and how hard the engine tries to get back into the one
 `perIssue: "sticky-session"` and `resume` are two halves of one idea: work an agent has already reasoned about is cheaper and better to continue than to re-derive. Sticky sessions decide **where a follow-up goes**; `resume` decides **what happens when it cannot get there** — a session can only be continued from the machine that still holds its transcript, so "the same session" is not always available.
 
 <Callout type="warn">
-  `resume: "require"` is a stop, not a preference. When the originating worker
-  cannot be reached, the run says so loudly and halts, rather than quietly
-  starting a fresh worker that has lost the reasoning. Use it when a silent
-  restart would be worse than a paused item; leave it `"prefer"` otherwise.
+  `resume: "require"` is a stop, not a preference. When the originating worker cannot be reached,
+  the run says so loudly and halts, rather than quietly starting a fresh worker that has lost the
+  reasoning. Use it when a silent restart would be worse than a paused item; leave it `"prefer"`
+  otherwise.
 </Callout>
 
 ## Models
@@ -242,10 +234,9 @@ The judgment classes default to `workhorse` and mechanical work to `fast` for on
 There is a third tier the config deliberately cannot name: `frontier`, the model your orchestrating session is itself running on. Flow never selects it, which is why it is absent from the enum. What flow does insist on is that **every delegated worker names its model explicitly** — because on a harness that inherits the parent's model when you omit one, an orchestrator running at frontier that omits it runs every delegate at frontier cost, silently.
 
 <Callout type="info">
-  Nothing here fails closed. One model available? Bind both tiers to it and the
-  policy becomes a no-op. No binding at all? The delegate falls back to your
-  harness's own default model **and the run says so** — a silent fallback is
-  indistinguishable from a policy that worked.
+  Nothing here fails closed. One model available? Bind both tiers to it and the policy becomes a
+  no-op. No binding at all? The delegate falls back to your harness's own default model **and the
+  run says so** — a silent fallback is indistinguishable from a policy that worked.
 </Callout>
 
 ## Loops
@@ -268,11 +259,10 @@ The reconciler registry. Each loop is one reconciler; the map is the extension s
 The priority order is deliberate: recovery first (never lose in-flight work), then inbox (a parked human is the cheapest unblock), then review and dispatch, with triage and hygiene as the slow background. To make the loop more responsive to replies, drop `loops.inbox.intervalMs`; to throttle tracker reads, raise it.
 
 <Callout type="warn">
-  `priority` and `intervalMs` configure the typed scheduler contract. In v1, the
-  **Pulse cron** fires the whole tick on its `cron` cadence and walks the
-  enabled loops in priority order in prose (`recovery → inbox/resume →
-  dispatch`). The continuous runner that fires **each** loop independently on
-  its own `intervalMs`, unattended, is the deferred P5 server. The `intervalMs`
+  `priority` and `intervalMs` configure the typed scheduler contract. In v1, the **Pulse cron**
+  fires the whole tick on its `cron` cadence and walks the enabled loops in priority order in prose
+  (`recovery → inbox/resume → dispatch`). The continuous runner that fires **each** loop
+  independently on its own `intervalMs`, unattended, is the deferred P5 server. The `intervalMs`
   defaults are the cadence that runner will honor.
 </Callout>
 
@@ -288,52 +278,46 @@ How inbound tracker events reach the engine, under `ingestion`:
 The producer is a swappable seam: the inbox reconciler consumes a normalized `TrackerEvent[]` from whichever transport is injected. v1 ships the `PollingTransport` (poll plus a durable watermark cursor); the webhook producer is a config-level drop-in once the inbound endpoint exists.
 
 <Callout type="warn">
-  `producer: "webhook"` parses, but the webhook transport is **not built in v1**
-  (it needs an inbound endpoint we do not have yet). Leave it `"poll"`. The seam
-  exists so the swap is a one-line config edit when the producer ships.
+  `producer: "webhook"` parses, but the webhook transport is **not built in v1** (it needs an
+  inbound endpoint we do not have yet). Leave it `"poll"`. The seam exists so the swap is a one-line
+  config edit when the producer ships.
 </Callout>
 
 ## Which dial should I touch?
 
-| If you want to...                            | Turn this                                                                                                                            |
-| -------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------ |
-| Turn the autonomous loop on                  | Approve `flow-drain` on the Schedules page, which switches it on (server required)                                                   |
-| Stop it for a while                          | `/flow:pause` (and `/flow:resume` to lift it)                                                                                        |
-| Make the autonomous tick fire more often     | Change it where the tick is scheduled ([Cadence](#cadence-set-it-where-the-tick-is-scheduled))                                       |
-| Run more than one item at a time             | Wait for P5; v1 is `autonomy.concurrency: "sequential"`                                                                              |
-| Cap how much work is in flight               | `autonomy.wipCap.global` / `wipCap.perProject`                                                                                       |
-| Get pinged when a question parks             | `involvement.nudge.relay` / `nudge.telegram`                                                                                         |
-| Require sign-off on the plan before EXECUTE  | `gates.planApproval: true`                                                                                                           |
-| Review a branch harder before the PR opens   | `review.reviewers` (raise it)                                                                                                        |
-| Skip the pre-PR machine review entirely      | `review.adversarial: false`                                                                                                          |
-| Cap spend per item                           | `gates.circuitBreaker.tokenBudget`                                                                                                   |
-| Make replies resume faster                   | `loops.inbox.intervalMs` (lower it)                                                                                                  |
-| Throttle tracker reads                       | `ingestion.pollIntervalMs` (raise it)                                                                                                |
-| Turn a reconciler off                        | `loops.<id>.enabled: false`                                                                                                          |
-| Reorder which reconciler wins contention     | `loops.<id>.priority`                                                                                                                |
-| Send follow-ups back to the same session     | `context.perIssue: "sticky-session"`                                                                                                 |
-| Stop instead of restarting a lost session    | `context.resume: "require"`                                                                                                          |
-| Point flow at this machine's models          | `models.bindings` in `config.local.json`                                                                                             |
-| Run mechanical work on a stronger model      | `models.tiers.mechanical: "workhorse"`                                                                                               |
-| Close a finished project without being asked | `gates.projectCompletion: "auto"`                                                                                                    |
+| If you want to...                            | Turn this                                                                                      |
+| -------------------------------------------- | ---------------------------------------------------------------------------------------------- |
+| Turn the autonomous loop on                  | Approve `flow-drain` on the Schedules page, which switches it on (server required)             |
+| Stop it for a while                          | `/flow:pause` (and `/flow:resume` to lift it)                                                  |
+| Make the autonomous tick fire more often     | Change it where the tick is scheduled ([Cadence](#cadence-set-it-where-the-tick-is-scheduled)) |
+| Run more than one item at a time             | Wait for P5; v1 is `autonomy.concurrency: "sequential"`                                        |
+| Cap how much work is in flight               | `autonomy.wipCap.global` / `wipCap.perProject`                                                 |
+| Get pinged when a question parks             | `involvement.nudge.relay` / `nudge.telegram`                                                   |
+| Require sign-off on the plan before EXECUTE  | `gates.planApproval: true`                                                                     |
+| Review a branch harder before the PR opens   | `review.reviewers` (raise it)                                                                  |
+| Skip the pre-PR machine review entirely      | `review.adversarial: false`                                                                    |
+| Cap spend per item                           | `gates.circuitBreaker.tokenBudget`                                                             |
+| Make replies resume faster                   | `loops.inbox.intervalMs` (lower it)                                                            |
+| Throttle tracker reads                       | `ingestion.pollIntervalMs` (raise it)                                                          |
+| Turn a reconciler off                        | `loops.<id>.enabled: false`                                                                    |
+| Reorder which reconciler wins contention     | `loops.<id>.priority`                                                                          |
+| Send follow-ups back to the same session     | `context.perIssue: "sticky-session"`                                                           |
+| Stop instead of restarting a lost session    | `context.resume: "require"`                                                                    |
+| Point flow at this machine's models          | `models.bindings` in `config.local.json`                                                       |
+| Run mechanical work on a stronger model      | `models.tiers.mechanical: "workhorse"`                                                         |
+| Close a finished project without being asked | `gates.projectCompletion: "auto"`                                                              |
+| Keep a bare label the groom audit flags      | List it in `groom.unnamespacedLabels`                                                          |
 
 ## Next steps
 
 <Cards>
-  <Card
-    title="Turning on autonomy"
-    href="/docs/guides/flow/turning-on-autonomy"
-  >
-    The full walkthrough for enabling the Pulse loop, with the server dependency
-    spelled out.
+  <Card title="Turning on autonomy" href="/docs/guides/flow/turning-on-autonomy">
+    The full walkthrough for enabling the Pulse loop, with the server dependency spelled out.
   </Card>
   <Card title="How it works" href="/docs/guides/flow/how-it-works">
     The reconciler registry and the inbound event seam these dials configure.
   </Card>
-  <Card
-    title="Driving it manually"
-    href="/docs/guides/flow/driving-it-manually"
-  >
+  <Card title="Driving it manually" href="/docs/guides/flow/driving-it-manually">
     Run one stage at a time, no server and no cron required.
   </Card>
 </Cards>

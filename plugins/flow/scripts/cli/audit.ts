@@ -56,7 +56,10 @@ export async function run(ctx: VerbContext): Promise<VerbResult> {
   const agentIdentity = await resolveAgentId(project);
   project.flushWarnings();
 
-  const results = runInvariants([...snapshot.items, ...snapshot.closed], { agentIdentity });
+  const results = runInvariants([...snapshot.items, ...snapshot.closed], {
+    agentIdentity,
+    unnamespacedLabels: project.loaded.config.groom.unnamespacedLabels,
+  });
   const verdict = verdictOf(results);
   return {
     exitCode: verdict.ok ? 0 : 1,

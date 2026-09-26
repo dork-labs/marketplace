@@ -71,6 +71,8 @@ interface Verdict {
 interface AuditOpts {
   /** The dispatch agent's identity; a ready item assigned to it passes GRM-8. */
   agentIdentity?: string;
+  /** Bare labels the team keeps on purpose (config `groom.unnamespacedLabels`); GRM-12 skips them. */
+  unnamespacedLabels?: readonly string[];
 }
 
 /** The parsed CLI arguments for the oracle. */
@@ -93,7 +95,8 @@ Usage:
   node --experimental-strip-types scripts/audit-backlog.ts        reads stdin
   node --experimental-strip-types scripts/audit-backlog.ts --help
 
-Fixture: a JSON array of WorkItems, or { "items": [...], "opts": { "agentIdentity": "..." } }.
+Fixture: a JSON array of WorkItems, or
+  { "items": [...], "opts": { "agentIdentity": "...", "unnamespacedLabels": ["..."] } }.
 Terminal items (completed/canceled) may be included for context; every
 invariant below is asserted over OPEN items only, except GRM-14.
 
@@ -115,7 +118,8 @@ Invariants ("ready" = carries the literal agent/ready label):
   GRM-9   ready => project stateCategory is not completed/canceled
   GRM-10  ready => carries a stage/* label (where a dispatched session resumes)
   GRM-11  no completed/canceled project holds an open item
-  GRM-12  every label is namespaced family/leaf (a bare tracker default fails)
+  GRM-12  every label is namespaced family/leaf (a bare tracker default fails),
+          except the bare labels in opts.unnamespacedLabels
   GRM-13  no item carries more than one agent/* label
   GRM-14  duplicateOf set => the item is terminal (a live duplicate is unresolved)
   GRM-15  state coherence: state, agent/* and stage/* agree (STATE-1 .. STATE-5):
@@ -318,10 +322,11 @@ function checkGrm11(items: readonly unknown[]): string[] {
   });
 }
 
-/** GRM-12 - every label on an open item is namespaced family/leaf. */
-function checkGrm12(items: readonly unknown[]): string[] {
+/** GRM-12 - every label on an open item is namespaced family/leaf, except the allowed bare ones. */
+function checkGrm12(items: readonly unknown[], opts: AuditOpts): string[] {
+  const allowed = new Set(opts.unnamespacedLabels ?? []);
   return eachOpenItem(items, (item, label) => {
-    const bare = labelsOf(item).filter((lbl) => !/^[^/]+\/.+$/.test(lbl));
+    const bare = labelsOf(item).filter((lbl) => !/^[^/]+\/.+$/.test(lbl) && !allowed.has(lbl));
     return bare.length === 0
       ? undefined
       : `${label} carries bare label(s) ${bare.join(', ')}; tracker defaults like "Bug" are invisible to the engine and must be re-namespaced or removed`;
@@ -504,6 +509,9 @@ function extractSnapshot(parsed: unknown): { items: unknown[]; opts: AuditOpts }
     const opts: AuditOpts = {};
     if (isPlainObject(parsed.opts) && isNonEmptyString(parsed.opts.agentIdentity)) {
       opts.agentIdentity = parsed.opts.agentIdentity;
+    }
+    if (isPlainObject(parsed.opts) && Array.isArray(parsed.opts.unnamespacedLabels)) {
+      opts.unnamespacedLabels = parsed.opts.unnamespacedLabels.filter(isNonEmptyString);
     }
     return { items: parsed.items, opts };
   }

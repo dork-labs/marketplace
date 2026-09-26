@@ -701,6 +701,26 @@ export const DecompositionSchema = z
   })
   .prefault({});
 
+/**
+ * A label GRM-12 may accept without a `family/` namespace: non-empty, no slash,
+ * and no leading or trailing space.
+ */
+export const BareLabelSchema = z.string().regex(/^[^/\s](?:[^/]*[^/\s])?$/, {
+  message: 'must be a bare label: non-empty, no "/", no leading or trailing space',
+});
+
+/**
+ * Backlog-groom policy (`/flow:groom`, `audit-backlog.ts`). `unnamespacedLabels`
+ * lists bare labels the team keeps on purpose (say, one mirrored from another
+ * tool), so GRM-12 skips exactly those and still fails every other bare label.
+ */
+export const GroomSchema = z
+  .object({
+    /** Bare labels GRM-12 accepts. Default: none. */
+    unnamespacedLabels: z.array(BareLabelSchema).default([]),
+  })
+  .prefault({});
+
 /** UI proof-of-completion mode (§13). */
 export const EvidenceUiSchema = z.enum(['auto', 'screenshot', 'off']);
 /** Temporal (motion) proof mode (§13). */
@@ -963,6 +983,8 @@ export const FlowConfigSchema = z
     decomposition: DecompositionSchema,
     /** Browser proof-of-completion policy. */
     evidence: EvidenceSchema,
+    /** Backlog-groom policy: the bare labels GRM-12 accepts. */
+    groom: GroomSchema,
     /** The parallel drain: workers at once, its limits, and how sessions start. */
     drain: DrainSchema,
     /** Self-test, journal and retro policy. */

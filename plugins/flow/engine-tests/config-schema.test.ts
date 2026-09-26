@@ -669,6 +669,7 @@ describe('z.toJSONSchema bridge', () => {
       'recovery',
       'decomposition',
       'evidence',
+      'groom',
       'drain',
       'selfImprovement',
     ];
@@ -788,5 +789,33 @@ describe('schema module surface', () => {
     const calibration = z.object({}).safeParse({});
     expect(calibration.success).toBe(true);
     expect(typeof FlowConfigSchema.parse).toBe('function');
+  });
+});
+
+describe('FlowConfigSchema — the groom block', () => {
+  // Purpose: with no groom block, GRM-12 exempts nothing; a default that
+  // quietly allowed some label would hide bare tracker labels from the audit.
+  it('defaults unnamespacedLabels to an empty list', () => {
+    expect(FlowConfigSchema.parse({}).groom).toEqual({ unnamespacedLabels: [] });
+  });
+
+  // Purpose: a valid bare label reads back through Zod and the JSON Schema.
+  it('accepts bare labels', () => {
+    const groom = { unnamespacedLabels: ['cloud-contract', 'Needs Design'] };
+    expect(FlowConfigSchema.parse({ groom }).groom).toEqual(groom);
+    expect(newAjv().compile(buildConfigJsonSchema())({ groom })).toBe(true);
+  });
+
+  // Purpose: an entry must be a bare label; a namespaced one needs no
+  // exemption, and an empty or padded one can never match a real label.
+  it.each([
+    ['an empty entry', ''],
+    ['a namespaced entry', 'type/bug'],
+    ['a padded entry', ' cloud-contract'],
+    ['a non-string entry', 7],
+  ])('refuses %s', (_name, entry) => {
+    const groom = { unnamespacedLabels: [entry] };
+    expect(FlowConfigSchema.safeParse({ groom }).success).toBe(false);
+    expect(newAjv().compile(buildConfigJsonSchema())({ groom })).toBe(false);
   });
 });

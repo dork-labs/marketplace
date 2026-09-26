@@ -998,6 +998,21 @@
       },
       "additionalProperties": false
     },
+    "groom": {
+      "default": {},
+      "type": "object",
+      "properties": {
+        "unnamespacedLabels": {
+          "default": [],
+          "type": "array",
+          "items": {
+            "type": "string",
+            "pattern": "^[^/\\s](?:[^/]*[^/\\s])?$"
+          }
+        }
+      },
+      "additionalProperties": false
+    },
     "drain": {
       "default": {},
       "type": "object",
