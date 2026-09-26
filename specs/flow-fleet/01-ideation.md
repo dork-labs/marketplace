@@ -3,6 +3,7 @@ slug: flow-fleet
 issue: null
 created: 2026-09-26
 status: ideation
+design-session: specs/flow-fleet/design
 builds-on: flow-cli-overhaul
 ---
 
@@ -186,7 +187,7 @@ Decided 2026-09-26:
 
 Still open:
 
-- Where the account display goes in DorkOS: status bar, sidebar, session header (explored in the visual companion; see `04-design-decisions.md` once chosen).
+- ~~Account display in DorkOS~~ **Decided:** status-bar chip, sidebar dots and header badge, shown only with 2+ accounts. See [`04-design-decisions.md`](04-design-decisions.md).
 - The Flow Board Shape: confirm the fleet panel lives there (see §9).
 
 ## 9) Where each piece lives (surfaces)
