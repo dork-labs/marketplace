@@ -13,6 +13,8 @@ const D = 24 * H;
 
 function account(partial: Partial<FleetAccount> & Pick<FleetAccount, 'id'>): FleetAccount {
   return {
+    runtime: 'claude-code',
+    implicit: false,
     label: null,
     color: null,
     path: `/home/example/.${partial.id}`,
@@ -23,8 +25,13 @@ function account(partial: Partial<FleetAccount> & Pick<FleetAccount, 'id'>): Fle
     scopeRepos: [],
     fiveHourRoom: null,
     weeklyRoom: null,
+    room: null,
     lastSeen: null,
     windows: {},
+    plan: null,
+    credits: null,
+    spend: null,
+    errors: [],
     ...partial,
   };
 }
@@ -41,6 +48,7 @@ function session(
     cwd: null,
     startedAt: null,
     sources: ['claude-code'],
+    runtime: 'claude-code',
     ...partial,
   };
 }
@@ -143,6 +151,59 @@ export function goldenModel(): FleetModel {
         },
       }),
       account({ id: 'Bad_Id', validId: false, role: 'kept-out' }),
+      account({
+        // Codex's implicit account: bars, a plan, and a model-scoped limit as a note.
+        runtime: 'codex',
+        id: 'default',
+        implicit: true,
+        path: null,
+        lastSeen: at(-5 * M),
+        plan: 'pro',
+        windows: {
+          seven_day: {
+            usedPct: 35,
+            resetsAt: at(4 * D + 2 * H),
+            status: null,
+            observedAt: at(-5 * M),
+            source: 'rollout',
+            expired: false,
+          },
+          'model:gpt-5.3-codex-spark': {
+            usedPct: 12,
+            resetsAt: at(3 * H),
+            status: null,
+            observedAt: at(-5 * M),
+            source: 'rollout',
+            expired: false,
+          },
+        },
+      }),
+      account({
+        // OpenCode's implicit account: spend this month, and one provider out of credits.
+        runtime: 'opencode',
+        id: 'default',
+        implicit: true,
+        path: null,
+        lastSeen: at(-20 * M),
+        spend: {
+          periodStart: '2026-09-01T00:00:00.000Z',
+          costUsd: 0.7504,
+          limitUsd: null,
+          observedAt: at(-20 * M),
+          source: 'transcript',
+        },
+        errors: ['credits:openrouter'],
+        windows: {
+          'credits:openrouter': {
+            usedPct: null,
+            resetsAt: null,
+            status: 'rejected',
+            observedAt: at(-20 * M),
+            source: 'error',
+            expired: false,
+          },
+        },
+      }),
     ],
     sessions: [
       session({
@@ -215,6 +276,25 @@ export function goldenModel(): FleetModel {
         state: 'unseen',
         host: null,
         sources: ['flow-run'],
+      }),
+      session({
+        sessionId: 'e4f5a6b7-0000-4000-8000-000000000010',
+        account: 'default',
+        state: 'busy',
+        host: 'dorkos',
+        cwd: '/home/example/Keep/app',
+        startedAt: at(-7 * M),
+        sources: ['dorkos'],
+        runtime: 'codex',
+      }),
+      session({
+        sessionId: 'f5a6b7c8-0000-4000-8000-000000000011',
+        account: 'default',
+        item: 'DOR-2374',
+        state: 'unseen',
+        host: 'cli',
+        sources: ['flow-run'],
+        runtime: 'opencode',
       }),
     ],
   };

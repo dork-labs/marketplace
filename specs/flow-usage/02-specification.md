@@ -638,7 +638,7 @@ The operator runs flow from Claude Code, Codex and OpenCode sessions (the fleet 
 **Reading, as DorkOS does it (DorkOS ADR 260825-110420).**
 
 - Copy `opencode.db` plus any `-wal` and `-shm` beside it into a temp folder. Open the copy read-only with `node:sqlite` (`DatabaseSync`, `readOnly: true`), and delete the copy afterwards. The live store is never opened.
-- **Allowlist:** one fixed query, `SELECT data FROM message`, and only these JSON fields of `data`: `role`, `providerID`, `cost`, `time.created`, `error.name`, `error.data.statusCode`. No other table or column is ever named.
+- **Allowlist:** one fixed query, `SELECT data FROM message`, and only these JSON fields of `data`: `role`, `providerID`, `cost`, `time.created`, `time.completed` (a row is dated by its completion, since OpenCode fills in cost and errors on the row it created first), `error.name`, `error.data.statusCode`. No other table or column is ever named.
 - `node:sqlite` is detected at runtime with a dynamic `import()`. Where it is missing or needs a flag, flow warns once and records nothing. Its ExperimentalWarning is suppressed for that import only.
 
 **Spend, per provider.**

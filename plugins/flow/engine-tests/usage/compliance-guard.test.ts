@@ -17,11 +17,13 @@ import {
   readFileSync,
   rmSync,
   statSync,
+  writeFileSync,
 } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { afterEach, describe, expect, it } from 'vitest';
+import { OPENCODE_MESSAGE_QUERY } from '../../scripts/fleet/opencode-store.ts';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const SCRIPTS = path.resolve(here, '..', '..', 'scripts');
@@ -40,6 +42,12 @@ const SECRET_VARS = ['CLAUDE_CODE_OAUTH_TOKEN', 'ANTHROPIC_API_KEY', 'ANTHROPIC_
 
 /** The one allowed mention of those names: the probe's removal list, found by name. */
 const STRIPPED_CONST = /export const PROBE_STRIPPED_ENV = \[[^\]]*\] as const;/;
+
+/** Text a Codex module's code must never hold: Codex's stored sign-in (A8). */
+const CODEX_BANNED_CODE = ['auth.json'];
+
+/** A Codex module: a guarded file with `codex` in its name. */
+const isCodexModule = (rel: string) => /codex/i.test(path.basename(rel));
 
 /** The one file allowed to call `fetch(`. */
 const FETCH_ALLOWED = path.join('fleet', 'sessions.ts');
@@ -83,6 +91,73 @@ function violations(root: string): string[] {
       if (withoutConst.includes(name)) found.push(`${rel}: names ${name}`);
     }
     if (rel !== FETCH_ALLOWED && text.includes('fetch(')) found.push(`${rel}: calls fetch(`);
+    if (isCodexModule(rel)) {
+      const code = codeOnly(text);
+      for (const banned of CODEX_BANNED_CODE) {
+        if (code.includes(banned)) found.push(`${rel}: names ${banned}`);
+      }
+    }
+  }
+  return found;
+}
+
+/** The one query the OpenCode store reader may run (spec A3, DorkOS ADR 260825-110420). Pinned. */
+const OPENCODE_ALLOWED_QUERY = 'SELECT data FROM message';
+
+/** The file that owns it, and the one line where it is declared. */
+const OPENCODE_READER = path.join('fleet', 'opencode-store.ts');
+const OPENCODE_QUERY_LINE = `export const OPENCODE_MESSAGE_QUERY = '${OPENCODE_ALLOWED_QUERY}';`;
+
+/** Names from OpenCode's credential tables that no guarded code may mention. */
+const OPENCODE_SECRET_NAMES = [/\baccess_token\b/, /\brefresh_token\b/, /\bcontrol_account\b/];
+
+/**
+ * `text` without its comments: block comments, and `//` comments that do not
+ * follow a `:` or a quote (so `http://` in a string survives). The SQL rules
+ * judge code, never what a comment says.
+ */
+function codeOnly(text: string): string {
+  return text
+    .replace(/\/\*[\s\S]*?\*\//g, '')
+    .split('\n')
+    .map((line) => line.replace(/(^|[^:'"`])\/\/.*$/, '$1'))
+    .join('\n');
+}
+
+/**
+ * Every SQL rule the guarded code breaks: only the OpenCode reader may hold SQL,
+ * its only SQL is the pinned query on its one declaration line, it prepares
+ * nothing else and runs no `exec`, and no code selects from a credential or
+ * account table or names a token column.
+ */
+function sqlViolations(root: string): string[] {
+  const found: string[] = [];
+  for (const rel of guardedFiles(root)) {
+    const code = codeOnly(readFileSync(path.join(root, rel), 'utf8'));
+    if (/\bFROM\s+(credential|account|control_account)\b/i.test(code)) {
+      found.push(`${rel}: selects from a credential or account table`);
+    }
+    for (const name of OPENCODE_SECRET_NAMES) {
+      if (name.test(code)) found.push(`${rel}: names ${name.source.replaceAll('\\b', '')}`);
+    }
+    // SQL is case-insensitive, and so is this count.
+    const selects = code.match(/\bSELECT\b/gi)?.length ?? 0;
+    if (rel !== OPENCODE_READER) {
+      if (selects > 0) found.push(`${rel}: holds SQL outside ${OPENCODE_READER}`);
+      // `.exec(` is also RegExp's, so only `.prepare(` marks a database statement here.
+      if (/\.prepare\(/.test(code)) {
+        found.push(`${rel}: prepares a database statement outside ${OPENCODE_READER}`);
+      }
+      continue;
+    }
+    if (selects !== 1 || !code.includes(OPENCODE_QUERY_LINE)) {
+      found.push(`${rel}: SQL other than the pinned query`);
+    }
+    const prepared = [...code.matchAll(/\.prepare\(([^)]*)\)/g)].map((m) => m[1]);
+    if (prepared.length === 0 || prepared.some((arg) => arg !== 'OPENCODE_MESSAGE_QUERY')) {
+      found.push(`${rel}: prepares something other than OPENCODE_MESSAGE_QUERY`);
+    }
+    if (/\.(exec|iterate)\(/.test(code)) found.push(`${rel}: runs exec or iterate`);
   }
   return found;
 }
@@ -110,6 +185,11 @@ describe('the usage compliance guard', () => {
     expect(files).toContain(path.join('cli', 'usage-probe.ts'));
     expect(files).toContain(path.join('cli', 'usage-scan.ts'));
     expect(files).toContain(path.join('usage', 'statusline-hook.sh'));
+    expect(files.filter(isCodexModule)).toEqual([
+      path.join('cli', 'usage-record-codex.ts'),
+      path.join('cli', 'usage-scan-codex.ts'),
+      path.join('fleet', 'codex-accounts.ts'),
+    ]);
     expect(violations(SCRIPTS)).toEqual([]);
   });
 
@@ -154,9 +234,72 @@ describe('the usage compliance guard', () => {
     expect(violations(allowed)).toEqual([]);
   });
 
+  it.each([
+    ['fleet/codex-accounts.ts', "const file = path.join(home, 'auth.json');"],
+    ['cli/usage-scan-codex.ts', 'const signIn = `${home}/auth.json`;'],
+  ])('fires on a Codex module naming auth.json in code (%s)', (rel, line) => {
+    // Purpose: prove the Codex rule can fail in each Codex module folder.
+    const root = copyWith(rel, line);
+    expect(violations(root)).toEqual([`${rel}: names auth.json`]);
+  });
+
+  it('lets a comment in a Codex module say auth.json is never read', () => {
+    // Purpose: the rule checks code, not comments (A8).
+    const root = copyWith(
+      'cli/usage-record-codex.ts',
+      '/** Never reads auth.json. */\n// nor auth.json here'
+    );
+    expect(violations(root)).toEqual([]);
+  });
+
   it('ignores files outside its scope', () => {
     // Purpose: host-io.ts owns the real fetch wiring; the guard covers only usage and fleet code.
     const root = copyWith('cli/host-io.ts', "await fetch('http://127.0.0.1');");
     expect(violations(root)).toEqual([]);
+  });
+
+  describe('the OpenCode store reader', () => {
+    it('runs exactly the pinned query, and the shipped code breaks no SQL rule', () => {
+      // Purpose: spec A3/A8. The reader's SQL equals the allowlisted query, checked
+      // on the exported value and on the code, never on a comment.
+      expect(OPENCODE_MESSAGE_QUERY).toBe(OPENCODE_ALLOWED_QUERY);
+      expect(guardedFiles(SCRIPTS)).toContain(OPENCODE_READER);
+      expect(sqlViolations(SCRIPTS)).toEqual([]);
+    });
+
+    it.each([
+      [OPENCODE_READER, "const q = 'SELECT value FROM credential';"],
+      [OPENCODE_READER, "db.exec('PRAGMA query_only = 0');"],
+      [OPENCODE_READER, "db.prepare('SELECT data FROM message').all();"],
+      [path.join('cli', 'usage-opencode.ts'), "const q = 'SELECT data FROM part';"],
+      [path.join('cli', 'usage-scan.ts'), 'const t = row.access_token;'],
+      [path.join('fleet', 'accounts.ts'), "const q = 'select * from account';"],
+      [path.join('cli', 'usage-opencode.ts'), "db.prepare('select data from auth_store').all();"],
+      [path.join('cli', 'usage-opencode.ts'), 'db.prepare(q).all();'],
+    ])('fires on SQL added to %s: %s', (rel, line) => {
+      // Purpose: prove each SQL rule can fail.
+      const root = copyWith(rel, line);
+      expect(sqlViolations(root).some((v) => v.startsWith(`${rel}:`))).toBe(true);
+    });
+
+    it('fires when the pinned query itself changes', () => {
+      // Purpose: widening the one query (a join, another table) is caught.
+      const root = copyWith(OPENCODE_READER, '');
+      const file = path.join(root, OPENCODE_READER);
+      writeFileSync(
+        file,
+        readFileSync(file, 'utf8').replace(
+          OPENCODE_QUERY_LINE,
+          "export const OPENCODE_MESSAGE_QUERY = 'SELECT data FROM message, credential';"
+        )
+      );
+      expect(sqlViolations(root)).toContain(`${OPENCODE_READER}: SQL other than the pinned query`);
+    });
+
+    it('ignores SQL in a comment', () => {
+      // Purpose: the guard checks code, not comments.
+      const root = copyWith(OPENCODE_READER, '// SELECT value FROM credential\n/* db.exec(x) */');
+      expect(sqlViolations(root)).toEqual([]);
+    });
   });
 });

@@ -317,6 +317,89 @@ describe('sessionState', () => {
   });
 });
 
+describe('joinSessions across runtimes', () => {
+  it("groups rows by runtime, keeps two runtimes' default accounts apart, and names each row's runtime", () => {
+    // Purpose: flow runs from Codex and OpenCode too; a limited Codex default must not mark OpenCode's.
+    const rows = joinSessions({
+      identities: [
+        { runtime: 'codex', id: 'default' },
+        { runtime: 'opencode', id: 'default' },
+        { id: 'acct-a' },
+      ],
+      cli: [
+        { sessionId: 'c1', pid: 1, account: 'acct-a', cwd: null, status: 'idle', startedAt: null },
+      ],
+      dorkos: [
+        {
+          sessionId: 'o1',
+          account: 'default',
+          cwd: null,
+          lifecycle: 'idle',
+          limited: false,
+          item: null,
+          startedAt: null,
+          runtime: 'opencode',
+        },
+        {
+          // A runtime flow does not know sorts after the three it does, whatever its name.
+          sessionId: 'z1',
+          account: null,
+          cwd: null,
+          lifecycle: 'idle',
+          limited: false,
+          item: null,
+          startedAt: null,
+          runtime: 'aardvark',
+        },
+        {
+          sessionId: 'x1',
+          account: 'default',
+          cwd: null,
+          lifecycle: 'idle',
+          limited: false,
+          item: null,
+          startedAt: null,
+          runtime: 'codex',
+        },
+      ],
+      runs: [
+        {
+          identifier: 'DOR-1',
+          sessionId: 'r1',
+          status: 'running',
+          stage: null,
+          account: null,
+          host: 'cli',
+          workerPid: null,
+          worktreePath: null,
+          startedAt: null,
+          runtime: 'opencode',
+        },
+      ],
+      windowsByAccount: {
+        'codex:default': {
+          seven_day: {
+            usedPct: 100,
+            resetsAt: '2026-09-30T00:00:00.000Z',
+            status: 'rejected',
+            observedAt: '2026-09-26T15:00:00.000Z',
+            source: 'rollout',
+          },
+        },
+      },
+      now: NOW,
+      pidAlive,
+    });
+    expect(rows.map((r) => [r.sessionId, r.runtime, r.state])).toEqual([
+      ['c1', 'claude-code', 'idle'],
+      ['x1', 'codex', 'limited'],
+      ['o1', 'opencode', 'idle'],
+      ['r1', 'opencode', 'unseen'],
+      ['z1', 'aardvark', 'idle'],
+    ]);
+  });
+});
+
 describe('joinSessions', () => {
   const cli: CliSession[] = [
     {
@@ -365,7 +448,7 @@ describe('joinSessions', () => {
       dorkos,
       runs,
       windowsByAccount: {
-        'acct-a': {
+        'claude-code:acct-a': {
           five_hour: {
             usedPct: null,
             resetsAt: '2026-09-26T19:00:00.000Z',

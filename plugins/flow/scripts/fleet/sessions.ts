@@ -58,6 +58,8 @@ export interface DorkosSession {
   item: string | null;
   /** When the session was created (UTC ISO), or `null`. */
   startedAt: string | null;
+  /** The runtime DorkOS runs it on (`claude-code`, `codex`, `opencode`, ...), or `null`. */
+  runtime: string | null;
 }
 
 /** What {@link fetchDorkosSessions} learned. */
@@ -92,6 +94,8 @@ export interface ActiveRun {
   worktreePath: string | null;
   /** When the run started (UTC ISO), or `null`. */
   startedAt: string | null;
+  /** The runtime the run's session uses, or `null` for a record written before runs named it. */
+  runtime: string | null;
 }
 
 /** Which source a fleet row came from. */
@@ -119,6 +123,12 @@ export interface FleetSession {
   startedAt: string | null;
   /** Where the row came from. */
   sources: SessionSource[];
+  /**
+   * The runtime the session runs on: `claude-code` for a Claude Code session
+   * file, DorkOS's own field for its rows, the run's for a run-only row, and
+   * `claude-code` when nothing says otherwise.
+   */
+  runtime: string;
 }
 
 /** Collapse runs of whitespace and trim, so `ps` padding never decides a comparison. */
@@ -391,6 +401,7 @@ export async function fetchDorkosSessions(
       limited: status !== null && status.limit !== null && status.limit !== undefined,
       item: tracker !== null && typeof tracker.id === 'string' ? tracker.id : null,
       startedAt: toIso(row.createdAt),
+      runtime: typeof row.runtime === 'string' && row.runtime !== '' ? row.runtime : null,
     });
   }
   return { url, reachable: true, sessions };
@@ -501,6 +512,7 @@ export async function collectRuns(
         workerPid: typeof run.workerPid === 'number' ? run.workerPid : null,
         worktreePath: typeof run.worktreePath === 'string' ? run.worktreePath : null,
         startedAt: toIso(run.startedAt),
+        runtime: typeof run.runtime === 'string' && run.runtime !== '' ? run.runtime : null,
       });
     }
   }
@@ -569,17 +581,46 @@ export function accountLimitedNow(windows: Record<string, unknown> | null, now: 
   );
 }
 
+/** The order runtimes are shown in; any other runtime comes after, by name. */
+const RUNTIME_ORDER = ['claude-code', 'codex', 'opencode'];
+
+/**
+ * Where a runtime sorts: Claude Code, Codex, OpenCode, then anything else.
+ *
+ * @param runtime - A runtime name.
+ * @returns Its position.
+ */
+export function runtimeRank(runtime: string): number {
+  const index = RUNTIME_ORDER.indexOf(runtime);
+  return index === -1 ? RUNTIME_ORDER.length : index;
+}
+
+/**
+ * The key one account's ledger windows are looked up by: `<runtime>:<id>`, so
+ * two runtimes' `default` accounts never meet.
+ *
+ * @param runtime - The runtime.
+ * @param id - The account id.
+ * @returns The key.
+ */
+export function fleetAccountKey(runtime: string, id: string): string {
+  return `${runtime}:${id}`;
+}
+
 /** Inputs of {@link joinSessions}. */
 export interface JoinInput {
-  /** The identities in registry order (decides sort order). */
-  identities: readonly Pick<AccountIdentity, 'id'>[];
+  /**
+   * The accounts in display order (decides sort order within a runtime). An
+   * entry with no `runtime` is a Claude Code account.
+   */
+  identities: readonly { id: string; runtime?: string }[];
   /** Live Claude Code sessions. */
   cli: readonly CliSession[];
   /** Sessions a loopback DorkOS reported. */
   dorkos: readonly DorkosSession[];
   /** Active flow runs. */
   runs: readonly ActiveRun[];
-  /** Each account's ledger windows, by registry id. */
+  /** Each account's ledger windows, by `<runtime>:<id>` ({@link fleetAccountKey}). */
   windowsByAccount: Readonly<Record<string, Record<string, unknown> | null>>;
   /** The moment to judge limits at. */
   now: Instant;
@@ -600,8 +641,9 @@ export function joinSessions(input: JoinInput): FleetSession[] {
   for (const run of input.runs)
     if (!runBySession.has(run.sessionId)) runBySession.set(run.sessionId, run);
   const dorkosById = new Map(input.dorkos.map((s) => [s.sessionId, s]));
-  const limited = (account: string | null): boolean =>
-    account !== null && accountLimitedNow(input.windowsByAccount[account] ?? null, input.now);
+  const limited = (runtime: string, account: string | null): boolean =>
+    account !== null &&
+    accountLimitedNow(input.windowsByAccount[fleetAccountKey(runtime, account)] ?? null, input.now);
 
   const rows: FleetSession[] = [];
   const done = new Set<string>();
@@ -611,6 +653,7 @@ export function joinSessions(input: JoinInput): FleetSession[] {
     const run = runBySession.get(sessionId);
     if (run) usedRuns.add(run);
     const account = dork?.account ?? cli?.account ?? run?.account ?? null;
+    const runtime = cli ? 'claude-code' : (dork?.runtime ?? run?.runtime ?? 'claude-code');
     const sources: SessionSource[] = [];
     if (cli) sources.push('claude-code');
     if (dork) sources.push('dorkos');
@@ -623,7 +666,7 @@ export function joinSessions(input: JoinInput): FleetSession[] {
       state: sessionState({
         dorkos: dork,
         cli: dork ? undefined : cli,
-        accountLimited: limited(account),
+        accountLimited: limited(runtime, account),
         pidAlive: input.pidAlive,
       }),
       host: run?.host ?? (dork ? 'dorkos' : 'cli'),
@@ -631,6 +674,7 @@ export function joinSessions(input: JoinInput): FleetSession[] {
       cwd: dork?.cwd ?? cli?.cwd ?? null,
       startedAt: dork?.startedAt ?? cli?.startedAt ?? null,
       sources,
+      runtime,
     };
   };
 
@@ -658,17 +702,25 @@ export function joinSessions(input: JoinInput): FleetSession[] {
       cwd: run.worktreePath,
       startedAt: run.startedAt,
       sources: ['flow-run'],
+      runtime: run.runtime ?? 'claude-code',
     });
   }
 
-  const order = new Map(input.identities.map((identity, index) => [identity.id, index]));
-  const rank = (account: string | null): number =>
-    account !== null && order.has(account)
-      ? (order.get(account) as number)
+  const order = new Map(
+    input.identities.map((identity, index) => [
+      fleetAccountKey(identity.runtime ?? 'claude-code', identity.id),
+      index,
+    ])
+  );
+  const rank = (row: FleetSession): number =>
+    row.account !== null && order.has(fleetAccountKey(row.runtime, row.account))
+      ? (order.get(fleetAccountKey(row.runtime, row.account)) as number)
       : Number.MAX_SAFE_INTEGER;
   return rows.sort(
     (a, b) =>
-      rank(a.account) - rank(b.account) ||
+      runtimeRank(a.runtime) - runtimeRank(b.runtime) ||
+      a.runtime.localeCompare(b.runtime) ||
+      rank(a) - rank(b) ||
       (a.item ?? '\uffff').localeCompare(b.item ?? '\uffff') ||
       (a.startedAt ?? '\uffff').localeCompare(b.startedAt ?? '\uffff')
   );

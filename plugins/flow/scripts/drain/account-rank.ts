@@ -329,17 +329,13 @@ function mainHeldBack(account: RankableAccount, now: Instant): boolean {
  */
 function headroomScore(account: RankableAccount, now: Instant): number {
   const reading = readWindow(entryOf(account.windows, 'seven_day'), now, 'seven_day');
-  if (reading?.expired) {
-    // A new week has begun since this reading: its whole allowance is left, the
-    // reserve applies again, and the next reset is unknown. S1's
-    // effectiveReservePct keeps reading the ended week's resetsAt as "inside the
-    // spend-down window", so it is not used here.
-    return (100 - account.policy.reservePct) / WEEK_HOURS;
-  }
   const ceiling = 100 - effectiveReservePct(account.policy, account.windows, now);
   const remaining = ceiling - (reading?.usedPct ?? 0);
+  // An expired reading's resetsAt is the week that already ended (it reads as 0
+  // used, and S1 applies the reserve again after the reset); the next reset is
+  // unknown, so its horizon is a full week.
   const hours =
-    reading !== null && reading.resetsAt !== null
+    reading !== null && reading.resetsAt !== null && !reading.expired
       ? Math.max(1, (Date.parse(reading.resetsAt) - instantMs(now)) / HOUR_MS)
       : WEEK_HOURS;
   return remaining / hours;
