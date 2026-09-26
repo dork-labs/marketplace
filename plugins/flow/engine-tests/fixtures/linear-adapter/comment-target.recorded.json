@@ -1,0 +1,28 @@
+{
+  "recordedAt": "2026-09-26",
+  "composio": "0.2.31",
+  "query": "query FlowCommentTarget($id: String!) {\n  issue(id: $id) { id identifier team { id key } }\n}",
+  "variables": {
+    "id": "DOR-2367"
+  },
+  "response": {
+    "successful": true,
+    "data": {
+      "composio_execution_message": null,
+      "data": {
+        "issue": {
+          "id": "uuid-DOR-2367",
+          "identifier": "DOR-2367",
+          "team": {
+            "id": "00000000-0000-4000-8000-00000000team",
+            "key": "DOR"
+          }
+        }
+      },
+      "errors": null,
+      "extensions": null
+    },
+    "error": null,
+    "logId": "log_recorded0004"
+  }
+}

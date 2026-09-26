@@ -19,12 +19,9 @@ description: The /flow engine's tracker adapter — the single skill that owns E
 > generic stage skill and the dispatch policy can work _without ever touching a
 > Linear-specific field or a tracker API string_.
 >
-> **This is a prose contract, not code.** In v1 there is no DorkOS server and
-> nothing imports a TypeScript adapter at runtime — the engine is server-free and
-> skill-based. The agent _reads this skill and follows it_. The typed
-> `interface PMClient` documented in [`../../SPEC.md`](../../docs/SPEC.md) is what the
-> **P5 server build** promotes this prose contract into. Building a TS adapter
-> class now would be dead code (this repo forbids dead code), so we do not.
+> **Prose plus code.** The agent reads this skill and follows it. `adapter.ts`
+> beside it holds the same recipes as tested code, which the `flow` CLI calls
+> (adapter contract 1.4.0, "The code realization").
 
 ## The one rule
 
