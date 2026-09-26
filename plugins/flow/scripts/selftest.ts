@@ -3,18 +3,21 @@
  *
  * Runs the `fast` tier (free, offline checks of this install and its prose,
  * `selftest/fast.ts`) and then the `scenarios` tier (the real `flow` verbs
- * against the fake tracker, `selftest/scenarios.ts`). The same module backs
+ * against the fake tracker, `selftest/scenarios.ts`). The `live` tier (a real
+ * model against the fake tracker, `selftest/live/`) runs only when asked for,
+ * with `FLOW_SELFTEST_LIVE=1`, and never in CI: it spends money. The same module backs
  * the `flow selftest` verb (`scripts/cli/selftest.ts`) and this script:
  *
  *   node --experimental-strip-types <flow-root>/scripts/selftest.ts [flags]
  *
- * Flags: `--tier fast|scenarios` (default: both), `--json`, `--strict` (a skip
- * fails the run), `--file` (turn failures into tracker work, `selftest/file.ts`),
- * `--no-save`, `--project <dir>`, `--rebaseline` (lower the word budgets to
- * today's counts), `--help`. The `live` tier is not built yet.
+ * Flags: `--tier fast|scenarios|live|all` (default: fast and scenarios; `all`
+ * adds live), `--max-usd <n>` (the live tier's ceiling), `--json`, `--strict`
+ * (a skip fails the run), `--file` (turn failures into tracker work,
+ * `selftest/file.ts`), `--no-save`, `--project <dir>`, `--rebaseline` (lower
+ * the word budgets to today's counts), `--help`.
  *
  * Exit codes: 0 no failures · 1 a check failed (or, with `--strict`, was skipped)
- * · 2 usage error.
+ * · 2 usage error, or the live tier's gate refused.
  *
  * Every run (unless `--no-save`) writes `.dork/flow/selftest/latest.json` and adds
  * one line to `history.jsonl` (the last 200 runs) in the project's main checkout,
@@ -32,6 +35,7 @@ import { flowVersion, invokedDirectly } from './_shared.ts';
 import { realProcessRunner } from './cli/context.ts';
 import { buildProvenance, signBody, unsignedBody } from './cli/provenance.ts';
 import { findConfigRoots } from './config-files.ts';
+import { UsageError } from './errors.ts';
 import { ensureIgnored } from './git-exclude.ts';
 import { append, journalFor, runtimeOf } from './journal.ts';
 import {
@@ -43,6 +47,7 @@ import {
 } from './selftest/doc-lint.ts';
 import { runFast } from './selftest/fast.ts';
 import { emptyFiling, fileFailures, filingSetup, type FilingResult } from './selftest/file.ts';
+import { liveRefusal } from './selftest/live/gate.ts';
 import {
   buildReport,
   exitCode,
@@ -89,8 +94,12 @@ export interface SelftestDeps {
 
 const HELP = `flow selftest: check this flow install, its prose, and how its commands behave.
 
-  --tier <tier>      fast (free, offline checks) or scenarios (the flow commands
-                     against a fake tracker); default: both
+  --tier <tier>      fast (free, offline checks), scenarios (the flow commands
+                     against a fake tracker), live (a real model against the
+                     fake tracker; costs money, needs FLOW_SELFTEST_LIVE=1,
+                     never runs in CI) or all; default: fast and scenarios
+  --max-usd <n>      the most the live tier may spend (default: the config's
+                     selfImprovement.selftest.liveBudgetUsd, else 1.00)
   --json             print the report as one JSON object
   --strict           a skipped check fails the run
   --file             turn each failure into tracker work (see the report)
@@ -99,7 +108,7 @@ const HELP = `flow selftest: check this flow install, its prose, and how its com
   --rebaseline       lower selftest/word-budgets.json to today's counts, then exit
   --help, -h         this text
 
-Exit codes: 0 no failures, 1 a check failed, 2 usage error.
+Exit codes: 0 no failures, 1 a check failed, 2 usage error or the live tier refused.
 `;
 
 /**
@@ -110,11 +119,23 @@ Exit codes: 0 no failures, 1 a check failed, 2 usage error.
  */
 export function tiersFor(value: string | undefined): Tier[] | string {
   if (value === undefined) return [...DEFAULT_TIERS];
-  if (value === 'fast' || value === 'scenarios') return [value];
-  if (value === 'live' || value === 'all') {
-    return `the live tier is not built yet; use --tier fast or --tier scenarios, or leave --tier off for both`;
+  if (value === 'fast' || value === 'scenarios' || value === 'live') return [value];
+  if (value === 'all') return ['fast', 'scenarios', 'live'];
+  return `unknown tier ${value} (use fast, scenarios, live or all)`;
+}
+
+/**
+ * The `--max-usd` value, parsed.
+ *
+ * @param value - The flag's value.
+ * @returns The amount, or a usage error message.
+ */
+export function maxUsdFor(value: string): number | string {
+  const amount = Number(value);
+  if (value.trim() === '' || !Number.isFinite(amount) || amount < 0) {
+    return `--max-usd needs an amount in US dollars, such as 0.50 (got ${value})`;
   }
-  return `unknown tier ${value} (use fast or scenarios)`;
+  return amount;
 }
 
 /** Parsed flags. */
@@ -126,6 +147,7 @@ interface Flags {
   file: boolean;
   rebaseline: boolean;
   project?: string;
+  maxUsd?: number;
   tiers: Tier[];
 }
 
@@ -157,6 +179,12 @@ function parseFlags(argv: readonly string[]): Flags | string {
       const v = value();
       if (v === undefined) return '--project needs a folder';
       flags.project = v;
+    } else if (arg === '--max-usd') {
+      const v = value();
+      if (v === undefined) return '--max-usd needs an amount';
+      const amount = maxUsdFor(v);
+      if (typeof amount === 'string') return amount;
+      flags.maxUsd = amount;
     } else if (arg === '--tier') {
       const v = value();
       if (v === undefined) return '--tier needs a value';
@@ -226,20 +254,30 @@ export interface SelftestRun {
   warn: (message: string) => void;
   /** Builds the scenarios' fake tracker (a test seam). */
   makeTracker?: TrackerFactory;
+  /** The live tier's ceiling (default: the project's config, else 1.00). */
+  maxUsd?: number;
 }
 
 /**
  * Run the tiers, file failures when asked, save the report.
  *
+ * The live tier's gate is checked before any tier starts.
+ *
  * @param run - What to run and where.
  * @returns The report and the exit code (0 or 1).
+ * @throws {UsageError} When the live tier is asked for and its gate refuses.
  */
 export async function runSelftest(
   run: SelftestRun
 ): Promise<{ report: SelftestReport; code: 0 | 1 }> {
+  if (run.tiers.includes('live')) {
+    const refusal = liveRefusal(run.env);
+    if (refusal !== undefined) throw new UsageError(refusal);
+  }
   const started = run.now();
   const t0 = performance.now();
   const checks: Check[] = [];
+  let credentialSource: string | undefined;
   for (const tier of run.tiers) {
     if (tier === 'fast') {
       checks.push(
@@ -249,6 +287,15 @@ export async function runSelftest(
       checks.push(
         ...(await runScenarios({ flowRoot: run.flowRoot, makeTracker: run.makeTracker }))
       );
+    } else if (tier === 'live') {
+      const live = await import('./selftest/live/run.ts');
+      const result = await live.runLive({
+        flowRoot: run.flowRoot,
+        env: run.env,
+        maxUsd: run.maxUsd ?? (await live.liveBudget(run.projectDir, run.flowRoot, run.env)),
+      });
+      checks.push(...result.checks);
+      credentialSource = result.credentialSource;
     }
   }
   const version = flowVersion(run.flowRoot);
@@ -257,6 +304,7 @@ export async function runSelftest(
     flowVersion: version,
     tiers: [...run.tiers],
     ms: Math.round(performance.now() - t0),
+    credentialSource,
   });
   if (run.file) report.filing = await file(report, run);
 
@@ -354,14 +402,15 @@ export function writeRebaseline(flowRoot: string): { file: string; count: number
  */
 export async function main(argv: readonly string[], deps: SelftestDeps): Promise<number> {
   const flowRoot = deps.flowRoot ?? FLOW_ROOT;
-  const flags = parseFlags(argv);
-  if (typeof flags === 'string') {
+  const refuse = (message: string): number => {
     if (argv.includes('--json')) {
-      deps.stdout(`${JSON.stringify({ v: 1, ok: false, error: { code: 2, message: flags } })}\n`);
+      deps.stdout(`${JSON.stringify({ v: 1, ok: false, error: { code: 2, message } })}\n`);
     }
-    deps.stderr(`flow selftest: ${flags}\n`);
+    deps.stderr(`flow selftest: ${message}\n`);
     return 2;
-  }
+  };
+  const flags = parseFlags(argv);
+  if (typeof flags === 'string') return refuse(flags);
   if (flags.help) {
     deps.stdout(HELP);
     return 0;
@@ -374,31 +423,39 @@ export async function main(argv: readonly string[], deps: SelftestDeps): Promise
 
   const projectDir = path.resolve(deps.cwd, flags.project ?? '.');
   const warn = (message: string) => deps.stderr(`flow selftest: ${message}\n`);
-  const { report, code } = await runSelftest({
-    flowRoot,
-    projectDir,
-    env: deps.env,
-    now: deps.now,
-    tiers: flags.tiers,
-    strict: flags.strict,
-    save: flags.save,
-    file: flags.file,
-    adapter: () =>
-      deps.createAdapter !== undefined
-        ? deps.createAdapter(projectDir)
-        : import('./tracker/load.ts').then((load) =>
-            load.createCodeAdapter({
-              projectDir,
-              flowRoot,
-              env: deps.env,
-              runProcess: realProcessRunner,
-              warn,
-            })
-          ),
-    sessionId: deps.env.FLOW_SESSION_ID || deps.env.CLAUDE_CODE_SESSION_ID || undefined,
-    warn,
-    makeTracker: deps.makeTracker,
-  });
+  let outcome: Awaited<ReturnType<typeof runSelftest>>;
+  try {
+    outcome = await runSelftest({
+      flowRoot,
+      projectDir,
+      env: deps.env,
+      now: deps.now,
+      tiers: flags.tiers,
+      strict: flags.strict,
+      save: flags.save,
+      file: flags.file,
+      adapter: () =>
+        deps.createAdapter !== undefined
+          ? deps.createAdapter(projectDir)
+          : import('./tracker/load.ts').then((load) =>
+              load.createCodeAdapter({
+                projectDir,
+                flowRoot,
+                env: deps.env,
+                runProcess: realProcessRunner,
+                warn,
+              })
+            ),
+      sessionId: deps.env.FLOW_SESSION_ID || deps.env.CLAUDE_CODE_SESSION_ID || undefined,
+      warn,
+      makeTracker: deps.makeTracker,
+      maxUsd: flags.maxUsd,
+    });
+  } catch (error) {
+    if (error instanceof UsageError) return refuse(error.message);
+    throw error;
+  }
+  const { report, code } = outcome;
   deps.stdout(flags.json ? `${JSON.stringify(report)}\n` : renderText(report));
   return code;
 }

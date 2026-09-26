@@ -604,12 +604,13 @@ describe('the flow selftest verb', { timeout: SCENARIOS_TIMEOUT }, () => {
     expect(ok.code).toBe(0);
     expect(JSON.parse(ok.out)).toMatchObject({ v: 1, ok: true, tiers: ['scenarios'] });
 
+    // The live tier's gate refuses without FLOW_SELFTEST_LIVE=1, as a usage error.
     const bad = await flow(['selftest', '--tier', 'live', '--json']);
     expect(bad.code).toBe(2);
     expect(JSON.parse(bad.out)).toMatchObject({
       v: 1,
       ok: false,
-      error: { code: 2, message: expect.stringMatching(/the live tier is not built yet/) },
+      error: { code: 2, message: expect.stringMatching(/set FLOW_SELFTEST_LIVE=1/) },
     });
   });
 });

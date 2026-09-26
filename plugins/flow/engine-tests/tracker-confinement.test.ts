@@ -67,10 +67,15 @@ const FLOW_BUNDLE_ROOTS = [
  * fixtures / assertions ABOUT the adapter contract rather than as live tracker
  * I/O. In the plugin layout the guard's own pattern literals and the adapter-doc
  * assertions live in `engine-tests/` — which is NOT a bundle root — so they are
- * never scanned and need no entry here. The set is retained as the documented
- * seam for any future in-bundle fixture.
+ * never scanned and need no entry here.
+ *
+ * - `scripts/selftest/live/denylist.ts`: the live self-test's breach check names
+ *   `composio` in its denylist, so a live run that calls it fails. It is the one
+ *   small file that must spell the word to forbid it, and holds nothing else.
  */
-const SCAN_EXCLUSIONS = new Set<string>();
+const SCAN_EXCLUSIONS = new Set<string>([
+  path.join(pluginRoot, 'scripts', 'selftest', 'live', 'denylist.ts'),
+]);
 
 /**
  * Tracker-string patterns that may only live in the adapter skill. Case-sensitive
