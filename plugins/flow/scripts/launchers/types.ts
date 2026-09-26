@@ -88,6 +88,12 @@ export interface SessionHandle {
   permissionMode?: LaunchPermissionMode;
   /** cli, cmux: the model the session was started with, passed again on resume. */
   model?: string;
+  /**
+   * dorkos: how the session was started, so recovery can tell whether DorkOS
+   * minted its id (`mcp`, the `session_start` tool) or flow did (`route`, the
+   * messages route; DorkOS may still have rebound it).
+   */
+  launchPath?: 'mcp' | 'route';
 }
 
 /**
