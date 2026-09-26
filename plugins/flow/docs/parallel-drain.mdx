@@ -1,27 +1,38 @@
 ---
 title: Draining in parallel
-description: A hand-run recipe for carrying several ready items to merge at once, with one worker per item and an independent reviewer for each, until flow does it for you.
+description: flow drain carries several ready items at once, each on its own account, reviewed before any pull request.
 ---
 
 # Draining in parallel
 
-flow's own loop carries one item at a time. To carry several ready items at once today, one session acts as the orchestrator and runs this recipe by hand. It uses these parts of flow:
+`flow drain --parallel 3` carries several ready items at once, three sessions at a time. For each item it makes a worktree, claims the item, and starts a worker on the account with the most room. Every push the worker reports is read by a separate reviewer session in its own worktree. The worker opens its PR only after a clean review at the branch head: `flow pr` refuses otherwise.
 
-- `templates/drain/worker-brief.md`: one worker's path from claim to DONE.
-- `templates/drain/reviewer-brief.md`: an independent reviewer's rubric for one pushed commit.
-- `flow watch`: exits when an open PR merges, fails a check, or leaves the merge queue.
+## Before you start
 
-## The recipe
+Allow each account flow may spend with `flow accounts set <id> --role rotation`. With none registered, sessions run on your own login. Each user judges their own use of more than one account against Anthropic's terms.
 
-1. **Pick the items.** Run `/flow:status` and take the ready items you want. Items that touch the same files go to the same worker, or wait for each other.
-2. **Fill the placeholders.** Copy the two briefs and replace each `<placeholder>` (`<project>`, `<flow-root>`, `<workspaces-dir>`, `<scratch-dir>`). `<flow-root>` is where flow is installed: take the real path of `.claude/skills/flow__closing-work` (`realpath`) and go two directories up. Add your repo's own landing rules if its `AGENTS.md` does not already cover them.
-3. **Start one worker per item.** Give each a background agent the worker brief and its item ids. Each claims, builds in its own worktree, pushes, and returns.
-4. **Review each pushed commit.** Start a fresh agent per worker with the reviewer brief and the pushed SHA. Send its findings back to that worker. Repeat until the verdict is clean.
-5. **Land.** Tell the worker to open its PR. Run `flow watch --pr <owner/repo>#<pr>` (one `--pr` per PR), and resume the worker when its PR merges or goes red.
-6. **Close.** Each worker runs DONE for its items and removes its worktree.
+## Where sessions run
 
-## Rules that keep it safe
+`--host` picks `cli` (plain `claude -p`), `cmux` (a workspace per session) or `dorkos`. `auto` takes cmux when the drain runs inside it, then DorkOS when it is running, then the plain CLI. A named host that is missing is an error.
 
-- One writer per worktree. The reviewer reads the pushed commit in its own worktree, never the worker's.
-- Workers must be resumable: the orchestrator messages the same agent after review and after merge.
-- Cap how many workers run at once. A loaded machine times out tests, and reruns cost more than waiting.
+## What each line means
+
+- `claimed on <account> (cli)`: a worker started.
+- `reviewer started at 4be1c2d`: a push is under review.
+- `sent review-findings`: the worker got the findings.
+- `sent open-pr`: the review came back clean.
+- `parked: <reason>`: a person is needed; the reason is posted on the item.
+
+## Limits
+
+No new session starts while the load per CPU is at or above `drain.maxLoadPerCpu`, or on an account already carrying `drain.maxLivePerAccount` sessions. After `drain.maxReviewRounds` reviews asking for changes, the run parks.
+
+## Terminal or schedule
+
+In a terminal, `flow drain` passes every `drain.pollSeconds` until nothing is left, or until Ctrl-C, which leaves every session running for the next drain to adopt. On a schedule, set `drain.parallel` and the `flow-drain` tick runs `flow drain --tick`, one pass per firing.
+
+## Parts
+
+- `templates/drain/worker-brief.md` and `templates/drain/reviewer-brief.md`: what each session reads first.
+- `flow watch`: wait on any PR by hand.
+- The launchers' live test starts real sessions only with `FLOW_LAUNCHER_LIVE=1`.

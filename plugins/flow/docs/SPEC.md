@@ -161,10 +161,8 @@ each one's flags.
 ## `FlowRun` record (promotion surface, P3)
 
 The durable run record keys the **session↔issue** association — the bridge that
-makes ephemeral sessions resumable. Written to `flow-state.json` (v1, disk) →
-server SQLite (v2), following the ADR-0043 file-first write-through pattern (disk
-is truth; the future DB is a derived cache). Typed in `@dorkos/flow`
-`flow-run.ts`:
+makes ephemeral sessions resumable. Written to `flow-state.json` (disk is truth;
+a future server DB is a derived cache). Typed in `flow-run.ts`:
 
 ```ts
 FlowRun {
@@ -177,9 +175,11 @@ FlowRun {
   startedAt, completedAt?;
   account?;                     // account id the CURRENT session bills
   host?;                        // launcher of the current session: cli | dorkos | cmux
+  runtime?;                     // claude-code | codex | opencode
+  checkpointAt?, checkpointSha?; // the last flow checkpoint
+  drain?;                       // flow drain: phase, sessions, reports, rev. Phases: working,
+                                //   reviewing, fixing, pr-ready, watching, fixing-ci, closing, parked
   provenance?;                  // v/harness/session/account/worker/host/instance/surface/resumeUrl
-                                //   — where the run came from; its wire subset is the
-                                //   agent:provenance signature (docs/provenance.md)
 }
 ```
 
