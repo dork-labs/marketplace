@@ -72,6 +72,8 @@ export interface SessionHandle {
   surface?: string;
   /** cmux: the workspace that holds the surface. */
   workspace?: string;
+  /** cmux: the workspace's title, so `stop` can rename it "<title> (stopped)". */
+  title?: string;
   /** cli: the stream-json log the session writes. */
   logFile?: string;
   /** cli: bytes of {@link logFile} already read. */
