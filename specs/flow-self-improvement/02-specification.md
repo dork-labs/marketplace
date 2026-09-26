@@ -16,13 +16,13 @@ tracker client behind it.
 
 ## Overview
 
-| Verb                                   | What it does                                                                    | Writes                                              |
-| -------------------------------------- | ------------------------------------------------------------------------------- | --------------------------------------------------- |
-| `flow selftest [--tier …] [--file]`    | Runs flow's own checks in three tiers and reports                               | `.dork/flow/selftest/latest.json`; items with `--file` |
-| `flow note --kind <k> "<text>"`        | An agent records friction it hit                                                | one journal line                                    |
-| `flow journal record <kind> …`         | Records an event the CLI cannot see (review verdict, CI red, handoff)           | one journal line                                    |
-| `flow journal tail [-n N] [--kind k]`  | Prints recent journal lines                                                     | nothing                                             |
-| `flow retro [--since 7d] [--file]`     | Measures flow's health, proposes improvements, and files them when asked        | `.dork/flow/retro/<date>.{json,md}`; items with `--file` |
+| Verb                                  | What it does                                                             | Writes                                                   |
+| ------------------------------------- | ------------------------------------------------------------------------ | -------------------------------------------------------- |
+| `flow selftest [--tier …] [--file]`   | Runs flow's own checks in three tiers and reports                        | `.dork/flow/selftest/latest.json`; items with `--file`   |
+| `flow note --kind <k> "<text>"`       | An agent records friction it hit                                         | one journal line                                         |
+| `flow journal record <kind> …`        | Records an event the CLI cannot see (review verdict, CI red, handoff)    | one journal line                                         |
+| `flow journal tail [-n N] [--kind k]` | Prints recent journal lines                                              | nothing                                                  |
+| `flow retro [--since 7d] [--file]`    | Measures flow's health, proposes improvements, and files them when asked | `.dork/flow/retro/<date>.{json,md}`; items with `--file` |
 
 `/flow:self-test` is a thin command over `flow selftest`. `skills/flow-retro/SKILL.md` is a weekly
 schedule, shipped off.
@@ -78,15 +78,15 @@ widens (`all` = fast + scenarios + live). Every check returns
 counts as a pass: the text report lists each skip with its reason, and `--strict` turns skips into
 exit 1.
 
-#### Tier `fast` (free, no network, target under 10 s)
+#### Tier `fast` (free, no network; under 10 s without `engine-tests`)
 
-| Check id                 | What it asserts                                                                                                                                         |
-| ------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `engine-tests`           | `vitest run` passes. Runs only when `node_modules/vitest` exists in the flow root; otherwise `skip` ("contributor toolchain not installed").             |
-| `adapter-conformance`    | `validate-adapter.ts` passes on `adapters/reference/fixtures/work-items.good.json` and fails with INV-1..5 on `work-items.bad.json` (a harness that passes the bad fixture is broken). Same for the fake tracker's own fixture. |
-| `config`                 | `validate-config.ts` passes on `config/config.example.json` and on the project's resolved config (from `config-files.ts`).                            |
-| `schema-fresh`           | `config/config.schema.json` equals the schema built from `config-schema.ts` (same builder CI uses, in memory, no `tsx`).                              |
-| `doc-lint/*`             | The rules below, over `commands/**/*.md`, `skills/**/SKILL.md`, `docs/**/*.{md,mdx}`, `README.md`.                                                     |
+| Check id              | What it asserts                                                                                                                                                                                                                                                                             |
+| --------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `engine-tests`        | `vitest run` passes. Runs only when `node_modules/vitest` exists in the flow root; otherwise `skip` ("contributor toolchain not installed"). Always `skip` when `VITEST` is set ("already inside Vitest"), so a test that runs the fast tier never starts Vitest again.                     |
+| `adapter-conformance` | `validate-adapter.ts` passes on `adapters/reference/fixtures/work-items.good.json` and fails with exactly `["INV-3"]` on `work-items.bad.json`, as `engine-tests/validate-adapter.test.ts` pins (a harness that passes the bad fixture is broken). Same for the fake tracker's own fixture. |
+| `config`              | `validate-config.ts` passes on `config/config.example.json` and on the project's resolved config (from `config-files.ts`).                                                                                                                                                                  |
+| `schema-fresh`        | `config/config.schema.json` equals the schema built from `config-schema.ts` (same builder CI uses, in memory, no `tsx`).                                                                                                                                                                    |
+| `doc-lint/*`          | The rules below, over `commands/**/*.md`, `skills/**/SKILL.md`, `docs/**/*.{md,mdx}`, `README.md`.                                                                                                                                                                                          |
 
 Doc-lint rules (`scripts/selftest/doc-lint.ts`, pure over `{ path, text }[]`):
 
@@ -106,8 +106,10 @@ Doc-lint rules (`scripts/selftest/doc-lint.ts`, pure over `{ path, text }[]`):
   timezone Node's `Intl` accepts, `enabled: false` (the opt-in convention), `max-runtime`, and
   `permissions`.
 - **`doc-lint/war-stories`**: inside a numbered or bulleted step of a skill or command, a line
-  with a date (`20\d\d-\d\d-\d\d`) or a tracker id (`[A-Z]{2,}-\d+`) fails. `docs/why.md` and
-  `CHANGELOG.md` are exempt. Today's hits are listed in `selftest/war-story-allow.json` so the check
+  with a date (`20\d\d-\d\d-\d\d`) or a tracker id fails. A tracker id is `<key>-<n>` where `<key>`
+  is the configured team key (`connection.team.key`) or `DOR`; rule ids such as `INV-3`, `GRM-9`
+  and `UTF-8` never match. `docs/why.md` (created by S7; absent today) and `CHANGELOG.md` are
+  exempt. Today's hits are listed in `selftest/war-story-allow.json` so the check
   starts green and only new ones fail; S7 empties the list.
 
 #### Tier `scenarios` (free, deterministic, no network)
@@ -126,19 +128,21 @@ behaves like the reference tracker where flow depends on it:
 
 It ships its fixture `adapters/reference/fake/fixture.json`, passes `validate-adapter.ts`, and
 passes S1's adapter conformance suite. `adapters/reference/fake/SKILL.md` is a short adapter skill
-("every verb: `flow tracker <verb>`") so a prose-driven agent reaches it in the live tier.
+("every verb: `flow tracker <verb>`"); the live sandbox copies it to
+`.agents/flow/adapters/fake/SKILL.md`, the project path `resolveAdapter` (`config-files.ts`) reads
+first, so a prose-driven agent reaches it.
 
 **Scenarios** (`scripts/selftest/scenarios/*.ts`), each a function
 `(ctx: { tracker, clock, flow }) => Promise<void>` that drives `flow` verbs in-process against the
 fake and asserts on the fake's state:
 
-| Scenario            | Steps and assertions                                                                                                                                                                                              |
-| ------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `lifecycle`         | capture → item in `backlog`, `origin/*`, no `agent/ready`. Triage-accept → one `type/*`, a priority, `agent/ready`. `flow next` returns it. `flow claim` → `agent/claimed` and no `agent/ready`, `started`. Merge with `Closes` → `completed`. `flow done` → `agent/completed`, one signed comment carrying a provenance line. |
-| `groom-audit`       | Load `engine-tests/fixtures/backlog.bad.json` into the fake; `flow audit` reports exactly the GRM ids `audit-backlog.test.ts` expects from that fixture. `backlog.good.json` reports none.                                          |
-| `recovery-ladder`   | A claimed, started item with a dead worker pid and an intact worktree → resume; missing worktree → restart; `agent/needs-input` → never reclaimed; retries past `recovery.maxRetries` → the configured `onExhausted`. |
-| `inbox-rules`       | One comment per comment-response rule (self-authored, addressed, ambiguous, and so on) → the expected respond/act/ignore; a reply to a parked question resumes it; an empty reply does not.                  |
-| `state-agreement`   | An item `completed` in the tracker but still `agent/claimed` → `flow audit` flags the disagreement (flow-cli-overhaul step 4; skipped until S1's DOR-2376 check exists, reported as skip).               |
+| Scenario          | Steps and assertions                                                                                                                                                                                                                                                                                                           |
+| ----------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `lifecycle`       | capture → item in `backlog`, `origin/*`, no `agent/ready`. Triage-accept → one `type/*`, a priority, `agent/ready`. `flow next` returns it. `flow claim` → `agent/claimed` and no `agent/ready`, `started`. Merge with `Closes` → `completed`. `flow done` → `agent/completed`, one signed comment carrying a provenance line. |
+| `groom-audit`     | Load `engine-tests/fixtures/backlog.bad.json` into the fake; `flow audit` reports exactly the GRM ids `audit-backlog.test.ts` expects from that fixture. `backlog.good.json` reports none.                                                                                                                                     |
+| `recovery-ladder` | A claimed, started item with a dead worker pid and an intact worktree → resume; missing worktree → restart; `agent/needs-input` → never reclaimed; retries past `recovery.maxRetries` → the configured `onExhausted`.                                                                                                          |
+| `inbox-rules`     | One comment per comment-response rule (self-authored, addressed, ambiguous, and so on) → the expected respond/act/ignore; a reply to a parked question resumes it; an empty reply does not.                                                                                                                                    |
+| `state-agreement` | An item `completed` in the tracker but still `agent/claimed` → `flow audit` flags the disagreement (flow-cli-overhaul step 4). Ships with DOR-2376, not before: until then it is not in the list, so no scenario is skipped for lack of a check.                                                                               |
 
 The same scenarios run in CI: `engine-tests/selftest-scenarios.test.ts` imports and runs each one,
 so the `flow plugin` job covers them with no new workflow.
@@ -157,21 +161,31 @@ words.
 - **Sandbox per case:** a temp git repo with the fixture files, a committed
   `.agents/flow/config.json` selecting the `fake` tracker at a temp store path, and the flow root
   given with `--plugin-dir`. The child runs
-  `claude -p "<case prompt>" --plugin-dir <flow-root> --output-format json --max-turns <n>` with
-  `--strict-mcp-config` and an empty MCP config (no tracker MCP reachable), and an env stripped of
-  every `*_API_KEY`, `COMPOSIO_*` and `LINEAR_*` other than the one credential. A case that reads
-  or writes anything outside the sandbox fails.
+  `claude -p "<case prompt>" --plugin-dir <flow-root> --output-format stream-json --verbose
+--max-turns <n> --max-budget-usd <remaining>` with cwd = sandbox and these fences:
+  1. `--strict-mcp-config` with an empty MCP config: no tracker MCP server.
+  2. `--permission-mode dontAsk` with an allowlist (`Read`, `Write`, `Edit`, `Glob`, `Grep`,
+     `Bash(node *)`, `Bash(git *)`, and the `flow` CLI): anything else, `composio`, `curl`, `gh`
+     and web tools included, is denied without a prompt.
+  3. An env stripped of every `*_API_KEY`, `COMPOSIO_*` and `LINEAR_*` other than the one
+     credential.
+  4. **Breach check** after the case: the runner scans the stream's `tool_use` events. A command
+     naming `composio`, `linear`, `curl`, `wget` or `gh`, or a file path outside the sandbox and the
+     flow root, fails the case as `breach`, whatever the oracle says.
+     A child `node` process could still reach the network; the fences make that a deliberate act a
+     stage skill never takes, and the breach check catches the ordinary routes.
 - **Budget:** `--max-usd` (default `selfImprovement.selftest.liveBudgetUsd`, 1.00). The runner sums
-  each case's reported `total_cost_usd` and starts no case once the total reaches the ceiling;
+  each case's reported `total_cost_usd`, passes what is left as `--max-budget-usd`, and starts no
+  case once the total reaches the ceiling;
   those cases are `skip` ("budget reached").
 - **Cases and outcome oracles** (`scripts/selftest/live/cases.ts`):
 
-| Case        | Prompt                                           | Oracle (reads the fake store and the sandbox only)                                                                           |
-| ----------- | ------------------------------------------------ | ---------------------------------------------------------------------------------------------------------------------------- |
-| `capture`   | `/flow:capture <brief>`                          | exactly one new item; `origin/*` set; no `agent/ready`; title non-empty                                                      |
-| `triage`    | `/flow:triage <id>` on a clear, small idea       | one `type/*`, a priority, and `agent/ready` whose item passes the readiness oracle; or `agent/needs-input` with one question |
-| `decompose` | `/flow:decompose specs/fixture/02-specification.md` | `03-tasks.json` passes `tasks-schema.ts`, no forbidden summary phrase, the item carries `stage/decompose`                   |
-| `done`      | `/flow:done <id>` with a follow-up in the fixture | item `completed` with `agent/completed`; each follow-up has a type, a priority and a project and went through triage        |
+| Case        | Prompt                                              | Oracle (reads the fake store and the sandbox only)                                                                           |
+| ----------- | --------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------- |
+| `capture`   | `/flow:capture <brief>`                             | exactly one new item; `origin/*` set; no `agent/ready`; title non-empty                                                      |
+| `triage`    | `/flow:triage <id>` on a clear, small idea          | one `type/*`, a priority, and `agent/ready` whose item passes the readiness oracle; or `agent/needs-input` with one question |
+| `decompose` | `/flow:decompose specs/fixture/02-specification.md` | `03-tasks.json` passes `tasks-schema.ts`, no forbidden summary phrase, the item carries `stage/decompose`                    |
+| `done`      | `/flow:done <id>` with a follow-up in the fixture   | item `completed` with `agent/completed`; each follow-up has a type, a priority and a project and went through triage         |
 
 A live run prints per-case pass/fail, cost and turns, and writes the same report shape.
 
@@ -180,14 +194,17 @@ A live run prints per-case pass/fail, cost and turns, and writes the same report
 - Text to stdout by default; `--json` prints `SelftestReport`
   (`{ v: 1, startedAt, flowVersion, tiers, checks: Check[], totals, credentialSource? }`).
 - Every run writes `.dork/flow/selftest/latest.json` and appends it to
-  `.dork/flow/selftest/history.jsonl` (totals and failing ids only, capped at 200 lines), and
+  `.dork/flow/selftest/history.jsonl` (tiers run, and each check's id and status, capped at 200
+  lines), and
   writes one `selftest` journal event.
 - `--file` files one tracker item per failing check (S1's create verb): type `task`, labels
   `origin/from-agent` and `selfImprovement.retro.labels`, never `agent/ready`, project
   `selfImprovement.retro.project` when set. The body names the check, its detail, the flow
   version, and a marker line `<!-- flow-selftest:fp=<fingerprint> -->`. Before creating, it reads
-  open items (S1's snapshot) and skips any failure whose fingerprint is already open, adding one
-  comment with the new detail instead. `fingerprint = sha1(checkId + ":" + stableDetailKey)[:12]`
+  the snapshot (S1) of open items plus items closed in the last 90 days. A fingerprint on an open
+  item gets one comment with the new detail. A fingerprint on a canceled item is not filed again
+  (a person declined it); the report lists it as "declined". A fingerprint on a completed item is
+  filed again only if the check fails again, with "regressed after <id>" in the body. `fingerprint = sha1(checkId + ":" + stableDetailKey)[:12]`
   where `stableDetailKey` omits counts and timestamps (for `doc-lint/words`, the file path).
 - `/flow:self-test` (`commands/self-test.md`, under 150 words): run `flow selftest` with the given
   arguments, show the report, and offer `--file` for failures. It never passes `--tier live`
@@ -207,21 +224,21 @@ existing `projectKey` in `config-files.ts`), so every worktree of a project writ
   "item": "<tracker identifier, if any>", ...kind fields }
 ```
 
-| `kind`             | Fields                                                                            | Written by                                        |
-| ------------------ | --------------------------------------------------------------------------------- | ------------------------------------------------- |
-| `verb`             | `verb`, `ms`, `exit`                                                              | the `flow` CLI wrapper, every verb run            |
-| `oracle.error`     | `oracle`, `exit`, `errorClass` (first line of the error, redacted, ≤ 200 chars)   | the CLI when an oracle exits 2 or throws          |
-| `stage`            | `stage`, `phase: start\|end`, `outcome?: ok\|failed\|parked`                        | `flow transition` (S1) and `flow done`            |
-| `item.readied`     | `by: triage\|decompose\|human`                                                     | the verb that applies `agent/ready`               |
-| `claim`            | `phase: claim\|release`                                                            | `flow claim`, `flow release`                      |
-| `retry`            | `rung: resume\|restart\|escalate`, `attempt`                                      | the recovery verb                                 |
-| `operator.wait`    | `phase: start\|end`, `waitedMs?` (on end)                                          | `needsInput`; the inbox verb that sees the answer |
-| `review`           | `round`, `sha7`, `verdict: clean\|changes`, `blocker`, `shouldFix`, `nit`, `categories[]` | `flow journal record review …` (S3 later)  |
-| `ci`               | `pr`, `event: red\|ejected\|merged`, `class: own\|innocent\|flake\|infra\|unknown`  | `flow journal record ci …` (S3 later)             |
-| `handoff`          | `from`, `to`, `reason: limit\|stage\|manual`                                      | `flow journal record handoff …` (S3 later)        |
-| `note`             | `noteKind: friction\|workaround\|confusion`, `text`, `skill?`                      | `flow note`                                       |
-| `selftest`         | `tiers`, `pass`, `fail`, `skip`, `ms`, `failing[]` (check ids)                    | `flow selftest`                                   |
-| `retro`            | `window`, `proposals`, `filed`, `commented`                                       | `flow retro`                                      |
+| `kind`          | Fields                                                                                    | Written by                                        |
+| --------------- | ----------------------------------------------------------------------------------------- | ------------------------------------------------- |
+| `verb`          | `verb`, `ms`, `exit`                                                                      | the `flow` CLI wrapper, every verb run            |
+| `oracle.error`  | `oracle`, `exit`, `errorClass` (first line of the error, redacted, ≤ 200 chars)           | the CLI when an oracle exits 2 or throws          |
+| `stage`         | `stage`, `phase: start\|end`, `outcome?: ok\|failed\|parked`                              | `flow transition` (S1) and `flow done`            |
+| `item.readied`  | `by: triage\|decompose\|human`                                                            | the verb that applies `agent/ready`               |
+| `claim`         | `phase: claim\|release`                                                                   | `flow claim`, `flow release`                      |
+| `retry`         | `rung: resume\|restart\|escalate`, `attempt`                                              | the recovery verb                                 |
+| `operator.wait` | `phase: start\|end`, `waitedMs?` (on end)                                                 | `needsInput`; the inbox verb that sees the answer |
+| `review`        | `round`, `sha7`, `verdict: clean\|changes`, `blocker`, `shouldFix`, `nit`, `categories[]` | `flow journal record review …` (S3 later)         |
+| `ci`            | `pr`, `event: red\|ejected\|merged`, `class: own\|innocent\|flake\|infra\|unknown`        | `flow journal record ci …` (S3 later)             |
+| `handoff`       | `from`, `to`, `reason: limit\|stage\|manual`                                              | `flow journal record handoff …` (S3 later)        |
+| `note`          | `noteKind: friction\|workaround\|confusion`, `text`, `skill?`                             | `flow note`                                       |
+| `selftest`      | `tiers`, `pass`, `fail`, `skip`, `ms`, `failing[]` (check ids)                            | `flow selftest`                                   |
+| `retro`         | `window`, `proposals`, `filed`, `commented`                                               | `flow retro`                                      |
 
 `categories[]` is a closed set: `logic`, `race`, `test`, `migration`, `security`, `docs`, `scope`,
 `style`, `other`.
@@ -237,11 +254,19 @@ above every line stays under 4 KiB, and the file is opened `O_APPEND`, so concur
 local filesystem never interleave inside a line. A journal failure (full disk, permissions) is
 reported once on stderr and never changes the verb's exit code or output.
 
-**Rotation.** Before appending, if the file is at or over `journal.maxBytes` (default 5 MB), take
-`journal.lock` (created with `wx`; a lock older than 30 s is stale and removed), rename
-`journal.<keep-1>` … `journal.1` up by one (dropping the oldest), rename `journal.jsonl` to
-`journal.1.jsonl`, release. Readers read `journal.jsonl` plus `journal.1..keep`. A line appended by
-a writer that raced the rename lands in `journal.1.jsonl` and is still read.
+**Rotation.** Files are `journal.jsonl`, then `journal.1.jsonl` … `journal.<keep>.jsonl`, oldest
+last. Before appending, if `journal.jsonl` is at or over `journal.maxBytes` (default 5 MB):
+
+1. Create `journal.lock` with `wx`. If it exists, skip rotation and just append (the holder is
+   rotating). A lock whose mtime is over 30 s old is stale: rename it to `journal.lock.<pid>` (only
+   one writer's rename succeeds) and retry once.
+2. **Holding the lock, `stat` again.** If the file is now under the cap, another writer already
+   rotated: release and append.
+3. Delete `journal.<keep>.jsonl`, rename each `journal.<n>.jsonl` to `journal.<n+1>.jsonl`
+   from the highest down, rename `journal.jsonl` to `journal.1.jsonl`, release.
+
+Readers read `journal.jsonl` and `journal.1..keep.jsonl`. A line appended by a writer that raced
+the rename lands in `journal.1.jsonl` and is still read.
 
 **Gitignore.** On the first write, if `git check-ignore -q .dork/flow/journal.jsonl` says it is
 not ignored, add `.dork/flow/` to the repository's `info/exclude` (local, never committed).
@@ -269,16 +294,16 @@ and one tracker snapshot (S1).
 
 **Measures** (pure functions in `retro.ts`, each with the previous window beside it):
 
-| Measure                    | Definition                                                                                                                |
-| -------------------------- | ------------------------------------------------------------------------------------------------------------------------- |
-| `readyVsUntriaged`         | from the snapshot: open items with `agent/ready` vs open items with no `type/*` label    |
+| Measure                    | Definition                                                                                                                                    |
+| -------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------- |
+| `readyVsUntriaged`         | from the snapshot: open items with `agent/ready` vs open items with no `type/*` label                                                         |
 | `captureToReadyDaysMedian` | for `item.readied` events in the window: event `ts` minus the item's `createdAt`. Items readied outside flow are not seen; the report says so |
-| `firstReviewCleanPct`      | `review` events with `round: 1`: share with `verdict: clean`                                                              |
-| `reviewCatchCount`         | sum of `blocker + shouldFix` over `review` events                                                                         |
-| `innocentEjections`        | `ci` events with `event: ejected` and `class: innocent`                                                                   |
-| `pluginWords`              | total words over the doc-lint file set, and the distance to the targets                                                   |
-| `oracleErrors`             | `oracle.error` count by `oracle`                                                                                          |
-| `operatorWaitHoursMedian`  | `operator.wait` end events: median `waitedMs`                                                                             |
+| `firstReviewCleanPct`      | `review` events with `round: 1`: share with `verdict: clean`                                                                                  |
+| `reviewCatchCount`         | sum of `blocker + shouldFix` over `review` events                                                                                             |
+| `innocentEjections`        | `ci` events with `event: ejected` and `class: innocent`                                                                                       |
+| `pluginWords`              | total words over the doc-lint file set, and the distance to the targets                                                                       |
+| `oracleErrors`             | `oracle.error` count by `oracle`                                                                                                              |
+| `operatorWaitHoursMedian`  | `operator.wait` end events: median `waitedMs`                                                                                                 |
 
 A measure with no data in the window is shown as "no data", never 0.
 
@@ -287,7 +312,8 @@ A measure with no data in the window is shown as "no data", never 0.
 1. **Note cluster:** 2+ `note` events in the window with the same `skill` (or the same
    normalized first five content words when `skill` is absent).
 2. **Repeated oracle error:** the same `oracle` + `errorClass` 2+ times.
-3. **Self-test regression:** a check that passed in the previous history entry and fails now.
+3. **Self-test regression:** a check that has `pass` in the most recent earlier history entry
+   that ran it, and `fail` now. A check the earlier run did not run is never a regression.
 4. **Measure got worse:** `firstReviewCleanPct` down 15+ points, `captureToReadyDaysMedian` up
    50%+, `innocentEjections` 3+, or `pluginWords` up at all.
 
@@ -299,7 +325,8 @@ agent rewrites it (below).
 
 **Filing (`--file`):** files `proposals[]` from the report just computed, or from `--input` (an
 edited copy). Same item shape and dedupe as `selftest --file`, with the marker
-`<!-- flow-retro:fp=<fingerprint> -->`; an open match gets one evidence comment instead. At most
+`<!-- flow-retro:fp=<fingerprint> -->`: an open match gets one evidence comment, a canceled match
+is never filed again, a completed match is filed again with "regressed after <id>". At most
 `selfImprovement.retro.maxItemsPerRun` (default 5) new items per run, highest evidence count first;
 the rest are listed as "not filed (cap)". Every filed item and comment is signed per the
 provenance rules.
@@ -343,7 +370,8 @@ Every test carries a purpose comment and a plant-a-break case that fails for the
 
 - **`engine-tests/doc-lint.test.ts`:** per rule, a clean corpus passes and a planted break fails
   (a grown file, a copied sentence, a dead link and a dead anchor, a bad cron, `enabled: true`, a
-  dated line inside a step, and the same line in `docs/why.md` passing). Plus: the shipped plugin
+  dated line inside a step, `INV-3` in a step passing, and the same dated line in `docs/why.md`
+  passing). Plus: the shipped plugin
   passes `fast` (the allow files make today green).
 - **`engine-tests/fake-tracker.test.ts`:** exclusive groups, `Closes` handling, inbox watermark,
   injected clock; passes `validate-adapter.ts` and S1's conformance suite.
@@ -351,21 +379,26 @@ Every test carries a purpose comment and a plant-a-break case that fails for the
   scenario (for example the fake leaving `agent/ready` on claim) makes it fail.
 - **`engine-tests/selftest-cli.test.ts`:** exit codes 0/1/2; skip is not pass; `--strict`; the
   live gate refuses without the flag, refuses with `CI` set even with the flag, and fails every
-  case with no credential; `--file` twice files once (fake tracker).
+  case with no credential; `--file` twice files once, a canceled match is not refiled, a completed
+  match is refiled as a regression (fake tracker); the `engine-tests` check skips under `VITEST`.
 - **`engine-tests/journal.test.ts`:** schema rejects unknown kinds and fields; redaction per token
   shape; 1,000-char cap; two child processes appending 500 lines each yield 1,000 parseable lines;
-  rotation at the cap keeps `keep` files and loses nothing written during it; a read-only
+  rotation at the cap keeps `keep` files and loses nothing written during it; two writers over the
+  cap rotate once, not twice; a stale lock is cleared by one writer; a read-only
   directory does not change the verb's exit code; `enabled: false` writes nothing; `info/exclude`
   gains the line once.
 - **`engine-tests/retro.test.ts`:** fixture journals with known answers for each measure, "no
   data" for empty windows, each proposal rule firing and not firing at its threshold, stable
-  fingerprints across runs, the cap, and dedupe against an open item (fake tracker).
+  fingerprints across runs, the cap, dedupe against open, canceled and completed items (fake
+  tracker), and rule 3 ignoring a check the earlier run did not run.
 - **Live tier:** not in CI. Its runner logic (gate, budget stop, env scrub, report) is unit-tested
-  with a stubbed `claude` binary on `PATH`.
+  with a stubbed `claude` binary on `PATH`, including a stub stream with a `composio` Bash call
+  that must fail the case as `breach`.
 
 ## Performance Considerations
 
-- `fast` + `scenarios` under 10 s on a laptop; scenarios use the in-memory fake.
+- `fast` (without `engine-tests`, which is the ~25 s Vitest suite) + `scenarios` under 10 s on a
+  laptop; scenarios use the in-memory fake.
 - One append per journal event; no read on the write path except a `stat` for rotation.
 - The retro reads at most `keep + 1` journal files (≤ 20 MB by default).
 
@@ -410,8 +443,9 @@ Tasks: [`03-tasks.json`](./03-tasks.json).
    ceiling $1.00; the local `claude` sign-in counts as a credential (same order as DorkOS evals).
 9. **Filing goes to the project's own tracker** as not-ready `origin/from-agent` tasks, capped at
    5 per retro run; nothing goes to the plugin's public repo automatically.
-10. **Dedupe by fingerprint marker** in the item body, found through a snapshot of open items (the
-    adapter contract has no search verb).
+10. **Dedupe by fingerprint marker** in the item body, found through a snapshot of open items and
+    items closed in the last 90 days (the adapter contract has no search verb). Canceled means
+    declined and is never refiled.
 11. **Review, CI and handoff events** get a manual `flow journal record` entry point now; S3
     writes them automatically.
 12. **No ADRs:** this repo has no `decisions/` folder.

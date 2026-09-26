@@ -22,13 +22,13 @@ The 2026-09-25/26 session was a manual retro of flow
 ([`../flow-cli-overhaul/01-ideation.md`](../flow-cli-overhaul/01-ideation.md) §1). Each row of its
 table is something a check, a journal or a retro should have caught on its own:
 
-| Session finding                                          | What would have caught it                                        |
-| -------------------------------------------------------- | ---------------------------------------------------------------- |
-| A helper hand-built `dispatch.ts` input wrong            | A journal `oracle.error` event, then a retro cluster              |
-| Every worker rediscovered the `agent/ready`/`claimed` swap | A scenario run (claim on the fake tracker) and friction notes   |
-| Worker, reviewer briefs and a PR watcher written by hand  | `workaround` notes ("improvised a script the plugin should ship") |
-| Follow-ups sat unready with no path to ready              | A retro measure: ready vs untriaged, capture→ready days          |
-| 43,000 words of prose, rules copied across files          | Doc lint: word ratchet and the duplicate-rule detector            |
+| Session finding                                            | What would have caught it                                         |
+| ---------------------------------------------------------- | ----------------------------------------------------------------- |
+| A helper hand-built `dispatch.ts` input wrong              | A journal `oracle.error` event, then a retro cluster              |
+| Every worker rediscovered the `agent/ready`/`claimed` swap | A scenario run (claim on the fake tracker) and friction notes     |
+| Worker, reviewer briefs and a PR watcher written by hand   | `workaround` notes ("improvised a script the plugin should ship") |
+| Follow-ups sat unready with no path to ready               | A retro measure: ready vs untriaged, capture→ready days           |
+| 43,000 words of prose, rules copied across files           | Doc lint: word ratchet and the duplicate-rule detector            |
 
 ## 2) What exists
 
