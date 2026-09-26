@@ -9,6 +9,7 @@ you until you **reinstall it** (Marketplace → flow → reinstall, or re-run yo
 **A drain on the DorkOS host now checks that work on your main sign-in really runs there. Reinstall to get it.**
 
 - When flow starts work on your own sign-in (`default`) through DorkOS, it now confirms the session uses that account's folder. If DorkOS was started on another account, the launch stops with a wrong-account error instead of spending that account.
+- The account-folder check follows symlinks, so a `~/.claude` that is a link to another folder still matches.
 
 ## 0.32.0
 

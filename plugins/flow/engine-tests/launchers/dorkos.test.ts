@@ -11,7 +11,7 @@
  * `session_start`, and a 401 for a mutating call without the token).
  */
 
-import { mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, realpathSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { createServer, type IncomingMessage, type Server } from 'node:http';
 import type { AddressInfo } from 'node:net';
 import os from 'node:os';
@@ -593,6 +593,17 @@ describe('dorkos launcher: the session it records', () => {
       const err = await launchFailure(h.launcher.start(requestFor(h, { account: main })));
       expect(err.code).toBe('wrong-account');
       expect(err.message).toContain(h.ambientConfigDir);
+    });
+  });
+
+  // Rule 5: a symlinked account folder matches the real folder DorkOS reports.
+  it('matches a symlinked default folder against the real folder DorkOS reports', async () => {
+    await withFake({}, async (h) => {
+      const link = path.join(path.dirname(h.ambientConfigDir), '.claude-link');
+      symlinkSync(h.ambientConfigDir, link);
+      const main = { runtime: 'claude-code' as const, id: 'default', path: link };
+      const handle = await h.launcher.start(requestFor(h, { account: main }));
+      expect(handle.account).toBe('default');
     });
   });
 
