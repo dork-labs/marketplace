@@ -241,9 +241,10 @@ async function blocked(ctx: VerbContext, run: DrainRun): Promise<VerbResult> {
     sessionProvenance(ctx, run.host)
   );
   const unsigned = unsignedBody(body);
-  const alreadyPosted = (item.comments ?? [])
-    .slice(-RECENT_COMMENTS)
-    .some((comment) => unsignedBody(comment.body) === unsigned);
+  // Skip only a retry of this same question (still the item's latest comment):
+  // after anyone replies, asking again posts anew, which the drain anchors on.
+  const last = (item.comments ?? []).at(-1);
+  const alreadyPosted = last !== undefined && unsignedBody(last.body) === unsigned;
   if (!alreadyPosted) await adapter.comment(item, body);
   await applyAndVerify(adapter, item, projectionFor({ type: 'needs-input' }, { stages }));
 

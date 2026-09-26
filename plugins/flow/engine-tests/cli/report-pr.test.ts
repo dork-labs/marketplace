@@ -369,6 +369,36 @@ describe('flow report blocked', () => {
       rev: 4,
     });
   });
+  // Purpose: asking the same question again after someone replied must post it
+  // again, so the drain anchors the next answer on the new question and the old
+  // reply does not resume the run. Fails if the dedupe checks the last 10
+  // comments instead of only the latest one.
+  it('re-asks the same question after a reply, and skips only an exact retry', async () => {
+    writeRun(drain());
+    writeFileSync(path.join(project.dir, 'q.md'), 'Which export format?\n');
+    const tracker = createFakeAdapter({ items: [claimedItem()] });
+    const first = await flow(
+      ['report', 'ACME-12', 'blocked', '--question-file', 'q.md'],
+      undefined,
+      tracker
+    );
+    expect(first.code).toBe(0);
+    const asked = (tracker.backlog.comments?.['ACME-12'] ?? []).length;
+    // A retry right away (the question is still the latest comment) posts nothing.
+    writeRun(drain());
+    await flow(['report', 'ACME-12', 'blocked', '--question-file', 'q.md'], undefined, tracker);
+    expect(tracker.backlog.comments?.['ACME-12']).toHaveLength(asked);
+    // After a person replies, the same question is posted again.
+    tracker.backlog.comments!['ACME-12']!.push({
+      id: 'reply',
+      author: 'dorian',
+      body: 'CSV.',
+      createdAt: '2026-09-26T12:01:00.000Z',
+    });
+    writeRun(drain());
+    await flow(['report', 'ACME-12', 'blocked', '--question-file', 'q.md'], undefined, tracker);
+    expect(tracker.backlog.comments?.['ACME-12']).toHaveLength(asked + 2);
+  });
 });
 
 describe('flow pr', () => {
