@@ -28,7 +28,7 @@
 
 import { z } from 'zod';
 
-import type { HostName, SessionHandle } from '../launchers/types.ts';
+import type { HostName, LaunchPermissionMode, SessionHandle } from '../launchers/types.ts';
 
 /** Where a drain run is in its loop. */
 export type DrainPhase =
@@ -173,6 +173,9 @@ export const SessionHandleSchema: z.ZodType<SessionHandle> = z.looseObject({
   workspace: z.string().optional(),
   logFile: z.string().optional(),
   logOffset: count.optional(),
+  configDir: z.string().optional(),
+  permissionMode: vocabulary<LaunchPermissionMode>().optional(),
+  model: z.string().optional(),
 });
 
 const workerHandleShape = {
@@ -185,6 +188,9 @@ const workerHandleShape = {
   workspace: z.string().optional(),
   logFile: z.string().optional(),
   logOffset: count.optional(),
+  configDir: z.string().optional(),
+  permissionMode: vocabulary<LaunchPermissionMode>().optional(),
+  model: z.string().optional(),
   pending: z.boolean().optional(),
 };
 
