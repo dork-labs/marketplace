@@ -264,6 +264,26 @@ describe('flow retro', () => {
     expect((await flow(['retro', '--since', '7'], fake)).code).toBe(2);
   });
 
+  it("names what failed in a regression's evidence, from the same run's latest.json", async () => {
+    writeFileSync(
+      path.join(project, '.dork', 'flow', 'selftest', 'latest.json'),
+      JSON.stringify({
+        startedAt: '2026-09-25T12:00:00.000Z',
+        checks: [
+          { id: 'config', fingerprint: '000000000001', detail: 'config.json has no tracker' },
+        ],
+      })
+    );
+    const fake = new FakeTracker({ items: [] }, { now: () => NOW });
+    const run = await flow(['retro', '--json'], fake);
+    const config = run.json.proposals.find(
+      (p: { title: string }) => p.title === 'self-test check config passed before and fails now'
+    );
+    expect(config.evidence.map((e: { text: string }) => e.text)).toContain(
+      'config failed: config.json has no tracker'
+    );
+  });
+
   it('keeps going with no data when the tracker cannot be reached', async () => {
     const fake = new FakeTracker({ items: [], failReads: 'tracker down' }, { now: () => NOW });
     const run = await flow(['retro', '--json'], fake);

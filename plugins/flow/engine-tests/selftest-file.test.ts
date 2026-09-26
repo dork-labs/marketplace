@@ -23,6 +23,8 @@ import {
   filedLabels,
   markerFor,
   planFiling,
+  planFindings,
+  type Finding,
   titleFor,
   type Candidate,
 } from '../scripts/selftest/file.ts';
@@ -139,6 +141,28 @@ describe('planFiling', () => {
     expect(planFiling([check], [candidate('FAKE-1', other)], META)[0]).toMatchObject({
       kind: 'file',
     });
+  });
+});
+
+describe('planFindings under a cap', () => {
+  it('files the finding with the most evidence first, whatever the input order', () => {
+    const finding = (subject: string, weight: number): Finding => ({
+      subject,
+      fingerprint: fingerprint('retro', subject),
+      title: `${subject} (${fingerprint('retro', subject)})`,
+      text: subject,
+      evidenceAt: NOW.toISOString(),
+      weight,
+    });
+    const plans = planFindings([finding('light', 1), finding('heavy', 2)], [], {
+      now: NOW,
+      marker: 'flow-retro',
+      maxNew: 1,
+    });
+    expect(plans.map((p) => [p.subject, p.kind])).toEqual([
+      ['light', 'cap'],
+      ['heavy', 'file'],
+    ]);
   });
 });
 

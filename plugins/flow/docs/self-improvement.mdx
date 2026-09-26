@@ -5,7 +5,7 @@ description: flow tests its own install, keeps notes on how its runs go, and onc
 
 # How flow checks and improves itself
 
-flow tests itself, keeps notes while it works, and once a week can look back over those notes and suggest fixes to itself.
+flow tests itself, keeps notes while it works, and once a week can suggest fixes to itself.
 
 ## The self-test
 
@@ -13,13 +13,13 @@ flow tests itself, keeps notes while it works, and once a week can look back ove
 
 - **fast**: your settings, the tracker adapter, and flow's own instructions (length, broken links, repeated rules). Free, offline, a few seconds.
 - **scenarios**: whole pieces of work played through the real flow commands against a pretend tracker. Also free and offline.
-- **live**: a real agent session against the pretend tracker. It costs money, so you will always have to turn it on. It is not built yet.
+- **live**: a real agent session. It costs money, so it will always need you to turn it on. Not built yet.
 
 Each run is saved in `.dork/flow/selftest/`.
 
 ## The journal
 
-flow keeps a notebook at `.dork/flow/journal.jsonl`, shared by every worktree of the project and kept out of git. Each line is one event: a command that ran, a failed check, a review verdict, an agent's note, or a reading of an account's usage. Each line says which agent wrote it: Claude Code, Codex or OpenCode.
+flow keeps a notebook at `.dork/flow/journal.jsonl`, shared by every worktree of the project and kept out of git. Each line is one event (a command that ran, an agent's note, an account's usage) and says which agent wrote it: Claude Code, Codex or OpenCode.
 
 It never holds comment bodies, prompts, code or tracker descriptions, and it removes tokens, email addresses and your home folder from any text.
 
@@ -29,7 +29,9 @@ To turn the journal off, set `selfImprovement.journal.enabled` to `false`.
 
 ## The weekly retro
 
-`flow retro` reads the last week of the journal, the week before, the self-test history and your backlog. It reports how many items are ready or still untyped, how long new work takes to become ready, how often a first review comes back clean, how long agents wait on you, how many words flow's instructions hold, and each account's usage: start, end, peak, and how often it ran out.
+`flow retro` reads the last week of the journal, the week before, the self-test history and your backlog. Some of its numbers fill in today: how many items are ready or still untyped, which flow commands failed, how many words flow's instructions hold, and each account's usage (start, end, peak, and how often it ran out).
+
+How long new work takes to become ready, and how long agents wait on you, read "no data" until flow writes those lines. Review and merge-queue numbers count only what an agent recorded with `flow journal record`; the verifying-work skill now asks for that after each review.
 
 Each number sits beside last week's and is split by agent. A number with nothing behind it says "no data", never 0.
 
@@ -39,7 +41,7 @@ A retro changes nothing unless you pass `--file`. Then it files each proposal as
 
 ## Turning on the weekly schedule
 
-The `flow-retro` skill runs on Mondays at 9:00, Los Angeles time. It runs the self-test and the retro, rewrites each proposal as one change to one named file, and files them. It never edits flow's files itself.
+The `flow-retro` skill runs on Mondays at 9:00, Los Angeles time. It runs the self-test and the retro, rewrites each proposal as one change to one named file, and files them, never editing flow itself.
 
 It ships switched off. With DorkOS, approve it on the Schedules page; anywhere else, point your scheduler at `skills/flow-retro/SKILL.md`. `/flow:pause` stops it too.
 

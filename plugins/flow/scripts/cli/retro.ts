@@ -15,9 +15,10 @@
  * (`selftest/file.ts`), with the marker `<!-- flow-retro:fp=<fingerprint> -->`
  * and at most `selfImprovement.retro.maxItemsPerRun` new items.
  *
- * Exit codes: 0 the report was written (and, with `--file`, everything was
- * filed) · 1 `--file` could not file everything (no create capability, or the
- * tracker failed) · 2 a bad `--since` or `--input`.
+ * Exit codes: 0 the report was written (and, with `--file`, every proposal
+ * was filed, commented on, declined, or held back by the cap for a later run)
+ * · 1 `--file` could not act on some proposal (the adapter cannot create, or
+ * the tracker failed) · 2 a bad `--since` or `--input`.
  *
  * @module @dorkos/flow/cli/retro
  */
@@ -102,6 +103,38 @@ function readHistory(file: string): HistoryEntry[] {
     }
   }
   return out;
+}
+
+/**
+ * Join each check's `detail` from `latest.json` into the history entry of the
+ * same run (history keeps ids and statuses only), so a regression's evidence
+ * can name the file that failed. Any other entry is left as it is.
+ */
+function withLatestDetails(history: HistoryEntry[], latestFile: string): HistoryEntry[] {
+  let latest: { startedAt?: unknown; checks?: unknown };
+  try {
+    latest = JSON.parse(readFileSync(latestFile, 'utf8'));
+  } catch {
+    return history;
+  }
+  if (!Array.isArray(latest.checks)) return history;
+  const details = new Map<string, string>();
+  for (const check of latest.checks as { fingerprint?: unknown; detail?: unknown }[]) {
+    if (typeof check.fingerprint === 'string' && typeof check.detail === 'string') {
+      details.set(check.fingerprint, check.detail);
+    }
+  }
+  return history.map((entry) =>
+    entry.startedAt !== latest.startedAt
+      ? entry
+      : {
+          ...entry,
+          checks: entry.checks.map((c) => {
+            const detail = c.fingerprint === undefined ? undefined : details.get(c.fingerprint);
+            return detail === undefined ? c : { ...c, detail };
+          }),
+        }
+  );
 }
 
 /** The newest earlier report's backlog and word measures, if there is one. */
@@ -212,6 +245,10 @@ export function renderRetro(report: RetroReport): string {
     '',
     ...measuresTable(report.measures),
     '',
+    '### What these numbers cannot see',
+    '',
+    ...report.caveats.map((c) => `- ${c}`),
+    '',
     '## Usage',
     '',
     ...usageTable(report.usageTrend),
@@ -232,7 +269,6 @@ export function renderRetro(report: RetroReport): string {
     lines.push('');
   }
   if (report.filing !== undefined) lines.push(...renderFiling(report.filing).slice(1), '');
-  lines.push('## What this cannot see', '', ...report.caveats.map((c) => `- ${c}`));
   return `${lines.join('\n')}\n`;
 }
 
@@ -281,7 +317,10 @@ export async function run(ctx: VerbContext): Promise<VerbResult> {
 
   const roots = findConfigRoots(ctx.projectDir, ctx.flowRoot);
   const checkout = roots.mainCheckout ?? roots.checkout;
-  const history = readHistory(path.join(checkout, SELFTEST_DIR, 'history.jsonl'));
+  const history = withLatestDetails(
+    readHistory(path.join(checkout, SELFTEST_DIR, 'history.jsonl')),
+    path.join(checkout, SELFTEST_DIR, 'latest.json')
+  );
 
   let snapshot: WorkItem[] | null = null;
   let snapshotSource: RetroReport['inputs']['snapshot'] = 'none';

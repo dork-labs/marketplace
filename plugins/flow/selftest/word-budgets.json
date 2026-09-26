@@ -96,8 +96,8 @@
     "target": 2056
   },
   "docs/self-improvement.mdx": {
-    "baseline": 582,
-    "target": 582
+    "baseline": 592,
+    "target": 592
   },
   "docs/SPEC.md": {
     "baseline": 2511,
@@ -184,7 +184,7 @@
     "target": 1200
   },
   "skills/verifying-work/SKILL.md": {
-    "baseline": 3553,
+    "baseline": 3547,
     "target": 1200
   }
 }

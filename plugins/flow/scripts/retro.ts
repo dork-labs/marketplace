@@ -82,6 +82,8 @@ export interface Measures {
   readyVsUntriaged: GlobalMeasure<ReadyVsUntriaged>;
   /** Median days from an item's creation to its `item.readied` line. */
   captureToReadyDaysMedian: JournalMeasure<number>;
+  /** How many readied items the capture-to-ready median was taken over. */
+  captureToReadySamples: JournalMeasure<number>;
   /** Of round-1 `review` lines, the share with verdict `clean`, 0 to 100. */
   firstReviewCleanPct: JournalMeasure<number>;
   /** Blockers plus should-fix findings over every `review` line. */
@@ -119,8 +121,12 @@ export interface HistoryEntry {
   startedAt: string;
   /** The tiers it ran. */
   tiers: string[];
-  /** Each check it ran, with its status. */
-  checks: { id: string; status: string; fingerprint?: string }[];
+  /**
+   * Each check it ran, with its status. One id can appear more than once: doc
+   * lint reports one check per file under the same id. `detail` is present
+   * only where the caller joined it in from `latest.json`.
+   */
+  checks: { id: string; status: string; fingerprint?: string; detail?: string }[];
 }
 
 /** The four proposal rules. */
@@ -331,18 +337,15 @@ export function readyVsUntriaged(snapshot: readonly WorkItem[] | null): Value<Re
 }
 
 /**
- * The median days from each readied item's creation to its `item.readied`
- * line. An item the snapshot does not hold (closed since, or no `createdAt`)
- * is left out.
- *
- * @param lines - Journal lines.
- * @param createdAt - Creation time (ISO) by item identifier.
- * @returns The median, or {@link NO_DATA}.
+ * Days from each readied item's creation to its `item.readied` line. Only
+ * items the snapshot holds with a `createdAt` count: the snapshot carries
+ * creation dates for OPEN items only, so an item readied and closed since
+ * drops out, and the median leans toward work that is still waiting.
  */
-export function captureToReadyDaysMedian(
+function captureToReadyDays(
   lines: readonly JournalLine[],
   createdAt: ReadonlyMap<string, string>
-): Value<number> {
+): number[] {
   const days: number[] = [];
   for (const line of ofKind(lines, 'item.readied')) {
     const created = line.item === undefined ? undefined : createdAt.get(line.item);
@@ -350,8 +353,39 @@ export function captureToReadyDaysMedian(
     const ms = Date.parse(line.ts) - Date.parse(created);
     if (Number.isFinite(ms) && ms >= 0) days.push(ms / DAY_MS);
   }
-  const value = median(days);
+  return days;
+}
+
+/**
+ * The median days from each readied item's creation to its `item.readied`
+ * line, over the items the snapshot still holds open (see the bias note on
+ * {@link captureToReadyDays}).
+ *
+ * @param lines - Journal lines.
+ * @param createdAt - Creation time (ISO) by open item identifier.
+ * @returns The median, or {@link NO_DATA}.
+ */
+export function captureToReadyDaysMedian(
+  lines: readonly JournalLine[],
+  createdAt: ReadonlyMap<string, string>
+): Value<number> {
+  const value = median(captureToReadyDays(lines, createdAt));
   return value === NO_DATA ? NO_DATA : round2(value);
+}
+
+/**
+ * How many readied items {@link captureToReadyDaysMedian} could measure.
+ *
+ * @param lines - Journal lines.
+ * @param createdAt - Creation time (ISO) by open item identifier.
+ * @returns The count, or {@link NO_DATA} when no item was readied at all.
+ */
+export function captureToReadySamples(
+  lines: readonly JournalLine[],
+  createdAt: ReadonlyMap<string, string>
+): Value<number> {
+  if (ofKind(lines, 'item.readied').length === 0) return NO_DATA;
+  return captureToReadyDays(lines, createdAt).length;
 }
 
 /**
@@ -520,6 +554,9 @@ export function computeMeasures(input: RetroInput): Measures {
     captureToReadyDaysMedian: journalMeasure(input, (lines) =>
       captureToReadyDaysMedian(lines, createdAt)
     ),
+    captureToReadySamples: journalMeasure(input, (lines) =>
+      captureToReadySamples(lines, createdAt)
+    ),
     firstReviewCleanPct: journalMeasure(input, firstReviewCleanPct),
     reviewCatchCount: journalMeasure(input, reviewCatchCount),
     innocentEjections: journalMeasure(input, innocentEjections),
@@ -544,6 +581,10 @@ export const ORACLE_REPEAT_MIN = 2;
 export const CLEAN_DROP_POINTS = 15;
 /** Rule 4: capture-to-ready median up by this share (0.5 = 50%). */
 export const CAPTURE_RISE_SHARE = 0.5;
+/** Rule 4 compares capture-to-ready only with this many samples in each window. */
+export const CAPTURE_MIN_SAMPLES = 5;
+/** Slack for float comparisons at a threshold, so a drop of exactly 15 points fires. */
+const EPSILON = 1e-9;
 /** Rule 4: this many innocent ejections in the window. */
 export const INNOCENT_EJECTIONS_MIN = 3;
 
@@ -694,25 +735,39 @@ export function selftestRegressions(
   });
   if (latest === -1) return [];
   const current = ordered[latest];
+  // A check id is one subject however many places it failed in: an entry's
+  // status for an id is fail when any of its checks with that id failed.
+  const statusOf = (entry: HistoryEntry, id: string): string | undefined => {
+    const ran = entry.checks.filter((c) => c.id === id);
+    if (ran.length === 0) return undefined;
+    if (ran.some((c) => c.status === 'fail')) return 'fail';
+    return ran.every((c) => c.status === 'skip') ? 'skip' : 'pass';
+  };
+  const failingIds = [
+    ...new Set(current.checks.filter((c) => c.status === 'fail').map((c) => c.id)),
+  ];
   const out: Proposal[] = [];
-  for (const check of current.checks) {
-    if (check.status !== 'fail') continue;
+  for (const id of failingIds) {
     let earlier: { entry: HistoryEntry; status: string } | undefined;
     for (let i = latest - 1; i >= 0 && earlier === undefined; i -= 1) {
-      const ran = ordered[i].checks.find((c) => c.id === check.id);
-      if (ran !== undefined) earlier = { entry: ordered[i], status: ran.status };
+      const status = statusOf(ordered[i], id);
+      if (status !== undefined) earlier = { entry: ordered[i], status };
     }
     if (earlier?.status !== 'pass') continue;
+    const failures = current.checks.filter((c) => c.id === id && c.status === 'fail');
     out.push(
       proposal(
         'selftest-regression',
-        check.id,
-        `self-test check ${check.id} passed before and fails now`,
+        id,
+        `self-test check ${id} passed before and fails now`,
         [
-          { ts: earlier.entry.startedAt, text: `${check.id} passed` },
-          { ts: current.startedAt, text: `${check.id} failed` },
+          { ts: earlier.entry.startedAt, text: `${id} passed` },
+          ...failures.map((c) => ({
+            ts: current.startedAt,
+            text: `${id} failed: ${c.detail ?? (c.fingerprint ? `fingerprint ${c.fingerprint}` : 'no detail')}`,
+          })),
         ],
-        `The self-test check ${check.id} passed on ${earlier.entry.startedAt.slice(0, 10)} and fails now. Find the change in between and fix it.`
+        `The self-test check ${id} passed on ${earlier.entry.startedAt.slice(0, 10)} and fails now${failures.length > 1 ? ` in ${failures.length} places` : ''}. Find the change in between and fix it.`
       )
     );
   }
@@ -721,7 +776,9 @@ export function selftestRegressions(
 
 /**
  * Rule 4, a measure got worse: first-review clean share down 15 points or
- * more, capture-to-ready median up 50% or more, 3 or more innocent ejections,
+ * more, capture-to-ready median up 50% or more (with 5 or more samples in
+ * each window, since the median is biased; see {@link captureToReadyDays}),
+ * 3 or more innocent ejections,
  * or the prose word total up at all. A measure with no data in either window
  * never fires.
  *
@@ -733,7 +790,7 @@ export function worseMeasures(measures: Measures, at: string): Proposal[] {
   const out: Proposal[] = [];
   const num = (value: Value<number>): value is number => typeof value === 'number';
   const clean = measures.firstReviewCleanPct;
-  if (num(clean.now) && num(clean.prev) && clean.prev - clean.now >= CLEAN_DROP_POINTS) {
+  if (num(clean.now) && num(clean.prev) && clean.prev - clean.now >= CLEAN_DROP_POINTS - EPSILON) {
     out.push(
       proposal(
         'measure-worse',
@@ -745,8 +802,14 @@ export function worseMeasures(measures: Measures, at: string): Proposal[] {
     );
   }
   const ready = measures.captureToReadyDaysMedian;
+  const samples = measures.captureToReadySamples;
+  const enough = (n: Value<number>) => num(n) && n >= CAPTURE_MIN_SAMPLES;
   if (num(ready.now) && num(ready.prev) && ready.prev > 0) {
-    if (ready.now >= ready.prev * (1 + CAPTURE_RISE_SHARE)) {
+    if (
+      enough(samples.now) &&
+      enough(samples.prev) &&
+      ready.now >= ready.prev * (1 + CAPTURE_RISE_SHARE) - EPSILON
+    ) {
       out.push(
         proposal(
           'measure-worse',
@@ -795,7 +858,8 @@ export function worseMeasures(measures: Measures, at: string): Proposal[] {
 export function runRetro(input: RetroInput): RetroResult {
   const measures = computeMeasures(input);
   const caveats = [
-    'Capture-to-ready counts only items flow readied; items readied by hand outside flow are not seen.',
+    'No flow command writes item.readied or operator.wait lines yet, so captureToReadyDaysMedian and operatorWaitHoursMedian read "no data" until one does. Review and CI lines come only from `flow journal record review|ci`, so firstReviewCleanPct, reviewCatchCount and innocentEjections count only what was recorded that way.',
+    'captureToReadyDaysMedian counts only items flow readied and that are still open: the backlog snapshot dates only open items, so items readied and closed since drop out and the median leans toward work still waiting. Items readied by hand outside flow are not seen. Rule 4 compares it only with 5 or more samples in each window.',
   ];
   if (input.snapshot === null)
     caveats.push('No backlog snapshot, so the backlog measure has no data.');

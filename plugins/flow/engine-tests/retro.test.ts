@@ -20,6 +20,7 @@ import { describe, expect, it } from 'vitest';
 
 import { JournalLineSchema, type JournalLine } from '../scripts/journal-schema.ts';
 import {
+  CAPTURE_MIN_SAMPLES,
   CLEAN_DROP_POINTS,
   NO_DATA,
   computeMeasures,
@@ -174,6 +175,12 @@ describe('measures, against the fixture', () => {
     expect(r.byRuntime.unknown.now).toBe(NO_DATA);
   });
 
+  it('captureToReadySamples: how many readied items the median could see', () => {
+    const r = m.captureToReadySamples;
+    expect([r.now, r.prev]).toEqual([3, 1]);
+    expect(r.byRuntime['claude-code'].now).toBe(2);
+  });
+
   it('operatorWaitHoursMedian: median of the ended waits', () => {
     const r = m.operatorWaitHoursMedian;
     expect([r.now, r.prev]).toEqual([2, NO_DATA]);
@@ -296,6 +303,49 @@ describe('proposal rules', () => {
     expect(fastOnly).toEqual(['self-test check config passed before and fails now']);
   });
 
+  it('rule 3 makes one proposal per check id, however many places it fails in', () => {
+    const entry = (startedAt: string, checks: HistoryEntry['checks']): HistoryEntry => ({
+      startedAt,
+      tiers: ['fast'],
+      checks,
+    });
+    const history = [
+      entry('2026-09-18T12:00:00.000Z', [
+        { id: 'doc-lint/words', status: 'pass', fingerprint: 'aaaaaaaaaaaa' },
+      ]),
+      entry('2026-09-25T12:00:00.000Z', [
+        { id: 'doc-lint/words', status: 'fail', fingerprint: 'bbbbbbbbbbbb', detail: 'a.md grew' },
+        { id: 'doc-lint/words', status: 'fail', fingerprint: 'cccccccccccc' },
+      ]),
+    ];
+    const found = selftestRegressions(history, WINDOW);
+    expect(found).toHaveLength(1);
+    expect(found[0].fingerprint).toBe(proposalFingerprint('selftest-regression', 'doc-lint/words'));
+    expect(found[0].evidence.map((e) => e.text)).toEqual([
+      'doc-lint/words passed',
+      'doc-lint/words failed: a.md grew',
+      'doc-lint/words failed: fingerprint cccccccccccc',
+    ]);
+    // So the weekly skill's --input round trip is accepted, not refused as a repeat.
+    expect(parseProposals(found)).toEqual(found);
+  });
+
+  it('rule 3 does not fire on fail then fail', () => {
+    const history: HistoryEntry[] = [
+      {
+        startedAt: '2026-09-18T12:00:00.000Z',
+        tiers: ['fast'],
+        checks: [{ id: 'config', status: 'fail' }],
+      },
+      {
+        startedAt: '2026-09-25T12:00:00.000Z',
+        tiers: ['fast'],
+        checks: [{ id: 'config', status: 'fail' }],
+      },
+    ];
+    expect(selftestRegressions(history, WINDOW)).toEqual([]);
+  });
+
   it('rule 3 ignores a latest run outside the window', () => {
     const later = windowFor('7d', new Date('2026-10-20T00:00:00.000Z'))!;
     expect(selftestRegressions(HISTORY, later)).toEqual([]);
@@ -305,6 +355,7 @@ describe('proposal rules', () => {
   function measures(over: {
     clean?: [number, number];
     ready?: [number, number];
+    samples?: [number, number];
     ejections?: number;
     words?: [number, number];
   }): Measures {
@@ -323,6 +374,9 @@ describe('proposal rules', () => {
     if (over.ready) {
       base.captureToReadyDaysMedian.prev = over.ready[0];
       base.captureToReadyDaysMedian.now = over.ready[1];
+      const [prev, now] = over.samples ?? [CAPTURE_MIN_SAMPLES, CAPTURE_MIN_SAMPLES];
+      base.captureToReadySamples.prev = prev;
+      base.captureToReadySamples.now = now;
     }
     if (over.ejections !== undefined) base.innocentEjections.now = over.ejections;
     if (over.words) {
@@ -338,10 +392,22 @@ describe('proposal rules', () => {
     expect(subjects(measures({ clean: [50, 35.01] }))).toEqual([]);
   });
 
+  it('rule 4: a drop of exactly 15 points fires even when float subtraction lands just short', () => {
+    // 70.1 - 55.1 is 14.999999999999993 in floating point.
+    expect(70.1 - 55.1).toBeLessThan(CLEAN_DROP_POINTS);
+    expect(subjects(measures({ clean: [70.1, 55.1] }))).toHaveLength(1);
+  });
+
   it('rule 4: capture-to-ready up 50% fires, 49% does not, and a zero baseline never does', () => {
     expect(subjects(measures({ ready: [2, 3] }))).toHaveLength(1);
     expect(subjects(measures({ ready: [2, 2.98] }))).toEqual([]);
     expect(subjects(measures({ ready: [0, 5] }))).toEqual([]);
+  });
+
+  it('rule 4: capture-to-ready needs 5 samples in each window, since its median is biased', () => {
+    expect(subjects(measures({ ready: [2, 3], samples: [5, 5] }))).toHaveLength(1);
+    expect(subjects(measures({ ready: [2, 3], samples: [4, 5] }))).toEqual([]);
+    expect(subjects(measures({ ready: [2, 3], samples: [5, 4] }))).toEqual([]);
   });
 
   it('rule 4: three innocent ejections fire, two do not', () => {
@@ -357,14 +423,13 @@ describe('proposal rules', () => {
 });
 
 describe('the whole retro on the fixture', () => {
-  it('proposes the flow-usage cluster, the repeated error, two regressions and four worse measures', () => {
+  it('proposes the flow-usage cluster, the repeated error, two regressions and three worse measures', () => {
     const { proposals } = runRetro(fixtureInput());
     expect(proposals.map((p) => p.rule)).toEqual([
       'note-cluster',
       'oracle-error',
       'selftest-regression',
       'selftest-regression',
-      'measure-worse',
       'measure-worse',
       'measure-worse',
       'measure-worse',

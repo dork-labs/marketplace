@@ -466,7 +466,7 @@ export const VERBS: readonly VerbDefinition[] = [
     name: 'retro',
     summary: "Look back over flow's own runs, report the measures, and propose changes.",
     description:
-      'Reads the journal for the window and the one before, the self-test history, the backlog and the prose word counts. Writes .dork/flow/retro/<date>.json and .md and one journal line. Changes nothing in the tracker unless --file. Exits 1 when --file could not file everything.',
+      'Reads the journal for the window and the one before, the self-test history, the backlog and the prose word counts. Writes .dork/flow/retro/<date>.json and .md and one journal line. Changes nothing in the tracker unless --file. Proposals over maxItemsPerRun wait for a later run and do not fail it; exits 1 when --file cannot act on a proposal (no create capability, or a tracker error).',
     common: ['project', 'snapshot', 'session'],
     flags: [
       {
