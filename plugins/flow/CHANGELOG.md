@@ -4,7 +4,7 @@ Installs of this plugin are pinned to a commit SHA, so a fix here does not reach
 you until you **reinstall it** (Marketplace → flow → reinstall, or re-run your
 `--plugin-dir` checkout's `git pull`). Each entry below says whether that matters.
 
-## 0.15.0
+## 0.18.0
 
 **New `flow` command: agents and people run flow's routine steps as one tested command instead of following long instructions. Reinstall to get it.**
 
@@ -18,6 +18,30 @@ Run it as `node --experimental-strip-types <flow-root>/scripts/flow.ts <command>
 - A new audit rule: an item's state, its `agent/*` label and its `stage/*` label must agree, and a `stage/*` label now appears only on work nobody has started. Items that break this show up in `flow audit`.
 - The Linear adapter now carries the code these commands use. The adapter contract is now version 2.0.0; a custom adapter that still sets `stage/*` labels on started work should be regenerated.
 - The instructions these commands replace are gone from the skills.
+
+## 0.17.0
+
+**flow now ships a fake tracker, the first piece of its self-test that runs stages without a real tracker. Nothing changes for your project; reinstall when you want it.**
+
+- The fake tracker keeps its items in one JSON file and behaves like the Linear adapter where flow depends on it. A claim changes only flow's own labels and keeps every other label. Moving an item picks a real state name. A label your team doesn't have is refused. A merged pull request that says `Closes <id>` closes the item.
+- One shared test runs the fake and the Linear adapter through the same cases, and the Linear side is checked against answers recorded from Linear, so a difference in any of those cases fails a test.
+- `/flow:self-test` also checks that the fake tracker's sample backlog is well formed.
+
+## 0.16.0
+
+**Groundwork for running several items at once across your Claude Code accounts. One new command; nothing else you use changes, so no reinstall is needed.**
+
+- New `flow checkpoint`: it writes a short `HANDOFF.md` in the item's worktree saying what is done, what is next, open questions and the exact next command. flow fills in the facts itself (the branch, the last commit, whether it was pushed), so a fresh session, even on another account, can pick the work up from that file. The file is kept out of git automatically.
+- flow can now decide which of your accounts should take the next piece of work: one with room in its 5-hour and weekly limits, preferring the account whose unused weekly allowance runs out soonest, and keeping your main account for last. Nothing uses it yet; `flow next` and `flow drain` will.
+- A run record has room for a parallel drain's progress and for an account that hit its limit, and the settings gain a `drain` block (listed in `config/CONFIG.md`). Nothing reads them yet.
+- The shared account test fixtures are now version 1.0.1: one new case proves a run record keeps these new fields when another run is written.
+
+## 0.15.0
+
+**More groundwork for tracking several Claude Code accounts. Nothing you use changes yet, so no reinstall is needed.**
+
+- flow can now read an account's usage from what Claude Code already shows: the 5-hour and weekly numbers on the status line, the limit messages saved in past conversations, and the usage report of a short check-in turn. The commands that record them arrive in the next release.
+- flow can now tell which account a Claude Code session belongs to, and list every running session with the item it serves and what it is doing. It combines Claude Code's own session list, a DorkOS app running on this computer, and flow's run records.
 
 ## 0.14.0
 

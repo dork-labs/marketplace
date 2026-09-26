@@ -113,6 +113,17 @@ export interface FlowStateFile {
    * held lock (see `withFileLock` in `atomic-json.ts`).
    */
   withLock<T>(fn: () => Promise<T>, options?: WithFileLockOptions): Promise<WithFileLockResult<T>>;
+
+  /**
+   * Replace a run with what `update` returns, inside the lock, so the update
+   * sees the run as it is on disk at that moment; nothing happens when there is
+   * no run for `issueId`. `update` must be pure: it can run on a retry.
+   */
+  updateRun(
+    issueId: string,
+    update: (run: FlowRun) => FlowRun,
+    options?: FlowStateWriteOptions
+  ): Promise<AtomicUpdateResult>;
   /** Set a run's stage, keeping its status; nothing happens when there is no run for `issueId`. */
   setRunStage(
     issueId: string,
@@ -209,6 +220,19 @@ export function openFlowStateFile(project: string): FlowStateFile {
       return writeUnderLock(
         file,
         (store) => updateFlowRunStatus(store, issueId, status, patch),
+        options
+      );
+    },
+    updateRun(issueId, update, options) {
+      return writeUnderLock(
+        file,
+        (store) => {
+          const state = parseFlowState(store.read());
+          const existing = state[issueId];
+          if (existing === undefined) return;
+          state[issueId] = { ...update(existing), issueId };
+          store.write(serializeFlowState(state));
+        },
         options
       );
     },

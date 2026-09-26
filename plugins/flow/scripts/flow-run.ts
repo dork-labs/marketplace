@@ -46,6 +46,7 @@
 
 import type { z } from 'zod';
 import type { RecoverySchema } from './config-schema.ts';
+import type { DrainState, RunLimit } from './drain/state.ts';
 
 /**
  * The lifecycle status of a {@link FlowRun}. Mirrors the §12 record's `status`
@@ -262,6 +263,24 @@ export interface FlowRun {
    * written by a future launcher never fails the all-or-nothing reader.
    */
   host?: string;
+  /**
+   * When the last `flow checkpoint` for this run was written (ISO), spec
+   * `flow-handoff-dispatch` §1. Written only by the checkpoint and report verbs.
+   */
+  checkpointAt?: string;
+  /** The `headSha` of that checkpoint: the commit the worktree was at. */
+  checkpointSha?: string;
+  /**
+   * The parallel drain's state for this run (§4.3), present only while
+   * `flow drain` carries it. See {@link DrainState}.
+   */
+  drain?: DrainState;
+  /**
+   * The account limit this run is living through (§5.1), absent when there is
+   * none. A limit is a field and not a {@link FlowRunStatus}: a new status
+   * value would make every older reader reject the whole file.
+   */
+  limit?: RunLimit;
 }
 
 /** The inferred {@link RecoverySchema} config type (`maxRetries`/`onExhausted`/`staleAfter`). */
