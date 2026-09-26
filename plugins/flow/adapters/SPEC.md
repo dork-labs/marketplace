@@ -281,9 +281,10 @@ universal and worth stating once:
 
 #### `claim(item: WorkItem): Promise<void>`
 
-- **Must do.** Mark the item as claimed by the agent: write the `agent/claimed`
-  label **and** move the item into a `started`-category state, in that order (label
-  first, so the durable claim signal lands even if the state move fails).
+- **Must do.** Mark the item as claimed by the agent: swap `agent/ready` for the
+  `agent/claimed` label **and** move the item into a `started`-category state, in
+  that order (label first, so the durable claim signal lands even if the state move
+  fails). The `agent/*` labels are one exclusive group: an item never carries two.
 - **Durability.** **Durable and idempotent.** The `agent/*` label is the durable
   state machine; it must survive a process restart (an in-memory claim does not).
   Re-claiming an already-claimed item is a no-op. After a crash, any

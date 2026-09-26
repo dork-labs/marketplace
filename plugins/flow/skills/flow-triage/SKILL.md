@@ -7,7 +7,7 @@ schedule:
   timezone: America/Los_Angeles
   enabled: false
   max-runtime: 30m
-  permissions: acceptEdits
+  permissions: default
 ---
 
 > **Flow root.** This skill lives at `<flow-root>/skills/flow-triage/SKILL.md`. If you reached it via a symlink (`.claude/skills/flow__*` or `.agents/skills/flow__*`), resolve the real path first (`realpath <path>`): the flow root is two directories above the skill directory. Every `<flow-root>/...` reference below is relative to that root.
@@ -30,17 +30,23 @@ Each firing:
    Otherwise the adapter is the `SKILL.md` at its `adapter.path` (inside it,
    `<flow-root>` means the output's `flowRoot`).
 1. Via the adapter, take a backlog snapshot.
-2. **Triage what is untriaged:** open items with no `agent/*` label and no human
+2. **Release stale claims:** items with `agent/claimed` that have been
+   untouched for 7 or more days (no tracker update and no comment). Release one
+   only when ALL of these hold; otherwise list it in the report and leave it:
+   - No run for it in `.dork/flow/flow-state.json`, whatever its worker's state.
+     Recovery owns those.
+   - It is not in the review state (the human-review gate) and not assigned to
+     a human.
+   - No open pull request, pushed branch or worktree carries its id.
+
+   Via the adapter, remove `agent/claimed`, move the item to an
+   `unstarted`-category state, and comment why. Do not restore `agent/ready`:
+   step 3 triages it again.
+3. **Triage what is untriaged:** open items with no `agent/*` label and no human
    assignee. Run each through Path B of `<flow-root>/skills/triaging-work/SKILL.md`.
    - Mark it ready only if it passes the six readiness rules
      (`<flow-root>/skills/grooming-backlog/SKILL.md`, phase 4 step 5).
    - Otherwise, park it with one question (`needsInput`).
-3. **Release stale claims:** items with `agent/claimed` that have been
-   untouched for 7 or more days (no tracker update and no comment). Via the
-   adapter, remove `agent/claimed`, move the item to an `unstarted`-category
-   state, and comment why. The next run triages it again.
-   - Skip an item with an open pull request or a live run in
-     `.dork/flow/flow-state.json`. List it in the report.
 4. Report: what was readied, parked, released and skipped.
 
 **Floor gates never run unattended.** No rejecting or cancelling, no new

@@ -91,11 +91,42 @@ function triageScheduleGaps(triage: string): string[] {
         'releases claims untouched for 7+ days',
         /`agent\/claimed`[^.]*untouched for 7 or more days/,
       ],
-      ['leaves live work alone', /open pull request/],
       ['keeps floor gates for the operator', /never run unattended/],
       ['says how to switch it on', /approve it on the Schedules page/],
     ])
   );
+  if (scheduleField(triage, 'permissions') !== 'default')
+    gaps.push('runs with default permissions');
+  gaps.push(...releaseGaps(triage));
+  if (!releasesFirst(triage)) gaps.push('releases before it triages');
+  return gaps;
+}
+
+/** Whether the release step comes before the triage step, so one run re-triages what it freed. */
+function releasesFirst(triage: string): boolean {
+  const release = triage.indexOf('**Release stale claims');
+  return release !== -1 && release < triage.indexOf('**Triage what is untriaged');
+}
+
+/**
+ * The stale-claim release must never take live work (DOR-2375 review): each skip
+ * case, and no restored readiness.
+ */
+function releaseGaps(triage: string): string[] {
+  const release = between(triage, '**Release stale claims', '**Triage what is untriaged');
+  const gaps = missing(release, [
+    ['releases only when all hold', /only when ALL of these hold/],
+    [
+      'skips an item with any flow run',
+      /No run for it in `\.dork\/flow\/flow-state\.json`, whatever/,
+    ],
+    ['skips an item in review', /not in the review state/],
+    ['skips an item assigned to a human', /not assigned to\s+a human/],
+    ['skips an item with an open PR', /No open pull request/],
+    ['skips an item with a pushed branch', /pushed branch/],
+    ['skips an item with a worktree', /worktree carries its id/],
+    ['does not restore readiness', /Do not restore `agent\/ready`/],
+  ]);
   return gaps;
 }
 
@@ -173,6 +204,36 @@ describe('both schedules ship and are documented', () => {
       .replace(/<flow-root>\/skills\/triaging-work\/SKILL\.md/g, 'its own rules')
       .replace(/enabled: false/, 'enabled: true');
     expect(triageScheduleGaps(triage)).toEqual(['ships switched off', 'reuses triaging-work']);
+  });
+
+  it.each([
+    ['skips an item with any flow run', /, whatever its worker's state/],
+    ['skips an item in review', /not in the review state/],
+    ['skips an item assigned to a human', /not assigned to\s+a human/],
+    ['skips an item with an open PR', /No open pull request/],
+    ['skips an item with a pushed branch', /pushed branch/],
+    ['skips an item with a worktree', /worktree carries its id/],
+    ['does not restore readiness', /Do not restore `agent\/ready`/],
+  ])('the release guard bites when it drops: %s', (label, cut) => {
+    const triage = read('skills/flow-triage/SKILL.md').replace(cut, 'x');
+    expect(releaseGaps(triage)).toEqual([label]);
+  });
+
+  it('the release guard bites when triage runs first', () => {
+    const triage = read('skills/flow-triage/SKILL.md')
+      .replace('**Release stale claims', '**TMP')
+      .replace('**Triage what is untriaged', '**Release stale claims')
+      .replace('**TMP', '**Triage what is untriaged');
+    expect(releasesFirst(read('skills/flow-triage/SKILL.md'))).toBe(true);
+    expect(releasesFirst(triage)).toBe(false);
+  });
+
+  it('the permission guard bites on acceptEdits', () => {
+    const triage = read('skills/flow-triage/SKILL.md').replace(
+      'permissions: default',
+      'permissions: acceptEdits'
+    );
+    expect(triageScheduleGaps(triage)).toEqual(['runs with default permissions']);
   });
 });
 

@@ -1,15 +1,27 @@
 #!/usr/bin/env bash
 # Watch PRs until one merges, closes, fails a check, or is neither armed nor queued.
 # Usage: watch.sh <owner/repo>:<pr> [<owner/repo>:<pr> ...]
-# Needs: gh (signed in) and jq.
+# Needs: gh (signed in) and jq. Exits with ERROR after 5 failed reads in a row
+# (a mistyped repo or an expired login), instead of waiting forever.
 set -u
+MAX_ERRORS=5
+errors=0
 while true; do
   for spec in "$@"; do
     repo=${spec%%:*}
     pr=${spec##*:}
-    j=$(gh pr view "$pr" -R "$repo" --json state,autoMergeRequest,statusCheckRollup 2>/dev/null) || continue
+    if ! j=$(gh pr view "$pr" -R "$repo" --json state,autoMergeRequest,statusCheckRollup 2>&1); then
+      errors=$((errors + 1))
+      if ((errors >= MAX_ERRORS)); then echo "$spec ERROR: $j"; exit 1; fi
+      continue
+    fi
+    errors=0
     state=$(jq -r .state <<<"$j")
-    failing=$(jq -r '[.statusCheckRollup[]? | select((.conclusion // "") | test("FAILURE|CANCELLED|TIMED_OUT|ACTION_REQUIRED")) | .name] | join(",")' <<<"$j")
+    # Check runs report `.conclusion`; commit statuses (a deploy preview, say) report `.state`.
+    failing=$(jq -r '[.statusCheckRollup[]?
+      | select(((.conclusion // "") | test("FAILURE|CANCELLED|TIMED_OUT|ACTION_REQUIRED"))
+          or ((.state // "") | test("FAILURE|ERROR")))
+      | (.name // .context)] | join(",")' <<<"$j")
     armed=$(jq -r '.autoMergeRequest != null' <<<"$j")
     if [[ $state != OPEN ]]; then echo "$spec $state"; exit 0; fi
     if [[ -n $failing ]]; then echo "$spec FAILING: $failing"; exit 0; fi

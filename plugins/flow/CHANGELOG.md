@@ -9,7 +9,7 @@ you until you **reinstall it** (Marketplace → flow → reinstall, or re-run yo
 **Work flow files for itself now reaches the ready queue, and two schedules keep it there. Reinstall, then approve the schedules you want.**
 
 - A follow-up filed when an item closes gets a type, a priority and a project, and goes through triage right away. It is marked ready only if it passes the six readiness rules; otherwise it is parked with one question.
-- New `flow-triage` schedule, daily: readies or parks every untriaged item, and releases claims nobody has touched for 7 days.
+- New `flow-triage` schedule, daily: readies or parks every untriaged item. It also releases a claim nobody has touched for 7 days, but never one that a flow run, the review gate, a person, a PR, a branch or a worktree still holds.
 - `flow-groom` now runs weekly instead of monthly, and stays a read-only check. The full groom still runs only when you start it.
 - Both ship switched off. On DorkOS, approve them on the Schedules page.
 - Triage and groom check the code before calling an item open or shipped.

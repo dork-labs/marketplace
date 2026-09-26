@@ -1,5 +1,7 @@
 # Artifacts from the 2026-09-25/26 Maintenance drain
 
+> **The live copy is `plugins/flow/templates/drain/`**, documented in `plugins/flow/docs/parallel-drain.mdx`. The files here are the historical record; change the live copy, not these.
+
 These are the hand-written tools that ran 15 items through 10 merged PRs, each with an independent adversarial review. They are the seed for `flow drain` and `flow watch` (step 2 of `../01-ideation.md`). The paths in them are placeholders.
 
 - `WORKER_BRIEF.md` walks one resumable worker through claim, worktree, build, push, review fixes, PR, land and DONE.
