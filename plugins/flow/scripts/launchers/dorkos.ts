@@ -43,7 +43,7 @@ import { readFileSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 
-import { resolveDorkHome } from '../fleet/accounts.ts';
+import { canonicalAccountPath, resolveDorkHome } from '../fleet/accounts.ts';
 import { assertLoopback } from '../fleet/sessions.ts';
 import {
   DEFAULT_START_TIMEOUT_MS,
@@ -248,13 +248,19 @@ function sentAccount(req: LaunchRequest): string | undefined {
  * else its id.
  */
 function expectedAccount(account: LaunchAccount): string {
-  if (account.path !== null) return path.resolve(account.path);
+  if (account.path !== null) return canonicalAccountPath(account.path, os.homedir());
   return account.provider ?? account.id;
 }
 
-/** Whether a reported `account` is the expected one (paths compared resolved). */
+/**
+ * Whether a reported `account` is the expected one. Paths compare canonically
+ * (spec §1.1a rule 5: `~`, trailing separators and symlinks), so a DorkOS that
+ * reports the real folder behind a symlinked `~/.claude` still matches.
+ */
 function sameAccount(reported: string, expected: string): boolean {
-  return path.isAbsolute(reported) ? path.resolve(reported) === expected : reported === expected;
+  return path.isAbsolute(reported)
+    ? canonicalAccountPath(reported, os.homedir()) === expected
+    : reported === expected;
 }
 
 /** How the MCP path went: started, or not usable so the route is taken (a final no throws). */
@@ -489,8 +495,18 @@ export function createDorkosLauncher(deps: DorkosLauncherDeps): Launcher {
     // account it bills. DorkOS derives `account` from where the transcript
     // lives, so it can lag the session itself; keep looking until the deadline.
     const sent = sentAccount(req);
+    // A standalone Claude Code `default` is not sent (DorkOS resolves its own
+    // default), but it has a machine-wide folder, so the session must still be
+    // proved to bill that folder: a DorkOS whose own environment points at
+    // another account would otherwise spend it unnoticed (spec §1.1a rev 6d).
     const expected =
-      sent === undefined || req.account === null ? null : expectedAccount(req.account);
+      req.account === null
+        ? null
+        : sent !== undefined
+          ? expectedAccount(req.account)
+          : req.runtime === 'claude-code' && req.account.path !== null
+            ? canonicalAccountPath(req.account.path, os.homedir())
+            : null;
     const deadline = deps.now() + timeoutMs;
     let seen: Record<string, unknown> | null = null;
     for (;;) {

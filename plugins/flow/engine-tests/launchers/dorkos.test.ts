@@ -11,7 +11,7 @@
  * `session_start`, and a 401 for a mutating call without the token).
  */
 
-import { mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, realpathSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { createServer, type IncomingMessage, type Server } from 'node:http';
 import type { AddressInfo } from 'node:net';
 import os from 'node:os';
@@ -573,6 +573,37 @@ describe('dorkos launcher: the session it records', () => {
       expect(handle.account).toBeNull();
       const post = h.requests().find((r) => r.url.endsWith('/messages'));
       expect(post?.body).not.toHaveProperty('account');
+    });
+  });
+
+  // A standalone Claude Code `default` (the operator's own sign-in) is not sent
+  // to DorkOS, but its machine-wide folder is still checked: DorkOS started
+  // with CLAUDE_CONFIG_DIR on a kept-out account must not bill that account.
+  it('proves a standalone default runs in its own folder without sending its id', async () => {
+    await withFake({}, async (h) => {
+      const main = { runtime: 'claude-code' as const, id: 'default', path: h.ambientConfigDir };
+      const handle = await h.launcher.start(requestFor(h, { account: main }));
+      expect(handle.account).toBe('default');
+      const post = h.requests().find((r) => r.url.endsWith('/messages'));
+      expect(post?.body).not.toHaveProperty('account');
+    });
+    await withFake({}, async (h) => {
+      h.script({ confirm: 'other-account' });
+      const main = { runtime: 'claude-code' as const, id: 'default', path: h.ambientConfigDir };
+      const err = await launchFailure(h.launcher.start(requestFor(h, { account: main })));
+      expect(err.code).toBe('wrong-account');
+      expect(err.message).toContain(h.ambientConfigDir);
+    });
+  });
+
+  // Rule 5: a symlinked account folder matches the real folder DorkOS reports.
+  it('matches a symlinked default folder against the real folder DorkOS reports', async () => {
+    await withFake({}, async (h) => {
+      const link = path.join(path.dirname(h.ambientConfigDir), '.claude-link');
+      symlinkSync(h.ambientConfigDir, link);
+      const main = { runtime: 'claude-code' as const, id: 'default', path: link };
+      const handle = await h.launcher.start(requestFor(h, { account: main }));
+      expect(handle.account).toBe('default');
     });
   });
 
