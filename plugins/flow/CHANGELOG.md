@@ -8,8 +8,9 @@ you until you **reinstall it** (Marketplace → flow → reinstall, or re-run yo
 
 **flow's journal now records which agent wrote each entry: Claude Code, Codex or OpenCode. Reinstall to get it.**
 
-- Every journal entry says which runtime ran it and what hosted the session (cmux, DorkOS, the runtime's own terminal, or a plain shell), so a later review can compare them.
-- flow works this out from the markers each runtime leaves in its shell. A launcher can say it outright with `FLOW_RUNTIME` and `FLOW_HARNESS`.
+- Every journal entry says which runtime ran it, so a later review can compare them. It also says what hosted the session when flow can tell: cmux, the runtime's own terminal, a plain shell, or whatever a launcher names with `FLOW_HARNESS` (DorkOS will name itself this way).
+- flow works this out from the markers each runtime leaves in its shell. A launcher can say it outright with `FLOW_RUNTIME` and `FLOW_HARNESS`; a runtime started from inside another one is still recognized as itself.
+- Entries written by earlier versions read as runtime "unknown".
 - The journal can now hold occasional readings of each account's usage, so a review can show how usage moved over a week. A reading is kept only when something changed enough to matter, so the file stays small.
 - `flow journal tail` shows the runtime beside each entry.
 

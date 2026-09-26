@@ -590,7 +590,7 @@ describe('runtime and harness on every line', () => {
 
   // Purpose: flow runs from Claude Code, Codex and OpenCode; the retro splits
   // every measure by runtime, so every line must say which one wrote it.
-  it('stamps what the caller names, and the schema requires both', () => {
+  it('stamps what the caller names', () => {
     const line = buildLine(note('hi'), {
       now: NOW,
       flowVersion: 'x',
@@ -599,16 +599,35 @@ describe('runtime and harness on every line', () => {
     });
     expect(line).toMatchObject({ runtime: 'codex', harness: 'cmux' });
     expect(JournalLineSchema.safeParse(line).success).toBe(true);
-    const { runtime: _r, ...without } = line;
-    expect(JournalLineSchema.safeParse(without).success).toBe(false);
   });
 
-  it('detects them from the environment when the caller does not name them', () => {
+  it('never guesses from this process: a caller that names neither gets unknown', () => {
+    // Verbs pass runtimeOf(ctx.env); reading process.env here would record the
+    // wrong runtime for a verb run with its own environment (a test, a launcher).
     vi.stubEnv('FLOW_RUNTIME', 'opencode');
-    vi.stubEnv('FLOW_HARNESS', 'dorkos');
+    vi.stubEnv('CLAUDECODE', '1');
     expect(buildLine(note('hi'), { now: NOW })).toMatchObject({
-      runtime: 'opencode',
-      harness: 'dorkos',
+      runtime: 'unknown',
+      harness: 'unknown',
+    });
+  });
+
+  it('reads a line written before 0.21.0 (no runtime or harness) as unknown, and it still validates', () => {
+    const old = {
+      v: 1,
+      ts: NOW.toISOString(),
+      flow: '0.20.0',
+      kind: 'note',
+      noteKind: 'friction',
+      text: 'old',
+    };
+    expect(JournalLineSchema.safeParse(old).success).toBe(true);
+    mkdirSync(path.dirname(base().path), { recursive: true });
+    writeFileSync(base().path, `${JSON.stringify(old)}\n`);
+    expect(read(settings()).lines[0]).toMatchObject({
+      runtime: 'unknown',
+      harness: 'unknown',
+      text: 'old',
     });
   });
 });
@@ -696,6 +715,11 @@ describe('shouldSampleUsage', () => {
     expect(shouldSampleUsage(previous, { ...previous.windows, seven_day_opus: w(1) }, at(1))).toBe(
       true
     );
+  });
+
+  it('samples when the last snapshot lies in the future (clock skew)', () => {
+    const future = { ts: at(60).toISOString(), windows: previous.windows };
+    expect(shouldSampleUsage(future, previous.windows, NOW)).toBe(true);
   });
 
   it('samples when the last snapshot time cannot be read', () => {

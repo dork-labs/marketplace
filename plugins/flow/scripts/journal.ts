@@ -1,194 +1,519 @@
 /**
- * `flow journal` (spec `flow-self-improvement` §2, DOR-2391):
+ * The journal (spec `flow-self-improvement` §2, DOR-2391): a small, local,
+ * secret-free record of how flow's runs go, one JSON line per event.
  *
- * - `flow journal record <review|ci|handoff> --field value ...` records an event
- *   the CLI cannot see for itself (a review verdict, a CI red, a handoff). The
- *   line is checked against the journal line schema first; a bad one is exit 2
- *   with the schema's message. Recording needs `zod`, loaded only here, so a
- *   missing install is exit 6 like every zod-needing verb.
- * - `flow journal tail [-n N] [--kind k]` prints the newest lines. No zod.
+ * It lives at `<main checkout>/.dork/flow/journal.jsonl`, so every worktree of a
+ * project writes one file (`config-files.ts` {@link journalSettings} says where,
+ * and whether it is on). Nothing here needs `zod`: a verb can write its line
+ * before `npm install`. The line schema is in `journal-schema.ts`, loaded only by
+ * code that validates hand-entered input.
  *
- * @module @dorkos/flow/cli/journal
+ * - **Never secrets.** Only the fields in the schema are stored, and the free
+ *   text fields (`note.text`, `oracle.error.errorClass`) pass {@link redact} and
+ *   a length cap in {@link buildLine}, whoever the caller is.
+ * - **Writing.** One `appendFileSync` per event, opened `O_APPEND`, so writers in
+ *   several processes never interleave inside a line.
+ * - **Never in the way.** {@link append} never throws. A failure (full disk,
+ *   permissions) is one warning on stderr, and the caller's exit code and output
+ *   stay as they were.
+ * - **Rotation.** At `maxBytes`, `journal.jsonl` becomes `journal.1.jsonl`, the
+ *   older files shift up one, and `journal.<keep>.jsonl` is dropped. A `wx` lock
+ *   file makes one writer do it; see {@link rotateIfFull}.
+ * - **Out of git.** The first write adds `.dork/flow/` to the repository's
+ *   `info/exclude` unless git already ignores the file.
+ *
+ * @module @dorkos/flow/journal
  */
 
-import { flowVersion } from '../_shared.ts';
-import { ConfigError, UsageError } from '../errors.ts';
 import {
-  ITEM_MAX,
-  JOURNAL_KINDS,
-  NAME_MAX,
-  append,
-  buildLine,
-  runtimeOf,
-  journalFor,
-  read,
-  type JournalEvent,
-  type LineMeta,
-} from '../journal.ts';
-import type { JournalSettings } from '../config-files.ts';
-import type { VerbContext, VerbResult } from './context.ts';
-import { formatColumns } from './output.ts';
-import { RECORD_FLAGS, TAIL_FLAGS } from './journal-verbs.ts';
+  appendFileSync,
+  closeSync,
+  existsSync,
+  mkdirSync,
+  openSync,
+  readFileSync,
+  renameSync,
+  rmSync,
+  statSync,
+  unlinkSync,
+} from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
 
-/** The events a person or agent may record by hand; the CLI writes the rest itself. */
-const RECORDABLE = ['review', 'ci', 'handoff'] as const;
-/** Record flags whose value is a whole number. */
-const NUMERIC = new Set(['round', 'blocker', 'shouldFix', 'nit', 'pr']);
-/** Default tail length. */
-const TAIL_DEFAULT = 20;
+import { isPlainObject } from './_shared.ts';
+import {
+  RUN_FILES_DIR,
+  findConfigRoots,
+  journalSettings,
+  refusalFor,
+  type JournalSettings,
+} from './config-files.ts';
+import { ensureIgnored } from './git-exclude.ts';
+import { detectRuntime, type Runtime } from './runtime-detect.ts';
+import type { JournalLine } from './journal-schema.ts';
+
+/** Every line kind, in the order of the spec's table. */
+export const JOURNAL_KINDS = [
+  'verb',
+  'oracle.error',
+  'stage',
+  'item.readied',
+  'claim',
+  'retry',
+  'operator.wait',
+  'review',
+  'ci',
+  'handoff',
+  'note',
+  'selftest',
+  'retro',
+  'usage.snapshot',
+] as const;
+
+/** A line kind. */
+export type JournalKind = (typeof JOURNAL_KINDS)[number];
+
+/** What an agent's `flow note` is about. */
+export const NOTE_KINDS = ['friction', 'workaround', 'confusion'] as const;
+
+/** The closed set of review finding categories. */
+export const REVIEW_CATEGORIES = [
+  'logic',
+  'race',
+  'test',
+  'migration',
+  'security',
+  'docs',
+  'scope',
+  'style',
+  'other',
+] as const;
+
+/** The most characters `note.text` keeps. */
+export const NOTE_TEXT_MAX = 1000;
+/** The most characters `oracle.error.errorClass` keeps. */
+export const ERROR_CLASS_MAX = 200;
+/** The most characters `item` keeps. */
+export const ITEM_MAX = 64;
+/** The most characters any other text field keeps (a verb, a skill, an account). */
+export const NAME_MAX = 100;
+/** The lock file one writer holds while it rotates, beside the journal. */
+export const LOCK_FILE = 'journal.lock';
+/** A lock older than this is left over from a writer that died, and is deleted. */
+export const STALE_LOCK_MS = 30_000;
+
+/** `Omit` applied to each member of a union, so the union survives. */
+type DistributiveOmit<T, K extends PropertyKey> = T extends unknown ? Omit<T, K> : never;
+
+/** An event as a caller passes it: a line without the fields {@link buildLine} stamps. */
+export type JournalEvent = DistributiveOmit<
+  JournalLine,
+  'v' | 'ts' | 'flow' | 'session' | 'runtime' | 'harness'
+>;
 
 /**
- * Run `flow journal`.
+ * The `runtime` and `harness` a verb stamps on its lines, read from the verb's
+ * own environment (its `VerbContext.env`), never from this process's, so a
+ * test or a launcher that hands a verb an environment gets that answer.
  *
- * @param ctx - The parsed invocation and the injected world.
- * @returns The recorded line, or the tailed lines.
- * @throws {UsageError} On an unknown action or kind, a flag the action does not
- *   take, or an event the schema rejects.
- * @throws {ConfigError} When flow must not act in this folder.
+ * @param env - The environment to read.
+ * @returns The runtime and harness for {@link LineMeta}.
  */
-export async function run(ctx: VerbContext): Promise<VerbResult> {
-  const [action, kind] = ctx.args.positionals;
-  if (action !== 'record' && action !== 'tail') {
-    throw new UsageError(`unknown action "${action}"; use record or tail`);
-  }
-  refuseFlags(ctx, action === 'record' ? TAIL_FLAGS : RECORD_FLAGS, action);
-
-  const journal = journalFor(ctx.projectDir, ctx.flowRoot);
-  if ('refusal' in journal) throw new ConfigError(journal.refusal);
-  return action === 'record'
-    ? record(ctx, journal.settings, kind)
-    : tail(ctx, journal.settings, kind);
+export function runtimeOf(env: Readonly<Record<string, string | undefined>>): {
+  runtime: Runtime;
+  harness: string;
+} {
+  const { runtime, harness } = detectRuntime(env);
+  return { runtime, harness };
 }
 
-/** Refuse any flag given that belongs to the other action. */
-function refuseFlags(ctx: VerbContext, foreign: readonly { name: string }[], action: string): void {
-  const given = foreign.find((flag) => flag.name in ctx.args.flags);
-  if (given) throw new UsageError(`"flow journal ${action}" does not take --${given.name}`);
+/** One usage window as a `usage.snapshot` line carries it. */
+export interface UsageWindowReading {
+  /** Share of the window used, 0 to 100. */
+  usedPct: number;
+  /** When the window resets, ISO-8601, or `null` when unknown. */
+  resetsAt: string | null;
 }
 
-/** `--should-fix` → `shouldFix`. */
-function fieldName(flag: string): string {
-  return flag.replace(/-([a-z])/g, (_, letter: string) => letter.toUpperCase());
+/** A `usage.snapshot` sample needs this long since the last one of the same account... */
+export const USAGE_SAMPLE_INTERVAL_MS = 30 * 60 * 1000;
+/** ...unless a window moved at least this many points, or reset, since then. */
+export const USAGE_SAMPLE_DELTA_PCT = 5;
+
+/**
+ * Whether a usage writer should add a `usage.snapshot` line now (fleet decision
+ * R8: the ledger keeps only the latest reading; the journal keeps a SAMPLED
+ * history for the retro's trends). Sample when there is no earlier snapshot of
+ * this account, when its time cannot be read or lies in the future (clock
+ * skew), when {@link USAGE_SAMPLE_INTERVAL_MS} has passed, when any window moved
+ * {@link USAGE_SAMPLE_DELTA_PCT} points or more, or when a window appeared,
+ * disappeared or reset (its `resetsAt` changed).
+ *
+ * @param previous - The account's last snapshot line (`ts` and `windows`), if any.
+ * @param windows - The new readings by window name.
+ * @param now - The time of the new reading.
+ * @returns `true` when the reading should be journaled.
+ */
+export function shouldSampleUsage(
+  previous: { ts: string; windows: Readonly<Record<string, UsageWindowReading>> } | undefined,
+  windows: Readonly<Record<string, UsageWindowReading>>,
+  now: Date
+): boolean {
+  if (previous === undefined) return true;
+  const elapsed = now.getTime() - Date.parse(previous.ts);
+  if (!(elapsed >= 0 && elapsed < USAGE_SAMPLE_INTERVAL_MS)) return true;
+  const names = new Set([...Object.keys(previous.windows), ...Object.keys(windows)]);
+  for (const name of names) {
+    const before = previous.windows[name];
+    const after = windows[name];
+    if (before === undefined || after === undefined) return true;
+    if (before.resetsAt !== after.resetsAt) return true;
+    if (!(Math.abs(after.usedPct - before.usedPct) < USAGE_SAMPLE_DELTA_PCT)) return true;
+  }
+  return false;
 }
 
-/** Build the event from the flags: numbers where the schema wants them, lists split. */
-function eventFrom(kind: (typeof RECORDABLE)[number], ctx: VerbContext): Record<string, unknown> {
-  const event: Record<string, unknown> = { kind };
-  if (kind === 'review') Object.assign(event, { blocker: 0, shouldFix: 0, nit: 0, categories: [] });
-  for (const [flag, value] of Object.entries(ctx.args.flags)) {
-    if (!RECORD_FLAGS.some((f) => f.name === flag) || typeof value !== 'string') continue;
-    const field = fieldName(flag);
-    if (NUMERIC.has(field)) {
-      event[field] = /^-?\d+$/.test(value) ? Number(value) : value;
-    } else if (field === 'categories') {
-      event[field] = value
-        .split(',')
-        .map((c) => c.trim())
-        .filter((c) => c !== '');
-    } else {
-      event[field] = value;
-    }
-  }
-  return event;
+/** Where a journal is and how it is written: {@link JournalSettings}, or a test's own. */
+export type JournalTarget = JournalSettings;
+
+/** What {@link buildLine} stamps on every line. */
+export interface LineMeta {
+  /** The event time. Default: now. */
+  now?: Date;
+  /** The flow plugin version. Default: `unknown`. */
+  flowVersion?: string;
+  /** The harness session id; only its first 8 characters are kept. */
+  session?: string;
+  /**
+   * The agent runtime the writer runs under. A verb passes `runtimeOf(ctx.env)`;
+   * absent, the line says `unknown` (never a guess from this process's env).
+   */
+  runtime?: Runtime;
+  /** What hosts the session, from `runtimeOf(ctx.env)`; absent, `unknown`. */
+  harness?: string;
 }
 
-/** `flow journal record <kind> ...`. */
-async function record(
-  ctx: VerbContext,
-  settings: JournalSettings,
-  kind: string | undefined
-): Promise<VerbResult> {
-  if (kind === undefined) {
-    throw new UsageError(`missing <kind> for "flow journal record": ${RECORDABLE.join(', ')}`);
+/** How {@link append} behaves beyond the line itself. */
+export interface AppendOptions extends LineMeta {
+  /** Where the one failure warning goes. Default: a `flow: warning:` line on stderr. */
+  warn?: (message: string) => void;
+  /**
+   * Test seam: runs after this writer found the file over the cap and before it
+   * tries the lock, so a test can put another writer's rotation in between.
+   */
+  beforeLock?: () => void;
+}
+
+/** What {@link append} did: wrote the line, found the journal off, or failed (and warned). */
+export type AppendOutcome = 'written' | 'off' | 'failed';
+
+/** Token shapes replaced by `[redacted]`, most specific first. */
+const TOKEN_PATTERNS: readonly RegExp[] = [
+  /\bsk-[A-Za-z0-9_-]{8,}/g,
+  /\bgithub_pat_[A-Za-z0-9_]{20,}/g,
+  /\bgh[pousr]_[A-Za-z0-9]{20,}/g,
+  /\blin_api_[A-Za-z0-9]{20,}/g,
+  /\bglpat-[A-Za-z0-9_-]{20,}/g,
+  /\bxox[bap]-[A-Za-z0-9-]{10,}/g,
+  /\bAKIA[0-9A-Z]{16}\b/g,
+  // Header credentials, any case. The value must look like a token, so prose
+  // survives: 8+ characters holding a digit (or `.`, `+`, `=` for bearer; `+`,
+  // `=` for basic, since `/` is common in prose). "the bearer credential
+  // expired" and "a basic setup/teardown step" are kept.
+  /\bbearer\s+(?=[A-Za-z0-9._~+/=-]*[0-9.+=])[A-Za-z0-9._~+/=-]{8,}/gi,
+  /\bbasic\s+(?=[A-Za-z0-9+/=]*[0-9+=])[A-Za-z0-9+/]{8,}={0,2}/gi,
+];
+/** An email address. */
+const EMAIL = /[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}/g;
+/**
+ * A run of 32 or more base64 or hex characters holding at least one letter and
+ * one digit: the shape of a bare key, a full commit SHA included. The
+ * letter-and-digit rule spares long plain words. `/` is a base64 character, so a
+ * long path without dots that has a digit in it (`specs/x-y/02-spec…`) is
+ * redacted too: over-redacting a path costs a diagnostic detail, while stopping
+ * runs at `/` would let a base64 key through in pieces.
+ */
+const LONG_RUN = /[A-Za-z0-9+/_-]{32,}={0,2}/g;
+
+/** Escape a string for use inside a regular expression. */
+function escapeRegExp(text: string): string {
+  return text.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
+/**
+ * Remove what must never be stored from free text: token shapes (`sk-…`,
+ * `ghp_…`, `github_pat_…`, `glpat-…`, `lin_api_…`, `xox[bap]-…`, `AKIA…`,
+ * `Bearer …` and `Basic …` in any case, any run of 32+ base64 or hex
+ * characters) become `[redacted]`, email addresses become `[email]`, and the
+ * home folder becomes `~`.
+ *
+ * @param text - Free text from an agent or an error message.
+ * @param home - The home folder to shorten. Default: the current user's.
+ * @returns The text with every match replaced.
+ */
+export function redact(text: string, home: string = os.homedir()): string {
+  let out = text;
+  if (home.length > 1) {
+    out = out.replace(new RegExp(`${escapeRegExp(home)}(?![A-Za-z0-9_.-])`, 'g'), '~');
   }
-  if (!(RECORDABLE as readonly string[]).includes(kind)) {
-    throw new UsageError(`cannot record "${kind}" by hand; use ${RECORDABLE.join(', ')}`);
+  for (const pattern of TOKEN_PATTERNS) out = out.replace(pattern, '[redacted]');
+  out = out.replace(EMAIL, '[email]');
+  return out.replace(LONG_RUN, (run) =>
+    /[A-Za-z]/.test(run) && /[0-9]/.test(run) ? '[redacted]' : run
+  );
+}
+
+/** The first `max` characters (code points, so no emoji is cut in half). */
+function cap(text: string, max: number): string {
+  const chars = Array.from(text);
+  return chars.length <= max ? text : chars.slice(0, max).join('');
+}
+
+/** The most characters a field keeps; any field not named here keeps {@link NAME_MAX}. */
+const FIELD_MAX: Readonly<Record<string, number>> = {
+  item: ITEM_MAX,
+  text: NOTE_TEXT_MAX,
+  errorClass: ERROR_CLASS_MAX,
+};
+
+/**
+ * Redact and cap one field value: every string, every string in a list, and
+ * every key and string inside an object (a usage snapshot's windows).
+ */
+function clean(field: string, value: unknown): unknown {
+  const max = FIELD_MAX[field] ?? NAME_MAX;
+  if (typeof value === 'string') {
+    const text = field === 'errorClass' ? (value.split(/\r?\n/, 1)[0] ?? '') : value;
+    return cap(redact(text), max);
   }
-  const event = eventFrom(kind as (typeof RECORDABLE)[number], ctx) as JournalEvent;
-  // buildLine caps every field so an automatic event can never be refused; a
-  // value typed by hand that is too long is a usage error instead (exit 2).
+  if (Array.isArray(value)) return value.map((entry) => clean(field, entry));
+  if (isPlainObject(value)) {
+    return Object.fromEntries(
+      Object.entries(value).map(([key, inner]) => [cap(redact(key), NAME_MAX), clean(key, inner)])
+    );
+  }
+  return value;
+}
+
+/**
+ * Stamp an event into a line: `v`, `ts`, `flow`, the `runtime` and `harness`
+ * the caller names (`unknown` when it names none) and the session prefix. Every
+ * string field the caller passed (`item`, `skill`, `from`, a note's text, an
+ * error's first line, each list entry) is redacted and capped at its schema
+ * maximum, whoever the caller is and whether or not it loads the schema.
+ *
+ * @param event - The event.
+ * @param meta - The time, plugin version and session.
+ * @returns The line to write.
+ */
+export function buildLine(event: JournalEvent, meta: LineMeta = {}): JournalLine {
+  const fields: Record<string, unknown> = {};
   for (const [field, value] of Object.entries(event)) {
-    const values = Array.isArray(value) ? value : [value];
-    const max = field === 'item' ? ITEM_MAX : NAME_MAX;
-    const long = values.find((entry) => typeof entry === 'string' && entry.length > max);
-    if (long !== undefined) {
-      throw new UsageError(`invalid ${kind} event: ${field} is longer than ${max} characters`);
-    }
+    fields[field] = field === 'kind' ? value : clean(field, value);
   }
-  const meta: LineMeta = {
-    now: ctx.now(),
-    flowVersion: flowVersion(ctx.flowRoot),
-    session: ctx.sessionId,
-    ...runtimeOf(ctx.env),
-  };
-  const { JournalLineSchema } = await import('../journal-schema.ts');
-  const checked = JournalLineSchema.safeParse(buildLine(event, meta));
-  if (!checked.success) {
-    const issues = checked.error.issues.map((issue) => {
-      const at = issue.path.join('.');
-      return at === '' ? issue.message : `${at}: ${issue.message}`;
-    });
-    throw new UsageError(`invalid ${kind} event: ${issues.join('; ')}`);
-  }
-
-  const outcome = append(settings, event, { ...meta, warn: ctx.warn });
-  const texts = {
-    written: `Recorded ${kind} in ${settings.path}.`,
-    off: `The journal is off (selfImprovement.journal.enabled is false), so the ${kind} event was not written.`,
-    failed: `The ${kind} event was not written: the journal could not be written (see the warning).`,
-  };
   return {
-    json: {
-      ok: true,
-      recorded: outcome === 'written',
-      outcome,
-      path: settings.path,
-      line: checked.data,
-    },
-    text: texts[outcome],
-  };
+    v: 1,
+    ts: (meta.now ?? new Date()).toISOString(),
+    flow: meta.flowVersion ?? 'unknown',
+    runtime: meta.runtime ?? 'unknown',
+    harness: cap(redact(meta.harness ?? 'unknown'), NAME_MAX),
+    ...(meta.session ? { session: meta.session.slice(0, 8) } : {}),
+    ...fields,
+  } as JournalLine;
 }
 
-/** `flow journal tail [-n N] [--kind k]`. */
-function tail(ctx: VerbContext, settings: JournalSettings, extra: string | undefined): VerbResult {
-  if (extra !== undefined) throw new UsageError(`unexpected argument "${extra}" for tail`);
-  const { lines: count, kind } = ctx.args.flags;
-  let limit = TAIL_DEFAULT;
-  if (typeof count === 'string') {
-    if (!/^[1-9]\d*$/.test(count)) throw new UsageError('-n needs a whole number above 0');
-    limit = Number(count);
-  }
-  if (typeof kind === 'string' && !(JOURNAL_KINDS as readonly string[]).includes(kind)) {
-    throw new UsageError(`unknown --kind "${kind}"; use one of ${JOURNAL_KINDS.join(', ')}`);
-  }
+/**
+ * The path of rotated file `n` beside a journal: `journal.<n>.jsonl`.
+ *
+ * @param journal - The journal file (`…/journal.jsonl`).
+ * @param n - The rotation number, 1 for the newest rotated file.
+ * @returns The rotated file's path.
+ */
+export function rotatedPath(journal: string, n: number): string {
+  const ext = path.extname(journal);
+  return `${journal.slice(0, journal.length - ext.length)}.${n}${ext}`;
+}
 
-  const { lines, skipped } = read(settings);
-  const shown = lines.filter((line) => kind === undefined || line.kind === kind).slice(-limit);
-  if (skipped > 0) ctx.warn(`${skipped} journal line(s) could not be read and were skipped`);
+/** The file's size, or `null` when it does not exist. */
+function sizeOf(file: string): number | null {
+  try {
+    return statSync(file).size;
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === 'ENOENT') return null;
+    throw error;
+  }
+}
 
-  const text =
-    shown.length === 0
-      ? kind === undefined
-        ? `The journal is empty (${settings.path}).`
-        : `No ${kind} lines in the journal.`
-      : formatColumns(
-          shown.map((line) => {
-            const {
-              v: _v,
-              ts,
-              kind: k,
-              flow: _f,
-              session: _s,
-              runtime,
-              harness: _h,
-              item,
-              ...fields
-            } = line;
-            return [ts, k, runtime ?? 'unknown', item ?? '-', JSON.stringify(fields)];
-          })
-        );
-  return {
-    json: { ok: true, path: settings.path, lines: shown, skipped },
-    text,
-  };
+/**
+ * Rotate the journal when it is at or over `maxBytes` (spec §2, "Rotation"):
+ *
+ * 1. Create the lock with `wx`. If it exists, another writer is rotating: skip.
+ *    A lock older than {@link STALE_LOCK_MS} is left from a writer that died:
+ *    delete it and skip; the next append takes the lock.
+ * 2. Holding the lock, check the size again. Under the cap means another writer
+ *    rotated between this writer's check and its lock: release and skip.
+ * 3. Drop `journal.<keep>.jsonl`, move each `journal.<n>.jsonl` to `<n+1>` from
+ *    the highest down, move `journal.jsonl` to `journal.1.jsonl`, release.
+ *
+ * A writer that appends while the rename happens lands its line in
+ * `journal.1.jsonl`, which {@link read} still reads. Throws on an IO error;
+ * {@link append} turns that into its one warning.
+ */
+function rotateIfFull(target: JournalTarget, beforeLock?: () => void): void {
+  const size = sizeOf(target.path);
+  if (size === null || size < target.maxBytes) return;
+  beforeLock?.();
+
+  const lock = path.join(path.dirname(target.path), LOCK_FILE);
+  try {
+    closeSync(openSync(lock, 'wx'));
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code !== 'EEXIST') throw error;
+    try {
+      if (Date.now() - statSync(lock).mtimeMs > STALE_LOCK_MS) unlinkSync(lock);
+    } catch {
+      // Another writer cleared or released it first; either way, skip.
+    }
+    return;
+  }
+  try {
+    const again = sizeOf(target.path);
+    if (again === null || again < target.maxBytes) return;
+    rmSync(rotatedPath(target.path, target.keep), { force: true });
+    for (let n = target.keep - 1; n >= 1; n -= 1) {
+      const from = rotatedPath(target.path, n);
+      if (existsSync(from)) renameSync(from, rotatedPath(target.path, n + 1));
+    }
+    renameSync(target.path, rotatedPath(target.path, 1));
+  } finally {
+    rmSync(lock, { force: true });
+  }
+}
+
+/**
+ * Keep the journal out of git, once: when the journal file does not exist yet,
+ * add `.dork/flow/` to `info/exclude` unless git already ignores it.
+ *
+ * @returns Why the exclude line could not be added, or `null`.
+ */
+function ignoreOnFirstWrite(target: JournalTarget): string | null {
+  if (existsSync(target.path)) return null;
+  const rel = path.relative(target.checkout, target.path);
+  if (rel.startsWith('..') || path.isAbsolute(rel)) return null;
+  try {
+    ensureIgnored(target.checkout, rel, `${RUN_FILES_DIR}/`);
+    return null;
+  } catch (error) {
+    return (error as Error).message;
+  }
+}
+
+/**
+ * Append one event to the journal. Never throws: a failure is one warning and
+ * the outcome `failed`, so a caller's exit code and output never depend on it.
+ *
+ * @param target - Where the journal is and how it is written.
+ * @param event - The event.
+ * @param options - The line's stamp, the warning sink and the test seam.
+ * @returns What happened.
+ */
+export function append(
+  target: JournalTarget,
+  event: JournalEvent,
+  options: AppendOptions = {}
+): AppendOutcome {
+  if (!target.enabled) return 'off';
+  const warn = options.warn ?? ((message) => process.stderr.write(`flow: warning: ${message}\n`));
+  // One warning per call at most: a failed append says so and nothing else; an
+  // append that worked but could not update info/exclude says that instead.
+  let excludeProblem: string | null = null;
+  try {
+    const line = `${JSON.stringify(buildLine(event, options))}\n`;
+    mkdirSync(path.dirname(target.path), { recursive: true });
+    excludeProblem = ignoreOnFirstWrite(target);
+    rotateIfFull(target, options.beforeLock);
+    appendFileSync(target.path, line, { flag: 'a' });
+  } catch (error) {
+    warn(`the journal at ${target.path} could not be written: ${(error as Error).message}`);
+    return 'failed';
+  }
+  if (excludeProblem !== null) warn(`could not keep the journal out of git: ${excludeProblem}`);
+  return 'written';
+}
+
+/** What {@link read} found. */
+export interface JournalRead {
+  /** Every line that parsed, oldest file first, in file order. */
+  lines: JournalLine[];
+  /** How many lines were not a journal line (bad JSON, another version). */
+  skipped: number;
+}
+
+/**
+ * Read the journal and its rotated files, oldest first. A line that is not JSON,
+ * or not a version-1 object with a `ts` and a `kind`, is skipped and counted.
+ * Lines are not checked against the full schema here, so reading needs no zod.
+ *
+ * @param target - The journal file and how many rotated files to read.
+ * @param since - Keep only lines at or after this time.
+ * @returns The lines and the skipped count.
+ */
+export function read(target: Pick<JournalTarget, 'path' | 'keep'>, since?: Date): JournalRead {
+  const files = [
+    ...Array.from({ length: target.keep }, (_, i) => rotatedPath(target.path, target.keep - i)),
+    target.path,
+  ];
+  const lines: JournalLine[] = [];
+  let skipped = 0;
+  const from = since?.getTime() ?? -Infinity;
+  for (const file of files) {
+    let text: string;
+    try {
+      text = readFileSync(file, 'utf8');
+    } catch {
+      continue;
+    }
+    for (const raw of text.split('\n')) {
+      if (raw.trim() === '') continue;
+      let value: unknown;
+      try {
+        value = JSON.parse(raw);
+      } catch {
+        skipped += 1;
+        continue;
+      }
+      if (
+        !isPlainObject(value) ||
+        value.v !== 1 ||
+        typeof value.ts !== 'string' ||
+        typeof value.kind !== 'string'
+      ) {
+        skipped += 1;
+        continue;
+      }
+      if (Date.parse(value.ts) < from) continue;
+      // Lines written before 0.21.0 carry no runtime or harness: read them as unknown.
+      if (typeof value.runtime !== 'string') value.runtime = 'unknown';
+      if (typeof value.harness !== 'string') value.harness = 'unknown';
+      lines.push(value as unknown as JournalLine);
+    }
+  }
+  return { lines, skipped };
+}
+
+/**
+ * The journal for a project folder: its main checkout's file and the project's
+ * `selfImprovement.journal` settings.
+ *
+ * @param projectDir - Any folder in the project.
+ * @param flowRoot - The plugin folder (`<flow-root>`).
+ * @returns The settings, or a plain reason flow must not act here.
+ */
+export function journalFor(
+  projectDir: string,
+  flowRoot: string
+): { settings: JournalSettings } | { refusal: string } {
+  const roots = findConfigRoots(projectDir, flowRoot);
+  const refusal = refusalFor(roots);
+  return refusal === null ? { settings: journalSettings(roots) } : { refusal };
 }

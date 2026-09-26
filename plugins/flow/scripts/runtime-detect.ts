@@ -13,9 +13,17 @@
  * | `codex`       | `CODEX_THREAD_ID`, `CODEX_SANDBOX` or `CODEX_SANDBOX_NETWORK_DISABLED` |
  * | `opencode`    | `OPENCODE=1` (with `OPENCODE_PID`)                              |
  *
- * `FLOW_RUNTIME` and `FLOW_HARNESS` override everything: a launcher that
- * knows what it started (DorkOS, a scheduler) says so, and flow never guesses
- * over it.
+ * `FLOW_RUNTIME` and `FLOW_HARNESS` let a launcher that knows what it started
+ * (DorkOS, a scheduler) say so. A launcher sets them in EACH child it starts:
+ * they are inherited, so an agent that starts another runtime passes its own
+ * override down. For that reason a marker of a MORE specific runtime (see
+ * below) outranks an override naming a less specific one: `FLOW_RUNTIME=
+ * claude-code` inherited into a `codex exec` still reads as `codex`.
+ *
+ * The harness is only as good as its evidence. `CMUX_PANEL_ID` is inherited
+ * too, so a server started in a cmux panel passes it to every session it
+ * hosts: a host such as DorkOS must set `FLOW_HARNESS` itself (`dorkos`); this
+ * module cannot otherwise tell it is DorkOS.
  *
  * A child inherits its parent's environment, so a Codex or OpenCode session
  * started from inside Claude Code carries both runtimes' markers. The most
@@ -60,7 +68,12 @@ export interface DetectedRuntime {
   markers: Array<(typeof RUNTIMES)[number]>;
   /** Set when `FLOW_RUNTIME` held a value that is not a runtime; it was ignored. */
   invalidOverride?: string;
+  /** Set when `FLOW_HARNESS` held a value that is not a safe name; it was ignored. */
+  invalidHarnessOverride?: string;
 }
+
+/** Most specific first: a runtime is more often launched FROM a later one. */
+const SPECIFICITY: readonly (typeof RUNTIMES)[number][] = ['codex', 'opencode', 'claude-code'];
 
 /** A harness name: short, and safe to print and to store. */
 const HARNESS_NAME = /^[a-z0-9][a-z0-9._-]{0,39}$/;
@@ -103,31 +116,42 @@ export function detectRuntime(
 ): DetectedRuntime {
   const markers = markersIn(env);
   const override = env.FLOW_RUNTIME?.trim();
+  const valid =
+    override !== undefined && (RUNTIMES as readonly string[]).includes(override)
+      ? (override as (typeof RUNTIMES)[number])
+      : undefined;
   let runtime: Runtime;
   let source: RuntimeSource;
   let invalidOverride: string | undefined;
 
-  if (
-    override !== undefined &&
-    override !== '' &&
-    (RUNTIMES as readonly string[]).includes(override)
-  ) {
-    runtime = override as Runtime;
-    source = 'override';
+  if (valid !== undefined) {
+    // An inherited override naming a LESS specific runtime than the child's own
+    // marker loses: FLOW_RUNTIME=claude-code passed down into `codex exec`.
+    const outranked =
+      markers.length > 0 && SPECIFICITY.indexOf(markers[0]) < SPECIFICITY.indexOf(valid);
+    runtime = outranked ? markers[0] : valid;
+    source = outranked ? 'env' : 'override';
   } else {
     if (override !== undefined && override !== '') invalidOverride = override.slice(0, 40);
-    runtime = markers[0] ?? 'unknown';
+    runtime = markers.length > 0 ? markers[0] : 'unknown';
     source = markers.length > 0 ? 'env' : 'none';
   }
 
   const harnessOverride = env.FLOW_HARNESS?.trim().toLowerCase();
+  let invalidHarnessOverride: string | undefined;
   let harness: string;
-  if (harnessOverride !== undefined && HARNESS_NAME.test(harnessOverride))
+  if (harnessOverride !== undefined && HARNESS_NAME.test(harnessOverride)) {
     harness = harnessOverride;
-  else if (has(env, 'CMUX_PANEL_ID')) harness = 'cmux';
-  else harness = runtime === 'unknown' ? 'shell' : runtime;
+  } else {
+    if (harnessOverride !== undefined && harnessOverride !== '') {
+      invalidHarnessOverride = harnessOverride.slice(0, 40);
+    }
+    if (has(env, 'CMUX_PANEL_ID')) harness = 'cmux';
+    else harness = runtime === 'unknown' ? 'shell' : runtime;
+  }
 
   const result: DetectedRuntime = { runtime, harness, source, markers };
   if (invalidOverride !== undefined) result.invalidOverride = invalidOverride;
+  if (invalidHarnessOverride !== undefined) result.invalidHarnessOverride = invalidHarnessOverride;
   return result;
 }

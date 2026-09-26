@@ -39,10 +39,13 @@ const common = {
   ts: z.iso.datetime(),
   /** The flow plugin version that wrote the line. */
   flow: z.string().min(1).max(40),
-  /** The agent runtime the writing process ran under (`detectRuntime`). */
-  runtime: z.enum([...RUNTIMES, 'unknown']),
-  /** What hosted the session: `cmux`, `dorkos`, the runtime's own CLI, or `shell`. */
-  harness: Name,
+  /**
+   * The agent runtime the writer ran under (`detectRuntime`). Optional because
+   * lines written before 0.21.0 lack it; `read` fills in `unknown`.
+   */
+  runtime: z.enum([...RUNTIMES, 'unknown']).optional(),
+  /** What hosted the session (see `detectRuntime`); optional for the same reason. */
+  harness: Name.optional(),
   /** The first 8 characters of the harness session id, when known. */
   session: z.string().min(1).max(8).optional(),
   /** The tracker identifier the event is about, when there is one. */

@@ -63,6 +63,19 @@ describe('detectRuntime', () => {
     });
   });
 
+  it("lets a child's own marker outrank an inherited override for a less specific runtime", () => {
+    // A Claude Code session launched with FLOW_RUNTIME=claude-code starts `codex exec`:
+    // the child inherits both, and is Codex.
+    expect(
+      detectRuntime({ FLOW_RUNTIME: 'claude-code', CLAUDECODE: '1', CODEX_THREAD_ID: 't' })
+    ).toMatchObject({ runtime: 'codex', source: 'env' });
+    // An override for the MORE specific runtime still wins over an inherited marker.
+    expect(detectRuntime({ FLOW_RUNTIME: 'codex', CLAUDECODE: '1' })).toMatchObject({
+      runtime: 'codex',
+      source: 'override',
+    });
+  });
+
   it('ignores an override that is not a runtime, and says so', () => {
     expect(detectRuntime({ FLOW_RUNTIME: 'gemini', CLAUDECODE: '1' })).toMatchObject({
       runtime: 'claude-code',
@@ -73,9 +86,10 @@ describe('detectRuntime', () => {
 
   it('names cmux as the harness inside a cmux panel, and refuses an unsafe harness name', () => {
     expect(detectRuntime({ CLAUDECODE: '1', CMUX_PANEL_ID: 'p' }).harness).toBe('cmux');
-    expect(detectRuntime({ CLAUDECODE: '1', FLOW_HARNESS: 'a b/../c' }).harness).toBe(
-      'claude-code'
-    );
+    expect(detectRuntime({ CLAUDECODE: '1', FLOW_HARNESS: 'a b/../c' })).toMatchObject({
+      harness: 'claude-code',
+      invalidHarnessOverride: 'a b/../c',
+    });
   });
 
   it('reads this process’s environment by default', () => {
