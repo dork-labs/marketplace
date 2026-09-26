@@ -7,7 +7,7 @@
 
 import { describe, expect, it } from 'vitest';
 
-import { detectRuntime } from '../scripts/runtime-detect.ts';
+import { childRuntimeEnv, detectRuntime } from '../scripts/runtime-detect.ts';
 
 describe('detectRuntime', () => {
   it.each([
@@ -63,17 +63,34 @@ describe('detectRuntime', () => {
     });
   });
 
-  it("lets a child's own marker outrank an inherited override for a less specific runtime", () => {
-    // A Claude Code session launched with FLOW_RUNTIME=claude-code starts `codex exec`:
-    // the child inherits both, and is Codex.
+  it('keeps FLOW_RUNTIME authoritative: Claude Code started by a Codex launcher is Claude Code', () => {
+    // The child inherits CODEX_THREAD_ID; the launcher's override names it.
     expect(
-      detectRuntime({ FLOW_RUNTIME: 'claude-code', CLAUDECODE: '1', CODEX_THREAD_ID: 't' })
-    ).toMatchObject({ runtime: 'codex', source: 'env' });
-    // An override for the MORE specific runtime still wins over an inherited marker.
-    expect(detectRuntime({ FLOW_RUNTIME: 'codex', CLAUDECODE: '1' })).toMatchObject({
+      detectRuntime({ CODEX_THREAD_ID: 't', CLAUDECODE: '1', FLOW_RUNTIME: 'claude-code' })
+    ).toMatchObject({ runtime: 'claude-code', source: 'override' });
+  });
+
+  it('childRuntimeEnv drops every marker and stale override, and names the child', () => {
+    const parent = {
+      PATH: '/bin',
+      CLAUDECODE: '1',
+      CLAUDE_CODE_ENTRYPOINT: 'cli',
+      CODEX_THREAD_ID: 't',
+      OPENCODE: '1',
+      FLOW_RUNTIME: 'claude-code',
+      FLOW_HARNESS: 'cmux',
+      UNSET: undefined,
+    };
+    const child = childRuntimeEnv(parent, 'codex', 'dorkos');
+    expect(child).toEqual({ PATH: '/bin', FLOW_RUNTIME: 'codex', FLOW_HARNESS: 'dorkos' });
+    expect(parent.CLAUDECODE).toBe('1');
+    // Once the child runtime adds its own marker, detection agrees with the launcher.
+    expect(detectRuntime({ ...child, CODEX_THREAD_ID: 'thr' })).toMatchObject({
       runtime: 'codex',
-      source: 'override',
+      harness: 'dorkos',
+      markers: ['codex'],
     });
+    expect(childRuntimeEnv(parent, 'opencode')).not.toHaveProperty('FLOW_HARNESS');
   });
 
   it('ignores an override that is not a runtime, and says so', () => {

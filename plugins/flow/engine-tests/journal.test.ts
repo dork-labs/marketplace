@@ -45,6 +45,7 @@ import {
   redact,
   rotatedPath,
   shouldSampleUsage,
+  usageSnapshotProblem,
   USAGE_SAMPLE_INTERVAL_MS,
   type AppendOptions,
   type JournalEvent,
@@ -682,6 +683,45 @@ describe('usage.snapshot lines', () => {
   });
 });
 
+describe('usage readings the journal refuses', () => {
+  const event = (windows: Record<string, unknown>, extra: Record<string, unknown> = {}) =>
+    ({
+      kind: 'usage.snapshot',
+      accountRuntime: 'codex',
+      account: 'default',
+      windows,
+      ...extra,
+    }) as unknown as JournalEvent;
+
+  it.each([
+    ['a NaN usedPct', { five_hour: { usedPct: Number.NaN, resetsAt: null } }, {}],
+    ['a usedPct above 100', { five_hour: { usedPct: 101, resetsAt: null } }, {}],
+    ['an unknown window', { daily: { usedPct: 1, resetsAt: null } }, {}],
+    ['an unreadable resetsAt', { five_hour: { usedPct: 1, resetsAt: 'soon' } }, {}],
+    ['a negative spend', { five_hour: { usedPct: 1, resetsAt: null } }, { spend: { costUsd: -1 } }],
+  ])('refuses %s and writes nothing', (_name, windows, extra) => {
+    expect(usageSnapshotProblem(event(windows, extra))).not.toBeNull();
+    const { options, warnings } = quiet();
+    expect(append(settings(), event(windows, extra), options)).toBe('failed');
+    expect(existsSync(base().path)).toBe(false);
+    expect(warnings).toHaveLength(1);
+  });
+
+  it('keeps a long model window name intact, so two windows never collapse into one', () => {
+    const windows = {
+      'model:claude-sonnet-4-5-20250929-thinking': { usedPct: 10, resetsAt: null },
+      'model:claude-sonnet-4-5-20250929-standard': { usedPct: 20, resetsAt: null },
+    };
+    const { options } = quiet({ runtime: 'claude-code', harness: 'dorkos' });
+    expect(append(settings(), event(windows), options)).toBe('written');
+    const [line] = read(settings()).lines;
+    expect(Object.keys((line as unknown as { windows: object }).windows)).toEqual(
+      Object.keys(windows)
+    );
+    expect(JournalLineSchema.safeParse(line).success).toBe(true);
+  });
+});
+
 describe('shouldSampleUsage', () => {
   const at = (minutes: number) => new Date(NOW.getTime() + minutes * 60_000);
   const w = (usedPct: number, resetsAt: string | null = '2026-09-26T15:00:00.000Z') => ({
@@ -713,6 +753,34 @@ describe('shouldSampleUsage', () => {
     ).toBe(true);
     expect(shouldSampleUsage(previous, { five_hour: w(40) }, at(1))).toBe(true);
     expect(shouldSampleUsage(previous, { ...previous.windows, seven_day_opus: w(1) }, at(1))).toBe(
+      true
+    );
+  });
+
+  it('treats the same reset written two ways, or a few seconds apart, as the same reset', () => {
+    // CLI and server may format differently; a writer may derive resetsAt from now.
+    expect(
+      shouldSampleUsage(
+        previous,
+        { five_hour: w(41, '2026-09-26T15:00:00Z'), seven_day: w(70) },
+        at(1)
+      )
+    ).toBe(false);
+    expect(
+      shouldSampleUsage(
+        previous,
+        { five_hour: w(41, '2026-09-26T15:00:01.500Z'), seven_day: w(70) },
+        at(1)
+      )
+    ).toBe(false);
+    expect(
+      shouldSampleUsage(
+        previous,
+        { five_hour: w(41, '2026-09-26T15:02:00.000Z'), seven_day: w(70) },
+        at(1)
+      )
+    ).toBe(true);
+    expect(shouldSampleUsage(previous, { five_hour: w(41, 'soon'), seven_day: w(70) }, at(1))).toBe(
       true
     );
   });

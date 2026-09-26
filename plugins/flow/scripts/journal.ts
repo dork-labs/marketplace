@@ -135,6 +135,63 @@ export interface UsageWindowReading {
   resetsAt: string | null;
 }
 
+/**
+ * A usage window name (fleet decision R2): `five_hour`, `seven_day`,
+ * `seven_day_opus`, `seven_day_sonnet`, `model:<slug>` or `window:<minutes>`.
+ */
+export const USAGE_WINDOW_NAME =
+  /^(five_hour|seven_day|seven_day_opus|seven_day_sonnet|model:[a-z0-9._-]{1,40}|window:\d{1,6})$/;
+
+/** The most windows one `usage.snapshot` line may carry. */
+export const USAGE_WINDOWS_MAX = 12;
+
+/** Whether a value is an ISO-8601 time `Date.parse` can read, or `null`. */
+function isResetTime(value: unknown): boolean {
+  return value === null || (typeof value === 'string' && !Number.isNaN(Date.parse(value)));
+}
+
+/**
+ * Why a `usage.snapshot` event cannot be written, or `null` when it can. The
+ * journal writes lines without zod, so this is the snapshot's check: a finite
+ * `usedPct` from 0 to 100, a known window name, at most
+ * {@link USAGE_WINDOWS_MAX} windows, a readable `resetsAt`, and a finite,
+ * non-negative spend. {@link append} refuses an event that fails it.
+ *
+ * @param event - The event.
+ * @returns The first problem, or `null`.
+ */
+export function usageSnapshotProblem(event: JournalEvent): string | null {
+  if (event.kind !== 'usage.snapshot') return null;
+  const windows = event.windows as Record<string, unknown>;
+  if (!isPlainObject(windows)) return 'windows must be an object';
+  const names = Object.keys(windows);
+  if (names.length > USAGE_WINDOWS_MAX) return `at most ${USAGE_WINDOWS_MAX} windows`;
+  for (const name of names) {
+    if (!USAGE_WINDOW_NAME.test(name)) return `unknown window "${name.slice(0, 40)}"`;
+    const reading = windows[name];
+    if (!isPlainObject(reading)) return `window ${name} is not a reading`;
+    const pct = reading.usedPct;
+    if (typeof pct !== 'number' || !Number.isFinite(pct) || pct < 0 || pct > 100) {
+      return `window ${name} usedPct must be a number from 0 to 100`;
+    }
+    if (!isResetTime(reading.resetsAt)) return `window ${name} resetsAt must be a time or null`;
+  }
+  const spend = event.spend as Record<string, unknown> | undefined;
+  if (spend !== undefined) {
+    for (const key of ['costUsd', 'limitUsd'] as const) {
+      const value = spend[key];
+      if (value === undefined && key === 'limitUsd') continue;
+      if (typeof value !== 'number' || !Number.isFinite(value) || value < 0) {
+        return `spend.${key} must be a number of 0 or more`;
+      }
+    }
+  }
+  return null;
+}
+
+/** Two reset times closer than this count as the same reset (formatting, jitter). */
+export const USAGE_RESET_TOLERANCE_MS = 60_000;
+
 /** A `usage.snapshot` sample needs this long since the last one of the same account... */
 export const USAGE_SAMPLE_INTERVAL_MS = 30 * 60 * 1000;
 /** ...unless a window moved at least this many points, or reset, since then. */
@@ -147,7 +204,14 @@ export const USAGE_SAMPLE_DELTA_PCT = 5;
  * this account, when its time cannot be read or lies in the future (clock
  * skew), when {@link USAGE_SAMPLE_INTERVAL_MS} has passed, when any window moved
  * {@link USAGE_SAMPLE_DELTA_PCT} points or more, or when a window appeared,
- * disappeared or reset (its `resetsAt` changed).
+ * disappeared or reset (its `resetsAt` moved by more than
+ * {@link USAGE_RESET_TOLERANCE_MS}, compared as times so `15:00:00Z` and
+ * `15:00:00.000Z` are the same reset).
+ *
+ * `previous` is the account's LAST snapshot line in file order, never the one
+ * with the latest `ts`: a previous time in the future (clock skew) samples, and
+ * choosing by latest `ts` would keep sampling every reading until the clock
+ * caught up.
  *
  * @param previous - The account's last snapshot line (`ts` and `windows`), if any.
  * @param windows - The new readings by window name.
@@ -167,10 +231,19 @@ export function shouldSampleUsage(
     const before = previous.windows[name];
     const after = windows[name];
     if (before === undefined || after === undefined) return true;
-    if (before.resetsAt !== after.resetsAt) return true;
+    if (resetMoved(before.resetsAt, after.resetsAt)) return true;
     if (!(Math.abs(after.usedPct - before.usedPct) < USAGE_SAMPLE_DELTA_PCT)) return true;
   }
   return false;
+}
+
+/** Whether two reset times differ by more than the tolerance (or one is unreadable). */
+function resetMoved(before: string | null, after: string | null): boolean {
+  if (before === null || after === null) return before !== after;
+  const a = Date.parse(before);
+  const b = Date.parse(after);
+  if (Number.isNaN(a) || Number.isNaN(b)) return true;
+  return Math.abs(a - b) > USAGE_RESET_TOLERANCE_MS;
 }
 
 /** Where a journal is and how it is written: {@link JournalSettings}, or a test's own. */
@@ -277,6 +350,21 @@ const FIELD_MAX: Readonly<Record<string, number>> = {
 };
 
 /**
+ * Redact and cap an object key. A usage window name that is already valid keeps
+ * its shape (a long model slug such as `model:claude-sonnet-4-5-20250929-thinking`
+ * would otherwise read as a key and be redacted, and two windows would collapse
+ * into one); token and address patterns still apply.
+ */
+function cleanKey(field: string, key: string): string {
+  if (field === 'windows' && USAGE_WINDOW_NAME.test(key)) {
+    let out = key;
+    for (const pattern of TOKEN_PATTERNS) out = out.replace(pattern, '[redacted]');
+    return out.replace(EMAIL, '[email]');
+  }
+  return cap(redact(key), NAME_MAX);
+}
+
+/**
  * Redact and cap one field value: every string, every string in a list, and
  * every key and string inside an object (a usage snapshot's windows).
  */
@@ -289,7 +377,7 @@ function clean(field: string, value: unknown): unknown {
   if (Array.isArray(value)) return value.map((entry) => clean(field, entry));
   if (isPlainObject(value)) {
     return Object.fromEntries(
-      Object.entries(value).map(([key, inner]) => [cap(redact(key), NAME_MAX), clean(key, inner)])
+      Object.entries(value).map(([key, inner]) => [cleanKey(field, key), clean(key, inner)])
     );
   }
   return value;
@@ -427,6 +515,11 @@ export function append(
   // One warning per call at most: a failed append says so and nothing else; an
   // append that worked but could not update info/exclude says that instead.
   let excludeProblem: string | null = null;
+  const invalid = usageSnapshotProblem(event);
+  if (invalid !== null) {
+    warn(`a usage reading was not written to the journal: ${invalid}`);
+    return 'failed';
+  }
   try {
     const line = `${JSON.stringify(buildLine(event, options))}\n`;
     mkdirSync(path.dirname(target.path), { recursive: true });

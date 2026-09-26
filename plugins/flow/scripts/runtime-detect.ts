@@ -14,11 +14,12 @@
  * | `opencode`    | `OPENCODE=1` (with `OPENCODE_PID`)                              |
  *
  * `FLOW_RUNTIME` and `FLOW_HARNESS` let a launcher that knows what it started
- * (DorkOS, a scheduler) say so. A launcher sets them in EACH child it starts:
- * they are inherited, so an agent that starts another runtime passes its own
- * override down. For that reason a marker of a MORE specific runtime (see
- * below) outranks an override naming a less specific one: `FLOW_RUNTIME=
- * claude-code` inherited into a `codex exec` still reads as `codex`.
+ * (DorkOS, a scheduler, flow's own launchers) say so, and they win over every
+ * marker. Both are inherited, and so are the markers, so a launcher builds each
+ * child's environment with {@link childRuntimeEnv}: it sets the child's runtime
+ * and removes every other runtime's marker and any stale override. A runtime
+ * started by hand from inside another one, with no launcher, may be labeled as
+ * its parent: that is the one case the environment cannot tell apart.
  *
  * The harness is only as good as its evidence. `CMUX_PANEL_ID` is inherited
  * too, so a server started in a cmux panel passes it to every session it
@@ -72,9 +73,6 @@ export interface DetectedRuntime {
   invalidHarnessOverride?: string;
 }
 
-/** Most specific first: a runtime is more often launched FROM a later one. */
-const SPECIFICITY: readonly (typeof RUNTIMES)[number][] = ['codex', 'opencode', 'claude-code'];
-
 /** A harness name: short, and safe to print and to store. */
 const HARNESS_NAME = /^[a-z0-9][a-z0-9._-]{0,39}$/;
 
@@ -125,12 +123,8 @@ export function detectRuntime(
   let invalidOverride: string | undefined;
 
   if (valid !== undefined) {
-    // An inherited override naming a LESS specific runtime than the child's own
-    // marker loses: FLOW_RUNTIME=claude-code passed down into `codex exec`.
-    const outranked =
-      markers.length > 0 && SPECIFICITY.indexOf(markers[0]) < SPECIFICITY.indexOf(valid);
-    runtime = outranked ? markers[0] : valid;
-    source = outranked ? 'env' : 'override';
+    runtime = valid;
+    source = 'override';
   } else {
     if (override !== undefined && override !== '') invalidOverride = override.slice(0, 40);
     runtime = markers.length > 0 ? markers[0] : 'unknown';
@@ -154,4 +148,43 @@ export function detectRuntime(
   if (invalidOverride !== undefined) result.invalidOverride = invalidOverride;
   if (invalidHarnessOverride !== undefined) result.invalidHarnessOverride = invalidHarnessOverride;
   return result;
+}
+
+/** Every environment variable a runtime marker check reads. */
+const MARKER_VARIABLES: readonly string[] = [
+  'CLAUDECODE',
+  'CLAUDE_CODE_ENTRYPOINT',
+  'CODEX_THREAD_ID',
+  'CODEX_SANDBOX',
+  'CODEX_SANDBOX_NETWORK_DISABLED',
+  'OPENCODE',
+  'OPENCODE_PID',
+];
+
+/**
+ * The environment a launcher hands a child runtime it starts: the parent's,
+ * without any runtime marker or stale override, plus `FLOW_RUNTIME` (and
+ * `FLOW_HARNESS` when given) naming the child. The child then sets its own
+ * marker, and {@link detectRuntime} agrees with the launcher whichever
+ * runtime started it.
+ *
+ * @param env - The parent environment.
+ * @param runtime - The runtime being started.
+ * @param harness - What hosts it (`dorkos`, `cmux`, ...), when the launcher knows.
+ * @returns A new environment object; `env` is not changed.
+ */
+export function childRuntimeEnv(
+  env: Readonly<Record<string, string | undefined>>,
+  runtime: (typeof RUNTIMES)[number],
+  harness?: string
+): Record<string, string> {
+  const next: Record<string, string> = {};
+  for (const [key, value] of Object.entries(env)) {
+    if (value === undefined || MARKER_VARIABLES.includes(key)) continue;
+    if (key === 'FLOW_RUNTIME' || key === 'FLOW_HARNESS') continue;
+    next[key] = value;
+  }
+  next.FLOW_RUNTIME = runtime;
+  if (harness !== undefined) next.FLOW_HARNESS = harness;
+  return next;
 }

@@ -17,6 +17,8 @@ import { z } from 'zod';
 
 import { RUNTIMES } from './runtime-detect.ts';
 import {
+  USAGE_WINDOW_NAME,
+  USAGE_WINDOWS_MAX,
   ERROR_CLASS_MAX,
   ITEM_MAX,
   JOURNAL_KINDS,
@@ -120,7 +122,7 @@ export const JournalLineSchema = z.discriminatedUnion('kind', [
         z
           .string()
           .regex(
-            /^(five_hour|seven_day|seven_day_opus|seven_day_sonnet|model:[a-z0-9._-]{1,40}|window:\d{1,6})$/,
+            USAGE_WINDOW_NAME,
             'a window is five_hour, seven_day, seven_day_opus, seven_day_sonnet, model:<slug> or window:<minutes>'
           ),
         z
@@ -130,7 +132,10 @@ export const JournalLineSchema = z.discriminatedUnion('kind', [
           })
           .strict()
       )
-      .refine((windows) => Object.keys(windows).length <= 12, 'at most 12 windows'),
+      .refine(
+        (windows) => Object.keys(windows).length <= USAGE_WINDOWS_MAX,
+        `at most ${USAGE_WINDOWS_MAX} windows`
+      ),
     /** The plan the runtime reports (for example max, pro, plus), when it reports one. */
     plan: Name.optional(),
     /** Metered spend in the current period, for accounts billed per use. */
