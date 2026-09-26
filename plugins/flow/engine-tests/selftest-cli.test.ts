@@ -54,24 +54,31 @@ async function run(argv: string[], env: NodeJS.ProcessEnv = { VITEST: 'true' }) 
   return { code, stdout, stderr };
 }
 
-describe('flow selftest', () => {
-  it('runs fast then scenarios by default, and passes on the shipped plugin', async () => {
-    const { code, stdout } = await run(['--json']);
-    const report = JSON.parse(stdout);
-    expect(report).toMatchObject({
-      v: 1,
-      ok: true,
-      tiers: ['fast', 'scenarios'],
-      flowVersion: expect.any(String),
-    });
-    expect(report.checks.filter((c: Check) => c.status === 'fail')).toEqual([]);
-    const engine = report.checks.find((c: Check) => c.id === 'engine-tests');
-    expect(engine).toMatchObject({ status: 'skip', detail: 'already inside a test run' });
-    expect(report.checks.filter((c: Check) => c.tier === 'scenarios').length).toBeGreaterThan(0);
-    expect(code).toBe(0);
-  });
+/** The scenarios tier runs real git and the real verbs; 5 s is too tight on a cold, loaded run. */
+const SCENARIOS_TIMEOUT = 30_000;
 
-  it('runs one tier when --tier names it', async () => {
+describe('flow selftest', () => {
+  it(
+    'runs fast then scenarios by default, and passes on the shipped plugin',
+    { timeout: SCENARIOS_TIMEOUT },
+    async () => {
+      const { code, stdout } = await run(['--json']);
+      const report = JSON.parse(stdout);
+      expect(report).toMatchObject({
+        v: 1,
+        ok: true,
+        tiers: ['fast', 'scenarios'],
+        flowVersion: expect.any(String),
+      });
+      expect(report.checks.filter((c: Check) => c.status === 'fail')).toEqual([]);
+      const engine = report.checks.find((c: Check) => c.id === 'engine-tests');
+      expect(engine).toMatchObject({ status: 'skip', detail: 'already inside a test run' });
+      expect(report.checks.filter((c: Check) => c.tier === 'scenarios').length).toBeGreaterThan(0);
+      expect(code).toBe(0);
+    }
+  );
+
+  it('runs one tier when --tier names it', { timeout: SCENARIOS_TIMEOUT }, async () => {
     const fast = JSON.parse((await run(['--tier', 'fast', '--json', '--no-save'])).stdout);
     expect(fast.tiers).toEqual(['fast']);
     expect(fast.checks.every((c: Check) => c.tier === 'fast')).toBe(true);
@@ -171,7 +178,7 @@ describe('the selftest journal line', () => {
   });
 });
 
-describe('the flow entry point, as a process', () => {
+describe('the flow entry point, as a process', { timeout: SCENARIOS_TIMEOUT }, () => {
   // Purpose: /flow:self-test runs `flow.ts selftest` as a script. The scenarios
   // import flow.ts, and a top-level await of main() there deadlocks that import
   // (Node exits 13 with no output), which no in-process test can see.

@@ -89,6 +89,9 @@ describe('planFiling', () => {
       labels: ['type/task', 'origin/from-agent', 'flow/self-test'],
       project: 'Flow health',
     });
+    const typed = planFiling([check], [], { ...META, labels: ['type/bug', 'flow/self-test'] })[0];
+    // type/* is an exclusive group: a configured type never joins type/task.
+    expect(typed).toMatchObject({ labels: ['type/task', 'origin/from-agent', 'flow/self-test'] });
     const none = planFiling([check], [], { ...META, project: null })[0];
     expect(none).toMatchObject({ labels: ['type/task', 'origin/from-agent'] });
     expect(none).not.toHaveProperty('project');
@@ -222,7 +225,10 @@ describe('fileFailures against the fake tracker', () => {
   });
 });
 
-describe('selftest --file, end to end', () => {
+/** The scenarios tier runs real git and the real verbs; 5 s is too tight on a cold, loaded run. */
+const SCENARIOS_TIMEOUT = 30_000;
+
+describe('selftest --file, end to end', { timeout: SCENARIOS_TIMEOUT }, () => {
   let project: string;
 
   beforeEach(() => {
@@ -315,14 +321,23 @@ describe('selftest --file, end to end', () => {
   });
 });
 
-describe('the flow selftest verb', () => {
+describe('the flow selftest verb', { timeout: SCENARIOS_TIMEOUT }, () => {
+  let project: string;
+
+  beforeEach(() => {
+    project = realpathSync(mkdtempSync(path.join(os.tmpdir(), 'flow-selftest-verb-')));
+    execFileSync('git', ['init', '-q'], { cwd: project });
+  });
+
+  afterEach(() => rmSync(project, { recursive: true, force: true }));
+
   /** Run `flow <argv>` with recording streams. */
   async function flow(argv: string[]) {
     let out = '';
     const sink = { write: (t: string) => ((out += t), true) };
     const code = await flowMain(argv, {
       env: { VITEST: 'true' },
-      cwd: os.tmpdir(),
+      cwd: project,
       now: () => NOW,
       stdout: sink,
       stderr: { write: () => true },

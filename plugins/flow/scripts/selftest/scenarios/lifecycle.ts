@@ -70,7 +70,7 @@ export interface Recorded {
  * `journal.ts`, over `detectRuntime`), so its lines say `codex` or
  * `claude-code`. The provenance line and the run record are not yet: only
  * Claude Code's marker and session variable are read there, so a Codex run
- * signs with no harness and records its session as unknown.
+ * signs with no harness and records its session as unknown (DOR-2404).
  */
 export const RECORDED: Readonly<Record<RuntimeShape, Recorded>> = {
   'claude-code': {

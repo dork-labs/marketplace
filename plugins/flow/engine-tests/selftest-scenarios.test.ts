@@ -31,7 +31,10 @@ async function runOne(id: string, makeTracker?: ReturnType<typeof patched>) {
   return check;
 }
 
-describe('the scenarios tier', () => {
+/** The scenarios tier runs real git and the real verbs; 5 s is too tight on a cold, loaded run. */
+const SCENARIOS_TIMEOUT = 30_000;
+
+describe('the scenarios tier', { timeout: SCENARIOS_TIMEOUT }, () => {
   it('runs every scenario as a passing check', async () => {
     // Purpose: the tier is the CI gate for the verbs' behavior against a
     // tracker; every scenario must pass on the shipped code. (It takes about

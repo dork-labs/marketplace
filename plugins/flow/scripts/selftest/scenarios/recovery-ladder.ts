@@ -15,7 +15,8 @@
  * does not read the setting, so every exhausted run escalates with
  * `agent/blocked` (what `block` means), and `escalate` and `abandon` have no
  * documented behavior to test against yet. The scenario sets `block`, the
- * default, and pins that; the other two are a follow-up to define and build.
+ * default, and pins that; the other two are a follow-up to define and build
+ * (DOR-2403).
  *
  * @module @dorkos/flow/selftest/scenarios/recovery-ladder
  */

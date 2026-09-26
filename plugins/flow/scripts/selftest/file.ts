@@ -40,13 +40,16 @@ export const FILED_LABELS: readonly string[] = ['type/task', 'origin/from-agent'
 
 /**
  * A filed item's labels: {@link FILED_LABELS} plus the configured extras, each
- * once, and never an `agent/*` label (a person triages the item first).
+ * once. An extra in the `agent/*` family is dropped (a person triages the item
+ * first), and so is one in `type/*`, an exclusive group this item already
+ * fills with `type/task`.
  *
  * @param extra - `selfImprovement.retro.labels`.
  * @returns The labels.
  */
 export function filedLabels(extra: readonly string[]): string[] {
-  return [...new Set([...FILED_LABELS, ...extra])].filter((label) => !label.startsWith('agent/'));
+  const kept = extra.filter((label) => !label.startsWith('agent/') && !label.startsWith('type/'));
+  return [...new Set([...FILED_LABELS, ...kept])];
 }
 
 /**
