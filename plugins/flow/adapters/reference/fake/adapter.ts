@@ -1,5 +1,5 @@
 /**
- * The fake tracker's code adapter (adapter contract 2.1.0): the module the flow
+ * The fake tracker's code adapter (adapter contract 2.2.0): the module the flow
  * CLI's loader imports when a project's tracker is `fake`.
  *
  * The tracker lives in the JSON file {@link FAKE_BACKLOG_ENV} names, and every

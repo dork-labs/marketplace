@@ -18,9 +18,11 @@
  *
  * A close the tracker cannot date counts as recent, so it is never overridden.
  *
- * The code adapter contract has no verb that creates an item, so nothing is
- * created: the items that would be filed are listed in the report with
- * "filing needs a create capability", and the run exits 1 (it has failures).
+ * A new item is created through the adapter's `createItem` (contract 2.2.0),
+ * only after this dedupe, with the signed body. An adapter without that
+ * capability creates nothing: the items that would be filed are listed with
+ * "filing needs a create capability". Either way the run exits 1: it has
+ * failures.
  *
  * @module @dorkos/flow/selftest/file
  */
@@ -38,18 +40,33 @@ export const CREATE_MISSING =
 /** The labels every filed item carries, before `selfImprovement.retro.labels`. */
 export const FILED_LABELS: readonly string[] = ['type/task', 'origin/from-agent'];
 
+/** The group of a namespaced label (`origin` for `origin/human`), or `null` for a bare one. */
+function groupOf(label: string): string | null {
+  const slash = label.indexOf('/');
+  return slash < 0 ? null : label.slice(0, slash);
+}
+
 /**
  * A filed item's labels: {@link FILED_LABELS} plus the configured extras, each
- * once. An extra in the `agent/*` family is dropped (a person triages the item
- * first), and so is one in `type/*`, an exclusive group this item already
- * fills with `type/task`.
+ * once and one per group (a tracker applies one label per group). An extra in
+ * the `agent/*` family is dropped (a person triages the item first); so is an
+ * extra in a group already filled: by `type/task` and `origin/from-agent`, or
+ * by an earlier extra.
  *
  * @param extra - `selfImprovement.retro.labels`.
  * @returns The labels.
  */
 export function filedLabels(extra: readonly string[]): string[] {
-  const kept = extra.filter((label) => !label.startsWith('agent/') && !label.startsWith('type/'));
-  return [...new Set([...FILED_LABELS, ...kept])];
+  const labels = [...FILED_LABELS];
+  const groups = new Set(labels.map(groupOf));
+  for (const label of extra) {
+    const group = groupOf(label);
+    if (group === 'agent' || labels.includes(label)) continue;
+    if (group !== null && groups.has(group)) continue;
+    labels.push(label);
+    groups.add(group);
+  }
+  return labels;
 }
 
 /**
@@ -92,6 +109,13 @@ export type Disposition =
   | {
       kind: 'file';
       checkId: string;
+      /**
+       * The create's idempotency key: the fingerprint plus every item already
+       * filed for it (or `none`). Two runs that see the same tracker send the
+       * same key and make one item; once an earlier item exists, even closed
+       * long ago, the key is new, so a returning failure is filed again.
+       */
+      key: string;
       title: string;
       body: string;
       labels: string[];
@@ -129,11 +153,14 @@ function bodyFor(check: Check, meta: FilingMeta, regressionOf?: string): string 
 function newItem(
   check: Check,
   meta: FilingMeta,
+  matches: readonly Candidate[],
   regressionOf?: string
 ): Extract<Disposition, { kind: 'file' }> {
+  const earlier = matches.map((m) => m.identifier).sort();
   return {
     kind: 'file',
     checkId: check.id,
+    key: `flow-selftest:${check.fingerprint}:${earlier.length === 0 ? 'none' : earlier.join(',')}`,
     title: titleFor(check),
     body: bodyFor(check, meta, regressionOf),
     labels: filedLabels(meta.labels ?? []),
@@ -199,9 +226,12 @@ export function planFiling(
           reason: 'completed after this run started',
         };
       }
-      return { ...newItem(check, meta, completed.identifier), regressionOf: completed.identifier };
+      return {
+        ...newItem(check, meta, matches, completed.identifier),
+        regressionOf: completed.identifier,
+      };
     }
-    return newItem(check, meta);
+    return newItem(check, meta, matches);
   });
 }
 
@@ -213,7 +243,9 @@ export interface FilingResult {
   declined: { checkId: string; identifier: string }[];
   /** Completed matches not filed again, and why. */
   notRefiled: { checkId: string; identifier: string; reason: string }[];
-  /** Items that would be filed, were there a create verb. */
+  /** Items created, with the identifier and link the tracker gave them. */
+  filed: { checkId: string; identifier: string; url: string; regressionOf?: string }[];
+  /** Items that would be filed, when the adapter cannot create. */
   wouldFile: {
     checkId: string;
     title: string;
@@ -222,7 +254,7 @@ export interface FilingResult {
     project?: string;
     regressionOf?: string;
   }[];
-  /** {@link CREATE_MISSING} when anything would be filed. */
+  /** {@link CREATE_MISSING} when anything would be filed but the adapter cannot create. */
   message?: string;
   /** Why filing could not run at all (config, capability, tracker). */
   error?: string;
@@ -240,7 +272,10 @@ export interface FilingDeps {
 
 /**
  * Match each failing check against the tracker and act: comment on open
- * matches, list everything else. Never creates an item.
+ * matches, skip declined and not-newer ones, and create the rest through
+ * `createItem` when the adapter has it (listing them otherwise). Dedupe always
+ * runs first, and a create that fails stops the run with the error, so a retry
+ * finds whatever did land by its fingerprint.
  *
  * @param failing - The failing checks.
  * @param meta - The evidence date, now, and the flow version.
@@ -252,7 +287,13 @@ export async function fileFailures(
   meta: FilingMeta,
   deps: FilingDeps
 ): Promise<FilingResult> {
-  const result: FilingResult = { commented: [], declined: [], notRefiled: [], wouldFile: [] };
+  const result: FilingResult = {
+    commented: [],
+    declined: [],
+    notRefiled: [],
+    filed: [],
+    wouldFile: [],
+  };
   if (failing.length === 0) return result;
   const { adapter } = deps;
   const snapshot = await adapter.getBacklogSnapshot({ includeClosed: true });
@@ -274,7 +315,21 @@ export async function fileFailures(
     });
   }
 
-  for (const plan of planFiling(failing, candidates, meta)) {
+  try {
+    await act(planFiling(failing, candidates, meta), deps, result);
+  } catch (error) {
+    // Keep what was already done: those comments and items exist now, and the
+    // next run finds them by their fingerprints.
+    result.error = (error as Error).message;
+  }
+  if (result.wouldFile.length > 0) result.message = CREATE_MISSING;
+  return result;
+}
+
+/** Carry out each plan in order, recording every step in `result` as it lands. */
+async function act(plans: Disposition[], deps: FilingDeps, result: FilingResult): Promise<void> {
+  const { adapter } = deps;
+  for (const plan of plans) {
     if (plan.kind === 'comment') {
       const item = await adapter.getItem(plan.identifier, { comments: 10 });
       const signed = deps.sign(plan.body);
@@ -292,13 +347,27 @@ export async function fileFailures(
     } else if (plan.kind === 'not-refiled') {
       const { checkId, identifier, reason } = plan;
       result.notRefiled.push({ checkId, identifier, reason });
+    } else if (adapter.capabilities.includes('createItem') && adapter.createItem !== undefined) {
+      const created = await adapter.createItem({
+        title: plan.title,
+        description: deps.sign(plan.body),
+        labels: plan.labels,
+        ...(plan.project !== undefined ? { project: plan.project } : {}),
+        // One item per failure per state of the tracker: a retry, or a second
+        // run at the same time, returns the item the first one made.
+        key: plan.key,
+      });
+      result.filed.push({
+        checkId: plan.checkId,
+        identifier: created.identifier,
+        url: created.url,
+        ...(plan.regressionOf !== undefined ? { regressionOf: plan.regressionOf } : {}),
+      });
     } else {
-      const { kind: _kind, ...item } = plan;
+      const { kind: _kind, key: _key, ...item } = plan;
       result.wouldFile.push(item);
     }
   }
-  if (result.wouldFile.length > 0) result.message = CREATE_MISSING;
-  return result;
 }
 
 /**
@@ -315,6 +384,11 @@ export function renderFiling(filing: FilingResult): string[] {
   }
   for (const d of filing.declined)
     lines.push(`  declined in ${d.identifier}, not filed again: ${d.checkId}`);
+  for (const f of filing.filed) {
+    lines.push(
+      `  filed ${f.identifier}: ${f.checkId}${f.regressionOf ? ` (regressed after ${f.regressionOf})` : ''} ${f.url}`
+    );
+  }
   for (const n of filing.notRefiled)
     lines.push(`  not filed again (${n.identifier} ${n.reason}): ${n.checkId}`);
   if (filing.message !== undefined) lines.push(`  ${filing.message}:`);
