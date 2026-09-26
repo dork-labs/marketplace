@@ -107,7 +107,7 @@ export async function run(ctx: VerbContext): Promise<VerbResult> {
   const [action = 'list', id] = ctx.args.positionals;
   const home = ctx.env.HOME || os.homedir();
   const dorkHome = resolveDorkHome(ctx.env, home);
-  const environment: AccountEnvironment = { env: ctx.env, home };
+  const environment: AccountEnvironment = { home };
   switch (action) {
     case 'list':
       if (id !== undefined)

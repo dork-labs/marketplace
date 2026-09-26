@@ -450,12 +450,14 @@ export function parseAccountKey(
 export const DEFAULT_ACCOUNT_LABEL = "Main (this computer's sign-in)";
 
 /**
- * What the default account is resolved from (spec §1.1a rev 6d). Pure inputs,
- * so a conformance runner resolves it without the filesystem.
+ * What the default account is resolved from besides `config.json` (spec §1.1a
+ * rev 6d). Pure inputs, so a conformance runner resolves it without the
+ * filesystem. There is deliberately no environment here: which account
+ * `default` names is machine-wide, and a session's own `CLAUDE_CONFIG_DIR` or
+ * `CODEX_HOME` must never change it (use {@link ambientAccountPath} for "which
+ * folder is this process running in").
  */
 export interface AccountEnvironment {
-  /** The environment (`CLAUDE_CONFIG_DIR`, `CODEX_HOME`). */
-  env: Readonly<Record<string, string | undefined>>;
   /** The OS home folder, for `~` and the built-in default folders. */
   home: string;
   /**
@@ -502,9 +504,13 @@ function expandedPath(dir: string, home: string): string {
 }
 
 /**
- * The folder a runtime runs in when nothing chooses one: `CLAUDE_CONFIG_DIR`,
- * else `<home>/.claude` for Claude Code; `CODEX_HOME`, else `<home>/.codex` for
- * Codex (an empty variable counts as unset). OpenCode has none (`null`).
+ * The folder THIS process runs in: `CLAUDE_CONFIG_DIR`, else `<home>/.claude`
+ * for Claude Code; `CODEX_HOME`, else `<home>/.codex` for Codex (an empty
+ * variable counts as unset). OpenCode has none (`null`).
+ *
+ * This is session attribution (which account a status line or a launcher
+ * runs as), never identity: {@link defaultAccountPath} decides what `default`
+ * names, machine-wide.
  *
  * @param runtime - The runtime.
  * @param env - The environment.
@@ -525,26 +531,30 @@ export function ambientAccountPath(
 }
 
 /**
- * The folder `<runtime>:default` names (spec §1.1a rev 6d):
+ * The folder `<runtime>:default` names, machine-wide (spec §1.1a rev 6d):
  *
  * - Claude Code: DorkOS `runtimes.claudeCode.defaultAccount` when it is a path
  *   (`activeAccount`, its name before DorkOS 0.65.0, when `defaultAccount` is
- *   null or absent), else {@link ambientAccountPath}.
- * - Codex: {@link ambientAccountPath}.
+ *   null or absent), else `<home>/.claude`.
+ * - Codex: `<home>/.codex`.
  * - OpenCode: `null` (its ambient default has no folder).
+ *
+ * The process environment is never read: a session running with
+ * `CLAUDE_CONFIG_DIR=~/.claude3` must not make `default` mean claude3, or it
+ * would read, write and prune another account's ledger and policy.
  *
  * A `defaultAccount` that is not an absolute or `~` path is ignored
  * (`default-account-invalid`).
  *
  * @param config - The parsed `config.json`, or `null`/`undefined`.
  * @param runtime - The runtime.
- * @param environment - The environment and home.
+ * @param environment - The OS home folder.
  * @returns The folder (not yet resolved) or `null`, and warnings.
  */
 export function defaultAccountPath(
   config: unknown,
   runtime: RuntimeSlug,
-  environment: Pick<AccountEnvironment, 'env' | 'home'>
+  environment: Pick<AccountEnvironment, 'home'>
 ): { path: string | null; warnings: FleetWarning[] } {
   const warnings: FleetWarning[] = [];
   if (runtime === 'claude-code') {
@@ -565,11 +575,15 @@ export function defaultAccountPath(
       }
       warnings.push({
         code: 'default-account-invalid',
-        message: `runtimes.claudeCode.defaultAccount in config.json is not an absolute path; used this environment's sign-in instead.`,
+        message: `runtimes.claudeCode.defaultAccount in config.json is not an absolute path; used the built-in default folder instead.`,
       });
     }
   }
-  return { path: ambientAccountPath(runtime, environment.env, environment.home), warnings };
+  if (runtime === 'opencode') return { path: null, warnings };
+  return {
+    path: path.join(environment.home, runtime === 'claude-code' ? '.claude' : '.codex'),
+    warnings,
+  };
 }
 
 /**
@@ -588,7 +602,7 @@ export function defaultAccountPath(
  *   it has no registered row left.
  *
  * @param config - The parsed `config.json`, or `null`/`undefined` when missing.
- * @param environment - The environment, home and real-path lookup the default resolves from.
+ * @param environment - The home and real-path lookup the default resolves from.
  * @returns The accounts and every runtime's warnings.
  */
 export function readAccounts(
@@ -616,7 +630,8 @@ export function readAccounts(
  *
  * @param runtime - The runtime.
  * @param inputs - The parsed `config.json` (`null`/`undefined` when missing), the
- *   environment, the home folder, and the real-path lookup (default: the filesystem).
+ *   OS home folder, and the real-path lookup (default: the filesystem). No
+ *   environment: `default` is machine-wide.
  * @returns The accounts in registry order (a standalone `default` last), and warnings.
  */
 export function resolveAccounts(
@@ -778,7 +793,7 @@ export function loadIdentities(
  * ({@link readAccounts}).
  *
  * @param dorkHome - The resolved DorkOS home.
- * @param environment - The environment and home the default account resolves from.
+ * @param environment - The home (and real-path lookup) the default account resolves from.
  * @returns The accounts, the warnings, and whether the file itself read cleanly
  *   (false when it exists but is not JSON: then no registry can be trusted to be
  *   complete, and nothing may be deleted because of it).

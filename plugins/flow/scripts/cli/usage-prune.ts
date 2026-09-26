@@ -238,7 +238,7 @@ function because(entry: PruneEntry): string {
 export async function run(ctx: VerbContext): Promise<VerbResult> {
   const dorkHome = resolveDorkHome({ ...ctx.env }, ctx.io.osHome);
   const apply = ctx.args.flags.yes === true && !ctx.dryRun;
-  const environment: AccountEnvironment = { env: ctx.env, home: ctx.io.osHome };
+  const environment: AccountEnvironment = { home: ctx.io.osHome };
   const planned = plan(dorkHome, environment, ctx.now().getTime());
   if (planned === null) {
     throw new ConfigError(

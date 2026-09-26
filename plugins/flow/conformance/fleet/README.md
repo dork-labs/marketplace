@@ -30,13 +30,15 @@ key rule is a minor; a changed or removed rule is a major.
 `<runtime>:<account-id>` (bare keys still read as Claude Code), and
 `resolveFleetPolicy`, `readIdentities` and `mergeLedger` take the runtime.
 
-2.1.0 (rev 6d) changes what `default` means. An account is its folder, not its
-id. `claude-code:default` and `codex:default` always exist and name the
-runtime's default folder. When a registered row has that folder, `default` is
+3.0.0 (rev 6d) is a major: it changes what `default` means. An account is its
+folder, not its id. `claude-code:default` and `codex:default` always exist and
+name the runtime's default folder, machine-wide: DorkOS's `defaultAccount`, else
+`~/.claude`; `~/.codex`. A process's own `CLAUDE_CONFIG_DIR` or `CODEX_HOME`
+never changes it. When a registered row has that folder, `default` is
 another name for that row (one ledger file, one policy). When none does,
 `default` is its own account, and beside registered accounts it defaults to
-`main`. `readAccounts` takes the environment, home folder and real paths as
-inputs, so a runner needs no filesystem.
+`main`. `readAccounts` takes the home folder and real paths as inputs, so a
+runner needs no filesystem; the cases' `env` exists only to prove it is ignored.
 
 ## What is here
 
@@ -44,7 +46,7 @@ inputs, so a runner needs no filesystem.
 | --- | --- | --- |
 | `account-id.cases.json` | Minting an account id from a label and a path | `mint(label, path, taken) -> id` |
 | `identity.cases.json` | Reading one runtime's rows (`runtimes.<claudeCode, codex or opencode>.accounts`) from `config.json` | `readIdentities(config, runtime) -> { accounts, warnings }` |
-| `accounts.cases.json` | Every runtime's accounts, and which one `default` names: its own account, or an alias of the row in the default folder | `readAccounts(config, { env, home, realpath }) -> { accounts, warnings }` |
+| `accounts.cases.json` | Every runtime's accounts, and which one `default` names: its own account, or an alias of the row in the default folder | `readAccounts(config, { home, realpath }) -> { accounts, warnings }` (never `input.env`) |
 | `fleet-policy.cases.json` | Resolving `fleet.json` with defaults (key migration, the default account's role and aliases, runtime settings), plus which repos an account may serve | `resolveFleetPolicy(accounts, fleet)`, `parseOriginRepo(origin)`, `mayServe(policy, repo)` |
 | `window-read.cases.json` | What one ledger window means at a given moment | `readWindow(entry, now, key) -> reading or null` |
 | `room.cases.json` | The reserve in force and whether an account has room | `effectiveReservePct`, `fiveHourRoom`, `weeklyRoom`, `modelRoom` |

@@ -22,10 +22,13 @@ import {
   canonicalAccountPath,
   resolveAccountRef,
   resolveAccounts,
+  resolveFleetPolicy,
   setAccountPolicy,
   unknownPolicyKeys,
   type RuntimeAccount,
 } from '../../scripts/fleet/accounts.ts';
+import { chooseAccount, rankAccounts } from '../../scripts/drain/account-rank.ts';
+import { launchAccountFor, sessionConfigDir } from '../../scripts/launchers/common.ts';
 
 let home: string;
 
@@ -51,9 +54,9 @@ function claudeConfig(
   };
 }
 
-/** Claude Code's resolved accounts for this config and environment. */
-function claude(config: unknown, env: Record<string, string> = {}): RuntimeAccount[] {
-  return resolveAccounts('claude-code', { config, env, home }).accounts;
+/** Claude Code's resolved accounts for this config (no environment: `default` is machine-wide). */
+function claude(config: unknown): RuntimeAccount[] {
+  return resolveAccounts('claude-code', { config, home }).accounts;
 }
 
 describe('canonicalAccountPath', () => {
@@ -112,19 +115,18 @@ describe('resolveAccounts', () => {
     }
   });
 
-  it('takes defaultAccount over CLAUDE_CONFIG_DIR, and CLAUDE_CONFIG_DIR over ~/.claude', () => {
-    // Purpose: the precedence DorkOS applies when it launches a session.
+  it('takes defaultAccount over ~/.claude', () => {
+    // Purpose: DorkOS's machine-wide choice decides; nothing else does.
     const rows = [{ id: 'claude3', path: path.join(home, '.claude3') }];
-    const env = { CLAUDE_CONFIG_DIR: path.join(home, '.claude3') };
-    expect(claude(claudeConfig(rows, null), env).map((a) => a.id)).toEqual(['claude3']);
-    const chosen = claude(claudeConfig(rows, path.join(home, 'work')), env);
+    expect(claude(claudeConfig(rows, null)).map((a) => a.id)).toEqual(['claude3', 'default']);
+    const chosen = claude(claudeConfig(rows, path.join(home, 'work')));
     expect(chosen.map((a) => [a.id, a.path])).toEqual([
       ['claude3', path.join(home, '.claude3')],
       ['default', path.join(home, 'work')],
     ]);
   });
 
-  it('gives Codex a default in CODEX_HOME, else ~/.codex, and OpenCode none beside rows', () => {
+  it('gives Codex a default in ~/.codex, and OpenCode none beside rows', () => {
     // Purpose: rule 1 for Codex; OpenCode keeps its ambient default only with no row.
     const config = {
       runtimes: {
@@ -132,16 +134,11 @@ describe('resolveAccounts', () => {
         opencode: { accounts: [{ id: 'router', path: path.join(home, 'oc') }] },
       },
     };
-    const codex = (env: Record<string, string>) =>
-      resolveAccounts('codex', { config, env, home }).accounts.map((a) => [a.id, a.path]);
-    expect(codex({})).toEqual([
+    expect(resolveAccounts('codex', { config, home }).accounts.map((a) => [a.id, a.path])).toEqual([
       ['team', path.join(home, '.codex-team')],
       ['default', path.join(home, '.codex')],
     ]);
-    expect(codex({ CODEX_HOME: path.join(home, '.codex-team') })).toEqual([
-      ['team', path.join(home, '.codex-team')],
-    ]);
-    const opencode = resolveAccounts('opencode', { config, env: {}, home }).accounts;
+    const opencode = resolveAccounts('opencode', { config, home }).accounts;
     expect(opencode.map((a) => [a.id, a.isDefault])).toEqual([['router', false]]);
   });
 });
@@ -219,5 +216,59 @@ describe('policy writers and an aliased default', () => {
     const accounts = claude(claudeConfig([{ id: 'mine', path: path.join(home, '.claude') }]));
     const raw = { v: 1, accounts: { 'claude-code:default': { role: 'main' }, ghost: {} } };
     expect(unknownPolicyKeys(accounts, raw)).toEqual(['claude-code:ghost']);
+  });
+});
+
+describe('launching the default account (rev 6d)', () => {
+  it('ranks and launches a standalone default in its machine-wide folder, whatever the supervisor runs in', () => {
+    // Purpose: review finding 2. The operator's own sign-in (main by default)
+    // must be pickable by dispatch, and the cli/cmux launchers must start it in
+    // DorkOS's default folder, not in the supervisor's CLAUDE_CONFIG_DIR.
+    const work = path.join(home, 'work');
+    const config = claudeConfig(
+      [{ id: 'claude3', path: path.join(home, '.claude3'), label: 'Claude3' }],
+      work
+    );
+    const accounts = claude(config);
+    const policy = resolveFleetPolicy(accounts, {
+      v: 1,
+      accounts: { 'claude-code:claude3': { role: 'kept-out' } },
+    });
+    const rank = rankAccounts({
+      now: '2026-09-26T12:00:00.000Z',
+      repo: 'acme/app',
+      accounts: accounts.map((account, index) => ({
+        id: account.id,
+        path: account.path ?? '',
+        routable: account.routable,
+        policy: policy.accounts[index],
+        windows: null,
+      })),
+      model: null,
+      affinity: null,
+      exclude: [],
+      liveByAccount: {},
+      opts: { warnMarginPct: 10, maxLivePerAccount: 2 },
+    });
+    expect(rank.pick).toBe('default');
+    const choice = chooseAccount({ identities: accounts, rank });
+    expect(choice).toEqual({ account: { id: 'default', path: work } });
+
+    const chosen = accounts.find((account) => account.id === 'default') as RuntimeAccount;
+    const launch = launchAccountFor(chosen);
+    expect(launch).toEqual({ runtime: 'claude-code', id: 'default', path: work });
+    const supervisorOnClaude3 = { CLAUDE_CONFIG_DIR: path.join(home, '.claude3') };
+    expect(sessionConfigDir(launch, supervisorOnClaude3, home)).toBe(work);
+  });
+
+  it('launches an aliased default as its row', () => {
+    // Purpose: one real account, one id, even on the launch path.
+    const accounts = claude(claudeConfig([{ id: 'mine', path: `${home}/.claude/` }]));
+    const target = resolveAccountRef(accounts, 'claude-code', 'default') as RuntimeAccount;
+    expect(launchAccountFor(target)).toEqual({
+      runtime: 'claude-code',
+      id: 'mine',
+      path: `${home}/.claude/`,
+    });
   });
 });

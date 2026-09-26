@@ -336,7 +336,7 @@ function renderAccount(scan: AccountScan, dryRun: boolean): string {
 export async function run(ctx: VerbContext): Promise<VerbResult> {
   const days = readDays(ctx);
   const dorkHome = resolveDorkHome(ctx.env, ctx.io.osHome);
-  const identities = loadAccounts(dorkHome, { env: ctx.env, home: ctx.io.osHome });
+  const identities = loadAccounts(dorkHome, { home: ctx.io.osHome });
   const accounts = targets(ctx, identities.accounts);
   const sinceMs = days === 'all' ? null : ctx.now().getTime() - days * DAY_MS;
 

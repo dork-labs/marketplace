@@ -11,7 +11,7 @@
  *   account by weekly headroom per hour left before its reset (spend what expires
  *   soonest), and a `main` account last unless it is inside its spend-down window.
  * - {@link chooseAccount} turns a rank into the account to launch on, and falls
- *   back to the ambient account only when no account is registered at all.
+ *   back to the ambient account only when it is given no account at all.
  * - {@link launchBudget} caps new launches by machine load.
  *
  * Every rule about reserves, room and scope comes from S1's fleet contract
@@ -146,15 +146,21 @@ export interface AccountRank {
 
 /** Input to {@link chooseAccount}. */
 export interface ChooseAccountInput {
-  /** Every registered identity (S1 `readIdentities`). Empty means no registry. */
-  identities: readonly { id: string; path: string }[];
+  /**
+   * The runtime's routable accounts from the shared resolver (S1
+   * `resolveAccounts`, rev 6d): the registered rows AND a standalone `default`
+   * with its machine-wide folder, so the operator's own sign-in (main by
+   * default) can be picked. `path` is `null` only for OpenCode's ambient
+   * default. Empty means no account at all.
+   */
+  identities: readonly { id: string; path: string | null }[];
   /** The rank for the item. */
   rank: AccountRank;
 }
 
 /** The account a session launches on (§3.4). */
 export type AccountChoice =
-  | { account: { id: string; path: string } }
+  | { account: { id: string; path: string | null } }
   | { account: null; reason: 'no-registry' }
   | { account: 'none'; reasons: IneligibleAccount[] };
 
@@ -409,12 +415,13 @@ export function rankAccounts(input: RankAccountsInput): AccountRank {
 }
 
 /**
- * The account a session launches on (§3.4). With no identity registered it is
- * the ambient account (`account: null`), as flow ran before fleets. With any
- * identity registered it is the rank's pick, or `'none'` with the reasons: it
- * never falls back to the ambient account, which may itself be a kept-out one.
+ * The account a session launches on (§3.4). With no account given it is the
+ * ambient account (`account: null`), as flow ran before fleets. Otherwise it is
+ * the rank's pick, a standalone `default` included, or `'none'` with the
+ * reasons: it never falls back to the ambient account, which may itself be a
+ * kept-out one.
  *
- * @param input - The registered identities and the item's rank.
+ * @param input - The resolved accounts and the item's rank.
  * @returns The chosen identity, the ambient marker, or `'none'` with every account's reasons.
  */
 export function chooseAccount(input: ChooseAccountInput): AccountChoice {

@@ -11,7 +11,7 @@ This is account-aware scheduling for one person's own accounts. Whether using se
 
 ## What flow records, and from where
 
-flow tracks the accounts listed in `~/.dork/config.json`, the same list the DorkOS app keeps, under `runtimes.claudeCode`, `runtimes.codex` and `runtimes.opencode`. Each tool has `default`: the folder it signs in from, such as `~/.claude`. If a listed account uses it, `default` is that account.
+flow tracks the accounts listed in `~/.dork/config.json`, the same list the DorkOS app keeps, under `runtimes.claudeCode`, `runtimes.codex` and `runtimes.opencode`. Each tool has `default`: this computer's main folder, such as `~/.claude`. If a listed account uses it, `default` is that account.
 
 For each account flow keeps one small file at `~/.dork/runtimes/<runtime>/usage/<account>.json`, holding the latest reading of each limit: how much is used, when it resets, and when that was seen. For a pay-as-you-go account it also holds what you spent.
 
@@ -21,7 +21,7 @@ flow reads these numbers only from what each tool itself shows. For Claude Code:
 - **Past conversations.** When an account runs out, Claude Code saves a message saying so, with the reset time. `flow usage scan` reads those.
 - **A short check-in turn.** `flow usage probe` sends one short message on an account and reads the numbers Claude Code reports back.
 
-For Codex, `flow usage scan --runtime codex` reads the limits Codex writes into its session logs in `CODEX_HOME` (or `~/.codex`). For OpenCode, `--runtime opencode` reads a copy of its message store: what each message cost, and any "out of credits" or "rate limited" answer, per provider.
+For Codex, `flow usage scan --runtime codex` reads the limits Codex writes into its session logs in each account's folder. For OpenCode, `--runtime opencode` reads a copy of its message store: what each message cost, and any "out of credits" or "rate limited" answer, per provider.
 
 flow never reads a sign-in (not Codex's `auth.json`, not OpenCode's credential tables), never looks in the macOS Keychain, and never asks any provider's servers for usage directly.
 

@@ -35,11 +35,11 @@ afterEach(() => {
 });
 
 /** Run `flow <argv>` against the temp home. */
-async function flow(argv: string[], now: () => Date = () => NOW) {
+async function flow(argv: string[], now: () => Date = () => NOW, env: Record<string, string> = {}) {
   let stdout = '';
   let stderr = '';
   const deps: MainDeps = {
-    env: { DORK_HOME: dorkHome },
+    env: { DORK_HOME: dorkHome, ...env },
     cwd: root,
     now,
     stdout: { write: (chunk: string) => (stdout += chunk) },
@@ -267,6 +267,34 @@ describe('flow usage prune', () => {
       ['claude-code', 'gone.json', 'unregistered', 'removed'],
     ]);
     expect(files('claude-code')).toContain('mine.json');
+  });
+
+  // Purpose: review blocker on rev 6d. `default` is machine-wide: run from a
+  // session on claude3 (CLAUDE_CONFIG_DIR=~/.claude3), prune must still see
+  // default.json as the operator's main ledger and never delete it, and must
+  // keep claude3's own file too.
+  it('never deletes the main default.json from a session on another account', async () => {
+    const osHome = path.join(root, 'home');
+    writeFileSync(
+      path.join(dorkHome, 'config.json'),
+      JSON.stringify({
+        runtimes: {
+          claudeCode: {
+            defaultAccount: null,
+            accounts: [{ id: 'claude3', path: path.join(osHome, '.claude3'), label: 'Claude3' }],
+          },
+        },
+      })
+    );
+    await ledger('claude-code', 'claude3');
+    const result = await flow(['usage', 'prune', '--yes', '--json'], () => NOW, {
+      CLAUDE_CONFIG_DIR: path.join(osHome, '.claude3'),
+    });
+    expect(result.code, result.stderr).toBe(EXIT.ok);
+    const listed = rows(result.json() as PruneJson).map((r) => r[1]);
+    expect(listed).not.toContain('default.json');
+    expect(listed).not.toContain('claude3.json');
+    expect(files('claude-code')).toEqual(expect.arrayContaining(['claude3.json', 'default.json']));
   });
 
   it('lists legacy files by the age rule for non-json', async () => {

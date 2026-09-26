@@ -189,7 +189,7 @@ function renderAccount(scan: CodexAccountScan, dryRun: boolean): string {
 export async function run(ctx: VerbContext): Promise<VerbResult> {
   const days = readDays(ctx);
   const dorkHome = resolveDorkHome(ctx.env, ctx.io.osHome);
-  const registry = codexAccounts(dorkHome, { env: ctx.env, home: ctx.io.osHome });
+  const registry = codexAccounts(dorkHome, { home: ctx.io.osHome });
   const accounts = targets(ctx, registry.accounts);
   const sinceMs = days === 'all' ? null : ctx.now().getTime() - days * DAY_MS;
 

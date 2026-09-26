@@ -105,10 +105,10 @@ const RUNNERS: Record<string, (c: Case) => void> = {
 
   'accounts.cases.json': ({ input, expected }) => {
     // The resolution inputs are data, so no case touches the filesystem: a
-    // folder missing from input.realpath does not exist.
+    // folder missing from input.realpath does not exist. input.env is never
+    // passed: `default` is machine-wide, and the cases that set it prove so.
     const realpaths = input.realpath as Record<string, string>;
     const result = readAccounts(input.config, {
-      env: input.env as Record<string, string>,
       home: input.home as string,
       realpath: (dir) => (Object.hasOwn(realpaths, dir) ? realpaths[dir] : null),
     });
@@ -227,8 +227,8 @@ describe('the fleet conformance fixture', () => {
   // Purpose: the folder is the contract DorkOS vendors. Pin its version and the
   // exact set of case files, so a case file added without a runner (and so never
   // run here) fails instead of passing silently.
-  it('is contract 2.1.0 with exactly the known case files', () => {
-    expect(readFileSync(path.join(FIXTURE_DIR, 'CONTRACT_VERSION'), 'utf8').trim()).toBe('2.1.0');
+  it('is contract 3.0.0 with exactly the known case files', () => {
+    expect(readFileSync(path.join(FIXTURE_DIR, 'CONTRACT_VERSION'), 'utf8').trim()).toBe('3.0.0');
     expect(caseFiles).toEqual(Object.keys(RUNNERS).sort());
   });
 

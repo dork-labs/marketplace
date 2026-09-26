@@ -217,7 +217,7 @@ export async function run(ctx: VerbContext): Promise<VerbResult> {
   const dorkHome = resolveDorkHome(ctx.env, ctx.io.osHome);
   // `default` resolves to the account it names (rev 6d): the row it aliases, or
   // this computer's own sign-in, which then records to default.json.
-  const { accounts } = loadAccounts(dorkHome, { env: ctx.env, home: ctx.io.osHome });
+  const { accounts } = loadAccounts(dorkHome, { home: ctx.io.osHome });
   const found = id === undefined ? null : resolveAccountRef(accounts, 'claude-code', id);
   if (found === null || !found.routable || found.path === null) {
     throw new PreconditionError(

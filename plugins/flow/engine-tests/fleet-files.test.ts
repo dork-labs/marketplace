@@ -121,7 +121,7 @@ describe('loadAccounts', () => {
         },
       })
     );
-    const result = loadAccounts(home, { env: {}, home: '/os-home' });
+    const result = loadAccounts(home, { home: '/os-home' });
     expect(result.registryReadable).toBe(true);
     expect(result.accounts.map((a) => [a.key, a.implicit, a.path])).toEqual([
       ['claude-code:work', false, '/w'],
@@ -136,12 +136,12 @@ describe('loadAccounts', () => {
   // account, so a caller that deletes by "unregistered" must not act on it.
   it('reports an unreadable registry', () => {
     writeFileSync(path.join(home, 'config.json'), '{oops');
-    expect(loadAccounts(home, { env: {}, home: '/os-home' }).registryReadable).toBe(false);
+    expect(loadAccounts(home, { home: '/os-home' }).registryReadable).toBe(false);
     writeFileSync(
       path.join(home, 'config.json'),
       JSON.stringify({ runtimes: { codex: { accounts: 'nope' } } })
     );
-    expect(loadAccounts(home, { env: {}, home: '/os-home' }).registryReadable).toBe(false);
+    expect(loadAccounts(home, { home: '/os-home' }).registryReadable).toBe(false);
   });
 });
 

@@ -625,6 +625,22 @@ describe('the default account (rev 6d)', () => {
     });
   });
 
+  it('keeps default machine-wide when run from a session on another account', async () => {
+    // Purpose: review blocker. A session on claude3 (CLAUDE_CONFIG_DIR set to
+    // its folder) must not turn claude3 into "default": the listing still shows
+    // the main sign-in as its own account, and `set default` writes its policy,
+    // never claude3's.
+    operator();
+    const onClaude3 = { CLAUDE_CONFIG_DIR: path.join(base, '.claude3') };
+    const out = (await flow(['accounts', '--json'], onClaude3)).json();
+    expect(claudeRows(out).map((row) => [row.id, row.isDefault])).toEqual([
+      ['claude3', false],
+      ['default', true],
+    ]);
+    expect((await flow(['accounts', 'set', 'default', '--reserve', '30'], onClaude3)).code).toBe(0);
+    expect(readJson(fleetFile).accounts).toEqual({ 'claude-code:default': { reservePct: 30 } });
+  });
+
   it('stores a policy for a default that stands alone under default', async () => {
     // Purpose: the standalone default is its own account with its own key.
     operator();

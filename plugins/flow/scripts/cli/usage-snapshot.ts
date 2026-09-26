@@ -20,7 +20,7 @@ import { journalUsage } from './usage-journal.ts';
  */
 export async function run(ctx: VerbContext): Promise<VerbResult> {
   const dorkHome = resolveDorkHome({ ...ctx.env }, ctx.io.osHome);
-  const { accounts } = loadAccounts(dorkHome, { env: ctx.env, home: ctx.io.osHome });
+  const { accounts } = loadAccounts(dorkHome, { home: ctx.io.osHome });
   const targets = accounts.flatMap((account) =>
     account.ledgerId !== null && listLedgerIds(dorkHome, account.runtime).includes(account.ledgerId)
       ? [{ runtime: account.runtime, id: account.ledgerId }]

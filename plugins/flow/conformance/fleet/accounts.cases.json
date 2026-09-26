@@ -1,6 +1,6 @@
 {
   "contract": "fleet",
-  "about": "Every account of every runtime (spec flow-cli-core 1.1a, rev 6d). Call readAccounts(config, { env, home, realpath }). input.config is the parsed config.json, or null when the file is missing; input.env is the environment; input.home is the OS home folder; input.realpath maps a folder to its real path, and a folder not in the map does not exist (so it is compared as normalized, not resolved). Paths are POSIX. Each runtime's rows are read with the identity rules (identity.cases.json). ACCOUNT IDENTITY IS THE FOLDER, NOT THE ID. Comparing two folders: expand a leading '~' with home, resolve, drop trailing '/', then take realpath[folder] when present. For claude-code and codex, '<runtime>:default' ALWAYS exists and names the default folder: claude-code = config runtimes.claudeCode.defaultAccount when it is a non-empty string that is absolute or starts with '~' (else runtimes.claudeCode.activeAccount, its name before DorkOS 0.65.0, when defaultAccount is null or absent), else env CLAUDE_CONFIG_DIR when non-empty, else '<home>/.claude'; codex = env CODEX_HOME when non-empty, else '<home>/.codex'. A defaultAccount that is a string but not a path is ignored with 'default-account-invalid'. When a ROUTABLE registered row of that runtime has the same folder, default is an ALIAS of that row: the row has isDefault true and there is no separate default account (ledger file, fleet.json entry and readings are the row's). Otherwise default is its own account, listed AFTER the registered rows: id 'default', implicit true, path = the default folder with '~' expanded and trailing '/' dropped (not realpath'd), canonicalPath = its comparable form, label \"Main (this computer's sign-in)\", ledgerId 'default'. opencode keeps its ambient default: one implicit account with path null, canonicalPath null and label null, only while it has no registered row left. expected.accounts lists runtimes in the order claude-code, codex, opencode, and rows in registry order within one, each as { runtime, id, key, implicit, isDefault, path, canonicalPath, label, color, routable, ledgerId } where key is '<runtime>:<id>', canonicalPath is the comparable folder, isDefault says '<runtime>:default' names the account, and ledgerId is the ledger file's id (<ledgerId>.json), null for a row that is not routable. expected.warnings is a multiset of codes (compare sorted).",
+  "about": "Every account of every runtime (spec flow-cli-core 1.1a, rev 6d). Call readAccounts(config, { env, home, realpath }). input.config is the parsed config.json, or null when the file is missing; input.env is a process environment the result must NOT depend on; input.home is the OS home folder; input.realpath maps a folder to its real path, and a folder not in the map does not exist (so it is compared as normalized, not resolved). Paths are POSIX. Each runtime's rows are read with the identity rules (identity.cases.json). ACCOUNT IDENTITY IS THE FOLDER, NOT THE ID. Comparing two folders: expand a leading '~' with home, resolve, drop trailing '/', then take realpath[folder] when present. For claude-code and codex, '<runtime>:default' ALWAYS exists and names the default folder, MACHINE-WIDE: claude-code = config runtimes.claudeCode.defaultAccount when it is a non-empty string that is absolute or starts with '~' (else runtimes.claudeCode.activeAccount, its name before DorkOS 0.65.0, when defaultAccount is null or absent), else '<home>/.claude'; codex = '<home>/.codex'. The process environment is NEVER an input to this: input.env holds variables such as CLAUDE_CONFIG_DIR and CODEX_HOME only to prove they are ignored (a session's own variable must not change which account default names); a runner must not pass it to the resolver. A defaultAccount that is a string but not a path is ignored with 'default-account-invalid'. When a ROUTABLE registered row of that runtime has the same folder, default is an ALIAS of that row: the row has isDefault true and there is no separate default account (ledger file, fleet.json entry and readings are the row's). Otherwise default is its own account, listed AFTER the registered rows: id 'default', implicit true, path = the default folder with '~' expanded and trailing '/' dropped (not realpath'd), canonicalPath = its comparable form, label \"Main (this computer's sign-in)\", ledgerId 'default'. opencode keeps its ambient default: one implicit account with path null, canonicalPath null and label null, only while it has no registered row left. expected.accounts lists runtimes in the order claude-code, codex, opencode, and rows in registry order within one, each as { runtime, id, key, implicit, isDefault, path, canonicalPath, label, color, routable, ledgerId } where key is '<runtime>:<id>', canonicalPath is the comparable folder, isDefault says '<runtime>:default' names the account, and ledgerId is the ledger file's id (<ledgerId>.json), null for a row that is not routable. expected.warnings is a multiset of codes (compare sorted).",
   "cases": [
     {
       "name": "no config file: every runtime has its default; Claude Code and Codex name their default folders",
@@ -830,7 +830,7 @@
       }
     },
     {
-      "name": "a defaultAccount that is not a path is ignored: CLAUDE_CONFIG_DIR decides",
+      "name": "a defaultAccount that is not a path is ignored: <home>/.claude decides, never CLAUDE_CONFIG_DIR",
       "input": {
         "config": {
           "runtimes": {
@@ -858,13 +858,26 @@
             "id": "claude3",
             "key": "claude-code:claude3",
             "implicit": false,
-            "isDefault": true,
+            "isDefault": false,
             "path": "/home/op/.claude3",
             "canonicalPath": "/home/op/.claude3",
             "label": null,
             "color": null,
             "routable": true,
             "ledgerId": "claude3"
+          },
+          {
+            "runtime": "claude-code",
+            "id": "default",
+            "key": "claude-code:default",
+            "implicit": true,
+            "isDefault": true,
+            "path": "/home/op/.claude",
+            "canonicalPath": "/home/op/.claude",
+            "label": "Main (this computer's sign-in)",
+            "color": null,
+            "routable": true,
+            "ledgerId": "default"
           },
           {
             "runtime": "codex",
@@ -899,22 +912,24 @@
       }
     },
     {
-      "name": "an empty CLAUDE_CONFIG_DIR counts as unset",
+      "name": "CLAUDE_CONFIG_DIR set to a registered folder does not change default: it stays machine-wide",
       "input": {
         "config": {
           "runtimes": {
             "claudeCode": {
+              "defaultAccount": null,
               "accounts": [
                 {
                   "id": "claude3",
-                  "path": "/home/op/.claude3"
+                  "path": "/home/op/.claude3",
+                  "label": "Claude3"
                 }
               ]
             }
           }
         },
         "env": {
-          "CLAUDE_CONFIG_DIR": ""
+          "CLAUDE_CONFIG_DIR": "/home/op/.claude3"
         },
         "home": "/home/op",
         "realpath": {}
@@ -929,7 +944,7 @@
             "isDefault": false,
             "path": "/home/op/.claude3",
             "canonicalPath": "/home/op/.claude3",
-            "label": null,
+            "label": "Claude3",
             "color": null,
             "routable": true,
             "ledgerId": "claude3"
@@ -1188,7 +1203,7 @@
       }
     },
     {
-      "name": "Codex: CODEX_HOME names a registered row, so codex:default is its alias",
+      "name": "Codex: CODEX_HOME naming a registered row does not change codex:default",
       "input": {
         "config": {
           "runtimes": {
@@ -1228,13 +1243,26 @@
             "id": "team",
             "key": "codex:team",
             "implicit": false,
-            "isDefault": true,
+            "isDefault": false,
             "path": "/Users/me/.codex-team",
             "canonicalPath": "/Users/me/.codex-team",
             "label": null,
             "color": null,
             "routable": true,
             "ledgerId": "team"
+          },
+          {
+            "runtime": "codex",
+            "id": "default",
+            "key": "codex:default",
+            "implicit": true,
+            "isDefault": true,
+            "path": "/home/op/.codex",
+            "canonicalPath": "/home/op/.codex",
+            "label": "Main (this computer's sign-in)",
+            "color": null,
+            "routable": true,
+            "ledgerId": "default"
           },
           {
             "runtime": "opencode",
@@ -1312,6 +1340,70 @@
             "color": null,
             "routable": true,
             "ledgerId": "router"
+          }
+        ],
+        "warnings": []
+      }
+    },
+    {
+      "name": "Codex: a registered row in <home>/.codex is codex:default's alias",
+      "input": {
+        "config": {
+          "runtimes": {
+            "codex": {
+              "accounts": [
+                {
+                  "id": "mine",
+                  "path": "/home/op/.codex/"
+                }
+              ]
+            }
+          }
+        },
+        "env": {},
+        "home": "/home/op",
+        "realpath": {}
+      },
+      "expected": {
+        "accounts": [
+          {
+            "runtime": "claude-code",
+            "id": "default",
+            "key": "claude-code:default",
+            "implicit": true,
+            "isDefault": true,
+            "path": "/home/op/.claude",
+            "canonicalPath": "/home/op/.claude",
+            "label": "Main (this computer's sign-in)",
+            "color": null,
+            "routable": true,
+            "ledgerId": "default"
+          },
+          {
+            "runtime": "codex",
+            "id": "mine",
+            "key": "codex:mine",
+            "implicit": false,
+            "isDefault": true,
+            "path": "/home/op/.codex/",
+            "canonicalPath": "/home/op/.codex",
+            "label": null,
+            "color": null,
+            "routable": true,
+            "ledgerId": "mine"
+          },
+          {
+            "runtime": "opencode",
+            "id": "default",
+            "key": "opencode:default",
+            "implicit": true,
+            "isDefault": true,
+            "path": null,
+            "canonicalPath": null,
+            "label": null,
+            "color": null,
+            "routable": true,
+            "ledgerId": "default"
           }
         ],
         "warnings": []

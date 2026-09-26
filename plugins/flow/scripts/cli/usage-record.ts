@@ -83,17 +83,12 @@ function writeStamp(stamp: string, fingerprint: string): void {
  * The account `record` writes for, or `null` (spec §1.1a rev 6d): `--account`
  * (`default` resolves to the row it aliases), else the account whose folder is
  * the one this session runs in (`CLAUDE_CONFIG_DIR`, else `<os home>/.claude`).
- *
- * The status line runs inside every session, and its `CLAUDE_CONFIG_DIR` is that
- * session's folder, not a choice for the machine. So `default` is resolved here
- * without it (DorkOS's `defaultAccount`, else `<os home>/.claude`): a session in
- * an unregistered folder that is not the default writes nothing, rather than
- * mixing another account's readings into `default.json`.
+ * `default` itself is machine-wide, so a session in an unregistered folder that
+ * is not the default writes nothing.
  */
 function targetAccount(ctx: VerbContext, dorkHome: string): RuntimeAccount | null {
   const home = ctx.io.osHome;
-  const machineEnv = { ...ctx.env, CLAUDE_CONFIG_DIR: undefined };
-  const { accounts } = loadAccounts(dorkHome, { env: machineEnv, home });
+  const { accounts } = loadAccounts(dorkHome, { home });
   const flag = ctx.args.flags.account;
   if (typeof flag === 'string') {
     const account = resolveAccountRef(accounts, 'claude-code', flag);

@@ -2719,6 +2719,85 @@
           }
         ]
       }
+    },
+    {
+      "name": "a standalone default from the shared resolver is chosen with its machine-wide folder (rev 6d)",
+      "input": {
+        "identities": [
+          {
+            "id": "claude3",
+            "path": "/home/op/.claude3"
+          },
+          {
+            "id": "default",
+            "path": "/home/op/.claude"
+          }
+        ],
+        "rank": {
+          "pick": "default",
+          "ranked": [
+            {
+              "id": "default",
+              "tier": 2,
+              "score": 0,
+              "signal": {
+                "level": "ok",
+                "window": null,
+                "resetsAt": null,
+                "cause": null
+              }
+            }
+          ],
+          "ineligible": [
+            {
+              "id": "claude3",
+              "reasons": [
+                "limited"
+              ]
+            }
+          ]
+        }
+      },
+      "expected": {
+        "account": {
+          "id": "default",
+          "path": "/home/op/.claude"
+        }
+      }
+    },
+    {
+      "name": "OpenCode's ambient default is chosen with no folder",
+      "input": {
+        "identities": [
+          {
+            "id": "default",
+            "path": null
+          }
+        ],
+        "rank": {
+          "pick": "default",
+          "ranked": [
+            {
+              "id": "default",
+              "tier": 1,
+              "score": 0,
+              "signal": {
+                "level": "unknown",
+                "window": null,
+                "resetsAt": null,
+                "cause": null
+              }
+            }
+          ],
+          "ineligible": []
+        }
+      },
+      "expected": {
+        "account": {
+          "id": "default",
+          "path": null
+        }
+      }
     }
   ],
   "launchBudget": [

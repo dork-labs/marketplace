@@ -181,7 +181,7 @@ export async function run(ctx: VerbContext): Promise<VerbResult> {
   const now = ctx.now();
   const dorkHome = resolveDorkHome({ ...ctx.env }, ctx.io.osHome);
 
-  const loaded = loadAccounts(dorkHome, { env: ctx.env, home: ctx.io.osHome });
+  const loaded = loadAccounts(dorkHome, { home: ctx.io.osHome });
   for (const warning of loaded.warnings) warn(warning.message);
   const accounts = shownAccounts(loaded.accounts, dorkHome, ctx.env, ctx.io.osHome);
   const policy = loadFleetPolicy(dorkHome, accounts);

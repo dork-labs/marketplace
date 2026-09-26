@@ -231,7 +231,7 @@ function openCodeAccounts(
   accounts: RuntimeAccount[];
   warnings: FleetWarning[];
 } {
-  const loaded = loadAccounts(dorkHome, { env: ctx.env, home: ctx.io.osHome });
+  const loaded = loadAccounts(dorkHome, { home: ctx.io.osHome });
   return {
     accounts: loaded.accounts.filter((a) => a.runtime === RUNTIME && a.routable),
     warnings: loaded.warnings,

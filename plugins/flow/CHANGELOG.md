@@ -8,12 +8,12 @@ you until you **reinstall it** (Marketplace → flow → reinstall, or re-run yo
 
 **Your main Claude Code sign-in now shows up in flow, even when you have listed other accounts. Reinstall to get it.**
 
-- flow now knows an account by its folder, not its name. `default` is the folder a tool uses when nothing picks one: for Claude Code, the one the DorkOS app is set to, else `CLAUDE_CONFIG_DIR`, else `~/.claude`; for Codex, `CODEX_HOME`, else `~/.codex`.
+- flow now knows an account by its folder, not its name. `default` is this computer's main folder: for Claude Code, the one the DorkOS app is set to, else `~/.claude`; for Codex, `~/.codex`. A session running in another folder never changes what `default` means.
 - If one of your listed accounts uses that folder, `default` is just another name for it. flow keeps one usage file and one set of settings for it, and `flow accounts` shows it once, as "Claude3 (default)".
 - If none does, `default` is its own account, "Main (this computer's sign-in)", with its usage in `default.json`. Before this, it was hidden as soon as you listed any account.
 - Next to listed accounts, that sign-in counts as your `main` account: flow keeps half of its weekly limit for you and uses it last. Give another account the `main` role, or give `default` any role, and your choice wins.
 - `flow usage probe default --yes` now checks that sign-in, and the status line records it. A session in a folder that is neither listed nor the default still records nothing.
-- The shared test files DorkOS checks itself against are now version 2.1.0.
+- The shared test files DorkOS checks itself against are now version 3.0.0: what `default` means changed, so DorkOS must update its side too.
 
 ## 0.26.0
 

@@ -17,7 +17,7 @@ import { existsSync, statSync } from 'node:fs';
 import path from 'node:path';
 
 import type { ProcessRunner } from '../cli/context.ts';
-import { ambientAccountPath } from '../fleet/accounts.ts';
+import { ambientAccountPath, type RuntimeAccount } from '../fleet/accounts.ts';
 import {
   DEFAULT_ACCOUNT_ID,
   LaunchError,
@@ -195,6 +195,22 @@ export function validateLaunchRequest(req: LaunchRequest): void {
   if (!path.isAbsolute(account.path)) {
     badRequest(`The account's path must be absolute, not "${account.path}".`);
   }
+}
+
+/**
+ * The {@link LaunchAccount} for one account from the shared resolver
+ * (`resolveAccounts`, spec `flow-cli-core` §1.1a rev 6d). A standalone
+ * `default` carries its machine-wide folder, and an aliased one is its row
+ * (id and folder), so the cli and cmux launchers start it where `default`
+ * really lives. Only OpenCode's ambient default keeps `path: null`.
+ *
+ * @param account - A resolved account.
+ * @returns The launch account.
+ */
+export function launchAccountFor(
+  account: Pick<RuntimeAccount, 'runtime' | 'id' | 'path'>
+): LaunchAccount {
+  return { runtime: account.runtime, id: account.id, path: account.path };
 }
 
 /**

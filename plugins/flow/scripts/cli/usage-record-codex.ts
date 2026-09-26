@@ -49,18 +49,12 @@ export function codexStdinReading(
 /**
  * The account `record` writes for: `--account` (`default` resolves to the row it
  * aliases), else the account whose folder is this process's Codex home.
- *
- * Like the Claude Code recorder, a session's `CODEX_HOME` is that session's
- * folder, not a choice for the machine, so `default` is resolved without it
- * (`<os home>/.codex`): an unregistered Codex home that is not the default
- * writes nothing.
+ * `codex:default` is machine-wide (`<os home>/.codex`), so an unregistered Codex
+ * home that is not the default writes nothing.
  */
 function targetAccount(ctx: VerbContext, dorkHome: string): CodexAccount | null {
   const home = ctx.io.osHome;
-  const { accounts } = codexAccounts(dorkHome, {
-    env: { ...ctx.env, CODEX_HOME: undefined },
-    home,
-  });
+  const { accounts } = codexAccounts(dorkHome, { home });
   const flag = ctx.args.flags.account;
   if (typeof flag === 'string') return resolveAccountRef(accounts, 'codex', flag);
   const ambient = ambientAccountPath('codex', ctx.env, home) ?? '';
