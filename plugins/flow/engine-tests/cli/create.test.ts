@@ -12,6 +12,7 @@ import {
   mkdtempSync,
   readFileSync,
   realpathSync,
+  renameSync,
   rmSync,
   symlinkSync,
   writeFileSync,
@@ -320,7 +321,27 @@ describe('flow create', () => {
   });
 
   it('keeps .dork/flow/tmp out of git when it reads a scratch file there', async () => {
-    // Purpose: a scratch file kept for a retry can never be committed.
+    // Purpose: a scratch file kept for a retry (here, after a refused create) can never be committed.
+    const scratch = path.join(project, '.dork', 'flow', 'tmp', 'idea.md');
+    mkdirSync(path.dirname(scratch), { recursive: true });
+    writeFileSync(scratch, 'Scratch idea.\n');
+    const t = tracker();
+    const run = await flow(
+      ['create', '--title', 'T', '--description-file', scratch, '--label', 'area/none'],
+      t
+    );
+    expect(run.code).toBe(EXIT.tracker);
+    expect(existsSync(scratch)).toBe(true);
+    const exclude = readFileSync(path.join(project, '.git', 'info', 'exclude'), 'utf8');
+    expect(exclude.split('\n')).toContain('.dork/flow/tmp/');
+    const ignored = spawnSync('git', ['check-ignore', '-q', '.dork/flow/tmp/idea.md'], {
+      cwd: project,
+    });
+    expect(ignored.status).toBe(0);
+  });
+
+  it('adds no exclude line on --dry-run', async () => {
+    // Purpose: a dry run writes nothing for the scratch file, not even git's exclude.
     const scratch = path.join(project, '.dork', 'flow', 'tmp', 'idea.md');
     mkdirSync(path.dirname(scratch), { recursive: true });
     writeFileSync(scratch, 'Scratch idea.\n');
@@ -330,13 +351,41 @@ describe('flow create', () => {
       t
     );
     expect(run.code).toBe(EXIT.ok);
-    const exclude = readFileSync(path.join(project, '.git', 'info', 'exclude'), 'utf8');
-    expect(exclude.split('\n')).toContain('.dork/flow/tmp/');
-    expect(existsSync(scratch)).toBe(true);
-    const ignored = spawnSync('git', ['check-ignore', '-q', '.dork/flow/tmp/idea.md'], {
-      cwd: project,
-    });
-    expect(ignored.status).toBe(0);
+    const file = path.join(project, '.git', 'info', 'exclude');
+    const exclude = existsSync(file) ? readFileSync(file, 'utf8') : '';
+    expect(exclude.split('\n')).not.toContain('.dork/flow/tmp/');
+  });
+
+  it('checks the scratch folder again before deleting: one swapped for a link meanwhile is not followed', async () => {
+    // Purpose: .dork/flow/tmp replaced by a link out of the project during the
+    // tracker call must not make flow delete the file the link reaches.
+    const outside = realpathSync(mkdtempSync(path.join(os.tmpdir(), 'flow-create-swap-')));
+    try {
+      const tmpDir = path.join(project, '.dork', 'flow', 'tmp');
+      mkdirSync(tmpDir, { recursive: true });
+      writeFileSync(path.join(tmpDir, 'idea.md'), 'Scratch idea.\n');
+      writeFileSync(path.join(outside, 'idea.md'), 'Outside, same name.\n');
+      const t = tracker();
+      const create = t.adapter.createItem as NonNullable<typeof t.adapter.createItem>;
+      const swapping = {
+        ...t.adapter,
+        capabilities: t.adapter.capabilities,
+        createItem: async (spec: Parameters<typeof create>[0]) => {
+          const created = await create(spec);
+          renameSync(tmpDir, `${tmpDir}-aside`);
+          symlinkSync(outside, tmpDir);
+          return created;
+        },
+      };
+      const run = await flow(
+        ['create', '--title', 'T', '--description-file', '.dork/flow/tmp/idea.md'],
+        { ...t, adapter: swapping }
+      );
+      expect(run.code).toBe(EXIT.ok);
+      expect(existsSync(path.join(outside, 'idea.md'))).toBe(true);
+    } finally {
+      rmSync(outside, { recursive: true, force: true });
+    }
   });
 
   it('keeps the scratch file when the create fails, for the retry', async () => {
