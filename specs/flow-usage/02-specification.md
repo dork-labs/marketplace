@@ -644,7 +644,7 @@ The operator runs flow from Claude Code, Codex and OpenCode sessions (the fleet 
 **Spend, per provider.**
 
 - `costUsd` = the sum of `cost` over assistant messages created since `periodStart`, the first instant of the current UTC month.
-- It is recorded through rev 6's `spend` with `source: "transcript"`, one reading for the account plus the per-provider split. Where rev 6's `spend` holds one number, the account total is recorded and the split is kept in the fleet JSON only.
+- It is recorded through rev 6's `spend` (`source: "transcript"`) as the account total, with `periodStart` = this month and `observedAt` = the newest message's time. A month with no messages yet records `costUsd: 0` with `observedAt` = the scan time. The per-provider split is shown only in `scan --runtime opencode` output (text and `--json`); the ledger holds the total.
 - `limitUsd` is never inferred.
 - A local model records cost 0.
 
@@ -669,7 +669,7 @@ The operator runs flow from Claude Code, Codex and OpenCode sessions (the fleet 
 
 - One `Accounts` block per runtime that has an account with ledger data, or a registered account. The headings are `Claude Code`, `Codex` and `OpenCode`.
 - Codex rows use the same bars as Claude Code. A `model:*` bucket shows as an extra note (`GPT-5.3-Codex-Spark 12%`), and a known `plan` shows in the notes.
-- OpenCode rows show `$<costUsd> this month` in place of the bars, plus `out (credits)` or `out (rate limit)` when a rejection is current.
+- OpenCode rows show `$<costUsd> this month` in place of the bars, or `$0.00 this month` when the stored `spend.periodStart` is not the current UTC month (a spend reading never goes stale, so last month's total is never shown as this month's). They add `out (credits: <provider>)` or `out (rate limit: <provider>)` for each current rejected error key.
 - Sessions are grouped under the same headings. A session's runtime is:
   - its source: a Claude Code session file means `claude-code`;
   - for a DorkOS session, its `runtime` field;
@@ -713,7 +713,7 @@ The operator runs flow from Claude Code, Codex and OpenCode sessions (the fleet 
   ```
 
 - **Sampled (R8):** a line for an account is written only when its last `usage.snapshot` line is more than 60 minutes old, or when a window's `usedPct` moved 5 or more points, or its `status` changed, since that line. That keeps usage from pushing run events out of the capped journal.
-- **Who writes it:** `flow usage scan`, `flow usage probe` and the new `flow usage snapshot` (for S3's supervisor pass), each by the sampling rule. The last line per account comes from the journal's own read of its current file.
+- **Who writes it:** `flow usage scan`, `flow usage probe` and the new `flow usage snapshot` (for S3's supervisor pass), each by the sampling rule. The last line per account comes from the journal's `read(target, since)` over the last 24 hours, which spans rotated files.
 - **Never from `record`:** the status-line path stays zero-dependency and needs no project.
 - **Outside a flow project, or with the journal off:** the verbs write no line and say nothing.
 - The journal's size cap and rotation govern retention.
