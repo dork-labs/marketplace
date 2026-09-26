@@ -45,38 +45,30 @@ CAPTURE → TRIAGE → IDEATE → SPECIFY → DECOMPOSE → EXECUTE → VERIFY �
 
 ### Orchestrator — no-args cold start
 
-A bare `/flow` (no stage, no item, no `auto`) resolves nothing to route. The
-orchestrator MUST **offer four intents** rather than guess: **capture** a new
-thought · **work on a project** (pick from the active projects via `getProjects`) ·
-**continue the queue** · **triage** the backlog, with a specific item, `auto`, and any
-explicit stage reachable as free text. In a terminal harness this is an `AskUserQuestion`;
-in any other, the same four intents rendered as a numbered prompt. **Continue the queue**
-is one tick of `auto`: the same `selectDispatch`
-oracle claims the next-ranked eligible item and carries it to its review gate, but
-bounded to a single item — it writes no auto-drain sentinel
-(`.dork/flow/auto-run.json`) and never loops.
+A bare `/flow` (no stage, no item, no `auto`) MUST **offer four intents** rather
+than guess: **capture** · **work on a project** (via `getProjects`) · **continue
+the queue** · **triage**, with an item, `auto` or a stage reachable as free text
+(an `AskUserQuestion` in a terminal harness, a numbered prompt elsewhere).
+**Continue the queue** is one tick of `auto`: `selectDispatch` claims the
+next-ranked item and carries it to its review gate, writing no auto-drain
+sentinel and never looping.
 
-**Naming a project** (with arguments: `/flow <project>`, or the aliases `start` /
-`resume`) resolves it via `resolveProject`, then routes by the project's state:
-project-scoped single-item dispatch when it has `agent/ready` children (`getProjectWork` +
-`selectDispatch`, honoring the `perProject` WIP cap), or advancing the project's umbrella
-issue one stage when it has none yet. `/flow auto <project>` and `/flow continue <project>`
-narrow the global queue modes to that one project.
+**Naming a project** (`/flow <project>`, or the aliases `start` / `resume`)
+resolves it via `resolveProject`, then does project-scoped single-item dispatch
+when it has `agent/ready` children (`getProjectWork` + `selectDispatch`, honoring
+the `perProject` WIP cap), or advances its umbrella issue one stage when it has
+none. `/flow auto <project>` and `/flow continue <project>` narrow the queue modes
+to that project.
 
 ## `PMClient` interface (promotion surface, P5)
 
-In **v1 the `PMClient` does not exist as code.** It is realized as the
-tracker adapter skill (the project's `.agents/flow/adapters/<tracker>/SKILL.md`, or
-`skills/linear-adapter/`, the reference adapter shipped here; `scripts/config-files.ts`
-prints which one as `adapter.path`) — a documented **prose** contract that owns every
-tracker API call and fulfils the capability verbs below. Generic
-stage skills call the adapter by naming a verb and never touch a tracker string
-(a grep guard enforces this). The agnosticism win ("all tracker I/O in one place")
-is real in v1 with no new infrastructure.
-
-The typed `interface PMClient` documented here is what the **P5 server build**
-promotes that prose contract into — same verbs, same `WorkItem` normalization,
-now executable code:
+In **v1 the `PMClient` is not code.** It is the tracker adapter skill (the
+project's `.agents/flow/adapters/<tracker>/SKILL.md`, or the shipped
+`skills/linear-adapter/`; `config-files.ts` prints which as `adapter.path`): a
+**prose** contract that owns every tracker call and fulfils the verbs below.
+Stage skills name a verb and never touch a tracker string (a grep guard enforces
+this). The P5 server build promotes it into this typed interface, same verbs,
+same `WorkItem` normalization:
 
 ```ts
 interface PMClient {
@@ -132,6 +124,40 @@ is the link where the surface supports one. The v1 tracker adapter skill owns th
 convention (its _Presenting a work item to a human_ section); the P5 `PMClient`
 carries it forward.
 
+## The flow CLI
+
+Skills and people run tracker steps through `scripts/flow.ts`:
+
+```bash
+node --experimental-strip-types <flow-root>/scripts/flow.ts <verb> [args] [flags]
+```
+
+`<flow-root>` is the `flowRoot` that `config-files.ts` prints. The
+[README](../README.md#the-flow-cli) lists the verbs; `flow <verb> --help` gives
+each one's flags.
+
+- `--json` prints one JSON object (`"v": 1`) on stdout, even on failure
+  (`"ok": false` with an `error`). Warnings go to stderr.
+- `--project <dir>` is the checkout to read (every verb but `accounts` and
+  `usage`). `--snapshot <file>` lets `next`, `audit` and `status` read a saved
+  `flow snapshot --json`. `--dry-run` prints the plan and writes nothing, on
+  `claim`, `release`, `done`, `stage`, `accounts` and `usage`. `--manual` lets
+  `next` and `claim` run while paused. `--session <id>` defaults to
+  `FLOW_SESSION_ID`, then the runtime's own session id.
+- Every write is read back from the tracker; one that does not stick exits 4.
+
+| Exit | Meaning                                                                 |
+| ---- | ----------------------------------------------------------------------- |
+| 0    | Success.                                                                |
+| 1    | The check found problems (`audit`, `status --strict`).                  |
+| 2    | Usage error: unknown verb, bad flag, missing argument.                  |
+| 3    | Config error: not configured, invalid, `mcp` transport, no adapter.     |
+| 4    | Tracker error: unreachable, auth failure, a write not confirmed.        |
+| 5    | Precondition failed: item not found, not claimable, claimed by another. |
+| 6    | Missing runtime dependency (`zod`).                                     |
+| 7    | Paused (`next` or `claim` without `--manual`).                          |
+| 70   | A bug in flow (never confused with 1).                                  |
+
 ## `FlowRun` record (promotion surface, P3)
 
 The durable run record keys the **session↔issue** association — the bridge that
@@ -149,6 +175,8 @@ FlowRun {
   attemptCount; workerPid;      // v1 single-machine liveness
   heartbeatAt?;                 // v2 (concurrent) liveness — unused in v1
   startedAt, completedAt?;
+  account?;                     // account id the CURRENT session bills
+  host?;                        // launcher of the current session: cli | dorkos | cmux
   provenance?;                  // v/harness/session/account/worker/host/instance/surface/resumeUrl
                                 //   — where the run came from; its wire subset is the
                                 //   agent:provenance signature (docs/provenance.md)
@@ -160,6 +188,14 @@ signature every outward write carries — specified, tracker-neutrally, in
 [`provenance.md`](./provenance.md). `worktreePath` and the delegated worker id
 stay local: they are a run record, not a wire format.
 
+`account` and `host` describe the **current** session; a handoff rewrites them.
+`host` is the launcher, not the machine (`provenance.host`), and a bare string so
+a future launcher never fails the reader. `provenance.account` never changes. DorkOS
+reads `flow-state.json` (never writes it) to tie its sessions to items by
+`sessionId`; account ids are explained in [Account usage](./account-usage.mdx).
+These shared rules, with test cases both sides run, are in
+[`conformance/fleet/README.md`](../conformance/fleet/README.md).
+
 The **checkpoint is the git commit + the JSONL session**, so the next-tick
 recovery ladder **resumes** (re-attach the worktree at HEAD, `resume` the
 session) rather than restarts. v2 adds heartbeat, a fencing token, atomic
@@ -167,10 +203,9 @@ multi-claim, and a stall-detector — the server residue earmarked in DOR-89.
 
 ## The typed engine — v1 promotion surface (`@dorkos/flow`)
 
-The engine's decision logic is **already typed code** in the `@dorkos/flow`
-package — the v1 promotion surface P5 lifts server-side unchanged. Each module is
-pure (config + inputs → a decision), table-driven, and unit-tested. This is the
-contract task 5.1 verifies is documented here.
+The engine's decision logic is **already typed code** in `@dorkos/flow`, which
+P5 lifts server-side unchanged. Each module is pure (config + inputs → a
+decision), table-driven, and unit-tested.
 
 ### Calibration ladder — `calibration.ts` (§5)
 
@@ -194,18 +229,14 @@ stages (`execution`) → `proceed-with-trail`. Types: `DecisionDescriptor`,
 
 `selectDispatch(items, options)` = `filterEligible` → `rankEligible` →
 `truncateRankedToWipCap`. Eligibility removes non-dispatchable state, missing
-`agent/ready` (PM-driven), open blockers, completed/canceled projects, and items
-the `ownership` policy doesn't permit (`isClaimable`) — every check is a per-item
-predicate, so the survivor set never depends on input order. Ranking applies the
-ordered 7-tier ladder (`unblockers → priority → projectStatus → type → size →
-age → identifier`), a **total** order: a tier where both items are neutral is a
-tie that falls through, so the identifier tiebreak is always reached and the
-result is independent of input order. The WIP cap runs **last**, truncating the
-ranked list to the global + per-project budgets: the ladder decides _which_ items
-survive, the cap only decides _how many_ (its name carries that precondition).
-`sizeOrdinal(size)` is exported as the one sanctioned way to compare a `size` —
-a `number | string` union — against a t-shirt threshold. Types: `DispatchConfig`,
-`OwnershipConfig`, `WipCap`, `WipLoad`, `RankFactor`.
+`agent/ready` (PM-driven), open blockers, closed projects, and items the
+`ownership` policy does not permit (`isClaimable`); each check is per item, so
+input order never matters. Ranking is a total order over seven tiers
+(`unblockers → priority → projectStatus → type → size → age → identifier`). The
+WIP cap runs last: the ladder decides _which_ items survive, the cap only _how
+many_. `sizeOrdinal(size)` is the one sanctioned way to compare a `size` against a
+t-shirt threshold. Types: `DispatchConfig`, `OwnershipConfig`, `WipCap`,
+`WipLoad`, `RankFactor`.
 
 ### Gates + auto-merge recovery — `gates.ts` (§5, §6)
 
@@ -214,16 +245,13 @@ a `number | string` union — against a t-shirt threshold. Types: `DispatchConfi
 mergeable? · CI green? · functionally unchanged? → resolve / bounce / re-approve).
 Types: `GatesConfig`, `ReviewGateConfig`, `CircuitBreakerConfig`, `MergeState`,
 `MergeDisposition`, `CircuitBreakerTrip`.
-`resolveProjectCompletion(pulse) → { disposition, reason }` joins them as a
-post-DONE disposition (not a gate), asking two questions in order. **May the
-project be closed at all?** An empty project, an incomplete rollup, any open
-item (the contract's guardrail), or an active spec still pointing at it each
-yield `skip` — not `advise`, since recommending a close-out that must not happen
-is the same mistake one human click later. **May the ENGINE close it?** Only
-under `gates.projectCompletion: "auto"` with an adapter that supports the
-OPTIONAL `completeProject` verb; either missing yields `advise`. The `reason`
-names the deciding condition, so no skip is silent. Types: `ProjectPulse`,
-`ProjectCompletionOutcome`, `ProjectCompletionDisposition`,
+`resolveProjectCompletion(pulse) → { disposition, reason }` is a post-DONE
+disposition, not a gate. An empty project, an incomplete rollup, any open item or
+an active spec yields `skip` (never `advise`: recommending a close that must not
+happen is the same mistake). Otherwise it yields `complete` only under
+`gates.projectCompletion: "auto"` with an adapter that has the OPTIONAL
+`completeProject` verb, else `advise`. The `reason` names the deciding condition.
+Types: `ProjectPulse`, `ProjectCompletionOutcome`, `ProjectCompletionDisposition`,
 `ProjectCompletionReason`.
 
 ### Comms routing + comment-response — `comms.ts`, `comment-response.ts` (§5)
@@ -262,13 +290,10 @@ capture per class (`ui` → GIF/WebM/none by interactive-vs-unattended trigger;
 
 `TasksFileSchema` / `TaskSchema` extend `03-tasks.json` with optional per-task
 `issue` / `parentIssue` fields and the PM-agnostic `ProvenanceSchema` block (one
-issue **or** project, never a flat `issues: []` list). `isPromotableToSubIssue`
-fires only at `size ≥ subIssueThreshold` (default `"xl"`), comparing a **task's**
-`size` — the t-shirt `TaskSize` enum on disk, not the `WorkItem.size` union. A
-`WorkItem.size` is compared against the same threshold through
-`sizeOrdinal(size) >= sizeOrdinal(threshold)`, since a points estimate and a
-t-shirt word are not directly comparable. Types: `TasksFile`, `Task`, `TaskSize`,
-`Provenance`.
+issue **or** project). `isPromotableToSubIssue` fires only at
+`size ≥ subIssueThreshold` (default `"xl"`); a `WorkItem.size` is compared through
+`sizeOrdinal`, since points and t-shirt words are not directly comparable. Types:
+`TasksFile`, `Task`, `TaskSize`, `Provenance`.
 
 ### Backlog-groom invariants — `audit-backlog.ts` (the GROOM oracle)
 
@@ -281,8 +306,13 @@ priority on every open item; size, both engine-read description sections, no
 open blocker, no foreign assignee, a live project, and a `stage/*` label on
 every READY item; no dead project holding open work; namespaced labels; a
 single-valued `agent/*` state machine; no live item with an unresolved
-`duplicateOf`; state and labels agreeing (GRM-15, each `STATE-n` breach of
-`work-state.ts`). Same contract as the conformance script (stdin or
+`duplicateOf`; and state and labels agreeing.
+
+**GRM-15** reports each `STATE-n` breach from `work-state.ts`, the one rule for
+how state and labels fit together: at most one `stage/*` label; none while
+started; `agent/claimed` only while started; no `agent/ready` while started; no
+`agent/completed` on an open item. `flow status` reports the same breaches on
+in-flight items as drift. Same contract as the conformance script (stdin or
 `--fixture`, `{ ok, failures }`, exit 0/1/2, dependency-free); the
 engine-tests seed a violation per invariant and prove the verdict goes red.
 
@@ -302,7 +332,7 @@ spec's load-bearing decisions:
 | `autonomy.seat`                   | `"pulse"` — sole v1 seat (`watcher` planned) | §10      |
 | `identity.agent` / `.reviewer`    | `"auto"` / `null` — resolved at runtime      | §7       |
 | `gates.review.mergeOnApproval`    | `true` + the §6 recovery ladder              | §6       |
-| `gates.projectCompletion`         | `"advisory"` — recommend, never auto-close   | 1.1.0†  |
+| `gates.projectCompletion`         | `"advisory"` — recommend, never auto-close   | 1.1.0†   |
 
 † The adapter contract's version, not a spec section: this dial exists to drive
 the optional `completeProject` verb added in `adapters/SPEC.md` 1.1.0.
@@ -315,28 +345,10 @@ shape is the Zod schema.
 
 ## P5 — the Flow Engine — Extension (NOT built here)
 
-Phase 5 — the server-side **Flow Engine — Extension** (Linear DOR-88…) — is
-**out of scope** for this spec and **not built here**. v1 is the proven,
-server-free harness; P5 graduates it into the single full-stack DorkOS extension.
-P5 is **additive**, not a rewrite — it promotes the three v1 contracts documented
-above (the **config schema**, the **`PMClient` verbs**, the **`FlowRun` record**)
-plus the typed engine, all of which already exist and are tested.
-
-**What P5 promotes this harness into** (for context, NOT implementation):
-
-- The server **`PMClient`** — the typed `interface PMClient` above, realized as
-  executable code (the tracker adapter's prose contract becomes a class).
-- A webhook / `dorkos.ai` relay + full **Linear Agent Accounts** (true two-account
-  identity, push-driven instead of polled).
-- A server-side **`WorkspaceManager`** graduating the v1 `gtr` worktree flow.
-- The **unattended evidence pipeline** — headless `recordVideo` → automated Linear
-  `fileUpload` / `attachmentCreate` (binary upload), the deferred half of §13
-  (**DOR-95**).
-- **Heartbeat / fencing concurrency** — the v2 `FlowRun.heartbeatAt`, fencing
-  token, atomic multi-claim, and stall-detector (the **DOR-89** server residue).
-- A **second PM adapter** (Jira / GitHub Issues) that proves the agnosticism the
-  one-adapter seam was built for.
-
-**Non-goals reaffirmed (NOT in this spec):** do not build the server `PMClient`,
-the webhook listener, the `WorkspaceManager` service, or the unattended evidence
-pipeline here. v1 ships the proven contracts; P5 promotes them.
+Phase 5 (Linear DOR-88…) is out of scope here. It is **additive**, not a rewrite:
+it promotes the three v1 contracts above plus the typed engine into one server-side
+DorkOS extension. For context only, it adds the typed server `PMClient`, a
+webhook relay with Linear Agent Accounts, a server `WorkspaceManager`, the
+unattended evidence pipeline (**DOR-95**), heartbeat and fencing concurrency
+(**DOR-89**), and a second tracker adapter to prove the seam. None of that is
+built in this spec.

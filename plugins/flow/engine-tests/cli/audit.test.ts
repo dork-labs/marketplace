@@ -89,6 +89,31 @@ describe('flow audit', () => {
     expect(JSON.parse(stranger.stdout).failures[0]).toMatchObject({ invariant: 'GRM-8' });
   });
 
+  it('lets GRM-12 skip exactly the bare labels in groom.unnamespacedLabels', async () => {
+    // Purpose: a team keeps a bare label on purpose (one mirrored from GitHub),
+    // so the config list must reach the oracle, and it must exempt only the
+    // labels it names: another bare label still fails GRM-12.
+    const withBare = (labels: string[]): FakeBacklog => {
+      const backlog = cleanBacklog();
+      backlog.items[0].labels = [...backlog.items[0].labels, ...labels];
+      return backlog;
+    };
+    temp = tempProject({
+      tracker: 'fake',
+      identity: { agent: 'flow-bot' },
+      groom: { unnamespacedLabels: ['cloud-contract'] },
+    });
+    const allowed = await runFlow(['audit', '--json'], temp, withBare(['cloud-contract']));
+    expect(allowed.code).toBe(EXIT.ok);
+
+    const other = await runFlow(['audit', '--json'], temp, withBare(['cloud-contract', 'Bug']));
+    expect(other.code).toBe(EXIT.findings);
+    const [failure] = JSON.parse(other.stdout).failures;
+    expect(failure).toMatchObject({ invariant: 'GRM-12' });
+    expect(failure.detail).toContain('Bug');
+    expect(failure.detail).not.toContain('cloud-contract');
+  });
+
   it('audits a --snapshot file without calling the adapter', async () => {
     // Purpose: a drain reuses one pull across next, audit and status; with
     // --snapshot the tracker must not be touched at all.

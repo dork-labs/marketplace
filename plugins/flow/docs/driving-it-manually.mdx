@@ -19,13 +19,6 @@ The single idea that makes the whole system coherent: a stage command and the au
 
 Each `/flow:<stage>` command is a thin trigger (around 40 lines) over a stage **skill**. The skill is where all the work lives. The autonomous loop reaches that same skill through a different trigger. There is no "manual version" and "auto version" of a stage to drift apart.
 
-<Callout type="info">
-  A slash command and a PM transition into a stage are **two triggers for one skill**. Whether you
-  type `/flow:specify` or the loop advances an item into SPECIFY, the `specifying-work` skill runs
-  the same way. Drive a stage by hand today, hand it to the loop tomorrow, and the behavior is
-  identical.
-</Callout>
-
 This is why manual driving is not a lesser mode. It is the same engine with a human holding the throttle.
 
 ## The stage spine
@@ -182,9 +175,8 @@ VERIFY runs the touched surface, captures proof-of-completion evidence scaled to
 The engine parks. There is no command here: you review the PR yourself.
 
 <Callout type="warn">
-  In v1 the engine does **not** detect your approval. The merge-decision logic exists and is tested,
-  but the unattended detection that fires it is the P5 server build. So in manual mode you **merge
-  the approved PR yourself**, then run the next command.
+  In v1 the engine does **not** notice your approval. **Merge the approved PR yourself**, then run
+  the next command.
 </Callout>
 
 </Step>
@@ -215,7 +207,7 @@ Four commands sit outside the spine. They let you see what is happening and take
 /flow:status
 ```
 
-Renders one pane from the tracker, `flow-state.json`, and the auto-run sentinel: every claimed or in-flight item (with its worktree, branch, and session id), every parked `needs-input` question, and the recorded assumption trail behind each autonomous decision. Reach for it whenever you want to answer "where does everything stand, and why?" without digging.
+Runs `flow status`: every item in flight (with its worktree, branch and session), every parked question, the pause, the drain, and any drift, such as a claimed item with no run behind it. Add an item id to see just that item.
 
 ### `/flow:pause` and `/flow:resume`
 
@@ -235,26 +227,20 @@ Renders one pane from the tracker, `flow-state.json`, and the auto-run sentinel:
 
 Checks this flow install in a few seconds, for free and offline: the adapter checker, your settings and their schema, and flow's own instructions (word budgets, copied rules, broken links, schedule settings). A skipped check is listed as skipped, never as passed. Add `--strict` to fail on a skip.
 
-## Which command should I use?
+## Doing one tracker step yourself
 
-<Cards>
-  <Card title="Advance one stage, then stop">
-    Use `/flow:<stage>` (or `/flow <item>`). One step, questions answered interactively, full
-    control between steps. The default for hands-on work.
-  </Card>
-  <Card title="Not sure where work stands">
-    Use bare `/flow` for the four-intent menu, or `/flow:status` to inspect everything in flight and
-    everything parked on you.
-  </Card>
-  <Card title="Make one safe unit of progress">
-    Pick **Continue the queue** from bare `/flow`. It claims the next-ranked item, carries it to its
-    gate, and stops. No drain, no loop.
-  </Card>
-  <Card title="Drain the whole ready queue by hand">
-    Use `/flow auto`. It drains sequentially from the terminal, server-free, carrying each item to
-    its review gate.
-  </Card>
-</Cards>
+Every stage command moves the item in the tracker with the `flow` command. You can run the same steps yourself, for example after merging a PR by hand. `<flow-root>` is the folder flow is installed in:
+
+```bash
+flow() { node --experimental-strip-types <flow-root>/scripts/flow.ts "$@"; }
+flow next                                  # the next item to work on
+flow claim DOR-201                         # start it and record the run
+flow stage DOR-201 verify                  # move it to another stage
+flow release DOR-201 --reason "blocked"    # let it go, back to the ready queue
+flow done DOR-201 --summary "Shipped" --pr <url>   # post the summary and close it
+```
+
+Add `--dry-run` to see a change before it happens, and `--help` after any verb for its options. While flow is paused, `next` and `claim` need `--manual`. Every change is read back from the tracker, and one that did not stick is reported, never assumed.
 
 ## Manual versus autonomous
 

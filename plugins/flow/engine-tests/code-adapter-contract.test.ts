@@ -1,5 +1,5 @@
 /**
- * One behavioral contract suite for code adapters (adapter contract 2.1.0),
+ * One behavioral contract suite for code adapters (adapter contract 2.2.0),
  * run against the fake tracker AND the real Linear adapter over a stateful,
  * Linear-shaped simulator built from recorded answers.
  *
@@ -42,6 +42,8 @@ interface Harness {
   id(n: number): string;
   /** An identifier of an item that exists but belongs to another team. */
   foreign: string;
+  /** The tracker archives a closed item: gone from team reads, still readable by id. */
+  archive(identifier: string): void;
 }
 
 const SEEDS: Seed[] = [
@@ -82,6 +84,7 @@ const SEEDS: Seed[] = [
 function fakeHarness(): Harness {
   const tracker = new FakeTracker({
     team: { key: 'FAKE', id: 'team-fake' },
+    projects: [{ id: 'proj-1', name: 'Example project' }],
     items: [
       ...SEEDS.map((seed) => ({
         id: `fake-${seed.n}`,
@@ -115,6 +118,7 @@ function fakeHarness(): Harness {
     writes: () => tracker.writes.length,
     id: (n) => `FAKE-${n}`,
     foreign: 'OTHER-7',
+    archive: (identifier) => tracker.archive(identifier),
   };
 }
 
@@ -144,7 +148,17 @@ function linearHarness(): Harness {
     transport: sim.transport,
     warn: () => undefined,
   });
-  return { adapter, writes: sim.writes, id: (n) => `${TEAM.key}-${n}`, foreign: 'FB-7' };
+  return {
+    adapter,
+    writes: sim.writes,
+    id: (n) => `${TEAM.key}-${n}`,
+    foreign: 'FB-7',
+    archive: (identifier) => {
+      const issue = sim.issues.find((i) => i.identifier === identifier);
+      if (issue === undefined) throw new Error(`no ${identifier}`);
+      issue.archived = true;
+    },
+  };
 }
 
 async function rejection(promise: Promise<unknown>): Promise<unknown> {
@@ -312,9 +326,158 @@ describe.each([
       ].sort()
     );
   });
+
+  it('creates an item in the triage state, open in the snapshot, with its labels, project and parent', async () => {
+    const h = make();
+    const before = h.writes();
+    const created = await h.adapter.createItem?.({
+      title: 'Filed by the self-test',
+      description: 'Body.\n\n<!-- flow-selftest:fp=abc123 -->',
+      labels: ['type/task', 'origin/from-agent'],
+      project: 'Example project',
+      parent: h.id(1),
+      priority: 3,
+    });
+    expect(created?.identifier).toMatch(/^[A-Z]+-\d+$/);
+    expect(created?.url).toMatch(/^https:\/\//);
+    expect(h.writes()).toBe(before + 1);
+    const item = await h.adapter.getItem(created?.identifier ?? '');
+    expect(item).toMatchObject({
+      title: 'Filed by the self-test',
+      stateCategory: 'backlog',
+      stateName: 'Triage',
+      parent: h.id(1),
+      priority: 3,
+      type: 'task',
+    });
+    expect(item.description).toContain('flow-selftest:fp=abc123');
+    expect(sorted(item.labels)).toEqual(sorted(['type/task', 'origin/from-agent']));
+    expect(item.project?.name).toBe('Example project');
+    const snapshot = await h.adapter.getBacklogSnapshot();
+    expect(snapshot.items.map((i) => i.identifier)).toContain(created?.identifier);
+  });
+
+  it('creates once per key: a second create with the same key returns the first item', async () => {
+    const h = make();
+    const spec = { title: 'Once', description: 'd', labels: ['type/task'], key: 'fp-once' };
+    const first = await h.adapter.createItem?.(spec);
+    const writes = h.writes();
+    const second = await h.adapter.createItem?.(spec);
+    expect(second?.identifier).toBe(first?.identifier);
+    const snapshot = await h.adapter.getBacklogSnapshot();
+    expect(snapshot.items.filter((i) => i.title === 'Once')).toHaveLength(1);
+    expect(h.writes()).toBe(writes);
+  });
+
+  it('a key names one OPEN item: once it is closed, or closed and archived, the same key creates a new one', async () => {
+    const h = make();
+    const spec = { title: 'Keyed', description: 'd', labels: ['type/task'], key: 'fp-return' };
+    const first = await h.adapter.createItem?.(spec);
+    const item = await h.adapter.getItem(first?.identifier ?? '');
+    await h.adapter.applyWorkState(item, {
+      stateCategory: 'completed',
+      agentLabel: 'agent/completed',
+    });
+    const second = await h.adapter.createItem?.(spec);
+    expect(second?.identifier).not.toBe(first?.identifier);
+
+    const secondItem = await h.adapter.getItem(second?.identifier ?? '');
+    await h.adapter.applyWorkState(secondItem, {
+      stateCategory: 'completed',
+      agentLabel: 'agent/completed',
+    });
+    h.archive(second?.identifier ?? '');
+    const snapshot = await h.adapter.getBacklogSnapshot({ includeClosed: true });
+    expect(snapshot.closed.map((c) => c.identifier)).not.toContain(second?.identifier);
+    const third = await h.adapter.createItem?.(spec);
+    expect([first?.identifier, second?.identifier]).not.toContain(third?.identifier);
+    // And the new one is what the key names now: a retry returns it.
+    expect((await h.adapter.createItem?.(spec))?.identifier).toBe(third?.identifier);
+  });
+
+  it('a key moves past its item when a person archived it while it was still open', async () => {
+    const h = make();
+    const spec = {
+      title: 'Archived open',
+      description: 'd',
+      labels: ['type/task'],
+      key: 'fp-archived-open',
+    };
+    const first = await h.adapter.createItem?.(spec);
+    h.archive(first?.identifier ?? '');
+    const second = await h.adapter.createItem?.(spec);
+    expect(second?.identifier).not.toBe(first?.identifier);
+  });
+
+  it('refuses two labels of one group and any agent label, creating nothing', async () => {
+    const h = make();
+    const before = h.writes();
+    const base = { title: 't', description: 'd' };
+    expect(
+      await rejection(
+        h.adapter.createItem?.({ ...base, labels: ['origin/from-agent', 'origin/human'] }) ??
+          Promise.resolve()
+      )
+    ).toBeInstanceOf(TrackerError);
+    expect(
+      await rejection(
+        h.adapter.createItem?.({ ...base, labels: ['type/task', 'agent/ready'] }) ??
+          Promise.resolve()
+      )
+    ).toBeInstanceOf(PreconditionError);
+    expect(h.writes()).toBe(before);
+  });
+
+  it('refuses to create with a label the team does not have, a missing project or a foreign parent', async () => {
+    const h = make();
+    const before = h.writes();
+    const spec = { title: 't', description: 'd', labels: ['type/task'] };
+    expect(
+      await rejection(
+        h.adapter.createItem?.({ ...spec, labels: ['flow/nope'] }) ?? Promise.resolve()
+      )
+    ).toBeInstanceOf(TrackerError);
+    expect(
+      await rejection(
+        h.adapter.createItem?.({ ...spec, project: 'No such project' }) ?? Promise.resolve()
+      )
+    ).toBeInstanceOf(PreconditionError);
+    expect(
+      await rejection(h.adapter.createItem?.({ ...spec, parent: h.foreign }) ?? Promise.resolve())
+    ).toBeInstanceOf(PreconditionError);
+    expect(h.writes()).toBe(before);
+  });
 });
 
 describe('fake tracker extras (no Linear counterpart)', () => {
+  it('never reuses an identifier: seeded closed history counts, other teams do not, dropped writes still advance', async () => {
+    const base = {
+      description: '',
+      type: 'task' as const,
+      stateCategory: 'unstarted' as const,
+      stateName: 'Todo',
+      parent: null,
+      relations: { blocks: [], blockedBy: [], children: [], relatedTo: [] },
+      labels: [],
+    };
+    const tracker = new FakeTracker({
+      team: { key: 'FAKE', id: 'team-fake' },
+      items: [
+        { ...base, id: 'f2', identifier: 'FAKE-2', title: 'open' },
+        { ...base, id: 'o9', identifier: 'OTHER-90', title: 'foreign' },
+      ],
+      closed: [{ identifier: 'FAKE-7', title: 'old', stateCategory: 'completed' }],
+    });
+    const made = await tracker.adapter.createItem?.({ title: 'x', description: '', labels: [] });
+    expect(made?.identifier).toBe('FAKE-8');
+
+    const dropping = new FakeTracker({ items: [], dropWrites: true });
+    const a = await dropping.adapter.createItem?.({ title: 'a', description: '', labels: [] });
+    const b = await dropping.adapter.createItem?.({ title: 'b', description: '', labels: [] });
+    expect(a?.identifier).not.toBe(b?.identifier);
+    expect(dropping.backlog.items).toEqual([]);
+  });
+
   it('a merged PR closes the items it names and leaves their labels alone', () => {
     const tracker = new FakeTracker({
       team: { key: 'FAKE', id: 'team-fake' },

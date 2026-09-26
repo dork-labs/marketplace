@@ -313,7 +313,8 @@ function journal(report: SelftestReport, run: SelftestRun): void {
 async function file(report: SelftestReport, run: SelftestRun): Promise<FilingResult> {
   const failing = report.checks.filter((check) => check.status === 'fail');
   try {
-    if (failing.length === 0) return { commented: [], declined: [], notRefiled: [], wouldFile: [] };
+    if (failing.length === 0)
+      return { commented: [], declined: [], notRefiled: [], filed: [], wouldFile: [] };
     const { loadConfig } = await import('./config-load.ts');
     const { requireCapabilities } = await import('./tracker/load.ts');
     const { config } = loadConfig(findConfigRoots(run.projectDir, run.flowRoot), run.env);
@@ -342,6 +343,7 @@ async function file(report: SelftestReport, run: SelftestRun): Promise<FilingRes
       commented: [],
       declined: [],
       notRefiled: [],
+      filed: [],
       wouldFile: [],
       error: (err as Error).message,
     };
