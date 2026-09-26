@@ -57,6 +57,7 @@ import {
   type LaunchRequest,
   type Launcher,
   type ProbeResult,
+  type SendOptions,
   type SendResult,
   type SessionHandle,
   type SessionState,
@@ -471,9 +472,19 @@ export function createCmuxLauncher(deps: CmuxLauncherDeps): Launcher {
     );
   }
 
-  async function send(h: SessionHandle, messageFile: string): Promise<SendResult> {
+  async function send(
+    given: SessionHandle,
+    messageFile: string,
+    opts: SendOptions = {}
+  ): Promise<SendResult> {
     validateMessageFile(messageFile);
     refuseBackslash('The message file', messageFile);
+    if (opts.model !== undefined && !/^[A-Za-z0-9._:/@\[\]-]+$/.test(opts.model)) {
+      throw new LaunchError('bad-request', `The model "${opts.model}" is not a model name.`);
+    }
+    // A live session switches with `/model <m>` before the pointer; a resumed
+    // one starts with `--model <m>` (the handle's model).
+    const h: SessionHandle = opts.model === undefined ? given : { ...given, model: opts.model };
     if (h.configDir === undefined || h.permissionMode === undefined) {
       throw new LaunchError(
         'bad-request',
@@ -486,6 +497,12 @@ export function createCmuxLauncher(deps: CmuxLauncherDeps): Launcher {
         throw new LaunchError(
           'unavailable',
           `The session's process (${h.pid}) is running, but no cmux surface hosts it.`
+        );
+      }
+      if (opts.model !== undefined) {
+        await cmux(
+          ['send', '--surface', surface, '--', `/model ${opts.model}\\n`],
+          `send to ${surface}`
         );
       }
       await sendPointer(surface, messageFile);

@@ -75,6 +75,8 @@ interface FakeOptions extends Omit<HarnessOptions, 'runtime'> {
   apiStatus?: number;
   /** A body `/api/*` answers with, echoing the request's Authorization header. */
   echoAuth?: boolean;
+  /** Refuse `PATCH /api/sessions/:id` model changes with 400. */
+  refuseModel?: boolean;
 }
 
 /** One HTTP request the fake saw. */
@@ -305,6 +307,14 @@ async function makeDorkosHarness(options: FakeOptions = {}): Promise<DorkosHarne
         });
       }
       return json(202, { sessionId: aliases.get(id) ?? id, messageId: 'm1' });
+    }
+
+    const patch = /^\/api\/sessions\/([^/?]+)$/.exec(url);
+    if (patch && req.method === 'PATCH') {
+      if (options.refuseModel) {
+        return json(400, { error: 'That model is not available here', code: 'MODEL_UNAVAILABLE' });
+      }
+      return json(200, { ok: true });
     }
 
     const get = /^\/api\/sessions\/([^/?]+)$/.exec(url);
@@ -666,6 +676,43 @@ describe('dorkos launcher: the session it records', () => {
       const err = await launchFailure(h.launcher.start(requestFor(h, { sessionId: 'not-a-uuid' })));
       expect(err.code).toBe('bad-request');
       expect(h.requests().filter((r) => r.url !== '/api/health')).toEqual([]);
+    });
+  });
+});
+
+describe('dorkos launcher: switching the model (spec §5.2a)', () => {
+  // The session's model is written before the message, so the turn runs on it.
+  it('PATCHes the model before sending, and records it on the handle', async () => {
+    await withFake({ mcp: 'without-tool' }, async (h) => {
+      const handle = await h.launcher.start(requestFor(h));
+      const sent = await h.launcher.send(handle, h.messageFile, { model: 'sonnet' });
+      const seen = h
+        .requests()
+        .filter((r) => r.url.startsWith(`/api/sessions/${handle.sessionId}`));
+      const patchAt = seen.findIndex((r) => r.method === 'PATCH');
+      expect(patchAt).toBeGreaterThan(-1);
+      expect(seen[patchAt]?.body).toEqual({ model: 'sonnet' });
+      expect(seen.slice(patchAt).some((r) => r.method === 'POST')).toBe(true);
+      expect(sent.handle.model).toBe('sonnet');
+    });
+  });
+
+  // A DorkOS that will not switch this session reports unsupported and sends nothing.
+  it('a refused model change is unsupported, and no message goes out', async () => {
+    await withFake({ mcp: 'without-tool', refuseModel: true }, async (h) => {
+      const handle = await h.launcher.start(requestFor(h));
+      const before = h.requests().length;
+      await expect(
+        h.launcher.send(handle, h.messageFile, { model: 'sonnet' })
+      ).rejects.toMatchObject({
+        code: 'unsupported',
+      });
+      expect(
+        h
+          .requests()
+          .slice(before)
+          .some((r) => r.method === 'POST')
+      ).toBe(false);
     });
   });
 });

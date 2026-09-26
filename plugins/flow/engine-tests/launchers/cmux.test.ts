@@ -489,6 +489,32 @@ describe('cmux launcher details', () => {
     });
   });
 
+  // Model fallback (spec §5.2a): a live session is switched with /model before
+  // the pointer, and the handle records the new model for a later resume.
+  it('send with a model types /model <m> first, then the pointer', async () => {
+    await withCmux({}, async (h) => {
+      const handle = await h.launcher.start(requestFor(h));
+      const sent = await h.launcher.send(handle, h.messageFile, { model: 'sonnet' });
+      const sends = argvOf(h, 'send').slice(1);
+      expect(sends).toEqual([
+        ['send', '--surface', 'surface:1', '--', '/model sonnet\\n'],
+        [
+          'send',
+          '--surface',
+          'surface:1',
+          '--',
+          `Read ${h.messageFile} and do exactly what it says.\\n`,
+        ],
+      ]);
+      expect(sent.handle.model).toBe('sonnet');
+      await expect(
+        h.launcher.send(handle, h.messageFile, { model: 'x; rm -rf /' })
+      ).rejects.toMatchObject({
+        code: 'bad-request',
+      });
+    });
+  });
+
   // Surface numbers change across a cmux restart: send finds the session's
   // surface again from its pid instead of trusting the handle's.
   it('re-resolves the surface from the pid after a restart renumbers it', async () => {

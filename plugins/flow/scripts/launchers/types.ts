@@ -188,6 +188,12 @@ export interface SendResult {
   handle: SessionHandle;
 }
 
+/** Options for {@link Launcher.send}. */
+export interface SendOptions {
+  /** Run the session's next turn on this model (a `models.bindings` value). */
+  model?: string;
+}
+
 /** What {@link Launcher.stop} did. */
 export type StopResult = 'stopped' | 'left-idle' | 'not-running';
 
@@ -212,8 +218,13 @@ export interface Launcher {
    * anything starts, and never another host or runtime in its place.
    */
   start(req: LaunchRequest): Promise<SessionHandle>;
-  /** Deliver a message file to a session, resuming it if it has exited. */
-  send(h: SessionHandle, messageFile: string): Promise<SendResult>;
+  /**
+   * Deliver a message file to a session, resuming it if it has exited. With
+   * `opts.model`, the session runs its next turn on that model (spec §5.2a
+   * model fallback) and the returned handle records it; a host that cannot
+   * switch this session's model throws `unsupported` and sends nothing.
+   */
+  send(h: SessionHandle, messageFile: string, opts?: SendOptions): Promise<SendResult>;
   /** What the session is doing now. */
   state(h: SessionHandle): Promise<SessionState>;
   /** Stop a session flow started. Never kills anything flow did not start. */

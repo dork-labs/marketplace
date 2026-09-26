@@ -59,6 +59,7 @@ import {
   type LaunchRequest,
   type Launcher,
   type ProbeResult,
+  type SendOptions,
   type SendResult,
   type SessionHandle,
   type SessionState,
@@ -300,7 +301,7 @@ export function createDorkosLauncher(deps: DorkosLauncherDeps): Launcher {
 
   /** One HTTP request to DorkOS. Throws `unavailable` when DorkOS does not answer at all. */
   async function request(
-    method: 'GET' | 'POST',
+    method: 'GET' | 'POST' | 'PATCH',
     route: string,
     init: { body?: unknown; headers?: Record<string, string>; timeout?: number } = {}
   ): Promise<Reply & { text: string; contentType: string }> {
@@ -533,8 +534,26 @@ export function createDorkosLauncher(deps: DorkosLauncherDeps): Launcher {
     );
   }
 
-  async function send(h: SessionHandle, messageFile: string): Promise<SendResult> {
+  async function send(
+    h: SessionHandle,
+    messageFile: string,
+    opts: SendOptions = {}
+  ): Promise<SendResult> {
     validateMessageFile(messageFile);
+    if (opts.model !== undefined) {
+      // The session's model setting, written before the message so the turn
+      // runs on it. DorkOS refusing it means this session cannot switch.
+      const patched = await request('PATCH', `/api/sessions/${encodeURIComponent(h.sessionId)}`, {
+        body: { model: opts.model },
+      });
+      if (patched.status === 401 || patched.status === 403) apiFailure(patched, 'the model change');
+      if (patched.status < 200 || patched.status >= 300) {
+        throw new LaunchError(
+          'unsupported',
+          `DorkOS would not switch this session to ${opts.model}: ${serverMessage(patched.body)}`
+        );
+      }
+    }
     const reply = await request(
       'POST',
       `/api/sessions/${encodeURIComponent(h.sessionId)}/messages`,
@@ -543,7 +562,10 @@ export function createDorkosLauncher(deps: DorkosLauncherDeps): Launcher {
       }
     );
     if (reply.status < 200 || reply.status >= 300) apiFailure(reply, 'the message');
-    return { result: 'delivered', handle: h };
+    return {
+      result: 'delivered',
+      handle: opts.model === undefined ? h : { ...h, model: opts.model },
+    };
   }
 
   async function state(h: SessionHandle): Promise<SessionState> {
