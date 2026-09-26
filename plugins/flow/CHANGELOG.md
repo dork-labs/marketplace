@@ -4,7 +4,7 @@ Installs of this plugin are pinned to a commit SHA, so a fix here does not reach
 you until you **reinstall it** (Marketplace → flow → reinstall, or re-run your
 `--plugin-dir` checkout's `git pull`). Each entry below says whether that matters.
 
-## 0.27.0
+## 0.28.0
 
 **Your main Claude Code sign-in now shows up in flow, even when you have listed other accounts. Reinstall to get it.**
 
@@ -14,6 +14,16 @@ you until you **reinstall it** (Marketplace → flow → reinstall, or re-run yo
 - Next to listed accounts, that sign-in counts as your `main` account: flow keeps half of its weekly limit for you and uses it last. Give another account the `main` role, or give `default` any role, and your choice wins.
 - `flow usage probe default --yes` now checks that sign-in, `flow usage install-statusline` sets up its status line, and the status line records it. A session in a folder that is neither listed nor the default still records nothing.
 - The shared test files DorkOS checks itself against are now version 3.0.0: what `default` means changed, so DorkOS must update its side too.
+
+## 0.27.0
+
+**flow can now file new tracker items itself, and `/flow:self-test --file` does. Reinstall to get it.**
+
+- The tracker adapter contract gains a create step (version 2.2.0). The Linear adapter implements it: it checks that every label and the project exist first, and never creates a label.
+- `/flow:self-test --file` now creates an item for each new failure, after checking the tracker for one already filed with the same fingerprint. A failure that already has an open item still gets a comment instead, and one a person declined is left alone.
+- New items land in your tracker's triage state and are never marked ready: triage still decides.
+- Filing the same failure twice, from a retry or from two runs at once, still makes one item.
+- A custom adapter without the create step keeps working: `--file` lists what it would file, as before.
 
 ## 0.26.0
 

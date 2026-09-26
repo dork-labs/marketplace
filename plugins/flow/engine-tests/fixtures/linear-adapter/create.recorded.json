@@ -1,0 +1,447 @@
+{
+  "recordedAt": "2026-09-26",
+  "composio": "0.2.31",
+  "note": "The SHAPES are recorded from real Linear calls: read-only reads of a real team, one real create with a client-chosen id (it filed a needed item and landed in Triage), the same create sent again, and one rejected label update. The VALUES are synthesized: label ids, project ids and names, the item's id, identifier and url, and the team id. Only the generic label families and one bare label are kept. The created-read answer carries archivedAt and the state type, so a keyed item that closed or was archived is told apart from an open one. createdReadArchived is a real read of an archived issue whose state is still open.",
+  "createRead": {
+    "query": "query FlowCreateRead($teamId: String!) {\n  team(id: $teamId) {\n    createLabels: labels(first: 250) { nodes { id name isGroup parent { name } } }\n  }\n}",
+    "response": {
+      "successful": true,
+      "data": {
+        "composio_execution_message": null,
+        "data": {
+          "team": {
+            "createLabels": {
+              "nodes": [
+                {
+                  "id": "lbl-stage-triage",
+                  "name": "triage",
+                  "isGroup": false,
+                  "parent": {
+                    "name": "stage"
+                  }
+                },
+                {
+                  "id": "lbl-stage-verify",
+                  "name": "verify",
+                  "isGroup": false,
+                  "parent": {
+                    "name": "stage"
+                  }
+                },
+                {
+                  "id": "lbl-stage-execute",
+                  "name": "execute",
+                  "isGroup": false,
+                  "parent": {
+                    "name": "stage"
+                  }
+                },
+                {
+                  "id": "lbl-stage-specify",
+                  "name": "specify",
+                  "isGroup": false,
+                  "parent": {
+                    "name": "stage"
+                  }
+                },
+                {
+                  "id": "lbl-stage-ideate",
+                  "name": "ideate",
+                  "isGroup": false,
+                  "parent": {
+                    "name": "stage"
+                  }
+                },
+                {
+                  "id": "lbl-stage-capture",
+                  "name": "capture",
+                  "isGroup": false,
+                  "parent": {
+                    "name": "stage"
+                  }
+                },
+                {
+                  "id": "lbl-stage-done",
+                  "name": "done",
+                  "isGroup": false,
+                  "parent": {
+                    "name": "stage"
+                  }
+                },
+                {
+                  "id": "lbl-stage-decompose",
+                  "name": "decompose",
+                  "isGroup": false,
+                  "parent": {
+                    "name": "stage"
+                  }
+                },
+                {
+                  "id": "lbl-group-stage",
+                  "name": "stage",
+                  "isGroup": true,
+                  "parent": null
+                },
+                {
+                  "id": "lbl-agent-needs-input",
+                  "name": "needs-input",
+                  "isGroup": false,
+                  "parent": {
+                    "name": "agent"
+                  }
+                },
+                {
+                  "id": "lbl-origin-from-signal",
+                  "name": "from-signal",
+                  "isGroup": false,
+                  "parent": {
+                    "name": "origin"
+                  }
+                },
+                {
+                  "id": "lbl-origin-from-agent",
+                  "name": "from-agent",
+                  "isGroup": false,
+                  "parent": {
+                    "name": "origin"
+                  }
+                },
+                {
+                  "id": "lbl-origin-human",
+                  "name": "human",
+                  "isGroup": false,
+                  "parent": {
+                    "name": "origin"
+                  }
+                },
+                {
+                  "id": "lbl-agent-completed",
+                  "name": "completed",
+                  "isGroup": false,
+                  "parent": {
+                    "name": "agent"
+                  }
+                },
+                {
+                  "id": "lbl-agent-claimed",
+                  "name": "claimed",
+                  "isGroup": false,
+                  "parent": {
+                    "name": "agent"
+                  }
+                },
+                {
+                  "id": "lbl-agent-ready",
+                  "name": "ready",
+                  "isGroup": false,
+                  "parent": {
+                    "name": "agent"
+                  }
+                },
+                {
+                  "id": "lbl-type-meta",
+                  "name": "meta",
+                  "isGroup": false,
+                  "parent": {
+                    "name": "type"
+                  }
+                },
+                {
+                  "id": "lbl-type-signal",
+                  "name": "signal",
+                  "isGroup": false,
+                  "parent": {
+                    "name": "type"
+                  }
+                },
+                {
+                  "id": "lbl-type-monitor",
+                  "name": "monitor",
+                  "isGroup": false,
+                  "parent": {
+                    "name": "type"
+                  }
+                },
+                {
+                  "id": "lbl-type-task",
+                  "name": "task",
+                  "isGroup": false,
+                  "parent": {
+                    "name": "type"
+                  }
+                },
+                {
+                  "id": "lbl-type-hypothesis",
+                  "name": "hypothesis",
+                  "isGroup": false,
+                  "parent": {
+                    "name": "type"
+                  }
+                },
+                {
+                  "id": "lbl-type-research",
+                  "name": "research",
+                  "isGroup": false,
+                  "parent": {
+                    "name": "type"
+                  }
+                },
+                {
+                  "id": "lbl-type-idea",
+                  "name": "idea",
+                  "isGroup": false,
+                  "parent": {
+                    "name": "type"
+                  }
+                },
+                {
+                  "id": "lbl-group-origin",
+                  "name": "origin",
+                  "isGroup": true,
+                  "parent": null
+                },
+                {
+                  "id": "lbl-group-agent",
+                  "name": "agent",
+                  "isGroup": true,
+                  "parent": null
+                },
+                {
+                  "id": "lbl-group-type",
+                  "name": "type",
+                  "isGroup": true,
+                  "parent": null
+                },
+                {
+                  "id": "lbl-bug",
+                  "name": "Bug",
+                  "isGroup": false,
+                  "parent": null
+                }
+              ]
+            }
+          }
+        },
+        "errors": null,
+        "extensions": null
+      },
+      "error": null,
+      "logId": "log_recorded"
+    }
+  },
+  "projectByName": {
+    "query": "query FlowCreateProject($teamId: String!, $name: String!) {\n  team(id: $teamId) {\n    createProjects: projects(first: 2, filter: { name: { eq: $name } }) { nodes { id name } }\n  }\n}",
+    "variables": {
+      "teamId": "00000000-0000-4000-8000-00000000team",
+      "name": "Example project"
+    },
+    "response": {
+      "successful": true,
+      "data": {
+        "composio_execution_message": null,
+        "data": {
+          "team": {
+            "createProjects": {
+              "nodes": [
+                {
+                  "id": "proj-1",
+                  "name": "Example project"
+                }
+              ]
+            }
+          }
+        },
+        "errors": null,
+        "extensions": null
+      },
+      "error": null,
+      "logId": "log_recorded"
+    }
+  },
+  "projectById": {
+    "query": "query FlowCreateProjectById($teamId: String!, $id: ID!) {\n  team(id: $teamId) {\n    createProjects: projects(first: 2, filter: { id: { eq: $id } }) { nodes { id name } }\n  }\n}",
+    "variables": {
+      "teamId": "00000000-0000-4000-8000-00000000team",
+      "id": "proj-1"
+    },
+    "response": {
+      "successful": true,
+      "data": {
+        "composio_execution_message": null,
+        "data": {
+          "team": {
+            "createProjects": {
+              "nodes": [
+                {
+                  "id": "proj-1",
+                  "name": "Example project"
+                }
+              ]
+            }
+          }
+        },
+        "errors": null,
+        "extensions": null
+      },
+      "error": null,
+      "logId": "log_recorded"
+    }
+  },
+  "projectMissing": {
+    "query": "query FlowCreateProject($teamId: String!, $name: String!) {\n  team(id: $teamId) {\n    createProjects: projects(first: 2, filter: { name: { eq: $name } }) { nodes { id name } }\n  }\n}",
+    "response": {
+      "successful": true,
+      "data": {
+        "composio_execution_message": "EMPTY RESULT (team.createProjects): The query executed successfully but returned no matching data. This is a valid response if no records match your criteria. If you expected results, verify your filter values and entity access permissions.",
+        "data": {
+          "team": {
+            "createProjects": {
+              "nodes": []
+            }
+          }
+        },
+        "errors": null,
+        "extensions": null
+      },
+      "error": null,
+      "logId": "log_recorded"
+    }
+  },
+  "create": {
+    "query": "mutation FlowCreateItem($input: IssueCreateInput!) {\n  issueCreate(input: $input) { success issue { id identifier url } }\n}",
+    "variables": {
+      "input": {
+        "id": "00000000-0000-4000-8000-000000000999",
+        "teamId": "00000000-0000-4000-8000-00000000team",
+        "title": "A new item",
+        "description": "Body.",
+        "labelIds": [
+          "lbl-origin-from-agent",
+          "lbl-type-task"
+        ],
+        "projectId": "proj-1",
+        "priority": 4
+      }
+    },
+    "response": {
+      "successful": true,
+      "data": {
+        "composio_execution_message": null,
+        "data": {
+          "issueCreate": {
+            "issue": {
+              "id": "00000000-0000-4000-8000-000000000999",
+              "identifier": "DOR-999",
+              "url": "https://linear.app/example/issue/DOR-999/a-new-item"
+            },
+            "success": true
+          }
+        },
+        "errors": null,
+        "extensions": null
+      },
+      "error": null,
+      "logId": "log_recorded"
+    },
+    "landedIn": {
+      "state": {
+        "name": "Triage",
+        "type": "triage"
+      }
+    }
+  },
+  "createAgain": {
+    "note": "The same input sent a second time: Linear refuses a second insert with that id.",
+    "query": "mutation FlowCreateItem($input: IssueCreateInput!) {\n  issueCreate(input: $input) { success issue { id identifier url } }\n}",
+    "response": {
+      "successful": false,
+      "data": {
+        "message": "Message: conflict on insert of Issue | Code: INPUT_ERROR | Path: issueCreate | Locations: line 2 col 3 | Details: Entity Issue with id 00000000-0000-4000-8000-000000000999 already exists.",
+        "status_code": 200
+      },
+      "error": "Message: conflict on insert of Issue | Code: INPUT_ERROR | Path: issueCreate | Locations: line 2 col 3 | Details: Entity Issue with id 00000000-0000-4000-8000-000000000999 already exists.",
+      "logId": "log_recorded"
+    }
+  },
+  "createdRead": {
+    "query": "query FlowCreatedRead($id: String!) {\n  issue(id: $id) { id identifier url archivedAt state { type } team { id key } }\n}",
+    "response": {
+      "successful": true,
+      "data": {
+        "composio_execution_message": null,
+        "data": {
+          "issue": {
+            "archivedAt": null,
+            "id": "00000000-0000-4000-8000-000000000999",
+            "identifier": "DOR-999",
+            "state": {
+              "type": "triage"
+            },
+            "team": {
+              "id": "00000000-0000-4000-8000-00000000team",
+              "key": "DOR"
+            },
+            "url": "https://linear.app/example/issue/DOR-999/a-new-item"
+          }
+        },
+        "errors": null,
+        "extensions": null
+      },
+      "error": null,
+      "logId": "log_recorded"
+    }
+  },
+  "createdReadMissing": {
+    "query": "query FlowCreatedRead($id: String!) {\n  issue(id: $id) { id identifier url archivedAt state { type } team { id key } }\n}",
+    "response": {
+      "successful": false,
+      "data": {
+        "message": "Message: Entity not found: Issue | Code: INPUT_ERROR | Path: issue | Locations: line 2 col 3 | Details: Could not find referenced Issue. | EXPLANATION: The provided issue ID parameter (such as id, issueId, or parentId) does not correspond to an existing issue. This commonly occurs with: issueUpdate(id: ...), issueDelete(id: ...), or any mutation/query accepting issueId/parentId. Ensure the ID is a valid UUID format (xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx) and corresponds to an existing issue. Use LINEAR_LIST_LINEAR_ISSUES or LINEAR_GET_LINEAR_ISSUE to find valid issue UUIDs.",
+        "status_code": 200
+      },
+      "error": "Message: Entity not found: Issue | Code: INPUT_ERROR | Path: issue | Locations: line 2 col 3 | Details: Could not find referenced Issue. | EXPLANATION: The provided issue ID parameter (such as id, issueId, or parentId) does not correspond to an existing issue. This commonly occurs with: issueUpdate(id: ...), issueDelete(id: ...), or any mutation/query accepting issueId/parentId. Ensure the ID is a valid UUID format (xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx) and corresponds to an existing issue. Use LINEAR_LIST_LINEAR_ISSUES or LINEAR_GET_LINEAR_ISSUE to find valid issue UUIDs.",
+      "logId": "log_recorded"
+    }
+  },
+  "twoLabelsOneGroup": {
+    "note": "An issueUpdate with two origin/* labels, rejected: Linear applies one label per group. Nothing was written.",
+    "response": {
+      "successful": false,
+      "data": {
+        "message": "Message: labelIds not exclusive child labels | Code: INPUT_ERROR | Path: issueUpdate | Locations: line 1 col 55 | Details: The label 'from-agent' is in the same group as 'human'. Only one label in a group can be applied to an issue. | EXPLANATION: The provided label_ids contain multiple labels from the same exclusive label group. In Linear, labels can be organized into groups where only ONE label from each group can be applied to an issue. To fix this: (1) Use LINEAR_LIST_LINEAR_LABELS with team_id to see label relationships (check isGroup and parent fields), (2) Identify which labels share the same parent group, (3) Select only ONE label per group.",
+        "status_code": 200
+      },
+      "error": "Message: labelIds not exclusive child labels | Code: INPUT_ERROR | Path: issueUpdate | Locations: line 1 col 55 | Details: The label 'from-agent' is in the same group as 'human'. Only one label in a group can be applied to an issue. | EXPLANATION: The provided label_ids contain multiple labels from the same exclusive label group. In Linear, labels can be organized into groups where only ONE label from each group can be applied to an issue. To fix this: (1) Use LINEAR_LIST_LINEAR_LABELS with team_id to see label relationships (check isGroup and parent fields), (2) Identify which labels share the same parent group, (3) Select only ONE label per group.",
+      "logId": "log_recorded"
+    }
+  },
+  "createdReadArchived": {
+    "note": "A real issue that is archived while still open (triage): read by id, it carries archivedAt and an open state type.",
+    "query": "query FlowCreatedRead($id: String!) {\n  issue(id: $id) { id identifier url archivedAt state { type } team { id key } }\n}",
+    "response": {
+      "successful": true,
+      "data": {
+        "composio_execution_message": null,
+        "data": {
+          "issue": {
+            "archivedAt": "2026-07-28T14:18:16.136Z",
+            "id": "00000000-0000-4000-8000-000000000999",
+            "identifier": "DOR-999",
+            "state": {
+              "type": "triage"
+            },
+            "team": {
+              "id": "00000000-0000-4000-8000-00000000team",
+              "key": "DOR"
+            },
+            "url": "https://linear.app/example/issue/DOR-999/a-new-item"
+          }
+        },
+        "errors": null,
+        "extensions": null
+      },
+      "error": null,
+      "logId": "log_recorded"
+    }
+  }
+}
