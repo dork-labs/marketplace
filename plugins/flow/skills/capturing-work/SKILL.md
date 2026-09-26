@@ -37,13 +37,13 @@ which signs the description and lands the item in the tracker's intake state.
      no single quote inside it;
    - the input as the description, with its source path if it came from a file.
      Only one plain line goes in `--description '<text>'`. Text with more lines,
-     or any of `` ` `` `$` `'` `"` `\`, breaks a shell argument: write it to a
-     file OUTSIDE the checkout (under the OS temp dir) and pass
-     `--description-file <file>`;
+     or any of `` ` `` `$` `'` `"` `\`, breaks a shell argument: write it to
+     `.dork/flow/tmp/<key>.md` in the project and pass `--description-file`
+     instead (flow deletes that file once the item is filed);
    - `type/idea` always: TRIAGE re-classifies it. `origin/human`: the operator
      had the thought;
-   - `--key`: a short, specific slug of the thought, so a retried capture
-     returns the first item instead of filing it twice;
+   - `--key`: a short, specific slug, so a retried capture returns the first
+     item instead of filing twice;
    - no priority or size: those come at TRIAGE.
 
 4. **Report** `<identifier> - <title>` and that it awaits triage. When

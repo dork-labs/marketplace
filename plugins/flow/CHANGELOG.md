@@ -12,6 +12,7 @@ you until you **reinstall it** (Marketplace → flow → reinstall, or re-run yo
 - `/flow:capture` now uses it, so a captured idea always lands in triage as an `idea` with `origin/human`, never ready to work on and with no priority.
 - Give it a `--key` and running it twice files one item, not two: the second run says the idea was already captured and shows that item's title. Once that item is closed, the same key files a new one. A key belongs to one team, so the same key in another team files its own item.
 - It refuses, before it touches the tracker, an empty title, a label that would mark the item ready (`agent/*`), two labels from one group, and a priority outside 0 to 4. `--dry-run` shows what it would file and files nothing.
+- A long description can come from a file. When that file is in `.dork/flow/tmp/`, flow deletes it once the item is filed, so it never ends up in your repository. Files anywhere else are left alone.
 - If your tracker's adapter cannot create items, it stops and says so instead of trying another way.
 - The self-test's live capture check now checks the real result: exactly one new item, with an origin, not ready.
 

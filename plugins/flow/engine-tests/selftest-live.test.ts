@@ -72,7 +72,27 @@ const init = process.env.STUB_NO_INIT
       apiKeySource: process.env.STUB_API_KEY_SOURCE || (process.env.ANTHROPIC_API_KEY ? 'ANTHROPIC_API_KEY' : 'none'),
       slash_commands: ['flow:capture', 'flow:decompose', 'flow:done'],
     }) + '\\n';
-const events = init + (process.env.STUB_STREAM
+// STUB_CAPTURE_FLOW_ROOT: act as a capturing agent would. Write the description
+// to .dork/flow/tmp/ in the project, run the real flow create on it, and report
+// both as tool calls.
+let acted = '';
+if (process.env.STUB_CAPTURE_FLOW_ROOT) {
+  const file = path.join(process.cwd(), '.dork', 'flow', 'tmp', 'csv.md');
+  const content = 'People want the monthly report as a CSV file.\\nIt has "quotes" and a $sign.\\n';
+  fs.mkdirSync(path.dirname(file), { recursive: true });
+  fs.writeFileSync(file, content);
+  const flowTs = path.join(process.env.STUB_CAPTURE_FLOW_ROOT, 'scripts', 'flow.ts');
+  const argv = ['--experimental-strip-types', flowTs, 'create', '--title', 'Export the monthly report as CSV',
+    '--description-file', '.dork/flow/tmp/csv.md', '--label', 'type/idea', '--label', 'origin/human', '--key', 'csv', '--json'];
+  require('node:child_process').execFileSync(process.execPath, argv, { stdio: 'ignore' });
+  const command = 'node ' + argv.slice(0, 3).join(' ') + " --title 'Export the monthly report as CSV'" +
+    ' --description-file .dork/flow/tmp/csv.md --label type/idea --label origin/human --key csv --json';
+  acted = [
+    { type: 'assistant', message: { content: [{ type: 'tool_use', name: 'Write', input: { file_path: file, content } }] } },
+    { type: 'assistant', message: { content: [{ type: 'tool_use', name: 'Bash', input: { command } }] } },
+  ].map((e) => JSON.stringify(e)).join('\\n') + '\\n';
+}
+const events = init + acted + (process.env.STUB_STREAM
   ? fs.readFileSync(process.env.STUB_STREAM, 'utf8')
   : [
       { type: 'assistant', message: { content: [{ type: 'tool_use', name: 'Read', input: { file_path: 'README.md' } }] } },
@@ -351,6 +371,19 @@ describe('the live tier runner', { timeout: LIVE_TIMEOUT }, () => {
     expect(result.checks[0].status).toBe('fail');
     expect(result.checks[0].detail).toMatch(/^breach: Bash ran a command naming composio/);
     expect(result.checks[0].costUsd).toBeCloseTo(0.05);
+  });
+
+  it('passes capture when the agent writes its description under .dork/flow/tmp and runs flow create', async () => {
+    // Purpose: the skill's scratch file sits inside the sandbox, so the breach
+    // check allows it; the real flow create files one item and removes the file.
+    const capture = LIVE_CASES.find((c) => c.id === 'capture') as RunnableCase;
+    const result = await runLive({
+      flowRoot: FLOW_ROOT,
+      env: armed({ STUB_CAPTURE_FLOW_ROOT: FLOW_ROOT }),
+      maxUsd: 1,
+      cases: [capture],
+    });
+    expect(result.checks[0]).toMatchObject({ id: 'live/capture', status: 'pass' });
   });
 
   it('reports a run with no result event as a failure, not a pass', async () => {

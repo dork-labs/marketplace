@@ -6,7 +6,15 @@
  */
 
 import { execFileSync } from 'node:child_process';
-import { mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
+import {
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  realpathSync,
+  rmSync,
+  writeFileSync,
+} from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
@@ -236,6 +244,46 @@ describe('flow create', () => {
     );
     expect(run.code).toBe(EXIT.ok);
     expect(t.fake.backlog.items[0].description.startsWith('From a file.\n\n— 🤖 /flow')).toBe(true);
+  });
+
+  it('removes a description file under .dork/flow/tmp once filed, and keeps one elsewhere', async () => {
+    // Purpose: the capture's scratch file never lingers where git could pick it up,
+    // and flow never deletes a file the operator keeps.
+    const scratch = path.join(project, '.dork', 'flow', 'tmp', 'idea.md');
+    mkdirSync(path.dirname(scratch), { recursive: true });
+    writeFileSync(scratch, 'Scratch idea.\n');
+    writeFileSync(path.join(project, 'kept.md'), 'Kept idea.\n');
+    // A look-alike outside the scratch folder is kept.
+    mkdirSync(path.join(project, '.dork', 'flow', 'tmp-not'), { recursive: true });
+    writeFileSync(path.join(project, '.dork', 'flow', 'tmp-not', 'x.md'), 'Near miss.\n');
+    const t = tracker();
+    const args = (file: string) => ['create', '--title', 'T', '--description-file', file];
+
+    const dry = await flow([...args('.dork/flow/tmp/idea.md'), '--dry-run'], t);
+    expect(dry.code).toBe(EXIT.ok);
+    expect(existsSync(scratch)).toBe(true);
+
+    expect((await flow(args('.dork/flow/tmp/idea.md'), t)).code).toBe(EXIT.ok);
+    expect(existsSync(scratch)).toBe(false);
+    expect(t.fake.backlog.items[0].description.startsWith('Scratch idea.')).toBe(true);
+
+    expect((await flow(args('kept.md'), t)).code).toBe(EXIT.ok);
+    expect(existsSync(path.join(project, 'kept.md'))).toBe(true);
+    expect((await flow(args('.dork/flow/tmp-not/x.md'), t)).code).toBe(EXIT.ok);
+    expect(existsSync(path.join(project, '.dork', 'flow', 'tmp-not', 'x.md'))).toBe(true);
+  });
+
+  it('keeps the scratch file when the create fails, for the retry', async () => {
+    const scratch = path.join(project, '.dork', 'flow', 'tmp', 'idea.md');
+    mkdirSync(path.dirname(scratch), { recursive: true });
+    writeFileSync(scratch, 'Scratch idea.\n');
+    const t = tracker();
+    const run = await flow(
+      ['create', '--title', 'T', '--description-file', scratch, '--label', 'area/none'],
+      t
+    );
+    expect(run.code).toBe(EXIT.tracker);
+    expect(existsSync(scratch)).toBe(true);
   });
 
   it.each([

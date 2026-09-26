@@ -18,6 +18,9 @@
  *   timeout also gets the first item back. A key names one OPEN item: once its
  *   item is closed, the same key files a new one.
  * - `--dry-run` prints the planned item and writes nothing.
+ * - A `--description-file` under `.dork/flow/tmp/` is removed once the item
+ *   is filed or found; a failed or dry run keeps it for the retry. A file
+ *   anywhere else is left alone.
  *
  * `created` is false when the item was already open before this run: found by
  * its marker, or handed back by the adapter for the key. Two runs racing on
@@ -30,7 +33,7 @@
  * @module @dorkos/flow/cli/create
  */
 
-import { readFileSync } from 'node:fs';
+import { readFileSync, rmSync } from 'node:fs';
 import path from 'node:path';
 
 import { findConfigRoots } from '../config-files.ts';
@@ -59,20 +62,44 @@ export function keyMarker(key: string): string {
   return `<!-- flow-create:key=${key} -->`;
 }
 
+/** Where a description file is scratch that `flow create` removes once it is done with it. */
+export const SCRATCH_DIR = path.join('.dork', 'flow', 'tmp');
+
+/** The description, and the scratch file to remove once the run is done with it. */
+interface Description {
+  /** The text. */
+  text: string;
+  /** The `--description-file`, when it lies under {@link SCRATCH_DIR}. */
+  scratch?: string;
+}
+
 /** The description from `--description` or `--description-file`, exactly one of them. */
-function descriptionText(ctx: VerbContext): string {
+function descriptionText(ctx: VerbContext): Description {
   const inline = ctx.args.flags.description;
   const file = ctx.args.flags['description-file'];
   if ((typeof inline === 'string') === (typeof file === 'string')) {
     throw new UsageError('pass exactly one of --description <text> or --description-file <path>');
   }
-  if (typeof inline === 'string') return inline;
+  if (typeof inline === 'string') return { text: inline };
   const resolved = path.resolve(ctx.projectDir, file as string);
+  let text: string;
   try {
-    return readFileSync(resolved, 'utf8');
+    text = readFileSync(resolved, 'utf8');
   } catch {
     throw new UsageError(`could not read the description file ${resolved}`);
   }
+  const rel = path.relative(path.join(ctx.projectDir, SCRATCH_DIR), resolved);
+  const scratch = rel !== '' && !rel.startsWith('..') && !path.isAbsolute(rel);
+  return scratch ? { text, scratch: resolved } : { text };
+}
+
+/**
+ * Remove a scratch description file once the item is filed or found, so none
+ * is left behind in a repo where `.dork/flow/` is not ignored. A failed or
+ * dry run keeps it, for the retry.
+ */
+function removeScratch(file: string | undefined): void {
+  if (file !== undefined) rmSync(file, { force: true });
 }
 
 /** The labels, each once, refused when one is `agent/*` or two share a group. */
@@ -140,7 +167,8 @@ export async function run(ctx: VerbContext): Promise<VerbResult> {
   const rawTitle = ctx.args.flags.title;
   const title = typeof rawTitle === 'string' ? rawTitle.trim() : '';
   if (title === '') throw new UsageError('pass a non-empty --title');
-  const description = descriptionText(ctx).trimEnd();
+  const { text, scratch } = descriptionText(ctx);
+  const description = text.trimEnd();
   if (description.trim() === '') throw new UsageError('the description is empty');
   const labels = labelList(ctx);
   const priority = priorityOf(ctx);
@@ -174,6 +202,7 @@ export async function run(ctx: VerbContext): Promise<VerbResult> {
       (item.description ?? '').split('\n').some((line) => line.trim() === marker)
     );
     if (match !== undefined) {
+      if (!ctx.dryRun) removeScratch(scratch);
       return {
         json: {
           ok: true,
@@ -205,6 +234,7 @@ export async function run(ctx: VerbContext): Promise<VerbResult> {
   }
 
   const created = await (adapter.createItem as NonNullable<typeof adapter.createItem>)(spec);
+  removeScratch(scratch);
   // The adapter hands back the key's existing item rather than a new one when
   // it already held that key (an item filed without the marker line). Such an
   // item was open in the snapshot, so it was not created now.
