@@ -260,36 +260,13 @@ first, before, includeArchived`. To read one issue's comments back (the
   list slug before a policy or write pass touches the hits — search is the
   easiest place to pull another team's issues in by accident.
 
-#### Building the groom snapshot (`getBacklogSnapshot()` via Composio)
+#### The groom snapshot is code: use `flow snapshot`
 
-Verified against the live workspace during the first groom (2026-08-03);
-team-scoping corrected 2026-09-10.
-
-- **Every pull goes through the team node.** All three issue pulls below — core
-  fields, the relation graph, and the closed titles — are
-  `team(id: "<teamId>") { issues(…) }`, never a top-level `issues(…)`. This is
-  not hygiene: the groom's write pass ingests whatever the snapshot contains, so
-  a snapshot carrying a sibling team's items lets it relabel, cancel, or reassign
-  issues that are user-facing communication surfaces — a user-feedback intake
-  team's items are somebody's open conversation, not backlog (verified hazard,
-  2026-09-10). Check the pulled identifiers all carry the `<teamKey>` prefix
-  before handing the snapshot on.
-- **The GraphQL complexity cap is 10000, and `relations` are expensive.** A
-  plain-field `team(id:) { issues }` query paginates fine at `first: 150-250`;
-  adding `relations` + `inverseRelations` + `children` costs roughly 230 points
-  per issue, so the relation pull needs `first: 40` or less. Build the snapshot
-  as **two paginated team-scoped pulls merged by identifier** — core fields at
-  150, the relation graph at 40 — rather than one query that trips the cap.
-- Pull closed items separately as titles only, through the same team node
-  (`team(id:) { issues(filter: { state: { type: { in: ["completed","canceled"] } } }, first: 250) }`)
-  — the duplicate/shipped matching passes need names, not full bodies.
-- Re-namespace labels (leaf → `family/leaf`) and resolve state categories
-  exactly as for `getEligibleWork`; project `state` DOES come back on a direct
-  GraphQL `projects` query (unlike `LINEAR_LIST_LINEAR_PROJECTS`), so prefer
-  GraphQL here — the groom's dead-project checks (GRM-9/GRM-11) need it. A
-  project is a workspace-level object and can span teams, so narrow the project
-  set to the ones the snapshot's own items reference rather than handing the
-  groom every project the account can see.
+`getBacklogSnapshot()` lives in `adapter.ts` beside this file (team-scoped,
+paginated, identifiers checked against the `<teamKey>-` prefix). Never script it
+by hand; run
+`node --experimental-strip-types "<flow-root>/scripts/flow.ts" snapshot --json`
+(`--include-closed` adds closed titles, `--out <file>` saves it for `--snapshot`).
 
 #### Bulk-write traps (the groom write pass)
 
@@ -524,7 +501,7 @@ this section "13" while the table already held more — the table is authoritati
 | **`getEligibleWork()`**         | `WorkItem[]` of candidate work for the dispatch policy (issues for the configured team `connection.team.key`, `includeArchived: false`)                                                                                                                                                                                                                                                                                                                                         | `mcp__plugin_linear_linear__list_issues`                                                                                         | `LINEAR_LIST_LINEAR_ISSUES`                                                               |
 | **`getInbox(agent)`**           | the agent's inbox (see shape below) — assigned-to-me + @mentions + new comments since the last tick                                                                                                                                                                                                                                                                                                                                                                             | `list_issues` (assignee filter) + `mcp__plugin_linear_linear__list_comments`                                                     | `LINEAR_LIST_LINEAR_ISSUES` + `LINEAR_LIST_COMMENTS`                                      |
 | **`getRelations(item)`**        | the typed relation graph (`blocks/blockedBy/children/relatedTo/duplicateOf`) for a single item                                                                                                                                                                                                                                                                                                                                                                                  | `mcp__plugin_linear_linear__get_issue` (returns relations)                                                                       | `LINEAR_GET_LINEAR_ISSUE`                                                                 |
-| **`getBacklogSnapshot()`**      | the GROOM input (`grooming-backlog`): EVERY non-archived item **of the configured team** regardless of state — open items fully normalized (relations, re-namespaced labels, project `stateCategory`), plus closed items at least as `{ identifier, title, stateCategory }` for duplicate/shipped matching. Unlike `getEligibleWork`, nothing is filtered toward dispatch; the snapshot feeds `scripts/audit-backlog.ts` as `{ items, opts: { agentIdentity } }`. See "Building the groom snapshot" below. | `list_issues` paginated with a **team** filter and **no state filter** + `list_projects` + `list_issue_statuses` (category map) + label-group recovery | `LINEAR_RUN_QUERY_OR_MUTATION`, paginated (see the snapshot notes)                        |
+| **`getBacklogSnapshot()`**      | the GROOM input (`grooming-backlog`): EVERY non-archived item **of the configured team** regardless of state — open items fully normalized (relations, re-namespaced labels, project `stateCategory`), plus closed items at least as `{ identifier, title, stateCategory }` for duplicate/shipped matching. Unlike `getEligibleWork`, nothing is filtered toward dispatch; run it with `flow snapshot`; `flow audit` checks it. | `list_issues` paginated with a **team** filter and **no state filter** + `list_projects` + `list_issue_statuses` (category map) + label-group recovery | `LINEAR_RUN_QUERY_OR_MUTATION`, paginated (see the snapshot notes)                        |
 
 ### Writes (all confined here; the single audit surface)
 

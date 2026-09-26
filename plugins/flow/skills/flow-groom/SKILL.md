@@ -31,13 +31,11 @@ Each firing runs the CHECK mode of the grooming-backlog skill
    lifts it" and stop. When it says `"ok": false`, report its first error and stop.
    Otherwise the adapter is the `SKILL.md` at its `adapter.path` (inside it,
    `<flow-root>` means the output's `flowRoot`).
-1. Via the adapter, take a full backlog snapshot.
-2. Run the groom oracle
-   (`node --experimental-strip-types "<flow-root>/scripts/audit-backlog.ts"`)
-   and the dispatch oracle over it.
-3. Report to the operator: the invariant verdict (which GRM checks fail, on
-   which items), the eligible-pool size, and the starvation stats — plus, when
-   anything is red, the one-line recommendation to run a full `/flow:groom`.
+1. Pull once: `node --experimental-strip-types "<flow-root>/scripts/flow.ts" snapshot --include-closed --out <scratch>/backlog.json`.
+   Run `flow.ts audit --snapshot <scratch>/backlog.json --json` and `flow.ts next --snapshot <scratch>/backlog.json --json`.
+2. Report to the operator: the failing invariants and their items, the
+   eligible-pool size, and the starvation stats, plus, when anything is red,
+   the one-line recommendation to run a full `/flow:groom`.
 
 **This tick never writes.** The full corrective groom closes work items and
 restructures projects, which sits behind a human gate by design; a scheduler

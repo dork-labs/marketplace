@@ -358,37 +358,82 @@ function checkGrm14(items: readonly unknown[]): string[] {
   return details;
 }
 
+/** One groom invariant: its id, a one-line summary, and the check that asserts it. */
+interface Invariant {
+  /** The invariant identifier, e.g. `GRM-4`. */
+  id: string;
+  /** What the invariant requires, in one line (the `--help` list, shortened). */
+  summary: string;
+  /** The check itself. */
+  check: Check;
+}
+
 /**
- * Run all fourteen groom checks over the snapshot and assemble the verdict.
- * One failures[] entry per breached invariant (details aggregated).
+ * Every groom invariant, in order. The one list: {@link audit} runs it, and the
+ * `flow audit` verb renders its report from it, so a new invariant is one row
+ * here and never a hard-coded range anywhere else.
+ */
+const INVARIANTS: readonly Invariant[] = [
+  { id: 'GRM-1', summary: 'every open item has exactly one type/* label', check: checkGrm1 },
+  { id: 'GRM-2', summary: 'every open item has a project', check: checkGrm2 },
+  { id: 'GRM-3', summary: 'every open item has priority 1-4', check: checkGrm3 },
+  { id: 'GRM-4', summary: 'a ready item has a size', check: checkGrm4 },
+  { id: 'GRM-5', summary: 'a ready item has "## Validation criteria"', check: checkGrm5 },
+  { id: 'GRM-6', summary: 'a ready item has "## On Completion"', check: checkGrm6 },
+  { id: 'GRM-7', summary: 'a ready item has no open blocker', check: checkGrm7 },
+  { id: 'GRM-8', summary: 'a ready item is unassigned or assigned to the agent', check: checkGrm8 },
+  { id: 'GRM-9', summary: "a ready item's project is not closed", check: checkGrm9 },
+  { id: 'GRM-10', summary: 'a ready item carries a stage/* label', check: checkGrm10 },
+  { id: 'GRM-11', summary: 'no closed project holds an open item', check: checkGrm11 },
+  { id: 'GRM-12', summary: 'every label is namespaced family/leaf', check: checkGrm12 },
+  { id: 'GRM-13', summary: 'no item carries more than one agent/* label', check: checkGrm13 },
+  { id: 'GRM-14', summary: 'an item with duplicateOf is closed', check: checkGrm14 },
+];
+
+/** One invariant's outcome: the breach details, one per offending item (empty = pass). */
+interface InvariantResult {
+  /** The invariant that was checked. */
+  invariant: Invariant;
+  /** One breach detail per offending item; empty when the invariant holds. */
+  details: string[];
+}
+
+/**
+ * Run every groom check in {@link INVARIANTS} and keep each breach detail
+ * separate, for a caller that renders them one per line.
+ *
+ * @param items - The snapshot's normalized WorkItems.
+ * @param opts - Snapshot options (the dispatch agent's identity for GRM-8).
+ * @returns One result per invariant, in {@link INVARIANTS} order.
+ */
+function runInvariants(items: readonly unknown[], opts: AuditOpts = {}): InvariantResult[] {
+  return INVARIANTS.map((invariant) => ({ invariant, details: invariant.check(items, opts) }));
+}
+
+/**
+ * Fold per-invariant results into the verdict: one failures[] entry per
+ * breached invariant, its details joined with `; `.
+ *
+ * @param results - What {@link runInvariants} returned.
+ * @returns The groom verdict.
+ */
+function verdictOf(results: readonly InvariantResult[]): Verdict {
+  const failures: Failure[] = results
+    .filter((result) => result.details.length > 0)
+    .map((result) => ({ invariant: result.invariant.id, detail: result.details.join('; ') }));
+  return { ok: failures.length === 0, failures };
+}
+
+/**
+ * Run every groom check in {@link INVARIANTS} over the snapshot and assemble
+ * the verdict. One failures[] entry per breached invariant (details aggregated).
  *
  * @param items - The snapshot's normalized WorkItems.
  * @param opts - Snapshot options (the dispatch agent's identity for GRM-8).
  * @returns The groom verdict.
  */
 function audit(items: readonly unknown[], opts: AuditOpts = {}): Verdict {
-  const checks: Array<[string, Check]> = [
-    ['GRM-1', checkGrm1],
-    ['GRM-2', checkGrm2],
-    ['GRM-3', checkGrm3],
-    ['GRM-4', checkGrm4],
-    ['GRM-5', checkGrm5],
-    ['GRM-6', checkGrm6],
-    ['GRM-7', checkGrm7],
-    ['GRM-8', checkGrm8],
-    ['GRM-9', checkGrm9],
-    ['GRM-10', checkGrm10],
-    ['GRM-11', checkGrm11],
-    ['GRM-12', checkGrm12],
-    ['GRM-13', checkGrm13],
-    ['GRM-14', checkGrm14],
-  ];
-  const failures: Failure[] = [];
-  for (const [invariant, check] of checks) {
-    const details = check(items, opts);
-    if (details.length > 0) failures.push({ invariant, detail: details.join('; ') });
-  }
-  return { ok: failures.length === 0, failures };
+  return verdictOf(runInvariants(items, opts));
 }
 
 /**
@@ -514,4 +559,5 @@ if (invokedDirectly(import.meta.url)) {
   process.exit(main(process.argv.slice(2)));
 }
 
-export { main, audit };
+export { main, audit, runInvariants, verdictOf, INVARIANTS };
+export type { AuditOpts, Failure, Invariant, InvariantResult, Verdict };

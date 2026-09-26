@@ -147,10 +147,9 @@ operator five intents via `AskUserQuestion`, then route the choice:
 5. **Check loop status**: render the in-flight / parked / assumptions pane → `/flow:status`
 
 **Recommended default (starvation-aware).** Before presenting the five intents,
-peek at the dispatch outcome by feeding the adapter's candidate set to
-`node --experimental-strip-types "${CLAUDE_PLUGIN_ROOT}/scripts/dispatch.ts"` (candidate set + policy as JSON in,
-`classifyDispatchOutcome`'s `{ picked, eligibleCount, starved, shapeableCount }` as
-JSON out; act on the counts). When the ready queue is empty but shapeable work waits
+peek at the dispatch outcome with
+`node --experimental-strip-types "${CLAUDE_PLUGIN_ROOT}/scripts/flow.ts" next --json`
+(act on its counts). When the ready queue is empty but shapeable work waits
 behind the readiness gate (`eligibleCount === 0 && shapeableCount > 0`), the queue
 is **starved**, so default the recommended `AskUserQuestion` intent to **"Triage
 the backlog"** (intent 4) and note "0 ready, <N> shapeable: run a triage pass?".
@@ -193,12 +192,10 @@ the project's umbrella identifier.
 resolves the project, then routes by where it sits on the spine:
 
 - **Has dispatchable children** (one or more `agent/ready` items in a non-terminal state):
-  **project-scoped single-item dispatch**. Via the adapter, pull the project's
-  candidate set with `getProjectWork(projectId)`, rank it with the dispatch ladder by
-  running `node --experimental-strip-types "${CLAUDE_PLUGIN_ROOT}/scripts/dispatch.ts"` (candidate set as JSON in, the ranked
-  `selectDispatch` result as JSON out; it already honors the `projectStatus` tier and the
-  `perProject` WIP cap), claim the top-ranked item, and carry it to its human-review gate,
-  then **stop**. One item, never looping, no `auto` sentinel.
+  **project-scoped single-item dispatch**. Rank the project's queue with
+  `node --experimental-strip-types "${CLAUDE_PLUGIN_ROOT}/scripts/flow.ts" next --for-project <project> --json`
+  (it honors the `projectStatus` tier and the `perProject` WIP cap), claim the
+  top-ranked item, and carry it to its human-review gate, then **stop**. One item, never looping, no `auto` sentinel.
 - **No dispatchable children yet** (still being shaped, pre-DECOMPOSE): advance the
   project's **umbrella issue** one stage, exactly like routing a work item (its `stage/*`
   label drives which). This is how `/flow resume <project>` carries a freshly-ideated
@@ -209,17 +206,15 @@ resolves the project, then routes by where it sits on the spine:
 - **`/flow continue <project>`**: one project-scoped dispatch tick (identical to
   `/flow <project>` when the project has dispatchable children).
 - **`/flow auto <project>`**: drain that project's ready queue autonomously to the
-  human-review gate, the same loop as bare `/flow auto` (below) but with the candidate set
-  scoped to the project via `getProjectWork`. Honors `autonomy.wipCap.perProject`.
+  human-review gate, the same loop as bare `/flow auto` (below) but ranking with
+  `flow.ts next --for-project <project>`. Honors `autonomy.wipCap.perProject`.
 
 ### Global queue modes (no project scope)
 
 - **`continue`** (or the cold-start "Continue the queue" choice): **single-item dispatch**
-  across the whole ready queue. Via the adapter, rank the ready queue with the
-  dispatch ladder by running `node --experimental-strip-types "${CLAUDE_PLUGIN_ROOT}/scripts/dispatch.ts"` (candidate set as
-  JSON in, the ranked `selectDispatch` result as JSON out), claim the top-ranked eligible
-  item, and
-  carry it to its human-review gate, then **stop**. This is one tick of `auto`: server-free,
+  across the whole ready queue. Rank it with
+  `node --experimental-strip-types "${CLAUDE_PLUGIN_ROOT}/scripts/flow.ts" next --json`, claim the top-ranked
+  eligible item, and carry it to its human-review gate, then **stop**. This is one tick of `auto`: server-free,
   a single item, never looping. **Pause check** first: if the guard's `paused` is not
   `null`, do not start (see **The pause** above). If the check cannot run or its output
   cannot be read, stop. It writes **no** `.dork/flow/auto-run.json` sentinel (that
@@ -273,9 +268,7 @@ is never reaped, because `/flow:resume` reads it back.
    placeholder, as it does on a harness that does not fill it in), say so: the
    hook cannot tell this session apart from any other, so the drain will stop
    after each item instead of looping.
-   Both counts come from `node --experimental-strip-types "${CLAUDE_PLUGIN_ROOT}/scripts/dispatch.ts"` (candidate set as
-   JSON in, `classifyDispatchOutcome`'s `{ picked, eligibleCount, starved, shapeableCount }`
-   as JSON out):
+   Both counts come from `node --experimental-strip-types "${CLAUDE_PLUGIN_ROOT}/scripts/flow.ts" next --json`:
    `<N>` is `eligibleCount` (ready, eligible issues from the dispatch policy) and
    `<M>` is `shapeableCount` (dispatchable-category items still behind the
    `agent/ready` gate). The `shapeable` field is the sentinel that lets the
@@ -305,8 +298,7 @@ is never reaped, because `/flow:resume` reads it back.
      `resolveIdentityMode` (`reviewer` unset / `null` / equal to `agent` is
      **shared**; a distinct reviewer is **two-account**). Resolve this **once per
      tick, not per item**, and cache it: feed the same resolved `Identity` + mode
-     into `classifyOwnership` (dispatch + ownership), `shouldRespondToComment`
-     (inbox), and `resolveCommsChannel(trigger, identityMode, involvement)`
+     into `shouldRespondToComment` (inbox) and `resolveCommsChannel(trigger, identityMode, involvement)`
      (stop-and-ask routing), so the typed oracles always receive a concrete account
      id, never the literal `"auto"`.
    - **(1) Recovery pass** (`loops.recovery`, priority 10) — re-adopt orphaned
@@ -337,12 +329,9 @@ is never reaped, because `/flow:resume` reads it back.
      from the item's `FlowRun`) or thread-replay. The poll↔webhook producer is a
      config edit (`ingestion.producer`), never a code change.
    - **(3) Dispatch pass** (`loops.dispatch`, priority 30) — claim the top-ranked
-     ready item and carry it to its gate. Via the adapter, fetch eligible
-     work and classify the dispatch outcome by running
-     `node --experimental-strip-types "${CLAUDE_PLUGIN_ROOT}/scripts/dispatch.ts"` (candidate set as JSON in,
-     `classifyDispatchOutcome`'s `{ picked, eligibleCount, starved, shapeableCount }`
-     as JSON out), which both ranks the ready queue (`selectDispatch`) and counts the
-     shapeable backlog behind the readiness gate. - **If `picked` is empty, do not stop silently.** Branch on `shapeableCount`: - **Starved** (`shapeableCount > 0`): the queue is starved, not done. Write
+     ready item and carry it to its gate. Run
+     `node --experimental-strip-types "${CLAUDE_PLUGIN_ROOT}/scripts/flow.ts" next --json`: it ranks the ready
+     queue and counts the shapeable backlog behind the readiness gate. - **If `picked` is empty, do not stop silently.** Branch on `shapeableCount`: - **Starved** (`shapeableCount > 0`): the queue is starved, not done. Write
      `ready: 0, shapeable: <M>` to the sentinel, then surface it: report
      "Queue starved: 0 ready, <M> shapeable: run a triage pass?" and offer, via
      `AskUserQuestion`, to run `/flow:triage` to ready that backlog (then resume

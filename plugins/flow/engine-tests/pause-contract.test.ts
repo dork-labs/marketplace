@@ -39,7 +39,7 @@ function between(text: string, from: string, to: string): string {
 function entryPoints(flow: string, files: Record<string, string>): Record<string, string> {
   return {
     'flow-drain tick': between(files.drain, '0. **Pause check', '1. **Recovery'),
-    'flow-groom check': between(files.groom, '0. **Pause check', '1. Via the adapter'),
+    'flow-groom check': between(files.groom, '0. **Pause check', '1. Pull once'),
     'flow-triage tick': between(files.triage, '0. **Pause check', '1. Via the adapter'),
     'tending-tracker tick': between(files.tending, '**Pause check', '0. **Resolve identity'),
     '/flow continue': between(flow, '- **`continue`**', '- **`auto`**'),

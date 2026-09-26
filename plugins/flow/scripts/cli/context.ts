@@ -127,6 +127,8 @@ export interface VerbContext {
   args: ParsedArgs;
   /** Whether `--json` was given. */
   json: boolean;
+  /** The working directory; resolve a verb's own path flags against it. */
+  cwd: string;
   /** `--project` resolved against cwd, else cwd. */
   projectDir: string;
   /** `--snapshot` resolved against cwd, when given. */
@@ -178,6 +180,7 @@ export function createVerbContext(
   return {
     args,
     json: args.json,
+    cwd: deps.cwd,
     projectDir,
     snapshotPath: pathFlag('snapshot'),
     sessionId: typeof sessionFlag === 'string' ? sessionFlag : envSession ? envSession : undefined,

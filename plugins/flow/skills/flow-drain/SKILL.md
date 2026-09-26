@@ -42,8 +42,8 @@ trigger over it. In reconciler-registry order, one tick:
    (`node --experimental-strip-types "<flow-root>/scripts/recovery.ts"`).
 2. **Inbox / resume.** Un-park items whose `agent/needs-input` question was
    answered, and resume the parked run.
-3. **Dispatch.** Rank the adapter's eligible work
-   (`node --experimental-strip-types "<flow-root>/scripts/dispatch.ts"`, JSON in, JSON out), claim the
+3. **Dispatch.** Rank the ready queue with
+   `node --experimental-strip-types "<flow-root>/scripts/flow.ts" next --json`, claim the
    top-ranked item (durable label plus state), provision its worktree, persist a
    `FlowRun` to `.dork/flow/flow-state.json`, and carry it to its human-review
    gate.

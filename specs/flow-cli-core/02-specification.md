@@ -460,14 +460,14 @@ interface CodeAdapter {
 - `--out` writes the JSON to a file too (for `--snapshot` reuse).
 - Replaces: the "Building the groom snapshot" recipe and the per-session pull scripts.
 
-**`flow next [-n N] [--project <name|id>]`**
+**`flow next [-n N] [--for-project <name|id>]`**
 
 - Loads config; snapshot from the tracker or `--snapshot`.
 - Identity: `identity.agent`, or `getCurrentUser().id` when it is `auto`; `identity.reviewer` as configured.
 - Ownership: `classifyOwnership` (`identity.ts`) per item, over `ownership.scope`.
 - WIP load: open items that are `started` and carry `agent/claimed`, counted by `project.id` and in total.
 - Runs `classifyDispatchOutcome(items, { dispatch, ownership, wipCap: autonomy.wipCap }, opts)`, the same function `dispatch.ts` runs.
-- `--project` filters candidates to one project (matched on id, else case-insensitive name) before dispatch.
+- `--for-project` filters candidates to one project (matched on id, else case-insensitive name) before dispatch; no match exits 5. Its own flag, so the common `--project <dir>` keeps meaning the checkout. The WIP load still counts every project.
 - `-n` (default 1) takes the first N of `picked` (already capped by WIP).
 - JSON: `{ v, picked: WorkItem[], eligibleCount, starved, shapeableCount, wip: { total, byProject } }`.
 - Exit 0 even when nothing is eligible; `starved` says why.

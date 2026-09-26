@@ -36,7 +36,60 @@ import { EXIT, FlowError, UsageError, type ExitCode } from './errors.ts';
  * here whose `load` is `() => import('./cli/<verb>.ts')`. An unregistered verb
  * is a usage error, so no placeholder entry ever ships.
  */
-export const VERBS: readonly VerbDefinition[] = [];
+export const VERBS: readonly VerbDefinition[] = [
+  {
+    name: 'snapshot',
+    summary: "Pull the team's backlog once, for reuse with --snapshot.",
+    description:
+      'Pull every open item of the configured team through the adapter. Prints counts by state and label family, or the whole snapshot with --json. --out also saves it to a file that next, audit and status read with --snapshot.',
+    common: ['project'],
+    flags: [
+      {
+        name: 'include-closed',
+        kind: 'boolean',
+        description: 'Also pull closed items, as titles.',
+      },
+      {
+        name: 'out',
+        kind: 'string',
+        value: 'file',
+        description: 'Also write the snapshot JSON to this file.',
+      },
+    ],
+    load: () => import('./cli/snapshot.ts'),
+  },
+  {
+    name: 'audit',
+    summary: 'Check the backlog against the groom invariants.',
+    description:
+      'Run the groom invariants (audit-backlog.ts) over the backlog and print each one that fails, with the items that break it. Exits 1 when any invariant fails.',
+    common: ['project', 'snapshot'],
+    load: () => import('./cli/audit.ts'),
+  },
+  {
+    name: 'next',
+    summary: 'Show the next item to work on, ranked by the dispatch policy.',
+    description:
+      'Rank the ready queue with the dispatch policy (the same one dispatch.ts runs), with ownership and work in progress worked out from the backlog. Nothing eligible still exits 0; "starved" says whether a triage pass would help. Exits 7 while flow is paused, unless --manual.',
+    common: ['project', 'snapshot', 'manual'],
+    flags: [
+      {
+        name: 'count',
+        kind: 'string',
+        short: 'n',
+        value: 'N',
+        description: 'How many picks to show. Default 1.',
+      },
+      {
+        name: 'for-project',
+        kind: 'string',
+        value: 'name|id',
+        description: 'Only consider items in this project (its id, or its name in any case).',
+      },
+    ],
+    load: () => import('./cli/next.ts'),
+  },
+];
 
 /** The plugin folder, `<flow-root>`: the parent of `scripts/`. */
 const FLOW_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
