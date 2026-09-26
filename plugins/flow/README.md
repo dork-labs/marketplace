@@ -140,6 +140,12 @@ audit half. Run it when the queue starves, after a large programme lands, or
 before turning on autonomy: the dispatch policy is only as truthful as the
 labels it reads, and a ready label nobody audits decays into noise.
 
+Two schedules keep the ready queue fed, both shipped switched off until you
+approve them: `flow-triage` (daily: readies or parks untriaged work, releases
+stale claims) and `flow-groom` (weekly `/flow:groom check`). See the dials page's
+Cadence section. To carry several items at once by hand, see
+`docs/parallel-drain.mdx`.
+
 ## Gates
 
 Involvement is **uncertainty-gated, not stage-gated** (the calibration ladder,

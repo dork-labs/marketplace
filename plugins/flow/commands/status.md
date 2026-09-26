@@ -38,7 +38,7 @@ a single pane:
    A schedule is in this project only when its `filePath` starts with one of those
    roots followed by `/`; a root that is merely the start of another folder's name
    (`/work/app` against `/work/app-2/...`) is a different project. Of those, keep every
-   schedule whose `name` is `flow-drain` or `flow-groom`, and every schedule a person
+   schedule whose `name` is `flow-drain`, `flow-groom` or `flow-triage`, and every schedule a person
    made whose `prompt` runs `/flow continue` (their own cadence for the tick). This
    command only reads: it never calls `tasks_update` and never changes a schedule.
 
@@ -60,7 +60,7 @@ Render, in this order:
   this project's flow schedules are listed, say so. When it was not available, say:
   "flow's scheduled runs fire when your own scheduler starts them; its entry decides
   how often". To change how often they fire, point to the dials page's Cadence
-  section (`docs/the-dials.mdx`), never to the shipped `flow-drain` or `flow-groom`
+  section (`docs/the-dials.mdx`), never to the shipped `flow-drain`, `flow-groom` or `flow-triage`
   file.
 - **Parked.** Every `agent/needs-input` item: via the adapter, list the
   parked items, and for each show the open question text and how long it has waited

@@ -124,7 +124,7 @@ so the same `.gitignore` (or `info/exclude`) keeps it out of git. Every schedule
 tick, the tracker tick, `/flow continue` and `/flow auto` check it first and stop, so
 it works under any scheduler and a plugin update cannot undo it. It is not a setting:
 nothing in `config.json` turns it on. On DorkOS, when the schedule tools are
-available, `/flow:pause` also switches this project's `flow-drain` and `flow-groom`
+available, `/flow:pause` also switches this project's `flow-drain`, `flow-groom` and `flow-triage`
 schedules off and records their ids in the flag (`hostSchedules`), so `/flow:resume`
 switches back on exactly those.
 

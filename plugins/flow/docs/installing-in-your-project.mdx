@@ -149,6 +149,7 @@ The plugin is inert until it knows your tracker and identity. You do not configu
 | `config/config.example.json`          | The config template in the plugin (`/flow:init` seeds from it).             | Yes (from the plugin)      |
 | `scripts/*.ts`                        | The shipped deterministic oracles + `validate-adapter.ts` (run via `node`). | Yes (from the plugin)      |
 | `flow-drain` (schedulable tick skill) | The autonomy tick. Ships switched off; approve it to arm.                   | Yes (from the plugin)      |
+| `flow-triage`, `flow-groom`           | Daily triage and a weekly read-only groom check. Ship switched off.         | Yes (from the plugin)      |
 
 ## Next steps
 

@@ -23,7 +23,7 @@ export function projectFilterGaps(passage: string): string[] {
     ['strips the flow folder from each root', /trailing `\/\.agents\/flow` removed/],
     ['requires a separator after the root', /starts with one of those\s+roots followed by `\/`/],
     ['rejects a mere name prefix', /merely the start of another folder's name/],
-    ['keeps flow-drain and flow-groom', /`name` is `flow-drain` or `flow-groom`/],
+    ['keeps every shipped flow schedule', /`name` is `flow-drain`, `flow-groom` or `flow-triage`/],
     [
       'keeps a person-made /flow continue schedule',
       /made[\s\S]{0,20}whose `prompt` runs `\/flow continue`/,

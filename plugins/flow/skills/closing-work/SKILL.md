@@ -73,6 +73,13 @@ Driven by the item's type and its `## On Completion` routing:
 - If this item was blocking others, note that they are now unblocked (read via
   the adapter's `getRelations`); use `link` only for genuinely typed relations.
 
+Every follow-up you file:
+
+- Gets a type, a priority and a project when you create it.
+- Goes through triage right away (`<flow-root>/skills/triaging-work/SKILL.md`, Path B).
+- Is marked ready only if it passes the six readiness rules (`<flow-root>/skills/grooming-backlog/SKILL.md`, phase 4 step 5).
+- Otherwise, park it with one question (`needsInput`).
+
 ### 5. Completion routing + project pulse check
 
 - Read the item's `## On Completion` section first — it is the most specific

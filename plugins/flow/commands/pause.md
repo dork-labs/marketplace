@@ -24,7 +24,7 @@ so nothing keeps running behind your back:
    It writes this machine's pause, `.agents/flow/paused.json` (always in the main
    checkout, so every worktree and the scheduler's session see the same one), keeps it
    out of git, and prints `{ ok, file, pausedAt, hostSchedules, alreadyPaused, ignored }`.
-   Every scheduled tick (`flow-drain`, `flow-groom`), the tracker tick
+   Every scheduled tick (`flow-drain`, `flow-groom`, `flow-triage`), the tracker tick
    (`tending-tracker`), `/flow continue` and `/flow auto` checks it before doing
    anything and stops. It lives in the project, so updating flow cannot undo it. **The
    flag is the pause**: step 3 is a courtesy on top of it, and nothing that goes wrong
@@ -41,7 +41,7 @@ so nothing keeps running behind your back:
    project only when its `filePath` starts with one of those roots followed by `/`; a
    root that is merely the start of another folder's name (`/work/app` against
    `/work/app-2/...`) is a different project, and its schedules are never touched.
-   For every schedule in this project whose `name` is `flow-drain` or `flow-groom`, or
+   For every schedule in this project whose `name` is `flow-drain`, `flow-groom` or `flow-triage`, or
    that a person made and whose `prompt` runs `/flow continue`, and in either case
    whose `enabled` is `true`, call `tasks_update` with `{ "id": <its id>, "enabled": false }`. Then record each id you switched off:
 
@@ -69,7 +69,7 @@ still starts the tick on its schedule, and the tick stops at its first step.** T
 the tick from starting at all, switch it off where it is scheduled: on DorkOS, the
 **Schedules** page, a switch that outlasts updates; with cron or CI, disable that job. A
 pause on this machine does not reach a scheduler on another one. Never edit `enabled` in
-the shipped `flow-drain` or `flow-groom` file: DorkOS ignores the file's switch once a
+the shipped `flow-drain`, `flow-groom` or `flow-triage` file: DorkOS ignores the file's switch once a
 schedule is approved, and an update replaces the file.
 
 ## Reclaiming or redirecting a specific item
