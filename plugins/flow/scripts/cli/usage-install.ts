@@ -24,7 +24,7 @@ import {
 import { randomBytes } from 'node:crypto';
 import path from 'node:path';
 import { PreconditionError } from '../errors.ts';
-import { loadIdentities, resolveDorkHome, type AccountIdentity } from '../fleet/accounts.ts';
+import { loadAccounts, resolveAccountRef, resolveDorkHome } from '../fleet/accounts.ts';
 import type { VerbContext, VerbResult } from './context.ts';
 import { formatColumns } from './output.ts';
 
@@ -94,7 +94,7 @@ function expandHome(value: string, osHome: string): string {
 
 /** Find the status-line script of an account, or say why it cannot be edited. */
 function findScript(
-  account: AccountIdentity,
+  account: { path: string },
   osHome: string
 ): { script: string } | { reason: string } {
   const settingsFile = path.join(account.path, 'settings.json');
@@ -289,13 +289,25 @@ function applyEdit(script: string, next: string, expectMarkers: number, stamp: n
  */
 export async function run(ctx: VerbContext): Promise<VerbResult> {
   const dorkHome = resolveDorkHome(ctx.env, ctx.io.osHome);
-  const { accounts } = loadIdentities(dorkHome, 'claude-code');
-  const only = ctx.args.flags.account;
-  const targets = accounts.filter(
-    (account) => account.routable && (typeof only !== 'string' || account.id === only)
+  // Every Claude Code account from the shared resolver (spec §1.1a rev 6d): the
+  // registered rows (an aliased `default` once, as its row) and a standalone
+  // `default` in its machine-wide folder, when that folder exists, so the
+  // operator's own sign-in gets the recorder too.
+  const { accounts } = loadAccounts(dorkHome, { home: ctx.io.osHome });
+  const installable = accounts.flatMap((account) =>
+    account.runtime === 'claude-code' &&
+    account.routable &&
+    account.path !== null &&
+    (!account.implicit || existsSync(account.path))
+      ? [{ ...account, path: account.path }]
+      : []
   );
+  const only = ctx.args.flags.account;
+  const picked =
+    typeof only === 'string' ? resolveAccountRef(installable, 'claude-code', only) : null;
+  const targets = typeof only === 'string' ? (picked === null ? [] : [picked]) : installable;
   if (typeof only === 'string' && targets.length === 0) {
-    throw new PreconditionError(`"${only}" is not a registered account; see "flow accounts".`);
+    throw new PreconditionError(`"${only}" is not a Claude Code account; see "flow accounts".`);
   }
   const yes = ctx.args.flags.yes === true;
   const remove = ctx.args.flags.remove === true;

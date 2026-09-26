@@ -255,3 +255,64 @@ describe('planEdit', () => {
     expect(planEdit("x='$(cat)' # read\n", block, false).lines).toEqual(block('x'));
   });
 });
+
+describe('flow usage install-statusline and the default account (rev 6d)', () => {
+  it("installs into this computer's own sign-in when it stands alone, the operator's case", async () => {
+    // Purpose: the operator's config (defaultAccount null, one row in
+    // ~/.claude3) leaves the main account in ~/.claude as the standalone
+    // `default`. Its status line must get the recorder too, or its usage is
+    // never recorded; `--account default` names it.
+    const main = account(
+      'claude',
+      { statusLine: { type: 'command', command: 'bash ~/.claude/statusline.sh' } },
+      { name: 'statusline.sh', text: SCRIPT_LF }
+    );
+    const claude3 = account(
+      'claude3',
+      { statusLine: { type: 'command', command: 'bash ~/.claude3/statusline.sh' } },
+      { name: 'statusline.sh', text: SCRIPT_LF }
+    );
+    writeFileSync(
+      path.join(dorkHome, 'config.json'),
+      JSON.stringify({
+        runtimes: {
+          claudeCode: { defaultAccount: null, accounts: [{ ...claude3, label: 'Claude3' }] },
+        },
+      })
+    );
+    const plan = await install(['--json']);
+    expect(plan.code, plan.stderr).toBe(0);
+    const plans = JSON.parse(plan.stdout).accounts;
+    expect(plans.map((p: { id: string; action: string }) => [p.id, p.action])).toEqual([
+      ['claude3', 'insert'],
+      ['default', 'insert'],
+    ]);
+    expect(plans[1].script).toBe(realpathSync(path.join(main.path, 'statusline.sh')));
+
+    const only = await install(['--account', 'default', '--yes', '--json']);
+    expect(only.code, only.stderr).toBe(0);
+    expect(readFileSync(path.join(main.path, 'statusline.sh'), 'utf8')).toContain(
+      'flow usage recorder'
+    );
+    expect(readFileSync(path.join(claude3.path, 'statusline.sh'), 'utf8')).not.toContain(
+      'flow usage recorder'
+    );
+  });
+
+  it('installs an aliased default once, under its registered row', async () => {
+    // Purpose: one real account, one plan: a row in ~/.claude IS default.
+    const main = account(
+      'claude',
+      { statusLine: { type: 'command', command: 'bash ~/.claude/statusline.sh' } },
+      { name: 'statusline.sh', text: SCRIPT_LF }
+    );
+    writeFileSync(
+      path.join(dorkHome, 'config.json'),
+      JSON.stringify({ runtimes: { claudeCode: { accounts: [{ ...main, id: 'mine' }] } } })
+    );
+    const plans = JSON.parse((await install(['--json'])).stdout).accounts;
+    expect(plans.map((p: { id: string }) => p.id)).toEqual(['mine']);
+    const named = JSON.parse((await install(['--account', 'default', '--json'])).stdout).accounts;
+    expect(named.map((p: { id: string }) => p.id)).toEqual(['mine']);
+  });
+});
