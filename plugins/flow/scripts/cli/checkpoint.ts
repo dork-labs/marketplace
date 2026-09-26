@@ -204,7 +204,11 @@ export async function run(ctx: VerbContext): Promise<VerbResult> {
       ...current,
       checkpointAt: header.writtenAt,
       checkpointSha: header.headSha,
-      ...(current.drain ? { drain: { ...current.drain, rev: current.drain.rev + 1 } } : {}),
+      // Bump rev only on a drain this version understands; a newer drain's
+      // fields are its writer's, never NaN-ed here.
+      ...(current.drain?.v === 1 && typeof current.drain.rev === 'number'
+        ? { drain: { ...current.drain, rev: current.drain.rev + 1 } }
+        : {}),
     }));
     for (const warning of result.warnings) ctx.warn(warning.message);
     if (result.status === 'dropped') {
