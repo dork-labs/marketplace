@@ -42,7 +42,7 @@ interface Verdict {
 
 interface Snapshot {
   items: Array<Record<string, unknown>>;
-  opts?: { agentIdentity?: string };
+  opts?: { agentIdentity?: string; unnamespacedLabels?: string[] };
 }
 
 /** Spawn the oracle, returning its exit code + captured streams. */
@@ -207,6 +207,48 @@ describe('audit-backlog', () => {
         },
       },
     ];
+
+    it('skips only the bare labels listed in opts.unnamespacedLabels (GRM-12)', () => {
+      // Purpose: the oracle stays zero-dependency, so the config exemption
+      // arrives through opts; a listed bare label passes, an unlisted one fails.
+      const snapshot = goodSnapshot();
+      (snapshot.items[1].labels as string[]).push('cloud-contract');
+      const allowed = {
+        ...snapshot,
+        opts: { ...snapshot.opts, unnamespacedLabels: ['cloud-contract'] },
+      };
+      const pass = runOracle({ stdin: JSON.stringify(allowed) });
+      expect(pass.status).toBe(0);
+
+      (snapshot.items[1].labels as string[]).push('Bug');
+      const mixed = {
+        ...snapshot,
+        opts: { ...snapshot.opts, unnamespacedLabels: ['cloud-contract'] },
+      };
+      const fail = runOracle({ stdin: JSON.stringify(mixed) });
+      expect(fail.status).toBe(1);
+      const verdict = JSON.parse(fail.stdout) as Verdict;
+      expect(verdict.failures.map((f) => f.invariant)).toEqual(['GRM-12']);
+      expect(verdict.failures[0].detail).toContain('Bug');
+      expect(verdict.failures[0].detail).not.toContain('cloud-contract');
+    });
+
+    it('never exempts a malformed label passed on stdin (GRM-12)', () => {
+      // Purpose: stdin follows the config's rule (a bare label, no slash, no
+      // surrounding space), so a listed "agent/" or " x" exempts nothing.
+      const snapshot = goodSnapshot();
+      (snapshot.items[1].labels as string[]).push('agent/', ' x');
+      const listed = {
+        ...snapshot,
+        opts: { ...snapshot.opts, unnamespacedLabels: ['agent/', ' x'] },
+      };
+      const run = runOracle({ stdin: JSON.stringify(listed) });
+      expect(run.status).toBe(1);
+      const verdict = JSON.parse(run.stdout) as Verdict;
+      const grm12 = verdict.failures.find((f) => f.invariant === 'GRM-12');
+      expect(grm12?.detail).toContain('agent/');
+      expect(grm12?.detail).toContain(' x');
+    });
 
     it.each(rows)('seeding a violation turns $invariant red', ({ invariant, also, seed }) => {
       const snapshot = goodSnapshot();

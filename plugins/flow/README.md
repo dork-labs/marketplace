@@ -4,14 +4,11 @@
 > identifiable installable unit: manual stages you drive from the terminal, and
 > an autonomous loop seated on DorkOS Pulse.
 
-This README is **the manual**. See [`SPEC.md`](./docs/SPEC.md) for the contract (the
-stage model, the `PMClient` promotion surface, the config schema, the `FlowRun`
-record, and the typed engine), [`CHARTER.md`](./docs/CHARTER.md) for the 15 goals the
-system is audited against, [`provenance.md`](./docs/provenance.md) for the
-tracker-neutral signature every outward write carries (so a later reader can route a
-follow-up back to the session that wrote it), and the published
-[guide series](./docs/) on dorkos.ai for the user-facing reference. These docs and
-the guides ship **with** the package (charter G15), under [`docs/`](./docs/).
+This README is **the manual**. [`SPEC.md`](./docs/SPEC.md) is the contract,
+[`CHARTER.md`](./docs/CHARTER.md) the 15 goals flow is audited against,
+[`provenance.md`](./docs/provenance.md) the signature every outward write carries,
+and the [guide series](./docs/) the user-facing reference. All of them ship with the
+package (charter G15).
 
 > [!IMPORTANT]
 > **Autonomous mode depends on a running DorkOS server (Pulse). Manual mode does
@@ -33,11 +30,36 @@ it; to do it yourself, from this directory:
 npm install --omit=dev
 ```
 
-`--omit=dev` is worth stating explicitly: a shell carrying `NODE_ENV=production`
-installs nothing from a bare `npm install`, which leaves the engine unable to run
-its own oracles. Contributors working on the plugin want `--include=dev` instead,
-which adds the Vitest engine-oracle suite, tsc, Prettier, and the
-`config.schema.json` generator.
+Say `--omit=dev`: under `NODE_ENV=production` a bare `npm install` installs
+nothing. Contributors want `--include=dev` for the tests and tools.
+
+## The flow CLI
+
+`flow` is one command for the tracker steps skills used to spell out in prose. It
+reads your config, calls the tracker through the adapter, and checks each write:
+
+```bash
+node --experimental-strip-types "${CLAUDE_PLUGIN_ROOT}/scripts/flow.ts" <verb> --json
+```
+
+| Verb              | What it does                                             |
+| ----------------- | -------------------------------------------------------- |
+| `snapshot`        | Pull the backlog once, for reuse with `--snapshot`.      |
+| `audit`           | Check the backlog against the groom invariants.          |
+| `next`            | Show the next item to work on.                           |
+| `claim`           | Start an item and record the run.                        |
+| `release`         | Let go of an item.                                       |
+| `done`            | Post the summary and close an item.                      |
+| `stage`           | Move an item to another stage.                           |
+| `status`          | Show what is in flight, parked or out of step.           |
+| `checkpoint`      | Write the item's `HANDOFF.md`.                           |
+| `accounts`        | List, add or set the accounts flow may spend.            |
+| `usage`           | Record each account's usage.                             |
+| `fleet`           | Show every account and running session. Changes nothing. |
+| `note`, `journal` | Write to or read flow's journal.                         |
+
+`flow <verb> --help` lists a verb's flags. Exit codes and the `--json` shape are in
+[`SPEC.md`](./docs/SPEC.md#the-flow-cli).
 
 ## Stages
 
@@ -87,15 +109,8 @@ single axis:
 | **Manual** (CLI/slash) | `/flow:specify`, `/flow:execute`    | `/flow auto` — drain the ready queue from the terminal        |
 | **PM-driven**          | rare; explicit single-stage advance | default — a Pulse tick claims an item, carries it to its gate |
 
-- **Manual + Step** — `/flow:<stage>` advances one stage and stops. Questions
-  arrive interactively. Server-free.
-- **Manual + Autonomous** — `/flow auto` drains the ready queue **sequentially
-  from the terminal**, carrying each item to its review gate. Server-free.
-- **PM-driven + Step** — rare; an explicit single-stage advance triggered by a
-  tracker transition.
-- **PM-driven + Autonomous** — the default seat: a **Pulse** tick claims the
-  top-ranked eligible item and carries it to its gate in a **fresh per-item
-  session**. **Requires the DorkOS server** (see below).
+The default seat is PM-driven + Autonomous: a **Pulse** tick carries the top-ranked
+item to its gate in a fresh session, which needs the DorkOS server (see below).
 
 Every stage is autonomous-capable. The human is pulled in by **uncertainty** (the
 calibration ladder), not by stage — which is why IDEATE asks freely while EXECUTE
@@ -173,8 +188,7 @@ spec §5). The hard gates:
 — this diff, green, cleanly mergeable. If that state can't be reproduced at merge
 time, the engine checks _mergeable? · CI green? · functionally unchanged?_ and
 routes each failure through the calibration ladder (mechanical conflict → resolve
-
-- announce; real tradeoff → bounce; behavior drift → re-request approval).
+and announce; real tradeoff → bounce; behavior drift → re-request approval).
 
 ## Adapter interface
 
@@ -244,11 +258,8 @@ agent session per run — so there is no scheduler to build.
   HEAD, resume the session) or restarted clean, with `attemptCount` guarding
   against runaway retries.
 
-> **Autonomous mode depends on a running DorkOS server (Pulse); manual mode does
-> not.** A generic `claude -p`-per-issue **watcher** seat (for non-DorkOS repos) is
-> designed but **not built in v1** — so `autonomy.seat` accepts only `pulse` today,
-> and `watcher` rejoins the enum when the seat ships. (The "watcher" is the external
-> poller that fires a headless `claude -p` tick per issue — not a prompt.)
+A `claude -p`-per-issue **watcher** seat for non-DorkOS repos is designed but not
+built, so `autonomy.seat` accepts only `pulse` today.
 
 ## Configuration
 
@@ -270,12 +281,8 @@ so it accepts any lowercase slug
 defaults to `linear`, the reference adapter shipped here. Full detail:
 [`config/CONFIG.md`](./config/CONFIG.md).
 
-A per-repo `WORKFLOW.md` override at the repo root is part of the config
-**contract** (Decision #15), but **v1 reads `.agents/flow/config.json` only** (plus its
-per-machine `config.local.json`; `scripts/config-files.ts` finds both, see
-[`config/CONFIG.md`](./config/CONFIG.md)) —
-applying the override is the promoted config loader's job (DOR-90 / the P5 server
-build), not the v1 harness skills. A `WORKFLOW.md` will not take effect yet.
+A per-repo `WORKFLOW.md` override is part of the config contract (Decision #15),
+but v1 reads only the two files above, so a `WORKFLOW.md` does not take effect yet.
 
 ## Templates
 

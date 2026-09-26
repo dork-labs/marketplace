@@ -349,6 +349,19 @@ CI or handoff event by hand.
 **`selftest.liveBudgetUsd`** is the most one run of the self-test's live tier may
 spend, in US dollars.
 
+## `groom`: bare labels the audit accepts
+
+The backlog audit (`flow audit`, invariant GRM-12) fails any label without a
+`family/` prefix, because flow cannot tell what a bare label means. When your team
+keeps one on purpose, say a label mirrored from GitHub, list it:
+
+```jsonc
+"groom": { "unnamespacedLabels": ["cloud-contract"] }
+```
+
+Only the listed labels pass; every other bare label still fails. Each entry must
+be a bare label: not empty, no `/`, no space at either end. The default is `[]`.
+
 ## Why `config.json` has no secrets
 
 `config.json` is committed and shared, so it must stay free of tokens, API keys,

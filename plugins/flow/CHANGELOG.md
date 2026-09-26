@@ -15,6 +15,21 @@ you until you **reinstall it** (Marketplace → flow → reinstall, or re-run yo
 - `flow usage probe default --yes` now checks that sign-in, and the status line records it. A session in a folder that is neither listed nor the default still records nothing.
 - The shared test files DorkOS checks itself against are now version 2.1.0.
 
+## 0.26.0
+
+**The `flow` command is documented, and the backlog audit can accept a label your team uses without a family. Reinstall to get it.**
+
+- The README, "Driving it manually" and the contract reference (`docs/SPEC.md`) now show the `flow` command and its verbs.
+- New setting `groom.unnamespacedLabels`: bare labels such as `cloud-contract` that the audit should accept without a `family/` prefix. It is empty by default, so every other bare label is still flagged.
+
+## 0.25.0
+
+**flow can now start a working session on a chosen account. Nothing you use changes yet, so no reinstall is needed.**
+
+- flow can now start a session in an item's worktree on a named account, in three places: a plain terminal (`claude -p`, `codex exec` or `opencode run`), a cmux workspace (Claude Code), or the DorkOS app (Claude Code, Codex or OpenCode). It checks afterwards that the session really runs on that account, and strips API keys from the session's environment so nothing else pays for it.
+- If a place cannot run a runtime (cmux and Codex, for example), flow says so and starts nothing, rather than guessing another one.
+- `flow drain` will use this to spread work across your accounts; it arrives in a later release.
+
 ## 0.24.0
 
 **flow now records usage for Codex and OpenCode too, and `flow fleet` shows every tool. Reinstall to get it.**
