@@ -15,7 +15,12 @@ import path from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
 import { HISTORY_CAP, SELFTEST_DIR, main, type SelftestDeps } from '../scripts/selftest.ts';
-import { conformanceProblem, engineTests, schemaMatches } from '../scripts/selftest/fast.ts';
+import {
+  conformanceProblem,
+  engineTests,
+  fakeFixtureProblem,
+  schemaMatches,
+} from '../scripts/selftest/fast.ts';
 import { buildReport, exitCode, fingerprint, type Check } from '../scripts/selftest/report.ts';
 import { FLOW_ROOT } from '../scripts/selftest.ts';
 
@@ -133,6 +138,11 @@ describe('the fast tier checks', () => {
 
   it('adapter conformance: a good fixture that fails is reported', () => {
     expect(conformanceProblem(bad, bad)).toMatch(/good fixture fails INV-3/);
+  });
+
+  it("adapter conformance: the fake tracker's fixture must conform too", () => {
+    expect(fakeFixtureProblem(good)).toBeNull();
+    expect(fakeFixtureProblem(bad)).toMatch(/fake tracker's fixture fails INV-3/);
   });
 
   it('schema freshness compares parsed JSON, so formatting never matters but content does', () => {

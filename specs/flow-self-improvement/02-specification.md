@@ -128,9 +128,10 @@ behaves like the reference tracker where flow depends on it:
 
 It ships its fixture `adapters/reference/fake/fixture.json`, passes `validate-adapter.ts`, and
 passes S1's adapter conformance suite. `adapters/reference/fake/SKILL.md` is a short adapter skill
-("every verb: `flow tracker <verb>`"); the live sandbox copies it to
-`.agents/flow/adapters/fake/SKILL.md`, the project path `resolveAdapter` (`config-files.ts`) reads
-first, so a prose-driven agent reaches it.
+("every verb: `flow tracker <verb>`"); the live sandbox links the folder
+(`adapters/reference/fake/`, with its `adapter.ts`) to `.agents/flow/adapters/fake/`, the project
+path `resolveAdapter` (`config-files.ts`) reads first, so a prose-driven agent and the `flow` CLI
+both reach it. A link, not a copy: the adapter imports from the plugin. (Amended at build, DOR-2390.)
 
 **Scenarios** (`scripts/selftest/scenarios/*.ts`), each a function
 `(ctx: { tracker, clock, flow }) => Promise<void>` that drives `flow` verbs in-process against the
