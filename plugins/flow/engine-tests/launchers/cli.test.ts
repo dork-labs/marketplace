@@ -1,8 +1,14 @@
 /**
  * The plain CLI launcher (spec `flow-handoff-dispatch` §2.3, task 2.1): the
- * shared contract suite (§2.7) against a fake `spawn`/`execFile` that records
- * argv, env and cwd and writes a scripted stream log and transcript into temp
- * config dirs, plus the cli-only details the contract does not cover.
+ * shared contract suite (§2.7) once per runtime, plus the claude-code details
+ * the contract does not cover.
+ *
+ * - claude-code: a fake `spawn`/`execFile` that records argv, env and cwd and
+ *   writes a scripted stream log and transcript into temp config dirs.
+ * - codex, opencode: real fake binaries (engine-tests/fixtures/cli-runtimes)
+ *   that emit scripted JSON events, write a rollout or an exportable session,
+ *   and run as real processes (see `cli-runtime-harness.ts`). Their details are
+ *   in `cli-runtimes.test.ts`.
  */
 
 import {
@@ -18,7 +24,7 @@ import {
 } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 
 import type { ProcessRunner } from '../../scripts/cli/context.ts';
 import {
@@ -27,7 +33,12 @@ import {
   type CliLauncherDeps,
   type DetachedSpawn,
 } from '../../scripts/launchers/cli.ts';
-import { LaunchError, type SessionHandle } from '../../scripts/launchers/types.ts';
+import {
+  LaunchError,
+  type LaunchAccount,
+  type SessionHandle,
+} from '../../scripts/launchers/types.ts';
+import { makeCliRuntimeHarness } from './cli-runtime-harness.ts';
 import {
   launcherContract,
   requestFor,
@@ -49,6 +60,8 @@ interface FakeProc {
 
 /** The cli harness plus the handles cli-only tests need. */
 interface CliHarness extends LauncherHarness {
+  /** The registered account; a Claude Code account always has a config dir. */
+  account: LaunchAccount & { path: string };
   deps: CliLauncherDeps;
   procs: Map<number, FakeProc>;
   root: string;
@@ -65,11 +78,15 @@ const PROJECT_SLUG = '-fake-project';
  * the ambient `~/.claude` and a stranger's config dir; a fake clock; and fake
  * process deps that play the scripted session.
  */
-async function makeCliHarness(options: HarnessOptions = {}): Promise<CliHarness> {
+async function makeCliHarness(options: Omit<HarnessOptions, 'runtime'> = {}): Promise<CliHarness> {
   const root = realpathSync(mkdtempSync(path.join(os.tmpdir(), 'flow-cli-launcher-')));
   const cwd = path.join(root, 'work tree');
   const osHome = path.join(root, 'home');
-  const account = { id: 'claude3', path: path.join(root, 'accounts', 'claude3') };
+  const account = {
+    runtime: 'claude-code' as const,
+    id: 'claude3',
+    path: path.join(root, 'accounts', 'claude3'),
+  };
   const otherDir = path.join(root, 'accounts', 'someone-else');
   for (const dir of [cwd, osHome, account.path, otherDir]) mkdirSync(dir, { recursive: true });
   const promptFile = path.join(cwd, 'prompt.md');
@@ -197,6 +214,8 @@ async function makeCliHarness(options: HarnessOptions = {}): Promise<CliHarness>
 
   return {
     launcher: createCliLauncher(deps),
+    runtime: 'claude-code',
+    mintsSessionId: false,
     accountBinding: 'config-dir',
     states: ['busy', 'exited', 'limited'],
     stopBehavior: 'pid',
@@ -248,7 +267,15 @@ async function makeCliHarness(options: HarnessOptions = {}): Promise<CliHarness>
   };
 }
 
-launcherContract('cli', makeCliHarness);
+// Real processes on a shared, loaded machine for codex and opencode.
+vi.setConfig({ testTimeout: 120_000 });
+
+launcherContract(
+  'cli',
+  (options) =>
+    options.runtime === 'claude-code' ? makeCliHarness(options) : makeCliRuntimeHarness(options),
+  ['claude-code', 'codex', 'opencode']
+);
 
 describe('cli launcher details', () => {
   // The probe reads the exit code, so a claude that answers non-zero is as

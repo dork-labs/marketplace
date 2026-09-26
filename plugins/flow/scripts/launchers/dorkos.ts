@@ -7,8 +7,14 @@
  *   token (DorkOS mints the id and applies its guards, launch cap and permission
  *   clamp; a refusal is final, never retried another way); otherwise
  *   `POST /api/sessions/<id>/messages`. Either way, `GET /api/sessions/<id>`
- *   then proves the session exists, names its canonical id, and shows the
- *   account dir it bills.
+ *   then proves the session exists, names its canonical id, runs on the
+ *   requested runtime (else `wrong-runtime`), and shows the account it bills.
+ * - **runtimes:** all three. `runtime` rides to `session_start` and the route
+ *   body. DorkOS supports accounts for claude-code only today, so for codex and
+ *   opencode an account is sent only when it is a registered, non-default one;
+ *   the implicit default account is omitted and DorkOS runs its ambient login.
+ *   A non-default codex or opencode account must still be reported back on the
+ *   session (`account`), and fails closed as `wrong-account` until DorkOS does.
  * - **send:** `POST /api/sessions/<id>/messages` (DorkOS queues while a turn runs).
  * - **state:** the session's `status` (DorkOS with account-fleet support), else `unknown`.
  * - **stop:** nothing; the session stays in DorkOS for the person (`left-idle`).
@@ -38,12 +44,16 @@ import path from 'node:path';
 import { resolveDorkHome } from '../fleet/accounts.ts';
 import {
   DEFAULT_START_TIMEOUT_MS,
+  isAmbientAccount,
   pointerLine,
   validateLaunchRequest,
   validateMessageFile,
 } from './common.ts';
+import { requireSupported, supportFor } from './support.ts';
 import {
+  DEFAULT_ACCOUNT_ID,
   LaunchError,
+  type LaunchAccount,
   type LaunchRequest,
   type Launcher,
   type ProbeResult,
@@ -213,6 +223,33 @@ function mintedSessionId(result: Record<string, unknown>): string | null {
   return null;
 }
 
+/**
+ * The account id DorkOS is sent, or `undefined` to omit it: claude-code sends
+ * any account that is not the ambient one; codex and opencode send only a
+ * registered, non-default account (DorkOS has accounts for claude-code only).
+ */
+function sentAccount(req: LaunchRequest): string | undefined {
+  const account = req.account;
+  if (account === null) return undefined;
+  if (req.runtime === 'claude-code') return isAmbientAccount(account) ? undefined : account.id;
+  return account.id === DEFAULT_ACCOUNT_ID ? undefined : account.id;
+}
+
+/**
+ * What DorkOS must report as the session's `account` for a sent account: its
+ * path (made absolute), else for a path-less opencode account its provider,
+ * else its id.
+ */
+function expectedAccount(account: LaunchAccount): string {
+  if (account.path !== null) return path.resolve(account.path);
+  return account.provider ?? account.id;
+}
+
+/** Whether a reported `account` is the expected one (paths compared resolved). */
+function sameAccount(reported: string, expected: string): boolean {
+  return path.isAbsolute(reported) ? path.resolve(reported) === expected : reported === expected;
+}
+
 /** How the MCP path went: started, or not usable so the route is taken (a final no throws). */
 type McpOutcome = { kind: 'started'; sessionId: string } | { kind: 'use-route' };
 
@@ -330,8 +367,8 @@ export function createDorkosLauncher(deps: DorkosLauncherDeps): Launcher {
     const args: Record<string, unknown> = {
       prompt: pointerLine(req.promptFile),
       cwd: req.cwd,
-      ...(req.account === null ? {} : { account: req.account.id }),
-      runtime: 'claude-code',
+      ...(sentAccount(req) === undefined ? {} : { account: sentAccount(req) }),
+      runtime: req.runtime,
       ...(req.model === undefined ? {} : { model: req.model }),
       permissionMode: req.permissionMode,
       seedContext: seedContextLine(req),
@@ -383,8 +420,8 @@ export function createDorkosLauncher(deps: DorkosLauncherDeps): Launcher {
         body: {
           content: pointerLine(req.promptFile),
           cwd: req.cwd,
-          runtime: 'claude-code',
-          ...(req.account === null ? {} : { account: req.account.id }),
+          runtime: req.runtime,
+          ...(sentAccount(req) === undefined ? {} : { account: sentAccount(req) }),
           seedContext: seedContextLine(req),
         },
       }
@@ -415,6 +452,7 @@ export function createDorkosLauncher(deps: DorkosLauncherDeps): Launcher {
   }
 
   async function start(req: LaunchRequest): Promise<SessionHandle> {
+    requireSupported('dorkos', req.runtime);
     validateLaunchRequest(req);
     if (!UUID_PATTERN.test(req.sessionId)) {
       throw new LaunchError(
@@ -430,19 +468,29 @@ export function createDorkosLauncher(deps: DorkosLauncherDeps): Launcher {
     const launchPath = viaMcp.kind === 'started' ? 'mcp' : 'route';
     const startedId = viaMcp.kind === 'started' ? viaMcp.sessionId : await startOverRoute(req);
 
-    // Prove it: the session exists, its canonical id, and the account it bills.
-    // DorkOS derives `account` from where the transcript lives, so it can lag the
-    // session itself; keep looking until the deadline.
-    const expected = req.account === null ? null : path.resolve(req.account.path);
+    // Prove it: the session exists, its canonical id, its runtime, and the
+    // account it bills. DorkOS derives `account` from where the transcript
+    // lives, so it can lag the session itself; keep looking until the deadline.
+    const sent = sentAccount(req);
+    const expected =
+      sent === undefined || req.account === null ? null : expectedAccount(req.account);
     const deadline = deps.now() + timeoutMs;
     let seen: Record<string, unknown> | null = null;
     for (;;) {
       const session = await getSession(startedId);
       if (session !== null) {
         seen = session;
+        // A DorkOS old enough to omit `runtime` runs Claude Code only.
+        const runtime = typeof session.runtime === 'string' ? session.runtime : 'claude-code';
+        if (runtime !== req.runtime) {
+          throw new LaunchError(
+            'wrong-runtime',
+            `DorkOS started session ${startedId} on ${runtime} instead of ${req.runtime}; flow left it idle in DorkOS.`
+          );
+        }
         const reported = typeof session.account === 'string' ? session.account : null;
         if (expected === null || reported !== null) {
-          if (expected !== null && path.resolve(reported ?? '') !== expected) {
+          if (expected !== null && !sameAccount(reported ?? '', expected)) {
             throw new LaunchError(
               'wrong-account',
               `DorkOS started the session on ${reported} instead of ${expected}; flow left it idle in DorkOS.`
@@ -450,6 +498,7 @@ export function createDorkosLauncher(deps: DorkosLauncherDeps): Launcher {
           }
           return {
             host: 'dorkos',
+            runtime: req.runtime,
             sessionId: typeof session.id === 'string' && session.id !== '' ? session.id : startedId,
             account: req.account?.id ?? null,
             cwd: req.cwd,
@@ -512,5 +561,13 @@ export function createDorkosLauncher(deps: DorkosLauncherDeps): Launcher {
     return 'left-idle';
   }
 
-  return { host: 'dorkos', probe, start, send, state, stop };
+  return {
+    host: 'dorkos',
+    supports: (runtime) => supportFor('dorkos', runtime),
+    probe,
+    start,
+    send,
+    state,
+    stop,
+  };
 }

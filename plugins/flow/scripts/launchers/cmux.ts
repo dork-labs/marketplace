@@ -17,6 +17,8 @@
  * - **state:** the session file's status, a limit in the transcript, or exited.
  * - **stop:** SIGTERM the recorded pid (after the `ps` check), then rename the
  *   workspace "<title> (stopped)". The workspace stays for the operator.
+ * - **runtimes:** claude-code only. A codex or opencode request throws
+ *   `unsupported` (`CMUX_CLAUDE_ONLY_REASON` in `support.ts`) before anything starts.
  *
  * Every outside effect comes in through {@link CmuxLauncherDeps}, so the
  * contract suite runs it against a fake `cmux` on a temp PATH.
@@ -43,6 +45,7 @@ import {
   validateMessageFile,
 } from './common.ts';
 import { findTranscript, proveAccount } from './prove-account.ts';
+import { requireSupported, supportFor } from './support.ts';
 import { shellQuote } from './shell-quote.ts';
 import {
   LaunchError,
@@ -346,7 +349,7 @@ export function createCmuxLauncher(deps: CmuxLauncherDeps): Launcher {
       const file = readSessionFile(h.configDir, h.pid);
       if (file !== null && file.sessionId !== h.sessionId) return 'not-running';
     }
-    const result = await stopRecordedPid(h.pid, stopDeps);
+    const result = await stopRecordedPid(h.pid, 'claude-code', stopDeps);
     if (result === 'stopped') await markStopped(h);
     return result;
   }
@@ -388,6 +391,7 @@ export function createCmuxLauncher(deps: CmuxLauncherDeps): Launcher {
   }
 
   async function start(req: LaunchRequest): Promise<SessionHandle> {
+    requireSupported('cmux', req.runtime);
     validateLaunchRequest(req);
     refuseBackslash('promptFile', req.promptFile);
     const configDir = sessionConfigDir(req.account, deps.env, deps.osHome);
@@ -398,6 +402,7 @@ export function createCmuxLauncher(deps: CmuxLauncherDeps): Launcher {
 
     const base: SessionHandle = {
       host: 'cmux',
+      runtime: 'claude-code',
       sessionId: req.sessionId,
       account: req.account?.id ?? null,
       cwd: req.cwd,
@@ -482,5 +487,13 @@ export function createCmuxLauncher(deps: CmuxLauncherDeps): Launcher {
     return { kind: 'exited', code: null };
   }
 
-  return { host: 'cmux', probe, start, send, state, stop: stopHandle };
+  return {
+    host: 'cmux',
+    supports: (runtime) => supportFor('cmux', runtime),
+    probe,
+    start,
+    send,
+    state,
+    stop: stopHandle,
+  };
 }

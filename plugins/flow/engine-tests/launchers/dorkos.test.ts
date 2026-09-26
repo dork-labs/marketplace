@@ -23,7 +23,12 @@ import {
   createDorkosLauncher,
   type DorkosLauncherDeps,
 } from '../../scripts/launchers/dorkos.ts';
-import { LaunchError, type SessionHandle } from '../../scripts/launchers/types.ts';
+import {
+  LaunchError,
+  type LaunchAccount,
+  type RuntimeName,
+  type SessionHandle,
+} from '../../scripts/launchers/types.ts';
 import {
   launcherContract,
   requestFor,
@@ -48,7 +53,11 @@ type McpMode =
 type MintMode = 'echo-flow-id' | 'fresh';
 
 /** The fake's knobs, fixed when the harness is built. */
-interface FakeOptions extends HarnessOptions {
+interface FakeOptions extends Omit<HarnessOptions, 'runtime'> {
+  /** The runtime the harness's sessions run on. Default `claude-code`. */
+  runtime?: RuntimeName;
+  /** Report this runtime on every session instead of the one requested. */
+  reportRuntime?: string;
   mcp?: McpMode;
   mint?: MintMode;
   /** Whether the token file exists under `<dorkHome>`. Default true. */
@@ -76,6 +85,7 @@ interface SeenRequest {
 interface FakeSession {
   id: string;
   account: string | undefined;
+  runtime: string;
   cwd: string | null;
   lifecycle: string;
   limit: { window: string; resetsAt: string | null } | null;
@@ -122,12 +132,23 @@ async function makeDorkosHarness(options: FakeOptions = {}): Promise<DorkosHarne
   const cwd = path.join(root, 'work tree');
   const osHome = path.join(root, 'home');
   const dorkHome = path.join(root, 'dork home');
-  const account = { id: 'claude3', path: path.join(root, 'accounts', 'claude3') };
+  const runtime = options.runtime ?? 'claude-code';
+  const account: LaunchAccount =
+    runtime === 'opencode'
+      ? { runtime, id: 'openrouter', path: null, provider: 'openrouter' }
+      : {
+          runtime,
+          id: runtime === 'codex' ? 'codex2' : 'claude3',
+          path: path.join(root, 'accounts', runtime === 'codex' ? 'codex2' : 'claude3'),
+        };
   const otherDir = path.join(root, 'accounts', 'someone-else');
   const ambientConfigDir = path.join(osHome, '.claude');
-  for (const dir of [cwd, osHome, dorkHome, account.path, otherDir, ambientConfigDir]) {
+  for (const dir of [cwd, osHome, dorkHome, otherDir, ambientConfigDir]) {
     mkdirSync(dir, { recursive: true });
   }
+  if (account.path !== null) mkdirSync(account.path, { recursive: true });
+  /** What the fake reports as a matching session's `account`, as the launcher expects it. */
+  const reportedAccount = account.path ?? account.provider ?? account.id;
   const promptFile = path.join(cwd, 'prompt.md');
   const messageFile = path.join(cwd, 'message.md');
   writeFileSync(promptFile, 'Do the work.\n');
@@ -146,7 +167,7 @@ async function makeDorkosHarness(options: FakeOptions = {}): Promise<DorkosHarne
   /** The account a newly started session reports, per the script. */
   function accountFor(accountId: unknown): string | undefined {
     if (nextScript.confirm === 'other-account') return otherDir;
-    return accountId === account.id ? account.path : ambientConfigDir;
+    return accountId === account.id ? reportedAccount : ambientConfigDir;
   }
 
   /** Open a session the way DorkOS would, and record the start. */
@@ -154,6 +175,8 @@ async function makeDorkosHarness(options: FakeOptions = {}): Promise<DorkosHarne
     sessions.set(id, {
       id,
       account: accountFor(body.account),
+      runtime:
+        options.reportRuntime ?? (typeof body.runtime === 'string' ? body.runtime : 'claude-code'),
       cwd: typeof body.cwd === 'string' ? body.cwd : null,
       lifecycle: 'streaming',
       limit: null,
@@ -237,7 +260,7 @@ async function makeDorkosHarness(options: FakeOptions = {}): Promise<DorkosHarne
         openSession(minted, args, args.prompt);
         const result = {
           sessionId: minted,
-          runtime: 'claude-code',
+          runtime: args.runtime,
           account: null,
           status: 'started',
         };
@@ -290,6 +313,7 @@ async function makeDorkosHarness(options: FakeOptions = {}): Promise<DorkosHarne
         title: 'Session',
         createdAt: '2026-09-26T18:00:00.000Z',
         updatedAt: '2026-09-26T18:00:00.000Z',
+        runtime: session.runtime,
         ...(session.account === undefined ? {} : { account: session.account }),
         ...(reportsStatus
           ? {
@@ -336,6 +360,8 @@ async function makeDorkosHarness(options: FakeOptions = {}): Promise<DorkosHarne
 
   return {
     launcher,
+    runtime,
+    mintsSessionId: false,
     accountBinding: 'account-id',
     states: ['busy', 'idle', 'limited'],
     stopBehavior: 'left-idle',
@@ -377,9 +403,16 @@ async function makeDorkosHarness(options: FakeOptions = {}): Promise<DorkosHarne
   };
 }
 
-launcherContract('dorkos (messages route)', (options) => makeDorkosHarness(options));
-launcherContract('dorkos (session_start over MCP)', (options) =>
-  makeDorkosHarness({ ...options, mcp: 'with-tool' })
+const DORKOS_RUNTIMES: readonly RuntimeName[] = ['claude-code', 'codex', 'opencode'];
+launcherContract(
+  'dorkos (messages route)',
+  (options) => makeDorkosHarness(options),
+  DORKOS_RUNTIMES
+);
+launcherContract(
+  'dorkos (session_start over MCP)',
+  (options) => makeDorkosHarness({ ...options, mcp: 'with-tool' }),
+  DORKOS_RUNTIMES
 );
 
 /** Await a call that must fail with a LaunchError. */
@@ -524,6 +557,46 @@ describe('dorkos launcher: the session it records', () => {
       expect(handle.account).toBeNull();
       const post = h.requests().find((r) => r.url.endsWith('/messages'));
       expect(post?.body).not.toHaveProperty('account');
+    });
+  });
+
+  // The runtime rides to both start paths exactly as requested, never a
+  // hardcoded claude-code.
+  it('passes the runtime to the route body and to session_start', async () => {
+    await withFake({ runtime: 'codex' }, async (h) => {
+      await h.launcher.start(requestFor(h));
+      const post = h.requests().find((r) => r.url.endsWith('/messages'));
+      expect(post?.body).toMatchObject({ runtime: 'codex', account: 'codex2' });
+    });
+    await withFake({ runtime: 'opencode', mcp: 'with-tool' }, async (h) => {
+      await h.launcher.start(requestFor(h));
+      expect(h.toolCalls()[0]?.args).toMatchObject({ runtime: 'opencode', account: 'openrouter' });
+    });
+  });
+
+  // DorkOS has accounts for claude-code only, so a codex or opencode request on
+  // the implicit default account sends no account and DorkOS runs its ambient login.
+  it('omits the implicit default account for codex and opencode', async () => {
+    for (const runtime of ['codex', 'opencode'] as const) {
+      await withFake({ runtime }, async (h) => {
+        const handle = await h.launcher.start(
+          requestFor(h, { account: { runtime, id: 'default', path: null } })
+        );
+        expect(handle).toMatchObject({ runtime, account: 'default' });
+        const post = h.requests().find((r) => r.url.endsWith('/messages'));
+        expect(post?.body).toMatchObject({ runtime });
+        expect(post?.body).not.toHaveProperty('account');
+      });
+    }
+  });
+
+  // A session DorkOS reports on another runtime is refused as wrong-runtime,
+  // not adopted: flow asked for codex and must not drive a Claude session.
+  it('a session on another runtime throws wrong-runtime', async () => {
+    await withFake({ runtime: 'codex', reportRuntime: 'claude-code' }, async (h) => {
+      const err = await launchFailure(h.launcher.start(requestFor(h)));
+      expect(err.code).toBe('wrong-runtime');
+      expect(err.message).toMatch(/on claude-code instead of codex/);
     });
   });
 

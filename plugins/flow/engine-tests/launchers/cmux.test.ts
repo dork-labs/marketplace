@@ -34,7 +34,7 @@ import {
   type CmuxLauncherDeps,
 } from '../../scripts/launchers/cmux.ts';
 import { pidExists } from '../../scripts/fleet/sessions.ts';
-import type { SessionHandle } from '../../scripts/launchers/types.ts';
+import type { LaunchAccount, RuntimeName, SessionHandle } from '../../scripts/launchers/types.ts';
 import {
   launcherContract,
   requestFor,
@@ -50,7 +50,9 @@ vi.setConfig({ testTimeout: 120_000 });
 const FIXTURES = path.join(path.dirname(fileURLToPath(import.meta.url)), '..', 'fixtures', 'cmux');
 
 /** How a cmux harness is built, beyond the contract's options. */
-interface CmuxHarnessOptions extends HarnessOptions {
+interface CmuxHarnessOptions extends Omit<HarnessOptions, 'runtime'> {
+  /** Ignored beyond the contract's bookkeeping: cmux runs claude-code only. */
+  runtime?: RuntimeName;
   /** The account's config dir name (lets a case put a space, quote and `$` in it). */
   accountDirName?: string;
 }
@@ -74,6 +76,8 @@ interface Delivery {
 
 /** The cmux harness plus the handles cmux-only tests need. */
 interface CmuxHarness extends LauncherHarness {
+  /** The registered account; cmux accounts always have a config dir. */
+  account: LaunchAccount & { path: string };
   deps: CmuxLauncherDeps;
   root: string;
   /** Every argv the fake cmux received, with the path it was run as. */
@@ -130,7 +134,8 @@ async function makeCmuxHarness(options: CmuxHarnessOptions = {}): Promise<CmuxHa
   const fakeDir = path.join(root, 'fake');
   const cwd = path.join(root, 'work tree');
   const osHome = path.join(root, 'home');
-  const account = {
+  const account: LaunchAccount & { path: string } = {
+    runtime: 'claude-code',
     id: 'claude3',
     path: path.join(root, 'accounts', options.accountDirName ?? 'claude3'),
   };
@@ -246,6 +251,8 @@ async function makeCmuxHarness(options: CmuxHarnessOptions = {}): Promise<CmuxHa
 
   return {
     launcher: createCmuxLauncher(deps),
+    runtime: 'claude-code',
+    mintsSessionId: false,
     accountBinding: 'config-dir',
     states: ['busy', 'idle', 'exited', 'limited'],
     stopBehavior: 'pid',
@@ -353,7 +360,7 @@ function argvOf(h: CmuxHarness, ...sub: string[]): string[][] {
 
 const STRIP = 'env -u ANTHROPIC_API_KEY -u ANTHROPIC_AUTH_TOKEN -u CLAUDE_CODE_OAUTH_TOKEN';
 
-launcherContract('cmux', makeCmuxHarness);
+launcherContract('cmux', makeCmuxHarness, ['claude-code']);
 
 describe('cmux launcher details', () => {
   // A cmux whose socket is down answers identify non-zero; the probe quotes

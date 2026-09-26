@@ -1,8 +1,9 @@
 /**
  * The rules every launcher keeps (spec `flow-handoff-dispatch` §2.1): validate
  * the request before anything starts, build the child's environment (the
- * account's config dir set, every other credential removed), phrase every
- * message as a one-line pointer, and stop only a pid flow recorded.
+ * account's runtime home set, every other credential of that runtime removed),
+ * phrase every message as a one-line pointer, and stop only a pid flow recorded
+ * that still runs the runtime flow started.
  *
  * Shared by the cli and cmux launchers; DorkOS uses {@link validateLaunchRequest}
  * and {@link pointerLine} too.
@@ -18,23 +19,48 @@ import path from 'node:path';
 import type { ProcessRunner } from '../cli/context.ts';
 import { defaultConfigDir } from '../fleet/config-dir.ts';
 import {
+  DEFAULT_ACCOUNT_ID,
   LaunchError,
   type LaunchAccount,
   type LaunchPermissionMode,
   type LaunchRequest,
+  type RuntimeName,
   type StopResult,
 } from './types.ts';
 
 /**
- * Environment variables that carry a credential of their own. Any of them in a
- * child would bill that credential instead of the named account's login, so
- * every child environment is built without them.
+ * Environment variables that carry a Claude Code credential of their own. Any
+ * of them in a child would bill that credential instead of the named account's
+ * login, so every Claude Code child environment is built without them.
  */
 export const CREDENTIAL_ENV_VARS = [
   'ANTHROPIC_API_KEY',
   'ANTHROPIC_AUTH_TOKEN',
   'CLAUDE_CODE_OAUTH_TOKEN',
 ] as const;
+
+/**
+ * Per runtime, the variables that would bill a credential other than the
+ * account's own login, so the child is built without them.
+ *
+ * - `claude-code`: {@link CREDENTIAL_ENV_VARS}; the `CLAUDE_CONFIG_DIR` login bills.
+ * - `codex`: `OPENAI_API_KEY` and `CODEX_API_KEY`; the `CODEX_HOME` login bills.
+ * - `opencode`: none. An OpenCode account IS the ambient provider credential
+ *   (often an API key in the environment, the intended path per RUNTIMES.md R3),
+ *   so stripping it would leave the session nothing to bill.
+ */
+export const RUNTIME_CREDENTIAL_ENV_VARS: Readonly<Record<RuntimeName, readonly string[]>> = {
+  'claude-code': CREDENTIAL_ENV_VARS,
+  codex: ['OPENAI_API_KEY', 'CODEX_API_KEY'],
+  opencode: [],
+};
+
+/** Per runtime, the variable naming the account's home; opencode has none. */
+export const RUNTIME_HOME_ENV_VAR: Readonly<Record<RuntimeName, string | null>> = {
+  'claude-code': 'CLAUDE_CONFIG_DIR',
+  codex: 'CODEX_HOME',
+  opencode: null,
+};
 
 /** How long `start` waits for a session to confirm, unless a launcher is told otherwise. */
 export const DEFAULT_START_TIMEOUT_MS = 90_000;
@@ -88,9 +114,14 @@ function isDir(dir: string): boolean {
 
 /**
  * Check a request before anything starts: `cwd` an existing absolute folder,
- * `promptFile` an existing absolute file, `account.path` absolute, the session
- * id safe as a file name, the permission mode known, and no value holding a
- * line break or NUL.
+ * `promptFile` an existing absolute file, the session id safe as a file name,
+ * the permission mode known, no value holding a line break or NUL, and the
+ * account one of the request's runtime:
+ *
+ * - `claude-code`, `codex`: `path` absolute, or `null` only for the implicit
+ *   {@link DEFAULT_ACCOUNT_ID} account.
+ * - `opencode`: `path` `null` (an OpenCode account is a provider, not a folder),
+ *   and a model of the form `provider/model` naming the account's provider.
  *
  * @param req - The request.
  * @throws {LaunchError} `bad-request` naming the first problem.
@@ -104,7 +135,8 @@ export function validateLaunchRequest(req: LaunchRequest): void {
     ['model', req.model],
     ['title', req.title],
     ['account.id', req.account?.id],
-    ['account.path', req.account?.path],
+    ['account.path', req.account?.path ?? undefined],
+    ['account.provider', req.account?.provider],
   ];
   for (const [name, value] of strings) {
     if (value === undefined) continue;
@@ -123,9 +155,52 @@ export function validateLaunchRequest(req: LaunchRequest): void {
   if (!PERMISSION_MODES.includes(req.permissionMode)) {
     badRequest(`permissionMode must be default, acceptEdits or bypassPermissions.`);
   }
-  if (req.account !== null && !path.isAbsolute(req.account.path)) {
-    badRequest(`The account's path must be absolute, not "${req.account.path}".`);
+  const account = req.account;
+  if (account === null) return;
+  if (account.runtime !== req.runtime) {
+    badRequest(
+      `The account ${account.id} is a ${account.runtime} account, not a ${req.runtime} one.`
+    );
   }
+  if (req.runtime === 'opencode') {
+    if (account.path !== null) {
+      badRequest(
+        `An opencode account names a provider, not a folder, so its path must be null, not "${account.path}".`
+      );
+    }
+    const provider = account.provider;
+    if (provider !== undefined && req.model !== undefined && req.model.includes('/')) {
+      const modelProvider = req.model.slice(0, req.model.indexOf('/'));
+      if (modelProvider !== provider) {
+        badRequest(
+          `The model ${req.model} is from ${modelProvider}, but the account ${account.id} bills ${provider}.`
+        );
+      }
+    }
+    return;
+  }
+  if (account.path === null) {
+    if (account.id !== DEFAULT_ACCOUNT_ID) {
+      badRequest(
+        `The account ${account.id} has no path; only the implicit default account may omit it.`
+      );
+    }
+    return;
+  }
+  if (!path.isAbsolute(account.path)) {
+    badRequest(`The account's path must be absolute, not "${account.path}".`);
+  }
+}
+
+/**
+ * Whether an account means the ambient environment: none named, or one with no
+ * path and no provider (the implicit {@link DEFAULT_ACCOUNT_ID} account).
+ *
+ * @param account - The request's account.
+ * @returns True for the ambient account.
+ */
+export function isAmbientAccount(account: LaunchAccount | null): boolean {
+  return account === null || (account.path === null && account.provider === undefined);
 }
 
 /**
@@ -142,11 +217,11 @@ export function validateMessageFile(file: string): void {
 }
 
 /**
- * The config dir a session runs in: the account's path, or for the ambient
- * account the supervisor's own resolved dir (its `CLAUDE_CONFIG_DIR`, else
- * `<osHome>/.claude`), made absolute.
+ * The Claude Code config dir a session runs in: the account's path, or for the
+ * ambient account the supervisor's own resolved dir (its `CLAUDE_CONFIG_DIR`,
+ * else `<osHome>/.claude`), made absolute.
  *
- * @param account - The account, or `null` for the ambient account.
+ * @param account - The account, or `null` (or a path-less default) for the ambient account.
  * @param env - The supervisor's environment.
  * @param osHome - The OS home folder.
  * @returns The absolute config dir.
@@ -160,24 +235,73 @@ export function sessionConfigDir(
 }
 
 /**
- * The child's environment: the supervisor's, minus every
- * {@link CREDENTIAL_ENV_VARS} entry, with `CLAUDE_CONFIG_DIR` set explicitly.
+ * The Codex home a session runs in, the way the Codex CLI resolves its own: the
+ * account's path, or for the ambient account the supervisor's `CODEX_HOME`,
+ * else `<osHome>/.codex`, made absolute. It is always set explicitly on the
+ * child, so the session can never land in a home flow did not name.
+ *
+ * @param account - The account, or `null` (or a path-less default) for the ambient account.
+ * @param env - The supervisor's environment.
+ * @param osHome - The OS home folder.
+ * @returns The absolute `CODEX_HOME`.
+ */
+export function sessionCodexHome(
+  account: LaunchAccount | null,
+  env: Readonly<Record<string, string | undefined>>,
+  osHome: string
+): string {
+  if (account?.path) return path.resolve(account.path);
+  const configured = env.CODEX_HOME;
+  return path.resolve(
+    configured !== undefined && configured !== '' ? configured : path.join(osHome, '.codex')
+  );
+}
+
+/**
+ * The runtime home a session runs in: {@link sessionConfigDir} for claude-code,
+ * {@link sessionCodexHome} for codex, and `null` for opencode (no home: its
+ * account is the ambient provider credential).
+ *
+ * @param runtime - The session's runtime.
+ * @param account - The account, or `null` for the ambient account.
+ * @param env - The supervisor's environment.
+ * @param osHome - The OS home folder.
+ * @returns The absolute home, or `null`.
+ */
+export function sessionHome(
+  runtime: RuntimeName,
+  account: LaunchAccount | null,
+  env: Readonly<Record<string, string | undefined>>,
+  osHome: string
+): string | null {
+  if (runtime === 'claude-code') return sessionConfigDir(account, env, osHome);
+  if (runtime === 'codex') return sessionCodexHome(account, env, osHome);
+  return null;
+}
+
+/**
+ * The child's environment: the supervisor's, minus the runtime's
+ * {@link RUNTIME_CREDENTIAL_ENV_VARS}, with the runtime's home variable
+ * ({@link RUNTIME_HOME_ENV_VAR}) set explicitly to `home`.
  *
  * @param env - The supervisor's environment.
- * @param configDir - The config dir the session must run in.
+ * @param runtime - The session's runtime.
+ * @param home - The runtime home the session must run in (`null` for opencode).
  * @returns A new environment object.
  */
 export function childEnv(
   env: Readonly<Record<string, string | undefined>>,
-  configDir: string
+  runtime: RuntimeName,
+  home: string | null
 ): Record<string, string> {
   const out: Record<string, string> = {};
-  const drop = new Set<string>(CREDENTIAL_ENV_VARS);
+  const drop = new Set<string>(RUNTIME_CREDENTIAL_ENV_VARS[runtime]);
   for (const [key, value] of Object.entries(env)) {
     if (value === undefined || drop.has(key)) continue;
     out[key] = value;
   }
-  out.CLAUDE_CONFIG_DIR = configDir;
+  const homeVar = RUNTIME_HOME_ENV_VAR[runtime];
+  if (homeVar !== null && home !== null) out[homeVar] = home;
   return out;
 }
 
@@ -197,6 +321,26 @@ export function isClaudeCommand(command: string): boolean {
   return /^node(\.exe)?$/.test(base) && /claude/i.test(script);
 }
 
+/**
+ * Whether a `ps -o command=` line runs `runtime`'s binary: {@link isClaudeCommand}
+ * for claude-code; for codex and opencode, a program named `codex`/`opencode`
+ * (or `.exe`), or `node` running a script whose file name is that binary (the
+ * npm launchers, `bin/codex.js` and the like).
+ *
+ * @param runtime - The runtime flow started.
+ * @param command - The full command line `ps` printed.
+ * @returns True when the line runs that runtime.
+ */
+export function isRuntimeCommand(runtime: RuntimeName, command: string): boolean {
+  if (runtime === 'claude-code') return isClaudeCommand(command);
+  const [program = '', script = ''] = command.trim().split(/\s+/);
+  const name = runtime;
+  const base = path.basename(program).replace(/\.exe$/, '');
+  if (base === name) return true;
+  const scriptBase = path.basename(script).replace(/\.(c?js|mjs|exe)$/, '');
+  return /^node(\.exe)?$/.test(path.basename(program)) && scriptBase === name;
+}
+
 /** What {@link stopRecordedPid} needs from the machine. */
 export interface StopPidDeps {
   /** Runs `ps` (no shell). */
@@ -209,14 +353,20 @@ export interface StopPidDeps {
 
 /**
  * Stop a process flow started, by the pid it recorded, only after `ps -o
- * command= -p <pid>` shows it still runs a `claude` command. A pid that is gone,
- * or now runs something else (the pid was reused), is left alone.
+ * command= -p <pid>` shows it still runs the runtime's binary
+ * ({@link isRuntimeCommand}). A pid that is gone, or now runs something else
+ * (the pid was reused), is left alone.
  *
  * @param pid - The recorded pid.
+ * @param runtime - The runtime flow started under that pid.
  * @param deps - Process access.
  * @returns `stopped` after a SIGTERM; `not-running` when there was nothing of flow's to stop.
  */
-export async function stopRecordedPid(pid: number, deps: StopPidDeps): Promise<StopResult> {
+export async function stopRecordedPid(
+  pid: number,
+  runtime: RuntimeName,
+  deps: StopPidDeps
+): Promise<StopResult> {
   if (!Number.isInteger(pid) || pid <= 0 || !deps.isAlive(pid)) return 'not-running';
   let command: string;
   try {
@@ -228,7 +378,7 @@ export async function stopRecordedPid(pid: number, deps: StopPidDeps): Promise<S
   } catch {
     return 'not-running';
   }
-  if (!isClaudeCommand(command)) return 'not-running';
+  if (!isRuntimeCommand(runtime, command)) return 'not-running';
   try {
     deps.kill(pid, 'SIGTERM');
   } catch {

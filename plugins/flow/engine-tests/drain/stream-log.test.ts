@@ -44,7 +44,15 @@ const event = line({
 const NOW = new Date('2026-09-26T18:10:00.000Z');
 
 function handle(logFile: string, account: string | null, logOffset = 0): SessionHandle {
-  return { host: 'cli', sessionId: 's1', account, cwd: dir, logFile, logOffset };
+  return {
+    host: 'cli',
+    runtime: 'claude-code',
+    sessionId: 's1',
+    account,
+    cwd: dir,
+    logFile,
+    logOffset,
+  };
 }
 
 describe('ingestStreamLog', () => {
@@ -107,6 +115,19 @@ describe('ingestStreamLog', () => {
     });
     expect(result.observations).toHaveLength(1);
     expect(result.status).toBe('skipped');
+    expect(record).not.toHaveBeenCalled();
+  });
+  // A codex or opencode handle is skipped: S1's ledger here is Claude Code's,
+  // and the per-runtime ledger is not written by this function (RUNTIMES.md R2).
+  it('skips a non-Claude handle without touching the ledger', async () => {
+    const logFile = path.join(dir, 's1.jsonl');
+    writeFileSync(logFile, init + event);
+    const record = vi.fn();
+    const result = await ingestStreamLog(
+      { ...handle(logFile, 'codex2'), runtime: 'codex' },
+      { dorkHome: dir, now: () => NOW, record }
+    );
+    expect(result).toMatchObject({ status: 'skipped', observations: [] });
     expect(record).not.toHaveBeenCalled();
   });
 });

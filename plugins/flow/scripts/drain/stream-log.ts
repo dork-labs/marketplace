@@ -123,7 +123,8 @@ export function parseJsonLines(text: string): Record<string, unknown>[] {
  * session is still writing is read whole on the next call.
  *
  * The ambient account has no registry id and so no ledger: its observations are
- * returned but nothing is written.
+ * returned but nothing is written. A codex or opencode handle is `skipped`: its
+ * ledger is per runtime (RUNTIMES.md R2) and not written by this function.
  *
  * @param handle - A cli session handle with `logFile` (and `logOffset`, default 0).
  * @param deps - The DorkOS home, the clock and the writer.
@@ -134,7 +135,10 @@ export async function ingestStreamLog(
   deps: IngestDeps
 ): Promise<IngestResult> {
   const start = handle.logOffset ?? 0;
-  if (handle.logFile === undefined) {
+  // Only a Claude Code stream carries `rate_limit_event`s, and S1's ledger is
+  // Claude Code's. Codex readings (`codex-rollout.ts`) land in the per-runtime
+  // ledger once S1 rev 6 defines it; until then they are not recorded at all.
+  if (handle.logFile === undefined || handle.runtime !== 'claude-code') {
     return { offset: start, observations: [], status: 'skipped', warnings: [] };
   }
   const chunk = readRange(handle.logFile, start);

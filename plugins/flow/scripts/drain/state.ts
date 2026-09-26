@@ -28,7 +28,12 @@
 
 import { z } from 'zod';
 
-import type { HostName, LaunchPermissionMode, SessionHandle } from '../launchers/types.ts';
+import type {
+  HostName,
+  LaunchPermissionMode,
+  RuntimeName,
+  SessionHandle,
+} from '../launchers/types.ts';
 
 /** Where a drain run is in its loop. */
 export type DrainPhase =
@@ -160,11 +165,18 @@ function vocabulary<T extends string>(): z.ZodType<T> {
 }
 
 const nullableString = z.string().nullable();
+
+/**
+ * A handle's runtime. A record written before launchers were runtime-aware has
+ * none; every such session was Claude Code, so it reads as `claude-code`.
+ */
+const runtimeField = vocabulary<RuntimeName>().default('claude-code');
 const count = z.number().int().nonnegative();
 
 /** The on-disk check for a {@link SessionHandle}. */
 export const SessionHandleSchema: z.ZodType<SessionHandle> = z.looseObject({
   host: vocabulary<HostName>(),
+  runtime: runtimeField,
   sessionId: z.string(),
   account: nullableString,
   cwd: z.string(),
@@ -180,6 +192,7 @@ export const SessionHandleSchema: z.ZodType<SessionHandle> = z.looseObject({
 
 const workerHandleShape = {
   host: vocabulary<HostName>(),
+  runtime: runtimeField,
   sessionId: z.string(),
   account: nullableString,
   cwd: z.string(),

@@ -10,7 +10,13 @@
  * never knows which: everything host-specific sits behind
  * {@link LauncherHarness}, and the few real differences between hosts are
  * declared as harness capabilities (`accountBinding`, `states`, `stopBehavior`,
- * `scrubsCredentials`, `reportsApiKeySource`) rather than branched on by name.
+ * `scrubsCredentials`, `reportsApiKeySource`, `mintsSessionId`) rather than
+ * branched on by name.
+ *
+ * Runtime-aware (RUNTIMES.md R5): a launcher's test file declares the runtimes
+ * its host supports, the whole suite runs once per (host, runtime) pair, and
+ * every runtime it does NOT declare is checked to be refused as `unsupported`
+ * with its reason, starting nothing.
  *
  * Not a test file itself (no `.test.ts`), so vitest runs it only through the
  * launcher test files that import it.
@@ -22,22 +28,38 @@ import { describe, expect, it } from 'vitest';
 import { shellQuote } from '../../scripts/launchers/shell-quote.ts';
 import {
   LaunchError,
+  RUNTIME_NAMES,
   type LaunchAccount,
   type LaunchErrorCode,
   type LaunchRequest,
   type Launcher,
+  type RuntimeName,
   type SessionHandle,
 } from '../../scripts/launchers/types.ts';
 
-/** The credential variables no child may inherit (spec §2.1 "No other credential rides along"). */
-export const CREDENTIAL_VARS = [
-  'ANTHROPIC_API_KEY',
-  'ANTHROPIC_AUTH_TOKEN',
-  'CLAUDE_CODE_OAUTH_TOKEN',
-] as const;
+/**
+ * Per runtime, the credential variables no child may inherit (spec §2.1 "No
+ * other credential rides along"; RUNTIMES.md R5). Written out here, not
+ * imported, so the suite pins them. opencode has none: its account IS the
+ * ambient provider credential.
+ */
+export const CREDENTIAL_VARS: Readonly<Record<RuntimeName, readonly string[]>> = {
+  'claude-code': ['ANTHROPIC_API_KEY', 'ANTHROPIC_AUTH_TOKEN', 'CLAUDE_CODE_OAUTH_TOKEN'],
+  codex: ['OPENAI_API_KEY', 'CODEX_API_KEY'],
+  opencode: [],
+};
+
+/** Per runtime, the variable a `config-dir` host names the account's home in. */
+const HOME_VAR: Readonly<Record<RuntimeName, string | null>> = {
+  'claude-code': 'CLAUDE_CONFIG_DIR',
+  codex: 'CODEX_HOME',
+  opencode: null,
+};
 
 /** How a harness is built for one case. */
 export interface HarnessOptions {
+  /** The runtime the harness's sessions run on. */
+  runtime: RuntimeName;
   /** Variables added to the supervisor's environment the launcher is given. */
   supervisorEnv?: Record<string, string>;
   /** Build the host as absent: its probe must fail and nothing may start. */
@@ -76,13 +98,15 @@ export interface HostSessionRecord {
   sessionId: string;
   /** The folder the session runs in, when the host was told one. */
   cwd: string | null;
-  /** `config-dir` hosts: the `CLAUDE_CONFIG_DIR` the child got. */
+  /** `config-dir` hosts: the runtime home the child got (`CLAUDE_CONFIG_DIR`, `CODEX_HOME`). */
   configDir?: string;
+  /** `provider` hosts: the provider the session bills. */
+  provider?: string;
   /** `account-id` hosts: the `account` the request carried; `undefined` when omitted. */
   accountId?: string;
   /** The message text the session received (or has queued), exactly. */
   message: string | null;
-  /** `config-dir` hosts: the environment the `claude` child sees. */
+  /** `config-dir` and `provider` hosts: the environment the runtime child sees. */
   childEnv?: Readonly<Record<string, string | undefined>>;
 }
 
@@ -106,8 +130,15 @@ export interface HostCall {
 export interface LauncherHarness {
   /** The launcher under test, built with the fake host's deps. */
   launcher: Launcher;
-  /** How the host names the account: a config dir in the child env, or an account id in a request. */
-  accountBinding: 'config-dir' | 'account-id';
+  /** The runtime this harness's sessions run on. */
+  runtime: RuntimeName;
+  /**
+   * How the host names the account: a runtime home in the child env, an
+   * account id in a request, or (opencode) the provider the session bills.
+   */
+  accountBinding: 'config-dir' | 'account-id' | 'provider';
+  /** Whether the runtime mints its own session id, replacing the request's (codex, opencode). */
+  mintsSessionId: boolean;
   /** The states the host can report, so case 8 checks exactly those. */
   states: readonly HostSignal['kind'][];
   /** `pid`: stop signals a recorded pid (after the ps check). `left-idle`: the host has no stop. */
@@ -118,7 +149,10 @@ export interface LauncherHarness {
   reportsApiKeySource: boolean;
   /** A registered account whose config dir exists. */
   account: LaunchAccount;
-  /** What the supervisor's ambient account resolves to (its `CLAUDE_CONFIG_DIR`, else `~/.claude`). */
+  /**
+   * What the supervisor's ambient account resolves to (its `CLAUDE_CONFIG_DIR`,
+   * else `~/.claude`; its `CODEX_HOME`, else `~/.codex`). Unused by `provider` hosts.
+   */
   ambientConfigDir: string;
   /** An existing absolute working folder. */
   cwd: string;
@@ -160,6 +194,7 @@ export function requestFor(
 ): LaunchRequest {
   return {
     role: 'worker',
+    runtime: h.runtime,
     identifier: 'ACME-12',
     account: h.account,
     cwd: h.cwd,
@@ -190,9 +225,9 @@ async function failure(
 }
 
 /** Run a case with a harness, always cleaning up. */
-async function withHarness(
-  make: MakeHarness,
-  options: HarnessOptions,
+async function withHarness<O>(
+  make: (options: O) => Promise<LauncherHarness>,
+  options: O,
   body: (h: LauncherHarness) => Promise<void>
 ): Promise<void> {
   const h = await make(options);
@@ -211,12 +246,62 @@ function startRecord(h: LauncherHarness, sessionId: string): HostSessionRecord {
 }
 
 /**
- * The shared launcher contract (spec §2.7, cases 1-12). Call once per launcher.
+ * The shared launcher contract (spec §2.7, cases 1-12), once per runtime the
+ * host supports, plus the unsupported-pair cases for every runtime it does not.
+ * Call once per launcher.
  *
  * @param name - The launcher's name, for the describe block.
- * @param make - Builds a harness per case.
+ * @param make - Builds a harness per case, for the runtime in its options.
+ * @param runtimes - The runtimes this host supports (the rest must be refused).
  */
-export function launcherContract(name: string, make: MakeHarness): void {
+export function launcherContract(
+  name: string,
+  make: MakeHarness,
+  runtimes: readonly RuntimeName[]
+): void {
+  for (const runtime of runtimes) {
+    runtimeContract(`${name} × ${runtime}`, (options) => make({ ...options, runtime }));
+  }
+  const unsupported = RUNTIME_NAMES.filter((r) => !runtimes.includes(r));
+  describe(`launcher contract: ${name} refuses what it cannot run`, () => {
+    // Case 13: supports() says yes for exactly the declared runtimes.
+    it('13. supports() agrees with the runtimes the host declares', async () => {
+      await withHarness(make, { runtime: runtimes[0] as RuntimeName }, async (h) => {
+        for (const runtime of RUNTIME_NAMES) {
+          expect(h.launcher.supports(runtime).ok, runtime).toBe(runtimes.includes(runtime));
+        }
+      });
+    });
+
+    // Case 14: an unsupported (host, runtime) pair is reported with its reason,
+    // never guessed around: start throws `unsupported`, runs nothing, starts nothing.
+    for (const runtime of unsupported) {
+      it(`14. ${runtime}: start throws unsupported with the reason and starts nothing`, async () => {
+        await withHarness(make, { runtime: runtimes[0] as RuntimeName }, async (h) => {
+          const support = h.launcher.supports(runtime);
+          expect(support.ok).toBe(false);
+          const reason = support.ok ? '' : support.reason;
+          expect(reason.length).toBeGreaterThan(0);
+          const err = await failure(
+            h.launcher.start(
+              requestFor(h, { runtime, account: { runtime, id: 'default', path: null } })
+            )
+          );
+          expect(err.code).toBe('unsupported');
+          expect(err.message).toContain(reason);
+          expect(h.sessions()).toEqual([]);
+          expect(h.calls()).toEqual([]);
+        });
+      });
+    }
+  });
+}
+
+/** The cases 1-12 for one (host, runtime) pair. */
+function runtimeContract(
+  name: string,
+  make: (options: Omit<HarnessOptions, 'runtime'>) => Promise<LauncherHarness>
+): void {
   describe(`launcher contract: ${name}`, () => {
     // Case 1: the session runs where and as whom it was asked to, and the
     // handle names it. A launcher that forgot the cwd or the account fails here.
@@ -225,12 +310,14 @@ export function launcherContract(name: string, make: MakeHarness): void {
         const req = requestFor(h);
         const handle = await h.launcher.start(req);
         expect(handle.host).toBe(h.launcher.host);
-        expect(handle.sessionId).toBe(req.sessionId);
+        expect(handle.runtime).toBe(h.runtime);
+        if (!h.mintsSessionId) expect(handle.sessionId).toBe(req.sessionId);
         expect(handle.account).toBe(h.account.id);
         expect(handle.cwd).toBe(h.cwd);
         const record = startRecord(h, handle.sessionId);
         expect(record.cwd).toBe(h.cwd);
         if (h.accountBinding === 'config-dir') expect(record.configDir).toBe(h.account.path);
+        else if (h.accountBinding === 'provider') expect(record.provider).toBe(h.account.provider);
         else expect(record.accountId).toBe(h.account.id);
       });
     });
@@ -244,8 +331,8 @@ export function launcherContract(name: string, make: MakeHarness): void {
         const record = startRecord(h, handle.sessionId);
         if (h.accountBinding === 'config-dir') {
           expect(record.configDir).toBe(h.ambientConfigDir);
-          expect(record.childEnv?.CLAUDE_CONFIG_DIR).toBe(h.ambientConfigDir);
-        } else {
+          expect(record.childEnv?.[HOME_VAR[h.runtime] as string]).toBe(h.ambientConfigDir);
+        } else if (h.accountBinding === 'account-id') {
           expect(record.accountId).toBeUndefined();
         }
       });
@@ -269,14 +356,16 @@ export function launcherContract(name: string, make: MakeHarness): void {
         const req = requestFor(h);
         const err = await failure(h.launcher.start(req));
         expect(err.code).toBe('wrong-account');
-        if (h.stopBehavior === 'pid') expect(h.stopped()).toContain(req.sessionId);
+        if (h.stopBehavior !== 'pid') return;
+        if (h.mintsSessionId) expect(h.stopped()).toHaveLength(1);
+        else expect(h.stopped()).toContain(req.sessionId);
       });
     });
 
     // Case 5: a missing host is reported with its reason, and nothing is tried.
     it('5. a missing host: probe says why, start throws unavailable and starts nothing', async () => {
       await withHarness(make, { hostMissing: true }, async (h) => {
-        const probe = await h.launcher.probe();
+        const probe = await h.launcher.probe(h.runtime);
         expect(probe.ok).toBe(false);
         const reason = probe.ok ? '' : probe.reason;
         expect(reason.length).toBeGreaterThan(0);
@@ -393,6 +482,13 @@ export function launcherContract(name: string, make: MakeHarness): void {
           { promptFile: `${h.cwd}/no-such-prompt.md` },
           { title: 'ACME-12\nworker' },
           { identifier: 'ACME\u000012' },
+          // An account of another runtime is never run on this one.
+          {
+            account: {
+              ...h.account,
+              runtime: RUNTIME_NAMES.find((r) => r !== h.runtime) as RuntimeName,
+            },
+          },
         ];
         for (const overrides of bad) {
           const err = await failure(h.launcher.start(requestFor(h, overrides)));
@@ -405,13 +501,16 @@ export function launcherContract(name: string, make: MakeHarness): void {
     // Case 12: a credential in the supervisor's environment never reaches the
     // child, and a session that still reports a key is refused.
     it('12. credential variables never reach the child; an apiKeySource other than none is refused', async () => {
-      const supervisorEnv = Object.fromEntries(CREDENTIAL_VARS.map((v) => [v, `secret-${v}`]));
+      const every = Object.values(CREDENTIAL_VARS).flat();
+      const supervisorEnv = Object.fromEntries(every.map((v) => [v, `secret-${v}`]));
       await withHarness(make, { supervisorEnv }, async (h) => {
         if (!h.scrubsCredentials) return;
         const handle = await h.launcher.start(requestFor(h));
         const record = startRecord(h, handle.sessionId);
         expect(record.childEnv).toBeDefined();
-        for (const name of CREDENTIAL_VARS) expect(record.childEnv?.[name]).toBeUndefined();
+        const own = CREDENTIAL_VARS[h.runtime];
+        expect(own.length).toBeGreaterThan(0);
+        for (const name of own) expect(record.childEnv?.[name]).toBeUndefined();
 
         if (!h.reportsApiKeySource) return;
         h.script({ confirm: 'confirmed', apiKeySource: 'ANTHROPIC_API_KEY' });

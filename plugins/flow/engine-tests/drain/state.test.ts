@@ -32,6 +32,7 @@ function fullDrain(): DrainState {
     phase: 'reviewing',
     worker: {
       host: 'cli',
+      runtime: 'claude-code',
       sessionId: 'w-1',
       account: 'claude3',
       cwd: '/work/ABC-1',
@@ -42,6 +43,7 @@ function fullDrain(): DrainState {
     },
     reviewer: {
       host: 'cmux',
+      runtime: 'claude-code',
       sessionId: 'r-1',
       account: null,
       cwd: '/work/ABC-1-review',
@@ -168,6 +170,17 @@ describe('the run record carries drain, limit and checkpoint fields', () => {
     run.limit.state = 'some-future-state';
     expect(FlowStateSchema.safeParse({ 'issue-1': run }).success).toBe(true);
     expect(DRAIN_PHASES).toContain('fixing-ci');
+  });
+
+  // Purpose: a handle written before launchers were runtime-aware has no
+  // runtime; every such session was Claude Code, so it reads as claude-code.
+  // Fails if the schema drops the default (the handle would lack its runtime).
+  it('reads a handle without a runtime as claude-code', () => {
+    const drain = fullDrain() as unknown as { worker: Record<string, unknown> };
+    delete drain.worker.runtime;
+    const parsed = DrainStateSchema.safeParse(drain);
+    expect(parsed.success).toBe(true);
+    expect(parsed.data?.worker?.runtime).toBe('claude-code');
   });
 
   // Purpose: a mistyped known field is still refused (forward compatibility is
