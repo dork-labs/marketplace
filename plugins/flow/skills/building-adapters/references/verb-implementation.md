@@ -128,9 +128,9 @@ Two universal rules apply to every verb:
 ### `claim(item: WorkItem): void`
 
 - **Binding.** `<update-item: set label + state>`.
-- **Must do.** Write the `agent/claimed` label **and** move the item into a
-  `started`-category state, **in that order** (label first, so the durable claim
-  signal lands even if the state move fails).
+- **Must do.** Swap `agent/ready` for `agent/claimed` and remove every `stage/*`
+  label, **and** move the item into a `started`-category state, **in that order**
+  (labels first, so the durable claim signal lands even if the state move fails).
 - **Durability.** **Durable and idempotent.** The `agent/*` label is the durable
   state machine; it must survive a process restart. Re-claiming is a no-op. After a
   crash, any `agent/claimed` + `started` + not-`agent/needs-input` item is
@@ -142,14 +142,15 @@ Two universal rules apply to every verb:
 ### `transition(item: WorkItem, to: StageProjection): void`
 
 - **Binding.** `<update-item: set stage label + state>`.
-- **Must do.** Project the item onto the target stage: set the stage's `stage/*`
-  label and, when the stage carries one, move the item into a state of the target
-  `stateCategory`. Drives the stage-to-projection round-trip the engine reads back.
+- **Must do.** Project the item onto the target stage. A `started` or `completed`
+  stage moves the item into a state of that category and removes every `stage/*`
+  label; any other stage sets its `stage/*` label and, when it carries one, its
+  `stateCategory` (contract 2.0.0).
 - **Durability.** **Durable and idempotent.** Re-applying the same transition is a
   no-op.
 - **Degradation.** A failed write surfaces loudly. If the tracker has no state of
-  the target category, set the label and leave the state as-is; never fabricate a
-  category.
+  the target category, apply the labels and leave the state as-is; never fabricate
+  a category.
 
 ### `comment(item: WorkItem, body: string): void`
 

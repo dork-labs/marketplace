@@ -124,8 +124,10 @@ describe('F14 — every runtime import of a shipped oracle is a declared depende
   });
 
   it('names exactly the scripts that import zod as a value', () => {
-    // Measured by deleting `node_modules` and loading every script: these four
-    // are the DIRECT value importers. The set of scripts that actually fail is
+    // Measured by deleting `node_modules` and loading every script: these are
+    // the DIRECT value importers. `journal-schema.ts` joined the original four;
+    // only `flow journal record` loads it, lazily, so the journal's write path
+    // stays zod-free. The set of scripts that actually fail is
     // larger (11 of 28) because most reach zod transitively through
     // `config-schema.ts` — `dispatch.ts` and `transport.ts` contain no `zod`
     // token at all and still die. Pinning the direct set keeps this test honest
@@ -140,6 +142,7 @@ describe('F14 — every runtime import of a shipped oracle is a declared depende
       'config-schema-builder.ts',
       'config-schema.ts',
       'flow-state.ts',
+      'journal-schema.ts',
       'tasks-schema.ts',
     ]);
   });

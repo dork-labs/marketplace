@@ -12,8 +12,11 @@
  * - In-process tests call {@link createFakeAdapter} with a backlog and read the
  *   recorded `calls` and the live `backlog` afterwards.
  * - A spawned `flow` process reaches it through the loader's `createAdapter`,
- *   which reads the backlog from the JSON file named by `FLOW_FAKE_BACKLOG` and
- *   writes every change back to that file, so the test can inspect it.
+ *   which re-reads the backlog from the JSON file named by `FLOW_FAKE_BACKLOG`
+ *   on every call and writes every change back to that file, so the test can
+ *   inspect it and two processes see each other's writes, as with a real
+ *   tracker. `getItemDelayMs` holds each `getItem` answer back, widening the
+ *   window a race between two processes needs.
  *
  * Two switches simulate a misbehaving tracker: `failReads` makes every read
  * throw a plain `Error` (the loader must map it to exit 4), and `dropWrites`
@@ -40,7 +43,7 @@ import type {
 import { labelsAfterChange } from '../../../../scripts/work-state.ts';
 
 /** The contract version this fake targets. */
-export const CONTRACT_VERSION = '1.4.0';
+export const CONTRACT_VERSION = '2.0.0';
 
 /** The environment variable naming the backlog file a spawned run reads and writes. */
 export const FAKE_BACKLOG_ENV = 'FLOW_FAKE_BACKLOG';
@@ -67,6 +70,11 @@ export interface FakeBacklog {
   failReads?: string;
   /** When true, `applyWorkState` records the call but changes nothing. */
   dropWrites?: boolean;
+  /**
+   * File-backed only: wait this many ms after reading, before `getItem`
+   * answers; a record gives the wait per identifier (others answer at once).
+   */
+  getItemDelayMs?: number | Record<string, number>;
 }
 
 /** One recorded write. */
@@ -173,21 +181,33 @@ export function createFakeAdapter(
 }
 
 /**
- * The contract's factory. Reads the backlog from the file `FLOW_FAKE_BACKLOG`
- * names (an empty backlog when unset) and writes every change back to it.
+ * The contract's factory. Re-reads the backlog from the file `FLOW_FAKE_BACKLOG`
+ * names on every call (an empty backlog when unset) and writes every change
+ * back to it.
  *
  * @param _ctx - The CLI's context; the fake needs none of it.
  * @returns The adapter.
  */
 export function createAdapter(_ctx: AdapterContext): CodeAdapter {
   const file = process.env[FAKE_BACKLOG_ENV];
-  const backlog: FakeBacklog =
-    file === undefined || file === ''
-      ? { items: [] }
-      : (JSON.parse(readFileSync(file, 'utf8')) as FakeBacklog);
-  const persist =
-    file === undefined || file === ''
-      ? undefined
-      : (state: FakeBacklog) => writeFileSync(file, `${JSON.stringify(state, null, 2)}\n`);
-  return createFakeAdapter(backlog, { persist }).adapter;
+  if (file === undefined || file === '') return createFakeAdapter({ items: [] }).adapter;
+  const load = (): FakeBacklog => JSON.parse(readFileSync(file, 'utf8')) as FakeBacklog;
+  const persist = (state: FakeBacklog) =>
+    writeFileSync(file, `${JSON.stringify(state, null, 2)}\n`);
+  const fresh = (backlog: FakeBacklog = load()) => createFakeAdapter(backlog, { persist }).adapter;
+  return {
+    capabilities: load().capabilities ?? ALL,
+    getCurrentUser: () => fresh().getCurrentUser(),
+    getBacklogSnapshot: (options) => fresh().getBacklogSnapshot(options),
+    async getItem(identifier, options) {
+      const backlog = load();
+      const item = await fresh(backlog).getItem(identifier, options);
+      const wait = backlog.getItemDelayMs;
+      const delay = typeof wait === 'number' ? wait : (wait?.[identifier] ?? 0);
+      if (delay > 0) await new Promise((resolve) => setTimeout(resolve, delay));
+      return item;
+    },
+    applyWorkState: (item, change) => fresh().applyWorkState(item, change),
+    comment: (item, body) => fresh().comment(item, body),
+  };
 }

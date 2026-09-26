@@ -28,6 +28,7 @@ import {
   type CliDeps,
   type VerbDefinition,
 } from './cli/context.ts';
+import { journalVerb, noteVerb } from './cli/journal-verbs.ts';
 import { Output, renderTopHelp, renderVerbHelp } from './cli/output.ts';
 import { EXIT, FlowError, UsageError, type ExitCode } from './errors.ts';
 
@@ -37,6 +38,236 @@ import { EXIT, FlowError, UsageError, type ExitCode } from './errors.ts';
  * is a usage error, so no placeholder entry ever ships.
  */
 export const VERBS: readonly VerbDefinition[] = [
+  {
+    name: 'snapshot',
+    summary: "Pull the team's backlog once, for reuse with --snapshot.",
+    description:
+      'Pull every open item of the configured team through the adapter. Prints counts by state and label family, or the whole snapshot with --json. --out also saves it to a file that next, audit and status read with --snapshot.',
+    common: ['project'],
+    flags: [
+      {
+        name: 'include-closed',
+        kind: 'boolean',
+        description: 'Also pull closed items, as titles.',
+      },
+      {
+        name: 'out',
+        kind: 'string',
+        value: 'file',
+        description: 'Also write the snapshot JSON to this file.',
+      },
+    ],
+    load: () => import('./cli/snapshot.ts'),
+  },
+  {
+    name: 'audit',
+    summary: 'Check the backlog against the groom invariants.',
+    description:
+      'Run the groom invariants (audit-backlog.ts) over the backlog and print each one that fails, with the items that break it. Exits 1 when any invariant fails.',
+    common: ['project', 'snapshot'],
+    load: () => import('./cli/audit.ts'),
+  },
+  {
+    name: 'next',
+    summary: 'Show the next item to work on, ranked by the dispatch policy.',
+    description:
+      'Rank the ready queue with the dispatch policy (the same one dispatch.ts runs), with ownership and work in progress worked out from the backlog. Nothing eligible still exits 0; "atWipCap" says the cap is what blocks; else "starved" says whether a triage pass would help. Exits 7 while flow is paused, unless --manual.',
+    common: ['project', 'snapshot', 'manual'],
+    flags: [
+      {
+        name: 'count',
+        kind: 'string',
+        short: 'n',
+        value: 'N',
+        description: 'How many picks to show. Default 1.',
+      },
+      {
+        name: 'for-project',
+        kind: 'string',
+        value: 'name|id',
+        description: 'Only consider items in this project (its id, or its name in any case).',
+      },
+    ],
+    load: () => import('./cli/next.ts'),
+  },
+  {
+    name: 'accounts',
+    summary: 'List the accounts flow may spend, add one, or set how flow routes work to them.',
+    description: [
+      'flow accounts [list]: every account with its role, reserve and room, and the fleet handoff.',
+      'flow accounts add --path <dir> [--label <text>] [--color <#rrggbb>]: register an account. It starts kept out.',
+      'flow accounts set <id> [--role] [--reserve] [--spend-down-hours] [--repos]: set one account\'s policy. "default" clears a field.',
+      'flow accounts set --handoff auto|ask|default: set the fleet-wide handoff.',
+      'Reads and writes <dorkHome> (DORK_HOME, else ~/.dork); needs no tracker and no project config.',
+    ].join('\n'),
+    common: ['dry-run'],
+    positionals: [
+      { name: 'action', description: 'list (default), add or set.' },
+      { name: 'id', description: 'The account id, for set.' },
+    ],
+    flags: [
+      {
+        name: 'path',
+        kind: 'string',
+        value: 'dir',
+        description: "add: the account's CLAUDE_CONFIG_DIR.",
+      },
+      {
+        name: 'label',
+        kind: 'string',
+        value: 'text',
+        description: 'add: your name for the account.',
+      },
+      { name: 'color', kind: 'string', value: '#rrggbb', description: 'add: its display color.' },
+      {
+        name: 'role',
+        kind: 'string',
+        value: 'main|rotation|kept-out',
+        description: 'set: how flow may spend it.',
+      },
+      {
+        name: 'reserve',
+        kind: 'string',
+        value: '0-100',
+        description: 'set: share of the 7-day window kept for you.',
+      },
+      {
+        name: 'spend-down-hours',
+        kind: 'string',
+        value: 'n',
+        description: 'set: hours before the 7-day reset when the reserve drops to 0.',
+      },
+      {
+        name: 'repos',
+        kind: 'string',
+        value: 'owner/name,...|none',
+        description: 'set: the only repos a kept-out account may serve.',
+      },
+      {
+        name: 'handoff',
+        kind: 'string',
+        value: 'auto|ask',
+        description: 'set (no id): move work off a spent account on its own, or ask first.',
+      },
+    ],
+    load: () => import('./cli/accounts.ts'),
+  },
+  {
+    name: 'status',
+    summary: 'Show what is in flight, what is parked, the drain, the pause and any drift.',
+    description:
+      'Joins the run records, the drain sentinel, the pause and the backlog. Drift is a running run whose item is not started, a claimed item with no run, a run whose worker is gone, or a STATE-n breach on an in-flight item. With an identifier: that item only, plus its last parked question.',
+    common: ['project', 'snapshot'],
+    positionals: [{ name: 'identifier', description: 'Show only this item.' }],
+    flags: [{ name: 'strict', kind: 'boolean', description: 'Exit 1 when there is drift.' }],
+    load: () => import('./cli/status.ts'),
+  },
+  {
+    name: 'claim',
+    summary: 'Start working an item: mark it claimed and record the run.',
+    description:
+      'Start working an item. It must be open, carry agent/ready, not be claimed, and be claimable under the ownership settings. Moves it to started with agent/claimed and no stage/* label, then records the run in flow-state.json. Posts no comment.',
+    common: ['project', 'dry-run', 'session', 'manual'],
+    positionals: [{ name: 'identifier', required: true, description: 'The item, e.g. DOR-123.' }],
+    flags: [
+      {
+        name: 'pid',
+        kind: 'string',
+        value: 'N',
+        description: 'The worker process id. Default: the parent of the calling shell.',
+      },
+      {
+        name: 'worktree',
+        kind: 'string',
+        value: 'path',
+        description: 'The worktree the run works in. Default: the checkout root.',
+      },
+      {
+        name: 'branch',
+        kind: 'string',
+        value: 'name',
+        description: 'The branch the run works on. Default: the checkout branch.',
+      },
+      {
+        name: 'account',
+        kind: 'string',
+        value: 'id',
+        description: 'The account this session bills.',
+      },
+      {
+        name: 'host',
+        kind: 'string',
+        value: 'cli|dorkos|cmux',
+        description: 'The launcher this session runs under.',
+      },
+    ],
+    load: () => import('./cli/claim.ts'),
+  },
+  {
+    name: 'release',
+    summary: 'Let go of an item: back to the ready queue, or unowned.',
+    description:
+      'Let go of an item. --to ready (the default) makes it unstarted with agent/ready and a stage/* label to resume at; --to none leaves it unowned. Deletes the run record. Posts a signed comment only with --reason.',
+    common: ['project', 'dry-run', 'session'],
+    positionals: [{ name: 'identifier', required: true, description: 'The item, e.g. DOR-123.' }],
+    flags: [
+      {
+        name: 'to',
+        kind: 'string',
+        value: 'ready|none',
+        description: 'Where the item goes. Default: ready.',
+      },
+      {
+        name: 'stage',
+        kind: 'string',
+        value: 'stage',
+        description: 'The stage to resume at. Default: the run record, else the item.',
+      },
+      {
+        name: 'reason',
+        kind: 'string',
+        value: 'text',
+        description: 'Post this as a signed comment.',
+      },
+    ],
+    load: () => import('./cli/release.ts'),
+  },
+  {
+    name: 'done',
+    summary: 'Finish an item: post the summary and close it.',
+    description:
+      'Finish an item. Posts the summary as a signed comment (skipped when one of the last 10 comments already says the same), moves it to completed with agent/completed and no stage/* label, and marks the run complete.',
+    common: ['project', 'dry-run', 'session'],
+    positionals: [{ name: 'identifier', required: true, description: 'The item, e.g. DOR-123.' }],
+    flags: [
+      { name: 'summary', kind: 'string', value: 'text', description: 'The completion summary.' },
+      {
+        name: 'summary-file',
+        kind: 'string',
+        value: 'path',
+        description: 'Read the summary from this file.',
+      },
+      {
+        name: 'pr',
+        kind: 'string',
+        value: 'url',
+        description: 'The pull request, added to the summary.',
+      },
+    ],
+    load: () => import('./cli/done.ts'),
+  },
+  {
+    name: 'stage',
+    summary: 'Move an item to another stage.',
+    description:
+      'Move an item to a stage from config. A started or completed stage removes every stage/* label; any other stage sets its label. Updates the run record when there is one.',
+    common: ['project', 'dry-run', 'session'],
+    positionals: [
+      { name: 'identifier', required: true, description: 'The item, e.g. DOR-123.' },
+      { name: 'stage', required: true, description: 'A key of stages in config.' },
+    ],
+    load: () => import('./cli/stage.ts'),
+  },
   {
     name: 'checkpoint',
     summary: "Write the item's HANDOFF.md checkpoint in this worktree.",
@@ -82,6 +313,90 @@ export const VERBS: readonly VerbDefinition[] = [
     ],
     load: () => import('./cli/checkpoint.ts'),
   },
+  {
+    name: 'usage',
+    summary: "Record each Claude Code account's usage, or set up the status line to.",
+    description: [
+      'Sub-verbs:',
+      '  record              Read the status-line JSON on stdin and save the readings (the status line runs this).',
+      '  scan                Recover past limit hits from saved conversations.',
+      '  probe <id>          Run one short official turn on an account to read its usage (needs --yes).',
+      "  install-statusline  Add the two recorder lines to each account's status-line script (needs --yes).",
+    ].join('\n'),
+    common: ['dry-run'],
+    flags: [
+      {
+        name: 'account',
+        kind: 'string',
+        value: 'id',
+        description: 'Only this account (record, scan, install-statusline).',
+      },
+      { name: 'verbose', kind: 'boolean', description: 'record: say on stderr what happened.' },
+      {
+        name: 'days',
+        kind: 'string',
+        value: 'n',
+        description: 'scan: read files changed in the last n days. Default 8.',
+      },
+      { name: 'all', kind: 'boolean', description: 'scan: read every file.' },
+      {
+        name: 'yes',
+        kind: 'boolean',
+        description: 'probe, install-statusline: go ahead. Without it nothing runs or changes.',
+      },
+      {
+        name: 'remove',
+        kind: 'boolean',
+        description: 'install-statusline: take the recorder lines out again.',
+      },
+      {
+        name: 'model',
+        kind: 'string',
+        value: 'alias',
+        description: 'probe: the model for the turn. Default haiku.',
+      },
+      {
+        name: 'timeout',
+        kind: 'string',
+        value: 's',
+        description: 'probe: give up after this many seconds. Default 90.',
+      },
+      {
+        name: 'claude',
+        kind: 'string',
+        value: 'path',
+        description: 'probe: the claude binary. Default FLOW_CLAUDE_BIN, else claude on PATH.',
+      },
+    ],
+    positionals: [
+      { name: 'sub-verb', description: 'record, scan, probe or install-statusline.' },
+      { name: 'id', description: 'probe: the account id.' },
+    ],
+    load: () => import('./cli/usage.ts'),
+  },
+  {
+    name: 'fleet',
+    summary: 'Show every account and every running session on one screen. Changes nothing.',
+    description: [
+      "Show each account's 5-hour and weekly usage, and each running session with its",
+      'account, item, state and host. Reads only; the one request it may make goes to',
+      'a DorkOS on this machine.',
+    ].join('\n'),
+    common: ['project'],
+    flags: [
+      {
+        name: 'dorkos-url',
+        kind: 'string',
+        value: 'url',
+        description:
+          'The DorkOS to ask. Default FLOW_DORKOS_URL, else http://127.0.0.1:<DORKOS_PORT or 4242>.',
+      },
+      { name: 'no-dorkos', kind: 'boolean', description: 'Do not ask DorkOS at all.' },
+    ],
+    load: () => import('./cli/fleet.ts'),
+  },
+  noteVerb,
+  journalVerb,
 ];
 
 /** The plugin folder, `<flow-root>`: the parent of `scripts/`. */

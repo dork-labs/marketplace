@@ -22,10 +22,9 @@ seeds the next loop phase, and tears down the workspace.
 ## The one tracker rule
 
 This is a generic stage skill. **It never touches a tracker API string.** The
-completion comment, the Done transition, the `agent/completed` label, follow-up
-creation, relation links, and the project pulse-check reads all go through the
-**adapter** skill by naming its verbs (`comment`, `transition`,
-`createSubIssue`, `link`, `getProjects`, `getEligibleWork`, `getRelations`, and —
+close itself is `flow done` (step 3). Follow-up creation, relation links and the
+project pulse-check reads go through the **adapter** skill by naming its verbs
+(`createSubIssue`, `link`, `getProjects`, `getEligibleWork`, `getRelations`, and —
 only in `auto` mode, and only when the adapter declares it supported — the
 optional `completeProject`). No raw tracker tool name, CLI invocation, or slug
 lives here. (The
@@ -56,13 +55,17 @@ project's own (`.agents/flow/adapters/<tracker>/`), or the one flow ships. Insid
 - **Follow-ups** needed; for hypotheses, whether the validation criteria were
   met.
 
-### 3. Comment + advance the item (via the adapter)
+### 3. Close the item
 
-- Via the adapter, `comment(item, body)` — post the completion summary (carries
-  the agent's `identity.marker`).
-- Via the adapter, `transition(item, "done")` — move to a `completed`-category
-  state and set `agent/completed`, clearing `agent/claimed`. **Match on state
-  category, never on the display name** — the adapter owns that mapping.
+Write the summary to a file, then run:
+
+```bash
+node --experimental-strip-types "<flow-root>/scripts/flow.ts" done <id> --summary-file <file> [--pr <url>] --json
+```
+
+It posts the summary once, signed, moves the item to `completed` with
+`agent/completed` (even when a merge closed it) and marks the run complete.
+Exit 4: run it again.
 
 ### 4. Create follow-up work (when required)
 
@@ -125,6 +128,7 @@ Every follow-up you file:
   early strands that work where nothing will ever surface it again. The adapter's
   verb re-checks this itself and refuses loudly; do not treat its refusal as a
   failure to route around.
+
 - Present the project state, the action taken or the action recommended, and offer
   to run a recommendation. If no transition is detected, report the project status
   briefly.

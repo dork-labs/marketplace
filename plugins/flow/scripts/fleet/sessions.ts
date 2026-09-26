@@ -22,6 +22,7 @@ import { readFileSync, readdirSync } from 'node:fs';
 import path from 'node:path';
 import { UsageError } from '../errors.ts';
 import type { ProcessRunner } from '../cli/context.ts';
+import { pidExists } from '../cli/host-io.ts';
 import type { AccountIdentity } from './accounts.ts';
 import { readWindow, type FleetWarning, type Instant } from './usage-ledger.ts';
 
@@ -136,22 +137,6 @@ function toIso(value: unknown): string | null {
     typeof value === 'number' ? value : typeof value === 'string' ? Date.parse(value) : NaN;
   if (!Number.isFinite(ms)) return null;
   return new Date(ms).toISOString();
-}
-
-/**
- * Whether a process exists: `kill(pid, 0)` succeeds, or fails with `EPERM` (it
- * exists but belongs to someone else).
- *
- * @param pid - A process id.
- * @returns True when the process exists.
- */
-export function pidExists(pid: number): boolean {
-  try {
-    process.kill(pid, 0);
-    return true;
-  } catch (error) {
-    return (error as NodeJS.ErrnoException).code === 'EPERM';
-  }
 }
 
 /** Dependencies of {@link readCliSessions}. */
@@ -348,11 +333,20 @@ export async function fetchDorkosSessions(
     response = await fetchImpl(endpoint, {
       method: 'GET',
       signal: AbortSignal.timeout(deps.timeoutMs ?? 1_500),
-      // A redirect could send the request off this machine; refuse to follow one.
-      redirect: 'error',
+      // A redirect could send the request off this machine: never follow one,
+      // and report it below as an answer rather than as "not running".
+      redirect: 'manual',
     });
   } catch {
     return { url, reachable: false, sessions: [] };
+  }
+  if (response.status >= 300 && response.status < 400) {
+    return {
+      url,
+      reachable: true,
+      sessions: [],
+      warning: `${url} answered with a redirect, which flow does not follow; no DorkOS sessions are shown.`,
+    };
   }
   if (!response.ok) {
     return {

@@ -6,7 +6,7 @@
  * verdict + exit code, exactly like `validate-adapter.test.ts`.
  *
  * The keystone property here is **every check can fail**: for each of the
- * fourteen GRM invariants there is a seeded mutation of the good fixture that
+ * fifteen GRM invariants there is a seeded mutation of the good fixture that
  * must turn the verdict red, naming exactly that invariant. This ports the
  * "prove the check can fail" self-test from the 2026-08-03 tracker
  * reorganization into committed tests - a groom verification that cannot go
@@ -222,6 +222,65 @@ describe('audit-backlog', () => {
     });
   });
 
+  describe('GRM-15 reports every state-coherence check (seeded violations)', () => {
+    /**
+     * One row per STATE-n check (spec flow-cli-core §5), seeded on the good
+     * snapshot so GRM-15 is the only invariant that goes red, and its detail
+     * names exactly the expected checks. A started ready item necessarily also
+     * carries a stage label, so STATE-4 is seeded together with STATE-2.
+     */
+    const rows: Array<{ check: string; expected: string[]; seed: (s: Snapshot) => void }> = [
+      {
+        check: 'STATE-1',
+        expected: ['STATE-1'],
+        seed: (s) => {
+          (s.items[1].labels as string[]).push('stage/ideate', 'stage/specify');
+        },
+      },
+      {
+        check: 'STATE-2',
+        expected: ['STATE-2'],
+        seed: (s) => {
+          s.items[1].stateCategory = 'started';
+          (s.items[1].labels as string[]).push('stage/ideate');
+        },
+      },
+      {
+        check: 'STATE-3',
+        expected: ['STATE-3'],
+        seed: (s) => {
+          (s.items[1].labels as string[]).push('agent/claimed');
+        },
+      },
+      {
+        check: 'STATE-4',
+        expected: ['STATE-2', 'STATE-4'],
+        seed: (s) => {
+          s.items[0].stateCategory = 'started';
+        },
+      },
+      {
+        check: 'STATE-5',
+        expected: ['STATE-5'],
+        seed: (s) => {
+          (s.items[1].labels as string[]).push('agent/completed');
+        },
+      },
+    ];
+
+    it.each(rows)('seeding $check turns GRM-15 red naming it', ({ expected, seed }) => {
+      // Purpose: each coherence check reaches the oracle's verdict, alone.
+      const snapshot = goodSnapshot();
+      seed(snapshot);
+      const { status, stdout } = runOracle({ stdin: JSON.stringify(snapshot) });
+      expect(status).toBe(1);
+      const verdict = JSON.parse(stdout) as Verdict;
+      expect(verdict.failures.map((f) => f.invariant)).toEqual(['GRM-15']);
+      const named = [...verdict.failures[0].detail.matchAll(/STATE-\d/g)].map((m) => m[0]);
+      expect(named.sort()).toEqual(expected);
+    });
+  });
+
   describe('scope rules', () => {
     it('skips terminal items for every open-item invariant', () => {
       const snapshot = goodSnapshot();
@@ -288,7 +347,7 @@ describe('audit-backlog', () => {
       const { status, stdout } = runOracle({ args: ['--help'] });
       expect(status).toBe(0);
       expect(stdout).toContain('GRM-1');
-      expect(stdout).toContain('GRM-14');
+      expect(stdout).toContain('GRM-15');
       expect(stdout).toContain('--fixture');
     });
   });

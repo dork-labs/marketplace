@@ -16,7 +16,7 @@
     "target": 113
   },
   "commands/flow.md": {
-    "baseline": 3936,
+    "baseline": 3988,
     "target": 600
   },
   "commands/groom.md": {
@@ -58,6 +58,10 @@
   "commands/verify.md": {
     "baseline": 94,
     "target": 94
+  },
+  "docs/account-usage.mdx": {
+    "baseline": 1016,
+    "target": 1016
   },
   "docs/bring-your-own-scheduler.mdx": {
     "baseline": 669,

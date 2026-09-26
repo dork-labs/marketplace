@@ -20,6 +20,7 @@ import path from 'node:path';
 
 import type { CodeAdapter } from '../tracker/types.ts';
 import type { ParsedArgs, VerbSpec } from './args.ts';
+import { realHostIo, type HostIo } from './host-io.ts';
 
 /** Anything text can be written to: `process.stdout`, or a test buffer. */
 export interface TextSink {
@@ -94,12 +95,18 @@ export interface CliDeps {
   createAdapter: AdapterFactory;
   /** Runs external commands (git, ps) with no shell. */
   runProcess: ProcessRunner;
+  /** Replaces parts of the machine the usage and fleet verbs touch; the rest are real. */
+  io?: Partial<HostIo>;
 }
 
 /** What a verb returns on success, or when its check found problems. */
 export interface VerbResult {
-  /** `0` (default) on success, `1` when the verb's check found problems. */
-  exitCode?: 0 | 1;
+  /**
+   * `0` (default) on success, `1` when the verb's check found problems, `5` when
+   * it finished and reported everything but a precondition failed for some of
+   * its targets (for example an account whose status line must be edited by hand).
+   */
+  exitCode?: 0 | 1 | 5;
   /** The `--json` payload. `v: 1` is added by the CLI and cannot be overridden. */
   json: Record<string, unknown>;
   /** The human-mode output: plain, aligned, uncolored. Empty prints nothing. */
@@ -127,11 +134,13 @@ export interface VerbContext {
   args: ParsedArgs;
   /** Whether `--json` was given. */
   json: boolean;
+  /** The working directory; resolve a verb's own path flags against it. */
+  cwd: string;
   /** `--project` resolved against cwd, else cwd. */
   projectDir: string;
   /** `--snapshot` resolved against cwd, when given. */
   snapshotPath?: string;
-  /** `--session`, else a non-empty `FLOW_SESSION_ID`; never invented. */
+  /** `--session`, else a non-empty `FLOW_SESSION_ID`, else Claude Code's `CLAUDE_CODE_SESSION_ID`; never invented. */
   sessionId?: string;
   /** Whether `--dry-run` was given. */
   dryRun: boolean;
@@ -149,6 +158,8 @@ export interface VerbContext {
   adapter(): Promise<CodeAdapter>;
   /** Print a warning to stderr (both output modes). */
   warn(message: string): void;
+  /** stdin, the OS home, loopback fetch, streaming children, pid checks, the watchdog. */
+  io: HostIo;
 }
 
 /**
@@ -171,13 +182,16 @@ export function createVerbContext(
     return typeof value === 'string' ? path.resolve(deps.cwd, value) : undefined;
   };
   const sessionFlag = args.flags.session;
-  const envSession = deps.env.FLOW_SESSION_ID;
+  // FLOW_SESSION_ID wins; Claude Code sets CLAUDE_CODE_SESSION_ID for every
+  // Bash command it runs, so an agent needs no flag there. Empty means unset.
+  const envSession = deps.env.FLOW_SESSION_ID || deps.env.CLAUDE_CODE_SESSION_ID;
   const projectDir = pathFlag('project') ?? deps.cwd;
 
   let adapter: Promise<CodeAdapter> | undefined;
   return {
     args,
     json: args.json,
+    cwd: deps.cwd,
     projectDir,
     snapshotPath: pathFlag('snapshot'),
     sessionId: typeof sessionFlag === 'string' ? sessionFlag : envSession ? envSession : undefined,
@@ -196,6 +210,7 @@ export function createVerbContext(
         warn,
       })),
     warn,
+    io: { ...realHostIo(), ...deps.io },
   };
 }
 

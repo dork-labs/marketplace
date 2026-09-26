@@ -30,6 +30,7 @@ import {
   readJsonFile,
   releaseLock,
   updateJsonFile,
+  withHeldLock,
 } from '../scripts/atomic-json.ts';
 
 let dir: string;
@@ -171,6 +172,73 @@ describe('updateJsonFile', () => {
     const [a, b] = await Promise.all([slow, fast]);
     expect([a.status, b.status]).toEqual(['written', 'written']);
     expect(JSON.parse(readFileSync(file, 'utf8'))).toEqual({ a: 1, b: 2 });
+  });
+});
+
+describe('withHeldLock', () => {
+  // Purpose: `flow claim` holds a lock of its own across a tracker read and
+  // write; these pin that the hold is exclusive, kept alive past the stale age,
+  // and always released.
+
+  it('makes a second holder wait until the first lets go', async () => {
+    // Purpose: two claims must run one after the other, never interleaved.
+    const order: string[] = [];
+    let release!: () => void;
+    const gate = new Promise<void>((resolve) => (release = resolve));
+    const first = withHeldLock(lock, async () => {
+      order.push('first-in');
+      await gate;
+      order.push('first-out');
+    });
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    const second = withHeldLock(lock, async () => {
+      order.push('second-in');
+    });
+    await new Promise((resolve) => setTimeout(resolve, 150));
+    release();
+    await Promise.all([first, second]);
+    expect(order).toEqual(['first-in', 'first-out', 'second-in']);
+    expect(existsSync(lock)).toBe(false);
+  });
+
+  it('reports a hold it could not take', async () => {
+    // Purpose: the caller must know it ran nothing, so it can refuse instead of racing.
+    writeFileSync(lock, 'someone-else');
+    let ran = false;
+    const result = await withHeldLock(
+      lock,
+      async () => {
+        ran = true;
+      },
+      { giveUpMs: 100 }
+    );
+    expect(result.held).toBe(false);
+    expect(ran).toBe(false);
+    expect(readFileSync(lock, 'utf8')).toBe('someone-else');
+  });
+
+  it('keeps the lock fresh while held so no one breaks it as stale', async () => {
+    // Purpose: a slow tracker call can outlast the stale age; a broken lock
+    // would let a second claim in.
+    await withHeldLock(
+      lock,
+      async () => {
+        age(lock, 60_000);
+        await new Promise((resolve) => setTimeout(resolve, 120));
+        expect(Date.now() - statSync(lock).mtimeMs).toBeLessThan(10_000);
+      },
+      { heartbeatMs: 30 }
+    );
+  });
+
+  it('releases the lock when the callback throws', async () => {
+    // Purpose: a refused claim must not leave the lock for 10 s.
+    await expect(
+      withHeldLock(lock, async () => {
+        throw new Error('boom');
+      })
+    ).rejects.toThrow('boom');
+    expect(existsSync(lock)).toBe(false);
   });
 });
 

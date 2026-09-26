@@ -199,7 +199,8 @@ export interface FlowRun {
   /**
    * The Claude SDK JSONL session id captured for this run — the resume handle.
    * With the Pulse seat, `sessionId = run.id` is captured per run, making each
-   * issue independently resumable.
+   * issue independently resumable. Empty (`""`) when the claiming session could
+   * not name itself: unknown, never invented, and resumed by thread-replay.
    */
   sessionId: string;
   /** Absolute worktree path, e.g. `~/.dork/workspaces/<project>/<key>/`. */

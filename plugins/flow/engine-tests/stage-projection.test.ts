@@ -2,8 +2,8 @@
  * Stage → projection round-trip (spec §1, §8, §10; task 2.5).
  *
  * The v1 PM adapter is a PROSE contract (the `linear-adapter` SKILL.md), so a
- * stage *transition* — `transition(item, stage)`: "set the stage's `stage/*`
- * label and, when the stage carries one, its `stateCategory`" — has no TS class
+ * stage *transition* — `transition(item, stage)`: the stage's `stateCategory`
+ * and, for a stage that is not started or completed, its `stage/*` label — has no TS class
  * to unit-test. Its single source of truth is instead the `stages` CONFIG in
  * `@dorkos/flow` (`StagesSchema`), which the adapter reads to know what to
  * project. This test pins that config projection: each stage maps to its

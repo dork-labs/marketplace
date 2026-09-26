@@ -1,6 +1,6 @@
 {
   "contract": "fleet",
-  "about": "The reserve and room on one account (spec flow-cli-core 1.1b 'The reserve and the spend-down window' and 'Room on an account'). input.policy is one resolved account policy; input.windows is the ledger's windows object, or null when the account has no ledger. Every window is read with readWindow first. effectiveReservePct is 0 when the seven_day entry has a resetsAt and now >= resetsAt - spendDownWindowHours, else reservePct. fiveHourRoom is false when the five_hour reading is rejected or usedPct >= 100, null with no reading, else true. weeklyRoom is the same for seven_day against 100 - effectiveReservePct. When input.model is given, modelRoom checks the window 'model:<model>' against 100 with no reserve.",
+  "about": "The reserve and room on one account (spec flow-cli-core 1.1b 'The reserve and the spend-down window' and 'Room on an account'). input.policy is one resolved account policy; input.windows is the ledger's windows object, or null when the account has no ledger. Every window is read with readWindow first. effectiveReservePct is 0 when the seven_day entry has a resetsAt and resetsAt - spendDownWindowHours <= now < resetsAt, else reservePct (at or after resetsAt the reading has expired: the window reset, so the reserve applies again). fiveHourRoom is false when the five_hour reading is rejected or usedPct >= 100, null with no reading, else true. weeklyRoom is the same for seven_day against 100 - effectiveReservePct. When input.model is given, modelRoom checks the window 'model:<model>' against 100 with no reserve.",
   "cases": [
     {
       "name": "no ledger: the reserve is the policy's and room is unknown",
@@ -66,6 +66,28 @@
         }
       },
       "expected": { "effectiveReservePct": 50, "fiveHourRoom": null, "weeklyRoom": false }
+    },
+    {
+      "name": "after the reset, the main account's 50% reserve applies again",
+      "input": {
+        "now": "2026-09-28T10:00:00.000Z",
+        "policy": { "id": "personal", "role": "main", "reservePct": 50, "spendDownWindowHours": 24, "scope": { "repos": [] } },
+        "windows": {
+          "seven_day": { "usedPct": 90, "resetsAt": "2026-09-27T16:00:00.000Z", "status": null, "observedAt": "2026-09-27T15:00:00.000Z", "source": "statusline" }
+        }
+      },
+      "expected": { "effectiveReservePct": 50, "fiveHourRoom": null, "weeklyRoom": true }
+    },
+    {
+      "name": "at exactly resetsAt the spend-down window has ended and the reserve applies",
+      "input": {
+        "now": "2026-09-27T16:00:00.000Z",
+        "policy": { "id": "personal", "role": "main", "reservePct": 50, "spendDownWindowHours": 24, "scope": { "repos": [] } },
+        "windows": {
+          "seven_day": { "usedPct": 90, "resetsAt": "2026-09-27T16:00:00.000Z", "status": null, "observedAt": "2026-09-27T15:00:00.000Z", "source": "statusline" }
+        }
+      },
+      "expected": { "effectiveReservePct": 50, "fiveHourRoom": null, "weeklyRoom": true }
     },
     {
       "name": "a seven_day reading with no resetsAt keeps the reserve",

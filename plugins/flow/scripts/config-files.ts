@@ -131,6 +131,21 @@ export const DEFAULT_TRACKER = 'linear';
  */
 export const PAUSE_FILE = 'paused.json';
 
+/**
+ * The folder, relative to the project's main checkout, holding flow's local run
+ * files: the journal, the self-test results. Kept out of git through
+ * `info/exclude`.
+ */
+export const RUN_FILES_DIR = '.dork/flow';
+/** The journal file in {@link RUN_FILES_DIR} (spec `flow-self-improvement` §2). */
+export const JOURNAL_FILE = 'journal.jsonl';
+/**
+ * The journal settings a config that says nothing resolves to. They mirror
+ * `JournalConfigSchema` in `config-schema.ts`, which this zod-free module cannot
+ * import; a test holds the two together.
+ */
+export const JOURNAL_DEFAULTS = { enabled: true, maxBytes: 5_000_000, keep: 3 } as const;
+
 /** What a tracker must look like before it is joined into a path (the schema's pattern). */
 const TRACKER_SLUG = /^[a-z][a-z0-9-]*$/;
 
@@ -1146,6 +1161,56 @@ export function migrateAll(
   };
 }
 
+/** Where this project's journal is and how it is written (spec `flow-self-improvement` §2). */
+export interface JournalSettings {
+  /** The journal file: `<main checkout>/.dork/flow/journal.jsonl`, shared by every worktree. */
+  path: string;
+  /** The main checkout (or the checkout outside a worktree) the path is under. */
+  checkout: string;
+  /** `selfImprovement.journal.enabled`. */
+  enabled: boolean;
+  /** `selfImprovement.journal.maxBytes`: the size that triggers a rotation. */
+  maxBytes: number;
+  /** `selfImprovement.journal.keep`: how many rotated files are kept. */
+  keep: number;
+}
+
+/**
+ * The journal's path and settings, read without zod so a journal write never
+ * needs `npm install`. `config.local.json` wins over `config.json`, field by
+ * field, and a missing or mistyped field takes its default. Settings that may
+ * belong to another project (a shared legacy folder) are not read.
+ *
+ * @param roots - The checkouts to act for.
+ * @param files - The settings in use; resolved from `roots` when omitted.
+ * @returns Where the journal is and how it is written.
+ */
+export function journalSettings(
+  roots: ConfigRoots,
+  files: ConfigFiles = resolveConfigFiles(roots)
+): JournalSettings {
+  const block = (file: string | null): Record<string, unknown> => {
+    if (file === null || files.shared) return {};
+    const value = parseOrUndefined(readOrNull(file));
+    const self = isPlainObject(value) ? value.selfImprovement : undefined;
+    const journal = isPlainObject(self) ? self.journal : undefined;
+    return isPlainObject(journal) ? journal : {};
+  };
+  const merged = { ...block(files.committed), ...block(files.local) };
+  const count = (value: unknown, fallback: number, min: number, max = Infinity): number =>
+    Number.isInteger(value) && (value as number) >= min && (value as number) <= max
+      ? (value as number)
+      : fallback;
+  const checkout = projectKey(roots);
+  return {
+    path: path.join(checkout, RUN_FILES_DIR, JOURNAL_FILE),
+    checkout,
+    enabled: typeof merged.enabled === 'boolean' ? merged.enabled : JOURNAL_DEFAULTS.enabled,
+    maxBytes: count(merged.maxBytes, JOURNAL_DEFAULTS.maxBytes, 1),
+    keep: count(merged.keep, JOURNAL_DEFAULTS.keep, 1, 20),
+  };
+}
+
 /** The one `.agents/flow/` that holds this project's pause: the main checkout's, else the checkout's. */
 function pauseFile(roots: ConfigRoots): string {
   return path.join(projectKey(roots), PROJECT_CONFIG_DIR, PAUSE_FILE);
@@ -1245,10 +1310,11 @@ Usage: config-files.ts [resolve|migrate|prepare|pause|resume] [--confirm|--decli
 
   resolve   (default) Which config.json and config.local.json flow reads, with
             config.json checked against config.schema.json, which tracker adapter
-            it reads, and whether flow is paused. Prints
+            it reads, whether flow is paused, and where its journal is. Prints
             { ok, origin, committed, local, committedDir, localDir, shared, moved,
-              flowRoot, adapter, paused, errors, warnings }; adapter is
-            { tracker, origin, path, target, shared, declined }. Exit 0 when
+              flowRoot, adapter, paused, journal, errors, warnings }; adapter is
+            { tracker, origin, path, target, shared, declined }; journal is
+            { path, enabled }. Exit 0 when
             configured, valid and with an adapter to read, 1 otherwise. Being
             paused is not an error: act on "paused".
   migrate   Copy settings, and the tracker adapter they name, from inside the
@@ -1339,12 +1405,14 @@ function resolveCommand(roots: ConfigRoots): { result: object; ok: boolean } {
   if (files.committed !== null) adapterIssues(adapter, errors, warnings);
 
   const ok = files.committed !== null && errors.length === 0;
+  const journal = journalSettings(roots, files);
   const result = {
     ok,
     ...files,
     flowRoot: roots.pluginRoot,
     adapter,
     paused: pauseState(roots),
+    journal: { path: journal.path, enabled: journal.enabled },
     errors,
     warnings,
   };

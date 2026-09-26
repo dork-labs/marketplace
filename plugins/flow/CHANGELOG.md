@@ -4,6 +4,66 @@ Installs of this plugin are pinned to a commit SHA, so a fix here does not reach
 you until you **reinstall it** (Marketplace → flow → reinstall, or re-run your
 `--plugin-dir` checkout's `git pull`). Each entry below says whether that matters.
 
+## 0.21.0
+
+**flow's journal now records which agent wrote each entry: Claude Code, Codex or OpenCode. Reinstall to get it.**
+
+- Every journal entry says which runtime ran it, so a later review can compare them. It also says what hosted the session when flow can tell: cmux, the runtime's own terminal, a plain shell, or whatever a launcher names with `FLOW_HARNESS` (DorkOS will name itself this way).
+- flow works this out from the markers each runtime leaves in its shell. A launcher can say it outright with `FLOW_RUNTIME` and `FLOW_HARNESS`; a launcher that starts one runtime from inside another (flow's own, or DorkOS) names the new one, so it is recorded as itself.
+- Entries written by earlier versions read as runtime "unknown".
+- The journal can now hold occasional readings of each account's usage, so a review can show how usage moved over a week. A reading is kept only when something changed enough to matter, so the file stays small.
+- `flow journal tail` shows the runtime beside each entry.
+
+## 0.20.0
+
+**flow now keeps a small notebook of how its runs go, and agents can add notes to it. Reinstall to get it.**
+
+- New `flow note`: when an agent had to improvise a script, found a skill's steps wrong, or had to guess between two instructions, it writes one sentence about it. `/flow` now tells agents when to do this.
+- New `flow journal record`: add a review verdict, a CI failure or a handoff to the notebook by hand. It checks what you typed and tells you which field is wrong.
+- New `flow journal tail`: print the newest entries, or only one kind.
+- The notebook is `.dork/flow/journal.jsonl` in your project, shared by every worktree and kept out of git. It never holds comment bodies, prompts or code, and it removes tokens, email addresses and your home folder from any text before saving it. It keeps its size in check by starting a new file at 5 MB and keeping the last three.
+- It is on by default. Turn it off with `selfImprovement.journal.enabled: false` in your settings (see `config/CONFIG.md`). If it cannot be written, you get one warning and the command still works.
+
+## 0.19.0
+
+**New `flow` command: agents and people run flow's routine steps as one tested command instead of following long instructions. Reinstall to get it.**
+
+Run it as `node --experimental-strip-types <flow-root>/scripts/flow.ts <command>`. Add `--json` for output a script can read.
+
+- `flow next` shows the next item to work on. It reads your settings itself, so nobody builds the ranking's input by hand.
+- `flow claim`, `flow release`, `flow done` and `flow stage` move an item along: they change its labels and state, check that the change landed, and keep the run record up to date.
+- `flow snapshot` pulls the backlog once. `flow audit` checks it and exits with an error when something is wrong, and `flow status` shows what is in flight, what is parked, and anything that disagrees.
+- In Claude Code, `flow claim` records which session is working an item without being told. Elsewhere, pass `--session`; without one the claim still goes ahead and says the session is unknown.
+- `flow accounts` lists your Claude Code accounts with the share of each one flow may spend, and lets you add one or change that share.
+- A new audit rule: an item's state, its `agent/*` label and its `stage/*` label must agree, and a `stage/*` label now appears only on work nobody has started. Items that break this show up in `flow audit`.
+- The Linear adapter now carries the code these commands use. The adapter contract is now version 2.0.0; a custom adapter that still sets `stage/*` labels on started work should be regenerated.
+- The instructions these commands replace are gone from the skills.
+- The reserve you keep on an account now comes back after its weekly reset. Before, it stayed at 0 after the reset, which has affected how accounts were ranked since 0.16.0.
+
+## 0.18.1
+
+**A guide to `flow usage` and `flow fleet`. Reinstall to get the page locally; the status-line lines point to it.**
+
+- New page, "Account usage and the fleet view" (`docs/account-usage.mdx`): what flow records and from where, how to add the status-line lines and take them out again, what a probe costs, and how to read the fleet screen.
+
+## 0.18.0
+
+**Two new commands, `flow usage` and `flow fleet`, show how much of each Claude Code account you have left. Reinstall to get them.**
+
+- `flow fleet` shows every account you registered, with its 5-hour and weekly use as bars and how long until each resets. Below that it lists every running session: its account, the item it works on, what it is doing (busy, idle, waiting on you, out of usage), and where it runs (terminal, DorkOS or cmux). It only reads; it changes nothing.
+- `flow usage install-statusline` adds two lines to each account's status-line script, so every session you use keeps that account's numbers up to date in the background. It shows you the change first and makes it only with `--yes`. It keeps a backup, and `--remove` takes the lines out again.
+- `flow usage scan` recovers the times an account ran out during the last week, from your saved conversations.
+- `flow usage probe <account> --yes` sends one short message on an account nobody has used lately, to read its numbers. It uses a small part of that account's 5-hour limit, and says so before it runs.
+- flow reads these numbers only from what Claude Code itself shows. It never reads your login or asks Anthropic's servers directly. Whether using several of your own accounts this way fits Anthropic's terms is your call.
+
+## 0.17.0
+
+**flow now ships a fake tracker, the first piece of its self-test that runs stages without a real tracker. Nothing changes for your project; reinstall when you want it.**
+
+- The fake tracker keeps its items in one JSON file and behaves like the Linear adapter where flow depends on it. A claim changes only flow's own labels and keeps every other label. Moving an item picks a real state name. A label your team doesn't have is refused. A merged pull request that says `Closes <id>` closes the item.
+- One shared test runs the fake and the Linear adapter through the same cases, and the Linear side is checked against answers recorded from Linear, so a difference in any of those cases fails a test.
+- `/flow:self-test` also checks that the fake tracker's sample backlog is well formed.
+
 ## 0.16.0
 
 **Groundwork for running several items at once across your Claude Code accounts. One new command; nothing else you use changes, so no reinstall is needed.**

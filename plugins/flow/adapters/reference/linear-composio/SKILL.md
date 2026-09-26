@@ -7,7 +7,7 @@ description: Reference tracker adapter for /flow - Linear reached over the Compo
 
 > **What this is.** A **reference tracker adapter** for the `/flow` engine: a
 > concrete realization of the neutral contract in [`../../SPEC.md`](../../SPEC.md)
-> (contract version `1.2.0`) over **one transport - the Composio CLI**. It owns
+> (contract version `2.0.0`) over **one transport - the Composio CLI**. It owns
 > every Linear call and normalizes Linear into the generic `WorkItem` shape so
 > the dispatch policy and the stage skills run unchanged.
 >
@@ -161,8 +161,9 @@ Linear label into its generic family before placing it on `labels[]`:
 
 - **`agent/*`** - the durable disposition state machine: `agent/ready`,
   `agent/claimed`, `agent/completed`, `agent/needs-input`.
-- **`stage/*`** - the active spine-stage projection (`stage/triage`,
-  `stage/ideate`, `stage/execute`, `stage/done`, ...).
+- **`stage/*`** - where the next session resumes (`stage/triage`,
+  `stage/ideate`, `stage/execute`, ...): at most one, and only while the item is
+  not started. While it is started, the run record carries the stage.
 - **`type/*`** - the work type (`type/task`, `type/research`, `type/idea`,
   `type/meta`, ...).
 
@@ -326,8 +327,10 @@ duplicateOf? }`, every entry in the **human-key `identifier`** form (for
 
 #### `claim(item): void`
 
-- **Call.** `LINEAR_UPDATE_ISSUE` adding the `agent/claimed` label **and** setting
-  `state_id` to a `started`-category state - label first, then the state move.
+- **Call.** `LINEAR_UPDATE_ISSUE` swapping `agent/ready` for `agent/claimed` and
+  removing every `stage/*` label (the full label set, from a read taken just
+  before the write), **and** setting `state_id` to a `started`-category state -
+  labels first, then the state move.
 - **Durability + degradation.** **Durable and idempotent.** The `agent/claimed`
   label is the durable claim signal (the state machine is labels, not the plan
   field); it must survive a restart. Re-claiming is a no-op. A partial claim
@@ -337,13 +340,15 @@ duplicateOf? }`, every entry in the **human-key `identifier`** form (for
 
 #### `transition(item, to): void`
 
-- **Call.** `LINEAR_UPDATE_ISSUE` setting the `stage/*` label for `to.stageLabel`
-  (replacing the prior `stage/*`) and, when `to.stateCategory` is given,
-  `state_id` to a state of that category for the team.
-- **Durability + degradation.** **Durable and idempotent.** The `stage/*` label
-  and category are projected state; re-applying is a no-op. If the team has no
-  state of the target category, set the label and leave the state as-is (never
-  fabricate a category). A failed write surfaces loudly.
+- **Call.** `LINEAR_UPDATE_ISSUE`. When `to.stateCategory` is `started` or
+  `completed`, set `state_id` to a state of that category and remove every
+  `stage/*` label. Otherwise set the `stage/*` label for `to.stageLabel`
+  (replacing the prior one) and, when `to.stateCategory` is given, `state_id` to
+  a state of that category for the team.
+- **Durability + degradation.** **Durable and idempotent.** Re-applying is a
+  no-op. If the team has no state of the target category, apply the labels and
+  leave the state as-is (never fabricate a category). A failed write surfaces
+  loudly.
 
 #### `comment(item, body): void`
 
@@ -381,7 +386,8 @@ The elicitation primitive - **four atomic effects, in order**:
 
 1. `LINEAR_CREATE_LINEAR_COMMENT` posting `question` (multiple-choice when
    possible, carrying the marker).
-2. `LINEAR_UPDATE_ISSUE` adding the `agent/needs-input` label.
+2. `LINEAR_UPDATE_ISSUE` making `agent/needs-input` the one `agent/*` label,
+   leaving the state alone.
 3. `assignToHuman(item)` (above, via `LINEAR_UPDATE_ISSUE`).
 4. **Stop** - the loop parks here; it resumes only on a non-agent reply surfaced
    by `getInbox`.
@@ -520,5 +526,5 @@ typed), **INV-3** (relation references in human-key form, resolving in-set or
 provably closed), **INV-4** (labels re-namespaced from the flattened Composio
 leaves into the generic families), and **INV-5** (the readiness gate is the
 literal `agent/ready` label, and `getEligibleWork` / `getProjectWork` return the
-broader candidate set, never pre-filtered). It targets contract version `1.2.0`,
+broader candidate set, never pre-filtered). It targets contract version `2.0.0`,
 and **declares `completeProject` supported** (SPEC section 3, _Optional verbs_).
