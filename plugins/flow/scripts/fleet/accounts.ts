@@ -7,13 +7,15 @@
  * - **Identity** (who the accounts are, how they look) lives in DorkOS config:
  *   `<dorkHome>/config.json` at `runtimes.<claudeCode|codex|opencode>.accounts[]`.
  *   DorkOS core owns it; flow reads it ({@link readAccounts}) and, through
- *   `flow accounts add`, may append a Claude Code row. A runtime with no
- *   registered account has one implicit account, `default`: the ambient
- *   environment.
+ *   `flow accounts add`, may append a Claude Code row. Every runtime has a
+ *   `default` account (rev 6d, {@link resolveAccounts}): an account is its
+ *   folder, and `default` names the runtime's default folder, as an alias of
+ *   the registered row in that folder or as its own account.
  * - **Routing policy** (which accounts flow may spend, and how much to keep
  *   back) lives in flow's own file, `<dorkHome>/flow/fleet.json`, keyed
  *   `<runtime>:<account-id>`. DorkOS core never touches it. A registered account
- *   with no entry is kept out; an implicit `default` is in rotation.
+ *   with no entry is kept out; a standalone `default` is main beside registered
+ *   accounts, else rotation.
  *
  * Defaults are resolved at read time ({@link resolveFleetPolicy}) and never
  * written. The room and reserve rules ({@link effectiveReservePct},
@@ -35,6 +37,7 @@ import {
   chmodSync,
   mkdirSync,
   readFileSync,
+  realpathSync,
   renameSync,
   rmSync,
   statSync,
@@ -102,11 +105,26 @@ export interface RegisteredAccount extends AccountIdentity {
   key: string;
   /** Always false: it has a row in the registry. */
   implicit: false;
+  /**
+   * Its folder for comparison ({@link canonicalAccountPath}): the identity of the
+   * real account, since two rows or a row and the default can name one folder.
+   */
+  canonicalPath: string;
+  /**
+   * True when `<runtime>:default` names this row: the runtime's default folder
+   * (spec §1.1a rev 6d) is this row's folder. Then `default` is an alias of its
+   * id, and there is no separate `default` account.
+   */
+  isDefault: boolean;
+  /** The ledger file's id (`<ledgerId>.json`): the id, or `null` when it is not routable. */
+  ledgerId: string | null;
 }
 
 /**
- * A runtime's implicit account: the ambient environment, used when the runtime
- * has no registered account. Its id is always `default`.
+ * A runtime's own `default` account (spec §1.1a rev 6d): the runtime's default
+ * folder when no registered row names it. For Claude Code and Codex it always
+ * has a folder; OpenCode keeps its ambient default (no folder), and only while
+ * it has no registered account.
  */
 export interface ImplicitAccount {
   /** The runtime it belongs to. */
@@ -115,23 +133,30 @@ export interface ImplicitAccount {
   id: typeof IMPLICIT_ACCOUNT_ID;
   /** `<runtime>:default`. */
   key: string;
-  /** No folder: the session runs in whatever environment launched it. */
-  path: null;
-  /** Never set. */
-  label: null;
+  /** The default folder, `~` expanded (`null` for OpenCode: the session's own environment). */
+  path: string | null;
+  /** The folder for comparison, or `null` with no folder. */
+  canonicalPath: string | null;
+  /** {@link DEFAULT_ACCOUNT_LABEL} with a folder; `null` for OpenCode. */
+  label: string | null;
   /** Never set. */
   color: null;
   /** Always true. */
   routable: true;
   /** Always true. */
   implicit: true;
+  /** Always true: `<runtime>:default` names it. */
+  isDefault: true;
+  /** Always `default`: its ledger is `default.json`. */
+  ledgerId: typeof IMPLICIT_ACCOUNT_ID;
 }
 
 /** Any account of any runtime. */
 export type RuntimeAccount = RegisteredAccount | ImplicitAccount;
 
 /** What {@link resolveFleetPolicy} needs to know about an account. */
-export type PolicySubject = Pick<RuntimeAccount, 'runtime' | 'id' | 'routable' | 'implicit'>;
+export type PolicySubject = Pick<RuntimeAccount, 'runtime' | 'id' | 'routable' | 'implicit'> &
+  Partial<Pick<RuntimeAccount, 'isDefault'>>;
 
 /** How flow may spend an account. */
 export type AccountRole = 'main' | 'rotation' | 'kept-out';
@@ -364,9 +389,9 @@ export function readIdentities(
     const reserved = id === IMPLICIT_ACCOUNT_ID;
     const routable = isValidAccountId(id) && !reserved;
     if (reserved) {
-      // `default` names the runtime's implicit account and its usage file; a
+      // `default` names the runtime's default account and its usage file; a
       // registered row with that id would read another folder's readings as
-      // its own, and could be spent as if it were the implicit account.
+      // its own, and could be spent as if it were the default account.
       warnings.push({
         code: 'id-reserved',
         message: `Account id "default" is reserved for the account a runtime uses when none is registered; this row is listed but kept out, with no usage file. Give it another id.`,
@@ -421,62 +446,304 @@ export function parseAccountKey(
   return { runtime, id, bare: false };
 }
 
+/** The label of a runtime's own `default` account when no registered row names its folder. */
+export const DEFAULT_ACCOUNT_LABEL = "Main (this computer's sign-in)";
+
 /**
- * Every account of every runtime (spec §1.1a), in runtime order (`claude-code`,
- * `codex`, `opencode`) and registry order within one. A runtime whose registry
- * has no row left after the row rules gets its implicit `default` account.
+ * What the default account is resolved from (spec §1.1a rev 6d). Pure inputs,
+ * so a conformance runner resolves it without the filesystem.
+ */
+export interface AccountEnvironment {
+  /** The environment (`CLAUDE_CONFIG_DIR`, `CODEX_HOME`). */
+  env: Readonly<Record<string, string | undefined>>;
+  /** The OS home folder, for `~` and the built-in default folders. */
+  home: string;
+  /**
+   * A folder's real path, or `null` when it does not exist (then the path is
+   * compared as written, normalized). Default: the filesystem's real path.
+   */
+  realpath?: (dir: string) => string | null;
+}
+
+/** The filesystem's real path of `dir`, or `null` when it cannot be resolved. */
+function systemRealpath(dir: string): string | null {
+  try {
+    return realpathSync.native(dir);
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * A folder in the form two folders are compared in (spec §1.1a rev 6d): a
+ * leading `~` expanded, resolved, trailing separators dropped, then its real
+ * path when it exists (so a symlink finds its target), else as normalized.
+ *
+ * @param dir - A folder as written in config or the environment.
+ * @param home - The OS home folder, for `~`.
+ * @param realpath - The real-path lookup. Default: the filesystem.
+ * @returns The comparable path.
+ */
+export function canonicalAccountPath(
+  dir: string,
+  home: string,
+  realpath: (dir: string) => string | null = systemRealpath
+): string {
+  return realpath(expandedPath(dir, home)) ?? expandedPath(dir, home);
+}
+
+/** `dir` with `~` expanded, resolved and trailing separators dropped (no real path). */
+function expandedPath(dir: string, home: string): string {
+  let expanded = dir;
+  if (expanded === '~') expanded = home;
+  else if (expanded.startsWith('~/')) expanded = path.join(home, expanded.slice(2));
+  // `path.resolve` also normalizes `..` and drops trailing separators.
+  return path.resolve(expanded);
+}
+
+/**
+ * The folder a runtime runs in when nothing chooses one: `CLAUDE_CONFIG_DIR`,
+ * else `<home>/.claude` for Claude Code; `CODEX_HOME`, else `<home>/.codex` for
+ * Codex (an empty variable counts as unset). OpenCode has none (`null`).
+ *
+ * @param runtime - The runtime.
+ * @param env - The environment.
+ * @param home - The OS home folder.
+ * @returns The folder, not yet resolved, or `null`.
+ */
+export function ambientAccountPath(
+  runtime: RuntimeSlug,
+  env: Readonly<Record<string, string | undefined>>,
+  home: string
+): string | null {
+  const variable =
+    runtime === 'claude-code' ? 'CLAUDE_CONFIG_DIR' : runtime === 'codex' ? 'CODEX_HOME' : null;
+  if (variable === null) return null;
+  const fromEnv = env[variable];
+  if (fromEnv !== undefined && fromEnv !== '') return fromEnv;
+  return path.join(home, runtime === 'claude-code' ? '.claude' : '.codex');
+}
+
+/**
+ * The folder `<runtime>:default` names (spec §1.1a rev 6d):
+ *
+ * - Claude Code: DorkOS `runtimes.claudeCode.defaultAccount` when it is a path
+ *   (`activeAccount`, its name before DorkOS 0.65.0, when `defaultAccount` is
+ *   null or absent), else {@link ambientAccountPath}.
+ * - Codex: {@link ambientAccountPath}.
+ * - OpenCode: `null` (its ambient default has no folder).
+ *
+ * A `defaultAccount` that is not an absolute or `~` path is ignored
+ * (`default-account-invalid`).
+ *
+ * @param config - The parsed `config.json`, or `null`/`undefined`.
+ * @param runtime - The runtime.
+ * @param environment - The environment and home.
+ * @returns The folder (not yet resolved) or `null`, and warnings.
+ */
+export function defaultAccountPath(
+  config: unknown,
+  runtime: RuntimeSlug,
+  environment: Pick<AccountEnvironment, 'env' | 'home'>
+): { path: string | null; warnings: FleetWarning[] } {
+  const warnings: FleetWarning[] = [];
+  if (runtime === 'claude-code') {
+    const runtimes = isObject(config) ? config.runtimes : undefined;
+    const section = isObject(runtimes) ? runtimes.claudeCode : undefined;
+    const chosen = isObject(section)
+      ? typeof section.defaultAccount === 'string' && section.defaultAccount !== ''
+        ? section.defaultAccount
+        : section.defaultAccount == null &&
+            typeof section.activeAccount === 'string' &&
+            section.activeAccount !== ''
+          ? section.activeAccount
+          : undefined
+      : undefined;
+    if (chosen !== undefined) {
+      if (chosen === '~' || chosen.startsWith('~/') || isAbsolutePath(chosen)) {
+        return { path: chosen, warnings };
+      }
+      warnings.push({
+        code: 'default-account-invalid',
+        message: `runtimes.claudeCode.defaultAccount in config.json is not an absolute path; used this environment's sign-in instead.`,
+      });
+    }
+  }
+  return { path: ambientAccountPath(runtime, environment.env, environment.home), warnings };
+}
+
+/**
+ * Every account of every runtime (spec §1.1a rev 6d), in runtime order
+ * (`claude-code`, `codex`, `opencode`), registered rows in registry order, then
+ * the runtime's own `default` when it stands alone.
+ *
+ * - Identity is the folder, not the id. For Claude Code and Codex,
+ *   `<runtime>:default` always exists and names {@link defaultAccountPath}.
+ * - When a routable registered row's folder is that folder (compared by
+ *   {@link canonicalAccountPath}), `default` is an ALIAS of that row: the row
+ *   gets `isDefault: true` and no separate account is listed.
+ * - Otherwise `default` is its own account, labelled
+ *   {@link DEFAULT_ACCOUNT_LABEL}, with the ledger `default.json`.
+ * - OpenCode keeps its ambient default: a `default` with no folder, only while
+ *   it has no registered row left.
  *
  * @param config - The parsed `config.json`, or `null`/`undefined` when missing.
+ * @param environment - The environment, home and real-path lookup the default resolves from.
  * @returns The accounts and every runtime's warnings.
  */
-export function readAccounts(config: unknown): {
+export function readAccounts(
+  config: unknown,
+  environment: AccountEnvironment
+): {
   accounts: RuntimeAccount[];
   warnings: FleetWarning[];
 } {
   const accounts: RuntimeAccount[] = [];
   const warnings: FleetWarning[] = [];
   for (const runtime of RUNTIMES) {
-    const read = readIdentities(config, runtime);
+    const read = resolveAccounts(runtime, { config, ...environment });
     warnings.push(...read.warnings);
-    if (read.accounts.length === 0) {
-      accounts.push(implicitAccount(runtime));
-      continue;
-    }
-    accounts.push(...asRegistered(runtime, read.accounts));
+    accounts.push(...read.accounts);
   }
   return { accounts, warnings };
 }
 
 /**
- * Tag one runtime's registered rows with their runtime and key.
+ * One runtime's accounts (spec §1.1a rev 6d; {@link readAccounts} for all of
+ * them): the one resolver every reader and writer uses, so no path can give one
+ * real account two readings. Each account carries its canonical folder, whether
+ * `default` names it (`isDefault`), its ledger id and its label.
+ *
+ * @param runtime - The runtime.
+ * @param inputs - The parsed `config.json` (`null`/`undefined` when missing), the
+ *   environment, the home folder, and the real-path lookup (default: the filesystem).
+ * @returns The accounts in registry order (a standalone `default` last), and warnings.
+ */
+export function resolveAccounts(
+  runtime: RuntimeSlug,
+  inputs: AccountEnvironment & { config: unknown }
+): { accounts: RuntimeAccount[]; warnings: FleetWarning[] } {
+  const realpath = inputs.realpath ?? systemRealpath;
+  const read = readIdentities(inputs.config, runtime);
+  const warnings = [...read.warnings];
+  const registered = asRegistered(runtime, read.accounts, inputs.home, realpath);
+  if (runtime === 'opencode') {
+    return {
+      accounts: registered.length > 0 ? registered : [implicitAccount(runtime, null, null)],
+      warnings,
+    };
+  }
+  const chosen = defaultAccountPath(inputs.config, runtime, inputs);
+  warnings.push(...chosen.warnings);
+  const folder = expandedPath(chosen.path ?? '', inputs.home);
+  const canonical = canonicalAccountPath(folder, inputs.home, realpath);
+  const alias = registered.find(
+    (account) => account.routable && account.canonicalPath === canonical
+  );
+  if (alias !== undefined) {
+    alias.isDefault = true;
+    return { accounts: registered, warnings };
+  }
+  return { accounts: [...registered, implicitAccount(runtime, folder, canonical)], warnings };
+}
+
+/**
+ * The account an id names in one runtime: `default` resolves to whichever
+ * account `isDefault` marks (a registered row when it is an alias), any other id
+ * to the registered row with that id. Every verb that takes an id resolves it
+ * here before it names a ledger file or a `fleet.json` key.
+ *
+ * @param accounts - Accounts from {@link resolveAccounts} or {@link readAccounts}.
+ * @param runtime - The runtime.
+ * @param id - The id given (`default` or a registry id).
+ * @returns The account, or `null`.
+ */
+export function resolveAccountRef<A extends RuntimeAccount>(
+  accounts: readonly A[],
+  runtime: RuntimeSlug,
+  id: string
+): A | null {
+  if (id === IMPLICIT_ACCOUNT_ID) {
+    return accounts.find((account) => account.runtime === runtime && account.isDefault) ?? null;
+  }
+  return (
+    accounts.find(
+      (account) => account.runtime === runtime && !account.implicit && account.id === id
+    ) ?? null
+  );
+}
+
+/**
+ * The routable account whose folder is `dir` (compared by
+ * {@link canonicalAccountPath}): the account a session running in that folder
+ * bills. The first match in list order wins.
+ *
+ * @param accounts - Accounts from {@link resolveAccounts} or {@link readAccounts}.
+ * @param runtime - The runtime.
+ * @param dir - The folder the session runs in.
+ * @param environment - The home and real-path lookup.
+ * @returns The account, or `null`.
+ */
+export function accountForPath<A extends RuntimeAccount>(
+  accounts: readonly A[],
+  runtime: RuntimeSlug,
+  dir: string,
+  environment: Pick<AccountEnvironment, 'home' | 'realpath'>
+): A | null {
+  const target = canonicalAccountPath(dir, environment.home, environment.realpath);
+  return (
+    accounts.find(
+      (account) =>
+        account.runtime === runtime && account.routable && account.canonicalPath === target
+    ) ?? null
+  );
+}
+
+/**
+ * Tag one runtime's registered rows with their runtime, key, canonical folder
+ * and ledger id.
  *
  * @param runtime - The runtime the rows belong to.
  * @param identities - Rows from {@link readIdentities} or {@link loadIdentities}.
- * @returns The rows as registered accounts, in the same order.
+ * @param home - The OS home folder, for `~`.
+ * @param realpath - The real-path lookup. Default: the filesystem.
+ * @returns The rows as registered accounts, in the same order, none marked default.
  */
 export function asRegistered(
   runtime: RuntimeSlug,
-  identities: readonly AccountIdentity[]
+  identities: readonly AccountIdentity[],
+  home: string,
+  realpath: (dir: string) => string | null = systemRealpath
 ): RegisteredAccount[] {
   return identities.map((identity) => ({
     ...identity,
     runtime,
     key: accountKey(runtime, identity.id),
     implicit: false,
+    canonicalPath: canonicalAccountPath(identity.path, home, realpath),
+    isDefault: false,
+    ledgerId: identity.routable ? identity.id : null,
   }));
 }
 
-/** A runtime's implicit `default` account. */
-function implicitAccount(runtime: RuntimeSlug): ImplicitAccount {
+/** A runtime's own `default` account, with its folder (or none). */
+function implicitAccount(
+  runtime: RuntimeSlug,
+  folder: string | null,
+  canonical: string | null
+): ImplicitAccount {
   return {
     runtime,
     id: IMPLICIT_ACCOUNT_ID,
     key: accountKey(runtime, IMPLICIT_ACCOUNT_ID),
-    path: null,
-    label: null,
+    path: folder,
+    canonicalPath: canonical,
+    label: folder === null ? null : DEFAULT_ACCOUNT_LABEL,
     color: null,
     routable: true,
     implicit: true,
+    isDefault: true,
+    ledgerId: IMPLICIT_ACCOUNT_ID,
   };
 }
 
@@ -511,17 +778,21 @@ export function loadIdentities(
  * ({@link readAccounts}).
  *
  * @param dorkHome - The resolved DorkOS home.
+ * @param environment - The environment and home the default account resolves from.
  * @returns The accounts, the warnings, and whether the file itself read cleanly
  *   (false when it exists but is not JSON: then no registry can be trusted to be
  *   complete, and nothing may be deleted because of it).
  */
-export function loadAccounts(dorkHome: string): {
+export function loadAccounts(
+  dorkHome: string,
+  environment: AccountEnvironment
+): {
   accounts: RuntimeAccount[];
   warnings: FleetWarning[];
   registryReadable: boolean;
 } {
   const read = readJsonFile(identityConfigPath(dorkHome));
-  const result = readAccounts(read.value);
+  const result = readAccounts(read.value, environment);
   const registryReadable =
     read.warnings.length === 0 && !result.warnings.some((w) => w.code === 'accounts-invalid');
   return {
@@ -531,14 +802,37 @@ export function loadAccounts(dorkHome: string): {
   };
 }
 
-/** The defaults for an account with no stored entry: rotation when implicit, else kept out. */
-function unlisted(account: PolicySubject): ResolvedAccountPolicy {
+/**
+ * The role an account has with no stored role (spec §1.1b rev 6d):
+ *
+ * - A registered account: `kept-out`.
+ * - A runtime's own `default` beside at least one routable registered account
+ *   of its runtime: `main` (it is the operator's own sign-in), unless another
+ *   account of that runtime is explicitly `main` in `fleet.json`, which wins;
+ *   then `rotation`.
+ * - A `default` that is its runtime's only routable account: `rotation`.
+ */
+function defaultRole(
+  account: PolicySubject,
+  accounts: readonly PolicySubject[],
+  explicitMains: ReadonlySet<RuntimeSlug>
+): AccountRole {
+  if (!account.implicit) return 'kept-out';
+  const besideRegistered = accounts.some(
+    (other) => other.runtime === account.runtime && !other.implicit && other.routable
+  );
+  if (!besideRegistered || explicitMains.has(account.runtime)) return 'rotation';
+  return 'main';
+}
+
+/** The defaults for an account with no stored entry. */
+function unlisted(account: PolicySubject, role: AccountRole): ResolvedAccountPolicy {
   return {
     runtime: account.runtime,
     id: account.id,
     key: accountKey(account.runtime, account.id),
-    role: account.implicit ? 'rotation' : 'kept-out',
-    reservePct: 0,
+    role,
+    reservePct: role === 'main' ? 50 : 0,
     spendDownWindowHours: 24,
     scope: { repos: [] },
   };
@@ -546,7 +840,7 @@ function unlisted(account: PolicySubject): ResolvedAccountPolicy {
 
 /** The kept-out defaults for an account. */
 function keptOut(account: PolicySubject): ResolvedAccountPolicy {
-  return { ...unlisted(account), role: 'kept-out' };
+  return unlisted(account, 'kept-out');
 }
 
 /** Parse one policy entry's fields, dropping invalid values with a warning. */
@@ -625,10 +919,15 @@ function readEntry(
 
 /**
  * Resolve the routing policy for every account (spec §1.1b), filling in the
- * defaults: role `rotation` for an implicit `default` account and `kept-out` for
- * every other, `reservePct` 50 for main else 0, `spendDownWindowHours` 24,
+ * defaults: role `kept-out` for a registered account; for a runtime's own
+ * `default`, `main` beside a routable registered account of its runtime (unless
+ * another account there is explicitly main) and `rotation` when it is the only
+ * one (rev 6d); `reservePct` 50 for main else 0, `spendDownWindowHours` 24,
  * `scope.repos` [], handoff `auto`, `runtimes` [], `crossRuntimeFallback` `off`.
  *
+ * - When `default` is an alias (a subject with `isDefault` that is not
+ *   implicit), an entry under `<runtime>:default` is that row's entry; the row's
+ *   own key wins when both are stored (`entry-duplicate`).
  * - Entries are keyed `<runtime>:<id>`. A bare key (written before contract
  *   2.0.0) reads as `claude-code:<key>`; when both forms are present the
  *   prefixed one wins (`entry-duplicate`).
@@ -650,14 +949,23 @@ export function resolveFleetPolicy(
   fleet: unknown
 ): ResolvedFleetPolicy {
   const warnings: FleetWarning[] = [];
-  const defaults = (): ResolvedFleetPolicy => ({
-    handoff: 'auto',
-    runtimes: [],
-    crossRuntimeFallback: 'off',
-    mains: {},
-    accounts: accounts.map((account) => (account.routable ? unlisted(account) : keptOut(account))),
-    warnings,
-  });
+  const defaults = (): ResolvedFleetPolicy => {
+    const mains: Partial<Record<RuntimeSlug, string>> = {};
+    const resolved = accounts.map((account) => {
+      if (!account.routable) return keptOut(account);
+      const policy = unlisted(account, defaultRole(account, accounts, new Set()));
+      if (policy.role === 'main') mains[account.runtime] = account.id;
+      return policy;
+    });
+    return {
+      handoff: 'auto',
+      runtimes: [],
+      crossRuntimeFallback: 'off',
+      mains,
+      accounts: resolved,
+      warnings,
+    };
+  };
   if (fleet === undefined || fleet === null) return defaults();
   if (!isObject(fleet)) {
     warnings.push({
@@ -733,6 +1041,32 @@ export function resolveFleetPolicy(
   }
   const entries = migrated.entries;
 
+  // rev 6d: when `default` is an alias, `<runtime>:default` is the aliased row's
+  // entry. The row's own key wins when both are stored.
+  for (const account of accounts) {
+    if (!account.isDefault || account.implicit) continue;
+    const alias = accountKey(account.runtime, IMPLICIT_ACCOUNT_ID);
+    const own = accountKey(account.runtime, account.id);
+    if (!Object.hasOwn(entries, alias)) continue;
+    if (Object.hasOwn(entries, own)) {
+      warnings.push({
+        code: 'entry-duplicate',
+        message: `fleet.json has a policy under both "${alias}" and "${own}", which are one account; used the second.`,
+      });
+    } else {
+      entries[own] = entries[alias];
+    }
+    delete entries[alias];
+  }
+
+  const explicitMains = new Set<RuntimeSlug>();
+  for (const account of accounts) {
+    const entry = entries[accountKey(account.runtime, account.id)];
+    if (account.routable && isObject(entry) && entry.role === 'main') {
+      explicitMains.add(account.runtime);
+    }
+  }
+
   const known = new Set(accounts.map((account) => accountKey(account.runtime, account.id)));
   for (const key of Object.keys(entries)) {
     if (!known.has(key)) {
@@ -748,7 +1082,13 @@ export function resolveFleetPolicy(
     const key = accountKey(account.runtime, account.id);
     const entry = Object.hasOwn(entries, key) ? entries[key] : undefined;
     if (!account.routable) {
-      if (entry !== undefined) {
+      // A hand-edited row with the reserved id shares its key with the real
+      // `default`; that entry is the real one's, not this row's.
+      const sharedKey = accounts.some(
+        (other) =>
+          other !== account && other.routable && accountKey(other.runtime, other.id) === key
+      );
+      if (entry !== undefined && !sharedKey) {
         warnings.push({
           code: 'entry-unroutable',
           message: `"${key}" is not a valid account id, so its policy is ignored and it stays kept out.`,
@@ -756,16 +1096,16 @@ export function resolveFleetPolicy(
       }
       return keptOut(account);
     }
-    if (entry === undefined) return unlisted(account);
-    if (!isObject(entry)) {
+    const base = unlisted(account, defaultRole(account, accounts, explicitMains));
+    let read: ReturnType<typeof readEntry> = {};
+    if (entry !== undefined && !isObject(entry)) {
       warnings.push({
         code: 'entry-invalid',
         message: `fleet.json's policy for "${key}" is not an object; read it as the default.`,
       });
-      return unlisted(account);
+    } else if (entry !== undefined) {
+      read = readEntry(key, entry, warnings);
     }
-    const read = readEntry(key, entry, warnings);
-    const base = unlisted(account);
     let role: AccountRole = read.role ?? base.role;
     if (role === 'main') {
       const current = mains[account.runtime];
@@ -885,7 +1225,7 @@ function editable(raw: unknown): Record<string, unknown> {
  * leaves it, `null` deletes it (back to the default), a value sets it.
  */
 export interface AccountPolicyPatch {
-  /** The role, or `null` for the default (rotation when implicit, else kept-out). */
+  /** The role, or `null` for the default ({@link resolveFleetPolicy}). */
   role?: AccountRole | null;
   /** 0-100, or `null` for the default. */
   reservePct?: number | null;
@@ -900,9 +1240,14 @@ export interface AccountPolicyPatch {
  * returns a new value, stores only fields that were set, keeps unknown fields,
  * migrates bare keys, and drops an entry (or `scope`) left empty.
  *
+ * When `default` is an alias of this account (rev 6d), pass `aliased: true`: an
+ * entry stored under `<runtime>:default` is folded into this key (this key's own
+ * entry wins) and removed, so one account keeps one entry.
+ *
  * @param raw - The raw file (`undefined` when missing).
- * @param key - `<runtime>:<id>`.
+ * @param key - `<runtime>:<id>`, already resolved ({@link resolveAccountRef}).
  * @param patch - The fields to set or delete.
+ * @param opts - `aliased`: `<runtime>:default` names this account.
  * @returns The new raw file.
  * @throws {UsageError} On a key or value the contract does not allow.
  * @throws {PreconditionError} When the file is another version (never downgraded).
@@ -910,7 +1255,8 @@ export interface AccountPolicyPatch {
 export function setAccountPolicy(
   raw: unknown,
   key: string,
-  patch: AccountPolicyPatch
+  patch: AccountPolicyPatch,
+  opts: { aliased?: boolean } = {}
 ): Record<string, unknown> {
   const parsed = parseAccountKey(key);
   if (parsed === null || parsed.bare || !isValidAccountId(parsed.id)) {
@@ -939,6 +1285,13 @@ export function setAccountPolicy(
 
   const next = editable(raw);
   const accounts = isObject(next.accounts) ? { ...next.accounts } : {};
+  if (opts.aliased === true && parsed.id !== IMPLICIT_ACCOUNT_ID) {
+    const alias = accountKey(parsed.runtime, IMPLICIT_ACCOUNT_ID);
+    if (Object.hasOwn(accounts, alias)) {
+      if (!Object.hasOwn(accounts, key)) accounts[key] = accounts[alias];
+      delete accounts[alias];
+    }
+  }
   const entry: Record<string, unknown> = isObject(accounts[key])
     ? { ...(accounts[key] as object) }
     : {};
@@ -994,11 +1347,17 @@ export function dropAccountPolicies(
  * @returns The `<runtime>:<id>` keys, sorted.
  */
 export function unknownPolicyKeys(
-  accounts: readonly Pick<RuntimeAccount, 'runtime' | 'id'>[],
+  accounts: readonly (Pick<RuntimeAccount, 'runtime' | 'id'> &
+    Partial<Pick<RuntimeAccount, 'isDefault'>>)[],
   raw: unknown
 ): string[] {
   if (!isObject(raw) || !isObject(raw.accounts)) return [];
   const known = new Set(accounts.map((account) => accountKey(account.runtime, account.id)));
+  // `<runtime>:default` always names an account in Claude Code and Codex (rev
+  // 6d): an alias keeps its entry until a write moves it under the row's id.
+  for (const account of accounts) {
+    if (account.isDefault) known.add(accountKey(account.runtime, IMPLICIT_ACCOUNT_ID));
+  }
   return Object.keys(migrateEntries(raw.accounts).entries)
     .filter((key) => !known.has(key))
     .sort();

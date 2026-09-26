@@ -4,6 +4,17 @@ Installs of this plugin are pinned to a commit SHA, so a fix here does not reach
 you until you **reinstall it** (Marketplace → flow → reinstall, or re-run your
 `--plugin-dir` checkout's `git pull`). Each entry below says whether that matters.
 
+## 0.27.0
+
+**Your main Claude Code sign-in now shows up in flow, even when you have listed other accounts. Reinstall to get it.**
+
+- flow now knows an account by its folder, not its name. `default` is the folder a tool uses when nothing picks one: for Claude Code, the one the DorkOS app is set to, else `CLAUDE_CONFIG_DIR`, else `~/.claude`; for Codex, `CODEX_HOME`, else `~/.codex`.
+- If one of your listed accounts uses that folder, `default` is just another name for it. flow keeps one usage file and one set of settings for it, and `flow accounts` shows it once, as "Claude3 (default)".
+- If none does, `default` is its own account, "Main (this computer's sign-in)", with its usage in `default.json`. Before this, it was hidden as soon as you listed any account.
+- Next to listed accounts, that sign-in counts as your `main` account: flow keeps half of its weekly limit for you and uses it last. Give another account the `main` role, or give `default` any role, and your choice wins.
+- `flow usage probe default --yes` now checks that sign-in, and the status line records it. A session in a folder that is neither listed nor the default still records nothing.
+- The shared test files DorkOS checks itself against are now version 2.1.0.
+
 ## 0.24.0
 
 **flow now records usage for Codex and OpenCode too, and `flow fleet` shows every tool. Reinstall to get it.**

@@ -6,8 +6,8 @@
  * In each `<dorkHome>/runtimes/<runtime>/usage/` it lists:
  *
  * - `<id>.json` and `<id>.json.corrupt-*` whose `<id>` is not a known account
- *   of that runtime (a registered, routable id; `default` while the runtime
- *   runs on its implicit account). A known account's `<id>.json` never goes.
+ *   of that runtime (a registered, routable id; `default` while `default`
+ *   stands alone, rev 6d). A known account's `<id>.json` never goes.
  * - `*.tmp`, `*.lock` and `*.lock.stale-*` more than 1 hour old. A younger one
  *   may belong to a write in progress.
  *
@@ -32,7 +32,7 @@
 import { lstatSync, readdirSync, rmSync } from 'node:fs';
 import path from 'node:path';
 import { ConfigError } from '../errors.ts';
-import { loadAccounts, resolveDorkHome } from '../fleet/accounts.ts';
+import { loadAccounts, resolveDorkHome, type AccountEnvironment } from '../fleet/accounts.ts';
 import {
   RUNTIMES,
   isValidAccountId,
@@ -101,18 +101,23 @@ function names(dir: string): string[] {
 }
 
 /**
- * Each runtime's known account ids, or `null` when `config.json` cannot be read
- * in full.
+ * Each runtime's ledger ids (spec §1.1a rev 6d), or `null` when `config.json`
+ * cannot be read in full. An aliased `default` is its row's id, so that file is
+ * kept and a leftover `default.json` (a second reading of the same account) is
+ * not; a `default` that stands alone keeps `default.json`.
  */
-function knownIds(dorkHome: string): Record<RuntimeSlug, Set<string>> | null {
-  const registry = loadAccounts(dorkHome);
+function knownIds(
+  dorkHome: string,
+  environment: AccountEnvironment
+): Record<RuntimeSlug, Set<string>> | null {
+  const registry = loadAccounts(dorkHome, environment);
   if (!registry.registryReadable) return null;
   const known = {} as Record<RuntimeSlug, Set<string>>;
   for (const runtime of RUNTIMES) {
     known[runtime] = new Set(
-      registry.accounts
-        .filter((account) => account.runtime === runtime && account.routable)
-        .map((account) => account.id)
+      registry.accounts.flatMap((account) =>
+        account.runtime === runtime && account.ledgerId !== null ? [account.ledgerId] : []
+      )
     );
   }
   return known;
@@ -153,8 +158,12 @@ function classifyLegacyFile(name: string, file: string, nowMs: number): boolean 
 }
 
 /** Everything `prune` would delete right now. */
-function plan(dorkHome: string, nowMs: number): { entries: PruneEntry[] } | null {
-  const known = knownIds(dorkHome);
+function plan(
+  dorkHome: string,
+  environment: AccountEnvironment,
+  nowMs: number
+): { entries: PruneEntry[] } | null {
+  const known = knownIds(dorkHome, environment);
   if (known === null) return null;
   const entries: PruneEntry[] = [];
   for (const runtime of RUNTIMES) {
@@ -176,17 +185,27 @@ function plan(dorkHome: string, nowMs: number): { entries: PruneEntry[] } | null
 }
 
 /** Whether `entry`'s rule still holds right now (the `--yes` re-check). */
-function stillListed(entry: PruneEntry, dorkHome: string, nowMs: number): boolean {
+function stillListed(
+  entry: PruneEntry,
+  dorkHome: string,
+  environment: AccountEnvironment,
+  nowMs: number
+): boolean {
   const name = path.basename(entry.file);
   if (entry.runtime === 'legacy') return classifyLegacyFile(name, entry.file, nowMs);
-  const known = knownIds(dorkHome);
+  const known = knownIds(dorkHome, environment);
   if (known === null) return false;
   return classifyRuntimeFile(name, entry.file, known[entry.runtime], nowMs) !== null;
 }
 
 /** Delete one listed file after re-checking its rule. */
-async function remove(entry: PruneEntry, dorkHome: string, nowMs: number): Promise<PruneStatus> {
-  if (!stillListed(entry, dorkHome, nowMs)) return 'kept';
+async function remove(
+  entry: PruneEntry,
+  dorkHome: string,
+  environment: AccountEnvironment,
+  nowMs: number
+): Promise<PruneStatus> {
+  if (!stillListed(entry, dorkHome, environment, nowMs)) return 'kept';
   const name = path.basename(entry.file);
   if (entry.runtime !== 'legacy' && entry.accountId !== undefined && name.endsWith('.json')) {
     return (await removeLedger(dorkHome, entry.runtime, entry.accountId)).status;
@@ -219,7 +238,8 @@ function because(entry: PruneEntry): string {
 export async function run(ctx: VerbContext): Promise<VerbResult> {
   const dorkHome = resolveDorkHome({ ...ctx.env }, ctx.io.osHome);
   const apply = ctx.args.flags.yes === true && !ctx.dryRun;
-  const planned = plan(dorkHome, ctx.now().getTime());
+  const environment: AccountEnvironment = { env: ctx.env, home: ctx.io.osHome };
+  const planned = plan(dorkHome, environment, ctx.now().getTime());
   if (planned === null) {
     throw new ConfigError(
       `${dorkHome}/config.json could not be read in full, so every account would look unregistered; nothing was removed. Fix the file, then retry.`
@@ -229,7 +249,7 @@ export async function run(ctx: VerbContext): Promise<VerbResult> {
   if (apply) {
     for (const entry of entries) {
       // A fresh clock and a fresh read of config.json for each re-check.
-      entry.status = await remove(entry, dorkHome, ctx.now().getTime());
+      entry.status = await remove(entry, dorkHome, environment, ctx.now().getTime());
       if (entry.status === 'dropped') ctx.warn(`${entry.file} stayed locked; run prune again.`);
     }
   }

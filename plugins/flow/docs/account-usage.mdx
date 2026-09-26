@@ -11,7 +11,7 @@ This is account-aware scheduling for one person's own accounts. Whether using se
 
 ## What flow records, and from where
 
-flow tracks the accounts listed in `~/.dork/config.json`, the same list the DorkOS app keeps: Claude Code's under `runtimes.claudeCode.accounts`, and Codex's and OpenCode's under `runtimes.codex` and `runtimes.opencode`. A runtime with no list has one account, `default`: whatever it is signed in to.
+flow tracks the accounts listed in `~/.dork/config.json`, the same list the DorkOS app keeps, under `runtimes.claudeCode`, `runtimes.codex` and `runtimes.opencode`. Each tool has `default`: the folder it signs in from, such as `~/.claude`. If a listed account uses it, `default` is that account.
 
 For each account flow keeps one small file at `~/.dork/runtimes/<runtime>/usage/<account>.json`, holding the latest reading of each limit: how much is used, when it resets, and when that was seen. For a pay-as-you-go account it also holds what you spent.
 
@@ -50,7 +50,7 @@ Nothing changes until you add `--yes`. Then flow:
 
 `--remove --yes` takes the two lines out again. `--account <id>` limits it to one account.
 
-The recorder runs in the background and starts Node only when a number changed.
+The recorder starts Node only when a number changed.
 
 When flow cannot edit a status line, it prints the two lines to add by hand. If you move the flow plugin, run `install-statusline --yes` again.
 
@@ -103,7 +103,7 @@ DorkOS: not running at http://127.0.0.1:4242
 
 **Accounts**, grouped by tool, one per line:
 
-- Its role: `main`, `rotation` or `kept-out`, from `~/.dork/flow/fleet.json`, keyed `<runtime>:<account>`. A listed account with no entry is `kept-out`; a `default` is `rotation`.
+- Its role: `main`, `rotation` or `kept-out`, from `~/.dork/flow/fleet.json`, keyed `<runtime>:<account>`. A listed account with no entry is `kept-out`; `default` is `main` next to listed accounts and `rotation` alone.
 - A bar and a percentage for the 5-hour and the weekly limit, and how long until each resets. OpenCode shows what you spent this month instead.
 - `out` means the account hit that limit. `reset` means it has reset since the last reading. `no reading` means flow never saw that limit, or the last reading is too old to trust.
 - Notes: the reserve you keep for yourself, when the account ran out, a model's own limit or the plan (Codex), and how long ago flow last saw its numbers.

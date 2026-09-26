@@ -19,7 +19,13 @@
  */
 
 import { PreconditionError, UsageError } from '../errors.ts';
-import { loadAccounts, resolveDorkHome, type RuntimeAccount } from '../fleet/accounts.ts';
+import {
+  IMPLICIT_ACCOUNT_ID,
+  loadAccounts,
+  resolveAccountRef,
+  resolveDorkHome,
+  type RuntimeAccount,
+} from '../fleet/accounts.ts';
 import {
   pickMessageFields,
   readOpenCodeStore,
@@ -214,12 +220,18 @@ export interface OpenCodeAccountScan {
   dropped: boolean;
 }
 
-/** The OpenCode accounts in the registry (the implicit `default` when there is none). */
-function openCodeAccounts(dorkHome: string): {
+/**
+ * The OpenCode accounts, through the shared resolver (spec §1.1a rev 6d):
+ * the registered rows, or OpenCode's ambient `default` when there is none.
+ */
+function openCodeAccounts(
+  ctx: VerbContext,
+  dorkHome: string
+): {
   accounts: RuntimeAccount[];
   warnings: FleetWarning[];
 } {
-  const loaded = loadAccounts(dorkHome);
+  const loaded = loadAccounts(dorkHome, { env: ctx.env, home: ctx.io.osHome });
   return {
     accounts: loaded.accounts.filter((a) => a.runtime === RUNTIME && a.routable),
     warnings: loaded.warnings,
@@ -313,11 +325,12 @@ export async function scanOpenCode(ctx: VerbContext, deps: OpenCodeDeps = {}): P
     warnings.push(warning);
     ctx.warn(warning.message);
   };
-  const registry = openCodeAccounts(dorkHome);
+  const registry = openCodeAccounts(ctx, dorkHome);
   for (const warning of registry.warnings) warn(warning);
   const flag = ctx.args.flags.account;
-  const accounts =
-    typeof flag === 'string' ? registry.accounts.filter((a) => a.id === flag) : registry.accounts;
+  const picked =
+    typeof flag === 'string' ? resolveAccountRef(registry.accounts, RUNTIME, flag) : null;
+  const accounts = typeof flag === 'string' ? (picked === null ? [] : [picked]) : registry.accounts;
   if (typeof flag === 'string' && accounts.length === 0) {
     throw new PreconditionError(`no OpenCode account "${flag}"; "flow fleet" lists the accounts`);
   }
@@ -444,13 +457,14 @@ export async function recordOpenCode(
       return done();
     }
     const dorkHome = resolveDorkHome(ctx.env, ctx.io.osHome);
-    const { accounts } = openCodeAccounts(dorkHome);
+    const { accounts } = openCodeAccounts(ctx, dorkHome);
     const flag = ctx.args.flags.account;
-    const account =
-      typeof flag === 'string'
-        ? accounts.find((a) => a.id === flag)
-        : accounts.find((a) => a.implicit);
-    if (account === undefined) {
+    const account = resolveAccountRef(
+      accounts,
+      RUNTIME,
+      typeof flag === 'string' ? flag : IMPLICIT_ACCOUNT_ID
+    );
+    if (account === null) {
       say('no OpenCode account to record for');
       return done();
     }

@@ -3,7 +3,8 @@
  * flow routes work to them (spec `flow-cli-core` §6, §1.1).
  *
  * - `list` (the default) joins every runtime's accounts in
- *   `<dorkHome>/config.json` (a runtime with none has its implicit `default`),
+ *   `<dorkHome>/config.json` (with each runtime's `default`: its own row, or
+ *   marked on the registered row whose folder it is),
  *   the policy in `<dorkHome>/flow/fleet.json` and each account's usage ledger,
  *   grouped by runtime. It drops the stored policy of an account that is no
  *   longer registered, and says so.
@@ -37,6 +38,7 @@ import {
   loadAccounts,
   loadFleetPolicy,
   parseAccountKey,
+  resolveAccountRef,
   resolveDorkHome,
   resolveFleetPolicy,
   setAccountPolicy,
@@ -44,6 +46,8 @@ import {
   unknownPolicyKeys,
   updateFleetPolicy,
   weeklyRoom,
+  IMPLICIT_ACCOUNT_ID,
+  type AccountEnvironment,
   type AccountPolicyPatch,
   type AccountRole,
   type CrossRuntimeFallback,
@@ -101,13 +105,15 @@ function refuseFlags(ctx: VerbContext, names: readonly string[], where: string):
  */
 export async function run(ctx: VerbContext): Promise<VerbResult> {
   const [action = 'list', id] = ctx.args.positionals;
-  const dorkHome = resolveDorkHome(ctx.env, ctx.env.HOME || os.homedir());
+  const home = ctx.env.HOME || os.homedir();
+  const dorkHome = resolveDorkHome(ctx.env, home);
+  const environment: AccountEnvironment = { env: ctx.env, home };
   switch (action) {
     case 'list':
       if (id !== undefined)
         throw new UsageError(`unexpected argument "${id}" for "flow accounts list"`);
       refuseFlags(ctx, [...ADD_FLAGS, ...POLICY_FLAGS, ...FLEET_FLAGS], 'list');
-      return list(ctx, dorkHome);
+      return list(ctx, dorkHome, environment);
     case 'add':
       if (id !== undefined)
         throw new UsageError(`unexpected argument "${id}" for "flow accounts add"`);
@@ -115,7 +121,9 @@ export async function run(ctx: VerbContext): Promise<VerbResult> {
       return add(ctx, dorkHome);
     case 'set':
       refuseFlags(ctx, ADD_FLAGS, 'set');
-      return id === undefined ? setFleet(ctx, dorkHome) : setAccount(ctx, dorkHome, id);
+      return id === undefined
+        ? setFleet(ctx, dorkHome)
+        : setAccount(ctx, dorkHome, environment, id);
     default:
       throw new UsageError(`unknown action "${action}" for "flow accounts"; use list, add or set`);
   }
@@ -127,6 +135,8 @@ interface ListedAccount {
   key: string;
   id: string;
   implicit: boolean;
+  /** True when `<runtime>:default` names this account (rev 6d). */
+  isDefault: boolean;
   label: string | null;
   path: string | null;
   color: string | null;
@@ -169,9 +179,13 @@ async function dropUnknown(
 }
 
 /** Every account of every runtime with its resolved policy, ledger readings and room. */
-async function list(ctx: VerbContext, dorkHome: string): Promise<VerbResult> {
+async function list(
+  ctx: VerbContext,
+  dorkHome: string,
+  environment: AccountEnvironment
+): Promise<VerbResult> {
   const now = ctx.now();
-  const registry = loadAccounts(dorkHome);
+  const registry = loadAccounts(dorkHome, environment);
   const dropped = await dropUnknown(ctx, dorkHome, registry.accounts, registry.registryReadable);
   const policy = loadFleetPolicy(dorkHome, registry.accounts);
   const warnings: FleetWarning[] = [
@@ -184,8 +198,8 @@ async function list(ctx: VerbContext, dorkHome: string): Promise<VerbResult> {
     let windows: Record<string, unknown> | null = null;
     let ledger: { windows?: unknown; spend?: unknown } | null = null;
     const readings: Record<string, unknown> = {};
-    if (account.routable) {
-      const read = readLedger(dorkHome, account.runtime, account.id);
+    if (account.ledgerId !== null) {
+      const read = readLedger(dorkHome, account.runtime, account.ledgerId);
       warnings.push(...read.warnings);
       ledger = read.ledger;
       windows = read.ledger?.windows ?? null;
@@ -199,6 +213,7 @@ async function list(ctx: VerbContext, dorkHome: string): Promise<VerbResult> {
       key: account.key,
       id: account.id,
       implicit: account.implicit,
+      isDefault: account.isDefault,
       label: account.label,
       path: account.path,
       color: account.color,
@@ -265,6 +280,12 @@ function overallCell(account: ListedAccount): string {
   return `${account.room ? 'yes' : 'no'}${spend}`;
 }
 
+/** The label, with `(default)` on the registered row `default` names: "Claude3 (default)". */
+function labelCell(account: ListedAccount): string {
+  if (!account.isDefault || account.implicit) return account.label ?? '-';
+  return `${account.label ?? account.id} (default)`;
+}
+
 /** The human listing: one table per runtime, then the fleet-wide settings. */
 function renderList(accounts: readonly ListedAccount[], policy: ResolvedFleetPolicy): string {
   const blocks: string[] = [];
@@ -286,7 +307,7 @@ function renderList(accounts: readonly ListedAccount[], policy: ResolvedFleetPol
         roomCell(account.windows.five_hour, account.fiveHourRoom),
         roomCell(account.windows.seven_day, account.weeklyRoom),
         overallCell(account),
-        account.label ?? '-',
+        labelCell(account),
         account.path ?? '(this environment)',
       ]);
     }
@@ -418,7 +439,12 @@ function storedEntry(raw: unknown, key: string): unknown {
 }
 
 /** `flow accounts set <id>`: edit one account's policy in `fleet.json`. */
-async function setAccount(ctx: VerbContext, dorkHome: string, given: string): Promise<VerbResult> {
+async function setAccount(
+  ctx: VerbContext,
+  dorkHome: string,
+  environment: AccountEnvironment,
+  given: string
+): Promise<VerbResult> {
   refuseFlags(ctx, FLEET_FLAGS, 'set <id>');
   const patch = policyPatch(ctx);
   if (Object.keys(patch).length === 0) {
@@ -432,10 +458,11 @@ async function setAccount(ctx: VerbContext, dorkHome: string, given: string): Pr
       `"${given}" is not an account: use <id> for Claude Code, or <runtime>:<id> with a runtime of ${RUNTIMES.join(', ')}`
     );
   }
-  const { accounts } = loadAccounts(dorkHome);
-  const account = accounts.find((a) => a.runtime === parsed.runtime && a.id === parsed.id);
-  const key = accountKey(parsed.runtime, parsed.id);
-  if (account === undefined) {
+  const { accounts } = loadAccounts(dorkHome, environment);
+  // `default` resolves to the row it aliases (rev 6d), so one account keeps one entry.
+  const account = resolveAccountRef(accounts, parsed.runtime, parsed.id);
+  const key = accountKey(parsed.runtime, account?.id ?? parsed.id);
+  if (account === null) {
     throw new PreconditionError(
       `"${key}" is not a registered account. Run "flow accounts" to see them, or add one with "flow accounts add --path <dir>".`
     );
@@ -449,14 +476,24 @@ async function setAccount(ctx: VerbContext, dorkHome: string, given: string): Pr
   const mutate = (raw: unknown): Record<string, unknown> => {
     if (patch.role === 'main') {
       const current = resolveFleetPolicy(accounts, raw).mains[account.runtime];
-      if (current !== undefined && current !== account.id) {
+      // A `default` that is main only by default gives way to an explicit main.
+      const implied =
+        current === IMPLICIT_ACCOUNT_ID &&
+        (
+          storedEntry(raw, accountKey(account.runtime, IMPLICIT_ACCOUNT_ID)) as {
+            role?: unknown;
+          } | null
+        )?.role !== 'main';
+      if (current !== undefined && current !== account.id && !implied) {
         const currentKey = accountKey(account.runtime, current);
         throw new PreconditionError(
           `"${currentKey}" is already the main ${RUNTIME_NAMES[account.runtime]} account. Give it another role first ("flow accounts set ${currentKey} --role rotation").`
         );
       }
     }
-    return setAccountPolicy(raw, key, patch);
+    return setAccountPolicy(raw, key, patch, {
+      aliased: account.isDefault && !account.implicit,
+    });
   };
 
   const file = fleetPolicyPath(dorkHome);

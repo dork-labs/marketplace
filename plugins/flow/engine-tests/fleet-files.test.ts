@@ -108,9 +108,10 @@ describe('loadIdentities', () => {
 });
 
 describe('loadAccounts', () => {
-  // Purpose: every runtime with no registered account has its implicit
-  // `default`; a registered runtime lists its rows, tagged with runtime and key.
-  it('lists each runtime, with an implicit default where nothing is registered', () => {
+  // Purpose: every runtime has its `default` (rev 6d): Claude Code and Codex
+  // name their default folders and stand alone beside rows in other folders;
+  // OpenCode's has no folder. Rows are tagged with runtime and key.
+  it('lists each runtime, with its default account', () => {
     writeFileSync(
       path.join(home, 'config.json'),
       JSON.stringify({
@@ -120,11 +121,13 @@ describe('loadAccounts', () => {
         },
       })
     );
-    const result = loadAccounts(home);
+    const result = loadAccounts(home, { env: {}, home: '/os-home' });
     expect(result.registryReadable).toBe(true);
     expect(result.accounts.map((a) => [a.key, a.implicit, a.path])).toEqual([
       ['claude-code:work', false, '/w'],
+      ['claude-code:default', true, '/os-home/.claude'],
       ['codex:team', false, '/codex-team'],
+      ['codex:default', true, '/os-home/.codex'],
       ['opencode:default', true, null],
     ]);
   });
@@ -133,12 +136,12 @@ describe('loadAccounts', () => {
   // account, so a caller that deletes by "unregistered" must not act on it.
   it('reports an unreadable registry', () => {
     writeFileSync(path.join(home, 'config.json'), '{oops');
-    expect(loadAccounts(home).registryReadable).toBe(false);
+    expect(loadAccounts(home, { env: {}, home: '/os-home' }).registryReadable).toBe(false);
     writeFileSync(
       path.join(home, 'config.json'),
       JSON.stringify({ runtimes: { codex: { accounts: 'nope' } } })
     );
-    expect(loadAccounts(home).registryReadable).toBe(false);
+    expect(loadAccounts(home, { env: {}, home: '/os-home' }).registryReadable).toBe(false);
   });
 });
 

@@ -17,7 +17,6 @@
 
 import { existsSync } from 'node:fs';
 import { UsageError } from '../errors.ts';
-import { codexHome } from '../fleet/codex-accounts.ts';
 import { resolveOpenCodeDataDir } from '../fleet/opencode-store.ts';
 import {
   accountRoom,
@@ -25,6 +24,7 @@ import {
   fiveHourRoom,
   loadAccounts,
   loadFleetPolicy,
+  resolveAccountRef,
   resolveDorkHome,
   weeklyRoom,
   type AccountIdentity,
@@ -44,6 +44,7 @@ import {
   type DorkosResult,
 } from '../fleet/sessions.ts';
 import {
+  IMPLICIT_ACCOUNT_ID,
   isErrorWindowKey,
   listLedgerIds,
   readCredits,
@@ -63,35 +64,32 @@ interface AccountRead {
 }
 
 /**
- * Where a runtime's implicit account lives on this machine, for deciding whether
- * to show it before it has a reading: Codex's home, OpenCode's data folder.
- * Claude Code's implicit account is shown only once it has a ledger.
+ * Where a runtime's own `default` account lives on this machine, for deciding
+ * whether to show it before it has a reading: its folder (rev 6d), or OpenCode's
+ * data folder for OpenCode's ambient default.
  */
 function implicitHome(
-  runtime: RuntimeSlug,
+  account: RuntimeAccount,
   env: Readonly<Record<string, string | undefined>>,
   osHome: string
 ): string | null {
-  if (runtime === 'codex') return codexHome(env, osHome);
-  if (runtime === 'opencode') return resolveOpenCodeDataDir(env, osHome);
+  if (account.path !== null) return account.path;
+  if (account.runtime === 'opencode') return resolveOpenCodeDataDir(env, osHome);
   return null;
 }
 
 /** Read one account's ledger and policy into its report row. */
 function readAccount(
   account: RuntimeAccount,
-  policy: ResolvedFleetPolicy,
+  resolved: ResolvedFleetPolicy['accounts'][number] | undefined,
   dorkHome: string,
   now: Date,
   warn: (message: string) => void
 ): AccountRead {
-  const resolved = policy.accounts.find(
-    (entry) => entry.runtime === account.runtime && entry.id === account.id
-  );
-  const tracked = account.routable && resolved !== undefined;
+  const tracked = account.ledgerId !== null && resolved !== undefined;
   let ledger: ReturnType<typeof readLedger>['ledger'] = null;
-  if (tracked) {
-    const read = readLedger(dorkHome, account.runtime, account.id);
+  if (tracked && account.ledgerId !== null) {
+    const read = readLedger(dorkHome, account.runtime, account.ledgerId);
     for (const warning of read.warnings) warn(warning.message);
     ledger = read.ledger;
   }
@@ -138,9 +136,9 @@ function readAccount(
 }
 
 /**
- * The accounts `flow fleet` shows: every registered account, and a runtime's
- * implicit `default` account when it has a ledger file or (Codex, OpenCode) its
- * home exists on this machine.
+ * The accounts `flow fleet` shows: every registered account (an aliased
+ * `default` is its row), and a runtime's standalone `default` when it has a
+ * ledger file or its folder (OpenCode: its data folder) exists on this machine.
  */
 function shownAccounts(
   accounts: readonly RuntimeAccount[],
@@ -151,7 +149,7 @@ function shownAccounts(
   return accounts.filter((account) => {
     if (!account.implicit) return true;
     if (listLedgerIds(dorkHome, account.runtime).includes(account.id)) return true;
-    const home = implicitHome(account.runtime, env, osHome);
+    const home = implicitHome(account, env, osHome);
     return home !== null && existsSync(home);
   });
 }
@@ -183,16 +181,27 @@ export async function run(ctx: VerbContext): Promise<VerbResult> {
   const now = ctx.now();
   const dorkHome = resolveDorkHome({ ...ctx.env }, ctx.io.osHome);
 
-  const loaded = loadAccounts(dorkHome);
+  const loaded = loadAccounts(dorkHome, { env: ctx.env, home: ctx.io.osHome });
   for (const warning of loaded.warnings) warn(warning.message);
   const accounts = shownAccounts(loaded.accounts, dorkHome, ctx.env, ctx.io.osHome);
   const policy = loadFleetPolicy(dorkHome, accounts);
   for (const warning of policy.warnings) warn(warning.message);
-  const reads = accounts.map((account) => readAccount(account, policy, dorkHome, now, warn));
-  // Claude Code session files and DorkOS's account paths are Claude Code config dirs.
-  const claudeIdentities: AccountIdentity[] = accounts.flatMap((account) =>
-    account.runtime === 'claude-code' && !account.implicit ? [account] : []
+  const reads = accounts.map((account, index) =>
+    readAccount(account, policy.accounts[index], dorkHome, now, warn)
   );
+  // Claude Code session files and DorkOS's account paths are Claude Code config
+  // dirs: every Claude Code account with a folder, the standalone default too.
+  const claudeIdentities: AccountIdentity[] = accounts.flatMap((account) =>
+    account.runtime === 'claude-code' && account.path !== null
+      ? [{ ...account, path: account.path }]
+      : []
+  );
+  // A run or DorkOS session that names `default` means the account `default` names (rev 6d).
+  const canonicalId = (runtime: string, id: string | null): string | null => {
+    if (id !== IMPLICIT_ACCOUNT_ID) return id;
+    const runtimeSlug = runtime as RuntimeSlug;
+    return resolveAccountRef(loaded.accounts, runtimeSlug, id)?.id ?? id;
+  };
 
   const [cli, dorkos] = await Promise.all([
     readCliSessions(claudeIdentities, {
@@ -205,16 +214,24 @@ export async function run(ctx: VerbContext): Promise<VerbResult> {
   ]);
   for (const warning of cli.warnings) warn(warning.message);
   if (dorkos?.warning !== undefined) warn(dorkos.warning);
-  const dorkosSessions = dorkos?.sessions ?? [];
+  const dorkosSessions = (dorkos?.sessions ?? []).map((session) => ({
+    ...session,
+    account: canonicalId(session.runtime ?? 'claude-code', session.account),
+  }));
 
   const cwds = [ctx.projectDir];
   for (const session of [...cli.sessions, ...dorkosSessions]) {
     if (session.cwd !== null) cwds.push(session.cwd);
   }
-  const { runs, warnings: runWarnings } = await collectRuns(cwds, {
+  const collected = await collectRuns(cwds, {
     runProcess: ctx.runProcess,
     readRuns: readRunStore,
   });
+  const runWarnings = collected.warnings;
+  const runs = collected.runs.map((run) => ({
+    ...run,
+    account: canonicalId(run.runtime ?? 'claude-code', run.account),
+  }));
   for (const warning of runWarnings) warn(warning.message);
 
   const sessions = joinSessions({

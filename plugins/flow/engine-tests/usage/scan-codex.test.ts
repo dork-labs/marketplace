@@ -260,20 +260,32 @@ describe('flow usage scan --runtime codex', () => {
     expect(JSON.parse(run.stdout).accounts[0]).toMatchObject({ home, files: 1, readings: 4 });
   });
 
-  it('scans registered Codex accounts in place of default', async () => {
-    // Purpose: once config.json lists Codex accounts, the verbs read those rows (A1).
+  it('scans registered Codex accounts, and default beside them only when it stands alone', async () => {
+    // Purpose: once config.json lists Codex accounts, the verbs read those rows
+    // (A1). codex:default is CODEX_HOME (rev 6d): its own account while no row
+    // has that folder, and an alias of the row once one does, so one real
+    // account is scanned once and written to one ledger.
     const work = path.join(root, 'codex-work');
     place('rollout-pro.jsonl', 'sessions/rollout-w.jsonl', 0.1, work);
+    mkdirSync(codexHome, { recursive: true });
     writeFileSync(
       path.join(dorkHome, 'config.json'),
       JSON.stringify({ runtimes: { codex: { accounts: [{ id: 'work', path: work }] } } })
     );
     const out = await scanJson();
-    expect(out.accounts.map((account) => [account.id, account.files])).toEqual([['work', 1]]);
+    expect(out.accounts.map((account) => account.id)).toEqual(['work', 'default']);
+    expect(out.accounts[0].files).toBe(1);
+    expect(existsSync(ledgerPath(dorkHome, 'codex', 'work'))).toBe(true);
+
+    rmSync(ledgerFile(), { force: true });
+    rmSync(ledgerPath(dorkHome, 'codex', 'work'), { force: true });
+    const aliased = await flow(
+      ['usage', 'scan', '--runtime', 'codex', '--account', 'default', '--json'],
+      { CODEX_HOME: `${work}/` }
+    );
+    expect(aliased.code, aliased.stderr).toBe(0);
+    expect(JSON.parse(aliased.stdout).accounts.map((a: { id: string }) => a.id)).toEqual(['work']);
     expect(existsSync(ledgerPath(dorkHome, 'codex', 'work'))).toBe(true);
     expect(existsSync(ledgerFile())).toBe(false);
-
-    const unknown = await flow(['usage', 'scan', '--runtime', 'codex', '--account', 'default']);
-    expect(unknown.code).toBe(5);
   });
 });

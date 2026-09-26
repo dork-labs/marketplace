@@ -84,8 +84,12 @@ const readJson = (file: string) => JSON.parse(readFileSync(file, 'utf8'));
 describe('flow accounts list', () => {
   it('lists an unlisted account as kept-out and warns that there is no main', async () => {
     // Purpose: opt-in by default (§1.1b). An account with no fleet.json entry is
-    // never spent, and flow never guesses a main account (D7), it warns.
-    writeConfig({ runtimes: { claudeCode: { accounts: [{ id: 'work', path: '/a/work' }] } } });
+    // never spent, and flow never guesses a main account (D7), it warns. The row
+    // is in the default folder, so `default` is its alias (rev 6d), not a
+    // separate account that would be main by default.
+    writeConfig({
+      runtimes: { claudeCode: { accounts: [{ id: 'work', path: path.join(base, '.claude') }] } },
+    });
     const result = await flow(['accounts', '--json']);
     expect(result.code).toBe(0);
     const out = result.json();
@@ -94,6 +98,7 @@ describe('flow accounts list', () => {
       key: 'claude-code:work',
       id: 'work',
       implicit: false,
+      isDefault: true,
       role: 'kept-out',
       reservePct: 0,
       scope: { repos: [] },
@@ -187,8 +192,10 @@ describe('flow accounts list', () => {
     writeConfig({ runtimes: { claudeCode: { accounts: [{ id: 'default-home', path: '/d' }] } } });
     const out = (await flow(['accounts', '--json'], { DORK_HOME: other })).json();
     expect(out.dorkHome).toBe(other);
+    // This computer's own sign-in stands beside the registered row, as main (rev 6d).
     expect(out.accounts.map((a: { key: string; role: string }) => [a.key, a.role])).toEqual([
       ['claude-code:redirected', 'rotation'],
+      ['claude-code:default', 'main'],
       ['codex:default', 'rotation'],
       ['opencode:default', 'rotation'],
     ]);
@@ -204,8 +211,9 @@ describe('flow accounts list', () => {
         .json()
         .accounts.map((a: { key: string; role: string; path: null }) => [a.key, a.role, a.path])
     ).toEqual([
-      ['claude-code:default', 'rotation', null],
-      ['codex:default', 'rotation', null],
+      // Claude Code and Codex name their default folders (rev 6d); OpenCode has none.
+      ['claude-code:default', 'rotation', path.join(base, '.claude')],
+      ['codex:default', 'rotation', path.join(base, '.codex')],
       ['opencode:default', 'rotation', null],
     ]);
     const text = (await flow(['accounts'])).stdout;
@@ -537,4 +545,90 @@ it('never builds a tracker adapter or reads project config', async () => {
   // Purpose: accounts runs anywhere, even outside a flow project (spec §6).
   // The deps' createAdapter throws; a call to it would surface as exit 70.
   expect((await flow(['accounts'])).code).toBe(0);
+});
+
+describe('the default account (rev 6d)', () => {
+  /** The operator's shape: defaultAccount null, one registered row outside ~/.claude. */
+  const operator = () =>
+    writeConfig({
+      runtimes: {
+        claudeCode: {
+          defaultAccount: null,
+          accounts: [{ id: 'claude3', path: path.join(base, '.claude3'), label: 'Claude3' }],
+        },
+      },
+    });
+  /** The same row, but DorkOS's default names its folder, so default is its alias. */
+  const aliased = () =>
+    writeConfig({
+      runtimes: {
+        claudeCode: {
+          defaultAccount: '~/.claude3/',
+          accounts: [{ id: 'claude3', path: path.join(base, '.claude3'), label: 'Claude3' }],
+        },
+      },
+    });
+  /** The listed rows of one runtime. */
+  const claudeRows = (out: { accounts: { runtime: string }[] }) =>
+    out.accounts.filter((row) => row.runtime === 'claude-code') as Record<string, unknown>[];
+
+  it("lists this computer's own sign-in as its own main account when no row names it", async () => {
+    // Purpose: the gap found in the operator's real config. Without this rule
+    // the main account in ~/.claude was invisible; beside rotation accounts it
+    // is the operator's own, so it defaults to main with a 50% reserve.
+    operator();
+    const out = (await flow(['accounts', '--json'])).json();
+    const claude = claudeRows(out);
+    expect(claude.map((row) => row.id)).toEqual(['claude3', 'default']);
+    expect(claude[1]).toMatchObject({
+      implicit: true,
+      isDefault: true,
+      label: "Main (this computer's sign-in)",
+      path: path.join(base, '.claude'),
+      role: 'main',
+      reservePct: 50,
+    });
+    expect(out.mains).toEqual({ 'claude-code': 'default' });
+    expect(out.warnings.map((w: { code: string }) => w.code)).not.toContain('no-main');
+
+    // An explicit main elsewhere wins; default then falls back to rotation.
+    expect((await flow(['accounts', 'set', 'claude3', '--role', 'main'])).code).toBe(0);
+    const after = (await flow(['accounts', '--json'])).json();
+    expect(after.mains).toEqual({ 'claude-code': 'claude3' });
+    expect(claudeRows(after)[1]).toMatchObject({ id: 'default', role: 'rotation', reservePct: 0 });
+  });
+
+  it('shows an alias once, as "Claude3 (default)", with no separate default row', async () => {
+    // Purpose: one real account, one row: the registered id carries the default mark.
+    aliased();
+    const out = (await flow(['accounts', '--json'])).json();
+    expect(claudeRows(out).map((row) => [row.id, row.isDefault])).toEqual([['claude3', true]]);
+    const text = (await flow(['accounts'])).stdout;
+    expect(text).toMatch(/^claude3\s+kept-out\s.*Claude3 \(default\)\s/m);
+  });
+
+  it('stores a policy for default under the id it aliases, folding any old default entry in', async () => {
+    // Purpose: one fleet.json policy per real account. `set default` on an
+    // alias writes claude-code:claude3, and an entry stored under
+    // claude-code:default reads as claude3's until that write moves it.
+    aliased();
+    writeFleet({ v: 1, accounts: { 'claude-code:default': { reservePct: 20 } } });
+    const listed = (await flow(['accounts', '--json'])).json();
+    expect(listed.dropped).toEqual([]);
+    expect(claudeRows(listed)[0]).toMatchObject({ id: 'claude3', reservePct: 20 });
+
+    const set = await flow(['accounts', 'set', 'default', '--role', 'rotation']);
+    expect(set.code, set.stderr).toBe(0);
+    expect(readJson(fleetFile)).toEqual({
+      v: 1,
+      accounts: { 'claude-code:claude3': { reservePct: 20, role: 'rotation' } },
+    });
+  });
+
+  it('stores a policy for a default that stands alone under default', async () => {
+    // Purpose: the standalone default is its own account with its own key.
+    operator();
+    expect((await flow(['accounts', 'set', 'default', '--role', 'kept-out'])).code).toBe(0);
+    expect(readJson(fleetFile).accounts).toEqual({ 'claude-code:default': { role: 'kept-out' } });
+  });
 });

@@ -17,8 +17,14 @@ import { mkdirSync, renameSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 import { randomBytes } from 'node:crypto';
 import { FlowError, UsageError } from '../errors.ts';
-import { loadIdentities, resolveDorkHome, type AccountIdentity } from '../fleet/accounts.ts';
-import { accountForConfigDir, defaultConfigDir } from '../fleet/config-dir.ts';
+import {
+  accountForPath,
+  ambientAccountPath,
+  loadAccounts,
+  resolveAccountRef,
+  resolveDorkHome,
+  type RuntimeAccount,
+} from '../fleet/accounts.ts';
 import { fromStatusLine } from '../fleet/observations.ts';
 import { ledgerDir, recordUsage } from '../fleet/usage-ledger.ts';
 import type { VerbContext, VerbResult } from './context.ts';
@@ -73,14 +79,28 @@ function writeStamp(stamp: string, fingerprint: string): void {
   renameSync(temp, stamp);
 }
 
-/** The account `record` writes for, or `null`. */
-function targetAccount(ctx: VerbContext, dorkHome: string): AccountIdentity | null {
-  const { accounts } = loadIdentities(dorkHome, 'claude-code');
+/**
+ * The account `record` writes for, or `null` (spec §1.1a rev 6d): `--account`
+ * (`default` resolves to the row it aliases), else the account whose folder is
+ * the one this session runs in (`CLAUDE_CONFIG_DIR`, else `<os home>/.claude`).
+ *
+ * The status line runs inside every session, and its `CLAUDE_CONFIG_DIR` is that
+ * session's folder, not a choice for the machine. So `default` is resolved here
+ * without it (DorkOS's `defaultAccount`, else `<os home>/.claude`): a session in
+ * an unregistered folder that is not the default writes nothing, rather than
+ * mixing another account's readings into `default.json`.
+ */
+function targetAccount(ctx: VerbContext, dorkHome: string): RuntimeAccount | null {
+  const home = ctx.io.osHome;
+  const machineEnv = { ...ctx.env, CLAUDE_CONFIG_DIR: undefined };
+  const { accounts } = loadAccounts(dorkHome, { env: machineEnv, home });
   const flag = ctx.args.flags.account;
   if (typeof flag === 'string') {
-    return accounts.find((account) => account.id === flag && account.routable) ?? null;
+    const account = resolveAccountRef(accounts, 'claude-code', flag);
+    return account !== null && account.routable ? account : null;
   }
-  return accountForConfigDir(accounts, defaultConfigDir(ctx.env, ctx.io.osHome), ctx.io.osHome);
+  const sessionDir = ambientAccountPath('claude-code', ctx.env, home) ?? '';
+  return accountForPath(accounts, 'claude-code', sessionDir, { home });
 }
 
 /** The `--json` payload shape of every runtime's `record`. */

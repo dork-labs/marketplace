@@ -4,8 +4,8 @@ This folder is the shared contract between the flow plugin and DorkOS for three
 things both of them read and write on one machine:
 
 - **Accounts.** Who the accounts of each runtime (Claude Code, Codex, OpenCode)
-  are (DorkOS's `config.json`, with one implicit `default` account for a runtime
-  that has none) and how flow may spend them (flow's `fleet.json`, keyed
+  are (DorkOS's `config.json`, plus each runtime's `default`: the folder it runs
+  in when nothing chooses one) and how flow may spend them (flow's `fleet.json`, keyed
   `<runtime>:<account-id>`).
 - **The usage ledger.** One file per account at
   `<dorkHome>/runtimes/<runtime>/usage/<account-id>.json` with the latest reading
@@ -14,7 +14,7 @@ things both of them read and write on one machine:
 - **The session and item link.** The `FlowRun` records in `flow-state.json`.
 
 The rules are written in `specs/flow-cli-core/02-specification.md` section 1
-(rev 6) of the `dork-labs/marketplace` repo. The case files here pin those rules as data, so
+(rev 6, with rev 6d) of the `dork-labs/marketplace` repo. The case files here pin those rules as data, so
 two independent implementations can prove they agree. flow runs them in
 `plugins/flow/engine-tests/fleet-conformance.test.ts`.
 
@@ -30,14 +30,22 @@ key rule is a minor; a changed or removed rule is a major.
 `<runtime>:<account-id>` (bare keys still read as Claude Code), and
 `resolveFleetPolicy`, `readIdentities` and `mergeLedger` take the runtime.
 
+2.1.0 (rev 6d) changes what `default` means. An account is its folder, not its
+id. `claude-code:default` and `codex:default` always exist and name the
+runtime's default folder. When a registered row has that folder, `default` is
+another name for that row (one ledger file, one policy). When none does,
+`default` is its own account, and beside registered accounts it defaults to
+`main`. `readAccounts` takes the environment, home folder and real paths as
+inputs, so a runner needs no filesystem.
+
 ## What is here
 
 | File | What it pins | The call it drives |
 | --- | --- | --- |
 | `account-id.cases.json` | Minting an account id from a label and a path | `mint(label, path, taken) -> id` |
 | `identity.cases.json` | Reading one runtime's rows (`runtimes.<claudeCode, codex or opencode>.accounts`) from `config.json` | `readIdentities(config, runtime) -> { accounts, warnings }` |
-| `accounts.cases.json` | Every runtime's accounts, with the implicit `default` where a runtime has none | `readAccounts(config) -> { accounts, warnings }` |
-| `fleet-policy.cases.json` | Resolving `fleet.json` with defaults (key migration, implicit defaults, runtime settings), plus which repos an account may serve | `resolveFleetPolicy(accounts, fleet)`, `parseOriginRepo(origin)`, `mayServe(policy, repo)` |
+| `accounts.cases.json` | Every runtime's accounts, and which one `default` names: its own account, or an alias of the row in the default folder | `readAccounts(config, { env, home, realpath }) -> { accounts, warnings }` |
+| `fleet-policy.cases.json` | Resolving `fleet.json` with defaults (key migration, the default account's role and aliases, runtime settings), plus which repos an account may serve | `resolveFleetPolicy(accounts, fleet)`, `parseOriginRepo(origin)`, `mayServe(policy, repo)` |
 | `window-read.cases.json` | What one ledger window means at a given moment | `readWindow(entry, now, key) -> reading or null` |
 | `room.cases.json` | The reserve in force and whether an account has room | `effectiveReservePct`, `fiveHourRoom`, `weeklyRoom`, `modelRoom` |
 | `eligibility.cases.json` | Room for any kind of account: subscription windows, metered spend, local models | `accountRoom(runtime, policy, ledger, now)`, `spendRoom(spend)` |

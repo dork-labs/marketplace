@@ -18,8 +18,12 @@ import { accessSync, constants, mkdtempSync, rmSync, statSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { ConfigError, PreconditionError, UsageError } from '../errors.ts';
-import { loadIdentities, resolveDorkHome, type AccountIdentity } from '../fleet/accounts.ts';
-import { canonicalDir } from '../fleet/config-dir.ts';
+import {
+  canonicalAccountPath,
+  loadAccounts,
+  resolveAccountRef,
+  resolveDorkHome,
+} from '../fleet/accounts.ts';
 import { fromRateLimitEvent } from '../fleet/observations.ts';
 import { recordUsage, type UsageObservation } from '../fleet/usage-ledger.ts';
 import type { VerbContext, VerbResult } from './context.ts';
@@ -82,7 +86,10 @@ export function probeArgs(model: string): string[] {
  * @param model - The model alias.
  * @returns One paragraph.
  */
-export function costNote(account: AccountIdentity, model: string): string {
+export function costNote(
+  account: { id: string; label: string | null; path: string },
+  model: string
+): string {
   return (
     `This runs one short Claude Code turn on ${account.label ?? account.id} (${account.path}) ` +
     `with model ${model}. It uses a small part of that account's 5-hour limit, and starts a new ` +
@@ -92,10 +99,13 @@ export function costNote(account: AccountIdentity, model: string): string {
 
 /**
  * The child's environment: the current one, minus {@link PROBE_STRIPPED_ENV},
- * with `CLAUDE_CONFIG_DIR` set to the account's folder. For the default folder
- * (`<os home>/.claude`) the variable is removed instead: Claude Code looks up a
- * differently named stored sign-in whenever it is set, even to the default
- * folder, so setting it would read that account as signed out.
+ * with `CLAUDE_CONFIG_DIR` set to the account's folder. For Claude Code's own
+ * built-in folder (`<os home>/.claude`, compared by `canonicalAccountPath`) the
+ * variable is removed instead: Claude Code looks up a differently named stored
+ * sign-in whenever it is set, even to that folder, so setting it would read
+ * that account as signed out. Unset, Claude Code runs in exactly that folder.
+ * (This is Claude Code's folder, not flow's `default` account, which DorkOS may
+ * point elsewhere.)
  *
  * @param env - The current environment.
  * @param accountPath - The account's config folder.
@@ -112,9 +122,10 @@ export function probeEnv(
   for (const [key, value] of Object.entries(env)) {
     if (value !== undefined && !stripped.has(key)) out[key] = value;
   }
-  const isDefault =
-    canonicalDir(accountPath, osHome) === canonicalDir(path.join(osHome, '.claude'), osHome);
-  if (isDefault) delete out.CLAUDE_CONFIG_DIR;
+  const builtIn =
+    canonicalAccountPath(accountPath, osHome) ===
+    canonicalAccountPath(path.join(osHome, '.claude'), osHome);
+  if (builtIn) delete out.CLAUDE_CONFIG_DIR;
   else out.CLAUDE_CONFIG_DIR = accountPath;
   return out;
 }
@@ -204,14 +215,16 @@ export async function run(ctx: VerbContext): Promise<VerbResult> {
   const model = typeof modelFlag === 'string' && modelFlag !== '' ? modelFlag : DEFAULT_PROBE_MODEL;
   const timeoutMs = readTimeoutMs(ctx);
   const dorkHome = resolveDorkHome(ctx.env, ctx.io.osHome);
-  const account = loadIdentities(dorkHome, 'claude-code').accounts.find(
-    (candidate) => candidate.id === id && candidate.routable
-  );
-  if (account === undefined) {
+  // `default` resolves to the account it names (rev 6d): the row it aliases, or
+  // this computer's own sign-in, which then records to default.json.
+  const { accounts } = loadAccounts(dorkHome, { env: ctx.env, home: ctx.io.osHome });
+  const found = id === undefined ? null : resolveAccountRef(accounts, 'claude-code', id);
+  if (found === null || !found.routable || found.path === null) {
     throw new PreconditionError(
-      `no registered account "${id}" with a valid id; "flow fleet" lists the accounts`
+      `no Claude Code account "${id}" with a valid id; "flow fleet" lists the accounts`
     );
   }
+  const account = { ...found, path: found.path };
 
   // The note comes first. Under --json stdout carries only the JSON, so it goes to stderr.
   const note = costNote(account, model);

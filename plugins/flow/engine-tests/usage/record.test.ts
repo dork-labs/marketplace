@@ -120,6 +120,48 @@ describe('flow usage record', () => {
     expect(ledger('acct-a')).not.toBeNull();
   });
 
+  it('writes under the registered id when default is its alias, never to default.json (rev 6d)', async () => {
+    // Purpose: `main` is registered in ~/.claude, the default folder, so
+    // `default` is its alias: one real account, one ledger file, whether the
+    // session names the folder or runs with no variable, and whether --account
+    // says main or default.
+    await record(statusLine('full.json'), { env: { CLAUDE_CONFIG_DIR: `${osHome}/.claude/` } });
+    await record(statusLine('iso-resets.json'), { argv: ['--account', 'default'] });
+    expect(ledger('main')).not.toBeNull();
+    expect(ledger('default')).toBeNull();
+  });
+
+  it("writes default.json when default stands alone, the operator's case (rev 6d)", async () => {
+    // Purpose: DorkOS defaultAccount null and one registered row elsewhere: the
+    // main sign-in in ~/.claude is its own account, `default`, and must not be
+    // invisible. A session in an unregistered folder still writes nothing: its
+    // CLAUDE_CONFIG_DIR is that session's folder, not the machine's default.
+    writeFileSync(
+      path.join(dorkHome, 'config.json'),
+      JSON.stringify({
+        runtimes: {
+          claudeCode: {
+            defaultAccount: null,
+            accounts: [{ id: 'claude3', path: path.join(osHome, '.claude3'), label: 'Claude3' }],
+          },
+        },
+      })
+    );
+    const json = await record(statusLine('full.json'), { argv: ['--json'] });
+    expect(JSON.parse(json.stdout)).toMatchObject({ account: 'default', changed: true });
+    expect(ledger('default')).toMatchObject({ accountId: 'default' });
+    await record(statusLine('full.json'), {
+      env: { CLAUDE_CONFIG_DIR: path.join(osHome, '.claude3') },
+    });
+    expect(ledger('claude3')).not.toBeNull();
+
+    const stray = await record(statusLine('iso-resets.json'), {
+      env: { CLAUDE_CONFIG_DIR: path.join(osHome, 'nope') },
+      argv: ['--json'],
+    });
+    expect(JSON.parse(stray.stdout)).toMatchObject({ account: null, recorded: [] });
+  });
+
   it('writes nothing for an unregistered dir, bad JSON, or oversized input', async () => {
     // Purpose: a status line on an account flow does not know must stay silent and harmless.
     for (const run of [
