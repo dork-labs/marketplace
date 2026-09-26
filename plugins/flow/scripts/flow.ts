@@ -314,6 +314,68 @@ export const VERBS: readonly VerbDefinition[] = [
     load: () => import('./cli/checkpoint.ts'),
   },
   {
+    name: 'report',
+    summary: 'Tell the drain a push, a review verdict or a question (drain workers and reviewers).',
+    description: [
+      'Record what happened on a drain run. flow checks each claim before recording it.',
+      '  pushed [--sha <sha>]   The commit (default HEAD) is on origin and has a checkpoint. Disarms an armed PR until it is reviewed.',
+      '  verdict --sha <sha> --token <t> (--clean | --changes --findings-file <f>)',
+      "                         The reviewer's verdict. The token comes from the reviewer's brief. A verdict on an older push is ignored.",
+      '  blocked --question-file <f>',
+      '                         Post the question on the item, mark it needs-input, and park the run.',
+    ].join('\n'),
+    common: ['project', 'session'],
+    positionals: [
+      { name: 'identifier', required: true, description: 'The work item, e.g. ACME-12.' },
+      { name: 'kind', required: true, description: 'pushed, verdict or blocked.' },
+    ],
+    flags: [
+      { name: 'sha', kind: 'string', value: 'sha', description: 'The commit pushed or reviewed.' },
+      {
+        name: 'token',
+        kind: 'string',
+        value: 'token',
+        description: "The review token from the reviewer's brief.",
+      },
+      { name: 'clean', kind: 'boolean', description: 'The review found nothing to change.' },
+      { name: 'changes', kind: 'boolean', description: 'The review asks for changes.' },
+      {
+        name: 'findings-file',
+        kind: 'string',
+        value: 'file',
+        description: 'The findings, with --changes.',
+      },
+      {
+        name: 'question-file',
+        kind: 'string',
+        value: 'file',
+        description: 'The question for a person, with blocked.',
+      },
+    ],
+    load: () => import('./cli/report.ts'),
+  },
+  {
+    name: 'pr',
+    summary: "Open a drain run's pull request after a clean review.",
+    description:
+      "Open the run's pull request into origin's default branch. Refuses unless the latest review is CLEAN at the branch head on origin. Adds a provenance line to the body. If a PR is already open for the branch, records it and exits 5.",
+    common: ['project', 'session'],
+    positionals: [
+      { name: 'identifier', required: true, description: 'The work item, e.g. ACME-12.' },
+    ],
+    flags: [
+      { name: 'title', kind: 'string', value: 'text', description: 'The PR title.' },
+      { name: 'body-file', kind: 'string', value: 'file', description: 'The PR body.' },
+      { name: 'arm', kind: 'boolean', description: 'Arm auto-merge on the new PR.' },
+      {
+        name: 'no-arm',
+        kind: 'boolean',
+        description: 'Leave auto-merge off. Default: drain.armAutoMerge (off).',
+      },
+    ],
+    load: () => import('./cli/pr.ts'),
+  },
+  {
     name: 'usage',
     summary: "Record each Claude Code account's usage, or set up the status line to.",
     description: [

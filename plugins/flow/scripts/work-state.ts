@@ -39,6 +39,8 @@ export const AGENT_CLAIMED = 'agent/claimed';
 export const AGENT_READY = 'agent/ready';
 /** The `agent/*` label an agent leaves on an item it finished. */
 export const AGENT_COMPLETED = 'agent/completed';
+/** The `agent/*` label on an item parked until a person answers the agent's question. */
+export const AGENT_NEEDS_INPUT = 'agent/needs-input';
 
 /**
  * The one change a writer applies to an item (spec §4, `applyWorkState`).
@@ -110,6 +112,10 @@ export type WorkStateEvent =
   | {
       /** `flow done`: an agent finished the item. */
       type: 'done';
+    }
+  | {
+      /** `flow report blocked`: the agent asked a question and parks until a person answers. */
+      type: 'needs-input';
     }
   | {
       /** `flow stage`: the item moves to another stage. */
@@ -205,6 +211,7 @@ function resumeLabel(explicit: string | undefined, ctx: ProjectionContext): stri
  * | `release` to `ready` | `unstarted` | `agent/ready` | the resume label (required) |
  * | `release` to `none` | `unstarted` | `null` | the resume label when known, else absent |
  * | `done` | `completed` | `agent/completed` | `null` |
+ * | `needs-input` | absent | `agent/needs-input` | absent |
  * | `stage` to a stage not in `backlog`/`unstarted` | that category | absent | `null` |
  * | `stage` to any other stage | its category if set, else absent | absent | its label (`null` when it has none) |
  *
@@ -220,6 +227,8 @@ export function projectionFor(event: WorkStateEvent, ctx: ProjectionContext): Wo
       return { stateCategory: 'started', agentLabel: AGENT_CLAIMED, stageLabel: null };
     case 'done':
       return { stateCategory: 'completed', agentLabel: AGENT_COMPLETED, stageLabel: null };
+    case 'needs-input':
+      return { agentLabel: AGENT_NEEDS_INPUT };
     case 'release': {
       const label = resumeLabel(event.stage, ctx);
       if (event.to === 'ready') {
