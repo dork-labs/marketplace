@@ -1,27 +1,31 @@
 ---
 title: Account usage and the fleet view
-description: How flow keeps track of how much of each Claude Code account you have used, and one screen that shows every account and every running session.
+description: How flow keeps track of how much of each account you have used, and one screen that shows every account and every running session.
 ---
 
 # Account usage and the fleet view
 
-If you run several Claude Code accounts, each one has a 5-hour limit and a weekly limit. flow can keep a record of how much of each you have used and when each limit resets. `flow fleet` then shows all of it on one screen, next to every session that is running and the item it is working on.
+If you run several Claude Code or Codex accounts, each one has a 5-hour limit and a weekly limit, and an OpenCode provider may bill you per use. flow keeps a record of how much of each you have used and when each limit resets. `flow fleet` then shows all of it on one screen, next to every session that is running and the item it is working on.
 
 This is account-aware scheduling for one person's own accounts. Whether using several of your own accounts this way fits Anthropic's terms is your call to make.
 
 ## What flow records, and from where
 
-flow tracks the Claude Code accounts listed in `~/.dork/config.json`, under `runtimes.claudeCode.accounts`. That is the same list the DorkOS app keeps. For each one, flow keeps one small file at `~/.dork/usage/<account>.json`. It holds the latest reading of each limit: how much is used, when it resets, and when that was seen.
+flow tracks the accounts listed in `~/.dork/config.json`, the same list the DorkOS app keeps: Claude Code's under `runtimes.claudeCode.accounts`, and Codex's and OpenCode's under `runtimes.codex` and `runtimes.opencode`. A runtime with no list has one account, `default`: whatever it is signed in to.
 
-flow reads these numbers only from what Claude Code itself shows:
+For each account flow keeps one small file at `~/.dork/runtimes/<runtime>/usage/<account>.json`, holding the latest reading of each limit: how much is used, when it resets, and when that was seen. For a pay-as-you-go account it also holds what you spent.
+
+flow reads these numbers only from what each tool itself shows. For Claude Code:
 
 - **The status line.** While you use an account in the terminal, Claude Code hands its status-line script the 5-hour and weekly numbers. Two added lines pass them to flow in the background.
 - **Past conversations.** When an account runs out, Claude Code saves a message saying so, with the reset time. `flow usage scan` reads those.
 - **A short check-in turn.** `flow usage probe` sends one short message on an account and reads the numbers Claude Code reports back.
 
-flow never reads your sign-in, never looks in the macOS Keychain, and never asks Anthropic's servers for usage directly.
+For Codex, `flow usage scan --runtime codex` reads the limits Codex writes into its session logs in `CODEX_HOME` (or `~/.codex`). For OpenCode, `--runtime opencode` reads a copy of its message store: what each message cost, and any "out of credits" or "rate limited" answer, per provider.
 
-Once a limit's reset time has passed, flow knows it is empty again, even if nobody has used the account since.
+flow never reads a sign-in (not Codex's `auth.json`, not OpenCode's credential tables), never looks in the macOS Keychain, and never asks any provider's servers for usage directly.
+
+After a limit's reset time, flow counts it as empty.
 
 ## Keep the numbers current: the status line
 
@@ -46,11 +50,9 @@ Nothing changes until you add `--yes`. Then flow:
 
 `--remove --yes` takes the two lines out again. `--account <id>` limits it to one account.
 
-The recorder runs in the background, so your status line never waits for it. It starts Node only when a number changed, and it prints nothing.
+The recorder runs in the background and starts Node only when a number changed.
 
-Some status lines flow cannot edit for you: an inline command instead of a script, or a script that never reads its input into a variable. For those it prints the two lines to add by hand.
-
-If you move the flow plugin, run `install-statusline --yes` again. It updates the lines in place.
+When flow cannot edit a status line, it prints the two lines to add by hand. If you move the flow plugin, run `install-statusline --yes` again.
 
 ## Catch up: scan past conversations
 
@@ -58,7 +60,9 @@ If you move the flow plugin, run `install-statusline --yes` again. It updates th
 node --experimental-strip-types <flow-root>/scripts/flow.ts usage scan
 ```
 
-This reads the last 8 days of saved conversations for every registered account and records each time an account ran out. `--days <n>` changes the window, `--all` reads everything, and `--dry-run` shows what it would record. Running it twice changes nothing.
+This reads the last 8 days of saved conversations and records each time an account ran out. `--days <n>` changes the window, `--all` reads everything, and `--dry-run` shows what it would record. Running it twice changes nothing.
+
+Add `--runtime codex` or `--runtime opencode` for those tools.
 
 ## An account nobody has used lately: probe it
 
@@ -68,7 +72,11 @@ node --experimental-strip-types <flow-root>/scripts/flow.ts usage probe <account
 
 Without `--yes` this only tells you what it would do. With `--yes` it sends one short message on that account (model `haiku`, no tools, no files) and records the numbers Claude Code reports. It uses a small part of that account's 5-hour limit. If no 5-hour window is running, it starts one.
 
-If the account turns out to be using an API key instead of its subscription, flow records nothing and says so.
+If the account turns out to use an API key, flow records nothing and says so.
+
+## Clean up
+
+`flow usage prune` lists files of removed accounts and write leftovers over an hour old; `--yes` deletes them. `flow usage snapshot` adds a sampled usage line to the flow journal; `scan` and `probe` do too.
 
 ## Read the fleet screen
 
@@ -77,23 +85,28 @@ node --experimental-strip-types <flow-root>/scripts/flow.ts fleet
 ```
 
 ```
-Accounts             5-hour                       week
+Claude Code          5-hour                       week
   claude2  main      [####......]   41%  2h 14m   [#######...]   72%  3d 04h
                      reserve 50%, seen 3m ago
 
+OpenCode
+  default  rotation  $0.75 this month
+                     out (credits: openrouter), seen 20m ago
+
 Sessions
-  claude2  DOR-2370  busy  cli  1a2b3c4d  ~/project-wt/feature  3h
+  Claude Code
+    claude2  DOR-2370  busy  cli  1a2b3c4d  ~/project-wt/feature  3h
 
 Sessions on accounts flow does not know are not shown.
 DorkOS: not running at http://127.0.0.1:4242
 ```
 
-**Accounts**, one per line:
+**Accounts**, grouped by tool, one per line:
 
-- Its role: `main`, `rotation` or `kept-out`, from `~/.dork/flow/fleet.json`. An account with no entry there is `kept-out`.
-- A bar and a percentage for the 5-hour and the weekly limit, and how long until each resets.
-- `out` means the account hit that limit. `reset` means the limit has reset since the last reading, so it is empty. `no reading` means flow has no current reading: it never saw that limit, or the last reading is too old to trust.
-- Notes: the reserve you keep for yourself, when the account ran out, and how long ago flow last saw its numbers.
+- Its role: `main`, `rotation` or `kept-out`, from `~/.dork/flow/fleet.json`, keyed `<runtime>:<account>`. A listed account with no entry is `kept-out`; a `default` is `rotation`.
+- A bar and a percentage for the 5-hour and the weekly limit, and how long until each resets. OpenCode shows what you spent this month instead.
+- `out` means the account hit that limit. `reset` means it has reset since the last reading. `no reading` means flow never saw that limit, or the last reading is too old to trust.
+- Notes: the reserve you keep for yourself, when the account ran out, a model's own limit or the plan (Codex), and how long ago flow last saw its numbers.
 
 **Sessions**, one per line: the account, the item it works on (if flow started it), what it is doing, where it runs, the start of its session id, its folder, and how long it has been running.
 
@@ -106,6 +119,6 @@ DorkOS: not running at http://127.0.0.1:4242
 | `stale`   | flow has a run for it, but its worker process is gone.         |
 | `unseen`  | flow has a run for it, but no session list shows it right now. |
 
-Where it runs is `cli` (a terminal), `dorkos` (the DorkOS app) or `cmux`. flow asks a DorkOS app on this computer for its sessions, and only on this computer. `--no-dorkos` skips that.
+Where it runs is `cli` (a terminal), `dorkos` (the DorkOS app) or `cmux`. flow asks a DorkOS app on this computer for its sessions; `--no-dorkos` skips that.
 
-`flow fleet` only reads. It changes no file and no setting. Add `--json` for the same data as one JSON object.
+`flow fleet` only reads; it changes nothing. Add `--json` for the same data as one JSON object.

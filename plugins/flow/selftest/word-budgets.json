@@ -40,8 +40,8 @@
     "target": 462
   },
   "commands/self-test.md": {
-    "baseline": 115,
-    "target": 115
+    "baseline": 140,
+    "target": 140
   },
   "commands/specify.md": {
     "baseline": 129,
@@ -60,8 +60,8 @@
     "target": 94
   },
   "docs/account-usage.mdx": {
-    "baseline": 1016,
-    "target": 1016
+    "baseline": 1123,
+    "target": 1123
   },
   "docs/bring-your-own-scheduler.mdx": {
     "baseline": 669,

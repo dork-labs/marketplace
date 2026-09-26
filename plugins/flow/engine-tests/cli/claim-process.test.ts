@@ -5,7 +5,8 @@
  * Every case spawns the real `scripts/flow.ts` with `node
  * --experimental-strip-types` in a temp git project whose tracker is the
  * file-backed fake adapter, linked in at `.agents/flow/adapters/fake/`. No
- * `FLOW_SESSION_ID` is set: an unattended drain may have none.
+ * `FLOW_SESSION_ID` is set: an unattended drain may have none, and then the
+ * session id comes from the runtime or the claim is refused.
  */
 
 import { spawn, spawnSync } from 'node:child_process';
@@ -131,14 +132,21 @@ describe('the documented drain claim runs as written', () => {
     expect(readBacklog().items[0].labels).toContain('agent/claimed');
   });
 
-  it('still claims when the agent does not know its session id', () => {
-    // Purpose: with no --session and no FLOW_SESSION_ID the claim used to exit 5
-    // on every tick; now it records the session as unknown and warns.
+  it('without --session, claims on the id the runtime sets, and refuses with none', () => {
+    // Purpose: the documented line leaves --session out under Claude Code and
+    // Codex, which set their own id for every command. With no id from anywhere
+    // the claim is refused (exit 5) and nothing is claimed, because a run with
+    // no session id can never be resumed.
     writeBacklog({ items: [item('FAKE-1')] });
-    const result = runLine(fill(documentedClaim('skills/flow-drain/SKILL.md'), null));
-    expect(result.status, result.stderr).toBe(EXIT.ok);
-    expect(result.stderr).toMatch(/--session/);
-    expect(runs()['id-FAKE-1'].sessionId).toBe('');
+    const line = fill(documentedClaim('skills/flow-drain/SKILL.md'), null);
+    const refused = runLine(line);
+    expect(refused.status, refused.stderr).toBe(EXIT.precondition);
+    expect(refused.stdout + refused.stderr).toMatch(/--session/);
+    expect(readBacklog().items[0].labels).not.toContain('agent/claimed');
+
+    const codex = runLine(line, claimEnv({ CODEX_THREAD_ID: 'thread-drain' }));
+    expect(codex.status, codex.stderr).toBe(EXIT.ok);
+    expect(runs()['id-FAKE-1']).toMatchObject({ sessionId: 'thread-drain', runtime: 'codex' });
   });
 
   it('claims with the command line commands/flow.md documents', () => {

@@ -23,6 +23,7 @@ import { canonicalDir } from '../fleet/config-dir.ts';
 import { fromRateLimitEvent } from '../fleet/observations.ts';
 import { recordUsage, type UsageObservation } from '../fleet/usage-ledger.ts';
 import type { VerbContext, VerbResult } from './context.ts';
+import { journalUsage } from './usage-journal.ts';
 
 /**
  * Variables removed from the probe's environment so the turn bills the
@@ -203,7 +204,7 @@ export async function run(ctx: VerbContext): Promise<VerbResult> {
   const model = typeof modelFlag === 'string' && modelFlag !== '' ? modelFlag : DEFAULT_PROBE_MODEL;
   const timeoutMs = readTimeoutMs(ctx);
   const dorkHome = resolveDorkHome(ctx.env, ctx.io.osHome);
-  const account = loadIdentities(dorkHome).accounts.find(
+  const account = loadIdentities(dorkHome, 'claude-code').accounts.find(
     (candidate) => candidate.id === id && candidate.routable
   );
   if (account === undefined) {
@@ -275,13 +276,14 @@ export async function run(ctx: VerbContext): Promise<VerbResult> {
     throw new PreconditionError('the probe finished but reported no usage; nothing recorded');
   }
 
-  const result = await recordUsage(dorkHome, account.id, observations, ctx.now());
+  const result = await recordUsage(dorkHome, 'claude-code', account.id, observations, ctx.now());
   for (const warning of result.warnings) ctx.warn(warning.message);
   if (result.status === 'dropped') {
     throw new PreconditionError(
       'the probe read the usage but could not save it (the usage file stayed locked); try again'
     );
   }
+  journalUsage(ctx, dorkHome, [{ runtime: 'claude-code', id: account.id }]);
 
   return {
     json: {

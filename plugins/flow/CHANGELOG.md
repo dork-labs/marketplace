@@ -4,6 +4,49 @@ Installs of this plugin are pinned to a commit SHA, so a fix here does not reach
 you until you **reinstall it** (Marketplace → flow → reinstall, or re-run your
 `--plugin-dir` checkout's `git pull`). Each entry below says whether that matters.
 
+## 0.25.0
+
+**flow can now start a working session on a chosen account. Nothing you use changes yet, so no reinstall is needed.**
+
+- flow can now start a session in an item's worktree on a named account, in three places: a plain terminal (`claude -p`, `codex exec` or `opencode run`), a cmux workspace (Claude Code), or the DorkOS app (Claude Code, Codex or OpenCode). It checks afterwards that the session really runs on that account, and strips API keys from the session's environment so nothing else pays for it.
+- If a place cannot run a runtime (cmux and Codex, for example), flow says so and starts nothing, rather than guessing another one.
+- `flow drain` will use this to spread work across your accounts; it arrives in a later release.
+
+## 0.24.0
+
+**flow now records usage for Codex and OpenCode too, and `flow fleet` shows every tool. Reinstall to get it.**
+
+- `flow usage scan --runtime codex` reads the limits Codex writes into its session logs: the 5-hour and weekly windows, a model's own limit (such as GPT-5.3-Codex-Spark), the plan and prepaid credits.
+- `flow usage scan --runtime opencode` reads a copy of OpenCode's message store. It adds up what you spent this month and notices when a provider answers "out of credits" or "rate limited". One provider's trouble never marks another as out.
+- `flow usage record --runtime codex` and `--runtime opencode` take one reading on stdin, so a hook can keep them current.
+- `flow fleet` groups accounts and sessions by tool: Claude Code and Codex with their bars, OpenCode with what it spent this month.
+- `flow usage prune` now only lists what it would delete. Add `--yes` to delete. It also finds files left over from older versions of flow.
+- `flow usage snapshot` adds a sampled usage line to the flow journal, so it keeps a history of your usage. `scan` and `probe` add one too.
+- flow still never reads a sign-in: not Claude Code's, not Codex's `auth.json`, not OpenCode's credential tables.
+
+## 0.23.0
+
+**flow now tracks accounts and usage for Claude Code, Codex and OpenCode, not only Claude Code. Reinstall, then run `flow accounts` once.**
+
+- Usage files moved to `~/.dork/runtimes/<runtime>/usage/<account>.json`, one folder per runtime (`claude-code`, `codex`, `opencode`). flow no longer reads the old `~/.dork/usage/` folder; your status line and `flow usage scan` fill the new one.
+- A runtime with no accounts listed now has one account called `default`: whatever that runtime is signed in to. flow may use it, so Codex and OpenCode work without any setup. Claude Code accounts you list still start kept out until you give them a role.
+- `flow accounts` shows each runtime's accounts separately, with a new ROOM column. Accounts in `fleet.json` are now named `<runtime>:<account>`, for example `codex:default`. Your existing entries keep working and are renamed the next time flow saves the file.
+- When an account is no longer listed, `flow accounts` removes its leftover settings and tells you. The new `flow usage prune` deletes its usage file (`--dry-run` shows what would go). A runtime's `default` usage file stays while no account is listed for it, and `default` cannot be used as a listed account's name.
+- Two new settings: `flow accounts set --runtimes codex,claude-code` sets which runtimes to prefer, and `--cross-runtime-fallback on` lets work move to another runtime when its own is used up. Until you set them, work stays on the runtime it started on.
+- Usage files can now hold a plan, prepaid credits and money spent, so a pay-as-you-go account counts as usable until it hits its spending cap. A local model with no limits is always usable.
+- `flow claim` records which runtime the session runs on (`--runtime` to say it yourself), and finds the session id under Codex as well as Claude Code. **A claim with no session id now stops with an error** instead of going ahead: pass `--session` (OpenCode does not provide one).
+- The shared test files DorkOS checks itself against are now version 2.0.0. This version is not compatible with 1.x.
+
+## 0.22.0
+
+**`flow selftest` now also checks how flow's commands behave, not only its files. Reinstall to get it.**
+
+- New `flow selftest` command (and `/flow:self-test` now runs it). Besides the quick checks of your settings and flow's own instructions, it plays whole pieces of work through the real commands against a pretend tracker in a throwaway folder: an item going from new to done, a backlog audit, recovering work whose session died, and deciding which comments to answer. It is free, needs no network and takes a few seconds. `--tier fast` or `--tier scenarios` runs just one half.
+- The item-to-done check runs twice, once as a Claude Code session and once as a Codex one, and checks that flow's notebook records each as the right one.
+- `--file` looks for an item it filed before for each failure. It adds a comment to an open one, leaves alone one a person closed as not wanted in the last 90 days, and files again one that was fixed but broke later. flow cannot create tracker items yet, so it lists the ones it would file (with the labels and project from `selfImprovement.retro`) instead of filing them.
+- The Linear adapter now reports when each closed item was closed, which is what lets `--file` tell a recent decision from an old one. The adapter contract is now version 2.1.0; adapters written for 2.0.0 keep working.
+- Each run adds one line to flow's notebook (`.dork/flow/journal.jsonl`), even with `--no-save`, unless the notebook is turned off.
+
 ## 0.21.0
 
 **flow's journal now records which agent wrote each entry: Claude Code, Codex or OpenCode. Reinstall to get it.**

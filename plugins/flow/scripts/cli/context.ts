@@ -21,6 +21,8 @@ import path from 'node:path';
 import type { CodeAdapter } from '../tracker/types.ts';
 import type { ParsedArgs, VerbSpec } from './args.ts';
 import { realHostIo, type HostIo } from './host-io.ts';
+import { RUNTIMES } from '../runtime-detect.ts';
+import { runtimeSession } from './session-id.ts';
 
 /** Anything text can be written to: `process.stdout`, or a test buffer. */
 export interface TextSink {
@@ -140,7 +142,10 @@ export interface VerbContext {
   projectDir: string;
   /** `--snapshot` resolved against cwd, when given. */
   snapshotPath?: string;
-  /** `--session`, else a non-empty `FLOW_SESSION_ID`, else Claude Code's `CLAUDE_CODE_SESSION_ID`; never invented. */
+  /**
+   * `--session`, else a non-empty `FLOW_SESSION_ID`, else the runtime's own id
+   * (`CLAUDE_CODE_SESSION_ID`, `CODEX_THREAD_ID`; see `./session-id.ts`); never invented.
+   */
   sessionId?: string;
   /** Whether `--dry-run` was given. */
   dryRun: boolean;
@@ -182,9 +187,16 @@ export function createVerbContext(
     return typeof value === 'string' ? path.resolve(deps.cwd, value) : undefined;
   };
   const sessionFlag = args.flags.session;
-  // FLOW_SESSION_ID wins; Claude Code sets CLAUDE_CODE_SESSION_ID for every
-  // Bash command it runs, so an agent needs no flag there. Empty means unset.
-  const envSession = deps.env.FLOW_SESSION_ID || deps.env.CLAUDE_CODE_SESSION_ID;
+  // FLOW_SESSION_ID wins; then the runtime's own id, which Claude Code
+  // (CLAUDE_CODE_SESSION_ID) and Codex (CODEX_THREAD_ID) set for every shell
+  // command they run, so an agent there needs no flag. Empty means unset.
+  // A verb that takes --runtime (claim) names the runtime, and so the variable.
+  const runtimeFlag = args.flags.runtime;
+  const named =
+    typeof runtimeFlag === 'string' && (RUNTIMES as readonly string[]).includes(runtimeFlag)
+      ? (runtimeFlag as (typeof RUNTIMES)[number])
+      : undefined;
+  const envSession = deps.env.FLOW_SESSION_ID || runtimeSession(deps.env, named).sessionId;
   const projectDir = pathFlag('project') ?? deps.cwd;
 
   let adapter: Promise<CodeAdapter> | undefined;

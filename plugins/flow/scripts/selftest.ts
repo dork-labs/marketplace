@@ -1,34 +1,40 @@
 /**
- * `selftest` — flow checks itself (spec `specs/flow-self-improvement`, DOR-2390).
+ * `selftest`: flow checks itself (spec `specs/flow-self-improvement`, DOR-2390).
  *
- * Runs the `fast` tier today: free, offline checks of this flow install and its
- * prose (see `selftest/fast.ts`). The `scenarios` and `live` tiers arrive with the
- * `flow` CLI (DOR-2367), which will run this module as its `selftest` verb; the
- * flags and exit codes already follow that CLI's conventions.
+ * Runs the `fast` tier (free, offline checks of this install and its prose,
+ * `selftest/fast.ts`) and then the `scenarios` tier (the real `flow` verbs
+ * against the fake tracker, `selftest/scenarios.ts`). The same module backs
+ * the `flow selftest` verb (`scripts/cli/selftest.ts`) and this script:
  *
  *   node --experimental-strip-types <flow-root>/scripts/selftest.ts [flags]
  *
- * Flags: `--tier fast` (the default and, for now, the only tier), `--json`,
- * `--strict` (a skip fails the run), `--no-save`, `--project <dir>`,
- * `--rebaseline` (lower the word budgets to today's counts), `--help`.
+ * Flags: `--tier fast|scenarios` (default: both), `--json`, `--strict` (a skip
+ * fails the run), `--file` (turn failures into tracker work, `selftest/file.ts`),
+ * `--no-save`, `--project <dir>`, `--rebaseline` (lower the word budgets to
+ * today's counts), `--help`. The `live` tier is not built yet.
  *
  * Exit codes: 0 no failures · 1 a check failed (or, with `--strict`, was skipped)
  * · 2 usage error.
  *
  * Every run (unless `--no-save`) writes `.dork/flow/selftest/latest.json` and adds
  * one line to `history.jsonl` (the last 200 runs) in the project's main checkout,
- * so every worktree shares one history.
+ * so every worktree shares one history. Every run, `--no-save` included, adds one
+ * `selftest` line to the project's journal unless the journal is off.
  *
  * @module @dorkos/flow/selftest
  */
 
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 import { flowVersion, invokedDirectly } from './_shared.ts';
+import { realProcessRunner } from './cli/context.ts';
+import { buildProvenance, signBody, unsignedBody } from './cli/provenance.ts';
 import { findConfigRoots } from './config-files.ts';
 import { ensureIgnored } from './git-exclude.ts';
+import { append, journalFor, runtimeOf } from './journal.ts';
 import {
   LINT_CONFIG_DIR,
   WORD_BUDGETS_FILE,
@@ -37,13 +43,18 @@ import {
   rebaseline,
 } from './selftest/doc-lint.ts';
 import { runFast } from './selftest/fast.ts';
+import { fileFailures, type FilingResult } from './selftest/file.ts';
 import {
   buildReport,
   exitCode,
   renderText,
+  type Check,
   type SelftestReport,
   type Tier,
 } from './selftest/report.ts';
+import { runScenarios } from './selftest/scenarios.ts';
+import type { TrackerFactory } from './selftest/scenarios/index.ts';
+import type { CodeAdapter } from './tracker/types.ts';
 
 /** The flow plugin root: the folder above `scripts/`. */
 export const FLOW_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
@@ -53,6 +64,9 @@ export const SELFTEST_DIR = path.join('.dork', 'flow', 'selftest');
 
 /** How many runs `history.jsonl` keeps. */
 export const HISTORY_CAP = 200;
+
+/** The tiers a run without `--tier` runs. */
+export const DEFAULT_TIERS: readonly Tier[] = ['fast', 'scenarios'];
 
 /** What `main` reads from and writes to, injected so tests need no real process. */
 export interface SelftestDeps {
@@ -68,13 +82,19 @@ export interface SelftestDeps {
   stderr: (text: string) => void;
   /** The flow root to check (defaults to this install). */
   flowRoot?: string;
+  /** Builds the project's tracker adapter for `--file`. Default: the project's configured adapter. */
+  createAdapter?: (projectDir: string) => Promise<CodeAdapter>;
+  /** Builds the scenarios' fake tracker (a test seam for planted breaks). */
+  makeTracker?: TrackerFactory;
 }
 
-const HELP = `flow selftest: check this flow install and its prose.
+const HELP = `flow selftest: check this flow install, its prose, and how its commands behave.
 
-  --tier fast        the free, offline checks (the default; the only tier for now)
+  --tier <tier>      fast (free, offline checks) or scenarios (the flow commands
+                     against a fake tracker); default: both
   --json             print the report as one JSON object
   --strict           a skipped check fails the run
+  --file             turn each failure into tracker work (see the report)
   --no-save          do not write .dork/flow/selftest/
   --project <dir>    the checkout whose config to check (default: the current folder)
   --rebaseline       lower selftest/word-budgets.json to today's counts, then exit
@@ -83,15 +103,31 @@ const HELP = `flow selftest: check this flow install and its prose.
 Exit codes: 0 no failures, 1 a check failed, 2 usage error.
 `;
 
+/**
+ * The tiers a `--tier` value names.
+ *
+ * @param value - The flag's value, or `undefined` when it was not given.
+ * @returns The tiers, or a usage error message.
+ */
+export function tiersFor(value: string | undefined): Tier[] | string {
+  if (value === undefined) return [...DEFAULT_TIERS];
+  if (value === 'fast' || value === 'scenarios') return [value];
+  if (value === 'live' || value === 'all') {
+    return `the live tier is not built yet; use --tier fast or --tier scenarios, or leave --tier off for both`;
+  }
+  return `unknown tier ${value} (use fast or scenarios)`;
+}
+
 /** Parsed flags. */
 interface Flags {
   help: boolean;
   json: boolean;
   strict: boolean;
   save: boolean;
+  file: boolean;
   rebaseline: boolean;
   project?: string;
-  tier: string;
+  tiers: Tier[];
 }
 
 /** Parse argv, or return a usage error message. */
@@ -101,9 +137,11 @@ function parseFlags(argv: readonly string[]): Flags | string {
     json: false,
     strict: false,
     save: true,
+    file: false,
     rebaseline: false,
-    tier: 'fast',
+    tiers: [],
   };
+  let tier: string | undefined;
   for (let i = 0; i < argv.length; i += 1) {
     const arg = argv[i];
     const value = (): string | undefined => {
@@ -114,6 +152,7 @@ function parseFlags(argv: readonly string[]): Flags | string {
     else if (arg === '--json') flags.json = true;
     else if (arg === '--strict') flags.strict = true;
     else if (arg === '--no-save') flags.save = false;
+    else if (arg === '--file') flags.file = true;
     else if (arg === '--rebaseline') flags.rebaseline = true;
     else if (arg === '--project') {
       const v = value();
@@ -122,14 +161,12 @@ function parseFlags(argv: readonly string[]): Flags | string {
     } else if (arg === '--tier') {
       const v = value();
       if (v === undefined) return '--tier needs a value';
-      flags.tier = v;
+      tier = v;
     } else return `unknown flag ${arg}`;
   }
-  if (flags.tier !== 'fast') {
-    return flags.tier === 'scenarios' || flags.tier === 'live' || flags.tier === 'all'
-      ? `the ${flags.tier} tier arrives with the flow CLI (DOR-2367); run --tier fast`
-      : `unknown tier ${flags.tier} (use fast)`;
-  }
+  const tiers = tiersFor(tier);
+  if (typeof tiers === 'string') return tiers;
+  flags.tiers = tiers;
   return flags;
 }
 
@@ -164,8 +201,169 @@ export function saveReport(report: SelftestReport, checkout: string): string {
   return dir;
 }
 
+/** One self-test run, as the script and the `flow selftest` verb both describe it. */
+export interface SelftestRun {
+  /** The flow root to check. */
+  flowRoot: string;
+  /** The project checkout (its config, its report folder, its tracker for `--file`). */
+  projectDir: string;
+  /** The environment. */
+  env: NodeJS.ProcessEnv;
+  /** The clock. */
+  now: () => Date;
+  /** The tiers to run, in order. */
+  tiers: readonly Tier[];
+  /** Whether a skip fails the run. */
+  strict: boolean;
+  /** Whether to write `latest.json` and `history.jsonl`. */
+  save: boolean;
+  /** Whether to turn failures into tracker work. */
+  file: boolean;
+  /** The project's tracker adapter, built only when `--file` has something to file. */
+  adapter: () => Promise<CodeAdapter>;
+  /** The session id to sign `--file` comments with, when known. */
+  sessionId?: string;
+  /** Print a warning. */
+  warn: (message: string) => void;
+  /** Builds the scenarios' fake tracker (a test seam). */
+  makeTracker?: TrackerFactory;
+}
+
 /**
- * Run the self-test.
+ * Run the tiers, file failures when asked, save the report.
+ *
+ * @param run - What to run and where.
+ * @returns The report and the exit code (0 or 1).
+ */
+export async function runSelftest(
+  run: SelftestRun
+): Promise<{ report: SelftestReport; code: 0 | 1 }> {
+  const started = run.now();
+  const t0 = performance.now();
+  const checks: Check[] = [];
+  for (const tier of run.tiers) {
+    if (tier === 'fast') {
+      checks.push(
+        ...(await runFast({ flowRoot: run.flowRoot, projectDir: run.projectDir, env: run.env }))
+      );
+    } else if (tier === 'scenarios') {
+      checks.push(
+        ...(await runScenarios({ flowRoot: run.flowRoot, makeTracker: run.makeTracker }))
+      );
+    }
+  }
+  const version = flowVersion(run.flowRoot);
+  const report = buildReport(checks, {
+    startedAt: started.toISOString(),
+    flowVersion: version,
+    tiers: [...run.tiers],
+    ms: Math.round(performance.now() - t0),
+  });
+  if (run.file) report.filing = await file(report, run);
+
+  if (run.save) {
+    try {
+      const roots = findConfigRoots(run.projectDir, run.flowRoot);
+      saveReport(report, roots.mainCheckout ?? roots.checkout);
+    } catch (err) {
+      run.warn(`could not save the report: ${(err as Error).message}`);
+    }
+  }
+  // The journal line is the run's history for the retro, so --no-save (which
+  // is about the report files) does not skip it; only a journal that is off does.
+  journal(report, run);
+  return { report, code: exitCode(report, { strict: run.strict }) };
+}
+
+/**
+ * Add one `selftest` line to the project's journal, stamped with the runtime
+ * that ran it. Never fails the run: a journal that is off, refused or
+ * unwritable only warns (through `append`).
+ */
+function journal(report: SelftestReport, run: SelftestRun): void {
+  const target = journalFor(run.projectDir, run.flowRoot);
+  if ('refusal' in target) return;
+  append(
+    target.settings,
+    {
+      kind: 'selftest',
+      tiers: [...report.tiers],
+      pass: report.totals.pass,
+      fail: report.totals.fail,
+      skip: report.totals.skip,
+      ms: report.totals.ms,
+      failing: report.checks.filter((c) => c.status === 'fail').map((c) => c.id),
+    },
+    {
+      now: run.now(),
+      flowVersion: report.flowVersion,
+      session: run.sessionId,
+      ...runtimeOf(run.env),
+      warn: run.warn,
+    }
+  );
+}
+
+/**
+ * `--file`: sign with the project's identity marker and this session's
+ * provenance, and match the failures against the project's tracker. A problem
+ * reaching the tracker is reported in the result, never thrown: the checks
+ * already ran, and the run already fails.
+ */
+async function file(report: SelftestReport, run: SelftestRun): Promise<FilingResult> {
+  const failing = report.checks.filter((check) => check.status === 'fail');
+  try {
+    if (failing.length === 0) return { commented: [], declined: [], notRefiled: [], wouldFile: [] };
+    const { loadConfig } = await import('./config-load.ts');
+    const { requireCapabilities } = await import('./tracker/load.ts');
+    const { config } = loadConfig(findConfigRoots(run.projectDir, run.flowRoot), run.env);
+    const { marker } = config.identity;
+    const { labels, project } = config.selfImprovement.retro;
+    const adapter = await run.adapter();
+    requireCapabilities(adapter, ['getBacklogSnapshot', 'getItem', 'comment']);
+    const provenance = buildProvenance({
+      env: run.env,
+      sessionId: run.sessionId,
+      hostname: os.hostname(),
+    });
+    return await fileFailures(
+      failing,
+      {
+        evidenceAt: report.startedAt,
+        now: run.now(),
+        flowVersion: report.flowVersion,
+        labels,
+        project,
+      },
+      { adapter, sign: (body) => signBody(body, marker, provenance), unsign: unsignedBody }
+    );
+  } catch (err) {
+    return {
+      commented: [],
+      declined: [],
+      notRefiled: [],
+      wouldFile: [],
+      error: (err as Error).message,
+    };
+  }
+}
+
+/**
+ * Lower the word budgets to today's counts (never raising one).
+ *
+ * @param flowRoot - The flow root.
+ * @returns The file written and how many files it budgets.
+ */
+export function writeRebaseline(flowRoot: string): { file: string; count: number } {
+  const files = loadCorpus(flowRoot);
+  const next = rebaseline(files, loadLintConfig(flowRoot).budgets);
+  const out = path.join(flowRoot, LINT_CONFIG_DIR, WORD_BUDGETS_FILE);
+  writeFileSync(out, `${JSON.stringify(next, null, 2)}\n`);
+  return { file: out, count: Object.keys(next).length };
+}
+
+/**
+ * Run the self-test from argv (the script entry).
  *
  * @param argv - Arguments after the script path.
  * @param deps - The environment, clock and output streams.
@@ -186,37 +384,40 @@ export async function main(argv: readonly string[], deps: SelftestDeps): Promise
     return 0;
   }
   if (flags.rebaseline) {
-    const files = loadCorpus(flowRoot);
-    const next = rebaseline(files, loadLintConfig(flowRoot).budgets);
-    const file = path.join(flowRoot, LINT_CONFIG_DIR, WORD_BUDGETS_FILE);
-    writeFileSync(file, `${JSON.stringify(next, null, 2)}\n`);
-    deps.stdout(`Wrote ${file} (${Object.keys(next).length} files)\n`);
+    const { file: out, count } = writeRebaseline(flowRoot);
+    deps.stdout(`Wrote ${out} (${count} files)\n`);
     return 0;
   }
 
   const projectDir = path.resolve(deps.cwd, flags.project ?? '.');
-  const started = deps.now();
-  const t0 = performance.now();
-  const tiers: Tier[] = ['fast'];
-  const checks = await runFast({ flowRoot, projectDir, env: deps.env });
-  const report = buildReport(checks, {
-    startedAt: started.toISOString(),
-    flowVersion: flowVersion(flowRoot),
-    tiers,
-    ms: Math.round(performance.now() - t0),
+  const warn = (message: string) => deps.stderr(`flow selftest: ${message}\n`);
+  const { report, code } = await runSelftest({
+    flowRoot,
+    projectDir,
+    env: deps.env,
+    now: deps.now,
+    tiers: flags.tiers,
+    strict: flags.strict,
+    save: flags.save,
+    file: flags.file,
+    adapter: () =>
+      deps.createAdapter !== undefined
+        ? deps.createAdapter(projectDir)
+        : import('./tracker/load.ts').then((load) =>
+            load.createCodeAdapter({
+              projectDir,
+              flowRoot,
+              env: deps.env,
+              runProcess: realProcessRunner,
+              warn,
+            })
+          ),
+    sessionId: deps.env.FLOW_SESSION_ID || deps.env.CLAUDE_CODE_SESSION_ID || undefined,
+    warn,
+    makeTracker: deps.makeTracker,
   });
-
-  if (flags.save) {
-    try {
-      const roots = findConfigRoots(projectDir, flowRoot);
-      saveReport(report, roots.mainCheckout ?? roots.checkout);
-    } catch (err) {
-      deps.stderr(`flow selftest: could not save the report: ${(err as Error).message}\n`);
-    }
-  }
-
   deps.stdout(flags.json ? `${JSON.stringify(report)}\n` : renderText(report));
-  return exitCode(report, { strict: flags.strict });
+  return code;
 }
 
 if (invokedDirectly(import.meta.url)) {

@@ -246,7 +246,7 @@ class LaunchError extends Error {
   stdout to `<cwd>/.dork/flow/drain/logs/<sessionId>.jsonl`, stderr to `….err.log`, `unref()`. Handle gets `pid`, `logFile`, `logOffset: 0`. Confirmed started when the log's first `system`/`init` line arrives and `proveAccount` passes.
 - **send:** pid alive → write the message under `.dork/flow/drain/inbox/<sessionId>/` and return `queued`; the runner delivers queued messages when the process exits. Pid gone → spawn `claude -p "<pointer>" --resume <sessionId> …` with the same account, cwd, mode and log file (appending); `delivered`, with the new pid in the handle.
 - **state:** pid alive → `busy`. Else read the log from the last `system`/`init`: a `rate_limit_event` with `status: "rejected"`, or a `result` whose error is a rate limit → `limited` (window and reset from the event); else `exited` with the exit code the runner recorded, or `null`.
-- **Ledger:** each tick the runner calls `ingestStreamLog(handle)`: every `rate_limit_event` after `logOffset` becomes an observation per S1 §1.2's `sdk_event` row (`utilization × 100`, `resetsAt` epoch seconds → ISO, `rateLimitType` as the window key, `observedAt` = when the runner read the line, since the event carries no time) and is merged into `<dorkHome>/usage/<account>.json` through S1's writer; `logOffset` advances. A headless session has no status line, so this is its only live usage source. The ambient account (no registry id) records nothing.
+- **Ledger:** each tick the runner calls `ingestStreamLog(handle)`: every `rate_limit_event` after `logOffset` becomes an observation per S1 §1.2's `sdk_event` row (`utilization × 100`, `resetsAt` epoch seconds → ISO, `rateLimitType` as the window key, `observedAt` = when the runner read the line, since the event carries no time) and is merged into `<dorkHome>/runtimes/claude-code/usage/<account>.json` through S1's writer; `logOffset` advances. A headless session has no status line, so this is its only live usage source. The ambient account (no registry id) records nothing.
 - **Transcript fallback:** when the stream carries no `rate_limit_event` (a Claude Code version without it), `transcriptLimit(path)` reads the last 64 KB of the session transcript for the structured `"error":"rate_limit"` entry, per S1's `transcript` row.
 - **stop:** SIGTERM the recorded pid (after the `ps` check) → `stopped`; no process → `not-running`.
 
@@ -313,6 +313,24 @@ Cases, each asserted on the fake's record, not on the launcher's return alone:
 12. With `ANTHROPIC_API_KEY`, `ANTHROPIC_AUTH_TOKEN` and `CLAUDE_CODE_OAUTH_TOKEN` in the supervisor's environment, none reaches the child (cli env; cmux `env -u` prefix); a cli stream whose init reports an `apiKeySource` other than `none` throws `wrong-account`.
 
 **Live smoke** (`engine-tests/launchers/live.test.ts`): one real session per host, gated by `FLOW_LAUNCHER_LIVE=1` read at module scope, with `FLOW_LAUNCHER_LIVE_ACCOUNT=<id>`. Each starts a session in a temp git repo with the message "Reply with the single word ready, then stop.", proves the account, waits for idle or exit, and stops it. It spends a few tokens of a real subscription, so it never runs in CI or in `npm test` without the flag; the task's PR records its output as the evidence for "starts a real official session".
+
+#### 2.8 Runtimes (operator direction, 2026-09-26)
+
+flow runs from Claude Code, Codex and OpenCode sessions, so a launch names a runtime as well as an account.
+
+- `LaunchRequest.runtime` and `SessionHandle.runtime` are `claude-code` | `codex` | `opencode`. An account belongs to one runtime: a `CLAUDE_CONFIG_DIR`, a `CODEX_HOME`, or an OpenCode provider profile. A runtime with no registered accounts has one implicit `default` account, the ambient environment.
+- `Launcher.supports(runtime)` answers before anything starts. An unsupported (host, runtime) pair throws `unsupported` with its reason and starts nothing; flow never swaps in another runtime or host.
+- `resolveHost` takes the runtime: a named host that cannot run it is an error naming the pair; `auto` picks the first host that both probes ok and supports it.
+
+| Host | claude-code | codex | opencode |
+| --- | --- | --- | --- |
+| cli | `claude -p … --output-format stream-json` with `CLAUDE_CONFIG_DIR` | `codex exec --json -C <cwd> …` with `CODEX_HOME` (`acceptEdits` = workspace-write with network on and the shared git dir writable, so a worker can commit and push); resume `codex exec resume <id>` | `opencode run --format json …` in the worktree; resume `--session <id>` |
+| cmux | interactive `claude`, as §2.4 | unsupported today ("use --host cli") | unsupported today ("use --host cli") |
+| dorkos | `session_start` / the route with `runtime: "claude-code"` | the same with `runtime: "codex"` | the same with `runtime: "opencode"` |
+
+**Proving the account, per runtime:** Claude Code as §2.1 (`apiKeySource`, the transcript under the config dir). Codex: the session's rollout file exists under `<CODEX_HOME>/sessions/`, and its `plan_type` is recorded when reported; `OPENAI_API_KEY` and `CODEX_API_KEY` are stripped so the `CODEX_HOME` login is what bills. OpenCode: the session's provider matches the account's provider when the account names one. DorkOS: the session reports the requested `runtime` and, for claude-code, the requested config dir.
+
+The wind-down hook (§5.4) is Claude-only; Codex and OpenCode workers get the supervisor's `wind-down` message. Ranking over (runtime, account) pairs, `fleet.runtimes`, and `crossRuntimeFallback` belong to phases 3 and 4 and are specified there.
 
 ### 3. Account-aware dispatch (DOR-2373)
 

@@ -1,0 +1,268 @@
+{
+  "contract": "fleet",
+  "about": "Every account of every runtime (spec flow-cli-core 1.1a). Call readAccounts(config). input.config is the parsed config.json, or null when the file is missing. Each runtime's rows are read with the identity rules (identity.cases.json). A runtime left with no row after those rules has ONE implicit account: id 'default', path null, label null, color null, routable true: the ambient environment. expected.accounts lists runtimes in the order claude-code, codex, opencode, and rows in registry order within one, each as { runtime, id, key, implicit, path, label, color, routable } where key is '<runtime>:<id>'. expected.warnings is a multiset of codes (compare sorted).",
+  "cases": [
+    {
+      "name": "no config file: one implicit default per runtime",
+      "input": {"config": null},
+      "expected": {
+        "accounts": [
+          {
+            "runtime": "claude-code",
+            "id": "default",
+            "key": "claude-code:default",
+            "implicit": true,
+            "path": null,
+            "label": null,
+            "color": null,
+            "routable": true
+          },
+          {
+            "runtime": "codex",
+            "id": "default",
+            "key": "codex:default",
+            "implicit": true,
+            "path": null,
+            "label": null,
+            "color": null,
+            "routable": true
+          },
+          {
+            "runtime": "opencode",
+            "id": "default",
+            "key": "opencode:default",
+            "implicit": true,
+            "path": null,
+            "label": null,
+            "color": null,
+            "routable": true
+          }
+        ],
+        "warnings": []
+      }
+    },
+    {
+      "name": "registered Claude Code accounts replace its default; the others keep theirs",
+      "input": {
+        "config": {
+          "runtimes": {
+            "claudeCode": {
+              "accounts": [
+                {"id": "work", "path": "/Users/me/.claude-work", "label": "Work"},
+                {"id": "claude3", "path": "/Users/me/.claude3"}
+              ]
+            }
+          }
+        }
+      },
+      "expected": {
+        "accounts": [
+          {
+            "runtime": "claude-code",
+            "id": "work",
+            "key": "claude-code:work",
+            "implicit": false,
+            "path": "/Users/me/.claude-work",
+            "label": "Work",
+            "color": null,
+            "routable": true
+          },
+          {
+            "runtime": "claude-code",
+            "id": "claude3",
+            "key": "claude-code:claude3",
+            "implicit": false,
+            "path": "/Users/me/.claude3",
+            "label": null,
+            "color": null,
+            "routable": true
+          },
+          {
+            "runtime": "codex",
+            "id": "default",
+            "key": "codex:default",
+            "implicit": true,
+            "path": null,
+            "label": null,
+            "color": null,
+            "routable": true
+          },
+          {
+            "runtime": "opencode",
+            "id": "default",
+            "key": "opencode:default",
+            "implicit": true,
+            "path": null,
+            "label": null,
+            "color": null,
+            "routable": true
+          }
+        ],
+        "warnings": []
+      }
+    },
+    {
+      "name": "a registry whose every row is skipped still gets the implicit default",
+      "input": {"config": {"runtimes": {"claudeCode": {"accounts": [{"id": "bad", "path": "relative/dir"}]}}}},
+      "expected": {
+        "accounts": [
+          {
+            "runtime": "claude-code",
+            "id": "default",
+            "key": "claude-code:default",
+            "implicit": true,
+            "path": null,
+            "label": null,
+            "color": null,
+            "routable": true
+          },
+          {
+            "runtime": "codex",
+            "id": "default",
+            "key": "codex:default",
+            "implicit": true,
+            "path": null,
+            "label": null,
+            "color": null,
+            "routable": true
+          },
+          {
+            "runtime": "opencode",
+            "id": "default",
+            "key": "opencode:default",
+            "implicit": true,
+            "path": null,
+            "label": null,
+            "color": null,
+            "routable": true
+          }
+        ],
+        "warnings": ["path-invalid"]
+      }
+    },
+    {
+      "name": "a hand-edited id that fails the pattern is still a registered row, so there is no default",
+      "input": {"config": {"runtimes": {"claudeCode": {"accounts": [{"id": "Bad_ID", "path": "/b"}]}}}},
+      "expected": {
+        "accounts": [
+          {
+            "runtime": "claude-code",
+            "id": "Bad_ID",
+            "key": "claude-code:Bad_ID",
+            "implicit": false,
+            "path": "/b",
+            "label": null,
+            "color": null,
+            "routable": false
+          },
+          {
+            "runtime": "codex",
+            "id": "default",
+            "key": "codex:default",
+            "implicit": true,
+            "path": null,
+            "label": null,
+            "color": null,
+            "routable": true
+          },
+          {
+            "runtime": "opencode",
+            "id": "default",
+            "key": "opencode:default",
+            "implicit": true,
+            "path": null,
+            "label": null,
+            "color": null,
+            "routable": true
+          }
+        ],
+        "warnings": ["id-invalid"]
+      }
+    },
+    {
+      "name": "a Codex registry is read like Claude Code's",
+      "input": {
+        "config": {
+          "runtimes": {
+            "codex": {"accounts": [{"id": "team", "path": "/Users/me/.codex-team"}]},
+            "opencode": {"accounts": "not a list"}
+          }
+        }
+      },
+      "expected": {
+        "accounts": [
+          {
+            "runtime": "claude-code",
+            "id": "default",
+            "key": "claude-code:default",
+            "implicit": true,
+            "path": null,
+            "label": null,
+            "color": null,
+            "routable": true
+          },
+          {
+            "runtime": "codex",
+            "id": "team",
+            "key": "codex:team",
+            "implicit": false,
+            "path": "/Users/me/.codex-team",
+            "label": null,
+            "color": null,
+            "routable": true
+          },
+          {
+            "runtime": "opencode",
+            "id": "default",
+            "key": "opencode:default",
+            "implicit": true,
+            "path": null,
+            "label": null,
+            "color": null,
+            "routable": true
+          }
+        ],
+        "warnings": ["accounts-invalid"]
+      }
+    },
+    {
+      "name": "a registered row with the reserved id default is not the implicit account",
+      "input": {"config": {"runtimes": {"claudeCode": {"accounts": [{"id": "default", "path": "/b"}]}}}},
+      "expected": {
+        "accounts": [
+          {
+            "runtime": "claude-code",
+            "id": "default",
+            "key": "claude-code:default",
+            "implicit": false,
+            "path": "/b",
+            "label": null,
+            "color": null,
+            "routable": false
+          },
+          {
+            "runtime": "codex",
+            "id": "default",
+            "key": "codex:default",
+            "implicit": true,
+            "path": null,
+            "label": null,
+            "color": null,
+            "routable": true
+          },
+          {
+            "runtime": "opencode",
+            "id": "default",
+            "key": "opencode:default",
+            "implicit": true,
+            "path": null,
+            "label": null,
+            "color": null,
+            "routable": true
+          }
+        ],
+        "warnings": ["id-reserved"]
+      }
+    }
+  ]
+}

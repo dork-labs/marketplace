@@ -24,11 +24,14 @@ import {
   mergeLedger,
   readLedger,
   recordUsage,
+  type FactObservation,
   type FleetWarning,
+  type LedgerOwner,
   type UsageLedger,
   type UsageObservation,
 } from '../fleet/usage-ledger.ts';
 import type { VerbContext, VerbResult } from './context.ts';
+import { journalUsage } from './usage-journal.ts';
 
 /** How many days of transcripts `scan` reads by default: one weekly window plus a day. */
 export const DEFAULT_SCAN_DAYS = 8;
@@ -56,8 +59,14 @@ export interface AccountScan {
   dropped: boolean;
 }
 
-/** Parse `--days` and `--all` into a day count or `'all'`. */
-function readDays(ctx: VerbContext): number | 'all' {
+/**
+ * Parse `--days` and `--all` into a day count or `'all'`.
+ *
+ * @param ctx - The verb context.
+ * @returns The number of days to read, or `'all'`.
+ * @throws {UsageError} For a bad `--days`, or `--days` with `--all`.
+ */
+export function readDays(ctx: VerbContext): number | 'all' {
   const days = ctx.args.flags.days;
   const all = ctx.args.flags.all === true;
   if (all && days !== undefined) throw new UsageError('use --days or --all, not both');
@@ -83,13 +92,21 @@ function targets(ctx: VerbContext, accounts: readonly AccountIdentity[]): Accoun
 }
 
 /**
- * Every `*.jsonl` file under `dir`, recursively, changed at or after `sinceMs`.
- * Symlinks are never followed. A folder that cannot be read is a warning.
+ * Every file under `dir`, recursively, whose name `keep` accepts (default: any
+ * `*.jsonl`) and that changed at or after `sinceMs`. Symlinks are never
+ * followed. A folder that cannot be read is a warning; a missing one is empty.
+ *
+ * @param dir - The folder to walk.
+ * @param sinceMs - The oldest mtime to keep (epoch ms), or `null` for every file.
+ * @param warn - Receives a warning for each folder that could not be read.
+ * @param keep - Which file names to keep.
+ * @returns The files, in name order within each folder.
  */
-async function transcriptFiles(
+export async function transcriptFiles(
   dir: string,
   sinceMs: number | null,
-  warn: (warning: FleetWarning) => void
+  warn: (warning: FleetWarning) => void,
+  keep: (name: string) => boolean = (name) => name.endsWith('.jsonl')
 ): Promise<string[]> {
   let entries;
   try {
@@ -106,8 +123,8 @@ async function transcriptFiles(
     const full = path.join(dir, entry.name);
     if (entry.isSymbolicLink()) continue;
     if (entry.isDirectory()) {
-      files.push(...(await transcriptFiles(full, sinceMs, warn)));
-    } else if (entry.isFile() && entry.name.endsWith('.jsonl')) {
+      files.push(...(await transcriptFiles(full, sinceMs, warn, keep)));
+    } else if (entry.isFile() && keep(entry.name)) {
       if (sinceMs !== null) {
         try {
           if ((await fsp.lstat(full)).mtimeMs < sinceMs) continue;
@@ -122,13 +139,20 @@ async function transcriptFiles(
 }
 
 /**
- * Stream one transcript and hand each parsed candidate line to `onEntry`. Returns false
- * (with a warning) when the file could not be read.
+ * Stream one JSONL file and hand each parsed line that contains `prefilter` to
+ * `onEntry`. A line that is not JSON is a warning, and reading goes on.
+ *
+ * @param file - The file to read.
+ * @param onEntry - Receives each parsed candidate line.
+ * @param warn - Receives a warning per unparsable line or unreadable file.
+ * @param prefilter - The text a line must contain before it is parsed.
+ * @returns False (with a warning) when the file could not be read.
  */
-async function scanFile(
+export async function scanFile(
   file: string,
   onEntry: (entry: unknown) => void,
-  warn: (warning: FleetWarning) => void
+  warn: (warning: FleetWarning) => void,
+  prefilter: string = PREFILTER
 ): Promise<boolean> {
   const lines = createInterface({
     input: createReadStream(file, { encoding: 'utf8' }),
@@ -138,7 +162,7 @@ async function scanFile(
   try {
     for await (const line of lines) {
       lineNo += 1;
-      if (!line.includes(PREFILTER)) continue;
+      if (!line.includes(prefilter)) continue;
       let entry: unknown;
       try {
         entry = JSON.parse(line);
@@ -162,24 +186,44 @@ async function scanFile(
 }
 
 /**
- * The window keys a merge of `observations` into `before` would replace. Each
- * is checked on its own with the ledger's own merge rule, so the answer matches
- * what the writer does.
+ * The name of what an observation updates: its window key, or its fact kind
+ * (`plan`, `credits`, `spend`).
+ *
+ * @param observation - A window or fact observation.
+ * @returns The key or kind.
  */
-function predictChanged(
+export function observationLabel(observation: UsageObservation | FactObservation): string {
+  return 'key' in observation ? observation.key : observation.kind;
+}
+
+/**
+ * The window keys (and fact kinds) a merge of `observations` into `before` would
+ * replace. Each is checked on its own with the ledger's own merge rule, so the
+ * answer matches what the writer does.
+ *
+ * @param before - The stored ledger, or `null`.
+ * @param observations - The observations about to be written.
+ * @param now - The merge time.
+ * @param owner - The runtime and account the ledger belongs to.
+ * @returns The labels ({@link observationLabel}) that would change.
+ */
+export function predictChanged(
   before: UsageLedger | null,
-  observations: readonly UsageObservation[],
+  observations: readonly (UsageObservation | FactObservation)[],
   now: Date,
-  accountId: string
+  owner: LedgerOwner
 ): string[] {
   return observations
     .filter((observation) => {
-      const merged = mergeLedger(before, [observation], now, accountId);
+      const merged = mergeLedger(before, [observation], now, owner);
       if (!merged.changed) return false;
-      const after = (merged.ledger as UsageLedger).windows[observation.key];
-      return after !== before?.windows[observation.key];
+      const after = merged.ledger as UsageLedger;
+      if ('key' in observation) {
+        return after.windows[observation.key] !== before?.windows[observation.key];
+      }
+      return after[observation.kind] !== before?.[observation.kind];
     })
-    .map((observation) => observation.key);
+    .map(observationLabel);
 }
 
 /** Scan one account's transcripts and, unless a dry run, save what they show. */
@@ -214,11 +258,14 @@ async function scanAccount(
 
   const observations = [...latest.values()].sort((a, b) => a.key.localeCompare(b.key));
   const now = ctx.now();
-  const before = readLedger(dorkHome, account.id).ledger;
-  let changed = predictChanged(before, observations, now, account.id);
+  const before = readLedger(dorkHome, 'claude-code', account.id).ledger;
+  let changed = predictChanged(before, observations, now, {
+    runtime: 'claude-code',
+    accountId: account.id,
+  });
   let dropped = false;
   if (!ctx.dryRun && observations.length > 0) {
-    const result = await recordUsage(dorkHome, account.id, observations, now);
+    const result = await recordUsage(dorkHome, 'claude-code', account.id, observations, now);
     for (const warning of result.warnings) warn(warning);
     dropped = result.status === 'dropped';
     if (result.status !== 'written') changed = [];
@@ -226,8 +273,13 @@ async function scanAccount(
   return { id: account.id, files, hits, unidentified, observations, changed, dropped };
 }
 
-/** A reset time in the reader's local time, or a note that it is unknown. */
-function localTime(iso: string | null): string {
+/**
+ * A reset time in the reader's local time, or a note that it is unknown.
+ *
+ * @param iso - A UTC ISO time, or `null`.
+ * @returns Human text.
+ */
+export function localTime(iso: string | null): string {
   if (iso === null) return 'an unknown time';
   return new Date(iso).toLocaleString(undefined, {
     dateStyle: 'medium',
@@ -264,7 +316,7 @@ function renderAccount(scan: AccountScan, dryRun: boolean): string {
 export async function run(ctx: VerbContext): Promise<VerbResult> {
   const days = readDays(ctx);
   const dorkHome = resolveDorkHome(ctx.env, ctx.io.osHome);
-  const identities = loadIdentities(dorkHome);
+  const identities = loadIdentities(dorkHome, 'claude-code');
   const accounts = targets(ctx, identities.accounts);
   const sinceMs = days === 'all' ? null : ctx.now().getTime() - days * DAY_MS;
 
@@ -287,5 +339,12 @@ export async function run(ctx: VerbContext): Promise<VerbResult> {
           ...(ctx.dryRun ? ['Dry run: nothing was saved.'] : []),
           ...scans.map((scan) => renderAccount(scan, ctx.dryRun)),
         ].join('\n');
-  return { json: { days, accounts: scans, warnings }, text };
+  if (!ctx.dryRun) {
+    journalUsage(
+      ctx,
+      dorkHome,
+      scans.map((scan) => ({ runtime: 'claude-code', id: scan.id }))
+    );
+  }
+  return { json: { runtime: 'claude-code', days, accounts: scans, warnings }, text };
 }

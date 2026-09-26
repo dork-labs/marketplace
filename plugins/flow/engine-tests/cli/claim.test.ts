@@ -71,6 +71,7 @@ describe('flow claim writes the claim projection and records the run', () => {
         },
         account: 'acct-1',
         host: 'dorkos',
+        runtime: 'claude-code',
       },
     });
     expect(result.json.run).toEqual(project.runs()['id-FAKE-1']);
@@ -110,20 +111,95 @@ describe('flow claim writes the claim projection and records the run', () => {
     });
   });
 
-  it('claims without a session id, records it as unknown and warns', async () => {
-    // Purpose: an unattended drain may not know its session; that must not
-    // block the claim, and the id is recorded empty, never invented.
+  it('refuses a claim with no session id, before any write (exit 5)', async () => {
+    // Purpose: recovery resumes a run by its session id, so a run with none
+    // cannot be resumed. The claim stops and names every way to give one; the
+    // id is never invented and nothing is written.
     const result = await runFlow(project, { items: [item('FAKE-1')] }, ['claim', 'FAKE-1'], {
       env: {},
     });
+    expect(result.code).toBe(EXIT.precondition);
+    const message = String((result.json.error as { message: string }).message);
+    for (const name of [
+      '--session',
+      'FLOW_SESSION_ID',
+      'CLAUDE_CODE_SESSION_ID',
+      'CODEX_THREAD_ID',
+    ])
+      expect(message).toContain(name);
+    expect(result.tracker.calls).toEqual([]);
+    expect(project.hasRunStore()).toBe(false);
+  });
+
+  it('under Codex, takes the session id from CODEX_THREAD_ID and records the runtime', async () => {
+    // Purpose: Codex sets CODEX_THREAD_ID for every command it runs, so a Codex
+    // drain claims with no flag, and the run names the runtime its session is on.
+    const result = await runFlow(project, { items: [item('FAKE-1')] }, ['claim', 'FAKE-1'], {
+      env: { CODEX_THREAD_ID: 'thread-7' },
+    });
     expect(result.code).toBe(EXIT.ok);
-    expect(result.tracker.calls).toEqual([
-      { method: 'applyWorkState', identifier: 'FAKE-1', change: CLAIM_CHANGE },
-    ]);
-    const run = project.runs()['id-FAKE-1'];
-    expect(run.sessionId).toBe('');
-    expect(run.provenance).not.toHaveProperty('sessionId');
-    expect(result.stderr).toMatch(/--session/);
+    expect(project.runs()['id-FAKE-1']).toMatchObject({ sessionId: 'thread-7', runtime: 'codex' });
+    expect(project.runs()['id-FAKE-1'].provenance).toMatchObject({ harness: 'codex' });
+  });
+
+  it('--runtime also picks which runtime the session id comes from', async () => {
+    // Purpose: with two runtimes' variables inherited, detection alone would
+    // take Codex's thread id; a claim that names Claude Code must record Claude
+    // Code's session, or recovery would resume the wrong conversation.
+    const result = await runFlow(
+      project,
+      { items: [item('FAKE-1')] },
+      ['claim', 'FAKE-1', '--runtime', 'claude-code'],
+      { env: { CLAUDECODE: '1', CLAUDE_CODE_SESSION_ID: 'cc-9', CODEX_THREAD_ID: 'thread-9' } }
+    );
+    expect(result.code).toBe(EXIT.ok);
+    expect(project.runs()['id-FAKE-1']).toMatchObject({
+      sessionId: 'cc-9',
+      runtime: 'claude-code',
+    });
+  });
+
+  it('under OpenCode, needs --session (it sets no session id) and records the runtime', async () => {
+    // Purpose: OpenCode marks its commands with OPENCODE=1 but gives no session
+    // id, so the claim is refused without --session and runs with it.
+    const env = { OPENCODE: '1' };
+    const refused = await runFlow(project, { items: [item('FAKE-1')] }, ['claim', 'FAKE-1'], {
+      env,
+    });
+    expect(refused.code).toBe(EXIT.precondition);
+    const result = await runFlow(
+      project,
+      { items: [item('FAKE-1')] },
+      ['claim', 'FAKE-1', '--session', 'oc-1'],
+      { env }
+    );
+    expect(result.code).toBe(EXIT.ok);
+    expect(project.runs()['id-FAKE-1']).toMatchObject({ sessionId: 'oc-1', runtime: 'opencode' });
+  });
+
+  it('--runtime names the runtime; outside a known runtime the field is left out', async () => {
+    // Purpose: a launcher that knows better says so, a value flow does not know
+    // is a usage error, and a run is never given a runtime nobody named.
+    const bad = await runFlow(
+      project,
+      { items: [item('FAKE-1')] },
+      ['claim', 'FAKE-1', '--runtime', 'gemini'],
+      { env: { FLOW_SESSION_ID: 's' } }
+    );
+    expect(bad.code).toBe(EXIT.usage);
+    const bare = await runFlow(project, { items: [item('FAKE-1')] }, ['claim', 'FAKE-1'], {
+      env: { FLOW_SESSION_ID: 's' },
+    });
+    expect(bare.code).toBe(EXIT.ok);
+    expect(project.runs()['id-FAKE-1']).not.toHaveProperty('runtime');
+    const named = await runFlow(
+      project,
+      { items: [item('FAKE-1')] },
+      ['claim', 'FAKE-1', '--runtime', 'codex'],
+      { env: { FLOW_SESSION_ID: 's', CLAUDECODE: '1' } }
+    );
+    expect(named.code).toBe(EXIT.ok);
+    expect(project.runs()['id-FAKE-1'].runtime).toBe('codex');
   });
 
   it('posts no comment', async () => {

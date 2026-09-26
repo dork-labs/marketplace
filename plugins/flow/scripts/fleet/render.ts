@@ -11,19 +11,23 @@
 
 import { formatColumns } from '../cli/output.ts';
 import type { AccountRole, HandoffMode } from './accounts.ts';
-import type { FleetSession } from './sessions.ts';
-import type { Instant, WindowReading } from './usage-ledger.ts';
+import { runtimeRank, type FleetSession } from './sessions.ts';
+import type { CreditsEntry, Instant, SpendEntry, WindowReading } from './usage-ledger.ts';
 
 /** One account as `flow fleet` reports it (the `--json` `accounts[]` entry). */
 export interface FleetAccount {
-  /** The registry id. */
+  /** The runtime the account belongs to (`claude-code`, `codex`, `opencode`). */
+  runtime: string;
+  /** The registry id, or `default` for a runtime's implicit account. */
   id: string;
+  /** Whether this is the runtime's implicit account (no registry row). */
+  implicit: boolean;
   /** The display label, or `null`. */
   label: string | null;
   /** The display color (`#rrggbb`), or `null`. */
   color: string | null;
-  /** The Claude Code config dir. */
-  path: string;
+  /** The account's folder (a Claude Code config dir, a Codex home), or `null` when implicit. */
+  path: string | null;
   /** Whether the id passes the account id pattern (only then is it tracked). */
   validId: boolean;
   /** The resolved routing role. */
@@ -38,10 +42,20 @@ export interface FleetAccount {
   fiveHourRoom: boolean | null;
   /** Room in the weekly window, or `null` with no reading. */
   weeklyRoom: boolean | null;
+  /** Room on the account as dispatch judges it (every window, errors, spend), or `null` when unknown. */
+  room: boolean | null;
   /** The newest `observedAt` across its windows, or `null`. */
   lastSeen: string | null;
   /** Every window with a reading now, by key. Stale windows are absent. */
   windows: Record<string, WindowReading>;
+  /** The plan the runtime reports (`pro`, `plus`, `max`), or `null`. */
+  plan: string | null;
+  /** Prepaid credits, when the runtime reports them, or `null`. */
+  credits: CreditsEntry | null;
+  /** Money spent this period, for a metered account, or `null`. */
+  spend: SpendEntry | null;
+  /** The `credits:*` and `rate_limit:*` keys that read `rejected` now. */
+  errors: string[];
 }
 
 /** What `flow fleet` learned about DorkOS, or `null` under `--no-dorkos`. */
@@ -174,9 +188,54 @@ function windowCell(reading: WindowReading | undefined, now: Instant): string {
   return `${bar(used)}  ${pct.padStart(4)}  ${time}`.padEnd(CELL_WIDTH);
 }
 
+/** Each runtime's heading. */
+const RUNTIME_TITLES: Readonly<Record<string, string>> = {
+  'claude-code': 'Claude Code',
+  codex: 'Codex',
+  opencode: 'OpenCode',
+};
+
+/**
+ * A runtime's heading: `Claude Code`, `Codex`, `OpenCode`, else its own name.
+ *
+ * @param runtime - The runtime.
+ * @returns The heading.
+ */
+export function runtimeTitle(runtime: string): string {
+  return RUNTIME_TITLES[runtime] ?? runtime;
+}
+
+/** `out (credits: openrouter)` / `out (rate limit: openrouter)` for each current error key. */
+function errorNotes(errors: readonly string[]): string[] {
+  return errors.map((key) => {
+    const [family, provider] = key.split(':');
+    return `out (${family === 'rate_limit' ? 'rate limit' : 'credits'}: ${provider})`;
+  });
+}
+
+/** The first instant of `now`'s month, in UTC. */
+function monthStart(now: Instant): number {
+  const date = new Date(toMs(now));
+  return Date.UTC(date.getUTCFullYear(), date.getUTCMonth(), 1);
+}
+
+/**
+ * A metered account's spend cell: `$0.75 this month`. A reading from an earlier
+ * month shows `$0.00 this month`, since a spend reading never goes stale.
+ *
+ * @param spend - The account's spend, or `null`.
+ * @param now - The moment to judge the month at.
+ * @returns The cell text.
+ */
+export function spendCell(spend: SpendEntry | null, now: Instant): string {
+  if (spend === null) return 'no spend recorded';
+  const current = Date.parse(spend.periodStart) >= monthStart(now);
+  return `$${(current ? spend.costUsd : 0).toFixed(2)} this month`;
+}
+
 /** The notes after an account's bars, in the spec's order. */
 function accountNotes(account: FleetAccount, now: Instant): string[] {
-  const notes: string[] = [];
+  const notes: string[] = [...errorNotes(account.errors)];
   if (account.reservePct > 0) {
     notes.push(
       account.effectiveReservePct === 0
@@ -191,6 +250,12 @@ function accountNotes(account: FleetAccount, now: Instant): string[] {
     .filter(([key]) => account.windows[key]?.status === 'rejected')
     .map(([, name]) => name);
   if (limited.length > 0) notes.push(`limited (${limited.join(', ')})`);
+  for (const [key, reading] of Object.entries(account.windows)) {
+    if (!key.startsWith('model:')) continue;
+    const pct = reading.status === 'rejected' ? 'out' : `${Math.round(reading.usedPct ?? 0)}%`;
+    notes.push(`${key.slice('model:'.length)} ${pct}`);
+  }
+  if (account.plan !== null) notes.push(`plan ${account.plan}`);
   if (account.role === 'kept-out' && account.scopeRepos.length === 0) {
     notes.push('kept out of all repos');
   }
@@ -198,7 +263,12 @@ function accountNotes(account: FleetAccount, now: Instant): string[] {
   return notes;
 }
 
-/** The accounts block. */
+/** Whether a runtime is metered (shows spend) rather than windowed (shows bars). */
+function isMetered(runtime: string): boolean {
+  return runtime === 'opencode';
+}
+
+/** The accounts blocks: one per runtime, headed by its name. */
 function renderAccounts(accounts: readonly FleetAccount[], now: Instant): string[] {
   if (accounts.length === 0) {
     return ['No accounts registered. Add one: flow accounts add --path ~/.claude'];
@@ -207,35 +277,49 @@ function renderAccounts(accounts: readonly FleetAccount[], now: Instant): string
   const roleWidth = 'rotation'.length;
   const lead = 2 + idWidth + 2 + roleWidth + 2;
   const gap = '   ';
-  const lines = [`${'Accounts'.padEnd(lead)}${'5-hour'.padEnd(CELL_WIDTH + gap.length)}week`];
   const rows = accounts.map((account) => {
     const id = `  ${account.id.padEnd(idWidth)}  `;
-    if (!account.validId) return { cells: `${id}invalid id, not tracked`, notes: '' };
-    const cells =
-      `${id}${account.role.padEnd(roleWidth)}  ` +
-      windowCell(account.windows.five_hour, now) +
-      gap +
-      windowCell(account.windows.seven_day, now);
-    return { cells, notes: accountNotes(account, now).join(', ') };
+    if (!account.validId) return { account, cells: `${id}invalid id, not tracked`, notes: '' };
+    const body = isMetered(account.runtime)
+      ? spendCell(account.spend, now).padEnd(CELL_WIDTH)
+      : windowCell(account.windows.five_hour, now) +
+        gap +
+        windowCell(account.windows.seven_day, now);
+    const cells = `${id}${account.role.padEnd(roleWidth)}  ${body}`;
+    return { account, cells, notes: accountNotes(account, now).join(', ') };
   });
   // Notes sit after the bars when every row's fit in 100 columns; otherwise every
   // row's go on their own line under it, so the table keeps one shape.
   const inline = rows.every(
     ({ cells, notes }) => notes === '' || cells.length + gap.length + notes.length <= MAX_COLUMNS
   );
-  for (const { cells, notes } of rows) {
-    if (notes === '') lines.push(cells.trimEnd());
-    else if (inline) lines.push(`${cells}${gap}${notes}`);
-    else lines.push(cells.trimEnd(), `${' '.repeat(lead)}${notes}`);
+  const runtimes = [...new Set(accounts.map((a) => a.runtime))].sort(
+    (a, b) => runtimeRank(a) - runtimeRank(b) || a.localeCompare(b)
+  );
+  const lines: string[] = [];
+  for (const runtime of runtimes) {
+    if (lines.length > 0) lines.push('');
+    const title = runtimeTitle(runtime);
+    lines.push(
+      isMetered(runtime)
+        ? title
+        : `${title.padEnd(lead)}${'5-hour'.padEnd(CELL_WIDTH + gap.length)}week`
+    );
+    for (const { account, cells, notes } of rows) {
+      if (account.runtime !== runtime) continue;
+      if (notes === '') lines.push(cells.trimEnd());
+      else if (inline) lines.push(`${cells}${gap}${notes}`);
+      else lines.push(cells.trimEnd(), `${' '.repeat(lead)}${notes}`);
+    }
   }
   return lines;
 }
 
-/** The sessions block. */
+/** The sessions block: one sub-heading per runtime, rows aligned across all of them. */
 function renderSessions(sessions: readonly FleetSession[], home: string, now: Instant): string[] {
   if (sessions.length === 0) return ['Sessions: none running'];
   const rows = sessions.map((s) => [
-    `  ${s.account ?? '?'}`,
+    `    ${s.account ?? '?'}`,
     s.item ?? '-',
     s.state,
     s.host ?? '?',
@@ -243,7 +327,17 @@ function renderSessions(sessions: readonly FleetSession[], home: string, now: In
     place(s.cwd, home),
     age(s.startedAt, now),
   ]);
-  return ['Sessions', ...formatColumns(rows).split('\n')];
+  const formatted = formatColumns(rows).split('\n');
+  const lines = ['Sessions'];
+  let current: string | null = null;
+  sessions.forEach((session, index) => {
+    if (session.runtime !== current) {
+      current = session.runtime;
+      lines.push(`  ${runtimeTitle(current)}`);
+    }
+    lines.push(formatted[index]);
+  });
+  return lines;
 }
 
 /**

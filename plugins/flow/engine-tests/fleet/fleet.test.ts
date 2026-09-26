@@ -21,12 +21,14 @@ import { fileURLToPath } from 'node:url';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { ProcessRunner, TextSink } from '../../scripts/cli/context.ts';
 import { main, type MainDeps } from '../../scripts/flow.ts';
+import { recordUsage } from '../../scripts/fleet/usage-ledger.ts';
 
 const FIXTURES = path.join(path.dirname(fileURLToPath(import.meta.url)), '../fixtures/usage');
 const NOW = '2026-09-26T16:00:00.000Z';
 const at = (offsetMs: number) => new Date(Date.parse(NOW) + offsetMs).toISOString();
 const M = 60_000;
 const H = 60 * M;
+const D = 24 * H;
 
 // Made-up session ids.
 const CLI_BUSY = '1a2b3c4d-1111-4111-8111-111111111111';
@@ -69,7 +71,7 @@ beforeEach(() => {
     v: 1,
     accounts: { claude2: { role: 'main' }, claude3: { role: 'rotation' } },
   });
-  writeJson(path.join(dorkHome, 'usage', 'claude2.json'), {
+  writeJson(path.join(dorkHome, 'runtimes', 'claude-code', 'usage', 'claude2.json'), {
     v: 1,
     accountId: 'claude2',
     updatedAt: at(-3 * M),
@@ -97,7 +99,7 @@ beforeEach(() => {
       },
     },
   });
-  writeJson(path.join(dorkHome, 'usage', 'claude3.json'), {
+  writeJson(path.join(dorkHome, 'runtimes', 'claude-code', 'usage', 'claude3.json'), {
     v: 1,
     accountId: 'claude3',
     updatedAt: at(-H),
@@ -332,10 +334,11 @@ describe('flow fleet', () => {
     const sessions = text.slice(text.indexOf('Sessions\n'), text.indexOf('\n\nSessions on'));
     expect(sessions.split('\n')).toEqual([
       'Sessions',
-      '  claude2  DOR-2370  busy     cli     1a2b3c4d  ~/project-wt/feature  3h',
-      '  claude2  DOR-2371  busy     dorkos  3c4d5e6f  ~/project             1h',
-      '  claude3  DOR-2372  stale    cli     4d5e6f70  ~/project-wt/gone     5h',
-      '  claude3  -         limited  cli     2b3c4d5e  ~/Keep/dorkos         12m',
+      '  Claude Code',
+      '    claude2  DOR-2370  busy     cli     1a2b3c4d  ~/project-wt/feature  3h',
+      '    claude2  DOR-2371  busy     dorkos  3c4d5e6f  ~/project             1h',
+      '    claude3  DOR-2372  stale    cli     4d5e6f70  ~/project-wt/gone     5h',
+      '    claude3  -         limited  cli     2b3c4d5e  ~/Keep/dorkos         12m',
     ]);
     expect(text).toContain('  Bad_Id   invalid id, not tracked');
     expect(text).toContain('Sessions on accounts flow does not know are not shown.');
@@ -347,13 +350,95 @@ describe('flow fleet', () => {
     expect(stderr.text).toContain('"Bad_Id"');
   });
 
+  it('shows Codex and OpenCode accounts in their own blocks once they have usage (DOR-2399)', async () => {
+    // Purpose: flow runs from every runtime; their implicit accounts appear with their own cells.
+    await recordUsage(
+      dorkHome,
+      'codex',
+      'default',
+      [
+        {
+          key: 'seven_day',
+          usedPct: 35,
+          resetsAt: at(4 * D),
+          status: null,
+          observedAt: at(-M),
+          source: 'rollout',
+        },
+        { kind: 'plan', name: 'pro', observedAt: at(-M), source: 'rollout' },
+      ],
+      new Date(NOW)
+    );
+    await recordUsage(
+      dorkHome,
+      'opencode',
+      'default',
+      [
+        {
+          key: 'credits:openrouter',
+          usedPct: null,
+          resetsAt: null,
+          status: 'rejected',
+          observedAt: at(-M),
+          source: 'error',
+        },
+        {
+          // An allowed error key is no rejection and must not show as "out".
+          key: 'rate_limit:openrouter',
+          usedPct: null,
+          resetsAt: null,
+          status: 'allowed',
+          observedAt: at(-M),
+          source: 'error',
+        },
+        {
+          kind: 'spend',
+          periodStart: '2026-09-01T00:00:00.000Z',
+          costUsd: 0.75,
+          observedAt: at(-M),
+          source: 'transcript',
+        },
+      ],
+      new Date(NOW)
+    );
+    const { exec, stdout } = run([]);
+    expect(await exec()).toBe(0);
+    const text = stdout.text;
+    expect(text).toMatch(/^Claude Code +5-hour +week$/m);
+    expect(text).toMatch(
+      /^Codex +5-hour +week\n {2}default +rotation +no reading +\[####\.\.\.\.\.\.\] +35%/m
+    );
+    expect(text).toMatch(/plan pro/);
+    expect(text).toMatch(/^OpenCode\n {2}default +rotation +\$0\.75 this month/m);
+    expect(text).toContain('out (credits: openrouter)');
+    expect(text).not.toContain('rate limit:');
+    const jsonRun = run(['--json']);
+    expect(await jsonRun.exec()).toBe(0);
+    const accounts = JSON.parse(jsonRun.stdout.text).accounts as {
+      runtime: string;
+      id: string;
+      plan: string | null;
+      errors: string[];
+      spend: { costUsd: number } | null;
+    }[];
+    expect(accounts.map((a) => `${a.runtime}:${a.id}`)).toEqual([
+      'claude-code:claude2',
+      'claude-code:claude3',
+      'claude-code:Bad_Id',
+      'codex:default',
+      'opencode:default',
+    ]);
+    expect(accounts[3]).toMatchObject({ plan: 'pro', errors: [] });
+    expect(accounts[4]).toMatchObject({ errors: ['credits:openrouter'], spend: { costUsd: 0.75 } });
+  });
+
   it('warns when a run store cannot be read, and still shows the live sessions', async () => {
     // Purpose: a corrupt flow-state.json must say so on stderr, never read silently as "no runs".
     writeFileSync(path.join(project, '.dork', 'flow', 'flow-state.json'), '{ torn');
     const { exec, stdout, stderr } = run([]);
     expect(await exec()).toBe(0);
     expect(stderr.text).toContain(path.join(project, '.dork', 'flow', 'flow-state.json'));
-    expect(stdout.text).toMatch(/ {2}claude2 +- +busy +cli +1a2b3c4d/);
+    expect(stdout.text).toMatch(/ {4}claude2 +- +busy +cli +1a2b3c4d/);
   });
 
   it('prints the --json shape the spec names', async () => {
@@ -376,7 +461,9 @@ describe('flow fleet', () => {
 
     const [claude2, claude3, bad] = payload.accounts;
     expect(Object.keys(claude2)).toEqual([
+      'runtime',
       'id',
+      'implicit',
       'label',
       'color',
       'path',
@@ -387,8 +474,13 @@ describe('flow fleet', () => {
       'scopeRepos',
       'fiveHourRoom',
       'weeklyRoom',
+      'room',
       'lastSeen',
       'windows',
+      'plan',
+      'credits',
+      'spend',
+      'errors',
     ]);
     expect(claude2).toMatchObject({
       id: 'claude2',
@@ -432,6 +524,7 @@ describe('flow fleet', () => {
       cwd: worktree,
       startedAt: at(-3 * H),
       sources: ['claude-code', 'flow-run'],
+      runtime: 'claude-code',
     });
     expect(payload.sessions.map((s: { state: string }) => s.state)).toEqual([
       'busy',
