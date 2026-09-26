@@ -4,6 +4,15 @@ Installs of this plugin are pinned to a commit SHA, so a fix here does not reach
 you until you **reinstall it** (Marketplace → flow → reinstall, or re-run your
 `--plugin-dir` checkout's `git pull`). Each entry below says whether that matters.
 
+## 0.12.0
+
+**Groundwork for the `flow` command. Nothing you use changes yet, so no reinstall is needed.**
+
+- New shared files for tracking several Claude Code accounts: which accounts flow may use and how much of each to keep for yourself (`~/.dork/flow/fleet.json`), and how much of each account's limits has been used (`~/.dork/usage/`). DorkOS reads the same files. A test fixture set proves both sides read them the same way.
+- flow now keeps the account and the launcher (terminal, DorkOS or cmux) on each run record, so a session can be matched to the item it is working on.
+- One written rule now says what a tracker item's state, its `agent/*` label and its `stage/*` label each mean. The audit that enforces it arrives with the commands that follow it.
+- The first piece of the `flow` command itself: how it reads its settings, its flags, and its exit codes. Its commands arrive in the next releases.
+
 ## 0.11.0
 
 **Work flow files for itself now reaches the ready queue, and two schedules keep it there. Reinstall, then approve the schedules you want.**
