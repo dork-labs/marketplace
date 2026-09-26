@@ -5,7 +5,7 @@
  * git project configured for it.
  */
 
-import { execFileSync } from 'node:child_process';
+import { execFileSync, spawnSync } from 'node:child_process';
 import {
   existsSync,
   mkdirSync,
@@ -13,6 +13,7 @@ import {
   readFileSync,
   realpathSync,
   rmSync,
+  symlinkSync,
   writeFileSync,
 } from 'node:fs';
 import os from 'node:os';
@@ -271,6 +272,71 @@ describe('flow create', () => {
     expect(existsSync(path.join(project, 'kept.md'))).toBe(true);
     expect((await flow(args('.dork/flow/tmp-not/x.md'), t)).code).toBe(EXIT.ok);
     expect(existsSync(path.join(project, '.dork', 'flow', 'tmp-not', 'x.md'))).toBe(true);
+  });
+
+  it('never deletes through a link: a scratch folder or file that points out of the project is kept', async () => {
+    // Purpose: the scratch check compares real paths, so a linked .dork, .dork/flow/tmp
+    // or a linked file never makes flow delete a file outside the project.
+    const outside = realpathSync(mkdtempSync(path.join(os.tmpdir(), 'flow-create-outside-')));
+    try {
+      writeFileSync(path.join(outside, 'real.md'), 'Outside.\n');
+      const t = tracker();
+      const args = ['create', '--title', 'T', '--description-file'];
+
+      // .dork/flow/tmp is a link to a folder outside the project.
+      mkdirSync(path.join(project, '.dork', 'flow'), { recursive: true });
+      symlinkSync(outside, path.join(project, '.dork', 'flow', 'tmp'));
+      expect((await flow([...args, '.dork/flow/tmp/real.md'], t)).code).toBe(EXIT.ok);
+      expect(existsSync(path.join(outside, 'real.md'))).toBe(true);
+      rmSync(path.join(project, '.dork', 'flow', 'tmp'));
+
+      // .dork itself is a link out.
+      rmSync(path.join(project, '.dork'), { recursive: true, force: true });
+      mkdirSync(path.join(outside, 'flow', 'tmp'), { recursive: true });
+      writeFileSync(path.join(outside, 'flow', 'tmp', 'deep.md'), 'Deep.\n');
+      symlinkSync(outside, path.join(project, '.dork'));
+      expect((await flow([...args, '.dork/flow/tmp/deep.md'], t)).code).toBe(EXIT.ok);
+      expect(existsSync(path.join(outside, 'flow', 'tmp', 'deep.md'))).toBe(true);
+      rmSync(path.join(project, '.dork'));
+
+      // A real scratch folder holding a link to a file outside.
+      mkdirSync(path.join(project, '.dork', 'flow', 'tmp'), { recursive: true });
+      symlinkSync(
+        path.join(outside, 'real.md'),
+        path.join(project, '.dork', 'flow', 'tmp', 'link.md')
+      );
+      expect((await flow([...args, '.dork/flow/tmp/link.md'], t)).code).toBe(EXIT.ok);
+      expect(existsSync(path.join(outside, 'real.md'))).toBe(true);
+
+      // Only a regular file is deleted: a link, even to another scratch file, is not.
+      const tmpDir = path.join(project, '.dork', 'flow', 'tmp');
+      writeFileSync(path.join(tmpDir, 'target.md'), 'Target.\n');
+      symlinkSync(path.join(tmpDir, 'target.md'), path.join(tmpDir, 'inner.md'));
+      expect((await flow([...args, '.dork/flow/tmp/inner.md'], t)).code).toBe(EXIT.ok);
+      expect(existsSync(path.join(tmpDir, 'target.md'))).toBe(true);
+    } finally {
+      rmSync(outside, { recursive: true, force: true });
+    }
+  });
+
+  it('keeps .dork/flow/tmp out of git when it reads a scratch file there', async () => {
+    // Purpose: a scratch file kept for a retry can never be committed.
+    const scratch = path.join(project, '.dork', 'flow', 'tmp', 'idea.md');
+    mkdirSync(path.dirname(scratch), { recursive: true });
+    writeFileSync(scratch, 'Scratch idea.\n');
+    const t = tracker();
+    const run = await flow(
+      ['create', '--title', 'T', '--description-file', scratch, '--dry-run'],
+      t
+    );
+    expect(run.code).toBe(EXIT.ok);
+    const exclude = readFileSync(path.join(project, '.git', 'info', 'exclude'), 'utf8');
+    expect(exclude.split('\n')).toContain('.dork/flow/tmp/');
+    expect(existsSync(scratch)).toBe(true);
+    const ignored = spawnSync('git', ['check-ignore', '-q', '.dork/flow/tmp/idea.md'], {
+      cwd: project,
+    });
+    expect(ignored.status).toBe(0);
   });
 
   it('keeps the scratch file when the create fails, for the retry', async () => {

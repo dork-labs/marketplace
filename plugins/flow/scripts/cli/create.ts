@@ -20,7 +20,9 @@
  * - `--dry-run` prints the planned item and writes nothing.
  * - A `--description-file` under `.dork/flow/tmp/` is removed once the item
  *   is filed or found; a failed or dry run keeps it for the retry. A file
- *   anywhere else is left alone.
+ *   anywhere else is left alone, judged by real path: a `.dork/flow/tmp` that
+ *   links out of the project is not flow's scratch. Reading one adds
+ *   `.dork/flow/tmp/` to git's local exclude unless git already ignores it.
  *
  * `created` is false when the item was already open before this run: found by
  * its marker, or handed back by the adapter for the key. Two runs racing on
@@ -33,12 +35,13 @@
  * @module @dorkos/flow/cli/create
  */
 
-import { readFileSync, rmSync } from 'node:fs';
+import { lstatSync, readFileSync, realpathSync, rmSync } from 'node:fs';
 import path from 'node:path';
 
 import { findConfigRoots } from '../config-files.ts';
 import { loadConfig } from '../config-load.ts';
 import { UsageError } from '../errors.ts';
+import { ensureIgnored } from '../git-exclude.ts';
 import { requireCapabilities } from '../tracker/load.ts';
 import type { Capability, NewItem } from '../tracker/types.ts';
 import { labelGroup } from '../work-state.ts';
@@ -88,9 +91,40 @@ function descriptionText(ctx: VerbContext): Description {
   } catch {
     throw new UsageError(`could not read the description file ${resolved}`);
   }
-  const rel = path.relative(path.join(ctx.projectDir, SCRATCH_DIR), resolved);
-  const scratch = rel !== '' && !rel.startsWith('..') && !path.isAbsolute(rel);
-  return scratch ? { text, scratch: resolved } : { text };
+  const scratch = scratchFile(ctx, resolved);
+  return scratch === undefined ? { text } : { text, scratch };
+}
+
+/**
+ * The real path of a description file that is flow's scratch, else
+ * `undefined`. Paths are compared as real paths, so a `.dork`, `.dork/flow` or
+ * `.dork/flow/tmp` that is a link out of the project makes nothing scratch, and
+ * only a regular file (not a link) counts. Any path that cannot be resolved
+ * counts as not scratch. A scratch file's folder is also kept out of git.
+ */
+function scratchFile(ctx: VerbContext, file: string): string | undefined {
+  let real: string;
+  try {
+    const project = realpathSync(ctx.projectDir);
+    const tmp = realpathSync(path.join(ctx.projectDir, SCRATCH_DIR));
+    if (tmp !== path.join(project, SCRATCH_DIR)) return undefined;
+    if (!lstatSync(file).isFile()) return undefined;
+    real = realpathSync(file);
+    const rel = path.relative(tmp, real);
+    if (rel === '' || rel.startsWith('..') || path.isAbsolute(rel)) return undefined;
+    try {
+      ensureIgnored(
+        project,
+        path.relative(project, real),
+        `${SCRATCH_DIR.split(path.sep).join('/')}/`
+      );
+    } catch {
+      // Not a git checkout, or git missing: the file is removed after the run anyway.
+    }
+  } catch {
+    return undefined;
+  }
+  return real;
 }
 
 /**
