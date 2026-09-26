@@ -126,7 +126,7 @@ carries it forward.
 
 ## The flow CLI
 
-`scripts/flow.ts` is the one command skills and people run for tracker steps:
+Skills and people run tracker steps through `scripts/flow.ts`:
 
 ```bash
 node --experimental-strip-types <flow-root>/scripts/flow.ts <verb> [args] [flags]
@@ -136,9 +136,8 @@ node --experimental-strip-types <flow-root>/scripts/flow.ts <verb> [args] [flags
 [README](../README.md#the-flow-cli) lists the verbs; `flow <verb> --help` gives
 each one's flags.
 
-- `--json` prints one JSON object with `"v": 1` on stdout, even on failure:
-  `{ "v": 1, "ok": false, "error": { "code", "message" } }`. Warnings go to
-  stderr.
+- `--json` prints one JSON object (`"v": 1`) on stdout, even on failure
+  (`"ok": false` with an `error`). Warnings go to stderr.
 - `--project <dir>` is the checkout to read (every verb but `accounts` and
   `usage`). `--snapshot <file>` lets `next`, `audit` and `status` read a saved
   `flow snapshot --json`. `--dry-run` prints the plan and writes nothing, on
@@ -157,7 +156,7 @@ each one's flags.
 | 5    | Precondition failed: item not found, not claimable, claimed by another. |
 | 6    | Missing runtime dependency (`zod`).                                     |
 | 7    | Paused (`next` or `claim` without `--manual`).                          |
-| 70   | A bug in flow, kept apart from 1 so a crash never reads as findings.    |
+| 70   | A bug in flow (never confused with 1).                                  |
 
 ## `FlowRun` record (promotion surface, P3)
 
