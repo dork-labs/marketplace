@@ -293,6 +293,23 @@ The producer is a swappable seam: the inbox reconciler consumes a normalized `Tr
   exists so the swap is a one-line config edit when the producer ships.
 </Callout>
 
+## Drain
+
+How `flow drain` runs several items at once, under `drain`. The defaults keep the one-item tick.
+
+| Dial                   | Default         | What it does                                                                 |
+| ---------------------- | --------------- | ---------------------------------------------------------------------------- |
+| `parallel`             | `0`             | Workers at once; `0` leaves one item to the scheduled tick.                  |
+| `maxLoadPerCpu`        | `1.5`           | No new session while the load per CPU is at or above this.                   |
+| `maxLivePerAccount`    | `2`             | Sessions one account runs at once.                                           |
+| `maxReviewRounds`      | `5`             | Review verdicts before an item parks for a person.                           |
+| `warnMarginPct`        | `10`            | How close to a usage ceiling, in percent, counts as a warning.               |
+| `windDownGraceMinutes` | `20`            | How long a warned worker has to checkpoint before flow writes one.           |
+| `pollSeconds`          | `60`            | Seconds between passes.                                                      |
+| `armAutoMerge`         | `false`         | Whether its PRs merge on their own once checks pass.                         |
+| `host`                 | `"auto"`        | Where sessions start: `cli`, `cmux` or `dorkos`. Set in `config.local.json`. |
+| `permissionMode`       | `"acceptEdits"` | The mode sessions start in. Set in `config.local.json`.                      |
+
 ## Which dial should I touch?
 
 | If you want to...                            | Turn this                                                                                                                            |

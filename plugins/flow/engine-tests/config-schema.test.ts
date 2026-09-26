@@ -412,6 +412,68 @@ describe('FlowConfigSchema — the context block: sticky sessions and the resume
   });
 });
 
+describe('FlowConfigSchema — the drain block (flow-handoff-dispatch §6)', () => {
+  // Purpose: every drain dial resolves to its spec default from {}, so an
+  // adopter who never mentions drain keeps today's one-item tick. Fails if a
+  // default drifts or the block loses its prefault.
+  it('resolves every drain default from {}', () => {
+    expect(FlowConfigSchema.parse({}).drain).toEqual({
+      parallel: 0,
+      maxLoadPerCpu: 1.5,
+      maxLivePerAccount: 2,
+      maxReviewRounds: 5,
+      warnMarginPct: 10,
+      windDownGraceMinutes: 20,
+      pollSeconds: 60,
+      armAutoMerge: false,
+      host: 'auto',
+      permissionMode: 'acceptEdits',
+    });
+  });
+
+  // Purpose: a block with every field set to a non-default value reads back
+  // exactly, through Zod and through the generated JSON Schema an editor uses.
+  it('round-trips every field set', () => {
+    const drain = {
+      parallel: 3,
+      maxLoadPerCpu: 0.75,
+      maxLivePerAccount: 1,
+      maxReviewRounds: 1,
+      warnMarginPct: 50,
+      windDownGraceMinutes: 1,
+      pollSeconds: 10,
+      armAutoMerge: true,
+      host: 'cmux',
+      permissionMode: 'bypassPermissions',
+    };
+    expect(FlowConfigSchema.parse({ drain }).drain).toEqual(drain);
+    const validate = newAjv().compile(buildConfigJsonSchema());
+    expect(validate({ drain })).toBe(true);
+  });
+
+  // Purpose: each bound in the spec table is enforced, at both edges where the
+  // spec names one. Fails if a bound is loosened or a type check dropped.
+  it.each([
+    ['parallel below 0', { parallel: -1 }],
+    ['parallel as a fraction', { parallel: 1.5 }],
+    ['maxLoadPerCpu at 0', { maxLoadPerCpu: 0 }],
+    ['maxLivePerAccount at 0', { maxLivePerAccount: 0 }],
+    ['maxLivePerAccount as a fraction', { maxLivePerAccount: 1.5 }],
+    ['maxReviewRounds at 0', { maxReviewRounds: 0 }],
+    ['warnMarginPct below 0', { warnMarginPct: -1 }],
+    ['warnMarginPct above 50', { warnMarginPct: 51 }],
+    ['windDownGraceMinutes at 0', { windDownGraceMinutes: 0 }],
+    ['pollSeconds below 10', { pollSeconds: 9 }],
+    ['armAutoMerge as a string', { armAutoMerge: 'yes' }],
+    ['an unknown host', { host: 'tmux' }],
+    ['an unknown permissionMode', { permissionMode: 'plan' }],
+  ])('refuses %s', (_name, drain) => {
+    expect(FlowConfigSchema.safeParse({ drain }).success).toBe(false);
+    const validate = newAjv().compile(buildConfigJsonSchema());
+    expect(validate({ drain })).toBe(false);
+  });
+});
+
 describe('FlowConfigSchema — the models block (tiers committed, bindings local)', () => {
   it('resolves the tier defaults from {}: judgment on workhorse, mechanical on fast', () => {
     const { models } = FlowConfigSchema.parse({});
@@ -607,6 +669,7 @@ describe('z.toJSONSchema bridge', () => {
       'recovery',
       'decomposition',
       'evidence',
+      'drain',
     ];
     for (const key of topLevelBlocks) {
       expect(properties).toHaveProperty(key);
