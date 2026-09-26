@@ -50,6 +50,9 @@ export interface FastOptions {
   env: NodeJS.ProcessEnv;
 }
 
+/** Set on the engine-test child, so any self-test run inside it skips the engine tests. */
+export const ENGINE_MARKER = 'FLOW_SELFTEST_ENGINE';
+
 /** The fixture the conformance harness must reject, and the invariant it breaks. */
 export const BAD_FIXTURE_INVARIANTS: readonly string[] = ['INV-3'];
 
@@ -77,28 +80,35 @@ function timed(id: string, run: () => { status: CheckStatus; detail: string }): 
 
 /**
  * Run the engine's Vitest suite. Skipped when the contributor toolchain is not
- * installed, and always skipped inside Vitest itself (`VITEST` is set): a test
- * that runs the fast tier must never start the suite again, or each run would
- * start another one until the job dies.
+ * installed, and always skipped when this process is already inside a test run:
+ * `VITEST` in this process's environment or the injected one, or
+ * {@link ENGINE_MARKER}, which the spawned suite always carries. A test that runs
+ * the fast tier must never start the suite again: each run would start another
+ * one until the machine runs out of processes (measured: about 1,100 in seconds).
+ * Checking this process's own environment too means no injected `env` can
+ * switch the guard off.
  *
  * @param options - Where flow lives and the environment.
  * @returns The check.
  */
 export function engineTests(options: FastOptions): Check {
+  const nested = [process.env, options.env].some(
+    (env) => env.VITEST !== undefined || env[ENGINE_MARKER] !== undefined
+  );
   const entry = path.join(options.flowRoot, 'node_modules', 'vitest', 'vitest.mjs');
   return timed('engine-tests', () => {
-    if (options.env.VITEST !== undefined) {
-      return { status: 'skip', detail: 'already inside Vitest' };
-    }
     if (!existsSync(entry)) {
       return {
         status: 'skip',
         detail: 'contributor toolchain not installed (npm install --include=dev in the flow root)',
       };
     }
+    if (nested) {
+      return { status: 'skip', detail: 'already inside a test run' };
+    }
     const res = spawnSync(process.execPath, [entry, 'run'], {
       cwd: options.flowRoot,
-      env: options.env,
+      env: { ...options.env, [ENGINE_MARKER]: '1' },
       encoding: 'utf8',
       timeout: 10 * 60 * 1000,
     });

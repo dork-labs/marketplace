@@ -119,8 +119,23 @@ describe('doc-lint/duplicate-rule', () => {
       { path: 'a.md', text: rule },
       { path: 'b.md', text: rule },
     ];
-    const allowed = checkDuplicates(files, { sentences: [] })[0].key;
-    expect(checkDuplicates(files, { sentences: [{ text: allowed, reason: 'test' }] })).toEqual([]);
+    const text = checkDuplicates(files, { sentences: [] })[0].key;
+    const allow = { sentences: [{ text, paths: ['a.md', 'b.md'], reason: 'test' }] };
+    expect(checkDuplicates(files, allow)).toEqual([]);
+  });
+
+  it('fails an allowed repeat copied into a file its entry does not list', () => {
+    const files = [
+      { path: 'a.md', text: rule },
+      { path: 'b.md', text: rule },
+      { path: 'c.md', text: rule },
+    ];
+    const text = checkDuplicates(files, { sentences: [] })[0].key;
+    const allow = { sentences: [{ text, paths: ['a.md', 'b.md'], reason: 'test' }] };
+    const findings = checkDuplicates(files, allow);
+    expect(findings).toHaveLength(1);
+    expect(findings[0]).toMatchObject({ rule: 'doc-lint/duplicate-rule', path: 'c.md' });
+    expect(findings[0].detail).toMatch(/copied into c\.md/);
   });
 });
 
@@ -228,14 +243,25 @@ describe('doc-lint/war-stories', () => {
     expect(checkWarStories(files, allow)).toHaveLength(1);
   });
 
-  it('passes a rule id with an allowed prefix, prose outside steps, and exempt files', () => {
+  it('fails a dated paragraph and a dated blockquote, not only steps', () => {
+    const files = [
+      { path: 'skills/x/SKILL.md', text: 'Each of these cost a failed batch on 2026-08-03.' },
+      { path: 'commands/y.md', text: '> Verified against the live tracker, 2026-09-10.' },
+    ];
+    expect(checkWarStories(files, allow).map((f) => f.path)).toEqual([
+      'skills/x/SKILL.md',
+      'commands/y.md',
+    ]);
+  });
+
+  it('passes a rule id with an allowed prefix, inline code, and files outside skills and commands', () => {
     const files = [
       {
         path: 'skills/x/SKILL.md',
-        text: '- Check INV-3 holds.\n\nOn 2026-09-10 we learned a lot.',
+        text: '- Check INV-3 holds.\n\nRun `git log --since 2026-09-10`.',
       },
       { path: 'docs/why.md', text: '- On 2026-09-10 DOR-1910 happened.' },
-      { path: 'docs/guide.mdx', text: '- On 2026-09-10 DOR-1910 happened.' },
+      { path: 'README.md', text: 'On 2026-09-10 DOR-1910 happened.' },
     ];
     expect(checkWarStories(files, allow)).toEqual([]);
   });

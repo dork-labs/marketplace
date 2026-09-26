@@ -22,13 +22,13 @@
  * @module @dorkos/flow/selftest
  */
 
-import { execFileSync, spawnSync } from 'node:child_process';
-import { appendFileSync, existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 import { invokedDirectly } from './_shared.ts';
 import { findConfigRoots } from './config-files.ts';
+import { ensureIgnored } from './git-exclude.ts';
 import {
   LINT_CONFIG_DIR,
   WORD_BUDGETS_FILE,
@@ -146,28 +146,6 @@ function flowVersion(flowRoot: string): string {
 }
 
 /**
- * Keep `.dork/flow/` out of git: when git does not already ignore it, add it to
- * the repository's `info/exclude` (local to this clone, never committed).
- *
- * @param checkout - The checkout the results are written in.
- */
-function ensureIgnored(checkout: string): void {
-  const probe = path.join('.dork', 'flow', 'selftest', 'latest.json');
-  const ignored = spawnSync('git', ['check-ignore', '-q', probe], { cwd: checkout });
-  if (ignored.status !== 1) return; // 0 = ignored; anything else = not a repo or git missing
-  const common = execFileSync('git', ['rev-parse', '--path-format=absolute', '--git-common-dir'], {
-    cwd: checkout,
-    encoding: 'utf8',
-  }).trim();
-  const exclude = path.join(common, 'info', 'exclude');
-  mkdirSync(path.dirname(exclude), { recursive: true });
-  const text = existsSync(exclude) ? readFileSync(exclude, 'utf8') : '';
-  if (!text.split('\n').includes('.dork/flow/')) {
-    appendFileSync(exclude, `${text === '' || text.endsWith('\n') ? '' : '\n'}.dork/flow/\n`);
-  }
-}
-
-/**
  * Write `latest.json` and add a line to `history.jsonl`, keeping the newest
  * {@link HISTORY_CAP} lines. A history line records the tiers and each check's id,
  * status and fingerprint, so a later run can tell "failed" from "did not run".
@@ -179,7 +157,7 @@ function ensureIgnored(checkout: string): void {
 export function saveReport(report: SelftestReport, checkout: string): string {
   const dir = path.join(checkout, SELFTEST_DIR);
   mkdirSync(dir, { recursive: true });
-  ensureIgnored(checkout);
+  ensureIgnored(checkout, path.join(SELFTEST_DIR, 'latest.json'), '.dork/flow/');
   writeFileSync(path.join(dir, 'latest.json'), `${JSON.stringify(report, null, 2)}\n`);
   const historyFile = path.join(dir, 'history.jsonl');
   const line = JSON.stringify({

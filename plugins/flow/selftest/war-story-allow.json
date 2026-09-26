@@ -47,6 +47,41 @@
       "path": "skills/linear-adapter/SKILL.md",
       "text": "2026-09-10). A project's description is a one-line summary field, not a body,",
       "reason": "Present before the self-test existed; the prose trim (DOR-2377) removes it."
+    },
+    {
+      "path": "skills/grooming-backlog/SKILL.md",
+      "text": "> failure modes. The first groom of the DorkOS tracker (2026-08-03) found that",
+      "reason": "Present before the self-test existed; the prose trim (DOR-2377) removes it."
+    },
+    {
+      "path": "skills/linear-adapter/SKILL.md",
+      "text": "skill (\"via the linear-adapter, claim DOR-123\") instead of touching the tracker.",
+      "reason": "Present before the self-test existed; the prose trim (DOR-2377) removes it."
+    },
+    {
+      "path": "skills/linear-adapter/SKILL.md",
+      "text": "(verified against a five-team workspace, 2026-09-10 — an account that connects",
+      "reason": "Present before the self-test existed; the prose trim (DOR-2377) removes it."
+    },
+    {
+      "path": "skills/linear-adapter/SKILL.md",
+      "text": "Verified against the live workspace during the first groom (2026-08-03);",
+      "reason": "Present before the self-test existed; the prose trim (DOR-2377) removes it."
+    },
+    {
+      "path": "skills/linear-adapter/SKILL.md",
+      "text": "team-scoping corrected 2026-09-10.",
+      "reason": "Present before the self-test existed; the prose trim (DOR-2377) removes it."
+    },
+    {
+      "path": "skills/linear-adapter/SKILL.md",
+      "text": "Each of these cost a failed batch on 2026-08-03; none produces a helpful error:",
+      "reason": "Present before the self-test existed; the prose trim (DOR-2377) removes it."
+    },
+    {
+      "path": "skills/linear-adapter/SKILL.md",
+      "text": "the loop, and every backlog view (the first DorkOS groom, 2026-08-03, found six",
+      "reason": "Present before the self-test existed; the prose trim (DOR-2377) removes it."
     }
   ]
 }

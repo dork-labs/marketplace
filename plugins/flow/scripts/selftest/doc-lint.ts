@@ -75,8 +75,11 @@ export type WordBudgets = Record<string, WordBudget>;
 
 /** `selftest/duplicate-allow.json`: repeats that are allowed, each with a reason. */
 export interface DuplicateAllow {
-  /** Normalized sentences (the `key` a duplicate finding carries) and why each may repeat. */
-  sentences: Array<{ text: string; reason: string }>;
+  /**
+   * Normalized sentences (the `key` a duplicate finding carries), the files each
+   * may repeat in, and why. A copy into any other file still fails.
+   */
+  sentences: Array<{ text: string; paths: string[]; reason: string }>;
 }
 
 /** `selftest/war-story-allow.json`: id prefixes that are not tracker ids, and allowed lines. */
@@ -105,9 +108,6 @@ export const WORD_BUDGETS_FILE = 'word-budgets.json';
 export const DUPLICATE_ALLOW_FILE = 'duplicate-allow.json';
 /** The war-story allow file name. */
 export const WAR_STORY_ALLOW_FILE = 'war-story-allow.json';
-
-/** Files the war-story rule never reads: they are where dated history belongs. */
-const WAR_STORY_EXEMPT = new Set(['docs/why.md', 'CHANGELOG.md']);
 
 /** A sentence needs at least this many words before a repeat counts as a copied rule. */
 const MIN_DUPLICATE_WORDS = 8;
@@ -307,7 +307,7 @@ function sentencesOf(text: string): string[] {
  * @returns One finding per repeated sentence, naming every file it is in.
  */
 export function checkDuplicates(files: readonly DocFile[], allow: DuplicateAllow): Finding[] {
-  const allowed = new Set(allow.sentences.map((s) => s.text));
+  const allowed = new Map(allow.sentences.map((s) => [s.text, new Set(s.paths)]));
   const seen = new Map<string, string[]>();
   for (const file of files) {
     const mine = new Set<string>();
@@ -322,12 +322,18 @@ export function checkDuplicates(files: readonly DocFile[], allow: DuplicateAllow
   }
   const findings: Finding[] = [];
   for (const [norm, paths] of seen) {
-    if (paths.length < 2 || allowed.has(norm)) continue;
+    if (paths.length < 2) continue;
+    const allowedPaths = allowed.get(norm);
+    const extra = allowedPaths === undefined ? paths : paths.filter((p) => !allowedPaths.has(p));
+    if (extra.length === 0) continue;
     const excerpt = norm.length > 80 ? `${norm.slice(0, 77)}...` : norm;
     findings.push({
       rule: 'doc-lint/duplicate-rule',
-      path: paths[0],
-      detail: `"${excerpt}" appears in ${paths.join(', ')}: keep it in one file`,
+      path: extra[0],
+      detail:
+        allowedPaths === undefined
+          ? `"${excerpt}" appears in ${paths.join(', ')}: keep it in one file`
+          : `"${excerpt}" is allowed in ${[...allowedPaths].join(', ')} and was copied into ${extra.join(', ')}: keep it in one file`,
       key: norm,
     });
   }
@@ -531,10 +537,11 @@ const DATE = /\b20\d\d-\d\d-\d\d\b/;
 const ID = /\b([A-Z]{2,})-\d+\b/g;
 
 /**
- * Find dated incidents and tracker ids inside the numbered or bulleted steps of
- * skills and commands. A step says what to do; the story of why belongs in
- * `docs/why.md` or the changelog. Ids whose prefix names a rule (INV-3, GRM-9)
- * are not tracker ids.
+ * Find dated incidents and tracker ids in the prose of skills and commands:
+ * steps, paragraphs and blockquotes alike (fenced and inline code are skipped).
+ * A skill says what to do; the story of why belongs in `docs/why.md` or the
+ * changelog, which this rule never reads. Ids whose prefix names a rule (INV-3,
+ * GRM-9) are not tracker ids.
  *
  * @param files - The corpus (only `skills/**` and `commands/**` are read).
  * @param allow - Rule-id prefixes and allowed lines.
@@ -544,14 +551,9 @@ export function checkWarStories(files: readonly DocFile[], allow: WarStoryAllow)
   const allowedLines = new Set(allow.lines.map((l) => `${l.path}\u0000${l.text}`));
   const findings: Finding[] = [];
   for (const file of files) {
-    if (WAR_STORY_EXEMPT.has(file.path)) continue;
     if (!file.path.startsWith('skills/') && !file.path.startsWith('commands/')) continue;
-    let inStep = false;
     for (const line of linesOutsideFences(splitFrontmatter(file.text).body)) {
       if (line.trim() === '') continue;
-      if (/^\s*([-*+]|\d+[.)])\s/.test(line)) inStep = true;
-      else if (!/^\s/.test(line)) inStep = false;
-      if (!inStep) continue;
       const text = stripInlineCode(line);
       const ids = [...text.matchAll(ID)].filter((m) => !(m[1] in allow.rulePrefixes));
       if (!DATE.test(text) && ids.length === 0) continue;
@@ -561,7 +563,7 @@ export function checkWarStories(files: readonly DocFile[], allow: WarStoryAllow)
       findings.push({
         rule: 'doc-lint/war-stories',
         path: file.path,
-        detail: `a step carries ${what}: move the story to docs/why.md or the changelog ("${trimmed.slice(0, 60)}")`,
+        detail: `a line carries ${what}: move the story to docs/why.md or the changelog ("${trimmed.slice(0, 60)}")`,
         key: `${file.path}:${trimmed}`,
       });
     }

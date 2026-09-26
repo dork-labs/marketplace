@@ -61,7 +61,7 @@ describe('flow selftest (fast tier)', () => {
     });
     expect(report.checks.filter((c: Check) => c.status === 'fail')).toEqual([]);
     const engine = report.checks.find((c: Check) => c.id === 'engine-tests');
-    expect(engine).toMatchObject({ status: 'skip', detail: 'already inside Vitest' });
+    expect(engine).toMatchObject({ status: 'skip', detail: 'already inside a test run' });
     expect(code).toBe(0);
   });
 
@@ -72,7 +72,7 @@ describe('flow selftest (fast tier)', () => {
   it('lists skips with their reason in the text report', async () => {
     const { stdout } = await run(['--no-save']);
     expect(stdout).toMatch(
-      /Skipped \(not passed\):\n {2}SKIP {2}engine-tests: already inside Vitest/
+      /Skipped \(not passed\):\n {2}SKIP {2}engine-tests: already inside a test run/
     );
   });
 
@@ -150,6 +150,52 @@ describe('the fast tier checks', () => {
       expect(result).toMatchObject({ status: 'skip', detail: expect.stringMatching(/toolchain/) });
     } finally {
       rmSync(empty, { recursive: true, force: true });
+    }
+  });
+});
+
+describe('the engine-test recursion guard', () => {
+  // The engine check spawns Vitest, and the suite runs the fast tier. Without a
+  // guard that no injected env can switch off, each run starts another (about
+  // 1,100 processes in seconds, measured). This drives the real spawn path with a
+  // fake vitest.mjs, from a child process that is NOT inside Vitest.
+  it('passes FLOW_SELFTEST_ENGINE to the suite, and a run inside it skips', () => {
+    const root = mkdtempSync(path.join(os.tmpdir(), 'flow-fake-root-'));
+    try {
+      const fast = path.join(FLOW_ROOT, 'scripts', 'selftest', 'fast.ts');
+      const record = path.join(root, 'record.json');
+      const nested = path.join(root, 'nested.ts');
+      const started = path.join(root, 'started');
+      // A run of the engine check with an EMPTY injected env: only the marker the
+      // parent put in this process's own environment can stop it.
+      writeFileSync(
+        nested,
+        `import { engineTests } from ${JSON.stringify(fast)};\n` +
+          `const c = engineTests({ flowRoot: ${JSON.stringify(root)}, projectDir: ${JSON.stringify(root)}, env: {} });\n` +
+          `process.stdout.write(JSON.stringify(c));\n`
+      );
+      mkdirSync(path.join(root, 'node_modules', 'vitest'), { recursive: true });
+      writeFileSync(
+        path.join(root, 'node_modules', 'vitest', 'vitest.mjs'),
+        `import { spawnSync } from 'node:child_process';\n` +
+          `import { existsSync, writeFileSync } from 'node:fs';\n` +
+          // A second start means the guard failed: stop here rather than recurse.
+          `if (existsSync(${JSON.stringify(started)})) process.exit(0);\n` +
+          `writeFileSync(${JSON.stringify(started)}, '');\n` +
+          `const inner = spawnSync(process.execPath, ['--experimental-strip-types', '--no-warnings', ${JSON.stringify(nested)}], { encoding: 'utf8' });\n` +
+          `writeFileSync(${JSON.stringify(record)}, JSON.stringify({ marker: process.env.FLOW_SELFTEST_ENGINE ?? null, nested: JSON.parse(inner.stdout) }));\n`
+      );
+      const outer = execFileSync(
+        process.execPath,
+        ['--experimental-strip-types', '--no-warnings', nested],
+        { encoding: 'utf8', env: { PATH: process.env.PATH ?? '' } }
+      );
+      expect(JSON.parse(outer)).toMatchObject({ id: 'engine-tests', status: 'pass' });
+      const seen = JSON.parse(readFileSync(record, 'utf8'));
+      expect(seen.marker).toBe('1');
+      expect(seen.nested).toMatchObject({ status: 'skip', detail: 'already inside a test run' });
+    } finally {
+      rmSync(root, { recursive: true, force: true });
     }
   });
 });
