@@ -28,6 +28,11 @@ export interface FlagSpec {
   readonly short?: string;
   /** Placeholder for the value in help, e.g. `N` renders `<N>`. Defaults to `value`. */
   readonly value?: string;
+  /**
+   * A `string` flag that may be given more than once. Every value lands in
+   * {@link ParsedArgs.repeated}, in order; {@link ParsedArgs.flags} holds the last.
+   */
+  readonly repeatable?: boolean;
   /** One plain sentence for help output. */
   readonly description: string;
 }
@@ -40,6 +45,8 @@ export interface PositionalSpec {
   readonly required?: boolean;
   /** One plain sentence for help output. */
   readonly description?: string;
+  /** The last positional only: it takes any number of values, none included. */
+  readonly variadic?: boolean;
 }
 
 /** The common flags a verb can opt into (the spec's common-flag table). */
@@ -72,6 +79,8 @@ export interface ParsedArgs {
    * string value, or `true` for a boolean flag.
    */
   readonly flags: Readonly<Record<string, string | true>>;
+  /** Every value of each repeatable flag given, in order. Absent when none was. */
+  readonly repeated?: Readonly<Record<string, readonly string[]>>;
   /** Whether `--json` was given. */
   readonly json: boolean;
 }
@@ -208,6 +217,7 @@ export function parseVerbArgs(
 ): ParsedArgs {
   const table = flagsFor(spec);
   const flags: Record<string, string | true> = {};
+  const repeated: Record<string, string[]> = {};
   const positionals: string[] = [];
   let json = false;
   let flagsEnded = false;
@@ -231,33 +241,38 @@ export function parseVerbArgs(
       continue;
     }
     if (flag.name === 'help') continue;
-    if (flag.name in flags) throw new UsageError(`--${flag.name} was given twice`);
+    if (flag.name in flags && !flag.repeatable) {
+      throw new UsageError(`--${flag.name} was given twice`);
+    }
 
     if (flag.kind === 'boolean') {
       if (inlineValue !== undefined) throw new UsageError(`--${flag.name} takes no value`);
       flags[flag.name] = true;
       continue;
     }
-    if (inlineValue !== undefined) {
-      flags[flag.name] = inlineValue;
-      continue;
+    let value = inlineValue;
+    if (value === undefined) {
+      const next = argv[i + 1];
+      if (next === undefined || i + 1 === location.index || looksLikeFlag(next)) {
+        throw new UsageError(`--${flag.name} needs a value`);
+      }
+      value = next;
+      i += 1;
     }
-    const next = argv[i + 1];
-    if (next === undefined || i + 1 === location.index || looksLikeFlag(next)) {
-      throw new UsageError(`--${flag.name} needs a value`);
-    }
-    flags[flag.name] = next;
-    i += 1;
+    flags[flag.name] = value;
+    if (flag.repeatable) (repeated[flag.name] ??= []).push(value);
   }
 
   checkPositionals(positionals, spec);
-  return { verb: spec.name, positionals, flags, json };
+  return Object.keys(repeated).length > 0
+    ? { verb: spec.name, positionals, flags, repeated, json }
+    : { verb: spec.name, positionals, flags, json };
 }
 
 /** Enforce the verb's positional count: every required one present, none extra. */
 function checkPositionals(positionals: readonly string[], spec: VerbSpec): void {
   const declared = spec.positionals ?? [];
-  if (positionals.length > declared.length) {
+  if (positionals.length > declared.length && !declared.at(-1)?.variadic) {
     throw new UsageError(
       `unexpected argument "${positionals[declared.length]}" for "flow ${spec.name}"`
     );

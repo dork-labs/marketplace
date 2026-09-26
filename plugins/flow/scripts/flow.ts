@@ -376,6 +376,41 @@ export const VERBS: readonly VerbDefinition[] = [
     load: () => import('./cli/pr.ts'),
   },
   {
+    name: 'watch',
+    summary: 'Wait until a watched pull request merges, closes, goes red or leaves the queue.',
+    description:
+      "Watch the named runs' pull requests (default: every run with one), plus any --pr. Prints one line per event: MERGED, CLOSED, FAILING: <checks>, EJECTED (innocent|suspect|unknown) or NOT-ARMED-NOT-QUEUED. Exits 0 on the first event unless --follow. Five failed reads in a row for one PR exit 4.",
+    common: ['project'],
+    positionals: [
+      {
+        name: 'identifier',
+        variadic: true,
+        description: 'Work items whose PRs to watch. Default: every run with a PR.',
+      },
+    ],
+    flags: [
+      {
+        name: 'pr',
+        kind: 'string',
+        value: 'owner/repo#n',
+        repeatable: true,
+        description: 'Also watch this pull request. Repeatable; needs no flow project.',
+      },
+      {
+        name: 'follow',
+        kind: 'boolean',
+        description: 'Keep watching after an event, until every PR merged or closed.',
+      },
+      {
+        name: 'interval',
+        kind: 'string',
+        value: 's',
+        description: 'Seconds between rounds. Default 90.',
+      },
+    ],
+    load: () => import('./cli/watch.ts'),
+  },
+  {
     name: 'usage',
     summary: "Record each Claude Code account's usage, or set up the status line to.",
     description: [

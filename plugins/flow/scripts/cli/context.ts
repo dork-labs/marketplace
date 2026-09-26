@@ -166,6 +166,11 @@ export interface VerbContext {
   io: HostIo;
   /** The forge for one repository (GitHub unless a test injects another). */
   forge(target: ForgeTarget): Forge;
+  /**
+   * Standard output, for a verb that prints as it goes (`flow watch --follow`).
+   * Every other verb returns its result instead.
+   */
+  stdout: TextSink;
 }
 
 /**
@@ -220,6 +225,7 @@ export function createVerbContext(
     forge: (target) =>
       deps.createForge?.(target) ??
       createGithubForge({ target, runProcess: deps.runProcess, now: () => deps.now() }),
+    stdout: deps.stdout,
   };
 }
 
