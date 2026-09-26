@@ -25,10 +25,20 @@
  * @module @dorkos/flow/fleet/accounts
  */
 
+import { randomBytes } from 'node:crypto';
+import {
+  chmodSync,
+  mkdirSync,
+  readFileSync,
+  renameSync,
+  rmSync,
+  statSync,
+  writeFileSync,
+} from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { readJsonFile, updateJsonFile, type AtomicUpdateResult } from '../atomic-json.ts';
-import { PreconditionError, UsageError } from '../errors.ts';
+import { ConfigError, PreconditionError, UsageError } from '../errors.ts';
 import { isValidAccountId, readWindow, type FleetWarning, type Instant } from './usage-ledger.ts';
 
 /** A display color: `#rrggbb`, lowercase. */
@@ -788,4 +798,145 @@ export function weeklyRoom(
  */
 export function modelRoom(windows: Windows, model: string, now: Instant): boolean | null {
   return roomIn(windows, `model:${model}`, now, 100);
+}
+
+/** What `flow accounts add` registers. */
+export interface NewIdentity {
+  /** The absolute `CLAUDE_CONFIG_DIR` (already `~`-expanded and checked by the caller). */
+  path: string;
+  /** The operator's name for it, or `null`. */
+  label: string | null;
+  /** `#rrggbb` (lowercase), or `null`. */
+  color: string | null;
+}
+
+/** What {@link addIdentity} did or, on a dry run, would do. */
+export interface AddIdentityResult {
+  /** The row written (all four keys). */
+  row: { id: string; path: string; label: string | null; color: string | null };
+  /** The file written. */
+  file: string;
+  /** Whether the file carries DorkOS's `__internal__` key (DorkOS manages it). */
+  dorkosManaged: boolean;
+  /** Whether the file was written (false on a dry run). */
+  written: boolean;
+}
+
+/** A path with its trailing separators removed, for comparing registered paths. */
+function normalizedPath(value: string): string {
+  const trimmed = value.replace(/(?<=.)[/\\]+$/, '');
+  return path.resolve(trimmed);
+}
+
+/**
+ * The indent a JSON file was written with, so a rewrite leaves every key it did
+ * not change byte-for-byte as it was: a tab (the `conf` default DorkOS uses),
+ * the first indented line's spaces, or two spaces for a new or one-line file.
+ */
+function detectIndent(text: string): string {
+  const match = /\n([ \t]+)\S/.exec(text);
+  return match === null ? '  ' : match[1];
+}
+
+/**
+ * Register an identity in `<dorkHome>/config.json` (spec §1.1a, `flow accounts
+ * add`). Reads the file fresh, appends one row with all four keys to
+ * `runtimes.claudeCode.accounts`, and changes nothing else: every other key keeps
+ * its value and, when the file was written with one indent style, its bytes.
+ * Writes a temp file and renames it over, keeping the file's mode (a new file is
+ * `0600`). Never writes any routing policy, so the new account starts kept out.
+ *
+ * DorkOS writes this file with `conf`, not the §1.2 lock, and re-reads it before
+ * each write of `runtimes.claudeCode` (spec §1.1a), so no lock is taken here.
+ *
+ * @param dorkHome - The resolved DorkOS home.
+ * @param identity - The account to add.
+ * @param opts - `dryRun` computes the row and writes nothing.
+ * @returns The row, the file and whether DorkOS manages it.
+ * @throws {PreconditionError} When the path is already registered.
+ * @throws {ConfigError} When the file exists but cannot be read as a JSON object.
+ */
+export function addIdentity(
+  dorkHome: string,
+  identity: NewIdentity,
+  opts: { dryRun?: boolean } = {}
+): AddIdentityResult {
+  const file = identityConfigPath(dorkHome);
+  let text: string | null = null;
+  let mode = 0o600;
+  try {
+    text = readFileSync(file, 'utf8');
+    mode = statSync(file).mode & 0o777;
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error;
+  }
+  let config: Record<string, unknown> = {};
+  if (text !== null && text.trim() !== '') {
+    let parsed: unknown;
+    try {
+      parsed = JSON.parse(text);
+    } catch {
+      parsed = undefined;
+    }
+    if (!isObject(parsed)) {
+      throw new ConfigError(
+        `${file} is not a JSON object, so flow did not change it. Fix or move it, then retry.`
+      );
+    }
+    config = parsed;
+  }
+
+  const runtimes = isObject(config.runtimes) ? config.runtimes : undefined;
+  const claudeCode =
+    runtimes !== undefined && isObject(runtimes.claudeCode) ? runtimes.claudeCode : undefined;
+  const rows =
+    claudeCode !== undefined && Array.isArray(claudeCode.accounts) ? claudeCode.accounts : [];
+  if (
+    claudeCode !== undefined &&
+    claudeCode.accounts !== undefined &&
+    !Array.isArray(claudeCode.accounts)
+  ) {
+    throw new ConfigError(
+      `runtimes.claudeCode.accounts in ${file} is not a list, so flow did not change it. Fix it, then retry.`
+    );
+  }
+
+  const { accounts } = readIdentities(config);
+  const wanted = normalizedPath(identity.path);
+  const existing = accounts.find((account) => normalizedPath(account.path) === wanted);
+  if (existing !== undefined) {
+    throw new PreconditionError(`${identity.path} is already registered as "${existing.id}".`);
+  }
+
+  // Reserve every id the file already holds, minted ones included, exactly as
+  // readIdentities (and DorkOS) would read them.
+  const taken = new Set(accounts.map((account) => account.id));
+  for (const row of rows) {
+    if (isObject(row) && typeof row.id === 'string' && row.id.length > 0) taken.add(row.id);
+  }
+  const id = mintAccountId({ label: identity.label, path: identity.path, taken });
+  const row = { id, path: identity.path, label: identity.label, color: identity.color };
+  const dorkosManaged = Object.hasOwn(config, '__internal__');
+  if (opts.dryRun) return { row, file, dorkosManaged, written: false };
+
+  const next: Record<string, unknown> = {
+    ...config,
+    runtimes: {
+      ...(runtimes ?? {}),
+      claudeCode: { ...(claudeCode ?? {}), accounts: [...rows, row] },
+    },
+  };
+  const indent = text === null ? '  ' : detectIndent(text);
+  const trailing = text === null || text.endsWith('\n') ? '\n' : '';
+  mkdirSync(dorkHome, { recursive: true, mode: 0o700 });
+  const tmp = `${file}.${process.pid}.${randomBytes(8).toString('hex')}.tmp`;
+  try {
+    writeFileSync(tmp, `${JSON.stringify(next, null, indent)}${trailing}`, { flag: 'wx', mode });
+    chmodSync(tmp, mode);
+    renameSync(tmp, file);
+  } catch (error) {
+    rmSync(tmp, { force: true });
+    throw error;
+  }
+  return { row, file, dorkosManaged, written: true };
 }

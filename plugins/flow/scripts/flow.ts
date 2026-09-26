@@ -89,6 +89,78 @@ export const VERBS: readonly VerbDefinition[] = [
     ],
     load: () => import('./cli/next.ts'),
   },
+  {
+    name: 'accounts',
+    summary: 'List the accounts flow may spend, add one, or set how flow routes work to them.',
+    description: [
+      'flow accounts [list]: every account with its role, reserve and room, and the fleet handoff.',
+      'flow accounts add --path <dir> [--label <text>] [--color <#rrggbb>]: register an account. It starts kept out.',
+      'flow accounts set <id> [--role] [--reserve] [--spend-down-hours] [--repos]: set one account\'s policy. "default" clears a field.',
+      'flow accounts set --handoff auto|ask|default: set the fleet-wide handoff.',
+      'Reads and writes <dorkHome> (DORK_HOME, else ~/.dork); needs no tracker and no project config.',
+    ].join('\n'),
+    common: ['dry-run'],
+    positionals: [
+      { name: 'action', description: 'list (default), add or set.' },
+      { name: 'id', description: 'The account id, for set.' },
+    ],
+    flags: [
+      {
+        name: 'path',
+        kind: 'string',
+        value: 'dir',
+        description: "add: the account's CLAUDE_CONFIG_DIR.",
+      },
+      {
+        name: 'label',
+        kind: 'string',
+        value: 'text',
+        description: 'add: your name for the account.',
+      },
+      { name: 'color', kind: 'string', value: '#rrggbb', description: 'add: its display color.' },
+      {
+        name: 'role',
+        kind: 'string',
+        value: 'main|rotation|kept-out',
+        description: 'set: how flow may spend it.',
+      },
+      {
+        name: 'reserve',
+        kind: 'string',
+        value: '0-100',
+        description: 'set: share of the 7-day window kept for you.',
+      },
+      {
+        name: 'spend-down-hours',
+        kind: 'string',
+        value: 'n',
+        description: 'set: hours before the 7-day reset when the reserve drops to 0.',
+      },
+      {
+        name: 'repos',
+        kind: 'string',
+        value: 'owner/name,...|none',
+        description: 'set: the only repos a kept-out account may serve.',
+      },
+      {
+        name: 'handoff',
+        kind: 'string',
+        value: 'auto|ask',
+        description: 'set (no id): move work off a spent account on its own, or ask first.',
+      },
+    ],
+    load: () => import('./cli/accounts.ts'),
+  },
+  {
+    name: 'status',
+    summary: 'Show what is in flight, what is parked, the drain, the pause and any drift.',
+    description:
+      'Joins the run records, the drain sentinel, the pause and the backlog. Drift is a running run whose item is not started, a claimed item with no run, a run whose worker is gone, or a STATE-n breach on an in-flight item. With an identifier: that item only, plus its last parked question.',
+    common: ['project', 'snapshot'],
+    positionals: [{ name: 'identifier', description: 'Show only this item.' }],
+    flags: [{ name: 'strict', kind: 'boolean', description: 'Exit 1 when there is drift.' }],
+    load: () => import('./cli/status.ts'),
+  },
 ];
 
 /** The plugin folder, `<flow-root>`: the parent of `scripts/`. */
