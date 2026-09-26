@@ -113,7 +113,8 @@ Source mapping is the contract table (S1 §1.2 "Mapping each source"), unchanged
 
 **The dedupe stamp.** When the hook (§2.2) sets `FLOW_USAGE_STAMP` and `FLOW_USAGE_FP`:
 
-- After the writer returns without giving up (changed or unchanged), write `FLOW_USAGE_FP` + `\n` to `FLOW_USAGE_STAMP`: temp file + rename, mode `0600`.
+- Write `FLOW_USAGE_FP` + `\n` to `FLOW_USAGE_STAMP` (temp file + rename, mode `0600`) when the run is settled: the writer returned without giving up (changed or unchanged), **or** there was nothing to record (no matching account, no valid window). Otherwise an unregistered config dir would start Node on every render.
+- **Only a faithful fingerprint is stamped.** The stamp is written only when `JSON.parse(fp.slice(1) + "}}")` (the fingerprint without its leading `:`, closed again) deep-equals `payload.rate_limits`. A fingerprint the hook cut short, for example because a future window holds a nested object, fails that check, is never stamped, and so can never hide a change: the reading is recorded on every render instead. (When `rate_limits` is absent the hook never starts Node, so the no-window stamp is only written for a `rate_limits` that holds no valid window.)
 - The stamp path is honored only when its parent is exactly `<dorkHome>/usage` and its basename starts with `.statusline-`. Otherwise it is ignored, so an environment variable can never make `record` write anywhere else.
 - A write the writer dropped leaves the stamp alone, so the next render retries.
 
@@ -147,6 +148,7 @@ exit 0
 - **Dedupe.** The status line re-renders several times a second while a session streams. Starting Node each time would cost about 50 ms of CPU per render across every session. The fingerprint is the text of the `rate_limits` object up to its closing `}}`, so Node starts only when a reading changed.
 - **The fingerprint errs toward recording.**
   - JSON with whitespace, a multi-line object or no `}}` makes the fingerprint longer or unreadable as one line, so it never matches and the reading is recorded (merge makes a repeat harmless).
+  - A fingerprint cut short inside `rate_limits` (a nested object in some future window) is never stamped, because `record` stamps only a fingerprint that parses back to the whole `rate_limits` object (§2.1).
   - It can only wrongly match when two config dirs sanitize to one stamp name (for example `/a/b` and `/a_b`) _and_ carry byte-identical `rate_limits`, reset times included. That costs one skipped reading equal to one already stored, and is accepted.
 - **The stamp is written by `record`**, after a successful merge, not by the hook. A dropped write is retried on the next render.
 
@@ -227,6 +229,7 @@ exit 0
 **`parseResetText(text, observedAt, key)`**, pure, no npm package:
 
 - Pattern: `resets (?:(Jan|Feb|…|Dec) (\d{1,2}) at )?(\d{1,2})(?::(\d{2}))?(am|pm) \(([^)]+)\)`.
+- Hours are 12-hour clock: `12am` is hour 0, `12pm` is hour 12, `1am`–`11am` are 1–11, `1pm`–`11pm` are 13–23. Real hits include `12:50am`, `12pm` and `at 12am`.
 - The zone is the IANA name in parentheses. An unknown zone (`Intl` throws `RangeError`) → `null`.
 - **With a date:** that wall time in that zone, in the year of `observedAt` in that zone. If the result is more than 1 day before `observedAt`, use the next year (a hit on Dec 30 that resets Jan 2).
 - **Without a date:** the first instant strictly after `observedAt` whose wall time in that zone is that time.
@@ -257,7 +260,7 @@ exit 0
 **Running it** (with `--yes`):
 
 - **Binary:** `--claude <path>`, else `FLOW_CLAUDE_BIN`, else `claude` on `PATH`. Not found: exit 3, naming what was tried.
-- **Environment:** the current one, with `CLAUDE_CONFIG_DIR=<account path>`, and with these removed so the turn bills that account's own sign-in and nothing else: `ANTHROPIC_API_KEY`, `ANTHROPIC_AUTH_TOKEN`, `CLAUDE_CODE_OAUTH_TOKEN`, `ANTHROPIC_BASE_URL`, `CLAUDE_CODE_USE_BEDROCK`, `CLAUDE_CODE_USE_VERTEX`, `CLAUDE_CODE_USE_FOUNDRY`. flow reads none of these values; it only leaves them out.
+- **Environment:** the current one, with `CLAUDE_CONFIG_DIR=<account path>` — except when the account's realpath equals the realpath of `<os home>/.claude`: then `CLAUDE_CONFIG_DIR` is **removed**. Claude Code 2.1.282 names its stored sign-in differently when the variable is set, even to the default folder, so setting it would read the default account as signed out. With that, and with these removed so the turn bills that account's own sign-in and nothing else: `ANTHROPIC_API_KEY`, `ANTHROPIC_AUTH_TOKEN`, `CLAUDE_CODE_OAUTH_TOKEN`, `ANTHROPIC_BASE_URL`, `CLAUDE_CODE_USE_BEDROCK`, `CLAUDE_CODE_USE_VERTEX`, `CLAUDE_CODE_USE_FOUNDRY`. flow reads none of these values; it only leaves them out.
 - **Arguments** (an array, never a shell): `-p "Reply with the single word OK." --model <model> --output-format stream-json --verbose --tools "" --strict-mcp-config --no-session-persistence --settings {"disableAllHooks":true}`. `--model` defaults to `haiku`.
 - **Never `--bare`:** bare mode signs in with an API key only, so it would not read the account's subscription limits.
 - **cwd:** a fresh `mkdtemp` folder, removed afterwards, so no project instructions load.
@@ -294,14 +297,14 @@ exit 0
 1. **Claude Code session files.**
    - For each account with a valid id, every `<path>/sessions/*.json` (not recursive). A file needs a number `pid` and a string `sessionId`; the rest is optional (`cwd`, `status`, `startedAt`, `procStart`, `name`). Anything else is skipped, with a warning.
    - **Alive** = `process.kill(pid, 0)` succeeds or fails with `EPERM`.
-   - Then one `ps -o pid=,lstart= -p <pid,…>` call: a pid whose `lstart` differs from the file's `procStart` (when both exist) was reused, and counts as dead. If `ps` fails, the kill check stands. Dead sessions are not shown.
+   - Then one `ps -o pid=,lstart= -p <pid,…>` call, run with `TZ=UTC LC_ALL=C` in its environment: Claude Code writes `procStart` in UTC and the C locale (`Fri Sep 25 22:57:30 2026`), while a bare `ps` prints local time in the user's locale. Both strings are trimmed and runs of spaces collapsed to one (`ps` pads single-digit days). A pid whose `lstart` then differs from `procStart` (when both exist) was reused, and counts as dead. If `ps` fails, the kill check stands. Dead sessions are not shown.
 2. **DorkOS.**
    - `GET <url>/api/sessions?limit=500`, 1.5 s timeout. `<url>` = `--dorkos-url`, else `FLOW_DORKOS_URL`, else `http://127.0.0.1:<DORKOS_PORT or 4242>`.
    - The host must be `127.0.0.1`, `localhost` or `::1`. Any other host: exit 2, so fleet never sends a request off the machine.
    - Connection refused: the note `DorkOS: not running at <url>` (not a warning). A non-2xx answer (for example 401 with sign-in on): a warning naming the status.
    - Kept: sessions with a `status` (this server holds them live), or whose `trackerItem.runStatus` is `queued`, `running` or `waiting_for_review`.
    - Account: `accountId`, else the identity whose path equals `account`, else `null`.
-   - A DorkOS release before S4 D7/D8 returns no `status` and no `trackerItem`, so it contributes no rows. The note then reads `DorkOS: running, but it does not report live sessions yet`.
+   - A DorkOS release before S4 D7/D8 returns no `status` and no `trackerItem`, so it contributes no rows, exactly like a newer one with nothing live. Both read the same, so the note says only what is known: `DorkOS: running at <url>, no live sessions` when it kept no rows, and nothing when it kept some. The DorkOS release note for D7/D8 is where a person learns which release reports live sessions.
 3. **flow run records.**
    - The main checkouts are those of `--project` (default cwd) and of every distinct `cwd` from sources 1 and 2.
    - Each is found with `git -C <cwd> rev-parse --path-format=absolute --git-common-dir`, whose parent is the main checkout: one call per distinct cwd, at most 8 at once, 2 s timeout each. A failure means no checkout.
@@ -417,7 +420,7 @@ DorkOS: not running at http://127.0.0.1:4242
   "dorkos": {
     "url": "http://127.0.0.1:4242",
     "reachable": false,
-    "reportsLive": null,
+    "sessionsShown": 0,
   },
   "warnings": ["…"],
 }
@@ -473,7 +476,7 @@ Each test carries a purpose comment and is shown to fail against a broken implem
 
 - `statusline/`: `full.json` (both windows, epoch `resets_at`), `iso-resets.json`, `no-rate-limits.json` (before the first response), `partial.json` (`seven_day` without `used_percentage`), `extra-window.json` (`seven_day_opus`), `bad-values.json` (string, 140, −5, a key failing the pattern), `pretty.json` (multi-line), `not-json.txt`.
 - `transcripts/`: `structured.jsonl` (a `quotaLimits` five_hour hit and a seven_day hit, shaped like the 2.1.280 entry), `text-only.jsonl` (the session text with a time, the weekly text with a date, the weekly text without a date), `model-limit.jsonl` (the Fable text), `decoy.jsonl` (a user message quoting `"error":"rate_limit"`; an ordinary assistant line), `broken.jsonl` (a torn line between two hits).
-- `sessions/`: session files with `busy`, `idle`, `shell`; one with a dead pid; one with a reused pid (`procStart` mismatch); one missing `sessionId`.
+- `sessions/`: session files with `busy`, `idle`, `shell`; one with a dead pid; one with a reused pid (`procStart` mismatch); one whose `procStart` is a real UTC value with a single-digit day, checked against a stubbed `ps` that prints `lstart` padded (`Sat Sep  5 22:57:30 2026`) so it matches; one missing `sessionId`.
 - `dorkos/`: a `GET /api/sessions` body with D7/D8 fields, and one from a release without them.
 - `flow-state.json` with running, review, complete and linked runs.
 
@@ -484,6 +487,7 @@ Each test carries a purpose comment and is shown to fail against a broken implem
 - **`parseResetText`:**
   - Time only, rolling past midnight.
   - Date with year rollover (observed Dec 30, resets Jan 2).
+  - `12:50am`, `12pm` and `Sep 18 at 12am` give hours 0, 12 and 0.
   - The repeated hour on 2026-11-01 in America/Chicago takes the earlier instant; the skipped hour on 2027-03-14 gives null.
   - An unknown zone gives null; a result outside the sanity bound gives null.
 - **`accountForConfigDir`:** unset `CLAUDE_CONFIG_DIR` → `~/.claude`; a trailing slash; a symlinked dir matching its target; an invalid-id row never matches; the first of two matches wins.
@@ -493,6 +497,7 @@ Each test carries a purpose comment and is shown to fail against a broken implem
 **Verb tests** (`main(argv, deps)`, temp `DORK_HOME`, fake runner).
 
 - **`record`:**
+  - No matching account, and a `rate_limits` with no valid window, both write the stamp; a fingerprint cut short (a nested object in a window) is never stamped.
   - Writes both windows with `resetsAt`, and stdout stays empty. (DOR-2369 validation 1.)
   - An unregistered dir, bad JSON or a TTY writes nothing.
   - A dropped write leaves the stamp unwritten.
