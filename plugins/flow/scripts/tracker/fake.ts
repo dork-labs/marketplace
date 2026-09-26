@@ -1,6 +1,6 @@
 /**
  * The fake tracker: an in-memory tracker behind the code-adapter contract
- * (adapter contract 1.4.0), for flow's self-test scenarios and live evals
+ * (adapter contract 2.1.0), for flow's self-test scenarios and live evals
  * (spec `specs/flow-self-improvement` §1, DOR-2390).
  *
  * It is not a mock that says yes. Where flow depends on how a real tracker
@@ -45,7 +45,7 @@ import type {
 import { ALL_CAPABILITIES } from './types.ts';
 
 /** The adapter contract version the fake implements. */
-export const FAKE_CONTRACT_VERSION = '1.4.0';
+export const FAKE_CONTRACT_VERSION = '2.1.0';
 
 /** The environment variable naming the JSON file a spawned run's fake tracker reads and writes. */
 export const FAKE_BACKLOG_ENV = 'FLOW_FAKE_BACKLOG';
@@ -116,6 +116,8 @@ export interface FakeBacklog {
   items: WorkItem[];
   /** Closed items known only by title (seeded history). */
   closed?: ClosedItem[];
+  /** When each closed item in `items` closed (ISO), by identifier; the fake records it on every close. */
+  closedAt?: Record<string, string>;
   /** Projects the items may reference. */
   projects?: WorkItemProject[];
   /** Comments per item identifier, oldest first. */
@@ -270,11 +272,19 @@ export class FakeTracker {
       const done = landingState('completed');
       item.stateCategory = done.category;
       item.stateName = done.name;
+      this.recordClose(item);
       closed.push(item.identifier);
       this.writes.push({ method: 'mergePr', identifier: item.identifier });
     }
     if (closed.length > 0) this.persist(this.backlog);
     return closed;
+  }
+
+  /** Record when an item closed, or forget it when the item is open again. */
+  private recordClose(item: WorkItem): void {
+    const dates = (this.backlog.closedAt ??= {});
+    if (isOpen(item.stateCategory)) delete dates[item.identifier];
+    else dates[item.identifier] = this.now().toISOString();
   }
 
   /** Throw when reads are switched off (an unreachable tracker). */
@@ -353,11 +363,15 @@ export class FakeTracker {
     const open = own.filter((item) => isOpen(item.stateCategory));
     const closedNow: ClosedItem[] = own
       .filter((item) => !isOpen(item.stateCategory))
-      .map((item) => ({
-        identifier: item.identifier,
-        title: item.title,
-        stateCategory: item.stateCategory as 'completed' | 'canceled',
-      }));
+      .map((item) => {
+        const closedAt = this.backlog.closedAt?.[item.identifier];
+        return {
+          identifier: item.identifier,
+          title: item.title,
+          stateCategory: item.stateCategory as 'completed' | 'canceled',
+          ...(closedAt === undefined ? {} : { closedAt }),
+        };
+      });
     const referenced = new Set(open.flatMap((item) => (item.project ? [item.project.id] : [])));
     return {
       v: 1,
@@ -401,6 +415,7 @@ export class FakeTracker {
       const state = landingState(change.stateCategory);
       current.stateCategory = state.category;
       current.stateName = state.name;
+      this.recordClose(current);
     }
     this.writes.push({
       method: 'applyWorkState',

@@ -1,5 +1,5 @@
 /**
- * One behavioral contract suite for code adapters (adapter contract 1.4.0),
+ * One behavioral contract suite for code adapters (adapter contract 2.1.0),
  * run against the fake tracker AND the real Linear adapter over a stateful,
  * Linear-shaped simulator built from recorded answers.
  *

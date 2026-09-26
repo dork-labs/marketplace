@@ -10,7 +10,9 @@
 
 import { createHash } from 'node:crypto';
 
-/** The self-test tiers. Only `fast` runs today; the others arrive with the `flow` CLI. */
+import { renderFiling, type FilingResult } from './file.ts';
+
+/** The self-test tiers. `fast` and `scenarios` run today; `live` is not built yet. */
 export type Tier = 'fast' | 'scenarios' | 'live';
 
 /** A check's outcome. A `skip` is never a pass. */
@@ -60,6 +62,8 @@ export interface SelftestReport {
   checks: Check[];
   /** The totals. */
   totals: Totals;
+  /** What `--file` did, when it was asked for. */
+  filing?: FilingResult;
 }
 
 /**
@@ -139,6 +143,7 @@ export function renderText(report: SelftestReport): string {
     lines.push('', 'Passed:');
     for (const c of passed) lines.push(`  ok    ${c.id}${c.detail === '' ? '' : `: ${c.detail}`}`);
   }
+  if (report.filing !== undefined) lines.push(...renderFiling(report.filing));
   const { pass, fail, skip, ms } = report.totals;
   lines.push('', `${pass} passed, ${fail} failed, ${skip} skipped in ${(ms / 1000).toFixed(1)}s`);
   return `${lines.join('\n')}\n`;

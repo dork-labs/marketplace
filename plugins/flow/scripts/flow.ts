@@ -417,6 +417,34 @@ export const VERBS: readonly VerbDefinition[] = [
   },
   noteVerb,
   journalVerb,
+  {
+    name: 'selftest',
+    summary: 'Check this flow install, its prose, and how its commands behave.',
+    description:
+      'Runs the fast checks (config, adapter conformance, the prose rules) and the scenarios (the flow commands against a fake tracker, in a temp folder). Saves the report to .dork/flow/selftest/. Exits 1 when a check fails, or with --strict when one is skipped.',
+    common: ['project'],
+    flags: [
+      {
+        name: 'tier',
+        kind: 'string',
+        value: 'fast|scenarios',
+        description: 'Run only this tier. Default: both.',
+      },
+      { name: 'strict', kind: 'boolean', description: 'A skipped check fails the run.' },
+      {
+        name: 'file',
+        kind: 'boolean',
+        description: 'Turn each failure into tracker work, once; the report says what it did.',
+      },
+      { name: 'no-save', kind: 'boolean', description: 'Do not write .dork/flow/selftest/.' },
+      {
+        name: 'rebaseline',
+        kind: 'boolean',
+        description: "Lower the prose word budgets to today's counts, then stop.",
+      },
+    ],
+    load: () => import('./cli/selftest.ts'),
+  },
 ];
 
 /** The plugin folder, `<flow-root>`: the parent of `scripts/`. */
@@ -524,8 +552,11 @@ const createCodeAdapter: AdapterFactory = async (request) => {
   return load.createCodeAdapter(request);
 };
 
+// Not a top-level await: `flow selftest` runs scenarios that import this module
+// for `main`, and a module still awaiting its own evaluation would make that
+// import wait forever (Node exits 13).
 if (invokedDirectly(import.meta.url)) {
-  process.exitCode = await main(process.argv.slice(2), {
+  void main(process.argv.slice(2), {
     env: process.env,
     cwd: process.cwd(),
     now: () => new Date(),
@@ -533,5 +564,7 @@ if (invokedDirectly(import.meta.url)) {
     stderr: process.stderr,
     createAdapter: createCodeAdapter,
     runProcess: realProcessRunner,
+  }).then((code) => {
+    process.exitCode = code;
   });
 }

@@ -4,7 +4,7 @@ Installs of this plugin are pinned to a commit SHA, so a fix here does not reach
 you until you **reinstall it** (Marketplace → flow → reinstall, or re-run your
 `--plugin-dir` checkout's `git pull`). Each entry below says whether that matters.
 
-## 0.22.0
+## 0.23.0
 
 **flow now tracks accounts and usage for Claude Code, Codex and OpenCode, not only Claude Code. Reinstall, then run `flow accounts` once.**
 
@@ -16,6 +16,16 @@ you until you **reinstall it** (Marketplace → flow → reinstall, or re-run yo
 - Usage files can now hold a plan, prepaid credits and money spent, so a pay-as-you-go account counts as usable until it hits its spending cap. A local model with no limits is always usable.
 - `flow claim` records which runtime the session runs on (`--runtime` to say it yourself), and finds the session id under Codex as well as Claude Code. **A claim with no session id now stops with an error** instead of going ahead: pass `--session` (OpenCode does not provide one).
 - The shared test files DorkOS checks itself against are now version 2.0.0. This version is not compatible with 1.x.
+
+## 0.22.0
+
+**`flow selftest` now also checks how flow's commands behave, not only its files. Reinstall to get it.**
+
+- New `flow selftest` command (and `/flow:self-test` now runs it). Besides the quick checks of your settings and flow's own instructions, it plays whole pieces of work through the real commands against a pretend tracker in a throwaway folder: an item going from new to done, a backlog audit, recovering work whose session died, and deciding which comments to answer. It is free, needs no network and takes a few seconds. `--tier fast` or `--tier scenarios` runs just one half.
+- The item-to-done check runs twice, once as a Claude Code session and once as a Codex one, and checks that flow's notebook records each as the right one.
+- `--file` looks for an item it filed before for each failure. It adds a comment to an open one, leaves alone one a person closed as not wanted in the last 90 days, and files again one that was fixed but broke later. flow cannot create tracker items yet, so it lists the ones it would file (with the labels and project from `selfImprovement.retro`) instead of filing them.
+- The Linear adapter now reports when each closed item was closed, which is what lets `--file` tell a recent decision from an old one. The adapter contract is now version 2.1.0; adapters written for 2.0.0 keep working.
+- Each run adds one line to flow's notebook (`.dork/flow/journal.jsonl`), even with `--no-save`, unless the notebook is turned off.
 
 ## 0.21.0
 

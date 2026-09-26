@@ -1,6 +1,6 @@
 /**
  * Find a tracker adapter's code and build it for one CLI run (spec
- * `flow-cli-core` §4, adapter contract 1.4.0 "The code realization").
+ * `flow-cli-core` §4, adapter contract since 1.4.0, "The code realization").
  *
  * - The code is `adapter.ts` in the same folder as the adapter `SKILL.md` that
  *   `config-files.ts` resolves (a project adapter under
@@ -115,7 +115,7 @@ export async function loadCodeAdapter(options: LoadCodeAdapterOptions): Promise<
     !/^\d+\.\d+\.\d+/.test(module.CONTRACT_VERSION)
   ) {
     throw new ConfigError(
-      `the ${tracker} adapter code at ${file} must export CONTRACT_VERSION, the adapter contract version it targets (for example "2.0.0")`
+      `the ${tracker} adapter code at ${file} must export CONTRACT_VERSION, the adapter contract version it targets (for example "2.1.0")`
     );
   }
   if (typeof module.createAdapter !== 'function') {
