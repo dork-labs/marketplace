@@ -45,7 +45,8 @@ The registry is split by owner (operator direction, 2026-09-26). DorkOS core own
 - A file DorkOS never touched is valid: flow may create it as `{"runtimes":{"claudeCode":{"accounts":[…]}}}` with no other keys.
 - Readers ignore fields they do not know; writers preserve them.
 - A row with a missing or non-absolute `path` is skipped, with a warning.
-- A row with no `id` gets one at read time by the minting rule; a duplicate `id` keeps the first row and warns.
+- A row with no `id` (or an empty one) gets one at read time by the minting rule. Ids are minted over every object row in array order **before any row is skipped**, exactly as DorkOS `backfillMissingAccountIds` does: every id already present is reserved first, then each missing one is minted from `label` (when a string) and `path` (when a string, else `''`). Skipping first would shift later ids and the two sides would write different ledger files.
+- A duplicate `id` keeps the first row and warns.
 - A row whose `id` fails the pattern (a hand edit) is listed, with a warning, but has no usage file and cannot be routed: it reads as `kept-out` with `scope.repos: []`.
 - A `color` that fails the pattern reads as `null`, with a warning.
 - flow writes every row it creates with all four keys, `label` and `color` as `null` when not given, so DorkOS's schema (`label` nullable with no default) accepts it.
