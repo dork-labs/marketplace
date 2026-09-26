@@ -94,16 +94,16 @@ export const VERBS: readonly VerbDefinition[] = [
     name: 'accounts',
     summary: 'List the accounts flow may spend, add one, or set how flow routes work to them.',
     description: [
-      'flow accounts [list]: every account with its role, reserve and room, and the fleet handoff.',
-      'flow accounts add --path <dir> [--label <text>] [--color <#rrggbb>]: register an account. It starts kept out.',
-      'flow accounts set <id> [--role] [--reserve] [--spend-down-hours] [--repos]: set one account\'s policy. "default" clears a field.',
-      'flow accounts set --handoff auto|ask|default: set the fleet-wide handoff.',
+      'flow accounts [list]: every account of each runtime with its role, reserve and room, and the fleet settings. Drops the policy of an account no longer registered.',
+      'flow accounts add --path <dir> [--label <text>] [--color <#rrggbb>]: register a Claude Code account. It starts kept out.',
+      'flow accounts set <id> [--role] [--reserve] [--spend-down-hours] [--repos]: set one account\'s policy. <id> is a Claude Code id, or <runtime>:<id> (codex:default). "default" clears a field.',
+      'flow accounts set --handoff auto|ask | --runtimes <runtime,...> | --cross-runtime-fallback off|on: set one fleet-wide setting ("default" clears it).',
       'Reads and writes <dorkHome> (DORK_HOME, else ~/.dork); needs no tracker and no project config.',
     ].join('\n'),
     common: ['dry-run'],
     positionals: [
       { name: 'action', description: 'list (default), add or set.' },
-      { name: 'id', description: 'The account id, for set.' },
+      { name: 'id', description: 'The account, for set: <id> or <runtime>:<id>.' },
     ],
     flags: [
       {
@@ -149,6 +149,19 @@ export const VERBS: readonly VerbDefinition[] = [
         value: 'auto|ask',
         description: 'set (no id): move work off a spent account on its own, or ask first.',
       },
+      {
+        name: 'runtimes',
+        kind: 'string',
+        value: 'runtime,...',
+        description:
+          'set (no id): runtimes in order of preference. Default: the one each item started on.',
+      },
+      {
+        name: 'cross-runtime-fallback',
+        kind: 'string',
+        value: 'off|on',
+        description: 'set (no id): let work move to another runtime when its own is out.',
+      },
     ],
     load: () => import('./cli/accounts.ts'),
   },
@@ -166,7 +179,7 @@ export const VERBS: readonly VerbDefinition[] = [
     name: 'claim',
     summary: 'Start working an item: mark it claimed and record the run.',
     description:
-      'Start working an item. It must be open, carry agent/ready, not be claimed, and be claimable under the ownership settings. Moves it to started with agent/claimed and no stage/* label, then records the run in flow-state.json. Posts no comment.',
+      "Start working an item. It must be open, carry agent/ready, not be claimed, and be claimable under the ownership settings. Moves it to started with agent/claimed and no stage/* label, then records the run in flow-state.json. Posts no comment. Needs a session id: --session, FLOW_SESSION_ID, or the runtime's own.",
     common: ['project', 'dry-run', 'session', 'manual'],
     positionals: [{ name: 'identifier', required: true, description: 'The item, e.g. DOR-123.' }],
     flags: [
@@ -199,6 +212,12 @@ export const VERBS: readonly VerbDefinition[] = [
         kind: 'string',
         value: 'cli|dorkos|cmux',
         description: 'The launcher this session runs under.',
+      },
+      {
+        name: 'runtime',
+        kind: 'string',
+        value: 'claude-code|codex|opencode',
+        description: 'The runtime this session runs on. Default: the one running this command.',
       },
     ],
     load: () => import('./cli/claim.ts'),
@@ -315,13 +334,14 @@ export const VERBS: readonly VerbDefinition[] = [
   },
   {
     name: 'usage',
-    summary: "Record each Claude Code account's usage, or set up the status line to.",
+    summary: "Record each account's usage, clear out stale usage files, or set up the status line.",
     description: [
       'Sub-verbs:',
       '  record              Read the status-line JSON on stdin and save the readings (the status line runs this).',
       '  scan                Recover past limit hits from saved conversations.',
       '  probe <id>          Run one short official turn on an account to read its usage (needs --yes).',
       "  install-statusline  Add the two recorder lines to each account's status-line script (needs --yes).",
+      "  prune               Delete the usage files of accounts no longer registered (never a runtime's default).",
     ].join('\n'),
     common: ['dry-run'],
     flags: [
@@ -369,7 +389,7 @@ export const VERBS: readonly VerbDefinition[] = [
       },
     ],
     positionals: [
-      { name: 'sub-verb', description: 'record, scan, probe or install-statusline.' },
+      { name: 'sub-verb', description: 'record, scan, probe, install-statusline or prune.' },
       { name: 'id', description: 'probe: the account id.' },
     ],
     load: () => import('./cli/usage.ts'),

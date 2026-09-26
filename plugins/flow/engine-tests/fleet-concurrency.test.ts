@@ -81,7 +81,7 @@ describe('eight writers merging into one ledger', () => {
       child(
         `
         const { recordUsage } = await import(${JSON.stringify(LEDGER_URL)});
-        const result = await recordUsage(process.env.HOME_DIR, 'claude3', [{
+        const result = await recordUsage(process.env.HOME_DIR, 'claude-code', 'claude3', [{
           key: process.env.KEY, usedPct: 10, resetsAt: null, status: null,
           observedAt: '2026-09-26T16:00:00.000Z', source: 'statusline',
         }], '2026-09-26T16:00:01.000Z');
@@ -93,11 +93,15 @@ describe('eight writers merging into one ledger', () => {
     await openGate();
     const results = await Promise.all(runs);
     expect(results.map((r) => r.status)).toEqual(keys.map(() => 'written'));
-    const ledger = JSON.parse(readFileSync(path.join(dir, 'usage', 'claude3.json'), 'utf8')) as {
+    const ledger = JSON.parse(
+      readFileSync(path.join(dir, 'runtimes', 'claude-code', 'usage', 'claude3.json'), 'utf8')
+    ) as {
       windows: Record<string, unknown>;
     };
     expect(Object.keys(ledger.windows).sort()).toEqual(keys);
-    expect(readdirSync(path.join(dir, 'usage'))).toEqual(['claude3.json']);
+    expect(readdirSync(path.join(dir, 'runtimes', 'claude-code', 'usage'))).toEqual([
+      'claude3.json',
+    ]);
   }, 30_000);
 });
 

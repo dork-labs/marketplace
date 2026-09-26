@@ -1,6 +1,6 @@
 /**
- * The `flow usage` verb (spec `flow-usage` §2): one dispatcher for its four
- * sub-verbs. Each sub-verb lives in its own module and is loaded with
+ * The `flow usage` verb (spec `flow-usage` §2, `flow-cli-core` §6): one
+ * dispatcher for its five sub-verbs. Each sub-verb lives in its own module and is loaded with
  * `import()`, so `usage record` (run by the status line) never loads the scan,
  * probe or install code.
  *
@@ -34,11 +34,16 @@ const SUB_VERBS: Readonly<
     takesId: false,
     load: () => import('./usage-install.ts'),
   },
+  prune: {
+    flags: ['dry-run'],
+    takesId: false,
+    load: () => import('./usage-prune.ts'),
+  },
 };
 
 /** The sub-verb list, for usage errors. */
 const LIST =
-  'flow usage record | scan | probe <id> | install-statusline; run "flow usage --help" for details';
+  'flow usage record | scan | probe <id> | install-statusline | prune; run "flow usage --help" for details';
 
 /**
  * Dispatch to the sub-verb named by the first positional, after checking it

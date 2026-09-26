@@ -75,7 +75,7 @@ Six parts. Each one is host-agnostic: it works the same in the bare CLI, in Dork
 
 ### 4.2 A usage ledger per account
 
-- **Store:** one small file per account, `~/.dork/usage/<account-id>.json`. Each file holds the latest reading per window (`5h`, `7d`, `7d-opus`, `7d-sonnet`, and model buckets), with `usedPct`, `resetsAt`, `observedAt` and `source`.
+- **Store:** one small file per account, `~/.dork/usage/<account-id>.json` (since moved to `~/.dork/runtimes/<runtime>/usage/<account-id>.json`; see §10). Each file holds the latest reading per window (`5h`, `7d`, `7d-opus`, `7d-sonnet`, and model buckets), with `usedPct`, `resetsAt`, `observedAt` and `source`.
 - **Fed by every source we're allowed to read:**
   - **CLI:** a 2-line addition to the status line script: `flow usage record` pipes the status line JSON in. This is the one that finally keeps `resets_at`.
   - **DorkOS:** `rate_limit_event` and the per-turn usage call write to the same ledger, via a new server-side per-account store.
@@ -204,3 +204,18 @@ Still open:
 - **Determinism:** tested code in place of prose an agent re-reads and re-interprets.
 - **Fewer tokens:** one command in place of pages of instructions.
 - **Work while no agent is running:** the status line recorder and the dispatcher watch loop.
+
+## 10) Runtimes (operator direction, 2026-09-26)
+
+The operator runs flow from Claude Code, Codex and OpenCode (open-weight models) sessions, so everything flow records, reads and routes must work for every runtime. Only Claude Code has several accounts today; the others have one implicit account each for now. These decisions are binding; the contract is spec `flow-cli-core` §1 rev 6 (fleet fixture 2.0.0).
+
+- **R1. Accounts are per runtime.** An account is a billing identity of one runtime: a `CLAUDE_CONFIG_DIR` (Claude Code), a `CODEX_HOME` (Codex), a provider credential profile (OpenCode). The registry is read per runtime (`runtimes.claudeCode.accounts[]` today; `runtimes.codex` and `runtimes.opencode` later). A runtime with no registered account has one implicit account, `default`: the ambient environment. `fleet.json` keys are `<runtime>:<account-id>` with the same roles; an unlisted Claude Code account stays kept-out, and an implicit `default` is in rotation (keeping it out would block its runtime).
+- **R2. The usage ledger is per runtime.** `<dorkHome>/runtimes/<runtime>/usage/<account-id>.json`, with a required `runtime`. Windows may carry `windowMinutes`; Codex's `primary`/`secondary` are keyed by length (300 is `five_hour`, 10080 is `seven_day`, else `window:<minutes>`), and a Codex limit other than the main one becomes one `model:<slug>` bucket. Optional `plan`, `credits` and `spend` (metered accounts); newest reading wins for each. Error-only signals are `credits:<slug>` and `rate_limit:<slug>`. A metered account is eligible unless its spend cap is reached; a local-model account (no windows, no cap) is always eligible.
+- **R3. Writers by runtime, all official data.** Claude Code: the status line and transcript scan (CLI), the SDK event and usage call (DorkOS). Codex: its rollout files' `rate_limits` events (`flow usage scan --runtime codex`) and the same data from the Codex SDK in DorkOS. OpenCode: per-turn cost from the sidecar and the provider's key API with the user's own key (DorkOS); rate-limit and credit errors as rejections. `flow usage record` takes `--runtime`.
+- **R4. Runs and dispatch are runtime-aware.** `FlowRun` gains `runtime`. Candidates are (runtime, account) pairs. `fleet.runtimes` is an ordered preference (default: the runtime the item started on first); `fleet.crossRuntimeFallback` is `off` by default, and when on, a task whose runtime is out may continue on another from its checkpoint. Model fallback stays within a runtime.
+- **R5. Launchers are runtime-aware.** `Launcher.start({ runtime, account, … })`: `claude` with `CLAUDE_CONFIG_DIR`, `codex exec` or the Codex SDK with `CODEX_HOME`, `opencode run` with the provider profile, DorkOS `session_start` with both. An unsupported (host, runtime) pair is reported, not guessed; each runtime verifies the account its own way.
+- **R6. Wind-down.** Claude Code's PostToolUse hook is Claude-only; Codex and OpenCode use the supervisor's `wind-down` message until they have a native hook.
+- **R7. DorkOS UI.** Account chip, dots and badge only for a runtime that supports accounts and has two or more; usage bars for any runtime with ledger data; the out-of-usage banner for any runtime that reports a rejection; the picker lists the same runtime's accounts, others in a second group only with cross-runtime fallback on.
+- **R8. Lifecycle.** The ledger is overwrite-only and never grows; history goes to the journal as sampled `usage.snapshot` events. When an account leaves the registry, DorkOS deletes its ledger file, `flow usage prune` removes any left behind (never `default`), and `flow accounts` drops its `fleet.json` policy with a note. A reading past its reset is read as empty, never deleted early.
+- **R9. Who reads the ledger, when.** flow: every `flow next` and `flow drain` pass, `flow fleet` and `flow accounts`, and `flow retro` through the journal. DorkOS: a watch plus a periodic read of the folders, feeding its status chip, settings bars, banner, picker and account advisor, and its `account.usage` / `account.limited` / `account.reset` events.
+

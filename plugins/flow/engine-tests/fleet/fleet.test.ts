@@ -69,7 +69,7 @@ beforeEach(() => {
     v: 1,
     accounts: { claude2: { role: 'main' }, claude3: { role: 'rotation' } },
   });
-  writeJson(path.join(dorkHome, 'usage', 'claude2.json'), {
+  writeJson(path.join(dorkHome, 'runtimes', 'claude-code', 'usage', 'claude2.json'), {
     v: 1,
     accountId: 'claude2',
     updatedAt: at(-3 * M),
@@ -97,7 +97,7 @@ beforeEach(() => {
       },
     },
   });
-  writeJson(path.join(dorkHome, 'usage', 'claude3.json'), {
+  writeJson(path.join(dorkHome, 'runtimes', 'claude-code', 'usage', 'claude3.json'), {
     v: 1,
     accountId: 'claude3',
     updatedAt: at(-H),

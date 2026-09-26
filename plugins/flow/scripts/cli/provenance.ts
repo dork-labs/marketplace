@@ -18,6 +18,7 @@
 import path from 'node:path';
 
 import type { FlowRunProvenance } from '../flow-run.ts';
+import { runtimeSession } from './session-id.ts';
 
 /** The marker name every signature is emitted under. */
 export const PROVENANCE_MARKER = 'agent:provenance';
@@ -44,7 +45,7 @@ const WIRE_FIELDS = [
 export interface ProvenanceInput {
   /** Environment variables (`CLAUDECODE`, `CLAUDE_CONFIG_DIR`, `CI`). */
   env: Readonly<Record<string, string | undefined>>;
-  /** `--session`, else `FLOW_SESSION_ID`, else `CLAUDE_CODE_SESSION_ID`; absent when none was given. */
+  /** `--session`, else `FLOW_SESSION_ID`, else the runtime's own id; absent when none was given. */
   sessionId?: string;
   /** The launcher this session runs under, when known (`--host` or the run record). */
   launcher?: string;
@@ -53,14 +54,15 @@ export interface ProvenanceInput {
 }
 
 /**
- * The harness this process runs under. Only Claude Code marks its child
- * processes (`CLAUDECODE=1`); anything else is left out rather than guessed.
+ * The harness this process runs under, as `../runtime-detect.ts` reads the
+ * markers Claude Code, Codex and OpenCode set; anything else is left out rather
+ * than guessed.
  *
  * @param env - Environment variables.
- * @returns `claude-code`, or `undefined` when the harness cannot be told.
+ * @returns `claude-code`, `codex` or `opencode`, or `undefined` when the harness cannot be told.
  */
 function harnessFrom(env: ProvenanceInput['env']): string | undefined {
-  return env.CLAUDECODE === '1' ? 'claude-code' : undefined;
+  return runtimeSession(env).runtime ?? undefined;
 }
 
 /**

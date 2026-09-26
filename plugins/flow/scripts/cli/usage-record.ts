@@ -20,7 +20,7 @@ import { FlowError, UsageError } from '../errors.ts';
 import { loadIdentities, resolveDorkHome, type AccountIdentity } from '../fleet/accounts.ts';
 import { accountForConfigDir, defaultConfigDir } from '../fleet/config-dir.ts';
 import { fromStatusLine } from '../fleet/observations.ts';
-import { recordUsage } from '../fleet/usage-ledger.ts';
+import { ledgerDir, recordUsage } from '../fleet/usage-ledger.ts';
 import type { VerbContext, VerbResult } from './context.ts';
 
 /** Largest status-line payload read; more than this records nothing. */
@@ -54,13 +54,13 @@ export function fingerprintIsFaithful(fingerprint: string, rateLimits: unknown):
 
 /**
  * The stamp path the hook asked for, or `null` when it is not exactly
- * `<dorkHome>/usage/.statusline-*`. An environment variable can never make
+ * `<dorkHome>/runtimes/claude-code/usage/.statusline-*`. An environment variable can never make
  * `record` write anywhere else.
  */
 function allowedStampPath(requested: string | undefined, dorkHome: string): string | null {
   if (requested === undefined || requested === '') return null;
   const resolved = path.resolve(requested);
-  if (path.dirname(resolved) !== path.join(dorkHome, 'usage')) return null;
+  if (path.dirname(resolved) !== ledgerDir(dorkHome, 'claude-code')) return null;
   if (!path.basename(resolved).startsWith('.statusline-')) return null;
   return resolved;
 }
@@ -75,7 +75,7 @@ function writeStamp(stamp: string, fingerprint: string): void {
 
 /** The account `record` writes for, or `null`. */
 function targetAccount(ctx: VerbContext, dorkHome: string): AccountIdentity | null {
-  const { accounts } = loadIdentities(dorkHome);
+  const { accounts } = loadIdentities(dorkHome, 'claude-code');
   const flag = ctx.args.flags.account;
   if (typeof flag === 'string') {
     return accounts.find((account) => account.id === flag && account.routable) ?? null;
@@ -160,7 +160,7 @@ async function record(
   }
 
   outcome.account = account.id;
-  const result = await recordUsage(dorkHome, account.id, observations, now);
+  const result = await recordUsage(dorkHome, 'claude-code', account.id, observations, now);
   for (const warning of result.warnings) say(warning.message);
   if (result.status === 'dropped') {
     // The next render retries: the stamp stays as it was.

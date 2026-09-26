@@ -13,8 +13,13 @@
  * that checks the item through the run record, so two claims on one machine run
  * one after the other: the second reads `agent/claimed` and exits 5. The run
  * store's own lock is taken only for the short run write, so other verbs'
- * writes never wait out a claim's tracker calls. A claim with no
- * session id records `sessionId: ""` (unknown, never invented) and warns.
+ * writes never wait out a claim's tracker calls.
+ *
+ * The run records the session id and the runtime. A claim with no session id
+ * (no `--session`, no `FLOW_SESSION_ID`, and a runtime that gives none) is
+ * refused (exit 5): recovery cannot resume a session it cannot name. The
+ * runtime is `--runtime`, else the one `./session-id.ts` finds, else left
+ * out.
  *
  * @module @dorkos/flow/cli/claim
  */
@@ -29,6 +34,8 @@ import type { CodeAdapter, WorkItem } from '../tracker/types.ts';
 import { AGENT_CLAIMED, AGENT_READY, projectionFor } from '../work-state.ts';
 import type { VerbContext, VerbResult } from './context.ts';
 import { LAUNCHERS } from './provenance.ts';
+import { RUNTIMES } from '../fleet/usage-ledger.ts';
+import { runtimeSession } from './session-id.ts';
 import {
   applyAndVerify,
   currentStageLabel,
@@ -122,9 +129,15 @@ export async function run(ctx: VerbContext): Promise<VerbResult> {
   if (typeof launcher === 'string' && !(LAUNCHERS as readonly string[]).includes(launcher)) {
     throw new UsageError(`--host must be one of ${LAUNCHERS.join(', ')}, not "${launcher}"`);
   }
-  if (ctx.sessionId === undefined) {
-    ctx.warn(
-      'no session id: the run records it as unknown, so recovery cannot resume this session; pass --session <id> or set FLOW_SESSION_ID (Claude Code sets CLAUDE_CODE_SESSION_ID itself)'
+  const runtimeFlag = ctx.args.flags.runtime;
+  if (typeof runtimeFlag === 'string' && !(RUNTIMES as readonly string[]).includes(runtimeFlag)) {
+    throw new UsageError(`--runtime must be one of ${RUNTIMES.join(', ')}, not "${runtimeFlag}"`);
+  }
+  const runtime = typeof runtimeFlag === 'string' ? runtimeFlag : runtimeSession(ctx.env).runtime;
+  const sessionId = ctx.sessionId;
+  if (sessionId === undefined) {
+    throw new PreconditionError(
+      `no session id, so recovery could not resume this session: pass --session <id> or set FLOW_SESSION_ID (Claude Code sets CLAUDE_CODE_SESSION_ID and Codex sets CODEX_THREAD_ID on their own; OpenCode sets none)`
     );
   }
 
@@ -166,7 +179,7 @@ export async function run(ctx: VerbContext): Promise<VerbResult> {
       const record: FlowRun = {
         issueId: item.id,
         identifier: item.identifier,
-        sessionId: ctx.sessionId ?? '',
+        sessionId,
         worktreePath,
         branch,
         stage: stageForLabel(stages, removedLabel) ?? 'execute',
@@ -181,6 +194,7 @@ export async function run(ctx: VerbContext): Promise<VerbResult> {
         },
         ...(typeof account === 'string' ? { account } : {}),
         ...(typeof launcher === 'string' ? { host: launcher } : {}),
+        ...(runtime === null ? {} : { runtime }),
       };
 
       if (!ctx.dryRun) {

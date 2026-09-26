@@ -19,6 +19,7 @@ import { UsageError } from '../errors.ts';
 import {
   effectiveReservePct,
   fiveHourRoom,
+  asRegistered,
   loadFleetPolicy,
   loadIdentities,
   resolveDorkHome,
@@ -58,7 +59,7 @@ function readAccount(
   const tracked = identity.routable && resolved !== undefined;
   let rawWindows: Record<string, unknown> | null = null;
   if (tracked) {
-    const { ledger, warnings } = readLedger(dorkHome, identity.id);
+    const { ledger, warnings } = readLedger(dorkHome, 'claude-code', identity.id);
     for (const warning of warnings) warn(warning.message);
     rawWindows = ledger?.windows ?? null;
   }
@@ -117,9 +118,11 @@ export async function run(ctx: VerbContext): Promise<VerbResult> {
   const now = ctx.now();
   const dorkHome = resolveDorkHome({ ...ctx.env }, ctx.io.osHome);
 
-  const identities = loadIdentities(dorkHome);
+  // The fleet view shows Claude Code's registered accounts: the only runtime
+  // whose sessions it can find today (spec flow-usage §2.6).
+  const identities = loadIdentities(dorkHome, 'claude-code');
   for (const warning of identities.warnings) warn(warning.message);
-  const policy = loadFleetPolicy(dorkHome, identities.accounts);
+  const policy = loadFleetPolicy(dorkHome, asRegistered('claude-code', identities.accounts));
   for (const warning of policy.warnings) warn(warning.message);
   const reads = identities.accounts.map((identity) =>
     readAccount(identity, policy, dorkHome, now, warn)
