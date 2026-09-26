@@ -4,6 +4,14 @@ Installs of this plugin are pinned to a commit SHA, so a fix here does not reach
 you until you **reinstall it** (Marketplace → flow → reinstall, or re-run your
 `--plugin-dir` checkout's `git pull`). Each entry below says whether that matters.
 
+## 0.25.0
+
+**flow can now start a working session on a chosen account. Nothing you use changes yet, so no reinstall is needed.**
+
+- flow can now start a session in an item's worktree on a named account, in three places: a plain terminal (`claude -p`, `codex exec` or `opencode run`), a cmux workspace (Claude Code), or the DorkOS app (Claude Code, Codex or OpenCode). It checks afterwards that the session really runs on that account, and strips API keys from the session's environment so nothing else pays for it.
+- If a place cannot run a runtime (cmux and Codex, for example), flow says so and starts nothing, rather than guessing another one.
+- `flow drain` will use this to spread work across your accounts; it arrives in a later release.
+
 ## 0.24.0
 
 **flow now records usage for Codex and OpenCode too, and `flow fleet` shows every tool. Reinstall to get it.**

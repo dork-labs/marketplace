@@ -314,6 +314,24 @@ Cases, each asserted on the fake's record, not on the launcher's return alone:
 
 **Live smoke** (`engine-tests/launchers/live.test.ts`): one real session per host, gated by `FLOW_LAUNCHER_LIVE=1` read at module scope, with `FLOW_LAUNCHER_LIVE_ACCOUNT=<id>`. Each starts a session in a temp git repo with the message "Reply with the single word ready, then stop.", proves the account, waits for idle or exit, and stops it. It spends a few tokens of a real subscription, so it never runs in CI or in `npm test` without the flag; the task's PR records its output as the evidence for "starts a real official session".
 
+#### 2.8 Runtimes (operator direction, 2026-09-26)
+
+flow runs from Claude Code, Codex and OpenCode sessions, so a launch names a runtime as well as an account.
+
+- `LaunchRequest.runtime` and `SessionHandle.runtime` are `claude-code` | `codex` | `opencode`. An account belongs to one runtime: a `CLAUDE_CONFIG_DIR`, a `CODEX_HOME`, or an OpenCode provider profile. A runtime with no registered accounts has one implicit `default` account, the ambient environment.
+- `Launcher.supports(runtime)` answers before anything starts. An unsupported (host, runtime) pair throws `unsupported` with its reason and starts nothing; flow never swaps in another runtime or host.
+- `resolveHost` takes the runtime: a named host that cannot run it is an error naming the pair; `auto` picks the first host that both probes ok and supports it.
+
+| Host | claude-code | codex | opencode |
+| --- | --- | --- | --- |
+| cli | `claude -p … --output-format stream-json` with `CLAUDE_CONFIG_DIR` | `codex exec --json -C <cwd> …` with `CODEX_HOME` (`acceptEdits` = workspace-write with network on and the shared git dir writable, so a worker can commit and push); resume `codex exec resume <id>` | `opencode run --format json …` in the worktree; resume `--session <id>` |
+| cmux | interactive `claude`, as §2.4 | unsupported today ("use --host cli") | unsupported today ("use --host cli") |
+| dorkos | `session_start` / the route with `runtime: "claude-code"` | the same with `runtime: "codex"` | the same with `runtime: "opencode"` |
+
+**Proving the account, per runtime:** Claude Code as §2.1 (`apiKeySource`, the transcript under the config dir). Codex: the session's rollout file exists under `<CODEX_HOME>/sessions/`, and its `plan_type` is recorded when reported; `OPENAI_API_KEY` and `CODEX_API_KEY` are stripped so the `CODEX_HOME` login is what bills. OpenCode: the session's provider matches the account's provider when the account names one. DorkOS: the session reports the requested `runtime` and, for claude-code, the requested config dir.
+
+The wind-down hook (§5.4) is Claude-only; Codex and OpenCode workers get the supervisor's `wind-down` message. Ranking over (runtime, account) pairs, `fleet.runtimes`, and `crossRuntimeFallback` belong to phases 3 and 4 and are specified there.
+
 ### 3. Account-aware dispatch (DOR-2373)
 
 All of §3 lives in `scripts/drain/account-rank.ts`: pure, dependency-free, fed S1's resolved identities, policy and `readWindow` results. `now` is always an input.
