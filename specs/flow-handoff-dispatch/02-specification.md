@@ -101,7 +101,7 @@ pnpm vitest run src/export
 | `v`           | `1`                                                                                      | CLI                                                        |
 | `identifier`  | string                                                                                   | argument                                                   |
 | `stage`       | `FlowStage`: where the next session resumes                                              | `FlowRun.stage` (the new stage at a stage boundary)        |
-| `trigger`     | `stage` \| `task` \| `limit-warning` \| `limit-rejected` \| `manual` \| `synthesized`    | `--trigger`                                                |
+| `trigger`     | `stage` \| `task` \| `fix` \| `limit-warning` \| `limit-rejected` \| `manual` \| `synthesized` | `--trigger` (`fix`: a push answering review findings or red CI) |
 | `writtenAt`   | ISO UTC                                                                                  | `deps.now`                                                 |
 | `sessionId`   | string \| null                                                                           | `--session`, `FLOW_SESSION_ID`, else `FlowRun.sessionId`    |
 | `account`     | registry id \| null                                                                      | `FlowRun.account`                                          |
@@ -221,12 +221,13 @@ class LaunchError extends Error {
 
 - **No shell.** Every command is an argv array through `execFile`/`spawn`. The one shell line flow builds is cmux's `--command` (§2.4), through one `shellQuote` function; any value with a newline or NUL is refused (`bad-request`).
 - **Validate first.** `cwd` and `promptFile` absolute and existing; `account.path` absolute. Else `bad-request`, nothing started.
-- **The account is set, then verified.** cli and cmux set `CLAUDE_CONFIG_DIR=<account.path>` in the child's environment (and remove it for the ambient account, so a supervisor running on one account never leaks its own into a child meant for the ambient one: the ambient case passes the supervisor's own value through unchanged). Each launcher then proves the session bills that account (below); a mismatch stops the session if flow can, and throws `wrong-account`.
+- **The account is set, then verified.** cli and cmux set `CLAUDE_CONFIG_DIR=<account.path>` for the child. For the ambient account they set it to the supervisor's resolved ambient dir (its own `CLAUDE_CONFIG_DIR`, else `~/.claude`), explicitly, because a cmux shell does not inherit the supervisor's environment. Each launcher then proves the session bills that account (below); a mismatch stops the session if flow can, and throws `wrong-account`.
+- **No other credential rides along.** A config dir names the account only if nothing overrides its login. cli and cmux remove `ANTHROPIC_API_KEY`, `ANTHROPIC_AUTH_TOKEN` and `CLAUDE_CODE_OAUTH_TOKEN` from the child (cli: from the spawn env; cmux: the `--command` line starts with `env -u ANTHROPIC_API_KEY -u ANTHROPIC_AUTH_TOKEN -u CLAUDE_CODE_OAUTH_TOKEN`, since cmux's shell may export them). Otherwise the session would silently bill that key instead of the named account.
 - **The first message is a pointer.** Every message is a file; the session gets one line: `Read <file> and do exactly what it says.` (cmux turns each newline into Enter, and a positional prompt does not survive `--command`.)
 - **Started means started.** `start` returns only after the session is confirmed busy or its transcript exists, within `startTimeoutMs` (default 90 s). Else `not-started`.
 - **Stop only what flow started**, by the pid it recorded, after checking the pid still runs a `claude` command (`ps -o command= -p <pid>`). Nothing is killed by name.
 
-**Proving the account** (`proveAccount`, shared by cli and cmux): the transcript `<account.path>/projects/*/<sessionId>.jsonl` exists. Claude Code writes a session's transcript only under the config dir it runs in, so this is the account, observed, not assumed. DorkOS proves it through the API (§2.5).
+**Proving the account** (`proveAccount`, shared by cli and cmux): the transcript `<account.path>/projects/*/<sessionId>.jsonl` exists, so the session runs in that config dir. The cli launcher also reads `apiKeySource` on the stream's `system`/`init` message and throws `wrong-account` unless it is `none` (the config dir's own login, not a key); an interactive cmux session shows no init message, so there the stripped environment is the guarantee. DorkOS proves the dir through the API (§2.5); its runtime owns which credential it uses.
 
 #### 2.2 Host resolution (`scripts/launchers/resolve.ts`)
 
@@ -240,7 +241,7 @@ class LaunchError extends Error {
 #### 2.3 Plain CLI launcher (`scripts/launchers/cli.ts`)
 
 - **probe:** `claude --version` exits 0. Else "the `claude` binary is not on PATH".
-- **start:** spawn, detached, with `cwd` and the account env:
+- **start:** spawn, detached, with `cwd` and the account env (credential variables removed):
   `claude -p "Read <promptFile> and do exactly what it says." --output-format stream-json --verbose --session-id <sessionId> --permission-mode <mode> [--model <model>]`
   stdout to `<cwd>/.dork/flow/drain/logs/<sessionId>.jsonl`, stderr to `….err.log`, `unref()`. Handle gets `pid`, `logFile`, `logOffset: 0`. Confirmed started when the log's first `system`/`init` line arrives and `proveAccount` passes.
 - **send:** pid alive → write the message under `.dork/flow/drain/inbox/<sessionId>/` and return `queued`; the runner delivers queued messages when the process exits. Pid gone → spawn `claude -p "<pointer>" --resume <sessionId> …` with the same account, cwd, mode and log file (appending); `delivered`, with the new pid in the handle.
@@ -256,8 +257,8 @@ The sequence is cmux-control's, proven by hand (`CLAUDE.md` lines 49–93).
 - **Binary:** `CMUX_BUNDLED_CLI_PATH` when set, else `cmux` on PATH.
 - **probe:** `cmux identify --json` exits 0. Else "cmux is not running (`<stderr first line>`)".
 - **start:**
-  1. `cmux workspace create --name <title> --cwd <cwd> --focus false --json --command "CLAUDE_CONFIG_DIR=<q(path)> claude --session-id <sessionId> --permission-mode <mode> [--model <q(model)>]"` → `workspace_ref`. The ambient account omits the assignment. `--command` delivers the line and Enter at spawn time.
-  2. Wait (≤ 30 s, polling 500 ms) for `<account dir>/sessions/<pid>.json` whose `sessionId` equals ours → `pid`. (Ambient: the dir is `CLAUDE_CONFIG_DIR` or `~/.claude`.)
+  1. `cmux workspace create --name <title> --cwd <cwd> --focus false --json --command "env -u ANTHROPIC_API_KEY -u ANTHROPIC_AUTH_TOKEN -u CLAUDE_CODE_OAUTH_TOKEN CLAUDE_CONFIG_DIR=<q(path)> claude --session-id <sessionId> --permission-mode <mode> [--model <q(model)>]"` → `workspace_ref` (for the ambient account, `path` is the supervisor's resolved ambient dir). `--command` delivers the line and Enter at spawn time.
+  2. Wait (≤ 30 s, polling 500 ms) for `<account dir>/sessions/<pid>.json` whose `sessionId` equals ours → `pid`.
   3. Resolve the surface: the row of `cmux top --all --processes --format tsv` whose process is `pid` → `surface`.
   4. `cmux send --surface <surface> "Read <promptFile> and do exactly what it says.\n"`. Never `--workspace`: it hits whichever surface is selected.
   5. Confirmed when `sessions/<pid>.json` shows `status: "busy"` or `proveAccount` passes, within the timeout. Idle with no transcript means the pointer never arrived: `not-started`.
@@ -271,9 +272,10 @@ The sequence is cmux-control's, proven by hand (`CLAUDE.md` lines 49–93).
 - **Token** (only for `/mcp`): `DORKOS_MCP_TOKEN`, else the file `<dorkHome>/mcp-local-token`. Never logged or printed.
 - **probe:** `GET /api/health` answers 2xx within 3 s. Else "DorkOS is not answering at <url>".
 - **start**, preferring the MCP tool:
-  1. `POST /mcp` JSON-RPC `tools/list` with the bearer token. When it lists `session_start`: `tools/call session_start { prompt: <pointer>, cwd, account: account.id, runtime: "claude-code", model, permissionMode, seedContext }`. The tool mints the session id; the handle takes the result's `sessionId`. The tool applies DorkOS's own guards, its launch cap and its permission clamp; a refusal is `refused` with the tool's words.
+  1. `POST /mcp` JSON-RPC `tools/list` with the bearer token. When it lists `session_start`: `tools/call session_start { prompt: <pointer>, cwd, account: account.id, runtime: "claude-code", model, permissionMode, seedContext }`. The tool mints the session id; the handle takes the result's `sessionId`. The tool applies DorkOS's own guards, its launch cap and its permission clamp; a refusal is `refused` with the tool's words, never retried through the route (a guard's no is policy). **Landing order:** S4's account guards consult the Flow extension (S4 X3), so the extension's guard must ship with or before `session_start` accepting `account`; until both are live on a machine, a refused launch releases the claim and says why.
   2. Otherwise (no token, a 401, or no such tool): `POST /api/sessions/<sessionId>/messages { content: <pointer>, cwd, runtime: "claude-code", account: account.id, seedContext }` → 202.
   3. `seedContext` is one line: "flow started this session as the <role> for <identifier>." The ambient account omits `account`.
+- **The canonical id:** DorkOS may rebind a route-started session to the id its runtime assigns. The handle (and so `FlowRun.sessionId`, which the hook and DorkOS's flow-run link match on) takes the `id` that `GET /api/sessions/<sessionId>` returns, never the id flow minted.
 - **Proving the account:** `GET /api/sessions/<sessionId>` (retry for up to the start timeout until it exists); its `account` must equal `account.path` after `path.resolve`. The HTTP route ignores an unknown id with only a server-side warning, so this check is what makes the launch honest. A mismatch throws `wrong-account` and the session is left idle (DorkOS has no stop call flow may use).
 - **send:** `POST /api/sessions/<id>/messages { content: <pointer> }` → 202 `delivered` (DorkOS queues a message sent while a turn runs).
 - **state:** `GET /api/sessions/<id>`. With S4's `status`: `limit` set → `limited`; `lifecycle` running → `busy`; otherwise `idle`. Without it (an older DorkOS): `unknown` ("this DorkOS does not report session status"); the runner then relies on the ledger, which DorkOS writes (S4), and on reports.
@@ -308,6 +310,7 @@ Cases, each asserted on the fake's record, not on the launcher's return alone:
 9. `stop` stops only a pid flow started (a pid whose `ps` command is not `claude` is left alone), and DorkOS answers `left-idle`.
 10. No command runs through a shell: every recorded call is an argv array; cmux's `--command` string round-trips a path containing a space, a quote and `$` through `shellQuote` exactly.
 11. `bad-request` for a relative `cwd`, a missing `promptFile`, or a value with a newline.
+12. With `ANTHROPIC_API_KEY`, `ANTHROPIC_AUTH_TOKEN` and `CLAUDE_CODE_OAUTH_TOKEN` in the supervisor's environment, none reaches the child (cli env; cmux `env -u` prefix); a cli stream whose init reports an `apiKeySource` other than `none` throws `wrong-account`.
 
 **Live smoke** (`engine-tests/launchers/live.test.ts`): one real session per host, gated by `FLOW_LAUNCHER_LIVE=1` read at module scope, with `FLOW_LAUNCHER_LIVE_ACCOUNT=<id>`. Each starts a session in a temp git repo with the message "Reply with the single word ready, then stop.", proves the account, waits for idle or exit, and stops it. It spends a few tokens of a real subscription, so it never runs in CI or in `npm test` without the flag; the task's PR records its output as the evidence for "starts a real official session".
 
@@ -352,7 +355,7 @@ An `unknown` signal is eligible: no reading is not evidence of no room, and S2's
 
 Eligible accounts are ordered in three tiers:
 
-1. **Warm cache.** `affinity` (the account of the item's current or last session) when eligible. A follow-up step that stays there resumes a warm prompt cache; eligibility already excludes an account near a limit.
+1. **Warm cache.** `affinity` (the account of the item's current or last session) when eligible, and not a `main` outside its spend-down window (that would break S1's "main only when no other is eligible"). A follow-up step that stays there resumes a warm prompt cache; eligibility already excludes an account near a limit.
 2. **Use it before you lose it.** Every other eligible account, except a `main` outside its spend-down window, by `score` descending:
    - `remaining = (100 − effectiveReservePct) − seven_day.usedPct`; with no weekly reading, `100 − effectiveReservePct`.
    - `hours = max(1, (seven_day.resetsAt − now) / 1 h)`; with no reset time, `168`.
@@ -402,7 +405,7 @@ S1's `flow next` gains, per picked item, `account: { pick, ranked, ineligible, r
 
 #### 4.2 One pass
 
-1. **Gather facts** for every run in `flow-state.json` with `drain` set and `status` `queued` or `running`: `launcher.state` of the worker and reviewer; `ingestStreamLog` for cli handles; the account's ledger windows; the checkpoint header; the reports recorded on the run (§4.5); the forge's PR status when `drain.pr` is set; the tracker item (one `getItem` per run) to notice it closed or lost its claim.
+1. **Gather facts** for every run in `flow-state.json` with `drain` set and `status` `queued` or `running`: `launcher.state` of the worker and reviewer; `ingestStreamLog` for cli handles; the account's ledger windows; the checkpoint header; the reports recorded on the run (§4.5); the forge's PR status when `drain.pr` is set, and `prForBranch` (any open PR on the run's branch) while it is not; the tracker item (one `getItem` per run) to notice it closed or lost its claim.
 2. **Decide** with the two pure reducers: `drainStep` (§4.4) and `nextHandoffAction` (§5). Each returns the new run state and a list of actions.
 3. **Act**, in order: stop sessions, send messages, handoffs, launches, forge calls, tracker writes. Each action is idempotent against the recorded state, so a pass that dies midway is repeated safely next time.
 4. **Fill slots:** `launchBudget` → `flow next -n <slots>` logic (with `--items`) → for each pick with an account: mint an id, provision the worktree, render the brief, claim (`queued`), `start`, record `running`. A pick with no account is skipped and reported.
@@ -423,9 +426,10 @@ interface FlowRun {
 
 interface DrainState {
   v: 1;
+  rev: number;                    // bumped by every write (§4.3)
   phase: 'working' | 'reviewing' | 'fixing' | 'pr-ready' | 'watching' | 'fixing-ci' | 'closing' | 'parked';
   worker: SessionHandle | null;
-  reviewer: (SessionHandle & { sha: string; worktree: string }) | null;
+  reviewer: (SessionHandle & { sha: string; worktree: string; token: string }) | null; // token: §4.5
   pushedSha: string | null;       // last SHA the worker reported pushed
   reviewedSha: string | null;     // the SHA of the latest verdict
   verdict: 'clean' | 'changes' | null;
@@ -441,6 +445,15 @@ interface DrainState {
 
 - `status` stays in S1's enum. A new status value would make every older reader reject the whole file (the `FlowRunStatus` schema is a `z.enum` inside an all-or-nothing record), which is why "limited" and every drain phase are fields, not statuses.
 - For `host: dorkos`, `workerPid` is `-1`. S1's `flow status` drift check "a run whose `workerPid` is not alive" skips runs with `drain` set and reports `launcher.state` instead (task 3.5 changes it).
+
+**flow's recovery pass leaves drain runs alone.** The existing recovery ladder (`skills/flow-drain` step 1, `scripts/recovery.ts`) treats a run whose `workerPid` is dead as an orphan and resumes its session. A cli worker exits after every `-p` turn and a DorkOS worker has `workerPid: -1`, so recovery would resume a session the supervisor already manages: two writers in one worktree. Recovery skips every run with `drain` set; the supervisor is their only recovery (task 3.5).
+
+**Who writes which field.** Three kinds of writer touch one run: the supervisor, the `flow report`/`flow pr` verbs a worker or reviewer runs, and `flow handoff`. Every write goes through S1's locked read-modify-write, and ownership is split so no writer overwrites another's news:
+
+- **Report-owned:** `pushedSha`, `verdict`, `reviewedSha`, `reviewRound`, `pr`, `checkpointAt`, `checkpointSha`. Only the verbs write them.
+- **Supervisor-owned:** everything else under `drain` and `limit`, plus the run's `account`, `host`, `sessionId`, `workerPid` on launch and handoff.
+- **Compare-and-set:** every write bumps `drain.rev` (an integer). The supervisor applies a pass's result for a run only if, re-read under the lock, `rev` still equals what it gathered. If a report landed in between, that run's decision is dropped and re-made next pass (its actions not yet taken are not taken).
+- **One handoff at a time:** a handoff first sets `limit.state = 'handing-off'` with a fresh `handoffToken`, by compare-and-set on the old `sessionId`. A second handoff (the supervisor and `flow handoff` at once) finds the state taken and stops. If the starting session fails, the state goes back to `awaiting-handoff`.
 
 #### 4.4 The drain reducer (`scripts/drain/drain-step.ts`, pure)
 
@@ -468,6 +481,10 @@ interface DrainState {
 | `watching` | forge: closed, not merged | `parked` | park: "the PR was closed without merging" |
 | `fixing-ci` | report `pushed` S3 | `reviewing` | (`flow report` disarmed the PR) start reviewer at S3, `deltaFrom` the last reviewed SHA |
 | `closing` | run `status` became `complete` (`flow done`) | (removed from the active set) | stop any live session flow started |
+| `reviewing` | verdict `clean` at S, but the origin head moved past S | `reviewing` | if `pushedSha` is the head, start a reviewer there; else send `continue` ("report your push with `flow report pushed`") |
+| `pr-ready`, `watching` | report `pushed` S ≠ `reviewedSha` | `reviewing` | (`flow report` disarmed an armed PR) start reviewer at S, `deltaFrom` the last reviewed SHA |
+| `working`, `reviewing`, `fixing` | the forge shows a PR for the branch while `drain.pr` is null | `parked` | disarm it; park: "a PR was opened before a clean review" |
+| (queued) | `status: "queued"` with no worker handle, older than the start timeout (a crash between claim and start) | (released) | release the claim to ready with its resume stage |
 | any | tracker item closed or cancelled by someone else, or it lost `agent/claimed` | `parked` | stop sessions; no tracker write |
 | any | report `blocked` | `parked` | (the report already posted the question) |
 
@@ -482,13 +499,13 @@ The worker and reviewer tell the supervisor what happened through one verb. The 
 
 - `sha` defaults to `git rev-parse HEAD` in the worktree.
 - Exit 5 unless `git ls-remote origin refs/heads/<branch>` equals it ("push first").
-- Exit 5 unless `FlowRun.checkpointSha` equals it ("write a checkpoint at this commit first: `flow checkpoint <id> --trigger task …`"). This is what makes "after each task" enforceable.
+- Exit 5 unless `FlowRun.checkpointSha` equals it ("write a checkpoint at this commit first: `flow checkpoint <id> --trigger task --task <task>`, or `--trigger fix` for a review or CI fix"). This is what makes "after each task" enforceable.
 - When a PR exists and is armed, disarm it (forge) and set `disarmedForReview`. A push to an open PR is not reviewed yet, and an armed PR could merge it.
 - Records `pushedSha`.
 
-**`flow report <identifier> verdict --sha <sha> (--clean | --changes --findings-file <file>)`** (reviewer)
+**`flow report <identifier> verdict --sha <sha> --token <t> (--clean | --changes --findings-file <file>)`** (reviewer)
 
-- Exit 5 when `--session` (or `FLOW_SESSION_ID`) equals the worker's session: a worker cannot review its own work.
+- Requires `--token <t>` equal to `drain.reviewer.token`: a random 128-bit hex the supervisor mints for each review and renders into that reviewer's brief only. A worker (or a stale reviewer) cannot record a verdict, on any host, without depending on session ids a host may mint later. Exit 5 on a missing or wrong token.
 - A `sha` other than `drain.pushedSha` is recorded as stale (warning, exit 0) and changes nothing.
 - `--changes` copies the findings file to `<worker worktree>/.dork/flow/drain/reviews/<round>-<sha7>.md`.
 - Records `verdict`, `reviewedSha`, `reviewRound + 1`.
@@ -506,7 +523,7 @@ The worker and reviewer tell the supervisor what happened through one verb. The 
 - Creates the PR (head = the run's branch, base = origin's default branch), arms it when `--arm` or `drain.armAutoMerge` (default false), records `drain.pr`.
 - Exit 5 when a PR already exists for the branch (it records the existing one instead, so a retry is safe).
 
-**The forge** (`scripts/forge/types.ts`, `scripts/forge/github.ts`): `branchHead`, `createPr`, `prStatus` (`{ state: 'open' | 'merged' | 'closed', failing: { name, url }[], armed, queued, headSha }`), `arm`, `disarm`, `recentGroupFailures(base, checkNames, sinceMinutes)`. The GitHub implementation runs `gh` with argv arrays: `gh pr create`, `gh pr view --json state,autoMergeRequest,statusCheckRollup,headRefOid`, `gh pr merge --auto` / `--disable-auto`, `gh api graphql` for `isInMergeQueue`, `gh run list --event merge_group`. The failing-check rule is `watch.sh`'s: a check run's `conclusion` in `FAILURE | CANCELLED | TIMED_OUT | ACTION_REQUIRED`, or a commit status's `state` in `FAILURE | ERROR`. A remote that is not on github.com (or `GH_HOST`) exits 3: "flow drain supports GitHub only today".
+**The forge** (`scripts/forge/types.ts`, `scripts/forge/github.ts`): `branchHead`, `prForBranch` (`gh pr list --head <branch> --state open`), `createPr`, `prStatus` (`{ state: 'open' | 'merged' | 'closed', failing: { name, url }[], armed, queued, headSha }`), `arm`, `disarm`, `recentGroupFailures(base, checkNames, sinceMinutes)`. The GitHub implementation runs `gh` with argv arrays: `gh pr create`, `gh pr view --json state,autoMergeRequest,statusCheckRollup,headRefOid`, `gh pr merge --auto` / `--disable-auto`, `gh api graphql` for `isInMergeQueue`, `gh run list --event merge_group`. The failing-check rule is `watch.sh`'s: a check run's `conclusion` in `FAILURE | CANCELLED | TIMED_OUT | ACTION_REQUIRED`, or a commit status's `state` in `FAILURE | ERROR`. A remote that is not on github.com (or `GH_HOST`) exits 3: "flow drain supports GitHub only today".
 
 **`flow watch`** replaces `templates/drain/watch.sh` (deleted in the same PR):
 
@@ -532,7 +549,7 @@ The worker and reviewer tell the supervisor what happened through one verb. The 
 
 - A separate top-level session, account chosen by `rankAccounts` with no affinity. Any eligible account will do: independence comes from a fresh session that never saw the worker's reasoning, not from a different account.
 - Its cwd is a detached worktree the supervisor creates at `<dorkHome>/workspaces/<repo name>/review-<identifier>-<sha7>` (`git worktree add --detach <path> <sha>` after fetching the branch), removed after the verdict. The worker's worktree is never shared.
-- **Brief:** `templates/drain/reviewer-brief.md` rendered with `{{identifier}}`, `{{sha}}`, `{{base}}` (merge-base with origin's default branch), `{{deltaFrom}}` ("also read `git diff <deltaFrom> <sha>` first" when set), `{{rubric}}` (`review.rubric`), `{{flow}}`, `{{findingsFile}}`. It ends with `flow report <id> verdict …`. The worktree steps the hand brief listed move into the supervisor.
+- **Brief:** `templates/drain/reviewer-brief.md` rendered with `{{identifier}}`, `{{sha}}`, `{{base}}` (merge-base with origin's default branch), `{{deltaFrom}}` ("also read `git diff <deltaFrom> <sha>` first" when set), `{{rubric}}` (`review.rubric`), `{{flow}}`, `{{findingsFile}}`, `{{token}}`. It ends with `flow report <id> verdict --sha <sha> --token <token> …`. The worktree steps the hand brief listed move into the supervisor.
 - **Model:** `models.bindings[models.tiers.review]`.
 - The reviewer is one-shot: after its verdict the supervisor stops it (cli exits by itself; cmux is stopped; DorkOS is left idle).
 
@@ -555,7 +572,8 @@ interface RunLimit {
   resetsAt: string | null;
   cause: 'limit' | 'reserve';
   since: string;              // ISO, when the episode began
-  state: 'winding-down' | 'awaiting-handoff' | 'pending-approval' | 'waiting-reset';
+  state: 'winding-down' | 'awaiting-handoff' | 'pending-approval' | 'waiting-reset' | 'handing-off';
+  handoffToken: string | null; // set with 'handing-off' (§4.3)
   notifiedAt: string | null;  // the ask-mode comment, once per episode
 }
 ```
@@ -591,7 +609,7 @@ The **signal** each pass is the worse of `limitSignal` over the run's account's 
 
 1. Make sure a checkpoint newer than `limit.since` exists (synthesize one if not).
 2. `launcher.stop(old)`: cli and cmux stop the process flow started; DorkOS leaves it idle. This keeps one writer per worktree: a limited session that a person later types into must not share the worktree with its successor.
-3. Resolve the host: the run's `host` when its probe passes, else `resolveHost(auto)`.
+3. The host is the run's `host`. If its probe fails, the handoff does not happen and the run parks with the probe's reason: switching hosts would be a guess (§2.2).
 4. `start` a new worker on the candidate account, same `cwd`, first message `resume-from-handoff` (§1). Model and permission mode as before.
 5. Rewrite the run: `account`, `host`, `sessionId`, `workerPid`, `drain.worker`; append to `drain.handoffs`; clear `limit`. `provenance` is untouched (S1: written once at run start).
 6. The phase does not change: the new session continues whatever the old one was doing, and reports as usual.
@@ -603,7 +621,7 @@ The **signal** each pass is the worse of `limitSignal` over the run's account's 
 - The operator's approval in `ask` mode, and a manual move in any mode.
 - `--to` must be eligible (`rankAccounts` with the run's account excluded); else exit 5 with its reasons. Without `--to`, the top candidate.
 - Runs §5.3 with reason `manual`, whether or not the run is limited.
-- Refuses (exit 5) while a `flow drain` holds the lock and the run is not limited, so a manual move never races a live supervisor mid-step; while limited it may run, and the supervisor sees the rewritten run next pass.
+- Refuses (exit 5) while a `flow drain` holds the lock and the run is not limited, so a manual move never races a live supervisor mid-step. While limited it may run; the `handing-off` compare-and-set (§4.3) makes sure only one of it and the supervisor moves the run.
 
 #### 5.4 Telling a live worker about a warning: the hook
 
@@ -724,7 +742,7 @@ Each test carries a purpose comment and is shown to fail against a broken implem
 - `README.md`: the new verbs in S1's verb table.
 - `docs/SPEC.md`: checkpoints, the drain phases, the handoff states, the new `FlowRun` fields.
 - `docs/the-dials.mdx` and `config/CONFIG.md`: the `drain` block.
-- Stage skills (`executing-specs`, `verifying-work`, `specifying-work`, `decomposing-work`, `closing-work`): `flow stage … --checkpoint-file` at their boundaries; `executing-specs`: `flow checkpoint --trigger task` after each task. `skills/flow-drain/SKILL.md`: the `drain.parallel` branch.
+- Stage skills (`executing-specs`, `verifying-work`, `specifying-work`, `decomposing-work`, `closing-work`): `flow stage … --checkpoint-file` at their boundaries; `verifying-work`: in a drain run (the worker brief says so), skip its own review and PR steps, `flow report pushed` and wait: the drain's reviewer and `flow pr` replace them; `executing-specs`: `flow checkpoint --trigger task` after each task. `skills/flow-drain/SKILL.md`: the `drain.parallel` branch.
 - `CHANGELOG.md` and the version bump in `plugin.json`, `.dork/manifest.json`, `package.json`, per PR.
 
 ## Implementation Phases
@@ -752,6 +770,11 @@ Each test carries a purpose comment and is shown to fail against a broken implem
 - **D14. At most 2 sessions per account by default**, because parallel workers share one 5-hour window.
 - **D15. The DorkOS launcher prefers `session_start` and falls back to the HTTP route**, verifying the account afterward either way, since the route ignores an unknown account.
 - **D16. Load cap 1.5 per CPU**, applied to launches only. The source session's failure was new launches on a saturated machine, not the running ones.
+
+- **D17. Launchers strip API-key variables and the cli launcher checks `apiKeySource`.** A config dir only names the account when no key overrides its login; billing the wrong credential silently is the failure the fleet exists to prevent.
+- **D18. A verdict needs the reviewer's one-time token**, not a session-id comparison. Session ids can be minted by the host after the brief is rendered, and a missing `--session` would otherwise let a worker approve itself.
+- **D19. A handoff never switches hosts.** A failed probe parks the run with its reason, consistent with "a missing host is reported, not guessed".
+- **D20. Drain runs are exempt from flow's recovery ladder**, which judges liveness by pid; the supervisor, which asks the launcher, is their only recovery.
 
 ## Open Questions
 
