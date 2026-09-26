@@ -49,7 +49,7 @@ import {
   type JournalSettings,
 } from './config-files.ts';
 import { ensureIgnored } from './git-exclude.ts';
-import { detectRuntime, type Runtime } from './runtime-detect.ts';
+import { detectRuntime, RUNTIMES, type Runtime } from './runtime-detect.ts';
 import type { JournalLine } from './journal-schema.ts';
 
 /** Every line kind, in the order of the spec's table. */
@@ -145,9 +145,17 @@ export const USAGE_WINDOW_NAME =
 /** The most windows one `usage.snapshot` line may carry. */
 export const USAGE_WINDOWS_MAX = 12;
 
-/** Whether a value is an ISO-8601 time `Date.parse` can read, or `null`. */
+/** An ISO-8601 date-time with a zone (`Z` or `+hh:mm`), as the schema requires. */
+const ISO_DATETIME = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}(:\d{2}(\.\d+)?)?(Z|[+-]\d{2}:\d{2})$/;
+
+/** Whether a value is a readable ISO-8601 date-time with a zone. */
+function isIsoTime(value: unknown): boolean {
+  return typeof value === 'string' && ISO_DATETIME.test(value) && !Number.isNaN(Date.parse(value));
+}
+
+/** Whether a value is an ISO-8601 date-time with a zone, or `null`. */
 function isResetTime(value: unknown): boolean {
-  return value === null || (typeof value === 'string' && !Number.isNaN(Date.parse(value)));
+  return value === null || isIsoTime(value);
 }
 
 /**
@@ -162,6 +170,9 @@ function isResetTime(value: unknown): boolean {
  */
 export function usageSnapshotProblem(event: JournalEvent): string | null {
   if (event.kind !== 'usage.snapshot') return null;
+  if (!(RUNTIMES as readonly string[]).includes(event.accountRuntime as string)) {
+    return `accountRuntime must be one of ${RUNTIMES.join(', ')}`;
+  }
   const windows = event.windows as Record<string, unknown>;
   if (!isPlainObject(windows)) return 'windows must be an object';
   const names = Object.keys(windows);
@@ -170,6 +181,8 @@ export function usageSnapshotProblem(event: JournalEvent): string | null {
     if (!USAGE_WINDOW_NAME.test(name)) return `unknown window "${name.slice(0, 40)}"`;
     const reading = windows[name];
     if (!isPlainObject(reading)) return `window ${name} is not a reading`;
+    const extra = Object.keys(reading).find((key) => key !== 'usedPct' && key !== 'resetsAt');
+    if (extra !== undefined) return `window ${name} has an unknown field "${extra.slice(0, 40)}"`;
     const pct = reading.usedPct;
     if (typeof pct !== 'number' || !Number.isFinite(pct) || pct < 0 || pct > 100) {
       return `window ${name} usedPct must be a number from 0 to 100`;
@@ -178,6 +191,9 @@ export function usageSnapshotProblem(event: JournalEvent): string | null {
   }
   const spend = event.spend as Record<string, unknown> | undefined;
   if (spend !== undefined) {
+    if (spend.periodStart !== undefined && !isIsoTime(spend.periodStart)) {
+      return 'spend.periodStart must be an ISO-8601 time with a zone';
+    }
     for (const key of ['costUsd', 'limitUsd'] as const) {
       const value = spend[key];
       if (value === undefined && key === 'limitUsd') continue;

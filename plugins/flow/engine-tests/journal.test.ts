@@ -698,6 +698,19 @@ describe('usage readings the journal refuses', () => {
     ['a usedPct above 100', { five_hour: { usedPct: 101, resetsAt: null } }, {}],
     ['an unknown window', { daily: { usedPct: 1, resetsAt: null } }, {}],
     ['an unreadable resetsAt', { five_hour: { usedPct: 1, resetsAt: 'soon' } }, {}],
+    ['a date-only resetsAt', { five_hour: { usedPct: 1, resetsAt: '2026-09-26' } }, {}],
+    ['a non-ISO resetsAt', { five_hour: { usedPct: 1, resetsAt: 'Sep 26 2026 15:00' } }, {}],
+    ['an extra field in a window', { five_hour: { usedPct: 1, resetsAt: null, note: 'hi' } }, {}],
+    [
+      'an unknown accountRuntime',
+      { five_hour: { usedPct: 1, resetsAt: null } },
+      { accountRuntime: 'gemini' },
+    ],
+    [
+      'an unreadable spend.periodStart',
+      { five_hour: { usedPct: 1, resetsAt: null } },
+      { spend: { costUsd: 1, periodStart: 'yesterday' } },
+    ],
     ['a negative spend', { five_hour: { usedPct: 1, resetsAt: null } }, { spend: { costUsd: -1 } }],
   ])('refuses %s and writes nothing', (_name, windows, extra) => {
     expect(usageSnapshotProblem(event(windows, extra))).not.toBeNull();

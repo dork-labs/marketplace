@@ -150,20 +150,25 @@ export function detectRuntime(
   return result;
 }
 
-/** Every environment variable a runtime marker check reads. */
-const MARKER_VARIABLES: readonly string[] = [
+/**
+ * The markers that say WHICH runtime a process is, removed from a child's
+ * environment. Codex's `CODEX_SANDBOX` and `CODEX_SANDBOX_NETWORK_DISABLED` are
+ * kept: a child started inside a Codex sandbox is still sandboxed (and may be
+ * offline), and those two are its only sign of it. The child's `FLOW_RUNTIME`
+ * outranks them for detection.
+ */
+const IDENTITY_MARKERS: readonly string[] = [
   'CLAUDECODE',
   'CLAUDE_CODE_ENTRYPOINT',
   'CODEX_THREAD_ID',
-  'CODEX_SANDBOX',
-  'CODEX_SANDBOX_NETWORK_DISABLED',
   'OPENCODE',
   'OPENCODE_PID',
 ];
 
 /**
  * The environment a launcher hands a child runtime it starts: the parent's,
- * without any runtime marker or stale override, plus `FLOW_RUNTIME` (and
+ * without the markers that identify a runtime or any stale override (Codex's
+ * sandbox variables stay), plus `FLOW_RUNTIME` (and
  * `FLOW_HARNESS` when given) naming the child. The child then sets its own
  * marker, and {@link detectRuntime} agrees with the launcher whichever
  * runtime started it.
@@ -180,7 +185,7 @@ export function childRuntimeEnv(
 ): Record<string, string> {
   const next: Record<string, string> = {};
   for (const [key, value] of Object.entries(env)) {
-    if (value === undefined || MARKER_VARIABLES.includes(key)) continue;
+    if (value === undefined || IDENTITY_MARKERS.includes(key)) continue;
     if (key === 'FLOW_RUNTIME' || key === 'FLOW_HARNESS') continue;
     next[key] = value;
   }

@@ -76,13 +76,20 @@ describe('detectRuntime', () => {
       CLAUDECODE: '1',
       CLAUDE_CODE_ENTRYPOINT: 'cli',
       CODEX_THREAD_ID: 't',
+      CODEX_SANDBOX: 'seatbelt',
       OPENCODE: '1',
       FLOW_RUNTIME: 'claude-code',
       FLOW_HARNESS: 'cmux',
       UNSET: undefined,
     };
     const child = childRuntimeEnv(parent, 'codex', 'dorkos');
-    expect(child).toEqual({ PATH: '/bin', FLOW_RUNTIME: 'codex', FLOW_HARNESS: 'dorkos' });
+    // Codex's sandbox marker stays: the child is still sandboxed.
+    expect(child).toEqual({
+      PATH: '/bin',
+      CODEX_SANDBOX: 'seatbelt',
+      FLOW_RUNTIME: 'codex',
+      FLOW_HARNESS: 'dorkos',
+    });
     expect(parent.CLAUDECODE).toBe('1');
     // Once the child runtime adds its own marker, detection agrees with the launcher.
     expect(detectRuntime({ ...child, CODEX_THREAD_ID: 'thr' })).toMatchObject({
