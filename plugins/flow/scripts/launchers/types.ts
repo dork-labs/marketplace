@@ -110,6 +110,13 @@ export interface SessionHandle {
   cwd: string;
   /** cli, cmux: the runtime process flow started (`claude`, `codex` or `opencode`). */
   pid?: number;
+  /**
+   * cli, cmux: the process's start time as `ps -o lstart=` printed it right
+   * after flow learned the pid. `stop` signals the pid only while it still
+   * reports this start time, so a pid the OS gave to another process (even
+   * another `claude`) is left alone. Absent on handles written before it existed.
+   */
+  pidStart?: string;
   /** cmux: the surface the session runs in. */
   surface?: string;
   /** cmux: the workspace that holds the surface. */

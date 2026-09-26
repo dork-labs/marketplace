@@ -56,6 +56,11 @@ type MintMode = 'echo-flow-id' | 'fresh';
 interface FakeOptions extends Omit<HarnessOptions, 'runtime'> {
   /** The runtime the harness's sessions run on. Default `claude-code`. */
   runtime?: RuntimeName;
+  /**
+   * The DORKOS_URL the launcher is given instead of the fake's loopback one
+   * (e.g. a remote host); the fake's fetch routes it to the fake server anyway.
+   */
+  urlAs?: string;
   /** Report this runtime on every session instead of the one requested. */
   reportRuntime?: string;
   mcp?: McpMode;
@@ -340,8 +345,16 @@ async function makeDorkosHarness(options: FakeOptions = {}): Promise<DorkosHarne
   const stdout: string[] = [];
   const stderr: string[] = [];
   const deps: DorkosLauncherDeps = {
-    fetch: globalThis.fetch,
-    env: { DORKOS_URL: baseUrl, DORK_HOME: dorkHome, ...options.supervisorEnv },
+    fetch:
+      options.urlAs === undefined
+        ? globalThis.fetch
+        : (input, init) =>
+            globalThis.fetch(String(input).replace(options.urlAs as string, baseUrl), init),
+    env: {
+      DORKOS_URL: options.urlAs ?? baseUrl,
+      DORK_HOME: dorkHome,
+      ...options.supervisorEnv,
+    },
     osHome,
     now: () => clock,
     sleep: async (ms) => {
@@ -389,6 +402,9 @@ async function makeDorkosHarness(options: FakeOptions = {}): Promise<DorkosHarne
       }
     },
     async makeForeign() {
+      // DorkOS sessions have no pid.
+    },
+    async makeReused() {
       // DorkOS sessions have no pid.
     },
     sessions: () => records,
@@ -598,6 +614,39 @@ describe('dorkos launcher: the session it records', () => {
       expect(err.code).toBe('wrong-runtime');
       expect(err.message).toMatch(/on claude-code instead of codex/);
     });
+  });
+
+  // The token file is this machine's own credential: it goes only to a DorkOS
+  // on loopback. A remote DORKOS_URL with no explicit token skips MCP and takes
+  // the route, sending no Authorization header at all.
+  it('never sends the token file to a DorkOS that is not on this machine', async () => {
+    await withFake({ mcp: 'with-tool', urlAs: 'http://dorkos.example:4242' }, async (h) => {
+      const handle = await h.launcher.start(requestFor(h));
+      expect(handle.launchPath).toBe('route');
+      expect(h.requests().some((r) => r.url.startsWith('/mcp'))).toBe(false);
+      for (const r of h.requests()) expect(r.authorization).toBeUndefined();
+    });
+  });
+
+  // An explicit DORKOS_MCP_TOKEN is the person's own choice, so it may go to
+  // any DorkOS they name; the token file on loopback still works as before.
+  it('an explicit token may go to a remote DorkOS; the file token goes to loopback', async () => {
+    await withFake(
+      {
+        mcp: 'with-tool',
+        urlAs: 'http://dorkos.example:4242',
+        supervisorEnv: { DORKOS_MCP_TOKEN: TOKEN },
+      },
+      async (h) => {
+        const handle = await h.launcher.start(requestFor(h));
+        expect(handle.launchPath).toBe('mcp');
+      }
+    );
+    for (const host of ['127.0.0.1', 'localhost']) {
+      await withFake({ mcp: 'with-tool', urlAs: `http://${host}:4242` }, async (h) => {
+        expect((await h.launcher.start(requestFor(h))).launchPath, host).toBe('mcp');
+      });
+    }
   });
 
   // A DorkOS whose sessions carry no status says so rather than guessing idle.

@@ -7,7 +7,9 @@
  * - **probe:** `claude --version` exits 0.
  * - **start:** `claude -p "<pointer>" --output-format stream-json --verbose
  *   --session-id <id> --permission-mode <mode> [--model <m>]` in `cwd`, with the
- *   account's `CLAUDE_CONFIG_DIR` and no Claude credential variables. Confirmed
+ *   account's `CLAUDE_CONFIG_DIR` (unset for `~/.claude`, so the unsuffixed
+ *   Keychain login is used; see `claudeConfigDirValue`) and no Claude credential
+ *   or biller-routing variables. Confirmed
  *   when the log's `system`/`init` line reports `apiKeySource: "none"` and the
  *   transcript appears under the account's dir.
  * - **resume:** `--resume <id>` on the same account, cwd, mode and log.
@@ -57,7 +59,7 @@
  * - **send:** a live process gets the message queued in the worktree's inbox (a
  *   headless run reads no more input); an exited one is resumed.
  * - **stop:** SIGTERM the recorded pid, only after `ps` shows it still runs the
- *   runtime's binary.
+ *   runtime's binary with the start time recorded at spawn (`pidStart`).
  *
  * Every outside effect comes in through {@link CliLauncherDeps}, so the contract
  * suite runs it against fakes.
@@ -89,6 +91,7 @@ import {
   DEFAULT_START_TIMEOUT_MS,
   childEnv,
   pointerLine,
+  readPidStart,
   sessionHome,
   stopRecordedPid,
   validateLaunchRequest,
@@ -451,7 +454,7 @@ export function createCliLauncher(deps: CliLauncherDeps): Launcher {
     try {
       child = deps.spawn(bins[runtime], args, {
         cwd,
-        env: childEnv(deps.env, runtime, home),
+        env: childEnv(deps.env, runtime, home, deps.osHome),
         stdoutFile: logFile,
         stderrFile: logFile.replace(/\.jsonl$/, '.err.log'),
       });
@@ -565,6 +568,10 @@ export function createCliLauncher(deps: CliLauncherDeps): Launcher {
     const logFile = drainDir(req.cwd, 'logs', `${req.sessionId}.jsonl`);
     const child = spawnRuntime(req.runtime, startArgs(req), req.cwd, home, logFile);
     const binary = bins[req.runtime];
+    const pidStart = await readPidStart(deps.run, child.pid);
+    // The identity a stop needs: the start time, else (ps could not say) the
+    // session id a claude start line carries.
+    const identity = { ...(pidStart === undefined ? {} : { pidStart }), sessionId: req.sessionId };
 
     const deadline = deps.now() + timeoutMs;
     let seen = false;
@@ -576,7 +583,7 @@ export function createCliLauncher(deps: CliLauncherDeps): Launcher {
             ? confirmCodex(home as string, logFile)
             : await confirmOpencode(req, logFile);
       if (found.kind === 'refused') {
-        await stopRecordedPid(child.pid, req.runtime, stopDeps);
+        await stopRecordedPid(child.pid, req.runtime, stopDeps, identity);
         throw new LaunchError('wrong-account', found.message);
       }
       if (found.kind === 'confirmed') {
@@ -587,6 +594,7 @@ export function createCliLauncher(deps: CliLauncherDeps): Launcher {
           account: req.account?.id ?? null,
           cwd: req.cwd,
           pid: child.pid,
+          ...(pidStart === undefined ? {} : { pidStart }),
           logFile,
           logOffset: 0,
           ...(home === null ? {} : { configDir: home }),
@@ -607,7 +615,7 @@ export function createCliLauncher(deps: CliLauncherDeps): Launcher {
       await deps.sleep(pollMs);
     }
 
-    await stopRecordedPid(child.pid, req.runtime, stopDeps);
+    await stopRecordedPid(child.pid, req.runtime, stopDeps, identity);
     if (seen) {
       const where =
         req.runtime === 'opencode'
@@ -648,7 +656,13 @@ export function createCliLauncher(deps: CliLauncherDeps): Launcher {
     }
     const args = resumeArgs(h, h.permissionMode, messageFile);
     const child = spawnRuntime(h.runtime, args, h.cwd, h.configDir ?? null, h.logFile);
-    return { result: 'delivered', handle: { ...h, pid: child.pid } };
+    const pidStart = await readPidStart(deps.run, child.pid);
+    const { pidStart: _old, ...rest } = h;
+    void _old;
+    return {
+      result: 'delivered',
+      handle: { ...rest, pid: child.pid, ...(pidStart === undefined ? {} : { pidStart }) },
+    };
   }
 
   /** claude-code: the stream first; the transcript when the stream names no window. */
@@ -710,7 +724,10 @@ export function createCliLauncher(deps: CliLauncherDeps): Launcher {
 
   async function stop(h: SessionHandle): Promise<StopResult> {
     if (h.pid === undefined) return 'not-running';
-    return stopRecordedPid(h.pid, h.runtime, stopDeps);
+    return stopRecordedPid(h.pid, h.runtime, stopDeps, {
+      ...(h.pidStart === undefined ? {} : { pidStart: h.pidStart }),
+      sessionId: h.sessionId,
+    });
   }
 
   return {

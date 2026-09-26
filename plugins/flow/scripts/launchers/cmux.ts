@@ -6,8 +6,9 @@
  * - **probe:** `cmux identify --json` exits 0.
  * - **start:** `cmux workspace create --name <title> --cwd <cwd> --focus false
  *   --json --command "<line>"`, where the line strips every credential variable
- *   and sets `CLAUDE_CONFIG_DIR` explicitly (a cmux shell does not inherit the
- *   supervisor's environment, and may export credentials of its own). Then the
+ *   and sets `CLAUDE_CONFIG_DIR` explicitly, or removes it for `~/.claude` (see
+ *   `claudeConfigDirValue`; a cmux shell does not inherit the supervisor's
+ *   environment, and may export credentials and a config dir of its own). Then the
  *   session's pid from `<config dir>/sessions/<pid>.json`, its surface from
  *   `cmux top`, and the first message as a one-line pointer sent to that
  *   surface. Confirmed when the transcript appears under the config dir.
@@ -15,7 +16,8 @@
  *   a cmux restart) and send the pointer; Claude Code queues input typed while
  *   busy. An exited session is resumed in a new workspace with `--resume`.
  * - **state:** the session file's status, a limit in the transcript, or exited.
- * - **stop:** SIGTERM the recorded pid (after the `ps` check), then rename the
+ * - **stop:** SIGTERM the recorded pid (after the `ps` check of its start time,
+ *   recorded as `pidStart` once the session file names the pid), then rename the
  *   workspace "<title> (stopped)". The workspace stays for the operator.
  * - **runtimes:** claude-code only. A codex or opencode request throws
  *   `unsupported` (`CMUX_CLAUDE_ONLY_REASON` in `support.ts`) before anything starts.
@@ -40,6 +42,8 @@ import {
   DEFAULT_START_TIMEOUT_MS,
   pointerLine,
   sessionConfigDir,
+  claudeConfigDirValue,
+  readPidStart,
   stopRecordedPid,
   validateLaunchRequest,
   validateMessageFile,
@@ -189,11 +193,19 @@ function refuseBackslash(name: string, file: string): void {
  * run claude. Session ids and permission modes are validated to shell-safe
  * words; the config dir and the model are quoted.
  */
-function commandLine(configDir: string, claudeArgs: readonly string[], model?: string): string {
+function commandLine(
+  configDir: string | undefined,
+  claudeArgs: readonly string[],
+  model?: string
+): string {
   const strip = CREDENTIAL_ENV_VARS.map((name) => `-u ${name}`).join(' ');
+  // `undefined` is Claude Code's own `~/.claude` login (see claudeConfigDirValue):
+  // the cmux shell may export a CLAUDE_CONFIG_DIR of its own, so it is removed.
+  const pin =
+    configDir === undefined ? '-u CLAUDE_CONFIG_DIR' : `CLAUDE_CONFIG_DIR=${shellQuote(configDir)}`;
   const words = [...claudeArgs];
   if (model !== undefined) words.push('--model', shellQuote(model));
-  return `env ${strip} CLAUDE_CONFIG_DIR=${shellQuote(configDir)} claude ${words.join(' ')}`;
+  return `env ${strip} ${pin} claude ${words.join(' ')}`;
 }
 
 /**
@@ -349,7 +361,10 @@ export function createCmuxLauncher(deps: CmuxLauncherDeps): Launcher {
       const file = readSessionFile(h.configDir, h.pid);
       if (file !== null && file.sessionId !== h.sessionId) return 'not-running';
     }
-    const result = await stopRecordedPid(h.pid, 'claude-code', stopDeps);
+    const result = await stopRecordedPid(h.pid, 'claude-code', stopDeps, {
+      ...(h.pidStart === undefined ? {} : { pidStart: h.pidStart }),
+      sessionId: h.sessionId,
+    });
     if (result === 'stopped') await markStopped(h);
     return result;
   }
@@ -365,7 +380,11 @@ export function createCmuxLauncher(deps: CmuxLauncherDeps): Launcher {
     exclude: number | undefined
   ): Promise<SessionHandle> {
     const configDir = h.configDir as string;
-    const line = commandLine(configDir, claudeArgs, h.model);
+    const line = commandLine(
+      claudeConfigDirValue(configDir, deps.env, deps.osHome),
+      claudeArgs,
+      h.model
+    );
     const workspace = await createWorkspace(h.title ?? h.sessionId, h.cwd, line);
     const withWorkspace: SessionHandle = { ...h, workspace };
     const pid = await waitForPid(configDir, h.sessionId, exclude);
@@ -376,7 +395,14 @@ export function createCmuxLauncher(deps: CmuxLauncherDeps): Launcher {
         `claude never wrote a session file for ${h.sessionId} under ${path.join(configDir, 'sessions')} within ${Math.round(pidTimeoutMs / 1000)} s.`
       );
     }
-    const withPid: SessionHandle = { ...withWorkspace, pid };
+    const pidStart = await readPidStart(deps.run, pid);
+    const { pidStart: _old, ...fresh } = withWorkspace;
+    void _old;
+    const withPid: SessionHandle = {
+      ...fresh,
+      pid,
+      ...(pidStart === undefined ? {} : { pidStart }),
+    };
     const surface = await waitForSurface(pid);
     if (surface === null) {
       await stopHandle(withPid);
@@ -396,7 +422,7 @@ export function createCmuxLauncher(deps: CmuxLauncherDeps): Launcher {
     refuseBackslash('promptFile', req.promptFile);
     const configDir = sessionConfigDir(req.account, deps.env, deps.osHome);
     // Build (and so validate) the shell line before anything starts.
-    commandLine(configDir, [], req.model);
+    commandLine(claudeConfigDirValue(configDir, deps.env, deps.osHome), [], req.model);
     const probed = await probe();
     if (!probed.ok) throw new LaunchError('unavailable', probed.reason);
 

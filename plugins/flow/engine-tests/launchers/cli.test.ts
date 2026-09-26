@@ -54,6 +54,10 @@ interface FakeProc {
   sessionId: string;
   alive: boolean;
   foreign: boolean;
+  /** What `ps -o lstart=` prints for the pid. */
+  start: string;
+  /** Set when the pid now runs someone else's claude: the session its command names. */
+  reusedFor?: string;
   logFile: string;
   exit: (code: number | null) => void;
 }
@@ -114,9 +118,13 @@ async function makeCliHarness(options: Omit<HarnessOptions, 'runtime'> = {}): Pr
     if (cmd === 'ps') {
       const proc = procs.get(Number(args.at(-1)));
       if (proc === undefined || !proc.alive) return { code: 1, stdout: '', stderr: '' };
+      if (args.includes('lstart=')) {
+        const start = proc.reusedFor === undefined ? proc.start : 'Sat Sep 26 23:59:59 2026';
+        return { code: 0, stdout: `${start}\n`, stderr: '' };
+      }
       const command = proc.foreign
         ? '/usr/bin/vim notes.txt'
-        : `claude -p Read ... --session-id ${proc.sessionId}`;
+        : `claude -p Read ... --session-id ${proc.reusedFor ?? proc.sessionId}`;
       return { code: 0, stdout: `${command}\n`, stderr: '' };
     }
     return { code: 127, stdout: '', stderr: `unexpected command ${cmd}` };
@@ -134,7 +142,8 @@ async function makeCliHarness(options: Omit<HarnessOptions, 'runtime'> = {}): Pr
       kind: resumeId === undefined ? 'start' : 'resume',
       sessionId,
       cwd: opts.cwd,
-      configDir: opts.env.CLAUDE_CONFIG_DIR,
+      // Claude Code's own resolution: the variable, else ~/.claude.
+      configDir: opts.env.CLAUDE_CONFIG_DIR ?? path.join(osHome, '.claude'),
       message: flag('-p') ?? null,
       childEnv: { ...opts.env },
     });
@@ -146,7 +155,10 @@ async function makeCliHarness(options: Omit<HarnessOptions, 'runtime'> = {}): Pr
         opts.stdoutFile,
         `${JSON.stringify({ type: 'system', subtype: 'init', session_id: sessionId, apiKeySource: script.apiKeySource ?? 'none' })}\n`
       );
-      const configDir = script.confirm === 'other-account' ? otherDir : opts.env.CLAUDE_CONFIG_DIR;
+      const configDir =
+        script.confirm === 'other-account'
+          ? otherDir
+          : (opts.env.CLAUDE_CONFIG_DIR ?? path.join(osHome, '.claude'));
       const dir = path.join(configDir, 'projects', PROJECT_SLUG);
       mkdirSync(dir, { recursive: true });
       appendFileSync(
@@ -162,6 +174,7 @@ async function makeCliHarness(options: Omit<HarnessOptions, 'runtime'> = {}): Pr
       sessionId,
       alive: true,
       foreign: false,
+      start: `Sat Sep 26 18:${String(pid % 60).padStart(2, '0')}:00 2026`,
       logFile: opts.stdoutFile,
       exit: resolveExit,
     });
@@ -180,7 +193,11 @@ async function makeCliHarness(options: Omit<HarnessOptions, 'runtime'> = {}): Pr
       stopped.push(proc.sessionId);
       proc.exit(null);
     },
-    env: { PATH: '/usr/bin:/bin', ...options.supervisorEnv },
+    env: {
+      PATH: '/usr/bin:/bin',
+      ...options.supervisorEnv,
+      ...options.supervisorEnvFor?.(osHome),
+    },
     osHome,
     now: () => clock,
     sleep: async (ms) => {
@@ -256,6 +273,9 @@ async function makeCliHarness(options: Omit<HarnessOptions, 'runtime'> = {}): Pr
     },
     makeForeign: async (handle) => {
       procOf(handle).foreign = true;
+    },
+    makeReused: async (handle, session) => {
+      procOf(handle).reusedFor = session === 'same' ? handle.sessionId : 'someone-elses-session';
     },
     sessions: () => [...spawned, ...inboxRecords()],
     calls: () => calls,

@@ -125,6 +125,8 @@ export async function makeCliRuntimeHarness(options: HarnessOptions): Promise<Cl
   const calls: HostCall[] = [];
   const stopped: string[] = [];
   const foreign = new Set<number>();
+  /** Reused pids: the session id the new process's command line names. */
+  const reused = new Map<number, string>();
   const spawned: number[] = [];
   const childPath = `${bin}:/usr/bin:/bin`;
 
@@ -141,6 +143,16 @@ export async function makeCliRuntimeHarness(options: HarnessOptions): Promise<Cl
     calls.push({ program: cmd, args, shell: false });
     if (cmd === 'ps' && foreign.has(Number(args.at(-1)))) {
       return Promise.resolve({ code: 0, stdout: '/usr/bin/vim notes.txt\n', stderr: '' });
+    }
+    const reusedAs = reused.get(Number(args.at(-1)));
+    if (cmd === 'ps' && reusedAs !== undefined) {
+      // The pid now runs another real-looking process of the runtime.
+      const stdout = args.includes('lstart=')
+        ? 'Sat Sep 26 23:59:59 2026'
+        : runtime === 'codex'
+          ? `codex exec --json resume ${reusedAs}`
+          : `opencode run --format json --session ${reusedAs}`;
+      return Promise.resolve({ code: 0, stdout: `${stdout}\n`, stderr: '' });
     }
     return new Promise((resolve, reject) => {
       execFile(
@@ -277,6 +289,12 @@ export async function makeCliRuntimeHarness(options: HarnessOptions): Promise<Cl
         return exit(handle, 'SIGUSR1');
       }
       throw new Error(`the cli ${runtime} host has no ${signal.kind} state`);
+    },
+    makeReused: async (handle, session) => {
+      reused.set(
+        handle.pid as number,
+        session === 'same' ? handle.sessionId : 'someone-elses-session'
+      );
     },
     makeForeign: async (handle) => {
       foreign.add(handle.pid as number);

@@ -154,6 +154,8 @@ async function makeCmuxHarness(options: CmuxHarnessOptions = {}): Promise<CmuxHa
   const calls: HostCall[] = [];
   const stopped: string[] = [];
   const foreign = new Set<number>();
+  /** Reused pids: the session id the new process's command line names. */
+  const reused = new Map<number, string>();
   // The real cmux is on the developer's PATH; the harness's PATH must not find it.
   const childPath = `${bin}:/usr/bin:/bin`;
 
@@ -172,6 +174,14 @@ async function makeCmuxHarness(options: CmuxHarnessOptions = {}): Promise<CmuxHa
     calls.push({ program: cmd, args, shell: false });
     if (cmd === 'ps' && foreign.has(Number(args.at(-1)))) {
       return Promise.resolve({ code: 0, stdout: '/usr/bin/vim notes.txt\n', stderr: '' });
+    }
+    const reusedAs = reused.get(Number(args.at(-1)));
+    if (cmd === 'ps' && reusedAs !== undefined) {
+      // The pid now runs another real-looking process of the runtime.
+      const stdout = args.includes('lstart=')
+        ? 'Sat Sep 26 23:59:59 2026'
+        : `claude --session-id ${reusedAs} --permission-mode acceptEdits`;
+      return Promise.resolve({ code: 0, stdout: `${stdout}\n`, stderr: '' });
     }
     return new Promise((resolve, reject) => {
       execFile(
@@ -202,7 +212,11 @@ async function makeCmuxHarness(options: CmuxHarnessOptions = {}): Promise<CmuxHa
       process.kill(pid, signal);
       if (sessionId !== undefined) stopped.push(sessionId);
     },
-    env: { PATH: '/usr/bin:/bin', ...options.supervisorEnv },
+    env: {
+      PATH: '/usr/bin:/bin',
+      ...options.supervisorEnv,
+      ...options.supervisorEnvFor?.(osHome),
+    },
     osHome,
     now: () => clock,
     sleep: async (ms) => {
@@ -218,7 +232,8 @@ async function makeCmuxHarness(options: CmuxHarnessOptions = {}): Promise<CmuxHa
       kind: c.argv.includes('--resume') ? 'resume' : 'start',
       sessionId: sessionIdOf(c),
       cwd: c.cwd,
-      configDir: c.env.CLAUDE_CONFIG_DIR,
+      // Claude Code's own resolution: the variable, else $HOME/.claude.
+      configDir: c.env.CLAUDE_CONFIG_DIR ?? path.join(osHome, '.claude'),
       message: firstTo.get(c.pid)?.message ?? null,
       childEnv: c.env,
     }));
@@ -297,6 +312,12 @@ async function makeCmuxHarness(options: CmuxHarnessOptions = {}): Promise<CmuxHa
         );
       }
     },
+    makeReused: async (handle, session) => {
+      reused.set(
+        handle.pid as number,
+        session === 'same' ? handle.sessionId : 'someone-elses-session'
+      );
+    },
     makeForeign: async (handle) => {
       if (handle.pid !== undefined) foreign.add(handle.pid);
     },
@@ -358,7 +379,9 @@ function argvOf(h: CmuxHarness, ...sub: string[]): string[][] {
     .filter((argv) => sub.every((s, i) => argv[i] === s));
 }
 
-const STRIP = 'env -u ANTHROPIC_API_KEY -u ANTHROPIC_AUTH_TOKEN -u CLAUDE_CODE_OAUTH_TOKEN';
+const STRIP =
+  'env -u ANTHROPIC_API_KEY -u ANTHROPIC_AUTH_TOKEN -u CLAUDE_CODE_OAUTH_TOKEN' +
+  ' -u CLAUDE_CODE_USE_BEDROCK -u CLAUDE_CODE_USE_VERTEX -u ANTHROPIC_BASE_URL';
 
 launcherContract('cmux', makeCmuxHarness, ['claude-code']);
 

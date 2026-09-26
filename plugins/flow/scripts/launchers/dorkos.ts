@@ -24,8 +24,9 @@
  * naming both `application/json` and `text/event-stream`, and the reply as
  * either a JSON body or a server-sent `message` event.
  *
- * The token (`DORKOS_MCP_TOKEN`, else `<dorkHome>/mcp-local-token`) rides only
- * on `/mcp` requests to the configured base URL. It is never printed, logged,
+ * The token (`DORKOS_MCP_TOKEN`, else `<dorkHome>/mcp-local-token`, the latter
+ * only for a loopback base URL) rides only on `/mcp` requests to the configured
+ * base URL. It is never printed, logged,
  * stored on the handle, or left in an error message, even one quoting the
  * server's own words.
  *
@@ -42,6 +43,7 @@ import os from 'node:os';
 import path from 'node:path';
 
 import { resolveDorkHome } from '../fleet/accounts.ts';
+import { assertLoopback } from '../fleet/sessions.ts';
 import {
   DEFAULT_START_TIMEOUT_MS,
   isAmbientAccount,
@@ -268,10 +270,20 @@ export function createDorkosLauncher(deps: DorkosLauncherDeps): Launcher {
   /**
    * The MCP token, read fresh each start: `DORKOS_MCP_TOKEN`, else DorkOS's
    * token file. `null` when neither is there.
+   *
+   * The file token is this machine's own instance credential, so it goes only
+   * to a DorkOS on loopback (127.0.0.1, ::1, localhost). A remote `DORKOS_URL`
+   * with no explicit token gets none: the start skips MCP and takes the route.
+   * An explicit `DORKOS_MCP_TOKEN` is the person's own choice and may go anywhere.
    */
   function readToken(): string | null {
     const fromEnv = deps.env.DORKOS_MCP_TOKEN?.trim();
     if (fromEnv) return fromEnv;
+    try {
+      assertLoopback(base);
+    } catch {
+      return null;
+    }
     const dorkHome = resolveDorkHome({ ...deps.env }, deps.osHome);
     try {
       const fromFile = readFileSync(path.join(dorkHome, MCP_TOKEN_FILE), 'utf8').trim();

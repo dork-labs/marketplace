@@ -44,8 +44,16 @@ import {
  * ambient provider credential.
  */
 export const CREDENTIAL_VARS: Readonly<Record<RuntimeName, readonly string[]>> = {
-  'claude-code': ['ANTHROPIC_API_KEY', 'ANTHROPIC_AUTH_TOKEN', 'CLAUDE_CODE_OAUTH_TOKEN'],
-  codex: ['OPENAI_API_KEY', 'CODEX_API_KEY'],
+  'claude-code': [
+    'ANTHROPIC_API_KEY',
+    'ANTHROPIC_AUTH_TOKEN',
+    'CLAUDE_CODE_OAUTH_TOKEN',
+    // Not keys, but each routes the session to another biller than the login.
+    'CLAUDE_CODE_USE_BEDROCK',
+    'CLAUDE_CODE_USE_VERTEX',
+    'ANTHROPIC_BASE_URL',
+  ],
+  codex: ['OPENAI_API_KEY', 'CODEX_API_KEY', 'OPENAI_BASE_URL'],
   opencode: [],
 };
 
@@ -62,6 +70,11 @@ export interface HarnessOptions {
   runtime: RuntimeName;
   /** Variables added to the supervisor's environment the launcher is given. */
   supervisorEnv?: Record<string, string>;
+  /**
+   * Variables added to the supervisor's environment that depend on the
+   * harness's own OS home (`config-dir` Claude Code hosts honor it).
+   */
+  supervisorEnvFor?: (osHome: string) => Record<string, string>;
   /** Build the host as absent: its probe must fail and nothing may start. */
   hostMissing?: boolean;
 }
@@ -166,6 +179,12 @@ export interface LauncherHarness {
   signal(handle: SessionHandle, signal: HostSignal): Promise<void>;
   /** `pid` hosts: make the handle's pid run a command that is not `claude` (a reused pid). */
   makeForeign(handle: SessionHandle): Promise<void>;
+  /**
+   * `pid` hosts: make the handle's pid a REUSED one that runs a real-looking
+   * process of the same runtime, started at another time, whose command line
+   * names the handle's own session (`same`) or another one (`other`).
+   */
+  makeReused(handle: SessionHandle, session: 'same' | 'other'): Promise<void>;
   /** Every session-level record, in order. */
   sessions(): readonly HostSessionRecord[];
   /** Every command run, in order. */
@@ -322,8 +341,10 @@ function runtimeContract(
       });
     });
 
-    // Case 2: the ambient account is named explicitly (cmux shells do not
-    // inherit the supervisor's env), or omitted where the host picks it.
+    // Case 2: the ambient account runs on the supervisor's resolved home, or
+    // omits the account where the host picks it. A Claude Code child on
+    // `~/.claude` from a supervisor that set no CLAUDE_CONFIG_DIR gets the
+    // variable UNSET: Claude Code reads the unsuffixed Keychain login only then.
     it('2. the ambient account runs on the supervisor’s resolved config dir', async () => {
       await withHarness(make, {}, async (h) => {
         const handle = await h.launcher.start(requestFor(h, { account: null }));
@@ -331,7 +352,9 @@ function runtimeContract(
         const record = startRecord(h, handle.sessionId);
         if (h.accountBinding === 'config-dir') {
           expect(record.configDir).toBe(h.ambientConfigDir);
-          expect(record.childEnv?.[HOME_VAR[h.runtime] as string]).toBe(h.ambientConfigDir);
+          const homeVar = HOME_VAR[h.runtime] as string;
+          if (h.runtime === 'claude-code') expect(record.childEnv?.[homeVar]).toBeUndefined();
+          else expect(record.childEnv?.[homeVar]).toBe(h.ambientConfigDir);
         } else if (h.accountBinding === 'account-id') {
           expect(record.accountId).toBeUndefined();
         }
@@ -520,5 +543,86 @@ function runtimeContract(
         expect(h.stopped()).toContain(req.sessionId);
       });
     });
+
+    // Case 15: a recorded pid the OS gave to another process of the same
+    // runtime (the operator's own claude, say) is never signalled, even when
+    // its command line names our session: the start time recorded at spawn
+    // (`pidStart`) is the identity, not the program name.
+    it('15. a reused pid running the same runtime at another start time is left alone', async () => {
+      await withHarness(make, {}, async (h) => {
+        if (h.stopBehavior !== 'pid') return;
+        const handle = await h.launcher.start(requestFor(h));
+        expect(handle.pidStart, 'the start time recorded at spawn').toBeTruthy();
+        await h.makeReused(handle, 'same');
+        expect(await h.launcher.stop(handle)).not.toBe('stopped');
+        expect(h.stopped()).not.toContain(handle.sessionId);
+      });
+    });
+
+    // Case 16: a handle written before `pidStart` existed is stopped only when
+    // the pid's command line names its session; a pid running the same
+    // runtime for another session is left alone.
+    it('16. a handle without pidStart is stopped only when the command names its session', async () => {
+      await withHarness(make, {}, async (h) => {
+        if (h.stopBehavior !== 'pid') return;
+        const reused = await h.launcher.start(requestFor(h));
+        await h.makeReused(reused, 'other');
+        expect(await h.launcher.stop({ ...reused, pidStart: undefined })).not.toBe('stopped');
+        expect(h.stopped()).not.toContain(reused.sessionId);
+
+        // A codex or opencode start line carries no id (the runtime mints it),
+        // so only a host whose start line names the session can prove this half.
+        if (h.mintsSessionId) return;
+        const ours = await h.launcher.start(requestFor(h));
+        expect(await h.launcher.stop({ ...ours, pidStart: undefined })).toBe('stopped');
+        expect(h.stopped()).toContain(ours.sessionId);
+      });
+    });
+
+    // Case 17: the Keychain login follows CLAUDE_CONFIG_DIR, so a Claude Code
+    // account on `~/.claude` gets the variable unset unless the supervisor
+    // itself exported that same dir (then its suffixed login is the real one).
+    it('17. a ~/.claude account unsets CLAUDE_CONFIG_DIR unless the supervisor named ~/.claude', async () => {
+      if (!(await isClaudeConfigDirHost(make))) return;
+      const home = (h: LauncherHarness): LaunchAccount => ({
+        runtime: 'claude-code',
+        id: 'main',
+        path: h.ambientConfigDir,
+      });
+      const cases: Array<[string, (osHome: string) => Record<string, string>, 'unset' | 'set']> = [
+        ['no variable', () => ({}), 'unset'],
+        [
+          'the supervisor exported ~/.claude',
+          (osHome) => ({ CLAUDE_CONFIG_DIR: `${osHome}/.claude` }),
+          'set',
+        ],
+        [
+          'the supervisor runs on ~/.claude3',
+          (osHome) => ({ CLAUDE_CONFIG_DIR: `${osHome}/.claude3` }),
+          'unset',
+        ],
+      ];
+      for (const [label, envFor, expected] of cases) {
+        await withHarness(make, { supervisorEnvFor: envFor }, async (h) => {
+          const handle = await h.launcher.start(requestFor(h, { account: home(h) }));
+          const record = startRecord(h, handle.sessionId);
+          expect(handle.configDir, label).toBe(h.ambientConfigDir);
+          expect(record.configDir, label).toBe(h.ambientConfigDir);
+          if (expected === 'unset')
+            expect(record.childEnv?.CLAUDE_CONFIG_DIR, label).toBeUndefined();
+          else expect(record.childEnv?.CLAUDE_CONFIG_DIR, label).toBe(h.ambientConfigDir);
+        });
+      }
+    });
   });
+}
+
+/** Whether the harness's host binds a Claude Code account by CLAUDE_CONFIG_DIR. */
+async function isClaudeConfigDirHost(
+  make: (options: Omit<HarnessOptions, 'runtime'>) => Promise<LauncherHarness>
+): Promise<boolean> {
+  const h = await make({});
+  const yes = h.runtime === 'claude-code' && h.accountBinding === 'config-dir';
+  await h.cleanup();
+  return yes;
 }

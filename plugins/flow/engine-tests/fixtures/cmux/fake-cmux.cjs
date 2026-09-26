@@ -104,6 +104,9 @@ function createWorkspace() {
         ANTHROPIC_API_KEY: 'cmux-shell-key',
         ANTHROPIC_AUTH_TOKEN: 'cmux-shell-token',
         CLAUDE_CODE_OAUTH_TOKEN: 'cmux-shell-oauth',
+        CLAUDE_CODE_USE_BEDROCK: '1',
+        CLAUDE_CODE_USE_VERTEX: '1',
+        ANTHROPIC_BASE_URL: 'https://proxy.example',
       },
     });
     shell.unref();
@@ -169,7 +172,7 @@ function send() {
   );
   if (!submitted || entry.script.confirm === 'silent') return;
   const reg = readLines(path.join(dir, 'claudes.jsonl')).find((r) => r.pid === entry.claudePid);
-  const configDir = reg.env.CLAUDE_CONFIG_DIR;
+  const configDir = reg.env.CLAUDE_CONFIG_DIR ?? path.join(reg.env.HOME, '.claude');
   const sessionFile = path.join(configDir, 'sessions', `${reg.pid}.json`);
   const session = readJson(sessionFile, {});
   fs.writeFileSync(sessionFile, JSON.stringify({ ...session, status: 'busy' }));

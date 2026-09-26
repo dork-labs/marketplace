@@ -18,7 +18,8 @@ const flag = (name) => {
   return at < 0 ? undefined : argv[at + 1];
 };
 const sessionId = flag('--resume') ?? flag('--session-id');
-const configDir = process.env.CLAUDE_CONFIG_DIR;
+// Claude Code's own resolution: the variable, else $HOME/.claude.
+const configDir = process.env.CLAUDE_CONFIG_DIR ?? path.join(process.env.HOME, '.claude');
 fs.mkdirSync(path.join(configDir, 'sessions'), { recursive: true });
 fs.writeFileSync(
   path.join(configDir, 'sessions', `${process.pid}.json`),

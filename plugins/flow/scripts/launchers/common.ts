@@ -29,14 +29,18 @@ import {
 } from './types.ts';
 
 /**
- * Environment variables that carry a Claude Code credential of their own. Any
- * of them in a child would bill that credential instead of the named account's
- * login, so every Claude Code child environment is built without them.
+ * Environment variables that make a Claude Code child bill something other
+ * than the named account's login: a credential of their own (the first three),
+ * or a route to another biller (Bedrock, Vertex, or a proxy base URL). Every
+ * Claude Code child environment is built without them.
  */
 export const CREDENTIAL_ENV_VARS = [
   'ANTHROPIC_API_KEY',
   'ANTHROPIC_AUTH_TOKEN',
   'CLAUDE_CODE_OAUTH_TOKEN',
+  'CLAUDE_CODE_USE_BEDROCK',
+  'CLAUDE_CODE_USE_VERTEX',
+  'ANTHROPIC_BASE_URL',
 ] as const;
 
 /**
@@ -44,14 +48,15 @@ export const CREDENTIAL_ENV_VARS = [
  * account's own login, so the child is built without them.
  *
  * - `claude-code`: {@link CREDENTIAL_ENV_VARS}; the `CLAUDE_CONFIG_DIR` login bills.
- * - `codex`: `OPENAI_API_KEY` and `CODEX_API_KEY`; the `CODEX_HOME` login bills.
+ * - `codex`: `OPENAI_API_KEY`, `CODEX_API_KEY` and `OPENAI_BASE_URL` (a route to
+ *   another endpoint); the `CODEX_HOME` login bills.
  * - `opencode`: none. An OpenCode account IS the ambient provider credential
  *   (often an API key in the environment, the intended path per RUNTIMES.md R3),
  *   so stripping it would leave the session nothing to bill.
  */
 export const RUNTIME_CREDENTIAL_ENV_VARS: Readonly<Record<RuntimeName, readonly string[]>> = {
   'claude-code': CREDENTIAL_ENV_VARS,
-  codex: ['OPENAI_API_KEY', 'CODEX_API_KEY'],
+  codex: ['OPENAI_API_KEY', 'CODEX_API_KEY', 'OPENAI_BASE_URL'],
   opencode: [],
 };
 
@@ -280,28 +285,71 @@ export function sessionHome(
 }
 
 /**
+ * The `CLAUDE_CONFIG_DIR` value that pins a Claude Code child to `root`, or
+ * `undefined` for "leave it unset" (DorkOS's `claudeConfigDirEnv`, the same rule).
+ *
+ * Claude Code names its macOS Keychain login `Claude Code-credentials` plus
+ * `-<8 hex of sha256(config dir)>`, and takes the UNSUFFIXED name exactly when
+ * `CLAUDE_CONFIG_DIR` is unset. `~/.claude`'s login is normally the unsuffixed
+ * one, so spelling `CLAUDE_CONFIG_DIR=~/.claude` out would point the child at a
+ * login that was never created. So:
+ *
+ * - `root` is `<osHome>/.claude` and the supervisor's own `CLAUDE_CONFIG_DIR`
+ *   does not name that same dir: unset. This covers no variable at all, and a
+ *   supervisor on another account (`~/.claude3`) selecting `~/.claude`.
+ * - Otherwise: `root`, explicitly. A supervisor that itself exports
+ *   `CLAUDE_CONFIG_DIR=~/.claude` signed in under the suffixed name, so naming
+ *   the path is right for it.
+ *
+ * Named accounts and the ambient one follow the same rule. Proving the account
+ * still looks under `root`, where Claude Code writes either way.
+ *
+ * @param root - The absolute config dir the child must run in.
+ * @param env - The supervisor's environment.
+ * @param osHome - The OS home folder.
+ * @returns The value to set, or `undefined` to remove the variable.
+ */
+export function claudeConfigDirValue(
+  root: string,
+  env: Readonly<Record<string, string | undefined>>,
+  osHome: string
+): string | undefined {
+  const ambient = env.CLAUDE_CONFIG_DIR;
+  const isDefaultRoot = path.resolve(root) === path.resolve(osHome, '.claude');
+  const ambientNamesRoot =
+    ambient !== undefined && ambient !== '' && path.resolve(ambient) === path.resolve(root);
+  return isDefaultRoot && !ambientNamesRoot ? undefined : root;
+}
+
+/**
  * The child's environment: the supervisor's, minus the runtime's
  * {@link RUNTIME_CREDENTIAL_ENV_VARS}, with the runtime's home variable
- * ({@link RUNTIME_HOME_ENV_VAR}) set explicitly to `home`.
+ * ({@link RUNTIME_HOME_ENV_VAR}) set explicitly to `home`, except that Claude
+ * Code's is removed where {@link claudeConfigDirValue} says unset.
  *
  * @param env - The supervisor's environment.
  * @param runtime - The session's runtime.
  * @param home - The runtime home the session must run in (`null` for opencode).
+ * @param osHome - The OS home folder, for the `~/.claude` rule.
  * @returns A new environment object.
  */
 export function childEnv(
   env: Readonly<Record<string, string | undefined>>,
   runtime: RuntimeName,
-  home: string | null
+  home: string | null,
+  osHome: string
 ): Record<string, string> {
   const out: Record<string, string> = {};
+  const homeVar = RUNTIME_HOME_ENV_VAR[runtime];
   const drop = new Set<string>(RUNTIME_CREDENTIAL_ENV_VARS[runtime]);
+  if (homeVar !== null) drop.add(homeVar);
   for (const [key, value] of Object.entries(env)) {
     if (value === undefined || drop.has(key)) continue;
     out[key] = value;
   }
-  const homeVar = RUNTIME_HOME_ENV_VAR[runtime];
-  if (homeVar !== null && home !== null) out[homeVar] = home;
+  if (homeVar === null || home === null) return out;
+  const value = runtime === 'claude-code' ? claudeConfigDirValue(home, env, osHome) : home;
+  if (value !== undefined) out[homeVar] = value;
   return out;
 }
 
@@ -351,34 +399,70 @@ export interface StopPidDeps {
   kill: (pid: number, signal: NodeJS.Signals) => void;
 }
 
+/** One `ps -o <field>= -p <pid>` answer, trimmed; `null` when ps says nothing. */
+async function psField(run: ProcessRunner, pid: number, field: string): Promise<string | null> {
+  try {
+    const result = await run('ps', ['-o', `${field}=`, '-p', String(pid)], { timeoutMs: 10_000 });
+    const text = result.stdout.trim();
+    return result.code === 0 && text !== '' ? text : null;
+  } catch {
+    return null;
+  }
+}
+
 /**
- * Stop a process flow started, by the pid it recorded, only after `ps -o
- * command= -p <pid>` shows it still runs the runtime's binary
- * ({@link isRuntimeCommand}). A pid that is gone, or now runs something else
- * (the pid was reused), is left alone.
+ * A process's start time as `ps -o lstart=` prints it: its identity beside the
+ * pid, read right after flow learns the pid and kept as `SessionHandle.pidStart`.
+ *
+ * @param run - Runs `ps` (no shell).
+ * @param pid - The process.
+ * @returns The start time, or `undefined` when ps could not say.
+ */
+export async function readPidStart(run: ProcessRunner, pid: number): Promise<string | undefined> {
+  return (await psField(run, pid, 'lstart')) ?? undefined;
+}
+
+/** Who flow expects to find at a recorded pid. */
+export interface PidIdentity {
+  /** The start time recorded at spawn ({@link readPidStart}), when there is one. */
+  pidStart?: string;
+  /** The session the process runs, for a handle recorded without `pidStart`. */
+  sessionId: string;
+}
+
+/**
+ * Stop a process flow started, by the pid it recorded, only while that pid is
+ * still flow's process:
+ *
+ * - `ps -o command=` shows the runtime's binary ({@link isRuntimeCommand}); and
+ * - with a recorded `pidStart`, `ps -o lstart=` shows that same start time, so a
+ *   pid the OS gave to another process, even the operator's own `claude` for
+ *   the same session, is left alone;
+ * - without one (a handle written before it existed), the command line names
+ *   the session id.
+ *
+ * Anything else, or a pid that is gone, is left alone.
  *
  * @param pid - The recorded pid.
  * @param runtime - The runtime flow started under that pid.
  * @param deps - Process access.
+ * @param identity - The recorded start time and session.
  * @returns `stopped` after a SIGTERM; `not-running` when there was nothing of flow's to stop.
  */
 export async function stopRecordedPid(
   pid: number,
   runtime: RuntimeName,
-  deps: StopPidDeps
+  deps: StopPidDeps,
+  identity: PidIdentity
 ): Promise<StopResult> {
   if (!Number.isInteger(pid) || pid <= 0 || !deps.isAlive(pid)) return 'not-running';
-  let command: string;
-  try {
-    const result = await deps.run('ps', ['-o', 'command=', '-p', String(pid)], {
-      timeoutMs: 10_000,
-    });
-    if (result.code !== 0) return 'not-running';
-    command = result.stdout;
-  } catch {
+  const command = await psField(deps.run, pid, 'command');
+  if (command === null || !isRuntimeCommand(runtime, command)) return 'not-running';
+  if (identity.pidStart !== undefined) {
+    if ((await psField(deps.run, pid, 'lstart')) !== identity.pidStart) return 'not-running';
+  } else if (!command.includes(identity.sessionId)) {
     return 'not-running';
   }
-  if (!isRuntimeCommand(runtime, command)) return 'not-running';
   try {
     deps.kill(pid, 'SIGTERM');
   } catch {
