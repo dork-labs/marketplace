@@ -83,34 +83,45 @@ function targetAccount(ctx: VerbContext, dorkHome: string): AccountIdentity | nu
   return accountForConfigDir(accounts, defaultConfigDir(ctx.env, ctx.io.osHome), ctx.io.osHome);
 }
 
-/** The `--json` payload shape. */
-interface RecordOutcome {
+/** The `--json` payload shape of every runtime's `record`. */
+export interface RecordOutcome {
+  /** The account written for, or `null`. */
   account: string | null;
+  /** The window keys (and fact kinds) handed to the writer. */
   recorded: string[];
+  /** Whether the ledger file changed. */
   changed: boolean;
+  /** Whether the write was given up (lock held, or something unexpected). */
   dropped: boolean;
 }
 
 /**
- * Run `flow usage record`.
+ * The frame every runtime's `record` shares (spec §2.1, A4): arm the watchdog,
+ * refuse a TTY, run `body`, and swallow anything unexpected, so a hook that
+ * pipes readings in never sees output or an error. Only a TTY or a bad flag
+ * fails.
  *
  * @param ctx - The verb context.
+ * @param ttyHint - What to pipe in, for a person who typed the verb by hand.
+ * @param body - Records the input; fills `outcome` and reports through `say`.
  * @returns An empty text result, and the outcome for `--json`.
  * @throws {UsageError} When stdin is a terminal.
  */
-export async function run(ctx: VerbContext): Promise<VerbResult> {
+export async function runRecorder(
+  ctx: VerbContext,
+  ttyHint: string,
+  body: (outcome: RecordOutcome, say: (message: string) => void) => Promise<void>
+): Promise<VerbResult> {
   ctx.io.armWatchdog(WATCHDOG_MS);
   const verbose = ctx.args.flags.verbose === true;
   const say = (message: string) => {
     if (verbose) ctx.warn(message);
   };
-  if (ctx.io.stdin.isTTY) {
-    throw new UsageError('pipe the status-line JSON in; see "flow usage --help"');
-  }
+  if (ctx.io.stdin.isTTY) throw new UsageError(ttyHint);
 
   const outcome: RecordOutcome = { account: null, recorded: [], changed: false, dropped: false };
   try {
-    await record(ctx, outcome, say);
+    await body(outcome, say);
   } catch (error) {
     // Anything unexpected is swallowed: the status line must never see an error.
     if (error instanceof UsageError) throw error;
@@ -120,6 +131,19 @@ export async function run(ctx: VerbContext): Promise<VerbResult> {
     );
   }
   return { json: { ok: true, ...outcome }, text: '' };
+}
+
+/**
+ * Run `flow usage record` for Claude Code.
+ *
+ * @param ctx - The verb context.
+ * @returns An empty text result, and the outcome for `--json`.
+ * @throws {UsageError} When stdin is a terminal.
+ */
+export async function run(ctx: VerbContext): Promise<VerbResult> {
+  return runRecorder(ctx, 'pipe the status-line JSON in; see "flow usage --help"', (outcome, say) =>
+    record(ctx, outcome, say)
+  );
 }
 
 /** The body of {@link run}; fills `outcome` as it goes. */

@@ -1,7 +1,7 @@
 /**
- * The `flow fleet` verb (spec `flow-usage` §2.6): every registered account with
- * its usage bars, and every live session with its account, item, state and host,
- * on one screen.
+ * The `flow fleet` verb (spec `flow-usage` §2.6 and Amendment 1 A5): every
+ * account of every runtime with its usage, and every live session with its
+ * account, item, state and host, on one screen, grouped by runtime.
  *
  * Reads only. No file, lock, stamp or tracker is written; the only network call
  * is one `GET` to a DorkOS on this machine. Needs no flow project config and no
@@ -15,30 +15,45 @@
  * @module @dorkos/flow/cli/fleet
  */
 
+import { existsSync } from 'node:fs';
 import { UsageError } from '../errors.ts';
+import { codexHome } from '../fleet/codex-accounts.ts';
+import { resolveOpenCodeDataDir } from '../fleet/opencode-store.ts';
 import {
+  accountRoom,
   effectiveReservePct,
   fiveHourRoom,
-  asRegistered,
+  loadAccounts,
   loadFleetPolicy,
-  loadIdentities,
   resolveDorkHome,
   weeklyRoom,
   type AccountIdentity,
   type ResolvedFleetPolicy,
+  type RuntimeAccount,
 } from '../fleet/accounts.ts';
 import { renderFleet, type FleetAccount, type FleetModel } from '../fleet/render.ts';
 import {
   assertLoopback,
   collectRuns,
   fetchDorkosSessions,
+  fleetAccountKey,
   joinSessions,
   readCliSessions,
   readRunStore,
   resolveDorkosUrl,
   type DorkosResult,
 } from '../fleet/sessions.ts';
-import { readLedger, readWindow, type WindowReading } from '../fleet/usage-ledger.ts';
+import {
+  isErrorWindowKey,
+  listLedgerIds,
+  readCredits,
+  readLedger,
+  readPlan,
+  readSpend,
+  readWindow,
+  type RuntimeSlug,
+  type WindowReading,
+} from '../fleet/usage-ledger.ts';
 import type { VerbContext, VerbResult } from './context.ts';
 
 /** One account's report plus the raw ledger windows the session join needs. */
@@ -47,22 +62,40 @@ interface AccountRead {
   rawWindows: Record<string, unknown> | null;
 }
 
+/**
+ * Where a runtime's implicit account lives on this machine, for deciding whether
+ * to show it before it has a reading: Codex's home, OpenCode's data folder.
+ * Claude Code's implicit account is shown only once it has a ledger.
+ */
+function implicitHome(
+  runtime: RuntimeSlug,
+  env: Readonly<Record<string, string | undefined>>,
+  osHome: string
+): string | null {
+  if (runtime === 'codex') return codexHome(env, osHome);
+  if (runtime === 'opencode') return resolveOpenCodeDataDir(env, osHome);
+  return null;
+}
+
 /** Read one account's ledger and policy into its report row. */
 function readAccount(
-  identity: AccountIdentity,
+  account: RuntimeAccount,
   policy: ResolvedFleetPolicy,
   dorkHome: string,
   now: Date,
   warn: (message: string) => void
 ): AccountRead {
-  const resolved = policy.accounts.find((entry) => entry.id === identity.id);
-  const tracked = identity.routable && resolved !== undefined;
-  let rawWindows: Record<string, unknown> | null = null;
+  const resolved = policy.accounts.find(
+    (entry) => entry.runtime === account.runtime && entry.id === account.id
+  );
+  const tracked = account.routable && resolved !== undefined;
+  let ledger: ReturnType<typeof readLedger>['ledger'] = null;
   if (tracked) {
-    const { ledger, warnings } = readLedger(dorkHome, 'claude-code', identity.id);
-    for (const warning of warnings) warn(warning.message);
-    rawWindows = ledger?.windows ?? null;
+    const read = readLedger(dorkHome, account.runtime, account.id);
+    for (const warning of read.warnings) warn(warning.message);
+    ledger = read.ledger;
   }
+  const rawWindows = ledger?.windows ?? null;
   const windows: Record<string, WindowReading> = {};
   let lastSeen: string | null = null;
   for (const [key, entry] of Object.entries(rawWindows ?? {})) {
@@ -71,24 +104,56 @@ function readAccount(
     windows[key] = reading;
     if (lastSeen === null || reading.observedAt > lastSeen) lastSeen = reading.observedAt;
   }
+  const spend = readSpend(ledger?.spend);
+  if (spend !== null && (lastSeen === null || spend.observedAt > lastSeen))
+    lastSeen = spend.observedAt;
   const reservePct = resolved?.reservePct ?? 0;
-  // Key order is the --json order in spec §2.6.
-  const account: FleetAccount = {
-    id: identity.id,
-    label: identity.label,
-    color: identity.color,
-    path: identity.path,
-    validId: identity.routable,
+  // Key order is the --json order in spec §2.6 and Amendment 1 A5.
+  const row: FleetAccount = {
+    runtime: account.runtime,
+    id: account.id,
+    implicit: account.implicit,
+    label: account.label,
+    color: account.color,
+    path: account.path,
+    validId: account.routable,
     role: resolved?.role ?? 'kept-out',
     reservePct,
-    effectiveReservePct: tracked ? effectiveReservePct(resolved, rawWindows, now) : reservePct,
+    effectiveReservePct:
+      tracked && resolved ? effectiveReservePct(resolved, rawWindows, now) : reservePct,
     scopeRepos: [...(resolved?.scope.repos ?? [])],
     fiveHourRoom: tracked ? fiveHourRoom(rawWindows, now) : null,
-    weeklyRoom: tracked ? weeklyRoom(resolved, rawWindows, now) : null,
+    weeklyRoom: tracked && resolved ? weeklyRoom(resolved, rawWindows, now) : null,
+    room: tracked && resolved ? accountRoom(account.runtime, resolved, ledger, now) : null,
     lastSeen,
     windows,
+    plan: readPlan(ledger?.plan)?.name ?? null,
+    credits: readCredits(ledger?.credits),
+    spend,
+    errors: Object.keys(windows)
+      .filter((key) => isErrorWindowKey(key) && windows[key].status === 'rejected')
+      .sort(),
   };
-  return { account, rawWindows };
+  return { account: row, rawWindows };
+}
+
+/**
+ * The accounts `flow fleet` shows: every registered account, and a runtime's
+ * implicit `default` account when it has a ledger file or (Codex, OpenCode) its
+ * home exists on this machine.
+ */
+function shownAccounts(
+  accounts: readonly RuntimeAccount[],
+  dorkHome: string,
+  env: Readonly<Record<string, string | undefined>>,
+  osHome: string
+): RuntimeAccount[] {
+  return accounts.filter((account) => {
+    if (!account.implicit) return true;
+    if (listLedgerIds(dorkHome, account.runtime).includes(account.id)) return true;
+    const home = implicitHome(account.runtime, env, osHome);
+    return home !== null && existsSync(home);
+  });
 }
 
 /**
@@ -118,24 +183,25 @@ export async function run(ctx: VerbContext): Promise<VerbResult> {
   const now = ctx.now();
   const dorkHome = resolveDorkHome({ ...ctx.env }, ctx.io.osHome);
 
-  // The fleet view shows Claude Code's registered accounts: the only runtime
-  // whose sessions it can find today (spec flow-usage §2.6).
-  const identities = loadIdentities(dorkHome, 'claude-code');
-  for (const warning of identities.warnings) warn(warning.message);
-  const policy = loadFleetPolicy(dorkHome, asRegistered('claude-code', identities.accounts));
+  const loaded = loadAccounts(dorkHome);
+  for (const warning of loaded.warnings) warn(warning.message);
+  const accounts = shownAccounts(loaded.accounts, dorkHome, ctx.env, ctx.io.osHome);
+  const policy = loadFleetPolicy(dorkHome, accounts);
   for (const warning of policy.warnings) warn(warning.message);
-  const reads = identities.accounts.map((identity) =>
-    readAccount(identity, policy, dorkHome, now, warn)
+  const reads = accounts.map((account) => readAccount(account, policy, dorkHome, now, warn));
+  // Claude Code session files and DorkOS's account paths are Claude Code config dirs.
+  const claudeIdentities: AccountIdentity[] = accounts.flatMap((account) =>
+    account.runtime === 'claude-code' && !account.implicit ? [account] : []
   );
 
   const [cli, dorkos] = await Promise.all([
-    readCliSessions(identities.accounts, {
+    readCliSessions(claudeIdentities, {
       pidAlive: ctx.io.pidAlive,
       runProcess: ctx.runProcess,
     }),
     dorkosUrl === null
       ? Promise.resolve<DorkosResult | null>(null)
-      : fetchDorkosSessions(dorkosUrl, identities.accounts, { fetchImpl: ctx.io.fetch }),
+      : fetchDorkosSessions(dorkosUrl, claudeIdentities, { fetchImpl: ctx.io.fetch }),
   ]);
   for (const warning of cli.warnings) warn(warning.message);
   if (dorkos?.warning !== undefined) warn(dorkos.warning);
@@ -152,11 +218,13 @@ export async function run(ctx: VerbContext): Promise<VerbResult> {
   for (const warning of runWarnings) warn(warning.message);
 
   const sessions = joinSessions({
-    identities: identities.accounts,
+    identities: accounts.map((account) => ({ runtime: account.runtime, id: account.id })),
     cli: cli.sessions,
     dorkos: dorkosSessions,
     runs,
-    windowsByAccount: Object.fromEntries(reads.map((r) => [r.account.id, r.rawWindows])),
+    windowsByAccount: Object.fromEntries(
+      reads.map((r) => [fleetAccountKey(r.account.runtime, r.account.id), r.rawWindows])
+    ),
     now,
     pidAlive: ctx.io.pidAlive,
   });

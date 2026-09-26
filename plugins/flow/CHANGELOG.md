@@ -4,6 +4,18 @@ Installs of this plugin are pinned to a commit SHA, so a fix here does not reach
 you until you **reinstall it** (Marketplace → flow → reinstall, or re-run your
 `--plugin-dir` checkout's `git pull`). Each entry below says whether that matters.
 
+## 0.24.0
+
+**flow now records usage for Codex and OpenCode too, and `flow fleet` shows every tool. Reinstall to get it.**
+
+- `flow usage scan --runtime codex` reads the limits Codex writes into its session logs: the 5-hour and weekly windows, a model's own limit (such as GPT-5.3-Codex-Spark), the plan and prepaid credits.
+- `flow usage scan --runtime opencode` reads a copy of OpenCode's message store. It adds up what you spent this month and notices when a provider answers "out of credits" or "rate limited". One provider's trouble never marks another as out.
+- `flow usage record --runtime codex` and `--runtime opencode` take one reading on stdin, so a hook can keep them current.
+- `flow fleet` groups accounts and sessions by tool: Claude Code and Codex with their bars, OpenCode with what it spent this month.
+- `flow usage prune` now only lists what it would delete. Add `--yes` to delete. It also finds files left over from older versions of flow.
+- `flow usage snapshot` adds a sampled usage line to the flow journal, so it keeps a history of your usage. `scan` and `probe` add one too.
+- flow still never reads a sign-in: not Claude Code's, not Codex's `auth.json`, not OpenCode's credential tables.
+
 ## 0.23.0
 
 **flow now tracks accounts and usage for Claude Code, Codex and OpenCode, not only Claude Code. Reinstall, then run `flow accounts` once.**

@@ -173,4 +173,44 @@ describe('usage record without npm install', () => {
       true
     );
   }, 30_000);
+
+  it('writes the Codex ledger with --runtime codex from a copy with no node_modules', async () => {
+    // Purpose: a Codex hook may run flow where npm install never ran (A8).
+    const copy = path.join(root, 'flow-codex');
+    cpSync(path.join(FLOW_ROOT, 'scripts'), path.join(copy, 'scripts'), { recursive: true });
+    const input = readFileSync(
+      path.join(FLOW_ROOT, 'engine-tests', 'fixtures', 'usage', 'codex', 'bare-rate-limits.json'),
+      'utf8'
+    );
+    const result = spawnSync(
+      process.execPath,
+      [
+        '--experimental-strip-types',
+        '--no-warnings',
+        path.join(copy, 'scripts', 'flow.ts'),
+        'usage',
+        'record',
+        '--runtime',
+        'codex',
+        '--verbose',
+      ],
+      {
+        input,
+        env: {
+          PATH: process.env.PATH,
+          HOME: root,
+          DORK_HOME: dorkHome,
+          CODEX_HOME: path.join(root, '.codex'),
+        },
+        encoding: 'utf8',
+      }
+    );
+    expect(result.stderr).toBe('');
+    expect(result.status).toBe(0);
+    expect(result.stdout).toBe('');
+    const ledger = JSON.parse(
+      readFileSync(path.join(dorkHome, 'runtimes', 'codex', 'usage', 'default.json'), 'utf8')
+    );
+    expect(ledger.windows.seven_day.usedPct).toBe(9.5);
+  }, 30_000);
 });

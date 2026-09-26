@@ -23,6 +23,7 @@ import { canonicalDir } from '../fleet/config-dir.ts';
 import { fromRateLimitEvent } from '../fleet/observations.ts';
 import { recordUsage, type UsageObservation } from '../fleet/usage-ledger.ts';
 import type { VerbContext, VerbResult } from './context.ts';
+import { journalUsage } from './usage-journal.ts';
 
 /**
  * Variables removed from the probe's environment so the turn bills the
@@ -282,6 +283,7 @@ export async function run(ctx: VerbContext): Promise<VerbResult> {
       'the probe read the usage but could not save it (the usage file stayed locked); try again'
     );
   }
+  journalUsage(ctx, dorkHome, [{ runtime: 'claude-code', id: account.id }]);
 
   return {
     json: {
