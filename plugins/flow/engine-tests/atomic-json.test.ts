@@ -30,7 +30,7 @@ import {
   readJsonFile,
   releaseLock,
   updateJsonFile,
-  withFileLock,
+  withHeldLock,
 } from '../scripts/atomic-json.ts';
 
 let dir: string;
@@ -175,61 +175,38 @@ describe('updateJsonFile', () => {
   });
 });
 
-describe('withFileLock', () => {
-  // Purpose: `flow claim` holds the file's lock across a tracker read and write,
-  // and writes the file inside it; these pin that the hold is exclusive,
-  // re-entrant for its own writes, and kept alive past the stale age.
-
-  it('lets a write inside the hold go through without deadlocking', async () => {
-    // Purpose: a non-re-entrant lock would make the inner write wait on itself and drop.
-    const result = await withFileLock(file, async () =>
-      updateJsonFile(file, () => ({ inner: true }), { giveUpMs: 200 })
-    );
-    expect(result.held).toBe(true);
-    expect(result.held && result.value.status).toBe('written');
-    expect(JSON.parse(readFileSync(file, 'utf8'))).toEqual({ inner: true });
-    expect(existsSync(lock)).toBe(false);
-  });
+describe('withHeldLock', () => {
+  // Purpose: `flow claim` holds a lock of its own across a tracker read and
+  // write; these pin that the hold is exclusive, kept alive past the stale age,
+  // and always released.
 
   it('makes a second holder wait until the first lets go', async () => {
-    // Purpose: two claims of one item must run one after the other, never interleaved.
+    // Purpose: two claims must run one after the other, never interleaved.
     const order: string[] = [];
     let release!: () => void;
     const gate = new Promise<void>((resolve) => (release = resolve));
-    const first = withFileLock(file, async () => {
+    const first = withHeldLock(lock, async () => {
       order.push('first-in');
       await gate;
       order.push('first-out');
     });
     await new Promise((resolve) => setTimeout(resolve, 20));
-    const second = withFileLock(file, async () => {
+    const second = withHeldLock(lock, async () => {
       order.push('second-in');
     });
     await new Promise((resolve) => setTimeout(resolve, 150));
     release();
     await Promise.all([first, second]);
     expect(order).toEqual(['first-in', 'first-out', 'second-in']);
-  });
-
-  it('does not let an unrelated write in another async context through', async () => {
-    // Purpose: re-entrancy follows the holder's own call chain, not the process,
-    // so a concurrent write elsewhere in the same process still waits.
-    let release!: () => void;
-    const gate = new Promise<void>((resolve) => (release = resolve));
-    const held = withFileLock(file, () => gate);
-    await new Promise((resolve) => setTimeout(resolve, 20));
-    const outside = await updateJsonFile(file, () => ({ x: 1 }), { giveUpMs: 100 });
-    expect(outside.status).toBe('dropped');
-    release();
-    await held;
+    expect(existsSync(lock)).toBe(false);
   });
 
   it('reports a hold it could not take', async () => {
     // Purpose: the caller must know it ran nothing, so it can refuse instead of racing.
     writeFileSync(lock, 'someone-else');
     let ran = false;
-    const result = await withFileLock(
-      file,
+    const result = await withHeldLock(
+      lock,
       async () => {
         ran = true;
       },
@@ -243,8 +220,8 @@ describe('withFileLock', () => {
   it('keeps the lock fresh while held so no one breaks it as stale', async () => {
     // Purpose: a slow tracker call can outlast the stale age; a broken lock
     // would let a second claim in.
-    await withFileLock(
-      file,
+    await withHeldLock(
+      lock,
       async () => {
         age(lock, 60_000);
         await new Promise((resolve) => setTimeout(resolve, 120));
@@ -257,7 +234,7 @@ describe('withFileLock', () => {
   it('releases the lock when the callback throws', async () => {
     // Purpose: a refused claim must not leave the lock for 10 s.
     await expect(
-      withFileLock(file, async () => {
+      withHeldLock(lock, async () => {
         throw new Error('boom');
       })
     ).rejects.toThrow('boom');

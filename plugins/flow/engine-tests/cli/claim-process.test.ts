@@ -191,3 +191,57 @@ describe('two claims of one item on one machine', () => {
     expect(runs()['id-FAKE-1'].sessionId).toBe(winnerSession);
   }, 30_000);
 });
+
+/** Wait until one of `files` exists, or fail after `ms`. */
+async function waitForAny(files: string[], ms: number): Promise<void> {
+  const until = Date.now() + ms;
+  while (!files.some((file) => existsSync(file))) {
+    if (Date.now() > until) throw new Error(`none of ${files.join(', ')} appeared`);
+    await new Promise((resolve) => setTimeout(resolve, 20));
+  }
+}
+
+describe('a slow claim and the other write verbs', () => {
+  it('does not make a stage change on another item wait out the run-store lock', async () => {
+    // Purpose: a claim waits on several tracker round-trips (seconds through
+    // composio). If it held the run store's own lock that long, a parallel
+    // session's "flow stage" (2 s lock wait) would update the tracker and then
+    // fail with "run record not saved".
+    const store = path.join(dir, '.dork', 'flow', 'flow-state.json');
+    mkdirSync(path.dirname(store), { recursive: true });
+    const other: FlowRun = {
+      issueId: 'id-FAKE-2',
+      identifier: 'FAKE-2',
+      sessionId: 'sess-other',
+      worktreePath: dir,
+      branch: 'work',
+      stage: 'execute',
+      status: 'running',
+      attemptCount: 0,
+      workerPid: 1,
+      startedAt: '2026-09-26T00:00:00.000Z',
+    };
+    writeFileSync(store, JSON.stringify({ 'id-FAKE-2': other }, null, 2));
+    writeBacklog({
+      items: [
+        item('FAKE-1'),
+        item('FAKE-2', {
+          stateCategory: 'started',
+          labels: ['type/task', 'agent/claimed'],
+          agentDisposition: 'claimed',
+        }),
+      ],
+      getItemDelayMs: { 'FAKE-1': 3500 },
+    });
+
+    const claim = claimAsync('sess-a');
+    await waitForAny([`${store}.lock`, `${store}.claim.lock`], 10_000);
+    const stage = runLine(
+      `node --experimental-strip-types "${path.join(FLOW_ROOT, 'scripts', 'flow.ts')}" stage FAKE-2 verify --json`
+    );
+    expect(stage.status, stage.stdout + stage.stderr).toBe(EXIT.ok);
+    expect((await claim).code).toBe(EXIT.ok);
+    expect(runs()['id-FAKE-2'].stage).toBe('verify');
+    expect(runs()['id-FAKE-1'].sessionId).toBe('sess-a');
+  }, 30_000);
+});

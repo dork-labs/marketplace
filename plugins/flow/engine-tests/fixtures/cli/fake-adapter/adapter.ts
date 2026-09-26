@@ -70,8 +70,11 @@ export interface FakeBacklog {
   failReads?: string;
   /** When true, `applyWorkState` records the call but changes nothing. */
   dropWrites?: boolean;
-  /** File-backed only: wait this many ms after reading, before `getItem` answers. */
-  getItemDelayMs?: number;
+  /**
+   * File-backed only: wait this many ms after reading, before `getItem`
+   * answers; a record gives the wait per identifier (others answer at once).
+   */
+  getItemDelayMs?: number | Record<string, number>;
 }
 
 /** One recorded write. */
@@ -199,7 +202,8 @@ export function createAdapter(_ctx: AdapterContext): CodeAdapter {
     async getItem(identifier, options) {
       const backlog = load();
       const item = await fresh(backlog).getItem(identifier, options);
-      const delay = backlog.getItemDelayMs ?? 0;
+      const wait = backlog.getItemDelayMs;
+      const delay = typeof wait === 'number' ? wait : (wait?.[identifier] ?? 0);
       if (delay > 0) await new Promise((resolve) => setTimeout(resolve, delay));
       return item;
     },

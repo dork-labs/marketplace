@@ -18,6 +18,7 @@ Run it as `node --experimental-strip-types <flow-root>/scripts/flow.ts <command>
 - A new audit rule: an item's state, its `agent/*` label and its `stage/*` label must agree, and a `stage/*` label now appears only on work nobody has started. Items that break this show up in `flow audit`.
 - The Linear adapter now carries the code these commands use. The adapter contract is now version 2.0.0; a custom adapter that still sets `stage/*` labels on started work should be regenerated.
 - The instructions these commands replace are gone from the skills.
+- The reserve you keep on an account now comes back after its weekly reset. Before, it stayed at 0 after the reset, which has affected how accounts were ranked since 0.16.0.
 
 ## 0.17.0
 

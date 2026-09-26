@@ -9,9 +9,11 @@
  * records a `FlowRun` whose `stage` is the one the removed `stage/*` label named.
  * It posts no comment: the label is the signal.
  *
- * The run store's lock is held from the tracker read that checks the item
- * through the run record, so two claims of one item on one machine run one after
- * the other: the second reads `agent/claimed` and exits 5. A claim with no
+ * The claim lock (`flow-state.json.claim.lock`) is held from the tracker read
+ * that checks the item through the run record, so two claims on one machine run
+ * one after the other: the second reads `agent/claimed` and exits 5. The run
+ * store's own lock is taken only for the short run write, so other verbs'
+ * writes never wait out a claim's tracker calls. A claim with no
  * session id records `sessionId: ""` (unknown, never invented) and warns.
  *
  * @module @dorkos/flow/cli/claim
@@ -55,9 +57,9 @@ async function resolveIdentity(adapter: CodeAdapter, config: FlowConfig): Promis
 }
 
 /**
- * How long a claim waits for another claim on this machine to finish with the
- * run store. Longer than the shared writers' 2 s: the holder is waiting on the
- * tracker, and a claim that waits is better than one that gives up.
+ * How long a claim waits for another claim on this machine to finish. Longer
+ * than the shared writers' 2 s: the holder is waiting on the tracker, and a
+ * claim that waits is better than one that gives up.
  */
 const CLAIM_LOCK_WAIT_MS = 60_000;
 
@@ -138,7 +140,7 @@ export async function run(ctx: VerbContext): Promise<VerbResult> {
   const { worktreePath, branch } = await checkout(ctx);
   const account = ctx.args.flags.account;
 
-  const locked = await store.withLock(
+  const locked = await store.withClaimLock(
     async () => {
       const item = await adapter.getItem(identifier);
       requireOpen(item, 'claim');
@@ -196,7 +198,7 @@ export async function run(ctx: VerbContext): Promise<VerbResult> {
   );
   if (!locked.held) {
     throw new PreconditionError(
-      `another flow on this machine held ${store.path} for ${CLAIM_LOCK_WAIT_MS / 1000} s, so ${identifier} was not claimed; try again`
+      `another claim on this machine held ${store.path}.claim.lock for ${CLAIM_LOCK_WAIT_MS / 1000} s, so ${identifier} was not claimed; try again`
     );
   }
   const { change, record } = locked.value;
