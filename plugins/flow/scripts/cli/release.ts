@@ -14,6 +14,7 @@
 import { UsageError } from '../errors.ts';
 import { projectionFor } from '../work-state.ts';
 import type { VerbContext, VerbResult } from './context.ts';
+import { recordEvent } from './auto-journal.ts';
 import { signBody } from './provenance.ts';
 import {
   applyAndVerify,
@@ -64,6 +65,7 @@ export async function run(ctx: VerbContext): Promise<VerbResult> {
       requireStored(removed.status, store.path, `run "flow release ${identifier}" again`);
     }
     if (body !== undefined) await adapter.comment(item, body);
+    recordEvent(ctx, { kind: 'claim', phase: 'release', item: identifier });
   }
   return {
     json: {

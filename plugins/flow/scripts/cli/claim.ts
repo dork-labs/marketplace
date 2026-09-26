@@ -35,6 +35,8 @@ import { AGENT_CLAIMED, AGENT_READY, projectionFor } from '../work-state.ts';
 import type { VerbContext, VerbResult } from './context.ts';
 import { LAUNCHERS } from './provenance.ts';
 import { RUNTIMES } from '../fleet/usage-ledger.ts';
+import type { Runtime } from '../runtime-detect.ts';
+import { recordEvent } from './auto-journal.ts';
 import { runtimeSession } from './session-id.ts';
 import {
   applyAndVerify,
@@ -216,7 +218,12 @@ export async function run(ctx: VerbContext): Promise<VerbResult> {
     );
   }
   const { change, record } = locked.value;
+  const journalRuntime = (runtime ?? undefined) as Runtime | undefined;
+  if (!ctx.dryRun) {
+    recordEvent(ctx, { kind: 'claim', phase: 'claim', item: identifier }, journalRuntime);
+  }
   return {
+    runtime: journalRuntime,
     json: { ok: true, dryRun: ctx.dryRun, identifier, change, run: record },
     text: `${ctx.dryRun ? 'Would claim' : 'Claimed'} ${identifier} at stage ${record.stage} (worker ${pid}, ${branch}).`,
   };

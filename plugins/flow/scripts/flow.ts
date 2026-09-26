@@ -2,12 +2,14 @@
  * The `flow` CLI entry point (spec `flow-cli-core` §2).
  *
  * Run it as `node --experimental-strip-types <flow-root>/scripts/flow.ts <verb>
- * [args] [flags]`. It owns three things and nothing else:
+ * [args] [flags]`. It owns four things and nothing else:
  *
  * - the verb table ({@link VERBS}), which the parser and `--help` read without
  *   loading any verb module;
  * - the run: parse argv, `import()` the one verb asked for, print its result;
- * - the one mapping from a thrown error to an exit code ({@link classifyError}).
+ * - the one mapping from a thrown error to an exit code ({@link classifyError});
+ * - the journal line every verb run gets once its arguments parse (`verb`, and
+ *   `oracle.error` on exit 70), which never changes the run's output or exit.
  *
  * Every top-level import is dependency-free, so `--help`, a usage error and the
  * "run npm install" hint all work before `npm install`. Verbs that need `zod`
@@ -26,11 +28,14 @@ import {
   realProcessRunner,
   type AdapterFactory,
   type CliDeps,
+  type VerbContext,
   type VerbDefinition,
 } from './cli/context.ts';
+import { recordEvent, recordsVerbRun } from './cli/auto-journal.ts';
 import { journalVerb, noteVerb } from './cli/journal-verbs.ts';
 import { Output, renderTopHelp, renderVerbHelp } from './cli/output.ts';
 import { EXIT, FlowError, UsageError, type ExitCode } from './errors.ts';
+import type { Runtime } from './runtime-detect.ts';
 
 /**
  * The verb table. Add a verb with one module under `scripts/cli/` and one entry
@@ -468,6 +473,12 @@ export interface MainDeps extends CliDeps {
   verbs?: readonly VerbDefinition[];
   /** The plugin folder named in the install hint. Default: this file's `..`. */
   flowRoot?: string;
+  /**
+   * A monotonic clock in milliseconds that times a verb run for its journal
+   * line. Default `performance.now`. Kept apart from `now` so timing a run
+   * never reads the clock a verb (or a test's scripted clock) counts on.
+   */
+  elapsedMs?: () => number;
 }
 
 /** An exit code and the plain sentence printed with it. */
@@ -523,6 +534,8 @@ export async function main(argv: readonly string[], deps: MainDeps): Promise<num
   const verbs = deps.verbs ?? VERBS;
   const flowRoot = deps.flowRoot ?? FLOW_ROOT;
   const output = new Output(wantsJson(argv), deps.stdout, deps.stderr);
+  const elapsed = deps.elapsedMs ?? (() => performance.now());
+  let run: VerbRun | undefined;
 
   try {
     const location = locateVerb(argv);
@@ -542,15 +555,72 @@ export async function main(argv: readonly string[], deps: MainDeps): Promise<num
     }
 
     const args = parseVerbArgs(argv, location, verb);
-    const module = await verb.load();
     const ctx = createVerbContext(args, deps, flowRoot, (message) => output.warn(message));
+    // From here the run is a verb run, and it is journaled however it ends.
+    run = { ctx, verb, startedMs: elapsed() };
+    const module = await verb.load();
     const result = await module.run(ctx);
     output.result(result);
-    return result.exitCode ?? EXIT.ok;
+    const code = result.exitCode ?? EXIT.ok;
+    journalRun(run, elapsed, code, { runtime: result.runtime });
+    return code;
   } catch (error) {
     const { code, message } = classifyError(error, flowRoot);
     output.error(code, message);
+    if (run !== undefined) journalRun(run, elapsed, code, { error });
     return code;
+  }
+}
+
+/** A verb run in progress: what {@link journalRun} records once it ends. */
+interface VerbRun {
+  /** The verb's context. */
+  ctx: VerbContext;
+  /** The verb. */
+  verb: VerbDefinition;
+  /** When the run started, from the monotonic clock. */
+  startedMs: number;
+}
+
+/**
+ * Journal a finished verb run: a `verb` line with its time and exit code and,
+ * when it failed with an internal error (a bug in flow or in an oracle it
+ * runs), an `oracle.error` line with the error's first line, whatever the
+ * verb. `note` and `journal` (which write their own lines) get no `verb` line,
+ * and `usage record` gets one only when it fails: see {@link recordsVerbRun}.
+ * The `verb` line's runtime is the one the verb reported (`VerbResult.runtime`),
+ * else the environment's; a verb that threw reports none, so a refused
+ * `flow claim --runtime x` is recorded under the runtime that ran it.
+ * Never throws and never prints: see `cli/auto-journal.ts`.
+ */
+function journalRun(
+  run: VerbRun,
+  elapsed: () => number,
+  code: number,
+  outcome: { error?: unknown; runtime?: Runtime } = {}
+): void {
+  const { ctx, verb } = run;
+  const { error, runtime } = outcome;
+  try {
+    const identifier =
+      verb.positionals?.[0]?.name === 'identifier' ? ctx.args.positionals[0] : undefined;
+    const item = identifier === undefined ? {} : { item: identifier };
+    const ms = Math.max(0, Math.round(elapsed() - run.startedMs));
+    if (recordsVerbRun(verb.name, ctx.args.positionals, code)) {
+      recordEvent(ctx, { kind: 'verb', verb: verb.name, ms, exit: code, ...item }, runtime);
+    }
+    if (code === EXIT.internal) {
+      const message = error instanceof Error ? error.message : String(error);
+      recordEvent(ctx, {
+        kind: 'oracle.error',
+        oracle: verb.name,
+        exit: code,
+        errorClass: message.split(/\r?\n/, 1)[0] ?? '',
+        ...item,
+      });
+    }
+  } catch {
+    // The clock or the error itself misbehaved; the run's outcome stands.
   }
 }
 

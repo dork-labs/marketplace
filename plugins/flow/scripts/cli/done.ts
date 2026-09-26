@@ -20,6 +20,7 @@ import path from 'node:path';
 import { UsageError } from '../errors.ts';
 import { projectionFor } from '../work-state.ts';
 import type { VerbContext, VerbResult } from './context.ts';
+import { recordEvent } from './auto-journal.ts';
 import { signBody, unsignedBody } from './provenance.ts';
 import {
   applyAndVerify,
@@ -86,6 +87,19 @@ export async function run(ctx: VerbContext): Promise<VerbResult> {
     if (existing !== undefined) {
       const written = await store.setRunStatus(item.id, 'complete', { completedAt });
       requireStored(written.status, store.path, `run "flow done ${identifier}" again`);
+    }
+    // A re-run (the recovery path) of a done that already finished journals
+    // nothing new: the summary was already posted and the run, if this machine
+    // keeps one, was already complete.
+    const repeat = alreadyPosted && (existing === undefined || existing.status === 'complete');
+    if (!repeat) {
+      recordEvent(ctx, {
+        kind: 'stage',
+        stage: 'done',
+        phase: 'end',
+        outcome: 'ok',
+        item: identifier,
+      });
     }
   }
   return {
