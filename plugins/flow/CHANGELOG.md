@@ -4,6 +4,12 @@ Installs of this plugin are pinned to a commit SHA, so a fix here does not reach
 you until you **reinstall it** (Marketplace → flow → reinstall, or re-run your
 `--plugin-dir` checkout's `git pull`). Each entry below says whether that matters.
 
+## 0.33.0
+
+**A drain on the DorkOS host now checks that work on your main sign-in really runs there. Reinstall to get it.**
+
+- When flow starts work on your own sign-in (`default`) through DorkOS, it now confirms the session uses that account's folder. If DorkOS was started on another account, the launch stops with a wrong-account error instead of spending that account.
+
 ## 0.32.0
 
 **Your main Claude Code sign-in now shows up in flow, even when you have listed other accounts. Reinstall to get it.**

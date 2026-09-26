@@ -489,8 +489,18 @@ export function createDorkosLauncher(deps: DorkosLauncherDeps): Launcher {
     // account it bills. DorkOS derives `account` from where the transcript
     // lives, so it can lag the session itself; keep looking until the deadline.
     const sent = sentAccount(req);
+    // A standalone Claude Code `default` is not sent (DorkOS resolves its own
+    // default), but it has a machine-wide folder, so the session must still be
+    // proved to bill that folder: a DorkOS whose own environment points at
+    // another account would otherwise spend it unnoticed (spec §1.1a rev 6d).
     const expected =
-      sent === undefined || req.account === null ? null : expectedAccount(req.account);
+      req.account === null
+        ? null
+        : sent !== undefined
+          ? expectedAccount(req.account)
+          : req.runtime === 'claude-code' && req.account.path !== null
+            ? path.resolve(req.account.path)
+            : null;
     const deadline = deps.now() + timeoutMs;
     let seen: Record<string, unknown> | null = null;
     for (;;) {

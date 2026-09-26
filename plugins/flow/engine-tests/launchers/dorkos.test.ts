@@ -576,6 +576,26 @@ describe('dorkos launcher: the session it records', () => {
     });
   });
 
+  // A standalone Claude Code `default` (the operator's own sign-in) is not sent
+  // to DorkOS, but its machine-wide folder is still checked: DorkOS started
+  // with CLAUDE_CONFIG_DIR on a kept-out account must not bill that account.
+  it('proves a standalone default runs in its own folder without sending its id', async () => {
+    await withFake({}, async (h) => {
+      const main = { runtime: 'claude-code' as const, id: 'default', path: h.ambientConfigDir };
+      const handle = await h.launcher.start(requestFor(h, { account: main }));
+      expect(handle.account).toBe('default');
+      const post = h.requests().find((r) => r.url.endsWith('/messages'));
+      expect(post?.body).not.toHaveProperty('account');
+    });
+    await withFake({}, async (h) => {
+      h.script({ confirm: 'other-account' });
+      const main = { runtime: 'claude-code' as const, id: 'default', path: h.ambientConfigDir };
+      const err = await launchFailure(h.launcher.start(requestFor(h, { account: main })));
+      expect(err.code).toBe('wrong-account');
+      expect(err.message).toContain(h.ambientConfigDir);
+    });
+  });
+
   // The runtime rides to both start paths exactly as requested, never a
   // hardcoded claude-code.
   it('passes the runtime to the route body and to session_start', async () => {
