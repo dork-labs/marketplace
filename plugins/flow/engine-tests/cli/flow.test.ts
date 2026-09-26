@@ -30,6 +30,7 @@ import {
   UsageError,
 } from '../../scripts/errors.ts';
 import { classifyError, main, VERBS, type MainDeps } from '../../scripts/flow.ts';
+import { createFakeAdapter } from '../fixtures/cli/fake-adapter/adapter.ts';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const FLOW_SCRIPT = path.resolve(here, '..', '..', 'scripts', 'flow.ts');
@@ -56,7 +57,7 @@ function fakeDeps(overrides: Partial<MainDeps> = {}) {
     now: () => new Date('2026-09-26T12:00:00.000Z'),
     stdout,
     stderr,
-    createAdapter: async () => ({ fake: true }),
+    createAdapter: async () => createFakeAdapter({ items: [] }).adapter,
     runProcess: async () => ({ code: 0, stdout: '', stderr: '' }),
     flowRoot: '/opt/flow',
     verbs: [],
@@ -439,7 +440,8 @@ describe('lazy loading and injected collaborators', () => {
   // Purpose: the verb reaches env, clock, process runner and adapter only
   // through deps, and the adapter is built once per run, lazily.
   it('hands the verb the injected collaborators', async () => {
-    const createAdapter = vi.fn(async (_request: AdapterRequest) => ({ id: 'fake-adapter' }));
+    const fakeAdapter = createFakeAdapter({ items: [] }).adapter;
+    const createAdapter = vi.fn(async (_request: AdapterRequest) => fakeAdapter);
     const runProcess = vi.fn(async () => ({ code: 0, stdout: 'main\n', stderr: '' }));
     let observed: unknown[] = [];
     const module: VerbModule = {
@@ -458,13 +460,7 @@ describe('lazy loading and injected collaborators', () => {
       env: { X: 'y' },
     });
     await main(['probe', '--project', 'p'], deps);
-    expect(observed).toEqual([
-      { id: 'fake-adapter' },
-      true,
-      'main\n',
-      '2026-09-26T12:00:00.000Z',
-      'y',
-    ]);
+    expect(observed).toEqual([fakeAdapter, true, 'main\n', '2026-09-26T12:00:00.000Z', 'y']);
     expect(createAdapter).toHaveBeenCalledTimes(1);
     expect(createAdapter.mock.calls[0][0]).toMatchObject({
       projectDir: path.resolve('/work/project', 'p'),
@@ -474,7 +470,7 @@ describe('lazy loading and injected collaborators', () => {
 
   // Purpose: a verb that never asks for the adapter never builds one.
   it('does not build the adapter unless asked', async () => {
-    const createAdapter = vi.fn(async () => ({}));
+    const createAdapter = vi.fn(async () => createFakeAdapter({ items: [] }).adapter);
     const { deps } = fakeDeps({
       verbs: [probeVerb(recordingModule().module)],
       createAdapter,

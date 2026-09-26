@@ -29,7 +29,7 @@ import {
   type VerbDefinition,
 } from './cli/context.ts';
 import { Output, renderTopHelp, renderVerbHelp } from './cli/output.ts';
-import { ConfigError, EXIT, FlowError, UsageError, type ExitCode } from './errors.ts';
+import { EXIT, FlowError, UsageError, type ExitCode } from './errors.ts';
 
 /**
  * The verb table. Add a verb with one module under `scripts/cli/` and one entry
@@ -180,13 +180,13 @@ export async function main(argv: readonly string[], deps: MainDeps): Promise<num
 }
 
 /**
- * The adapter factory the script wires until the tracker seam (spec §4) lands:
- * it refuses with exit 3, the code for "no code adapter".
+ * The adapter factory the script wires (spec §4). `tracker/load.ts` needs zod
+ * (through config loading), so it is imported only when a verb asks for the
+ * tracker; a missing install then exits 6 through {@link classifyError}.
  */
-const noCodeAdapter: AdapterFactory = async () => {
-  throw new ConfigError(
-    'this flow CLI has no tracker adapter loader; update the flow plugin to use tracker verbs'
-  );
+const createCodeAdapter: AdapterFactory = async (request) => {
+  const load = await import('./tracker/load.ts');
+  return load.createCodeAdapter(request);
 };
 
 if (invokedDirectly(import.meta.url)) {
@@ -196,7 +196,7 @@ if (invokedDirectly(import.meta.url)) {
     now: () => new Date(),
     stdout: process.stdout,
     stderr: process.stderr,
-    createAdapter: noCodeAdapter,
+    createAdapter: createCodeAdapter,
     runProcess: realProcessRunner,
   });
 }
