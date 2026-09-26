@@ -12,7 +12,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { describe, expect, it, vi } from 'vitest';
 
-import { codexModeArgs } from '../../scripts/launchers/cli.ts';
+import { codexModeArgs, gitCommonDirOf } from '../../scripts/launchers/cli.ts';
 import {
   codexLimit,
   codexWindowKey,
@@ -57,6 +57,8 @@ describe('cli launcher: codex', () => {
         'workspace-write',
         '-c',
         'approval_policy="never"',
+        '-c',
+        'sandbox_workspace_write.network_access=true',
         '-m',
         'gpt-5.5',
         `Read ${h.promptFile} and do exactly what it says.`,
@@ -105,15 +107,37 @@ describe('cli launcher: codex', () => {
   // approvals never asked (codex exec has no approval channel).
   it('maps each permission mode to a sandbox', () => {
     expect(codexModeArgs('default')).toEqual(['-s', 'read-only', '-c', 'approval_policy="never"']);
-    expect(codexModeArgs('acceptEdits')).toEqual([
+    expect(codexModeArgs('acceptEdits', '/repo/.git')).toEqual([
       '-s',
       'workspace-write',
       '-c',
       'approval_policy="never"',
+      '-c',
+      'sandbox_workspace_write.network_access=true',
+      '-c',
+      'sandbox_workspace_write.writable_roots=["/repo/.git"]',
     ]);
     expect(codexModeArgs('bypassPermissions')).toEqual([
       '--dangerously-bypass-approvals-and-sandbox',
     ]);
+  });
+
+  // A drain worker commits in a linked worktree, whose objects and refs live in
+  // the shared git dir outside the worktree; gitCommonDirOf must find it from
+  // the worktree's .git pointer file. Fails if the sandbox root is the worktree.
+  it('finds the shared git dir of a linked worktree', () => {
+    const root = mkdtempSync(path.join(os.tmpdir(), 'flow-gitdir-'));
+    const common = path.join(root, 'main', '.git');
+    const wtGit = path.join(common, 'worktrees', 'wt1');
+    mkdirSync(wtGit, { recursive: true });
+    writeFileSync(path.join(wtGit, 'commondir'), '../..\n');
+    const wt = path.join(root, 'wt1');
+    mkdirSync(wt);
+    writeFileSync(path.join(wt, '.git'), `gitdir: ${wtGit}\n`);
+    expect(gitCommonDirOf(wt)).toBe(common);
+    expect(gitCommonDirOf(path.join(root, 'main'))).toBe(common);
+    expect(gitCommonDirOf(path.join(root, 'nowhere'))).toBeNull();
+    rmSync(root, { recursive: true, force: true });
   });
 
   // The ambient account is the supervisor's own CODEX_HOME when it has one,

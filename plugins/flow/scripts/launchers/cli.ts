@@ -26,8 +26,9 @@
  *   handle once a `rate_limits` reading reports it.
  * - **mode flags** (the mapping DorkOS's codex runtime uses; `codex exec` has no
  *   approval channel): `default` → `-s read-only -c approval_policy="never"`;
- *   `acceptEdits` → `-s workspace-write -c approval_policy="never"` (network
- *   stays off in that sandbox, Codex's own default); `bypassPermissions` →
+ *   `acceptEdits` → `-s workspace-write -c approval_policy="never"`, plus network
+ *   access and the shared git dir as a writable root so a worker can commit and
+ *   push from a linked worktree; `bypassPermissions` →
  *   `--dangerously-bypass-approvals-and-sandbox`.
  * - **resume:** `codex exec --json -C <cwd> <mode flags> [-m <model>] resume <id>
  *   "<pointer>"`: the shared flags go before `resume`, the order the Codex SDK
@@ -74,6 +75,7 @@ import {
   readdirSync,
   readFileSync,
   rmSync,
+  statSync,
   writeFileSync,
 } from 'node:fs';
 import os from 'node:os';
@@ -329,11 +331,52 @@ function streamArgs(mode: string, model: string | undefined): string[] {
   return args;
 }
 
-/** The `codex exec` sandbox/approval flags for a permission mode (see the module doc). */
-export function codexModeArgs(mode: LaunchPermissionMode): string[] {
+/**
+ * The `codex exec` sandbox/approval flags for a permission mode (see the module
+ * doc). Under `acceptEdits` a drain worker must commit and push, so the
+ * workspace-write sandbox also gets network access and the repository's shared
+ * git directory as a writable root: in a linked worktree, `git commit` writes
+ * objects and refs there, outside the worktree Codex would otherwise confine it to.
+ *
+ * @param mode - The requested permission mode.
+ * @param gitCommonDir - The absolute shared git directory of the worktree, when known.
+ */
+export function codexModeArgs(mode: LaunchPermissionMode, gitCommonDir?: string | null): string[] {
   if (mode === 'bypassPermissions') return ['--dangerously-bypass-approvals-and-sandbox'];
-  const sandbox = mode === 'acceptEdits' ? 'workspace-write' : 'read-only';
-  return ['-s', sandbox, '-c', 'approval_policy="never"'];
+  if (mode === 'default') return ['-s', 'read-only', '-c', 'approval_policy="never"'];
+  return [
+    '-s',
+    'workspace-write',
+    '-c',
+    'approval_policy="never"',
+    '-c',
+    'sandbox_workspace_write.network_access=true',
+    ...(gitCommonDir
+      ? ['-c', `sandbox_workspace_write.writable_roots=[${JSON.stringify(gitCommonDir)}]`]
+      : []),
+  ];
+}
+
+/**
+ * The shared git directory of the checkout at `cwd`, read from disk with no
+ * subprocess: a `.git` directory is itself the common dir; a linked worktree's
+ * `.git` file points at `<common>/worktrees/<name>`, whose `commondir` names it.
+ *
+ * @param cwd - The worktree root.
+ * @returns The absolute common git directory, or null when it cannot be read.
+ */
+export function gitCommonDirOf(cwd: string): string | null {
+  try {
+    const dotGit = path.join(cwd, '.git');
+    if (statSync(dotGit).isDirectory()) return dotGit;
+    const pointer = /^gitdir:\s*(.+)$/m.exec(readFileSync(dotGit, 'utf8'));
+    if (!pointer) return null;
+    const gitDir = path.resolve(cwd, pointer[1].trim());
+    const common = readFileSync(path.join(gitDir, 'commondir'), 'utf8').trim();
+    return path.resolve(gitDir, common);
+  } catch {
+    return null;
+  }
 }
 
 /** The `codex exec` flags shared by a start and a resume (they precede `resume`). */
@@ -343,7 +386,7 @@ function codexArgs(cwd: string, mode: LaunchPermissionMode, model: string | unde
     '--json',
     '-C',
     cwd,
-    ...codexModeArgs(mode),
+    ...codexModeArgs(mode, gitCommonDirOf(cwd)),
     ...(model === undefined ? [] : ['-m', model]),
   ];
 }
