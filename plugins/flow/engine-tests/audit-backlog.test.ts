@@ -233,6 +233,23 @@ describe('audit-backlog', () => {
       expect(verdict.failures[0].detail).not.toContain('cloud-contract');
     });
 
+    it('never exempts a malformed label passed on stdin (GRM-12)', () => {
+      // Purpose: stdin follows the config's rule (a bare label, no slash, no
+      // surrounding space), so a listed "agent/" or " x" exempts nothing.
+      const snapshot = goodSnapshot();
+      (snapshot.items[1].labels as string[]).push('agent/', ' x');
+      const listed = {
+        ...snapshot,
+        opts: { ...snapshot.opts, unnamespacedLabels: ['agent/', ' x'] },
+      };
+      const run = runOracle({ stdin: JSON.stringify(listed) });
+      expect(run.status).toBe(1);
+      const verdict = JSON.parse(run.stdout) as Verdict;
+      const grm12 = verdict.failures.find((f) => f.invariant === 'GRM-12');
+      expect(grm12?.detail).toContain('agent/');
+      expect(grm12?.detail).toContain(' x');
+    });
+
     it.each(rows)('seeding a violation turns $invariant red', ({ invariant, also, seed }) => {
       const snapshot = goodSnapshot();
       seed(snapshot);

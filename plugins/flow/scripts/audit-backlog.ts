@@ -511,7 +511,12 @@ function extractSnapshot(parsed: unknown): { items: unknown[]; opts: AuditOpts }
       opts.agentIdentity = parsed.opts.agentIdentity;
     }
     if (isPlainObject(parsed.opts) && Array.isArray(parsed.opts.unnamespacedLabels)) {
-      opts.unnamespacedLabels = parsed.opts.unnamespacedLabels.filter(isNonEmptyString);
+      // Same rule as the config's groom.unnamespacedLabels: a bare label (no
+      // slash, no surrounding space), so stdin cannot exempt a malformed one.
+      opts.unnamespacedLabels = parsed.opts.unnamespacedLabels.filter(
+        (label): label is string =>
+          isNonEmptyString(label) && !label.includes('/') && label.trim() === label
+      );
     }
     return { items: parsed.items, opts };
   }

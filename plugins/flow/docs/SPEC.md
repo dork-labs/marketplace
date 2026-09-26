@@ -139,11 +139,12 @@ each one's flags.
 - `--json` prints one JSON object with `"v": 1` on stdout, even on failure:
   `{ "v": 1, "ok": false, "error": { "code", "message" } }`. Warnings go to
   stderr.
-- `--project <dir>` is the checkout to read (every verb but `accounts`).
-  `--snapshot <file>` lets `next`, `audit` and `status` read a saved
-  `flow snapshot --json`. `--dry-run` prints a write verb's plan and writes
-  nothing. `--manual` lets `next` and `claim` run while paused. `--session <id>`
-  defaults to `FLOW_SESSION_ID`, then `CLAUDE_CODE_SESSION_ID`.
+- `--project <dir>` is the checkout to read (every verb but `accounts` and
+  `usage`). `--snapshot <file>` lets `next`, `audit` and `status` read a saved
+  `flow snapshot --json`. `--dry-run` prints the plan and writes nothing, on
+  `claim`, `release`, `done`, `stage`, `accounts` and `usage`. `--manual` lets
+  `next` and `claim` run while paused. `--session <id>` defaults to
+  `FLOW_SESSION_ID`, then the runtime's own session id.
 - Every write is read back from the tracker; one that does not stick exits 4.
 
 | Exit | Meaning                                                                 |
