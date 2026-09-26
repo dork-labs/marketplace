@@ -96,6 +96,7 @@ When flow picks the next item (`flow next`), it also picks the account. The rank
    - The account is under its reserve on the 7-day window and has room on the 5-hour window.
    - The item's model has room (per-model weekly limits).
 2. **Prefer the headroom that expires soonest:** score = remaining % ÷ hours until the weekly reset. An account resetting tomorrow with 40% left beats one resetting in 6 days with 60% left. This is what spends ~100% of each account without starving any of them.
+   - **The main account goes last.** It is the operator's own. It keeps a reserve (a setting, default **50%** of the week) and is only offered work when no other rotation account is eligible, **or** its weekly reset is close enough that its unused headroom would otherwise expire. The "spend-down window" setting defaults to the last 24 hours before its reset. Inside that window, its reserve drops to 0%, so no tokens are left on the table.
 3. **Keep work warm:** a follow-up step on an item stays on the account that has its prompt cache, unless that account is near a limit.
 4. **Match the model to the work** (flow's existing `models.tiers`): mechanical work runs on a smaller model and saves Opus-class limits for judgment. This stretches every account further than routing alone.
 
@@ -173,8 +174,32 @@ This merges with `flow-cli-overhaul`.
 
 ## 8) Decisions for the operator
 
-1. **Compliance:** is rotating work across your own subscriptions an acceptable risk? The design is identical either way; the answer changes only whether the rotation is on by default.
-2. **Registry home:** use the DorkOS config (recommended, one list for all tools) or a flow-owned file?
-3. **Auto-handoff:** fully automatic on a limit (recommended for flow items only), or ask first?
-4. **Reserve:** how much of the weekly window to keep back for your own interactive use? Suggestion: 10–15% on your main account, 0% on the rest.
-5. **The org-managed client account:** confirm it stays out of rotation, and name the repos it may be used for.
+Decided 2026-09-26:
+
+1. **Compliance:** the operator accepts the risk for this single-operator, self-funded use. flow ships the feature with a plain note that each user must judge their own use against Anthropic's terms. It is not built or marketed for teams.
+2. **Registry home:** the DorkOS config (`runtimes.claudeCode.accounts[]`), shared by flow, DorkOS and cmux-control.
+3. **Handoff:** automatic by default, with a setting (`fleet.handoff: auto | ask`) to make it manual.
+4. **Reserve:** a per-account setting.
+   - The **main** account defaults to a 50% reserve and is drained **last**, only inside its spend-down window before its weekly reset (see §4.4).
+   - Other rotation accounts default to 0%.
+5. **The org-managed client account** stays out of the rotation.
+
+Still open:
+
+- Where the account display goes in DorkOS: status bar, sidebar, session header (explored in the visual companion; see `04-design-decisions.md` once chosen).
+- The Flow Board Shape: confirm the fleet panel lives there (see §9).
+
+## 9) Where each piece lives (surfaces)
+
+| Piece                                                                                | Home                                                                                                                       | Why                                                                        |
+| ------------------------------------------------------------------------------------ | -------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------- |
+| Accounts, their usage, and reset times                                               | **DorkOS core**: Settings → Runtimes, a status-bar account chip, and sidebar dots                                          | Accounts are a core DorkOS concept. Every session needs them, flow or not. |
+| "Which task is on which account," the board, the review inbox, and dispatch controls | **The Flow Board Shape** (Shapes programme P2, already planned as the flagship): a panel extension plus the flow schedules | This is flow-specific. A Shape packages it as one install.                 |
+| One-off visual reports (a groom report, a drain summary)                             | **Canvas**                                                                                                                 | Canvas suits a picture of a moment, not an always-on control panel.        |
+| The engine: ledger, dispatch, launchers and checkpoints                              | **The flow plugin's scripts** (`flow <verb>`), called by agents in any host and by DorkOS through MCP                      | One engine, the same result in the CLI, cmux and DorkOS.                   |
+
+**About the `flow` "CLI":** it is not a separate install. It is the plugin's existing `scripts/` folder behind one entry point (`node <flow-root>/scripts/flow.ts <verb>`). Agents call it through Bash exactly as they call the oracles today. It adds no power an agent lacks. It adds:
+
+- **Determinism:** tested code in place of prose an agent re-reads and re-interprets.
+- **Fewer tokens:** one command in place of pages of instructions.
+- **Work while no agent is running:** the status line recorder and the dispatcher watch loop.
