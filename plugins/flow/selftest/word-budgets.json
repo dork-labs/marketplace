@@ -95,6 +95,10 @@
     "baseline": 2056,
     "target": 2056
   },
+  "docs/self-improvement.mdx": {
+    "baseline": 592,
+    "target": 592
+  },
   "docs/SPEC.md": {
     "baseline": 2511,
     "target": 2511
@@ -143,6 +147,10 @@
     "baseline": 380,
     "target": 380
   },
+  "skills/flow-retro/SKILL.md": {
+    "baseline": 269,
+    "target": 269
+  },
   "skills/flow-triage/SKILL.md": {
     "baseline": 569,
     "target": 569
@@ -176,7 +184,7 @@
     "target": 1200
   },
   "skills/verifying-work/SKILL.md": {
-    "baseline": 3553,
+    "baseline": 3547,
     "target": 1200
   }
 }

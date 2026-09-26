@@ -100,18 +100,16 @@ against a superseded diff is not proof.
 
 - **Dispatch `review.reviewers` separate reviewer agents** (default one). Each is
   a fresh agent with its own context — **never the agent that implemented the
-  change, reviewing from the context it implemented in**. That agent reviews the
-  change it remembers intending rather than the diff it produced; that is the
-  exact failure this step exists to prevent.
+  change, reviewing from the context it implemented in**: it would review what it
+  meant to write, not the diff.
 - **Name each reviewer's model explicitly.** Reviewers are the `review` work
   class: resolve `models.tiers.review` (default `workhorse`) through
   `models.bindings` and pass the result. Never dispatch with the model omitted —
   on a harness that inherits the parent's model on omission, an orchestrator
   sitting at the frontier tier silently runs every reviewer at frontier cost. An
-  unbound tier falls back to the harness default **with a note in the run**, and a
-  model that errors falls sideways or down, never up to the orchestrator's model.
-  The full policy, including the work-class table, lives in the EXECUTE stage
-  skill; this is the reviewer's half of it.
+  unbound tier falls back to the harness default **with a note in the run**; a
+  failing model falls sideways or down, never up.
+  The full policy is in the EXECUTE stage skill.
 - **Give each reviewer three things: the diff, the rubric, and the intent.** The
   diff and the files it touches (via the base/head SHAs); the rubric named by
   `review.rubric` — resolved from the repo root when there is one and from the
@@ -129,6 +127,8 @@ against a superseded diff is not proof.
 - **Converge.** Fix what the findings justify, rebut in writing what they get
   wrong, then re-review the updated diff. Repeat until a pass returns nothing
   blocking.
+- **Record each pass** with `flow journal record review --item <id> --round <n>
+  --sha7 <sha> --verdict clean|changes` and its finding counts, for the retro.
 - **Re-verify if convergence touched code.** Any fix made during this step
   invalidates the step-2 run, so re-run the verification gate before step 5. The
   proof you attach must describe the diff you are actually shipping.

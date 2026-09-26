@@ -4,7 +4,7 @@ Installs of this plugin are pinned to a commit SHA, so a fix here does not reach
 you until you **reinstall it** (Marketplace → flow → reinstall, or re-run your
 `--plugin-dir` checkout's `git pull`). Each entry below says whether that matters.
 
-## 0.29.0
+## 0.30.0
 
 **New `flow drain --parallel N`: flow works on several ready items at once, each on the account with the most room, and opens a PR only after an independent review comes back clean. Reinstall to get it.**
 
@@ -14,6 +14,20 @@ you until you **reinstall it** (Marketplace → flow → reinstall, or re-run yo
 - `flow next` now names the account (and, with Codex or OpenCode, the tool) each item should run on.
 - `flow stage --checkpoint-file` writes a `HANDOFF.md` checkpoint at every stage boundary, and the stage instructions use it.
 - On DorkOS, the scheduled drain runs one `flow drain --tick` per firing once `drain.parallel` is set above 0. At 0 it does what it did before.
+
+## 0.29.0
+
+**New `flow retro`: flow looks back over its own week and suggests fixes to itself. Reinstall to get it.**
+
+- `flow retro` reads flow's notebook for the last week and the week before, the self-test results and your backlog. Today it can show how many items are ready or still untyped, which flow commands failed, and how many words flow's instructions hold. Each number sits beside last week's and is split by agent: Claude Code, Codex and OpenCode. A number with nothing behind it says "no data", never 0.
+- Some numbers wait on notebook lines nothing writes yet: how long new work takes to become ready, and how long agents wait on you, read "no data" for now. Review and merge-queue numbers count only what was recorded with `flow journal record`, and the verifying-work skill now asks agents to record each review.
+- It also shows each account's usage over the week: where it started and ended, its peak, and how often it ran out.
+- It proposes changes to flow by four fixed rules: two or more agent notes about the same thing, the same error twice, a self-test check that passed before and fails now, and a number that got clearly worse.
+- It changes nothing unless you pass `--file`. Then it files each proposal as a tracker item, at most five a run (`selfImprovement.retro.maxItemsPerRun`), never marked ready. It uses the same rules as `flow selftest --file`: a comment on an item it filed before, nothing for one you declined in the last 90 days. `--input` files an edited list instead.
+- Each run saves its report to `.dork/flow/retro/` and adds one line to the notebook.
+- New `flow-retro` weekly schedule (Mondays at 9:00, Los Angeles time) runs the self-test and the retro, rewrites each proposal into one concrete change, and files them. It ships switched off; approve it on the DorkOS Schedules page to turn it on.
+- New docs page, "How flow checks and improves itself".
+- `flow selftest --file` now reports each item under `subject` instead of `checkId`.
 
 ## 0.28.0
 
