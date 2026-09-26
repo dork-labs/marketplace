@@ -395,6 +395,20 @@ describe.each([
     expect((await h.adapter.createItem?.(spec))?.identifier).toBe(third?.identifier);
   });
 
+  it('a key moves past its item when a person archived it while it was still open', async () => {
+    const h = make();
+    const spec = {
+      title: 'Archived open',
+      description: 'd',
+      labels: ['type/task'],
+      key: 'fp-archived-open',
+    };
+    const first = await h.adapter.createItem?.(spec);
+    h.archive(first?.identifier ?? '');
+    const second = await h.adapter.createItem?.(spec);
+    expect(second?.identifier).not.toBe(first?.identifier);
+  });
+
   it('refuses two labels of one group and any agent label, creating nothing', async () => {
     const h = make();
     const before = h.writes();

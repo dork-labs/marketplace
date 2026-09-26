@@ -789,7 +789,8 @@ const CREATE = JSON.parse(
   | 'create'
   | 'createAgain'
   | 'createdRead'
-  | 'createdReadMissing',
+  | 'createdReadMissing'
+  | 'createdReadArchived',
   Recorded
 > & { twoLabelsOneGroup: { response: Record<string, unknown> } };
 
@@ -949,6 +950,22 @@ describe('createItem', () => {
       expect(ids).toEqual([linear.createIdFor('k'), linear.createIdFor('k:DOR-999')]);
     }
   );
+
+  it('moves past a keyed item that is archived while still open (recorded)', async () => {
+    // Purpose: a person archived or deleted a filed item that was never closed;
+    // the returning failure must not get that item back.
+    let creates = 0;
+    const { adapter, calls } = build((call) => {
+      if (call.operation === 'FlowCreateItem') {
+        creates += 1;
+        return creates === 1 ? CREATE.createAgain.response : replay(CREATE.create, call);
+      }
+      if (call.operation === 'FlowCreatedRead') return replay(CREATE.createdReadArchived, call);
+      return routeCreate()(call);
+    });
+    await adapter.createItem?.({ title: 't', description: 'd', labels: [], key: 'k' });
+    expect(calls.filter((c) => c.operation === 'FlowCreateItem')).toHaveLength(2);
+  });
 
   it('rethrows when the create fails and nothing landed', async () => {
     const { adapter } = build((call) =>
