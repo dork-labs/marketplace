@@ -46,7 +46,9 @@ The registry is split by owner (operator direction, 2026-09-26). DorkOS core own
 - Readers ignore fields they do not know; writers preserve them.
 - A row with a missing or non-absolute `path` is skipped, with a warning.
 - A row with no `id` gets one at read time by the minting rule; a duplicate `id` keeps the first row and warns.
+- A row whose `id` fails the pattern (a hand edit) is listed, with a warning, but has no usage file and cannot be routed: it reads as `kept-out` with `scope.repos: []`.
 - A `color` that fails the pattern reads as `null`, with a warning.
+- flow writes every row it creates with all four keys, `label` and `color` as `null` when not given, so DorkOS's schema (`label` nullable with no default) accepts it.
 
 **Minting an id** (identical to DorkOS `claudeAccountId`, pinned by fixtures)
 
@@ -56,7 +58,8 @@ The registry is split by owner (operator direction, 2026-09-26). DorkOS core own
 
 **What DorkOS must do**
 
-- Add `color` (optional, nullable, the pattern above) to `ClaudeCodeAccountSchema`.
+- Add `color` to `ClaudeCodeAccountSchema`: nullable, default `null`, the pattern above.
+- Enforce the id pattern on every write, so no new row gets an id the ledger would refuse.
 - Re-read the file before each write of `runtimes.claudeCode`, so a flow `accounts add` made while the server runs is not lost.
 - Accept a `config.json` that flow created (no `__internal__`, no `version`).
 - Keep the minting rule (it already has it).
@@ -191,13 +194,13 @@ JSON Schema: `plugins/flow/conformance/fleet/fleet-policy.schema.json`.
 
 **Writing** (every writer, flow or DorkOS)
 
-1. Take the lock: create `<id>.json.lock` with exclusive-create (`O_CREAT|O_EXCL`, Node `wx`), writing the writer's pid.
-2. A lock older than 10 s (by mtime) is stale: delete it and retry.
+1. Take the lock: create `<id>.json.lock` with exclusive-create (`O_CREAT|O_EXCL`, Node `wx`), writing a fresh token `<pid>:<random 128-bit hex>`. The token, not the pid, identifies the holder, so two writers in one process never mistake each other's lock.
+2. A lock older than 10 s (by mtime) is stale. Break it by renaming it to `<id>.json.lock.stale-<random>` (only one renamer can win), deleting the renamed file, then retrying step 1. Never delete a lock by its original name.
 3. Retry with 25–100 ms jittered waits; give up after 2 s total. Giving up drops this write with a warning; it never throws into the caller's turn.
 4. Under the lock, read the file. Missing = empty. Unparsable = rename it to `<id>.json.corrupt-<epoch ms>` and start empty.
 5. Merge. If nothing changed, release the lock and stop.
 6. Write `<id>.json.<pid>.<random>.tmp` in the same folder, `fsync` it, `rename` it over `<id>.json`.
-7. Delete the lock (only if it still holds this writer's pid).
+7. Release: read the lock, and delete it only if it still holds this writer's token.
 
 **Reading** needs no lock: `rename` is atomic, so a reader sees the old file or the new one, never half of one. An unparsable file reads as empty, with a warning.
 
@@ -213,7 +216,7 @@ JSON Schema: `plugins/flow/conformance/fleet/fleet-policy.schema.json`.
 | Field     | Type                               | Meaning                                                                                             |
 | --------- | ---------------------------------- | --------------------------------------------------------------------------------------------------- |
 | `account` | string (a registry id)              | The account the run's **current** session bills. Rewritten on every handoff.                        |
-| `host`    | `"cli"` \| `"dorkos"` \| `"cmux"`  | The launcher the current session runs under.                                                        |
+| `host`    | string: `cli`, `dorkos` or `cmux` today | The launcher the current session runs under.                                                   |
 
 - `host` is not the machine. The machine is `provenance.host`.
 - `provenance.account` stays what it is: the origin's `CLAUDE_CONFIG_DIR` basename, written once at run start and never updated. `FlowRun.account` is the current registry id.
@@ -222,6 +225,8 @@ JSON Schema: `plugins/flow/conformance/fleet/fleet-policy.schema.json`.
 **Rules**
 
 - Readers pass unknown fields through (the store is read-modify-write; see the `looseObject` note in `flow-state.ts`).
+- `host` is validated as a bare string, like `provenance.harness`: the vocabulary is pinned in prose, so a record from a future launcher never fails the all-or-nothing reader.
+- A writer that finds the existing file present but failing the schema refuses to write and reports the file; it never replaces a file it could not read (that would delete every other run).
 - Writers use the §1.2 lock-and-rename steps, with the lock at `flow-state.json.lock`.
 - DorkOS reads this file and never writes it, until a later contract moves the store into DorkOS (flow SPEC v2).
 
@@ -379,12 +384,13 @@ interface CodeAdapter {
 - `connection.transport: "mcp"` → exit 3: "the mcp transport exists only inside an agent session; set connection.transport to cli to use the flow CLI". (Decision D3.)
 - The transport names no tracker and no command. The adapter supplies the command.
 
-**The adapter contract** (`adapters/SPEC.md`) goes to **1.4.0** (minor, additive):
+**The adapter contract** (`adapters/SPEC.md`) goes to **1.4.0** (minor, additive) with the code realization, then to **2.0.0** (major) with the F10 rule (§5):
 
 - A new section, "The code realization": the file, the factory, `AdapterContext`, the five methods and their mapping to the verbs.
 - `getItem` and `getBacklogSnapshot` join the optional reads. `getBacklogSnapshot` is already what `audit-backlog.ts` names; this makes it a declared verb.
 - `applyWorkState` is the code realization of `claim` and `transition`; its label and state effects follow §5.
 - An adapter with no code realization still conforms at 1.4.0; it just cannot serve the CLI.
+- **2.0.0** changes `transition` and `claim`: a stage whose category is `started` or `completed` removes every `stage/*` label instead of setting one, and `claim` removes `agent/ready` and every `stage/*` label. That breaks the old "set the stage's label" rule, so it is a major bump. The same PR updates `skills/linear-adapter/SKILL.md` and both `adapters/reference/*/SKILL.md` to the new rule, and a project adapter pinned to 1.x keeps working but trips STATE-2 until regenerated (`flow audit` names each item).
 
 **The shipped Linear code adapter** (`skills/linear-adapter/adapter.ts`, inside the tracker-confinement carve-out)
 
@@ -435,6 +441,7 @@ interface CodeAdapter {
 | `stage` to any other stage | the stage's `stateCategory` if set, else absent | absent            | the stage's `label`                                                  |
 
 - The resume stage is `--stage`, else `FlowRun.stage`, else the `stage/*` label the claim removed (recorded as `FlowRun.stage`).
+- **Recovery with no run record** (`re-derive`: claimed on another machine) cannot read the stage off the tracker any more. It derives it from the workspace: `verify` when the item's branch has an open PR, else `execute`. `deriveStage({ hasOpenPr })` in `work-state.ts` is that rule.
 - Releasing to `ready` with no known resume stage exits 5 ("pass --stage"), because GRM-10 would fail.
 - `needsInput` stays prose in S1 (it posts a question and assigns a person). Its projection is `agentLabel: agent/needs-input` and leaves state alone; the adapter skill says so.
 
@@ -465,7 +472,8 @@ interface CodeAdapter {
 - Takes the `flow-state.json` lock, so two claims on one machine serialize.
 - Writes `projectionFor('claim')`, then verifies by re-read.
 - Writes a `FlowRun`: `status: "running"`, `stage` from the removed `stage/*` label (default `execute`), `attemptCount: 0` (or +1 if a record exists), `workerPid`, `startedAt`, `sessionId`, `worktreePath`, `branch`, `account`, `host`, and `provenance` per `docs/provenance.md` (omit what is unknown).
-- `--pid` default: the parent of the shell that ran `flow` (the harness), read with `ps -o ppid= -p <process.ppid>`. If that fails, exit 2 asking for `--pid`.
+- `--pid` default: the parent of the shell that ran `flow` (the harness), read with `ps -o ppid= -p <process.ppid>`. If that fails, exit 5 asking for `--pid`.
+- `sessionId` is required on a FlowRun and never invented: with neither `--session` nor `FLOW_SESSION_ID`, exit 5 asking for one.
 - `--worktree` default: the checkout root of `--project`; `--branch` default: its current branch.
 - No comment is posted: the label is the signal (agent etiquette: mostly quiet).
 - Replaces: the label-swap and state-move steps in the drain, execute and adapter prose.
@@ -509,7 +517,7 @@ interface CodeAdapter {
 **`flow accounts [list] | add --path <dir> [--label <text>] [--color <#rrggbb>] | set [<id>] [policy flags]`**
 
 - `list` (default): every identity (§1.1a) with its resolved policy (§1.1b), its ledger windows via `readWindow`, `effectiveReservePct`, `fiveHourRoom`, `weeklyRoom`, the fleet `handoff`, and every warning.
-- `add` registers an identity in `config.json`: expands `~`, requires an absolute path that exists, refuses a path already registered (exit 5), mints the id, writes `label` and `color` only when given. It writes no policy, so a new account starts kept-out.
+- `add` registers an identity in `config.json`: expands `~`, requires an absolute path that exists, refuses a path already registered (exit 5), mints the id, and writes the row with all four keys (`label`, `color` as `null` when not given). It writes no policy, so a new account starts kept-out.
 - `add` reads `config.json` fresh, changes only `runtimes.claudeCode.accounts`, keeps every other key, then temp-file + `rename`; the file keeps its mode (new file: `0600`).
 - When `config.json` has `__internal__` (DorkOS manages it), `add` prints "DorkOS manages this file; you can also add accounts in its settings" and still writes (DorkOS re-reads before writing, §1.1a).
 - `set <id>` edits that account's entry in `fleet.json`: `--role main|rotation|kept-out`, `--reserve <0-100>`, `--spend-down-hours <n>`, `--repos owner/name,…` (or `none` for `[]`). Each accepts `default` to delete the field.
@@ -591,7 +599,7 @@ Each test carries a purpose comment and is shown to fail against a broken implem
 - **Phase 1, foundations:** the shared-contract modules and fixtures (first, DorkOS depends on them), config loading, the work-state rule with GRM-15, the FlowRun fields and file store, the CLI skeleton.
 - **Phase 2, tracker seam:** the code-adapter loader and transport, contract 1.4.0, the Linear code adapter.
 - **Phase 3, verbs:** each verb, deleting the prose it replaces in the same PR.
-- **Phase 4, prove it:** docs, and a live run of `flow audit` on the DOR backlog with one fix pass.
+- **Phase 4, prove it:** docs, and a live run of `flow audit` on the DOR backlog with one fix pass until it exits 0.
 
 ## Decisions (made autonomously, logged as assumptions)
 
@@ -599,7 +607,7 @@ Each test carries a purpose comment and is shown to fail against a broken implem
 - **D2. A code adapter beside `SKILL.md`, loaded by path.** Keeps project adapters committed with the project (DOR-2285) and the Linear code inside the confinement carve-out.
 - **D3. The CLI refuses the `mcp` transport.** An MCP server lives inside an agent session; a child process cannot call it, and the acting identity could not be pinned.
 - **D4. One write primitive, `applyWorkState`, plus `comment`.** Policy stays in `work-state.ts`; adapters stay mechanical.
-- **D5. `stage/*` only on unstarted items.** The ideation's "only before EXECUTE" read literally would leave a released execute-stage item with no resume point and fail GRM-10. Resolves ideation open question 3.
+- **D5. `stage/*` only on unstarted items (adapter contract 2.0.0).** The ideation's "only before EXECUTE" read literally would leave a released execute-stage item with no resume point and fail GRM-10. Resolves ideation open question 3.
 - **D6. Policy is flow's file, not DorkOS config** (operator direction, 2026-09-26, via the orchestrator). DorkOS core keeps identity, `color` and the ledger; roles are `main | rotation | kept-out`, replacing the ideation's `general, reserve, org` and its separate `rotation` flag. Unlisted accounts are kept out.
 - **D7. No inferred main account.** Guessing from `~/.claude` or `defaultAccount` could reserve the wrong account; `flow accounts` warns instead.
 - **D8. `FlowRun.host` is the launcher, not the machine.** The machine is already `provenance.host`.
