@@ -113,8 +113,9 @@ Source mapping is the contract table (S1 §1.2 "Mapping each source"), unchanged
 
 **The dedupe stamp.** When the hook (§2.2) sets `FLOW_USAGE_STAMP` and `FLOW_USAGE_FP`:
 
-- Write `FLOW_USAGE_FP` + `\n` to `FLOW_USAGE_STAMP` (temp file + rename, mode `0600`) when the run is settled: the writer returned without giving up (changed or unchanged), **or** there was nothing to record (no matching account, no valid window). Otherwise an unregistered config dir would start Node on every render.
-- **Only a faithful fingerprint is stamped.** The stamp is written only when `JSON.parse(fp.slice(1) + "}}")` (the fingerprint without its leading `:`, closed again) deep-equals `payload.rate_limits`. A fingerprint the hook cut short, for example because a future window holds a nested object, fails that check, is never stamped, and so can never hide a change: the reading is recorded on every render instead. (When `rate_limits` is absent the hook never starts Node, so the no-window stamp is only written for a `rate_limits` that holds no valid window.)
+- Write `FLOW_USAGE_FP` + `\n` to `FLOW_USAGE_STAMP` (temp file + rename, mode `0600`) in exactly two cases:
+  - **Nothing could be recorded:** no matching account, or a `rate_limits` with no valid window (for example `null`). Without this, an unregistered config dir would start Node on every render.
+  - **A settled write with a faithful fingerprint:** the writer returned without giving up (changed or unchanged), **and** `JSON.parse(fp.slice(1) + "}}")` (the fingerprint without its leading `:`, closed again) deep-equals `payload.rate_limits`. A fingerprint the hook cut short, for example because a future window holds a nested object, fails that check and is never stamped, so it can never hide a change: that reading is recorded on every render instead.
 - The stamp path is honored only when its parent is exactly `<dorkHome>/usage` and its basename starts with `.statusline-`. Otherwise it is ignored, so an environment variable can never make `record` write anywhere else.
 - A write the writer dropped leaves the stamp alone, so the next render retries.
 
