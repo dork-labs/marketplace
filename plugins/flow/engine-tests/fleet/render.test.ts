@@ -13,11 +13,13 @@ import {
   dorkosNote,
   place,
   renderFleet,
+  runtimeTitle,
+  spendCell,
 } from '../../scripts/fleet/render.ts';
 import { NOW, goldenModel } from './render-model.ts';
 
 const GOLDEN = [
-  'Accounts                  5-hour                       week',
+  'Claude Code               5-hour                       week',
   '  claude2       main      [####......]   41%  2h 14m   [#######...]   72%  3d 04h',
   '                          reserve 50%, seen 3m ago',
   '  claude3       rotation  [##########]   out  42m      [###.......]   31%  5d 11h',
@@ -28,16 +30,29 @@ const GOLDEN = [
   '                          reserve 20% (0% now: spend-down), limited (week), seen <1m ago',
   '  Bad_Id        invalid id, not tracked',
   '',
+  'Codex                     5-hour                       week',
+  '  default       rotation  no reading                   [####......]   35%  4d 02h',
+  '                          gpt-5.3-codex-spark 12%, plan pro, seen 5m ago',
+  '',
+  'OpenCode',
+  '  default       rotation  $0.75 this month',
+  '                          out (credits: openrouter), seen 20m ago',
+  '',
   'Sessions',
-  '  claude2  DOR-2369  busy         cli     1a2b3c4d  ~/…/spec-flow-usage                3h',
-  '  claude2  -         idle         cli     2b3c4d5e  ~/Keep/dork-os/dorkos              <1m',
-  '  claude2  DOR-2370  unseen       dorkos  5e4d3c2b  -                                  -',
-  '  claude2  DOR-2371  parked       dorkos  6f5e4d3c  /srv/app                           2d',
-  '  claude3  -         limited      cli     9f8e7d6c  ~/Keep/dork-os/dorkos              12m',
-  '  claude3  DOR-2372  stale        cmux    a0b1c2d3  ~/wt                               5h',
-  '  claude4  -         unknown      cli     b1c2d3e4  /tmp/x                             1m',
-  '  ?        -         interrupted  dorkos  c2d3e4f5  /…/final-folder-name-that-is-long  -',
-  '  ?        DOR-2373  unseen       ?       d3e4f5a6  -                                  -',
+  '  Claude Code',
+  '    claude2  DOR-2369  busy         cli     1a2b3c4d  ~/…/spec-flow-usage                3h',
+  '    claude2  -         idle         cli     2b3c4d5e  ~/Keep/dork-os/dorkos              <1m',
+  '    claude2  DOR-2370  unseen       dorkos  5e4d3c2b  -                                  -',
+  '    claude2  DOR-2371  parked       dorkos  6f5e4d3c  /srv/app                           2d',
+  '    claude3  -         limited      cli     9f8e7d6c  ~/Keep/dork-os/dorkos              12m',
+  '    claude3  DOR-2372  stale        cmux    a0b1c2d3  ~/wt                               5h',
+  '    claude4  -         unknown      cli     b1c2d3e4  /tmp/x                             1m',
+  '    ?        -         interrupted  dorkos  c2d3e4f5  /…/final-folder-name-that-is-long  -',
+  '    ?        DOR-2373  unseen       ?       d3e4f5a6  -                                  -',
+  '  Codex',
+  '    default  -         busy         dorkos  e4f5a6b7  ~/Keep/app                         7m',
+  '  OpenCode',
+  '    default  DOR-2374  unseen       cli     f5a6b7c8  -                                  -',
   '',
   'Sessions on accounts flow does not know are not shown.',
   'DorkOS: not running at http://127.0.0.1:4242',
@@ -66,7 +81,7 @@ describe('renderFleet', () => {
     ];
     const text = renderFleet(model, NOW);
     expect(text.split('\n').slice(0, 3)).toEqual([
-      'Accounts             5-hour                       week',
+      'Claude Code          5-hour                       week',
       '  claude2  main      [####......]   41%  2h 14m   [#######...]   72%  3d 04h   seen 3m ago',
       '  claude3  rotation  [###.......]   31%  5d 11h   no reading                   seen 1h ago',
     ]);
@@ -146,5 +161,31 @@ describe('cell helpers', () => {
     expect(dorkosNote({ url, reachable: true, sessionsShown: 2 }, true)).toBeNull();
     // A 401: reachable, but its answer was not a list. The warning speaks; the note does not.
     expect(dorkosNote({ url, reachable: true, sessionsShown: 0 }, false)).toBeNull();
+  });
+});
+
+describe('the runtime cells', () => {
+  it("shows this month's spend, and $0.00 for a reading from an earlier month", () => {
+    // Purpose: a spend reading never goes stale, so last month's total must not read as this month's.
+    const spend = {
+      periodStart: '2026-09-01T00:00:00.000Z',
+      costUsd: 0.7504,
+      limitUsd: null,
+      observedAt: '2026-09-20T00:00:00.000Z',
+      source: 'transcript' as const,
+    };
+    expect(spendCell(spend, NOW)).toBe('$0.75 this month');
+    expect(spendCell(spend, '2026-10-02T00:00:00.000Z')).toBe('$0.00 this month');
+    expect(spendCell(null, NOW)).toBe('no spend recorded');
+  });
+
+  it('names each runtime, and keeps an unknown one as it is', () => {
+    // Purpose: a DorkOS runtime flow does not know still gets a heading.
+    expect(['claude-code', 'codex', 'opencode', 'test-mode'].map(runtimeTitle)).toEqual([
+      'Claude Code',
+      'Codex',
+      'OpenCode',
+      'test-mode',
+    ]);
   });
 });
