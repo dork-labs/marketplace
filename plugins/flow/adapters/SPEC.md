@@ -1,6 +1,6 @@
 # Tracker Adapter Contract
 
-> **Contract version: 1.4.0** (semver). See [Versioning](#5-versioning).
+> **Contract version: 2.0.0** (semver). See [Versioning](#5-versioning).
 >
 > This is the **generic, tracker-neutral** contract every `/flow` tracker adapter
 > must satisfy. It names no tracker, no API, and no slug. Reference adapters
@@ -100,7 +100,9 @@ tracker's native labels into the generic families before placing them on
 - **`agent/*`** - the durable disposition state machine: `agent/ready`,
   `agent/claimed`, `agent/completed`, `agent/needs-input`. `agentDisposition` is
   derived from this family.
-- **`stage/*`** - the active spine stage projection.
+- **`stage/*`** - where the next session resumes. At most one, and only while
+  the item is not started (`backlog` or `unstarted`); while it is started, the
+  run record carries the stage.
 - **`type/*`** - the work type (`type` is derived from this family).
 - Other generic families an adopter's stages introduce follow the same
   `family/leaf` form.
@@ -287,9 +289,11 @@ universal and worth stating once:
 #### `claim(item: WorkItem): Promise<void>`
 
 - **Must do.** Mark the item as claimed by the agent: swap `agent/ready` for the
-  `agent/claimed` label **and** move the item into a `started`-category state, in
-  that order (label first, so the durable claim signal lands even if the state move
-  fails). The `agent/*` labels are one exclusive group: an item never carries two.
+  `agent/claimed` label, remove every `stage/*` label, **and** move the item into a
+  `started`-category state, in that order (labels first, so the durable claim
+  signal lands even if the state move fails). The `agent/*` labels are one
+  exclusive group: an item never carries two. The stage the removed label named
+  goes on the run record.
 - **Durability.** **Durable and idempotent.** The `agent/*` label is the durable
   state machine; it must survive a process restart (an in-memory claim does not).
   Re-claiming an already-claimed item is a no-op. After a crash, any
@@ -302,13 +306,14 @@ universal and worth stating once:
 
 #### `transition(item: WorkItem, to: StageProjection): Promise<void>`
 
-- **Must do.** Project the item onto the target stage: set the stage's `stage/*`
-  label and, when the stage carries one, move the item into a state of the target
-  `stateCategory`. Drives the stage-to-projection round-trip the engine reads
+- **Must do.** Project the item onto the target stage. A stage whose
+  `stateCategory` is `started` or `completed` moves the item into a state of that
+  category and removes every `stage/*` label. Any other stage sets its `stage/*`
+  label (the one label of that family) and, when it carries one, moves the item
+  into a state of its `stateCategory`. Drives the stage-to-projection round-trip the engine reads
   back. (The typed promotion surface may narrow `to` to a bare `StateCategory`
   because the stage-to-label mapping is derivable from the engine's stage model;
-  an adapter may accept either form as long as both the `stage/*` label and the
-  category are projected.)
+  an adapter may accept either form as long as the projection above is applied.)
 - **Durability.** **Durable and idempotent.** The `stage/*` label and category are
   projected state; re-applying the same transition is a no-op.
 - **Degradation.** A failed write surfaces loudly. If the tracker has no state of
@@ -363,7 +368,7 @@ universal and worth stating once:
   post the `question` as a comment (multiple-choice when possible, carrying the
   marker **and the `agent:provenance` signature** — this is the write whose entire
   purpose is to be replied to, so the reply has to be routable); (2) apply the
-  `agent/needs-input` label; (3) `assignToHuman`; (4) **stop** (the loop parks
+  `agent/needs-input` label, leaving the state alone; (3) `assignToHuman`; (4) **stop** (the loop parks
   here). Resumes only on a non-agent reply surfaced by `getInbox`.
 - **Durability.** **Durable park, idempotent.** "Parked on a human" is a distinct
   durable state the stall sweep must never reclaim. Order the effects so the
@@ -535,7 +540,7 @@ skill, so a project adapter always wins over a shipped one.
 **The module.** It exports two things:
 
 ```ts
-export const CONTRACT_VERSION: string; // the contract version it targets, e.g. '1.4.0'
+export const CONTRACT_VERSION: string; // the contract version it targets, e.g. '2.0.0'
 export function createAdapter(ctx: AdapterContext): CodeAdapter;
 ```
 
@@ -557,8 +562,11 @@ interface AdapterContext {
 interface TrackerTransport {
   kind: 'cli';
   /** Run an external command with no shell. Rejects when it cannot start or times out. */
-  run(cmd: string, args: readonly string[], opts?: { timeoutMs?: number }):
-    Promise<{ code: number; stdout: string; stderr: string }>;
+  run(
+    cmd: string,
+    args: readonly string[],
+    opts?: { timeoutMs?: number }
+  ): Promise<{ code: number; stdout: string; stderr: string }>;
 }
 ```
 
@@ -574,13 +582,17 @@ interface TrackerTransport {
 naming it.
 
 ```ts
-type Capability = 'getCurrentUser' | 'getBacklogSnapshot' | 'getItem' | 'applyWorkState' | 'comment';
+type Capability =
+  'getCurrentUser' | 'getBacklogSnapshot' | 'getItem' | 'applyWorkState' | 'comment';
 
 interface CodeAdapter {
   capabilities: readonly Capability[];
   getCurrentUser(): Promise<{ id: string; name?: string }>;
   getBacklogSnapshot(opts?: { includeClosed?: boolean }): Promise<BacklogSnapshot>;
-  getItem(identifier: string, opts?: { comments?: number }): Promise<WorkItem & { comments?: ItemComment[] }>;
+  getItem(
+    identifier: string,
+    opts?: { comments?: number }
+  ): Promise<WorkItem & { comments?: ItemComment[] }>;
   applyWorkState(item: WorkItem, change: WorkStateChange): Promise<void>;
   comment(item: WorkItem, body: string): Promise<void>;
 }
@@ -595,7 +607,12 @@ interface BacklogSnapshot {
   projects: WorkItemProject[]; // only the projects the items reference
 }
 
-interface ItemComment { id: string; author: string; body: string; createdAt: string }
+interface ItemComment {
+  id: string;
+  author: string;
+  body: string;
+  createdAt: string;
+}
 
 interface WorkStateChange {
   stateCategory?: StateCategory; // move to a state of this category; absent = leave
@@ -604,13 +621,13 @@ interface WorkStateChange {
 }
 ```
 
-| Method               | The verb it realizes                                   | Used by                             |
-| -------------------- | ------------------------------------------------------ | ----------------------------------- |
-| `getCurrentUser`     | `getCurrentUser`                                        | `flow next`, `flow audit`           |
-| `getBacklogSnapshot` | `getBacklogSnapshot` (optional read, below)             | `flow snapshot`, `next`, `audit`, `status` |
-| `getItem`            | `getItem` (optional read, below)                        | every write, to check it landed; `flow status <id>` |
-| `applyWorkState`     | `claim` and `transition`                                | `flow claim`, `release`, `done`, `stage` |
-| `comment`            | `comment`                                               | `flow release --reason`, `flow done` |
+| Method               | The verb it realizes                        | Used by                                             |
+| -------------------- | ------------------------------------------- | --------------------------------------------------- |
+| `getCurrentUser`     | `getCurrentUser`                            | `flow next`, `flow audit`                           |
+| `getBacklogSnapshot` | `getBacklogSnapshot` (optional read, below) | `flow snapshot`, `next`, `audit`, `status`          |
+| `getItem`            | `getItem` (optional read, below)            | every write, to check it landed; `flow status <id>` |
+| `applyWorkState`     | `claim` and `transition`                    | `flow claim`, `release`, `done`, `stage`            |
+| `comment`            | `comment`                                   | `flow release --reason`, `flow done`                |
 
 **The two optional reads.**
 
@@ -735,6 +752,15 @@ declaration.
 
 ### What each version added
 
+- **2.0.0** - **state, `agent/*` and `stage/*` agree** (MAJOR). `claim` now
+  removes `agent/ready` and every `stage/*` label, and `transition` to a stage
+  whose category is `started` or `completed` removes every `stage/*` label
+  instead of setting one; the run record carries the stage while the item is
+  started. `needsInput` sets `agent/needs-input` and leaves the state alone.
+  This breaks 1.x's "set the stage's label" rule, so it is a major bump. The
+  `flow audit` oracle's GRM-15 checks the rule (`STATE-1..5`): an adapter still
+  on 1.x keeps working but trips `STATE-2` on every started item until it is
+  regenerated, and the audit names each one.
 - **1.4.0** - added the **code realization** (section 3,
   [The code realization](#the-code-realization)): an optional `adapter.ts` beside
   the skill exporting `CONTRACT_VERSION` and `createAdapter(ctx)`, the

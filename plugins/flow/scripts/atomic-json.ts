@@ -36,6 +36,14 @@
  * Reading needs no lock: `rename` is atomic, so a reader sees the old file or the
  * new one, never half of one.
  *
+ * **Holding a lock across a slow sequence** ({@link withHeldLock}). A caller
+ * that must check something and then act on it (`flow claim` reads the tracker,
+ * checks the item is still unclaimed, writes it, then records the run) holds a
+ * lock of its own for the whole sequence, never a shared file's lock: a file
+ * lock held for seconds would make every other writer of that file give up. The
+ * held lock follows the same steps 1-3 and 7, and its mtime is refreshed while
+ * held, so a long hold is never judged stale.
+ *
  * Dependency-free (node builtins only), like every fleet-contract module.
  *
  * @module @dorkos/flow/atomic-json
@@ -52,6 +60,7 @@ import {
   readFileSync,
   renameSync,
   unlinkSync,
+  utimesSync,
   writeSync,
 } from 'node:fs';
 import path from 'node:path';
@@ -281,6 +290,66 @@ export function releaseLock(lockPath: string, token: string): void {
     unlinkSync(lockPath);
   } catch (error) {
     if (errorCode(error) !== 'ENOENT') throw error;
+  }
+}
+
+/** Options for {@link withHeldLock}. */
+export interface HeldLockOptions extends LockOptions {
+  /**
+   * How often to refresh the held lock's mtime, in ms. Default a third of the
+   * stale age.
+   */
+  heartbeatMs?: number;
+}
+
+/** What {@link withHeldLock} did: ran the callback under the lock, or could not take it. */
+export type HeldLockResult<T> =
+  { held: true; value: T } | { held: false; warning: AtomicJsonWarning };
+
+/**
+ * Run `fn` holding the lock at `lockPath` (steps 1-3, then 7), so a check and
+ * the work that depends on it happen with no other holder in between. The
+ * lock's mtime is refreshed while held, and the lock is released when `fn`
+ * settles, also when it throws.
+ *
+ * @param lockPath - The lock file. Its folder is created (`0700`) when missing.
+ * @param fn - The work to do under the lock.
+ * @param options - Give-up and stale ages, and the refresh interval.
+ * @returns `held: true` with `fn`'s value, or `held: false` with a
+ *   `lock-timeout` warning when the lock never freed (then `fn` did not run).
+ */
+export async function withHeldLock<T>(
+  lockPath: string,
+  fn: () => Promise<T>,
+  options: HeldLockOptions = {}
+): Promise<HeldLockResult<T>> {
+  mkdirSync(path.dirname(lockPath), { recursive: true, mode: 0o700 });
+  const held = await acquireLock(lockPath, options);
+  if (held === null) {
+    return {
+      held: false,
+      warning: {
+        code: 'lock-timeout',
+        message: `Could not take ${lockPath} within ${options.giveUpMs ?? LOCK_GIVE_UP_MS} ms.`,
+      },
+    };
+  }
+  const heartbeatMs = options.heartbeatMs ?? Math.floor((options.staleMs ?? LOCK_STALE_MS) / 3);
+  const heartbeat = setInterval(() => {
+    try {
+      if (readFileSync(lockPath, 'utf8') !== held.token) return;
+      const now = new Date();
+      utimesSync(lockPath, now, now);
+    } catch {
+      // The lock is gone or unreadable; release below handles what is left.
+    }
+  }, heartbeatMs);
+  heartbeat.unref();
+  try {
+    return { held: true, value: await fn() };
+  } finally {
+    clearInterval(heartbeat);
+    releaseLock(lockPath, held.token);
   }
 }
 

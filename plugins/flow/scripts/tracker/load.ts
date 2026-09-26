@@ -115,7 +115,7 @@ export async function loadCodeAdapter(options: LoadCodeAdapterOptions): Promise<
     !/^\d+\.\d+\.\d+/.test(module.CONTRACT_VERSION)
   ) {
     throw new ConfigError(
-      `the ${tracker} adapter code at ${file} must export CONTRACT_VERSION, the adapter contract version it targets (for example "1.4.0")`
+      `the ${tracker} adapter code at ${file} must export CONTRACT_VERSION, the adapter contract version it targets (for example "2.0.0")`
     );
   }
   if (typeof module.createAdapter !== 'function') {

@@ -173,7 +173,7 @@ const moreOftenRow = (dials: string) =>
  */
 function statusGaps(status: string): string[] {
   const allowedTools = /^allowed-tools:(.*)$/m.exec(status)?.[1] ?? '';
-  const source = between(status, '5. **The schedules', 'Render, in this order');
+  const source = between(status, '2. **The schedules', '**Schedules.**');
   const gaps: string[] = [];
   if (!allowedTools.includes('mcp__dorkos__tasks_list')) gaps.push('may not call tasks_list');
   if (/tasks_update/.test(allowedTools)) gaps.push('pre-approves tasks_update');
@@ -187,7 +187,7 @@ function statusGaps(status: string): string[] {
   ];
   gaps.push(...sourceNeeds.filter(([, re]) => !re.test(source)).map(([label]) => label));
   gaps.push(...projectFilterGaps(source));
-  const pane = between(status, '- **Schedules.**', '- **Parked.**');
+  const pane = status.slice(status.indexOf('**Schedules.**'));
   const paneNeeds: [string, RegExp][] = [
     ['shows the cron and timezone', /the `cron`\s+and its `timezone`/],
     ['explains a schedule waiting for approval', /`pending_approval` means/],

@@ -393,8 +393,14 @@ export const inboxReconciler: Reconciler<FlowReconcileInput> = {
     }
     // Resume the parked run: re-attach the worktree at HEAD and resume the captured
     // session. The sessionId is the `--resume` handle; absent a local run, fall back
-    // to thread-replay. The dedupeKey is carried for the idempotent audit trail.
-    const via = next.run ? `--resume ${next.run.sessionId}` : 'thread-replay (no local FlowRun)';
+    // to thread-replay, and so does a run whose claim could not name its session
+    // (sessionId ""). The dedupeKey is carried for the idempotent audit trail.
+    const via =
+      next.run === null
+        ? 'thread-replay (no local FlowRun)'
+        : next.run.sessionId === ''
+          ? 'thread-replay (the run recorded no session id)'
+          : `--resume ${next.run.sessionId}`;
     return Promise.resolve({
       id: 'inbox',
       acted: true,

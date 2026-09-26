@@ -1,7 +1,7 @@
 {
   "rulePrefixes": {
     "INV": "adapter conformance invariants (INV-1..INV-5), not tracker items",
-    "GRM": "groom invariants (GRM-1..GRM-14), not tracker items",
+    "GRM": "groom invariants (GRM-1..GRM-15), not tracker items",
     "UTF": "the UTF-8 encoding name",
     "ISO": "the ISO-8601 date format name",
     "SHA": "hash names such as SHA-256",

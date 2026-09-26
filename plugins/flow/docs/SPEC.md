@@ -275,16 +275,16 @@ t-shirt word are not directly comparable. Types: `TasksFile`, `Task`, `TaskSize`
 The whole-tracker health oracle behind `/flow:groom` (`grooming-backlog`).
 Where `validate-adapter.ts` asserts one adapter's normalization is well-formed
 (INV-1..5, per-item shape), `audit-backlog.ts` asserts the **backlog itself**
-is honestly dispatchable: fourteen invariants (GRM-1..14) over a full
+is honestly dispatchable: fifteen invariants (GRM-1..15) over a full
 `getBacklogSnapshot()` — exactly one `type/*` label, a project, and a real
 priority on every open item; size, both engine-read description sections, no
 open blocker, no foreign assignee, a live project, and a `stage/*` label on
 every READY item; no dead project holding open work; namespaced labels; a
 single-valued `agent/*` state machine; no live item with an unresolved
-`duplicateOf`. Same harness contract as the conformance script (stdin or
+`duplicateOf`; state and labels agreeing (GRM-15, each `STATE-n` breach of
+`work-state.ts`). Same contract as the conformance script (stdin or
 `--fixture`, `{ ok, failures }`, exit 0/1/2, dependency-free); the
-engine-tests seed a violation per invariant and assert the verdict goes red,
-so a groom verification that cannot fail cannot ship.
+engine-tests seed a violation per invariant and prove the verdict goes red.
 
 ## Config schema reference
 

@@ -1,6 +1,6 @@
 ---
 name: grooming-backlog
-description: The /flow engine's backlog GROOM — a whole-backlog corrective sweep that makes the configured team's backlog honestly dispatchable. Audits every open item against the fourteen groom invariants, closes shipped/duplicate/junk work with cited evidence, reconciles projects with the repo's real programme structure, classifies and gates every survivor, then verifies the result with the audit-backlog and dispatch oracles. Use when the dispatch queue starves, after a large programme lands, before enabling autonomous mode, or whenever the tracker has drifted from reality. `check` mode is the read-only audit half. PM-agnostic; all tracker I/O routes through the adapter skill.
+description: The /flow engine's backlog GROOM — a whole-backlog corrective sweep that makes the configured team's backlog honestly dispatchable. Audits every open item against the fifteen groom invariants, closes shipped/duplicate/junk work with cited evidence, reconciles projects with the repo's real programme structure, classifies and gates every survivor, then verifies the result with the audit-backlog and dispatch oracles. Use when the dispatch queue starves, after a large programme lands, before enabling autonomous mode, or whenever the tracker has drifted from reality. `check` mode is the read-only audit half. PM-agnostic; all tracker I/O routes through the adapter skill.
 ---
 
 # Grooming the Backlog — the whole-backlog sweep
@@ -24,7 +24,7 @@ description: The /flow engine's backlog GROOM — a whole-backlog corrective swe
 > pick. A ready label nobody audits decays into noise.
 >
 > **This is a prose contract, not code.** The agent reads this skill and follows
-> it. A thin `/flow:groom` command triggers it; the fourteen invariants live as
+> it. A thin `/flow:groom` command triggers it; the fifteen invariants live as
 > the typed oracle `<flow-root>/scripts/audit-backlog.ts`.
 
 ## The one rule: never touch the tracker directly
@@ -74,36 +74,36 @@ at the phase-5 gate: the **closure list** (with per-item evidence) and the
 (labels, priorities, estimates, states, relations, description sections)
 proceeds under the operator's plan approval of the groom itself.
 
-## The fourteen invariants (what "groomed" means)
+## The fifteen invariants (what "groomed" means)
 
 The oracle is the definition — run it, do not re-derive it:
 
 ```bash
-node --experimental-strip-types "<flow-root>/scripts/audit-backlog.ts" --fixture <snapshot.json>
+node --experimental-strip-types "<flow-root>/scripts/flow.ts" audit --json   # exit 1 = an invariant fails
 node --experimental-strip-types "<flow-root>/scripts/audit-backlog.ts" --help   # the full list
 ```
 
-In one line each: every open item has exactly one `type/*` label, a project,
-and a real priority (GRM-1..3); every READY item has a size, both engine-read
-description sections (`## Validation criteria`, `## On Completion`), no open
-blocker, no foreign assignee, a live project, and a `stage/*` label
-(GRM-4..10); no dead project holds open work (GRM-11); labels are namespaced
-(GRM-12); the agent state machine is single-valued (GRM-13); and a live item
-never carries an unresolved `duplicateOf` (GRM-14).
+In brief: every open item has one `type/*` label, a project, and a real
+priority (GRM-1..3); every READY item has a size, both engine-read description
+sections, no open blocker, no foreign assignee, a live project, and a `stage/*`
+label (GRM-4..10); no dead project holds open work (GRM-11); labels are
+namespaced (GRM-12); the agent state machine is single-valued (GRM-13); a live
+item never carries an unresolved `duplicateOf` (GRM-14); and state agrees with
+labels (GRM-15).
 
 ## The procedure
 
 ### Phase 1 — Snapshot and baseline
 
-1. Via the adapter, `getCurrentUser()` (the identity for GRM-8) and
-   `getBacklogSnapshot()`: every open item with relations, labels, and project
-   states, plus recently-closed titles for duplicate/shipped matching.
+1. Pull the backlog, closed titles included:
+   `node --experimental-strip-types "<flow-root>/scripts/flow.ts" snapshot --include-closed --out <scratch>/before.json`.
 2. Materialize a **ledger** in the session scratchpad: one row per item,
    current values, empty proposal slots. Every later phase reads and writes
    this file, never its memory of it.
-3. Run `audit-backlog.ts` and `dispatch.ts` on the snapshot. Record both — this
-   is the BEFORE baseline the final report compares against. In **check** mode,
-   skip to phase 7's report using these results.
+3. Run `flow.ts audit --snapshot <scratch>/before.json --json` and
+   `flow.ts next --snapshot <scratch>/before.json -n 10 --json`. Record both: this is the BEFORE baseline the final report
+   compares against. In **check** mode, skip to phase 7's report using these
+   results.
 
 ### Phase 2 — Project architecture
 
@@ -219,11 +219,11 @@ respecting its bulk-write guidance:
 
 ### Phase 7 — Verify and report
 
-1. Re-snapshot via the adapter. Run `audit-backlog.ts`: the pass condition is
+1. Run `flow.ts audit --json` again: the pass condition is
    every invariant green over the groomed scope. If another session created
    items mid-groom, report their violations as OUT of scope — do not touch
    another session's in-flight work, and do not count it as your failure.
-2. Run `dispatch.ts` on the fresh snapshot and compare with the phase-1
+2. Run `flow.ts next -n 10 --json` and compare with the phase-1
    baseline. The groom's real pass condition is qualitative: **the top picks
    are work the operator would genuinely want an agent doing next.** A bigger
    eligible pool with a wrong top pick is a failed groom.

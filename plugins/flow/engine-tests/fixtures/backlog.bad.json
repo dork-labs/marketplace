@@ -26,7 +26,7 @@
       "stateName": "In Progress",
       "parent": null,
       "relations": { "blocks": ["GRM-200"], "blockedBy": [], "children": [], "relatedTo": [] },
-      "labels": ["type/task", "stage/execute"],
+      "labels": ["type/task", "agent/claimed"],
       "priority": 2,
       "project": { "id": "proj-1", "name": "Widgets", "stateCategory": "started" },
       "createdAt": "2026-08-01T00:00:00.000Z"

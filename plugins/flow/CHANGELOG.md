@@ -4,6 +4,22 @@ Installs of this plugin are pinned to a commit SHA, so a fix here does not reach
 you until you **reinstall it** (Marketplace → flow → reinstall, or re-run your
 `--plugin-dir` checkout's `git pull`). Each entry below says whether that matters.
 
+## 0.19.0
+
+**New `flow` command: agents and people run flow's routine steps as one tested command instead of following long instructions. Reinstall to get it.**
+
+Run it as `node --experimental-strip-types <flow-root>/scripts/flow.ts <command>`. Add `--json` for output a script can read.
+
+- `flow next` shows the next item to work on. It reads your settings itself, so nobody builds the ranking's input by hand.
+- `flow claim`, `flow release`, `flow done` and `flow stage` move an item along: they change its labels and state, check that the change landed, and keep the run record up to date.
+- `flow snapshot` pulls the backlog once. `flow audit` checks it and exits with an error when something is wrong, and `flow status` shows what is in flight, what is parked, and anything that disagrees.
+- In Claude Code, `flow claim` records which session is working an item without being told. Elsewhere, pass `--session`; without one the claim still goes ahead and says the session is unknown.
+- `flow accounts` lists your Claude Code accounts with the share of each one flow may spend, and lets you add one or change that share.
+- A new audit rule: an item's state, its `agent/*` label and its `stage/*` label must agree, and a `stage/*` label now appears only on work nobody has started. Items that break this show up in `flow audit`.
+- The Linear adapter now carries the code these commands use. The adapter contract is now version 2.0.0; a custom adapter that still sets `stage/*` labels on started work should be regenerated.
+- The instructions these commands replace are gone from the skills.
+- The reserve you keep on an account now comes back after its weekly reset. Before, it stayed at 0 after the reset, which has affected how accounts were ranked since 0.16.0.
+
 ## 0.18.1
 
 **A guide to `flow usage` and `flow fleet`. Reinstall to get the page locally; the status-line lines point to it.**

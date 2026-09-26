@@ -33,7 +33,14 @@
 import { execFileSync } from 'node:child_process';
 import { readFileSync } from 'node:fs';
 import path from 'node:path';
-import { updateJsonFile, type AtomicUpdateResult, type LockOptions } from './atomic-json.ts';
+import {
+  updateJsonFile,
+  withHeldLock,
+  type AtomicUpdateResult,
+  type LockOptions,
+  type HeldLockOptions,
+  type HeldLockResult,
+} from './atomic-json.ts';
 import { ConfigError } from './errors.ts';
 import type { FlowRun, FlowRunStatus, FlowStage } from './flow-run.ts';
 import {
@@ -100,6 +107,14 @@ export interface FlowStateFile {
     patch?: Partial<FlowRun>,
     options?: FlowStateWriteOptions
   ): Promise<AtomicUpdateResult>;
+  /**
+   * Run `fn` holding the claim lock, `flow-state.json.claim.lock`, so two
+   * claims on this machine run one after the other. It is not the store's own
+   * lock: a claim holds it across slow tracker calls, and the store's writes
+   * inside `fn` (and every other verb's) take the store lock only briefly.
+   */
+  withClaimLock<T>(fn: () => Promise<T>, options?: HeldLockOptions): Promise<HeldLockResult<T>>;
+
   /**
    * Replace a run with what `update` returns, inside the lock, so the update
    * sees the run as it is on disk at that moment; nothing happens when there is
@@ -183,6 +198,9 @@ export function openFlowStateFile(project: string): FlowStateFile {
         raw = undefined;
       }
       return parseFlowState(raw);
+    },
+    withClaimLock(fn, options) {
+      return withHeldLock(`${file}.claim.lock`, fn, options);
     },
     upsertRun(run, options) {
       return writeUnderLock(file, (store) => writeFlowRun(store, run), options);
