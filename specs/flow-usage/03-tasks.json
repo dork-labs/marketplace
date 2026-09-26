@@ -1,9 +1,9 @@
 {
   "spec": "specs/flow-usage/02-specification.md",
   "slug": "flow-usage",
-  "generatedAt": "2026-09-26T19:40:00.000Z",
-  "mode": "full",
-  "lastDecomposeDate": null,
+  "generatedAt": "2026-09-26T21:00:00.000Z",
+  "mode": "incremental",
+  "lastDecomposeDate": "2026-09-26T19:40:00.000Z",
   "tasks": [
     {
       "id": "1.1",
@@ -99,6 +99,78 @@
       "size": "medium",
       "priority": "medium",
       "dependencies": ["2.1", "2.2", "2.3", "2.4", "2.5"],
+      "parallelWith": []
+    },
+    {
+      "id": "4.1",
+      "phase": 4,
+      "phaseName": "Every runtime (Amendment 1, DOR-2399)",
+      "subject": "[flow-usage] [P4] Record Codex usage: scan --runtime codex and record --runtime codex",
+      "description": "Amendment 1 of specs/flow-usage/02-specification.md (DOR-2399). Blocked by S1 contract rev 6 (runtime-neutral ledger <dorkHome>/runtimes/<runtime>/usage/<id>.json with plan, credits, spend, windowMinutes; fixture 2.0.0) being merged: write only through rev 6's ledger writer and follow its field names where they differ from this text. Add fromCodexRateLimits(rl, observedAt) to scripts/fleet/observations.ts (pure, zero npm): for limit_id 'codex' or absent, primary/secondary become windows keyed by window_minutes (300 five_hour, 10080 seven_day, else window_<minutes>); any other limit_id becomes one model:<slug> bucket (slug = account-id slug rule of limit_name, else limit_id) holding its tightest window (highest used_percent, ties to the longer window); used_percent -> usedPct clamped; resets_at epoch s -> ISO; window_minutes -> windowMinutes; rate_limit_reached_type non-null -> status rejected on the named window (primary/secondary) or on every window of that limit; else status null; plan_type -> plan; credits {has_credits, unlimited, balance} -> credits {hasCredits, unlimited, balance}; source transcript; skip a window with neither usedPct nor status. Implicit Codex account 'default' = CODEX_HOME (non-empty) else <os home>/.codex. scan --runtime codex: walk <codex home>/sessions and <codex home>/archived_sessions for rollout-*.jsonl with the --days mtime filter, no symlinks, prefilter \"rate_limits\", accept type event_msg + payload.type token_count + object payload.rate_limits, observedAt = timestamp, newest per window, one ledger write. record --runtime codex: stdin is a bare rate_limits object (observedAt now) or a rollout line (its timestamp), with §2.1's silence rules. --runtime default stays claude-code; the usage dispatcher accepts --runtime on record and scan. Fixtures (made up, shaped like real rollouts: event_msg/token_count with rate_limits {limit_id, limit_name, primary, secondary, credits, individual_limit, spend_control_reached, plan_type, rate_limit_reached_type}): the codex limit with both windows, a codex_bengalfox limit named GPT-5.3-Codex-Spark, a reached limit, credits, plus and pro plans, a decoy user line. Tests: mapping per row, scan idempotence and mtime filter, record from a bare object and from a line, record --runtime codex runs from a copy of scripts/ with no node_modules. Each test proven to fail against a mutation. Acceptance: tests, typecheck, prettier, selftest clean.",
+      "activeForm": "Recording Codex usage: scan --runtime codex and record --runtime codex",
+      "size": "medium",
+      "priority": "medium",
+      "dependencies": [],
+      "parallelWith": ["4.2"]
+    },
+    {
+      "id": "4.2",
+      "phase": 4,
+      "phaseName": "Every runtime (Amendment 1, DOR-2399)",
+      "subject": "[flow-usage] [P4] Record OpenCode spend and credit/rate-limit errors from its own store",
+      "description": "Amendment 1 of specs/flow-usage/02-specification.md (DOR-2399). Blocked by S1 contract rev 6 (runtime-neutral ledger <dorkHome>/runtimes/<runtime>/usage/<id>.json with plan, credits, spend, windowMinutes; fixture 2.0.0) being merged: write only through rev 6's ledger writer and follow its field names where they differ from this text. Implicit OpenCode account 'default'; store = OPENCODE_DB (absolute, or relative to the data folder; ':memory:' = none) else <data folder>/opencode.db, data folder = $XDG_DATA_HOME/opencode (non-empty) else <os home>/.local/share/opencode (same rule as DorkOS opencode-data-dir.ts). scan --runtime opencode: import node:sqlite dynamically (missing -> one warning, nothing recorded); open DatabaseSync(store, { readOnly: true }); query ONLY the message table and ONLY json fields role, providerID, cost, time.created, error.name, error.data.statusCode of data; never the credential, account or control_account tables. spend = { periodStart: first instant of the current UTC month, costUsd: sum(cost) of assistant messages created since periodStart, observedAt: newest such message, source: transcript }, no limitUsd. Error signal: the newest assistant message with error.name APIError and statusCode 402 or 429 -> rev 6's window-less rejected reading with source error; a newer assistant message without error -> allowed for the same key. Other status codes are not recorded. record --runtime opencode: one assistant message JSON on stdin updates only the error signal. Extend engine-tests/usage/compliance-guard.test.ts: fail on 'credential', 'auth.json' or 'control_account' in the Codex/OpenCode modules (prove it with a violating temp copy). Tests build a temp opencode.db with node:sqlite (cost rows in two months, a 402 then a later success, a 429 as the newest, a decoy credential table with a row the test proves is never read by asserting the SQL text flow runs). Acceptance: tests, typecheck, prettier, selftest clean.",
+      "activeForm": "Recording OpenCode spend and credit/rate-limit errors from its own store",
+      "size": "medium",
+      "priority": "medium",
+      "dependencies": [],
+      "parallelWith": ["4.1"]
+    },
+    {
+      "id": "4.3",
+      "phase": 4,
+      "phaseName": "Every runtime (Amendment 1, DOR-2399)",
+      "subject": "[flow-usage] [P4] Group flow fleet by runtime: Codex bars, OpenCode spend",
+      "description": "Amendment 1 of specs/flow-usage/02-specification.md (DOR-2399). Blocked by S1 contract rev 6 (runtime-neutral ledger <dorkHome>/runtimes/<runtime>/usage/<id>.json with plan, credits, spend, windowMinutes; fixture 2.0.0) being merged: write only through rev 6's ledger writer and follow its field names where they differ from this text. Read accounts of every runtime (Claude Code registry rows; Codex/OpenCode implicit default when their ledger file exists or their home/store exists). Render one Accounts block per runtime that has an account with ledger data or a registered account, headed 'Claude Code', 'Codex', 'OpenCode'. Codex rows use the same bars; model:* buckets become a note ('GPT-5.3-Codex-Spark 12%' using the stored label, else the slug); a known plan shows in notes. OpenCode rows show '$<costUsd, 2 decimals> this month' in place of bars and 'out (credits)' / 'out (rate limit)' when a rejection is current. Sessions grouped under the same headings: Claude Code session files -> claude-code; DorkOS rows by their runtime field; run-only rows by FlowRun.runtime when present else claude-code. JSON gains runtime on accounts and sessions, and plan, credits, spend on accounts. Keep every line <= 100 columns and the read-only proof. Update the golden text and fleet tests. Acceptance: tests, typecheck, prettier, selftest clean.",
+      "activeForm": "Grouping flow fleet by runtime: Codex bars, OpenCode spend",
+      "size": "medium",
+      "priority": "medium",
+      "dependencies": ["4.1", "4.2"],
+      "parallelWith": []
+    },
+    {
+      "id": "4.4",
+      "phase": 4,
+      "phaseName": "Every runtime (Amendment 1, DOR-2399)",
+      "subject": "[flow-usage] [P4] Ship flow usage prune",
+      "description": "Amendment 1 of specs/flow-usage/02-specification.md (DOR-2399). Blocked by S1 contract rev 6 (runtime-neutral ledger <dorkHome>/runtimes/<runtime>/usage/<id>.json with plan, credits, spend, windowMinutes; fixture 2.0.0) being merged: write only through rev 6's ledger writer and follow its field names where they differ from this text. `flow usage prune [--yes] [--json]`: list every file in <dorkHome>/runtimes/<runtime>/usage/ that is not <id>.json of a known account of that runtime (a registered Claude Code id; 'default' for Codex and OpenCode while they have no registry), plus legacy files in <dorkHome>/usage/ (*.json, .statusline-*, *.corrupt-*). Without --yes list and exit 0; with --yes delete each after re-checking its account is still unknown; never delete a lock file younger than 10 s; never touch a known account's ledger. Tests on a temp DORK_HOME: listing, --yes deletion, a known ledger and a fresh lock survive, legacy files listed. Acceptance: tests, typecheck, prettier, selftest clean.",
+      "activeForm": "Shipping flow usage prune",
+      "size": "small",
+      "priority": "medium",
+      "dependencies": ["4.1"],
+      "parallelWith": ["4.2", "4.3"]
+    },
+    {
+      "id": "4.5",
+      "phase": 4,
+      "phaseName": "Every runtime (Amendment 1, DOR-2399)",
+      "subject": "[flow-usage] [P4] Journal usage.snapshot events and flow usage snapshot",
+      "description": "Amendment 1 of specs/flow-usage/02-specification.md (DOR-2399). Blocked by S1 contract rev 6 (runtime-neutral ledger <dorkHome>/runtimes/<runtime>/usage/<id>.json with plan, credits, spend, windowMinutes; fixture 2.0.0) being merged: write only through rev 6's ledger writer and follow its field names where they differ from this text. Also blocked by the flow journal (marketplace PR #63) being merged. Add the journal kind usage.snapshot to its JOURNAL_KINDS and zod schema: { kind: 'usage.snapshot', runtime: 'claude-code'|'codex'|'opencode', account: string, windows: Record<string, { usedPct: number|null, resetsAt: string|null, status: 'allowed'|'allowed_warning'|'rejected'|null }>, costUsd?: number }. Writers: flow usage scan and flow usage probe append one line per account whose ledger they changed; new `flow usage snapshot [--json]` appends one line per account whose ledger updatedAt is newer than that account's last usage.snapshot line in the journal (found with the journal's read over its current file). flow usage record never writes journal lines. Outside a flow project or with the journal off, write nothing and say nothing. Tests: scan writes one line per changed account and none on an unchanged rerun; snapshot writes only for accounts updated since their last line; record writes no journal line; journal off -> no file. Acceptance: tests, typecheck, prettier, selftest clean.",
+      "activeForm": "Journaling usage.snapshot events and flow usage snapshot",
+      "size": "medium",
+      "priority": "medium",
+      "dependencies": ["4.1", "4.2"],
+      "parallelWith": []
+    },
+    {
+      "id": "4.6",
+      "phase": 4,
+      "phaseName": "Every runtime (Amendment 1, DOR-2399)",
+      "subject": "[flow-usage] [P4] Document every runtime and prove Codex and OpenCode live",
+      "description": "Update plugins/flow/docs/account-usage.mdx (and its word budget) for Codex and OpenCode: where each reading comes from (Codex rollouts, OpenCode's own store; never auth.json or credential tables), scan --runtime, the grouped fleet screen, prune. CHANGELOG and version bump. Live proof on the operator's machine with a temporary DORK_HOME: scan --runtime codex (report the windows and plan found), scan --runtime opencode (report spend this month and any current rejection), flow fleet grouped by runtime, prune without --yes. Paste outputs (home shortened to ~) into the PR. Acceptance: docs accurate to the code, selftest clean, outputs in the PR.",
+      "activeForm": "Documenting every runtime and prove Codex and OpenCode live",
+      "size": "small",
+      "priority": "medium",
+      "dependencies": ["4.3", "4.4", "4.5"],
       "parallelWith": []
     }
   ]
