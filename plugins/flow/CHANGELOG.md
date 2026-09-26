@@ -4,6 +4,15 @@ Installs of this plugin are pinned to a commit SHA, so a fix here does not reach
 you until you **reinstall it** (Marketplace → flow → reinstall, or re-run your
 `--plugin-dir` checkout's `git pull`). Each entry below says whether that matters.
 
+## 0.15.0
+
+**Groundwork for running several items at once across your Claude Code accounts. One new command; nothing else you use changes, so no reinstall is needed.**
+
+- New `flow checkpoint`: it writes a short `HANDOFF.md` in the item's worktree saying what is done, what is next, open questions and the exact next command. flow fills in the facts itself (the branch, the last commit, whether it was pushed), so a fresh session, even on another account, can pick the work up from that file. The file is kept out of git automatically.
+- flow can now decide which of your accounts should take the next piece of work: one with room in its 5-hour and weekly limits, preferring the account whose unused weekly allowance runs out soonest, and keeping your main account for last. Nothing uses it yet; `flow next` and `flow drain` will.
+- A run record has room for a parallel drain's progress and for an account that hit its limit, and the settings gain a `drain` block (listed in `config/CONFIG.md`). Nothing reads them yet.
+- The shared account test fixtures are now version 1.0.1: one new case proves a run record keeps these new fields when another run is written.
+
 ## 0.14.0
 
 **More groundwork for the `flow` command. Nothing you use changes yet, so no reinstall is needed.**
