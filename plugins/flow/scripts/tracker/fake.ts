@@ -1,6 +1,6 @@
 /**
  * The fake tracker: an in-memory tracker behind the code-adapter contract
- * (adapter contract 1.4.0), for flow's self-test scenarios and live evals
+ * (adapter contract 2.1.0), for flow's self-test scenarios and live evals
  * (spec `specs/flow-self-improvement` §1, DOR-2390).
  *
  * It is not a mock that says yes. Where flow depends on how a real tracker
@@ -45,7 +45,7 @@ import type {
 import { ALL_CAPABILITIES } from './types.ts';
 
 /** The adapter contract version the fake implements. */
-export const FAKE_CONTRACT_VERSION = '1.4.0';
+export const FAKE_CONTRACT_VERSION = '2.1.0';
 
 /** The environment variable naming the JSON file a spawned run's fake tracker reads and writes. */
 export const FAKE_BACKLOG_ENV = 'FLOW_FAKE_BACKLOG';

@@ -78,6 +78,22 @@ describe('planFiling', () => {
     expect(plan.labels).not.toContain('agent/ready');
   });
 
+  it("files with selfImprovement.retro's labels and project, and never an agent/* label", () => {
+    const meta = {
+      ...META,
+      labels: ['flow/self-test', 'agent/ready', 'type/task'],
+      project: 'Flow health',
+    };
+    expect(planFiling([check], [], meta)[0]).toMatchObject({
+      kind: 'file',
+      labels: ['type/task', 'origin/from-agent', 'flow/self-test'],
+      project: 'Flow health',
+    });
+    const none = planFiling([check], [], { ...META, project: null })[0];
+    expect(none).toMatchObject({ labels: ['type/task', 'origin/from-agent'] });
+    expect(none).not.toHaveProperty('project');
+  });
+
   it('comments on an open match instead of filing', () => {
     expect(planFiling([check], [candidate('FAKE-1', check)], META)[0]).toMatchObject({
       kind: 'comment',
@@ -213,7 +229,13 @@ describe('selftest --file, end to end', () => {
     project = realpathSync(mkdtempSync(path.join(os.tmpdir(), 'flow-selftest-file-')));
     execFileSync('git', ['init', '-q'], { cwd: project });
     mkdirSync(path.join(project, '.agents', 'flow'), { recursive: true });
-    writeFileSync(path.join(project, '.agents', 'flow', 'config.json'), '{"tracker":"fake"}');
+    writeFileSync(
+      path.join(project, '.agents', 'flow', 'config.json'),
+      JSON.stringify({
+        tracker: 'fake',
+        selfImprovement: { retro: { labels: ['flow/self-test'], project: 'Flow health' } },
+      })
+    );
   });
 
   afterEach(() => rmSync(project, { recursive: true, force: true }));
@@ -265,6 +287,12 @@ describe('selftest --file, end to end', () => {
     const wouldFile = report.filing.wouldFile.map((w: { checkId: string }) => w.checkId);
     expect(wouldFile).toContain('scenarios/lifecycle/codex');
     expect(wouldFile).not.toContain('scenarios/lifecycle/claude-code');
+    for (const item of report.filing.wouldFile) {
+      expect(item).toMatchObject({
+        labels: ['type/task', 'origin/from-agent', 'flow/self-test'],
+        project: 'Flow health',
+      });
+    }
     expect(report.filing.message).toBe(CREATE_MISSING);
     expect(projectTracker.writes.map((w) => w.method)).toEqual(['comment']);
   });

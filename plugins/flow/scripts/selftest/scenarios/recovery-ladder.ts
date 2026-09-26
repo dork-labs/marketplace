@@ -11,8 +11,11 @@
  * facts read from the fake, the run store and the disk, and persists the
  * attempt count it returns, as the runtime would.
  *
- * `recovery.onExhausted` is not read by the oracle: every exhausted run
- * escalates with `agent/blocked`, whatever the setting.
+ * Not covered: `recovery.onExhausted` values other than `block`. The oracle
+ * does not read the setting, so every exhausted run escalates with
+ * `agent/blocked` (what `block` means), and `escalate` and `abandon` have no
+ * documented behavior to test against yet. The scenario sets `block`, the
+ * default, and pins that; the other two are a follow-up to define and build.
  *
  * @module @dorkos/flow/selftest/scenarios/recovery-ladder
  */

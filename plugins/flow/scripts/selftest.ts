@@ -16,10 +16,10 @@
  * Exit codes: 0 no failures · 1 a check failed (or, with `--strict`, was skipped)
  * · 2 usage error.
  *
- * Every run (unless `--no-save`) writes `.dork/flow/selftest/latest.json`, adds
+ * Every run (unless `--no-save`) writes `.dork/flow/selftest/latest.json` and adds
  * one line to `history.jsonl` (the last 200 runs) in the project's main checkout,
- * so every worktree shares one history, and adds one `selftest` line to the
- * project's journal.
+ * so every worktree shares one history. Every run, `--no-save` included, adds one
+ * `selftest` line to the project's journal unless the journal is off.
  *
  * @module @dorkos/flow/selftest
  */
@@ -34,7 +34,7 @@ import { realProcessRunner } from './cli/context.ts';
 import { buildProvenance, signBody, unsignedBody } from './cli/provenance.ts';
 import { findConfigRoots } from './config-files.ts';
 import { ensureIgnored } from './git-exclude.ts';
-import { append, journalFor } from './journal.ts';
+import { append, journalFor, runtimeOf } from './journal.ts';
 import {
   LINT_CONFIG_DIR,
   WORD_BUDGETS_FILE,
@@ -268,14 +268,17 @@ export async function runSelftest(
     } catch (err) {
       run.warn(`could not save the report: ${(err as Error).message}`);
     }
-    journal(report, run);
   }
+  // The journal line is the run's history for the retro, so --no-save (which
+  // is about the report files) does not skip it; only a journal that is off does.
+  journal(report, run);
   return { report, code: exitCode(report, { strict: run.strict }) };
 }
 
 /**
- * Add one `selftest` line to the project's journal. Never fails the run: a
- * journal that is off, refused or unwritable only warns (through `append`).
+ * Add one `selftest` line to the project's journal, stamped with the runtime
+ * that ran it. Never fails the run: a journal that is off, refused or
+ * unwritable only warns (through `append`).
  */
 function journal(report: SelftestReport, run: SelftestRun): void {
   const target = journalFor(run.projectDir, run.flowRoot);
@@ -291,7 +294,13 @@ function journal(report: SelftestReport, run: SelftestRun): void {
       ms: report.totals.ms,
       failing: report.checks.filter((c) => c.status === 'fail').map((c) => c.id),
     },
-    { now: run.now(), flowVersion: report.flowVersion, session: run.sessionId, warn: run.warn }
+    {
+      now: run.now(),
+      flowVersion: report.flowVersion,
+      session: run.sessionId,
+      ...runtimeOf(run.env),
+      warn: run.warn,
+    }
   );
 }
 
@@ -307,8 +316,9 @@ async function file(report: SelftestReport, run: SelftestRun): Promise<FilingRes
     if (failing.length === 0) return { commented: [], declined: [], notRefiled: [], wouldFile: [] };
     const { loadConfig } = await import('./config-load.ts');
     const { requireCapabilities } = await import('./tracker/load.ts');
-    const marker = loadConfig(findConfigRoots(run.projectDir, run.flowRoot), run.env).config
-      .identity.marker;
+    const { config } = loadConfig(findConfigRoots(run.projectDir, run.flowRoot), run.env);
+    const { marker } = config.identity;
+    const { labels, project } = config.selfImprovement.retro;
     const adapter = await run.adapter();
     requireCapabilities(adapter, ['getBacklogSnapshot', 'getItem', 'comment']);
     const provenance = buildProvenance({
@@ -318,7 +328,13 @@ async function file(report: SelftestReport, run: SelftestRun): Promise<FilingRes
     });
     return await fileFailures(
       failing,
-      { evidenceAt: report.startedAt, now: run.now(), flowVersion: report.flowVersion },
+      {
+        evidenceAt: report.startedAt,
+        now: run.now(),
+        flowVersion: report.flowVersion,
+        labels,
+        project,
+      },
       { adapter, sign: (body) => signBody(body, marker, provenance), unsign: unsignedBody }
     );
   } catch (err) {

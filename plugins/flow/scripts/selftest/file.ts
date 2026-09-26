@@ -35,8 +35,19 @@ export const WINDOW_DAYS = 90;
 export const CREATE_MISSING =
   'filing needs a create capability: the tracker adapter has no verb that creates an item, so these were not filed';
 
-/** The labels a filed item carries (never `agent/ready`: a person triages it). */
+/** The labels every filed item carries, before `selfImprovement.retro.labels`. */
 export const FILED_LABELS: readonly string[] = ['type/task', 'origin/from-agent'];
+
+/**
+ * A filed item's labels: {@link FILED_LABELS} plus the configured extras, each
+ * once, and never an `agent/*` label (a person triages the item first).
+ *
+ * @param extra - `selfImprovement.retro.labels`.
+ * @returns The labels.
+ */
+export function filedLabels(extra: readonly string[]): string[] {
+  return [...new Set([...FILED_LABELS, ...extra])].filter((label) => !label.startsWith('agent/'));
+}
 
 /**
  * The marker line a filed item's description carries.
@@ -81,6 +92,7 @@ export type Disposition =
       title: string;
       body: string;
       labels: string[];
+      project?: string;
       regressionOf?: string;
     };
 
@@ -92,6 +104,10 @@ export interface FilingMeta {
   now: Date;
   /** The flow version that ran. */
   flowVersion: string;
+  /** `selfImprovement.retro.labels`: extra labels a filed item gets. Default none. */
+  labels?: readonly string[];
+  /** `selfImprovement.retro.project`: the project a filed item goes to; `null`/absent = none. */
+  project?: string | null;
 }
 
 /** The body of a filed item, or of the comment on an open one. */
@@ -104,6 +120,22 @@ function bodyFor(check: Check, meta: FilingMeta, regressionOf?: string): string 
     '',
     markerFor(check.fingerprint),
   ].join('\n');
+}
+
+/** The item a failing check would be filed as. */
+function newItem(
+  check: Check,
+  meta: FilingMeta,
+  regressionOf?: string
+): Extract<Disposition, { kind: 'file' }> {
+  return {
+    kind: 'file',
+    checkId: check.id,
+    title: titleFor(check),
+    body: bodyFor(check, meta, regressionOf),
+    labels: filedLabels(meta.labels ?? []),
+    ...(meta.project ? { project: meta.project } : {}),
+  };
 }
 
 /** Whether a close falls inside the window; an undated close always does. */
@@ -164,22 +196,9 @@ export function planFiling(
           reason: 'completed after this run started',
         };
       }
-      return {
-        kind: 'file',
-        checkId: check.id,
-        title: titleFor(check),
-        body: bodyFor(check, meta, completed.identifier),
-        labels: [...FILED_LABELS],
-        regressionOf: completed.identifier,
-      };
+      return { ...newItem(check, meta, completed.identifier), regressionOf: completed.identifier };
     }
-    return {
-      kind: 'file',
-      checkId: check.id,
-      title: titleFor(check),
-      body: bodyFor(check, meta),
-      labels: [...FILED_LABELS],
-    };
+    return newItem(check, meta);
   });
 }
 
@@ -197,6 +216,7 @@ export interface FilingResult {
     title: string;
     body: string;
     labels: string[];
+    project?: string;
     regressionOf?: string;
   }[];
   /** {@link CREATE_MISSING} when anything would be filed. */
@@ -270,14 +290,8 @@ export async function fileFailures(
       const { checkId, identifier, reason } = plan;
       result.notRefiled.push({ checkId, identifier, reason });
     } else {
-      const { checkId, title, body, labels, regressionOf } = plan;
-      result.wouldFile.push({
-        checkId,
-        title,
-        body,
-        labels,
-        ...(regressionOf ? { regressionOf } : {}),
-      });
+      const { kind: _kind, ...item } = plan;
+      result.wouldFile.push(item);
     }
   }
   if (result.wouldFile.length > 0) result.message = CREATE_MISSING;

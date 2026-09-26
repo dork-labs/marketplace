@@ -69,8 +69,8 @@ async function load() {
 }
 
 describe('the shipped fake tracker', () => {
-  it('declares contract 1.4.0 and is what the loader finds for a project linked to it', async () => {
-    expect(fakeModule.CONTRACT_VERSION).toBe('1.4.0');
+  it('declares contract 2.1.0 and is what the loader finds for a project linked to it', async () => {
+    expect(fakeModule.CONTRACT_VERSION).toBe('2.1.0');
     vi.stubEnv(FAKE_BACKLOG_ENV, backlogFile);
     const adapter = await load();
     const snapshot = await adapter.getBacklogSnapshot();
@@ -124,5 +124,27 @@ describe('the shipped fake tracker', () => {
     const read = await tracker.adapter.getItem('FAKE-1', { comments: 1 });
     expect(read.comments?.[0].createdAt).toBe('2030-01-02T03:04:05.000Z');
     expect((await tracker.adapter.getBacklogSnapshot()).fetchedAt).toBe('2030-01-02T03:04:05.000Z');
+  });
+
+  it('dates each close by its clock, and forgets the date when the item reopens (contract 2.1.0)', async () => {
+    // Purpose: selftest --file refiles over a close only when it can date it;
+    // the fake must report closedAt the way an adapter that knows it does.
+    let now = new Date('2030-01-01T00:00:00.000Z');
+    const tracker = new FakeTracker(structuredClone(FIXTURE), { now: () => now });
+    const closedAt = async (id: string) =>
+      (await tracker.adapter.getBacklogSnapshot({ includeClosed: true })).closed.find(
+        (c) => c.identifier === id
+      )?.closedAt;
+    await tracker.adapter.applyWorkState(await tracker.adapter.getItem('FAKE-1'), {
+      stateCategory: 'canceled',
+    });
+    expect(await closedAt('FAKE-1')).toBe('2030-01-01T00:00:00.000Z');
+    await tracker.adapter.applyWorkState(await tracker.adapter.getItem('FAKE-1'), {
+      stateCategory: 'unstarted',
+    });
+    expect(tracker.backlog.closedAt?.['FAKE-1']).toBeUndefined();
+    now = new Date('2030-02-01T00:00:00.000Z');
+    tracker.mergePr({ body: 'Closes FAKE-1' });
+    expect(await closedAt('FAKE-1')).toBe('2030-02-01T00:00:00.000Z');
   });
 });

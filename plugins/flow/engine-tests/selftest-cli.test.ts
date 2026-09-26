@@ -8,7 +8,7 @@
  * exit code) each get a planted break that must fail for the stated reason.
  */
 
-import { execFileSync } from 'node:child_process';
+import { execFileSync, spawnSync } from 'node:child_process';
 import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync, mkdirSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -104,7 +104,7 @@ describe('flow selftest', () => {
     expect((await run(['--bogus'])).code).toBe(2);
   });
 
-  it('saves latest.json, one history line and one journal line, and keeps .dork/flow/ out of git', async () => {
+  it('saves latest.json and one history line, and keeps .dork/flow/ out of git', async () => {
     await run(['--tier', 'fast', '--no-save']);
     expect(existsSync(path.join(project, SELFTEST_DIR))).toBe(false);
 
@@ -118,13 +118,6 @@ describe('flow selftest', () => {
       status: 'skip',
       fingerprint: expect.stringMatching(/^[0-9a-f]{12}$/),
     });
-    const journal = readFileSync(path.join(project, '.dork', 'flow', 'journal.jsonl'), 'utf8')
-      .trim()
-      .split('\n')
-      .map((l) => JSON.parse(l));
-    expect(journal).toEqual([
-      expect.objectContaining({ kind: 'selftest', tiers: ['fast'], fail: 0, failing: [] }),
-    ]);
     const exclude = readFileSync(path.join(project, '.git', 'info', 'exclude'), 'utf8');
     expect(exclude.split('\n').filter((l) => l === '.dork/flow/')).toHaveLength(1);
     await run(['--tier', 'fast']);
@@ -142,6 +135,63 @@ describe('flow selftest', () => {
     expect(lines).toHaveLength(HISTORY_CAP);
     expect(JSON.parse(lines[0])).toEqual({ n: 51 });
     expect(JSON.parse(lines.at(-1) ?? '{}').startedAt).toBe('2026-09-26T12:00:00.000Z');
+  });
+});
+
+/** The project's journal lines. */
+function journalLines(): Record<string, unknown>[] {
+  const file = path.join(project, '.dork', 'flow', 'journal.jsonl');
+  if (!existsSync(file)) return [];
+  return readFileSync(file, 'utf8')
+    .trim()
+    .split('\n')
+    .map((l) => JSON.parse(l) as Record<string, unknown>);
+}
+
+describe('the selftest journal line', () => {
+  it('is written on every run, --no-save included, stamped with the runtime that ran it', async () => {
+    // Purpose: the retro reads self-test history from the journal, per
+    // runtime; --no-save is about the report files, not that history.
+    await run(['--tier', 'fast', '--no-save'], { VITEST: 'true', CODEX_THREAD_ID: 'thread-1' });
+    await run(['--tier', 'fast', '--no-save'], { VITEST: 'true', CLAUDECODE: '1' });
+    expect(journalLines()).toEqual([
+      expect.objectContaining({ kind: 'selftest', tiers: ['fast'], runtime: 'codex', fail: 0 }),
+      expect.objectContaining({ kind: 'selftest', runtime: 'claude-code', harness: 'claude-code' }),
+    ]);
+  });
+
+  it('is not written when the journal is off', async () => {
+    mkdirSync(path.join(project, '.agents', 'flow'), { recursive: true });
+    writeFileSync(
+      path.join(project, '.agents', 'flow', 'config.json'),
+      JSON.stringify({ selfImprovement: { journal: { enabled: false } } })
+    );
+    await run(['--tier', 'fast', '--no-save']);
+    expect(journalLines()).toEqual([]);
+  });
+});
+
+describe('the flow entry point, as a process', () => {
+  // Purpose: /flow:self-test runs `flow.ts selftest` as a script. The scenarios
+  // import flow.ts, and a top-level await of main() there deadlocks that import
+  // (Node exits 13 with no output), which no in-process test can see.
+  it('runs `flow selftest --tier scenarios` to a parseable report and exit 0', () => {
+    const result = spawnSync(
+      process.execPath,
+      [
+        '--experimental-strip-types',
+        '--no-warnings',
+        path.join(FLOW_ROOT, 'scripts', 'flow.ts'),
+        'selftest',
+        '--tier',
+        'scenarios',
+        '--no-save',
+        '--json',
+      ],
+      { cwd: project, encoding: 'utf8', env: { PATH: process.env.PATH ?? '' }, timeout: 60_000 }
+    );
+    expect(result.status).toBe(0);
+    expect(JSON.parse(result.stdout)).toMatchObject({ v: 1, ok: true, tiers: ['scenarios'] });
   });
 });
 

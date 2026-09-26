@@ -16,12 +16,16 @@
  *
  * Runtime-parameterized: the same run as a Claude Code-shaped session
  * (`CLAUDECODE=1`) and a Codex-shaped one (`CODEX_THREAD_ID`, no `CLAUDECODE`),
- * asserting what the verbs record for each today (see {@link RECORDED}).
+ * asserting what each records (see {@link RECORDED}): `detectRuntime` must
+ * read the environment as that runtime, and a `flow note` written during the
+ * run must land in the journal stamped with it.
  *
  * @module @dorkos/flow/selftest/scenarios/lifecycle
  */
 
 import { PROVENANCE_MARKER } from '../../cli/provenance.ts';
+import { journalFor, read as readJournal, runtimeOf } from '../../journal.ts';
+import { detectRuntime } from '../../runtime-detect.ts';
 import { verifyWrite } from '../../tracker/verify-write.ts';
 import { AGENT_READY, projectionFor, type StageTable } from '../../work-state.ts';
 import {
@@ -47,8 +51,12 @@ export const RUNTIME_ENV: Readonly<Record<RuntimeShape, Record<string, string>>>
   codex: { CODEX_THREAD_ID: 'codex-thread-1' },
 };
 
-/** What the write verbs record about the session, per harness shape. */
+/** What a run records about its session, per harness shape. */
 export interface Recorded {
+  /** What `detectRuntime` says the environment is, and every journal line's `runtime`. */
+  runtime: RuntimeShape;
+  /** Every journal line's `harness` (no cmux panel and no `FLOW_HARNESS` here). */
+  journalHarness: string;
   /** The provenance line's (and the run record's) `harness`; absent = left out. */
   harness?: string;
   /** The run record's `sessionId` (`''` = unknown, never invented). */
@@ -58,30 +66,22 @@ export interface Recorded {
 }
 
 /**
- * What the verbs record today. Only Claude Code marks its child processes, so
- * a Codex-shaped run records no harness and no session: `CODEX_THREAD_ID` is
- * not read yet. When `scripts/runtime-detect.ts` lands, `codex` gains
- * `harness: 'codex'` and its session id, and {@link runtimeOf} becomes
- * `detectRuntime`.
+ * What a run records today. The journal is runtime-aware (`runtimeOf` in
+ * `journal.ts`, over `detectRuntime`), so its lines say `codex` or
+ * `claude-code`. The provenance line and the run record are not yet: only
+ * Claude Code's marker and session variable are read there, so a Codex run
+ * signs with no harness and records its session as unknown.
  */
 export const RECORDED: Readonly<Record<RuntimeShape, Recorded>> = {
-  'claude-code': { harness: 'claude-code', sessionId: 'claude-session-1', account: '.claude-work' },
-  codex: { sessionId: '' },
+  'claude-code': {
+    runtime: 'claude-code',
+    journalHarness: 'claude-code',
+    harness: 'claude-code',
+    sessionId: 'claude-session-1',
+    account: '.claude-work',
+  },
+  codex: { runtime: 'codex', journalHarness: 'codex', sessionId: '' },
 };
-
-/**
- * The seam for `detectRuntime(env)` (`scripts/runtime-detect.ts`, landing in a
- * parallel change): which harness an environment describes. Until that module
- * exists, the two shapes this scenario builds are told apart here.
- *
- * @param env - The environment a `flow` command sees.
- * @returns The harness shape, or `undefined` when it is neither.
- */
-export function runtimeOf(env: Readonly<Record<string, string>>): RuntimeShape | undefined {
-  if (env.CLAUDECODE === '1') return 'claude-code';
-  if (env.CODEX_THREAD_ID !== undefined && env.CODEX_THREAD_ID !== '') return 'codex';
-  return undefined;
-}
 
 /** The item the scenario carries through. */
 const ID = 'FAKE-1';
@@ -114,9 +114,13 @@ function expectItem(
  */
 export async function lifecycle(runtime: RuntimeShape, options: ScenarioOptions): Promise<void> {
   const env = RUNTIME_ENV[runtime];
-  const shape = runtimeOf(env);
-  check(shape === runtime, `the ${runtime} environment reads as ${shape ?? 'no harness'}`);
-  const recorded = RECORDED[shape];
+  const recorded = RECORDED[runtime];
+  const detected = detectRuntime(env);
+  checkEqual(
+    { runtime: detected.runtime, harness: runtimeOf(env).harness },
+    { runtime: recorded.runtime, harness: recorded.journalHarness },
+    `detectRuntime on the ${runtime}-shaped environment`
+  );
 
   await withScenario(options, async (ctx) => {
     // 1. Captured: in the backlog, with an origin, not ready.
@@ -248,6 +252,23 @@ export async function lifecycle(runtime: RuntimeShape, options: ScenarioOptions)
     );
     checkEqual(provenance.account, recorded.account, `the ${runtime} provenance account`);
     checkEqual(ctx.runs()[`id-${ID}`]?.status, 'complete', 'the run status after flow done');
+
+    // A note written during the run is journaled as this runtime.
+    await ctx.flowOk(
+      ['note', '--kind', 'friction', '--item', ID, 'The export needed a guess.'],
+      env
+    );
+    const journal = journalFor(ctx.projectDir, options.flowRoot);
+    check(!('refusal' in journal), `the journal refused the scenario project`);
+    const lines = readJournal(journal.settings).lines;
+    check(lines.length > 0, `flow note under ${runtime} wrote no journal line`);
+    for (const line of lines) {
+      checkEqual(
+        { kind: line.kind, runtime: line.runtime, harness: line.harness },
+        { kind: line.kind, runtime: recorded.runtime, harness: recorded.journalHarness },
+        `a journal line written under ${runtime}`
+      );
+    }
 
     // A retried `flow done` posts nothing new.
     const again = await ctx.flowOk(doneArgs, env);

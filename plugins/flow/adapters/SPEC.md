@@ -1,6 +1,6 @@
 # Tracker Adapter Contract
 
-> **Contract version: 2.0.0** (semver). See [Versioning](#5-versioning).
+> **Contract version: 2.1.0** (semver). See [Versioning](#5-versioning).
 >
 > This is the **generic, tracker-neutral** contract every `/flow` tracker adapter
 > must satisfy. It names no tracker, no API, and no slug. Reference adapters
@@ -540,7 +540,7 @@ skill, so a project adapter always wins over a shipped one.
 **The module.** It exports two things:
 
 ```ts
-export const CONTRACT_VERSION: string; // the contract version it targets, e.g. '2.0.0'
+export const CONTRACT_VERSION: string; // the contract version it targets, e.g. '2.1.0'
 export function createAdapter(ctx: AdapterContext): CodeAdapter;
 ```
 
@@ -753,6 +753,12 @@ declaration.
 
 ### What each version added
 
+- **2.1.0** - a closed item in the backlog snapshot may carry **`closedAt`**,
+  the date it was completed or canceled (section 3, "The two optional reads").
+  Optional, so additive (MINOR): an adapter that cannot tell leaves it out, and
+  a reader treats an undated close as recent. `flow selftest --file` uses it to
+  refile over a cancel only after 90 days, and a completed item only when the
+  failure is newer.
 - **2.0.0** - **state, `agent/*` and `stage/*` agree** (MAJOR). `claim` now
   removes `agent/ready` and every `stage/*` label, and `transition` to a stage
   whose category is `started` or `completed` removes every `stage/*` label
