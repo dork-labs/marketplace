@@ -312,6 +312,88 @@ export const VERBS: readonly VerbDefinition[] = [
     ],
     load: () => import('./cli/checkpoint.ts'),
   },
+  {
+    name: 'usage',
+    summary: "Record each Claude Code account's usage, or set up the status line to.",
+    description: [
+      'Sub-verbs:',
+      '  record              Read the status-line JSON on stdin and save the readings (the status line runs this).',
+      '  scan                Recover past limit hits from saved conversations.',
+      '  probe <id>          Run one short official turn on an account to read its usage (needs --yes).',
+      "  install-statusline  Add the two recorder lines to each account's status-line script (needs --yes).",
+    ].join('\n'),
+    common: ['dry-run'],
+    flags: [
+      {
+        name: 'account',
+        kind: 'string',
+        value: 'id',
+        description: 'Only this account (record, scan, install-statusline).',
+      },
+      { name: 'verbose', kind: 'boolean', description: 'record: say on stderr what happened.' },
+      {
+        name: 'days',
+        kind: 'string',
+        value: 'n',
+        description: 'scan: read files changed in the last n days. Default 8.',
+      },
+      { name: 'all', kind: 'boolean', description: 'scan: read every file.' },
+      {
+        name: 'yes',
+        kind: 'boolean',
+        description: 'probe, install-statusline: go ahead. Without it nothing runs or changes.',
+      },
+      {
+        name: 'remove',
+        kind: 'boolean',
+        description: 'install-statusline: take the recorder lines out again.',
+      },
+      {
+        name: 'model',
+        kind: 'string',
+        value: 'alias',
+        description: 'probe: the model for the turn. Default haiku.',
+      },
+      {
+        name: 'timeout',
+        kind: 'string',
+        value: 's',
+        description: 'probe: give up after this many seconds. Default 90.',
+      },
+      {
+        name: 'claude',
+        kind: 'string',
+        value: 'path',
+        description: 'probe: the claude binary. Default FLOW_CLAUDE_BIN, else claude on PATH.',
+      },
+    ],
+    positionals: [
+      { name: 'sub-verb', description: 'record, scan, probe or install-statusline.' },
+      { name: 'id', description: 'probe: the account id.' },
+    ],
+    load: () => import('./cli/usage.ts'),
+  },
+  {
+    name: 'fleet',
+    summary: 'Show every account and every running session on one screen. Changes nothing.',
+    description: [
+      "Show each account's 5-hour and weekly usage, and each running session with its",
+      'account, item, state and host. Reads only; the one request it may make goes to',
+      'a DorkOS on this machine.',
+    ].join('\n'),
+    common: ['project'],
+    flags: [
+      {
+        name: 'dorkos-url',
+        kind: 'string',
+        value: 'url',
+        description:
+          'The DorkOS to ask. Default FLOW_DORKOS_URL, else http://127.0.0.1:<DORKOS_PORT or 4242>.',
+      },
+      { name: 'no-dorkos', kind: 'boolean', description: 'Do not ask DorkOS at all.' },
+    ],
+    load: () => import('./cli/fleet.ts'),
+  },
 ];
 
 /** The plugin folder, `<flow-root>`: the parent of `scripts/`. */
