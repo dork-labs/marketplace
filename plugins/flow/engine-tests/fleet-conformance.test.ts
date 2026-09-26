@@ -172,8 +172,8 @@ describe('the fleet conformance fixture', () => {
   // Purpose: the folder is the contract DorkOS vendors. Pin its version and the
   // exact set of case files, so a case file added without a runner (and so never
   // run here) fails instead of passing silently.
-  it('is contract 1.0.1 with exactly the known case files', () => {
-    expect(readFileSync(path.join(FIXTURE_DIR, 'CONTRACT_VERSION'), 'utf8').trim()).toBe('1.0.1');
+  it('is contract 1.0.2 with exactly the known case files', () => {
+    expect(readFileSync(path.join(FIXTURE_DIR, 'CONTRACT_VERSION'), 'utf8').trim()).toBe('1.0.2');
     expect(caseFiles).toEqual(Object.keys(RUNNERS).sort());
   });
 
