@@ -337,11 +337,13 @@ export const VERBS: readonly VerbDefinition[] = [
     summary: "Record each account's usage, clear out stale usage files, or set up the status line.",
     description: [
       'Sub-verbs:',
-      '  record              Read the status-line JSON on stdin and save the readings (the status line runs this).',
-      '  scan                Recover past limit hits from saved conversations.',
+      '  record              Read usage on stdin and save it: the status-line JSON, or with --runtime codex a',
+      '                      Codex rate_limits object or session-log line.',
+      '  scan                Recover past usage from saved conversations (Codex: its session logs).',
       '  probe <id>          Run one short official turn on an account to read its usage (needs --yes).',
       "  install-statusline  Add the two recorder lines to each account's status-line script (needs --yes).",
-      '  prune               Delete the usage files of accounts no longer registered.',
+      '  prune               List usage files nobody needs (unregistered accounts, old leftovers); --yes deletes them.',
+      '  snapshot            Add a sampled usage line to the flow journal for each account (a drain runs this).',
     ].join('\n'),
     common: ['dry-run'],
     flags: [
@@ -350,6 +352,12 @@ export const VERBS: readonly VerbDefinition[] = [
         kind: 'string',
         value: 'id',
         description: 'Only this account (record, scan, install-statusline).',
+      },
+      {
+        name: 'runtime',
+        kind: 'string',
+        value: 'runtime',
+        description: 'record, scan: claude-code (default), codex or opencode.',
       },
       { name: 'verbose', kind: 'boolean', description: 'record: say on stderr what happened.' },
       {
@@ -362,7 +370,8 @@ export const VERBS: readonly VerbDefinition[] = [
       {
         name: 'yes',
         kind: 'boolean',
-        description: 'probe, install-statusline: go ahead. Without it nothing runs or changes.',
+        description:
+          'probe, install-statusline, prune: go ahead. Without it nothing runs or changes.',
       },
       {
         name: 'remove',
@@ -389,7 +398,10 @@ export const VERBS: readonly VerbDefinition[] = [
       },
     ],
     positionals: [
-      { name: 'sub-verb', description: 'record, scan, probe, install-statusline or prune.' },
+      {
+        name: 'sub-verb',
+        description: 'record, scan, probe, install-statusline, prune or snapshot.',
+      },
       { name: 'id', description: 'probe: the account id.' },
     ],
     load: () => import('./cli/usage.ts'),

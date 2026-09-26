@@ -9,20 +9,31 @@
 
 import { UsageError } from '../errors.ts';
 import type { VerbContext, VerbModule, VerbResult } from './context.ts';
+import { parseRuntime, runtimeHandler } from './usage-runtime.ts';
 
-/** Each sub-verb, the flags it takes, and how to load it. */
+/**
+ * Each sub-verb, the flags it takes, and how to load it. `record` and `scan`
+ * pick their module by `--runtime` ({@link runtimeHandler}).
+ */
 const SUB_VERBS: Readonly<
-  Record<string, { flags: readonly string[]; takesId: boolean; load(): Promise<VerbModule> }>
+  Record<
+    string,
+    {
+      flags: readonly string[];
+      takesId: boolean;
+      load(ctx: VerbContext): Promise<VerbModule>;
+    }
+  >
 > = {
   record: {
-    flags: ['account', 'verbose'],
+    flags: ['account', 'verbose', 'runtime'],
     takesId: false,
-    load: () => import('./usage-record.ts'),
+    load: (ctx) => runtimeHandler('record', parseRuntime(ctx.args.flags.runtime))(),
   },
   scan: {
-    flags: ['account', 'days', 'all', 'dry-run'],
+    flags: ['account', 'days', 'all', 'dry-run', 'runtime'],
     takesId: false,
-    load: () => import('./usage-scan.ts'),
+    load: (ctx) => runtimeHandler('scan', parseRuntime(ctx.args.flags.runtime))(),
   },
   probe: {
     flags: ['model', 'timeout', 'claude', 'yes'],
@@ -35,15 +46,20 @@ const SUB_VERBS: Readonly<
     load: () => import('./usage-install.ts'),
   },
   prune: {
-    flags: ['dry-run'],
+    flags: ['yes', 'dry-run'],
     takesId: false,
     load: () => import('./usage-prune.ts'),
+  },
+  snapshot: {
+    flags: [],
+    takesId: false,
+    load: () => import('./usage-snapshot.ts'),
   },
 };
 
 /** The sub-verb list, for usage errors. */
 const LIST =
-  'flow usage record | scan | probe <id> | install-statusline | prune; run "flow usage --help" for details';
+  'flow usage record | scan | probe <id> | install-statusline | prune | snapshot; run "flow usage --help" for details';
 
 /**
  * Dispatch to the sub-verb named by the first positional, after checking it
@@ -51,8 +67,8 @@ const LIST =
  *
  * @param ctx - The verb context.
  * @returns The sub-verb's result.
- * @throws {UsageError} For a missing or unknown sub-verb, a flag it does not
- *   take, or a missing or extra `<id>`.
+ * @throws {UsageError} For a missing or unknown sub-verb, an unknown or unbuilt
+ *   `--runtime`, a flag it does not take, or a missing or extra `<id>`.
  */
 export async function run(ctx: VerbContext): Promise<VerbResult> {
   const [sub, id] = ctx.args.positionals;
@@ -70,6 +86,6 @@ export async function run(ctx: VerbContext): Promise<VerbResult> {
   if (!entry.takesId && id !== undefined) {
     throw new UsageError(`unexpected argument "${id}" for "flow usage ${sub}"`);
   }
-  const module = await entry.load();
+  const module = await entry.load(ctx);
   return module.run(ctx);
 }
