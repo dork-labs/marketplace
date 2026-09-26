@@ -5,7 +5,7 @@ description: flow drain carries several ready items at once, each on its own acc
 
 # Draining in parallel
 
-`flow drain --parallel 3` carries several ready items at once, three sessions at a time. For each item it makes a worktree, claims the item, and starts a worker on the account with the most room. Every push the worker reports is read by a separate reviewer session in its own worktree. The worker opens its PR only after a clean review at the branch head: `flow pr` refuses otherwise.
+`flow drain --parallel 3` carries three ready items at once, each in its own worktree with a worker on the account with the most room. A separate reviewer session reads every push, and `flow pr` opens the PR only after a clean review at the branch head.
 
 ## Before you start
 
@@ -13,26 +13,31 @@ Allow each account flow may spend with `flow accounts set <id> --role rotation`.
 
 ## Where sessions run
 
-`--host` picks `cli` (plain `claude -p`), `cmux` (a workspace per session) or `dorkos`. `auto` takes cmux when the drain runs inside it, then DorkOS when it is running, then the plain CLI. A named host that is missing is an error.
+`--host` picks `cli` (plain `claude -p`), `cmux` or `dorkos`. `auto` takes cmux when the drain runs inside it, then DorkOS, then the CLI.
 
 ## What each line means
 
 - `claimed on <account> (cli)`: a worker started.
-- `reviewer started at 4be1c2d`: a push is under review.
-- `sent review-findings`: the worker got the findings.
-- `sent open-pr`: the review came back clean.
+- `moved to <account>`: an account ran out, so the work moved.
 - `parked: <reason>`: a person is needed; the reason is posted on the item.
 
-## Limits
+## What happens at a limit
 
-No new session starts while the load per CPU is at or above `drain.maxLoadPerCpu`, or on an account already carrying `drain.maxLivePerAccount` sessions. After `drain.maxReviewRounds` reviews asking for changes, the run parks.
+Near a limit, the worker finishes its step, writes `HANDOFF.md` and stops. If the account resets within `drain.waitIfResetWithinMinutes`, the run waits. If only one model ran out, it goes on with the next in `drain.modelFallback`. Otherwise a session on another account continues from `HANDOFF.md`.
+
+## Ask or auto
+
+`handoff` in `fleet.json` decides: `auto` moves the run at once; `ask` posts one comment with the `flow handoff <id> --to <account>` command and waits for the reset. `flow handoff <id> --wait` keeps a run where it is.
+
+## Caps
+
+No new session starts while load per CPU is at `drain.maxLoadPerCpu` or above, or on an account with `drain.maxLivePerAccount` sessions. `drain.maxReviewRounds` reviews asking for changes park the run.
 
 ## Terminal or schedule
 
-In a terminal, `flow drain` passes every `drain.pollSeconds` until nothing is left, or until Ctrl-C, which leaves every session running for the next drain to adopt. On a schedule, set `drain.parallel` and the `flow-drain` tick runs `flow drain --tick`, one pass per firing.
+In a terminal, `flow drain` passes every `drain.pollSeconds` until nothing is left or Ctrl-C, which leaves sessions running. On a schedule, the `flow-drain` tick runs `flow drain --tick`.
 
 ## Parts
 
 - `templates/drain/worker-brief.md` and `templates/drain/reviewer-brief.md`: what each session reads first.
 - `flow watch`: wait on any PR by hand.
-- The launchers' live test starts real sessions only with `FLOW_LAUNCHER_LIVE=1`.
