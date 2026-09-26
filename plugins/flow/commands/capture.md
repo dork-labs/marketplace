@@ -11,10 +11,8 @@ Capture this into the tracker: $ARGUMENTS
 
 Read `${CLAUDE_PLUGIN_ROOT}/skills/capturing-work/SKILL.md` and follow its process exactly.
 
-That skill is PM-agnostic: it routes every tracker read or write through the
-tracker adapter skill (the `SKILL.md` at the `adapter.path` that
-`node --experimental-strip-types "${CLAUDE_PLUGIN_ROOT}/scripts/config-files.ts"` prints), which it reads on demand. Do not
-touch a tracker directly from this command — the skill owns the whole flow.
+Its one tracker write is `node --experimental-strip-types "${CLAUDE_PLUGIN_ROOT}/scripts/flow.ts" create`,
+which reaches the tracker adapter's code itself. Never touch the tracker another way.
 
 If no argument is provided, ask the operator for the thought to capture, then
 follow the skill. CAPTURE only captures — it does not triage, evaluate, or plan.

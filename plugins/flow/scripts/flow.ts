@@ -286,6 +286,45 @@ export const VERBS: readonly VerbDefinition[] = [
     load: () => import('./cli/done.ts'),
   },
   {
+    name: 'create',
+    summary: 'File a new item in the tracker.',
+    description:
+      'File one new item through the adapter, with a signed description (identity marker and provenance). Refuses before any tracker call an empty title, an agent/* label, two labels in one group, and a priority outside 0-4. With --key, an open item already filed with that key is returned instead of a new one (created: false), and a retry after a timeout gets the same item. Needs the createItem capability (exit 3).',
+    common: ['project', 'dry-run', 'session'],
+    flags: [
+      { name: 'title', kind: 'string', value: 'text', description: 'The title.' },
+      { name: 'description', kind: 'string', value: 'text', description: 'The description.' },
+      {
+        name: 'description-file',
+        kind: 'string',
+        value: 'path',
+        description: 'Read the description from this file.',
+      },
+      {
+        name: 'label',
+        kind: 'string',
+        value: 'label',
+        repeatable: true,
+        description: 'A label the team has, e.g. type/idea. Repeatable; one per group.',
+      },
+      {
+        name: 'for-project',
+        kind: 'string',
+        value: 'name|id',
+        description: 'File it in this tracker project (its id or exact name).',
+      },
+      { name: 'parent', kind: 'string', value: 'id', description: 'The parent item, e.g. DOR-12.' },
+      { name: 'priority', kind: 'string', value: '0-4', description: '0 none, 1 urgent … 4 low.' },
+      {
+        name: 'key',
+        kind: 'string',
+        value: 'key',
+        description: 'An idempotency key: one open item per key.',
+      },
+    ],
+    load: () => import('./cli/create.ts'),
+  },
+  {
     name: 'stage',
     summary: 'Move an item to another stage.',
     description:

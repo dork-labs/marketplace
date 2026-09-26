@@ -4,6 +4,17 @@ Installs of this plugin are pinned to a commit SHA, so a fix here does not reach
 you until you **reinstall it** (Marketplace → flow → reinstall, or re-run your
 `--plugin-dir` checkout's `git pull`). Each entry below says whether that matters.
 
+## 0.33.0
+
+**`/flow:capture` now files the item with one flow command, the same way every time. Reinstall to get it.**
+
+- `flow create` files one new item: a title, a description, and the labels you give it. It signs the description so people can see an agent wrote it and which session did.
+- `/flow:capture` now uses it, so a captured idea always lands in triage as an `idea` with `origin/human`, never ready to work on and with no priority.
+- Give it a `--key` and running it twice files one item, not two: the second run gets the first item back. Once that item is closed, the same key files a new one.
+- It refuses, before it touches the tracker, an empty title, a label that would mark the item ready (`agent/*`), two labels from one group, and a priority outside 0 to 4. `--dry-run` shows what it would file and files nothing.
+- If your tracker's adapter cannot create items, it stops and says so instead of trying another way.
+- The self-test's live capture check now checks the real result: exactly one new item, with an origin, not ready.
+
 ## 0.32.0
 
 **Your main Claude Code sign-in now shows up in flow, even when you have listed other accounts. Reinstall to get it.**

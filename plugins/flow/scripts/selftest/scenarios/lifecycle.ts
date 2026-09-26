@@ -7,12 +7,13 @@
  * the fake after every step, the signed completion comment and its provenance
  * line, and the run record.
  *
- * Capture and triage have no `flow` verb: they are judgment carried by the
- * capturing-work and triaging-work skills. So the item is SEEDED as captured,
- * and triage-accept is applied through the adapter with the same work-state
- * helper every writer uses (`projectionFor`), plus the fields the adapter
- * contract cannot write (type, priority, size, the description), which a
- * triage writer sets with the tracker's own tools.
+ * The item is SEEDED as captured (`flow create`, which capture now calls, has
+ * its own tests in `engine-tests/cli/create.test.ts`). Triage has no `flow`
+ * verb: it is judgment carried by the triaging-work skill. So triage-accept
+ * is applied through the adapter with the same work-state helper every writer
+ * uses (`projectionFor`), plus the fields the adapter contract cannot write
+ * (type, priority, size, the description), which a triage writer sets with the
+ * tracker's own tools.
  *
  * Runtime-parameterized: the same run as a Claude Code-shaped session
  * (`CLAUDECODE=1`) and a Codex-shaped one (`CODEX_THREAD_ID`, no `CLAUDECODE`),

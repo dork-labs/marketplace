@@ -758,9 +758,8 @@ describe('the live report', { timeout: LIVE_TIMEOUT }, () => {
         expect(check.detail).toMatch(/\$0\.1000, 3 turns/);
       }
     }
-    // The stub wrote nothing, so capture's "nothing fabricated" holds and the
-    // others fail on their oracles: exit 1.
-    expect(report.checks.find((c: { id: string }) => c.id === 'live/capture').status).toBe('pass');
+    // The stub wrote nothing, so every case fails on its oracle: exit 1.
+    expect(report.checks.find((c: { id: string }) => c.id === 'live/capture').status).toBe('fail');
     expect(run.code).toBe(1);
     const text = await runMain(['--tier', 'live', '--no-save'], armed());
     expect(text.stdout).toMatch(/Live tier: \$0\.3000 spent, paid by local-claude-login/);
@@ -867,10 +866,17 @@ describe('the live oracles', { timeout: LIVE_TIMEOUT }, () => {
     ).toMatch(/completed without agent\/completed/);
   });
 
-  it('capture fails when the plugin never loaded, even though nothing changed', async () => {
-    // Purpose: "nothing happened" is a pass only when flow was there to do it.
+  it('capture fails when the plugin never loaded, even with the item in place', async () => {
+    // Purpose: an item counts only when flow was there to make it.
     const c = liveCase('capture');
-    const input = { sandbox: tmp, before: c.backlog, after: c.backlog };
+    const captured = {
+      ...c.backlog.items[0],
+      id: 'x',
+      identifier: 'FAKE-2',
+      labels: ['type/idea', 'origin/human'],
+    };
+    const after = { ...c.backlog, items: [...c.backlog.items, captured] };
+    const input = { sandbox: tmp, before: c.backlog, after };
     expect(await c.oracle({ ...input, stream: { toolUses: [] } })).toMatch(
       /plugin may not have loaded/
     );
@@ -885,7 +891,7 @@ describe('the live oracles', { timeout: LIVE_TIMEOUT }, () => {
             {
               name: 'Bash',
               input: {
-                command: `node --experimental-strip-types ${FLOW_ROOT}/scripts/flow.ts status`,
+                command: `node --experimental-strip-types ${FLOW_ROOT}/scripts/flow.ts create`,
               },
             },
           ],
@@ -894,16 +900,35 @@ describe('the live oracles', { timeout: LIVE_TIMEOUT }, () => {
     ).toBeUndefined();
   });
 
-  it('capture fails when an item appears, since flow has no create verb to make one', async () => {
-    // Purpose: an item in the store can only have come from outside the flow command.
-    expect(await judge('capture', () => {})).toBeUndefined();
+  it('capture passes on exactly one item from flow create, with an origin and not ready', async () => {
+    // Purpose: the oracle reads the store the real flow create wrote through the linked fake.
+    const create = (s: ReturnType<typeof makeSandbox>, ...labels: string[]) =>
+      flow(
+        s,
+        'create',
+        '--title',
+        'Export the monthly report as CSV',
+        '--description',
+        'People want a CSV export.',
+        ...labels.flatMap((label) => ['--label', label])
+      );
+    expect(await judge('capture', (s) => create(s, 'type/idea', 'origin/human'))).toBeUndefined();
+    expect(await judge('capture', () => {})).toMatch(/gained 0 items/);
     expect(
       await judge('capture', (s) => {
+        create(s, 'type/idea', 'origin/human');
+        create(s, 'type/idea', 'origin/human');
+      })
+    ).toMatch(/gained 2 items/);
+    expect(await judge('capture', (s) => create(s, 'type/idea'))).toMatch(/no origin\/\* label/);
+    expect(
+      await judge('capture', (s) => {
+        create(s, 'type/idea', 'origin/human');
         const store = JSON.parse(readFileSync(s.backlogFile, 'utf8')) as FakeBacklog;
-        store.items.push({ ...store.items[0], id: 'x', identifier: 'FAKE-9' });
+        store.items[1].labels.push('agent/ready');
         writeFileSync(s.backlogFile, JSON.stringify(store));
       })
-    ).toMatch(/gained FAKE-9/);
+    ).toMatch(/carries agent\/ready/);
   });
 
   it('builds the sandbox with the adapter linked, not copied, and the store outside the project', () => {

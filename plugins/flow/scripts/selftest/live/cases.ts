@@ -5,14 +5,12 @@
  *
  * What an agent can do against the fake is bounded by the `flow` command: the
  * fake adapter's skill routes every tracker read and write through it, and it
- * has no verb to create an item, set an item's type or priority, or park an
- * item with `agent/needs-input`. So:
+ * has no verb to set an item's type or priority, or to park an item with
+ * `agent/needs-input`. So:
  *
- * - `capture` runs, and checks what is possible today: the agent, finding no
- *   way to create an item, makes nothing up (the capturing-work skill says
- *   "never fabricate a capture"). When a create verb lands, this oracle
- *   becomes the spec's: exactly one new item, `origin/*` set, not ready.
- * - `triage` and `done/follow-up` are skips that say which verb is missing.
+ * - `capture` checks the spec's outcome: exactly one new item (`flow create`),
+ *   with an `origin/*` label and no `agent/ready`.
+ * - `triage` and `done/follow-up` are skips that say what is missing.
  * - `decompose` and `done` run as the spec describes them.
  *
  * @module @dorkos/flow/selftest/live/cases
@@ -163,8 +161,8 @@ export const LIVE_CASES: readonly LiveCase[] = [
       item('FAKE-1', { title: 'An item already in the tracker', stateCategory: 'backlog' }),
     ]),
     oracle: ({ before, after, stream }) => {
-      // "Nothing happened" passes only when flow was really there: the
-      // session loaded /flow:capture, or ran the flow command.
+      // The capture counts only when flow was really there: the session
+      // loaded /flow:capture, or ran the flow command.
       const loaded = stream.slashCommands?.includes('flow:capture') === true;
       const ranFlow = stream.toolUses.some(
         (u) => typeof u.input.command === 'string' && /scripts\/flow\.ts\b/.test(u.input.command)
@@ -172,11 +170,16 @@ export const LIVE_CASES: readonly LiveCase[] = [
       if (!loaded && !ranFlow) {
         return 'the session neither loaded /flow:capture nor ran the flow command: the plugin may not have loaded';
       }
-      // The flow command has no create verb, so the only honest outcome is
-      // no new item: the skill says to say so and stop, never to fabricate.
       const added = after.items.filter((i) => find(before, i.identifier) === undefined);
-      if (added.length > 0) {
-        return `the tracker gained ${added.map((i) => i.identifier).join(', ')}, but flow has no command to create an item: the agent reached the store another way`;
+      if (added.length !== 1) {
+        return `the tracker gained ${added.length} items (${added.map((i) => i.identifier).join(', ') || 'none'}), not exactly one`;
+      }
+      const [captured] = added;
+      if (!captured.labels.some((label) => label.startsWith('origin/'))) {
+        return `${captured.identifier} has no origin/* label (labels: ${captured.labels.join(', ') || 'none'})`;
+      }
+      if (captured.labels.includes('agent/ready')) {
+        return `${captured.identifier} carries agent/ready: readiness is triage's decision`;
       }
       return undefined;
     },
@@ -264,7 +267,7 @@ export const LIVE_CASES: readonly LiveCase[] = [
   {
     id: 'done/follow-up',
     skip:
-      'flow has no command to create an item, so the follow-up the done case asks for cannot be filed ' +
-      'or checked for a type, a priority, a project and a triage',
+      'the closing-work skill does not file follow-ups through "flow create" yet, so the follow-up ' +
+      'the done case asks for cannot be checked for a type, a priority, a project and a triage',
   },
 ];
