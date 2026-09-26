@@ -76,7 +76,11 @@ export function findAnswer(
       )[0];
     candidates =
       parkComment !== undefined
-        ? candidates.slice(parkComment.index + 1)
+        ? candidates.filter(
+            (comment, index) =>
+              index !== parkComment.index &&
+              Date.parse(comment.createdAt) >= Date.parse(parkComment.comment.createdAt)
+          )
         : candidates.filter((comment) => Date.parse(comment.createdAt) > parkedAt - CLOCK_SKEW_MS);
   } else {
     // No park time: only what came after the agent's own latest comment (its question).
