@@ -423,9 +423,9 @@ describe('F1 — generic commands name no tracker and route through the resolved
     // The positive half. The commands that send the agent to the adapter must
     // name it by `adapter.path`, so the instruction resolves for the project's
     // own adapter as well as a shipped one. Pinned by name so dropping the line
-    // from any of them fails here. `status` is not one: `flow status` reaches the
-    // adapter's code itself.
-    const readers = ['capture', 'flow', 'groom', 'ideate', 'specify', 'triage'];
+    // from any of them fails here. `status` and `capture` are not: `flow status`
+    // and `flow create` reach the adapter's code themselves.
+    const readers = ['flow', 'groom', 'ideate', 'specify', 'triage'];
     for (const name of readers) {
       const content = readFileSync(path.join(FLOW_COMMANDS_DIR, `${name}.md`), 'utf8');
       expect(

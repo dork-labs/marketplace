@@ -286,6 +286,45 @@ export const VERBS: readonly VerbDefinition[] = [
     load: () => import('./cli/done.ts'),
   },
   {
+    name: 'create',
+    summary: 'File a new item in the tracker.',
+    description:
+      'File one new item through the adapter, with a signed description (identity marker and provenance). Refuses before any tracker call an empty title, an agent/* label, two labels in one group, and a priority outside 0-4. With --key, an open item already filed with that key is returned instead of a new one (created: false), and a retry after a timeout gets the same item. Needs the createItem capability (exit 3).',
+    common: ['project', 'dry-run', 'session'],
+    flags: [
+      { name: 'title', kind: 'string', value: 'text', description: 'The title.' },
+      { name: 'description', kind: 'string', value: 'text', description: 'The description.' },
+      {
+        name: 'description-file',
+        kind: 'string',
+        value: 'path',
+        description: 'Read the description from this file.',
+      },
+      {
+        name: 'label',
+        kind: 'string',
+        value: 'label',
+        repeatable: true,
+        description: 'A label the team has, e.g. type/idea. Repeatable; one per group.',
+      },
+      {
+        name: 'for-project',
+        kind: 'string',
+        value: 'name|id',
+        description: 'File it in this tracker project (its id or exact name).',
+      },
+      { name: 'parent', kind: 'string', value: 'id', description: 'The parent item, e.g. DOR-12.' },
+      { name: 'priority', kind: 'string', value: '0-4', description: '0 none, 1 urgent … 4 low.' },
+      {
+        name: 'key',
+        kind: 'string',
+        value: 'key',
+        description: 'An idempotency key: one open item per key.',
+      },
+    ],
+    load: () => import('./cli/create.ts'),
+  },
+  {
     name: 'stage',
     summary: 'Move an item to another stage.',
     description:
@@ -803,7 +842,7 @@ export async function main(argv: readonly string[], deps: MainDeps): Promise<num
     const result = await module.run(ctx);
     output.result(result);
     const code = result.exitCode ?? EXIT.ok;
-    journalRun(run, elapsed, code, { runtime: result.runtime });
+    journalRun(run, elapsed, code, { runtime: result.runtime, item: result.item });
     return code;
   } catch (error) {
     const { code, message } = classifyError(error, flowRoot);
@@ -829,6 +868,8 @@ interface VerbRun {
  * runs), an `oracle.error` line with the error's first line, whatever the
  * verb. `note` and `journal` (which write their own lines) get no `verb` line,
  * and `usage record` gets one only when it fails: see {@link recordsVerbRun}.
+ * Its item is the verb's identifier positional, or the one the verb reported
+ * (`VerbResult.item`, as `flow create` reports the item it filed).
  * The `verb` line's runtime is the one the verb reported (`VerbResult.runtime`),
  * else the environment's; a verb that threw reports none, so a refused
  * `flow claim --runtime x` is recorded under the runtime that ran it.
@@ -838,13 +879,14 @@ function journalRun(
   run: VerbRun,
   elapsed: () => number,
   code: number,
-  outcome: { error?: unknown; runtime?: Runtime } = {}
+  outcome: { error?: unknown; runtime?: Runtime; item?: string } = {}
 ): void {
   const { ctx, verb } = run;
   const { error, runtime } = outcome;
   try {
     const identifier =
-      verb.positionals?.[0]?.name === 'identifier' ? ctx.args.positionals[0] : undefined;
+      outcome.item ??
+      (verb.positionals?.[0]?.name === 'identifier' ? ctx.args.positionals[0] : undefined);
     const item = identifier === undefined ? {} : { item: identifier };
     const ms = Math.max(0, Math.round(elapsed() - run.startedMs));
     if (recordsVerbRun(verb.name, ctx.args.positionals, code)) {

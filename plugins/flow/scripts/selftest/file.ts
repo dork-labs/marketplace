@@ -36,6 +36,7 @@ import { findConfigRoots } from '../config-files.ts';
 import { redact } from '../journal.ts';
 import type { CodeAdapter, WorkItem } from '../tracker/types.ts';
 import type { Check } from './report.ts';
+import { labelGroup } from '../work-state.ts';
 
 /** How far back a closed match still counts. */
 export const WINDOW_DAYS = 90;
@@ -50,12 +51,6 @@ export const FILED_LABELS: readonly string[] = ['type/task', 'origin/from-agent'
 /** Which marker a filed item carries: one per source, so the two never match each other. */
 export type MarkerKind = 'flow-selftest' | 'flow-retro';
 
-/** The group of a namespaced label (`origin` for `origin/human`), or `null` for a bare one. */
-function groupOf(label: string): string | null {
-  const slash = label.indexOf('/');
-  return slash < 0 ? null : label.slice(0, slash);
-}
-
 /**
  * A filed item's labels: {@link FILED_LABELS} plus the configured extras, each
  * once and one per group (a tracker applies one label per group). An extra in
@@ -68,9 +63,9 @@ function groupOf(label: string): string | null {
  */
 export function filedLabels(extra: readonly string[]): string[] {
   const labels = [...FILED_LABELS];
-  const groups = new Set(labels.map(groupOf));
+  const groups = new Set(labels.map(labelGroup));
   for (const label of extra) {
-    const group = groupOf(label);
+    const group = labelGroup(label);
     if (group === 'agent' || labels.includes(label)) continue;
     if (group !== null && groups.has(group)) continue;
     labels.push(label);

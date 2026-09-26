@@ -126,7 +126,7 @@ export interface FakeBacklog {
   comments?: Record<string, ItemComment[]>;
   /** The team's labels beyond {@link FAKE_TEAM_LABELS}. */
   labels?: string[];
-  /** Idempotency keys `createItem` has seen, and the item each one made. */
+  /** Idempotency keys `createItem` has seen (as `<team id>:<key>`), and the item each one made. */
   createdKeys?: Record<string, string>;
   /**
    * Items the tracker archived: gone from every snapshot (as Linear leaves
@@ -407,10 +407,13 @@ export class FakeTracker {
     this.read();
     // A key names one OPEN item. A key whose item is closed or archived moves
     // on to the key chained with that item's identifier, as the Linear adapter
-    // does, so a returning failure gets a new item.
+    // does, so a returning failure gets a new item. Keys are stored under the
+    // team, as the Linear adapter hashes the team id into the issue id: the
+    // same key in another team names another item.
+    const scope = `${this.team.id ?? this.team.key ?? ''}:`;
     let chain = spec.key;
     while (chain !== undefined) {
-      const existing = this.backlog.createdKeys?.[chain];
+      const existing = this.backlog.createdKeys?.[scope + chain];
       if (existing === undefined) break;
       const archived = (this.backlog.archived ?? []).some((i) => i.identifier === existing);
       const item = this.backlog.items.find((candidate) => candidate.identifier === existing);
@@ -507,7 +510,7 @@ export class FakeTracker {
     };
     this.backlog.items.push(item);
     parent?.relations.children.push(identifier);
-    if (chain !== undefined) (this.backlog.createdKeys ??= {})[chain] = identifier;
+    if (chain !== undefined) (this.backlog.createdKeys ??= {})[scope + chain] = identifier;
     this.writes.push({ method: 'createItem', identifier });
     this.persist(this.backlog);
     return created;

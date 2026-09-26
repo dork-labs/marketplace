@@ -17,7 +17,7 @@ import { describe, expect, it } from 'vitest';
 
 import { FlowConfigSchema } from '../scripts/config-schema.ts';
 import { PreconditionError, TrackerError } from '../scripts/errors.ts';
-import { FakeTracker } from '../scripts/tracker/fake.ts';
+import { FakeTracker, type FakeBacklog } from '../scripts/tracker/fake.ts';
 import type { CodeAdapter, WorkItem } from '../scripts/tracker/types.ts';
 import { verifyWrite } from '../scripts/tracker/verify-write.ts';
 import { validate } from '../scripts/validate-adapter.ts';
@@ -476,6 +476,23 @@ describe('fake tracker extras (no Linear counterpart)', () => {
     const b = await dropping.adapter.createItem?.({ title: 'b', description: '', labels: [] });
     expect(a?.identifier).not.toBe(b?.identifier);
     expect(dropping.backlog.items).toEqual([]);
+  });
+
+  it('keeps its key map per team: the same key in two teams makes two items', async () => {
+    // Purpose: mirrors the Linear adapter, whose issue id hashes the team id with the key.
+    const store: FakeBacklog = { team: { key: 'FAKE', id: 'team-fake' }, items: [] };
+    const spec = { title: 'x', description: '', labels: [], key: 'export-csv' };
+    const here = await new FakeTracker(store).adapter.createItem?.(spec);
+    store.team = { key: 'OPS', id: 'team-ops' };
+    const there = await new FakeTracker(store).adapter.createItem?.(spec);
+    expect(here?.identifier).toBe('FAKE-1');
+    expect(there?.identifier).toBe('OPS-1');
+    expect(store.createdKeys).toEqual({
+      'team-fake:export-csv': 'FAKE-1',
+      'team-ops:export-csv': 'OPS-1',
+    });
+    // And within one team, the key still returns its item.
+    expect((await new FakeTracker(store).adapter.createItem?.(spec))?.identifier).toBe('OPS-1');
   });
 
   it('a merged PR closes the items it names and leaves their labels alone', () => {

@@ -896,8 +896,35 @@ describe('createItem', () => {
     const idOf = (calls: Call[]) =>
       (calls.find((c) => c.operation === 'FlowCreateItem')?.variables.input as { id: string }).id;
     expect(idOf(one.calls)).toBe(idOf(two.calls));
-    expect(linear.createIdFor('fp-1')).toBe(idOf(one.calls));
-    expect(linear.createIdFor('fp-2')).not.toBe(idOf(one.calls));
+    expect(linear.createIdFor('fp-1', TEAM.id)).toBe(idOf(one.calls));
+    expect(linear.createIdFor('fp-2', TEAM.id)).not.toBe(idOf(one.calls));
+  });
+
+  it('scopes the id to the team: the same key in another team sends another id', async () => {
+    // Purpose: Linear issue ids are global, so a short key like "export-csv"
+    // must never name another team's (or another workspace's) issue.
+    const other = { key: 'OPS', id: '11111111-2222-4333-8444-555555555555' };
+    expect(linear.createIdFor('export-csv', TEAM.id)).not.toBe(
+      linear.createIdFor('export-csv', other.id)
+    );
+    const here = build(routeCreate());
+    const there = build(routeCreate(), { team: other });
+    await here.adapter.createItem?.({
+      title: 't',
+      description: 'd',
+      labels: [],
+      key: 'export-csv',
+    });
+    await there.adapter.createItem?.({
+      title: 't',
+      description: 'd',
+      labels: [],
+      key: 'export-csv',
+    });
+    const idOf = (calls: Call[]) =>
+      (calls.find((c) => c.operation === 'FlowCreateItem')?.variables.input as { id: string }).id;
+    expect(idOf(here.calls)).toBe(linear.createIdFor('export-csv', TEAM.id));
+    expect(idOf(there.calls)).toBe(linear.createIdFor('export-csv', other.id));
   });
 
   it('returns the existing item when Linear refuses a second insert with the same id', async () => {
@@ -947,7 +974,10 @@ describe('createItem', () => {
       const ids = calls
         .filter((c) => c.operation === 'FlowCreateItem')
         .map((c) => (c.variables.input as { id: string }).id);
-      expect(ids).toEqual([linear.createIdFor('k'), linear.createIdFor('k:DOR-999')]);
+      expect(ids).toEqual([
+        linear.createIdFor('k', TEAM.id),
+        linear.createIdFor('k:DOR-999', TEAM.id),
+      ]);
     }
   );
 
