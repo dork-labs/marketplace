@@ -247,6 +247,20 @@ export interface FlowRun {
    * {@link FlowRunProvenance}.
    */
   provenance?: FlowRunProvenance;
+  /**
+   * The registry id (spec `flow-cli-core` §1.1a) of the account the run's
+   * **current** session bills. Rewritten on every handoff to another account.
+   * Not the same as `provenance.account`, which is the origin's
+   * `CLAUDE_CONFIG_DIR` basename, written once at run start and never updated.
+   */
+  account?: string;
+  /**
+   * The launcher the current session runs under: `cli`, `dorkos` or `cmux`
+   * today. Not the machine (that is `provenance.host`). A bare string, like
+   * `provenance.harness`: the vocabulary is pinned here in prose, so a record
+   * written by a future launcher never fails the all-or-nothing reader.
+   */
+  host?: string;
 }
 
 /** The inferred {@link RecoverySchema} config type (`maxRetries`/`onExhausted`/`staleAfter`). */
@@ -312,7 +326,10 @@ export type RecoveryActionKind = 'skip' | 'resume' | 'restart-clean' | 'escalate
  * - `escalate` — retries are exhausted (`attemptCount >= recovery.maxRetries`):
  *   apply `agent/blocked`, comment, and nudge; the loop blocks on the human.
  * - `re-derive` — no local run record (claimed on another machine): rebuild the
- *   run from tracker + workspace (tracker-as-truth), then adopt it.
+ *   run from tracker + workspace (tracker-as-truth), then adopt it. The tracker
+ *   no longer carries the stage of a started item (no `stage/*` label while
+ *   started), so the stage comes from `deriveStage` in `work-state.ts`:
+ *   `verify` when the item's branch has an open PR, else `execute`.
  */
 export type RecoveryAction =
   | {
@@ -407,7 +424,8 @@ export function recoverOrphan(
   }
 
   // 2. No local record (other machine) — tracker-as-truth re-derivation. By
-  // definition there is no `run` to adopt; rebuild it from tracker + workspace.
+  // definition there is no `run` to adopt; rebuild it from tracker + workspace,
+  // taking the stage from `deriveStage` (work-state.ts), not a stage/* label.
   if (signal === 'no-local-record') {
     return { kind: 're-derive', reason: 'no-local-record' };
   }

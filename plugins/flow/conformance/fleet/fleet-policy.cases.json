@@ -1,0 +1,293 @@
+{
+  "contract": "fleet",
+  "about": "Resolving routing policy from <dorkHome>/flow/fleet.json (spec flow-cli-core 1.1b). input.identities is the identity list in registry order ({ id, routable } from the identity read); input.fleet is the parsed fleet.json, or null when the file is missing. expected.accounts is one resolved policy per identity, in registry order, with every default filled in: role kept-out, reservePct 50 for main else 0, spendDownWindowHours 24, scope.repos []. A non-routable identity always resolves to the kept-out defaults. expected.mainId is the one main account, or null. expected.warnings is a multiset of codes (compare sorted). input.checks, when present, asks mayServe for an account and a checkout's origin URL (null = no origin): expected.checks gives, per check, the owner/name parsed from the origin (null when unparsable) and the mayServe answer. owner/name compare case-insensitively.",
+  "cases": [
+    {
+      "name": "no fleet.json: every account is kept out",
+      "input": { "identities": [{ "id": "work", "routable": true }, { "id": "claude3", "routable": true }], "fleet": null },
+      "expected": {
+        "handoff": "auto",
+        "mainId": null,
+        "accounts": [
+          { "id": "work", "role": "kept-out", "reservePct": 0, "spendDownWindowHours": 24, "scope": { "repos": [] } },
+          { "id": "claude3", "role": "kept-out", "reservePct": 0, "spendDownWindowHours": 24, "scope": { "repos": [] } }
+        ],
+        "warnings": []
+      }
+    },
+    {
+      "name": "a complete policy, defaults filled in at read time",
+      "input": {
+        "identities": [
+          { "id": "personal", "routable": true },
+          { "id": "claude3", "routable": true },
+          { "id": "org", "routable": true },
+          { "id": "unlisted", "routable": true }
+        ],
+        "fleet": {
+          "v": 1,
+          "handoff": "ask",
+          "note": "unknown fields are ignored",
+          "accounts": {
+            "personal": { "role": "main" },
+            "claude3": { "role": "rotation", "spendDownWindowHours": 12 },
+            "org": { "role": "kept-out", "scope": { "repos": ["acme/app"] } }
+          }
+        }
+      },
+      "expected": {
+        "handoff": "ask",
+        "mainId": "personal",
+        "accounts": [
+          { "id": "personal", "role": "main", "reservePct": 50, "spendDownWindowHours": 24, "scope": { "repos": [] } },
+          { "id": "claude3", "role": "rotation", "reservePct": 0, "spendDownWindowHours": 12, "scope": { "repos": [] } },
+          { "id": "org", "role": "kept-out", "reservePct": 0, "spendDownWindowHours": 24, "scope": { "repos": ["acme/app"] } },
+          { "id": "unlisted", "role": "kept-out", "reservePct": 0, "spendDownWindowHours": 24, "scope": { "repos": [] } }
+        ],
+        "warnings": []
+      }
+    },
+    {
+      "name": "explicit zeroes are values, not absences",
+      "input": {
+        "identities": [{ "id": "personal", "routable": true }],
+        "fleet": { "v": 1, "accounts": { "personal": { "role": "main", "reservePct": 0, "spendDownWindowHours": 0 } } }
+      },
+      "expected": {
+        "handoff": "auto",
+        "mainId": "personal",
+        "accounts": [
+          { "id": "personal", "role": "main", "reservePct": 0, "spendDownWindowHours": 0, "scope": { "repos": [] } }
+        ],
+        "warnings": []
+      }
+    },
+    {
+      "name": "a second main reads as rotation; the first in registry order wins",
+      "input": {
+        "identities": [{ "id": "a", "routable": true }, { "id": "b", "routable": true }],
+        "fleet": { "v": 1, "accounts": { "b": { "role": "main" }, "a": { "role": "main", "reservePct": 30 } } }
+      },
+      "expected": {
+        "handoff": "auto",
+        "mainId": "a",
+        "accounts": [
+          { "id": "a", "role": "main", "reservePct": 30, "spendDownWindowHours": 24, "scope": { "repos": [] } },
+          { "id": "b", "role": "rotation", "reservePct": 0, "spendDownWindowHours": 24, "scope": { "repos": [] } }
+        ],
+        "warnings": ["main-duplicate"]
+      }
+    },
+    {
+      "name": "invalid values read as absent",
+      "input": {
+        "identities": [{ "id": "a", "routable": true }],
+        "fleet": {
+          "v": 1,
+          "handoff": "sometimes",
+          "accounts": { "a": { "role": "reserve", "reservePct": 150, "spendDownWindowHours": -1 } }
+        }
+      },
+      "expected": {
+        "handoff": "auto",
+        "mainId": null,
+        "accounts": [
+          { "id": "a", "role": "kept-out", "reservePct": 0, "spendDownWindowHours": 24, "scope": { "repos": [] } }
+        ],
+        "warnings": ["handoff-invalid", "role-invalid", "reserve-invalid", "spend-down-invalid"]
+      }
+    },
+    {
+      "name": "non-numeric numbers read as absent",
+      "input": {
+        "identities": [{ "id": "a", "routable": true }],
+        "fleet": { "v": 1, "accounts": { "a": { "role": "main", "reservePct": "40", "spendDownWindowHours": null } } }
+      },
+      "expected": {
+        "handoff": "auto",
+        "mainId": "a",
+        "accounts": [
+          { "id": "a", "role": "main", "reservePct": 50, "spendDownWindowHours": 24, "scope": { "repos": [] } }
+        ],
+        "warnings": ["reserve-invalid", "spend-down-invalid"]
+      }
+    },
+    {
+      "name": "bad repo entries are dropped one by one",
+      "input": {
+        "identities": [{ "id": "org", "routable": true }],
+        "fleet": { "v": 1, "accounts": { "org": { "role": "kept-out", "scope": { "repos": ["acme/app", "nope", 5] } } } }
+      },
+      "expected": {
+        "handoff": "auto",
+        "mainId": null,
+        "accounts": [
+          { "id": "org", "role": "kept-out", "reservePct": 0, "spendDownWindowHours": 24, "scope": { "repos": ["acme/app"] } }
+        ],
+        "warnings": ["repo-invalid", "repo-invalid"]
+      }
+    },
+    {
+      "name": "a scope that is not an object reads as absent",
+      "input": {
+        "identities": [{ "id": "org", "routable": true }],
+        "fleet": { "v": 1, "accounts": { "org": { "scope": ["acme/app"] } } }
+      },
+      "expected": {
+        "handoff": "auto",
+        "mainId": null,
+        "accounts": [
+          { "id": "org", "role": "kept-out", "reservePct": 0, "spendDownWindowHours": 24, "scope": { "repos": [] } }
+        ],
+        "warnings": ["scope-invalid"]
+      }
+    },
+    {
+      "name": "an entry for an unknown id is ignored",
+      "input": {
+        "identities": [{ "id": "a", "routable": true }],
+        "fleet": { "v": 1, "accounts": { "ghost": { "role": "rotation" } } }
+      },
+      "expected": {
+        "handoff": "auto",
+        "mainId": null,
+        "accounts": [
+          { "id": "a", "role": "kept-out", "reservePct": 0, "spendDownWindowHours": 24, "scope": { "repos": [] } }
+        ],
+        "warnings": ["entry-unknown-id"]
+      }
+    },
+    {
+      "name": "a non-routable identity stays kept out whatever its entry says",
+      "input": {
+        "identities": [{ "id": "Bad_ID", "routable": false }],
+        "fleet": { "v": 1, "accounts": { "Bad_ID": { "role": "rotation" } } }
+      },
+      "expected": {
+        "handoff": "auto",
+        "mainId": null,
+        "accounts": [
+          { "id": "Bad_ID", "role": "kept-out", "reservePct": 0, "spendDownWindowHours": 24, "scope": { "repos": [] } }
+        ],
+        "warnings": ["entry-unroutable"]
+      }
+    },
+    {
+      "name": "an entry that is not an object reads as absent",
+      "input": { "identities": [{ "id": "a", "routable": true }], "fleet": { "v": 1, "accounts": { "a": "rotation" } } },
+      "expected": {
+        "handoff": "auto",
+        "mainId": null,
+        "accounts": [
+          { "id": "a", "role": "kept-out", "reservePct": 0, "spendDownWindowHours": 24, "scope": { "repos": [] } }
+        ],
+        "warnings": ["entry-invalid"]
+      }
+    },
+    {
+      "name": "accounts that is not an object reads as empty",
+      "input": { "identities": [{ "id": "a", "routable": true }], "fleet": { "v": 1, "handoff": "ask", "accounts": [] } },
+      "expected": {
+        "handoff": "ask",
+        "mainId": null,
+        "accounts": [
+          { "id": "a", "role": "kept-out", "reservePct": 0, "spendDownWindowHours": 24, "scope": { "repos": [] } }
+        ],
+        "warnings": ["accounts-invalid"]
+      }
+    },
+    {
+      "name": "a file with no v reads as version 1",
+      "input": { "identities": [{ "id": "a", "routable": true }], "fleet": { "accounts": { "a": { "role": "rotation" } } } },
+      "expected": {
+        "handoff": "auto",
+        "mainId": null,
+        "accounts": [
+          { "id": "a", "role": "rotation", "reservePct": 0, "spendDownWindowHours": 24, "scope": { "repos": [] } }
+        ],
+        "warnings": []
+      }
+    },
+    {
+      "name": "an unknown version is not read: everything stays kept out",
+      "input": {
+        "identities": [{ "id": "a", "routable": true }],
+        "fleet": { "v": 2, "handoff": "ask", "accounts": { "a": { "role": "rotation" } } }
+      },
+      "expected": {
+        "handoff": "auto",
+        "mainId": null,
+        "accounts": [
+          { "id": "a", "role": "kept-out", "reservePct": 0, "spendDownWindowHours": 24, "scope": { "repos": [] } }
+        ],
+        "warnings": ["fleet-version-unknown"]
+      }
+    },
+    {
+      "name": "a fleet.json that is not an object reads as missing",
+      "input": { "identities": [{ "id": "a", "routable": true }], "fleet": ["a"] },
+      "expected": {
+        "handoff": "auto",
+        "mainId": null,
+        "accounts": [
+          { "id": "a", "role": "kept-out", "reservePct": 0, "spendDownWindowHours": 24, "scope": { "repos": [] } }
+        ],
+        "warnings": ["fleet-invalid"]
+      }
+    },
+    {
+      "name": "mayServe: main and rotation serve any repo, kept-out only its scope",
+      "input": {
+        "identities": [
+          { "id": "personal", "routable": true },
+          { "id": "claude3", "routable": true },
+          { "id": "org", "routable": true },
+          { "id": "idle", "routable": true }
+        ],
+        "fleet": {
+          "v": 1,
+          "accounts": {
+            "personal": { "role": "main", "scope": { "repos": ["ignored/for-main"] } },
+            "claude3": { "role": "rotation" },
+            "org": { "role": "kept-out", "scope": { "repos": ["Acme/App"] } }
+          }
+        },
+        "checks": [
+          { "account": "personal", "origin": "https://github.com/someone/else.git" },
+          { "account": "claude3", "origin": null },
+          { "account": "org", "origin": "https://github.com/acme/app.git" },
+          { "account": "org", "origin": "git@github.com:ACME/app.git" },
+          { "account": "org", "origin": "ssh://git@github.com:22/acme/app" },
+          { "account": "org", "origin": "https://user@gitlab.example/acme/app/" },
+          { "account": "org", "origin": "https://github.com/acme/other" },
+          { "account": "org", "origin": "not a url" },
+          { "account": "org", "origin": null },
+          { "account": "idle", "origin": "https://github.com/acme/app.git" }
+        ]
+      },
+      "expected": {
+        "handoff": "auto",
+        "mainId": "personal",
+        "accounts": [
+          { "id": "personal", "role": "main", "reservePct": 50, "spendDownWindowHours": 24, "scope": { "repos": ["ignored/for-main"] } },
+          { "id": "claude3", "role": "rotation", "reservePct": 0, "spendDownWindowHours": 24, "scope": { "repos": [] } },
+          { "id": "org", "role": "kept-out", "reservePct": 0, "spendDownWindowHours": 24, "scope": { "repos": ["Acme/App"] } },
+          { "id": "idle", "role": "kept-out", "reservePct": 0, "spendDownWindowHours": 24, "scope": { "repos": [] } }
+        ],
+        "warnings": [],
+        "checks": [
+          { "repo": "someone/else", "mayServe": true },
+          { "repo": null, "mayServe": true },
+          { "repo": "acme/app", "mayServe": true },
+          { "repo": "ACME/app", "mayServe": true },
+          { "repo": "acme/app", "mayServe": true },
+          { "repo": "acme/app", "mayServe": true },
+          { "repo": "acme/other", "mayServe": false },
+          { "repo": null, "mayServe": false },
+          { "repo": null, "mayServe": false },
+          { "repo": "acme/app", "mayServe": false }
+        ]
+      }
+    }
+  ]
+}
