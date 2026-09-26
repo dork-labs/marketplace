@@ -46,7 +46,7 @@ key rule is a minor; a changed or removed rule is a major.
 | `prune.cases.json` | Which ledger files go when their account is no longer registered | `pruneTargets(registered, onDisk)` |
 | `flow-run.cases.json` | Reading `flow-state.json`, and keeping unknown fields when one run is written | the all-or-nothing reader, and an upsert by `issueId` |
 | `usage-ledger.schema.json` | The ledger file shape (JSON Schema draft-07) | |
-| `fleet-policy.schema.json` | The `fleet.json` shape (JSON Schema draft-07) | |
+| `fleet-policy.schema.json` | The `fleet.json` shape a WRITER may store (JSON Schema draft-07). Readers accept more: no `v` reads as 1, and a bare key from before 2.0.0 reads as `claude-code:<key>` (see the `fleet-policy` cases and spec 1.1b) | |
 | `*.examples.json` | Values each schema must accept (`valid`) and reject (`invalid`) | |
 
 Each case file has an `about` field that states the rule and the exact meaning of

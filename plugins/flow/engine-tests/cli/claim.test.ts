@@ -142,6 +142,23 @@ describe('flow claim writes the claim projection and records the run', () => {
     expect(project.runs()['id-FAKE-1'].provenance).toMatchObject({ harness: 'codex' });
   });
 
+  it('--runtime also picks which runtime the session id comes from', async () => {
+    // Purpose: with two runtimes' variables inherited, detection alone would
+    // take Codex's thread id; a claim that names Claude Code must record Claude
+    // Code's session, or recovery would resume the wrong conversation.
+    const result = await runFlow(
+      project,
+      { items: [item('FAKE-1')] },
+      ['claim', 'FAKE-1', '--runtime', 'claude-code'],
+      { env: { CLAUDECODE: '1', CLAUDE_CODE_SESSION_ID: 'cc-9', CODEX_THREAD_ID: 'thread-9' } }
+    );
+    expect(result.code).toBe(EXIT.ok);
+    expect(project.runs()['id-FAKE-1']).toMatchObject({
+      sessionId: 'cc-9',
+      runtime: 'claude-code',
+    });
+  });
+
   it('under OpenCode, needs --session (it sets no session id) and records the runtime', async () => {
     // Purpose: OpenCode marks its commands with OPENCODE=1 but gives no session
     // id, so the claim is refused without --session and runs with it.

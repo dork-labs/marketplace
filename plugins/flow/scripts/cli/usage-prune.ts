@@ -3,9 +3,9 @@
  * delete the usage files of accounts that are no longer registered.
  *
  * For each runtime it lists `<dorkHome>/runtimes/<runtime>/usage/<id>.json` and
- * removes every file whose id is not a registered account of that runtime.
- * `default.json` is never removed: it belongs to the runtime's implicit account,
- * which comes back whenever the runtime's registry is empty. Nothing is removed
+ * removes every file whose id is not a routable account of that runtime.
+ * `default.json` stays while the runtime runs on its implicit account and goes
+ * once the runtime has registered accounts. Nothing is removed
  * when `config.json` cannot be read in full, since then every account would look
  * unregistered. Each removal takes the file's lock, so a writer merging at that
  * moment finishes first or starts after.
@@ -53,7 +53,9 @@ export async function run(ctx: VerbContext): Promise<VerbResult> {
   const registered = {} as Record<RuntimeSlug, string[]>;
   const onDisk = {} as Record<RuntimeSlug, string[]>;
   for (const runtime of RUNTIMES) {
-    registered[runtime] = registry.accounts.filter((a) => a.runtime === runtime).map((a) => a.id);
+    registered[runtime] = registry.accounts
+      .filter((account) => account.runtime === runtime && account.routable)
+      .map((account) => account.id);
     onDisk[runtime] = listLedgerIds(dorkHome, runtime);
   }
   const targets = pruneTargets(registered, onDisk);

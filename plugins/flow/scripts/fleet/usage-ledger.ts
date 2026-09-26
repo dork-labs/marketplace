@@ -67,9 +67,6 @@ export const KNOWN_WINDOW_KEYS = [
   'overage',
 ] as const;
 
-/** A per-model bucket key: `model:<slug>`. */
-const MODEL_KEY_PATTERN = /^model:[a-z0-9][a-z0-9._-]*$/;
-
 /** A window named only by its length: `window:<minutes>` (Codex, spec §1.2). */
 const MINUTES_KEY_PATTERN = /^window:[1-9][0-9]*$/;
 
@@ -78,9 +75,6 @@ const MINUTES_KEY_PATTERN = /^window:[1-9][0-9]*$/;
  * of credits) or `rate_limit:<slug>` (HTTP 429). Always window-less.
  */
 const ERROR_KEY_PATTERN = /^(credits|rate_limit):[a-z0-9][a-z0-9._-]*$/;
-
-/** Any other window key, so a new SDK window needs no contract change. */
-const GENERIC_KEY_PATTERN = /^[a-z][a-z0-9_]*$/;
 
 /** ISO-8601 with an explicit zone (`Z` or `+hh:mm`). */
 const ISO_WITH_ZONE = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}(:\d{2}(\.\d+)?)?(Z|[+-]\d{2}:\d{2})$/;
@@ -252,6 +246,13 @@ export function isValidAccountId(id: unknown): id is string {
 }
 
 /**
+ * The whole window-key grammar as one pattern (spec §1.2 "Window keys"), for
+ * other readers of ledger windows (the journal's `usage.snapshot`) to share.
+ */
+export const WINDOW_KEY_PATTERN =
+  /^(model:[a-z0-9][a-z0-9._-]*|(credits|rate_limit):[a-z0-9][a-z0-9._-]*|window:[1-9][0-9]*|[a-z][a-z0-9_]*)$/;
+
+/**
  * Whether `key` is an allowed window key: a known key, `model:<slug>`,
  * `window:<minutes>`, `credits:<slug>`, `rate_limit:<slug>`, or any
  * `^[a-z][a-z0-9_]*$`.
@@ -260,13 +261,7 @@ export function isValidAccountId(id: unknown): id is string {
  * @returns True when a writer may store it.
  */
 export function isValidWindowKey(key: unknown): key is string {
-  return (
-    typeof key === 'string' &&
-    (MODEL_KEY_PATTERN.test(key) ||
-      MINUTES_KEY_PATTERN.test(key) ||
-      ERROR_KEY_PATTERN.test(key) ||
-      GENERIC_KEY_PATTERN.test(key))
-  );
+  return typeof key === 'string' && WINDOW_KEY_PATTERN.test(key);
 }
 
 /**
@@ -647,8 +642,10 @@ const CODEX_MAIN_LIMIT = 'codex';
  * - `used_percent` (0-100) is `usedPct`, `resets_at` (epoch seconds) is
  *   `resetsAt`, and the window's length is kept as `windowMinutes`. A window with
  *   no usable length or percentage is skipped.
- * - `status` is `rejected` when `rate_limit_reached_type` is not null, else
- *   `null`; the type has no other meaning here.
+ * - `status` is `null`, except when `rate_limit_reached_type` is not null: then
+ *   only the window(s) that hit the limit are `rejected` (every one at 100%, else
+ *   the tightest, a tie going to the shorter window), and a model bucket's one
+ *   window is. The type has no other meaning here.
  * - `plan_type` becomes a `plan` fact, and `credits` a `credits` fact.
  *
  * @param rateLimits - The event's `rate_limits` object (anything; bad parts are skipped).
@@ -662,10 +659,8 @@ export function codexObservations(
   source: UsageSource = 'rollout'
 ): (UsageObservation | FactObservation)[] {
   if (!isObject(rateLimits)) return [];
-  const status: WindowStatus | null =
-    rateLimits.rate_limit_reached_type === undefined || rateLimits.rate_limit_reached_type === null
-      ? null
-      : 'rejected';
+  const reached =
+    rateLimits.rate_limit_reached_type !== undefined && rateLimits.rate_limit_reached_type !== null;
   const windows: { minutes: number; usedPct: number; resetsAt: string | null }[] = [];
   for (const slot of ['primary', 'secondary'] as const) {
     const window = rateLimits[slot];
@@ -688,13 +683,23 @@ export function codexObservations(
   const limitId = rateLimits.limit_id;
   const isMain = limitId === undefined || limitId === null || limitId === CODEX_MAIN_LIMIT;
   if (isMain) {
+    // A hit limit is one window's doing. Marking every window rejected would
+    // lock the account out until the WEEK resets (dispatch then avoids it, so
+    // no newer reading ever clears it): mark only the windows at 100%, else the
+    // tightest one, a tie going to the shorter window, which resets first.
+    const full = windows.filter((window) => window.usedPct >= 100);
+    const hit = !reached
+      ? []
+      : full.length > 0
+        ? full
+        : [...windows].sort((a, b) => b.usedPct - a.usedPct || a.minutes - b.minutes).slice(0, 1);
     for (const window of windows) {
       out.push({
         key: windowKeyForMinutes(window.minutes) as string,
         usedPct: window.usedPct,
         resetsAt: window.resetsAt,
         windowMinutes: window.minutes,
-        status,
+        status: hit.includes(window) ? 'rejected' : null,
         observedAt,
         source,
       });
@@ -714,7 +719,7 @@ export function codexObservations(
         usedPct: tightest.usedPct,
         resetsAt: tightest.resetsAt,
         windowMinutes: tightest.minutes,
-        status,
+        status: reached ? 'rejected' : null,
         observedAt,
         source,
       });
@@ -919,11 +924,12 @@ export async function removeLedger(
 
 /**
  * The ledger files to delete because their account is no longer registered
- * (spec §1.2 "Removing an account"; `flow usage prune`). Pure. A runtime's
- * `default` file is always kept: it belongs to the implicit account, which comes
- * back whenever that runtime's registry is empty.
+ * (spec §1.2 "Removing an account"; `flow usage prune`). Pure. `default.json`
+ * is kept only while its runtime runs on the implicit account (so `registered`
+ * holds `default`); once the runtime has registered accounts its readings
+ * describe no account, and it goes like any other.
  *
- * @param registered - Each runtime's account ids (an implicit `default` may be among them).
+ * @param registered - Each runtime's routable account ids (`default` only while it is implicit).
  * @param onDisk - Each runtime's ledger ids on disk ({@link listLedgerIds}).
  * @returns The ids to delete per runtime, in the order of `onDisk`.
  */
@@ -934,9 +940,7 @@ export function pruneTargets(
   const out = {} as Record<RuntimeSlug, string[]>;
   for (const runtime of RUNTIMES) {
     const known = new Set(registered[runtime] ?? []);
-    out[runtime] = (onDisk[runtime] ?? []).filter(
-      (id) => id !== IMPLICIT_ACCOUNT_ID && !known.has(id)
-    );
+    out[runtime] = (onDisk[runtime] ?? []).filter((id) => !known.has(id));
   }
   return out;
 }

@@ -1,6 +1,6 @@
 {
   "contract": "fleet",
-  "about": "Reading one runtime's registered rows from <dorkHome>/config.json at runtimes.<claudeCode|codex|opencode>.accounts (spec flow-cli-core 1.1a). Call readIdentities(config, runtime). input.config is the parsed config.json, or null when the file is missing; input.runtime is claude-code, codex or opencode (config keys claudeCode, codex, opencode). Every runtime's rows follow the same rules. expected.accounts lists every account read, in file order, as { id, path, label, color, routable }; routable is false for a row whose id fails ^[a-z0-9]+(-[a-z0-9]+)*$ (it has no usage file and reads as kept-out). expected.warnings is a multiset of warning codes (compare sorted; order and message text are not part of the contract). Ids are minted over EVERY object row (a row with no id or an empty-string id), in array order, BEFORE any row is skipped for its path, exactly as DorkOS backfills them: first every non-empty string id already in the array is reserved (including ids on later rows and on rows later skipped), then each row missing an id gets mint(label if it is a string else null, path if it is a string else '', taken) and its id joins taken. Non-object rows get no id and take none. A path is absolute when it starts with '/', a drive letter and a separator (C:\\ or C:/), or '\\\\'.",
+  "about": "Reading one runtime's registered rows from <dorkHome>/config.json at runtimes.<claudeCode|codex|opencode>.accounts (spec flow-cli-core 1.1a). Call readIdentities(config, runtime). input.config is the parsed config.json, or null when the file is missing; input.runtime is claude-code, codex or opencode (config keys claudeCode, codex, opencode). Every runtime's rows follow the same rules. expected.accounts lists every account read, in file order, as { id, path, label, color, routable }; routable is false for a row whose id fails ^[a-z0-9]+(-[a-z0-9]+)*$ (it has no usage file and reads as kept-out). expected.warnings is a multiset of warning codes (compare sorted; order and message text are not part of the contract). Ids are minted over EVERY object row (a row with no id or an empty-string id), in array order, BEFORE any row is skipped for its path, exactly as DorkOS backfills them: first every non-empty string id already in the array is reserved (including ids on later rows and on rows later skipped), then each row missing an id gets mint(label if it is a string else null, path if it is a string else '', taken) and its id joins taken. Non-object rows get no id and take none. A path is absolute when it starts with '/', a drive letter and a separator (C:\\ or C:/), or '\\\\'. The id 'default' is reserved for the implicit account (1.1a): a row whose id is 'default' is listed with routable false and warning 'id-reserved', and minting never produces it.",
   "cases": [
     {
       "name": "no config file means no accounts",
@@ -260,6 +260,36 @@
         "config": {"runtimes": {"claudeCode": {"accounts": [{"id": "work", "path": "/w"}]}}}
       },
       "expected": {"accounts": [], "warnings": []}
+    },
+    {
+      "name": "a hand-written id default is listed but not routable",
+      "input": {
+        "runtime": "claude-code",
+        "config": {"runtimes": {"claudeCode": {"accounts": [{"id": "default", "path": "/Users/me/.claude-d"}]}}}
+      },
+      "expected": {
+        "accounts": [{"id": "default", "path": "/Users/me/.claude-d", "label": null, "color": null, "routable": false}],
+        "warnings": ["id-reserved"]
+      }
+    },
+    {
+      "name": "a row labelled Default is minted default-2",
+      "input": {
+        "runtime": "claude-code",
+        "config": {"runtimes": {"claudeCode": {"accounts": [{"path": "/Users/me/.claude-d", "label": "Default"}]}}}
+      },
+      "expected": {
+        "accounts": [
+          {
+            "id": "default-2",
+            "path": "/Users/me/.claude-d",
+            "label": "Default",
+            "color": null,
+            "routable": true
+          }
+        ],
+        "warnings": ["id-minted"]
+      }
     }
   ]
 }

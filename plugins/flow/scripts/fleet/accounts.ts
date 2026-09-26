@@ -220,7 +220,9 @@ export function slugifyAccountId(value: string): string {
 /**
  * Mint an id for an account (spec §1.1a): the label slugified, else the path's
  * last segment slugified, else `account`; `-2`, `-3`, ... appended until it is not
- * in `taken`. Identical to DorkOS `claudeAccountId`.
+ * in `taken`. `default` is always taken: it is reserved for a runtime's implicit
+ * account, so a label "Default" mints `default-2`. DorkOS `claudeAccountId` must
+ * reserve it the same way (spec §1.1a).
  *
  * @param opts - The row's label and path, and the ids already taken.
  * @returns A free id matching the id pattern.
@@ -237,6 +239,7 @@ export function mintAccountId(opts: {
       .pop() ?? '';
   const base = slugifyAccountId(opts.label ?? '') || slugifyAccountId(basename) || 'account';
   const taken = new Set(opts.taken);
+  taken.add(IMPLICIT_ACCOUNT_ID);
   if (!taken.has(base)) return base;
   for (let n = 2; ; n += 1) {
     const candidate = `${base}-${n}`;
@@ -358,8 +361,17 @@ export function readIdentities(
       return;
     }
     seen.add(id);
-    const routable = isValidAccountId(id);
-    if (!routable) {
+    const reserved = id === IMPLICIT_ACCOUNT_ID;
+    const routable = isValidAccountId(id) && !reserved;
+    if (reserved) {
+      // `default` names the runtime's implicit account and its usage file; a
+      // registered row with that id would read another folder's readings as
+      // its own, and could be spent as if it were the implicit account.
+      warnings.push({
+        code: 'id-reserved',
+        message: `Account id "default" is reserved for the account a runtime uses when none is registered; this row is listed but kept out, with no usage file. Give it another id.`,
+      });
+    } else if (!routable) {
       warnings.push({
         code: 'id-invalid',
         message: `Account id "${id}" is not lowercase letters, digits and single hyphens; it is listed but kept out, with no usage file.`,

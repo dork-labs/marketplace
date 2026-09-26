@@ -650,12 +650,28 @@ describe('usage.snapshot lines', () => {
       'window:1440': { usedPct: 0, resetsAt: null },
     });
     expect(JournalLineSchema.safeParse(buildLine(ok, meta)).success).toBe(true);
-    const bad = snapshot({ daily: { usedPct: 10, resetsAt: null } });
+    const bad = snapshot({ 'Five Hour': { usedPct: 10, resetsAt: null } });
     expect(JournalLineSchema.safeParse(buildLine(bad, meta)).success).toBe(false);
     const many = Object.fromEntries(
       Array.from({ length: 13 }, (_, i) => [`window:${i + 1}`, { usedPct: 1, resetsAt: null }])
     );
     expect(JournalLineSchema.safeParse(buildLine(snapshot(many), meta)).success).toBe(false);
+  });
+
+  it('accepts every window the usage ledger may hold, and a null usedPct', () => {
+    // Purpose: the journal samples ledger readings, so it must take every key
+    // the ledger's grammar allows (error signals, overage, generic SDK windows,
+    // long model slugs) and a window-less reading with no percentage; else one
+    // such window makes append refuse the whole usage.snapshot line.
+    const windows = {
+      'credits:openrouter': { usedPct: null, resetsAt: null },
+      'rate_limit:openrouter': { usedPct: null, resetsAt: '2026-09-26T16:01:00Z' },
+      overage: { usedPct: 5, resetsAt: null },
+      some_new_window: { usedPct: 1, resetsAt: null },
+      [`model:${'gpt-5.3-codex-spark-'.repeat(3)}x`]: { usedPct: 64, resetsAt: null },
+    };
+    expect(usageSnapshotProblem(snapshot(windows))).toBeNull();
+    expect(JournalLineSchema.safeParse(buildLine(snapshot(windows), meta)).success).toBe(true);
   });
 
   it('rejects a usedPct outside 0 to 100 and a field a window does not have', () => {
@@ -696,7 +712,11 @@ describe('usage readings the journal refuses', () => {
   it.each([
     ['a NaN usedPct', { five_hour: { usedPct: Number.NaN, resetsAt: null } }, {}],
     ['a usedPct above 100', { five_hour: { usedPct: 101, resetsAt: null } }, {}],
-    ['an unknown window', { daily: { usedPct: 1, resetsAt: null } }, {}],
+    [
+      'a window name outside the ledger grammar',
+      { 'Five Hour': { usedPct: 1, resetsAt: null } },
+      {},
+    ],
     ['an unreadable resetsAt', { five_hour: { usedPct: 1, resetsAt: 'soon' } }, {}],
     ['a date-only resetsAt', { five_hour: { usedPct: 1, resetsAt: '2026-09-26' } }, {}],
     ['a non-ISO resetsAt', { five_hour: { usedPct: 1, resetsAt: 'Sep 26 2026 15:00' } }, {}],

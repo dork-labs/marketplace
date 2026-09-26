@@ -224,6 +224,45 @@
         ],
         "warnings": ["accounts-invalid"]
       }
+    },
+    {
+      "name": "a registered row with the reserved id default is not the implicit account",
+      "input": {"config": {"runtimes": {"claudeCode": {"accounts": [{"id": "default", "path": "/b"}]}}}},
+      "expected": {
+        "accounts": [
+          {
+            "runtime": "claude-code",
+            "id": "default",
+            "key": "claude-code:default",
+            "implicit": false,
+            "path": "/b",
+            "label": null,
+            "color": null,
+            "routable": false
+          },
+          {
+            "runtime": "codex",
+            "id": "default",
+            "key": "codex:default",
+            "implicit": true,
+            "path": null,
+            "label": null,
+            "color": null,
+            "routable": true
+          },
+          {
+            "runtime": "opencode",
+            "id": "default",
+            "key": "opencode:default",
+            "implicit": true,
+            "path": null,
+            "label": null,
+            "color": null,
+            "routable": true
+          }
+        ],
+        "warnings": ["id-reserved"]
+      }
     }
   ]
 }

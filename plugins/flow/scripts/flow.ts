@@ -341,7 +341,7 @@ export const VERBS: readonly VerbDefinition[] = [
       '  scan                Recover past limit hits from saved conversations.',
       '  probe <id>          Run one short official turn on an account to read its usage (needs --yes).',
       "  install-statusline  Add the two recorder lines to each account's status-line script (needs --yes).",
-      "  prune               Delete the usage files of accounts no longer registered (never a runtime's default).",
+      '  prune               Delete the usage files of accounts no longer registered.',
     ].join('\n'),
     common: ['dry-run'],
     flags: [

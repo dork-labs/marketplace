@@ -85,9 +85,11 @@ describe('flow usage prune', () => {
   });
 
   // Purpose: only the files of accounts that are not registered go, in every
-  // runtime; a registered account's file, each runtime's `default` and every
-  // file that is not a ledger (a status-line stamp) stay.
-  it('removes the files of unregistered accounts and keeps default', async () => {
+  // runtime. A registered account's file stays; `default.json` stays only while
+  // its runtime runs on the implicit account (Codex here) and goes once the
+  // runtime has registered accounts (Claude Code here), because its readings
+  // then describe no account. A file that is not a ledger (a stamp) stays.
+  it('removes the files of unregistered accounts, and default only when it is not implicit', async () => {
     const result = await flow(['usage', 'prune', '--json']);
     expect(result.code, result.stderr).toBe(EXIT.ok);
     expect(
@@ -99,10 +101,11 @@ describe('flow usage prune', () => {
           f.status,
         ])
     ).toEqual([
+      ['claude-code', 'default', 'removed'],
       ['claude-code', 'gone', 'removed'],
       ['codex', 'old-team', 'removed'],
     ]);
-    expect(files('claude-code')).toEqual(['.statusline-x', 'default.json', 'mine.json']);
+    expect(files('claude-code')).toEqual(['.statusline-x', 'mine.json']);
     expect(files('codex')).toEqual(['default.json']);
   });
 

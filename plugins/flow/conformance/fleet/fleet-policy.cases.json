@@ -870,6 +870,31 @@
         ],
         "warnings": ["runtimes-invalid", "runtimes-invalid", "runtimes-invalid", "cross-runtime-fallback-invalid"]
       }
+    },
+    {
+      "name": "a registered row using the reserved id default stays kept out, even with an entry",
+      "input": {
+        "accounts": [{"runtime": "claude-code", "id": "default", "routable": false, "implicit": false}],
+        "fleet": {"v": 1, "accounts": {"claude-code:default": {"role": "rotation"}}}
+      },
+      "expected": {
+        "handoff": "auto",
+        "runtimes": [],
+        "crossRuntimeFallback": "off",
+        "mains": {},
+        "accounts": [
+          {
+            "runtime": "claude-code",
+            "id": "default",
+            "key": "claude-code:default",
+            "role": "kept-out",
+            "reservePct": 0,
+            "spendDownWindowHours": 24,
+            "scope": {"repos": []}
+          }
+        ],
+        "warnings": ["entry-unroutable"]
+      }
     }
   ]
 }
