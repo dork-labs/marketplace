@@ -1,7 +1,7 @@
 {
   "commands/capture.md": {
-    "baseline": 128,
-    "target": 128
+    "baseline": 103,
+    "target": 103
   },
   "commands/decompose.md": {
     "baseline": 81,
@@ -124,8 +124,8 @@
     "target": 2435
   },
   "skills/capturing-work/SKILL.md": {
-    "baseline": 780,
-    "target": 780
+    "baseline": 588,
+    "target": 588
   },
   "skills/closing-work/SKILL.md": {
     "baseline": 1494,

@@ -12,23 +12,14 @@ description: The /flow engine's CAPTURE stage — quick, low-commitment intake o
 > beyond "this is an idea," prioritize, or plan — that is TRIAGE's job
 > (`triaging-work`).
 >
-> **This is a prose contract, not code.** The agent reads this skill and follows
-> it. A thin `/flow:capture` command and a PM-driven transition are two
+> A thin `/flow:capture` command and a PM-driven transition are two
 > **triggers** for this one skill (spec §1).
 
-## The one rule: never touch the tracker directly
+## The one rule: every tracker write goes through `flow`
 
-This skill is **PM-agnostic**. It never names a tracker API, a tool string, or a
-tracker-specific field. **Every tracker read or write goes through the
-adapter skill** (the v1 `PMClient`, spec §3) by naming one of its
-capability verbs — e.g. _"via the adapter, create the work item …"_. The
-adapter owns all the tracker tooling and the projection of the generic
-`WorkItem` shape onto the tracker; CAPTURE only speaks `WorkItem` + verbs.
-
-Read the adapter skill's contract before acting. It is the `SKILL.md` at the `adapter.path` that
-`node --experimental-strip-types "<flow-root>/scripts/config-files.ts"` prints: the
-project's own (`.agents/flow/adapters/<tracker>/`), or the one flow ships. Inside it,
-`<flow-root>` means that output's `flowRoot`.
+CAPTURE never names a tracker API or tool. Its one write is `flow create`
+(`flow` means `node --experimental-strip-types "<flow-root>/scripts/flow.ts"`),
+which signs the description and lands the item in the tracker's intake state.
 
 ## Process
 
@@ -40,38 +31,24 @@ project's own (`.agents/flow/adapters/<tracker>/`), or the one flow ships. Insid
    item, ask for the **single** missing detail and stop — do not expand scope,
    classify deeply, or research. (CAPTURE is an intent stage: when genuinely
    unsure, lean toward asking — spec §5 stage bias.)
-3. **Create the work item via the adapter.** Ask the adapter to create a
-   new item with:
+3. **Create the item:**
+
+   ```bash
+   flow create --title "<title>" --description "<text>" \
+     --label type/idea --label origin/human --key <key> --json
+   ```
+
    - a concise, actionable, imperative-voice **title**;
-   - the provided input as the **description** (include the source path if it came
-     from a file);
-   - **type** `idea` — CAPTURE always produces an idea; it is the lowest-commitment
-     entry point and is re-classified later in TRIAGE;
-   - **origin** `human` (the work originated from the operator);
-   - the configured **team**, and a `backlog`-category intake state (the adapter
-     projects this onto the tracker — the tracker's projection is the `type/idea` label
-     and the **Triage** state; that mapping is the _adapter's_ concern, not this
-     skill's).
-   - Leave **priority** and **estimate/size** unset — commitment and sizing come
-     at TRIAGE, not capture. No-priority sorts last in dispatch, which is correct
-     for uncommitted work.
-4. **Leave a provenance trail.** Via the adapter, post a structured
-   next-steps comment so the item is self-documenting and TRIAGE knows where to
-   pick up:
+   - the input as the description, with its source path if it came from a file
+     (long text goes in `--description-file <file>`);
+   - `type/idea` always: CAPTURE is the lowest-commitment entry point, and TRIAGE
+     re-classifies it. `origin/human`: the operator had the thought;
+   - `--key`: a short slug of the thought, so a retried capture returns the first
+     item (`created: false`) instead of filing it twice;
+   - no priority or size: commitment and sizing come at TRIAGE, and no priority
+     sorts last in dispatch.
 
-   ```
-   **Agent Action** — [YYYY-MM-DD]
-   **Action:** Captured idea, placed in intake
-   **Reasoning:** Quick capture via the CAPTURE stage
-   **Next steps:** Awaiting triage (the TRIAGE stage / triaging-work)
-   ```
-
-   The agent's own comments carry the adapter's identity marker so the
-   comment-response rules (spec §5) never treat them as a human reply — the
-   adapter applies that when it writes the comment.
-
-5. **Report** the created item as identifier with title (`PROJ-157 - Title`, per
-   the adapter's display convention), and that it is awaiting triage.
+4. **Report** the item as `<identifier> - <title>` and say it awaits triage.
 
 ## Guardrails
 
@@ -84,8 +61,9 @@ project's own (`.agents/flow/adapters/<tracker>/`), or the one flow ships. Insid
 - **Reversible + confident → proceed silently** (spec §5 calibration ladder):
   capturing a single idea is cheap to undo, so don't over-ask. Ask only for the
   one missing detail that blocks creating a meaningful item.
-- **If the tracker is unavailable**, the adapter will say so — surface that
-  limitation plainly and stop. Never fabricate a capture.
+- **If `flow create` fails** (exit 3: this tracker cannot create items through flow; exit 4:
+  the tracker is unreachable or lacks a label), surface its message plainly and
+  stop. Never fabricate a capture, and never reach the tracker another way.
 
 ## Stage handoff
 
