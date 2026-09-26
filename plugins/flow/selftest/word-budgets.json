@@ -59,6 +59,10 @@
     "baseline": 94,
     "target": 94
   },
+  "docs/account-usage.mdx": {
+    "baseline": 1016,
+    "target": 1016
+  },
   "docs/bring-your-own-scheduler.mdx": {
     "baseline": 669,
     "target": 669
