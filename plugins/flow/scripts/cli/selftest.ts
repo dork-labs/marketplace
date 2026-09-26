@@ -3,7 +3,8 @@
  * form of `scripts/selftest.ts`, running the same {@link runSelftest}.
  *
  * Exit codes are the self-test's: 0 no failures, 1 a check failed (or, with
- * `--strict`, was skipped), 2 a usage error. `--file` uses the project's own
+ * `--strict`, was skipped), 2 a usage error or a refusal by the live tier's
+ * gate (`runSelftest` throws it as a `UsageError`). `--file` uses the project's own
  * tracker adapter, the one every other verb uses.
  *
  * @module @dorkos/flow/cli/selftest
@@ -11,7 +12,7 @@
 
 import { UsageError } from '../errors.ts';
 import { renderText } from '../selftest/report.ts';
-import { runSelftest, tiersFor, writeRebaseline } from '../selftest.ts';
+import { maxUsdFor, runSelftest, tiersFor, writeRebaseline } from '../selftest.ts';
 import type { VerbContext, VerbResult } from './context.ts';
 
 /**
@@ -28,6 +29,12 @@ export async function run(ctx: VerbContext): Promise<VerbResult> {
   }
   const tiers = tiersFor(typeof flags.tier === 'string' ? flags.tier : undefined);
   if (typeof tiers === 'string') throw new UsageError(tiers);
+  let maxUsd: number | undefined;
+  if (typeof flags['max-usd'] === 'string') {
+    const amount = maxUsdFor(flags['max-usd']);
+    if (typeof amount === 'string') throw new UsageError(amount);
+    maxUsd = amount;
+  }
 
   const { report, code } = await runSelftest({
     flowRoot: ctx.flowRoot,
@@ -41,6 +48,7 @@ export async function run(ctx: VerbContext): Promise<VerbResult> {
     adapter: () => ctx.adapter(),
     sessionId: ctx.sessionId,
     warn: (message) => ctx.warn(message),
+    maxUsd,
   });
   return {
     exitCode: code,

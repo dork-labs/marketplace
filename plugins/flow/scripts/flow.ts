@@ -594,8 +594,16 @@ export const VERBS: readonly VerbDefinition[] = [
       {
         name: 'tier',
         kind: 'string',
-        value: 'fast|scenarios',
-        description: 'Run only this tier. Default: both.',
+        value: 'fast|scenarios|live|all',
+        description:
+          'The tier to run. Default: fast and scenarios. live runs a real model and costs money: it needs FLOW_SELFTEST_LIVE=1 and never runs in CI.',
+      },
+      {
+        name: 'max-usd',
+        kind: 'string',
+        value: 'amount',
+        description:
+          'The most the live tier may spend, in US dollars. Default: selfImprovement.selftest.liveBudgetUsd.',
       },
       { name: 'strict', kind: 'boolean', description: 'A skipped check fails the run.' },
       {

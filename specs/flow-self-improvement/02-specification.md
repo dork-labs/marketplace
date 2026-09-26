@@ -188,6 +188,11 @@ words.
 | `decompose` | `/flow:decompose specs/fixture/02-specification.md` | `03-tasks.json` passes `tasks-schema.ts`, no forbidden summary phrase, the item carries `stage/decompose`                    |
 | `done`      | `/flow:done <id>` with a follow-up in the fixture   | item `completed` with `agent/completed`; each follow-up has a type, a priority and a project and went through triage         |
 
+(Amended at build, DOR-2390: the `flow` command has no verb to create an item, set its type or
+priority, or park it with `agent/needs-input`, and the fake adapter routes every write through it.
+So `capture` checks what is possible today, that nothing was fabricated; `triage` and the `done`
+follow-up (`done/follow-up`) are reported as skips naming the missing verb; `done` checks the close.)
+
 A live run prints per-case pass/fail, cost and turns, and writes the same report shape.
 
 #### Report and `--file`

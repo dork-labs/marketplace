@@ -12,7 +12,7 @@ import { createHash } from 'node:crypto';
 
 import { renderFiling, type FilingResult } from './file.ts';
 
-/** The self-test tiers. `fast` and `scenarios` run today; `live` is not built yet. */
+/** The self-test tiers. `live` runs a real model: opt-in, paid, never in CI. */
 export type Tier = 'fast' | 'scenarios' | 'live';
 
 /** A check's outcome. A `skip` is never a pass. */
@@ -32,6 +32,10 @@ export interface Check {
   detail: string;
   /** A stable 12-hex-character id for this exact problem (see {@link fingerprint}). */
   fingerprint: string;
+  /** A live case's reported spend, in US dollars. */
+  costUsd?: number;
+  /** A live case's turns. */
+  turns?: number;
 }
 
 /** Totals over a report's checks. */
@@ -64,6 +68,8 @@ export interface SelftestReport {
   totals: Totals;
   /** What `--file` did, when it was asked for. */
   filing?: FilingResult;
+  /** Which credential paid for the live tier (`none` when none answered); absent when it did not run. */
+  credentialSource?: string;
 }
 
 /**
@@ -88,7 +94,13 @@ export function fingerprint(checkId: string, stableKey: string): string {
  */
 export function buildReport(
   checks: readonly Check[],
-  meta: { startedAt: string; flowVersion: string; tiers: Tier[]; ms: number }
+  meta: {
+    startedAt: string;
+    flowVersion: string;
+    tiers: Tier[];
+    ms: number;
+    credentialSource?: string;
+  }
 ): SelftestReport {
   const totals: Totals = { pass: 0, fail: 0, skip: 0, ms: meta.ms };
   for (const check of checks) totals[check.status] += 1;
@@ -100,6 +112,7 @@ export function buildReport(
     tiers: meta.tiers,
     checks: [...checks],
     totals,
+    ...(meta.credentialSource !== undefined ? { credentialSource: meta.credentialSource } : {}),
   };
 }
 
@@ -144,6 +157,10 @@ export function renderText(report: SelftestReport): string {
     for (const c of passed) lines.push(`  ok    ${c.id}${c.detail === '' ? '' : `: ${c.detail}`}`);
   }
   if (report.filing !== undefined) lines.push(...renderFiling(report.filing));
+  if (report.credentialSource !== undefined) {
+    const spent = report.checks.reduce((sum, c) => sum + (c.costUsd ?? 0), 0);
+    lines.push('', `Live tier: $${spent.toFixed(4)} spent, paid by ${report.credentialSource}`);
+  }
   const { pass, fail, skip, ms } = report.totals;
   lines.push('', `${pass} passed, ${fail} failed, ${skip} skipped in ${(ms / 1000).toFixed(1)}s`);
   return `${lines.join('\n')}\n`;

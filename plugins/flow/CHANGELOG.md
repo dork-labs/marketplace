@@ -4,6 +4,18 @@ Installs of this plugin are pinned to a commit SHA, so a fix here does not reach
 you until you **reinstall it** (Marketplace → flow → reinstall, or re-run your
 `--plugin-dir` checkout's `git pull`). Each entry below says whether that matters.
 
+## 0.31.0
+
+**flow's self-test can now try a few stage commands on a real Claude session. It costs money and only runs when you ask. Reinstall to get it.**
+
+- `flow selftest --tier live` gives `/flow:capture`, `/flow:decompose` and `/flow:done` to a real session in a throwaway folder, against a fake tracker, and checks what changed there, not what the agent said.
+- It refuses unless you set `FLOW_SELFTEST_LIVE=1`, even when a key is set, and it never runs in CI.
+- It pays with `ANTHROPIC_API_KEY`, then `CLAUDE_CODE_OAUTH_TOKEN`, then your `claude` sign-in, and the report says which one paid. With none, every check fails.
+- It stops starting checks once it has spent `selfImprovement.selftest.liveBudgetUsd` ($1.00 by default), or the amount you give `--max-usd`. Each check reports its cost and turns.
+- The session gets no tracker keys and no MCP servers. A check fails if the session tries composio, linear, curl, wget or gh, or touches a file outside its folder and flow.
+- Two checks are listed as skipped for now, with the reason: triage and filing a follow-up. flow has no command yet to set an item's type or priority, or to create an item.
+- `--tier all` now runs all three tiers. The default is still the two free ones.
+
 ## 0.30.0
 
 **New `flow drain --parallel N`: flow works on several ready items at once, each on the account with the most room, and opens a PR only after an independent review comes back clean. Reinstall to get it.**
