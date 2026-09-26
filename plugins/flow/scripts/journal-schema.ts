@@ -15,6 +15,7 @@
 
 import { z } from 'zod';
 
+import { RUNTIMES } from './runtime-detect.ts';
 import {
   ERROR_CLASS_MAX,
   ITEM_MAX,
@@ -38,6 +39,10 @@ const common = {
   ts: z.iso.datetime(),
   /** The flow plugin version that wrote the line. */
   flow: z.string().min(1).max(40),
+  /** The agent runtime the writing process ran under (`detectRuntime`). */
+  runtime: z.enum([...RUNTIMES, 'unknown']),
+  /** What hosted the session: `cmux`, `dorkos`, the runtime's own CLI, or `shell`. */
+  harness: Name,
   /** The first 8 characters of the harness session id, when known. */
   session: z.string().min(1).max(8).optional(),
   /** The tracker identifier the event is about, when there is one. */
@@ -101,6 +106,40 @@ export const JournalLineSchema = z.discriminatedUnion('kind', [
     failing: z.array(Name),
   }),
   line('retro', { window: Name, proposals: Count, filed: Count, commented: Count }),
+  line('usage.snapshot', {
+    /** The runtime the ACCOUNT belongs to (a server may sample another runtime's account). */
+    accountRuntime: z.enum(RUNTIMES),
+    /** The account id in that runtime's registry, or `default` for its implicit one. */
+    account: Name,
+    /** Readings by window name (fleet decision R2 names). */
+    windows: z
+      .record(
+        z
+          .string()
+          .regex(
+            /^(five_hour|seven_day|seven_day_opus|seven_day_sonnet|model:[a-z0-9._-]{1,40}|window:\d{1,6})$/,
+            'a window is five_hour, seven_day, seven_day_opus, seven_day_sonnet, model:<slug> or window:<minutes>'
+          ),
+        z
+          .object({
+            usedPct: z.number().min(0).max(100),
+            resetsAt: z.iso.datetime({ offset: true }).nullable(),
+          })
+          .strict()
+      )
+      .refine((windows) => Object.keys(windows).length <= 12, 'at most 12 windows'),
+    /** The plan the runtime reports (for example max, pro, plus), when it reports one. */
+    plan: Name.optional(),
+    /** Metered spend in the current period, for accounts billed per use. */
+    spend: z
+      .object({
+        costUsd: z.number().nonnegative(),
+        limitUsd: z.number().nonnegative().optional(),
+        periodStart: z.iso.datetime({ offset: true }).optional(),
+      })
+      .strict()
+      .optional(),
+  }),
 ]);
 
 /** One journal line. */

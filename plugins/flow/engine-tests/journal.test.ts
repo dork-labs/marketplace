@@ -25,7 +25,7 @@ import {
 import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { FlowConfigSchema } from '../scripts/config-schema.ts';
 import {
@@ -44,6 +44,8 @@ import {
   read,
   redact,
   rotatedPath,
+  shouldSampleUsage,
+  USAGE_SAMPLE_INTERVAL_MS,
   type AppendOptions,
   type JournalEvent,
 } from '../scripts/journal.ts';
@@ -131,6 +133,16 @@ const SAMPLES: JournalEvent[] = [
   { kind: 'note', noteKind: 'workaround', text: 'wrote a PR watcher by hand', skill: 'flow-drain' },
   { kind: 'selftest', tiers: ['fast'], pass: 8, fail: 1, skip: 0, ms: 900, failing: ['doc-lint'] },
   { kind: 'retro', window: '7d', proposals: 3, filed: 2, commented: 1 },
+  {
+    kind: 'usage.snapshot',
+    accountRuntime: 'codex',
+    account: 'default',
+    windows: {
+      five_hour: { usedPct: 42, resetsAt: '2026-09-26T15:00:00.000Z' },
+      seven_day: { usedPct: 80.5, resetsAt: null },
+    },
+    plan: 'plus',
+  },
 ];
 
 describe('the line schema', () => {
@@ -570,3 +582,125 @@ function writer(
     );
   });
 }
+
+describe('runtime and harness on every line', () => {
+  afterEach(() => {
+    vi.unstubAllEnvs();
+  });
+
+  // Purpose: flow runs from Claude Code, Codex and OpenCode; the retro splits
+  // every measure by runtime, so every line must say which one wrote it.
+  it('stamps what the caller names, and the schema requires both', () => {
+    const line = buildLine(note('hi'), {
+      now: NOW,
+      flowVersion: 'x',
+      runtime: 'codex',
+      harness: 'cmux',
+    });
+    expect(line).toMatchObject({ runtime: 'codex', harness: 'cmux' });
+    expect(JournalLineSchema.safeParse(line).success).toBe(true);
+    const { runtime: _r, ...without } = line;
+    expect(JournalLineSchema.safeParse(without).success).toBe(false);
+  });
+
+  it('detects them from the environment when the caller does not name them', () => {
+    vi.stubEnv('FLOW_RUNTIME', 'opencode');
+    vi.stubEnv('FLOW_HARNESS', 'dorkos');
+    expect(buildLine(note('hi'), { now: NOW })).toMatchObject({
+      runtime: 'opencode',
+      harness: 'dorkos',
+    });
+  });
+});
+
+describe('usage.snapshot lines', () => {
+  const snapshot = (windows: Record<string, unknown>): JournalEvent =>
+    ({
+      kind: 'usage.snapshot',
+      accountRuntime: 'claude-code',
+      account: 'acct-2',
+      windows,
+    }) as unknown as JournalEvent;
+  const meta = { now: NOW, flowVersion: 'x', runtime: 'claude-code' as const, harness: 'dorkos' };
+
+  it('accepts the fleet window names and rejects any other, or more than twelve', () => {
+    const ok = snapshot({
+      five_hour: { usedPct: 10, resetsAt: '2026-09-26T15:00:00Z' },
+      'model:claude-opus': { usedPct: 3, resetsAt: null },
+      'window:1440': { usedPct: 0, resetsAt: null },
+    });
+    expect(JournalLineSchema.safeParse(buildLine(ok, meta)).success).toBe(true);
+    const bad = snapshot({ daily: { usedPct: 10, resetsAt: null } });
+    expect(JournalLineSchema.safeParse(buildLine(bad, meta)).success).toBe(false);
+    const many = Object.fromEntries(
+      Array.from({ length: 13 }, (_, i) => [`window:${i + 1}`, { usedPct: 1, resetsAt: null }])
+    );
+    expect(JournalLineSchema.safeParse(buildLine(snapshot(many), meta)).success).toBe(false);
+  });
+
+  it('rejects a usedPct outside 0 to 100 and a field a window does not have', () => {
+    for (const reading of [
+      { usedPct: 101, resetsAt: null },
+      { usedPct: 5, resetsAt: null, note: 'x' },
+    ]) {
+      expect(
+        JournalLineSchema.safeParse(buildLine(snapshot({ five_hour: reading }), meta)).success
+      ).toBe(false);
+    }
+  });
+
+  it('redacts a secret smuggled into a window key or value', () => {
+    const line = buildLine(
+      snapshot({
+        ghp_abcdefghijklmnopqrstuvwxyz0123: {
+          usedPct: 1,
+          resetsAt: 'sk-ant-api03-abcdefghijklmnop',
+        },
+      }),
+      meta
+    ) as unknown as { windows: Record<string, { resetsAt: string }> };
+    expect(JSON.stringify(line)).not.toMatch(/ghp_|sk-ant/);
+  });
+});
+
+describe('shouldSampleUsage', () => {
+  const at = (minutes: number) => new Date(NOW.getTime() + minutes * 60_000);
+  const w = (usedPct: number, resetsAt: string | null = '2026-09-26T15:00:00.000Z') => ({
+    usedPct,
+    resetsAt,
+  });
+  const previous = { ts: NOW.toISOString(), windows: { five_hour: w(40), seven_day: w(70) } };
+
+  // Purpose: the ledger keeps only the latest reading; the journal keeps a
+  // sampled history, dense enough for trends and small enough to rotate slowly.
+  it('samples the first reading of an account', () => {
+    expect(shouldSampleUsage(undefined, { five_hour: w(1) }, NOW)).toBe(true);
+  });
+
+  it('skips a small change soon after the last sample', () => {
+    expect(shouldSampleUsage(previous, { five_hour: w(44), seven_day: w(71) }, at(10))).toBe(false);
+  });
+
+  it('samples once the interval has passed, a window moved 5 points, reset, appeared or vanished', () => {
+    const later = new Date(NOW.getTime() + USAGE_SAMPLE_INTERVAL_MS);
+    expect(shouldSampleUsage(previous, { five_hour: w(40), seven_day: w(70) }, later)).toBe(true);
+    expect(shouldSampleUsage(previous, { five_hour: w(45), seven_day: w(70) }, at(1))).toBe(true);
+    expect(
+      shouldSampleUsage(
+        previous,
+        { five_hour: w(2, '2026-09-26T20:00:00.000Z'), seven_day: w(70) },
+        at(1)
+      )
+    ).toBe(true);
+    expect(shouldSampleUsage(previous, { five_hour: w(40) }, at(1))).toBe(true);
+    expect(shouldSampleUsage(previous, { ...previous.windows, seven_day_opus: w(1) }, at(1))).toBe(
+      true
+    );
+  });
+
+  it('samples when the last snapshot time cannot be read', () => {
+    expect(
+      shouldSampleUsage({ ts: 'garbage', windows: previous.windows }, previous.windows, at(1))
+    ).toBe(true);
+  });
+});

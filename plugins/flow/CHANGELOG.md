@@ -4,6 +4,15 @@ Installs of this plugin are pinned to a commit SHA, so a fix here does not reach
 you until you **reinstall it** (Marketplace → flow → reinstall, or re-run your
 `--plugin-dir` checkout's `git pull`). Each entry below says whether that matters.
 
+## 0.21.0
+
+**flow's journal now records which agent wrote each entry: Claude Code, Codex or OpenCode. Reinstall to get it.**
+
+- Every journal entry says which runtime ran it and what hosted the session (cmux, DorkOS, the runtime's own terminal, or a plain shell), so a later review can compare them.
+- flow works this out from the markers each runtime leaves in its shell. A launcher can say it outright with `FLOW_RUNTIME` and `FLOW_HARNESS`.
+- The journal can now hold occasional readings of each account's usage, so a review can show how usage moved over a week. A reading is kept only when something changed enough to matter, so the file stays small.
+- `flow journal tail` shows the runtime beside each entry.
+
 ## 0.20.0
 
 **flow now keeps a small notebook of how its runs go, and agents can add notes to it. Reinstall to get it.**
