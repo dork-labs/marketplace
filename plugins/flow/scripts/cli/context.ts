@@ -24,6 +24,7 @@ import type { HostName, Launcher } from '../launchers/types.ts';
 import type { CodeAdapter } from '../tracker/types.ts';
 import type { ParsedArgs, VerbSpec } from './args.ts';
 import { realHostIo, type HostIo } from './host-io.ts';
+import type { Runtime } from '../runtime-detect.ts';
 import { RUNTIMES } from '../runtime-detect.ts';
 import { runtimeSession } from './session-id.ts';
 
@@ -124,6 +125,12 @@ export interface VerbResult {
   json: Record<string, unknown>;
   /** The human-mode output: plain, aligned, uncolored. Empty prints nothing. */
   text: string;
+  /**
+   * The runtime the verb resolved for itself, when that can differ from the
+   * environment's (`flow claim --runtime`). The run's `verb` journal line uses
+   * it, so it agrees with the verb's own lines. Never printed.
+   */
+  runtime?: Runtime;
 }
 
 /** A verb's own module, loaded lazily with `import()`. */

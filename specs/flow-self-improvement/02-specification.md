@@ -259,6 +259,32 @@ above every line stays under 4 KiB, and the file is opened `O_APPEND`, so concur
 local filesystem never interleave inside a line. A journal failure (full disk, permissions) is
 reported once on stderr and never changes the verb's exit code or output.
 
+**Automatic lines (amended at build, DOR-2391 task 3.1).** What the CLI writes on its own, where
+it differs from the table above:
+
+- `verb`: after every verb run whose arguments parse; never for `--help` or a usage error. `note`
+  and `journal` write their own lines and get none. `usage record` (run by the status line many
+  times a minute) gets one only when it exits non-zero.
+- `oracle.error`: on exit 70 (an internal error) from any verb, `usage record` included. Never on
+  exit 2: in this CLI no verb runs an oracle script, oracles run in-process and an oracle bug
+  throws (exit 70), and exit 2 means the caller made a usage error.
+- `stage`: `start` is written by `flow stage` for the new stage, `end` (outcome `ok`) by `flow
+  done`. A re-run of `flow done` whose summary is already posted, and whose run (when this machine
+  keeps one) is already complete, writes no second `end`. There is no `flow transition` verb.
+- `item.readied`, `retry` and `operator.wait` have no writer yet. No verb applies `agent/ready`
+  as a readiness decision (`flow release --to ready` returns an already-readied item to the queue
+  and is recorded as `claim` `release`), and no recovery or inbox verb exists. They arrive with a
+  triage verb (`item.readied`), a recovery verb (`retry`) and an inbox / needs-input verb
+  (`operator.wait`). Until then the retro's `captureToReadyDaysMedian` and
+  `operatorWaitHoursMedian` read "no data".
+- `claim`: the line and the run's `verb` line carry the runtime `flow claim` records on the
+  `FlowRun` (`--runtime`, else the one the environment names), so the three agree. A claim that is
+  refused records its `verb` line under the environment's runtime.
+- Automatic lines are silent: a journal failure drops the line with no warning, so every verb's
+  stdout, stderr and exit code are byte-identical whether or not it was written. They are also
+  skipped outside git and in a project with no flow config. `flow note` and `flow journal record`
+  still warn on a failure, as above.
+
 **Rotation.** Files are `journal.jsonl`, then `journal.1.jsonl` … `journal.<keep>.jsonl`, oldest
 last. Before appending, if `journal.jsonl` is at or over `journal.maxBytes` (default 5 MB):
 

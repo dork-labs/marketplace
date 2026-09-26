@@ -14,6 +14,7 @@
 import { UsageError } from '../errors.ts';
 import { projectionFor, type WorkStateChange } from '../work-state.ts';
 import type { VerbContext, VerbResult } from './context.ts';
+import { recordEvent } from './auto-journal.ts';
 import { signBody } from './provenance.ts';
 import {
   applyAndVerify,
@@ -108,6 +109,7 @@ export async function run(ctx: VerbContext): Promise<VerbResult> {
     stage: typeof stageFlag === 'string' ? stageFlag : undefined,
     reason: typeof reason === 'string' ? reason : undefined,
   });
+  if (!ctx.dryRun) recordEvent(ctx, { kind: 'claim', phase: 'release', item: identifier });
   return {
     json: {
       ok: true,

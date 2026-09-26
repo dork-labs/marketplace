@@ -22,6 +22,7 @@ import type { FlowStage } from '../flow-run.ts';
 import { projectionFor } from '../work-state.ts';
 import { checkpointLine, writeCheckpoint, type WrittenCheckpoint } from './checkpoint.ts';
 import type { VerbContext, VerbResult } from './context.ts';
+import { recordEvent } from './auto-journal.ts';
 import { applyAndVerify, requireStored, runFor, setupWrite } from './work-write.ts';
 
 /**
@@ -69,6 +70,7 @@ export async function run(ctx: VerbContext): Promise<VerbResult> {
       const written = await store.setRunStage(item.id, stage as FlowStage);
       requireStored(written.status, store.path, `run "flow stage ${identifier} ${stage}" again`);
     }
+    recordEvent(ctx, { kind: 'stage', stage, phase: 'start', item: identifier });
   }
   const moved = `${ctx.dryRun ? 'Would move' : 'Moved'} ${identifier} to ${stage}.`;
   return {
