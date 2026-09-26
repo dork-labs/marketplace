@@ -5,7 +5,7 @@ IFS= read -r -d '' input || true
 case $input in *'"rate_limits"'*) ;; *) exit 0 ;; esac
 fp=${input#*'"rate_limits"'}; fp=${fp%%'}}'*}
 dir=${CLAUDE_CONFIG_DIR:-$HOME/.claude}
-stamp=${DORK_HOME:-$HOME/.dork}/usage/.statusline-${dir//[^A-Za-z0-9]/_}
+stamp=${DORK_HOME:-$HOME/.dork}/runtimes/claude-code/usage/.statusline-${dir//[^A-Za-z0-9]/_}
 last=; [ -r "$stamp" ] && IFS= read -r last < "$stamp"
 [ "$fp" = "$last" ] && exit 0
 here=${BASH_SOURCE[0]%/*}

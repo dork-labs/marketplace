@@ -140,10 +140,10 @@ const DOCUMENTS = new Set(
 );
 
 describe('the module', () => {
-  it('declares contract 1.4.0 and all five capabilities', () => {
+  it('declares contract 2.1.0 and all five capabilities', () => {
     // Purpose: the loader requires CONTRACT_VERSION and the capability list;
     // the shipped adapter serves every verb.
-    expect(linear.CONTRACT_VERSION).toBe('2.0.0');
+    expect(linear.CONTRACT_VERSION).toBe('2.1.0');
     const { adapter } = build(snapshotRoute);
     expect([...adapter.capabilities].sort()).toEqual(
       ['applyWorkState', 'comment', 'getBacklogSnapshot', 'getCurrentUser', 'getItem'].sort()
@@ -362,10 +362,23 @@ describe('getBacklogSnapshot', () => {
 
     const withClosed = build(snapshotRoute);
     const snapshot = await withClosed.adapter.getBacklogSnapshot({ includeClosed: true });
+    // closedAt is the date of the matching terminal state (contract 2.1.0), so
+    // a canceled item never reports its (null) completion date or the reverse.
     expect(snapshot.closed).toEqual([
-      { identifier: 'DOR-90', title: 'An earlier shipped change', stateCategory: 'completed' },
-      { identifier: 'DOR-91', title: 'A canceled idea', stateCategory: 'canceled' },
+      {
+        identifier: 'DOR-90',
+        title: 'An earlier shipped change',
+        stateCategory: 'completed',
+        closedAt: '2026-09-01T10:00:00.000Z',
+      },
+      {
+        identifier: 'DOR-91',
+        title: 'A canceled idea',
+        stateCategory: 'canceled',
+        closedAt: '2026-09-02T11:00:00.000Z',
+      },
     ]);
+    expect(linear.SNAPSHOT_CLOSED_QUERY).toMatch(/completedAt canceledAt/);
     const closedCall = withClosed.calls.find((call) => call.operation === 'FlowSnapshotClosed');
     expect(closedCall?.variables).toEqual({ teamId: TEAM.id, first: 250, after: null });
   });

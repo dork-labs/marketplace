@@ -125,7 +125,7 @@ async function scanJson(extra: string[] = []) {
 }
 
 function readLedgerFile(): { windows: Record<string, Record<string, unknown>> } {
-  return JSON.parse(readFileSync(ledgerPath(dorkHome, 'one'), 'utf8'));
+  return JSON.parse(readFileSync(ledgerPath(dorkHome, 'claude-code', 'one'), 'utf8'));
 }
 
 describe('flow usage scan', () => {
@@ -202,7 +202,7 @@ describe('flow usage scan', () => {
     // Purpose: scan is safe to run on a schedule; an unchanged ledger is never rewritten.
     place('structured.jsonl');
     await scanJson();
-    const file = ledgerPath(dorkHome, 'one');
+    const file = ledgerPath(dorkHome, 'claude-code', 'one');
     const bytes = readFileSync(file);
     const mtime = statSync(file).mtimeMs;
 
@@ -216,6 +216,7 @@ describe('flow usage scan', () => {
     // Purpose: an old limit hit must not replace a fresher reading the status line stored.
     await recordUsage(
       dorkHome,
+      'claude-code',
       'one',
       [
         {
@@ -245,9 +246,12 @@ describe('flow usage scan', () => {
   it('says a locked usage file was not saved, never that a newer reading is stored', async () => {
     // Purpose: a dropped write must read as "not saved", so the person knows to run it again.
     place('structured.jsonl');
-    mkdirSync(path.join(dorkHome, 'usage'), { recursive: true });
+    mkdirSync(path.join(dorkHome, 'runtimes', 'claude-code', 'usage'), { recursive: true });
     // A live holder's fresh lock makes the writer give up after 2 s.
-    writeFileSync(path.join(dorkHome, 'usage', 'one.json.lock'), `${process.pid}:held`);
+    writeFileSync(
+      path.join(dorkHome, 'runtimes', 'claude-code', 'usage', 'one.json.lock'),
+      `${process.pid}:held`
+    );
     const human = await flow(['usage', 'scan']);
     expect(human.code).toBe(0);
     expect(human.stdout).toMatch(/not saved \(the usage file stayed locked/);
@@ -261,8 +265,8 @@ describe('flow usage scan', () => {
     place('structured.jsonl');
     const out = await scanJson(['--dry-run']);
     expect(out.accounts[0].changed.sort()).toEqual(['five_hour', 'seven_day']);
-    expect(existsSync(ledgerPath(dorkHome, 'one'))).toBe(false);
-    expect(existsSync(path.join(dorkHome, 'usage'))).toBe(false);
+    expect(existsSync(ledgerPath(dorkHome, 'claude-code', 'one'))).toBe(false);
+    expect(existsSync(path.join(dorkHome, 'runtimes', 'claude-code', 'usage'))).toBe(false);
   });
 
   it('warns about a torn line and still records the hits around it', async () => {

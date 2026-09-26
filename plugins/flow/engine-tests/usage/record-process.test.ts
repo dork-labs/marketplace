@@ -116,7 +116,9 @@ describe('the hook', () => {
 
       await runUntilStdoutCloses(bash, [HOOK], FULL, env);
       expect(calls()).toBe(1);
-      const ledger = JSON.parse(readFileSync(path.join(dorkHome, 'usage', 'acct-a.json'), 'utf8'));
+      const ledger = JSON.parse(
+        readFileSync(path.join(dorkHome, 'runtimes', 'claude-code', 'usage', 'acct-a.json'), 'utf8')
+      );
       expect(ledger.windows.five_hour.resetsAt).toBe('2026-09-26T19:00:00.000Z');
 
       await runUntilStdoutCloses(bash, [HOOK], FULL, env);
@@ -167,6 +169,8 @@ describe('usage record without npm install', () => {
     expect(result.stderr).toBe('');
     expect(result.status).toBe(0);
     expect(result.stdout).toBe('');
-    expect(existsSync(path.join(dorkHome, 'usage', 'acct-a.json'))).toBe(true);
+    expect(existsSync(path.join(dorkHome, 'runtimes', 'claude-code', 'usage', 'acct-a.json'))).toBe(
+      true
+    );
   }, 30_000);
 });

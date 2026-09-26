@@ -553,7 +553,7 @@ Each test carries a purpose comment and is shown to fail against a broken implem
 - Usage comes only from what the official binary hands us: the status-line payload, transcripts and a real `claude -p` turn. No Keychain or credentials file is read, no token is extracted, and no Anthropic endpoint is called by flow (flow-fleet §3). The compliance guard enforces it.
 - The probe removes API-key and token variables from the child's environment without reading them, and refuses to record a turn that answered on an API key.
 - `fleet` talks only to a loopback URL and only with `GET`.
-- Ledger files, stamps and backups are `0600`, in `0700` folders (S1 §1.2). Account ids are pattern-checked before they become file names. The stamp path from the environment is confined to `<dorkHome>/usage/.statusline-*`.
+- Ledger files, stamps and backups are `0600`, in `0700` folders (S1 §1.2). Account ids are pattern-checked before they become file names. The stamp path from the environment is confined to `<dorkHome>/runtimes/claude-code/usage/.statusline-*`.
 - `install-statusline` writes only with `--yes`. It keeps a backup, preserves the mode, verifies after writing, and restores on a failed check. Paths it writes are single-quoted, and a path containing a quote is refused.
 - No shell anywhere: every child process gets an argument array.
 - flow is a public plugin, so the docs say it plainly: each person must judge their own use against Anthropic's terms. The feature is described as account-aware scheduling, never as a way to get more out of a plan.

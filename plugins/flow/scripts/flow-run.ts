@@ -264,6 +264,13 @@ export interface FlowRun {
    */
   host?: string;
   /**
+   * The runtime the current session runs on: `claude-code`, `codex` or
+   * `opencode` today (spec `flow-cli-core` §1.3). Rewritten on every handoff,
+   * like {@link account}, whose registry it names. A bare string, like
+   * {@link host}, so a record from a future runtime never fails the reader.
+   */
+  runtime?: string;
+  /**
    * When the last `flow checkpoint` for this run was written (ISO), spec
    * `flow-handoff-dispatch` §1. Written only by the checkpoint and report verbs.
    */

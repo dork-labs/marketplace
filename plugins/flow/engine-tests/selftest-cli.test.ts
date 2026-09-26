@@ -8,7 +8,7 @@
  * exit code) each get a planted break that must fail for the stated reason.
  */
 
-import { execFileSync } from 'node:child_process';
+import { execFileSync, spawnSync } from 'node:child_process';
 import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync, mkdirSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -54,46 +54,68 @@ async function run(argv: string[], env: NodeJS.ProcessEnv = { VITEST: 'true' }) 
   return { code, stdout, stderr };
 }
 
-describe('flow selftest (fast tier)', () => {
-  it('passes on the shipped plugin, with the engine tests skipped inside Vitest', async () => {
-    const { code, stdout } = await run(['--json']);
-    const report = JSON.parse(stdout);
-    expect(report).toMatchObject({
-      v: 1,
-      ok: true,
-      tiers: ['fast'],
-      flowVersion: expect.any(String),
-    });
-    expect(report.checks.filter((c: Check) => c.status === 'fail')).toEqual([]);
-    const engine = report.checks.find((c: Check) => c.id === 'engine-tests');
-    expect(engine).toMatchObject({ status: 'skip', detail: 'already inside a test run' });
-    expect(code).toBe(0);
+/** The scenarios tier runs real git and the real verbs; 5 s is too tight on a cold, loaded run. */
+const SCENARIOS_TIMEOUT = 30_000;
+
+describe('flow selftest', () => {
+  it(
+    'runs fast then scenarios by default, and passes on the shipped plugin',
+    { timeout: SCENARIOS_TIMEOUT },
+    async () => {
+      const { code, stdout } = await run(['--json']);
+      const report = JSON.parse(stdout);
+      expect(report).toMatchObject({
+        v: 1,
+        ok: true,
+        tiers: ['fast', 'scenarios'],
+        flowVersion: expect.any(String),
+      });
+      expect(report.checks.filter((c: Check) => c.status === 'fail')).toEqual([]);
+      const engine = report.checks.find((c: Check) => c.id === 'engine-tests');
+      expect(engine).toMatchObject({ status: 'skip', detail: 'already inside a test run' });
+      expect(report.checks.filter((c: Check) => c.tier === 'scenarios').length).toBeGreaterThan(0);
+      expect(code).toBe(0);
+    }
+  );
+
+  it('runs one tier when --tier names it', { timeout: SCENARIOS_TIMEOUT }, async () => {
+    const fast = JSON.parse((await run(['--tier', 'fast', '--json', '--no-save'])).stdout);
+    expect(fast.tiers).toEqual(['fast']);
+    expect(fast.checks.every((c: Check) => c.tier === 'fast')).toBe(true);
+    const scenarios = JSON.parse(
+      (await run(['--tier', 'scenarios', '--json', '--no-save'])).stdout
+    );
+    expect(scenarios.tiers).toEqual(['scenarios']);
+    expect(scenarios.checks.every((c: Check) => c.id.startsWith('scenarios/'))).toBe(true);
   });
 
   it('counts a skip as not passed: --strict fails the run on it', async () => {
-    expect((await run(['--strict', '--no-save'])).code).toBe(1);
+    expect((await run(['--tier', 'fast', '--strict', '--no-save'])).code).toBe(1);
   });
 
   it('lists skips with their reason in the text report', async () => {
-    const { stdout } = await run(['--no-save']);
+    const { stdout } = await run(['--tier', 'fast', '--no-save']);
     expect(stdout).toMatch(
       /Skipped \(not passed\):\n {2}SKIP {2}engine-tests: already inside a test run/
     );
   });
 
-  it('refuses tiers that do not exist yet, and unknown flags, with exit 2', async () => {
-    const scenarios = await run(['--tier', 'scenarios', '--json']);
-    expect(scenarios.code).toBe(2);
-    expect(JSON.parse(scenarios.stdout)).toMatchObject({ v: 1, ok: false, error: { code: 2 } });
-    expect(scenarios.stderr).toMatch(/arrives with the flow CLI/);
+  it('refuses the live tier (not built yet), unknown tiers and unknown flags, with exit 2', async () => {
+    for (const tier of ['live', 'all']) {
+      const refused = await run(['--tier', tier, '--json']);
+      expect(refused.code).toBe(2);
+      expect(JSON.parse(refused.stdout)).toMatchObject({ v: 1, ok: false, error: { code: 2 } });
+      expect(refused.stderr).toMatch(/the live tier is not built yet/);
+    }
+    expect((await run(['--tier', 'slow'])).code).toBe(2);
     expect((await run(['--bogus'])).code).toBe(2);
   });
 
   it('saves latest.json and one history line, and keeps .dork/flow/ out of git', async () => {
-    await run(['--no-save']);
+    await run(['--tier', 'fast', '--no-save']);
     expect(existsSync(path.join(project, SELFTEST_DIR))).toBe(false);
 
-    await run([]);
+    await run(['--tier', 'fast']);
     const dir = path.join(project, SELFTEST_DIR);
     expect(JSON.parse(readFileSync(path.join(dir, 'latest.json'), 'utf8')).v).toBe(1);
     const history = readFileSync(path.join(dir, 'history.jsonl'), 'utf8').trim().split('\n');
@@ -105,7 +127,7 @@ describe('flow selftest (fast tier)', () => {
     });
     const exclude = readFileSync(path.join(project, '.git', 'info', 'exclude'), 'utf8');
     expect(exclude.split('\n').filter((l) => l === '.dork/flow/')).toHaveLength(1);
-    await run([]);
+    await run(['--tier', 'fast']);
     const again = readFileSync(path.join(project, '.git', 'info', 'exclude'), 'utf8');
     expect(again.split('\n').filter((l) => l === '.dork/flow/')).toHaveLength(1);
   });
@@ -115,11 +137,68 @@ describe('flow selftest (fast tier)', () => {
     mkdirSync(dir, { recursive: true });
     const old = Array.from({ length: HISTORY_CAP + 50 }, (_, i) => JSON.stringify({ n: i }));
     writeFileSync(path.join(dir, 'history.jsonl'), `${old.join('\n')}\n`);
-    await run([]);
+    await run(['--tier', 'fast']);
     const lines = readFileSync(path.join(dir, 'history.jsonl'), 'utf8').trim().split('\n');
     expect(lines).toHaveLength(HISTORY_CAP);
     expect(JSON.parse(lines[0])).toEqual({ n: 51 });
     expect(JSON.parse(lines.at(-1) ?? '{}').startedAt).toBe('2026-09-26T12:00:00.000Z');
+  });
+});
+
+/** The project's journal lines. */
+function journalLines(): Record<string, unknown>[] {
+  const file = path.join(project, '.dork', 'flow', 'journal.jsonl');
+  if (!existsSync(file)) return [];
+  return readFileSync(file, 'utf8')
+    .trim()
+    .split('\n')
+    .map((l) => JSON.parse(l) as Record<string, unknown>);
+}
+
+describe('the selftest journal line', () => {
+  it('is written on every run, --no-save included, stamped with the runtime that ran it', async () => {
+    // Purpose: the retro reads self-test history from the journal, per
+    // runtime; --no-save is about the report files, not that history.
+    await run(['--tier', 'fast', '--no-save'], { VITEST: 'true', CODEX_THREAD_ID: 'thread-1' });
+    await run(['--tier', 'fast', '--no-save'], { VITEST: 'true', CLAUDECODE: '1' });
+    expect(journalLines()).toEqual([
+      expect.objectContaining({ kind: 'selftest', tiers: ['fast'], runtime: 'codex', fail: 0 }),
+      expect.objectContaining({ kind: 'selftest', runtime: 'claude-code', harness: 'claude-code' }),
+    ]);
+  });
+
+  it('is not written when the journal is off', async () => {
+    mkdirSync(path.join(project, '.agents', 'flow'), { recursive: true });
+    writeFileSync(
+      path.join(project, '.agents', 'flow', 'config.json'),
+      JSON.stringify({ selfImprovement: { journal: { enabled: false } } })
+    );
+    await run(['--tier', 'fast', '--no-save']);
+    expect(journalLines()).toEqual([]);
+  });
+});
+
+describe('the flow entry point, as a process', { timeout: SCENARIOS_TIMEOUT }, () => {
+  // Purpose: /flow:self-test runs `flow.ts selftest` as a script. The scenarios
+  // import flow.ts, and a top-level await of main() there deadlocks that import
+  // (Node exits 13 with no output), which no in-process test can see.
+  it('runs `flow selftest --tier scenarios` to a parseable report and exit 0', () => {
+    const result = spawnSync(
+      process.execPath,
+      [
+        '--experimental-strip-types',
+        '--no-warnings',
+        path.join(FLOW_ROOT, 'scripts', 'flow.ts'),
+        'selftest',
+        '--tier',
+        'scenarios',
+        '--no-save',
+        '--json',
+      ],
+      { cwd: project, encoding: 'utf8', env: { PATH: process.env.PATH ?? '' }, timeout: 60_000 }
+    );
+    expect(result.status).toBe(0);
+    expect(JSON.parse(result.stdout)).toMatchObject({ v: 1, ok: true, tiers: ['scenarios'] });
   });
 });
 

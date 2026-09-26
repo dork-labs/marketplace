@@ -36,7 +36,7 @@ trigger over it. In reconciler-registry order, one tick:
    it says `"ok": false`, report its first error and stop. Otherwise the tracker adapter
    for the steps below is the `SKILL.md` at its `adapter.path` (inside it, `<flow-root>`
    means the output's `flowRoot`).
-1. **Recovery.** Re-adopt any orphaned claimed work: read
+1. **Recovery.** Re-adopt orphaned claimed work: read
    `.dork/flow/flow-state.json`, GC closed-issue records, probe the worker, and
    resume / restart-clean / escalate per the recovery script
    (`node --experimental-strip-types "<flow-root>/scripts/recovery.ts"`).
@@ -46,10 +46,10 @@ trigger over it. In reconciler-registry order, one tick:
    `node --experimental-strip-types "<flow-root>/scripts/flow.ts" next --json`, provision the
    top item's worktree, claim it with
    `node --experimental-strip-types "<flow-root>/scripts/flow.ts" claim <id> --session <session id> --worktree <path> --branch <branch> --json`
-   (omit `--session` if unknown)
+   (Claude Code and Codex supply `--session`)
    and carry it to its human-review gate.
 
-Stop at the review gate or on a genuine question. Other tracker reads and writes
+Stop at the review gate or a genuine question. Other tracker reads and writes
 go through **the adapter**; this tick never names a tracker directly.
 
 **Operator override.** At each stage boundary, check for the `agent/paused`

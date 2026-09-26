@@ -41,6 +41,7 @@ import os from 'node:os';
 import path from 'node:path';
 
 import { isPlainObject } from './_shared.ts';
+import { WINDOW_KEY_PATTERN } from './fleet/usage-ledger.ts';
 import {
   RUN_FILES_DIR,
   findConfigRoots,
@@ -129,18 +130,18 @@ export function runtimeOf(env: Readonly<Record<string, string | undefined>>): {
 
 /** One usage window as a `usage.snapshot` line carries it. */
 export interface UsageWindowReading {
-  /** Share of the window used, 0 to 100. */
-  usedPct: number;
+  /** Share of the window used, 0 to 100, or `null` for a window-less reading (an error signal). */
+  usedPct: number | null;
   /** When the window resets, ISO-8601, or `null` when unknown. */
   resetsAt: string | null;
 }
 
 /**
- * A usage window name (fleet decision R2): `five_hour`, `seven_day`,
- * `seven_day_opus`, `seven_day_sonnet`, `model:<slug>` or `window:<minutes>`.
+ * A usage window name: exactly the usage ledger's window-key grammar (fleet
+ * contract, spec `flow-cli-core` §1.2), shared so every window the ledger may
+ * hold can be sampled into the journal.
  */
-export const USAGE_WINDOW_NAME =
-  /^(five_hour|seven_day|seven_day_opus|seven_day_sonnet|model:[a-z0-9._-]{1,40}|window:\d{1,6})$/;
+export const USAGE_WINDOW_NAME = WINDOW_KEY_PATTERN;
 
 /** The most windows one `usage.snapshot` line may carry. */
 export const USAGE_WINDOWS_MAX = 12;
@@ -161,7 +162,7 @@ function isResetTime(value: unknown): boolean {
 /**
  * Why a `usage.snapshot` event cannot be written, or `null` when it can. The
  * journal writes lines without zod, so this is the snapshot's check: a finite
- * `usedPct` from 0 to 100, a known window name, at most
+ * `usedPct` from 0 to 100 (or `null`), a window name in the ledger grammar, at most
  * {@link USAGE_WINDOWS_MAX} windows, a readable `resetsAt`, and a finite,
  * non-negative spend. {@link append} refuses an event that fails it.
  *
@@ -184,8 +185,11 @@ export function usageSnapshotProblem(event: JournalEvent): string | null {
     const extra = Object.keys(reading).find((key) => key !== 'usedPct' && key !== 'resetsAt');
     if (extra !== undefined) return `window ${name} has an unknown field "${extra.slice(0, 40)}"`;
     const pct = reading.usedPct;
-    if (typeof pct !== 'number' || !Number.isFinite(pct) || pct < 0 || pct > 100) {
-      return `window ${name} usedPct must be a number from 0 to 100`;
+    if (
+      pct !== null &&
+      (typeof pct !== 'number' || !Number.isFinite(pct) || pct < 0 || pct > 100)
+    ) {
+      return `window ${name} usedPct must be a number from 0 to 100, or null`;
     }
     if (!isResetTime(reading.resetsAt)) return `window ${name} resetsAt must be a time or null`;
   }
@@ -248,7 +252,9 @@ export function shouldSampleUsage(
     const after = windows[name];
     if (before === undefined || after === undefined) return true;
     if (resetMoved(before.resetsAt, after.resetsAt)) return true;
-    if (!(Math.abs(after.usedPct - before.usedPct) < USAGE_SAMPLE_DELTA_PCT)) return true;
+    if (before.usedPct === null || after.usedPct === null) {
+      if (before.usedPct !== after.usedPct) return true;
+    } else if (!(Math.abs(after.usedPct - before.usedPct) < USAGE_SAMPLE_DELTA_PCT)) return true;
   }
   return false;
 }

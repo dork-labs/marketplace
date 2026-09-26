@@ -21,7 +21,7 @@ description: The /flow engine's tracker adapter — the single skill that owns E
 >
 > **Prose plus code.** The agent reads this skill and follows it. `adapter.ts`
 > beside it holds the same recipes as tested code, which the `flow` CLI calls
-> (adapter contract 2.0.0, "The code realization").
+> (adapter contract 2.1.0, "The code realization").
 
 ## The one rule
 

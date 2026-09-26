@@ -77,7 +77,9 @@ describe('ingestStreamLog', () => {
     ]);
     expect(result.offset).toBe(Buffer.byteLength(init + event));
     expect(result.status).toBe('written');
-    const ledger = JSON.parse(readFileSync(path.join(dir, 'usage', 'claude3.json'), 'utf8'));
+    const ledger = JSON.parse(
+      readFileSync(path.join(dir, 'runtimes', 'claude-code', 'usage', 'claude3.json'), 'utf8')
+    );
     expect(ledger.windows.five_hour).toMatchObject({ usedPct: 83, source: 'sdk_event' });
   });
 
@@ -101,6 +103,8 @@ describe('ingestStreamLog', () => {
     expect(second.observations).toHaveLength(1);
     expect(second.offset).toBe(Buffer.byteLength(init + event));
     expect(record).toHaveBeenCalledTimes(1);
+    // The reading lands in Claude Code's per-runtime ledger for that account.
+    expect(record).toHaveBeenCalledWith(dir, 'claude-code', 'claude3', expect.any(Array), NOW);
   });
 
   // The ambient account has no registry id and so no ledger file.

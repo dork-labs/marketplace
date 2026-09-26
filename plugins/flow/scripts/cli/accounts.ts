@@ -2,12 +2,16 @@
  * `flow accounts`: list the accounts flow may spend, register one, and set how
  * flow routes work to them (spec `flow-cli-core` §6, §1.1).
  *
- * - `list` (the default) joins the identities in `<dorkHome>/config.json`, the
- *   policy in `<dorkHome>/flow/fleet.json` and each account's usage ledger.
- * - `add` appends one identity to `config.json` and writes no policy, so a new
- *   account starts kept out.
- * - `set <id>` edits that account's policy in `fleet.json`; `set` with no id
- *   takes only `--handoff`.
+ * - `list` (the default) joins every runtime's accounts in
+ *   `<dorkHome>/config.json` (a runtime with none has its implicit `default`),
+ *   the policy in `<dorkHome>/flow/fleet.json` and each account's usage ledger,
+ *   grouped by runtime. It drops the stored policy of an account that is no
+ *   longer registered, and says so.
+ * - `add` appends one Claude Code identity to `config.json` and writes no
+ *   policy, so a new account starts kept out.
+ * - `set <id>` edits that account's policy in `fleet.json` (`<runtime>:<id>`, or
+ *   a bare id for Claude Code); `set` with no id takes the fleet-wide
+ *   `--handoff`, `--runtimes` and `--cross-runtime-fallback`.
  *
  * It needs no tracker and no flow project config, and it reads `<dorkHome>` from
  * `DORK_HOME` like every fleet file. Dependency-free: node builtins and local
@@ -23,23 +27,40 @@ import path from 'node:path';
 import { readJsonFile } from '../atomic-json.ts';
 import { PreconditionError, UsageError } from '../errors.ts';
 import {
+  accountKey,
+  accountRoom,
   addIdentity,
+  dropAccountPolicies,
   effectiveReservePct,
   fiveHourRoom,
   fleetPolicyPath,
+  loadAccounts,
   loadFleetPolicy,
-  loadIdentities,
+  parseAccountKey,
   resolveDorkHome,
   resolveFleetPolicy,
   setAccountPolicy,
-  setHandoff,
+  setFleetSetting,
+  unknownPolicyKeys,
   updateFleetPolicy,
   weeklyRoom,
   type AccountPolicyPatch,
   type AccountRole,
+  type CrossRuntimeFallback,
+  type FleetSettings,
   type HandoffMode,
+  type ResolvedFleetPolicy,
 } from '../fleet/accounts.ts';
-import { readLedger, readWindow, type FleetWarning } from '../fleet/usage-ledger.ts';
+import {
+  RUNTIMES,
+  isRuntimeSlug,
+  readLedger,
+  readSpend,
+  readWindow,
+  type FleetWarning,
+  type RuntimeSlug,
+  type SpendEntry,
+} from '../fleet/usage-ledger.ts';
 import { formatColumns } from './output.ts';
 import type { VerbContext, VerbResult } from './context.ts';
 
@@ -48,6 +69,16 @@ const POLICY_FLAGS = ['role', 'reserve', 'spend-down-hours', 'repos'] as const;
 
 /** The flags `add` takes. */
 const ADD_FLAGS = ['path', 'label', 'color'] as const;
+
+/** The flags `set` takes with no account id. */
+const FLEET_FLAGS = ['handoff', 'runtimes', 'cross-runtime-fallback'] as const;
+
+/** Each runtime's name for people. */
+const RUNTIME_NAMES: Readonly<Record<RuntimeSlug, string>> = {
+  'claude-code': 'Claude Code',
+  codex: 'Codex',
+  opencode: 'OpenCode',
+};
 
 /** A string flag's value, when given. */
 function flag(ctx: VerbContext, name: string): string | undefined {
@@ -75,12 +106,12 @@ export async function run(ctx: VerbContext): Promise<VerbResult> {
     case 'list':
       if (id !== undefined)
         throw new UsageError(`unexpected argument "${id}" for "flow accounts list"`);
-      refuseFlags(ctx, [...ADD_FLAGS, ...POLICY_FLAGS, 'handoff', 'dry-run'], 'list');
+      refuseFlags(ctx, [...ADD_FLAGS, ...POLICY_FLAGS, ...FLEET_FLAGS], 'list');
       return list(ctx, dorkHome);
     case 'add':
       if (id !== undefined)
         throw new UsageError(`unexpected argument "${id}" for "flow accounts add"`);
-      refuseFlags(ctx, [...POLICY_FLAGS, 'handoff'], 'add');
+      refuseFlags(ctx, [...POLICY_FLAGS, ...FLEET_FLAGS], 'add');
       return add(ctx, dorkHome);
     case 'set':
       refuseFlags(ctx, ADD_FLAGS, 'set');
@@ -92,9 +123,12 @@ export async function run(ctx: VerbContext): Promise<VerbResult> {
 
 /** One account as `list` reports it. */
 interface ListedAccount {
+  runtime: RuntimeSlug;
+  key: string;
   id: string;
+  implicit: boolean;
   label: string | null;
-  path: string;
+  path: string | null;
   color: string | null;
   routable: boolean;
   role: AccountRole;
@@ -104,35 +138,71 @@ interface ListedAccount {
   scope: { repos: string[] };
   fiveHourRoom: boolean | null;
   weeklyRoom: boolean | null;
+  room: boolean | null;
   windows: Record<string, unknown>;
+  spend: SpendEntry | null;
 }
 
-/** Every identity with its resolved policy, ledger readings and room. */
-function list(ctx: VerbContext, dorkHome: string): VerbResult {
-  const now = ctx.now();
-  const identities = loadIdentities(dorkHome);
-  const policy = loadFleetPolicy(dorkHome, identities.accounts);
-  const warnings: FleetWarning[] = [...identities.warnings, ...policy.warnings];
+/**
+ * Drop the stored policy of every account that is no longer registered (spec
+ * §1.1b), unless the registry could not be read in full or this is a dry run.
+ *
+ * @returns The keys dropped (or, on a dry run, that would be).
+ */
+async function dropUnknown(
+  ctx: VerbContext,
+  dorkHome: string,
+  accounts: Parameters<typeof unknownPolicyKeys>[0],
+  registryReadable: boolean
+): Promise<string[]> {
+  if (!registryReadable) return [];
+  const file = fleetPolicyPath(dorkHome);
+  const raw = readJsonFile(file).value;
+  const keys = unknownPolicyKeys(accounts, raw);
+  if (keys.length === 0 || ctx.dryRun) return keys;
+  let dropped: string[] = [];
+  const result = await updateFleetPolicy(dorkHome, (current) => {
+    dropped = unknownPolicyKeys(accounts, current);
+    return dropped.length === 0 ? current : dropAccountPolicies(current, dropped);
+  });
+  return result.status === 'dropped' ? [] : dropped;
+}
 
-  const accounts: ListedAccount[] = identities.accounts.map((identity, index) => {
+/** Every account of every runtime with its resolved policy, ledger readings and room. */
+async function list(ctx: VerbContext, dorkHome: string): Promise<VerbResult> {
+  const now = ctx.now();
+  const registry = loadAccounts(dorkHome);
+  const dropped = await dropUnknown(ctx, dorkHome, registry.accounts, registry.registryReadable);
+  const policy = loadFleetPolicy(dorkHome, registry.accounts);
+  const warnings: FleetWarning[] = [
+    ...registry.warnings,
+    ...policy.warnings.filter((w) => !(w.code === 'entry-unknown-id' && dropped.length > 0)),
+  ];
+
+  const accounts: ListedAccount[] = registry.accounts.map((account, index) => {
     const resolved = policy.accounts[index];
     let windows: Record<string, unknown> | null = null;
+    let ledger: { windows?: unknown; spend?: unknown } | null = null;
     const readings: Record<string, unknown> = {};
-    if (identity.routable) {
-      const ledger = readLedger(dorkHome, identity.id);
-      warnings.push(...ledger.warnings);
-      windows = ledger.ledger?.windows ?? null;
+    if (account.routable) {
+      const read = readLedger(dorkHome, account.runtime, account.id);
+      warnings.push(...read.warnings);
+      ledger = read.ledger;
+      windows = read.ledger?.windows ?? null;
       for (const key of Object.keys(windows ?? {})) {
         const reading = readWindow(windows?.[key], now, key);
         if (reading !== null) readings[key] = reading;
       }
     }
     return {
-      id: identity.id,
-      label: identity.label,
-      path: identity.path,
-      color: identity.color,
-      routable: identity.routable,
+      runtime: account.runtime,
+      key: account.key,
+      id: account.id,
+      implicit: account.implicit,
+      label: account.label,
+      path: account.path,
+      color: account.color,
+      routable: account.routable,
       role: resolved.role,
       reservePct: resolved.reservePct,
       effectiveReservePct: effectiveReservePct(resolved, windows, now),
@@ -140,16 +210,25 @@ function list(ctx: VerbContext, dorkHome: string): VerbResult {
       scope: resolved.scope,
       fiveHourRoom: fiveHourRoom(windows, now),
       weeklyRoom: weeklyRoom(resolved, windows, now),
+      room: account.routable ? accountRoom(account.runtime, resolved, ledger, now) : false,
       windows: readings,
+      spend: readSpend(ledger?.spend),
     };
   });
-  if (accounts.length > 0 && policy.mainId === null) {
-    warnings.push({
-      code: 'no-main',
-      message:
-        'No account is main, so none keeps a default reserve for your own use. Pick one with "flow accounts set <id> --role main".',
-    });
+  for (const runtime of RUNTIMES) {
+    const registered = accounts.filter((a) => a.runtime === runtime && !a.implicit);
+    if (registered.length > 0 && policy.mains[runtime] === undefined) {
+      warnings.push({
+        code: 'no-main',
+        message: `No ${RUNTIME_NAMES[runtime]} account is main, so none keeps a default reserve for your own use. Pick one with "flow accounts set <id> --role main".`,
+      });
+    }
   }
+  const notes = dropped.map(
+    (key) =>
+      `${ctx.dryRun ? 'Would drop' : 'Dropped'} the policy for "${key}": it is no longer a registered account.`
+  );
+  for (const note of notes) ctx.warn(note);
   for (const warning of warnings) ctx.warn(warning.message);
 
   return {
@@ -157,11 +236,14 @@ function list(ctx: VerbContext, dorkHome: string): VerbResult {
       ok: true,
       dorkHome,
       handoff: policy.handoff,
-      mainId: policy.mainId,
+      runtimes: policy.runtimes,
+      crossRuntimeFallback: policy.crossRuntimeFallback,
+      mains: policy.mains,
       accounts,
+      dropped,
       warnings,
     },
-    text: renderList(accounts, policy.handoff),
+    text: renderList(accounts, policy),
   };
 }
 
@@ -173,36 +255,61 @@ function roomCell(reading: unknown, room: boolean | null): string {
   return room ? shown : `${shown} (no room)`;
 }
 
-/** The human listing: one row per account, then the handoff. */
-function renderList(accounts: readonly ListedAccount[], handoff: HandoffMode): string {
-  if (accounts.length === 0) {
-    return 'No accounts registered. Add one with "flow accounts add --path <dir>".';
+/** The overall room, for one cell. */
+function overallCell(account: ListedAccount): string {
+  const spend =
+    account.spend === null
+      ? ''
+      : ` ($${account.spend.costUsd.toFixed(2)}${account.spend.limitUsd === null ? '' : ` of $${account.spend.limitUsd.toFixed(2)}`})`;
+  if (account.room === null) return `unknown${spend}`;
+  return `${account.room ? 'yes' : 'no'}${spend}`;
+}
+
+/** The human listing: one table per runtime, then the fleet-wide settings. */
+function renderList(accounts: readonly ListedAccount[], policy: ResolvedFleetPolicy): string {
+  const blocks: string[] = [];
+  for (const runtime of RUNTIMES) {
+    const rows = [['ID', 'ROLE', 'RESERVE', '5-HOUR', '7-DAY', 'ROOM', 'LABEL', 'PATH']];
+    for (const account of accounts.filter((a) => a.runtime === runtime)) {
+      const role =
+        account.role === 'kept-out' && account.scope.repos.length > 0
+          ? `kept-out (${account.scope.repos.join(', ')})`
+          : account.role;
+      const reserve =
+        account.effectiveReservePct < account.reservePct
+          ? `${account.effectiveReservePct}% (spending down)`
+          : `${account.reservePct}%`;
+      rows.push([
+        account.id,
+        role,
+        reserve,
+        roomCell(account.windows.five_hour, account.fiveHourRoom),
+        roomCell(account.windows.seven_day, account.weeklyRoom),
+        overallCell(account),
+        account.label ?? '-',
+        account.path ?? '(this environment)',
+      ]);
+    }
+    blocks.push(`${RUNTIME_NAMES[runtime]}\n${formatColumns(rows)}`);
   }
-  const rows = [['ID', 'ROLE', 'RESERVE', '5-HOUR', '7-DAY', 'LABEL', 'PATH']];
-  for (const account of accounts) {
-    const role =
-      account.role === 'kept-out' && account.scope.repos.length > 0
-        ? `kept-out (${account.scope.repos.join(', ')})`
-        : account.role;
-    const reserve =
-      account.effectiveReservePct < account.reservePct
-        ? `${account.effectiveReservePct}% (spending down)`
-        : `${account.reservePct}%`;
-    rows.push([
-      account.id,
-      role,
-      reserve,
-      roomCell(account.windows.five_hour, account.fiveHourRoom),
-      roomCell(account.windows.seven_day, account.weeklyRoom),
-      account.label ?? '-',
-      account.path,
-    ]);
+  if (!accounts.some((a) => a.runtime === 'claude-code' && !a.implicit)) {
+    blocks.push(
+      'No Claude Code account is registered, so flow uses the one this environment signs in with. Add one with "flow accounts add --path <dir>".'
+    );
   }
-  const handoffLine =
-    handoff === 'auto'
+  const settings = [
+    policy.handoff === 'auto'
       ? 'Handoff: auto (work moves off a spent account on its own)'
-      : 'Handoff: ask (flow asks before moving work off a spent account)';
-  return `${formatColumns(rows)}\n\n${handoffLine}`;
+      : 'Handoff: ask (flow asks before moving work off a spent account)',
+    policy.runtimes.length === 0
+      ? 'Runtimes: the one each item started on'
+      : `Runtimes: ${policy.runtimes.join(', ')}`,
+    policy.crossRuntimeFallback === 'on'
+      ? 'Cross-runtime fallback: on (work may move to another runtime when its own is out)'
+      : 'Cross-runtime fallback: off',
+  ];
+  blocks.push(settings.join('\n'));
+  return blocks.join('\n\n');
 }
 
 /** Expand a leading `~` to the home folder. */
@@ -298,88 +405,131 @@ function policyPatch(ctx: VerbContext): AccountPolicyPatch {
   return patch;
 }
 
-/** An account's stored entry in a raw `fleet.json`, or `null`. */
-function storedEntry(raw: unknown, id: string): unknown {
+/** An account's stored entry in a raw `fleet.json` (bare keys read as Claude Code), or `null`. */
+function storedEntry(raw: unknown, key: string): unknown {
   const accounts = (raw as { accounts?: unknown } | undefined)?.accounts;
   if (typeof accounts !== 'object' || accounts === null) return null;
-  return Object.hasOwn(accounts, id) ? (accounts as Record<string, unknown>)[id] : null;
+  const record = accounts as Record<string, unknown>;
+  if (Object.hasOwn(record, key)) return record[key];
+  const parsed = parseAccountKey(key);
+  if (parsed?.runtime === 'claude-code' && Object.hasOwn(record, parsed.id))
+    return record[parsed.id];
+  return null;
 }
 
 /** `flow accounts set <id>`: edit one account's policy in `fleet.json`. */
-async function setAccount(ctx: VerbContext, dorkHome: string, id: string): Promise<VerbResult> {
-  refuseFlags(ctx, ['handoff'], 'set <id>');
+async function setAccount(ctx: VerbContext, dorkHome: string, given: string): Promise<VerbResult> {
+  refuseFlags(ctx, FLEET_FLAGS, 'set <id>');
   const patch = policyPatch(ctx);
   if (Object.keys(patch).length === 0) {
     throw new UsageError(
       '"flow accounts set <id>" needs at least one of --role, --reserve, --spend-down-hours, --repos'
     );
   }
-  const { accounts: identities } = loadIdentities(dorkHome);
-  const identity = identities.find((candidate) => candidate.id === id);
-  if (identity === undefined) {
-    throw new PreconditionError(
-      `"${id}" is not a registered account. Run "flow accounts" to see them, or add it with "flow accounts add --path <dir>".`
+  const parsed = parseAccountKey(given);
+  if (parsed === null) {
+    throw new UsageError(
+      `"${given}" is not an account: use <id> for Claude Code, or <runtime>:<id> with a runtime of ${RUNTIMES.join(', ')}`
     );
   }
-  if (!identity.routable) {
+  const { accounts } = loadAccounts(dorkHome);
+  const account = accounts.find((a) => a.runtime === parsed.runtime && a.id === parsed.id);
+  const key = accountKey(parsed.runtime, parsed.id);
+  if (account === undefined) {
     throw new PreconditionError(
-      `"${id}" is not a valid account id, so flow cannot route work to it. Fix its id in ${path.join(dorkHome, 'config.json')}.`
+      `"${key}" is not a registered account. Run "flow accounts" to see them, or add one with "flow accounts add --path <dir>".`
+    );
+  }
+  if (!account.routable) {
+    throw new PreconditionError(
+      `"${key}" is not a valid account id, so flow cannot route work to it. Fix its id in ${path.join(dorkHome, 'config.json')}.`
     );
   }
 
   const mutate = (raw: unknown): Record<string, unknown> => {
     if (patch.role === 'main') {
-      const { mainId } = resolveFleetPolicy(identities, raw);
-      if (mainId !== null && mainId !== id) {
+      const current = resolveFleetPolicy(accounts, raw).mains[account.runtime];
+      if (current !== undefined && current !== account.id) {
+        const currentKey = accountKey(account.runtime, current);
         throw new PreconditionError(
-          `"${mainId}" is already the main account. Give it another role first ("flow accounts set ${mainId} --role rotation").`
+          `"${currentKey}" is already the main ${RUNTIME_NAMES[account.runtime]} account. Give it another role first ("flow accounts set ${currentKey} --role rotation").`
         );
       }
     }
-    return setAccountPolicy(raw, id, patch);
+    return setAccountPolicy(raw, key, patch);
   };
 
   const file = fleetPolicyPath(dorkHome);
   if (ctx.dryRun) {
     const raw = readJsonFile(file).value;
     const next = mutate(raw);
-    return changeResult(file, id, storedEntry(raw, id), storedEntry(next, id), true);
+    return changeResult(file, key, storedEntry(raw, key), storedEntry(next, key), true);
   }
   let before: unknown = null;
   const result = await updateFleetPolicy(dorkHome, (raw) => {
-    before = storedEntry(raw, id);
+    before = storedEntry(raw, key);
     return mutate(raw);
   });
   droppedCheck(result.status, file);
-  return changeResult(file, id, before, storedEntry(result.value, id), false);
+  return changeResult(file, key, before, storedEntry(result.value, key), false);
 }
 
-/** `flow accounts set` with no id: the fleet-wide handoff. */
+/** The one fleet-wide setting the `set` flags name, and its new value (`null` = default). */
+function fleetChange(ctx: VerbContext): {
+  name: keyof FleetSettings;
+  value: FleetSettings[keyof FleetSettings] | null;
+} {
+  const given = FLEET_FLAGS.filter((name) => ctx.args.flags[name] !== undefined);
+  if (given.length !== 1) {
+    throw new UsageError(
+      '"flow accounts set" needs an account id, or exactly one of --handoff auto|ask|default, --runtimes <runtime,...>|default, --cross-runtime-fallback off|on|default'
+    );
+  }
+  const value = flag(ctx, given[0]) ?? '';
+  if (given[0] === 'handoff') {
+    if (value === 'default') return { name: 'handoff', value: null };
+    if (value === 'auto' || value === 'ask') return { name: 'handoff', value };
+    throw new UsageError(`--handoff must be auto, ask or default; got "${value}"`);
+  }
+  if (given[0] === 'cross-runtime-fallback') {
+    if (value === 'default') return { name: 'crossRuntimeFallback', value: null };
+    if (value === 'off' || value === 'on')
+      return { name: 'crossRuntimeFallback', value: value as CrossRuntimeFallback };
+    throw new UsageError(`--cross-runtime-fallback must be off, on or default; got "${value}"`);
+  }
+  if (value === 'default') return { name: 'runtimes', value: null };
+  const listed = value
+    .split(',')
+    .map((runtime) => runtime.trim())
+    .filter((runtime) => runtime !== '');
+  const bad = listed.find((runtime) => !isRuntimeSlug(runtime));
+  if (listed.length === 0 || bad !== undefined || new Set(listed).size !== listed.length) {
+    throw new UsageError(
+      `--runtimes must list runtimes once each, in order (${RUNTIMES.join(', ')}), or be "default"; got "${value}"`
+    );
+  }
+  return { name: 'runtimes', value: listed as RuntimeSlug[] };
+}
+
+/** `flow accounts set` with no id: one fleet-wide setting. */
 async function setFleet(ctx: VerbContext, dorkHome: string): Promise<VerbResult> {
   refuseFlags(ctx, POLICY_FLAGS, 'set');
-  const value = flag(ctx, 'handoff');
-  if (value === undefined) {
-    throw new UsageError('"flow accounts set" needs an account id, or --handoff auto|ask|default');
-  }
-  let handoff: HandoffMode | null;
-  if (value === 'default') handoff = null;
-  else if (value === 'auto' || value === 'ask') handoff = value;
-  else throw new UsageError(`--handoff must be auto, ask or default; got "${value}"`);
-
+  const { name, value } = fleetChange(ctx);
   const file = fleetPolicyPath(dorkHome);
-  const handoffOf = (raw: unknown): unknown =>
-    (raw as { handoff?: unknown } | undefined)?.handoff ?? null;
+  const valueOf = (raw: unknown): unknown =>
+    (raw as Record<string, unknown> | undefined)?.[name] ?? null;
+  const apply = (raw: unknown) => setFleetSetting(raw, name, value);
   if (ctx.dryRun) {
     const raw = readJsonFile(file).value;
-    return changeResult(file, null, handoffOf(raw), handoffOf(setHandoff(raw, handoff)), true);
+    return changeResult(file, name, valueOf(raw), valueOf(apply(raw)), true, true);
   }
   let before: unknown = null;
   const result = await updateFleetPolicy(dorkHome, (raw) => {
-    before = handoffOf(raw);
-    return setHandoff(raw, handoff);
+    before = valueOf(raw);
+    return apply(raw);
   });
   droppedCheck(result.status, file);
-  return changeResult(file, null, before, handoffOf(result.value), false);
+  return changeResult(file, name, before, valueOf(result.value), false, true);
 }
 
 /** A write the lock never let through is a failure the operator should retry. */
@@ -389,15 +539,20 @@ function droppedCheck(status: string, file: string): void {
   }
 }
 
-/** The result of a `set`: what was stored before and after, as JSON and text. */
+/**
+ * The result of a `set`: what was stored before and after, as JSON and text.
+ * `subject` is the account key, or the fleet-wide setting's name when `fleet`.
+ */
 function changeResult(
   file: string,
-  id: string | null,
+  subject: string,
   before: unknown,
   after: unknown,
-  dryRun: boolean
+  dryRun: boolean,
+  fleet = false
 ): VerbResult {
-  const subject = id === null ? 'handoff' : `"${id}"`;
+  const id = fleet ? null : subject;
+  const shown = fleet ? subject : `"${subject}"`;
   const show = (value: unknown) =>
     value === null || value === undefined ? '(defaults)' : JSON.stringify(value);
   const unchanged = JSON.stringify(before ?? null) === JSON.stringify(after ?? null);
@@ -406,14 +561,14 @@ function changeResult(
     json: {
       ok: true,
       file,
-      ...(id === null ? {} : { id }),
+      ...(id === null ? { setting: subject } : { id }),
       dryRun,
       changed: !unchanged,
       before: before ?? null,
       after: after ?? null,
     },
     text: unchanged
-      ? `${subject} ${verb}: ${show(after)}`
-      : `${subject} ${verb}: ${show(before)} -> ${show(after)} in ${file}`,
+      ? `${shown} ${verb}: ${show(after)}`
+      : `${shown} ${verb}: ${show(before)} -> ${show(after)} in ${file}`,
   };
 }

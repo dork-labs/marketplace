@@ -18,18 +18,28 @@ import { fileURLToPath } from 'node:url';
 import Ajv from 'ajv';
 import { describe, expect, it } from 'vitest';
 import {
+  accountRoom,
   effectiveReservePct,
   fiveHourRoom,
   mayServe,
   mintAccountId,
   modelRoom,
   parseOriginRepo,
+  readAccounts,
   readIdentities,
   resolveFleetPolicy,
+  spendRoom,
   weeklyRoom,
+  type PolicySubject,
   type ResolvedAccountPolicy,
 } from '../scripts/fleet/accounts.ts';
-import { mergeLedger, readWindow } from '../scripts/fleet/usage-ledger.ts';
+import {
+  codexObservations,
+  mergeLedger,
+  pruneTargets,
+  readWindow,
+  type RuntimeSlug,
+} from '../scripts/fleet/usage-ledger.ts';
 import {
   FlowStateSchema,
   parseFlowState,
@@ -88,21 +98,28 @@ const RUNNERS: Record<string, (c: Case) => void> = {
   },
 
   'identity.cases.json': ({ input, expected }) => {
-    const result = readIdentities(input.config);
+    const result = readIdentities(input.config, input.runtime as RuntimeSlug);
+    expect(result.accounts).toEqual(expected.accounts);
+    expect(codes(result.warnings)).toEqual(expectedCodes(expected.warnings));
+  },
+
+  'accounts.cases.json': ({ input, expected }) => {
+    const result = readAccounts(input.config);
     expect(result.accounts).toEqual(expected.accounts);
     expect(codes(result.warnings)).toEqual(expectedCodes(expected.warnings));
   },
 
   'fleet-policy.cases.json': ({ input, expected }) => {
-    const identities = input.identities as { id: string; routable: boolean }[];
-    const resolved = resolveFleetPolicy(identities, input.fleet);
+    const resolved = resolveFleetPolicy(input.accounts as PolicySubject[], input.fleet);
     expect(resolved.handoff).toBe(expected.handoff);
-    expect(resolved.mainId).toBe(expected.mainId);
+    expect(resolved.runtimes).toEqual(expected.runtimes);
+    expect(resolved.crossRuntimeFallback).toBe(expected.crossRuntimeFallback);
+    expect(resolved.mains).toEqual(expected.mains);
     expect(resolved.accounts).toEqual(expected.accounts);
     expect(codes(resolved.warnings)).toEqual(expectedCodes(expected.warnings));
     const checks = (input.checks ?? []) as { account: string; origin: string | null }[];
     const answers = checks.map((check) => {
-      const policy = resolved.accounts.find((a) => a.id === check.account);
+      const policy = resolved.accounts.find((entry) => entry.key === check.account);
       if (policy === undefined) throw new Error(`case names unknown account ${check.account}`);
       const repo = parseOriginRepo(check.origin);
       return { repo, mayServe: mayServe(policy, repo) };
@@ -136,11 +153,42 @@ const RUNNERS: Record<string, (c: Case) => void> = {
       input.existing,
       input.observations as unknown[],
       input.now as string,
-      input.accountId as string
+      {
+        runtime: input.runtime as RuntimeSlug,
+        accountId: input.accountId as string,
+      }
     );
     expect(result.changed).toBe(expected.changed);
     expect(result.ledger).toEqual(expected.ledger);
     expect(codes(result.warnings)).toEqual(expectedCodes(expected.warnings));
+  },
+
+  'codex-rate-limits.cases.json': ({ input, expected }) => {
+    expect(codexObservations(input.rateLimits, input.observedAt as string, 'rollout')).toEqual(
+      expected.observations
+    );
+  },
+
+  'eligibility.cases.json': ({ input, expected }) => {
+    const ledger = input.ledger as { windows?: unknown; spend?: unknown } | null;
+    expect({
+      room: accountRoom(
+        input.runtime as RuntimeSlug,
+        input.policy as ResolvedAccountPolicy,
+        ledger,
+        input.now as string
+      ),
+      spendRoom: spendRoom(ledger?.spend),
+    }).toEqual(expected);
+  },
+
+  'prune.cases.json': ({ input, expected }) => {
+    expect(
+      pruneTargets(
+        input.registered as Partial<Record<RuntimeSlug, string[]>>,
+        input.onDisk as Partial<Record<RuntimeSlug, string[]>>
+      )
+    ).toEqual(expected.remove);
   },
 
   'flow-run.cases.json': ({ input, expected }) => {
@@ -172,8 +220,8 @@ describe('the fleet conformance fixture', () => {
   // Purpose: the folder is the contract DorkOS vendors. Pin its version and the
   // exact set of case files, so a case file added without a runner (and so never
   // run here) fails instead of passing silently.
-  it('is contract 1.0.2 with exactly the known case files', () => {
-    expect(readFileSync(path.join(FIXTURE_DIR, 'CONTRACT_VERSION'), 'utf8').trim()).toBe('1.0.2');
+  it('is contract 2.0.0 with exactly the known case files', () => {
+    expect(readFileSync(path.join(FIXTURE_DIR, 'CONTRACT_VERSION'), 'utf8').trim()).toBe('2.0.0');
     expect(caseFiles).toEqual(Object.keys(RUNNERS).sort());
   });
 
@@ -191,7 +239,7 @@ describe('the fleet conformance fixture', () => {
         expect(names.has(c.name), `${file}: duplicate name ${c.name}`).toBe(false);
         names.add(c.name);
       }
-      if (['window-read', 'room', 'ledger-merge'].some((p) => file.startsWith(p))) {
+      if (['window-read', 'room', 'ledger-merge', 'eligibility'].some((p) => file.startsWith(p))) {
         for (const c of parsed.cases)
           expect(typeof c.input.now, `${file}: ${c.name}`).toBe('string');
       }

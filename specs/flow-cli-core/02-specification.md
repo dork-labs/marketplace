@@ -20,9 +20,11 @@ status: specified
 - One rule decides what tracker state, `agent/*` and `stage/*` each mean (F10). It lives in `scripts/work-state.ts`; the writers and the audit both use it.
 - Section 1 is the shared contract with DorkOS: the account registry, the usage ledger and the session↔item link. It is written first because DorkOS builds against it in parallel (spec `claude-account-fleet`, dorkos repo).
 
-## 1. Shared contracts (flow ↔ DorkOS)
+## 1. Shared contracts (flow ↔ DorkOS), rev 6
 
-These three contracts are public and tracker-neutral. Both sides implement them independently and prove it with one fixture set (§1.4). A change to any rule here is a contract change: bump `CONTRACT_VERSION` in the fixture folder and change both sides.
+These contracts are public and tracker-neutral. Both sides implement them independently and prove it with one fixture set (§1.4). A change to any rule here is a contract change: bump `CONTRACT_VERSION` in the fixture folder and change both sides.
+
+**Rev 6 (contract 2.0.0, breaking) makes every contract runtime-neutral.** flow runs from Claude Code, Codex and OpenCode sessions, so everything it records, reads and routes names the runtime. The runtime slug is `claude-code`, `codex` or `opencode`; anything else is refused before it reaches a path. The binding decisions are summarized in [`../flow-fleet/01-ideation.md`](../flow-fleet/01-ideation.md) "Runtimes" (R1-R9).
 
 ### 1.1 Accounts: identity in DorkOS config, routing policy in flow's own file
 
@@ -30,18 +32,31 @@ The registry is split by owner (operator direction, 2026-09-26). DorkOS core own
 
 `<dorkHome>` below = the `DORK_HOME` environment variable when set and non-empty, else `<os home>/.dork`. flow never uses DorkOS's dev-mode default (`apps/server/.temp/.dork`); a DorkOS dev server that wants flow to see its accounts sets `DORK_HOME`.
 
-#### 1.1a Identity: `<dorkHome>/config.json` → `runtimes.claudeCode.accounts[]` (DorkOS core)
+**An account is a billing identity of ONE runtime:** a `CLAUDE_CONFIG_DIR` for Claude Code, a `CODEX_HOME` for Codex, a provider credential profile for OpenCode. Its key everywhere outside the registry is `<runtime>:<account-id>` (`claude-code:acct-2`, `codex:default`). The same id in two runtimes is two accounts.
+
+#### 1.1a Identity: `<dorkHome>/config.json` → `runtimes.<claudeCode|codex|opencode>.accounts[]` (DorkOS core)
+
+| Runtime       | Config key               | `path` is                        |
+| ------------- | ------------------------ | -------------------------------- |
+| `claude-code` | `runtimes.claudeCode`    | the account's `CLAUDE_CONFIG_DIR` |
+| `codex`       | `runtimes.codex`         | the account's `CODEX_HOME`        |
+| `opencode`    | `runtimes.opencode`      | the provider profile's folder     |
+
+Every runtime's rows have the same shape and follow the same rules:
 
 | Field   | Type                               | Default when absent | Meaning                                                                  |
 | ------- | ---------------------------------- | ------------------- | ------------------------------------------------------------------------ |
 | `id`    | string, `^[a-z0-9]+(-[a-z0-9]+)*$` | minted (below)      | What everything else references. Unique in the array.                    |
-| `path`  | string, absolute                   | required            | The `CLAUDE_CONFIG_DIR` this account runs in.                            |
+| `path`  | string, absolute                   | required            | The folder the account runs in (table above).                            |
 | `label` | string \| null                     | `null`              | The operator's name for it.                                              |
 | `color` | string `^#[0-9a-f]{6}$` \| null    | `null`              | **New, DorkOS core.** Display color; `null` = a stable default by position. |
 
-- `id`, `path`, `label` exist today (DorkOS `ClaudeCodeAccountSchema`, spec `claude-code-accounts` D1). `color` is the one new field.
+- `id`, `path`, `label` exist today for Claude Code (DorkOS `ClaudeCodeAccountSchema`, spec `claude-code-accounts` D1). `color` is the one new field. The Codex and OpenCode registries are a later DorkOS backlog item; readers read them when present.
+- **The implicit account.** A runtime with no registered row left after the rules below has ONE implicit account, id `default`, with no path: the ambient environment (whatever that runtime is signed in to). It is the only way that runtime runs at all until it has a registry. A runtime with any registered row has no implicit account.
+- **`default` is reserved** for the implicit account. Minting never produces it (a base of `default` counts as taken, so a label "Default" mints `default-2`). A registered row whose `id` is `default` (a hand edit) is listed with an `id-reserved` warning but is not routable: it has no usage file and reads as `kept-out`, so it can never read the implicit account's readings or be spent as if it were that account.
+- A DorkOS row minted as `default` before this rule existed is renamed by DorkOS to the next free `default-N` on its next write of the registry (its config migration), and DorkOS moves any per-account references (agent manifests, launch hints) with it. Until then flow lists it as `id-reserved` and does not route it.
 - No routing policy lives here. DorkOS core never reads or writes flow's policy.
-- A missing file or a missing key means "no accounts", never an error.
+- A missing file or a missing key means "no accounts" (so, one implicit account per runtime), never an error.
 - A file DorkOS never touched is valid: flow may create it as `{"runtimes":{"claudeCode":{"accounts":[…]}}}` with no other keys.
 - Readers ignore fields they do not know; writers preserve them.
 - A row with a missing or non-absolute `path` is skipped, with a warning.
@@ -49,13 +64,13 @@ The registry is split by owner (operator direction, 2026-09-26). DorkOS core own
 - A duplicate `id` keeps the first row and warns.
 - A row whose `id` fails the pattern (a hand edit) is listed, with a warning, but has no usage file and cannot be routed: it reads as `kept-out` with `scope.repos: []`.
 - A `color` that fails the pattern reads as `null`, with a warning.
-- flow writes every row it creates with all four keys, `label` and `color` as `null` when not given, so DorkOS's schema (`label` nullable with no default) accepts it.
+- flow writes every row it creates with all four keys, `label` and `color` as `null` when not given, so DorkOS's schema (`label` nullable with no default) accepts it. `flow accounts add` registers Claude Code rows only.
 
 **Minting an id** (identical to DorkOS `claudeAccountId`, pinned by fixtures)
 
 - Slugify: lowercase, every run of non `[a-z0-9]` becomes one `-`, trim `-` from both ends.
 - Base = slug(label), else slug(basename of path), else `account`.
-- If the base is taken, append `-2`, `-3`, … until free.
+- If the base is taken, append `-2`, `-3`, … until free. `default` is always taken.
 
 **What DorkOS must do**
 
@@ -63,7 +78,9 @@ The registry is split by owner (operator direction, 2026-09-26). DorkOS core own
 - Enforce the id pattern on every write, so no new row gets an id the ledger would refuse.
 - Re-read the file before each write of `runtimes.claudeCode`, so a flow `accounts add` made while the server runs is not lost.
 - Accept a `config.json` that flow created (no `__internal__`, no `version`).
-- Keep the minting rule (it already has it).
+- Keep the minting rule, and reserve `default` in it (`claudeAccountId` must never return `default`; skip to `default-2`), and refuse `default` as an id on every write.
+- When it adds `runtimes.codex.accounts` or `runtimes.opencode.accounts`, use the same row shape and rules.
+- When an account is removed from a registry, delete its ledger file (§1.2 "Removing an account").
 
 #### 1.1b Routing policy: `<dorkHome>/flow/fleet.json` (flow-owned)
 
@@ -71,39 +88,48 @@ The registry is split by owner (operator direction, 2026-09-26). DorkOS core own
 {
   "v": 1,
   "handoff": "auto",                 // "auto" | "ask"; default "auto"
+  "runtimes": ["claude-code", "codex"], // preference order; default [] (see below)
+  "crossRuntimeFallback": "off",     // "off" | "on"; default "off"
   "accounts": {
-    "claude3": {                     // key = an identity id from 1.1a
+    "claude-code:claude3": {         // key = <runtime>:<account-id>
       "role": "rotation",            // "main" | "rotation" | "kept-out"
       "reservePct": 0,               // 0–100
       "spendDownWindowHours": 24,    // ≥ 0
       "scope": { "repos": ["acme/app"] } // only read for kept-out
-    }
+    },
+    "codex:default": { "role": "kept-out" }
   }
 }
 ```
 
-JSON Schema: `plugins/flow/conformance/fleet/fleet-policy.schema.json`.
+JSON Schema: `plugins/flow/conformance/fleet/fleet-policy.schema.json`. It is the **writer** shape: what a writer may store. Readers accept more (below): a file with no `v`, and bare keys written before 2.0.0, both of which the schema rejects.
 
 | Field                  | Default when absent                                   | Meaning                                                                                  |
 | ---------------------- | ----------------------------------------------------- | ---------------------------------------------------------------------------------------- |
 | `handoff`              | `"auto"`                                              | Fleet-wide: move work off an account that runs out automatically, or ask first.           |
-| `role`                 | `"kept-out"`                                          | `main`: the operator's own, drained last. `rotation`: spent freely. `kept-out`: not spent, except on its scoped repos. |
+| `runtimes`             | `[]`                                                  | Runtimes in order of preference. `[]` = the runtime the item started on first.            |
+| `crossRuntimeFallback` | `"off"`                                               | `on`: a task whose runtime is out may continue on another runtime from its checkpoint.    |
+| `role`                 | `"rotation"` for an implicit `default`, else `"kept-out"` | `main`: the operator's own, drained last. `rotation`: spent freely. `kept-out`: not spent, except on its scoped repos. |
 | `reservePct`           | `50` for `main`, else `0`                             | Share of the 7-day window kept back for the operator's own use.                           |
 | `spendDownWindowHours` | `24`                                                  | Hours before the 7-day reset in which the reserve drops to 0.                             |
 | `scope.repos`          | `[]`                                                  | For `kept-out` only: the repos it may serve. `[]` = never. Ignored for `main` and `rotation`, which serve any repo. |
 
 **Rules**
 
-- **Opt-in by default.** An identity with no entry in `fleet.json`, or no `fleet.json` at all, resolves to `role: "kept-out"`, `scope.repos: []`: nothing is spent until the operator says so.
+- **Opt-in by default for registered accounts.** A registered account with no entry in `fleet.json`, or no `fleet.json` at all, resolves to `role: "kept-out"`, `scope.repos: []`: nothing is spent until the operator says so.
+- **An implicit `default` account resolves to `rotation`.** It is the only way its runtime runs at all, so keeping it out would block the runtime. An entry for it applies like any other.
+- **Keys.** An entry's key is `<runtime>:<account-id>`. A bare key with no `:` was written before contract 2.0.0 and reads as `claude-code:<key>`; when both forms are present the prefixed one wins and the bare one is ignored, with a warning. Every write stores the prefixed form (the next write migrates the file).
 - Writers store only what the operator set. Defaults are resolved at read time, never written.
 - Readers ignore fields they do not know; writers preserve them.
 - A `scope.repos` entry is `owner/name`, compared case-insensitively with the `owner/name` parsed from the checkout's `origin` remote (https or ssh form, `.git` stripped). A checkout with no parsable `origin` matches nothing.
-- At most one `main`. With two or more, readers keep the first in registry order and treat the rest as `rotation`, with a warning.
-- With no `main`, no account has a default reserve; `flow accounts` warns.
-- An unknown `role`, an out-of-range `reservePct` or a negative `spendDownWindowHours` reads as absent (the default), with a warning.
-- An entry whose key is not a registered identity id is ignored, with a warning (it is kept in the file).
+- At most one `main` per runtime. With two or more, readers keep the first in registry order and treat the rest as `rotation`, with a warning.
+- With no `main` in a runtime that has registered accounts, none of them has a default reserve; `flow accounts` warns.
+- An unknown `role`, an out-of-range `reservePct` or a negative `spendDownWindowHours` reads as absent (the default), with a warning. A `runtimes` entry that is not a runtime slug, or repeats one, is dropped with a warning; an unknown `crossRuntimeFallback` reads as `off`, with a warning.
+- An entry whose key names no account (an unknown runtime, or an account no longer registered) is ignored, with a warning. `flow accounts` then drops it from the file with a note, unless `config.json` could not be read in full.
+- **Version.** A file with no `v` reads as version 1. A file whose `v` is anything else (another number, or a non-number) is not read: every account resolves to its default, with a `fleet-version-unknown` warning, and every writer refuses to write it (never a downgrade), naming the file and its version.
 - Writes use the §1.2 lock-and-rename steps, with the lock at `fleet.json.lock`.
 - Two writers edit this file: `flow accounts set` in the bare CLI, and the DorkOS Flow extension's server side behind its "Flow" settings tab. Both use the same steps; DorkOS core does not touch it.
+- Model fallback stays within a runtime. Which (runtime, account) pair takes an item, using `runtimes` and `crossRuntimeFallback`, belongs to dispatch (spec unit S3, `rankAccounts` over pairs); the fields and their defaults above are the contract.
 
 **Which repos an account may serve** (`mayServe(policy, repo)`)
 
@@ -121,72 +147,106 @@ JSON Schema: `plugins/flow/conformance/fleet/fleet-policy.schema.json`.
 
 - `fiveHourRoom`: `false` when the `five_hour` reading is `rejected` or its `usedPct ≥ 100`; `null` when there is no reading; else `true`.
 - `weeklyRoom`: `false` when the `seven_day` reading is `rejected` or its `usedPct ≥ 100 − effectiveReservePct`; `null` when there is no reading; else `true`.
-- A model bucket is checked like `weeklyRoom` against 100 (no reserve), when dispatch knows the item's model.
+- A model bucket (`model:<slug>`, `seven_day_opus`, `seven_day_sonnet`) is checked like `weeklyRoom` against 100 (no reserve), when dispatch knows the item's model (`modelRoom`).
+- `spendRoom`: `false` when the ledger's `spend` has a `limitUsd` and `costUsd ≥ limitUsd`; `null` with no spend reading; else `true`.
+- `accountRoom(runtime, policy, ledger, now)`, the one answer for any kind of account:
+  - `false` when any current window that is not a model bucket is `rejected` or at its ceiling (`seven_day` against `100 − effectiveReservePct`, every other window against 100). This includes a `credits:<slug>` or `rate_limit:<slug>` rejection, whatever the other windows say. Also `false` when `spendRoom` is `false`.
+  - Else `true` when the account has a current non-bucket window reading or a spend reading. **A metered account is eligible unless its `spend.limitUsd` is reached.**
+  - Else, with nothing to go on: `true` for `opencode` (**a local-model account, no windows and no cap, is always eligible**) and `null` for `claude-code` and `codex`, whose accounts always have subscription windows.
 - `null` means unknown. Dispatch decides what unknown means; `flow accounts` shows "unknown".
 
 ### 1.2 The usage ledger
 
 **Where it lives**
 
-- One file per account: `<dorkHome>/usage/<account-id>.json`. The id is the registry id and must match the id pattern above; anything else is refused (no path traversal).
+- One file per account: `<dorkHome>/runtimes/<runtime>/usage/<account-id>.json`. The runtime must be a runtime slug and the id must match the id pattern above (`default` for the implicit account); anything else is refused (no path traversal).
 - Folder mode `0700`, file mode `0600`.
+- The folder sits under `runtimes/<runtime>/` because the ledger is core account observation that DorkOS reads without flow, and it is specific to one runtime's accounts. Readers never read the location used before 2.0.0, `<dorkHome>/usage/`.
+- **Lifecycle.** The ledger is overwrite-only (one small file per account, the newest reading per window), so it never grows; the history of readings goes to the flow journal as sampled `usage.snapshot` events. A reading past its `resetsAt` reads as empty and is never deleted early.
 
 **Shape** (JSON Schema: `plugins/flow/conformance/fleet/usage-ledger.schema.json`)
 
 ```jsonc
 {
   "v": 1,
-  "accountId": "claude3",
-  "updatedAt": "2026-09-26T16:04:11.000Z",   // last write, any window
+  "runtime": "codex",                         // required; always the runtime in the path
+  "accountId": "default",
+  "updatedAt": "2026-09-26T16:04:11.000Z",   // last write, any window or fact
   "windows": {
     "five_hour": {
       "usedPct": 41.5,                        // number 0–100, or null when the source gave none
       "resetsAt": "2026-09-26T19:00:00.000Z", // ISO-8601 UTC, or null
-      "status": "allowed",                    // "allowed" | "allowed_warning" | "rejected", or null
+      "windowMinutes": 300,                   // optional: the window's length, when the source names it
+      "status": null,                         // "allowed" | "allowed_warning" | "rejected", or null
       "observedAt": "2026-09-26T16:04:10.000Z", // when the SOURCE saw it, not when it was written
-      "source": "statusline"                  // "statusline" | "sdk_event" | "sdk_usage" | "transcript"
+      "source": "rollout"
     },
     "seven_day": { … },
-    "seven_day_opus": { … },
-    "seven_day_sonnet": { … },
-    "model:opus": { … }                       // a per-model bucket
-  }
+    "model:gpt-5.3-codex-spark": { … },       // a per-model bucket
+    "credits:openrouter": { … }               // an error-only signal (below)
+  },
+  "plan": { "name": "pro", "observedAt": "…", "source": "rollout" },        // optional
+  "credits": { "hasCredits": true, "unlimited": false, "balance": "12.50",   // optional
+               "observedAt": "…", "source": "rollout" },
+  "spend": { "periodStart": "2026-09-01T00:00:00.000Z", "costUsd": 20,       // optional, metered accounts
+             "limitUsd": 25, "observedAt": "…", "source": "provider_api" }
 }
 ```
+
+- `v` stays `1`; contract 2.0.0 adds the required `runtime`. A merge into a file with no `runtime` (or another one) sets it to the path's runtime and rewrites the file. Readers trust the path.
+- `plan`, `credits` and `spend` each carry `observedAt` and `source` and merge like a window: newest `observedAt` wins. `balance` is the runtime's own string, or `null`. `limitUsd` is `null` (or absent) with no cap. A spend reading never goes stale.
 
 **Window keys**
 
 - Known: `five_hour`, `seven_day`, `seven_day_opus`, `seven_day_sonnet`, `overage`.
-- Model buckets: `model:<slug>`, slug `^[a-z0-9][a-z0-9._-]*$`.
+- Model buckets: `model:<slug>`.
+- A window known only by its length: `window:<minutes>`, minutes an integer ≥ 1.
+- Error-only signals from one provider: `credits:<slug>` (payment required, out of credits) and `rate_limit:<slug>` (HTTP 429), where the slug is the provider id (`credits:openrouter`). They are window-less entries: `source: "error"`, `status: "rejected"`, `usedPct: null`, and `resetsAt` when the provider says.
+- Every `<slug>` above follows `^[a-z0-9][a-z0-9._-]*$`: lowercase, every run of characters outside `[a-z0-9._-]` becomes `-`, anything but a letter or digit trimmed from the start and `-` from the end (`GPT-5.3-Codex-Spark` → `gpt-5.3-codex-spark`).
 - Any other key matching `^[a-z][a-z0-9_]*$` is allowed, so a new SDK window needs no contract change. Readers ignore keys they do not use; writers keep them.
 
 **One entry**
 
 - `observedAt` and `source` are required. At least one of `usedPct` and `status` is non-null.
+- `windowMinutes`, when present, is an integer ≥ 1; anything else makes the entry invalid.
 - All timestamps are ISO-8601 with an explicit zone; writers emit UTC with `Z`.
 - `usedPct` is clamped to 0–100 by the writer.
 
 **Mapping each source** (writers convert; the ledger holds one unit)
 
-| Source        | `usedPct`                                   | `resetsAt`                    | `status`             |
-| ------------- | ------------------------------------------- | ----------------------------- | -------------------- |
-| `statusline`  | `rate_limits.<w>.used_percentage` (0–100)   | `resets_at`, epoch seconds or ISO, to ISO | `null`   |
-| `sdk_event`   | `rate_limit_info.utilization` × 100 (0–1 fraction) | `resetsAt` epoch seconds, to ISO | `status`       |
-| `sdk_usage`   | `rate_limits.<w>.utilization` (0–100)       | `resets_at` (ISO)             | `null`               |
-| `transcript`  | `null`                                      | parsed from the message, else `null` | `"rejected"`  |
+| Source         | Runtime     | Writer                   | `usedPct`                                   | `resetsAt`                    | `status`             |
+| -------------- | ----------- | ------------------------ | ------------------------------------------- | ----------------------------- | -------------------- |
+| `statusline`   | Claude Code | flow CLI                 | `rate_limits.<w>.used_percentage` (0–100)   | `resets_at`, epoch seconds or ISO, to ISO | `null`   |
+| `sdk_event`    | Claude Code | DorkOS                   | `rate_limit_info.utilization` × 100 (0–1 fraction) | `resetsAt` epoch seconds, to ISO | `status`       |
+| `sdk_usage`    | Claude Code | DorkOS, `flow usage probe` | `rate_limits.<w>.utilization` (0–100)     | `resets_at` (ISO)             | `null`               |
+| `transcript`   | Claude Code | `flow usage scan`        | `null`                                      | parsed from the message, else `null` | `"rejected"`  |
+| `rollout`      | Codex       | `flow usage scan --runtime codex`, DorkOS | see "Codex" below          | see below                     | see below            |
+| `sidecar`      | OpenCode    | DorkOS                   | none: per-turn `cost` becomes `spend`       |                               |                      |
+| `provider_api` | OpenCode    | DorkOS                   | none: the provider's key API gives `spend` (credit and limit) |              |                      |
+| `error`        | any         | DorkOS, flow             | `null`                                      | when the provider says        | `"rejected"`         |
 
 - `sdk_event` uses `rateLimitType` as the window key.
 - A transcript message whose window cannot be identified is not recorded.
+- All data is official: status line, SDK events, the runtime's own rollout files, the provider's documented key API with the user's own key. No token extraction.
 
-**Reading a window** (`readWindow(entry, now)`)
+**Codex** (`codexObservations(rateLimits, observedAt, source)`, one `rate_limits` payload)
+
+- One account has several limits, told apart by `limit_id`, and their events alternate. Only the main limit (`limit_id` `"codex"`, or none) maps to plain windows: `primary` and `secondary` are keyed by `window_minutes`, not by slot: `300` → `five_hour`, `10080` → `seven_day`, anything else → `window:<minutes>`.
+- Any other limit (e.g. `limit_id` `codex_bengalfox`, `limit_name` `GPT-5.3-Codex-Spark`, or `premium`) becomes ONE `model:<slug>` bucket, the slug from `limit_name`, else `limit_id`. It holds the limit's tightest window: the highest `used_percent`, a tie going to the longer window. Mapping by slot alone would let such a limit overwrite the account's `five_hour` and `seven_day`.
+- `used_percent` is `usedPct`, `resets_at` (epoch seconds) is `resetsAt`, and the length is kept as `windowMinutes`. A window with no integer length or numeric percentage is skipped.
+- `status` is `null`, except when `rate_limit_reached_type` is not null: then only the window(s) that hit the limit are `"rejected"`: every window with `used_percent ≥ 100`, else the single tightest one (the highest `used_percent`, a tie going to the shorter window, which resets first). A model bucket's one window is `"rejected"`. Marking every window would keep a week-long window rejected long after a 5-hour limit reset, and dispatch, avoiding the account, would never produce a reading that clears it. The type has no other meaning (it is null in real events even at 100%).
+- `plan_type` becomes `plan`; `credits` (`has_credits`, `unlimited`, `balance`) becomes `credits`.
+
+**Reading a window** (`readWindow(entry, now, key)`)
 
 - Expired: `resetsAt` is set and `now ≥ resetsAt`. An expired entry reads as `usedPct 0`, `status "allowed"`, `expired: true`.
-- Stale: `resetsAt` is null and `now − observedAt` exceeds the window length (`five_hour` 5 h; every other key 7 days). A stale entry reads as no reading.
+- Stale: `resetsAt` is null and `now − observedAt` exceeds the window length. The length is 1 hour for `credits:*` and `rate_limit:*`; else the entry's `windowMinutes`, or the minutes in a `window:<minutes>` key; else `five_hour` 5 h and every other key 7 days. A stale entry reads as no reading.
 - Otherwise the entry reads as stored.
 
-**Merging** (`mergeLedger(existing, observations, now)`)
+**Merging** (`mergeLedger(existing, observations, now, { runtime, accountId })`)
 
-- Per window key, an observation replaces the stored entry only when its `observedAt` is strictly later.
+- An observation is a window reading (it has a `key`) or a fact (it has a `kind`: `plan`, `credits` or `spend`).
+- Per window key, and per fact, an observation replaces the stored entry only when its `observedAt` is strictly later.
 - Equal `observedAt`: the stored entry stays (so a replay is a no-op).
 - An observation whose `observedAt` is more than 5 minutes after `now` is dropped with a warning, so one bad clock cannot pin a window forever.
 - An invalid observation is dropped with a warning; the rest still merge.
@@ -209,40 +269,56 @@ JSON Schema: `plugins/flow/conformance/fleet/fleet-policy.schema.json`.
 
 **Reading** needs no lock: `rename` is atomic, so a reader sees the old file or the new one, never half of one. An unparsable file reads as empty, with a warning.
 
+**Removing an account** (`pruneTargets(registered, onDisk)`)
+
+- A ledger file whose id is not a registered account of its runtime is deleted: by DorkOS when the operator removes the account, and by `flow usage prune` for any left behind.
+- `default.json` is kept only while its runtime runs on the implicit account. Once the runtime has registered accounts, its readings describe no account (a registered `default` row is not routable), so it goes like any other.
+- Deleting takes the file's lock (step 1), so a writer merging at that moment finishes first or starts after. A missing file is not an error. Nothing is deleted when `config.json` cannot be read in full.
+
 ### 1.3 The session ↔ item link
 
 **Where it lives**
 
 - `<main checkout>/.dork/flow/flow-state.json`: one file per project, shared by every worktree. `<main checkout>` is the parent of `git rev-parse --git-common-dir`.
-- Shape: `Record<issueId, FlowRun>` (`scripts/flow-state.ts`, unchanged except the two fields below).
+- Shape: `Record<issueId, FlowRun>` (`scripts/flow-state.ts`, unchanged except the three fields below).
 
-**Two new optional `FlowRun` fields**
+**Three optional `FlowRun` fields**
 
 | Field     | Type                               | Meaning                                                                                             |
 | --------- | ---------------------------------- | --------------------------------------------------------------------------------------------------- |
-| `account` | string (a registry id)              | The account the run's **current** session bills. Rewritten on every handoff.                        |
+| `runtime` | string: `claude-code`, `codex` or `opencode` today | The runtime the **current** session runs on. Rewritten on every handoff.            |
+| `account` | string (an id in that runtime's registry, or `default`) | The account the current session bills. Rewritten on every handoff.             |
 | `host`    | string: `cli`, `dorkos` or `cmux` today | The launcher the current session runs under.                                                   |
 
 - `host` is not the machine. The machine is `provenance.host`.
-- `provenance.account` stays what it is: the origin's `CLAUDE_CONFIG_DIR` basename, written once at run start and never updated. `FlowRun.account` is the current registry id.
+- `provenance.account` stays what it is: the origin's `CLAUDE_CONFIG_DIR` basename, written once at run start and never updated. `FlowRun.account` is the current registry id; with `runtime` it forms the account key.
 - The join key between a session and an item is `FlowRun.sessionId`. A DorkOS session whose id matches a record serves that record's `identifier`.
 
 **Rules**
 
 - Readers pass unknown fields through (the store is read-modify-write; see the `looseObject` note in `flow-state.ts`).
-- `host` is validated as a bare string, like `provenance.harness`: the vocabulary is pinned in prose, so a record from a future launcher never fails the all-or-nothing reader.
+- `host` and `runtime` are validated as bare strings, like `provenance.harness`: the vocabularies are pinned in prose, so a record from a future launcher or runtime never fails the all-or-nothing reader.
 - A writer that finds the existing file present but failing the schema refuses to write and reports the file; it never replaces a file it could not read (that would delete every other run).
 - Writers use the §1.2 lock-and-rename steps, with the lock at `flow-state.json.lock`.
 - DorkOS reads this file and never writes it, until a later contract moves the store into DorkOS (flow SPEC v2).
 
 ### 1.4 The conformance fixture
 
-- Folder: `plugins/flow/conformance/fleet/`, with `CONTRACT_VERSION` (`1.0.0`), the JSON Schemas (`usage-ledger.schema.json`, `fleet-policy.schema.json`), and case files.
-- Case files: `account-id.cases.json`, `identity.cases.json` (reading 1.1a rows), `fleet-policy.cases.json` (resolving 1.1b, including unlisted accounts and `mayServe`), `window-read.cases.json`, `room.cases.json`, `ledger-merge.cases.json`, `flow-run.cases.json`.
+- Folder: `plugins/flow/conformance/fleet/`, with `CONTRACT_VERSION` (`2.0.0`), the JSON Schemas (`usage-ledger.schema.json`, `fleet-policy.schema.json`), and case files.
+- Case files: `account-id.cases.json`, `identity.cases.json` (one runtime's rows), `accounts.cases.json` (every runtime, with implicit defaults), `fleet-policy.cases.json` (resolving 1.1b, including key migration, implicit defaults and `mayServe`), `window-read.cases.json`, `room.cases.json`, `eligibility.cases.json` (`accountRoom`, `spendRoom`: metered and local accounts), `ledger-merge.cases.json`, `codex-rate-limits.cases.json`, `prune.cases.json`, `flow-run.cases.json`.
 - Every case is `{ "name": string, "input": object, "expected": object }`, and `now` is always an input, never the wall clock.
 - `flow-run.cases.json` gives FlowRun records, some with fields the reader does not know, and the expected read-back (unknown fields preserved).
 - flow runs them in `engine-tests/fleet-conformance.test.ts`. DorkOS vendors the folder at a pinned commit and runs its own implementation against it; the DorkOS spec picks the mechanism.
 - The fixture folder names no tracker, no price, no plan and nothing private.
+
+**What DorkOS must do for rev 6**
+
+- Read and write ledgers at `<dorkHome>/runtimes/<runtime>/usage/<account-id>.json` with the required `runtime`, and never the old `<dorkHome>/usage/`.
+- Read every runtime's registry and give a runtime with none its implicit `default` account.
+- Write Codex readings with the Codex rules above, OpenCode `spend` and `credits:*`/`rate_limit:*` signals with the rules above.
+- Delete a removed account's ledger file (§1.2 "Removing an account").
+- Watch the ledger folders (a file watch plus a periodic read), so readings flow writes reach its views.
+- Run the 2.0.0 fixture, including the new case files.
 
 ## Background / Problem Statement
 
@@ -295,7 +371,7 @@ JSON Schema: `plugins/flow/conformance/fleet/fleet-policy.schema.json`.
 | `--project <dir>`  | all but `accounts`           | The checkout to resolve config and run state from. Default: cwd.                       |
 | `--snapshot <file>`| `next`, `audit`, `status`    | Read this saved `flow snapshot --json` output instead of the tracker.                  |
 | `--dry-run`        | `claim`, `release`, `done`, `stage`, `accounts add`, `accounts set` | Print the planned change; write nothing. |
-| `--session <id>`   | write verbs                  | The harness session id for provenance and `FlowRun.sessionId`. Else `FLOW_SESSION_ID`, else `CLAUDE_CODE_SESSION_ID` (Claude Code sets it for every Bash command). |
+| `--session <id>`   | write verbs                  | The harness session id for provenance and `FlowRun.sessionId`. Else `FLOW_SESSION_ID`, else the runtime's own id: `CLAUDE_CODE_SESSION_ID` (Claude Code) or `CODEX_THREAD_ID` (Codex), each set for every shell command. OpenCode sets none (`scripts/cli/session-id.ts`). |
 | `--manual`         | `next`, `claim`              | A person is driving: run even while flow is paused.                                    |
 | `--help`, `-h`     | all                          | Usage for the verb (or the verb list). Exit 0.                                         |
 
@@ -473,14 +549,15 @@ interface CodeAdapter {
 - Exit 0 even when nothing is eligible; `starved` says why.
 - Replaces: every prose step that builds `dispatch.ts` input by hand (`commands/flow.md`, `skills/flow-drain`).
 
-**`flow claim <identifier> [--pid N] [--worktree <path>] [--branch <name>] [--account <id>] [--host cli|dorkos|cmux]`**
+**`flow claim <identifier> [--pid N] [--worktree <path>] [--branch <name>] [--account <id>] [--host cli|dorkos|cmux] [--runtime claude-code|codex|opencode]`**
 
 - Preconditions (exit 5 on any): the item is open; carries `agent/ready`; is not `agent/claimed`; its ownership class is claimable under `ownership`; not paused (exit 7 unless `--manual`).
 - Holds a claim lock, `flow-state.json.claim.lock` (the §1.2 lock steps, its mtime refreshed while held), from the `getItem` that checks the preconditions through the `FlowRun` write, so two claims of one item on one machine serialize: the second reads `agent/claimed` and exits 5. The store's own `flow-state.json.lock` is taken only for the short `FlowRun` write, so `stage`, `done` and `release` writes never wait out a claim's tracker calls.
 - Writes `projectionFor('claim')`, then verifies by re-read.
-- Writes a `FlowRun`: `status: "running"`, `stage` from the removed `stage/*` label (default `execute`), `attemptCount: 0` (or +1 if a record exists), `workerPid`, `startedAt`, `sessionId`, `worktreePath`, `branch`, `account`, `host`, and `provenance` per `docs/provenance.md` (omit what is unknown).
+- Writes a `FlowRun`: `status: "running"`, `stage` from the removed `stage/*` label (default `execute`), `attemptCount: 0` (or +1 if a record exists), `workerPid`, `startedAt`, `sessionId`, `worktreePath`, `branch`, `runtime`, `account`, `host`, and `provenance` per `docs/provenance.md` (omit what is unknown).
 - `--pid` default: the parent of the shell that ran `flow` (the harness), read with `ps -o ppid= -p <process.ppid>`. If that fails, exit 5 asking for `--pid`.
-- `sessionId` is never invented: with no `--session`, `FLOW_SESSION_ID` or `CLAUDE_CODE_SESSION_ID`, the claim still runs, records `sessionId: ""` (unknown; recovery resumes it by thread-replay), and warns on stderr. The session id is `--session`, else `FLOW_SESSION_ID`, else `CLAUDE_CODE_SESSION_ID`, which Claude Code sets for every Bash command, so a Claude Code drain needs no flag; the prose passes `--session <session id>` when the agent knows it.
+- `sessionId` is never invented. It is `--session`, else `FLOW_SESSION_ID`, else the runtime's own id (`CLAUDE_CODE_SESSION_ID` under Claude Code, `CODEX_THREAD_ID` under Codex), so a Claude Code or Codex drain needs no flag. With none of them (OpenCode sets no id), the claim exits 5 before any write, naming the flag and the variables: recovery resumes a run by its session id, so a run without one could never be resumed. (Rev 6; before it, the claim recorded `sessionId: ""` and warned.)
+- `runtime` (rev 6): `--runtime`, else the runtime the shared `scripts/runtime-detect.ts` finds (its most specific marker wins: Codex, then OpenCode, then Claude Code; `FLOW_RUNTIME` overrides), else omitted. The session id then comes from that runtime's own variable, also when `--runtime` names it (`runtimeSession(env, runtime)` in `scripts/cli/session-id.ts`). A value outside the three slugs exits 2. The same detection fills `provenance.harness`.
 - `--worktree` default: the checkout root of `--project`; `--branch` default: its current branch.
 - No comment is posted: the label is the signal (agent etiquette: mostly quiet).
 - Replaces: the label-swap and state-move steps in the drain, execute and adapter prose.
@@ -521,16 +598,24 @@ interface CodeAdapter {
 - `--strict` exits 1 when there is drift.
 - DorkOS schedules stay in `commands/status.md` (only an in-session tool can list them). The command shrinks to "run `flow status`, then list schedules when `tasks_list` exists".
 
-**`flow accounts [list] | add --path <dir> [--label <text>] [--color <#rrggbb>] | set [<id>] [policy flags]`**
+**`flow accounts [list] | add --path <dir> [--label <text>] [--color <#rrggbb>] | set [<id>] [policy flags]`** (rev 6: per runtime)
 
-- `list` (default): every identity (§1.1a) with its resolved policy (§1.1b), its ledger windows via `readWindow`, `effectiveReservePct`, `fiveHourRoom`, `weeklyRoom`, the fleet `handoff`, and every warning.
+- `list` (default): every account of every runtime (§1.1a, implicit `default`s included), grouped by runtime, each with its key, resolved policy (§1.1b), ledger windows via `readWindow`, spend, `effectiveReservePct`, `fiveHourRoom`, `weeklyRoom`, `accountRoom`; then the fleet `handoff`, `runtimes`, `crossRuntimeFallback`, each runtime's main, and every warning.
+- `list` drops the `fleet.json` policy of an account that is no longer registered, and prints a note per key (`dropped` in JSON). With `--dry-run` it only says what it would drop. When `config.json` cannot be read in full it drops nothing.
 - `add` registers an identity in `config.json`: expands `~`, requires an absolute path that exists, refuses a path already registered (exit 5), mints the id, and writes the row with all four keys (`label`, `color` as `null` when not given). It writes no policy, so a new account starts kept-out.
 - `add` reads `config.json` fresh, changes only `runtimes.claudeCode.accounts`, keeps every other key, then temp-file + `rename`; the file keeps its mode (new file: `0600`).
 - When `config.json` has `__internal__` (DorkOS manages it), `add` prints "DorkOS manages this file; you can also add accounts in its settings" and still writes (DorkOS re-reads before writing, §1.1a).
-- `set <id>` edits that account's entry in `fleet.json`: `--role main|rotation|kept-out`, `--reserve <0-100>`, `--spend-down-hours <n>`, `--repos owner/name,…` (or `none` for `[]`). Each accepts `default` to delete the field.
-- `set` with no id takes only `--handoff auto|ask`.
-- `set` refuses an id that is not a registered identity (exit 5), and a second `main` (exit 5, naming the current one).
+- `set <id>` edits that account's entry in `fleet.json`. `<id>` is `<runtime>:<account-id>` (`codex:default`), or a bare id meaning Claude Code. Flags: `--role main|rotation|kept-out`, `--reserve <0-100>`, `--spend-down-hours <n>`, `--repos owner/name,…` (or `none` for `[]`). Each accepts `default` to delete the field.
+- `set` with no id takes exactly one fleet-wide setting: `--handoff auto|ask`, `--runtimes <runtime,…>` (each slug once, in order) or `--cross-runtime-fallback off|on`; each accepts `default`.
+- `set` refuses an account that does not exist (exit 5; an unknown runtime prefix is exit 2), and a second `main` in the same runtime (exit 5, naming the current one).
+- Every write stores keys as `<runtime>:<id>`, so the first `set` migrates a file with bare keys.
 - Needs no tracker and no flow project config.
+
+**`flow usage prune [--dry-run]`** (rev 6)
+
+- Deletes `<dorkHome>/runtimes/<runtime>/usage/<id>.json` for every id that is not a registered account of that runtime (`pruneTargets`, §1.2 "Removing an account"), each under the file's lock. `default.json` only once its runtime has registered accounts; never a lock, temp, backup or stamp file.
+- `--dry-run` lists what it would delete. Exit 3, deleting nothing, when `config.json` cannot be read in full.
+- Lives beside the other `flow usage` sub-verbs (spec `flow-usage`); needs no tracker.
 
 ### 7. Code structure
 

@@ -135,9 +135,9 @@ export async function ingestStreamLog(
   deps: IngestDeps
 ): Promise<IngestResult> {
   const start = handle.logOffset ?? 0;
-  // Only a Claude Code stream carries `rate_limit_event`s, and S1's ledger is
-  // Claude Code's. Codex readings (`codex-rollout.ts`) land in the per-runtime
-  // ledger once S1 rev 6 defines it; until then they are not recorded at all.
+  // Only a Claude Code stream carries `rate_limit_event`s. A Codex session's
+  // readings live in its rollout file, which `flow usage scan --runtime codex`
+  // records into the per-runtime ledger; the drain does not duplicate that.
   if (handle.logFile === undefined || handle.runtime !== 'claude-code') {
     return { offset: start, observations: [], status: 'skipped', warnings: [] };
   }
@@ -159,7 +159,13 @@ export async function ingestStreamLog(
     return { offset, observations, status: 'skipped', warnings: [] };
   }
   const record = deps.record ?? recordUsage;
-  const written = await record(deps.dorkHome, handle.account, observations, observedAt);
+  const written = await record(
+    deps.dorkHome,
+    'claude-code',
+    handle.account,
+    observations,
+    observedAt
+  );
   return { offset, observations, status: written.status, warnings: written.warnings };
 }
 

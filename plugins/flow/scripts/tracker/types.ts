@@ -1,6 +1,6 @@
 /**
  * The code-adapter types: what a tracker adapter's `adapter.ts` exports and what
- * the flow CLI hands it (spec `flow-cli-core` §4, adapter contract 1.4.0 "The
+ * the flow CLI hands it (spec `flow-cli-core` §4, adapter contract since 1.4.0, "The
  * code realization").
  *
  * An adapter's code lives in `adapter.ts` beside its `SKILL.md`. It exports
@@ -83,6 +83,12 @@ export interface ClosedItem {
   title: string;
   /** Which terminal category it closed in. */
   stateCategory: 'completed' | 'canceled';
+  /**
+   * When it closed (ISO), when the tracker says. Optional: an adapter that
+   * cannot tell leaves it out, and a reader treats an unknown date as recent
+   * (the self-test's `--file` never refiles over a close it cannot date).
+   */
+  closedAt?: string;
 }
 
 /**
@@ -146,7 +152,7 @@ export type ItemWithComments = WorkItem & {
 };
 
 /**
- * The code realization of the adapter contract (adapter contract 1.4.0). An
+ * The code realization of the adapter contract (since contract 1.4.0). An
  * adapter lists the methods it implements in `capabilities`; a verb that needs
  * one it lacks exits 3 naming it.
  *
@@ -182,7 +188,7 @@ export interface CodeAdapter {
 
 /** What an adapter's `adapter.ts` module exports. */
 export interface CodeAdapterModule {
-  /** The adapter contract version the code targets, for example `1.4.0`. */
+  /** The adapter contract version the code targets, for example `2.1.0`. */
   CONTRACT_VERSION: string;
   /** Build the adapter for one run. */
   createAdapter(ctx: AdapterContext): CodeAdapter;

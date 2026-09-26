@@ -57,7 +57,7 @@ import type {
 import { labelsAfterChange } from '../../scripts/work-state.ts';
 
 /** The adapter contract version this code targets. */
-export const CONTRACT_VERSION = '2.0.0';
+export const CONTRACT_VERSION = '2.1.0';
 
 /** The Composio slug every read and write goes through. */
 export const GRAPHQL_SLUG = 'LINEAR_RUN_QUERY_OR_MUTATION';
@@ -128,7 +128,7 @@ export const SNAPSHOT_CLOSED_QUERY = `query FlowSnapshotClosed($teamId: String!,
   team(id: $teamId) {
     issues(first: $first, after: $after, filter: { state: { type: { in: ["completed", "canceled"] } } }) {
       pageInfo { hasNextPage endCursor }
-      nodes { identifier title state { type } }
+      nodes { identifier title state { type } completedAt canceledAt }
     }
   }
 }`;
@@ -731,19 +731,28 @@ export function createAdapter(ctx: AdapterContext): CodeAdapter {
       let closed: ClosedItem[] = [];
       if (opts.includeClosed) {
         const nodes = inTeam(
-          await paginate<{ identifier: string; title?: string; state?: { type?: string } }>(
-            SNAPSHOT_CLOSED_QUERY,
-            teamId,
-            CLOSED_PAGE_SIZE
-          ),
+          await paginate<{
+            identifier: string;
+            title?: string;
+            state?: { type?: string };
+            completedAt?: string | null;
+            canceledAt?: string | null;
+          }>(SNAPSHOT_CLOSED_QUERY, teamId, CLOSED_PAGE_SIZE),
           key,
           'closed items'
         );
         closed = nodes.flatMap((node) => {
           const category = node.state?.type;
-          return category === 'completed' || category === 'canceled'
-            ? [{ identifier: node.identifier, title: node.title ?? '', stateCategory: category }]
-            : [];
+          if (category !== 'completed' && category !== 'canceled') return [];
+          const closedAt = category === 'completed' ? node.completedAt : node.canceledAt;
+          return [
+            {
+              identifier: node.identifier,
+              title: node.title ?? '',
+              stateCategory: category,
+              ...(typeof closedAt === 'string' && closedAt !== '' ? { closedAt } : {}),
+            },
+          ];
         });
       }
 

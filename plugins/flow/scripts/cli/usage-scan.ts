@@ -174,7 +174,7 @@ function predictChanged(
 ): string[] {
   return observations
     .filter((observation) => {
-      const merged = mergeLedger(before, [observation], now, accountId);
+      const merged = mergeLedger(before, [observation], now, { runtime: 'claude-code', accountId });
       if (!merged.changed) return false;
       const after = (merged.ledger as UsageLedger).windows[observation.key];
       return after !== before?.windows[observation.key];
@@ -214,11 +214,11 @@ async function scanAccount(
 
   const observations = [...latest.values()].sort((a, b) => a.key.localeCompare(b.key));
   const now = ctx.now();
-  const before = readLedger(dorkHome, account.id).ledger;
+  const before = readLedger(dorkHome, 'claude-code', account.id).ledger;
   let changed = predictChanged(before, observations, now, account.id);
   let dropped = false;
   if (!ctx.dryRun && observations.length > 0) {
-    const result = await recordUsage(dorkHome, account.id, observations, now);
+    const result = await recordUsage(dorkHome, 'claude-code', account.id, observations, now);
     for (const warning of result.warnings) warn(warning);
     dropped = result.status === 'dropped';
     if (result.status !== 'written') changed = [];
@@ -264,7 +264,7 @@ function renderAccount(scan: AccountScan, dryRun: boolean): string {
 export async function run(ctx: VerbContext): Promise<VerbResult> {
   const days = readDays(ctx);
   const dorkHome = resolveDorkHome(ctx.env, ctx.io.osHome);
-  const identities = loadIdentities(dorkHome);
+  const identities = loadIdentities(dorkHome, 'claude-code');
   const accounts = targets(ctx, identities.accounts);
   const sinceMs = days === 'all' ? null : ctx.now().getTime() - days * DAY_MS;
 
