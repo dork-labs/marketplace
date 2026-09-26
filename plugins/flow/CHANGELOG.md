@@ -4,6 +4,13 @@ Installs of this plugin are pinned to a commit SHA, so a fix here does not reach
 you until you **reinstall it** (Marketplace → flow → reinstall, or re-run your
 `--plugin-dir` checkout's `git pull`). Each entry below says whether that matters.
 
+## 0.14.0
+
+**More groundwork for the `flow` command. Nothing you use changes yet, so no reinstall is needed.**
+
+- A tracker adapter can now ship code beside its instructions, so the `flow` command can read and update the tracker itself. The adapter contract is now version 1.4.0 and explains how (`docs/building-your-adapter.mdx`).
+- The Linear adapter ships that code. It reads the backlog, one item and the signed-in account, and writes labels, state and comments, all through the Composio CLI account set in your local config.
+
 ## 0.13.0
 
 **Groundwork for the `flow` command. Nothing you use changes yet, so no reinstall is needed.**

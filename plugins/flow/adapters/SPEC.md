@@ -1,6 +1,6 @@
 # Tracker Adapter Contract
 
-> **Contract version: 1.3.1** (semver). See [Versioning](#5-versioning).
+> **Contract version: 1.4.0** (semver). See [Versioning](#5-versioning).
 >
 > This is the **generic, tracker-neutral** contract every `/flow` tracker adapter
 > must satisfy. It names no tracker, no API, and no slug. Reference adapters
@@ -27,11 +27,16 @@ the verb semantics, and passes the conformance invariants (section 4), the entir
 engine runs unchanged. Adopting a tracker is additive, never a rewrite of the
 engine.
 
-Two realizations of this contract exist, and both honor it identically:
+Three realizations of this contract exist, and all honor it identically:
 
 - **Prose realization (skill-based, server-free).** A documented skill that owns
   every tracker call and follows these verbs and this normalization by hand. The
-  agent reads the skill and acts on it; nothing imports an adapter at runtime.
+  agent reads the skill and acts on it.
+- **Code realization (the `flow` CLI, since 1.4.0).** An `adapter.ts` beside the
+  skill that the `flow` command imports and calls for the mechanical steps:
+  reading the backlog, claiming, releasing, finishing and moving an item between
+  stages. It is optional: an adapter without it still conforms, and the skill
+  keeps working through its prose. See [The code realization](#the-code-realization).
 - **Typed realization (the promotion surface).** A typed `PMClient` interface
   with the same verbs and the same `WorkItem` shape, backed by a tracker's API
   and a webhook relay instead of in-session calls. The server build promotes the
@@ -514,6 +519,139 @@ Idempotent: resolving an already-resolved report to the same outcome is a no-op.
   **with the work item that was already created**, so a human can close the loop
   by hand rather than the promotion being silently orphaned.
 
+### The code realization
+
+Since **1.4.0** an adapter may carry code beside its skill, so the `flow` command
+can run the mechanical steps without an agent re-reading prose. The code is
+optional: an adapter with none still conforms, and the `flow` command then
+refuses the tracker commands with "the `<tracker>` adapter has no code" (exit 3)
+while the skill keeps working.
+
+**The file.** `adapter.ts` in the same folder as the adapter's `SKILL.md` (a
+project adapter's `.agents/flow/adapters/<tracker>/`, or a shipped adapter's
+folder in the plugin). `flow` finds it through the same resolver that finds the
+skill, so a project adapter always wins over a shipped one.
+
+**The module.** It exports two things:
+
+```ts
+export const CONTRACT_VERSION: string; // the contract version it targets, e.g. '1.4.0'
+export function createAdapter(ctx: AdapterContext): CodeAdapter;
+```
+
+`flow` runs the file with Node's type stripping, so it is plain TypeScript with
+no build step. A project adapter needs no imports from flow: `AdapterContext`
+hands it everything at run time, and it may `import type` the shapes from the
+plugin's `scripts/tracker/types.ts` only when it lives where that path resolves.
+
+**The context.** `flow` builds it once per run:
+
+```ts
+interface AdapterContext {
+  config: FlowConfig; // the merged, validated flow config
+  secrets: { trackerAccount?: string; trackerToken?: string };
+  transport: TrackerTransport; // picked by connection.transport
+  warn(message: string): void; // prints to stderr
+}
+
+interface TrackerTransport {
+  kind: 'cli';
+  /** Run an external command with no shell. Rejects when it cannot start or times out. */
+  run(cmd: string, args: readonly string[], opts?: { timeoutMs?: number }):
+    Promise<{ code: number; stdout: string; stderr: string }>;
+}
+```
+
+- The transport names no tracker and no command; the adapter supplies both, and
+  passes every value as an argument, never through a shell.
+- Only `connection.transport: "cli"` serves the `flow` command. An in-session
+  transport (`mcp`) exists only inside an agent session: a child process cannot
+  call it and cannot pin the acting identity, so `flow` refuses it (exit 3).
+- Secrets never reach stdout, stderr or a file the adapter writes.
+
+**The five methods.** The adapter lists the ones it implements in
+`capabilities`; a `flow` command that needs one the adapter lacks exits 3
+naming it.
+
+```ts
+type Capability = 'getCurrentUser' | 'getBacklogSnapshot' | 'getItem' | 'applyWorkState' | 'comment';
+
+interface CodeAdapter {
+  capabilities: readonly Capability[];
+  getCurrentUser(): Promise<{ id: string; name?: string }>;
+  getBacklogSnapshot(opts?: { includeClosed?: boolean }): Promise<BacklogSnapshot>;
+  getItem(identifier: string, opts?: { comments?: number }): Promise<WorkItem & { comments?: ItemComment[] }>;
+  applyWorkState(item: WorkItem, change: WorkStateChange): Promise<void>;
+  comment(item: WorkItem, body: string): Promise<void>;
+}
+
+interface BacklogSnapshot {
+  v: 1;
+  tracker: string;
+  team: { key: string | null; id: string | null };
+  fetchedAt: string; // ISO-8601
+  items: WorkItem[]; // every OPEN item of the team, fully normalized
+  closed: { identifier: string; title: string; stateCategory: 'completed' | 'canceled' }[];
+  projects: WorkItemProject[]; // only the projects the items reference
+}
+
+interface ItemComment { id: string; author: string; body: string; createdAt: string }
+
+interface WorkStateChange {
+  stateCategory?: StateCategory; // move to a state of this category; absent = leave
+  agentLabel?: string | null; // the one agent/* label; null = remove all; absent = leave
+  stageLabel?: string | null; // the one stage/* label; null = remove all; absent = leave
+}
+```
+
+| Method               | The verb it realizes                                   | Used by                             |
+| -------------------- | ------------------------------------------------------ | ----------------------------------- |
+| `getCurrentUser`     | `getCurrentUser`                                        | `flow next`, `flow audit`           |
+| `getBacklogSnapshot` | `getBacklogSnapshot` (optional read, below)             | `flow snapshot`, `next`, `audit`, `status` |
+| `getItem`            | `getItem` (optional read, below)                        | every write, to check it landed; `flow status <id>` |
+| `applyWorkState`     | `claim` and `transition`                                | `flow claim`, `release`, `done`, `stage` |
+| `comment`            | `comment`                                               | `flow release --reason`, `flow done` |
+
+**The two optional reads.**
+
+- `getBacklogSnapshot(opts)` returns one pull of the configured team's backlog:
+  every open item, normalized exactly as `getEligibleWork` normalizes it, plus
+  closed items as titles when `includeClosed` is set, plus only the projects
+  those items reference. It is scoped to the configured team and never returns
+  another team's item: an identifier outside the team is dropped with a warning.
+  It is also what the backlog groom reads.
+- `getItem(identifier, opts)` returns one item, normalized the same way, with its
+  latest `opts.comments` comments oldest first when asked. An item that does not
+  exist, or belongs to another team, is a precondition failure (exit 5), not an
+  empty result.
+- Like every read, both **throw** when the tracker cannot be reached.
+
+**`applyWorkState` is the code realization of `claim` and `transition`.**
+
+- The `flow` command decides the change; the adapter only applies it. The change
+  for each event (claim, release, done, moving to a stage) is written once, in
+  flow's work-state rule, and the adapter never second-guesses it.
+- For each label family the change names, the adapter removes every label of
+  that family and adds the change's label (when it is a string). Every other
+  label is kept.
+- It computes the new label set from a read taken **immediately before the
+  write**, never from the `item` it was handed: a label set written from an
+  older read silently deletes labels another session added in between.
+- It writes the labels and the state in **one** tracker write where the tracker
+  allows it. Where it cannot, it writes the labels first, the same order `claim`
+  requires.
+- The state it moves to is a state of the change's category (for a tracker with
+  several, a stable choice such as the first in the team's order).
+- It never creates a label. A label the tracker does not have is a failed write
+  that names the label.
+- After every write the `flow` command re-reads the item with `getItem` and
+  exits 4 when the tracker disagrees with the change. A write the tracker
+  reported as done but did not keep is caught there, never trusted.
+
+**Errors.** Anything a method throws becomes exit 4 ("could not reach the
+tracker"), unless it is one of flow's own typed errors, which keep their code.
+A method must never return an empty result for a read it could not make.
+
 ---
 
 ## 4. Conformance invariants
@@ -597,6 +735,14 @@ declaration.
 
 ### What each version added
 
+- **1.4.0** - added the **code realization** (section 3,
+  [The code realization](#the-code-realization)): an optional `adapter.ts` beside
+  the skill exporting `CONTRACT_VERSION` and `createAdapter(ctx)`, the
+  `AdapterContext` the `flow` command hands it, and five methods. `getItem` and
+  `getBacklogSnapshot` join the contract as optional reads, and `applyWorkState`
+  is the code realization of `claim` and `transition`, applying the change flow's
+  work-state rule computes. Additive: an adapter with no code still conforms at
+  1.4.0; it simply cannot serve the `flow` command.
 - **1.3.1** - spelled out what `getInbox` always had to return: every entry's
   `itemId`, and an `occurredAt` that is an ISO-8601 date-time with an explicit
   zone (section 3). The engine now drops, with a warning, an entry whose

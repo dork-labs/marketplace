@@ -54,6 +54,34 @@ export interface WorkStateChange {
   stageLabel?: string | null;
 }
 
+/** The label prefix of the one-per-item ownership family. */
+export const AGENT_LABEL_PREFIX = 'agent/';
+
+/**
+ * The label set an item carries after a {@link WorkStateChange}: for each
+ * family the change names, every label of that family is dropped and the
+ * change's label (when a string) added; every other label is kept in order.
+ * Adapters compute their write from this, and `verifyWrite` checks against it,
+ * so "replace the family" is written once.
+ *
+ * @param labels - The labels read from the tracker immediately before the write.
+ * @param change - The change being applied.
+ * @returns The labels the item should carry afterwards, without duplicates.
+ */
+export function labelsAfterChange(labels: readonly string[], change: WorkStateChange): string[] {
+  const families: [string, string | null | undefined][] = [
+    [AGENT_LABEL_PREFIX, change.agentLabel],
+    [STAGE_LABEL_PREFIX, change.stageLabel],
+  ];
+  let next = [...new Set(labels)];
+  for (const [prefix, label] of families) {
+    if (label === undefined) continue;
+    next = next.filter((existing) => !existing.startsWith(prefix));
+    if (label !== null) next.push(label);
+  }
+  return next;
+}
+
 /** The fields of one config stage the rule reads (a slice of `StageSchema`). */
 export interface StageInfo {
   /** The stage's `stage/*` label, when it has one. */

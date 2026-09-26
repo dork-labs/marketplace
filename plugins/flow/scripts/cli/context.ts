@@ -18,6 +18,7 @@
 import { execFile } from 'node:child_process';
 import path from 'node:path';
 
+import type { CodeAdapter } from '../tracker/types.ts';
 import type { ParsedArgs, VerbSpec } from './args.ts';
 
 /** Anything text can be written to: `process.stdout`, or a test buffer. */
@@ -59,17 +60,23 @@ export type ProcessRunner = (
 export interface AdapterRequest {
   /** The checkout whose config names the tracker (the resolved `--project`). */
   projectDir: string;
+  /** The plugin folder (`<flow-root>`), where a shipped adapter lives. */
+  flowRoot: string;
+  /** Environment variables (`FLOW_TRACKER_*` fill the secrets). */
+  env: Readonly<Record<string, string | undefined>>;
+  /** Runs the transport's external commands with no shell. */
+  runProcess: ProcessRunner;
   /** Print a warning to stderr. */
   warn(message: string): void;
 }
 
 /**
- * Build the tracker adapter for a project. The CLI calls it at most once per
- * run and only when a verb asks, so read-only verbs that need no tracker never
- * load config or an adapter. The code-adapter types arrive with the tracker
- * seam (spec §4); until then the adapter is opaque here.
+ * Build the tracker adapter for a project (spec §4). The CLI calls it at most
+ * once per run and only when a verb asks, so verbs that need no tracker never
+ * load config or an adapter. The script wires `createCodeAdapter` from
+ * `scripts/tracker/load.ts`; tests pass a fake.
  */
-export type AdapterFactory = (request: AdapterRequest) => Promise<unknown>;
+export type AdapterFactory = (request: AdapterRequest) => Promise<CodeAdapter>;
 
 /** Everything `main` needs from the world; the script entry wires the real ones. */
 export interface CliDeps {
@@ -139,7 +146,7 @@ export interface VerbContext {
   /** Runs external commands with no shell. */
   runProcess: ProcessRunner;
   /** The tracker adapter, built on first call and reused after. */
-  adapter(): Promise<unknown>;
+  adapter(): Promise<CodeAdapter>;
   /** Print a warning to stderr (both output modes). */
   warn(message: string): void;
 }
@@ -167,7 +174,7 @@ export function createVerbContext(
   const envSession = deps.env.FLOW_SESSION_ID;
   const projectDir = pathFlag('project') ?? deps.cwd;
 
-  let adapter: Promise<unknown> | undefined;
+  let adapter: Promise<CodeAdapter> | undefined;
   return {
     args,
     json: args.json,
@@ -180,7 +187,14 @@ export function createVerbContext(
     env: deps.env,
     now: () => deps.now(),
     runProcess: deps.runProcess,
-    adapter: () => (adapter ??= deps.createAdapter({ projectDir, warn })),
+    adapter: () =>
+      (adapter ??= deps.createAdapter({
+        projectDir,
+        flowRoot,
+        env: deps.env,
+        runProcess: deps.runProcess,
+        warn,
+      })),
     warn,
   };
 }
