@@ -174,7 +174,7 @@ describe('argv parsing', () => {
     const fallback = recordingModule();
     const a = fakeDeps({
       verbs: [probeVerb(fallback.module)],
-      env: { FLOW_SESSION_ID: '', CLAUDE_CODE_SESSION_ID: 'cc-session' },
+      env: { FLOW_SESSION_ID: '', CLAUDECODE: '1', CLAUDE_CODE_SESSION_ID: 'cc-session' },
     });
     await main(['probe'], a.deps);
     expect(fallback.seen[0].sessionId).toBe('cc-session');
@@ -182,10 +182,31 @@ describe('argv parsing', () => {
     const both = recordingModule();
     const b = fakeDeps({
       verbs: [probeVerb(both.module)],
-      env: { FLOW_SESSION_ID: 'flow-session', CLAUDE_CODE_SESSION_ID: 'cc-session' },
+      env: {
+        FLOW_SESSION_ID: 'flow-session',
+        CLAUDECODE: '1',
+        CLAUDE_CODE_SESSION_ID: 'cc-session',
+      },
     });
     await main(['probe'], b.deps);
     expect(both.seen[0].sessionId).toBe('flow-session');
+  });
+
+  // Purpose: under Codex no flag is needed either: CODEX_THREAD_ID, which Codex
+  // sets for every command, is the fallback, still below FLOW_SESSION_ID.
+  it('falls back to CODEX_THREAD_ID under Codex', async () => {
+    const fallback = recordingModule();
+    const a = fakeDeps({
+      verbs: [probeVerb(fallback.module)],
+      env: { CODEX_THREAD_ID: 'codex-thread' },
+    });
+    await main(['probe'], a.deps);
+    expect(fallback.seen[0].sessionId).toBe('codex-thread');
+
+    const opencode = recordingModule();
+    const b = fakeDeps({ verbs: [probeVerb(opencode.module)], env: { OPENCODE: '1' } });
+    await main(['probe'], b.deps);
+    expect(opencode.seen[0].sessionId).toBeUndefined();
   });
 
   // Purpose: common flags may come before the verb, and `--` ends flag parsing

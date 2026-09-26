@@ -289,7 +289,7 @@ function applyEdit(script: string, next: string, expectMarkers: number, stamp: n
  */
 export async function run(ctx: VerbContext): Promise<VerbResult> {
   const dorkHome = resolveDorkHome(ctx.env, ctx.io.osHome);
-  const { accounts } = loadIdentities(dorkHome);
+  const { accounts } = loadIdentities(dorkHome, 'claude-code');
   const only = ctx.args.flags.account;
   const targets = accounts.filter(
     (account) => account.routable && (typeof only !== 'string' || account.id === only)

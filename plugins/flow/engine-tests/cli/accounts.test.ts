@@ -89,19 +89,21 @@ describe('flow accounts list', () => {
     const result = await flow(['accounts', '--json']);
     expect(result.code).toBe(0);
     const out = result.json();
-    expect(out.accounts).toMatchObject([
-      {
-        id: 'work',
-        role: 'kept-out',
-        reservePct: 0,
-        scope: { repos: [] },
-        fiveHourRoom: null,
-        weeklyRoom: null,
-      },
-    ]);
+    expect(out.accounts[0]).toMatchObject({
+      runtime: 'claude-code',
+      key: 'claude-code:work',
+      id: 'work',
+      implicit: false,
+      role: 'kept-out',
+      reservePct: 0,
+      scope: { repos: [] },
+      fiveHourRoom: null,
+      weeklyRoom: null,
+      room: null,
+    });
     expect(out.handoff).toBe('auto');
     expect(out.warnings.map((w: { code: string }) => w.code)).toContain('no-main');
-    expect(result.stderr).toContain('No account is main');
+    expect(result.stderr).toContain('No Claude Code account is main');
   });
 
   it('joins the policy and the ledger: reserve, room and the fleet handoff', async () => {
@@ -122,7 +124,7 @@ describe('flow accounts list', () => {
       handoff: 'ask',
       accounts: { mine: { role: 'main' }, spare: { role: 'rotation' } },
     });
-    mkdirSync(path.join(dorkHome, 'usage'), { recursive: true });
+    mkdirSync(path.join(dorkHome, 'runtimes', 'claude-code', 'usage'), { recursive: true });
     const entry = (usedPct: number, resetsAt: string) => ({
       usedPct,
       resetsAt,
@@ -131,7 +133,7 @@ describe('flow accounts list', () => {
       source: 'statusline',
     });
     writeFileSync(
-      path.join(dorkHome, 'usage', 'mine.json'),
+      path.join(dorkHome, 'runtimes', 'claude-code', 'usage', 'mine.json'),
       JSON.stringify({
         v: 1,
         accountId: 'mine',
@@ -146,7 +148,7 @@ describe('flow accounts list', () => {
     expect(result.code).toBe(0);
     const out = result.json();
     expect(out.handoff).toBe('ask');
-    expect(out.mainId).toBe('mine');
+    expect(out.mains).toEqual({ 'claude-code': 'mine' });
     const [mine, spare] = out.accounts;
     // main keeps 50% back, and 60% used leaves no weekly room for flow.
     expect(mine).toMatchObject({
@@ -161,9 +163,11 @@ describe('flow accounts list', () => {
     expect(out.warnings).toEqual([]);
 
     const text = await flow(['accounts']);
-    expect(text.stdout).toMatch(/^ID\s+ROLE\s+RESERVE\s+5-HOUR\s+7-DAY\s+LABEL\s+PATH$/m);
-    expect(text.stdout).toMatch(/^mine\s+main\s+50%\s+20%\s+60% \(no room\)\s+Mine\s+\/a\/mine$/m);
-    expect(text.stdout).toMatch(/^spare\s+rotation\s+0%\s+unknown\s+unknown/m);
+    expect(text.stdout).toMatch(/^ID\s+ROLE\s+RESERVE\s+5-HOUR\s+7-DAY\s+ROOM\s+LABEL\s+PATH$/m);
+    expect(text.stdout).toMatch(
+      /^mine\s+main\s+50%\s+20%\s+60% \(no room\)\s+no\s+Mine\s+\/a\/mine$/m
+    );
+    expect(text.stdout).toMatch(/^spare\s+rotation\s+0%\s+unknown\s+unknown\s+unknown/m);
     expect(text.stdout).toContain('Handoff: ask');
   });
 
@@ -183,9 +187,65 @@ describe('flow accounts list', () => {
     writeConfig({ runtimes: { claudeCode: { accounts: [{ id: 'default-home', path: '/d' }] } } });
     const out = (await flow(['accounts', '--json'], { DORK_HOME: other })).json();
     expect(out.dorkHome).toBe(other);
-    expect(out.accounts.map((a: { id: string; role: string }) => [a.id, a.role])).toEqual([
-      ['redirected', 'rotation'],
+    expect(out.accounts.map((a: { key: string; role: string }) => [a.key, a.role])).toEqual([
+      ['claude-code:redirected', 'rotation'],
+      ['codex:default', 'rotation'],
+      ['opencode:default', 'rotation'],
     ]);
+  });
+
+  it('lists every runtime, each with its implicit default when nothing is registered', async () => {
+    // Purpose: every runtime flow runs on has one account at least (spec
+    // 1.1a). With no registry it is the environment's own sign-in, in rotation,
+    // and the text groups accounts by runtime.
+    const result = await flow(['accounts', '--json']);
+    expect(
+      result
+        .json()
+        .accounts.map((a: { key: string; role: string; path: null }) => [a.key, a.role, a.path])
+    ).toEqual([
+      ['claude-code:default', 'rotation', null],
+      ['codex:default', 'rotation', null],
+      ['opencode:default', 'rotation', null],
+    ]);
+    const text = (await flow(['accounts'])).stdout;
+    for (const heading of ['Claude Code', 'Codex', 'OpenCode']) {
+      expect(text).toMatch(new RegExp(`^${heading}$`, 'm'));
+    }
+    expect(text).toMatch(/^default\s+rotation\s+0%.*\(this environment\)$/m);
+    // A local-model OpenCode account has nothing to run out of.
+    expect(text).toMatch(/^default\s+rotation\s+0%\s+unknown\s+unknown\s+yes\s/m);
+  });
+
+  it('drops the policy of an account that is no longer registered, with a note', async () => {
+    // Purpose: a removed account leaves no routing policy behind (R8). A dry
+    // run only says what it would drop, and an unreadable registry drops
+    // nothing, because then every account would look removed.
+    writeConfig({ runtimes: { claudeCode: { accounts: [{ id: 'mine', path: '/a/mine' }] } } });
+    writeFleet({
+      v: 1,
+      accounts: { gone: { role: 'rotation' }, 'claude-code:mine': { role: 'main' } },
+    });
+    const dry = await flow(['accounts', '--dry-run', '--json']);
+    expect(dry.json().dropped).toEqual(['claude-code:gone']);
+    expect(dry.stderr).toContain('Would drop the policy for "claude-code:gone"');
+    expect(readJson(fleetFile).accounts.gone).toEqual({ role: 'rotation' });
+
+    writeFileSync(configFile, '{oops');
+    expect((await flow(['accounts', '--json'])).json().dropped).toEqual([]);
+    expect(readJson(fleetFile).accounts.gone).toEqual({ role: 'rotation' });
+
+    writeConfig({ runtimes: { claudeCode: { accounts: [{ id: 'mine', path: '/a/mine' }] } } });
+    const real = await flow(['accounts', '--json']);
+    expect(real.json().dropped).toEqual(['claude-code:gone']);
+    expect(real.stderr).toContain('Dropped the policy for "claude-code:gone"');
+    expect(real.json().warnings.map((w: { code: string }) => w.code)).not.toContain(
+      'entry-unknown-id'
+    );
+    expect(readJson(fleetFile)).toEqual({
+      v: 1,
+      accounts: { 'claude-code:mine': { role: 'main' } },
+    });
   });
 
   it('says so plainly when no account is registered', async () => {
@@ -241,9 +301,11 @@ describe('flow accounts add', () => {
     expect((await flow(['accounts', 'add', '--path', dir, '--label', 'Spare Seat'])).code).toBe(0);
     expect(existsSync(fleetFile)).toBe(false);
     const out = (await flow(['accounts', '--json'])).json();
-    expect(out.accounts).toMatchObject([
-      { id: 'spare-seat', label: 'Spare Seat', role: 'kept-out' },
-    ]);
+    expect(out.accounts[0]).toMatchObject({
+      key: 'claude-code:spare-seat',
+      label: 'Spare Seat',
+      role: 'kept-out',
+    });
   });
 
   it("creates a missing config.json with mode 0600 and keeps an existing file's mode", async () => {
@@ -353,13 +415,15 @@ describe('flow accounts set', () => {
     expect(result.code).toBe(0);
     expect(readJson(fleetFile)).toEqual({
       v: 1,
-      accounts: { spare: { role: 'kept-out', scope: { repos: ['acme/app', 'acme/api'] } } },
+      accounts: {
+        'claude-code:spare': { role: 'kept-out', scope: { repos: ['acme/app', 'acme/api'] } },
+      },
     });
     expect(readFileSync(configFile, 'utf8')).toBe(before);
 
-    await flow(['accounts', 'set', 'mine', '--role', 'main']);
+    await flow(['accounts', 'set', 'claude-code:mine', '--role', 'main']);
     // No reservePct or spendDownWindowHours written: main's 50% is a read-time default.
-    expect(readJson(fleetFile).accounts.mine).toEqual({ role: 'main' });
+    expect(readJson(fleetFile).accounts['claude-code:mine']).toEqual({ role: 'main' });
   });
 
   it('"default" deletes a field, and "none" stores an empty repo list', async () => {
@@ -380,11 +444,17 @@ describe('flow accounts set', () => {
       '--repos',
       'none',
     ]);
+    // The bare key written before contract 2.0.0 is stored in its new form.
     expect(readJson(fleetFile)).toEqual({
       v: 1,
       custom: 'kept',
       accounts: {
-        spare: { role: 'rotation', spendDownWindowHours: 12, note: 'x', scope: { repos: [] } },
+        'claude-code:spare': {
+          role: 'rotation',
+          spendDownWindowHours: 12,
+          note: 'x',
+          scope: { repos: [] },
+        },
       },
     });
   });
@@ -398,18 +468,45 @@ describe('flow accounts set', () => {
     await flow(['accounts', 'set', 'mine', '--role', 'main']);
     const second = await flow(['accounts', 'set', 'spare', '--role', 'main']);
     expect(second.code).toBe(5);
-    expect(second.stderr).toContain('"mine" is already the main account');
-    expect(readJson(fleetFile).accounts.spare).toBeUndefined();
+    expect(second.stderr).toContain('"claude-code:mine" is already the main Claude Code account');
+    expect(readJson(fleetFile).accounts['claude-code:spare']).toBeUndefined();
+    // One main per runtime: Codex's implicit default may be main too.
+    expect((await flow(['accounts', 'set', 'codex:default', '--role', 'main'])).code).toBe(0);
+    expect((await flow(['accounts', 'set', 'gemini:x', '--role', 'main'])).code).toBe(2);
   });
 
-  it('set with no id takes only --handoff', async () => {
-    // Purpose: the fleet-wide switch is separate from per-account policy.
+  it('set with no id takes only the fleet-wide settings, one at a time', async () => {
+    // Purpose: the fleet-wide switches are separate from per-account policy.
     expect((await flow(['accounts', 'set', '--handoff', 'ask'])).code).toBe(0);
     expect(readJson(fleetFile)).toEqual({ v: 1, handoff: 'ask' });
     expect((await flow(['accounts', 'set', '--role', 'main'])).code).toBe(2);
     expect((await flow(['accounts', 'set', 'mine', '--handoff', 'ask'])).code).toBe(2);
     expect((await flow(['accounts', 'set', '--handoff', 'default'])).code).toBe(0);
     expect(readJson(fleetFile)).toEqual({ v: 1 });
+  });
+
+  it('sets the runtime preference and cross-runtime fallback', async () => {
+    // Purpose: the two runtime settings (spec 1.1b) are stored as written,
+    // "default" clears them, and a value outside the contract is a usage error.
+    expect((await flow(['accounts', 'set', '--runtimes', 'codex, claude-code'])).code).toBe(0);
+    expect((await flow(['accounts', 'set', '--cross-runtime-fallback', 'on'])).code).toBe(0);
+    expect(readJson(fleetFile)).toEqual({
+      v: 1,
+      runtimes: ['codex', 'claude-code'],
+      crossRuntimeFallback: 'on',
+    });
+    const out = (await flow(['accounts', '--json'])).json();
+    expect(out).toMatchObject({ runtimes: ['codex', 'claude-code'], crossRuntimeFallback: 'on' });
+    for (const bad of [
+      ['--runtimes', 'codex,codex'],
+      ['--runtimes', 'gemini'],
+      ['--cross-runtime-fallback', 'maybe'],
+      ['--handoff', 'ask', '--runtimes', 'codex'],
+    ]) {
+      expect((await flow(['accounts', 'set', ...bad])).code, bad.join(' ')).toBe(2);
+    }
+    expect((await flow(['accounts', 'set', '--runtimes', 'default'])).code).toBe(0);
+    expect(readJson(fleetFile)).toEqual({ v: 1, crossRuntimeFallback: 'on' });
   });
 
   it('rejects out-of-range values (exit 2) and --dry-run writes nothing', async () => {

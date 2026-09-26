@@ -192,7 +192,7 @@ describe('flow usage probe', () => {
     expect(run.stdout.startsWith('This runs one short Claude Code turn on Second (')).toBe(true);
     expect(run.stdout).toContain("It uses a small part of that account's 5-hour limit");
     expect(run.stdout).toContain('Run again with --yes to go ahead.');
-    expect(existsSync(ledgerPath(dorkHome, 'two'))).toBe(false);
+    expect(existsSync(ledgerPath(dorkHome, 'claude-code', 'two'))).toBe(false);
   });
 
   it('prints the note on stderr under --json, before anything runs', async () => {
@@ -270,7 +270,9 @@ describe('flow usage probe', () => {
     });
     expect(out.observations).toHaveLength(2);
 
-    const windows = JSON.parse(readFileSync(ledgerPath(dorkHome, 'two'), 'utf8')).windows;
+    const windows = JSON.parse(
+      readFileSync(ledgerPath(dorkHome, 'claude-code', 'two'), 'utf8')
+    ).windows;
     expect(windows.five_hour).toEqual({
       usedPct: 25,
       resetsAt: new Date(1790000000 * 1000).toISOString(),
@@ -297,7 +299,7 @@ describe('flow usage probe', () => {
     expect(run.code).toBe(5);
     expect(run.stderr).toContain('answered with an API key (ANTHROPIC_API_KEY)');
     expect(calls[0].replies).toEqual(['stop']);
-    expect(existsSync(ledgerPath(dorkHome, 'two'))).toBe(false);
+    expect(existsSync(ledgerPath(dorkHome, 'claude-code', 'two'))).toBe(false);
   });
 
   it('exits 5 when the turn reports no usage', async () => {
@@ -307,7 +309,7 @@ describe('flow usage probe', () => {
     expect(run.code).toBe(5);
     expect(run.stderr).toContain('reported no usage; nothing recorded');
     expect(run.stderr).toContain('not JSON');
-    expect(existsSync(ledgerPath(dorkHome, 'two'))).toBe(false);
+    expect(existsSync(ledgerPath(dorkHome, 'claude-code', 'two'))).toBe(false);
   });
 
   it('stops a hanging turn at --timeout and exits 5', async () => {

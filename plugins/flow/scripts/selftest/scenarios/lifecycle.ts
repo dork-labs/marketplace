@@ -66,11 +66,11 @@ export interface Recorded {
 }
 
 /**
- * What a run records today. The journal is runtime-aware (`runtimeOf` in
- * `journal.ts`, over `detectRuntime`), so its lines say `codex` or
- * `claude-code`. The provenance line and the run record are not yet: only
- * Claude Code's marker and session variable are read there, so a Codex run
- * signs with no harness and records its session as unknown (DOR-2404).
+ * What a run records today. The journal, the provenance line and the run
+ * record are all runtime-aware (`detectRuntime`, plus `cli/session-id.ts` for
+ * the session id): a Codex run signs as `codex` and records its thread id
+ * (`CODEX_THREAD_ID`) as its session. The account handle is still read only
+ * from Claude Code's config dir, so a Codex run leaves it out.
  */
 export const RECORDED: Readonly<Record<RuntimeShape, Recorded>> = {
   'claude-code': {
@@ -80,7 +80,12 @@ export const RECORDED: Readonly<Record<RuntimeShape, Recorded>> = {
     sessionId: 'claude-session-1',
     account: '.claude-work',
   },
-  codex: { runtime: 'codex', journalHarness: 'codex', sessionId: '' },
+  codex: {
+    runtime: 'codex',
+    journalHarness: 'codex',
+    harness: 'codex',
+    sessionId: 'codex-thread-1',
+  },
 };
 
 /** The item the scenario carries through. */

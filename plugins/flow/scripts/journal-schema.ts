@@ -123,11 +123,11 @@ export const JournalLineSchema = z.discriminatedUnion('kind', [
           .string()
           .regex(
             USAGE_WINDOW_NAME,
-            'a window is five_hour, seven_day, seven_day_opus, seven_day_sonnet, model:<slug> or window:<minutes>'
+            'a window name follows the usage ledger grammar (five_hour, model:<slug>, window:<minutes>, credits:<slug>, rate_limit:<slug>, or lowercase_with_underscores)'
           ),
         z
           .object({
-            usedPct: z.number().min(0).max(100),
+            usedPct: z.number().min(0).max(100).nullable(),
             resetsAt: z.iso.datetime({ offset: true }).nullable(),
           })
           .strict()

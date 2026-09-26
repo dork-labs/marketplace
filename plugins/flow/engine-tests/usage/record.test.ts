@@ -85,7 +85,7 @@ async function record(
 }
 
 function ledger(id: string): Record<string, unknown> | null {
-  const file = path.join(dorkHome, 'usage', `${id}.json`);
+  const file = path.join(dorkHome, 'runtimes', 'claude-code', 'usage', `${id}.json`);
   return existsSync(file) ? JSON.parse(readFileSync(file, 'utf8')) : null;
 }
 
@@ -131,7 +131,7 @@ describe('flow usage record', () => {
     ]) {
       expect(await run()).toMatchObject({ code: 0, stdout: '', stderr: '' });
     }
-    expect(existsSync(path.join(dorkHome, 'usage'))).toBe(false);
+    expect(existsSync(path.join(dorkHome, 'runtimes', 'claude-code', 'usage'))).toBe(false);
   });
 
   it('refuses a terminal on stdin', async () => {
@@ -161,7 +161,8 @@ describe('flow usage record', () => {
       const after = text.slice(text.indexOf('"rate_limits"') + '"rate_limits"'.length);
       return after.slice(0, after.indexOf('}}'));
     };
-    const stampPath = () => path.join(dorkHome, 'usage', '.statusline-x');
+    const stampPath = () =>
+      path.join(dorkHome, 'runtimes', 'claude-code', 'usage', '.statusline-x');
     const hookEnv = (text: string, stamp = stampPath()) => ({
       ...acctAEnv(),
       FLOW_USAGE_FP: fp(text),
@@ -203,7 +204,7 @@ describe('flow usage record', () => {
       const outside = path.join(root, '.statusline-evil');
       await record(text, { env: hookEnv(text, outside) });
       expect(existsSync(outside)).toBe(false);
-      const wrongName = path.join(dorkHome, 'usage', 'acct-a.json.bak');
+      const wrongName = path.join(dorkHome, 'runtimes', 'claude-code', 'usage', 'acct-a.json.bak');
       await record(text, { env: hookEnv(text, wrongName) });
       expect(existsSync(wrongName)).toBe(false);
     });
@@ -211,9 +212,12 @@ describe('flow usage record', () => {
     it('leaves the stamp alone when the write is dropped', async () => {
       // Purpose: a dropped write must be retried on the next render.
       const text = statusLine('full.json');
-      mkdirSync(path.join(dorkHome, 'usage'), { recursive: true });
+      mkdirSync(path.join(dorkHome, 'runtimes', 'claude-code', 'usage'), { recursive: true });
       // A live holder's lock (fresh mtime, never released) makes the writer give up after 2 s.
-      writeFileSync(path.join(dorkHome, 'usage', 'acct-a.json.lock'), `${process.pid}:held`);
+      writeFileSync(
+        path.join(dorkHome, 'runtimes', 'claude-code', 'usage', 'acct-a.json.lock'),
+        `${process.pid}:held`
+      );
       const result = await record(text, { env: hookEnv(text), argv: ['--json'] });
       expect(JSON.parse(result.stdout)).toMatchObject({ dropped: true });
       expect(existsSync(stampPath())).toBe(false);

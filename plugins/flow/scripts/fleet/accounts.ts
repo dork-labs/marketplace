@@ -1,24 +1,29 @@
 /**
  * The account registry flow and DorkOS share (spec `flow-cli-core` §1.1).
  *
- * The registry is split by owner:
+ * An account is a billing identity of ONE runtime (`claude-code`, `codex` or
+ * `opencode`). The registry is split by owner:
  *
  * - **Identity** (who the accounts are, how they look) lives in DorkOS config:
- *   `<dorkHome>/config.json` at `runtimes.claudeCode.accounts[]`. DorkOS core owns
- *   it; flow reads it ({@link readIdentities}) and, through `flow accounts add`,
- *   may append a row.
+ *   `<dorkHome>/config.json` at `runtimes.<claudeCode|codex|opencode>.accounts[]`.
+ *   DorkOS core owns it; flow reads it ({@link readAccounts}) and, through
+ *   `flow accounts add`, may append a Claude Code row. A runtime with no
+ *   registered account has one implicit account, `default`: the ambient
+ *   environment.
  * - **Routing policy** (which accounts flow may spend, and how much to keep
- *   back) lives in flow's own file, `<dorkHome>/flow/fleet.json`. DorkOS core
- *   never touches it. It is opt-in: an account with no entry is kept out.
+ *   back) lives in flow's own file, `<dorkHome>/flow/fleet.json`, keyed
+ *   `<runtime>:<account-id>`. DorkOS core never touches it. A registered account
+ *   with no entry is kept out; an implicit `default` is in rotation.
  *
  * Defaults are resolved at read time ({@link resolveFleetPolicy}) and never
  * written. The room and reserve rules ({@link effectiveReservePct},
- * {@link fiveHourRoom}, {@link weeklyRoom}, {@link modelRoom}) read the usage
- * ledger through `usage-ledger.ts`.
+ * {@link fiveHourRoom}, {@link weeklyRoom}, {@link modelRoom}, {@link spendRoom},
+ * {@link accountRoom}) read the usage ledger through `usage-ledger.ts`.
  *
  * This is a shared contract, pinned by the case files in
- * `plugins/flow/conformance/fleet/` (`account-id`, `identity`, `fleet-policy`,
- * `room`). Change a rule only together with that folder's `CONTRACT_VERSION`.
+ * `plugins/flow/conformance/fleet/` (`account-id`, `identity`, `accounts`,
+ * `fleet-policy`, `room`, `eligibility`). Change a rule only together with that
+ * folder's `CONTRACT_VERSION`.
  *
  * Dependency-free (node builtins and local zero-dependency modules only).
  *
@@ -39,7 +44,20 @@ import os from 'node:os';
 import path from 'node:path';
 import { readJsonFile, updateJsonFile, type AtomicUpdateResult } from '../atomic-json.ts';
 import { ConfigError, PreconditionError, UsageError } from '../errors.ts';
-import { isValidAccountId, readWindow, type FleetWarning, type Instant } from './usage-ledger.ts';
+import {
+  IMPLICIT_ACCOUNT_ID,
+  RUNTIMES,
+  isRuntimeSlug,
+  isValidAccountId,
+  readSpend,
+  readWindow,
+  type FleetWarning,
+  type Instant,
+  type RuntimeSlug,
+  type SpendEntry,
+} from './usage-ledger.ts';
+
+export { IMPLICIT_ACCOUNT_ID };
 
 /** A display color: `#rrggbb`, lowercase. */
 const COLOR_PATTERN = /^#[0-9a-f]{6}$/;
@@ -50,11 +68,23 @@ const REPO_PATTERN = /^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/;
 /** The fleet policy format version this module reads and writes. */
 export const FLEET_POLICY_VERSION = 1;
 
-/** One account identity, read from DorkOS config. */
+/** Each runtime's key under `runtimes` in DorkOS config. */
+export const RUNTIME_CONFIG_KEYS: Readonly<Record<RuntimeSlug, string>> = {
+  'claude-code': 'claudeCode',
+  codex: 'codex',
+  opencode: 'opencode',
+};
+
+/**
+ * One registered row of one runtime's registry, read from DorkOS config.
+ */
 export interface AccountIdentity {
   /** The registry id. May fail the id pattern on a hand-edited row (then `routable` is false). */
   id: string;
-  /** The absolute `CLAUDE_CONFIG_DIR` this account runs in. */
+  /**
+   * The absolute folder this account runs in: a `CLAUDE_CONFIG_DIR` for Claude
+   * Code, a `CODEX_HOME` for Codex, the provider profile's folder for OpenCode.
+   */
   path: string;
   /** The operator's name for it, or `null`. */
   label: string | null;
@@ -64,16 +94,62 @@ export interface AccountIdentity {
   routable: boolean;
 }
 
+/** A registered account of one runtime. */
+export interface RegisteredAccount extends AccountIdentity {
+  /** The runtime it belongs to. */
+  runtime: RuntimeSlug;
+  /** `<runtime>:<id>`, its key in `fleet.json`. */
+  key: string;
+  /** Always false: it has a row in the registry. */
+  implicit: false;
+}
+
+/**
+ * A runtime's implicit account: the ambient environment, used when the runtime
+ * has no registered account. Its id is always `default`.
+ */
+export interface ImplicitAccount {
+  /** The runtime it belongs to. */
+  runtime: RuntimeSlug;
+  /** Always `default`. */
+  id: typeof IMPLICIT_ACCOUNT_ID;
+  /** `<runtime>:default`. */
+  key: string;
+  /** No folder: the session runs in whatever environment launched it. */
+  path: null;
+  /** Never set. */
+  label: null;
+  /** Never set. */
+  color: null;
+  /** Always true. */
+  routable: true;
+  /** Always true. */
+  implicit: true;
+}
+
+/** Any account of any runtime. */
+export type RuntimeAccount = RegisteredAccount | ImplicitAccount;
+
+/** What {@link resolveFleetPolicy} needs to know about an account. */
+export type PolicySubject = Pick<RuntimeAccount, 'runtime' | 'id' | 'routable' | 'implicit'>;
+
 /** How flow may spend an account. */
 export type AccountRole = 'main' | 'rotation' | 'kept-out';
+
+/** Whether a task whose runtime is out may continue on another runtime. */
+export type CrossRuntimeFallback = 'off' | 'on';
 
 /** Whether work moves off a spent account automatically or after asking. */
 export type HandoffMode = 'auto' | 'ask';
 
 /** One account's policy with every default filled in. */
 export interface ResolvedAccountPolicy {
-  /** The registry id. */
+  /** The runtime the account belongs to. */
+  runtime: RuntimeSlug;
+  /** The registry id (`default` for an implicit account). */
   id: string;
+  /** `<runtime>:<id>`. */
+  key: string;
   /** `main`: the operator's own, drained last. `rotation`: spent freely. `kept-out`: only on its scoped repos. */
   role: AccountRole;
   /** Share of the 7-day window kept back for the operator (0-100). */
@@ -88,9 +164,16 @@ export interface ResolvedAccountPolicy {
 export interface ResolvedFleetPolicy {
   /** Fleet-wide handoff mode. */
   handoff: HandoffMode;
-  /** The one main account, or `null` when there is none. */
-  mainId: string | null;
-  /** One resolved policy per identity, in registry order. */
+  /**
+   * Runtimes in order of preference. Empty (the default) means "the runtime the
+   * item started on first".
+   */
+  runtimes: RuntimeSlug[];
+  /** Whether a task may continue on another runtime once its own is out. Default `off`. */
+  crossRuntimeFallback: CrossRuntimeFallback;
+  /** Each runtime's one main account id, when it has one. */
+  mains: Partial<Record<RuntimeSlug, string>>;
+  /** One resolved policy per account, in the order given. */
   accounts: ResolvedAccountPolicy[];
   /** Everything read as absent or ignored, and why. */
   warnings: FleetWarning[];
@@ -137,7 +220,9 @@ export function slugifyAccountId(value: string): string {
 /**
  * Mint an id for an account (spec §1.1a): the label slugified, else the path's
  * last segment slugified, else `account`; `-2`, `-3`, ... appended until it is not
- * in `taken`. Identical to DorkOS `claudeAccountId`.
+ * in `taken`. `default` is always taken: it is reserved for a runtime's implicit
+ * account, so a label "Default" mints `default-2`. DorkOS `claudeAccountId` must
+ * reserve it the same way (spec §1.1a).
  *
  * @param opts - The row's label and path, and the ids already taken.
  * @returns A free id matching the id pattern.
@@ -154,6 +239,7 @@ export function mintAccountId(opts: {
       .pop() ?? '';
   const base = slugifyAccountId(opts.label ?? '') || slugifyAccountId(basename) || 'account';
   const taken = new Set(opts.taken);
+  taken.add(IMPLICIT_ACCOUNT_ID);
   if (!taken.has(base)) return base;
   for (let n = 2; ; n += 1) {
     const candidate = `${base}-${n}`;
@@ -173,7 +259,9 @@ function isAbsolutePath(value: unknown): value is string {
 }
 
 /**
- * Read the account identities out of a parsed `config.json` (spec §1.1a).
+ * Read one runtime's registered rows out of a parsed `config.json` (spec
+ * §1.1a), at `runtimes.<claudeCode|codex|opencode>.accounts`. Every runtime's
+ * rows follow the same rules.
  *
  * - A missing file (`null`/`undefined`) or a missing key means no accounts.
  * - A row with no id gets one by {@link mintAccountId} (`id-minted`), exactly as
@@ -187,22 +275,27 @@ function isAbsolutePath(value: unknown): value is string {
  * - Unknown fields are ignored.
  *
  * @param config - The parsed `config.json`, or `null`/`undefined` when missing.
+ * @param runtime - Whose registry to read.
  * @returns The identities in file order, and warnings.
  */
-export function readIdentities(config: unknown): {
+export function readIdentities(
+  config: unknown,
+  runtime: RuntimeSlug
+): {
   accounts: AccountIdentity[];
   warnings: FleetWarning[];
 } {
   const warnings: FleetWarning[] = [];
   const accounts: AccountIdentity[] = [];
+  const configKey = RUNTIME_CONFIG_KEYS[runtime];
   const runtimes = isObject(config) ? config.runtimes : undefined;
-  const claudeCode = isObject(runtimes) ? runtimes.claudeCode : undefined;
-  const rows = isObject(claudeCode) ? claudeCode.accounts : undefined;
+  const section = isObject(runtimes) ? runtimes[configKey] : undefined;
+  const rows = isObject(section) ? section.accounts : undefined;
   if (rows === undefined || rows === null) return { accounts, warnings };
   if (!Array.isArray(rows)) {
     warnings.push({
       code: 'accounts-invalid',
-      message: 'runtimes.claudeCode.accounts in config.json is not a list; read it as no accounts.',
+      message: `runtimes.${configKey}.accounts in config.json is not a list; read it as no accounts.`,
     });
     return { accounts, warnings };
   }
@@ -268,8 +361,17 @@ export function readIdentities(config: unknown): {
       return;
     }
     seen.add(id);
-    const routable = isValidAccountId(id);
-    if (!routable) {
+    const reserved = id === IMPLICIT_ACCOUNT_ID;
+    const routable = isValidAccountId(id) && !reserved;
+    if (reserved) {
+      // `default` names the runtime's implicit account and its usage file; a
+      // registered row with that id would read another folder's readings as
+      // its own, and could be spent as if it were the implicit account.
+      warnings.push({
+        code: 'id-reserved',
+        message: `Account id "default" is reserved for the account a runtime uses when none is registered; this row is listed but kept out, with no usage file. Give it another id.`,
+      });
+    } else if (!routable) {
       warnings.push({
         code: 'id-invalid',
         message: `Account id "${id}" is not lowercase letters, digits and single hyphens; it is listed but kept out, with no usage file.`,
@@ -289,30 +391,162 @@ export function readIdentities(config: unknown): {
   return { accounts, warnings };
 }
 
+/**
+ * An account's key in `fleet.json`: `<runtime>:<id>`.
+ *
+ * @param runtime - The runtime slug.
+ * @param id - The account id.
+ * @returns The key.
+ */
+export function accountKey(runtime: RuntimeSlug, id: string): string {
+  return `${runtime}:${id}`;
+}
+
+/**
+ * Split a `fleet.json` key into its runtime and id. A bare key with no `:` is a
+ * key written before contract 2.0.0 and means a Claude Code account.
+ *
+ * @param key - A key from `fleet.json`, or an id the operator typed.
+ * @returns The runtime, the id and whether the key was bare; `null` when the part
+ *   before the `:` is not a runtime slug or the id is empty.
+ */
+export function parseAccountKey(
+  key: string
+): { runtime: RuntimeSlug; id: string; bare: boolean } | null {
+  const colon = key.indexOf(':');
+  if (colon === -1) return key === '' ? null : { runtime: 'claude-code', id: key, bare: true };
+  const runtime = key.slice(0, colon);
+  const id = key.slice(colon + 1);
+  if (!isRuntimeSlug(runtime) || id === '') return null;
+  return { runtime, id, bare: false };
+}
+
+/**
+ * Every account of every runtime (spec §1.1a), in runtime order (`claude-code`,
+ * `codex`, `opencode`) and registry order within one. A runtime whose registry
+ * has no row left after the row rules gets its implicit `default` account.
+ *
+ * @param config - The parsed `config.json`, or `null`/`undefined` when missing.
+ * @returns The accounts and every runtime's warnings.
+ */
+export function readAccounts(config: unknown): {
+  accounts: RuntimeAccount[];
+  warnings: FleetWarning[];
+} {
+  const accounts: RuntimeAccount[] = [];
+  const warnings: FleetWarning[] = [];
+  for (const runtime of RUNTIMES) {
+    const read = readIdentities(config, runtime);
+    warnings.push(...read.warnings);
+    if (read.accounts.length === 0) {
+      accounts.push(implicitAccount(runtime));
+      continue;
+    }
+    accounts.push(...asRegistered(runtime, read.accounts));
+  }
+  return { accounts, warnings };
+}
+
+/**
+ * Tag one runtime's registered rows with their runtime and key.
+ *
+ * @param runtime - The runtime the rows belong to.
+ * @param identities - Rows from {@link readIdentities} or {@link loadIdentities}.
+ * @returns The rows as registered accounts, in the same order.
+ */
+export function asRegistered(
+  runtime: RuntimeSlug,
+  identities: readonly AccountIdentity[]
+): RegisteredAccount[] {
+  return identities.map((identity) => ({
+    ...identity,
+    runtime,
+    key: accountKey(runtime, identity.id),
+    implicit: false,
+  }));
+}
+
+/** A runtime's implicit `default` account. */
+function implicitAccount(runtime: RuntimeSlug): ImplicitAccount {
+  return {
+    runtime,
+    id: IMPLICIT_ACCOUNT_ID,
+    key: accountKey(runtime, IMPLICIT_ACCOUNT_ID),
+    path: null,
+    label: null,
+    color: null,
+    routable: true,
+    implicit: true,
+  };
+}
+
 /** `<dorkHome>/config.json`. */
 export function identityConfigPath(dorkHome: string): string {
   return path.join(dorkHome, 'config.json');
 }
 
 /**
- * Read the identities from `<dorkHome>/config.json`. A missing file means no
- * accounts; an unparsable one means no accounts with a `file-corrupt` warning.
+ * Read one runtime's registered rows from `<dorkHome>/config.json`. A missing
+ * file means no accounts; an unparsable one means no accounts with a
+ * `file-corrupt` warning.
  *
  * @param dorkHome - The resolved DorkOS home.
+ * @param runtime - Whose registry to read.
  * @returns The identities and warnings.
  */
-export function loadIdentities(dorkHome: string): {
+export function loadIdentities(
+  dorkHome: string,
+  runtime: RuntimeSlug
+): {
   accounts: AccountIdentity[];
   warnings: FleetWarning[];
 } {
   const read = readJsonFile(identityConfigPath(dorkHome));
-  const result = readIdentities(read.value);
+  const result = readIdentities(read.value, runtime);
   return { accounts: result.accounts, warnings: [...read.warnings, ...result.warnings] };
 }
 
+/**
+ * Read every account of every runtime from `<dorkHome>/config.json`
+ * ({@link readAccounts}).
+ *
+ * @param dorkHome - The resolved DorkOS home.
+ * @returns The accounts, the warnings, and whether the file itself read cleanly
+ *   (false when it exists but is not JSON: then no registry can be trusted to be
+ *   complete, and nothing may be deleted because of it).
+ */
+export function loadAccounts(dorkHome: string): {
+  accounts: RuntimeAccount[];
+  warnings: FleetWarning[];
+  registryReadable: boolean;
+} {
+  const read = readJsonFile(identityConfigPath(dorkHome));
+  const result = readAccounts(read.value);
+  const registryReadable =
+    read.warnings.length === 0 && !result.warnings.some((w) => w.code === 'accounts-invalid');
+  return {
+    accounts: result.accounts,
+    warnings: [...read.warnings, ...result.warnings],
+    registryReadable,
+  };
+}
+
+/** The defaults for an account with no stored entry: rotation when implicit, else kept out. */
+function unlisted(account: PolicySubject): ResolvedAccountPolicy {
+  return {
+    runtime: account.runtime,
+    id: account.id,
+    key: accountKey(account.runtime, account.id),
+    role: account.implicit ? 'rotation' : 'kept-out',
+    reservePct: 0,
+    spendDownWindowHours: 24,
+    scope: { repos: [] },
+  };
+}
+
 /** The kept-out defaults for an account. */
-function keptOut(id: string): ResolvedAccountPolicy {
-  return { id, role: 'kept-out', reservePct: 0, spendDownWindowHours: 24, scope: { repos: [] } };
+function keptOut(account: PolicySubject): ResolvedAccountPolicy {
+  return { ...unlisted(account), role: 'kept-out' };
 }
 
 /** Parse one policy entry's fields, dropping invalid values with a warning. */
@@ -333,7 +567,7 @@ function readEntry(
     } else {
       warnings.push({
         code: 'role-invalid',
-        message: `"${id}" has an unknown role; read it as kept-out.`,
+        message: `"${id}" has an unknown role; read it as the default.`,
       });
     }
   }
@@ -390,46 +624,52 @@ function readEntry(
 }
 
 /**
- * Resolve the routing policy for every identity (spec §1.1b), filling in the
- * defaults: role `kept-out`, `reservePct` 50 for main else 0,
- * `spendDownWindowHours` 24, `scope.repos` [], handoff `auto`.
+ * Resolve the routing policy for every account (spec §1.1b), filling in the
+ * defaults: role `rotation` for an implicit `default` account and `kept-out` for
+ * every other, `reservePct` 50 for main else 0, `spendDownWindowHours` 24,
+ * `scope.repos` [], handoff `auto`, `runtimes` [], `crossRuntimeFallback` `off`.
  *
- * - No `fleet.json`, or no entry for an identity: kept out (opt-in by default).
+ * - Entries are keyed `<runtime>:<id>`. A bare key (written before contract
+ *   2.0.0) reads as `claude-code:<key>`; when both forms are present the
+ *   prefixed one wins (`entry-duplicate`).
+ * - No `fleet.json`, or no entry for an account: the defaults above.
  * - Invalid values read as absent, with a warning.
- * - At most one main: later mains in registry order read as rotation
- *   (`main-duplicate`).
- * - Entries whose key is not an identity id are ignored (`entry-unknown-id`);
- *   a non-routable identity stays kept out whatever its entry says
+ * - At most one main per runtime: later mains of that runtime, in the order
+ *   given, read as rotation (`main-duplicate`).
+ * - Entries whose key names no account are ignored (`entry-unknown-id`); a
+ *   non-routable account stays kept out whatever its entry says
  *   (`entry-unroutable`).
  * - A file of another version is not read (`fleet-version-unknown`).
  *
- * @param identities - The identities in registry order.
+ * @param accounts - The accounts, in runtime then registry order.
  * @param fleet - The parsed `fleet.json`, or `null`/`undefined` when missing.
  * @returns The resolved policy.
  */
 export function resolveFleetPolicy(
-  identities: readonly Pick<AccountIdentity, 'id' | 'routable'>[],
+  accounts: readonly PolicySubject[],
   fleet: unknown
 ): ResolvedFleetPolicy {
   const warnings: FleetWarning[] = [];
   const defaults = (): ResolvedFleetPolicy => ({
     handoff: 'auto',
-    mainId: null,
-    accounts: identities.map((identity) => keptOut(identity.id)),
+    runtimes: [],
+    crossRuntimeFallback: 'off',
+    mains: {},
+    accounts: accounts.map((account) => (account.routable ? unlisted(account) : keptOut(account))),
     warnings,
   });
   if (fleet === undefined || fleet === null) return defaults();
   if (!isObject(fleet)) {
     warnings.push({
       code: 'fleet-invalid',
-      message: 'fleet.json is not an object; every account is kept out.',
+      message: 'fleet.json is not an object; every account reads as its default.',
     });
     return defaults();
   }
   if (fleet.v !== undefined && fleet.v !== FLEET_POLICY_VERSION) {
     warnings.push({
       code: 'fleet-version-unknown',
-      message: `fleet.json is version ${JSON.stringify(fleet.v)}; this reader knows ${FLEET_POLICY_VERSION}, so every account is kept out.`,
+      message: `fleet.json is version ${JSON.stringify(fleet.v)}; this reader knows ${FLEET_POLICY_VERSION}, so every account reads as its default.`,
     });
     return defaults();
   }
@@ -446,10 +686,37 @@ export function resolveFleetPolicy(
     }
   }
 
-  let entries: Record<string, unknown> = {};
+  const runtimes: RuntimeSlug[] = [];
+  if (fleet.runtimes !== undefined) {
+    const listed = Array.isArray(fleet.runtimes) ? fleet.runtimes : [fleet.runtimes];
+    for (const runtime of listed) {
+      if (isRuntimeSlug(runtime) && !runtimes.includes(runtime)) {
+        runtimes.push(runtime);
+      } else {
+        warnings.push({
+          code: 'runtimes-invalid',
+          message: `fleet.json runtimes lists ${JSON.stringify(runtime)}, which is not a runtime or is listed twice; ignored it.`,
+        });
+      }
+    }
+  }
+
+  let crossRuntimeFallback: CrossRuntimeFallback = 'off';
+  if (fleet.crossRuntimeFallback !== undefined) {
+    if (fleet.crossRuntimeFallback === 'off' || fleet.crossRuntimeFallback === 'on') {
+      crossRuntimeFallback = fleet.crossRuntimeFallback;
+    } else {
+      warnings.push({
+        code: 'cross-runtime-fallback-invalid',
+        message: 'fleet.json has an unknown crossRuntimeFallback; read it as off.',
+      });
+    }
+  }
+
+  let raw: Record<string, unknown> = {};
   if (fleet.accounts !== undefined) {
     if (isObject(fleet.accounts)) {
-      entries = fleet.accounts;
+      raw = fleet.accounts;
     } else {
       warnings.push({
         code: 'accounts-invalid',
@@ -457,52 +724,63 @@ export function resolveFleetPolicy(
       });
     }
   }
+  const migrated = migrateEntries(raw);
+  for (const key of migrated.shadowed) {
+    warnings.push({
+      code: 'entry-duplicate',
+      message: `fleet.json has a policy under both "${key}" and "claude-code:${key}"; used the second.`,
+    });
+  }
+  const entries = migrated.entries;
 
-  const known = new Set(identities.map((identity) => identity.id));
+  const known = new Set(accounts.map((account) => accountKey(account.runtime, account.id)));
   for (const key of Object.keys(entries)) {
     if (!known.has(key)) {
       warnings.push({
         code: 'entry-unknown-id',
-        message: `fleet.json has a policy for "${key}", which is not a registered account; ignored it.`,
+        message: `fleet.json has a policy for "${key}", which is not an account; ignored it.`,
       });
     }
   }
 
-  let mainId: string | null = null;
-  const accounts = identities.map((identity): ResolvedAccountPolicy => {
-    const entry = Object.hasOwn(entries, identity.id) ? entries[identity.id] : undefined;
-    if (!identity.routable) {
+  const mains: Partial<Record<RuntimeSlug, string>> = {};
+  const resolved = accounts.map((account): ResolvedAccountPolicy => {
+    const key = accountKey(account.runtime, account.id);
+    const entry = Object.hasOwn(entries, key) ? entries[key] : undefined;
+    if (!account.routable) {
       if (entry !== undefined) {
         warnings.push({
           code: 'entry-unroutable',
-          message: `"${identity.id}" is not a valid account id, so its policy is ignored and it stays kept out.`,
+          message: `"${key}" is not a valid account id, so its policy is ignored and it stays kept out.`,
         });
       }
-      return keptOut(identity.id);
+      return keptOut(account);
     }
-    if (entry === undefined) return keptOut(identity.id);
+    if (entry === undefined) return unlisted(account);
     if (!isObject(entry)) {
       warnings.push({
         code: 'entry-invalid',
-        message: `fleet.json's policy for "${identity.id}" is not an object; read it as kept-out.`,
+        message: `fleet.json's policy for "${key}" is not an object; read it as the default.`,
       });
-      return keptOut(identity.id);
+      return unlisted(account);
     }
-    const read = readEntry(identity.id, entry, warnings);
-    let role: AccountRole = read.role ?? 'kept-out';
+    const read = readEntry(key, entry, warnings);
+    const base = unlisted(account);
+    let role: AccountRole = read.role ?? base.role;
     if (role === 'main') {
-      if (mainId === null) {
-        mainId = identity.id;
+      const current = mains[account.runtime];
+      if (current === undefined) {
+        mains[account.runtime] = account.id;
       } else {
         warnings.push({
           code: 'main-duplicate',
-          message: `"${identity.id}" is also marked main; "${mainId}" came first, so "${identity.id}" reads as rotation.`,
+          message: `"${key}" is also marked main; "${accountKey(account.runtime, current)}" came first, so "${key}" reads as rotation.`,
         });
         role = 'rotation';
       }
     }
     return {
-      id: identity.id,
+      ...base,
       role,
       reservePct: read.reservePct ?? (role === 'main' ? 50 : 0),
       spendDownWindowHours: read.spendDownWindowHours ?? 24,
@@ -510,7 +788,30 @@ export function resolveFleetPolicy(
     };
   });
 
-  return { handoff, mainId, accounts, warnings };
+  return { handoff, runtimes, crossRuntimeFallback, mains, accounts: resolved, warnings };
+}
+
+/**
+ * `fleet.json` accounts with every bare key renamed to `claude-code:<key>`. A
+ * bare key whose prefixed form is also present is dropped (the prefixed one
+ * wins) and reported in `shadowed`.
+ */
+function migrateEntries(raw: Record<string, unknown>): {
+  entries: Record<string, unknown>;
+  shadowed: string[];
+} {
+  const entries: Record<string, unknown> = {};
+  const shadowed: string[] = [];
+  for (const [key, value] of Object.entries(raw)) {
+    if (key.includes(':')) entries[key] = value;
+  }
+  for (const [key, value] of Object.entries(raw)) {
+    if (key.includes(':')) continue;
+    const prefixed = accountKey('claude-code', key);
+    if (Object.hasOwn(entries, prefixed)) shadowed.push(key);
+    else entries[prefixed] = value;
+  }
+  return { entries, shadowed };
 }
 
 /** `<dorkHome>/flow/fleet.json`. */
@@ -519,26 +820,27 @@ export function fleetPolicyPath(dorkHome: string): string {
 }
 
 /**
- * Read `<dorkHome>/flow/fleet.json` (no lock) and resolve it for `identities`.
+ * Read `<dorkHome>/flow/fleet.json` (no lock) and resolve it for `accounts`.
  *
  * @param dorkHome - The resolved DorkOS home.
- * @param identities - The identities in registry order.
+ * @param accounts - The accounts, in runtime then registry order.
  * @returns The resolved policy; file problems are in its warnings.
  */
 export function loadFleetPolicy(
   dorkHome: string,
-  identities: readonly Pick<AccountIdentity, 'id' | 'routable'>[]
+  accounts: readonly PolicySubject[]
 ): ResolvedFleetPolicy {
   const read = readJsonFile(fleetPolicyPath(dorkHome));
-  const resolved = resolveFleetPolicy(identities, read.value);
+  const resolved = resolveFleetPolicy(accounts, read.value);
   return { ...resolved, warnings: [...read.warnings, ...resolved.warnings] };
 }
 
 /**
  * Edit `fleet.json` under its lock (§1.2 steps, lock at `fleet.json.lock`). The
  * mutation receives the raw file (`undefined` when missing) and returns the new
- * raw file; build it with {@link setAccountPolicy} and {@link setHandoff} so
- * only what the operator set is stored and unknown fields survive.
+ * raw file; build it with {@link setAccountPolicy}, {@link setFleetSetting} and
+ * {@link dropAccountPolicies} so only what the operator set is stored, bare keys
+ * are migrated, and unknown fields survive.
  *
  * @param dorkHome - The resolved DorkOS home.
  * @param mutate - Raw file in, raw file out.
@@ -560,14 +862,22 @@ export function updateFleetPolicy(
   });
 }
 
-/** The raw file as a v1 object to edit (a copy), creating one when missing or unusable. */
+/**
+ * The raw file as a v1 object to edit (a copy), creating one when missing or
+ * unusable. Bare account keys are renamed to `claude-code:<key>` here, so every
+ * write stores the 2.0.0 form.
+ */
 function editable(raw: unknown): Record<string, unknown> {
   if (isObject(raw) && raw.v !== undefined && raw.v !== FLEET_POLICY_VERSION) {
     throw new PreconditionError(
       `fleet.json is version ${JSON.stringify(raw.v)}; this flow writes version ${FLEET_POLICY_VERSION} and will not downgrade it. Update flow, then retry.`
     );
   }
-  return isObject(raw) ? { ...raw, v: FLEET_POLICY_VERSION } : { v: FLEET_POLICY_VERSION };
+  const next: Record<string, unknown> = isObject(raw)
+    ? { ...raw, v: FLEET_POLICY_VERSION }
+    : { v: FLEET_POLICY_VERSION };
+  if (isObject(next.accounts)) next.accounts = migrateEntries(next.accounts).entries;
+  return next;
 }
 
 /**
@@ -575,7 +885,7 @@ function editable(raw: unknown): Record<string, unknown> {
  * leaves it, `null` deletes it (back to the default), a value sets it.
  */
 export interface AccountPolicyPatch {
-  /** The role, or `null` for the default (kept-out). */
+  /** The role, or `null` for the default (rotation when implicit, else kept-out). */
   role?: AccountRole | null;
   /** 0-100, or `null` for the default. */
   reservePct?: number | null;
@@ -588,21 +898,24 @@ export interface AccountPolicyPatch {
 /**
  * Apply a patch to one account's entry in a raw `fleet.json` value. Pure:
  * returns a new value, stores only fields that were set, keeps unknown fields,
- * and drops an entry (or `scope`) left empty.
+ * migrates bare keys, and drops an entry (or `scope`) left empty.
  *
  * @param raw - The raw file (`undefined` when missing).
- * @param id - A registry id.
+ * @param key - `<runtime>:<id>`.
  * @param patch - The fields to set or delete.
  * @returns The new raw file.
- * @throws {UsageError} On an id or value the contract does not allow.
+ * @throws {UsageError} On a key or value the contract does not allow.
  * @throws {PreconditionError} When the file is another version (never downgraded).
  */
 export function setAccountPolicy(
   raw: unknown,
-  id: string,
+  key: string,
   patch: AccountPolicyPatch
 ): Record<string, unknown> {
-  if (!isValidAccountId(id)) throw new UsageError(`"${id}" is not a valid account id.`);
+  const parsed = parseAccountKey(key);
+  if (parsed === null || parsed.bare || !isValidAccountId(parsed.id)) {
+    throw new UsageError(`"${key}" is not a valid account key (<runtime>:<id>).`);
+  }
   if (patch.role != null && !['main', 'rotation', 'kept-out'].includes(patch.role)) {
     throw new UsageError(
       `role must be main, rotation or kept-out (got ${JSON.stringify(patch.role)}).`
@@ -626,13 +939,13 @@ export function setAccountPolicy(
 
   const next = editable(raw);
   const accounts = isObject(next.accounts) ? { ...next.accounts } : {};
-  const entry: Record<string, unknown> = isObject(accounts[id])
-    ? { ...(accounts[id] as object) }
+  const entry: Record<string, unknown> = isObject(accounts[key])
+    ? { ...(accounts[key] as object) }
     : {};
-  const apply = (key: string, value: unknown): void => {
+  const apply = (field: string, value: unknown): void => {
     if (value === undefined) return;
-    if (value === null) delete entry[key];
-    else entry[key] = value;
+    if (value === null) delete entry[field];
+    else entry[field] = value;
   };
   apply('role', patch.role);
   apply('reservePct', patch.reservePct);
@@ -644,28 +957,92 @@ export function setAccountPolicy(
     if (Object.keys(scope).length === 0) delete entry.scope;
     else entry.scope = scope;
   }
-  if (Object.keys(entry).length === 0) delete accounts[id];
-  else accounts[id] = entry;
+  if (Object.keys(entry).length === 0) delete accounts[key];
+  else accounts[key] = entry;
   next.accounts = accounts;
   return next;
 }
 
 /**
- * Set or clear the fleet-wide handoff in a raw `fleet.json` value. Pure.
+ * Remove stored policies from a raw `fleet.json` value (spec §1.1b, "An entry
+ * whose key names no account"). Pure; migrates bare keys first, so a bare key is
+ * named by its `claude-code:` form.
  *
  * @param raw - The raw file (`undefined` when missing).
- * @param handoff - `auto`, `ask`, or `null` to delete it (back to the default, auto).
+ * @param keys - The `<runtime>:<id>` keys to remove.
  * @returns The new raw file.
- * @throws {UsageError} On a value other than auto, ask or null.
  * @throws {PreconditionError} When the file is another version (never downgraded).
  */
-export function setHandoff(raw: unknown, handoff: HandoffMode | null): Record<string, unknown> {
-  if (handoff !== null && handoff !== 'auto' && handoff !== 'ask') {
-    throw new UsageError(`handoff must be auto or ask (got ${JSON.stringify(handoff)}).`);
+export function dropAccountPolicies(
+  raw: unknown,
+  keys: readonly string[]
+): Record<string, unknown> {
+  const next = editable(raw);
+  if (!isObject(next.accounts)) return next;
+  const accounts = { ...next.accounts };
+  for (const key of keys) delete accounts[key];
+  next.accounts = accounts;
+  return next;
+}
+
+/**
+ * The stored policies whose key names no account (after migrating bare keys):
+ * what `flow accounts` drops. Pure.
+ *
+ * @param accounts - Every account of every runtime ({@link readAccounts}).
+ * @param raw - The raw `fleet.json` (`undefined` when missing).
+ * @returns The `<runtime>:<id>` keys, sorted.
+ */
+export function unknownPolicyKeys(
+  accounts: readonly Pick<RuntimeAccount, 'runtime' | 'id'>[],
+  raw: unknown
+): string[] {
+  if (!isObject(raw) || !isObject(raw.accounts)) return [];
+  const known = new Set(accounts.map((account) => accountKey(account.runtime, account.id)));
+  return Object.keys(migrateEntries(raw.accounts).entries)
+    .filter((key) => !known.has(key))
+    .sort();
+}
+
+/** A fleet-wide setting and the value type `fleet.json` stores for it. */
+export interface FleetSettings {
+  /** Move work off a spent account on its own, or ask first. */
+  handoff: HandoffMode;
+  /** Runtimes in order of preference. */
+  runtimes: RuntimeSlug[];
+  /** Whether a task may continue on another runtime once its own is out. */
+  crossRuntimeFallback: CrossRuntimeFallback;
+}
+
+/**
+ * Set or clear one fleet-wide setting in a raw `fleet.json` value. Pure.
+ *
+ * @param raw - The raw file (`undefined` when missing).
+ * @param name - `handoff`, `runtimes` or `crossRuntimeFallback`.
+ * @param value - The value, or `null` to delete it (back to the default).
+ * @returns The new raw file.
+ * @throws {UsageError} On a value the contract does not allow.
+ * @throws {PreconditionError} When the file is another version (never downgraded).
+ */
+export function setFleetSetting<K extends keyof FleetSettings>(
+  raw: unknown,
+  name: K,
+  value: FleetSettings[K] | null
+): Record<string, unknown> {
+  if (value !== null) {
+    const ok =
+      name === 'handoff'
+        ? value === 'auto' || value === 'ask'
+        : name === 'crossRuntimeFallback'
+          ? value === 'off' || value === 'on'
+          : Array.isArray(value) &&
+            value.every(isRuntimeSlug) &&
+            new Set(value).size === value.length;
+    if (!ok) throw new UsageError(`${name} cannot be ${JSON.stringify(value)}.`);
   }
   const next = editable(raw);
-  if (handoff === null) delete next.handoff;
-  else next.handoff = handoff;
+  if (value === null) delete next[name];
+  else next[name] = Array.isArray(value) ? [...value] : value;
   return next;
 }
 
@@ -802,6 +1179,74 @@ export function modelRoom(windows: Windows, model: string, now: Instant): boolea
   return roomIn(windows, `model:${model}`, now, 100);
 }
 
+/**
+ * Room within a spend cap (spec §1.1b, metered accounts): false when the spend
+ * reading has a `limitUsd` and `costUsd >= limitUsd`, true for any other valid
+ * reading, `null` with none.
+ *
+ * @param spend - The ledger's `spend`, or anything.
+ * @returns True, false, or `null` for unknown.
+ */
+export function spendRoom(spend: unknown): boolean | null {
+  const read: SpendEntry | null = readSpend(spend);
+  if (read === null) return null;
+  return read.limitUsd === null || read.costUsd < read.limitUsd;
+}
+
+/** The runtimes whose accounts always have rate-limit windows (subscription plans). */
+const WINDOWED_RUNTIMES: ReadonlySet<RuntimeSlug> = new Set(['claude-code', 'codex']);
+
+/** Whether a window key is one model's bucket, which bounds only sessions on that model. */
+function isModelBucket(key: string): boolean {
+  return key.startsWith('model:') || key.startsWith('seven_day_');
+}
+
+/**
+ * Whether an account has room for work, whatever kind of account it is (spec
+ * §1.1b "Room on an account"):
+ *
+ * - `false` when any current window that is not a model bucket is `rejected` or
+ *   at its ceiling (`seven_day` against `100 - effectiveReservePct`, every other
+ *   window against 100), or when the spend reading is at its `limitUsd`.
+ * - Else `true` when the account has a current window reading (not a model
+ *   bucket) or a spend reading: a metered account is eligible unless its spend
+ *   cap is reached.
+ * - Else, with nothing to go on: `true` for a runtime without subscription
+ *   windows (OpenCode; a local-model account, no windows and no cap, is always
+ *   eligible), and `null` (unknown) for Claude Code and Codex.
+ *
+ * Model buckets are checked separately with {@link modelRoom}, when the model is
+ * known.
+ *
+ * @param runtime - The account's runtime.
+ * @param policy - The account's resolved policy (for the weekly reserve).
+ * @param ledger - The account's parsed ledger, or `null` with none.
+ * @param now - The moment to judge at.
+ * @returns True, false, or `null` for unknown.
+ */
+export function accountRoom(
+  runtime: RuntimeSlug,
+  policy: ResolvedAccountPolicy,
+  ledger: { windows?: unknown; spend?: unknown } | null,
+  now: Instant
+): boolean | null {
+  const windows = isObject(ledger?.windows) ? ledger.windows : null;
+  let seen = false;
+  for (const key of Object.keys(windows ?? {})) {
+    if (isModelBucket(key)) continue;
+    const reading = readWindow(entryOf(windows, key), now, key);
+    if (reading === null) continue;
+    seen = true;
+    const ceiling = key === 'seven_day' ? 100 - effectiveReservePct(policy, windows, now) : 100;
+    if (reading.status === 'rejected') return false;
+    if (reading.usedPct !== null && reading.usedPct >= ceiling) return false;
+  }
+  const spend = spendRoom(ledger?.spend);
+  if (spend === false) return false;
+  if (seen || spend === true) return true;
+  return WINDOWED_RUNTIMES.has(runtime) ? null : true;
+}
+
 /** What `flow accounts add` registers. */
 export interface NewIdentity {
   /** The absolute `CLAUDE_CONFIG_DIR` (already `~`-expanded and checked by the caller). */
@@ -903,7 +1348,7 @@ export function addIdentity(
     );
   }
 
-  const { accounts } = readIdentities(config);
+  const { accounts } = readIdentities(config, 'claude-code');
   const wanted = normalizedPath(identity.path);
   const existing = accounts.find((account) => normalizedPath(account.path) === wanted);
   if (existing !== undefined) {

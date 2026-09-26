@@ -109,7 +109,8 @@ export const COMMON_FLAGS: Readonly<Record<CommonFlag, FlagSpec>> = {
     name: 'session',
     kind: 'string',
     value: 'id',
-    description: 'The harness session id. Default: FLOW_SESSION_ID, else CLAUDE_CODE_SESSION_ID.',
+    description:
+      "The harness session id. Default: FLOW_SESSION_ID, else the runtime's own (CLAUDE_CODE_SESSION_ID, CODEX_THREAD_ID).",
   },
   manual: {
     name: 'manual',

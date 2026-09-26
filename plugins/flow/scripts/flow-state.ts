@@ -151,6 +151,9 @@ export const FlowRunSchema = z.looseObject({
   // from a future launcher discard every in-flight run on the machine.
   account: z.string().optional(),
   host: z.string().optional(),
+  // The current session's runtime (spec flow-cli-core §1.3); a bare string for
+  // the same reason as `host`.
+  runtime: z.string().optional(),
   // The last checkpoint, the drain state and the limit (spec
   // flow-handoff-dispatch §1, §4.3, §5.1). Their vocabularies are checked as
   // strings, for the same reason as `host`; see drain/state.ts.
