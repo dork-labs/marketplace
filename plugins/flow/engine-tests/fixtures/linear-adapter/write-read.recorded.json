@@ -1,0 +1,419 @@
+{
+  "recordedAt": "2026-09-26",
+  "composio": "0.2.31",
+  "query": "query FlowWriteRead($id: String!, $teamId: String!) {\n  issue(id: $id) {\n    id identifier team { id key } state { id type }\n    issueLabels: labels(first: 100) { nodes { id name parent { name } } }\n  }\n  team(id: $teamId) {\n    teamLabels: labels(first: 250) { nodes { id name isGroup parent { name } } }\n    states(first: 100) { nodes { id name type position } }\n  }\n}",
+  "variables": {
+    "id": "DOR-2367",
+    "teamId": "00000000-0000-4000-8000-00000000team"
+  },
+  "response": {
+    "successful": true,
+    "data": {
+      "composio_execution_message": null,
+      "data": {
+        "issue": {
+          "id": "uuid-DOR-2367",
+          "identifier": "DOR-2367",
+          "issueLabels": {
+            "nodes": [
+              {
+                "id": "lbl-origin-from-agent",
+                "name": "from-agent",
+                "parent": {
+                  "name": "origin"
+                }
+              },
+              {
+                "id": "lbl-type-task",
+                "name": "task",
+                "parent": {
+                  "name": "type"
+                }
+              },
+              {
+                "id": "lbl-repo-marketplace",
+                "name": "marketplace",
+                "parent": {
+                  "name": "repo"
+                }
+              },
+              {
+                "id": "lbl-agent-claimed",
+                "name": "claimed",
+                "parent": {
+                  "name": "agent"
+                }
+              }
+            ]
+          },
+          "state": {
+            "id": "st-in-progress",
+            "type": "started"
+          },
+          "team": {
+            "id": "00000000-0000-4000-8000-00000000team",
+            "key": "DOR"
+          }
+        },
+        "team": {
+          "states": {
+            "nodes": [
+              {
+                "id": "st-triage",
+                "name": "Triage",
+                "position": 0,
+                "type": "triage"
+              },
+              {
+                "id": "st-in-review",
+                "name": "In Review",
+                "position": 1002,
+                "type": "started"
+              },
+              {
+                "id": "st-canceled",
+                "name": "Canceled",
+                "position": 4,
+                "type": "canceled"
+              },
+              {
+                "id": "st-duplicate",
+                "name": "Duplicate",
+                "position": 5,
+                "type": "duplicate"
+              },
+              {
+                "id": "st-todo",
+                "name": "Todo",
+                "position": 1,
+                "type": "unstarted"
+              },
+              {
+                "id": "st-backlog",
+                "name": "Backlog",
+                "position": 0,
+                "type": "backlog"
+              },
+              {
+                "id": "st-done",
+                "name": "Done",
+                "position": 3,
+                "type": "completed"
+              },
+              {
+                "id": "st-in-progress",
+                "name": "In Progress",
+                "position": 2,
+                "type": "started"
+              }
+            ]
+          },
+          "teamLabels": {
+            "nodes": [
+              {
+                "id": "lbl-repo-marketplace",
+                "isGroup": false,
+                "name": "marketplace",
+                "parent": {
+                  "name": "repo"
+                }
+              },
+              {
+                "id": "lbl-repo",
+                "isGroup": true,
+                "name": "repo",
+                "parent": null
+              },
+              {
+                "id": "lbl-cloud-contract",
+                "isGroup": false,
+                "name": "cloud-contract",
+                "parent": null
+              },
+              {
+                "id": "lbl-ui-audit-in-progress",
+                "isGroup": false,
+                "name": "in-progress",
+                "parent": {
+                  "name": "ui-audit"
+                }
+              },
+              {
+                "id": "lbl-ui-audit",
+                "isGroup": true,
+                "name": "ui-audit",
+                "parent": null
+              },
+              {
+                "id": "lbl-source-audit",
+                "isGroup": false,
+                "name": "audit",
+                "parent": {
+                  "name": "source"
+                }
+              },
+              {
+                "id": "lbl-source",
+                "isGroup": true,
+                "name": "source",
+                "parent": null
+              },
+              {
+                "id": "lbl-stage-triage",
+                "isGroup": false,
+                "name": "triage",
+                "parent": {
+                  "name": "stage"
+                }
+              },
+              {
+                "id": "lbl-stage-verify",
+                "isGroup": false,
+                "name": "verify",
+                "parent": {
+                  "name": "stage"
+                }
+              },
+              {
+                "id": "lbl-stage-execute",
+                "isGroup": false,
+                "name": "execute",
+                "parent": {
+                  "name": "stage"
+                }
+              },
+              {
+                "id": "lbl-stage-specify",
+                "isGroup": false,
+                "name": "specify",
+                "parent": {
+                  "name": "stage"
+                }
+              },
+              {
+                "id": "lbl-stage-ideate",
+                "isGroup": false,
+                "name": "ideate",
+                "parent": {
+                  "name": "stage"
+                }
+              },
+              {
+                "id": "lbl-stage-capture",
+                "isGroup": false,
+                "name": "capture",
+                "parent": {
+                  "name": "stage"
+                }
+              },
+              {
+                "id": "lbl-stage-done",
+                "isGroup": false,
+                "name": "done",
+                "parent": {
+                  "name": "stage"
+                }
+              },
+              {
+                "id": "lbl-stage-decompose",
+                "isGroup": false,
+                "name": "decompose",
+                "parent": {
+                  "name": "stage"
+                }
+              },
+              {
+                "id": "lbl-stage",
+                "isGroup": true,
+                "name": "stage",
+                "parent": null
+              },
+              {
+                "id": "lbl-agent-needs-input",
+                "isGroup": false,
+                "name": "needs-input",
+                "parent": {
+                  "name": "agent"
+                }
+              },
+              {
+                "id": "lbl-origin-from-signal",
+                "isGroup": false,
+                "name": "from-signal",
+                "parent": {
+                  "name": "origin"
+                }
+              },
+              {
+                "id": "lbl-origin-from-agent",
+                "isGroup": false,
+                "name": "from-agent",
+                "parent": {
+                  "name": "origin"
+                }
+              },
+              {
+                "id": "lbl-confidence-low",
+                "isGroup": false,
+                "name": "low",
+                "parent": {
+                  "name": "confidence"
+                }
+              },
+              {
+                "id": "lbl-confidence-medium",
+                "isGroup": false,
+                "name": "medium",
+                "parent": {
+                  "name": "confidence"
+                }
+              },
+              {
+                "id": "lbl-confidence-high",
+                "isGroup": false,
+                "name": "high",
+                "parent": {
+                  "name": "confidence"
+                }
+              },
+              {
+                "id": "lbl-origin-human",
+                "isGroup": false,
+                "name": "human",
+                "parent": {
+                  "name": "origin"
+                }
+              },
+              {
+                "id": "lbl-agent-completed",
+                "isGroup": false,
+                "name": "completed",
+                "parent": {
+                  "name": "agent"
+                }
+              },
+              {
+                "id": "lbl-agent-claimed",
+                "isGroup": false,
+                "name": "claimed",
+                "parent": {
+                  "name": "agent"
+                }
+              },
+              {
+                "id": "lbl-agent-ready",
+                "isGroup": false,
+                "name": "ready",
+                "parent": {
+                  "name": "agent"
+                }
+              },
+              {
+                "id": "lbl-type-meta",
+                "isGroup": false,
+                "name": "meta",
+                "parent": {
+                  "name": "type"
+                }
+              },
+              {
+                "id": "lbl-type-signal",
+                "isGroup": false,
+                "name": "signal",
+                "parent": {
+                  "name": "type"
+                }
+              },
+              {
+                "id": "lbl-type-monitor",
+                "isGroup": false,
+                "name": "monitor",
+                "parent": {
+                  "name": "type"
+                }
+              },
+              {
+                "id": "lbl-type-task",
+                "isGroup": false,
+                "name": "task",
+                "parent": {
+                  "name": "type"
+                }
+              },
+              {
+                "id": "lbl-type-hypothesis",
+                "isGroup": false,
+                "name": "hypothesis",
+                "parent": {
+                  "name": "type"
+                }
+              },
+              {
+                "id": "lbl-type-research",
+                "isGroup": false,
+                "name": "research",
+                "parent": {
+                  "name": "type"
+                }
+              },
+              {
+                "id": "lbl-type-idea",
+                "isGroup": false,
+                "name": "idea",
+                "parent": {
+                  "name": "type"
+                }
+              },
+              {
+                "id": "lbl-confidence",
+                "isGroup": true,
+                "name": "confidence",
+                "parent": null
+              },
+              {
+                "id": "lbl-origin",
+                "isGroup": true,
+                "name": "origin",
+                "parent": null
+              },
+              {
+                "id": "lbl-agent",
+                "isGroup": true,
+                "name": "agent",
+                "parent": null
+              },
+              {
+                "id": "lbl-type",
+                "isGroup": true,
+                "name": "type",
+                "parent": null
+              },
+              {
+                "id": "lbl-feature",
+                "isGroup": false,
+                "name": "Feature",
+                "parent": null
+              },
+              {
+                "id": "lbl-improvement",
+                "isGroup": false,
+                "name": "Improvement",
+                "parent": null
+              },
+              {
+                "id": "lbl-bug",
+                "isGroup": false,
+                "name": "Bug",
+                "parent": null
+              }
+            ]
+          }
+        }
+      },
+      "errors": null,
+      "extensions": null
+    },
+    "error": null,
+    "logId": "log_recorded0004"
+  }
+}

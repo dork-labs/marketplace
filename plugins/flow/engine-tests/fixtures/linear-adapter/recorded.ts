@@ -8,7 +8,8 @@
  * same envelope inside the file), a GraphQL failure (exit 0,
  * `successful: false`, the message in `error`), labels as a leaf plus a
  * `parent` group, `triage` and `duplicate` state types, and team states with
- * `position`. The VALUES are synthesized: ids, titles and people are made up,
+ * `position`. The write-read and comment-target answers are stored whole, with
+ * the query they were captured with, in the `*.recorded.json` files beside this. The VALUES are synthesized: ids, titles and people are made up,
  * and only a handful of items are kept, so nothing private is in this file.
  */
 
@@ -55,31 +56,9 @@ export const LABEL = {
   agentReady: { id: 'lbl-agent-ready', name: 'ready', parent: { name: 'agent' } },
   agentClaimed: { id: 'lbl-agent-claimed', name: 'claimed', parent: { name: 'agent' } },
   stageExecute: { id: 'lbl-stage-execute', name: 'execute', parent: { name: 'stage' } },
-  stageIdeate: { id: 'lbl-stage-ideate', name: 'ideate', parent: { name: 'stage' } },
   originAgent: { id: 'lbl-origin-agent', name: 'from-agent', parent: { name: 'origin' } },
-  repoApp: { id: 'lbl-repo-app', name: 'app', parent: { name: 'repo' } },
   bareBug: { id: 'lbl-bug', name: 'Bug', parent: null },
 } as const;
-
-/** The team's labels, as `team { labels }` returns them (groups included). */
-export const TEAM_LABELS = [
-  ...Object.values(LABEL).map((label) => ({ ...label, isGroup: false })),
-  { id: 'lbl-group-agent', name: 'agent', isGroup: true, parent: null },
-  { id: 'lbl-group-stage', name: 'stage', isGroup: true, parent: null },
-  { id: 'lbl-stage-verify', name: 'verify', isGroup: false, parent: { name: 'stage' } },
-];
-
-/** The team's states, as `team { states }` returns them: unordered, with positions. */
-export const TEAM_STATES = [
-  { id: 'st-triage', name: 'Triage', type: 'triage', position: 0 },
-  { id: 'st-review', name: 'In Review', type: 'started', position: 1002 },
-  { id: 'st-canceled', name: 'Canceled', type: 'canceled', position: 4 },
-  { id: 'st-duplicate', name: 'Duplicate', type: 'duplicate', position: 5 },
-  { id: 'st-todo', name: 'Todo', type: 'unstarted', position: 1 },
-  { id: 'st-backlog', name: 'Backlog', type: 'backlog', position: 0 },
-  { id: 'st-done', name: 'Done', type: 'completed', position: 3 },
-  { id: 'st-progress', name: 'In Progress', type: 'started', position: 2 },
-];
 
 /** Build one issue node in the core-fields shape. */
 export function issueNode(

@@ -8,7 +8,7 @@
  * @see fixtures/linear-adapter/recorded.ts for what was recorded and what was synthesized
  */
 
-import { mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -33,8 +33,6 @@ import {
   RELATIONS_PAGE,
   spilledEnvelope,
   TEAM,
-  TEAM_LABELS,
-  TEAM_STATES,
   VIEWER,
 } from './fixtures/linear-adapter/recorded.ts';
 
@@ -519,25 +517,79 @@ describe('getCurrentUser and getItem', () => {
   });
 });
 
-/** A write-read answer: the issue as it is NOW, plus the team's labels and states. */
-function writeRead(labels: object[], state = { id: 'st-todo', type: 'unstarted' }) {
-  return okEnvelope({
-    issue: {
-      id: 'uuid-DOR-101',
-      identifier: 'DOR-101',
-      team: TEAM,
-      state,
-      labels: { nodes: labels },
-    },
-    team: { labels: { nodes: TEAM_LABELS }, states: { nodes: TEAM_STATES } },
+/**
+ * A recorded read: the query it was captured with and the real (anonymized)
+ * answer. The stub answers only that exact query, so changing a query without
+ * re-recording its answer fails here instead of passing against a mock.
+ */
+interface Recorded {
+  query: string;
+  response: Record<string, unknown>;
+}
+const WRITE_READ = JSON.parse(
+  readFileSync(
+    new URL('./fixtures/linear-adapter/write-read.recorded.json', import.meta.url),
+    'utf8'
+  )
+) as Recorded;
+const COMMENT_TARGET = JSON.parse(
+  readFileSync(
+    new URL('./fixtures/linear-adapter/comment-target.recorded.json', import.meta.url),
+    'utf8'
+  )
+) as Recorded;
+
+/** The recorded answer for `call`, after checking it asked the recorded query. */
+function replay(recorded: Recorded, call: Call): Record<string, unknown> {
+  expect(call.query, `${call.operation} changed; re-record its fixture`).toBe(recorded.query);
+  return structuredClone(recorded.response);
+}
+
+interface RecordedLabel {
+  id: string;
+  name: string;
+  isGroup?: boolean;
+  parent: { name: string } | null;
+}
+
+/** The recorded team's labels, by namespaced name. */
+const TEAM_LABEL_IDS = new Map(
+  (
+    WRITE_READ.response as { data: { data: { team: { teamLabels: { nodes: RecordedLabel[] } } } } }
+  ).data.data.team.teamLabels.nodes
+    .filter((label) => !label.isGroup)
+    .map((label) => [label.parent ? `${label.parent.name}/${label.name}` : label.name, label])
+);
+
+/** The recorded label id for a namespaced name. */
+function labelId(name: string): string {
+  const label = TEAM_LABEL_IDS.get(name);
+  if (label === undefined) throw new Error(`the recorded team has no ${name} label`);
+  return label.id;
+}
+
+/**
+ * The recorded write-read answer with the issue's labels and state set for one
+ * case (the team's labels and states stay as recorded).
+ */
+function writeRead(call: Call, labels: string[], state = { id: 'st-todo', type: 'unstarted' }) {
+  const envelope = replay(WRITE_READ, call) as {
+    data: { data: { issue: { state: unknown; issueLabels: { nodes: unknown[] } } } };
+  };
+  const issue = envelope.data.data.issue;
+  issue.state = state;
+  issue.issueLabels.nodes = labels.map((name) => {
+    const { isGroup: _group, ...label } = TEAM_LABEL_IDS.get(name) as RecordedLabel;
+    return label;
   });
+  return envelope;
 }
 
 /** The item as the caller last saw it (older than the tracker). */
 const STALE_ITEM: WorkItem = {
-  id: 'uuid-DOR-101',
-  identifier: 'DOR-101',
-  title: 'Title of DOR-101',
+  id: 'uuid-DOR-2367',
+  identifier: 'DOR-2367',
+  title: 'Title of DOR-2367',
   description: '',
   type: 'task',
   stateCategory: 'unstarted',
@@ -551,11 +603,11 @@ describe('applyWorkState', () => {
   it('sends ONE issueUpdate whose labelIds come from a fresh read, with the lowest-position state', async () => {
     // Purpose: labelIds replaces the whole set, so it must be the union from a
     // read taken just before the write (keeping a label another session added,
-    // repo/app), with only the named families replaced; the state is the team's
-    // lowest-position state of the target category (In Progress, not In Review).
+    // repo/marketplace), with only the named families replaced; the state is the
+    // team's lowest-position state of the target category (In Progress, not In Review).
     const { adapter, calls } = build((call) =>
       call.operation === 'FlowWriteRead'
-        ? writeRead([LABEL.typeTask, LABEL.agentReady, LABEL.stageExecute, LABEL.repoApp])
+        ? writeRead(call, ['type/task', 'agent/ready', 'stage/execute', 'repo/marketplace'])
         : okEnvelope({ issueUpdate: { success: true } })
     );
     await adapter.applyWorkState(STALE_ITEM, {
@@ -565,15 +617,57 @@ describe('applyWorkState', () => {
     });
 
     expect(calls.map((call) => call.operation)).toEqual(['FlowWriteRead', 'FlowApplyWorkState']);
-    expect(calls[0].variables).toEqual({ id: 'uuid-DOR-101', teamId: TEAM.id });
-    const update = calls[1];
-    expect(update.variables).toEqual({
-      id: 'uuid-DOR-101',
+    expect(calls[0].variables).toEqual({ id: 'uuid-DOR-2367', teamId: TEAM.id });
+    expect(calls[1].variables).toEqual({
+      id: 'uuid-DOR-2367',
       input: {
-        labelIds: [LABEL.typeTask.id, LABEL.repoApp.id, LABEL.agentClaimed.id],
-        stateId: 'st-progress',
+        labelIds: [labelId('type/task'), labelId('repo/marketplace'), labelId('agent/claimed')],
+        stateId: 'st-in-progress',
       },
     });
+  });
+
+  it('works on the recorded answer exactly as Linear gave it', async () => {
+    // Purpose: no editing of the fixture at all: the real issue (claimed,
+    // started) moves to verify, keeping every label it had but its stage.
+    const { adapter, calls } = build((call) =>
+      call.operation === 'FlowWriteRead'
+        ? replay(WRITE_READ, call)
+        : okEnvelope({ issueUpdate: { success: true } })
+    );
+    await adapter.applyWorkState(STALE_ITEM, { stageLabel: 'stage/verify' });
+    expect(calls[1].variables.input).toEqual({
+      labelIds: [
+        labelId('origin/from-agent'),
+        labelId('type/task'),
+        labelId('repo/marketplace'),
+        labelId('agent/claimed'),
+        labelId('stage/verify'),
+      ],
+    });
+  });
+
+  it('throws and writes nothing when the answer has no label list', async () => {
+    // Purpose: Composio renames a field asked for twice (labels_1, labels_2);
+    // a missing label connection read as "no labels" would strip every label
+    // on the write, so it must be a failed read.
+    const { adapter, calls } = build((call) => {
+      const envelope = replay(WRITE_READ, call) as {
+        data: { data: { issue: Record<string, unknown>; team: Record<string, unknown> } };
+      };
+      const { issue, team } = envelope.data.data;
+      issue.labels_1 = issue.issueLabels;
+      delete issue.issueLabels;
+      team.labels_2 = team.teamLabels;
+      delete team.teamLabels;
+      return envelope;
+    });
+    const error = await rejection(
+      adapter.applyWorkState(STALE_ITEM, { stateCategory: 'unstarted' })
+    );
+    expect(error).toBeInstanceOf(TrackerError);
+    expect((error as Error).message).toMatch(/no label list; flow wrote nothing/);
+    expect(calls.map((call) => call.operation)).toEqual(['FlowWriteRead']);
   });
 
   it('leaves the state alone when the item is already in the target category', async () => {
@@ -581,7 +675,7 @@ describe('applyWorkState', () => {
     // Progress; a same-category change sends labels only.
     const { adapter, calls } = build((call) =>
       call.operation === 'FlowWriteRead'
-        ? writeRead([LABEL.typeTask, LABEL.agentClaimed], { id: 'st-review', type: 'started' })
+        ? writeRead(call, ['type/task', 'agent/claimed'], { id: 'st-in-review', type: 'started' })
         : okEnvelope({ issueUpdate: { success: true } })
     );
     await adapter.applyWorkState(STALE_ITEM, {
@@ -589,14 +683,14 @@ describe('applyWorkState', () => {
       stageLabel: 'stage/verify',
     });
     expect(calls[1].variables.input).toEqual({
-      labelIds: [LABEL.typeTask.id, LABEL.agentClaimed.id, 'lbl-stage-verify'],
+      labelIds: [labelId('type/task'), labelId('agent/claimed'), labelId('stage/verify')],
     });
   });
 
   it('sends nothing when the tracker already matches the change', async () => {
     // Purpose: a re-run converges without a write.
-    const { adapter, calls } = build(() =>
-      writeRead([LABEL.typeTask, LABEL.agentClaimed], { id: 'st-progress', type: 'started' })
+    const { adapter, calls } = build((call) =>
+      writeRead(call, ['type/task', 'agent/claimed'], { id: 'st-in-progress', type: 'started' })
     );
     await adapter.applyWorkState(STALE_ITEM, {
       stateCategory: 'started',
@@ -608,7 +702,7 @@ describe('applyWorkState', () => {
   it('refuses a label the team does not have, naming it, and writes nothing', async () => {
     // Purpose: flow never creates labels; a missing one is a failed write that
     // says which label to create.
-    const { adapter, calls } = build(() => writeRead([LABEL.typeTask]));
+    const { adapter, calls } = build((call) => writeRead(call, ['type/task']));
     const error = await rejection(
       adapter.applyWorkState(STALE_ITEM, { stageLabel: 'stage/nonexistent' })
     );
@@ -621,7 +715,7 @@ describe('applyWorkState', () => {
     // Purpose: a write is never reported as success unless Linear says so.
     const { adapter } = build((call) =>
       call.operation === 'FlowWriteRead'
-        ? writeRead([LABEL.typeTask, LABEL.agentReady])
+        ? writeRead(call, ['type/task', 'agent/ready'])
         : okEnvelope({ issueUpdate: { success: false } })
     );
     const error = await rejection(
@@ -632,17 +726,35 @@ describe('applyWorkState', () => {
 });
 
 describe('comment', () => {
-  it('posts through commentCreate with the issue id and body as variables', async () => {
+  it("checks the item is the team's, then posts with the issue id and body as variables", async () => {
     // Purpose: the body goes in a variable, so a `$word` or a provenance line in
-    // it can never break or alter the query.
-    const { adapter, calls } = build(() => okEnvelope({ commentCreate: { success: true } }));
+    // it can never break or alter the query; and like every write, it acts only
+    // on the configured team's items.
+    const { adapter, calls } = build((call) =>
+      call.operation === 'FlowCommentTarget'
+        ? replay(COMMENT_TARGET, call)
+        : okEnvelope({ commentCreate: { success: true } })
+    );
     const body = 'Released: run `echo $sessionId` first.\n<!-- agent:provenance {"v":1} -->';
     await adapter.comment(STALE_ITEM, body);
-    expect(calls).toHaveLength(1);
-    expect(calls[0]).toMatchObject({
-      operation: 'FlowComment',
-      variables: { issueId: 'uuid-DOR-101', body },
+    expect(calls.map((call) => call.operation)).toEqual(['FlowCommentTarget', 'FlowComment']);
+    expect(calls[1].variables).toEqual({ issueId: 'uuid-DOR-2367', body });
+  });
+
+  it("refuses to comment on another team's item", async () => {
+    // Purpose: one account reaches every team; a comment is a user-visible
+    // write, so it is never posted outside the configured team.
+    const { adapter, calls } = build((call) => {
+      const envelope = replay(COMMENT_TARGET, call) as {
+        data: { data: { issue: { identifier: string; team: { id: string; key: string } } } };
+      };
+      envelope.data.data.issue.identifier = 'FB-7';
+      envelope.data.data.issue.team = { id: 'other-team', key: 'FB' };
+      return envelope;
     });
+    const error = await rejection(adapter.comment({ ...STALE_ITEM, identifier: 'FB-7' }, 'hi'));
+    expect(error).toBeInstanceOf(PreconditionError);
+    expect(calls.map((call) => call.operation)).toEqual(['FlowCommentTarget']);
   });
 });
 
@@ -654,7 +766,9 @@ describe('GraphQL hygiene', () => {
     const routes = (call: Call): Answer => {
       switch (call.operation) {
         case 'FlowWriteRead':
-          return writeRead([LABEL.typeTask, LABEL.agentReady]);
+          return writeRead(call, ['type/task', 'agent/ready']);
+        case 'FlowCommentTarget':
+          return replay(COMMENT_TARGET, call);
         case 'FlowApplyWorkState':
           return okEnvelope({ issueUpdate: { success: true } });
         case 'FlowComment':

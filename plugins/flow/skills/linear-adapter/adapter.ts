@@ -162,12 +162,17 @@ export const ITEM_WITH_COMMENTS_QUERY = `query FlowItemComments($id: String!, $c
 export const WRITE_READ_QUERY = `query FlowWriteRead($id: String!, $teamId: String!) {
   issue(id: $id) {
     id identifier team { id key } state { id type }
-    labels(first: 100) { nodes { id name parent { name } } }
+    issueLabels: labels(first: 100) { nodes { id name parent { name } } }
   }
   team(id: $teamId) {
-    labels(first: 250) { nodes { id name isGroup parent { name } } }
+    teamLabels: labels(first: 250) { nodes { id name isGroup parent { name } } }
     states(first: 100) { nodes { id name type position } }
   }
+}`;
+
+/** The read `comment` takes to confirm the item is the team's before posting. */
+export const COMMENT_TARGET_QUERY = `query FlowCommentTarget($id: String!) {
+  issue(id: $id) { id identifier team { id key } }
 }`;
 
 /** The one write `applyWorkState` sends: labels and state together. */
@@ -256,9 +261,9 @@ interface RawPage<T> {
 
 /** What {@link WRITE_READ_QUERY} returns. */
 interface WriteReadResponse {
-  issue?: RawIssue | null;
+  issue?: (RawIssue & { issueLabels?: RawPage<RawLabel> | null }) | null;
   team?: {
-    labels?: RawPage<RawLabel> | null;
+    teamLabels?: RawPage<RawLabel> | null;
     states?: RawPage<{ id: string; name?: string; type: string; position: number }> | null;
   } | null;
 }
@@ -463,6 +468,32 @@ function cleanMessage(text: string, secrets: readonly string[]): string {
 }
 
 /**
+ * Refuse an issue that is missing or belongs to another team; flow acts only
+ * on its own team's items.
+ *
+ * @param issue - The issue as read, or null.
+ * @param identifier - What the caller asked for, for the message.
+ * @param team - The configured team.
+ * @returns The issue.
+ * @throws {PreconditionError} When missing or foreign.
+ */
+function ownIssue<T extends RawIssue>(
+  issue: T | null | undefined,
+  identifier: string,
+  team: Team
+): T {
+  if (issue === null || issue === undefined) {
+    throw new PreconditionError(`${identifier} was not found in Linear`);
+  }
+  if (issue.team?.id !== team.id || !issue.identifier.startsWith(`${team.key}-`)) {
+    throw new PreconditionError(
+      `${issue.identifier} belongs to another Linear team, not ${team.key}; flow only acts on its own team`
+    );
+  }
+  return issue;
+}
+
+/**
  * Build the Linear code adapter.
  *
  * @param ctx - The CLI's context: config, secrets, transport and warning sink.
@@ -645,16 +676,7 @@ export function createAdapter(ctx: AdapterContext): CodeAdapter {
       }
       throw error;
     }
-    const issue = data.issue;
-    if (issue === null || issue === undefined) {
-      throw new PreconditionError(`${identifier} was not found in Linear`);
-    }
-    if (issue.team?.id !== teamId || !issue.identifier.startsWith(`${key}-`)) {
-      throw new PreconditionError(
-        `${issue.identifier} belongs to another Linear team, not ${key}; flow only acts on its own team`
-      );
-    }
-    return issue;
+    return ownIssue(data.issue, identifier, { id: teamId, key });
   }
 
   return {
@@ -770,23 +792,25 @@ export function createAdapter(ctx: AdapterContext): CodeAdapter {
         id: item.id || item.identifier,
         teamId,
       });
-      const issue = data.issue;
-      if (issue === null || issue === undefined) {
-        throw new PreconditionError(`${item.identifier} was not found in Linear`);
-      }
-      if (issue.team?.id !== teamId || !issue.identifier.startsWith(`${key}-`)) {
-        throw new PreconditionError(
-          `${issue.identifier} belongs to another Linear team, not ${key}; flow only acts on its own team`
+      const issue = ownIssue(data.issue, item.identifier, { id: teamId, key });
+
+      // The label set comes from this read, never from `item`. A missing
+      // connection is a failed read, never an empty set: written back as
+      // labelIds it would strip every label. (Both label connections carry an
+      // alias: Composio renames a field asked for twice to labels_1/labels_2.)
+      const issueLabels = issue.issueLabels?.nodes;
+      const teamLabelNodes = data.team?.teamLabels?.nodes;
+      if (!Array.isArray(issueLabels) || !Array.isArray(teamLabelNodes)) {
+        throw new TrackerError(
+          `Linear's answer for ${issue.identifier} carried no label list; flow wrote nothing`
         );
       }
-
-      // The label set comes from this read, never from `item`.
       const current = new Map<string, string>();
-      for (const label of issue.labels?.nodes ?? []) current.set(namespacedLabel(label), label.id);
+      for (const label of issueLabels) current.set(namespacedLabel(label), label.id);
       const next = labelsAfterChange([...current.keys()], change);
 
       const teamLabels = new Map<string, string>();
-      for (const label of data.team?.labels?.nodes ?? []) {
+      for (const label of teamLabelNodes) {
         if (label.isGroup) continue;
         if (!teamLabels.has(namespacedLabel(label)))
           teamLabels.set(namespacedLabel(label), label.id);
@@ -831,9 +855,13 @@ export function createAdapter(ctx: AdapterContext): CodeAdapter {
     },
 
     async comment(item: WorkItem, body: string) {
+      const target = await graphql<{ issue?: RawIssue | null }>(COMMENT_TARGET_QUERY, {
+        id: item.id || item.identifier,
+      });
+      const issue = ownIssue(target.issue, item.identifier, await team());
       const result = await graphql<{ commentCreate?: { success?: boolean } | null }>(
         COMMENT_MUTATION,
-        { issueId: item.id, body }
+        { issueId: issue.id, body }
       );
       if (result.commentCreate?.success !== true) {
         throw new TrackerError(`Linear did not confirm the comment on ${item.identifier}`);
