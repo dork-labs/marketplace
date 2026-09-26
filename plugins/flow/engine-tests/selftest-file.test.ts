@@ -20,6 +20,7 @@ import {
   CREATE_MISSING,
   WINDOW_DAYS,
   fileFailures,
+  filedLabels,
   markerFor,
   planFiling,
   titleFor,
@@ -149,8 +150,17 @@ describe('fileFailures against the fake tracker', () => {
     return new FakeTracker(backlog, { now });
   }
 
-  it('writes nothing and lists the item when there is no match: no create verb', async () => {
-    const fake = tracker({ items: [] });
+  it('writes nothing and lists the item when the adapter cannot create', async () => {
+    const fake = tracker({
+      items: [],
+      capabilities: [
+        'getCurrentUser',
+        'getBacklogSnapshot',
+        'getItem',
+        'applyWorkState',
+        'comment',
+      ],
+    });
     const result = await fileFailures([check], META, {
       adapter: fake.adapter,
       sign,
@@ -161,6 +171,76 @@ describe('fileFailures against the fake tracker', () => {
       expect.objectContaining({ checkId: check.id, title: titleFor(check) }),
     ]);
     expect(fake.writes).toEqual([]);
+  });
+
+  it('keeps one label per group: extras in a group already filled, or agent/*, are dropped', () => {
+    expect(
+      filedLabels([
+        'origin/human',
+        'type/bug',
+        'agent/ready',
+        'flow/self-test',
+        'flow/other',
+        'Bug',
+      ])
+    ).toEqual(['type/task', 'origin/from-agent', 'flow/self-test', 'Bug']);
+  });
+
+  it('keeps what it already did when a create fails partway, and reports the error', async () => {
+    const other = failing('scenarios/inbox-rules');
+    const fake = tracker({ items: [] });
+    const inner = fake.adapter.createItem;
+    let calls = 0;
+    fake.adapter.createItem = async (spec) => {
+      calls += 1;
+      if (calls === 2) throw new Error('tracker went away');
+      return (await inner?.(spec)) as never;
+    };
+    const result = await fileFailures([check, other], META, {
+      adapter: fake.adapter,
+      sign,
+      unsign: unsignedBody,
+    });
+    expect(result.filed).toHaveLength(1);
+    expect(result.error).toBe('tracker went away');
+  });
+
+  it('passes the failure fingerprint as the create key, so a repeat create makes no second item', async () => {
+    const fake = tracker({ items: [] });
+    const seen: (string | undefined)[] = [];
+    const inner = fake.adapter.createItem;
+    fake.adapter.createItem = async (spec) => {
+      seen.push(spec.key);
+      return (await inner?.(spec)) as never;
+    };
+    await fileFailures([check], META, { adapter: fake.adapter, sign, unsign: unsignedBody });
+    expect(seen).toEqual([`flow-selftest:${check.fingerprint}:`]);
+  });
+
+  it('creates the item after dedupe when the adapter can, and only comments the next time', async () => {
+    const fake = tracker({ items: [] });
+    const deps = { adapter: fake.adapter, sign, unsign: unsignedBody };
+    const first = await fileFailures([check], META, deps);
+    expect(first.wouldFile).toEqual([]);
+    expect(first.message).toBeUndefined();
+    expect(first.filed).toEqual([
+      { checkId: check.id, identifier: 'FAKE-1', url: 'https://fake.tracker/FAKE-1' },
+    ]);
+    const created = fake.backlog.items[0];
+    expect(created).toMatchObject({
+      title: titleFor(check),
+      stateName: 'Triage',
+      labels: ['type/task', 'origin/from-agent'],
+    });
+    expect(created.description).toContain(markerFor(check.fingerprint));
+    expect(created.description).toContain('— 🤖 /flow');
+    expect(created.labels).not.toContain('agent/ready');
+
+    // The same failure again finds the item by its fingerprint: a comment, no second item.
+    const second = await fileFailures([check], META, deps);
+    expect(second.filed).toEqual([]);
+    expect(second.commented).toEqual([{ checkId: check.id, identifier: 'FAKE-1', posted: true }]);
+    expect(fake.backlog.items).toHaveLength(1);
   });
 
   it('comments once on an open match, and not again for the same detail', async () => {
@@ -206,8 +286,10 @@ describe('fileFailures against the fake tracker', () => {
       sign,
       unsign: unsignedBody,
     });
-    expect(result.wouldFile).toEqual([expect.objectContaining({ regressionOf: 'FAKE-1' })]);
-    expect(result.message).toBe(CREATE_MISSING);
+    expect(result.filed).toEqual([
+      expect.objectContaining({ checkId: check.id, identifier: 'FAKE-2', regressionOf: 'FAKE-1' }),
+    ]);
+    expect(fake.backlog.items[1].description).toMatch(/^Regressed after FAKE-1\./);
   });
 
   it('does not refile a completed match that closed after this run started', async () => {
@@ -246,7 +328,7 @@ describe('selftest --file, end to end', { timeout: SCENARIOS_TIMEOUT }, () => {
 
   afterEach(() => rmSync(project, { recursive: true, force: true }));
 
-  it('comments on the open match, lists the rest, and exits 1 without creating anything', async () => {
+  it('comments on the open match, creates the rest after dedupe, and exits 1', async () => {
     // A tracker planted to keep agent/ready on claim fails both lifecycle
     // scenarios; claude-code's already has an open item, codex's has none.
     const sticky = (
@@ -268,7 +350,11 @@ describe('selftest --file, end to end', { timeout: SCENARIOS_TIMEOUT }, () => {
       fingerprint: fingerprint('scenarios/lifecycle/claude-code', 'lifecycle/claude-code'),
     };
     const projectTracker = new FakeTracker(
-      { items: [filed('FAKE-7', claude)] },
+      {
+        items: [filed('FAKE-7', claude)],
+        labels: ['flow/self-test'],
+        projects: [{ id: 'proj-health', name: 'Flow health' }],
+      },
       { now: () => NOW }
     );
     let stdout = '';
@@ -289,18 +375,63 @@ describe('selftest --file, end to end', { timeout: SCENARIOS_TIMEOUT }, () => {
       { checkId: 'scenarios/lifecycle/claude-code', identifier: 'FAKE-7', posted: true },
     ]);
     // The planted tracker breaks every scenario that claims; only the one with
-    // an open item is commented on, the rest would be filed.
-    const wouldFile = report.filing.wouldFile.map((w: { checkId: string }) => w.checkId);
-    expect(wouldFile).toContain('scenarios/lifecycle/codex');
-    expect(wouldFile).not.toContain('scenarios/lifecycle/claude-code');
-    for (const item of report.filing.wouldFile) {
-      expect(item).toMatchObject({
-        labels: ['type/task', 'origin/from-agent', 'flow/self-test'],
-        project: 'Flow health',
-      });
+    // an open item is commented on, the rest are created.
+    expect(report.filing.wouldFile).toEqual([]);
+    const filedIds = report.filing.filed.map((f: { checkId: string }) => f.checkId);
+    expect(filedIds).toContain('scenarios/lifecycle/codex');
+    expect(filedIds).not.toContain('scenarios/lifecycle/claude-code');
+    const created = projectTracker.backlog.items.filter((item) => item.identifier !== 'FAKE-7');
+    expect(created).toHaveLength(filedIds.length);
+    for (const item of created) {
+      expect(item.labels).toEqual(['type/task', 'origin/from-agent', 'flow/self-test']);
+      expect(item.project?.name).toBe('Flow health');
     }
+    const methods = projectTracker.writes.map((w) => w.method);
+    expect(methods[0]).toBe('comment');
+    expect(methods.slice(1).every((m) => m === 'createItem')).toBe(true);
+  });
+
+  it('lists what it would file, and creates nothing, when the adapter cannot create', async () => {
+    const projectTracker = new FakeTracker(
+      {
+        items: [],
+        capabilities: [
+          'getCurrentUser',
+          'getBacklogSnapshot',
+          'getItem',
+          'applyWorkState',
+          'comment',
+        ],
+      },
+      { now: () => NOW }
+    );
+    let stdout = '';
+    const code = await main(['--tier', 'scenarios', '--file', '--json', '--no-save'], {
+      env: { VITEST: 'true' },
+      cwd: project,
+      now: () => NOW,
+      stdout: (t) => {
+        stdout += t;
+      },
+      stderr: () => undefined,
+      createAdapter: async () => projectTracker.adapter,
+      makeTracker: (backlog, options) => {
+        const fake = new FakeTracker(backlog, options);
+        const inner = fake.adapter.applyWorkState;
+        fake.adapter.applyWorkState = async (item, change) => {
+          await inner(item, change);
+          const stored = fake.backlog.items.find((i) => i.identifier === item.identifier);
+          if (change.agentLabel === 'agent/claimed') stored?.labels.push('agent/ready');
+        };
+        return fake;
+      },
+    });
+    expect(code).toBe(1);
+    const report = JSON.parse(stdout);
+    expect(report.filing.filed).toEqual([]);
+    expect(report.filing.wouldFile.length).toBeGreaterThan(0);
     expect(report.filing.message).toBe(CREATE_MISSING);
-    expect(projectTracker.writes.map((w) => w.method)).toEqual(['comment']);
+    expect(projectTracker.writes).toEqual([]);
   });
 
   it('reports a tracker it cannot reach in the report, and still exits 1', async () => {

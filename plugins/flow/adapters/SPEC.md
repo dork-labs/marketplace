@@ -1,6 +1,6 @@
 # Tracker Adapter Contract
 
-> **Contract version: 2.1.0** (semver). See [Versioning](#5-versioning).
+> **Contract version: 2.2.0** (semver). See [Versioning](#5-versioning).
 >
 > This is the **generic, tracker-neutral** contract every `/flow` tracker adapter
 > must satisfy. It names no tracker, no API, and no slug. Reference adapters
@@ -540,7 +540,7 @@ skill, so a project adapter always wins over a shipped one.
 **The module.** It exports two things:
 
 ```ts
-export const CONTRACT_VERSION: string; // the contract version it targets, e.g. '2.1.0'
+export const CONTRACT_VERSION: string; // the contract version it targets, e.g. '2.2.0'
 export function createAdapter(ctx: AdapterContext): CodeAdapter;
 ```
 
@@ -577,13 +577,18 @@ interface TrackerTransport {
   call it and cannot pin the acting identity, so `flow` refuses it (exit 3).
 - Secrets never reach stdout, stderr or a file the adapter writes.
 
-**The five methods.** The adapter lists the ones it implements in
+**The six methods.** The adapter lists the ones it implements in
 `capabilities`; a `flow` command that needs one the adapter lacks exits 3
 naming it.
 
 ```ts
 type Capability =
-  'getCurrentUser' | 'getBacklogSnapshot' | 'getItem' | 'applyWorkState' | 'comment';
+  | 'getCurrentUser'
+  | 'getBacklogSnapshot'
+  | 'getItem'
+  | 'applyWorkState'
+  | 'comment'
+  | 'createItem';
 
 interface CodeAdapter {
   capabilities: readonly Capability[];
@@ -595,6 +600,17 @@ interface CodeAdapter {
   ): Promise<WorkItem & { comments?: ItemComment[] }>;
   applyWorkState(item: WorkItem, change: WorkStateChange): Promise<void>;
   comment(item: WorkItem, body: string): Promise<void>;
+  createItem?(item: NewItem): Promise<{ id: string; identifier: string; url: string }>; // since 2.2.0
+}
+
+interface NewItem {
+  title: string;
+  description: string; // already signed by the caller
+  labels: string[]; // generic families; each must be a label the team has
+  project?: string; // a project of the team, by id or exact name
+  parent?: string; // the parent's identifier; it must be the team's own
+  priority?: 0 | 1 | 2 | 3 | 4;
+  key?: string; // idempotency key: a second create with the same key returns the first item
 }
 
 interface BacklogSnapshot {
@@ -628,6 +644,7 @@ interface WorkStateChange {
 | `getItem`            | `getItem` (optional read, below)            | every write, to check it landed; `flow status <id>` |
 | `applyWorkState`     | `claim` and `transition`                    | `flow claim`, `release`, `done`, `stage`            |
 | `comment`            | `comment`                                   | `flow release --reason`, `flow done`                |
+| `createItem`         | creating an item (capture, follow-ups)      | `flow selftest --file`                              |
 
 **The two optional reads.**
 
@@ -643,6 +660,27 @@ interface WorkStateChange {
   exist, or belongs to another team, is a precondition failure (exit 5), not an
   empty result.
 - Like every read, both **throw** when the tracker cannot be reached.
+
+**`createItem` (since 2.2.0) files a new item in the configured team.**
+
+- It reads the team's labels first and refuses, creating nothing: a label the
+  team does not have (an adapter never creates labels), two labels of one group
+  (a tracker applies one label per group), and any `agent/*` label (a new item
+  is never ready: readiness is triage's decision). It finds the project by id or
+  exact name with a filtered read, so no page limit can miss it, and refuses a
+  project or parent that is missing or another team's.
+- The item lands where the tracker puts new work (Linear: its triage state).
+- It creates at most one item per call and returns its `id`, `identifier` and a
+  `url` a person can open. It throws when the tracker does not confirm.
+- **Idempotent with a `key`.** The same key never makes a second item: the
+  second call returns the first. On Linear the key becomes the issue's
+  client-chosen id, so a create that times out after Linear accepted it is
+  found by that id, and a second run filing the same failure at the same time
+  gets "already exists" and returns the first run's item. Callers still dedupe
+  first by a fingerprint in the description, which also finds items filed
+  before keys existed.
+- It is optional: without it, `flow` lists what it would file and creates
+  nothing.
 
 **`applyWorkState` is the code realization of `claim` and `transition`.**
 
@@ -753,6 +791,10 @@ declaration.
 
 ### What each version added
 
+- **2.2.0** - **`createItem`**, an optional sixth method that files a new item
+  in the configured team (section 3, "`createItem`"). Optional, so additive
+  (MINOR). `flow selftest --file` creates through it, after deduping by a
+  fingerprint in the description and with the fingerprint as its `key`.
 - **2.1.0** - a closed item in the backlog snapshot may carry **`closedAt`**,
   the date it was completed or canceled (section 3, "The two optional reads").
   Optional, so additive (MINOR): an adapter that cannot tell leaves it out, and

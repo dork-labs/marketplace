@@ -1,6 +1,6 @@
 /**
  * The fake tracker: an in-memory tracker behind the code-adapter contract
- * (adapter contract 2.1.0), for flow's self-test scenarios and live evals
+ * (adapter contract 2.2.0), for flow's self-test scenarios and live evals
  * (spec `specs/flow-self-improvement` §1, DOR-2390).
  *
  * It is not a mock that says yes. Where flow depends on how a real tracker
@@ -35,9 +35,11 @@ import type {
   Capability,
   ClosedItem,
   CodeAdapter,
+  CreatedItem,
   ItemComment,
   ItemWithComments,
   TrackerAccount,
+  NewItem,
   WorkItem,
   WorkItemProject,
   WorkStateChange,
@@ -45,7 +47,7 @@ import type {
 import { ALL_CAPABILITIES } from './types.ts';
 
 /** The adapter contract version the fake implements. */
-export const FAKE_CONTRACT_VERSION = '2.1.0';
+export const FAKE_CONTRACT_VERSION = '2.2.0';
 
 /** The environment variable naming the JSON file a spawned run's fake tracker reads and writes. */
 export const FAKE_BACKLOG_ENV = 'FLOW_FAKE_BACKLOG';
@@ -124,6 +126,8 @@ export interface FakeBacklog {
   comments?: Record<string, ItemComment[]>;
   /** The team's labels beyond {@link FAKE_TEAM_LABELS}. */
   labels?: string[];
+  /** Idempotency keys `createItem` has seen, and the item each one made. */
+  createdKeys?: Record<string, string>;
   /** When set, every read throws a plain `Error` with this message (an unreachable tracker). */
   failReads?: string;
   /** When true, writes report success and change nothing (a tracker that drops writes). */
@@ -134,7 +138,8 @@ export interface FakeBacklog {
 export type FakeWrite =
   | { method: 'applyWorkState'; identifier: string; change: WorkStateChange }
   | { method: 'comment'; identifier: string; author: string; body: string }
-  | { method: 'mergePr'; identifier: string };
+  | { method: 'mergePr'; identifier: string }
+  | { method: 'createItem'; identifier: string };
 
 /** How a {@link FakeTracker} is built. */
 export interface FakeTrackerOptions {
@@ -143,6 +148,17 @@ export interface FakeTrackerOptions {
   /** Called with the backlog after every write (a spawned run saves its file here). */
   persist?: (backlog: FakeBacklog) => void;
 }
+
+/** The work item types a `type/*` label may name. */
+const WORK_ITEM_TYPES: readonly string[] = [
+  'idea',
+  'research',
+  'hypothesis',
+  'task',
+  'monitor',
+  'signal',
+  'meta',
+];
 
 /** The default account the adapter acts as. */
 const DEFAULT_USER: TrackerAccount = { id: 'user-flow-agent', name: 'Flow agent' };
@@ -207,6 +223,8 @@ export class FakeTracker {
   readonly adapter: CodeAdapter;
 
   private readonly now: () => Date;
+  /** The highest number `createItem` has handed out, so dropped writes never repeat one. */
+  private createSeq = 0;
   private readonly persist: (backlog: FakeBacklog) => void;
 
   /**
@@ -325,7 +343,7 @@ export class FakeTracker {
     return new Set([...FAKE_TEAM_LABELS, ...(this.backlog.labels ?? [])]);
   }
 
-  /** The adapter, as a plain object with the five methods. */
+  /** The adapter, as a plain object with the six methods. */
   private buildAdapter(): CodeAdapter {
     return {
       capabilities: this.backlog.capabilities ?? [...ALL_CAPABILITIES],
@@ -354,7 +372,116 @@ export class FakeTracker {
         if (this.backlog.dropWrites) return;
         this.addComment(item.identifier, this.user.id, body);
       },
+      createItem: async (spec) => this.createItem(spec),
     };
+  }
+
+  /**
+   * Create an item as Linear does (recorded 2026-09-26): it lands in the team's
+   * `Triage` state (backlog category), with the labels, project, parent and
+   * priority asked for. A label the team does not have is refused and nothing is
+   * created; a missing or foreign project or parent is a precondition failure.
+   */
+  private createItem(spec: NewItem): CreatedItem {
+    this.read();
+    if (spec.key !== undefined) {
+      const existing = this.backlog.createdKeys?.[spec.key];
+      const item = this.backlog.items.find((candidate) => candidate.identifier === existing);
+      if (item !== undefined) {
+        return {
+          id: item.id,
+          identifier: item.identifier,
+          url: `https://fake.tracker/${item.identifier}`,
+        };
+      }
+    }
+    const labels = [...new Set(spec.labels)];
+    const agent = labels.find((label) => label.startsWith('agent/'));
+    if (agent !== undefined) {
+      throw new PreconditionError(
+        `a new item never carries an agent/* label ("${agent}"); readiness is triage's decision`
+      );
+    }
+    const known = this.teamLabels();
+    const unknown = labels.find((label) => !known.has(label));
+    if (unknown !== undefined) {
+      throw new TrackerError(
+        `the ${this.team.key ?? 'fake'} team has no "${unknown}" label; create it in the tracker (flow never creates labels)`
+      );
+    }
+    // One label per group, as Linear enforces for its label groups.
+    const groups = new Map<string, string>();
+    for (const label of labels) {
+      const slash = label.indexOf('/');
+      if (slash < 0) continue;
+      const group = label.slice(0, slash);
+      const other = groups.get(group);
+      if (other !== undefined) {
+        throw new TrackerError(
+          `"${other}" and "${label}" are both in the ${group} group, and an item takes one label per group; nothing was created`
+        );
+      }
+      groups.set(group, label);
+    }
+    let project: WorkItemProject | undefined;
+    if (spec.project !== undefined) {
+      project = (this.backlog.projects ?? []).find(
+        (candidate) => candidate.id === spec.project || candidate.name === spec.project
+      );
+      if (project === undefined) {
+        throw new PreconditionError(`the team has no project "${spec.project}"`);
+      }
+    }
+    const parent = spec.parent === undefined ? undefined : this.find(spec.parent, 'read');
+
+    const key = this.team.key ?? 'FAKE';
+    // Number after every identifier this team has used, open, closed or seeded
+    // as closed history, so a new item never reuses one.
+    const used = [
+      ...this.backlog.items.map((item) => item.identifier),
+      ...(this.backlog.closed ?? []).map((item) => item.identifier),
+    ].filter((identifier) => identifier.startsWith(`${key}-`));
+    const next =
+      Math.max(
+        this.createSeq,
+        ...used.map((identifier) => Number(/-(\d+)$/.exec(identifier)?.[1] ?? 0))
+      ) + 1;
+    this.createSeq = next;
+    const identifier = `${key}-${next}`;
+    const created: CreatedItem = {
+      id: `fake-${next}`,
+      identifier,
+      url: `https://fake.tracker/${identifier}`,
+    };
+    if (this.backlog.dropWrites) return created;
+
+    // As the Linear adapter normalizes: the first known type/* leaf, else task.
+    const typeLeaf = labels
+      .filter((label) => label.startsWith('type/'))
+      .map((label) => label.slice('type/'.length))
+      .find((leaf) => WORK_ITEM_TYPES.includes(leaf));
+    const triage = FAKE_STATES.find((state) => state.name === 'Triage') as FakeState;
+    const item: WorkItem = {
+      id: created.id,
+      identifier,
+      title: spec.title,
+      description: spec.description,
+      type: (typeLeaf ?? 'task') as WorkItem['type'],
+      stateCategory: triage.category,
+      stateName: triage.name,
+      ...(spec.priority !== undefined ? { priority: spec.priority } : {}),
+      ...(project !== undefined ? { project: structuredClone(project) } : {}),
+      parent: parent?.identifier ?? null,
+      relations: { blocks: [], blockedBy: [], children: [], relatedTo: [] },
+      labels,
+      createdAt: this.now().toISOString(),
+    };
+    this.backlog.items.push(item);
+    parent?.relations.children.push(identifier);
+    if (spec.key !== undefined) (this.backlog.createdKeys ??= {})[spec.key] = identifier;
+    this.writes.push({ method: 'createItem', identifier });
+    this.persist(this.backlog);
+    return created;
   }
 
   /** One pull of the team's backlog. */

@@ -124,9 +124,9 @@ export interface ItemComment {
   createdAt: string;
 }
 
-/** The five {@link CodeAdapter} methods. A verb checks the ones it needs before it runs. */
+/** The six {@link CodeAdapter} methods. A verb checks the ones it needs before it runs. */
 export type Capability =
-  'getCurrentUser' | 'getBacklogSnapshot' | 'getItem' | 'applyWorkState' | 'comment';
+  'getCurrentUser' | 'getBacklogSnapshot' | 'getItem' | 'applyWorkState' | 'comment' | 'createItem';
 
 /** Every {@link Capability}, in declaration order. */
 export const ALL_CAPABILITIES: readonly Capability[] = [
@@ -135,7 +135,44 @@ export const ALL_CAPABILITIES: readonly Capability[] = [
   'getItem',
   'applyWorkState',
   'comment',
+  'createItem',
 ];
+
+/** What `createItem` makes (contract 2.2.0). */
+export interface NewItem {
+  /** The title. */
+  title: string;
+  /** The body. The caller has already signed it. */
+  description: string;
+  /**
+   * Labels in the generic families (`type/task`, `origin/from-agent`, ...). Each
+   * must be a label the team already has: an adapter never creates labels.
+   */
+  labels: string[];
+  /** A project of the team, by id or exact name. */
+  project?: string;
+  /** The parent item's identifier (it must be the team's own). */
+  parent?: string;
+  /** `0` none … `4` low, as {@link WorkItem.priority}. */
+  priority?: 0 | 1 | 2 | 3 | 4;
+  /**
+   * An idempotency key. Two creates with the same key make ONE item: the second
+   * returns the first. Callers pass what makes the item unique (a self-test
+   * fingerprint), so a retry after a timeout, or two runs at once, never file
+   * twice.
+   */
+  key?: string;
+}
+
+/** What `createItem` returns. */
+export interface CreatedItem {
+  /** Tracker-native id. */
+  id: string;
+  /** Human key, for example `ABC-123`. */
+  identifier: string;
+  /** A link a person can open. */
+  url: string;
+}
 
 /** The account the adapter acts as. */
 export interface TrackerAccount {
@@ -184,11 +221,19 @@ export interface CodeAdapter {
   applyWorkState(item: WorkItem, change: WorkStateChange): Promise<void>;
   /** Post a comment. The caller has already signed the body. */
   comment(item: WorkItem, body: string): Promise<void>;
+  /**
+   * Create an item in the configured team (contract 2.2.0). Refuses, writing
+   * nothing: a label the team does not have, or two labels of one group
+   * (`TrackerError`); any `agent/*` label, and a project or parent that is
+   * missing or another team's (`PreconditionError`). With a `key`, a second
+   * create returns the first item instead of making another.
+   */
+  createItem?(item: NewItem): Promise<CreatedItem>;
 }
 
 /** What an adapter's `adapter.ts` module exports. */
 export interface CodeAdapterModule {
-  /** The adapter contract version the code targets, for example `2.1.0`. */
+  /** The adapter contract version the code targets, for example `2.2.0`. */
   CONTRACT_VERSION: string;
   /** Build the adapter for one run. */
   createAdapter(ctx: AdapterContext): CodeAdapter;

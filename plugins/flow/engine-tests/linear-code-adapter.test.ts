@@ -140,13 +140,20 @@ const DOCUMENTS = new Set(
 );
 
 describe('the module', () => {
-  it('declares contract 2.1.0 and all five capabilities', () => {
+  it('declares contract 2.2.0 and all six capabilities', () => {
     // Purpose: the loader requires CONTRACT_VERSION and the capability list;
-    // the shipped adapter serves every verb.
-    expect(linear.CONTRACT_VERSION).toBe('2.1.0');
+    // the shipped adapter serves every verb, createItem included.
+    expect(linear.CONTRACT_VERSION).toBe('2.2.0');
     const { adapter } = build(snapshotRoute);
     expect([...adapter.capabilities].sort()).toEqual(
-      ['applyWorkState', 'comment', 'getBacklogSnapshot', 'getCurrentUser', 'getItem'].sort()
+      [
+        'applyWorkState',
+        'comment',
+        'createItem',
+        'getBacklogSnapshot',
+        'getCurrentUser',
+        'getItem',
+      ].sort()
     );
   });
 
@@ -771,6 +778,229 @@ describe('comment', () => {
   });
 });
 
+/** The recorded create answers (values synthesized, shapes recorded). */
+const CREATE = JSON.parse(
+  readFileSync(new URL('./fixtures/linear-adapter/create.recorded.json', import.meta.url), 'utf8')
+) as Record<
+  | 'createRead'
+  | 'projectByName'
+  | 'projectById'
+  | 'projectMissing'
+  | 'create'
+  | 'createAgain'
+  | 'createdRead'
+  | 'createdReadMissing',
+  Recorded
+> & { twoLabelsOneGroup: { response: Record<string, unknown> } };
+
+/** The recorded create-read team's label ids, by namespaced name. */
+function createLabelId(name: string): string {
+  const nodes = (
+    CREATE.createRead.response as {
+      data: { data: { team: { createLabels: { nodes: RecordedLabel[] } } } };
+    }
+  ).data.data.team.createLabels.nodes;
+  const found = nodes.find(
+    (label) =>
+      !label.isGroup && (label.parent ? `${label.parent.name}/${label.name}` : label.name) === name
+  );
+  if (found === undefined) throw new Error(`the recorded create-read has no ${name} label`);
+  return found.id;
+}
+
+describe('createItem', () => {
+  /** Answers each create operation with its recording; `create` as given. */
+  const routeCreate =
+    (create: (call: Call) => Answer = (call) => replay(CREATE.create, call)) =>
+    (call: Call): Answer => {
+      switch (call.operation) {
+        case 'FlowCreateRead':
+          return replay(CREATE.createRead, call);
+        case 'FlowCreateProject':
+          return call.variables.name === 'Example project'
+            ? replay(CREATE.projectByName, call)
+            : replay(CREATE.projectMissing, call);
+        case 'FlowCreateProjectById':
+          return replay(CREATE.projectById, call);
+        case 'FlowCreateItem':
+          return create(call);
+        case 'FlowCreatedRead':
+          return replay(CREATE.createdRead, call);
+        default:
+          throw new Error(`unexpected operation ${call.operation}`);
+      }
+    };
+
+  it('reads labels and the project by name, then sends ONE issueCreate with a client id, and returns what Linear gave', async () => {
+    // Purpose: bound to the recorded shapes; labels resolve through the team's
+    // own list, the project through a filtered read (no page limit to miss it).
+    const { adapter, calls } = build(routeCreate());
+    const created = await adapter.createItem?.({
+      title: 'A new item',
+      description: 'Body.',
+      labels: ['origin/from-agent', 'type/task', 'Bug'],
+      project: 'Example project',
+      priority: 4,
+    });
+    expect(created).toEqual({
+      id: '00000000-0000-4000-8000-000000000999',
+      identifier: 'DOR-999',
+      url: 'https://linear.app/example/issue/DOR-999/a-new-item',
+    });
+    expect(calls.map((call) => call.operation)).toEqual([
+      'FlowCreateRead',
+      'FlowCreateProject',
+      'FlowCreateItem',
+    ]);
+    const input = calls[2].variables.input as Record<string, unknown>;
+    expect(input.id).toMatch(
+      /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/
+    );
+    // The same fields the recorded create sent, with this call's values.
+    expect(Object.keys(input).sort()).toEqual(
+      Object.keys((CREATE.create as unknown as { variables: { input: object } }).variables.input)
+        .concat()
+        .sort()
+    );
+    expect(input).toMatchObject({
+      teamId: TEAM.id,
+      title: 'A new item',
+      description: 'Body.',
+      labelIds: [
+        createLabelId('origin/from-agent'),
+        createLabelId('type/task'),
+        createLabelId('Bug'),
+      ],
+      projectId: 'proj-1',
+      priority: 4,
+    });
+  });
+
+  it('finds a project by id through the id-filtered read', async () => {
+    const { adapter, calls } = build(routeCreate());
+    await adapter.createItem?.({
+      title: 't',
+      description: 'd',
+      labels: [],
+      project: '0f0e0d0c-0b0a-4908-8706-050403020100',
+    });
+    expect(calls.map((call) => call.operation)).toContain('FlowCreateProjectById');
+  });
+
+  it('derives the issue id from the key: the same key always sends the same id', async () => {
+    const one = build(routeCreate());
+    const two = build(routeCreate());
+    await one.adapter.createItem?.({ title: 't', description: 'd', labels: [], key: 'fp-1' });
+    await two.adapter.createItem?.({ title: 't', description: 'd', labels: [], key: 'fp-1' });
+    const idOf = (calls: Call[]) =>
+      (calls.find((c) => c.operation === 'FlowCreateItem')?.variables.input as { id: string }).id;
+    expect(idOf(one.calls)).toBe(idOf(two.calls));
+    expect(linear.createIdFor('fp-1')).toBe(idOf(one.calls));
+    expect(linear.createIdFor('fp-2')).not.toBe(idOf(one.calls));
+  });
+
+  it('returns the existing item when Linear refuses a second insert with the same id', async () => {
+    // Purpose: a retry after a timeout, or a second run at the same time.
+    const { adapter, calls } = build(routeCreate(() => CREATE.createAgain.response));
+    const created = await adapter.createItem?.({
+      title: 't',
+      description: 'd',
+      labels: [],
+      key: 'k',
+    });
+    expect(created?.identifier).toBe('DOR-999');
+    expect(calls.map((call) => call.operation).slice(-2)).toEqual([
+      'FlowCreateItem',
+      'FlowCreatedRead',
+    ]);
+  });
+
+  it('rethrows when the create fails and nothing landed', async () => {
+    const { adapter } = build((call) =>
+      call.operation === 'FlowCreatedRead'
+        ? replay(CREATE.createdReadMissing, call)
+        : routeCreate(() => ({ raw: { code: 1, stdout: '', stderr: 'timed out' } }))(call)
+    );
+    expect(
+      await rejection(
+        adapter.createItem?.({ title: 't', description: 'd', labels: [] }) ?? Promise.resolve()
+      )
+    ).toBeInstanceOf(TrackerError);
+  });
+
+  it('throws and creates nothing when the answer carries no label list (aliasing)', async () => {
+    const { adapter, calls } = build((call) => {
+      const envelope = replay(CREATE.createRead, call) as {
+        data: { data: { team: Record<string, unknown> } };
+      };
+      const team = envelope.data.data.team;
+      team.labels_1 = team.createLabels;
+      delete team.createLabels;
+      return envelope;
+    });
+    const error = await rejection(
+      adapter.createItem?.({ title: 't', description: 'd', labels: ['type/task'] }) ??
+        Promise.resolve()
+    );
+    expect(error).toBeInstanceOf(TrackerError);
+    expect((error as Error).message).toMatch(/no label list; flow created nothing/);
+    expect(calls.map((call) => call.operation)).toEqual(['FlowCreateRead']);
+  });
+
+  it('refuses, before sending anything, two labels of one group (as Linear does), an unknown label, an agent label and a missing project', async () => {
+    // Linear's own answer to two origin/* labels, recorded:
+    expect(JSON.stringify(CREATE.twoLabelsOneGroup.response)).toMatch(/not exclusive child labels/);
+    const { adapter, calls } = build(routeCreate());
+    const refused = async (spec: Parameters<NonNullable<typeof adapter.createItem>>[0]) =>
+      rejection(adapter.createItem?.(spec) ?? Promise.resolve());
+    const base = { title: 't', description: 'd' };
+    const group = await refused({ ...base, labels: ['origin/from-agent', 'origin/human'] });
+    expect(group).toBeInstanceOf(TrackerError);
+    expect((group as Error).message).toMatch(/one label per group/);
+    expect(await refused({ ...base, labels: ['flow/nope'] })).toBeInstanceOf(TrackerError);
+    expect(await refused({ ...base, labels: ['agent/ready'] })).toBeInstanceOf(PreconditionError);
+    expect(await refused({ ...base, labels: [], project: 'Nope' })).toBeInstanceOf(
+      PreconditionError
+    );
+    expect(calls.map((call) => call.operation)).not.toContain('FlowCreateItem');
+  });
+
+  it('refuses a parent from another team, and fails loudly when Linear does not confirm', async () => {
+    const foreign = build((call) =>
+      call.operation === 'FlowItem'
+        ? okEnvelope({
+            issue: {
+              ...issueNode('FB-7'),
+              team: { id: 'other-team', key: 'FB' },
+              relations: { nodes: [] },
+            },
+          })
+        : routeCreate()(call)
+    );
+    expect(
+      await rejection(
+        foreign.adapter.createItem?.({
+          title: 't',
+          description: 'd',
+          labels: [],
+          parent: 'FB-7',
+        }) ?? Promise.resolve()
+      )
+    ).toBeInstanceOf(PreconditionError);
+    expect(foreign.calls.map((call) => call.operation)).not.toContain('FlowCreateItem');
+
+    const unconfirmed = build(
+      routeCreate(() => okEnvelope({ issueCreate: { success: true, issue: null } }))
+    );
+    expect(
+      await rejection(
+        unconfirmed.adapter.createItem?.({ title: 't', description: 'd', labels: [] }) ??
+          Promise.resolve()
+      )
+    ).toBeInstanceOf(TrackerError);
+  });
+});
+
 describe('GraphQL hygiene', () => {
   it('never puts data into query text: every document is a constant and every $variable is declared and passed', async () => {
     // Purpose: Composio rejects a query holding a `$word` with no matching
@@ -786,6 +1016,12 @@ describe('GraphQL hygiene', () => {
           return okEnvelope({ issueUpdate: { success: true } });
         case 'FlowComment':
           return okEnvelope({ commentCreate: { success: true } });
+        case 'FlowCreateRead':
+          return replay(CREATE.createRead, call);
+        case 'FlowCreateItem':
+          return replay(CREATE.create, call);
+        case 'FlowCreatedRead':
+          return replay(CREATE.createdRead, call);
         case 'FlowItem':
           return okEnvelope({
             issue: {
@@ -807,8 +1043,13 @@ describe('GraphQL hygiene', () => {
       { agentLabel: 'agent/claimed' }
     );
     await adapter.comment(STALE_ITEM, 'body with $sessionId and ${client}');
+    await adapter.createItem?.({
+      title: 'Costs $5 and ${x}',
+      description: 'with $input inside',
+      labels: ['type/task'],
+    });
 
-    expect(new Set(calls.map((call) => call.operation)).size).toBeGreaterThanOrEqual(9);
+    expect(new Set(calls.map((call) => call.operation)).size).toBeGreaterThanOrEqual(11);
     for (const call of calls) {
       expect(
         DOCUMENTS.has(call.query),

@@ -39,6 +39,7 @@
  * @module @dorkos/flow/skills/linear-adapter/adapter
  */
 
+import { createHash, randomUUID } from 'node:crypto';
 import { readFileSync } from 'node:fs';
 
 import { ConfigError, PreconditionError, TrackerError } from '../../scripts/errors.ts';
@@ -47,17 +48,19 @@ import type {
   BacklogSnapshot,
   ClosedItem,
   CodeAdapter,
+  CreatedItem,
   ItemComment,
   ItemWithComments,
   StateCategory,
   WorkItem,
+  NewItem,
   WorkItemProject,
   WorkStateChange,
 } from '../../scripts/tracker/types.ts';
 import { labelsAfterChange } from '../../scripts/work-state.ts';
 
 /** The adapter contract version this code targets. */
-export const CONTRACT_VERSION = '2.1.0';
+export const CONTRACT_VERSION = '2.2.0';
 
 /** The Composio slug every read and write goes through. */
 export const GRAPHQL_SLUG = 'LINEAR_RUN_QUERY_OR_MUTATION';
@@ -184,6 +187,61 @@ export const ISSUE_UPDATE_MUTATION = `mutation FlowApplyWorkState($id: String!, 
 export const COMMENT_MUTATION = `mutation FlowComment($issueId: String!, $body: String!) {
   commentCreate(input: { issueId: $issueId, body: $body }) { success }
 }`;
+
+/**
+ * The read `createItem` takes before it writes: the team's labels. The
+ * connection carries an alias, because Composio renames a field asked for
+ * twice (labels_1, labels_2), and a missing connection must be a failed read,
+ * never "the team has no labels".
+ */
+export const CREATE_READ_QUERY = `query FlowCreateRead($teamId: String!) {
+  team(id: $teamId) {
+    createLabels: labels(first: 250) { nodes { id name isGroup parent { name } } }
+  }
+}`;
+
+/** One of the team's projects by exact name (a filtered read: no page limit to miss it). */
+export const CREATE_PROJECT_QUERY = `query FlowCreateProject($teamId: String!, $name: String!) {
+  team(id: $teamId) {
+    createProjects: projects(first: 2, filter: { name: { eq: $name } }) { nodes { id name } }
+  }
+}`;
+
+/** One of the team's projects by id. */
+export const CREATE_PROJECT_BY_ID_QUERY = `query FlowCreateProjectById($teamId: String!, $id: ID!) {
+  team(id: $teamId) {
+    createProjects: projects(first: 2, filter: { id: { eq: $id } }) { nodes { id name } }
+  }
+}`;
+
+/** The one write `createItem` sends. Its input carries a client-chosen `id`. */
+export const CREATE_ITEM_MUTATION = `mutation FlowCreateItem($input: IssueCreateInput!) {
+  issueCreate(input: $input) { success issue { id identifier url } }
+}`;
+
+/** The read after a create that did not answer: did the issue with that id land? */
+export const CREATED_READ_QUERY = `query FlowCreatedRead($id: String!) {
+  issue(id: $id) { id identifier url team { id key } }
+}`;
+
+/** A UUID, for telling a project id from a project name. */
+const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+/**
+ * The issue id a create sends: derived from the idempotency key when there is
+ * one (the same key always names the same issue, so Linear refuses a second
+ * insert with "already exists"), else random. Linear takes a client-supplied
+ * UUID on `issueCreate` (recorded 2026-09-26).
+ *
+ * @param key - The idempotency key, if any.
+ * @returns A version-4-shaped UUID.
+ */
+export function createIdFor(key: string | undefined): string {
+  if (key === undefined) return randomUUID();
+  const hex = createHash('sha256').update(`flow:create:${key}`).digest('hex');
+  const variant = ((parseInt(hex[16], 16) & 0x3) | 0x8).toString(16);
+  return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-4${hex.slice(13, 16)}-${variant}${hex.slice(17, 20)}-${hex.slice(20, 32)}`;
+}
 
 /** The account the adapter acts as. */
 export const VIEWER_QUERY = `query FlowViewer { viewer { id name } }`;
@@ -580,6 +638,26 @@ export function createAdapter(ctx: AdapterContext): CodeAdapter {
     return data.data as T;
   }
 
+  /**
+   * The issue a create with this id made, or `null` when none landed. Linear's
+   * "Entity not found" is the null answer; any other failure throws.
+   */
+  async function createdIssue(id: string, own: Team): Promise<CreatedItem | null> {
+    let data: {
+      issue?: { id?: string; identifier?: string; url?: string; team?: RawIssue['team'] } | null;
+    };
+    try {
+      data = await graphql(CREATED_READ_QUERY, { id });
+    } catch (error) {
+      if (error instanceof TrackerError && /Entity not found/.test(error.message)) return null;
+      throw error;
+    }
+    const issue = data.issue;
+    if (!issue?.id || !issue.identifier || !issue.url) return null;
+    ownIssue(issue as RawIssue, issue.identifier, own);
+    return { id: issue.id, identifier: issue.identifier, url: issue.url };
+  }
+
   let teamPromise: Promise<Team> | undefined;
   /** The configured team, with its id resolved from its key (or the reverse). */
   function team(): Promise<Team> {
@@ -680,7 +758,14 @@ export function createAdapter(ctx: AdapterContext): CodeAdapter {
   }
 
   return {
-    capabilities: ['getCurrentUser', 'getBacklogSnapshot', 'getItem', 'applyWorkState', 'comment'],
+    capabilities: [
+      'getCurrentUser',
+      'getBacklogSnapshot',
+      'getItem',
+      'applyWorkState',
+      'comment',
+      'createItem',
+    ],
 
     async getCurrentUser() {
       const data = await graphql<{ viewer?: { id?: string; name?: string } | null }>(
@@ -875,6 +960,105 @@ export function createAdapter(ctx: AdapterContext): CodeAdapter {
       if (result.commentCreate?.success !== true) {
         throw new TrackerError(`Linear did not confirm the comment on ${item.identifier}`);
       }
+    },
+
+    async createItem(spec: NewItem): Promise<CreatedItem> {
+      const { id: teamId, key } = await team();
+      const agent = spec.labels.find((label) => label.startsWith('agent/'));
+      if (agent !== undefined) {
+        throw new PreconditionError(
+          `a new item never carries an agent/* label ("${agent}"); readiness is triage's decision`
+        );
+      }
+      const data = await graphql<{ team?: { createLabels?: RawPage<RawLabel> | null } | null }>(
+        CREATE_READ_QUERY,
+        { teamId }
+      );
+      const labelNodes = data.team?.createLabels?.nodes;
+      if (!Array.isArray(labelNodes)) {
+        throw new TrackerError(
+          `Linear's answer for team ${key} carried no label list; flow created nothing`
+        );
+      }
+      const teamLabels = new Map<string, RawLabel>();
+      for (const label of labelNodes) {
+        if (label.isGroup) continue;
+        if (!teamLabels.has(namespacedLabel(label))) teamLabels.set(namespacedLabel(label), label);
+      }
+      const groups = new Map<string, string>();
+      const labelIds = [...new Set(spec.labels)].map((name) => {
+        const label = teamLabels.get(name);
+        if (label === undefined) {
+          throw new TrackerError(
+            `Linear team ${key} has no "${name}" label; create it in Linear (flow never creates labels)`
+          );
+        }
+        // Linear applies one label per group (recorded: "labelIds not exclusive child labels").
+        const group = label.parent?.name;
+        if (group !== undefined) {
+          const other = groups.get(group);
+          if (other !== undefined) {
+            throw new TrackerError(
+              `"${other}" and "${name}" are both in Linear's ${group} group, and an item takes one label per group; flow created nothing`
+            );
+          }
+          groups.set(group, name);
+        }
+        return label.id;
+      });
+
+      const id = createIdFor(spec.key);
+      const input: Record<string, unknown> = {
+        id,
+        teamId,
+        title: spec.title,
+        description: spec.description,
+        labelIds,
+      };
+      if (spec.project !== undefined) {
+        const byId = UUID.test(spec.project);
+        const found = await graphql<{
+          team?: { createProjects?: RawPage<{ id: string; name: string }> | null } | null;
+        }>(
+          byId ? CREATE_PROJECT_BY_ID_QUERY : CREATE_PROJECT_QUERY,
+          byId ? { teamId, id: spec.project } : { teamId, name: spec.project }
+        );
+        const project = found.team?.createProjects?.nodes?.[0];
+        if (project === undefined) {
+          throw new PreconditionError(`Linear team ${key} has no project "${spec.project}"`);
+        }
+        input.projectId = project.id;
+      }
+      if (spec.parent !== undefined) {
+        input.parentId = (await readIssue(spec.parent)).id;
+      }
+      if (spec.priority !== undefined) input.priority = spec.priority;
+
+      let result: {
+        issueCreate?: {
+          success?: boolean;
+          issue?: { id?: string; identifier?: string; url?: string } | null;
+        } | null;
+      };
+      try {
+        result = await graphql(CREATE_ITEM_MUTATION, { input });
+      } catch (error) {
+        // A timeout after Linear accepted the create, or a second create with the
+        // same key ("already exists"): the id says whether the issue landed.
+        const landed = await createdIssue(id, { id: teamId, key });
+        if (landed !== null) return landed;
+        throw error;
+      }
+      const created = result.issueCreate?.issue;
+      if (
+        result.issueCreate?.success !== true ||
+        typeof created?.id !== 'string' ||
+        typeof created.identifier !== 'string' ||
+        typeof created.url !== 'string'
+      ) {
+        throw new TrackerError(`Linear did not confirm the new item "${spec.title}"`);
+      }
+      return { id: created.id, identifier: created.identifier, url: created.url };
     },
   };
 }
