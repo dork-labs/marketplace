@@ -56,7 +56,7 @@ import {
   type ProbeResult,
   type RuntimeName,
 } from '../launchers/types.ts';
-import { AGENT_CLAIMED, projectionFor } from '../work-state.ts';
+import { AGENT_CLAIMED, AGENT_NEEDS_INPUT, projectionFor } from '../work-state.ts';
 import { loadProjectConfig } from './backlog.ts';
 import { claimItem } from './claim.ts';
 import type { VerbContext, VerbResult } from './context.ts';
@@ -244,6 +244,7 @@ export async function drain(ctx: VerbContext, options: DrainOptions = {}): Promi
       return {
         closed: !isOpenItem(item),
         claimed: item.labels.includes(AGENT_CLAIMED),
+        needsInput: item.labels.includes(AGENT_NEEDS_INPUT),
         title: item.title,
       };
     },

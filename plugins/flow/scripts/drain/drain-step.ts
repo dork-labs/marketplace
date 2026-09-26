@@ -98,6 +98,8 @@ export interface DrainFacts {
     closed: boolean;
     /** Still carries the agent's claim. */
     claimed: boolean;
+    /** Carries `agent/needs-input`: a person has not answered yet. */
+    needsInput: boolean;
     /** Its title, for the pull request. */
     title: string;
   };
@@ -136,7 +138,9 @@ export type SendAction = {
  *   reviewed SHA, for "also read `git diff <deltaFrom> <sha>`".
  * - `stop`: stop that session (its handle, runtime filled in).
  * - `send`: render the message and deliver it to the worker.
- * - `arm` / `disarm`: turn auto-merge on or off.
+ * - `arm` / `disarm`: turn auto-merge on or off. An arm names the reviewed
+ *   commit it is for (`sha`); the forge refuses it once the PR's head is
+ *   anything else, and the runner re-checks it under the lock first.
  * - `adopt-or-release`: a start never confirmed; adopt the minted session if it
  *   exists, else release the claim (§4.3).
  * - `park`: apply the park; `trackerWrite: false` when the item was taken away,
@@ -146,7 +150,7 @@ export type DrainAction =
   | { kind: 'start-reviewer'; sha: string; deltaFrom: string | null }
   | { kind: 'stop'; which: 'worker' | 'reviewer'; handle: SessionHandle }
   | SendAction
-  | { kind: 'arm'; pr: PrRef }
+  | { kind: 'arm'; pr: PrRef; sha: string }
   | { kind: 'disarm'; pr: PrRef }
   | { kind: 'adopt-or-release' }
   | { kind: 'park'; reason: string; trackerWrite: boolean };
@@ -172,7 +176,15 @@ export const PARK_REASONS = {
 } as const;
 
 /** The phases where the worker writes code before a clean review. */
-const PRE_REVIEW_PHASES = new Set<DrainState['phase']>(['working', 'reviewing', 'fixing']);
+const PRE_REVIEW_PHASES = new Set<DrainState['phase']>([
+  'working',
+  'reviewing',
+  'fixing',
+  'pr-ready',
+]);
+
+/** The phases after a clean review, where a new head must go back to review. */
+const POST_REVIEW_PHASES = new Set<DrainState['phase']>(['pr-ready', 'watching', 'fixing-ci']);
 
 /** A step under construction: the drain it leads to and its actions. */
 interface Step {
@@ -209,8 +221,8 @@ function stopReviewer(step: Step): Step {
  * the last reviewed SHA when there is one and it differs. A new SHA resets the
  * restart count (see the module comment on counting).
  */
-function startReviewer(step: Step, sha: string): Step {
-  const stopped = stopReviewer(step);
+function startReviewer(step: Step, sha: string, facts: DrainFacts): Step {
+  const stopped = disarmIfArmed(stopReviewer(step), facts);
   const reviewedSha = stopped.drain.reviewedSha;
   // Replacing a reviewer at another SHA starts a new count; restarting at the
   // same SHA, or filling an empty slot, keeps it.
@@ -228,20 +240,59 @@ function startReviewer(step: Step, sha: string): Step {
   };
 }
 
+/**
+ * Disarm the run's PR when it is armed (as recorded, or as the forge sees it):
+ * whatever is about to be reviewed must not merge first.
+ */
+function disarmIfArmed(step: Step, facts: DrainFacts): Step {
+  const pr = step.drain.pr;
+  if (pr === null) return step;
+  const armed = pr.armed || (facts.pr !== null && facts.pr.state === 'open' && facts.pr.armed);
+  if (!armed || step.actions.some((a) => a.kind === 'disarm')) return step;
+  return { drain: step.drain, actions: [...step.actions, { kind: 'disarm', pr: ref(pr) }] };
+}
+
+/**
+ * Whether the reviewed commit is what would merge: a clean verdict at
+ * `reviewedSha`, which is also the last reported push, the branch head on
+ * origin, and the PR's head.
+ */
+function reviewedIsHead(
+  drain: DrainState,
+  facts: DrainFacts
+): drain is DrainState & {
+  reviewedSha: string;
+} {
+  const sha = drain.reviewedSha;
+  return (
+    sha !== null &&
+    drain.verdict === 'clean' &&
+    drain.pushedSha === sha &&
+    facts.originHead === sha &&
+    facts.pr !== null &&
+    facts.pr.headSha === sha
+  );
+}
+
 /** Park the run: the reviewer stops; the worker too when the item was taken away. */
 function park(step: Step, reason: string, taken = false): Step {
   let next = stopReviewer(step);
-  if (taken && next.drain.worker) {
+  const worker = next.drain.worker;
+  if (worker && !worker.pending) {
+    // A parked run holds no live session. The handle stays (unless the item was
+    // taken away), so an answer can resume the same session with a message.
     next = {
-      drain: { ...next.drain, worker: null },
-      actions: [
-        ...next.actions,
-        { kind: 'stop', which: 'worker', handle: sessionHandle(next.drain.worker) },
-      ],
+      drain: taken ? { ...next.drain, worker: null } : next.drain,
+      actions: [...next.actions, { kind: 'stop', which: 'worker', handle: sessionHandle(worker) }],
     };
   }
   return {
-    drain: { ...toPhase(next.drain, 'parked'), parkedReason: reason },
+    drain: {
+      ...toPhase(next.drain, 'parked'),
+      parkedReason: reason,
+      parkedFrom:
+        step.drain.phase === 'parked' ? (step.drain.parkedFrom ?? null) : step.drain.phase,
+    },
     actions: [...next.actions, { kind: 'park', reason, trackerWrite: !taken }],
   };
 }
@@ -303,10 +354,10 @@ function reviewing(step: Step, run: FlowRun, facts: DrainFacts, cfg: DrainStepCo
 
   if (!verdictHere) {
     const reviewer = drain.reviewer;
-    if (!reviewer || reviewer.sha !== sha) return startReviewer(step, sha);
+    if (!reviewer || reviewer.sha !== sha) return startReviewer(step, sha, facts);
     if (!reviewer.pending && stopped(facts.reviewer)) {
       if (drain.nudges >= 1) return park(step, PARK_REASONS.reviewerStopped);
-      const restarted = startReviewer(step, sha);
+      const restarted = startReviewer(step, sha, facts);
       return { ...restarted, drain: { ...restarted.drain, nudges: drain.nudges + 1 } };
     }
     return step;
@@ -338,37 +389,75 @@ function reviewing(step: Step, run: FlowRun, facts: DrainFacts, cfg: DrainStepCo
       title: facts.item.title,
     });
   }
+  return rearmIfReviewed({ ...next, drain: toPhase(next.drain, 'watching') }, facts);
+}
+
+/**
+ * Re-arm a PR flow disarmed for a review, once that review came back clean at
+ * the commit that would merge ({@link reviewedIsHead}). Until then it stays
+ * disarmed, with `disarmedForReview` set, and a later pass tries again.
+ */
+function rearmIfReviewed(step: Step, facts: DrainFacts): Step {
+  const pr = step.drain.pr;
+  if (pr === null || !pr.disarmedForReview || !reviewedIsHead(step.drain, facts)) return step;
+  if (facts.pr?.armed) return step;
   return {
-    drain: toPhase(next.drain, 'watching'),
-    actions: drain.pr.disarmedForReview
-      ? [...next.actions, { kind: 'arm', pr: ref(drain.pr) }]
-      : next.actions,
+    drain: step.drain,
+    actions: [...step.actions, { kind: 'arm', pr: ref(pr), sha: step.drain.reviewedSha }],
   };
+}
+
+/**
+ * Whether the branch moved past the reviewed commit: origin's head, or the
+ * open PR's head, is another commit (or anything at all, before a review).
+ */
+function headMoved(drain: DrainState, facts: DrainFacts): boolean {
+  // With nothing reviewed, any known head is unreviewed.
+  const reviewed = drain.reviewedSha;
+  return (
+    (facts.originHead !== null && facts.originHead !== reviewed) ||
+    (facts.pr !== null && facts.pr.state === 'open' && facts.pr.headSha !== reviewed)
+  );
+}
+
+/**
+ * A push the worker never reported, after a clean review: disarm now (it must
+ * never stay armed), and once the worker has stopped, ask it to report the
+ * push so the new commit is reviewed (twice, then park).
+ */
+function unreportedPush(step: Step, run: FlowRun, facts: DrainFacts, cfg: DrainStepConfig): Step {
+  return nudge(disarmIfArmed(step, facts), run, facts, cfg, true);
 }
 
 /** `watching`: follow the PR until it merges, closes, or goes red. */
 function watching(step: Step, run: FlowRun, facts: DrainFacts, cfg: DrainStepConfig): Step {
   const drain = step.drain;
   const pr = facts.pr;
-  if (!pr || !drain.pr) return step;
+  if (!drain.pr) return step;
   const prUrl = drain.pr.url;
-  if (pr.state === 'merged') {
+  if (pr?.state === 'merged') {
     return send({ ...step, drain: toPhase(drain, 'closing') }, 'merged', {
       flow: cfg.flow,
       identifier: run.identifier,
       prUrl,
     });
   }
-  if (pr.state === 'closed') return park(step, PARK_REASONS.prClosed);
+  if (pr?.state === 'closed') return park(step, PARK_REASONS.prClosed);
+  if (headMoved(drain, facts)) return unreportedPush(step, run, facts, cfg);
+  if (!pr) return step;
   const redCtx = { flow: cfg.flow, identifier: run.identifier, prUrl, failing: pr.failing };
   if (pr.failing.length > 0 && facts.ejection === null) {
     return send({ ...step, drain: toPhase(drain, 'fixing-ci') }, 'ci-red', redCtx);
   }
   if (!pr.armed && !pr.queued && facts.ejection !== null) {
-    if (facts.ejection === 'innocent' && drain.rearmedFor !== pr.headSha) {
+    if (
+      facts.ejection === 'innocent' &&
+      drain.rearmedFor !== pr.headSha &&
+      reviewedIsHead(drain, facts)
+    ) {
       return {
         drain: { ...drain, rearmedFor: pr.headSha },
-        actions: [...step.actions, { kind: 'arm', pr: ref(drain.pr) }],
+        actions: [...step.actions, { kind: 'arm', pr: ref(drain.pr), sha: drain.reviewedSha }],
       };
     }
     return send({ ...step, drain: toPhase(drain, 'fixing-ci') }, 'ci-red', {
@@ -376,7 +465,7 @@ function watching(step: Step, run: FlowRun, facts: DrainFacts, cfg: DrainStepCon
       ejected: true,
     });
   }
-  return step;
+  return rearmIfReviewed(step, facts);
 }
 
 /** The phase table for a run that is live, claimed and past its start. */
@@ -385,31 +474,74 @@ function phaseStep(step: Step, run: FlowRun, facts: DrainFacts, cfg: DrainStepCo
   const pushed = unreviewedPush(drain);
   switch (drain.phase) {
     case 'working':
-      return pushed ? startReviewer(step, pushed) : nudge(step, run, facts, cfg);
+      return pushed ? startReviewer(step, pushed, facts) : nudge(step, run, facts, cfg);
     case 'reviewing':
       return reviewing(step, run, facts, cfg);
     case 'fixing':
       if (drain.verdict === 'changes' && drain.reviewRound >= cfg.maxReviewRounds) {
         return park(step, PARK_REASONS.rounds(drain.reviewRound));
       }
-      return pushed ? startReviewer(step, pushed) : nudge(step, run, facts, cfg);
+      return pushed ? startReviewer(step, pushed, facts) : nudge(step, run, facts, cfg);
     case 'fixing-ci':
-      return pushed ? startReviewer(step, pushed) : nudge(step, run, facts, cfg);
+      if (pushed) return startReviewer(step, pushed, facts);
+      return headMoved(drain, facts)
+        ? unreportedPush(step, run, facts, cfg)
+        : nudge(step, run, facts, cfg);
     case 'pr-ready':
-      if (pushed) return startReviewer(step, pushed);
+      if (pushed) return startReviewer(step, pushed, facts);
+      if (headMoved(drain, facts)) return unreportedPush(step, run, facts, cfg);
       return drain.pr ? { ...step, drain: toPhase(drain, 'watching') } : step;
     case 'watching':
-      return pushed ? startReviewer(step, pushed) : watching(step, run, facts, cfg);
+      return pushed ? startReviewer(step, pushed, facts) : watching(step, run, facts, cfg);
     default:
       return step;
   }
 }
 
 /**
+ * A parked run whose question was answered: its item no longer carries
+ * `agent/needs-input` and is still claimed and open. It goes back to the phase
+ * it parked from (`working` when unknown) and the worker gets a `continue` that
+ * points at the answer. Anything else leaves it parked and unchanged.
+ */
+function readopt(
+  run: FlowRun,
+  current: DrainState,
+  facts: DrainFacts,
+  cfg: DrainStepConfig
+): DrainStepResult {
+  const item = facts.item;
+  if (item.closed || !item.claimed || item.needsInput || run.limit) return { run, actions: [] };
+  const from = current.parkedFrom;
+  const phase = from && from !== 'parked' ? from : 'working';
+  return {
+    run: {
+      ...run,
+      drain: {
+        ...current,
+        ...facts.reports,
+        phase,
+        parkedReason: null,
+        parkedFrom: null,
+        nudges: 0,
+      },
+    },
+    actions: [
+      {
+        kind: 'send',
+        message: 'continue',
+        ctx: { flow: cfg.flow, identifier: run.identifier, answered: true },
+      },
+    ],
+  };
+}
+
+/**
  * One reducer step for one drain run (spec §4.4).
  *
- * @param run - The run as the pass read it; a run without `drain`, a parked
- *   run, or a drain written by a newer flow (`v` above 1) comes back unchanged.
+ * @param run - The run as the pass read it; a run without `drain`, or a drain
+ *   written by a newer flow (`v` above 1), comes back unchanged; a parked run
+ *   comes back unchanged until its question is answered ({@link readopt}).
  * @param facts - What the pass observed.
  * @param cfg - The drain settings.
  * @param now - The pass's clock, for `wakeAfter`.
@@ -422,7 +554,8 @@ export function drainStep(
   now: Date
 ): DrainStepResult {
   const current = run.drain;
-  if (!current || current.v !== 1 || current.phase === 'parked') return { run, actions: [] };
+  if (!current || current.v !== 1) return { run, actions: [] };
+  if (current.phase === 'parked') return readopt(run, current, facts, cfg);
 
   // Record the reports first: they are facts whatever else happens.
   const recorded: DrainState = { ...current, ...facts.reports };

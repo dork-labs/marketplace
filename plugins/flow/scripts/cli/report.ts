@@ -247,7 +247,12 @@ async function blocked(ctx: VerbContext, run: DrainRun): Promise<VerbResult> {
   await writeDrain(
     store,
     run,
-    (drain) => ({ ...drain, phase: 'parked', parkedReason: reason }),
+    (drain) => ({
+      ...drain,
+      phase: 'parked',
+      parkedReason: reason,
+      parkedFrom: drain.phase === 'parked' ? (drain.parkedFrom ?? null) : drain.phase,
+    }),
     `run "flow report ${run.identifier} blocked" again (the question is posted, so it will not be posted twice)`
   );
   return {

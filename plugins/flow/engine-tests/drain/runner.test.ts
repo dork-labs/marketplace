@@ -22,7 +22,7 @@ import {
 } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { realProcessRunner, type ProcessRunner } from '../../scripts/cli/context.ts';
 import { drain, type DrainOptions } from '../../scripts/cli/drain.ts';
@@ -43,6 +43,9 @@ import {
 } from '../../scripts/launchers/types.ts';
 import { createFakeAdapter, type FakeTracker } from '../fixtures/cli/fake-adapter/adapter.ts';
 import { item, makeProject, type WriteProject } from '../cli/write-harness.ts';
+
+// Every case drives real git and several CLI runs; a loaded machine needs the room.
+vi.setConfig({ testTimeout: 60_000 });
 
 const FLOW_ROOT = path.resolve(path.dirname(new URL(import.meta.url).pathname), '..', '..');
 const T0 = Date.parse('2026-09-26T12:00:00.000Z');
@@ -87,6 +90,8 @@ interface LauncherScript {
   onStart?: (req: LaunchRequest) => void;
   /** Called during each state read. */
   onState?: (handle: SessionHandle) => void;
+  /** Awaited during each stop. */
+  onStop?: (handle: SessionHandle) => Promise<void>;
   /** Session states by session id (default busy). */
   states: Map<string, SessionState>;
 }
@@ -130,6 +135,7 @@ function fakeLaunchers(log: LauncherLog, script: LauncherScript) {
     },
     async stop(handle) {
       log.stops.push(handle);
+      await script.onStop?.(handle);
       return 'stopped';
     },
   });
@@ -142,14 +148,15 @@ function fakeForge() {
   let armed = false;
   let prNumber: number | null = null;
   const status: Partial<PrStatus> = {};
+  /** The ACME-1 branch head on origin (what the PR's head is). */
+  const head = () => {
+    const run = Object.values(project.runs()).find((r) => r.identifier === 'ACME-1');
+    return git(project.dir, 'ls-remote', 'origin', `refs/heads/${run?.branch}`).split(/\s+/)[0];
+  };
   /** The gate the whole drain exists for: a clean verdict at the branch head on origin. */
   const gate = (what: string) => {
-    const run = Object.values(project.runs()).find((r) => r.identifier === 'ACME-1');
-    const d = run?.drain;
-    const head = git(project.dir, 'ls-remote', 'origin', `refs/heads/${run?.branch}`).split(
-      /\s+/
-    )[0];
-    if (!d || d.verdict !== 'clean' || d.reviewedSha !== head) {
+    const d = Object.values(project.runs()).find((r) => r.identifier === 'ACME-1')?.drain;
+    if (!d || d.verdict !== 'clean' || d.reviewedSha !== head()) {
       violations.push(
         `${what} without a clean review at the head (${d?.verdict} at ${d?.reviewedSha}, head ${head})`
       );
@@ -177,14 +184,19 @@ function fakeForge() {
         failing: [],
         armed,
         queued: false,
-        headSha: 'x',
+        headSha: head(),
         base: 'work',
         ...status,
       };
     },
-    async arm(pr) {
-      calls.push({ method: 'arm', arg: pr });
+    async arm(pr, sha) {
+      calls.push({ method: 'arm', arg: [pr, sha] });
       gate('arm');
+      // As GitHub does with --match-head-commit: another head refuses the arm.
+      if (sha !== head()) {
+        violations.push(`arm at ${sha} while the head is ${head()}`);
+        throw new Error('head changed');
+      }
       armed = true;
     },
     async disarm(pr) {
@@ -195,7 +207,7 @@ function fakeForge() {
       return [];
     },
   };
-  return { forge, calls, violations, status };
+  return { forge, calls, violations, status, head };
 }
 
 /** Real git, except `remote get-url origin` answers a GitHub address. */
@@ -510,7 +522,10 @@ describe('flow drain: one item from pick to closing', () => {
     await tick();
     await reviewerSays('ACME-1', s3, 'clean');
     await tick();
-    expect(world.forge.calls.filter((c) => c.method === 'arm')).toHaveLength(2);
+    expect(world.forge.calls.filter((c) => c.method === 'arm')).toEqual([
+      { method: 'arm', arg: [7, s2] },
+      { method: 'arm', arg: [7, s3] },
+    ]);
     expect(drainOf('ACME-1')).toMatchObject({ phase: 'watching', pr: { armed: true } });
 
     // Merged -> the worker is told to close; flow done -> its session is stopped.
@@ -729,6 +744,131 @@ describe('flow drain: compare-and-set', () => {
     await tick();
     expect(world.log.starts.filter((s) => s.req.role === 'reviewer')).toHaveLength(1);
   });
+});
+
+describe('flow drain: arming only the reviewed commit', () => {
+  it.each([
+    // The report landed and the forge still shows S2: only the locked re-check of
+    // the reported push stands between the decision and an arm at S2.
+    ['pushes and reports S3 while the forge still shows S2', true],
+    // The push landed, not yet its report: only the forge's head stands in the way.
+    ['pushes S3 without reporting it yet', false],
+  ] as const)(
+    'does not arm when the worker %s before the arm lands',
+    async (_name, reports) => {
+      // Purpose: the race behind the review gate. A pass decides to re-arm at the
+      // reviewed S2; before the arm lands the worker pushes S3. The runner must
+      // refuse to arm, and every arm names its commit.
+      world.tracker = createFakeAdapter({ user: { id: 'agent-1' }, items: [item('ACME-1')] });
+      await tick();
+      const s1 = await workerPushes('ACME-1', 'one');
+      await tick();
+      await reviewerSays('ACME-1', s1, 'clean');
+      await tick();
+      const wt = runOf('ACME-1').worktreePath;
+      writeFileSync(path.join(wt, 'pr-body.md'), 'What changes.\n');
+      const pr = await flow(
+        ['pr', 'ACME-1', '--title', 'T', '--body-file', path.join(wt, 'pr-body.md'), '--arm'],
+        wt
+      );
+      expect(pr.code, pr.stderr).toBe(0);
+      await tick();
+      const s2 = await workerPushes('ACME-1', 'two', 'fix');
+      expect(drainOf('ACME-1').pr).toMatchObject({ armed: false, disarmedForReview: true });
+      await tick();
+      await reviewerSays('ACME-1', s2, 'clean');
+
+      // The pass that would re-arm at S2 stops the reviewer first; the worker's
+      // next push and report land right then.
+      let s3: string | null = null;
+      world.script.onStop = async (handle) => {
+        if (s3 === null && handle.sessionId === lastReviewer().handle.sessionId) {
+          world.script.onStop = undefined;
+          if (reports) {
+            s3 = await workerPushes('ACME-1', 'three', 'fix');
+            world.forge.status.headSha = s2; // the forge has not caught up
+          } else {
+            writeFileSync(path.join(wt, 'three.txt'), 'three');
+            git(wt, 'add', 'three.txt');
+            git(wt, 'commit', '-q', '-m', 'three');
+            git(wt, 'push', '-q', 'origin', runOf('ACME-1').branch);
+            s3 = git(wt, 'rev-parse', 'HEAD');
+          }
+        }
+      };
+      await tick();
+      delete world.forge.status.headSha;
+      expect(s3).not.toBeNull();
+      const arms = world.forge.calls.filter((c) => c.method === 'arm').map((c) => c.arg);
+      expect(arms).toEqual([[7, s1]]);
+      expect(drainOf('ACME-1').pr).toMatchObject({ armed: false, disarmedForReview: true });
+      expect(world.forge.violations).toEqual([]);
+
+      if (reports) {
+        // The next pass reviews S3; nothing arms until it is clean.
+        await tick();
+        expect(lastReviewer().req.cwd).toContain((s3 as unknown as string).slice(0, 7));
+      }
+    },
+    120_000
+  );
+
+  it('disarms a push nobody reported on an armed PR', async () => {
+    // Purpose: a worker that pushes without reporting must never leave an armed
+    // PR merging a commit nobody reviewed.
+    world.tracker = createFakeAdapter({ user: { id: 'agent-1' }, items: [item('ACME-1')] });
+    await tick();
+    const s1 = await workerPushes('ACME-1', 'one');
+    await tick();
+    await reviewerSays('ACME-1', s1, 'clean');
+    await tick();
+    const wt = runOf('ACME-1').worktreePath;
+    writeFileSync(path.join(wt, 'pr-body.md'), 'What changes.\n');
+    await flow(
+      ['pr', 'ACME-1', '--title', 'T', '--body-file', path.join(wt, 'pr-body.md'), '--arm'],
+      wt
+    );
+    await tick();
+    // An unreported push.
+    writeFileSync(path.join(wt, 'x.txt'), 'x');
+    git(wt, 'add', 'x.txt');
+    git(wt, 'commit', '-q', '-m', 'x');
+    git(wt, 'push', '-q', 'origin', runOf('ACME-1').branch);
+    await tick();
+    expect(world.forge.calls.at(-1)).toEqual({ method: 'disarm', arg: 7 });
+    expect(drainOf('ACME-1').pr).toMatchObject({ armed: false, disarmedForReview: true });
+    expect(world.forge.violations).toEqual([]);
+  }, 120_000);
+});
+
+describe('flow drain: parked runs', () => {
+  it('a parked run holds no slot, and an answered one is picked back up', async () => {
+    // Purpose: a run waiting on a person must not block new work, and once the
+    // person answers, the drain resumes it instead of leaving it parked forever.
+    await tick();
+    const first = runOf('ACME-1');
+    const question = path.join(first.worktreePath, 'q.md');
+    writeFileSync(question, 'Which format?\n');
+    const blocked = await flow(
+      ['report', 'ACME-1', 'blocked', '--question-file', question],
+      first.worktreePath
+    );
+    expect(blocked.code, blocked.stderr).toBe(0);
+    expect(drainOf('ACME-1')).toMatchObject({ phase: 'parked', parkedFrom: 'working' });
+
+    // parallel 1: the parked run frees its slot, so ACME-2 starts.
+    await tick();
+    expect(runOf('ACME-2').status).toBe('running');
+
+    // A person answers: the item is claimed again, without needs-input.
+    const acme1 = world.tracker.backlog.items.find((i) => i.identifier === 'ACME-1')!;
+    acme1.labels = acme1.labels.filter((l) => l !== 'agent/needs-input').concat('agent/claimed');
+    await tick();
+    expect(drainOf('ACME-1')).toMatchObject({ phase: 'working', parkedReason: null });
+    const sent = world.log.sends.at(-1);
+    expect(sent?.handle.sessionId).toBe(first.sessionId);
+    expect(sent?.text).toContain('answered');
+  }, 120_000);
 });
 
 describe('flow drain: the handoff seam', () => {

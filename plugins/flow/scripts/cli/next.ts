@@ -175,7 +175,8 @@ function liveKey(runtime: string | undefined, account: string | null | undefined
 
 /**
  * Live sessions per `<runtime>:<id>`: every `running` or `queued` run by its
- * account, plus its drain reviewer's handle by the reviewer's account. A run or
+ * account, plus its drain reviewer's handle by the reviewer's account. A parked
+ * drain run counts for nothing. A run or
  * handle with no account bills its runtime's implicit `default`.
  *
  * @param runs - Every run, keyed by issue id.
@@ -188,6 +189,8 @@ export function liveByAccount(runs: Readonly<Record<string, FlowRun>>): Record<s
   };
   for (const run of Object.values(runs)) {
     if (run.status !== 'running' && run.status !== 'queued') continue;
+    // A parked drain run holds no live session (parking stops them).
+    if (run.drain?.phase === 'parked') continue;
     add(liveKey(run.runtime, run.account));
     const reviewer = run.drain?.reviewer;
     if (reviewer) add(liveKey(handleRuntime(reviewer), reviewer.account));

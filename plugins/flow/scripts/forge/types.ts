@@ -86,8 +86,12 @@ export interface Forge {
   createPr(input: CreatePrInput): Promise<ForgePr>;
   /** Read a PR's state, failing checks, auto-merge and queue position. */
   prStatus(pr: number): Promise<PrStatus>;
-  /** Arm auto-merge. */
-  arm(pr: number): Promise<void>;
+  /**
+   * Arm auto-merge for the reviewed commit only: the forge refuses when the
+   * PR's head is not `headSha` (GitHub: `--match-head-commit`), so a push that
+   * lands after the review can never merge through this arm.
+   */
+  arm(pr: number, headSha: string): Promise<void>;
   /** Disarm auto-merge. */
   disarm(pr: number): Promise<void>;
   /**

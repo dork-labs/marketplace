@@ -237,13 +237,23 @@ describe('the other gh calls', () => {
     ]);
   });
 
-  // arm and disarm are gh pr merge --auto / --disable-auto.
+  // arm and disarm are gh pr merge --auto / --disable-auto; arm is tied to the
+  // reviewed commit with --match-head-commit, so a later push cannot merge.
   it('arm and disarm', async () => {
     const { gh, forge } = forgeWith({ 'pr merge': ok('') });
-    await forge.arm(5);
+    await forge.arm(5, 'abc123');
     await forge.disarm(5);
     expect(gh.calls.map((c) => c.args)).toEqual([
-      ['pr', 'merge', '5', '-R', 'dork-labs/marketplace', '--auto'],
+      [
+        'pr',
+        'merge',
+        '5',
+        '-R',
+        'dork-labs/marketplace',
+        '--auto',
+        '--match-head-commit',
+        'abc123',
+      ],
       ['pr', 'merge', '5', '-R', 'dork-labs/marketplace', '--disable-auto'],
     ]);
   });

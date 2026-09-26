@@ -161,7 +161,7 @@ export async function run(ctx: VerbContext): Promise<VerbResult> {
   // Recorded before arming, so a failed arm never leaves an unrecorded PR.
   await recordPr(ctx, drainRun, forge, created, false);
   if (arm) {
-    await forge.arm(created.number);
+    await forge.arm(created.number, head);
     await recordPr(ctx, drainRun, forge, created, true);
   }
   return {

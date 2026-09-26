@@ -14,6 +14,8 @@ import { afterEach, describe, expect, it } from 'vitest';
 
 import { findConfigRoots } from '../../scripts/config-files.ts';
 import { loadConfig } from '../../scripts/config-load.ts';
+import { liveByAccount } from '../../scripts/cli/next.ts';
+import type { DrainState } from '../../scripts/drain/state.ts';
 import { EXIT } from '../../scripts/errors.ts';
 import type { FlowRun } from '../../scripts/flow-run.ts';
 import type { WorkItem } from '../../scripts/tracker/types.ts';
@@ -642,5 +644,32 @@ describe('flow next: the account each pick runs on (flow-handoff-dispatch §3.5)
     const human = await next(['-n', '2', '--no-account']);
     expect(human.stdout).not.toContain('->');
     expect(human.stderr).toBe('');
+  });
+});
+
+describe('liveByAccount', () => {
+  // Purpose: a parked drain run holds no live session, so it must not use up
+  // its account's room; a working one, and its reviewer, still count.
+  it('counts running runs and their reviewers, but not a parked drain run', () => {
+    const base = {
+      identifier: 'X',
+      sessionId: 's',
+      worktreePath: '/w',
+      branch: 'b',
+      stage: 'execute',
+      status: 'running',
+      attemptCount: 0,
+      workerPid: -1,
+      startedAt: '2026-09-26T00:00:00.000Z',
+      account: 'a',
+    } as const;
+    const drain = (phase: DrainState['phase']) =>
+      ({ v: 1, rev: 1, phase, worker: null, reviewer: null }) as unknown as DrainState;
+    const runs: Record<string, FlowRun> = {
+      one: { ...base, issueId: 'one', drain: drain('working') },
+      two: { ...base, issueId: 'two', drain: drain('parked') },
+      three: { ...base, issueId: 'three' },
+    };
+    expect(liveByAccount(runs)).toEqual({ 'claude-code:a': 2 });
   });
 });

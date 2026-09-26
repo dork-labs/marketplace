@@ -39,17 +39,17 @@ trigger over it. In reconciler-registry order, one tick:
    resume / restart-clean / escalate per the recovery script
    (`node --experimental-strip-types "<flow-root>/scripts/recovery.ts"`). Skip
    every run with `drain` set: `flow drain` recovers its own.
-2. **Inbox / resume.** Un-park items whose `agent/needs-input` question was
-   answered, and resume the parked run.
+2. **Inbox / resume.** Un-park answered `agent/needs-input` items and resume
+   their runs; skip runs with `drain` set.
 3. **Dispatch.** With `drain.parallel` at 1 or more, run
    `node --experimental-strip-types "<flow-root>/scripts/flow.ts" drain --tick` and stop.
    At 0, take the top item of `flow.ts next --json`, provision its worktree, claim it with
-   `flow.ts claim <id> --session <session id> --worktree <path> --branch <branch> --json`
+   `node --experimental-strip-types "<flow-root>/scripts/flow.ts" claim <id> --session <session id> --worktree <path> --branch <branch> --json`
    (Claude Code and Codex supply `--session`)
    and carry it to its human-review gate.
 
 Stop at the review gate or a genuine question. Other tracker reads and writes
-go through **the adapter**; this tick never names a tracker directly.
+go through **the adapter**; this tick never names a tracker.
 
 **Operator override.** At each stage boundary, check for the `agent/paused`
 marker: if present, advance no further, run `flow.ts release <id>

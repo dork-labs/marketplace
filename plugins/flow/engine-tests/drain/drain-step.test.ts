@@ -137,7 +137,7 @@ function facts(d: DrainState, over: Partial<DrainFacts> = {}): DrainFacts {
     originHead: d.pushedSha,
     pr: null,
     ejection: null,
-    item: { closed: false, claimed: true, title: 'Export the report as CSV' },
+    item: { closed: false, claimed: true, needsInput: false, title: 'Export the report as CSV' },
     runComplete: false,
     ...over,
   };
@@ -145,7 +145,7 @@ function facts(d: DrainState, over: Partial<DrainFacts> = {}): DrainFacts {
 
 /** An open PR status. */
 function prStatus(over: Partial<PrStatusFact> = {}): PrStatusFact {
-  return { state: 'open', failing: [], armed: true, queued: false, headSha: HEAD_PR, ...over };
+  return { state: 'open', failing: [], armed: true, queued: false, headSha: S, ...over };
 }
 
 /** Run one step. */
@@ -182,6 +182,7 @@ describe('drainStep: the phase table', () => {
     expect(out.drain.phase).toBe('parked');
     expect(out.drain.parkedReason).toBe(PARK_REASONS.workerStopped);
     expect(out.actions).toEqual([
+      STOP_WORKER,
       { kind: 'park', reason: PARK_REASONS.workerStopped, trackerWrite: true },
     ]);
   });
@@ -212,7 +213,7 @@ describe('drainStep: the phase table', () => {
 
   // reviewing + clean at the head with a PR: back to watching, re-armed if flow disarmed it.
   it.each([
-    [true, [stopReviewer(S), { kind: 'arm', pr: { repo: 'acme/app', number: 88 } }]],
+    [true, [stopReviewer(S), { kind: 'arm', pr: { repo: 'acme/app', number: 88 }, sha: S }]],
     [false, [stopReviewer(S)]],
   ] as const)(
     'reviewing + clean at S == head, PR exists (disarmedForReview %s) -> watching',
@@ -225,7 +226,7 @@ describe('drainStep: the phase table', () => {
         reviewer: reviewer(S),
         pr: { ...PR, disarmedForReview: disarmed },
       });
-      const out = step(d);
+      const out = step(d, { pr: prStatus({ armed: false, headSha: S }) });
       expect(out.drain.phase).toBe('watching');
       expect(out.actions).toEqual(actions);
     }
@@ -291,6 +292,7 @@ describe('drainStep: the phase table', () => {
     expect(second.drain.phase).toBe('parked');
     expect(second.actions).toEqual([
       stopReviewer(S),
+      STOP_WORKER,
       { kind: 'park', reason: PARK_REASONS.reviewerStopped, trackerWrite: true },
     ]);
   });
@@ -331,6 +333,7 @@ describe('drainStep: the phase table', () => {
     expect(out.drain.parkedReason).toBe('the review did not come back clean after 5 rounds');
     expect(out.actions).toEqual([
       stopReviewer(S),
+      STOP_WORKER,
       { kind: 'park', reason: PARK_REASONS.rounds(5), trackerWrite: true },
     ]);
   });
@@ -381,15 +384,15 @@ describe('drainStep: the phase table', () => {
       ejection: 'innocent',
     });
     expect(out.drain.phase).toBe('watching');
-    expect(out.drain.rearmedFor).toBe(HEAD_PR);
-    expect(out.actions).toEqual([{ kind: 'arm', pr: { repo: 'acme/app', number: 88 } }]);
+    expect(out.drain.rearmedFor).toBe(S);
+    expect(out.actions).toEqual([{ kind: 'arm', pr: { repo: 'acme/app', number: 88 }, sha: S }]);
   });
 
   // watching + any other ejection (suspect, unknown, or innocent twice at one head): ci-red.
   it.each([
     ['suspect', null],
     ['unknown', null],
-    ['innocent', HEAD_PR],
+    ['innocent', S],
   ] as const)(
     'watching + ejected, %s (rearmedFor %s) -> fixing-ci, send ci-red',
     (ejection, rearmedFor) => {
@@ -421,6 +424,7 @@ describe('drainStep: the phase table', () => {
     const out = step(watchingDrain(), { pr: prStatus({ state: 'closed' }) });
     expect(out.drain.phase).toBe('parked');
     expect(out.actions).toEqual([
+      STOP_WORKER,
       { kind: 'park', reason: PARK_REASONS.prClosed, trackerWrite: true },
     ]);
   });
@@ -429,14 +433,18 @@ describe('drainStep: the phase table', () => {
   it('fixing-ci + pushed S3 -> reviewing, start reviewer with deltaFrom = reviewedSha', () => {
     const out = step(watchingDrain({ phase: 'fixing-ci', pushedSha: S2 }));
     expect(out.drain.phase).toBe('reviewing');
-    expect(out.actions).toEqual([{ kind: 'start-reviewer', sha: S2, deltaFrom: S }]);
+    // The PR is armed, so it is disarmed before the review starts.
+    expect(out.actions).toEqual([
+      { kind: 'disarm', pr: { repo: 'acme/app', number: 88 } },
+      { kind: 'start-reviewer', sha: S2, deltaFrom: S },
+    ]);
   });
 
   // closing + flow done ran: stop what is still live.
   it('closing + runComplete -> stop any live session', () => {
     const out = step(watchingDrain({ phase: 'closing' }), {
       runComplete: true,
-      item: { closed: true, claimed: false, title: 't' },
+      item: { closed: true, claimed: false, needsInput: false, title: 't' },
     });
     expect(out.drain.phase).toBe('closing');
     expect(out.drain.worker).toBeNull();
@@ -446,7 +454,7 @@ describe('drainStep: the phase table', () => {
   // closing + the worker closed the item itself: that is not "taken away".
   it('closing + item closed before runComplete -> no park, no action', () => {
     const out = step(watchingDrain({ phase: 'closing' }), {
-      item: { closed: true, claimed: false, title: 't' },
+      item: { closed: true, claimed: false, needsInput: false, title: 't' },
     });
     expect(out.drain.phase).toBe('closing');
     expect(out.actions).toEqual([]);
@@ -493,12 +501,15 @@ describe('drainStep: the phase table', () => {
       const d = watchingDrain({ phase, pushedSha: S2 });
       const out = step(d, { pr: prStatus() });
       expect(out.drain.phase).toBe('reviewing');
-      expect(out.actions).toEqual([{ kind: 'start-reviewer', sha: S2, deltaFrom: S }]);
+      expect(out.actions).toEqual([
+        { kind: 'disarm', pr: { repo: 'acme/app', number: 88 } },
+        { kind: 'start-reviewer', sha: S2, deltaFrom: S },
+      ]);
     }
   );
 
   // working, reviewing or fixing + a PR on the branch before a clean review: disarm and park.
-  it.each(['working', 'reviewing', 'fixing'] as const)(
+  it.each(['working', 'reviewing', 'fixing', 'pr-ready'] as const)(
     '%s + a PR on the branch while drain.pr is null -> parked, disarm',
     (phase) => {
       const d = drain(phase, {
@@ -511,6 +522,7 @@ describe('drainStep: the phase table', () => {
       expect(out.actions).toEqual([
         { kind: 'disarm', pr: { repo: 'acme/app', number: 90 } },
         ...(phase === 'reviewing' ? [stopReviewer(S)] : []),
+        STOP_WORKER,
         { kind: 'park', reason: PARK_REASONS.earlyPr, trackerWrite: true },
       ]);
     }
@@ -535,7 +547,7 @@ describe('drainStep: the phase table', () => {
     ['claim lost', { closed: false, claimed: false }],
   ] as const)('item %s by someone else -> parked, stop sessions, no tracker write', (_n, item) => {
     const d = drain('reviewing', { pushedSha: S, reviewer: reviewer(S) });
-    const out = step(d, { item: { ...item, title: 't' } });
+    const out = step(d, { item: { ...item, needsInput: false, title: 't' } });
     expect(out.drain.phase).toBe('parked');
     expect(out.actions).toEqual([
       stopReviewer(S),
@@ -548,7 +560,8 @@ describe('drainStep: the phase table', () => {
   it('a run the blocked report parked -> unchanged, no action', () => {
     const d = drain('parked', { parkedReason: 'blocked' });
     const r = run(d);
-    const out = drainStep(r, facts(d, { worker: { kind: 'idle' } }), CFG, NOW);
+    const f = facts(d, { worker: { kind: 'idle' } });
+    const out = drainStep(r, { ...f, item: { ...f.item, needsInput: true } }, CFG, NOW);
     expect(out.run).toBe(r);
     expect(out.actions).toEqual([]);
   });
@@ -600,6 +613,134 @@ describe('drainStep: while run.limit is set', () => {
   });
 });
 
+describe('drainStep: arming only the reviewed commit', () => {
+  /** A watching drain with PR #88 at a clean S. */
+  const clean = (over: Partial<DrainState> = {}) =>
+    drain('watching', {
+      pushedSha: S,
+      reviewedSha: S,
+      verdict: 'clean',
+      reviewRound: 1,
+      pr: { ...PR, armed: true },
+      ...over,
+    });
+
+  // A clean re-review re-arms only when the PR's head is the reviewed commit;
+  // otherwise it waits in watching with disarmedForReview still set.
+  it('re-arms at the reviewed SHA only when the PR head is that SHA', () => {
+    const d = drain('reviewing', {
+      pushedSha: S,
+      reviewedSha: S,
+      verdict: 'clean',
+      reviewRound: 2,
+      reviewer: reviewer(S),
+      pr: { ...PR, armed: false, disarmedForReview: true },
+    });
+    const lagging = step(d, { pr: prStatus({ armed: false, headSha: S2 }) });
+    expect(lagging.drain.phase).toBe('watching');
+    expect(lagging.drain.pr?.disarmedForReview).toBe(true);
+    expect(lagging.actions.some((a) => a.kind === 'arm')).toBe(false);
+
+    // Next pass in watching: the forge caught up, so it arms at S.
+    const caught = step(lagging.drain, { pr: prStatus({ armed: false, headSha: S }) });
+    expect(caught.actions).toEqual([{ kind: 'arm', pr: { repo: 'acme/app', number: 88 }, sha: S }]);
+  });
+
+  // Any restart of review while the PR is armed disarms it first.
+  it.each(['pr-ready', 'watching', 'fixing-ci'] as const)(
+    '%s + a reported push while armed -> disarm, then review',
+    (phase) => {
+      const out = step(clean({ phase, pushedSha: S2 }), {
+        originHead: S2,
+        pr: prStatus({ headSha: S2 }),
+      });
+      expect(out.drain.phase).toBe('reviewing');
+      expect(out.actions).toEqual([
+        { kind: 'disarm', pr: { repo: 'acme/app', number: 88 } },
+        { kind: 'start-reviewer', sha: S2, deltaFrom: S },
+      ]);
+    }
+  );
+
+  // An innocent ejection re-arms only a clean review of the head (a head that
+  // moved is caught before this, as an unreported push).
+  it('an innocent ejection does not re-arm without a clean review at the head', () => {
+    const out = step(clean({ verdict: 'changes' }), {
+      originHead: S,
+      pr: prStatus({
+        armed: false,
+        queued: false,
+        headSha: S,
+        failing: [{ name: 'e2e', url: 'u' }],
+      }),
+      ejection: 'innocent',
+    });
+    expect(out.actions.some((a) => a.kind === 'arm')).toBe(false);
+  });
+
+  // A push nobody reported, seen on origin or on the PR: disarm, and ask for
+  // the report once the worker has stopped. Never left armed.
+  it.each([
+    ['pr-ready', { originHead: S2, pr: null }],
+    ['watching', { originHead: S2, pr: prStatus({ headSha: S }) }],
+    ['watching', { originHead: S, pr: prStatus({ headSha: S2 }) }],
+    ['fixing-ci', { originHead: S2, pr: prStatus({ headSha: S2 }) }],
+  ] as const)('%s + an unreported push -> disarm, continue', (phase, seen) => {
+    const d = clean({ phase, pr: phase === 'pr-ready' ? null : { ...PR, armed: true } });
+    const busy = step(d, { ...seen, worker: { kind: 'busy' } });
+    expect(busy.drain.phase).toBe(phase);
+    expect(busy.actions).toEqual(
+      phase === 'pr-ready' ? [] : [{ kind: 'disarm', pr: { repo: 'acme/app', number: 88 } }]
+    );
+    const idle = step(d, { ...seen, worker: { kind: 'idle' } });
+    expect(idle.actions.at(-1)).toEqual({
+      kind: 'send',
+      message: 'continue',
+      ctx: { ...BASE, unreportedPush: true },
+    });
+    expect(idle.actions.some((a) => a.kind === 'arm')).toBe(false);
+  });
+});
+
+describe('drainStep: parked runs', () => {
+  // Parking stops the worker but keeps its handle, so an answer can resume it.
+  it('parking stops the worker, keeps its handle, and records where it parked from', () => {
+    const out = step(drain('working', { nudges: 2 }), { worker: { kind: 'idle' } });
+    expect(out.drain).toMatchObject({ phase: 'parked', parkedFrom: 'working', worker: WORKER });
+    expect(out.actions).toContainEqual(STOP_WORKER);
+  });
+
+  // Answered (needs-input gone, still claimed and open): back to its phase with a continue.
+  it('an answered parked run goes back to its phase and gets a continue', () => {
+    const d = drain('parked', { parkedReason: 'q', parkedFrom: 'fixing', nudges: 2 });
+    const out = step(d, { worker: { kind: 'exited', code: 0 } });
+    expect(out.drain).toMatchObject({
+      phase: 'fixing',
+      parkedReason: null,
+      parkedFrom: null,
+      nudges: 0,
+    });
+    expect(out.actions).toEqual([
+      { kind: 'send', message: 'continue', ctx: { ...BASE, answered: true } },
+    ]);
+    // With no recorded phase it resumes as working.
+    const bare = step(drain('parked', { parkedReason: 'q' }));
+    expect(bare.drain.phase).toBe('working');
+  });
+
+  // Still waiting on a person, or taken away: left alone.
+  it.each([
+    ['still needs input', { closed: false, claimed: true, needsInput: true }],
+    ['claim removed', { closed: false, claimed: false, needsInput: false }],
+    ['closed', { closed: true, claimed: true, needsInput: false }],
+  ] as const)('a parked run whose item is %s stays parked', (_n, item) => {
+    const d = drain('parked', { parkedReason: 'q', parkedFrom: 'working' });
+    const out = step(d, { item: { ...item, title: 't' } });
+    expect(out.drain.phase).toBe('parked');
+    expect(out.actions).toEqual([]);
+  });
+});
+
 /** A seeded PRNG (mulberry32), so the property sweep is reproducible. */
 function prng(seed: number): () => number {
   let a = seed;
@@ -625,11 +766,13 @@ describe('drainStep: properties over every row', () => {
   // Across random states in every phase: no action creates a PR, and open-pr
   // goes out only with a clean verdict at the pushed SHA that is the origin head,
   // on a run with no PR yet.
-  it('never creates a PR; open-pr only with a clean verdict at the origin head', () => {
+  it('never creates a PR; open-pr and arm only with a clean verdict at the head; a moved head is disarmed', () => {
     const rand = prng(20260926);
     const pick = <T>(xs: readonly T[]): T => xs[Math.floor(rand() * xs.length)]!;
     const shas = [null, S, S2, HEAD_PR] as const;
     let openPrs = 0;
+    let arms = 0;
+    let disarmChecks = 0;
     for (let i = 0; i < 20_000; i++) {
       const pushedSha = pick(shas);
       const d = drain(pick(DRAIN_PHASES), {
@@ -639,7 +782,7 @@ describe('drainStep: properties over every row', () => {
         reviewedSha: pick(shas),
         verdict: pick([null, 'clean', 'changes'] as const),
         reviewRound: pick([0, 1, 4, 5, 6]),
-        pr: pick([null, PR, { ...PR, disarmedForReview: true }]),
+        pr: pick([null, PR, { ...PR, disarmedForReview: true }, { ...PR, armed: true }]),
         rearmedFor: pick([null, HEAD_PR]),
         nudges: pick([0, 1, 2]),
       });
@@ -656,12 +799,13 @@ describe('drainStep: properties over every row', () => {
         originHead: pick(shas),
         pr: pick([
           null,
-          prStatus(),
+          prStatus({ headSha: pick(shas.filter((x) => x !== null)) as string }),
+          prStatus({ armed: false, headSha: pick([S, S2]) }),
           prStatus({ state: 'merged' }),
-          prStatus({ armed: false, failing: [{ name: 'x', url: 'y' }] }),
+          prStatus({ armed: false, failing: [{ name: 'x', url: 'y' }], headSha: pick([S, S2]) }),
         ]),
         ejection: pick([null, 'innocent', 'suspect', 'unknown'] as const),
-        item: { closed: rand() < 0.1, claimed: rand() > 0.1, title: 'T' },
+        item: { closed: rand() < 0.1, claimed: rand() > 0.1, needsInput: rand() < 0.5, title: 'T' },
         runComplete: rand() < 0.2,
       });
       const r = run(d, {
@@ -669,9 +813,41 @@ describe('drainStep: properties over every row', () => {
         ...(rand() < 0.2 ? { limit: {} as RunLimit } : {}),
       });
       const out = drainStep(r, f, CFG, NOW);
+      // A head that moved past the reviewed commit on an armed PR is disarmed.
+      const moved =
+        (f.originHead !== null && f.originHead !== d.reviewedSha) ||
+        (f.pr !== null && f.pr.state === 'open' && f.pr.headSha !== d.reviewedSha);
+      const armed = d.pr?.armed === true || (f.pr?.state === 'open' && f.pr.armed);
+      if (
+        moved &&
+        armed &&
+        d.pr !== null &&
+        ['pr-ready', 'watching', 'fixing-ci'].includes(d.phase) &&
+        !f.item.closed &&
+        f.item.claimed &&
+        f.pr?.state !== 'merged' &&
+        f.pr?.state !== 'closed' &&
+        // (A start that never confirmed is resolved first, before any phase step.)
+        !(
+          f.queuedAgeMs !== null &&
+          f.queuedAgeMs > CFG.startTimeoutMs &&
+          ((r.status === 'queued' && d.worker === null) || d.worker?.pending === true)
+        )
+      ) {
+        disarmChecks++;
+        expect(out.actions.some((a) => a.kind === 'disarm')).toBe(true);
+      }
       for (const a of out.actions) {
         expect(ALLOWED.has(a.kind)).toBe(true);
         expect(JSON.stringify(a)).not.toMatch(/create/i);
+        if (a.kind === 'arm') {
+          arms++;
+          expect(a.sha).toBe(f.reports.reviewedSha);
+          expect(f.reports.verdict).toBe('clean');
+          expect(f.reports.pushedSha).toBe(a.sha);
+          expect(f.originHead).toBe(a.sha);
+          expect(f.pr?.headSha).toBe(a.sha);
+        }
         if (a.kind === 'send' && a.message === 'open-pr') {
           openPrs++;
           expect(f.reports.verdict).toBe('clean');
@@ -682,8 +858,10 @@ describe('drainStep: properties over every row', () => {
         }
       }
     }
-    // The sweep must actually reach the open-pr row, or it proves nothing.
+    // The sweep must actually reach the open-pr, arm and moved-head rows, or it proves nothing.
     expect(openPrs).toBeGreaterThan(0);
+    expect(arms).toBeGreaterThan(0);
+    expect(disarmChecks).toBeGreaterThan(0);
   });
 });
 

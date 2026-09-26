@@ -132,6 +132,8 @@ export interface DrainState {
   handoffs: DrainHandoff[];
   /** Why the run parked, when `phase` is `parked`. */
   parkedReason: string | null;
+  /** The phase the run parked from, which an answer resumes; absent on older records. */
+  parkedFrom?: DrainPhase | null;
 }
 
 /** A run's account limit episode (§5.1), stored at `FlowRun.limit`. */
@@ -264,6 +266,7 @@ const DrainStateV1Schema = z.looseObject({
     })
   ),
   parkedReason: nullableString,
+  parkedFrom: vocabulary<DrainPhase>().nullable().optional(),
 });
 
 /**

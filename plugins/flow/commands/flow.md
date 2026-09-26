@@ -334,7 +334,8 @@ is never reaped, because `/flow:resume` reads it back.
      `agent/needs-input` items. Events are triggers, not truth: re-read each item's
      current state, then run `shouldRespondToComment` (rule 3 → `resume`; the
      resolved `identity.marker` from step 0 disambiguates a non-agent reply in
-     shared mode, and rule 1 skips the agent's own). On `resume`, re-attach the
+     shared mode, and rule 1 skips the agent's own). A run with `drain` set is the
+     drain's to resume: skip it. On `resume`, re-attach the
      worktree at HEAD and resume the parked run via `--resume <sessionId>` (read
      from the item's `FlowRun`) or thread-replay. The poll↔webhook producer is a
      config edit (`ingestion.producer`), never a code change.

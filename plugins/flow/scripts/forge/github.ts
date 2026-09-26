@@ -384,8 +384,11 @@ export function createGithubForge(options: GithubForgeOptions): Forge {
       return status.state === 'open' ? { ...status, queued: await inMergeQueue(pr) } : status;
     },
 
-    async arm(pr) {
-      await gh(['pr', 'merge', String(pr), '-R', repoArg, '--auto'], `arming ${target.repo}#${pr}`);
+    async arm(pr, headSha) {
+      await gh(
+        ['pr', 'merge', String(pr), '-R', repoArg, '--auto', '--match-head-commit', headSha],
+        `arming ${target.repo}#${pr} at ${headSha.slice(0, 7)}`
+      );
     },
 
     async disarm(pr) {

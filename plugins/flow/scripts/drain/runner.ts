@@ -186,6 +186,8 @@ export interface ItemFacts {
   closed: boolean;
   /** Still carries the agent's claim. */
   claimed: boolean;
+  /** Carries `agent/needs-input`: a person has not answered yet. */
+  needsInput: boolean;
   /** Its title. */
   title: string;
 }
@@ -310,8 +312,19 @@ function writable(run: FlowRun | undefined): run is DrainRun {
 }
 
 /**
- * Whether a pass looks at this run: a writable drain, not parked, and queued or
- * running (or complete with a session still to stop in `closing`).
+ * Whether a pass looks at this run: a writable drain, queued or running (a
+ * parked one too, to notice an answer), or complete with a session still to
+ * stop in `closing`.
+ */
+function isTracked(run: FlowRun): run is DrainRun {
+  if (!writable(run)) return false;
+  if (run.drain.phase === 'parked') return run.status === 'queued' || run.status === 'running';
+  return isActive(run);
+}
+
+/**
+ * Whether a run is live: tracked and not parked. A parked run holds no live
+ * session, so it takes no slot and does not keep a drain loop going.
  */
 function isActive(run: FlowRun): run is DrainRun {
   if (!writable(run) || run.drain.phase === 'parked') return false;
@@ -885,20 +898,66 @@ export async function runPass(deps: PassDeps): Promise<PassReport> {
         if (intent === null) return 'no account may take the review; the next pass tries again';
         return startReviewer(run, intent, action.deltaFrom);
       case 'arm': {
-        await deps.forge.arm(action.pr.number);
+        // Arm only the reviewed commit, re-checked now: the forge's head, then
+        // under the lock the last reported push and the verdict, so a push
+        // reported since the decision refuses the arm. The forge refuses it
+        // too once the head is any other commit (--match-head-commit).
+        const n = action.pr.number;
+        const status = await deps.forge.prStatus(n);
+        let reserved = false;
+        if (status.state === 'open' && status.headSha === action.sha) {
+          reserved = await supervisorWrite(run.issueId, (r) =>
+            r.drain.pr?.number === n &&
+            r.drain.verdict === 'clean' &&
+            r.drain.reviewedSha === action.sha &&
+            r.drain.pushedSha === action.sha
+              ? {
+                  ...r,
+                  drain: {
+                    ...r.drain,
+                    pr: { ...r.drain.pr, armed: true, disarmedForReview: false },
+                  },
+                }
+              : undefined
+          );
+        }
+        if (!reserved) {
+          return `did not arm #${n}: ${short(action.sha)} is no longer the reviewed head`;
+        }
+        try {
+          await deps.forge.arm(n, action.sha);
+        } catch (error) {
+          await supervisorWrite(run.issueId, (r) =>
+            r.drain.pr?.number === n
+              ? {
+                  ...r,
+                  drain: {
+                    ...r.drain,
+                    pr: { ...r.drain.pr, armed: false, disarmedForReview: true },
+                  },
+                }
+              : undefined
+          );
+          return `did not arm #${n} at ${short(action.sha)}: ${(error as Error).message}`;
+        }
+        return `armed #${n} at ${short(action.sha)}`;
+      }
+      case 'disarm': {
+        await deps.forge.disarm(action.pr.number);
+        // Recorded, so a clean review of what comes next re-arms it.
         await supervisorWrite(run.issueId, (r) =>
           r.drain.pr?.number === action.pr.number
             ? {
                 ...r,
-                drain: { ...r.drain, pr: { ...r.drain.pr, armed: true, disarmedForReview: false } },
+                drain: {
+                  ...r.drain,
+                  pr: { ...r.drain.pr, armed: false, disarmedForReview: true },
+                },
               }
             : undefined
         );
         return describe(action, null);
       }
-      case 'disarm':
-        await deps.forge.disarm(action.pr.number);
-        return describe(action, null);
       case 'park':
         if (action.trackerWrite) await deps.park(run.identifier, action.reason);
         return describe(action, null);
@@ -914,7 +973,7 @@ export async function runPass(deps: PassDeps): Promise<PassReport> {
   const passRun = async (initial: DrainRun): Promise<void> => {
     await settleReviewerIntent(initial);
     const fresh = current(initial.issueId);
-    if (!fresh || !isActive(fresh)) return;
+    if (!fresh || !isTracked(fresh)) return;
     const run = fresh;
     considered.add(`${run.runtime ?? 'claude-code'}:${run.account ?? 'default'}`);
 
@@ -1013,7 +1072,7 @@ export async function runPass(deps: PassDeps): Promise<PassReport> {
 
   // 1-3: every active drain run.
   for (const run of Object.values(deps.store.read())) {
-    if (!isActive(run)) continue;
+    if (!isTracked(run)) continue;
     try {
       await passRun(run);
     } catch (error) {

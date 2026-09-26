@@ -78,8 +78,8 @@ function fakeForge(opts: { existing?: ForgePr | null; armed?: boolean } = {}) {
         base: 'main',
       };
     },
-    async arm(pr) {
-      calls.push({ method: 'arm', arg: pr });
+    async arm(pr, sha) {
+      calls.push({ method: 'arm', arg: [pr, sha] });
     },
     async disarm(pr) {
       calls.push({ method: 'disarm', arg: pr });
@@ -429,7 +429,10 @@ describe('flow pr', () => {
     writeRun(drain({ pushedSha: head, reviewedSha: head, verdict: 'clean' }), head);
     const r = await flow([...args, '--arm']);
     expect(r.code).toBe(0);
-    expect(r.forge.calls.filter((c) => c.method === 'arm')).toEqual([{ method: 'arm', arg: 7 }]);
+    // Tied to the reviewed commit, the head it checked.
+    expect(r.forge.calls.filter((c) => c.method === 'arm')).toEqual([
+      { method: 'arm', arg: [7, head] },
+    ]);
     expect(stored().pr?.armed).toBe(true);
   });
 
