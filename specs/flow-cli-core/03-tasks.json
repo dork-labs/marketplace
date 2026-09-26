@@ -1,0 +1,263 @@
+{
+  "spec": "specs/flow-cli-core/02-specification.md",
+  "slug": "flow-cli-core",
+  "generatedAt": "2026-09-26T17:30:00.000Z",
+  "mode": "full",
+  "lastDecomposeDate": null,
+  "tasks": [
+    {
+      "id": "1.1",
+      "phase": 1,
+      "phaseName": "Foundations and shared contracts",
+      "subject": "[flow-cli-core] [P1] Build the shared fleet contracts and their conformance fixture, test-first",
+      "description": "Implement 02-specification.md section 1 in dependency-free modules. (a) scripts/atomic-json.ts: lock-and-rename writer. Lock = exclusive-create `<file>.lock` holding the writer pid; a lock older than 10 s by mtime is stale and deleted; retry with 25-100 ms jitter; give up after 2 s total and return a dropped-write result with a warning (never throw into the caller); under the lock read (missing = empty; unparsable = rename to `<file>.corrupt-<epoch ms>` and start empty), merge via a caller callback, skip the write when unchanged, write `<file>.<pid>.<random>.tmp` in the same folder, fsync, rename over the target, delete the lock only if it still holds this pid; files 0600, created folders 0700. (b) scripts/fleet/usage-ledger.ts: the v1 ledger shape at `<dorkHome>/usage/<id>.json` (`{v:1, accountId, updatedAt, windows:{<key>:{usedPct 0-100|null, resetsAt ISO|null, status allowed|allowed_warning|rejected|null, observedAt ISO, source statusline|sdk_event|sdk_usage|transcript}}}`); window keys five_hour, seven_day, seven_day_opus, seven_day_sonnet, overage, `model:<slug>` and any `^[a-z][a-z0-9_]*$`; at least one of usedPct/status non-null; readWindow(entry, now) with expired (now >= resetsAt reads usedPct 0, status allowed, expired true) and stale (resetsAt null and older than the window length: five_hour 5 h, others 7 d, reads as no reading); mergeLedger(existing, observations, now): strictly-later observedAt wins per key, equal keeps stored, future-by-more-than-5-min dropped with a warning, invalid observations dropped, updatedAt = now only on change, unknown keys preserved; account ids validated against `^[a-z0-9]+(-[a-z0-9]+)*$` before becoming file names. (c) scripts/fleet/accounts.ts: dorkHome resolution (DORK_HOME non-empty, else os home/.dork); identity read of `config.json` runtimes.claudeCode.accounts (id, path, label, color; skip rows without an absolute path; mint missing ids; duplicate ids keep the first; bad color reads null; every case warns); mintAccountId identical to DorkOS claudeAccountId (slugify label, else path basename, else `account`; append -2, -3 until free); fleet policy read/write of `<dorkHome>/flow/fleet.json` (`{v:1, handoff auto|ask, accounts:{<id>:{role main|rotation|kept-out, reservePct, spendDownWindowHours, scope:{repos}}}}`) with defaults resolved at read time only: unlisted = kept-out with repos [], reservePct 50 for main else 0, spendDownWindowHours 24, handoff auto; at most one main (extras read as rotation with a warning); invalid values read as absent with a warning; entries for unknown ids ignored with a warning and preserved; mayServe(policy, repo) (main/rotation any repo, kept-out only scope.repos, owner/name compared case-insensitively, parsed from https or ssh origin URLs with .git stripped); effectiveReservePct (0 inside the spend-down window before the seven_day resetsAt, else reservePct); fiveHourRoom and weeklyRoom (false when rejected or usedPct at or above 100, or 100 minus effective reserve for weekly; null when no reading). (d) FlowRun gains optional `account` (registry id, current) and `host` (cli|dorkos|cmux) in flow-run.ts and flow-state.ts, both looseObject-compatible. (e) plugins/flow/conformance/fleet/: CONTRACT_VERSION 1.0.0, usage-ledger.schema.json, fleet-policy.schema.json, and case files account-id, identity, fleet-policy, window-read, room, ledger-merge, flow-run (`{name, input, expected}`, `now` always an input, flow-run cases prove unknown fields survive a read-back), plus a README telling DorkOS how to run them. (f) engine-tests/fleet-conformance.test.ts runs every case; ajv validates good and bad schema examples; a concurrency test spawns 8 child processes merging different windows into one ledger and asserts all 8 survive, and asserts a stale lock is broken and a live one waited on. Acceptance: all tests pass, typecheck and prettier clean, each test proven to fail against a broken implementation, fixture folder names no tracker and nothing private. Land this first: the DorkOS spec (claude-account-fleet) builds against it.",
+      "activeForm": "Building the shared fleet contracts",
+      "size": "large",
+      "priority": "high",
+      "dependencies": [],
+      "parallelWith": [
+        "1.2",
+        "1.3",
+        "1.5"
+      ]
+    },
+    {
+      "id": "1.2",
+      "phase": 1,
+      "phaseName": "Foundations and shared contracts",
+      "subject": "[flow-cli-core] [P1] Load and validate config inside the CLI (env > local > committed > defaults)",
+      "description": "Add scripts/config-load.ts exporting loadConfig(roots, env) returning { config: FlowConfig, secrets: { trackerAccount?, trackerToken? }, files, paused, warnings }. Files come only from resolveConfigFiles in config-files.ts. Deep-merge objects, replace arrays and scalars, in precedence env > config.local.json > config.json > schema defaults (config/CONFIG.md). Split `secrets` off before FlowConfigSchema.parse because the schema is .strict() and has no secrets key. Env: FLOW_TRACKER_ACCOUNT -> secrets.trackerAccount, FLOW_TRACKER_TOKEN -> secrets.trackerToken; no other env var. A non-null refusalFor(roots) or origin none raises a typed ConfigError carrying the refusal text (the CLI maps it to exit 3); a Zod failure raises ConfigError listing each path and message. paused = pauseState(roots). Tests in engine-tests/config-load.test.ts: each precedence layer wins over the next, secrets never reach config, a strict-schema failure lists its path, refusal and not-configured both raise, pause is reported. Acceptance: tests pass, typecheck and prettier clean.",
+      "activeForm": "Loading config for the CLI",
+      "size": "small",
+      "priority": "high",
+      "dependencies": [],
+      "parallelWith": [
+        "1.1",
+        "1.3",
+        "1.5"
+      ]
+    },
+    {
+      "id": "1.3",
+      "phase": 1,
+      "phaseName": "Foundations and shared contracts",
+      "subject": "[flow-cli-core] [P1] Write the work-state rule once and add GRM-15 state coherence to the audit oracle",
+      "description": "Add dependency-free scripts/work-state.ts, the only place the F10 rule lives. Rule: tracker state category = progress (backlog/unstarted not being worked, started being worked, completed/canceled closed); at most one agent/* label = ownership (ready, claimed, needs-input, completed); at most one stage/* label = where the next session resumes, only on backlog or unstarted items; FlowRun.stage carries the stage while started. Export stateCoherence(item) returning violations over OPEN items: STATE-1 more than one stage/* label; STATE-2 a started item carries a stage/* label; STATE-3 agent/claimed on an item that is not started; STATE-4 agent/ready on a started item; STATE-5 agent/completed on an open item (more than one agent/* stays GRM-13). Export projectionFor(event, ctx) returning a WorkStateChange {stateCategory?, agentLabel? (null removes all agent/*), stageLabel? (null removes all stage/*)}: claim -> started, agent/claimed, stage null; release to ready -> unstarted, agent/ready, stage/<resume stage> (throw a PreconditionError when no resume stage is known); release to none -> unstarted, agent label null, stage/<resume stage> when known else absent; done -> completed, agent/completed, stage null; stage to a stage whose stateCategory is started or completed -> that category, stage null; stage to any other stage -> its stateCategory if set, its label. Resume stage = explicit, else FlowRun.stage, else the stage label the claim removed. In scripts/audit-backlog.ts add GRM-15 (state coherence) that reports each STATE-n breach per item, importing work-state.ts (still no zod), and add it to the HELP text. Tests: engine-tests/work-state.test.ts covers every projection row and every STATE-n red on a seeded item and green on its fixed twin; extend engine-tests/audit-backlog.test.ts bad fixtures with one GRM-15 violation per check and prove the verdict goes red. Update docs/SPEC.md's audit-backlog paragraph to fifteen invariants. Acceptance: tests pass, audit-backlog.ts still runs with no node_modules, typecheck and prettier clean.",
+      "activeForm": "Writing the work-state rule",
+      "size": "medium",
+      "priority": "high",
+      "dependencies": [],
+      "parallelWith": [
+        "1.1",
+        "1.2",
+        "1.5"
+      ]
+    },
+    {
+      "id": "1.4",
+      "phase": 1,
+      "phaseName": "Foundations and shared contracts",
+      "subject": "[flow-cli-core] [P1] Add the file-backed FlowRun store on the shared lock",
+      "description": "Add scripts/flow-state-file.ts: a FlowStateStore backed by `<main checkout>/.dork/flow/flow-state.json`, where main checkout = parent of `git rev-parse --git-common-dir` for the --project checkout, so every worktree shares one store. Reads need no lock and pass unknown fields through (FlowRunSchema is looseObject). Writes go through atomic-json.ts with the lock at flow-state.json.lock; expose upsertRun, removeRun, setRunStatus and setRunStage helpers over writeFlowRun/updateFlowRunStatus. Tests: 8 child processes each upsert a different run and all 8 survive; a record with a field this reader does not know keeps it after another run is written; a linked worktree resolves the main checkout's file. Acceptance: tests pass, typecheck and prettier clean.",
+      "activeForm": "Adding the FlowRun file store",
+      "size": "small",
+      "priority": "high",
+      "dependencies": [
+        "1.1"
+      ],
+      "parallelWith": [
+        "1.2",
+        "1.3",
+        "1.5"
+      ]
+    },
+    {
+      "id": "1.5",
+      "phase": 1,
+      "phaseName": "Foundations and shared contracts",
+      "subject": "[flow-cli-core] [P1] Build the flow.ts entry point: verbs, flags, output modes, exit codes",
+      "description": "Add scripts/flow.ts and scripts/cli/{args,output,context}.ts. Run as `node --experimental-strip-types <flow-root>/scripts/flow.ts <verb> [args] [flags]`. Top-level imports are dependency-free; each verb module is loaded with dynamic import(); a failed import of zod prints `flow: run \"npm install --omit=dev\" in <flow-root>` and exits 6. Export main(argv, deps) where deps injects env, cwd, now, stdout, stderr, the adapter factory and the process runner; the script entry wires real ones via invokedDirectly. Verb table: a registry the verb tasks add to (snapshot, next, claim, release, done, stage, audit, status, accounts); an unregistered verb is a usage error (2), so no stub verbs ship. Common flags: --json (one JSON object on stdout with v:1, also on failure as {v:1, ok:false, error:{code, message}}), --project <dir>, --snapshot <file> (next, audit, status), --dry-run (write verbs), --session <id> (else FLOW_SESSION_ID), --manual (next, claim), --help/-h. Human output is plain and uncolored; diagnostics go to stderr. Exit codes: 0 ok, 1 the verb's check found problems, 2 usage, 3 config (not configured, invalid, mcp transport, no code adapter), 4 tracker (unreachable, auth, write not confirmed), 5 precondition, 6 missing zod, 7 paused. Map typed errors (ConfigError, TrackerError, PreconditionError, PausedError) to codes in one place. Tests: engine-tests/cli/flow.test.ts for argv parsing, unknown verb and bad flag (2), --help per verb (0), JSON error envelope, and one spawn test running the real script's --help. Acceptance: tests pass, typecheck and prettier clean.",
+      "activeForm": "Building the flow entry point",
+      "size": "medium",
+      "priority": "high",
+      "dependencies": [],
+      "parallelWith": [
+        "1.1",
+        "1.2",
+        "1.3"
+      ]
+    },
+    {
+      "id": "2.1",
+      "phase": 2,
+      "phaseName": "Tracker seam",
+      "subject": "[flow-cli-core] [P2] Load code adapters over the cli transport and publish adapter contract 1.4.0",
+      "description": "Add scripts/tracker/types.ts (AdapterContext {config, secrets, transport, warn}; TrackerTransport {kind:'cli', run(cmd, args, {timeoutMs}) -> {code, stdout, stderr}}; BacklogSnapshot {v:1, tracker, team{key,id}, fetchedAt, items: open WorkItem[], closed: {identifier,title,stateCategory}[], projects}; WorkStateChange; ItemComment; Capability; CodeAdapter {capabilities, getCurrentUser, getBacklogSnapshot({includeClosed}), getItem(identifier, {comments}), applyWorkState(item, change), comment(item, body)}). Add scripts/tracker/external-cli.ts: execFile, no shell, 60 s default timeout, 64 MB output cap, spawn failure and timeout reject with TrackerError. Add scripts/tracker/load.ts: resolve adapter.path via config-files.ts, import adapter.ts from the same folder, require exported CONTRACT_VERSION and createAdapter; no adapter.ts -> ConfigError 'the <tracker> adapter has no code; the flow CLI cannot reach the tracker. The skill still works through the adapter's prose'; connection.transport mcp -> ConfigError 'the mcp transport exists only inside an agent session; set connection.transport to cli to use the flow CLI'; requireCapabilities(adapter, [...]) -> ConfigError naming the missing one. Add a shared verifyWrite(adapter, item, change) that re-reads via getItem and raises TrackerError when labels or category disagree. Add a file-based fake adapter under engine-tests/fixtures/cli/fake-adapter/ (adapter.ts + SKILL.md) driven by an in-memory backlog, for the verb tests. Update adapters/SPEC.md to 1.4.0 (minor, additive): a 'code realization' section (file, factory, AdapterContext, the five methods, mapping to verbs), getItem and getBacklogSnapshot as optional reads, applyWorkState as the code realization of claim and transition with the section-5 projections, and a 1.4.0 entry in 'What each version added'. Update docs/building-your-adapter.mdx with how to add adapter.ts. Tests: loader finds a project adapter and a shipped one, missing code, mcp and a missing capability each raise ConfigError, a throwing read maps to exit 4, verifyWrite catches a disagreeing read-back. Acceptance: tests pass, typecheck and prettier clean.",
+      "activeForm": "Loading code adapters",
+      "size": "medium",
+      "priority": "high",
+      "dependencies": [
+        "1.2",
+        "1.5"
+      ],
+      "parallelWith": []
+    },
+    {
+      "id": "2.2",
+      "phase": 2,
+      "phaseName": "Tracker seam",
+      "subject": "[flow-cli-core] [P2] Move the Linear adapter's mechanical calls into skills/linear-adapter/adapter.ts",
+      "description": "Implement the Linear code adapter inside the tracker-confinement carve-out. Every call is `composio execute <SLUG> --account <secrets.trackerAccount> -d <json>` through the injected transport; a missing trackerAccount raises ConfigError. Reads use LINEAR_RUN_QUERY_OR_MUTATION with input key query_or_mutation and GraphQL variables (never string-interpolated prose; results nest under .data.data), through team(id:) never a top-level issues(); read storedInFile responses from outputFilePath. team.id resolves from team.key via teams when unset. getBacklogSnapshot: core fields paginated at first 150, relations + inverseRelations + children at first 40, merged by identifier; closed items as titles at first 250 through the same team node; every identifier checked against the `<teamKey>-` prefix (a foreign one is dropped with a warning); projects narrowed to those the items reference, with state from a direct projects query. Normalization: labels re-namespaced parent.name/name (a parentless leaf stays bare so GRM-12 sees it), stateCategory from state.type with triage mapped to backlog, estimate -> size, priority, assignee id, relations in identifier form. getItem(identifier, {comments}) via issue(id:) with comments nodes. applyWorkState: fresh read of the item's labels immediately before the write, compute the new set (replace the agent/* family and/or stage/* family per the change), resolve label ids from the team's labels (a missing label raises TrackerError naming it; never create labels), pick the team's lowest-position state of the target category, send ONE issueUpdate with labelIds and stateId as variables. comment: commentCreate with issueId and body as variables. getCurrentUser: viewer {id name}. Export CONTRACT_VERSION '1.4.0'. Tests (engine-tests/linear-code-adapter.test.ts) with recorded Composio responses: paged snapshot, storedInFile spill, a cross-team identifier dropped, flattened labels re-namespaced, a triage state, normalized output passing validate-adapter.ts INV-1..5, applyWorkState sending one issueUpdate whose labelIds are the union from the fresh read, no GraphQL text containing an interpolated `$`. Add skills/**/*.ts to tsconfig include. Delete from skills/linear-adapter/SKILL.md the prose the code now owns (the Composio snapshot recipe, the label-union write rule and claim/transition mechanics) and add a short 'the flow CLI calls this code; agents call flow' note; keep the WorkItem mapping, verb table and durability rules. Acceptance: tests pass, tracker-confinement guard green, typecheck and prettier clean.",
+      "activeForm": "Coding the Linear adapter",
+      "size": "large",
+      "priority": "high",
+      "dependencies": [
+        "2.1"
+      ],
+      "parallelWith": []
+    },
+    {
+      "id": "3.1",
+      "phase": 3,
+      "phaseName": "Verbs",
+      "subject": "[flow-cli-core] [P3] Ship flow snapshot and flow audit, and retire the groom-check prose",
+      "description": "Register the snapshot and audit verbs in flow.ts. `flow snapshot [--include-closed] [--out <file>]`: requires getBacklogSnapshot; human output is counts by state category and label family; --json prints the BacklogSnapshot; --out also writes it to a file. `flow audit [--snapshot <file>]`: snapshot from the tracker or the file, agentIdentity = identity.agent or getCurrentUser().id when auto, run the audit-backlog.ts oracle functions over items plus closed, human output one block per failing invariant (GRM-1 to GRM-15), JSON {v, ok, failures}; exit 1 on any failure. Replace the snapshot-then-oracle steps in skills/grooming-backlog/SKILL.md (check mode) and skills/flow-groom/SKILL.md with `flow audit --json`, deleting the replaced prose in the same PR. Tests: engine-tests/cli/snapshot.test.ts and audit.test.ts with the fake adapter: counts, --out file equals --json output, a clean fixture exits 0, a GRM-15 fixture exits 1 naming the item, --snapshot never calls the adapter. Bump the plugin version and add a CHANGELOG entry. Acceptance: tests pass, typecheck and prettier clean.",
+      "activeForm": "Shipping snapshot and audit",
+      "size": "medium",
+      "priority": "high",
+      "dependencies": [
+        "1.3",
+        "1.5",
+        "2.1"
+      ],
+      "parallelWith": [
+        "3.2",
+        "3.3",
+        "3.4",
+        "3.5"
+      ]
+    },
+    {
+      "id": "3.2",
+      "phase": 3,
+      "phaseName": "Verbs",
+      "subject": "[flow-cli-core] [P3] Ship flow next with no hand-built dispatch input",
+      "description": "Register `flow next [-n N] [--project <name|id>]`. Load config (config-load.ts), snapshot from the tracker or --snapshot, identity.agent or getCurrentUser().id when auto, identity.reviewer as configured, ownership via classifyOwnership over ownership.scope, WIP load = open items that are started and carry agent/claimed counted by project.id and in total, then classifyDispatchOutcome(items, {dispatch, ownership, wipCap: autonomy.wipCap}, {ownershipOf, inProgressByProject, inProgressTotal}). --project filters candidates by id, else case-insensitive name, before dispatch. -n (default 1) takes the first N picked. Paused -> exit 7 unless --manual. JSON {v, picked, eligibleCount, starved, shapeableCount, wip:{total, byProject}}; human output lists picks as `KEY - Title` with priority and size, or says why nothing is eligible; exit 0 either way. Parity test: for three fixture backlogs, `flow next --json` picks equal dispatch.ts fed the hand-built input for the same items. Replace every prose step that builds dispatch.ts input by hand in commands/flow.md and skills/flow-drain/SKILL.md with `flow next --json`, deleting the replaced prose in the same PR. Bump version, CHANGELOG. Acceptance: tests pass, typecheck and prettier clean.",
+      "activeForm": "Shipping flow next",
+      "size": "medium",
+      "priority": "high",
+      "dependencies": [
+        "1.2",
+        "1.5",
+        "2.1"
+      ],
+      "parallelWith": [
+        "3.1",
+        "3.3",
+        "3.4",
+        "3.5"
+      ]
+    },
+    {
+      "id": "3.3",
+      "phase": 3,
+      "phaseName": "Verbs",
+      "subject": "[flow-cli-core] [P3] Ship flow claim, release, done and stage over the work-state projections",
+      "description": "Register four write verbs; each checks capabilities, takes the flow-state.json lock where it writes a run, applies projectionFor(event) via applyWorkState, and re-reads with verifyWrite. Add scripts/cli/provenance.ts building the agent:provenance line per docs/provenance.md (harness, sessionId from --session or FLOW_SESSION_ID, account as the CLAUDE_CONFIG_DIR basename, host = os hostname, surface; omit unknowns, never an email). `claim <id> [--pid N] [--worktree] [--branch] [--account <id>] [--host cli|dorkos|cmux]`: exit 5 unless the item is open, carries agent/ready, is not agent/claimed and its ownership class is claimable; exit 7 when paused unless --manual; writes the claim projection; upserts a FlowRun (status running, stage from the removed stage/* label else execute, attemptCount 0 or previous + 1, workerPid, startedAt, sessionId, worktreePath, branch, account, host, provenance); --pid default = parent of the invoking shell read with `ps -o ppid= -p <process.ppid>`, failure -> exit 2 asking for --pid; --worktree and --branch default to the --project checkout root and its branch; posts no comment. `release <id> [--to ready|none] [--stage <stage>] [--reason <text>]`: release projection (ready with no resume stage -> exit 5 'pass --stage'), removes the FlowRun, posts a signed comment only with --reason. `done <id> (--summary|--summary-file) [--pr <url>]`: posts the summary with the identity marker and provenance line unless one of the last 10 comments has the same body up to its provenance line, applies the done projection even when the tracker already closed the item, sets FlowRun complete with completedAt. `stage <id> <stage>`: stage must be a key of config stages; stage projection; updates FlowRun.stage when a record exists. --dry-run prints the planned WorkStateChange and FlowRun and writes nothing. Tests per verb with the fake adapter: exact applyWorkState calls, every precondition exit, paused, idempotent done, verify failure -> 4, dry-run writes nothing. Replace the label-swap, state-move and signed-comment steps in skills/executing-specs, skills/closing-work, skills/flow-drain and commands/flow.md with these verbs, and state in skills/linear-adapter/SKILL.md that needsInput sets agent/needs-input and leaves state alone; delete the replaced prose in the same PR. Bump version, CHANGELOG. Acceptance: tests pass, typecheck and prettier clean.",
+      "activeForm": "Shipping the write verbs",
+      "size": "large",
+      "priority": "high",
+      "dependencies": [
+        "1.3",
+        "1.4",
+        "1.5",
+        "2.1"
+      ],
+      "parallelWith": [
+        "3.1",
+        "3.2",
+        "3.4",
+        "3.5"
+      ]
+    },
+    {
+      "id": "3.4",
+      "phase": 3,
+      "phaseName": "Verbs",
+      "subject": "[flow-cli-core] [P3] Ship flow status and shrink commands/status.md",
+      "description": "Register `flow status [<id>] [--strict]`. Join flow-state.json (flow-state-file.ts), .dork/flow/auto-run.json (an active sentinel is an orphan when its pid is dead or it started over 24 h ago), the pause, and the snapshot (tracker or --snapshot). Sections: paused banner; drain; in flight (each FlowRun plus every agent/claimed item, with identifier, title, stage, status, worktree, branch, account, host); parked (agent/needs-input items); drift (a running run whose item is not started; a claimed item with no run; a run whose workerPid is not alive; any STATE-n breach on an in-flight item). With an identifier: that item only plus its last parked question via getItem(id, {comments: 20}). --strict exits 1 on any drift; otherwise 0. JSON {v, paused, drain, inFlight, parked, drift}. Rewrite commands/status.md to: run `flow status`, then list this project's flow schedules when the tasks_list tool exists (keep that paragraph's filtering rules), deleting the rest. Tests with the fake adapter and a temp flow-state.json for every drift kind and the orphan sentinel. Bump version, CHANGELOG. Acceptance: tests pass, typecheck and prettier clean.",
+      "activeForm": "Shipping flow status",
+      "size": "medium",
+      "priority": "medium",
+      "dependencies": [
+        "1.3",
+        "1.4",
+        "1.5",
+        "2.1"
+      ],
+      "parallelWith": [
+        "3.1",
+        "3.2",
+        "3.3",
+        "3.5"
+      ]
+    },
+    {
+      "id": "3.5",
+      "phase": 3,
+      "phaseName": "Verbs",
+      "subject": "[flow-cli-core] [P3] Ship flow accounts: list identities with policy and usage, add identities, set flow policy",
+      "description": "Register `flow accounts [list] | add --path <dir> [--label] [--color] | set [<id>] [policy flags]` on fleet/accounts.ts and fleet/usage-ledger.ts; it needs no tracker and no project config. list (default): every identity from `<dorkHome>/config.json` runtimes.claudeCode.accounts with resolved policy from `<dorkHome>/flow/fleet.json` (unlisted = kept-out), ledger windows via readWindow, effectiveReservePct, fiveHourRoom and weeklyRoom (unknown when null), the fleet handoff, and all warnings (including 'no main account'); human output one row per account. add: expand ~, require an absolute existing path, exit 5 for a path already registered, mint the id, write label and color only when given, never any policy; read config.json fresh, change only runtimes.claudeCode.accounts, keep every other key byte-for-byte, temp file + rename, keep the file mode (new file 0600); when the file has __internal__ print 'DorkOS manages this file; you can also add accounts in its settings' and still write. set <id>: --role main|rotation|kept-out, --reserve 0-100, --spend-down-hours n, --repos owner/name,... or none; each accepts default to delete the field; writes only fleet.json via atomic-json; exit 5 for an unregistered id or a second main (naming the current one). set with no id takes only --handoff auto|ask. --dry-run prints the change. Tests: add keeps other config sections and unknown keys, writes no policy; set never touches config.json and never writes defaults; unlisted lists as kept-out; the DorkOS note only with __internal__; DORK_HOME redirects both files. Bump version, CHANGELOG. Acceptance: tests pass, typecheck and prettier clean.",
+      "activeForm": "Shipping flow accounts",
+      "size": "medium",
+      "priority": "high",
+      "dependencies": [
+        "1.1",
+        "1.5"
+      ],
+      "parallelWith": [
+        "3.1",
+        "3.2",
+        "3.3",
+        "3.4"
+      ]
+    },
+    {
+      "id": "4.1",
+      "phase": 4,
+      "phaseName": "Prove it",
+      "subject": "[flow-cli-core] [P4] Document the flow CLI and its contracts",
+      "description": "Add a short 'The flow CLI' section with the verb table to plugins/flow/README.md; turn the manual steps in docs/driving-it-manually.mdx into flow calls; in docs/SPEC.md document the CLI surface, the FlowRun account and host fields and GRM-15; link conformance/fleet/README.md from docs/SPEC.md. Plain language per the writing-for-humans skill; no banned words. Bump version, CHANGELOG. Acceptance: docs render, the skills-and-manifests gate passes.",
+      "activeForm": "Documenting the flow CLI",
+      "size": "small",
+      "priority": "medium",
+      "dependencies": [
+        "3.1",
+        "3.2",
+        "3.3",
+        "3.4",
+        "3.5"
+      ],
+      "parallelWith": []
+    },
+    {
+      "id": "4.2",
+      "phase": 4,
+      "phaseName": "Prove it",
+      "subject": "[flow-cli-core] [P4] Run flow audit on the live DOR backlog and fix it to clean",
+      "description": "With the Linear code adapter configured (connection.transport cli, trackerAccount dorkos), run `flow snapshot --out` and `flow audit --json` on the DOR team. For each GRM-15 breach use `flow stage` or `flow release` (never a hand-written tracker call) to fix it, logging each fix; leave judgment-only failures (GRM-1 to GRM-14) to a groom and list them. Re-run until GRM-15 is clean. Also run `flow next --json` against the same snapshot and dispatch.ts with hand-built input, and record that the picks match. Post the before/after counts as a signed comment on DOR-2376. Acceptance: GRM-15 clean on the live backlog; parity recorded.",
+      "activeForm": "Auditing the live backlog",
+      "size": "small",
+      "priority": "medium",
+      "dependencies": [
+        "2.2",
+        "3.1",
+        "3.2",
+        "3.3"
+      ],
+      "parallelWith": [
+        "4.1"
+      ]
+    }
+  ]
+}
