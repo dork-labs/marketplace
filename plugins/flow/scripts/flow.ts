@@ -409,6 +409,45 @@ export const VERBS: readonly VerbDefinition[] = [
     load: () => import('./cli/pr.ts'),
   },
   {
+    name: 'drain',
+    summary:
+      'Carry several ready items at once: a worker per item on its own account, and a review before any PR.',
+    description: [
+      'Each pass checks every drain run (sessions, reports, the PR, the tracker item), sends each worker its next message, starts a reviewer for each push, and fills free slots with the next ready items, each on the account with the most room.',
+      'A PR opens only after a clean review at the branch head (flow pr enforces it). No new session starts while the machine is busy.',
+      '--tick runs one pass and exits (for a scheduler); otherwise it passes every drain.pollSeconds until nothing is active or eligible, or Ctrl-C, which leaves every session running. One drain per project (exit 5 while another runs). Exits 7 while flow is paused, unless --manual.',
+    ].join('\n'),
+    common: ['project', 'manual', 'dry-run'],
+    flags: [
+      {
+        name: 'parallel',
+        kind: 'string',
+        value: 'N',
+        description: 'Sessions at once. Default drain.parallel.',
+      },
+      {
+        name: 'host',
+        kind: 'string',
+        value: 'auto|cli|cmux|dorkos',
+        description: 'Where sessions run. Default drain.host, else auto.',
+      },
+      {
+        name: 'items',
+        kind: 'string',
+        value: 'id,...',
+        description: 'Only these items, in this order.',
+      },
+      {
+        name: 'permission-mode',
+        kind: 'string',
+        value: 'mode',
+        description: 'default, acceptEdits or bypassPermissions. Default drain.permissionMode.',
+      },
+      { name: 'tick', kind: 'boolean', description: 'Run one pass, then exit.' },
+    ],
+    load: () => import('./cli/drain.ts'),
+  },
+  {
     name: 'watch',
     summary: 'Wait until a watched pull request merges, closes, goes red or leaves the queue.',
     description:
