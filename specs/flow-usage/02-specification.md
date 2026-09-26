@@ -154,10 +154,11 @@ exit 0
 
 ```bash
 # flow usage recorder (opt-in): records this account's usage for `flow fleet`. See <flow-root>/docs/account-usage.mdx
-[ -x '<abs hook path>' ] && { printf '%s' "$<var>" | FLOW_NODE='<abs node path>' '<abs hook path>'; } >/dev/null 2>&1 &
+{ [ -x '<abs hook path>' ] && printf '%s' "$<var>" | FLOW_NODE='<abs node path>' '<abs hook path>'; } >/dev/null 2>&1 &
 ```
 
-- `&` runs the whole group in the background. Every one of its streams goes to `/dev/null`. A non-interactive shell also gives a background job `/dev/null` as stdin. So the status-line script's own stdout reaches EOF as soon as the script ends, and Claude Code never waits for the recorder.
+- `&` runs the whole group in the background, and the redirection covers the whole group, test included. Every stream of the background job goes to `/dev/null`, and a non-interactive shell gives a background job `/dev/null` as stdin. So the status-line script's own stdout reaches EOF as soon as the script ends, and Claude Code never waits for the recorder.
+- The redirection must wrap the `[ -x … ] &&` test too. With `[ -x … ] && { …; } >/dev/null 2>&1 &`, the backgrounded subshell that runs the `&&` keeps the status line's stdout open until the recorder ends: a test with a 2 s recorder held the status line for 2.2 s under `/bin/bash` 3.2. The form above returned in under 30 ms under bash 3.2, zsh and sh.
 - `[ -x … ]` keeps a moved or removed plugin silent.
 - `FLOW_NODE` is the absolute Node that ran `install-statusline`. A status line's `PATH` may not include an nvm Node, and a bare `node` then fails silently. This was the DOR-2121 failure in the DorkOS repo's own hooks. When `FLOW_NODE` is unset (a hand-copied snippet), the hook falls back to `node` on `PATH`.
 - If Claude Code kills the status-line process group while a recorder runs, the recorder dies mid-merge. The ledger is still whole (atomic rename), and the next render records again.
