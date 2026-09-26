@@ -147,7 +147,22 @@ export function conformanceProblem(
 }
 
 /**
- * Check the adapter conformance harness against the reference fixtures.
+ * The conformance verdict over the fake tracker's fixture: the backlog the
+ * self-test's scenarios run against must itself be a conforming one.
+ *
+ * @param items - The fixture's items.
+ * @returns `null` when they pass, else which invariants they fail.
+ */
+export function fakeFixtureProblem(items: readonly unknown[]): string | null {
+  const verdict = validateAdapter(items);
+  return verdict.ok
+    ? null
+    : `the fake tracker's fixture fails ${verdict.failures.map((f) => f.invariant).join(', ')}`;
+}
+
+/**
+ * Check the adapter conformance harness against the reference fixtures, and
+ * the fake tracker's fixture against the invariants.
  *
  * @param options - Where flow lives.
  * @returns The check.
@@ -157,7 +172,15 @@ export function adapterConformance(options: FastOptions): Check {
     const dir = path.join(options.flowRoot, 'adapters', 'reference', 'fixtures');
     const read = (name: string): unknown[] =>
       JSON.parse(readFileSync(path.join(dir, name), 'utf8')) as unknown[];
-    const problem = conformanceProblem(read('work-items.good.json'), read('work-items.bad.json'));
+    const fake = JSON.parse(
+      readFileSync(
+        path.join(options.flowRoot, 'adapters', 'reference', 'fake', 'fixture.json'),
+        'utf8'
+      )
+    ) as { items: unknown[] };
+    const problem =
+      conformanceProblem(read('work-items.good.json'), read('work-items.bad.json')) ??
+      fakeFixtureProblem(fake.items);
     return problem === null ? { status: 'pass', detail: '' } : { status: 'fail', detail: problem };
   });
 }

@@ -1,0 +1,185 @@
+{
+  "tracker": "fake",
+  "team": {
+    "key": "FAKE",
+    "id": "team-fake"
+  },
+  "user": {
+    "id": "user-flow-agent",
+    "name": "Flow agent"
+  },
+  "items": [
+    {
+      "id": "fake-1",
+      "identifier": "FAKE-1",
+      "title": "A raw idea nobody has triaged",
+      "description": "A raw idea nobody has triaged.\n\n## Validation criteria\n\n- It works.",
+      "type": "idea",
+      "stateCategory": "backlog",
+      "stateName": "Triage",
+      "parent": null,
+      "relations": {
+        "blocks": [],
+        "blockedBy": [],
+        "children": [],
+        "relatedTo": []
+      },
+      "labels": ["type/idea", "origin/human", "stage/triage"],
+      "createdAt": "2026-09-20T10:00:00.000Z"
+    },
+    {
+      "id": "fake-2",
+      "identifier": "FAKE-2",
+      "title": "A small ready task",
+      "description": "A small ready task.\n\n## Validation criteria\n\n- It works.",
+      "type": "task",
+      "stateCategory": "unstarted",
+      "stateName": "Todo",
+      "priority": 2,
+      "project": {
+        "id": "proj-selftest",
+        "name": "Self-test project",
+        "stateCategory": "started",
+        "lead": "user-human"
+      },
+      "parent": null,
+      "relations": {
+        "blocks": [],
+        "blockedBy": [],
+        "children": [],
+        "relatedTo": []
+      },
+      "labels": ["type/task", "origin/human", "agent/ready", "stage/execute"],
+      "agentDisposition": "ready",
+      "createdAt": "2026-09-18T09:00:00.000Z"
+    },
+    {
+      "id": "fake-3",
+      "identifier": "FAKE-3",
+      "title": "A ready task blocked by another",
+      "description": "A ready task blocked by another.\n\n## Validation criteria\n\n- It works.",
+      "type": "task",
+      "stateCategory": "unstarted",
+      "stateName": "Todo",
+      "priority": 3,
+      "project": {
+        "id": "proj-selftest",
+        "name": "Self-test project",
+        "stateCategory": "started",
+        "lead": "user-human"
+      },
+      "parent": null,
+      "relations": {
+        "blocks": [],
+        "blockedBy": ["FAKE-4"],
+        "children": [],
+        "relatedTo": []
+      },
+      "labels": ["type/task", "origin/from-agent", "agent/ready", "stage/execute"],
+      "agentDisposition": "ready",
+      "createdAt": "2026-09-20T10:00:00.000Z"
+    },
+    {
+      "id": "fake-4",
+      "identifier": "FAKE-4",
+      "title": "A task an agent is working",
+      "description": "A task an agent is working.\n\n## Validation criteria\n\n- It works.",
+      "type": "task",
+      "stateCategory": "started",
+      "stateName": "In Progress",
+      "priority": 2,
+      "project": {
+        "id": "proj-selftest",
+        "name": "Self-test project",
+        "stateCategory": "started",
+        "lead": "user-human"
+      },
+      "parent": null,
+      "relations": {
+        "blocks": ["FAKE-3"],
+        "blockedBy": [],
+        "children": [],
+        "relatedTo": []
+      },
+      "labels": ["type/task", "origin/human", "agent/claimed"],
+      "agentDisposition": "claimed",
+      "createdAt": "2026-09-20T10:00:00.000Z"
+    },
+    {
+      "id": "fake-5",
+      "identifier": "FAKE-5",
+      "title": "A task parked on a question",
+      "description": "A task parked on a question.\n\n## Validation criteria\n\n- It works.",
+      "type": "task",
+      "stateCategory": "backlog",
+      "stateName": "Backlog",
+      "priority": 3,
+      "parent": null,
+      "relations": {
+        "blocks": [],
+        "blockedBy": [],
+        "children": [],
+        "relatedTo": []
+      },
+      "labels": ["type/task", "origin/human", "agent/needs-input", "stage/triage"],
+      "agentDisposition": "needs-input",
+      "createdAt": "2026-09-20T10:00:00.000Z"
+    },
+    {
+      "id": "fake-6",
+      "identifier": "FAKE-6",
+      "title": "A task an agent finished",
+      "description": "A task an agent finished.\n\n## Validation criteria\n\n- It works.",
+      "type": "task",
+      "stateCategory": "completed",
+      "stateName": "Done",
+      "priority": 3,
+      "parent": null,
+      "relations": {
+        "blocks": [],
+        "blockedBy": [],
+        "children": [],
+        "relatedTo": []
+      },
+      "labels": ["type/task", "origin/from-agent", "agent/completed"],
+      "agentDisposition": "completed",
+      "createdAt": "2026-09-20T10:00:00.000Z"
+    },
+    {
+      "id": "fake-7",
+      "identifier": "FAKE-7",
+      "title": "An idea someone declined",
+      "description": "An idea someone declined.\n\n## Validation criteria\n\n- It works.",
+      "type": "idea",
+      "stateCategory": "canceled",
+      "stateName": "Canceled",
+      "parent": null,
+      "relations": {
+        "blocks": [],
+        "blockedBy": [],
+        "children": [],
+        "relatedTo": []
+      },
+      "labels": ["type/idea", "origin/human"],
+      "createdAt": "2026-09-20T10:00:00.000Z"
+    }
+  ],
+  "projects": [
+    {
+      "id": "proj-selftest",
+      "name": "Self-test project",
+      "stateCategory": "started",
+      "lead": "user-human"
+    }
+  ],
+  "comments": {
+    "FAKE-5": [
+      {
+        "id": "comment-FAKE-5-1",
+        "author": "user-flow-agent",
+        "body": "Which of the two layouts should this use?",
+        "createdAt": "2026-09-21T10:00:00.000Z"
+      }
+    ]
+  }
+}
