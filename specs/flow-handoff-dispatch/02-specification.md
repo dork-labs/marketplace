@@ -639,6 +639,27 @@ The **signal** each pass is the worse of `limitSignal` over the run's account's 
 - A reviewer that hits a limit is not handed off: the supervisor stops it and starts a new reviewer at the same SHA on another account. A review restarts cheaply; no checkpoint is needed.
 - The same machine runs whether the cause is the real limit or the main account's reserve.
 
+#### 5.2a Additions (operator direction, 2026-09-26)
+
+These rows extend the §5.2 table. Where they apply, they are checked before the table's `awaiting-handoff` rows.
+
+| State | Condition | Next | Actions |
+| --- | --- | --- | --- |
+| `awaiting-handoff` | the exhausted window's `resetsAt` is within `drain.waitIfResetWithinMinutes` (default 60) | `waiting-reset` on the same account | none; `wakeAfter = resetsAt`. The warm transcript and cache are kept, because a handoff re-bills the whole context. This holds even when a candidate exists, and in `ask` mode it needs no approval (same account, like D5). |
+| `awaiting-handoff` | the exhausted window is model-scoped (`seven_day_opus`, `seven_day_sonnet`, `model:<slug>`), the account still has room on `five_hour` and `seven_day`, `drain.modelFallback` names a next model in the same runtime whose bucket has room, and the host can switch the model for the next turn | (cleared) | send `limit-cleared` with the fallback model (`Launcher.send(h, file, { model })`). The same session continues on that model, with no handoff. A host that cannot switch models skips this row. |
+| any | `flow handoff <id> --wait [--until <iso>]` | `waiting-reset`, `heldBy: "person"` | the supervisor holds the run until `--until`, or until the account's own reset when omitted. A person's wait outranks auto handoff: no candidate moves the run while it is held. `flow handoff --to` (or the time passing) releases it. |
+| `awaiting-handoff`, `waiting-reset` | no same-runtime candidate, `fleet.crossRuntimeFallback: on`, and a candidate on another runtime | as a handoff | the handoff goes to that runtime. `HANDOFF.md` is runtime-neutral, and the resume message says the previous session ran on another tool. |
+
+- `drain.modelFallback` is an ordered list per runtime, for example `{ "claude-code": ["opus", "sonnet"] }`, resolved through `models.bindings`. Empty (the default) means off. A fallback never crosses runtimes.
+- `Launcher.send` takes an optional `{ model }`:
+  - cli: `--resume … --model <m>` (claude, codex) or `-m` (opencode).
+  - cmux: sends `/model <m>` before the pointer.
+  - DorkOS: writes the session's model setting before the send, when the API allows it; otherwise `unsupported`.
+- **Who does what on an exhausted account.** The supervisor is code, so it never needs a model turn on the exhausted account. A synthesized checkpoint is written by code and needs no model. The first model turn of a handoff happens on the target account, in the new session.
+- **The resume message** gives the new session two things to read: `HANDOFF.md`, and the path of the old session's transcript, whose last part it reads (read-only) for detail the checkpoint lacks. flow itself only resolves that path. It never copies, moves or writes a transcript, and the no-transcript test asserts no write under any account's `projects/` directory.
+- **Wind-down per runtime.** The hook (§5.4) is Claude Code only. Codex and OpenCode workers get the supervisor's `wind-down` message.
+- `flow handoff --to` and `--wait` are safe to call from outside the supervisor, for example from the DorkOS Flow extension's account advisor. Both use the §4.3 compare-and-set and the `handing-off` token.
+
 #### 5.3 A handoff
 
 1. Make sure a checkpoint newer than `limit.since` exists (synthesize one if not).
@@ -687,6 +708,8 @@ A worker learns of a warning two ways. The supervisor's `wind-down` message work
 | `warnMarginPct` | 0–50, `10` | How close to a ceiling counts as a warning. |
 | `windDownGraceMinutes` | int ≥ 1, `20` | How long a warned worker has to checkpoint before flow writes one for it. |
 | `pollSeconds` | int ≥ 10, `60` | Pass interval without `--tick`. |
+| `waitIfResetWithinMinutes` | int ≥ 0, `60` | Wait on the same account instead of handing off when its limit resets this soon (§5.2a). |
+| `modelFallback` | `{ <runtime>: tier or model[] }`, `{}` | Continue on the next model when only a model bucket is out (§5.2a). |
 | `armAutoMerge` | boolean, `false` | Whether `flow pr` arms auto-merge. |
 | `host` | `auto` \| `cli` \| `cmux` \| `dorkos`, `auto` | Machine-specific: belongs in `config.local.json`. |
 | `permissionMode` | `default` \| `acceptEdits` \| `bypassPermissions`, `acceptEdits` | Machine-specific: belongs in `config.local.json`. |
