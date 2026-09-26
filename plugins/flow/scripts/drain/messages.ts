@@ -110,11 +110,24 @@ export interface MessageContexts {
     worktree: string;
     /** The run's branch. */
     branch: string;
+    /**
+     * The previous session's transcript (absolute), when flow could resolve it.
+     * The new session reads its last part, read-only; flow never copies, moves
+     * or writes a transcript (spec §5.2a).
+     */
+    transcript?: string | null;
+    /** The runtime the previous session ran on, when it was another one than this session's. */
+    previousRuntime?: string | null;
   };
   /** The limit that stopped the worker has cleared: carry on. */
   'limit-cleared': MessageContextBase & {
     /** The account's label as the operator knows it. */
     accountLabel: string;
+    /**
+     * Set when the session goes on under another model because only its model's
+     * allowance ran out (spec §5.2a model fallback); absent after a reset.
+     */
+    model?: string | null;
   };
 }
 
@@ -319,7 +332,14 @@ export function render<K extends MessageKind>(kind: K, ctx: MessageContexts[K]):
         [
           `You are continuing ${id} in this worktree (${c.worktree}), on branch ${c.branch}.`,
           `Read \`.dork/flow/HANDOFF.md\`, then your brief at \`${WORKER_BRIEF_FILE}\`, then run the command under "Next command" in HANDOFF.md.`,
-          'The previous session was on another account. Do not run `flow claim`: the run is already yours.',
+          c.previousRuntime
+            ? `The previous session ran on another tool (${c.previousRuntime}) and another account. Do not run \`flow claim\`: the run is already yours.`
+            : 'The previous session was on another account. Do not run `flow claim`: the run is already yours.',
+          ...(c.transcript
+            ? [
+                `For detail HANDOFF.md leaves out, read the last part of the previous session's transcript at \`${c.transcript}\` (for example \`tail -n 200\`). Only read it: never edit, copy or move it.`,
+              ]
+            : []),
           'First, check where the run stands:',
         ],
         command(ctx, 'status', id)
@@ -330,7 +350,9 @@ export function render<K extends MessageKind>(kind: K, ctx: MessageContexts[K]):
       need(kind, 'accountLabel', c.accountLabel);
       return compose(
         [
-          `The limit on ${c.accountLabel} has reset. Continue ${id} from where you stopped; \`.dork/flow/HANDOFF.md\` says what is next.`,
+          c.model
+            ? `${c.accountLabel} ran out of room for the model you were on, so this session now runs on ${c.model}. Continue ${id} from where you stopped; \`.dork/flow/HANDOFF.md\` says what is next.`
+            : `The limit on ${c.accountLabel} has reset. Continue ${id} from where you stopped; \`.dork/flow/HANDOFF.md\` says what is next.`,
           pushSteps(ctx, 'task'),
         ],
         reportPushed

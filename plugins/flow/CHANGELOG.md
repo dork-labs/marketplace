@@ -4,6 +4,19 @@ Installs of this plugin are pinned to a commit SHA, so a fix here does not reach
 you until you **reinstall it** (Marketplace → flow → reinstall, or re-run your
 `--plugin-dir` checkout's `git pull`). Each entry below says whether that matters.
 
+## 0.34.0
+
+**When an account runs out, `flow drain` moves the work to another account with room, waits for the reset, or switches models, with no one having to step in. Reinstall to get it.**
+
+- When an account nears its limit, its worker is told to finish the step it is on, write a `HANDOFF.md` checkpoint and stop. In Claude Code this happens between tool calls; Codex and OpenCode workers hear it from the drain on its next pass.
+- When an account runs out, what happens next depends on the limit:
+  - If the limit resets within the hour, the work waits and continues in the same session.
+  - If only one model's allowance ran out, the same session can carry on with a fallback model you list in `drain.modelFallback`.
+  - Otherwise a new session starts on another account in the same worktree, and it picks up from `HANDOFF.md` and the old session's transcript. No transcript is ever copied or moved.
+- With `handoff: ask` in `fleet.json`, flow posts one comment naming the account it would move to and the command to do it (`flow handoff <item> --to <account>`), and otherwise waits for the reset.
+- `flow handoff <item> --wait` holds a run until its limit resets, even in `auto` mode.
+- New settings: `drain.waitIfResetWithinMinutes` (default 60) and `drain.modelFallback` (off by default).
+
 ## 0.33.0
 
 **A drain on the DorkOS host now checks that work on your main sign-in really runs there. Reinstall to get it.**

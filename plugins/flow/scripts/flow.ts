@@ -453,6 +453,62 @@ export const VERBS: readonly VerbDefinition[] = [
     load: () => import('./cli/drain.ts'),
   },
   {
+    name: 'handoff',
+    summary: 'Move a drain run to another account now, or hold a limited one where it is.',
+    description: [
+      "Stops the run's session, makes sure HANDOFF.md is current, and starts a new session on the other account in the same worktree, told to read HANDOFF.md and the old session's transcript. This is how you approve the move flow asks for in ask mode.",
+      '--to must be an account that may take the item (else exit 5 with its reasons); without --to, the best one. --wait keeps a limited run on its own account until --until, or until the account resets. While a flow drain is running, only a limited run can be moved (exit 5).',
+    ].join('\n'),
+    common: ['project'],
+    positionals: [
+      { name: 'identifier', required: true, description: 'The work item, e.g. ACME-12.' },
+    ],
+    flags: [
+      {
+        name: 'to',
+        kind: 'string',
+        value: 'runtime:account',
+        description: "The account to move to. A bare id means one of the run's runtime.",
+      },
+      {
+        name: 'wait',
+        kind: 'boolean',
+        description: 'Hold a limited run on its own account instead of moving it.',
+      },
+      {
+        name: 'until',
+        kind: 'string',
+        value: 'iso',
+        description: 'With --wait: hold until then. Default: until the account resets.',
+      },
+      {
+        name: 'reason',
+        kind: 'string',
+        value: 'text',
+        description: 'Why, in a few words, for the checkpoint flow writes.',
+      },
+    ],
+    load: () => import('./cli/handoff.ts'),
+  },
+  {
+    name: 'limit-check',
+    summary: "Say whether a run's account is near a usage limit.",
+    description: [
+      "With an item: print its account's usage signal (ok, warning, exhausted or unknown).",
+      'With --hook: the Claude Code PostToolUse hook. It tells a drain worker, once per limit, to finish its step, checkpoint and stop. It prints nothing for any other session and always exits 0.',
+    ].join('\n'),
+    common: ['project'],
+    positionals: [{ name: 'identifier', description: 'The work item, e.g. ACME-12.' }],
+    flags: [
+      {
+        name: 'hook',
+        kind: 'boolean',
+        description: "Run as the PostToolUse hook: read the hook's JSON on stdin.",
+      },
+    ],
+    load: () => import('./cli/limit-check.ts'),
+  },
+  {
     name: 'watch',
     summary: 'Wait until a watched pull request merges, closes, goes red or leaves the queue.',
     description:

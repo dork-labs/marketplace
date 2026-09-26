@@ -129,9 +129,13 @@ export interface PrRef {
   number: number;
 }
 
-/** A message to the worker, with the context its template renders from. */
+/**
+ * A message to the worker, with the context its template renders from. `model`
+ * (set only by the handoff reducer's model fallback, spec §5.2a) asks the host
+ * to run the session's next turn on that model.
+ */
 export type SendAction = {
-  [K in MessageKind]: { kind: 'send'; message: K; ctx: MessageContexts[K] };
+  [K in MessageKind]: { kind: 'send'; message: K; ctx: MessageContexts[K]; model?: string };
 }[MessageKind];
 
 /**

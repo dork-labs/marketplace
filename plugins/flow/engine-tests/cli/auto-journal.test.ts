@@ -416,9 +416,11 @@ describe('what is never journaled', () => {
 
   it('every verb in the table is either journaled or deliberately left out', () => {
     // Purpose: a new verb is journaled by default; only note and journal are not
-    // (usage record is left out by its sub-verb).
+    // (usage record is left out by its sub-verb, and limit-check only in its
+    // hook form, which runs after every tool call).
     const skipped = VERBS.filter((verb) => !recordsVerbRun(verb.name, [], 0)).map((v) => v.name);
-    expect(skipped).toEqual(['note', 'journal']);
+    expect([...skipped].sort()).toEqual(['journal', 'limit-check', 'note']);
+    expect(recordsVerbRun('limit-check', ['ACME-1'], 0)).toBe(true);
   });
 });
 

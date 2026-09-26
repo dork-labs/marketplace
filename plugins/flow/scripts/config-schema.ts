@@ -865,6 +865,21 @@ export const DrainSchema = z
     windDownGraceMinutes: z.number().int().min(1).default(20),
     /** Seconds between passes when `flow drain` runs without `--tick`. */
     pollSeconds: z.number().int().min(10).default(60),
+    /**
+     * Wait on the same account instead of handing off when its limit resets
+     * within this many minutes (spec §5.2a): a handoff re-bills the whole
+     * context, so a short wait keeps the warm session. `0` never waits.
+     */
+    waitIfResetWithinMinutes: z.number().int().nonnegative().default(60),
+    /**
+     * Per runtime, the models to continue on, in order, when only the current
+     * model's allowance runs out (spec §5.2a): tier names or model ids, each
+     * resolved through `models.bindings`. The same session goes on under the
+     * next model with room; a fallback never crosses runtimes. Empty: off.
+     */
+    modelFallback: z
+      .partialRecord(z.enum(['claude-code', 'codex', 'opencode']), z.array(z.string().min(1)))
+      .default({}),
     /** Whether `flow pr` arms auto-merge on the PRs it opens. */
     armAutoMerge: z.boolean().default(false),
     /** The host sessions start under. Machine-specific: set it in `config.local.json`. */

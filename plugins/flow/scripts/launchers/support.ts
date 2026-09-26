@@ -103,3 +103,19 @@ export function requireSupported(host: HostName, runtime: unknown): asserts runt
     );
   }
 }
+
+/**
+ * Whether a session on `host` and `runtime` can be moved to another model for
+ * its next turn (spec §5.2a model fallback): cli resumes with `--model`/`-m`,
+ * cmux types `/model <m>` or resumes with `--model`, DorkOS writes the
+ * session's model setting. Every supported pair can today; a pair the host
+ * cannot run cannot. DorkOS may still refuse a particular session at send
+ * time, which `send` reports as `unsupported`.
+ *
+ * @param host - The session's host.
+ * @param runtime - The session's runtime.
+ * @returns Whether the handoff machine may try the model fallback.
+ */
+export function canSwitchModel(host: HostName, runtime: RuntimeName): boolean {
+  return supportFor(host, runtime).ok;
+}

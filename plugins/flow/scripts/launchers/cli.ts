@@ -106,6 +106,7 @@ import {
   type Launcher,
   type ProbeResult,
   type RuntimeName,
+  type SendOptions,
   type SendResult,
   type SessionHandle,
   type SessionState,
@@ -631,8 +632,15 @@ export function createCliLauncher(deps: CliLauncherDeps): Launcher {
     );
   }
 
-  async function send(h: SessionHandle, messageFile: string): Promise<SendResult> {
+  async function send(
+    given: SessionHandle,
+    messageFile: string,
+    opts: SendOptions = {}
+  ): Promise<SendResult> {
     validateMessageFile(messageFile);
+    // A model switch rides the next resume (`--model` / `-m`); the handle keeps
+    // it, so every later resume stays on it too.
+    const h: SessionHandle = opts.model === undefined ? given : { ...given, model: opts.model };
     const needsHome = h.runtime !== 'opencode';
     if (
       h.logFile === undefined ||

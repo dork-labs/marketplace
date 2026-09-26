@@ -301,6 +301,8 @@ default, so a config that never mentions it keeps the one-item tick.
 | `warnMarginPct`        | number 0–50, `10`                                                | How close to a usage ceiling, in percent, counts as a warning.                 |
 | `windDownGraceMinutes` | whole number ≥ 1, `20`                                           | How long a warned worker has to checkpoint before flow writes one for it.      |
 | `pollSeconds`          | whole number ≥ 10, `60`                                          | Seconds between passes when `flow drain` runs on its own.                      |
+| `waitIfResetWithinMinutes` | whole number ≥ 0, `60`                                       | When an account's limit resets this soon, wait for it instead of moving the item. `0` never waits. |
+| `modelFallback`        | `{ runtime: [model, ...] }`, `{}`                                | When only one model's allowance runs out, the models to continue on, in order (names from `models.bindings` or model ids). Empty: off. |
 | `armAutoMerge`         | boolean, `false`                                                 | Whether the PRs the drain opens are set to merge once checks pass.             |
 | `host`                 | `auto` \| `cli` \| `cmux` \| `dorkos`, `auto`                    | Where sessions start. About this machine: set it in `config.local.json`.       |
 | `permissionMode`       | `default` \| `acceptEdits` \| `bypassPermissions`, `acceptEdits` | The mode sessions start in. About this machine: set it in `config.local.json`. |

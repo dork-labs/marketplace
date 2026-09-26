@@ -379,6 +379,26 @@ describe('cli launcher details', () => {
     }
   });
 
+  // Model fallback (spec §5.2a): send with { model } resumes on that model,
+  // and the handle keeps it for every later resume.
+  it('send with a model resumes with --model <m> and records it on the handle', async () => {
+    const h = await makeCliHarness();
+    try {
+      const handle = await h.launcher.start(requestFor(h, { model: 'opus' }));
+      await h.signal(handle, { kind: 'exited' });
+      const { handle: next } = await h.launcher.send(handle, h.messageFile, { model: 'sonnet' });
+      const resume = h
+        .calls()
+        .filter((c) => (c.args as string[]).includes('--resume'))
+        .at(-1);
+      const args = resume?.args as string[];
+      expect(args.slice(args.indexOf('--model'))).toEqual(['--model', 'sonnet']);
+      expect(next.model).toBe('sonnet');
+    } finally {
+      await h.cleanup();
+    }
+  });
+
   // Exited carries the exit code the launcher recorded when the child exited.
   it('state reports the recorded exit code', async () => {
     const h = await makeCliHarness();

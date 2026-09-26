@@ -102,3 +102,25 @@ export function acquireDrainLock(
     `another drain kept taking ${file}; run "flow drain" again once it settles`
   );
 }
+
+/**
+ * The pid of a live drain holding the project's lock, or `null` when no live
+ * drain holds it (no lock, an unreadable one, or a dead pid's).
+ *
+ * @param mainCheckout - The project's main checkout.
+ * @param pidAlive - A pid-liveness check.
+ * @returns The live holder's pid, or `null`.
+ */
+export function liveDrainPid(
+  mainCheckout: string,
+  pidAlive: (pid: number) => boolean
+): number | null {
+  let contents: string;
+  try {
+    contents = readFileSync(path.join(mainCheckout, DRAIN_LOCK_FILE), 'utf8');
+  } catch {
+    return null;
+  }
+  const pid = lockPid(contents);
+  return pid !== null && pidAlive(pid) ? pid : null;
+}
