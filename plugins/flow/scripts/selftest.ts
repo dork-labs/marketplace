@@ -26,7 +26,7 @@ import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
-import { invokedDirectly } from './_shared.ts';
+import { flowVersion, invokedDirectly } from './_shared.ts';
 import { findConfigRoots } from './config-files.ts';
 import { ensureIgnored } from './git-exclude.ts';
 import {
@@ -131,18 +131,6 @@ function parseFlags(argv: readonly string[]): Flags | string {
       : `unknown tier ${flags.tier} (use fast)`;
   }
   return flags;
-}
-
-/** The installed plugin's version, from `.claude-plugin/plugin.json`. */
-function flowVersion(flowRoot: string): string {
-  try {
-    const manifest = JSON.parse(
-      readFileSync(path.join(flowRoot, '.claude-plugin', 'plugin.json'), 'utf8')
-    );
-    return typeof manifest.version === 'string' ? manifest.version : 'unknown';
-  } catch {
-    return 'unknown';
-  }
 }
 
 /**

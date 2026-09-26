@@ -1393,6 +1393,7 @@ describe('config-files CLI', () => {
         declined: [],
       },
       paused: null,
+      journal: { path: path.join(repo, '.dork/flow/journal.jsonl'), enabled: true },
       errors: [],
       warnings: [],
     });

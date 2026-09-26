@@ -13,6 +13,7 @@
  */
 
 import { readFileSync, realpathSync } from 'node:fs';
+import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 /** The minimal argv surface every oracle script accepts. */
@@ -85,5 +86,22 @@ export function invokedDirectly(metaUrl: string): boolean {
     return realpathSync(fileURLToPath(metaUrl)) === realpathSync(entry);
   } catch {
     return false;
+  }
+}
+
+/**
+ * The installed plugin's version, from `.claude-plugin/plugin.json`.
+ *
+ * @param flowRoot - The plugin folder (`<flow-root>`).
+ * @returns The version, or `unknown` when the manifest cannot be read.
+ */
+export function flowVersion(flowRoot: string): string {
+  try {
+    const manifest = JSON.parse(
+      readFileSync(path.join(flowRoot, '.claude-plugin', 'plugin.json'), 'utf8')
+    );
+    return typeof manifest.version === 'string' ? manifest.version : 'unknown';
+  } catch {
+    return 'unknown';
   }
 }

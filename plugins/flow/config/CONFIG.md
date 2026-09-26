@@ -309,6 +309,46 @@ Which accounts the drain may use, and whether it moves an item to another accoun
 by itself when one runs out, is not here: that is `handoff` in the machine's
 `fleet.json`.
 
+## `selfImprovement`: how flow checks and records itself
+
+This block is committed team policy. Every field has a default, so a config that
+leaves it out gets exactly this:
+
+```jsonc
+"selfImprovement": {
+  "journal": { "enabled": true, "maxBytes": 5000000, "keep": 3 },
+  "retro": { "window": "7d", "maxItemsPerRun": 5, "project": null, "labels": [] },
+  "selftest": { "liveBudgetUsd": 1.0 }
+}
+```
+
+**`journal`** is a small record of how flow's runs go, one line per event, in
+`.dork/flow/journal.jsonl` in the project's main checkout, so every worktree writes
+one file. flow keeps that folder out of git through the repository's
+`info/exclude`, never a committed file.
+
+- It holds only short, fixed fields: which command ran and how it ended, stage
+  changes, review verdicts, CI results, and the one-sentence notes agents write
+  with `flow note`. It never holds comment bodies, prompts, diffs or tracker
+  descriptions. Free text has tokens, email addresses and your home folder
+  removed before it is written.
+- When the file reaches `maxBytes` it is renamed `journal.1.jsonl`, older files
+  move up one, and anything past `keep` is deleted.
+- `enabled: false` turns every write off, `flow note` included. Put it in
+  `config.local.json` to turn the journal off on your machine only.
+- A journal that cannot be written (a full disk, a read-only folder) prints one
+  warning and never fails the command that was writing it.
+
+`flow journal tail` prints the newest lines; `flow journal record` adds a review,
+CI or handoff event by hand.
+
+**`retro`** is the periodic review of the journal: how far back it reads
+(`window`, a number and `h`, `d` or `w`), the most tracker items one run may file
+(`maxItemsPerRun`), and the project and extra labels those items get.
+
+**`selftest.liveBudgetUsd`** is the most one run of the self-test's live tier may
+spend, in US dollars.
+
 ## Why `config.json` has no secrets
 
 `config.json` is committed and shared, so it must stay free of tokens, API keys,
