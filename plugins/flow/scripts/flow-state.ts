@@ -143,6 +143,12 @@ export const FlowRunSchema = z.looseObject({
   startedAt: z.string(),
   completedAt: z.string().optional(),
   provenance: FlowRunProvenanceSchema.optional(),
+  // The current session's billing account (a registry id) and launcher (spec
+  // flow-cli-core §1.3). `host` is a bare string on purpose, for the reason the
+  // provenance schema gives for `harness`: a `z.enum` here would make one record
+  // from a future launcher discard every in-flight run on the machine.
+  account: z.string().optional(),
+  host: z.string().optional(),
 });
 
 /**

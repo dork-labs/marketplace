@@ -1,0 +1,39 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "Usage ledger v1",
+  "description": "One account's usage windows at <dorkHome>/usage/<account-id>.json (spec flow-cli-core 1.2). Readers ignore fields and window keys they do not use; writers keep them.",
+  "type": "object",
+  "required": ["v", "accountId", "updatedAt", "windows"],
+  "properties": {
+    "v": { "const": 1 },
+    "accountId": { "type": "string", "pattern": "^[a-z0-9]+(-[a-z0-9]+)*$" },
+    "updatedAt": { "$ref": "#/definitions/isoTime" },
+    "windows": {
+      "type": "object",
+      "propertyNames": { "pattern": "^(model:[a-z0-9][a-z0-9._-]*|[a-z][a-z0-9_]*)$" },
+      "additionalProperties": { "$ref": "#/definitions/window" }
+    }
+  },
+  "definitions": {
+    "isoTime": {
+      "description": "ISO-8601 with an explicit zone. Writers emit UTC with Z.",
+      "type": "string",
+      "pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}(:\\d{2}(\\.\\d+)?)?(Z|[+-]\\d{2}:\\d{2})$"
+    },
+    "window": {
+      "type": "object",
+      "required": ["observedAt", "source"],
+      "properties": {
+        "usedPct": { "type": ["number", "null"], "minimum": 0, "maximum": 100 },
+        "resetsAt": { "oneOf": [{ "$ref": "#/definitions/isoTime" }, { "type": "null" }] },
+        "status": { "enum": ["allowed", "allowed_warning", "rejected", null] },
+        "observedAt": { "$ref": "#/definitions/isoTime" },
+        "source": { "enum": ["statusline", "sdk_event", "sdk_usage", "transcript"] }
+      },
+      "anyOf": [
+        { "required": ["usedPct"], "properties": { "usedPct": { "type": "number" } } },
+        { "required": ["status"], "properties": { "status": { "type": "string" } } }
+      ]
+    }
+  }
+}

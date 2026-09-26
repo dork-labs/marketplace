@@ -1,0 +1,72 @@
+# Fleet conformance fixture
+
+This folder is the shared contract between the flow plugin and DorkOS for three
+things both of them read and write on one machine:
+
+- **Accounts.** Who the Claude Code accounts are (DorkOS's `config.json`) and how
+  flow may spend them (flow's `fleet.json`).
+- **The usage ledger.** One file per account with the latest reading of each
+  rate-limit window.
+- **The session and item link.** The `FlowRun` records in `flow-state.json`.
+
+The rules are written in `specs/flow-cli-core/02-specification.md` section 1 of
+the `dork-labs/marketplace` repo. The case files here pin those rules as data, so
+two independent implementations can prove they agree. flow runs them in
+`plugins/flow/engine-tests/fleet-conformance.test.ts`.
+
+## Version
+
+`CONTRACT_VERSION` holds the contract version (semver). Any change to a rule or a
+case is a contract change: bump the version and change both sides. A new case
+that only pins an existing rule more tightly is a patch; a new field or window
+key rule is a minor; a changed or removed rule is a major.
+
+## What is here
+
+| File | What it pins | The call it drives |
+| --- | --- | --- |
+| `account-id.cases.json` | Minting an account id from a label and a path | `mint(label, path, taken) -> id` |
+| `identity.cases.json` | Reading `runtimes.claudeCode.accounts` from `config.json` | `readIdentities(config) -> { accounts, warnings }` |
+| `fleet-policy.cases.json` | Resolving `fleet.json` with defaults, plus which repos an account may serve | `resolveFleetPolicy(identities, fleet)`, `parseOriginRepo(origin)`, `mayServe(policy, repo)` |
+| `window-read.cases.json` | What one ledger window means at a given moment | `readWindow(entry, now, key) -> reading or null` |
+| `room.cases.json` | The reserve in force and whether an account has room | `effectiveReservePct`, `fiveHourRoom`, `weeklyRoom`, `modelRoom` |
+| `ledger-merge.cases.json` | Folding new readings into a ledger | `mergeLedger(existing, observations, now, accountId)` |
+| `flow-run.cases.json` | Reading `flow-state.json`, and keeping unknown fields when one run is written | the all-or-nothing reader, and an upsert by `issueId` |
+| `usage-ledger.schema.json` | The ledger file shape (JSON Schema draft-07) | |
+| `fleet-policy.schema.json` | The `fleet.json` shape (JSON Schema draft-07) | |
+| `*.examples.json` | Values each schema must accept (`valid`) and reject (`invalid`) | |
+
+Each case file has an `about` field that states the rule and the exact meaning of
+every input and expected field. Read it before writing a runner.
+
+## Case format
+
+Every case is `{ "name": string, "input": object, "expected": object }`.
+
+- `now` is always an input when time matters. Never use the wall clock.
+- Times are ISO-8601 with an explicit zone. Expected times are UTC with
+  milliseconds and `Z`.
+- `expected.warnings` is a list of warning codes. Compare it as a multiset (sort
+  both sides): the codes are the contract, their order and message text are not.
+- Compare every other expected value for deep equality.
+
+## Running the cases from DorkOS
+
+1. Vendor this folder at a pinned commit of `dork-labs/marketplace` (the DorkOS
+   spec `claude-account-fleet` picks the mechanism). Record the commit and the
+   `CONTRACT_VERSION` next to the copy.
+2. Write one runner per case file that feeds `input` to the DorkOS
+   implementation and compares against `expected` as described above. The
+   `about` field of each file and flow's own runner
+   (`fleet-conformance.test.ts`) show the mapping.
+3. Fail when a case file is present that has no runner, so a new file in a later
+   version cannot pass by being skipped.
+4. Validate each `*.examples.json` value against its schema: every `valid` value
+   passes and every `invalid` value fails.
+
+## What the fixture does not cover
+
+The cases pin the pure rules. The file mechanics (paths, modes, the
+lock-and-rename steps in spec section 1.2 "Writing") are described in the spec
+and proven by each side's own tests, because they need real files and real
+processes.

@@ -1,0 +1,27 @@
+{
+  "about": "Examples for fleet-policy.schema.json. Every 'valid' value must pass the schema and every 'invalid' one must fail it.",
+  "valid": [
+    { "name": "a new file: only the version", "value": { "v": 1 } },
+    {
+      "name": "the spec's example policy",
+      "value": {
+        "v": 1,
+        "handoff": "auto",
+        "accounts": {
+          "claude3": { "role": "rotation", "reservePct": 0, "spendDownWindowHours": 24, "scope": { "repos": ["acme/app"] } },
+          "personal": { "role": "main" },
+          "org": { "role": "kept-out", "scope": { "repos": ["Acme/App", "acme/site.v2"] }, "note": "unknown fields are kept" }
+        }
+      }
+    }
+  ],
+  "invalid": [
+    { "name": "no version", "value": { "accounts": {} } },
+    { "name": "unknown handoff", "value": { "v": 1, "handoff": "sometimes" } },
+    { "name": "unknown role", "value": { "v": 1, "accounts": { "a": { "role": "reserve" } } } },
+    { "name": "reserve over 100", "value": { "v": 1, "accounts": { "a": { "reservePct": 150 } } } },
+    { "name": "negative spend-down window", "value": { "v": 1, "accounts": { "a": { "spendDownWindowHours": -1 } } } },
+    { "name": "repo that is not owner/name", "value": { "v": 1, "accounts": { "a": { "scope": { "repos": ["acme"] } } } } },
+    { "name": "account key that is not an id", "value": { "v": 1, "accounts": { "Bad_ID": { "role": "rotation" } } } }
+  ]
+}

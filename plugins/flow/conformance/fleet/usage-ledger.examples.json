@@ -1,0 +1,48 @@
+{
+  "about": "Examples for usage-ledger.schema.json. Every 'valid' value must pass the schema and every 'invalid' one must fail it.",
+  "valid": [
+    {
+      "name": "the spec's example ledger",
+      "value": {
+        "v": 1,
+        "accountId": "claude3",
+        "updatedAt": "2026-09-26T16:04:11.000Z",
+        "windows": {
+          "five_hour": { "usedPct": 41.5, "resetsAt": "2026-09-26T19:00:00.000Z", "status": "allowed", "observedAt": "2026-09-26T16:04:10.000Z", "source": "statusline" },
+          "seven_day": { "usedPct": 12, "resetsAt": null, "status": null, "observedAt": "2026-09-26T16:04:10.000Z", "source": "sdk_usage" },
+          "model:opus": { "usedPct": null, "resetsAt": null, "status": "rejected", "observedAt": "2026-09-26T16:04:10.000Z", "source": "transcript" },
+          "some_new_window": { "usedPct": 3, "observedAt": "2026-09-26T16:04:10+02:00", "source": "sdk_event" }
+        }
+      }
+    },
+    {
+      "name": "an empty ledger with an unknown top-level field",
+      "value": { "v": 1, "accountId": "work-2", "updatedAt": "2026-09-26T16:04:11Z", "windows": {}, "writer": "future" }
+    }
+  ],
+  "invalid": [
+    { "name": "wrong version", "value": { "v": 2, "accountId": "a", "updatedAt": "2026-09-26T16:04:11Z", "windows": {} } },
+    { "name": "account id with a path separator", "value": { "v": 1, "accountId": "../etc", "updatedAt": "2026-09-26T16:04:11Z", "windows": {} } },
+    { "name": "timestamp without a zone", "value": { "v": 1, "accountId": "a", "updatedAt": "2026-09-26T16:04:11", "windows": {} } },
+    {
+      "name": "usedPct over 100",
+      "value": { "v": 1, "accountId": "a", "updatedAt": "2026-09-26T16:04:11Z", "windows": { "five_hour": { "usedPct": 101, "observedAt": "2026-09-26T16:04:11Z", "source": "statusline" } } }
+    },
+    {
+      "name": "neither usedPct nor status",
+      "value": { "v": 1, "accountId": "a", "updatedAt": "2026-09-26T16:04:11Z", "windows": { "five_hour": { "usedPct": null, "status": null, "observedAt": "2026-09-26T16:04:11Z", "source": "statusline" } } }
+    },
+    {
+      "name": "unknown source",
+      "value": { "v": 1, "accountId": "a", "updatedAt": "2026-09-26T16:04:11Z", "windows": { "five_hour": { "usedPct": 1, "observedAt": "2026-09-26T16:04:11Z", "source": "screen" } } }
+    },
+    {
+      "name": "window key that is not allowed",
+      "value": { "v": 1, "accountId": "a", "updatedAt": "2026-09-26T16:04:11Z", "windows": { "Five-Hour": { "usedPct": 1, "observedAt": "2026-09-26T16:04:11Z", "source": "statusline" } } }
+    },
+    {
+      "name": "missing observedAt",
+      "value": { "v": 1, "accountId": "a", "updatedAt": "2026-09-26T16:04:11Z", "windows": { "five_hour": { "usedPct": 1, "source": "statusline" } } }
+    }
+  ]
+}

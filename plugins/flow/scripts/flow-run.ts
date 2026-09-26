@@ -247,6 +247,20 @@ export interface FlowRun {
    * {@link FlowRunProvenance}.
    */
   provenance?: FlowRunProvenance;
+  /**
+   * The registry id (spec `flow-cli-core` §1.1a) of the account the run's
+   * **current** session bills. Rewritten on every handoff to another account.
+   * Not the same as `provenance.account`, which is the origin's
+   * `CLAUDE_CONFIG_DIR` basename, written once at run start and never updated.
+   */
+  account?: string;
+  /**
+   * The launcher the current session runs under: `cli`, `dorkos` or `cmux`
+   * today. Not the machine (that is `provenance.host`). A bare string, like
+   * `provenance.harness`: the vocabulary is pinned here in prose, so a record
+   * written by a future launcher never fails the all-or-nothing reader.
+   */
+  host?: string;
 }
 
 /** The inferred {@link RecoverySchema} config type (`maxRetries`/`onExhausted`/`staleAfter`). */

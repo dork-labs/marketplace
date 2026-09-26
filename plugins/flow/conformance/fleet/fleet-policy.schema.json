@@ -1,0 +1,34 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "Fleet routing policy v1",
+  "description": "flow's routing policy at <dorkHome>/flow/fleet.json (spec flow-cli-core 1.1b). Writers store only what the operator set; defaults are resolved at read time. Readers ignore fields they do not know; writers keep them.",
+  "type": "object",
+  "required": ["v"],
+  "properties": {
+    "v": { "const": 1 },
+    "handoff": { "enum": ["auto", "ask"], "description": "Default auto." },
+    "accounts": {
+      "type": "object",
+      "description": "Keyed by an identity id from config.json runtimes.claudeCode.accounts.",
+      "propertyNames": { "pattern": "^[a-z0-9]+(-[a-z0-9]+)*$" },
+      "additionalProperties": {
+        "type": "object",
+        "properties": {
+          "role": { "enum": ["main", "rotation", "kept-out"], "description": "Default kept-out." },
+          "reservePct": { "type": "number", "minimum": 0, "maximum": 100, "description": "Default 50 for main, else 0." },
+          "spendDownWindowHours": { "type": "number", "minimum": 0, "description": "Default 24." },
+          "scope": {
+            "type": "object",
+            "properties": {
+              "repos": {
+                "type": "array",
+                "description": "owner/name, compared case-insensitively. Read only for kept-out. Default [].",
+                "items": { "type": "string", "pattern": "^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$" }
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+}
