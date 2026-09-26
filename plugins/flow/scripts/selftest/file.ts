@@ -33,6 +33,7 @@ import os from 'node:os';
 
 import { buildProvenance, signBody, unsignedBody } from '../cli/provenance.ts';
 import { findConfigRoots } from '../config-files.ts';
+import { redact } from '../journal.ts';
 import type { CodeAdapter, WorkItem } from '../tracker/types.ts';
 import type { Check } from './report.ts';
 
@@ -200,11 +201,16 @@ export interface CheckFilingMeta extends FilingMeta {
   flowVersion: string;
 }
 
-/** The body of a filed item, or of the comment on an open one. */
+/**
+ * The body of a filed item, or of the comment on an open one. The free text
+ * (a check's detail, a proposal's evidence) passes the journal's `redact()`,
+ * so a token or a home path never reaches the tracker; the marker line is
+ * left as it is, since dedupe matches it exactly.
+ */
 function bodyFor(finding: Finding, marker: MarkerKind, regressionOf?: string): string {
   return [
     ...(regressionOf === undefined ? [] : [`Regressed after ${regressionOf}.`, '']),
-    finding.text,
+    redact(finding.text),
     '',
     markerFor(finding.fingerprint, marker),
   ].join('\n');
@@ -222,7 +228,8 @@ function newItem(
     kind: 'file',
     subject: finding.subject,
     key: `${meta.marker ?? 'flow-selftest'}:${finding.fingerprint}:${earlier.length === 0 ? 'none' : earlier.join(',')}`,
-    title: finding.title,
+    // The title ends in `(<fingerprint>)`, which redaction leaves alone (12 hex characters).
+    title: redact(finding.title),
     body: bodyFor(finding, meta.marker ?? 'flow-selftest', regressionOf),
     labels: filedLabels(meta.labels ?? []),
     ...(meta.project ? { project: meta.project } : {}),

@@ -144,6 +144,59 @@ describe('planFiling', () => {
   });
 });
 
+describe('filing redacts what it copies into the tracker', () => {
+  it('removes a home path and a token from the created item and from the comment on it', async () => {
+    const token = `ghp_${'a1B2'.repeat(9)}`;
+    const home = `${os.homedir()}/work/private-notes.md`;
+    const check: Check = {
+      ...failing('doc-lint/words'),
+      detail: `${home} grew; the log said ${token}`,
+    };
+    const fake = new FakeTracker({ items: [] }, { now: () => NOW });
+    const sign = (body: string) => signBody(body, '— 🤖 /flow', { v: 1, host: 'test-host' });
+    const deps = { adapter: fake.adapter, sign, unsign: unsignedBody };
+
+    const first = await fileFailures([check], META, deps);
+    expect(first.filed).toHaveLength(1);
+    const created = fake.backlog.items[0];
+    expect(created.description).not.toContain(token);
+    expect(created.description).not.toContain(os.homedir());
+    expect(created.description).toContain('~/work/private-notes.md grew');
+    expect(created.description).toContain('[redacted]');
+    // The marker survives, so the next run still finds the item.
+    expect(created.description).toContain(markerFor(check.fingerprint));
+
+    const second = await fileFailures([{ ...check, detail: `${check.detail} again` }], META, deps);
+    expect(second.commented).toEqual([
+      { subject: check.id, identifier: created.identifier, posted: true },
+    ]);
+    const [comment] = fake.backlog.comments?.[created.identifier] ?? [];
+    expect(comment.body).not.toContain(token);
+    expect(comment.body).not.toContain(os.homedir());
+    expect(comment.body).toContain('[redacted]');
+  });
+});
+
+describe('filing redacts a title', () => {
+  it('keeps the fingerprint and drops a token', () => {
+    const fp = fingerprint('retro', 'title');
+    const [plan] = planFindings(
+      [
+        {
+          subject: 'x',
+          fingerprint: fp,
+          title: `flow retro: ${os.homedir()} saw ghp_${'a1B2'.repeat(9)} (${fp})`,
+          text: 'x',
+          evidenceAt: NOW.toISOString(),
+        },
+      ],
+      [],
+      { now: NOW, marker: 'flow-retro' }
+    );
+    expect(plan).toMatchObject({ kind: 'file', title: `flow retro: ~ saw [redacted] (${fp})` });
+  });
+});
+
 describe('planFindings under a cap', () => {
   it('files the finding with the most evidence first, whatever the input order', () => {
     const finding = (subject: string, weight: number): Finding => ({
