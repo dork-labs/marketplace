@@ -1,0 +1,160 @@
+{
+  "sentences": [
+    {
+      "text": "capture quick low commitment intake of a raw thought as an",
+      "reason": "Present before the self-test existed; the prose trim (DOR-2377) removes it."
+    },
+    {
+      "text": "ideate shape a complex brief into a structured ideation artifact",
+      "reason": "Present before the self-test existed; the prose trim (DOR-2377) removes it."
+    },
+    {
+      "text": "execute implement the tasks across dependency aware batches in an isolated worktree",
+      "reason": "Present before the self-test existed; the prose trim (DOR-2377) removes it."
+    },
+    {
+      "text": "verify run the touched surface capture proof of completion evidence open the pr and hand off to review",
+      "reason": "Present before the self-test existed; the prose trim (DOR-2377) removes it."
+    },
+    {
+      "text": "done close the work create follow ups run the project pulse check and tear down the worktree",
+      "reason": "Present before the self-test existed; the prose trim (DOR-2377) removes it."
+    },
+    {
+      "text": "step run one stage stop autonomous run to a gate",
+      "reason": "Present before the self-test existed; the prose trim (DOR-2377) removes it."
+    },
+    {
+      "text": "manual cli slash drain the ready queue from the terminal",
+      "reason": "Present before the self-test existed; the prose trim (DOR-2377) removes it."
+    },
+    {
+      "text": "that skill is pm agnostic it routes every tracker read or write through the tracker adapter skill the at the that prints which it reads on demand",
+      "reason": "Present before the self-test existed; the prose trim (DOR-2377) removes it."
+    },
+    {
+      "text": "if the check cannot run or its output cannot be read stop",
+      "reason": "Present before the self-test existed; the prose trim (DOR-2377) removes it."
+    },
+    {
+      "text": "when the work is tracked route every tracker read write through the tracker adapter skill the at the that prints never call a tracker directly from this command",
+      "reason": "Present before the self-test existed; the prose trim (DOR-2377) removes it."
+    },
+    {
+      "text": "if the work is untracked or no adapter is available skip tracker projection silently",
+      "reason": "Present before the self-test existed; the prose trim (DOR-2377) removes it."
+    },
+    {
+      "text": "dorkos tools may be deferred behind tool search if is not loaded load it with toolsearch first and treat it as absent only when that finds nothing",
+      "reason": "Present before the self-test existed; the prose trim (DOR-2377) removes it."
+    },
+    {
+      "text": "specify turn ideation into a frozen specification plus draft adrs",
+      "reason": "Present before the self-test existed; the prose trim (DOR-2377) removes it."
+    },
+    {
+      "text": "decompose break the spec into tasks mirrored to the tracker as a checklist",
+      "reason": "Present before the self-test existed; the prose trim (DOR-2377) removes it."
+    },
+    {
+      "text": "title driving it manually href docs guides flow driving it manually",
+      "reason": "Present before the self-test existed; the prose trim (DOR-2377) removes it."
+    },
+    {
+      "text": "this is the one artifact a machine parses so it has to be valid json json escape every value quotes backslashes newlines control characters and drop any field whose value you cannot escape safely",
+      "reason": "Present before the self-test existed; the prose trim (DOR-2377) removes it."
+    },
+    {
+      "text": "if you reached it via a symlink or resolve the real path first the flow root is two directories above the skill directory",
+      "reason": "Present before the self-test existed; the prose trim (DOR-2377) removes it."
+    },
+    {
+      "text": "every reference below is relative to that root",
+      "reason": "Present before the self-test existed; the prose trim (DOR-2377) removes it."
+    },
+    {
+      "text": "this is a prose contract not code the agent reads this skill and follows",
+      "reason": "Present before the self-test existed; the prose trim (DOR-2377) removes it."
+    },
+    {
+      "text": "the one rule never touch the tracker directly",
+      "reason": "Present before the self-test existed; the prose trim (DOR-2377) removes it."
+    },
+    {
+      "text": "it never names a tracker api a tool string or a tracker specific field",
+      "reason": "Present before the self-test existed; the prose trim (DOR-2377) removes it."
+    },
+    {
+      "text": "every tracker read or write goes through the adapter skill the v1 spec 3 by naming one of its capability verbs e g",
+      "reason": "Present before the self-test existed; the prose trim (DOR-2377) removes it."
+    },
+    {
+      "text": "read the adapter skill s contract before acting",
+      "reason": "Present before the self-test existed; the prose trim (DOR-2377) removes it."
+    },
+    {
+      "text": "it is the at the that prints the project s own or the one flow ships",
+      "reason": "Present before the self-test existed; the prose trim (DOR-2377) removes it."
+    },
+    {
+      "text": "no raw tracker tool name cli invocation or slug lives here",
+      "reason": "Present before the self-test existed; the prose trim (DOR-2377) removes it."
+    },
+    {
+      "text": "the vitest guard enforces this for the whole flow bundle",
+      "reason": "Present before the self-test existed; the prose trim (DOR-2377) removes it."
+    },
+    {
+      "text": "finding the adapter it is the at the that prints the project s own or the one flow ships",
+      "reason": "Present before the self-test existed; the prose trim (DOR-2377) removes it."
+    },
+    {
+      "text": "trigger doors the thin command or a pm transition into",
+      "reason": "Present before the self-test existed; the prose trim (DOR-2377) removes it."
+    },
+    {
+      "text": "the block in the frontmatter above is what makes this file a scheduled task",
+      "reason": "Present before the self-test existed; the prose trim (DOR-2377) removes it."
+    },
+    {
+      "text": "if the check cannot run or its output cannot be read stop never act without knowing whether flow is paused",
+      "reason": "Present before the self-test existed; the prose trim (DOR-2377) removes it."
+    },
+    {
+      "text": "when it says report its first error and stop",
+      "reason": "Present before the self-test existed; the prose trim (DOR-2377) removes it."
+    },
+    {
+      "text": "all tracker reads and writes go through the adapter this tick never names a tracker directly",
+      "reason": "Present before the self-test existed; the prose trim (DOR-2377) removes it."
+    },
+    {
+      "text": "neither edits this file it is the package s and an update replaces it",
+      "reason": "Present before the self-test existed; the prose trim (DOR-2377) removes it."
+    },
+    {
+      "text": "it ships the same explicit opt in as",
+      "reason": "Present before the self-test existed; the prose trim (DOR-2377) removes it."
+    },
+    {
+      "text": "to switch it on with dorkos approve it on the schedules page",
+      "reason": "Present before the self-test existed; the prose trim (DOR-2377) removes it."
+    },
+    {
+      "text": "on any other harness point your own scheduler os cron ci at it",
+      "reason": "Present before the self-test existed; the prose trim (DOR-2377) removes it."
+    },
+    {
+      "text": "when its is not report flow is paused since lifts it and stop",
+      "reason": "Present before the self-test existed; the prose trim (DOR-2377) removes it."
+    },
+    {
+      "text": "otherwise the adapter is the at its inside it means the output s",
+      "reason": "Present before the self-test existed; the prose trim (DOR-2377) removes it."
+    },
+    {
+      "text": "never answer its own comments or the body carries",
+      "reason": "Present before the self-test existed; the prose trim (DOR-2377) removes it."
+    }
+  ]
+}

@@ -1,0 +1,52 @@
+{
+  "rulePrefixes": {
+    "INV": "adapter conformance invariants (INV-1..INV-5), not tracker items",
+    "GRM": "groom invariants (GRM-1..GRM-14), not tracker items",
+    "UTF": "the UTF-8 encoding name",
+    "ISO": "the ISO-8601 date format name",
+    "SHA": "hash names such as SHA-256",
+    "ADR": "decision record ids, which name a decision rather than an incident"
+  },
+  "lines": [
+    {
+      "path": "skills/linear-adapter/SKILL.md",
+      "text": "against `composio` v0.2.31, 2026-09-09).",
+      "reason": "Present before the self-test existed; the prose trim (DOR-2377) removes it."
+    },
+    {
+      "path": "skills/linear-adapter/SKILL.md",
+      "text": "hazard, 2026-09-10).",
+      "reason": "Present before the self-test existed; the prose trim (DOR-2377) removes it."
+    },
+    {
+      "path": "skills/linear-adapter/SKILL.md",
+      "text": "(verified against `composio` v0.2.31, 2026-09-15).",
+      "reason": "Present before the self-test existed; the prose trim (DOR-2377) removes it."
+    },
+    {
+      "path": "skills/linear-adapter/SKILL.md",
+      "text": "treat every other path's answer as unknown (verified 2026-09-09). The",
+      "reason": "Present before the self-test existed; the prose trim (DOR-2377) removes it."
+    },
+    {
+      "path": "skills/linear-adapter/SKILL.md",
+      "text": "bad id or a missing OAuth scope. It is neither (verified 2026-07-13, DOR-306).",
+      "reason": "Present before the self-test existed; the prose trim (DOR-2377) removes it."
+    },
+    {
+      "path": "skills/linear-adapter/SKILL.md",
+      "text": "(verified 2026-09-09). It searches the whole workspace and **returns cross-team",
+      "reason": "Present before the self-test existed; the prose trim (DOR-2377) removes it."
+    },
+    {
+      "path": "skills/linear-adapter/SKILL.md",
+      "text": "2026-09-10). Check the pulled identifiers all carry the `<teamKey>` prefix",
+      "reason": "Present before the self-test existed; the prose trim (DOR-2377) removes it."
+    },
+    {
+      "path": "skills/linear-adapter/SKILL.md",
+      "text": "2026-09-10). A project's description is a one-line summary field, not a body,",
+      "reason": "Present before the self-test existed; the prose trim (DOR-2377) removes it."
+    }
+  ]
+}
