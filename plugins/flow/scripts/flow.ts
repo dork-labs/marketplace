@@ -161,6 +161,112 @@ export const VERBS: readonly VerbDefinition[] = [
     flags: [{ name: 'strict', kind: 'boolean', description: 'Exit 1 when there is drift.' }],
     load: () => import('./cli/status.ts'),
   },
+  {
+    name: 'claim',
+    summary: 'Start working an item: mark it claimed and record the run.',
+    description:
+      'Start working an item. It must be open, carry agent/ready, not be claimed, and be claimable under the ownership settings. Moves it to started with agent/claimed and no stage/* label, then records the run in flow-state.json. Posts no comment.',
+    common: ['project', 'dry-run', 'session', 'manual'],
+    positionals: [{ name: 'identifier', required: true, description: 'The item, e.g. DOR-123.' }],
+    flags: [
+      {
+        name: 'pid',
+        kind: 'string',
+        value: 'N',
+        description: 'The worker process id. Default: the parent of the calling shell.',
+      },
+      {
+        name: 'worktree',
+        kind: 'string',
+        value: 'path',
+        description: 'The worktree the run works in. Default: the checkout root.',
+      },
+      {
+        name: 'branch',
+        kind: 'string',
+        value: 'name',
+        description: 'The branch the run works on. Default: the checkout branch.',
+      },
+      {
+        name: 'account',
+        kind: 'string',
+        value: 'id',
+        description: 'The account this session bills.',
+      },
+      {
+        name: 'host',
+        kind: 'string',
+        value: 'cli|dorkos|cmux',
+        description: 'The launcher this session runs under.',
+      },
+    ],
+    load: () => import('./cli/claim.ts'),
+  },
+  {
+    name: 'release',
+    summary: 'Let go of an item: back to the ready queue, or unowned.',
+    description:
+      'Let go of an item. --to ready (the default) makes it unstarted with agent/ready and a stage/* label to resume at; --to none leaves it unowned. Deletes the run record. Posts a signed comment only with --reason.',
+    common: ['project', 'dry-run', 'session'],
+    positionals: [{ name: 'identifier', required: true, description: 'The item, e.g. DOR-123.' }],
+    flags: [
+      {
+        name: 'to',
+        kind: 'string',
+        value: 'ready|none',
+        description: 'Where the item goes. Default: ready.',
+      },
+      {
+        name: 'stage',
+        kind: 'string',
+        value: 'stage',
+        description: 'The stage to resume at. Default: the run record, else the item.',
+      },
+      {
+        name: 'reason',
+        kind: 'string',
+        value: 'text',
+        description: 'Post this as a signed comment.',
+      },
+    ],
+    load: () => import('./cli/release.ts'),
+  },
+  {
+    name: 'done',
+    summary: 'Finish an item: post the summary and close it.',
+    description:
+      'Finish an item. Posts the summary as a signed comment (skipped when one of the last 10 comments already says the same), moves it to completed with agent/completed and no stage/* label, and marks the run complete.',
+    common: ['project', 'dry-run', 'session'],
+    positionals: [{ name: 'identifier', required: true, description: 'The item, e.g. DOR-123.' }],
+    flags: [
+      { name: 'summary', kind: 'string', value: 'text', description: 'The completion summary.' },
+      {
+        name: 'summary-file',
+        kind: 'string',
+        value: 'path',
+        description: 'Read the summary from this file.',
+      },
+      {
+        name: 'pr',
+        kind: 'string',
+        value: 'url',
+        description: 'The pull request, added to the summary.',
+      },
+    ],
+    load: () => import('./cli/done.ts'),
+  },
+  {
+    name: 'stage',
+    summary: 'Move an item to another stage.',
+    description:
+      'Move an item to a stage from config. A started or completed stage removes every stage/* label; any other stage sets its label. Updates the run record when there is one.',
+    common: ['project', 'dry-run', 'session'],
+    positionals: [
+      { name: 'identifier', required: true, description: 'The item, e.g. DOR-123.' },
+      { name: 'stage', required: true, description: 'A key of stages in config.' },
+    ],
+    load: () => import('./cli/stage.ts'),
+  },
 ];
 
 /** The plugin folder, `<flow-root>`: the parent of `scripts/`. */

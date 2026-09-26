@@ -1,6 +1,6 @@
 ---
 name: grooming-backlog
-description: The /flow engine's backlog GROOM — a whole-backlog corrective sweep that makes the configured team's backlog honestly dispatchable. Audits every open item against the fourteen groom invariants, closes shipped/duplicate/junk work with cited evidence, reconciles projects with the repo's real programme structure, classifies and gates every survivor, then verifies the result with the audit-backlog and dispatch oracles. Use when the dispatch queue starves, after a large programme lands, before enabling autonomous mode, or whenever the tracker has drifted from reality. `check` mode is the read-only audit half. PM-agnostic; all tracker I/O routes through the adapter skill.
+description: The /flow engine's backlog GROOM — a whole-backlog corrective sweep that makes the configured team's backlog honestly dispatchable. Audits every open item against the fifteen groom invariants, closes shipped/duplicate/junk work with cited evidence, reconciles projects with the repo's real programme structure, classifies and gates every survivor, then verifies the result with the audit-backlog and dispatch oracles. Use when the dispatch queue starves, after a large programme lands, before enabling autonomous mode, or whenever the tracker has drifted from reality. `check` mode is the read-only audit half. PM-agnostic; all tracker I/O routes through the adapter skill.
 ---
 
 # Grooming the Backlog — the whole-backlog sweep
@@ -24,7 +24,7 @@ description: The /flow engine's backlog GROOM — a whole-backlog corrective swe
 > pick. A ready label nobody audits decays into noise.
 >
 > **This is a prose contract, not code.** The agent reads this skill and follows
-> it. A thin `/flow:groom` command triggers it; the fourteen invariants live as
+> it. A thin `/flow:groom` command triggers it; the fifteen invariants live as
 > the typed oracle `<flow-root>/scripts/audit-backlog.ts`.
 
 ## The one rule: never touch the tracker directly
@@ -74,7 +74,7 @@ at the phase-5 gate: the **closure list** (with per-item evidence) and the
 (labels, priorities, estimates, states, relations, description sections)
 proceeds under the operator's plan approval of the groom itself.
 
-## The fourteen invariants (what "groomed" means)
+## The fifteen invariants (what "groomed" means)
 
 The oracle is the definition — run it, do not re-derive it:
 
@@ -83,13 +83,13 @@ node --experimental-strip-types "<flow-root>/scripts/flow.ts" audit --json   # e
 node --experimental-strip-types "<flow-root>/scripts/audit-backlog.ts" --help   # the full list
 ```
 
-In one line each: every open item has exactly one `type/*` label, a project,
-and a real priority (GRM-1..3); every READY item has a size, both engine-read
-description sections (`## Validation criteria`, `## On Completion`), no open
-blocker, no foreign assignee, a live project, and a `stage/*` label
-(GRM-4..10); no dead project holds open work (GRM-11); labels are namespaced
-(GRM-12); the agent state machine is single-valued (GRM-13); and a live item
-never carries an unresolved `duplicateOf` (GRM-14).
+In brief: every open item has one `type/*` label, a project, and a real
+priority (GRM-1..3); every READY item has a size, both engine-read description
+sections, no open blocker, no foreign assignee, a live project, and a `stage/*`
+label (GRM-4..10); no dead project holds open work (GRM-11); labels are
+namespaced (GRM-12); the agent state machine is single-valued (GRM-13); a live
+item never carries an unresolved `duplicateOf` (GRM-14); and state agrees with
+labels (GRM-15).
 
 ## The procedure
 

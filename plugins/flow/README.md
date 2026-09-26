@@ -131,7 +131,7 @@ its gate, then stop) · **Triage** the backlog, with a specific item or `auto` (
 whole queue) reachable as free text. "Continue the queue" is one tick of `auto`.
 
 Beside the stages sits the whole-backlog sweep: **`/flow:groom`**
-(`grooming-backlog`) audits every open item against the fourteen groom
+(`grooming-backlog`) audits every open item against the fifteen groom
 invariants (`scripts/audit-backlog.ts`), closes shipped/duplicate/junk work
 with cited evidence behind a human gate, reconciles projects with reality, and
 applies the readiness gate honestly — then proves the result with a

@@ -143,7 +143,7 @@ describe('the module', () => {
   it('declares contract 1.4.0 and all five capabilities', () => {
     // Purpose: the loader requires CONTRACT_VERSION and the capability list;
     // the shipped adapter serves every verb.
-    expect(linear.CONTRACT_VERSION).toBe('1.4.0');
+    expect(linear.CONTRACT_VERSION).toBe('2.0.0');
     const { adapter } = build(snapshotRoute);
     expect([...adapter.capabilities].sort()).toEqual(
       ['applyWorkState', 'comment', 'getBacklogSnapshot', 'getCurrentUser', 'getItem'].sort()

@@ -40,7 +40,7 @@ import type {
 import { labelsAfterChange } from '../../../../scripts/work-state.ts';
 
 /** The contract version this fake targets. */
-export const CONTRACT_VERSION = '1.4.0';
+export const CONTRACT_VERSION = '2.0.0';
 
 /** The environment variable naming the backlog file a spawned run reads and writes. */
 export const FAKE_BACKLOG_ENV = 'FLOW_FAKE_BACKLOG';

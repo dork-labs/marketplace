@@ -298,8 +298,9 @@ describe('agent provenance — it reaches adapters that are not this tracker', (
   });
 
   it('the contract took a MINOR bump for the new requirement', () => {
-    // At or past 1.2.0: later additive minors (1.3.0, the intake trio) keep it.
-    expect(contract).toMatch(/\*\*Contract version: 1\.[2-9]\.\d+\*\*/);
+    // At or past 1.2.0: later minors (1.3.0, the intake trio) and majors (2.0.0,
+    // the work-state rule) keep it.
+    expect(contract).toMatch(/\*\*Contract version: (?:1\.[2-9]|[2-9]\.\d+)\.\d+\*\*/);
     expect(contractFlat).toMatch(
       /\*\*1\.2\.0\*\* - outward writes carry the \*\*`agent:provenance` signature\*\*/
     );

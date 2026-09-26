@@ -1,7 +1,7 @@
 /*
  * audit-backlog.ts - the /flow backlog-groom invariant oracle.
  *
- * Asserts the fourteen groom invariants (GRM-1 .. GRM-14) against a snapshot of
+ * Asserts the fifteen groom invariants (GRM-1 .. GRM-15) against a snapshot of
  * NORMALIZED WorkItems - the whole live backlog as the adapter's
  * `getBacklogSnapshot()` verb emits it. Where validate-adapter.ts asks "did the
  * adapter normalize each item correctly?", this oracle asks "is the backlog
@@ -16,8 +16,8 @@
  * unmappable Duplicate state) are snapshot-time obligations of the ADAPTER,
  * documented in the tracker adapter skill, and never reach this oracle.
  *
- * This script is dependency-free by design (no zod, no imports beyond node:fs /
- * node:url) and runs directly under `node --experimental-strip-types`, exactly
+ * This script is dependency-free by design (no zod; its only imports are node:fs,
+ * node:url and the zero-dependency work-state.ts that GRM-15 reports from) and runs directly under `node --experimental-strip-types`, exactly
  * like the other oracle scripts in this directory (ADR-0294, ADR-0298). Schema
  * types are deliberately NOT imported here, even as `import type` - the checks
  * are hand-rolled over `unknown` so the oracle also survives a NON-conformant
@@ -37,6 +37,8 @@
 import { readFileSync, realpathSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 
+import { stateCoherence } from './work-state.ts';
+
 /** State categories an item may still be worked FROM (open, not terminal). */
 const OPEN_STATE_CATEGORIES: string[] = ['backlog', 'unstarted', 'started'];
 
@@ -51,7 +53,7 @@ const AGENT_READY_LABEL = 'agent/ready';
 
 /** A single breached invariant in the verdict. */
 interface Failure {
-  /** The invariant identifier (`GRM-1` .. `GRM-14`, or `INPUT` for malformed input). */
+  /** The invariant identifier (`GRM-1` .. `GRM-15`, or `INPUT` for malformed input). */
   invariant: string;
   /** The aggregated human-readable breach detail(s). */
   detail: string;
@@ -81,7 +83,7 @@ interface HarnessArgs {
 
 const HELP = `audit-backlog - the /flow backlog-groom invariant oracle.
 
-Asserts the fourteen groom invariants (GRM-1 .. GRM-14) against a snapshot of
+Asserts the fifteen groom invariants (GRM-1 .. GRM-15) against a snapshot of
 NORMALIZED WorkItems - the whole live backlog, as the adapter's
 getBacklogSnapshot() verb emits it. Run by the grooming-backlog skill before
 and after a groom; runnable standalone for a read-only health check.
@@ -116,6 +118,9 @@ Invariants ("ready" = carries the literal agent/ready label):
   GRM-12  every label is namespaced family/leaf (a bare tracker default fails)
   GRM-13  no item carries more than one agent/* label
   GRM-14  duplicateOf set => the item is terminal (a live duplicate is unresolved)
+  GRM-15  state coherence: state, agent/* and stage/* agree (STATE-1 .. STATE-5):
+          at most one stage/* label, none on a started item, agent/claimed only
+          when started, no agent/ready when started, no agent/completed when open
 `;
 
 /** True for a non-array, non-null object. */
@@ -388,6 +393,11 @@ const INVARIANTS: readonly Invariant[] = [
   { id: 'GRM-12', summary: 'every label is namespaced family/leaf', check: checkGrm12 },
   { id: 'GRM-13', summary: 'no item carries more than one agent/* label', check: checkGrm13 },
   { id: 'GRM-14', summary: 'an item with duplicateOf is closed', check: checkGrm14 },
+  {
+    id: 'GRM-15',
+    summary: 'state, the agent/* label and the stage/* label agree',
+    check: checkGrm15,
+  },
 ];
 
 /** One invariant's outcome: the breach details, one per offending item (empty = pass). */
@@ -408,6 +418,18 @@ interface InvariantResult {
  */
 function runInvariants(items: readonly unknown[], opts: AuditOpts = {}): InvariantResult[] {
   return INVARIANTS.map((invariant) => ({ invariant, details: invariant.check(items, opts) }));
+}
+
+/**
+ * GRM-15 - state coherence (spec flow-cli-core §5): the tracker state, the one
+ * agent/* label and the one stage/* label agree. Reports every STATE-n breach
+ * per item from work-state.ts, the one place the rule is written.
+ */
+function checkGrm15(items: readonly unknown[]): string[] {
+  return eachOpenItem(items, (item, label) => {
+    const breaches = stateCoherence(item).map((v) => `${label} ${v.check}: ${v.detail}`);
+    return breaches.length === 0 ? undefined : breaches.join('; ');
+  });
 }
 
 /**

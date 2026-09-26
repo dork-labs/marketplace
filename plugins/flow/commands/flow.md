@@ -170,8 +170,8 @@ queue.
    `resume` or `resume <issue-id>` un-pauses autonomy via `/flow:resume`.
 2. **A stage name** (e.g. `/flow specify`): invoke that stage's `/flow:<stage>` command.
 3. **An explicit work item** (an issue identifier like `PROJ-157`, or a spec path):
-   determine its current stage from its `stage/*` label (via the adapter)
-   or its spec artifacts, then advance one stage.
+   determine its current stage from its `stage/*` label, or while it is started
+   its run record's `stage`, or its spec artifacts, then advance one stage.
 4. **`continue` or `auto`** (optionally followed by a project name, see below): the
    queue-draining modes.
 5. **A project** (a tracker project name, a spec slug that homes on a project, or a
@@ -339,20 +339,14 @@ is never reaped, because `/flow:resume` reads it back.
      dispatch needs. Render any named item as `PROJ-123 - Title` (the adapter's
      display convention). - **Done** (`shapeableCount === 0`): the queue is genuinely drained (or the
      only remaining work is parked on a human or a gate). Set
-     `ready: 0, shapeable: 0` and go to **Stop**. - Otherwise claim the top-ranked eligible issue (`picked[0]`, durable label +
-     state, via the adapter) and provision its worktree. On claim, persist a
-     `FlowRun` to `.dork/flow/flow-state.json` via the flow engine's typed
-     `writeFlowRun`, following the `FlowRun` shape:
-     `{ issueId, identifier, sessionId, worktreePath, branch, stage, status,
-attemptCount, workerPid, startedAt }`, with `status` starting at `queued`
-     then `running`. This is the per-issue session↔issue record the recovery pass
-     adopts (distinct from the `.dork/flow/auto-run.json` drain sentinel). Carry
-     the item through the stages to its human-review gate, advancing the record
-     with `updateFlowRunStatus` at each transition (`waiting_for_review` at the
-     review gate, `complete` at DONE; move `stage` in lockstep). At each stage
+     `ready: 0, shapeable: 0` and go to **Stop**. - Otherwise provision the top-ranked issue's (`picked[0]`) worktree and claim
+     it: `node --experimental-strip-types "${CLAUDE_PLUGIN_ROOT}/scripts/flow.ts" claim <id> --worktree <path> --branch <branch> --json`
+     writes the label, the state and the `FlowRun` (the record the recovery pass
+     adopts). Carry the item to its human-review gate, moving stages with
+     `flow.ts stage <id> <stage> --json` (DONE is `flow.ts done`). At each stage
      boundary, honor the operator override: if the item now carries the
      `agent/paused` marker (via the adapter), advance it no further,
-     release the claim cleanly, and move on (see "Operator override" below). At
+     run `flow.ts release <id> --to none --json`, and move on (see "Operator override" below). At
      every decision point walk the calibration ladder; `stop-and-ask` on a live
      terminal asks inline via `AskUserQuestion`.
    - After the iteration reaches a gate (or parks on a genuine question), update
@@ -390,11 +384,11 @@ The operator always outranks the loop. Three override surfaces, coarse to fine:
   the project's `.agents/flow/config.json`; see the dials guide (`${CLAUDE_PLUGIN_ROOT}/docs/the-dials.mdx`).
 - **Reclaim or redirect one item.** Via the adapter, apply the
   **`agent/paused`** marker to an item. The running tick honors `agent/paused` **at
-  stage boundaries**: it advances the item no further, releases the claim cleanly
-  (drops `agent/claimed`), and leaves the worktree intact for inspection, rather
+  stage boundaries**: it advances the item no further, runs `flow.ts release <id>
+--to none`, and leaves the worktree intact for inspection, rather
   than abandoning a half-finished stage. To hand the item to a human or another
   agent instead, use the ownership-policy reassignment (reassign on the tracker via
   the adapter); `classifyOwnership` then treats it as not-ours.
 
-All tracker I/O (fetch, rank inputs, claim, transition, comment, assign) routes
+Claim, stage, release and done run through `flow.ts`; all other tracker I/O routes
 through the tracker adapter skill; this command never names a tracker string.

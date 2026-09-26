@@ -43,17 +43,17 @@ trigger over it. In reconciler-registry order, one tick:
 2. **Inbox / resume.** Un-park items whose `agent/needs-input` question was
    answered, and resume the parked run.
 3. **Dispatch.** Rank the ready queue with
-   `node --experimental-strip-types "<flow-root>/scripts/flow.ts" next --json`, claim the
-   top-ranked item (durable label plus state), provision its worktree, persist a
-   `FlowRun` to `.dork/flow/flow-state.json`, and carry it to its human-review
-   gate.
+   `node --experimental-strip-types "<flow-root>/scripts/flow.ts" next --json`, provision the
+   top item's worktree, claim it with
+   `node --experimental-strip-types "<flow-root>/scripts/flow.ts" claim <id> --worktree <path> --branch <branch> --json`
+   and carry it to its human-review gate.
 
-Stop at the review gate or on a genuine question. All tracker reads and writes go
-through **the adapter**; this tick never names a tracker directly.
+Stop at the review gate or on a genuine question. Other tracker reads and writes
+go through **the adapter**; this tick never names a tracker directly.
 
-**Operator override.** At each stage boundary, via the adapter, check for the
-`agent/paused` marker: if present, advance no further, release the claim
-(`agent/claimed`) cleanly, and stop. `/flow:pause` halts every tick through the
+**Operator override.** At each stage boundary, check for the `agent/paused`
+marker: if present, advance no further, run `flow.ts release <id>
+--to none`, and stop. `/flow:pause` halts every tick through the
 project's pause flag that step 0 reads; `/flow:resume` lifts it. Neither edits
 this file: it is the package's, and an update replaces it. To stop the scheduler
 starting the tick at all, switch it off where it is scheduled (on DorkOS, the
