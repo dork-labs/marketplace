@@ -131,6 +131,12 @@ export interface VerbResult {
    * it, so it agrees with the verb's own lines. Never printed.
    */
   runtime?: Runtime;
+  /**
+   * The item the run acted on, when the verb learns it only while running
+   * (`flow create`'s new identifier). The `verb` journal line records it; a
+   * verb whose first positional is the identifier needs not set it. Never printed.
+   */
+  item?: string;
 }
 
 /** A verb's own module, loaded lazily with `import()`. */

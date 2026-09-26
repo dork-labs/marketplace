@@ -231,17 +231,21 @@ const KEY_CHAIN_MAX = 20;
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 /**
- * The issue id a create sends: derived from the idempotency key when there is
- * one (the same key always names the same issue, so Linear refuses a second
- * insert with "already exists"), else random. Linear takes a client-supplied
- * UUID on `issueCreate` (recorded 2026-09-26).
+ * The issue id a create sends: derived from the team and the idempotency key
+ * when there is one (the same key in the same team always names the same
+ * issue, so Linear refuses a second insert with "already exists"), else
+ * random. Linear takes a client-supplied UUID on `issueCreate` (recorded
+ * 2026-09-26). Issue ids are unique across ALL of Linear, so the team id is in
+ * the hash: a short human key such as `export-csv` in another team or another
+ * workspace must never name this team's issue.
  *
- * @param key - The idempotency key, if any.
+ * @param key - The idempotency key (or its chained form), if any.
+ * @param teamId - The configured team's Linear id.
  * @returns A version-4-shaped UUID.
  */
-export function createIdFor(key: string | undefined): string {
+export function createIdFor(key: string | undefined, teamId: string): string {
   if (key === undefined) return randomUUID();
-  const hex = createHash('sha256').update(`flow:create:${key}`).digest('hex');
+  const hex = createHash('sha256').update(`flow:create:${teamId}:${key}`).digest('hex');
   const variant = ((parseInt(hex[16], 16) & 0x3) | 0x8).toString(16);
   return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-4${hex.slice(13, 16)}-${variant}${hex.slice(17, 20)}-${hex.slice(20, 32)}`;
 }
@@ -1061,7 +1065,7 @@ export function createAdapter(ctx: AdapterContext): CodeAdapter {
         } | null;
       } | null = null;
       for (let step = 0; result === null; step += 1) {
-        const id = createIdFor(chain);
+        const id = createIdFor(chain, teamId);
         try {
           result = await graphql(CREATE_ITEM_MUTATION, { input: { ...input, id } });
         } catch (error) {

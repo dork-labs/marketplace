@@ -842,7 +842,7 @@ export async function main(argv: readonly string[], deps: MainDeps): Promise<num
     const result = await module.run(ctx);
     output.result(result);
     const code = result.exitCode ?? EXIT.ok;
-    journalRun(run, elapsed, code, { runtime: result.runtime });
+    journalRun(run, elapsed, code, { runtime: result.runtime, item: result.item });
     return code;
   } catch (error) {
     const { code, message } = classifyError(error, flowRoot);
@@ -868,6 +868,8 @@ interface VerbRun {
  * runs), an `oracle.error` line with the error's first line, whatever the
  * verb. `note` and `journal` (which write their own lines) get no `verb` line,
  * and `usage record` gets one only when it fails: see {@link recordsVerbRun}.
+ * Its item is the verb's identifier positional, or the one the verb reported
+ * (`VerbResult.item`, as `flow create` reports the item it filed).
  * The `verb` line's runtime is the one the verb reported (`VerbResult.runtime`),
  * else the environment's; a verb that threw reports none, so a refused
  * `flow claim --runtime x` is recorded under the runtime that ran it.
@@ -877,13 +879,14 @@ function journalRun(
   run: VerbRun,
   elapsed: () => number,
   code: number,
-  outcome: { error?: unknown; runtime?: Runtime } = {}
+  outcome: { error?: unknown; runtime?: Runtime; item?: string } = {}
 ): void {
   const { ctx, verb } = run;
   const { error, runtime } = outcome;
   try {
     const identifier =
-      verb.positionals?.[0]?.name === 'identifier' ? ctx.args.positionals[0] : undefined;
+      outcome.item ??
+      (verb.positionals?.[0]?.name === 'identifier' ? ctx.args.positionals[0] : undefined);
     const item = identifier === undefined ? {} : { item: identifier };
     const ms = Math.max(0, Math.round(elapsed() - run.startedMs));
     if (recordsVerbRun(verb.name, ctx.args.positionals, code)) {

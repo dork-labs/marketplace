@@ -19,7 +19,13 @@
  *   item is closed, the same key files a new one.
  * - `--dry-run` prints the planned item and writes nothing.
  *
- * Its journal line is the `verb` line `main` writes for every run.
+ * `created` is false when the item was already open before this run: found by
+ * its marker, or handed back by the adapter for the key. Two runs racing on
+ * one key both reach `createItem`; the adapter files one item, and both runs
+ * may report it as created.
+ *
+ * Its journal line is the `verb` line `main` writes for every run, with the
+ * item it filed or found.
  *
  * @module @dorkos/flow/cli/create
  */
@@ -32,6 +38,7 @@ import { loadConfig } from '../config-load.ts';
 import { UsageError } from '../errors.ts';
 import { requireCapabilities } from '../tracker/load.ts';
 import type { Capability, NewItem } from '../tracker/types.ts';
+import { labelGroup } from '../work-state.ts';
 import type { VerbContext, VerbResult } from './context.ts';
 import { signBody } from './provenance.ts';
 import { sessionProvenance } from './work-write.ts';
@@ -50,12 +57,6 @@ const KEY_MAX = 200;
  */
 export function keyMarker(key: string): string {
   return `<!-- flow-create:key=${key} -->`;
-}
-
-/** The group of a namespaced label (`origin` for `origin/human`), or `null` for a bare one. */
-function groupOf(label: string): string | null {
-  const slash = label.indexOf('/');
-  return slash < 0 ? null : label.slice(0, slash);
 }
 
 /** The description from `--description` or `--description-file`, exactly one of them. */
@@ -80,7 +81,7 @@ function labelList(ctx: VerbContext): string[] {
   const groups = new Map<string, string>();
   for (const label of labels) {
     if (label.trim() === '') throw new UsageError('a --label is empty');
-    const group = groupOf(label);
+    const group = labelGroup(label);
     if (group === 'agent') {
       throw new UsageError(
         `a new item never carries an agent/* label ("${label}"); readiness is triage's decision`
@@ -164,10 +165,12 @@ export async function run(ctx: VerbContext): Promise<VerbResult> {
     ...(key === undefined ? {} : { key }),
   };
 
+  // With a key: the open items, to return one already filed with it.
+  let open: readonly { identifier: string; title: string; description?: string }[] = [];
   if (key !== undefined) {
     const marker = keyMarker(key);
-    const snapshot = await adapter.getBacklogSnapshot();
-    const match = snapshot.items.find((item) =>
+    open = (await adapter.getBacklogSnapshot()).items;
+    const match = open.find((item) =>
       (item.description ?? '').split('\n').some((line) => line.trim() === marker)
     );
     if (match !== undefined) {
@@ -176,24 +179,52 @@ export async function run(ctx: VerbContext): Promise<VerbResult> {
           ok: true,
           created: false,
           identifier: match.identifier,
+          title: match.title,
           url: null,
           ...(ctx.dryRun ? { dryRun: true } : {}),
         },
-        text: `${match.identifier} ${match.title} (already filed with key ${key})`,
+        text: `Already captured as ${match.identifier} - ${match.title}`,
+        item: match.identifier,
       };
     }
   }
 
   if (ctx.dryRun) {
     return {
-      json: { ok: true, created: false, identifier: null, url: null, dryRun: true, item: spec },
+      json: {
+        ok: true,
+        created: false,
+        identifier: null,
+        title,
+        url: null,
+        dryRun: true,
+        item: spec,
+      },
       text: `Would create "${title}"${labels.length > 0 ? ` with ${labels.join(', ')}` : ''}.`,
     };
   }
 
   const created = await (adapter.createItem as NonNullable<typeof adapter.createItem>)(spec);
+  // The adapter hands back the key's existing item rather than a new one when
+  // it already held that key (an item filed without the marker line). Such an
+  // item was open in the snapshot, so it was not created now.
+  const existed = open.find((item) => item.identifier === created.identifier);
+  if (existed !== undefined) {
+    return {
+      json: {
+        ok: true,
+        created: false,
+        identifier: created.identifier,
+        title: existed.title,
+        url: created.url,
+      },
+      text: `Already captured as ${created.identifier} - ${existed.title} ${created.url}`,
+      item: created.identifier,
+    };
+  }
   return {
-    json: { ok: true, created: true, identifier: created.identifier, url: created.url },
+    json: { ok: true, created: true, identifier: created.identifier, title, url: created.url },
     text: `${created.identifier} ${title} ${created.url}`,
+    item: created.identifier,
   };
 }

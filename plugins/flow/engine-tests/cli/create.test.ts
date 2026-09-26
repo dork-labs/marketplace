@@ -6,7 +6,7 @@
  */
 
 import { execFileSync } from 'node:child_process';
-import { mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
@@ -112,6 +112,7 @@ describe('flow create', () => {
       ok: true,
       created: true,
       identifier: 'FAKE-2',
+      title: 'Export the monthly report as CSV',
       url: 'https://fake.tracker/FAKE-2',
     });
     const [item] = added(t, ['FAKE-1']);
@@ -164,6 +165,48 @@ describe('flow create', () => {
     expect(second.json).toMatchObject({ created: false, identifier: 'FAKE-1' });
     expect(t.fake.writes.map((w) => w.method)).toEqual(['createItem']);
     expect(t.fake.backlog.items).toHaveLength(1);
+  });
+
+  it("says a repeat was already captured, with the first item's own title", async () => {
+    // Purpose: two ideas sharing a key must not read as the new idea filed under the old id.
+    const t = tracker({
+      items: [existing('FAKE-4', { title: 'An older idea', description: keyMarker('csv') })],
+    });
+    const json = await flow([...CAPTURE, '--key', 'csv'], t);
+    expect(json.json).toMatchObject({
+      created: false,
+      identifier: 'FAKE-4',
+      title: 'An older idea',
+    });
+    const text = await flow([...CAPTURE, '--key', 'csv'], t, false);
+    expect(text.out).toBe('Already captured as FAKE-4 - An older idea\n');
+  });
+
+  it('reports created: false when the adapter hands back an item that was already open', async () => {
+    // Purpose: an item the key made before the marker existed is not new.
+    const t = tracker({
+      items: [existing('FAKE-3', { title: 'Filed by key alone' })],
+      createdKeys: { 'team-fake:k9': 'FAKE-3' },
+    });
+    const run = await flow([...CAPTURE, '--key', 'k9'], t);
+    expect(run.json).toMatchObject({
+      created: false,
+      identifier: 'FAKE-3',
+      title: 'Filed by key alone',
+    });
+    expect(t.fake.backlog.items).toHaveLength(1);
+  });
+
+  it('journals the item it filed on the verb line', async () => {
+    const t = tracker();
+    await flow(CAPTURE, t);
+    const lines = readFileSync(path.join(project, '.dork', 'flow', 'journal.jsonl'), 'utf8')
+      .trim()
+      .split('\n')
+      .map((line) => JSON.parse(line) as Record<string, unknown>);
+    expect(lines).toContainEqual(
+      expect.objectContaining({ kind: 'verb', verb: 'create', item: 'FAKE-1' })
+    );
   });
 
   it('finds a keyed item by its marker even when the tracker lost the key', async () => {

@@ -60,6 +60,18 @@ export interface WorkStateChange {
 export const AGENT_LABEL_PREFIX = 'agent/';
 
 /**
+ * The group of a namespaced label (`origin` for `origin/human`), or `null` for
+ * a bare one. A tracker applies one label per group.
+ *
+ * @param label - A label.
+ * @returns Its group, or `null`.
+ */
+export function labelGroup(label: string): string | null {
+  const slash = label.indexOf('/');
+  return slash < 0 ? null : label.slice(0, slash);
+}
+
+/**
  * The label set an item carries after a {@link WorkStateChange}: for each
  * family the change names, every label of that family is dropped and the
  * change's label (when a string) added; every other label is kept in order.

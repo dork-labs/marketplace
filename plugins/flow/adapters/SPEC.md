@@ -676,7 +676,9 @@ interface WorkStateChange {
   open, a second call with the key returns it. Once it is closed or archived,
   the key moves on (chained with the old item's identifier) and the call makes
   a new item, so a failure that returns long after its item closed, even one
-  archived out of every snapshot, is filed again. On Linear the key becomes the issue's
+  archived out of every snapshot, is filed again. A key is scoped to the
+  configured team: the same key in another team, or another workspace, names a
+  different item. On Linear the team id and the key become the issue's
   client-chosen id, so a create that times out after Linear accepted it is
   found by that id, and a second run filing the same failure at the same time
   gets "already exists" and returns the first run's item. Callers still dedupe
