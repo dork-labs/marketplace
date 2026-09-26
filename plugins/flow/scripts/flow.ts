@@ -284,11 +284,20 @@ export const VERBS: readonly VerbDefinition[] = [
     name: 'stage',
     summary: 'Move an item to another stage.',
     description:
-      'Move an item to a stage from config. A started or completed stage removes every stage/* label; any other stage sets its label. Updates the run record when there is one.',
+      'Move an item to a stage from config. A started or completed stage removes every stage/* label; any other stage sets its label. Updates the run record when there is one. With --checkpoint-file, first writes the HANDOFF.md checkpoint for the new stage; a drain run must pass it.',
     common: ['project', 'dry-run', 'session'],
     positionals: [
       { name: 'identifier', required: true, description: 'The item, e.g. DOR-123.' },
       { name: 'stage', required: true, description: 'A key of stages in config.' },
+    ],
+    flags: [
+      {
+        name: 'checkpoint-file',
+        kind: 'string',
+        value: 'file',
+        description:
+          'The checkpoint body (Done, Next, Open questions, Next command), relative to --project.',
+      },
     ],
     load: () => import('./cli/stage.ts'),
   },

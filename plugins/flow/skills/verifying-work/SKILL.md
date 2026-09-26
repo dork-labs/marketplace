@@ -346,7 +346,7 @@ documents the tracker's behavior.
 The **human-review gate is always on** (spec §5). VERIFY does not advance to
 DONE. Instead, via the adapter:
 
-- `transition` the work item into the review state (e.g. In Review).
+- `node --experimental-strip-types "<flow-root>/scripts/flow.ts" stage <id> review --checkpoint-file <f>` (the checkpoint body).
 - `assignToHuman(item)` — assign the reviewer, which fires their notification.
 - **Stop.** The engine **parks** at REVIEW. REVIEW is a human gate with **no
   skill** — there is no `reviewing-work`. The loop resumes (in P2) only on the
