@@ -855,6 +855,66 @@ export const DrainSchema = z
   .prefault({});
 
 /**
+ * The journal (spec `flow-self-improvement` §2): a local, redacted record of how
+ * flow's runs go, at `<main checkout>/.dork/flow/journal.jsonl`. On by default;
+ * `enabled: false` makes every write a no-op. The file rotates once it reaches
+ * `maxBytes`, keeping `keep` older files beside it.
+ *
+ * `config-files.ts` reads these three fields without zod (its `journalSettings`),
+ * so its defaults must match these; a test holds them together.
+ */
+export const JournalConfigSchema = z
+  .object({
+    /** Whether flow writes the journal at all. */
+    enabled: z.boolean().default(true),
+    /** The size in bytes at which `journal.jsonl` is rotated. */
+    maxBytes: z.number().int().positive().default(5_000_000),
+    /** How many rotated files (`journal.1.jsonl` …) are kept. */
+    keep: z.number().int().min(1).max(20).default(3),
+  })
+  .prefault({});
+
+/** The periodic review of the journal (spec `flow-self-improvement` §3). */
+export const RetroConfigSchema = z
+  .object({
+    /** How far back one retro reads, as a count and a unit: `7d`, `48h`, `2w`. */
+    window: z
+      .string()
+      .regex(/^[1-9][0-9]*[hdw]$/, 'window is a count and a unit: h, d or w (for example 7d)')
+      .default('7d'),
+    /** The most tracker items one retro run may file. */
+    maxItemsPerRun: z.number().int().nonnegative().default(5),
+    /** The tracker project filed items go to; `null` files them with no project. */
+    project: z.string().nullable().default(null),
+    /** Extra labels every filed item gets. */
+    labels: z.array(z.string()).default([]),
+  })
+  .prefault({});
+
+/** The self-test (spec `flow-self-improvement` §1). */
+export const SelftestConfigSchema = z
+  .object({
+    /** The most one live-tier run may spend, in US dollars. */
+    liveBudgetUsd: z.number().nonnegative().default(1.0),
+  })
+  .prefault({});
+
+/**
+ * How flow checks itself, records its runs and reviews them (spec
+ * `flow-self-improvement` §4).
+ */
+export const SelfImprovementSchema = z
+  .object({
+    /** The run journal. */
+    journal: JournalConfigSchema,
+    /** The periodic review. */
+    retro: RetroConfigSchema,
+    /** The self-test. */
+    selftest: SelftestConfigSchema,
+  })
+  .prefault({});
+
+/**
  * The authoritative `/flow` engine configuration schema (§9).
  *
  * `FlowConfigSchema.parse({})` resolves the complete §9 default config.
@@ -905,6 +965,8 @@ export const FlowConfigSchema = z
     evidence: EvidenceSchema,
     /** The parallel drain: workers at once, its limits, and how sessions start. */
     drain: DrainSchema,
+    /** Self-test, journal and retro policy. */
+    selfImprovement: SelfImprovementSchema,
   })
   .strict();
 

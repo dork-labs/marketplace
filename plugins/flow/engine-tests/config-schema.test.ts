@@ -670,6 +670,7 @@ describe('z.toJSONSchema bridge', () => {
       'decomposition',
       'evidence',
       'drain',
+      'selfImprovement',
     ];
     for (const key of topLevelBlocks) {
       expect(properties).toHaveProperty(key);

@@ -28,6 +28,7 @@ import {
   type CliDeps,
   type VerbDefinition,
 } from './cli/context.ts';
+import { journalVerb, noteVerb } from './cli/journal-verbs.ts';
 import { Output, renderTopHelp, renderVerbHelp } from './cli/output.ts';
 import { EXIT, FlowError, UsageError, type ExitCode } from './errors.ts';
 
@@ -394,6 +395,8 @@ export const VERBS: readonly VerbDefinition[] = [
     ],
     load: () => import('./cli/fleet.ts'),
   },
+  noteVerb,
+  journalVerb,
 ];
 
 /** The plugin folder, `<flow-root>`: the parent of `scripts/`. */

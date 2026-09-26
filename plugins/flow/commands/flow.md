@@ -41,6 +41,14 @@ they observe or steer the loop, never advance a stage:
 | `pause`  | `/flow:pause`  | Halt every autonomous mode (drain sentinel + pause flag) at once  |
 | `resume` | `/flow:resume` | Restore what `pause` halted                                       |
 
+**Notes on flow itself.** Write `flow note` when: you improvised a script or brief the plugin
+should have shipped (`workaround`); a skill's steps were wrong or missing (`friction`); two
+instructions disagreed or you guessed (`confusion`). One sentence, no secrets, no pasted output.
+
+```bash
+node --experimental-strip-types "${CLAUDE_PLUGIN_ROOT}/scripts/flow.ts" note --kind friction "<one sentence>"
+```
+
 ## Trigger doors × execution modes (orthogonal)
 
 The trigger source (manual CLI vs PM-driven) is **orthogonal** to the execution
