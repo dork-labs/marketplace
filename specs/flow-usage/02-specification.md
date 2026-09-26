@@ -8,7 +8,7 @@ status: specified
 # flow records each account's usage from what Claude Code already shows, and `flow fleet` puts every account and session on one screen
 
 **Status:** Approved
-**Issues:** DOR-2369 (F3 usage ledger), DOR-2370 (F4 `flow fleet`)
+**Issues:** DOR-2369 (F3 usage ledger), DOR-2370 (F4 `flow fleet`), DOR-2399 (every runtime, Amendment 1)
 **Date:** 2026-09-26
 **Input:** [`01-ideation.md`](./01-ideation.md)
 
@@ -600,6 +600,141 @@ Each test carries a purpose comment and is shown to fail against a broken implem
 ## Open Questions
 
 None open.
+
+## Amendment 1 (2026-09-26): every runtime records usage (DOR-2399)
+
+The operator runs flow from Claude Code, Codex and OpenCode sessions (the fleet programme's runtime decisions R1–R9). This amendment extends S2 to every runtime. It builds on contract rev 6 from spec unit S1: the runtime-neutral ledger at `<dorkHome>/runtimes/<runtime>/usage/<account-id>.json` (runtime slugs `claude-code`, `codex`, `opencode`), its optional `plan`, `credits` and `spend` fields, and `windowMinutes` on a window. Where this section names a field or path, rev 6 is the authority; if they differ, rev 6 wins and this section follows.
+
+### A1. Accounts per runtime
+
+- Claude Code accounts are the registry rows, as today.
+- Codex and OpenCode have no registry yet (R1). Each has one implicit account, `default`, that stands for the ambient environment:
+  - Codex: `CODEX_HOME` when set and non-empty, else `<os home>/.codex`.
+  - OpenCode: the data folder `$XDG_DATA_HOME/opencode` when `XDG_DATA_HOME` is set and non-empty, else `<os home>/.local/share/opencode`. The store is `opencode.db` in it, or `OPENCODE_DB` when set (an absolute path, or one relative to the data folder; `:memory:` means no store). This is the same rule as DorkOS `opencode-data-dir.ts`.
+- When rev 6 adds `runtimes.codex.accounts[]` or `runtimes.opencode.accounts[]`, the verbs read those rows instead. Nothing here assumes there is only one account.
+
+### A2. Codex: `flow usage scan --runtime codex`
+
+**The mapping is rev 6's.** Contract rev 6 owns how a Codex `rate_limits` payload becomes ledger entries (`codexObservations` in `fleet/usage-ledger.ts`): window keys by `window_minutes` (`five_hour`, `seven_day`, else `window:<minutes>`), `source: "rollout"`, `plan` and `credits`. S2 adds only the scan and the stdin path around it.
+
+**The limit_id rule (in rev 6, accepted by its owner).** Real rollouts carry several limits: `limit_id` `codex` (the main limit), `codex_bengalfox` (`limit_name` "GPT-5.3-Codex-Spark", with its own windows) and `premium`, and their events alternate.
+
+- Only `codex` (or an absent `limit_id`) maps to `five_hour`, `seven_day` or `window:<m>`.
+- Any other limit becomes one `model:<slug>` bucket holding its tightest window: the highest `used_percent`, with a tie going to the longer window.
+- The slug comes from `limit_name`, else `limit_id`, lowercased with dots kept: `model:gpt-5.3-codex-spark`.
+
+`rate_limit_reached_type` is null in every real event seen, even at 100% used. It means only "non-null → rejected", and no fixture gives it a finer meaning.
+
+**Files.** `<codex home>/sessions/**/rollout-*.jsonl` and `<codex home>/archived_sessions/**/rollout-*.jsonl`, with §2.4's `--days` mtime filter and symlink rule.
+
+**Lines.**
+
+- The text prefilter is `"rate_limits"`.
+- An entry counts when `type` is `event_msg`, `payload.type` is `token_count`, and `payload.rate_limits` is an object. `observedAt` is the entry's `timestamp`.
+- Newest per key wins, and the account gets one ledger write.
+
+### A3. OpenCode: `flow usage scan --runtime opencode`
+
+**Reading, as DorkOS does it (DorkOS ADR 260825-110420).**
+
+- Copy `opencode.db` plus any `-wal` and `-shm` beside it into a temp folder. Open the copy read-only with `node:sqlite` (`DatabaseSync`, `readOnly: true`), and delete the copy afterwards. The live store is never opened.
+- **Allowlist:** one fixed query, `SELECT data FROM message`, and only these JSON fields of `data`: `role`, `providerID`, `cost`, `time.created`, `error.name`, `error.data.statusCode`. No other table or column is ever named.
+- `node:sqlite` is detected at runtime with a dynamic `import()`. Where it is missing or needs a flag, flow warns once and records nothing. Its ExperimentalWarning is suppressed for that import only.
+
+**Spend, per provider.**
+
+- `costUsd` = the sum of `cost` over assistant messages created since `periodStart`, the first instant of the current UTC month.
+- It is recorded through rev 6's `spend` (`source: "transcript"`) as the account total, with `periodStart` = this month and `observedAt` = the newest message's time. A month with no messages yet records `costUsd: 0` with `observedAt` = `periodStart`, so a rerun in that month leaves the file byte-identical. The per-provider split is shown only in `scan --runtime opencode` output (text and `--json`); the ledger holds the total.
+- `limitUsd` is never inferred.
+- A local model records cost 0.
+
+**Errors, per provider.**
+
+- For each `providerID`, the newest assistant message decides:
+  - an `APIError` with `statusCode` 402 → `credits:<provider>`, rejected;
+  - 429 → `rate_limit:<provider>`, rejected;
+  - no error → `allowed` for both keys of that provider.
+- A success from one provider never clears another's error, so a local model's success cannot hide an OpenRouter credit limit.
+- These are rev 6's window-less error entries: `source: "error"`, `status: "rejected"`, `usedPct: null`, and `resetsAt` when known. With no `resetsAt`, an entry goes stale after 1 hour. The provider slug follows the model-slug rule.
+- **Dispatch:** rev 6's room checks treat any rejected, unexpired `credits:*` or `rate_limit:*` entry as no room, whatever the other windows say. S2 only writes these entries, and `flow fleet` shows them.
+
+### A4. `flow usage record --runtime <runtime>`
+
+- `--runtime claude-code` (the default) is §2.1, unchanged.
+- `--runtime codex` takes one Codex `rate_limits` object, or one whole rollout line, on stdin. It records it for the Codex account by rev 6's mapping (A2), with `observedAt` = now for a bare object, else the line's timestamp. This lets a Codex hook or DorkOS pipe readings in.
+- `--runtime opencode` takes one OpenCode assistant message JSON on stdin and records its spend and error signal by A3. With no message store to sum, a single message adds nothing to `costUsd`; it only updates the error signal. Spend comes from `scan`.
+- The silence rules of §2.1 apply to every runtime.
+
+### A5. `flow fleet` groups by runtime
+
+- One `Accounts` block per runtime that has an account with ledger data, or a registered account. The headings are `Claude Code`, `Codex` and `OpenCode`.
+- Codex rows use the same bars as Claude Code. A `model:*` bucket shows as an extra note (`GPT-5.3-Codex-Spark 12%`), and a known `plan` shows in the notes.
+- OpenCode rows show `$<costUsd> this month` in place of the bars, or `$0.00 this month` when the stored `spend.periodStart` is not the current UTC month (a spend reading never goes stale, so last month's total is never shown as this month's). They add `out (credits: <provider>)` or `out (rate limit: <provider>)` for each current rejected error key.
+- Sessions are grouped under the same headings. A session's runtime is:
+  - its source: a Claude Code session file means `claude-code`;
+  - for a DorkOS session, its `runtime` field;
+  - for a run-only row, `FlowRun.runtime` when S3 adds it, else `claude-code`.
+- The JSON gains `runtime` on every account and session, plus `plan`, `credits` and `spend` on accounts.
+
+### A6. `flow usage prune [--yes] [--json]`
+
+**What it lists** in `<dorkHome>/runtimes/<runtime>/usage/`:
+
+- `<id>.json` and `<id>.json.corrupt-*` whose `<id>` is not a known account of that runtime. Known means a registered Claude Code id, or `default` for Codex and OpenCode while they have no registry.
+- A `*.tmp`, `*.lock` or `*.lock.stale-*` file only when it is more than 1 hour old. A younger one may belong to a write in progress.
+
+**Legacy files** in the pre-rev-6 `<dorkHome>/usage/` (`*.json`, `.statusline-*`, `*.corrupt-*`) are listed by the same age rule.
+
+**What it skips:**
+
+- A runtime whose registry key exists in `config.json` but that flow does not read yet (for example `runtimes.codex.accounts` before flow supports it). Its files may be DorkOS's.
+- A known account's `<id>.json`, always.
+
+**Deleting:**
+
+- Without `--yes` it lists and exits 0.
+- With `--yes` it deletes each file after re-checking its rule.
+- The ledger never grows (overwrite-only, R8), so nothing prunes readings by age.
+
+### A7. Journal `usage.snapshot` events
+
+- The shape is proposed to the journal owner (S8, marketplace PR #63) and added to its schema in the same PR that first writes it:
+
+  ```jsonc
+  {
+    "kind": "usage.snapshot",
+    "runtime": "codex",
+    "account": "default",
+    "windows": {
+      "five_hour": { "usedPct": 12, "resetsAt": "…", "status": null },
+    },
+    "costUsd": 0.75,
+  } // costUsd only for a metered account
+  ```
+
+- **Sampled (R8):** a line for an account is written only when its last `usage.snapshot` line is more than 60 minutes old, or when a window's `usedPct` moved 5 or more points, or its `status` changed, since that line. That keeps usage from pushing run events out of the capped journal.
+- **Who writes it:** `flow usage scan`, `flow usage probe` and the new `flow usage snapshot` (for S3's supervisor pass), each by the sampling rule. The last line per account comes from the journal's `read(target, since)` over the last 24 hours, which spans rotated files.
+- **Never from `record`:** the status-line path stays zero-dependency and needs no project.
+- **Outside a flow project, or with the journal off:** the verbs write no line and say nothing.
+- The journal's size cap and rotation govern retention.
+
+### A8. Tests and compliance
+
+- **Fixtures:**
+  - Made-up rollout lines: the `codex` limit with both windows, interleaved with a `codex_bengalfox` model limit, plus credits and the `plus` and `pro` plans.
+  - A small `opencode.db` generated in the test with `node:sqlite`. Per-provider cost rows span two months. It holds an OpenRouter 402 followed by an ollama success (the 402 must stay), a later OpenRouter success (which clears it), a 429, and a decoy `credential` table. The test asserts the exact SQL flow ran.
+- **Compliance guard:** the OpenCode reader's SQL must equal the one allowlisted query, which the test pins. The Codex modules must never name `auth.json`. The guard checks code, not comments.
+- The process test for `record --runtime codex` runs without `node_modules`, like the Claude Code one.
+
+### A9. Decisions (autonomous, logged)
+
+- **B1.** A Codex model-scoped limit becomes one `model:<slug>` bucket holding its tightest window. Rev 6 accepted this.
+- **B2.** OpenCode spend is per calendar month (UTC). The local store has no billing period, and a month matches how metered providers bill.
+- **B3.** OpenCode errors count only for 402 and 429, per provider. Other API errors are not about usage.
+- **B6.** The OpenCode store is read from a copy, through one allowlisted query, as DorkOS ADR 260825-110420 requires.
+- **B7.** `usage.snapshot` is sampled: at most one line per account per hour, unless usage moved 5 points or a status changed.
+- **B4.** `record` never writes journal lines, so the hot path keeps no project and no dependencies.
+- **B5.** Codex and OpenCode each use one implicit `default` account until their registries exist (R1).
 
 ## Related ADRs
 

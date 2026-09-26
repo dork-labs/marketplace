@@ -14,7 +14,7 @@
 
 import { flowVersion } from '../_shared.ts';
 import { ConfigError, UsageError } from '../errors.ts';
-import { NOTE_KINDS, append, journalFor, type JournalEvent } from '../journal.ts';
+import { NOTE_KINDS, append, journalFor, runtimeOf, type JournalEvent } from '../journal.ts';
 import type { VerbContext, VerbResult } from './context.ts';
 
 /**
@@ -52,6 +52,7 @@ export async function run(ctx: VerbContext): Promise<VerbResult> {
     now: ctx.now(),
     flowVersion: flowVersion(ctx.flowRoot),
     session: ctx.sessionId,
+    ...runtimeOf(ctx.env),
     warn: ctx.warn,
   });
 

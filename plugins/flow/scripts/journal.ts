@@ -49,6 +49,7 @@ import {
   type JournalSettings,
 } from './config-files.ts';
 import { ensureIgnored } from './git-exclude.ts';
+import { detectRuntime, RUNTIMES, type Runtime } from './runtime-detect.ts';
 import type { JournalLine } from './journal-schema.ts';
 
 /** Every line kind, in the order of the spec's table. */
@@ -66,6 +67,7 @@ export const JOURNAL_KINDS = [
   'note',
   'selftest',
   'retro',
+  'usage.snapshot',
 ] as const;
 
 /** A line kind. */
@@ -104,7 +106,161 @@ export const STALE_LOCK_MS = 30_000;
 type DistributiveOmit<T, K extends PropertyKey> = T extends unknown ? Omit<T, K> : never;
 
 /** An event as a caller passes it: a line without the fields {@link buildLine} stamps. */
-export type JournalEvent = DistributiveOmit<JournalLine, 'v' | 'ts' | 'flow' | 'session'>;
+export type JournalEvent = DistributiveOmit<
+  JournalLine,
+  'v' | 'ts' | 'flow' | 'session' | 'runtime' | 'harness'
+>;
+
+/**
+ * The `runtime` and `harness` a verb stamps on its lines, read from the verb's
+ * own environment (its `VerbContext.env`), never from this process's, so a
+ * test or a launcher that hands a verb an environment gets that answer.
+ *
+ * @param env - The environment to read.
+ * @returns The runtime and harness for {@link LineMeta}.
+ */
+export function runtimeOf(env: Readonly<Record<string, string | undefined>>): {
+  runtime: Runtime;
+  harness: string;
+} {
+  const { runtime, harness } = detectRuntime(env);
+  return { runtime, harness };
+}
+
+/** One usage window as a `usage.snapshot` line carries it. */
+export interface UsageWindowReading {
+  /** Share of the window used, 0 to 100. */
+  usedPct: number;
+  /** When the window resets, ISO-8601, or `null` when unknown. */
+  resetsAt: string | null;
+}
+
+/**
+ * A usage window name (fleet decision R2): `five_hour`, `seven_day`,
+ * `seven_day_opus`, `seven_day_sonnet`, `model:<slug>` or `window:<minutes>`.
+ */
+export const USAGE_WINDOW_NAME =
+  /^(five_hour|seven_day|seven_day_opus|seven_day_sonnet|model:[a-z0-9._-]{1,40}|window:\d{1,6})$/;
+
+/** The most windows one `usage.snapshot` line may carry. */
+export const USAGE_WINDOWS_MAX = 12;
+
+/** An ISO-8601 date-time with a zone (`Z` or `+hh:mm`), as the schema requires. */
+const ISO_DATETIME = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}(:\d{2}(\.\d+)?)?(Z|[+-]\d{2}:\d{2})$/;
+
+/** Whether a value is a readable ISO-8601 date-time with a zone. */
+function isIsoTime(value: unknown): boolean {
+  return typeof value === 'string' && ISO_DATETIME.test(value) && !Number.isNaN(Date.parse(value));
+}
+
+/** Whether a value is an ISO-8601 date-time with a zone, or `null`. */
+function isResetTime(value: unknown): boolean {
+  return value === null || isIsoTime(value);
+}
+
+/**
+ * Why a `usage.snapshot` event cannot be written, or `null` when it can. The
+ * journal writes lines without zod, so this is the snapshot's check: a finite
+ * `usedPct` from 0 to 100, a known window name, at most
+ * {@link USAGE_WINDOWS_MAX} windows, a readable `resetsAt`, and a finite,
+ * non-negative spend. {@link append} refuses an event that fails it.
+ *
+ * @param event - The event.
+ * @returns The first problem, or `null`.
+ */
+export function usageSnapshotProblem(event: JournalEvent): string | null {
+  if (event.kind !== 'usage.snapshot') return null;
+  if (!(RUNTIMES as readonly string[]).includes(event.accountRuntime as string)) {
+    return `accountRuntime must be one of ${RUNTIMES.join(', ')}`;
+  }
+  const windows = event.windows as Record<string, unknown>;
+  if (!isPlainObject(windows)) return 'windows must be an object';
+  const names = Object.keys(windows);
+  if (names.length > USAGE_WINDOWS_MAX) return `at most ${USAGE_WINDOWS_MAX} windows`;
+  for (const name of names) {
+    if (!USAGE_WINDOW_NAME.test(name)) return `unknown window "${name.slice(0, 40)}"`;
+    const reading = windows[name];
+    if (!isPlainObject(reading)) return `window ${name} is not a reading`;
+    const extra = Object.keys(reading).find((key) => key !== 'usedPct' && key !== 'resetsAt');
+    if (extra !== undefined) return `window ${name} has an unknown field "${extra.slice(0, 40)}"`;
+    const pct = reading.usedPct;
+    if (typeof pct !== 'number' || !Number.isFinite(pct) || pct < 0 || pct > 100) {
+      return `window ${name} usedPct must be a number from 0 to 100`;
+    }
+    if (!isResetTime(reading.resetsAt)) return `window ${name} resetsAt must be a time or null`;
+  }
+  const spend = event.spend as Record<string, unknown> | undefined;
+  if (spend !== undefined) {
+    if (spend.periodStart !== undefined && !isIsoTime(spend.periodStart)) {
+      return 'spend.periodStart must be an ISO-8601 time with a zone';
+    }
+    for (const key of ['costUsd', 'limitUsd'] as const) {
+      const value = spend[key];
+      if (value === undefined && key === 'limitUsd') continue;
+      if (typeof value !== 'number' || !Number.isFinite(value) || value < 0) {
+        return `spend.${key} must be a number of 0 or more`;
+      }
+    }
+  }
+  return null;
+}
+
+/** Two reset times closer than this count as the same reset (formatting, jitter). */
+export const USAGE_RESET_TOLERANCE_MS = 60_000;
+
+/** A `usage.snapshot` sample needs this long since the last one of the same account... */
+export const USAGE_SAMPLE_INTERVAL_MS = 30 * 60 * 1000;
+/** ...unless a window moved at least this many points, or reset, since then. */
+export const USAGE_SAMPLE_DELTA_PCT = 5;
+
+/**
+ * Whether a usage writer should add a `usage.snapshot` line now (fleet decision
+ * R8: the ledger keeps only the latest reading; the journal keeps a SAMPLED
+ * history for the retro's trends). Sample when there is no earlier snapshot of
+ * this account, when its time cannot be read or lies in the future (clock
+ * skew), when {@link USAGE_SAMPLE_INTERVAL_MS} has passed, when any window moved
+ * {@link USAGE_SAMPLE_DELTA_PCT} points or more, or when a window appeared,
+ * disappeared or reset (its `resetsAt` moved by more than
+ * {@link USAGE_RESET_TOLERANCE_MS}, compared as times so `15:00:00Z` and
+ * `15:00:00.000Z` are the same reset).
+ *
+ * `previous` is the account's LAST snapshot line in file order, never the one
+ * with the latest `ts`: a previous time in the future (clock skew) samples, and
+ * choosing by latest `ts` would keep sampling every reading until the clock
+ * caught up.
+ *
+ * @param previous - The account's last snapshot line (`ts` and `windows`), if any.
+ * @param windows - The new readings by window name.
+ * @param now - The time of the new reading.
+ * @returns `true` when the reading should be journaled.
+ */
+export function shouldSampleUsage(
+  previous: { ts: string; windows: Readonly<Record<string, UsageWindowReading>> } | undefined,
+  windows: Readonly<Record<string, UsageWindowReading>>,
+  now: Date
+): boolean {
+  if (previous === undefined) return true;
+  const elapsed = now.getTime() - Date.parse(previous.ts);
+  if (!(elapsed >= 0 && elapsed < USAGE_SAMPLE_INTERVAL_MS)) return true;
+  const names = new Set([...Object.keys(previous.windows), ...Object.keys(windows)]);
+  for (const name of names) {
+    const before = previous.windows[name];
+    const after = windows[name];
+    if (before === undefined || after === undefined) return true;
+    if (resetMoved(before.resetsAt, after.resetsAt)) return true;
+    if (!(Math.abs(after.usedPct - before.usedPct) < USAGE_SAMPLE_DELTA_PCT)) return true;
+  }
+  return false;
+}
+
+/** Whether two reset times differ by more than the tolerance (or one is unreadable). */
+function resetMoved(before: string | null, after: string | null): boolean {
+  if (before === null || after === null) return before !== after;
+  const a = Date.parse(before);
+  const b = Date.parse(after);
+  if (Number.isNaN(a) || Number.isNaN(b)) return true;
+  return Math.abs(a - b) > USAGE_RESET_TOLERANCE_MS;
+}
 
 /** Where a journal is and how it is written: {@link JournalSettings}, or a test's own. */
 export type JournalTarget = JournalSettings;
@@ -117,6 +273,13 @@ export interface LineMeta {
   flowVersion?: string;
   /** The harness session id; only its first 8 characters are kept. */
   session?: string;
+  /**
+   * The agent runtime the writer runs under. A verb passes `runtimeOf(ctx.env)`;
+   * absent, the line says `unknown` (never a guess from this process's env).
+   */
+  runtime?: Runtime;
+  /** What hosts the session, from `runtimeOf(ctx.env)`; absent, `unknown`. */
+  harness?: string;
 }
 
 /** How {@link append} behaves beyond the line itself. */
@@ -202,7 +365,25 @@ const FIELD_MAX: Readonly<Record<string, number>> = {
   errorClass: ERROR_CLASS_MAX,
 };
 
-/** Redact and cap one field value: every string, and every string in a list. */
+/**
+ * Redact and cap an object key. A usage window name that is already valid keeps
+ * its shape (a long model slug such as `model:claude-sonnet-4-5-20250929-thinking`
+ * would otherwise read as a key and be redacted, and two windows would collapse
+ * into one); token and address patterns still apply.
+ */
+function cleanKey(field: string, key: string): string {
+  if (field === 'windows' && USAGE_WINDOW_NAME.test(key)) {
+    let out = key;
+    for (const pattern of TOKEN_PATTERNS) out = out.replace(pattern, '[redacted]');
+    return out.replace(EMAIL, '[email]');
+  }
+  return cap(redact(key), NAME_MAX);
+}
+
+/**
+ * Redact and cap one field value: every string, every string in a list, and
+ * every key and string inside an object (a usage snapshot's windows).
+ */
 function clean(field: string, value: unknown): unknown {
   const max = FIELD_MAX[field] ?? NAME_MAX;
   if (typeof value === 'string') {
@@ -210,11 +391,17 @@ function clean(field: string, value: unknown): unknown {
     return cap(redact(text), max);
   }
   if (Array.isArray(value)) return value.map((entry) => clean(field, entry));
+  if (isPlainObject(value)) {
+    return Object.fromEntries(
+      Object.entries(value).map(([key, inner]) => [cleanKey(field, key), clean(key, inner)])
+    );
+  }
   return value;
 }
 
 /**
- * Stamp an event into a line: `v`, `ts`, `flow` and the session prefix. Every
+ * Stamp an event into a line: `v`, `ts`, `flow`, the `runtime` and `harness`
+ * the caller names (`unknown` when it names none) and the session prefix. Every
  * string field the caller passed (`item`, `skill`, `from`, a note's text, an
  * error's first line, each list entry) is redacted and capped at its schema
  * maximum, whoever the caller is and whether or not it loads the schema.
@@ -232,6 +419,8 @@ export function buildLine(event: JournalEvent, meta: LineMeta = {}): JournalLine
     v: 1,
     ts: (meta.now ?? new Date()).toISOString(),
     flow: meta.flowVersion ?? 'unknown',
+    runtime: meta.runtime ?? 'unknown',
+    harness: cap(redact(meta.harness ?? 'unknown'), NAME_MAX),
     ...(meta.session ? { session: meta.session.slice(0, 8) } : {}),
     ...fields,
   } as JournalLine;
@@ -342,6 +531,11 @@ export function append(
   // One warning per call at most: a failed append says so and nothing else; an
   // append that worked but could not update info/exclude says that instead.
   let excludeProblem: string | null = null;
+  const invalid = usageSnapshotProblem(event);
+  if (invalid !== null) {
+    warn(`a usage reading was not written to the journal: ${invalid}`);
+    return 'failed';
+  }
   try {
     const line = `${JSON.stringify(buildLine(event, options))}\n`;
     mkdirSync(path.dirname(target.path), { recursive: true });
@@ -406,7 +600,11 @@ export function read(target: Pick<JournalTarget, 'path' | 'keep'>, since?: Date)
         skipped += 1;
         continue;
       }
-      if (Date.parse(value.ts) >= from) lines.push(value as unknown as JournalLine);
+      if (Date.parse(value.ts) < from) continue;
+      // Lines written before 0.21.0 carry no runtime or harness: read them as unknown.
+      if (typeof value.runtime !== 'string') value.runtime = 'unknown';
+      if (typeof value.harness !== 'string') value.harness = 'unknown';
+      lines.push(value as unknown as JournalLine);
     }
   }
   return { lines, skipped };

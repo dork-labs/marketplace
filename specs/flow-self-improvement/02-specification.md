@@ -223,25 +223,27 @@ existing `projectKey` in `config-files.ts`), so every worktree of a project writ
 
 ```jsonc
 { "v": 1, "ts": "<ISO-8601 UTC>", "kind": "<kind>", "flow": "<plugin version>",
+  "runtime": "claude-code | codex | opencode | unknown", "harness": "<cmux, dorkos, the runtime CLI, or shell>",
   "session": "<first 8 chars of the harness session id, if known>",
   "item": "<tracker identifier, if any>", ...kind fields }
 ```
 
-| `kind`          | Fields                                                                                    | Written by                                        |
-| --------------- | ----------------------------------------------------------------------------------------- | ------------------------------------------------- |
-| `verb`          | `verb`, `ms`, `exit`                                                                      | the `flow` CLI wrapper, every verb run            |
-| `oracle.error`  | `oracle`, `exit`, `errorClass` (first line of the error, redacted, ≤ 200 chars)           | the CLI when an oracle exits 2 or throws          |
-| `stage`         | `stage`, `phase: start\|end`, `outcome?: ok\|failed\|parked`                              | `flow transition` (S1) and `flow done`            |
-| `item.readied`  | `by: triage\|decompose\|human`                                                            | the verb that applies `agent/ready`               |
-| `claim`         | `phase: claim\|release`                                                                   | `flow claim`, `flow release`                      |
-| `retry`         | `rung: resume\|restart\|escalate`, `attempt`                                              | the recovery verb                                 |
-| `operator.wait` | `phase: start\|end`, `waitedMs?` (on end)                                                 | `needsInput`; the inbox verb that sees the answer |
-| `review`        | `round`, `sha7`, `verdict: clean\|changes`, `blocker`, `shouldFix`, `nit`, `categories[]` | `flow journal record review …` (S3 later)         |
-| `ci`            | `pr`, `event: red\|ejected\|merged`, `class: own\|innocent\|flake\|infra\|unknown`        | `flow journal record ci …` (S3 later)             |
-| `handoff`       | `from`, `to`, `reason: limit\|stage\|manual`                                              | `flow journal record handoff …` (S3 later)        |
-| `note`          | `noteKind: friction\|workaround\|confusion`, `text`, `skill?`                             | `flow note`                                       |
-| `selftest`      | `tiers`, `pass`, `fail`, `skip`, `ms`, `failing[]` (check ids)                            | `flow selftest`                                   |
-| `retro`         | `window`, `proposals`, `filed`, `commented`                                               | `flow retro`                                      |
+| `kind`           | Fields                                                                                                                            | Written by                                         |
+| ---------------- | --------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------- |
+| `verb`           | `verb`, `ms`, `exit`                                                                                                              | the `flow` CLI wrapper, every verb run             |
+| `oracle.error`   | `oracle`, `exit`, `errorClass` (first line of the error, redacted, ≤ 200 chars)                                                   | the CLI when an oracle exits 2 or throws           |
+| `stage`          | `stage`, `phase: start\|end`, `outcome?: ok\|failed\|parked`                                                                      | `flow transition` (S1) and `flow done`             |
+| `item.readied`   | `by: triage\|decompose\|human`                                                                                                    | the verb that applies `agent/ready`                |
+| `claim`          | `phase: claim\|release`                                                                                                           | `flow claim`, `flow release`                       |
+| `retry`          | `rung: resume\|restart\|escalate`, `attempt`                                                                                      | the recovery verb                                  |
+| `operator.wait`  | `phase: start\|end`, `waitedMs?` (on end)                                                                                         | `needsInput`; the inbox verb that sees the answer  |
+| `review`         | `round`, `sha7`, `verdict: clean\|changes`, `blocker`, `shouldFix`, `nit`, `categories[]`                                         | `flow journal record review …` (S3 later)          |
+| `ci`             | `pr`, `event: red\|ejected\|merged`, `class: own\|innocent\|flake\|infra\|unknown`                                                | `flow journal record ci …` (S3 later)              |
+| `handoff`        | `from`, `to`, `reason: limit\|stage\|manual`                                                                                      | `flow journal record handoff …` (S3 later)         |
+| `note`           | `noteKind: friction\|workaround\|confusion`, `text`, `skill?`                                                                     | `flow note`                                        |
+| `selftest`       | `tiers`, `pass`, `fail`, `skip`, `ms`, `failing[]` (check ids)                                                                    | `flow selftest`                                    |
+| `retro`          | `window`, `proposals`, `filed`, `commented`                                                                                       | `flow retro`                                       |
+| `usage.snapshot` | `accountRuntime`, `account`, `windows` (name → `usedPct`, `resetsAt`), `plan?`, `spend?` (`costUsd`, `limitUsd?`, `periodStart?`) | usage writers (S2), sampled by `shouldSampleUsage` |
 
 `categories[]` is a closed set: `logic`, `race`, `test`, `migration`, `security`, `docs`, `scope`,
 `style`, `other`.
@@ -309,7 +311,20 @@ and one tracker snapshot (S1).
 | `oracleErrors`             | `oracle.error` count by `oracle`                                                                                                              |
 | `operatorWaitHoursMedian`  | `operator.wait` end events: median `waitedMs`                                                                                                 |
 
-A measure with no data in the window is shown as "no data", never 0.
+A measure with no data in the window is shown as "no data", never 0. Every measure is also shown
+per runtime (`claude-code`, `codex`, `opencode`, `unknown`), from each line's `runtime`.
+
+`usageTrend` (per `accountRuntime:account`, per window): the first and last sampled `usedPct` in
+the window, the peak, and how many times the window ran out (`usedPct` 100). It reads the
+`usage.snapshot` lines only, since the usage ledger keeps just the latest reading (fleet decision
+R8).
+
+**Runtime and harness (amended at build, 2026-09-26).** Every line carries the `runtime` and
+`harness` of the process that wrote it, from `scripts/runtime-detect.ts` (`detectRuntime`, the one
+shared detector: `FLOW_RUNTIME`/`FLOW_HARNESS` first, then each runtime's own environment
+marker). Usage writers add a `usage.snapshot` line only when `shouldSampleUsage` says so: the
+first reading of an account, 30 minutes since the last sample, a window that moved 5 points,
+reset, appeared or vanished.
 
 **Proposal rules** (deterministic; each yields `{ fingerprint, rule, title, evidence[], proposal }`):
 
