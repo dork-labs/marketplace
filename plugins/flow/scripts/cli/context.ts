@@ -18,6 +18,8 @@
 import { execFile } from 'node:child_process';
 import path from 'node:path';
 
+import { createGithubForge } from '../forge/github.ts';
+import type { Forge, ForgeFactory, ForgeTarget } from '../forge/types.ts';
 import type { CodeAdapter } from '../tracker/types.ts';
 import type { ParsedArgs, VerbSpec } from './args.ts';
 import { realHostIo, type HostIo } from './host-io.ts';
@@ -99,6 +101,8 @@ export interface CliDeps {
   runProcess: ProcessRunner;
   /** Replaces parts of the machine the usage and fleet verbs touch; the rest are real. */
   io?: Partial<HostIo>;
+  /** Builds the forge for a repository. Default: the GitHub forge over {@link runProcess}. */
+  createForge?: ForgeFactory;
 }
 
 /** What a verb returns on success, or when its check found problems. */
@@ -163,8 +167,15 @@ export interface VerbContext {
   adapter(): Promise<CodeAdapter>;
   /** Print a warning to stderr (both output modes). */
   warn(message: string): void;
-  /** stdin, the OS home, loopback fetch, streaming children, pid checks, the watchdog. */
+  /** stdin, the OS home, loopback fetch, streaming children, pid checks, the watchdog, sleep. */
   io: HostIo;
+  /** The forge for one repository (GitHub unless a test injects another). */
+  forge(target: ForgeTarget): Forge;
+  /**
+   * Standard output, for a verb that prints as it goes (`flow watch --follow`).
+   * Every other verb returns its result instead.
+   */
+  stdout: TextSink;
 }
 
 /**
@@ -223,6 +234,10 @@ export function createVerbContext(
       })),
     warn,
     io: { ...realHostIo(), ...deps.io },
+    forge: (target) =>
+      deps.createForge?.(target) ??
+      createGithubForge({ target, runProcess: deps.runProcess, now: () => deps.now() }),
+    stdout: deps.stdout,
   };
 }
 

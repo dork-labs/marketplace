@@ -58,7 +58,6 @@ guessing at severity.
 
 ## `drain/` — the parallel-drain recipe
 
-[`drain/worker-brief.md`](./drain/worker-brief.md),
-[`drain/reviewer-brief.md`](./drain/reviewer-brief.md) and
-[`drain/watch.sh`](./drain/watch.sh) are the hand-run recipe for carrying
-several ready items at once. `docs/parallel-drain.mdx` says how to use them.
+[`drain/worker-brief.md`](./drain/worker-brief.md) and
+[`drain/reviewer-brief.md`](./drain/reviewer-brief.md) are the hand-run recipe
+for carrying several ready items at once, with `flow watch` watching the PRs. `docs/parallel-drain.mdx` says how to use them.
