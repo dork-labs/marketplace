@@ -176,16 +176,9 @@ const nullableString = z.string().nullable();
  */
 const runtimeField = vocabulary<RuntimeName>().optional();
 
-/**
- * The runtime of a stored handle: its own, or `claude-code` for a handle
- * written before launchers were runtime-aware.
- *
- * @param handle - A handle read from the run store.
- * @returns Its runtime.
- */
-export function handleRuntime(handle: { runtime?: RuntimeName }): RuntimeName {
-  return handle.runtime ?? 'claude-code';
-}
+// `handleRuntime` lives in the dependency-free launcher types so the pure
+// reducers can use it without loading zod; re-exported here beside the schema.
+export { handleRuntime } from '../launchers/types.ts';
 const count = z.number().int().nonnegative();
 
 /** The on-disk check for a {@link SessionHandle}. */
