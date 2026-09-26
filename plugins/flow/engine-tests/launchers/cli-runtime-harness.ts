@@ -35,7 +35,7 @@ import {
   type CliLauncherDeps,
   type DetachedSpawn,
 } from '../../scripts/launchers/cli.ts';
-import { pidExists } from '../../scripts/fleet/sessions.ts';
+import { pidExists } from '../../scripts/cli/host-io.ts';
 import type { LaunchAccount, SessionHandle } from '../../scripts/launchers/types.ts';
 import type { HarnessOptions, HostCall, HostSessionRecord, LauncherHarness } from './contract.ts';
 

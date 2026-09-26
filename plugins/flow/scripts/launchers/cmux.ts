@@ -34,7 +34,7 @@ import path from 'node:path';
 
 import { realProcessRunner, type ProcessRunner } from '../cli/context.ts';
 import { transcriptLimit } from '../drain/stream-log.ts';
-import { pidExists } from '../fleet/sessions.ts';
+import { pidExists } from '../cli/host-io.ts';
 import {
   CREDENTIAL_ENV_VARS,
   DEFAULT_START_TIMEOUT_MS,

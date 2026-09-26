@@ -83,7 +83,7 @@ import path from 'node:path';
 
 import { realProcessRunner, type ProcessRunner } from '../cli/context.ts';
 import { parseJsonLines, streamLimit, transcriptLimit } from '../drain/stream-log.ts';
-import { pidExists } from '../fleet/sessions.ts';
+import { pidExists } from '../cli/host-io.ts';
 import { codexLimit, findCodexRollout, readCodexRateLimits } from './codex-rollout.ts';
 import {
   DEFAULT_START_TIMEOUT_MS,

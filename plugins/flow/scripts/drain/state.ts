@@ -55,7 +55,9 @@ export const DRAIN_PHASES: readonly DrainPhase[] = [
  * A worker's session handle. `pending` is the intent written before launch
  * (§4.3): the minted session id is claimed in the slot, then `start` is called.
  */
-export interface DrainWorkerHandle extends SessionHandle {
+export interface DrainWorkerHandle extends Omit<SessionHandle, 'runtime'> {
+  /** Absent on a handle written before launchers were runtime-aware; read it with {@link handleRuntime}. */
+  runtime?: SessionHandle['runtime'];
   /** `true` while the slot holds the intent and the session is not yet confirmed started. */
   pending?: boolean;
 }
@@ -168,13 +170,26 @@ const nullableString = z.string().nullable();
 
 /**
  * A handle's runtime. A record written before launchers were runtime-aware has
- * none; every such session was Claude Code, so it reads as `claude-code`.
+ * none; every such session was Claude Code. The reader passes the absence
+ * through unchanged (a read-modify-write must not add fields to other runs), and
+ * code that uses a stored handle reads it through {@link handleRuntime}.
  */
-const runtimeField = vocabulary<RuntimeName>().default('claude-code');
+const runtimeField = vocabulary<RuntimeName>().optional();
+
+/**
+ * The runtime of a stored handle: its own, or `claude-code` for a handle
+ * written before launchers were runtime-aware.
+ *
+ * @param handle - A handle read from the run store.
+ * @returns Its runtime.
+ */
+export function handleRuntime(handle: { runtime?: RuntimeName }): RuntimeName {
+  return handle.runtime ?? 'claude-code';
+}
 const count = z.number().int().nonnegative();
 
 /** The on-disk check for a {@link SessionHandle}. */
-export const SessionHandleSchema: z.ZodType<SessionHandle> = z.looseObject({
+export const SessionHandleSchema = z.looseObject({
   host: vocabulary<HostName>(),
   runtime: runtimeField,
   sessionId: z.string(),

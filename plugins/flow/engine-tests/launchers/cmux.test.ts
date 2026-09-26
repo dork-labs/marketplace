@@ -33,7 +33,7 @@ import {
   surfaceForPid,
   type CmuxLauncherDeps,
 } from '../../scripts/launchers/cmux.ts';
-import { pidExists } from '../../scripts/fleet/sessions.ts';
+import { pidExists } from '../../scripts/cli/host-io.ts';
 import type { LaunchAccount, RuntimeName, SessionHandle } from '../../scripts/launchers/types.ts';
 import {
   launcherContract,

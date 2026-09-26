@@ -11,6 +11,7 @@ import { describe, expect, it } from 'vitest';
 import {
   DRAIN_PHASES,
   DrainStateSchema,
+  handleRuntime,
   RunLimitSchema,
   type DrainState,
   type RunLimit,
@@ -173,14 +174,18 @@ describe('the run record carries drain, limit and checkpoint fields', () => {
   });
 
   // Purpose: a handle written before launchers were runtime-aware has no
-  // runtime; every such session was Claude Code, so it reads as claude-code.
-  // Fails if the schema drops the default (the handle would lack its runtime).
-  it('reads a handle without a runtime as claude-code', () => {
+  // runtime. The reader must accept it and add nothing (a read-modify-write
+  // would otherwise change other runs' records), and handleRuntime reads it as
+  // claude-code, since every such session was. Fails if the schema requires the
+  // field, injects a default, or handleRuntime guesses another runtime.
+  it('accepts a handle without a runtime unchanged, and handleRuntime reads it as claude-code', () => {
     const drain = fullDrain() as unknown as { worker: Record<string, unknown> };
     delete drain.worker.runtime;
     const parsed = DrainStateSchema.safeParse(drain);
     expect(parsed.success).toBe(true);
-    expect(parsed.data?.worker?.runtime).toBe('claude-code');
+    expect(parsed.data?.worker).not.toHaveProperty('runtime');
+    expect(handleRuntime(parsed.data!.worker!)).toBe('claude-code');
+    expect(handleRuntime({ runtime: 'codex' })).toBe('codex');
   });
 
   // Purpose: a mistyped known field is still refused (forward compatibility is
