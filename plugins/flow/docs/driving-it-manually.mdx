@@ -81,6 +81,7 @@ A specific item, an explicit stage, or `auto` (drain the whole queue) are all re
 | `/flow:status`    | (observe) | engine              | Render every in-flight item, every parked question, and the assumption trail behind each decision.                                                                                        |
 | `/flow:pause`     | (control) | engine              | Halt every mode from one place.                                                                                                                                                           |
 | `/flow:resume`    | (control) | engine              | Lift the pause and let work flow again.                                                                                                                                                   |
+| `/flow:self-test` | (observe) | engine              | Check this flow install and its instructions in a few seconds, and report what is broken.                                                                                                 |
 
 There is no `/flow:review`. REVIEW is the human gate; the engine parks and waits for you.
 
@@ -204,9 +205,9 @@ DONE closes the item, creates any follow-up work, runs the project-pulse check f
 
 You do not have to run every command in one sitting. The filesystem and tracker are ground truth, so you can stop after any stage, come back later, and pick up exactly where the work stands.
 
-## Observing and controlling: status, pause, resume
+## Observing and controlling: status, self-test, pause, resume
 
-Three commands sit outside the spine. They let you see what is happening and take control.
+Four commands sit outside the spine. They let you see what is happening and take control.
 
 ### `/flow:status`
 
@@ -225,6 +226,14 @@ Renders one pane from the tracker, `flow-state.json`, and the auto-run sentinel:
 ```
 
 `/flow:pause` halts every mode from one place. It is the operator override: autonomy is never a loss of control. `/flow:resume` lifts the pause. The pause is a file in your project (`.agents/flow/paused.json`), so updating flow never undoes it, and every stage command in this guide still works while it is on: a pause stops the loop, never you. To disable or reprioritize an individual loop instead of halting everything, edit the `loops` block in config rather than pausing (see [The dials](/docs/guides/flow/the-dials)).
+
+### `/flow:self-test`
+
+```bash
+/flow:self-test
+```
+
+Checks this flow install in a few seconds, for free and offline: the adapter checker, your settings and their schema, and flow's own instructions (word budgets, copied rules, broken links, schedule settings). A skipped check is listed as skipped, never as passed. Add `--strict` to fail on a skip.
 
 ## Which command should I use?
 

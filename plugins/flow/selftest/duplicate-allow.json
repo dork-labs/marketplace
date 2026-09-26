@@ -1,0 +1,281 @@
+{
+  "sentences": [
+    {
+      "text": "capture quick low commitment intake of a raw thought as an",
+      "paths": ["README.md", "docs/driving-it-manually.mdx", "docs/what-flow-is.mdx"],
+      "reason": "Present before the self-test existed; the prose trim (DOR-2377) removes it."
+    },
+    {
+      "text": "ideate shape a complex brief into a structured ideation artifact",
+      "paths": ["README.md", "docs/driving-it-manually.mdx", "docs/what-flow-is.mdx"],
+      "reason": "Present before the self-test existed; the prose trim (DOR-2377) removes it."
+    },
+    {
+      "text": "execute implement the tasks across dependency aware batches in an isolated worktree",
+      "paths": ["README.md", "docs/driving-it-manually.mdx", "docs/what-flow-is.mdx"],
+      "reason": "Present before the self-test existed; the prose trim (DOR-2377) removes it."
+    },
+    {
+      "text": "verify run the touched surface capture proof of completion evidence open the pr and hand off to review",
+      "paths": ["README.md", "docs/driving-it-manually.mdx"],
+      "reason": "Present before the self-test existed; the prose trim (DOR-2377) removes it."
+    },
+    {
+      "text": "done close the work create follow ups run the project pulse check and tear down the worktree",
+      "paths": ["README.md", "docs/driving-it-manually.mdx", "docs/what-flow-is.mdx"],
+      "reason": "Present before the self-test existed; the prose trim (DOR-2377) removes it."
+    },
+    {
+      "text": "step run one stage stop autonomous run to a gate",
+      "paths": ["README.md", "commands/flow.md"],
+      "reason": "Present before the self-test existed; the prose trim (DOR-2377) removes it."
+    },
+    {
+      "text": "manual cli slash drain the ready queue from the terminal",
+      "paths": ["README.md", "commands/flow.md"],
+      "reason": "Present before the self-test existed; the prose trim (DOR-2377) removes it."
+    },
+    {
+      "text": "that skill is pm agnostic it routes every tracker read or write through the tracker adapter skill the at the that prints which it reads on demand",
+      "paths": ["commands/capture.md", "commands/groom.md", "commands/triage.md"],
+      "reason": "Present before the self-test existed; the prose trim (DOR-2377) removes it."
+    },
+    {
+      "text": "if the check cannot run or its output cannot be read stop",
+      "paths": ["commands/flow.md", "skills/linear-adapter/SKILL.md"],
+      "reason": "Present before the self-test existed; the prose trim (DOR-2377) removes it."
+    },
+    {
+      "text": "when the work is tracked route every tracker read write through the tracker adapter skill the at the that prints never call a tracker directly from this command",
+      "paths": ["commands/ideate.md", "commands/specify.md"],
+      "reason": "Present before the self-test existed; the prose trim (DOR-2377) removes it."
+    },
+    {
+      "text": "if the work is untracked or no adapter is available skip tracker projection silently",
+      "paths": ["commands/ideate.md", "commands/specify.md"],
+      "reason": "Present before the self-test existed; the prose trim (DOR-2377) removes it."
+    },
+    {
+      "text": "dorkos tools may be deferred behind tool search if is not loaded load it with toolsearch first and treat it as absent only when that finds nothing",
+      "paths": ["commands/resume.md", "commands/status.md"],
+      "reason": "Present before the self-test existed; the prose trim (DOR-2377) removes it."
+    },
+    {
+      "text": "specify turn ideation into a frozen specification plus draft adrs",
+      "paths": ["docs/driving-it-manually.mdx", "docs/what-flow-is.mdx"],
+      "reason": "Present before the self-test existed; the prose trim (DOR-2377) removes it."
+    },
+    {
+      "text": "decompose break the spec into tasks mirrored to the tracker as a checklist",
+      "paths": ["docs/driving-it-manually.mdx", "docs/what-flow-is.mdx"],
+      "reason": "Present before the self-test existed; the prose trim (DOR-2377) removes it."
+    },
+    {
+      "text": "title driving it manually href docs guides flow driving it manually",
+      "paths": ["docs/installing-in-your-project.mdx", "docs/the-dials.mdx"],
+      "reason": "Present before the self-test existed; the prose trim (DOR-2377) removes it."
+    },
+    {
+      "text": "this is the one artifact a machine parses so it has to be valid json json escape every value quotes backslashes newlines control characters and drop any field whose value you cannot escape safely",
+      "paths": ["docs/provenance.md", "skills/verifying-work/SKILL.md"],
+      "reason": "Present before the self-test existed; the prose trim (DOR-2377) removes it."
+    },
+    {
+      "text": "if you reached it via a symlink or resolve the real path first the flow root is two directories above the skill directory",
+      "paths": [
+        "skills/building-adapters/SKILL.md",
+        "skills/closing-work/SKILL.md",
+        "skills/decomposing-work/SKILL.md",
+        "skills/executing-specs/SKILL.md",
+        "skills/flow-drain/SKILL.md",
+        "skills/flow-groom/SKILL.md",
+        "skills/flow-triage/SKILL.md",
+        "skills/grooming-backlog/SKILL.md",
+        "skills/ideating-features/SKILL.md",
+        "skills/initializing-flow/SKILL.md",
+        "skills/linear-adapter/SKILL.md",
+        "skills/tending-tracker/SKILL.md",
+        "skills/triaging-work/SKILL.md",
+        "skills/verifying-work/SKILL.md"
+      ],
+      "reason": "Present before the self-test existed; the prose trim (DOR-2377) removes it."
+    },
+    {
+      "text": "every reference below is relative to that root",
+      "paths": [
+        "skills/building-adapters/SKILL.md",
+        "skills/closing-work/SKILL.md",
+        "skills/decomposing-work/SKILL.md",
+        "skills/executing-specs/SKILL.md",
+        "skills/flow-drain/SKILL.md",
+        "skills/flow-groom/SKILL.md",
+        "skills/flow-triage/SKILL.md",
+        "skills/grooming-backlog/SKILL.md",
+        "skills/ideating-features/SKILL.md",
+        "skills/initializing-flow/SKILL.md",
+        "skills/linear-adapter/SKILL.md",
+        "skills/tending-tracker/SKILL.md",
+        "skills/triaging-work/SKILL.md",
+        "skills/verifying-work/SKILL.md"
+      ],
+      "reason": "Present before the self-test existed; the prose trim (DOR-2377) removes it."
+    },
+    {
+      "text": "this is a prose contract not code the agent reads this skill and follows",
+      "paths": [
+        "skills/capturing-work/SKILL.md",
+        "skills/grooming-backlog/SKILL.md",
+        "skills/triaging-work/SKILL.md"
+      ],
+      "reason": "Present before the self-test existed; the prose trim (DOR-2377) removes it."
+    },
+    {
+      "text": "the one rule never touch the tracker directly",
+      "paths": [
+        "skills/capturing-work/SKILL.md",
+        "skills/grooming-backlog/SKILL.md",
+        "skills/triaging-work/SKILL.md"
+      ],
+      "reason": "Present before the self-test existed; the prose trim (DOR-2377) removes it."
+    },
+    {
+      "text": "it never names a tracker api a tool string or a tracker specific field",
+      "paths": [
+        "skills/capturing-work/SKILL.md",
+        "skills/grooming-backlog/SKILL.md",
+        "skills/triaging-work/SKILL.md"
+      ],
+      "reason": "Present before the self-test existed; the prose trim (DOR-2377) removes it."
+    },
+    {
+      "text": "every tracker read or write goes through the adapter skill the v1 spec 3 by naming one of its capability verbs e g",
+      "paths": ["skills/capturing-work/SKILL.md", "skills/triaging-work/SKILL.md"],
+      "reason": "Present before the self-test existed; the prose trim (DOR-2377) removes it."
+    },
+    {
+      "text": "read the adapter skill s contract before acting",
+      "paths": [
+        "skills/capturing-work/SKILL.md",
+        "skills/grooming-backlog/SKILL.md",
+        "skills/triaging-work/SKILL.md"
+      ],
+      "reason": "Present before the self-test existed; the prose trim (DOR-2377) removes it."
+    },
+    {
+      "text": "it is the at the that prints the project s own or the one flow ships",
+      "paths": [
+        "skills/capturing-work/SKILL.md",
+        "skills/grooming-backlog/SKILL.md",
+        "skills/triaging-work/SKILL.md"
+      ],
+      "reason": "Present before the self-test existed; the prose trim (DOR-2377) removes it."
+    },
+    {
+      "text": "no raw tracker tool name cli invocation or slug lives here",
+      "paths": [
+        "skills/closing-work/SKILL.md",
+        "skills/decomposing-work/SKILL.md",
+        "skills/verifying-work/SKILL.md"
+      ],
+      "reason": "Present before the self-test existed; the prose trim (DOR-2377) removes it."
+    },
+    {
+      "text": "the vitest guard enforces this for the whole flow bundle",
+      "paths": [
+        "skills/closing-work/SKILL.md",
+        "skills/decomposing-work/SKILL.md",
+        "skills/verifying-work/SKILL.md"
+      ],
+      "reason": "Present before the self-test existed; the prose trim (DOR-2377) removes it."
+    },
+    {
+      "text": "finding the adapter it is the at the that prints the project s own or the one flow ships",
+      "paths": [
+        "skills/closing-work/SKILL.md",
+        "skills/decomposing-work/SKILL.md",
+        "skills/specifying-work/SKILL.md",
+        "skills/tending-tracker/SKILL.md",
+        "skills/verifying-work/SKILL.md"
+      ],
+      "reason": "Present before the self-test existed; the prose trim (DOR-2377) removes it."
+    },
+    {
+      "text": "trigger doors the thin command or a pm transition into",
+      "paths": ["skills/decomposing-work/SKILL.md", "skills/verifying-work/SKILL.md"],
+      "reason": "Present before the self-test existed; the prose trim (DOR-2377) removes it."
+    },
+    {
+      "text": "the block in the frontmatter above is what makes this file a scheduled task",
+      "paths": [
+        "skills/flow-drain/SKILL.md",
+        "skills/flow-groom/SKILL.md",
+        "skills/flow-triage/SKILL.md"
+      ],
+      "reason": "Present before the self-test existed; the prose trim (DOR-2377) removes it."
+    },
+    {
+      "text": "if the check cannot run or its output cannot be read stop never act without knowing whether flow is paused",
+      "paths": [
+        "skills/flow-drain/SKILL.md",
+        "skills/flow-groom/SKILL.md",
+        "skills/flow-triage/SKILL.md",
+        "skills/tending-tracker/SKILL.md"
+      ],
+      "reason": "Present before the self-test existed; the prose trim (DOR-2377) removes it."
+    },
+    {
+      "text": "when it says report its first error and stop",
+      "paths": [
+        "skills/flow-drain/SKILL.md",
+        "skills/flow-groom/SKILL.md",
+        "skills/flow-triage/SKILL.md",
+        "skills/tending-tracker/SKILL.md"
+      ],
+      "reason": "Present before the self-test existed; the prose trim (DOR-2377) removes it."
+    },
+    {
+      "text": "all tracker reads and writes go through the adapter this tick never names a tracker directly",
+      "paths": ["skills/flow-drain/SKILL.md", "skills/flow-triage/SKILL.md"],
+      "reason": "Present before the self-test existed; the prose trim (DOR-2377) removes it."
+    },
+    {
+      "text": "neither edits this file it is the package s and an update replaces it",
+      "paths": [
+        "skills/flow-drain/SKILL.md",
+        "skills/flow-groom/SKILL.md",
+        "skills/flow-triage/SKILL.md"
+      ],
+      "reason": "Present before the self-test existed; the prose trim (DOR-2377) removes it."
+    },
+    {
+      "text": "it ships the same explicit opt in as",
+      "paths": ["skills/flow-groom/SKILL.md", "skills/flow-triage/SKILL.md"],
+      "reason": "Present before the self-test existed; the prose trim (DOR-2377) removes it."
+    },
+    {
+      "text": "to switch it on with dorkos approve it on the schedules page",
+      "paths": ["skills/flow-groom/SKILL.md", "skills/flow-triage/SKILL.md"],
+      "reason": "Present before the self-test existed; the prose trim (DOR-2377) removes it."
+    },
+    {
+      "text": "on any other harness point your own scheduler os cron ci at it",
+      "paths": ["skills/flow-groom/SKILL.md", "skills/flow-triage/SKILL.md"],
+      "reason": "Present before the self-test existed; the prose trim (DOR-2377) removes it."
+    },
+    {
+      "text": "when its is not report flow is paused since lifts it and stop",
+      "paths": ["skills/flow-groom/SKILL.md", "skills/flow-triage/SKILL.md"],
+      "reason": "Present before the self-test existed; the prose trim (DOR-2377) removes it."
+    },
+    {
+      "text": "otherwise the adapter is the at its inside it means the output s",
+      "paths": ["skills/flow-groom/SKILL.md", "skills/flow-triage/SKILL.md"],
+      "reason": "Present before the self-test existed; the prose trim (DOR-2377) removes it."
+    },
+    {
+      "text": "never answer its own comments or the body carries",
+      "paths": ["skills/linear-adapter/SKILL.md", "skills/tending-tracker/SKILL.md"],
+      "reason": "Present before the self-test existed; the prose trim (DOR-2377) removes it."
+    }
+  ]
+}

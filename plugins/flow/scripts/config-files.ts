@@ -80,6 +80,7 @@ import { fileURLToPath } from 'node:url';
 import { isDeepStrictEqual } from 'node:util';
 
 import { invokedDirectly, isPlainObject } from './_shared.ts';
+import { addExcludeLines } from './git-exclude.ts';
 import { validateConfig, type ValidationIssue } from './validate-config.ts';
 
 /** The project folder, relative to a checkout, that holds flow's settings. */
@@ -698,22 +699,13 @@ function ensureGitignore(dir: string): string {
  */
 function ensureExclude(dir: string): string {
   mkdirSync(dir, { recursive: true });
-  const common = gitOutput(dir, ['rev-parse', '--path-format=absolute', '--git-common-dir']);
   const top = gitOutput(dir, ['rev-parse', '--show-toplevel']);
-  if (common === null || top === null) throw new Error(`${dir} is not in a git checkout`);
+  if (top === null) throw new Error(`${dir} is not in a git checkout`);
   const rel = path.relative(path.resolve(top), dir).split(path.sep).join('/');
-  const exclude = path.join(common, 'info', 'exclude');
-  mkdirSync(path.dirname(exclude), { recursive: true });
-  const text = existsSync(exclude) ? readFileSync(exclude, 'utf8') : '';
-  const present = new Set(text.split(/\r?\n/).map((line) => line.trim()));
-  const missing = GITIGNORE_LINES.map((line) => `/${rel}/${line}`).filter(
-    (line) => !present.has(line)
+  return addExcludeLines(
+    dir,
+    GITIGNORE_LINES.map((line) => `/${rel}/${line}`)
   );
-  if (missing.length > 0) {
-    const separator = text === '' || text.endsWith('\n') ? '' : '\n';
-    writeFileSync(exclude, `${text}${separator}${missing.join('\n')}\n`);
-  }
-  return exclude;
 }
 
 /**

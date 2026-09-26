@@ -1,0 +1,178 @@
+{
+  "commands/capture.md": {
+    "baseline": 128,
+    "target": 128
+  },
+  "commands/decompose.md": {
+    "baseline": 81,
+    "target": 81
+  },
+  "commands/done.md": {
+    "baseline": 92,
+    "target": 92
+  },
+  "commands/execute.md": {
+    "baseline": 113,
+    "target": 113
+  },
+  "commands/flow.md": {
+    "baseline": 3936,
+    "target": 600
+  },
+  "commands/groom.md": {
+    "baseline": 167,
+    "target": 167
+  },
+  "commands/ideate.md": {
+    "baseline": 121,
+    "target": 121
+  },
+  "commands/init.md": {
+    "baseline": 208,
+    "target": 208
+  },
+  "commands/pause.md": {
+    "baseline": 811,
+    "target": 100
+  },
+  "commands/resume.md": {
+    "baseline": 462,
+    "target": 462
+  },
+  "commands/self-test.md": {
+    "baseline": 115,
+    "target": 115
+  },
+  "commands/specify.md": {
+    "baseline": 129,
+    "target": 129
+  },
+  "commands/status.md": {
+    "baseline": 725,
+    "target": 725
+  },
+  "commands/triage.md": {
+    "baseline": 140,
+    "target": 140
+  },
+  "commands/verify.md": {
+    "baseline": 94,
+    "target": 94
+  },
+  "docs/bring-your-own-scheduler.mdx": {
+    "baseline": 669,
+    "target": 669
+  },
+  "docs/building-your-adapter.mdx": {
+    "baseline": 901,
+    "target": 901
+  },
+  "docs/CHARTER.md": {
+    "baseline": 1123,
+    "target": 1123
+  },
+  "docs/driving-it-manually.mdx": {
+    "baseline": 2094,
+    "target": 2015
+  },
+  "docs/how-it-works.mdx": {
+    "baseline": 3116,
+    "target": 3116
+  },
+  "docs/installing-in-your-project.mdx": {
+    "baseline": 1077,
+    "target": 1077
+  },
+  "docs/parallel-drain.mdx": {
+    "baseline": 355,
+    "target": 355
+  },
+  "docs/provenance.md": {
+    "baseline": 2056,
+    "target": 2056
+  },
+  "docs/SPEC.md": {
+    "baseline": 2511,
+    "target": 2511
+  },
+  "docs/the-dials.mdx": {
+    "baseline": 4022,
+    "target": 4022
+  },
+  "docs/turning-on-autonomy.mdx": {
+    "baseline": 2835,
+    "target": 2835
+  },
+  "docs/what-flow-is.mdx": {
+    "baseline": 1691,
+    "target": 1691
+  },
+  "README.md": {
+    "baseline": 2438,
+    "target": 2438
+  },
+  "skills/building-adapters/SKILL.md": {
+    "baseline": 2435,
+    "target": 2435
+  },
+  "skills/capturing-work/SKILL.md": {
+    "baseline": 780,
+    "target": 780
+  },
+  "skills/closing-work/SKILL.md": {
+    "baseline": 1494,
+    "target": 1200
+  },
+  "skills/decomposing-work/SKILL.md": {
+    "baseline": 1335,
+    "target": 1200
+  },
+  "skills/executing-specs/SKILL.md": {
+    "baseline": 4069,
+    "target": 1200
+  },
+  "skills/flow-drain/SKILL.md": {
+    "baseline": 495,
+    "target": 495
+  },
+  "skills/flow-groom/SKILL.md": {
+    "baseline": 380,
+    "target": 380
+  },
+  "skills/flow-triage/SKILL.md": {
+    "baseline": 569,
+    "target": 569
+  },
+  "skills/grooming-backlog/SKILL.md": {
+    "baseline": 2369,
+    "target": 2369
+  },
+  "skills/ideating-features/SKILL.md": {
+    "baseline": 594,
+    "target": 594
+  },
+  "skills/initializing-flow/SKILL.md": {
+    "baseline": 4396,
+    "target": 4396
+  },
+  "skills/linear-adapter/SKILL.md": {
+    "baseline": 6905,
+    "target": 1000
+  },
+  "skills/specifying-work/SKILL.md": {
+    "baseline": 904,
+    "target": 904
+  },
+  "skills/tending-tracker/SKILL.md": {
+    "baseline": 3640,
+    "target": 3640
+  },
+  "skills/triaging-work/SKILL.md": {
+    "baseline": 3055,
+    "target": 1200
+  },
+  "skills/verifying-work/SKILL.md": {
+    "baseline": 3553,
+    "target": 1200
+  }
+}

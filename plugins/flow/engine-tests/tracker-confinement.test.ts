@@ -389,6 +389,7 @@ describe('F1 — generic commands name no tracker and route through the resolved
         'init',
         'pause',
         'resume',
+        'self-test',
         'specify',
         'status',
         'triage',
