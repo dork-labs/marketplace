@@ -644,7 +644,7 @@ The operator runs flow from Claude Code, Codex and OpenCode sessions (the fleet 
 **Spend, per provider.**
 
 - `costUsd` = the sum of `cost` over assistant messages created since `periodStart`, the first instant of the current UTC month.
-- It is recorded through rev 6's `spend` (`source: "transcript"`) as the account total, with `periodStart` = this month and `observedAt` = the newest message's time. A month with no messages yet records `costUsd: 0` with `observedAt` = the scan time. The per-provider split is shown only in `scan --runtime opencode` output (text and `--json`); the ledger holds the total.
+- It is recorded through rev 6's `spend` (`source: "transcript"`) as the account total, with `periodStart` = this month and `observedAt` = the newest message's time. A month with no messages yet records `costUsd: 0` with `observedAt` = `periodStart`, so a rerun in that month leaves the file byte-identical. The per-provider split is shown only in `scan --runtime opencode` output (text and `--json`); the ledger holds the total.
 - `limitUsd` is never inferred.
 - A local model records cost 0.
 
