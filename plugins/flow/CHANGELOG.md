@@ -4,6 +4,16 @@ Installs of this plugin are pinned to a commit SHA, so a fix here does not reach
 you until you **reinstall it** (Marketplace → flow → reinstall, or re-run your
 `--plugin-dir` checkout's `git pull`). Each entry below says whether that matters.
 
+## 0.28.0
+
+**flow's notebook now fills itself in as flow's commands run. Reinstall to get it.**
+
+- Every `flow` command adds one line to the notebook (`.dork/flow/journal.jsonl`) saying which command ran, how long it took and how it ended. A later review can then see which steps are slow or keep failing.
+- Claiming an item, letting it go, moving it to a stage and finishing it each add a line of their own, with the item and which tool ran it (Claude Code, Codex or OpenCode).
+- When a command fails because of a bug in flow, the notebook keeps the first line of the error, with tokens, email addresses and your home folder removed.
+- `flow note` and `flow journal` don't add a line about themselves. The usage recorder your status line runs adds one only when it fails. Nothing is written for `--help` or a mistyped command, and running `flow done` again on a finished item doesn't count it twice.
+- The notebook never changes what a command prints or how it ends. If it can't be written, the command works exactly as before, with no warning. Projects with no flow settings get no notebook.
+
 ## 0.27.0
 
 **flow can now file new tracker items itself, and `/flow:self-test --file` does. Reinstall to get it.**
