@@ -997,6 +997,68 @@
         }
       },
       "additionalProperties": false
+    },
+    "drain": {
+      "default": {},
+      "type": "object",
+      "properties": {
+        "parallel": {
+          "default": 0,
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
+        },
+        "maxLoadPerCpu": {
+          "default": 1.5,
+          "type": "number",
+          "exclusiveMinimum": 0
+        },
+        "maxLivePerAccount": {
+          "default": 2,
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 9007199254740991
+        },
+        "maxReviewRounds": {
+          "default": 5,
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 9007199254740991
+        },
+        "warnMarginPct": {
+          "default": 10,
+          "type": "number",
+          "minimum": 0,
+          "maximum": 50
+        },
+        "windDownGraceMinutes": {
+          "default": 20,
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 9007199254740991
+        },
+        "pollSeconds": {
+          "default": 60,
+          "type": "integer",
+          "minimum": 10,
+          "maximum": 9007199254740991
+        },
+        "armAutoMerge": {
+          "default": false,
+          "type": "boolean"
+        },
+        "host": {
+          "default": "auto",
+          "type": "string",
+          "enum": ["auto", "cli", "cmux", "dorkos"]
+        },
+        "permissionMode": {
+          "default": "acceptEdits",
+          "type": "string",
+          "enum": ["default", "acceptEdits", "bypassPermissions"]
+        }
+      },
+      "additionalProperties": false
     }
   },
   "additionalProperties": false

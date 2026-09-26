@@ -107,5 +107,15 @@
     "temporal": "video",
     "logic": "test-summary",
     "attachTo": ["pr", "tracker"]
+  },
+  "drain": {
+    "parallel": 0,
+    "maxLoadPerCpu": 1.5,
+    "maxLivePerAccount": 2,
+    "maxReviewRounds": 5,
+    "warnMarginPct": 10,
+    "windDownGraceMinutes": 20,
+    "pollSeconds": 60,
+    "armAutoMerge": false
   }
 }

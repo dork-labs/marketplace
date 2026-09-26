@@ -1,6 +1,6 @@
 {
   "contract": "fleet",
-  "about": "Reading <main checkout>/.dork/flow/flow-state.json, a map of issue id to FlowRun (spec flow-cli-core 1.3). input.state is the parsed file. expected.valid says whether the whole file passes the FlowRun schema; expected.readBack is what a reader returns: the records unchanged, unknown fields included, when valid, and {} when any record is invalid (the reader is all-or-nothing). 'account' and 'host' are optional strings; 'host' is a bare string (cli, dorkos or cmux today), so a record from a future launcher still reads. When input.write is present, it is one FlowRun upserted by its issueId through the read-modify-write store, and expected.readBack is the file afterwards: unknown fields on every other record must survive.",
+  "about": "Reading <main checkout>/.dork/flow/flow-state.json, a map of issue id to FlowRun (spec flow-cli-core 1.3). input.state is the parsed file. expected.valid says whether the whole file passes the FlowRun schema; expected.readBack is what a reader returns: the records unchanged, unknown fields included, when valid, and {} when any record is invalid (the reader is all-or-nothing). 'account' and 'host' are optional strings; 'host' is a bare string (cli, dorkos or cmux today), so a record from a future launcher still reads. 'checkpointAt', 'checkpointSha', 'drain' and 'limit' are flow's own optional fields (spec flow-handoff-dispatch 4.3 and 5.1); DorkOS need not read them, but a writer must keep them, like any unknown field. When input.write is present, it is one FlowRun upserted by its issueId through the read-modify-write store, and expected.readBack is the file afterwards: unknown fields on every other record must survive.",
   "cases": [
     {
       "name": "a minimal record reads back unchanged",
@@ -118,6 +118,66 @@
             "issueId": "issue-2", "identifier": "ABC-2", "sessionId": "s-2", "worktreePath": "/work/ABC-2", "branch": "abc-2",
             "stage": "execute", "status": "running", "attemptCount": 0, "workerPid": 2, "startedAt": "2026-09-26T16:30:00.000Z",
             "account": "personal", "host": "cli"
+          }
+        }
+      }
+    },
+    {
+      "name": "a record carrying a checkpoint, drain state and a limit reads back unchanged after another run is written",
+      "input": {
+        "state": {
+          "issue-1": {
+            "issueId": "issue-1", "identifier": "ABC-1", "sessionId": "w-1", "worktreePath": "/work/ABC-1", "branch": "abc-1",
+            "stage": "verify", "status": "running", "attemptCount": 0, "workerPid": -1, "startedAt": "2026-09-26T16:00:00.000Z",
+            "account": "claude3", "host": "dorkos",
+            "checkpointAt": "2026-09-26T17:00:00.000Z", "checkpointSha": "4be1c2d",
+            "drain": {
+              "v": 1, "rev": 12, "phase": "reviewing",
+              "worker": { "host": "dorkos", "sessionId": "w-1", "account": "claude3", "cwd": "/work/ABC-1" },
+              "reviewer": { "host": "cli", "sessionId": "r-1", "account": "claude4", "cwd": "/work/ABC-1-review", "pid": 5151, "logFile": "/work/ABC-1/.dork/flow/drain/logs/r-1.jsonl", "logOffset": 2048, "pending": false, "sha": "4be1c2d", "worktree": "/work/ABC-1-review", "tokenHash": "sha256:0f1e" },
+              "pushedSha": "4be1c2d", "reviewedSha": "39aa01b", "verdict": "changes", "reviewRound": 1,
+              "pr": null, "rearmedFor": null, "nudges": 0, "wakeAfter": null,
+              "handoffs": [ { "from": null, "to": "claude3", "at": "2026-09-26T16:40:00.000Z", "reason": "rejected" } ],
+              "parkedReason": null
+            },
+            "limit": {
+              "level": "warning", "account": "claude3", "window": "weekly", "resetsAt": "2026-10-01T09:00:00.000Z", "cause": "limit",
+              "since": "2026-09-26T17:30:00.000Z", "state": "winding-down", "handoffToken": null, "handingOffAt": null,
+              "handoffSessionId": null, "notifiedAt": null
+            }
+          }
+        },
+        "write": {
+          "issueId": "issue-2", "identifier": "ABC-2", "sessionId": "s-2", "worktreePath": "/work/ABC-2", "branch": "abc-2",
+          "stage": "execute", "status": "queued", "attemptCount": 0, "workerPid": 2, "startedAt": "2026-09-26T16:30:00.000Z"
+        }
+      },
+      "expected": {
+        "valid": true,
+        "readBack": {
+          "issue-1": {
+            "issueId": "issue-1", "identifier": "ABC-1", "sessionId": "w-1", "worktreePath": "/work/ABC-1", "branch": "abc-1",
+            "stage": "verify", "status": "running", "attemptCount": 0, "workerPid": -1, "startedAt": "2026-09-26T16:00:00.000Z",
+            "account": "claude3", "host": "dorkos",
+            "checkpointAt": "2026-09-26T17:00:00.000Z", "checkpointSha": "4be1c2d",
+            "drain": {
+              "v": 1, "rev": 12, "phase": "reviewing",
+              "worker": { "host": "dorkos", "sessionId": "w-1", "account": "claude3", "cwd": "/work/ABC-1" },
+              "reviewer": { "host": "cli", "sessionId": "r-1", "account": "claude4", "cwd": "/work/ABC-1-review", "pid": 5151, "logFile": "/work/ABC-1/.dork/flow/drain/logs/r-1.jsonl", "logOffset": 2048, "pending": false, "sha": "4be1c2d", "worktree": "/work/ABC-1-review", "tokenHash": "sha256:0f1e" },
+              "pushedSha": "4be1c2d", "reviewedSha": "39aa01b", "verdict": "changes", "reviewRound": 1,
+              "pr": null, "rearmedFor": null, "nudges": 0, "wakeAfter": null,
+              "handoffs": [ { "from": null, "to": "claude3", "at": "2026-09-26T16:40:00.000Z", "reason": "rejected" } ],
+              "parkedReason": null
+            },
+            "limit": {
+              "level": "warning", "account": "claude3", "window": "weekly", "resetsAt": "2026-10-01T09:00:00.000Z", "cause": "limit",
+              "since": "2026-09-26T17:30:00.000Z", "state": "winding-down", "handoffToken": null, "handingOffAt": null,
+              "handoffSessionId": null, "notifiedAt": null
+            }
+          },
+          "issue-2": {
+            "issueId": "issue-2", "identifier": "ABC-2", "sessionId": "s-2", "worktreePath": "/work/ABC-2", "branch": "abc-2",
+            "stage": "execute", "status": "queued", "attemptCount": 0, "workerPid": 2, "startedAt": "2026-09-26T16:30:00.000Z"
           }
         }
       }

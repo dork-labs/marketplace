@@ -32,6 +32,8 @@
  */
 
 import { z } from 'zod';
+
+import { DrainStateSchema, RunLimitSchema } from './drain/state.ts';
 import type { FlowRun, FlowRunProvenance, FlowRunStatus, FlowStage } from './flow-run.ts';
 
 /**
@@ -149,6 +151,13 @@ export const FlowRunSchema = z.looseObject({
   // from a future launcher discard every in-flight run on the machine.
   account: z.string().optional(),
   host: z.string().optional(),
+  // The last checkpoint, the drain state and the limit (spec
+  // flow-handoff-dispatch §1, §4.3, §5.1). Their vocabularies are checked as
+  // strings, for the same reason as `host`; see drain/state.ts.
+  checkpointAt: z.string().optional(),
+  checkpointSha: z.string().optional(),
+  drain: DrainStateSchema.optional(),
+  limit: RunLimitSchema.optional(),
 });
 
 /**
