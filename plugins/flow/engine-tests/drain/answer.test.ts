@@ -62,6 +62,17 @@ describe('findAnswer', () => {
     expect(findAnswer(ITEM, comments, since, CTX)?.id).toBe('reply');
   });
 
+  // Purpose: a run that parks twice within minutes must wait for an answer to
+  // the second question. Fails if the anchor is the first park's comment: the
+  // reply to the first question would resume the run at once.
+  it('anchors a second park on its own comment, not the first', () => {
+    const since = c('x', 'x', 15).createdAt;
+    const comments = [c('park1', 'bot', 10), c('reply1', 'dorian', 12), c('park2', 'bot', 15)];
+    expect(findAnswer(ITEM, comments, since, CTX)).toBeNull();
+    const answered = [...comments, c('reply2', 'dorian', 16)];
+    expect(findAnswer(ITEM, answered, since, CTX)?.id).toBe('reply2');
+  });
+
   // Purpose: the agent's own comment is never an answer, by author or by its marker.
   it('ignores the agent, by account or by marker', () => {
     const since = c('x', 'x', 0).createdAt;

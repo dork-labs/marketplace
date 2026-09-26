@@ -347,9 +347,11 @@ export async function drain(ctx: VerbContext, options: DrainOptions = {}): Promi
         sessionProvenance(ctx, undefined)
       );
       const unsigned = unsignedBody(body);
-      const posted = (item.comments ?? [])
-        .slice(-RECENT_COMMENTS)
-        .some((comment) => unsignedBody(comment.body) === unsigned);
+      // Skip only a retry of this same park: the identical comment is still the
+      // item's latest. After anyone has replied, a new park posts a new comment,
+      // which is what findAnswer anchors the next answer on.
+      const last = (item.comments ?? []).at(-1);
+      const posted = last !== undefined && unsignedBody(last.body) === unsigned;
       if (!posted) await adapter.comment(item, body);
       await applyAndVerify(adapter, item, projectionFor({ type: 'needs-input' }, { stages }));
     },

@@ -64,16 +64,20 @@ export function findAnswer(
   let candidates = [...comments];
   if (Number.isFinite(parkedAt)) {
     // parkedAt is this machine's clock; comment times are the tracker's. Anchor
-    // on the park comment itself (the agent's own comment around parkedAt) when
+    // on the park comment itself (the agent's own comment nearest parkedAt, so a
+    // second park anchors on its own comment, not the first's) when
     // it is there, and otherwise allow a small skew, so a quick reply is never
     // missed because the local clock runs ahead.
     const parkComment = candidates
-      .map((comment, index) => ({ comment, index }))
+      .map((comment, index) => ({
+        comment,
+        index,
+        distance: Math.abs(Date.parse(comment.createdAt) - parkedAt),
+      }))
       .filter(
-        ({ comment }) =>
-          decide(comment).rule === 1 &&
-          Math.abs(Date.parse(comment.createdAt) - parkedAt) <= PARK_ANCHOR_WINDOW_MS
-      )[0];
+        ({ comment, distance }) => decide(comment).rule === 1 && distance <= PARK_ANCHOR_WINDOW_MS
+      )
+      .sort((x, y) => x.distance - y.distance || y.index - x.index)[0];
     candidates =
       parkComment !== undefined
         ? candidates.filter(
