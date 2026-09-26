@@ -33,7 +33,7 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { FLOW_ROOT, main } from '../scripts/selftest.ts';
 import { LIVE_CASES, type LiveCase, type RunnableCase } from '../scripts/selftest/live/cases.ts';
 import { liveRefusal, resolveCredential } from '../scripts/selftest/live/gate.ts';
-import { runLive } from '../scripts/selftest/live/run.ts';
+import { deniedTools, runLive } from '../scripts/selftest/live/run.ts';
 import { findBreach } from '../scripts/selftest/live/breach.ts';
 import { makeSandbox } from '../scripts/selftest/live/sandbox.ts';
 import type { FakeBacklog } from '../scripts/tracker/fake.ts';
@@ -606,6 +606,43 @@ describe('the breach check', { timeout: LIVE_TIMEOUT }, () => {
     }
   });
 
+  it('follows cd from segment to segment, and a cd out of the sandbox is a breach', () => {
+    // Purpose: after `cd` into the adapter link, a relative write lands in the
+    // real plugin. The link's realpath is in the flow root, so the cd itself fails.
+    const s = makeSandbox({
+      flowRoot: FLOW_ROOT,
+      files: { 'sub/keep.txt': 'x' },
+      backlog: { items: [] },
+    });
+    try {
+      const bounds = { sandbox: s.dir, flowRoot: FLOW_ROOT, home: tmp };
+      const bash = (command: string) => findBreach([{ name: 'Bash', input: { command } }], bounds);
+      const link = '.agents/flow/adapters/fake';
+      expect(bash(`cd ${link} && node -e "require('fs').writeFileSync('adapter.ts', '')"`)).toMatch(
+        /changed folder to \.agents\/flow\/adapters\/fake, outside the sandbox/
+      );
+      expect(bash(`cd ${link} && node -p 1 > adapter.ts`)).toMatch(/changed folder to/);
+      expect(bash(`cd ${link}; node -p 1 > $PWD/adapter.ts`)).toMatch(/changed folder to/);
+      expect(bash(`pushd "\${CLAUDE_PLUGIN_ROOT}/scripts" && node -p 1 > x.ts`)).toMatch(
+        /changed folder to/
+      );
+      expect(bash('cd .. && node -p 1 > x')).toMatch(/changed folder to \.\., outside/);
+      expect(bash('cd && node -p 1')).toMatch(/changed folder to ~, outside/);
+
+      // Inside the sandbox a cd is fine, and paths follow it.
+      expect(bash('cd sub && node -p 1 > out.txt')).toBeUndefined();
+      expect(bash('cd sub && node -p 1 > $PWD/out.txt')).toBeUndefined();
+      expect(bash('cd sub && node -p 1 > $PWD/../top.txt')).toBeUndefined();
+      expect(bash('cd sub && git status && cd .. && node -p 1 > top.txt')).toBeUndefined();
+      expect(bash('cd sub && node -p 1 > ../../escape.txt')).toMatch(
+        /wrote \.\.\/\.\.\/escape\.txt/
+      );
+      expect(bash('cd sub && pushd . && popd && node -p 1 > ok.txt')).toBeUndefined();
+    } finally {
+      s.cleanup();
+    }
+  });
+
   it('flags a path it cannot follow: a .. out of the sandbox, the store variable, $VAR', () => {
     // Purpose: the store is outside the project, reachable only by a path the
     // earlier check missed: a relative `..`, the store's variable, or $HOME.
@@ -634,6 +671,21 @@ describe('the breach check', { timeout: LIVE_TIMEOUT }, () => {
       expect(bash('node ./scripts/a.js ../project/README.md')).toBeUndefined();
     } finally {
       s.cleanup();
+    }
+  });
+});
+
+describe('the permission-rule layer', () => {
+  it('denies edits in the flow root by path, and skips a path rules would garble', () => {
+    // Purpose: a flow root with ( ) or spaces would close or split the rule;
+    // such a path gets no rule (the breach check still judges every write).
+    expect(deniedTools(FLOW_ROOT)).toContain(`Edit(/${FLOW_ROOT}/**)`);
+    for (const odd of ['plugins (copy)', 'my plugins', 'a,b', 'x*y']) {
+      const dir = path.join(tmp, odd);
+      mkdirSync(dir);
+      const rules = deniedTools(dir);
+      expect(rules.some((r) => r.includes(odd))).toBe(false);
+      expect(rules).toContain('Write(.agents/flow/adapters/fake/**)');
     }
   });
 });

@@ -176,16 +176,30 @@ export function usd(amount: number): string {
 const FAKE_LINK = '.agents/flow/adapters/fake';
 
 /**
+ * Characters a permission-rule path can hold without meaning something else:
+ * no parentheses (they close the rule), spaces or commas (they split the list),
+ * or glob characters.
+ */
+const RULE_SAFE_PATH = /^[A-Za-z0-9._\-/@+~]+$/;
+
+/**
  * A second layer under the breach check: permission rules denying file edits
  * in the flow root, by its path and by the sandbox's link into it. `//` starts
  * an absolute path in a rule; a bare path is relative to the sandbox. A deny
  * rule outranks the allowlist's plain `Edit` and `Write`.
  *
+ * A flow-root path holding a character rules treat specially (see
+ * {@link RULE_SAFE_PATH}) gets no rule, since a garbled one could deny the
+ * wrong thing or nothing. The breach check still judges every write, so it
+ * remains the enforcement either way.
+ *
  * @param flowRoot - The flow root.
  * @returns The rules.
  */
 export function deniedTools(flowRoot: string): string[] {
-  const absolute = [...new Set([flowRoot, realpathSync(flowRoot)])];
+  const absolute = [...new Set([flowRoot, realpathSync(flowRoot)])].filter((dir) =>
+    RULE_SAFE_PATH.test(dir)
+  );
   const roots = [...absolute.map((dir) => `/${dir}/**`), `${FAKE_LINK}/**`];
   return ['Edit', 'Write', 'NotebookEdit'].flatMap((tool) => roots.map((r) => `${tool}(${r})`));
 }

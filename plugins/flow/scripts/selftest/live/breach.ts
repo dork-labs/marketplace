@@ -106,8 +106,18 @@ const GIT_MUTATING: readonly string[] = [
 /** Git options that take the next token as a folder the command acts on. */
 const GIT_DIR_OPTIONS: readonly string[] = ['-C', '--git-dir', '--work-tree'];
 
-/** A variable used as a value: `$NAME` or `${NAME}` at the start of a token. */
-const VARIABLE_PATH = /(?:^|[\s'"=(:>])(\$\{?[A-Za-z_][A-Za-z0-9_]*\}?)/;
+/**
+ * A variable used as a value: `$NAME` or `${NAME}` at the start of a token.
+ * `$PWD` is left out: it is followed, per command segment, as the folder that
+ * segment runs in.
+ */
+const VARIABLE_PATH = /(?:^|[\s'"=(:>])(\$\{?(?!PWD\b)[A-Za-z_][A-Za-z0-9_]*\}?)/;
+
+/** `$PWD` or `${PWD}`. */
+const PWD_VARIABLE = /\$\{PWD\}|\$PWD\b/g;
+
+/** Commands that change the folder later segments run in. */
+const FOLDER_CHANGERS: readonly string[] = ['cd', 'pushd', 'popd'];
 
 /** A path read from the environment inside code. */
 const ENV_READ = /\bprocess\.env\b/;
@@ -200,27 +210,82 @@ function gitWrites(segment: string): { writes: string[]; refusal?: string } {
   return { writes: dirs };
 }
 
-/** The paths one Bash command reads and writes, or why it is a breach outright. */
-function commandPaths(command: string): { reads: string[]; writes: string[]; refusal?: string } {
-  const reads: string[] = [];
-  const writes: string[] = [];
-  for (const match of command.matchAll(REDIRECT)) writes.push(unquote(match[1]));
-  for (const segment of segments(command)) {
+/** A path a command names, and the folder it is read against. */
+interface Located {
+  /** The path as the command spells it. */
+  raw: string;
+  /** Every folder the command had been in by then: a relative path is judged against each. */
+  bases: readonly string[];
+}
+
+/**
+ * The paths one Bash command reads and writes, following `cd`, `pushd` and
+ * `popd` from segment to segment, or why it is a breach outright.
+ *
+ * A relative path is judged against EVERY folder the command had been in by
+ * then, not only the latest: a `cd` inside a subshell, `( cd x )`, does not
+ * outlast it, and the check does not parse subshells, so it assumes either.
+ * A `cd` whose realpath leaves the sandbox is a breach by itself; that covers
+ * the sandbox's link to the fake adapter, whose realpath is in the flow root.
+ *
+ * @param command - The command, with `$CLAUDE_PLUGIN_ROOT` already expanded.
+ * @param start - The sandbox (the folder the command starts in).
+ * @param into - The realpath a `cd` target resolves to, from a given folder.
+ * @param inSandbox - Whether a realpath is inside the sandbox.
+ */
+function commandPaths(
+  command: string,
+  start: string,
+  into: (from: string, target: string) => string,
+  inSandbox: (real: string) => boolean
+): { reads: Located[]; writes: Located[]; refusal?: string } {
+  const reads: Located[] = [];
+  const writes: Located[] = [];
+  const bases: string[] = [start];
+  const stack: string[] = [start];
+  for (const raw of segments(command)) {
+    const current = stack[stack.length - 1];
+    const segment = raw.replace(PWD_VARIABLE, current);
+    const seen = [...bases];
+    const at = (list: Located[], paths: readonly string[]) =>
+      list.push(...paths.map((p) => ({ raw: p, bases: seen })));
+    at(
+      writes,
+      [...segment.matchAll(REDIRECT)].map((m) => unquote(m[1]))
+    );
     const tokens = segment.split(TOKEN_SPLIT).filter((t) => t !== '');
     const verb = path.basename(tokens[0] ?? '');
     const args = tokens.slice(1).filter((t) => !t.startsWith('-'));
+    if (FOLDER_CHANGERS.includes(verb)) {
+      if (verb === 'popd') {
+        if (stack.length > 1) stack.pop();
+        continue;
+      }
+      const words = segment
+        .split(/\s+/)
+        .filter((t) => t !== '')
+        .map(unquote);
+      const target = words.slice(1).find((t) => !t.startsWith('-') || t === '-') ?? '~';
+      const next = target === '-' ? (stack[stack.length - 2] ?? start) : into(current, target);
+      if (!inSandbox(next))
+        return { reads, writes, refusal: `changed folder to ${target}, outside the sandbox` };
+      if (verb === 'pushd') stack.push(next);
+      else stack[stack.length - 1] = next;
+      bases.push(next);
+      continue;
+    }
     if (JS_WRITE.test(segment)) {
-      writes.push(...tokens);
+      at(writes, tokens);
     } else if (WRITING_COMMANDS.includes(verb)) {
-      writes.push(...args);
+      at(writes, args);
     } else if (verb === 'cp' && args.length > 0) {
-      writes.push(args[args.length - 1]);
+      at(writes, [args[args.length - 1]]);
     } else if (verb === 'git') {
       const git = gitWrites(segment);
       if (git.refusal !== undefined) return { reads, writes, refusal: git.refusal };
-      writes.push(...git.writes);
+      at(writes, git.writes);
     }
-    reads.push(...tokens.filter(readCandidate));
+    at(reads, tokens.filter(readCandidate));
   }
   return { reads, writes };
 }
@@ -237,18 +302,17 @@ function scriptWrites(code: string): { writes: string[]; refusal?: string } {
   return { writes: writes.filter((w) => w !== '') };
 }
 
-/** Where a shell variable the check can follow points. */
-function expandKnown(command: string, bounds: BreachBounds): string {
-  return command
-    .replace(/\$\{CLAUDE_PLUGIN_ROOT\}|\$CLAUDE_PLUGIN_ROOT\b/g, bounds.flowRoot)
-    .replace(/\$\{PWD\}|\$PWD\b/g, bounds.sandbox);
+/** `$CLAUDE_PLUGIN_ROOT` read as the flow root (`$PWD` is followed per segment). */
+function expandPluginRoot(command: string, bounds: BreachBounds): string {
+  return command.replace(/\$\{CLAUDE_PLUGIN_ROOT\}|\$CLAUDE_PLUGIN_ROOT\b/g, bounds.flowRoot);
 }
 
 /**
  * Find the first tool call that left the fences.
  *
  * `$CLAUDE_PLUGIN_ROOT` (how flow's own commands name its scripts) is read as
- * the flow root and `$PWD` as the sandbox; any other variable is a breach.
+ * the flow root and `$PWD` as the folder the command is in at that point (the
+ * sandbox, or where a `cd` took it); any other variable is a breach.
  *
  * Call it before the sandbox is deleted: realpaths are read from disk.
  *
@@ -259,25 +323,27 @@ function expandKnown(command: string, bounds: BreachBounds): string {
 export function findBreach(uses: readonly ToolUse[], bounds: BreachBounds): string | undefined {
   const sandbox = realpathOf(bounds.sandbox);
   const flowRoot = realpathOf(bounds.flowRoot);
-  const resolve = (raw: string): string => {
+  const resolve = (raw: string, base: string = bounds.sandbox): string => {
     const expanded =
       raw === '~' ? bounds.home : raw.startsWith('~/') ? path.join(bounds.home, raw.slice(2)) : raw;
-    return realpathOf(path.resolve(bounds.sandbox, expanded));
+    return realpathOf(path.resolve(base, expanded));
   };
-  const badRead = (raw: string): boolean => {
+  const badRead = (raw: string, base?: string): boolean => {
     if (HARMLESS_PATHS.includes(raw)) return false;
-    const real = resolve(raw);
+    const real = resolve(raw, base);
     return !within(real, sandbox) && !within(real, flowRoot);
   };
-  const badWrite = (raw: string): boolean => {
+  const badWrite = (raw: string, base?: string): boolean => {
     if (HARMLESS_PATHS.includes(raw)) return false;
-    return !within(resolve(raw), sandbox);
+    return !within(resolve(raw, base), sandbox);
   };
+  const anyBase = (bad: (raw: string, base: string) => boolean) => (located: Located) =>
+    located.bases.some((base) => bad(located.raw, base));
 
   for (const use of uses) {
     const raw = use.input.command;
     if (typeof raw === 'string') {
-      const command = expandKnown(raw, bounds);
+      const command = expandPluginRoot(raw, bounds);
       const named = forbiddenName(command);
       if (named !== undefined) return `${use.name} ran a command naming ${named}: ${command}`;
       const variable = VARIABLE_PATH.exec(command);
@@ -287,13 +353,18 @@ export function findBreach(uses: readonly ToolUse[], bounds: BreachBounds): stri
       if (ENV_READ.test(command)) {
         return `${use.name} read process.env, which the check cannot follow: ${command}`;
       }
-      const { reads, writes, refusal } = commandPaths(command);
+      const { reads, writes, refusal } = commandPaths(
+        command,
+        sandbox,
+        (from, target) => resolve(target, from),
+        (real) => within(real, sandbox)
+      );
       if (refusal !== undefined) return `${use.name} ${refusal}: ${command}`;
-      const write = writes.find(badWrite);
-      if (write !== undefined) return `${use.name} wrote ${write}, outside the sandbox`;
-      const read = reads.find(badRead);
+      const write = writes.find(anyBase(badWrite));
+      if (write !== undefined) return `${use.name} wrote ${write.raw}, outside the sandbox`;
+      const read = reads.find(anyBase(badRead));
       if (read !== undefined) {
-        return `${use.name} named ${read}, outside the sandbox and the flow root`;
+        return `${use.name} named ${read.raw}, outside the sandbox and the flow root`;
       }
     }
     const writing = WRITE_TOOLS.includes(use.name);
@@ -307,7 +378,7 @@ export function findBreach(uses: readonly ToolUse[], bounds: BreachBounds): stri
       if (script.refusal !== undefined) {
         return `${use.name} wrote a script that ${script.refusal}, which the check cannot follow`;
       }
-      const target = script.writes.find(badWrite);
+      const target = script.writes.find((w) => badWrite(w));
       if (target !== undefined) {
         return `${use.name} wrote a script that writes ${target}, outside the sandbox`;
       }
