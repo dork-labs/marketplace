@@ -71,7 +71,7 @@ export const VERBS: readonly VerbDefinition[] = [
     name: 'next',
     summary: 'Show the next item to work on, ranked by the dispatch policy.',
     description:
-      'Rank the ready queue with the dispatch policy (the same one dispatch.ts runs), with ownership and work in progress worked out from the backlog. Nothing eligible still exits 0; "atWipCap" says the cap is what blocks; else "starved" says whether a triage pass would help. Exits 7 while flow is paused, unless --manual.',
+      'Rank the ready queue with the dispatch policy (the same one dispatch.ts runs), with ownership and work in progress worked out from the backlog. Each pick also gets the account its session should run on (see flow accounts), spreading -n picks across accounts. Nothing eligible still exits 0; "atWipCap" says the cap is what blocks; else "starved" says whether a triage pass would help. Exits 7 while flow is paused, unless --manual.',
     common: ['project', 'snapshot', 'manual'],
     flags: [
       {
@@ -86,6 +86,11 @@ export const VERBS: readonly VerbDefinition[] = [
         kind: 'string',
         value: 'name|id',
         description: 'Only consider items in this project (its id, or its name in any case).',
+      },
+      {
+        name: 'no-account',
+        kind: 'boolean',
+        description: 'Do not pick the account each item should run on.',
       },
     ],
     load: () => import('./cli/next.ts'),

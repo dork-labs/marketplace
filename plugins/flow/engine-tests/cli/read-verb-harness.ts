@@ -11,6 +11,7 @@ import { mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from 'nod
 import os from 'node:os';
 import path from 'node:path';
 
+import type { CliDeps } from '../../scripts/cli/context.ts';
 import { main, VERBS } from '../../scripts/flow.ts';
 import type { WorkItem } from '../../scripts/tracker/types.ts';
 import { createFakeAdapter, type FakeBacklog } from '../fixtures/cli/fake-adapter/adapter.ts';
@@ -21,6 +22,8 @@ export interface TempProject {
   project: string;
   /** An empty plugin folder, so no real plugin's settings leak in. */
   plugin: string;
+  /** A private DorkOS home (`DORK_HOME`), so the operator's own accounts never leak in. */
+  dorkHome: string;
   /** Delete both folders. */
   cleanup(): void;
 }
@@ -38,7 +41,12 @@ export function tempProject(config: Record<string, unknown>): TempProject {
   mkdirSync(path.join(project, '.agents', 'flow'), { recursive: true });
   mkdirSync(plugin, { recursive: true });
   writeFileSync(path.join(project, '.agents', 'flow', 'config.json'), JSON.stringify(config));
-  return { project, plugin, cleanup: () => rmSync(base, { recursive: true, force: true }) };
+  return {
+    project,
+    plugin,
+    dorkHome: path.join(base, 'dork'),
+    cleanup: () => rmSync(base, { recursive: true, force: true }),
+  };
 }
 
 /** What one in-process run produced. */
@@ -53,24 +61,33 @@ export interface RunResult {
   adapterBuilds: number;
 }
 
+/** Optional parts of the world a run sees. */
+export interface RunOptions {
+  /** Answers external commands (`git remote get-url origin`). Default: exit 0, no output. */
+  runProcess?: CliDeps['runProcess'];
+}
+
 /**
- * Run `flow <argv>` in-process against a fake backlog.
+ * Run `flow <argv>` in-process against a fake backlog, with `DORK_HOME` set to
+ * the temp project's own.
  *
  * @param argv - The arguments after the script path.
  * @param temp - The temp project; runs with cwd = its project folder.
  * @param backlog - The fake tracker's state.
+ * @param options - Replaces the process runner.
  * @returns The exit code, both streams and the adapter build count.
  */
 export async function runFlow(
   argv: readonly string[],
   temp: TempProject,
-  backlog: FakeBacklog
+  backlog: FakeBacklog,
+  options: RunOptions = {}
 ): Promise<RunResult> {
   let stdout = '';
   let stderr = '';
   let adapterBuilds = 0;
   const code = await main(argv, {
-    env: {},
+    env: { DORK_HOME: temp.dorkHome },
     cwd: temp.project,
     now: () => new Date('2026-09-26T12:00:00.000Z'),
     stdout: { write: (chunk: string) => (stdout += chunk) },
@@ -79,7 +96,7 @@ export async function runFlow(
       adapterBuilds += 1;
       return createFakeAdapter(backlog).adapter;
     },
-    runProcess: async () => ({ code: 0, stdout: '', stderr: '' }),
+    runProcess: options.runProcess ?? (async () => ({ code: 0, stdout: '', stderr: '' })),
     flowRoot: temp.plugin,
     verbs: VERBS,
   });

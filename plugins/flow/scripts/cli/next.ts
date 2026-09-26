@@ -16,12 +16,40 @@
  * - Paused: exit 7 unless `--manual`. Nothing eligible is still exit 0, with
  *   `atWipCap` saying the WIP cap is what blocks, else `starved` saying whether
  *   a triage pass would help.
+ * - The account (spec `flow-handoff-dispatch` §3.5): each pick gains
+ *   `account`, the (runtime, account) pair its session should bill, from
+ *   `rankAccounts` over every account of every runtime (implicit `default`s
+ *   included), their policy and ledgers, the checkout's origin repo, the
+ *   implementation model, and the live runs in `flow-state.json`. Picks are
+ *   assigned in order and each adds one to its account's live count, so `-n`
+ *   spreads work. `--no-account` skips this. No tracker call is added.
  *
  * @module @dorkos/flow/cli/next
  */
 
 import { classifyDispatchOutcome } from '../dispatch-policy.ts';
-import { PausedError, PreconditionError, UsageError } from '../errors.ts';
+import {
+  chooseAccount,
+  itemRuntime,
+  rankAccounts,
+  type AccountRef,
+  type IneligibleAccount,
+  type RankableAccount,
+  type RankedAccount,
+} from '../drain/account-rank.ts';
+import { ConfigError, PausedError, PreconditionError, UsageError } from '../errors.ts';
+import {
+  accountKey,
+  loadAccounts,
+  loadFleetPolicy,
+  parseOriginRepo,
+  resolveDorkHome,
+  type RuntimeAccount,
+} from '../fleet/accounts.ts';
+import { readLedger, type RuntimeSlug } from '../fleet/usage-ledger.ts';
+import type { FlowRun } from '../flow-run.ts';
+import { openFlowStateFile } from '../flow-state-file.ts';
+import { handleRuntime } from '../launchers/types.ts';
 import { classifyOwnership, type Identity, type OwnershipScope } from '../identity.ts';
 import type { BacklogSnapshot, WorkItem, WorkItemProject } from '../tracker/types.ts';
 import { AGENT_CLAIMED } from '../work-state.ts';
@@ -96,9 +124,157 @@ function parseCount(value: string | true | undefined): number {
   return count;
 }
 
+/** Why a pick got the account it did. */
+export type AccountReason = 'ranked' | 'ambient' | 'cross-runtime' | 'none';
+
+/** The account a pick's session should bill (§3.5), as `flow next --json` shows it. */
+export interface ItemAccount {
+  /** The item's runtime: its run's, else the first of `fleet.runtimes`, else `claude-code`. */
+  runtime: RuntimeSlug;
+  /** The (runtime, account) pair, or `null` when no account may take it. */
+  pick: AccountRef | null;
+  /** Eligible accounts, best first. */
+  ranked: RankedAccount[];
+  /** Accounts left out, with every reason. */
+  ineligible: IneligibleAccount[];
+  /**
+   * `ranked`: a registered account of the item's runtime. `ambient`: the
+   * runtime's implicit `default` account (it has no registry), which runs in the
+   * ambient environment. `cross-runtime`: an account of another runtime
+   * (`crossRuntimeFallback: on`). `none`: nothing may take it.
+   */
+  reason: AccountReason;
+  /** The picked account's label, or `null` (for the human text). */
+  label: string | null;
+}
+
+/** Everything account assignment reads, gathered once per run. */
+export interface AssignmentInput {
+  /** The moment to judge at. */
+  now: Date;
+  /** The checkout's `owner/name`, or `null`. */
+  repo: string | null;
+  /** The implementation model, or `null`. */
+  model: string | null;
+  /** Every account of every runtime, with policy, windows and spend. */
+  accounts: readonly (RankableAccount & { label: string | null })[];
+  /** `fleet.runtimes`. */
+  runtimes: readonly RuntimeSlug[];
+  /** `fleet.crossRuntimeFallback`. */
+  crossRuntimeFallback: 'off' | 'on';
+  /** Every run in `flow-state.json`, keyed by issue id. */
+  runs: Readonly<Record<string, FlowRun>>;
+  /** `drain.warnMarginPct` and `drain.maxLivePerAccount`. */
+  opts: { warnMarginPct: number; maxLivePerAccount: number };
+}
+
+/** `<runtime>:<id>` for a stored account, where no account means the runtime's implicit one. */
+function liveKey(runtime: string | undefined, account: string | null | undefined): string {
+  return `${runtime ?? 'claude-code'}:${account ?? 'default'}`;
+}
+
+/**
+ * Live sessions per `<runtime>:<id>`: every `running` or `queued` run by its
+ * account, plus its drain reviewer's handle by the reviewer's account. A run or
+ * handle with no account bills its runtime's implicit `default`.
+ *
+ * @param runs - Every run, keyed by issue id.
+ * @returns The counts.
+ */
+export function liveByAccount(runs: Readonly<Record<string, FlowRun>>): Record<string, number> {
+  const live: Record<string, number> = {};
+  const add = (key: string): void => {
+    live[key] = (live[key] ?? 0) + 1;
+  };
+  for (const run of Object.values(runs)) {
+    if (run.status !== 'running' && run.status !== 'queued') continue;
+    add(liveKey(run.runtime, run.account));
+    const reviewer = run.drain?.reviewer;
+    if (reviewer) add(liveKey(handleRuntime(reviewer), reviewer.account));
+  }
+  return live;
+}
+
+/**
+ * Assign each pick its account, in pick order (§3.5). Each assignment adds one
+ * to its account's live count, so later picks see it and `-n` spreads work.
+ * Pure.
+ *
+ * @param picked - The picks, in order.
+ * @param input - The accounts, runs, repo, model, policy and settings.
+ * @returns One assignment per pick.
+ */
+export function assignAccounts(picked: readonly WorkItem[], input: AssignmentInput): ItemAccount[] {
+  const live = liveByAccount(input.runs);
+  const runByItem = new Map(Object.values(input.runs).map((run) => [run.issueId, run]));
+  return picked.map((item): ItemAccount => {
+    const run = runByItem.get(item.id);
+    const runtime = itemRuntime(run?.runtime, input.runtimes);
+    const rank = rankAccounts({
+      now: input.now,
+      repo: input.repo,
+      accounts: input.accounts,
+      runtime,
+      runtimes: input.runtimes,
+      crossRuntimeFallback: input.crossRuntimeFallback,
+      model: input.model,
+      affinity: run?.account ? liveKey(run.runtime, run.account) : null,
+      exclude: [],
+      liveByAccount: live,
+      opts: input.opts,
+    });
+    const choice = chooseAccount({ accounts: input.accounts, rank });
+    const base = { runtime, ranked: rank.ranked, ineligible: rank.ineligible };
+    if (choice.account === 'none') return { ...base, pick: null, reason: 'none', label: null };
+    const chosen = choice.account;
+    const key = accountKey(chosen.runtime, chosen.id);
+    live[key] = (live[key] ?? 0) + 1;
+    const label =
+      input.accounts.find((a) => a.runtime === chosen.runtime && a.id === chosen.id)?.label ?? null;
+    const reason: AccountReason =
+      chosen.runtime !== runtime ? 'cross-runtime' : chosen.implicit ? 'ambient' : 'ranked';
+    return { ...base, pick: { runtime: chosen.runtime, id: chosen.id }, reason, label };
+  });
+}
+
+/**
+ * The human suffix for one assignment: ` -> <label or id>`, ` -> ambient
+ * account`, or ` -> no account`; another runtime's account is named with its
+ * runtime.
+ *
+ * @param account - The assignment.
+ * @returns The suffix, starting with a space.
+ */
+export function accountSuffix(account: ItemAccount): string {
+  if (account.pick === null) return ' -> no account';
+  const name =
+    account.reason === 'ambient' ? 'ambient account' : (account.label ?? account.pick.id);
+  if (account.reason !== 'cross-runtime') return ` -> ${name}`;
+  return account.pick.id === 'default' && account.label === null
+    ? ` -> ${account.pick.runtime} ambient account`
+    : ` -> ${account.pick.runtime}:${name}`;
+}
+
+/**
+ * The stderr block when a pick has no account: every account's reasons, and
+ * the command that allows one.
+ *
+ * @param repo - The checkout's `owner/name`, or `null`.
+ * @param account - The first assignment with no account.
+ * @returns The message.
+ */
+export function noAccountMessage(repo: string | null, account: ItemAccount): string {
+  const reasons = account.ineligible
+    .map((entry) => `${accountKey(entry.runtime, entry.id)}: ${entry.reasons.join(', ')}`)
+    .join('; ');
+  return `No account may take work for ${repo ?? 'this checkout (no origin repo)'}: ${reasons || 'no account of this runtime'}. Run \`flow accounts set <id> --role rotation\` to allow one.`;
+}
+
 /** The fields of an outcome the human text needs. */
 interface NextSummary {
   picked: WorkItem[];
+  /** Each pick's account, in pick order; absent with `--no-account`. */
+  accounts?: ItemAccount[];
   eligibleCount: number;
   starved: boolean;
   shapeableCount: number;
@@ -125,13 +301,17 @@ export function renderNext(summary: NextSummary): string {
         : 'Nothing is eligible, and nothing waits behind the agent/ready gate: the queue is drained.';
     return [why, wipLine].join('\n');
   }
-  const rows = summary.picked.map((item) => [
-    `  ${item.identifier} - ${item.title}`,
-    item.priority === undefined || item.priority === 0
-      ? 'no priority'
-      : `priority ${item.priority}`,
-    item.size === undefined ? 'no size' : `size ${item.size}`,
-  ]);
+  const rows = summary.picked.map((item, i) => {
+    const account = summary.accounts?.[i];
+    const size = item.size === undefined ? 'no size' : `size ${item.size}`;
+    return [
+      `  ${item.identifier} - ${item.title}`,
+      item.priority === undefined || item.priority === 0
+        ? 'no priority'
+        : `priority ${item.priority}`,
+      account === undefined ? size : `${size}${accountSuffix(account)}`,
+    ];
+  });
   return [
     `Next (${summary.picked.length} of ${summary.eligibleCount} eligible):`,
     formatColumns(rows),
@@ -198,15 +378,108 @@ export async function run(ctx: VerbContext): Promise<VerbResult> {
   const atWipCap = outcome.eligibleCount === 0 && uncapped.eligibleCount > 0;
 
   const picked = outcome.picked.slice(0, count);
+  let accounts: ItemAccount[] | undefined;
+  if (ctx.args.flags['no-account'] !== true && picked.length > 0) {
+    const input = await gatherAssignmentInput(ctx, config);
+    accounts = assignAccounts(picked, input);
+    const blocked = accounts.find((account) => account.pick === null);
+    if (blocked !== undefined) ctx.warn(noAccountMessage(input.repo, blocked));
+  }
   return {
     json: {
-      picked,
+      picked:
+        accounts === undefined
+          ? picked
+          : picked.map((item, i) => ({ ...item, account: jsonAccount(accounts[i]) })),
       eligibleCount: outcome.eligibleCount,
       starved: outcome.starved,
       shapeableCount: outcome.shapeableCount,
       atWipCap,
       wip,
     },
-    text: renderNext({ ...outcome, picked, atWipCap, wip, wipCap: config.autonomy.wipCap }),
+    text: renderNext({
+      ...outcome,
+      picked,
+      accounts,
+      atWipCap,
+      wip,
+      wipCap: config.autonomy.wipCap,
+    }),
+  };
+}
+
+/** The JSON shape of one assignment: `{ runtime, pick, ranked, ineligible, reason }`. */
+function jsonAccount(account: ItemAccount): Omit<ItemAccount, 'label'> {
+  const { runtime, pick, ranked, ineligible, reason } = account;
+  return { runtime, pick, ranked, ineligible, reason };
+}
+
+/** The project config `flow next` reads. */
+type NextConfig = ReturnType<typeof loadProjectConfig>['loaded']['config'];
+
+/**
+ * Read what account assignment needs: the registry, `fleet.json` and each
+ * account's ledger under `<dorkHome>` (warnings go to stderr), the checkout's
+ * origin, and the run store. A folder that is not a git checkout has no origin
+ * and no run store, and assigns from the registry alone.
+ *
+ * @param ctx - The verb's context.
+ * @param config - The project config.
+ * @returns The assignment input.
+ */
+async function gatherAssignmentInput(
+  ctx: VerbContext,
+  config: NextConfig
+): Promise<AssignmentInput> {
+  const dorkHome = resolveDorkHome({ ...ctx.env }, ctx.io.osHome);
+  const registry = loadAccounts(dorkHome);
+  for (const warning of registry.warnings) ctx.warn(warning.message);
+  const policy = loadFleetPolicy(dorkHome, registry.accounts);
+  for (const warning of policy.warnings) ctx.warn(warning.message);
+
+  const accounts = registry.accounts.flatMap((account: RuntimeAccount) => {
+    const resolved = policy.accounts.find(
+      (entry) => entry.runtime === account.runtime && entry.id === account.id
+    );
+    if (resolved === undefined) return [];
+    const ledger = account.routable ? readLedger(dorkHome, account.runtime, account.id) : null;
+    for (const warning of ledger?.warnings ?? []) ctx.warn(warning.message);
+    return [
+      {
+        runtime: account.runtime,
+        id: account.id,
+        path: account.path,
+        implicit: account.implicit,
+        routable: account.routable,
+        policy: resolved,
+        windows: ledger?.ledger?.windows ?? null,
+        spend: ledger?.ledger?.spend,
+        label: account.label,
+      },
+    ];
+  });
+
+  const origin = await ctx.runProcess('git', ['remote', 'get-url', 'origin'], {
+    cwd: ctx.projectDir,
+  });
+  let runs: Record<string, FlowRun> = {};
+  try {
+    runs = openFlowStateFile(ctx.projectDir).read();
+  } catch (error) {
+    if (!(error instanceof ConfigError)) throw error;
+  }
+  const model = config.models.bindings[config.models.tiers.implementation] ?? null;
+  return {
+    now: ctx.now(),
+    repo: origin.code === 0 ? parseOriginRepo(origin.stdout) : null,
+    model,
+    accounts,
+    runtimes: policy.runtimes,
+    crossRuntimeFallback: policy.crossRuntimeFallback,
+    runs,
+    opts: {
+      warnMarginPct: config.drain.warnMarginPct,
+      maxLivePerAccount: config.drain.maxLivePerAccount,
+    },
   };
 }
