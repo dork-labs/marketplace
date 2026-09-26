@@ -109,8 +109,13 @@ export type Disposition =
   | {
       kind: 'file';
       checkId: string;
-      /** The failing check's fingerprint: the create's idempotency key. */
-      fingerprint: string;
+      /**
+       * The create's idempotency key: the fingerprint plus every item already
+       * filed for it (or `none`). Two runs that see the same tracker send the
+       * same key and make one item; once an earlier item exists, even closed
+       * long ago, the key is new, so a returning failure is filed again.
+       */
+      key: string;
       title: string;
       body: string;
       labels: string[];
@@ -148,12 +153,14 @@ function bodyFor(check: Check, meta: FilingMeta, regressionOf?: string): string 
 function newItem(
   check: Check,
   meta: FilingMeta,
+  matches: readonly Candidate[],
   regressionOf?: string
 ): Extract<Disposition, { kind: 'file' }> {
+  const earlier = matches.map((m) => m.identifier).sort();
   return {
     kind: 'file',
     checkId: check.id,
-    fingerprint: check.fingerprint,
+    key: `flow-selftest:${check.fingerprint}:${earlier.length === 0 ? 'none' : earlier.join(',')}`,
     title: titleFor(check),
     body: bodyFor(check, meta, regressionOf),
     labels: filedLabels(meta.labels ?? []),
@@ -219,9 +226,12 @@ export function planFiling(
           reason: 'completed after this run started',
         };
       }
-      return { ...newItem(check, meta, completed.identifier), regressionOf: completed.identifier };
+      return {
+        ...newItem(check, meta, matches, completed.identifier),
+        regressionOf: completed.identifier,
+      };
     }
-    return newItem(check, meta);
+    return newItem(check, meta, matches);
   });
 }
 
@@ -343,9 +353,9 @@ async function act(plans: Disposition[], deps: FilingDeps, result: FilingResult)
         description: deps.sign(plan.body),
         labels: plan.labels,
         ...(plan.project !== undefined ? { project: plan.project } : {}),
-        // One item per failure: a retry, or a second run at the same time,
-        // returns the item the first one made.
-        key: `flow-selftest:${plan.fingerprint}:${plan.regressionOf ?? ''}`,
+        // One item per failure per state of the tracker: a retry, or a second
+        // run at the same time, returns the item the first one made.
+        key: plan.key,
       });
       result.filed.push({
         checkId: plan.checkId,
@@ -354,7 +364,7 @@ async function act(plans: Disposition[], deps: FilingDeps, result: FilingResult)
         ...(plan.regressionOf !== undefined ? { regressionOf: plan.regressionOf } : {}),
       });
     } else {
-      const { kind: _kind, fingerprint: _fingerprint, ...item } = plan;
+      const { kind: _kind, key: _key, ...item } = plan;
       result.wouldFile.push(item);
     }
   }

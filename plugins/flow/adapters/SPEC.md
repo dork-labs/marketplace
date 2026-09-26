@@ -794,7 +794,9 @@ declaration.
 - **2.2.0** - **`createItem`**, an optional sixth method that files a new item
   in the configured team (section 3, "`createItem`"). Optional, so additive
   (MINOR). `flow selftest --file` creates through it, after deduping by a
-  fingerprint in the description and with the fingerprint as its `key`.
+  fingerprint in the description, with a `key` made of the fingerprint and
+  every item already filed for it, so a failure that returns after its item
+  closed gets a new key and a new item.
 - **2.1.0** - a closed item in the backlog snapshot may carry **`closedAt`**,
   the date it was completed or canceled (section 3, "The two optional reads").
   Optional, so additive (MINOR): an adapter that cannot tell leaves it out, and

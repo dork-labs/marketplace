@@ -1045,7 +1045,15 @@ export function createAdapter(ctx: AdapterContext): CodeAdapter {
       } catch (error) {
         // A timeout after Linear accepted the create, or a second create with the
         // same key ("already exists"): the id says whether the issue landed.
-        const landed = await createdIssue(id, { id: teamId, key });
+        let landed: CreatedItem | null;
+        try {
+          landed = await createdIssue(id, { id: teamId, key });
+        } catch (readError) {
+          // Report the create's own failure; the check after it failed too.
+          throw new TrackerError(
+            `${(error as Error).message} (and checking whether the item landed failed: ${(readError as Error).message})`
+          );
+        }
         if (landed !== null) return landed;
         throw error;
       }

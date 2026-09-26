@@ -928,6 +928,20 @@ describe('createItem', () => {
     ).toBeInstanceOf(TrackerError);
   });
 
+  it("reports the create's own failure when the check after it fails too", async () => {
+    const { adapter } = build((call) =>
+      call.operation === 'FlowCreatedRead'
+        ? { raw: { code: 1, stdout: '', stderr: 'read went away' } }
+        : routeCreate(() => ({ raw: { code: 1, stdout: '', stderr: 'create timed out' } }))(call)
+    );
+    const error = await rejection(
+      adapter.createItem?.({ title: 't', description: 'd', labels: [] }) ?? Promise.resolve()
+    );
+    expect(error).toBeInstanceOf(TrackerError);
+    expect((error as Error).message).toMatch(/create timed out/);
+    expect((error as Error).message).toMatch(/checking whether the item landed failed/);
+  });
+
   it('throws and creates nothing when the answer carries no label list (aliasing)', async () => {
     const { adapter, calls } = build((call) => {
       const envelope = replay(CREATE.createRead, call) as {

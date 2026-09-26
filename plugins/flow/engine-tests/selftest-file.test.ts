@@ -214,7 +214,32 @@ describe('fileFailures against the fake tracker', () => {
       return (await inner?.(spec)) as never;
     };
     await fileFailures([check], META, { adapter: fake.adapter, sign, unsign: unsignedBody });
-    expect(seen).toEqual([`flow-selftest:${check.fingerprint}:`]);
+    expect(seen).toEqual([`flow-selftest:${check.fingerprint}:none`]);
+  });
+
+  it('files a failure again once its old item closed long ago: the key changes with what was filed', async () => {
+    // A key that stayed the same forever would return the old, closed item as
+    // "filed" and never file the failure again.
+    let clock = new Date('2026-01-01T12:00:00.000Z');
+    const fake = new FakeTracker({ items: [] }, { now: () => clock });
+    const deps = { adapter: fake.adapter, sign, unsign: unsignedBody };
+    const first = await fileFailures(
+      [check],
+      { ...META, evidenceAt: clock.toISOString(), now: clock },
+      deps
+    );
+    expect(first.filed.map((f) => f.identifier)).toEqual(['FAKE-1']);
+    clock = new Date('2026-01-02T12:00:00.000Z');
+    fake.mergePr({ body: 'Closes FAKE-1' });
+
+    clock = new Date('2026-06-01T12:00:00.000Z');
+    const later = await fileFailures(
+      [check],
+      { ...META, evidenceAt: clock.toISOString(), now: clock },
+      deps
+    );
+    expect(later.filed.map((f) => f.identifier)).toEqual(['FAKE-2']);
+    expect(fake.backlog.items.map((i) => i.identifier)).toEqual(['FAKE-1', 'FAKE-2']);
   });
 
   it('creates the item after dedupe when the adapter can, and only comments the next time', async () => {
