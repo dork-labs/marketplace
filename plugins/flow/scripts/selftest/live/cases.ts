@@ -23,6 +23,7 @@ import path from 'node:path';
 
 import type { FakeBacklog } from '../../tracker/fake.ts';
 import type { WorkItem } from '../../tracker/types.ts';
+import type { ToolUse } from './breach.ts';
 
 /** What an oracle reads. */
 export interface OracleInput {
@@ -32,6 +33,8 @@ export interface OracleInput {
   before: FakeBacklog;
   /** The fake's store after the run. */
   after: FakeBacklog;
+  /** What the session loaded and did, from its stream. */
+  stream: { slashCommands?: string[]; toolUses: readonly ToolUse[] };
 }
 
 /** A case that cannot run today, with the reason; reported as a skip, never a pass. */
@@ -159,7 +162,16 @@ export const LIVE_CASES: readonly LiveCase[] = [
     backlog: backlog([
       item('FAKE-1', { title: 'An item already in the tracker', stateCategory: 'backlog' }),
     ]),
-    oracle: ({ before, after }) => {
+    oracle: ({ before, after, stream }) => {
+      // "Nothing happened" passes only when flow was really there: the
+      // session loaded /flow:capture, or ran the flow command.
+      const loaded = stream.slashCommands?.includes('flow:capture') === true;
+      const ranFlow = stream.toolUses.some(
+        (u) => typeof u.input.command === 'string' && /scripts\/flow\.ts\b/.test(u.input.command)
+      );
+      if (!loaded && !ranFlow) {
+        return 'the session neither loaded /flow:capture nor ran the flow command: the plugin may not have loaded';
+      }
       // The flow command has no create verb, so the only honest outcome is
       // no new item: the skill says to say so and stop, never to fabricate.
       const added = after.items.filter((i) => find(before, i.identifier) === undefined);

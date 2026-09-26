@@ -227,16 +227,6 @@ Runs `flow status`: every item in flight (with its worktree, branch and session)
 
 Checks this flow install in a few seconds, for free and offline: the adapter checker, your settings and their schema, and flow's own instructions (word budgets, copied rules, broken links, schedule settings). A skipped check is listed as skipped, never as passed. Add `--strict` to fail on a skip.
 
-#### Running the live tier
-
-The live tier gives a few stage commands to a real Claude session and checks what they did to a fake tracker. **It costs money**, so it runs only when you ask for it, from a terminal:
-
-```bash
-FLOW_SELFTEST_LIVE=1 node --experimental-strip-types <flow-root>/scripts/selftest.ts --tier live
-```
-
-Without `FLOW_SELFTEST_LIVE=1` it refuses, even if you have a key set, and it never runs in CI. It pays with `ANTHROPIC_API_KEY`, then `CLAUDE_CODE_OAUTH_TOKEN`, then your `claude` sign-in, and the report says which one paid. It stops starting new checks once it has spent `selfImprovement.selftest.liveBudgetUsd` ($1.00 by default); `--max-usd` changes that.
-
 ## Doing one tracker step yourself
 
 Every stage command moves the item in the tracker with the `flow` command. You can run the same steps yourself, for example after merging a PR by hand. `<flow-root>` is the folder flow is installed in:

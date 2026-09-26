@@ -34,10 +34,17 @@ import { FLOW_ROOT, main } from '../scripts/selftest.ts';
 import { LIVE_CASES, type LiveCase, type RunnableCase } from '../scripts/selftest/live/cases.ts';
 import { liveRefusal, resolveCredential } from '../scripts/selftest/live/gate.ts';
 import { runLive } from '../scripts/selftest/live/run.ts';
-import { findBreach, makeSandbox } from '../scripts/selftest/live/sandbox.ts';
+import { findBreach } from '../scripts/selftest/live/breach.ts';
+import { makeSandbox } from '../scripts/selftest/live/sandbox.ts';
 import type { FakeBacklog } from '../scripts/tracker/fake.ts';
 
-/** The stub `claude`: `auth status` answers from STUB_LOGGED_IN; a run records itself and prints a stream. */
+/**
+ * The stub `claude`: `auth status` answers from STUB_LOGGED_IN; a run records
+ * itself and prints a stream. Unless STUB_NO_INIT is set, the stream starts
+ * with an init event naming the credential as Claude Code would (the API key
+ * when one is in its env, else `none`, or STUB_API_KEY_SOURCE) and the flow
+ * commands as loaded.
+ */
 const STUB = `#!/usr/bin/env node
 const fs = require('node:fs');
 const path = require('node:path');
@@ -57,15 +64,25 @@ fs.writeFileSync(path.join(dir, 'call-' + n + '.json'), JSON.stringify({
   adapterIsLink: fs.lstatSync(link).isSymbolicLink(),
   adapterTarget: fs.realpathSync(link),
 }));
-const events = process.env.STUB_STREAM
+const init = process.env.STUB_NO_INIT
+  ? ''
+  : JSON.stringify({
+      type: 'system',
+      subtype: 'init',
+      apiKeySource: process.env.STUB_API_KEY_SOURCE || (process.env.ANTHROPIC_API_KEY ? 'ANTHROPIC_API_KEY' : 'none'),
+      slash_commands: ['flow:capture', 'flow:decompose', 'flow:done'],
+    }) + '\\n';
+const events = init + (process.env.STUB_STREAM
   ? fs.readFileSync(process.env.STUB_STREAM, 'utf8')
   : [
-      { type: 'system', subtype: 'init' },
       { type: 'assistant', message: { content: [{ type: 'tool_use', name: 'Read', input: { file_path: 'README.md' } }] } },
       { type: 'result', subtype: 'success', total_cost_usd: Number(process.env.STUB_COST || '0.1'), num_turns: 3 },
-    ].map((e) => JSON.stringify(e)).join('\\n') + '\\n';
+    ].map((e) => JSON.stringify(e)).join('\\n') + '\\n');
 process.stdout.write(events);
 `;
+
+/** Each case spawns git and a child process; 5 s is too tight on a loaded machine. */
+const LIVE_TIMEOUT = 60_000;
 
 let tmp: string;
 let bin: string;
@@ -155,7 +172,7 @@ async function runMain(argv: string[], env: Record<string, string>) {
   return { code, stdout, stderr, project };
 }
 
-describe('the live tier gate', () => {
+describe('the live tier gate', { timeout: LIVE_TIMEOUT }, () => {
   it('refuses without FLOW_SELFTEST_LIVE=1, before anything runs, exit 2', async () => {
     // Purpose: a credential alone arms nothing. The key is set and the stub is
     // signed in, and the run still refuses, starting no tier and no child.
@@ -193,7 +210,7 @@ describe('the live tier gate', () => {
   });
 });
 
-describe('the live tier runner', () => {
+describe('the live tier runner', { timeout: LIVE_TIMEOUT }, () => {
   it('fails every case that would run when no credential answers, and runs none', async () => {
     // Purpose: no credential is never a pass and never a skip.
     const result = await runLive({
@@ -242,6 +259,9 @@ describe('the live tier runner', () => {
         LINEAR_API_TOKEN: 'lin',
         GH_TOKEN: 'gh',
         CLAUDECODE: '1',
+        ANTHROPIC_BASE_URL: 'https://proxy.example.test',
+        CLAUDE_CODE_USE_BEDROCK: '1',
+        CLAUDE_CODE_USE_VERTEX: '1',
       }),
       maxUsd: 1,
       cases: [trivial('env')],
@@ -254,7 +274,14 @@ describe('the live tier runner', () => {
         (k.endsWith('_API_KEY') && k !== 'ANTHROPIC_API_KEY') ||
         k.startsWith('COMPOSIO_') ||
         k.startsWith('LINEAR_') ||
-        ['CLAUDE_CODE_OAUTH_TOKEN', 'GH_TOKEN', 'FLOW_SELFTEST_LIVE', 'CLAUDECODE'].includes(k)
+        k.startsWith('CLAUDE_CODE_USE_') ||
+        [
+          'CLAUDE_CODE_OAUTH_TOKEN',
+          'GH_TOKEN',
+          'FLOW_SELFTEST_LIVE',
+          'CLAUDECODE',
+          'ANTHROPIC_BASE_URL',
+        ].includes(k)
     );
     expect(leaked).toEqual([]);
     expect(env.FLOW_RUNTIME).toBe('claude-code');
@@ -287,6 +314,7 @@ describe('the live tier runner', () => {
     const after = (flag: string) => argv[argv.indexOf(flag) + 1];
     expect(argv[0]).toBe('-p');
     expect(argv).toContain('--strict-mcp-config');
+    expect(after('--setting-sources')).toBe('project,local');
     expect(after('--permission-mode')).toBe('dontAsk');
     expect(after('--max-budget-usd')).toBe('0.75');
     expect(after('--plugin-dir')).toBe(FLOW_ROOT);
@@ -330,16 +358,63 @@ describe('the live tier runner', () => {
     // Purpose: a child that died mid-run proves nothing, whatever the store says.
     const result = await runLive({
       flowRoot: FLOW_ROOT,
-      env: armed({ STUB_STREAM: stream([{ type: 'system', subtype: 'init' }]) }),
+      env: armed({ STUB_STREAM: stream([]) }),
       maxUsd: 1,
       cases: [trivial('crash')],
     });
     expect(result.checks[0].status).toBe('fail');
     expect(result.checks[0].detail).toMatch(/ended without a result/);
   });
+
+  it('charges a run that reported no cost everything it was allowed, and stops there', async () => {
+    // Purpose: an unfinished run (timeout, crash, no result) may have spent up
+    // to its --max-budget-usd; counting it as $0 lets the total pass the cap.
+    const result = await runLive({
+      flowRoot: FLOW_ROOT,
+      env: armed({ STUB_STREAM: stream([]) }),
+      maxUsd: 0.8,
+      cases: [trivial('a'), trivial('b')],
+    });
+    expect(result.checks[0]).toMatchObject({ status: 'fail', costUsd: 0.8 });
+    expect(result.checks[0].detail).toMatch(/\$0\.8000 charged, none reported/);
+    expect(result.checks[1].status).toBe('skip');
+    expect(result.checks[1].detail).toMatch(/^budget reached/);
+    expect(result.spentUsd).toBeCloseTo(0.8);
+    expect(calls()).toHaveLength(1);
+  });
+
+  it('fails a case when the session says a different credential paid than the report names', async () => {
+    // Purpose: the report's credentialSource must be the bill that was
+    // reached. An apiKeyHelper or another route shows up in init's apiKeySource.
+    for (const [extra, source] of [
+      [{ STUB_API_KEY_SOURCE: 'apiKeyHelper' }, 'apiKeyHelper'],
+      [{ STUB_NO_INIT: '1' }, 'missing'],
+    ] as const) {
+      const result = await runLive({
+        flowRoot: FLOW_ROOT,
+        env: armed(extra),
+        maxUsd: 1,
+        cases: [trivial('who-paid')],
+      });
+      expect(result.credentialSource).toBe('local-claude-login');
+      expect(result.checks[0].status).toBe('fail');
+      expect(result.checks[0].detail).toMatch(
+        new RegExp(
+          `did not pay with local-claude-login: its apiKeySource is ${source}, expected none`
+        )
+      );
+    }
+    const keyed = await runLive({
+      flowRoot: FLOW_ROOT,
+      env: armed({ ANTHROPIC_API_KEY: 'sk-x', STUB_API_KEY_SOURCE: 'none' }),
+      maxUsd: 1,
+      cases: [trivial('who-paid')],
+    });
+    expect(keyed.checks[0].detail).toMatch(/expected ANTHROPIC_API_KEY/);
+  });
 });
 
-describe('the breach check', () => {
+describe('the breach check', { timeout: LIVE_TIMEOUT }, () => {
   it('judges paths by realpath: an alias inside is fine, a link or /tmp out is a breach', () => {
     // Purpose: macOS temp folders are /var/... with the realpath /private/var/...;
     // comparing the strings would miss an escape through a link, or flag a
@@ -376,13 +451,96 @@ describe('the breach check', () => {
       findBreach([{ name: 'Bash', input: { command: `cat ${outside}/secret.txt` } }], bounds)
     ).toMatch(/named .*secret\.txt, outside/);
     expect(findBreach([{ name: 'Grep', input: { path: '~/.ssh' } }], bounds)).toMatch(/~\/\.ssh/);
-    for (const tool of ['linear', 'curl https://x.test', 'wget x', 'gh issue list']) {
+    for (const tool of [
+      'curl https://x.test',
+      'wget x',
+      'gh issue list',
+      'git log | xargs curl x',
+      `node -e "require('child_process').execSync('gh pr list')"`,
+      'node -e "1" # COMPOSIO',
+    ]) {
       expect(findBreach([{ name: 'Bash', input: { command: tool } }], bounds)).toMatch(/naming/);
+    }
+    for (const fine of ['git grep "linear-issue:"', 'git log --grep linear', 'node --ghost x']) {
+      expect(findBreach([{ name: 'Bash', input: { command: fine } }], bounds)).toBeUndefined();
+    }
+  });
+
+  it('allows writes in the sandbox only: through the adapter link, to the flow root, by redirect', () => {
+    // Purpose: the flow root is readable, never writable. The sandbox's
+    // adapter folder is a link into the plugin, so a write through it lands
+    // in the checkout the oracles run from.
+    const s = makeSandbox({ flowRoot: FLOW_ROOT, files: {}, backlog: { items: [] } });
+    try {
+      const bounds = { sandbox: s.dir, flowRoot: FLOW_ROOT, home: tmp };
+      const skill = '.agents/flow/adapters/fake/SKILL.md';
+      const one = (name: string, input: Record<string, unknown>) =>
+        findBreach([{ name, input }], bounds);
+      expect(one('Read', { file_path: skill })).toBeUndefined();
+      expect(one('Read', { file_path: path.join(FLOW_ROOT, 'scripts', 'flow.ts') })).toBe(
+        undefined
+      );
+      expect(one('Write', { file_path: 'notes/summary.md' })).toBeUndefined();
+      expect(one('Edit', { file_path: skill })).toMatch(
+        /^Edit wrote .*SKILL\.md, outside the sandbox/
+      );
+      expect(one('Edit', { file_path: path.join(s.dir, skill) })).toMatch(/outside the sandbox/);
+      expect(one('Write', { file_path: path.join(FLOW_ROOT, 'scripts', 'new.ts') })).toMatch(
+        /^Write wrote .*new\.ts, outside the sandbox/
+      );
+      expect(one('NotebookEdit', { notebook_path: `${FLOW_ROOT}/x.ipynb` })).toMatch(/wrote/);
+      expect(one('Bash', { command: `node x.js > ${skill}` })).toMatch(/wrote .*SKILL\.md/);
+      expect(one('Bash', { command: `git show HEAD:a 2>> ${FLOW_ROOT}/log` })).toMatch(/wrote/);
+      expect(one('Bash', { command: `git diff | tee out.txt ${FLOW_ROOT}/x` })).toMatch(/wrote/);
+      expect(one('Bash', { command: `git show HEAD:a > out.txt 2>/dev/null` })).toBeUndefined();
+      expect(
+        one('Bash', {
+          command: `node -e "require('fs').writeFileSync('${FLOW_ROOT}/scripts/x.ts', '')"`,
+        })
+      ).toMatch(/wrote .*scripts\/x\.ts/);
+      expect(
+        one('Bash', {
+          command: `node --experimental-strip-types ${FLOW_ROOT}/scripts/flow.ts next`,
+        })
+      ).toBeUndefined();
+    } finally {
+      s.cleanup();
+    }
+  });
+
+  it('flags a path it cannot follow: a .. out of the sandbox, the store variable, $VAR', () => {
+    // Purpose: the store is outside the project, reachable only by a path the
+    // earlier check missed: a relative `..`, the store's variable, or $HOME.
+    const s = makeSandbox({ flowRoot: FLOW_ROOT, files: {}, backlog: { items: [] } });
+    try {
+      const bounds = { sandbox: s.dir, flowRoot: FLOW_ROOT, home: tmp };
+      const bash = (command: string) => findBreach([{ name: 'Bash', input: { command } }], bounds);
+      expect(bash(`node -e "require('fs').writeFileSync('../store/backlog.json', '{}')"`)).toMatch(
+        /wrote \.\.\/store\/backlog\.json/
+      );
+      expect(
+        bash(`node -e "console.log(require('fs').readFileSync('../store/backlog.json'))"`)
+      ).toMatch(/named \.\.\/store\/backlog\.json, outside/);
+      expect(bash(`node -e "require('fs').readFileSync(process.env.FLOW_FAKE_BACKLOG)"`)).toMatch(
+        /read process\.env/
+      );
+      expect(bash(`node -e "require('fs').readFileSync(process.env['X'])"`)).toMatch(
+        /process\.env/
+      );
+      expect(bash('git show HEAD:a > $HOME/out')).toMatch(/used \$HOME as a path/);
+      expect(bash('node x.js "${TMPDIR}/y"')).toMatch(/used \$\{TMPDIR\} as a path/);
+      expect(findBreach([{ name: 'Read', input: { file_path: '$HOME/.ssh/id' } }], bounds)).toMatch(
+        /cannot follow/
+      );
+      expect(bash('git log -1 --format=%H')).toBeUndefined();
+      expect(bash('node ./scripts/a.js ../project/README.md')).toBeUndefined();
+    } finally {
+      s.cleanup();
     }
   });
 });
 
-describe('the live report', () => {
+describe('the live report', { timeout: LIVE_TIMEOUT }, () => {
   it('reports each case with its cost and turns, the skips with reasons, and who paid', async () => {
     // Purpose: the live tier writes the standard SelftestReport, plus the
     // credential that paid and each case's spend.
@@ -413,13 +571,16 @@ describe('the live report', () => {
   });
 });
 
-describe('the live oracles', { timeout: 30_000 }, () => {
+describe('the live oracles', { timeout: LIVE_TIMEOUT }, () => {
   /** The case by id. */
   function liveCase(id: string): RunnableCase {
     const found = LIVE_CASES.find((c) => c.id === id);
     if (found === undefined || found.skip !== undefined) throw new Error(`no runnable ${id}`);
     return found;
   }
+
+  /** A stream in which the session loaded the flow commands. */
+  const loaded = { slashCommands: ['flow:capture', 'flow:decompose', 'flow:done'], toolUses: [] };
 
   /** Run the real flow CLI in a case's sandbox, against its store. */
   function flow(sandbox: { dir: string; backlogFile: string }, ...args: string[]) {
@@ -441,7 +602,7 @@ describe('the live oracles', { timeout: 30_000 }, () => {
     try {
       act(sandbox);
       const after = JSON.parse(readFileSync(sandbox.backlogFile, 'utf8')) as FakeBacklog;
-      return await c.oracle({ sandbox: sandbox.dir, before: c.backlog, after });
+      return await c.oracle({ sandbox: sandbox.dir, before: c.backlog, after, stream: loaded });
     } finally {
       sandbox.cleanup();
     }
@@ -508,6 +669,33 @@ describe('the live oracles', { timeout: 30_000 }, () => {
         writeFileSync(s.backlogFile, JSON.stringify(store));
       })
     ).toMatch(/completed without agent\/completed/);
+  });
+
+  it('capture fails when the plugin never loaded, even though nothing changed', async () => {
+    // Purpose: "nothing happened" is a pass only when flow was there to do it.
+    const c = liveCase('capture');
+    const input = { sandbox: tmp, before: c.backlog, after: c.backlog };
+    expect(await c.oracle({ ...input, stream: { toolUses: [] } })).toMatch(
+      /plugin may not have loaded/
+    );
+    expect(await c.oracle({ ...input, stream: { slashCommands: ['help'], toolUses: [] } })).toMatch(
+      /plugin may not have loaded/
+    );
+    expect(
+      await c.oracle({
+        ...input,
+        stream: {
+          toolUses: [
+            {
+              name: 'Bash',
+              input: {
+                command: `node --experimental-strip-types ${FLOW_ROOT}/scripts/flow.ts status`,
+              },
+            },
+          ],
+        },
+      })
+    ).toBeUndefined();
   });
 
   it('capture fails when an item appears, since flow has no create verb to make one', async () => {

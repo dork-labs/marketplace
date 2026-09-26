@@ -13,9 +13,19 @@ flow tests itself, keeps notes while it works, and once a week can suggest fixes
 
 - **fast**: your settings, the tracker adapter, and flow's own instructions (length, broken links, repeated rules). Free, offline, a few seconds.
 - **scenarios**: whole pieces of work played through the real flow commands against a pretend tracker. Also free and offline.
-- **live**: a real agent session. It costs money, so it will always need you to turn it on. Not built yet.
+- **live**: a real agent session that runs a few flow commands against the pretend tracker. It costs money, so you turn it on each time (see below).
 
 Each run is saved in `.dork/flow/selftest/`.
+
+### Running the live tier
+
+It costs money, so it runs only when you set `FLOW_SELFTEST_LIVE=1`, never in CI, even when a key is set:
+
+```bash
+FLOW_SELFTEST_LIVE=1 node --experimental-strip-types <flow-root>/scripts/selftest.ts --tier live
+```
+
+It pays with `ANTHROPIC_API_KEY`, then `CLAUDE_CODE_OAUTH_TOKEN`, then your `claude` sign-in, and the report says which one paid. It starts no new check once it has spent `selfImprovement.selftest.liveBudgetUsd` ($1.00 by default, or `--max-usd`).
 
 ## The journal
 

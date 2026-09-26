@@ -12,7 +12,8 @@ you until you **reinstall it** (Marketplace → flow → reinstall, or re-run yo
 - It refuses unless you set `FLOW_SELFTEST_LIVE=1`, even when a key is set, and it never runs in CI.
 - It pays with `ANTHROPIC_API_KEY`, then `CLAUDE_CODE_OAUTH_TOKEN`, then your `claude` sign-in, and the report says which one paid. With none, every check fails.
 - It stops starting checks once it has spent `selfImprovement.selftest.liveBudgetUsd` ($1.00 by default), or the amount you give `--max-usd`. Each check reports its cost and turns.
-- The session gets no tracker keys and no MCP servers. A check fails if the session tries composio, linear, curl, wget or gh, or touches a file outside its folder and flow.
+- The session gets no tracker keys, no MCP servers and none of your own plugins, hooks or settings. A check fails if the session runs composio, curl, wget or gh, reads a file outside its folder and flow, or writes anywhere outside its folder. It also fails if the session paid with a different credential than the report names.
+- A session that ends without reporting its cost counts as having spent everything it was allowed.
 - Two checks are listed as skipped for now, with the reason: triage and filing a follow-up. flow has no command yet to set an item's type or priority, or to create an item.
 - `--tier all` now runs all three tiers. The default is still the two free ones.
 

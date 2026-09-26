@@ -69,12 +69,12 @@ const FLOW_BUNDLE_ROOTS = [
  * assertions live in `engine-tests/` — which is NOT a bundle root — so they are
  * never scanned and need no entry here.
  *
- * - `scripts/selftest/live/sandbox.ts`: the live self-test's breach check names
- *   `composio` in its DENYLIST, so a live run that calls it fails. It is the one
- *   place that must spell the word to forbid it.
+ * - `scripts/selftest/live/denylist.ts`: the live self-test's breach check names
+ *   `composio` in its denylist, so a live run that calls it fails. It is the one
+ *   small file that must spell the word to forbid it, and holds nothing else.
  */
 const SCAN_EXCLUSIONS = new Set<string>([
-  path.join(pluginRoot, 'scripts', 'selftest', 'live', 'sandbox.ts'),
+  path.join(pluginRoot, 'scripts', 'selftest', 'live', 'denylist.ts'),
 ]);
 
 /**

@@ -38,7 +38,8 @@ import {
   type CredentialSource,
   type LiveCredential,
 } from './gate.ts';
-import { childEnv, findBreach, makeSandbox, type ToolUse } from './sandbox.ts';
+import { findBreach, type ToolUse } from './breach.ts';
+import { childEnv, makeSandbox } from './sandbox.ts';
 
 /** The ceiling when neither `--max-usd` nor config says otherwise, in US dollars. */
 export const DEFAULT_LIVE_BUDGET_USD = 1.0;
@@ -53,6 +54,24 @@ export const ALLOWED_TOOLS: readonly string[] = [
   'Bash(node *)',
   'Bash(git *)',
 ];
+
+/**
+ * The settings the child loads: the sandbox's own only (it has none). The
+ * person's user settings would bring their plugins, hooks, permission rules
+ * and any `apiKeyHelper`, so the flow plugin comes from `--plugin-dir` alone.
+ */
+export const SETTING_SOURCES = 'project,local';
+
+/**
+ * What the init event's `apiKeySource` says for each credential. Claude Code
+ * names the API key it read; a subscription sign-in or an OAuth token is not
+ * an API key, and reads `none`.
+ */
+export const EXPECTED_API_KEY_SOURCE: Readonly<Record<CredentialSource, string>> = {
+  'anthropic-api-key': 'ANTHROPIC_API_KEY',
+  'claude-oauth-token': 'none',
+  'local-claude-login': 'none',
+};
 
 /** How long one case may run before it is stopped. */
 const CASE_TIMEOUT_MS = 15 * 60_000;
@@ -87,6 +106,10 @@ export interface LiveTierResult {
 export interface StreamSummary {
   /** Every tool call, in order. */
   toolUses: ToolUse[];
+  /** The init event's `apiKeySource`: which credential Claude Code says it is using. */
+  apiKeySource?: string;
+  /** The init event's `slash_commands`: what the session loaded. */
+  slashCommands?: string[];
   /** The `result` event's `total_cost_usd`, when there was one. */
   costUsd?: number;
   /** The `result` event's `num_turns`. */
@@ -114,7 +137,14 @@ export function parseStream(text: string): StreamSummary {
     } catch {
       continue;
     }
-    if (event.type === 'assistant') {
+    if (event.type === 'system' && event.subtype === 'init') {
+      if (typeof event.apiKeySource === 'string') summary.apiKeySource = event.apiKeySource;
+      if (Array.isArray(event.slash_commands)) {
+        summary.slashCommands = event.slash_commands.filter(
+          (c): c is string => typeof c === 'string'
+        );
+      }
+    } else if (event.type === 'assistant') {
       const content = (event.message as { content?: unknown } | undefined)?.content;
       if (!Array.isArray(content)) continue;
       for (const block of content as Record<string, unknown>[]) {
@@ -165,6 +195,8 @@ export function childArgs(
     String(runCase.maxTurns),
     '--max-budget-usd',
     usd(options.remainingUsd),
+    '--setting-sources',
+    SETTING_SOURCES,
     '--strict-mcp-config',
     '--mcp-config',
     options.mcpConfig,
@@ -259,8 +291,12 @@ async function runOne(
     const env = childEnv(context.env, context.credential, sandbox.backlogFile);
     const child = await runChild(args, { cwd: sandbox.dir, env, timeoutMs: context.timeoutMs });
     const stream = parseStream(child.stdout);
-    const spend = { costUsd: stream.costUsd ?? 0, turns: stream.turns ?? 0 };
-    const cost = `$${spend.costUsd.toFixed(4)}, ${spend.turns} turns`;
+    // A run that reported no cost (a timeout, a crash, no result event) is
+    // charged everything it was allowed, so the ceiling holds.
+    const allowed = Number(usd(context.remainingUsd));
+    const charged = stream.costUsd === undefined;
+    const spend = { costUsd: stream.costUsd ?? allowed, turns: stream.turns ?? 0 };
+    const cost = `$${spend.costUsd.toFixed(4)}${charged ? ' charged, none reported' : ''}, ${spend.turns} turns`;
 
     const breach = findBreach(stream.toolUses, {
       sandbox: sandbox.dir,
@@ -270,6 +306,16 @@ async function runOne(
     if (breach !== undefined) {
       return record(liveCase.id, 'fail', elapsed(), `breach: ${breach} (${cost})`, spend);
     }
+    const expected = EXPECTED_API_KEY_SOURCE[context.credential.source];
+    if (stream.apiKeySource !== expected) {
+      return record(
+        liveCase.id,
+        'fail',
+        elapsed(),
+        `the session did not pay with ${context.credential.source}: its apiKeySource is ${stream.apiKeySource ?? 'missing'}, expected ${expected} (${cost})`,
+        spend
+      );
+    }
     if (!stream.finished) {
       const why = child.error ?? `exit ${child.code}`;
       const said = child.stderr.trim().split('\n')[0] ?? '';
@@ -277,7 +323,7 @@ async function runOne(
         liveCase.id,
         'fail',
         elapsed(),
-        `the run ended without a result (${why})${said === '' ? '' : `: ${said}`}`,
+        `the run ended without a result (${why}; ${cost})${said === '' ? '' : `: ${said}`}`,
         spend
       );
     }
@@ -297,6 +343,7 @@ async function runOne(
       sandbox: sandbox.dir,
       before: liveCase.backlog,
       after,
+      stream,
     });
     const ended =
       stream.subtype === undefined || stream.subtype === 'success' ? '' : `, ${stream.subtype}`;

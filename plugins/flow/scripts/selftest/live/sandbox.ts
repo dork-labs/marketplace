@@ -17,9 +17,8 @@
  *   or edits the store by hand fails the breach check.
  * - `mcp.json`: an MCP config with no servers, for `--strict-mcp-config`.
  *
- * This module also builds the child's environment ({@link childEnv}) and
- * checks the stream afterwards for anything that left the fences
- * ({@link findBreach}).
+ * This module also builds the child's environment ({@link childEnv}). The
+ * breach check that reads the stream afterwards is `breach.ts`.
  *
  * Dependency-free (node builtins only).
  *
@@ -27,15 +26,7 @@
  */
 
 import { execFileSync } from 'node:child_process';
-import {
-  existsSync,
-  mkdirSync,
-  mkdtempSync,
-  realpathSync,
-  rmSync,
-  symlinkSync,
-  writeFileSync,
-} from 'node:fs';
+import { mkdirSync, mkdtempSync, realpathSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 
@@ -125,14 +116,13 @@ export function makeSandbox(options: {
 
 /**
  * Variables no live child keeps whatever their name says: the second of the
- * two pinned credentials (the chosen one is put back), another way to reach
- * Anthropic, the forge's tokens, and the flag itself, so an agent in the child
- * that runs the self-test cannot start a second paid run.
+ * two pinned credentials (the chosen one is put back), the forge's tokens, and
+ * the flag itself, so an agent in the child that runs the self-test cannot
+ * start a second paid run.
  */
 const ALWAYS_STRIPPED: readonly string[] = [
   API_KEY_VAR,
   OAUTH_TOKEN_VAR,
-  'ANTHROPIC_AUTH_TOKEN',
   'GH_TOKEN',
   'GITHUB_TOKEN',
   LIVE_FLAG,
@@ -140,7 +130,10 @@ const ALWAYS_STRIPPED: readonly string[] = [
 
 /**
  * Whether a variable is stripped from the child: every `*_API_KEY`, every
- * `COMPOSIO_*` and `LINEAR_*`, and {@link ALWAYS_STRIPPED}.
+ * `COMPOSIO_*` and `LINEAR_*`, every `ANTHROPIC_*` (another token, or
+ * `ANTHROPIC_BASE_URL` routing the run to a different bill), every
+ * `CLAUDE_CODE_USE_*` (Bedrock, Vertex, Foundry), and {@link ALWAYS_STRIPPED}.
+ * The one chosen credential is put back afterwards.
  *
  * @param name - The variable's name.
  * @returns `true` when the child must not see it.
@@ -150,6 +143,8 @@ export function isStripped(name: string): boolean {
     name.endsWith('_API_KEY') ||
     name.startsWith('COMPOSIO_') ||
     name.startsWith('LINEAR_') ||
+    name.startsWith('ANTHROPIC_') ||
+    name.startsWith('CLAUDE_CODE_USE_') ||
     ALWAYS_STRIPPED.includes(name)
   );
 }
@@ -172,99 +167,4 @@ export function childEnv(
   const next = childRuntimeEnv(env, 'claude-code', 'selftest');
   for (const name of Object.keys(next)) if (isStripped(name)) delete next[name];
   return { ...next, ...credential.env, [FAKE_BACKLOG_ENV]: backlogFile };
-}
-
-/** A tool call the child made, as the stream reports it. */
-export interface ToolUse {
-  /** The tool, for example `Bash` or `Read`. */
-  name: string;
-  /** Its input. */
-  input: Record<string, unknown>;
-}
-
-/** A command naming one of these is a breach: each is a way to a real tracker, forge or network. */
-const FORBIDDEN_COMMAND = /\b(composio|linear|curl|wget|gh)\b/i;
-
-/** The input fields that name a file or folder. */
-const PATH_FIELDS: readonly string[] = ['file_path', 'path', 'notebook_path'];
-
-/**
- * Absolute (or `~`) paths inside a shell command: a token starting with `/` or
- * `~/`, after the start, a space, a quote, `=`, `(` or a redirection.
- */
-const COMMAND_PATH = /(?:^|[\s'"=(<>])((?:\/|~\/)[^\s'"`;|&<>()]*)/g;
-
-/** Paths a command may name that are not files a case could reach anything through. */
-const HARMLESS_PATHS: readonly string[] = ['/dev/null', '/dev/stdout', '/dev/stderr', '/dev/stdin'];
-
-/**
- * The realpath of a path that may not exist yet: the realpath of its nearest
- * existing ancestor, with the rest appended. A write to a new file under a
- * link is then judged by where the link goes.
- */
-function realpathOf(p: string): string {
-  let current = path.resolve(p);
-  const rest: string[] = [];
-  while (!existsSync(current)) {
-    const parent = path.dirname(current);
-    if (parent === current) break;
-    rest.unshift(path.basename(current));
-    current = parent;
-  }
-  let real: string;
-  try {
-    real = realpathSync(current);
-  } catch {
-    real = current;
-  }
-  return path.join(real, ...rest);
-}
-
-/** Whether `child` is `base` or inside it. */
-function within(child: string, base: string): boolean {
-  return child === base || child.startsWith(`${base}${path.sep}`);
-}
-
-/**
- * Find the first tool call that left the fences: a command naming composio,
- * linear, curl, wget or gh, or a path whose realpath is outside the realpaths
- * of both the sandbox project and the flow root. On macOS the temp folder is
- * `/var/...` but its realpath is `/private/var/...`, so both sides are
- * compared as realpaths. A relative path is read against the project.
- *
- * Call it before the sandbox is deleted: realpaths are read from disk.
- *
- * @param uses - The child's tool calls.
- * @param bounds - The sandbox project, the flow root and the home folder (for `~`).
- * @returns What breached, in one line, or `undefined`.
- */
-export function findBreach(
-  uses: readonly ToolUse[],
-  bounds: { sandbox: string; flowRoot: string; home: string }
-): string | undefined {
-  const allowed = [realpathOf(bounds.sandbox), realpathOf(bounds.flowRoot)];
-  const outside = (raw: string): boolean => {
-    const expanded = raw.startsWith('~/') ? path.join(bounds.home, raw.slice(2)) : raw;
-    const real = realpathOf(path.resolve(bounds.sandbox, expanded));
-    return !allowed.some((base) => within(real, base));
-  };
-  for (const use of uses) {
-    const command = use.input.command;
-    if (typeof command === 'string') {
-      const named = FORBIDDEN_COMMAND.exec(command);
-      if (named !== null) return `${use.name} ran a command naming ${named[1]}: ${command}`;
-      for (const match of command.matchAll(COMMAND_PATH)) {
-        const p = match[1];
-        if (HARMLESS_PATHS.includes(p)) continue;
-        if (outside(p)) return `${use.name} named ${p}, outside the sandbox and the flow root`;
-      }
-    }
-    for (const field of PATH_FIELDS) {
-      const value = use.input[field];
-      if (typeof value === 'string' && value !== '' && outside(value)) {
-        return `${use.name} reached ${value}, outside the sandbox and the flow root`;
-      }
-    }
-  }
-  return undefined;
 }
