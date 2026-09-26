@@ -86,6 +86,20 @@ function writeConfig(settings: object): void {
 }
 
 describe('flow note', () => {
+  it('stamps the runtime and harness from its own environment (a Codex-shaped run)', async () => {
+    await flow(['note', '--kind', 'friction', 'the claim step was unclear'], {
+      CODEX_THREAD_ID: 'thr_1',
+    });
+    await flow(['note', '--kind', 'friction', 'again'], {
+      CLAUDECODE: '1',
+      FLOW_HARNESS: 'dorkos',
+    });
+    expect(journalLines().map((l) => [l.runtime, l.harness])).toEqual([
+      ['codex', 'codex'],
+      ['claude-code', 'dorkos'],
+    ]);
+  });
+
   it('writes one schema-valid note line and exits 0', async () => {
     const { code, stdout } = await flow(
       [
@@ -362,7 +376,7 @@ describe('flow journal tail', () => {
 
   it('prints aligned text by default', async () => {
     const { stdout } = await flow(['journal', 'tail', '-n', '1']);
-    expect(stdout).toMatch(/^2026-09-26T12:00:00\.000Z {2}ci {2}- {2}\{"pr":7,/);
+    expect(stdout).toMatch(/^2026-09-26T12:00:00\.000Z {2}ci {2}unknown {2}- {2}\{"pr":7,/);
   });
 
   it('says so when nothing matches', async () => {

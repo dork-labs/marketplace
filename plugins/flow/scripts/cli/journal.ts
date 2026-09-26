@@ -19,6 +19,7 @@ import {
   NAME_MAX,
   append,
   buildLine,
+  runtimeOf,
   journalFor,
   read,
   type JournalEvent,
@@ -118,6 +119,7 @@ async function record(
     now: ctx.now(),
     flowVersion: flowVersion(ctx.flowRoot),
     session: ctx.sessionId,
+    ...runtimeOf(ctx.env),
   };
   const { JournalLineSchema } = await import('../journal-schema.ts');
   const checked = JournalLineSchema.safeParse(buildLine(event, meta));
@@ -171,8 +173,18 @@ function tail(ctx: VerbContext, settings: JournalSettings, extra: string | undef
         : `No ${kind} lines in the journal.`
       : formatColumns(
           shown.map((line) => {
-            const { v: _v, ts, kind: k, flow: _f, session: _s, item, ...fields } = line;
-            return [ts, k, item ?? '-', JSON.stringify(fields)];
+            const {
+              v: _v,
+              ts,
+              kind: k,
+              flow: _f,
+              session: _s,
+              runtime,
+              harness: _h,
+              item,
+              ...fields
+            } = line;
+            return [ts, k, runtime ?? 'unknown', item ?? '-', JSON.stringify(fields)];
           })
         );
   return {
