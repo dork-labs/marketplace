@@ -1,6 +1,6 @@
 {
   "contract": "fleet",
-  "about": "Reading account identities from <dorkHome>/config.json at runtimes.claudeCode.accounts (spec flow-cli-core 1.1a). input.config is the parsed config.json, or null when the file is missing. expected.accounts lists every account read, in file order, as { id, path, label, color, routable }; routable is false for a row whose id fails ^[a-z0-9]+(-[a-z0-9]+)*$ (it has no usage file and reads as kept-out). expected.warnings is a multiset of warning codes (compare sorted; order and message text are not part of the contract). Before minting any missing id, every non-empty string id already in the array is reserved, including ids on later rows. A path is absolute when it starts with '/', a drive letter and a separator (C:\\ or C:/), or '\\\\'.",
+  "about": "Reading account identities from <dorkHome>/config.json at runtimes.claudeCode.accounts (spec flow-cli-core 1.1a). input.config is the parsed config.json, or null when the file is missing. expected.accounts lists every account read, in file order, as { id, path, label, color, routable }; routable is false for a row whose id fails ^[a-z0-9]+(-[a-z0-9]+)*$ (it has no usage file and reads as kept-out). expected.warnings is a multiset of warning codes (compare sorted; order and message text are not part of the contract). Ids are minted over EVERY object row (a row with no id or an empty-string id), in array order, BEFORE any row is skipped for its path, exactly as DorkOS backfills them: first every non-empty string id already in the array is reserved (including ids on later rows and on rows later skipped), then each row missing an id gets mint(label if it is a string else null, path if it is a string else '', taken) and its id joins taken. Non-object rows get no id and take none. A path is absolute when it starts with '/', a drive letter and a separator (C:\\ or C:/), or '\\\\'.",
   "cases": [
     {
       "name": "no config file means no accounts",
@@ -75,6 +75,33 @@
           { "id": "claude-spare", "path": "/Users/me/.claude-spare", "label": null, "color": null, "routable": true }
         ],
         "warnings": ["id-minted", "id-minted"]
+      }
+    },
+    {
+      "name": "ids are minted before bad-path rows are skipped, so later ids match DorkOS",
+      "input": {
+        "config": {
+          "runtimes": {
+            "claudeCode": {
+              "accounts": [
+                { "path": "relative/claude" },
+                "not a row",
+                { "path": "/x/claude" },
+                { "id": "", "label": 7, "path": "/y/claude" },
+                { "label": "Spare" },
+                { "path": "/z/spare" }
+              ]
+            }
+          }
+        }
+      },
+      "expected": {
+        "accounts": [
+          { "id": "claude-2", "path": "/x/claude", "label": null, "color": null, "routable": true },
+          { "id": "claude-3", "path": "/y/claude", "label": null, "color": null, "routable": true },
+          { "id": "spare-2", "path": "/z/spare", "label": null, "color": null, "routable": true }
+        ],
+        "warnings": ["path-invalid", "row-invalid", "id-minted", "id-minted", "label-invalid", "path-invalid", "id-minted"]
       }
     },
     {

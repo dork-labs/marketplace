@@ -28,7 +28,7 @@
 import os from 'node:os';
 import path from 'node:path';
 import { readJsonFile, updateJsonFile, type AtomicUpdateResult } from '../atomic-json.ts';
-import { UsageError } from '../errors.ts';
+import { PreconditionError, UsageError } from '../errors.ts';
 import { isValidAccountId, readWindow, type FleetWarning, type Instant } from './usage-ledger.ts';
 
 /** A display color: `#rrggbb`, lowercase. */
@@ -166,9 +166,11 @@ function isAbsolutePath(value: unknown): value is string {
  * Read the account identities out of a parsed `config.json` (spec §1.1a).
  *
  * - A missing file (`null`/`undefined`) or a missing key means no accounts.
- * - Rows without an absolute `path` are skipped (`path-invalid`).
- * - A row with no id gets one by {@link mintAccountId} (`id-minted`). Every id
- *   already present is reserved first, including ids on later rows.
+ * - A row with no id gets one by {@link mintAccountId} (`id-minted`), exactly as
+ *   DorkOS backfills it: over every object row in array order, BEFORE any row
+ *   is skipped, with every id already present reserved first (including ids on
+ *   later rows).
+ * - Rows without an absolute `path` are then skipped (`path-invalid`).
  * - A duplicate id keeps the first row (`id-duplicate`).
  * - An id failing the pattern is listed with `routable: false` (`id-invalid`).
  * - A bad `color` or `label` reads as `null` (`color-invalid`, `label-invalid`).
@@ -195,14 +197,30 @@ export function readIdentities(config: unknown): {
     return { accounts, warnings };
   }
 
+  // Ids are minted over EVERY object row, in array order, before any row is
+  // skipped: the same row selection, order and taken-set as DorkOS's
+  // backfillMissingAccountIds. Skipping a bad-path row first would shift the
+  // ids of later rows, and the two sides would write different ledger files.
   const taken = new Set<string>();
   for (const row of rows) {
     if (isObject(row) && typeof row.id === 'string' && row.id.length > 0) taken.add(row.id);
   }
+  const ids = rows.map((row): { id: string; minted: boolean } | null => {
+    if (!isObject(row)) return null;
+    if (typeof row.id === 'string' && row.id.length > 0) return { id: row.id, minted: false };
+    const id = mintAccountId({
+      label: typeof row.label === 'string' ? row.label : null,
+      path: typeof row.path === 'string' ? row.path : '',
+      taken,
+    });
+    taken.add(id);
+    return { id, minted: true };
+  });
   const seen = new Set<string>();
 
   rows.forEach((row, index) => {
-    if (!isObject(row)) {
+    const resolved = ids[index];
+    if (!isObject(row) || resolved === null) {
       warnings.push({
         code: 'row-invalid',
         message: `Account row ${index} is not an object; skipped it.`,
@@ -225,12 +243,8 @@ export function readIdentities(config: unknown): {
         message: `Account row ${index} has a label that is not text; read it as none.`,
       });
     }
-    let id: string;
-    if (typeof row.id === 'string' && row.id.length > 0) {
-      id = row.id;
-    } else {
-      id = mintAccountId({ label, path: row.path, taken });
-      taken.add(id);
+    const id = resolved.id;
+    if (resolved.minted) {
       warnings.push({
         code: 'id-minted',
         message: `Account row ${index} had no id; read it as "${id}".`,
@@ -519,16 +533,30 @@ export function loadFleetPolicy(
  * @param dorkHome - The resolved DorkOS home.
  * @param mutate - Raw file in, raw file out.
  * @returns What happened to the file.
+ * @throws {PreconditionError} When the file is another version; it is left as it is.
  */
 export function updateFleetPolicy(
   dorkHome: string,
   mutate: (raw: unknown) => unknown
 ): Promise<AtomicUpdateResult> {
-  return updateJsonFile(fleetPolicyPath(dorkHome), mutate);
+  const file = fleetPolicyPath(dorkHome);
+  return updateJsonFile(file, (raw) => {
+    if (isObject(raw) && raw.v !== undefined && raw.v !== FLEET_POLICY_VERSION) {
+      throw new PreconditionError(
+        `${file} is version ${JSON.stringify(raw.v)}; this flow writes version ${FLEET_POLICY_VERSION} and will not downgrade it. Update flow, then retry.`
+      );
+    }
+    return mutate(raw);
+  });
 }
 
 /** The raw file as a v1 object to edit (a copy), creating one when missing or unusable. */
 function editable(raw: unknown): Record<string, unknown> {
+  if (isObject(raw) && raw.v !== undefined && raw.v !== FLEET_POLICY_VERSION) {
+    throw new PreconditionError(
+      `fleet.json is version ${JSON.stringify(raw.v)}; this flow writes version ${FLEET_POLICY_VERSION} and will not downgrade it. Update flow, then retry.`
+    );
+  }
   return isObject(raw) ? { ...raw, v: FLEET_POLICY_VERSION } : { v: FLEET_POLICY_VERSION };
 }
 
@@ -557,6 +585,7 @@ export interface AccountPolicyPatch {
  * @param patch - The fields to set or delete.
  * @returns The new raw file.
  * @throws {UsageError} On an id or value the contract does not allow.
+ * @throws {PreconditionError} When the file is another version (never downgraded).
  */
 export function setAccountPolicy(
   raw: unknown,
@@ -618,6 +647,7 @@ export function setAccountPolicy(
  * @param handoff - `auto`, `ask`, or `null` to delete it (back to the default, auto).
  * @returns The new raw file.
  * @throws {UsageError} On a value other than auto, ask or null.
+ * @throws {PreconditionError} When the file is another version (never downgraded).
  */
 export function setHandoff(raw: unknown, handoff: HandoffMode | null): Record<string, unknown> {
   if (handoff !== null && handoff !== 'auto' && handoff !== 'ask') {

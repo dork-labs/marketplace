@@ -29,7 +29,7 @@ import {
   setHandoff,
   updateFleetPolicy,
 } from '../scripts/fleet/accounts.ts';
-import { UsageError } from '../scripts/errors.ts';
+import { PreconditionError, UsageError } from '../scripts/errors.ts';
 import {
   ledgerPath,
   readLedger,
@@ -161,6 +161,22 @@ describe('fleet.json', () => {
     );
     expect(() => setAccountPolicy(undefined, 'a', { repos: ['acme'] })).toThrow(UsageError);
     expect(() => setHandoff(undefined, 'later' as never)).toThrow(UsageError);
+  });
+
+  // Purpose: a writer never downgrades a fleet.json of another version: the
+  // write is refused naming the file and its version, and the file is untouched.
+  it('refuses to write a fleet.json of another version', async () => {
+    mkdirSync(path.join(home, 'flow'));
+    const bytes = JSON.stringify({ v: 2, accounts: { a: { role: 'main', tier: 'new' } } });
+    writeFileSync(fleetPolicyPath(home), bytes);
+    const write = updateFleetPolicy(home, (raw) => setHandoff(raw, 'ask'));
+    await expect(write).rejects.toThrow(PreconditionError);
+    await expect(updateFleetPolicy(home, (raw) => raw)).rejects.toThrow(
+      new RegExp(`${fleetPolicyPath(home).replace(/[.*+?^${}()|[\]\\]/g, '\\$&')} is version 2`)
+    );
+    expect(readFileSync(fleetPolicyPath(home), 'utf8')).toBe(bytes);
+    expect(() => setAccountPolicy({ v: 2 }, 'a', { role: 'rotation' })).toThrow(PreconditionError);
+    expect(() => setHandoff({ v: '1' }, 'ask')).toThrow(PreconditionError);
   });
 
   // Purpose: the file-reading wrapper resolves the file it finds.
