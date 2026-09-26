@@ -429,7 +429,8 @@ interface DrainState {
   rev: number;                    // bumped by every write (§4.3)
   phase: 'working' | 'reviewing' | 'fixing' | 'pr-ready' | 'watching' | 'fixing-ci' | 'closing' | 'parked';
   worker: SessionHandle | null;
-  reviewer: (SessionHandle & { sha: string; worktree: string; token: string }) | null; // token: §4.5
+  reviewer: (SessionHandle & { sha: string; worktree: string; tokenHash: string; pending?: boolean }) | null; // tokenHash: §4.5
+  // worker handles carry pending?: boolean too (§4.3, intent before launch)
   pushedSha: string | null;       // last SHA the worker reported pushed
   reviewedSha: string | null;     // the SHA of the latest verdict
   verdict: 'clean' | 'changes' | null;
@@ -452,7 +453,9 @@ interface DrainState {
 
 - **Report-owned:** `pushedSha`, `verdict`, `reviewedSha`, `reviewRound`, `pr`, `checkpointAt`, `checkpointSha`. Only the verbs write them.
 - **Supervisor-owned:** everything else under `drain` and `limit`, plus the run's `account`, `host`, `sessionId`, `workerPid` on launch and handoff.
-- **Compare-and-set:** every write bumps `drain.rev` (an integer). The supervisor applies a pass's result for a run only if, re-read under the lock, `rev` still equals what it gathered. If a report landed in between, that run's decision is dropped and re-made next pass (its actions not yet taken are not taken).
+- **Compare-and-set:** every write by every writer (`flow checkpoint`, `flow report`, `flow pr`, `flow handoff`, the supervisor) bumps `drain.rev` (an integer). The supervisor applies a pass's result for a run only if, re-read under the lock, `rev` still equals what it gathered. If a report landed in between, that run's decision is dropped and re-made next pass.
+- **Intent before launch:** a pass that will start a session first writes, by that compare-and-set, the intent: the minted `sessionId`, the role, and for a reviewer the SHA and the token's hash, in the handle slot with `pending: true`. Only then does it call `start`. The resulting handle is written by a second update that needs no unchanged `rev` (the slot is supervisor-owned and the intent already claimed it). A pass that dies between the two leaves a pending slot, which the next pass resolves by looking for the minted session (below).
+- **Adopt before releasing:** a pending slot, or a `queued` run with no handle, older than the start timeout, is checked for its minted session first (cli and cmux: `sessions/*.json` and the transcript under the account dir; DorkOS: `GET /api/sessions/<id>`). Found → adopted into the slot. Not found → the slot is cleared (a `queued` worker's claim is released to ready). A live session is never orphaned into a second writer.
 - **One handoff at a time:** a handoff first sets `limit.state = 'handing-off'` with a fresh `handoffToken`, by compare-and-set on the old `sessionId`. A second handoff (the supervisor and `flow handoff` at once) finds the state taken and stops. If the starting session fails, the state goes back to `awaiting-handoff`.
 
 #### 4.4 The drain reducer (`scripts/drain/drain-step.ts`, pure)
@@ -484,7 +487,7 @@ interface DrainState {
 | `reviewing` | verdict `clean` at S, but the origin head moved past S | `reviewing` | if `pushedSha` is the head, start a reviewer there; else send `continue` ("report your push with `flow report pushed`") |
 | `pr-ready`, `watching` | report `pushed` S ≠ `reviewedSha` | `reviewing` | (`flow report` disarmed an armed PR) start reviewer at S, `deltaFrom` the last reviewed SHA |
 | `working`, `reviewing`, `fixing` | the forge shows a PR for the branch while `drain.pr` is null | `parked` | disarm it; park: "a PR was opened before a clean review" |
-| (queued) | `status: "queued"` with no worker handle, older than the start timeout (a crash between claim and start) | (released) | release the claim to ready with its resume stage |
+| (queued) | `status: "queued"` with no worker handle, or a pending one, older than the start timeout (a crash between claim and start) | `working` or (released) | adopt the minted session if it exists (§4.3), else release the claim to ready with its resume stage |
 | any | tracker item closed or cancelled by someone else, or it lost `agent/claimed` | `parked` | stop sessions; no tracker write |
 | any | report `blocked` | `parked` | (the report already posted the question) |
 
@@ -505,7 +508,7 @@ The worker and reviewer tell the supervisor what happened through one verb. The 
 
 **`flow report <identifier> verdict --sha <sha> --token <t> (--clean | --changes --findings-file <file>)`** (reviewer)
 
-- Requires `--token <t>` equal to `drain.reviewer.token`: a random 128-bit hex the supervisor mints for each review and renders into that reviewer's brief only. A worker (or a stale reviewer) cannot record a verdict, on any host, without depending on session ids a host may mint later. Exit 5 on a missing or wrong token.
+- Requires `--token <t>` whose SHA-256 equals `drain.reviewer.tokenHash`: the supervisor mints a random 128-bit hex per review, renders it into that reviewer's brief only, and stores only its hash (the worker can read `flow-state.json`). A worker (or a stale reviewer) cannot record a verdict, on any host, without depending on session ids a host may mint later. Exit 5 on a missing or wrong token.
 - A `sha` other than `drain.pushedSha` is recorded as stale (warning, exit 0) and changes nothing.
 - `--changes` copies the findings file to `<worker worktree>/.dork/flow/drain/reviews/<round>-<sha7>.md`.
 - Records `verdict`, `reviewedSha`, `reviewRound + 1`.
@@ -574,6 +577,8 @@ interface RunLimit {
   since: string;              // ISO, when the episode began
   state: 'winding-down' | 'awaiting-handoff' | 'pending-approval' | 'waiting-reset' | 'handing-off';
   handoffToken: string | null; // set with 'handing-off' (§4.3)
+  handingOffAt: string | null; // when 'handing-off' was set
+  handoffSessionId: string | null; // the session id minted for the new session, for adoption
   notifiedAt: string | null;  // the ask-mode comment, once per episode
 }
 ```
@@ -600,6 +605,7 @@ The **signal** each pass is the worse of `limitSignal` over the run's account's 
 | `pending-approval` | the run's own account's signal is `ok` again | (cleared) | **resume here**: `send` `limit-cleared` to the same session, reason `reset` |
 | `waiting-reset` | `now ≥ wakeAfter`, own account `ok` | (cleared) | resume here, reason `reset` |
 | `waiting-reset` | `now ≥ wakeAfter`, a candidate | as `awaiting-handoff` | as `awaiting-handoff` (auto hands off, ask notifies) |
+| `handing-off` | older than the start timeout (the mover died) | (cleared) or `awaiting-handoff` | if the new session it minted exists, adopt it and finish §5.3 step 5; else back to `awaiting-handoff`, token cleared |
 
 - Resuming on the same account after its reset is not a move between accounts, so `ask` allows it without approval (Decision D5). It keeps the warm transcript.
 - A reviewer that hits a limit is not handed off: the supervisor stops it and starts a new reviewer at the same SHA on another account. A review restarts cheaply; no checkpoint is needed.
