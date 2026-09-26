@@ -17,7 +17,7 @@ import { existsSync, statSync } from 'node:fs';
 import path from 'node:path';
 
 import type { ProcessRunner } from '../cli/context.ts';
-import { defaultConfigDir } from '../fleet/config-dir.ts';
+import { ambientAccountPath } from '../fleet/accounts.ts';
 import {
   DEFAULT_ACCOUNT_ID,
   LaunchError,
@@ -236,7 +236,8 @@ export function sessionConfigDir(
   env: Readonly<Record<string, string | undefined>>,
   osHome: string
 ): string {
-  return path.resolve(account?.path ?? defaultConfigDir(env, osHome));
+  // Claude Code always has an ambient folder, so the lookup never returns null.
+  return path.resolve(account?.path ?? (ambientAccountPath('claude-code', env, osHome) as string));
 }
 
 /**
