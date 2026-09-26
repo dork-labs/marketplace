@@ -1333,7 +1333,7 @@ describe('config-files CLI', () => {
   function installCopy(dir: string, files: { config?: string; local?: string } = {}): string {
     const plugin = makePlugin(dir, files);
     mkdirSync(path.join(plugin, 'scripts'));
-    for (const name of ['config-files.ts', 'validate-config.ts', '_shared.ts']) {
+    for (const name of ['config-files.ts', 'validate-config.ts', '_shared.ts', 'git-exclude.ts']) {
       copyFileSync(path.join(PLUGIN_DIR, 'scripts', name), path.join(plugin, 'scripts', name));
     }
     copyFileSync(
