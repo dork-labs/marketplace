@@ -24,7 +24,7 @@
  */
 
 import { spawn } from 'node:child_process';
-import { readFileSync } from 'node:fs';
+import { readFileSync, realpathSync } from 'node:fs';
 import os from 'node:os';
 
 import type { FakeBacklog } from '../../tracker/fake.ts';
@@ -172,6 +172,24 @@ export function usd(amount: number): string {
   return String(Math.max(0, Math.round(amount * 10_000) / 10_000));
 }
 
+/** The sandbox's link to the fake adapter, relative to the project. */
+const FAKE_LINK = '.agents/flow/adapters/fake';
+
+/**
+ * A second layer under the breach check: permission rules denying file edits
+ * in the flow root, by its path and by the sandbox's link into it. `//` starts
+ * an absolute path in a rule; a bare path is relative to the sandbox. A deny
+ * rule outranks the allowlist's plain `Edit` and `Write`.
+ *
+ * @param flowRoot - The flow root.
+ * @returns The rules.
+ */
+export function deniedTools(flowRoot: string): string[] {
+  const absolute = [...new Set([flowRoot, realpathSync(flowRoot)])];
+  const roots = [...absolute.map((dir) => `/${dir}/**`), `${FAKE_LINK}/**`];
+  return ['Edit', 'Write', 'NotebookEdit'].flatMap((tool) => roots.map((r) => `${tool}(${r})`));
+}
+
 /**
  * The child's argv, after `claude`.
  *
@@ -204,6 +222,8 @@ export function childArgs(
     'dontAsk',
     '--allowed-tools',
     ...ALLOWED_TOOLS,
+    '--disallowed-tools',
+    ...deniedTools(options.flowRoot),
   ];
 }
 
@@ -306,6 +326,25 @@ async function runOne(
     if (breach !== undefined) {
       return record(liveCase.id, 'fail', elapsed(), `breach: ${breach} (${cost})`, spend);
     }
+    // A run that did not finish says so first, with what it printed: its
+    // stderr explains more than a missing init field would.
+    if (!stream.finished) {
+      const why = child.error ?? `exit ${child.code}`;
+      const said = child.stderr
+        .trim()
+        .split('\n')
+        .filter((line) => line.trim() !== '')
+        .slice(-3)
+        .join(' | ')
+        .slice(-400);
+      return record(
+        liveCase.id,
+        'fail',
+        elapsed(),
+        `did not finish (${why}; ${cost})${said === '' ? '' : `; stderr: ${said}`}`,
+        spend
+      );
+    }
     const expected = EXPECTED_API_KEY_SOURCE[context.credential.source];
     if (stream.apiKeySource !== expected) {
       return record(
@@ -313,17 +352,6 @@ async function runOne(
         'fail',
         elapsed(),
         `the session did not pay with ${context.credential.source}: its apiKeySource is ${stream.apiKeySource ?? 'missing'}, expected ${expected} (${cost})`,
-        spend
-      );
-    }
-    if (!stream.finished) {
-      const why = child.error ?? `exit ${child.code}`;
-      const said = child.stderr.trim().split('\n')[0] ?? '';
-      return record(
-        liveCase.id,
-        'fail',
-        elapsed(),
-        `the run ended without a result (${why}; ${cost})${said === '' ? '' : `: ${said}`}`,
         spend
       );
     }

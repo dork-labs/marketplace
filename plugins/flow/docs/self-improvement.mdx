@@ -11,21 +11,17 @@ flow tests itself, keeps notes while it works, and once a week can suggest fixes
 
 `/flow:self-test` (or `flow selftest`) checks your install in tiers:
 
-- **fast**: your settings, the tracker adapter, and flow's own instructions (length, broken links, repeated rules). Free, offline, a few seconds.
+- **fast**: your settings, the tracker adapter, and flow's own instructions. Free, offline, a few seconds.
 - **scenarios**: whole pieces of work played through the real flow commands against a pretend tracker. Also free and offline.
-- **live**: a real agent session that runs a few flow commands against the pretend tracker. It costs money, so you turn it on each time (see below).
-
-Each run is saved in `.dork/flow/selftest/`.
-
-### Running the live tier
-
-It costs money, so it runs only when you set `FLOW_SELFTEST_LIVE=1`, never in CI, even when a key is set:
+- **live**: a real agent session runs a few flow commands against the pretend tracker. **It costs money**, so it runs only with `FLOW_SELFTEST_LIVE=1`, and never in CI:
 
 ```bash
 FLOW_SELFTEST_LIVE=1 node --experimental-strip-types <flow-root>/scripts/selftest.ts --tier live
 ```
 
-It pays with `ANTHROPIC_API_KEY`, then `CLAUDE_CODE_OAUTH_TOKEN`, then your `claude` sign-in, and the report says which one paid. It starts no new check once it has spent `selfImprovement.selftest.liveBudgetUsd` ($1.00 by default, or `--max-usd`).
+It pays with `ANTHROPIC_API_KEY`, then `CLAUDE_CODE_OAUTH_TOKEN`, then your `claude` sign-in, says which one paid, and stops at `selfImprovement.selftest.liveBudgetUsd` ($1.00 by default, or `--max-usd`).
+
+Each run is saved in `.dork/flow/selftest/`.
 
 ## The journal
 
@@ -33,7 +29,7 @@ flow keeps a notebook at `.dork/flow/journal.jsonl`, shared by every worktree of
 
 It never holds comment bodies, prompts, code or tracker descriptions, and it removes tokens, email addresses and your home folder from any text.
 
-Agents write a `flow note` when they had to improvise, a step was wrong, or two instructions disagreed. A real one: `flow usage probe` could not see the main account, because DorkOS had registered it as its unnamed default, so the agent pointed the probe at it by hand. When a second note about the same skill arrives that week, the retro turns them into one proposal.
+Agents write a `flow note` when they had to improvise, a step was wrong, or two instructions disagreed. When a second note about the same skill arrives that week, the retro turns them into one proposal.
 
 To turn the journal off, set `selfImprovement.journal.enabled` to `false`.
 

@@ -78,6 +78,7 @@ const events = init + (process.env.STUB_STREAM
       { type: 'assistant', message: { content: [{ type: 'tool_use', name: 'Read', input: { file_path: 'README.md' } }] } },
       { type: 'result', subtype: 'success', total_cost_usd: Number(process.env.STUB_COST || '0.1'), num_turns: 3 },
     ].map((e) => JSON.stringify(e)).join('\\n') + '\\n');
+if (process.env.STUB_STDERR) process.stderr.write(process.env.STUB_STDERR + '\\n');
 process.stdout.write(events);
 `;
 
@@ -321,15 +322,13 @@ describe('the live tier runner', { timeout: LIVE_TIMEOUT }, () => {
     expect(after('--output-format')).toBe('stream-json');
     expect(argv).toContain('--verbose');
     expect(after('--max-turns')).toBe('5');
-    expect(argv.slice(argv.indexOf('--allowed-tools') + 1)).toEqual([
-      'Read',
-      'Write',
-      'Edit',
-      'Glob',
-      'Grep',
-      'Bash(node *)',
-      'Bash(git *)',
-    ]);
+    expect(
+      argv.slice(argv.indexOf('--allowed-tools') + 1, argv.indexOf('--disallowed-tools'))
+    ).toEqual(['Read', 'Write', 'Edit', 'Glob', 'Grep', 'Bash(node *)', 'Bash(git *)']);
+    const denied = argv.slice(argv.indexOf('--disallowed-tools') + 1);
+    expect(denied).toContain(`Edit(/${FLOW_ROOT}/**)`);
+    expect(denied).toContain(`Write(/${FLOW_ROOT}/**)`);
+    expect(denied).toContain('Edit(.agents/flow/adapters/fake/**)');
     expect(call.config).toMatchObject({ tracker: 'fake', connection: { transport: 'cli' } });
     expect(call.adapterIsLink).toBe(true);
     expect(call.adapterTarget).toBe(
@@ -363,7 +362,26 @@ describe('the live tier runner', { timeout: LIVE_TIMEOUT }, () => {
       cases: [trivial('crash')],
     });
     expect(result.checks[0].status).toBe('fail');
-    expect(result.checks[0].detail).toMatch(/ended without a result/);
+    expect(result.checks[0].detail).toMatch(/^did not finish/);
+  });
+
+  it('says a run with no result did not finish, with its stderr, before any credential mismatch', async () => {
+    // Purpose: a crash that also skipped init must read as a crash, not as a
+    // wrong credential; its stderr is the clue.
+    const result = await runLive({
+      flowRoot: FLOW_ROOT,
+      env: armed({
+        STUB_STREAM: stream([]),
+        STUB_NO_INIT: '1',
+        STUB_STDERR: 'boom: out of memory',
+      }),
+      maxUsd: 1,
+      cases: [trivial('crash')],
+    });
+    expect(result.checks[0].detail).toMatch(
+      /^did not finish \(exit 0; .*\); stderr: boom: out of memory$/
+    );
+    expect(result.checks[0].detail).not.toMatch(/apiKeySource/);
   });
 
   it('charges a run that reported no cost everything it was allowed, and stops there', async () => {
@@ -503,6 +521,86 @@ describe('the breach check', { timeout: LIVE_TIMEOUT }, () => {
           command: `node --experimental-strip-types ${FLOW_ROOT}/scripts/flow.ts next`,
         })
       ).toBeUndefined();
+    } finally {
+      s.cleanup();
+    }
+  });
+
+  it('reads $CLAUDE_PLUGIN_ROOT as the flow root and $PWD as the sandbox, as flow commands spell them', () => {
+    // Purpose: commands/flow.md and the stage commands name flow's scripts
+    // through ${CLAUDE_PLUGIN_ROOT}; flagging it would fail every paid case.
+    const s = makeSandbox({ flowRoot: FLOW_ROOT, files: {}, backlog: { items: [] } });
+    try {
+      const bounds = { sandbox: s.dir, flowRoot: FLOW_ROOT, home: tmp };
+      const bash = (command: string) => findBreach([{ name: 'Bash', input: { command } }], bounds);
+      expect(
+        bash(
+          'node --experimental-strip-types "${CLAUDE_PLUGIN_ROOT}/scripts/flow.ts" done FAKE-2 --summary-file s.md --json'
+        )
+      ).toBeUndefined();
+      expect(bash('node $CLAUDE_PLUGIN_ROOT/scripts/config-files.ts')).toBeUndefined();
+      expect(bash('git -C "$PWD" status')).toBeUndefined();
+      expect(bash('node x.js > "${CLAUDE_PLUGIN_ROOT}/scripts/x.ts"')).toMatch(
+        /wrote .*scripts\/x\.ts, outside/
+      );
+      expect(bash('node x.js > $PWD/../escape.txt')).toMatch(/wrote .*escape\.txt, outside/);
+      expect(bash('node x.js "${CLAUDE_PLUGIN_ROOTX}/y"')).toMatch(
+        /used \$\{CLAUDE_PLUGIN_ROOTX\}/
+      );
+    } finally {
+      s.cleanup();
+    }
+  });
+
+  it('follows a script written into the sandbox and git aimed elsewhere', () => {
+    // Purpose: two routes to a write the path fields never show: a script the
+    // agent writes and then runs, and git -C at another repository.
+    const s = makeSandbox({ flowRoot: FLOW_ROOT, files: {}, backlog: { items: [] } });
+    try {
+      const bounds = { sandbox: s.dir, flowRoot: FLOW_ROOT, home: tmp };
+      const one = (name: string, input: Record<string, unknown>) =>
+        findBreach([{ name, input }], bounds);
+      const script = (target: string) =>
+        `import { writeFileSync } from 'node:fs';\nwriteFileSync('${target}', 'x');\n`;
+      expect(
+        one('Write', { file_path: 'write-it.mjs', content: script(`${FLOW_ROOT}/scripts/x.ts`) })
+      ).toMatch(/wrote a script that writes .*scripts\/x\.ts, outside/);
+      expect(
+        one('Write', { file_path: 'w.mjs', content: script('../store/backlog.json') })
+      ).toMatch(/writes \.\.\/store\/backlog\.json/);
+      expect(
+        one('Edit', {
+          file_path: 'w.mjs',
+          old_string: 'a',
+          new_string: script('.agents/flow/adapters/fake/SKILL.md'),
+        })
+      ).toMatch(/SKILL\.md, outside/);
+      expect(
+        one('Write', {
+          file_path: 'w.mjs',
+          content: "require('fs').rmSync(process.env.FLOW_FAKE_BACKLOG)",
+        })
+      ).toMatch(/process\.env/);
+      expect(
+        one('Write', { file_path: 'w.mjs', content: script('out/result.json') })
+      ).toBeUndefined();
+      expect(
+        one('Write', { file_path: 'notes.md', content: 'See ../other and /etc/hosts.' })
+      ).toBeUndefined();
+
+      const bash = (command: string) => one('Bash', { command });
+      const git = 'git';
+      expect(bash(`${git} -C ${FLOW_ROOT} reset --hard`)).toMatch(/wrote .*, outside the sandbox/);
+      expect(bash(`${git} -C "${FLOW_ROOT}" -c a=b restore .`)).toMatch(/wrote/);
+      expect(bash(`${git} --work-tree ${FLOW_ROOT} clean -fd`)).toMatch(/wrote/);
+      expect(bash(`${git} -C .agents/flow/adapters/fake commit -am x`)).toMatch(/wrote/);
+      expect(bash(`${git} --git-dir=${FLOW_ROOT}/.git commit -m x`)).toMatch(/wrote/);
+      expect(bash(`${git} config --global user.name x`)).toMatch(
+        /changed git config outside the sandbox/
+      );
+      expect(bash(`${git} -C ${FLOW_ROOT} log -1`)).toBeUndefined();
+      expect(bash(`${git} config user.name x`)).toBeUndefined();
+      expect(bash(`${git} add -A && ${git} commit -m "tasks"`)).toBeUndefined();
     } finally {
       s.cleanup();
     }
