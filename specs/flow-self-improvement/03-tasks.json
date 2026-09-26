@@ -1,0 +1,153 @@
+{
+  "spec": "specs/flow-self-improvement/02-specification.md",
+  "slug": "flow-self-improvement",
+  "generatedAt": "2026-09-26T12:00:00.000Z",
+  "mode": "full",
+  "lastDecomposeDate": null,
+  "tasks": [
+    {
+      "id": "1.1",
+      "phase": 1,
+      "phaseName": "Fast tier and journal core",
+      "subject": "[flow-self-improvement] [P1] Doc lint: five rules with allow files and a word ratchet (DOR-2390)",
+      "description": "Create plugins/flow/scripts/selftest/doc-lint.ts: pure functions over { path, text }[] for the corpus commands/**/*.md, skills/**/SKILL.md, docs/**/*.{md,mdx}, README.md. Rules: (1) doc-lint/words: word count per file vs plugins/flow/selftest/word-budgets.json { '<path>': { baseline, target } }; fail when count > baseline; report distance to target; a file with no entry fails 'add a budget'; a --rebaseline helper lowers baselines to current counts and never raises one. Seed baselines from today's counts and targets from flow-cli-overhaul step 5 (commands/flow.md 600, skills/linear-adapter/SKILL.md 1000, commands/pause.md 100, stage skills 1200; others = baseline). (2) doc-lint/duplicate-rule: normalize sentences (lowercase, strip markdown and punctuation, >= 8 words); a sentence in 2+ files fails naming both; selftest/duplicate-allow.json lists allowed repeats each with a reason, seeded with today's hits. (3) doc-lint/links: relative markdown links resolve to files; #anchors resolve to a heading slug in the target. (4) doc-lint/frontmatter: SKILL.md name equals folder name and description non-empty; commands have description; a schedule: block has a 5-field cron, an Intl-accepted timezone, enabled: false, max-runtime and permissions. (5) doc-lint/war-stories: inside a numbered or bulleted list item in skills/commands, a line matching 20\\d\\d-\\d\\d-\\d\\d or an id matching [A-Z]{2,}-\\d+ fails, except ids whose prefix is in the rule-id list in selftest/war-story-allow.json (seeded INV, GRM, UTF, ADR; additions carry a reason), so the answer is the same on every install; docs/why.md (S7 creates it; absent today) and CHANGELOG.md exempt; selftest/war-story-allow.json seeded with today's hits. Fix any dead link the links rule finds in the shipped docs. Each check returns { id, tier: 'fast', status, ms, detail, fingerprint } with fingerprint = sha1(checkId + ':' + stableDetailKey).slice(0,12) (stableDetailKey omits counts/timestamps; for words it is the path). Tests: engine-tests/doc-lint.test.ts with a clean corpus passing and a planted break per rule (grown file, copied sentence, dead link, dead anchor, bad cron, enabled: true, dated line in a step, INV-3 in a step passing, the same dated line in docs/why.md passing), and the shipped plugin passing. TSDoc on every export. Acceptance: npm test green; each planted break fails for its stated reason.",
+      "activeForm": "Building the doc-lint rules",
+      "size": "medium",
+      "priority": "high",
+      "dependencies": [],
+      "parallelWith": ["1.3"]
+    },
+    {
+      "id": "1.2",
+      "phase": 1,
+      "phaseName": "Fast tier and journal core",
+      "subject": "[flow-self-improvement] [P1] Fast tier runner and report types (DOR-2390)",
+      "description": "Create plugins/flow/scripts/selftest/report.ts (types Check { id, tier: 'fast'|'scenarios'|'live', status: 'pass'|'fail'|'skip', ms, detail, fingerprint } and SelftestReport { v: 1, startedAt, flowVersion, tiers, checks, totals: { pass, fail, skip, ms }, credentialSource? }, a text renderer listing every skip with its reason, and exitCode(report, { strict }) = 2 on harness error, 1 on any fail or (strict and any skip), else 0) and plugins/flow/scripts/selftest/fast.ts running: engine-tests (spawn vitest run only when <flowRoot>/node_modules/vitest exists, else skip 'contributor toolchain not installed'; always skip 'already inside Vitest' when process.env.VITEST is set, so tests that run the fast tier never recurse); adapter-conformance (validate-adapter.ts passes work-items.good.json and must fail work-items.bad.json with exactly ['INV-3'] as engine-tests/validate-adapter.test.ts pins; any other verdict is a fail); config (validate-config.ts on config/config.example.json and on the resolved project config from config-files.ts); schema-fresh (build the JSON schema in memory with the same builder generate-config-schema.ts uses and compare to config/config.schema.json, no tsx); plus every doc-lint rule from task 1.1. Persist: write .dork/flow/selftest/latest.json and append the tiers run and each check's id and status to .dork/flow/selftest/history.jsonl capped at 200 lines, under the main checkout (projectKey in config-files.ts). Tests in engine-tests/selftest-cli.test.ts for exit codes 0/1/2, skip-is-not-pass, --strict, history cap. Acceptance: fast tier (excluding engine-tests, the ~25 s Vitest suite) under 10 s on the shipped plugin and green.",
+      "activeForm": "Building the fast self-test tier",
+      "size": "medium",
+      "priority": "high",
+      "dependencies": ["1.1"],
+      "parallelWith": []
+    },
+    {
+      "id": "1.3",
+      "phase": 1,
+      "phaseName": "Fast tier and journal core",
+      "subject": "[flow-self-improvement] [P1] Journal store: schema, redaction, append, rotation, gitignore (DOR-2391)",
+      "description": "Create plugins/flow/scripts/journal.ts. Path: <projectKey>/.dork/flow/journal.jsonl (projectKey = mainCheckout ?? checkout, from config-files.ts); config-files.ts resolve output gains journal: { path, enabled }. Line schema (zod .strict(), discriminated union on kind): common { v: 1, ts ISO UTC, kind, flow (plugin version), session? (8 chars), item? }; kinds and fields: verb { verb, ms, exit }; oracle.error { oracle, exit, errorClass <=200 chars redacted }; stage { stage, phase: start|end, outcome?: ok|failed|parked }; item.readied { by: triage|decompose|human }; claim { phase: claim|release }; retry { rung: resume|restart|escalate, attempt }; operator.wait { phase: start|end, waitedMs? }; review { round, sha7, verdict: clean|changes, blocker, shouldFix, nit, categories: ('logic'|'race'|'test'|'migration'|'security'|'docs'|'scope'|'style'|'other')[] }; ci { pr, event: red|ejected|merged, class: own|innocent|flake|infra|unknown }; handoff { from, to, reason: limit|stage|manual }; note { noteKind: friction|workaround|confusion, text <=1000 chars, skill? }; selftest { tiers, pass, fail, skip, ms, failing[] }; retro { window, proposals, filed, commented }. redact(): replace sk-..., ghp_..., github_pat_..., lin_api_..., xox[bap]-..., AKIA..., 'Bearer <tok>', any 32+ char base64/hex run with [redacted]; emails with [email]; the home directory prefix with ~. append(event): if disabled no-op; stat; when size >= selfImprovement.journal.maxBytes (default 5_000_000) rotate: files are journal.jsonl then journal.1.jsonl .. journal.<keep>.jsonl (keep default 3). (1) create journal.lock with 'wx'; if it exists, skip rotation and append; a lock with mtime older than 30 s is stale: delete it and append without rotating (the next append takes the lock; a rare double rotation from two writers clearing one stale lock is accepted). (2) holding the lock, stat again; if under the cap another writer rotated: release and append. (3) delete journal.<keep>.jsonl, rename journal.<n>.jsonl to journal.<n+1>.jsonl from highest down, rename journal.jsonl to journal.1.jsonl, release; then one appendFileSync(line + '\\n') (O_APPEND). Any IO error: one stderr warning, never throw. First write: if `git check-ignore -q` says the path is not ignored, append '.dork/flow/' to <git-common-dir>/info/exclude once. read(since): parse journal.jsonl + journal.1..keep.jsonl, skip unparseable lines with a count. Add selfImprovement section to config-schema.ts: journal { enabled true, maxBytes 5000000, keep 3 }, retro { window '7d', maxItemsPerRun 5, project null, labels [] }, selftest { liveBudgetUsd 1.0 }; regenerate config.schema.json (npm run generate:schema); document in config/CONFIG.md. Tests engine-tests/journal.test.ts: unknown kind/field rejected; each token shape redacted; 1000-char cap; two child processes appending 500 lines each give 1000 parseable lines; rotation keeps `keep` files and loses no line written during it; two writers over the cap rotate once, not twice; a stale lock is deleted and that append does not rotate; read-only dir leaves exit code unchanged; enabled false writes nothing; info/exclude gains the line once. Acceptance: all pass, schema check green.",
+      "activeForm": "Building the journal store",
+      "size": "large",
+      "priority": "high",
+      "dependencies": [],
+      "parallelWith": ["1.1"]
+    },
+    {
+      "id": "1.4",
+      "phase": 1,
+      "phaseName": "Fast tier and journal core",
+      "subject": "[flow-self-improvement] [P1] `flow note`, `flow journal record|tail`, and the one when-to-note rule (DOR-2391)",
+      "description": "Register verbs in S1's scripts/flow.ts registry (use S1's registration API): `flow note --kind friction|workaround|confusion [--item <id>] [--skill <name>] \"<text>\"` (exit 2 on missing kind or empty text; when the journal is off, print that it is off and exit 0); `flow journal record <review|ci|handoff> --field value ...` validating against the journal schema (exit 2 on invalid input with the zod message); `flow journal tail [-n 20] [--kind k]` printing lines. Add the rule, once, to commands/flow.md (moves to S7's shared rules block later), under 60 words: \"Write `flow note` when: you improvised a script or brief the plugin should have shipped (workaround); a skill's steps were wrong or missing (friction); two instructions disagreed or you guessed (confusion). One sentence, no secrets, no pasted output.\" Update the word budget baseline for commands/flow.md in the same commit only if it grows (ratchet rule). Tests: verb exit codes, record validation, tail filtering. Acceptance: npm test green; doc lint green.",
+      "activeForm": "Adding the note and journal verbs",
+      "size": "small",
+      "priority": "high",
+      "dependencies": ["1.3"],
+      "parallelWith": []
+    },
+    {
+      "id": "2.1",
+      "phase": 2,
+      "phaseName": "Fake tracker and scenarios",
+      "subject": "[flow-self-improvement] [P2] Fake tracker client passing adapter conformance (DOR-2390)",
+      "description": "Create plugins/flow/scripts/tracker/fake.ts implementing S1's TrackerClient (the typed PMClient of adapters/SPEC.md, including S1's create and snapshot verbs) over an in-memory store with optional JSON-file persistence (load/save on each call when constructed with a path). Behaviour: five state categories with display names Triage, Todo, In Progress, Done, Canceled; exclusive label groups agent/*, type/*, stage/* (adding one removes siblings); comments with author and timestamp; getInbox returns comments after a watermark; needsInput adds agent/needs-input and a question comment; mergePr({ body }) moves any item named by 'Closes <identifier>' to completed; an injected clock (never Date.now()). Register 'fake' as a tracker name in S1's tracker selection so .agents/flow/config.json can select it with a store path. Ship adapters/reference/fake/fixture.json (normalized WorkItems) and adapters/reference/fake/SKILL.md (short: every verb is `flow tracker <verb>`); the live sandbox (task 5.1) copies it to .agents/flow/adapters/fake/SKILL.md, the project path resolveAdapter in config-files.ts reads first. Tests engine-tests/fake-tracker.test.ts: exclusive groups, Closes handling, inbox watermark, injected clock, persistence round-trip; validate-adapter.ts passes the fixture; S1's adapter conformance suite passes against the fake. Add the fixture to the fast tier's adapter-conformance check. Acceptance: all green.",
+      "activeForm": "Building the fake tracker",
+      "size": "large",
+      "priority": "high",
+      "dependencies": ["1.2"],
+      "parallelWith": []
+    },
+    {
+      "id": "2.2",
+      "phase": 2,
+      "phaseName": "Fake tracker and scenarios",
+      "subject": "[flow-self-improvement] [P2] Four deterministic scenarios, run by the verb and by CI (DOR-2390)",
+      "description": "Create plugins/flow/scripts/selftest/scenarios/{lifecycle,groom-audit,recovery-ladder,inbox-rules}.ts, each exporting (ctx: { tracker: FakeTracker, clock, flow }) => Promise<void> that drives flow verbs in-process against the fake and throws a descriptive error on a failed assertion, and scenarios/index.ts listing them. lifecycle: capture -> backlog, origin/* set, no agent/ready; triage-accept -> one type/*, a priority, agent/ready; flow next returns it; flow claim -> agent/claimed and no agent/ready, category started; mergePr with Closes -> completed; flow done -> agent/completed and one comment carrying an agent:provenance line. groom-audit: load engine-tests/fixtures/backlog.bad.json -> flow audit reports exactly the GRM ids audit-backlog.test.ts expects; backlog.good.json -> none. recovery-ladder: claimed+started item, dead pid, worktree present -> resume; worktree missing -> restart; agent/needs-input -> never reclaimed; retries past recovery.maxRetries -> recovery.onExhausted. inbox-rules: one comment per comment-response rule -> expected respond/act/ignore; a reply to a parked question resumes it; an empty reply does not. (A state-agreement scenario, completed but still agent/claimed flagged by flow audit, ships with DOR-2376 with its own planted break; not in this task.) Add scenarios.ts in selftest/ that runs them into Check records (tier 'scenarios'). Add engine-tests/selftest-scenarios.test.ts that runs each scenario, plus one planted break per scenario (e.g. a fake that keeps agent/ready on claim) that must fail. Acceptance: npm test green; scenarios tier under 5 s.",
+      "activeForm": "Writing the scenarios",
+      "size": "large",
+      "priority": "high",
+      "dependencies": ["2.1"],
+      "parallelWith": []
+    },
+    {
+      "id": "2.3",
+      "phase": 2,
+      "phaseName": "Fake tracker and scenarios",
+      "subject": "[flow-self-improvement] [P2] `flow selftest` verb, `--file` with fingerprint dedupe, and /flow:self-test (DOR-2390)",
+      "description": "Register `flow selftest [--tier fast|scenarios|live|all] [--json] [--strict] [--file] [--rebaseline] [--max-usd N]` in S1's registry. Default tiers: fast then scenarios. --json prints SelftestReport; otherwise the text report. Every run persists latest.json/history.jsonl (task 1.2) and appends a selftest journal event. --file: via S1's snapshot read open items plus items closed in the last 90 days; for each failing check with marker `<!-- flow-selftest:fp=<fingerprint> -->` in a description: open match -> one comment with the new detail; match canceled in the window -> not filed (report lists it as 'declined'; may be filed again after 90 days); completed match -> file again only on evidence dated after the item's completion, with 'regressed after <id>' in the body; no match -> create an item (type task, labels origin/from-agent plus selfImprovement.retro.labels, never agent/ready, project selfImprovement.retro.project when set) whose body names the check, detail, flow version and the marker; sign every write with the provenance line. Create commands/self-test.md (< 150 words): run flow selftest with the given args, show the report, offer --file for failures, never pass --tier live unless asked this turn. Tests (fake tracker): --file twice files each failure once and comments the second time; a canceled match is not refiled; a completed match is refiled as a regression; exit codes. Add both files to word-budgets.json. Acceptance: npm test green; doc lint green.",
+      "activeForm": "Wiring the selftest verb and command",
+      "size": "medium",
+      "priority": "high",
+      "dependencies": ["2.2"],
+      "parallelWith": []
+    },
+    {
+      "id": "3.1",
+      "phase": 3,
+      "phaseName": "Automatic events",
+      "subject": "[flow-self-improvement] [P3] Automatic journal events from the CLI's own verbs (DOR-2391)",
+      "description": "In S1's scripts/flow.ts dispatcher, wrap every verb: record { kind: 'verb', verb, ms, exit } after it runs; when an oracle script exits 2 or throws, record oracle.error { oracle, exit, errorClass: first line of the error, redacted, <=200 chars }. In the verbs: flow transition (S1) records stage { phase start|end, outcome }; flow done records stage end outcome ok; any verb that applies agent/ready records item.readied { by }; flow claim/release record claim; the recovery verb records retry { rung, attempt }; needsInput records operator.wait start; the inbox verb that sees the human answer to a parked question records operator.wait end with waitedMs from the matching start. Pass session (first 8 chars of CLAUDE_SESSION_ID or the harness id S1 exposes, when set) and item. Journal writes never change a verb's exit or stdout. Tests: run each verb against the fake tracker and assert the journal lines (fake clock); an unwritable journal leaves verb output byte-identical. Acceptance: npm test green.",
+      "activeForm": "Emitting automatic journal events",
+      "size": "medium",
+      "priority": "medium",
+      "dependencies": ["1.3", "2.1"],
+      "parallelWith": []
+    },
+    {
+      "id": "4.1",
+      "phase": 4,
+      "phaseName": "Retro and schedule",
+      "subject": "[flow-self-improvement] [P4] Retro measures and proposal rules as pure code (DOR-2392)",
+      "description": "Create plugins/flow/scripts/retro.ts, pure over { journal: Event[], prevJournal: Event[], selftestHistory, snapshot: WorkItem[], words }. Measures, each with the previous window's value: readyVsUntriaged (open agent/ready vs open with no type/* label); captureToReadyDaysMedian (item.readied ts minus the item's createdAt; note that items readied outside flow are unseen); firstReviewCleanPct (round 1 review events with verdict clean); reviewCatchCount (sum blocker+shouldFix); innocentEjections (ci ejected+innocent); pluginWords (total and distance to targets); oracleErrors by oracle; operatorWaitHoursMedian. Empty data -> 'no data', never 0. Proposal rules: (1) 2+ notes with the same skill, or the same normalized first five content words when skill is absent; (2) the same oracle+errorClass 2+ times; (3) a selftest check with status pass in the most recent earlier history entry that ran it, and fail now (a check the earlier run did not run is never a regression); (4) firstReviewCleanPct down >=15 points, captureToReadyDaysMedian up >=50%, innocentEjections >=3, or pluginWords up at all. Each proposal { fingerprint: sha1(rule + ':' + subjectKey).slice(0,12), rule, title, evidence[], proposal (template text) }. Tests engine-tests/retro.test.ts: fixture journals with a known expected value per measure; empty window -> no data; each rule firing at and not firing just below its threshold; fingerprints stable across runs; rule 3 not firing when the earlier run was --tier fast only. Acceptance: npm test green.",
+      "activeForm": "Computing retro measures",
+      "size": "medium",
+      "priority": "medium",
+      "dependencies": ["1.3"],
+      "parallelWith": ["3.1"]
+    },
+    {
+      "id": "4.2",
+      "phase": 4,
+      "phaseName": "Retro and schedule",
+      "subject": "[flow-self-improvement] [P4] `flow retro` verb with reports, filing, cap and dedupe (DOR-2392)",
+      "description": "Register `flow retro [--since <duration>] [--json] [--file] [--input <proposals.json>]` in S1's registry. Window default selfImprovement.retro.window (7d); reads the journal for the window and the one before, selftest history, one S1 snapshot, and doc-lint word counts; calls retro.ts; writes .dork/flow/retro/<YYYY-MM-DD>.json (report + proposals[]) and .md (measures table then proposals); appends a retro journal event. Read-only unless --file. --file files proposals from the computed report or from --input (validated against the proposal schema, exit 2 if invalid): dedupe by `<!-- flow-retro:fp=<fingerprint> -->` over open items and items closed in the last 90 days, same rules as selftest --file (open -> one evidence comment; canceled in the window -> not refiled, listed 'declined'; completed -> refiled with 'regressed after <id>' only when some evidence is dated after the completion; pre-completion evidence alone never refiles), create otherwise with the same item shape as selftest --file; at most selfImprovement.retro.maxItemsPerRun (default 5) new items, highest evidence count first, the rest listed as 'not filed (cap)'; sign every write with provenance. Tests (fake tracker): read-only by default (no tracker writes); cap honoured; a second run comments instead of filing; a completed item with only pre-completion notes in the window is not refiled; invalid --input exits 2. Acceptance: npm test green.",
+      "activeForm": "Wiring the retro verb",
+      "size": "medium",
+      "priority": "medium",
+      "dependencies": ["4.1", "2.1"],
+      "parallelWith": []
+    },
+    {
+      "id": "4.3",
+      "phase": 4,
+      "phaseName": "Retro and schedule",
+      "subject": "[flow-self-improvement] [P4] flow-retro weekly schedule skill and the self-improvement docs page (DOR-2392)",
+      "description": "Create plugins/flow/skills/flow-retro/SKILL.md with frontmatter name flow-retro, display-name '/flow retro', description one line, schedule { cron: '0 9 * * 1', timezone: America/Los_Angeles, enabled: false, max-runtime: 20m, permissions: default }. Steps: 0 the same pause check as skills/flow-groom/SKILL.md step 0; 1 run `flow selftest --json`; 2 run `flow retro --json`; 3 for each proposal keep, merge or drop it, and rewrite title and proposal as one concrete change to a named plugin file; 4 write the edited list to a temp file and run `flow retro --file --input <file>`; 5 report the measures and what was filed. It never edits plugin files. Keep under 400 words. Create docs/self-improvement.mdx (< 600 words, writing-for-humans style): the three tiers and what each costs; what the journal holds and never holds, and the off switch; how to turn on the retro schedule; how DorkOS will show one health line later. Add to docs/meta.json, word-budgets.json. Update CHANGELOG.md for the release that ships this phase. Acceptance: doc lint green (frontmatter rule validates the schedule block), npm test green.",
+      "activeForm": "Writing the retro schedule and docs",
+      "size": "small",
+      "priority": "medium",
+      "dependencies": ["4.2"],
+      "parallelWith": []
+    },
+    {
+      "id": "5.1",
+      "phase": 5,
+      "phaseName": "Live tier",
+      "subject": "[flow-self-improvement] [P5] Live tier: gated, budgeted outcome evals against the fake tracker (DOR-2390)",
+      "description": "Create plugins/flow/scripts/selftest/live/{gate.ts,sandbox.ts,run.ts,cases.ts}. Gate (before anything starts): require FLOW_SELFTEST_LIVE=1; refuse when CI is set regardless; refusals name the missing piece and exit 2. Credential order ANTHROPIC_API_KEY, CLAUDE_CODE_OAUTH_TOKEN, local `claude auth status` sign-in; record which in report.credentialSource; none -> every case fail 'no credential'. Sandbox per case: temp git repo with fixture files, committed .agents/flow/config.json selecting tracker 'fake' at a temp store path seeded from the case fixture. Copy adapters/reference/fake/SKILL.md to <sandbox>/.agents/flow/adapters/fake/SKILL.md. Run `claude -p \"<prompt>\" --plugin-dir <flowRoot> --output-format stream-json --verbose --max-turns <n> --max-budget-usd <remaining> --strict-mcp-config --mcp-config <empty> --permission-mode dontAsk --allowed-tools Read Write Edit Glob Grep 'Bash(node *)' 'Bash(git *)' <the flow CLI>` with cwd = sandbox and an env stripped of every *_API_KEY, COMPOSIO_* and LINEAR_* except the chosen credential. Breach check after each case: scan the stream's tool_use events; any command naming composio, linear, curl, wget or gh, or a file path whose realpath is outside the realpaths of the sandbox and flow root (macOS /var -> /private/var), fails the case as 'breach' regardless of the oracle. Budget: --max-usd (default selfImprovement.selftest.liveBudgetUsd = 1.0); sum each case's total_cost_usd, pass the remainder as --max-budget-usd; start no case once reached (skip 'budget reached'). Cases with outcome oracles reading only the fake store and the sandbox: capture (exactly one new item, origin/* set, no agent/ready); triage (one type/*, a priority, and agent/ready passing the readiness oracle, or agent/needs-input with one question); decompose on specs/fixture/02-specification.md (03-tasks.json passes tasks-schema.ts, no forbidden summary phrase, item has stage/decompose); done with a follow-up (completed + agent/completed; each follow-up has type, priority, project and went through triage). Report per case pass/fail, cost, turns in the standard SelftestReport. Tests with a stub `claude` on PATH: gate refusals (no flag; flag with CI set), no-credential fails every case, budget stop, env scrub (stub prints its env), breach (stub stream with a composio Bash call fails the case as breach), report shape. Never in CI. Acceptance: npm test green; a manual run with the flag documented in docs/self-improvement.mdx.",
+      "activeForm": "Building the live eval tier",
+      "size": "large",
+      "priority": "low",
+      "dependencies": ["2.3"],
+      "parallelWith": []
+    }
+  ]
+}
