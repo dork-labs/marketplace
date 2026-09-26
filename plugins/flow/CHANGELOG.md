@@ -20,6 +20,12 @@ Run it as `node --experimental-strip-types <flow-root>/scripts/flow.ts <command>
 - The instructions these commands replace are gone from the skills.
 - The reserve you keep on an account now comes back after its weekly reset. Before, it stayed at 0 after the reset, which has affected how accounts were ranked since 0.16.0.
 
+## 0.18.1
+
+**A guide to `flow usage` and `flow fleet`. Reinstall to get the page locally; the status-line lines point to it.**
+
+- New page, "Account usage and the fleet view" (`docs/account-usage.mdx`): what flow records and from where, how to add the status-line lines and take them out again, what a probe costs, and how to read the fleet screen.
+
 ## 0.18.0
 
 **Two new commands, `flow usage` and `flow fleet`, show how much of each Claude Code account you have left. Reinstall to get them.**
