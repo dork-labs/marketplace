@@ -195,12 +195,16 @@ JSON Schema: `plugins/flow/conformance/fleet/fleet-policy.schema.json`.
 **Writing** (every writer, flow or DorkOS)
 
 1. Take the lock: create `<id>.json.lock` with exclusive-create (`O_CREAT|O_EXCL`, Node `wx`), writing a fresh token `<pid>:<random 128-bit hex>`. The token, not the pid, identifies the holder, so two writers in one process never mistake each other's lock.
-2. A lock older than 10 s (by mtime) is stale. Break it by renaming it to `<id>.json.lock.stale-<random>` (only one renamer can win), deleting the renamed file, then retrying step 1. Never delete a lock by its original name.
+2. A lock older than 10 s (by mtime) is stale. Read its token, then break it:
+   - Rename it to `<id>.json.lock.stale-<random>`.
+   - Read the moved file's token. If it is not the token judged stale (a fresh lock was renamed by mistake), put it back with `link(moved, <id>.json.lock)` (this fails if a newer lock already exists, which is fine), then delete the moved name and retry step 1.
+   - If it is the stale token, delete the moved name and retry step 1.
+   - Never delete a lock by its original name.
 3. Retry with 25–100 ms jittered waits; give up after 2 s total. Giving up drops this write with a warning; it never throws into the caller's turn.
 4. Under the lock, read the file. Missing = empty. Unparsable = rename it to `<id>.json.corrupt-<epoch ms>` and start empty.
 5. Merge. If nothing changed, release the lock and stop.
 6. Write `<id>.json.<pid>.<random>.tmp` in the same folder, `fsync` it, `rename` it over `<id>.json`.
-7. Release: read the lock, and delete it only if it still holds this writer's token.
+7. Release: read the lock, and delete it only if it still holds this writer's token. A writer that held the lock past 10 s can lose it to a breaker between that read and the delete; this is accepted, because a merge takes milliseconds and every write is a merge. Do not add a second mechanism for it.
 
 **Reading** needs no lock: `rename` is atomic, so a reader sees the old file or the new one, never half of one. An unparsable file reads as empty, with a warning.
 
@@ -427,6 +431,7 @@ interface CodeAdapter {
 
 - "More than one `agent/*`" stays GRM-13; it is not repeated.
 - `audit-backlog.ts` gains **GRM-15 (state coherence)**, which reports every `STATE-n` breach per item. It imports `work-state.ts` (a zero-dependency module, so the oracle still runs before `npm install`).
+- GRM-15 is switched on in the same PR as adapter contract 2.0.0 (task 3.3). Before then, the prose adapters still write `stage/*` on started items, and the audit would go red on every in-flight item for a rule nobody could follow yet.
 - GRM-10 (ready ⇒ a `stage/*` label) is unchanged and consistent: a ready item is never started.
 
 **The projections** (`projectionFor(event, ctx) → WorkStateChange`; the writers use nothing else)
