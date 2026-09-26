@@ -2,10 +2,11 @@
  * Codex accounts and rollout lines, for `flow usage record|scan --runtime codex`
  * (spec `flow-usage` Amendment 1, A1, A2, A4).
  *
- * - An account's folder is a Codex home. The implicit `default` account is the
- *   ambient one: `CODEX_HOME` when set and non-empty, else `<os home>/.codex`.
- *   Registered `runtimes.codex.accounts[]` rows, when there are any, replace it
- *   (the registry rules are `accounts.ts`).
+ * - An account's folder is a Codex home. Which accounts there are, and which
+ *   one `codex:default` names (`CODEX_HOME` when set and non-empty, else
+ *   `<os home>/.codex`; an alias when a registered row has that folder), is the
+ *   shared resolver's answer (`resolveAccounts` in `accounts.ts`, spec §1.1a
+ *   rev 6d); this module only adds each account's home.
  * - Usage comes only from the `rate_limits` object Codex writes into its own
  *   session logs (`token_count` events). Mapping it to ledger entries is the
  *   contract's `codexObservations`, not this module's. Nothing here reads a
@@ -17,63 +18,34 @@
  * @module @dorkos/flow/fleet/codex-accounts
  */
 
-import path from 'node:path';
-import { IMPLICIT_ACCOUNT_ID, loadIdentities } from './accounts.ts';
+import { loadAccounts, type AccountEnvironment, type RuntimeAccount } from './accounts.ts';
 import type { FleetWarning } from './usage-ledger.ts';
 
-/** One Codex account with the folder its sessions live in. */
-export interface CodexAccount {
-  /** The account id (`default` for the implicit one). */
-  id: string;
-  /** Its Codex home: the registered path, or the ambient one for `default`. */
+/** One routable Codex account with the folder its sessions live in. */
+export type CodexAccount = RuntimeAccount & {
+  /** Its Codex home: the account's folder. */
   home: string;
-  /** Whether it is the implicit account. */
-  implicit: boolean;
-}
+};
 
 /**
- * The ambient Codex home: `CODEX_HOME` when set and non-empty, else
- * `<osHome>/.codex`.
- *
- * @param env - The environment.
- * @param osHome - The OS home folder.
- * @returns The folder, not yet resolved.
- */
-export function codexHome(
-  env: Readonly<Record<string, string | undefined>>,
-  osHome: string
-): string {
-  const fromEnv = env.CODEX_HOME;
-  if (fromEnv !== undefined && fromEnv !== '') return fromEnv;
-  return path.join(osHome, '.codex');
-}
-
-/**
- * Every routable Codex account, each with its home: the registered rows, or the
- * implicit `default` (the ambient home) when there are none.
+ * Every routable Codex account with its home, in the resolver's order
+ * (registered rows, then `default` when it stands alone).
  *
  * @param dorkHome - The resolved DorkOS home.
- * @param env - The environment, for `CODEX_HOME`.
- * @param osHome - The OS home folder.
- * @returns The accounts in registry order, and the registry's warnings.
+ * @param environment - The environment (`CODEX_HOME`) and home.
+ * @returns The accounts and the registry's warnings.
  */
 export function codexAccounts(
   dorkHome: string,
-  env: Readonly<Record<string, string | undefined>>,
-  osHome: string
+  environment: AccountEnvironment
 ): { accounts: CodexAccount[]; warnings: FleetWarning[] } {
-  // The same rule as `readAccounts`: no row left means the implicit account.
-  const { accounts: rows, warnings } = loadIdentities(dorkHome, 'codex');
-  if (rows.length === 0) {
-    return {
-      accounts: [{ id: IMPLICIT_ACCOUNT_ID, home: codexHome(env, osHome), implicit: true }],
-      warnings,
-    };
-  }
-  const accounts = rows
-    .filter((row) => row.routable)
-    .map((row) => ({ id: row.id, home: row.path, implicit: false }));
-  return { accounts, warnings };
+  const loaded = loadAccounts(dorkHome, environment);
+  const accounts = loaded.accounts.flatMap((account): CodexAccount[] =>
+    account.runtime === 'codex' && account.routable && account.path !== null
+      ? [{ ...account, home: account.path }]
+      : []
+  );
+  return { accounts, warnings: loaded.warnings };
 }
 
 /** Whether `value` is a non-null, non-array object. */

@@ -129,6 +129,27 @@ describe('flow usage snapshot', () => {
     expect(snapshots()).toHaveLength(3);
   });
 
+  it('journals the default account once: by its own id when it stands alone, else as its row (rev 6d)', async () => {
+    // Purpose: default.json is a real account while no row has the default
+    // folder, so it gets its line; once a row has that folder, a leftover
+    // default.json is a second reading of that row and is never journaled.
+    await recordUsage(dorkHome, 'claude-code', 'default', [reading(30, T0)], T0);
+    await flow(['usage', 'snapshot'], T0);
+    expect(snapshots().map((line) => line.account)).toEqual(['default']);
+
+    writeFileSync(
+      path.join(dorkHome, 'config.json'),
+      JSON.stringify({
+        runtimes: { claudeCode: { accounts: [{ id: 'mine', path: path.join(root, '.claude') }] } },
+      })
+    );
+    await recordUsage(dorkHome, 'claude-code', 'mine', [reading(50, T0)], T0);
+    const later = new Date(T0.getTime() + 31 * MIN);
+    await recordUsage(dorkHome, 'claude-code', 'default', [reading(90, later)], later);
+    await flow(['usage', 'snapshot'], later);
+    expect(snapshots().map((line) => line.account)).toEqual(['default', 'mine']);
+  });
+
   it('writes nothing for an account with no usage, and nothing with the journal off', async () => {
     // Purpose: no empty lines, and the off switch is honored.
     await flow(['usage', 'snapshot'], T0);

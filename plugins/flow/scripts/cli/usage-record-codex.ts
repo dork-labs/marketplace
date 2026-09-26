@@ -12,15 +12,14 @@
  * @module @dorkos/flow/cli/usage-record-codex
  */
 
-import { canonicalDir } from '../fleet/config-dir.ts';
-import {
-  codexAccounts,
-  codexHome,
-  rolloutReading,
-  type CodexAccount,
-} from '../fleet/codex-accounts.ts';
+import { codexAccounts, rolloutReading, type CodexAccount } from '../fleet/codex-accounts.ts';
 import { codexObservations, recordUsage } from '../fleet/usage-ledger.ts';
-import { resolveDorkHome } from '../fleet/accounts.ts';
+import {
+  accountForPath,
+  ambientAccountPath,
+  resolveAccountRef,
+  resolveDorkHome,
+} from '../fleet/accounts.ts';
 import type { VerbContext, VerbResult } from './context.ts';
 import { MAX_STDIN_BYTES, runRecorder, type RecordOutcome } from './usage-record.ts';
 
@@ -47,14 +46,19 @@ export function codexStdinReading(
   return { rateLimits: payload, observedAt: now.toISOString() };
 }
 
-/** The account `record` writes for: `--account`, else the one whose home is the ambient one. */
-function targetAccount(ctx: VerbContext, accounts: readonly CodexAccount[]): CodexAccount | null {
+/**
+ * The account `record` writes for: `--account` (`default` resolves to the row it
+ * aliases), else the account whose folder is this process's Codex home.
+ * `codex:default` is machine-wide (`<os home>/.codex`), so an unregistered Codex
+ * home that is not the default writes nothing.
+ */
+function targetAccount(ctx: VerbContext, dorkHome: string): CodexAccount | null {
+  const home = ctx.io.osHome;
+  const { accounts } = codexAccounts(dorkHome, { home });
   const flag = ctx.args.flags.account;
-  if (typeof flag === 'string') return accounts.find((account) => account.id === flag) ?? null;
-  const implicit = accounts.find((account) => account.implicit);
-  if (implicit !== undefined) return implicit;
-  const ambient = canonicalDir(codexHome(ctx.env, ctx.io.osHome), ctx.io.osHome);
-  return accounts.find((account) => canonicalDir(account.home, ctx.io.osHome) === ambient) ?? null;
+  if (typeof flag === 'string') return resolveAccountRef(accounts, 'codex', flag);
+  const ambient = ambientAccountPath('codex', ctx.env, home) ?? '';
+  return accountForPath(accounts, 'codex', ambient, { home });
 }
 
 /** Read stdin, find the reading and write it; fills `outcome` as it goes. */
@@ -85,7 +89,7 @@ async function record(
   }
 
   const dorkHome = resolveDorkHome(ctx.env, ctx.io.osHome);
-  const account = targetAccount(ctx, codexAccounts(dorkHome, ctx.env, ctx.io.osHome).accounts);
+  const account = targetAccount(ctx, dorkHome);
   if (account === null) {
     say('no Codex account for this Codex home');
     return;

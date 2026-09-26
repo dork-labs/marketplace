@@ -15,9 +15,10 @@
  * @module @dorkos/flow/cli/usage-scan-codex
  */
 
+import { existsSync } from 'node:fs';
 import path from 'node:path';
 import { PreconditionError } from '../errors.ts';
-import { resolveDorkHome } from '../fleet/accounts.ts';
+import { resolveAccountRef, resolveDorkHome } from '../fleet/accounts.ts';
 import {
   codexAccounts,
   isRolloutFile,
@@ -72,12 +73,17 @@ export interface CodexAccountScan {
   dropped: boolean;
 }
 
-/** The accounts to scan: `--account`, or every Codex account. */
+/**
+ * The accounts to scan: `--account` (`default` resolves to the row it aliases),
+ * or every Codex account, the standalone `default` only when its folder exists.
+ */
 function targets(ctx: VerbContext, accounts: readonly CodexAccount[]): CodexAccount[] {
   const flag = ctx.args.flags.account;
-  if (typeof flag !== 'string') return [...accounts];
-  const match = accounts.find((account) => account.id === flag);
-  if (match === undefined) {
+  if (typeof flag !== 'string') {
+    return accounts.filter((account) => !account.implicit || existsSync(account.home));
+  }
+  const match = resolveAccountRef(accounts, 'codex', flag);
+  if (match === null) {
     throw new PreconditionError(`no Codex account "${flag}"; "flow fleet" lists the accounts`);
   }
   return [match];
@@ -183,7 +189,7 @@ function renderAccount(scan: CodexAccountScan, dryRun: boolean): string {
 export async function run(ctx: VerbContext): Promise<VerbResult> {
   const days = readDays(ctx);
   const dorkHome = resolveDorkHome(ctx.env, ctx.io.osHome);
-  const registry = codexAccounts(dorkHome, ctx.env, ctx.io.osHome);
+  const registry = codexAccounts(dorkHome, { home: ctx.io.osHome });
   const accounts = targets(ctx, registry.accounts);
   const sinceMs = days === 'all' ? null : ctx.now().getTime() - days * DAY_MS;
 

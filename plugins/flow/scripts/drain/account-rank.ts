@@ -14,10 +14,12 @@
  *   window. Another runtime's accounts are candidates only with
  *   `crossRuntimeFallback: on`, after every account of the item's runtime, in
  *   `fleet.runtimes` order.
- * - {@link chooseAccount} turns a rank into the account to launch on. A runtime
- *   with no registered account has one implicit `default` account (S1 §1.1a):
- *   the ambient environment, ranked like any other. There is no other fallback,
- *   so a registered kept-out account is never spent by accident.
+ * - {@link chooseAccount} turns a rank into the account to launch on. Every
+ *   runtime has a `default` account (S1 §1.1a rev 6d): machine-wide, an alias
+ *   of the registered row in its folder or its own account in that folder
+ *   (`main` by default beside registered accounts), ranked like any other.
+ *   There is no other fallback, so a registered kept-out account is never spent
+ *   by accident.
  * - {@link launchBudget} caps new launches by machine load.
  *
  * Every rule about reserves, room and scope comes from S1's fleet contract
@@ -98,11 +100,15 @@ export type IneligibleReason =
 export interface RankableAccount {
   /** The runtime the account belongs to. */
   runtime: RuntimeSlug;
-  /** The registry id (`default` for a runtime's implicit account). */
+  /** The registry id (`default` for a runtime's standalone default account). */
   id: string;
-  /** The account's folder (`CLAUDE_CONFIG_DIR`, `CODEX_HOME`, provider profile); `null` for the implicit account. */
+  /**
+   * The account's folder (`CLAUDE_CONFIG_DIR`, `CODEX_HOME`, provider profile).
+   * A standalone `default` has its machine-wide folder (rev 6d); `null` only for
+   * OpenCode's ambient default.
+   */
   path: string | null;
-  /** True for a runtime's implicit `default` account: the ambient environment. */
+  /** True for a runtime's standalone `default` (no registered row has its folder). */
   implicit: boolean;
   /** False when S1 found the id unroutable. */
   routable: boolean;
@@ -128,7 +134,7 @@ export interface RankAccountsInput {
   now: Instant;
   /** The item's repo, `owner/name`, or `null` when the checkout has no parsable origin. */
   repo: string | null;
-  /** Every account of every runtime (implicit `default`s included), with its policy, windows and spend. */
+  /** Every account of every runtime from S1 `resolveAccounts` (each runtime's `default` included), with its policy, windows and spend. */
   accounts: readonly RankableAccount[];
   /** The item's runtime ({@link itemRuntime}). */
   runtime: RuntimeSlug;
@@ -199,8 +205,9 @@ export interface ChooseAccountInput {
 }
 
 /**
- * The account a session launches on (§3.4). An `implicit` pick has no path: the
- * session runs in the ambient environment of its runtime.
+ * The account a session launches on (§3.4). A pick with no path (OpenCode's
+ * ambient default) runs in the ambient environment of its runtime; every other
+ * pick, a standalone `default` included, runs in its folder.
  */
 export type AccountChoice =
   | { account: { runtime: RuntimeSlug; id: string; path: string | null; implicit: boolean } }
@@ -569,12 +576,12 @@ export function rankAccounts(input: RankAccountsInput): AccountRank {
 
 /**
  * The account a session launches on (§3.4): the rank's pick, or `'none'` with
- * the reasons. A runtime with no registered account ranks its implicit
- * `default` account, the ambient environment (`implicit: true`, no path), so a
- * one-account user needs no fleet setup. There is no other fallback: a runtime
- * with registered accounts has no implicit one, and the ambient folder may be a
- * kept-out account (the client's org account), which nothing spends until the
- * operator says so.
+ * the reasons. Every runtime's `default` is ranked like any other account (S1
+ * §1.1a rev 6d): machine-wide, never the supervisor's own environment, so a
+ * one-account user needs no fleet setup and the operator's own sign-in beside
+ * registered accounts is main. There is no other fallback: a registered
+ * account with no role is kept out, and nothing spends it until the operator
+ * says so.
  *
  * @param input - The accounts the rank was built from, and the item's rank.
  * @returns The chosen account, or `'none'` with every account's reasons.

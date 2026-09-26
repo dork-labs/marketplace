@@ -3779,13 +3779,13 @@
   ],
   "chooseAccount": [
     {
-      "name": "a runtime with no registry: its implicit default account, the ambient environment (no path)",
+      "name": "a runtime with no registered row: its default account, in its machine-wide folder (S1 rev 6d)",
       "input": {
         "accounts": [
           {
             "runtime": "claude-code",
             "id": "default",
-            "path": null,
+            "path": "/home/op/.claude",
             "implicit": true
           }
         ],
@@ -3815,7 +3815,7 @@
         "account": {
           "runtime": "claude-code",
           "id": "default",
-          "path": null,
+          "path": "/home/op/.claude",
           "implicit": true
         }
       }
@@ -3960,6 +3960,104 @@
             ]
           }
         ]
+      }
+    },
+    {
+      "name": "a standalone default beside registered accounts is chosen with its machine-wide folder (rev 6d)",
+      "input": {
+        "accounts": [
+          {
+            "runtime": "claude-code",
+            "id": "claude3",
+            "path": "/home/op/.claude3",
+            "implicit": false
+          },
+          {
+            "runtime": "claude-code",
+            "id": "default",
+            "path": "/home/op/.claude",
+            "implicit": true
+          }
+        ],
+        "rank": {
+          "pick": {
+            "runtime": "claude-code",
+            "id": "default"
+          },
+          "ranked": [
+            {
+              "runtime": "claude-code",
+              "id": "default",
+              "tier": 2,
+              "score": 0,
+              "signal": {
+                "level": "ok",
+                "window": null,
+                "resetsAt": null,
+                "cause": null
+              }
+            }
+          ],
+          "ineligible": [
+            {
+              "runtime": "claude-code",
+              "id": "claude3",
+              "reasons": [
+                "out-of-scope"
+              ]
+            }
+          ]
+        }
+      },
+      "expected": {
+        "account": {
+          "runtime": "claude-code",
+          "id": "default",
+          "path": "/home/op/.claude",
+          "implicit": true
+        }
+      }
+    },
+    {
+      "name": "OpenCode's ambient default is the only pick with no folder",
+      "input": {
+        "accounts": [
+          {
+            "runtime": "opencode",
+            "id": "default",
+            "path": null,
+            "implicit": true
+          }
+        ],
+        "rank": {
+          "pick": {
+            "runtime": "opencode",
+            "id": "default"
+          },
+          "ranked": [
+            {
+              "runtime": "opencode",
+              "id": "default",
+              "tier": 1,
+              "score": 0,
+              "signal": {
+                "level": "unknown",
+                "window": null,
+                "resetsAt": null,
+                "cause": null
+              }
+            }
+          ],
+          "ineligible": []
+        }
+      },
+      "expected": {
+        "account": {
+          "runtime": "opencode",
+          "id": "default",
+          "path": null,
+          "implicit": true
+        }
       }
     }
   ],

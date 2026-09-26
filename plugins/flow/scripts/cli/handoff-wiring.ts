@@ -41,11 +41,11 @@ import {
 } from '../drain/handoff.ts';
 import { askText, type HandoffAccount } from '../drain/handoff-exec.ts';
 import type { HandoffIo, HandoffStep } from '../drain/runner.ts';
-import { loadAccounts, loadFleetPolicy } from '../fleet/accounts.ts';
+import { loadAccounts, loadFleetPolicy, resolveAccountRef } from '../fleet/accounts.ts';
 import type { FlowRun } from '../flow-run.ts';
 import type { RuntimeSlug } from '../fleet/usage-ledger.ts';
 import { findCodexRollout } from '../launchers/codex-rollout.ts';
-import { DEFAULT_START_TIMEOUT_MS, sessionHome } from '../launchers/common.ts';
+import { DEFAULT_START_TIMEOUT_MS, launchAccountFor, sessionHome } from '../launchers/common.ts';
 import { findTranscript } from '../launchers/prove-account.ts';
 import { canSwitchModel } from '../launchers/support.ts';
 import {
@@ -141,7 +141,10 @@ export function handoffWiring(wiring: HandoffWiringInput): HandoffWiring {
         at,
         view: (async () => {
           const input = await gatherAssignmentInput(ctx, config);
-          const policy = loadFleetPolicy(dorkHome, loadAccounts(dorkHome).accounts);
+          const policy = loadFleetPolicy(
+            dorkHome,
+            loadAccounts(dorkHome, { home: ctx.io.osHome }).accounts
+          );
           return { input, handoff: policy.handoff };
         })(),
       };
@@ -317,19 +320,15 @@ export function handoffWiring(wiring: HandoffWiringInput): HandoffWiring {
   const transcriptFor: HandoffIo['transcriptFor'] = (handle: SessionHandle) => {
     const runtime = handleRuntime(handle);
     if (runtime === 'opencode') return null;
-    const registered =
-      handle.account === null
-        ? null
-        : (loadAccounts(dorkHome).accounts.find(
-            (a) => a.runtime === runtime && a.id === handle.account
-          ) ?? null);
+    // The account's folder from the shared resolver (a handle with no account
+    // bills the machine-wide `default`), never the supervisor's own environment.
+    const { accounts } = loadAccounts(dorkHome, { home: ctx.io.osHome });
+    const found = resolveAccountRef(accounts, runtime, handle.account ?? 'default');
     const home =
       handle.configDir ??
       sessionHome(
         runtime,
-        handle.account === null
-          ? null
-          : { runtime, id: handle.account, path: registered?.path ?? null },
+        found === null || found.path === null ? null : launchAccountFor(found),
         ctx.env,
         ctx.io.osHome
       );

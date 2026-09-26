@@ -41,6 +41,7 @@ import {
   loadAccounts,
   loadFleetPolicy,
   parseOriginRepo,
+  resolveAccountRef,
   resolveDorkHome,
 } from '../fleet/accounts.ts';
 import { openFlowStateFile, resolveMainCheckout } from '../flow-state-file.ts';
@@ -49,10 +50,11 @@ import { dorkosBaseUrl } from '../launchers/dorkos.ts';
 import { classifyOwnership } from '../identity.ts';
 import { realLauncher } from '../launchers/real.ts';
 import { hostPreference, resolveHost } from '../launchers/resolve.ts';
-import { DEFAULT_START_TIMEOUT_MS, sessionHome } from '../launchers/common.ts';
+import { DEFAULT_START_TIMEOUT_MS, launchAccountFor, sessionHome } from '../launchers/common.ts';
 import {
   HOST_NAMES,
   type HostName,
+  type LaunchAccount,
   type LaunchPermissionMode,
   type Launcher,
   type ProbeResult,
@@ -143,21 +145,20 @@ export function parker(
  * @returns The finder.
  */
 export function sessionFinder(ctx: VerbContext, dorkHome: string): PassDeps['findSession'] {
+  /** The launch account a session probe names (`null`: `default`), from the shared resolver. */
+  const probeLaunchAccount = (runtime: RuntimeName, id: string | null): LaunchAccount | null => {
+    const { accounts } = loadAccounts(dorkHome, { home: ctx.io.osHome });
+    const found = resolveAccountRef(accounts, runtime, id ?? 'default');
+    return found === null || found.path === null ? null : launchAccountFor(found);
+  };
   return (probe) => {
     const configDir =
       probe.configDir ??
       sessionHome(
         probe.runtime ?? 'claude-code',
-        probe.account === null
-          ? null
-          : {
-              runtime: probe.runtime ?? 'claude-code',
-              id: probe.account,
-              path:
-                loadAccounts(dorkHome).accounts.find(
-                  (a) => a.runtime === (probe.runtime ?? 'claude-code') && a.id === probe.account
-                )?.path ?? null,
-            },
+        // A handle with no account bills `default`, which is machine-wide
+        // (rev 6d): its folder, never the supervisor's own environment.
+        probeLaunchAccount(probe.runtime ?? 'claude-code', probe.account),
         ctx.env,
         ctx.io.osHome
       ) ??
@@ -277,7 +278,10 @@ export async function drain(ctx: VerbContext, options: DrainOptions = {}): Promi
     return host;
   };
   // Resolve the first runtime now, so a missing host fails before anything is claimed.
-  const runtimes = loadFleetPolicy(dorkHome, loadAccounts(dorkHome).accounts).runtimes;
+  const runtimes = loadFleetPolicy(
+    dorkHome,
+    loadAccounts(dorkHome, { home: ctx.io.osHome }).accounts
+  ).runtimes;
   await hostFor((runtimes[0] ?? 'claude-code') as RuntimeName);
 
   const model = (tier: 'implementation' | 'review'): string | null =>

@@ -17,7 +17,7 @@ import { existsSync, statSync } from 'node:fs';
 import path from 'node:path';
 
 import type { ProcessRunner } from '../cli/context.ts';
-import { defaultConfigDir } from '../fleet/config-dir.ts';
+import { ambientAccountPath, type RuntimeAccount } from '../fleet/accounts.ts';
 import {
   DEFAULT_ACCOUNT_ID,
   LaunchError,
@@ -198,6 +198,22 @@ export function validateLaunchRequest(req: LaunchRequest): void {
 }
 
 /**
+ * The {@link LaunchAccount} for one account from the shared resolver
+ * (`resolveAccounts`, spec `flow-cli-core` §1.1a rev 6d). A standalone
+ * `default` carries its machine-wide folder, and an aliased one is its row
+ * (id and folder), so the cli and cmux launchers start it where `default`
+ * really lives. Only OpenCode's ambient default keeps `path: null`.
+ *
+ * @param account - A resolved account.
+ * @returns The launch account.
+ */
+export function launchAccountFor(
+  account: Pick<RuntimeAccount, 'runtime' | 'id' | 'path'>
+): LaunchAccount {
+  return { runtime: account.runtime, id: account.id, path: account.path };
+}
+
+/**
  * Whether an account means the ambient environment: none named, or one with no
  * path and no provider (the implicit {@link DEFAULT_ACCOUNT_ID} account).
  *
@@ -236,7 +252,8 @@ export function sessionConfigDir(
   env: Readonly<Record<string, string | undefined>>,
   osHome: string
 ): string {
-  return path.resolve(account?.path ?? defaultConfigDir(env, osHome));
+  // Claude Code always has an ambient folder, so the lookup never returns null.
+  return path.resolve(account?.path ?? (ambientAccountPath('claude-code', env, osHome) as string));
 }
 
 /**

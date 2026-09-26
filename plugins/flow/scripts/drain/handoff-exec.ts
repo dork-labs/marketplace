@@ -47,6 +47,7 @@ import {
   type RuntimeName,
   type SessionHandle,
 } from '../launchers/types.ts';
+import { launchAccountFor } from '../launchers/common.ts';
 import type { AccountRef } from './account-rank.ts';
 import { windowLabel, type HandoffReason } from './handoff.ts';
 import { render as renderMessage } from './messages.ts';
@@ -160,9 +161,13 @@ function labelOf(account: HandoffAccount | null, ref: AccountRef): string {
   return account?.label ?? `${ref.runtime}:${ref.id}`;
 }
 
-/** The launch account for a handoff target: `null` for the ambient (implicit) one. */
+/**
+ * The launch account for a handoff target, as the runner launches one
+ * (`launchAccountFor`): a standalone `default` starts in its machine-wide
+ * folder; only a folder-less account is `null`, the ambient environment.
+ */
 function launchAccount(account: HandoffAccount): LaunchAccount | null {
-  return account.implicit ? null : { runtime: account.runtime, id: account.id, path: account.path };
+  return account.path === null ? null : launchAccountFor(account);
 }
 
 /** A stored handle as a launcher takes it. */

@@ -49,7 +49,7 @@ const FIRST_WINDOWS = ['five_hour', 'seven_day'];
 export interface UsageTarget {
   /** The runtime the account belongs to. */
   runtime: RuntimeSlug;
-  /** The account id, or `default` for the runtime's implicit account. */
+  /** The account id: a ledger id, `default` for a standalone default account. */
   id: string;
 }
 

@@ -378,11 +378,17 @@ describe('flow next: the account each pick runs on (flow-handoff-dispatch §3.5)
     writeFileSync(file, typeof value === 'string' ? value : JSON.stringify(value));
   }
 
-  /** Register Claude Code accounts and give each a fleet policy. */
+  /**
+   * Register Claude Code accounts and give each a fleet policy. DorkOS's
+   * `defaultAccount` names the first one's folder, so `default` is its alias
+   * (rev 6d) and these cases rank only the registered accounts they name.
+   */
   function fleet(accounts: Record<string, Record<string, unknown>>, extra = {}): void {
+    const first = Object.keys(accounts)[0];
     put('config.json', {
       runtimes: {
         claudeCode: {
+          defaultAccount: first === undefined ? null : path.join(temp!.dorkHome, 'claude', first),
           accounts: Object.keys(accounts).map((id) => ({
             id,
             path: path.join(temp!.dorkHome, 'claude', id),
@@ -442,17 +448,43 @@ describe('flow next: the account each pick runs on (flow-handoff-dispatch §3.5)
     return { ...result, json: argv.includes('--json') ? JSON.parse(result.stdout) : null };
   }
 
-  it("with no registry, picks the runtime's implicit default: the ambient account", async () => {
-    // Purpose: a one-account user needs no fleet setup; the implicit default is
-    // the ambient environment and is named that way.
+  it("with no registry, picks the runtime's default: this computer's own sign-in", async () => {
+    // Purpose: a one-account user needs no fleet setup. `default` is
+    // machine-wide (rev 6d), a real folder, so it is ranked and named by its label.
     temp = tempProject(config());
     const { json } = await next(['--json']);
     expect(json.picked[0].account).toMatchObject({
       runtime: 'claude-code',
       pick: { runtime: 'claude-code', id: 'default' },
-      reason: 'ambient',
+      reason: 'ranked',
     });
-    expect((await next([])).stdout).toMatch(/A-1 - Title of A-1 .* -> ambient account$/m);
+    expect((await next([])).stdout).toMatch(
+      /A-1 - Title of A-1 .* -> Main \(this computer's sign-in\)$/m
+    );
+  });
+
+  it("the operator's shape: picks default as main, never the kept-out registered account", async () => {
+    // Purpose: defaultAccount null and claude3 registered with no policy. The
+    // main sign-in in ~/.claude is its own account, main by default, so it
+    // takes the work; claude3 stays kept out (never spent without a role).
+    temp = tempProject(config());
+    put('config.json', {
+      runtimes: {
+        claudeCode: {
+          defaultAccount: null,
+          accounts: [{ id: 'claude3', path: path.join(temp.osHome, '.claude3'), label: 'Claude3' }],
+        },
+      },
+    });
+    const { json } = await next(['--json']);
+    expect(json.picked[0].account).toMatchObject({
+      pick: { runtime: 'claude-code', id: 'default' },
+      reason: 'ranked',
+    });
+    expect(json.picked[0].account.ranked[0]).toMatchObject({ id: 'default', tier: 2 });
+    expect(json.picked[0].account.ineligible).toEqual([
+      { runtime: 'claude-code', id: 'claude3', reasons: ['out-of-scope'] },
+    ]);
   });
 
   it('DOR-2373: an account resetting sooner with less left beats one resetting later with more', async () => {
@@ -594,7 +626,7 @@ describe('flow next: the account each pick runs on (flow-handoff-dispatch §3.5)
     expect(json.picked[0].account).toMatchObject({
       runtime: 'codex',
       pick: { runtime: 'codex', id: 'default' },
-      reason: 'ambient',
+      reason: 'ranked',
     });
     expect(stdout).toBeTruthy();
   });

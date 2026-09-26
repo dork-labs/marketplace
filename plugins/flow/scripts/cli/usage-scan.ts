@@ -14,11 +14,16 @@
  * @module @dorkos/flow/cli/usage-scan
  */
 
-import { createReadStream, promises as fsp } from 'node:fs';
+import { createReadStream, existsSync, promises as fsp } from 'node:fs';
 import path from 'node:path';
 import { createInterface } from 'node:readline';
 import { PreconditionError, UsageError } from '../errors.ts';
-import { loadIdentities, resolveDorkHome, type AccountIdentity } from '../fleet/accounts.ts';
+import {
+  loadAccounts,
+  resolveAccountRef,
+  resolveDorkHome,
+  type RuntimeAccount,
+} from '../fleet/accounts.ts';
 import { fromTranscriptEntry } from '../fleet/observations.ts';
 import {
   mergeLedger,
@@ -32,6 +37,9 @@ import {
 } from '../fleet/usage-ledger.ts';
 import type { VerbContext, VerbResult } from './context.ts';
 import { journalUsage } from './usage-journal.ts';
+
+/** A Claude Code account with a config folder to read transcripts from. */
+type ScannedAccount = RuntimeAccount & { path: string };
 
 /** How many days of transcripts `scan` reads by default: one weekly window plus a day. */
 export const DEFAULT_SCAN_DAYS = 8;
@@ -78,12 +86,24 @@ export function readDays(ctx: VerbContext): number | 'all' {
   return Number(days);
 }
 
-/** The accounts to scan: `--account`, or every account with a valid id. */
-function targets(ctx: VerbContext, accounts: readonly AccountIdentity[]): AccountIdentity[] {
+/**
+ * The accounts to scan: `--account` (`default` resolves to the row it aliases),
+ * or every Claude Code account with a valid id, and the standalone `default`
+ * when its folder exists on this machine.
+ */
+function targets(ctx: VerbContext, accounts: readonly RuntimeAccount[]): ScannedAccount[] {
+  const scannable = accounts.flatMap((account): ScannedAccount[] =>
+    account.runtime === 'claude-code' &&
+    account.routable &&
+    account.path !== null &&
+    (!account.implicit || existsSync(account.path))
+      ? [{ ...account, path: account.path }]
+      : []
+  );
   const flag = ctx.args.flags.account;
-  if (typeof flag !== 'string') return accounts.filter((account) => account.routable);
-  const match = accounts.find((account) => account.id === flag && account.routable);
-  if (match === undefined) {
+  if (typeof flag !== 'string') return scannable;
+  const match = resolveAccountRef(scannable, 'claude-code', flag);
+  if (match === null) {
     throw new PreconditionError(
       `no registered account "${flag}" with a valid id; "flow fleet" lists the accounts`
     );
@@ -230,7 +250,7 @@ export function predictChanged(
 async function scanAccount(
   ctx: VerbContext,
   dorkHome: string,
-  account: AccountIdentity,
+  account: ScannedAccount,
   sinceMs: number | null,
   warn: (warning: FleetWarning) => void
 ): Promise<AccountScan> {
@@ -316,7 +336,7 @@ function renderAccount(scan: AccountScan, dryRun: boolean): string {
 export async function run(ctx: VerbContext): Promise<VerbResult> {
   const days = readDays(ctx);
   const dorkHome = resolveDorkHome(ctx.env, ctx.io.osHome);
-  const identities = loadIdentities(dorkHome, 'claude-code');
+  const identities = loadAccounts(dorkHome, { home: ctx.io.osHome });
   const accounts = targets(ctx, identities.accounts);
   const sinceMs = days === 'all' ? null : ctx.now().getTime() - days * DAY_MS;
 

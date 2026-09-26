@@ -90,9 +90,9 @@ export interface DrainPullRequest {
 
 /** One move of a run between accounts. */
 export interface DrainHandoff {
-  /** The account moved from, or `null` for the ambient account. */
+  /** The account moved from, or `null` for the runtime's standalone `default` account. */
   from: string | null;
-  /** The account moved to, or `null` for the ambient account. */
+  /** The account moved to, or `null` for the runtime's standalone `default` account. */
   to: string | null;
   /** When (ISO). */
   at: string;
@@ -142,7 +142,7 @@ export interface DrainState {
 export interface RunLimit {
   /** How bad: close to a ceiling, or at it. */
   level: 'warning' | 'exhausted';
-  /** The account that hit it, or `null` for the ambient account. */
+  /** The account that hit it, or `null` for the runtime's standalone `default` account. */
   account: string | null;
   /** The rate-limit window. */
   window: string | null;

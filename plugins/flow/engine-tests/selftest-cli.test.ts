@@ -100,14 +100,16 @@ describe('flow selftest', () => {
     );
   });
 
-  it('refuses the live tier (not built yet), unknown tiers and unknown flags, with exit 2', async () => {
+  it('refuses the unarmed live tier, unknown tiers, bad amounts and unknown flags, with exit 2', async () => {
+    // The live tier's own gate is pinned in selftest-live.test.ts.
     for (const tier of ['live', 'all']) {
       const refused = await run(['--tier', tier, '--json']);
       expect(refused.code).toBe(2);
       expect(JSON.parse(refused.stdout)).toMatchObject({ v: 1, ok: false, error: { code: 2 } });
-      expect(refused.stderr).toMatch(/the live tier is not built yet/);
+      expect(refused.stderr).toMatch(/set FLOW_SELFTEST_LIVE=1/);
     }
     expect((await run(['--tier', 'slow'])).code).toBe(2);
+    expect((await run(['--max-usd', '-1'])).code).toBe(2);
     expect((await run(['--bogus'])).code).toBe(2);
   });
 

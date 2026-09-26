@@ -85,7 +85,7 @@ function signalFor(ctx: VerbContext, run: FlowRun): { signal: LimitSignal; label
   const dorkHome = resolveDorkHome({ ...ctx.env }, ctx.io.osHome);
   const ledger = readLedger(dorkHome, runtime, run.account).ledger;
   if (ledger === null) return null;
-  const registry = loadAccounts(dorkHome).accounts;
+  const registry = loadAccounts(dorkHome, { home: ctx.io.osHome }).accounts;
   const policy = loadFleetPolicy(dorkHome, registry).accounts.find(
     (entry) => entry.runtime === runtime && entry.id === run.account
   );
