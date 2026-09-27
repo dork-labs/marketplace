@@ -12,5 +12,5 @@
     "noEmit": true,
     "types": ["node"]
   },
-  "include": ["scripts/**/*", "engine-tests/**/*", "skills/**/*.ts"]
+  "include": ["scripts/**/*", "engine-tests/**/*", "skills/**/*.ts", ".dork/extensions/**/*.ts"]
 }

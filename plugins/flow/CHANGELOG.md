@@ -4,6 +4,18 @@ Installs of this plugin are pinned to a commit SHA, so a fix here does not reach
 you until you **reinstall it** (Marketplace → flow → reinstall, or re-run your
 `--plugin-dir` checkout's `git pull`). Each entry below says whether that matters.
 
+## 0.41.0
+
+**Flow can now tell DorkOS which accounts to offer when one runs out, keep your main account in reserve, move a flow run to another account itself in the background, and hold a run when you choose to wait for the reset. Reinstall to get it; it needs DorkOS 0.88.0 or newer.**
+
+- The flow plugin now carries a DorkOS extension named Flow. Turn it on in DorkOS under Settings, Extensions. On an older DorkOS it does nothing.
+- When an account runs out, DorkOS offers only the accounts flow may use for that work, best first, with a plain reason on each, such as "58% of the week left" or "Out until Tue 3pm".
+- An agent, or a message from another agent, can only start work on an account you put in the rotation, or one you kept out but allowed for that repo.
+- Your main account shows as kept in reserve while another account has room, until its weekly reset is close.
+- For a flow run, flow decides: it moves the run to another account after a 10-second countdown when handoff is automatic, or waits when the reset is less than an hour away. When you pick an account yourself, flow does the move in the background and DorkOS shows where the work went.
+- Choosing to wait, or cancelling an automatic move, holds the run on its own account, so flow does not move it behind your back.
+- The new session starts from the run's HANDOFF.md checkpoint.
+
 ## 0.40.0
 
 **Fixes found by running `flow drain` for real across several Claude Code accounts. Reinstall to get them.**

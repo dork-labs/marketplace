@@ -30,7 +30,6 @@
  * @module @dorkos/flow/flow-state-file
  */
 
-import { execFileSync } from 'node:child_process';
 import { readFileSync } from 'node:fs';
 import path from 'node:path';
 import {
@@ -42,6 +41,7 @@ import {
   type HeldLockResult,
 } from './atomic-json.ts';
 import { ConfigError } from './errors.ts';
+import { STATE_RELATIVE_PATH, resolveMainCheckout } from './main-checkout.ts';
 import type { FlowRun, FlowRunStatus, FlowStage } from './flow-run.ts';
 import {
   FlowStateSchema,
@@ -52,34 +52,7 @@ import {
   type FlowStateStore,
 } from './flow-state.ts';
 
-/** Where the store lives inside the main checkout. */
-const STATE_RELATIVE_PATH = path.join('.dork', 'flow', 'flow-state.json');
-
-/**
- * The main checkout of the git checkout at `project`: the parent of
- * `git rev-parse --git-common-dir` (asked for as an absolute path, git 2.31 or
- * later, so a subfolder resolves the same as the checkout root). From a linked
- * worktree this is the main checkout, not the worktree.
- *
- * @param project - Any folder inside a git checkout (main or linked worktree).
- * @returns The absolute path of the main checkout.
- * @throws {ConfigError} When `project` is not inside a git checkout.
- */
-export function resolveMainCheckout(project: string): string {
-  let commonDir: string;
-  try {
-    commonDir = execFileSync('git', ['rev-parse', '--path-format=absolute', '--git-common-dir'], {
-      cwd: project,
-      encoding: 'utf8',
-      stdio: ['ignore', 'pipe', 'pipe'],
-    }).trim();
-  } catch {
-    throw new ConfigError(
-      `${project} is not inside a git checkout, so flow cannot find its run store. Run flow from the project's checkout or pass --project.`
-    );
-  }
-  return path.dirname(path.resolve(project, commonDir));
-}
+export { resolveMainCheckout };
 
 /** Per-write options: lock tuning (the defaults are the contract values). */
 export type FlowStateWriteOptions = LockOptions;
