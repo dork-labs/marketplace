@@ -5,74 +5,34 @@ description: The /flow engine's DONE stage — report completion on a work item,
 
 # Closing Work — the DONE stage
 
-> **Flow root.** This skill lives at `<flow-root>/skills/closing-work/SKILL.md`. If you reached it via a symlink (`.claude/skills/flow__*` or `.agents/skills/flow__*`), resolve the real path first (`realpath <path>`): the flow root is two directories above the skill directory. Every `<flow-root>/...` reference below is relative to that root.
+`<flow-root>` is two folders above this file's `realpath`. `flow <verb>` means
+`node --experimental-strip-types "<flow-root>/scripts/flow.ts" <verb>`.
 
-> **Stage:** DONE (spec §1). One generic, PM-agnostic stage skill.
-> **PM projection (tracker):** Done state + `agent/completed` label.
-> **Trigger doors:** the thin `/flow:done` command _or_ a PM transition into the
-> DONE stage are two triggers for this one skill.
+DONE runs only **after the human-review gate approved** the work (and, unattended, after
+the merge). It closes the item, files follow-ups, checks the project, and cleans up.
+Links and project reads go through the adapter at `adapter.path` (`link`, `getProjects`,
+`getEligibleWork`, `getRelations`, and `completeProject` only when supported).
 
-DONE is an **intentional** act — "I'm satisfied; close the loop." It runs only
-**after the human-review gate (REVIEW) has approved** the work (and, in the
-autonomous loop, after the auto-merge recovery ladder has merged a green,
-cleanly-mergeable diff — spec §6). It reports completion, advances the work item,
-seeds the next loop phase, and tears down the workspace.
+### 1. Identify the item
 
-## The one tracker rule
+The given identifier; else only strong local context (the spec's provenance block, an
+item claimed this session); else ask. Never close casually.
 
-This is a generic stage skill. **It never touches a tracker API string.** The
-close is `flow done` (step 3) and each follow-up is `flow create` (step 4).
-Relation links and the project pulse-check reads go through the **adapter**
-skill by naming its verbs (`link`, `getProjects`, `getEligibleWork`,
-`getRelations`, and —
-only in `auto` mode, and only when the adapter declares it supported — the
-optional `completeProject`). No raw tracker tool name, CLI invocation, or slug
-lives here. (The
-`tracker-confinement` Vitest guard enforces this for the whole flow bundle.)
+### 2. Write the summary
 
-**Finding the adapter.** It is the `SKILL.md` at the `adapter.path` that
-`node --experimental-strip-types "<flow-root>/scripts/config-files.ts"` prints: the
-project's own (`.agents/flow/adapters/<tracker>/`), or the one flow ships. Inside it,
-`<flow-root>` means that output's `flowRoot`.
+What was done; evidence scaled to the work (the VERIFY bundle); files changed and the
+spec link; follow-ups; for a hypothesis, whether its criteria were met.
 
-## Process
+### 3. Close it
 
-### 1. Identify the work item
+`flow done <id> --summary-file <file> [--pr <url>] --json` posts the summary once, signed,
+sets `completed` with `agent/completed` (even after a merge closed it), and completes the
+run. Exit 4: run it again.
 
-- Use the explicitly provided identifier (e.g. `PROJ-123`) when present.
-- Otherwise infer only from strong local context: the spec's provenance block /
-  `linear-issue:` frontmatter, or an item claimed earlier in this session.
-- If still ambiguous, ask a short bounded question. Do not close casually.
+### 4. File follow-up work
 
-### 2. Build the completion summary
-
-- **What was done** — a brief summary.
-- **Evidence** — proof scaled to the work (the VERIFY bundle): the test command +
-  pass summary for server/logic work; a screenshot or annotated GIF for UI work;
-  video only for temporal behavior. Paste/attach it on the item.
-- **Files changed** (if applicable) and the spec directory link (if routed
-  through the spec workflow).
-- **Follow-ups** needed; for hypotheses, whether the validation criteria were
-  met.
-
-### 3. Close the item
-
-Write the summary to a file, then run:
-
-```bash
-node --experimental-strip-types "<flow-root>/scripts/flow.ts" done <id> --summary-file <file> [--pr <url>] --json
-```
-
-It posts the summary once, signed, moves the item to `completed` with
-`agent/completed` (even when a merge closed it) and marks the run complete.
-Exit 4: run it again.
-
-### 4. File follow-up work (when required)
-
-The item's type and `## On Completion` section say what follows (a
-`type/hypothesis` gets a `type/monitor` holding its validation criteria). File
-each with `flow create` (here `flow` is
-`node --experimental-strip-types "<flow-root>/scripts/flow.ts"`):
+The item's type and `## On Completion` say what follows (a `type/hypothesis` gets a
+`type/monitor` holding its criteria). File each with:
 
 ```bash
 flow create --title '<title>' --description-file .dork/flow/tmp/<key>.md \
@@ -80,109 +40,43 @@ flow create --title '<title>' --description-file .dork/flow/tmp/<key>.md \
   --for-project '<project>' --key <id>-followup-<slug> --json
 ```
 
-Always a type, a priority and a project (the closed item's); never an `agent/*`
-label. The key makes a retry return the first item. Titles and description
-files follow the capture skill's step 3
-(`<flow-root>/skills/capturing-work/SKILL.md`).
+Always a type, a priority and a project (this item's); never an `agent/*` label. The
+`--key` makes a retry return the first item. Write titles and descriptions as
+`<flow-root>/skills/capturing-work/SKILL.md` step 3 says.
 
-Then triage it right away (`<flow-root>/skills/triaging-work/SKILL.md`, Path B):
-ready only if it passes the six readiness rules
-(`<flow-root>/skills/grooming-backlog/SKILL.md`, phase 4 step 5), otherwise
-park it with one question. If this item was blocking others, note they are unblocked
-(the adapter's `getRelations`); `link` only genuinely typed relations.
+Then triage it right away (`<flow-root>/skills/triaging-work/SKILL.md`, Path B): ready
+only if it passes the six readiness rules (`<flow-root>/skills/grooming-backlog/SKILL.md`,
+phase 4 step 5), otherwise park it with one question. Note any items this one was
+blocking as unblocked (`getRelations`); `link` only real typed relations.
 
-### 5. Completion routing + project pulse check
+### 5. Project pulse check
 
-- Read the item's `## On Completion` section first — it is the most specific
-  signal for what to recommend next; when it is absent, fall back to the
-  project pulse-check rules below.
-- Run a **project pulse check** (skip if the item has no project): via the
-  adapter, read remaining items in the same project, group by type + state
-  category, and apply the loop-continuity rules:
-  - All research Done, no hypothesis/spec → recommend `/flow:ideate` (complex) or
-    creating `type/task` sub-issues (simple).
-  - All tasks under a hypothesis Done → recommend closing the parent hypothesis.
-  - All monitors cleared → the project itself may be finished; take the close-out
-    decision below.
-  - Zero remaining active items → gather the facts the close-out decision needs
-    (below) rather than deciding here.
-- **The close-out decision.** Gather five facts about the project and let the
-  oracle decide — do not re-derive the rules here:
-  - `gates.projectCompletion` (`"advisory"` or `"auto"`),
-  - the project's progress rollup (`done` of `total`),
-  - its **open item count, read live** through the adapter (never inferred from
-    the rollup — the two disagree exactly when it matters),
-  - whether `specs/manifest.json` still holds an active spec for the project, and
-  - whether the adapter declares the optional **`completeProject`** verb supported.
+Skip when the item has no project. `## On Completion` routing beats the defaults. Read
+the project's remaining items by type and state:
 
-  Feed them to `resolveProjectCompletion` in
-  `<flow-root>/scripts/gates-policy.ts`, which returns a `disposition` and the
-  `reason` that decided it. Act on the disposition:
-  - `complete` → close the project via the adapter's **`completeProject`** verb,
-    then report that you did it and with which outcome.
-  - `advise` → recommend the close-out, offer to run it, and leave the decision
-    with the human.
-  - `skip` → do **not** close it and do **not** recommend closing it. Report the
-    project's status and move on.
+- all research done, no hypothesis or spec → recommend `/flow:ideate`, or `type/task`
+  sub-issues when simple;
+- all tasks under a hypothesis done → recommend closing the hypothesis;
+- all monitors cleared or nothing active → the close-out decision.
 
-  **Always report the `reason` verbatim** alongside what you did. It is the whole
-  point of the shape: "I did not close it" is only useful to a person paired with
-  which condition stopped it. That oracle is the source of truth if this prose and
-  that code ever drift.
+**Close-out:** give `resolveProjectCompletion` (`<flow-root>/scripts/gates-policy.ts`)
+the five facts: `gates.projectCompletion`, the progress rollup, the open item count
+**read live** (never from the rollup), whether `specs/manifest.json` holds an active spec
+for it, and whether `completeProject` is supported. Act on its `disposition`: `complete`
+→ `completeProject` and report it; `advise` → recommend and leave it to the person;
+`skip` → neither close nor recommend. **Always report its `reason` verbatim.** A project
+with open items never closes; if the adapter refuses, do not route around it.
 
-  One condition is worth knowing by name even though the oracle enforces it: a
-  project with **open items** is never closed, in either mode. A project in a
-  terminal state hides its open items from dispatch permanently, so closing one
-  early strands that work where nothing will ever surface it again. The adapter's
-  verb re-checks this itself and refuses loudly; do not treat its refusal as a
-  failure to route around.
+### 6. Clean up the worktree
 
-- Present the project state, the action taken or the action recommended, and offer
-  to run a recommendation. If no transition is detected, report the project status
-  briefly.
-
-### 6. Clean up the workspace
-
-If the work ran in a dedicated git worktree (recorded in the spec's
-`04-implementation.md`, or detected when `git rev-parse --git-dir
---git-common-dir` prints two different paths), clean it up here.
-
-**Remove it without asking when all three of these hold:**
-
-- its branch is merged,
-- its working tree has no uncommitted and no untracked files, and
-- it holds no commit that is missing from the remote.
-
-That combination makes removal lossless, and asking costs more than it protects.
-If any one of them fails, leave the worktree alone and say which one failed —
-never remove a worktree with uncommitted, untracked, or unpushed work.
-
-If the session is currently inside that worktree, **leave it first** (return to
-the main checkout, using your harness's worktree-exit tool if it has one) before
-removing. Prefer your harness's own worktree cleanup command over bare
-`git worktree remove` when it has one, since it may also tear down provisioning
-that git does not know about.
-
-**When the branch is not merged yet, do not promise to clean it up "once it
-merges."** Where merging is automated (auto-merge, a merge queue, a merge bot),
-it lands after this session is gone. The reliable habit is a sweep at the START
-of a session that removes every worktree whose branch has since merged. Tell the
-person that, once, instead of leaving a worktree with no owner.
+For a dedicated worktree (in `04-implementation.md`, or `git rev-parse --git-dir
+--git-common-dir` differ): remove it without asking only when its branch is merged, it
+has no uncommitted or untracked files, and no commit is missing from the remote.
+Otherwise leave it and say which condition failed. Leave the worktree before removing
+it; prefer the harness's cleanup command. Unmerged: never promise to clean it "once it
+merges"; say once that a start-of-session sweep removes merged worktrees.
 
 ### 7. Report
 
-Report what was closed, any follow-up created, and the project-pulse next-action
-recommendation. Name every work item as identifier with title (`PROJ-157 - Title`,
-per the adapter's display convention), never the bare key.
-
-## Guardrails
-
-- DONE is intentional and gated — never close an item casually or before REVIEW
-  approval.
-- Do not skip the project pulse check unless the item has no project context and
-  no clear parent flow.
-- Prefer the item's explicit `## On Completion` routing over generic defaults.
-- Filesystem stays canonical; the tracker holds pointers + state + conversation,
-  never a second copy of the prose.
-- All tracker I/O through `flow` or the adapter. No tracker strings in this skill. If
-  the tracker is unavailable, explain the limitation clearly rather than guessing.
+What closed, the follow-ups, and the pulse recommendation, items by the adapter's display
+convention. The repo holds the prose; the tracker holds pointers, state and conversation.

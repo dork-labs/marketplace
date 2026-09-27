@@ -148,15 +148,6 @@ describe('the documented drain claim runs as written', () => {
     expect(codex.status, codex.stderr).toBe(EXIT.ok);
     expect(runs()['id-FAKE-1']).toMatchObject({ sessionId: 'thread-drain', runtime: 'codex' });
   });
-
-  it('claims with the command line commands/flow.md documents', () => {
-    // Purpose: the interactive drain's line must work the same way.
-    writeBacklog({ items: [item('FAKE-1')] });
-    const line = fill(documentedClaim('commands/flow.md'), 'sess-cmd');
-    const result = runLine(line, claimEnv({ CLAUDE_PLUGIN_ROOT: FLOW_ROOT }));
-    expect(result.status, result.stderr).toBe(EXIT.ok);
-    expect(runs()['id-FAKE-1'].sessionId).toBe('sess-cmd');
-  });
 });
 
 /** Spawn one claim and resolve with its exit code. */

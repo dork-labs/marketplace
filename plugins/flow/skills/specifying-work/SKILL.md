@@ -5,125 +5,48 @@ description: The /flow engine's SPECIFY stage — turns a validated ideation art
 
 # Specifying Work — the SPECIFY stage
 
-> **Stage: SPECIFY in the `/flow` model.** This is the generic, PM-agnostic
-> stage skill for SPECIFY (spec §5.1, the stage spine: capture · triage ·
-> ideate · **specify** · decompose · execute · verify · review · done). A thin
-> `/flow:specify` command and a PM `stage/specify` transition are two **triggers**
-> for this one skill. It absorbs today's `/ideate-to-spec` + `/spec:create`.
+`<flow-root>` is two folders above this file's `realpath`. `flow <verb>` means
+`node --experimental-strip-types "<flow-root>/scripts/flow.ts" <verb>`.
 
-Use it to:
+SPECIFY turns a validated `specs/<slug>/01-ideation.md` into an implementation-ready
+`02-specification.md`, resolves its open decisions, and seeds draft ADRs. Tracker writes
+go through the adapter at `adapter.path`; branch only on a `WorkItem`'s `stateCategory`,
+never a tracker's state name.
 
-- transform a validated `01-ideation.md` into an implementation-ready
-  `02-specification.md`
-- resolve the spec's open decisions interactively before the spec is frozen
-- seed draft ADRs from the architectural decisions the spec surfaces
+Fill the scaffolds, never inline a template: the spec from
+[`templates/docs/specification.md`](../../templates/docs/specification.md), ADRs from
+[`templates/docs/adr.md`](../../templates/docs/adr.md).
 
-## The two rules of every `/flow` stage skill
+**Read first:** `AGENTS.md`, the ideation, `specs/manifest.json` and any existing
+`specs/<slug>/` files, and the `decisions/` that may constrain the design.
 
-1. **Never touch a tracker directly.** This skill contains no tracker MCP call,
-   no CLI-fallback invocation, and no tracker slug. All tracker reads and writes
-   (breadcrumb comments, evidence) route through the
-   **adapter** skill by reference —
-   e.g. "via the adapter, `comment` a breadcrumb". The
-   adapter is the single audit surface for tracker I/O. **Finding the adapter.** It is the `SKILL.md` at the `adapter.path` that
-   `node --experimental-strip-types "<flow-root>/scripts/config-files.ts"` prints: the
-   project's own (`.agents/flow/adapters/<tracker>/`), or the one flow ships. Inside it,
-   `<flow-root>` means that output's `flowRoot`.
-2. **Generic over PMs.** Branch only on the adapter's `WorkItem`
-   `stateCategory`, never on a tracker's state display name. The skill works
-   unchanged whether the tracker is Jira, GitHub Issues, or any other.
+## Steps
 
-## Doc scaffolds (externalized templates)
+1. **Read the ideation:** intent and assumptions, codebase map, root cause (a bug),
+   research, resolved decisions.
+2. **Validate the problem from first principles.** Not real or not clear: stop and ask.
+3. **Resolve open decisions** one question per turn, each with context, a recommended
+   option and trade-offs. SPECIFY is an intent stage: when unsure, ask.
+4. **Scope:** one spec or several, prerequisites first, what is deferred; map the
+   end-to-end flow and blast radius. An ideation that already reads as a design is
+   adapted, not re-derived.
+5. **Write the spec**, every section filled; carry research forward verbatim where
+   precision matters. No time or effort estimates.
+6. **Resolve the spec's own open questions**, recorded as struck-through `(RESOLVED)`
+   entries with Answer and Rationale. Re-read the file fresh each pass.
+7. **Seed draft ADRs** for each decision signal (technology choice, pattern, trade-off,
+   rejected alternative, deliberate exclusion): `status: draft`, `extractedFrom: <slug>`,
+   with a `decisions/` manifest entry when one exists. Skip if already extracted.
+8. **Manifest:** set `specs/manifest.json`'s `<slug>` entry to `specified`.
 
-This skill carries **no inline document templates**. It references the
-externalized scaffolds under [`../../templates/docs/`](../../templates/docs/),
-filling the `{placeholders}` rather than copying a template into prose:
+Do the validation and ADR extraction inline; never depend on slash-command chaining or a
+background-agent API.
 
-| Artifact                           | Template                                                                                                            |
-| ---------------------------------- | ------------------------------------------------------------------------------------------------------------------- |
-| `specs/<slug>/02-specification.md` | [`templates/docs/specification.md`](../../templates/docs/specification.md)                                          |
-| `specs/<slug>/03-tasks.json`       | [`templates/docs/tasks.json`](../../templates/docs/tasks.json) (DECOMPOSE seeds it; referenced here for provenance) |
-| `decisions/<id>-<slug>.md`         | [`templates/docs/adr.md`](../../templates/docs/adr.md)                                                              |
+## Tracker
 
-(The IDEATE input scaffold is [`templates/docs/ideation.md`](../../templates/docs/ideation.md),
-owned by the `ideating-features` skill.)
+- On entry: `flow stage <id> specify --checkpoint-file <f>` (Done, Next, Open questions,
+  Next command).
+- On completion: a breadcrumb `comment` (spec created at `specs/<slug>/02-specification.md`,
+  next DECOMPOSE). Untracked or no adapter: skip.
 
-## Read First
-
-Before acting, read:
-
-- `AGENTS.md`
-- the input `specs/<slug>/01-ideation.md` (the SPECIFY input)
-- `specs/manifest.json` and any existing `specs/<slug>/` materials
-- relevant `decisions/` ADRs that may constrain the design
-
-## Core Workflow
-
-1. **Extract the slug & read the ideation artifact**
-   - Input is `specs/<slug>/01-ideation.md`; extract `<slug>` for the output path.
-   - Synthesize Intent & Assumptions, Codebase Map, Root Cause (if a bug),
-     Research, and the resolved Decisions.
-2. **Validate the problem from first principles**
-   - Strip away solution assumptions; confirm the core problem is real and
-     clearly defined. If it is not, stop and ask before specifying.
-3. **Gather decisions interactively**
-   - Walk the ideation's open clarifications. Present each with context, a
-     recommended option, and trade-offs; record the resolution.
-   - SPECIFY is an **intent stage**: when uncertain on a reversible call, **ask**
-     rather than guess (spec §5 stage bias). One question per turn.
-4. **Scope the specification**
-   - One comprehensive spec vs. several smaller ones; prerequisites first;
-     anything explicitly deferred. Map the end-to-end flow and blast radius.
-5. **Write the specification**
-   - Produce `specs/<slug>/02-specification.md` from the
-     [`specification.md`](../../templates/docs/specification.md) scaffold. Fill
-     every section meaningfully; carry ideation research forward verbatim where
-     precision matters. No time/effort estimates.
-6. **Resolve the spec's own open questions**
-   - Extract any open questions the draft surfaces; resolve them interactively
-     and record answers as struck-through `(RESOLVED)` entries with Answer +
-     Rationale (preserving the original context as an audit trail). Re-read the
-     file fresh on each pass so external edits and already-answered questions
-     are respected.
-7. **Seed draft ADRs**
-   - Scan ideation + spec for decision signals (technology choices, pattern
-     adoption, trade-off resolutions, rejected alternatives, deliberate
-     exclusions — see the `writing-adrs` skill). For each, write a draft ADR
-     from the [`adr.md`](../../templates/docs/adr.md) scaffold (`status: draft`,
-     `extractedFrom: <slug>`). Allocate the ADR's identifier and add its
-     `decisions/` manifest entry via your harness's manifest-maintenance
-     command or script if it provides one; otherwise write the entry directly.
-     (Skip if your project has no `decisions/` manifest.) Skip too if ADRs were
-     already extracted for this slug.
-8. **Update the manifest**
-   - Ensure `specs/manifest.json` has an entry for `<slug>` at status
-     `specified` (add if missing; promote from `ideation` if present).
-
-## Tracker projection (via the adapter only)
-
-When the work is tracked, project the stage through the **adapter** —
-never a tracker call from here:
-
-- **On entry:** `node --experimental-strip-types "<flow-root>/scripts/flow.ts" stage <id> specify --checkpoint-file <f>`,
-  where `<f>` holds the checkpoint body (Done, Next, Open questions, Next command).
-- **On completion:** via the adapter, `comment` a breadcrumb on the item
-  (spec created, location `specs/<slug>/02-specification.md`, next step
-  DECOMPOSE). If the item is untracked or no adapter is available, skip silently
-  — tracker projection is always optional.
-
-## Output Expectations
-
-- a complete, validated `specs/<slug>/02-specification.md` (all sections filled,
-  open questions resolved)
-- draft ADRs for the architectural decisions surfaced (or a note that they were
-  already extracted)
-- a synced `specs/manifest.json` entry at status `specified`
-- recommended next step: **DECOMPOSE** (`/flow:decompose`)
-
-## Cross-Agent Rules
-
-- Treat this skill as the portable replacement for `/ideate-to-spec` + `/spec:create`.
-- Do not depend on slash-command chaining; do the validation and ADR extraction inline.
-- Do not assume background-agent APIs exist; do discovery sequentially if none are available.
-- If the ideation already reads as a detailed design, adapt it into the
-  specification scaffold rather than re-deriving it from scratch.
+Next: `/flow:decompose`.

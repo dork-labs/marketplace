@@ -5,72 +5,31 @@ description: The /flow engine's DECOMPOSE stage — break a validated specificat
 
 # Decomposing Work — the DECOMPOSE stage
 
-> **Flow root.** This skill lives at `<flow-root>/skills/decomposing-work/SKILL.md`. If you reached it via a symlink (`.claude/skills/flow__*` or `.agents/skills/flow__*`), resolve the real path first (`realpath <path>`): the flow root is two directories above the skill directory. Every `<flow-root>/...` reference below is relative to that root.
+`<flow-root>` is two folders above this file's `realpath`. `flow <verb>` means
+`node --experimental-strip-types "<flow-root>/scripts/flow.ts" <verb>`.
 
-> **Stage:** DECOMPOSE (spec §1). One generic, PM-agnostic stage skill.
-> **Absorbs:** today's `/spec:decompose` and `/spec:tasks-sync`.
-> **PM projection (tracker):** `stage/decompose` label + the active-phase plan
-> checklist mirrored into the work item.
-> **Trigger doors:** the thin `/flow:decompose` command _or_ a PM transition into
-> the DECOMPOSE stage are two triggers for this one skill.
+DECOMPOSE turns a frozen spec into `specs/<slug>/03-tasks.json`, the canonical task list,
+and mirrors it into the tracker as a projection. Tracker writes (`transition`, `comment`,
+`createSubIssue`, `getRelations`) go through the adapter at `adapter.path`.
 
-This skill turns a frozen specification into the single source of truth for
-implementation — `specs/<slug>/03-tasks.json` — and keeps the tracker in sync as
-a _projection_ of it. The filesystem is canonical; the tracker holds pointers +
-state + the plan checklist, never a second copy of the prose (spec §8).
+### 1. Resolve
 
-## The one tracker rule
+The slug is the spec path's second segment. `SPEC_FILE` must exist and be a complete
+spec (SPECIFY's output); otherwise stop and report.
 
-This is a generic stage skill. **It never touches a tracker API string.** Every
-read or write to the tracker — the plan-checklist mirror, the `stage/decompose`
-transition, any breadcrumb comment, sub-issue promotion — goes through the
-**adapter** skill by naming its capability verbs (`transition`,
-`comment`, `createSubIssue`, `getRelations`). No raw tracker tool name, CLI
-invocation, or slug lives here. (The `tracker-confinement` Vitest guard enforces
-this for the whole flow bundle.)
+### 2. Mode
 
-**Finding the adapter.** It is the `SKILL.md` at the `adapter.path` that
-`node --experimental-strip-types "<flow-root>/scripts/config-files.ts"` prints: the
-project's own (`.agents/flow/adapters/<tracker>/`), or the one flow ships. Inside it,
-`<flow-root>` means that output's `flowRoot`.
+- No `03-tasks.json`, or no tasks for the slug → **full**.
+- It exists and the spec's changelog has entries after its `generatedAt` →
+  **incremental**: keep done tasks, update affected pending ones, add only new work.
+- No new entries → **skip**: "No changes since last decompose (<date>); delete
+  `03-tasks.json` to force", and stop.
 
-## Process
+### 3. Write the task files (background worker)
 
-### 1. Resolve the spec and slug
-
-```
-SPEC_FILE = the spec path from the trigger arguments
-SLUG      = second path segment (e.g. "user-auth" from
-            "specs/user-auth/02-specification.md")
-TASKS_JSON = "specs/<SLUG>/03-tasks.json"
-TASKS_MD   = "specs/<SLUG>/03-tasks.md"
-```
-
-Verify `SPEC_FILE` exists and is a valid specification (has the expected
-sections). If it does not, stop and report — DECOMPOSE only runs on a frozen
-spec (SPECIFY's output).
-
-### 2. Detect mode (full · incremental · skip)
-
-- **No `03-tasks.json`, or no matching tasks** in the built-in Task API for this
-  slug → **full mode**.
-- **`03-tasks.json` exists** → compare its `generatedAt` against the spec's
-  changelog. New changelog entries → **incremental mode** (preserve DONE tasks,
-  update affected pending tasks, create only new work). No new entries →
-  **skip mode**: report "No changes since last decompose (<date>); delete
-  `03-tasks.json` to force" and exit early.
-
-### 3. Produce `03-tasks.json` + `03-tasks.md` (background agent)
-
-Spawn a background `general-purpose` agent to do the heavy analysis off the main
-context (saves ~90% of main context), writing **both** files to disk:
-
-- `specs/<SLUG>/03-tasks.json` — machine-readable, the canonical schema below.
-- `specs/<SLUG>/03-tasks.md` — human-readable breakdown for browsing + diffs.
-
-The agent has **no** Task-API access; the main context creates tasks in step 4.
-
-**Canonical `03-tasks.json` schema** (the existing schema, extended per spec §8):
+A background worker (model named, per the Delegation Policy in
+`<flow-root>/skills/executing-specs/SKILL.md`) writes `03-tasks.json` and a readable
+`03-tasks.md`. It has no Task API access.
 
 ```jsonc
 {
@@ -81,7 +40,7 @@ The agent has **no** Task-API access; the main context creates tasks in step 4.
   "lastDecomposeDate": "<DATE | null>",
   "tasks": [
     {
-      "id": "1.1", // Phase.TaskNumber
+      "id": "1.1",
       "phase": 1,
       "phaseName": "Foundation",
       "subject": "[<SLUG>] [P1] Imperative task title",
@@ -90,103 +49,52 @@ The agent has **no** Task-API access; the main context creates tasks in step 4.
       "size": "small | medium | large | xl",
       "priority": "high | medium | low",
       "dependencies": ["1.0"],
-      "parallelWith": ["1.2", "1.3"],
-
-      // Spec §8 schema extension — the ONLY place the task→issue map lives.
-      // Populated only when a task is promoted to its own tracker sub-issue
-      // (step 6). Absent otherwise; most tasks stay checklist-only.
+      "parallelWith": ["1.2"],
       "issue": null,
-      "parentIssue": null,
+      "parentIssue": null, // set only on promotion (step 6)
     },
   ],
 }
 ```
 
-**Content rule (critical):** descriptions are copied verbatim and self-contained
-— full code blocks, technical requirements, and acceptance criteria with test
-scenarios. The main context copies them into the Task API unchanged; there is no
-second pass. Forbidden summarization phrases: "as specified", "from the spec",
-"see specification", "as described above", "implement according to spec". If the
-agent catches itself writing one, it stops and copies the real content.
+**Descriptions are self-contained:** full code, requirements, acceptance criteria and
+test scenarios, copied unchanged later. Never "as specified", "from the spec", "see
+specification", "as described above", or "implement according to spec".
 
-### 4. Create tasks in the built-in Task API (main context)
+### 4. Load the Task API (main context)
 
-This absorbs `/spec:tasks-sync`'s sync logic — it runs unconditionally as the tail
-of decompose, and is also the manual repair path when JSON exists but the Task
-API is empty.
+The Task API is a live display of `03-tasks.json`, not a second source of truth.
 
-1. Read `specs/<SLUG>/03-tasks.json`. If missing/malformed, fall back to parsing
-   `03-tasks.md` (header pattern `^### Task (\d+)\.(\d+): (.+)$`, deriving
-   `activeForm` from the imperative title), or re-run step 3.
-2. List existing tasks for the slug (`TaskList()` filtered to `[<slug>]`); skip
-   any already present (idempotent — safe to re-run).
-3. For each missing task: `TaskCreate({ subject, description, activeForm })`,
-   retrying once on failure. Track `task.id → created taskId`.
-4. Resolve dependencies: for each task with `dependencies`,
-   `TaskUpdate({ taskId, addBlockedBy: deps.map(id → createdId) })`. Skip deps
-   whose task is absent.
-5. Spot-check 2–3 created descriptions for the forbidden phrases; warn (don't
-   block) if found.
+1. Read `03-tasks.json` (malformed: parse `03-tasks.md` headers
+   `^### Task (\d+)\.(\d+): (.+)$`, or redo step 3).
+2. Skip tasks already in `TaskList()` for `[<slug>]` (safe to re-run).
+3. `TaskCreate({ subject, description, activeForm })` for each missing one, one retry.
+4. `TaskUpdate({ taskId, addBlockedBy })` for dependencies that exist.
+5. Spot-check 2-3 descriptions for the forbidden phrases; warn, do not block.
 
-The built-in Task API is a **live-display projection** of `03-tasks.json`, not a
-parallel source of truth (spec §8 — collapse the dual task system).
+### 5. Mirror into the tracker
 
-### 5. Mirror the plan into the tracker (via the adapter)
+- `flow stage <id> decompose --checkpoint-file <f>`.
+- Mirror the **active phase** as a plan checklist generated from `03-tasks.json`; never
+  hand-edit it, regenerate it.
+- Optionally a breadcrumb `comment`.
+- **Ready the execute-ready work:** add `agent/ready` to the item (and any promoted
+  sub-issue). Without it dispatch never picks it up; DECOMPOSE is the second readiness
+  producer after TRIAGE.
 
-Project the decomposition onto the work item — never authored independently:
+No linked item or no tracker: skip the mirror; the files on disk are the result.
 
-- `node --experimental-strip-types "<flow-root>/scripts/flow.ts" stage <id> decompose --checkpoint-file <f>`
-  (sets `stage/decompose`; `<f>` is the checkpoint body).
-- Mirror the **active phase** as a plan checklist on the work item, **generated
-  from `03-tasks.json`, never hand-edited.** This is a projection: regenerate it
-  from the canonical file rather than editing it in place.
-- Optionally drop a breadcrumb `comment` (decomposed into N tasks; next stage is
-  EXECUTE).
-- **Ready the execute-ready work for dispatch.** Once the plan is mirrored and the
-  spec is decomposed into actionable tasks, via the adapter apply the
-  durable `agent/ready` label to the execute-ready work item (and to any task
-  promoted to its own sub-issue in step 6). The work item carrying the decomposed
-  plan becomes dispatchable **only once `agent/ready` is applied**: the dispatch
-  eligibility gate (the `agent/ready` constant `node --experimental-strip-types "<flow-root>/scripts/dispatch.ts"`
-  matches on, unconditionally) holds out anything lacking it. This is the **second readiness
-  producer** after TRIAGE (the first, on accept; see `triaging-work`): DECOMPOSE
-  readies the work it hands to EXECUTE so the dispatch loop has fuel.
+### 6. Sub-issue promotion (rare)
 
-If no work item is linked (provenance block absent) or the tracker is
-unavailable, skip the tracker mirror silently — decomposition on disk still
-succeeds. Tracker integration is always optional.
-
-### 6. Sub-issue promotion (the rare exception)
-
-Promote a task to its own tracker sub-issue **only** when
-`size ≥ decomposition.subIssueThreshold` (default `"xl"`); the parent's size does
-not additionally gate (spec §8). The vast majority of tasks stay checklist lines.
-When promotion fires: via the adapter, `createSubIssue(parent, spec)`, then write
-the returned identifier into that task's `issue` field (and `parentIssue`) in
-`03-tasks.json` — the canonical, normalized home of the task→issue mapping. A flat
-top-level `issues: […]` list is rejected (it duplicates the map and reintroduces
-drift).
+Promote a task only when `size ≥ decomposition.subIssueThreshold` (default `"xl"`):
+`createSubIssue(parent, spec)`, then write the identifier into that task's `issue` and
+`parentIssue`. That is the only home of the task→issue map; never a top-level `issues` list.
 
 ### 7. Report
 
-Report the spec path, mode, the two files written, the task counts by phase, the
-parallel/critical-path summary, any promoted sub-issues (each as identifier with
-title, `PROJ-157 - Title`, per the adapter's display convention), and the next
-stage: EXECUTE (`/flow:execute specs/<SLUG>/02-specification.md`).
+Spec path, mode, both files, task counts by phase, the parallel and critical path, any
+promoted sub-issues, and next: `/flow:execute specs/<SLUG>/02-specification.md`.
 
-## Calibration (spec §5)
-
-DECOMPOSE is an **execution stage**: in the ambiguous middle (reversible +
-not-confident), it **proceeds on the best default and logs the assumption**
-(`agent/assumption` comment via the adapter + a note in the task) rather than
-stopping to ask. The floor (row 0 — irreversible/outward-facing/secrets) still
-stops and asks via the adapter's `needsInput`. The plan-approval gate after
-DECOMPOSE is **off by default** (`gates.planApproval: false`); the engine flows
-straight to EXECUTE and surfaces plan assumptions at the human-review gate.
-
-## Guardrails
-
-- Filesystem (`03-tasks.json`) is canonical; the tracker mirror is a projection.
-- Never hand-edit the plan checklist; regenerate it from `03-tasks.json`.
-- Keep descriptions self-contained — no summarization placeholders.
-- All tracker I/O through the adapter. No tracker strings in this skill.
+**Calibration.** An execution stage: the ambiguous middle proceeds on the best default
+with an `agent/assumption` trail; the floor stops and asks via `needsInput`. Plan
+approval is off by default (`gates.planApproval: false`).

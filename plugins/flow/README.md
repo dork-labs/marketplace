@@ -74,27 +74,9 @@ authored independently.
                      ▲ adapter (PMClient): one per tracker, swappable
 ```
 
-- **CAPTURE** — quick, low-commitment intake of a raw thought as an `idea`. Does
-  not evaluate or classify. (`capturing-work`)
-- **TRIAGE** — classify freeform input into a type, or evaluate a captured item
-  (accept / reject / needs-research / needs-refinement) and make the
-  **simple-vs-complex** routing call. (`triaging-work`)
-- **IDEATE** — shape a complex brief into a structured ideation artifact.
-  (`ideating-features`)
-- **SPECIFY** — turn ideation into a frozen specification + draft ADRs.
-  (`specifying-work`)
-- **DECOMPOSE** — break the spec into `03-tasks.json` tasks (mirrored to the
-  tracker as a checklist; promote a sub-issue only at `size ≥ "xl"`).
-  (`decomposing-work`)
-- **EXECUTE** — implement the tasks across dependency-aware batches in an
-  isolated worktree. (`executing-specs`)
-- **VERIFY** — run the touched surface, capture proof-of-completion evidence,
-  open the PR, and hand off to review. (`verifying-work`)
-- **REVIEW** — the **human gate**. The engine parks here; there is no skill and
-  no command. On approval + green CI it resumes into DONE.
-- **DONE** — close the work, create follow-ups, run the project-pulse check, and
-  tear down the worktree. (`closing-work`)
-- **MONITOR / SIGNAL** — the optional tail that keeps the loop spinning.
+What each stage does, in plain words, is on the
+[What flow is](./docs/what-flow-is.mdx) page. REVIEW is the human gate: the engine
+stops there and waits for you. There is no skill and no command for it.
 
 Match on a tracker state's **category** (`backlog | unstarted | started |
 completed | canceled`), never its display **name** — that is what keeps the
@@ -102,20 +84,10 @@ system portable across teams and trackers.
 
 ## Modes
 
-The **trigger source** is orthogonal to the **execution mode** — a 2×2, not a
-single axis:
-
-|                        | **Step** (run one stage, stop)      | **Autonomous** (run to a gate)                                |
-| ---------------------- | ----------------------------------- | ------------------------------------------------------------- |
-| **Manual** (CLI/slash) | `/flow:specify`, `/flow:execute`    | `/flow auto` — drain the ready queue from the terminal        |
-| **PM-driven**          | rare; explicit single-stage advance | default — a Pulse tick claims an item, carries it to its gate |
-
-The default seat is PM-driven + Autonomous: a **Pulse** tick carries the top-ranked
-item to its gate in a fresh session, which needs the DorkOS server (see below).
-
-Every stage is autonomous-capable. The human is pulled in by **uncertainty** (the
-calibration ladder), not by stage — which is why IDEATE asks freely while EXECUTE
-asks rarely, as an emergent property of one rule.
+You can run one stage at a time (`/flow:specify`), drain the ready queue from your
+terminal (`/flow auto`), or let a scheduled tick pick the top item and carry it to
+its review gate in a fresh session. The scheduled tick needs the DorkOS server (see
+below).
 
 ## Command ↔ state map
 
@@ -221,9 +193,8 @@ never see a tracker-specific field. Full verb contract: the reference adapter's
 [`adapters/SPEC.md`](./adapters/SPEC.md); the typed `interface PMClient`
 the P5 server build promotes it into is in [`SPEC.md`](./docs/SPEC.md).
 
-The adapter also owns the **display convention**: every work item shown to a human
-is rendered as `PROJ-157 - Title` (identifier first, the identifier linked where the
-surface supports it), never a bare key.
+The adapter also owns the **display convention**: how a work item is shown to a
+person.
 
 ## Autonomous mode & the server dependency
 

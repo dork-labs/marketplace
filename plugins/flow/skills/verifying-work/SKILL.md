@@ -5,384 +5,133 @@ description: The /flow engine's VERIFY stage — trace recent work for correctne
 
 # Verifying Work — the VERIFY stage
 
-> **Flow root.** This skill lives at `<flow-root>/skills/verifying-work/SKILL.md`. If you reached it via a symlink (`.claude/skills/flow__*` or `.agents/skills/flow__*`), resolve the real path first (`realpath <path>`): the flow root is two directories above the skill directory. Every `<flow-root>/...` reference below is relative to that root.
+`<flow-root>` is two folders above this file's `realpath`. `flow <verb>` means
+`node --experimental-strip-types "<flow-root>/scripts/flow.ts" <verb>`.
 
-> **Stage:** VERIFY (spec §1). One generic, PM-agnostic stage skill.
-> **Absorbs:** today's `/review-recent-work`, browser proof-of-completion, and
-> code review (the `browser-testing`, `requesting-code-review`, and
-> `verification-before-completion` skills).
-> **PM projection (tracker):** evidence attached to the work item / PR.
+VERIFY proves, with evidence, that the change does what the spec asked, then parks at
+the human-review gate. It never declares the work done. Tracker writes
+(`attachEvidence`, `assignToHuman`, `comment`, `transition`) go through the adapter at
+`adapter.path`.
 
-VERIFY is the proof stage. It answers one question with evidence, never
-assertion: _does the implementation actually do what the spec asked, and is it
-ready for a human to approve?_ It ends by parking at the **human-review gate**
-(REVIEW) — VERIFY never declares the work done itself (that is DONE, after a
-human approves).
+**In a `flow drain` run** (its worker brief says so), skip this skill's review and PR
+steps: run `flow report <id> pushed`, then wait for the supervisor.
 
-## The one tracker rule
+## 1. Correctness trace
 
-This is a generic stage skill. **It never touches a tracker API string.**
-Attaching evidence, assigning the reviewer, and any breadcrumb go through the
-**adapter** skill by naming its verbs (`attachEvidence`,
-`assignToHuman`, `comment`, `transition`). No raw tracker tool name, CLI
-invocation, or slug lives here.
+For each file and function changed since the base: what it does, its callers and
+callees; trace the logic and fix what is wrong. This is the only review of your own work.
 
-**Finding the adapter.** It is the `SKILL.md` at the `adapter.path` that
-`node --experimental-strip-types "<flow-root>/scripts/config-files.ts"` prints: the
-project's own (`.agents/flow/adapters/<tracker>/`), or the one flow ships. Inside it,
-`<flow-root>` means that output's `flowRoot`.
+## 2. The verification gate
 
-## Process
+**No completion claim without fresh evidence:** run the proving command in this pass
+and read its whole output. Scale to the change: tests (0 failures), lint, typecheck,
+build, and for a bug the symptom test going red→green. Prefer package-filtered commands.
+Check the VCS diff; never trust an agent's "success".
 
-**In a `flow drain` run** (its worker brief says so), skip this skill's own review and PR steps: run `flow report <id> pushed`, then wait for the supervisor's message.
+## 3. Advisory review — only when step 4 is off
 
-### 1. Correctness trace (absorbs `/review-recent-work`)
+With `review.adversarial` false, have a fresh reviewer (or the harness's code-review
+skill) read the diff against the task and the project's standards. It is advisory: you
+may open the PR with a finding outstanding if the PR body says so.
 
-Trace the recently-changed files and functions to verify the implementation is
-**correct and complete**, fixing issues found in place:
+## 4. Adversarial review — before the PR exists
 
-- Identify the files/functions modified since the change's base (e.g. the spec's
-  base SHA, or `git diff` against the merge base).
-- For each function: state what it does, its callers, its callees, then trace the
-  logic for correctness.
-- Correct any issue found during the trace.
+With `review.adversarial` true (the default), the PR does not open until an
+independent review converges. Run it before the evidence: converging changes the diff.
 
-This is the quick inline self-review, and it is the only review you perform on
-your own work. Everything that follows is read by someone else: the independent
-gate in step 4 when it is configured on, the lighter conformance pass in step 3
-when it is not.
+- Dispatch `review.reviewers` (default 1) fresh reviewers, **never the agent that
+  implemented the change, from its own context**.
+- Name each reviewer's model: the `review` class, per the Delegation Policy in
+  `<flow-root>/skills/executing-specs/SKILL.md`.
+- Give each **the diff, the rubric and the intent**: the base/head SHAs; the
+  `review.rubric` file (default `REVIEW.md`; relative to the repo root, else the
+  current folder; absolute as is); the item's description or its `03-tasks.json` task.
+  Never your account of what you did.
+- Pool findings from all reviewers: **any blocking finding blocks unless rebutted.**
+- **Converge:** fix what is justified, rebut in writing what is wrong, re-review the new
+  diff, until a pass finds nothing blocking.
+- Record each pass: `flow journal record review --item <id> --round <n> --sha7 <sha>
+--verdict clean|changes`, with finding counts.
+- A fix made here invalidates step 2: re-run the gate before step 5.
 
-### 2. The verification gate (absorbs `verification-before-completion`)
+**Degradation.** Never review your own branch from your own working context. Every
+floor below is disclosed in the run report and the PR's review-status line:
 
-**The Iron Law: no completion claim without fresh verification evidence.** Before
-asserting any status, run the proving command _in this pass_ and read its full
-output — confidence is not evidence. Scale the commands to the change:
+- **No rubric file:** resolve `review.rubric` to a path and check it first. If missing,
+  review on general discipline (correctness, blast radius, data loss, secrets, tests)
+  and print, in the run output,
+  `no rubric at <resolved path> — reviewing without one; run /flow:init to scaffold it`,
+  and name the same resolved path in the evidence comment and review-status line.
+- **`review.adversarial` false:** skip this step and say so.
+- **No second agent:** review in a fresh context handed only the diff, the rubric and
+  the intent, and record that it ran degraded.
 
-| Claim          | Command                                  |
-| -------------- | ---------------------------------------- |
-| Tests pass     | `pnpm vitest run [path]` → 0 failures    |
-| Linter clean   | `pnpm lint` → 0 errors/warnings          |
-| Types check    | `pnpm typecheck` → 0 errors              |
-| Build succeeds | `pnpm build` → exit 0                    |
-| Bug fixed      | original symptom test passes (red→green) |
+## 5. Proof of completion
 
-Prefer package-filtered commands when scoped (`pnpm vitest run <file>`,
-`dotenv -- turbo typecheck --filter=@dorkos/<pkg>`). Trust no agent's "success"
-report without checking the VCS diff. The full `verification-before-completion`
-skill carries the rationalization-prevention table — read it when tempted to
-skip.
+Evidence is config-driven, never hand-picked: follow the `EvidencePlan` that
+`selectEvidence` returns for the change `kind`, `liveSession` and the `evidence` block.
 
-### 3. Structured code review — only when the gate in step 4 is off
+- **UI** (`kind: "ui"`): Playwright on the touched surface. `evidence.ui: "auto"` gives
+  an annotated GIF (`gif_creator`) in a live session, a WebM (`recordVideo`) unattended;
+  `"screenshot"` a still; `"off"` nothing.
+- **Temporal:** `evidence.temporal` `"video"` (default), `"gif"` or `"off"`.
+- **Logic:** `evidence.logic` `"test-summary"` (default), `"full-output"` or `"off"`.
 
-Run this step **only when `review.adversarial` is false**. With the gate on, step
-4 reads the same diff against the same spec and more besides, so running both
-spends two full reads to answer one question.
+The format keys off whether a live session is attached now, never off autonomy. v1
+attaches links, not binary uploads. A capture that cannot be produced is reported as a
+gap; never fake proof.
 
-For non-trivial changes, dispatch a fresh reviewing subagent (or your harness's
-code-review skill or agent if it has one) rather than self-reviewing. Obtain the
-base/head SHAs, assemble the review context (what was implemented · the task spec
-from `03-tasks.json` · base/head SHAs · a summary), dispatch the subagent, and act
-on its feedback. The reviewer reads actual code against the spec and the project's
-standards (architecture boundaries, layering, import rules, test coverage) — it
-never trusts the implementer's narrative.
+## 6. Attach the evidence and open the PR
 
-This pass is **advisory**: it is scoped by size, it carries no rubric, and it does
-not block the PR. You may open the PR with a finding outstanding, provided you say
-so in the PR body. Step 4 is the opposite on all three counts.
+`attachTo` (default `["pr", "tracker"]`) decides:
 
-### 4. Adversarial review — before the PR exists
+- **`"pr"`:** the bundle (test summary, recording links, the linked item) in a PR
+  comment; open or update the PR from `templates/pr.md`, including its review-status
+  line (gate ran, skipped by config, or degraded, and which rubric).
+- **`"tracker"`:** `attachEvidence(item, evidence)` with a link to each artifact and the PR.
 
-When `review.adversarial` is true (the default), the branch **must face an
-independent adversarial review before a PR exists**, and that review **blocks**:
-the PR does not open until it converges. Run it here, ahead of the evidence
-bundle, because a review that converges changes the diff and proof captured
-against a superseded diff is not proof.
+A `"none"` capture has nothing to attach; say so.
 
-- **Dispatch `review.reviewers` separate reviewer agents** (default one). Each is
-  a fresh agent with its own context — **never the agent that implemented the
-  change, reviewing from the context it implemented in**: it would review what it
-  meant to write, not the diff.
-- **Name each reviewer's model explicitly.** Reviewers are the `review` work
-  class: resolve `models.tiers.review` (default `workhorse`) through
-  `models.bindings` and pass the result. Never dispatch with the model omitted —
-  on a harness that inherits the parent's model on omission, an orchestrator
-  sitting at the frontier tier silently runs every reviewer at frontier cost. An
-  unbound tier falls back to the harness default **with a note in the run**; a
-  failing model falls sideways or down, never up.
-  The full policy is in the EXECUTE stage skill.
-- **Give each reviewer three things: the diff, the rubric, and the intent.** The
-  diff and the files it touches (via the base/head SHAs); the rubric named by
-  `review.rubric` — resolved from the repo root when there is one and from the
-  current directory when there is not, or taken as-is when it is absolute
-  (default `REVIEW.md`) — which
-  carries the severity calibration, the repo's hard rules, and the do-not-report
-  list; and the work item's description or its `03-tasks.json` task, so the
-  reviewer can judge conformance — did this do what was asked — as well as
-  soundness. What you do **not** hand over is your account of what you did: that
-  is the story the review exists to check, not an input to it.
-- **Reconcile more than one reviewer by union, not by vote.** Findings from all
-  `review.reviewers` reviewers are pooled, and **any blocking finding blocks
-  unless it is rebutted** — a second reviewer failing to notice a real defect is
-  not evidence against the reviewer who did.
-- **Converge.** Fix what the findings justify, rebut in writing what they get
-  wrong, then re-review the updated diff. Repeat until a pass returns nothing
-  blocking.
-- **Record each pass** with `flow journal record review --item <id> --round <n>
-  --sha7 <sha> --verdict clean|changes` and its finding counts, for the retro.
-- **Re-verify if convergence touched code.** Any fix made during this step
-  invalidates the step-2 run, so re-run the verification gate before step 5. The
-  proof you attach must describe the diff you are actually shipping.
+### Provenance
 
-**Degradation.** The absolute rule is narrower than "always use another agent":
-**never review your own branch from your own working context.** Everything below
-is a documented floor beneath the full gate, and every one of them is disclosed
-in the run report and in the PR's review-status line — a degraded review that
-reads as a clean one is worse than none.
-
-- **The rubric file is missing** → the reviewer proceeds on general review
-  discipline (correctness, blast radius, data loss, secrets, test coverage) — and
-  this degradation is **announced, never inferred**. Before dispatching, resolve
-  `review.rubric` to a concrete path and check it exists. If it does not, say so
-  in **both** places a person looks:
-  - **in the run output**, as its own line:
-    `no rubric at <resolved path> — reviewing without one; run /flow:init to scaffold it`
-  - **in the evidence comment and the PR's review-status line**, naming the same
-    resolved path.
-
-  Print the path you actually resolved, not the configured string: the two differ
-  whenever `review.rubric` is relative and flow is running somewhere other than
-  the repo root, and "REVIEW.md is missing" is unactionable when the reader cannot
-  tell which `REVIEW.md` was looked for. Adversarial review is **on by default**,
-  so a silent fallback here reads as a rubric-calibrated review that never
-  happened — which is the failure this whole section exists to prevent.
-
-- **`review.adversarial` is false** → skip this step entirely and say that you
-  skipped it. The tradeoff is deliberate and belongs in the report, not hidden:
-  the loop is cheaper in tokens and time, and the first eye on the diff is the
-  human's.
-- **No second agent is available** in your harness → run the review in a **fresh
-  context handed only the diff, the rubric, and the intent**, with none of the
-  implementation conversation carried in. This is the degraded floor, not an
-  equivalent: a fresh context cannot forget what it was never told, but it also
-  cannot bring a second reviewer's independent priors. Record that the review ran
-  degraded.
-
-### 5. Proof-of-completion bundle (browser proof)
-
-Gather proof **scaled to the surface touched** (spec §13), following the
-`browser-testing` skill for the methodology. The format and attach target are
-**config-driven from the `evidence` block** of the project's `.agents/flow/config.json` — never
-hand-picked. The pinned oracle for that decision is the flow engine's
-`selectEvidence`: given the change `kind`, the
-run's trigger (`liveSession`), and the resolved `evidence` config, it returns an
-`EvidencePlan` — the capture format, the tool that produces it, and where the
-bundle attaches. Follow its result; do not re-derive the choice by hand.
-
-**Resolve the capture per class** (what `selectEvidence` returns):
-
-- **UI change** (`kind: "ui"`) → run Playwright (`apps/e2e`) for the touched
-  surface. `evidence.ui` picks the format; `"auto"` (default) resolves on the
-  trigger:
-  - **interactive** run (a live CLI/session) → an **annotated GIF** via
-    claude-in-chrome's `gif_creator` (per-action keyframes with click/label
-    overlays).
-  - **unattended** run (no live session) → a **WebM** via Playwright's
-    `recordVideo` — the path already wired in `apps/e2e`
-    (`video: 'retain-on-failure'` in `playwright.config.ts`).
-  - `evidence.ui: "screenshot"` pins a still; `"off"` skips UI capture.
-- **Temporal behavior** (`kind: "temporal"`) → a moving recording regardless of
-  trigger: `evidence.temporal` is `"video"` (WebM) by default, `"gif"` forces the
-  annotated GIF, `"off"` skips it.
-- **Server / logic** (`kind: "logic"`) → the verification-gate summary from step 2:
-  `evidence.logic` is `"test-summary"` by default, `"full-output"` attaches the raw
-  command output, `"off"` skips it.
-
-The capture _format_ keys off whether a live interactive session is attached right
-now (the same `liveSession` signal the comms router uses), never off the autonomy
-of the run: `/flow auto` is autonomous yet interactive (annotated GIF reachable);
-a Pulse tick is autonomous and unattended (WebM `recordVideo`).
-
-> ### Scope boundary — v1 (this skill) vs the P5 server extension
->
-> **v1 (here, interactive/CLI) attaches what an interactive or CLI run can already
-> produce:** the `apps/e2e` **WebM** (`recordVideo`, headless), any `gif_creator`
-> capture from a live interactive session, and the verification-command summaries.
-> The selector (`selectEvidence`) and the attach step below are the full v1
-> pipeline; nothing here is a placeholder.
->
-> **Deferred to the P5 server extension, NOT built here:** the
-> fully **unattended/server variant** — headless `recordVideo` driven by the
-> server-side VERIFY runner, then **automated** tracker `fileUpload` /
-> `attachmentCreate` of the artifact (binary upload) with no human in the loop. v1
-> attaches _links/URLs_ to the produced artifacts via the adapter (step 6); P5
-> promotes that to server-driven binary upload + the headless capture loop. When P5
-> lands, `selectEvidence`'s output is unchanged — only the executor moves
-> server-side. Until then, if a capture cannot be produced (e.g. no live session
-> _and_ no `apps/e2e` run for the surface), VERIFY **documents the gap rather than
-> faking proof**.
-
-### 6. Attach evidence + open the review (via the adapter)
-
-Project the proof onto the work item — the single audit surface. The plan's
-`attachTo` (from `selectEvidence`, echoing `evidence.attachTo`, default
-`["pr", "tracker"]`) decides which of these fire:
-
-- **`"pr"`** → assemble the **ProofShot-style bundle** into the PR comment: the
-  test/validation summary, the recording link(s) (the `apps/e2e` WebM and/or the
-  `gif_creator` GIF), and the linked work item. Open / update the PR with the
-  `templates/pr.md` scaffold, including its review-status line (whether the step-4
-  gate ran, was skipped by config, or ran degraded, and against which rubric).
-- **`"tracker"`** → via the adapter, `attachEvidence(item, evidence)` — the same
-  bundle attached onto the work item's `externalUrls` (a link to each artifact + a
-  link to the PR). Route this through the **adapter** verb; never touch a
-  tracker string here.
-
-If a class resolved to a `"none"` capture, its `attachTo` is empty — there is no
-bundle to attach, and VERIFY says so rather than inventing one.
-
-#### Stamp the run's provenance
-
-A reviewer or a follow-up session should not have to guess where this change came
-from. Carry the run's `provenance` block (written at EXECUTE Phase 0.5, in
-`.dork/flow/flow-state.json`) onto both surfaces.
-
-**The signature's shape is defined once, in
-[`<flow-root>/docs/provenance.md`](../../docs/provenance.md) — read it there and
-do not redefine it here.** In short: one hidden last line,
-`<!-- agent:provenance {"v":1,…} -->`, carrying `harness`, `sessionId`,
-`account`, `host`, `surface`, and — under DorkOS only — `instanceId` and
-`resumeUrl`. `flow:provenance` is the **legacy name readers still accept**; what
-you EMIT is always `agent:provenance`.
+The signature is defined in [`<flow-root>/docs/provenance.md`](../../docs/provenance.md);
+do not redefine it here. It carries `harness`, `sessionId`, `account`, `host`,
+`surface`, and — under DorkOS only — `instanceId` and `resumeUrl`, from the run's
+`flow-state.json` record. Emit `agent:provenance`; `flow:provenance` is the legacy name
+readers still accept.
 
 **The signature itself is per-write: every body written outward carries it, every
-time.** VERIFY changes nothing about that. The **once-per-run** cadence below
-applies to **the PR-body stamp only** — that one artifact is written here and not
-re-stamped on every later push. The comment this stage posts, and every comment
-any later stage or tick posts, carries its own signature like any other outward
-write.
+time.** The once-per-run cadence applies to **the PR-body stamp only**: its last line,
+written here and not re-stamped on later pushes. The comment this stage posts
+carries its own signature like any other outward write, beside the identity `marker`.
+Add an `attachEvidence` link only for a resumable session URL.
 
-- **On the PR** — append the signature as the last line of the body. It is an
-  HTML comment, so a human reading the PR never sees it, and a later session can
-  read it back without parsing prose. `templates/pr.md` carries the same marker.
-  **This is the once-per-run stamp**: written at this gate, not re-written on
-  every subsequent push to the branch.
+It must be valid JSON (spec §6). With no provenance from EXECUTE, stamp what this
+session knows (spec §5). If the repository is public, follow the spec's
+public-repository rules: truncate `sessionId` and omit `resumeUrl`.
 
-  **This is the one artifact a machine parses, so it has to be valid JSON.**
-  JSON-escape every value — quotes, backslashes, newlines, control characters —
-  and drop any field whose value you cannot escape safely. A missing field
-  degrades one lookup; an unescaped quote invalidates the whole blob, and a
-  parser that silently gets nothing back is exactly the failure this line exists
-  to prevent. If nothing survives escaping, write no line at all and say so.
+### Closing form
 
-- **On the work item** — via the adapter, and **only with verbs that already
-  exist**:
-  - `comment(item, body)` carrying the same signature plus the identity `marker`
-    (the two are different things and both belong on the comment — the marker is
-    how the agent recognizes its own writes, the signature is how a machine
-    routes a reply), or
-  - `attachEvidence(item, evidence)` with a link, **when — and only when — the
-    provenance includes a resumable session URL** a person or a later tick can
-    actually open. A link that resolves to nothing is worse than no link.
+**Does this PR complete the item?** Merge automation is diff-blind.
 
-**Emit only the fields the run actually has.** Omitted is a fact; invented is a
-lie a later session will act on. And **never an email address** in `account` or
-anywhere else — a PR body can be world-readable and permanent, and `account` is
-the **harness** account, never the tracker account. If provenance is empty
-because the harness could determine nothing, skip both stamps and say so in the
-run report rather than writing an empty block that looks like a stamp.
+- Yes: `Closes <identifier>` in the body.
+- No: `Refs <identifier>`, and the identifier nowhere the tracker treats as closing,
+  the title first.
+- The branch name can close it too. After a partial PR merges, read the item's state;
+  if automation closed it, `transition` it back to the stage the remaining work is at
+  and say automation closed it. Recommend once that the adopter turn off branch-name
+  auto-close. The adapter documents what the tracker honours.
 
-**If EXECUTE never ran** — you were triggered straight into VERIFY, so
-`flow-state.json` holds no provenance for this item — apply the general rule
-(canonical spec, "Omit, never fabricate"): stamp what _this_ session can
-determine about itself and omit the rest. Partial provenance from the verifying
-session is still a real trail; inventing an execution session that never happened
-is not.
+## 7. Hand off to the human-review gate
 
-**If the repository is public**, follow the canonical spec's public-repository
-rules before writing either stamp: truncate `sessionId` and omit `resumeUrl`. A
-PR body is the single most public thing this stage writes.
+The human-review gate is always on. VERIFY never advances to DONE.
 
-#### Decide the closing form deliberately
+1. `flow stage <id> review --checkpoint-file <f>`.
+2. `assignToHuman(item)`.
+3. **Stop.** REVIEW has no skill: never invent one, never auto-approve. After a person
+   approves and merges, `/flow:done <issue>` closes the item.
 
-Before composing the title and body, answer one question: **does this PR complete
-the work item?** The rationale for caring is one line: **merge automation is
-diff-blind.** It cannot tell a half-finished feature from a finished one, so the
-references you write are the only truth it reads. A closing reference on a partial
-PR silently closes live work, and the next dispatch pass will never see it again.
+No linked item or no tracker: skip the tracker steps and report the evidence inline.
 
-- **It completes the item** → reference the item in the **body** with the
-  tracker's **closing** form (conventionally `Closes <identifier>`). The tracker's
-  merge automation then moves the item to its terminal state on merge, which is
-  what you want.
-- **It does not complete the item** (a partial delivery, one PR of several) →
-  reference it with an explicitly **non-closing** form (conventionally
-  `Refs <identifier>`) and keep the identifier out of every position the tracker
-  treats as closing, starting with the **title**.
-
-**The branch name is a third closing vector, and you do not control it here.**
-Many trackers close an item when a branch carrying its identifier merges,
-independently of the title and body — and flow's own convention makes the
-identifier the branch key on _every_ branch, so a partial PR is exposed to this by
-default. Two things follow, and a partial PR needs both:
-
-- **Check after the merge, not before.** Read the item's state once the PR lands;
-  if branch automation closed it while work remains, reopen it via the adapter's
-  `transition` — back to the stage projection the remaining work actually sits at,
-  not merely out of the terminal state — and say that automation, not a human,
-  closed it.
-- **Tell the adopter about the durable fix.** The reliable cure is a setting, not
-  a habit: most trackers let you disable branch-name-based auto-close in their
-  git-integration settings, leaving the body reference as the only closing signal.
-  Recommend it once, rather than paying the check on every partial PR.
-
-Use the tracker's generic closing keywords — not a memorized per-tracker list.
-When you are unsure which forms the configured tracker honors, or whether its
-branch automation is on, read the adapter skill: it is the one component that
-documents the tracker's behavior.
-
-### 7. Hand off to the human-review gate (REVIEW)
-
-The **human-review gate is always on** (spec §5). VERIFY does not advance to
-DONE. Instead, via the adapter:
-
-- `node --experimental-strip-types "<flow-root>/scripts/flow.ts" stage <id> review --checkpoint-file <f>` (the checkpoint body).
-- `assignToHuman(item)` — assign the reviewer, which fires their notification.
-- **Stop.** The engine **parks** at REVIEW. REVIEW is a human gate with **no
-  skill** — there is no `reviewing-work`. The loop resumes (in P2) only on the
-  human's approval, after which DONE (`closing-work`) and the auto-merge recovery
-  ladder run. **In v1 there is no approval detection:** after you approve and merge
-  the PR, run `/flow:done <issue>` to move the item to Done and tear down the
-  worktree — the unattended approval→merge resume is the P2 server Extension.
-
-When you report the handoff to the operator, name the work item as identifier with
-title (`PROJ-157 - Title`, per the adapter's display convention), never the
-bare key.
-
-If no work item is linked or the tracker is unavailable, skip the tracker steps
-silently and report the evidence inline — tracker integration is always optional.
-
-## Calibration (spec §5)
-
-VERIFY is an **execution stage**: in the ambiguous middle (reversible +
-not-confident) it **proceeds on the best default and logs the assumption** rather
-than stopping. The floor (row 0) still stops and asks via the adapter's
-`needsInput`. But VERIFY's _output_ is itself the human gate — every assumption
-logged during EXECUTE/VERIFY surfaces here for the human to approve.
-
-## Guardrails
-
-- Evidence before claims, always (the Iron Law). No "should"/"probably"/"seems".
-- VERIFY never closes the loop — it parks at REVIEW. DONE is a separate stage.
-- REVIEW has no skill; do not invent a reviewing skill or auto-approve.
-- Never review your own branch from your own working context, and never let a
-  skipped, degraded, or unconverged review pass silently — say which happened, in
-  the report and on the PR.
-- A PR that does not complete its work item never carries a closing reference —
-  and its item's state is checked again after the merge, because the branch name
-  can close it without one.
-- Provenance is stamped from what the run actually knows. An omitted field is
-  honest; a fabricated one sends the next session after a worker that never
-  existed.
-- Every reviewer is dispatched with its model named. An omitted model is not a
-  neutral default — it is the orchestrator's model, at the orchestrator's price.
-- All tracker I/O through the adapter. No tracker strings in this skill.
+**Calibration.** VERIFY is an execution stage: the ambiguous middle proceeds on the best
+default and logs the assumption; the floor still stops and asks via `needsInput`.

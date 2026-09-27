@@ -34,19 +34,6 @@ function between(text: string, from: string, to: string): string {
   return text.slice(start, end);
 }
 
-/** Every passage that must hold a pause check, by name. */
-function entryPoints(flow: string, files: Record<string, string>): Record<string, string> {
-  return {
-    'flow-drain tick': between(files.drain, '0. **Pause check', '1. **Recovery'),
-    'flow-groom check': between(files.groom, '0. **Pause check', '1. Pull once'),
-    'flow-triage tick': between(files.triage, '0. **Pause check', '1. Via the adapter'),
-    'tending-tracker tick': between(files.tending, '**Pause check', '0. **Resolve identity'),
-    '/flow continue': between(flow, '- **`continue`**', '- **`auto`**'),
-    '/flow auto start': between(flow, '0. **Pause check', '1. **Start'),
-    '/flow auto iteration': between(flow, '2. **Pause check', '**Then it runs'),
-  };
-}
-
 /** What the general "The pause." paragraph of flow.md must cover. */
 function generalPauseGaps(flow: string): string[] {
   const text = between(flow, '**The pause.**', 'With a valid config present');
@@ -59,66 +46,70 @@ function generalPauseGaps(flow: string): string[] {
   return needs.filter(([, re]) => !re.test(text)).map(([label]) => label);
 }
 
+/**
+ * What makes a passage a pointer at the one pause check: it names the check,
+ * runs flow-drain's step 0, and stops when that says stop. The check itself
+ * lives once, in flow-drain step 0 (the doc lint's duplicate rule keeps one copy).
+ */
+function pointerGaps(passage: string): string[] {
+  const needs: [string, RegExp][] = [
+    ['names the pause check', /\*\*Pause check/],
+    ['runs flow-drain step 0', /step 0 of\s+`<flow-root>\/skills\/flow-drain\/SKILL\.md`/],
+    ['stops when it says to', /Stop\s+whenever it says to stop/],
+  ];
+  return needs.filter(([, re]) => !re.test(passage)).map(([label]) => label);
+}
+
 const shipped = () => ({
   drain: read('skills/flow-drain/SKILL.md'),
   groom: read('skills/flow-groom/SKILL.md'),
   triage: read('skills/flow-triage/SKILL.md'),
+  retro: read('skills/flow-retro/SKILL.md'),
   tending: read('skills/tending-tracker/SKILL.md'),
 });
 
+/** Every passage that must point at the pause check, by name. */
+function pointers(files: ReturnType<typeof shipped>): Record<string, string> {
+  return {
+    'flow-groom check': between(files.groom, '0. **Pause check', '1. Pull once'),
+    'flow-triage tick': between(files.triage, '0. **Pause check', '1. Take a backlog'),
+    'flow-retro tick': between(files.retro, '0. **Pause check', '1. Run `flow selftest'),
+    'tending-tracker tick': between(files.tending, '**Pause check', '0. **Resolve identity'),
+    '/flow auto start': between(files.drain, '1. **Pause check', '2. **Start'),
+    '/flow auto iteration': between(files.drain, '3. **Each iteration', '4. End early'),
+  };
+}
+
 describe('every autonomous entry point checks the pause first', () => {
-  it('each passage holds a complete pause check', () => {
-    const passages = entryPoints(read('commands/flow.md'), shipped());
-    const gaps = Object.entries(passages).flatMap(([name, text]) =>
-      pauseCheckGaps(text).map((gap) => `${name}: ${gap}`)
+  it('the one tick holds the complete pause check', () => {
+    const drain = shipped().drain;
+    expect(pauseCheckGaps(between(drain, '0. **Pause check', '1. **Identity'))).toEqual([]);
+  });
+
+  it('every other entry point runs that check, and stops when it says stop', () => {
+    const gaps = Object.entries(pointers(shipped())).flatMap(([name, text]) =>
+      pointerGaps(text).map((gap) => `${name}: ${gap}`)
     );
     expect(gaps).toEqual([]);
-    expect(Object.keys(passages)).toHaveLength(7);
+    expect(Object.keys(pointers(shipped()))).toHaveLength(6);
   });
 
-  it('the guard bites when a check is removed or loses its fail-closed line', () => {
-    // Plant-a-break on the real files: drop the drain's check; strip the
-    // fail-closed sentence from the auto iteration.
+  it('/flow continue and auto run the flow-drain tick', () => {
+    const modes = between(read('commands/flow.md'), '## Queue modes', '- **`auto`**');
+    expect(modes).toMatch(/skills\/flow-drain\/SKILL\.md/);
+  });
+
+  it('the guard bites when the check loses its flag or a pointer is cut', () => {
     const files = shipped();
     files.drain = files.drain.replace('`paused` is not `null`', '`paused` is set');
-    const flow = read('commands/flow.md').replace(
-      /(2\. \*\*Pause check[\s\S]*?)if the check cannot run or its output cannot be read,\s+stop too\./,
-      '$1'
-    );
-    const passages = entryPoints(flow, files);
-    expect(pauseCheckGaps(passages['flow-drain tick'])).toEqual(['reads `paused`']);
-    expect(pauseCheckGaps(passages['/flow auto iteration'])).toEqual([
-      'stops when the check cannot run',
+    expect(pauseCheckGaps(between(files.drain, '0. **Pause check', '1. **Identity'))).toEqual([
+      'reads `paused`',
     ]);
-  });
-});
-
-describe('the flow-retro tick checks the pause through flow-groom', () => {
-  /**
-   * flow-retro does not copy the pause check (the doc lint's duplicate rule
-   * keeps one copy); its step 0 runs flow-groom's step 0, which the suite
-   * above pins. What its step 0 must say for that to hold.
-   */
-  function retroGaps(text: string): string[] {
-    const step = between(text, '0. **Pause check', '1. Run `flow selftest');
-    const needs: [string, RegExp][] = [
-      ['comes before anything else', /\*\*Pause check, before anything else/],
-      ['runs flow-groom step 0', /step 0 of\s+`<flow-root>\/skills\/flow-groom\/SKILL\.md`/],
-      ['stops when it says to', /stop\s+whenever it says to stop/],
-    ];
-    return needs.filter(([, re]) => !re.test(step)).map(([label]) => label);
-  }
-
-  it('its step 0 runs flow-groom step 0 and stops when that says stop', () => {
-    expect(retroGaps(read('skills/flow-retro/SKILL.md'))).toEqual([]);
-  });
-
-  it('the guard bites when the step stops pointing at flow-groom', () => {
-    const planted = read('skills/flow-retro/SKILL.md').replace(
-      'flow-groom/SKILL.md',
-      'flow-retro/SKILL.md'
-    );
-    expect(retroGaps(planted)).toEqual(['runs flow-groom step 0']);
+    files.retro = files.retro.replace('flow-drain/SKILL.md', 'flow-retro/SKILL.md');
+    files.groom = files.groom.replace('Stop whenever it says to stop', 'Carry on');
+    const passages = pointers(files);
+    expect(pointerGaps(passages['flow-retro tick'])).toEqual(['runs flow-drain step 0']);
+    expect(pointerGaps(passages['flow-groom check'])).toEqual(['stops when it says to']);
   });
 });
 

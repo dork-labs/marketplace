@@ -5,15 +5,11 @@ description: The /flow engine's CAPTURE stage — quick, low-commitment intake o
 
 # Capturing Work — the CAPTURE stage
 
-> The first stage on the `/flow` spine (`CAPTURE → TRIAGE → …`, spec §1).
-> CAPTURE turns a raw thought into a durable, low-commitment work item. It does
-> **not** evaluate, prioritize, or plan: that is TRIAGE's job (`triaging-work`).
-> `/flow:capture` and a PM-driven transition both trigger this skill.
+`<flow-root>` is two folders above this file's `realpath`. `flow <verb>` means
+`node --experimental-strip-types "<flow-root>/scripts/flow.ts" <verb>`.
 
-## The one rule: every tracker write goes through `flow`
-
-CAPTURE never names a tracker API or tool. Its one write is `flow create`
-(`flow` means `node --experimental-strip-types "<flow-root>/scripts/flow.ts"`),
+CAPTURE turns a raw thought into a low-commitment work item. It does not evaluate,
+prioritize or plan: that is TRIAGE (`triaging-work`). Its one write is `flow create`,
 which signs the description and lands the item in the tracker's intake state.
 
 ## Process
@@ -52,18 +48,9 @@ which signs the description and lands the item in the tracker's intake state.
 
 ## Guardrails
 
-- **Do not triage or evaluate here.** No alignment check, feasibility judgment,
-  duplication search, prioritization, or planning; for those, use `triaging-work`.
-- **Do not expand scope** beyond what the operator described. One thought in → one
-  idea captured.
-- **Reversible + confident → proceed silently** (spec §5 calibration ladder):
-  capturing a single idea is cheap to undo, so don't over-ask. Ask only for the
-  one missing detail that blocks creating a meaningful item.
+- **Do not triage here**, and do not expand scope: one thought in, one idea out.
+- Capturing is cheap to undo: ask only for the one missing detail that blocks a
+  meaningful item.
 - **If `flow create` fails** (exit 3: this tracker cannot create items through
   flow; exit 4: the tracker is unreachable or lacks a label), surface its
   message plainly and stop. Never fabricate a capture, and never reach the tracker another way.
-
-## Stage handoff
-
-CAPTURE's only successor is TRIAGE: the idea waits in intake until
-`triaging-work` evaluates and routes it. CAPTURE never skips ahead.
