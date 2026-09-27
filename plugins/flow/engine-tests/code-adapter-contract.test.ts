@@ -252,7 +252,7 @@ describe.each([
     expect(await rejection(h.adapter.getItem(h.foreign))).toBeInstanceOf(PreconditionError);
   });
 
-  it("refuses to write to another team's item (precondition) and reports a missing one as a tracker failure", async () => {
+  it("refuses to write to another team's item or a missing one (precondition)", async () => {
     const h = make();
     const template = await h.adapter.getItem(h.id(1));
     const foreign = { ...template, id: '', identifier: h.foreign };
@@ -264,8 +264,8 @@ describe.each([
     expect(await rejection(h.adapter.comment(foreign, 'x'))).toBeInstanceOf(PreconditionError);
     expect(
       await rejection(h.adapter.applyWorkState(missing, { agentLabel: 'agent/claimed' }))
-    ).toBeInstanceOf(TrackerError);
-    expect(await rejection(h.adapter.comment(missing, 'x'))).toBeInstanceOf(TrackerError);
+    ).toBeInstanceOf(PreconditionError);
+    expect(await rejection(h.adapter.comment(missing, 'x'))).toBeInstanceOf(PreconditionError);
     expect(h.writes()).toBe(before);
   });
 

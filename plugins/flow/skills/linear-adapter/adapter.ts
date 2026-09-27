@@ -760,21 +760,33 @@ export function createAdapter(ctx: AdapterContext): CodeAdapter {
     return out;
   }
 
-  /** Read one issue, refusing one that is missing or outside the team. */
-  async function readIssue(identifier: string, comments?: number): Promise<RawIssue> {
-    const { id: teamId, key } = await team();
-    let data: { issue?: RawIssue | null };
+  /**
+   * Run a read of one issue, turning Linear's "Entity not found" into the
+   * missing-item precondition (exit 5) rather than a tracker failure (exit 4).
+   */
+  async function readOne<T>(
+    query: string,
+    variables: Record<string, unknown>,
+    identifier: string
+  ): Promise<T> {
     try {
-      data =
-        comments !== undefined && comments > 0
-          ? await graphql(ITEM_WITH_COMMENTS_QUERY, { id: identifier, comments })
-          : await graphql(ITEM_QUERY, { id: identifier });
+      return await graphql<T>(query, variables);
     } catch (error) {
       if (error instanceof TrackerError && /Entity not found/.test(error.message)) {
         throw new PreconditionError(`${identifier} was not found in Linear`);
       }
       throw error;
     }
+  }
+
+  /** Read one issue, refusing one that is missing or outside the team. */
+  async function readIssue(identifier: string, comments?: number): Promise<RawIssue> {
+    const { id: teamId, key } = await team();
+    const data = await readOne<{ issue?: RawIssue | null }>(
+      comments !== undefined && comments > 0 ? ITEM_WITH_COMMENTS_QUERY : ITEM_QUERY,
+      comments !== undefined && comments > 0 ? { id: identifier, comments } : { id: identifier },
+      identifier
+    );
     return ownIssue(data.issue, identifier, { id: teamId, key });
   }
 
@@ -903,10 +915,11 @@ export function createAdapter(ctx: AdapterContext): CodeAdapter {
 
     async applyWorkState(item: WorkItem, change: WorkStateChange) {
       const { id: teamId, key } = await team();
-      const data = await graphql<WriteReadResponse>(WRITE_READ_QUERY, {
-        id: item.id || item.identifier,
-        teamId,
-      });
+      const data = await readOne<WriteReadResponse>(
+        WRITE_READ_QUERY,
+        { id: item.id || item.identifier, teamId },
+        item.identifier
+      );
       const issue = ownIssue(data.issue, item.identifier, { id: teamId, key });
 
       // The label set comes from this read, never from `item`. A missing
@@ -970,9 +983,11 @@ export function createAdapter(ctx: AdapterContext): CodeAdapter {
     },
 
     async comment(item: WorkItem, body: string) {
-      const target = await graphql<{ issue?: RawIssue | null }>(COMMENT_TARGET_QUERY, {
-        id: item.id || item.identifier,
-      });
+      const target = await readOne<{ issue?: RawIssue | null }>(
+        COMMENT_TARGET_QUERY,
+        { id: item.id || item.identifier },
+        item.identifier
+      );
       const issue = ownIssue(target.issue, item.identifier, await team());
       const result = await graphql<{ commentCreate?: { success?: boolean } | null }>(
         COMMENT_MUTATION,

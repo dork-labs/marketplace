@@ -46,11 +46,14 @@ import {
   rotatedPath,
   shouldSampleUsage,
   usageSnapshotProblem,
+  usageWindowName,
   USAGE_SAMPLE_INTERVAL_MS,
+  USAGE_WINDOW_SLUG_MAX,
   type AppendOptions,
   type JournalEvent,
 } from '../scripts/journal.ts';
 import { JournalLineSchema } from '../scripts/journal-schema.ts';
+import { bucketSlug } from '../scripts/fleet/usage-ledger.ts';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const WRITER = path.join(here, 'fixtures', 'journal', 'writer.ts');
@@ -672,6 +675,39 @@ describe('usage.snapshot lines', () => {
     };
     expect(usageSnapshotProblem(snapshot(windows))).toBeNull();
     expect(JournalLineSchema.safeParse(buildLine(snapshot(windows), meta)).success).toBe(true);
+  });
+
+  it('caps the slug of a model window from a long limit name, keeping two apart', () => {
+    // Purpose: the ledger's key grammar has no length cap, so a 60-character
+    // Codex limit_name went into every journal line at full length. The cap
+    // must still leave two names that share their first 40 characters apart.
+    const names = [
+      'GPT-5.3-Codex-Spark Extended Research Preview Weekly Limit A',
+      'GPT-5.3-Codex-Spark Extended Research Preview Weekly Limit B',
+    ];
+    expect(names.map((name) => name.length)).toEqual([60, 60]);
+    const keys = names.map((name) => `model:${bucketSlug(name)}`);
+    const line = buildLine(
+      snapshot(Object.fromEntries(keys.map((key) => [key, { usedPct: 5, resetsAt: null }]))),
+      meta
+    ) as unknown as { windows: Record<string, unknown> };
+    const written = Object.keys(line.windows);
+    expect(written).toHaveLength(2);
+    for (const key of written) {
+      expect(key.startsWith('model:gpt-5.3-codex-spark-extended')).toBe(true);
+      expect(key.length - 'model:'.length).toBeLessThanOrEqual(USAGE_WINDOW_SLUG_MAX);
+    }
+    expect(written).toEqual(keys.map(usageWindowName));
+    expect(JournalLineSchema.safeParse(line).success).toBe(true);
+  });
+
+  it('leaves a window name within the cap as it is, and capping twice changes nothing', () => {
+    for (const key of ['five_hour', 'window:1440', 'model:gpt-5.3-codex-spark']) {
+      expect(usageWindowName(key)).toBe(key);
+    }
+    const capped = usageWindowName(`rate_limit:${'a'.repeat(60)}`);
+    expect(capped.length - 'rate_limit:'.length).toBe(USAGE_WINDOW_SLUG_MAX);
+    expect(usageWindowName(capped)).toBe(capped);
   });
 
   it('rejects a usedPct outside 0 to 100 and a field a window does not have', () => {
