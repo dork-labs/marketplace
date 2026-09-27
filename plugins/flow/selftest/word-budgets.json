@@ -132,8 +132,8 @@
     "target": 932
   },
   "skills/capturing-work/SKILL.md": {
-    "baseline": 469,
-    "target": 469
+    "baseline": 477,
+    "target": 477
   },
   "skills/closing-work/SKILL.md": {
     "baseline": 598,
@@ -144,8 +144,8 @@
     "target": 578
   },
   "skills/executing-specs/SKILL.md": {
-    "baseline": 968,
-    "target": 968
+    "baseline": 982,
+    "target": 982
   },
   "skills/flow-drain/SKILL.md": {
     "baseline": 633,
@@ -156,8 +156,8 @@
     "target": 165
   },
   "skills/flow-retro/SKILL.md": {
-    "baseline": 219,
-    "target": 219
+    "baseline": 230,
+    "target": 230
   },
   "skills/flow-triage/SKILL.md": {
     "baseline": 380,
@@ -172,8 +172,8 @@
     "target": 250
   },
   "skills/initializing-flow/SKILL.md": {
-    "baseline": 1160,
-    "target": 1160
+    "baseline": 1165,
+    "target": 1165
   },
   "skills/linear-adapter/SKILL.md": {
     "baseline": 1440,
@@ -184,8 +184,8 @@
     "target": 361
   },
   "skills/tending-tracker/SKILL.md": {
-    "baseline": 1162,
-    "target": 1162
+    "baseline": 1176,
+    "target": 1176
   },
   "skills/triaging-work/SKILL.md": {
     "baseline": 1139,

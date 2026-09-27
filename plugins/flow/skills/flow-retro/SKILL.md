@@ -13,7 +13,7 @@ schedule:
 `<flow-root>` is two folders above this file's `realpath`.
 
 The schedulable **weekly retro**: flow reads its own journal and self-test
-results and files what should change in flow itself. Off until you approve it.
+results and files what should change in flow itself. Off until you approve it on the Schedules page, or point your own scheduler at it.
 
 `flow` below means `node --experimental-strip-types "<flow-root>/scripts/flow.ts"`.
 

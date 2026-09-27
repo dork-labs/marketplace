@@ -81,7 +81,7 @@ Exit `0` with `{ "ok": true }` passes; otherwise fix the mapping behind the name
 invariant (`INV-1 .. INV-5`). **Never go to Step 4 until it is green.** On Node before
 22.6, run the scripts with `tsx`. An existing adapter: re-validate first, regenerate
 only if it fails. A tracker flow ships an adapter for (`adapter.origin: "shipped"`)
-needs none generated unless overriding it on purpose.
+needs none generated unless overriding it on purpose: validate it and move on.
 
 ## Step 4 — Write the settings and the rubric
 

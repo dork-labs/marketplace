@@ -8,7 +8,7 @@ you until you **reinstall it** (Marketplace → flow → reinstall, or re-run yo
 
 **The instructions for each /flow stage are much shorter, so an agent reads less before it does the work. Nothing flow does has changed. Reinstall if you want the shorter versions; your runs work the same either way.**
 
-- The stage instructions (setup, triage, ideate, specify, decompose, execute, verify, done, the backlog clean-up and the team-member loop) went from about 29,000 words to about 9,000. Each one is now roughly 250 to 1,200 words.
+- The stage instructions (setup, triage, ideate, specify, decompose, execute, verify, done, the backlog clean-up and the team-member loop) went from about 26,000 words to about 9,000. Each one is now roughly 250 to 1,200 words.
 - The scheduled jobs (the drain, daily triage, weekly health check and weekly retro) are shorter too. The steps of one run of the queue now live in one place, the `flow-drain` job, and `/flow continue` and `/flow auto` follow it. `/flow` itself is down to about 700 words.
 - Every scheduled job now checks the pause the same way, by running the drain's first step, so there is one copy of that check to keep right.
 - The stories behind the rules (the first backlog clean-up, the review rubric that went missing outside a git folder, and others) moved to `docs/why.md`, with a table of where each shared rule lives.

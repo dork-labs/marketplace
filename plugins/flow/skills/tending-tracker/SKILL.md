@@ -19,6 +19,7 @@ tested truth is the oracles `classifyOwnership` (`identity.ts`), `shouldRespondT
 
 - **Pause check.** Run step 0 of `<flow-root>/skills/flow-drain/SKILL.md` on every
   poll. Stop whenever it says to stop.
+- **Tracker unavailable:** say so and stop; never fabricate inbox state.
 
 0. **Resolve identity** once per tick, not per item: `getCurrentUser` resolves
    `identity.agent: "auto"` to a real account id (never pass `"auto"` to an oracle).
@@ -117,7 +118,7 @@ path**: (a) delivered into `<id>`, (b) fresh session, (c) handled here, origin o
   add `agent/needs-input`, `assignToHuman`, stop. Parked is durable; the stall sweep
   never reclaims it; only a non-agent reply (rule 3) resumes it.
 - **Stuck means stop and ask, never guess.** Walk the calibration ladder; a
-  `stop-and-ask` (a floor row, sticky and not confident, or the ambiguous middle) is the
+  `stop-and-ask` (a floor row, sticky and not confident, or the ambiguous middle routed to `ask`) is the
   trigger. `resolveCommsChannel(trigger, identityMode, involvement)` picks:
   `interactive` (ask inline, never park), `comment-and-assign` (two-account:
   `needsInput`), or `comment-and-nudge` (shared: `needsInput` plus the out-of-band nudge

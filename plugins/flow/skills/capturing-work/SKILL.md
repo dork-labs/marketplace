@@ -22,7 +22,7 @@ which signs the description and lands the item in the tracker's intake state.
    item, ask for the **single** missing detail and stop — do not expand scope,
    classify deeply, or research. (CAPTURE is an intent stage: when genuinely
    unsure, lean toward asking — spec §5 stage bias.)
-3. **Create the item:**
+3. **Create the item.** Never add `agent/*` or `stage/*` labels: TRIAGE decides.
 
    ```bash
    flow create --title '<title>' --description '<text>' \

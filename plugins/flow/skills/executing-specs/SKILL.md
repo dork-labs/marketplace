@@ -103,7 +103,8 @@ Show the plan, then run every batch without asking, unless the arguments carry
 2. **Wait** for all of them.
 3. **Failure:** the default is to continue that worker with the failure (rung 1), not
    relaunch. If it cannot continue, the resume ladder decides; never pick the fallback
-   yourself. Skipping marks dependents blocked.
+   yourself. Skipping marks dependents blocked. Stopping for manual intervention is also an
+   option; with a person present, ask which.
 4. **Two-stage review, per task**, by `review` workers, never the one that wrote it:
    - Stage 1, spec compliance: everything asked, nothing extra, nothing misread; the
      reviewer reads code, not the report.
