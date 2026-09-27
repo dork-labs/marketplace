@@ -4,6 +4,17 @@ Installs of this plugin are pinned to a commit SHA, so a fix here does not reach
 you until you **reinstall it** (Marketplace → flow → reinstall, or re-run your
 `--plugin-dir` checkout's `git pull`). Each entry below says whether that matters.
 
+## 0.42.0
+
+**A Flow tab in DorkOS Settings lets you choose which accounts flow may use, keep part of your main account for yourself, limit an account to certain repos, and pick whether work moves automatically when an account runs out. Reinstall to get it; it needs DorkOS 0.88.0 or newer.**
+
+- Find it under Settings, Add-ons, Flow, once the Flow extension is turned on. Every change saves as you make it.
+- Each account is Main, Rotation or Kept out. The first time you open the tab, it explains the three and links to the guide.
+- Under Main, choose how much of its week to keep for yourself, and how close to the weekly reset flow may use the rest.
+- Under Kept out, list the repos (`owner/name`) that account may still work on.
+- The tab tells you when flow has only your main account to use, or no account at all.
+- On an older DorkOS, the tab says to update DorkOS instead.
+
 ## 0.41.0
 
 **Flow can now tell DorkOS which accounts to offer when one runs out, keep your main account in reserve, move a flow run to another account itself in the background, and hold a run when you choose to wait for the reset. Reinstall to get it; it needs DorkOS 0.88.0 or newer.**
@@ -73,6 +84,7 @@ you until you **reinstall it** (Marketplace → flow → reinstall, or re-run yo
 - `/flow:init` now has an accounts step that runs it.
 - While you have several accounts flow could use and none in the rotation, `flow status`, `flow fleet` and `flow next` end with one line suggesting setup. Turn it off with `"fleet": { "nudge": false }`.
 - New guide: `docs/use-all-your-accounts.mdx`.
+
 ## 0.36.0
 
 **Follow-up work and triage now go through flow's own commands, so they come out the same way every time. Reinstall to get it.**

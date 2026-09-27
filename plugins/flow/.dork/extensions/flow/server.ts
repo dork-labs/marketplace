@@ -83,10 +83,14 @@ function gitOrigin(cwd: string): string | null {
   }
 }
 
-/** Send a route error, or a 500 for anything else. */
+/**
+ * Send a route error, or a 500 for anything else. A refusal flow made on
+ * purpose carries `refusedBy: 'flow'`, so the Flow tab shows its words and
+ * never the host's own (such as a 404 for routes that are not mounted).
+ */
 function fail(res: RouteResponse, error: unknown): void {
   if (error instanceof RouteError) {
-    res.status(error.status).json({ error: error.message });
+    res.status(error.status).json({ error: error.message, refusedBy: 'flow' });
     return;
   }
   res.status(500).json({ error: error instanceof Error ? error.message : String(error) });
