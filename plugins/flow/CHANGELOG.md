@@ -4,6 +4,12 @@ Installs of this plugin are pinned to a commit SHA, so a fix here does not reach
 you until you **reinstall it** (Marketplace → flow → reinstall, or re-run your
 `--plugin-dir` checkout's `git pull`). Each entry below says whether that matters.
 
+## 0.43.1
+
+**`flow accounts pick` now works from any folder. Reinstall to get it.**
+
+- Run from a folder with no flow settings, `flow accounts pick` could be refused because of old settings left inside a shared flow plugin folder, which may belong to another project. It now ignores those, says so, and ranks with the defaults. A folder's own settings that are broken still stop it.
+
 ## 0.43.0
 
 **New `flow accounts pick`: ask which account new work should start on, without a tracker item. Reinstall to get it.**

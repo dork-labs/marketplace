@@ -50,7 +50,7 @@ function accountDir(name: string): string {
   return dir;
 }
 
-async function flow(argv: string[], env: Record<string, string> = {}) {
+async function flow(argv: string[], env: Record<string, string> = {}, flowRoot?: string) {
   let stdout = '';
   let stderr = '';
   const deps: MainDeps = {
@@ -63,6 +63,7 @@ async function flow(argv: string[], env: Record<string, string> = {}) {
       throw new Error('flow accounts must never build a tracker adapter');
     },
     runProcess: async () => ({ code: 0, stdout: '', stderr: '' }),
+    ...(flowRoot === undefined ? {} : { flowRoot }),
   };
   const code = await main(argv, deps);
   return { code, stdout, stderr, json: () => JSON.parse(stdout) };
@@ -749,6 +750,26 @@ describe('flow accounts pick', () => {
     writeFileSync(path.join(base, '.agents', 'flow', 'config.json'), '{ not json');
     const r = await flow(['accounts', 'pick', '--repo', 'acme/app']);
     expect(r.code).toBe(3);
+  });
+
+  it('ignores settings left in a shared plugin folder, with a warning', async () => {
+    // Purpose: found switching cmux-control onto flow (2026-09-27). A plugin
+    // checkout can still hold pre-0.9 settings in its own config/ folder; they
+    // may belong to another project, and a controller run from any folder must
+    // not be refused by them. Fails if shared-legacy settings abort the pick.
+    twoRotation();
+    // The plugin folder is outside this project, so its settings are shared.
+    const plugin = realpathSync(mkdtempSync(path.join(os.tmpdir(), 'flow-plugin-')));
+    try {
+      mkdirSync(path.join(plugin, 'config'), { recursive: true });
+      writeFileSync(path.join(plugin, 'config', 'config.json'), '{ not json');
+      const r = await flow(['accounts', 'pick', '--repo', 'acme/app', '--json'], {}, plugin);
+      expect(r.code).toBe(0);
+      expect(r.json().pick).toMatchObject({ runtime: 'claude-code' });
+      expect(r.stderr).toContain('ignored the settings in');
+    } finally {
+      rmSync(plugin, { recursive: true, force: true });
+    }
   });
 
   it('--runtime ranks that runtime first, with no Claude model binding', async () => {
