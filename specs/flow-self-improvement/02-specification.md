@@ -188,10 +188,22 @@ words.
 | `decompose` | `/flow:decompose specs/fixture/02-specification.md` | `03-tasks.json` passes `tasks-schema.ts`, no forbidden summary phrase, the item carries `stage/decompose`                    |
 | `done`      | `/flow:done <id>` with a follow-up in the fixture   | item `completed` with `agent/completed`; each follow-up has a type, a priority and a project and went through triage         |
 
-(Amended at build, DOR-2390: the `flow` command has no verb to create an item, set its type or
-priority, or park it with `agent/needs-input`, and the fake adapter routes every write through it.
-So `capture` checks what is possible today, that nothing was fabricated; `triage` and the `done`
-follow-up (`done/follow-up`) are reported as skips naming the missing verb; `done` checks the close.)
+(Amended at build, DOR-2390: the fake adapter routes every write through the `flow` command, so a
+case can check only what a `flow` verb can write. `capture` checks one new item from `flow create`.
+Amended again in flow 0.36.0, when `flow triage` shipped and closing-work began filing follow-ups
+with `flow create`: `triage` and `done/follow-up` now run instead of being skipped.
+
+- `triage` checks that the item ends with EITHER `agent/ready` (with a `stage/*` label) OR
+  `agent/needs-input` plus exactly one new comment (the question), never both, and that nothing
+  else in the backlog changed. It drops the row's "one `type/*`, a priority" and "passes the
+  readiness oracle" clauses: no adapter capability writes an item's type, priority or size, so on
+  the fake a readied item could never pass the readiness oracle (GRM-4 needs a size), and the
+  check would only measure the missing capability, not the triage.
+- `done` checks the close and that nothing was filed, since its fixture asks for no follow-up.
+- `done/follow-up` has a follow-up in its fixture. It checks the close, exactly one new item with a
+  `type/*`, a priority, the project and `origin/from-agent`, triaged (ready or parked on one
+  question), and, when ready, passing the groom invariants. `flow create` cannot size an item, so
+  on the fake the passing outcome is a parked follow-up.)
 
 A live run prints per-case pass/fail, cost and turns, and writes the same report shape.
 
@@ -241,7 +253,7 @@ existing `projectKey` in `config-files.ts`), so every worktree of a project writ
 | `item.readied`   | `by: triage\|decompose\|human`                                                                                                    | the verb that applies `agent/ready`                |
 | `claim`          | `phase: claim\|release`                                                                                                           | `flow claim`, `flow release`                       |
 | `retry`          | `rung: resume\|restart\|escalate`, `attempt`                                                                                      | the recovery verb                                  |
-| `operator.wait`  | `phase: start\|end`, `waitedMs?` (on end)                                                                                         | `needsInput`; the inbox verb that sees the answer  |
+| `operator.wait`  | `phase: start\|end`, `waitedMs?` (on end)                                                                                         | `flow triage --park` (start); the inbox verb (end) |
 | `review`         | `round`, `sha7`, `verdict: clean\|changes`, `blocker`, `shouldFix`, `nit`, `categories[]`                                         | `flow journal record review …` (S3 later)          |
 | `ci`             | `pr`, `event: red\|ejected\|merged`, `class: own\|innocent\|flake\|infra\|unknown`                                                | `flow journal record ci …` (S3 later)              |
 | `handoff`        | `from`, `to`, `reason: limit\|stage\|manual`                                                                                      | `flow journal record handoff …` (S3 later)         |
@@ -276,12 +288,13 @@ it differs from the table above:
 - `stage`: `start` is written by `flow stage` for the new stage, `end` (outcome `ok`) by `flow
   done`. A re-run of `flow done` whose summary is already posted, and whose run (when this machine
   keeps one) is already complete, writes no second `end`. There is no `flow transition` verb.
-- `item.readied`, `retry` and `operator.wait` have no writer yet. No verb applies `agent/ready`
-  as a readiness decision (`flow release --to ready` returns an already-readied item to the queue
-  and is recorded as `claim` `release`), and no recovery or inbox verb exists. They arrive with a
-  triage verb (`item.readied`), a recovery verb (`retry`) and an inbox / needs-input verb
-  (`operator.wait`). Until then the retro's `captureToReadyDaysMedian` and
-  `operatorWaitHoursMedian` read "no data".
+- `item.readied` (`by: triage`) is written by `flow triage --ready`, and `operator.wait` `start`
+  by `flow triage --park`, each only when the item did not already carry that label, so a retry
+  writes neither twice (flow 0.36.0). `flow release --to ready` returns an already-readied item to
+  the queue and is recorded as `claim` `release`, not as a readiness decision. `retry` and the
+  `operator.wait` `end` line (with `waitedMs`) still have no writer: they arrive with a recovery
+  verb and an inbox verb that sees the answer. Until then the retro's `operatorWaitHoursMedian`
+  reads "no data"; `captureToReadyDaysMedian` fills in from `flow triage` runs.
 - `claim`: the line and the run's `verb` line carry the runtime `flow claim` records on the
   `FlowRun` (`--runtime`, else the one the environment names), so the three agree. A claim that is
   refused records its `verb` line under the environment's runtime.

@@ -858,7 +858,7 @@ export function worseMeasures(measures: Measures, at: string): Proposal[] {
 export function runRetro(input: RetroInput): RetroResult {
   const measures = computeMeasures(input);
   const caveats = [
-    'No flow command writes item.readied or operator.wait lines yet, so captureToReadyDaysMedian and operatorWaitHoursMedian read "no data" until one does. Review and CI lines come only from `flow journal record review|ci`, so firstReviewCleanPct, reviewCatchCount and innocentEjections count only what was recorded that way.',
+    'item.readied lines come only from `flow triage --ready`, so captureToReadyDaysMedian reads "no data" until a triage has run through flow. No flow command writes an operator.wait end line yet (`flow triage --park` writes only the start), so operatorWaitHoursMedian reads "no data" until one does. Review and CI lines come only from `flow journal record review|ci`, so firstReviewCleanPct, reviewCatchCount and innocentEjections count only what was recorded that way.',
     'captureToReadyDaysMedian counts only items flow readied and that are still open: the backlog snapshot dates only open items, so items readied and closed since drop out and the median leans toward work still waiting. Items readied by hand outside flow are not seen. Rule 4 compares it only with 5 or more samples in each window.',
   ];
   if (input.snapshot === null)

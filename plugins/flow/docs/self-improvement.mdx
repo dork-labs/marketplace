@@ -35,9 +35,9 @@ To turn the journal off, set `selfImprovement.journal.enabled` to `false`.
 
 ## The weekly retro
 
-`flow retro` reads the last week of the journal, the week before, the self-test history and your backlog. Some of its numbers fill in today: how many items are ready or still untyped, which flow commands failed, how many words flow's instructions hold, and each account's usage (start, end, peak, and how often it ran out).
+`flow retro` reads the last week of the journal, the week before, the self-test history and your backlog. Some numbers fill in today: how many items are ready or still untyped, which flow commands failed, how many words flow's instructions hold, and each account's usage (start, end, peak, and how often it ran out).
 
-How long new work takes to become ready, and how long agents wait on you, read "no data" until flow writes those lines. Review and merge-queue numbers count only what an agent recorded with `flow journal record`; the verifying-work skill now asks for that after each review.
+Time to ready counts items `flow triage` readied. Time agents wait on you reads "no data": flow records when a wait starts, not when it ends. Review and merge-queue numbers count only what an agent recorded with `flow journal record`; the verifying-work skill asks for that after each review.
 
 Each number sits beside last week's and is split by agent. A number with nothing behind it says "no data", never 0.
 

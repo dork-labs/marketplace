@@ -325,6 +325,36 @@ export const VERBS: readonly VerbDefinition[] = [
     load: () => import('./cli/create.ts'),
   },
   {
+    name: 'triage',
+    summary: 'Finish a triage: ready an item, or park it with a question.',
+    description:
+      'Write the outcome of a triage. --ready --stage <stage> makes the item unstarted with agent/ready and that stage/* label. --park <question> (or --question-file <path>) posts the question as a signed comment (not twice) and applies agent/needs-input; a question file under .dork/flow/tmp/ is removed once posted. Refuses before any write an item that is closed or being worked. Does not set type, priority or size.',
+    common: ['project', 'dry-run', 'session'],
+    positionals: [{ name: 'identifier', required: true, description: 'The item, e.g. DOR-123.' }],
+    flags: [
+      { name: 'ready', kind: 'boolean', description: 'Make it claimable.' },
+      {
+        name: 'stage',
+        kind: 'string',
+        value: 'stage',
+        description: 'With --ready: where the work starts, e.g. execute or ideate.',
+      },
+      {
+        name: 'park',
+        kind: 'string',
+        value: 'question',
+        description: 'Park it on a person, asking this.',
+      },
+      {
+        name: 'question-file',
+        kind: 'string',
+        value: 'path',
+        description: 'Park it, asking the question in this file.',
+      },
+    ],
+    load: () => import('./cli/triage.ts'),
+  },
+  {
     name: 'stage',
     summary: 'Move an item to another stage.',
     description:
