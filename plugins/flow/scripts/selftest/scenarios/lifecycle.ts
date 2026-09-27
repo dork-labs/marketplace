@@ -8,12 +8,10 @@
  * line, and the run record.
  *
  * The item is SEEDED as captured (`flow create`, which capture now calls, has
- * its own tests in `engine-tests/cli/create.test.ts`). Triage has no `flow`
- * verb: it is judgment carried by the triaging-work skill. So triage-accept
- * is applied through the adapter with the same work-state helper every writer
- * uses (`projectionFor`), plus the fields the adapter contract cannot write
- * (type, priority, size, the description), which a triage writer sets with the
- * tracker's own tools.
+ * its own tests in `engine-tests/cli/create.test.ts`). Triage-accept runs
+ * the real `flow triage --ready`; the fields no adapter capability writes
+ * (type, priority, size, the description) are set first, as a triage writer
+ * sets them with the tracker's own tools.
  *
  * Runtime-parameterized: the same run as a Claude Code-shaped session
  * (`CLAUDECODE=1`) and a Codex-shaped one (`CODEX_THREAD_ID`, no `CLAUDECODE`),
@@ -27,8 +25,7 @@
 import { PROVENANCE_MARKER } from '../../cli/provenance.ts';
 import { journalFor, read as readJournal, runtimeOf } from '../../journal.ts';
 import { detectRuntime } from '../../runtime-detect.ts';
-import { verifyWrite } from '../../tracker/verify-write.ts';
-import { AGENT_READY, projectionFor, type StageTable } from '../../work-state.ts';
+import { AGENT_READY } from '../../work-state.ts';
 import {
   check,
   checkEqual,
@@ -145,9 +142,7 @@ export async function lifecycle(runtime: RuntimeShape, options: ScenarioOptions)
     checkEqual(family(ctx.item(ID), 'origin/'), ['origin/human'], `${ID}'s origin/* labels`);
 
     // 2. Triage-accept. The fields the adapter cannot write are set as the
-    // tracker's own tools would; the label and state change goes through the
-    // projection table like every writer's. Its "hand to the ready queue at a
-    // stage" row is `release` to `ready`, the state a triage-accept leaves.
+    // tracker's own tools would; the ready write is `flow triage --ready`.
     const stored = ctx.item(ID);
     stored.type = 'task';
     stored.labels.push('type/task');
@@ -155,14 +150,8 @@ export async function lifecycle(runtime: RuntimeShape, options: ScenarioOptions)
     stored.size = 3;
     stored.description =
       'Add a CSV export.\n\n## Validation criteria\n\n- The file opens in a spreadsheet.\n\n## On Completion\n\n- Nothing further.';
+    await ctx.flowOk(['triage', ID, '--ready', '--stage', 'execute'], env);
     const config = ctx.loadedConfig();
-    const accept = projectionFor(
-      { type: 'release', to: 'ready', stage: 'execute' },
-      { stages: config.stages as StageTable }
-    );
-    const before = await tracker.adapter.getItem(ID);
-    await tracker.adapter.applyWorkState(before, accept);
-    await verifyWrite(tracker.adapter, before, accept);
     expectItem(ctx, 'triage-accept', {
       category: 'unstarted',
       state: 'Todo',
@@ -268,6 +257,10 @@ export async function lifecycle(runtime: RuntimeShape, options: ScenarioOptions)
     check(!('refusal' in journal), `the journal refused the scenario project`);
     const lines = readJournal(journal.settings).lines;
     check(lines.length > 0, `flow note under ${runtime} wrote no journal line`);
+    check(
+      lines.some((l) => l.kind === 'item.readied' && l.by === 'triage' && l.item === ID),
+      `flow triage --ready under ${runtime} journaled no item.readied line for ${ID}`
+    );
     for (const line of lines) {
       checkEqual(
         { kind: line.kind, runtime: line.runtime, harness: line.harness },
