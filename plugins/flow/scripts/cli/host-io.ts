@@ -12,6 +12,7 @@
 
 import { spawn } from 'node:child_process';
 import os from 'node:os';
+import { createInterface } from 'node:readline';
 
 /** Standard input as a verb sees it. */
 export interface StdinSource {
@@ -22,6 +23,12 @@ export interface StdinSource {
    * bytes (reading then stops).
    */
   read(limit: number): Promise<string | null>;
+  /**
+   * Read one line a person typed, without its newline, or `null` at the end of
+   * input. Only `flow accounts setup` asks questions; a stdin without it is
+   * never asked anything.
+   */
+  readLine?(): Promise<string | null>;
 }
 
 /** Options for {@link StreamRunner}. */
@@ -103,6 +110,22 @@ const realStdin: StdinSource = {
       });
       process.stdin.on('end', () => finish(Buffer.concat(chunks).toString('utf8')));
       process.stdin.on('error', () => finish(null));
+    });
+  },
+  readLine() {
+    // One interface per line, closed right after, so nothing keeps the process
+    // alive once the verb returns. Only used when stdin is a terminal.
+    return new Promise((resolve) => {
+      const rl = createInterface({ input: process.stdin, terminal: false });
+      let done = false;
+      rl.once('line', (line) => {
+        done = true;
+        rl.close();
+        resolve(line);
+      });
+      rl.once('close', () => {
+        if (!done) resolve(null);
+      });
     });
   },
 };

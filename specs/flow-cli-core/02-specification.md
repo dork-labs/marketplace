@@ -741,3 +741,37 @@ None open. The operator decided compliance, registry home, handoff default, rese
 - `plugins/flow/adapters/SPEC.md`, `plugins/flow/docs/SPEC.md`, `plugins/flow/docs/provenance.md`
 - DorkOS `packages/shared/src/config-schema.ts` (`ClaudeCodeAccountSchema`, `claudeAccountId`)
 - Linear: DOR-2366 (umbrella), DOR-2367, DOR-2368, DOR-2376
+
+## Amendment: account setup (DOR-2461)
+
+**Date:** 2026-09-27. **Why:** a new user with three account folders had to learn `accounts add`, `accounts set`, the roles and `usage install-statusline` before flow spent a second account. Setup walks them through it once. Nothing here changes a contract in §1: setup only calls the existing writers (`addIdentity`, `updateFleetPolicy` + `setAccountPolicy`, the install-statusline planner).
+
+### S1. `flow accounts setup [--yes] [--rotation <refs>|all] [--keep-out <refs>] [--main <ref>] [--statusline] [--dry-run] [--json]`
+
+1. **Detect** (`scripts/fleet/detect-accounts.ts`, reads names and folder existence only, never a file's contents except the two org markers' existence):
+   - Claude Code: `<home>/.claude`; every `<home>/.claude*` folder that holds a `sessions/` or `projects/` folder; `CLAUDE_CONFIG_DIR` when set and a folder.
+   - Codex: `<home>/.codex`, and `CODEX_HOME` when set and a folder.
+   - OpenCode: the data folder (`$XDG_DATA_HOME/opencode`, else `<home>/.local/share/opencode`, `resolveOpenCodeDataDir`) when it exists. It is the ambient `opencode:default`.
+   - Every registered account whose folder exists joins the list. Folders are merged by `canonicalAccountPath`, so a symlink or a registered row is one candidate.
+2. **Show** each candidate: runtime, folder, where it was found, its registered id (or "not registered"), its latest 5-hour and 7-day reading from its ledger when it has one, its stored role, and an org marker with its reason.
+3. **Propose**, per runtime with two or more candidates: the machine default (`defaultAccountPath`) is `main` (50% reserve); every other candidate is `rotation`, except one the user marks kept-out and one with an org marker, which is pre-selected kept-out with its reason shown. A stored role is the starting answer on a re-run. A runtime with one candidate gets no proposal (its `default` is already `rotation` by rev 6d).
+4. **Ask** (a terminal, no `--yes`): per non-default candidate "Is <folder> a work, organization or client account? Those stay kept out." (the default answer is yes only for an org-marked one), then "Keep <default> as your main account, with 50% held back for you?", then per Claude Code main/rotation account "Add the usage recorder to its status line?". Never assumed from the folder name.
+5. **Plan and confirm.** The writes are printed, one line each, as the `flow` command that does the same thing, then one "Make these N changes?" question. Order: `accounts add` for each rotation folder that is not registered (a kept-out folder is left unregistered), then `accounts set` for each role that differs from the stored one, then `usage install-statusline` edits.
+6. **`--yes` (agents):** no questions; the flags decide. `--rotation` names the rotation accounts (`all` = every non-default candidate without an org marker or `--keep-out`); `--keep-out` wins over `--rotation`; `--main` picks main (default: the machine default; an org-marked account needs to be named). An unnamed candidate keeps its stored role, else stays kept out. `--statusline` adds the recorder for each Claude Code main/rotation account. The plan is still printed.
+7. **No terminal and no `--yes`:** the plan is printed, nothing is written, and the result says to re-run with `--yes` and flags.
+8. `--dry-run` asks (in a terminal) and prints, and writes nothing. `--json` prints `{ ok, dryRun, applied, candidates[], plan[], notes[] }`; questions and the plan go to stderr in a terminal.
+9. `/flow:init` gains an Accounts step that runs `flow accounts setup` (agents: `--yes` with the operator's answers as flags).
+
+### S2. The nudge
+
+- `flow status`, `flow fleet` and `flow next` print one extra line in human mode when a runtime has two or more detected account folders and none of its registered accounts is `rotation`: "3 Claude Code account folders found, 0 in rotation: run `flow accounts setup`." One line in all, for the first such runtime.
+- Never in `--json` (stdout unchanged), never on stderr, never a different exit code, and never an error: a detection failure prints nothing.
+- New config field `fleet.nudge` (boolean, default `true`); `false` turns it off. Read without zod, from `config.local.json` over `config.json`, like `journalSettings`.
+
+### S3. Decisions (autonomous, logged as assumptions)
+
+- **A1. Org marker = a file Claude Code leaves in the account folder when an organization manages it:** `remote-settings.json` (its cache of server-managed settings) or `policy-limits.json` (org policy limits). Neither name is in Claude Code's published docs (checked 2026-09-27: they document server-managed settings being fetched, and the machine-wide `managed-settings.json` under `/Library/Application Support/ClaudeCode/` or `/etc/claude-code/`, which is not per account and so not used). The names come from the operator's pointer and Claude Code's observed behaviour. Only existence is checked, never contents; a missing marker proves nothing, which is why the question is always asked.
+- **A2. Rotation needs registration.** A non-default folder can only be routed once it has an id, so putting it in rotation plans an `accounts add` first. A kept-out folder is not registered: unregistered is already unused.
+- **A3. `--yes` never puts an account in rotation unasked.** D7 (no inferred main) still holds for the bare CLI: the only implied role is the one rev 6d already implies (default = main beside others), and setup writes it explicitly only when confirmed or flagged.
+- **A4. Rotation is counted over registered accounts.** A standalone `default` that is rotation only because it is alone does not silence the nudge.
+- **A5. Codex and OpenCode folders are shown, never registered:** `accounts add` registers Claude Code only (§6). A non-default Codex folder is listed with a note.

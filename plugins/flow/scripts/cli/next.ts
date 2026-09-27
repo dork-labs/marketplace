@@ -57,6 +57,7 @@ import { AGENT_CLAIMED } from '../work-state.ts';
 import { loadProjectConfig, readBacklog, resolveAgentId } from './backlog.ts';
 import type { VerbContext, VerbResult } from './context.ts';
 import { formatColumns } from './output.ts';
+import { withSetupNudge } from './setup-nudge.ts';
 
 /** The live in-progress load the WIP cap measures. */
 export interface WipLoad {
@@ -477,7 +478,7 @@ export async function run(ctx: VerbContext): Promise<VerbResult> {
   const { picked, accounts, outcome, atWipCap, wip } = plan;
   const blocked = accounts?.find((account) => account.pick === null);
   if (blocked !== undefined) ctx.warn(noAccountMessage(plan.repo, blocked));
-  return {
+  return withSetupNudge(ctx, {
     json: {
       picked:
         accounts === undefined
@@ -497,7 +498,7 @@ export async function run(ctx: VerbContext): Promise<VerbResult> {
       wip,
       wipCap: config.autonomy.wipCap,
     }),
-  };
+  });
 }
 
 /** The JSON shape of one assignment: `{ runtime, pick, ranked, ineligible, reason }`. */

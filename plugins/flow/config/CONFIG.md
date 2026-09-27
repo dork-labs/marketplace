@@ -364,6 +364,21 @@ keeps one on purpose, say a label mirrored from GitHub, list it:
 Only the listed labels pass; every other bare label still fails. Each entry must
 be a bare label: not empty, no `/`, no space at either end. The default is `[]`.
 
+## `fleet`: the account setup reminder
+
+When this computer has two or more account folders for one tool and none of its
+accounts is in rotation, `flow status`, `flow fleet` and `flow next` end with one
+line suggesting `flow accounts setup` (see `docs/use-all-your-accounts.mdx`). The
+line never appears with `--json` and never changes an exit code.
+
+```jsonc
+"fleet": { "nudge": true }
+```
+
+Set `nudge` to `false` to turn the line off; the default is `true`. It is about
+this machine, so `config.local.json` is a good home for it. Which accounts flow
+may spend is not here: that is the machine's `fleet.json`.
+
 ## Why `config.json` has no secrets
 
 `config.json` is committed and shared, so it must stay free of tokens, API keys,

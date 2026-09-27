@@ -102,6 +102,8 @@ async function status(
     createAdapter: async () => fake.adapter,
     runProcess: async () => ({ code: 0, stdout: '', stderr: '' }),
     createLauncher,
+    // A private OS home: the setup nudge looks for account folders there.
+    io: { osHome: path.join(project, 'home') },
   };
   const code = await main(['status', ...argv], deps);
   return { code, stdout, stderr, json: () => JSON.parse(stdout), calls: fake.calls };

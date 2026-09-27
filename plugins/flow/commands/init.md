@@ -11,8 +11,8 @@ Set up `/flow` in this repo: $ARGUMENTS
 
 Read `${CLAUDE_PLUGIN_ROOT}/skills/initializing-flow/SKILL.md` and follow its process
 exactly. It is the one-time setup entry point: it detects whether `/flow` is
-already configured, gathers your setup choices (tracker + connection, identity
-mode, project routing, adversarial review, model tiers), generates the concrete adapter for
+already configured, gathers your setup choices (tracker + connection, identity,
+project routing, review, model tiers, accounts), generates the concrete adapter for
 your tracker, writes the committed `config.json` plus the gitignored
 `config.local.json`, scaffolds a review rubric if you have none, and confirms the
 install with a real read through your adapter plus a policy self-check.

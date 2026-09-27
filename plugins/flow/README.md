@@ -42,22 +42,22 @@ reads your config, calls the tracker through the adapter, and checks each write:
 node --experimental-strip-types "${CLAUDE_PLUGIN_ROOT}/scripts/flow.ts" <verb> --json
 ```
 
-| Verb              | What it does                                             |
-| ----------------- | -------------------------------------------------------- |
-| `snapshot`        | Pull the backlog once, for reuse with `--snapshot`.      |
-| `audit`           | Check the backlog against the groom invariants.          |
-| `next`            | Show the next item to work on.                           |
-| `claim`           | Start an item and record the run.                        |
-| `release`         | Let go of an item.                                       |
-| `done`            | Post the summary and close an item.                      |
-| `stage`           | Move an item to another stage.                           |
-| `status`          | Show what is in flight, parked or out of step.           |
-| `checkpoint`      | Write the item's `HANDOFF.md`.                           |
-| `accounts`        | List, add or set the accounts flow may spend.            |
-| `usage`           | Record each account's usage.                             |
-| `fleet`           | Show every account and running session. Changes nothing. |
-| `drain`           | Carry several items at once.                             |
-| `note`, `journal` | Write to or read flow's journal.                         |
+| Verb              | What it does                                                                    |
+| ----------------- | ------------------------------------------------------------------------------- |
+| `snapshot`        | Pull the backlog once, for reuse with `--snapshot`.                             |
+| `audit`           | Check the backlog against the groom invariants.                                 |
+| `next`            | Show the next item to work on.                                                  |
+| `claim`           | Start an item and record the run.                                               |
+| `release`         | Let go of an item.                                                              |
+| `done`            | Post the summary and close an item.                                             |
+| `stage`           | Move an item to another stage.                                                  |
+| `status`          | Show what is in flight, parked or out of step.                                  |
+| `checkpoint`      | Write the item's `HANDOFF.md`.                                                  |
+| `accounts`        | Set up and list the accounts flow may spend (`docs/use-all-your-accounts.mdx`). |
+| `usage`           | Record each account's usage.                                                    |
+| `fleet`           | Show every account and running session. Changes nothing.                        |
+| `drain`           | Carry several items at once.                                                    |
+| `note`, `journal` | Write to or read flow's journal.                                                |
 
 `flow <verb> --help` lists a verb's flags. Exit codes and the `--json` shape are in
 [`SPEC.md`](./docs/SPEC.md#the-flow-cli).

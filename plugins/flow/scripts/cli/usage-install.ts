@@ -280,6 +280,89 @@ function applyEdit(script: string, next: string, expectMarkers: number, stamp: n
 }
 
 /**
+ * The recorder lines for this plugin install, as a function of the status-line
+ * script's input variable.
+ *
+ * @param flowRootDir - The plugin folder.
+ * @returns Builds the two lines for a capture variable.
+ * @throws {PreconditionError} When the hook is missing or not executable, or a
+ *   path holds a quote or a newline.
+ */
+export function recorderFor(flowRootDir: string): (variable: string) => [string, string] {
+  const hookSource = path.join(flowRootDir, 'scripts', 'usage', 'statusline-hook.sh');
+  let hookPath: string;
+  try {
+    hookPath = realpathSync(hookSource);
+    if ((statSync(hookPath).mode & 0o111) === 0) throw new Error('not executable');
+  } catch {
+    throw new PreconditionError(`${hookSource} is missing or not executable; reinstall flow.`);
+  }
+  const nodePath = process.execPath;
+  for (const value of [hookPath, nodePath]) {
+    if (/['\n]/.test(value)) {
+      throw new PreconditionError(
+        `${value} contains a quote or a newline, so it cannot be written safely.`
+      );
+    }
+  }
+  const flowRoot = realpathSync(flowRootDir);
+  return (variable: string) => recorderBlock(variable, hookPath, nodePath, flowRoot);
+}
+
+/**
+ * Plan (and with `apply`, make) the change to one account's status-line script.
+ *
+ * @param account - The account's id and folder.
+ * @param osHome - The OS home folder, for `~` in `settings.json`.
+ * @param block - From {@link recorderFor}.
+ * @param opts - `remove` takes the lines out; `apply` writes; `stamp` names the backup.
+ * @returns The plan and, when applied, its backup.
+ * @throws {PreconditionError} When a write did not read back as planned.
+ */
+export function planScript(
+  account: { id: string; path: string },
+  osHome: string,
+  block: (variable: string) => [string, string],
+  opts: { remove: boolean; apply: boolean; stamp: number }
+): InstallPlan {
+  const found = findScript(account, osHome);
+  if ('reason' in found) {
+    return {
+      id: account.id,
+      script: null,
+      action: 'manual',
+      reason: found.reason,
+      lines: block('input'),
+      applied: false,
+    };
+  }
+  const text = readFileSync(found.script, 'utf8');
+  const edit = planEdit(text, block, opts.remove);
+  const plan: InstallPlan = {
+    id: account.id,
+    script: found.script,
+    action: edit.action,
+    ...(edit.reason ? { reason: edit.reason } : {}),
+    ...(edit.line ? { line: edit.line } : {}),
+    ...(edit.lines
+      ? { lines: edit.lines }
+      : edit.action === 'manual'
+        ? { lines: block('input') }
+        : {}),
+    applied: false,
+  };
+  if (
+    opts.apply &&
+    edit.next !== undefined &&
+    ['insert', 'update', 'remove'].includes(edit.action)
+  ) {
+    plan.backup = applyEdit(found.script, edit.next, edit.action === 'remove' ? 0 : 1, opts.stamp);
+    plan.applied = true;
+  }
+  return plan;
+}
+
+/**
  * Run `flow usage install-statusline`.
  *
  * @param ctx - The verb context.
@@ -311,66 +394,11 @@ export async function run(ctx: VerbContext): Promise<VerbResult> {
   }
   const yes = ctx.args.flags.yes === true;
   const remove = ctx.args.flags.remove === true;
-
-  const hookSource = path.join(ctx.flowRoot, 'scripts', 'usage', 'statusline-hook.sh');
-  let hookPath: string;
-  try {
-    hookPath = realpathSync(hookSource);
-    if ((statSync(hookPath).mode & 0o111) === 0) throw new Error('not executable');
-  } catch {
-    throw new PreconditionError(`${hookSource} is missing or not executable; reinstall flow.`);
-  }
-  const nodePath = process.execPath;
-  for (const value of [hookPath, nodePath]) {
-    if (/['\n]/.test(value)) {
-      throw new PreconditionError(
-        `${value} contains a quote or a newline, so it cannot be written safely.`
-      );
-    }
-  }
-  const flowRoot = realpathSync(ctx.flowRoot);
-  const block = (variable: string) => recorderBlock(variable, hookPath, nodePath, flowRoot);
-
-  const plans: InstallPlan[] = [];
-  for (const account of targets) {
-    const found = findScript(account, ctx.io.osHome);
-    if ('reason' in found) {
-      plans.push({
-        id: account.id,
-        script: null,
-        action: 'manual',
-        reason: found.reason,
-        lines: block('input'),
-        applied: false,
-      });
-      continue;
-    }
-    const text = readFileSync(found.script, 'utf8');
-    const edit = planEdit(text, block, remove);
-    const plan: InstallPlan = {
-      id: account.id,
-      script: found.script,
-      action: edit.action,
-      ...(edit.reason ? { reason: edit.reason } : {}),
-      ...(edit.line ? { line: edit.line } : {}),
-      ...(edit.lines
-        ? { lines: edit.lines }
-        : edit.action === 'manual'
-          ? { lines: block('input') }
-          : {}),
-      applied: false,
-    };
-    if (yes && edit.next !== undefined && ['insert', 'update', 'remove'].includes(edit.action)) {
-      plan.backup = applyEdit(
-        found.script,
-        edit.next,
-        edit.action === 'remove' ? 0 : 1,
-        ctx.now().getTime()
-      );
-      plan.applied = true;
-    }
-    plans.push(plan);
-  }
+  const block = recorderFor(ctx.flowRoot);
+  const stamp = ctx.now().getTime();
+  const plans = targets.map((account) =>
+    planScript(account, ctx.io.osHome, block, { remove, apply: yes, stamp })
+  );
 
   const manual = plans.some((plan) => plan.action === 'manual');
   return {

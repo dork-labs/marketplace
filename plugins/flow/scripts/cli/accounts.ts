@@ -10,6 +10,8 @@
  *   longer registered, and says so.
  * - `add` appends one Claude Code identity to `config.json` and writes no
  *   policy, so a new account starts kept out.
+ * - `setup` finds the account folders on this machine and walks through their
+ *   roles (`./accounts-setup.ts`).
  * - `set <id>` edits that account's policy in `fleet.json` (`<runtime>:<id>`, or
  *   a bare id for Claude Code); `set` with no id takes the fleet-wide
  *   `--handoff`, `--runtimes` and `--cross-runtime-fallback`.
@@ -68,6 +70,9 @@ import {
 import { formatColumns } from './output.ts';
 import type { VerbContext, VerbResult } from './context.ts';
 
+/** The flags only `setup` takes (kept here so every other action can refuse them cheaply). */
+const SETUP_FLAGS = ['yes', 'rotation', 'keep-out', 'main', 'statusline'] as const;
+
 /** The flags `set` takes with an account id. */
 const POLICY_FLAGS = ['role', 'reserve', 'spend-down-hours', 'repos'] as const;
 
@@ -108,7 +113,15 @@ export async function run(ctx: VerbContext): Promise<VerbResult> {
   const home = ctx.env.HOME || os.homedir();
   const dorkHome = resolveDorkHome(ctx.env, home);
   const environment: AccountEnvironment = { home };
+  if (action !== 'setup') refuseFlags(ctx, SETUP_FLAGS, action);
   switch (action) {
+    case 'setup': {
+      if (id !== undefined)
+        throw new UsageError(`unexpected argument "${id}" for "flow accounts setup"`);
+      refuseFlags(ctx, [...ADD_FLAGS, ...POLICY_FLAGS, ...FLEET_FLAGS], 'setup');
+      const setup = await import('./accounts-setup.ts');
+      return setup.run(ctx);
+    }
     case 'list':
       if (id !== undefined)
         throw new UsageError(`unexpected argument "${id}" for "flow accounts list"`);
@@ -125,7 +138,9 @@ export async function run(ctx: VerbContext): Promise<VerbResult> {
         ? setFleet(ctx, dorkHome)
         : setAccount(ctx, dorkHome, environment, id);
     default:
-      throw new UsageError(`unknown action "${action}" for "flow accounts"; use list, add or set`);
+      throw new UsageError(
+        `unknown action "${action}" for "flow accounts"; use list, add, set or setup`
+      );
   }
 }
 

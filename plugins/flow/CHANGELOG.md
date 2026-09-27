@@ -4,6 +4,18 @@ Installs of this plugin are pinned to a commit SHA, so a fix here does not reach
 you until you **reinstall it** (Marketplace → flow → reinstall, or re-run your
 `--plugin-dir` checkout's `git pull`). Each entry below says whether that matters.
 
+## 0.37.0
+
+**`flow accounts setup` sets up every account on your computer in one go, so flow can share work between them. Reinstall to get it.**
+
+- It finds your Claude Code account folders (`~/.claude`, other `~/.claude…` folders you have used, and `CLAUDE_CONFIG_DIR`), your Codex folder and OpenCode's data folder, and shows each one's latest usage when flow has seen it.
+- It suggests a role for each: your computer's default account stays your main one, with half its weekly limit kept for you, and the others join the rotation.
+- It asks which accounts are work, organization or client accounts, and keeps those out. A folder that looks managed by an organization is marked, with the reason, and suggested for keeping out.
+- It can add each account to DorkOS and add the usage recorder to its status line.
+- Every change is printed first and made only after you say yes. Agents use `--yes` with `--rotation`, `--keep-out`, `--main` and `--statusline`; `--dry-run` changes nothing.
+- `/flow:init` now has an accounts step that runs it.
+- While you have several account folders and none in the rotation, `flow status`, `flow fleet` and `flow next` end with one line suggesting setup. Turn it off with `"fleet": { "nudge": false }`.
+- New guide: `docs/use-all-your-accounts.mdx`.
 ## 0.36.0
 
 **Follow-up work and triage now go through flow's own commands, so they come out the same way every time. Reinstall to get it.**

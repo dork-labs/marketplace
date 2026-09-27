@@ -99,6 +99,8 @@ async function flow(
     createAdapter: async () => tracker.adapter,
     runProcess: defaultRunner,
     flowRoot: FLOW_ROOT,
+    // A private OS home: `next` looks for account folders there (the setup nudge).
+    io: { osHome: path.join(project.dir, 'home') },
     ...(options.verbs ? { verbs: options.verbs } : {}),
   };
   const code = await main(argv, deps);
