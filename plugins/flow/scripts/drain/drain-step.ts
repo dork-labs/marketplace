@@ -586,6 +586,22 @@ export function drainStep(
 ): DrainStepResult {
   const current = run.drain;
   if (!current || current.v !== 1) return { run, actions: [] };
+  // The run's own PR merged: the tracker closes the item on its `Closes` line,
+  // which is expected, not "taken away". Go straight to closing, even from a
+  // park that mistook that close for someone else's (found live, 2026-09-27).
+  if (
+    current.pr !== null &&
+    facts.pr?.state === 'merged' &&
+    (current.phase === 'watching' ||
+      (current.phase === 'parked' && current.parkedReason === PARK_REASONS.itemTaken))
+  ) {
+    const step = send(
+      { drain: { ...toPhase(current, 'closing'), parkedReason: null }, actions: [] },
+      'merged',
+      { flow: cfg.flow, identifier: run.identifier, prUrl: current.pr.url }
+    );
+    return { run: { ...run, drain: step.drain }, actions: step.actions };
+  }
   if (current.phase === 'parked') return readopt(run, current, facts, cfg);
 
   // Record the reports first: they are facts whatever else happens.

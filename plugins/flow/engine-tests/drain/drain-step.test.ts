@@ -366,6 +366,36 @@ describe('drainStep: the phase table', () => {
     ]);
   });
 
+  // Found live (2026-09-27): the PR merged through the queue and the tracker
+  // closed the item on its `Closes` line before the next pass. That close is
+  // the run's own, not "taken away". Fails if the taken-away rule runs first.
+  it('watching + merged while the tracker already closed the item -> closing, not parked', () => {
+    const out = step(watchingDrain(), {
+      pr: prStatus({ state: 'merged' }),
+      item: { closed: true, claimed: true, needsInput: false, title: 't' },
+    });
+    expect(out.drain.phase).toBe('closing');
+    expect(out.actions).toEqual([
+      { kind: 'send', message: 'merged', ctx: { ...BASE, prUrl: PR.url } },
+    ]);
+  });
+
+  // A run a pass already parked for that close recovers once the merge is seen.
+  it('parked as taken away, but its own PR merged -> closing, send merged', () => {
+    const parked = watchingDrain({
+      phase: 'parked',
+      parkedFrom: 'watching',
+      parkedReason: PARK_REASONS.itemTaken,
+    } as Partial<DrainState>);
+    const out = step(parked, {
+      pr: prStatus({ state: 'merged' }),
+      item: { closed: true, claimed: true, needsInput: false, title: 't' },
+    });
+    expect(out.drain.phase).toBe('closing');
+    expect(out.drain.parkedReason).toBeNull();
+    expect(out.actions.map((a) => a.kind)).toEqual(['send']);
+  });
+
   // watching + failing checks: send them to the worker.
   it('watching + failing -> fixing-ci, send ci-red with names and urls', () => {
     const failing = [{ name: 'test', url: 'https://ci/1' }];
