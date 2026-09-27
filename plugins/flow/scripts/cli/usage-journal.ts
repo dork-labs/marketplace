@@ -24,6 +24,7 @@ import {
   read,
   runtimeOf,
   shouldSampleUsage,
+  usageWindowName,
   USAGE_WINDOWS_MAX,
   type JournalEvent,
   type UsageWindowReading,
@@ -92,7 +93,8 @@ export function snapshotEvent(
     if (isErrorWindowKey(key)) continue;
     const reading = readWindow(ledger.windows[key], now, key);
     if (reading === null) continue;
-    windows[key] = { usedPct: reading.usedPct, resetsAt: reading.resetsAt };
+    // Named as the line will be, so the next sample compares against the same key.
+    windows[usageWindowName(key)] = { usedPct: reading.usedPct, resetsAt: reading.resetsAt };
   }
   const plan = readPlan(ledger.plan);
   const spend = readSpend(ledger.spend);

@@ -21,6 +21,7 @@ import { fileURLToPath } from 'node:url';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { recordUsage, type UsageObservation } from '../../scripts/fleet/usage-ledger.ts';
 import { snapshotEvent } from '../../scripts/cli/usage-journal.ts';
+import { usageWindowName } from '../../scripts/journal.ts';
 import { main, type MainDeps } from '../../scripts/flow.ts';
 
 const FLOW_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..');
@@ -246,5 +247,32 @@ describe('snapshotEvent', () => {
       T0
     );
     expect(event).toMatchObject({ windows: {}, spend: { costUsd: 0.75 } });
+  });
+
+  it('names a long model window as the journal line will, so sampling compares like with like', () => {
+    // Purpose: the journal caps a long slug; an event keyed by the uncapped
+    // ledger key would never match the last line, and every tick would sample.
+    const key = `model:${'gpt-5.3-codex-spark-extended-research-preview-'.repeat(2)}x`;
+    const event = snapshotEvent(
+      { runtime: 'codex', id: 'default' },
+      {
+        v: 1,
+        runtime: 'codex',
+        accountId: 'default',
+        updatedAt: T0.toISOString(),
+        windows: {
+          [key]: {
+            usedPct: 40,
+            resetsAt: new Date(T0.getTime() + 60 * 60 * 1000).toISOString(),
+            status: null,
+            observedAt: T0.toISOString(),
+            source: 'rollout',
+          },
+        },
+      },
+      T0
+    );
+    expect(usageWindowName(key)).not.toBe(key);
+    expect(event).toMatchObject({ windows: { [usageWindowName(key)]: { usedPct: 40 } } });
   });
 });

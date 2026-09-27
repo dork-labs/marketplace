@@ -37,6 +37,7 @@ import {
   statSync,
   unlinkSync,
 } from 'node:fs';
+import { createHash } from 'node:crypto';
 import os from 'node:os';
 import path from 'node:path';
 
@@ -142,6 +143,29 @@ export interface UsageWindowReading {
  * hold can be sampled into the journal.
  */
 export const USAGE_WINDOW_NAME = WINDOW_KEY_PATTERN;
+
+/** The most characters the slug of a `model:`, `credits:` or `rate_limit:` window name keeps. */
+export const USAGE_WINDOW_SLUG_MAX = 40;
+
+/** A window name with a slug: its family and the slug. */
+const SLUG_WINDOW = /^(model|credits|rate_limit):(.+)$/;
+
+/**
+ * A usage window name as a journal line writes it. The ledger grammar puts no
+ * cap on a slug, so a long one (a Codex `limit_name` goes in whole) is cut to
+ * {@link USAGE_WINDOW_SLUG_MAX} characters, the last nine a `-` and a hash of
+ * the full slug, so two long names that share a start stay two windows. Any
+ * other name is returned as it is, and capping a capped name changes nothing.
+ *
+ * @param name - A window name in the ledger grammar.
+ * @returns The name the journal keeps.
+ */
+export function usageWindowName(name: string): string {
+  const match = SLUG_WINDOW.exec(name);
+  if (match === null || match[2].length <= USAGE_WINDOW_SLUG_MAX) return name;
+  const hash = createHash('sha256').update(match[2]).digest('hex').slice(0, 8);
+  return `${match[1]}:${match[2].slice(0, USAGE_WINDOW_SLUG_MAX - 9)}-${hash}`;
+}
 
 /** The most windows one `usage.snapshot` line may carry. */
 export const USAGE_WINDOWS_MAX = 12;
@@ -375,11 +399,11 @@ const FIELD_MAX: Readonly<Record<string, number>> = {
  * Redact and cap an object key. A usage window name that is already valid keeps
  * its shape (a long model slug such as `model:claude-sonnet-4-5-20250929-thinking`
  * would otherwise read as a key and be redacted, and two windows would collapse
- * into one); token and address patterns still apply.
+ * into one), capped by {@link usageWindowName}; token and address patterns still apply.
  */
 function cleanKey(field: string, key: string): string {
   if (field === 'windows' && USAGE_WINDOW_NAME.test(key)) {
-    let out = key;
+    let out = usageWindowName(key);
     for (const pattern of TOKEN_PATTERNS) out = out.replace(pattern, '[redacted]');
     return out.replace(EMAIL, '[email]');
   }

@@ -336,21 +336,15 @@ export class FakeTracker {
   }
 
   /**
-   * The stored item, refusing another team's with a `PreconditionError`. A
-   * missing item is a `PreconditionError` on a read and a `TrackerError` on a
-   * write, as the Linear adapter reports them (its write paths do not map
-   * Linear's "Entity not found").
+   * The stored item, refusing a missing one or another team's with a
+   * `PreconditionError`, on a read and a write alike, as the Linear adapter
+   * reports them.
    */
-  private find(identifier: string, use: 'read' | 'write' = 'read'): WorkItem {
+  private find(identifier: string): WorkItem {
     const item =
       this.backlog.items.find((candidate) => candidate.identifier === identifier) ??
       (this.backlog.archived ?? []).find((candidate) => candidate.identifier === identifier);
-    if (item === undefined) {
-      if (use === 'write') {
-        throw new TrackerError(`the tracker could not find ${identifier} to write to`);
-      }
-      throw new PreconditionError(`${identifier} was not found`);
-    }
+    if (item === undefined) throw new PreconditionError(`${identifier} was not found`);
     if (!this.ownId(identifier)) {
       throw new PreconditionError(
         `${identifier} belongs to another team, not ${this.team.key}; flow only acts on its own team`
@@ -389,7 +383,7 @@ export class FakeTracker {
       applyWorkState: async (item, change) => this.applyWorkState(item, change),
       comment: async (item, body) => {
         this.read();
-        this.find(item.identifier, 'write');
+        this.find(item.identifier);
         if (this.backlog.dropWrites) return;
         this.addComment(item.identifier, this.user.id, body);
       },
@@ -463,7 +457,7 @@ export class FakeTracker {
         throw new PreconditionError(`the team has no project "${spec.project}"`);
       }
     }
-    const parent = spec.parent === undefined ? undefined : this.find(spec.parent, 'read');
+    const parent = spec.parent === undefined ? undefined : this.find(spec.parent);
 
     const key = this.team.key ?? 'FAKE';
     // Number after every identifier this team has used, open, closed or seeded
@@ -551,7 +545,7 @@ export class FakeTracker {
    */
   private applyWorkState(item: WorkItem, change: WorkStateChange): void {
     this.read();
-    const current = this.find(item.identifier, 'write');
+    const current = this.find(item.identifier);
     const next = labelsAfterChange(current.labels, change);
     const known = this.teamLabels();
     // Only a label this change ADDS must be the team's: an item keeps whatever it
