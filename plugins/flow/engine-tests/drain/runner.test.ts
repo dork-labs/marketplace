@@ -33,6 +33,7 @@ import type { DrainState } from '../../scripts/drain/state.ts';
 import { dueForSnapshot } from '../../scripts/drain/usage-sample.ts';
 import { EXIT } from '../../scripts/errors.ts';
 import type { FlowRun } from '../../scripts/flow-run.ts';
+import { openFlowStateFile } from '../../scripts/flow-state-file.ts';
 import { main, VERBS } from '../../scripts/flow.ts';
 import type { CreatePrInput, Forge, PrStatus } from '../../scripts/forge/types.ts';
 import {
@@ -1422,6 +1423,25 @@ describe('flow drain: handoff on a limit (§5)', () => {
     expect(workers()).toHaveLength(2);
     expect(runOf('ACME-1').account).toBe(to);
     assertNoTranscriptWrites();
+  });
+
+  it("--wait drops an earlier hold's resumeOnReset, so it resumes at the reset", async () => {
+    // Purpose: a CLI wait is today's wait, whatever a DorkOS wait said before.
+    const { from, to } = await started();
+    rejected(from, 500);
+    rejected(to);
+    rejected('default');
+    clock += 60_000;
+    await tick();
+    expect(runOf('ACME-1').limit?.state).toBe('waiting-reset');
+    await openFlowStateFile(project.dir).updateRun(runOf('ACME-1').issueId, (run) => ({
+      ...run,
+      limit: { ...run.limit!, heldBy: 'person', heldUntil: null, resumeOnReset: false },
+    }));
+    const held = await flow(['handoff', 'ACME-1', '--wait']);
+    expect(held.code, held.stderr).toBe(0);
+    expect(runOf('ACME-1').limit).toMatchObject({ heldBy: 'person', heldUntil: null });
+    expect(runOf('ACME-1').limit).not.toHaveProperty('resumeOnReset');
   });
 
   it('warning: winds down, the worker checkpoints and stops, then it hands off proactively', async () => {

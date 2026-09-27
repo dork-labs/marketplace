@@ -83,12 +83,9 @@ import { invokedDirectly, isPlainObject } from './_shared.ts';
 import { addExcludeLines } from './git-exclude.ts';
 import { validateConfig, type ValidationIssue } from './validate-config.ts';
 
-/** The project folder, relative to a checkout, that holds flow's settings. */
-export const PROJECT_CONFIG_DIR = '.agents/flow';
-/** The committed team-policy file. */
-export const CONFIG_FILE = 'config.json';
-/** The per-machine file: credentials and overrides, never committed. */
-export const LOCAL_CONFIG_FILE = 'config.local.json';
+import { CONFIG_FILE, LOCAL_CONFIG_FILE, PROJECT_CONFIG_DIR } from './config-names.ts';
+
+export { CONFIG_FILE, LOCAL_CONFIG_FILE, PROJECT_CONFIG_DIR };
 /**
  * The file a migration leaves in the old plugin `config/` folder, holding the
  * path of the project the settings moved to. A folder carrying it is never read

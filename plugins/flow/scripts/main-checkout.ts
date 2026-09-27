@@ -26,16 +26,18 @@ export const STATE_RELATIVE_PATH = path.join('.dork', 'flow', 'flow-state.json')
  * worktree this is the main checkout, not the worktree.
  *
  * @param project - Any folder inside a git checkout (main or linked worktree).
+ * @param opts - `timeoutMs`: give up on git after this long (default: no limit).
  * @returns The absolute path of the main checkout.
  * @throws {ConfigError} When `project` is not inside a git checkout.
  */
-export function resolveMainCheckout(project: string): string {
+export function resolveMainCheckout(project: string, opts: { timeoutMs?: number } = {}): string {
   let commonDir: string;
   try {
     commonDir = execFileSync('git', ['rev-parse', '--path-format=absolute', '--git-common-dir'], {
       cwd: project,
       encoding: 'utf8',
       stdio: ['ignore', 'pipe', 'pipe'],
+      ...(opts.timeoutMs === undefined ? {} : { timeout: opts.timeoutMs }),
     }).trim();
   } catch {
     throw new ConfigError(

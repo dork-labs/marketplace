@@ -21,6 +21,7 @@ import path from 'node:path';
 import { updateFleetPolicy } from '../../../scripts/fleet/accounts.ts';
 import { createAdvisor, type ExecFileLike, type FlowAdvisor } from './lib/advisor.ts';
 import { ContinuedWatcher } from './lib/continued-watcher.ts';
+import { GIT_TIMEOUT_MS } from './lib/run-store.ts';
 import {
   RouteError,
   buildFleetView,
@@ -52,6 +53,10 @@ export interface FlowExtensionOverrides {
   originOf?: (cwd: string) => string | null;
   /** Where to log (default: `console.warn`). */
   log?: (message: string) => void;
+  /** A monotonic clock in ms, for `move`'s deadline. */
+  clockMs?: () => number;
+  /** Whether a process is alive. */
+  pidAlive?: (pid: number) => boolean;
 }
 
 /** What {@link createFlowExtension} built. */
@@ -71,7 +76,7 @@ function gitOrigin(cwd: string): string | null {
       cwd,
       encoding: 'utf8',
       stdio: ['ignore', 'pipe', 'ignore'],
-      timeout: 1_000,
+      timeout: GIT_TIMEOUT_MS,
     }).trim();
   } catch {
     return null;
@@ -197,6 +202,8 @@ export function createFlowExtension(
     originOf: overrides.originOf ?? gitOrigin,
     watcher,
     log,
+    clockMs: overrides.clockMs,
+    pidAlive: overrides.pidAlive,
   });
   const unregister = accounts.registerAdvisor(advisor);
   const stopWatching = ctx.schedule(WATCH_INTERVAL_SECONDS, () => watcher.check());

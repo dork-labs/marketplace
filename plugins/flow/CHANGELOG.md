@@ -16,6 +16,8 @@ you until you **reinstall it** (Marketplace → flow → reinstall, or re-run yo
 - Choosing to wait, or cancelling an automatic move, holds the run on its own account, so flow does not move it behind your back.
 - If you wait with "Continue automatically when it resets" turned off, flow leaves the run alone after the reset too, until you continue it, wait again with that turned on, or run `flow handoff`. With it on, the run carries on by itself at the reset, as before.
 - The new session starts from the run's HANDOFF.md checkpoint.
+- Only work `flow drain` runs is flow's to move. Work you picked up yourself with `flow claim` is handled by DorkOS like any other conversation.
+- When you pick an account for a flow run, flow checks it the way `flow handoff` would, and says why it can't move the run right away instead of trying and failing later.
 
 ## 0.40.0
 

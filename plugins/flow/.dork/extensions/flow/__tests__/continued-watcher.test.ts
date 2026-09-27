@@ -90,6 +90,18 @@ describe('the watcher', () => {
     expect(second.host.accounts.markContinued).toHaveBeenCalledTimes(1);
   });
 
+  it('tries a report DorkOS refused again on the next pass, then never again', async () => {
+    const { advisor, watcher, host } = setup({ data: null });
+    await advisor.claims!(session);
+    host.accounts.markContinued.mockRejectedValueOnce(new Error('DorkOS is restarting'));
+    flowMovesRuns('');
+    await watcher.check();
+    expect(host.accounts.markContinued).toHaveBeenCalledTimes(1);
+    await watcher.check();
+    await watcher.check();
+    expect(host.accounts.markContinued).toHaveBeenCalledTimes(2);
+  });
+
   it('never reports a session the advisor did not claim', async () => {
     const { watcher, host } = setup({ data: null });
     await watcher.check();

@@ -19,6 +19,9 @@ import { readJsonFile, updateJsonFile } from '../../../../scripts/atomic-json.ts
 import { ConfigError, PreconditionError } from '../../../../scripts/errors.ts';
 import { STATE_RELATIVE_PATH, resolveMainCheckout } from '../../../../scripts/main-checkout.ts';
 
+/** How long a git call may take on an advisor call, which DorkOS bounds at 2 s. */
+export const GIT_TIMEOUT_MS = 500;
+
 /** How long an advisor write waits for the store's lock: under DorkOS's 2 s bound. */
 export const ADVISOR_LOCK_GIVE_UP_MS = 1_500;
 
@@ -88,7 +91,7 @@ export function flowStatePath(mainCheckout: string): string {
  */
 export function mainCheckoutOf(cwd: string): string | null {
   try {
-    return resolveMainCheckout(cwd);
+    return resolveMainCheckout(cwd, { timeoutMs: GIT_TIMEOUT_MS });
   } catch {
     return null;
   }
@@ -127,8 +130,8 @@ export function storeMtime(mainCheckout: string): number | null {
 
 /**
  * The flow run a session is on: the run in its project's store whose
- * `sessionId` is this session's. A session with no git checkout, no store, or
- * no matching run is not a flow run.
+ * `sessionId` is this session's, a drain run first. A session with no git
+ * checkout, no store, or no matching run is not a flow run.
  *
  * @param cwd - The session's working directory.
  * @param sessionId - The session's id.
@@ -138,8 +141,33 @@ export function findFlowRun(cwd: string, sessionId: string | undefined): FoundRu
   if (sessionId === undefined || sessionId === '') return null;
   const mainCheckout = mainCheckoutOf(cwd);
   if (mainCheckout === null) return null;
-  const run = Object.values(readRuns(mainCheckout)).find((r) => r.sessionId === sessionId);
+  const matches = Object.values(readRuns(mainCheckout)).filter((r) => r.sessionId === sessionId);
+  const run = matches.find(isDrainRun) ?? matches[0];
   return run === undefined ? null : { mainCheckout, run };
+}
+
+/**
+ * Whether a run is one `flow drain` carries: only those does flow's supervisor
+ * move, hold and resume, so only those are flow's to claim. A run from an
+ * interactive `flow claim` is a person's session like any other.
+ *
+ * @param run - A stored run.
+ * @returns True for a drain run.
+ */
+export function isDrainRun(run: StoredRun): boolean {
+  return isObject(run.drain) && run.drain.v === 1;
+}
+
+/**
+ * The drain run a session is on, or `null` ({@link findFlowRun}, drain runs only).
+ *
+ * @param cwd - The session's working directory.
+ * @param sessionId - The session's id.
+ * @returns The run and its main checkout, or `null`.
+ */
+export function findDrainRun(cwd: string, sessionId: string | undefined): FoundRun | null {
+  const found = findFlowRun(cwd, sessionId);
+  return found !== null && isDrainRun(found.run) ? found : null;
 }
 
 /** A person's hold on a run, as flow's `flow handoff --wait` writes it (§5.2a). */

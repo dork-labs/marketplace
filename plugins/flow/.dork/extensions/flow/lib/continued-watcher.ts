@@ -71,6 +71,7 @@ export class ContinuedWatcher {
   private loading: Promise<WatcherData> | null = null;
   private readonly mtimes = new Map<string, number | null>();
   private checking: Promise<void> | null = null;
+  private readonly reporting = new Set<string>();
 
   /**
    * @param deps - Storage, the accounts API, the moves in flight and a logger.
@@ -113,19 +114,38 @@ export class ContinuedWatcher {
   }
 
   /**
-   * Record a pair as reported, unless it already was. Call before reporting it.
+   * Tell DorkOS a source session moved on, once per (old, new) pair. The pair
+   * is recorded only after `markContinued` succeeds, so a failure is tried
+   * again on a later pass; a pair already reported, or being reported now,
+   * is skipped.
    *
    * @param from - The source session.
-   * @param to - The new session.
-   * @returns True when the pair was new (so the caller reports it).
+   * @param to - Where it went.
+   * @returns True when DorkOS took the report now.
    */
-  async markReported(from: string, to: string): Promise<boolean> {
+  async report(
+    from: string,
+    to: { sessionId: string; runtime: string; accountId: string }
+  ): Promise<boolean> {
     const data = await this.load();
-    const pair = `${from}→${to}`;
-    if (data.reported.includes(pair)) return false;
+    const pair = `${from}→${to.sessionId}`;
+    if (data.reported.includes(pair) || this.reporting.has(pair)) return false;
+    this.reporting.add(pair);
+    try {
+      await this.deps.accounts.markContinued(from, to);
+    } catch (error) {
+      this.deps.log(`[flow] DorkOS did not take the move of ${from}: ${String(error)}`);
+      const claim = data.claimed[from];
+      // Read that store again next pass, so the report is retried.
+      if (claim !== undefined) this.mtimes.delete(claim.mainCheckout);
+      return false;
+    } finally {
+      this.reporting.delete(pair);
+    }
     data.reported.push(pair);
-    if (data.reported.length > REPORTED_LIMIT)
+    if (data.reported.length > REPORTED_LIMIT) {
       data.reported.splice(0, data.reported.length - REPORTED_LIMIT);
+    }
     delete data.claimed[from];
     await this.save(data);
     return true;
@@ -147,10 +167,15 @@ export class ContinuedWatcher {
     for (const mainCheckout of checkouts) {
       const mtime = storeMtime(mainCheckout);
       if (this.mtimes.has(mainCheckout) && this.mtimes.get(mainCheckout) === mtime) continue;
-      this.mtimes.set(mainCheckout, mtime);
+      const sources = Object.entries(data.claimed).filter(
+        ([, claim]) => claim.mainCheckout === mainCheckout
+      );
+      // While a move of one of its runs is in flight, read this store again
+      // next pass: a handoff that times out may still have written its session.
+      if (!sources.some(([source]) => moving.has(source))) this.mtimes.set(mainCheckout, mtime);
       const runs = readRuns(mainCheckout);
-      for (const [source, claim] of Object.entries(data.claimed)) {
-        if (claim.mainCheckout !== mainCheckout || moving.has(source)) continue;
+      for (const [source, claim] of sources) {
+        if (moving.has(source)) continue;
         const run = runs[claim.issueId];
         if (run === undefined) {
           delete data.claimed[source];
@@ -158,18 +183,11 @@ export class ContinuedWatcher {
           continue;
         }
         if (run.sessionId === '' || run.sessionId === source) continue;
-        if (!(await this.markReported(source, run.sessionId))) continue;
-        try {
-          await this.deps.accounts.markContinued(source, {
-            sessionId: run.sessionId,
-            runtime: run.runtime ?? 'claude-code',
-            accountId: run.account ?? 'default',
-          });
-        } catch (error) {
-          this.deps.log(
-            `[flow] DorkOS did not take the move of ${run.identifier}: ${String(error)}`
-          );
-        }
+        await this.report(source, {
+          sessionId: run.sessionId,
+          runtime: run.runtime ?? 'claude-code',
+          accountId: run.account ?? 'default',
+        });
       }
     }
   }

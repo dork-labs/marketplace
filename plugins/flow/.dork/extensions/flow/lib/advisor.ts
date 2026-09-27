@@ -10,7 +10,10 @@
  * - `onLimited` hands a flow run off by itself (`handoff: auto`), waits when the
  *   reset is under an hour away, and otherwise asks.
  * - `claims`, `move`, `wait` and `cancelAuto` make flow the only mover of a flow
- *   run. `move` accepts at once and runs `flow handoff` in the background; the
+ *   run. Only a run `flow drain` carries is flow's: an interactive `flow claim`
+ *   session has no supervisor, so DorkOS handles it like any other session.
+ *   `move` refuses what `flow handoff` would refuse, ranking with the project's
+ *   drain settings, and never starts after its 1.5 s deadline. `move` accepts at once and runs `flow handoff` in the background; the
  *   result reaches DorkOS through `accounts.markContinued`.
  * - `carryOver` seeds the new session from the run's `HANDOFF.md`.
  *
@@ -34,6 +37,8 @@ import {
   CHECKPOINT_FILE,
   parseCheckpoint,
 } from '../../../../scripts/drain/checkpoint.ts';
+import { liveByAccount } from '../../../../scripts/drain/live-count.ts';
+import { liveDrainPid } from '../../../../scripts/drain/lock.ts';
 import { render } from '../../../../scripts/drain/messages.ts';
 import { PreconditionError } from '../../../../scripts/errors.ts';
 import {
@@ -62,7 +67,8 @@ import type {
   SessionInfo,
 } from './host-types.ts';
 import { SEED_CONTEXT_MAX_LENGTH } from './host-types.ts';
-import { findFlowRun, holdRun, readRuns, type FoundRun } from './run-store.ts';
+import { DRAIN_DEFAULTS, readDrainSettings } from './drain-settings.ts';
+import { findDrainRun, findFlowRun, holdRun, readRuns, type FoundRun } from './run-store.ts';
 import { ineligibleReason, reserveReason, roomReason } from './reasons.ts';
 import type { ContinuedWatcher } from './continued-watcher.ts';
 
@@ -79,7 +85,17 @@ export const AUTO_HANDOFF_DELAY_SECONDS = 10;
 const WAIT_IF_RESET_WITHIN_MS = 60 * 60 * 1000;
 
 /** Flow's default `drain.warnMarginPct`. */
-const WARN_MARGIN_PCT = 10;
+const WARN_MARGIN_PCT = DRAIN_DEFAULTS.warnMarginPct;
+
+/**
+ * How long `move` may spend checking before it must have accepted: under
+ * DorkOS's 2 s bound, so a move DorkOS already refused is never started.
+ */
+export const MOVE_DEADLINE_MS = 1_500;
+
+/** What `move` says when its checks ran past {@link MOVE_DEADLINE_MS}. */
+export const TOO_SLOW_MESSAGE =
+  'Flow took too long to check this move, so it did not start it. Try again.';
 
 /** Reasons that hide an account from a strict (flow-policy) ranking. */
 const HIDING_REASONS: readonly IneligibleReason[] = ['not-routable', 'excluded', 'out-of-scope'];
@@ -118,6 +134,20 @@ export interface AdvisorDeps {
   watcher: ContinuedWatcher;
   /** Where to log. */
   log: (message: string) => void;
+  /** A monotonic clock in ms, for `move`'s deadline (default `performance.now`). */
+  clockMs?: () => number;
+  /** Whether a process is alive (default: `process.kill(pid, 0)`). */
+  pidAlive?: (pid: number) => boolean;
+}
+
+/** Whether a process is alive: signal 0 reaches it, or it exists but is not ours. */
+function processAlive(pid: number): boolean {
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch (error) {
+    return (error as { code?: string }).code === 'EPERM';
+  }
 }
 
 /** The advisor, plus hooks tests and the server use. */
@@ -176,6 +206,29 @@ export function createAdvisor(deps: AdvisorDeps): FlowAdvisor {
       throw error;
     });
   }
+  // Check node once at registration, so a person's move never waits on it.
+  checkNode().catch(() => {});
+  const clockMs = deps.clockMs ?? (() => performance.now());
+  const pidAlive = deps.pidAlive ?? processAlive;
+
+  /** `promise`, or a refusal once `deadline` (on {@link clockMs}) has passed. */
+  function beforeDeadline<T>(promise: Promise<T>, deadline: number): Promise<T> {
+    const left = deadline - clockMs();
+    if (left <= 0) return Promise.reject(new PreconditionError(TOO_SLOW_MESSAGE));
+    return new Promise<T>((resolve, reject) => {
+      const timer = setTimeout(() => reject(new PreconditionError(TOO_SLOW_MESSAGE)), left);
+      promise.then(
+        (value) => {
+          clearTimeout(timer);
+          resolve(value);
+        },
+        (error: unknown) => {
+          clearTimeout(timer);
+          reject(error);
+        }
+      );
+    });
+  }
 
   /**
    * Rank the accounts for one decision with flow's `rankAccounts`. `strict`
@@ -189,6 +242,8 @@ export function createAdvisor(deps: AdvisorDeps): FlowAdvisor {
     model: string | null;
     strict: boolean;
     only?: ReadonlySet<string>;
+    /** A drain run's main checkout: rank with its project's drain settings and live sessions. */
+    project?: string;
   }): Promise<RankedDecision & { subjects: FleetSubject[]; raw: unknown; repo: string | null }> {
     const subjects = fleetSubjects(await deps.accounts.list());
     const { policy, raw } = readPolicy(deps.dorkHome, subjects);
@@ -229,8 +284,14 @@ export function createAdvisor(deps: AdvisorDeps): FlowAdvisor {
       model: opts.model,
       affinity: null,
       exclude: opts.exclude,
-      liveByAccount: {},
-      opts: { warnMarginPct: WARN_MARGIN_PCT, maxLivePerAccount: Number.MAX_SAFE_INTEGER },
+      liveByAccount:
+        opts.project === undefined
+          ? {}
+          : liveByAccount(readRuns(opts.project) as unknown as Parameters<typeof liveByAccount>[0]),
+      opts:
+        opts.project === undefined
+          ? { warnMarginPct: WARN_MARGIN_PCT, maxLivePerAccount: Number.MAX_SAFE_INTEGER }
+          : readDrainSettings(opts.project),
     });
     return { rank, accounts, policy, subjects, raw, repo };
   }
@@ -247,12 +308,12 @@ export function createAdvisor(deps: AdvisorDeps): FlowAdvisor {
     return accountKey(runtime, accountId ?? IMPLICIT_ACCOUNT_ID);
   }
 
-  /** The flow run a session is on, or a refusal in flow's words. */
+  /** The drain run a session is on, or a refusal in flow's words. */
   function requireFlowRun(info: SessionInfo): FoundRun {
-    const found = findFlowRun(info.cwd, info.sessionId);
+    const found = findDrainRun(info.cwd, info.sessionId);
     if (found === null) {
       throw new PreconditionError(
-        'This session is not a flow run on this machine, so flow cannot change it.'
+        'This session is not a flow drain run on this machine, so flow cannot change it.'
       );
     }
     return found;
@@ -295,16 +356,61 @@ export function createAdvisor(deps: AdvisorDeps): FlowAdvisor {
       deps.log(`[flow] flow handoff moved ${run.identifier} but the run names no new session`);
       return;
     }
-    if (!(await deps.watcher.markReported(info.sessionId, next))) return;
-    try {
-      await deps.accounts.markContinued(info.sessionId, {
-        sessionId: next,
-        runtime: target.runtime,
-        accountId: target.accountId,
-      });
-    } catch (error) {
-      deps.log(`[flow] DorkOS did not take the move of ${run.identifier}: ${String(error)}`);
+    await deps.watcher.report(info.sessionId, {
+      sessionId: next,
+      runtime: target.runtime,
+      accountId: target.accountId,
+    });
+  }
+
+  /** `move`'s checks after the run is found, then the background handoff. */
+  async function checkAndStart(
+    info: SessionInfo,
+    found: FoundRun,
+    target: { runtime: string; accountId: string },
+    deadline: number
+  ): Promise<void> {
+    const { run, mainCheckout } = found;
+    // The same refusal as `flow handoff` (cli/handoff.ts): never mid-step.
+    const live = liveDrainPid(mainCheckout, pidAlive);
+    if (live !== null && run.limit === undefined) {
+      throw new PreconditionError(
+        `a flow drain (pid ${live}) is running and ${run.identifier} is not limited, so moving it now could land in the middle of a step. Stop the drain first, or wait until the run is limited.`
+      );
     }
+    const runtime = runtimeOf(info.runtime);
+    const targetRuntime = runtimeOf(target.runtime);
+    const worker = (run.drain as { worker?: { model?: unknown } | null }).worker;
+    const decision = await beforeDeadline(
+      decide({
+        runtime,
+        cwd: info.cwd,
+        exclude: [sessionKey(runtime, info.accountId)],
+        model: typeof worker?.model === 'string' ? worker.model : null,
+        strict: true,
+        project: mainCheckout,
+      }),
+      deadline
+    );
+    const ref = `${targetRuntime}:${target.accountId}`;
+    const ranked = decision.rank.ranked.some(
+      (a) => a.runtime === targetRuntime && a.id === target.accountId
+    );
+    if (!ranked) {
+      const out = decision.rank.ineligible.find(
+        (a) => a.runtime === targetRuntime && a.id === target.accountId
+      );
+      throw new PreconditionError(
+        out === undefined
+          ? `${ref} is not an account ${run.identifier} may move to (not registered, or another runtime while crossRuntimeFallback is off)`
+          : `${ref} may not take ${run.identifier}: ${out.reasons.join(', ')}`
+      );
+    }
+    await beforeDeadline(deps.watcher.noteClaimed(info.sessionId, found), deadline);
+    // DorkOS stops waiting at 2 s: past the deadline it has refused, so start nothing.
+    if (clockMs() >= deadline) throw new PreconditionError(TOO_SLOW_MESSAGE);
+    const job = handOff(info, found, target).finally(() => inFlight.delete(info.sessionId));
+    inFlight.set(info.sessionId, job);
   }
 
   const advisor: FlowAdvisor = {
@@ -312,7 +418,7 @@ export function createAdvisor(deps: AdvisorDeps): FlowAdvisor {
 
     async rank(candidates: AccountCandidate[], ctx: AdvisorContext): Promise<AdvisorRanking> {
       const runtime = runtimeOf(ctx.runtime);
-      const flowRun = findFlowRun(ctx.cwd, ctx.sessionId);
+      const flowRun = findDrainRun(ctx.cwd, ctx.sessionId);
       const strict = ctx.caller === 'agent' || ctx.caller === 'relay' || flowRun !== null;
       const exclude =
         ctx.excludeAccountId === undefined ? [] : [accountKey(runtime, ctx.excludeAccountId)];
@@ -323,6 +429,7 @@ export function createAdvisor(deps: AdvisorDeps): FlowAdvisor {
         model: null,
         strict,
         only: new Set(candidates.map((c) => c.id)),
+        project: flowRun?.mainCheckout,
       });
       const now = deps.now();
       const byKey = new Map(decision.accounts.map((a) => [accountKey(a.runtime, a.id), a]));
@@ -390,7 +497,7 @@ export function createAdvisor(deps: AdvisorDeps): FlowAdvisor {
     },
 
     async onLimited(info: LimitedSessionInfo): Promise<LimitedPlan> {
-      const found = findFlowRun(info.cwd, info.sessionId);
+      const found = findDrainRun(info.cwd, info.sessionId);
       if (found === null) return { mode: 'ask' };
       const subjects = fleetSubjects(await deps.accounts.list());
       const { policy } = readPolicy(deps.dorkHome, subjects);
@@ -401,6 +508,7 @@ export function createAdvisor(deps: AdvisorDeps): FlowAdvisor {
         exclude: [sessionKey(runtime, info.accountId)],
         model: info.model,
         strict: true,
+        project: found.mainCheckout,
       });
       const pick = decision.rank.pick;
       if (decision.policy.handoff === 'auto' && pick !== null && pick.runtime === runtime) {
@@ -414,16 +522,22 @@ export function createAdvisor(deps: AdvisorDeps): FlowAdvisor {
     },
 
     async claims(info: SessionInfo): Promise<boolean> {
-      const found = findFlowRun(info.cwd, info.sessionId);
+      const found = findDrainRun(info.cwd, info.sessionId);
       if (found === null) return false;
       await deps.watcher.noteClaimed(info.sessionId, found);
       return true;
     },
 
     async move(info: SessionInfo, target: { runtime: string; accountId: string }): Promise<void> {
-      await checkNode();
-      const found = requireFlowRun(info);
-      const { run } = found;
+      const deadline = clockMs() + MOVE_DEADLINE_MS;
+      await beforeDeadline(checkNode(), deadline);
+      const found = findFlowRun(info.cwd, info.sessionId);
+      if (found === null) {
+        throw new PreconditionError(
+          'This session is not a flow run on this machine, so flow cannot move it.'
+        );
+      }
+      const { run, mainCheckout } = found;
       if (run.drain?.v !== 1) {
         throw new PreconditionError(
           `${run.identifier} has no drain run on this machine; flow handoff moves runs flow drain started`
@@ -432,32 +546,14 @@ export function createAdvisor(deps: AdvisorDeps): FlowAdvisor {
       if (inFlight.has(info.sessionId)) {
         throw new PreconditionError(`flow is already moving ${run.identifier}`);
       }
-      const runtime = runtimeOf(info.runtime);
-      const targetRuntime = runtimeOf(target.runtime);
-      const decision = await decide({
-        runtime,
-        cwd: info.cwd,
-        exclude: [sessionKey(runtime, info.accountId)],
-        model: null,
-        strict: true,
-      });
-      const ref = `${targetRuntime}:${target.accountId}`;
-      const ranked = decision.rank.ranked.some(
-        (a) => a.runtime === targetRuntime && a.id === target.accountId
-      );
-      if (!ranked) {
-        const out = decision.rank.ineligible.find(
-          (a) => a.runtime === targetRuntime && a.id === target.accountId
-        );
-        throw new PreconditionError(
-          out === undefined
-            ? `${ref} is not an account ${run.identifier} may move to (not registered, or another runtime while crossRuntimeFallback is off)`
-            : `${ref} may not take ${run.identifier}: ${out.reasons.join(', ')}`
-        );
+      // Hold the slot through the checks, so two moves never both start.
+      inFlight.set(info.sessionId, Promise.resolve());
+      try {
+        await checkAndStart(info, found, target, deadline);
+      } catch (error) {
+        inFlight.delete(info.sessionId);
+        throw error;
       }
-      await deps.watcher.noteClaimed(info.sessionId, found);
-      const job = handOff(info, found, target).finally(() => inFlight.delete(info.sessionId));
-      inFlight.set(info.sessionId, job);
     },
 
     async cancelAuto(info: SessionInfo): Promise<void> {

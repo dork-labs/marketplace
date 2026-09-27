@@ -9,6 +9,7 @@ import path from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import {
   NODE_MESSAGE,
+  TOO_SLOW_MESSAGE,
   type ExecError,
   type ExecFileLike,
   type FlowAdvisor,
@@ -84,6 +85,8 @@ function setup(
     exec?: ReturnType<typeof fakeExec>;
     storage?: { data: unknown };
     origin?: string | null;
+    clockMs?: () => number;
+    pidAlive?: (pid: number) => boolean;
   } = {}
 ) {
   const exec = opts.exec ?? fakeExec();
@@ -94,6 +97,8 @@ function setup(
     execFile: exec.execFile,
     originOf: () => (opts.origin === undefined ? `https://github.com/${REPO}.git` : opts.origin),
     log,
+    clockMs: opts.clockMs,
+    pidAlive: opts.pidAlive,
   });
   const advisor = ext.advisor as FlowAdvisor;
   return { advisor, host, exec, log, ext };
@@ -327,6 +332,31 @@ describe('claims', () => {
     expect(await advisor.claims!(flowSession({ sessionId: 'not-flow' }))).toBe(false);
     expect(await advisor.claims!(flowSession({ cwd: world.root }))).toBe(false);
   });
+
+  it('leaves an interactive flow run (no drain) to DorkOS like any session', async () => {
+    // `flow claim` in a person's own session: flow's supervisor never moves it.
+    writeRuns(world, { i1: runRecord(world, { drain: undefined }) });
+    writeFleet(world.dorkHome, {
+      accounts: {
+        'claude-code:work': { role: 'rotation' },
+        'claude-code:personal': { role: 'rotation' },
+      },
+    });
+    const { advisor } = setup();
+    expect(await advisor.claims!(flowSession())).toBe(false);
+    expect(
+      await advisor.onLimited!({
+        sessionId: 's-old',
+        cwd: world.worktree,
+        accountId: 'work',
+        window: 'seven_day',
+        resetsAt: null,
+        scope: 'account',
+        model: null,
+      })
+    ).toEqual({ mode: 'ask' });
+    await expect(advisor.wait!(flowSession(), null, true)).rejects.toThrow(/not a flow drain run/);
+  });
 });
 
 describe('move', () => {
@@ -365,6 +395,61 @@ describe('move', () => {
     ]);
     expect(call.options).toMatchObject({ timeout: 120_000, shell: false });
     expect(advisor.inFlight.has('s-old')).toBe(true);
+  });
+
+  it.each([
+    ['at the first check', 1],
+    ['only at the last moment before starting', 4],
+  ])(
+    'never starts the handoff once its checks ran past the deadline (%s)',
+    async (_name, onTime) => {
+      // DorkOS answers 503 at 2 s; a move started after that would be a second writer.
+      // The clock reads 0 for the first `onTime` reads, then 5 s.
+      const exec = fakeExec();
+      let reads = 0;
+      const { advisor } = setup({ exec, clockMs: () => (reads++ < onTime ? 0 : 5_000) });
+      await expect(advisor.move!(flowSession(), target)).rejects.toThrow(TOO_SLOW_MESSAGE);
+      expect(exec.handoffs()).toHaveLength(0);
+      expect(advisor.inFlight.size).toBe(0);
+    }
+  );
+
+  it('refuses, as flow handoff does, while a drain runs and the run is not limited', async () => {
+    mkdirSync(path.join(world.main, '.dork', 'flow'), { recursive: true });
+    writeFileSync(
+      path.join(world.main, '.dork', 'flow', 'drain.lock'),
+      JSON.stringify({ pid: 4242 })
+    );
+    const exec = fakeExec();
+    const { advisor } = setup({ exec, pidAlive: (pid) => pid === 4242 });
+    await expect(advisor.move!(flowSession(), target)).rejects.toThrow(
+      'a flow drain (pid 4242) is running and ACME-1 is not limited'
+    );
+    expect(exec.handoffs()).toHaveLength(0);
+  });
+
+  it("ranks with the project's drain settings (an account at its live cap)", async () => {
+    mkdirSync(path.join(world.main, '.agents', 'flow'), { recursive: true });
+    writeFileSync(
+      path.join(world.main, '.agents', 'flow', 'config.json'),
+      JSON.stringify({ drain: { maxLivePerAccount: 1 } })
+    );
+    writeRuns(world, {
+      i1: runRecord(world),
+      i2: {
+        ...runRecord(world),
+        issueId: 'i2',
+        identifier: 'ACME-2',
+        sessionId: 's-2',
+        account: 'personal',
+      },
+    });
+    const exec = fakeExec();
+    const { advisor } = setup({ exec });
+    await expect(advisor.move!(flowSession(), target)).rejects.toThrow(
+      'claude-code:personal may not take ACME-1: at-capacity'
+    );
+    expect(exec.handoffs()).toHaveLength(0);
   });
 
   it('refuses an unknown run before starting anything', async () => {
@@ -408,6 +493,26 @@ describe('move', () => {
     });
     const { advisor, host, ext } = setup({ exec });
     await advisor.move!(flowSession(), target);
+    await advisor.inFlight.get('s-old');
+    await ext.watcher!.check();
+    expect(host.accounts.markContinued).toHaveBeenCalledTimes(1);
+    expect(host.accounts.markContinued).toHaveBeenCalledWith('s-old', {
+      sessionId: 's-new',
+      runtime: 'claude-code',
+      accountId: 'personal',
+    });
+  });
+
+  it('reports a session a timed-out handoff still wrote, once the move ends', async () => {
+    // The watcher must not settle on the store while the move is in flight.
+    let pending: ExecCall | undefined;
+    const exec = fakeExec({ onHandoff: (call) => (pending = call) });
+    const { advisor, host, ext } = setup({ exec });
+    await advisor.move!(flowSession(), target);
+    writeRuns(world, { i1: runRecord(world, { sessionId: 's-new', account: 'personal' }) });
+    await ext.watcher!.check();
+    expect(host.accounts.markContinued).not.toHaveBeenCalled();
+    pending!.callback(Object.assign(new Error('killed'), { killed: true }), '', '');
     await advisor.inFlight.get('s-old');
     await ext.watcher!.check();
     expect(host.accounts.markContinued).toHaveBeenCalledTimes(1);
