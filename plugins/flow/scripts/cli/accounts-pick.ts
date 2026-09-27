@@ -11,7 +11,8 @@
  * @module flow/cli/accounts-pick
  */
 
-import { ConfigError, UsageError } from '../errors.ts';
+import { findConfigRoots, refusalFor, resolveConfigFiles } from '../config-files.ts';
+import { UsageError } from '../errors.ts';
 import { RUNTIMES, type RuntimeSlug } from '../fleet/usage-ledger.ts';
 import type { WorkItem } from '../tracker/types.ts';
 import { loadProjectConfig } from './backlog.ts';
@@ -27,15 +28,19 @@ import {
 /** A stand-in item: the ranking needs one, and it matches no run. */
 const NO_ITEM = { id: '\u0000accounts-pick', identifier: 'new work' } as WorkItem;
 
-/** The project's config, or the settings' defaults when the folder has none. */
+/**
+ * The project's config, or the settings' defaults when the folder has no flow
+ * config at all. Only a missing config falls back: a config that is broken,
+ * unconfirmed, or refused for this folder still fails (exit 3), so a pick is
+ * never ranked with settings nobody chose.
+ */
 async function configFor(ctx: VerbContext): Promise<NextConfig> {
-  try {
-    return loadProjectConfig(ctx).loaded.config;
-  } catch (error) {
-    if (!(error instanceof ConfigError)) throw error;
+  const roots = findConfigRoots(ctx.projectDir, ctx.flowRoot);
+  if (refusalFor(roots) === null && resolveConfigFiles(roots).origin === 'none') {
     const { FlowConfigSchema } = await import('../config-schema.ts');
     return FlowConfigSchema.parse({}) as NextConfig;
   }
+  return loadProjectConfig(ctx).loaded.config;
 }
 
 /** A string flag, or undefined. */
@@ -62,11 +67,19 @@ export async function run(ctx: VerbContext): Promise<VerbResult> {
   const config = await configFor(ctx);
   const input = await gatherAssignmentInput(ctx, config);
   const model = stringFlag(ctx, 'model');
+  // --runtime names the work's own runtime: it ranks first, and the operator's
+  // fleet.runtimes order still decides any cross-runtime fallback. A model
+  // binding is a Claude Code one, so another runtime ranks with no model unless
+  // --model names one.
+  const runtimes =
+    runtime === undefined
+      ? input.runtimes
+      : [runtime as RuntimeSlug, ...input.runtimes.filter((r) => r !== runtime)];
   const [account] = assignAccounts([NO_ITEM], {
     ...input,
+    runtimes,
     ...(repo === undefined ? {} : { repo }),
-    ...(model === undefined ? {} : { model }),
-    ...(runtime === undefined ? {} : { runtimes: [runtime as RuntimeSlug] }),
+    model: model ?? (runtime !== undefined && runtime !== 'claude-code' ? null : input.model),
   });
   const resolvedRepo = repo ?? input.repo;
   const path =

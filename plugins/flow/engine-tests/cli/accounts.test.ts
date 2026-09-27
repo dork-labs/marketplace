@@ -740,6 +740,34 @@ describe('flow accounts pick', () => {
     expect(r.stdout).toContain('flow accounts set <id> --role rotation');
   });
 
+  it('fails on a broken flow config instead of ranking with defaults', async () => {
+    // Purpose: only a folder with NO flow config ranks with the defaults. A
+    // config that is present but invalid must fail (exit 3), never be silently
+    // replaced by default margins and caps. Fails if every config error falls back.
+    twoRotation();
+    mkdirSync(path.join(base, '.agents', 'flow'), { recursive: true });
+    writeFileSync(path.join(base, '.agents', 'flow', 'config.json'), '{ not json');
+    const r = await flow(['accounts', 'pick', '--repo', 'acme/app']);
+    expect(r.code).toBe(3);
+  });
+
+  it('--runtime ranks that runtime first, with no Claude model binding', async () => {
+    // Purpose: a codex pick lands on a codex account (its implicit default here),
+    // not a Claude one. Fails if --runtime is ignored.
+    twoRotation();
+    const r = await flow([
+      'accounts',
+      'pick',
+      '--repo',
+      'acme/app',
+      '--runtime',
+      'codex',
+      '--json',
+    ]);
+    expect(r.code).toBe(0);
+    expect(r.json().pick).toMatchObject({ runtime: 'codex', id: 'default' });
+  });
+
   it('refuses a malformed --repo and an unknown --runtime, and other actions refuse pick flags', async () => {
     twoRotation();
     expect((await flow(['accounts', 'pick', '--repo', 'nope'])).code).toBe(2);
