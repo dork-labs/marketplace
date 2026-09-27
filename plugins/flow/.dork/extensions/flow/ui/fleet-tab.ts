@@ -35,10 +35,11 @@ import {
   HEADING,
   INSET,
   MUTED,
-  RANGE,
+  RANGE_CLASS,
   ROOT,
   ROW,
   ROW_LABEL,
+  rangeStyle,
 } from './styles.ts';
 
 /** Shown on a DorkOS without what the Flow tab needs. */
@@ -172,7 +173,8 @@ function MainPanel(props: MainPanelProps): Node {
       value: draft,
       'aria-label': 'Share of the weekly limit kept for you',
       'aria-valuetext': `${draft}%`,
-      style: RANGE,
+      className: RANGE_CLASS,
+      style: rangeStyle(draft),
       onChange: (event: { target: HTMLInputElement }) => setDraft(Number(event.target.value)),
     }),
     h(
@@ -249,6 +251,8 @@ function SettingRow<T extends string>(props: {
   onChange: (value: T) => void;
   error: string | undefined;
   children?: Node;
+  /** The tab's last row, which has no rule under it (the mockup's `:last-child`). */
+  last?: boolean;
 }): Node {
   const labelId = useId();
   return h(
@@ -256,7 +260,7 @@ function SettingRow<T extends string>(props: {
     null,
     h(
       'div',
-      { style: ROW },
+      { style: props.last ? { ...ROW, borderBottom: 0 } : ROW },
       h('span', { id: labelId, style: ROW_LABEL }, props.label),
       h(SegmentedControl<T>, {
         options: props.options,
@@ -305,6 +309,7 @@ export function CrossRuntimeRow(props: {
     SettingRow<FleetView['crossRuntimeFallback']>,
     {
       label: 'Cross-runtime fallback',
+      last: true,
       options: CROSS_RUNTIME_OPTIONS,
       value: props.value,
       onChange: props.onChange,
@@ -336,6 +341,8 @@ export function FleetTab(): Node {
   const [errors, setErrors] = useState<Record<Scope, string>>({});
   // The last body flow answered, which a failed write rolls back to.
   const saved = useRef<FleetView | null>(null);
+  // The write whose answer `saved` holds; an older write's answer never replaces it.
+  const savedSeq = useRef(0);
   // Only the newest write's answer is shown, so an older answer never
   // overwrites a newer choice that is still on its way.
   const latest = useRef(0);
@@ -352,14 +359,7 @@ export function FleetTab(): Node {
       (error: unknown) => {
         if (!live) return;
         if (error instanceof HostTooOldError) setPhase({ kind: 'too-old' });
-        else
-          setPhase({
-            kind: 'failed',
-            message:
-              error instanceof FleetRequestError && error.status !== 0
-                ? error.message
-                : LOAD_FAILED_TEXT,
-          });
+        else setPhase({ kind: 'failed', message: LOAD_FAILED_TEXT });
       }
     );
     return () => {
@@ -377,7 +377,10 @@ export function FleetTab(): Node {
     setBody((current) => (current ? optimistic(current) : current));
     request().then(
       (fleet) => {
-        saved.current = fleet;
+        if (seq > savedSeq.current) {
+          saved.current = fleet;
+          savedSeq.current = seq;
+        }
         if (seq === latest.current) setBody(fleet);
       },
       (error: unknown) => {
@@ -447,7 +450,6 @@ export function FleetTab(): Node {
           )
         )
       ),
-    h('div', { style: { height: '12px' } }),
     h(HandoffRow, {
       value: body.handoff,
       error: errors.handoff,
@@ -473,7 +475,9 @@ export function FleetTab(): Node {
 
 /** The words to show for a failed request. */
 function messageOf(error: unknown): string {
-  return error instanceof FleetRequestError ? error.message : UNREACHABLE_MESSAGE;
+  return error instanceof FleetRequestError && error.refusedByFlow
+    ? error.message
+    : UNREACHABLE_MESSAGE;
 }
 
 /** `record` without `key`. */

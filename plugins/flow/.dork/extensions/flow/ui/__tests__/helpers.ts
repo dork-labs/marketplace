@@ -66,6 +66,9 @@ export function fleet(groups: FleetGroup[], extra: Partial<FleetView> = {}): Fle
   };
 }
 
+/** A body whose `json()` rejects, as a non-JSON error page does. */
+export const NO_JSON = Symbol('no-json');
+
 /** One answer the stub gives. */
 export interface StubAnswer {
   status: number;
@@ -90,16 +93,21 @@ export function stubFetch(
   opts: { hold?: boolean } = {}
 ) {
   const calls: StubCall[] = [];
-  const pending: (() => void)[] = [];
+  const pending: { resolve: () => void; done: boolean }[] = [];
   const fetchMock = vi.fn(async (url: string, init?: { method?: string; body?: string }) => {
     const method = init?.method ?? 'GET';
     calls.push({ method, url, body: init?.body === undefined ? undefined : JSON.parse(init.body) });
     const answer = method === 'GET' ? initial : (writes.shift() ?? initial);
-    if (method !== 'GET' && opts.hold) await new Promise<void>((resolve) => pending.push(resolve));
+    if (method !== 'GET' && opts.hold) {
+      await new Promise<void>((resolve) => pending.push({ resolve, done: false }));
+    }
     return {
       ok: answer.status >= 200 && answer.status < 300,
       status: answer.status,
-      json: async () => answer.body,
+      json: async () => {
+        if (answer.body === NO_JSON) throw new SyntaxError('Unexpected token <');
+        return answer.body;
+      },
     };
   });
   vi.stubGlobal('fetch', fetchMock);
@@ -108,6 +116,18 @@ export function stubFetch(
     /** The PUTs made so far. */
     puts: () => calls.filter((call) => call.method === 'PUT'),
     /** Let every held PUT answer. */
-    release: () => pending.splice(0).forEach((resolve) => resolve()),
+    release: () => {
+      for (const entry of pending)
+        if (!entry.done) {
+          entry.done = true;
+          entry.resolve();
+        }
+    },
+    /** Let the `index`th held PUT (0-based, in the order they were sent) answer. */
+    releaseAt: (index: number) => {
+      const entry = pending[index];
+      entry.done = true;
+      entry.resolve();
+    },
   };
 }

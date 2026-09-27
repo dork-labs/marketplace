@@ -9,7 +9,7 @@ import {
   NOTHING_USABLE_TEXT,
   ROLE_LINES,
 } from '../notice.ts';
-import { account, claudeGroup, codexGroup, fleet, stubFetch } from './helpers.ts';
+import { NO_JSON, account, claudeGroup, codexGroup, fleet, stubFetch } from './helpers.ts';
 
 afterEach(() => {
   vi.unstubAllGlobals();
@@ -156,7 +156,12 @@ describe('FleetTab: the role radio group', () => {
         status: 200,
         body: fleet([claudeGroup([account('Main', 'main'), account('Acct 2', 'rotation')])]),
       },
-      [{ status: 409, body: { error: 'fleet.json changed while you were editing it.' } }],
+      [
+        {
+          status: 409,
+          body: { error: 'fleet.json changed while you were editing it.', refusedBy: 'flow' },
+        },
+      ],
       { hold: true }
     );
     await renderTab();
@@ -423,5 +428,132 @@ describe('FleetTab: notices', () => {
     });
     await renderTab();
     expect(screen.queryByRole('status')).toBeNull();
+  });
+});
+
+describe('FleetTab: what a failure says', () => {
+  const body = () => fleet([claudeGroup([account('Main', 'main'), account('Acct 2', 'rotation')])]);
+
+  it.each([
+    ['a host 404', { status: 404, body: { error: "Extension 'flow' has no server routes" } }],
+    ['a JSON-less 500', { status: 500, body: NO_JSON }],
+    [
+      'a refusal-shaped 409 on the first load',
+      { status: 409, body: { error: 'Locked.', refusedBy: 'flow' } },
+    ],
+  ])('the first load shows only "Flow could not be reached." on %s', async (_name, answer) => {
+    stubFetch(answer);
+    await renderTab();
+    expect(screen.getByRole('alert').textContent).toBe('Flow could not be reached.');
+    expect(screen.queryByText(/Extension 'flow'|Locked/)).toBeNull();
+  });
+
+  it.each([
+    ['a host 404', { status: 404, body: { error: "Extension 'flow' has no server routes" } }],
+    ['a JSON-less 500', { status: 500, body: NO_JSON }],
+    [
+      'a 500 with an error',
+      { status: 500, body: { error: 'ENOENT: /secret/path', refusedBy: 'flow' } },
+    ],
+  ])('a write that fails with %s says flow could not be reached', async (_name, answer) => {
+    stubFetch({ status: 200, body: body() }, [answer]);
+    await renderTab();
+    await act(async () => {
+      fireEvent.click(within(roles('Acct 2')).getByRole('radio', { name: 'Kept out' }));
+    });
+    expect(screen.getByRole('alert').textContent).toBe(
+      'Flow could not be reached, so this was not changed.'
+    );
+    expect(
+      within(roles('Acct 2')).getByRole('radio', { name: 'Rotation' }).getAttribute('aria-checked')
+    ).toBe('true');
+  });
+
+  it("a write flow refuses shows flow's own words", async () => {
+    stubFetch({ status: 200, body: body() }, [
+      { status: 400, body: { error: '"x" is not an owner/name repo.', refusedBy: 'flow' } },
+    ]);
+    await renderTab();
+    await act(async () => {
+      fireEvent.click(within(roles('Acct 2')).getByRole('radio', { name: 'Kept out' }));
+    });
+    expect(screen.getByRole('alert').textContent).toBe('"x" is not an owner/name repo.');
+  });
+});
+
+describe('FleetTab: answers that arrive out of order', () => {
+  it('a new Main shows the old Main as Rotation at once, before flow answers', async () => {
+    stubFetch(
+      {
+        status: 200,
+        body: fleet([claudeGroup([account('Main', 'main'), account('Acct 2', 'rotation')])]),
+      },
+      [],
+      { hold: true }
+    );
+    await renderTab();
+    fireEvent.click(within(roles('Acct 2')).getByRole('radio', { name: 'Main' }));
+    expect(
+      within(roles('Acct 2')).getByRole('radio', { name: 'Main' }).getAttribute('aria-checked')
+    ).toBe('true');
+    expect(
+      within(roles('Main')).getByRole('radio', { name: 'Rotation' }).getAttribute('aria-checked')
+    ).toBe('true');
+  });
+
+  it("an older write's answer never replaces a newer saved one, so a later failure rolls back to the newer", async () => {
+    const initial = fleet([claudeGroup([account('Main', 'main'), account('Acct 2', 'rotation')])]);
+    const answerA = fleet([claudeGroup([account('Main', 'main'), account('Acct 2', 'kept-out')])]);
+    const answerB = fleet([claudeGroup([account('Main', 'rotation'), account('Acct 2', 'main')])]);
+    const stub = stubFetch(
+      { status: 200, body: initial },
+      [
+        { status: 200, body: answerA },
+        { status: 200, body: answerB },
+        { status: 409, body: { error: 'Locked.', refusedBy: 'flow' } },
+      ],
+      { hold: true }
+    );
+    await renderTab();
+    fireEvent.click(within(roles('Acct 2')).getByRole('radio', { name: 'Kept out' }));
+    await act(async () => {});
+    fireEvent.click(within(roles('Acct 2')).getByRole('radio', { name: 'Main' }));
+    await act(async () => {});
+    // B answers first, then the older A.
+    await act(async () => {
+      stub.releaseAt(1);
+    });
+    await act(async () => {
+      stub.releaseAt(0);
+    });
+    expect(
+      within(roles('Acct 2')).getByRole('radio', { name: 'Main' }).getAttribute('aria-checked')
+    ).toBe('true');
+
+    // A third write fails: the tab rolls back to B, not to A.
+    fireEvent.click(
+      within(screen.getByRole('radiogroup', { name: 'When an account runs out' })).getByRole(
+        'radio',
+        {
+          name: 'Ask me',
+        }
+      )
+    );
+    await act(async () => {});
+    await act(async () => {
+      stub.releaseAt(2);
+    });
+    expect(screen.getByRole('alert').textContent).toBe('Locked.');
+    expect(
+      within(roles('Acct 2')).getByRole('radio', { name: 'Main' }).getAttribute('aria-checked')
+    ).toBe('true');
+    expect(
+      within(roles('Main')).getByRole('radio', { name: 'Rotation' }).getAttribute('aria-checked')
+    ).toBe('true');
+    expect(
+      within(screen.getByRole('radiogroup', { name: 'When an account runs out' }))
+        .getByRole('radio', { name: 'Hand off automatically' })
+        .getAttribute('aria-checked')
+    ).toBe('true');
   });
 });

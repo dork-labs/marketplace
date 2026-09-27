@@ -44,7 +44,6 @@ export const NOTICE: Style = {
   padding: '0.5rem 0.75rem',
   fontSize: TEXT_SM,
   lineHeight: 'calc(1.25 / 0.875)',
-  margin: '0.5rem 0',
 };
 
 /**
@@ -70,14 +69,14 @@ export const HEADING: Style = { margin: '0 0 2px', fontSize: '13px', fontWeight:
 /** A muted line. */
 export const MUTED: Style = { margin: 0, color: hostColor('muted-foreground'), fontSize: '12px' };
 
-/** One row: an account, or a fleet-wide setting. */
+/** One row: an account, or a fleet-wide setting (the mockup's `.ax-rowx`). */
 export const ROW: Style = {
   display: 'flex',
   alignItems: 'center',
   gap: '10px',
-  minHeight: '32px',
-  padding: '6px 0',
-  borderBottom: `1px solid ${hostColor('border', 0.5)}`,
+  padding: '9px 0',
+  // The mockup's row rule (#f4f4f5) is the host's --muted.
+  borderBottom: `1px solid ${hostColor('muted')}`,
 };
 
 /** A row's label, which takes the free width. */
@@ -86,17 +85,20 @@ export const ROW_LABEL: Style = { flex: 1, minWidth: 0, fontWeight: 600 };
 /** An account's color dot. */
 export const DOT: Style = { flex: 'none', width: '10px', height: '10px', borderRadius: '50%' };
 
-/** The inset panel under a Main or Kept out row. */
+/**
+ * The inset panel under a Main or Kept out row (the mockup's `.ax-sub`: #fafafa
+ * on a #f4f4f5 rule, the host's --background and --muted).
+ */
 export const INSET: Style = {
   display: 'flex',
   flexWrap: 'wrap',
   alignItems: 'center',
   gap: '6px',
-  margin: '6px 0 8px 20px',
+  margin: '0 0 8px 20px',
   padding: '8px 10px',
   borderRadius: 'var(--radius, 0.5rem)',
-  border: `1px solid ${hostColor('border', 0.5)}`,
-  background: hostColor('muted'),
+  border: `1px solid ${hostColor('muted')}`,
+  background: hostColor('background'),
   fontSize: '12px',
 };
 
@@ -171,7 +173,18 @@ export const CHIP_REMOVE: Style = {
 };
 
 /** The reserve slider. */
-export const RANGE: Style = { width: '100px', accentColor: hostColor('foreground') };
+export const RANGE_CLASS = 'flow-fleet-range';
+
+/**
+ * The reserve slider's inline style: `--flow-fill` is how far the host-colored
+ * part of the track reaches.
+ *
+ * @param pct - The value, 0-100.
+ * @returns Its style.
+ */
+export function rangeStyle(pct: number): Style {
+  return { ['--flow-fill' as string]: `${pct}%` } as Style;
+}
 
 /** An error line under the control that failed. */
 export const ALERT: Style = {
@@ -187,10 +200,68 @@ export const ALERT: Style = {
 export const FOCUS_CSS = `
 .flow-fleet-tab button:focus-visible,
 .flow-fleet-tab select:focus-visible,
-.flow-fleet-tab input:focus-visible,
+.flow-fleet-tab input:not([type='range']):focus-visible,
 .flow-fleet-tab a:focus-visible {
   outline: 2px solid hsl(var(--ring));
   outline-offset: 1px;
 }
 .flow-fleet-tab [role='radio']:focus-visible { outline-offset: -2px; }
+/* The host Slider (@dork-labs/ui slider.tsx): a 6px --muted track, filled
+   with --primary; a 16px white thumb with a --primary border and shadow-sm,
+   and a 4px --ring/50 ring on hover and focus. */
+.flow-fleet-range {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 100px;
+  height: 16px;
+  margin: 0;
+  background: transparent;
+  vertical-align: middle;
+  touch-action: none;
+}
+.flow-fleet-range:focus-visible { outline: none; }
+.flow-fleet-range::-webkit-slider-runnable-track {
+  height: 6px;
+  border-radius: 9999px;
+  background: linear-gradient(to right, hsl(var(--primary)) var(--flow-fill), hsl(var(--muted)) var(--flow-fill));
+}
+.flow-fleet-range::-moz-range-track {
+  height: 6px;
+  border-radius: 9999px;
+  background: hsl(var(--muted));
+}
+.flow-fleet-range::-moz-range-progress {
+  height: 6px;
+  border-radius: 9999px 0 0 9999px;
+  background: hsl(var(--primary));
+}
+.flow-fleet-range::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  box-sizing: border-box;
+  width: 16px;
+  height: 16px;
+  margin-top: -5px;
+  border: 1px solid hsl(var(--primary));
+  border-radius: 9999px;
+  background: #fff;
+  box-shadow: 0 1px 3px 0 rgb(0 0 0 / 0.1), 0 1px 2px -1px rgb(0 0 0 / 0.1);
+  transition: box-shadow 150ms;
+}
+.flow-fleet-range::-moz-range-thumb {
+  box-sizing: border-box;
+  width: 16px;
+  height: 16px;
+  border: 1px solid hsl(var(--primary));
+  border-radius: 9999px;
+  background: #fff;
+  box-shadow: 0 1px 3px 0 rgb(0 0 0 / 0.1), 0 1px 2px -1px rgb(0 0 0 / 0.1);
+  transition: box-shadow 150ms;
+}
+.flow-fleet-range:hover::-webkit-slider-thumb,
+.flow-fleet-range:focus-visible::-webkit-slider-thumb { box-shadow: 0 0 0 4px hsl(var(--ring) / 0.5); }
+.flow-fleet-range:hover::-moz-range-thumb,
+.flow-fleet-range:focus-visible::-moz-range-thumb { box-shadow: 0 0 0 4px hsl(var(--ring) / 0.5); }
+@media (prefers-reduced-motion: reduce) {
+  .flow-fleet-range::-webkit-slider-thumb, .flow-fleet-range::-moz-range-thumb { transition: none; }
+}
 `;

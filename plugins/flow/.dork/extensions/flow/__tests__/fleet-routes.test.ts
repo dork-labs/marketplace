@@ -158,6 +158,8 @@ describe('PUT /fleet/accounts/:key', () => {
     });
     expect(sent.status).toBe(400);
     expect((sent.body as { error: string }).error).toContain('"not a repo"');
+    // The Flow tab shows a refusal's words only when flow marks it as its own.
+    expect((sent.body as { refusedBy: string }).refusedBy).toBe('flow');
     expect(writer).not.toHaveBeenCalled();
   });
 

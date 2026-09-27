@@ -28,15 +28,19 @@ export interface AccountPatch {
 export class FleetRequestError extends Error {
   /** The HTTP status, or 0 when the server could not be reached. */
   readonly status: number;
+  /** True when flow itself refused, in words meant for the person. */
+  readonly refusedByFlow: boolean;
 
   /**
    * @param status - The HTTP status, or 0.
    * @param message - The message to show.
+   * @param refusedByFlow - Whether flow itself refused.
    */
-  constructor(status: number, message: string) {
+  constructor(status: number, message: string, refusedByFlow = false) {
     super(message);
     this.name = 'FleetRequestError';
     this.status = status;
+    this.refusedByFlow = refusedByFlow;
   }
 }
 
@@ -79,11 +83,21 @@ async function call(method: 'GET' | 'PUT', path: string, body?: unknown): Promis
   }
   const json: unknown = await response.json().catch(() => null);
   if (response.ok) return json as FleetView;
-  const answer = (json ?? {}) as { error?: unknown; reason?: unknown };
+  const answer = (json ?? {}) as { error?: unknown; reason?: unknown; refusedBy?: unknown };
   if (response.status === 501 && answer.reason === 'host-too-old') throw new HostTooOldError();
-  const message =
-    typeof answer.error === 'string' && answer.error !== '' ? answer.error : UNREACHABLE_MESSAGE;
-  throw new FleetRequestError(response.status, message);
+  // Only flow's own refusal (a 4xx its routes send on purpose, in plain words)
+  // is shown; the host's errors and any 5xx read as "could not be reached".
+  const refusal =
+    response.status >= 400 &&
+    response.status < 500 &&
+    answer.refusedBy === 'flow' &&
+    typeof answer.error === 'string' &&
+    answer.error !== '';
+  throw new FleetRequestError(
+    response.status,
+    refusal ? (answer.error as string) : UNREACHABLE_MESSAGE,
+    refusal
+  );
 }
 
 /**
