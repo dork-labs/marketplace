@@ -129,7 +129,8 @@ function copyTree(
     try {
       copyFileSync(from, to);
     } catch (error) {
-      if (!isMissing(error)) throw error;
+      // Skip only a source that is gone; a missing destination is a real fault.
+      if (!isMissing(error) || existsSync(from)) throw error;
     }
     return;
   }

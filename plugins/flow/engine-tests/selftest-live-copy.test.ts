@@ -6,7 +6,9 @@
  * the file vanished between being listed and being copied.
  *
  * `node:fs` is wrapped so a file or folder can be deleted at the exact moment
- * the copy reaches it: the real call then meets a real ENOENT.
+ * the copy reaches it: the real call then meets a real ENOENT, which the copy
+ * must skip. These pin the walker's behaviour; they do not replay the queue
+ * run (the old `cpSync` copy never called the wrapped functions).
  */
 
 import * as fs from 'node:fs';
@@ -21,12 +23,17 @@ const race = vi.hoisted(() => ({
   file: null as string | null,
   /** Deleted just before the copy lists it. */
   dir: null as string | null,
+  /** The destination folder of this file is deleted just before it is copied. */
+  dropDestinationOf: null as string | null,
 }));
 
 vi.mock('node:fs', async (importOriginal) => {
   const real = await importOriginal<typeof import('node:fs')>();
   const copyFileSync: typeof real.copyFileSync = (from, to, mode) => {
     if (race.file !== null && String(from) === race.file) real.rmSync(race.file);
+    if (race.dropDestinationOf !== null && String(from) === race.dropDestinationOf) {
+      real.rmSync(path.dirname(String(to)), { recursive: true });
+    }
     return real.copyFileSync(from, to, mode);
   };
   const readdirSync = ((dir: fs.PathLike, ...rest: unknown[]) => {
@@ -62,6 +69,7 @@ beforeEach(() => {
   put('node_modules/vitest/index.js');
   race.file = null;
   race.dir = null;
+  race.dropDestinationOf = null;
 });
 
 afterEach(() => {
@@ -109,6 +117,11 @@ describe('copyPlugin', () => {
     for (const name of ['.gitignore', '.claude-plugin/plugin.json', 'templates/a.tmpl', '.tmpl']) {
       expect(fs.existsSync(path.join(into, name)), name).toBe(true);
     }
+  });
+
+  it('fails when the destination folder disappears, rather than leaving a partial copy', () => {
+    race.dropDestinationOf = path.join(source, 'scripts/flow.ts');
+    expect(() => copyPlugin(source, into)).toThrow(/ENOENT/);
   });
 
   it('copies a link as what it points to, and skips a link that leads nowhere', () => {
