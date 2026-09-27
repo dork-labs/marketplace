@@ -262,6 +262,7 @@ export const FOCUS_CSS = `
 .flow-fleet-range:hover::-moz-range-thumb,
 .flow-fleet-range:focus-visible::-moz-range-thumb { box-shadow: 0 0 0 4px hsl(var(--ring) / 0.5); }
 @media (prefers-reduced-motion: reduce) {
-  .flow-fleet-range::-webkit-slider-thumb, .flow-fleet-range::-moz-range-thumb { transition: none; }
+  .flow-fleet-range::-webkit-slider-thumb { transition: none; }
+  .flow-fleet-range::-moz-range-thumb { transition: none; }
 }
 `;
