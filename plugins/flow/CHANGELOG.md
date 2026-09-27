@@ -4,7 +4,7 @@ Installs of this plugin are pinned to a commit SHA, so a fix here does not reach
 you until you **reinstall it** (Marketplace → flow → reinstall, or re-run your
 `--plugin-dir` checkout's `git pull`). Each entry below says whether that matters.
 
-## 0.44.0
+## 0.45.0
 
 **The `/flow` commands are much shorter, so an agent reads less before it starts work. Nothing they do has changed. Reinstall if you want the shorter versions; your runs work the same either way.**
 
