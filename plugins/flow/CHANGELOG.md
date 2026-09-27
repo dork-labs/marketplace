@@ -4,6 +4,12 @@ Installs of this plugin are pinned to a commit SHA, so a fix here does not reach
 you until you **reinstall it** (Marketplace → flow → reinstall, or re-run your
 `--plugin-dir` checkout's `git pull`). Each entry below says whether that matters.
 
+## 0.37.1
+
+**The self-test's live tier can no longer change your flow checkout. Reinstall only if you run the live tier.**
+
+- Each live case now gives its agent a temporary copy of the plugin instead of your checkout. Anything the agent writes into the plugin, by whatever route, lands in the copy, which is deleted when the case ends. The check that fails a case for writing outside its folder still runs, as a second layer.
+
 ## 0.37.0
 
 **`flow accounts setup` sets up every account on your computer in one go, so flow can share work between them. Reinstall to get it.**
