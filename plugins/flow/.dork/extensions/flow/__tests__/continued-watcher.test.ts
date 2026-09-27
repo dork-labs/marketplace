@@ -4,7 +4,8 @@
  * even across a re-created extension), and never for an unclaimed session.
  */
 
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { REPORT_ATTEMPTS } from '../lib/continued-watcher.ts';
 import { createFlowExtension } from '../server.ts';
 import { fakeCtx, fakeRouter, makeWorld, runRecord, writeRuns, type World } from './fixtures.ts';
 
@@ -27,11 +28,12 @@ afterEach(() => {
 /** Build the extension over a shared storage. */
 function setup(storage: { data: unknown }) {
   const host = fakeCtx(world, { storage });
+  const log = vi.fn();
   const ext = createFlowExtension(fakeRouter(), host.ctx, {
     originOf: () => null,
-    log: () => {},
+    log,
   });
-  return { host, ext, advisor: ext.advisor!, watcher: ext.watcher! };
+  return { host, ext, log, advisor: ext.advisor!, watcher: ext.watcher! };
 }
 
 /** Flow's supervisor moves both runs to new sessions. */
@@ -100,6 +102,23 @@ describe('the watcher', () => {
     await watcher.check();
     await watcher.check();
     expect(host.accounts.markContinued).toHaveBeenCalledTimes(2);
+  });
+
+  it('gives up on a pair DorkOS keeps refusing, after 5 tries, and logs once', async () => {
+    const storage: { data: unknown } = { data: null };
+    const { advisor, watcher, host, log } = setup(storage);
+    await advisor.claims!(session);
+    host.accounts.markContinued.mockRejectedValue(
+      new Error('not a session this extension may move')
+    );
+    flowMovesRuns('');
+    for (let pass = 0; pass < 8; pass++) await watcher.check();
+    expect(host.accounts.markContinued).toHaveBeenCalledTimes(REPORT_ATTEMPTS);
+    expect(log).toHaveBeenCalledTimes(1);
+    expect(log.mock.calls[0][0]).toContain('gave up');
+    const data = storage.data as { claimed: Record<string, unknown>; reported: string[] };
+    expect(data.claimed).toEqual({});
+    expect(data.reported).toEqual(['s-old→s-new']);
   });
 
   it('never reports a session the advisor did not claim', async () => {

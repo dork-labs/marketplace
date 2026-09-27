@@ -13,8 +13,9 @@
  *   run. Only a run `flow drain` carries is flow's: an interactive `flow claim`
  *   session has no supervisor, so DorkOS handles it like any other session.
  *   `move` refuses what `flow handoff` would refuse, ranking with the project's
- *   drain settings, and never starts after its 1.5 s deadline. `move` accepts at once and runs `flow handoff` in the background; the
- *   result reaches DorkOS through `accounts.markContinued`.
+ *   drain settings, and never starts after its 1.5 s deadline. `move` accepts
+ *   at once and runs `flow handoff` in the background; the result reaches
+ *   DorkOS through `accounts.markContinued`.
  * - `carryOver` seeds the new session from the run's `HANDOFF.md`.
  *
  * `modelFallback` is not implemented: DorkOS's default applies.

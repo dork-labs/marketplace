@@ -19,6 +19,13 @@ import { readRuns, storeMtime, type FoundRun } from './run-store.ts';
 /** How many reported pairs are remembered. */
 const REPORTED_LIMIT = 500;
 
+/**
+ * How many times one pair is offered to DorkOS before the watcher gives up.
+ * DorkOS refuses for good once the source is no longer one this extension may
+ * move (its limit cleared, or it was never claimed there).
+ */
+export const REPORT_ATTEMPTS = 5;
+
 /** What the watcher keeps in the extension's storage. */
 interface WatcherData {
   /** Claimed source sessions, with the store and run they are on. */
@@ -72,6 +79,7 @@ export class ContinuedWatcher {
   private readonly mtimes = new Map<string, number | null>();
   private checking: Promise<void> | null = null;
   private readonly reporting = new Set<string>();
+  private readonly attempts = new Map<string, number>();
 
   /**
    * @param deps - Storage, the accounts API, the moves in flight and a logger.
@@ -116,8 +124,9 @@ export class ContinuedWatcher {
   /**
    * Tell DorkOS a source session moved on, once per (old, new) pair. The pair
    * is recorded only after `markContinued` succeeds, so a failure is tried
-   * again on a later pass; a pair already reported, or being reported now,
-   * is skipped.
+   * again on a later pass, up to {@link REPORT_ATTEMPTS} times in all; then the
+   * pair is recorded as given up, its claim dropped, and one line logged. A
+   * pair already reported (or given up), or being reported now, is skipped.
    *
    * @param from - The source session.
    * @param to - Where it went.
@@ -134,21 +143,35 @@ export class ContinuedWatcher {
     try {
       await this.deps.accounts.markContinued(from, to);
     } catch (error) {
-      this.deps.log(`[flow] DorkOS did not take the move of ${from}: ${String(error)}`);
+      const tries = (this.attempts.get(pair) ?? 0) + 1;
+      this.attempts.set(pair, tries);
       const claim = data.claimed[from];
-      // Read that store again next pass, so the report is retried.
-      if (claim !== undefined) this.mtimes.delete(claim.mainCheckout);
+      if (tries < REPORT_ATTEMPTS) {
+        // Read that store again next pass, so the report is retried.
+        if (claim !== undefined) this.mtimes.delete(claim.mainCheckout);
+        return false;
+      }
+      this.deps.log(
+        `[flow] gave up telling DorkOS that ${from} moved to ${to.sessionId} after ${tries} tries: ${String(error)}`
+      );
+      await this.record(data, from, pair);
       return false;
     } finally {
       this.reporting.delete(pair);
     }
+    await this.record(data, from, pair);
+    return true;
+  }
+
+  /** Record a pair as settled (reported or given up) and drop its source's claim. */
+  private async record(data: WatcherData, from: string, pair: string): Promise<void> {
+    this.attempts.delete(pair);
     data.reported.push(pair);
     if (data.reported.length > REPORTED_LIMIT) {
       data.reported.splice(0, data.reported.length - REPORTED_LIMIT);
     }
     delete data.claimed[from];
     await this.save(data);
-    return true;
   }
 
   /** Check every watched store once. Overlapping calls share one pass. */
