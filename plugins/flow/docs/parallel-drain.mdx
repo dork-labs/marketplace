@@ -9,11 +9,11 @@ description: flow drain carries several ready items at once, each on its own acc
 
 ## Before you start
 
-Allow each account flow may spend with `flow accounts set <id> --role rotation`; with none, sessions use your own login. Each user judges their own use of more than one account against Anthropic's terms.
+Allow each account flow may spend with `flow accounts set <id> --role rotation`. Each user judges their own use of more than one account against Anthropic's terms.
 
 ## Where sessions run
 
-`--host` picks `cli`, `cmux` or `dorkos`; `auto` tries them in the order cmux, DorkOS, CLI.
+`--host` picks `cli`, `cmux` or `dorkos`; `auto` tries cmux, DorkOS, then CLI.
 
 ## What each line means
 
@@ -22,11 +22,11 @@ Allow each account flow may spend with `flow accounts set <id> --role rotation`;
 - `sent review-findings`: the worker got the findings.
 - `sent open-pr`: the review came back clean.
 - `moved to <account>`: an account ran out, so the work moved.
-- `parked: <reason>`: a person is needed; the item says why.
+- `parked: <reason>`: a person is needed.
 
 ## What happens at a limit
 
-Near a limit, the worker finishes its step, writes `HANDOFF.md` and stops. If the account resets within `drain.waitIfResetWithinMinutes`, the run waits. If only one model ran out, it goes on with the next in `drain.modelFallback`. Otherwise a session on another account continues from `HANDOFF.md`.
+Near a limit, the worker finishes its step, checkpoints and stops. If the account resets within `drain.waitIfResetWithinMinutes`, the run waits. If only one model ran out, it goes on with the next in `drain.modelFallback`. Otherwise a session on another account continues from `HANDOFF.md`.
 
 ## Ask or auto
 
@@ -34,13 +34,16 @@ Near a limit, the worker finishes its step, writes `HANDOFF.md` and stops. If th
 
 ## Caps
 
-New sessions wait while load per CPU reaches `drain.maxLoadPerCpu` or an account has `drain.maxLivePerAccount` sessions. `drain.maxReviewRounds` rounds of changes park the run.
+New sessions wait while load per CPU reaches `drain.maxLoadPerCpu` or an account has `drain.maxLivePerAccount` sessions. After `drain.maxReviewRounds` rounds the run parks.
 
 ## Terminal or schedule
 
-In a terminal, `flow drain` passes every `drain.pollSeconds` until nothing is left or Ctrl-C. On a schedule, the `flow-drain` tick runs `flow drain --tick`.
+In a terminal, `flow drain` repeats every `drain.pollSeconds` until done or Ctrl-C. A schedule runs `flow drain --tick`.
+
+## Permissions
+
+Workers start in `drain.permissionMode`, default `acceptEdits`, which runs only what your repo's settings allow. `bypassPermissions` is your call per project; your guard hooks still run.
 
 ## Parts
 
-- `templates/drain/worker-brief.md` and `templates/drain/reviewer-brief.md`: what each session reads first.
-- `flow watch`: wait on any PR by hand.
+Sessions read `templates/drain/worker-brief.md` and `templates/drain/reviewer-brief.md`. `flow watch` waits on a PR by hand.

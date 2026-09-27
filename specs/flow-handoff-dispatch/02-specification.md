@@ -262,13 +262,14 @@ The sequence is cmux-control's, proven by hand (`CLAUDE.md` lines 49–93).
   3. Resolve the surface: the row of `cmux top --all --processes --format tsv` whose process is `pid` → `surface`.
   4. `cmux send --surface <surface> "Read <promptFile> and do exactly what it says.\n"`. Never `--workspace`: it hits whichever surface is selected.
   5. Confirmed when `sessions/<pid>.json` shows `status: "busy"` or `proveAccount` passes, within the timeout. Idle with no transcript means the pointer never arrived: `not-started`.
+  - While waiting for the session file, the launcher reads the new workspace's own surface (`cmux read-screen --surface`). If Claude Code's workspace-trust dialog is showing ("Yes, I trust this folder"), it answers it with `send-key down`, `enter`: the folder is one flow provisioned itself. An interactive session in a folder it has not seen writes no session file until the dialog is answered (live proof).
 - **send:** check the surface still hosts our pid and `sessions/<pid>.json` still names our `sessionId` (surface numbers are not stable across a cmux restart; re-resolve from the pid). Then `cmux send --surface … "<pointer>\n"`; Claude Code queues input typed while busy → `delivered`. Process gone → a new workspace with `claude --resume <sessionId> --permission-mode <mode>` (permission mode is not restored on resume, so it is always passed), then the pointer; the handle gets the new pid, surface and workspace.
 - **state:** pid alive → `sessions/<pid>.json` `status` (`busy` or `idle`); `transcriptLimit` → `limited`; pid gone → `exited` (`code: null`).
 - **stop:** SIGTERM the pid (after the `ps` check), then `cmux workspace rename <workspace> --title "<title> (stopped)"`. The workspace stays, so the operator can read it.
 
 #### 2.5 DorkOS launcher (`scripts/launchers/dorkos.ts`)
 
-- **Base URL:** `DORKOS_URL`, else `http://127.0.0.1:<DORKOS_PORT or 4242>`.
+- **Base URL:** `DORKOS_URL`, else `http://localhost:<DORKOS_PORT or 4242>`. DorkOS binds `localhost`, which is `::1` on many machines, so `127.0.0.1` misses it (live proof). A 403 whose body names its own reason (for example `OUTSIDE_BOUNDARY`, a session folder outside the directories DorkOS serves) is `refused` with that reason, not `auth`.
 - **Token** (only for `/mcp`): `DORKOS_MCP_TOKEN`, else the file `<dorkHome>/mcp-local-token`. Never logged or printed.
 - **probe:** `GET /api/health` answers 2xx within 3 s. Else "DorkOS is not answering at <url>".
 - **start**, preferring the MCP tool:
@@ -349,7 +350,7 @@ Windows checked, each with a ceiling:
 | each of `modelBucketsFor(model)` | 100 |
 
 - `exhausted` when any checked window's `status` is `rejected` or `usedPct ≥ ceiling`. `cause` is `reserve` when only the reserve made it exhausted (weekly `usedPct` under 100), else `limit`.
-- `warning` when not exhausted and any window's `status` is `allowed_warning` or `usedPct ≥ ceiling − warnMarginPct` (`drain.warnMarginPct`, default 10).
+- `warning` when not exhausted and any window's `usedPct ≥ ceiling − warnMarginPct` (`drain.warnMarginPct`, default 10); `status: allowed_warning` counts only for a window with no measured `usedPct`. (Live proof, 2026-09-27: the SDK sends `allowed_warning` on the weekly window from about 50% used, so trusting it would wind every account down at half its allowance.)
 - `ok` when every checked window has a reading and none trips; `unknown` when none trips and some window has no reading.
 - `window` and `resetsAt` name the worst window (exhausted before warning; then the soonest `resetsAt`).
 - `modelBucketsFor(model)`: `model:<slug>` where slug is the model lowercased with every run of characters outside `[a-z0-9._-]` turned into `-`; plus `seven_day_opus` when the model contains `opus`, `seven_day_sonnet` when it contains `sonnet`. No model → none. A bucket the ledger does not have reads as no reading, which never blocks.
@@ -516,7 +517,8 @@ interface DrainState {
 | `pr-ready`, `watching` | report `pushed` S ≠ `reviewedSha` | `reviewing` | (`flow report` disarmed an armed PR) start reviewer at S, `deltaFrom` the last reviewed SHA |
 | `working`, `reviewing`, `fixing` | the forge shows a PR for the branch while `drain.pr` is null | `parked` | disarm it; park: "a PR was opened before a clean review" |
 | (queued) | `status: "queued"` with no worker handle, or a pending one, older than the start timeout (a crash between claim and start) | `working` or (released) | adopt the minted session if it exists (§4.3), else release the claim to ready with its resume stage |
-| any | tracker item closed or cancelled by someone else, or it lost `agent/claimed` | `parked` | stop sessions; no tracker write |
+| any | tracker item closed or cancelled by someone else, or it lost `agent/claimed`, **unless the run's own PR merged** (the tracker closes the item on the PR's `Closes` line, often before the next pass; live proof) | `parked` | stop sessions; no tracker write |
+| `watching`, or `parked` as taken away | the run's own PR merged | `closing` | send `merged` |
 | any | report `blocked` | `parked` | (the report already posted the question) |
 
 - **Park** = `drain.phase = 'parked'`, `parkedReason` set, and, unless the item was taken away, the S1 `needs-input` projection plus one signed comment with the reason, through the adapter. A parked run leaves the active set; S1's inbox path resumes it when the person answers, and the next `flow drain` pass adopts it back into `working` with a `continue` message.

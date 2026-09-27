@@ -4,6 +4,17 @@ Installs of this plugin are pinned to a commit SHA, so a fix here does not reach
 you until you **reinstall it** (Marketplace → flow → reinstall, or re-run your
 `--plugin-dir` checkout's `git pull`). Each entry below says whether that matters.
 
+## 0.38.0
+
+**Fixes found by running `flow drain` for real across several Claude Code accounts. Reinstall to get them.**
+
+- `flow drain` no longer stops work on an account at half its weekly allowance. Claude Code sends an early "warning" once an account passes about half its week. flow now goes by the measured share and treats that signal as a warning only when no share is known.
+- When the merge queue lands a drain's PR and the tracker closes the item on its own, the run now goes on to finish (DONE). Before, it stopped, as if someone else had closed the item.
+- Starting a session in cmux now answers Claude Code's "do you trust this folder" question for the worktree flow created. Before, the session waited on that question and the start timed out.
+- `flow drain` and `flow fleet` now find the DorkOS app on `localhost`, where it listens, instead of `127.0.0.1`, which misses it on many Macs.
+- When DorkOS refuses to start a session for its own reason, such as a folder outside the ones it serves, flow says so. Before, it told you to sign in.
+- New: a live check of the three places a session can start (terminal, cmux, DorkOS) on a named account. It runs only when you set `FLOW_LAUNCHER_LIVE=1`, and only on a main or rotation account.
+
 ## 0.37.1
 
 **Two small fixes. Reinstall to get them; nothing breaks if you wait.**
