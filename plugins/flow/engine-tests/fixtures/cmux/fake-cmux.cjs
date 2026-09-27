@@ -186,6 +186,39 @@ function send() {
   );
 }
 
+function readScreen() {
+  const surface = flag('--surface');
+  const entry = surface === undefined ? undefined : state.surfaces[surface];
+  if (entry === undefined) fail(`surface ${surface} not found`);
+  const trusted = fs.existsSync(path.join(dir, `trusted-${entry.claudePid}`));
+  process.stdout.write(
+    control.trustPrompt && !trusted
+      ? ' Quick safety check: Is this a project you created or one you trust?\n ❯ No, exit\n   Yes, I trust this folder\n'
+      : ' ❯ \n'
+  );
+}
+
+function sendKey() {
+  const surface = flag('--surface');
+  const entry = surface === undefined ? undefined : state.surfaces[surface];
+  if (entry === undefined) fail(`surface ${surface} not found`);
+  const key = argv[argv.length - 1];
+  const keys = path.join(dir, `keys-${entry.claudePid}`);
+  fs.appendFileSync(keys, `${key}\n`);
+  const typed = fs.readFileSync(keys, 'utf8').trim().split('\n');
+  // "down" then "enter" picks "Yes, I trust this folder".
+  if (key === 'enter' && typed.at(-2) === 'down') {
+    fs.writeFileSync(path.join(dir, `trusted-${entry.claudePid}`), '');
+    // Like the real dialog, answering it returns once the session has started:
+    // wait (real time) for the fake claude to write its session file.
+    const reg = readLines(path.join(dir, 'claudes.jsonl')).find((r) => r.pid === entry.claudePid);
+    const configDir = reg.env.CLAUDE_CONFIG_DIR ?? path.join(reg.env.HOME, '.claude');
+    const sessionFile = path.join(configDir, 'sessions', `${entry.claudePid}.json`);
+    const deadline = Date.now() + 5000;
+    while (!fs.existsSync(sessionFile) && Date.now() < deadline) pause(20);
+  }
+}
+
 function rename() {
   const workspace = argv[2];
   if (state.workspaces[workspace] === undefined) fail(`workspace ${workspace} not found`);
@@ -198,4 +231,6 @@ else if (argv[0] === 'workspace' && argv[1] === 'create') createWorkspace();
 else if (argv[0] === 'workspace' && argv[1] === 'rename') rename();
 else if (argv[0] === 'top') top();
 else if (argv[0] === 'send') send();
+else if (argv[0] === 'read-screen') readScreen();
+else if (argv[0] === 'send-key') sendKey();
 else fail(`the fake cmux does not play "${argv.join(' ')}"`);

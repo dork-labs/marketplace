@@ -590,7 +590,7 @@ describe('flow fleet', () => {
       'limited',
     ]);
     expect(payload.dorkos).toEqual({
-      url: 'http://127.0.0.1:4242',
+      url: 'http://localhost:4242',
       reachable: true,
       sessionsShown: 1,
     });
@@ -604,7 +604,7 @@ describe('flow fleet', () => {
     expect(await exec()).toBe(0);
     expect(snapshot(root)).toEqual(before);
     expect(fetch.requests).toEqual([
-      { url: 'http://127.0.0.1:4242/api/sessions?limit=500', method: 'GET' },
+      { url: 'http://localhost:4242/api/sessions?limit=500', method: 'GET' },
     ]);
     // Every process it started was a read: one ps, and git rev-parse per distinct folder.
     const kinds = runner.calls.map((c) => (c[0] === 'env' ? 'ps' : `git ${c[3]}`));
@@ -617,7 +617,7 @@ describe('flow fleet', () => {
     const { exec, stdout, stderr } = run([], 'refused');
     expect(await exec()).toBe(0);
     expect(stdout.text.trimEnd().split('\n').at(-1)).toBe(
-      'DorkOS: not running at http://127.0.0.1:4242'
+      'DorkOS: not running at http://localhost:4242'
     );
     expect(stderr.text).not.toContain('DorkOS');
     // The run DorkOS hosted still shows, from its run record.
@@ -631,7 +631,7 @@ describe('flow fleet', () => {
     expect(stderr.text).toMatch(/warning: DorkOS answered 401/);
     const payload = JSON.parse(stdout.text);
     expect(payload.dorkos).toEqual({
-      url: 'http://127.0.0.1:4242',
+      url: 'http://localhost:4242',
       reachable: true,
       sessionsShown: 0,
     });
@@ -650,7 +650,7 @@ describe('flow fleet', () => {
     const { exec, stdout, stderr } = run([], { status: 200, body });
     expect(await exec()).toBe(0);
     expect(stdout.text.trimEnd().split('\n').at(-1)).toBe(
-      'DorkOS: running at http://127.0.0.1:4242, no live sessions'
+      'DorkOS: running at http://localhost:4242, no live sessions'
     );
     expect(stderr.text).not.toContain('DorkOS');
   });

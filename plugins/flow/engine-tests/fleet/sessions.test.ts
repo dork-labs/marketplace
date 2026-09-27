@@ -219,8 +219,8 @@ describe('the DorkOS source', () => {
     expect(resolveDorkosUrl(undefined, { FLOW_DORKOS_URL: 'http://localhost:2' })).toBe(
       'http://localhost:2'
     );
-    expect(resolveDorkosUrl(undefined, { DORKOS_PORT: '6242' })).toBe('http://127.0.0.1:6242');
-    expect(resolveDorkosUrl(undefined, {})).toBe('http://127.0.0.1:4242');
+    expect(resolveDorkosUrl(undefined, { DORKOS_PORT: '6242' })).toBe('http://localhost:6242');
+    expect(resolveDorkosUrl(undefined, {})).toBe('http://localhost:4242');
   });
 });
 

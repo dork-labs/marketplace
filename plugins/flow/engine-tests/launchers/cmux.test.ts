@@ -462,6 +462,30 @@ describe('cmux launcher details', () => {
     });
   });
 
+  // Found live (2026-09-27): an interactive claude in a folder it has not seen
+  // shows the workspace-trust dialog and writes no session file until it is
+  // answered, so start timed out. The launcher answers it on the new
+  // workspace's own surface ("down", "enter" = "Yes, I trust this folder").
+  // Fails if the dialog is left alone (not-started) or keys go elsewhere.
+  it('answers the workspace-trust dialog on its own surface, then starts', async () => {
+    await withCmux({}, async (h) => {
+      h.control({ trustPrompt: true });
+      const handle = await h.launcher.start(requestFor(h));
+      expect(handle.surface).toBe('surface:1');
+      expect(argvOf(h, 'send-key')).toEqual([
+        ['send-key', '--surface', 'surface:1', 'down'],
+        ['send-key', '--surface', 'surface:1', 'enter'],
+      ]);
+      expect(argvOf(h, 'read-screen')[0]).toEqual([
+        'read-screen',
+        '--surface',
+        'surface:1',
+        '--lines',
+        '30',
+      ]);
+    });
+  });
+
   // Messages go to the surface, never the workspace (which hits whatever
   // surface is selected), and end with cmux's literal \n so they submit.
   it('sends with --surface and a trailing \\n, never --workspace', async () => {

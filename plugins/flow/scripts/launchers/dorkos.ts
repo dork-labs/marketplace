@@ -123,7 +123,7 @@ export function realDorkosLauncherDeps(): DorkosLauncherDeps {
 }
 
 /**
- * DorkOS's base URL: `DORKOS_URL`, else `http://127.0.0.1:<DORKOS_PORT or 4242>`.
+ * DorkOS's base URL: `DORKOS_URL`, else `http://localhost:<DORKOS_PORT or 4242>` (DorkOS binds `localhost`, which is `::1` on many machines, so `127.0.0.1` would miss it).
  *
  * @param env - The supervisor's environment.
  * @returns The base URL, without a trailing slash.
@@ -132,7 +132,7 @@ export function dorkosBaseUrl(env: Readonly<Record<string, string | undefined>>)
   const explicit = env.DORKOS_URL?.trim();
   if (explicit) return explicit.replace(/\/+$/, '');
   const port = env.DORKOS_PORT?.trim() || '4242';
-  return `http://127.0.0.1:${port}`;
+  return `http://localhost:${port}`;
 }
 
 /**
@@ -343,6 +343,19 @@ export function createDorkosLauncher(deps: DorkosLauncherDeps): Launcher {
 
   /** Throw the error the spec gives a failed HTTP API reply. */
   function apiFailure(reply: Reply, what: string): never {
+    // A 403 that names its own reason is a policy refusal, not sign-in: DorkOS
+    // answers `OUTSIDE_BOUNDARY` for a session whose folder is outside the
+    // directories it serves (found in the live proof, 2026-09-27). Say that.
+    const code =
+      typeof reply.body === 'object' && reply.body !== null
+        ? (reply.body as { code?: unknown }).code
+        : undefined;
+    if (reply.status === 403 && typeof code === 'string' && !/AUTH|LOGIN|TOKEN/i.test(code)) {
+      throw new LaunchError(
+        'refused',
+        `DorkOS refused ${what} (${code}): ${serverMessage(reply.body)}`
+      );
+    }
     if (reply.status === 401 || reply.status === 403) {
       throw new LaunchError('auth', DORKOS_AUTH_MESSAGE);
     }

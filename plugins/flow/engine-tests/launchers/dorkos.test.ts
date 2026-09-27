@@ -73,6 +73,8 @@ interface FakeOptions extends Omit<HarnessOptions, 'runtime'> {
   reportsStatus?: boolean;
   /** Answer every `/api/*` call but health with this status. */
   apiStatus?: number;
+  /** The `code` and `error` that `apiStatus` answers with (default BROKE / Something broke). */
+  apiError?: { code: string; error: string };
   /** A body `/api/*` answers with, echoing the request's Authorization header. */
   echoAuth?: boolean;
   /** Refuse `PATCH /api/sessions/:id` model changes with 400. */
@@ -282,7 +284,10 @@ async function makeDorkosHarness(options: FakeOptions = {}): Promise<DorkosHarne
 
     if (options.apiStatus !== undefined && url.startsWith('/api/')) {
       const echo = options.echoAuth ? ` (you sent ${req.headers.authorization ?? 'nothing'})` : '';
-      return json(options.apiStatus, { error: `Something broke${echo}`, code: 'BROKE' });
+      return json(
+        options.apiStatus,
+        options.apiError ?? { error: `Something broke${echo}`, code: 'BROKE' }
+      );
     }
 
     const messages = /^\/api\/sessions\/([^/?]+)\/messages$/.exec(url);
@@ -756,6 +761,28 @@ describe('dorkos launcher: errors and the token', () => {
       expect(err.code).toBe('auth');
       expect(err.message).toBe(DORKOS_AUTH_MESSAGE);
     });
+  });
+
+  // Found live (2026-09-27): DorkOS answers 403 OUTSIDE_BOUNDARY for a session
+  // whose folder is outside the directories it serves. That is a refusal with
+  // its own reason, not sign-in; telling the person to set a token misleads.
+  // Fails if every 403 is read as auth.
+  it('a 403 naming its own reason is refused with that reason, not auth', async () => {
+    await withFake(
+      {
+        apiStatus: 403,
+        apiError: {
+          error: 'Access denied: path outside directory boundary',
+          code: 'OUTSIDE_BOUNDARY',
+        },
+      },
+      async (h) => {
+        const err = await launchFailure(h.launcher.start(requestFor(h)));
+        expect(err.code).toBe('refused');
+        expect(err.message).toContain('OUTSIDE_BOUNDARY');
+        expect(err.message).toContain('outside directory boundary');
+      }
+    );
   });
 
   // Any other failure is unavailable with the status and the server's words.
