@@ -36,11 +36,6 @@
       "reason": "Present before the self-test existed; the prose trim (DOR-2377) removes it."
     },
     {
-      "text": "title driving it manually href docs guides flow driving it manually",
-      "paths": ["docs/installing-in-your-project.mdx", "docs/the-dials.mdx"],
-      "reason": "Present before the self-test existed; the prose trim (DOR-2377) removes it."
-    },
-    {
       "text": "this is the one artifact a machine parses so it has to be valid json json escape every value quotes backslashes newlines control characters and drop any field whose value you cannot escape safely",
       "paths": ["docs/provenance.md", "skills/verifying-work/SKILL.md"],
       "reason": "Present before the self-test existed; the prose trim (DOR-2377) removes it."
@@ -86,15 +81,6 @@
       "reason": "Present before the self-test existed; the prose trim (DOR-2377) removes it."
     },
     {
-      "text": "this is a prose contract not code the agent reads this skill and follows",
-      "paths": [
-        "skills/capturing-work/SKILL.md",
-        "skills/grooming-backlog/SKILL.md",
-        "skills/triaging-work/SKILL.md"
-      ],
-      "reason": "Present before the self-test existed; the prose trim (DOR-2377) removes it."
-    },
-    {
       "text": "the one rule never touch the tracker directly",
       "paths": [
         "skills/capturing-work/SKILL.md",
@@ -110,11 +96,6 @@
         "skills/grooming-backlog/SKILL.md",
         "skills/triaging-work/SKILL.md"
       ],
-      "reason": "Present before the self-test existed; the prose trim (DOR-2377) removes it."
-    },
-    {
-      "text": "every tracker read or write goes through the adapter skill the v1 spec 3 by naming one of its capability verbs e g",
-      "paths": ["skills/capturing-work/SKILL.md", "skills/triaging-work/SKILL.md"],
       "reason": "Present before the self-test existed; the prose trim (DOR-2377) removes it."
     },
     {
@@ -165,11 +146,6 @@
       "reason": "Present before the self-test existed; the prose trim (DOR-2377) removes it."
     },
     {
-      "text": "trigger doors the thin command or a pm transition into",
-      "paths": ["skills/decomposing-work/SKILL.md", "skills/verifying-work/SKILL.md"],
-      "reason": "Present before the self-test existed; the prose trim (DOR-2377) removes it."
-    },
-    {
       "text": "the block in the frontmatter above is what makes this file a scheduled task",
       "paths": [
         "skills/flow-drain/SKILL.md",
@@ -196,11 +172,6 @@
         "skills/flow-triage/SKILL.md",
         "skills/tending-tracker/SKILL.md"
       ],
-      "reason": "Present before the self-test existed; the prose trim (DOR-2377) removes it."
-    },
-    {
-      "text": "all tracker reads and writes go through the adapter this tick never names a tracker directly",
-      "paths": ["skills/flow-drain/SKILL.md", "skills/flow-triage/SKILL.md"],
       "reason": "Present before the self-test existed; the prose trim (DOR-2377) removes it."
     },
     {

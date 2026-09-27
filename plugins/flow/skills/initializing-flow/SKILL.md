@@ -439,7 +439,7 @@ the review rubric. The triad and its precedence are documented in
 
 ### Step 4b - Accounts
 
-Follow "For scripts and agents" in `<flow-root>/docs/use-all-your-accounts.mdx`: propose
+Flags: `flow accounts setup --help`. Propose
 with `flow accounts setup --json`, ask which accounts are work or client ones (never
 assume), then apply with `--yes`. Headless: skip.
 
