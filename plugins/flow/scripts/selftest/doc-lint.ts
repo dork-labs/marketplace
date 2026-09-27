@@ -589,7 +589,8 @@ function walk(root: string, dir: string, keep: (rel: string) => boolean): string
 }
 
 /**
- * Load the corpus doc lint reads: `commands/**\/*.md`, `skills/**\/SKILL.md`,
+ * Load the corpus doc lint reads: `commands/**\/*.md`, `skills/**\/*.md` (each
+ * skill and the references and prompts beside it, since an agent reads those too),
  * `docs/**\/*.{md,mdx}` and `README.md`.
  *
  * @param flowRoot - The flow plugin's root directory.
@@ -598,7 +599,7 @@ function walk(root: string, dir: string, keep: (rel: string) => boolean): string
 export function loadCorpus(flowRoot: string): DocFile[] {
   const paths = [
     ...walk(flowRoot, 'commands', (p) => p.endsWith('.md')),
-    ...walk(flowRoot, 'skills', (p) => p.endsWith('/SKILL.md')),
+    ...walk(flowRoot, 'skills', (p) => p.endsWith('.md')),
     ...walk(flowRoot, 'docs', (p) => /\.mdx?$/.test(p)),
     ...(existsSync(path.join(flowRoot, 'README.md')) ? ['README.md'] : []),
   ].sort();

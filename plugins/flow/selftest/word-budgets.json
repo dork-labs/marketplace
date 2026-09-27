@@ -127,6 +127,14 @@
     "baseline": 2175,
     "target": 2175
   },
+  "skills/building-adapters/references/conformance-harness.md": {
+    "baseline": 531,
+    "target": 531
+  },
+  "skills/building-adapters/references/mapping-worksheet.md": {
+    "baseline": 465,
+    "target": 465
+  },
   "skills/building-adapters/SKILL.md": {
     "baseline": 932,
     "target": 932
@@ -142,6 +150,18 @@
   "skills/decomposing-work/SKILL.md": {
     "baseline": 578,
     "target": 578
+  },
+  "skills/executing-specs/analysis-agent-prompt.md": {
+    "baseline": 534,
+    "target": 534
+  },
+  "skills/executing-specs/implementation-agent-prompt.md": {
+    "baseline": 577,
+    "target": 577
+  },
+  "skills/executing-specs/implementation-summary-template.md": {
+    "baseline": 95,
+    "target": 95
   },
   "skills/executing-specs/SKILL.md": {
     "baseline": 982,
