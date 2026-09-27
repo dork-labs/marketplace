@@ -4,7 +4,7 @@ Installs of this plugin are pinned to a commit SHA, so a fix here does not reach
 you until you **reinstall it** (Marketplace → flow → reinstall, or re-run your
 `--plugin-dir` checkout's `git pull`). Each entry below says whether that matters.
 
-## 0.38.0
+## 0.40.0
 
 **Fixes found by running `flow drain` for real across several Claude Code accounts. Reinstall to get them.**
 
@@ -15,6 +15,22 @@ you until you **reinstall it** (Marketplace → flow → reinstall, or re-run yo
 - `flow drain` and `flow fleet` now find the DorkOS app on `localhost`, where it listens, instead of `127.0.0.1`, which misses it on many Macs.
 - When DorkOS refuses to start a session for its own reason, such as a folder outside the ones it serves, flow says so. Before, it told you to sign in.
 - New: a live check of the three places a session can start (terminal, cmux, DorkOS) on a named account. It runs only when you set `FLOW_LAUNCHER_LIVE=1`, and only on a main or rotation account.
+
+## 0.39.0
+
+**The self-test's live tier no longer fails when a file in your flow checkout is deleted while it copies the plugin. Reinstall only if you run the live tier.**
+
+- The copy skips a file or folder that disappears while it runs, and a link that leads nowhere, instead of stopping with "no such file or directory".
+- It leaves out short-lived hidden temp files, such as `.something.tmp.json`.
+- flow's own tests no longer write a temp file into the plugin folder.
+
+## 0.37.3
+
+**Two usage readings from the same moment no longer lose the one that says an account is out. Reinstall to get it.**
+
+- When two sessions on one account see a limit in the same millisecond, flow now keeps the more serious reading: out of usage over near the limit over fine, then the higher percentage, then the later reset. Before, the second reading was dropped, so an account that had just run out could keep showing as available.
+- The shared test fixture DorkOS checks itself against is now version 4.0.0, because the rule for readings from the same moment changed. The file format did not change.
+- `flow usage scan` keeps the same reading the merge would, so it no longer drops an "out" reading when two sessions log a limit at the same moment.
 
 ## 0.37.2
 

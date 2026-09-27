@@ -181,8 +181,9 @@ export interface SpendEntry {
 
 /**
  * A new plan, credits or spend reading, as a writer hands it to
- * {@link mergeLedger}: the entry plus its `kind`. Like a window, each replaces
- * the stored one only when its `observedAt` is strictly later.
+ * {@link mergeLedger}: the entry plus its `kind`. Each replaces the stored one
+ * only when its `observedAt` is strictly later (a window also breaks ties; see
+ * {@link replacesWindow}).
  */
 export type FactObservation =
   | ({ kind: 'plan' } & PlanEntry)
@@ -510,14 +511,79 @@ export interface LedgerOwner {
   accountId: string;
 }
 
+/** How severe a window status is, for breaking a tie (higher wins; `null` lowest). */
+const STATUS_RANK: Readonly<Record<WindowStatus, number>> = {
+  allowed: 1,
+  allowed_warning: 2,
+  rejected: 3,
+};
+
+/**
+ * Whether a new window reading replaces the stored one (spec §1.2 "Merging").
+ * A strictly later `observedAt` wins. On an equal `observedAt` (two sessions on
+ * one account can see a limit in the same millisecond), the more severe reading
+ * wins: `rejected` over `allowed_warning` over `allowed` (a missing status
+ * lowest), then the higher `usedPct` (missing lowest), then the later
+ * `resetsAt` (missing lowest), then the greater `source`, then the longer
+ * `windowMinutes` (missing lowest). Values are compared normalized (instants,
+ * clamped `usedPct`). Equal on all of these keeps the stored one, so the rule
+ * is a strict total order: deterministic, order-independent, and a replay is a
+ * no-op.
+ *
+ * @param next - The new reading.
+ * @param stored - The stored reading.
+ * @returns `true` when `next` should replace `stored`.
+ */
+export function replacesWindow(next: WindowEntry, stored: WindowEntry): boolean {
+  const nextAt = Date.parse(next.observedAt);
+  const storedAt = Date.parse(stored.observedAt);
+  if (nextAt !== storedAt) return nextAt > storedAt;
+  const rank = (e: WindowEntry): number => (e.status === null ? 0 : STATUS_RANK[e.status]);
+  if (rank(next) !== rank(stored)) return rank(next) > rank(stored);
+  const used = (e: WindowEntry): number => e.usedPct ?? -1;
+  if (used(next) !== used(stored)) return used(next) > used(stored);
+  const resets = (e: WindowEntry): number =>
+    e.resetsAt === null ? -Infinity : Date.parse(e.resetsAt);
+  if (resets(next) !== resets(stored)) return resets(next) > resets(stored);
+  // Last tie-breaks, so two writers pick the same bytes whatever order they saw
+  // the readings in: the greater `source` (code-unit order), then the longer
+  // `windowMinutes` (missing lowest). Equal on everything keeps the stored one.
+  if (next.source !== stored.source) return next.source > stored.source;
+  return (next.windowMinutes ?? -1) > (stored.windowMinutes ?? -1);
+}
+
+/**
+ * Whether a writer that pre-reduces observations per window key (a scanner
+ * keeping one reading per key before calling {@link mergeLedger}) should keep
+ * `next` over `kept`. Window readings use {@link replacesWindow} on their
+ * normalized form, so a pre-reduction never drops the reading the merge would
+ * keep; facts (and anything not a valid reading) keep strict-later.
+ *
+ * @param next - The candidate observation.
+ * @param kept - The observation kept so far for the same key.
+ * @returns `true` when `next` should replace `kept`.
+ */
+export function keepsObservation(
+  next: UsageObservation | FactObservation,
+  kept: UsageObservation | FactObservation
+): boolean {
+  if ('key' in next && 'key' in kept) {
+    const a = normalizeEntry(next);
+    const b = normalizeEntry(kept);
+    if (a !== null && b !== null) return replacesWindow(a, b);
+  }
+  return Date.parse(next.observedAt) > Date.parse(kept.observedAt);
+}
+
 /**
  * Fold observations into a ledger (spec §1.2 "Merging"). Pure: no I/O, no clock.
  *
  * - An observation is a window reading (it has a `key`) or a fact (it has a
  *   `kind`: `plan`, `credits` or `spend`).
- * - Per window key, and per fact, an observation replaces the stored entry only
- *   when its `observedAt` is strictly later; equal keeps the stored one (a replay
- *   is a no-op). A stored entry that is not valid is replaced by any valid
+ * - Per fact, an observation replaces the stored one only when its `observedAt`
+ *   is strictly later; equal keeps the stored one (a replay is a no-op). Per
+ *   window key, {@link replacesWindow} decides: later wins, and a tie goes to
+ *   the more severe reading. A stored entry that is not valid is replaced by any valid
  *   observation.
  * - An observation more than 5 minutes after `now` is dropped
  *   (`observation-future`); an invalid one is dropped (`observation-invalid`).
@@ -613,7 +679,7 @@ export function mergeLedger(
     if (entry === null || !isValidWindowKey(key)) return invalid();
     if (future(key, entry.observedAt)) return;
     const stored = normalizeEntry(base.windows[key]);
-    if (stored !== null && Date.parse(entry.observedAt) <= Date.parse(stored.observedAt)) return;
+    if (stored !== null && !replacesWindow(entry, stored)) return;
     base.windows[key] = entry;
     contentChanged = true;
   });

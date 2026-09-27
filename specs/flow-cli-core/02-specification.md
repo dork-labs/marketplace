@@ -28,6 +28,8 @@ These contracts are public and tracker-neutral. Both sides implement them indepe
 
 **Rev 6d (contract 3.0.0) pins what `default` means.** Found against the operator's real `config.json` (`defaultAccount: null`, one registered row in `~/.claude3`): under rev 6 `default` existed only when a runtime had no registered row, so the operator's main account in `~/.claude` was invisible. Now an account is its folder, not its id; `default` always names the runtime's default folder, and is an alias when a registered row has that folder (§1.1a "The default account (rev 6d)"). The meaning of `default` changed, a changed rule, so the version is a major bump.
 
+**Rev 6e (contract 4.0.0) pins how the ledger merge breaks a tie on `observedAt`** (§1.2 "Merging"): the more severe reading wins instead of the stored one, because two sessions on one account can see a limit in the same millisecond and the second `rejected` was being dropped. The file format is unchanged; the rule is a major because it reverses rev 6d's "equal keeps the stored entry".
+
 ### 1.1 Accounts: identity in DorkOS config, routing policy in flow's own file
 
 The registry is split by owner (operator direction, 2026-09-26). DorkOS core owns who the accounts are and how they look. flow owns how work is routed to them.
@@ -263,8 +265,9 @@ JSON Schema: `plugins/flow/conformance/fleet/fleet-policy.schema.json`. It is th
 **Merging** (`mergeLedger(existing, observations, now, { runtime, accountId })`)
 
 - An observation is a window reading (it has a `key`) or a fact (it has a `kind`: `plan`, `credits` or `spend`).
-- Per window key, and per fact, an observation replaces the stored entry only when its `observedAt` is strictly later.
-- Equal `observedAt`: the stored entry stays (so a replay is a no-op).
+- Per fact, an observation replaces the stored entry only when its `observedAt` is strictly later; an equal `observedAt` keeps the stored fact (a replay is a no-op).
+- Per window key, a strictly later `observedAt` wins.
+- **Ties (rev 6e, contract 4.0.0).** On an equal `observedAt` (two sessions on one account can see a limit in the same millisecond), the more severe reading wins: status `rejected` > `allowed_warning` > `allowed` > `null`, then the higher `usedPct` (`null` lowest), then the later `resetsAt` (`null` lowest), then the greater `source` (code-unit order), then the longer `windowMinutes` (missing lowest). All comparisons use the normalized values: timestamps as instants (so `+02:00` and `Z` can tie) and `usedPct` after clamping. A reading equal on all of these keeps the stored entry. This is a strict total order, so the merge is deterministic, independent of observation order, and a replay is a no-op; a same-millisecond `rejected` is never lost. A writer that pre-reduces readings per window before merging (a scanner) uses the same order (`keepsObservation`).
 - An observation whose `observedAt` is more than 5 minutes after `now` is dropped with a warning, so one bad clock cannot pin a window forever.
 - An invalid observation is dropped with a warning; the rest still merge.
 - `updatedAt` becomes `now` when anything changed; otherwise the file is not rewritten.
@@ -321,7 +324,7 @@ JSON Schema: `plugins/flow/conformance/fleet/fleet-policy.schema.json`. It is th
 
 ### 1.4 The conformance fixture
 
-- Folder: `plugins/flow/conformance/fleet/`, with `CONTRACT_VERSION` (`3.0.0` since rev 6d), the JSON Schemas (`usage-ledger.schema.json`, `fleet-policy.schema.json`), and case files.
+- Folder: `plugins/flow/conformance/fleet/`, with `CONTRACT_VERSION` (`4.0.0` since rev 6e), the JSON Schemas (`usage-ledger.schema.json`, `fleet-policy.schema.json`), and case files.
 - Case files: `account-id.cases.json`, `identity.cases.json` (one runtime's rows), `accounts.cases.json` (every runtime and its default account: standalone, alias, `defaultAccount` set, with the resolution inputs `home` and a `realpath` map given as case inputs so no runner needs the filesystem, and an `env` that must be ignored), `fleet-policy.cases.json` (resolving 1.1b, including key migration, the default account's role and aliases, and `mayServe`), `window-read.cases.json`, `room.cases.json`, `eligibility.cases.json` (`accountRoom`, `spendRoom`: metered and local accounts), `ledger-merge.cases.json`, `codex-rate-limits.cases.json`, `prune.cases.json`, `flow-run.cases.json`.
 - Every case is `{ "name": string, "input": object, "expected": object }`, and `now` is always an input, never the wall clock.
 - `flow-run.cases.json` gives FlowRun records, some with fields the reader does not know, and the expected read-back (unknown fields preserved).
@@ -335,7 +338,7 @@ JSON Schema: `plugins/flow/conformance/fleet/fleet-policy.schema.json`. It is th
 - Write Codex readings with the Codex rules above, OpenCode `spend` and `credits:*`/`rate_limit:*` signals with the rules above.
 - Delete a removed account's ledger file (§1.2 "Removing an account").
 - Watch the ledger folders (a file watch plus a periodic read), so readings flow writes reach its views.
-- Run the 3.0.0 fixture, including the new case files and the rev 6d cases.
+- Run the 4.0.0 fixture, including the new case files, the rev 6d cases and the rev 6e tie cases.
 
 ## Background / Problem Statement
 
