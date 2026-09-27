@@ -82,6 +82,9 @@ const ADD_FLAGS = ['path', 'label', 'color'] as const;
 /** The flags `set` takes with no account id. */
 const FLEET_FLAGS = ['handoff', 'runtimes', 'cross-runtime-fallback'] as const;
 
+/** The flags only `pick` takes. */
+const PICK_FLAGS = ['repo', 'runtime', 'model'] as const;
+
 /** Each runtime's name for people. */
 const RUNTIME_NAMES: Readonly<Record<RuntimeSlug, string>> = {
   'claude-code': 'Claude Code',
@@ -118,28 +121,35 @@ export async function run(ctx: VerbContext): Promise<VerbResult> {
     case 'setup': {
       if (id !== undefined)
         throw new UsageError(`unexpected argument "${id}" for "flow accounts setup"`);
-      refuseFlags(ctx, [...ADD_FLAGS, ...POLICY_FLAGS, ...FLEET_FLAGS], 'setup');
+      refuseFlags(ctx, [...ADD_FLAGS, ...POLICY_FLAGS, ...FLEET_FLAGS, ...PICK_FLAGS], 'setup');
       const setup = await import('./accounts-setup.ts');
       return setup.run(ctx);
+    }
+    case 'pick': {
+      if (id !== undefined)
+        throw new UsageError(`unexpected argument "${id}" for "flow accounts pick"`);
+      refuseFlags(ctx, [...ADD_FLAGS, ...POLICY_FLAGS, ...FLEET_FLAGS], 'pick');
+      const pick = await import('./accounts-pick.ts');
+      return pick.run(ctx);
     }
     case 'list':
       if (id !== undefined)
         throw new UsageError(`unexpected argument "${id}" for "flow accounts list"`);
-      refuseFlags(ctx, [...ADD_FLAGS, ...POLICY_FLAGS, ...FLEET_FLAGS], 'list');
+      refuseFlags(ctx, [...ADD_FLAGS, ...POLICY_FLAGS, ...FLEET_FLAGS, ...PICK_FLAGS], 'list');
       return list(ctx, dorkHome, environment);
     case 'add':
       if (id !== undefined)
         throw new UsageError(`unexpected argument "${id}" for "flow accounts add"`);
-      refuseFlags(ctx, [...POLICY_FLAGS, ...FLEET_FLAGS], 'add');
+      refuseFlags(ctx, [...POLICY_FLAGS, ...FLEET_FLAGS, ...PICK_FLAGS], 'add');
       return add(ctx, dorkHome);
     case 'set':
-      refuseFlags(ctx, ADD_FLAGS, 'set');
+      refuseFlags(ctx, [...ADD_FLAGS, ...PICK_FLAGS], 'set');
       return id === undefined
         ? setFleet(ctx, dorkHome)
         : setAccount(ctx, dorkHome, environment, id);
     default:
       throw new UsageError(
-        `unknown action "${action}" for "flow accounts"; use list, add, set or setup`
+        `unknown action "${action}" for "flow accounts"; use list, add, set, setup or pick`
       );
   }
 }

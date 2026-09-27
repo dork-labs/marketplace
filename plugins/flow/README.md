@@ -53,7 +53,7 @@ node --experimental-strip-types "${CLAUDE_PLUGIN_ROOT}/scripts/flow.ts" <verb> -
 | `stage`           | Move an item to another stage.                                                  |
 | `status`          | Show what is in flight, parked or out of step.                                  |
 | `checkpoint`      | Write the item's `HANDOFF.md`.                                                  |
-| `accounts`        | Set up and list the accounts flow may spend (`docs/use-all-your-accounts.mdx`). |
+| `accounts`        | Set up, list or pick the accounts flow spends (`docs/use-all-your-accounts.mdx`). |
 | `usage`           | Record each account's usage.                                                    |
 | `fleet`           | Show every account and running session. Changes nothing.                        |
 | `drain`           | Carry several items at once.                                                    |
