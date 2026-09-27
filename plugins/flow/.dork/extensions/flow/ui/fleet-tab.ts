@@ -353,6 +353,9 @@ export function FleetTab(): Node {
 
   // Bumped by the Retry action on a failed load, which runs the load again.
   const [attempt, setAttempt] = useState(0);
+  // The load-failure alert is keyed by the attempt, so a repeated failure
+  // mounts a new alert and screen readers announce it again even though the
+  // words match.
   // True while a retried load is on its way. The failed view stays up (Retry
   // marked busy, not removed) so keyboard focus stays on the button.
   const [retrying, setRetrying] = useState(false);
@@ -413,7 +416,7 @@ export function FleetTab(): Node {
   if (phase.kind === 'too-old') return root(h('p', { style: MUTED }, HOST_TOO_OLD_TEXT));
   if (phase.kind === 'failed') {
     return root(
-      h('p', { role: 'alert', style: ALERT }, phase.message),
+      h('p', { key: `load-failed-${attempt}`, role: 'alert', style: ALERT }, phase.message),
       h(
         'button',
         {

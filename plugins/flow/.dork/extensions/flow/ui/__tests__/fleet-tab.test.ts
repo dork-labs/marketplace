@@ -464,6 +464,19 @@ describe('FleetTab: what a failure says', () => {
     expect(document.activeElement).toBe(screen.getByRole('button', { name: 'Retry' }));
   });
 
+  it('mounts a new alert for a repeated load failure so screen readers announce it again', async () => {
+    stubFetch({ status: 500, body: NO_JSON });
+    await renderTab();
+    const first = screen.getByRole('alert');
+    await act(async () => {
+      fireEvent.click(screen.getByRole('button', { name: 'Retry' }));
+    });
+    const second = screen.getByRole('alert');
+    expect(second.textContent).toBe(first.textContent);
+    expect(second).not.toBe(first);
+    expect(first.isConnected).toBe(false);
+  });
+
   it('Retry loads the settings again after a failed first load', async () => {
     const good = body();
     let calls = 0;

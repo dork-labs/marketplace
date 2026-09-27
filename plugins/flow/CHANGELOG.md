@@ -8,7 +8,7 @@ you until you **reinstall it** (Marketplace → flow → reinstall, or re-run yo
 
 **The Flow tab's error messages are clearer, and a failed load has a Retry button. Reinstall to get it.**
 
-- If the tab can't load, it says "Couldn't load Flow's settings. Try again in a moment." and offers Retry.
+- If the tab can't load, it says "Couldn't load Flow's settings. Try again in a moment." and offers Retry. If Retry fails too, screen readers announce the message again.
 - If a change can't be saved, it says "Flow didn't respond, so nothing was changed. Try again."
 
 ## 0.42.0
