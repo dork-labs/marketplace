@@ -26,6 +26,7 @@ import {
 } from '../fleet/accounts.ts';
 import { fromTranscriptEntry } from '../fleet/observations.ts';
 import {
+  keepsObservation,
   mergeLedger,
   readLedger,
   recordUsage,
@@ -268,7 +269,7 @@ async function scanAccount(
     hits += 1;
     const { observation } = finding;
     const kept = latest.get(observation.key);
-    if (kept === undefined || Date.parse(observation.observedAt) > Date.parse(kept.observedAt)) {
+    if (kept === undefined || keepsObservation(observation, kept)) {
       latest.set(observation.key, observation);
     }
   };

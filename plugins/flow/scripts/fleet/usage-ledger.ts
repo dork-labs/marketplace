@@ -524,8 +524,11 @@ const STATUS_RANK: Readonly<Record<WindowStatus, number>> = {
  * one account can see a limit in the same millisecond), the more severe reading
  * wins: `rejected` over `allowed_warning` over `allowed` (a missing status
  * lowest), then the higher `usedPct` (missing lowest), then the later
- * `resetsAt` (missing lowest). A reading equal on all of these keeps the stored
- * one, so the rule is deterministic, order-independent and a replay is a no-op.
+ * `resetsAt` (missing lowest), then the greater `source`, then the longer
+ * `windowMinutes` (missing lowest). Values are compared normalized (instants,
+ * clamped `usedPct`). Equal on all of these keeps the stored one, so the rule
+ * is a strict total order: deterministic, order-independent, and a replay is a
+ * no-op.
  *
  * @param next - The new reading.
  * @param stored - The stored reading.
@@ -541,7 +544,35 @@ export function replacesWindow(next: WindowEntry, stored: WindowEntry): boolean 
   if (used(next) !== used(stored)) return used(next) > used(stored);
   const resets = (e: WindowEntry): number =>
     e.resetsAt === null ? -Infinity : Date.parse(e.resetsAt);
-  return resets(next) > resets(stored);
+  if (resets(next) !== resets(stored)) return resets(next) > resets(stored);
+  // Last tie-breaks, so two writers pick the same bytes whatever order they saw
+  // the readings in: the greater `source` (code-unit order), then the longer
+  // `windowMinutes` (missing lowest). Equal on everything keeps the stored one.
+  if (next.source !== stored.source) return next.source > stored.source;
+  return (next.windowMinutes ?? -1) > (stored.windowMinutes ?? -1);
+}
+
+/**
+ * Whether a writer that pre-reduces observations per window key (a scanner
+ * keeping one reading per key before calling {@link mergeLedger}) should keep
+ * `next` over `kept`. Window readings use {@link replacesWindow} on their
+ * normalized form, so a pre-reduction never drops the reading the merge would
+ * keep; facts (and anything not a valid reading) keep strict-later.
+ *
+ * @param next - The candidate observation.
+ * @param kept - The observation kept so far for the same key.
+ * @returns `true` when `next` should replace `kept`.
+ */
+export function keepsObservation(
+  next: UsageObservation | FactObservation,
+  kept: UsageObservation | FactObservation
+): boolean {
+  if ('key' in next && 'key' in kept) {
+    const a = normalizeEntry(next);
+    const b = normalizeEntry(kept);
+    if (a !== null && b !== null) return replacesWindow(a, b);
+  }
+  return Date.parse(next.observedAt) > Date.parse(kept.observedAt);
 }
 
 /**

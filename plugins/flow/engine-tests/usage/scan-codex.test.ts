@@ -183,6 +183,50 @@ describe('flow usage scan --runtime codex', () => {
     });
   });
 
+  // Contract 3.1+ (rev 6e): two sessions on one account can log a limit in the
+  // same millisecond. The scan's per-window pre-reduction must keep the reading
+  // the merge would keep (the rejected one), whichever file it reads first.
+  it('keeps a same-millisecond rejected reading whichever rollout is read first', async () => {
+    const line = (used: number, reached: string | null) =>
+      JSON.stringify({
+        timestamp: '2026-09-26T19:30:00.000Z',
+        type: 'event_msg',
+        payload: {
+          type: 'token_count',
+          info: null,
+          rate_limits: {
+            limit_id: 'codex',
+            limit_name: null,
+            primary: { used_percent: used, window_minutes: 300, resets_at: 1790465400 },
+            secondary: null,
+            credits: null,
+            rate_limit_reached_type: reached,
+          },
+        },
+      }) + '\n';
+    for (const [first, second] of [
+      [line(100, 'primary'), line(40, null)],
+      [line(40, null), line(100, 'primary')],
+    ]) {
+      rmSync(codexHome, { recursive: true, force: true });
+      rmSync(path.join(dorkHome, 'runtimes'), { recursive: true, force: true });
+      for (const [name, body] of [
+        ['rollout-2026-09-26T19-30-00-0199aaaa.jsonl', first],
+        ['rollout-2026-09-26T19-30-00-0199bbbb.jsonl', second],
+      ]) {
+        const file = path.join(codexHome, 'sessions/2026/09/26', name);
+        mkdirSync(path.dirname(file), { recursive: true });
+        writeFileSync(file, body);
+      }
+      const run = await flow(['usage', 'scan', '--runtime', 'codex', '--json']);
+      expect(run.code).toBe(0);
+      const ledger = JSON.parse(readFileSync(ledgerPath(dorkHome, 'codex', 'default'), 'utf8')) as {
+        windows: Record<string, { status: string | null; usedPct: number | null }>;
+      };
+      expect(ledger.windows.five_hour).toMatchObject({ status: 'rejected', usedPct: 100 });
+    }
+  });
+
   it('reads archived sessions only within --days, and --all brings them back', async () => {
     // Purpose: the 20-day-old archive is outside the default 8 days; with --all
     // its premium limit is found, while its older plus plan and windows lose

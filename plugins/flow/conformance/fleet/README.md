@@ -40,11 +40,13 @@ another name for that row (one ledger file, one policy). When none does,
 `main`. `readAccounts` takes the home folder and real paths as inputs, so a
 runner needs no filesystem; the cases' `env` exists only to prove it is ignored.
 
-3.1.0 (rev 6e) is a minor: readers stay compatible. It pins how the merge
-breaks a tie on `observedAt` for a window: `rejected` over `allowed_warning`
-over `allowed` over no status, then the higher `usedPct`, then the later
-`resetsAt`; a reading equal on all of these keeps the stored one. Before it, a
-second reading from the same millisecond was dropped, even a `rejected` one.
+4.0.0 (rev 6e) is a major: it changes the merge rule for a tie on `observedAt`
+(before, the stored reading always stayed). Now the more severe reading wins:
+`rejected` over `allowed_warning` over `allowed` over no status, then the higher
+`usedPct`, then the later `resetsAt`, then the greater `source`, then the longer
+`windowMinutes`, all on normalized values. A reading equal on all of these
+keeps the stored one. Before it, a second reading from the same millisecond was
+dropped, even a `rejected` one.
 
 ## What is here
 
