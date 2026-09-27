@@ -7,6 +7,8 @@
  * @module @dorkos/flow/extension/panel-service
  */
 
+import os from 'node:os';
+import { loadAccounts } from '../../../../scripts/fleet/accounts.ts';
 import type { ExecFileLike } from './advisor.ts';
 import type { AccountsApi } from './host-types.ts';
 import {
@@ -21,6 +23,9 @@ import {
 
 /** The shortest gap between two `panel` events, in ms. */
 export const EMIT_INTERVAL_MS = 1_000;
+
+/** How long the note about DorkOS schedules stays up after a resume, in ms. */
+export const SCHEDULES_NOTE_MS = 10 * 60_000;
 
 /** The most chat folders remembered as projects to cover. */
 const REMEMBERED_CWDS = 50;
@@ -41,6 +46,10 @@ export interface PanelServiceDeps {
   now: () => Date;
   /** Folder to main checkout (default: flow's `resolveMainCheckout`). */
   resolver?: CheckoutResolver;
+  /** Whether a pid exists (default: `process.kill(pid, 0)`, as `flow fleet`). */
+  pidAlive?: (pid: number) => boolean;
+  /** The OS home flow resolves each runtime's `default` account from (default: this user's). */
+  osHome?: string;
   /** Where to log. */
   log: (message: string) => void;
 }
@@ -49,7 +58,11 @@ export interface PanelServiceDeps {
 export class PanelService {
   private readonly resolver: CheckoutResolver;
   private readonly cwds: string[] = [];
-  private schedulesOff = false;
+  /**
+   * When a resume last found DorkOS schedules `/flow:pause` had switched off,
+   * or `null`. Held in memory only, so it does not survive a server restart.
+   */
+  private schedulesOffAt: Date | null = null;
   private lastSent: string | null = null;
   private lastEmitAt = -Infinity;
   private timer: ReturnType<typeof setTimeout> | null = null;
@@ -84,6 +97,10 @@ export class PanelService {
    * @returns The `GET /panel` body.
    */
   async model(): Promise<PanelModel> {
+    // flow's registry names the account a run on `default` bills (`flow fleet`'s canonicalId).
+    const registry = loadAccounts(this.deps.dorkHome, {
+      home: this.deps.osHome ?? os.homedir(),
+    }).accounts;
     const [summaries, usage] = await Promise.all([
       this.deps.accounts.list(),
       this.deps.accounts.usage(),
@@ -94,8 +111,24 @@ export class PanelService {
       usage,
       projects: this.projects(),
       now: this.deps.now(),
-      schedulesOff: this.schedulesOff,
+      schedulesOff: this.schedulesOffAt !== null,
+      registry,
+      pidAlive: this.deps.pidAlive,
     });
+  }
+
+  /**
+   * The model a person asked for (`GET /panel`): the note about DorkOS
+   * schedules is dropped once it has been up for {@link SCHEDULES_NOTE_MS}.
+   *
+   * @returns The `GET /panel` body.
+   */
+  async requested(): Promise<PanelModel> {
+    const at = this.schedulesOffAt;
+    if (at !== null && this.deps.now().getTime() - at.getTime() >= SCHEDULES_NOTE_MS) {
+      this.schedulesOffAt = null;
+    }
+    return this.model();
   }
 
   /**
@@ -112,8 +145,6 @@ export class PanelService {
         mainCheckout: project.mainCheckout,
       });
     }
-    // A new pause starts a new cycle: an older note about schedules is moot.
-    this.schedulesOff = false;
     return this.answer();
   }
 
@@ -123,6 +154,8 @@ export class PanelService {
    * @returns The new model.
    */
   async resume(): Promise<PanelModel> {
+    // Each resume says afresh whether schedules are still off.
+    this.schedulesOffAt = null;
     for (const project of this.projects()) {
       if (!project.paused) continue;
       const output = await runPauseCommand({
@@ -130,7 +163,7 @@ export class PanelService {
         command: 'resume',
         mainCheckout: project.mainCheckout,
       });
-      if (reportsSchedulesOff(output)) this.schedulesOff = true;
+      if (reportsSchedulesOff(output)) this.schedulesOffAt = this.deps.now();
     }
     return this.answer();
   }

@@ -240,6 +240,8 @@ const POPOVER_WINDOWS: readonly { key: keyof PanelAccount['windows']; label: str
 function AccountPopover(props: {
   account: PanelAccount;
   top: number;
+  /** The row that opened it: a press on it toggles, so it must not also close from outside. */
+  opener: HTMLElement | undefined;
   onClose: (returnFocus: boolean) => void;
 }): Node {
   const { account } = props;
@@ -250,7 +252,9 @@ function AccountPopover(props: {
   useEffect(() => {
     ref.current?.focus();
     const onPointer = (event: PointerEvent) => {
-      if (ref.current && !ref.current.contains(event.target as globalThis.Node)) {
+      const target = event.target as globalThis.Node;
+      if (props.opener?.contains(target)) return;
+      if (ref.current && !ref.current.contains(target)) {
         props.onClose(false);
       }
     };
@@ -318,7 +322,13 @@ function AccountPopover(props: {
 /** The panel's loading state. */
 type Phase = { kind: 'loading' } | { kind: 'failed'; failures: number } | { kind: 'ready' };
 
-/** Open the host's event stream and replace the model on each panel event. */
+/** `EventSource.OPEN`, spelled out so a stand-in without the constant still compares. */
+const OPEN_STATE = 1;
+
+/**
+ * Open the host's event stream and replace the model on each panel event;
+ * while the stream is not open, re-read the model every 30 s instead.
+ */
 function useLiveModel(
   apply: (model: PanelModel) => void,
   refetch: () => void,
@@ -328,13 +338,18 @@ function useLiveModel(
     if (!enabled) return;
     let poll: ReturnType<typeof setInterval> | null = null;
     let source: EventSource | null = null;
+    // Re-read on a timer only while the stream is down; the browser keeps
+    // reconnecting it, and polling stops once it is open again.
     const startPolling = () => {
-      source?.close();
-      source = null;
       poll ??= setInterval(refetch, FALLBACK_POLL_MS);
     };
+    const stopPolling = () => {
+      if (poll !== null) clearInterval(poll);
+      poll = null;
+    };
     if (typeof EventSource === 'function') {
-      source = new EventSource(`${resolveApiBaseUrl()}/events`);
+      const stream = new EventSource(`${resolveApiBaseUrl()}/events`);
+      source = stream;
       source.addEventListener(PANEL_EVENT, (event) => {
         try {
           apply(JSON.parse((event as MessageEvent<string>).data) as PanelModel);
@@ -342,13 +357,16 @@ function useLiveModel(
           // A frame that is not a model is ignored; the next one replaces it.
         }
       });
-      source.addEventListener('error', startPolling);
+      stream.addEventListener('error', () => {
+        if (stream.readyState !== OPEN_STATE) startPolling();
+      });
+      stream.addEventListener('open', stopPolling);
     } else {
       startPolling();
     }
     return () => {
       source?.close();
-      if (poll !== null) clearInterval(poll);
+      stopPolling();
     };
   }, [enabled]);
 }
@@ -567,6 +585,7 @@ export function createFlowPanel(api: PanelHostApi): ComponentType {
             key: `popover-${openAccount.key}`,
             account: openAccount,
             top: open.top,
+            opener: rowRefs.current.get(openAccount.key),
             onClose: closePopover,
           })
     );

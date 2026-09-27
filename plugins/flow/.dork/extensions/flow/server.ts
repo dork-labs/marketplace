@@ -212,12 +212,13 @@ export function createFlowExtension(
     execFile: exec,
     now,
     log,
+    pidAlive: overrides.pidAlive,
   });
   router.get(
     '/panel',
     handle(async (req, res) => {
       panel.noteCwd(req.query?.cwd);
-      res.status(200).json(await panel.model());
+      res.status(200).json(await panel.requested());
     })
   );
   router.post(

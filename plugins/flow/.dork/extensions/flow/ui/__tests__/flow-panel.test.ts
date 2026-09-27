@@ -20,6 +20,8 @@ class FakeEventSource {
   static opened: FakeEventSource[] = [];
   readonly listeners = new Map<string, ((event: unknown) => void)[]>();
   closed = false;
+  /** `CONNECTING` (0) until {@link open}, then `OPEN` (1). */
+  readyState = 0;
 
   constructor(readonly url: string) {
     FakeEventSource.opened.push(this);
@@ -38,8 +40,15 @@ class FakeEventSource {
     for (const listener of this.listeners.get(type) ?? []) listener({ data: JSON.stringify(data) });
   }
 
-  /** Fail the stream. */
+  /** Open (or reopen) the stream. */
+  open(): void {
+    this.readyState = 1;
+    for (const listener of this.listeners.get('open') ?? []) listener({});
+  }
+
+  /** Drop the stream; the browser goes back to connecting it. */
   fail(): void {
+    this.readyState = 0;
     for (const listener of this.listeners.get('error') ?? []) listener({});
   }
 }
@@ -200,6 +209,22 @@ describe('FlowPanel: accounts', () => {
     fireEvent.keyDown(dialog, { key: 'Escape' });
     expect(screen.queryByRole('dialog')).toBeNull();
     expect(document.activeElement).toBe(row);
+  });
+
+  it('closes on a press of the row that opened it, without reopening', async () => {
+    stubFetch({ status: 200, body: model() });
+    await renderPanel();
+    const row = screen.getByRole('button', { name: /^Claude2,/ });
+    fireEvent.click(row);
+    // A press on the opener is its own toggle, not a press outside.
+    fireEvent.pointerDown(row);
+    expect(screen.getByRole('dialog', { name: 'Claude2' })).toBeTruthy();
+    fireEvent.click(row);
+    expect(screen.queryByRole('dialog')).toBeNull();
+    // A press anywhere else closes it.
+    fireEvent.click(row);
+    fireEvent.pointerDown(document.body);
+    expect(screen.queryByRole('dialog')).toBeNull();
   });
 });
 
@@ -365,18 +390,48 @@ describe('FlowPanel: loading and live updates', () => {
     expect(source.closed).toBe(true);
   });
 
-  it('re-reads the model every 30 seconds when the stream fails', async () => {
+  it('re-reads every 30 seconds only while the stream is down, and stops once it reconnects', async () => {
     vi.useFakeTimers({ toFake: ['setInterval', 'clearInterval'] });
     const stub = stubFetch({ status: 200, body: model() });
     await renderPanel();
     const [source] = FakeEventSource.opened;
-    act(() => source.fail());
-    expect(source.closed).toBe(true);
     const gets = () => stub.calls.filter((c) => c.method === 'GET').length;
+    const wait = async () => {
+      await act(async () => {
+        vi.advanceTimersByTime(FALLBACK_POLL_MS);
+      });
+    };
+    act(() => source.open());
+    await wait();
     expect(gets()).toBe(1);
+
+    // Down: the stream is left to reconnect, and the panel polls meanwhile.
+    act(() => source.fail());
+    expect(source.closed).toBe(false);
+    await wait();
+    expect(gets()).toBe(2);
+    await wait();
+    expect(gets()).toBe(3);
+
+    // Back: polling stops.
+    act(() => source.open());
+    await wait();
+    await wait();
+    expect(gets()).toBe(3);
+  });
+
+  it('does not poll for an error the stream recovers from while still open', async () => {
+    vi.useFakeTimers({ toFake: ['setInterval', 'clearInterval'] });
+    const stub = stubFetch({ status: 200, body: model() });
+    await renderPanel();
+    const [source] = FakeEventSource.opened;
+    act(() => source.open());
+    act(() => {
+      for (const listener of source.listeners.get('error') ?? []) listener({});
+    });
     await act(async () => {
       vi.advanceTimersByTime(FALLBACK_POLL_MS);
     });
-    expect(gets()).toBe(2);
+    expect(stub.calls.filter((c) => c.method === 'GET')).toHaveLength(1);
   });
 });

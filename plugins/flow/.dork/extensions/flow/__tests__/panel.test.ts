@@ -15,13 +15,17 @@ import {
   CheckoutResolver,
   discoverCheckouts,
   isLiveDrainRun,
+  isStaleRun,
   pauseFlagPath,
+  runAccountKey,
   runState,
   slotsOf,
   type PanelModel,
   type RunPill,
 } from '../lib/panel.ts';
-import { EMIT_INTERVAL_MS } from '../lib/panel-service.ts';
+import { EMIT_INTERVAL_MS, SCHEDULES_NOTE_MS } from '../lib/panel-service.ts';
+import { pidExists } from '../../../../scripts/cli/host-io.ts';
+import type { RuntimeAccount } from '../../../../scripts/fleet/accounts.ts';
 import { createFlowExtension } from '../server.ts';
 import {
   fakeCtx,
@@ -88,14 +92,18 @@ function usage(id: string, extra: Partial<AccountUsage> = {}): AccountUsage {
 }
 
 /** Build the extension over the fixture world. */
-function setup(opts: Parameters<typeof fakeCtx>[1] = {}) {
+function setup(
+  opts: Parameters<typeof fakeCtx>[1] = {},
+  machine: { now?: () => Date; pidAlive?: (pid: number) => boolean } = {}
+) {
   const router = fakeRouter();
   const host = fakeCtx(world, opts);
   const ext = createFlowExtension(router, host.ctx, {
-    now: () => NOW,
+    now: machine.now ?? (() => NOW),
     originOf: () => null,
     log: () => {},
     execFile: execFile as never,
+    pidAlive: machine.pidAlive,
   });
   return { router, host, ext };
 }
@@ -173,6 +181,29 @@ describe('slots', () => {
     expect(isLiveDrainRun({ status: 'running', drain: drain('parked') })).toBe(false);
     expect(isLiveDrainRun({ status: 'waiting_for_review', drain: drain('watching') })).toBe(false);
     expect(isLiveDrainRun({ status: 'running' })).toBe(false);
+  });
+});
+
+describe('isStaleRun', () => {
+  it('reads a DorkOS run (workerPid -1) as live with the real pid check, as flow fleet does', () => {
+    expect(isStaleRun({ status: 'running', workerPid: -1 }, pidExists)).toBe(false);
+    expect(isStaleRun({ status: 'running', workerPid: 2 ** 22 + 7 }, pidExists)).toBe(true);
+    expect(isStaleRun({ status: 'running', workerPid: process.pid }, pidExists)).toBe(false);
+  });
+});
+
+describe('runAccountKey', () => {
+  const registry = [
+    { runtime: 'claude-code', id: 'work', implicit: false, isDefault: true },
+    { runtime: 'codex', id: 'default', implicit: true, isDefault: true },
+  ] as unknown as RuntimeAccount[];
+
+  it('names a run on default, or on no account, by the registered account default points at', () => {
+    expect(runAccountKey(registry, undefined, null)).toBe('claude-code:work');
+    expect(runAccountKey(registry, 'claude-code', 'default')).toBe('claude-code:work');
+    expect(runAccountKey(registry, 'codex', null)).toBe('codex:default');
+    expect(runAccountKey(registry, 'claude-code', 'personal')).toBe('claude-code:personal');
+    expect(runAccountKey([], 'claude-code', null)).toBe('claude-code:default');
   });
 });
 
@@ -295,6 +326,31 @@ describe('GET /panel', () => {
     expect(model.schedulesOff).toBe(false);
   });
 
+  it("neither shows nor counts a run whose worker is gone, by flow fleet's rule", async () => {
+    writeConfig(world.main, { parallel: 3 });
+    writeRuns(world, {
+      live: runRecord(world, { issueId: 'live', identifier: 'ACME-1', workerPid: 111 }),
+      crashed: runRecord(world, { issueId: 'crashed', identifier: 'ACME-2', workerPid: 222 }),
+      dorkos: runRecord(world, {
+        issueId: 'dorkos',
+        identifier: 'ACME-3',
+        host: 'dorkos',
+        workerPid: -1,
+      }),
+      review: runRecord(world, {
+        issueId: 'review',
+        identifier: 'ACME-4',
+        status: 'waiting_for_review',
+        workerPid: 222,
+        drain: { v: 1, rev: 1, phase: 'watching' },
+      }),
+    });
+    const { router } = setup({}, { pidAlive: (pid) => pid !== 222 });
+    const model = await panel(router);
+    expect(model.runs.map((r) => r.identifier)).toEqual(['ACME-1', 'ACME-3', 'ACME-4']);
+    expect(model.slots).toEqual({ busy: 2, total: 3 });
+  });
+
   it('has nothing to pause when no project has flow runs or settings', async () => {
     const { router } = setup();
     const model = await panel(router);
@@ -364,10 +420,29 @@ describe('POST /pause and /resume', () => {
       pauseFlagPath(world.main),
       JSON.stringify({ pausedAt: NOW.toISOString(), hostSchedules: ['sched-1'] })
     );
-    const { router } = setup({ extensionDir: EXTENSION_DIR });
+    let now = NOW;
+    const { router } = setup({ extensionDir: EXTENSION_DIR }, { now: () => now });
     expect((await panel(router)).paused).toBe('all');
     const resumed = await router.call('post', '/resume');
     expect(resumed.body as PanelModel).toMatchObject({ paused: 'none', schedulesOff: true });
+
+    // Still up just under ten minutes later, gone on the first read after.
+    now = new Date(NOW.getTime() + SCHEDULES_NOTE_MS - 1);
+    expect((await panel(router)).schedulesOff).toBe(true);
+    now = new Date(NOW.getTime() + SCHEDULES_NOTE_MS);
+    expect((await panel(router)).schedulesOff).toBe(false);
+  }, 30_000);
+
+  it('drops the note when resume is called again and finds nothing switched off', async () => {
+    writeConfig(world.main, {});
+    const flag = pauseFlagPath(world.main);
+    mkdirSync(path.dirname(flag), { recursive: true });
+    writeFileSync(flag, JSON.stringify({ pausedAt: NOW.toISOString(), hostSchedules: ['s-1'] }));
+    const { router } = setup({ extensionDir: EXTENSION_DIR });
+    await panel(router);
+    expect(((await router.call('post', '/resume')).body as PanelModel).schedulesOff).toBe(true);
+    writeFileSync(flag, JSON.stringify({ pausedAt: NOW.toISOString(), hostSchedules: [] }));
+    expect(((await router.call('post', '/resume')).body as PanelModel).schedulesOff).toBe(false);
   }, 30_000);
 
   it('answers 502 in plain words when flow could not pause', async () => {

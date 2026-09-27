@@ -23,7 +23,18 @@ import {
   PROJECT_CONFIG_DIR,
 } from '../../../../scripts/config-names.ts';
 import { liveKey } from '../../../../scripts/drain/live-count.ts';
-import { ACTIVE_RUN_STATUSES, readRunStore } from '../../../../scripts/fleet/sessions.ts';
+import {
+  IMPLICIT_ACCOUNT_ID,
+  resolveAccountRef,
+  type RuntimeAccount,
+} from '../../../../scripts/fleet/accounts.ts';
+import {
+  ACTIVE_RUN_STATUSES,
+  readRunStore,
+  sessionState,
+} from '../../../../scripts/fleet/sessions.ts';
+import { isRuntimeSlug } from '../../../../scripts/fleet/usage-ledger.ts';
+import { pidExists } from '../../../../scripts/cli/host-io.ts';
 import type { ExecFileLike } from './advisor.ts';
 import { readDrainSettings } from './drain-settings.ts';
 import { buildFleetView, RouteError } from './fleet.ts';
@@ -284,12 +295,82 @@ function panelWindow(usage: AccountUsage | undefined, key: string): PanelWindow 
   return { usedPct: entry.usedPct, resetsAt: entry.resetsAt, status: entry.status };
 }
 
+/**
+ * Whether a run's worker is gone, by `flow fleet`'s own rule for a run with no
+ * live session row (`sessionState`'s run-only branch): a run waiting for review
+ * is parked, never stale; otherwise it is stale when it names a worker pid that
+ * no longer exists. A DorkOS-hosted run records `workerPid: -1`, which that
+ * check (`process.kill(-1, 0)`) never reads as gone, exactly as in `flow fleet`.
+ *
+ * @param run - The run as stored.
+ * @param pidAlive - Whether a pid exists.
+ * @returns True when the run should be neither shown nor counted.
+ */
+export function isStaleRun(
+  run: Record<string, unknown>,
+  pidAlive: (pid: number) => boolean
+): boolean {
+  return (
+    sessionState({
+      runOnly: {
+        status: typeof run.status === 'string' ? run.status : '',
+        workerPid: typeof run.workerPid === 'number' ? run.workerPid : null,
+      },
+      accountLimited: false,
+      pidAlive,
+    }) === 'stale'
+  );
+}
+
+/**
+ * The account a run bills, `<runtime>:<id>`, named the way `flow fleet` names
+ * it (its `canonicalId`): a run with no account bills its runtime's `default`,
+ * and `default` resolves through flow's registry to the registered account it
+ * points at, when it points at one.
+ *
+ * @param registry - flow's accounts (`loadAccounts`).
+ * @param runtime - The run's runtime, absent for `claude-code`.
+ * @param account - The run's account, or `null`.
+ * @returns The key.
+ */
+export function runAccountKey(
+  registry: readonly RuntimeAccount[],
+  runtime: string | undefined,
+  account: string | null
+): string {
+  const slug = runtime ?? 'claude-code';
+  const id = account ?? IMPLICIT_ACCOUNT_ID;
+  if (id === IMPLICIT_ACCOUNT_ID && isRuntimeSlug(slug)) {
+    const target = resolveAccountRef(registry, slug, id);
+    if (target !== null) return liveKey(slug, target.id);
+  }
+  return liveKey(slug, id);
+}
+
+/** The shown runs of one project: active, and not stale. */
+function shownRuns(
+  project: PanelProject,
+  pidAlive: (pid: number) => boolean
+): Record<string, unknown>[] {
+  return Object.values(project.store).filter(
+    (run): run is Record<string, unknown> =>
+      isObject(run) &&
+      typeof run.identifier === 'string' &&
+      typeof run.status === 'string' &&
+      ACTIVE_RUN_STATUSES.has(run.status) &&
+      !isStaleRun(run, pidAlive)
+  );
+}
+
 /** The run rows of one project, in the store's order. */
-function projectRuns(project: PanelProject): PanelRun[] {
+function projectRuns(
+  project: PanelProject,
+  registry: readonly RuntimeAccount[],
+  pidAlive: (pid: number) => boolean
+): PanelRun[] {
   const rows: PanelRun[] = [];
-  for (const run of Object.values(project.store)) {
-    if (!isObject(run) || typeof run.identifier !== 'string') continue;
-    if (typeof run.status !== 'string' || !ACTIVE_RUN_STATUSES.has(run.status)) continue;
+  for (const run of shownRuns(project, pidAlive)) {
+    if (typeof run.identifier !== 'string') continue;
     const runtime = typeof run.runtime === 'string' && run.runtime !== '' ? run.runtime : undefined;
     const account = typeof run.account === 'string' && run.account !== '' ? run.account : null;
     rows.push({
@@ -300,7 +381,7 @@ function projectRuns(project: PanelProject): PanelRun[] {
         typeof run.worktreePath === 'string' && run.worktreePath !== ''
           ? run.worktreePath
           : project.mainCheckout,
-      accountKey: liveKey(runtime, account),
+      accountKey: runAccountKey(registry, runtime, account),
       state: runState(run),
     });
   }
@@ -310,7 +391,8 @@ function projectRuns(project: PanelProject): PanelRun[] {
 /**
  * Build the panel's model.
  *
- * @param input - The DorkOS home, DorkOS's accounts and usage, the projects, the clock, and the resume note.
+ * @param input - The DorkOS home, DorkOS's accounts and usage, flow's account
+ *   registry, the projects, the clock, the resume note, and the pid check.
  * @returns The model.
  */
 export function buildPanel(input: {
@@ -320,7 +402,13 @@ export function buildPanel(input: {
   projects: readonly PanelProject[];
   now: Date;
   schedulesOff: boolean;
+  /** flow's accounts, to name the account a run bills (default: none). */
+  registry?: readonly RuntimeAccount[];
+  /** Whether a pid exists (default: `process.kill(pid, 0)`, as `flow fleet`). */
+  pidAlive?: (pid: number) => boolean;
 }): PanelModel {
+  const pidAlive = input.pidAlive ?? pidExists;
+  const registry = input.registry ?? [];
   const view = buildFleetView(input.dorkHome, input.summaries, input.now);
   const accounts: PanelAccount[] = view.groups.flatMap((group) =>
     group.accounts.map((account) => {
@@ -343,12 +431,12 @@ export function buildPanel(input: {
       };
     })
   );
-  const runs = input.projects.flatMap(projectRuns);
+  const runs = input.projects.flatMap((project) => projectRuns(project, registry, pidAlive));
   let busy = 0;
   let total = 0;
   for (const project of input.projects) {
-    for (const run of Object.values(project.store)) {
-      if (isObject(run) && isLiveDrainRun(run)) busy += 1;
+    for (const run of shownRuns(project, pidAlive)) {
+      if (isLiveDrainRun(run)) busy += 1;
     }
     total += slotsOf(readDrainSettings(project.mainCheckout).parallel);
   }
