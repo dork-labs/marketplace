@@ -13,6 +13,7 @@ you until you **reinstall it** (Marketplace → flow → reinstall, or re-run yo
 - Every scheduled job now checks the pause the same way, by running the drain's first step, so there is one copy of that check to keep right.
 - The stories behind the rules (the first backlog clean-up, the review rubric that went missing outside a git folder, and others) moved to `docs/why.md`, with a table of where each shared rule lives.
 - The README no longer repeats what each stage does; it points at the "What flow is" page.
+- The guide for building an adapter for a new tracker is about half as long. It points at the adapter rules instead of copying them, and keeps the steps: fill in the tables, build a test file, run the checker until it passes.
 
 
 ## 0.46.0
