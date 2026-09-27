@@ -9,7 +9,8 @@ you until you **reinstall it** (Marketplace → flow → reinstall, or re-run yo
 **Follow-up work and triage now go through flow's own commands, so they come out the same way every time. Reinstall to get it.**
 
 - When `/flow:done` files follow-up work, it now uses `flow create`. Each follow-up gets a type, a priority, the finished item's project and an `origin/from-agent` label, and it is never marked ready when it is filed. Running `/flow:done` again does not file the same follow-up twice.
-- New command: `flow triage`. `--ready --stage <stage>` marks an item ready to work on and says where the work starts. `--park '<question>'` posts one question and marks the item as waiting on a person. It never posts the same question twice, and it refuses an item that is closed or that an agent is already working on. `--dry-run` shows what it would do.
+- New command: `flow triage`. `--ready --stage <stage>` marks an item ready to work on and says where the work starts. `--park '<question>'` posts one question and marks the item as waiting on a person. It never posts the same question twice, and it refuses an item that is closed or that an agent is already working on. `--dry-run` shows what it would do. A question with quotes, a `$` or several lines can come from a file with `--question-file`; a file in `.dork/flow/tmp/` is deleted once the question is posted.
+- `flow retro` now measures how long new work takes to become ready, from the items `flow triage` marks ready.
 - `/flow:triage` now uses `flow triage` to mark an item ready or waiting. Setting an item's type and priority works as before.
 - The self-test's live tier now checks two things it used to skip: a triage ends with the item either ready or waiting on exactly one question, and a finished item with follow-up work gets exactly one well-formed follow-up, which is marked ready only if it really is.
 

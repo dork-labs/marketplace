@@ -71,7 +71,8 @@ Exit 4: run it again.
 
 The item's type and `## On Completion` section say what follows (a
 `type/hypothesis` gets a `type/monitor` holding its validation criteria). File
-each with the step 3 command's `create` verb:
+each with `flow create` (here `flow` is
+`node --experimental-strip-types "<flow-root>/scripts/flow.ts"`):
 
 ```bash
 flow create --title '<title>' --description-file .dork/flow/tmp/<key>.md \
@@ -80,8 +81,8 @@ flow create --title '<title>' --description-file .dork/flow/tmp/<key>.md \
 ```
 
 Always a type, a priority and a project (the closed item's); never an `agent/*`
-label. The key makes a retry return the first item. Quote titles and write the
-description file as the capture skill's step 3 says
+label. The key makes a retry return the first item. Titles and description
+files follow the capture skill's step 3
 (`<flow-root>/skills/capturing-work/SKILL.md`).
 
 Then triage it right away (`<flow-root>/skills/triaging-work/SKILL.md`, Path B):

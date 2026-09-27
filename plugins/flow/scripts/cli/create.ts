@@ -19,11 +19,7 @@
  *   item is closed, the same key files a new one.
  * - `--dry-run` prints the planned item and writes nothing.
  * - A `--description-file` under `.dork/flow/tmp/` is removed once the item
- *   is filed or found; a failed or dry run keeps it for the retry. A file
- *   anywhere else is left alone, judged by real path: a `.dork/flow/tmp` that
- *   links out of the project is not flow's scratch, checked when it is read
- *   and again right before it is removed. Reading one (except on a dry run)
- *   adds `.dork/flow/tmp/` to git's local exclude unless git already ignores it.
+ *   is filed or found, by the scratch-file rule in `scratch-file.ts`.
  *
  * `created` is false when the item was already open before this run: found by
  * its marker, or handed back by the adapter for the key. Two runs racing on
@@ -36,17 +32,14 @@
  * @module @dorkos/flow/cli/create
  */
 
-import { lstatSync, readFileSync, realpathSync, rmSync } from 'node:fs';
-import path from 'node:path';
-
 import { findConfigRoots } from '../config-files.ts';
 import { loadConfig } from '../config-load.ts';
 import { UsageError } from '../errors.ts';
-import { ensureIgnored } from '../git-exclude.ts';
 import { requireCapabilities } from '../tracker/load.ts';
 import type { Capability, NewItem } from '../tracker/types.ts';
 import { labelGroup } from '../work-state.ts';
 import type { VerbContext, VerbResult } from './context.ts';
+import { flagText, removeScratch } from './scratch-file.ts';
 import { signBody } from './provenance.ts';
 import { sessionProvenance } from './work-write.ts';
 
@@ -64,91 +57,6 @@ const KEY_MAX = 200;
  */
 export function keyMarker(key: string): string {
   return `<!-- flow-create:key=${key} -->`;
-}
-
-/** Where a description file is scratch that `flow create` removes once it is done with it. */
-export const SCRATCH_DIR = path.join('.dork', 'flow', 'tmp');
-
-/** The description, and the scratch file to remove once the run is done with it. */
-interface Description {
-  /** The text. */
-  text: string;
-  /**
-   * The `--description-file` as given (resolved against the project), when it
-   * was scratch at read time. {@link removeScratch} checks it again before it
-   * deletes anything.
-   */
-  scratch?: string;
-}
-
-/**
- * The description from `--description` or `--description-file`, exactly one
- * of them. Reading a scratch file keeps `.dork/flow/tmp/` out of git, except
- * on a dry run, which writes nothing.
- */
-function descriptionText(ctx: VerbContext): Description {
-  const inline = ctx.args.flags.description;
-  const file = ctx.args.flags['description-file'];
-  if ((typeof inline === 'string') === (typeof file === 'string')) {
-    throw new UsageError('pass exactly one of --description <text> or --description-file <path>');
-  }
-  if (typeof inline === 'string') return { text: inline };
-  const resolved = path.resolve(ctx.projectDir, file as string);
-  let text: string;
-  try {
-    text = readFileSync(resolved, 'utf8');
-  } catch {
-    throw new UsageError(`could not read the description file ${resolved}`);
-  }
-  const real = scratchFile(ctx, resolved);
-  if (real === undefined) return { text };
-  if (!ctx.dryRun) {
-    try {
-      const project = realpathSync(ctx.projectDir);
-      ensureIgnored(
-        project,
-        path.relative(project, real),
-        `${SCRATCH_DIR.split(path.sep).join('/')}/`
-      );
-    } catch {
-      // Not a git checkout, or git missing: the file is removed after the run anyway.
-    }
-  }
-  return { text, scratch: resolved };
-}
-
-/**
- * The real path of a description file that is flow's scratch, else
- * `undefined`. Paths are compared as real paths, so a `.dork`, `.dork/flow` or
- * `.dork/flow/tmp` that is a link out of the project makes nothing scratch, and
- * only a regular file (not a link) counts. Any path that cannot be resolved
- * counts as not scratch.
- */
-function scratchFile(ctx: VerbContext, file: string): string | undefined {
-  try {
-    const project = realpathSync(ctx.projectDir);
-    const tmp = realpathSync(path.join(ctx.projectDir, SCRATCH_DIR));
-    if (tmp !== path.join(project, SCRATCH_DIR)) return undefined;
-    if (!lstatSync(file).isFile()) return undefined;
-    const real = realpathSync(file);
-    const rel = path.relative(tmp, real);
-    if (rel === '' || rel.startsWith('..') || path.isAbsolute(rel)) return undefined;
-    return real;
-  } catch {
-    return undefined;
-  }
-}
-
-/**
- * Remove a scratch description file once the item is filed or found, so none
- * is left behind in a repo where `.dork/flow/` is not ignored. A failed or
- * dry run keeps it, for the retry. The scratch checks run again first: a
- * folder swapped for a link during the tracker call is never followed.
- */
-function removeScratch(ctx: VerbContext, file: string | undefined): void {
-  if (file === undefined) return;
-  const real = scratchFile(ctx, file);
-  if (real !== undefined) rmSync(real, { force: true });
 }
 
 /** The labels, each once, refused when one is `agent/*` or two share a group. */
@@ -216,7 +124,15 @@ export async function run(ctx: VerbContext): Promise<VerbResult> {
   const rawTitle = ctx.args.flags.title;
   const title = typeof rawTitle === 'string' ? rawTitle.trim() : '';
   if (title === '') throw new UsageError('pass a non-empty --title');
-  const { text, scratch } = descriptionText(ctx);
+  const given = flagText(ctx, {
+    inline: 'description',
+    file: 'description-file',
+    what: 'description',
+  });
+  if (given === undefined) {
+    throw new UsageError('pass --description <text> or --description-file <path>');
+  }
+  const { text, scratch } = given;
   const description = text.trimEnd();
   if (description.trim() === '') throw new UsageError('the description is empty');
   const labels = labelList(ctx);

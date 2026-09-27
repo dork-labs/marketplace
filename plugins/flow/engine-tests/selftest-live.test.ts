@@ -992,6 +992,12 @@ describe('the live oracles', { timeout: LIVE_TIMEOUT }, () => {
         writeFileSync(s.backlogFile, JSON.stringify(store));
       })
     ).toMatch(/completed without agent\/completed/);
+    expect(
+      await judge('done', (s) => {
+        flow(s, 'done', 'FAKE-2', '--summary', 'Shipped');
+        flow(s, 'create', '--title', 'Unasked', '--description', 'x', '--label', 'type/task');
+      })
+    ).toMatch(/nothing follows FAKE-2, but FAKE-3 was filed/);
   });
 
   it('capture fails when the plugin never loaded, even with the item in place', async () => {

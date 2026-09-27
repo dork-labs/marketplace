@@ -339,7 +339,14 @@ export const LIVE_CASES: readonly LiveCase[] = [
         labels: ['type/task', 'origin/human', 'agent/claimed'],
       }),
     ]),
-    oracle: ({ after }) => notDone(after, 'FAKE-2'),
+    oracle: ({ before, after }) => {
+      const open = notDone(after, 'FAKE-2');
+      if (open !== undefined) return open;
+      const added = after.items.filter((i) => find(before, i.identifier) === undefined);
+      return added.length === 0
+        ? undefined
+        : `nothing follows FAKE-2, but ${added.map((i) => i.identifier).join(', ')} was filed`;
+    },
   },
   {
     id: 'done/follow-up',

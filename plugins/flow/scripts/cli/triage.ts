@@ -1,33 +1,46 @@
 /**
- * `flow triage <identifier> (--ready --stage <stage> | --park <question>)`: the
+ * `flow triage <identifier> (--ready --stage <stage> | --park <question> |
+ * --question-file <path>)`: the
  * one tracker write that ends a triage. The triaging-work skill makes the
  * judgment (accept or ask, simple or complex); this verb writes the outcome.
  *
  * - `--ready --stage <stage>` makes the item claimable: unstarted,
  *   `agent/ready`, and the stage's `stage/*` label, which is the release-to-ready
  *   projection with an explicit stage (`work-state.ts`).
- * - `--park <question>` posts the question as a signed comment (asking for a
- *   reply), then applies
- *   the needs-input projection: `agent/needs-input` replaces any other
- *   `agent/*` label. A retry whose question is still the item's latest comment
- *   does not post it twice.
+ * - `--park <question>` (or `--question-file`, for a question a shell
+ *   argument would break) posts the question as a signed comment asking for a
+ *   reply, then applies the needs-input projection: `agent/needs-input`
+ *   replaces any other `agent/*` label. A retry whose question is still the
+ *   item's latest comment does not post it twice. A question file under
+ *   `.dork/flow/tmp/` is removed once the item is parked (`scratch-file.ts`).
  *
- * Refuses before any tracker write: not exactly one of `--ready` and `--park`,
+ * Journal: besides the `verb` line `main` writes, an item that was not
+ * already ready gets `item.readied` (`by: triage`), and an item that was not
+ * already parked gets `operator.wait` `start`, so a retry writes neither twice.
+ *
+ * Refuses before any tracker write: not exactly one of `--ready` and a question,
  * `--stage` without `--ready` (or `--ready` without it), an empty question, a
  * stage that is not in config or has no label, a closed item, and an item an
  * agent is on (started, or `agent/claimed`). Setting the type, priority or
  * size is not this verb's job: no adapter capability writes them.
  *
- * `--dry-run` prints the change and writes nothing. Its journal line is the
- * `verb` line `main` writes for every run.
+ * `--dry-run` prints the change and writes nothing.
  *
  * @module @dorkos/flow/cli/triage
  */
 
 import { PreconditionError, UsageError } from '../errors.ts';
-import { AGENT_CLAIMED, projectionFor, type WorkStateChange } from '../work-state.ts';
+import {
+  AGENT_CLAIMED,
+  AGENT_NEEDS_INPUT,
+  AGENT_READY,
+  projectionFor,
+  type WorkStateChange,
+} from '../work-state.ts';
+import { recordEvent } from './auto-journal.ts';
 import type { VerbContext, VerbResult } from './context.ts';
 import { signBody, unsignedBody } from './provenance.ts';
+import { flagText, removeScratch } from './scratch-file.ts';
 import { applyAndVerify, requireOpen, sessionProvenance, setupWrite } from './work-write.ts';
 
 /** How many of the latest comments are read to spot a retried question. */
@@ -43,14 +56,16 @@ export async function run(ctx: VerbContext): Promise<VerbResult> {
   // Every usage refusal comes before the config, the adapter or any tracker call.
   const [identifier] = ctx.args.positionals;
   const ready = ctx.args.flags.ready === true;
-  const rawPark = ctx.args.flags.park;
-  const park = typeof rawPark === 'string' ? rawPark.trim() : undefined;
+  const question = flagText(ctx, { inline: 'park', file: 'question-file', what: 'question' });
+  const park = question?.text.trim();
   const rawStage = ctx.args.flags.stage;
   const stage = typeof rawStage === 'string' ? rawStage : undefined;
   if (ready === (park !== undefined)) {
-    throw new UsageError('pass exactly one of --ready or --park <question>');
+    throw new UsageError(
+      'pass exactly one of --ready, --park <question> or --question-file <path>'
+    );
   }
-  if (park === '') throw new UsageError('--park needs the question to ask');
+  if (park === '') throw new UsageError('the question to park on is empty');
   if (ready && stage === undefined) {
     throw new UsageError('--ready needs --stage <stage>: a ready item says where to resume');
   }
@@ -82,7 +97,16 @@ export async function run(ctx: VerbContext): Promise<VerbResult> {
     commented = last === undefined || unsignedBody(last.body) !== unsignedBody(body);
     if (!ctx.dryRun && commented) await adapter.comment(item, body);
   }
-  if (!ctx.dryRun) await applyAndVerify(adapter, item, change);
+  if (!ctx.dryRun) {
+    await applyAndVerify(adapter, item, change);
+    removeScratch(ctx, question?.scratch);
+    if (ready && !item.labels.includes(AGENT_READY)) {
+      recordEvent(ctx, { kind: 'item.readied', by: 'triage', item: identifier });
+    }
+    if (!ready && !item.labels.includes(AGENT_NEEDS_INPUT)) {
+      recordEvent(ctx, { kind: 'operator.wait', phase: 'start', item: identifier });
+    }
+  }
 
   const verb = ctx.dryRun ? 'Would mark' : 'Marked';
   return {

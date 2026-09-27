@@ -4,7 +4,7 @@
  * `agent/needs-input`. Every refusal comes before any tracker write.
  */
 
-import { readFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
@@ -287,6 +287,19 @@ describe('flow triage refuses before any write', () => {
   });
 });
 
+/** Every journal line the project holds, parsed. */
+function journal(): Record<string, unknown>[] {
+  const file = path.join(project.dir, '.dork', 'flow', 'journal.jsonl');
+  if (!existsSync(file)) return [];
+  return readFileSync(file, 'utf8')
+    .trim()
+    .split('\n')
+    .map((line) => JSON.parse(line) as Record<string, unknown>);
+}
+
+/** The journal lines of one kind, verb lines left out. */
+const ofKind = (kind: string) => journal().filter((line) => line.kind === kind);
+
 describe('flow triage journal', () => {
   it('gets its verb line from main, naming the item', async () => {
     await runFlow(project, { items: [untriaged()] }, [
@@ -296,12 +309,139 @@ describe('flow triage journal', () => {
       '--stage',
       'execute',
     ]);
-    const lines = readFileSync(path.join(project.dir, '.dork', 'flow', 'journal.jsonl'), 'utf8')
-      .trim()
-      .split('\n')
-      .map((line) => JSON.parse(line) as Record<string, unknown>);
-    expect(lines).toContainEqual(
+    expect(journal()).toContainEqual(
       expect.objectContaining({ kind: 'verb', verb: 'triage', item: 'FAKE-1' })
     );
+  });
+
+  it('writes item.readied by triage on --ready, once: a retry on a ready item writes none', async () => {
+    // Purpose: the retro's capture-to-ready median reads these lines; a retry
+    // must not count one item twice.
+    const first = await runFlow(project, { items: [untriaged()] }, [
+      'triage',
+      'FAKE-1',
+      '--ready',
+      '--stage',
+      'execute',
+    ]);
+    expect(ofKind('item.readied')).toEqual([
+      expect.objectContaining({ kind: 'item.readied', by: 'triage', item: 'FAKE-1' }),
+    ]);
+    expect(ofKind('operator.wait')).toEqual([]);
+    await runFlow(project, first.tracker, ['triage', 'FAKE-1', '--ready', '--stage', 'execute']);
+    expect(ofKind('item.readied')).toHaveLength(1);
+  });
+
+  it('writes operator.wait start on --park, once: a retry on a parked item writes none', async () => {
+    const first = await runFlow(project, { items: [untriaged()] }, [
+      'triage',
+      'FAKE-1',
+      '--park',
+      'Which report?',
+    ]);
+    expect(ofKind('operator.wait')).toEqual([
+      expect.objectContaining({ kind: 'operator.wait', phase: 'start', item: 'FAKE-1' }),
+    ]);
+    expect(ofKind('item.readied')).toEqual([]);
+    await runFlow(project, first.tracker, ['triage', 'FAKE-1', '--park', 'Which report?']);
+    expect(ofKind('operator.wait')).toHaveLength(1);
+  });
+
+  it('writes neither on --dry-run', async () => {
+    await runFlow(project, { items: [untriaged()] }, [
+      'triage',
+      'FAKE-1',
+      '--park',
+      'Which report?',
+      '--dry-run',
+    ]);
+    await runFlow(project, { items: [untriaged()] }, [
+      'triage',
+      'FAKE-1',
+      '--ready',
+      '--stage',
+      'execute',
+      '--dry-run',
+    ]);
+    expect([...ofKind('item.readied'), ...ofKind('operator.wait')]).toEqual([]);
+  });
+});
+
+describe('flow triage --question-file', () => {
+  /** Write a file in the project and return its path relative to it. */
+  function put(rel: string, text: string): string {
+    mkdirSync(path.dirname(path.join(project.dir, rel)), { recursive: true });
+    writeFileSync(path.join(project.dir, rel), text);
+    return rel;
+  }
+
+  const QUESTION = `Isn't "monthly" the only report? It costs $5 to run \`export\`.\nOr all of them?\n`;
+
+  it('posts a question a shell argument would break, and removes the scratch file', async () => {
+    // Purpose: quotes, $, backticks and newlines reach the comment intact, and
+    // flow's scratch file does not stay behind in the checkout.
+    const file = put('.dork/flow/tmp/FAKE-1-question.md', QUESTION);
+    const result = await runFlow(project, { items: [untriaged()] }, [
+      'triage',
+      'FAKE-1',
+      '--question-file',
+      file,
+    ]);
+    expect(result.code).toBe(EXIT.ok);
+    const comment = result.tracker.calls.find((call) => call.method === 'comment') as {
+      body: string;
+    };
+    expect(comment.body.startsWith(`${QUESTION.trim()}\n\nReply to this comment to go on.`)).toBe(
+      true
+    );
+    expect(result.tracker.backlog.items[0].labels).toContain('agent/needs-input');
+    expect(existsSync(path.join(project.dir, file))).toBe(false);
+  });
+
+  it('keeps a question file outside .dork/flow/tmp, and keeps a scratch one on --dry-run', async () => {
+    const outside = put('question.md', QUESTION);
+    await runFlow(project, { items: [untriaged()] }, [
+      'triage',
+      'FAKE-1',
+      '--question-file',
+      outside,
+    ]);
+    expect(existsSync(path.join(project.dir, outside))).toBe(true);
+    const scratch = put('.dork/flow/tmp/q.md', QUESTION);
+    const dry = await runFlow(project, { items: [untriaged()] }, [
+      'triage',
+      'FAKE-1',
+      '--question-file',
+      scratch,
+      '--dry-run',
+    ]);
+    expect(dry.tracker.calls).toEqual([]);
+    expect(existsSync(path.join(project.dir, scratch))).toBe(true);
+  });
+
+  it('keeps the scratch file when the write fails, for the retry', async () => {
+    const scratch = put('.dork/flow/tmp/q.md', QUESTION);
+    const result = await runFlow(project, { items: [untriaged()], dropWrites: true }, [
+      'triage',
+      'FAKE-1',
+      '--question-file',
+      scratch,
+    ]);
+    expect(result.code).toBe(EXIT.tracker);
+    expect(existsSync(path.join(project.dir, scratch))).toBe(true);
+  });
+
+  it('refuses --park with --question-file, --ready with either, and a missing file, before any write', async () => {
+    const file = put('.dork/flow/tmp/q.md', QUESTION);
+    for (const argv of [
+      ['triage', 'FAKE-1', '--park', 'Why?', '--question-file', file],
+      ['triage', 'FAKE-1', '--ready', '--stage', 'execute', '--question-file', file],
+      ['triage', 'FAKE-1', '--question-file', 'nowhere.md'],
+    ]) {
+      const result = await runFlow(project, { items: [untriaged()] }, argv);
+      expect(result.code, argv.join(' ')).toBe(EXIT.usage);
+      expect(result.tracker.calls).toEqual([]);
+    }
+    expect(existsSync(path.join(project.dir, file))).toBe(true);
   });
 });

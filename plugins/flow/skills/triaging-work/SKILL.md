@@ -42,12 +42,12 @@ flow triage <id> --ready --stage <execute|ideate> --json   # agent/ready + stage
 flow triage <id> --park '<question>' --json               # signed question + agent/needs-input
 ```
 
-`--ready` makes the item claimable with the stage label that says where the work
-starts; `--park` asks one question (single quotes, none inside) and parks the item
-until a person answers, never posting the same question twice. It refuses a
-closed item or one an agent is working. It does not set type, priority or size:
-those stay adapter writes. Exit 3: this tracker cannot take the write; exit 4:
-run it again.
+`--ready` says where the work starts; `--park` asks one question, never twice,
+and parks the item until a person answers. A question that is not one plain line
+goes in `.dork/flow/tmp/<id>-question.md`, passed as `--question-file` (the
+capture skill's step 3 rule, `<flow-root>/skills/capturing-work/SKILL.md`). Type,
+priority and size stay adapter writes. Exit 3: this tracker cannot take the
+write; exit 4: run it again.
 
 Read the adapter skill's contract before acting. It is the `SKILL.md` at the `adapter.path` that
 `node --experimental-strip-types "<flow-root>/scripts/config-files.ts"` prints: the
