@@ -83,9 +83,9 @@ import { invokedDirectly, isPlainObject } from './_shared.ts';
 import { addExcludeLines } from './git-exclude.ts';
 import { validateConfig, type ValidationIssue } from './validate-config.ts';
 
-import { CONFIG_FILE, LOCAL_CONFIG_FILE, PROJECT_CONFIG_DIR } from './config-names.ts';
+import { CONFIG_FILE, LOCAL_CONFIG_FILE, PAUSE_FILE, PROJECT_CONFIG_DIR } from './config-names.ts';
 
-export { CONFIG_FILE, LOCAL_CONFIG_FILE, PROJECT_CONFIG_DIR };
+export { CONFIG_FILE, LOCAL_CONFIG_FILE, PAUSE_FILE, PROJECT_CONFIG_DIR };
 /**
  * The file a migration leaves in the old plugin `config/` folder, holding the
  * path of the project the settings moved to. A folder carrying it is never read
@@ -122,12 +122,6 @@ export const ADAPTER_FILE = 'SKILL.md';
 export const SHIPPED_ADAPTERS: readonly string[] = ['linear'];
 /** The tracker a config names when it names none (the schema default). */
 export const DEFAULT_TRACKER = 'linear';
-/**
- * The file whose presence pauses flow's autonomy on this machine. It sits beside
- * `config.local.json` and, like it, is never committed.
- */
-export const PAUSE_FILE = 'paused.json';
-
 /**
  * The folder, relative to the project's main checkout, holding flow's local run
  * files: the journal, the self-test results. Kept out of git through

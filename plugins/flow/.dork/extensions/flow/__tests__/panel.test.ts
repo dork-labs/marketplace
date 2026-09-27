@@ -1,0 +1,450 @@
+/**
+ * The Flow panel's server side (spec `claude-account-ui` §8.5): the state
+ * pill table, the slots math, `GET /panel` over flow's own files, pause and
+ * resume through flow's own `config-files.ts`, and the throttled `panel` event.
+ */
+
+import { execFile } from 'node:child_process';
+import { existsSync, mkdirSync, rmSync, writeFileSync } from 'node:fs';
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import type { ExecFileLike } from '../lib/advisor.ts';
+import type { AccountUsage } from '../lib/host-types.ts';
+import {
+  CheckoutResolver,
+  discoverCheckouts,
+  isLiveDrainRun,
+  pauseFlagPath,
+  runState,
+  slotsOf,
+  type PanelModel,
+  type RunPill,
+} from '../lib/panel.ts';
+import { EMIT_INTERVAL_MS } from '../lib/panel-service.ts';
+import { createFlowExtension } from '../server.ts';
+import {
+  fakeCtx,
+  fakeRouter,
+  git,
+  makeWorld,
+  runRecord,
+  writeFleet,
+  writeLedger,
+  writeRuns,
+  type World,
+} from './fixtures.ts';
+
+/** The real extension folder, so pause and resume run flow's real `config-files.ts`. */
+const EXTENSION_DIR = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
+
+const NOW = new Date('2026-09-27T12:00:00.000Z');
+
+let world: World;
+
+beforeEach(() => {
+  world = makeWorld();
+});
+
+afterEach(() => {
+  vi.useRealTimers();
+  world.cleanup();
+});
+
+/** One usage row as DorkOS serves it. */
+function usage(id: string, extra: Partial<AccountUsage> = {}): AccountUsage {
+  return {
+    runtime: 'claude-code',
+    accountId: id,
+    label: null,
+    color: '#2563eb',
+    windows: [
+      {
+        key: 'five_hour',
+        label: '5-hour',
+        usedPct: 40,
+        resetsAt: '2026-09-27T14:10:00.000Z',
+        status: 'allowed',
+        expired: false,
+        observedAt: NOW.toISOString(),
+        source: 'statusline',
+      },
+      {
+        key: 'seven_day',
+        label: 'This week',
+        usedPct: 72,
+        resetsAt: '2026-09-30T15:00:00.000Z',
+        status: 'allowed',
+        expired: false,
+        observedAt: NOW.toISOString(),
+        source: 'statusline',
+      },
+    ],
+    state: 'ok',
+    limit: null,
+    updatedAt: NOW.toISOString(),
+    ...extra,
+  };
+}
+
+/** Build the extension over the fixture world. */
+function setup(opts: Parameters<typeof fakeCtx>[1] = {}) {
+  const router = fakeRouter();
+  const host = fakeCtx(world, opts);
+  const ext = createFlowExtension(router, host.ctx, {
+    now: () => NOW,
+    originOf: () => null,
+    log: () => {},
+    execFile: execFile as never,
+  });
+  return { router, host, ext };
+}
+
+/** GET /panel's body. */
+async function panel(
+  router: ReturnType<typeof fakeRouter>,
+  cwd: string = world.worktree
+): Promise<PanelModel> {
+  const sent = await router.call('get', '/panel', { query: { cwd } });
+  expect(sent.status).toBe(200);
+  return sent.body as PanelModel;
+}
+
+/** Write the project's committed flow settings. */
+function writeConfig(main: string, drain: Record<string, unknown>): void {
+  mkdirSync(path.join(main, '.agents', 'flow'), { recursive: true });
+  writeFileSync(path.join(main, '.agents', 'flow', 'config.json'), JSON.stringify({ drain }));
+}
+
+describe('runState', () => {
+  const rows: [string, Record<string, unknown>, RunPill][] = [
+    [
+      'a handoff under way',
+      { limit: { state: 'handing-off' }, drain: { phase: 'working' } },
+      'handing-off',
+    ],
+    ['winding down before a move', { limit: { state: 'winding-down' } }, 'handing-off'],
+    [
+      'ask mode waiting for the operator',
+      { limit: { state: 'pending-approval' } },
+      'waiting-on-you',
+    ],
+    [
+      "a person's hold that will not resume itself",
+      { limit: { state: 'waiting-reset', heldBy: 'person', resumeOnReset: false } },
+      'waiting-on-you',
+    ],
+    ['parked for a person', { drain: { phase: 'parked', parkedFor: 'person' } }, 'waiting-on-you'],
+    ['parked for another reason', { drain: { phase: 'parked', parkedFor: 'other' } }, 'parked'],
+    ['parked by an older flow', { drain: { phase: 'parked' } }, 'parked'],
+    ['waiting for the reset', { limit: { state: 'waiting-reset' } }, 'parked'],
+    ['awaiting a handoff', { limit: { state: 'awaiting-handoff' } }, 'parked'],
+    [
+      "a person's hold that resumes at the reset",
+      { limit: { heldBy: 'person', resumeOnReset: true } },
+      'parked',
+    ],
+    ['reviewing', { drain: { phase: 'reviewing' } }, 'in-review'],
+    ['PR ready', { drain: { phase: 'pr-ready' } }, 'in-review'],
+    ['watching the PR', { drain: { phase: 'watching' } }, 'in-review'],
+    ['working', { drain: { phase: 'working' } }, 'building'],
+    ['fixing', { drain: { phase: 'fixing' } }, 'building'],
+    ['fixing CI', { drain: { phase: 'fixing-ci' } }, 'building'],
+    ['closing', { drain: { phase: 'closing' } }, 'building'],
+    ['queued', { status: 'queued' }, 'building'],
+    ['an interactive run', { status: 'running' }, 'building'],
+    ['not a record', {}, 'building'],
+  ];
+  it.each(rows)('%s', (_name, run, pill) => {
+    expect(runState(run)).toBe(pill);
+  });
+});
+
+describe('slots', () => {
+  it('counts the sequential default as one slot', () => {
+    expect(slotsOf(0)).toBe(1);
+    expect(slotsOf(3)).toBe(3);
+  });
+
+  it('counts only queued or running drain runs that are not parked as live', () => {
+    const drain = (phase: string) => ({ v: 1, rev: 1, phase });
+    expect(isLiveDrainRun({ status: 'running', drain: drain('working') })).toBe(true);
+    expect(isLiveDrainRun({ status: 'queued', drain: drain('working') })).toBe(true);
+    expect(isLiveDrainRun({ status: 'running', drain: drain('parked') })).toBe(false);
+    expect(isLiveDrainRun({ status: 'waiting_for_review', drain: drain('watching') })).toBe(false);
+    expect(isLiveDrainRun({ status: 'running' })).toBe(false);
+  });
+});
+
+describe('discoverCheckouts', () => {
+  it("finds the projects behind the drain's worktrees and the chats' folders, once each", () => {
+    const repoDir = path.join(world.dorkHome, 'workspaces', 'app');
+    mkdirSync(repoDir, { recursive: true });
+    git(world.main, 'worktree', 'add', '-q', '-b', 'dork/acme-2', path.join(repoDir, 'ACME-2'));
+    mkdirSync(path.join(repoDir, 'not-a-worktree'));
+    const resolve = vi.fn((cwd: string) =>
+      cwd.startsWith(world.root) && !cwd.endsWith('elsewhere') ? world.main : null
+    );
+    const resolver = new CheckoutResolver(resolve);
+    const found = discoverCheckouts(
+      world.dorkHome,
+      [world.worktree, path.join(world.root, 'elsewhere')],
+      resolver
+    );
+    expect(found).toEqual([world.main]);
+    discoverCheckouts(world.dorkHome, [world.worktree], resolver);
+    // Each folder is resolved once and remembered.
+    expect(resolve.mock.calls.map(([cwd]) => cwd).sort()).toEqual(
+      [path.join(repoDir, 'ACME-2'), world.worktree, path.join(world.root, 'elsewhere')].sort()
+    );
+  });
+});
+
+describe('GET /panel', () => {
+  it('shows every account with its usage, and every active run with its state', async () => {
+    writeFleet(world.dorkHome, { accounts: { 'claude-code:work': { role: 'main' } } });
+    writeLedger(
+      world.dorkHome,
+      'claude-code',
+      'work',
+      { seven_day: { usedPct: 72, resetsAt: '2026-09-30T15:00:00.000Z' } },
+      NOW.toISOString()
+    );
+    writeConfig(world.main, { parallel: 3 });
+    writeRuns(world, {
+      i1: runRecord(world, { title: 'account chip' }),
+      i2: runRecord(world, {
+        issueId: 'i2',
+        identifier: 'ACME-2',
+        sessionId: '',
+        status: 'queued',
+        worktreePath: '',
+        account: 'personal',
+        drain: { v: 1, rev: 1, phase: 'working' },
+      }),
+      i3: runRecord(world, {
+        issueId: 'i3',
+        identifier: 'ACME-3',
+        sessionId: 's-3',
+        drain: { v: 1, rev: 1, phase: 'parked', parkedFor: 'person' },
+      }),
+      i4: runRecord(world, { issueId: 'i4', identifier: 'ACME-4', status: 'complete' }),
+    });
+    const { router } = setup({
+      usage: [
+        usage('work', { subscriptionType: 'max' }),
+        usage('personal', {
+          state: 'limited',
+          limit: { window: 'seven_day', resetsAt: '2026-09-29T15:00:00.000Z' },
+        }),
+      ],
+    });
+    const model = await panel(router);
+
+    expect(model.accounts.map((a) => [a.key, a.label, a.reserved])).toEqual([
+      ['claude-code:work', 'Work', true],
+      ['claude-code:personal', 'personal', false],
+      ['codex:default', "Codex (this computer's sign-in)", false],
+    ]);
+    const [work, personal, codex] = model.accounts;
+    expect(work).toMatchObject({
+      runtime: 'claude-code',
+      id: 'work',
+      color: '#2563eb',
+      out: null,
+      plan: 'max',
+      windows: {
+        five_hour: { usedPct: 40, resetsAt: '2026-09-27T14:10:00.000Z', status: 'allowed' },
+        seven_day: { usedPct: 72, resetsAt: '2026-09-30T15:00:00.000Z', status: 'allowed' },
+      },
+    });
+    expect(personal.out).toEqual({ resetsAt: '2026-09-29T15:00:00.000Z' });
+    expect(codex.windows).toEqual({ five_hour: null, seven_day: null });
+    expect(codex.plan).toBeNull();
+
+    expect(model.runs).toEqual([
+      {
+        identifier: 'ACME-1',
+        title: 'account chip',
+        sessionId: 's-old',
+        cwd: world.worktree,
+        accountKey: 'claude-code:work',
+        state: 'building',
+      },
+      {
+        identifier: 'ACME-2',
+        title: null,
+        sessionId: null,
+        cwd: world.main,
+        accountKey: 'claude-code:personal',
+        state: 'building',
+      },
+      {
+        identifier: 'ACME-3',
+        title: null,
+        sessionId: 's-3',
+        cwd: world.worktree,
+        accountKey: 'claude-code:work',
+        state: 'waiting-on-you',
+      },
+    ]);
+    // Two live drain runs (the parked one holds no slot) of drain.parallel 3.
+    expect(model.slots).toEqual({ busy: 2, total: 3 });
+    expect(model.paused).toBe('none');
+    expect(model.canPause).toBe(true);
+    expect(model.schedulesOff).toBe(false);
+  });
+
+  it('has nothing to pause when no project has flow runs or settings', async () => {
+    const { router } = setup();
+    const model = await panel(router);
+    expect(model.runs).toEqual([]);
+    expect(model.slots).toEqual({ busy: 0, total: 0 });
+    expect(model.canPause).toBe(false);
+    expect(model.paused).toBe('none');
+  });
+
+  it('counts parallel 0 as one slot per project', async () => {
+    writeConfig(world.main, {});
+    const { router } = setup();
+    expect((await panel(router)).slots).toEqual({ busy: 0, total: 1 });
+  });
+
+  it('answers 501 host-too-old on an older DorkOS', async () => {
+    const router = fakeRouter();
+    createFlowExtension(router, fakeCtx(world, { dorkHome: false }).ctx);
+    for (const [method, route] of [
+      ['get', '/panel'],
+      ['post', '/pause'],
+      ['post', '/resume'],
+    ] as const) {
+      expect(await router.call(method, route)).toEqual({
+        status: 501,
+        body: { reason: 'host-too-old' },
+      });
+    }
+  });
+});
+
+describe('POST /pause and /resume', () => {
+  it("pause and resume flow in every project shown, through flow's own pause file", async () => {
+    // A second project, covered through a chat opened in it.
+    const other = path.join(world.root, 'other');
+    mkdirSync(other);
+    git(other, 'init', '-q');
+    git(other, 'commit', '-q', '--allow-empty', '-m', 'init');
+    writeConfig(world.main, { parallel: 2 });
+    writeConfig(other, {});
+    const { router } = setup({ extensionDir: EXTENSION_DIR });
+    await panel(router, world.worktree);
+    await panel(router, other);
+
+    const paused = await router.call('post', '/pause');
+    expect(paused.status).toBe(200);
+    expect((paused.body as PanelModel).paused).toBe('all');
+    expect(existsSync(pauseFlagPath(world.main))).toBe(true);
+    expect(existsSync(pauseFlagPath(other))).toBe(true);
+
+    // Resume one by hand: the panel reads some, and Pause pauses only the rest.
+    rmSync(pauseFlagPath(other));
+    expect((await panel(router)).paused).toBe('some');
+    expect(((await router.call('post', '/pause')).body as PanelModel).paused).toBe('all');
+
+    const resumed = await router.call('post', '/resume');
+    expect(resumed.status).toBe(200);
+    expect(resumed.body as PanelModel).toMatchObject({ paused: 'none', schedulesOff: false });
+    expect(existsSync(pauseFlagPath(world.main))).toBe(false);
+    expect(existsSync(pauseFlagPath(other))).toBe(false);
+  }, 30_000);
+
+  it('notes when a resume leaves DorkOS schedules that /flow:pause switched off', async () => {
+    writeConfig(world.main, {});
+    mkdirSync(path.dirname(pauseFlagPath(world.main)), { recursive: true });
+    writeFileSync(
+      pauseFlagPath(world.main),
+      JSON.stringify({ pausedAt: NOW.toISOString(), hostSchedules: ['sched-1'] })
+    );
+    const { router } = setup({ extensionDir: EXTENSION_DIR });
+    expect((await panel(router)).paused).toBe('all');
+    const resumed = await router.call('post', '/resume');
+    expect(resumed.body as PanelModel).toMatchObject({ paused: 'none', schedulesOff: true });
+  }, 30_000);
+
+  it('answers 502 in plain words when flow could not pause', async () => {
+    writeConfig(world.main, {});
+    const router = fakeRouter();
+    const host = fakeCtx(world);
+    createFlowExtension(router, host.ctx, {
+      now: () => NOW,
+      log: () => {},
+      execFile: ((_file, _args, _opts, callback) => {
+        callback(Object.assign(new Error('boom'), { code: 1 }), '', '');
+      }) satisfies ExecFileLike,
+    });
+    await router.call('get', '/panel', { query: { cwd: world.worktree } });
+    expect(await router.call('post', '/pause')).toEqual({
+      status: 502,
+      body: { error: "Flow couldn't pause in main. Try again.", refusedBy: 'flow' },
+    });
+  });
+});
+
+describe('the panel event', () => {
+  it('sends the model when usage changes, at most once a second', async () => {
+    vi.useFakeTimers({ now: NOW, toFake: ['setTimeout', 'clearTimeout', 'Date'] });
+    const { host } = setup({ usage: [usage('work')] });
+    const changed = () => {
+      for (const listener of host.usageListeners) listener(usage('work'));
+    };
+
+    changed();
+    await vi.advanceTimersByTimeAsync(0);
+    expect(host.emit).toHaveBeenCalledTimes(1);
+    expect(host.emit.mock.calls[0][0]).toBe('panel');
+
+    // A burst inside the second shares one event, sent when the second is up.
+    const listenerUsage = usage('work', {
+      windows: [{ ...usage('work').windows[0], usedPct: 91 }],
+    });
+    host.accounts.usage.mockResolvedValue([listenerUsage]);
+    changed();
+    changed();
+    changed();
+    await vi.advanceTimersByTimeAsync(EMIT_INTERVAL_MS / 2);
+    expect(host.emit).toHaveBeenCalledTimes(1);
+    await vi.advanceTimersByTimeAsync(EMIT_INTERVAL_MS);
+    expect(host.emit).toHaveBeenCalledTimes(2);
+    const sent = host.emit.mock.calls[1][1] as PanelModel;
+    expect(sent.accounts[0].windows.five_hour?.usedPct).toBe(91);
+  });
+
+  it('sends nothing when the model did not change, and polls the run stores', async () => {
+    vi.useFakeTimers({ now: NOW, toFake: ['setTimeout', 'clearTimeout', 'Date'] });
+    const { host, router } = setup();
+    await panel(router);
+    // The panel's poll is scheduled first, before the continued-watcher's.
+    const poll = host.scheduled[0];
+    await poll();
+    await vi.advanceTimersByTimeAsync(0);
+    expect(host.emit).toHaveBeenCalledTimes(1);
+    await vi.advanceTimersByTimeAsync(EMIT_INTERVAL_MS);
+    await poll();
+    await vi.advanceTimersByTimeAsync(EMIT_INTERVAL_MS);
+    expect(host.emit).toHaveBeenCalledTimes(1);
+
+    writeRuns(world, { i1: runRecord(world) });
+    await poll();
+    await vi.advanceTimersByTimeAsync(EMIT_INTERVAL_MS);
+    expect(host.emit).toHaveBeenCalledTimes(2);
+    expect((host.emit.mock.calls[1][1] as PanelModel).runs.map((r) => r.identifier)).toEqual([
+      'ACME-1',
+    ]);
+  });
+
+  it('stops listening on dispose', () => {
+    const { host, ext } = setup();
+    expect(host.usageListeners).toHaveLength(1);
+    ext.dispose();
+    expect(host.usageListeners).toHaveLength(0);
+  });
+});

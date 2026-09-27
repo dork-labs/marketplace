@@ -799,6 +799,7 @@ export async function runPass(deps: PassDeps): Promise<PassReport> {
           parkedReason: reason,
           parkedFrom: r.drain.phase === 'parked' ? (r.drain.parkedFrom ?? null) : r.drain.phase,
           parkedAt: now.toISOString(),
+          parkedFor: 'other',
         },
       }));
       await deps.park(run.identifier, reason);
@@ -1411,6 +1412,7 @@ export async function runPass(deps: PassDeps): Promise<PassReport> {
         wakeAfter: null,
         handoffs: [],
         parkedReason: null,
+        parkedFor: null,
       },
     });
     const issueId = Object.values(deps.store.read()).find(

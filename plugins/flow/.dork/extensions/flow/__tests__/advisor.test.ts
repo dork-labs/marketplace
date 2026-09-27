@@ -141,7 +141,8 @@ describe('the advisor is registered', () => {
     expect(host.registered[0]).toBe(ext.advisor);
     ext.dispose();
     expect(host.unregister).toHaveBeenCalledTimes(1);
-    expect(host.cancelSchedule).toHaveBeenCalledTimes(1);
+    // The watcher's schedule and the Flow panel's.
+    expect(host.cancelSchedule).toHaveBeenCalledTimes(2);
   });
 });
 

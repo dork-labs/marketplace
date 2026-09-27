@@ -197,6 +197,15 @@ export interface FlowRun {
    */
   identifier: string;
   /**
+   * The item's title as the tracker gave it at claim, so a reader (the
+   * `/flow:status` surface, a DorkOS panel) can name the work without a tracker
+   * call. Written once at claim and never refreshed, so a later rename is not
+   * reflected. Absent when the title was unknown; never `null` or `""`. Optional
+   * and additive: readers ignore fields they do not know (spec `flow-cli-core`
+   * §1.3), so an older reader keeps working.
+   */
+  title?: string;
+  /**
    * The Claude SDK JSONL session id captured for this run — the resume handle.
    * With the Pulse seat, `sessionId = run.id` is captured per run, making each
    * issue independently resumable. Empty (`""`) when the claiming session could

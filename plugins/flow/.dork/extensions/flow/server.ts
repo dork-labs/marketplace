@@ -6,6 +6,9 @@
  * - `PUT /fleet/accounts/:key`, `PUT /fleet/handoff` and `PUT /fleet/cross-runtime`
  *   change `<dorkHome>/flow/fleet.json` under the contract's lock and answer the
  *   new `GET /fleet` body.
+ * - `GET /panel` answers the Flow panel's model; `POST /pause` and
+ *   `POST /resume` pause or resume flow in the projects it shows and answer the
+ *   new model. The model is also pushed as the `panel` event when it changes.
  * - On a DorkOS without `ctx.dorkHome` and the accounts API (before 0.88.0),
  *   no advisor is registered and every route answers `501 { reason: 'host-too-old' }`.
  *
@@ -21,6 +24,7 @@ import path from 'node:path';
 import { updateFleetPolicy } from '../../../scripts/fleet/accounts.ts';
 import { createAdvisor, type ExecFileLike, type FlowAdvisor } from './lib/advisor.ts';
 import { ContinuedWatcher } from './lib/continued-watcher.ts';
+import { PanelService } from './lib/panel-service.ts';
 import { GIT_TIMEOUT_MS } from './lib/run-store.ts';
 import {
   RouteError,
@@ -40,6 +44,9 @@ import type {
 
 /** How often the watcher looks at the claimed runs' stores, in seconds (the host's minimum). */
 const WATCH_INTERVAL_SECONDS = 5;
+
+/** How often the panel's projects are read again for changes, in seconds (the host's minimum). */
+const PANEL_INTERVAL_SECONDS = 5;
 
 /** What {@link createFlowExtension} can be given in place of the real machine. */
 export interface FlowExtensionOverrides {
@@ -65,6 +72,8 @@ export interface FlowExtension {
   advisor: FlowAdvisor | null;
   /** The watcher, or `null` on a host too old for one. */
   watcher: ContinuedWatcher | null;
+  /** The Flow panel's service, or `null` on a host too old for one. */
+  panel: PanelService | null;
   /** Stop the watcher and remove the advisor. */
   dispose(): void;
 }
@@ -146,7 +155,10 @@ export function createFlowExtension(
     router.put('/fleet/accounts/:key', tooOld);
     router.put('/fleet/handoff', tooOld);
     router.put('/fleet/cross-runtime', tooOld);
-    return { advisor: null, watcher: null, dispose: () => {} };
+    router.get('/panel', tooOld);
+    router.post('/pause', tooOld);
+    router.post('/resume', tooOld);
+    return { advisor: null, watcher: null, panel: null, dispose: () => {} };
   }
 
   const { dorkHome, accounts } = ctx;
@@ -189,6 +201,41 @@ export function createFlowExtension(
     })
   );
 
+  // extensionDir is <flow plugin>/.dork/extensions/flow.
+  const flowRoot = path.resolve(ctx.extensionDir, '../../..');
+  const exec = overrides.execFile ?? (execFile as unknown as ExecFileLike);
+  const panel = new PanelService({
+    dorkHome,
+    flowRoot,
+    accounts,
+    emit: (event, data) => ctx.emit(event, data),
+    execFile: exec,
+    now,
+    log,
+  });
+  router.get(
+    '/panel',
+    handle(async (req, res) => {
+      panel.noteCwd(req.query?.cwd);
+      res.status(200).json(await panel.model());
+    })
+  );
+  router.post(
+    '/pause',
+    handle(async (_req, res) => {
+      res.status(200).json(await panel.pause());
+    })
+  );
+  router.post(
+    '/resume',
+    handle(async (_req, res) => {
+      res.status(200).json(await panel.resume());
+    })
+  );
+  const stopUsage =
+    typeof accounts.onUsage === 'function' ? accounts.onUsage(() => panel.request()) : () => {};
+  const stopPanelPoll = ctx.schedule(PANEL_INTERVAL_SECONDS, async () => panel.request());
+
   let advisor: FlowAdvisor | null = null;
   const watcher = new ContinuedWatcher({
     storage: ctx.storage,
@@ -198,11 +245,10 @@ export function createFlowExtension(
   });
   advisor = createAdvisor({
     dorkHome,
-    // extensionDir is <flow plugin>/.dork/extensions/flow.
-    flowRoot: path.resolve(ctx.extensionDir, '../../..'),
+    flowRoot,
     accounts,
     now,
-    execFile: overrides.execFile ?? (execFile as unknown as ExecFileLike),
+    execFile: exec,
     originOf: overrides.originOf ?? gitOrigin,
     watcher,
     log,
@@ -214,8 +260,12 @@ export function createFlowExtension(
   return {
     advisor,
     watcher,
+    panel,
     dispose() {
       stopWatching();
+      stopPanelPoll();
+      stopUsage();
+      panel.dispose();
       unregister();
     },
   };

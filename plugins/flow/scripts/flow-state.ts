@@ -134,6 +134,8 @@ const FlowRunProvenanceSchema: z.ZodType<FlowRunProvenance> = z.looseObject({
 export const FlowRunSchema = z.looseObject({
   issueId: z.string(),
   identifier: z.string(),
+  // The item's title at claim; absent when unknown (never null or "").
+  title: z.string().optional(),
   sessionId: z.string(),
   worktreePath: z.string(),
   branch: z.string(),

@@ -258,6 +258,8 @@ async function blocked(ctx: VerbContext, run: DrainRun): Promise<VerbResult> {
       parkedReason: reason,
       parkedFrom: drain.phase === 'parked' ? (drain.parkedFrom ?? null) : drain.phase,
       parkedAt: ctx.now().toISOString(),
+      // The one park a person must answer: the item now carries agent/needs-input.
+      parkedFor: 'person',
     }),
     `run "flow report ${run.identifier} blocked" again (the question is posted, so it will not be posted twice)`
   );

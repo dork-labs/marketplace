@@ -4,6 +4,16 @@ Installs of this plugin are pinned to a commit SHA, so a fix here does not reach
 you until you **reinstall it** (Marketplace → flow → reinstall, or re-run your
 `--plugin-dir` checkout's `git pull`). Each entry below says whether that matters.
 
+## 0.44.0
+
+**A Flow panel beside your chats shows each account's usage and what flow is working on, and lets you pause flow. Reinstall to get it; it needs DorkOS 0.88.0 or newer.**
+
+- Open it from the Flow tab in the panel on the right of any chat, once the Flow extension is turned on.
+- Each account shows two small bars, for its 5-hour and weekly limits, and says when it is out or kept in reserve. Click an account to see its plan and when each limit resets.
+- Each task flow is working on shows what it is doing: building, in review, waiting on you, handing off, or parked. Click one to open its chat.
+- Pause flow stops flow from starting new work in the projects the panel shows, and Resume flow starts it again. The panel updates by itself as things change.
+- Flow now saves each task's title with it, so the panel can show the title, and it notes when a task is parked waiting for your answer.
+
 ## 0.43.1
 
 **`flow accounts pick` now works from any folder. Reinstall to get it.**

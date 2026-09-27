@@ -305,6 +305,8 @@ function park(step: Step, reason: string, taken = false): Step {
       parkedReason: reason,
       parkedFrom:
         step.drain.phase === 'parked' ? (step.drain.parkedFrom ?? null) : step.drain.phase,
+      // Only `flow report blocked` parks on a person; every park here is flow's own.
+      parkedFor: 'other',
     },
     actions: [...next.actions, { kind: 'park', reason, trackerWrite: !taken }],
   };
@@ -567,6 +569,7 @@ function readopt(
         parkedReason: null,
         parkedFrom: null,
         parkedAt: null,
+        parkedFor: null,
         nudges: 0,
       },
     },
@@ -626,6 +629,7 @@ export function drainStep(
           parkedReason: null,
           parkedFrom: null,
           parkedAt: null,
+          parkedFor: null,
         },
         actions: [],
       },
