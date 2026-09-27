@@ -25,6 +25,7 @@ import { readFileSync } from 'node:fs';
 import path from 'node:path';
 
 import { findConfigRoots, pauseState } from '../config-files.ts';
+import { withSetupNudge } from './setup-nudge.ts';
 import { PreconditionError } from '../errors.ts';
 import type { FlowRun } from '../flow-run.ts';
 import { openFlowStateFile } from '../flow-state-file.ts';
@@ -304,11 +305,15 @@ export async function run(ctx: VerbContext): Promise<VerbResult> {
   const paused = pause === null ? null : { since: pause.pausedAt, file: pause.file };
   // `ok` matches the exit code: false only when --strict found drift.
   const failed = strict && drift.length > 0;
-  return {
-    exitCode: failed ? 1 : 0,
-    json: { ok: !failed, paused, drain, inFlight, parked, drift },
-    text: render({ paused, drain, inFlight, parked, drift }, now),
-  };
+  return withSetupNudge(
+    ctx,
+    {
+      exitCode: failed ? 1 : 0,
+      json: { ok: !failed, paused, drain, inFlight, parked, drift },
+      text: render({ paused, drain, inFlight, parked, drift }, now),
+    },
+    roots
+  );
 }
 
 /** One in-flight entry from a run record and/or a tracker item. */

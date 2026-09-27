@@ -111,6 +111,10 @@
     "baseline": 2835,
     "target": 2835
   },
+  "docs/use-all-your-accounts.mdx": {
+    "baseline": 1031,
+    "target": 1031
+  },
   "docs/what-flow-is.mdx": {
     "baseline": 1691,
     "target": 1691
@@ -164,8 +168,8 @@
     "target": 594
   },
   "skills/initializing-flow/SKILL.md": {
-    "baseline": 4396,
-    "target": 4396
+    "baseline": 4390,
+    "target": 4390
   },
   "skills/linear-adapter/SKILL.md": {
     "baseline": 6905,

@@ -1211,6 +1211,40 @@ export function journalSettings(
   };
 }
 
+/** The `fleet` block's defaults; `FleetConfigSchema` must agree (a test holds them together). */
+export const FLEET_DEFAULTS = { nudge: true } as const;
+
+/** The `fleet` settings a verb reads without zod (spec `flow-cli-core` Amendment "account setup", S2). */
+export interface FleetSettings {
+  /** `fleet.nudge`: whether `status`, `fleet` and `next` suggest `flow accounts setup`. */
+  nudge: boolean;
+}
+
+/**
+ * The `fleet` block, read without zod like {@link journalSettings}:
+ * `config.local.json` wins over `config.json`, a missing or mistyped field takes
+ * its default, and a shared legacy folder is not read.
+ *
+ * @param roots - The checkouts to act for.
+ * @param files - The settings in use; resolved from `roots` when omitted.
+ * @returns The fleet settings.
+ */
+export function fleetSettings(
+  roots: ConfigRoots,
+  files: ConfigFiles = resolveConfigFiles(roots)
+): FleetSettings {
+  const block = (file: string | null): Record<string, unknown> => {
+    if (file === null || files.shared) return {};
+    const value = parseOrUndefined(readOrNull(file));
+    const fleet = isPlainObject(value) ? value.fleet : undefined;
+    return isPlainObject(fleet) ? fleet : {};
+  };
+  const merged = { ...block(files.committed), ...block(files.local) };
+  return {
+    nudge: typeof merged.nudge === 'boolean' ? merged.nudge : FLEET_DEFAULTS.nudge,
+  };
+}
+
 /** The one `.agents/flow/` that holds this project's pause: the main checkout's, else the checkout's. */
 function pauseFile(roots: ConfigRoots): string {
   return path.join(projectKey(roots), PROJECT_CONFIG_DIR, PAUSE_FILE);

@@ -49,6 +49,7 @@ confirms before overwriting committed config.
   2 GATHER     tracker + connection · identity · routing · review · model tiers
   3 ADAPTER    generate the concrete adapter, then validate until green (the gate)
   4 CONFIG     write config.json + config.local.json (secrets) + the review rubric
+  4b ACCOUNTS  flow accounts setup
   5 CONFIRM    5a connectivity (a real adapter read) + 5b policy self-check
 ```
 
@@ -436,6 +437,12 @@ the review rubric. The triad and its precedence are documented in
    guessing at severity. This file is committed, not gitignored — a rubric is
    shared policy, and it holds no secrets.
 
+### Step 4b - Accounts
+
+Follow "For scripts and agents" in `<flow-root>/docs/use-all-your-accounts.mdx`: propose
+with `flow accounts setup --json`, ask which accounts are work or client ones (never
+assume), then apply with `--yes`. Headless: skip.
+
 ### Step 5 - Confirm the install
 
 Two checks, and they answer **different questions**. Run both, and report each
@@ -514,11 +521,7 @@ can change them with another `/flow:init`.
   connectivity read fails (Step 5a), stop and say exactly what is wrong and which
   file to fix. Never report `/flow` as ready on an unverified or unreachable
   setup.
-- **Never let a policy check impersonate a connectivity check.** Step 5b runs a
-  pure function over items already in hand; it cannot reach a tracker and cannot
-  fail for a credential reason. Report it under its own label, and never treat its
-  clean empty result as evidence that anything connected. Only Step 5a can say
-  that.
+- **Never let a policy check impersonate a connectivity check** (Step 5b).
 
 ## References
 
