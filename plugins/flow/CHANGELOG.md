@@ -4,6 +4,14 @@ Installs of this plugin are pinned to a commit SHA, so a fix here does not reach
 you until you **reinstall it** (Marketplace → flow → reinstall, or re-run your
 `--plugin-dir` checkout's `git pull`). Each entry below says whether that matters.
 
+## 0.39.0
+
+**The self-test's live tier no longer fails when a file in your flow checkout is deleted while it copies the plugin. Reinstall only if you run the live tier.**
+
+- The copy skips a file or folder that disappears while it runs, and a link that leads nowhere, instead of stopping with "no such file or directory".
+- It leaves out short-lived hidden temp files, such as `.something.tmp.json`.
+- flow's own tests no longer write a temp file into the plugin folder.
+
 ## 0.37.3
 
 **Two usage readings from the same moment no longer lose the one that says an account is out. Reinstall to get it.**

@@ -35,13 +35,15 @@
 
 import { execFileSync } from 'node:child_process';
 import {
-  cpSync,
+  copyFileSync,
   existsSync,
   mkdirSync,
   mkdtempSync,
   readFileSync,
+  readdirSync,
   realpathSync,
   rmSync,
+  statSync,
   symlinkSync,
   writeFileSync,
 } from 'node:fs';
@@ -85,11 +87,81 @@ function git(dir: string, ...args: string[]): void {
 }
 
 /**
+ * A dotfile scratch name such as `.dispatch-fixture.tmp.json`, `.x.tmp` or
+ * `.tmp-123`: something a test or a tool writes into the checkout for a moment
+ * and deletes again. The copy leaves these out, since no case needs them and
+ * one can vanish while the copy is running.
+ */
+const SCRATCH_DOTFILE = /^\.(?:.*\.)?tmp(?:[.-].*)?$/i;
+
+/** `true` when `error` is Node's "no such file or directory". */
+function isMissing(error: unknown): boolean {
+  return (error as NodeJS.ErrnoException | null)?.code === 'ENOENT';
+}
+
+/**
+ * Copy `from` to `to`, following every link, skipping any entry `skip` names.
+ * An entry that disappears between being listed and being copied (another
+ * process in the checkout deleted it: a test's temp file, an editor's swap
+ * file) is skipped rather than failing the copy, and so is a link that leads
+ * nowhere. Sockets and pipes are skipped too. A link that leads back to a
+ * folder already being copied is skipped, so a loop cannot recurse forever.
+ *
+ * @param from - The file or folder to copy.
+ * @param to - Where it goes.
+ * @param skip - Leaves out an entry, given its name and full path.
+ * @param open - Real paths of the folders being copied above this one.
+ */
+function copyTree(
+  from: string,
+  to: string,
+  skip: (name: string, full: string) => boolean,
+  open: ReadonlySet<string> = new Set()
+): void {
+  let stats;
+  try {
+    stats = statSync(from);
+  } catch (error) {
+    if (isMissing(error)) return;
+    throw error;
+  }
+  if (stats.isFile()) {
+    try {
+      copyFileSync(from, to);
+    } catch (error) {
+      if (!isMissing(error)) throw error;
+    }
+    return;
+  }
+  if (!stats.isDirectory()) return;
+  let real: string;
+  let names: string[];
+  try {
+    real = realpathSync(from);
+    names = readdirSync(from);
+  } catch (error) {
+    if (isMissing(error)) return;
+    throw error;
+  }
+  if (open.has(real)) return;
+  const inside = new Set(open).add(real);
+  mkdirSync(to, { recursive: true });
+  for (const name of names) {
+    const full = path.join(from, name);
+    if (skip(name, full)) continue;
+    copyTree(full, path.join(to, name), skip, inside);
+  }
+}
+
+/**
  * Copy the flow root to `into`. Its `node_modules` is left out but for the
  * packages `package.json` lists under `dependencies` (the shipped runtime
  * needs only `zod`, which has no dependencies of its own). The root is copied
  * by its realpath and every link inside it as the file or folder it points
- * to, so nothing in the copy leads back into the checkout.
+ * to, so nothing in the copy leads back into the checkout. Dotfile scratch
+ * files are left out, and a file deleted while the copy runs is skipped: other
+ * work in the same checkout (a test run) may be creating and deleting files
+ * the whole time.
  *
  * @param flowRoot - The flow root, the operator's checkout.
  * @param into - The folder to create.
@@ -97,15 +169,14 @@ function git(dir: string, ...args: string[]): void {
 export function copyPlugin(flowRoot: string, into: string): void {
   const source = realpathSync(flowRoot);
   const modules = path.join(source, 'node_modules');
-  cpSync(source, into, { recursive: true, dereference: true, filter: (src) => src !== modules });
+  const scratch = (name: string): boolean => SCRATCH_DOTFILE.test(name);
+  copyTree(source, into, (name, full) => full === modules || scratch(name));
   const manifest = JSON.parse(readFileSync(path.join(source, 'package.json'), 'utf8')) as {
     dependencies?: Record<string, string>;
   };
   for (const name of Object.keys(manifest.dependencies ?? {})) {
     const from = path.join(modules, name);
-    if (existsSync(from)) {
-      cpSync(from, path.join(into, 'node_modules', name), { recursive: true, dereference: true });
-    }
+    if (existsSync(from)) copyTree(from, path.join(into, 'node_modules', name), scratch);
   }
 }
 
