@@ -4,6 +4,13 @@ Installs of this plugin are pinned to a commit SHA, so a fix here does not reach
 you until you **reinstall it** (Marketplace → flow → reinstall, or re-run your
 `--plugin-dir` checkout's `git pull`). Each entry below says whether that matters.
 
+## 0.42.1
+
+**The Flow tab's error messages are clearer, and a failed load has a Retry button. Reinstall to get it.**
+
+- If the tab can't load, it says "Couldn't load Flow's settings. Try again in a moment." and offers Retry.
+- If a change can't be saved, it says "Flow didn't respond, so nothing was changed. Try again."
+
 ## 0.42.0
 
 **A Flow tab in DorkOS Settings lets you choose which accounts flow may use, keep part of your main account for yourself, limit an account to certain repos, and pick whether work moves automatically when an account runs out. Reinstall to get it; it needs DorkOS 0.88.0 or newer.**

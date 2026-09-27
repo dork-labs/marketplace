@@ -1,7 +1,7 @@
 {
   "id": "flow",
   "name": "Flow",
-  "version": "0.42.0",
+  "version": "0.42.1",
   "description": "Choose how flow spends your accounts.",
   "minHostVersion": "0.88.0"
 }

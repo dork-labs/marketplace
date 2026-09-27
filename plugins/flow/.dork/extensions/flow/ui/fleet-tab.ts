@@ -28,6 +28,7 @@ import { RepoChips } from './repo-chips.ts';
 import { SegmentedControl, type SegmentOption } from './segmented.ts';
 import {
   ALERT,
+  CHIP,
   DOT,
   FIELD,
   FOCUS_CSS,
@@ -46,7 +47,10 @@ import {
 export const HOST_TOO_OLD_TEXT = 'Update DorkOS to choose how flow uses your accounts.';
 
 /** Shown when the tab could not read flow's settings and flow gave no reason. */
-export const LOAD_FAILED_TEXT = 'Flow could not be reached.';
+export const LOAD_FAILED_TEXT = "Couldn't load Flow's settings. Try again in a moment.";
+
+/** The action beside {@link LOAD_FAILED_TEXT} that loads the settings again. */
+export const RETRY_TEXT = 'Retry';
 
 /** Shown when DorkOS knows no account at all. */
 export const NO_ACCOUNTS_TEXT = 'Add Claude accounts in Settings → Runtimes first.';
@@ -347,6 +351,9 @@ export function FleetTab(): Node {
   // overwrites a newer choice that is still on its way.
   const latest = useRef(0);
 
+  // Bumped by the Retry action on a failed load, which runs the load again.
+  const [attempt, setAttempt] = useState(0);
+
   useEffect(() => {
     let live = true;
     getFleet().then(
@@ -365,7 +372,7 @@ export function FleetTab(): Node {
     return () => {
       live = false;
     };
-  }, []);
+  }, [attempt]);
 
   const write = (
     scope: Scope,
@@ -399,7 +406,23 @@ export function FleetTab(): Node {
     );
 
   if (phase.kind === 'too-old') return root(h('p', { style: MUTED }, HOST_TOO_OLD_TEXT));
-  if (phase.kind === 'failed') return root(h('p', { role: 'alert', style: ALERT }, phase.message));
+  if (phase.kind === 'failed') {
+    return root(
+      h('p', { role: 'alert', style: ALERT }, phase.message),
+      h(
+        'button',
+        {
+          type: 'button',
+          style: { ...CHIP, cursor: 'pointer' },
+          onClick: () => {
+            setPhase({ kind: 'loading' });
+            setAttempt((n) => n + 1);
+          },
+        },
+        RETRY_TEXT
+      )
+    );
+  }
   if (phase.kind === 'loading' || body === null) return root(h('div', { 'aria-busy': true }));
 
   const header = [

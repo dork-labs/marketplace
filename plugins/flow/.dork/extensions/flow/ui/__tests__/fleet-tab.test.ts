@@ -441,11 +441,43 @@ describe('FleetTab: what a failure says', () => {
       'a refusal-shaped 409 on the first load',
       { status: 409, body: { error: 'Locked.', refusedBy: 'flow' } },
     ],
-  ])('the first load shows only "Flow could not be reached." on %s', async (_name, answer) => {
+  ])('the first load shows only the load-failure line on %s', async (_name, answer) => {
     stubFetch(answer);
     await renderTab();
-    expect(screen.getByRole('alert').textContent).toBe('Flow could not be reached.');
+    expect(screen.getByRole('alert').textContent).toBe(
+      "Couldn't load Flow's settings. Try again in a moment."
+    );
     expect(screen.queryByText(/Extension 'flow'|Locked/)).toBeNull();
+  });
+
+  it('Retry loads the settings again after a failed first load', async () => {
+    const good = body();
+    let calls = 0;
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () => {
+        calls += 1;
+        const failed = calls === 1;
+        return {
+          ok: !failed,
+          status: failed ? 500 : 200,
+          json: async () => {
+            if (failed) throw new SyntaxError('Unexpected token <');
+            return good;
+          },
+        };
+      })
+    );
+    await renderTab();
+    expect(screen.getByRole('alert').textContent).toBe(
+      "Couldn't load Flow's settings. Try again in a moment."
+    );
+    await act(async () => {
+      fireEvent.click(screen.getByRole('button', { name: 'Retry' }));
+    });
+    expect(calls).toBe(2);
+    expect(screen.queryByRole('alert')).toBeNull();
+    expect(screen.getByText('Which accounts flow may use')).toBeTruthy();
   });
 
   it.each([
@@ -462,7 +494,7 @@ describe('FleetTab: what a failure says', () => {
       fireEvent.click(within(roles('Acct 2')).getByRole('radio', { name: 'Kept out' }));
     });
     expect(screen.getByRole('alert').textContent).toBe(
-      'Flow could not be reached, so this was not changed.'
+      "Flow didn't respond, so nothing was changed. Try again."
     );
     expect(
       within(roles('Acct 2')).getByRole('radio', { name: 'Rotation' }).getAttribute('aria-checked')
