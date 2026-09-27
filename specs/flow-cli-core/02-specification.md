@@ -263,8 +263,9 @@ JSON Schema: `plugins/flow/conformance/fleet/fleet-policy.schema.json`. It is th
 **Merging** (`mergeLedger(existing, observations, now, { runtime, accountId })`)
 
 - An observation is a window reading (it has a `key`) or a fact (it has a `kind`: `plan`, `credits` or `spend`).
-- Per window key, and per fact, an observation replaces the stored entry only when its `observedAt` is strictly later.
-- Equal `observedAt`: the stored entry stays (so a replay is a no-op).
+- Per fact, an observation replaces the stored entry only when its `observedAt` is strictly later; an equal `observedAt` keeps the stored fact (a replay is a no-op).
+- Per window key, a strictly later `observedAt` wins.
+- **Ties (rev 6e, contract 3.1.0).** On an equal `observedAt` (two sessions on one account can see a limit in the same millisecond), the more severe reading wins: status `rejected` > `allowed_warning` > `allowed` > `null`, then the higher `usedPct` (`null` lowest), then the later `resetsAt` (`null` lowest). A reading equal on all of these keeps the stored entry. The merge is therefore deterministic, independent of observation order, and a replay is a no-op; a same-millisecond `rejected` is never lost.
 - An observation whose `observedAt` is more than 5 minutes after `now` is dropped with a warning, so one bad clock cannot pin a window forever.
 - An invalid observation is dropped with a warning; the rest still merge.
 - `updatedAt` becomes `now` when anything changed; otherwise the file is not rewritten.

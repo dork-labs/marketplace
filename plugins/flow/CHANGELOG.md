@@ -4,6 +4,13 @@ Installs of this plugin are pinned to a commit SHA, so a fix here does not reach
 you until you **reinstall it** (Marketplace → flow → reinstall, or re-run your
 `--plugin-dir` checkout's `git pull`). Each entry below says whether that matters.
 
+## 0.37.2
+
+**Two usage readings from the same moment no longer lose the one that says an account is out. Reinstall to get it.**
+
+- When two sessions on one account see a limit in the same millisecond, flow now keeps the more serious reading: out of usage over near the limit over fine, then the higher percentage, then the later reset. Before, the second reading was dropped, so an account that had just run out could keep showing as available.
+- The shared test fixture DorkOS checks itself against is now version 3.1.0. Readers of 3.0.0 still work.
+
 ## 0.37.1
 
 **Two small fixes. Reinstall to get them; nothing breaks if you wait.**
