@@ -4,17 +4,14 @@
   "identity": {
     "agent": "auto",
     "reviewer": null,
-    "marker": "\u2014 \ud83e\udd16 /flow"
+    "marker": "— 🤖 /flow"
   },
   "ownership": {
     "claimAssignedToAgent": true,
     "claimUnassigned": true,
     "claimAssignedToHuman": false,
     "claimAssignedToOthers": false,
-    "scope": [
-      "issues",
-      "projects"
-    ]
+    "scope": ["issues", "projects"]
   },
   "comments": {
     "respondWhen": "addressed",
@@ -109,10 +106,7 @@
   "involvement": {
     "comms": "infer-from-trigger",
     "calibration": {
-      "proceedSilentlyWhen": [
-        "reversible",
-        "confident"
-      ],
+      "proceedSilentlyWhen": ["reversible", "confident"],
       "alwaysAsk": [
         "irreversible-or-destructive",
         "outward-facing",
@@ -134,14 +128,7 @@
     }
   },
   "dispatch": {
-    "rank": [
-      "unblockers",
-      "priority",
-      "projectStatus",
-      "type",
-      "size",
-      "age"
-    ],
+    "rank": ["unblockers", "priority", "projectStatus", "type", "size", "age"],
     "sizeOrder": "small-first"
   },
   "gates": {
@@ -197,10 +184,7 @@
     "ui": "auto",
     "temporal": "video",
     "logic": "test-summary",
-    "attachTo": [
-      "pr",
-      "tracker"
-    ]
+    "attachTo": ["pr", "tracker"]
   },
   "connection": {
     "team": {
@@ -229,5 +213,8 @@
   },
   "drain": {
     "parallel": 2
+  },
+  "groom": {
+    "unnamespacedLabels": ["cloud-contract"]
   }
 }
