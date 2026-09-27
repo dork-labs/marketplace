@@ -536,6 +536,37 @@ describe("a person's wait (§5.2a)", () => {
     expect(out.run.limit?.heldBy).toBeUndefined();
     expect(kinds(out.actions)).toEqual(['handoff']);
   });
+
+  it('with resumeOnReset false, stays held when the account is ok again', () => {
+    // Purpose: a person's wait with "continue automatically" off is not resumed by flow.
+    const out = nextHandoffAction(
+      input({ run: run({ ...held, resumeOnReset: false }), signal: OK })
+    );
+    expect(out.actions).toEqual([]);
+    expect(out.run.limit).toMatchObject({ heldBy: 'person', resumeOnReset: false });
+  });
+
+  it.each(MODES)('(%s) with resumeOnReset false, never moves, even past its time', (mode) => {
+    // Purpose: only a person releases it; the time passing does not.
+    const out = nextHandoffAction(
+      input({
+        mode,
+        run: run({ ...held, heldUntil: at(-1), resumeOnReset: false }, { wakeAfter: at(-10) }),
+        signal: OUT,
+        checkpoint: WARNED,
+      })
+    );
+    expect(out.actions).toEqual([]);
+    expect(out.run.limit).toMatchObject({ heldBy: 'person', resumeOnReset: false });
+  });
+
+  it('with resumeOnReset true, resumes when the account is ok again, as before', () => {
+    const out = nextHandoffAction(
+      input({ run: run({ ...held, resumeOnReset: true }), signal: OK })
+    );
+    expect(out.run.limit).toBeUndefined();
+    expect(kinds(out.actions)).toEqual(['send:limit-cleared']);
+  });
 });
 
 describe('cross-runtime continuation (§5.2a)', () => {

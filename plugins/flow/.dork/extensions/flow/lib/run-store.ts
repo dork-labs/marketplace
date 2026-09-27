@@ -154,9 +154,9 @@ export interface RunHold {
  * Hold a run on its own account for a person, under the store's lock: the
  * limit reads `waiting-reset` with `heldBy: "person"` and `heldUntil`, exactly
  * the fields flow's handoff reducer honours (`flow handoff --wait`), and the
- * drain's `wakeAfter` moves to the hold's end. `resumeOnReset` is written
- * beside them for flow's reducer to read; today's reducer resumes a held run
- * whenever its account is clear. A run flow has not yet seen limited gets a
+ * drain's `wakeAfter` moves to the hold's end. `resumeOnReset: false` keeps
+ * the run held, neither resumed nor moved, until a person acts; `true`
+ * resumes it once its account clears. A run flow has not yet seen limited gets a
  * limit episode here, so the hold has something to attach to. Compare-and-set
  * on the session read, as flow's own hold is.
  *

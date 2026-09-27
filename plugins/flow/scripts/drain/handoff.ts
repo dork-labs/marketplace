@@ -16,7 +16,9 @@
  *   `wind-down`; `exhausted` starts an `awaiting-handoff` one.
  * - A person's wait (`heldBy: "person"`, `flow handoff --wait`) outranks every
  *   automatic move: the run resumes on its own account when that account is
- *   `ok` again, and nothing else happens until `heldUntil` passes.
+ *   `ok` again, and nothing else happens until `heldUntil` passes. With
+ *   `resumeOnReset: false` (DorkOS's wait with "Continue automatically" off)
+ *   nothing happens at all until a person acts.
  * - `winding-down`: clears when the signal is `ok` again (a reset); moves on
  *   when the account is exhausted, when the worker wrote its `limit-warning`
  *   checkpoint and stopped, or when it stopped without one and the grace time
@@ -395,6 +397,8 @@ export function nextHandoffAction(input: HandoffInput): HandoffResult {
     }
 
     if (limit.heldBy === 'person') {
+      // The person said not to go on by itself: nothing happens until a person acts.
+      if (limit.resumeOnReset === false) return;
       if (clear(signal)) return resumeHere(w, inp);
       const until = limit.heldUntil ? Date.parse(limit.heldUntil) : NaN;
       if (!Number.isFinite(until) || now.getTime() < until) return;

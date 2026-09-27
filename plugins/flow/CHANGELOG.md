@@ -14,6 +14,7 @@ you until you **reinstall it** (Marketplace → flow → reinstall, or re-run yo
 - Your main account shows as kept in reserve while another account has room, until its weekly reset is close.
 - For a flow run, flow decides: it moves the run to another account after a 10-second countdown when handoff is automatic, or waits when the reset is less than an hour away. When you pick an account yourself, flow does the move in the background and DorkOS shows where the work went.
 - Choosing to wait, or cancelling an automatic move, holds the run on its own account, so flow does not move it behind your back.
+- If you wait with "Continue automatically when it resets" turned off, flow leaves the run alone after the reset too, until you continue it, wait again with that turned on, or run `flow handoff`. With it on, the run carries on by itself at the reset, as before.
 - The new session starts from the run's HANDOFF.md checkpoint.
 
 ## 0.40.0
