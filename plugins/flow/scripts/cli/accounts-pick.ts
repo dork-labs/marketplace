@@ -11,6 +11,8 @@
  * @module flow/cli/accounts-pick
  */
 
+import path from 'node:path';
+
 import { findConfigRoots, refusalFor, resolveConfigFiles } from '../config-files.ts';
 import { UsageError } from '../errors.ts';
 import { RUNTIMES, type RuntimeSlug } from '../fleet/usage-ledger.ts';
@@ -30,15 +32,29 @@ const NO_ITEM = { id: '\u0000accounts-pick', identifier: 'new work' } as WorkIte
 
 /**
  * The project's config, or the settings' defaults when the folder has no flow
- * config at all. Only a missing config falls back: a config that is broken,
- * unconfirmed, or refused for this folder still fails (exit 3), so a pick is
- * never ranked with settings nobody chose.
+ * config of its own. Only that falls back: a project config that is broken,
+ * or a folder flow must not act in, still fails (exit 3), so a pick is never
+ * ranked with settings nobody chose.
+ *
+ * Settings left inside a shared plugin folder (the pre-0.9 place) are not this
+ * folder's either: a controller outside flow, run from any folder, would
+ * otherwise be refused by another project's leftovers. Those are ignored, with
+ * a warning, and the defaults apply.
  */
 async function configFor(ctx: VerbContext): Promise<NextConfig> {
   const roots = findConfigRoots(ctx.projectDir, ctx.flowRoot);
-  if (refusalFor(roots) === null && resolveConfigFiles(roots).origin === 'none') {
-    const { FlowConfigSchema } = await import('../config-schema.ts');
-    return FlowConfigSchema.parse({}) as NextConfig;
+  if (refusalFor(roots) === null) {
+    const files = resolveConfigFiles(roots);
+    const sharedLegacy = files.origin === 'legacy' && files.shared;
+    if (files.origin === 'none' || sharedLegacy) {
+      if (sharedLegacy) {
+        ctx.warn(
+          `ignored the settings in ${path.dirname(files.committed ?? '')}: they sit in a plugin folder other projects may share, not in this folder; ranking with the defaults`
+        );
+      }
+      const { FlowConfigSchema } = await import('../config-schema.ts');
+      return FlowConfigSchema.parse({}) as NextConfig;
+    }
   }
   return loadProjectConfig(ctx).loaded.config;
 }
