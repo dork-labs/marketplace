@@ -16,6 +16,12 @@ you until you **reinstall it** (Marketplace → flow → reinstall, or re-run yo
 - When DorkOS refuses to start a session for its own reason, such as a folder outside the ones it serves, flow says so. Before, it told you to sign in.
 - New: a live check of the three places a session can start (terminal, cmux, DorkOS) on a named account. It runs only when you set `FLOW_LAUNCHER_LIVE=1`, and only on a main or rotation account.
 
+## 0.37.2
+
+**The self-test's live tier can no longer change your flow checkout. Reinstall only if you run the live tier.**
+
+- Each live case now gives its agent a temporary copy of the plugin instead of your checkout. Anything the agent writes into the plugin, by whatever route, lands in the copy, which is deleted when the case ends. The check that fails a case for writing outside its folder still runs, as a second layer.
+
 ## 0.37.1
 
 **Two small fixes. Reinstall to get them; nothing breaks if you wait.**

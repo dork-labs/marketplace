@@ -7,7 +7,9 @@
  * - **Writes** may reach the sandbox project ONLY. The sandbox's
  *   `.agents/flow/adapters/fake/` is a link into the plugin, so every path is
  *   judged by its realpath: an Edit through the link is a write into the flow
- *   root, the checkout the oracles themselves run from.
+ *   root. The runner hands the child a temp copy of the plugin (`sandbox.ts`),
+ *   so such a write cannot reach the operator's checkout even when this check
+ *   misses it; this check is the second layer, and still fails the case.
  * - A command naming a forbidden tool ({@link forbiddenName}) is a breach.
  * - A path the check cannot resolve is a breach: one taken from a variable
  *   (`$HOME/...`, `${X}`) or from `process.env` (how the fake's store path

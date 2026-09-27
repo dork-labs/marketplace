@@ -15,17 +15,20 @@
 import { execFileSync } from 'node:child_process';
 import {
   chmodSync,
+  cpSync,
   existsSync,
   lstatSync,
   mkdirSync,
   mkdtempSync,
   readFileSync,
   readdirSync,
+  readlinkSync,
   realpathSync,
   rmSync,
   symlinkSync,
   writeFileSync,
 } from 'node:fs';
+import { createHash } from 'node:crypto';
 import os from 'node:os';
 import path from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
@@ -73,16 +76,18 @@ const init = process.env.STUB_NO_INIT
       apiKeySource: process.env.STUB_API_KEY_SOURCE || (process.env.ANTHROPIC_API_KEY ? 'ANTHROPIC_API_KEY' : 'none'),
       slash_commands: ['flow:capture', 'flow:triage', 'flow:decompose', 'flow:done'],
     }) + '\\n';
-// STUB_CAPTURE_FLOW_ROOT: act as a capturing agent would. Write the description
-// to .dork/flow/tmp/ in the project, run the real flow create on it, and report
-// both as tool calls.
+// The plugin the child was given: what $CLAUDE_PLUGIN_ROOT names in a real session.
+const pluginDir = args[args.indexOf('--plugin-dir') + 1];
+// STUB_CAPTURE: act as a capturing agent would. Write the description to
+// .dork/flow/tmp/ in the project, run the plugin's flow create on it, and
+// report both as tool calls.
 let acted = '';
-if (process.env.STUB_CAPTURE_FLOW_ROOT) {
+if (process.env.STUB_CAPTURE) {
   const file = path.join(process.cwd(), '.dork', 'flow', 'tmp', 'csv.md');
   const content = 'People want the monthly report as a CSV file.\\nIt has "quotes" and a $sign.\\n';
   fs.mkdirSync(path.dirname(file), { recursive: true });
   fs.writeFileSync(file, content);
-  const flowTs = path.join(process.env.STUB_CAPTURE_FLOW_ROOT, 'scripts', 'flow.ts');
+  const flowTs = path.join(pluginDir, 'scripts', 'flow.ts');
   const argv = ['--experimental-strip-types', flowTs, 'create', '--title', 'Export the monthly report as CSV',
     '--description-file', '.dork/flow/tmp/csv.md', '--label', 'type/idea', '--label', 'origin/human', '--key', 'csv', '--json'];
   require('node:child_process').execFileSync(process.execPath, argv, { stdio: 'ignore' });
@@ -93,11 +98,21 @@ if (process.env.STUB_CAPTURE_FLOW_ROOT) {
     { type: 'assistant', message: { content: [{ type: 'tool_use', name: 'Bash', input: { command } }] } },
   ].map((e) => JSON.stringify(e)).join('\\n') + '\\n';
 }
-// STUB_FLOW_ROOT with STUB_FLOW_RUNS: act as an agent following a skill would.
-// Write each of STUB_FILES (path in the project -> text), then run the real
-// flow with each argv in STUB_FLOW_RUNS, in order, reporting all as tool calls.
-if (process.env.STUB_FLOW_ROOT) {
-  const flowTs = path.join(process.env.STUB_FLOW_ROOT, 'scripts', 'flow.ts');
+// STUB_WRITE_PLUGIN: act as an agent writing into the plugin by routes a
+// pattern check cannot follow: a shell cd through the adapter link, paths
+// built with path.join and by string concatenation from --plugin-dir, and
+// one through node_modules/.. (the kernel follows a link before the ..).
+if (process.env.STUB_WRITE_PLUGIN) {
+  require('node:child_process').execSync('cd ' + link + ' && echo pwned > adapter.ts');
+  fs.writeFileSync(path.join(pluginDir, 'scripts', 'flow.ts'), 'pwned');
+  fs.appendFileSync(pluginDir + '/README.md', 'pwned');
+  fs.appendFileSync(pluginDir + '/node_modules/../package.json', 'pwned');
+}
+// STUB_FLOW_RUNS: act as an agent following a skill would. Write each of
+// STUB_FILES (path in the project -> text), then run the plugin's flow with
+// each argv in STUB_FLOW_RUNS, in order, reporting all as tool calls.
+if (process.env.STUB_FLOW_RUNS) {
+  const flowTs = path.join(pluginDir, 'scripts', 'flow.ts');
   const uses = [];
   for (const [rel, content] of Object.entries(JSON.parse(process.env.STUB_FILES || '{}'))) {
     const file = path.join(process.cwd(), rel);
@@ -180,6 +195,40 @@ function trivial(id: string): RunnableCase {
     backlog: { items: [] },
     oracle: () => undefined,
   };
+}
+
+/**
+ * A copy of the flow root in the test's temp folder, with a copy of `zod` as
+ * its only package: no link leads from it back to the real checkout.
+ */
+function copyOfPlugin(): string {
+  const dir = path.join(tmp, 'checkout');
+  cpSync(FLOW_ROOT, dir, {
+    recursive: true,
+    filter: (src) => path.relative(FLOW_ROOT, src) !== 'node_modules',
+  });
+  cpSync(path.join(FLOW_ROOT, 'node_modules', 'zod'), path.join(dir, 'node_modules', 'zod'), {
+    recursive: true,
+    dereference: true,
+  });
+  return dir;
+}
+
+/** A hash of every file under a folder (its links not followed): any byte changed changes it. */
+function treeHash(dir: string): string {
+  const hash = createHash('sha256');
+  const walk = (at: string) => {
+    for (const name of readdirSync(at).sort()) {
+      const file = path.join(at, name);
+      const stat = lstatSync(file);
+      hash.update(`${path.relative(dir, file)}\0`);
+      if (stat.isSymbolicLink()) hash.update(`-> ${readlinkSync(file)}\0`);
+      else if (stat.isDirectory()) walk(file);
+      else hash.update(readFileSync(file));
+    }
+  };
+  walk(dir);
+  return hash.digest('hex');
 }
 
 /** Write a stream the stub prints instead of its default. */
@@ -359,7 +408,11 @@ describe('the live tier runner', { timeout: LIVE_TIMEOUT }, () => {
     expect(after('--setting-sources')).toBe('project,local');
     expect(after('--permission-mode')).toBe('dontAsk');
     expect(after('--max-budget-usd')).toBe('0.75');
-    expect(after('--plugin-dir')).toBe(FLOW_ROOT);
+    // The child gets the sandbox's copy of the plugin, never the checkout.
+    const pluginDir = after('--plugin-dir');
+    expect(pluginDir).not.toBe(FLOW_ROOT);
+    expect(path.dirname(pluginDir)).toBe(path.dirname(call.cwd));
+    expect(existsSync(pluginDir)).toBe(false);
     expect(after('--output-format')).toBe('stream-json');
     expect(argv).toContain('--verbose');
     expect(after('--max-turns')).toBe('5');
@@ -369,14 +422,38 @@ describe('the live tier runner', { timeout: LIVE_TIMEOUT }, () => {
     const denied = argv.slice(argv.indexOf('--disallowed-tools') + 1);
     expect(denied).toContain(`Edit(/${FLOW_ROOT}/**)`);
     expect(denied).toContain(`Write(/${FLOW_ROOT}/**)`);
+    expect(denied).toContain(`Edit(/${pluginDir}/**)`);
     expect(denied).toContain('Edit(.agents/flow/adapters/fake/**)');
     expect(call.config).toMatchObject({ tracker: 'fake', connection: { transport: 'cli' } });
     expect(call.adapterIsLink).toBe(true);
-    expect(call.adapterTarget).toBe(
-      realpathSync(path.join(FLOW_ROOT, 'adapters', 'reference', 'fake'))
-    );
+    expect(call.adapterTarget).toBe(path.join(pluginDir, 'adapters', 'reference', 'fake'));
     expect(path.basename(call.cwd)).toBe('project');
     expect(existsSync(call.cwd)).toBe(false); // the sandbox is deleted afterwards
+  });
+
+  it('keeps the checkout byte-identical when the agent writes into the plugin by any route', async () => {
+    // Purpose: the breach check reads a stream, and a node program can write
+    // past it (execSync with a cd, path.join, concatenation). The child runs
+    // against a temp copy of the plugin, so those writes land in the copy.
+    // The "checkout" here is itself a copy, so a regression cannot damage the
+    // real one.
+    const checkout = copyOfPlugin();
+    const before = treeHash(checkout);
+    const result = await runLive({
+      flowRoot: checkout,
+      env: armed({ STUB_WRITE_PLUGIN: '1' }),
+      maxUsd: 1,
+      cases: [trivial('write-plugin')],
+    });
+    expect(treeHash(checkout)).toBe(before);
+    // The stub finished its writes (a failed one would have cost it its result
+    // event), so they landed in the copy, which is gone with the sandbox.
+    expect(result.checks[0]).toMatchObject({ id: 'live/write-plugin', status: 'pass' });
+    const [call] = calls();
+    const pluginDir = call.argv[call.argv.indexOf('--plugin-dir') + 1];
+    expect(pluginDir.startsWith(realpathSync(checkout))).toBe(false);
+    expect(existsSync(pluginDir)).toBe(false);
+    expect(existsSync(path.join(checkout, 'node_modules', 'zod'))).toBe(true);
   });
 
   it('fails a case as a breach when the stream shows a composio call, whatever the oracle says', async () => {
@@ -400,7 +477,7 @@ describe('the live tier runner', { timeout: LIVE_TIMEOUT }, () => {
     const capture = LIVE_CASES.find((c) => c.id === 'capture') as RunnableCase;
     const result = await runLive({
       flowRoot: FLOW_ROOT,
-      env: armed({ STUB_CAPTURE_FLOW_ROOT: FLOW_ROOT }),
+      env: armed({ STUB_CAPTURE: '1' }),
       maxUsd: 1,
       cases: [capture],
     });
@@ -413,7 +490,6 @@ describe('the live tier runner', { timeout: LIVE_TIMEOUT }, () => {
     const result = await runLive({
       flowRoot: FLOW_ROOT,
       env: armed({
-        STUB_FLOW_ROOT: FLOW_ROOT,
         STUB_FLOW_RUNS: JSON.stringify(runs.map((argv) => [...argv, '--json'])),
         STUB_FILES: JSON.stringify(files),
       }),
@@ -604,16 +680,16 @@ describe('the breach check', { timeout: LIVE_TIMEOUT }, () => {
 
   it('allows writes in the sandbox only: through the adapter link, to the flow root, by redirect', () => {
     // Purpose: the flow root is readable, never writable. The sandbox's
-    // adapter folder is a link into the plugin, so a write through it lands
-    // in the checkout the oracles run from.
+    // adapter folder is a link into the plugin's copy, so a write through it
+    // is a write into the flow root the child was given.
     const s = makeSandbox({ flowRoot: FLOW_ROOT, files: {}, backlog: { items: [] } });
     try {
-      const bounds = { sandbox: s.dir, flowRoot: FLOW_ROOT, home: tmp };
+      const bounds = { sandbox: s.dir, flowRoot: s.pluginDir, home: tmp };
       const skill = '.agents/flow/adapters/fake/SKILL.md';
       const one = (name: string, input: Record<string, unknown>) =>
         findBreach([{ name, input }], bounds);
       expect(one('Read', { file_path: skill })).toBeUndefined();
-      expect(one('Read', { file_path: path.join(FLOW_ROOT, 'scripts', 'flow.ts') })).toBe(
+      expect(one('Read', { file_path: path.join(s.pluginDir, 'scripts', 'flow.ts') })).toBe(
         undefined
       );
       expect(one('Write', { file_path: 'notes/summary.md' })).toBeUndefined();
@@ -621,22 +697,22 @@ describe('the breach check', { timeout: LIVE_TIMEOUT }, () => {
         /^Edit wrote .*SKILL\.md, outside the sandbox/
       );
       expect(one('Edit', { file_path: path.join(s.dir, skill) })).toMatch(/outside the sandbox/);
-      expect(one('Write', { file_path: path.join(FLOW_ROOT, 'scripts', 'new.ts') })).toMatch(
+      expect(one('Write', { file_path: path.join(s.pluginDir, 'scripts', 'new.ts') })).toMatch(
         /^Write wrote .*new\.ts, outside the sandbox/
       );
-      expect(one('NotebookEdit', { notebook_path: `${FLOW_ROOT}/x.ipynb` })).toMatch(/wrote/);
+      expect(one('NotebookEdit', { notebook_path: `${s.pluginDir}/x.ipynb` })).toMatch(/wrote/);
       expect(one('Bash', { command: `node x.js > ${skill}` })).toMatch(/wrote .*SKILL\.md/);
-      expect(one('Bash', { command: `git show HEAD:a 2>> ${FLOW_ROOT}/log` })).toMatch(/wrote/);
-      expect(one('Bash', { command: `git diff | tee out.txt ${FLOW_ROOT}/x` })).toMatch(/wrote/);
+      expect(one('Bash', { command: `git show HEAD:a 2>> ${s.pluginDir}/log` })).toMatch(/wrote/);
+      expect(one('Bash', { command: `git diff | tee out.txt ${s.pluginDir}/x` })).toMatch(/wrote/);
       expect(one('Bash', { command: `git show HEAD:a > out.txt 2>/dev/null` })).toBeUndefined();
       expect(
         one('Bash', {
-          command: `node -e "require('fs').writeFileSync('${FLOW_ROOT}/scripts/x.ts', '')"`,
+          command: `node -e "require('fs').writeFileSync('${s.pluginDir}/scripts/x.ts', '')"`,
         })
       ).toMatch(/wrote .*scripts\/x\.ts/);
       expect(
         one('Bash', {
-          command: `node --experimental-strip-types ${FLOW_ROOT}/scripts/flow.ts next`,
+          command: `node --experimental-strip-types ${s.pluginDir}/scripts/flow.ts next`,
         })
       ).toBeUndefined();
     } finally {
@@ -649,7 +725,7 @@ describe('the breach check', { timeout: LIVE_TIMEOUT }, () => {
     // through ${CLAUDE_PLUGIN_ROOT}; flagging it would fail every paid case.
     const s = makeSandbox({ flowRoot: FLOW_ROOT, files: {}, backlog: { items: [] } });
     try {
-      const bounds = { sandbox: s.dir, flowRoot: FLOW_ROOT, home: tmp };
+      const bounds = { sandbox: s.dir, flowRoot: s.pluginDir, home: tmp };
       const bash = (command: string) => findBreach([{ name: 'Bash', input: { command } }], bounds);
       expect(
         bash(
@@ -675,13 +751,13 @@ describe('the breach check', { timeout: LIVE_TIMEOUT }, () => {
     // agent writes and then runs, and git -C at another repository.
     const s = makeSandbox({ flowRoot: FLOW_ROOT, files: {}, backlog: { items: [] } });
     try {
-      const bounds = { sandbox: s.dir, flowRoot: FLOW_ROOT, home: tmp };
+      const bounds = { sandbox: s.dir, flowRoot: s.pluginDir, home: tmp };
       const one = (name: string, input: Record<string, unknown>) =>
         findBreach([{ name, input }], bounds);
       const script = (target: string) =>
         `import { writeFileSync } from 'node:fs';\nwriteFileSync('${target}', 'x');\n`;
       expect(
-        one('Write', { file_path: 'write-it.mjs', content: script(`${FLOW_ROOT}/scripts/x.ts`) })
+        one('Write', { file_path: 'write-it.mjs', content: script(`${s.pluginDir}/scripts/x.ts`) })
       ).toMatch(/wrote a script that writes .*scripts\/x\.ts, outside/);
       expect(
         one('Write', { file_path: 'w.mjs', content: script('../store/backlog.json') })
@@ -708,15 +784,17 @@ describe('the breach check', { timeout: LIVE_TIMEOUT }, () => {
 
       const bash = (command: string) => one('Bash', { command });
       const git = 'git';
-      expect(bash(`${git} -C ${FLOW_ROOT} reset --hard`)).toMatch(/wrote .*, outside the sandbox/);
-      expect(bash(`${git} -C "${FLOW_ROOT}" -c a=b restore .`)).toMatch(/wrote/);
-      expect(bash(`${git} --work-tree ${FLOW_ROOT} clean -fd`)).toMatch(/wrote/);
+      expect(bash(`${git} -C ${s.pluginDir} reset --hard`)).toMatch(
+        /wrote .*, outside the sandbox/
+      );
+      expect(bash(`${git} -C "${s.pluginDir}" -c a=b restore .`)).toMatch(/wrote/);
+      expect(bash(`${git} --work-tree ${s.pluginDir} clean -fd`)).toMatch(/wrote/);
       expect(bash(`${git} -C .agents/flow/adapters/fake commit -am x`)).toMatch(/wrote/);
-      expect(bash(`${git} --git-dir=${FLOW_ROOT}/.git commit -m x`)).toMatch(/wrote/);
+      expect(bash(`${git} --git-dir=${s.pluginDir}/.git commit -m x`)).toMatch(/wrote/);
       expect(bash(`${git} config --global user.name x`)).toMatch(
         /changed git config outside the sandbox/
       );
-      expect(bash(`${git} -C ${FLOW_ROOT} log -1`)).toBeUndefined();
+      expect(bash(`${git} -C ${s.pluginDir} log -1`)).toBeUndefined();
       expect(bash(`${git} config user.name x`)).toBeUndefined();
       expect(bash(`${git} add -A && ${git} commit -m "tasks"`)).toBeUndefined();
     } finally {
@@ -734,7 +812,7 @@ describe('the breach check', { timeout: LIVE_TIMEOUT }, () => {
       backlog: { items: [] },
     });
     try {
-      const bounds = { sandbox: s.dir, flowRoot: FLOW_ROOT, home: tmp };
+      const bounds = { sandbox: s.dir, flowRoot: s.pluginDir, home: tmp };
       const bash = (command: string) => findBreach([{ name: 'Bash', input: { command } }], bounds);
       const link = '.agents/flow/adapters/fake';
       const writeAdapter = `node -e "require('fs').writeFileSync('adapter.ts', '')"`;
@@ -785,7 +863,7 @@ describe('the breach check', { timeout: LIVE_TIMEOUT }, () => {
       backlog: { items: [] },
     });
     try {
-      const bounds = { sandbox: s.dir, flowRoot: FLOW_ROOT, home: tmp };
+      const bounds = { sandbox: s.dir, flowRoot: s.pluginDir, home: tmp };
       const bash = (command: string) => findBreach([{ name: 'Bash', input: { command } }], bounds);
       const link = '.agents/flow/adapters/fake';
       const inner = `cd ${link} && node -e "require('fs').writeFileSync('adapter.ts', '')"`;
@@ -812,7 +890,7 @@ describe('the breach check', { timeout: LIVE_TIMEOUT }, () => {
     // earlier check missed: a relative `..`, the store's variable, or $HOME.
     const s = makeSandbox({ flowRoot: FLOW_ROOT, files: {}, backlog: { items: [] } });
     try {
-      const bounds = { sandbox: s.dir, flowRoot: FLOW_ROOT, home: tmp };
+      const bounds = { sandbox: s.dir, flowRoot: s.pluginDir, home: tmp };
       const bash = (command: string) => findBreach([{ name: 'Bash', input: { command } }], bounds);
       expect(bash(`node -e "require('fs').writeFileSync('../store/backlog.json', '{}')"`)).toMatch(
         /wrote \.\.\/store\/backlog\.json/
@@ -1200,16 +1278,31 @@ describe('the live oracles', { timeout: LIVE_TIMEOUT }, () => {
   });
 
   it('builds the sandbox with the adapter linked, not copied, and the store outside the project', () => {
-    // Purpose: the fake's adapter.ts imports from the plugin by relative path; a copy breaks it.
-    const s = makeSandbox({ flowRoot: FLOW_ROOT, files: {}, backlog: { items: [] } });
+    // Purpose: the fake's adapter.ts imports from the plugin by relative path;
+    // a copy of the adapter alone breaks it, so the link goes into the
+    // sandbox's copy of the whole plugin. That copy is a real folder even when
+    // the flow root is reached through a link, and nothing in it, its
+    // node_modules included, leads back to the checkout.
+    const alias = path.join(tmp, 'flow-alias');
+    symlinkSync(FLOW_ROOT, alias, 'dir');
+    const s = makeSandbox({ flowRoot: alias, files: {}, backlog: { items: [] } });
     try {
       const link = path.join(s.dir, '.agents', 'flow', 'adapters', 'fake');
       expect(lstatSync(link).isSymbolicLink()).toBe(true);
+      expect(realpathSync(link)).toBe(path.join(s.pluginDir, 'adapters', 'reference', 'fake'));
+      expect(lstatSync(s.pluginDir).isDirectory()).toBe(true);
+      expect(existsSync(path.join(s.pluginDir, 'scripts', 'flow.ts'))).toBe(true);
+      const modules = path.join(s.pluginDir, 'node_modules');
+      expect(lstatSync(modules).isDirectory()).toBe(true);
+      expect(readdirSync(modules)).toEqual(['zod']);
+      expect(lstatSync(path.join(modules, 'zod')).isDirectory()).toBe(true);
       expect(s.backlogFile.startsWith(`${s.dir}${path.sep}`)).toBe(false);
       const tracked = execFileSync('git', ['ls-files'], { cwd: s.dir, encoding: 'utf8' });
       expect(tracked.split('\n')).toContain('.agents/flow/config.json');
     } finally {
       s.cleanup();
     }
+    expect(existsSync(s.root)).toBe(false);
+    expect(existsSync(path.join(FLOW_ROOT, 'node_modules', 'zod'))).toBe(true);
   });
 });

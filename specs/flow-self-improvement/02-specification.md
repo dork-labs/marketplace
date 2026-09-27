@@ -132,6 +132,7 @@ passes S1's adapter conformance suite. `adapters/reference/fake/SKILL.md` is a s
 (`adapters/reference/fake/`, with its `adapter.ts`) to `.agents/flow/adapters/fake/`, the project
 path `resolveAdapter` (`config-files.ts`) reads first, so a prose-driven agent and the `flow` CLI
 both reach it. A link, not a copy: the adapter imports from the plugin. (Amended at build, DOR-2390.)
+The link goes into the sandbox's copy of the plugin, not the checkout (DOR-2430).
 
 **Scenarios** (`scripts/selftest/scenarios/*.ts`), each a function
 `(ctx: { tracker, clock, flow }) => Promise<void>` that drives `flow` verbs in-process against the
@@ -160,9 +161,13 @@ words.
   sign-in. The report records which one paid. No credential → every case `fail` with
   "no credential", never a skip or a pass.
 - **Sandbox per case:** a temp git repo with the fixture files, a committed
-  `.agents/flow/config.json` selecting the `fake` tracker at a temp store path, and the flow root
-  given with `--plugin-dir`. The child runs
-  `claude -p "<case prompt>" --plugin-dir <flow-root> --output-format stream-json --verbose
+  `.agents/flow/config.json` selecting the `fake` tracker at a temp store path, and a temp copy of
+  the flow root (with its own copy of the runtime packages, so no link leads back) given with
+  `--plugin-dir`. The child never gets a path into the operator's checkout, so a write the breach
+  check misses (a `node` program's `execSync`, `path.join`, or `node_modules/..`) lands in the
+  copy, which is deleted with the sandbox; the oracles run from the checkout (DOR-2430). The child
+  runs
+  `claude -p "<case prompt>" --plugin-dir <copy> --output-format stream-json --verbose
 --max-turns <n> --max-budget-usd <remaining>` with cwd = sandbox and these fences:
   1. `--strict-mcp-config` with an empty MCP config: no tracker MCP server.
   2. `--permission-mode dontAsk` with an allowlist (`Read`, `Write`, `Edit`, `Glob`, `Grep`,
