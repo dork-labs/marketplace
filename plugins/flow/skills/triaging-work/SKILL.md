@@ -29,13 +29,25 @@ description: The /flow engine's TRIAGE stage — classify and route incoming wor
 ## The one rule: never touch the tracker directly
 
 This skill is **PM-agnostic**. It never names a tracker API, a tool string, or a
-tracker-specific field. **Every tracker read or write goes through the
-adapter skill** (the v1 `PMClient`, spec §3) by naming one of its
-capability verbs — e.g. _"via the adapter, transition the item …"_. The
-adapter owns all the tracker tooling and projects the generic `WorkItem`
-shape onto the tracker (the type-label set; a `backlog`/`unstarted` state —
-the tracker's Backlog/Todo); those mappings are the _adapter's_ concern, not this
-skill's.
+tracker-specific field. **The outcome write is `flow triage`** (below); every
+other tracker read or write goes through the **adapter skill** by naming one of
+its capability verbs — e.g. _"via the adapter, transition the item …"_. The
+adapter owns the tracker tooling and its mappings, not this skill.
+
+**Ready or park: one command.** (`flow` means
+`node --experimental-strip-types "<flow-root>/scripts/flow.ts"`.)
+
+```bash
+flow triage <id> --ready --stage <execute|ideate> --json   # agent/ready + stage/<stage>
+flow triage <id> --park '<question>' --json               # signed question + agent/needs-input
+```
+
+`--ready` makes the item claimable with the stage label that says where the work
+starts; `--park` asks one question (single quotes, none inside) and parks the item
+until a person answers, never posting the same question twice. It refuses a
+closed item or one an agent is working. It does not set type, priority or size:
+those stay adapter writes. Exit 3: this tracker cannot take the write; exit 4:
+run it again.
 
 Read the adapter skill's contract before acting. It is the `SKILL.md` at the `adapter.path` that
 `node --experimental-strip-types "<flow-root>/scripts/config-files.ts"` prints: the
@@ -89,15 +101,10 @@ the config key and the optional adapter verbs it needs.
    set only when scope is already clear (a signal is high priority; ideas stay
    unset until commitment). If the description claims a dependency on another item,
    ask the adapter to create the typed **blocking relation** — dispatch reads the
-   relation graph, never prose blocker claims. **Then ready the work for dispatch:**
-   under the full-autonomy posture (decisions A0/A1) an accepted intake item is
-   readied broadly, so via the adapter apply the durable `agent/ready` label
-   - the successor `stage/*` label (a clearly-actionable item → `stage/execute`;
-     work that still needs shaping → `stage/ideate`), exactly as Path B's Accept
-     routing does (step 4 there). The only intake that stays unreadied is an
-     `Ambiguous` input parked for clarification or a deliberately low-commitment
-     `idea` held back for later Path B evaluation; a `Brief` is readied per route
-     after its decomposition gate (next step) clears.
+   relation graph, never prose blocker claims. **Then ready it** with
+   `flow triage --ready`, at the stage Path B step 4 picks. Only an `Ambiguous`
+   input (parked) or a low-commitment `idea` held for Path B stays unready; a
+   `Brief` is readied per route once its gate (next step) clears.
 4. **Brief → project decomposition is a hard gate.** If the input is a brief (3+
    distinct concerns), this is a sticky, outward-shaping decision: **stop and
    present** the proposed decomposition (each concern → its type) and **ask for
@@ -122,31 +129,24 @@ the config key and the optional adapter verbs it needs.
 
    | Decision             | Criteria                                           | Routing                                                                                                                                       |
    | -------------------- | -------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------- |
-   | **Accept**           | aligned, feasible, not a duplicate                 | transition to the backlog; assign to the aligned project; apply `agent/ready` + the `stage/*` label; then route simple-vs-complex (next step) |
+   | **Accept**           | aligned, feasible, not a duplicate                 | assign to the aligned project; route simple-vs-complex (next step), then `flow triage --ready`                                                 |
    | **Reject**           | misaligned, infeasible, or out of scope            | transition to a `canceled`-category state; comment the reason                                                                                 |
    | **Needs research**   | feasibility or scope genuinely uncertain           | create a linked `research` item; keep the original in the backlog                                                                             |
-   | **Needs refinement** | too vague to act on — the originator must say more | `needsInput`: post the question, apply the needs-input label, assign to the human, stop                                                       |
+   | **Needs refinement** | too vague to act on — the originator must say more | `flow triage --park '<question>'`; assign to the human via the adapter; stop                                                                  |
 
 4. **On Accept, make the simple-vs-complex routing call** — the heart of TRIAGE.
-   This call selects the **path**, never whether readiness is applied: under the
-   full-autonomy posture (decisions A0/A1) every accepted item is readied for
-   dispatch on both routes. Whichever route you take, **via the adapter,
-   apply `agent/ready` + the `stage/*` label** so the dispatch eligibility gate
-   (the `agent/ready` constant `node --experimental-strip-types "<flow-root>/scripts/dispatch.ts"` matches on) can
-   pick the work up; without `agent/ready`
-   the item sits behind the gate and never dispatches (the keystone fix).
+   It picks the **stage**, never whether the item is readied: every accepted item
+   is readied (decisions A0/A1), because without `agent/ready` dispatch never
+   picks it up.
    - **Simple** (single-session, clear scope — roughly: single file / one
      clearly-scoped component, no new architectural pattern, no cross-cutting
      concern) → keep it **in the tracker** as a `task` (or a small set of `task`
-     sub-items). It flows straight toward EXECUTE; via the adapter, apply
-     `agent/ready` + `stage/execute` (the execute-adjacent stage label). It does
-     **not** need the spec workflow.
+     sub-items): `flow triage --ready --stage execute`. It does **not** need the
+     spec workflow.
    - **Complex** (3+ files across layers, introduces a new pattern, needs an
      architectural decision, cross-cutting, or multi-session) → **escalate to the
-     spec workflow**: route onward to IDEATE (`ideating-features`) → SPECIFY; via
-     the adapter, apply `agent/ready` + `stage/ideate`. The item becomes the
-     spec's context and is linked for traceability; the spec carries the work from
-     there.
+     spec workflow** (IDEATE → SPECIFY): `flow triage --ready --stage ideate`. The
+     item becomes the spec's context and is linked for traceability.
    - **When in doubt, prefer complex** — over-planning is cheaper than
      under-planning.
 
@@ -247,8 +247,8 @@ exist anywhere else in flow, and step 1 being first is what makes the rest cheap
    via the adapter's `promote` verb: a clean imperative title written by you, a
    description that states the problem rather than pasting the prose, and a
    **link back to the report**. For an Attach, add the link to the existing item.
-   The new item then enters the ordinary flow — route it simple-vs-complex and
-   ready it exactly as Path B step 4 does. The report itself is **never** given
+   The new item then enters the ordinary flow — route it and ready it as Path B
+   step 4 does. The report itself is **never** given
    `agent/ready` and never gets a `stage/*` label; it is not work.
 7. **Close the loop.** Resolve the report via `resolveIntake` with the outcome
    and, for Decline and Needs info, the reason or the question. Somebody outside
@@ -289,8 +289,8 @@ the accept/route decision, and what happens next.
 
 - **TRIAGE is an intent stage** (spec §5 stage bias): in the ambiguous middle
   (reversible but not confident), **lean toward asking** rather than guessing —
-  classification and routing shape everything downstream. Use `needsInput` /
-  `AskUserQuestion` per the inferred comms channel.
+  classification and routing shape everything downstream. Park with
+  `flow triage --park`, or use `AskUserQuestion`, per the inferred comms channel.
 - **Floor gates always stop**, even at full confidence: creating a project,
   rejecting/cancelling someone's work, or any outward-facing change → present and
   ask first.

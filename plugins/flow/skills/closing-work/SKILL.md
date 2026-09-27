@@ -8,7 +8,6 @@ description: The /flow engine's DONE stage — report completion on a work item,
 > **Flow root.** This skill lives at `<flow-root>/skills/closing-work/SKILL.md`. If you reached it via a symlink (`.claude/skills/flow__*` or `.agents/skills/flow__*`), resolve the real path first (`realpath <path>`): the flow root is two directories above the skill directory. Every `<flow-root>/...` reference below is relative to that root.
 
 > **Stage:** DONE (spec §1). One generic, PM-agnostic stage skill.
-> **Absorbs:** the legacy `/linear:done` close flow (retired in spec #257).
 > **PM projection (tracker):** Done state + `agent/completed` label.
 > **Trigger doors:** the thin `/flow:done` command _or_ a PM transition into the
 > DONE stage are two triggers for this one skill.
@@ -22,9 +21,10 @@ seeds the next loop phase, and tears down the workspace.
 ## The one tracker rule
 
 This is a generic stage skill. **It never touches a tracker API string.** The
-close itself is `flow done` (step 3). Follow-up creation, relation links and the
-project pulse-check reads go through the **adapter** skill by naming its verbs
-(`createSubIssue`, `link`, `getProjects`, `getEligibleWork`, `getRelations`, and —
+close is `flow done` (step 3) and each follow-up is `flow create` (step 4).
+Relation links and the project pulse-check reads go through the **adapter**
+skill by naming its verbs (`link`, `getProjects`, `getEligibleWork`,
+`getRelations`, and —
 only in `auto` mode, and only when the adapter declares it supported — the
 optional `completeProject`). No raw tracker tool name, CLI invocation, or slug
 lives here. (The
@@ -67,21 +67,28 @@ It posts the summary once, signed, moves the item to `completed` with
 `agent/completed` (even when a merge closed it) and marks the run complete.
 Exit 4: run it again.
 
-### 4. Create follow-up work (when required)
+### 4. File follow-up work (when required)
 
-Driven by the item's type and its `## On Completion` routing:
+The item's type and `## On Completion` section say what follows (a
+`type/hypothesis` gets a `type/monitor` holding its validation criteria). File
+each with the step 3 command's `create` verb:
 
-- `type/hypothesis` → via the adapter, create a `type/monitor` item carrying the
-  hypothesis's validation criteria (origin labelled as from-agent).
-- If this item was blocking others, note that they are now unblocked (read via
-  the adapter's `getRelations`); use `link` only for genuinely typed relations.
+```bash
+flow create --title '<title>' --description-file .dork/flow/tmp/<key>.md \
+  --label type/<type> --label origin/from-agent --priority <1-4> \
+  --for-project '<project>' --key <id>-followup-<slug> --json
+```
 
-Every follow-up you file:
+Always a type, a priority and a project (the closed item's); never an `agent/*`
+label. The key makes a retry return the first item. Quote titles and write the
+description file as the capture skill's step 3 says
+(`<flow-root>/skills/capturing-work/SKILL.md`).
 
-- Gets a type, a priority and a project when you create it.
-- Goes through triage right away (`<flow-root>/skills/triaging-work/SKILL.md`, Path B).
-- Is marked ready only if it passes the six readiness rules (`<flow-root>/skills/grooming-backlog/SKILL.md`, phase 4 step 5).
-- Otherwise, park it with one question (`needsInput`).
+Then triage it right away (`<flow-root>/skills/triaging-work/SKILL.md`, Path B):
+ready only if it passes the six readiness rules
+(`<flow-root>/skills/grooming-backlog/SKILL.md`, phase 4 step 5), otherwise
+park it with one question. If this item was blocking others, note they are unblocked
+(the adapter's `getRelations`); `link` only genuinely typed relations.
 
 ### 5. Completion routing + project pulse check
 
@@ -156,13 +163,10 @@ removing. Prefer your harness's own worktree cleanup command over bare
 that git does not know about.
 
 **When the branch is not merged yet, do not promise to clean it up "once it
-merges."** Nobody will be there. Where merging is automated — an auto-merge
-setting, a merge queue, a scheduled merge bot — the merge lands minutes to hours
-after this stage runs, and the session that would have done the cleanup is gone
-by then. So the reliable habit is a sweep at the START of a session, not a
-promise at the end of one: a periodic pass that removes every worktree whose
-branch has since merged. Tell the person that, once, instead of leaving a
-worktree behind with no owner.
+merges."** Where merging is automated (auto-merge, a merge queue, a merge bot),
+it lands after this session is gone. The reliable habit is a sweep at the START
+of a session that removes every worktree whose branch has since merged. Tell the
+person that, once, instead of leaving a worktree with no owner.
 
 ### 7. Report
 
@@ -179,5 +183,5 @@ per the adapter's display convention), never the bare key.
 - Prefer the item's explicit `## On Completion` routing over generic defaults.
 - Filesystem stays canonical; the tracker holds pointers + state + conversation,
   never a second copy of the prose.
-- All tracker I/O through the adapter. No tracker strings in this skill. If
+- All tracker I/O through `flow` or the adapter. No tracker strings in this skill. If
   the tracker is unavailable, explain the limitation clearly rather than guessing.

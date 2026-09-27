@@ -4,13 +4,21 @@
  * the agent said (spec `specs/flow-self-improvement` §1, tier `live`, DOR-2390).
  *
  * What an agent can do against the fake is bounded by the `flow` command: the
- * fake adapter's skill routes every tracker read and write through it, and it
- * has no verb to set an item's type or priority, or to park an item with
- * `agent/needs-input`. So:
+ * fake adapter's skill routes every tracker read and write through it. So:
  *
  * - `capture` checks the spec's outcome: exactly one new item (`flow create`),
  *   with an `origin/*` label and no `agent/ready`.
- * - `triage` and `done/follow-up` are skips that say what is missing.
+ * - `triage` checks the one write `flow triage` makes: the item ends ready
+ *   (with a `stage/*` label) or parked on exactly one question, never both, and
+ *   nothing else in the backlog changes. flow has no command that sets an
+ *   item's type or priority (no adapter capability writes them), so the oracle
+ *   does not ask for them; the skill still does that through a real adapter.
+ * - `done/follow-up` checks what closing-work promises: the item closes, one
+ *   follow-up is filed (`flow create`) with a type, a priority, the project and
+ *   `origin/from-agent`, and triage then readies it only when it passes the
+ *   groom readiness invariants, or else parks it on one question. `flow create`
+ *   cannot size an item, so on the fake a ready follow-up fails GRM-4: the
+ *   honest outcome there is a parked one.
  * - `decompose` and `done` run as the spec describes them.
  *
  * @module @dorkos/flow/selftest/live/cases
@@ -18,7 +26,9 @@
 
 import { existsSync, readFileSync } from 'node:fs';
 import path from 'node:path';
+import { isDeepStrictEqual } from 'node:util';
 
+import { audit } from '../../audit-backlog.ts';
 import type { FakeBacklog } from '../../tracker/fake.ts';
 import type { WorkItem } from '../../tracker/types.ts';
 import type { ToolUse } from './breach.ts';
@@ -113,6 +123,46 @@ function find(store: FakeBacklog, identifier: string): WorkItem | undefined {
   return store.items.find((i) => i.identifier === identifier);
 }
 
+/** How many comments an item gained between two stores. */
+function newComments(before: FakeBacklog, after: FakeBacklog, identifier: string): number {
+  return (after.comments?.[identifier]?.length ?? 0) - (before.comments?.[identifier]?.length ?? 0);
+}
+
+/** Why an item is not closed by `flow done`, or `undefined` when it is. */
+function notDone(store: FakeBacklog, identifier: string): string | undefined {
+  const done = find(store, identifier);
+  if (done === undefined) return `${identifier} is gone from the store`;
+  if (done.stateCategory !== 'completed') {
+    return `${identifier} is ${done.stateCategory}, not completed`;
+  }
+  if (!done.labels.includes('agent/completed')) {
+    return `${identifier} is completed without agent/completed (labels: ${done.labels.join(', ')})`;
+  }
+  return undefined;
+}
+
+/**
+ * Why a triaged item is not in one honest outcome, or `undefined`: ready with
+ * a `stage/*` label, or parked with exactly one new comment (the question).
+ */
+function notTriaged(before: FakeBacklog, after: FakeBacklog, identifier: string) {
+  const labels = find(after, identifier)?.labels ?? [];
+  const ready = labels.includes('agent/ready');
+  const parked = labels.includes('agent/needs-input');
+  if (ready && parked) return `${identifier} carries both agent/ready and agent/needs-input`;
+  if (!ready && !parked) {
+    return `${identifier} was neither readied nor parked (labels: ${labels.join(', ') || 'none'})`;
+  }
+  if (ready && !labels.some((label) => label.startsWith('stage/'))) {
+    return `${identifier} is ready with no stage/* label to start at`;
+  }
+  const asked = newComments(before, after, identifier);
+  if (parked && asked !== 1) {
+    return `${identifier} is parked with ${asked} new comments, not exactly one question`;
+  }
+  return undefined;
+}
+
 /** The phrases the decomposing-work skill forbids in a task description. */
 export const FORBIDDEN_PHRASES: readonly string[] = [
   'as specified',
@@ -186,9 +236,46 @@ export const LIVE_CASES: readonly LiveCase[] = [
   },
   {
     id: 'triage',
-    skip:
-      'flow has no command to set an item type or priority, or to park an item with agent/needs-input ' +
-      '(only "flow release --to ready"), so a triage cannot be finished against the fake',
+    prompt: `/flow:triage FAKE-1 ${STAY_INSIDE}`,
+    maxTurns: 25,
+    files: {},
+    backlog: backlog([
+      item('FAKE-1', {
+        title: 'Let people export the monthly report as a CSV file',
+        description:
+          'People download the monthly report as a PDF and retype the numbers into a ' +
+          'spreadsheet. Offer the same report as a CSV file.',
+        type: 'idea',
+        stateCategory: 'backlog',
+        stateName: 'Triage',
+        labels: ['type/idea', 'origin/human'],
+      }),
+      item('FAKE-2', {
+        title: 'Add a greeting command',
+        stateCategory: 'unstarted',
+        priority: 3,
+        project: PROJECT,
+        labels: ['type/task', 'origin/human', 'agent/ready', 'stage/execute'],
+      }),
+    ]),
+    oracle: ({ before, after }) => {
+      const ids = (store: FakeBacklog) =>
+        store.items
+          .map((i) => i.identifier)
+          .sort()
+          .join(', ');
+      if (ids(after) !== ids(before)) {
+        return `the backlog went from ${ids(before)} to ${ids(after)}; triage files nothing`;
+      }
+      for (const was of before.items) {
+        if (was.identifier === 'FAKE-1') continue;
+        const now = find(after, was.identifier);
+        if (!isDeepStrictEqual(now, was) || newComments(before, after, was.identifier) !== 0) {
+          return `${was.identifier} changed, but the triage was of FAKE-1 only`;
+        }
+      }
+      return notTriaged(before, after, 'FAKE-1');
+    },
   },
   {
     id: 'decompose',
@@ -244,6 +331,26 @@ export const LIVE_CASES: readonly LiveCase[] = [
         title: 'Add a greeting command',
         description:
           'Add a greeting command.\n\n## Validation criteria\n\n- It prints a greeting.\n\n' +
+          '## On Completion\n\n- Nothing follows.',
+        stateCategory: 'started',
+        stateName: 'In Review',
+        priority: 3,
+        project: PROJECT,
+        labels: ['type/task', 'origin/human', 'agent/claimed'],
+      }),
+    ]),
+    oracle: ({ after }) => notDone(after, 'FAKE-2'),
+  },
+  {
+    id: 'done/follow-up',
+    prompt: `/flow:done FAKE-2 ${STAY_INSIDE}`,
+    maxTurns: 40,
+    files: {},
+    backlog: backlog([
+      item('FAKE-2', {
+        title: 'Add a greeting command',
+        description:
+          'Add a greeting command.\n\n## Validation criteria\n\n- It prints a greeting.\n\n' +
           '## On Completion\n\n- File a follow-up task: translate the greeting into French.',
         stateCategory: 'started',
         stateName: 'In Review',
@@ -252,22 +359,37 @@ export const LIVE_CASES: readonly LiveCase[] = [
         labels: ['type/task', 'origin/human', 'agent/claimed'],
       }),
     ]),
-    oracle: ({ after }) => {
-      const done = find(after, 'FAKE-2');
-      if (done === undefined) return 'FAKE-2 is gone from the store';
-      if (done.stateCategory !== 'completed') {
-        return `FAKE-2 is ${done.stateCategory}, not completed`;
+    oracle: ({ before, after }) => {
+      const open = notDone(after, 'FAKE-2');
+      if (open !== undefined) return open;
+      const added = after.items.filter((i) => find(before, i.identifier) === undefined);
+      if (added.length !== 1) {
+        return `${added.length} follow-ups were filed (${added.map((i) => i.identifier).join(', ') || 'none'}), not exactly one`;
       }
-      if (!done.labels.includes('agent/completed')) {
-        return `FAKE-2 is completed without agent/completed (labels: ${done.labels.join(', ')})`;
+      const [next] = added;
+      const labels = next.labels.join(', ') || 'none';
+      if (!next.labels.some((label) => label.startsWith('type/'))) {
+        return `follow-up ${next.identifier} has no type/* label (labels: ${labels})`;
+      }
+      if (typeof next.priority !== 'number' || next.priority < 1) {
+        return `follow-up ${next.identifier} has no priority`;
+      }
+      if (next.project?.id !== PROJECT.id) {
+        return `follow-up ${next.identifier} is not in ${PROJECT.name}`;
+      }
+      if (!next.labels.includes('origin/from-agent')) {
+        return `follow-up ${next.identifier} lacks origin/from-agent (labels: ${labels})`;
+      }
+      const untriaged = notTriaged(before, after, next.identifier);
+      if (untriaged !== undefined) return `follow-up ${untriaged}`;
+      if (next.labels.includes('agent/ready')) {
+        const verdict = audit(after.items, { agentIdentity: after.user?.id });
+        if (!verdict.ok) {
+          const failed = verdict.failures.map((f) => f.invariant).join(', ');
+          return `follow-up ${next.identifier} is ready but fails the readiness rules (${failed})`;
+        }
       }
       return undefined;
     },
-  },
-  {
-    id: 'done/follow-up',
-    skip:
-      'the closing-work skill does not file follow-ups through "flow create" yet, so the follow-up ' +
-      'the done case asks for cannot be checked for a type, a priority, a project and a triage',
   },
 ];

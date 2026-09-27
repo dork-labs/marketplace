@@ -32,7 +32,10 @@ function missing(passage: string, needs: [string, RegExp][]): string[] {
 
 /** What DONE's follow-up step must say. */
 function followUpGaps(closing: string): string[] {
-  return missing(between(closing, '### 4. Create follow-up work', '### 5.'), [
+  return missing(between(closing, '### 4. File follow-up work', '### 5.'), [
+    ['files it with flow create', /flow create /],
+    ['labels it from an agent', /origin\/from-agent/],
+    ['keys it so a retry files once', /--key /],
     ['gives every follow-up a type, priority and project', /type, a priority and a project/],
     ['triages it right away', /triaging-work[\s\S]*right away|right away[\s\S]*triaging-work/],
     ['readies only on the six rules', /six readiness rules/],
@@ -178,6 +181,16 @@ describe('a follow-up filed at DONE is readied or parked', () => {
   it('the guard bites when the readiness rule is dropped', () => {
     const closing = read('skills/closing-work/SKILL.md').replace(/six readiness rules/g, 'rules');
     expect(followUpGaps(closing)).toEqual(['readies only on the six rules']);
+  });
+
+  it('the guard bites when follow-ups stop going through flow create, unkeyed', () => {
+    const closing = read('skills/closing-work/SKILL.md')
+      .replace(/flow create /g, 'the adapter ')
+      .replace(/--key /g, '');
+    expect(followUpGaps(closing)).toEqual([
+      'files it with flow create',
+      'keys it so a retry files once',
+    ]);
   });
 });
 

@@ -8,8 +8,8 @@
     "target": 81
   },
   "commands/done.md": {
-    "baseline": 92,
-    "target": 92
+    "baseline": 89,
+    "target": 89
   },
   "commands/execute.md": {
     "baseline": 113,
@@ -128,7 +128,7 @@
     "target": 568
   },
   "skills/closing-work/SKILL.md": {
-    "baseline": 1494,
+    "baseline": 1473,
     "target": 1200
   },
   "skills/decomposing-work/SKILL.md": {
@@ -180,7 +180,7 @@
     "target": 3640
   },
   "skills/triaging-work/SKILL.md": {
-    "baseline": 3055,
+    "baseline": 3015,
     "target": 1200
   },
   "skills/verifying-work/SKILL.md": {
