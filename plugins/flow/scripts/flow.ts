@@ -109,11 +109,12 @@ export const VERBS: readonly VerbDefinition[] = [
       'flow accounts set <id> [--role] [--reserve] [--spend-down-hours] [--repos]: set one account\'s policy. <id> is a Claude Code id, or <runtime>:<id> (codex:default). "default" clears a field.',
       'flow accounts set --handoff auto|ask | --runtimes <runtime,...> | --cross-runtime-fallback off|on: set one fleet-wide setting ("default" clears it).',
       'flow accounts setup [--yes] [--rotation <refs>|all] [--keep-out <refs>] [--main <ref>] [--statusline]: find the account folders on this computer and set their roles. In a terminal it asks; with --yes the flags decide; every change is shown first. A ref is an account id, a folder or a folder name.',
+      'flow accounts pick [--repo owner/name] [--runtime <runtime>] [--model <model>]: the account new work should start on, ranked as flow next ranks it (room, reserve, scope, the headroom that expires soonest, main last), with no tracker item.',
       'Reads and writes <dorkHome> (DORK_HOME, else ~/.dork); needs no tracker and no project config.',
     ].join('\n'),
     common: ['dry-run'],
     positionals: [
-      { name: 'action', description: 'list (default), add, set or setup.' },
+      { name: 'action', description: 'list (default), add, set, setup or pick.' },
       { name: 'id', description: 'The account, for set: <id> or <runtime>:<id>.' },
     ],
     flags: [
@@ -201,6 +202,25 @@ export const VERBS: readonly VerbDefinition[] = [
         name: 'statusline',
         kind: 'boolean',
         description: "setup: add the usage recorder to each spent account's status line.",
+      },
+      {
+        name: 'repo',
+        kind: 'string',
+        value: 'owner/name',
+        description: "pick: the repo the work is in. Default: this checkout's origin.",
+      },
+      {
+        name: 'runtime',
+        kind: 'string',
+        value: 'runtime',
+        description:
+          'pick: claude-code, codex or opencode. Default: fleet.runtimes, else claude-code.',
+      },
+      {
+        name: 'model',
+        kind: 'string',
+        value: 'model',
+        description: "pick: the model the work runs on, so a spent model's weekly bucket counts.",
       },
     ],
     load: () => import('./cli/accounts.ts'),
@@ -731,7 +751,7 @@ export const VERBS: readonly VerbDefinition[] = [
         kind: 'string',
         value: 'url',
         description:
-          'The DorkOS to ask. Default FLOW_DORKOS_URL, else http://127.0.0.1:<DORKOS_PORT or 4242>.',
+          'The DorkOS to ask. Default FLOW_DORKOS_URL, else http://localhost:<DORKOS_PORT or 4242>.',
       },
       { name: 'no-dorkos', kind: 'boolean', description: 'Do not ask DorkOS at all.' },
     ],

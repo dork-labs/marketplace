@@ -648,3 +648,102 @@ describe('the default account (rev 6d)', () => {
     expect(readJson(fleetFile).accounts).toEqual({ 'claude-code:default': { role: 'kept-out' } });
   });
 });
+
+describe('flow accounts pick', () => {
+  /** Write one account's weekly usage into its per-runtime ledger. */
+  function ledger(id: string, usedPct: number, resetsAt: string): void {
+    const dir = path.join(dorkHome, 'runtimes', 'claude-code', 'usage');
+    mkdirSync(dir, { recursive: true });
+    writeFileSync(
+      path.join(dir, `${id}.json`),
+      JSON.stringify({
+        v: 1,
+        runtime: 'claude-code',
+        accountId: id,
+        updatedAt: '2026-09-26T11:59:00.000Z',
+        windows: {
+          seven_day: {
+            usedPct,
+            resetsAt,
+            status: null,
+            observedAt: '2026-09-26T11:59:00.000Z',
+            source: 'statusline',
+          },
+        },
+      })
+    );
+  }
+
+  function twoRotation(keepMainOut = false): void {
+    writeConfig({
+      runtimes: {
+        claudeCode: {
+          accounts: [
+            { id: 'soon', path: accountDir('soon'), label: 'Soon', color: null },
+            { id: 'later', path: accountDir('later'), label: 'Later', color: null },
+            { id: 'org', path: accountDir('org'), label: 'Org', color: null },
+          ],
+        },
+      },
+    });
+    writeFleet({
+      v: 1,
+      accounts: {
+        'claude-code:soon': { role: 'rotation' },
+        'claude-code:later': { role: 'rotation' },
+        'claude-code:org': { role: 'kept-out', scope: { repos: ['client/app'] } },
+        ...(keepMainOut ? { 'claude-code:default': { role: 'kept-out' } } : {}),
+      },
+    });
+  }
+
+  it('picks with no tracker and no project config, by the headroom that expires soonest', async () => {
+    // Purpose: a controller outside flow (cmux-control) asks where to start new
+    // work. With no flow config in the folder it ranks with the defaults, reads
+    // no tracker (the adapter factory throws), and applies rankAccounts: 40%
+    // left resetting in a day beats 60% left resetting in six. Fails if pick
+    // needs a project config, or ranks by remaining share alone.
+    twoRotation();
+    ledger('soon', 60, '2026-09-27T12:00:00.000Z');
+    ledger('later', 40, '2026-10-02T12:00:00.000Z');
+    const r = await flow(['accounts', 'pick', '--repo', 'acme/app', '--json']);
+    expect(r.code).toBe(0);
+    const out = r.json();
+    expect(out.pick).toMatchObject({ runtime: 'claude-code', id: 'soon', label: 'Soon' });
+    // The machine-wide default is main (rev 6d), so it ranks last.
+    expect(out.ranked.map((row: { id: string }) => row.id)).toEqual(['soon', 'later', 'default']);
+    // The kept-out account is never offered outside its scope.
+    expect(out.ineligible).toContainEqual(
+      expect.objectContaining({ id: 'org', reasons: expect.arrayContaining(['out-of-scope']) })
+    );
+  });
+
+  it('offers a kept-out account only for its scoped repo', async () => {
+    // Purpose: scope is enforced for a pick exactly as for dispatch. Fails if
+    // --repo is ignored.
+    twoRotation();
+    ledger('soon', 99, '2026-10-02T12:00:00.000Z');
+    ledger('later', 99, '2026-10-02T12:00:00.000Z');
+    const r = await flow(['accounts', 'pick', '--repo', 'client/app', '--json']);
+    expect(r.json().pick).toMatchObject({ id: 'org' });
+  });
+
+  it('says why nothing may take the work, and exits 0', async () => {
+    // Purpose: an account at its ceiling is limited; with none left the pick is
+    // null and the message names each account's reasons and the fix.
+    twoRotation(true);
+    ledger('soon', 100, '2026-10-02T12:00:00.000Z');
+    ledger('later', 100, '2026-10-02T12:00:00.000Z');
+    const r = await flow(['accounts', 'pick', '--repo', 'acme/app']);
+    expect(r.code).toBe(0);
+    expect(r.stdout).toContain('No account may take work for acme/app');
+    expect(r.stdout).toContain('flow accounts set <id> --role rotation');
+  });
+
+  it('refuses a malformed --repo and an unknown --runtime, and other actions refuse pick flags', async () => {
+    twoRotation();
+    expect((await flow(['accounts', 'pick', '--repo', 'nope'])).code).toBe(2);
+    expect((await flow(['accounts', 'pick', '--runtime', 'gpt'])).code).toBe(2);
+    expect((await flow(['accounts', 'list', '--repo', 'a/b'])).code).toBe(2);
+  });
+});

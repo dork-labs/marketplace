@@ -4,6 +4,13 @@ Installs of this plugin are pinned to a commit SHA, so a fix here does not reach
 you until you **reinstall it** (Marketplace → flow → reinstall, or re-run your
 `--plugin-dir` checkout's `git pull`). Each entry below says whether that matters.
 
+## 0.43.0
+
+**New `flow accounts pick`: ask which account new work should start on, without a tracker item. Reinstall to get it.**
+
+- `flow accounts pick` ranks your accounts the way `flow next` and `flow drain` do: room in the 5-hour, weekly and model limits, the reserve, which repos an account may serve, and the unused allowance that runs out soonest, with your main account last. It needs no tracker and no flow settings in the folder, so a tool outside flow, or you at a terminal, can use it. `--repo`, `--runtime` and `--model` say what the work is.
+- `flow fleet --help` now names the address it really uses for DorkOS (`localhost`).
+
 ## 0.42.0
 
 **A Flow tab in DorkOS Settings lets you choose which accounts flow may use, keep part of your main account for yourself, limit an account to certain repos, and pick whether work moves automatically when an account runs out. Reinstall to get it; it needs DorkOS 0.88.0 or newer.**
