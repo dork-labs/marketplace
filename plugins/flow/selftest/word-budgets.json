@@ -16,8 +16,8 @@
     "target": 79
   },
   "commands/flow.md": {
-    "baseline": 1168,
-    "target": 1168
+    "baseline": 1185,
+    "target": 1185
   },
   "commands/groom.md": {
     "baseline": 91,
@@ -32,8 +32,8 @@
     "target": 106
   },
   "commands/pause.md": {
-    "baseline": 274,
-    "target": 274
+    "baseline": 283,
+    "target": 283
   },
   "commands/resume.md": {
     "baseline": 201,
@@ -112,8 +112,8 @@
     "target": 2835
   },
   "docs/use-all-your-accounts.mdx": {
-    "baseline": 193,
-    "target": 193
+    "baseline": 201,
+    "target": 201
   },
   "docs/what-flow-is.mdx": {
     "baseline": 1691,

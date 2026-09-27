@@ -151,6 +151,7 @@ describe('/flow:pause and /flow:resume switch DorkOS schedules only as agreed', 
         /When the tools are not available[\s\S]*?skip this step and say so/,
       ],
       ['the flag stays the authority', /The\s+flag is the pause/],
+      ['loads deferred tools first', /load deferred ones first, as `\/flow:status` step 2 says/],
       // The project filter and the deferred-tool rule live once, in /flow:status
       // step 2 (cadence-contract pins them there); pause selects the same way.
       ['selects schedules as /flow:status does', /exactly as `\/flow:status` step 2 selects them/],
