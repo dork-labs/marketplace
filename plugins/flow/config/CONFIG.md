@@ -366,8 +366,8 @@ be a bare label: not empty, no `/`, no space at either end. The default is `[]`.
 
 ## `fleet`: the account setup reminder
 
-When this computer has two or more account folders for one tool and none of its
-accounts is in rotation, `flow status`, `flow fleet` and `flow next` end with one
+When this computer has two or more accounts for one tool that flow could spend
+(work, client and kept-out ones don't count) and none of them is in rotation, `flow status`, `flow fleet` and `flow next` end with one
 line suggesting `flow accounts setup` (see `docs/use-all-your-accounts.mdx`). The
 line never appears with `--json` and never changes an exit code.
 
@@ -376,8 +376,10 @@ line never appears with `--json` and never changes an exit code.
 ```
 
 Set `nudge` to `false` to turn the line off; the default is `true`. It is about
-this machine, so `config.local.json` is a good home for it. Which accounts flow
-may spend is not here: that is the machine's `fleet.json`.
+this machine, so `config.local.json` is a good home for it. flow has no
+user-level config: outside a project nothing turns the line off, and it goes away
+once setup is done. Which accounts flow may spend is not here: that is the
+machine's `fleet.json`.
 
 ## Why `config.json` has no secrets
 

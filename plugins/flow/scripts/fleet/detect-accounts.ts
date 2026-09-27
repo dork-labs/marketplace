@@ -23,13 +23,15 @@ import path from 'node:path';
 
 import {
   accountForPath,
+  accountKey,
   canonicalAccountPath,
   defaultAccountPath,
   resolveAccountRef,
+  type AccountRole,
   type RuntimeAccount,
 } from './accounts.ts';
 import { resolveOpenCodeDataDir } from './opencode-store.ts';
-import { RUNTIMES, type RuntimeSlug } from './usage-ledger.ts';
+import { IMPLICIT_ACCOUNT_ID, RUNTIMES, type RuntimeSlug } from './usage-ledger.ts';
 
 /** Where a candidate folder was found. */
 export type CandidateSource = 'home' | 'glob' | 'env' | 'default' | 'registered' | 'data';
@@ -199,3 +201,94 @@ export function detectAccountFolders(inputs: DetectInputs): AccountCandidate[] {
     return [...own.filter((c) => c.isDefault), ...own.filter((c) => !c.isDefault)];
   });
 }
+
+/** An account's stored `fleet.json` entry, as far as setup reads it. */
+export interface StoredPolicy {
+  /** The stored role, or `null`. */
+  role: AccountRole | null;
+  /** The stored reserve, or `null`. */
+  reservePct: number | null;
+}
+
+/**
+ * An account's stored role and reserve in a raw `fleet.json` (a bare key reads
+ * as Claude Code; an aliased `default`'s entry counts for its row).
+ *
+ * @param raw - The raw `fleet.json`, or `undefined`.
+ * @param runtime - The account's runtime.
+ * @param id - Its id.
+ * @param isDefault - Whether `<runtime>:default` names it.
+ * @returns What is stored; `null` fields when nothing is.
+ */
+export function storedPolicyOf(
+  raw: unknown,
+  runtime: RuntimeSlug,
+  id: string,
+  isDefault: boolean
+): StoredPolicy {
+  const out: StoredPolicy = { role: null, reservePct: null };
+  const accounts = (raw as { accounts?: unknown } | undefined)?.accounts;
+  if (typeof accounts !== 'object' || accounts === null) return out;
+  const record = accounts as Record<string, { role?: unknown; reservePct?: unknown } | undefined>;
+  const keys = [accountKey(runtime, id)];
+  if (runtime === 'claude-code') keys.push(id);
+  if (isDefault) keys.push(accountKey(runtime, IMPLICIT_ACCOUNT_ID));
+  for (const key of keys) {
+    if (!Object.hasOwn(record, key)) continue;
+    const { role, reservePct } = record[key] ?? {};
+    if (out.role === null && (role === 'main' || role === 'rotation' || role === 'kept-out')) {
+      out.role = role;
+    }
+    if (
+      out.reservePct === null &&
+      typeof reservePct === 'number' &&
+      reservePct >= 0 &&
+      reservePct <= 100
+    ) {
+      out.reservePct = reservePct;
+    }
+  }
+  return out;
+}
+
+/**
+ * Why setup cannot change this folder's role at all, or `null` when it can: an
+ * account whose id is not routable, or a folder of a runtime flow cannot
+ * register (`flow accounts add` registers Claude Code only).
+ *
+ * @param candidate - The folder.
+ * @param configFile - `config.json`, named in the reason.
+ * @returns The reason, or `null`.
+ */
+export function blockedReason(candidate: AccountCandidate, configFile: string): string | null {
+  const account = candidate.account;
+  if (account !== null && !account.routable) {
+    return `its id "${account.id}" is not a valid account id; fix it in ${configFile}`;
+  }
+  if (account === null && candidate.runtime !== 'claude-code') {
+    return `flow can register Claude Code folders only; add ${RUNTIME_LABELS[candidate.runtime]} accounts in DorkOS`;
+  }
+  return null;
+}
+
+/**
+ * Whether a folder counts toward the setup nudge: setup could put it in the
+ * rotation without the operator overriding anything (it is not blocked, has no
+ * org marker, and was not kept out on purpose), or it is already spent.
+ *
+ * @param candidate - The folder.
+ * @param stored - Its stored policy.
+ * @returns True when it counts.
+ */
+export function countsForSetup(candidate: AccountCandidate, stored: StoredPolicy): boolean {
+  if (blockedReason(candidate, '') !== null) return false;
+  if (stored.role === 'main' || stored.role === 'rotation') return true;
+  return candidate.orgMarker === null && stored.role !== 'kept-out';
+}
+
+/** Each runtime's name for people. */
+export const RUNTIME_LABELS: Readonly<Record<RuntimeSlug, string>> = {
+  'claude-code': 'Claude Code',
+  codex: 'Codex',
+  opencode: 'OpenCode',
+};

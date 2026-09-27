@@ -235,8 +235,8 @@ describe('flow accounts setup: the proposal', () => {
     const work = out.candidates.find((c: { path: string }) => c.path.endsWith('.claude-work'));
     expect(work.orgManaged.reason).toMatch(/remote-settings\.json/);
     expect(out.plan.map((w: { command: string }) => w.command)).toEqual([
-      `flow accounts add --path ${path.join(home, '.claude-2')}`,
-      `flow accounts add --path ${path.join(home, '.claude3')}`,
+      'flow accounts add --path ~/.claude-2',
+      'flow accounts add --path ~/.claude3',
       'flow accounts set claude-code:claude-2 --role rotation',
       'flow accounts set claude-code:claude3 --role rotation',
       'flow accounts set claude-code:default --role main',
@@ -255,6 +255,9 @@ describe('flow accounts setup: the proposal', () => {
     expect(result.stdout).toContain(
       'flow accounts setup --yes --rotation ~/.claude-2,~/.claude3 --keep-out ~/.claude-work'
     );
+    // Folders under the home folder are shown as ~/..., never as full paths.
+    expect(result.stdout).toContain('register ~/.claude-2 as "claude-2" in ~/.dork/config.json');
+    expect(result.stdout).not.toContain(home);
     expect(existsSync(configFile())).toBe(false);
   });
 
@@ -296,9 +299,9 @@ describe('flow accounts setup: the proposal', () => {
 describe('flow accounts setup: in a terminal', () => {
   it('asks, prints every change before the last question, and writes only after yes', async () => {
     fleetHome();
-    // main? (yes) · .claude-2 work? (no) · .claude-work work? (default: yes) ·
-    // .claude3 work? (yes) · status lines for .claude and .claude-2 (no, no) · make them? (y)
-    const term = terminal(['', 'n', '', 'y', '', '', 'y']);
+    // .claude-2 work? (no) · .claude-work work? (default: yes) · .claude3 work? (yes) ·
+    // main? (yes) · status lines for .claude and .claude-2 (no, no) · make them? (y)
+    const term = terminal(['n', '', 'y', '', '', '', 'y']);
     const result = await flow(['accounts', 'setup'], { stdin: term.stdin });
     expect(result.code).toBe(0);
     const err = result.stderr;
@@ -306,6 +309,7 @@ describe('flow accounts setup: in a terminal', () => {
     expect(err).toContain('~/.claude-work looks org-managed');
     expect(err).toMatch(/Is ~\/\.claude-work a work, organization or client account\? .* \[Y\/n\]/);
     expect(err).toMatch(/Is ~\/\.claude-2 a work, organization or client account\? .* \[y\/N\]/);
+    expect(err).toContain('Yes keeps it out; no lets flow spend it in rotation.');
     // Every change is on screen before the confirmation.
     expect(err.indexOf('Changes (3):')).toBeGreaterThan(-1);
     expect(err.indexOf('Changes (3):')).toBeLessThan(err.indexOf('Make these 3 changes?'));
@@ -324,7 +328,7 @@ describe('flow accounts setup: in a terminal', () => {
 
   it('writes nothing when the last answer is no', async () => {
     fleetHome();
-    const term = terminal(['', 'n', '', 'n', '', '', '', 'n']);
+    const term = terminal(['n', '', 'n', '', '', '', '', 'n']);
     const result = await flow(['accounts', 'setup'], { stdin: term.stdin });
     expect(result.code).toBe(0);
     expect(result.stdout).toContain('Nothing changed.');
@@ -341,7 +345,7 @@ describe('flow accounts setup: in a terminal', () => {
 
   it('with --dry-run, asks but never writes', async () => {
     fleetHome();
-    const term = terminal(['', 'n', '', 'n', '', '', '']);
+    const term = terminal(['n', '', 'n', '', '', '', '']);
     const result = await flow(['accounts', 'setup', '--dry-run'], { stdin: term.stdin });
     expect(result.code).toBe(0);
     expect(result.stderr).not.toContain('Make these');
@@ -386,12 +390,13 @@ describe('flow accounts setup --yes', () => {
     expect(result.stdout).toContain('Made 5 changes.');
   });
 
-  it('never puts an account in rotation unless a flag names it', async () => {
+  it('never puts an account in rotation unless a flag names it, and then makes no main', async () => {
     fleetHome();
     const result = await flow(['accounts', 'setup', '--yes', '--json']);
     expect(result.code).toBe(0);
+    expect(result.json().plan).toEqual([]);
     expect(existsSync(configFile())).toBe(false);
-    expect(readJson(fleetFile()).accounts).toEqual({ 'claude-code:default': { role: 'main' } });
+    expect(existsSync(fleetFile())).toBe(false);
   });
 
   it('--keep-out wins over --rotation all; --main picks another main by folder name', async () => {
@@ -409,12 +414,105 @@ describe('flow accounts setup --yes', () => {
       '--json',
     ]);
     expect(result.code).toBe(0);
-    expect(readJson(fleetFile()).accounts).toEqual({
-      'claude-code:claude-2': { role: 'main' },
-      'claude-code:default': { role: 'rotation' },
-    });
+    // Only the named main is written: the default was not named and not proposed,
+    // so its role is left alone (it reads as rotation beside an explicit main, rev 6d),
+    // and the plan's notes say so.
+    expect(readJson(fleetFile()).accounts).toEqual({ 'claude-code:claude-2': { role: 'main' } });
+    expect(result.json().notes.join('\n')).toMatch(
+      /~\/\.claude \(this computer's default\) will read as rotation once ~\/\.claude-2 is main/
+    );
     expect(readJson(configFile()).runtimes.claudeCode.accounts).toHaveLength(1);
     expectValidFleet();
+  });
+
+  it('--rotation all never spends an account you kept out; naming it does, and the plan says so', async () => {
+    fleetHome();
+    mkdirSync(dorkHome, { recursive: true });
+    writeFileSync(
+      configFile(),
+      JSON.stringify({
+        runtimes: {
+          claudeCode: { accounts: [{ id: 'client', path: path.join(home, '.claude3') }] },
+        },
+      })
+    );
+    expect((await flow(['accounts', 'set', 'client', '--role', 'kept-out'])).code).toBe(0);
+
+    const all = await flow(['accounts', 'setup', '--yes', '--rotation', 'all', '--json']);
+    expect(readJson(fleetFile()).accounts['claude-code:client']).toEqual({ role: 'kept-out' });
+    expect(all.json().notes.join('\n')).toContain('~/.claude3 stays kept out: you set it kept out');
+
+    const named = await flow(['accounts', 'setup', '--yes', '--rotation', 'client']);
+    expect(named.stdout).toContain(
+      'make claude-code:client rotation in ~/.dork/flow/fleet.json (was kept out: you set it kept out; named in --rotation)'
+    );
+    expect(readJson(fleetFile()).accounts['claude-code:client']).toEqual({ role: 'rotation' });
+  });
+
+  it('--rotation all says why it leaves an org-managed folder out', async () => {
+    fleetHome();
+    const out = (await flow(['accounts', 'setup', '--yes', '--rotation', 'all', '--json'])).json();
+    expect(out.notes.join('\n')).toMatch(
+      /~\/\.claude-work stays kept out: it has remote-settings\.json/
+    );
+  });
+
+  it('makes no main when nothing else ends up in rotation: the default and an org-managed folder', async () => {
+    dir('.claude');
+    dir('.claude-work', 'projects');
+    writeFileSync(path.join(home, '.claude-work', 'policy-limits.json'), '{}');
+    const out = (await flow(['accounts', 'setup', '--yes', '--rotation', 'all', '--json'])).json();
+    expect(out.plan).toEqual([]);
+    expect(existsSync(fleetFile())).toBe(false);
+    // Proposing without flags: the org folder is kept out, so no main either.
+    const proposed = (await flow(['accounts', 'setup', '--json'])).json();
+    expect(proposed.plan).toEqual([]);
+  });
+
+  it('makes no main when nothing else ends up in rotation: ~/.codex and a CODEX_HOME folder', async () => {
+    dir('.codex');
+    const codexHome = path.join(base, 'codex-2');
+    mkdirSync(codexHome);
+    const out = (
+      await flow(['accounts', 'setup', '--yes', '--rotation', 'all', '--json'], {
+        env: { CODEX_HOME: codexHome },
+      })
+    ).json();
+    expect(out.plan).toEqual([]);
+    expect(existsSync(fleetFile())).toBe(false);
+    expect(out.notes.join('\n')).toContain('flow can register Claude Code folders only');
+  });
+
+  it('shows the reserve the main account will really keep', async () => {
+    fleetHome();
+    mkdirSync(path.dirname(fleetFile()), { recursive: true });
+    writeFileSync(
+      fleetFile(),
+      JSON.stringify({ v: 1, accounts: { 'claude-code:default': { reservePct: 30 } } })
+    );
+    const term = terminal(['n', '', 'n', '', '', '', '', 'n']);
+    const result = await flow(['accounts', 'setup'], { stdin: term.stdin });
+    expect(result.stderr).toContain('with 30% of its weekly limit held back for you?');
+    expect(result.stderr).toContain('make claude-code:default main (keeps 30% for you)');
+    expect(result.stderr).not.toContain('50%');
+  });
+
+  it('says one change, not "1 changes"', async () => {
+    fleetHome();
+    await flow(['accounts', 'setup', '--yes', '--rotation', 'all']);
+    const one = await flow(['accounts', 'setup', '--yes', '--keep-out', '.claude3']);
+    expect(one.stdout).toContain('Changes (1):');
+    expect(one.stdout).toContain('Made 1 change.');
+  });
+
+  it('in a terminal, says the --rotation and --keep-out flags need --yes', async () => {
+    fleetHome();
+    const result = await flow(['accounts', 'setup', '--rotation', 'all', '--dry-run'], {
+      stdin: terminal([]).stdin,
+    });
+    expect(result.stdout).toContain(
+      'The --rotation and --keep-out flags only apply with --yes; answer the questions instead.'
+    );
   });
 
   it('an org-managed folder goes to rotation only when named', async () => {

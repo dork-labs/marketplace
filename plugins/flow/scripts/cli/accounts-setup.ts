@@ -40,7 +40,12 @@ import {
   updateFleetPolicy,
   type AccountRole,
 } from '../fleet/accounts.ts';
-import { detectAccountFolders, type AccountCandidate } from '../fleet/detect-accounts.ts';
+import {
+  blockedReason,
+  detectAccountFolders,
+  storedPolicyOf,
+  type AccountCandidate,
+} from '../fleet/detect-accounts.ts';
 import {
   IMPLICIT_ACCOUNT_ID,
   readLedger,
@@ -68,6 +73,10 @@ interface Row {
   id: string | null;
   /** The role stored in `fleet.json`, or `null`. */
   storedRole: AccountRole | null;
+  /** The reserve stored in `fleet.json`, or `null`. */
+  storedReserve: number | null;
+  /** The reserve it has now, resolved. */
+  reservePct: number;
   /** The role it has now, resolved, or `null` when it has no account. */
   currentRole: AccountRole | null;
   /** Latest 5-hour and 7-day used share from its ledger, when known. */
@@ -78,6 +87,8 @@ interface Row {
   statusline: boolean;
   /** Why it cannot be changed, when it cannot. */
   blocked: string | null;
+  /** Why the plan changes its role, when that needs saying. */
+  why: string | null;
 }
 
 /** One planned write. */
@@ -92,6 +103,10 @@ export interface PlannedWrite {
   path: string;
   /** For `set`: the role. */
   role?: AccountRole;
+  /** For `set` to main: the reserve it will keep. */
+  reservePct?: number;
+  /** For `set`: why, when the role overrides something (a kept-out account named in --rotation). */
+  why?: string;
   /** The file it changes. */
   file: string;
   /** The `flow` command that makes the same change. */
@@ -112,31 +127,21 @@ function shown(dir: string, home: string): string {
   return rel !== '' && !rel.startsWith('..') && !path.isAbsolute(rel) ? `~/${rel}` : dir;
 }
 
-/** A role for people. */
-function roleText(role: AccountRole | null): string {
-  if (role === 'main') return 'main (keeps 50% for you)';
+/** A role for people, with a main account's reserve. */
+function roleText(role: AccountRole | null, reservePct: number): string {
+  if (role === 'main') return `main (keeps ${reservePct}% for you)`;
   if (role === 'kept-out') return 'kept out';
   return role ?? '-';
 }
 
-/** The role stored for an account in the raw `fleet.json`, or `null`. */
-function storedRoleOf(
-  raw: unknown,
-  runtime: RuntimeSlug,
-  id: string,
-  isDefault: boolean
-): AccountRole | null {
-  const accounts = (raw as { accounts?: unknown } | undefined)?.accounts;
-  if (typeof accounts !== 'object' || accounts === null) return null;
-  const record = accounts as Record<string, { role?: unknown } | undefined>;
-  const keys = [accountKey(runtime, id)];
-  if (runtime === 'claude-code') keys.push(id);
-  if (isDefault) keys.push(accountKey(runtime, IMPLICIT_ACCOUNT_ID));
-  for (const key of keys) {
-    const role = Object.hasOwn(record, key) ? record[key]?.role : undefined;
-    if (role === 'main' || role === 'rotation' || role === 'kept-out') return role;
-  }
-  return null;
+/** The reserve a main account keeps: what is stored, else the default for main (50). */
+function mainReserve(row: Row): number {
+  return row.storedReserve ?? 50;
+}
+
+/** A count and a noun: "1 change", "3 changes". */
+function plural(count: number, noun: string): string {
+  return `${count} ${noun}${count === 1 ? '' : 's'}`;
 }
 
 /** The rows a comma list of refs names. `all` names nothing here; callers handle it. */
@@ -207,7 +212,7 @@ function renderFound(rows: readonly Row[], home: string): string {
       RUNTIME_NAMES[row.candidate.runtime],
       shown(row.candidate.path, home),
       row.id ?? 'not registered',
-      row.currentRole === null ? '-' : roleText(row.currentRole),
+      row.currentRole === null ? '-' : roleText(row.currentRole, row.reservePct),
       pct(row.usage.fiveHour),
       pct(row.usage.sevenDay),
       notes.join('; '),
@@ -216,18 +221,18 @@ function renderFound(rows: readonly Row[], home: string): string {
   return `Account folders found:\n${formatColumns(table)}`;
 }
 
-/** The planned changes, one per line. */
-function renderPlan(plan: readonly PlannedWrite[]): string {
+/** The planned changes, one per line, with folders shown under `~`. */
+function renderPlan(plan: readonly PlannedWrite[], home: string): string {
   if (plan.length === 0) return 'Nothing to change.';
   return [
     `Changes (${plan.length}):`,
     ...plan.map((write, i) => {
       const what =
         write.kind === 'add'
-          ? `register ${write.path} as "${write.id}" in ${write.file}`
+          ? `register ${shown(write.path, home)} as "${write.id}" in ${shown(write.file, home)}`
           : write.kind === 'set'
-            ? `make ${accountKey(write.runtime, write.id)} ${roleText(write.role ?? null)} in ${write.file}`
-            : `add the usage recorder to ${write.file} after line ${write.install?.line ?? '?'}`;
+            ? `make ${accountKey(write.runtime, write.id)} ${roleText(write.role ?? null, write.reservePct ?? 50)} in ${shown(write.file, home)}${write.why === undefined ? '' : ` (${write.why})`}`
+            : `add the usage recorder to ${shown(write.file, home)} after line ${write.install?.line ?? '?'}`;
       return `  ${i + 1}. ${what}\n     (${write.command})`;
     }),
   ].join('\n');
@@ -244,8 +249,8 @@ function usedPct(windows: Record<string, unknown> | undefined, key: string, now:
  *
  * @param ctx - The invocation and the injected world.
  * @returns What was found, proposed and (when confirmed) changed.
- * @throws {UsageError} On a flag that names no folder found, or a flag given
- *   without `--yes` outside a terminal that asks.
+ * @throws {UsageError} On a `--rotation`, `--keep-out` or `--main` ref that
+ *   names no folder found (exit 2).
  * @throws {PreconditionError} When `fleet.json` stayed locked, or is a newer version.
  */
 export async function run(ctx: VerbContext): Promise<VerbResult> {
@@ -285,24 +290,22 @@ export async function run(ctx: VerbContext): Promise<VerbResult> {
         sevenDay: usedPct(windows, 'seven_day', now),
       };
     }
-    let blocked: string | null = null;
-    if (account !== null && !account.routable) {
-      blocked = `its id "${account.id}" is not a valid account id; fix it in ${configFile}`;
-    } else if (account === null && candidate.runtime !== 'claude-code') {
-      blocked = `flow can register Claude Code folders only; add ${RUNTIME_NAMES[candidate.runtime]} accounts in DorkOS`;
-    }
+    const stored =
+      account === null
+        ? { role: null, reservePct: null }
+        : storedPolicyOf(fleetRaw, account.runtime, account.id, account.isDefault);
     return {
       candidate,
       id: account?.id ?? null,
-      storedRole:
-        account === null
-          ? null
-          : storedRoleOf(fleetRaw, account.runtime, account.id, account.isDefault),
+      storedRole: stored.role,
+      storedReserve: stored.reservePct,
+      reservePct: index === -1 ? 0 : (policy.accounts[index]?.reservePct ?? 0),
       currentRole: index === -1 ? null : (policy.accounts[index]?.role ?? null),
       usage,
       choice: null,
       statusline: false,
-      blocked,
+      blocked: blockedReason(candidate, configFile),
+      why: null,
     };
   });
 
@@ -329,43 +332,74 @@ export async function run(ctx: VerbContext): Promise<VerbResult> {
       own.find((row) => row.candidate.isDefault) ??
       null;
     if (main !== null && main.blocked !== null) main = null;
-    if (main !== null && mode === 'ask') {
-      const keep = await ask(
-        ctx,
-        `Keep ${shown(main.candidate.path, home)} as your main ${RUNTIME_NAMES[runtime]} account, with 50% of its weekly limit held back for you?`,
-        true
-      );
-      if (!keep) main = null;
-    }
-    if (main !== null) main.choice = 'main';
+    const namedMain = main !== null && mainRefs.has(main);
 
     for (const row of own) {
       if (row === main || row.blocked !== null) continue;
+      const where = shown(row.candidate.path, home);
+      const keptOutWhy =
+        row.storedRole === 'kept-out'
+          ? 'you set it kept out'
+          : row.candidate.orgMarker !== null
+            ? row.candidate.orgMarker.reason
+            : null;
       if (mode === 'ask') {
         if (row.candidate.orgMarker !== null) {
-          ctx.stderr.write(
-            `${shown(row.candidate.path, home)} looks org-managed: ${row.candidate.orgMarker.reason}.\n`
-          );
+          ctx.stderr.write(`${where} looks org-managed: ${row.candidate.orgMarker.reason}.\n`);
         }
         const work = await ask(
           ctx,
-          `Is ${shown(row.candidate.path, home)} a work, organization or client account? flow keeps those out.`,
-          row.candidate.orgMarker !== null || row.storedRole === 'kept-out'
+          `Is ${where} a work, organization or client account? Yes keeps it out; no lets flow spend it in rotation.`,
+          keptOutWhy !== null
         );
         row.choice = work ? 'kept-out' : 'rotation';
       } else if (mode === 'propose' && rotationFlag === undefined && keepOutRefs.size === 0) {
-        row.choice =
-          row.candidate.orgMarker !== null || row.storedRole === 'kept-out'
-            ? 'kept-out'
-            : 'rotation';
+        row.choice = keptOutWhy !== null ? 'kept-out' : 'rotation';
       } else if (keepOutRefs.has(row)) {
         row.choice = 'kept-out';
-      } else if (rotationRefs.has(row) || (rotationAll && row.candidate.orgMarker === null)) {
+      } else if (rotationRefs.has(row)) {
         row.choice = 'rotation';
-      } else if (row.storedRole === 'main') {
-        // Another account became main: this one gives way.
+        if (keptOutWhy !== null) row.why = `was kept out: ${keptOutWhy}; named in --rotation`;
+      } else if (rotationAll && !row.candidate.isDefault && keptOutWhy === null) {
         row.choice = 'rotation';
+      } else if (rotationAll && !row.candidate.isDefault) {
+        notes.push(`${where} stays kept out: ${keptOutWhy}. Name it in --rotation to spend it.`);
+      } else if (row.storedRole === 'main' && main !== null) {
+        row.choice = 'rotation';
+        row.why = `${shown(main.candidate.path, home)} becomes main`;
       }
+    }
+
+    // A main keeps a reserve back from the others; with no other account in
+    // the rotation it would only hold back the one account flow can use.
+    const othersRotate = own.some(
+      (row) =>
+        row !== main &&
+        (row.choice === 'rotation' ||
+          (row.choice === null &&
+            row.candidate.account !== null &&
+            !row.candidate.account.implicit &&
+            row.currentRole === 'rotation'))
+    );
+    if (main === null || !(othersRotate || namedMain)) continue;
+    if (mode === 'ask') {
+      const keep = await ask(
+        ctx,
+        `Keep ${shown(main.candidate.path, home)} as your main ${RUNTIME_NAMES[runtime]} account, with ${mainReserve(main)}% of its weekly limit held back for you?`,
+        true
+      );
+      if (!keep) continue;
+    }
+    main.choice = 'main';
+    // A standalone default with no stored role reads as rotation once another
+    // account is main (rev 6d): nothing is written for it, so say so.
+    const standalone = own.find(
+      (row) => row.candidate.isDefault && row.candidate.account?.implicit === true
+    );
+    if (standalone !== undefined && standalone !== main && standalone.storedRole === null) {
+      notes.push(
+        `${shown(standalone.candidate.path, home)} (this computer's default) will read as rotation once ${shown(main.candidate.path, home)} is main.`
+      );
     }
   }
 
@@ -406,7 +440,7 @@ export async function run(ctx: VerbContext): Promise<VerbResult> {
       id,
       path: row.candidate.path,
       file: configFile,
-      command: `flow accounts add --path ${row.candidate.path}`,
+      command: `flow accounts add --path ${shown(row.candidate.path, home)}`,
     });
   }
   const roleWrites: PlannedWrite[] = [];
@@ -423,6 +457,8 @@ export async function run(ctx: VerbContext): Promise<VerbResult> {
       id,
       path: row.candidate.path,
       role: row.choice,
+      ...(row.choice === 'main' ? { reservePct: mainReserve(row) } : {}),
+      ...(row.why === null ? {} : { why: row.why }),
       file: fleetFile,
       command: `flow accounts set ${key} --role ${row.choice}`,
     });
@@ -468,15 +504,12 @@ export async function run(ctx: VerbContext): Promise<VerbResult> {
     }
   }
   for (const row of rows) {
-    if (
-      row.blocked !== null &&
-      row.candidate.account === null &&
-      row.candidate.runtime !== 'claude-code'
-    ) {
-      notes.push(`${shown(row.candidate.path, home)}: ${row.blocked}.`);
-    } else if (row.blocked !== null && row.candidate.account !== null) {
-      notes.push(`${shown(row.candidate.path, home)}: left as it is, ${row.blocked}.`);
-    }
+    if (row.blocked === null) continue;
+    notes.push(
+      row.candidate.account === null
+        ? `${shown(row.candidate.path, home)}: ${row.blocked}.`
+        : `${shown(row.candidate.path, home)}: left as it is, ${row.blocked}.`
+    );
   }
 
   // Confirm, then write.
@@ -484,21 +517,28 @@ export async function run(ctx: VerbContext): Promise<VerbResult> {
   if (plan.length > 0 && !ctx.dryRun) {
     if (mode === 'yes') apply = true;
     else if (mode === 'ask') {
-      ctx.stderr.write(`${renderPlan(plan)}\n\n`);
-      apply = await ask(ctx, `Make these ${plan.length} changes?`, false);
+      ctx.stderr.write(`${renderPlan(plan, home)}\n\n`);
+      apply = await ask(
+        ctx,
+        plan.length === 1 ? 'Make this change?' : `Make these ${plan.length} changes?`,
+        false
+      );
     }
   }
   if (apply) await applyPlan(ctx, dorkHome, home, plan, now);
 
   const proposal = rows
     .filter((row) => row.choice !== null)
-    .map((row) => `  ${shown(row.candidate.path, home)}: ${roleText(row.choice)}`);
+    .map(
+      (row) =>
+        `  ${shown(row.candidate.path, home)}: ${roleText(row.choice, row.choice === 'main' ? mainReserve(row) : 0)}`
+    );
   const text: string[] = [];
   if (mode !== 'ask') text.push(renderFound(rows, home));
   if (proposal.length > 0) text.push(['Roles:', ...proposal].join('\n'));
-  if (mode !== 'ask' || !apply) text.push(renderPlan(plan));
+  if (mode !== 'ask' || !apply) text.push(renderPlan(plan, home));
   if (plan.length > 0) {
-    if (apply) text.push(`Made ${plan.length} changes. See them with "flow accounts".`);
+    if (apply) text.push(`Made ${plural(plan.length, 'change')}. See them with "flow accounts".`);
     else if (ctx.dryRun) text.push('Dry run: nothing changed.');
     else if (mode === 'ask') text.push('Nothing changed.');
     else text.push(`Nothing changed. To make these changes, run: ${suggestion(rows, home)}`);

@@ -16,9 +16,12 @@ import { afterEach, describe, expect, it } from 'vitest';
 
 import { FlowConfigSchema } from '../../scripts/config-schema.ts';
 import { FLEET_DEFAULTS } from '../../scripts/config-files.ts';
+import type { VerbContext } from '../../scripts/cli/context.ts';
+import { setupNudge } from '../../scripts/cli/setup-nudge.ts';
 import { runFlow, tempProject, type TempProject } from './read-verb-harness.ts';
 
-const NUDGE = '3 Claude Code account folders found, 0 in rotation: run `flow accounts setup`.';
+// The standalone default reads as rotation alone (rev 6d), as `flow accounts` shows it.
+const NUDGE = '3 Claude Code accounts found, 1 in rotation: run `flow accounts setup`.';
 
 /** The three commands the nudge rides on, with arguments that make them read only. */
 const VERBS: readonly (readonly string[])[] = [['status'], ['next'], ['fleet', '--no-dorkos']];
@@ -149,6 +152,68 @@ describe('the setup nudge', () => {
     expect(result.code).toBe(0);
     expect(result.stdout).not.toContain('accounts setup');
     expect(result.stderr).toBe('');
+  });
+});
+
+describe('what the nudge counts', () => {
+  it('does not count an org-managed folder, so the default beside one stays quiet', async () => {
+    const t = project();
+    mkdirSync(path.join(t.osHome, '.claude'), { recursive: true });
+    mkdirSync(path.join(t.osHome, '.claude-work', 'projects'), { recursive: true });
+    writeFileSync(path.join(t.osHome, '.claude-work', 'remote-settings.json'), '{}');
+    expect((await runFlow(['status'], t, { items: [] })).stdout).not.toContain('accounts setup');
+  });
+
+  it('does not count a folder flow cannot register (a second Codex folder)', async () => {
+    const t = project();
+    mkdirSync(path.join(t.osHome, '.codex'), { recursive: true });
+    const second = path.join(path.dirname(t.osHome), 'codex-2');
+    mkdirSync(second, { recursive: true });
+    const result = await runFlow(
+      ['fleet', '--no-dorkos'],
+      t,
+      { items: [] },
+      {},
+      { CODEX_HOME: second }
+    );
+    expect(result.stdout).not.toContain('accounts setup');
+  });
+
+  it('does not count a folder kept out on purpose', async () => {
+    const t = project();
+    threeFolders(t);
+    writeDork(t, 'config.json', {
+      runtimes: {
+        claudeCode: {
+          accounts: [
+            { id: 'two', path: path.join(t.osHome, '.claude-2') },
+            { id: 'three', path: path.join(t.osHome, '.claude3') },
+          ],
+        },
+      },
+    });
+    writeDork(t, path.join('flow', 'fleet.json'), {
+      v: 1,
+      accounts: {
+        'claude-code:two': { role: 'kept-out' },
+        'claude-code:three': { role: 'kept-out' },
+      },
+    });
+    expect((await runFlow(['status'], t, { items: [] })).stdout).not.toContain('accounts setup');
+  });
+
+  it('is never computed in --json mode', () => {
+    const t = project();
+    threeFolders(t);
+    const ctx = {
+      json: true,
+      projectDir: t.project,
+      flowRoot: t.plugin,
+      env: { DORK_HOME: t.dorkHome },
+      io: { osHome: t.osHome },
+    } as unknown as VerbContext;
+    expect(setupNudge(ctx)).toBeNull();
+    expect(setupNudge({ ...ctx, json: false } as VerbContext)).toBe(NUDGE);
   });
 });
 

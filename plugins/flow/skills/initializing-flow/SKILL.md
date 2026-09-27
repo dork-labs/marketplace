@@ -10,7 +10,12 @@ description: First-run setup for the /flow engine in a new repo - detect or reco
 > **What this is.** The one-time setup procedure an adopter (or `/flow:init`)
 > follows to make `/flow` runnable in a repo: pick a tracker, generate the
 > concrete **adapter** that lets the generic engine speak to it, scaffold the
-> config triad, set up this computer's accounts, and confirm the install.
+> config triad, and confirm the install. After this runs clean, every
+> `/flow:<stage>` command and the autonomous loop work against your tracker with
+> no further wiring.
+>
+> **This is a prose procedure, not code.** The agent reads this skill and follows
+> it. `/flow:init` is a thin trigger over it.
 
 ## The one rule: stay tracker-neutral until the adapter exists
 
@@ -22,13 +27,14 @@ folder. Everything else you touch (the
 config triad, the dispatch check) stays generic. When you need adapter-generation
 detail, read the `building-adapters` skill
 (`<flow-root>/skills/building-adapters/SKILL.md`); it owns the generate-and-verify
-contract.
+contract. This skill owns the **setup orchestration** around it.
 
 ## Calibration: ask when a human is present, default when headless
 
 Setup choices are gathered by the calibration ladder. When a human is at the
 terminal, ask with `AskUserQuestion` (one question per choice, with the safe
-option pre-marked). When running headless, do **not** block: apply the sane default for each
+option pre-marked). When running headless (no interactive terminal, or a
+non-interactive trigger), do **not** block: apply the sane default for each
 choice, record the assumption in your setup report, and proceed. Setup is
 reversible (re-run with `/flow:init` to change anything), so headless defaults are
 safe to apply silently. The one exception is Step 4's clobber guard, which always
@@ -43,7 +49,7 @@ confirms before overwriting committed config.
   2 GATHER     tracker + connection · identity · routing · review · model tiers
   3 ADAPTER    generate the concrete adapter, then validate until green (the gate)
   4 CONFIG     write config.json + config.local.json (secrets) + the review rubric
-  4b ACCOUNTS  flow accounts setup: which accounts flow may spend
+  4b ACCOUNTS  flow accounts setup
   5 CONFIRM    5a connectivity (a real adapter read) + 5b policy self-check
 ```
 
@@ -118,8 +124,9 @@ than discovering it at Step 5.
    (`dispatch.ts` is one of them: it names no package itself, and still cannot
    load without `zod`). `dispatch.ts` is used as the probe precisely because it
    sits on that transitive path, so a pass here clears the whole config-schema
-   graph the rest of setup depends on. `validate-config.ts` is dependency-free on
-   purpose, so it is no use as this probe.
+   graph the rest of setup depends on. `validate-config.ts` is the deliberate
+   exception — it is kept dependency-free so it can validate a config before
+   anything is installed, which is also why it is no use as this probe.
 
    On `ERR_MODULE_NOT_FOUND`, install it into the plugin and re-run the check:
 
@@ -130,7 +137,8 @@ than discovering it at Step 5.
    **`--omit=dev` is not optional wording.** A shell carrying
    `NODE_ENV=production` (or an `omit=dev` npm config) installs _nothing_ from a
    bare `npm install`, which is exactly how an adopter ends up with a plugin whose
-   own validator cannot run. Contributors who also want the test/lint/schema-generation
+   own validator cannot run. Stating the flag makes the command behave the same
+   in every shell. Contributors who also want the test/lint/schema-generation
    toolchain use `--include=dev` instead; an adopter never needs it.
 
    Interactive: report what is missing and ask before installing. Headless: run
@@ -429,13 +437,11 @@ the review rubric. The triad and its precedence are documented in
    guessing at severity. This file is committed, not gitignored — a rubric is
    shared policy, and it holds no secrets.
 
-### Step 4b - Accounts on this computer
+### Step 4b - Accounts
 
-Run `node --experimental-strip-types <flow-root>/scripts/flow.ts accounts setup --json` (it
-only proposes). With several folders for one tool, show the operator each folder, its
-proposed role and any org-managed reason, and ask which are work, organization or client
-accounts; never assume. Re-run with `--yes` plus `--rotation`, `--keep-out`, `--main`,
-`--statusline` from their answers. Headless: skip and report it.
+Follow "For scripts and agents" in `<flow-root>/docs/use-all-your-accounts.mdx`: propose
+with `flow accounts setup --json`, ask which accounts are work or client ones (never
+assume), then apply with `--yes`. Headless: skip.
 
 ### Step 5 - Confirm the install
 
@@ -515,11 +521,7 @@ can change them with another `/flow:init`.
   connectivity read fails (Step 5a), stop and say exactly what is wrong and which
   file to fix. Never report `/flow` as ready on an unverified or unreachable
   setup.
-- **Never let a policy check impersonate a connectivity check.** Step 5b runs a
-  pure function over items already in hand; it cannot reach a tracker and cannot
-  fail for a credential reason. Report it under its own label, and never treat its
-  clean empty result as evidence that anything connected. Only Step 5a can say
-  that.
+- **Never let a policy check impersonate a connectivity check** (Step 5b).
 
 ## References
 

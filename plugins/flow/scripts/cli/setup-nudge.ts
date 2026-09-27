@@ -16,7 +16,13 @@
 
 import { readJsonFile } from '../atomic-json.ts';
 import { findConfigRoots, fleetSettings, type ConfigRoots } from '../config-files.ts';
-import { detectAccountFolders, type AccountCandidate } from '../fleet/detect-accounts.ts';
+import {
+  RUNTIME_LABELS,
+  countsForSetup,
+  detectAccountFolders,
+  storedPolicyOf,
+  type AccountCandidate,
+} from '../fleet/detect-accounts.ts';
 import {
   fleetPolicyPath,
   identityConfigPath,
@@ -25,40 +31,50 @@ import {
   resolveFleetPolicy,
   type RuntimeAccount,
 } from '../fleet/accounts.ts';
-import { RUNTIMES, type RuntimeSlug } from '../fleet/usage-ledger.ts';
+import { RUNTIMES } from '../fleet/usage-ledger.ts';
 import type { VerbContext, VerbResult } from './context.ts';
 
-/** Each runtime's name for people. */
-const RUNTIME_NAMES: Readonly<Record<RuntimeSlug, string>> = {
-  'claude-code': 'Claude Code',
-  codex: 'Codex',
-  opencode: 'OpenCode',
-};
-
 /**
- * The nudge for these folders and this policy, or `null`. Rotation is counted
- * over registered accounts only: a standalone `default` that reads as rotation
- * because it is alone (rev 6d) does not mean the other folders are in use.
+ * The nudge for these folders and this policy, or `null` (spec Amendment
+ * "account setup", S2). Only folders setup could put in the rotation count
+ * ({@link countsForSetup}): an org-marked folder, one kept out on purpose, and
+ * one flow cannot register never keep the line alive. It fires while a runtime
+ * has two or more of them and none of its registered accounts is rotation; a
+ * standalone `default` that reads as rotation because it is alone (rev 6d) does
+ * not count, but it is included in "M in rotation" so the line agrees with
+ * `flow accounts`.
  *
  * @param candidates - The folders found ({@link detectAccountFolders}).
  * @param accounts - Every account, in the order `roles` follows.
  * @param roles - Each account's resolved role, in the same order.
+ * @param fleetRaw - The raw `fleet.json`, for what was stored on purpose.
  * @returns The line, or `null`.
  */
 export function nudgeLine(
   candidates: readonly AccountCandidate[],
   accounts: readonly RuntimeAccount[],
-  roles: readonly string[]
+  roles: readonly string[],
+  fleetRaw: unknown
 ): string | null {
+  const roleOf = (candidate: AccountCandidate): string | null => {
+    const index = candidate.account === null ? -1 : accounts.indexOf(candidate.account);
+    return index === -1 ? null : (roles[index] ?? null);
+  };
   for (const runtime of RUNTIMES) {
-    const found = candidates.filter((c) => c.runtime === runtime).length;
-    if (found < 2) continue;
-    const inRotation = accounts.filter(
-      (account, index) =>
-        account.runtime === runtime && !account.implicit && roles[index] === 'rotation'
-    ).length;
-    if (inRotation > 0) continue;
-    return `${found} ${RUNTIME_NAMES[runtime]} account folders found, 0 in rotation: run \`flow accounts setup\`.`;
+    const counted = candidates.filter(
+      (c) =>
+        c.runtime === runtime &&
+        countsForSetup(
+          c,
+          c.account === null
+            ? { role: null, reservePct: null }
+            : storedPolicyOf(fleetRaw, runtime, c.account.id, c.account.isDefault)
+        )
+    );
+    if (counted.length < 2) continue;
+    const rotating = counted.filter((c) => roleOf(c) === 'rotation');
+    if (rotating.some((c) => c.account !== null && !c.account.implicit)) continue;
+    return `${counted.length} ${RUNTIME_LABELS[runtime]} accounts found, ${rotating.length} in rotation: run \`flow accounts setup\`.`;
   }
   return null;
 }
@@ -79,12 +95,14 @@ export function setupNudge(ctx: VerbContext, roots?: ConfigRoots): string | null
     const dorkHome = resolveDorkHome({ ...ctx.env }, home);
     const config = readJsonFile(identityConfigPath(dorkHome)).value;
     const { accounts } = readAccounts(config, { home });
-    const policy = resolveFleetPolicy(accounts, readJsonFile(fleetPolicyPath(dorkHome)).value);
+    const fleetRaw = readJsonFile(fleetPolicyPath(dorkHome)).value;
+    const policy = resolveFleetPolicy(accounts, fleetRaw);
     const candidates = detectAccountFolders({ home, env: ctx.env, config, accounts });
     return nudgeLine(
       candidates,
       accounts,
-      policy.accounts.map((p) => p.role)
+      policy.accounts.map((p) => p.role),
+      fleetRaw
     );
   } catch {
     return null;

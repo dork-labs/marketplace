@@ -85,7 +85,7 @@ describe('a fresh user sets up their accounts', () => {
     const before = flow('fleet', '--no-dorkos');
     expect(before.code).toBe(0);
     expect(before.stdout).toContain(
-      '4 Claude Code account folders found, 0 in rotation: run `flow accounts setup`.'
+      '3 Claude Code accounts found, 1 in rotation: run `flow accounts setup`.'
     );
   });
 
