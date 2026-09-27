@@ -353,6 +353,9 @@ export function FleetTab(): Node {
 
   // Bumped by the Retry action on a failed load, which runs the load again.
   const [attempt, setAttempt] = useState(0);
+  // True while a retried load is on its way. The failed view stays up (Retry
+  // marked busy, not removed) so keyboard focus stays on the button.
+  const [retrying, setRetrying] = useState(false);
 
   useEffect(() => {
     let live = true;
@@ -361,10 +364,12 @@ export function FleetTab(): Node {
         if (!live) return;
         saved.current = fleet;
         setBody(fleet);
+        setRetrying(false);
         setPhase({ kind: 'ready' });
       },
       (error: unknown) => {
         if (!live) return;
+        setRetrying(false);
         if (error instanceof HostTooOldError) setPhase({ kind: 'too-old' });
         else setPhase({ kind: 'failed', message: LOAD_FAILED_TEXT });
       }
@@ -413,9 +418,11 @@ export function FleetTab(): Node {
         'button',
         {
           type: 'button',
-          style: { ...CHIP, cursor: 'pointer' },
+          style: { ...CHIP, cursor: retrying ? 'progress' : 'pointer' },
+          'aria-disabled': retrying,
           onClick: () => {
-            setPhase({ kind: 'loading' });
+            if (retrying) return;
+            setRetrying(true);
             setAttempt((n) => n + 1);
           },
         },

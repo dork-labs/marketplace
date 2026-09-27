@@ -450,6 +450,20 @@ describe('FleetTab: what a failure says', () => {
     expect(screen.queryByText(/Extension 'flow'|Locked/)).toBeNull();
   });
 
+  it('keeps Retry on screen and focused when the retried load fails too', async () => {
+    stubFetch({ status: 500, body: NO_JSON });
+    await renderTab();
+    const retry = screen.getByRole('button', { name: 'Retry' });
+    retry.focus();
+    await act(async () => {
+      fireEvent.click(retry);
+    });
+    expect(screen.getByRole('alert').textContent).toBe(
+      "Couldn't load Flow's settings. Try again in a moment."
+    );
+    expect(document.activeElement).toBe(screen.getByRole('button', { name: 'Retry' }));
+  });
+
   it('Retry loads the settings again after a failed first load', async () => {
     const good = body();
     let calls = 0;
