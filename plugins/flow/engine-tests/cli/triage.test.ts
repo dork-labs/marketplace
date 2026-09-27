@@ -444,4 +444,30 @@ describe('flow triage --question-file', () => {
     }
     expect(existsSync(path.join(project.dir, file))).toBe(true);
   });
+
+  it('touches nothing on a refused combination: no git-exclude line for the scratch file', async () => {
+    // Purpose: reading a scratch file writes git's local exclude, so it must
+    // wait until the flags are known to agree.
+    // With the journal off, whose first line would exclude .dork/flow/, the
+    // scratch read is the only thing that writes the exclude file.
+    project.config({
+      tracker: 'fake',
+      identity: { agent: 'agent-1' },
+      selfImprovement: { journal: { enabled: false } },
+    });
+    const file = put('.dork/flow/tmp/q.md', QUESTION);
+    const exclude = path.join(project.dir, '.git', 'info', 'exclude');
+    const excluded = () => (existsSync(exclude) ? readFileSync(exclude, 'utf8') : '');
+    for (const argv of [
+      ['triage', 'FAKE-1', '--ready', '--stage', 'execute', '--question-file', file],
+      ['triage', 'FAKE-1', '--question-file', file, '--stage', 'execute'],
+    ]) {
+      const result = await runFlow(project, { items: [untriaged()] }, argv);
+      expect(result.code, argv.join(' ')).toBe(EXIT.usage);
+    }
+    expect(excluded()).not.toContain('.dork/flow/tmp/');
+    // The same file on an accepted run does add the line.
+    await runFlow(project, { items: [untriaged()] }, ['triage', 'FAKE-1', '--question-file', file]);
+    expect(excluded()).toContain('.dork/flow/tmp/');
+  });
 });

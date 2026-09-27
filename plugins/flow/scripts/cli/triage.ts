@@ -17,6 +17,9 @@
  * Journal: besides the `verb` line `main` writes, an item that was not
  * already ready gets `item.readied` (`by: triage`), and an item that was not
  * already parked gets `operator.wait` `start`, so a retry writes neither twice.
+ * The line is written only after the read-back confirms the label, so when the
+ * label lands but the read-back fails (exit 4), the retry finds the label
+ * already there and that item's line is never written.
  *
  * Refuses before any tracker write: not exactly one of `--ready` and a question,
  * `--stage` without `--ready` (or `--ready` without it), an empty question, a
@@ -56,20 +59,24 @@ export async function run(ctx: VerbContext): Promise<VerbResult> {
   // Every usage refusal comes before the config, the adapter or any tracker call.
   const [identifier] = ctx.args.positionals;
   const ready = ctx.args.flags.ready === true;
-  const question = flagText(ctx, { inline: 'park', file: 'question-file', what: 'question' });
-  const park = question?.text.trim();
+  const asks = typeof ctx.args.flags.park === 'string';
+  const asksFromFile = typeof ctx.args.flags['question-file'] === 'string';
   const rawStage = ctx.args.flags.stage;
   const stage = typeof rawStage === 'string' ? rawStage : undefined;
-  if (ready === (park !== undefined)) {
+  if (ready === (asks || asksFromFile)) {
     throw new UsageError(
       'pass exactly one of --ready, --park <question> or --question-file <path>'
     );
   }
-  if (park === '') throw new UsageError('the question to park on is empty');
   if (ready && stage === undefined) {
     throw new UsageError('--ready needs --stage <stage>: a ready item says where to resume');
   }
   if (!ready && stage !== undefined) throw new UsageError('--stage goes with --ready only');
+  // Read the question only once the flags agree: reading a scratch file adds
+  // the git-exclude line, and a refused combination must touch nothing.
+  const question = flagText(ctx, { inline: 'park', file: 'question-file', what: 'question' });
+  const park = question?.text.trim();
+  if (park === '') throw new UsageError('the question to park on is empty');
 
   const { loaded, stages, adapter } = await setupWrite(
     ctx,

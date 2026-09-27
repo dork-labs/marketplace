@@ -22,9 +22,8 @@ description: The /flow engine's TRIAGE stage — classify and route incoming wor
 > is a later stage's concern, and a separate **audit** skill owns backlog-health
 > checks. TRIAGE does not run the loop, dispatch work, or audit the backlog.
 >
-> **This is a prose contract, not code.** The agent reads this skill and follows
-> it. A thin `/flow:triage` command and a PM-driven transition are two **triggers**
-> for this one skill (spec §1).
+> **A prose contract, not code.** A thin `/flow:triage` command and a PM-driven
+> transition are two **triggers** for this one skill (spec §1).
 
 ## The one rule: never touch the tracker directly
 
@@ -43,11 +42,11 @@ flow triage <id> --park '<question>' --json               # signed question + ag
 ```
 
 `--ready` says where the work starts; `--park` asks one question, never twice,
-and parks the item until a person answers. A question that is not one plain line
+and parks the item until answered. A question that is not one plain line
 goes in `.dork/flow/tmp/<id>-question.md`, passed as `--question-file` (the
 capture skill's step 3 rule, `<flow-root>/skills/capturing-work/SKILL.md`). Type,
-priority and size stay adapter writes. Exit 3: this tracker cannot take the
-write; exit 4: run it again.
+priority and size stay adapter writes. Exit 3: the tracker cannot take the
+write; 4: retry; 5: the item is closed or in progress, so leave it.
 
 Read the adapter skill's contract before acting. It is the `SKILL.md` at the `adapter.path` that
 `node --experimental-strip-types "<flow-root>/scripts/config-files.ts"` prints: the
