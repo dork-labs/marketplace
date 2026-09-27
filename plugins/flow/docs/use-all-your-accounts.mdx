@@ -5,13 +5,13 @@ description: Set up every Claude Code, Codex and OpenCode account on this comput
 
 # Use all your accounts
 
-If you have more than one Claude Code account on this computer, flow can spread its work across them. When one account reaches its limit, work moves to another one instead of stopping. The same goes for Codex and OpenCode.
+With several Claude Code, Codex or OpenCode accounts on this computer, flow can spread its work across them. When one reaches its limit, work moves to another instead of stopping.
 
 One command sets it up: `flow accounts setup`. It finds your accounts, suggests a role for each one, and changes nothing until you say yes.
 
 ## First, a word on the rules
 
-This is built for one person using their own accounts. Whether that fits Anthropic's terms, or the terms of any other service you use, is your call. Read them and judge your own use. Don't use it to share accounts between people. Keep a work or client account out unless you are allowed to use it this way.
+This is built for one person using their own accounts. Whether that fits Anthropic's terms, or any other service's, is your call to judge. Don't use it to share accounts between people. Keep a work or client account out unless you are allowed to use it this way.
 
 ## The three roles
 
@@ -42,16 +42,16 @@ It looks for:
 It lists each one with its latest usage, when flow has seen it. Then it asks a few questions:
 
 1. For each account besides your main one: is it a work, organization or client account? Say yes and it is kept out. Say no and it joins the rotation.
-2. If any account joined the rotation: should this computer's default account stay your main one? (With nothing else in the rotation, there is no main: keeping half back would only slow you down.)
+2. If any account joined the rotation: should this computer's default account stay your main one? (With nothing else in the rotation, there is no main.)
 3. For each account flow will use: should flow add a small recorder to its status line, so flow sees its limits? See [Account usage](./account-usage.mdx).
 
 If a folder looks managed by an organization, setup says why and suggests keeping it out. It can't always tell, so it asks about every account.
 
-Before it changes anything, setup prints each change as the `flow` command that would make it, then asks once. Say no and nothing changes. Run it again any time; it starts from your current choices.
+Before it changes anything, setup prints each change as the `flow` command that would make it, then asks once. Run it again any time; it starts from your current choices.
 
 ### For scripts and agents
 
-Add `--yes` and the flags decide instead of questions:
+Run `flow accounts setup --json` first to see the proposal, then `--yes` with flags, which decide instead of questions:
 
 ```bash
 flow accounts setup --yes --rotation all --keep-out ~/.claude-work --statusline
@@ -59,10 +59,10 @@ flow accounts setup --yes --rotation all --keep-out ~/.claude-work --statusline
 
 - `--rotation all` puts every account in the rotation except your default, the ones you keep out now or kept out before, and any that look organization-managed. It says which it skipped and why. To spend one of those anyway, name it: `--rotation ~/.claude-work`.
 - `--keep-out` names the accounts to keep out.
-- `--main` picks a different main account. Your default is left as it is; beside another main it counts as rotation, and setup says so.
+- `--main` picks a different main account. There is only one main, so an account you had made main moves to rotation. Your default, if you never set its role, then counts as rotation too. The plan shows both before anything changes.
 - `--statusline` adds the usage recorder where it can.
 
-Without `--rotation`, `--yes` never puts an account in the rotation, and it never changes an account you did not name. The changes are still printed. Add `--dry-run` to see them without making them.
+Without `--rotation`, `--yes` never puts an account in the rotation. Apart from the old main giving way to a new one, it never changes an account you did not name. The changes are still printed; `--dry-run` shows them without making them.
 
 ## Set it up in the DorkOS app
 
@@ -90,4 +90,4 @@ While you have several accounts flow could use and only your default is in the r
 
 **You changed your mind.** Run setup again, or change one account with `flow accounts set <id> --role kept-out`.
 
-**Setup says a file is locked.** Another flow command was writing the same file. Wait a moment and run it again.
+**Setup says a file is locked.** Another flow command was writing it. Run setup again.

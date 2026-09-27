@@ -515,6 +515,27 @@ describe('flow accounts setup --yes', () => {
     );
   });
 
+  it('--main over a stored main moves the old one to rotation, and the plan shows it first', async () => {
+    fleetHome();
+    await flow(['accounts', 'setup', '--yes', '--rotation', 'all']);
+    expect(readJson(fleetFile()).accounts['claude-code:default']).toEqual({ role: 'main' });
+
+    const dry = await flow(['accounts', 'setup', '--yes', '--main', '.claude-2', '--dry-run']);
+    const line =
+      'make claude-code:default rotation in ~/.dork/flow/fleet.json (~/.claude-2 becomes main)';
+    expect(dry.stdout).toContain(line);
+    expect(readJson(fleetFile()).accounts['claude-code:default']).toEqual({ role: 'main' });
+
+    const real = await flow(['accounts', 'setup', '--yes', '--main', '.claude-2']);
+    expect(real.stdout.indexOf(line)).toBeGreaterThan(-1);
+    expect(real.stdout.indexOf(line)).toBeLessThan(real.stdout.indexOf('Made 2 changes.'));
+    expect(readJson(fleetFile()).accounts).toMatchObject({
+      'claude-code:default': { role: 'rotation' },
+      'claude-code:claude-2': { role: 'main' },
+    });
+    expectValidFleet();
+  });
+
   it('an org-managed folder goes to rotation only when named', async () => {
     fleetHome();
     await flow(['accounts', 'setup', '--yes', '--rotation', '.claude-work', '--json']);
