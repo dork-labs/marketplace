@@ -12,6 +12,7 @@ import { vi } from 'vitest';
 import type {
   AccountAdvisor,
   AccountSummary,
+  AccountUsage,
   DataProviderContext,
   ExtensionRouter,
   RouteHandler,
@@ -148,9 +149,9 @@ export interface Sent {
 /** A router that records handlers and can call them. */
 export interface FakeRouter extends ExtensionRouter {
   call(
-    method: 'get' | 'put',
+    method: 'get' | 'put' | 'post',
     route: string,
-    req?: { params?: Record<string, string>; body?: unknown }
+    req?: { params?: Record<string, string>; body?: unknown; query?: Record<string, unknown> }
   ): Promise<Sent>;
 }
 
@@ -163,6 +164,9 @@ export function fakeRouter(): FakeRouter {
     },
     put(route, handler) {
       handlers.set(`put ${route}`, handler);
+    },
+    post(route, handler) {
+      handlers.set(`post ${route}`, handler);
     },
     async call(method, route, req = {}) {
       const handler = handlers.get(`${method} ${route}`);
@@ -178,7 +182,7 @@ export function fakeRouter(): FakeRouter {
           return res;
         },
       };
-      await handler({ params: req.params ?? {}, body: req.body }, res);
+      await handler({ params: req.params ?? {}, body: req.body, query: req.query ?? {} }, res);
       return sent;
     },
   };
@@ -192,6 +196,8 @@ export function fakeCtx(
     storage?: { data: unknown };
     accounts?: 'full' | 'none' | 'no-mark-continued';
     dorkHome?: boolean;
+    usage?: AccountUsage[];
+    extensionDir?: string;
   } = {}
 ) {
   const store = opts.storage ?? { data: null };
@@ -199,10 +205,17 @@ export function fakeCtx(
   const unregister = vi.fn();
   const cancelSchedule = vi.fn();
   const scheduled: (() => Promise<void>)[] = [];
+  const emit = vi.fn((_event: string, _data: unknown) => {});
+  const usageListeners: ((usage: AccountUsage) => void)[] = [];
   const accounts = {
     list: vi.fn(async () => opts.summaries ?? SUMMARIES),
-    usage: vi.fn(async () => []),
-    onUsage: vi.fn(() => () => {}),
+    usage: vi.fn(async (): Promise<AccountUsage[]> => opts.usage ?? []),
+    onUsage: vi.fn((listener: (usage: AccountUsage) => void) => {
+      usageListeners.push(listener);
+      return () => {
+        usageListeners.splice(usageListeners.indexOf(listener), 1);
+      };
+    }),
     markContinued: vi.fn(async () => {}),
     registerAdvisor: vi.fn((advisor: AccountAdvisor) => {
       registered.push(advisor);
@@ -227,10 +240,22 @@ export function fakeCtx(
       scheduled.push(fn);
       return cancelSchedule;
     },
+    emit,
     extensionId: 'flow',
-    extensionDir: path.join(world.root, 'plugins', 'flow', '.dork', 'extensions', 'flow'),
+    extensionDir:
+      opts.extensionDir ?? path.join(world.root, 'plugins', 'flow', '.dork', 'extensions', 'flow'),
     ...(opts.dorkHome === false ? {} : { dorkHome: world.dorkHome }),
     ...(ctxAccounts === undefined ? {} : { accounts: ctxAccounts }),
   };
-  return { ctx, accounts, registered, unregister, cancelSchedule, scheduled, store };
+  return {
+    ctx,
+    accounts,
+    registered,
+    unregister,
+    cancelSchedule,
+    scheduled,
+    store,
+    emit,
+    usageListeners,
+  };
 }

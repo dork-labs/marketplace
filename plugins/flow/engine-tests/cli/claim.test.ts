@@ -51,6 +51,7 @@ describe('flow claim writes the claim projection and records the run', () => {
       'id-FAKE-1': {
         issueId: 'id-FAKE-1',
         identifier: 'FAKE-1',
+        title: 'Title of FAKE-1',
         sessionId: 'session-abc',
         worktreePath: project.dir,
         branch: 'work',
@@ -75,6 +76,22 @@ describe('flow claim writes the claim projection and records the run', () => {
       },
     });
     expect(result.json.run).toEqual(project.runs()['id-FAKE-1']);
+  });
+
+  it('records the item title on the run, and leaves it out when the tracker gave none', async () => {
+    // Purpose: a reader names the work from the run record alone, so the claim
+    // copies the title; an unknown title is omitted, never written as "" or null.
+    const titled = await runFlow(project, { items: [item('FAKE-1')] }, ['claim', 'FAKE-1']);
+    expect(titled.code).toBe(EXIT.ok);
+    expect(project.runs()['id-FAKE-1'].title).toBe('Title of FAKE-1');
+
+    const untitled = await runFlow(project, { items: [item('FAKE-2', { title: '  ' })] }, [
+      'claim',
+      'FAKE-2',
+    ]);
+    expect(untitled.code).toBe(EXIT.ok);
+    expect(project.runs()['id-FAKE-2']).toBeDefined();
+    expect('title' in project.runs()['id-FAKE-2']).toBe(false);
   });
 
   it('defaults the stage to execute and counts a repeat claim as a new attempt', async () => {

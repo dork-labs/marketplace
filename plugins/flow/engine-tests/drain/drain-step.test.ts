@@ -837,6 +837,54 @@ describe('drainStep: parked runs', () => {
     expect(bare.drain.phase).toBe('working');
   });
 
+  // Who a park waits on (read by the DorkOS panel): every park the reducer
+  // decides is flow's own, so it records `other`; only `flow report blocked`
+  // records `person` (report-pr.test.ts). Fails if park() stops writing it.
+  it('a reviewer-stopped or worker-stopped park records parkedFor other', () => {
+    const reviewerGone = step(
+      drain('reviewing', { pushedSha: S, reviewer: reviewer(S), nudges: 1 }),
+      {
+        reviewer: { kind: 'idle' },
+      }
+    );
+    expect(reviewerGone.drain).toMatchObject({
+      phase: 'parked',
+      parkedReason: PARK_REASONS.reviewerStopped,
+      parkedFor: 'other',
+    });
+    const workerGone = step(drain('working', { nudges: 2 }), { worker: { kind: 'idle' } });
+    expect(workerGone.drain).toMatchObject({ phase: 'parked', parkedFor: 'other' });
+  });
+
+  // Leaving a park clears who it waited on, so a resumed run never reads as
+  // waiting on a person. Fails if readopt or the merged rescue keeps the field.
+  it('an answered park and a merged rescue both clear parkedFor to null', () => {
+    const answered = step(
+      drain('parked', { parkedReason: 'q', parkedFrom: 'fixing', parkedFor: 'person' })
+    );
+    expect(answered.drain.phase).toBe('fixing');
+    expect(answered.drain.parkedFor).toBeNull();
+
+    const rescued = step(
+      drain('parked', {
+        pushedSha: S,
+        reviewedSha: S,
+        verdict: 'clean',
+        reviewRound: 1,
+        pr: { ...PR, armed: true },
+        parkedFrom: 'watching',
+        parkedReason: PARK_REASONS.itemTaken,
+        parkedFor: 'other',
+      }),
+      {
+        pr: prStatus({ state: 'merged' }),
+        item: { closed: true, claimed: true, needsInput: false, title: 't' },
+      }
+    );
+    expect(rescued.drain.phase).toBe('closing');
+    expect(rescued.drain.parkedFor).toBeNull();
+  });
+
   // Still waiting on a person, or taken away: left alone.
   it.each([
     ['still needs input', { closed: false, claimed: true, needsInput: true }],

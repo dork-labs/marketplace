@@ -1,10 +1,11 @@
 /**
- * The project's drain settings the advisor ranks with, so a move it accepts is
- * one `flow handoff` would make: `drain.warnMarginPct` and
- * `drain.maxLivePerAccount` from `<main checkout>/.agents/flow/config.json`,
- * with `config.local.json` over it, as flow's config loader merges them.
+ * The project's drain settings: the two the advisor ranks with, so a move it
+ * accepts is one `flow handoff` would make (`drain.warnMarginPct`,
+ * `drain.maxLivePerAccount`), and the Flow panel's slot count (`drain.parallel`),
+ * from `<main checkout>/.agents/flow/config.json` with `config.local.json` over
+ * it, as flow's config loader merges them.
  *
- * flow's loader validates with zod, which this bundle cannot load, so the two
+ * flow's loader validates with zod, which this bundle cannot load, so the
  * numbers are read loosely: a missing or out-of-range value reads as the
  * schema's default.
  *
@@ -20,14 +21,16 @@ import {
 } from '../../../../scripts/config-names.ts';
 
 /** The schema's defaults (`config-schema.ts`, `drain`). */
-export const DRAIN_DEFAULTS = { warnMarginPct: 10, maxLivePerAccount: 2 } as const;
+export const DRAIN_DEFAULTS = { warnMarginPct: 10, maxLivePerAccount: 2, parallel: 0 } as const;
 
-/** The two drain settings ranking needs. */
+/** The drain settings the extension reads. */
 export interface DrainSettings {
   /** Points below a ceiling that count as near a limit (0-50). */
   warnMarginPct: number;
   /** Live sessions one account may carry (1 or more). */
   maxLivePerAccount: number;
+  /** Drain workers at once; `0` is flow's sequential default. */
+  parallel: number;
 }
 
 /** Whether `value` is a non-null, non-array object. */
@@ -55,6 +58,7 @@ export function readDrainSettings(mainCheckout: string): DrainSettings {
   };
   const warn = merged.warnMarginPct;
   const live = merged.maxLivePerAccount;
+  const parallel = merged.parallel;
   return {
     warnMarginPct:
       typeof warn === 'number' && warn >= 0 && warn <= 50 ? warn : DRAIN_DEFAULTS.warnMarginPct,
@@ -62,5 +66,9 @@ export function readDrainSettings(mainCheckout: string): DrainSettings {
       typeof live === 'number' && Number.isInteger(live) && live >= 1
         ? live
         : DRAIN_DEFAULTS.maxLivePerAccount,
+    parallel:
+      typeof parallel === 'number' && Number.isInteger(parallel) && parallel >= 0
+        ? parallel
+        : DRAIN_DEFAULTS.parallel,
   };
 }

@@ -6,7 +6,8 @@
  * `agent/claimed`, and its ownership class is claimable; refuses (exit 7) while
  * flow is paused unless `--manual`. Then it writes the `claim` projection
  * (started, `agent/claimed`, no `stage/*` label), confirms it on read-back, and
- * records a `FlowRun` whose `stage` is the one the removed `stage/*` label named.
+ * records a `FlowRun`, with the item's title, whose `stage` is the one the removed
+ * `stage/*` label named.
  * It posts no comment: the label is the signal.
  *
  * The claim lock (`flow-state.json.claim.lock`) is held from the tracker read
@@ -121,6 +122,15 @@ async function checkout(ctx: VerbContext): Promise<{ worktreePath: string; branc
   };
 }
 
+/**
+ * The run's `title` field: the item's title when the tracker gave a non-blank
+ * one, else nothing, so the run never records `null` or `""` (see `FlowRun.title`).
+ */
+function titleOf(item: WorkItem): { title?: string } {
+  const title = typeof item.title === 'string' ? item.title.trim() : '';
+  return title === '' ? {} : { title };
+}
+
 /** What {@link claimItem} records on the run. */
 export interface ClaimInput {
   /** The item, e.g. `ACME-12`. */
@@ -196,6 +206,7 @@ export async function claimItem(
       const record: FlowRun = {
         issueId: item.id,
         identifier: item.identifier,
+        ...titleOf(item),
         sessionId: input.sessionId,
         worktreePath: input.worktreePath,
         branch: input.branch,

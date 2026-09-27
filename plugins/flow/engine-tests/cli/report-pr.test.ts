@@ -369,6 +369,16 @@ describe('flow report blocked', () => {
       rev: 4,
     });
   });
+  // Purpose: a question is the one park that waits on a person, and a reader
+  // (the DorkOS panel) tells it from flow's own parks by `parkedFor`. Fails if
+  // the blocked report stops recording it.
+  it('records that the park waits on a person', async () => {
+    writeRun(drain());
+    writeFileSync(path.join(project.dir, 'q.md'), 'Which export format?\n');
+    const r = await flow(['report', 'ACME-12', 'blocked', '--question-file', 'q.md']);
+    expect(r.code).toBe(0);
+    expect(stored()).toMatchObject({ phase: 'parked', parkedFor: 'person' });
+  });
   // Purpose: asking the same question again after someone replied must post it
   // again, so the drain anchors the next answer on the new question and the old
   // reply does not resume the run. Fails if the dedupe checks the last 10

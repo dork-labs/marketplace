@@ -12,3 +12,9 @@ export const PROJECT_CONFIG_DIR = '.agents/flow';
 export const CONFIG_FILE = 'config.json';
 /** The per-machine file: credentials and overrides, never committed. */
 export const LOCAL_CONFIG_FILE = 'config.local.json';
+/**
+ * The file whose presence pauses flow's autonomy on this machine. It sits beside
+ * `config.local.json` in the main checkout's {@link PROJECT_CONFIG_DIR} and, like
+ * it, is never committed.
+ */
+export const PAUSE_FILE = 'paused.json';

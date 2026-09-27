@@ -6,6 +6,7 @@
  */
 
 import type { FleetAccount, FleetView } from '../lib/fleet.ts';
+import type { PanelModel } from '../lib/panel.ts';
 
 /** The desktop shell's bridge, when the tab runs inside the DorkOS app. */
 interface ElectronBridge {
@@ -70,7 +71,11 @@ export function resolveApiBaseUrl(): string {
 }
 
 /** Call one of flow's routes and return its body, or throw with the words to show. */
-async function call(method: 'GET' | 'PUT', path: string, body?: unknown): Promise<FleetView> {
+async function call<T = FleetView>(
+  method: 'GET' | 'PUT' | 'POST',
+  path: string,
+  body?: unknown
+): Promise<T> {
   let response: Response;
   try {
     response = await fetch(`${resolveApiBaseUrl()}/ext/flow${path}`, {
@@ -82,7 +87,7 @@ async function call(method: 'GET' | 'PUT', path: string, body?: unknown): Promis
     throw new FleetRequestError(0, UNREACHABLE_MESSAGE);
   }
   const json: unknown = await response.json().catch(() => null);
-  if (response.ok) return json as FleetView;
+  if (response.ok) return json as T;
   const answer = (json ?? {}) as { error?: unknown; reason?: unknown; refusedBy?: unknown };
   if (response.status === 501 && answer.reason === 'host-too-old') throw new HostTooOldError();
   // Only flow's own refusal (a 4xx its routes send on purpose, in plain words)
@@ -140,4 +145,33 @@ export function putCrossRuntime(
   crossRuntimeFallback: FleetView['crossRuntimeFallback']
 ): Promise<FleetView> {
   return call('PUT', '/fleet/cross-runtime', { crossRuntimeFallback });
+}
+
+/**
+ * Read the Flow panel's model. The folder of the chat the panel sits beside is
+ * passed along, so flow covers that project too.
+ *
+ * @param cwd - The chat's folder, or `null`.
+ * @returns The `GET /panel` body.
+ */
+export function getPanel(cwd: string | null): Promise<PanelModel> {
+  return call<PanelModel>('GET', cwd ? `/panel?cwd=${encodeURIComponent(cwd)}` : '/panel');
+}
+
+/**
+ * Pause flow in every project the panel shows.
+ *
+ * @returns The new model.
+ */
+export function pauseFlow(): Promise<PanelModel> {
+  return call<PanelModel>('POST', '/pause');
+}
+
+/**
+ * Resume flow in every project the panel shows.
+ *
+ * @returns The new model.
+ */
+export function resumeFlow(): Promise<PanelModel> {
+  return call<PanelModel>('POST', '/resume');
 }

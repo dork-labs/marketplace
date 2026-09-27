@@ -307,8 +307,12 @@ export function assertLoopback(url: string): URL {
   return parsed;
 }
 
-/** Run statuses a fleet row cares about. */
-const ACTIVE_RUN_STATUSES = new Set(['queued', 'running', 'waiting_for_review']);
+/** Run statuses a fleet row cares about: a run in any other status is over. */
+export const ACTIVE_RUN_STATUSES: ReadonlySet<string> = new Set([
+  'queued',
+  'running',
+  'waiting_for_review',
+]);
 
 /** Dependencies of {@link fetchDorkosSessions}. */
 export interface DorkosDeps {

@@ -10,8 +10,8 @@
  * **Why the phases are fields, not statuses.** `FlowRunStatus` is an enum inside
  * an all-or-nothing reader: a new status value would make every older reader
  * reject the whole file. For the same reason, every vocabulary in here (phase,
- * host, verdict, limit level and state, handoff reason) is checked only as a
- * string, the way `FlowRun.host` is. The TypeScript types pin the values flow
+ * host, verdict, limit level and state, handoff reason, parked-for) is checked
+ * only as a string, the way `FlowRun.host` is. The TypeScript types pin the values flow
  * writes; the schema refuses only the wrong type, so a record from a newer flow
  * still reads, and code that meets a value it does not know leaves that run
  * alone.
@@ -136,6 +136,15 @@ export interface DrainState {
   parkedFrom?: DrainPhase | null;
   /** When the run parked (ISO): only a reply after it answers the park. */
   parkedAt?: string | null;
+  /**
+   * Who the park waits on: `person` when the worker asked a question a person
+   * must answer (`flow report blocked`, which labels the item
+   * `agent/needs-input`), `other` for every other park (a stopped session, the
+   * review-round limit, a closed PR, a host that cannot start a session).
+   * `null` once the run leaves the park; absent on records written before the
+   * field existed, which a reader treats as unknown.
+   */
+  parkedFor?: 'person' | 'other' | null;
 }
 
 /** A run's account limit episode (§5.1), stored at `FlowRun.limit`. */
@@ -296,6 +305,7 @@ const DrainStateV1Schema = z.looseObject({
   parkedReason: nullableString,
   parkedFrom: vocabulary<DrainPhase>().nullable().optional(),
   parkedAt: nullableString.optional(),
+  parkedFor: vocabulary<'person' | 'other'>().nullable().optional(),
 });
 
 /**

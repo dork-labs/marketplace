@@ -173,6 +173,26 @@ describe('writing runs', () => {
     expect(onDisk.b).toEqual(run('b', { account: 'claude3', host: 'cli' }));
   });
 
+  // Purpose: `title` is part of the run record contract (spec §1.3): a run
+  // carrying it round-trips through the store unchanged, survives a write of
+  // another run, and a run without it reads back without one. A title of the
+  // wrong type is a malformed record, so the store refuses the file rather than
+  // passing it through as an unknown field would be.
+  it('round-trips a run title unchanged, and refuses a title that is not a string', async () => {
+    const store = openFlowStateFile(repo);
+    const titled = run('a', { title: 'Show the item title on the run' });
+    await store.upsertRun(titled);
+    await store.upsertRun(run('b'));
+    await store.updateRun('b', (current) => ({ ...current, stage: 'verify' }));
+    expect(store.read()).toEqual({ a: titled, b: run('b', { stage: 'verify' }) });
+    const onDisk = JSON.parse(readFileSync(stateFile(), 'utf8')) as Record<string, FlowRun>;
+    expect(onDisk.a).toEqual(titled);
+    expect('title' in onDisk.b).toBe(false);
+
+    writeFileSync(stateFile(), JSON.stringify({ c: { ...run('c'), title: 42 } }));
+    await expect(store.upsertRun(run('d'))).rejects.toThrow(ConfigError);
+  });
+
   // Purpose: a file that is present but fails the schema is refused with a
   // ConfigError naming it, and left byte-for-byte unchanged. The fail-soft
   // reader would read it as {}, and writing that back would delete every other

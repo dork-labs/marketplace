@@ -359,6 +359,7 @@ export async function executeHandoff(
               parkedReason,
               parkedFrom: r.drain.phase === 'parked' ? (r.drain.parkedFrom ?? null) : r.drain.phase,
               parkedAt: nowIso,
+              parkedFor: 'other',
               rev: r.drain.rev + 1,
             },
           }
@@ -551,6 +552,7 @@ export async function adoptOrRevertHandoff(deps: HandoffExecDeps, read: FlowRun)
               parkedReason: reason,
               parkedFrom: r.drain.phase === 'parked' ? (r.drain.parkedFrom ?? null) : r.drain.phase,
               parkedAt: nowIso,
+              parkedFor: 'other',
               rev: r.drain.rev + 1,
             },
           }

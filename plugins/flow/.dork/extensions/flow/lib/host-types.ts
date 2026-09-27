@@ -54,6 +54,10 @@ export interface AccountUsage {
   limit: { window: string; resetsAt: string | null } | null;
   /** The ledger's last write, or `null`. */
   updatedAt: string | null;
+  /** The plan a usage call reported (Claude Code), or `null`. */
+  subscriptionType?: string | null;
+  /** The plan the ledger holds (Codex `plan_type`), or `null`. */
+  plan?: { name: string } | null;
 }
 
 /** One account an agent runtime can run on, as {@link AccountsApi.list} reports it. */
@@ -219,6 +223,8 @@ export interface RouteRequest {
   params: Record<string, string>;
   /** The parsed JSON body; `undefined` on an empty body (Express 5). */
   body?: unknown;
+  /** The query string, parsed. */
+  query?: Record<string, unknown>;
 }
 
 /** The response calls the Flow routes make (a subset of Express's `Response`). */
@@ -238,6 +244,8 @@ export interface ExtensionRouter {
   get(path: string, handler: RouteHandler): unknown;
   /** Register a PUT route. */
   put(path: string, handler: RouteHandler): unknown;
+  /** Register a POST route. */
+  post(path: string, handler: RouteHandler): unknown;
 }
 
 /**
@@ -253,6 +261,8 @@ export interface DataProviderContext {
   };
   /** Run `fn` every `intervalSeconds` (at least 5); returns a cancel function. */
   schedule(intervalSeconds: number, fn: () => Promise<void>): () => void;
+  /** Broadcast `ext:<id>:<event>` on DorkOS's `/api/events` stream. */
+  emit(event: string, data: unknown): void;
   /** This extension's id. */
   readonly extensionId: string;
   /** Absolute path of this extension's folder. */
