@@ -9,10 +9,13 @@
  *
  * 1. skips it when it cannot run today, or when the budget is spent;
  * 2. builds the sandbox and runs `claude -p <prompt>` in it with the fences:
- *    the flow root as its only plugin, no MCP servers (`--strict-mcp-config`
- *    with an empty config), `--permission-mode dontAsk` with a short
- *    allowlist, what is left of the budget as `--max-budget-usd`, and an
- *    environment stripped of every other credential and tracker token;
+ *    the sandbox's copy of the flow root as its only plugin (never the
+ *    checkout itself, and nothing in the copy links back to it, so no write
+ *    the breach check misses can reach it), no MCP servers
+ *    (`--strict-mcp-config` with an empty config), `--permission-mode
+ *    dontAsk` with a short allowlist, what is left of the budget as
+ *    `--max-budget-usd`, and an environment stripped of every other
+ *    credential and tracker token;
  * 3. reads the stream: the `result` event's cost and turns, and every
  *    `tool_use`, which the breach check scans;
  * 4. fails the case as a breach when a tool call left the fences, whatever
@@ -78,7 +81,10 @@ const CASE_TIMEOUT_MS = 15 * 60_000;
 
 /** What the tier needs. */
 export interface LiveTierOptions {
-  /** The flow plugin root, handed to the child as `--plugin-dir`. */
+  /**
+   * The flow plugin root. Each case copies it into its sandbox and hands the
+   * child the copy as `--plugin-dir`; the oracles run from this one.
+   */
   flowRoot: string;
   /** The runner's environment. */
   env: Readonly<Record<string, string | undefined>>;
@@ -183,9 +189,10 @@ const FAKE_LINK = '.agents/flow/adapters/fake';
 const RULE_SAFE_PATH = /^[A-Za-z0-9._\-/@+~]+$/;
 
 /**
- * A second layer under the breach check: permission rules denying file edits
- * in the flow root, by its path and by the sandbox's link into it. `//` starts
- * an absolute path in a rule; a bare path is relative to the sandbox. A deny
+ * A layer under the breach check: permission rules denying file edits in
+ * each flow root given (the copy the child runs and the checkout it was made
+ * from), by its path and by the sandbox's link into the copy. `//` starts an
+ * absolute path in a rule; a bare path is relative to the sandbox. A deny
  * rule outranks the allowlist's plain `Edit` and `Write`.
  *
  * A flow-root path holding a character rules treat specially (see
@@ -193,12 +200,12 @@ const RULE_SAFE_PATH = /^[A-Za-z0-9._\-/@+~]+$/;
  * wrong thing or nothing. The breach check still judges every write, so it
  * remains the enforcement either way.
  *
- * @param flowRoot - The flow root.
+ * @param flowRoots - The flow roots.
  * @returns The rules.
  */
-export function deniedTools(flowRoot: string): string[] {
-  const absolute = [...new Set([flowRoot, realpathSync(flowRoot)])].filter((dir) =>
-    RULE_SAFE_PATH.test(dir)
+export function deniedTools(...flowRoots: string[]): string[] {
+  const absolute = [...new Set(flowRoots.flatMap((root) => [root, realpathSync(root)]))].filter(
+    (dir) => RULE_SAFE_PATH.test(dir)
   );
   const roots = [...absolute.map((dir) => `/${dir}/**`), `${FAKE_LINK}/**`];
   return ['Edit', 'Write', 'NotebookEdit'].flatMap((tool) => roots.map((r) => `${tool}(${r})`));
@@ -208,18 +215,19 @@ export function deniedTools(flowRoot: string): string[] {
  * The child's argv, after `claude`.
  *
  * @param runCase - The case.
- * @param options - The flow root, the empty MCP config and the budget left.
+ * @param options - The plugin copy the child runs, the checkout it was made
+ *   from, the empty MCP config and the budget left.
  * @returns The arguments.
  */
 export function childArgs(
   runCase: RunnableCase,
-  options: { flowRoot: string; mcpConfig: string; remainingUsd: number }
+  options: { pluginDir: string; flowRoot: string; mcpConfig: string; remainingUsd: number }
 ): string[] {
   return [
     '-p',
     runCase.prompt,
     '--plugin-dir',
-    options.flowRoot,
+    options.pluginDir,
     '--output-format',
     'stream-json',
     '--verbose',
@@ -237,7 +245,7 @@ export function childArgs(
     '--allowed-tools',
     ...ALLOWED_TOOLS,
     '--disallowed-tools',
-    ...deniedTools(options.flowRoot),
+    ...deniedTools(options.pluginDir, options.flowRoot),
   ];
 }
 
@@ -318,6 +326,7 @@ async function runOne(
   });
   try {
     const args = childArgs(liveCase, {
+      pluginDir: sandbox.pluginDir,
       flowRoot: context.flowRoot,
       mcpConfig: sandbox.mcpConfig,
       remainingUsd: context.remainingUsd,
@@ -334,7 +343,7 @@ async function runOne(
 
     const breach = findBreach(stream.toolUses, {
       sandbox: sandbox.dir,
-      flowRoot: context.flowRoot,
+      flowRoot: sandbox.pluginDir,
       home: context.env.HOME ?? os.homedir(),
     });
     if (breach !== undefined) {

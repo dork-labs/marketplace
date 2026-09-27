@@ -4,13 +4,21 @@
  *
  * A sandbox is a new temp folder holding:
  *
+ * - `plugin/`: a copy of the flow root, which the child gets as its
+ *   `--plugin-dir`, with its own copy of the runtime packages (`zod`). The
+ *   breach check reads a stream, and a `node` program can write past it
+ *   (`execSync` with a `cd`, a path built with `path.join`), so the child
+ *   never gets a path into the operator's checkout, and nothing in the copy
+ *   links back to it (a link would let `<link>/..` reach the checkout):
+ *   whatever it writes into the plugin lands in this copy and is deleted
+ *   with the sandbox.
  * - `project/`: a git repo with the case's fixture files and a committed
  *   `.agents/flow/config.json` that selects the `fake` tracker over the `cli`
- *   transport. `.agents/flow/adapters/fake/` is a LINK to the plugin's
- *   `adapters/reference/fake/`, never a copy: its `adapter.ts` imports from
- *   the plugin by relative path, and Node follows the link to the real file.
- *   That is the path `resolveAdapter` reads first, so an agent reading the
- *   adapter skill and the `flow` command both reach the fake.
+ *   transport. `.agents/flow/adapters/fake/` is a LINK to the copy's
+ *   `adapters/reference/fake/`, never a copy of its own: its `adapter.ts`
+ *   imports from the plugin by relative path, and Node follows the link to
+ *   the copy's file. That is the path `resolveAdapter` reads first, so an
+ *   agent reading the adapter skill and the `flow` command both reach the fake.
  * - `store/backlog.json`: a copy of the case's backlog, which
  *   `FLOW_FAKE_BACKLOG` names. It sits OUTSIDE the project on purpose: the
  *   only way into the tracker is the `flow` command, and an agent that reads
@@ -26,7 +34,17 @@
  */
 
 import { execFileSync } from 'node:child_process';
-import { mkdirSync, mkdtempSync, realpathSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
+import {
+  cpSync,
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  realpathSync,
+  rmSync,
+  symlinkSync,
+  writeFileSync,
+} from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 
@@ -40,6 +58,8 @@ export interface Sandbox {
   root: string;
   /** The git project the child runs in (its realpath). */
   dir: string;
+  /** The copy of the flow root the child gets as `--plugin-dir`. */
+  pluginDir: string;
   /** The fake tracker's store, outside the project. */
   backlogFile: string;
   /** The empty MCP config. */
@@ -65,10 +85,36 @@ function git(dir: string, ...args: string[]): void {
 }
 
 /**
+ * Copy the flow root to `into`. Its `node_modules` is left out but for the
+ * packages `package.json` lists under `dependencies` (the shipped runtime
+ * needs only `zod`, which has no dependencies of its own). The root is copied
+ * by its realpath and every link inside it as the file or folder it points
+ * to, so nothing in the copy leads back into the checkout.
+ *
+ * @param flowRoot - The flow root, the operator's checkout.
+ * @param into - The folder to create.
+ */
+export function copyPlugin(flowRoot: string, into: string): void {
+  const source = realpathSync(flowRoot);
+  const modules = path.join(source, 'node_modules');
+  cpSync(source, into, { recursive: true, dereference: true, filter: (src) => src !== modules });
+  const manifest = JSON.parse(readFileSync(path.join(source, 'package.json'), 'utf8')) as {
+    dependencies?: Record<string, string>;
+  };
+  for (const name of Object.keys(manifest.dependencies ?? {})) {
+    const from = path.join(modules, name);
+    if (existsSync(from)) {
+      cpSync(from, path.join(into, 'node_modules', name), { recursive: true, dereference: true });
+    }
+  }
+}
+
+/**
  * Build a case's sandbox.
  *
- * @param options - The flow root, the case's files (path relative to the
- *   project, to contents) and its backlog.
+ * @param options - The flow root (it is copied, never handed to the child),
+ *   the case's files (path relative to the project, to contents) and its
+ *   backlog.
  * @returns The sandbox; call `cleanup()` when the case is over.
  */
 export function makeSandbox(options: {
@@ -79,6 +125,8 @@ export function makeSandbox(options: {
   const root = realpathSync(mkdtempSync(path.join(os.tmpdir(), 'flow-live-')));
   const cleanup = () => rmSync(root, { recursive: true, force: true });
   try {
+    const pluginDir = path.join(root, 'plugin');
+    copyPlugin(options.flowRoot, pluginDir);
     const dir = path.join(root, 'project');
     mkdirSync(dir);
     git(dir, 'init', '-q', '-b', 'main');
@@ -94,7 +142,7 @@ export function makeSandbox(options: {
       `${JSON.stringify(SANDBOX_CONFIG, null, 2)}\n`
     );
     symlinkSync(
-      path.join(options.flowRoot, 'adapters', 'reference', 'fake'),
+      path.join(pluginDir, 'adapters', 'reference', 'fake'),
       path.join(flowDir, 'adapters', 'fake'),
       'dir'
     );
@@ -107,7 +155,7 @@ export function makeSandbox(options: {
     writeFileSync(backlogFile, `${JSON.stringify(options.backlog, null, 2)}\n`);
     const mcpConfig = path.join(root, 'mcp.json');
     writeFileSync(mcpConfig, `${JSON.stringify({ mcpServers: {} })}\n`);
-    return { root, dir, backlogFile, mcpConfig, cleanup };
+    return { root, dir, pluginDir, backlogFile, mcpConfig, cleanup };
   } catch (error) {
     cleanup();
     throw error;

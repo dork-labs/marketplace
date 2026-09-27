@@ -4,13 +4,19 @@ Installs of this plugin are pinned to a commit SHA, so a fix here does not reach
 you until you **reinstall it** (Marketplace → flow → reinstall, or re-run your
 `--plugin-dir` checkout's `git pull`). Each entry below says whether that matters.
 
-## 0.37.2
+## 0.37.3
 
 **Two usage readings from the same moment no longer lose the one that says an account is out. Reinstall to get it.**
 
 - When two sessions on one account see a limit in the same millisecond, flow now keeps the more serious reading: out of usage over near the limit over fine, then the higher percentage, then the later reset. Before, the second reading was dropped, so an account that had just run out could keep showing as available.
 - The shared test fixture DorkOS checks itself against is now version 4.0.0, because the rule for readings from the same moment changed. The file format did not change.
 - `flow usage scan` keeps the same reading the merge would, so it no longer drops an "out" reading when two sessions log a limit at the same moment.
+
+## 0.37.2
+
+**The self-test's live tier can no longer change your flow checkout. Reinstall only if you run the live tier.**
+
+- Each live case now gives its agent a temporary copy of the plugin instead of your checkout. Anything the agent writes into the plugin, by whatever route, lands in the copy, which is deleted when the case ends. The check that fails a case for writing outside its folder still runs, as a second layer.
 
 ## 0.37.1
 
