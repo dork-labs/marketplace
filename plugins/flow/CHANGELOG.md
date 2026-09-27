@@ -11,6 +11,13 @@ you until you **reinstall it** (Marketplace → flow → reinstall, or re-run yo
 - `flow accounts pick` ranks your accounts the way `flow next` and `flow drain` do: room in the 5-hour, weekly and model limits, the reserve, which repos an account may serve, and the unused allowance that runs out soonest, with your main account last. It needs no tracker and no flow settings in the folder, so a tool outside flow, or you at a terminal, can use it. `--repo`, `--runtime` and `--model` say what the work is.
 - `flow fleet --help` now names the address it really uses for DorkOS (`localhost`).
 
+## 0.42.1
+
+**The Flow tab's error messages are clearer, and a failed load has a Retry button. Reinstall to get it.**
+
+- If the tab can't load, it says "Couldn't load Flow's settings. Try again in a moment." and offers Retry. If Retry fails too, screen readers announce the message again.
+- If a change can't be saved, it says "Flow didn't respond, so nothing was changed. Try again."
+
 ## 0.42.0
 
 **A Flow tab in DorkOS Settings lets you choose which accounts flow may use, keep part of your main account for yourself, limit an account to certain repos, and pick whether work moves automatically when an account runs out. Reinstall to get it; it needs DorkOS 0.88.0 or newer.**
