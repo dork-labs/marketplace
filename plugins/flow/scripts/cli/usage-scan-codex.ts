@@ -27,6 +27,7 @@ import {
 } from '../fleet/codex-accounts.ts';
 import {
   codexObservations,
+  keepsObservation,
   readLedger,
   recordUsage,
   type FactObservation,
@@ -107,7 +108,7 @@ async function scanAccount(
     for (const observation of codexObservations(reading.rateLimits, reading.observedAt)) {
       const label = observationLabel(observation);
       const kept = latest.get(label);
-      if (kept === undefined || Date.parse(observation.observedAt) > Date.parse(kept.observedAt)) {
+      if (kept === undefined || keepsObservation(observation, kept)) {
         latest.set(label, observation);
       }
     }

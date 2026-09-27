@@ -1,6 +1,6 @@
 {
   "contract": "fleet",
-  "about": "Merging observations into one account's usage ledger (spec flow-cli-core 1.2 'Merging'). Call mergeLedger(existing, observations, now, { runtime, accountId }). input.existing is the parsed ledger file, or null when there is none. An observation is either a window reading (it has a 'key'; an omitted usedPct, resetsAt or status reads as null, windowMinutes is optional) or a fact (it has a 'kind': 'plan' { name }, 'credits' { hasCredits, unlimited, balance } or 'spend' { periodStart, costUsd, limitUsd }, each with observedAt and source). Per window key, and per fact, an observation replaces the stored entry only when its observedAt is strictly later; an equal observedAt keeps the stored entry. An observation more than 5 minutes after now is dropped ('observation-future'); an invalid one is dropped ('observation-invalid'); the rest still merge. The merged window entry is { usedPct, resetsAt, windowMinutes (only when given), status, observedAt, source } with usedPct clamped to 0-100 and timestamps normalized to UTC ISO with milliseconds and 'Z'. A stored fact is the observation without 'kind', with timestamps normalized and a missing limitUsd or balance as null. The ledger's runtime and accountId are set to the owner's; a change to either rewrites the file. updatedAt becomes now only when something changed. Unknown ledger fields and unknown window keys are kept. expected.changed says whether the file must be rewritten; expected.ledger is the ledger after the merge; expected.warnings is a multiset of codes (compare sorted).",
+  "about": "Merging observations into one account's usage ledger (spec flow-cli-core 1.2 'Merging'). Call mergeLedger(existing, observations, now, { runtime, accountId }). input.existing is the parsed ledger file, or null when there is none. An observation is either a window reading (it has a 'key'; an omitted usedPct, resetsAt or status reads as null, windowMinutes is optional) or a fact (it has a 'kind': 'plan' { name }, 'credits' { hasCredits, unlimited, balance } or 'spend' { periodStart, costUsd, limitUsd }, each with observedAt and source). Per fact, an observation replaces the stored one only when its observedAt is strictly later; an equal observedAt keeps the stored fact. Per window key, a strictly later observedAt wins, and on an EQUAL observedAt (two sessions on one account can see a limit in the same millisecond) the more severe reading wins: status rejected > allowed_warning > allowed > null, then the higher usedPct (null lowest), then the later resetsAt (null lowest), then the greater source (code-unit order), then the longer windowMinutes (missing lowest); a reading equal on all of these keeps the stored entry. Every comparison uses the NORMALIZED values: timestamps as instants (so '+02:00' and 'Z' can tie) and usedPct after clamping to 0-100. This is a strict total order, so the merge is deterministic, independent of observation order, and a replay is a no-op (contract 4.0.0; before it, an equal observedAt always kept the stored entry). An observation more than 5 minutes after now is dropped ('observation-future'); an invalid one is dropped ('observation-invalid'); the rest still merge. The merged window entry is { usedPct, resetsAt, windowMinutes (only when given), status, observedAt, source } with usedPct clamped to 0-100 and timestamps normalized to UTC ISO with milliseconds and 'Z'. A stored fact is the observation without 'kind', with timestamps normalized and a missing limitUsd or balance as null. The ledger's runtime and accountId are set to the owner's; a change to either rewrites the file. updatedAt becomes now only when something changed. Unknown ledger fields and unknown window keys are kept. expected.changed says whether the file must be rewritten; expected.ledger is the ledger after the merge; expected.warnings is a multiset of codes (compare sorted).",
   "cases": [
     {
       "name": "the first observation creates the ledger",
@@ -159,7 +159,59 @@
       }
     },
     {
-      "name": "an equal observedAt keeps the stored entry, so a replay is a no-op",
+      "name": "an identical replay (same observedAt and reading) keeps the stored entry: a no-op",
+      "input": {
+        "existing": {
+          "v": 1,
+          "runtime": "claude-code",
+          "accountId": "claude3",
+          "updatedAt": "2026-09-26T15:00:00.000Z",
+          "windows": {
+            "five_hour": {
+              "usedPct": 50,
+              "resetsAt": null,
+              "status": "allowed",
+              "observedAt": "2026-09-26T15:00:00.000Z",
+              "source": "statusline"
+            }
+          }
+        },
+        "runtime": "claude-code",
+        "accountId": "claude3",
+        "now": "2026-09-26T15:05:00.000Z",
+        "observations": [
+          {
+            "key": "five_hour",
+            "usedPct": 50,
+            "resetsAt": null,
+            "status": "allowed",
+            "observedAt": "2026-09-26T15:00:00.000Z",
+            "source": "statusline"
+          }
+        ]
+      },
+      "expected": {
+        "changed": false,
+        "warnings": [],
+        "ledger": {
+          "v": 1,
+          "runtime": "claude-code",
+          "accountId": "claude3",
+          "updatedAt": "2026-09-26T15:00:00.000Z",
+          "windows": {
+            "five_hour": {
+              "usedPct": 50,
+              "resetsAt": null,
+              "status": "allowed",
+              "observedAt": "2026-09-26T15:00:00.000Z",
+              "source": "statusline"
+            }
+          }
+        }
+      }
+    },
+    {
+      "name": "a tie on observedAt: rejected beats a stored reading with a weaker status",
       "input": {
         "existing": {
           "v": 1,
@@ -178,15 +230,67 @@
         },
         "runtime": "claude-code",
         "accountId": "claude3",
-        "now": "2026-09-26T16:00:00.000Z",
+        "now": "2026-09-26T15:05:00.000Z",
         "observations": [
           {
             "key": "five_hour",
             "usedPct": 99,
             "resetsAt": null,
             "status": "rejected",
-            "observedAt": "2026-09-26T17:00:00+02:00",
+            "observedAt": "2026-09-26T15:00:00.000Z",
             "source": "sdk_event"
+          }
+        ]
+      },
+      "expected": {
+        "changed": true,
+        "warnings": [],
+        "ledger": {
+          "v": 1,
+          "runtime": "claude-code",
+          "accountId": "claude3",
+          "updatedAt": "2026-09-26T15:05:00.000Z",
+          "windows": {
+            "five_hour": {
+              "usedPct": 99,
+              "resetsAt": null,
+              "status": "rejected",
+              "observedAt": "2026-09-26T15:00:00.000Z",
+              "source": "sdk_event"
+            }
+          }
+        }
+      }
+    },
+    {
+      "name": "a tie on observedAt: a weaker status never replaces a stored rejected",
+      "input": {
+        "existing": {
+          "v": 1,
+          "runtime": "claude-code",
+          "accountId": "claude3",
+          "updatedAt": "2026-09-26T15:00:00.000Z",
+          "windows": {
+            "five_hour": {
+              "usedPct": 99,
+              "resetsAt": null,
+              "status": "rejected",
+              "observedAt": "2026-09-26T15:00:00.000Z",
+              "source": "sdk_event"
+            }
+          }
+        },
+        "runtime": "claude-code",
+        "accountId": "claude3",
+        "now": "2026-09-26T15:05:00.000Z",
+        "observations": [
+          {
+            "key": "five_hour",
+            "usedPct": 100,
+            "resetsAt": null,
+            "status": "allowed",
+            "observedAt": "2026-09-26T15:00:00.000Z",
+            "source": "statusline"
           }
         ]
       },
@@ -200,11 +304,207 @@
           "updatedAt": "2026-09-26T15:00:00.000Z",
           "windows": {
             "five_hour": {
-              "usedPct": 50,
+              "usedPct": 99,
               "resetsAt": null,
-              "status": null,
+              "status": "rejected",
+              "observedAt": "2026-09-26T15:00:00.000Z",
+              "source": "sdk_event"
+            }
+          }
+        }
+      }
+    },
+    {
+      "name": "a tie on observedAt and status: the higher usedPct wins",
+      "input": {
+        "existing": {
+          "v": 1,
+          "runtime": "claude-code",
+          "accountId": "claude3",
+          "updatedAt": "2026-09-26T15:00:00.000Z",
+          "windows": {
+            "five_hour": {
+              "usedPct": 60,
+              "resetsAt": null,
+              "status": "allowed_warning",
               "observedAt": "2026-09-26T15:00:00.000Z",
               "source": "statusline"
+            }
+          }
+        },
+        "runtime": "claude-code",
+        "accountId": "claude3",
+        "now": "2026-09-26T15:05:00.000Z",
+        "observations": [
+          {
+            "key": "five_hour",
+            "usedPct": 91,
+            "resetsAt": null,
+            "status": "allowed_warning",
+            "observedAt": "2026-09-26T15:00:00.000Z",
+            "source": "sdk_event"
+          }
+        ]
+      },
+      "expected": {
+        "changed": true,
+        "warnings": [],
+        "ledger": {
+          "v": 1,
+          "runtime": "claude-code",
+          "accountId": "claude3",
+          "updatedAt": "2026-09-26T15:05:00.000Z",
+          "windows": {
+            "five_hour": {
+              "usedPct": 91,
+              "resetsAt": null,
+              "status": "allowed_warning",
+              "observedAt": "2026-09-26T15:00:00.000Z",
+              "source": "sdk_event"
+            }
+          }
+        }
+      }
+    },
+    {
+      "name": "a tie on observedAt, status and usedPct: the later resetsAt wins",
+      "input": {
+        "existing": {
+          "v": 1,
+          "runtime": "claude-code",
+          "accountId": "claude3",
+          "updatedAt": "2026-09-26T15:00:00.000Z",
+          "windows": {
+            "five_hour": {
+              "usedPct": 80,
+              "resetsAt": "2026-09-26T19:00:00.000Z",
+              "status": "allowed",
+              "observedAt": "2026-09-26T15:00:00.000Z",
+              "source": "statusline"
+            }
+          }
+        },
+        "runtime": "claude-code",
+        "accountId": "claude3",
+        "now": "2026-09-26T15:05:00.000Z",
+        "observations": [
+          {
+            "key": "five_hour",
+            "usedPct": 80,
+            "resetsAt": "2026-09-26T20:00:00.000Z",
+            "status": "allowed",
+            "observedAt": "2026-09-26T15:00:00.000Z",
+            "source": "sdk_event"
+          }
+        ]
+      },
+      "expected": {
+        "changed": true,
+        "warnings": [],
+        "ledger": {
+          "v": 1,
+          "runtime": "claude-code",
+          "accountId": "claude3",
+          "updatedAt": "2026-09-26T15:05:00.000Z",
+          "windows": {
+            "five_hour": {
+              "usedPct": 80,
+              "resetsAt": "2026-09-26T20:00:00.000Z",
+              "status": "allowed",
+              "observedAt": "2026-09-26T15:00:00.000Z",
+              "source": "sdk_event"
+            }
+          }
+        }
+      }
+    },
+    {
+      "name": "tied observations in one batch give the same result in either order (rejected first)",
+      "input": {
+        "existing": null,
+        "runtime": "claude-code",
+        "accountId": "claude3",
+        "now": "2026-09-26T15:05:00.000Z",
+        "observations": [
+          {
+            "key": "five_hour",
+            "usedPct": 99,
+            "resetsAt": null,
+            "status": "rejected",
+            "observedAt": "2026-09-26T15:00:00.000Z",
+            "source": "sdk_event"
+          },
+          {
+            "key": "five_hour",
+            "usedPct": 40,
+            "resetsAt": null,
+            "status": "allowed",
+            "observedAt": "2026-09-26T15:00:00.000Z",
+            "source": "statusline"
+          }
+        ]
+      },
+      "expected": {
+        "changed": true,
+        "warnings": [],
+        "ledger": {
+          "v": 1,
+          "runtime": "claude-code",
+          "accountId": "claude3",
+          "updatedAt": "2026-09-26T15:05:00.000Z",
+          "windows": {
+            "five_hour": {
+              "usedPct": 99,
+              "resetsAt": null,
+              "status": "rejected",
+              "observedAt": "2026-09-26T15:00:00.000Z",
+              "source": "sdk_event"
+            }
+          }
+        }
+      }
+    },
+    {
+      "name": "tied observations in one batch give the same result in either order (rejected last)",
+      "input": {
+        "existing": null,
+        "runtime": "claude-code",
+        "accountId": "claude3",
+        "now": "2026-09-26T15:05:00.000Z",
+        "observations": [
+          {
+            "key": "five_hour",
+            "usedPct": 40,
+            "resetsAt": null,
+            "status": "allowed",
+            "observedAt": "2026-09-26T15:00:00.000Z",
+            "source": "statusline"
+          },
+          {
+            "key": "five_hour",
+            "usedPct": 99,
+            "resetsAt": null,
+            "status": "rejected",
+            "observedAt": "2026-09-26T15:00:00.000Z",
+            "source": "sdk_event"
+          }
+        ]
+      },
+      "expected": {
+        "changed": true,
+        "warnings": [],
+        "ledger": {
+          "v": 1,
+          "runtime": "claude-code",
+          "accountId": "claude3",
+          "updatedAt": "2026-09-26T15:05:00.000Z",
+          "windows": {
+            "five_hour": {
+              "usedPct": 99,
+              "resetsAt": null,
+              "status": "rejected",
+              "observedAt": "2026-09-26T15:00:00.000Z",
+              "source": "sdk_event"
             }
           }
         }
@@ -238,7 +538,9 @@
       },
       "expected": {
         "changed": true,
-        "warnings": ["observation-future"],
+        "warnings": [
+          "observation-future"
+        ],
         "ledger": {
           "v": 1,
           "runtime": "claude-code",
@@ -328,7 +630,13 @@
             "observedAt": "2026-09-26T15:00:00.000Z",
             "source": "statusline"
           },
-          {"key": "five_hour", "usedPct": 10, "resetsAt": null, "status": null, "source": "statusline"},
+          {
+            "key": "five_hour",
+            "usedPct": 10,
+            "resetsAt": null,
+            "status": null,
+            "source": "statusline"
+          },
           "not an object",
           {
             "key": "seven_day",
@@ -487,7 +795,9 @@
               "observedAt": "2026-09-26T15:00:00.000Z",
               "source": "sdk_usage"
             },
-            "Odd Key": {"anything": true}
+            "Odd Key": {
+              "anything": true
+            }
           }
         },
         "runtime": "claude-code",
@@ -527,7 +837,9 @@
               "observedAt": "2026-09-26T15:00:00.000Z",
               "source": "sdk_usage"
             },
-            "Odd Key": {"anything": true},
+            "Odd Key": {
+              "anything": true
+            },
             "model:claude-opus-4.1": {
               "usedPct": 12,
               "resetsAt": null,
@@ -554,7 +866,13 @@
           "runtime": "claude-code",
           "accountId": "claude3",
           "updatedAt": "2026-09-26T15:00:00.000Z",
-          "windows": {"five_hour": {"usedPct": 10, "observedAt": "yesterday", "source": "statusline"}}
+          "windows": {
+            "five_hour": {
+              "usedPct": 10,
+              "observedAt": "yesterday",
+              "source": "statusline"
+            }
+          }
         },
         "runtime": "claude-code",
         "accountId": "claude3",
@@ -608,12 +926,23 @@
           }
         ]
       },
-      "expected": {"changed": false, "warnings": ["observation-invalid"], "ledger": null}
+      "expected": {
+        "changed": false,
+        "warnings": [
+          "observation-invalid"
+        ],
+        "ledger": null
+      }
     },
     {
       "name": "a ledger of an unknown version is left alone",
       "input": {
-        "existing": {"v": 2, "accountId": "claude3", "updatedAt": "2026-09-26T15:00:00.000Z", "windows": {}},
+        "existing": {
+          "v": 2,
+          "accountId": "claude3",
+          "updatedAt": "2026-09-26T15:00:00.000Z",
+          "windows": {}
+        },
         "runtime": "claude-code",
         "accountId": "claude3",
         "now": "2026-09-26T16:00:00.000Z",
@@ -630,14 +959,25 @@
       },
       "expected": {
         "changed": false,
-        "warnings": ["ledger-version-unknown"],
-        "ledger": {"v": 2, "accountId": "claude3", "updatedAt": "2026-09-26T15:00:00.000Z", "windows": {}}
+        "warnings": [
+          "ledger-version-unknown"
+        ],
+        "ledger": {
+          "v": 2,
+          "accountId": "claude3",
+          "updatedAt": "2026-09-26T15:00:00.000Z",
+          "windows": {}
+        }
       }
     },
     {
       "name": "a ledger that is not a ledger object starts over",
       "input": {
-        "existing": ["not", "a", "ledger"],
+        "existing": [
+          "not",
+          "a",
+          "ledger"
+        ],
         "runtime": "claude-code",
         "accountId": "claude3",
         "now": "2026-09-26T16:00:00.000Z",
@@ -654,7 +994,9 @@
       },
       "expected": {
         "changed": true,
-        "warnings": ["ledger-invalid"],
+        "warnings": [
+          "ledger-invalid"
+        ],
         "ledger": {
           "v": 1,
           "runtime": "claude-code",
@@ -772,7 +1114,11 @@
           "accountId": "default",
           "updatedAt": "2026-09-26T15:00:00.000Z",
           "windows": {},
-          "plan": {"name": "plus", "observedAt": "2026-09-26T15:00:00.000Z", "source": "rollout"},
+          "plan": {
+            "name": "plus",
+            "observedAt": "2026-09-26T15:00:00.000Z",
+            "source": "rollout"
+          },
           "spend": {
             "periodStart": "2026-09-01T00:00:00.000Z",
             "costUsd": 4.5,
@@ -785,7 +1131,12 @@
         "accountId": "default",
         "now": "2026-09-26T16:00:00.000Z",
         "observations": [
-          {"kind": "plan", "name": "pro", "observedAt": "2026-09-26T15:59:00.000Z", "source": "rollout"},
+          {
+            "kind": "plan",
+            "name": "pro",
+            "observedAt": "2026-09-26T15:59:00.000Z",
+            "source": "rollout"
+          },
           {
             "kind": "credits",
             "hasCredits": true,
@@ -812,7 +1163,11 @@
           "accountId": "default",
           "updatedAt": "2026-09-26T16:00:00.000Z",
           "windows": {},
-          "plan": {"name": "pro", "observedAt": "2026-09-26T15:59:00.000Z", "source": "rollout"},
+          "plan": {
+            "name": "pro",
+            "observedAt": "2026-09-26T15:59:00.000Z",
+            "source": "rollout"
+          },
           "spend": {
             "periodStart": "2026-09-01T00:00:00.000Z",
             "costUsd": 4.5,
@@ -889,13 +1244,27 @@
             "observedAt": "2026-09-26T15:59:00Z",
             "source": "rollout"
           },
-          {"kind": "mood", "observedAt": "2026-09-26T15:59:00Z", "source": "sidecar"},
-          {"kind": "plan", "name": "", "observedAt": "2026-09-26T15:59:00Z", "source": "rollout"}
+          {
+            "kind": "mood",
+            "observedAt": "2026-09-26T15:59:00Z",
+            "source": "sidecar"
+          },
+          {
+            "kind": "plan",
+            "name": "",
+            "observedAt": "2026-09-26T15:59:00Z",
+            "source": "rollout"
+          }
         ]
       },
       "expected": {
         "changed": false,
-        "warnings": ["observation-invalid", "observation-invalid", "observation-invalid", "observation-invalid"],
+        "warnings": [
+          "observation-invalid",
+          "observation-invalid",
+          "observation-invalid",
+          "observation-invalid"
+        ],
         "ledger": null
       }
     },
@@ -930,7 +1299,9 @@
       },
       "expected": {
         "changed": true,
-        "warnings": ["observation-invalid"],
+        "warnings": [
+          "observation-invalid"
+        ],
         "ledger": {
           "v": 1,
           "runtime": "opencode",
@@ -950,6 +1321,256 @@
               "status": "rejected",
               "observedAt": "2026-09-26T15:59:00.000Z",
               "source": "error"
+            }
+          }
+        }
+      }
+    },
+    {
+      "name": "a tie compares instants, not strings: +02:00 and Z name the same millisecond",
+      "input": {
+        "existing": {
+          "v": 1,
+          "runtime": "claude-code",
+          "accountId": "claude3",
+          "updatedAt": "2026-09-26T15:00:00.000Z",
+          "windows": {
+            "five_hour": {
+              "usedPct": 50,
+              "resetsAt": null,
+              "status": null,
+              "observedAt": "2026-09-26T15:00:00.000Z",
+              "source": "statusline"
+            }
+          }
+        },
+        "runtime": "claude-code",
+        "accountId": "claude3",
+        "now": "2026-09-26T15:05:00.000Z",
+        "observations": [
+          {
+            "key": "five_hour",
+            "usedPct": 99,
+            "resetsAt": null,
+            "status": "rejected",
+            "observedAt": "2026-09-26T17:00:00.000+02:00",
+            "source": "sdk_event"
+          }
+        ]
+      },
+      "expected": {
+        "changed": true,
+        "warnings": [],
+        "ledger": {
+          "v": 1,
+          "runtime": "claude-code",
+          "accountId": "claude3",
+          "updatedAt": "2026-09-26T15:05:00.000Z",
+          "windows": {
+            "five_hour": {
+              "usedPct": 99,
+              "resetsAt": null,
+              "status": "rejected",
+              "observedAt": "2026-09-26T15:00:00.000Z",
+              "source": "sdk_event"
+            }
+          }
+        }
+      }
+    },
+    {
+      "name": "a tie compares usedPct after clamping: 104 clamps to 100 and ties a stored 100, so the stored entry stays",
+      "input": {
+        "existing": {
+          "v": 1,
+          "runtime": "claude-code",
+          "accountId": "claude3",
+          "updatedAt": "2026-09-26T15:00:00.000Z",
+          "windows": {
+            "five_hour": {
+              "usedPct": 100,
+              "resetsAt": null,
+              "status": "rejected",
+              "observedAt": "2026-09-26T15:00:00.000Z",
+              "source": "sdk_event"
+            }
+          }
+        },
+        "runtime": "claude-code",
+        "accountId": "claude3",
+        "now": "2026-09-26T15:05:00.000Z",
+        "observations": [
+          {
+            "key": "five_hour",
+            "usedPct": 104,
+            "resetsAt": null,
+            "status": "rejected",
+            "observedAt": "2026-09-26T15:00:00.000Z",
+            "source": "sdk_event"
+          }
+        ]
+      },
+      "expected": {
+        "changed": false,
+        "warnings": [],
+        "ledger": {
+          "v": 1,
+          "runtime": "claude-code",
+          "accountId": "claude3",
+          "updatedAt": "2026-09-26T15:00:00.000Z",
+          "windows": {
+            "five_hour": {
+              "usedPct": 100,
+              "resetsAt": null,
+              "status": "rejected",
+              "observedAt": "2026-09-26T15:00:00.000Z",
+              "source": "sdk_event"
+            }
+          }
+        }
+      }
+    },
+    {
+      "name": "a tie on every reading field goes to the greater source, in either order (statusline > sdk_event)",
+      "input": {
+        "existing": null,
+        "runtime": "claude-code",
+        "accountId": "claude3",
+        "now": "2026-09-26T15:05:00.000Z",
+        "observations": [
+          {
+            "key": "five_hour",
+            "usedPct": 50,
+            "resetsAt": null,
+            "status": "allowed",
+            "observedAt": "2026-09-26T15:00:00.000Z",
+            "source": "sdk_event"
+          },
+          {
+            "key": "five_hour",
+            "usedPct": 50,
+            "resetsAt": null,
+            "status": "allowed",
+            "observedAt": "2026-09-26T15:00:00.000Z",
+            "source": "statusline"
+          }
+        ]
+      },
+      "expected": {
+        "changed": true,
+        "warnings": [],
+        "ledger": {
+          "v": 1,
+          "runtime": "claude-code",
+          "accountId": "claude3",
+          "updatedAt": "2026-09-26T15:05:00.000Z",
+          "windows": {
+            "five_hour": {
+              "usedPct": 50,
+              "resetsAt": null,
+              "status": "allowed",
+              "observedAt": "2026-09-26T15:00:00.000Z",
+              "source": "statusline"
+            }
+          }
+        }
+      }
+    },
+    {
+      "name": "the same tie with the observations reversed gives the same bytes",
+      "input": {
+        "existing": null,
+        "runtime": "claude-code",
+        "accountId": "claude3",
+        "now": "2026-09-26T15:05:00.000Z",
+        "observations": [
+          {
+            "key": "five_hour",
+            "usedPct": 50,
+            "resetsAt": null,
+            "status": "allowed",
+            "observedAt": "2026-09-26T15:00:00.000Z",
+            "source": "statusline"
+          },
+          {
+            "key": "five_hour",
+            "usedPct": 50,
+            "resetsAt": null,
+            "status": "allowed",
+            "observedAt": "2026-09-26T15:00:00.000Z",
+            "source": "sdk_event"
+          }
+        ]
+      },
+      "expected": {
+        "changed": true,
+        "warnings": [],
+        "ledger": {
+          "v": 1,
+          "runtime": "claude-code",
+          "accountId": "claude3",
+          "updatedAt": "2026-09-26T15:05:00.000Z",
+          "windows": {
+            "five_hour": {
+              "usedPct": 50,
+              "resetsAt": null,
+              "status": "allowed",
+              "observedAt": "2026-09-26T15:00:00.000Z",
+              "source": "statusline"
+            }
+          }
+        }
+      }
+    },
+    {
+      "name": "a tie on every field but windowMinutes goes to the longer window (missing lowest)",
+      "input": {
+        "existing": {
+          "v": 1,
+          "runtime": "claude-code",
+          "accountId": "claude3",
+          "updatedAt": "2026-09-26T15:00:00.000Z",
+          "windows": {
+            "five_hour": {
+              "usedPct": 50,
+              "resetsAt": null,
+              "status": "allowed",
+              "observedAt": "2026-09-26T15:00:00.000Z",
+              "source": "statusline"
+            }
+          }
+        },
+        "runtime": "claude-code",
+        "accountId": "claude3",
+        "now": "2026-09-26T15:05:00.000Z",
+        "observations": [
+          {
+            "key": "five_hour",
+            "usedPct": 50,
+            "resetsAt": null,
+            "status": "allowed",
+            "observedAt": "2026-09-26T15:00:00.000Z",
+            "source": "statusline",
+            "windowMinutes": 300
+          }
+        ]
+      },
+      "expected": {
+        "changed": true,
+        "warnings": [],
+        "ledger": {
+          "v": 1,
+          "runtime": "claude-code",
+          "accountId": "claude3",
+          "updatedAt": "2026-09-26T15:05:00.000Z",
+          "windows": {
+            "five_hour": {
+              "usedPct": 50,
+              "resetsAt": null,
+              "status": "allowed",
+              "observedAt": "2026-09-26T15:00:00.000Z",
+              "source": "statusline",
+              "windowMinutes": 300
             }
           }
         }
