@@ -464,12 +464,37 @@ describe('FleetTab: what a failure says', () => {
     expect(document.activeElement).toBe(screen.getByRole('button', { name: 'Retry' }));
   });
 
-  it('mounts a new alert for a repeated load failure so screen readers announce it again', async () => {
-    stubFetch({ status: 500, body: NO_JSON });
+  it('re-announces the load failure only once a retry has actually failed', async () => {
+    let calls = 0;
+    let failSecond: () => void = () => {};
+    const failed = {
+      ok: false,
+      status: 500,
+      json: async () => {
+        throw new SyntaxError('Unexpected token <');
+      },
+    };
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () => {
+        calls += 1;
+        if (calls === 1) return failed;
+        await new Promise<void>((resolve) => {
+          failSecond = resolve;
+        });
+        return failed;
+      })
+    );
     await renderTab();
     const first = screen.getByRole('alert');
     await act(async () => {
       fireEvent.click(screen.getByRole('button', { name: 'Retry' }));
+    });
+    // The retry is still on its way: the first alert stays, nothing is re-announced yet.
+    expect(calls).toBe(2);
+    expect(first.isConnected).toBe(true);
+    await act(async () => {
+      failSecond();
     });
     const second = screen.getByRole('alert');
     expect(second.textContent).toBe(first.textContent);

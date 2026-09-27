@@ -331,7 +331,7 @@ export function CrossRuntimeRow(props: {
 type Phase =
   | { kind: 'loading' }
   | { kind: 'too-old' }
-  | { kind: 'failed'; message: string }
+  | { kind: 'failed'; message: string; failures: number }
   | { kind: 'ready' };
 
 /**
@@ -353,9 +353,6 @@ export function FleetTab(): Node {
 
   // Bumped by the Retry action on a failed load, which runs the load again.
   const [attempt, setAttempt] = useState(0);
-  // The load-failure alert is keyed by the attempt, so a repeated failure
-  // mounts a new alert and screen readers announce it again even though the
-  // words match.
   // True while a retried load is on its way. The failed view stays up (Retry
   // marked busy, not removed) so keyboard focus stays on the button.
   const [retrying, setRetrying] = useState(false);
@@ -374,7 +371,14 @@ export function FleetTab(): Node {
         if (!live) return;
         setRetrying(false);
         if (error instanceof HostTooOldError) setPhase({ kind: 'too-old' });
-        else setPhase({ kind: 'failed', message: LOAD_FAILED_TEXT });
+        // Counts failures that landed, so the alert below remounts (and is
+        // announced again) only when a retry has actually failed too.
+        else
+          setPhase((current) => ({
+            kind: 'failed',
+            message: LOAD_FAILED_TEXT,
+            failures: current.kind === 'failed' ? current.failures + 1 : 1,
+          }));
       }
     );
     return () => {
@@ -416,7 +420,7 @@ export function FleetTab(): Node {
   if (phase.kind === 'too-old') return root(h('p', { style: MUTED }, HOST_TOO_OLD_TEXT));
   if (phase.kind === 'failed') {
     return root(
-      h('p', { key: `load-failed-${attempt}`, role: 'alert', style: ALERT }, phase.message),
+      h('p', { key: `load-failed-${phase.failures}`, role: 'alert', style: ALERT }, phase.message),
       h(
         'button',
         {
