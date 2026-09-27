@@ -22,6 +22,7 @@ Contract: [`../../adapters/SPEC.md`](../../adapters/SPEC.md) 2.2.0. `adapter.ts`
 - Both files are the project's; `config-files.ts` prints their paths (`committed`, `local`); local wins. Never inline a team, slug or account.
 - **`cli`:** every call is `composio execute <SLUG> --account "<trackerAccount>" -d '<json>'`. The flag is the only thing keeping another connected account (a personal login, unrelated `artblocks` work) from receiving flow's writes. Lost a slug: `composio search "<intent>" --toolkits linear`.
 - **`mcp`:** the server acts as whoever OAuth'd it, not as `trackerAccount`. Before any write, `get_authenticated_user` must be the same identity; unauthenticated, authenticate as that account; a different identity, use `cli`. Pass `includeArchived: false` on `list_issues`; never `includeMembers: true` on `list_projects` (complexity errors).
+- **Hand calls:** per-verb MCP tools are in `../../adapters/reference/linear-mcp/SKILL.md`; Composio slugs, input keys and response shapes in `../../adapters/reference/linear-composio/SKILL.md`.
 
 ## The verbs
 
