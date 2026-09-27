@@ -162,10 +162,11 @@ words.
   "no credential", never a skip or a pass.
 - **Sandbox per case:** a temp git repo with the fixture files, a committed
   `.agents/flow/config.json` selecting the `fake` tracker at a temp store path, and a temp copy of
-  the flow root (its `node_modules` linked, not copied) given with `--plugin-dir`. The child never
-  gets a path into the operator's checkout, so a write the breach check misses (a `node` program's
-  `execSync` or `path.join`) lands in the copy, which is deleted with the sandbox; the oracles run
-  from the checkout (DOR-2430). The child runs
+  the flow root (with its own copy of the runtime packages, so no link leads back) given with
+  `--plugin-dir`. The child never gets a path into the operator's checkout, so a write the breach
+  check misses (a `node` program's `execSync`, `path.join`, or `node_modules/..`) lands in the
+  copy, which is deleted with the sandbox; the oracles run from the checkout (DOR-2430). The child
+  runs
   `claude -p "<case prompt>" --plugin-dir <copy> --output-format stream-json --verbose
 --max-turns <n> --max-budget-usd <remaining>` with cwd = sandbox and these fences:
   1. `--strict-mcp-config` with an empty MCP config: no tracker MCP server.

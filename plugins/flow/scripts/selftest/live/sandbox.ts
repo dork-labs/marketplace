@@ -5,13 +5,13 @@
  * A sandbox is a new temp folder holding:
  *
  * - `plugin/`: a copy of the flow root, which the child gets as its
- *   `--plugin-dir`. Its `node_modules` is a link to the checkout's, not a
- *   copy. The breach check reads a stream, and a `node` program can write
- *   past it (`execSync` with a `cd`, a path built with `path.join`), so the
- *   child never gets a path into the operator's checkout: whatever it writes
- *   into the plugin lands in this copy and is deleted with the sandbox. Only
- *   a write into `node_modules` still reaches the checkout's, and the breach
- *   check stays the fence for that.
+ *   `--plugin-dir`, with its own copy of the runtime packages (`zod`). The
+ *   breach check reads a stream, and a `node` program can write past it
+ *   (`execSync` with a `cd`, a path built with `path.join`), so the child
+ *   never gets a path into the operator's checkout, and nothing in the copy
+ *   links back to it (a link would let `<link>/..` reach the checkout):
+ *   whatever it writes into the plugin lands in this copy and is deleted
+ *   with the sandbox.
  * - `project/`: a git repo with the case's fixture files and a committed
  *   `.agents/flow/config.json` that selects the `fake` tracker over the `cli`
  *   transport. `.agents/flow/adapters/fake/` is a LINK to the copy's
@@ -39,6 +39,7 @@ import {
   existsSync,
   mkdirSync,
   mkdtempSync,
+  readFileSync,
   realpathSync,
   rmSync,
   symlinkSync,
@@ -84,12 +85,11 @@ function git(dir: string, ...args: string[]): void {
 }
 
 /**
- * Copy the flow root to `into`, all but its `node_modules`, which is linked
- * (the copy's scripts still import `zod`). The root is copied by its
- * realpath and every link inside it as the file or folder it points to, so
- * nothing in the copy but `node_modules` leads back into the checkout.
- * `rmSync` removes a link without following it, so deleting the copy leaves
- * the checkout's packages alone.
+ * Copy the flow root to `into`. Its `node_modules` is left out but for the
+ * packages `package.json` lists under `dependencies` (the shipped runtime
+ * needs only `zod`, which has no dependencies of its own). The root is copied
+ * by its realpath and every link inside it as the file or folder it points
+ * to, so nothing in the copy leads back into the checkout.
  *
  * @param flowRoot - The flow root, the operator's checkout.
  * @param into - The folder to create.
@@ -98,7 +98,15 @@ export function copyPlugin(flowRoot: string, into: string): void {
   const source = realpathSync(flowRoot);
   const modules = path.join(source, 'node_modules');
   cpSync(source, into, { recursive: true, dereference: true, filter: (src) => src !== modules });
-  if (existsSync(modules)) symlinkSync(modules, path.join(into, 'node_modules'), 'dir');
+  const manifest = JSON.parse(readFileSync(path.join(source, 'package.json'), 'utf8')) as {
+    dependencies?: Record<string, string>;
+  };
+  for (const name of Object.keys(manifest.dependencies ?? {})) {
+    const from = path.join(modules, name);
+    if (existsSync(from)) {
+      cpSync(from, path.join(into, 'node_modules', name), { recursive: true, dereference: true });
+    }
+  }
 }
 
 /**

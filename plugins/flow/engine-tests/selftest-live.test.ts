@@ -99,12 +99,14 @@ if (process.env.STUB_CAPTURE) {
   ].map((e) => JSON.stringify(e)).join('\\n') + '\\n';
 }
 // STUB_WRITE_PLUGIN: act as an agent writing into the plugin by routes a
-// pattern check cannot follow: a shell cd through the adapter link, and paths
-// built with path.join and by string concatenation from --plugin-dir.
+// pattern check cannot follow: a shell cd through the adapter link, paths
+// built with path.join and by string concatenation from --plugin-dir, and
+// one through node_modules/.. (the kernel follows a link before the ..).
 if (process.env.STUB_WRITE_PLUGIN) {
   require('node:child_process').execSync('cd ' + link + ' && echo pwned > adapter.ts');
   fs.writeFileSync(path.join(pluginDir, 'scripts', 'flow.ts'), 'pwned');
   fs.appendFileSync(pluginDir + '/README.md', 'pwned');
+  fs.appendFileSync(pluginDir + '/node_modules/../package.json', 'pwned');
 }
 // STUB_FLOW_RUNS: act as an agent following a skill would. Write each of
 // STUB_FILES (path in the project -> text), then run the plugin's flow with
@@ -195,14 +197,20 @@ function trivial(id: string): RunnableCase {
   };
 }
 
-/** A copy of the flow root in the test's temp folder, `node_modules` linked. */
+/**
+ * A copy of the flow root in the test's temp folder, with a copy of `zod` as
+ * its only package: no link leads from it back to the real checkout.
+ */
 function copyOfPlugin(): string {
   const dir = path.join(tmp, 'checkout');
   cpSync(FLOW_ROOT, dir, {
     recursive: true,
     filter: (src) => path.relative(FLOW_ROOT, src) !== 'node_modules',
   });
-  symlinkSync(path.join(FLOW_ROOT, 'node_modules'), path.join(dir, 'node_modules'), 'dir');
+  cpSync(path.join(FLOW_ROOT, 'node_modules', 'zod'), path.join(dir, 'node_modules', 'zod'), {
+    recursive: true,
+    dereference: true,
+  });
   return dir;
 }
 
@@ -1273,8 +1281,8 @@ describe('the live oracles', { timeout: LIVE_TIMEOUT }, () => {
     // Purpose: the fake's adapter.ts imports from the plugin by relative path;
     // a copy of the adapter alone breaks it, so the link goes into the
     // sandbox's copy of the whole plugin. That copy is a real folder even when
-    // the flow root is reached through a link, and only its node_modules
-    // leads back to the checkout.
+    // the flow root is reached through a link, and nothing in it, its
+    // node_modules included, leads back to the checkout.
     const alias = path.join(tmp, 'flow-alias');
     symlinkSync(FLOW_ROOT, alias, 'dir');
     const s = makeSandbox({ flowRoot: alias, files: {}, backlog: { items: [] } });
@@ -1285,8 +1293,9 @@ describe('the live oracles', { timeout: LIVE_TIMEOUT }, () => {
       expect(lstatSync(s.pluginDir).isDirectory()).toBe(true);
       expect(existsSync(path.join(s.pluginDir, 'scripts', 'flow.ts'))).toBe(true);
       const modules = path.join(s.pluginDir, 'node_modules');
-      expect(lstatSync(modules).isSymbolicLink()).toBe(true);
-      expect(realpathSync(modules)).toBe(realpathSync(path.join(FLOW_ROOT, 'node_modules')));
+      expect(lstatSync(modules).isDirectory()).toBe(true);
+      expect(readdirSync(modules)).toEqual(['zod']);
+      expect(lstatSync(path.join(modules, 'zod')).isDirectory()).toBe(true);
       expect(s.backlogFile.startsWith(`${s.dir}${path.sep}`)).toBe(false);
       const tracked = execFileSync('git', ['ls-files'], { cwd: s.dir, encoding: 'utf8' });
       expect(tracked.split('\n')).toContain('.agents/flow/config.json');

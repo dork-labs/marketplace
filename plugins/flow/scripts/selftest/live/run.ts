@@ -10,10 +10,12 @@
  * 1. skips it when it cannot run today, or when the budget is spent;
  * 2. builds the sandbox and runs `claude -p <prompt>` in it with the fences:
  *    the sandbox's copy of the flow root as its only plugin (never the
- *    checkout itself, so no write the breach check misses can reach it), no MCP servers (`--strict-mcp-config`
- *    with an empty config), `--permission-mode dontAsk` with a short
- *    allowlist, what is left of the budget as `--max-budget-usd`, and an
- *    environment stripped of every other credential and tracker token;
+ *    checkout itself, and nothing in the copy links back to it, so no write
+ *    the breach check misses can reach it), no MCP servers
+ *    (`--strict-mcp-config` with an empty config), `--permission-mode
+ *    dontAsk` with a short allowlist, what is left of the budget as
+ *    `--max-budget-usd`, and an environment stripped of every other
+ *    credential and tracker token;
  * 3. reads the stream: the `result` event's cost and turns, and every
  *    `tool_use`, which the breach check scans;
  * 4. fails the case as a breach when a tool call left the fences, whatever
