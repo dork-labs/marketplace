@@ -10,10 +10,4 @@ argument-hint: '<path-to-spec-file>'
 Implement the specification at: $ARGUMENTS
 
 Read `${CLAUDE_PLUGIN_ROOT}/skills/executing-specs/SKILL.md` and follow its process exactly.
-
-The skill uses supporting files in `${CLAUDE_PLUGIN_ROOT}/skills/executing-specs/` — read them
-on demand as instructed by the skill, not upfront.
-
-All tracker I/O (the `agent/claimed` claim, the In Progress transition,
-breadcrumbs) routes through the tracker adapter skill — this command never
-touches a tracker string directly.
+Read its supporting files in `${CLAUDE_PLUGIN_ROOT}/skills/executing-specs/` only when it says to.

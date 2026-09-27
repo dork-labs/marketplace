@@ -4,6 +4,15 @@ Installs of this plugin are pinned to a commit SHA, so a fix here does not reach
 you until you **reinstall it** (Marketplace → flow → reinstall, or re-run your
 `--plugin-dir` checkout's `git pull`). Each entry below says whether that matters.
 
+## 0.43.0
+
+**The `/flow` commands are much shorter, so an agent reads less before it starts work. Nothing they do has changed. Reinstall if you want the shorter versions; your runs work the same either way.**
+
+- `/flow` is down from about 3,900 words to about 1,200. `/flow:pause` went from about 800 to under 300, and `/flow:status` and `/flow:resume` are about half their old length.
+- The step-by-step commands (`/flow:capture`, `/flow:triage` and the rest) now just point at the skill that does the work, without repeating its rules.
+- Each rule the commands share now lives in one file. For example, how flow picks this project's schedules is written only in `/flow:status`, and `/flow:pause` points there.
+- A new page, `docs/why.md`, keeps the stories behind flow's rules (what went wrong and what it taught us), so the commands can stick to what to do.
+
 ## 0.44.0
 
 **A Flow panel beside your chats shows each account's usage and what flow is working on, and lets you pause flow. Reinstall to get it; it needs DorkOS 0.88.0 or newer.**

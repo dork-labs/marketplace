@@ -1,63 +1,63 @@
 {
   "commands/capture.md": {
-    "baseline": 103,
-    "target": 103
+    "baseline": 76,
+    "target": 76
   },
   "commands/decompose.md": {
-    "baseline": 81,
-    "target": 81
+    "baseline": 56,
+    "target": 56
   },
   "commands/done.md": {
-    "baseline": 89,
-    "target": 89
+    "baseline": 59,
+    "target": 59
   },
   "commands/execute.md": {
-    "baseline": 113,
-    "target": 113
+    "baseline": 79,
+    "target": 79
   },
   "commands/flow.md": {
-    "baseline": 3988,
-    "target": 600
+    "baseline": 1168,
+    "target": 1168
   },
   "commands/groom.md": {
-    "baseline": 167,
-    "target": 167
+    "baseline": 91,
+    "target": 91
   },
   "commands/ideate.md": {
-    "baseline": 121,
-    "target": 121
+    "baseline": 73,
+    "target": 73
   },
   "commands/init.md": {
-    "baseline": 208,
-    "target": 208
+    "baseline": 106,
+    "target": 106
   },
   "commands/pause.md": {
-    "baseline": 811,
-    "target": 100
+    "baseline": 274,
+    "target": 274
   },
   "commands/resume.md": {
-    "baseline": 462,
-    "target": 462
+    "baseline": 201,
+    "target": 201
   },
   "commands/self-test.md": {
     "baseline": 140,
     "target": 140
   },
   "commands/specify.md": {
-    "baseline": 129,
-    "target": 129
+    "baseline": 82,
+    "target": 82
   },
   "commands/status.md": {
-    "baseline": 725,
-    "target": 725
+    "baseline": 301,
+    "target": 301
   },
   "commands/triage.md": {
-    "baseline": 140,
-    "target": 140
+    "baseline": 83,
+    "target": 83
   },
   "commands/verify.md": {
-    "baseline": 94,
-    "target": 94
+    "baseline": 68,
+    "target": 68
   },
   "docs/account-usage.mdx": {
     "baseline": 1123,
@@ -118,6 +118,10 @@
   "docs/what-flow-is.mdx": {
     "baseline": 1691,
     "target": 1691
+  },
+  "docs/why.md": {
+    "baseline": 503,
+    "target": 503
   },
   "README.md": {
     "baseline": 2438,

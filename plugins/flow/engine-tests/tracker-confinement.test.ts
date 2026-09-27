@@ -478,9 +478,19 @@ describe('F1 — generic commands name no tracker and route through the resolved
     // The other positive half: a command that dropped the word "adapter"
     // entirely would pass the negative rule while losing the routing
     // instruction. `init` is the one exception — it is setup, and it runs
-    // BEFORE any adapter exists.
-    for (const file of commandFiles) {
-      if (path.basename(file) === 'init.md') continue;
+    // BEFORE any adapter exists. A command that only hands over to a stage
+    // skill carries no tracker instruction of its own (the rule lives once, in
+    // the adapter skill, DOR-2377); the skill's routing is pinned above.
+    const delegatesOnly = (text: string) =>
+      /skills\/[a-z-]+\/SKILL\.md` and follow its process\s+exactly/.test(text);
+    const checked = commandFiles.filter(
+      (file) => path.basename(file) !== 'init.md' && !delegatesOnly(readFileSync(file, 'utf8'))
+    );
+    // Non-vacuous: the commands that drive the tracker themselves are still read.
+    expect(checked.map((file) => path.basename(file, '.md'))).toEqual(
+      expect.arrayContaining(['flow', 'pause', 'resume'])
+    );
+    for (const file of checked) {
       expect(
         readFileSync(file, 'utf8'),
         `${path.relative(pluginRoot, file)} no longer mentions the adapter at all`

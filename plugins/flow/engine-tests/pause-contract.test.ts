@@ -12,7 +12,6 @@ import { readFileSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
-import { projectFilterGaps } from './schedule-filter.ts';
 
 const pluginRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const read = (rel: string) => readFileSync(path.join(pluginRoot, rel), 'utf8');
@@ -152,15 +151,11 @@ describe('/flow:pause and /flow:resume switch DorkOS schedules only as agreed', 
         /When the tools are not available[\s\S]*?skip this step and say so/,
       ],
       ['the flag stays the authority', /The\s+flag is the pause/],
-      [
-        'loads deferred tools first',
-        /deferred behind tool search[\s\S]*?load them with ToolSearch first/,
-      ],
+      // The project filter and the deferred-tool rule live once, in /flow:status
+      // step 2 (cadence-contract pins them there); pause selects the same way.
+      ['selects schedules as /flow:status does', /exactly as `\/flow:status` step 2 selects them/],
     ];
-    return [
-      ...needs.filter(([, re]) => !re.test(text)).map(([label]) => label),
-      ...projectFilterGaps(text),
-    ];
+    return needs.filter(([, re]) => !re.test(text)).map(([label]) => label);
   }
 
   /** What the resume command must say. */
@@ -168,10 +163,7 @@ describe('/flow:pause and /flow:resume switch DorkOS schedules only as agreed', 
     const needs: [string, RegExp][] = [
       ['switches back only the recorded ids', /for each id in the list,\s+and for nothing else/],
       ['reads hostSchedules', /`hostSchedules`/],
-      [
-        'loads a deferred tool first',
-        /deferred behind tool search[\s\S]*?load it with ToolSearch first/,
-      ],
+      ['loads a deferred tool as /flow:status does', /load it as `\/flow:status` step 2 says/],
     ];
     return needs.filter(([, re]) => !re.test(text)).map(([label]) => label);
   }
@@ -182,19 +174,17 @@ describe('/flow:pause and /flow:resume switch DorkOS schedules only as agreed', 
   });
 
   it('the guard bites when a limit is dropped', () => {
-    // A root matched as a bare string prefix would let `/work/app` claim
-    // `/work/app-2`: switching off another project's schedule.
-    const pause = read('commands/pause.md').replace('roots followed by `/`', 'roots');
-    expect(pauseGaps(pause)).toEqual(['requires a separator after the root']);
-    const unrooted = read('commands/pause.md').replace('`committedDir` and the `localDir`', 'x');
-    expect(pauseGaps(unrooted)).toEqual(['names the roots']);
+    // Selecting schedules any other way than /flow:status could switch off
+    // another project's schedule.
+    const pause = read('commands/pause.md').replace('exactly as `/flow:status` step 2', 'by name');
+    expect(pauseGaps(pause)).toEqual(['selects schedules as /flow:status does']);
     const resume = read('commands/resume.md').replace('and for nothing else', 'x');
     expect(resumeGaps(resume)).toEqual(['switches back only the recorded ids']);
   });
 
-  it('the guard bites when the deferred-tool rule is dropped', () => {
-    const pause = read('commands/pause.md').replace('load them with ToolSearch first', 'x');
-    expect(pauseGaps(pause)).toEqual(['loads deferred tools first']);
+  it('the guard bites when resume stops loading its tool the /flow:status way', () => {
+    const resume = read('commands/resume.md').replace('load it as `/flow:status` step 2 says', 'x');
+    expect(resumeGaps(resume)).toEqual(['loads a deferred tool as /flow:status does']);
   });
 
   it('a running tick is not interrupted, and pause says so', () => {
