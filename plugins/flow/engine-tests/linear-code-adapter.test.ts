@@ -521,6 +521,7 @@ describe('getCurrentUser and getItem', () => {
     const missing = build(() => failedEnvelope('Entity not found: Issue'));
     const notFound = await rejection(missing.adapter.getItem('DOR-999'));
     expect(notFound).toBeInstanceOf(PreconditionError);
+    expect((notFound as PreconditionError).exitCode).toBe(EXIT.precondition);
 
     const foreign = build(() =>
       okEnvelope({
@@ -743,6 +744,19 @@ describe('applyWorkState', () => {
     );
     expect(error).toBeInstanceOf(TrackerError);
   });
+
+  it('reports a missing item as a precondition failure and writes nothing', async () => {
+    // Purpose: like getItem, a missing item is exit 5 (the item), not exit 4
+    // (the tracker), whichever verb met it first.
+    const { adapter, calls } = build(() => failedEnvelope('Entity not found: Issue'));
+    const error = await rejection(
+      adapter.applyWorkState(STALE_ITEM, { agentLabel: 'agent/claimed' })
+    );
+    expect(error).toBeInstanceOf(PreconditionError);
+    expect((error as PreconditionError).exitCode).toBe(EXIT.precondition);
+    expect((error as Error).message).toMatch(/DOR-2367 was not found in Linear/);
+    expect(calls.map((call) => call.operation)).toEqual(['FlowWriteRead']);
+  });
 });
 
 describe('comment', () => {
@@ -774,6 +788,16 @@ describe('comment', () => {
     });
     const error = await rejection(adapter.comment({ ...STALE_ITEM, identifier: 'FB-7' }, 'hi'));
     expect(error).toBeInstanceOf(PreconditionError);
+    expect(calls.map((call) => call.operation)).toEqual(['FlowCommentTarget']);
+  });
+
+  it('reports a missing item as a precondition failure and posts nothing', async () => {
+    // Purpose: a missing item is exit 5 (the item), not exit 4 (the tracker).
+    const { adapter, calls } = build(() => failedEnvelope('Entity not found: Issue'));
+    const error = await rejection(adapter.comment(STALE_ITEM, 'hi'));
+    expect(error).toBeInstanceOf(PreconditionError);
+    expect((error as PreconditionError).exitCode).toBe(EXIT.precondition);
+    expect((error as Error).message).toMatch(/DOR-2367 was not found in Linear/);
     expect(calls.map((call) => call.operation)).toEqual(['FlowCommentTarget']);
   });
 });
