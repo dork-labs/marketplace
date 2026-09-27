@@ -519,6 +519,7 @@ interface DrainState {
 | (queued) | `status: "queued"` with no worker handle, or a pending one, older than the start timeout (a crash between claim and start) | `working` or (released) | adopt the minted session if it exists (§4.3), else release the claim to ready with its resume stage |
 | any | tracker item closed or cancelled by someone else, or it lost `agent/claimed`, **unless the run's own PR merged** (the tracker closes the item on the PR's `Closes` line, often before the next pass; live proof) | `parked` | stop sessions; no tracker write |
 | `watching`, or `parked` as taken away | the run's own PR merged | `closing` | send `merged` |
+| `watching` | forge: the PR conflicts with its base (`mergeable: CONFLICTING` or `mergeStateStatus: DIRTY`; such a PR runs no checks) | `fixing-ci` | send `ci-red` naming the conflict: merge the base, resolve, push, report (live proof) |
 | any | report `blocked` | `parked` | (the report already posted the question) |
 
 - **Park** = `drain.phase = 'parked'`, `parkedReason` set, and, unless the item was taken away, the S1 `needs-input` projection plus one signed comment with the reason, through the adapter. A parked run leaves the active set; S1's inbox path resumes it when the person answers, and the next `flow drain` pass adopts it back into `working` with a `continue` message.

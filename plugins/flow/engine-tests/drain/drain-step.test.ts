@@ -434,6 +434,19 @@ describe('drainStep: the phase table', () => {
     expect(out.actions.some((a) => a.kind === 'send' && a.message === 'merged')).toBe(false);
   });
 
+  // Found live (2026-09-27): a PR that conflicts with main runs no checks and
+  // never merges, so watching it would wait for good. Fails if a conflicting PR
+  // is left in watching.
+  it('watching + a conflict with the base -> fixing-ci, the worker is told to merge main', () => {
+    const out = step(watchingDrain(), {
+      pr: prStatus({ conflicting: true, base: 'main' } as Partial<PrStatusFact>),
+    });
+    expect(out.drain.phase).toBe('fixing-ci');
+    const sent = out.actions.find((a) => a.kind === 'send');
+    expect(sent).toMatchObject({ message: 'ci-red' });
+    expect(JSON.stringify(sent)).toContain('merge origin/main');
+  });
+
   // watching + failing checks: send them to the worker.
   it('watching + failing -> fixing-ci, send ci-red with names and urls', () => {
     const failing = [{ name: 'test', url: 'https://ci/1' }];

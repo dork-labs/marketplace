@@ -62,6 +62,10 @@ export interface PrStatusFact {
   queued: boolean;
   /** The PR's head commit. */
   headSha: string;
+  /** The branch it merges into, when known. */
+  base?: string;
+  /** Whether it conflicts with its base: no checks run and it never merges. */
+  conflicting?: boolean;
 }
 
 /**
@@ -455,6 +459,19 @@ function watching(step: Step, run: FlowRun, facts: DrainFacts, cfg: DrainStepCon
   if (headMoved(drain, facts)) return unreportedPush(step, run, facts, cfg);
   if (!pr) return step;
   const redCtx = { flow: cfg.flow, identifier: run.identifier, prUrl, failing: pr.failing };
+  // A PR that conflicts with its base runs no checks and never merges, so it
+  // would wait here for good (found live, 2026-09-27). Tell the worker.
+  if (pr.state === 'open' && pr.conflicting === true) {
+    return send({ ...step, drain: toPhase(drain, 'fixing-ci') }, 'ci-red', {
+      ...redCtx,
+      failing: [
+        {
+          name: `a merge conflict with ${pr.base || 'its base branch'}: merge origin/${pr.base || 'main'}, resolve it, push, then report the push`,
+          url: prUrl,
+        },
+      ],
+    });
+  }
   if (pr.failing.length > 0 && facts.ejection === null) {
     return send({ ...step, drain: toPhase(drain, 'fixing-ci') }, 'ci-red', redCtx);
   }
