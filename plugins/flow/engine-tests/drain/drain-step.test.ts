@@ -393,7 +393,45 @@ describe('drainStep: the phase table', () => {
     });
     expect(out.drain.phase).toBe('closing');
     expect(out.drain.parkedReason).toBeNull();
+    expect(out.drain.parkedFrom).toBeNull();
     expect(out.actions.map((a) => a.kind)).toEqual(['send']);
+  });
+
+  // The rescue has limits (review, 2026-09-27). A person who reopened and
+  // unclaimed the item after the merge wins; a limit owns the worker; and with
+  // no worker handle there is nobody to run DONE, so the run stays parked
+  // rather than sitting in closing for good. Each fails if its guard is dropped.
+  it('merged, but the item was reopened and unclaimed -> parked as taken, not closing', () => {
+    const out = step(watchingDrain(), {
+      pr: prStatus({ state: 'merged' }),
+      item: { closed: false, claimed: false, needsInput: false, title: 't' },
+    });
+    expect(out.drain.phase).toBe('parked');
+  });
+  it('parked as taken with no worker handle stays parked when its PR merged', () => {
+    const parked = watchingDrain({
+      phase: 'parked',
+      parkedFrom: 'watching',
+      parkedReason: PARK_REASONS.itemTaken,
+      worker: null,
+    } as Partial<DrainState>);
+    const out = step(parked, {
+      pr: prStatus({ state: 'merged' }),
+      item: { closed: true, claimed: false, needsInput: false, title: 't' },
+    });
+    expect(out.drain.phase).toBe('parked');
+    expect(out.actions).toEqual([]);
+  });
+  it('a limited run is not rescued by a merge; the handoff reducer owns it', () => {
+    const out = step(
+      watchingDrain(),
+      {
+        pr: prStatus({ state: 'merged' }),
+        item: { closed: true, claimed: true, needsInput: false, title: 't' },
+      },
+      { limit: { level: 'exhausted' } } as unknown as Partial<FlowRun>
+    );
+    expect(out.actions.some((a) => a.kind === 'send' && a.message === 'merged')).toBe(false);
   });
 
   // watching + failing checks: send them to the worker.

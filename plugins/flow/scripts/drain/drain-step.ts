@@ -287,10 +287,11 @@ function park(step: Step, reason: string, taken = false): Step {
   let next = stopReviewer(step);
   const worker = next.drain.worker;
   if (worker && !worker.pending) {
-    // A parked run holds no live session. The handle stays (unless the item was
-    // taken away), so an answer can resume the same session with a message.
+    // A parked run holds no live session. The handle stays, so an answer (or,
+    // for a close that was the run's own merge, the `merged` message) can
+    // resume the same session.
     next = {
-      drain: taken ? { ...next.drain, worker: null } : next.drain,
+      drain: next.drain,
       actions: [...next.actions, { kind: 'stop', which: 'worker', handle: sessionHandle(worker) }],
     };
   }
@@ -589,14 +590,28 @@ export function drainStep(
   // The run's own PR merged: the tracker closes the item on its `Closes` line,
   // which is expected, not "taken away". Go straight to closing, even from a
   // park that mistook that close for someone else's (found live, 2026-09-27).
+  // Not when a person reopened and unclaimed the item after the merge, not
+  // while a limit owns the worker, and only with a worker to run DONE.
   if (
     current.pr !== null &&
     facts.pr?.state === 'merged' &&
+    (facts.item.closed || facts.item.claimed) &&
+    !run.limit &&
+    current.worker !== null &&
     (current.phase === 'watching' ||
       (current.phase === 'parked' && current.parkedReason === PARK_REASONS.itemTaken))
   ) {
+    const recorded: DrainState = { ...current, ...facts.reports };
     const step = send(
-      { drain: { ...toPhase(current, 'closing'), parkedReason: null }, actions: [] },
+      {
+        drain: {
+          ...toPhase(recorded, 'closing'),
+          parkedReason: null,
+          parkedFrom: null,
+          parkedAt: null,
+        },
+        actions: [],
+      },
       'merged',
       { flow: cfg.flow, identifier: run.identifier, prUrl: current.pr.url }
     );

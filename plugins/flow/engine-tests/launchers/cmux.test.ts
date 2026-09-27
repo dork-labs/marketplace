@@ -32,6 +32,7 @@ import {
   createCmuxLauncher,
   surfaceForPid,
   type CmuxLauncherDeps,
+  trustMoves,
 } from '../../scripts/launchers/cmux.ts';
 import { pidExists } from '../../scripts/cli/host-io.ts';
 import type { LaunchAccount, RuntimeName, SessionHandle } from '../../scripts/launchers/types.ts';
@@ -484,6 +485,16 @@ describe('cmux launcher details', () => {
         '30',
       ]);
     });
+  });
+
+  // Claude Code has shipped the trust options in both orders, so the cursor is
+  // read, never assumed (review, 2026-09-27). Fails if a fixed "down" is sent.
+  it('trustMoves reads the cursor: Yes selected needs no move, Yes below needs down', () => {
+    expect(trustMoves(' ❯ Yes, I trust this folder\n   No, exit\n')).toEqual([]);
+    expect(trustMoves(' ❯ No, exit\n   Yes, I trust this folder\n')).toEqual(['down']);
+    expect(trustMoves('   No, exit\n ❯ Yes, I trust this folder\n')).toEqual([]);
+    expect(trustMoves(' ❯ \n')).toBeNull();
+    expect(trustMoves('   Yes, I trust this folder\n')).toBeNull();
   });
 
   // Messages go to the surface, never the workspace (which hits whatever

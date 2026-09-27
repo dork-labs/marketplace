@@ -169,6 +169,27 @@ export function surfaceOfWorkspace(tsv: string, workspace: string): string | nul
  */
 export const TRUST_PROMPT_TEXT = 'Yes, I trust this folder';
 
+/**
+ * The arrow keys that move the trust dialog's cursor (`❯`) onto "Yes, I trust
+ * this folder", read from the screen: Claude Code has shipped the options in
+ * both orders, so the order is never assumed. Pressing enter afterwards picks it.
+ *
+ * @param screen - The surface's text.
+ * @returns The keys (possibly none), or `null` when the dialog is not showing or
+ *   its cursor cannot be found.
+ */
+export function trustMoves(screen: string): string[] | null {
+  const lines = screen.split('\n');
+  const yes = lines.findIndex((line) => line.includes(TRUST_PROMPT_TEXT));
+  if (yes < 0) return null;
+  // The options are the lines around "Yes" that start with the cursor or its
+  // blank column: find the cursor among them.
+  const cursor = lines.findIndex((line) => /^\s*❯/.test(line));
+  if (cursor < 0 || Math.abs(cursor - yes) > 5) return null;
+  const steps = yes - cursor;
+  return Array.from({ length: Math.abs(steps) }, () => (steps > 0 ? 'down' : 'up'));
+}
+
 /** The first non-empty line of a text, or `null`. */
 function firstLine(text: string): string | null {
   const line = text
@@ -302,12 +323,12 @@ export function createCmuxLauncher(deps: CmuxLauncherDeps): Launcher {
     return ref;
   }
 
-  /** Wait for a live pid whose session file names `sessionId` (other than `exclude`). */
   /**
    * Answer Claude Code's workspace-trust dialog in a workspace flow created, for
    * a folder flow itself provisioned (the item's worktree, or a review or smoke
-   * folder): "down" then "enter" picks "Yes, I trust this folder". Only the
-   * surface of `workspace` is read and keyed, never a selected or other one.
+   * folder): the arrow keys {@link trustMoves} reads off the screen, then enter,
+   * pick "Yes, I trust this folder". Only the surface of `workspace` is read and
+   * keyed, never a selected or other one.
    *
    * @returns Whether the dialog was on screen and answered.
    */
@@ -323,15 +344,18 @@ export function createCmuxLauncher(deps: CmuxLauncherDeps): Launcher {
         ['read-screen', '--surface', surface, '--lines', '30'],
         'read the new session'
       );
-      if (!screen.includes(TRUST_PROMPT_TEXT)) return false;
-      await cmux(['send-key', '--surface', surface, 'down'], 'answer the trust dialog');
-      await cmux(['send-key', '--surface', surface, 'enter'], 'answer the trust dialog');
+      const moves = trustMoves(screen);
+      if (moves === null) return false;
+      for (const key of [...moves, 'enter']) {
+        await cmux(['send-key', '--surface', surface, key], 'answer the trust dialog');
+      }
       return true;
     } catch {
       return false;
     }
   }
 
+  /** Wait for a live pid whose session file names `sessionId` (other than `exclude`). */
   async function waitForPid(
     configDir: string,
     sessionId: string,
