@@ -53,7 +53,7 @@ export class HostTooOldError extends Error {
 }
 
 /** Shown when a request fails without a message from flow. */
-export const UNREACHABLE_MESSAGE = 'Flow could not be reached, so this was not changed.';
+export const UNREACHABLE_MESSAGE = "Flow didn't respond, so nothing was changed. Try again.";
 
 /**
  * The DorkOS API base URL. In the desktop app the page is not served by the

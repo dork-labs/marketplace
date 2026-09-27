@@ -441,11 +441,95 @@ describe('FleetTab: what a failure says', () => {
       'a refusal-shaped 409 on the first load',
       { status: 409, body: { error: 'Locked.', refusedBy: 'flow' } },
     ],
-  ])('the first load shows only "Flow could not be reached." on %s', async (_name, answer) => {
+  ])('the first load shows only the load-failure line on %s', async (_name, answer) => {
     stubFetch(answer);
     await renderTab();
-    expect(screen.getByRole('alert').textContent).toBe('Flow could not be reached.');
+    expect(screen.getByRole('alert').textContent).toBe(
+      "Couldn't load Flow's settings. Try again in a moment."
+    );
     expect(screen.queryByText(/Extension 'flow'|Locked/)).toBeNull();
+  });
+
+  it('keeps Retry on screen and focused when the retried load fails too', async () => {
+    stubFetch({ status: 500, body: NO_JSON });
+    await renderTab();
+    const retry = screen.getByRole('button', { name: 'Retry' });
+    retry.focus();
+    await act(async () => {
+      fireEvent.click(retry);
+    });
+    expect(screen.getByRole('alert').textContent).toBe(
+      "Couldn't load Flow's settings. Try again in a moment."
+    );
+    expect(document.activeElement).toBe(screen.getByRole('button', { name: 'Retry' }));
+  });
+
+  it('re-announces the load failure only once a retry has actually failed', async () => {
+    let calls = 0;
+    let failSecond: () => void = () => {};
+    const failed = {
+      ok: false,
+      status: 500,
+      json: async () => {
+        throw new SyntaxError('Unexpected token <');
+      },
+    };
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () => {
+        calls += 1;
+        if (calls === 1) return failed;
+        await new Promise<void>((resolve) => {
+          failSecond = resolve;
+        });
+        return failed;
+      })
+    );
+    await renderTab();
+    const first = screen.getByRole('alert');
+    await act(async () => {
+      fireEvent.click(screen.getByRole('button', { name: 'Retry' }));
+    });
+    // The retry is still on its way: the first alert stays, nothing is re-announced yet.
+    expect(calls).toBe(2);
+    expect(first.isConnected).toBe(true);
+    await act(async () => {
+      failSecond();
+    });
+    const second = screen.getByRole('alert');
+    expect(second.textContent).toBe(first.textContent);
+    expect(second).not.toBe(first);
+    expect(first.isConnected).toBe(false);
+  });
+
+  it('Retry loads the settings again after a failed first load', async () => {
+    const good = body();
+    let calls = 0;
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () => {
+        calls += 1;
+        const failed = calls === 1;
+        return {
+          ok: !failed,
+          status: failed ? 500 : 200,
+          json: async () => {
+            if (failed) throw new SyntaxError('Unexpected token <');
+            return good;
+          },
+        };
+      })
+    );
+    await renderTab();
+    expect(screen.getByRole('alert').textContent).toBe(
+      "Couldn't load Flow's settings. Try again in a moment."
+    );
+    await act(async () => {
+      fireEvent.click(screen.getByRole('button', { name: 'Retry' }));
+    });
+    expect(calls).toBe(2);
+    expect(screen.queryByRole('alert')).toBeNull();
+    expect(screen.getByText('Which accounts flow may use')).toBeTruthy();
   });
 
   it.each([
@@ -462,7 +546,7 @@ describe('FleetTab: what a failure says', () => {
       fireEvent.click(within(roles('Acct 2')).getByRole('radio', { name: 'Kept out' }));
     });
     expect(screen.getByRole('alert').textContent).toBe(
-      'Flow could not be reached, so this was not changed.'
+      "Flow didn't respond, so nothing was changed. Try again."
     );
     expect(
       within(roles('Acct 2')).getByRole('radio', { name: 'Rotation' }).getAttribute('aria-checked')
