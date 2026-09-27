@@ -218,7 +218,7 @@ export function createFlowExtension(
     '/panel',
     handle(async (req, res) => {
       panel.noteCwd(req.query?.cwd);
-      res.status(200).json(await panel.requested());
+      res.status(200).json(await panel.model());
     })
   );
   router.post(

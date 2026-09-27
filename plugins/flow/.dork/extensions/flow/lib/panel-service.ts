@@ -97,6 +97,12 @@ export class PanelService {
    * @returns The `GET /panel` body.
    */
   async model(): Promise<PanelModel> {
+    // The schedules note is dropped once it has been up for SCHEDULES_NOTE_MS,
+    // for a person's GET /panel and a live `panel` event alike.
+    const at = this.schedulesOffAt;
+    if (at !== null && this.deps.now().getTime() - at.getTime() >= SCHEDULES_NOTE_MS) {
+      this.schedulesOffAt = null;
+    }
     // flow's registry names the account a run on `default` bills (`flow fleet`'s canonicalId).
     const registry = loadAccounts(this.deps.dorkHome, {
       home: this.deps.osHome ?? os.homedir(),
@@ -115,20 +121,6 @@ export class PanelService {
       registry,
       pidAlive: this.deps.pidAlive,
     });
-  }
-
-  /**
-   * The model a person asked for (`GET /panel`): the note about DorkOS
-   * schedules is dropped once it has been up for {@link SCHEDULES_NOTE_MS}.
-   *
-   * @returns The `GET /panel` body.
-   */
-  async requested(): Promise<PanelModel> {
-    const at = this.schedulesOffAt;
-    if (at !== null && this.deps.now().getTime() - at.getTime() >= SCHEDULES_NOTE_MS) {
-      this.schedulesOffAt = null;
-    }
-    return this.model();
   }
 
   /**

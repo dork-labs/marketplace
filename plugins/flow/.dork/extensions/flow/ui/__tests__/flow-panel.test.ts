@@ -401,23 +401,25 @@ describe('FlowPanel: loading and live updates', () => {
         vi.advanceTimersByTime(FALLBACK_POLL_MS);
       });
     };
-    act(() => source.open());
+    // The load, then one read when the stream opens.
+    await act(async () => source.open());
     await wait();
-    expect(gets()).toBe(1);
+    expect(gets()).toBe(2);
 
     // Down: the stream is left to reconnect, and the panel polls meanwhile.
     act(() => source.fail());
     expect(source.closed).toBe(false);
     await wait();
-    expect(gets()).toBe(2);
-    await wait();
     expect(gets()).toBe(3);
+    await wait();
+    expect(gets()).toBe(4);
 
-    // Back: polling stops.
-    act(() => source.open());
+    // Back: one read for what was missed, then polling stops.
+    await act(async () => source.open());
+    expect(gets()).toBe(5);
     await wait();
     await wait();
-    expect(gets()).toBe(3);
+    expect(gets()).toBe(5);
   });
 
   it('does not poll for an error the stream recovers from while still open', async () => {
@@ -425,13 +427,32 @@ describe('FlowPanel: loading and live updates', () => {
     const stub = stubFetch({ status: 200, body: model() });
     await renderPanel();
     const [source] = FakeEventSource.opened;
-    act(() => source.open());
+    await act(async () => source.open());
     act(() => {
       for (const listener of source.listeners.get('error') ?? []) listener({});
     });
     await act(async () => {
       vi.advanceTimersByTime(FALLBACK_POLL_MS);
     });
-    expect(stub.calls.filter((c) => c.method === 'GET')).toHaveLength(1);
+    // The load and the read on open; no poll.
+    expect(stub.calls.filter((c) => c.method === 'GET')).toHaveLength(2);
+  });
+
+  it('reads the model again when the stream reopens, catching what was missed', async () => {
+    const stub = stubFetch({ status: 200, body: model() });
+    await renderPanel();
+    const [source] = FakeEventSource.opened;
+    act(() => source.fail());
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () => ({
+        ok: true,
+        status: 200,
+        json: async () => model({ runs: [run('DOR-7', { state: 'parked' })] }),
+      }))
+    );
+    await act(async () => source.open());
+    expect(stub.calls).toHaveLength(1);
+    expect(screen.getByRole('button', { name: 'DOR-7 account chip, parked' })).toBeTruthy();
   });
 });

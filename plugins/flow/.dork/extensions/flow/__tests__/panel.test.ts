@@ -433,6 +433,26 @@ describe('POST /pause and /resume', () => {
     expect((await panel(router)).schedulesOff).toBe(false);
   }, 30_000);
 
+  it('drops the note from the live panel event too, once it has been up ten minutes', async () => {
+    writeConfig(world.main, {});
+    mkdirSync(path.dirname(pauseFlagPath(world.main)), { recursive: true });
+    writeFileSync(
+      pauseFlagPath(world.main),
+      JSON.stringify({ pausedAt: NOW.toISOString(), hostSchedules: ['sched-1'] })
+    );
+    let now = NOW;
+    const { router, host } = setup({ extensionDir: EXTENSION_DIR }, { now: () => now });
+    await panel(router);
+    await router.call('post', '/resume');
+    const lastSent = () => host.emit.mock.calls.at(-1)?.[1] as PanelModel | undefined;
+    await vi.waitFor(() => expect(lastSent()?.schedulesOff).toBe(true), { timeout: 3_000 });
+
+    // No GET /panel: only the panel's own poll runs, and its event drops the note.
+    now = new Date(NOW.getTime() + SCHEDULES_NOTE_MS);
+    await host.scheduled[0]();
+    await vi.waitFor(() => expect(lastSent()?.schedulesOff).toBe(false), { timeout: 3_000 });
+  }, 30_000);
+
   it('drops the note when resume is called again and finds nothing switched off', async () => {
     writeConfig(world.main, {});
     const flag = pauseFlagPath(world.main);

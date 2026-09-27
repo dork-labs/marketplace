@@ -327,7 +327,8 @@ const OPEN_STATE = 1;
 
 /**
  * Open the host's event stream and replace the model on each panel event;
- * while the stream is not open, re-read the model every 30 s instead.
+ * read the model again whenever the stream opens, and every 30 s while it is
+ * not open.
  */
 function useLiveModel(
   apply: (model: PanelModel) => void,
@@ -360,7 +361,12 @@ function useLiveModel(
       stream.addEventListener('error', () => {
         if (stream.readyState !== OPEN_STATE) startPolling();
       });
-      stream.addEventListener('open', stopPolling);
+      // Events sent while the stream was down are lost, and the server sends
+      // nothing for an unchanged model, so read it once whenever it opens.
+      stream.addEventListener('open', () => {
+        stopPolling();
+        refetch();
+      });
     } else {
       startPolling();
     }
