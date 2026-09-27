@@ -508,7 +508,8 @@ describe('F1 — generic commands name no tracker and route through the resolved
 describe('the shipped adapter defers to a project override', () => {
   /** What the preface must say, before anything else in the skill. */
   function prefaceGaps(content: string): string[] {
-    const head = content.slice(0, content.indexOf('> **What this is.**'));
+    // Everything before the first section heading: the preface an agent reads first.
+    const head = content.slice(0, content.search(/^## /m));
     const needs: [string, RegExp][] = [
       ['has the preface', /\*\*Is this the adapter to use\?\*\*/],
       ['runs the resolver', /scripts\/config-files\.ts/],
