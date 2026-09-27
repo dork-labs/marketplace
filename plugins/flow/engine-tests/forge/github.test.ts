@@ -19,6 +19,7 @@ import type { ProcessOptions, ProcessResult } from '../../scripts/cli/context.ts
 import { ConfigError, EXIT } from '../../scripts/errors.ts';
 import { createGithubForge, failingChecks, parsePrView } from '../../scripts/forge/github.ts';
 import { ForgeError, forgeTargetFor } from '../../scripts/forge/types.ts';
+import { parsePrView as parseForConflict } from '../../scripts/forge/github.ts';
 
 const FIXTURES = path.join(path.dirname(fileURLToPath(import.meta.url)), '../fixtures/forge');
 
@@ -64,6 +65,25 @@ function forgeWith(replies: Record<string, Reply>) {
 
 const notQueued = { 'api graphql': ok(fixture('graphql-in-merge-queue.json')) };
 
+// Found live (2026-09-27): a PR in conflict with its base runs no checks, so
+// only the forge's mergeable fields can say why nothing moves. Fails if they are
+// not read.
+describe('parsePrView: a conflict with the base', () => {
+  it('reads CONFLICTING or DIRTY as conflicting, and anything else as not', () => {
+    const base = { state: 'OPEN', headRefOid: 'abc', baseRefName: 'main', statusCheckRollup: [] };
+    expect(parseForConflict({ ...base, mergeable: 'CONFLICTING' }, false, 'r#1').conflicting).toBe(
+      true
+    );
+    expect(parseForConflict({ ...base, mergeStateStatus: 'DIRTY' }, false, 'r#1').conflicting).toBe(
+      true
+    );
+    expect(
+      parseForConflict({ ...base, mergeable: 'MERGEABLE', mergeStateStatus: 'CLEAN' }, false, 'r#1')
+        .conflicting
+    ).toBe(false);
+  });
+});
+
 describe('prStatus parses recorded gh pr view output', () => {
   // A merged PR reads as merged with nothing failing, and asks no queue question.
   it('merged', async () => {
@@ -81,7 +101,7 @@ describe('prStatus parses recorded gh pr view output', () => {
         '-R',
         'dork-labs/marketplace',
         '--json',
-        'state,autoMergeRequest,statusCheckRollup,headRefOid,baseRefName',
+        'state,autoMergeRequest,statusCheckRollup,headRefOid,baseRefName,mergeable,mergeStateStatus',
       ],
     });
   });

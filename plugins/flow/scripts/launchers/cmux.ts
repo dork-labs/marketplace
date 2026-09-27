@@ -147,6 +147,49 @@ export function surfaceForPid(tsv: string, pid: number): string | null {
   return null;
 }
 
+/**
+ * The surface of a workspace flow just created: the `surface` row whose parent
+ * pane belongs to `workspace` in `cmux top --all --processes --format tsv`
+ * (columns: cpu, memory, count, type, ref, parent, label).
+ *
+ * @param tsv - The `cmux top` output.
+ * @param workspace - The workspace ref (`workspace:N`).
+ * @returns The first surface in it, or `null`.
+ */
+export function surfaceOfWorkspace(tsv: string, workspace: string): string | null {
+  const rows = tsv.split('\n').map((line) => line.split('\t'));
+  const panes = new Set(rows.filter((c) => c[3] === 'pane' && c[5] === workspace).map((c) => c[4]));
+  const row = rows.find((c) => c[3] === 'surface' && panes.has(c[5] ?? ''));
+  return row?.[4] ?? null;
+}
+
+/**
+ * The option Claude Code's workspace-trust dialog shows for a folder it has not
+ * seen. An interactive session writes no session file until it is answered.
+ */
+export const TRUST_PROMPT_TEXT = 'Yes, I trust this folder';
+
+/**
+ * The arrow keys that move the trust dialog's cursor (`❯`) onto "Yes, I trust
+ * this folder", read from the screen: Claude Code has shipped the options in
+ * both orders, so the order is never assumed. Pressing enter afterwards picks it.
+ *
+ * @param screen - The surface's text.
+ * @returns The keys (possibly none), or `null` when the dialog is not showing or
+ *   its cursor cannot be found.
+ */
+export function trustMoves(screen: string): string[] | null {
+  const lines = screen.split('\n');
+  const yes = lines.findIndex((line) => line.includes(TRUST_PROMPT_TEXT));
+  if (yes < 0) return null;
+  // The options are the lines around "Yes" that start with the cursor or its
+  // blank column: find the cursor among them.
+  const cursor = lines.findIndex((line) => /^\s*❯/.test(line));
+  if (cursor < 0 || Math.abs(cursor - yes) > 5) return null;
+  const steps = yes - cursor;
+  return Array.from({ length: Math.abs(steps) }, () => (steps > 0 ? 'down' : 'up'));
+}
+
 /** The first non-empty line of a text, or `null`. */
 function firstLine(text: string): string | null {
   const line = text
@@ -280,14 +323,48 @@ export function createCmuxLauncher(deps: CmuxLauncherDeps): Launcher {
     return ref;
   }
 
+  /**
+   * Answer Claude Code's workspace-trust dialog in a workspace flow created, for
+   * a folder flow itself provisioned (the item's worktree, or a review or smoke
+   * folder): the arrow keys {@link trustMoves} reads off the screen, then enter,
+   * pick "Yes, I trust this folder". Only the surface of `workspace` is read and
+   * keyed, never a selected or other one.
+   *
+   * @returns Whether the dialog was on screen and answered.
+   */
+  async function answerTrust(workspace: string): Promise<boolean> {
+    try {
+      const top = await cmux(
+        ['top', '--all', '--processes', '--format', 'tsv'],
+        'list its processes'
+      );
+      const surface = surfaceOfWorkspace(top, workspace);
+      if (surface === null) return false;
+      const screen = await cmux(
+        ['read-screen', '--surface', surface, '--lines', '30'],
+        'read the new session'
+      );
+      const moves = trustMoves(screen);
+      if (moves === null) return false;
+      for (const key of [...moves, 'enter']) {
+        await cmux(['send-key', '--surface', surface, key], 'answer the trust dialog');
+      }
+      return true;
+    } catch {
+      return false;
+    }
+  }
+
   /** Wait for a live pid whose session file names `sessionId` (other than `exclude`). */
   async function waitForPid(
     configDir: string,
     sessionId: string,
-    exclude: number | undefined
+    exclude: number | undefined,
+    workspace?: string
   ): Promise<number | null> {
     const deadline = deps.now() + pidTimeoutMs;
     const dir = path.join(configDir, 'sessions');
+    let trustAnswered = false;
     for (;;) {
       let names: string[] = [];
       try {
@@ -303,6 +380,7 @@ export function createCmuxLauncher(deps: CmuxLauncherDeps): Launcher {
         if (readSessionFile(configDir, pid)?.sessionId === sessionId) return pid;
       }
       if (deps.now() >= deadline) return null;
+      if (workspace !== undefined && !trustAnswered) trustAnswered = await answerTrust(workspace);
       await deps.sleep(pollMs);
     }
   }
@@ -388,7 +466,7 @@ export function createCmuxLauncher(deps: CmuxLauncherDeps): Launcher {
     );
     const workspace = await createWorkspace(h.title ?? h.sessionId, h.cwd, line);
     const withWorkspace: SessionHandle = { ...h, workspace };
-    const pid = await waitForPid(configDir, h.sessionId, exclude);
+    const pid = await waitForPid(configDir, h.sessionId, exclude, workspace);
     if (pid === null) {
       await markStopped(withWorkspace);
       throw new LaunchError(

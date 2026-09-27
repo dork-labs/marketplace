@@ -265,7 +265,7 @@ export async function readCliSessions(
 
 /**
  * The DorkOS URL `flow fleet` asks: the flag, else `FLOW_DORKOS_URL`, else
- * `http://127.0.0.1:<DORKOS_PORT or 4242>`.
+ * `http://localhost:<DORKOS_PORT or 4242>` (DorkOS binds `localhost`, often `::1`).
  *
  * @param flag - The `--dorkos-url` value, if any.
  * @param env - The environment.
@@ -277,7 +277,7 @@ export function resolveDorkosUrl(
 ): string {
   if (flag !== undefined && flag !== '') return flag;
   if (env.FLOW_DORKOS_URL) return env.FLOW_DORKOS_URL;
-  return `http://127.0.0.1:${env.DORKOS_PORT || '4242'}`;
+  return `http://localhost:${env.DORKOS_PORT || '4242'}`;
 }
 
 /**

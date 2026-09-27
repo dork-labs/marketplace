@@ -55,7 +55,7 @@ const GOLDEN = [
   '    default  DOR-2374  unseen       cli     f5a6b7c8  -                                  -',
   '',
   'Sessions on accounts flow does not know are not shown.',
-  'DorkOS: not running at http://127.0.0.1:4242',
+  'DorkOS: not running at http://localhost:4242',
 ].join('\n');
 
 describe('renderFleet', () => {

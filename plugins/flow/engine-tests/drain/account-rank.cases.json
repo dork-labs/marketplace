@@ -13,29 +13,21 @@
       "input": {
         "model": "claude-opus-4-1"
       },
-      "expected": [
-        "model:claude-opus-4-1",
-        "seven_day_opus"
-      ]
+      "expected": ["model:claude-opus-4-1", "seven_day_opus"]
     },
     {
       "name": "S1's bucketSlug: lowercased, runs outside [a-z0-9._-] become one '-', a trailing '-' trimmed; sonnet adds seven_day_sonnet",
       "input": {
         "model": "Claude Sonnet 4.5 [1m]"
       },
-      "expected": [
-        "model:claude-sonnet-4.5-1m",
-        "seven_day_sonnet"
-      ]
+      "expected": ["model:claude-sonnet-4.5-1m", "seven_day_sonnet"]
     },
     {
       "name": "neither family: only the model bucket",
       "input": {
         "model": "haiku"
       },
-      "expected": [
-        "model:haiku"
-      ]
+      "expected": ["model:haiku"]
     }
   ],
   "limitSignal": [
@@ -447,7 +439,7 @@
       }
     },
     {
-      "name": "allowed_warning status: warning",
+      "name": "allowed_warning with no measured share: warning",
       "input": {
         "runtime": "claude-code",
         "now": "2026-09-26T16:00:00.000Z",
@@ -463,7 +455,7 @@
         "warnMarginPct": 10,
         "windows": {
           "five_hour": {
-            "usedPct": 30,
+            "usedPct": null,
             "resetsAt": "2026-09-26T19:00:00.000Z",
             "status": "allowed_warning",
             "observedAt": "2026-09-26T15:59:00.000Z",
@@ -1103,6 +1095,45 @@
         "resetsAt": "2026-09-26T16:30:00.000Z",
         "cause": "limit"
       }
+    },
+    {
+      "name": "allowed_warning at a measured 30% (the SDK warns from ~50% weekly): the share decides, ok",
+      "input": {
+        "runtime": "claude-code",
+        "now": "2026-09-26T16:00:00.000Z",
+        "policy": {
+          "role": "rotation",
+          "reservePct": 0,
+          "spendDownWindowHours": 24,
+          "scope": {
+            "repos": []
+          }
+        },
+        "model": null,
+        "warnMarginPct": 10,
+        "windows": {
+          "five_hour": {
+            "usedPct": 30,
+            "resetsAt": "2026-09-26T19:00:00.000Z",
+            "status": "allowed_warning",
+            "observedAt": "2026-09-26T15:59:00.000Z",
+            "source": "statusline"
+          },
+          "seven_day": {
+            "usedPct": 20,
+            "resetsAt": "2026-10-02T16:00:00.000Z",
+            "status": null,
+            "observedAt": "2026-09-26T15:59:00.000Z",
+            "source": "statusline"
+          }
+        }
+      },
+      "expected": {
+        "level": "ok",
+        "window": null,
+        "resetsAt": null,
+        "cause": null
+      }
     }
   ],
   "rankAccounts": [
@@ -1375,9 +1406,7 @@
             }
           }
         ],
-        "exclude": [
-          "claude-code:left"
-        ]
+        "exclude": ["claude-code:left"]
       },
       "expected": {
         "pick": {
@@ -1395,16 +1424,12 @@
           {
             "runtime": "claude-code",
             "id": "left",
-            "reasons": [
-              "excluded"
-            ]
+            "reasons": ["excluded"]
           },
           {
             "runtime": "claude-code",
             "id": "spent",
-            "reasons": [
-              "limited"
-            ]
+            "reasons": ["limited"]
           }
         ]
       }
@@ -1664,9 +1689,7 @@
           {
             "runtime": "claude-code",
             "id": "warm",
-            "reasons": [
-              "near-limit"
-            ]
+            "reasons": ["near-limit"]
           }
         ]
       }
@@ -1886,9 +1909,7 @@
           {
             "runtime": "claude-code",
             "id": "Bad_Id",
-            "reasons": [
-              "not-routable"
-            ]
+            "reasons": ["not-routable"]
           }
         ]
       }
@@ -1928,9 +1949,7 @@
             }
           }
         ],
-        "exclude": [
-          "claude-code:left"
-        ]
+        "exclude": ["claude-code:left"]
       },
       "expected": {
         "pick": null,
@@ -1939,9 +1958,7 @@
           {
             "runtime": "claude-code",
             "id": "left",
-            "reasons": [
-              "excluded"
-            ]
+            "reasons": ["excluded"]
           }
         ]
       }
@@ -1989,9 +2006,7 @@
           {
             "runtime": "claude-code",
             "id": "client",
-            "reasons": [
-              "out-of-scope"
-            ]
+            "reasons": ["out-of-scope"]
           }
         ]
       }
@@ -2010,9 +2025,7 @@
               "reservePct": 0,
               "spendDownWindowHours": 24,
               "scope": {
-                "repos": [
-                  "Dork-Labs/Marketplace"
-                ]
+                "repos": ["Dork-Labs/Marketplace"]
               }
             },
             "windows": {
@@ -2092,15 +2105,13 @@
           {
             "runtime": "claude-code",
             "id": "spent",
-            "reasons": [
-              "limited"
-            ]
+            "reasons": ["limited"]
           }
         ]
       }
     },
     {
-      "name": "near-limit alone: a warning signal",
+      "name": "near-limit alone: allowed_warning with no measured share",
       "input": {
         "now": "2026-09-26T16:00:00.000Z",
         "accounts": [
@@ -2125,7 +2136,7 @@
                 "source": "statusline"
               },
               "seven_day": {
-                "usedPct": 20,
+                "usedPct": null,
                 "resetsAt": "2026-10-02T16:00:00.000Z",
                 "status": "allowed_warning",
                 "observedAt": "2026-09-26T15:59:00.000Z",
@@ -2142,9 +2153,7 @@
           {
             "runtime": "claude-code",
             "id": "close",
-            "reasons": [
-              "near-limit"
-            ]
+            "reasons": ["near-limit"]
           }
         ]
       }
@@ -2195,9 +2204,7 @@
           {
             "runtime": "claude-code",
             "id": "busy",
-            "reasons": [
-              "at-capacity"
-            ]
+            "reasons": ["at-capacity"]
           }
         ]
       }
@@ -2230,9 +2237,7 @@
             }
           }
         ],
-        "exclude": [
-          "claude-code:client"
-        ],
+        "exclude": ["claude-code:client"],
         "liveByAccount": {
           "claude-code:client": 3
         }
@@ -2244,12 +2249,7 @@
           {
             "runtime": "claude-code",
             "id": "client",
-            "reasons": [
-              "excluded",
-              "out-of-scope",
-              "limited",
-              "at-capacity"
-            ]
+            "reasons": ["excluded", "out-of-scope", "limited", "at-capacity"]
           }
         ]
       }
@@ -2697,9 +2697,7 @@
           {
             "runtime": "claude-code",
             "id": "a",
-            "reasons": [
-              "limited"
-            ]
+            "reasons": ["limited"]
           }
         ]
       }
@@ -3148,9 +3146,7 @@
           {
             "runtime": "claude-code",
             "id": "a",
-            "reasons": [
-              "limited"
-            ]
+            "reasons": ["limited"]
           }
         ]
       }
@@ -3160,11 +3156,7 @@
       "input": {
         "now": "2026-09-26T16:00:00.000Z",
         "runtime": "claude-code",
-        "runtimes": [
-          "claude-code",
-          "opencode",
-          "codex"
-        ],
+        "runtimes": ["claude-code", "opencode", "codex"],
         "crossRuntimeFallback": "on",
         "accounts": [
           {
@@ -3265,9 +3257,7 @@
           {
             "runtime": "claude-code",
             "id": "a",
-            "reasons": [
-              "limited"
-            ]
+            "reasons": ["limited"]
           }
         ]
       }
@@ -3277,9 +3267,7 @@
       "input": {
         "now": "2026-09-26T16:00:00.000Z",
         "runtime": "claude-code",
-        "runtimes": [
-          "opencode"
-        ],
+        "runtimes": ["opencode"],
         "crossRuntimeFallback": "on",
         "accounts": [
           {
@@ -3449,9 +3437,7 @@
           {
             "runtime": "claude-code",
             "id": "a",
-            "reasons": [
-              "limited"
-            ]
+            "reasons": ["limited"]
           }
         ]
       }
@@ -3461,14 +3447,10 @@
       "input": {
         "now": "2026-09-26T16:00:00.000Z",
         "runtime": "codex",
-        "runtimes": [
-          "codex"
-        ],
+        "runtimes": ["codex"],
         "crossRuntimeFallback": "on",
         "affinity": "claude-code:a",
-        "exclude": [
-          "claude-code:b"
-        ],
+        "exclude": ["claude-code:b"],
         "liveByAccount": {
           "claude-code:a": 2
         },
@@ -3612,16 +3594,12 @@
           {
             "runtime": "claude-code",
             "id": "a",
-            "reasons": [
-              "at-capacity"
-            ]
+            "reasons": ["at-capacity"]
           },
           {
             "runtime": "claude-code",
             "id": "b",
-            "reasons": [
-              "excluded"
-            ]
+            "reasons": ["excluded"]
           }
         ]
       }
@@ -3693,9 +3671,7 @@
           {
             "runtime": "opencode",
             "id": "capped",
-            "reasons": [
-              "limited"
-            ]
+            "reasons": ["limited"]
           }
         ]
       }
@@ -3769,9 +3745,7 @@
           {
             "runtime": "claude-code",
             "id": "default",
-            "reasons": [
-              "out-of-scope"
-            ]
+            "reasons": ["out-of-scope"]
           }
         ]
       }
@@ -3860,9 +3834,7 @@
             {
               "runtime": "claude-code",
               "id": "a",
-              "reasons": [
-                "limited"
-              ]
+              "reasons": ["limited"]
             }
           ]
         }
@@ -3942,9 +3914,7 @@
             {
               "runtime": "claude-code",
               "id": "client",
-              "reasons": [
-                "out-of-scope"
-              ]
+              "reasons": ["out-of-scope"]
             }
           ]
         }
@@ -3955,9 +3925,7 @@
           {
             "runtime": "claude-code",
             "id": "client",
-            "reasons": [
-              "out-of-scope"
-            ]
+            "reasons": ["out-of-scope"]
           }
         ]
       }
@@ -4002,9 +3970,7 @@
             {
               "runtime": "claude-code",
               "id": "claude3",
-              "reasons": [
-                "out-of-scope"
-              ]
+              "reasons": ["out-of-scope"]
             }
           ]
         }
@@ -4110,9 +4076,7 @@
       "name": "the run's recorded runtime wins",
       "input": {
         "recorded": "codex",
-        "runtimes": [
-          "opencode"
-        ]
+        "runtimes": ["opencode"]
       },
       "expected": "codex"
     },
@@ -4120,10 +4084,7 @@
       "name": "no run: the first of fleet.runtimes",
       "input": {
         "recorded": null,
-        "runtimes": [
-          "opencode",
-          "codex"
-        ]
+        "runtimes": ["opencode", "codex"]
       },
       "expected": "opencode"
     },

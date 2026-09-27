@@ -90,7 +90,7 @@ export function failingChecks(rollup: unknown): FailingCheck[] {
 }
 
 /**
- * Parse `gh pr view --json state,autoMergeRequest,statusCheckRollup,headRefOid,baseRefName`.
+ * Parse `gh pr view --json state,autoMergeRequest,statusCheckRollup,headRefOid,baseRefName,mergeable,mergeStateStatus`.
  *
  * @param raw - The parsed JSON.
  * @param queued - Whether the PR is in the merge queue (a separate GraphQL read).
@@ -117,6 +117,9 @@ export function parsePrView(raw: unknown, queued: boolean, where: string): PrSta
     queued,
     headSha,
     base: str(view.baseRefName) ?? '',
+    conflicting:
+      str(view.mergeable)?.toUpperCase() === 'CONFLICTING' ||
+      str(view.mergeStateStatus)?.toUpperCase() === 'DIRTY',
   };
 }
 
@@ -376,7 +379,7 @@ export function createGithubForge(options: GithubForgeOptions): Forge {
           '-R',
           repoArg,
           '--json',
-          'state,autoMergeRequest,statusCheckRollup,headRefOid,baseRefName',
+          'state,autoMergeRequest,statusCheckRollup,headRefOid,baseRefName,mergeable,mergeStateStatus',
         ],
         `reading ${where}`
       );

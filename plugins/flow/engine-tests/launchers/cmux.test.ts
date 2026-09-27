@@ -32,6 +32,7 @@ import {
   createCmuxLauncher,
   surfaceForPid,
   type CmuxLauncherDeps,
+  trustMoves,
 } from '../../scripts/launchers/cmux.ts';
 import { pidExists } from '../../scripts/cli/host-io.ts';
 import type { LaunchAccount, RuntimeName, SessionHandle } from '../../scripts/launchers/types.ts';
@@ -460,6 +461,40 @@ describe('cmux launcher details', () => {
         title: 'ACME-12 worker',
       });
     });
+  });
+
+  // Found live (2026-09-27): an interactive claude in a folder it has not seen
+  // shows the workspace-trust dialog and writes no session file until it is
+  // answered, so start timed out. The launcher answers it on the new
+  // workspace's own surface ("down", "enter" = "Yes, I trust this folder").
+  // Fails if the dialog is left alone (not-started) or keys go elsewhere.
+  it('answers the workspace-trust dialog on its own surface, then starts', async () => {
+    await withCmux({}, async (h) => {
+      h.control({ trustPrompt: true });
+      const handle = await h.launcher.start(requestFor(h));
+      expect(handle.surface).toBe('surface:1');
+      expect(argvOf(h, 'send-key')).toEqual([
+        ['send-key', '--surface', 'surface:1', 'down'],
+        ['send-key', '--surface', 'surface:1', 'enter'],
+      ]);
+      expect(argvOf(h, 'read-screen')[0]).toEqual([
+        'read-screen',
+        '--surface',
+        'surface:1',
+        '--lines',
+        '30',
+      ]);
+    });
+  });
+
+  // Claude Code has shipped the trust options in both orders, so the cursor is
+  // read, never assumed (review, 2026-09-27). Fails if a fixed "down" is sent.
+  it('trustMoves reads the cursor: Yes selected needs no move, Yes below needs down', () => {
+    expect(trustMoves(' ❯ Yes, I trust this folder\n   No, exit\n')).toEqual([]);
+    expect(trustMoves(' ❯ No, exit\n   Yes, I trust this folder\n')).toEqual(['down']);
+    expect(trustMoves('   No, exit\n ❯ Yes, I trust this folder\n')).toEqual([]);
+    expect(trustMoves(' ❯ \n')).toBeNull();
+    expect(trustMoves('   Yes, I trust this folder\n')).toBeNull();
   });
 
   // Messages go to the surface, never the workspace (which hits whatever

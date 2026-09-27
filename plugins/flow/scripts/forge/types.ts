@@ -46,6 +46,11 @@ export interface PrStatus {
   headSha: string;
   /** The branch it merges into. */
   base: string;
+  /**
+   * Whether the PR conflicts with its base. A conflicting PR runs no checks and
+   * never merges, so nothing else would ever wake its worker (live proof).
+   */
+  conflicting?: boolean;
 }
 
 /**

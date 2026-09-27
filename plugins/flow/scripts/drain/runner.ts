@@ -693,6 +693,8 @@ export async function runPass(deps: PassDeps): Promise<PassReport> {
         armed: status.armed,
         queued: status.queued,
         headSha: status.headSha,
+        base: status.base,
+        ...(status.conflicting === true ? { conflicting: true } : {}),
       };
       if (status.state === 'open' && drain.pr.armed && !status.armed && !status.queued) {
         const groups = await deps.forge.recentGroupFailures(

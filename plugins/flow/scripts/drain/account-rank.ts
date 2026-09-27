@@ -377,11 +377,16 @@ export function limitSignal(input: LimitSignalInput): LimitSignal {
       resetsAt: reading?.resetsAt ?? null,
       read: reading !== null,
       exhausted,
+      // A measured share decides; `allowed_warning` counts only when there is
+      // none. Found live (2026-09-27): the SDK sends `allowed_warning` on the
+      // weekly window from about 50% used, which read as "near the limit" would
+      // wind down every account at half its allowance.
       warning:
         !exhausted &&
         reading !== null &&
-        (reading.status === 'allowed_warning' ||
-          (reading.usedPct !== null && reading.usedPct >= ceiling - warnMarginPct)),
+        (reading.usedPct !== null
+          ? reading.usedPct >= ceiling - warnMarginPct
+          : reading.status === 'allowed_warning'),
       usedPct: reading?.usedPct ?? null,
       rejected: reading?.status === 'rejected',
     });

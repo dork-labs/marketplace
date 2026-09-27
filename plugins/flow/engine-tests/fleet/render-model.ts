@@ -58,7 +58,7 @@ export function goldenModel(): FleetModel {
   return {
     home: '/home/example',
     handoff: 'auto',
-    dorkos: { url: 'http://127.0.0.1:4242', reachable: false, sessionsShown: 0 },
+    dorkos: { url: 'http://localhost:4242', reachable: false, sessionsShown: 0 },
     dorkosListed: false,
     accounts: [
       account({

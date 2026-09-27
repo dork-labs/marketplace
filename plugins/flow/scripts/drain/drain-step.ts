@@ -62,6 +62,10 @@ export interface PrStatusFact {
   queued: boolean;
   /** The PR's head commit. */
   headSha: string;
+  /** The branch it merges into, when known. */
+  base?: string;
+  /** Whether it conflicts with its base: no checks run and it never merges. */
+  conflicting?: boolean;
 }
 
 /**
@@ -287,10 +291,11 @@ function park(step: Step, reason: string, taken = false): Step {
   let next = stopReviewer(step);
   const worker = next.drain.worker;
   if (worker && !worker.pending) {
-    // A parked run holds no live session. The handle stays (unless the item was
-    // taken away), so an answer can resume the same session with a message.
+    // A parked run holds no live session. The handle stays, so an answer (or,
+    // for a close that was the run's own merge, the `merged` message) can
+    // resume the same session.
     next = {
-      drain: taken ? { ...next.drain, worker: null } : next.drain,
+      drain: next.drain,
       actions: [...next.actions, { kind: 'stop', which: 'worker', handle: sessionHandle(worker) }],
     };
   }
@@ -454,6 +459,19 @@ function watching(step: Step, run: FlowRun, facts: DrainFacts, cfg: DrainStepCon
   if (headMoved(drain, facts)) return unreportedPush(step, run, facts, cfg);
   if (!pr) return step;
   const redCtx = { flow: cfg.flow, identifier: run.identifier, prUrl, failing: pr.failing };
+  // A PR that conflicts with its base runs no checks and never merges, so it
+  // would wait here for good (found live, 2026-09-27). Tell the worker.
+  if (pr.state === 'open' && pr.conflicting === true) {
+    return send({ ...step, drain: toPhase(drain, 'fixing-ci') }, 'ci-red', {
+      ...redCtx,
+      failing: [
+        {
+          name: `a merge conflict with ${pr.base || 'its base branch'}: merge origin/${pr.base || 'main'}, resolve it, push, then report the push`,
+          url: prUrl,
+        },
+      ],
+    });
+  }
   if (pr.failing.length > 0 && facts.ejection === null) {
     return send({ ...step, drain: toPhase(drain, 'fixing-ci') }, 'ci-red', redCtx);
   }
@@ -586,6 +604,36 @@ export function drainStep(
 ): DrainStepResult {
   const current = run.drain;
   if (!current || current.v !== 1) return { run, actions: [] };
+  // The run's own PR merged: the tracker closes the item on its `Closes` line,
+  // which is expected, not "taken away". Go straight to closing, even from a
+  // park that mistook that close for someone else's (found live, 2026-09-27).
+  // Not when a person reopened and unclaimed the item after the merge, not
+  // while a limit owns the worker, and only with a worker to run DONE.
+  if (
+    current.pr !== null &&
+    facts.pr?.state === 'merged' &&
+    (facts.item.closed || facts.item.claimed) &&
+    !run.limit &&
+    current.worker !== null &&
+    (current.phase === 'watching' ||
+      (current.phase === 'parked' && current.parkedReason === PARK_REASONS.itemTaken))
+  ) {
+    const recorded: DrainState = { ...current, ...facts.reports };
+    const step = send(
+      {
+        drain: {
+          ...toPhase(recorded, 'closing'),
+          parkedReason: null,
+          parkedFrom: null,
+          parkedAt: null,
+        },
+        actions: [],
+      },
+      'merged',
+      { flow: cfg.flow, identifier: run.identifier, prUrl: current.pr.url }
+    );
+    return { run: { ...run, drain: step.drain }, actions: step.actions };
+  }
   if (current.phase === 'parked') return readopt(run, current, facts, cfg);
 
   // Record the reports first: they are facts whatever else happens.
