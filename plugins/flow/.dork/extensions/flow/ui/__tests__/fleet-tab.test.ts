@@ -338,12 +338,14 @@ describe('FleetTab: notices', () => {
     const notice = screen.getByRole('status');
     for (const line of ROLE_LINES) expect(within(notice).getByText(line)).toBeTruthy();
     const link = within(notice).getByRole('link', { name: GUIDE_LINK_TEXT });
-    expect(link.getAttribute('href')).toBe('https://dorkos.ai/docs/use-all-your-accounts');
-    expect(GUIDE_URL).toBe('https://dorkos.ai/docs/use-all-your-accounts');
+    expect(link.getAttribute('href')).toBe(
+      'https://dorkos.ai/docs/guides/flow/use-all-your-accounts'
+    );
+    expect(GUIDE_URL).toBe('https://dorkos.ai/docs/guides/flow/use-all-your-accounts');
     expect(link.textContent).toBe('How to use all your accounts');
     expect(link.getAttribute('target')).toBe('_blank');
     expect(link.getAttribute('rel')).toBe('noopener noreferrer');
-    expect(notice.querySelector('svg')?.getAttribute('aria-hidden')).toBe('true');
+    expect(notice.querySelector('svg')).toBeNull();
 
     await act(async () => {
       fireEvent.click(within(roles('Main')).getByRole('radio', { name: 'Main' }));

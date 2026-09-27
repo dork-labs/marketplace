@@ -8,13 +8,13 @@
 
 import type { FleetView } from '../lib/fleet.ts';
 import { h, type Node } from './react.ts';
-import { NOTICE, NOTICE_ICON } from './styles.ts';
+import { NOTICE } from './styles.ts';
 
 /**
- * The guide that explains the roles (`plugins/flow/docs/use-all-your-accounts.mdx`).
- * The spec's published address; the page is not live on the docs site yet.
+ * The guide that explains the roles (`plugins/flow/docs/use-all-your-accounts.mdx`),
+ * at the address the docs site serves flow's guides under (`/docs/guides/flow/<page>`).
  */
-export const GUIDE_URL = 'https://dorkos.ai/docs/use-all-your-accounts';
+export const GUIDE_URL = 'https://dorkos.ai/docs/guides/flow/use-all-your-accounts';
 
 /** The guide link's words (Q22, decided). */
 export const GUIDE_LINK_TEXT = 'How to use all your accounts';
@@ -65,29 +65,8 @@ export function pickNotice(body: FleetView): NoticeKind | null {
   return hasMain && !hasRotation ? 'nothing-in-rotation' : null;
 }
 
-/** The info icon (Lucide's `Info`, which the host uses for its info tone), redrawn inline. */
-function InfoIcon(): Node {
-  return h(
-    'svg',
-    {
-      'aria-hidden': true,
-      'data-slot': 'notice-icon',
-      viewBox: '0 0 24 24',
-      fill: 'none',
-      stroke: 'currentColor',
-      strokeWidth: 2,
-      strokeLinecap: 'round',
-      strokeLinejoin: 'round',
-      style: NOTICE_ICON,
-    },
-    h('circle', { cx: 12, cy: 12, r: 10 }),
-    h('path', { d: 'M12 16v-4' }),
-    h('path', { d: 'M12 8h.01' })
-  );
-}
-
 /**
- * A notice in the host `Notice` component's info tone, with its icon.
+ * A notice in the host `Notice` component's info tone (which has no icon).
  *
  * @param props - The notice's content.
  * @returns The notice.
@@ -96,8 +75,7 @@ export function InfoNotice(props: { children?: Node }): Node {
   return h(
     'div',
     { role: 'status', 'data-slot': 'notice', 'data-tone': 'info', style: NOTICE },
-    h(InfoIcon),
-    h('div', { style: { minWidth: 0 } }, props.children)
+    props.children
   );
 }
 

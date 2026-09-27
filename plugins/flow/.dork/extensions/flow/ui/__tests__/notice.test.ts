@@ -62,13 +62,12 @@ describe('pickNotice', () => {
 });
 
 describe('InfoNotice', () => {
-  it('is a status with a hidden icon, in the host info tone', () => {
+  it('is a status in the host info tone, with no icon (the host Notice has none)', () => {
     render(React.createElement(InfoNotice, null, 'Hello'));
     const notice = screen.getByRole('status');
     expect(notice.textContent).toBe('Hello');
     expect(notice.getAttribute('data-tone')).toBe('info');
-    const icon = notice.querySelector('svg');
-    expect(icon?.getAttribute('aria-hidden')).toBe('true');
+    expect(notice.querySelector('svg')).toBeNull();
     expect(notice.style.borderRadius).toBe('0.375rem');
     expect(notice.style.padding).toBe('0.5rem 0.75rem');
     expect(notice.style.background).toBe('hsl(var(--muted))');

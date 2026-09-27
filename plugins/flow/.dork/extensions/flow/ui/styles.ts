@@ -37,9 +37,6 @@ const TEXT_XS = 'var(--text-xs, 0.75rem)';
  * `rounded-md border px-3 py-2 text-sm border-dui-border bg-dui-muted text-dui-foreground`.
  */
 export const NOTICE: Style = {
-  display: 'flex',
-  gap: '0.5rem',
-  alignItems: 'flex-start',
   borderRadius: RADIUS_MD,
   border: `1px solid ${hostColor('border')}`,
   background: hostColor('muted'),
@@ -48,14 +45,6 @@ export const NOTICE: Style = {
   fontSize: TEXT_SM,
   lineHeight: 'calc(1.25 / 0.875)',
   margin: '0.5rem 0',
-};
-
-/** The notice's icon: the host's `size-icon-sm` (1rem), one line tall. */
-export const NOTICE_ICON: Style = {
-  flex: 'none',
-  width: '1rem',
-  height: '1rem',
-  marginTop: '0.125rem',
 };
 
 /**
