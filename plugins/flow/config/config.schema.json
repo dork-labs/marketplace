@@ -1169,6 +1169,17 @@
         }
       },
       "additionalProperties": false
+    },
+    "fleet": {
+      "default": {},
+      "type": "object",
+      "properties": {
+        "nudge": {
+          "default": true,
+          "type": "boolean"
+        }
+      },
+      "additionalProperties": false
     }
   },
   "additionalProperties": false

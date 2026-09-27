@@ -950,6 +950,23 @@ export const SelfImprovementSchema = z
   .prefault({});
 
 /**
+ * This machine's accounts, as far as project config goes (spec `flow-cli-core`
+ * Amendment "account setup", S2). Routing policy is not here: it lives in
+ * `<dorkHome>/flow/fleet.json`. `config-files.ts` reads this block without zod
+ * (`fleetSettings`), so its defaults must match these; a test holds them together.
+ */
+export const FleetConfigSchema = z
+  .object({
+    /**
+     * Whether `flow status`, `flow fleet` and `flow next` print one line
+     * suggesting `flow accounts setup` when several account folders exist and
+     * none is in rotation.
+     */
+    nudge: z.boolean().default(true),
+  })
+  .prefault({});
+
+/**
  * The authoritative `/flow` engine configuration schema (§9).
  *
  * `FlowConfigSchema.parse({})` resolves the complete §9 default config.
@@ -1004,6 +1021,8 @@ export const FlowConfigSchema = z
     drain: DrainSchema,
     /** Self-test, journal and retro policy. */
     selfImprovement: SelfImprovementSchema,
+    /** Whether flow suggests setting up this machine's accounts. */
+    fleet: FleetConfigSchema,
   })
   .strict();
 

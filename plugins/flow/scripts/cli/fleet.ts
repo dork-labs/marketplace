@@ -56,6 +56,7 @@ import {
   type WindowReading,
 } from '../fleet/usage-ledger.ts';
 import type { VerbContext, VerbResult } from './context.ts';
+import { withSetupNudge } from './setup-nudge.ts';
 
 /** One account's report plus the raw ledger windows the session join needs. */
 interface AccountRead {
@@ -262,7 +263,7 @@ export async function run(ctx: VerbContext): Promise<VerbResult> {
     dorkosListed: dorkos !== null && dorkos.reachable && dorkos.warning === undefined,
   };
 
-  return {
+  return withSetupNudge(ctx, {
     json: {
       now: now.toISOString(),
       handoff: model.handoff,
@@ -272,5 +273,5 @@ export async function run(ctx: VerbContext): Promise<VerbResult> {
       warnings,
     },
     text: renderFleet(model, now),
-  };
+  });
 }

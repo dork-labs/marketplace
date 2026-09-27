@@ -78,19 +78,21 @@ export interface RunOptions {
  * @param temp - The temp project; runs with cwd = its project folder.
  * @param backlog - The fake tracker's state.
  * @param options - Replaces the process runner.
+ * @param env - More environment variables.
  * @returns The exit code, both streams and the adapter build count.
  */
 export async function runFlow(
   argv: readonly string[],
   temp: TempProject,
   backlog: FakeBacklog,
-  options: RunOptions = {}
+  options: RunOptions = {},
+  env: Record<string, string> = {}
 ): Promise<RunResult> {
   let stdout = '';
   let stderr = '';
   let adapterBuilds = 0;
   const code = await main(argv, {
-    env: { DORK_HOME: temp.dorkHome },
+    env: { DORK_HOME: temp.dorkHome, ...env },
     cwd: temp.project,
     now: () => new Date('2026-09-26T12:00:00.000Z'),
     stdout: { write: (chunk: string) => (stdout += chunk) },

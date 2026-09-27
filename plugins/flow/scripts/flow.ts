@@ -108,11 +108,12 @@ export const VERBS: readonly VerbDefinition[] = [
       'flow accounts add --path <dir> [--label <text>] [--color <#rrggbb>]: register a Claude Code account. It starts kept out.',
       'flow accounts set <id> [--role] [--reserve] [--spend-down-hours] [--repos]: set one account\'s policy. <id> is a Claude Code id, or <runtime>:<id> (codex:default). "default" clears a field.',
       'flow accounts set --handoff auto|ask | --runtimes <runtime,...> | --cross-runtime-fallback off|on: set one fleet-wide setting ("default" clears it).',
+      'flow accounts setup [--yes] [--rotation <refs>|all] [--keep-out <refs>] [--main <ref>] [--statusline]: find the account folders on this computer and set their roles. In a terminal it asks; with --yes the flags decide; every change is shown first. A ref is an account id, a folder or a folder name.',
       'Reads and writes <dorkHome> (DORK_HOME, else ~/.dork); needs no tracker and no project config.',
     ].join('\n'),
     common: ['dry-run'],
     positionals: [
-      { name: 'action', description: 'list (default), add or set.' },
+      { name: 'action', description: 'list (default), add, set or setup.' },
       { name: 'id', description: 'The account, for set: <id> or <runtime>:<id>.' },
     ],
     flags: [
@@ -171,6 +172,35 @@ export const VERBS: readonly VerbDefinition[] = [
         kind: 'string',
         value: 'off|on',
         description: 'set (no id): let work move to another runtime when its own is out.',
+      },
+      {
+        name: 'yes',
+        kind: 'boolean',
+        description: 'setup: ask nothing; the flags decide. The changes are still printed.',
+      },
+      {
+        name: 'rotation',
+        kind: 'string',
+        value: 'refs|all',
+        description:
+          'setup: the accounts to spend freely. all = every folder but the default, a kept-out one and an org-managed one.',
+      },
+      {
+        name: 'keep-out',
+        kind: 'string',
+        value: 'refs',
+        description: 'setup: the work, organization or client accounts flow must not spend.',
+      },
+      {
+        name: 'main',
+        kind: 'string',
+        value: 'ref',
+        description: "setup: your main account. Default: this computer's default folder.",
+      },
+      {
+        name: 'statusline',
+        kind: 'boolean',
+        description: "setup: add the usage recorder to each spent account's status line.",
       },
     ],
     load: () => import('./cli/accounts.ts'),
