@@ -50,7 +50,9 @@ import {
 import { readLedger, type RuntimeSlug } from '../fleet/usage-ledger.ts';
 import type { FlowRun } from '../flow-run.ts';
 import { openFlowStateFile } from '../flow-state-file.ts';
-import { handleRuntime } from '../launchers/types.ts';
+import { liveByAccount, liveKey } from '../drain/live-count.ts';
+
+export { liveByAccount };
 import { classifyOwnership, type Identity, type OwnershipScope } from '../identity.ts';
 import type { BacklogSnapshot, WorkItem, WorkItemProject } from '../tracker/types.ts';
 import { AGENT_CLAIMED } from '../work-state.ts';
@@ -173,37 +175,6 @@ export interface AssignmentInput {
   runs: Readonly<Record<string, FlowRun>>;
   /** `drain.warnMarginPct` and `drain.maxLivePerAccount`. */
   opts: { warnMarginPct: number; maxLivePerAccount: number };
-}
-
-/** `<runtime>:<id>` for a stored account, where no account means the runtime's `default`. */
-function liveKey(runtime: string | undefined, account: string | null | undefined): string {
-  return `${runtime ?? 'claude-code'}:${account ?? 'default'}`;
-}
-
-/**
- * Live sessions per `<runtime>:<id>`: every `running` or `queued` run by its
- * account, plus its drain reviewer's handle by the reviewer's account. A parked
- * drain run counts for nothing. A run or
- * handle with no account bills its runtime's `default` ({@link assignAccounts}
- * folds `<runtime>:default` into the row it aliases).
- *
- * @param runs - Every run, keyed by issue id.
- * @returns The counts.
- */
-export function liveByAccount(runs: Readonly<Record<string, FlowRun>>): Record<string, number> {
-  const live: Record<string, number> = {};
-  const add = (key: string): void => {
-    live[key] = (live[key] ?? 0) + 1;
-  };
-  for (const run of Object.values(runs)) {
-    if (run.status !== 'running' && run.status !== 'queued') continue;
-    // A parked drain run holds no live session (parking stops them).
-    if (run.drain?.phase === 'parked') continue;
-    add(liveKey(run.runtime, run.account));
-    const reviewer = run.drain?.reviewer;
-    if (reviewer) add(liveKey(handleRuntime(reviewer), reviewer.account));
-  }
-  return live;
 }
 
 /**

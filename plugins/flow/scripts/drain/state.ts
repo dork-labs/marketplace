@@ -170,6 +170,13 @@ export interface RunLimit {
   heldBy?: 'person';
   /** Until when a person's wait holds the run (ISO); `null` means until the account's own reset. */
   heldUntil?: string | null;
+  /**
+   * With a person's hold: whether flow may resume the run on its own account
+   * once that account clears. `false` (a DorkOS "Wait for reset" with
+   * "Continue automatically" off) keeps the run held, neither resumed nor
+   * moved, until a person acts; `true` or absent resumes it as before.
+   */
+  resumeOnReset?: boolean;
   /** While `handing-off`: the target (`<runtime>:<id>`), so a stale mark can be adopted (§5.2). */
   handoffTo?: string;
   /** While `handing-off`: why the run is moving, recorded with the move when a stale mark is adopted. */
@@ -317,6 +324,7 @@ export const RunLimitSchema: z.ZodType<RunLimit> = z.looseObject({
   notifiedAt: nullableString,
   heldBy: vocabulary<'person'>().optional(),
   heldUntil: nullableString.optional(),
+  resumeOnReset: z.boolean().optional(),
   handoffTo: z.string().optional(),
   handoffReason: vocabulary<DrainHandoff['reason']>().optional(),
   candidate: nullableString.optional(),

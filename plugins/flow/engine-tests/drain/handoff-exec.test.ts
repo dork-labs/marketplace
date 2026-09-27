@@ -14,6 +14,7 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import {
   adoptOrRevertHandoff,
   executeHandoff,
+  limitLine,
   type HandoffExecDeps,
 } from '../../scripts/drain/handoff-exec.ts';
 import type { DrainState, RunLimit } from '../../scripts/drain/state.ts';
@@ -250,16 +251,40 @@ describe("executeHandoff: a person's hold", () => {
   });
 
   it('a failed --to leaves no hold behind', async () => {
-    // Purpose: reverted() drops heldBy and heldUntil, so the run is not held forever.
+    // Purpose: reverted() drops heldBy, heldUntil and resumeOnReset, so the run is not held forever.
     runs = {
-      'i-1': limitedRun('cli', { state: 'waiting-reset', heldBy: 'person', heldUntil: null }),
+      'i-1': limitedRun('cli', {
+        state: 'waiting-reset',
+        heldBy: 'person',
+        heldUntil: null,
+        resumeOnReset: false,
+      }),
     };
     script.startThrows = true;
     const out = await executeHandoff(deps(), runs['i-1'], TO, 'manual');
     expect(out.status).toBe('failed');
     expect(runs['i-1'].limit?.heldBy).toBeUndefined();
     expect(runs['i-1'].limit?.heldUntil).toBeUndefined();
+    expect(runs['i-1'].limit?.resumeOnReset).toBeUndefined();
     expect(runs['i-1'].limit?.state).toBe('awaiting-handoff');
+  });
+});
+
+describe("limitLine for a person's hold", () => {
+  const held = (extra: Partial<RunLimit>) =>
+    limitedRun('cli', { state: 'waiting-reset', heldBy: 'person', heldUntil: null, ...extra })
+      .limit;
+
+  it('says a hold with automatic continue off lasts until someone continues it', () => {
+    expect(limitLine(held({ resumeOnReset: false }), null)).toBe(
+      'held by a person until they continue it'
+    );
+  });
+
+  it.each([true, undefined])('keeps the reset wording when resumeOnReset is %s', (value) => {
+    expect(limitLine(held({ resumeOnReset: value }), null)).toMatch(
+      /^held by a person until the account resets/
+    );
   });
 });
 

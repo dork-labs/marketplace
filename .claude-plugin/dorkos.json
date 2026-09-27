@@ -84,7 +84,7 @@
     "flow": {
       "type": "plugin",
       "categories": ["agent-ops", "project-management"],
-      "layers": ["commands", "skills", "hooks"],
+      "layers": ["commands", "skills", "hooks", "extensions"],
       "icon": "🌊",
       "featured": true,
       "pricing": { "model": "free" }

@@ -27,7 +27,7 @@ import { randomBytes, randomUUID } from 'node:crypto';
 
 import { executeHandoff, parseRef, type HandoffExecDeps } from '../drain/handoff-exec.ts';
 import { liveDrainPid } from '../drain/lock.ts';
-import type { DrainState } from '../drain/state.ts';
+import type { DrainState, RunLimit } from '../drain/state.ts';
 import { PreconditionError, UsageError } from '../errors.ts';
 import { resolveDorkHome } from '../fleet/accounts.ts';
 import type { FlowRun } from '../flow-run.ts';
@@ -216,7 +216,13 @@ async function hold(
     const wakeAfter = until ?? run.limit.resetsAt ?? null;
     return {
       ...run,
-      limit: { ...run.limit, state: 'waiting-reset', heldBy: 'person', heldUntil: until },
+      // A CLI wait resumes at the reset as always, whatever an earlier hold said.
+      limit: {
+        ...withoutResumeChoice(run.limit),
+        state: 'waiting-reset',
+        heldBy: 'person',
+        heldUntil: until,
+      },
       drain: { ...drain, wakeAfter, rev: drain.rev + 1 },
     };
   });
@@ -226,4 +232,10 @@ async function hold(
     json: { identifier, heldUntil: until, resetsAt: found.limit.resetsAt },
     text: `${identifier} held on its own account until ${when ?? 'its limit resets'}; no automatic move happens meanwhile. flow handoff ${identifier} --to <account> releases it.`,
   };
+}
+
+/** A limit without an earlier hold's `resumeOnReset`. */
+function withoutResumeChoice(limit: RunLimit): RunLimit {
+  const { resumeOnReset: _resumeOnReset, ...rest } = limit;
+  return rest;
 }

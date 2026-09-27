@@ -201,6 +201,7 @@ function reverted(limit: RunLimit): RunLimit {
     handoffReason: _reason,
     heldBy: _heldBy,
     heldUntil: _heldUntil,
+    resumeOnReset: _resumeOnReset,
     ...rest
   } = limit;
   return {
@@ -620,9 +621,11 @@ export function limitLine(limit: RunLimit | undefined, wakeAfter: string | null)
     case 'pending-approval':
       return `limited until ${until}, waiting for approval to move to ${limit.candidate ?? 'another account'}`;
     case 'waiting-reset':
-      return limit.heldBy === 'person'
-        ? `held by a person until ${limit.heldUntil ? localTime(limit.heldUntil) : `the account resets (${until})`}`
-        : `limited until ${until}, waiting (next check ${localTime(wakeAfter)})`;
+      return limit.heldBy === 'person' && limit.resumeOnReset === false
+        ? 'held by a person until they continue it'
+        : limit.heldBy === 'person'
+          ? `held by a person until ${limit.heldUntil ? localTime(limit.heldUntil) : `the account resets (${until})`}`
+          : `limited until ${until}, waiting (next check ${localTime(wakeAfter)})`;
     case 'winding-down':
       return `near its ${windowLabel(limit.window) ?? 'usage'} limit, winding down`;
     case 'handing-off':
