@@ -15,7 +15,6 @@
 import { execFileSync } from 'node:child_process';
 import {
   chmodSync,
-  cpSync,
   existsSync,
   lstatSync,
   mkdirSync,
@@ -38,7 +37,7 @@ import { LIVE_CASES, type LiveCase, type RunnableCase } from '../scripts/selftes
 import { liveRefusal, resolveCredential } from '../scripts/selftest/live/gate.ts';
 import { deniedTools, runLive } from '../scripts/selftest/live/run.ts';
 import { findBreach } from '../scripts/selftest/live/breach.ts';
-import { makeSandbox } from '../scripts/selftest/live/sandbox.ts';
+import { copyPlugin, makeSandbox } from '../scripts/selftest/live/sandbox.ts';
 import type { FakeBacklog } from '../scripts/tracker/fake.ts';
 import type { WorkItem } from '../scripts/tracker/types.ts';
 
@@ -198,19 +197,15 @@ function trivial(id: string): RunnableCase {
 }
 
 /**
- * A copy of the flow root in the test's temp folder, with a copy of `zod` as
- * its only package: no link leads from it back to the real checkout.
+ * A copy of the flow root in the test's temp folder, with its runtime
+ * dependencies (`zod`) as its only packages: no link leads from it back to
+ * the real checkout.
  */
 function copyOfPlugin(): string {
   const dir = path.join(tmp, 'checkout');
-  cpSync(FLOW_ROOT, dir, {
-    recursive: true,
-    filter: (src) => path.relative(FLOW_ROOT, src) !== 'node_modules',
-  });
-  cpSync(path.join(FLOW_ROOT, 'node_modules', 'zod'), path.join(dir, 'node_modules', 'zod'), {
-    recursive: true,
-    dereference: true,
-  });
+  // The live tier's own copy, so a file deleted in the real checkout while
+  // this runs (another test's temp file) cannot fail it.
+  copyPlugin(FLOW_ROOT, dir);
   return dir;
 }
 

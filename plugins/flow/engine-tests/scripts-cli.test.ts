@@ -16,7 +16,8 @@
  */
 
 import { spawnSync } from 'node:child_process';
-import { existsSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
@@ -150,7 +151,11 @@ describe('dispatch', () => {
 
   it('reads from --input <path> as well as stdin', () => {
     // A round-trip through a temp file proves the --input path is honored.
-    const tmp = path.join(PLUGIN_DIR, '.dispatch-fixture.tmp.json');
+    // The file lives under the OS temp folder, never in the plugin: the live
+    // self-test copies the plugin root, and a file deleted mid-copy there once
+    // failed that copy.
+    const dir = mkdtempSync(path.join(os.tmpdir(), 'flow-dispatch-input-'));
+    const tmp = path.join(dir, 'fixture.json');
     writeFileSync(tmp, JSON.stringify({ items, config, opts }), 'utf8');
     try {
       const { status, stdout } = runScript('dispatch', {
@@ -159,7 +164,7 @@ describe('dispatch', () => {
       expect(status).toBe(0);
       expect(JSON.parse(stdout).eligibleCount).toBe(1);
     } finally {
-      rmSync(tmp, { force: true });
+      rmSync(dir, { recursive: true, force: true });
     }
   });
 
