@@ -317,8 +317,9 @@ describe('GET /panel', () => {
     ]);
   });
 
-  it('shows a registered account at the default folder once, under its own label', async () => {
-    // DorkOS folds `default` into the registered row whose folder it is.
+  it('adds no row of its own for a default DorkOS folded into a registered account', async () => {
+    // DorkOS folds `default` into the registered row whose folder it is, so this
+    // guards against the panel ever adding a row of its own, not the label fix.
     const { router } = setup({
       summaries: [
         { runtime: 'claude-code', id: 'work', label: 'Work', color: '#2563eb', implicit: false },
