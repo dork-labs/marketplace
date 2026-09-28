@@ -3,385 +3,135 @@ name: tending-tracker
 description: The /flow engine's agent-as-team-member loop — the agent participates in a shared tracker like a teammate. Each tick it polls its inbox (assigned-to-me + @mentions + new comments), decides respond/act/ignore per the five comment-response rules, claims work with durable agent/* labels, asks the human via comment+assign when genuinely stuck (soft-escalation), and writes answers back as durable memory so the same question is never asked twice. Use when the agent is operating continuously inside a shared tracker. PM-agnostic; all tracker I/O routes through the adapter skill.
 ---
 
-# Tending the Tracker — the agent-as-team-member loop
+# Tending the Tracker
 
-> **Flow root.** This skill lives at `<flow-root>/skills/tending-tracker/SKILL.md`. If you reached it via a symlink (`.claude/skills/flow__*` or `.agents/skills/flow__*`), resolve the real path first (`realpath <path>`): the flow root is two directories above the skill directory. Every `<flow-root>/...` reference below is relative to that root.
+`<flow-root>` is two folders above this file's `realpath`.
 
-> **What this is.** The behaviors that let the `/flow` agent operate inside a
-> **shared** tracker the way a good teammate does (spec §5, §7; Phase 3
-> acceptance): watch its inbox, speak only when it should, claim work durably,
-> ask when stuck, and remember the answers. It is the inbound-comms counterpart
-> to the stage skills — they advance one item through the pipeline; this skill
-> keeps the agent a well-behaved participant in a board it shares with humans and
-> other agents.
->
-> **This is a prose contract the agent follows.** It composes already-built
-> pieces: the adapter verbs (the only place that touches a tracker) and
-> three pinned flow-engine oracles: `classifyOwnership`,
-> `shouldRespondToComment`, and `resolveInvolvement` (the calibration ladder,
-> runnable as `node --experimental-strip-types "<flow-root>/scripts/involvement.ts"`: decision context JSON
-> in, verdict JSON out). The agent reasons in the agent layer;
-> the oracles are the tested source of truth for _what_ the rules decide.
+How the agent behaves in a tracker it shares with people: watch its inbox, speak only
+when it should, claim durably, ask when stuck, remember answers. Every tracker read and
+write is an adapter verb (`getInbox`, `claim`, `comment`, `assignToHuman`, `needsInput`,
+`transition`, `link`); the adapter is at `adapter.path`. The rules below are prose; the
+tested truth is the oracles `classifyOwnership` (`identity.ts`), `shouldRespondToComment`
+(`comment-response.ts`), `resolveCommsChannel` (`comms.ts`) and `resolveInvolvement`
+(`node --experimental-strip-types "<flow-root>/scripts/involvement.ts"`, JSON in and out).
 
-## The one tracker rule
+## The tick
 
-This is a generic skill. **It never touches a tracker API string.** Every
-inbox read, comment, claim, label change, assignment, and link goes through the
-**adapter** skill by naming its verbs (`getInbox`, `claim`, `comment`,
-`assignToHuman`, `needsInput`, `transition`, `link`). No raw tracker tool name,
-CLI invocation, or slug lives here — the `tracker-confinement` Vitest guard
-enforces this for the whole flow bundle.
+- **Pause check.** Run step 0 of `<flow-root>/skills/flow-drain/SKILL.md` on every
+  poll. Stop whenever it says to stop.
+- **Tracker unavailable:** say so and stop; never fabricate inbox state.
 
-**Finding the adapter.** It is the `SKILL.md` at the `adapter.path` that
-`node --experimental-strip-types "<flow-root>/scripts/config-files.ts"` prints: the
-project's own (`.agents/flow/adapters/<tracker>/`), or the one flow ships. Inside it,
-`<flow-root>` means that output's `flowRoot`.
+0. **Resolve identity** once per tick, not per item: `getCurrentUser` resolves
+   `identity.agent: "auto"` to a real account id (never pass `"auto"` to an oracle).
+   Build `Identity { agent, reviewer, marker }` from it and `config.identity`; the mode
+   comes from `resolveIdentityMode`: no distinct reviewer is **shared**, one is
+   **two-account**. Detected, never configured.
+1. **Poll** `getInbox(agent)`: assigned-to-me, @mentions, and new comments since a
+   durable watermark (gap-free across restarts).
+2. **Decide** respond / act / ignore per the comment-response rules below.
+3. **Act** on what you own (claim, advance through the stage skills, resume).
+4. **When stuck, ask** (soft-escalation, below).
+5. **Remember the answer** (below).
 
-## The team-member tick
+## The comment-response rules
 
-Run this on each inbox poll. It is a loop, not a one-shot stage, and it claims and
-advances work, so it honours the pause like every other autonomous entry point:
+Classify ownership first: `mine` / `reviewer` / `other` / `unassigned`, from the item's
+assignee (a project's lead) against the resolved identity. In shared mode a
+self-assignment is still `mine`; own authorship is known by `identity.marker`. Then,
+first match wins:
 
-- **Pause check, before anything else, on every poll.** Run
-   `node --experimental-strip-types "<flow-root>/scripts/config-files.ts"`. If the check cannot run or its output cannot be read, stop: never act without knowing
-   whether flow is paused. When its
-   `paused` is not `null`, flow is paused on this machine: report "flow is paused
-   (since `<pausedAt>`); `/flow:resume` lifts it" and stop, claiming, commenting and
-   advancing nothing. When it says `"ok": false`, report its first error and stop.
+1. **Never answer your own comment:** author is `identity.agent`, or the body carries
+   `identity.marker` (in shared mode the marker is the only signal). → ignore.
+2. **Always respond when addressed:** an @mention, or in shared mode a `/flow` or
+   `@flow` token. Overrides ownership. → respond.
+3. **A non-agent comment on an `agent/needs-input` item is the answer.** → resume:
+   re-attach the worktree at HEAD and `--resume <sessionId>` from the item's `FlowRun`.
+   **When the item has no `FlowRun`**, route as below.
+4. **Stay out of `other`-owned threads** unless addressed. → ignore.
+5. **The rest leans quiet:** ignore unless `comments.ambiguousBias` is `"engage"`.
+   Over-responding is the worse failure.
 
-0. **Resolve identity for the tick** — via the adapter, `getCurrentUser` once;
-   build the resolved `Identity` and derive the mode. This feeds the three oracles
-   below (see "Resolve identity once per tick").
-1. **Poll the inbox** — via the adapter, `getInbox(agent)`.
-2. **For each entry, decide respond / act / ignore** — the five comment-response
-   rules, driven by `classifyOwnership`. When the verdict is a reply to whoever
-   started the thread, **route it** first (see "Routing a reply back to its
-   originating session").
-3. **Act on what you own** — claim eligible work with a durable label, advance it
-   through the stage skills, or resume a parked item.
-4. **When genuinely stuck, hand off** — soft-escalation routed by identity mode:
-   ask inline (live), comment-and-assign (two-account), or comment-and-nudge
-   (shared).
-5. **When you get an answer, remember it** — write the resolution where the next
-   decision's evidence test will find it, so the question is never re-asked.
-
----
-
-### 0. Resolve identity once per tick — `getCurrentUser`
-
-At the HEAD of each tick, **before** touching any entry, resolve the engine's
-identity exactly once and cache it for the whole tick:
-
-1. Via the adapter, call `getCurrentUser` to resolve `identity.agent: "auto"` into
-   the authenticated account id. This is resolved **once per tick, not per item**:
-   the result is cached and reused across every entry, so the oracles always
-   receive a concrete account id, never the literal `"auto"` sentinel.
-2. Build the resolved `Identity { agent, reviewer, marker }` from the resolved
-   account plus `config.identity.reviewer` and `config.identity.marker`.
-3. Derive the mode with `resolveIdentityMode(identity)` (`identity.ts`):
-   `reviewer` unset / `null` / equal to `agent` is **shared** mode, a distinct
-   reviewer account is **two-account** mode. The mode is detected, never
-   configured.
-
-Pass that one resolved `Identity` + mode into all three pinned oracles this tick:
-`classifyOwnership(item, identity)` (per entry), `shouldRespondToComment(comment,
-{ item, ownership, identity }, comments)` (per entry), and
-`resolveCommsChannel(trigger, identityMode, involvement)` (when a `stop-and-ask`
-fires). Resolving up front is what lets the mode-agnostic oracles actually do
-their job: a typed `Identity` carrying a real account id is the input they were
-built to consume.
-
-### 1. Poll the inbox — `getInbox(agent)`
-
-Via the adapter, `getInbox(agent)` returns everything the agent must look at this
-tick: **assigned-to-me + @mentions + new comments since the last tick**. Each
-entry carries the triggering comment so the rules below can decide:
-
-```
-InboxEntry {
-  item,                       // the WorkItem the comment is on
-  comment: { author, mentions[], body },
-}
-```
-
-Track the last-tick watermark so "new comments since the last tick" stays
-gap-free across restarts — the watermark is a durable cursor, not in-memory
-state. The adapter owns the tracker-native query; this skill only names the verb.
-
-### 2. Decide respond / act / ignore — the five rules
-
-For each inbox entry, classify the item's ownership, then walk the five
-comment-response rules **in precedence order** (first match wins). The pinned
-oracle is `shouldRespondToComment` in `comment-response.ts`, consuming the
-`OwnershipClass` from `classifyOwnership` (`identity.ts`) — this skill is the
-prose the agent reads; that module is the tested truth.
-
-First, classify ownership (`classifyOwnership(item, identity)` → `mine` /
-`reviewer` / `other` / `unassigned`), comparing the item's `assignee` (or, for a
-project, its `lead`) against the **resolved** `identity.agent` / `identity.reviewer`.
-In **shared-account** mode (no distinct reviewer account) the agent acts _as_ the
-human, so a self-assignment is still `mine` — the agent recognizes its own
-authorship by `identity.marker`, not by account.
-
-Then the rules:
-
-1. **Never answer its own comments.** `author == identity.agent`, **or** the body
-   carries `identity.marker` (`— 🤖 /flow`). In shared-account mode the marker is
-   the _only_ signal — author alone can't tell agent from human. Highest
-   precedence: it breaks self-reply loops before any other rule fires. → **ignore**.
-2. **Always respond when directly addressed.** An @mention of the agent account,
-   or (shared mode) an explicit `/flow` / `@flow` token in the body. **Overrides
-   ownership** — respond even on a teammate's (`other`-owned) thread. → **respond**.
-3. **Resume a parked `agent/needs-input` item on a non-agent comment.** Rule 1
-   already excluded the agent's own writes, so a non-agent comment on a parked
-   item _is_ the answer the agent stopped for via `needsInput`. → **resume** the
-   run (un-park and continue — distinct from merely posting a reply). This is what
-   the typed `inbox` reconciler (`reconcilers.ts`, priority 20) automates: it polls
-   the `InboundTransport` (`transport.ts`) for `comment.added` events on parked
-   items and runs this same `shouldRespondToComment` oracle. The resume is
-   **identity-mode-agnostic**: in shared mode the `identity.marker` (rule 1) is the
-   only thing that distinguishes the human's reply from the agent's own. On
-   `resume`, re-attach the worktree at HEAD and resume the captured session via
-   `--resume <sessionId>` **read from the item's `FlowRun`** — that record is
-   authoritative whenever it exists, and no thread signature overrides it. **When
-   the item has no `FlowRun`** (this machine never claimed it, or the run record
-   was pruned), fall through to "Routing a reply back to its originating session"
-   below, which recovers the session from the thread's signature and degrades to
-   thread-replay when it cannot.
-4. **Stay out of `other`-owned threads unless mentioned.** Rule 2 already handled
-   the mention case; an `other`-owned thread with no address is a teammate's
-   conversation. → **ignore**.
-5. **Soft zone leans quiet.** Everything left — the agent's own / `unassigned` /
-   `reviewer` threads, not addressed, not parked — is the ambiguous middle. With
-   `comments.ambiguousBias: "quiet"` (the default) silence is the safe default;
-   `"engage"` flips it to respond. **Over-responding is the worse failure** (a
-   chatty bot on every thread), so quiet ships as the default. → **ignore** unless
-   `engage`.
-
-`comments.respondWhen: "addressed"` and `comments.ambiguousBias: "quiet"` are the
-§9 defaults; re-tuning chattiness is a config edit, never a code change.
+Chattiness is config (`comments.respondWhen`, `comments.ambiguousBias`), never code.
 
 #### Routing a reply back to its originating session
 
-A `respond` or `resume` verdict answers _whether_ to reply. This answers **where
-the reply should land** — and it runs **before** you act on the thread, not after
-you have already written into the wrong session.
+This decides where a respond or resume lands, and it runs **before** you act on the
+thread.
 
 ##### Which session is "the originating session"
 
-Answer this first, in this order. The two sources can disagree, and the local
-record wins:
-
-1. **A durable run record for this item is authoritative.** If `flow-state.json`
-   holds a `FlowRun` for the item, its `sessionId` **is** the session to route to
-   — this is the same handle rule 3 already resumes with, and nothing in a thread
-   overrides it. A local record is first-party; a thread signature is a claim
-   copied onto a surface a human can edit.
-2. **Otherwise, read the thread's signature.** For an item with no run record —
-   work this machine never claimed, a thread started by another install, an item
-   another person filed — the signature is the only pointer there is.
-
-Every outward write an agent makes is signed with a machine-readable provenance
-line (the shape is defined once, in
-[`<flow-root>/docs/provenance.md`](../../docs/provenance.md); readers accept both
-the current `agent:provenance` name and the legacy `flow:provenance` one). Read
-it back with the canonical reader rules, of which one is load-bearing here:
-
-**Take the newest signature that is NOT your own.** Newest wins because it is the
-session most likely to still be alive — but this loop signs its own replies, so
-the newest signature on a thread it has already answered **is its own**, and
-routing on it delivers the follow-up straight back into this session: a
-self-delivery cycle that looks exactly like working resume. **Compare each
-signature's `sessionId` against this session's own id and skip the matches**,
-then take the newest of what remains. In shared-account mode this comparison is
-the only discriminator available — `account`, `host` and `harness` are all
-identical between the agent and itself, and the visible `identity.marker` says
-"an agent wrote this", not "which one".
-
-A blob that fails to parse counts as absent, and so does a signature a human
-stripped while editing.
+1. **A durable run record for this item is authoritative.** A `FlowRun` in
+   `flow-state.json` names the session; nothing in a thread overrides it.
+2. **Otherwise, read the thread's signature** (format: `<flow-root>/docs/provenance.md`).
+   **Take the newest signature that is NOT your own.** This loop signs its own replies,
+   so the newest is often itself: a self-delivery cycle. **Compare each signature's
+   `sessionId` against this session's own id and skip the matches.** In shared-account
+   mode this comparison is the only discriminator. A blob that fails to parse counts as
+   absent, and so does a signature a human stripped.
 
 ##### Where the follow-up goes
 
-| What the newest not-your-own signature says                                                   | Where the follow-up goes                                                                                                                                                                                                                                                                                             |
-| ---------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| **(a)** Same `host`, same `harness`, and that `sessionId` is **still resumable**                | **Deliver the follow-up INTO that session.** For `surface: "bare-cli"`, resume the harness session directly (`--resume <sessionId>`). For `surface: "dorkos"` **and an `instanceId` matching this install**, post the follow-up as a message to that session (`POST /api/sessions/<id>/messages`) so it lands in the live run. |
-| **(b)** Same `host`, but the session is **gone** (no transcript, no live run, resume refused)   | **Start a fresh session seeded with the thread** — the item, the full comment thread, and the provenance you read. The context is rebuilt from durable artifacts, which is exactly what they are for.                                                                                                                 |
-| **(c)** A **different `host`**, or a different DorkOS `instanceId`                             | **Handle it in the current session, and say so in the reply.** Cross-machine routing is a **recorded future step, not something to fake**: name in the reply that the originating session lives on another machine and was not reached, so nobody believes a handoff happened.                                        |
-| **No signature at all** (unsigned, human-authored, or every signature was your own)            | Same as **(b)** — fresh session seeded with the thread. Absence of a signature is not evidence of a dead session, so never claim you resumed one.                                                                                                                                                                    |
+| Newest not-your-own signature says                             | Where it goes                                                                                                                                                               |
+| -------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **(a)** Same `host` and `harness`, session **still resumable** | **Deliver the follow-up INTO that session:** `bare-cli` → `--resume <sessionId>`; `dorkos` with an `instanceId` matching this install → `POST /api/sessions/<id>/messages`. |
+| **(b)** Same `host`, session **gone**                          | **Start a fresh session seeded with the thread** (item, comments, provenance).                                                                                              |
+| **(c)** A different `host`, or a different DorkOS `instanceId` | **Handle it in the current session, and say so** in the reply: cross-machine routing is a recorded future step, not something to fake.                                      |
+| No signature (unsigned, human, or all your own)                | As (b). Never claim you resumed a session.                                                                                                                                  |
 
-**Anything that does not clearly match (a) is (b).** That is the default row, and
-it is stated so the ladder cannot dead-end: a signature missing `surface`, a
-`harness` this reader does not recognize, a resume that errors for a reason you
-cannot classify — all of it lands on (b), a fresh session seeded with the thread.
-(b) is always safe; it only costs context that the durable artifacts can rebuild.
+**Anything that does not clearly match (a) is (b).** (b) is always safe.
 
 ##### Deciding "still resumable"
 
-Rung (a) hinges on one testable question: does that session still exist on this
-machine? **Derive the answer, never assume it** — and if the probe itself fails,
-that is (b), not (a):
+Derive it, never assume; if the probe itself fails, that is (b), not (a).
 
-- **claude-code** — the session's transcript lives under
-  `~/.claude/projects/<project-slug>/<sessionId>.jsonl` (honouring
-  `CLAUDE_CONFIG_DIR` when set). Its presence is the cheap check; a
-  `claude --resume <sessionId>` probe is the authoritative one.
-- **codex**, **opencode** — the same question against that harness's own store:
-  its thread store and its sidecar session store respectively. Resolve the
-  location the way the harness itself resolves it.
-- **`surface: "dorkos"`** — the session is the install's, not a bare transcript's:
-  it is resumable when the `instanceId` matches this install and the server
-  answers for that session id.
+- **claude-code:** `~/.claude/projects/<project-slug>/<sessionId>.jsonl` (honour
+  `CLAUDE_CONFIG_DIR`); `claude --resume <sessionId>` is the authoritative probe.
+- **codex**, **opencode:** that harness's thread store and its sidecar session store,
+  located the way the harness locates them.
+- **`dorkos`:** resumable when the `instanceId` matches and the server answers for the id.
 
-The set you prefix-match a truncated `sessionId` against is **that same store** —
-the sessions this machine actually holds, enumerated from the harness's session
-directory. Never match against ids you have only seen in tracker threads; that
-set is not local, and a match in it proves nothing about resumability.
+A truncated `sessionId` is prefix-matched against that local store; exactly one match
+is the session, else (b). Never match against ids you have only seen in tracker threads.
+This install's own `instanceId` comes from the DorkOS install itself, not from anything
+in the thread; for a reader that cannot determine its own `instanceId`, a `dorkos` signature
+falls to (c).
 
-**This install's own `instanceId`** comes from the DorkOS install itself (the id
-the running server reports for itself), not from anything in the thread. A reader
-that cannot determine its own `instanceId` cannot prove an install match, so a
-`surface: "dorkos"` signature falls to (c) — different install, as far as it can
-honestly tell.
+**Silence about which path you took is not allowed.** The tick report **names the
+path**: (a) delivered into `<id>`, (b) fresh session, (c) handled here, origin on `<host>`.
 
-Two rules bind all of this:
+> **One product-specific name, deliberately.** `POST /api/sessions/<id>/messages` is a
+> DorkOS mechanism, and it is not a tracker string; non-DorkOS readers never match that row.
 
-- **A `sessionId` is an opaque token you match locally.** An emitter in a public
-  repo may have shipped only its first 8 characters, so prefix-match against the
-  local session store above. Exactly one match is the session; ambiguous or no
-  match degrades to **(b)**.
-- **Silence about which path you took is not allowed.** The tick report **names
-  the path** — `(a)` delivered into session `<id>`, `(b)` fresh session seeded,
-  `(c)` handled here, originating session on `<host>`. A resume that silently
-  became a fresh session is the failure this whole convention exists to prevent,
-  and an unreported one is indistinguishable from a working resume.
+## Claiming
 
-> **One product-specific name, deliberately.** `POST /api/sessions/<id>/messages`
-> is a DorkOS mechanism named inside an otherwise PM-agnostic skill. It is here on
-> purpose and it is not a tracker string: the confinement rule this skill obeys is
-> about **tracker** coupling, and the `dorkos` surface is one branch of a rung that
-> degrades to (b) everywhere else. A reader that is not DorkOS simply never matches
-> that row.
+- `claim(item)` writes `agent/claimed` and a `started`-category state, so it survives a
+  restart. The `agent/*` labels are the state machine, never the plan field.
+- In shared mode, `mine` is yours to act on only with `agent/claimed` too
+  (`SHARED_MODE_CLAIM_LABEL`).
+- Never take over an `other`-owned item; `link` only for real typed relations.
 
-### 3. Act on what you own — durable label claims
+## Writing and escalating
 
-When the tick surfaces eligible, unclaimed work the agent should pick up:
+- Every `comment` carries `identity.marker` (so rule 1 sees it) and will always carry
+  the provenance signature, never an email address. Both, every reply.
+- `needsInput(item, question)`: comment the question (multiple choice when possible),
+  add `agent/needs-input`, `assignToHuman`, stop. Parked is durable; the stall sweep
+  never reclaims it; only a non-agent reply (rule 3) resumes it.
+- **Stuck means stop and ask, never guess.** Walk the calibration ladder; a
+  `stop-and-ask` (a floor row, sticky and not confident, or the ambiguous middle routed to `ask`) is the
+  trigger. `resolveCommsChannel(trigger, identityMode, involvement)` picks:
+  `interactive` (ask inline, never park), `comment-and-assign` (two-account:
+  `needsInput`), or `comment-and-nudge` (shared: `needsInput` plus the out-of-band nudge
+  as the primary channel, since assigning notifies no one).
+- `proceed-with-trail`: act on the best default with an `agent/assumption` trail.
+  `proceed-silently`: act.
+- Ask a real question with options, and say what you would do absent an answer.
 
-- Via the adapter, **`claim(item)`** — writes the `agent/claimed` **label** AND
-  moves the item into a `started`-category state, in that order, so the claim
-  **survives a restart**. The **state machine is the `agent/*` labels**, never the
-  ephemeral plan/checklist field (the Huginn durability lesson, spec §3). After a
-  crash, any `agent/claimed` + `started` + not-`agent/needs-input` item is
-  recoverable as the agent's orphaned work.
-- **Shared-account caveat:** in shared mode a `mine`-classified item is the
-  agent's _own work to act on_ only when it **also** carries the `agent/claimed`
-  label — the assignee alone is ambiguous because agent and human share the
-  account. `classifyOwnership` reports raw ownership; this label gate lives in the
-  claim step (see `SHARED_MODE_CLAIM_LABEL` in `identity.ts`).
-- Claim **only permitted classes** — never silently take over a teammate's
-  (`other`-owned) item. Then hand the claimed item to the right stage skill to
-  advance it, or **resume** a rule-3 item where it parked.
+## Answers become memory
 
-### 4. Comment, assign, and hand off
+Write each answer where the next evidence test finds it, so it is never asked twice: a
+reusable decision → an ADR; a preference or threshold → the project's
+`.agents/flow/config.json`; a point answer → a marked `comment` on the item plus the
+label change. The repo holds the answer; the tracker holds pointers and state.
 
-The agent's outbound moves on the board, all via the adapter:
-
-- **`comment(item, body)`** — post a comment. The agent's own comments **always
-  carry `identity.marker`** so rule 1 can recognize them next tick (essential in
-  shared mode), **and always carry the provenance signature** so the next reader
-  can route a reply back to this session. The two are not substitutes: the marker
-  is visible and answers "did I write this?", the signature is hidden and answers
-  "which runtime, session, account and machine wrote this?". Every reply this loop
-  writes is signed — including the replies it posts on threads it did not start.
-- **`assignToHuman(item)`** — set the assignee to the reviewer / authenticated
-  human (fires a tracker notification). Used at handoff and the review gate. In
-  **shared-account** mode this notifies no one (agent and human are the same
-  account), so the out-of-band nudge becomes the primary channel: route via
-  `resolveCommsChannel`, which returns `comment-and-nudge` in that case (step 5).
-- **`needsInput(item, question)`** — the **elicitation primitive**, four atomic
-  effects in order: (1) post the question as a `comment` (multiple-choice when
-  possible, carrying the marker); (2) apply the `agent/needs-input` label;
-  (3) `assignToHuman`; (4) **stop** — the loop parks here. "Parked on a human" is
-  a distinct, durable state the stall sweep must never reclaim; it resumes **only**
-  on a non-agent reply, surfaced by `getInbox` and matched by rule 3.
-
-### 5. Soft-escalation — stop, comment, assign when stuck
-
-**Any time the agent is genuinely stuck, it stops, comments, and assigns to the
-human** (spec Decision #2a) rather than guessing. This is not stage-gated — it is
-**uncertainty-gated**, driven by the calibration ladder (the `resolveInvolvement`
-oracle, `node --experimental-strip-types "<flow-root>/scripts/involvement.ts"`):
-
-- Walk the ladder for the decision at hand. A `stop-and-ask` outcome (the floor —
-  irreversible / outward-facing / secrets-or-spend / scope-change — or sticky +
-  not-confident, or the ambiguous middle routed to `ask`) is exactly the
-  soft-escalation trigger.
-- **Route the ask by channel, not by guesswork.** Call
-  `resolveCommsChannel(trigger, identityMode, involvement)` (`comms.ts`) with the
-  tick's resolved mode (step 0). It returns one of three channels:
-  - **`interactive`** (a live terminal, either mode): ask inline via
-    `AskUserQuestion`, the loop never parks.
-  - **`comment-and-assign`** (unattended, two-account): call **`needsInput`**
-    (comment carrying the marker + `agent/needs-input` label + `assignToHuman` +
-    stop). The distinct reviewer account gets a real notification.
-  - **`comment-and-nudge`** (unattended, shared): same durable record (comment +
-    `agent/needs-input`), but `assignToHuman` notifies no one (agent and human are
-    one account), so fire the out-of-band **nudge as the primary** attention
-    channel (`route.nudgePrimary` is `true`; Relay / Telegram per
-    `involvement.nudge`), not a courtesy ping.
-- A `proceed-with-trail` outcome means proceed on the best default and leave a
-  durable `agent/assumption` trail (auditable at the review gate); `proceed-silently`
-  means just act. Escalate on the first matching `stop-and-ask` row — don't burn a
-  human interrupt on a decision the ladder says to proceed on.
-- Frame every handoff as a real question with options, not "I'm stuck." Honest by
-  design: tell the human exactly what's blocked and what you'd do absent an answer.
-  When you surface the item to the human in a live session (an `AskUserQuestion`,
-  not the parked tracker comment), name it as identifier with title
-  (`PROJ-157 - Title`, per the adapter's display convention).
-
-### 6. Answers become memory
-
-When a human answers — a rule-3 resume, or any decision the human resolves —
-**write the resolution where the next decision's evidence test will find it, so
-the same question is never asked twice**:
-
-- A reusable decision → the **decisions table / an ADR** (`/adr:create`,
-  `decisions/`).
-- A durable preference or threshold → **`config.json`** (the engine's config: the project's
-  `.agents/flow/config.json`, whose path `<flow-root>/scripts/config-files.ts` prints).
-- A point answer scoped to one item → back onto the **item** via the adapter's
-  `comment` (carrying the marker), plus the relevant label change.
-
-The adapter writes the _tracker_ side (the comment + label); the **durable answer
-lives in the repo artifact**, not in a separate store — the filesystem stays
-canonical, the tracker holds pointers + state + conversation. On the next tick the
-agent's evidence test reads the artifact and proceeds `confident` instead of
-re-parking.
-
----
-
-## Guardrails
-
-- **Over-responding is the worse failure.** When unsure whether to speak, stay
-  quiet (rule 5 default). A teammate who chimes in on every thread is noise.
-- **Never claim a teammate's (`other`-owned) work.** Claim only permitted classes;
-  use `link` only for genuinely typed relations, never to annex an item.
-- **The state machine is the `agent/*` labels**, not the plan field — every claim,
-  park, and completion is a durable label written via the adapter so it survives a
-  restart.
-- **Recognize your own writes by the marker**, especially in shared-account mode —
-  a missing marker on the agent's own comment can trigger a self-reply or
-  self-resume loop.
-- **Sign every outward write, and never sign it with a person.** The provenance
-  line goes on every comment the agent authors; it carries a short non-PII account
-  handle and **never an email address**, because these bodies land on trackers and
-  public forges where a comment is world-readable and permanent.
-- **Never claim a routing path you did not take.** Report `(a)`, `(b)`, or `(c)`
-  honestly. "Resumed the session" when you actually started a fresh one is the one
-  lie that makes the whole signature worthless.
-- **All tracker I/O through the adapter.** No tracker strings in this skill.
-  If the tracker is unavailable, explain the limitation clearly rather than
-  guessing or fabricating inbox state.
-- **Live dry run is a human step.** Validating this loop against a real shared
-  tracker (read-only first) is a manual human verification — this skill never
-  performs unattended live writes during that validation.
+A first live run against a shared tracker is a human step, read-only first.

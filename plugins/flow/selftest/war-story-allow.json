@@ -7,11 +7,5 @@
     "SHA": "hash names such as SHA-256",
     "ADR": "decision record ids, which name a decision rather than an incident"
   },
-  "lines": [
-    {
-      "path": "skills/grooming-backlog/SKILL.md",
-      "text": "> failure modes. The first groom of the DorkOS tracker (2026-08-03) found that",
-      "reason": "Present before the self-test existed; the prose trim (DOR-2377) removes it."
-    }
-  ]
+  "lines": []
 }

@@ -1,195 +1,52 @@
 # Conformance harness (`validate-adapter.ts`)
 
-Step 4 in detail: the harness interface, how to build a fixture, the verify loop,
-and per-invariant troubleshooting. The invariants themselves are normative in
-[`<flow-root>/adapters/SPEC.md`](../../../adapters/SPEC.md) section 4; this file is
-the operational guide to passing them.
+Step 4 in detail. What each invariant asserts is [`<flow-root>/adapters/SPEC.md`](../../../adapters/SPEC.md) section 4; this file is how to pass them.
 
----
-
-## Interface
+## Run it
 
 ```bash
-node --experimental-strip-types "<flow-root>/scripts/validate-adapter.ts" --fixture <path-to-fixture.json>
+node --experimental-strip-types "<flow-root>/scripts/validate-adapter.ts" --fixture <fixture.json>
 ```
 
-- **In:** `--fixture <path>` points at a JSON file of the normalized `WorkItem`s
-  your adapter's read verbs return (see [Fixtures](#fixtures)). JSON in.
-- **Out:** a JSON **verdict** on stdout:
+- In: a JSON file of the normalized `WorkItem`s your read verbs return.
+- Out: `{ "ok": boolean, "failures": [ { "invariant": "INV-n", "detail": "..." } ] }` on stdout.
+- Exit `0` is pass, nonzero is fail. Gate on the exit code; read `failures` to fix.
 
-  ```jsonc
-  {
-    "ok": true, // false when any invariant failed
-    "failures": [
-      // empty when ok
-      {
-        "invariant": "INV-4",
-        "detail": "human-readable explanation of the breach",
-      },
-    ],
-  }
-  ```
+## Build the fixture
 
-  - `ok: boolean` - the overall pass/fail.
-  - `failures: Array<{ invariant: string, detail: string }>` - one entry per
-    breached invariant. `invariant` is the id (`INV-1 .. INV-5`); `detail` explains
-    what tripped and, usually, which item.
+Serialize what your adapter's read verbs actually return from a real or recorded tracker, never a hand-written ideal. The harness only checks the cases present, so a thin fixture passes falsely. Cover:
 
-- **Exit code:** `0` when `ok` is `true` (pass); **nonzero** when any invariant
-  failed (fail). Gate scripts and CI branch on the exit code; humans read the
-  `failures` array.
+| Case                                                                                        | Exercises |
+| ------------------------------------------------------------------------------------------- | --------- |
+| One item per `stateCategory`, plus one from the tracker's holding state                     | `INV-1`   |
+| Some items with `priority` / `size` / `project` / `createdAt`, some without                 | `INV-2`   |
+| A `blockedBy` that resolves in the fixture, and one pointing at a closed or out-of-set item | `INV-3`   |
+| Labels from `agent/*`, `stage/*` and `type/*`                                               | `INV-4`   |
+| A dispatchable item with `agent/ready` and one without                                      | `INV-5`   |
 
-The verdict shape (`{ ok, failures: [{ invariant, detail }] }`) and the exit-code
-contract are stable; build your loop around them.
+## Prove it bites
 
----
+Before trusting green, run a throwaway fixture of broken items; each must fail as named:
 
-## Fixtures
+- Bare `ready` instead of `agent/ready`: `INV-4` and `INV-5`.
+- `priority: 0` on an item with no native priority: `INV-2`.
+- A native id in `blockedBy` instead of an `identifier`: `INV-3`.
+- A made-up sixth `stateCategory`: `INV-1`.
 
-A fixture is a JSON file holding the normalized `WorkItem`s your read verbs
-produce. Make it **representative**: the harness can only check invariants against
-the cases your fixture contains, so a thin fixture yields a falsely-green verdict.
-Cover, at minimum:
+None fail: your fixture or invocation is wrong. Fix that first.
 
-- **All five state categories** - at least one item each of `backlog`,
-  `unstarted`, `started`, `completed`, `canceled`, **plus** an item from your
-  tracker's holding/un-triaged state (it must normalize to `backlog`). Exercises
-  `INV-1`.
-- **Readiness, both ways** - at least one item carrying `agent/ready` and at least
-  one dispatchable item that lacks it (the candidate-set requirement). Exercises
-  `INV-5`.
-- **Relations, both ways** - an item whose `blockedBy` references another item
-  **in the fixture**, and one whose `blockedBy` references a closed/out-of-set item
-  (which must be treated as non-blocking). Exercises `INV-3`.
-- **Labels across families** - items carrying `agent/*`, `stage/*`, and `type/*`
-  in their re-namespaced form. Exercises `INV-4`.
-- **Optionals present and absent** - some items with `priority`/`size`/`project`/
-  `createdAt`, some without (absent, not fabricated). Exercises `INV-2`.
+## The loop
 
-Generate the fixture by running your adapter's read verbs against a real (or
-recorded) tracker and serializing the normalized output, so you are validating the
-adapter's **actual** normalization, not a hand-written ideal.
+Run, read each failure, fix the **mapping** that produced it, re-run. Never edit the fixture to pass: it is the adapter's output, so that hides a real bug. The only fixture edit allowed adds a missing case. Done means `ok: true`, exit `0`.
 
-### Negative cases (prove the harness bites)
-
-Before trusting a green verdict, confirm the harness _can_ fail by feeding it
-deliberately-broken items in a throwaway fixture - each should produce the named
-failure:
-
-- A bare-leaf label (`ready` instead of `agent/ready`) -> `INV-4` (and the
-  readiness leaf also trips `INV-5`).
-- A fabricated `priority: 0` for an item with no native priority -> `INV-2`.
-- A `blockedBy` entry holding a native id instead of an `identifier` -> `INV-3`.
-- A made-up sixth `stateCategory` -> `INV-1`.
-
-If these do **not** fail, your fixture or invocation is wrong; fix that before
-trusting any pass.
-
----
-
-## The verify loop
-
-```
-build/refresh fixture
-   │
-   ▼
-run: node --experimental-strip-types "<flow-root>/scripts/validate-adapter.ts" --fixture <fixture.json>
-   │
-   ├─ exit 0 / ok:true  ──────────────▶  DONE (adapter conforms)
-   │
-   └─ exit nonzero / ok:false
-         │  read failures[].invariant + detail
-         ▼
-      fix the MAPPING that produced the breach (not the fixture)
-         │
-         └──────────── re-run ──────────────┘
-```
-
-Fix the **adapter's mapping**, not the fixture, when an invariant fails: the
-fixture is the adapter's output, so editing it to pass hides a real conformance
-bug. The only legitimate fixture edits are to _broaden coverage_ (add a case the
-fixture was missing). The adapter is not done until the verdict is `ok: true` with
-exit `0`.
-
----
-
-## Per-invariant troubleshooting
-
-### `INV-1` - all five state categories are representable
-
-- **Asserts.** Every emitted `stateCategory` is one of `backlog | unstarted |
-started | completed | canceled`; states of each native category map to one of the
-  five; a holding/un-triaged native state maps to `backlog`; no sixth category is
-  ever emitted.
-- **Usual cause.** A tracker-native category leaked through (you passed the
-  tracker's own `type` string), or a holding state was given a new bucket.
-- **Fix.** Revisit the 2a table. Map every state to exactly one of the five; send
-  the holding state to `backlog`. Never emit a tracker-specific value.
-
-### `INV-2` - required fields present and correctly typed
-
-- **Asserts.** Every `WorkItem` carries the required fields with correct types
-  (`id`, `identifier` non-empty strings; `title`, `description`, `stateName`
-  strings; `type` one of the seven; `stateCategory` one of the five; `parent`
-  `string | null`; `relations` with `string[]` arrays; `labels` `string[]`).
-  Optionals (`priority`, `size`, `project`, `assignee`, `agentDisposition`,
-  `createdAt`) are absent or correctly typed. A missing optional is `undefined`,
-  never fabricated.
-- **Usual cause.** Defaulting a missing `priority` or `size` to `0`/smallest, or a
-  missing `parent` to `""` instead of `null`, or dropping a required field.
-- **Fix.** Emit `undefined` for missing optionals (neutral is not "lowest"); set
-  `parent` to `null` for top-level items; ensure every required field is populated
-  and typed.
-
-### `INV-3` - relation references resolve
-
-- **Asserts.** Every id in `relations.blockedBy` (and `blocks`, `children`,
-  `relatedTo`, `duplicateOf`) is in the human-key `identifier` form, never a
-  native id. Within one `getEligibleWork()`/`getProjectWork()` response, each
-  `blockedBy` reference to a still-open item resolves to a member of the returned
-  set; a reference absent from the set is closed/out-of-scope and treated as
-  non-blocking.
-- **Usual cause.** Emitting native node ids in relation arrays, or parsing
-  relations from description prose, or treating an out-of-set reference as a hard
-  block.
-- **Fix.** Map relation endpoints to their `identifier`s. Read only the typed
-  relation graph, never prose. Treat an out-of-set/closed reference as neutral
-  (non-blocking).
-
-### `INV-4` - labels are re-namespaced into the generic families
-
-- **Asserts.** `labels[]` contains generic-family labels, not raw native leaves or
-  tracker-specific groupings. `agentDisposition` is consistent with an `agent/*`
-  label; the stage projection appears as a `stage/*` label; `type` matches a
-  `type/*` label.
-- **Usual cause.** Passing the tracker's flattened leaf labels straight through
-  (`ready` instead of `agent/ready`), the single most common adapter bug.
-- **Fix.** Apply the 2b leaf-to-family map in every read verb. Confirm
-  `agentDisposition`, the stage label, and `type` all trace to a namespaced label.
-
-### `INV-5` - the readiness gate is the `agent/ready` label
-
-- **Asserts.** (a) Every item the eligibility pass admits carries the literal,
-  re-namespaced `agent/ready` label; and (b) the readiness signal never appears as
-  a bare leaf. `getEligibleWork()`/`getProjectWork()` return the full **candidate**
-  set (items with `agent/ready` **plus** dispatchable items that lack it), so the
-  loop can distinguish done from starved.
-- **Usual cause.** Either expressing readiness as a bare leaf/separate field, or
-  pre-filtering the candidate read down to only `agent/ready` items.
-- **Fix.** Express readiness only as the `agent/ready` label (re-namespaced). Do
-  **not** pre-filter: return the full candidate set and let the engine's
-  eligibility pass apply the gate. Pre-filtering passes a naive check but breaks
-  starvation detection ("ready: 0 but shapeable work waits").
-
----
+| Failure | Usual cause                                                                                                     | Fix                                                                                                        |
+| ------- | --------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------- |
+| `INV-1` | Tracker's own state `type` passed through, or the holding state given its own bucket                            | Map every state to one of the five (worksheet 2a); holding state to `backlog`                              |
+| `INV-2` | Missing `priority`/`size` defaulted to `0` or smallest; missing `parent` as `""`; a required field dropped      | Missing optional is `undefined`; top-level `parent` is `null`; fill every required field                   |
+| `INV-3` | Native node ids in relation arrays, relations parsed from prose, or an out-of-set reference treated as blocking | Map endpoints to `identifier`s; read only the typed graph; out-of-set is non-blocking                      |
+| `INV-4` | Native leaves passed straight through (`ready`), the most common adapter bug                                    | Apply the worksheet 2b map in every read verb                                                              |
+| `INV-5` | Readiness as a bare leaf or separate field, or the candidate read pre-filtered to `agent/ready`                 | Readiness is only `agent/ready`; return the full candidate set (pre-filtering breaks starvation detection) |
 
 ## Versioning
 
-Your adapter declares the contract version it targets (`CONTRACT_VERSION` constant
-or a manifest field; SPEC section 5). The harness cannot check that declaration —
-it reads a fixture of normalized `WorkItem`s, so it validates your **output** —
-which is why keeping the declaration honest is the author's job. On a contract
-bump, re-run the harness: a MAJOR
-bump may require regenerating the adapter; a MINOR bump is additive but worth
-re-validating; a PATCH bump is wording only. Pin the version you generated against
-so drift is caught at validation time, not at runtime.
+The harness reads output, so it cannot check your declared contract version; keeping it honest is yours. On a contract bump, re-run the harness (the bump rules are SPEC section 5). Pin the version you generated against so drift shows at validation, not at runtime.

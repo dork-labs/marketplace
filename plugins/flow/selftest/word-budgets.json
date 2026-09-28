@@ -16,8 +16,8 @@
     "target": 79
   },
   "commands/flow.md": {
-    "baseline": 1185,
-    "target": 1185
+    "baseline": 714,
+    "target": 714
   },
   "commands/groom.md": {
     "baseline": 91,
@@ -76,8 +76,8 @@
     "target": 1123
   },
   "docs/driving-it-manually.mdx": {
-    "baseline": 2094,
-    "target": 2015
+    "baseline": 1979,
+    "target": 1979
   },
   "docs/how-it-works.mdx": {
     "baseline": 3116,
@@ -100,8 +100,8 @@
     "target": 592
   },
   "docs/SPEC.md": {
-    "baseline": 2511,
-    "target": 2511
+    "baseline": 2483,
+    "target": 2483
   },
   "docs/the-dials.mdx": {
     "baseline": 4022,
@@ -120,79 +120,99 @@
     "target": 1691
   },
   "docs/why.md": {
-    "baseline": 844,
-    "target": 844
+    "baseline": 1267,
+    "target": 1267
   },
   "README.md": {
-    "baseline": 2438,
-    "target": 2438
+    "baseline": 2175,
+    "target": 2175
+  },
+  "skills/building-adapters/references/conformance-harness.md": {
+    "baseline": 531,
+    "target": 531
+  },
+  "skills/building-adapters/references/mapping-worksheet.md": {
+    "baseline": 465,
+    "target": 465
   },
   "skills/building-adapters/SKILL.md": {
-    "baseline": 947,
-    "target": 947
+    "baseline": 932,
+    "target": 932
   },
   "skills/capturing-work/SKILL.md": {
-    "baseline": 568,
-    "target": 568
+    "baseline": 477,
+    "target": 477
   },
   "skills/closing-work/SKILL.md": {
-    "baseline": 1471,
-    "target": 1200
+    "baseline": 598,
+    "target": 598
   },
   "skills/decomposing-work/SKILL.md": {
-    "baseline": 1335,
-    "target": 1200
+    "baseline": 578,
+    "target": 578
+  },
+  "skills/executing-specs/analysis-agent-prompt.md": {
+    "baseline": 534,
+    "target": 534
+  },
+  "skills/executing-specs/implementation-agent-prompt.md": {
+    "baseline": 577,
+    "target": 577
+  },
+  "skills/executing-specs/implementation-summary-template.md": {
+    "baseline": 95,
+    "target": 95
   },
   "skills/executing-specs/SKILL.md": {
-    "baseline": 4069,
-    "target": 1200
+    "baseline": 982,
+    "target": 982
   },
   "skills/flow-drain/SKILL.md": {
-    "baseline": 495,
-    "target": 495
+    "baseline": 633,
+    "target": 633
   },
   "skills/flow-groom/SKILL.md": {
+    "baseline": 165,
+    "target": 165
+  },
+  "skills/flow-retro/SKILL.md": {
+    "baseline": 230,
+    "target": 230
+  },
+  "skills/flow-triage/SKILL.md": {
     "baseline": 380,
     "target": 380
   },
-  "skills/flow-retro/SKILL.md": {
-    "baseline": 269,
-    "target": 269
-  },
-  "skills/flow-triage/SKILL.md": {
-    "baseline": 569,
-    "target": 569
-  },
   "skills/grooming-backlog/SKILL.md": {
-    "baseline": 2369,
-    "target": 2369
+    "baseline": 1156,
+    "target": 1156
   },
   "skills/ideating-features/SKILL.md": {
-    "baseline": 594,
-    "target": 594
+    "baseline": 250,
+    "target": 250
   },
   "skills/initializing-flow/SKILL.md": {
-    "baseline": 4390,
-    "target": 4390
+    "baseline": 1165,
+    "target": 1165
   },
   "skills/linear-adapter/SKILL.md": {
-    "baseline": 1440,
-    "target": 1440
+    "baseline": 1381,
+    "target": 1381
   },
   "skills/specifying-work/SKILL.md": {
-    "baseline": 904,
-    "target": 904
+    "baseline": 361,
+    "target": 361
   },
   "skills/tending-tracker/SKILL.md": {
-    "baseline": 3640,
-    "target": 3640
+    "baseline": 1176,
+    "target": 1176
   },
   "skills/triaging-work/SKILL.md": {
-    "baseline": 2998,
-    "target": 1200
+    "baseline": 1139,
+    "target": 1139
   },
   "skills/verifying-work/SKILL.md": {
-    "baseline": 3547,
-    "target": 1200
+    "baseline": 1087,
+    "target": 1087
   }
 }

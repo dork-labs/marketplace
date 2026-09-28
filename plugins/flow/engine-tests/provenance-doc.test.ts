@@ -192,12 +192,10 @@ describe('agent provenance — privacy rules', () => {
     // The footgun: a tracker's "authenticated user" read returns a real person.
     expect(specFlat).toMatch(/`account` is the \*\*harness account\*\*/i);
     expect(specFlat).toMatch(/not\*\* the tracker account/i);
-    expect(executingFlat).toMatch(/never the tracker account/i);
   });
 
   it('omits `account` entirely when the derived value contains an `@`', () => {
     expect(specFlat).toMatch(/contains an `@`, omit `account` entirely/);
-    expect(executingFlat).toMatch(/contains an `@`, omit `account` entirely/);
   });
 
   it('warns that `host` can carry a real name, and says to consider omitting it', () => {
@@ -367,36 +365,19 @@ describe('agent provenance — the emitters reference the spec instead of redefi
   });
 });
 
-describe('agent provenance — EXECUTE Phase 0.5 fills the block', () => {
-  it.each(['v', 'account', 'instanceId', 'surface', 'resumeUrl'] as const)(
-    'documents the `%s` field in the Phase 0.5 table',
-    (field) => {
-      expect(executing).toMatch(new RegExp(`\\|\\s*\`${field}\`\\s*\\|`));
-    }
-  );
-
-  it('marks the local-only rows and says they never go on the wire', () => {
-    for (const field of LOCAL_ONLY_FIELDS) {
-      expect(tableRow(executing, new RegExp(`\`${field}\``))).toMatch(/_\(local only\)_/);
-    }
-    expect(executingFlat).toMatch(/never go on the wire/);
+describe('agent provenance — EXECUTE stamps it through flow claim', () => {
+  // The field derivation (harness account, no email, omit what is unknown, wire
+  // fields only) is code now: engine-tests/cli/provenance.test.ts pins it. The
+  // skill keeps the one rule a person adds by hand, and points at the spec.
+  it('claims with flow claim and points at the spec instead of restating the fields', () => {
+    expect(executing).toMatch(/scripts\/flow\.ts" claim /);
+    expect(executingFlat).toMatch(/docs\/provenance\.md/);
+    expect(executing).not.toMatch(/\|\s*`agentId`\s*\|/);
   });
 
-  it('gives per-harness derivation guidance for `account`, and says derive-never-guess', () => {
-    expect(executing).toContain('CLAUDE_CONFIG_DIR');
-    expect(executingFlat).toMatch(/\*\*Derive it, never guess\*\*/);
-    expect(executingFlat).toMatch(/`codex` and `opencode`/);
-    expect(executingFlat).toMatch(/profile \/ home directory/i);
-    expect(executingFlat).toMatch(/cannot derive it, \*\*omit it\*\*/);
-  });
-
-  it('scopes `instanceId` to DorkOS runs but requires `surface` everywhere', () => {
-    const instanceRow = tableRow(executing, /`instanceId`/);
-    expect(flat(instanceRow)).toMatch(/when this run is under DorkOS/i);
-    expect(flat(instanceRow)).toMatch(/Do not substitute the hostname/);
-    const surfaceRow = tableRow(executing, /`surface`/);
-    expect(flat(surfaceRow)).toMatch(/\*\*Always write it, on every surface\*\*/);
-    expect(flat(surfaceRow)).toMatch(/not DorkOS-only/);
+  it('adds only what flow claim cannot derive, and never fabricates', () => {
+    expect(executingFlat).toMatch(/`instanceId` and `resumeUrl`/);
+    expect(executingFlat).toMatch(/never fabricate/i);
   });
 });
 

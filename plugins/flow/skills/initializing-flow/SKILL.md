@@ -3,537 +3,139 @@ name: initializing-flow
 description: First-run setup for the /flow engine in a new repo - detect or reconfigure an existing install, gather setup choices (tracker + connection, identity mode, project routing, adversarial review, model tiers) via the calibration ladder, generate and verify the concrete tracker adapter, scaffold the committed config.json plus the gitignored config.local.json and a review rubric, and confirm the install with a real adapter read plus a policy self-check. Use when running /flow:init, configuring flow for the first time, adopting a new tracker, or reconfiguring an existing flow install.
 ---
 
-# Initializing Flow - first-run setup
+# Initializing Flow
 
-> **Flow root.** This skill lives at `<flow-root>/skills/initializing-flow/SKILL.md`. If you reached it via a symlink (`.claude/skills/flow__*` or `.agents/skills/flow__*`), resolve the real path first (`realpath <path>`): the flow root is two directories above the skill directory. Every `<flow-root>/...` reference below is relative to that root.
+`<flow-root>` is two folders above this file's `realpath`. `cf` means
+`node --experimental-strip-types "<flow-root>/scripts/config-files.ts"`; `flow <verb>` means
+`node --experimental-strip-types "<flow-root>/scripts/flow.ts" <verb>`.
 
-> **What this is.** The one-time setup procedure an adopter (or `/flow:init`)
-> follows to make `/flow` runnable in a repo: pick a tracker, generate the
-> concrete **adapter** that lets the generic engine speak to it, scaffold the
-> config triad, and confirm the install. After this runs clean, every
-> `/flow:<stage>` command and the autonomous loop work against your tracker with
-> no further wiring.
->
-> **This is a prose procedure, not code.** The agent reads this skill and follows
-> it. `/flow:init` is a thin trigger over it.
+Setup makes `/flow` runnable in a repo: pick a tracker, generate and verify its adapter,
+write the settings, confirm the install. It stays tracker-neutral: the only
+tracker-aware thing it makes is the adapter, at `.agents/flow/adapters/<tracker>/SKILL.md`
+in the project (committed; never in the plugin folder, which an update replaces).
+`<flow-root>/skills/building-adapters/SKILL.md` owns how to generate one; the settings
+and their precedence are in `<flow-root>/config/CONFIG.md`.
 
-## The one rule: stay tracker-neutral until the adapter exists
+**Calibration.** A person present: ask each choice with `AskUserQuestion`, the safe
+option marked. Headless: apply each default, record it as an assumption, carry on.
+Setup is reversible by re-running `/flow:init`; the one exception is overwriting
+committed config, which always needs a person.
 
-Setup never names a tracker API, a tool string, or a tracker-specific field. The
-**only** tracker-aware artifact this procedure produces is the generated adapter,
-in the project at `.agents/flow/adapters/<tracker>/SKILL.md` (committed: it is the
-team's code, and a plugin update never touches it). Never write it into the plugin
-folder. Everything else you touch (the
-config triad, the dispatch check) stays generic. When you need adapter-generation
-detail, read the `building-adapters` skill
-(`<flow-root>/skills/building-adapters/SKILL.md`); it owns the generate-and-verify
-contract. This skill owns the **setup orchestration** around it.
+## Step 1 — Detect
 
-## Calibration: ask when a human is present, default when headless
+1. Run `cf migrate` exactly as the `/flow` guard does
+   (`<flow-root>/commands/flow.md`), except that a decline continues here as a fresh
+   install (flow records it, so nobody asks this project again).
+2. Run `cf`. `"origin": "none"`, or a `committed` file that is not valid JSON → **fresh
+   install**, seeded from `<flow-root>/config/config.example.json`.
+3. A `committed` file that parses → **re-run**. Name the current `tracker` and
+   `identity.agent`; ask: reconfigure, regenerate the adapter only (Step 3), or cancel.
+   Headless: cancel, and say a valid config exists. `adapter.origin` `"none"`:
+   recommend regenerating the adapter.
+4. **Toolchain.** `node` on PATH and `<flow-root>/scripts/validate-adapter.ts` present,
+   else stop. Then probe the oracles' one dependency:
+   `echo '{"items":[],"config":{},"ownershipOf":{}}' | node --experimental-strip-types "<flow-root>/scripts/dispatch.ts"`.
+   Any JSON passes. `ERR_MODULE_NOT_FOUND` naming `zod`: install with
+   `npm install --omit=dev --prefix "<flow-root>"` (the flag makes it work under
+   `NODE_ENV=production`), asking first when a person is present; re-check. Still
+   failing: stop, naming the command and its error.
 
-Setup choices are gathered by the calibration ladder. When a human is at the
-terminal, ask with `AskUserQuestion` (one question per choice, with the safe
-option pre-marked). When running headless (no interactive terminal, or a
-non-interactive trigger), do **not** block: apply the sane default for each
-choice, record the assumption in your setup report, and proceed. Setup is
-reversible (re-run with `/flow:init` to change anything), so headless defaults are
-safe to apply silently. The one exception is Step 4's clobber guard, which always
-confirms before overwriting committed config.
+## Step 2 — Gather the choices
 
----
+1. **Tracker and connection.** The transport picks the closest reference adapter
+   (`<flow-root>/adapters/SPEC.md`, `<flow-root>/adapters/reference/`). Capture:
+   `tracker` (a slug, `^[a-z][a-z0-9-]*$`; it names the adapter to generate, not a
+   supported list); `connection.transport`, `cli` (safe default: the account is fixed
+   per call) or `mcp`; `secrets.trackerAccount`; `connection.team` (`key` + `id`);
+   `connection.workspace.slug`. **With `mcp`, warn:** the server writes as whoever
+   authenticated it, so that must be the same identity as `secrets.trackerAccount`.
+   Headless: the template's tracker, `cli`, team and workspace left `null`.
+2. **Identity mode.** Shared (`identity.agent: "auto"`, resolved at runtime; the marker
+   keeps the agent off its own comments) or two-account (the agent's own handle). Also
+   the human reviewer handle. Headless: shared, no reviewer (the gate then mentions the
+   human in a comment).
+3. **Project routing:** `ownership.scope` `["issues"]` or `["issues", "projects"]`
+   (headless default).
+4. **Adversarial review.** On (recommended: `review.adversarial: true`; a separate
+   reviewer blocks the PR until findings converge) or off (cheaper; the first eye is the
+   human's). When on: `review.reviewers` (default 1; raise only for a wide blast radius)
+   and `review.rubric` (default `REVIEW.md`). Headless: on, 1, `REVIEW.md`. Also tell the
+   operator to turn off branch-name auto-close in the tracker's git integration, so the
+   PR body is the only closing signal.
+5. **Model tiers.** Ask for two models: **workhorse** (implementation, review, analysis)
+   and **fast** (mechanical work). The orchestrating model is never a delegate tier, so
+   do not ask for it. One model: bind both to it. Unknown: leave them unbound (each run
+   falls back to the harness default and says so). Headless: no bindings.
 
-## Process
+## Step 3 — Generate and verify the adapter (the gate)
 
-```
-  1 DETECT     does a valid config.json already exist?  (fresh vs re-run)
-  2 GATHER     tracker + connection · identity · routing · review · model tiers
-  3 ADAPTER    generate the concrete adapter, then validate until green (the gate)
-  4 CONFIG     write config.json + config.local.json (secrets) + the review rubric
-  4b ACCOUNTS  flow accounts setup
-  5 CONFIRM    5a connectivity (a real adapter read) + 5b policy self-check
-```
-
-### Step 1 - Detect: fresh install or re-run
-
-flow's settings live in the project, never in the plugin: `.agents/flow/config.json`
-(committed team policy) and `.agents/flow/config.local.json` (this machine's
-credentials and overrides, ignored by git). An older flow kept them inside the plugin,
-where an update could erase them, so first copy any such settings over, then ask
-where the settings are:
+Follow `building-adapters`: read the SPEC, start from the closest reference, write the
+adapter to `<committedDir>/adapters/<tracker>/SKILL.md` (`adapter.target` on a re-run),
+mapping the `WorkItem` model and all 16 required verbs. Then loop:
 
 ```bash
-node --experimental-strip-types "<flow-root>/scripts/config-files.ts" migrate
-node --experimental-strip-types "<flow-root>/scripts/config-files.ts"
+node --experimental-strip-types "<flow-root>/scripts/validate-adapter.ts" --fixture <fixture.json>
 ```
 
-`migrate` never overwrites or deletes, and moves an adapter an older flow generated
-into the plugin along with the settings (its result's `adapter` part); when it prints
-`"migrated": true` (at the top or in `adapter`), tell the operator which files it
-wrote. When it prints `"needsConfirmation": true`, the old settings or adapter sit in
-a plugin folder several projects may share: show the operator its `found` and
-`adapter.found` (folder, tracker, team, workspace; the adapter's `name` and first
-lines) and ask **"Are these this
-project's settings?"** (one answer covers both). On yes, run `config-files.ts migrate --confirm`. On no, run
-`config-files.ts migrate --decline` (flow records the answer, so neither `/flow`
-nor a later `/flow:init` asks this project again, even if this setup is abandoned)
-and continue as a **fresh install** below. Headless, never answer for a person:
-stop and report that the settings may belong to another project and someone must
-run `/flow` in this project to confirm. The second command prints
-`{ ok, origin, committed, local, committedDir, localDir, shared, moved, flowRoot, adapter,
-paused, errors, warnings }`.
+Exit `0` with `{ "ok": true }` passes; otherwise fix the mapping behind the named
+invariant (`INV-1 .. INV-5`). **Never go to Step 4 until it is green.** On Node before
+22.6, run the scripts with `tsx`. An existing adapter: re-validate first, regenerate
+only if it fails. A tracker flow ships an adapter for (`adapter.origin: "shipped"`)
+needs none generated unless overriding it on purpose: validate it and move on.
 
-- **`"origin": "none"` (declined settings are no longer found), or a `committed`
-  file that is not valid JSON → fresh install.** This is the _expected_ state of a clean install: the plugin ships
-  only the templates `<flow-root>/config/config.example.json` and
-  `config.local.example.json`, never a `config.json`. Proceed to Step 2 with
-  defaults seeded from `config.example.json`, otherwise from schema defaults.
-- **A `committed` file that parses → re-run (reconfigure).** Do **not** clobber it silently.
-  Tell the operator `/flow` is already configured (name the current `tracker` and
-  `identity.agent`), and ask whether to **reconfigure** (re-gather choices and
-  rewrite), **regenerate the adapter only** (skip Steps 2 and 4, jump to Step 3),
-  or **cancel**. Headless re-run defaults to **cancel** (never rewrite committed
-  config without a human), and reports that it stopped because a valid config
-  already exists. When `adapter.origin` is `"none"` (no adapter for the configured
-  tracker, for example one a plugin update erased before flow kept adapters in the
-  project), say so and recommend **regenerate the adapter only**.
+## Step 4 — Write the settings and the rubric
 
-#### Confirm the toolchain before going further
-
-Setup is about to lean on the engine oracles, so prove they run **now** rather
-than discovering it at Step 5.
-
-1. **`node` is on PATH** and `<flow-root>/scripts/validate-adapter.ts` exists (it is
-   the Step 3 gate). If either is missing, stop and say so plainly rather than
-   proceeding to a setup that cannot be verified.
-
-2. **The oracles' one runtime dependency is installed.** Run the dispatch oracle
-   on an empty candidate set:
+0. `cf prepare` prints `{ ok, committed, local, ignoreFiles }`; write to exactly those
+   paths. `"ok": false`: **stop**, show `reason`; git would commit the credentials file.
+1. **`config.json`** (committed): from `config.example.json`, keeping `$schema`; set
+   `tracker`, `connection.transport`, `identity.agent`, `ownership.scope` and the `review`
+   block. Leave `models.bindings` empty and `connection.team` / `connection.workspace`
+   `null`. **Never a token, key or account handle here.** On a re-run, rewrite only after
+   Step 1's confirmation.
+2. **`config.local.json`** (ignored): create it only if absent,
+   `test -f "$LOCAL" || (umask 077 && cp <flow-root>/config/config.local.example.json "$LOCAL")`.
+   Fill `secrets.trackerAccount` (and `secrets.trackerToken` if the host gives no auth),
+   `connection.team`, `connection.workspace.slug`, `identity.reviewer`, and
+   `models.bindings`. Merge into an existing file; never overwrite it.
+3. Tell the operator to commit `.agents/flow/config.json` and `.agents/flow/.gitignore`,
+   never `config.local.json`.
+4. **Rubric**, only when `review.adversarial` is true. Resolve `review.rubric`: absolute →
+   as is; relative → the repo root, or the current folder outside a repo. Then:
 
    ```bash
-   echo '{"items":[],"config":{},"ownershipOf":{}}' | node --experimental-strip-types "<flow-root>/scripts/dispatch.ts"
-   ```
-
-   It should answer `{"picked":[],"eligibleCount":0,"starved":false,"shapeableCount":0}`.
-   Any JSON result at all passes this check — even a rejection of the payload —
-   because what it proves is that the module graph loaded. What it is looking for
-   is the other outcome: **`ERR_MODULE_NOT_FOUND` naming `zod`**.
-
-   The shipped `scripts/*.ts` run on `node --experimental-strip-types`, which
-   erases `import type` lines but resolves every value import. **Several oracles
-   need `zod` on disk** — mostly transitively, by reaching `config-schema.ts`
-   (`dispatch.ts` is one of them: it names no package itself, and still cannot
-   load without `zod`). `dispatch.ts` is used as the probe precisely because it
-   sits on that transitive path, so a pass here clears the whole config-schema
-   graph the rest of setup depends on. `validate-config.ts` is the deliberate
-   exception — it is kept dependency-free so it can validate a config before
-   anything is installed, which is also why it is no use as this probe.
-
-   On `ERR_MODULE_NOT_FOUND`, install it into the plugin and re-run the check:
-
-   ```bash
-   npm install --omit=dev --prefix "<flow-root>"
-   ```
-
-   **`--omit=dev` is not optional wording.** A shell carrying
-   `NODE_ENV=production` (or an `omit=dev` npm config) installs _nothing_ from a
-   bare `npm install`, which is exactly how an adopter ends up with a plugin whose
-   own validator cannot run. Stating the flag makes the command behave the same
-   in every shell. Contributors who also want the test/lint/schema-generation
-   toolchain use `--include=dev` instead; an adopter never needs it.
-
-   Interactive: report what is missing and ask before installing. Headless: run
-   the install, then re-run the check and record it as an applied assumption.
-
-   If the re-check still fails, **stop**. Name the command that failed and its
-   error. Everything after this point — the Step 3 conformance gate, the Step 5
-   confirmation — depends on these scripts running.
-
-### Step 2 - Gather setup choices (the calibration ladder)
-
-Five choices drive the rest of setup. Gather them with `AskUserQuestion`
-interactively, or apply the headless default.
-
-1. **Tracker + connection.** Which tracker, and how the adapter reaches it. Offer:
-   - your tracker via an **in-session MCP server** (an authenticated MCP server
-     exposes tracker tools the agent calls directly),
-   - your tracker via an **external CLI** (a CLI bridges to the tracker when no
-     in-session MCP server is available),
-   - a different tracker (for example a generic issue tracker) via **MCP**,
-   - a different tracker via **CLI or REST**,
-   - **other / from scratch**.
-
-   This choice picks the adapter's **transport** and its closest reference
-   starting point in Step 3 (an MCP transport resembles the MCP reference
-   adapter; a CLI or REST transport resembles the CLI/REST reference adapter;
-   see `<flow-root>/adapters/SPEC.md` and the reference adapters under
-   `<flow-root>/adapters/reference/`). Capture, into the config the adapter reads:
-   - the tracker's short name → the `tracker` config field (and `<tracker>` in the
-     adapter path). It is a slug: lowercase letters, digits and dashes, starting
-     with a letter (`^[a-z][a-z0-9-]*$`) — `github`, `jira`, `github-issues`. Any
-     such value is accepted, because `tracker` names the adapter you are about to
-     generate; it is not a list of trackers flow supports,
-   - the transport → `connection.transport`, one of `cli` (an account-pinned
-     external CLI — the **safe default**, since the acting identity is fixed by the
-     account handle) or `mcp` (an in-session MCP server),
-   - the connection/account handle the adapter authenticates through →
-     `secrets.trackerAccount`,
-   - the **team** the engine reads and writes → `connection.team` (`key` + `id`);
-     the adapter can discover the id from the key with a "list teams" read during
-     Step 3,
-   - the **workspace/org** slug → `connection.workspace.slug`.
-
-   **If the operator picks the `mcp` transport, warn about the identity footgun:**
-   an MCP server acts as whoever authenticated (OAuth'd) it, with no per-call
-   account flag, so it must be authenticated as the **same identity** as
-   `secrets.trackerAccount` or the engine silently writes as the OAuth identity.
-   The `cli` transport has no such hazard (every call carries the account handle),
-   which is why it is the default.
-   _Headless default: keep the template's `tracker` value and its matching
-   reference transport (`connection.transport: "cli"`), and leave
-   `connection.team` / `connection.workspace` at their `null` placeholders for the
-   operator to fill in a later `/flow:init`._
-
-2. **Identity mode.** Whether the agent shares the human's tracker account or has
-   its own (charter G10). Offer:
-   - **Shared account**: the agent acts as the human's account. Set
-     `identity.agent` to `"auto"` (resolved at runtime via the adapter's
-     current-user read) and rely on the identity `marker` so the agent never
-     answers its own comments.
-   - **Two-account**: the agent has its own tracker account. Set `identity.agent`
-     to the agent's account handle.
-
-   In both modes, capture the human **reviewer** handle for the review-gate
-   handoff (it lands in `config.local.json`, since a real handle is machine/account
-   specific). _Headless default: shared account (`identity.agent: "auto"`),
-   reviewer left unset (the review gate falls back to a comment that mentions the
-   human)._
-
-3. **Project routing.** What the engine claims and routes by default. This maps to
-   `ownership.scope`. Offer:
-   - **Issues only**: claim and run individual work items (`["issues"]`).
-   - **Issues and projects**: also treat a project as a claimable/dispatchable
-     unit (`["issues", "projects"]`).
-
-   Project-scoped narrowing at runtime (for example `/flow auto <project>`) works
-   regardless of this default via the adapter's project-resolution read; this
-   choice only sets what the loop sweeps by default. _Headless default:
-   `["issues", "projects"]` (the template default)._
-
-4. **Adversarial review.** Whether a branch faces an independent machine review
-   before its PR opens, and how hard. This maps to the `review` block. Offer:
-   - **On** (recommended): VERIFY dispatches a separate reviewer agent that reads
-     the diff against a rubric file and blocks the PR until the findings converge.
-     It spends more tokens per item and buys materially higher output quality —
-     the implementing agent is the worst reviewer of its own branch, because it
-     reviews the change it remembers intending rather than the diff it produced.
-     Sets `review.adversarial: true`.
-   - **Off**: VERIFY opens the PR straight from the evidence bundle. Cheaper and
-     faster; the first eye on the diff is the human's. Sets
-     `review.adversarial: false`.
-
-   When it is on, also capture **how many reviewers run** (`review.reviewers`,
-   default `1`) — raise it only for changes with a wide blast radius, since every
-   extra reviewer is another full read of the diff — and **which rubric file**
-   they read (`review.rubric`, default `REVIEW.md` — resolved against the repo
-   root, or the current directory outside a repo, or used as-is when absolute).
-   _Headless default: on, one reviewer, `REVIEW.md`._
-
-   **Recommend one tracker setting while you are here:** most trackers close a
-   work item when a branch carrying its identifier merges, on top of any closing
-   keyword in the PR body. Since flow puts the identifier in every branch name,
-   that setting closes items on partial PRs that deliberately used a non-closing
-   reference. Tell the operator to disable branch-name-based auto-close in their
-   tracker's git-integration settings, so the PR body stays the only closing
-   signal. It is a one-time change flow cannot make for them, and without it
-   VERIFY has to re-check the item's state after every partial merge.
-
-5. **Model tiers.** Which models this machine's harness can actually reach, so
-   every delegated worker is dispatched on purpose rather than by accident. Ask
-   the operator to rank the models available to them and name two:
-   - **Workhorse** — the strong general-purpose model. Implementation, review,
-     and analysis work run here by default.
-   - **Fast** — the cheap quick one. Mechanical work (searches, scaffolds,
-     renames, log triage) runs here by default.
-
-   Two, deliberately. The model the orchestrating session is itself running on is
-   **not** a delegate tier: flow never names it, never binds it, and never routes
-   a worker onto it, so setup does not ask for it.
-
-   Write both answers to `models.bindings` in `config.local.json`. A model name is
-   machine-specific, so it never goes in the committed file — that one carries
-   only `models.tiers`, the class-to-tier policy, which names no model at all.
-   Explain the split while you ask; it is the same split as the tracker
-   coordinates. Two special cases, both fine:
-   - **Only one model available** → bind both tiers to it. The policy becomes a
-     no-op, which is a valid configuration and not a failure.
-   - **The operator does not know** → leave the bindings out. Each unbound tier
-     falls back to the harness's own default model, and every run that does so
-     says it did.
-
-   _Headless default: write no bindings, and record the assumption — delegates
-   fall back to the harness default until someone runs `/flow:init` again._
-
-Record each chosen value and each headless assumption; they feed Steps 3 and 4
-and the final report.
-
-### Step 3 - Generate and verify the adapter (the gate)
-
-Hand off to the `building-adapters` skill and follow it to produce the concrete
-adapter for the chosen tracker. In brief:
-
-1. Read `<flow-root>/adapters/SPEC.md` (the contract) and pick the closest
-   reference adapter for the transport chosen in Step 2 (or from-scratch for a
-   tracker no reference fits).
-2. Generate the adapter into the project, at
-   `<committedDir>/adapters/<tracker>/SKILL.md` (`committedDir` from Step 1's
-   output: the folder `config.json` is in or goes to; on a re-run with the same
-   tracker this is `adapter.target`). Commit it with `config.json`. Never write it
-   into `<flow-root>`: a plugin update replaces that folder. Map the tracker onto the
-   generic `WorkItem` model and all 16 required capability verbs, with the
-   durability and graceful-degradation notes the SPEC requires, and a
-   supported/not-supported line for each optional verb.
-3. Build a representative fixture and run the conformance gate until it is green:
-
-   ```bash
-   node --experimental-strip-types "<flow-root>/scripts/validate-adapter.ts" --fixture <path-to-your-fixture.json>
-   ```
-
-   > Node < 22.6 lacks `--experimental-strip-types`; on those runtimes invoke any
-   > `<flow-root>/scripts/*.ts` oracle with `tsx` instead (e.g.
-   > `tsx "<flow-root>/scripts/validate-adapter.ts" --fixture <fixture.json>`).
-
-   Exit code `0` with `{ "ok": true }` is the pass. A nonzero exit names the
-   failed invariant (`INV-1 .. INV-5`); fix the **mapping** that produced it in the
-   adapter and re-run. **Do not advance to Step 4 until the verdict is green**: an
-   unverified adapter is the failure mode `building-adapters` exists to prevent.
-
-If the chosen tracker already has a conforming adapter (the "regenerate" or
-re-run path), re-validate it against the current contract version rather than
-regenerating from scratch, and only regenerate if validation fails. A tracker flow
-ships an adapter for (`adapter.origin: "shipped"`, today `linear`) needs no
-generated one: validate the shipped adapter and move on. Generate a project adapter
-for it only to override the shipped one on purpose; the project's copy then wins.
-
-### Step 4 - Scaffold the config triad and the review rubric
-
-Prepare the project's settings folder, write the two config files, then scaffold
-the review rubric. The triad and its precedence are documented in
-`<flow-root>/config/CONFIG.md`; honor it.
-
-0. **Prepare the folder.** Run
-
-   ```bash
-   node --experimental-strip-types "<flow-root>/scripts/config-files.ts" prepare
-   ```
-
-   It creates the project's `.agents/flow/` folders and prints
-   `{ ok, committed, local, ignoreFiles }`. `committed` is where the `config.json`
-   in use lives, or the current checkout for a fresh setup; `local` is where the
-   `config.local.json` in use lives, or the main checkout when you are in a linked
-   git worktree, so every worktree finds it. A folder in the current checkout gets a
-   `.gitignore` that keeps `config.local.json` out of git (commit it with
-   `config.json`); the main checkout's folder is covered by the repo's
-   `info/exclude` instead, so no untracked file there blocks a later merge. Either
-   way git is asked to prove it. Write the two
-   files below to exactly the `committed` and `local` paths it prints. On
-   `"ok": false`, **stop**: git would commit the credentials file. Show the
-   `reason` and do not write `config.local.json` until the operator fixes it. A
-   committed credential file is the one outcome setup must never allow.
-
-1. **`config.json`** (committed, no secrets). Seed it from
-   `<flow-root>/config/config.example.json`, keeping its `$schema` (a URL, so editors
-   validate the file from the project). Set the resolved behavioral policy
-   from Step 2: `tracker` (the chosen tracker's short name), `connection.transport`
-   (the transport choice — `cli` or `mcp`), `identity.agent` (`"auto"` for shared,
-   the agent handle for two-account), `ownership.scope` (the project-routing
-   choice), and the `review` block (`adversarial`, `reviewers`, `rubric` — the
-   adversarial-review choice). **Leave `models.bindings` empty here** — the tier
-   policy in `models.tiers` is shared and stays, but the models it binds to are
-   per-machine and go in the local file, for the same reason no credential does.
-   **Leave `connection.team` and
-   `connection.workspace` at their `null`
-   placeholders here** — a concrete team key/id or workspace slug is
-   deployment-specific and goes in the gitignored local file, never the shared
-   committed one (see CONFIG.md). Leave every other field at its template/schema
-   default. **Never write a token, API key, or account handle into this file**:
-   the schema is strict and credential-free by design. On a re-run, only rewrite
-   this file after the Step 1 confirmation; never overwrite committed config
-   silently.
-
-2. **`config.local.json`** (gitignored, secrets + per-machine overrides). Create
-   it from the template if it does not already exist:
-
-   ```bash
-   LOCAL="<the local path prepare printed>"
-   test -f "$LOCAL" || (umask 077 && cp <flow-root>/config/config.local.example.json "$LOCAL")
-   ```
-
-   Fill in `secrets.trackerAccount` (the connection/account handle from Step 2)
-   and, when the host does not already supply tracker auth, `secrets.trackerToken`.
-   Put the resolved **team** coordinates from Step 2 under `connection.team`
-   (`key` + `id`) and the **workspace** slug under `connection.workspace.slug` —
-   these deep-merge over the committed file's `null` placeholders. Put the human
-   reviewer handle under `identity.reviewer` here, and the two model answers from
-   Step 2 under `models.bindings` (`workhorse` + `fast`) — a model name is
-   per-machine and belongs here, never in the committed file. Delete any template
-   block you do not need. If an existing `config.local.json` is present, merge the new values in
-   rather than overwriting the operator's other overrides.
-
-3. **Tell the operator what to commit:** `.agents/flow/config.json` and
-   `.agents/flow/.gitignore`. Never `config.local.json`; `prepare` already proved
-   git ignores it.
-
-4. **The review rubric** (only when `review.adversarial` resolves true). If no
-   file exists at the path in `review.rubric` — resolved as the table below
-   describes (default
-   `REVIEW.md`), copy the scaffold there:
-
-   ```bash
-   RUBRIC="REVIEW.md"   # the configured review.rubric
+   RUBRIC="REVIEW.md"   # set to the configured review.rubric
    ROOT="$(git rev-parse --show-toplevel 2>/dev/null || pwd)"
-   case "$RUBRIC" in
-     /*) TARGET="$RUBRIC" ;;      # absolute: used as-is
-     *)  TARGET="$ROOT/$RUBRIC" ;;
-   esac
+   case "$RUBRIC" in /*) TARGET="$RUBRIC" ;; *) TARGET="$ROOT/$RUBRIC" ;; esac
    mkdir -p "$(dirname "$TARGET")"
    test -f "$TARGET" || cp <flow-root>/templates/review-rubric.md "$TARGET"
    echo "rubric: $TARGET"
    ```
 
-   Set `RUBRIC` to the configured `review.rubric` before running this — the
-   literal above is only the default. The `case` is what makes an absolute
-   `review.rubric` work: joining it onto `$ROOT` would produce a nonsense
-   `$ROOT//Users/you/REVIEW.md`.
+   **Never overwrite an existing rubric.** Print the resolved path; for a new one, ask the
+   operator to fill its two **FILL IN** sections. The rubric is committed.
 
-   **The `|| pwd` is the other half.** `git rev-parse --show-toplevel` fails
-   outside a git repo, and a bare `$(...)` failure silently yields an empty string
-   — so the rubric was written to `/REVIEW.md`, or not at all, and the adversarial
-   gate (which is **on by default**) quietly reviewed every branch without the
-   rubric it was configured to use. Falling back to the current directory keeps
-   the behaviour honest. The resolution rule, in full:
+## Step 4b — Accounts
 
-   | `review.rubric`          | resolves against      |
-   | ------------------------ | --------------------- |
-   | absolute (`/…`)          | itself — used as-is   |
-   | relative, inside a repo  | the repo root         |
-   | relative, outside a repo | the current directory |
+`flow accounts setup --json` proposes; ask which are work or client accounts (never
+assume); apply with `--yes`. Headless: skip.
 
-   Print the resolved path and tell the operator where it went.
+## Step 5 — Confirm
 
-   The `mkdir -p` matters because `review.rubric` may be a nested path (for
-   example `docs/code-review.md`) whose directory does not exist yet; `cp` into a
-   missing directory fails, and a setup step that fails here would leave the
-   adversarial gate pointed at nothing. Your harness may prompt for approval on
-   the `git rev-parse` call even though the command only reads — approve it; there
-   is no other tracker-neutral way to resolve the repo root.
+Two checks answering different questions; report each by name.
 
-   Set `RUBRIC` to the configured `review.rubric` when the operator chose one
-   other than the default; the `case` above then places it correctly whether it is
-   relative or absolute. **Never overwrite an existing rubric** — an adopter who
-   already has one has already calibrated it. When you create the file, tell the
-   operator to fill in its two **FILL IN** sections (the repo's hard rules and its
-   always-check list): the scaffold reviews generically until those are written,
-   which is the difference between a reviewer that knows the codebase and one
-   guessing at severity. This file is committed, not gitignored — a rubric is
-   shared policy, and it holds no secrets.
+- **5a Connectivity**, the only tracker call: through the adapter, `getCurrentUser()`
+  (show the account flow will act as) and the team and workspace lookup. Any error or
+  empty team: name the file to fix (`config.local.json` for credentials and coordinates,
+  the adapter at `adapter.path` for transport) and **stop**; `/flow` is not ready.
+- **5b Policy self-check**: pipe `getEligibleWork()`'s candidates into
+  `<flow-root>/scripts/dispatch.ts`. Label it "policy oracle only — no tracker call"; an
+  empty queue says "the oracle ran on zero candidates". **5b alone is never a green light.**
 
-### Step 4b - Accounts
+Only after 5a passes, report ready: the tracker, the account 5a resolved, the identity
+mode, the routing scope, the review posture and rubric path, each tier's model (or
+unbound), the entry points, a reminder to commit a generated adapter, and every headless
+assumption.
 
-Flags: `flow accounts setup --help`. Propose
-with `flow accounts setup --json`, ask which accounts are work or client ones (never
-assume), then apply with `--yes`. Headless: skip.
-
-### Step 5 - Confirm the install
-
-Two checks, and they answer **different questions**. Run both, and report each
-under its own name — never let one stand in for the other.
-
-#### 5a. Connectivity — a real read through the adapter
-
-This is the only check that touches the tracker. Using the adapter skill you
-generated in Step 3, perform two reads:
-
-1. `getCurrentUser()` — proves the credentials in `config.local.json` authenticate,
-   and tells the operator **which account** flow will act as. Show that account
-   back to them: on the `mcp` transport this is the single most likely thing to be
-   wrong, and it fails silently by writing as the wrong person rather than by
-   erroring.
-2. The configured **team / workspace** lookup — proves `connection.team` and
-   `connection.workspace.slug` name something that actually exists and that the
-   authenticated account can see it.
-
-An auth error, an empty/unresolvable team, or any throw is a **connection or
-credential gap**. Name the specific file to fix — `config.local.json` for
-credentials and coordinates, the adapter at `adapter.path` for
-transport — and **stop**. Do not report `/flow` as ready.
-
-#### 5b. Policy self-check — the dispatch oracle, no tracker call
-
-Now feed the **real** candidate set from the adapter's `getEligibleWork()` into
-the dispatch oracle:
-
-```bash
-node --experimental-strip-types "<flow-root>/scripts/dispatch.ts"
-```
-
-(candidate set + policy as JSON on stdin, `{ picked, eligibleCount, starved,
-shapeableCount }` as JSON out).
-
-**Label this result honestly: policy oracle only — no tracker call.**
-`dispatch.ts` is a pure function over the items you hand it. It never opens a
-connection, never authenticates, and cannot fail for a credential reason. Its
-`{"picked":[],"eligibleCount":0,"starved":false}` on an empty queue means "the
-ranking policy loaded and agrees there is nothing to pick" — it does **not** mean
-the tracker is reachable, and reading it that way is how an install that never
-connected to anything looks green. If `getEligibleWork()` returned nothing, say
-so explicitly ("empty queue — the oracle ran on zero candidates") rather than
-presenting an empty result as a passing connectivity test.
-
-**5b alone is never a green light.** Only 5a can confirm the adapter, config, and
-credentials resolve.
-
-#### Report
-
-Only when **5a** passed, tell the operator `/flow` is ready: name the configured
-tracker, the **account 5a resolved**, the identity mode, the project-routing
-scope, the adversarial-review posture (and the rubric path — say where it
-resolved to, and flag it if you just scaffolded one that still needs filling in),
-the model bound to each delegate tier (or that a tier is
-unbound and will fall back to the harness default), and the entry points
-(`/flow` to orchestrate, `/flow:<stage>` for a single stage, `/flow auto` for the
-autonomous drain). When you generated an adapter, remind them to commit
-`.agents/flow/adapters/<tracker>/` with `config.json`. Surface any headless assumptions you applied so the operator
-can change them with another `/flow:init`.
-
----
-
-## Idempotency and safety
-
-- **Re-runnable.** Running `/flow:init` again never clobbers committed config
-  without the Step 1 confirmation; a headless re-run defaults to cancel.
-- **The verify gate is non-negotiable.** Step 3 does not complete until
-  `validate-adapter.ts` returns green. Setup that skips the gate ships an adapter
-  that "looks right" but may not conform.
-- **No secret ever lands in a committed file.** Credentials live only in
-  `config.local.json` (gitignored) or a `FLOW_`-prefixed environment variable.
-- **Honest failure.** If the toolchain is missing or its dependency check cannot
-  be made to pass (Step 1), the adapter cannot be verified (Step 3), or the
-  connectivity read fails (Step 5a), stop and say exactly what is wrong and which
-  file to fix. Never report `/flow` as ready on an unverified or unreachable
-  setup.
-- **Never let a policy check impersonate a connectivity check** (Step 5b).
-
-## References
-
-- `<flow-root>/config/CONFIG.md` - the config triad, precedence, and the secrets/policy
-  split.
-- `<flow-root>/skills/building-adapters/SKILL.md` - the generate-and-verify
-  procedure Step 3 invokes.
-- `<flow-root>/adapters/SPEC.md` - the tracker-neutral adapter contract the
-  generated adapter conforms to.
-- `<flow-root>/config/config.example.json` / `<flow-root>/config/config.local.example.json` - the
-  committed policy template and the local-secrets template Step 4 scaffolds from.
-- `<flow-root>/scripts/config-files.ts` - where the project's settings live: `resolve`
-  (default), `migrate` and `prepare`, as Steps 1 and 4 use them.
-- `<flow-root>/templates/review-rubric.md` - the review-rubric scaffold Step 4
-  copies to the repo root when `review.adversarial` is on.
+**Honest failure.** A missing toolchain, a red adapter gate or a failed read stops setup
+with what is wrong and which file to fix. Credentials live only in `config.local.json`
+or a `FLOW_`-prefixed environment variable.

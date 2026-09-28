@@ -5,7 +5,7 @@ description: Guided procedure for generating and verifying a concrete /flow trac
 
 # building-adapters - generate a conforming `/flow` tracker adapter
 
-> **Where `<flow-root>` is:** the folder that holds `skills/`, found from this file's `realpath` (it may be reached through a `flow__*` skill link).
+`<flow-root>` is two folders above this file's `realpath`.
 
 Produce one tracker adapter: the only tracker-aware part of flow. **Generate, then verify.** An adapter is done when `validate-adapter.ts` returns green on a representative fixture, not when it looks right.
 

@@ -10,20 +10,17 @@ schedule:
   permissions: default
 ---
 
-`<flow-root>` below is the folder two levels above this file's real path (run `realpath` on it first if you reached it through a `flow__*` symlink).
+`<flow-root>` is two folders above this file's `realpath`.
 
-This is the schedulable **weekly retro**: flow looks back over its own journal
-and self-test results, and files what should change in flow itself. It ships
-`schedule.enabled: false`. To switch it on with DorkOS, approve it on the
-Schedules page; on any other harness, point your own scheduler at it.
+The schedulable **weekly retro**: flow reads its own journal and self-test
+results and files what should change in flow itself. Off until you approve it on the Schedules page, or point your own scheduler at it.
 
 `flow` below means `node --experimental-strip-types "<flow-root>/scripts/flow.ts"`.
 
 Each firing:
 
-0. **Pause check, before anything else:** run step 0 of
-   `<flow-root>/skills/flow-groom/SKILL.md` exactly as written there, and stop
-   whenever it says to stop.
+0. **Pause check.** Run step 0 of
+   `<flow-root>/skills/flow-drain/SKILL.md`. Stop whenever it says to stop.
 1. Run `flow selftest --json`, so this week's history has a fresh entry.
 2. Run `flow retro --json` and read its `measures` and `proposals`.
 3. For each proposal, keep it, merge it into another, or drop it. Rewrite each

@@ -9,7 +9,7 @@ argument-hint: '[issue-id to reclaim, or empty to halt all autonomy]'
 
 Pause: $ARGUMENTS
 
-With an item id, halt only that item: apply `agent/paused` through the adapter at `adapter.path` (the tick honours it at the next stage boundary, see `/flow` **One tick**). Otherwise, all in one go:
+With an item id, halt only that item: apply `agent/paused` through the adapter at `adapter.path` (the tick honours it at the next stage boundary, see `flow-drain` **One tick**). Otherwise, all in one go:
 
 1. If `.dork/flow/auto-run.json` exists, set its `active` to `false`.
 2. Run `node --experimental-strip-types "${CLAUDE_PLUGIN_ROOT}/scripts/config-files.ts" pause`. The

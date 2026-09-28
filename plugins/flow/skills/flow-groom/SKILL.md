@@ -10,39 +10,20 @@ schedule:
   permissions: default
 ---
 
-> **Flow root.** This skill lives at `<flow-root>/skills/flow-groom/SKILL.md`. If you reached it via a symlink (`.claude/skills/flow__*` or `.agents/skills/flow__*`), resolve the real path first (`realpath <path>`): the flow root is two directories above the skill directory. Every `<flow-root>/...` reference below is relative to that root.
+`<flow-root>` is two folders above this file's `realpath`. `flow <verb>` means
+`node --experimental-strip-types "<flow-root>/scripts/flow.ts" <verb>`.
 
-This is the schedulable **groom health check**: a weekly, read-only
-`/flow:groom check`. The `schedule:` block in the frontmatter above is what makes
-this file a scheduled task. The full groom closes items, so it stays
-operator-run.
+The schedulable **groom health check**: a weekly, read-only
+`/flow:groom check`. The full groom closes items, so it stays operator-run. Off
+until you approve it on the Schedules page (DorkOS) or wire your own scheduler.
 
-It ships `schedule.enabled: false`, the same explicit opt-in as `flow-drain`. To
-switch it on with DorkOS, approve it on the Schedules page. On any other harness,
-point your own scheduler (OS cron, CI) at it.
+Each firing runs the CHECK mode of `<flow-root>/skills/grooming-backlog/SKILL.md`:
 
-Each firing runs the CHECK mode of the grooming-backlog skill
-(`<flow-root>/skills/grooming-backlog/SKILL.md`) and stops:
+0. **Pause check.** Run step 0 of
+   `<flow-root>/skills/flow-drain/SKILL.md`. Stop whenever it says to stop.
+1. Pull once: `flow snapshot --include-closed --out <scratch>/backlog.json`.
+   Run `flow audit --snapshot <scratch>/backlog.json --json` and `flow next --snapshot <scratch>/backlog.json --json`.
+2. Report the failing invariants and their items, the eligible-pool size and the
+   starvation stats; when anything is red, recommend a full `/flow:groom`.
 
-0. **Pause check, before anything else.** Run
-   `node --experimental-strip-types "<flow-root>/scripts/config-files.ts"`. If the check cannot run or its output cannot be read, stop: never act without knowing
-   whether flow is paused. When its
-   `paused` is not `null`, report "flow is paused (since `<pausedAt>`); `/flow:resume`
-   lifts it" and stop. When it says `"ok": false`, report its first error and stop.
-   Otherwise the adapter is the `SKILL.md` at its `adapter.path` (inside it,
-   `<flow-root>` means the output's `flowRoot`).
-1. Pull once: `node --experimental-strip-types "<flow-root>/scripts/flow.ts" snapshot --include-closed --out <scratch>/backlog.json`.
-   Run `flow.ts audit --snapshot <scratch>/backlog.json --json` and `flow.ts next --snapshot <scratch>/backlog.json --json`.
-2. Report to the operator: the failing invariants and their items, the
-   eligible-pool size, and the starvation stats, plus, when anything is red,
-   the one-line recommendation to run a full `/flow:groom`.
-
-**This tick never writes.** The full corrective groom closes work items and
-restructures projects, which sits behind a human gate by design; a scheduler
-must not walk through it. All tracker reads go through **the adapter**; this
-tick never names a tracker directly.
-
-**Operator override.** `/flow:pause` halts this check along with the other
-autonomous surfaces, through the project's pause flag that step 0 reads;
-`/flow:resume` lifts it. Neither edits this file: it is the package's, and an
-update replaces it.
+**This tick never writes.** Closing and restructuring sit behind a human gate.

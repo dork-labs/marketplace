@@ -118,10 +118,8 @@ WorkItem {
 `size` (e.g. GitHub Issues) supply what exists; the dispatch policy treats missing
 fields as neutral.
 
-**Presenting to humans:** any surface that shows a `WorkItem` to a person renders
-`identifier` then `title` (`PROJ-157 - Title`), never the bare key; the identifier
-is the link where the surface supports one. The v1 tracker adapter skill owns this
-convention (its _Presenting a work item to a human_ section); the P5 `PMClient`
+**Presenting to humans:** the v1 tracker adapter skill owns how a `WorkItem` is
+shown to a person (its _Presenting a work item to a human_ section); the P5 `PMClient`
 carries it forward.
 
 ## The flow CLI

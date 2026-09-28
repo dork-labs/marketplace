@@ -7,16 +7,21 @@ mistakes that taught each rule. Grouped by topic, one short paragraph each.
 
 A rule shared by many files is written in one file only. Every other file points at it.
 
-| Rule                                                                        | Its one home                                           |
-| --------------------------------------------------------------------------- | ------------------------------------------------------ |
-| The stage table, routing, the guard, the pause rule, one tick, `/flow auto` | `commands/flow.md`                                     |
-| Stopping one item at a stage boundary (`agent/paused`)                      | `commands/flow.md`, section "One tick"                 |
-| Picking this project's flow schedules, and loading DorkOS's deferred tools  | `commands/status.md`, step 2                           |
-| The tracker is reached only through the `flow` command or the adapter       | `skills/linear-adapter/SKILL.md` (the shipped adapter) |
-| Provenance lines on tracker and pull request text                           | `docs/provenance.md`                                   |
-| Showing an item to a person (`PROJ-157 - Title`)                            | `skills/linear-adapter/SKILL.md`                       |
-| The comment-response rules (never answer your own comment, and the rest)    | `skills/tending-tracker/SKILL.md`                      |
-| The stories behind the rules                                                | this page                                              |
+| Rule                                                                          | Its one home                                           |
+| ----------------------------------------------------------------------------- | ------------------------------------------------------ |
+| The stage table, routing, the guard, the pause rule                           | `commands/flow.md`                                     |
+| One tick, `/flow auto`, stopping an item at a stage boundary (`agent/paused`) | `skills/flow-drain/SKILL.md`                           |
+| The pause check every autonomous entry point runs                             | `skills/flow-drain/SKILL.md`, step 0                   |
+| Picking this project's flow schedules, and loading DorkOS's deferred tools    | `commands/status.md`, step 2                           |
+| The tracker is reached only through the `flow` command or the adapter         | `skills/linear-adapter/SKILL.md` (the shipped adapter) |
+| Finding `<flow-root>` from a skill's real path                                | `skills/linear-adapter/SKILL.md`                       |
+| Provenance lines on tracker and pull request text                             | `docs/provenance.md`                                   |
+| Showing an item to a person (`PROJ-157 - Title`)                              | `skills/linear-adapter/SKILL.md`                       |
+| The comment-response rules (never answer your own comment, and the rest)      | `skills/tending-tracker/SKILL.md`                      |
+| Which model a worker runs on, and the resume ladder                           | `skills/executing-specs/SKILL.md`                      |
+| The six readiness rules                                                       | `skills/grooming-backlog/SKILL.md`, phase 4            |
+| What each stage does, for people                                              | `docs/what-flow-is.mdx`                                |
+| The stories behind the rules                                                  | this page                                              |
 
 ## The `/flow auto` sentinel
 
@@ -83,3 +88,44 @@ neither (2026-07-13, DOR-306).
 Sub-issue promotion once compared a size to the threshold directly. On a numeric
 estimate that compares `8` to `"xl"`, which has no answer (DOR-515). Sizes are now
 compared by ordinal, on one scale for both kinds.
+
+## Grooming the backlog
+
+The first groom of the DorkOS tracker (2026-08-03) found only 21 of 276 open items
+passed the dispatch check, and at least four of those 21 could not be done or had
+already shipped, including the queue's top pick. About a fifth of the items already
+marked ready failed when an agent checked the code instead of trusting the ticket.
+That is why a groom needs evidence from the code for "shipped" and for "open", and why
+readying every item in a set means the bar was not applied.
+
+## Reports from outside the team
+
+Path C of triage checks for duplicates before anything else. On a hand run over 12
+reports, doing that first turned one "new feature" into a copy fix, and stopped
+another from being filed as a regression of work that was already done.
+
+## Reviews and their rubric
+
+The agent that wrote a change is the worst reviewer of it: it reviews what it meant to
+write, not the diff. So the review runs in a fresh context, and a model is always named
+for it. A worker dispatched without a model can quietly run on the most expensive one.
+
+Setup once found the repo root with `git rev-parse` alone. Outside a git repo that
+command fails silently, so the rubric was written to `/REVIEW.md` or not at all, and
+every review ran without it while looking calibrated. Setup now falls back to the
+current folder, and a missing rubric is announced by path.
+
+## Setup
+
+A shell with `NODE_ENV=production` installs nothing from a plain `npm install`, which
+left adopters with a plugin whose own checker could not run. Setup now says
+`--omit=dev`. And an empty dispatch check once passed for a working install: it runs
+on the items it is handed and never touches the tracker, so an install that never
+connected looked green. Setup now reports the tracker read and the policy check
+separately.
+
+## Claims survive a restart
+
+Flow keeps an item's state in `agent/*` labels, never in a plan checklist or a field
+that is rewritten freely. An earlier agent loop kept its state in its plan and lost
+every claim when it restarted.

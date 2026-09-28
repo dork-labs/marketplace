@@ -26,25 +26,25 @@ Contract: [`../../adapters/SPEC.md`](../../adapters/SPEC.md) 2.2.0. `adapter.ts`
 
 ## The verbs
 
-SPEC section 3's 16 required verbs, the groom-only `getBacklogSnapshot`, and the optional `completeProject` (**supported**). Use the `flow` verb where one exists; it reads back and records.
+SPEC section 3's 16 required verbs, the groom-only `getBacklogSnapshot`, and the optional `completeProject` (**supported**). Where a `flow` verb exists, use it: it reads back and records.
 
-| Verb                                                                      | Do this                                                                                                                                                                                                                                                                                                        |
-| ------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| **`getCurrentUser()`**                                                    | Code. By hand: `LINEAR_GET_CURRENT_USER` (never `LINEAR_GET_AUTHENTICATED_USER`, which does not exist), or `viewer { id name }`.                                                                                                                                                                               |
-| **`getBacklogSnapshot()`**                                                | `flow snapshot --json` (`--include-closed`, `--out <file>`). Never script it.                                                                                                                                                                                                                                  |
-| **`getEligibleWork()`**, **`getProjectWork(projectId)`**                  | `flow next --json` (`--for-project`). Returns candidates; the policy applies the `agent/ready` gate.                                                                                                                                                                                                           |
-| **`getProjects()`**, **`resolveProject(nameOrId)`**, **`getProject(id)`** | GraphQL `projects` / `team { issues(filter: { project }) }`. `resolveProject` returns every case-insensitive match; an umbrella identifier resolves to its project.                                                                                                                                            |
-| **`getRelations(item)`**                                                  | GraphQL only, see below.                                                                                                                                                                                                                                                                                       |
-| **`getInbox(agent)`**                                                     | Assigned-to-me, @mentions and new comments since the last tick, as `InboxEntry` below.                                                                                                                                                                                                                         |
-| **`claim(item)`**                                                         | `flow claim <id> --session <session id> --json`. Swaps `agent/ready` for `agent/claimed` (one exclusive `agent/*` group), removes every `stage/*` label, moves the item to started, confirms on read-back, records the run.                                                                                    |
-| **`transition(item, stage)`**                                             | `flow stage <id> <stage> --json`. Release is `flow release`; finishing is `flow done`.                                                                                                                                                                                                                         |
-| **`comment(item, body)`**                                                 | GraphQL `commentCreate`. Ends with `identity.marker` and the `agent:provenance` line.                                                                                                                                                                                                                          |
-| **`assignToHuman(item)`**                                                 | `issueUpdate` `assigneeId` = the reviewer. Used at the review gate and on handoff.                                                                                                                                                                                                                             |
-| **`attachEvidence(item, evidence)`**                                      | Link the proof (recording, test summary, PR) per `evidence.attachTo`.                                                                                                                                                                                                                                          |
-| **`needsInput(item, question)`**                                          | Four effects: post the question (multiple choice when possible, with the marker and the `agent:provenance` line), apply `agent/needs-input` leaving the state alone, `assignToHuman`, **stop**. `flow triage <id> --park` does the first two. Resumes only on a non-agent reply.                               |
-| **`link(a, b, type)`**                                                    | A typed relation (`blocks`, `related`, `duplicate`). Never in description prose.                                                                                                                                                                                                                               |
-| **`createSubIssue(parent, spec)`**                                        | `flow create --parent <id> --key <key>`. Only when `sizeOrdinal(size) >= sizeOrdinal(decomposition.subIssueThreshold)`. The task's `issue` field in `03-tasks.json` is its home. Its description ends with the `agent:provenance` signature; a rewrite replaces it.                                            |
-| **`completeProject(project, outcome)`**                                   | `projectUpdate` to `completed` or `canceled`. List its issues live first; any open one: **refuse** and name it (dispatch drops a closed project's issues). Read its state from GraphQL `projects`; unreadable: refuse. Already there: no-op. On `mcp`, use `save_project` or `update_project`; neither: `cli`. |
+| Verb                                                                      | Do this                                                                                                                                                                                                                                                                                               |
+| ------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **`getCurrentUser()`**                                                    | Code. By hand: `LINEAR_GET_CURRENT_USER` (never `LINEAR_GET_AUTHENTICATED_USER`, which does not exist), or `viewer { id name }`.                                                                                                                                                                      |
+| **`getBacklogSnapshot()`**                                                | `flow snapshot --json` (`--include-closed`, `--out <file>`). Never script it.                                                                                                                                                                                                                         |
+| **`getEligibleWork()`**, **`getProjectWork(projectId)`**                  | `flow next --json` (`--for-project`). Returns candidates; the policy applies the `agent/ready` gate.                                                                                                                                                                                                  |
+| **`getProjects()`**, **`resolveProject(nameOrId)`**, **`getProject(id)`** | GraphQL `projects` / `team { issues(filter: { project }) }`. `resolveProject` returns every case-insensitive match; an umbrella identifier resolves to its project.                                                                                                                                   |
+| **`getRelations(item)`**                                                  | GraphQL only, see below.                                                                                                                                                                                                                                                                              |
+| **`getInbox(agent)`**                                                     | Assigned-to-me, @mentions and new comments since the last tick (`InboxEntry` below).                                                                                                                                                                                                                  |
+| **`claim(item)`**                                                         | `flow claim <id> --session <session id> --json`. Swaps `agent/ready` for `agent/claimed` (one exclusive `agent/*` group), drops every `stage/*`, moves to started.                                                                                                                                    |
+| **`transition(item, stage)`**                                             | `flow stage <id> <stage> --json`. Release is `flow release`; finishing is `flow done`.                                                                                                                                                                                                                |
+| **`comment(item, body)`**                                                 | GraphQL `commentCreate`. Ends with `identity.marker` and the `agent:provenance` line.                                                                                                                                                                                                                 |
+| **`assignToHuman(item)`**                                                 | `issueUpdate` `assigneeId` = the reviewer (review gate, handoff).                                                                                                                                                                                                                                     |
+| **`attachEvidence(item, evidence)`**                                      | Link the proof (recording, test summary, PR) per `evidence.attachTo`.                                                                                                                                                                                                                                 |
+| **`needsInput(item, question)`**                                          | Post the question (multiple choice when possible; marker and `agent:provenance` line), apply `agent/needs-input` leaving the state alone, `assignToHuman`, **stop**. `flow triage <id> --park` does the first two. Resume only on a non-agent reply.                                                  |
+| **`link(a, b, type)`**                                                    | A typed relation (`blocks`, `related`, `duplicate`). Never in description prose.                                                                                                                                                                                                                      |
+| **`createSubIssue(parent, spec)`**                                        | `flow create --parent <id> --key <key>`. Only when `sizeOrdinal(size) >= sizeOrdinal(decomposition.subIssueThreshold)`. Record it in the task's `issue` field in `03-tasks.json`. Description ends with the `agent:provenance` line; a rewrite replaces it.                                           |
+| **`completeProject(project, outcome)`**                                   | `projectUpdate` to `completed` or `canceled`. List its issues live first; any open: **refuse**, naming it (dispatch drops a closed project's issues). Read its state from GraphQL `projects`; unreadable: refuse; already there: no-op. On `mcp`, `save_project` or `update_project`; neither: `cli`. |
 
 ## Calls by hand
 
@@ -53,7 +53,7 @@ SPEC section 3's 16 required verbs, the groom-only `getBacklogSnapshot`, and the
 - **Scope every read to the team:** `team(id: "<teamId>") { issues(…) }`, never a top-level `issues`. The list slug `LINEAR_LIST_LINEAR_ISSUES` has no team filter and is WORKSPACE-wide, not team-scoped: post-filter by identifier prefix (`<teamKey>-`) before any policy or write pass. `--account` is not a team filter.
 - `searchIssues(term:, includeArchived: false)` is cross-team too: post-filter by identifier prefix.
 - Relations: read `relations` and `inverseRelations` through the team node. Any other path's answer (the get slug returns `null`) means unknown, never "no blockers". Read cross-team edges; never write their far end.
-- A large answer spills to `outputFilePath`; read it with `jq`. Paginate with `first` and `after` only.
+- A large answer spills to `outputFilePath`: read it with `jq`. Paginate with `first`/`after` only.
 - Read one issue's comments as `issue(id:) { comments { nodes { id body } } }`.
 - "Entity not found" on a comment to an id that reads fine: the issue is archived; check `archivedAt`.
 
@@ -71,16 +71,15 @@ SPEC section 3's 16 required verbs, the groom-only `getBacklogSnapshot`, and the
 ```
 WorkItem {
   id, identifier, title, description,
-  type,            // idea|research|hypothesis|task|monitor|signal|meta, from type/* (exactly one)
+  type,            // from type/*, exactly one
   stateCategory,   // backlog|unstarted|started|completed|canceled
-  stateName,       // display only, never matched on
-  priority,        // native 0 none · 1 urgent · 2 high · 3 medium · 4 low, never a label
-  size,            // native estimate number, never a label or t-shirt conversion
+  stateName,       // display only
+  priority, size,  // native fields, never labels; size never t-shirt converted
   project, parent,
   relations { blocks[], blockedBy[], children[], relatedTo[], duplicateOf? },
-  labels[],        // all labels, re-namespaced group/leaf
-  assignee,        // raw; classifyOwnership decides mine|reviewer|other|unassigned
-  agentDisposition // ready|claimed|completed|needs-input, from agent/*
+  labels[],        // re-namespaced group/leaf
+  assignee,        // raw; classifyOwnership decides
+  agentDisposition // from agent/*
 }
 ```
 
@@ -88,7 +87,7 @@ WorkItem {
 - An untriaged item is held out of dispatch by its missing `agent/ready`, not its category. TRIAGE and DECOMPOSE apply `agent/ready`.
 - Labels arrive as bare leaves with a `parent` group; re-namespace to `parent/name` (`ready` → `agent/ready`), or dispatch silently misses them.
 - Compare `size` by ordinal only, never to the threshold word: `sizeOrdinal(8)` and `sizeOrdinal("xl")` are both `4`. Missing is neutral and never promotes.
-- Graceful degradation: a missing field is `undefined` (neutral), never `0`, `null` or `""`; never fabricate one. SPEC section 2 has the full rules.
+- Graceful degradation: a missing field is `undefined` (neutral), never `0`, `null` or `""`. Full rules: SPEC section 2.
 
 ## The state machine
 

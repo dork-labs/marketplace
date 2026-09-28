@@ -284,4 +284,20 @@ describe('the shipped plugin', () => {
     const findings = lintCorpus(loadCorpus(FLOW_ROOT), loadLintConfig(FLOW_ROOT), FLOW_ROOT);
     expect(findings.map((f) => `${f.rule} ${f.path}: ${f.detail}`)).toEqual([]);
   });
+
+  it('reads the files beside a skill, and a budgeted reference file cannot grow', () => {
+    // An agent reads a skill's references and prompts as well as SKILL.md, so
+    // the ratchet covers them: text added to one fails like text added to a skill.
+    const corpus = loadCorpus(FLOW_ROOT);
+    const config = loadLintConfig(FLOW_ROOT);
+    const reference = 'skills/building-adapters/references/conformance-harness.md';
+    for (const p of [reference, 'skills/executing-specs/implementation-agent-prompt.md']) {
+      expect(corpus.map((f) => f.path)).toContain(p);
+      expect(config.budgets[p]).toBeDefined();
+    }
+    const grown = corpus.map((f) =>
+      f.path === reference ? { ...f, text: `${f.text}\nOne more rule that should not be here.` } : f
+    );
+    expect(checkWords(grown, config.budgets).map((f) => f.path)).toEqual([reference]);
+  });
 });
