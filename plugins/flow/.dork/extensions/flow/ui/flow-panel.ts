@@ -12,7 +12,7 @@
 
 import type { ComponentType } from 'react';
 import type { PanelAccount, PanelModel, PanelRun, PanelWindow } from '../lib/panel.ts';
-import { FleetRequestError, getPanel, pauseFlow, resolveApiBaseUrl, resumeFlow } from './api.ts';
+import { UNREACHABLE_MESSAGE, getPanel, pauseFlow, resolveApiBaseUrl, resumeFlow } from './api.ts';
 import {
   PILL_TEXT,
   TONE_VARIABLE,
@@ -32,19 +32,19 @@ export const PANEL_LOAD_FAILED_TEXT = "Couldn't load Flow's status. Try again in
 /** The action beside {@link PANEL_LOAD_FAILED_TEXT}. */
 export const PANEL_RETRY_TEXT = 'Retry';
 
-/** Shown under "Running" when flow runs nothing (Q24, open). */
+/** Shown under "Running" when flow runs nothing (Q24, decided). */
 export const NOTHING_RUNNING_TEXT = 'Nothing is running.';
 
-/** The footer button while flow runs anywhere (Q25, open). */
+/** The footer button while flow runs anywhere (Q25, decided). */
 export const PAUSE_TEXT = 'Pause flow';
 
-/** The footer button while flow is paused everywhere (Q25, open). */
+/** The footer button while flow is paused everywhere (Q25, decided). */
 export const RESUME_TEXT = 'Resume flow';
 
-/** The slots text while flow is paused everywhere (Q25, open). */
+/** The slots text while flow is paused everywhere (Q25, decided). */
 export const PAUSED_TEXT = 'paused';
 
-/** Shown after a resume that could not turn DorkOS schedules back on (Q28, open). */
+/** Shown after a resume that could not turn DorkOS schedules back on (Q28, decided). */
 export const SCHEDULES_OFF_TEXT = "Turn flow's schedules back on in Tasks.";
 
 /** How often the panel re-reads its model when the live stream fails, in ms. */
@@ -544,7 +544,9 @@ export function createFlowPanel(api: PanelHostApi): ComponentType {
         },
         (failure: unknown) => {
           setBusy(false);
-          setError(failure instanceof FleetRequestError ? failure.message : String(failure));
+          // The panel always says the one approved sentence; flow's own words go to the console.
+          console.error('[flow] pause/resume failed:', failure);
+          setError(UNREACHABLE_MESSAGE);
         }
       );
     };

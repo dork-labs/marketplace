@@ -4,6 +4,12 @@ Installs of this plugin are pinned to a commit SHA, so a fix here does not reach
 you until you **reinstall it** (Marketplace → flow → reinstall, or re-run your
 `--plugin-dir` checkout's `git pull`). Each entry below says whether that matters.
 
+## 0.47.1
+
+**If pausing or resuming flow from the Flow panel fails, the panel now says so in one plain sentence. Reinstall to get it.**
+
+- A failed Pause flow or Resume flow now shows "Flow didn't respond, so nothing was changed. Try again." instead of a technical message.
+
 ## 0.47.0
 
 **The instructions for each /flow stage are much shorter, so an agent reads less before it does the work. Nothing flow does has changed. Reinstall if you want the shorter versions; your runs work the same either way.**
