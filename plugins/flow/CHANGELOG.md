@@ -15,7 +15,6 @@ you until you **reinstall it** (Marketplace → flow → reinstall, or re-run yo
 - The README no longer repeats what each stage does; it points at the "What flow is" page.
 - The guide for building an adapter for a new tracker is about half as long. It points at the adapter rules instead of copying them, and keeps the steps: fill in the tables, build a test file, run the checker until it passes.
 
-
 ## 0.46.0
 
 **The tracker adapter's instructions are much shorter, so an agent reads less before it touches your tracker. Nothing it does has changed. Reinstall if you want the shorter versions; your runs work the same either way.**
