@@ -15,6 +15,7 @@
 import { readJsonFile } from '../../../../scripts/atomic-json.ts';
 import { PreconditionError, UsageError } from '../../../../scripts/errors.ts';
 import {
+  DEFAULT_ACCOUNT_LABEL,
   accountKey,
   effectiveReservePct,
   fleetPolicyPath,
@@ -226,9 +227,23 @@ export function storedEntry(
   return isObject(entry) ? entry : undefined;
 }
 
-/** The label of an account as the Flow tab shows it. */
+/**
+ * The label of an account as the Flow tab and the Flow panel show it.
+ *
+ * - Claude Code's standalone `default` (its own sign-in folder, when no
+ *   registered row names that folder) takes DorkOS's label, "Main (this
+ *   computer's sign-in)", or flow's same {@link DEFAULT_ACCOUNT_LABEL} when
+ *   DorkOS gave none. A `default` that aliases a registered row is not listed
+ *   on its own: DorkOS lists that row once, under its own label.
+ * - Codex's and OpenCode's implicit accounts read "<Runtime> (this computer's
+ *   sign-in)": the panel has no runtime captions, so two rows called "Main"
+ *   would not say which is which.
+ */
 function accountLabel(subject: FleetSubject): string {
-  if (subject.implicit) return `${RUNTIME_LABELS[subject.runtime]} (this computer's sign-in)`;
+  if (subject.implicit) {
+    if (subject.runtime === 'claude-code') return subject.summary.label ?? DEFAULT_ACCOUNT_LABEL;
+    return `${RUNTIME_LABELS[subject.runtime]} (this computer's sign-in)`;
+  }
   return subject.summary.label ?? subject.id;
 }
 

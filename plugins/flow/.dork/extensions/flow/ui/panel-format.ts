@@ -121,7 +121,8 @@ export function formatResetTime(iso: string, now: Date, locale?: string): string
 /**
  * The muted words after an account's name: "out · resets Tue" when it is out
  * ("out" when the reset is unknown), "reserved" when flow is keeping Main's
- * reserve, else nothing.
+ * reserve, "unknown" when neither window has a reading (the host's unknown
+ * state, as a Codex or OpenCode sign-in with no usage read yet), else nothing.
  *
  * @param account - The account.
  * @param now - The moment to read from.
@@ -133,7 +134,10 @@ export function accountStateText(account: PanelAccount, now: Date): string | nul
       ? 'out'
       : `out · resets ${formatResetDay(account.out.resetsAt, now)}`;
   }
-  return account.reserved ? 'reserved' : null;
+  if (account.reserved) return 'reserved';
+  const { five_hour: five, seven_day: week } = account.windows;
+  const unread = (entry: PanelWindow | null) => entry === null || entry.usedPct === null;
+  return unread(five) && unread(week) ? 'unknown' : null;
 }
 
 /**

@@ -10,7 +10,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { ExecFileLike } from '../lib/advisor.ts';
-import type { AccountUsage } from '../lib/host-types.ts';
+import type { AccountSummary, AccountUsage } from '../lib/host-types.ts';
 import {
   CheckoutResolver,
   discoverCheckouts,
@@ -232,6 +232,102 @@ describe('discoverCheckouts', () => {
 });
 
 describe('GET /panel', () => {
+  it("shows this computer's Claude sign-in once, as Main, beside the registered accounts", async () => {
+    // The operator's shape: no registered row at the default folder, so DorkOS
+    // lists the default on its own, labelled as its own sign-in; Main is it.
+    const summaries: AccountSummary[] = [
+      {
+        runtime: 'claude-code',
+        id: 'claude2',
+        label: 'Claude2',
+        color: '#16a34a',
+        implicit: false,
+      },
+      {
+        runtime: 'claude-code',
+        id: 'claude3',
+        label: 'Claude3',
+        color: '#d97706',
+        implicit: false,
+      },
+      {
+        runtime: 'claude-code',
+        id: 'claude4',
+        label: 'Claude4',
+        color: '#9333ea',
+        implicit: false,
+      },
+      {
+        runtime: 'claude-code',
+        id: 'default',
+        label: "Main (this computer's sign-in)",
+        color: '#2563eb',
+        implicit: true,
+      },
+      {
+        runtime: 'codex',
+        id: 'default',
+        label: "Main (this computer's sign-in)",
+        color: '#a855f7',
+        implicit: true,
+      },
+    ];
+    writeFleet(world.dorkHome, {
+      accounts: {
+        'claude-code:default': { role: 'main' },
+        'claude-code:claude2': { role: 'rotation' },
+      },
+    });
+    writeLedger(
+      world.dorkHome,
+      'claude-code',
+      'default',
+      { seven_day: { usedPct: 91, resetsAt: '2026-09-30T15:00:00.000Z' } },
+      NOW.toISOString()
+    );
+    const { router } = setup({ summaries });
+    const model = await panel(router);
+    expect(model.accounts.map((a) => [a.key, a.label, a.reserved])).toEqual([
+      ['claude-code:claude2', 'Claude2', false],
+      ['claude-code:claude3', 'Claude3', false],
+      ['claude-code:claude4', 'Claude4', false],
+      ['claude-code:default', "Main (this computer's sign-in)", true],
+      // Codex keeps its runtime's name: the panel has no runtime captions.
+      ['codex:default', "Codex (this computer's sign-in)", false],
+    ]);
+  });
+
+  it("falls back to flow's own label when DorkOS gives the Claude default none", async () => {
+    const { router } = setup({
+      summaries: [
+        { runtime: 'claude-code', id: 'default', label: null, color: '#2563eb', implicit: true },
+      ],
+    });
+    expect((await panel(router)).accounts.map((a) => a.label)).toEqual([
+      "Main (this computer's sign-in)",
+    ]);
+  });
+
+  it('shows a registered account at the default folder once, under its own label', async () => {
+    // DorkOS folds `default` into the registered row whose folder it is.
+    const { router } = setup({
+      summaries: [
+        { runtime: 'claude-code', id: 'work', label: 'Work', color: '#2563eb', implicit: false },
+        {
+          runtime: 'claude-code',
+          id: 'claude2',
+          label: 'Claude2',
+          color: '#16a34a',
+          implicit: false,
+        },
+      ],
+    });
+    expect((await panel(router)).accounts.map((a) => [a.key, a.label])).toEqual([
+      ['claude-code:work', 'Work'],
+      ['claude-code:claude2', 'Claude2'],
+    ]);
+  });
+
   it('shows every account with its usage, and every active run with its state', async () => {
     writeFleet(world.dorkHome, { accounts: { 'claude-code:work': { role: 'main' } } });
     writeLedger(

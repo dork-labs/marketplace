@@ -4,6 +4,12 @@ Installs of this plugin are pinned to a commit SHA, so a fix here does not reach
 you until you **reinstall it** (Marketplace → flow → reinstall, or re-run your
 `--plugin-dir` checkout's `git pull`). Each entry below says whether that matters.
 
+## 0.47.2
+
+**The Flow panel and the Flow tab call this computer's own Claude sign-in "Main (this computer's sign-in)", as DorkOS does. Reinstall to get it.**
+
+- The panel also marks an account whose usage it can't read yet: its bars are dashed outlines, and it says "unknown" after the name.
+
 ## 0.47.1
 
 **If pausing or resuming flow from the Flow panel fails, the panel now says so in one plain sentence. Reinstall to get it.**
