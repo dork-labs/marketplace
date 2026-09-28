@@ -1,7 +1,7 @@
 /**
- * The rule `/flow:status` and `/flow:pause` both follow to pick this project's
- * flow schedules out of DorkOS's `tasks_list` (DOR-2300 review). Kept in one
- * place so the two commands are held to the same wording.
+ * The rule `/flow:status` step 2 states, and `/flow:pause` follows by pointing
+ * at it, to pick this project's flow schedules out of DorkOS's `tasks_list`
+ * (DOR-2300 review). The rule's prose lives in `/flow:status` alone.
  *
  * A project root is a folder, not a string prefix: `/work/app` must not claim
  * `/work/app-2/...`, which is how a pause could switch off ANOTHER project's

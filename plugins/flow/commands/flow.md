@@ -1,16 +1,18 @@
 ---
-description: The /flow engine — one PM-agnostic workflow from capture to done. Routes to a stage, advances a work item or project, or (P2) drives the autonomous loop.
+description: The /flow engine — one PM-agnostic workflow from capture to done. Routes to a stage, advances a work item or project, or drains the ready queue.
 category: flow
 allowed-tools: Read, Glob, Grep, SlashCommand, Task, TaskList, TaskGet, AskUserQuestion
-argument-hint: "[stage | work-item | project | continue | auto]"
+argument-hint: '[stage | work-item | project | continue | auto]'
 ---
 
 # /flow — the workflow engine
 
-One canonical stage model, run two ways: manually via these commands, or
-autonomously through a PM tool. Resolve and route: $ARGUMENTS
+Resolve and route: $ARGUMENTS
 
-## Stage model (command ↔ stage)
+`flow <verb>` below means `node --experimental-strip-types "${CLAUDE_PLUGIN_ROOT}/scripts/flow.ts" <verb>`;
+`cf` means `node --experimental-strip-types "${CLAUDE_PLUGIN_ROOT}/scripts/config-files.ts"`.
+
+## Stages
 
 | Stage     | Command           | Skill               |
 | --------- | ----------------- | ------------------- |
@@ -24,382 +26,78 @@ autonomously through a PM tool. Resolve and route: $ARGUMENTS
 | REVIEW    | — (human gate)    | —                   |
 | DONE      | `/flow:done`      | `closing-work`      |
 
-All tracker I/O routes through the tracker adapter skill: the `SKILL.md` at the
-`adapter.path` that `config-files.ts` prints (see the first-run guard below). It is the
-project's own adapter (`.agents/flow/adapters/<tracker>/SKILL.md`), else the one flow
-ships for that tracker. When this command names a work item to the operator
-(the dispatch pick, the ready-queue list, the resumed item), render it as
-identifier with title (`PROJ-157 - Title`), per the adapter's display convention;
-never a bare key.
+`/flow:status`, `/flow:pause` and `/flow:resume` observe or steer; they never advance a stage.
 
-**Observe + control (non-stage commands).** Three commands sit beside the spine;
-they observe or steer the loop, never advance a stage:
+- Name an item as `PROJ-157 - Title` (the adapter's display convention), never a bare key.
+- Uncertainty, not the stage, pulls a person in.
+- Hit friction, a workaround or a confusion in flow itself: `flow note --kind friction|workaround|confusion "<one sentence>"`. No secrets, no pasted output.
 
-| Verb     | Command        | What it does                                                      |
-| -------- | -------------- | ----------------------------------------------------------------- |
-| `status` | `/flow:status` | One pane: in-flight items, parked questions, the assumption trail |
-| `pause`  | `/flow:pause`  | Halt every autonomous mode (drain sentinel + pause flag) at once  |
-| `resume` | `/flow:resume` | Restore what `pause` halted                                       |
+## Guard (every invocation, before routing)
 
-**Notes on flow itself.** Write `flow note` when: you improvised a script or brief the plugin
-should have shipped (`workaround`); a skill's steps were wrong or missing (`friction`); two
-instructions disagreed or you guessed (`confusion`). One sentence, no secrets, no pasted output.
+Never guess a settings path. Run `cf migrate`:
 
-```bash
-node --experimental-strip-types "${CLAUDE_PLUGIN_ROOT}/scripts/flow.ts" note --kind friction "<one sentence>"
-```
+- `"migrated": true` (top level or in `adapter`): name the files it wrote; ask the operator to commit `.agents/flow/config.json`, `.agents/flow/.gitignore` and any `.agents/flow/adapters/` it wrote, never `config.local.json`.
+- `"needsConfirmation": true`: nothing was copied. Show `found` and `adapter.found` (never a credential), then ask with `AskUserQuestion`: **"Are these this project's settings?"** One answer covers both. Yes: `cf migrate --confirm`, report as above. No: `cf migrate --decline`, route to `/flow:init`, stop. Headless: never answer for them; stop and report "these settings may belong to another project; run /flow in this project to confirm".
+- `"ok": false`: show `reason`, carry on.
 
-## Trigger doors × execution modes (orthogonal)
+Then run `cf`:
 
-The trigger source (manual CLI vs PM-driven) is **orthogonal** to the execution
-mode (step vs autonomous). The 2×2:
+- `"ok": false`: route to `/flow:init` and stop before any stage or dispatch work. Headless: report the first error and stop.
+- Show every warning with its path, then carry on. A `/secrets` warning goes first and loud: credentials sit in the committed `config.json`; move that block to `config.local.json` before committing.
+- `config.local.json` overrides `config.json`; a field in neither takes its `default` from `config/config.schema.json`.
+- Read the tracker adapter from `adapter.path` only; `<flow-root>` inside it means `flowRoot`.
 
-|                        | **Step** (run one stage, stop)      | **Autonomous** (run to a gate)                                 |
-| ---------------------- | ----------------------------------- | -------------------------------------------------------------- |
-| **Manual** (CLI/slash) | `/flow:specify`, `/flow:execute`    | `/flow auto` — drain the ready queue from the terminal         |
-| **PM-driven**          | rare; explicit single-stage advance | default — a Pulse tick claims an issue, carries it to its gate |
-
-Every stage is autonomous-capable; the human is pulled in by **uncertainty**
-(the calibration ladder), not by stage. `/flow auto` is the manual-autonomous
-cell — a live terminal drain, server-free (no DorkOS server required). The
-PM-driven-autonomous cell is the Pulse seat, a fresh session per tick.
+**The pause.** When `paused` is not `null`, never
+start `continue` or `auto`, and never run a scheduled tick or a tracker tick: say "flow is paused (since `<pausedAt>`); `/flow:resume` lifts it" and stop. Everything else runs: a pause stops the loop, never
+the operator. With a valid config present, route as below.
 
 ## Routing
 
-**First-run guard (before any routing).** flow's settings live in the project, not in
-the plugin: `.agents/flow/config.json` (committed team policy) and
-`.agents/flow/config.local.json` (this machine's credentials and overrides, ignored by git).
-So does a tracker adapter `/flow:init` generated (`.agents/flow/adapters/<tracker>/`,
-committed) and this machine's pause (`.agents/flow/paused.json`, ignored by git).
-One script knows where they are; never guess a path. On any `/flow` invocation, first run
+**No arguments.** Do not guess. Run `flow next --json`, then offer five intents with `AskUserQuestion`:
 
-```bash
-node --experimental-strip-types "${CLAUDE_PLUGIN_ROOT}/scripts/config-files.ts" migrate
-```
+1. Capture a new thought → `/flow:capture`.
+2. Work on a project → list active projects (adapter `getProjects`), let them pick, go to **Projects**; none active: take a typed name via `resolveProject`.
+3. Continue the queue → `continue`.
+4. Triage the backlog → `/flow:triage`.
+5. Check loop status → `/flow:status`.
 
-It moves settings, and the tracker adapter they name, that an older flow kept inside the
-plugin into the project. It never overwrites or deletes anything, and it prints
-`{ ok, migrated, needsConfirmation, found, from, wrote, unchanged, leftInPlace, reason,
-adapter }`, where `adapter` has the same fields for the adapter:
+Recommend 4 when `starved` and not `atWipCap` ("0 ready, <N> shapeable: run a triage pass?"); else recommend 3.
 
-- **`"migrated": true`** (at the top or in `adapter`): tell the operator which files it
-  wrote and ask them to commit `.agents/flow/config.json`, `.agents/flow/.gitignore` and
-  any `.agents/flow/adapters/` folder it wrote (never `config.local.json`).
-- **`"needsConfirmation": true`**: the old settings or adapter sit in a plugin folder
-  outside this project, which several projects may share, so they may be another project's
-  (credentials included). Nothing was copied. Show the operator `found` (the folder,
-  tracker, team and workspace; never a credential) and `adapter.found` (the adapter's
-  folder, its `name` and its first lines, `excerpt`) and ask with
-  `AskUserQuestion`: **"Are these this project's settings?"** The one answer covers both.
-  On yes, run the same command with `migrate --confirm` and report
-  it as above. On no, run `migrate --decline` (flow remembers the answer and never asks
-  this project again), then route to `/flow:init` to set this project up fresh, and stop.
-  With no human to ask (a headless run, such as a scheduled tick), never answer for them:
-  stop the run and report, in plain words, "these settings may belong to another project;
-  run /flow in this project to confirm". Acting on another project's settings would claim
-  its work.
-- **`"ok": false`**: show its `reason` and carry on; flow keeps reading the old files until
-  the operator resolves it.
+**With arguments**, first match wins:
 
-Then run
+1. `status`, `pause`, bare `resume` or `resume <issue-id>` → that control command.
+2. A stage name → its `/flow:<stage>` command.
+3. An item id or spec path → find its stage (`stage/*` label, else its run record's `stage`, else its spec artifacts); advance one stage.
+4. `continue` or `auto`, optionally with a project.
+5. A project name, spec slug or umbrella id (`resolveProject`; `resume <project>` lands here) → **Projects**.
+6. Anything else: a description; resolve the item, advance one stage.
 
-```bash
-node --experimental-strip-types "${CLAUDE_PLUGIN_ROOT}/scripts/config-files.ts"
-```
+Several matches: list them with `AskUserQuestion`. A bare stage name is the stage; name a colliding project with `/flow resume <project>` or its umbrella id. Still ambiguous: ask.
 
-which prints `{ ok, origin, committed, local, committedDir, localDir, shared, moved,
-flowRoot, adapter, paused, errors, warnings }`: the
-`config.json` and `config.local.json` in use (`local` may be `null`), with `config.json`
-checked against `config/config.schema.json` (a field the schema gives a default may be left
-out); the tracker adapter to read, `adapter.path` (`adapter.origin` says whether it is the
-project's own, one flow ships, or one still inside the plugin); and this machine's pause,
-`paused` (`null` when not paused). When `"ok": false` (no `config.json` anywhere, no adapter
-for the tracker, or another `errors` entry), route straight to
-`/flow:init` to scaffold it and stop, before any stage or dispatch work. A headless run
-stops instead of routing, and reports the first error's message; one at `(file)` or
-`(adapter)` saying the settings or adapter "may belong to another project" means a person
-has to run `/flow` in this project to confirm them. **Warnings never
-do.** Most are an unknown key in `config.json` (a typo, or a setting this version of flow no
-longer has) that flow ignores; the rest are about the files themselves (settings or an
-adapter still inside the plugin, settings moved to another project, or team settings git
-ignores). Show every warning to the operator, naming its path,
-then carry on. Show a warning at `/secrets` first, and make it stand out: it means tracker
-credentials are sitting in the committed `config.json`, so tell the operator plainly to move
-that block to `config.local.json` before anything is committed. Every skill reads settings
-from the two files this printed, with `config.local.json` overriding `config.json`. A field
-missing from both means its `default` in `config/config.schema.json`; read that value
-wherever a skill reads the raw field.
+**Projects.** With `agent/ready` children in a non-terminal state: rank with `flow next --for-project <project> --json`, claim the top item, carry it to its review gate, stop (no sentinel). With none: advance the umbrella issue one stage by its `stage/*` label. `continue <project>` is one such tick; `auto <project>` is **auto** ranked with `--for-project`.
 
-Read the adapter from `adapter.path` and nowhere else. A project adapter lives outside the
-plugin, so wherever it says `<flow-root>`, that means `flowRoot` from the same output,
-whatever the adapter's own note says about where it lives.
+## Queue modes
 
-**The pause.** When `paused` is not `null`, flow's autonomy is halted on this machine: never
-start `continue` or `auto` (below), and never run a scheduled tick or a tracker tick
-(`tending-tracker`). Say "flow is paused
-(since `<pausedAt>`); `/flow:resume` lifts it" and stop. Everything else (a stage command, a
-named work item, `status`, `pause`, `resume`) runs as usual: a pause stops the loop, never
-the operator. With a valid config present, behave exactly as below.
+- **`continue`**: one **tick** (below), no sentinel, then stop. Never loops. **Pause check** first: if the guard's `paused` is not `null`, do not start. If the check cannot run or its output cannot be read, stop before claiming.
+- **`auto`**: drain the ready queue in this terminal, one tick after another. No server needed.
 
-**No arguments (cold start).** When `$ARGUMENTS` is empty, do not guess. Offer the
-operator five intents via `AskUserQuestion`, then route the choice:
+**Auto.**
 
-1. **Capture a new thought**: save a raw idea, no evaluation yet → `/flow:capture`
-2. **Work on a project**: via the adapter's `getProjects` verb, list the active
-   (non-terminal) projects and let the operator pick one, then route the chosen project
-   through **"Working on a project"** (below). With no active projects, fall through to a
-   typed project name via `resolveProject`.
-3. **Continue the queue**: pick up the next-ranked item across the whole ready queue and
-   carry it to its gate, then stop → **single-item dispatch** (below)
-4. **Triage the backlog**: classify and route captured items → `/flow:triage`
-5. **Check loop status**: render the in-flight / parked / assumptions pane → `/flow:status`
+0. **Pause check.** If the guard's `paused` is not `null`, do not start. If the check cannot run or its output cannot be read, stop before claiming.
+1. **Start.** Write `.dork/flow/auto-run.json` (not `flow-state.json`) = `{ "active": true, "ready": <eligibleCount>, "shapeable": <shapeableCount>, "startedAt": "<ISO>", "pid": <pid>, "sessionId": "${CLAUDE_SESSION_ID}" }`, counts from `flow next --json`. If `sessionId` still reads as a `${…}` placeholder, say the drain will stop after each item.
+2. **Pause check** each iteration by running `cf` again. When `paused` is not `null`, claim nothing more and stop; keep the sentinel (set `active` to `false` if it is not); if the check cannot run or its output cannot be read, stop too.
+   **Then it runs one tick.** After it, write the new `ready` and `shapeable` counts.
+3. End early with `<promise>ABORT</promise>`, cleanly with `<promise>PHASE_COMPLETE:auto</promise>`.
+4. **Stop.** Drained or aborted: delete the sentinel. Never leave a stale one.
 
-**Recommended default (starvation-aware).** Before presenting the five intents,
-peek at the dispatch outcome with
-`node --experimental-strip-types "${CLAUDE_PLUGIN_ROOT}/scripts/flow.ts" next --json`
-(act on its counts). When the ready queue is empty but shapeable work waits
-behind the readiness gate (`starved` and not `atWipCap`), the queue
-is **starved**, so default the recommended `AskUserQuestion` intent to **"Triage
-the backlog"** (intent 4) and note "0 ready, <N> shapeable: run a triage pass?".
-When ready work exists, or `atWipCap` says the work-in-progress cap is full, default instead to **"Continue the queue"** (intent 3).
-Render any named item as `PROJ-123 - Title` (the adapter's display convention).
+## One tick (continue, auto, and the `flow-drain` schedule)
 
-`AskUserQuestion` auto-appends an **"Other"** free-text option: a stage name, a specific
-item (an issue # or description, resolved then advanced one stage), a **project name**
-(resolved via the adapter's `resolveProject` verb), or `auto` to drain the whole
-queue.
+Resolve identity once per tick with the adapter's `getCurrentUser`; never hand an oracle the literal `"auto"`. Re-read an item's state through the adapter before acting on it. In order:
 
-**With arguments, resolve and route** (resolution precedence, first match wins):
+1. **Recovery.** Read `.dork/flow/flow-state.json`, drop records whose item is closed. For each `agent/claimed`, started, not `agent/needs-input` item, probe its worker and worktree and run `scripts/recovery.ts`. `resume`: re-attach the worktree at HEAD and resume its `sessionId`. Otherwise act on `restart-clean`, `escalate` (`agent/blocked`) or `re-derive`. Skip runs with `drain` set.
+2. **Inbox.** Un-park answered `agent/needs-input` items before claiming anything new: poll the adapter's `getInbox`, apply the comment-response rules in `skills/tending-tracker/SKILL.md` (never answer your own comment), resume with `--resume <sessionId>`. Skip runs with `drain` set.
+3. **Dispatch.** Take `flow next --json`. Empty `picked`: at `atWipCap`, offer no triage; `starved`, write `ready: 0, shapeable: <M>`, report "Queue starved: 0 ready, <M> shapeable: run a triage pass?" and offer `/flow:triage` or stop; else the queue is drained, go to **Stop**. Otherwise provision `picked[0]`'s worktree and claim it: `node --experimental-strip-types "${CLAUDE_PLUGIN_ROOT}/scripts/flow.ts" claim <id> --session <session id> --worktree <path> --branch <branch> --json`. Move stages with `flow stage <id> <stage> --json`, carrying the item to its human-review gate (REVIEW), never past it; DONE is `flow done`, after a human approves. At each decision, run `scripts/involvement.ts`; a live terminal asks inline with `AskUserQuestion`, never a parked tracker comment.
 
-1. **A control verb** (`status`, `pause`, or bare `resume`): invoke `/flow:status` /
-   `/flow:pause` / `/flow:resume`. These observe or steer the loop; they never advance a
-   stage. Disambiguation: `resume <project>` (a project name follows) keeps its existing
-   meaning: carry that project forward (precedence rule 5, "Working on a project"); bare
-   `resume` or `resume <issue-id>` un-pauses autonomy via `/flow:resume`.
-2. **A stage name** (e.g. `/flow specify`): invoke that stage's `/flow:<stage>` command.
-3. **An explicit work item** (an issue identifier like `PROJ-157`, or a spec path):
-   determine its current stage from its `stage/*` label, or while it is started
-   its run record's `stage`, or its spec artifacts, then advance one stage.
-4. **`continue` or `auto`** (optionally followed by a project name, see below): the
-   queue-draining modes.
-5. **A project** (a tracker project name, a spec slug that homes on a project, or a
-   project umbrella's identifier): resolve it via the adapter's `resolveProject`
-   verb, then route by the project's state (see "Working on a project" below).
-6. **Otherwise**: treat the argument as a work-item description, resolve the item via the
-   adapter, then advance one stage.
+**At each stage boundary**, if the item carries `agent/paused`: advance it no further, run `flow release <id> --to none --json`, leave the worktree, move on. Reassigning an item on the tracker hands it to a person or another agent.
 
-When a name matches more than one thing (two projects, or an item and a project), do not
-guess: list the matches with `AskUserQuestion` and let the operator pick. A bare token that
-matches a stage name resolves as that **stage** (precedence rule 2); to address a project
-whose name collides with a stage, name it explicitly with `/flow resume <project>` or pass
-the project's umbrella identifier.
-
-### Working on a project
-
-`/flow <project>` (and the aliases `/flow start <project>` / `/flow resume <project>`)
-resolves the project, then routes by where it sits on the spine:
-
-- **Has dispatchable children** (one or more `agent/ready` items in a non-terminal state):
-  **project-scoped single-item dispatch**. Rank the project's queue with
-  `node --experimental-strip-types "${CLAUDE_PLUGIN_ROOT}/scripts/flow.ts" next --for-project <project> --json`
-  (it honors the `projectStatus` tier and the `perProject` WIP cap), claim the
-  top-ranked item, and carry it to its human-review gate, then **stop**. One item, never looping, no `auto` sentinel.
-- **No dispatchable children yet** (still being shaped, pre-DECOMPOSE): advance the
-  project's **umbrella issue** one stage, exactly like routing a work item (its `stage/*`
-  label drives which). This is how `/flow resume <project>` carries a freshly-ideated
-  project into SPECIFY.
-
-**Project-scoped queue modes** narrow the global modes to one project's queue:
-
-- **`/flow continue <project>`**: one project-scoped dispatch tick (identical to
-  `/flow <project>` when the project has dispatchable children).
-- **`/flow auto <project>`**: drain that project's ready queue autonomously to the
-  human-review gate, the same loop as bare `/flow auto` (below) but ranking with
-  `flow.ts next --for-project <project>`. Honors `autonomy.wipCap.perProject`.
-
-### Global queue modes (no project scope)
-
-- **`continue`** (or the cold-start "Continue the queue" choice): **single-item dispatch**
-  across the whole ready queue. Rank it with
-  `node --experimental-strip-types "${CLAUDE_PLUGIN_ROOT}/scripts/flow.ts" next --json`, claim the top-ranked
-  eligible item, and carry it to its human-review gate, then **stop**. This is one tick of `auto`: server-free,
-  a single item, never looping. **Pause check** first: if the guard's `paused` is not
-  `null`, do not start (see **The pause** above). If the check cannot run or its output
-  cannot be read, stop. It writes **no** `.dork/flow/auto-run.json` sentinel (that
-  file is `auto` only), so the `flow-loop` Stop hook stays a strict no-op and the session
-  ends after the one item.
-- **`auto`**: drain the whole ready queue autonomously to the human-review gate (below).
-
-When the stage is still ambiguous after this, ask.
-
-## `/flow auto` — drain the ready queue (manual autonomous mode)
-
-Drain the ready queue **sequentially from the terminal**, server-free. Each
-issue is carried to its human-review gate; involvement is uncertainty-gated
-(the calibration ladder: run `node --experimental-strip-types "${CLAUDE_PLUGIN_ROOT}/scripts/involvement.ts"` with the
-decision context as JSON in for the `resolveInvolvement` verdict as JSON out), and comms route
-through the live terminal — `AskUserQuestion` inline, never a parked tracker
-comment (`resolveCommsChannel(trigger, identityMode, involvement)` returns
-`interactive` for a manual + live-session trigger in either identity mode;
-unattended routes split by mode, `comment-and-assign` for two-account and
-`comment-and-nudge` for shared).
-
-**The active-run sentinel (what the Stop hook reads).** `/flow auto` keeps the
-session looping by signalling its state in `.dork/flow/auto-run.json`. The
-`flow-loop.mjs` Stop hook reads ONLY this file: with it absent (every normal
-session, every `/flow:<stage>` step run) the hook is a strict no-op and the
-session stops. This sentinel is distinct from the per-issue `flow-state.json`
-run record (the session↔issue association, recovery ladder).
-
-**A sentinel is only as good as its owner.** The `pid` written at
-start is checked, not just recorded: on every Stop the hook probes it, and a
-sentinel whose owner is gone — or one still claiming `active` more than 24 hours
-later, where the number may have been recycled onto an unrelated process — is
-treated as an orphan, allowed to stop, and **deleted**. So a drain that dies
-without tearing down no longer traps every later session in that repo.
-
-**Only the session that started the drain is held.** The sentinel records that
-session's `sessionId`, and the hook compares it with the id of whichever session
-is stopping. Every other session in the repo stops silently, never sees the
-banner, and cannot end the drain with a marker. A sentinel with no `sessionId`
-holds nobody, the owner included, so the drain would end after one item. Two
-consequences for anything that reads this file: a MISSING sentinel does not prove
-the queue drained, and a PAUSED one (`active: false`, written by `/flow:pause`)
-is never reaped, because `/flow:resume` reads it back.
-
-0. **Pause check.** If the guard's `paused` is not `null`, do not start (see **The
-   pause**). If the check cannot run or its output cannot be read, stop.
-1. **Start.** Write `.dork/flow/auto-run.json` =
-   `{ "active": true, "ready": <N>, "shapeable": <M>, "startedAt": "<ISO>", "pid": <pid>, "sessionId": "${CLAUDE_SESSION_ID}" }`.
-   `sessionId` is this session's id, filled in when this command loads; copy it
-   exactly. If the value above is not a session id (it still reads as a `${…}`
-   placeholder, as it does on a harness that does not fill it in), say so: the
-   hook cannot tell this session apart from any other, so the drain will stop
-   after each item instead of looping.
-   Both counts come from `node --experimental-strip-types "${CLAUDE_PLUGIN_ROOT}/scripts/flow.ts" next --json`:
-   `<N>` is `eligibleCount` (ready, eligible issues from the dispatch policy) and
-   `<M>` is `shapeableCount` (dispatchable-category items still behind the
-   `agent/ready` gate). The `shapeable` field is the sentinel that lets the
-   `flow-loop` Stop hook tell a **starved** queue (work waiting on a triage pass)
-   from a genuinely **drained** one (task 1.7). (Inline assumption: the auto-run
-   sentinel gains `shapeable: <N>`.)
-2. **Pause check at the start of every iteration**, by running
-   `node --experimental-strip-types "${CLAUDE_PLUGIN_ROOT}/scripts/config-files.ts"` again:
-   a `/flow:pause` from any session writes the flag. A drain whose `paused` is not `null`
-   claims nothing more and stops; if the check cannot run or its output cannot be read,
-   stop too. It does not delete the sentinel: `/flow:pause` set it to
-   `active: false`, which lets the session stop and lets `/flow:resume` restart the drain.
-   (If the sentinel still says `active: true`, set it to `false` yourself first.)
-   **Then it runs the reconciler registry order: recovery → inbox/resume → dispatch.**
-   This mirrors the flow engine's `runTick` walking the `loops` config (the typed
-   source of truth) in ascending priority — `loops.recovery` (10) before
-   `loops.inbox` (20) before `loops.dispatch` (30). The continuous unattended
-   runner that actually calls `runTick` on a timer is the deferred P5 server build;
-   v1 walks the same order by hand in this prose. Each pass re-derives truth via
-   the adapter before acting (events are triggers, not truth), and a
-   higher-priority pass that claims an item wins same-item contention (recovery
-   re-adopts an orphan before dispatch tries to claim it).
-   - **(0) Resolve identity for the tick.** Before any pass, via the
-     adapter call `getCurrentUser` **once** to resolve
-     `identity.agent: "auto"` into the authenticated account id; build the resolved
-     `Identity { agent, reviewer, marker }` and derive the mode with the flow engine's
-     `resolveIdentityMode` (`reviewer` unset / `null` / equal to `agent` is
-     **shared**; a distinct reviewer is **two-account**). Resolve this **once per
-     tick, not per item**, and cache it: feed the same resolved `Identity` + mode
-     into `shouldRespondToComment` (inbox) and `resolveCommsChannel(trigger, identityMode, involvement)`
-     (stop-and-ask routing), so the typed oracles always receive a concrete account
-     id, never the literal `"auto"`.
-   - **(1) Recovery pass** (`loops.recovery`, priority 10) — re-adopt orphaned
-     claimed work at the head of the tick, and garbage-collect stale runs first.
-     Read the durable run map from `.dork/flow/flow-state.json` via the typed
-     the flow engine's `readFlowState`, then call `gcFlowState` to drop records whose
-     issue is closed/terminal (so the store stays honest before any new claim). Via
-     the adapter, list `agent/claimed` + started-category +
-     not-`agent/needs-input` items. Skip every run with `drain` set: `flow drain`
-     is its only recovery (its workers exit between turns, so a dead pid is normal).
-     For each other item, take its `FlowRun` from the run map,
-     probe whether its `workerPid` is alive and the worktree/session checkpoint
-     survives, and run the recovery oracle `node --experimental-strip-types "${CLAUDE_PLUGIN_ROOT}/scripts/recovery.ts"`
-     (the run record + liveness probe as JSON in, the `recoverOrphan` `RecoveryAction`
-     as JSON out): on `resume`, re-attach the worktree at HEAD and **resume** the captured
-     `sessionId` rather than re-claim from scratch; otherwise act on the returned
-     `RecoveryAction` (`restart-clean`, `escalate` to `agent/blocked`, or
-     `re-derive`). A parked `agent/needs-input` item is never reclaimed.
-   - **(2) Inbox/resume pass** (`loops.inbox`, priority 20) — un-park answered
-     questions before claiming anything new. This is the typed `inbox` reconciler
-     (the flow engine's `inboxReconciler`) wrapping `shouldRespondToComment` over the
-     normalized event seam: via the adapter, poll the inbox into the
-     `InboundTransport` (the flow engine's `PollingTransport`, fed by the adapter's
-     `getInbox` + a durable watermark) to get `comment.added` `TrackerEvent`s on
-     `agent/needs-input` items. Events are triggers, not truth: re-read each item's
-     current state, then run `shouldRespondToComment` (rule 3 → `resume`; the
-     resolved `identity.marker` from step 0 disambiguates a non-agent reply in
-     shared mode, and rule 1 skips the agent's own). A run with `drain` set is the
-     drain's to resume: skip it. On `resume`, re-attach the
-     worktree at HEAD and resume the parked run via `--resume <sessionId>` (read
-     from the item's `FlowRun`) or thread-replay. The poll↔webhook producer is a
-     config edit (`ingestion.producer`), never a code change.
-   - **(3) Dispatch pass** (`loops.dispatch`, priority 30) — claim the top-ranked
-     ready item and carry it to its gate. Run
-     `node --experimental-strip-types "${CLAUDE_PLUGIN_ROOT}/scripts/flow.ts" next --json`: it ranks the ready
-     queue and counts the shapeable backlog behind the readiness gate. - **If `picked` is empty, do not stop silently.** Branch: - **At the WIP cap** (`atWipCap`): ready work waits for a free slot, so offer no triage; carry the in-flight items, or stop. - **Starved** (`shapeableCount > 0`): the queue is starved, not done. Write
-     `ready: 0, shapeable: <M>` to the sentinel, then surface it: report
-     "Queue starved: 0 ready, <M> shapeable: run a triage pass?" and offer, via
-     `AskUserQuestion`, to run `/flow:triage` to ready that backlog (then resume
-     the drain) or to stop. A triage pass produces the `agent/ready` fuel
-     dispatch needs. Render any named item as `PROJ-123 - Title` (the adapter's
-     display convention). - **Done** (`shapeableCount === 0`): the queue is genuinely drained (or the
-     only remaining work is parked on a human or a gate). Set
-     `ready: 0, shapeable: 0` and go to **Stop**. - Otherwise provision the top-ranked issue's (`picked[0]`) worktree and claim
-     it: `node --experimental-strip-types "${CLAUDE_PLUGIN_ROOT}/scripts/flow.ts" claim <id> --session <session id> --worktree <path> --branch <branch> --json`
-     writes the label, the state and the `FlowRun` (the record the recovery pass
-     adopts). Carry the item to its human-review gate, moving stages with
-     `flow.ts stage <id> <stage> --json` (DONE is `flow.ts done`). At each stage
-     boundary, honor the operator override: if the item now carries the
-     `agent/paused` marker (via the adapter), advance it no further,
-     run `flow.ts release <id> --to none --json`, and move on (see "Operator override" below). At
-     every decision point walk the calibration ladder; `stop-and-ask` on a live
-     terminal asks inline via `AskUserQuestion`.
-   - After the iteration reaches a gate (or parks on a genuine question), update
-     `ready` **and** `shapeable` in the sentinel to the new remaining counts.
-
-3. **Loop continuation.** While `active: true` and `ready > 0`, the `flow-loop`
-   Stop hook blocks the stop (exit 2) and the drain continues to the next issue.
-   Output `<promise>ABORT</promise>` to stop early, or `<promise>PHASE_COMPLETE:auto</promise>`
-   to end the drain cleanly — either overrides the sentinel and allows the stop,
-   and the hook deletes the sentinel on its way out, so the advertised hatch is
-   real rather than advisory.
-4. **Stop / teardown.** When the queue is drained (or on abort), **delete**
-   `.dork/flow/auto-run.json`. With the sentinel gone the Stop hook fails open
-   and the session ends. Never leave a stale sentinel — it would trap the next
-   session in the drain loop. The hook now reaps an orphan it finds, but that is
-   a backstop for a drain that DIED, not a licence to skip this step: an owner
-   that is still alive is believed.
-
-## Operator override (pause / resume / reclaim)
-
-The operator always outranks the loop. Three override surfaces, coarse to fine:
-
-- **Halt everything.** `/flow:pause` stops every autonomous mode from one place: it
-  sets `active: false` in the `.dork/flow/auto-run.json` drain sentinel AND writes this
-  machine's pause flag (`config-files.ts pause`, `.agents/flow/paused.json`), which every
-  scheduled tick, `continue` and `auto` check before doing anything, so no mode keeps
-  claiming. The flag is in the project, so a plugin update cannot undo it, and it works
-  under any scheduler. `/flow:resume` restores both. Halting and restoring autonomy is
-  always one action, never a hunt across files. flow never edits the shipped
-  `flow-drain` schedule: on DorkOS a schedule's on/off switch is the one on the Schedules
-  page.
-- **Disable or reorder one loop.** Per-reconciler control is a `loops` config edit,
-  not a command: `loops.<id>.enabled: false` silences a single reconciler (e.g.
-  `loops.triage`, `loops.hygiene`) and `loops.<id>.priority` reorders the tick. Edit
-  the project's `.agents/flow/config.json`; see the dials guide (`${CLAUDE_PLUGIN_ROOT}/docs/the-dials.mdx`).
-- **Reclaim or redirect one item.** Via the adapter, apply the
-  **`agent/paused`** marker to an item. The running tick honors `agent/paused` **at
-  stage boundaries**: it advances the item no further, runs `flow.ts release <id>
---to none`, and leaves the worktree intact for inspection, rather
-  than abandoning a half-finished stage. To hand the item to a human or another
-  agent instead, use the ownership-policy reassignment (reassign on the tracker via
-  the adapter); `classifyOwnership` then treats it as not-ours.
-
-Claim, stage, release and done run through `flow.ts`; all other tracker I/O routes
-through the tracker adapter skill; this command never names a tracker string.
+Tracker rules: see the adapter at `adapter.path`.

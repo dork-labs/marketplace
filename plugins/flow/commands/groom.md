@@ -10,16 +10,8 @@ argument-hint: '[check]'
 Groom the backlog: $ARGUMENTS
 
 Read `${CLAUDE_PLUGIN_ROOT}/skills/grooming-backlog/SKILL.md` and follow its
-process exactly.
+process exactly. Its tracker adapter is the `SKILL.md` at `adapter.path`.
 
-That skill is PM-agnostic: it routes every tracker read or write through the
-tracker adapter skill (the `SKILL.md` at the `adapter.path` that
-`node --experimental-strip-types "${CLAUDE_PLUGIN_ROOT}/scripts/config-files.ts"` prints), which it reads on demand. Do not
-touch a tracker directly from this command — the skill owns the sweep, the
-invariants, and the human gate.
-
-If the argument is `check`, run the read-only audit (snapshot → oracles →
-report, zero writes). With no argument, run the full groom: it will present the
-closure list and project restructuring for approval before writing anything.
-GROOM sweeps the whole backlog — it does not triage a single new item (that is
-`/flow:triage`) and it does not dispatch work (that is the loop).
+`check`: the read-only audit, zero writes. No argument: the full groom, which asks
+approval for its closures and project changes before writing. GROOM neither triages
+one new item (`/flow:triage`) nor dispatches work.
