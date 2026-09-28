@@ -282,3 +282,98 @@ describe('resolveInvolvement — the calibration ladder (§5)', () => {
     });
   });
 });
+
+describe('answeredBy — someone always checks (charter G12, spec flow-multiproject §13)', () => {
+  const STOPS = ['ask', 'tell', 'auto'] as const;
+  const floor = (triggers: readonly FloorTrigger[]) =>
+    descriptor('reversible', 'confident', 'execution', triggers);
+
+  // Purpose: the dial decides who answers a stop-and-ask, per stop and row.
+  it('names who answers a floor question at each stop', () => {
+    const at = (stop: (typeof STOPS)[number]) =>
+      resolveInvolvement(floor(['outward-facing']), DEFAULT_CALIBRATION, stop);
+    expect(at('ask')).toMatchObject({ answeredBy: 'person', answeredByAtDeadline: null });
+    expect(at('tell')).toMatchObject({
+      answeredBy: 'person',
+      answeredByAtDeadline: 'reviewer-agent',
+    });
+    expect(at('auto')).toMatchObject({ answeredBy: 'reviewer-agent', answeredByAtDeadline: null });
+    for (const stop of STOPS) expect(at(stop).behavior).toBe('stop-and-ask');
+  });
+
+  it('names who answers a question off the floor at each stop', () => {
+    const sticky = descriptor('sticky', 'not-confident', 'execution');
+    expect(resolveInvolvement(sticky, DEFAULT_CALIBRATION, 'ask')).toMatchObject({
+      answeredBy: 'person',
+      answeredByAtDeadline: null,
+    });
+    expect(resolveInvolvement(sticky, DEFAULT_CALIBRATION, 'tell')).toMatchObject({
+      answeredBy: 'person',
+      answeredByAtDeadline: 'agent-default',
+    });
+    expect(resolveInvolvement(sticky, DEFAULT_CALIBRATION, 'auto')).toMatchObject({
+      answeredBy: 'agent-default',
+      answeredByAtDeadline: null,
+    });
+  });
+
+  // Purpose: the floor is never settled by the agent's own pick, at any stop,
+  // for any row the floor wins.
+  it('never lets the agent answer a floor row by its own pick', () => {
+    for (const stop of STOPS) {
+      for (const trigger of ALL_FLOOR_TRIGGERS) {
+        for (const reversibility of REVERSIBILITIES) {
+          for (const confidence of CONFIDENCES) {
+            const result = resolveInvolvement(
+              descriptor(reversibility, confidence, 'intake', [trigger]),
+              DEFAULT_CALIBRATION,
+              stop
+            );
+            expect(result.row).toBe(CalibrationRow.Floor);
+            expect(result.answeredBy).not.toBe('agent-default');
+            expect(result.answeredByAtDeadline).not.toBe('agent-default');
+          }
+        }
+      }
+    }
+  });
+
+  // Purpose: spending past a limit you set is yours alone (N11): a decision
+  // carrying secrets-or-spend waits for a person at every stop, alone or with
+  // another trigger, with no deadline.
+  it('always leaves secrets-or-spend to a person', () => {
+    const combos: FloorTrigger[][] = [
+      ['secrets-or-spend'],
+      ['secrets-or-spend', 'outward-facing'],
+      ['irreversible-or-destructive', 'secrets-or-spend', 'scope-change'],
+    ];
+    for (const stop of STOPS) {
+      for (const triggers of combos) {
+        expect(resolveInvolvement(floor(triggers), DEFAULT_CALIBRATION, stop)).toMatchObject({
+          behavior: 'stop-and-ask',
+          answeredBy: 'person',
+          answeredByAtDeadline: null,
+        });
+      }
+    }
+  });
+
+  // Purpose: at Just do it the ambiguous middle proceeds with a trail even in
+  // an intake stage, whatever stageBias says.
+  it('proceeds in the ambiguous middle at auto, and asks nobody when it proceeds', () => {
+    const middle = descriptor('reversible', 'not-confident', 'intake');
+    expect(resolveInvolvement(middle, DEFAULT_CALIBRATION, 'tell').behavior).toBe('stop-and-ask');
+    expect(resolveInvolvement(middle, DEFAULT_CALIBRATION, 'auto')).toMatchObject({
+      behavior: 'proceed-with-trail',
+      answeredBy: null,
+      answeredByAtDeadline: null,
+    });
+  });
+
+  // Purpose: with no stop given the ladder behaves exactly as before: every
+  // stop-and-ask is a person's.
+  it('defaults to a person when no stop is given', () => {
+    const result = resolveInvolvement(floor(['scope-change']), DEFAULT_CALIBRATION);
+    expect(result).toMatchObject({ answeredBy: 'person', answeredByAtDeadline: null });
+  });
+});

@@ -91,6 +91,13 @@ export const JournalLineSchema = z.discriminatedUnion('kind', [
     nit: Count,
     categories: z.array(z.enum(REVIEW_CATEGORIES)),
   }),
+  line('review.approved', {
+    by: z.enum(['person', 'reviewer-agent']),
+    sha7: z
+      .string()
+      .regex(/^[0-9a-f]{7}$/, 'sha7 is the first 7 hex characters of a commit')
+      .optional(),
+  }),
   line('ci', {
     pr: z.number().int().positive(),
     event: z.enum(['red', 'ejected', 'merged']),

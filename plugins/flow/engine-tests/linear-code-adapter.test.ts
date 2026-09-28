@@ -1190,3 +1190,65 @@ describe('GraphQL hygiene', () => {
     }
   });
 });
+
+describe('what a failure means (spec flow-multiproject §7.1)', () => {
+  // Purpose: a refused or expired sign-in is the one tracker failure only a
+  // person can fix, so it must read as `auth`; everything else (a timeout, a
+  // 5xx) is a blip flow retries quietly and reads as `unreachable`.
+  it.each([
+    ['HTTP 401 Unauthorized', 'auth'],
+    ['Authentication failed: token expired', 'auth'],
+    ['The connected account for linear is expired; re-authenticate', 'auth'],
+    ['AUTHENTICATION_ERROR Authentication required, not authenticated', 'auth'],
+    ['No active connected account found for toolkit linear', 'auth'],
+    ['socket hang up', 'unreachable'],
+    ['502 Bad Gateway', 'unreachable'],
+    ['"composio" did not finish within 60 s and was stopped', 'unreachable'],
+  ])('reads "%s" as %s', (detail, kind) => {
+    expect(linear.trackerErrorKind(detail)).toBe(kind);
+  });
+
+  it('carries the kind on the TrackerError the adapter throws', async () => {
+    const { adapter } = build(() => ({ successful: false, error: '401 Unauthorized' }));
+    const auth = (await rejection(adapter.getBacklogSnapshot())) as TrackerError;
+    expect(auth).toBeInstanceOf(TrackerError);
+    expect(auth.kind).toBe('auth');
+    const { adapter: flaky } = build(() => ({
+      raw: { code: 1, stdout: '', stderr: 'ECONNRESET while calling the API' },
+    }));
+    expect(((await rejection(flaky.getBacklogSnapshot())) as TrackerError).kind).toBe(
+      'unreachable'
+    );
+  });
+});
+
+describe('the team page', () => {
+  // Purpose: the snapshot names the team's page, so DorkOS can offer "Open in
+  // Linear"; it comes from any issue's address, and is null when there is none.
+  it('derives the team page from an issue address', () => {
+    expect(
+      linear.teamUrl(
+        [{ url: null }, { url: 'https://linear.app/dorkos/issue/DOR-7/some-title' }],
+        'DOR'
+      )
+    ).toBe('https://linear.app/dorkos/team/DOR');
+    expect(linear.teamUrl([], 'DOR')).toBeNull();
+  });
+
+  it('puts it on the snapshot', async () => {
+    const withUrl = (page: typeof CORE_PAGE_1) =>
+      JSON.parse(
+        JSON.stringify(page).replace(
+          /"identifier":"(DOR-\d+)"/,
+          '"identifier":"$1","url":"https://linear.app/dorkos/issue/$1/x"'
+        )
+      ) as typeof CORE_PAGE_1;
+    const { adapter } = build((call) =>
+      call.operation === 'FlowSnapshotCore'
+        ? okEnvelope(withUrl(call.variables.after === 'cursor-page-1' ? CORE_PAGE_2 : CORE_PAGE_1))
+        : snapshotRoute(call)
+    );
+    const snapshot = await adapter.getBacklogSnapshot();
+    expect(snapshot.team.url).toBe('https://linear.app/dorkos/team/DOR');
+  });
+});

@@ -395,11 +395,32 @@ describe('errors map to exit codes in one place', () => {
       expect(JSON.parse(stdout.text())).toEqual({
         v: 1,
         ok: false,
-        error: { code, message: error.message },
+        error:
+          error instanceof TrackerError
+            ? { code, message: error.message, kind: 'unreachable' }
+            : { code, message: error.message },
       });
       expect(stderr.text()).toBe(`flow: ${error.message}\n`);
     });
   }
+
+  // Purpose: the Flow extension tells a blip from a sign-in that is gone by the
+  // envelope's kind: a gone sign-in is the one tracker failure worth asking a
+  // person about (spec flow-multiproject §7.1).
+  it("carries a tracker error's kind in the JSON envelope", async () => {
+    const module: VerbModule = {
+      run: async () => {
+        throw new TrackerError('Linear refused the sign-in', { kind: 'auth' });
+      },
+    };
+    const { deps, stdout } = fakeDeps({ verbs: [probeVerb(module)] });
+    expect(await main(['probe', '--json'], deps)).toBe(EXIT.tracker);
+    expect(JSON.parse(stdout.text()).error).toEqual({
+      code: EXIT.tracker,
+      message: 'Linear refused the sign-in',
+      kind: 'auth',
+    });
+  });
 
   // Purpose: in human mode an error goes to stderr only and stdout stays empty.
   it('prints a human error to stderr only', async () => {

@@ -123,6 +123,12 @@ export interface DrainStepConfig {
   startTimeoutMs: number;
   /** The full flow command prefix messages spell verbs with. */
   flow: string;
+  /**
+   * Whether the worker fixes failing checks and merge conflicts on its own
+   * (default `true`). `false` when the project's "Retry and fix problems" stop
+   * is Ask me first (`autonomy.ts`): the run parks for a person instead.
+   */
+  fixFailingChecks?: boolean;
 }
 
 /** A pull request an action is about. */
@@ -185,6 +191,8 @@ export const PARK_REASONS = {
   prClosed: 'the PR was closed without merging',
   itemTaken: 'the item was closed, or its claim removed, by someone else',
   rounds: (n: number) => `the review did not come back clean after ${n} rounds`,
+  checksFailed:
+    "the PR's checks failed, and this project's settings ask you before flow fixes failing checks",
 } as const;
 
 /** The phases where the worker writes code before a clean review. */
@@ -461,6 +469,10 @@ function watching(step: Step, run: FlowRun, facts: DrainFacts, cfg: DrainStepCon
   if (headMoved(drain, facts)) return unreportedPush(step, run, facts, cfg);
   if (!pr) return step;
   const redCtx = { flow: cfg.flow, identifier: run.identifier, prUrl, failing: pr.failing };
+  const red = (pr.state === 'open' && pr.conflicting === true) || pr.failing.length > 0;
+  if (red && facts.ejection === null && cfg.fixFailingChecks === false) {
+    return park(step, PARK_REASONS.checksFailed);
+  }
   // A PR that conflicts with its base runs no checks and never merges, so it
   // would wait here for good (found live, 2026-09-27). Tell the worker.
   if (pr.state === 'open' && pr.conflicting === true) {

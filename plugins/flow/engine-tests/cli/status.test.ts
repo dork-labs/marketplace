@@ -303,6 +303,24 @@ describe('flow status', () => {
     expect(out.paused).toMatchObject({ since: '2026-09-26T08:00:00.000Z' });
   });
 
+  it('says when a timed pause ends, and forgets one that has ended', async () => {
+    // Purpose: spec flow-multiproject §5.1: a timed pause reads "Paused until",
+    // and once its end has passed flow is not paused any more.
+    mkdirSync(path.join(project, '.agents', 'flow'), { recursive: true });
+    const flag = (until: string) =>
+      writeFileSync(
+        path.join(project, '.agents', 'flow', 'paused.json'),
+        JSON.stringify({ pausedAt: '2026-09-26T08:00:00.000Z', until })
+      );
+    const later = new Date(NOW.getTime() + 3_600_000).toISOString();
+    flag(later);
+    const result = await status([]);
+    expect(result.stdout.split('\n')[0]).toContain(`Paused until ${later}`);
+    expect((await status(['--json'])).json().paused).toMatchObject({ until: later });
+    flag(new Date(NOW.getTime() - 1).toISOString());
+    expect((await status(['--json'])).json().paused).toBeNull();
+  });
+
   it('lists parked items, and with an identifier shows the last parked question', async () => {
     // Purpose: parked items are listed; the focused view reads the item's
     // comments (getItem with 20) and shows the agent's last signed question.

@@ -34,7 +34,14 @@ import {
 import { recordEvent, recordsVerbRun } from './cli/auto-journal.ts';
 import { journalVerb, noteVerb } from './cli/journal-verbs.ts';
 import { Output, renderTopHelp, renderVerbHelp } from './cli/output.ts';
-import { EXIT, FlowError, UsageError, type ExitCode } from './errors.ts';
+import {
+  EXIT,
+  FlowError,
+  TrackerError,
+  UsageError,
+  type ExitCode,
+  type TrackerErrorKind,
+} from './errors.ts';
 import type { Runtime } from './runtime-detect.ts';
 
 /**
@@ -279,6 +286,13 @@ export const VERBS: readonly VerbDefinition[] = [
         value: 'claude-code|codex|opencode',
         description: 'The runtime this session runs on. Default: the one running this command.',
       },
+      {
+        name: 'dispatched-by',
+        kind: 'string',
+        value: 'session',
+        description:
+          'The session id of the chat that launched this run, so DorkOS shows the run in that chat too.',
+      },
     ],
     load: () => import('./cli/claim.ts'),
   },
@@ -472,19 +486,21 @@ export const VERBS: readonly VerbDefinition[] = [
   },
   {
     name: 'report',
-    summary: 'Tell the drain a push, a review verdict or a question (drain workers and reviewers).',
+    summary: 'Record a push, a review verdict or a question (drain workers, reviewers, VERIFY).',
     description: [
-      'Record what happened on a drain run. flow checks each claim before recording it.',
+      'Record what happened on a run. flow checks each claim before recording it.',
       '  pushed [--sha <sha>]   The commit (default HEAD) is on origin and has a checkpoint. Disarms an armed PR until it is reviewed.',
       '  verdict --sha <sha> --token <t> (--clean | --changes --findings-file <f>)',
       "                         The reviewer's verdict. The token comes from the reviewer's brief. A verdict on an older push is ignored.",
       '  blocked --question-file <f>',
       '                         Post the question on the item, mark it needs-input, and park the run.',
+      '  review-brief --sha <sha>',
+      "                         VERIFY: start a review of a run flow drain did not start. Prints the token for the reviewer's brief; the reviewer records its verdict with verdict --token.",
     ].join('\n'),
     common: ['project', 'session'],
     positionals: [
       { name: 'identifier', required: true, description: 'The work item, e.g. ACME-12.' },
-      { name: 'kind', required: true, description: 'pushed, verdict or blocked.' },
+      { name: 'kind', required: true, description: 'pushed, verdict, blocked or review-brief.' },
     ],
     flags: [
       { name: 'sha', kind: 'string', value: 'sha', description: 'The commit pushed or reviewed.' },
@@ -510,6 +526,137 @@ export const VERBS: readonly VerbDefinition[] = [
       },
     ],
     load: () => import('./cli/report.ts'),
+  },
+  {
+    name: 'review',
+    summary: 'Ship finished work at the review gate, or send it back with a note.',
+    description: [
+      'Record a verdict at the review gate. Nothing is ever closed, released or reassigned.',
+      '  --approve [--by person|reviewer-agent]',
+      '      Comment "Shipped" on the item, approve the PR (a person only, and not their own PR), and arm it to merge when gates.review.mergeOnApproval is on.',
+      "      --by reviewer-agent needs a clean review recorded with the reviewer's token at the branch head, passing checks, review.adversarial on, and the project's Ship finished work setting past Ask me first.",
+      '  --changes (--note <text> | --note-file <file>)',
+      '      Comment "Sent back: <note>", request changes on the PR, and send the work back: a drain run gets the note as review findings; any other run returns to execute.',
+      'Exits 5 when the item is not at the review gate.',
+    ].join('\n'),
+    common: ['project', 'session', 'dry-run'],
+    positionals: [{ name: 'identifier', required: true, description: 'The item, e.g. DOR-123.' }],
+    flags: [
+      { name: 'approve', kind: 'boolean', description: 'Ship it.' },
+      {
+        name: 'by',
+        kind: 'string',
+        value: 'person|reviewer-agent',
+        description: 'Who approves. Default person.',
+      },
+      { name: 'changes', kind: 'boolean', description: 'Send it back.' },
+      { name: 'note', kind: 'string', value: 'text', description: 'What should change.' },
+      {
+        name: 'note-file',
+        kind: 'string',
+        value: 'file',
+        description: 'Read what should change from this file.',
+      },
+    ],
+    load: () => import('./cli/review.ts'),
+  },
+  {
+    name: 'ask',
+    summary: 'Park a question with your own pick, so someone can answer it with one click.',
+    description: [
+      'Post a question on the item with 2 to 5 choices (each at most 40 characters), your pick and why (at most 300 characters), mark it needs-input, and record it on the run. A drain run parks until it is answered.',
+      "Who answers comes from the project's Agent questions setting (flow autonomy) and --floor: at Tell me after, a question off the floor gets a deadline (the project's wait, or --decide-by, 5 minutes to 7 days away) after which your pick stands. A floor question never has a deadline; a secrets-or-spend one always waits for a person. At Just do it a question off the floor is refused: go ahead with your pick and write down why.",
+      "--check-pick: after a floor question's wait, print the brief (with a token) for the reviewer agent, which approves the pick with flow answer --pick --by reviewer-agent --token <t>.",
+    ].join('\n'),
+    common: ['project', 'session', 'dry-run'],
+    positionals: [{ name: 'identifier', required: true, description: 'The item, e.g. DOR-123.' }],
+    flags: [
+      { name: 'question', kind: 'string', value: 'text', description: 'The question.' },
+      {
+        name: 'choice',
+        kind: 'string',
+        value: 'text',
+        repeatable: true,
+        description: 'One answer; give 2 to 5.',
+      },
+      { name: 'pick', kind: 'string', value: 'n', description: 'The number of your own choice.' },
+      {
+        name: 'why',
+        kind: 'string',
+        value: 'text',
+        description: 'Why you ask, and why your pick.',
+      },
+      {
+        name: 'floor',
+        kind: 'string',
+        value: 'trigger,...',
+        description:
+          'The floor triggers it carries: irreversible-or-destructive, outward-facing, secrets-or-spend, scope-change.',
+      },
+      {
+        name: 'decide-by',
+        kind: 'string',
+        value: 'iso',
+        description: "When your pick stands if nobody answers. Default: the project's wait.",
+      },
+      {
+        name: 'check-pick',
+        kind: 'boolean',
+        description: "Hand a floor question's pick to the reviewer agent.",
+      },
+    ],
+    load: () => import('./cli/ask.ts'),
+  },
+  {
+    name: 'answer',
+    summary: "Answer an agent's parked question.",
+    description: [
+      'Post an answer on an item that carries agent/needs-input, and record it on the run so the work resumes. Exits 5 when the question was already answered.',
+      '  --text <text> | --text-file <file>   A person\'s answer (at most 2,000 characters), posted with "Answered in DorkOS." as its last line.',
+      "  --pick --by agent-default            The question's deadline passed: the agent's pick stands. Refused for a floor question.",
+      "  --pick --by reviewer-agent --token <t>  The reviewer agent checked a floor question's pick and agrees.",
+    ].join('\n'),
+    common: ['project', 'session', 'dry-run'],
+    positionals: [{ name: 'identifier', required: true, description: 'The item, e.g. DOR-123.' }],
+    flags: [
+      { name: 'text', kind: 'string', value: 'text', description: 'The answer.' },
+      {
+        name: 'text-file',
+        kind: 'string',
+        value: 'file',
+        description: 'Read the answer from this file.',
+      },
+      { name: 'pick', kind: 'boolean', description: "Take the agent's own pick." },
+      {
+        name: 'by',
+        kind: 'string',
+        value: 'agent-default|reviewer-agent',
+        description: 'With --pick: who settled it.',
+      },
+      {
+        name: 'token',
+        kind: 'string',
+        value: 'token',
+        description: 'With --by reviewer-agent: the token from flow ask --check-pick.',
+      },
+    ],
+    load: () => import('./cli/answer.ts'),
+  },
+  {
+    name: 'autonomy',
+    summary: 'Show how much flow does on its own in this project.',
+    description:
+      "Reads this project's Flow settings from DorkOS (a copy in <dorkHome>/flow/autonomy/): for each kind of ask (ship finished work, agent questions, sort new ideas, retry and fix problems) whether flow asks you first, tells you after, or just does it. Read-only: only a person changes it, in the project's Flow settings. With no settings chosen, flow asks you first.",
+    common: ['project'],
+    flags: [
+      {
+        name: 'kind',
+        kind: 'string',
+        value: 'ship|questions|sort|retry',
+        description: 'Show one kind only.',
+      },
+    ],
+    load: () => import('./cli/autonomy.ts'),
   },
   {
     name: 'pr',
@@ -847,6 +994,12 @@ export interface ClassifiedError {
   code: ExitCode;
   /** The message for stderr and the JSON envelope. */
   message: string;
+  /**
+   * For a tracker error: whether the sign-in is gone (`auth`) or the tracker
+   * did not answer (`unreachable`). The JSON envelope carries it, so a caller
+   * (the Flow extension) can tell a blip from something only a person can fix.
+   */
+  kind?: TrackerErrorKind;
 }
 
 /**
@@ -873,6 +1026,9 @@ function isMissingZod(error: unknown): boolean {
 export function classifyError(error: unknown, flowRoot: string): ClassifiedError {
   if (isMissingZod(error)) {
     return { code: EXIT.dependency, message: `run "npm install --omit=dev" in ${flowRoot}` };
+  }
+  if (error instanceof TrackerError) {
+    return { code: error.exitCode, message: error.message, kind: error.kind };
   }
   if (error instanceof FlowError) return { code: error.exitCode, message: error.message };
   const message = error instanceof Error ? error.message : String(error);
@@ -925,8 +1081,8 @@ export async function main(argv: readonly string[], deps: MainDeps): Promise<num
     journalRun(run, elapsed, code, { runtime: result.runtime, item: result.item });
     return code;
   } catch (error) {
-    const { code, message } = classifyError(error, flowRoot);
-    output.error(code, message);
+    const { code, message, kind } = classifyError(error, flowRoot);
+    output.error(code, message, kind);
     if (run !== undefined) journalRun(run, elapsed, code, { error });
     return code;
   }

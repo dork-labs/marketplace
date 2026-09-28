@@ -53,6 +53,13 @@ outside 0-100, which the rules left unwritten. Writers clamp, and so does a
 reader: 130 reads as 100 and -5 as 0 (`window-read` cases). A reader never
 treats such an entry as invalid, and never drops the file over it.
 
+4.1.0 (spec `flow-multiproject` §6, in this repo) is a minor: two new optional
+`FlowRun` fields. `dispatchedBy` is the session id of the chat that launched a
+run, when another chat did (a `flow drain`, or `flow claim --dispatched-by`), so
+DorkOS can show the run in that chat too. `updatedAt` is when the record was last
+written; every writer stamps it. Both are plain strings; a record from before
+4.1.0 has neither and still reads (`flow-run` cases).
+
 ## What is here
 
 | File | What it pins | The call it drives |

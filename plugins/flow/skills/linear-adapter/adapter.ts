@@ -42,7 +42,12 @@
 import { createHash, randomUUID } from 'node:crypto';
 import { readFileSync } from 'node:fs';
 
-import { ConfigError, PreconditionError, TrackerError } from '../../scripts/errors.ts';
+import {
+  ConfigError,
+  PreconditionError,
+  TrackerError,
+  type TrackerErrorKind,
+} from '../../scripts/errors.ts';
 import type {
   AdapterContext,
   BacklogSnapshot,
@@ -111,7 +116,7 @@ export const SNAPSHOT_CORE_QUERY = `query FlowSnapshotCore($teamId: String!, $fi
   team(id: $teamId) {
     issues(first: $first, after: $after, ${OPEN_FILTER}) {
       pageInfo { hasNextPage endCursor }
-      nodes { ${ISSUE_FIELDS} project { id name } }
+      nodes { ${ISSUE_FIELDS} url project { id name } }
     }
   }
 }`;
@@ -291,6 +296,8 @@ interface RawIssue {
   project?: RawProject | null;
   team?: { id?: string | null; key?: string | null } | null;
   comments?: { nodes?: RawComment[] | null } | null;
+  /** The issue's web address (snapshot pull 1 only), which names the workspace. */
+  url?: string | null;
 }
 
 /** An issue node's relation graph. */
@@ -518,6 +525,42 @@ export function normalizeIssue(
 // ---------------------------------------------------------------------------
 
 /**
+ * The team's page in Linear, from any issue's address
+ * (`https://linear.app/<workspace>/issue/KEY-1/…` gives
+ * `https://linear.app/<workspace>/team/KEY`), or `null` when no issue has one.
+ *
+ * @param nodes - The snapshot's issues.
+ * @param key - The team key.
+ * @returns The team's address, or `null`.
+ */
+export function teamUrl(nodes: readonly { url?: string | null }[], key: string): string | null {
+  for (const node of nodes) {
+    const match = /^(https:\/\/linear\.app\/[^/]+)\/issue\//.exec(node.url ?? '');
+    if (match !== null) return `${match[1]}/team/${encodeURIComponent(key)}`;
+  }
+  return null;
+}
+
+/**
+ * Words a refused or expired sign-in leaves in Composio's or Linear's answer: an
+ * HTTP 401 or 403, Linear's `AUTHENTICATION_ERROR`, or a connection Composio
+ * says is expired, revoked or inactive.
+ */
+const AUTH_FAILURE =
+  /\b(?:401|403)\b|unauthori[sz]ed|forbidden|authenticat(?:e|ion)[_ ](?:error|failed|required)|not authenticated|re-?authenticate|invalid (?:api[_ ]key|token|credentials?)|(?:token|credentials?|connection|connected account)[^.]{0,40}\b(?:expired|revoked|inactive|disabled|not active)\b|no (?:active )?connected account/i;
+
+/**
+ * Whether a failure's words say the sign-in is gone (`auth`), which only a
+ * person can fix, or anything else (`unreachable`), which a retry fixes.
+ *
+ * @param detail - The failure's text (stderr, Composio's error, Linear's error).
+ * @returns The kind.
+ */
+export function trackerErrorKind(detail: string): TrackerErrorKind {
+  return AUTH_FAILURE.test(detail) ? 'auth' : 'unreachable';
+}
+
+/**
  * Strip terminal color codes, collapse whitespace, cut to a readable length and
  * hide the account handle.
  */
@@ -586,8 +629,10 @@ export function createAdapter(ctx: AdapterContext): CodeAdapter {
       JSON.stringify(input),
     ]);
     if (result.code !== 0) {
+      const detail = result.stderr || result.stdout;
       throw new TrackerError(
-        `composio ${slug} failed (exit ${result.code}): ${cleanMessage(result.stderr || result.stdout, [account as string])}`
+        `composio ${slug} failed (exit ${result.code}): ${cleanMessage(detail, [account as string])}`,
+        { kind: trackerErrorKind(detail) }
       );
     }
     let envelope: Record<string, unknown>;
@@ -612,7 +657,8 @@ export function createAdapter(ctx: AdapterContext): CodeAdapter {
     if (envelope.successful !== true) {
       const detail = typeof envelope.error === 'string' ? envelope.error : 'no detail given';
       throw new TrackerError(
-        `Linear refused the request: ${cleanMessage(detail, [account as string])}`
+        `Linear refused the request: ${cleanMessage(detail, [account as string])}`,
+        { kind: trackerErrorKind(detail) }
       );
     }
     return envelope.data;
@@ -629,9 +675,12 @@ export function createAdapter(ctx: AdapterContext): CodeAdapter {
       errors?: unknown;
     } | null;
     if (Array.isArray(data?.errors) && data.errors.length > 0) {
-      const first = data.errors[0] as { message?: unknown };
+      const first = data.errors[0] as { message?: unknown; extensions?: { code?: unknown } };
+      const message = String(first?.message ?? 'unknown');
+      const code = typeof first?.extensions?.code === 'string' ? first.extensions.code : '';
       throw new TrackerError(
-        `Linear returned an error: ${cleanMessage(String(first?.message ?? 'unknown'), [account as string])}`
+        `Linear returned an error: ${cleanMessage(message, [account as string])}`,
+        { kind: trackerErrorKind(`${code} ${message}`) }
       );
     }
     if (
@@ -877,7 +926,7 @@ export function createAdapter(ctx: AdapterContext): CodeAdapter {
       return {
         v: 1,
         tracker: ctx.config.tracker,
-        team: { key, id: teamId },
+        team: { key, id: teamId, url: teamUrl(core, key) },
         fetchedAt: new Date().toISOString(),
         items,
         closed,

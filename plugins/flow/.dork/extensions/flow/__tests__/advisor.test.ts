@@ -577,6 +577,11 @@ describe('wait and cancelAuto hold the run for the person', () => {
       keepMe: true,
     });
     expect(store.i2.sessionId).toBe('s-2');
+    // Every writer stamps the write time (spec flow-multiproject §6.3), and
+    // only on the run it wrote.
+    expect(typeof store.i1.updatedAt).toBe('string');
+    expect(Number.isFinite(Date.parse(store.i1.updatedAt as string))).toBe(true);
+    expect(store.i2.updatedAt).toBeUndefined();
   });
 
   it('cancelAuto holds the run with no resume', async () => {

@@ -401,6 +401,42 @@ export function createGithubForge(options: GithubForgeOptions): Forge {
       );
     },
 
+    async review(pr, input) {
+      const where = `${target.repo}#${pr}`;
+      const view = record(
+        await ghJson(
+          ['pr', 'view', String(pr), '-R', repoArg, '--json', 'author'],
+          `reading who wrote ${where}`
+        )
+      );
+      const author = str(record(view?.author)?.login);
+      const viewer = (
+        await gh(['api', ...hostArgs, 'user', '--jq', '.login'], 'reading the signed-in account')
+      ).trim();
+      const own = author !== undefined && viewer !== '' && author === viewer;
+      if (own && input.event === 'approve') return 'skipped';
+      const dir = mkdtempSync(path.join(os.tmpdir(), 'flow-review-'));
+      const bodyFile = path.join(dir, 'body.md');
+      try {
+        writeFileSync(bodyFile, input.body);
+        if (own) {
+          await gh(
+            ['pr', 'comment', String(pr), '-R', repoArg, '--body-file', bodyFile],
+            `commenting on ${where}`
+          );
+          return 'commented';
+        }
+        const flag = input.event === 'approve' ? '--approve' : '--request-changes';
+        await gh(
+          ['pr', 'review', String(pr), '-R', repoArg, flag, '--body-file', bodyFile],
+          `reviewing ${where}`
+        );
+        return 'reviewed';
+      } finally {
+        rmSync(dir, { recursive: true, force: true });
+      }
+    },
+
     async recentGroupFailures(base, checkNames, sinceMinutes) {
       const since = new Date(options.now().getTime() - sinceMinutes * 60_000);
       const raw = await ghJson(

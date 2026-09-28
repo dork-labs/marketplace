@@ -64,6 +64,7 @@ export const JOURNAL_KINDS = [
   'retry',
   'operator.wait',
   'review',
+  'review.approved',
   'ci',
   'handoff',
   'note',

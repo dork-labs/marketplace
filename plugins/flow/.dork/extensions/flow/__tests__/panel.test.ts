@@ -17,6 +17,7 @@ import {
   isLiveDrainRun,
   isStaleRun,
   pauseFlagPath,
+  pauseFlagPauses,
   runAccountKey,
   runState,
   slotsOf,
@@ -166,6 +167,30 @@ describe('runState', () => {
   ];
   it.each(rows)('%s', (_name, run, pill) => {
     expect(runState(run)).toBe(pill);
+  });
+});
+
+describe('pauseFlagPauses', () => {
+  // Purpose: the panel reads a timed pause the way flow's engine does, so a
+  // pause whose end has passed stops showing as paused (spec flow-multiproject
+  // §5.1), while a flag with no end, or one nobody can read, still pauses.
+  it('reads a timed pause as over at its end, and anything unclear as paused', () => {
+    const dir = path.join(world.root, 'flags');
+    mkdirSync(dir, { recursive: true });
+    const flag = (name: string, body: string) => {
+      const file = path.join(dir, name);
+      writeFileSync(file, body);
+      return file;
+    };
+    const now = new Date('2026-09-28T12:00:00.000Z');
+    expect(pauseFlagPauses(path.join(dir, 'none.json'), now)).toBe(false);
+    expect(pauseFlagPauses(flag('open.json', '{"pausedAt":"x"}'), now)).toBe(true);
+    expect(pauseFlagPauses(flag('junk.json', 'not json'), now)).toBe(true);
+    expect(pauseFlagPauses(flag('later.json', '{"until":"2026-09-28T13:00:00Z"}'), now)).toBe(true);
+    expect(pauseFlagPauses(flag('ended.json', '{"until":"2026-09-28T12:00:00Z"}'), now)).toBe(
+      false
+    );
+    expect(pauseFlagPauses(flag('odd.json', '{"until":"whenever"}'), now)).toBe(true);
   });
 });
 

@@ -47,6 +47,10 @@ independent review converges. Run it before the evidence: converging changes the
   `review.rubric` file (default `REVIEW.md`; relative to the repo root, else the
   current folder; absolute as is); the item's description or its `03-tasks.json` task.
   Never your account of what you did.
+- Before each pass, `flow report <id> review-brief --sha <head> --json` and put its
+  `token` in the reviewer's brief only; the reviewer records its verdict with `flow report
+  <id> verdict --sha <head> --token <t> --clean` (or `--changes --findings-file <f>`). A
+  verdict written any other way does not count.
 - Pool findings from all reviewers: **any blocking finding blocks unless rebutted.**
 - **Converge:** fix what is justified, rebut in writing what is wrong, re-review the new
   diff, until a pass finds nothing blocking.
@@ -122,16 +126,20 @@ public-repository rules: truncate `sessionId` and omit `resumeUrl`.
   and say automation closed it. Recommend once that the adopter turn off branch-name
   auto-close. The adapter documents what the tracker honours.
 
-## 7. Hand off to the human-review gate
+## 7. Hand off to the review gate
 
-The human-review gate is always on. VERIFY never advances to DONE.
+The review gate is always checked. VERIFY never advances to DONE.
 
 1. `flow stage <id> review --checkpoint-file <f>`.
-2. `assignToHuman(item)`.
-3. **Stop.** REVIEW has no skill: never invent one, never auto-approve. After a person
-   approves and merges, `/flow:done <issue>` closes the item.
+2. `flow autonomy --kind ship --json`. `answeredBy: person`: `assignToHuman(item)` and
+   **stop**. Otherwise, when the adversarial review above recorded a clean verdict at the
+   branch head (`flow report <id> review-brief` gave the reviewer its token; the reviewer
+   ran `flow report <id> verdict --clean`): `flow review <id> --approve --by
+   reviewer-agent --json`. Refused, or no clean verdict: `assignToHuman(item)` and stop.
+3. REVIEW has no skill: never invent one, never approve without a clean check. After the
+   PR merges, `/flow:done <issue>` closes the item.
 
 No linked item or no tracker: skip the tracker steps and report the evidence inline.
 
 **Calibration.** VERIFY is an execution stage: the ambiguous middle proceeds on the best
-default and logs the assumption; the floor still stops and asks via `needsInput`.
+default and logs the assumption; the floor is still checked (`answeredBy`) via `needsInput`.

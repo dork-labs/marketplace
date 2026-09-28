@@ -232,6 +232,8 @@ export async function holdRun(found: FoundRun, hold: RunHold, now: Date): Promis
           };
       const next: StoredRun = {
         ...run,
+        // Every writer stamps the write time (spec flow-multiproject §6.3).
+        updatedAt: now.toISOString(),
         limit: {
           ...limit,
           state: 'waiting-reset',

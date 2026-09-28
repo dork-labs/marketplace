@@ -48,15 +48,17 @@ point your own scheduler (OS cron, CI) at it.
    - Otherwise provision `picked[0]`'s worktree and claim it:
      `node --experimental-strip-types "<flow-root>/scripts/flow.ts" claim <id> --session <session id> --worktree <path> --branch <branch> --json`
      (Claude Code and Codex supply `--session`).
-   - Move stages with `flow stage <id> <stage> --json` up to its human-review gate
-     (REVIEW), never past it. DONE is `flow done`, after a human approves.
-   - At each decision run `<flow-root>/scripts/involvement.ts`. A live terminal asks
-     inline with `AskUserQuestion`, never a parked tracker comment.
+   - Move stages with `flow stage <id> <stage> --json` up to its review gate (REVIEW),
+     and past it only when the reviewer agent may answer it (`verifying-work` step 7).
+     DONE is `flow done`, after the gate approved.
+   - At each decision run `<flow-root>/scripts/involvement.ts` with `"stop"` from
+     `flow autonomy --kind questions --json`; its `answeredBy` says who answers. A live
+     terminal asks inline with `AskUserQuestion`, never a parked tracker comment.
    - At each stage boundary, if the item carries `agent/paused`: advance it no
      further, run `flow release <id> --to none --json`, leave the worktree, move on.
      Reassigning an item on the tracker hands it to a person or another agent.
 
-Stop at the review gate or a genuine question.
+Stop at the review gate (unless the reviewer agent answered it) or a genuine question.
 
 ## Auto
 

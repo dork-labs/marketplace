@@ -457,6 +457,24 @@ describe('drainStep: the phase table', () => {
     ]);
   });
 
+  // Spec flow-multiproject §7.7: when the project's "Retry and fix problems"
+  // is Ask me first, red checks and conflicts park the run for a person
+  // instead of going to the worker. Fails if the worker is told to fix them.
+  it('watching + failing or conflicting, fixing not allowed -> parked for a person', () => {
+    const noFix = { ...CFG, fixFailingChecks: false };
+    for (const pr of [
+      prStatus({ failing: [{ name: 'test', url: 'https://ci/1' }] }),
+      prStatus({ conflicting: true, base: 'main' } as Partial<PrStatusFact>),
+    ]) {
+      const out = drainStep(run(watchingDrain()), facts(watchingDrain(), { pr }), noFix, NOW);
+      expect(out.run.drain).toMatchObject({
+        phase: 'parked',
+        parkedReason: PARK_REASONS.checksFailed,
+      });
+      expect(out.actions.some((a) => a.kind === 'send' && a.message === 'ci-red')).toBe(false);
+    }
+  });
+
   // watching + an innocent ejection not yet re-armed at this head: arm once.
   it('watching + ejected, innocent, rearmedFor != head -> watching, arm, rearmedFor = head', () => {
     const failing = [{ name: 'e2e', url: 'https://ci/2' }];

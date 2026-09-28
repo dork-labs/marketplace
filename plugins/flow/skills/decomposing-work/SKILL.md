@@ -96,5 +96,5 @@ Spec path, mode, both files, task counts by phase, the parallel and critical pat
 promoted sub-issues, and next: `/flow:execute specs/<SLUG>/02-specification.md`.
 
 **Calibration.** An execution stage: the ambiguous middle proceeds on the best default
-with an `agent/assumption` trail; the floor stops and asks via `needsInput`. Plan
+with an `agent/assumption` trail; the floor is checked (`answeredBy`) via `needsInput`. Plan
 approval is off by default (`gates.planApproval: false`).

@@ -94,7 +94,7 @@ async function recordPr(
   armed: boolean
 ): Promise<void> {
   await writeDrain(
-    openFlowStateFile(ctx.projectDir),
+    openFlowStateFile(ctx.projectDir, { now: ctx.now }),
     run,
     (drain) => ({
       ...drain,
@@ -128,7 +128,11 @@ export async function run(ctx: VerbContext): Promise<VerbResult> {
   }
   const arm = wantsArm(ctx);
 
-  const drainRun = findDrainRun(openFlowStateFile(ctx.projectDir), identifier, 'pr');
+  const drainRun = findDrainRun(
+    openFlowStateFile(ctx.projectDir, { now: ctx.now }),
+    identifier,
+    'pr'
+  );
   const { worktreePath: worktree, branch, drain } = drainRun;
   const head = await originHead(ctx, worktree, branch);
   if (drain.verdict !== 'clean' || head === null || drain.reviewedSha !== head) {

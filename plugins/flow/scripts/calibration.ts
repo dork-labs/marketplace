@@ -11,7 +11,7 @@
  *
  * | # | Condition | Behavior | Blocks loop? |
  * |---|-----------|----------|--------------|
- * | 0 | Floor — irreversible/destructive · outward-facing · secrets/spend/prod · scope change | stop-and-ask — even at full confidence | yes |
+ * | 0 | Floor — irreversible/destructive · outward-facing · secrets/spend/prod · scope change | stop-and-ask (forces a check) — even at full confidence | yes |
  * | 1 | Reversible + confident | proceed-silently | no |
  * | 2 | Sticky + not-confident | stop-and-ask | yes |
  * | 3 | Reversible + not-confident (the ambiguous middle) | routed by `stageBias` | stage-dependent |
@@ -22,6 +22,16 @@
  * (DECOMPOSE/EXECUTE/VERIFY → `execution`) proceed on the best default and log
  * the assumption. That single rule yields "IDEATE asks freely, EXECUTE asks
  * rarely" as an emergent property.
+ *
+ * **Who answers a stop-and-ask** ({@link AnsweredBy}, spec `flow-multiproject`
+ * §13): the floor is inviolable in the sense "someone must check", not "a human
+ * must answer". The project's "Agent questions" stop (`autonomy.ts`) picks the
+ * checker: you at Ask me first; you, then at the deadline the reviewer agent
+ * (floor) or the agent's own pick (not floor), at Tell me after; the reviewer
+ * agent (floor) or the agent's pick (not floor) at Just do it. A floor row is
+ * never settled by the agent's own pick, and a decision carrying
+ * `secrets-or-spend` always waits for you: spending past a limit you set is
+ * something only you can decide.
  *
  * **This module is the pinned oracle.** The v1 prose skills describe these same
  * rules in natural language, but this TypeScript is the tested source of truth
@@ -35,6 +45,7 @@
  */
 
 import type { z } from 'zod';
+import type { AutonomyStop } from './autonomy.ts';
 import type { CalibrationSchema } from './config-schema.ts';
 
 /**
@@ -46,8 +57,8 @@ export type Calibration = z.infer<typeof CalibrationSchema>;
 
 /**
  * The four floor triggers (§5, ladder row 0). Any one present forces a
- * `stop-and-ask` regardless of confidence or reversibility. Mirrors the
- * `alwaysAsk` config tags ({@link Calibration.alwaysAsk}).
+ * `stop-and-ask` (a check) regardless of confidence or reversibility. Mirrors
+ * the `alwaysAsk` config tags ({@link Calibration.alwaysAsk}).
  */
 export type FloorTrigger =
   'irreversible-or-destructive' | 'outward-facing' | 'secrets-or-spend' | 'scope-change';
@@ -126,6 +137,20 @@ export interface DecisionDescriptor {
   stage: DecisionStage;
 }
 
+/**
+ * Who answers a `stop-and-ask` (spec `flow-multiproject` §13):
+ *
+ * - `person` — you.
+ * - `reviewer-agent` — an independent reviewer agent checks the agent's pick and
+ *   either approves it or leaves it for you.
+ * - `agent-default` — the agent goes ahead with its own pick and writes down why.
+ *   Never for a floor row.
+ */
+export type AnsweredBy = 'person' | 'reviewer-agent' | 'agent-default';
+
+/** The trigger that always waits for a person, whatever the dial says. */
+export const PERSON_ONLY_TRIGGER: FloorTrigger = 'secrets-or-spend';
+
 /** The resolved outcome of walking the calibration ladder. */
 export interface InvolvementDecision {
   /** Which of the three behaviors to take. */
@@ -141,6 +166,14 @@ export interface InvolvementDecision {
    * auditable at the review gate (§5).
    */
   logAssumption: boolean;
+  /** Who answers it first, for a `stop-and-ask`; `null` when nothing is asked. */
+  answeredBy: AnsweredBy | null;
+  /**
+   * Who answers once the question's deadline passes unanswered, or `null` when
+   * it waits for {@link answeredBy} however long it takes (always `null` when
+   * nothing is asked).
+   */
+  answeredByAtDeadline: AnsweredBy | null;
 }
 
 /**
@@ -167,6 +200,78 @@ function proceedWithTrail(row: CalibrationRow, calibration: Calibration): Involv
     blocks: false,
     row,
     logAssumption: calibration.assumptionLog.artifact,
+    answeredBy: null,
+    answeredByAtDeadline: null,
+  };
+}
+
+/** A `proceed-silently` outcome: nothing is asked. */
+function proceedSilently(row: CalibrationRow): InvolvementDecision {
+  return {
+    behavior: 'proceed-silently',
+    blocks: false,
+    row,
+    logAssumption: false,
+    answeredBy: null,
+    answeredByAtDeadline: null,
+  };
+}
+
+/** Who answers a question, first and once its deadline passes. */
+export interface WhoAnswers {
+  /** Who answers it first. */
+  answeredBy: AnsweredBy;
+  /** Who answers once the deadline passes unanswered, or `null` when it waits. */
+  answeredByAtDeadline: AnsweredBy | null;
+}
+
+/**
+ * Who answers a question (see {@link AnsweredBy}): the rule behind every
+ * `stop-and-ask`, also used by `flow ask` for the question it parks.
+ *
+ * - A question carrying `secrets-or-spend`, or any question at `ask`: you, and
+ *   it waits for you however long it takes.
+ * - At `tell`: you first; at the deadline the reviewer agent (a floor
+ *   question) or the agent's own pick (any other).
+ * - At `auto`: the reviewer agent (a floor question) or the agent's own pick.
+ *
+ * @param floor - Whether the question is on the calibration floor.
+ * @param floorTriggers - The floor triggers it carries.
+ * @param stop - The project's "Agent questions" stop.
+ * @returns Who answers.
+ */
+export function whoAnswers(
+  floor: boolean,
+  floorTriggers: readonly FloorTrigger[],
+  stop: AutonomyStop
+): WhoAnswers {
+  // Spending past a limit you set is yours alone, at every stop. The tag is
+  // treated whole: a secret and a spend cannot be told apart safely from it.
+  if (floorTriggers.includes(PERSON_ONLY_TRIGGER) || stop === 'ask') {
+    return { answeredBy: 'person', answeredByAtDeadline: null };
+  }
+  // A floor question is checked by the reviewer agent, never by the agent's own pick.
+  const checker: AnsweredBy = floor ? 'reviewer-agent' : 'agent-default';
+  return stop === 'tell'
+    ? { answeredBy: 'person', answeredByAtDeadline: checker }
+    : { answeredBy: checker, answeredByAtDeadline: null };
+}
+
+/**
+ * A `stop-and-ask` outcome, with who answers it under the project's "Agent
+ * questions" stop (see {@link whoAnswers}).
+ */
+function stopAndAsk(
+  row: CalibrationRow,
+  floorTriggers: readonly FloorTrigger[],
+  stop: AutonomyStop
+): InvolvementDecision {
+  return {
+    behavior: 'stop-and-ask',
+    blocks: true,
+    row,
+    logAssumption: false,
+    ...whoAnswers(row === CalibrationRow.Floor, floorTriggers, stop),
   };
 }
 
@@ -189,26 +294,27 @@ function proceedWithTrail(row: CalibrationRow, calibration: Calibration): Involv
  * `proceedSilentlyWhen` gates row 1; `alwaysAsk` defines the floor; `stageBias`
  * routes row 3; `assumptionLog.artifact` decides whether trail rows log.
  *
+ * `stop` is the project's "Agent questions" stop (`autonomy.ts`, default `ask`).
+ * It decides who answers each `stop-and-ask` ({@link AnsweredBy}), and at
+ * `auto` the ambiguous middle (row 3) proceeds with a trail in every stage.
+ *
  * @param decision - The evidence-based facts about the decision point.
  * @param calibration - The resolved `involvement.calibration` config block.
+ * @param stop - The project's "Agent questions" stop. Default `ask`.
  * @returns The behavior to take, whether it blocks the loop, the matched row,
- *   and whether to write an assumption trail.
+ *   whether to write an assumption trail, and who answers.
  */
 export function resolveInvolvement(
   decision: DecisionDescriptor,
-  calibration: Calibration
+  calibration: Calibration,
+  stop: AutonomyStop = 'ask'
 ): InvolvementDecision {
   const floorTriggers = decision.floorTriggers ?? [];
 
-  // Row 0 — Floor. Highest precedence: a floor trigger stops the loop even at
+  // Row 0 — Floor. Highest precedence: a floor trigger forces a check even at
   // full confidence on a reversible decision.
   if (hasActiveFloorTrigger(floorTriggers, calibration.alwaysAsk)) {
-    return {
-      behavior: 'stop-and-ask',
-      blocks: true,
-      row: CalibrationRow.Floor,
-      logAssumption: false,
-    };
+    return stopAndAsk(CalibrationRow.Floor, floorTriggers, stop);
   }
 
   const isReversible = decision.reversibility === 'reversible';
@@ -218,35 +324,21 @@ export function resolveInvolvement(
   // config's proceedSilentlyWhen allow-list to qualify for the silent path.
   const silentTags = new Set<string>(calibration.proceedSilentlyWhen);
   if (isReversible && isConfident && silentTags.has('reversible') && silentTags.has('confident')) {
-    return {
-      behavior: 'proceed-silently',
-      blocks: false,
-      row: CalibrationRow.ReversibleConfident,
-      logAssumption: false,
-    };
+    return proceedSilently(CalibrationRow.ReversibleConfident);
   }
 
   // Row 2 — sticky + not-confident → stop & ask.
   if (!isReversible && !isConfident) {
-    return {
-      behavior: 'stop-and-ask',
-      blocks: true,
-      row: CalibrationRow.StickyNotConfident,
-      logAssumption: false,
-    };
+    return stopAndAsk(CalibrationRow.StickyNotConfident, floorTriggers, stop);
   }
 
   // Row 3 — reversible + not-confident (the ambiguous middle) → routed by stage
   // bias. The frozen spec is the cut line: intake asks, execution proceeds + logs.
+  // At Just do it the agent does not ask here: it proceeds and writes down why.
   if (isReversible && !isConfident) {
-    const bias = calibration.stageBias[decision.stage];
+    const bias = stop === 'auto' ? 'proceed-and-log' : calibration.stageBias[decision.stage];
     if (bias === 'ask') {
-      return {
-        behavior: 'stop-and-ask',
-        blocks: true,
-        row: CalibrationRow.AmbiguousMiddle,
-        logAssumption: false,
-      };
+      return stopAndAsk(CalibrationRow.AmbiguousMiddle, floorTriggers, stop);
     }
     return proceedWithTrail(CalibrationRow.AmbiguousMiddle, calibration);
   }

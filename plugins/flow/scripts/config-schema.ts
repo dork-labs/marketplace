@@ -222,7 +222,12 @@ export const StageSchema = z.object({
   label: z.string().optional(),
   /** Tracker state category this stage projects onto, if any. */
   stateCategory: StateCategorySchema.optional(),
-  /** Whether this stage is a human-approval gate. */
+  /**
+   * Whether this stage is a gate someone must answer. For `review`, who answers
+   * is the project's "Ship finished work" setting in DorkOS (`autonomy.ts`):
+   * the operator, or the reviewer agent on a clean review. The key keeps its
+   * name, so no config changes.
+   */
   humanGate: z.boolean().optional(),
 });
 
@@ -340,13 +345,17 @@ export const CalibrationSchema = z
     /** Condition tags under which the agent proceeds silently. */
     proceedSilentlyWhen: z.array(ProceedSilentlyWhenSchema).default(['reversible', 'confident']),
     /**
-     * Condition tags that always force a stop-and-ask (ladder floor). The floor
-     * is **inviolable** (charter G12): `.min(1)` rejects `alwaysAsk: []` so an
-     * operator can re-prioritize the floor triggers but never trim it to nothing.
+     * Condition tags that always force a check (ladder floor). The floor is
+     * always checked (charter G12): by the operator, or by a checker they chose
+     * (the reviewer agent), never by nobody; a `secrets-or-spend` decision
+     * always waits for the operator. `.min(1)` rejects `alwaysAsk: []`, so an
+     * operator can re-prioritize the floor triggers but it cannot be trimmed to
+     * nothing. Who checks is the project's "Agent questions" setting in DorkOS
+     * (`autonomy.ts`), not a config key.
      */
     alwaysAsk: z
       .array(AlwaysAskSchema)
-      .min(1, 'The calibration floor is inviolable: alwaysAsk must keep at least one trigger.')
+      .min(1, 'The calibration floor is always checked: alwaysAsk must keep at least one trigger.')
       .default([
         'irreversible-or-destructive',
         'outward-facing',

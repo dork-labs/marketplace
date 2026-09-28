@@ -177,6 +177,84 @@ export interface FlowRunProvenance {
 }
 
 /**
+ * The adversarial review of a run that is not a drain run (spec
+ * `flow-multiproject` §7.5): VERIFY's reviewer records its verdict here the way
+ * a drain's reviewer records it on `drain`. Only a verdict recorded with the
+ * token whose hash is {@link tokenHash} counts, so an agent cannot write itself
+ * a clean review.
+ */
+export interface RunReview {
+  /** SHA-256 (hex) of the token handed to the reviewer's brief; the token itself is never stored. */
+  tokenHash: string;
+  /** The commit the review was started for. */
+  sha: string;
+  /** The recorded verdict, or `null` while none is recorded. */
+  verdict: 'clean' | 'changes' | null;
+  /** The commit the recorded verdict covers, or `null` while none is recorded. */
+  reviewedSha: string | null;
+}
+
+/** One answer an agent offers with a question (spec `flow-multiproject` §7.5). */
+export interface RunQuestionChoice {
+  /** A short stable id, `c1` to `c5`, in the order the agent gave them. */
+  id: string;
+  /** The words on the choice, at most 40 characters. */
+  label: string;
+}
+
+/**
+ * A question an agent parked for someone to answer, written by `flow ask`
+ * (spec `flow-multiproject` §7.5). The Flow extension raises it in the app's
+ * inbox; the drain and the inbox pass take {@link pick} at {@link decideBy}.
+ */
+export interface RunQuestion {
+  /** The question as the agent wrote it. */
+  text: string;
+  /** Two to five answers. */
+  choices: RunQuestionChoice[];
+  /** The id of the agent's own pick among {@link choices}. */
+  pick: string;
+  /** Why it asks, and why that pick: plain words, at most 300 characters. */
+  why: string;
+  /** When it asked (ISO). */
+  askedAt: string;
+  /**
+   * When the agent goes ahead with its pick if nobody answers (ISO), or `null`
+   * when it waits for someone however long it takes.
+   */
+  decideBy: string | null;
+  /**
+   * The calibration floor triggers the question carries (empty when none). A
+   * floor question is never settled by a deadline alone: the reviewer agent or
+   * a person checks the pick, and one carrying `secrets-or-spend` always waits
+   * for a person.
+   */
+  floor: string[];
+  /** Who answers it first: see `AnsweredBy` in `calibration.ts`. */
+  answeredBy: string;
+  /**
+   * When the reviewer agent may check the pick of a floor question (ISO): at
+   * once at Just do it, after the question's wait at Tell me after. `null` when
+   * nobody but a person answers it.
+   */
+  checkAfter: string | null;
+  /**
+   * The hash of the token `flow ask --check-pick` handed the reviewer agent, so
+   * only that reviewer can approve the pick of a floor question. Absent until a
+   * check is asked for.
+   */
+  checkTokenHash?: string;
+  /**
+   * The answer, once someone gave it through `flow answer` (the text, when, and
+   * who: `person`, `agent-default` at the deadline, or `reviewer-agent`). The
+   * drain resumes on it even when the tracker comment it also posts would not
+   * count as a reply (flow posting through the agent's own tracker account, whose
+   * comments read as the agent's).
+   */
+  answer?: { text: string; at: string; by: string };
+}
+
+/**
  * The **durable run record** (§12) — the session↔issue association, keyed by
  * issue, written to `flow-state.json` (v1, disk) → server SQLite (v2). Follows
  * the ADR-0043 **file-first write-through** pattern: disk is the source of
@@ -297,6 +375,24 @@ export interface FlowRun {
    * value would make every older reader reject the whole file.
    */
   limit?: RunLimit;
+  /**
+   * When this record was last written (ISO). Every writer stamps it (the CLI's
+   * run store and the Flow extension), so a reader can tell a run that is still
+   * moving from one that went quiet. Absent on records written before it existed;
+   * a reader then falls back to the other timestamps. Fleet contract 4.1.0.
+   */
+  updatedAt?: string;
+  /**
+   * The session id of the chat that launched this run, when another chat did
+   * (a `flow drain` started it, or `flow claim --dispatched-by`). DorkOS uses it
+   * to show the run in the launching chat too. Absent when the run's own session
+   * claimed it. Fleet contract 4.1.0.
+   */
+  dispatchedBy?: string;
+  /** VERIFY's adversarial review of a run that is not a drain run. See {@link RunReview}. */
+  review?: RunReview;
+  /** The question the run is parked on, while one is open. See {@link RunQuestion}. */
+  question?: RunQuestion;
 }
 
 /** The inferred {@link RecoverySchema} config type (`maxRetries`/`onExhausted`/`staleAfter`). */

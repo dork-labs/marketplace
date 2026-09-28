@@ -11,4 +11,4 @@ Close the loop for: $ARGUMENTS
 
 Read `${CLAUDE_PLUGIN_ROOT}/skills/closing-work/SKILL.md` and follow its process exactly.
 
-DONE runs only after the human-review gate (REVIEW) has approved.
+DONE runs only after the review gate (REVIEW) approved.

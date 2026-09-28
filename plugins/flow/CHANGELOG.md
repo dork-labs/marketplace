@@ -4,6 +4,17 @@ Installs of this plugin are pinned to a commit SHA, so a fix here does not reach
 you until you **reinstall it** (Marketplace → flow → reinstall, or re-run your
 `--plugin-dir` checkout's `git pull`). Each entry below says whether that matters.
 
+## 0.48.0
+
+**A pause can now end on its own, and flow is ready for DorkOS to answer its questions for you. Reinstall to get it.**
+
+- `/flow:pause for 1 hour` or `/flow:pause until 9am` ends the pause at that time by itself, even with DorkOS closed. A timed pause leaves your schedules on; each run just stops at its first step until the end. `/flow:status` says "Paused until …".
+- New `flow review` ships finished work at the review gate, or sends it back with a note. Shipping comments on the item, approves the pull request (unless you wrote it) and arms it to merge; sending it back never closes anything.
+- New `flow ask` is how an agent parks a question now: it always offers its own pick and says why, so you can answer with one click. New `flow answer` posts your answer; whoever answers first wins.
+- Each project can now say how much flow does on its own: ask you first, tell you after, or just do it. You choose it in the project's Flow settings in DorkOS once DorkOS ships that page; `flow autonomy` shows what is in force. Until you choose, nothing changes.
+- The safety floor now means "someone always checks", not "only a person answers". You can let the reviewer agent ship work it reviewed clean, or let an agent go with its own pick after a deadline. A decision about secrets or spending always waits for you, and nothing on the floor is ever settled by nobody.
+- For DorkOS: each run now records when it last changed and which chat launched it, so a chat can show every item it handed off (the shared contract with DorkOS is now 4.1.0). When Linear stops accepting flow's sign-in, flow now says so apart from a slow connection, so only the sign-in ever needs you.
+
 ## 0.47.3
 
 **Nothing flow does has changed, and there is no need to reinstall.** The usage file flow shares with DorkOS now spells out one more rule: a usage reading above 100% counts as 100%, and one below 0% counts as 0%.

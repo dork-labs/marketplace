@@ -34,7 +34,14 @@
 import { z } from 'zod';
 
 import { DrainStateSchema, RunLimitSchema } from './drain/state.ts';
-import type { FlowRun, FlowRunProvenance, FlowRunStatus, FlowStage } from './flow-run.ts';
+import type {
+  FlowRun,
+  FlowRunProvenance,
+  FlowRunStatus,
+  FlowStage,
+  RunQuestion,
+  RunReview,
+} from './flow-run.ts';
 
 /**
  * The {@link FlowStage} spine as a Zod enum — mirrors the `FlowStage` union in
@@ -119,6 +126,31 @@ const FlowRunProvenanceSchema: z.ZodType<FlowRunProvenance> = z.looseObject({
   branch: z.string().optional(),
 });
 
+/** The on-disk validator for {@link RunReview}. */
+const RunReviewSchema: z.ZodType<RunReview> = z.looseObject({
+  tokenHash: z.string(),
+  sha: z.string(),
+  // A vocabulary checked only as a string, as drain/state.ts does, so a verdict
+  // a newer flow adds never makes this all-or-nothing reader drop every run.
+  verdict: z.custom<RunReview['verdict']>((value) => value === null || typeof value === 'string'),
+  reviewedSha: z.string().nullable(),
+});
+
+/** The on-disk validator for {@link RunQuestion}. */
+const RunQuestionSchema: z.ZodType<RunQuestion> = z.looseObject({
+  text: z.string(),
+  choices: z.array(z.looseObject({ id: z.string(), label: z.string() })),
+  pick: z.string(),
+  why: z.string(),
+  askedAt: z.string(),
+  decideBy: z.string().nullable(),
+  floor: z.array(z.string()),
+  answeredBy: z.string(),
+  checkAfter: z.string().nullable(),
+  checkTokenHash: z.string().optional(),
+  answer: z.looseObject({ text: z.string(), at: z.string(), by: z.string() }).optional(),
+});
+
 /**
  * The Zod validator for a single {@link FlowRun} record — the on-disk schema the
  * reader validates against. Drift between this and the `FlowRun` interface is
@@ -163,6 +195,15 @@ export const FlowRunSchema = z.looseObject({
   checkpointSha: z.string().optional(),
   drain: DrainStateSchema.optional(),
   limit: RunLimitSchema.optional(),
+  // When the record was last written, and the chat that launched the run (spec
+  // flow-multiproject §6, fleet contract 4.1.0). Plain strings.
+  updatedAt: z.string().optional(),
+  dispatchedBy: z.string().optional(),
+  // VERIFY's token-bound review and the open question (spec flow-multiproject
+  // §7.5), flow's own fields. Loose objects, for the reason the provenance
+  // schema gives: a newer writer's extra keys must survive an older reader.
+  review: RunReviewSchema.optional(),
+  question: RunQuestionSchema.optional(),
 });
 
 /**

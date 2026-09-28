@@ -51,7 +51,7 @@ import path from 'node:path';
 
 import type { ProcessRunner } from '../cli/context.ts';
 import { FlowError } from '../errors.ts';
-import type { FlowRun } from '../flow-run.ts';
+import type { FlowRun, RunQuestion } from '../flow-run.ts';
 import type { FlowStateFile } from '../flow-state-file.ts';
 import { judgeEjection } from '../forge/ejection.ts';
 import type { Forge } from '../forge/types.ts';
@@ -231,6 +231,8 @@ export interface PassSettings {
   maxLoadPerCpu: number;
   /** Review verdicts before a run parks. */
   maxReviewRounds: number;
+  /** Whether workers fix failing checks on their own (default `true`); see `DrainStepConfig`. */
+  fixFailingChecks?: boolean;
   /** How long a claim or intent may wait before adopt-or-release (ms). */
   startTimeoutMs: number;
   /** The permission mode sessions start in. */
@@ -279,7 +281,10 @@ export interface PassDeps {
    * also looks for a reply newer than `since` and, finding one, lifts
    * needs-input through the adapter and returns the answer's pointer.
    */
-  item(identifier: string, parked?: { since: string | null }): Promise<ItemFacts>;
+  item(
+    identifier: string,
+    parked?: { since: string | null; question?: RunQuestion }
+  ): Promise<ItemFacts>;
   /** `flow next`'s logic with account assignment, for `slots` picks. */
   plan(slots: number): Promise<PassPlan>;
   /**
@@ -555,6 +560,9 @@ export async function runPass(deps: PassDeps): Promise<PassReport> {
     maxReviewRounds: deps.settings.maxReviewRounds,
     startTimeoutMs: deps.settings.startTimeoutMs,
     flow: deps.flow,
+    ...(deps.settings.fixFailingChecks === undefined
+      ? {}
+      : { fixFailingChecks: deps.settings.fixFailingChecks }),
   };
 
   /** Record one line for a run. */
@@ -723,7 +731,12 @@ export async function runPass(deps: PassDeps): Promise<PassReport> {
 
     const item = await deps.item(
       run.identifier,
-      drain.phase === 'parked' ? { since: drain.parkedAt ?? null } : undefined
+      drain.phase === 'parked'
+        ? {
+            since: drain.parkedAt ?? null,
+            ...(run.question === undefined ? {} : { question: run.question }),
+          }
+        : undefined
     );
     const pendingSince = Date.parse(drain.worker?.pendingSince ?? run.startedAt);
     const unstarted =

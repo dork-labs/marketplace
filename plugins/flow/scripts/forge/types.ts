@@ -79,6 +79,25 @@ export interface CreatePrInput {
   body: string;
 }
 
+/** What {@link Forge.review} submits on a pull request. */
+export interface ReviewInput {
+  /** Approve it, or ask for changes. */
+  event: 'approve' | 'request-changes';
+  /** The review's text. */
+  body: string;
+}
+
+/**
+ * What {@link Forge.review} did:
+ *
+ * - `reviewed` — the review was submitted.
+ * - `commented` — the signed-in account wrote the PR, and the forge refuses a
+ *   review of one's own PR, so a request for changes became a plain comment.
+ * - `skipped` — the same, for an approval: nothing was posted, and the tracker
+ *   comment is the approval of record.
+ */
+export type ReviewOutcome = 'reviewed' | 'commented' | 'skipped';
+
 /** One repository on a forge. Every method throws {@link ForgeError} when the forge cannot answer. */
 export interface Forge {
   /** `owner/name`. */
@@ -99,6 +118,12 @@ export interface Forge {
   arm(pr: number, headSha: string): Promise<void>;
   /** Disarm auto-merge. */
   disarm(pr: number): Promise<void>;
+  /**
+   * Review a PR as the signed-in account (spec `flow-multiproject` §7.5). A
+   * forge refuses a review of one's own PR, so when the signed-in account wrote
+   * it, an approval posts nothing and a request for changes posts a comment.
+   */
+  review(pr: number, input: ReviewInput): Promise<ReviewOutcome>;
   /**
    * Merge-group attempts on `base` in the last `sinceMinutes` minutes that had
    * failing checks. `checkNames` narrows `failing` to those names; empty keeps

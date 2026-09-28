@@ -26,6 +26,8 @@ import path from 'node:path';
 
 import { chooseAccount, rankAccounts } from '../drain/account-rank.ts';
 import { answerPointer, findAnswer } from '../drain/answer.ts';
+import type { RunQuestion } from '../flow-run.ts';
+import { parkedAnswer, pickComment } from '../question.ts';
 import { acquireDrainLock } from '../drain/lock.ts';
 import {
   findMintedSession,
@@ -75,6 +77,8 @@ import {
 import { signBody, unsignedBody } from './provenance.ts';
 import { releaseItem } from './release.ts';
 import { journalUsage } from './usage-journal.ts';
+import { stopInForce, type AutonomyRead } from '../autonomy.ts';
+import { runtimeSession } from './session-id.ts';
 import { applyAndVerify, isOpenItem, sessionProvenance, setupWrite } from './work-write.ts';
 
 /** The permission modes a drain session may start in. */
@@ -100,6 +104,37 @@ export interface DrainOptions {
   mintToken?: () => string;
   /** Look for a session a stopped pass started (default: this machine's files, or DorkOS). */
   findSession?: PassDeps['findSession'];
+}
+
+/**
+ * A pointer to an answer `flow answer` recorded on the run, for the worker's
+ * `continue` message.
+ *
+ * @param question - The answered question.
+ * @param identifier - The item.
+ * @returns The pointer, with the answer's words.
+ */
+export function recordedAnswerPointer(question: RunQuestion, identifier: string): string {
+  const answer = question.answer;
+  if (answer === undefined) return `the latest comment on ${identifier}`;
+  const who =
+    answer.by === 'person'
+      ? 'a person, from DorkOS'
+      : answer.by === 'reviewer-agent'
+        ? 'the reviewer agent'
+        : 'your own pick, at the deadline';
+  return `the answer recorded on ${identifier} at ${answer.at} by ${who}: "${answer.text}"`;
+}
+
+/**
+ * Whether the project's dial says Ask me first for "Retry and fix problems".
+ * With no copy of the dial at all, flow fixes failing checks as it always has.
+ *
+ * @param read - What reading the dial found (`null`: not read).
+ * @returns `true` when the drain must park on red checks instead of fixing them.
+ */
+export function asksBeforeFixing(read: AutonomyRead | null): boolean {
+  return read !== null && stopInForce(read, 'retry') === 'ask';
 }
 
 /**
@@ -208,7 +243,7 @@ export async function drain(ctx: VerbContext, options: DrainOptions = {}): Promi
   if (paused !== null && !ctx.manual) {
     project.flushWarnings();
     throw new PausedError(
-      `flow is paused${paused.pausedAt ? ` (since ${paused.pausedAt})` : ''}; /flow:resume lifts it, or pass --manual when a person is driving`
+      `flow is paused${paused.until ? ` until ${paused.until}` : paused.pausedAt ? ` (since ${paused.pausedAt})` : ''}; /flow:resume lifts it${paused.until ? ' sooner' : ''}, or pass --manual when a person is driving`
     );
   }
   const parallel = parallelOf(ctx, config.drain.parallel);
@@ -240,6 +275,8 @@ export async function drain(ctx: VerbContext, options: DrainOptions = {}): Promi
 
   const setup = await setupWrite(ctx, CAPABILITIES);
   const { adapter, store, stages } = setup;
+  /** The chat running this drain: every run it starts records it as `dispatchedBy`. */
+  const launchedBy = runtimeSession(ctx.env).sessionId;
   let agent: string | undefined;
   /** The agent's account id, resolved once (`identity.agent`, or the tracker's current user for `auto`). */
   const agentId = async (): Promise<string> =>
@@ -329,6 +366,8 @@ export async function drain(ctx: VerbContext, options: DrainOptions = {}): Promi
       parallel,
       maxLoadPerCpu: config.drain.maxLoadPerCpu,
       maxReviewRounds: config.drain.maxReviewRounds,
+      // "Retry and fix problems" at Ask me first: park on red checks (autonomy.ts).
+      fixFailingChecks: !asksBeforeFixing(project.loaded.autonomy),
       startTimeoutMs: DEFAULT_START_TIMEOUT_MS,
       permissionMode,
       workerModel: model('implementation'),
@@ -367,14 +406,39 @@ export async function drain(ctx: VerbContext, options: DrainOptions = {}): Promi
         ),
         comments: config.comments,
       });
-      if (reply === null || ctx.dryRun) return facts;
+      const question = parked.question;
+      let answer: string | null = reply === null ? null : answerPointer(reply, identifier);
+      const fromQuestion = answer === null ? parkedAnswer(question, ctx.now()) : null;
+      if (fromQuestion === 'recorded' && question !== undefined) {
+        // `flow answer` recorded it (from DorkOS, or the pick at a deadline).
+        answer = recordedAnswerPointer(question, identifier);
+      }
+      if (fromQuestion === 'take-pick' && question !== undefined) {
+        // Nobody answered by the deadline: the agent's pick stands (spec
+        // flow-multiproject §7.5). Posted as the agent, and recorded, so a
+        // DorkOS deadline arriving later finds it settled and does nothing.
+        if (ctx.dryRun) return facts;
+        await adapter.comment(
+          item,
+          signBody(
+            pickComment(question, 'agent-default'),
+            config.identity.marker,
+            sessionProvenance(ctx, undefined)
+          )
+        );
+        const at = ctx.now().toISOString();
+        const settled = {
+          ...question,
+          answer: { text: pickComment(question, 'agent-default'), at, by: 'agent-default' },
+        };
+        await store.updateRun(item.id, (current) =>
+          current.question === undefined ? current : { ...current, question: settled }
+        );
+        answer = recordedAnswerPointer(settled, identifier);
+      }
+      if (answer === null || ctx.dryRun) return facts;
       await applyAndVerify(adapter, item, projectionFor({ type: 'claim' }, { stages }));
-      return {
-        ...facts,
-        claimed: true,
-        needsInput: false,
-        answer: answerPointer(reply, identifier),
-      };
+      return { ...facts, claimed: true, needsInput: false, answer };
     },
     async plan(slots) {
       const plan = await planNext(ctx, project, { count: slots, items, accounts: true });
@@ -428,6 +492,8 @@ export async function drain(ctx: VerbContext, options: DrainOptions = {}): Promi
         host: input.host,
         runtime: input.runtime,
         drain: input.drain,
+        // The chat that ran `flow drain`, so DorkOS lists the run in it too.
+        ...(launchedBy === null ? {} : { dispatchedBy: launchedBy }),
       });
     },
     async release(identifier) {

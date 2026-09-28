@@ -325,6 +325,11 @@ export interface PauseState {
   /** When the pause began, or `null` when the flag cannot be read (it still pauses). */
   pausedAt: string | null;
   /**
+   * When the pause ends by itself (ISO), or `null` for a pause that lasts until
+   * someone resumes. An end that cannot be read is `null`: the safe side.
+   */
+  until: string | null;
+  /**
    * The ids of the host's schedule rows `/flow:pause` switched off (DorkOS), so
    * `/flow:resume` switches back on exactly those and nothing a person turned off
    * themselves.
@@ -340,9 +345,11 @@ export interface PauseResult {
   file: string;
   /** When the pause in effect began. */
   pausedAt: string | null;
+  /** When it ends by itself, or `null` until someone resumes. */
+  until: string | null;
   /** The host schedule ids recorded in the flag. */
   hostSchedules: string[];
-  /** flow was already paused; the earlier flag was kept. */
+  /** flow was already paused; the earlier start time was kept (a new end replaces the old one). */
   alreadyPaused: boolean;
   /** Whether git ignores the flag; `false` means it could be committed by mistake. */
   ignored: boolean;
@@ -1247,6 +1254,36 @@ function recordedSchedules(value: unknown): string[] {
   return value.hostSchedules.filter((id): id is string => typeof id === 'string' && id !== '');
 }
 
+/** The pause flag as written: present or not, and what it records, whatever its end time. */
+interface PauseFlag {
+  /** The flag file. */
+  file: string;
+  /** When the pause began, or `null` when unreadable. */
+  pausedAt: string | null;
+  /** When it ends, or `null` when it has no end (or its end cannot be read). */
+  until: string | null;
+  /** The host schedule ids it records. */
+  hostSchedules: string[];
+}
+
+/** The flag in the project, or `null` when there is none, read without looking at the clock. */
+function readPauseFlag(roots: ConfigRoots): PauseFlag | null {
+  const file = pauseFile(roots);
+  if (!isFile(file)) return null;
+  const value = parseOrUndefined(readOrNull(file));
+  const pausedAt =
+    isPlainObject(value) && typeof value.pausedAt === 'string' ? value.pausedAt : null;
+  const rawUntil = isPlainObject(value) ? value.until : undefined;
+  const until =
+    typeof rawUntil === 'string' && Number.isFinite(Date.parse(rawUntil)) ? rawUntil : null;
+  return { file, pausedAt, until, hostSchedules: recordedSchedules(value) };
+}
+
+/** Whether a flag's end time has come: an `until` at or before `now`. */
+function expired(flag: PauseFlag, now: Date): boolean {
+  return flag.until !== null && Date.parse(flag.until) <= now.getTime();
+}
+
 /**
  * Whether flow is paused on this machine: whether {@link PAUSE_FILE} exists in
  * the project's own `.agents/flow/` (the main checkout's, from a linked
@@ -1254,16 +1291,24 @@ function recordedSchedules(value: unknown): string[] {
  * flag's presence is the pause; one that cannot be read still pauses, the safe
  * direction for autonomy.
  *
+ * A flag whose `until` is at or before `now` has ended and reads as not paused,
+ * so a timed pause ends on time whether or not DorkOS is running (spec
+ * `flow-multiproject` §5.1). An `until` that cannot be read reads as no end.
+ *
  * @param roots - The checkouts to act for.
+ * @param now - The time to judge the end against. Default: now.
  * @returns The pause, or `null` when flow is not paused.
  */
-export function pauseState(roots: ConfigRoots): PauseState | null {
-  const file = pauseFile(roots);
-  if (!isFile(file)) return null;
-  const value = parseOrUndefined(readOrNull(file));
-  const pausedAt =
-    isPlainObject(value) && typeof value.pausedAt === 'string' ? value.pausedAt : null;
-  return { file, pausedAt, hostSchedules: recordedSchedules(value) };
+export function pauseState(roots: ConfigRoots, now: Date = new Date()): PauseState | null {
+  const flag = readPauseFlag(roots);
+  if (flag === null || expired(flag, now)) return null;
+  return flag;
+}
+
+/** Write a flag file. */
+function writeFlag(file: string, flag: Omit<PauseFlag, 'file'>, create: boolean): void {
+  const body = { pausedAt: flag.pausedAt, until: flag.until, hostSchedules: flag.hostSchedules };
+  writeFileSync(file, `${JSON.stringify(body, null, 2)}\n`, create ? { flag: 'wx' } : undefined);
 }
 
 /**
@@ -1271,8 +1316,12 @@ export function pauseState(roots: ConfigRoots): PauseState | null {
  * project's own `.agents/flow/` (the main checkout's from a worktree, whatever
  * settings the worktree has), after keeping it out of git. Every autonomous entry
  * point (the scheduled ticks, the tracker tick, `/flow continue`, `/flow auto`)
- * checks it first and stops. An existing pause is kept, so its start time stays
- * true. Works whether or not flow is configured.
+ * checks it first and stops. Works whether or not flow is configured.
+ *
+ * `until` is when the pause ends by itself (`null`: when someone resumes).
+ * Pausing a project that is already paused keeps its start time, so it stays
+ * true, and **replaces** its end: the newest choice wins. A flag whose end has
+ * passed is a finished pause, so pausing again starts a new one.
  *
  * `hostSchedules` adds the ids of host schedule rows the caller just switched
  * off, so `/flow:resume` can switch those back on; they merge into the flag.
@@ -1283,55 +1332,73 @@ export function pauseState(roots: ConfigRoots): PauseState | null {
  * @param roots - The checkouts to act for.
  * @param now - The time to record.
  * @param hostSchedules - Host schedule ids to record in the flag.
+ * @param until - When the pause ends by itself (ISO), or `null` for no end.
  * @returns The flag in effect, and whether git ignores it.
  */
 export function pauseFlow(
   roots: ConfigRoots,
   now: Date = new Date(),
-  hostSchedules: readonly string[] = []
+  hostSchedules: readonly string[] = [],
+  until: string | null = null
 ): PauseResult {
   const file = pauseFile(roots);
   keepOutOfGit(roots, path.dirname(file));
   const ignored = !inGitRepo(path.dirname(file)) || gitIgnores(file);
 
+  const fresh = { pausedAt: now.toISOString(), until, hostSchedules: [...new Set(hostSchedules)] };
   let alreadyPaused = true;
   try {
-    const pausedAt = now.toISOString();
-    writeFileSync(file, `${JSON.stringify({ pausedAt, hostSchedules: [] }, null, 2)}\n`, {
-      flag: 'wx',
-    });
+    writeFlag(file, fresh, true);
     alreadyPaused = false;
   } catch (err) {
     // Already paused (perhaps by another session a moment ago): that pause stands.
     if ((err as NodeJS.ErrnoException).code !== 'EEXIST') throw err;
   }
-  const state = pauseState(roots) ?? { file, pausedAt: null, hostSchedules: [] };
-  const merged = [...new Set([...state.hostSchedules, ...hostSchedules])];
-  if (merged.length !== state.hostSchedules.length) {
-    const next = { pausedAt: state.pausedAt, hostSchedules: merged };
-    writeFileSync(file, `${JSON.stringify(next, null, 2)}\n`);
+  if (!alreadyPaused) return { ok: true, file, ...fresh, alreadyPaused, ignored };
+
+  const current = readPauseFlag(roots) ?? { file, ...fresh };
+  const merged = [...new Set([...current.hostSchedules, ...hostSchedules])];
+  if (expired(current, now)) {
+    // A pause whose end has come is over: this is a new pause, not a change to it.
+    const next = { ...fresh, hostSchedules: merged };
+    writeFlag(file, next, false);
+    return { ok: true, file, ...next, alreadyPaused: false, ignored };
   }
-  return { ok: true, ...state, hostSchedules: merged, alreadyPaused, ignored };
+  const next = { pausedAt: current.pausedAt, until, hostSchedules: merged };
+  const raw = parseOrUndefined(readOrNull(file));
+  const storedUntil = isPlainObject(raw) ? raw.until : undefined;
+  if (merged.length !== current.hostSchedules.length || (storedUntil ?? null) !== until) {
+    writeFlag(file, next, false);
+  }
+  return { ok: true, file, ...next, alreadyPaused, ignored };
 }
 
 /**
- * Lift a pause: remove the project's {@link PAUSE_FILE}.
+ * Lift a pause: remove the project's {@link PAUSE_FILE}. A flag whose end has
+ * already passed is removed too (it no longer pauses anything, but a stale file
+ * would confuse a reader that only checks for it); `wasPaused` then says `false`.
  *
  * @param roots - The checkouts to act for.
+ * @param now - The time to judge the end against. Default: now.
  * @returns Whether flow was paused, the flag removed, and the host schedule ids
  *   the pause had switched off.
  */
-export function resumeFlow(roots: ConfigRoots): ResumeResult {
-  const state = pauseState(roots);
-  if (state === null) return { ok: true, wasPaused: false, removed: [], hostSchedules: [] };
-  rmSync(state.file, { force: true });
-  return { ok: true, wasPaused: true, removed: [state.file], hostSchedules: state.hostSchedules };
+export function resumeFlow(roots: ConfigRoots, now: Date = new Date()): ResumeResult {
+  const flag = readPauseFlag(roots);
+  if (flag === null) return { ok: true, wasPaused: false, removed: [], hostSchedules: [] };
+  rmSync(flag.file, { force: true });
+  return {
+    ok: true,
+    wasPaused: !expired(flag, now),
+    removed: [flag.file],
+    hostSchedules: flag.hostSchedules,
+  };
 }
 
 const HELP = `config-files — find, migrate and prepare flow's project files.
 
 Usage: config-files.ts [resolve|migrate|prepare|pause|resume] [--confirm|--decline]
-                      [--host-schedule <id>]... [--project <dir>]
+                      [--host-schedule <id>]... [--until <iso>] [--project <dir>]
 
   resolve   (default) Which config.json and config.local.json flow reads, with
             config.json checked against config.schema.json, which tracker adapter
@@ -1356,10 +1423,14 @@ Usage: config-files.ts [resolve|migrate|prepare|pause|resume] [--confirm|--decli
   pause     Pause flow's autonomy on this machine (the project's
             .agents/flow/paused.json, in the main checkout from a worktree, kept
             out of git). --host-schedule <id> records a host schedule row the
-            caller switched off, so resume can switch it back on. Prints
-            { ok, file, pausedAt, hostSchedules, alreadyPaused, ignored }.
-  resume    Lift the pause. Prints { ok, wasPaused, removed, hostSchedules }:
-            switch those host schedule rows, and only those, back on.
+            caller switched off, so resume can switch it back on. --until <iso>
+            ends the pause by itself at that time (a time in the future, with
+            its zone); without it the pause lasts until resume. Pausing again
+            keeps the start time and replaces the end. Prints
+            { ok, file, pausedAt, until, hostSchedules, alreadyPaused, ignored }.
+  resume    Lift the pause (and remove a timed pause that has already ended).
+            Prints { ok, wasPaused, removed, hostSchedules }: switch those host
+            schedule rows, and only those, back on.
 
 --project <dir> is the folder to act for (default: the current directory).
 Only paths and non-secret facts are printed, never a credential.
@@ -1501,6 +1572,7 @@ export function main(argv: readonly string[]): number {
   let confirm = false;
   let decline = false;
   const hostSchedules: string[] = [];
+  let until: string | undefined;
   for (let i = 0; i < argv.length; i += 1) {
     const arg = argv[i];
     if (arg === '--help' || arg === '-h') {
@@ -1515,6 +1587,16 @@ export function main(argv: readonly string[]): number {
       confirm = true;
     } else if (arg === '--decline') {
       decline = true;
+    } else if (arg === '--until' || arg.startsWith('--until=')) {
+      const value = arg === '--until' ? argv[i + 1] : arg.slice('--until='.length);
+      if (value === undefined || value === '' || value.startsWith('--')) {
+        process.stderr.write(
+          `config-files: --until needs the time the pause ends, e.g. 2026-09-29T09:00:00+02:00; leave it out to pause until resume\n`
+        );
+        return 2;
+      }
+      until = value;
+      if (arg === '--until') i += 1;
     } else if (arg === '--host-schedule' && argv[i + 1] !== undefined && argv[i + 1] !== '') {
       hostSchedules.push(argv[i + 1]);
       i += 1;
@@ -1538,6 +1620,26 @@ export function main(argv: readonly string[]): number {
     process.stderr.write(`config-files: --host-schedule only goes with pause\n`);
     return 2;
   }
+  const now = new Date();
+  if (until !== undefined) {
+    if (command !== 'pause') {
+      process.stderr.write(`config-files: --until only goes with pause\n`);
+      return 2;
+    }
+    const at = Date.parse(until);
+    if (!Number.isFinite(at)) {
+      process.stderr.write(
+        `config-files: --until must be a time with its zone, e.g. 2026-09-29T09:00:00+02:00, not "${until}"\n`
+      );
+      return 2;
+    }
+    if (at <= now.getTime()) {
+      process.stderr.write(
+        `config-files: --until ${until} has already passed; pick a time in the future\n`
+      );
+      return 2;
+    }
+  }
   let output: { result: object; ok: boolean };
   if (command === 'migrate') {
     if (confirm && decline) {
@@ -1558,7 +1660,7 @@ export function main(argv: readonly string[]): number {
     process.stderr.write(`config-files: adapter: ${result.adapter.reason}\n`);
     output = { result, ok: result.ok };
   } else if (command === 'pause') {
-    const result = pauseFlow(roots, new Date(), hostSchedules);
+    const result = pauseFlow(roots, now, hostSchedules, until ?? null);
     if (!result.ignored) {
       process.stderr.write(
         `config-files: warning — git does not ignore ${result.file}, so the pause could be committed by mistake\n`
@@ -1566,7 +1668,7 @@ export function main(argv: readonly string[]): number {
     }
     output = { result, ok: result.ok };
   } else if (command === 'resume') {
-    const result = resumeFlow(roots);
+    const result = resumeFlow(roots, now);
     output = { result, ok: result.ok };
   } else if (command === 'prepare') {
     const result = prepareConfigDirs(roots, resolveConfigFiles(roots));

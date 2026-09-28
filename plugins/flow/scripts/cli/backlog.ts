@@ -21,6 +21,7 @@ import { loadConfig, type LoadedConfig } from '../config-load.ts';
 import { UsageError } from '../errors.ts';
 import { requireCapabilities } from '../tracker/load.ts';
 import type { BacklogSnapshot, CodeAdapter } from '../tracker/types.ts';
+import { verbLoadOptions } from './load-options.ts';
 import type { VerbContext } from './context.ts';
 
 /** The project's loaded config, plus an adapter handle that remembers whether it was used. */
@@ -41,7 +42,11 @@ export interface ProjectConfig {
  * @throws {ConfigError} When flow is not configured here or its config is invalid.
  */
 export function loadProjectConfig(ctx: VerbContext): ProjectConfig {
-  const loaded = loadConfig(findConfigRoots(ctx.projectDir, ctx.flowRoot), ctx.env);
+  const loaded = loadConfig(
+    findConfigRoots(ctx.projectDir, ctx.flowRoot),
+    ctx.env,
+    verbLoadOptions(ctx)
+  );
   let adapterUsed = false;
   return {
     loaded,

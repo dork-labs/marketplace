@@ -40,7 +40,14 @@ import {
   type ConfigRoots,
   type PauseState,
 } from './config-files.ts';
+import {
+  applyAutonomy,
+  autonomyCopyPath,
+  readAutonomyCopy,
+  type AutonomyRead,
+} from './autonomy.ts';
 import { FlowConfigSchema, type FlowConfig } from './config-schema.ts';
+import { canonicalProjectRoot } from './main-checkout.ts';
 import { ConfigError } from './errors.ts';
 
 /** The tracker credentials, kept out of the policy config. */
@@ -61,8 +68,25 @@ export interface LoadedConfig {
   files: ConfigFiles;
   /** This machine's pause, or `null` when flow is not paused. */
   paused: PauseState | null;
+  /**
+   * What reading the project's autonomy dial found, or `null` when the caller
+   * gave no DorkOS home (then the dial was not applied).
+   */
+  autonomy: AutonomyRead | null;
   /** Plain sentences about settings that load but deserve attention. */
   warnings: string[];
+}
+
+/** What {@link loadConfig} needs beyond the files and the environment. */
+export interface LoadOptions {
+  /** The clock a timed pause's end is judged by. Default: the wall clock. */
+  now?: () => Date;
+  /**
+   * The DorkOS home, where the copy of the project's autonomy dial lives
+   * (`autonomy.ts`). Given, the dial is read and applied to `recovery` and
+   * `involvement.calibration.stageBias`; left out, neither is touched.
+   */
+  dorkHome?: string;
 }
 
 /** The environment variables the loader reads, and the secret each fills. */
@@ -76,13 +100,15 @@ const SECRET_ENV: Readonly<Record<keyof FlowSecrets, string>> = {
  *
  * @param roots - The checkout, main checkout and plugin root to look in.
  * @param env - The environment to read `FLOW_TRACKER_*` from.
+ * @param options - The clock.
  * @returns The config, secrets, files, pause and warnings.
  * @throws {ConfigError} When flow must not act here, is not configured, a file
  *   is not a JSON object, or the merged settings fail the schema.
  */
 export function loadConfig(
   roots: ConfigRoots,
-  env: Readonly<Record<string, string | undefined>> = process.env
+  env: Readonly<Record<string, string | undefined>> = process.env,
+  options: LoadOptions = {}
 ): LoadedConfig {
   const refusal = refusalFor(roots);
   if (refusal !== null) throw new ConfigError(refusal);
@@ -128,12 +154,46 @@ export function loadConfig(
   }
 
   const merged = deepMerge(committed.policy, local.policy);
+  const parsed = parsePolicy(merged, warnings);
+  const autonomy = options.dorkHome === undefined ? null : readDial(roots, options.dorkHome);
   return {
-    config: parsePolicy(merged, warnings),
+    config: autonomy === null ? parsed : withDial(parsed, autonomy),
     secrets,
     files,
-    paused: pauseState(roots),
+    paused: pauseState(roots, options.now?.() ?? new Date()),
+    autonomy,
     warnings,
+  };
+}
+
+/** Read the copy of the project's dial; a folder outside git has none. */
+function readDial(roots: ConfigRoots, dorkHome: string): AutonomyRead {
+  let root: string;
+  try {
+    root = canonicalProjectRoot(roots.checkout);
+  } catch {
+    return { state: 'missing', file: '' };
+  }
+  return readAutonomyCopy(autonomyCopyPath(dorkHome, root));
+}
+
+/** The config as the dial reads it: `recovery` and `stageBias` per `applyAutonomy`. */
+function withDial(config: FlowConfig, read: AutonomyRead): FlowConfig {
+  const calibration = config.involvement.calibration;
+  const tuned = applyAutonomy(
+    { recovery: config.recovery, stageBias: calibration.stageBias },
+    read
+  );
+  if (tuned.recovery === config.recovery && tuned.stageBias === calibration.stageBias) {
+    return config;
+  }
+  return {
+    ...config,
+    recovery: tuned.recovery,
+    involvement: {
+      ...config.involvement,
+      calibration: { ...calibration, stageBias: tuned.stageBias },
+    },
   };
 }
 

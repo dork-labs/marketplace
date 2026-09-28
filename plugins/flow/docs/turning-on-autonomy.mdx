@@ -10,12 +10,13 @@ import { Cards, Card } from "fumadocs-ui/components/card";
 # Turning on the automatic loop
 
 <Callout type="info">
-  **"Automatic" means the loop carries work to your review gate on its own. It
-  does not mean it merges without you.** The human-review gate (after VERIFY)
-  and the calibration floor are *always on*, in every setup on this page. The
-  loop claims a ready item, drives it to a PR with evidence, parks at the review
-  gate, and waits. You approve and merge. Nothing reaches `main` that you did
-  not choose.
+  **"Automatic" means the loop carries work to a check you chose, on its own.**
+  The review gate (after VERIFY) and the calibration floor are *always checked*,
+  in every setup on this page. The loop claims a ready item, drives it to a PR
+  with evidence, parks at the review gate, and waits for its check. Unless you
+  let the reviewer agent ship work it found clean (the project's "How much it
+  does on its own" setting in DorkOS, see [The dials](/docs/guides/flow/the-dials)),
+  you approve and merge. Nothing reaches `main` that nobody checked.
 </Callout>
 
 There are three ways to run `/flow` without hand-driving each stage. They differ on one axis:
@@ -50,9 +51,11 @@ whichever way you schedule it:
 <Callout type="warn">
   The loop respects the **calibration floor** unconditionally. An action that is
   irreversible or destructive, outward-facing, spends money or touches secrets,
-  or materially changes scope stops for you *even at full confidence*. The floor
-  is non-trimmable: a config that tries to empty it fails to load. Autonomy can
-  never be widened past the floor by editing a file.
+  or materially changes scope is checked *even at full confidence*: by you, or,
+  at Just do it, by the reviewer agent. Never by nobody, and anything about
+  secrets or spending always waits for you. The floor is non-trimmable: a config
+  that tries to empty it fails to load. Autonomy can never be widened past the
+  floor by editing a file.
 </Callout>
 
 ## The three setups
@@ -261,7 +264,7 @@ guidance, is in [The dials](/docs/guides/flow/the-dials).
 | `ingestion.producer`                   | The inbound transport. `poll` today; `webhook` is the deferred drop-in.                                    | `"poll"`                            |
 | `ingestion.pollIntervalMs`             | How often the loop polls the tracker for inbound events.                                                   | `60000`                             |
 | `gates.planApproval`                   | Whether DECOMPOSE pauses for a pre-code plan checkpoint.                                                   | `false`                             |
-| `involvement.calibration.alwaysAsk`    | The non-trimmable floor: action classes that always stop for you.                                          | four classes (min 1)                |
+| `involvement.calibration.alwaysAsk`    | The non-trimmable floor: action classes that are always checked.                                           | four classes (min 1)                |
 | `involvement.nudge`                    | The out-of-band attention channel for parked questions in shared mode.                                     | `{ relay: false, telegram: false }` |
 | `dispatch.rank` / `dispatch.sizeOrder` | How the next item is chosen when several are ready.                                                        | unblockers-first, small-first       |
 
@@ -297,6 +300,10 @@ Autonomy is never a loss of control, in any setup:
   Schedules page when it can reach them, and resume switches back on only those. Elsewhere the
   scheduler still starts each tick on time and the tick stops at its first step; disable your cron
   or CI job to stop it starting at all.
+- **A pause can end on its own.** `/flow pause for 1 hour` or `/flow pause until 9am` records the
+  end in the flag, and flow reads it itself, so the pause ends on time even with DorkOS closed. A
+  timed pause leaves your schedules on: each tick stops at its first step until the end, then
+  starts work again. `/flow resume` still lifts it sooner.
 - **Reprioritize or disable a loop** by editing its `loops.<id>` block.
 - **Reclaim or redirect an item** by reassigning it; the running tick honors the change at the next
   stage boundary.
@@ -327,8 +334,8 @@ Deferred to the P5 server build:
 What _is_ real after this revision: readiness produced at TRIAGE and DECOMPOSE; starvation detected
 and surfaced; the typed reconciler registry, scheduler, and `loops` config; the `FlowRun` store and
 recovery reconciler; the `TrackerEvent` seam with `PollingTransport`; identity-aware question routing
-with the inbox/resume reconciler; `/flow:status`, `/flow pause`, and `/flow resume`; and the
-non-trimmable calibration floor.
+with the inbox/resume reconciler; `/flow:status`, `/flow pause` (with an optional end), and
+`/flow resume`; and the non-trimmable calibration floor, always checked.
 
 ## Next steps
 

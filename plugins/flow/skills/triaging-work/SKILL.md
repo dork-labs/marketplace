@@ -53,8 +53,8 @@ From an intake source → C; the trigger names an item → B; else A.
    dependency in the description becomes a typed blocking relation (dispatch reads
    relations, never prose). Then `flow triage --ready` at the stage Path B step 4 picks.
    Only an Ambiguous input (parked) or an `idea` held for Path B stays unready.
-4. **A Brief is a floor gate.** Present the proposed decomposition and ask before
-   creating a project; only on approval create it, the children, and the links.
+4. **A Brief is a floor gate.** Have the proposed decomposition checked (`answeredBy`)
+   before creating a project; only on approval create it, the children, and the links.
 5. Provenance comment and report (below).
 
 ## Path B — Evaluate and route
@@ -113,7 +113,7 @@ In this order:
 7. **Close the loop** with `resolveIntake`: the outcome, plus the reason or question for
    Decline and Needs info.
 
-Decline, Junk and Needs info reply to an outside person: floor gates, ask first.
+Decline, Junk and Needs info reply to an outside person: floor gates, checked first.
 Promote and Attach need no gate of their own.
 
 ## Provenance and report

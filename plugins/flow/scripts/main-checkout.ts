@@ -13,6 +13,7 @@
  */
 
 import { execFileSync } from 'node:child_process';
+import { realpathSync } from 'node:fs';
 import path from 'node:path';
 import { ConfigError } from './errors.ts';
 
@@ -45,4 +46,46 @@ export function resolveMainCheckout(project: string, opts: { timeoutMs?: number 
     );
   }
   return path.dirname(path.resolve(project, commonDir));
+}
+
+/**
+ * The project root the way DorkOS keys a project (spec `flow-multiproject`
+ * §8.6): run `git rev-parse --path-format=absolute --git-common-dir`; the root
+ * is the common dir's parent when its basename is `.git`, else the common dir
+ * itself (a bare repository); then normalised (no trailing separator) and with
+ * symlinks resolved, falling back to the normalised path when that fails. So
+ * `/tmp/x` and `/private/tmp/x` are one key, and every worktree and subfolder of
+ * a project maps to the same root.
+ *
+ * @param cwd - Any folder inside the project.
+ * @param opts - `timeoutMs`: give up on git after this long (default: no limit).
+ * @returns The canonical root.
+ * @throws {ConfigError} When `cwd` is not inside a git repository.
+ */
+export function canonicalProjectRoot(cwd: string, opts: { timeoutMs?: number } = {}): string {
+  let commonDir: string;
+  try {
+    commonDir = execFileSync('git', ['rev-parse', '--path-format=absolute', '--git-common-dir'], {
+      cwd,
+      encoding: 'utf8',
+      stdio: ['ignore', 'pipe', 'pipe'],
+      ...(opts.timeoutMs === undefined ? {} : { timeout: opts.timeoutMs }),
+    }).trim();
+  } catch {
+    throw new ConfigError(`${cwd} is not inside a git repository, so it is not a project.`);
+  }
+  const absolute = path.resolve(cwd, commonDir);
+  const root = path.basename(absolute) === '.git' ? path.dirname(absolute) : absolute;
+  const normalised = stripTrailingSeparator(path.normalize(root));
+  try {
+    return realpathSync(normalised);
+  } catch {
+    return normalised;
+  }
+}
+
+/** A path without a trailing separator, except the filesystem root itself. */
+function stripTrailingSeparator(value: string): string {
+  const trimmed = value.replace(/[\\/]+$/, '');
+  return trimmed === '' ? path.parse(value).root : trimmed;
 }

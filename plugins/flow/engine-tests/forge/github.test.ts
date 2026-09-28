@@ -278,6 +278,52 @@ describe('the other gh calls', () => {
     ]);
   });
 
+  // Spec flow-multiproject §7.5: a person's verdict at the review gate lands on
+  // the PR, except that GitHub refuses a review of one's own PR: then an
+  // approval posts nothing (the tracker comment is the record) and a request
+  // for changes becomes a plain comment. The body goes through a file, never
+  // the command line.
+  it('review approves or requests changes, and never reviews its own PR', async () => {
+    const bodies: string[] = [];
+    const capture = (args: readonly string[]) => {
+      bodies.push(readFileSync(args[args.indexOf('--body-file') + 1], 'utf8'));
+      return ok('');
+    };
+    const as = (viewer: string) =>
+      forgeWith({
+        'pr view': ok({ author: { login: 'author-a' } }),
+        'api user': { code: 0, stdout: `${viewer}\n`, stderr: '' },
+        'pr review': capture,
+        'pr comment': capture,
+      });
+
+    const other = as('reviewer-b');
+    expect(await other.forge.review(5, { event: 'approve', body: 'Shipped from DorkOS.' })).toBe(
+      'reviewed'
+    );
+    expect(other.gh.calls.at(-1)?.args.slice(0, 6)).toEqual([
+      'pr',
+      'review',
+      '5',
+      '-R',
+      'dork-labs/marketplace',
+      '--approve',
+    ]);
+    expect(
+      await other.forge.review(5, { event: 'request-changes', body: 'Rename the flag.' })
+    ).toBe('reviewed');
+    expect(other.gh.calls.at(-1)?.args).toContain('--request-changes');
+
+    const own = as('author-a');
+    expect(await own.forge.review(5, { event: 'approve', body: 'x' })).toBe('skipped');
+    expect(own.gh.calls.some((c) => c.args[1] === 'review')).toBe(false);
+    expect(await own.forge.review(5, { event: 'request-changes', body: 'Fix it.' })).toBe(
+      'commented'
+    );
+    expect(own.gh.calls.at(-1)?.args.slice(0, 3)).toEqual(['pr', 'comment', '5']);
+    expect(bodies).toEqual(['Shipped from DorkOS.', 'Rename the flag.', 'Fix it.']);
+  });
+
   // recentGroupFailures reads failed merge-group runs in the window and their failing jobs.
   it('recentGroupFailures', async () => {
     const { gh, forge } = forgeWith({

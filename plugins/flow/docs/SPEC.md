@@ -207,19 +207,22 @@ decision), table-driven, and unit-tested.
 
 ### Calibration ladder — `calibration.ts` (§5)
 
-`resolveInvolvement(descriptor, config) → InvolvementDecision`. Walks the
+`resolveInvolvement(descriptor, config, stop?) → InvolvementDecision`. Walks the
 five-row ladder top-down and returns the first match:
 
-| Row | Condition                                                            | Behavior             |
-| --- | -------------------------------------------------------------------- | -------------------- |
-| 0   | Floor (irreversible · outward-facing · secrets/spend · scope-change) | `stop-and-ask`       |
-| 1   | reversible + confident                                               | `proceed-silently`   |
-| 2   | sticky + not-confident                                               | `stop-and-ask`       |
-| 3   | reversible + not-confident (ambiguous middle)                        | routed by stage bias |
-| 4   | sticky + confident                                                   | `proceed-with-trail` |
+| Row | Condition                                                            | Behavior             | Who answers (ask · tell · auto)                                 |
+| --- | -------------------------------------------------------------------- | -------------------- | --------------------------------------------------------------- |
+| 0   | Floor (irreversible · outward-facing · secrets/spend · scope-change) | `stop-and-ask`       | person · person, then reviewer agent · reviewer agent           |
+| 1   | reversible + confident                                               | `proceed-silently`   | nobody asked                                                    |
+| 2   | sticky + not-confident                                               | `stop-and-ask`       | person · person, then the agent's pick · the agent's pick       |
+| 3   | reversible + not-confident (ambiguous middle)                        | routed by stage bias | as row 2 when it asks; at `auto` it proceeds with a trail       |
+| 4   | sticky + confident                                                   | `proceed-with-trail` | nobody asked                                                    |
 
 Stage bias routes row 3: intake stages (`intake`) → `stop-and-ask`; execution
-stages (`execution`) → `proceed-with-trail`. Types: `DecisionDescriptor`,
+stages (`execution`) → `proceed-with-trail`. The third argument is the project's
+"Agent questions" stop (`autonomy.ts`); `answeredBy` and `answeredByAtDeadline`
+on the result say who answers. A floor row is never answered by the agent's own
+pick, and a decision carrying `secrets-or-spend` is always the person's. Types: `DecisionDescriptor`,
 `InvolvementDecision`, `FloorTrigger`, `Reversibility`, `Confidence`,
 `DecisionStage`, `InvolvementBehavior`.
 

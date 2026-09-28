@@ -323,9 +323,26 @@ export interface DorkosDeps {
 }
 
 /**
+ * The tracker item a DorkOS session row serves: the first of `trackerItems`
+ * (newest first, spec `flow-multiproject` §6.4), else the single `trackerItem`
+ * a DorkOS from before that list sends. Core keeps both for a while, so either
+ * DorkOS works.
+ *
+ * @param row - One session row.
+ * @returns The item, or `null` when the row names none.
+ */
+export function trackerItemOf(row: Record<string, unknown>): Record<string, unknown> | null {
+  if (Array.isArray(row.trackerItems)) {
+    const first = row.trackerItems.find(isObject);
+    if (first !== undefined) return first;
+  }
+  return isObject(row.trackerItem) ? row.trackerItem : null;
+}
+
+/**
  * Ask a loopback DorkOS for its sessions (`GET /api/sessions?limit=500`) and
  * keep the ones it holds live (they carry a `status`) or that serve an active
- * flow run (`trackerItem.runStatus`). A DorkOS release without those fields
+ * flow run (the `runStatus` of the row's tracker item, see {@link trackerItemOf}). A DorkOS release without those fields
  * contributes nothing, exactly like one with nothing live.
  *
  * @param url - The DorkOS base URL; must be loopback.
@@ -387,7 +404,7 @@ export async function fetchDorkosSessions(
   for (const row of rows) {
     if (!isObject(row) || typeof row.id !== 'string') continue;
     const status = isObject(row.status) ? row.status : null;
-    const tracker = isObject(row.trackerItem) ? row.trackerItem : null;
+    const tracker = trackerItemOf(row);
     const activeRun =
       tracker !== null &&
       typeof tracker.runStatus === 'string' &&

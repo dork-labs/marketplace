@@ -88,7 +88,7 @@ export async function run(ctx: VerbContext): Promise<VerbResult> {
   const project = loadProjectConfig(ctx);
   const { config } = project.loaded;
   const mainCheckout = resolveMainCheckout(ctx.projectDir);
-  const store = openFlowStateFile(mainCheckout);
+  const store = openFlowStateFile(mainCheckout, { now: ctx.now });
   const found = findRun(store.read(), identifier);
   if (found === undefined || found.drain?.v !== 1) {
     throw new PreconditionError(

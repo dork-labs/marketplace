@@ -308,7 +308,7 @@ describe('FlowConfigSchema — the ingestion / transport block (task 4.4)', () =
 });
 
 describe('CalibrationSchema — the calibration floor is non-trimmable (task 5.4)', () => {
-  it('rejects an empty alwaysAsk (the floor is inviolable, charter G12)', () => {
+  it('rejects an empty alwaysAsk (the floor is always checked, charter G12)', () => {
     const result = FlowConfigSchema.safeParse({
       involvement: { calibration: { alwaysAsk: [] } },
     });

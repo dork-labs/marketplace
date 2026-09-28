@@ -114,19 +114,27 @@ describe('where the store lives', () => {
   });
 });
 
+/** The store's clock in these tests, and the `updatedAt` it stamps. */
+const STAMP = '2026-09-28T09:00:00.000Z';
+const clock = { now: () => new Date(STAMP) };
+
 describe('writing runs', () => {
   // Purpose: the helpers cover the run lifecycle over one file: upsert, status
   // and stage changes that keep the other fields, and removal.
   it('upserts, updates and removes runs', async () => {
-    const store = openFlowStateFile(repo);
+    const store = openFlowStateFile(repo, clock);
     expect(store.read()).toEqual({});
     expect((await store.upsertRun(run('a'))).status).toBe('written');
     await store.upsertRun(run('b'));
     await store.setRunStage('a', 'verify');
     await store.setRunStatus('b', 'complete', { completedAt: '2026-09-26T17:00:00.000Z' });
     expect(store.read()).toEqual({
-      a: run('a', { stage: 'verify' }),
-      b: run('b', { status: 'complete', completedAt: '2026-09-26T17:00:00.000Z' }),
+      a: run('a', { stage: 'verify', updatedAt: STAMP }),
+      b: run('b', {
+        status: 'complete',
+        completedAt: '2026-09-26T17:00:00.000Z',
+        updatedAt: STAMP,
+      }),
     });
     await store.removeRun('a');
     expect(Object.keys(store.read())).toEqual(['b']);
@@ -135,7 +143,7 @@ describe('writing runs', () => {
   // Purpose: changing a run that does not exist creates nothing (the claim step
   // owns creation), so the file is not even written.
   it('leaves the file alone when the run does not exist', async () => {
-    const store = openFlowStateFile(repo);
+    const store = openFlowStateFile(repo, clock);
     expect((await store.setRunStatus('nope', 'failed')).status).toBe('unchanged');
     expect((await store.setRunStage('nope', 'verify')).status).toBe('unchanged');
     expect((await store.removeRun('nope')).status).toBe('unchanged');
@@ -146,7 +154,7 @@ describe('writing runs', () => {
   // lock and writes what it returns, keeping the key; a missing run is left
   // alone. Fails if the update reads a stale copy or re-keys the run.
   it('updates a run from its on-disk value', async () => {
-    const store = openFlowStateFile(repo);
+    const store = openFlowStateFile(repo, clock);
     await store.upsertRun(run('a'));
     await store.setRunStage('a', 'verify');
     await store.updateRun('a', (current) => ({
@@ -154,7 +162,9 @@ describe('writing runs', () => {
       issueId: 'ignored',
       checkpointSha: `${current.stage}-sha`,
     }));
-    expect(store.read()).toEqual({ a: run('a', { stage: 'verify', checkpointSha: 'verify-sha' }) });
+    expect(store.read()).toEqual({
+      a: run('a', { stage: 'verify', checkpointSha: 'verify-sha', updatedAt: STAMP }),
+    });
     expect((await store.updateRun('nope', (current) => current)).status).toBe('unchanged');
   });
 
@@ -165,12 +175,12 @@ describe('writing runs', () => {
     mkdirSync(path.dirname(stateFile()), { recursive: true });
     const future = { ...run('a'), checkpoint: { ref: 'abc123' }, host: 'future-launcher' };
     writeFileSync(stateFile(), JSON.stringify({ a: future }));
-    const store = openFlowStateFile(repo);
+    const store = openFlowStateFile(repo, clock);
     expect(store.read().a).toEqual(future);
     await store.upsertRun(run('b', { account: 'claude3', host: 'cli' }));
     const onDisk = JSON.parse(readFileSync(stateFile(), 'utf8')) as Record<string, unknown>;
     expect(onDisk.a).toEqual(future);
-    expect(onDisk.b).toEqual(run('b', { account: 'claude3', host: 'cli' }));
+    expect(onDisk.b).toEqual(run('b', { account: 'claude3', host: 'cli', updatedAt: STAMP }));
   });
 
   // Purpose: `title` is part of the run record contract (spec §1.3): a run
@@ -179,14 +189,17 @@ describe('writing runs', () => {
   // wrong type is a malformed record, so the store refuses the file rather than
   // passing it through as an unknown field would be.
   it('round-trips a run title unchanged, and refuses a title that is not a string', async () => {
-    const store = openFlowStateFile(repo);
+    const store = openFlowStateFile(repo, clock);
     const titled = run('a', { title: 'Show the item title on the run' });
     await store.upsertRun(titled);
     await store.upsertRun(run('b'));
     await store.updateRun('b', (current) => ({ ...current, stage: 'verify' }));
-    expect(store.read()).toEqual({ a: titled, b: run('b', { stage: 'verify' }) });
+    expect(store.read()).toEqual({
+      a: { ...titled, updatedAt: STAMP },
+      b: run('b', { stage: 'verify', updatedAt: STAMP }),
+    });
     const onDisk = JSON.parse(readFileSync(stateFile(), 'utf8')) as Record<string, FlowRun>;
-    expect(onDisk.a).toEqual(titled);
+    expect(onDisk.a).toEqual({ ...titled, updatedAt: STAMP });
     expect('title' in onDisk.b).toBe(false);
 
     writeFileSync(stateFile(), JSON.stringify({ c: { ...run('c'), title: 42 } }));
@@ -201,7 +214,7 @@ describe('writing runs', () => {
     mkdirSync(path.dirname(stateFile()), { recursive: true });
     const bytes = JSON.stringify({ a: run('a'), b: { issueId: 'b' } }, null, 3);
     writeFileSync(stateFile(), bytes);
-    const store = openFlowStateFile(repo);
+    const store = openFlowStateFile(repo, clock);
     expect(store.read()).toEqual({});
     await expect(store.upsertRun(run('c'))).rejects.toThrow(ConfigError);
     await expect(store.upsertRun(run('c'))).rejects.toThrow(stateFile());
@@ -215,15 +228,36 @@ describe('writing runs', () => {
   it('refuses to replace a file that is not JSON', async () => {
     mkdirSync(path.dirname(stateFile()), { recursive: true });
     writeFileSync(stateFile(), '{"a": ');
-    await expect(openFlowStateFile(repo).upsertRun(run('c'))).rejects.toThrow(ConfigError);
+    await expect(openFlowStateFile(repo, clock).upsertRun(run('c'))).rejects.toThrow(ConfigError);
     expect(readFileSync(stateFile(), 'utf8')).toBe('{"a": ');
     expect(readdirSync(path.dirname(stateFile()))).toEqual(['flow-state.json']);
+  });
+
+  // Purpose: spec flow-multiproject §6.3: every write stamps `updatedAt` on the
+  // run it writes, with the store's clock, and only on that run, so a reader
+  // can tell a run still moving from one that went quiet. Fails if a write of
+  // one run restamps another, or a writer forgets the stamp.
+  it('stamps updatedAt on the run each write touches, and only that run', async () => {
+    let now = '2026-09-28T09:00:00.000Z';
+    const store = openFlowStateFile(repo, { now: () => new Date(now) });
+    await store.upsertRun(run('a', { updatedAt: '2020-01-01T00:00:00.000Z' }));
+    await store.upsertRun(run('b'));
+    expect(store.read().a.updatedAt).toBe('2026-09-28T09:00:00.000Z');
+    now = '2026-09-28T10:00:00.000Z';
+    await store.setRunStage('a', 'verify');
+    expect(store.read().a.updatedAt).toBe(now);
+    expect(store.read().b.updatedAt).toBe('2026-09-28T09:00:00.000Z');
+    now = '2026-09-28T11:00:00.000Z';
+    await store.setRunStatus('b', 'failed');
+    await store.updateRun('a', (current) => ({ ...current, checkpointSha: 'x' }));
+    expect(store.read().a.updatedAt).toBe(now);
+    expect(store.read().b.updatedAt).toBe(now);
   });
 
   // Purpose: writes take the lock at flow-state.json.lock; reads take none, so
   // a reader is never blocked by a writer.
   it('writes under flow-state.json.lock and reads without it', async () => {
-    const store = openFlowStateFile(repo);
+    const store = openFlowStateFile(repo, clock);
     await store.upsertRun(run('a'));
     writeFileSync(`${stateFile()}.lock`, 'someone:else');
     expect(Object.keys(store.read())).toEqual(['a']);

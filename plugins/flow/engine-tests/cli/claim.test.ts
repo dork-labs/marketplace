@@ -6,7 +6,9 @@
  * fake adapter, and asserts the exact `applyWorkState` calls.
  */
 
+import { writeFileSync } from 'node:fs';
 import os from 'node:os';
+import path from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
 import { EXIT } from '../../scripts/errors.ts';
@@ -73,6 +75,7 @@ describe('flow claim writes the claim projection and records the run', () => {
         account: 'acct-1',
         host: 'dorkos',
         runtime: 'claude-code',
+        updatedAt: '2026-09-26T12:00:00.000Z',
       },
     });
     expect(result.json.run).toEqual(project.runs()['id-FAKE-1']);
@@ -219,6 +222,22 @@ describe('flow claim writes the claim projection and records the run', () => {
     expect(project.runs()['id-FAKE-1'].runtime).toBe('codex');
   });
 
+  it('records --dispatched-by, the chat that launched the run (fleet contract 4.1.0)', async () => {
+    // Purpose: DorkOS lists a run in the chat that launched it by matching
+    // dispatchedBy to that chat's session id (spec flow-multiproject §6.1).
+    const result = await runFlow(project, { items: [item('FAKE-1')] }, [
+      'claim',
+      'FAKE-1',
+      '--dispatched-by',
+      'orchestrator-session',
+    ]);
+    expect(result.code).toBe(EXIT.ok);
+    expect(project.runs()['id-FAKE-1'].dispatchedBy).toBe('orchestrator-session');
+    const plain = await runFlow(project, { items: [item('FAKE-2')] }, ['claim', 'FAKE-2']);
+    expect(plain.code).toBe(EXIT.ok);
+    expect('dispatchedBy' in project.runs()['id-FAKE-2']).toBe(false);
+  });
+
   it('posts no comment', async () => {
     // Purpose: the label is the signal (agent etiquette: mostly quiet).
     const result = await runFlow(project, { items: [item('FAKE-1')] }, ['claim', 'FAKE-1']);
@@ -311,6 +330,24 @@ describe('flow claim and the pause', () => {
     const result = await runFlow(project, { items: [item('FAKE-1')] }, ['claim', 'FAKE-1']);
     expect(result.code).toBe(EXIT.paused);
     expect(result.tracker.calls).toEqual([]);
+  });
+
+  it('claims again once a timed pause has ended, without --manual', async () => {
+    // Purpose: spec flow-multiproject §5.1: a timed pause ends on time with
+    // DorkOS closed, because claim reads the end itself. The harness clock is
+    // 2026-09-26T12:00Z; a pause that ended at 11:00Z no longer stops a claim,
+    // one that ends at 13:00Z still does.
+    const flag = (until: string) =>
+      writeFileSync(
+        path.join(project.dir, '.agents', 'flow', 'paused.json'),
+        JSON.stringify({ pausedAt: '2026-09-26T10:00:00.000Z', until, hostSchedules: [] })
+      );
+    flag('2026-09-26T13:00:00.000Z');
+    const stillPaused = await runFlow(project, { items: [item('FAKE-1')] }, ['claim', 'FAKE-1']);
+    expect(stillPaused.code).toBe(EXIT.paused);
+    flag('2026-09-26T11:00:00.000Z');
+    const result = await runFlow(project, { items: [item('FAKE-1')] }, ['claim', 'FAKE-1']);
+    expect(result.code).toBe(EXIT.ok);
   });
 
   it('claims while paused with --manual', async () => {

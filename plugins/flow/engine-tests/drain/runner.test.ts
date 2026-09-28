@@ -224,6 +224,10 @@ function fakeForge() {
     async recentGroupFailures() {
       return [];
     },
+    async review(pr, input) {
+      calls.push({ method: 'review', arg: [pr, input] });
+      return 'reviewed' as const;
+    },
   };
   /** A PR that exists on the forge but no run has recorded yet (flow pr mid-flight). */
   const openPr = () => {

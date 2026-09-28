@@ -1220,7 +1220,12 @@ describe('pause', () => {
     const result = pauseFlow(roots(wt, plugin, repo), now);
     const file = path.join(repo, '.agents/flow', PAUSE_FILE);
     expect(result).toMatchObject({ ok: true, file, alreadyPaused: false, ignored: true });
-    const expected = { file, pausedAt: '2026-09-23T12:00:00.000Z', hostSchedules: [] };
+    const expected = {
+      file,
+      pausedAt: '2026-09-23T12:00:00.000Z',
+      until: null,
+      hostSchedules: [],
+    };
     expect(pauseState(roots(wt, plugin, repo))).toEqual(expected);
     expect(pauseState(roots(repo, plugin))).toEqual(expected);
     expect(untracked(repo)).toBe('');
@@ -1290,8 +1295,88 @@ describe('pause', () => {
     expect(pauseState(roots(repo, makePlugin(path.join(base, 'p'))))).toEqual({
       file,
       pausedAt: null,
+      until: null,
       hostSchedules: [],
     });
+  });
+
+  // Spec flow-multiproject §5.1: a timed pause ends on time with or without
+  // DorkOS running, because every entry point reads pauseState. Fails if the
+  // engine ignores `until`, or ends a pause a moment early.
+  it('ends a timed pause at its end time, and not a moment before', () => {
+    const repo = makeRepo();
+    const r = roots(repo, makePlugin(path.join(base, 'p')));
+    const until = '2026-09-23T13:00:00.000Z';
+    const result = pauseFlow(r, new Date('2026-09-23T12:00:00.000Z'), [], until);
+    expect(result).toMatchObject({ alreadyPaused: false, until });
+    expect(pauseState(r, new Date('2026-09-23T12:59:59.999Z'))?.until).toBe(until);
+    expect(pauseState(r, new Date(until))).toBeNull();
+    expect(pauseState(r, new Date('2026-09-24T00:00:00.000Z'))).toBeNull();
+  });
+
+  // A new choice wins: pausing an already-paused project replaces its end and
+  // keeps its start, so "paused since" stays true.
+  it('replaces the end of a pause that is still on, and keeps its start', () => {
+    const repo = makeRepo();
+    const r = roots(repo, makePlugin(path.join(base, 'p')));
+    pauseFlow(r, new Date('2026-09-23T12:00:00.000Z'), [], '2026-09-23T13:00:00.000Z');
+    const again = pauseFlow(
+      r,
+      new Date('2026-09-23T12:30:00.000Z'),
+      [],
+      '2026-09-24T09:00:00.000Z'
+    );
+    expect(again).toMatchObject({
+      alreadyPaused: true,
+      pausedAt: '2026-09-23T12:00:00.000Z',
+      until: '2026-09-24T09:00:00.000Z',
+    });
+    // Pausing with no end now makes it last until someone resumes.
+    pauseFlow(r, new Date('2026-09-23T12:40:00.000Z'));
+    expect(pauseState(r, new Date('2026-12-01T00:00:00.000Z'))).toMatchObject({
+      pausedAt: '2026-09-23T12:00:00.000Z',
+      until: null,
+    });
+  });
+
+  // A pause whose end has passed is over, so pausing again starts a new pause.
+  it('starts a new pause over one that has already ended', () => {
+    const repo = makeRepo();
+    const r = roots(repo, makePlugin(path.join(base, 'p')));
+    pauseFlow(r, new Date('2026-09-23T12:00:00.000Z'), [], '2026-09-23T13:00:00.000Z');
+    const later = new Date('2026-09-23T14:00:00.000Z');
+    expect(pauseFlow(r, later)).toMatchObject({
+      alreadyPaused: false,
+      pausedAt: later.toISOString(),
+      until: null,
+    });
+    expect(pauseState(r, later)?.pausedAt).toBe(later.toISOString());
+  });
+
+  // An end nobody can read is no end: when in doubt, autonomy stays off.
+  it('treats an unreadable end as no end', () => {
+    const repo = makeRepo();
+    write(
+      path.join(repo, '.agents/flow', PAUSE_FILE),
+      JSON.stringify({ pausedAt: '2026-09-23T12:00:00.000Z', until: 'tomorrow-ish' })
+    );
+    const r = roots(repo, makePlugin(path.join(base, 'p')));
+    expect(pauseState(r, new Date('2030-01-01T00:00:00.000Z'))).toMatchObject({ until: null });
+  });
+
+  // Resume also removes a flag whose end has passed, so no stale file is left
+  // for a reader that only checks whether it exists; it was not "paused".
+  it('resume removes an expired flag and says it was not paused', () => {
+    const repo = makeRepo();
+    const r = roots(repo, makePlugin(path.join(base, 'p')));
+    const flag = pauseFlow(r, new Date('2026-09-23T12:00:00.000Z'), [], '2026-09-23T13:00:00.000Z');
+    expect(resumeFlow(r, new Date('2026-09-23T14:00:00.000Z'))).toEqual({
+      ok: true,
+      wasPaused: false,
+      removed: [flag.file],
+      hostSchedules: [],
+    });
+    expect(existsSync(flag.file)).toBe(false);
   });
 
   // A hand-edited flag may hold junk ids. Only non-empty strings are schedule
@@ -1514,6 +1599,25 @@ describe('config-files CLI', () => {
     });
     expect(run(plugin, repo, ['resume']).out).toMatchObject({ ok: true, wasPaused: true });
     expect(run(plugin, repo).out.paused).toBeNull();
+  });
+
+  // Spec flow-multiproject §5.1: --until records the end; a missing value, a
+  // time that is not one, or one already past is a usage error that writes
+  // nothing, and --until only goes with pause.
+  it('pause --until records the end and refuses a bad or missing one', () => {
+    const repo = makeRepo();
+    const plugin = shared();
+    const flag = path.join(repo, '.agents/flow', PAUSE_FILE);
+    expect(run(plugin, repo, ['pause', '--until']).status).toBe(2);
+    expect(run(plugin, repo, ['pause', '--until', 'soon']).status).toBe(2);
+    expect(run(plugin, repo, ['pause', '--until', '2001-01-01T00:00:00Z']).status).toBe(2);
+    expect(run(plugin, repo, ['resume', '--until', '2999-01-01T00:00:00Z']).status).toBe(2);
+    expect(existsSync(flag)).toBe(false);
+    const until = new Date(Date.now() + 3_600_000).toISOString();
+    const paused = run(plugin, repo, ['pause', '--until', until]);
+    expect(paused.status).toBe(0);
+    expect(paused.out).toMatchObject({ ok: true, until, alreadyPaused: false });
+    expect(run(plugin, repo).out.paused).toMatchObject({ until });
   });
 
   // A pause is a safety control: it works before flow is configured.

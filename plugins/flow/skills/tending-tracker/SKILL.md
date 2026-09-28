@@ -114,9 +114,16 @@ path**: (a) delivered into `<id>`, (b) fresh session, (c) handled here, origin o
 
 - Every `comment` carries `identity.marker` (so rule 1 sees it) and will always carry
   the provenance signature, never an email address. Both, every reply.
-- `needsInput(item, question)`: comment the question (multiple choice when possible),
-  add `agent/needs-input`, `assignToHuman`, stop. Parked is durable; the stall sweep
-  never reclaims it; only a non-agent reply (rule 3) resumes it.
+- `needsInput(item, question)`: `flow ask <id> --question … --choice … --pick <n>
+  --why … [--floor <triggers>]` posts it with your pick, adds `agent/needs-input` and
+  records it on the run; then `assignToHuman`, stop. Parked is durable; the stall sweep
+  never reclaims it; a non-agent reply (rule 3) or an answer `flow answer` recorded on
+  the run (`question.answer`) resumes it.
+- **Who answers** is `flow ask`'s `answeredBy`: the person; the agent's pick once
+  `decideBy` passes (the inbox pass runs `flow answer <id> --pick --by agent-default`,
+  then resumes); or, for a floor question once `checkAfter` passes, the reviewer agent
+  (`flow ask <id> --check-pick`, handed to an independent reviewer with its brief). A
+  question about secrets or spending always waits for a person.
 - **Stuck means stop and ask, never guess.** Walk the calibration ladder; a
   `stop-and-ask` (a floor row, sticky and not confident, or the ambiguous middle routed to `ask`) is the
   trigger. `resolveCommsChannel(trigger, identityMode, involvement)` picks:

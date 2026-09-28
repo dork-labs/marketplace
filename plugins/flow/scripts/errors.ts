@@ -71,11 +71,32 @@ export class ConfigError extends FlowError {
   }
 }
 
+/**
+ * Why a tracker call failed, as far as the adapter can tell:
+ *
+ * - `auth`: the tracker refused or no longer accepts the sign-in. Only a person
+ *   can fix it (sign in again), so this is the one tracker failure worth asking
+ *   a person about.
+ * - `unreachable`: anything else (a network error, a timeout, a 5xx). Retrying
+ *   on its own fixes it, so nobody needs to be asked.
+ */
+export type TrackerErrorKind = 'auth' | 'unreachable';
+
 /** The tracker could not be read or a write was not confirmed (exit 4). */
 export class TrackerError extends FlowError {
-  /** @param message - What failed. */
-  constructor(message: string) {
+  /**
+   * Why it failed. An adapter sets `auth` for a refused or expired credential;
+   * everything else, and an adapter that says nothing, reads as `unreachable`.
+   */
+  readonly kind: TrackerErrorKind;
+
+  /**
+   * @param message - What failed.
+   * @param options - `kind`: why it failed (default `unreachable`).
+   */
+  constructor(message: string, options: { kind?: TrackerErrorKind } = {}) {
     super(message, EXIT.tracker);
+    this.kind = options.kind ?? 'unreachable';
   }
 }
 

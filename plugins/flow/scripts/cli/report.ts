@@ -15,14 +15,28 @@
  *   comment, applies the needs-input projection through the tracker adapter,
  *   and parks the run.
  *
+ * VERIFY's adversarial reviewer (a run `flow drain` did not start) uses the
+ * same token mechanism (spec `flow-multiproject` §7.5):
+ *
+ * - `review-brief --sha <sha>` (VERIFY): mints a token for a review of `sha`,
+ *   stores only its hash on the run (`review`), and prints the token, which goes
+ *   in the reviewer's brief and nowhere else.
+ * - `verdict --sha <sha> --token <t> (--clean | --changes --findings-file <f>)`
+ *   (the reviewer): on a run with no drain, the token must match `review` and
+ *   the SHA the one the brief was for; the verdict lands in `review.verdict`
+ *   and `review.reviewedSha`. A verdict written any other way is not a verdict,
+ *   so `flow review --by reviewer-agent` never trusts one.
+ *
  * @module @dorkos/flow/cli/report
  */
 
-import { createHash, timingSafeEqual } from 'node:crypto';
+import { createHash, randomBytes, timingSafeEqual } from 'node:crypto';
 import { copyFileSync, mkdirSync, readFileSync } from 'node:fs';
 import path from 'node:path';
 
 import { PreconditionError, UsageError } from '../errors.ts';
+import type { FlowRun } from '../flow-run.ts';
+import type { FlowStateFile } from '../flow-state-file.ts';
 import { openFlowStateFile } from '../flow-state-file.ts';
 import { projectionFor } from '../work-state.ts';
 import type { VerbContext, VerbResult } from './context.ts';
@@ -39,7 +53,7 @@ import { signBody, unsignedBody } from './provenance.ts';
 import { applyAndVerify, sessionProvenance, setupWrite } from './work-write.ts';
 
 /** The report kinds, in help order. */
-export const REPORT_KINDS = ['pushed', 'verdict', 'blocked'] as const;
+export const REPORT_KINDS = ['pushed', 'verdict', 'blocked', 'review-brief'] as const;
 
 /** How many of the latest comments are checked for an earlier post of the question. */
 const RECENT_COMMENTS = 10;
@@ -118,7 +132,7 @@ async function pushed(ctx: VerbContext, run: DrainRun): Promise<VerbResult> {
   if (disarm) await (await originForge(ctx, worktree)).disarm(pr.number);
 
   await writeDrain(
-    openFlowStateFile(ctx.projectDir),
+    openFlowStateFile(ctx.projectDir, { now: ctx.now }),
     run,
     (drain) => ({
       ...drain,
@@ -184,7 +198,7 @@ async function verdict(ctx: VerbContext, run: DrainRun): Promise<VerbResult> {
   let tokenGone = false;
   let pushedNow: string | null = run.drain.pushedSha;
   const written = await writeDrain(
-    openFlowStateFile(ctx.projectDir),
+    openFlowStateFile(ctx.projectDir, { now: ctx.now }),
     run,
     (drain) => {
       // Re-checked under the lock: a new review or push may have landed since the read.
@@ -214,6 +228,13 @@ async function verdict(ctx: VerbContext, run: DrainRun): Promise<VerbResult> {
     },
     text: `Recorded a ${clean ? 'CLEAN' : 'CHANGES'} verdict on ${short(sha)} for ${run.identifier} (round ${round}).`,
   };
+}
+
+/** Whether any run for `identifier` carries a drain. */
+function hasDrainRun(store: FlowStateFile, identifier: string): boolean {
+  return Object.values(store.read()).some(
+    (run) => run.identifier === identifier && run.drain !== undefined
+  );
 }
 
 /** The first line of the question, for `parkedReason`. */
@@ -275,6 +296,129 @@ async function blocked(ctx: VerbContext, run: DrainRun): Promise<VerbResult> {
   };
 }
 
+/** The run for `identifier` that no drain carries (VERIFY's run), or a refusal. */
+function findReviewRun(store: FlowStateFile, identifier: string): FlowRun {
+  const runs = Object.values(store.read()).filter((run) => run.identifier === identifier);
+  if (runs.length === 0) {
+    throw new PreconditionError(
+      `${identifier} has no run in ${store.path}; claim it first (flow claim), so its review has somewhere to be recorded`
+    );
+  }
+  const run = runs.find((candidate) => candidate.drain === undefined);
+  if (run === undefined) {
+    throw new PreconditionError(
+      `${identifier} is a flow drain run; its reviewer's token comes from the drain, not from review-brief`
+    );
+  }
+  return run;
+}
+
+/** Resolve `--sha` to a full commit in the run's worktree (else the working directory). */
+async function resolveSha(ctx: VerbContext, run: FlowRun): Promise<string> {
+  const asked = flag(ctx, 'sha');
+  if (asked === undefined) throw new UsageError('--sha <sha> is required: the commit to review');
+  const cwd = run.worktreePath !== '' ? run.worktreePath : ctx.cwd;
+  const resolved = await git(ctx, cwd, ['rev-parse', '--verify', `${asked}^{commit}`]);
+  if (resolved.code !== 0) throw new PreconditionError(`${asked} is not a commit in ${cwd}`);
+  return resolved.stdout.trim().toLowerCase();
+}
+
+/** `flow report review-brief`: mint the token VERIFY hands its reviewer. */
+async function reviewBrief(ctx: VerbContext, identifier: string): Promise<VerbResult> {
+  onlyFlags(ctx, 'review-brief', ['sha']);
+  const store = openFlowStateFile(ctx.projectDir, { now: ctx.now });
+  const run = findReviewRun(store, identifier);
+  const sha = await resolveSha(ctx, run);
+  const token = randomBytes(16).toString('hex');
+  const written = await store.updateRun(run.issueId, (current) => ({
+    ...current,
+    review: { tokenHash: tokenHash(token), sha, verdict: null, reviewedSha: null },
+  }));
+  if (written.status === 'dropped') {
+    throw new PreconditionError(
+      `${store.path} stayed locked by another flow command, so no review was started; run the same command again`
+    );
+  }
+  return {
+    json: { ok: true, identifier, report: 'review-brief', sha, token },
+    text: `Started a review of ${short(sha)} for ${identifier}. Put this token in the reviewer's brief and nowhere else: ${token}`,
+  };
+}
+
+/** `flow report verdict` on a run with no drain: VERIFY's reviewer. */
+async function reviewVerdict(ctx: VerbContext, identifier: string): Promise<VerbResult> {
+  onlyFlags(ctx, 'verdict', ['sha', 'token', 'clean', 'changes', 'findings-file']);
+  const store = openFlowStateFile(ctx.projectDir, { now: ctx.now });
+  const run = findReviewRun(store, identifier);
+  const sha = flag(ctx, 'sha')?.toLowerCase();
+  if (sha === undefined) throw new UsageError('--sha <sha> is required: the commit you reviewed');
+  const clean = ctx.args.flags.clean === true;
+  const changes = ctx.args.flags.changes === true;
+  if (clean === changes) throw new UsageError('pass exactly one of --clean or --changes');
+  if (clean && flag(ctx, 'findings-file') !== undefined) {
+    throw new UsageError('--findings-file goes with --changes, not --clean');
+  }
+  const findings = changes ? readFlagFile(ctx, 'findings-file') : undefined;
+  const token = flag(ctx, 'token');
+  const refuse = () =>
+    new PreconditionError(
+      `this verdict's token does not match the review started for ${identifier}; only the reviewer's brief carries it`
+    );
+  const review = run.review;
+  if (token === undefined || review === undefined || !tokenMatches(token, review.tokenHash)) {
+    throw refuse();
+  }
+  const stale = (): VerbResult => {
+    ctx.warn(
+      `the review was started for ${short(review.sha)}, not ${short(sha)}, so the verdict was not recorded`
+    );
+    return {
+      json: { ok: true, identifier, report: 'verdict', sha, stale: true },
+      text: `Ignored a verdict on ${short(sha)} for ${identifier}: the review was for another commit.`,
+    };
+  };
+  if (sha.length < 7 || !review.sha.startsWith(sha)) return stale();
+
+  let findingsPath: string | null = null;
+  if (findings !== undefined) {
+    const base = run.worktreePath !== '' ? run.worktreePath : ctx.cwd;
+    findingsPath = path.join(base, '.dork', 'flow', 'review', `${sha.slice(0, 7)}.md`);
+    mkdirSync(path.dirname(findingsPath), { recursive: true });
+    copyFileSync(path.resolve(ctx.cwd, flag(ctx, 'findings-file') as string), findingsPath);
+  }
+  let tokenGone = false;
+  const written = await store.updateRun(run.issueId, (current) => {
+    // Re-checked under the lock: a new brief may have replaced the token since the read.
+    tokenGone = !tokenMatches(token, current.review?.tokenHash);
+    if (tokenGone || current.review === undefined) return current;
+    return {
+      ...current,
+      review: {
+        ...current.review,
+        verdict: clean ? 'clean' : 'changes',
+        reviewedSha: current.review.sha,
+      },
+    };
+  });
+  if (tokenGone) throw refuse();
+  if (written.status === 'dropped') {
+    throw new PreconditionError(
+      `${store.path} stayed locked by another flow command, so the verdict was not recorded; run the same command again`
+    );
+  }
+  return {
+    json: {
+      ok: true,
+      identifier,
+      report: 'verdict',
+      sha: review.sha,
+      verdict: clean ? 'clean' : 'changes',
+      findings: findingsPath,
+    },
+    text: `Recorded a ${clean ? 'CLEAN' : 'CHANGES'} verdict on ${short(review.sha)} for ${identifier}.`,
+  };
+}
+
 /**
  * Run `flow report`.
  *
@@ -288,7 +432,10 @@ export async function run(ctx: VerbContext): Promise<VerbResult> {
   if (!(REPORT_KINDS as readonly string[]).includes(kind)) {
     throw new UsageError(`the report must be one of ${REPORT_KINDS.join(', ')}, not "${kind}"`);
   }
-  const drainRun = findDrainRun(openFlowStateFile(ctx.projectDir), identifier, 'report');
+  if (kind === 'review-brief') return reviewBrief(ctx, identifier);
+  const store = openFlowStateFile(ctx.projectDir, { now: ctx.now });
+  if (kind === 'verdict' && !hasDrainRun(store, identifier)) return reviewVerdict(ctx, identifier);
+  const drainRun = findDrainRun(store, identifier, 'report');
   if (kind === 'pushed') return pushed(ctx, drainRun);
   if (kind === 'verdict') return verdict(ctx, drainRun);
   return blocked(ctx, drainRun);

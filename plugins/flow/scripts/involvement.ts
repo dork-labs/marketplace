@@ -14,6 +14,7 @@
  */
 
 import { resolveInvolvement } from './calibration.ts';
+import type { AutonomyStop } from './autonomy.ts';
 import type { Calibration, DecisionDescriptor } from './calibration.ts';
 import { invokedDirectly, isPlainObject, parseArgs, readRawInput } from './_shared.ts';
 
@@ -23,6 +24,11 @@ interface InvolvementInput {
   decision: DecisionDescriptor;
   /** The resolved `involvement.calibration` config block that drives every threshold. */
   calibration: Calibration;
+  /**
+   * The project's "Agent questions" stop (`flow autonomy --kind questions`):
+   * who answers a stop-and-ask. Default `ask` (you).
+   */
+  stop?: AutonomyStop;
 }
 
 const HELP = `involvement — the /flow calibration ladder (§5): uncertainty-gated human involvement.
@@ -35,11 +41,16 @@ Reads JSON from stdin (or --input <path>):
       "confidence":     "confident" | "not-confident",
       "stage":          "intake" | "execution"
     },
-    "calibration": Calibration   // the resolved involvement.calibration config block
+    "calibration": Calibration,  // the resolved involvement.calibration config block
+    "stop"?: "ask" | "tell" | "auto"  // flow autonomy --kind questions; default ask
   }
 
 Writes the InvolvementDecision as JSON to stdout:
-  { "behavior": "proceed-silently"|"proceed-with-trail"|"stop-and-ask", "blocks": boolean, "row": number, "logAssumption": boolean }
+  { "behavior": "proceed-silently"|"proceed-with-trail"|"stop-and-ask", "blocks": boolean, "row": number, "logAssumption": boolean,
+    "answeredBy": "person"|"reviewer-agent"|"agent-default"|null, "answeredByAtDeadline": same|null }
+  answeredBy says who answers a stop-and-ask: you, the reviewer agent (a floor
+  question), or the agent's own pick (never for the floor). answeredByAtDeadline
+  says who answers once flow ask's deadline passes; null means it waits.
 
 Exit codes: 0 ok | 1 invalid input | 2 oracle invariant violation.
 `;
@@ -78,10 +89,14 @@ export function main(argv: readonly string[]): number {
     return 1;
   }
 
-  const { decision, calibration } = parsed as unknown as InvolvementInput;
+  const { decision, calibration, stop } = parsed as unknown as InvolvementInput;
+  if (stop !== undefined && stop !== 'ask' && stop !== 'tell' && stop !== 'auto') {
+    process.stderr.write('involvement: invalid input — "stop" must be "ask", "tell" or "auto"\n');
+    return 1;
+  }
 
   try {
-    const result = resolveInvolvement(decision, calibration);
+    const result = resolveInvolvement(decision, calibration, stop ?? 'ask');
     process.stdout.write(`${JSON.stringify(result)}\n`);
     return 0;
   } catch (err) {
