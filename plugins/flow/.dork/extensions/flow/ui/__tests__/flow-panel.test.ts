@@ -342,6 +342,29 @@ describe('FlowPanel: pause', () => {
     // A 5xx is never shown in flow's words: the tab's own message says nothing changed.
     expect(screen.getByRole('alert').textContent).toBe(UNREACHABLE_MESSAGE);
   });
+
+  it("shows the fixed sentence, never flow's own words, and logs them to the console", async () => {
+    const logged = vi.spyOn(console, 'error').mockImplementation(() => {});
+    stubFetch({ status: 200, body: model({ paused: 'all' }) }, [
+      {
+        status: 409,
+        body: { error: 'fleet.json is locked; nothing was changed.', refusedBy: 'flow' },
+      },
+    ]);
+    await renderPanel();
+    await act(async () => {
+      fireEvent.click(screen.getByRole('button', { name: 'Resume flow' }));
+    });
+    expect(screen.getByRole('alert').textContent).toBe(
+      "Flow didn't respond, so nothing was changed. Try again."
+    );
+    expect(screen.queryByText(/fleet\.json is locked/)).toBeNull();
+    expect(logged).toHaveBeenCalledWith('[flow] pause/resume failed:', expect.any(Error));
+    expect(String((logged.mock.calls[0][1] as Error).message)).toBe(
+      'fleet.json is locked; nothing was changed.'
+    );
+    logged.mockRestore();
+  });
 });
 
 describe('FlowPanel: loading and live updates', () => {
