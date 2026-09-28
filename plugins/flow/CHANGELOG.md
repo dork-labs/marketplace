@@ -4,6 +4,12 @@ Installs of this plugin are pinned to a commit SHA, so a fix here does not reach
 you until you **reinstall it** (Marketplace → flow → reinstall, or re-run your
 `--plugin-dir` checkout's `git pull`). Each entry below says whether that matters.
 
+## 0.47.3
+
+**Nothing flow does has changed, and there is no need to reinstall.** The usage file flow shares with DorkOS now spells out one more rule: a usage reading above 100% counts as 100%, and one below 0% counts as 0%.
+
+- flow already read it that way. DorkOS used to throw away the reading, and with it the account's whole usage file, so the account showed as unknown. Pinning the rule in the shared test cases lets both sides prove they agree.
+
 ## 0.47.2
 
 **The Flow panel and the Flow tab call this computer's own Claude sign-in "Main (this computer's sign-in)", as DorkOS does. Reinstall to get it.**
