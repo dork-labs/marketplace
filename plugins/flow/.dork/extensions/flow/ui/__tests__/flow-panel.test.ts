@@ -147,6 +147,33 @@ describe('FlowPanel: accounts', () => {
     const [, week] = Array.from(unknown.children) as HTMLElement[];
     expect(week.dataset.tone).toBe('unknown');
     expect(week.children).toHaveLength(0);
+    // The host's UnknownTrack: a dashed outline in the border colour, no fill.
+    expect(week.style.border).toBe('1px dashed hsl(var(--border))');
+    expect(week.style.background).toBe('transparent');
+    // One window read: no "unknown" word after the name.
+    expect(screen.queryByText('unknown')).toBeNull();
+  });
+
+  it('says unknown after the name when neither window has a reading', async () => {
+    stubFetch({
+      status: 200,
+      body: model({
+        accounts: [
+          acct('Codex', { windows: { five_hour: null, seven_day: win(null) } }),
+          acct('Main', { reserved: true, windows: { five_hour: null, seven_day: null } }),
+        ],
+      }),
+    });
+    await renderPanel();
+    expect(screen.getByText('unknown')).toBeTruthy();
+    expect(
+      screen.getByRole('button', {
+        name: 'Codex, unknown, 5-hour window usage unknown, weekly usage unknown',
+      })
+    ).toBeTruthy();
+    // "reserved" keeps the one slot.
+    expect(screen.getByRole('button', { name: /^Main, reserved, / })).toBeTruthy();
+    expect(screen.queryByText(/no usage yet/)).toBeNull();
   });
 
   it('colors bars by the host rule: amber from 70%, red when rejected or full', async () => {

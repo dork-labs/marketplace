@@ -200,13 +200,26 @@ function Dot(props: { color: string | undefined }): Node {
   });
 }
 
-/** One horizontal bar track, filled in the window's tone. */
+/**
+ * A track with no reading: the host's `UnknownTrack` (`border border-dashed
+ * border-border bg-transparent`), a dashed outline with no fill.
+ */
+const UNKNOWN_TRACK: Style = {
+  boxSizing: 'border-box',
+  border: `1px dashed ${hostColor('border')}`,
+  background: 'transparent',
+};
+
+/** One horizontal bar track, filled in the window's tone, or dashed with no reading. */
 function Track(props: { entry: PanelWindow | null; height: string }): Node {
   const tone = barTone(props.entry);
   const fill = barFill(props.entry);
   return h(
     'div',
-    { 'data-tone': tone, style: { ...TRACK, height: props.height } },
+    {
+      'data-tone': tone,
+      style: { ...TRACK, ...(tone === 'unknown' ? UNKNOWN_TRACK : {}), height: props.height },
+    },
     tone === 'unknown'
       ? null
       : h('b', {

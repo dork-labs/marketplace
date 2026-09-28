@@ -15,6 +15,7 @@
 import { readJsonFile } from '../../../../scripts/atomic-json.ts';
 import { PreconditionError, UsageError } from '../../../../scripts/errors.ts';
 import {
+  DEFAULT_ACCOUNT_LABEL,
   accountKey,
   effectiveReservePct,
   fleetPolicyPath,
@@ -39,7 +40,7 @@ import {
 } from '../../../../scripts/fleet/usage-ledger.ts';
 import type { AccountSummary } from './host-types.ts';
 
-/** The color of a runtime's implicit account: the stone palette value (decided, Q21). */
+/** The color of Codex's and OpenCode's implicit accounts: the stone palette value (decided, Q21). */
 export const IMPLICIT_ACCOUNT_COLOR = '#78716c';
 
 /** A repo a kept-out account may serve: `owner/name`. */
@@ -226,9 +227,33 @@ export function storedEntry(
   return isObject(entry) ? entry : undefined;
 }
 
-/** The label of an account as the Flow tab shows it. */
+/**
+ * The color of an account's dot: DorkOS's own color, except for Codex's and
+ * OpenCode's implicit accounts, which use the stone {@link IMPLICIT_ACCOUNT_COLOR}
+ * (Q21). Claude Code's standalone `default` is "Main" and keeps DorkOS's color.
+ */
+function accountColor(subject: FleetSubject): string {
+  if (subject.implicit && subject.runtime !== 'claude-code') return IMPLICIT_ACCOUNT_COLOR;
+  return subject.summary.color;
+}
+
+/**
+ * The label of an account as the Flow tab and the Flow panel show it.
+ *
+ * - Claude Code's standalone `default` (its own sign-in folder, when no
+ *   registered row names that folder) takes DorkOS's label, "Main (this
+ *   computer's sign-in)", or flow's same {@link DEFAULT_ACCOUNT_LABEL} when
+ *   DorkOS gave none. A `default` that aliases a registered row is not listed
+ *   on its own: DorkOS lists that row once, under its own label.
+ * - Codex's and OpenCode's implicit accounts read "<Runtime> (this computer's
+ *   sign-in)": the panel has no runtime captions, so two rows called "Main"
+ *   would not say which is which.
+ */
 function accountLabel(subject: FleetSubject): string {
-  if (subject.implicit) return `${RUNTIME_LABELS[subject.runtime]} (this computer's sign-in)`;
+  if (subject.implicit) {
+    if (subject.runtime === 'claude-code') return subject.summary.label ?? DEFAULT_ACCOUNT_LABEL;
+    return `${RUNTIME_LABELS[subject.runtime]} (this computer's sign-in)`;
+  }
   return subject.summary.label ?? subject.id;
 }
 
@@ -273,7 +298,7 @@ export function buildFleetView(
       key: resolved.key,
       id: subject.id,
       label: accountLabel(subject),
-      color: subject.implicit ? IMPLICIT_ACCOUNT_COLOR : subject.summary.color,
+      color: accountColor(subject),
       implicit: subject.implicit,
       role: resolved.role,
       reservePct: resolved.reservePct,
