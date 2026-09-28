@@ -40,7 +40,7 @@ import {
 } from '../../../../scripts/fleet/usage-ledger.ts';
 import type { AccountSummary } from './host-types.ts';
 
-/** The color of a runtime's implicit account: the stone palette value (decided, Q21). */
+/** The color of Codex's and OpenCode's implicit accounts: the stone palette value (decided, Q21). */
 export const IMPLICIT_ACCOUNT_COLOR = '#78716c';
 
 /** A repo a kept-out account may serve: `owner/name`. */
@@ -228,6 +228,16 @@ export function storedEntry(
 }
 
 /**
+ * The color of an account's dot: DorkOS's own color, except for Codex's and
+ * OpenCode's implicit accounts, which use the stone {@link IMPLICIT_ACCOUNT_COLOR}
+ * (Q21). Claude Code's standalone `default` is "Main" and keeps DorkOS's color.
+ */
+function accountColor(subject: FleetSubject): string {
+  if (subject.implicit && subject.runtime !== 'claude-code') return IMPLICIT_ACCOUNT_COLOR;
+  return subject.summary.color;
+}
+
+/**
  * The label of an account as the Flow tab and the Flow panel show it.
  *
  * - Claude Code's standalone `default` (its own sign-in folder, when no
@@ -288,7 +298,7 @@ export function buildFleetView(
       key: resolved.key,
       id: subject.id,
       label: accountLabel(subject),
-      color: subject.implicit ? IMPLICIT_ACCOUNT_COLOR : subject.summary.color,
+      color: accountColor(subject),
       implicit: subject.implicit,
       role: resolved.role,
       reservePct: resolved.reservePct,

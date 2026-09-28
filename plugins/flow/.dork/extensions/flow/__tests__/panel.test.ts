@@ -26,6 +26,7 @@ import {
 import { EMIT_INTERVAL_MS, SCHEDULES_NOTE_MS } from '../lib/panel-service.ts';
 import { pidExists } from '../../../../scripts/cli/host-io.ts';
 import type { RuntimeAccount } from '../../../../scripts/fleet/accounts.ts';
+import { IMPLICIT_ACCOUNT_COLOR } from '../lib/fleet.ts';
 import { createFlowExtension } from '../server.ts';
 import {
   fakeCtx,
@@ -294,6 +295,14 @@ describe('GET /panel', () => {
       ['claude-code:default', "Main (this computer's sign-in)", true],
       // Codex keeps its runtime's name: the panel has no runtime captions.
       ['codex:default', "Codex (this computer's sign-in)", false],
+    ]);
+    // Main takes DorkOS's color; Codex's own sign-in stays stone (Q21).
+    expect(model.accounts.map((a) => [a.key, a.color])).toEqual([
+      ['claude-code:claude2', '#16a34a'],
+      ['claude-code:claude3', '#d97706'],
+      ['claude-code:claude4', '#9333ea'],
+      ['claude-code:default', '#2563eb'],
+      ['codex:default', IMPLICIT_ACCOUNT_COLOR],
     ]);
   });
 

@@ -8,6 +8,7 @@ you until you **reinstall it** (Marketplace → flow → reinstall, or re-run yo
 
 **The Flow panel and the Flow tab call this computer's own Claude sign-in "Main (this computer's sign-in)", as DorkOS does. Reinstall to get it.**
 
+- That account's dot now has the colour DorkOS gives it, like your other accounts.
 - The panel also marks an account whose usage it can't read yet: its bars are dashed outlines, and it says "unknown" after the name.
 
 ## 0.47.1
