@@ -48,6 +48,11 @@ runner needs no filesystem; the cases' `env` exists only to prove it is ignored.
 keeps the stored one. Before it, a second reading from the same millisecond was
 dropped, even a `rejected` one.
 
+4.0.1 (rev 6f) is a patch: it pins what a reader does with a `usedPct`
+outside 0-100, which the rules left unwritten. Writers clamp, and so does a
+reader: 130 reads as 100 and -5 as 0 (`window-read` cases). A reader never
+treats such an entry as invalid, and never drops the file over it.
+
 ## What is here
 
 | File | What it pins | The call it drives |
