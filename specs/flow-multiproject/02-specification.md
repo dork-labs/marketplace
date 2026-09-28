@@ -1,0 +1,910 @@
+---
+slug: flow-multiproject
+created: 2026-09-28
+status: specified
+---
+
+# Flow across many projects: the Flow tab, Flow home, timed pauses, the run chip, the inbox, and settings by who they affect
+
+**Status:** Draft
+**Date:** 2026-09-28
+**Input:** [`01-ideation.md`](./01-ideation.md), [`design-decisions.md`](./design-decisions.md) (final), [`converged-design.md`](./converged-design.md), [`design/`](./design/)
+**Companion:** the DorkOS core spec `specs/flow-multiproject/` in the `dorkos` repo. Every host seam named here is **per the DorkOS core spec; final names follow it**.
+
+## Overview
+
+- The Flow tab follows the chat. In a flow project it shows that project (its conditions, what is running, what is up next). Anywhere else it shows a thin "All projects" view. Accounts leave the tab.
+- Flow home (`/x/flow`) lists every project in three bands: needs you, something's off, all fine. A project filter lives in the URL. A second tab shows this week's usage per project and per account.
+- Every pause has a duration: until tomorrow 9am, for 1 hour, or until you resume. The end time is stored, and the engine honours it even when DorkOS is closed.
+- A chip in the status bar says which item this chat is working on and where it stands, or "3 items · 1 needs you".
+- flow asks in the Activity inbox only when only a person can help, and every ask says what will happen and why: "Ship the new out-of-usage banner?" (👍 Ship it / 👎 Send it back), an agent's question with its own pick and a deadline, "Sign in to Linear again". A slow tracker is retried quietly.
+- One dial per project (Ask me first, Tell me after, Just do it) decides how much flow does on its own; after you answer, flow offers once to do that kind of thing on its own next time. Whatever you pick, someone checks: you, the reviewer agent, or a safe default at a deadline.
+- Buttons that need an agent ("Set up flow here", "Sort them", "Sign in") start the work in a new chat with a plain title and reason; no command is ever on screen.
+- One settings component, used on each project's settings page and in Settings → Flow, splits settings into "Shared with the repo" and "Just me", and lists the accounts the project may use. DorkOS enforces that list; flow's "Only for these repos" moves into it once.
+
+## Background / Problem Statement
+
+- `lib/panel-service.ts` covers "the projects it shows": the worktree folders under `<dorkHome>/workspaces/` plus up to 50 chat folders it has seen (`REMEMBERED_CWDS`). A project you have not opened a chat in since the server started is invisible. The runs of every covered project are one flat list.
+- The panel's "Pause flow" pauses every covered project at once and has no end. A forgotten pause stops flow for days.
+- The panel repeats the accounts that the account chip and Settings already show (`AccountPopover`, `MiniBars`).
+- Nothing reaches you when flow needs you: a review gate or an agent's question waits on the tracker, and a tracker that stopped answering is silent.
+- A chat that hands items to other chats shows none of them.
+- Settings → Flow (`ui/fleet-tab.ts`) holds only this computer's account policy. Per-project settings are edited by hand in JSON, and nothing says whether a change reaches teammates.
+- "Only for these repos" (`scope.repos` in `<dorkHome>/flow/fleet.json`) is enforced by flow's advisor only. A launch DorkOS makes without asking flow can still use the account anywhere.
+
+## Goals
+
+- Each surface shows one project when the chat is in one, and every project when it is not, with no engine words.
+- A person learns that flow needs them in one place (the Activity inbox), once per thing, with a way to act in place.
+- No pause lasts longer than the person chose.
+- A person can tell, before saving, whether a setting reaches everyone on the repo or only this computer.
+- An account restricted to a project is never used for another, by flow or by DorkOS.
+- Everything degrades plainly on a DorkOS without the new seams.
+
+## Non-Goals
+
+- Any seam in core (N1-N6, N9): the core spec owns them.
+- Moving the account pool, reserve or handoff mode (Settings → Runtimes and today's account roles stay).
+- A detailed design of "Capacity this week" (design-decisions: out of scope; this spec ships a minimal first version).
+- Tuning condition time limits beyond N7's starting values.
+- Changing DorkOS's "full power" tool-approval mode inside a chat: the dial (§7.7) covers flow's decisions across projects and stays separate from it (N11).
+- A Linux or phone-specific build: the phone uses the same pages.
+
+## Technical Dependencies
+
+- The flow plugin in this worktree at 0.47.3 (`plugins/flow/.claude-plugin/plugin.json`), extension 0.47.2 (`extension.json`).
+- DorkOS 0.88.0 or newer for today's behaviour. Each new surface is detected per feature at run time (`typeof api.registerPage === 'function'`, `ctx.inbox` present, and so on), never by comparing versions (§10). `minHostVersion` stays `0.88.0`, so an older DorkOS keeps today's Flow tab.
+- Core seams, from the core spec's §11 "Contracts consumed by the flow spec" (all **per the DorkOS core spec; final names follow it**). `@dorkos/extension-api` is not on npm, so flow mirrors each in `lib/host-types.ts`, checked by a drift guard (§10.1):
+
+| Seam                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                        | Side          | How flow uses it                                                                                                                                                                                                                                                                                                                                                                                                                                                        |
+| ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `api.setTabMarker(tabId, 'attention' \| null)`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                              | client        | The amber dot on the Flow tab label (§3.4); `tabId` is `'panel'`, the id flow registers the right-panel tab under.                                                                                                                                                                                                                                                                                                                                                      |
+| `ExtensionReadableState.currentProject: ProjectRef \| null` (`{ root, name }`), subscribable                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                | client        | Picks the lens (§3.1) and the settings switcher's default (§8.1).                                                                                                                                                                                                                                                                                                                                                                                                       |
+| `api.registerPage(path, component, { title, icon?, menu? })` at `/x/<extensionId>/<path>`; the page gets `ExtensionPageProps` (`params`, `search`, `setSearch`)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                             | client        | `''` (Flow home, `/x/flow`), `'p/:name'` (the lens page) and `'p/:name/settings'` (§4). `?project=` and `?tab=` live in `search`.                                                                                                                                                                                                                                                                                                                                       |
+| `api.registerStatusBarItem(id, component, { label, priority?, when?, urgent? })`; the component gets `StatusBarSlotContext` (`sessionId`, `cwd`, `project`, `trackerItems`, `compact`)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                      | client        | The run chip (§6). `when` and `urgent` read only `ctx.trackerItems`.                                                                                                                                                                                                                                                                                                                                                                                                    |
+| `TrackerItemRef` (`id`, `stage`, `runStatus`, `startedAt`, `via: 'this-chat' \| 'own-chat'`, `ownChatSessionId`); core puts a run in a chat's list by its `sessionId` (`this-chat`) or by `dispatchedBy === session.id` (`own-chat`)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                        | client/HTTP   | Which items the chip shows, and "Open its chat" (§6).                                                                                                                                                                                                                                                                                                                                                                                                                   |
+| `ctx.inbox.raise(DecisionInput)`, `ctx.inbox.resolve(key, { outcome })`, `ctx.inbox.list()`, `ctx.inbox.onAction(handler)`; `InboxLimitError` past 50 open                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                  | server        | Review gates, agents' questions, escalated conditions (§7). `DecisionInput` carries `project`, `projectLabel` ("Linear DOR", the only source of the heading's label), `since` and an in-app `link`. Actions are `yes-no` (with `rejectAsksForNote`, note up to 2,000 characters) or `word` (optional `href`, optional `input: { placeholder, maxLength }`, whose text arrives on the event as `text`). A handler may return `navigate` (an in-app path core validates). |
+| `ctx.inbox.raise(DecisionInput)` with `why` required (1-300), `title` ≤ 120, `detail` ≤ 500, `project`, `projectLabel`, `since`, `link`; `DecisionActions` of kind `yes-no`, `word` (optional `href`, or `input` for inline text) or `choice` (2-5 `choices`, `defaultChoice`, `decideBy`, `allowReply`); `ctx.inbox.resolve(key, { outcome, by? })` with `DecisionActor` `{ kind: 'agent' \| 'rule', label }`; `ctx.inbox.record(...)` (history only); `ctx.inbox.list()`; `ctx.inbox.onAction(handler)` with `DecisionActionEvent` (`action`, `choiceId`, `decidedBy: 'person' \| 'deadline'`, `offerId`, `note`, `text`); `DecisionActionResult` with optional `navigate`, `message` and `offer: { text, offerId }`; `InboxLimitError`, `InboxLinkError` | server        | Every ask (§7.3), questions with the agent's pick and deadline, "Next time, on its own?" (§7.8), and "While you were away" (§7.10).                                                                                                                                                                                                                                                                                                                                     |
+| `ctx.sessions.start(StartWorkInput)` (server, decided by flow's rules) and `api.startWork(StartWorkInput)` (client, person-only, returns `{ sessionId }`); `StartWorkInput` = `{ project, prompt ≤ 20,000, title 1-80, reason 1-200 }`; `StartWorkError` codes `not_a_project`, `account_not_allowed_here`, `start_limit`; the project must be one `ctx.projects.list()` returns to flow (it holds flow, or flow reported it); limits per extension across both, restart-safe, including chats started from flow's started chats: 10 starts per rolling hour, 3 started chats running a turn at once; `Session.startedBy`                                                                                                                                   | server/client | Every outcome button that needs an agent (§7.9) and the daily sort (§7.7).                                                                                                                                                                                                                                                                                                                                                                                              |
+| `api.listDecisions()` (`ExtensionDecisionView[]`) and `api.answerDecision(decisionId, DecisionAnswer)` (`DecisionAnswerResult`: `resolved`, `message`, `navigate`, `offer`, `watch`), which call `GET /api/extensions/:id/decisions` and `POST /api/extensions/:id/decisions/:decisionId/action`, scoped to flow and behind the person bar. An answer through this path is attributed to the extension (history: "answered in Flow"), never to "you", and never carries an offer                                                                                                                                                                                                                                                                            | client        | Flow home and the lens page (§4.2, §7.4).                                                                                                                                                                                                                                                                                                                                                                                                                               |
+| `ctx.requirePerson` (Express middleware)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                    | server        | Guards every flow route that changes something (§11).                                                                                                                                                                                                                                                                                                                                                                                                                   |
+| `api.projectSettings.get(root)` / `.set(root, value)` (the only writer: `PUT /api/extensions/:id/project-settings`, person bar, value ≤ 16 KiB) and `ctx.projectSettings.get(root)` / `.onChange(listener)` (read-only; no server setter exists)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                            | client/server | The autonomy dial (§7.7).                                                                                                                                                                                                                                                                                                                                                                                                                                               |
+| `ExtensionReadableState.requireLogin: boolean`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                              | client        | The note under the dial (§7.7).                                                                                                                                                                                                                                                                                                                                                                                                                                         |
+| `DecisionActionResult` also `{ settled: true }`; `watch: { sessionId, label }` (label ≤ 40) on either result and on `resolve`; `DecisionActor` also `{ kind: 'deadline' }`; `offer.settingsPatch: { project, patch }`, written by core on Yes; `ctx.inbox.record(..., tell)`; `DecisionActionEvent.pendingActionId` after a person's answer got `keepOpen`, credited by `resolve(key, { outcome, answering, offer?, watch? })`                                                                                                                                                                                                                                                                                                                              | server        | Deadline races (§7.4), "· Watch" rows (§7.9), slow answers that still credit you and keep the offer.                                                                                                                                                                                                                                                                                                                                                                    |
+| `ctx.projects.resolve(cwd)`, `ctx.projects.list()` (`ProjectInfo`: `root`, `name`, `originRepo`, `lastSeenAt`; only projects that hold a copy of flow or that flow reported), `ctx.projects.report(path)` (no label), `ctx.projects.onChange`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                               | server        | Enumerates projects with flow's own discovery (§9.1).                                                                                                                                                                                                                                                                                                                                                                                                                   |
+| `GET /api/projects`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                         | HTTP          | The settings project switcher and the `fleet.json` migration's `owner/name` mapping (§8.5).                                                                                                                                                                                                                                                                                                                                                                             |
+| `GET /api/runtimes/claude-code/account-eligibility?project=`, `PUT /api/runtimes/claude-code/project-accounts`, `PUT /api/runtimes/claude-code/accounts/:id/only-projects` (the two `PUT`s person-only)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                     | HTTP          | The account checkboxes (§8.4) and the migration (§8.5), called from flow's browser half. There is no `ctx.accounts` write API: flow's server half never changes account access.                                                                                                                                                                                                                                                                                         |
+| `runtimes.claudeCode.accounts[].onlyProjects`, `runtimes.claudeCode.projectAccounts`, `runtimes.claudeCode.defaultAccountOnlyProjects` in `<dorkHome>/config.json`, roots stored canonical                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                  | file          | Read by flow's CLI so a terminal run obeys the same rule (§8.6).                                                                                                                                                                                                                                                                                                                                                                                                        |
+| `Session.trackerItems` and `SessionInfo.trackerItems: { id, via }[]`, with the deprecated `trackerItem` kept until core removes it                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                          | HTTP/server   | `flow fleet`'s session rows and the advisor (§6.4).                                                                                                                                                                                                                                                                                                                                                                                                                     |
+| Extension discovery across projects, newest install wins (N5)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                               | server        | One loaded Flow extension serves every project; flow reports per-project version skew itself (§9.3).                                                                                                                                                                                                                                                                                                                                                                    |
+
+## Detailed Design
+
+### 1. What changes, at a glance
+
+| Area           | Today                                                                      | After                                                                                                                                |
+| -------------- | -------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------ |
+| Client entry   | `index.ts`: Settings tab `fleet` + right-panel `panel`                     | Same two, plus pages, a status-bar chip, palette commands, a pause dialog, the tab marker, all fed by one live store (`ui/store.ts`) |
+| Server model   | `GET /panel` → `PanelModel` (accounts, runs, slots, paused), event `panel` | `GET /model` → `FlowModel` (projects, their runs, queue, conditions, decisions), event `model` (§2)                                  |
+| Pause          | `POST /pause`, `POST /resume` over every covered project, no end           | Same routes, body `{ project? , all?, until }`; the flag stores `until`; the engine lifts it on time (§5)                            |
+| Inbox          | none                                                                       | conditions and decisions through `ctx.inbox` (§7)                                                                                    |
+| Settings       | Settings → Flow: this computer only                                        | `ProjectFlowSettings` on a per-project page and on top of Settings → Flow (§8)                                                       |
+| Engine         | pause has no end; no verb records a review verdict or an answer            | `pause --until`; `flow review`; `flow answer`; `FlowRun.updatedAt` and `dispatchedBy`; `behaviour.json` (§5, §7, §9.3)               |
+| Fleet contract | `scope.repos` enforced by flow only                                        | also honours core's `onlyProjects` and `projectAccounts` (contract 4.1.0, §8.6)                                                      |
+
+### 2. The server model
+
+#### 2.1 `FlowModel`
+
+`lib/model.ts` replaces the panel half of `lib/panel.ts`. `GET /api/ext/flow/model[?cwd=<dir>]` answers it; the server pushes it as `ext:flow:model` at most once a second and only when it changed (today's `PanelService.request()` throttle, kept).
+
+```ts
+interface FlowModel {
+  behaviour: number; // this extension's flow behaviour level (§9.3)
+  generatedAt: string;
+  projects: FlowProject[]; // sorted by name
+  decisions: FlowDecision[]; // open decisions flow raised, every project, oldest first
+  cwdProject: string | null; // project name for ?cwd=, for hosts without currentProject (§10)
+}
+
+interface FlowProject {
+  name: string; // core's project name (§9.1)
+  root: string; // main checkout
+  setup: "ready" | "not-set-up"; // not-set-up: installed, no .agents/flow/config.json
+  tracker: { label: string; team: string | null; url: string | null } | null; // "Linear", "DOR"
+  pause: { since: string | null; until: string | null } | null;
+  runs: FlowRunRow[];
+  queue: { next: QueueItem[]; more: number } | null; // null: not read (mcp transport, or never read)
+  capacity: { busy: number; slots: number };
+  conditions: FlowCondition[];
+  version: {
+    flow: string | null;
+    behaviour: number;
+    olderBehaviour: string | null;
+  };
+}
+
+interface FlowRunRow {
+  identifier: string;
+  title: string | null;
+  url: string | null;
+  sessionId: string | null;
+  dispatchedBy: string | null;
+  cwd: string;
+  account: { key: string; label: string; color: string };
+  state:
+    "building" | "needs-you" | "in-review" | "handing-off" | "parked" | "done";
+  updatedAt: string | null; // newest timestamp on the record (§6.2)
+}
+
+interface FlowCondition {
+  kind: "paused" | "tracker-unreachable" | "nothing-ready";
+  since: string; // when it began
+  escalated: boolean; // an inbox item is live for it
+  detail: { untriaged?: number }; // nothing-ready: items waiting for triage
+}
+
+interface FlowDecision {
+  key: string; // flow's key, before core namespaces it (§7.2)
+  project: string; // project name
+  kind: "review" | "question" | "tracker-unreachable" | "nothing-ready";
+  title: string;
+  detail: string | null;
+  identifier: string | null; // the item, for review and question
+  raisedAt: string;
+  actions: "ship" | "question" | "sign-in" | "sort" | "retry";
+  why: string; // required on every ask (§7.3)
+  defaultChoice: string | null; // questions: the agent's pick
+  decideBy: string | null; // questions: the deadline
+}
+```
+
+- `PanelAccount`, `PanelWindow`, the `accounts` list and `slots` across projects go. A run row carries its account's label and color only, for the dot (V3).
+- `runState` (`lib/panel.ts`) keeps its five rules. Its values are renamed for the new pill words: `waiting-on-you` becomes `needs-you`. `done` is new: a run whose `status` is `completed` in the last 24 hours, used only by the chip (V5 "Merged · closed").
+- `isStaleRun`, `isLiveDrainRun`, `slotsOf`, `runAccountKey`, `CheckoutResolver` and `discoverCheckouts` stay as they are.
+
+#### 2.2 Reading a project's tracker
+
+The extension never loads a tracker adapter itself (it cannot load zod, `__tests__/bundle-safety.test.ts`). It runs flow's CLI from its own `flowRoot`, the way it runs `config-files.ts` today (`runPauseCommand`):
+
+1. `flow snapshot --json --out <dorkHome>/flow/cache/<projectId>/snapshot.json --project <root>` pulls the backlog once. `<projectId>` is the first 12 hex characters of the SHA-256 of the root.
+2. `flow next -n 3 --json --no-account --manual --snapshot <file>` gives `picked` (the next three, for "Up next"), `eligibleCount` (so "+ N more" is `eligibleCount - picked.length`), `shapeableCount`, `starved` and `atWipCap`. `--manual` only lets a read run while the project is paused; `next` writes nothing.
+3. `flow status --json --snapshot <file>` gives the parked items; for a parked item seen for the first time, `flow status <identifier> --json --snapshot <file>` gives its last question.
+
+- **Cadence:** every 5 minutes per project, at most two projects at once, and at once when a lens for that project opens and the last read is older than 60 seconds. A read in flight is never started twice.
+- **Only code flow ships runs on a timer.** `flow snapshot` loads the project's tracker adapter code. When `resolveAdapter` (`scripts/config-files.ts`) finds the adapter flow ships (under `flowRoot`), reads run automatically. When it finds a project's own adapter (`<root>/.agents/flow/adapters/<tracker>/adapter.ts`), that is code committed to the repo, and it runs only after a person allows it once in the lens: "Read Linear with this project's own adapter? It runs code from this repo. Allow". The allow is stored in `ctx.storage` keyed by the root and the SHA-256 of the adapter file, so a changed adapter asks again; the route that records it is person-only (§11). Until then `queue` is null and the lens shows the allow line. The same rule covers `flow review` and `flow answer` (§7.5).
+- **Only `connection.transport: cli` can be read** (`scripts/tracker/load.ts`, Decision D3: `mcp` exists only inside an agent session). A project on `mcp` has `queue: null`, no tracker condition, and its lens shows "Up next is shown when flow can reach Linear from here" with a link to the transport guide. Its runs, pause and review gates (from the run store) still show.
+- **Exit codes** decide health: exit 0 is reachable; exit 4 (`EXIT.tracker`) starts or continues "can't reach"; exit 3 (config) marks the project `not-set-up` when the config is missing and otherwise shows "flow's settings in <name> have a problem · Open settings"; any other failure is logged and changes nothing.
+- The snapshot's team gains an optional `url` (§5.6) for "Open in Linear ↗". Without it the footer link is hidden.
+
+#### 2.3 Throttle and cost
+
+- File reads (run store, pause flag, config) stay on the 5-second `ctx.schedule` poll (`PANEL_INTERVAL_SECONDS`). Tracker reads (§2.2) are on their own 5-minute timer and never block a model build: the model always uses the last cached read.
+- `node --experimental-strip-types` costs about 50 ms to start (flow-usage spec); three processes per project every 5 minutes is acceptable at 15 projects.
+
+### 3. The Flow tab (right panel)
+
+#### 3.1 Two lenses, one component
+
+`ui/flow-tab.ts` replaces `ui/flow-panel.ts`. It reads the live store (§3.5) and `currentProject`:
+
+- **Project lens** when `currentProject.root` equals a `FlowProject.root`.
+- **All-projects lens** otherwise (no project, or a project without flow).
+
+The lens is a separate component, `ui/project-lens.ts`, reused by the lens page (§4.3).
+
+#### 3.2 Project lens (V3 A)
+
+Top to bottom, in one scroll:
+
+1. **Header:** the project name (bold), "· Linear DOR" muted (tracker label and team key; hidden when unknown), then **Pause** (opens the pause menu, §5.3) and **⚙** (navigates to `/x/flow/p/<name>/settings`). While paused, Pause reads "Paused until 9:00" with **Resume** beside it; "Paused" alone for a pause with no end.
+2. **Condition lines**, one per live condition, muted box, each an outcome with a why (§7.1): "Linear hasn't answered since 09:14. Flow keeps trying." (no button: a person can't fix a blip), "Sign in to Linear again · Flow can't read dorkos's work until you do. [Sign in]", "12 new ideas haven't been sorted · Flow has had nothing ready to work on for a day. [Sort them]". The paused condition is already in the header and gets no line.
+3. **Running · 2 of 3**: busy of slots (`capacity`). One row per run: account dot, identifier and title, a neutral pill: "Building", "Needs you", "In review", "Handing off", "Parked". A row with a session opens it (`sessionRoute`, kept). "Nothing is running." when empty.
+4. **Up next**: the first three queue items numbered, "+ 5 more" as muted text. Hidden when `queue` is null.
+5. **Footer:** "2 need you elsewhere →" on the left, only when decisions exist in other projects; it opens Flow home. "Open in Linear ↗" on the right when `tracker.url` is known.
+6. **Setup state:** a `not-set-up` project shows only the header (no Pause) and "Flow is installed but doesn't know where your work lives yet. [Connect a tracker]". The button starts the work (§7.9); on a host without that seam the line keeps the words and ⓘ shows the command to type (`/flow:init`).
+7. **Version line** (§9.3), muted, above the footer, only when set.
+
+When a decision in this project is open and the host has no inbox seam (§10), its V2 row shows at the top of the lens.
+
+#### 3.3 All-projects lens
+
+- Header "All projects".
+- One line per project with a decision or a condition, most urgent first: "**dorkos** · 2 need you", "**blintz** · Sign in to Linear again", "**client-api** · Paused until 9:00". Clicking a line opens `/x/flow/p/<name>`.
+- "2 other projects are fine" (muted), when any.
+- **"Set up flow here"**: one quiet muted line, "This folder is a repo. [Set up flow here]", when `currentProject` is non-null and has no flow install. The button starts the work in a new chat (§7.9): installing flow into this project from the Marketplace, then setting it up. Never a banner. On a host without that seam, the button opens the flow package in the Marketplace (`/marketplace`) instead.
+- "Open Flow home →" at the bottom.
+- With no flow project at all (possible only briefly, since the extension loads from a project's install), the lens says "flow isn't set up in any project yet."
+
+#### 3.4 The tab marker
+
+`ui/marker.ts` calls `api.setTabMarker('panel', value)` whenever the store changes:
+
+- `'attention'` when `decisions.length > 0`, or when every project whose `setup` is `ready` is paused (at least one such project).
+- `null` otherwise. Conditions that did not escalate never set it. No count.
+
+The call is skipped when the host has no `setTabMarker` (§10).
+
+#### 3.5 One live store
+
+`ui/store.ts` holds one `FlowModel` for the whole client extension. `activate` starts it once:
+
+- It reads `GET /model` (with `?cwd=` on hosts without `currentProject`), then follows `ext:flow:model` on `/api/events` with today's fallback: a 30-second re-read while the stream is not open, and one read each time it opens (`useLiveModel`'s rules, moved here, `FALLBACK_POLL_MS` kept).
+- The tab, the pages, the chip and the marker subscribe to it. Today each panel instance opened its own `EventSource`; now there is one.
+- It stops in `activate`'s cleanup.
+
+#### 3.6 What leaves the tab
+
+- The "Accounts" caption and every account row, `AccountPopover`, `MiniBars`, `Track`, `POPOVER`, `POPOVER_WINDOWS`, `UNKNOWN_TRACK`, and the `open`/`rowRefs` state in `ui/flow-panel.ts` are deleted, not moved: the account chip and Settings → Runtimes already show each account's usage.
+- In `ui/panel-format.ts`, `barTone`, `TONE_VARIABLE`, `barFill`, `barsSentence`, `formatResetDay`, `formatResetTime`, `accountStateText`, `planName` and `windowDetail` go with them (no other file imports them). `PILL_TEXT` stays, with the new words ("Building", "Needs you", "In review", "Handing off", "Parked").
+- `slotsText` ("2 of 3 slots busy") becomes the "Running · 2 of 3" caption. `PAUSE_TEXT`, `RESUME_TEXT`, `PAUSED_TEXT` and the footer pause button give way to the header's Pause/Resume. `SCHEDULES_OFF_TEXT` stays for the one case that still switches schedules off (§5.4).
+
+### 4. Flow home (V4, N8)
+
+#### 4.1 Routes
+
+`index.ts` registers three paths, when `registerPage` exists: `''`, `'p/:name'` and `'p/:name/settings'`. `<name>` is core's project name as given (§9.1); it is URL-safe, so flow never rewrites it.
+
+| Path                        | Page                        | Title                    |
+| --------------------------- | --------------------------- | ------------------------ |
+| `/x/flow`                   | Flow home                   | "Flow"                   |
+| `/x/flow/p/<name>`          | the project lens as a page  | "<name> · Flow"          |
+| `/x/flow/p/<name>/settings` | the project's settings (§8) | "<name> · Flow settings" |
+
+- **2 or more projects:** `/x/flow` shows the home.
+- **1 project:** `/x/flow` renders that project's lens (the same component as `/x/flow/p/<name>`), so links never 404.
+- **0 projects:** "flow isn't set up in any project yet" and a link to the install guide.
+- An unknown `<name>`: "No flow project is called <name> on this computer." and "Open Flow home →".
+- On the phone (no right panel), the home is the project list and a project opens its lens page (N8).
+
+#### 4.2 The home page (V4 A)
+
+- Title "Flow". Top right, **"Pause all projects ▾"** (§5.3; "Until tomorrow 9am" first). While every ready project is paused with the same end: "Paused until 9:00" and **Resume**; with different ends: "Paused" and **Resume all**.
+- Tabs **Projects** (default) and **Capacity this week**; the tab lives in `?tab=capacity`.
+- **Project filter:** "All projects ▾" at the top of the page. Picking one sets `?project=<name>` and filters all three bands. A name that no longer exists shows the unfiltered page with "No project is called <name> any more." The filter is read from the URL on load, so it can be bookmarked and shared between tabs.
+- **Bands**, each hidden when empty:
+  1. **"Needs you · 3"**: one row per decision, oldest first. A fixed-width project column, the decision's title, its buttons (§7.5), with the same buttons as the inbox row. Answers given here go through `api.answerDecision`, which core attributes to Flow, not to you, and which never brings a "Next time" offer. So flow routes the asks where that matters to core's inbox: a review gate ("Ship …?") and a floor question show **Review in Activity →** (`/activity`) instead of buttons, so history says you shipped it and the offer can appear. Every other ask is answered in place, and the band says so once, muted: "Answers here show in history as answered in Flow." (§7.4)
+  2. **"Something's off · 1"**: one line per project with a live condition, the same outcome words as the lens, with its one action: **Resume** (paused), **Sign in** (sign-in gone), none for a tracker that is only slow.
+  3. **"All fine · 2"**: one muted line per remaining project: "2 running · 4 up next", "Nothing ready to work on", "Flow isn't set up here yet · Connect a tracker".
+- Clicking a project name opens `/x/flow/p/<name>`.
+
+#### 4.3 The lens page
+
+`/x/flow/p/<name>` renders `ui/project-lens.ts` full width, with the project's open decisions as V2 rows at the top (a phone has no inbox dropdown beside it), under the same rule as Flow home: ship and floor asks link to Activity, the rest are answered in place and credited to Flow (§4.2). ⚙ opens the settings page.
+
+#### 4.4 Capacity this week (minimal first version)
+
+Only data flow already has, and nothing forecast:
+
+- **Per account:** each account's weekly window from `ctx.accounts.usage()` (`seven_day`): "Acct 2 · 64% of this week · resets Thu 3pm". Metered accounts show `spend.costUsd` from the account's usage ledger when present ("$12.40 this period"). Dots and names come from `ctx.accounts.list()`.
+- **Per project:** from the project's journal (`<main checkout>/.dork/flow/journal.jsonl` and its rotated `journal.1.jsonl`), read leniently line by line by `lib/capacity.ts` itself. flow's own reader (`read` in `scripts/journal.ts`) cannot be bundled, because it imports `config-files.ts`, which finds its folder from its module URL. It shows hours of agent work this week (sum of `stage` start/end pairs, per item), items finished (`stage` `done` ends), and handoffs between accounts (`handoff` lines). "This week" is Monday 00:00 local time to now.
+- A project whose journal is off (`selfImprovement.journal.enabled: false`) reads "Not recorded: the journal is off in this project."
+- There is no project × account matrix: no data flow keeps today says which account paid for which project's work. §Open Questions records the follow-up.
+
+### 5. Pause with a duration (V4 menu, N7)
+
+#### 5.1 The engine
+
+`scripts/config-files.ts`:
+
+- `pauseFlow(roots, now, hostSchedules, until?)` writes `until` (ISO, or `null` for "until I resume") into `paused.json` beside `pausedAt` and `hostSchedules`. Pausing an already-paused project **replaces** `until` (a new choice wins) and keeps `pausedAt`.
+- `pauseState(roots, now?)` reads `until`. A flag whose `until` is at or before `now` reads as **not paused**. An unreadable `until` reads as no end (the safe side). `PauseState` gains `until: string | null`.
+- The CLI takes `pause --until <iso>` (`--until` with no value is refused; omitted means no end) and prints `until`.
+- `resume` is unchanged; it also removes an expired flag.
+- `flow status` says "Paused until <time>" or "Paused since <time>" (`scripts/cli/status.ts` `render`).
+
+Because `pauseState` is what `flow next`, `flow drain`, `flow claim` and every tick's step 0 read (`scripts/config-load.ts`), a timed pause ends on time with or without DorkOS running. A project on an older flow (behaviour 0) ignores `until`; the extension lifts its flag at the end time (§5.2), and its lens says so (§9.3).
+
+#### 5.2 The routes
+
+- `POST /pause` body `{ project?: string, all?: true, until: string | null }`: exactly one of `project` and `all`. It runs `config-files.ts pause --project <root> [--until <iso>]` for that project, or for every `ready` project (paused ones too, so a new end time applies to all). `until` must be in the future and at most 30 days away; else 400 "Pick a time in the next 30 days."
+- `POST /resume` body `{ project?: string, all?: true }`: runs `resume` where paused.
+- Both answer the new `FlowModel`.
+- Both are person-only (`ctx.requirePerson`, §11): an agent calling flow's route cannot pause or resume a project. The slash command (§5.4) is the agent's path, and it goes through the engine, not these routes.
+- **Expiry sweep:** on each 5-second poll, a flag whose `until` has passed is lifted by running `resume` for that project. This is what ends an older engine's pause, and it removes the stale file for everyone.
+- A body without `project` or `all` (today's panel) reads as `all: true, until: null`, so a client from before this spec still works.
+
+#### 5.3 The menu
+
+`ui/pause-menu.ts`, one component used by the lens header, the home header and the palette dialog:
+
+- "Until tomorrow 9am": 09:00 on the next calendar day in the browser's time zone (a pause chosen before 09:00 still ends tomorrow, never in minutes).
+- "For 1 hour": now plus 60 minutes.
+- "Until I resume": `until: null`.
+
+The browser computes `until` and sends an ISO string with its offset. The highlighted default is the project's pause default (§8.2) for a project, and "Until tomorrow 9am" for Pause all (V4).
+
+#### 5.4 The slash command and the palette
+
+- `/flow:pause [<item id> | for <duration> | until <time>]` (`commands/pause.md`): with a duration it passes `--until` and **skips step 3** (switching DorkOS schedules off), because nothing would switch them back on at the end; the flag alone stops every tick at its step 0. Without a duration it behaves exactly as today, schedules included. `/flow:resume` is unchanged.
+- Palette commands, registered with `api.registerCommand`, each opening the pause menu in a dialog registered with `api.registerDialog`:
+  - "Flow: Pause this project" (the chat's project). Command labels are fixed at registration, so when the chat is in no flow project the dialog says "This chat isn't in a flow project." and offers Pause all instead.
+  - "Flow: Pause all projects".
+  - "Flow: Resume this project" and "Flow: Resume all projects" (no dialog; they act at once and toast the result with `api.notify`).
+  - No "Open Flow home" command: core lists every page registered without params in the palette's "Add-ons" group and the phone menu (`menu` defaults to true), so Flow home is already there. The two param pages register with `menu: false`.
+- The palette commands pause and resume through flow's person-only routes; a command run by anything but a person is refused like the button.
+
+### 6. The run chip (V5 B)
+
+#### 6.1 Which items
+
+`ui/run-chip.ts` is registered with `api.registerStatusBarItem('run', RunChip, { label: 'Flow run', priority: 50, when, urgent })`. The component gets `StatusBarSlotContext` (`sessionId`, `cwd`, `project`, `trackerItems`, `compact`).
+
+- **`when(ctx)`** is `ctx.trackerItems.length > 0`. **`urgent(ctx)`** is true when any item's `stage` is `review` or its `runStatus` is one flow writes for a run waiting on a person. Both read only `ctx.trackerItems`: they are pure and synchronous, and core calls them on every status-bar render, so they never touch the store or the network.
+- **The items** are `ctx.trackerItems` (core's list, newest first). Core puts a run in a chat's list when its `sessionId` is the chat's (`via: 'this-chat'`) or its `dispatchedBy` is (`via: 'own-chat'`, with `ownChatSessionId` the run's own chat). The component matches each item by `id` to a `FlowRunRow` in the store for its pill and title; an item the store does not know yet shows its id and core's `stage`.
+- **`FlowRun.dispatchedBy`** (new, optional string): the session id of the chat that launched the run. `flow drain` writes it from the launching chat's `runtimeSession()` (`scripts/cli/session-id.ts`) onto every run it starts; `flow claim --dispatched-by <id>` sets it explicitly. It is a fleet-contract addition (readers pass unknown fields through; `conformance/fleet/flow-run.cases.json` gains a case) that core's run link matches.
+- No items: `when` is false and core hides the item.
+
+#### 6.2 States and copy
+
+- **One item:** "DOR-2387 · Building". Click: opens the item in the tracker (`url`, new tab) and navigates to `/x/flow/p/<name>`, or on a host without pages opens the Flow tab.
+- **Several items:** "3 items · 1 needs you ▴". The state shown is the most urgent, in this order: needs you, handing off, parked, building, in review, done. Click opens a list upward: one row per item with its pill, then "Open dorkos in Flow →".
+- **"Open its chat"**: a row whose item runs in its own chat (`via: 'own-chat'`) carries a link "Open its chat" that navigates to `/session?session=<ownChatSessionId>&dir=<run cwd>`; with `ownChatSessionId` null (not a DorkOS chat) the row has no link (today's `sessionRoute`). One list; no other word for these items appears on screen (V7).
+- **Words:** Building, Needs you, In review, Handing off, Parked, "Last update 2h ago", "Merged · closed" (one item done), "Done" (all of several done).
+- **Stale rule:** a run's last update is the newest of `updatedAt` (new, §6.3), `heartbeatAt`, `checkpointAt`, `drain.parkedAt`, `limit.since` and `startedAt`. The chip shows "Last update 2h ago" (the age muted) in place of the state when the state is Building or Handing off and the last update is more than 60 minutes old, or when the store has not refreshed for 5 minutes (any state). Needs you, In review and Parked are expected to wait and never go quiet.
+- **Phone:** when `ctx.compact` is true, the identifier (or "3 items") and the state; the title is dropped.
+- Facts only; it never estimates time left.
+
+#### 6.3 `FlowRun.updatedAt`
+
+Every writer of a run record stamps `updatedAt` with the write time: `scripts/flow-state-file.ts` (the CLI's writer) and `holdRun` in `lib/run-store.ts` (the extension's). Optional in the contract; older records lack it and fall back to the other timestamps.
+
+#### 6.4 `flow fleet` reads the new session list
+
+`scripts/fleet/sessions.ts` reads a DorkOS session row's `trackerItems` (the newest first; the first is the row's item) and falls back to the single `trackerItem` when `trackerItems` is absent. Core keeps both fields for a deprecation window, so this works against DorkOS before and after the change. `SessionInfo` and `LimitedSessionInfo` in `lib/host-types.ts` gain `trackerItems?: { id: string; via: 'this-chat' | 'own-chat' }[]` beside the deprecated `trackerItem?`, and the advisor reads the list first. Lands in F0.
+
+### 7. Conditions, escalation and decisions (N7)
+
+#### 7.1 The conditions
+
+`lib/conditions.ts` tracks each project's conditions with a fake-able clock. State (`since`, `escalated`, `idleSince`) is kept in `ctx.storage` so a restart does not reset a time limit.
+
+**The rule (V8, N11): a condition reaches a person only when only a person can fix it.** Everything else is shown where you look (the lens, Flow home) and fixed by flow itself.
+
+| Condition                      | Detection                                                                                                                                   | Reaches the inbox                                                                                                                                                                                                                                                        | Words (headline · why · button)                                                                                                                               |
+| ------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Paused                         | `paused.json` present and not expired                                                                                                       | never (it has an end time)                                                                                                                                                                                                                                               | lens header "Paused until 9:00 · Resume"                                                                                                                      |
+| Tracker slow or unreachable    | the tracker read (§2.2) exits 4 with `kind: 'unreachable'` (network, timeout, a 5xx)                                                        | never. flow retries on its own with backoff (1, 2, 5, then every 5 minutes); the lens and home show a line only after 15 minutes of continuous failure                                                                                                                   | "Linear hasn't answered since 09:14 · Flow keeps trying. Nothing is lost." · no button                                                                        |
+| Sign-in gone                   | the tracker read exits 4 with `kind: 'auth'` (the adapter reports a refused or expired credential, twice in a row, a refresh having failed) | **at once**: only a person can sign in (N11)                                                                                                                                                                                                                             | "Sign in to Linear again" · "Flow can't read or update dorkos's work in Linear until you do. Nothing is lost; it's waiting." · **Sign in**                    |
+| Nothing ready, ideas waiting   | `eligibleCount` 0, `atWipCap` false, `shapeableCount` > 0                                                                                   | only when the project's "Sort new ideas" is at **Ask me first** (§7.7) and **(a)** no run has been active for **24 hours** (`idleSince`), **(b)** it has free capacity (busy < slots, not paused). At the other stops flow sorts them itself (§7.7) and nothing is asked | "12 new ideas haven't been sorted" · "Flow has had nothing ready to work on in dorkos for a day. Sorting them lets it pick up the good ones." · **Sort them** |
+| Nothing ready, nothing waiting | `eligibleCount` 0, `shapeableCount` 0                                                                                                       | never                                                                                                                                                                                                                                                                    | home "All fine" line "Nothing ready to work on"                                                                                                               |
+
+- The `kind` comes from a new optional field on flow's tracker error: `TrackerError` (`scripts/errors.ts`) gains `kind: 'auth' | 'unreachable'`, set by the adapter (the shipped adapters map a refused or expired credential to `auth`; anything else, and an adapter that sets nothing, is `unreachable`). `flow snapshot --json` prints it in its error body. This replaces N7's one-hour escalation of an unreachable tracker: V8 later ruled that a blip never reaches a person.
+- A condition that is not live when its limit passes raises nothing. When a raised condition clears, flow resolves it with `cleared`; core shows "Linear came back for dorkos · Resolved on its own at 11:02".
+
+#### 7.2 Keys
+
+`<kind>:<projectId>[:<identifier>]`, where `<projectId>` is the 12-hex-character hash of the root (§2.2): `tracker:3f2a…`, `idle:3f2a…`, `review:3f2a…:DOR-2387`, `question:3f2a…:DOR-2401`. Core namespaces the key to the extension. One live item per project and condition (one per item for decisions), so a flapping condition re-raises the same key and never duplicates (V2). flow also keeps its raised set in `ctx.storage` so it resolves what it raised after a restart, and reconciles it with `ctx.inbox.list()` at start.
+
+**Limit.** Core allows 50 open decisions per extension; the 51st `raise` throws `InboxLimitError`. flow raises in priority order (review gates, then questions, then escalated conditions, oldest first within each), so what is dropped is the least urgent. On `InboxLimitError` it stops raising for that pass, logs once, keeps the unraised items in the model (Flow home and the lens still show them), and retries on the next pass after something resolves.
+
+**A project that vanishes** (its root is gone, §9.1) has its open items resolved with `cancelled`: nothing was answered and nothing cleared, so no "resolved on its own" history row.
+
+#### 7.3 The words on every ask (V8)
+
+Three rules, on every flow surface (inbox rows, lens lines, Flow home rows):
+
+1. **The headline says what will happen, as an outcome or a question.** Never a command, a stage name or an item id. The item's own title is used ("Ship the new out-of-usage banner?"); an item with no title reads "Ship this change?" and the id moves to the detail.
+2. **Every ask has a why line** (`DecisionInput.why`, required by core, plain text, at most 300 characters): what happens, why now, what "no" means. flow never raises without one; a builder that cannot fill it refuses to raise and logs the gap.
+3. **Every ask offers a way to never ask again** (§7.8).
+
+| Ask                                          | Headline                                                                      | Why line                                                                                                                                                                                                                                                                                                                                                                                   | Actions                                                                                                                                                                                                   |
+| -------------------------------------------- | ----------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Review gate (at "Ask me first", §7.7)        | "Ship <item title>?"                                                          | Built from facts on the run: "It's built, tests pass, and the reviewer agent found nothing. Shipping merges it into the app." With findings that were answered: "It's built and tests pass. The reviewer agent raised 2 points and both were fixed. Shipping merges it into the app." With checks still running: "It's built; tests are still running. Shipping merges it once they pass." | 👍 **Ship it** / 👎 **Send it back** (asks "What should change?", note up to 2,000 characters)                                                                                                            |
+| An agent's question                          | the agent's own question, as it wrote it ("Should the old API keep working?") | the agent's context; at Tell me after, for a non-floor question, the deadline: "It's changing how sessions load. If you don't answer by 5pm, it keeps it (the safer choice)." A floor question or one at Ask me first names no deadline: "It won't go ahead until someone checks."                                                                                                         | `{ kind: 'choice', choices, allowReply: true }`, plus `defaultChoice` and `decideBy` **only** for a non-floor question at Tell me after: 2-5 chips (labels ≤ 40), the agent's pick marked, and **Reply…** |
+| Sign-in gone                                 | "Sign in to Linear again"                                                     | "Flow can't read or update dorkos's work in Linear until you do. Nothing is lost; it's waiting."                                                                                                                                                                                                                                                                                           | **Sign in** (§7.9)                                                                                                                                                                                        |
+| Ideas waiting (at "Ask me first")            | "12 new ideas haven't been sorted"                                            | "Flow has had nothing ready to work on in dorkos for a day. Sorting them lets it pick up the good ones."                                                                                                                                                                                                                                                                                   | **Sort them** (§7.9)                                                                                                                                                                                      |
+| A problem it could retry (at "Ask me first") | "Try fixing the failing checks on <item title>?"                              | "The checks failed after the last change. Flow can look at why and push a fix; no means it waits for you."                                                                                                                                                                                                                                                                                 | 👍 **Fix it** / 👎 **Leave it**                                                                                                                                                                           |
+
+- **When each is raised.** The review gate: when a run reaches the `review` stage, will not merge by itself, and the project's "Ship finished work" is at Ask me first. A question: when an item is labelled `agent/needs-input` and assigned to the person, or a drain run is parked for a person (`drain.parkedFor: 'person'`), and the run record carries a structured question (§7.5, `flow ask`); a question from an older engine without one reads "An agent needs an answer on <item title>" with the question behind ⓘ and **Reply…**. The retry ask: when "Retry and fix problems" is at Ask me first and the drain parks a run on red checks.
+- **Settling by other paths.** A review gate resolves `cleared` when the stage leaves `review` another way (approved on the forge, the item closed); a question when its label goes (answered on the tracker).
+- Every decision carries `project: <root>`, `projectLabel` ("Linear DOR", the only source of the heading's label), `why`, `link` (the project's lens page, `/x/flow/p/<name>`) and, for conditions, `since`. Titles at most 120 characters and detail at most 500 (core's limits); flow truncates with "…".
+- The item id and PR number go in `detail` ("DOR-2387 · PR #2303 · 12 min ago"), behind ⓘ.
+
+#### 7.4 Acting on a decision
+
+One handler, `lib/decisions.ts`, registered with `ctx.inbox.onAction`, does the work for every answer. Flow home and the lens page have no route of their own: they read open decisions with `api.listDecisions()` (matched to the model's decisions by `key`) and answer with `api.answerDecision(id, answer)`, core's extension-scoped path (`POST /api/extensions/:id/decisions/:decisionId/action`, person bar). Core attributes those answers to Flow ("answered in Flow") and gives them no offer, so the asks whose attribution matters (a review gate, a floor question) are routed to core's inbox from flow's pages (§4.2). So an agent can never answer a review gate by calling a flow route, and the inbox and flow's pages always agree. A `DecisionActionEvent` with `decidedBy: 'deadline'` is core applying a question's `defaultChoice` at `decideBy`; core fires deadlines only while flow is running and has registered `onAction`, so a deadline that passed while flow was stopped fires after it starts, never before.
+
+The actions flow raises:
+
+| Decision      | `actions`                                                                                                                                                                                                                                                                                                                                                                                                                                                             | What the handler does                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                             | Result                                                                                                                                                                                                                                                                                                                 |
+| ------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Review gate   | `{ kind: 'yes-no', approveLabel: 'Ship it', rejectLabel: 'Send it back', rejectAsksForNote: true }`                                                                                                                                                                                                                                                                                                                                                                   | 👍 runs `flow review <id> --approve --by person --json` (§7.5). 👎 takes `event.note` (required, 1-2,000 characters, the same limit on both sides) and runs `flow review <id> --changes --note-file <tmp> --json`. Never closes anything.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                         | `{ resolve: 'approved', offer }` / `{ resolve: 'rejected' }`                                                                                                                                                                                                                                                           |
+| Question      | `{ kind: 'choice', choices: [{ id, label }…], allowReply: true }` from the run's `question` block (§7.5). `defaultChoice` and `decideBy` are set **only** for a non-floor question at Tell me after; a floor question (§13) and any question at Ask me first are raised with neither, so no deadline is shown or armed. A question from an older engine with no choices is `{ kind: 'word', label: 'Reply', input: { placeholder: 'Your answer', maxLength: 2000 } }` | a person's chip (`choiceId`) or Reply (`text`) runs `flow answer <id> --text-file <tmp> --json`. `decidedBy: 'deadline'` (only possible for a non-floor Tell-me-after question): `flow answer <id> --pick --by agent-default`. Should a deadline event ever arrive for a floor question, the handler returns `{ keepOpen: true }` and core keeps the row open. A floor question at Tell me after is checked by flow's own timer instead: at `questionDeadlineMinutes` flow runs `flow ask <id> --check-pick`, and the reviewer agent's verdict resolves the row with `resolve(key, { outcome: 'answered', by: { kind: 'agent', label: 'the reviewer agent' } })`, or leaves it for you. **Race:** `flow answer` exits 5 when the question was already settled (the `agent/needs-input` label is gone, because the engine's own deadline pass or a tracker reply got there first). On the deadline path the handler returns `{ settled: true }` (core cancels the timer) and resolves the row itself with `resolve(key, { outcome: 'answered', by: { kind: 'deadline' } })`, so history reads exactly as when core applies the default; on a person's answer it resolves the row `cleared` and returns `{ keepOpen: true, message: 'This was already answered on the tracker.' }`. Never a failure | person: `{ resolve: 'answered', offer }`; deadline: `{ resolve: 'answered' }` (core records it as decided at the deadline)                                                                                                                                                                                             |
+| Sign-in gone  | `{ kind: 'word', label: 'Sign in' }`                                                                                                                                                                                                                                                                                                                                                                                                                                  | starts the sign-in in a new chat with `ctx.sessions.start` (§7.9)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                 | `{ keepOpen: true, watch: { sessionId, label: 'Signing in to Linear…' } }`: core shows "Signing in to Linear… · Watch" on the row; flow resolves `cleared` when the next read succeeds. A `StartWorkError` returns `{ keepOpen: true, message: <its message> }`                                                        |
+| Ideas waiting | `{ kind: 'word', label: 'Sort them' }`                                                                                                                                                                                                                                                                                                                                                                                                                                | starts sorting in a new chat with `ctx.sessions.start` (§7.9)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                     | `{ resolve: 'answered', watch: { sessionId, label: 'Sorting 12 ideas…' }, offer }`: the person said yes, so the ask is done, and core's row links to the new chat; if ideas are still waiting a day later, the condition raises again. A `StartWorkError` returns `{ keepOpen: true, message: <its message> }` instead |
+| Retry         | `{ kind: 'yes-no', approveLabel: 'Fix it', rejectLabel: 'Leave it' }`                                                                                                                                                                                                                                                                                                                                                                                                 | 👍 un-parks the run into the drain's `fixing-ci` phase; 👎 leaves it parked                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                       | `{ resolve: 'approved', offer }` / `{ resolve: 'rejected' }`                                                                                                                                                                                                                                                           |
+
+- A failed command returns `{ keepOpen: true, message: "Flow couldn't send that. Try again." }`; nothing is resolved.
+- Every `link`, `href` and `navigate` value is an in-app path (`/x/flow/...` or a core route such as `/session?...`). Core refuses anything else (`InboxLinkError` on raise; a bad `navigate` counts as a handler error), so flow never puts a tracker URL there.
+- A raise that throws `InboxLimitError` (a limit named in `limit`: `why`, `title`, `detail`, `open`, `key`, `choices`, `decideBy`) wrote nothing. `open` is handled as in §7.2; any other limit is a flow bug: logged once with the key, and the ask shows in the model and on flow's pages only.
+- The handler must answer within core's 5-second bound. `flow review` and `flow answer` can take longer (a tracker and a forge call), so the handler starts the command, waits up to 4 seconds, and if it has not finished returns `{ keepOpen: true, message: 'Sending…' }` and keeps the event's `pendingActionId` (issued only for answers core attributes to a person, i.e. from core's inbox). When the command finishes, flow calls `resolve(key, { outcome, answering: pendingActionId, offer })`, so history says **you** decided and the "Next time" offer still shows; on failure it updates the row's detail to "That didn't go through. Try again."
+
+#### 7.5 The new verbs
+
+**`flow review <identifier> (--approve [--by person | reviewer-agent] | --changes --note <text> | --note-file <file>) [--json]`** records a verdict at the review gate: a person's, or the reviewer agent's when the project lets it answer (§7.7). `--by` defaults to `person`. It refuses (exit 5) an item not at `review`, and refuses `--by reviewer-agent` unless a **token-bound** clean verdict exists at the head commit, the project's "Ship finished work" is not at Ask me first, and `review.adversarial` is on.
+
+**Token-bound verdicts.** Today only a drain run's reviewer records a verdict that cannot be forged: `flow report <id> verdict --sha <sha> --token <t>` (`scripts/cli/report.ts`) checks the token's SHA-256 against `drain.reviewer.tokenHash`, and a verdict on any SHA but the last push is not recorded. This spec extends the same mechanism to VERIFY's adversarial reviewer (`skills/verifying-work/SKILL.md`): VERIFY mints a token with `flow report <id> review-brief --sha <sha> --json`, which stores its hash as `review: { tokenHash, sha }` on the run record and returns the token for the reviewer's brief only; the reviewer records its verdict with the same `flow report <id> verdict --sha --token` call, which now accepts a non-drain run and writes `review.verdict` and `review.reviewedSha`. `flow review --by reviewer-agent` reads `drain.verdict`/`drain.reviewedSha` or `review.verdict`/`review.reviewedSha` and requires `clean` at the forge's current head. A verdict an agent wrote any other way (a comment, a hand edit) is not a verdict. Outside that, Ship stays at Ask me first.
+
+- **Approve:**
+  1. Comments on the tracker item: from a person, as the person (without the agent's marker), "Shipped from DorkOS."; from the reviewer agent, with the agent's marker, "Shipped: the reviewer agent approved it (clean review at <sha7>)." A reviewer-agent approval never approves on the forge (step 2 is skipped); the tracker comment and the journal are its record.
+  2. With an open PR: approves it on the forge when the forge's signed-in user is not the PR's author (GitHub refuses a self-approval; then the tracker comment is the approval of record). New `Forge.review(pr, { event: 'approve' | 'request-changes', body })` in `scripts/forge/types.ts`, implemented in `scripts/forge/github.ts` with `gh pr review`.
+  3. When `gates.review.mergeOnApproval` is true, arms the PR (`Forge.arm`, exists), so it merges when checks pass; the drain's `watching` phase or `/flow:done` closes the item after the merge, as today. When false, the person merges.
+  4. Journals `operator.wait` `end` for the item (a person) or a new `review.approved` line with `by: 'reviewer-agent'`.
+- **Changes:**
+  1. Comments on the tracker item with the note, as the person: "Sent back: <note>".
+  2. With an open PR: requests changes on the forge with the note (a plain PR comment when self-review is refused).
+  3. Sends the work back: a drain run gets `drain.verdict: 'changes'` and phase `fixing` through the drain's own transition (`scripts/drain/drain-step.ts` already sends the worker a `review-findings` message on that path), with the note as the finding. Any other run moves to `execute` (`flow stage <id> execute`) and keeps its session, so the next tick resumes it with the note.
+  4. Nothing is closed, released or reassigned.
+
+**`flow ask <identifier> --question <text> --choice <text>… --pick <n> --why <text> [--decide-by <iso>] [--json]`** is how an agent parks a question now. It posts the question on the tracker as today's park comment does (with the choices, its pick and "If you don't answer by 5pm, I'll go with <pick>."), labels the item `agent/needs-input`, and writes `question: { text, choices, pick, why, askedAt, decideBy }` on the run record, which the extension reads for `defaultChoice` and `decideBy`. It enforces core's choice rules so the question can be raised as a `choice` decision: 2-5 choices, each label at most 40 characters (longer ones are refused with a plain message so the agent rewrites them), and a deadline between 5 minutes and 7 days ahead. `--decide-by` defaults from the project's "Agent questions" stop (§7.7): none at Ask me first and none for a floor question (the decision is raised without `defaultChoice` or `decideBy`), `now + questionDeadlineMinutes` (default 240) for a non-floor question at Tell me after. The skills that park today (`skills/tending-tracker/SKILL.md`, the stage skills' `needsInput`) call it instead of writing the comment by hand. At the deadline two paths can settle it, and whichever runs first wins (the second finds the `agent/needs-input` label gone and does nothing): core's deadline event through flow's handler (§7.4) while DorkOS is running, and, with DorkOS closed, the drain's answer pass (`scripts/drain/answer.ts`) and the tick's inbox pass, which take the pick as the answer: they post "No answer by 5pm, so going with <pick> (the agent's pick)." as the agent and resume. A floor question (§13) has no deadline in the inbox and is never settled by a deadline alone: at Tell me after, `flow ask <id> --check-pick` (run by flow's timer, or by the engine's inbox pass with DorkOS closed) hands the pick to the reviewer agent, which posts its verdict and either resumes with the pick or keeps the item waiting for you. `flow answer <id> --pick --by agent-default` is the non-floor deadline path's single call.
+
+**`flow answer <identifier> (--text <text> | --text-file <file>) [--json]`** posts the text as a comment on the item, as the person (without the agent's marker, so `shouldRespondToComment` counts it as the answer), and adds "Answered in DorkOS." as a last line. The drain's `findAnswer` (`scripts/drain/answer.ts`) and the inbox pass (`skills/tending-tracker/SKILL.md`) pick it up unchanged. It refuses (exit 5) an item without `agent/needs-input`.
+
+Both verbs go through the adapter (`requireCapabilities`, `comment`), so they work for every tracker with a `cli` transport. An `mcp`-only project cannot act from the server: its review gates and questions are raised as `{ kind: 'word', label: 'Open', href: '/x/flow/p/<name>' }`, and the lens page links each item to the tracker ("Review in Linear ↗", "Answer in Linear ↗"). Tracker links live on flow's own page because an inbox `href` must be in-app.
+
+#### 7.6 Hosts without the inbox
+
+Without `ctx.inbox` (§10) nothing is raised. The decisions stay in the model and show as V2 rows in the lens and on Flow home; their buttons call flow's own `POST /decisions/:key` (`{ action, note?, text? }`), person-only (§11), which runs the same handler. That route exists only on such hosts; on a host with the inbox it answers 410 "Answer this in the Activity inbox."
+
+#### 7.7 How much flow does on its own (V10, N11)
+
+One dial per project, **Ask me first | Tell me after | Just do it**, in the project's "Just me" box (§8.2), with **Customize…** for per-kind switches. Each kind has the same three stops; the dial sets all four, and Customize sets one. **Whatever the stop, someone checks** (§13): at "Just do it" the check moves to the reviewer agent or a safe default, never to nobody.
+
+**Where the dial lives.** Not in the repo: `config.local.json` is a file any agent working in the checkout can write, and the dial decides who checks the agents. It lives in core's per-project settings for flow (core spec §7.10): read with `ctx.projectSettings.get(root)` on the server and `api.projectSettings.get(root)` in the browser, and written **only** by `api.projectSettings.set(root, value)` from flow's settings page, which core sends through its person-bar route `PUT /api/extensions/:id/project-settings`. There is no server-side setter, so neither flow's server half nor any agent it runs can move the dial. Each write shows in Activity ("Flow settings for dorkos changed"). The value (validated by flow on read, at most 16 KiB):
+
+```jsonc
+{
+  "dial": "tell", // "ask" | "tell" | "auto"
+  "kinds": {
+    // Customize; a missing kind follows the dial
+    "ship": "tell",
+    "questions": "tell",
+    "sort": "tell",
+    "retry": "tell",
+  },
+  "questionDeadlineMinutes": 240,
+}
+```
+
+- **The engine reads a copy.** The CLI cannot reach core's storage, so the extension writes a read-only copy to `<dorkHome>/flow/autonomy/<projectId>.json` whenever `ctx.projectSettings.onChange` fires and re-checks it on each 5-second poll; a copy that differs from storage (edited by anything else) is rewritten from storage and logged. `resolveAutonomy` reads the copy; a missing or unreadable copy reads as `ask` for every kind, so a broken copy only ever makes flow ask more. With DorkOS closed, the last copy stands.
+- **Default.** With no server setter, the default is computed, not stored: when the extension first sees a project with no run history (no runs in `flow-state.json`, no journal), it records `newAt` for that root in its own `ctx.storage`, and a project with `newAt` and no dial value reads as `tell` (V10's default for new setups) in the copy and on the settings page. A project first seen with history reads as `ask`, so an upgrade changes nothing about what flow does until the person moves the dial; its lens shows one quiet line, "Flow can do more on its own now. Choose how much →". `/flow:init`, in setup or reconfigure mode, never writes the dial: an agent must not be able to set its own autonomy.
+- **The guarantee has honest limits.** Core's person bar has two documented residuals: with Require login off, a local caller that does not name itself as an agent is trusted; and in any posture, code running on the same page (any approved extension) can call the route. So "someone must check" (§13) is complete only with Require login on, and only against agents, not against an approved extension. When `api.getState().requireLogin` is false, the dial shows core's line under it, verbatim: "Anyone on this computer can change this. Turn on Require login so only you can."
+- One resolver, `resolveAutonomy(copy, kind)` in a new `scripts/autonomy.ts`, answers the stop for a kind; the engine, the skills (through `flow autonomy --kind <kind> --json`) and the extension all use it.
+
+**What each stop does, precisely:**
+
+| Kind                                                                                                               | Ask me first (`ask`)                                                                                                                                                                            | Tell me after (`tell`)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                 | Just do it (`auto`)                                                                                                                                                                                                                                                                  |
+| ------------------------------------------------------------------------------------------------------------------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| **Ship finished work** (the review stage; `stages.review.humanGate` stays `true`, the stop decides who answers it) | today's gate: VERIFY assigns the item to you and stops; the review decision is raised (§7.3). `gates.review.mergeOnApproval` applies after your 👍                                              | when a token-bound clean verdict exists at the head commit (§7.5) and checks pass, `flow review --approve --by reviewer-agent` runs; the PR is armed only when `gates.review.mergeOnApproval` is true, exactly as after a person's 👍 (§7.5 step 3); a history row tells you (§7.10). Without a token-bound reviewer (`review.adversarial` off for the repo, or an engine that predates §7.5's tokens), this kind cannot leave Ask me first, and the dial says why ("Ship finished work: asks you, because no reviewer agent checks this repo's work") | the same approval; a history row tells you (§7.10); core folds a run of them into "While you were away"                                                                                                                                                                              |
+| **Agent questions** (`involvement.calibration`)                                                                    | `stop-and-ask` parks for you with no deadline (today)                                                                                                                                           | a non-floor question is raised with `defaultChoice` and `decideBy` (now + `questionDeadlineMinutes`); silence means the agent goes ahead with its pick at the deadline, and you're told. A floor question (a `calibration.alwaysAsk` trigger) is raised with no deadline; after `questionDeadlineMinutes` unanswered, flow hands the pick to the reviewer agent, who approves it or holds it for you. A `secrets-or-spend` question always waits for you (§13)                                                                                         | the agent does not ask: row 3 of the ladder proceeds with a trail (both `calibration.stageBias.intake` and `.execution` read as `proceed-and-log`), and it writes down why (`calibration.assumptionLog`). A floor question goes to the reviewer agent at once, never to nobody (§13) |
+| **Sort new ideas** (triage)                                                                                        | nothing runs on its own; the "ideas waiting" ask (§7.1)                                                                                                                                         | once a day, at 09:00 local, when `shapeableCount` > 0, the project is not paused, and no triage ran in the last 20 hours (the journal's `item.readied` `by: triage` lines), the extension starts sorting in a new chat (§7.9); you're told                                                                                                                                                                                                                                                                                                             | the same run, recorded the same way (§7.10)                                                                                                                                                                                                                                          |
+| **Retry and fix problems** (`recovery`, the drain's `fixing-ci`)                                                   | `recovery.maxRetries` reads as `0` and `recovery.onExhausted` as `escalate`: every failure asks; the drain parks a run on red checks instead of fixing them, and the retry ask is raised (§7.3) | the committed `recovery` values apply (default 2 retries, then `block`) and the drain fixes red checks as today; you're told of each retry                                                                                                                                                                                                                                                                                                                                                                                                             | the same, recorded the same way (§7.10)                                                                                                                                                                                                                                              |
+
+- The stop is read, never written, by the engine or any agent: `ask` overrides `recovery` and `stageBias` at read time in `scripts/config-load.ts`, so the committed values stay as the team set them.
+- No stop reaches the three things only a person can do (N11), and each is person-only by construction: signing in (only the "Sign in" ask, which a person completes in the new chat; the tracker never accepts an agent's sign-in), trusting new code (core's `extension.approval`, answered only through the person bar; flow never asks it), and spending past a set limit (every `secrets-or-spend` floor trigger has `answeredBy: 'person'` at every stop, §13).
+
+#### 7.8 "Next time, on its own?" (V9)
+
+After a person answers an ask whose kind is at Ask me first, the handler's `resolve` result carries `offer: { text, offerId }` (text ≤ 160, `offerId` ≤ 64, e.g. `ship:3f2a…`). Core draws it once as a green line under the answered row, and honours it only for a person's answer (never at a deadline).
+
+| Kind      | The person just…  | Offer                                                                                                |
+| --------- | ----------------- | ---------------------------------------------------------------------------------------------------- |
+| Ship      | shipped it        | "Shipped. Next time, ship on its own when the reviewer agent approves? [Yes]"                        |
+| Questions | answered          | "Answered. Next time, let the agent go with its pick if you haven't answered by the deadline? [Yes]" |
+| Sort      | pressed Sort them | "Sorting. Next time, sort new ideas every morning on its own? [Yes]"                                 |
+| Retry     | pressed Fix it    | "Fixing. Next time, fix failing checks on its own? [Yes]"                                            |
+
+- **Yes** is written by core: flow's `offer` carries `settingsPatch: { project: <root>, patch: { kinds: { <kind>: 'tell' } } }` (per the DorkOS core spec), and core applies it to flow's per-project settings when the person says Yes, the same store and bar as `api.projectSettings.set` (§7.7). Flow's server half never writes the dial. `ctx.projectSettings.onChange` then refreshes the engine's copy. Core still calls the handler with `action: 'offer'`; flow answers `{ resolve: 'approved', message: "Done. Change it any time in dorkos's Flow settings." }` (core reads only `message`).
+- Offers exist only for answers core credits to a person: core's inbox, or a `resolve` with a valid `answering`. Flow's own pages never get one (§4.2).
+- Offered at most once per project and kind every 30 days (kept in `ctx.storage`), and never for a kind the project's behaviour level cannot store.
+- No offer after 👎, and none for "Send it back" or "Leave it".
+
+#### 7.9 Starting work (V7, N12)
+
+Every button that needs an agent to do something starts it in a **new chat**, never the current one. A button on flow's own pages and the lens calls `api.startWork(StartWorkInput)` (person-only); an inbox button reaches flow's handler, which calls `ctx.sessions.start(StartWorkInput)`; the daily sort (§7.7) calls `ctx.sessions.start`. Core runs the prompt at once, titles the chat `title` (1-80 characters), shows "Started by Flow: <reason>" (1-200) as its first line (`Session.startedBy`, `kind: 'extension'`), and applies the project's account rules (N6) like any launch. The prompt (≤ 20,000) is never the headline: core shows it as the chat's first message, collapsed to one line ("What it was asked ▸").
+
+| Button             | Where             | Title                             | Reason                                                              | Prompt                                                                            |
+| ------------------ | ----------------- | --------------------------------- | ------------------------------------------------------------------- | --------------------------------------------------------------------------------- |
+| Set up flow here   | all-projects lens | "Setting up flow in <repo>"       | "You asked to set up flow in this repo"                             | install flow into this project from the DorkOS Marketplace, then run `/flow:init` |
+| Connect a tracker  | lens, not set up  | "Connecting a tracker for <name>" | "Flow is installed here but doesn't know where your work lives yet" | `/flow:init`                                                                      |
+| Sort them          | inbox, lens, home | "Sorting 12 new ideas in <name>"  | "12 new ideas were waiting to be sorted"                            | `/flow:triage`                                                                    |
+| Sign in            | inbox, lens, home | "Signing in to Linear for <name>" | "Linear stopped accepting flow's sign-in"                           | `/flow:init` asked to reconnect the tracker only                                  |
+| (daily sort, §7.7) | —                 | "Sorting new ideas in <name>"     | "Your settings sort new ideas every morning"                        | `/flow:triage`                                                                    |
+
+- After a button, its row reads "Sorting 12 ideas… · Watch"; Watch opens the new chat. In the inbox this is core's `watch` (`{ sessionId, label }`, label ≤ 40) on the action result or on `resolve`; on flow's own pages it is the `sessionId` `api.startWork` returns.
+- **The project must be flow's to start in.** `ctx.sessions.start` and `api.startWork` refuse (`not_a_project`) a project that `ctx.projects.list()` would not return to flow. "Set up flow here" targets a repo without flow, so the server reports every chat folder it notes (`GET /model?cwd=`) with `ctx.projects.report(cwd)` before the lens offers the button.
+- **Chats a started chat starts count against flow's limits too** (core follows the `startedBy` chain). The prompts flow sends never ask the chat to start further chats.
+- **Errors.** `StartWorkError` shows its own plain message on the row: `not_a_project` (the folder is no longer a project), `account_not_allowed_here` (no account may work in this project; the row adds "Choose accounts →" to the project's settings), `start_limit`.
+- **Staying inside core's limits** (per extension, across `api` and `ctx` together: 10 starts per rolling hour, 3 started chats running a turn at once). Flow keeps its automatic starts well under them so a person's click is never the one refused:
+  - The daily sort (§7.7) uses at most **4 starts per hour** and **starts nothing while 2 of flow's started chats are running**, leaving 6 starts and 1 running slot for buttons. At 09:00 it queues every project due, most ideas waiting first, and starts one every 15 minutes; a project not reached by 13:00 waits for tomorrow and says so on its lens line ("Sorting waits until tomorrow: flow is busy").
+  - flow counts its own starts (a rolling log in `ctx.storage`) and its running chats (sessions whose `startedBy.extensionId` is `flow` with a turn in progress, from the model's runs), so it rarely meets the limit; when it does (`start_limit`), an automatic start retries at the next slot, and a button shows core's message.
+  - Buttons are never queued: a click either starts now or says why not.
+- **Older hosts** (no `startWork` / `ctx.sessions.start`): the button is replaced by the same outcome words and ⓘ, which shows the command to type in a chat in that folder. That is the only place a command ever appears.
+
+#### 7.10 "While you were away"
+
+When flow settles something without asking, it leaves a history row in Activity saying who decided, never an ask, never a push. Core draws the row as "<title> · <what was chosen> · <who> at <time>" (core spec §7.4, §7.9); flow supplies the title, the `choiceLabel` and the `by` label:
+
+| Settled by                              | flow supplies                                                                                                                    | Core shows                                                                           |
+| --------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------ |
+| the reviewer agent (ship)               | title "Ship the new out-of-usage banner?", `choiceLabel` "Shipped", `by: { kind: 'agent', label: 'the reviewer agent' }`         | "Ship the new out-of-usage banner? · Shipped · the reviewer agent at 2:14pm"         |
+| core, at a question's deadline          | the question's title and choices                                                                                                 | "Should the old API keep working? · Keep it · decided by the agent at 5pm"           |
+| the reviewer agent, on a floor question | `resolve(key, { outcome: 'answered', by: { kind: 'agent', label: 'the reviewer agent' } })`                                      | "… · Keep it · the reviewer agent at 5:02pm"                                         |
+| a V10 stop (the daily sort, a retry)    | `by: { kind: 'rule', label: "your 'Tell me after' setting" }` (or "your 'Just do it' setting"), `choiceLabel` "Sorted" / "Fixed" | "12 new ideas haven't been sorted · Sorted · your 'Tell me after' setting at 9:03am" |
+
+- One `record` per event. At **Tell me after** flow passes `tell: true` (the row is unread in Activity, never pushed); at **Just do it**, `tell: false` (quiet). Core folds three or more consecutive rows not decided by a person into one "While you were away · 5" group, so flow does no rolling-up of its own.
+- A history row for a started chat carries `watch: { sessionId, label }`, so "· Watch" opens it.
+- **Something that was never asked** (a ship the reviewer agent approved, a daily sort, a retry) is written with `ctx.inbox.record({ key, title, why, detail?, project, projectLabel, link, outcome, by, choiceLabel, tell })`: no ask, no bell count, no push. `by` is a `DecisionActor`: `{ kind: 'agent', label: 'the reviewer agent' }`, `{ kind: 'rule', label: "your 'Tell me after' setting" }`, and `choiceLabel` is the outcome in a word ("Shipped", "Sorted", "Fixed").
+- **A decision that was open when it settled:** a question core settled at its deadline is recorded by core as decided at the deadline (`resolvedBy: 'deadline'`); one the reviewer agent settled is resolved with `resolve(key, { outcome: 'answered', by: { kind: 'agent', label: 'the reviewer agent' } })`.
+- A `record` that throws `InboxLimitError` wrote nothing; flow logs it once and moves on (history is a courtesy, never a blocker).
+
+### 8. Settings by who they affect (V6)
+
+#### 8.1 One component, two entry points
+
+`ui/project-settings.ts` exports `ProjectFlowSettings({ project })`.
+
+- **The per-project page** (`/x/flow/p/<name>/settings`, from ⚙ and from Flow home) renders it for one project, headed "<name> · Flow settings" with the root path muted.
+- **Settings → Flow** (the existing `fleet` tab, id kept so Settings → Runtimes' link to `flow:fleet` still lands) renders, top to bottom: a project switcher ("Project: dorkos ▾") that defaults to `currentProject` (else the first project by name), the heading "Editing dorkos", `ProjectFlowSettings` for the chosen project, then a "This computer" heading over today's `FleetTab` content (roles, reserve, handoff, cross-runtime), unchanged except §8.5.
+- Data: `GET /settings/:name` and the person-only `PUT /settings/:name` (§8.3) for the two files; the account checkboxes talk to core directly from the browser (§8.4). The project switcher lists `GET /api/projects` narrowed to flow projects.
+
+#### 8.2 The fields
+
+**"Shared with the repo"** (pill "everyone on this repo"), written to `<root>/.agents/flow/config.json`, with the note (mono) "Saving changes .agents/flow/config.json in this repo." The path comes from `PROJECT_CONFIG_DIR` and `CONFIG_FILE` (`scripts/config-names.ts`), never typed out.
+
+| Field                               | Key                              | Control                                                                       |
+| ----------------------------------- | -------------------------------- | ----------------------------------------------------------------------------- |
+| Tracker and team                    | `tracker`, `connection.team.key` | read-only ("Linear · team DOR"), with "Change it with /flow:init"             |
+| Review before a PR opens            | `review.adversarial`             | switch ("Another agent reviews every change before the PR opens")             |
+| Merge when I approve                | `gates.review.mergeOnApproval`   | switch                                                                        |
+| Merge by itself when checks pass    | `drain.armAutoMerge`             | switch                                                                        |
+| Labels flow accepts without a group | `groom.unnamespacedLabels`       | chips (reusing `ui/repo-chips.ts`'s chip pattern)                             |
+| Schedules                           | the flow tasks in DorkOS         | read-only ("Triage daily · Groom weekly") with "Change in Tasks →" (`/tasks`) |
+
+**"Just me"** (pill "only this computer"), written to `<root>/.agents/flow/config.local.json`, except the dial, which lives in core's per-project settings written only by a person (§7.7), and the pause default, in flow's `ctx.storage`:
+
+| Field                                   | Key                                                                                             | Control                                                                                                                                                                                                                                                                                                                      |
+| --------------------------------------- | ----------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| How much it does on its own             | core's per-project settings for flow (§7.7), written with `api.projectSettings.set`, not a file | the dial, **Ask me first \| Tell me after \| Just do it**, with the V10 table under it (§7.7), and **Customize…**, which opens one switch per kind (Ship finished work, Agent questions, Sort new ideas, Retry and fix problems), each with the same three stops. A kind set apart from the dial shows the dial as "Custom". |
+| How long an agent waits for your answer | the same per-project settings (`questionDeadlineMinutes`)                                       | shown under "Agent questions" at Tell me after: 1 hour, 4 hours (default), end of day                                                                                                                                                                                                                                        |
+| Starts work on its own                  | `autonomy.default`                                                                              | "Yes, when there's something ready" (`auto`) / "Only when I start it" (`manual`)                                                                                                                                                                                                                                             |
+| At most at once                         | `drain.parallel`                                                                                | 1-8 stepper; `0` (sequential) reads as 1                                                                                                                                                                                                                                                                                     |
+| Pause default                           | extension storage, per root                                                                     | the three menu choices (§5.3)                                                                                                                                                                                                                                                                                                |
+| Accounts this project may use           | core (§8.4)                                                                                     | one checkbox per account                                                                                                                                                                                                                                                                                                     |
+
+- The pause default is kept in `ctx.storage`, not in `config.local.json`: only the menu reads it, and `FlowConfigSchema` is `.strict()`, so a new key would break the config of every project on an older flow.
+- Every other key in both files is left exactly as found.
+
+#### 8.3 Reading and writing
+
+- `GET /settings/:name` reads both files leniently (the way `lib/drain-settings.ts` reads `drain`), fills defaults from the values `config-schema.ts` documents, and says for each field which file its value came from.
+- `PUT /settings/:name` body `{ shared?: {...}, local?: {...}, pauseDefault? }`, person-only (§11):
+  1. **Key skew first.** `lib/settings.ts` holds a table of every key the page can write and the flow behaviour level (§9.3) that first understood it. Every key the page writes to a file is level 0 today. The dial is not in a file; a project whose engine is below level 1 cannot read its copy, so there the dial shows disabled with "Update flow in this project to choose this." A key whose level is above the project's `behaviour` is refused before anything is written (400, "Update flow in this project to change this."), and `GET` marks that field disabled with the same words. `FlowConfigSchema` is `.strict()`, so writing a key an older engine does not know would break that project's unattended runs.
+  2. Writes each file through `updateJsonFile` (`scripts/atomic-json.ts`, lock and rename), changing only the named keys. `config.local.json` is created with flow's ignore header when missing, as `config-files.ts prepare` does.
+  3. Validates with **the extension's own flow** (`flowRoot`): `node --experimental-strip-types <flowRoot>/scripts/config-files.ts --project <root>`, which reads and checks the two JSON files and imports no code from the project. The project's own `<root>/.dork/plugins/flow/scripts/` is never run: it is code committed to that repo, and saving a setting must not execute it. `"ok": false` restores both files from the copies read in step 2 and answers 400 with flow's first error.
+  4. Answers the new settings.
+- A shared write is a change to a committed file. The UI says so before saving (the note) and after ("Saved. Commit .agents/flow/config.json to share it."). flow never commits.
+
+#### 8.4 Accounts this project may use
+
+Read and written by flow's **browser half**, as the person, through core's HTTP routes (there is no server-side write API, so flow's server half can never widen account access):
+
+- **Read:** `GET /api/runtimes/claude-code/account-eligibility?project=<root>` gives `allow` and one `AccountEligibilityRow` per Claude Code account (N6 covers `runtimes.claudeCode`), Main (`default`) included. Each row: dot, name, checkbox.
+- **Checked** means `allowedByProject`. `allow: null` (no entry) means every account the account-side rule allows, shown as all checked.
+- An account whose `allowedByAccount` is false shows "· only for client-app" (from its `onlyProjects` names) and its checkbox is off. Checking it asks first: "Work is only for client-app. Let dorkos use it too?" Yes calls `PUT /api/runtimes/claude-code/accounts/:id/only-projects` with this root added (`:id` is `default` for Main), then allows it here.
+- Each change calls `PUT /api/runtimes/claude-code/project-accounts` `{ project: <root>, allow }` and redraws from its answer.
+- **Unchecking the last account** asks: "With no accounts allowed, every chat in dorkos will be refused, including yours. Continue?"
+- A `403` (not a person) or any core refusal shows core's message; nothing is retried.
+- Settings → Runtimes shows "Only for client-app" on the account's own row; that is core's.
+
+#### 8.5 Moving "Only for these repos" into core (N6)
+
+Today a kept-out account may list repos in `fleet.json` (`accounts.<key>.scope.repos`, `owner/name`), shown as chips under "Only for these repos" in Settings → Flow (`ui/repo-chips.ts`, `KeptOutPanel` in `ui/fleet-tab.ts`).
+
+**The migration runs in flow's browser half, when a person opens Settings → Flow** on a host with the eligibility routes. It needs a person because core's `only-projects` route is person-only, and it tells that person what moved.
+
+1. Read `GET /api/ext/flow/fleet` (flow's kept-out Claude Code accounts with their `repos`) and `GET /api/projects` (every known project with its `originRepo`).
+2. For each kept-out account with repos, match each repo to the projects whose `originRepo` equals it, ignoring case.
+3. **At least one repo matched:** `PUT /api/runtimes/claude-code/accounts/:id/only-projects` with the matched roots, then `PUT /api/ext/flow/fleet/accounts/:key` `{ role: 'rotation', repos: null }`. Kept out plus a repo list meant "only these repos"; core's rule now says that for every launch, and rotation lets flow spend the account there. The core write comes first, so a failure between the two leaves the account narrower, never wider.
+4. **No repo matched** (none of them is on this computer): nothing changes yet; flow's own rule stays in force.
+5. Repos that did not match are kept in the migration marker (`api.saveData`, `{ accountKey, movedRoots, pendingRepos, at }`). On a later visit, a pending repo that now has a known project is added to the account's `onlyProjects`.
+6. **Show what moved**, once, at the top of the tab: "Moved to DorkOS: Work is now only for client-app and client-api. acme/app isn't on this computer yet; it will be added when it is. Change this in Settings → Runtimes →". A failure says "Couldn't move Work's repo limits to DorkOS. Nothing changed." and retries on the next visit.
+7. Kept out with no repos stays kept out: flow never uses it anywhere.
+
+**After it:**
+
+- The chips are replaced by core's rule, read-only: "Only for client-app · Change in Settings → Runtimes →". The "+ add" chip goes; `PUT /fleet/accounts/:key` still accepts `repos` for the flow CLI, but the tab no longer sends it.
+- On a host without the eligibility routes, nothing migrates and the chips stay as today.
+
+#### 8.6 The flow CLI honours core's rule (fleet contract 4.1.0)
+
+Without this a terminal `flow drain` could spend an account DorkOS forbids.
+
+- **The rule.** `mayServe` (`scripts/fleet/accounts.ts`) gains the project root: an account serves a project only if flow's role allows it **and** core's rule does. Core's rule is read from `<dorkHome>/config.json`, which `loadAccounts` already reads: `runtimes.claudeCode.accounts[].onlyProjects` for registered accounts, `runtimes.claudeCode.defaultAccountOnlyProjects` for Main (`default`), and `runtimes.claudeCode.projectAccounts[root].allow` for the project side. A non-null `onlyProjects` never allows "no project". `flow next`, `flow drain` and the advisor use it.
+- **Finding the root the way core keys it.** New `canonicalProjectRoot(cwd)` in `scripts/main-checkout.ts`: run `git rev-parse --path-format=absolute --git-common-dir`; the root is the common dir's parent when its basename is `.git`, else the common dir itself (a bare repo, core's rule; today's `resolveMainCheckout` always takes the parent); then normalise (`path.normalize`, no trailing separator) and resolve symlinks with `realpathSync`, falling back to the normalised path when that fails. This is core's `canonicalDirectory` applied to core's root rule, so `/tmp/x` and `/private/tmp/x` are one key. Keys in `config.json` are compared exactly after this step.
+- **Contract.** `conformance/fleet/CONTRACT_VERSION` goes to `4.1.0`. `eligibility.cases.json` gains the truth table (null or list × no entry or entry × project or no project, Main included) and root cases (worktree, subfolder, symlinked path, bare repo). Core vendors 4.1.0 and runs the same cases against its `accountEligibility`, so the two cannot drift.
+
+### 9. Many projects
+
+#### 9.1 Enumerating projects
+
+`lib/projects.ts`:
+
+1. **Candidates:** `ctx.projects.list()` roots, plus `discoverCheckouts(dorkHome, cwds, resolver)` (kept: worktrees under `<dorkHome>/workspaces/` and chat folders seen), plus the roots in flow's own `ctx.storage` (every flow project seen before, so one that has not been opened since a restart still shows).
+2. **A flow project** is a candidate with `<root>/.dork/plugins/flow/.claude-plugin/plugin.json`, or `.agents/flow/config.json`, or a run store with runs (today's `readProjects` rule, widened by the install check). `setup` is `not-set-up` when the install exists without `config.json`.
+3. **Report:** every flow project not already in core's list is reported with `ctx.projects.report(root)`. The tracker label ("Linear DOR") is not reported here; it travels on each decision as `projectLabel` (§7.3).
+4. **Names** are core's, unchanged: `ctx.projects.resolve(root).name` (the folder name, or core's clash form of it). Core keeps them unique, stable and URL-safe, so `/x/flow/p/<name>` uses the name as given and flow never adds a suffix. Without `ctx.projects` (§10), the name is the folder name, and two flow projects with one folder name are told apart by core's clash rule applied by flow itself (`basename~parent`), so a later upgrade to a host with `ctx.projects` keeps the same URLs.
+5. A project whose root disappears drops out on the next poll; its open inbox items resolve `cancelled` (no history row, since nothing was answered or cleared).
+6. `ctx.projects.onChange` asks for a new model, so a project core learns about shows up without waiting for the poll.
+
+#### 9.2 Per-project tracker health
+
+The conditions in §7.1, from the reads in §2.2. A slow tracker shows on the lens and home after 15 minutes and never reaches the inbox; a sign-in that is gone reaches the inbox at once.
+
+#### 9.3 Version skew
+
+- **`plugins/flow/behaviour.json`** (new): `{ "v": 1, "behaviour": 1, "changes": [ { "level": 1, "effect": "timed pauses end on time" }, … ] }`. A missing file is behaviour 0.
+- **When to bump it:** a change raises `behaviour` only when it changes what a project's own engine does unattended in a way the app relies on (the pause format, the run-store fields the app reads, account eligibility in the CLI, a verb the app runs against the project's install). A new UI, wording or a fix does not. `engine-tests/behaviour.test.ts` fails when `behaviour` and the last `changes` entry disagree, so every bump names its effect.
+- **Detection:** for each project the server reads `<root>/.dork/plugins/flow/behaviour.json` and `.claude-plugin/plugin.json`. When the project's `behaviour` is lower than the extension's own (read from its `flowRoot`), `version.olderBehaviour` is the `effect` of the first level the project lacks.
+- **What shows:** one muted line in the lens: "dorkos runs an older flow (0.46.1), so timed pauses may not end on time. Update flow here." "Update flow here" opens the flow package in the Marketplace. Nothing shows when behaviour is equal, whatever the version numbers, and nothing shows on Flow home (the lens is where you fix it).
+- Level 1 is F0's engine work (§5.1, §6.3, §7.5): timed pauses, `updatedAt`, `dispatchedBy`, `flow review`, `flow answer`. Level 2 is F4's: the CLI honouring core's account rule (§8.6).
+- The settings page uses the same levels to refuse a key an older engine would reject (§8.3).
+
+### 10. A DorkOS without the new seams
+
+Detection is per feature, never by version: each surface checks for its own seam at run time, so a DorkOS that ships some seams and not others gets exactly the surfaces it can carry. `minHostVersion` stays `0.88.0` (the accounts API). `hostSupportsFlow` (`server.ts`) stays the gate for everything; below 0.88.0 every route still answers `501 { reason: 'host-too-old' }` and the tab shows today's host-too-old notice.
+
+| Missing                                                                              | Server                                                                                                                                                                                         | Client                                                                                                                                                                                                     |
+| ------------------------------------------------------------------------------------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `ctx.projects`                                                                       | enumerates with `discoverCheckouts` and storage only; names from folder names                                                                                                                  | —                                                                                                                                                                                                          |
+| `ctx.inbox`                                                                          | raises nothing; decisions stay in the model                                                                                                                                                    | the lens shows its project's decisions as V2 rows at the top; the all-projects lens lists them per project                                                                                                 |
+| `currentProject`                                                                     | `GET /model?cwd=` returns `cwdProject`                                                                                                                                                         | the tab resolves the lens from `currentCwd` through `cwdProject`                                                                                                                                           |
+| `registerPage`                                                                       | —                                                                                                                                                                                              | no home, lens page or settings page; ⚙ opens Settings → Flow with that project picked; "Open Flow home →" and the footer "elsewhere" link switch to the all-projects lens; Flow home is not in the palette |
+| `setTabMarker`                                                                       | —                                                                                                                                                                                              | no dot                                                                                                                                                                                                     |
+| `registerStatusBarItem`                                                              | —                                                                                                                                                                                              | no chip                                                                                                                                                                                                    |
+| `ctx.requirePerson`                                                                  | the routes that change something are not registered at all (pause, resume, settings writes, `POST /decisions/:key`); the lens shows "Pause from a chat with /flow:pause" instead of the button | read-only lens and settings                                                                                                                                                                                |
+| eligibility routes (`GET /api/runtimes/claude-code/account-eligibility` answers 404) | —                                                                                                                                                                                              | no account checkboxes, no migration; "Only for these repos" chips stay (§8.5)                                                                                                                              |
+
+`lib/host-types.ts` mirrors each new seam as optional, exactly as it does `dorkHome` and `accounts` today, and `hostSupports*` guards (`hostSupportsProjects`, `hostSupportsInbox`, `hostSupportsPersonGuard`) sit beside `hostSupportsFlow`. The client checks `typeof api.<method> === 'function'`, and probes the eligibility routes once per session.
+
+A route that changes something is never registered without the person guard: an older host has no way to tell a person from an agent, and a route that pauses a project, answers a review gate or rewrites a committed file must not be open to an agent.
+
+#### 10.1 The drift guard
+
+`@dorkos/extension-api` is not on npm, so flow's mirror can drift. A vendored, type-level contract fixture guards it:
+
+- `lib/__contract__/extension-api.d.ts` is a copy of the seams in the core spec's §11 (client and server types), vendored from the DorkOS release it targets, with that release's version in a header line. It is replaced whole, never hand-edited.
+- `__tests__/host-types.contract.test.ts` uses `expectTypeOf` (vitest) to assert that every member of `lib/host-types.ts` is assignable from the fixture's matching type (flow may mirror a subset, never a different shape), and that every seam flow calls exists in the fixture. A core change that renames or reshapes a seam fails flow's tests when the fixture is refreshed, not at run time on someone's machine.
+- Core keeps its own twin (its conformance tests in the core spec §10); this fixture is flow's side of the same agreement.
+
+### 11. Routes, after
+
+"Person" means the route is wrapped in `ctx.requirePerson`: a request from an agent, a relay message or anything but a person's browser is refused with core's `403`. Every route that changes something is person-only.
+
+| Route                                                                        | Guard  | Status                                                                                                                                                                    |
+| ---------------------------------------------------------------------------- | ------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `GET /fleet`                                                                 | —      | kept                                                                                                                                                                      |
+| `PUT /fleet/accounts/:key`, `PUT /fleet/handoff`, `PUT /fleet/cross-runtime` | person | kept; now person-only, since they change which accounts flow spends                                                                                                       |
+| `GET /panel`                                                                 | —      | removed (replaced by `GET /model`); the `panel` event is removed with it                                                                                                  |
+| `GET /model`                                                                 | —      | new (§2.1)                                                                                                                                                                |
+| `POST /pause`, `POST /resume`                                                | person | kept, with bodies (§5.2)                                                                                                                                                  |
+| `POST /decisions/:key`                                                       | person | new, **only on hosts without `ctx.inbox`** (§7.6); elsewhere core's inbox, or `api.answerDecision` (`POST /api/extensions/:id/decisions/:decisionId/action`), is the path |
+| `GET /settings/:name`                                                        | —      | new (§8.3)                                                                                                                                                                |
+| `PUT /settings/:name`                                                        | person | new (§8.3)                                                                                                                                                                |
+| `POST /projects/:name/allow-adapter`                                         | person | new (§2.2)                                                                                                                                                                |
+| `GET /capacity`                                                              | —      | new (§4.4); read on demand, not pushed                                                                                                                                    |
+
+Every route follows today's error shape: a refusal flow made on purpose is `{ error, refusedBy: 'flow' }` in plain words; core's `403` reads "Only a person can change this." in the UI; anything else reads as `UNREACHABLE_MESSAGE` (`ui/api.ts`).
+
+### 12. Code structure
+
+```
+plugins/flow/
+├── behaviour.json                      # new (§9.3)
+├── scripts/
+│   ├── config-files.ts                 # pause --until, pauseState(now) (§5.1)
+│   ├── flow-state-file.ts              # stamps updatedAt (§6.3)
+│   ├── flow-run.ts                     # updatedAt?, dispatchedBy? (§6)
+│   ├── flow.ts                         # registers review, answer; claim --dispatched-by
+│   ├── cli/review.ts, cli/answer.ts, cli/ask.ts, cli/autonomy.ts  # new (§7.5, §7.7)
+│   ├── autonomy.ts                     # resolveAutonomy (§7.7)
+│   ├── calibration.ts                  # answeredBy (§13)
+│   ├── errors.ts                       # TrackerError.kind (§7.1)
+│   ├── cli/status.ts                   # "Paused until …"
+│   ├── forge/types.ts, forge/github.ts # Forge.review (§7.5)
+│   ├── tracker/types.ts                # BacklogSnapshot.team.url? (§2.2)
+│   ├── main-checkout.ts                # canonicalProjectRoot (§8.6)
+│   ├── fleet/sessions.ts               # trackerItems with trackerItem fallback (§6.4)
+│   └── fleet/accounts.ts               # mayServe with the project (§8.6)
+├── commands/pause.md                   # durations (§5.4)
+├── conformance/fleet/                  # 4.1.0: eligibility and flow-run cases
+└── .dork/extensions/flow/
+    ├── index.ts                        # store, tab, pages, chip, commands, dialog, marker
+    ├── server.ts                       # routes (§11), timers, inbox wiring
+    ├── lib/model.ts                    # FlowModel (§2.1); runState etc. move here from panel.ts
+    ├── lib/projects.ts                 # enumeration, names, skew (§9)
+    ├── lib/tracker-reads.ts            # §2.2
+    ├── lib/conditions.ts, lib/decisions.ts  # §7
+    ├── lib/settings.ts, lib/capacity.ts, lib/adapter-trust.ts
+    ├── lib/__contract__/extension-api.d.ts  # vendored drift-guard fixture (§10.1)
+    ├── lib/panel.ts, lib/panel-service.ts   # reduced to what model.ts does not take, then deleted
+    └── ui/store.ts, flow-tab.ts, project-lens.ts, all-projects.ts, home-page.ts,
+        project-settings.ts, pause-menu.ts, run-chip.ts, marker.ts,
+        migrate-repos.ts (browser half, §8.5), core-api.ts (calls to core's HTTP routes)
+        (flow-panel.ts deleted; panel-format.ts keeps PILL_TEXT only)
+```
+
+- Everything under `.dork/extensions/flow/` stays zod-free and package-free; `__tests__/bundle-safety.test.ts` walks every new file. Anything that needs zod or cannot be bundled (the tracker adapter, `config-files.ts`, `scripts/journal.ts`) runs as a subprocess of flow's CLI, as pause does, or is read leniently by the extension's own code, as `lib/run-store.ts` and `lib/drain-settings.ts` already do.
+- `lib/panel.ts` and `lib/panel-service.ts` are removed in the phase that lands `lib/model.ts`; no dead module stays.
+
+### 13. Charter change: the floor means "someone must check" (N11)
+
+**The change.** Charter G12 and the precedence rule make the calibration floor (`involvement.calibration.alwaysAsk`) and the review gate inviolable in the sense "a human must answer". From this spec on, they are inviolable in the sense **"someone must check"**: a floor trigger or the review gate is always checked, by the person, by the reviewer agent, or (for a non-floor question only) by the agent's stated default at a deadline, and **never by nobody**. The person chooses who per project with the dial (§7.7). `alwaysAsk` keeps `.min(1)`: the floor still cannot be emptied; what moves is who answers it.
+
+**Rationale.** The operator's rule for this work is that every ask is optional and there is a path to full autonomy. A floor that only a person can clear makes a person the bottleneck for every irreversible or outward-facing step, and an unattended loop then waits for days. Delegating the check to an independent reviewer agent keeps the safety property that matters (no action on those classes goes unexamined, and there is a durable record of who checked) while removing the bottleneck. Three things stay person-only because only a person can do them (N11): signing in to an outside service, spending past a limit the person set, and trusting code from a new source. Every decision tagged `secrets-or-spend` is therefore never delegated, at any stop.
+
+**What changes in the engine.** `resolveInvolvement` (`scripts/calibration.ts`) keeps its five rows and gains `answeredBy: 'person' | 'reviewer-agent' | 'agent-default'` on every `stop-and-ask`, from `resolveAutonomy(copy, 'questions')`: `ask` → `person`; `tell` → `person`, then after `questionDeadlineMinutes` `reviewer-agent` for a floor row and `agent-default` otherwise; `auto` → `reviewer-agent` for a floor row, and row 3 proceeds with a trail. Two overrides, whatever the stop: a floor row can never produce `agent-default`, and **any decision carrying the `secrets-or-spend` trigger is `person`** (N11: spending past a limit the person set is person-only; the trigger is treated whole, because a secret and a spend cannot be told apart safely from the tag). `calibration.test.ts` pins both.
+
+**Where G12 and the human-only floor are written today, and the edit each gets** (all in `plugins/flow/`):
+
+| File                                                                | Where                                                      | Edit                                                                                                                                                                                                                                                                                                                                                                    |
+| ------------------------------------------------------------------- | ---------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `docs/CHARTER.md`                                                   | lines 17-19, "Precedence"                                  | "…are inviolable: someone always checks them (you, or an agent or rule you trust)…"                                                                                                                                                                                                                                                                                     |
+| `docs/CHARTER.md`                                                   | lines 38-40, G2's "Conformant when"                        | "the only things that pull in a checker are the calibration floor…, genuine uncertainty, and the always-on review gate; who checks is the operator's choice"                                                                                                                                                                                                            |
+| `docs/CHARTER.md`                                                   | lines 95-99, G12                                           | "Conformant when: the review gate and calibration floor are always checked, by the operator or by a checker they chose (the reviewer agent, or an agent's stated default at a deadline for non-floor questions), never by nobody; every such check leaves a record of who checked…" plus a dated "Changed 2026-09-28 (flow-multiproject)" note with the rationale above |
+| `scripts/config-schema.ts`                                          | lines 344-351, `alwaysAsk` TSDoc and the `.min(1)` message | "the floor is always checked (charter G12)… cannot be trimmed to nothing"; the refusal message keeps its meaning; no new config keys (the dial is not in config, §7.7)                                                                                                                                                                                                  |
+| `scripts/config-schema.ts`                                          | lines 226-252, `humanGate` TSDoc                           | "a gate someone must answer; who answers is the project's 'Ship finished work' stop, read from the autonomy copy (§7.7)" (the key name stays, so no config migration)                                                                                                                                                                                                   |
+| `scripts/calibration.ts`                                            | lines 48-50, 178, 203-205                                  | row 0 "forces a check" instead of "forces a stop for the human"; `answeredBy`                                                                                                                                                                                                                                                                                           |
+| `engine-tests/config-schema.test.ts`                                | line 311                                                   | test title "the floor is always checked, charter G12"                                                                                                                                                                                                                                                                                                                   |
+| `engine-tests/calibration.test.ts`                                  | —                                                          | new cases: `answeredBy` for each stop and row; "a floor row is never `agent-default`"; "`secrets-or-spend` is `person` at ask, tell and auto, alone or with other triggers"                                                                                                                                                                                             |
+| `docs/SPEC.md`                                                      | §5 ladder, lines 215-221                                   | a column "who answers"                                                                                                                                                                                                                                                                                                                                                  |
+| `docs/the-dials.mdx`                                                | lines 141, 150-152                                         | the floor is "always checked"; a new section on the dial                                                                                                                                                                                                                                                                                                                |
+| `docs/turning-on-autonomy.mdx`                                      | lines 12-16, 49-56, 264, 331                               | the callouts: "Automatic means the loop carries work to a check you chose…"; the floor "is always checked; at Just do it, by the reviewer agent"                                                                                                                                                                                                                        |
+| `README.md`                                                         | "Gates", from line 136                                     | same wording                                                                                                                                                                                                                                                                                                                                                            |
+| `skills/verifying-work/SKILL.md`                                    | lines 128-132 and 137                                      | step 7 asks `flow autonomy --kind ship --json`: `person` → today's assign and stop; otherwise, with a clean review at the head, `flow review <id> --approve --by reviewer-agent`. "Never auto-approve" becomes "never approve without a clean check"                                                                                                                    |
+| `skills/closing-work/SKILL.md`                                      | line 11                                                    | "after the review gate approved (by the operator or the reviewer agent)"                                                                                                                                                                                                                                                                                                |
+| `commands/done.md`, `commands/verify.md`                            | line 14 each                                               | same                                                                                                                                                                                                                                                                                                                                                                    |
+| `skills/flow-drain/SKILL.md`                                        | lines 51-52, 59                                            | "up to its review gate, and past it only when the reviewer agent may answer it"                                                                                                                                                                                                                                                                                         |
+| `skills/tending-tracker/SKILL.md`                                   | line 121                                                   | `stop-and-ask` parks through `flow ask` with the answering rule                                                                                                                                                                                                                                                                                                         |
+| `skills/decomposing-work/SKILL.md`, `skills/triaging-work/SKILL.md` | lines 99; 56 and 116                                       | "the floor stops and asks" → "the floor is checked (`answeredBy`)"                                                                                                                                                                                                                                                                                                      |
+
+The `scripts/dispatch-policy.ts:60` and `engine-tests/dispatch.test.ts` mentions of G12 are about honest reporting of a bad adapter, not the floor, and do not change.
+
+## User Experience
+
+- **In a project:** open a chat in `dorkos`; the Flow tab shows dorkos: what is running, what is next, and anything wrong. The status bar says "DOR-2387 · Building".
+- **Elsewhere:** the tab shows only projects that need something, and "Open Flow home →".
+- **When flow needs you:** the bell shows "Ship the new out-of-usage banner?" with "It's built, tests pass, and the reviewer agent found nothing. Shipping merges it into the app." under a "dorkos · Linear DOR" heading. 👍 Ship it; 👎 Send it back asks what should change. Then, once: "Shipped. Next time, ship on its own when the reviewer agent approves? [Yes]".
+- **A question:** "Should the old API keep working?" with the agent's pick marked and "If you don't answer by 5pm, it keeps it (the safer choice)."
+- **A tracker problem:** a slow Linear shows a quiet line and flow keeps trying; only a sign-in that is really gone asks "Sign in to Linear again", and when Linear comes back it moves to history as "Linear came back for dorkos · Resolved on its own at 11:02".
+- **While you were away:** "Shipped the new sidebar · the reviewer agent approved it · 2:14pm".
+- **Pausing:** every Pause asks how long. The button then says "Paused until 9:00" with Resume beside it.
+- **Settings:** each project's settings say, per box, who a change affects, and name the file a shared change writes.
+
+## Testing Strategy
+
+The extension's suites live in `.dork/extensions/flow/__tests__/` (server) and `ui/__tests__/` (client, jsdom, `helpers.ts`); the engine's in `engine-tests/` and beside each script.
+
+**Engine**
+
+- `config-files.ts`: `pause --until` writes `until`; a second pause replaces it and keeps `pausedAt`; `pauseState` at, before and after `until`; an unreadable `until` pauses; `resume` removes an expired flag; `next`, `drain` and `claim` run after `until` passes without `--manual` (purpose: the engine ends a pause with DorkOS closed).
+- `flow review`: with the fake adapter (`scripts/tracker/fake.ts`) and a fake forge: approve comments, approves on the forge only when the author differs, arms only with `mergeOnApproval`; changes comments, requests changes, moves a drain run to `fixing` with the note and any other run to `execute`; refuses an item not at `review`; closes nothing (assert no `done`, `release` or close call).
+- `flow answer`: the comment has no agent marker and `shouldRespondToComment` counts it; refuses an item without `agent/needs-input`.
+- `mayServe`/`rankAccounts`: an account with `onlyProjects` is ineligible elsewhere; `projectAccounts` narrows; both must allow; the new conformance cases pass (contract 4.1.0).
+- `flow-run.cases.json`: `updatedAt` and `dispatchedBy` survive a write to another record.
+- `engine-tests/behaviour.test.ts`: `behaviour` equals the last `changes` level.
+- `autonomy.test.ts`: a missing or unreadable copy reads `ask` for every kind; `kinds` override the dial; `ask` overrides `recovery` and `stageBias` at read time without writing; ship cannot leave `ask` with `review.adversarial` off.
+- `calibration.test.ts`: `answeredBy` per stop and row; a floor row is never `agent-default`; `secrets-or-spend` is `person` at every stop, alone or combined with another trigger; `alwaysAsk: []` still fails.
+- `flow ask`: writes the question block and the comment with the pick and deadline; the answer pass takes the pick at `decideBy` and posts who decided; a floor question at its deadline goes to the reviewer agent.
+- `flow review --by reviewer-agent`: refused without a token-bound clean verdict at the forge's head (a verdict written without the token, or at an older SHA, is refused), at `ask`, or with the reviewer agent off; never approves on the forge; arms only with `mergeOnApproval`.
+- `flow report review-brief` / `verdict` on a non-drain run: the token's hash is stored, a wrong token or a stale SHA records nothing, and a clean verdict lands in `review.verdict`/`review.reviewedSha`.
+- `flow answer --pick` on an already-settled question exits 5; on the deadline path the handler returns `{ settled: true }` and resolves the row itself; on a person's answer it resolves `cleared` and keeps the row with a message.
+- `home-page.test.ts` (addition): ship and floor asks show "Review in Activity →" and no buttons; the "answered in Flow" note shows once above the other asks.
+- `TrackerError.kind`: the shipped adapters map a refused credential to `auth` and a timeout to `unreachable`.
+
+**Extension server**
+
+- `model.test.ts` (from `panel.test.ts`): two projects' runs stay separate; `runState`'s rules with the new words; `done` within 24 hours; `not-set-up`; `cwdProject`.
+- `projects.test.ts`: candidates from a fake `ctx.projects`, `discoverCheckouts` and storage; the install check; core's names used unchanged (a clash name such as `dorkos~work` reaches the URL as given); the no-`ctx.projects` fallback applies the same clash rule; unknown roots are reported; a vanished root drops out and its items resolve `cancelled`.
+- `adapter-trust.test.ts`: a shipped adapter reads on the timer; a project adapter does not until allowed; a changed adapter file asks again; the allow route is person-only.
+- `person-guard.test.ts`: every changing route (§11) is wrapped in the guard and refuses a non-person request; on a host without the guard those routes are not registered.
+- `tracker-reads.test.ts` with a fake `execFile`: exit 0, 4 and 3 map to reachable, unreachable and settings problem; `mcp` transport is never read; one read at a time per project; at most two at once.
+- `conditions.test.ts` with a fake clock and fake `ctx.inbox`: an `unreachable` tracker never raises; an `auth` failure raises at once and clears with `cleared`; flapping re-raises the same key once; nothing-ready needs all of 24 hours idle, free capacity and untriaged items; paused never raises; state survives a restart through storage.
+- `decisions.test.ts`: review and question raise at once with `project`, `projectLabel`, `link` and core's length limits; they resolve `cleared` when their stage or label changes; each action runs the right verb with `event.note` or `event.text` and returns the right result; a note over 2,000 characters is refused; a verb slower than 4 seconds returns keep-open and resolves later; a failed verb keeps the row; every `href`/`navigate` is an in-app path; `InboxLimitError` stops raising for the pass, keeps the rest in the model and retries; `POST /decisions/:key` exists only without `ctx.inbox`.
+- `host-types.contract.test.ts`: `lib/host-types.ts` against the vendored fixture (§10.1).
+- `asks-copy.test.ts`: every ask flow raises has a headline with no item id, stage name or command in it (checked against the id pattern, the stage names in `config-schema.ts` and a leading `/`), a non-empty `why` of at most 300 characters, and the right action labels; an ask builder with no `why` refuses to raise.
+- `conditions.test.ts` (additions): `unreachable` never raises and shows a lens line only after 15 minutes; `auth` raises at once and clears on the next good read; ideas waiting raises only at Ask me first.
+- `autonomy-store.test.ts`: the dial is written only through `api.projectSettings.set` (the server half has no setter, a type test); `onChange` rewrites the copy; `requireLogin: false` shows core's line verbatim; an accepted offer's `settingsPatch` moves only that kind, and the server half has no write path; a copy edited on disk is rewritten from storage on the next poll; a project first seen with no history reads `tell` with nothing written, one with history reads `ask`; `/flow:init` never writes it.
+- `autonomy-runs.test.ts`: the daily sort starts at 09:00 only with ideas waiting, not paused, and no triage in 20 hours; tell writes one `record` per event with `tell: true` and auto with `tell: false`, each with the right `by` and `choiceLabel`; the offer appears once per kind in 30 days, only at ask, and Yes moves only that kind.
+- `start-work.test.ts`: each button calls `api.startWork` (flow's pages) or `ctx.sessions.start` (inbox handler, daily sort) with the table's title and reason within core's lengths, and never shows the prompt; each `StartWorkError` code shows its message; the daily sort never exceeds 4 starts an hour or starts with 2 of flow's chats running, staggers 15 minutes apart and gives up at 13:00; on a host without the seam, ⓘ shows the command.
+- `decisions.test.ts` (core shapes): questions are `choice` decisions with 2-5 chips and a `decideBy` in range; a `deadline` event takes the pick for a non-floor question, sends a floor question to the reviewer agent and keeps the row, and is ignored at Ask me first; `offer` rides only on a person's `resolve` result and `action: 'offer'` moves only that kind; `record` carries `by` and `choiceLabel`; `InboxLinkError` and each `InboxLimitError` limit are handled.
+- `pause-routes.test.ts`: `project` vs `all`; `until` past or beyond 30 days is 400; the empty body from an old client pauses all with no end; the expiry sweep lifts an expired flag once.
+- `settings.test.ts`: reads both files and reports each value's source; a write changes only the named keys; a validation failure restores both files; the old-flow message on an unknown key; the pause default lives in storage.
+- (The migration's tests are client tests; see `migrate-repos.test.ts` below.)
+- `fleet-routes.test.ts`: unchanged routes still pass; add the host-too-old cases for every new route.
+- `bundle-safety.test.ts`: covers the new files.
+
+**Extension client**
+
+- `flow-tab.test.ts` (from `flow-panel.test.ts`): lens chosen by `currentProject`, and by `cwdProject` without it; project lens order, pills, "+ N more", footer rules; all-projects lens lists only projects with a decision or condition; "Set up flow here" only for a repo without flow; no account rows anywhere.
+- `marker.test.ts`: attention with a decision; attention when every ready project is paused; nothing for a plain condition; no call without `setTabMarker`.
+- `home-page.test.ts`: bands and counts; `?project=` filters all bands and survives reload; unknown project name; 1 project renders the lens; 0 projects; Pause all menu default.
+- `pause-menu.test.ts`: "Until tomorrow 9am" at 08:00 and at 22:00 is tomorrow 09:00 local; "For 1 hour"; "Until I resume" sends `null`.
+- `run-chip.test.ts`: one item, several items with the urgency order, the stale rule at 59 and 61 minutes for Building, never for Needs you, the 5-minute refresh rule, done words, phone width drops the title.
+- `project-settings.test.ts`: both entry points render the same component; the switcher defaults to the current project; the shared note shows the path from `config-names.ts`; the account-restriction confirmation; the last-account confirmation.
+- `migrate-repos.test.ts` (browser half, fake `fetch`): all repos matched calls core's `only-projects` before flow's role change and shows what moved; partly matched moves the matched roots and keeps the rest in the marker; none matched changes nothing; a later visit adds a newly known repo; kept out with no repos stays; a second visit changes nothing; a core `403` or failure changes nothing and says so; no eligibility routes, no migration.
+- `account-checkboxes.test.ts`: reads and writes only core's routes; the restricted-account confirmation widens `only-projects` first; the last-account warning names every chat in the project.
+- `activate.test.ts`: every registration happens on a full host, and each is skipped cleanly when its seam is missing (§10 table, one case per row).
+
+**Live check before the last phase merges:** on the operator's machine with flow in four projects: the lens follows the chat across all four; a timed pause ends on time with DorkOS quit; a review gate approved from the inbox merges; the account migration moves "Only for these repos" and a launch in another project refuses the account.
+
+## Performance Considerations
+
+- File reads stay on the 5-second poll, one `stat`-cheap pass per project; tracker reads are 5-minute, bounded to two at once, and cached on disk.
+- One `EventSource` per client instead of one per panel mount.
+- The model is sent only when it changed, at most once a second (unchanged throttle).
+
+## Security Considerations
+
+- **Person-only writes.** Every flow route that changes something (pause, resume, settings, fleet policy, the adapter allow, the no-inbox decision route) is wrapped in `ctx.requirePerson`; on a host without it they are not registered (§10, §11). Decisions are answered only through core's person-bar routes: the inbox (credited to the person) or `api.answerDecision` on flow's pages (credited to Flow). `api.startWork` is person-only too; `ctx.sessions.start` runs only the starts flow's own settings decide (§7.7), within core's start limits. Account access is changed only through core's person-only HTTP routes, from flow's browser half; flow's server half has no way to widen it.
+- **Agents cannot set their own autonomy.** The dial is in core's per-project settings, written only through `api.projectSettings.set` behind the person bar, with no server setter; the engine's copy lives outside the repo, is rewritten from storage when it differs, and reads as Ask me first when missing. Core's person bar has two residuals (login off; same-page extension code), so this holds fully only with Require login on, and only against agents (§7.7).
+- **No repo code without consent.** Saving settings validates with the extension's own flow, never the project's `.dork/plugins/flow/scripts/` (§8.3). A project's own tracker adapter runs only after a person allows that exact file (§2.2).
+- Every command runs with `execFile`, no shell, argument arrays only (today's `runPauseCommand` pattern). Notes and answers go through a temp file (`--note-file`, `--text-file`), never the command line, and are deleted after the call.
+- `flow review` and `flow answer` act as the person (the forge's and tracker's signed-in account). They run only from a person's answer; no timer ever calls them.
+- Every `href`, `link` and `navigate` flow hands core is an in-app path; tracker links appear only on flow's own pages.
+- A shared settings write changes a committed file; the UI says so, and flow never commits or pushes.
+
+## Documentation
+
+- `plugins/flow/README.md`: a new "In the DorkOS app" section (the tab's two lenses, Flow home, the run chip, the inbox, settings by who they affect) and the pause duration in the command table.
+- `docs/turning-on-autonomy.mdx`: pausing with a duration, and that a timed pause ends on its own.
+- `docs/the-dials.mdx`: which settings are shared and which are just you, with the real file paths.
+- `docs/use-all-your-accounts.mdx`: "Only for these repos" is now DorkOS's "Accounts this project may use"; the one-time move.
+- `docs/driving-it-manually.mdx`: `flow review`, `flow answer` and `flow ask`.
+- `docs/CHARTER.md` and the other files in §13's table: the "someone must check" change, with its rationale and date.
+- `docs/the-dials.mdx` and `docs/turning-on-autonomy.mdx`: the dial, what each stop does (§7.7's table in plain words), and "While you were away".
+- `commands/pause.md`: the duration argument and the schedules rule (§5.4).
+- `plugins/flow/CHANGELOG.md`: one entry per phase.
+- The DorkOS site guide and the extension-authoring docs are the core spec's.
+
+## Implementation Phases
+
+Each phase is one PR (one version bump per PR). Core phase names follow the core spec; the mapping is by seam, so if core reorders, the flow phase moves with its seam.
+
+- **F0, the engine (no core dependency; can land first).** The charter change and every edit in §13's table; `resolveAutonomy` reading the copy, `flow autonomy`, `flow ask`, token-bound verdicts for VERIFY's reviewer and `flow review --by` (§7.5), `answeredBy` with the `secrets-or-spend` override, and `TrackerError.kind`; timed pause (§5.1) and the command (§5.4); `updatedAt` and `dispatchedBy` (§6); `flow review` and `flow answer` with `Forge.review` (§7.5); `BacklogSnapshot.team.url`; `scripts/fleet/sessions.ts` reading `trackerItems` with the `trackerItem` fallback (§6.4); `behaviour.json` at level 1. Tests in `engine-tests/` and beside each script.
+- **F1, the multi-project server and the tab** (after core's project registry, `currentProject` and multi-project discovery). `lib/model.ts`, `lib/projects.ts`, `lib/tracker-reads.ts`, `GET /model`, the pause routes with durations (registered only behind core's person guard) and the expiry sweep, the vendored contract fixture and drift guard (§10.1), `ui/store.ts`, the two lenses, the pause menu and palette commands, version skew, and the fallbacks for older hosts (§10). `flow-panel.ts`, the account section and `lib/panel*.ts` are deleted here.
+- **F2, pages, marker and chip** (after core's pages, tab marker and status-bar slot). Flow home with the filter and Pause all, the lens page, the settings page shell, the tab marker, the run chip, and "Capacity this week".
+- **F3, the inbox and autonomy** (after core's inbox decisions, the person guard, `why`/`defaultChoice`/`decideBy`/`offer`, and starting work). The V8 words on every ask, outcome buttons through `startWork` / `ctx.sessions.start`, the daily sort, "While you were away", conditions and escalation, the review and question decisions answered through core's action route, the adapter allow line, and §7.6's no-inbox fallback.
+- **F4, settings and accounts** (after core's account eligibility). `ProjectFlowSettings` on both entry points, the shared and just-me writes, the dial and Customize (§7.7), the "Next time, on its own?" offers (§7.8, which write through the same settings writer), the account checkboxes and the `fleet.json` migration in the browser half (both through core's HTTP routes), the CLI honouring core's rule (fleet contract 4.1.0; `behaviour` gains its eligibility entry, level 2).
+- **F5, prove it.** Docs, and the live check in Testing Strategy, with screenshots in the PR.
+
+F0 is contract-first for the pieces core reads (`dispatchedBy` and `updatedAt` in `flow-run.cases.json`), so core's N9 reader can target them.
+
+## Decisions (made autonomously, logged as assumptions)
+
+- **A1. The shared file is `.agents/flow/config.json`.** The V6 mockup's `.dork/flow/config.json` does not match flow; the UI names the path from `config-names.ts`.
+- **A2. Schedules are shown, not edited, in the shared box.** They are DorkOS tasks, not a key in flow's config; the box links to Tasks.
+- **A3. The pause default lives in the extension's storage,** not `config.local.json`, because the strict config schema would break older installs.
+- **A4. The engine reads `until` itself,** so a pause ends with DorkOS closed. The extension's expiry sweep covers older installs.
+- **A5. A timed `/flow:pause` never switches schedules off,** since nothing would switch them back on at the end.
+- **A6. "Until tomorrow 9am" is the browser's local 09:00 on the next calendar day.**
+- **A7. Review gate = a run at the `review` stage that will not merge by itself.** 👍 approves in the tracker and, when allowed, on the forge, and arms merge only if `mergeOnApproval`; 👎 sends the work back with the note and closes nothing.
+- **A8. Tracker reads run flow's CLI in a subprocess** and only for `cli` transports; `mcp` projects show local facts and link out.
+- **A9. Kept out plus repos migrates to rotation plus core's `onlyProjects`,** in the browser half when a person opens Settings → Flow, core first; kept out with no repos stays kept out; an account none of whose repos is on this computer waits; unmatched repos are added later from the marker.
+- **A10. The CLI honours core's eligibility too** (contract 4.1.0, Main's `defaultAccountOnlyProjects` included, roots canonicalised the way core keys them), so a terminal run and a DorkOS launch agree.
+- **A11. Version skew is a behaviour integer with a named effect,** not a semver comparison; equal behaviour shows nothing.
+- **A12. Capacity this week shows per-account weekly use and per-project hours of work from the journal,** with no project × account split, because no data today says which account paid for which project.
+- **A13. Decision keys hash the project root,** so a key never carries a path and never collides across two projects with one name.
+- **A14. The chip's items come only from `ctx.trackerItems`;** flow adds `dispatchedBy` so core can put the items of chats it launched in it.
+- **A16. An existing project reads as Ask me first until the person moves the dial;** the extension stores Tell me after for a project it first sees with no history; `/flow:init` never writes the dial. V10's default holds for every new setup, and an upgrade never starts shipping without a person's choice.
+- **A17. Ship at Tell me after or Just do it needs a token-bound clean verdict at the head commit;** without a reviewer that can record one, "someone must check" would have no checker, so that kind stays at Ask me first and the dial says why.
+- **A20. The dial lives in core's per-project settings, written only by a person through `api.projectSettings.set`;** the engine reads a copy outside the repo, a missing copy reads as ask, and the new-project default is computed, never written.
+- **A21. Flow's pages send ship and floor asks to core's inbox,** because an answer on flow's page is credited to Flow and brings no offer.
+- **A18. A slow tracker never reaches the inbox; a gone sign-in does at once.** This replaces N7's one-hour escalation, following V8.
+- **A19. Retry at Ask me first reads `recovery.maxRetries` as 0 and parks on red checks,** at read time, leaving the committed values alone.
+- **A15. Nothing changing runs without core's person guard,** and flow runs repo-committed code (a project's own adapter) only after a person allows that exact file.
+
+## Open Questions
+
+- **A project × account view in Capacity.** Needs flow to record the account on `stage` journal lines; a later spec decides whether that is worth the journal change.
