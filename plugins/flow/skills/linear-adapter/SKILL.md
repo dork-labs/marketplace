@@ -3,671 +3,112 @@ name: linear-adapter
 description: The /flow engine's tracker adapter — the single skill that owns EVERY Linear MCP / Composio call and normalizes Linear into the generic WorkItem shape. Use whenever a /flow stage skill or the loop engine needs to read or write the tracker (claim, transition, comment, inbox, relations, evidence, sub-issues). All flow tracker I/O routes through here; no other flow skill or command may touch a tracker string.
 ---
 
-# Linear Adapter — the v1 `PMClient`
+# Linear adapter
 
-> **Is this the adapter to use?** A project can override this shipped adapter with its
-> own, at `.agents/flow/adapters/linear/SKILL.md`. Before acting on anything below, run
-> `node --experimental-strip-types "<flow-root>/scripts/config-files.ts"`: if the
-> `adapter.path` it prints is not this file, stop reading this one and read that file
-> instead. If the check cannot run or its output cannot be read, stop.
+> **Is this the adapter to use?** Run `node --experimental-strip-types "<flow-root>/scripts/config-files.ts"`. If the `adapter.path` it prints is not this file, stop reading this one and read that file. If the check cannot run or its output cannot be read, stop.
 
-> **Flow root.** This skill lives at `<flow-root>/skills/linear-adapter/SKILL.md`. If you reached it via a symlink (`.claude/skills/flow__*` or `.agents/skills/flow__*`), resolve the real path first (`realpath <path>`): the flow root is two directories above the skill directory. Every `<flow-root>/...` reference below is relative to that root.
+> **Flow root:** the folder two levels above this skill's real path (`realpath` a `.claude/skills/flow__*` or `.agents/skills/flow__*` link first). `<flow-root>/...` paths start there. `flow <verb>` means `node --experimental-strip-types "<flow-root>/scripts/flow.ts" <verb>`.
 
-> **What this is.** The `/flow` engine's **work model + tracker adapter**. It is
-> the v1 realization of the `PMClient` contract (spec §3): it normalizes Linear
-> into one generic `WorkItem` shape and fulfils every capability verb, so every
-> generic stage skill and the dispatch policy can work _without ever touching a
-> Linear-specific field or a tracker API string_.
->
-> **Prose plus code.** The agent reads this skill and follows it. `adapter.ts`
-> beside it holds the same recipes as tested code, which the `flow` CLI calls
-> (adapter contract 2.2.0, "The code realization").
+Contract: [`../../adapters/SPEC.md`](../../adapters/SPEC.md) 2.2.0. `adapter.ts` beside this file is the code `flow` runs.
 
 ## The one rule
 
-**All `/flow` tracker I/O lives here.** No other flow skill or `/flow:*` command
-may contain a `mcp__linear__*` / `mcp__plugin_linear_linear__*` string, a
-`composio` invocation, or a `LINEAR_*` slug. Generic stage skills call _this_
-skill ("via the linear-adapter, claim DOR-123") instead of touching the tracker.
-This gives the agnosticism win ("all Linear in one place") and a single audit
-surface for every tracker write (spec §Security). An executable grep guard
-(`packages/flow/src/__tests__/tracker-confinement.test.ts`) enforces this for the
-flow bundle.
+**The tracker is reached only through a `flow` verb or this adapter.** No other flow skill or command may name a `mcp__linear__*` / `mcp__plugin_linear_linear__*` tool, a `composio` call or a `LINEAR_*` slug; they name a verb from the table below. One audit surface for every write. `engine-tests/tracker-confinement.test.ts` enforces it.
 
-The P5 server build swaps this skill for a typed `PMClient`; a second adapter
-(Jira / GitHub Issues) proves the agnosticism. Because the generic layer only
-ever speaks `WorkItem` + the verbs, that swap is additive, not a rewrite.
+## Connection (config, never hardcoded)
 
----
+`connection.team.key` (the identifier prefix), `connection.team.id`, `connection.workspace.slug` and the secret `secrets.trackerAccount` live in `config.local.json`; `connection.transport` (`cli` by default, or `mcp`) in the committed `config.json`.
 
-## Accessing Linear — the connection is config-driven
+- Both files are the project's; `config-files.ts` prints their paths (`committed`, `local`); local wins. Never inline a team, slug or account.
+- **`cli`:** every call is `composio execute <SLUG> --account "<trackerAccount>" -d '<json>'`. The flag is the only thing keeping another connected account (a personal login, unrelated `artblocks` work) from receiving flow's writes. Lost a slug: `composio search "<intent>" --toolkits linear`.
+- **`mcp`:** the server acts as whoever OAuth'd it, not as `trackerAccount`. Before any write, `get_authenticated_user` must be the same identity; unauthenticated, authenticate as that account; a different identity, use `cli`. Pass `includeArchived: false` on `list_issues`; never `includeMembers: true` on `list_projects` (complexity errors).
+- **Hand calls:** per-verb MCP tools are in `../../adapters/reference/linear-mcp/SKILL.md`; Composio slugs, input keys and response shapes in `../../adapters/reference/linear-composio/SKILL.md`.
 
-**The adapter hardcodes no team, workspace, or account.** It reads WHERE and HOW
-it reaches Linear from config, fresh on every run — so pointing flow at a
-different team, workspace, or account is a config edit, never a change to this
-skill:
+## The verbs
 
-| Config value                | What it is                                                   | Where it lives                            |
-| --------------------------- | ------------------------------------------------------------ | ----------------------------------------- |
-| `connection.team.key`       | team key / issue prefix (the token before the dash in an id) | `config.local.json` (null in committed)   |
-| `connection.team.id`        | the team's Linear id, when a call needs to scope by it       | `config.local.json` (null in committed)   |
-| `connection.workspace.slug` | the workspace / org slug                                     | `config.local.json` (null in committed)   |
-| `connection.transport`      | which access path is **primary** — `cli` or `mcp`            | `config.json` (committed policy)          |
-| `secrets.trackerAccount`    | the account handle the CLI acts as                           | `config.local.json` (secret, out-of-band) |
+SPEC section 3's 16 required verbs, the groom-only `getBacklogSnapshot`, and the optional `completeProject` (**supported**). Use the `flow` verb where one exists; it reads back and records.
 
-Both settings files live in the **project**, never in the plugin: `.agents/flow/config.json` (committed policy) and `.agents/flow/config.local.json` (this machine's credentials and coordinates, ignored by git; in a git worktree it may be the main checkout's copy). Run `node --experimental-strip-types "<flow-root>/scripts/config-files.ts"` and read the `committed` and `local` paths it prints; never guess them. Values in the local file override the committed one.
+| Verb                                                                      | Do this                                                                                                                                                                                                                                                                                                        |
+| ------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **`getCurrentUser()`**                                                    | Code. By hand: `LINEAR_GET_CURRENT_USER` (never `LINEAR_GET_AUTHENTICATED_USER`, which does not exist), or `viewer { id name }`.                                                                                                                                                                               |
+| **`getBacklogSnapshot()`**                                                | `flow snapshot --json` (`--include-closed`, `--out <file>`). Never script it.                                                                                                                                                                                                                                  |
+| **`getEligibleWork()`**, **`getProjectWork(projectId)`**                  | `flow next --json` (`--for-project`). Returns candidates; the policy applies the `agent/ready` gate.                                                                                                                                                                                                           |
+| **`getProjects()`**, **`resolveProject(nameOrId)`**, **`getProject(id)`** | GraphQL `projects` / `team { issues(filter: { project }) }`. `resolveProject` returns every case-insensitive match; an umbrella identifier resolves to its project.                                                                                                                                            |
+| **`getRelations(item)`**                                                  | GraphQL only, see below.                                                                                                                                                                                                                                                                                       |
+| **`getInbox(agent)`**                                                     | Assigned-to-me, @mentions and new comments since the last tick, as `InboxEntry` below.                                                                                                                                                                                                                         |
+| **`claim(item)`**                                                         | `flow claim <id> --session <session id> --json`. Swaps `agent/ready` for `agent/claimed` (one exclusive `agent/*` group), removes every `stage/*` label, moves the item to started, confirms on read-back, records the run.                                                                                    |
+| **`transition(item, stage)`**                                             | `flow stage <id> <stage> --json`. Release is `flow release`; finishing is `flow done`.                                                                                                                                                                                                                         |
+| **`comment(item, body)`**                                                 | GraphQL `commentCreate`. Ends with `identity.marker` and the `agent:provenance` line.                                                                                                                                                                                                                          |
+| **`assignToHuman(item)`**                                                 | `issueUpdate` `assigneeId` = the reviewer. Used at the review gate and on handoff.                                                                                                                                                                                                                             |
+| **`attachEvidence(item, evidence)`**                                      | Link the proof (recording, test summary, PR) per `evidence.attachTo`.                                                                                                                                                                                                                                          |
+| **`needsInput(item, question)`**                                          | Four effects: post the question (multiple choice when possible, with the marker and the `agent:provenance` line), apply `agent/needs-input` leaving the state alone, `assignToHuman`, **stop**. `flow triage <id> --park` does the first two. Resumes only on a non-agent reply.                               |
+| **`link(a, b, type)`**                                                    | A typed relation (`blocks`, `related`, `duplicate`). Never in description prose.                                                                                                                                                                                                                               |
+| **`createSubIssue(parent, spec)`**                                        | `flow create --parent <id> --key <key>`. Only when `sizeOrdinal(size) >= sizeOrdinal(decomposition.subIssueThreshold)`. The task's `issue` field in `03-tasks.json` is its home. Its description ends with the `agent:provenance` signature; a rewrite replaces it.                                            |
+| **`completeProject(project, outcome)`**                                   | `projectUpdate` to `completed` or `canceled`. List its issues live first; any open one: **refuse** and name it (dispatch drops a closed project's issues). Read its state from GraphQL `projects`; unreadable: refuse. Already there: no-op. On `mcp`, use `save_project` or `update_project`; neither: `cli`. |
 
-`/flow:init` sets all of these. A real team key/id and workspace slug live in the
-gitignored `config.local.json`, never in the shared committed config — a concrete
-id baked into the shipped template would re-hardcode the agnosticism this seam
-exists to preserve. Below, `<teamKey>`, `<teamId>`, `<workspaceSlug>`, and
-`<trackerAccount>` stand in for those configured values.
+## Calls by hand
 
-### Two transports, selected by `connection.transport`
+- Use `LINEAR_RUN_QUERY_OR_MUTATION`: input key `query_or_mutation` (not `query`), plus `variables`; the answer is under `.data.data`.
+- Pass every value as a GraphQL variable: a literal `$word` in the query text fails the call.
+- **Scope every read to the team:** `team(id: "<teamId>") { issues(…) }`, never a top-level `issues`. The list slug `LINEAR_LIST_LINEAR_ISSUES` has no team filter and is WORKSPACE-wide, not team-scoped: post-filter by identifier prefix (`<teamKey>-`) before any policy or write pass. `--account` is not a team filter.
+- `searchIssues(term:, includeArchived: false)` is cross-team too: post-filter by identifier prefix.
+- Relations: read `relations` and `inverseRelations` through the team node. Any other path's answer (the get slug returns `null`) means unknown, never "no blockers". Read cross-team edges; never write their far end.
+- A large answer spills to `outputFilePath`; read it with `jq`. Paginate with `first` and `after` only.
+- Read one issue's comments as `issue(id:) { comments { nodes { id body } } }`.
+- "Entity not found" on a comment to an id that reads fine: the issue is archived; check `archivedAt`.
 
-Both paths reach the **same** team and workspace; `connection.transport` decides
-which is primary. The adapter is the only place either path appears.
+**Bulk writes** (the groom):
 
-**`cli` (the default) — the Composio CLI, account-pinned.** Works even when the
-MCP server is unauthenticated (see the `composio-cli` skill). Linear slugs are
-`LINEAR_*`. **Always pass `--account "<trackerAccount>"`**, read fresh from
-`.agents/flow/config.local.json` → `secrets.trackerAccount` (set by `/flow:init`); **never
-hardcode an account name here.** This is the safe default precisely because the
-acting identity is pinned by config: any other connected account — a maintainer's
-personal login, or unrelated `artblocks` work — must **never** receive flow's
-writes, and the `--account "<trackerAccount>"` flag is the only thing keeping them
-out (there is no team filter on the list slug — see below). An adopter points flow
-at a dedicated bot account by setting `trackerAccount`, not by editing this skill.
+- A label write replaces the whole set; state, `agent/*` and `stage/*` go through `flow claim|release|done|stage|triage`; any other label write reads fresh first.
+- A description write replaces the whole field: strip any `agent:provenance` / `flow:provenance` line, write exactly one as the last line.
+- Aliased mutations partially apply: 5-10 per call, check each `success`, re-read a sample.
+- Project `state` takes only `backlog | planned | started | completed | canceled`; use `backlog` for "real, not active".
+- A project description is capped at 255 characters: one sentence there, the long prose (`<flow-root>/templates/records/project.md`) on the umbrella `type/meta` issue.
+- Never close a project by hand; use `completeProject`.
 
-```bash
-composio execute LINEAR_LIST_LINEAR_TEAMS    --account "<trackerAccount>" -d '{}'
-composio execute LINEAR_LIST_LINEAR_PROJECTS --account "<trackerAccount>" -d '{}'
-# Discover other slugs by intent:
-composio search "list linear issues" "create a linear issue" --toolkits linear
-```
-
-**`mcp` — the in-session Linear MCP server.** Tool names are
-`mcp__plugin_linear_linear__*` (e.g. `list_issues`, `save_issue`, `save_comment`,
-`get_authenticated_user`); the prose shorthand for the family is `mcp__linear__*`.
-It is faster and richer than the CLI, but it carries a **real footgun the `cli`
-path does not**:
-
-> **The MCP server acts as whoever authenticated (OAuth'd) it — which is NOT
-> necessarily `secrets.trackerAccount`.** Unlike the CLI, the MCP transport takes
-> no `--account` flag; its acting identity is fixed at OAuth time. If the MCP is
-> authenticated as a different identity than `trackerAccount`, **every flow write
-> silently lands as that OAuth identity** — the exact silent-wrong-account failure
-> the account-pinned `cli` path prevents.
->
-> So before you use `mcp` for any write: confirm the MCP is authenticated as the
-> **same identity** as `secrets.trackerAccount` — read `get_authenticated_user`
-> and check it matches the configured account. If the server is unauthenticated,
-> run `mcp__linear__authenticate` and complete OAuth **as that account**. If it is
-> authenticated as a **different** account, do not write through MCP — fall back to
-> the `cli` transport (which is account-pinned) rather than acting as the wrong
-> identity.
-
-**Query hygiene** (applies to every read):
-
-- **MCP only:** always pass `includeArchived: false` on `list_issues` — Linear
-  defaults to `true`, pulling archived noise from deleted projects. The Composio
-  `LINEAR_LIST_LINEAR_ISSUES` has **no** `include_archived` param (see the
-  schema gotcha below); passing it errors on a paginated call.
-- Do **not** pass `includeMembers: true` on `list_projects` — it triggers
-  GraphQL query-complexity errors. Fetch member/lead detail separately.
-
-### Composio CLI — verified schemas, response shapes & gotchas
-
-The Composio fallback diverges from the MCP transport in ways that bite silently.
-These are empirically verified against `composio` v0.2.31 and the live DorkOS
-workspace; trust them over a slug's `--get-schema` guess when they conflict.
-
-- **Prefer one GraphQL read over the field-poor list slug.**
-  `LINEAR_RUN_QUERY_OR_MUTATION` is the richest read path and resolves the two
-  worst traps below (missing category, flattened labels) in a single call —
-  request `state{ name type }` for the category and `labels{ nodes{ name parent{
-name } } }` to recover the namespace (reconstruct `agent/ready` as
-  `parent.name + "/" + name`; `ready`→`parent:agent`, `research`→`parent:type`).
-  It also returns `estimate` (size) and `priority`, and accepts a label filter
-  (`issues(filter:{ labels:{ name:{ eq:"ready" } } })`). The result nests under
-  `.data.data.team` (note the **double** `data`). Reach for the per-verb slugs
-  below for writes and simple lookups; reach for GraphQL when you need the full
-  dispatch-ready shape.
-
-- **`LINEAR_RUN_QUERY_OR_MUTATION`'s input key is `query_or_mutation` — not
-  `query`.** The payload is
-  `-d '{"query_or_mutation": "<the query>", "variables": { … }}'`. A `query` key
-  fails Composio's own schema validation with `Unknown key` before the call ever
-  reaches Linear, so the error names your payload, not your GraphQL (verified
-  against `composio` v0.2.31, 2026-09-09).
-
-- **Team scope is the adapter's job on every read — nothing in the API supplies
-  it.** `getBacklogSnapshot` and `getEligibleWork` are **team-scoped** reads: the
-  team is the configured `connection.team.id` / `connection.team.key`, never
-  "whatever the account can see". Via GraphQL, scope through the team node —
-  `team(id: "<teamId>") { issues(…) }` — and never a top-level `issues(…)`. Via
-  the field-poor list slug there is no team filter to pass at all (see below), so
-  **post-filter the results by identifier prefix** (`<teamKey>` + `-`) before any
-  policy or write pass consumes them. A workspace holds many teams — the
-  reference workspace has five, one of them a user-feedback intake team whose
-  issues are live conversations with real people — so an unscoped read hands the
-  groom's write pass items it must never relabel, close, or reassign (verified
-  hazard, 2026-09-10).
-
-- **Slugs are doubly-prefixed; there is no `LINEAR_GET_ISSUE`.** The verbs are
-  `LINEAR_LIST_LINEAR_ISSUES`, `LINEAR_GET_LINEAR_ISSUE`,
-  `LINEAR_LIST_LINEAR_PROJECTS`, `LINEAR_GET_LINEAR_PROJECT`,
-  `LINEAR_LIST_LINEAR_TEAMS`, `LINEAR_LIST_LINEAR_LABELS`,
-  `LINEAR_LIST_LINEAR_STATES`. The un-doubled `LINEAR_GET_ISSUE` does **not**
-  exist (`ToolRouterV2_ToolNotFound`). When a slug 404s, rediscover it with
-  `composio search "<intent>" --toolkits linear`.
-- **`getCurrentUser` is `LINEAR_GET_CURRENT_USER`, not
-  `LINEAR_GET_AUTHENTICATED_USER`.** The second is the MCP tool name with a
-  Composio prefix, and Composio answers it with `ToolRouterV2_ToolNotFound`.
-  Pass `-d '{}'`. The user usually comes back under `.data.user`, but the wrapper
-  can nest it elsewhere, so check the keys before reading `id` and `name`, and
-  throw if no user object is found. If the slug call fails, the same read is
-  `query { viewer { id name } }` through `LINEAR_RUN_QUERY_OR_MUTATION`
-  (verified against `composio` v0.2.31, 2026-09-15).
-- **`LINEAR_GET_LINEAR_ISSUE` takes the human identifier** — `-d '{"issue_id":"DOR-149"}'`,
-  no UUID needed. It returns the fields the LIST call omits: `state.type` (the
-  category), `estimate` (the `size`), `priority`, `labels.nodes`, `project`,
-  `parent`. **Caveat:** its `relations` field comes back `null` via Composio — the
-  typed `blocks/blockedBy` graph that feeds dispatch eligibility is **not**
-  reliably populated. A `null` here means **unknown**, never "no blockers":
-  "neutral" is only how the dispatch policy _ranks_ an absent graph (see
-  _Graceful degradation_), and reading it as a finding is how a blocked item gets
-  claimed. Cross-check the graph the reliable way before any decision rests on
-  it.
-- **The relation graph has exactly one reliable read: GraphQL, through the team
-  node.** For any decision that depends on the graph — dispatch blockers, a
-  duplicate adjudication, a cross-team sweep — request
-  `relations { nodes { type relatedIssue { identifier state { type } } } }`
-  (plus `inverseRelations` for the incoming edges) inside
-  `team(id: "<teamId>") { issues(…) }` via `LINEAR_RUN_QUERY_OR_MUTATION`, and
-  treat every other path's answer as unknown (verified 2026-09-09). The
-  cross-team case is the one that bites: a related issue's `identifier` carries
-  its own team prefix, so an edge can point **out** of the configured team. Read
-  those edges — "blocked by another team's item" is exactly what the graph is for
-  — but never write to the far end of one: the sweep's scope stays the
-  `<teamKey>`-prefixed items, and the related issue is evidence, not work.
-- **`LINEAR_LIST_LINEAR_ISSUES` has a tiny filter schema — no team filter.**
-  Allowed top-level keys are only `after, first, project_id, assignee_id,
-original_cursor, include_transitions, cursor_was_corrupted`. There is **no
-  `team_id`** (passing it is silently dropped on the first call and hard-errors on
-  a paginated one) and **no `include_archived`**. Scope to a project with
-  `project_id`; there is no team scoping at all, and **the unfiltered list is
-  WORKSPACE-wide, not team-scoped.** One account reaches every team in the
-  workspace it connects to (`connection.workspace.slug`), so
-  `--account "<trackerAccount>"` prevents cross-**account** leakage only — it is
-  what keeps any other connected account (e.g. `artblocks`) out, and it is not a
-  team filter. Post-filter by identifier prefix, per the team-scope rule above
-  (verified against a five-team workspace, 2026-09-10 — an account that connects
-  to one workspace is not thereby scoped to one team).
-- **Response shapes:** list → `.data.issues[]` + `.data.page_info{ hasNextPage,
-endCursor }` (**not** `.data.items`); get → `.data.issue`; projects →
-  `.data.projects[]`; teams → `.data.teams[]`. When a call needs the team id, use
-  the configured `connection.team.id` (resolve it from `connection.team.key` via
-  `LINEAR_LIST_LINEAR_TEAMS` if it is not set); never inline a literal id here.
-- **Large reads spill to a file.** A big result returns `{ successful: true,
-storedInFile: true, outputFilePath, tokenCount }` with **no inline data** — read
-  `outputFilePath` with `jq` (don't slurp it into context). Paginate by passing
-  `{ first, after: <endCursor> }` and **only** those keys (adding any filter key
-  to an `after` call trips schema validation).
-- **Labels arrive FLATTENED to leaf names.** A grouped Linear label surfaces on
-  the issue as its bare leaf: `ready` (not `agent/ready`), `claimed`/`completed`/
-  `needs-input` (not `agent/*`), `verify`/`ideate` (not `stage/*`),
-  `task`/`research`/`idea`/`meta` (not `type/*`). The group prefix is a separate
-  parent label that is **not** present on `labels.nodes`. This is a real
-  normalization trap: the dispatch policy (`node --experimental-strip-types "<flow-root>/scripts/dispatch.ts"`)
-  matches the literal `agent/ready`, so a raw Composio `ready` will **silently
-  fail eligibility**. The adapter MUST re-namespace leaf → group before handing
-  `labels[]` to the policy. Recover the group↔leaf map from
-  `LINEAR_LIST_LINEAR_LABELS` (team-scoped; distinguishes container vs leaf
-  labels).
-- **The category (`state.type`) is absent from the LIST call.** A listed issue's
-  `state` is `{ name }` only — no `type`. Since the generic layer matches on
-  category, resolve it via `LINEAR_GET_LINEAR_ISSUE` per item, or once via
-  `LINEAR_LIST_LINEAR_STATES` (a team-scoped `name → type` map). A `triage`-type
-  state is real here (see the category table's † note).
-- **Project `state` is `null` via Composio.** `LINEAR_LIST_LINEAR_PROJECTS`
-  returns `{ id, name, state: null }` — the project workflow-state category is not
-  populated, so the dead-project dispatch tier degrades to a no-op (the documented
-  graceful-degradation behavior; here it is always neutral).
-- **Comment-writes on ARCHIVED issues fail with a misleading error.**
-  `commentCreate` (via `LINEAR_CREATE_LINEAR_COMMENT` or raw GraphQL) on an
-  archived issue returns `Entity not found: Issue` — while `issue(id:)` reads and
-  even `issueUpdate` on the same UUID still succeed, so the error looks like a
-  bad id or a missing OAuth scope. It is neither (verified 2026-07-13, DOR-306).
-  When a comment-write returns "Entity not found" on a UUID that reads fine,
-  check the issue's `archivedAt` via GraphQL before suspecting scopes or
-  transposed UUIDs. Archived issues stay out of normal flow via the
-  `includeArchived: false` hygiene rule; this bites only when an item is
-  addressed directly by identifier.
-- **`LINEAR_CREATE_LINEAR_COMMENT` wants camelCase `issueId`** — unlike
-  `LINEAR_GET_LINEAR_ISSUE`'s snake_case `issue_id`. Allowed keys: `body,
-issueId`. The casing convention varies per slug; trust the validation error's
-  allowed-keys list.
-- **`LINEAR_LIST_COMMENTS` cannot filter by issue.** Its only keys are `after,
-first, before, includeArchived`. To read one issue's comments back (the
-  round-trip check), use `LINEAR_GET_LINEAR_ISSUE` — its `comments.nodes` carries
-  them — or a GraphQL `issue(id:){ comments { nodes { id body } } }`.
-- **Text search is GraphQL-only; no `LINEAR_SEARCH*` slug is worth reaching
-  for.** The working pattern is one `LINEAR_RUN_QUERY_OR_MUTATION` read:
-  `searchIssues(term: $q, first: N, includeArchived: false) { nodes { identifier title state { type } } }`
-  (verified 2026-09-09). It searches the whole workspace and **returns cross-team
-  results**, so scope or post-filter it by identifier prefix exactly as for the
-  list slug before a policy or write pass touches the hits — search is the
-  easiest place to pull another team's issues in by accident.
-
-#### The groom snapshot is code: use `flow snapshot`
-
-`getBacklogSnapshot()` lives in `adapter.ts` beside this file (team-scoped,
-paginated, identifiers checked against the `<teamKey>-` prefix). Never script it
-by hand; run
-`node --experimental-strip-types "<flow-root>/scripts/flow.ts" snapshot --json`
-(`--include-closed` adds closed titles, `--out <file>` saves it for `--snapshot`).
-
-#### Bulk-write traps (the groom write pass)
-
-Each of these cost a failed batch on 2026-08-03; none produces a helpful error:
-
-- **A literal `$word` anywhere in an inlined mutation string breaks the call.**
-  Composio scans the whole query text for `$identifier` and demands a matching
-  GraphQL variable, so a description containing a shell snippet or template
-  literal (`$sessionId`, `${client}`) fails with "Query contains variable
-  syntax for: X". **Pass all prose through real GraphQL variables** —
-  `mutation($id: String!, $desc: String!) { issueUpdate(id: $id, input: { description: $desc }) { success } }`
-  — never string-interpolated into the query body.
-- **A description write REPLACES the whole field — including any signature
-  already in it.** Read the current description, strip any `agent:provenance` /
-  `flow:provenance` line, then write the new body with exactly one signature as
-  its last line. Appending without stripping leaves two signatures in one field
-  and no rule for which a reader should believe. Note that the signature's JSON
-  can legitimately contain a `$`, so it goes through a real GraphQL variable like
-  any other description prose (see the trap above).
-- **A label write REPLACES the entire label set.** State, `agent/*` and
-  `stage/*` changes go through `flow claim|release|done|stage`, whose code reads
-  fresh before it writes; any other label write must do the same.
-- **Aliased mutations partially apply.** A failed alias does not roll back its
-  siblings. Batch 5-10 aliases per call, check each alias's `success` in the
-  response, and re-read a sample after every batch.
-- **Project `state` accepts only** `backlog | planned | started | completed |
-canceled`. `paused` is rejected with "No project status found for type
-  paused" even though Linear the product has the concept. Use `backlog` for
-  "real work, not shipped, not active".
-- **`projectCreate` rejects a description longer than 255 characters** —
-  "description must be shorter than or equal to 255 characters" (verified
-  2026-09-10). A project's description is a one-line summary field, not a body,
-  so a programme charter pasted into it fails the whole mutation. Write a single
-  sentence there and put the long prose — the `## Goal` / `## Scope` /
-  `## Anchor & provenance` sections of
-  `<flow-root>/templates/records/project.md` — on the project's **umbrella
-  issue** (the `type/meta` anchor), which has no such cap.
-- **Never close a project out by hand.** Moving a project to
-  `completed`/`canceled` goes through the **`completeProject`** verb (writes
-  table above), which owns the open-issues guardrail and the live-data check
-  that goes with it. Bulk passes are exactly where that check gets skipped, and
-  a wrongly-closed project hides its open issues from dispatch permanently.
-
----
-
-## The `WorkItem` normalization shape
-
-Every read verb returns work normalized into this shape, so the generic layer
-never sees a Linear field name. The adapter's job is the mapping in the third
-column.
+## The `WorkItem` shape
 
 ```
 WorkItem {
-  id,              // tracker-native id (Linear node id)
-  identifier,      // human key, e.g. "DOR-123" — the worktree/branch key
-  title,
-  description,
-  type,            // idea|research|hypothesis|task|monitor|signal|meta
+  id, identifier, title, description,
+  type,            // idea|research|hypothesis|task|monitor|signal|meta, from type/* (exactly one)
   stateCategory,   // backlog|unstarted|started|completed|canceled
-                   //   MATCHED ON CATEGORY, NEVER ON DISPLAY NAME (see below)
-  stateName,       // display only ("In Progress", "Triage", …) — never matched on
-  priority,        // 0–4  (0 none · 1 urgent · 2 high · 3 medium · 4 low)
-  size,            // number (points, native) | string (t-shirt) — promotion + ranking
-  project,         // { id, name, stateCategory, lead }
-  parent,          // parent WorkItem id (sub-issue) or null
-  relations {      // the dependency graph — read from typed Linear relations
-    blocks[],      // items THIS blocks
-    blockedBy[],   // items that block THIS  (feeds dispatch eligibility)
-    children[],    // sub-issues
-    relatedTo[],
-    duplicateOf?,
-  },
-  labels[],        // ALL labels, including stage/* and agent/*
-  assignee,        // → classifyOwnership(): mine|reviewer|other|unassigned
-  agentDisposition // ready|claimed|completed|needs-input  (derived from agent/* labels)
+  stateName,       // display only, never matched on
+  priority,        // native 0 none · 1 urgent · 2 high · 3 medium · 4 low, never a label
+  size,            // native estimate number, never a label or t-shirt conversion
+  project, parent,
+  relations { blocks[], blockedBy[], children[], relatedTo[], duplicateOf? },
+  labels[],        // all labels, re-namespaced group/leaf
+  assignee,        // raw; classifyOwnership decides mine|reviewer|other|unassigned
+  agentDisposition // ready|claimed|completed|needs-input, from agent/*
 }
 ```
 
-### `stateCategory` is matched on CATEGORY, never on display name
+- `stateCategory` is matched on category, never on display name. State `type` maps to itself; `triage` maps to `backlog`; `duplicate` cannot be represented, so `flow snapshot` drops and warns on it. A groom routes both out of those states.
+- An untriaged item is held out of dispatch by its missing `agent/ready`, not its category. TRIAGE and DECOMPOSE apply `agent/ready`.
+- Labels arrive as bare leaves with a `parent` group; re-namespace to `parent/name` (`ready` → `agent/ready`), or dispatch silently misses them.
+- Compare `size` by ordinal only, never to the threshold word: `sizeOrdinal(8)` and `sizeOrdinal("xl")` are both `4`. Missing is neutral and never promotes.
+- Graceful degradation: a missing field is `undefined` (neutral), never `0`, `null` or `""`; never fabricate one. SPEC section 2 has the full rules.
 
-Linear workflow states each belong to one of five **categories**:
-`backlog · unstarted · started · completed · canceled`. The display **name** is
-team-customizable ("Triage", "In Progress", "Shipped", …) and varies per team —
-matching on it is brittle and breaks the moment a team renames a state. The
-generic layer therefore branches **only** on `stateCategory`; `stateName` is
-carried for display only. The adapter resolves a state to its category via
-`list_issue_statuses` (each status carries its `type`/category) and maps:
+## The state machine
 
-| Linear state `type` | `stateCategory` |
-| ------------------- | --------------- |
-| `triage`            | `backlog` †     |
-| `backlog`           | `backlog`       |
-| `unstarted`         | `unstarted`     |
-| `started`           | `started`       |
-| `completed`         | `completed`     |
-| `canceled`          | `canceled`      |
-| `duplicate`         | unprojectable ‡ |
+- The `agent/*` labels are the durable state machine, not the plan field: `agent/ready`, `agent/claimed`, `agent/completed`, `agent/needs-input`, one at a time.
+- State, `agent/*` and `stage/*` agree; the `flow` verbs keep them so (`scripts/work-state.ts`). A claimed started item without `agent/needs-input` is orphaned work.
+- A merged PR whose body says `Closes <identifier>` closes the item at merge; use a non-closing reference to keep it open.
+- `agent/needs-input` is parked on a person: the stall sweep never reclaims it.
 
-† Linear's **Triage** feature adds a sixth state `type`, `triage`, beyond the
-five `StateCategorySchema` values. It is the un-triaged holding state (an item
-that has not yet been classified or routed). Normalize it to `backlog` —
-non-terminal, so it lists and recovers like any open item — but note it is kept
-**out of dispatch by the absent `agent/ready` label, not by its category**: an
-un-triaged item carries no `agent/*` label, so `filterEligible` drops it
-regardless. **Readiness (`agent/ready`) is produced by the shaping stages, not by
-this adapter and not by a state category:** TRIAGE applies it on accept (both
-routes: simple readied for EXECUTE, complex readied for IDEATE; see `triaging-work`)
-and DECOMPOSE applies it to the execute-ready tasks it emits (see
-`decomposing-work`). The adapter's job is the category mapping above (moving an
-accepted item into a true `backlog`/`unstarted` state); producing the `agent/ready`
-signal that lets `filterEligible` pick the work up is the stage skills' job, so an
-item lacking it is held out of dispatch by the **absent label**, never by its
-category. Never fabricate a distinct `triage` category — the typed enum has only
-five values.
+## Showing an item to a person
 
-‡ Linear's **Duplicate** workflow state has type `duplicate` — a seventh state
-type that maps onto NOTHING in the generic model. An item parked there is
-**unprojectable**: neither open nor closed, invisible to the dispatch policy,
-the loop, and every backlog view (the first DorkOS groom, 2026-08-03, found six
-items stranded this way). The adapter must never normalize `duplicate` to a
-real category; it must **flag** these items so a groom routes them out.
+Write `PROJ-157 - Title` (or a 3-6 word summary), never a bare key. Link only the identifier (`[PROJ-157](<url>) - Title`, never a wikilink); do not re-link a key the surface auto-links. Comments inside the tracker are exempt.
 
-**Snapshot-time obligations (the two Linear-only groom checks).** The generic
-`audit-backlog.ts` oracle is tracker-neutral, so two Linear-specific conditions
-are this adapter's job to surface whenever it builds a `getBacklogSnapshot()`:
+## Provenance
 
-1. **Items in a `triage`-type state** are un-triaged intake. A groom must route
-   every one of them out (to a real backlog/todo state, with a `type/*` label)
-   — nothing stays in Triage after a groom.
-2. **Items in the `duplicate`-type state** must leave it: verify the duplicate
-   target still makes sense, create a real `duplicate` relation via `link`,
-   then move the item to a **canceled**-category state. If verification shows
-   the item is actually live unfinished work, move it to a real open state
-   instead — never leave anything in the unmappable state either way.
+The canonical spec is [`../../docs/provenance.md`](../../docs/provenance.md); do not redefine it here. Linear keeps HTML comments byte-for-byte in descriptions and comments. A person in the rich-text editor can strip the line without noticing; readers treat that as unsigned.
 
-### `type`, `agentDisposition`, `priority`, `size` mappings
-
-- **`type`** ← the `type/*` label group (idea, research, hypothesis, task,
-  monitor, signal, meta). Mutually exclusive — exactly one per issue.
-- **`agentDisposition`** ← the `agent/*` label group: `agent/ready` → `ready`,
-  `agent/claimed` → `claimed`, `agent/completed` → `completed`,
-  `agent/needs-input` → `needs-input`. **The `agent/*` labels are the durable
-  state machine** (spec §3, the Huginn durability lesson) — _not_ the ephemeral
-  `plan`/checklist field, which does not survive a restart.
-- **`priority`** ← Linear's native priority field (`0` none, `1` urgent, `2`
-  high, `3` medium, `4` low). Native field, never a `priority/*` label.
-- **`size`** ← Linear's native estimate field, passed through **as the number
-  Linear gives you** (Linear's estimate is numeric on every scale it offers —
-  Fibonacci, exponential, linear). Native field, never a label. Do **not**
-  stringify it and do **not** convert it to a t-shirt letter. Drives the dispatch
-  size tier and the sub-issue promotion rule.
-
-  `size` is a **union** by design: `number | string`. A tracker with a numeric
-  estimate emits the number; a tracker with no numeric field emits a t-shirt
-  string (`xs` · `sm` · `md` · `lg` · `xl` · `xxl`). The dispatch policy maps
-  both onto one shared ordinal scale, so an adapter never has to invent a
-  conversion. Emit your tracker's native shape unconverted.
-
-  **Never compare a `size` to a threshold directly.** `decomposition.subIssueThreshold`
-  is a t-shirt word (`"xl"` by default), so on a numeric estimate `size ≥ threshold`
-  would be comparing two different vocabularies — `8 ≥ "xl"` is not a question
-  either side can answer. Compare **ordinals**, which is the whole point of the
-  shared scale:
-
-  ```
-  sizeOrdinal(item.size) >= sizeOrdinal(decomposition.subIssueThreshold)
-  ```
-
-  `sizeOrdinal` is exported from `@dorkos/flow` (`dispatch-policy.ts`) and
-  resolves both vocabularies onto one scale — `sizeOrdinal(8)` and
-  `sizeOrdinal("xl")` are both `4`. An absent or non-conformant estimate returns
-  `undefined` (neutral), and a neutral size never promotes. Use it rather than
-  inventing a numeric→t-shirt conversion in your adapter.
-
----
-
-## Presenting a work item to a human
-
-Every `WorkItem` this adapter returns carries `title` alongside `identifier`, so
-the title is always in hand with no extra fetch. **Never surface a bare tracker
-key to a human reader.** Whenever a stage skill, a `/flow` command, or the loop
-reports a work item to a person (terminal output, a status line, a report, an
-`AskUserQuestion` option, a PR or commit body), render the identifier followed by
-the title:
+## `InboxEntry`
 
 ```
-DOR-157 - Connect Claude Code account
+InboxEntry { item, occurredAt /* ISO-8601 Z */, comment: { author, mentions[], body } }
 ```
 
-- **Order + separator.** Identifier first, then a space-hyphen-space, then the
-  title. The hyphen keeps the line readable when the title itself contains a
-  colon (`DOR-149 - Harness portability: dry-run loop`). If a title is long or
-  unwieldy, a 3-6 word summary may stand in for it, but the bare `DOR-157` alone
-  is never acceptable.
-- **Link the identifier, not the title.** Where the surface supports a link, the
-  identifier is the anchor and the title stays plain text, so variable title
-  punctuation can never break link parsing. The structure is identical on every
-  surface; only the link syntax adapts:
-  - Markdown and Obsidian: `[DOR-157](<issue-url>) - Title` (a standard link,
-    never an Obsidian `[[wikilink]]`, since the target is an external tracker URL).
-  - HTML: `<a href="<issue-url>">DOR-157</a> - Title`.
-  - Slack mrkdwn: `<<issue-url>|DOR-157> - Title`.
-  - Auto-linking surfaces (Linear, GitHub, Slack with the Linear app): the bare
-    `DOR-157 - Title` already links the key, so do not double-link.
-- **Tracker comments are exempt.** Comments this adapter posts live inside the
-  tracker, whose own UI already shows the title, so pairing there is redundant.
-  This convention governs agent-to-human surfaces _outside_ the tracker.
-
----
-
-## The 18 capability verbs
-
-Each verb is mapped to its concrete Linear MCP call (primary) and Composio
-fallback. The generic layer only ever names these verbs; the adapter owns the
-call. Nine reads + nine writes: the contract's **16 required** verbs
-([`../../adapters/SPEC.md`](../../adapters/SPEC.md) section 3), the groom-only
-`getBacklogSnapshot` read this adapter adds on top, and the contract's **optional**
-`completeProject`, which this adapter **supports**. (An earlier revision titled
-this section "13" while the table already held more — the table is authoritative.)
-
-### Reads
-
-| Verb                            | What it returns                                                                                                                                                                                                                                                                                                                                                                                                                                                                 | Linear MCP (primary)                                                                                                             | Composio fallback (`--account <trackerAccount>`)                                          |
-| ------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------- |
-| **`getCurrentUser()`**          | the authenticated account (resolves `identity.agent: "auto"`, drives `classifyOwnership`)                                                                                                                                                                                                                                                                                                                                                                                       | `mcp__plugin_linear_linear__get_authenticated_user`                                                                              | `LINEAR_GET_CURRENT_USER`                                                                 |
-| **`getProjects()`**             | projects normalized to `{ id, name, stateCategory, lead }`                                                                                                                                                                                                                                                                                                                                                                                                                      | `mcp__plugin_linear_linear__list_projects` (no `includeMembers`)                                                                 | `LINEAR_LIST_LINEAR_PROJECTS`                                                             |
-| **`resolveProject(nameOrId)`**  | one `WorkItemProject` for a fuzzy name / spec slug / umbrella identifier (case-insensitive). Returns ALL matches when more than one, so the caller disambiguates. The project-addressing primitive for `/flow <project>`.                                                                                                                                                                                                                                                       | `list_projects` then match on name; resolve an umbrella id via `get_issue` → its `project`                                       | `LINEAR_LIST_LINEAR_PROJECTS` then match (+ `LINEAR_GET_LINEAR_ISSUE` for an umbrella id) |
-| **`getProject(id)`**            | one project with its `children[]` (project issues), its umbrella issue (the `type/meta` anchor), and a progress rollup (`done`/`total`, current stage).                                                                                                                                                                                                                                                                                                                         | `list_projects` (the one) + `list_issues` (project filter, `includeArchived: false`)                                             | `LINEAR_GET_LINEAR_PROJECT` + `LINEAR_LIST_LINEAR_ISSUES` (project filter)                |
-| **`getProjectWork(projectId)`** | `getEligibleWork` **scoped to one project**: the candidate `WorkItem[]` for project-scoped dispatch (same normalization + graceful-degradation rules as `getEligibleWork`).                                                                                                                                                                                                                                                                                                     | `list_issues` (project filter, `includeArchived: false`)                                                                         | `LINEAR_LIST_LINEAR_ISSUES` (project filter)                                              |
-| **`getEligibleWork()`**         | `WorkItem[]` of candidate work for the dispatch policy (issues for the configured team `connection.team.key`, `includeArchived: false`)                                                                                                                                                                                                                                                                                                                                         | `mcp__plugin_linear_linear__list_issues`                                                                                         | `LINEAR_LIST_LINEAR_ISSUES`                                                               |
-| **`getInbox(agent)`**           | the agent's inbox (see shape below) — assigned-to-me + @mentions + new comments since the last tick                                                                                                                                                                                                                                                                                                                                                                             | `list_issues` (assignee filter) + `mcp__plugin_linear_linear__list_comments`                                                     | `LINEAR_LIST_LINEAR_ISSUES` + `LINEAR_LIST_COMMENTS`                                      |
-| **`getRelations(item)`**        | the typed relation graph (`blocks/blockedBy/children/relatedTo/duplicateOf`) for a single item                                                                                                                                                                                                                                                                                                                                                                                  | `mcp__plugin_linear_linear__get_issue` (returns relations)                                                                       | `LINEAR_GET_LINEAR_ISSUE`                                                                 |
-| **`getBacklogSnapshot()`**      | the GROOM input (`grooming-backlog`): EVERY non-archived item **of the configured team** regardless of state — open items fully normalized (relations, re-namespaced labels, project `stateCategory`), plus closed items at least as `{ identifier, title, stateCategory }` for duplicate/shipped matching. Unlike `getEligibleWork`, nothing is filtered toward dispatch; run it with `flow snapshot`; `flow audit` checks it. | `list_issues` paginated with a **team** filter and **no state filter** + `list_projects` + `list_issue_statuses` (category map) + label-group recovery | `LINEAR_RUN_QUERY_OR_MUTATION`, paginated (see the snapshot notes)                        |
-
-### Writes (all confined here; the single audit surface)
-
-| Verb                                                                           | Durable effect                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                            | Linear MCP (primary)                                   | Composio fallback (`--account <trackerAccount>`)                                                        |
-| ------------------------------------------------------------------------------ | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------ | ------------------------------------------------------------------------------------------------------- |
-| **`claim(item)`**                                                              | Swaps `agent/ready` for `agent/claimed` (one exclusive `agent/*` group), removes every `stage/*` label and moves the item to a `started` state. Run `node --experimental-strip-types "<flow-root>/scripts/flow.ts" claim <id> --session <session id> --json`; it confirms on read-back and records the run.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                               | `flow claim` (code adapter)                            | `flow claim` (code adapter)                                                                             |
-| **`transition(item, stage)`**                                                  | Run `node --experimental-strip-types "<flow-root>/scripts/flow.ts" stage <id> <stage> --json`. A `started` or `completed` stage moves the item there and removes every `stage/*` label; any other stage sets its `stage/*` label.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                         | `flow stage` (code adapter)                            | `flow stage` (code adapter)                                                                             |
-| **`comment(item, body)`**                                                      | Posts a comment. The agent's own comments carry `identity.marker` (`— 🤖 /flow`) so the comment-response rules can recognize them in shared-account mode, **and the `agent:provenance` signature line** ("Provenance: signing outward writes" below) so a later reader can route a follow-up back to this session.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                        | `mcp__plugin_linear_linear__save_comment`              | `LINEAR_CREATE_LINEAR_COMMENT`                                                                          |
-| **`assignToHuman(item)`**                                                      | Sets the issue assignee to the reviewer / authenticated human (triggers a Linear notification). Used at the review gate and in handoff.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                   | `save_issue` (assigneeId)                              | `LINEAR_UPDATE_ISSUE`                                                                                   |
-| **`attachEvidence(item, evidence)`**                                           | Attaches proof-of-completion (browser recording, test summary, PR link) to the issue via its external URLs / attachment links per `evidence.attachTo`.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                    | `save_issue` (links/attachments)                       | `LINEAR_UPDATE_ISSUE`                                                                                   |
-| **`needsInput(item, question)`**                                               | The elicitation primitive — **four atomic effects**: (1) post the question as a `comment` (multiple-choice when possible, carrying the marker **and the `agent:provenance` line** — this is the one write whose whole purpose is to be replied to, so the reply has to be routable); (2) apply the `agent/needs-input` label, leaving the state alone; (3) `assignToHuman`; (4) **stop** (the loop parks here). Resumes only on a non-agent reply (see `getInbox`).                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                       | `save_comment` + `save_issue` (label + assignee)       | `LINEAR_CREATE_LINEAR_COMMENT` + `LINEAR_UPDATE_ISSUE`                                                  |
-| **`link(a, b, type)`**                                                         | Creates a typed relation (`blocks`, `related`, `duplicate`, …) between two items. Typed relations live in the graph, never in description prose.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                          | `save_issue` (relation)                                | `LINEAR_UPDATE_ISSUE`                                                                                   |
-| **`createSubIssue(parent, spec)`**                                             | Creates a child issue under `parent` (sub-issue promotion: fires only when `sizeOrdinal(size) >= sizeOrdinal(decomposition.subIssueThreshold)`, threshold default `"xl"`). The new issue's canonical home is the per-task `issue` field in `03-tasks.json`. The description it authors carries the **`agent:provenance` signature** as its last line; a later rewrite of that description **replaces** the signature rather than appending a second one.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                  | `mcp__plugin_linear_linear__save_issue` (parentId set) | `LINEAR_CREATE_LINEAR_ISSUE`                                                                            |
-| **`completeProject(project, outcome)`** _(optional verb — **supported** here)_ | Moves a whole **project** (not an issue) into a terminal state: `outcome: 'completed'` when its work shipped, `'canceled'` when it was abandoned. Linear's project `state` accepts only `backlog \| planned \| started \| completed \| canceled`. **Never move a project to `completed`/`canceled` while it holds open issues** — dispatch drops the issues of a terminal project, so an open issue left inside one vanishes from the ready queue and the starvation count permanently, and only a human reading the tracker ever finds it. So **verify from live data at call time**: list the project's issues (project filter, `includeArchived: false`), resolve each category, and if any is `backlog`/`unstarted`/`started`, **refuse loudly** and name them — never trust an issue list the caller passed in. Idempotent: already in the requested terminal state is a no-op; the _other_ terminal state is a real change and re-runs the check. **Degradation:** via Composio the project's own `state` reads back `null` on `LINEAR_LIST_LINEAR_PROJECTS`, so read it from a GraphQL `projects` query, where it is populated; if neither the state nor the issue list can be read, **refuse** rather than guess that an unseen project is empty. | `save_project` (project `state`)                       | `LINEAR_RUN_QUERY_OR_MUTATION` (`projectUpdate`, id + state as real GraphQL variables; check `success`) |
-
-`completeProject` is the contract's one **optional** verb (contract `1.1.0`, SPEC
-section 3, _Optional verbs_). This adapter declaring it **supported** is what lets
-a caller name it — and a caller must still carry its own fallback, since another
-tracker's adapter may not support it. One honest caveat on that declaration: the
-Composio binding is the verified path, while the **MCP tool name has not been
-exercised against a live server**. Before the first write on the `mcp` transport,
-list the server's tools and find the project-write **sibling of `save_issue`** —
-`save_project` on this server family, `update_project` on an older one. If neither
-is there, the server cannot write projects: treat the verb as unsupported on that
-transport and use the `cli` path instead.
-
-> Slugs shown in the Composio column follow the `LINEAR_*` convention; confirm
-> the exact slug with `composio search "<intent>" --toolkits linear` if a call
-> errors — Composio occasionally revises slug names. `LIST_LINEAR_TEAMS` and
-> `LIST_LINEAR_PROJECTS` are confirmed in use today.
-
----
-
-## Provenance: signing outward writes
-
-Every body this adapter writes outward — every `comment`, the `needsInput`
-question, any description it authors — carries a hidden, machine-readable
-signature line as its **last** line, so a later reader can route a follow-up back
-to the session that wrote it:
-
-```
-<!-- agent:provenance {"v":1,"harness":"claude-code","sessionId":"…","account":"work","host":"…","surface":"dorkos"} -->
-```
-
-**The canonical spec is [`../../docs/provenance.md`](../../docs/provenance.md) —
-read it there and do not redefine it here.** It owns the marker name, the eight
-wire fields, the per-write cadence, the omit-never-fabricate and valid-JSON
-discipline, the never-an-email rule, the public-repository rules, the emission
-list, and the reader rules. It is tracker-neutral on purpose: every adapter signs
-the same way, so a reader can parse a signature without knowing which tracker
-produced it. Readers also accept the legacy `flow:provenance` name; this adapter
-never emits it.
-
-What belongs **here** is the part that is specific to this tracker:
-
-- **Round-trip verified.** This tracker preserves HTML comments **byte-for-byte**
-  in both issue descriptions and comment bodies — confirmed by API round-trip on
-  both surfaces. So the signature survives a write→read cycle intact and the
-  reader rules can rely on it.
-- **A human editing in the rich-text editor can strip the line.** The tracker's
-  editor is rich-text, not raw markdown, and a person editing around a hidden
-  comment can drop it without noticing. That is expected, and it is why the reader
-  rule treats a missing signature as "route as unsigned" rather than as evidence
-  about the session.
-- **Description writes go through the `$word` and replace-whole-field traps**
-  documented under "Bulk-write traps" above. The signature is prose inside the
-  description field, so it is passed as a real GraphQL variable like any other
-  description text, and a description write **replaces** the field — which is why
-  the canonical spec requires dropping an existing signature before appending a
-  new one rather than accumulating two.
-
----
-
-## `getInbox` shape
-
-`getInbox(agent)` returns the items the agent must look at this tick:
-assigned-to-me + @mentions + new comments since the last tick. Each carries the
-triggering comment so the comment-response rules (spec §5) can decide whether to
-act:
-
-```
-InboxEntry {
-  item,                       // the WorkItem the comment is on
-  occurredAt,                 // the comment's createdAt, as Linear returns it (ISO-8601, `Z`; verified 2026-09-25)
-  comment: {
-    author,                   // who wrote it (compared against identity.agent / marker)
-    mentions[],               // @mentioned accounts (drives "directly addressed")
-    body,                     // the comment text (may carry an explicit /flow token)
-  }
-}
-```
-
-The comment-response rules that consume this (implemented in P2/P3, listed here
-because the inbox shape exists to serve them):
-
-1. **Never answer its own comments** — `author == identity.agent`, or the body
-   carries `identity.marker`. In shared-account mode the marker is the _only_
-   signal. Breaks self-reply loops.
-2. **Always respond when directly addressed** — an @mention of the agent's
-   account, or (shared mode) an explicit `/flow` / `@flow` token in the body.
-   This overrides ownership, even on a teammate's issue.
-3. **Resume when an `agent/needs-input` item gets a non-agent comment** — that
-   reply is the answer the agent parked for via `needsInput`.
-4. **Stay out of `other`-owned threads unless mentioned.**
-5. **Soft zone leans quiet** (`comments.ambiguousBias: "quiet"`) —
-   over-responding is the worse failure; silence is the safe default.
-
-`classifyOwnership(item)` (built in P3, spec §7) consumes the `assignee`/
-`project.lead` this adapter normalizes, compared against `identity.agent` /
-`identity.reviewer`, to label each item `mine | reviewer | other | unassigned`.
-The adapter supplies the raw `assignee`; it does not itself classify.
-
----
-
-## Durability rules (the state machine)
-
-- **The state machine is the `agent/*` labels**, not the ephemeral plan/checklist
-  field. A label written via `save_issue` survives a process restart; an
-  in-memory plan does not (Huginn durability lesson, spec §3).
-- **State, `agent/*` and `stage/*` agree** (contract 2.0.0): a `stage/*` label
-  only on an item that is not started; while started, the run record carries the
-  stage. `flow claim`, `release`, `done` and `stage` write every change; a claimed
-  `started` item without `agent/needs-input` is recoverable as orphaned work.
-- **A merge closes the item.** Linear auto-closes an issue when a PR whose body says
-  `Closes <identifier>` merges, so DONE may find it already completed. Use a
-  non-closing reference when the item must stay open.
-- **`needsInput` parks durably**: label `agent/needs-input` + comment + assign to
-  human + stop. "Parked on a human" is a distinct, durable state the stall sweep
-  must never reclaim — it resumes only on the human's reply, surfaced by
-  `getInbox`.
-- **Answers become memory**: resolutions the agent receives are written where the
-  next decision's evidence-test will find them (decisions table / ADR /
-  `config.json`) — not in a separate store. The adapter writes the tracker side
-  (the comment + label change); the durable answer lives in the repo artifact.
-
----
-
-## Graceful degradation (other trackers)
-
-The `WorkItem` shape is the generic contract; a non-Linear tracker supplies what
-it has and the dispatch policy treats anything missing as **neutral** (spec §3,
-§4). Documented here so a future Jira / GitHub-Issues adapter (P5) follows the
-same contract:
-
-- **No `project.stateCategory`** (e.g. GitHub Issues has no projects with
-  workflow categories) → the project-status dispatch tier is a no-op; items rank
-  on the remaining tiers.
-- **No `priority`** → treated as neutral (sorts as "none", i.e. last in the
-  priority tier) rather than excluded.
-- **No `size`** → treated as neutral in the size tier; sub-issue promotion simply
-  never fires (no size to exceed the threshold).
-- **No native estimate/points** → `size` is `undefined`, not `0`; "neutral" must
-  never be confused with "smallest". A `0`-point estimate is a REAL, smallest
-  estimate and ranks ahead of every larger one; an item with no estimate at all
-  ranks BEHIND every concrete one. Omit the field — never send `null`, never
-  send `0` to mean "unset", never send `""`.
-
-The adapter populates every field it _can_ from the underlying tracker and leaves
-the rest `undefined`; it never fabricates a value to satisfy the shape.
-
----
-
-## Promotion path (P5)
-
-This prose contract is the **promotion surface**. The P5 server-side Flow Engine
-— Extension promotes it into a typed `interface PMClient` (documented in
-[`../../SPEC.md`](../../docs/SPEC.md)) with the same verbs and the same `WorkItem`
-shape, backed by the Linear Agent Accounts API and a webhook relay instead of
-in-session MCP calls. A second adapter (Jira / GitHub Issues) proves the
-agnosticism. Because the generic layer speaks only `WorkItem` + verbs, the swap
-is additive — this skill is the seam.
+The comment-response rules that read it live in `<flow-root>/skills/tending-tracker/SKILL.md`.

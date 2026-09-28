@@ -72,11 +72,11 @@ The `flow` command runs the mechanical steps (snapshot, claim, stage, done) and 
 It needs an `adapter.ts` beside your `SKILL.md`. Without one the skill still works, and `flow` says
 the adapter has no code.
 
-- Export `CONTRACT_VERSION` (`"1.4.0"`) and `createAdapter(ctx)`. `ctx` holds your config, your
+- Export `CONTRACT_VERSION` (the contract version you built against, `"2.2.0"` today) and `createAdapter(ctx)`. `ctx` holds your config, your
   secrets, a `transport` that runs your tracker's CLI with no shell, and `warn`. No flow imports
   needed.
 - List the methods you implement in `capabilities`: `getCurrentUser`, `getBacklogSnapshot`,
-  `getItem`, `applyWorkState`, `comment`. The contract's "The code realization" section defines
+  `getItem`, `applyWorkState`, `comment`, `createItem`. The contract's "The code realization" section defines
   each.
 - A read that fails throws; it never returns an empty list.
 - `applyWorkState` builds labels from a fresh read, never from the item it was handed, and never

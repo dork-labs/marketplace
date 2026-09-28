@@ -1,12 +1,11 @@
 /**
  * Doc-completeness guard for the `linear-adapter` skill (spec §3; task 1.1).
  *
- * The v1 `PMClient` is a PROSE contract — a SKILL.md the agent reads and follows,
- * not executable code. A prose contract has no compiler to keep it complete, so
- * this cheap structural test pins that the contract documents every capability
- * verb, the core `WorkItem` fields, and the load-bearing invariants. If the
- * adapter shape (spec §3) changes, this test is the early warning that the prose
- * drifted.
+ * The mechanical verbs are code (`adapter.ts`, pinned by
+ * `linear-code-adapter.test.ts`); the skill still carries the verbs an agent
+ * runs by hand and the rules for them. Prose has no compiler, so this cheap
+ * structural test pins that the skill names every capability verb, the core
+ * `WorkItem` fields, and the load-bearing invariants.
  */
 import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
@@ -200,11 +199,5 @@ describe('linear-adapter SKILL.md — prose-contract completeness', () => {
     const stated = Number(claimed?.[1]);
     expect(sizeOrdinal('xl')).toBe(stated);
     expect(sizeOrdinal(8)).toBe(stated);
-  });
-
-  it('frames itself as a prose contract that P5 promotes into a typed PMClient', () => {
-    expect(skill).toMatch(/prose contract/i);
-    expect(skill).toContain('PMClient');
-    expect(skill).toMatch(/P5/);
   });
 });

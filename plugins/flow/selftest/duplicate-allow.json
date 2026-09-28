@@ -43,7 +43,6 @@
     {
       "text": "if you reached it via a symlink or resolve the real path first the flow root is two directories above the skill directory",
       "paths": [
-        "skills/building-adapters/SKILL.md",
         "skills/closing-work/SKILL.md",
         "skills/decomposing-work/SKILL.md",
         "skills/executing-specs/SKILL.md",
@@ -53,7 +52,6 @@
         "skills/grooming-backlog/SKILL.md",
         "skills/ideating-features/SKILL.md",
         "skills/initializing-flow/SKILL.md",
-        "skills/linear-adapter/SKILL.md",
         "skills/tending-tracker/SKILL.md",
         "skills/triaging-work/SKILL.md",
         "skills/verifying-work/SKILL.md"
@@ -63,7 +61,6 @@
     {
       "text": "every reference below is relative to that root",
       "paths": [
-        "skills/building-adapters/SKILL.md",
         "skills/closing-work/SKILL.md",
         "skills/decomposing-work/SKILL.md",
         "skills/executing-specs/SKILL.md",
@@ -73,7 +70,6 @@
         "skills/grooming-backlog/SKILL.md",
         "skills/ideating-features/SKILL.md",
         "skills/initializing-flow/SKILL.md",
-        "skills/linear-adapter/SKILL.md",
         "skills/tending-tracker/SKILL.md",
         "skills/triaging-work/SKILL.md",
         "skills/verifying-work/SKILL.md"
@@ -206,11 +202,6 @@
     {
       "text": "otherwise the adapter is the at its inside it means the output s",
       "paths": ["skills/flow-groom/SKILL.md", "skills/flow-triage/SKILL.md"],
-      "reason": "Present before the self-test existed; the prose trim (DOR-2377) removes it."
-    },
-    {
-      "text": "never answer its own comments or the body carries",
-      "paths": ["skills/linear-adapter/SKILL.md", "skills/tending-tracker/SKILL.md"],
       "reason": "Present before the self-test existed; the prose trim (DOR-2377) removes it."
     }
   ]

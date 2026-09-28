@@ -4,6 +4,15 @@ Installs of this plugin are pinned to a commit SHA, so a fix here does not reach
 you until you **reinstall it** (Marketplace → flow → reinstall, or re-run your
 `--plugin-dir` checkout's `git pull`). Each entry below says whether that matters.
 
+## 0.46.0
+
+**The tracker adapter's instructions are much shorter, so an agent reads less before it touches your tracker. Nothing it does has changed. Reinstall if you want the shorter versions; your runs work the same either way.**
+
+- The Linear adapter's instructions went from about 6,600 words to about 1,400. Steps the `flow` command already does in code (claiming an item, moving it between stages, finishing it, filing new work, pulling the backlog) are now one line each: "run `flow <verb>`".
+- The guide for building your own adapter went from about 2,400 words to under 1,000. It points at the adapter contract instead of repeating it, and a checklist that only restated the contract is gone.
+- The stories behind the adapter's rules (the Composio quirks, the team-scope mistake, the first backlog clean-up) moved to `docs/why.md`.
+- The "Build your tracker adapter" page now names the current contract version and the `createItem` method.
+
 ## 0.45.0
 
 **The `/flow` commands are much shorter, so an agent reads less before it starts work. Nothing they do has changed. Reinstall if you want the shorter versions; your runs work the same either way.**

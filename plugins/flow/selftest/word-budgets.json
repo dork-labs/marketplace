@@ -68,8 +68,8 @@
     "target": 669
   },
   "docs/building-your-adapter.mdx": {
-    "baseline": 901,
-    "target": 901
+    "baseline": 616,
+    "target": 616
   },
   "docs/CHARTER.md": {
     "baseline": 1123,
@@ -120,16 +120,16 @@
     "target": 1691
   },
   "docs/why.md": {
-    "baseline": 503,
-    "target": 503
+    "baseline": 844,
+    "target": 844
   },
   "README.md": {
     "baseline": 2438,
     "target": 2438
   },
   "skills/building-adapters/SKILL.md": {
-    "baseline": 2435,
-    "target": 2435
+    "baseline": 947,
+    "target": 947
   },
   "skills/capturing-work/SKILL.md": {
     "baseline": 568,
@@ -176,8 +176,8 @@
     "target": 4390
   },
   "skills/linear-adapter/SKILL.md": {
-    "baseline": 6905,
-    "target": 1000
+    "baseline": 1440,
+    "target": 1440
   },
   "skills/specifying-work/SKILL.md": {
     "baseline": 904,
