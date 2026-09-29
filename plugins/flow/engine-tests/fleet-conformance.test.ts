@@ -12,7 +12,17 @@
  * order and message text are not.
  */
 
-import { readFileSync, readdirSync } from 'node:fs';
+import { execFileSync } from 'node:child_process';
+import {
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  readdirSync,
+  realpathSync,
+  rmSync,
+  writeFileSync,
+} from 'node:fs';
+import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import Ajv from 'ajv';
@@ -49,6 +59,7 @@ import {
   type FlowStateStore,
 } from '../scripts/flow-state.ts';
 import type { FlowRun } from '../scripts/flow-run.ts';
+import { openFlowStateFile } from '../scripts/flow-state-file.ts';
 
 const FIXTURE_DIR = path.resolve(
   path.dirname(fileURLToPath(import.meta.url)),
@@ -87,7 +98,7 @@ function expectedCodes(expected: unknown): string[] {
 }
 
 /** The runner for each case file, by file name. */
-const RUNNERS: Record<string, (c: Case) => void> = {
+const RUNNERS: Record<string, (c: Case) => void | Promise<void>> = {
   'account-id.cases.json': ({ input, expected }) => {
     const id = mintAccountId({
       label: input.label as string | null,
@@ -198,13 +209,15 @@ const RUNNERS: Record<string, (c: Case) => void> = {
     ).toEqual(expected.remove);
   },
 
-  'flow-run.cases.json': ({ input, expected }) => {
+  'flow-run.cases.json': async ({ input, expected }) => {
     const raw = JSON.stringify(input.state);
     expect(FlowStateSchema.safeParse(input.state).success).toBe(expected.valid);
     if (input.write === undefined) {
       expect(parseFlowState(raw)).toEqual(expected.readBack);
       return;
     }
+    // The pure upsert, with the stamp the writer's clock (input.now) gives it.
+    const now = input.now as string;
     let cell: string | undefined = raw;
     const store: FlowStateStore = {
       read: () => cell,
@@ -212,10 +225,25 @@ const RUNNERS: Record<string, (c: Case) => void> = {
         cell = contents;
       },
     };
-    writeFlowRun(store, input.write as FlowRun);
+    writeFlowRun(store, { ...(input.write as FlowRun), updatedAt: now });
     expect(JSON.parse(cell)).toEqual(expected.readBack);
     expect(readFlowState(store)).toEqual(expected.readBack);
     expect(serializeFlowState(readFlowState(store))).toBe(cell);
+
+    // The real store, which stamps updatedAt itself under the lock: the file it
+    // leaves must be exactly the case's readBack.
+    const repo = realpathSync(mkdtempSync(path.join(os.tmpdir(), 'flow-conformance-')));
+    try {
+      execFileSync('git', ['init', '-q', repo]);
+      const file = path.join(repo, '.dork', 'flow', 'flow-state.json');
+      mkdirSync(path.dirname(file), { recursive: true });
+      writeFileSync(file, raw);
+      const real = openFlowStateFile(repo, { now: () => new Date(now) });
+      expect((await real.upsertRun(input.write as FlowRun)).status).toBe('written');
+      expect(JSON.parse(readFileSync(file, 'utf8'))).toEqual(expected.readBack);
+    } finally {
+      rmSync(repo, { recursive: true, force: true });
+    }
   },
 };
 
@@ -227,8 +255,8 @@ describe('the fleet conformance fixture', () => {
   // Purpose: the folder is the contract DorkOS vendors. Pin its version and the
   // exact set of case files, so a case file added without a runner (and so never
   // run here) fails instead of passing silently.
-  it('is contract 4.0.1 with exactly the known case files', () => {
-    expect(readFileSync(path.join(FIXTURE_DIR, 'CONTRACT_VERSION'), 'utf8').trim()).toBe('4.0.1');
+  it('is contract 4.1.0 with exactly the known case files', () => {
+    expect(readFileSync(path.join(FIXTURE_DIR, 'CONTRACT_VERSION'), 'utf8').trim()).toBe('4.1.0');
     expect(caseFiles).toEqual(Object.keys(RUNNERS).sort());
   });
 

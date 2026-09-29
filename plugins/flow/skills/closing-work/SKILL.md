@@ -8,15 +8,16 @@ description: The /flow engine's DONE stage — report completion on a work item,
 `<flow-root>` is two folders above this file's `realpath`. `flow <verb>` means
 `node --experimental-strip-types "<flow-root>/scripts/flow.ts" <verb>`.
 
-DONE runs only **after the human-review gate approved** the work (and, unattended, after
-the merge). It closes the item, files follow-ups, checks the project, and cleans up.
+DONE runs only **after the review gate approved** the work (a person or the reviewer
+agent; unattended, after the merge). It closes the item, files follow-ups, checks the
+project, cleans up.
 Links and project reads go through the adapter at `adapter.path` (`link`, `getProjects`,
 `getEligibleWork`, `getRelations`, and `completeProject` only when supported).
 
 ### 1. Identify the item
 
-The given identifier; else only strong local context (the spec's provenance block, an
-item claimed this session); else ask. Never close casually.
+The given identifier; else strong local context (the spec's provenance block, an item
+claimed this session); else ask.
 
 ### 2. Write the summary
 

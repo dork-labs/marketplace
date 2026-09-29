@@ -20,17 +20,21 @@
  *   byte-for-byte alone. The fail-soft reader would read such a file as `{}`,
  *   and writing that back would delete every other in-flight run.
  *
- * The write helpers run the existing store helpers in `flow-state.ts`
- * ({@link writeFlowRun}, {@link updateFlowRunStatus}) against an in-memory
- * {@link FlowStateStore} inside the lock, so the upsert and update rules stay in
- * one place. There is deliberately no plain `FlowStateStore` over the file: its
+ * The write helpers run against an in-memory {@link FlowStateStore} inside
+ * the lock, with the reader and serializer in `flow-state.ts`, so the upsert
+ * and update rules stay in one place. There is deliberately no plain `FlowStateStore` over the file: its
  * synchronous `write` could only replace the whole file without the lock, which
  * is exactly the lost-update this module exists to prevent.
+ *
+ * - **Every write stamps `updatedAt`** on the run it writes (spec
+ *   `flow-multiproject` §6.3), with the store's clock, so a reader can tell a
+ *   run that is still moving from one that went quiet.
  *
  * @module @dorkos/flow/flow-state-file
  */
 
 import { readFileSync } from 'node:fs';
+import { isDeepStrictEqual } from 'node:util';
 import path from 'node:path';
 import {
   updateJsonFile,
@@ -47,8 +51,6 @@ import {
   FlowStateSchema,
   parseFlowState,
   serializeFlowState,
-  updateFlowRunStatus,
-  writeFlowRun,
   type FlowStateStore,
 } from './flow-state.ts';
 
@@ -106,6 +108,13 @@ export interface FlowStateFile {
   ): Promise<AtomicUpdateResult>;
 }
 
+/** Whether two runs differ in nothing but `updatedAt`. */
+function sameExceptStamp(a: FlowRun, b: FlowRun): boolean {
+  const { updatedAt: _a, ...left } = a;
+  const { updatedAt: _b, ...right } = b;
+  return isDeepStrictEqual(left, right);
+}
+
 /**
  * Check the existing file before a write: missing is an empty store; anything
  * that fails {@link FlowStateSchema} is refused.
@@ -151,16 +160,40 @@ function writeUnderLock(
   );
 }
 
+/** Options for {@link openFlowStateFile}. */
+export interface FlowStateFileOptions {
+  /** The clock that stamps `updatedAt` on every write. Default: the wall clock. */
+  now?: () => Date;
+}
+
 /**
  * Open the run store of the project at `project` (any folder in its main
  * checkout or one of its linked worktrees).
  *
  * @param project - A folder inside the project's git checkout.
+ * @param options - The clock that stamps `updatedAt`.
  * @returns The store; nothing is read or written until a method is called.
  * @throws {ConfigError} When `project` is not inside a git checkout.
  */
-export function openFlowStateFile(project: string): FlowStateFile {
+export function openFlowStateFile(
+  project: string,
+  options: FlowStateFileOptions = {}
+): FlowStateFile {
   const file = path.join(resolveMainCheckout(project), STATE_RELATIVE_PATH);
+  const clock = options.now ?? (() => new Date());
+  /** The run as written now: `updatedAt` is the write time. */
+  const stamped = (run: FlowRun): FlowRun => ({ ...run, updatedAt: clock().toISOString() });
+  /**
+   * Replace one run, unless nothing but its stamp would change: a write that
+   * changes nothing leaves `updatedAt` (and the file) alone, so a run that is
+   * only waiting never looks busy.
+   */
+  const put = (store: FlowStateStore, previous: FlowRun | undefined, next: FlowRun): void => {
+    if (previous !== undefined && sameExceptStamp(previous, next)) return;
+    const state = parseFlowState(store.read());
+    state[next.issueId] = stamped(next);
+    store.write(serializeFlowState(state));
+  };
   return {
     path: file,
     read() {
@@ -176,7 +209,11 @@ export function openFlowStateFile(project: string): FlowStateFile {
       return withHeldLock(`${file}.claim.lock`, fn, options);
     },
     upsertRun(run, options) {
-      return writeUnderLock(file, (store) => writeFlowRun(store, run), options);
+      return writeUnderLock(
+        file,
+        (store) => put(store, parseFlowState(store.read())[run.issueId], run),
+        options
+      );
     },
     removeRun(issueId, options) {
       return writeUnderLock(
@@ -193,7 +230,11 @@ export function openFlowStateFile(project: string): FlowStateFile {
     setRunStatus(issueId, status, patch, options) {
       return writeUnderLock(
         file,
-        (store) => updateFlowRunStatus(store, issueId, status, patch),
+        (store) => {
+          const existing = parseFlowState(store.read())[issueId];
+          if (existing === undefined) return;
+          put(store, existing, { ...existing, ...patch, issueId, status });
+        },
         options
       );
     },
@@ -204,8 +245,7 @@ export function openFlowStateFile(project: string): FlowStateFile {
           const state = parseFlowState(store.read());
           const existing = state[issueId];
           if (existing === undefined) return;
-          state[issueId] = { ...update(existing), issueId };
-          store.write(serializeFlowState(state));
+          put(store, existing, { ...update(existing), issueId });
         },
         options
       );
@@ -216,7 +256,7 @@ export function openFlowStateFile(project: string): FlowStateFile {
         (store) => {
           const existing = parseFlowState(store.read())[issueId];
           if (existing === undefined) return;
-          updateFlowRunStatus(store, issueId, existing.status, { stage });
+          put(store, existing, { ...existing, stage });
         },
         options
       );

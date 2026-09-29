@@ -105,3 +105,14 @@ export function flowVersion(flowRoot: string): string {
     return 'unknown';
   }
 }
+
+/**
+ * Whether an ISO time names its zone (`Z` or an offset). A time without one
+ * would be read in this machine's zone, which may not be the one meant.
+ *
+ * @param value - The time as given.
+ * @returns `true` when it ends in `Z` or `±hh:mm`.
+ */
+export function hasZone(value: string): boolean {
+  return /T\d{2}:\d{2}(?::\d{2}(?:\.\d+)?)?(?:Z|[+-]\d{2}:?\d{2})$/i.test(value.trim());
+}

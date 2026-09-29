@@ -13,6 +13,8 @@
 
 import { UsageError } from '../errors.ts';
 import { projectionFor, type WorkStateChange } from '../work-state.ts';
+import { resolveMainCheckout } from '../main-checkout.ts';
+import { retireChecker } from './checker.ts';
 import type { VerbContext, VerbResult } from './context.ts';
 import { recordEvent } from './auto-journal.ts';
 import { signBody } from './provenance.ts';
@@ -75,6 +77,8 @@ export async function releaseItem(
   if (!ctx.dryRun) {
     await applyAndVerify(adapter, item, change);
     if (existing !== undefined) {
+      // A pick checker must not outlive the run it checks.
+      await retireChecker(ctx, store, resolveMainCheckout(ctx.projectDir), item.id);
       const removed = await store.removeRun(item.id);
       requireStored(removed.status, store.path, `run "flow release ${input.identifier}" again`);
     }

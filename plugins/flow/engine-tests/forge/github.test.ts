@@ -17,7 +17,12 @@ import { describe, expect, it } from 'vitest';
 
 import type { ProcessOptions, ProcessResult } from '../../scripts/cli/context.ts';
 import { ConfigError, EXIT } from '../../scripts/errors.ts';
-import { createGithubForge, failingChecks, parsePrView } from '../../scripts/forge/github.ts';
+import {
+  createGithubForge,
+  failingChecks,
+  parsePrView,
+  pendingChecks,
+} from '../../scripts/forge/github.ts';
 import { ForgeError, forgeTargetFor } from '../../scripts/forge/types.ts';
 import { parsePrView as parseForConflict } from '../../scripts/forge/github.ts';
 
@@ -276,6 +281,75 @@ describe('the other gh calls', () => {
       ],
       ['pr', 'merge', '5', '-R', 'dork-labs/marketplace', '--disable-auto'],
     ]);
+  });
+
+  // Spec flow-multiproject §7.5: a person's verdict at the review gate lands on
+  // the PR, except that GitHub refuses a review of one's own PR: then an
+  // approval posts nothing (the tracker comment is the record) and a request
+  // for changes becomes a plain comment. The body goes through a file, never
+  // the command line.
+  it('review approves or requests changes, and never reviews its own PR', async () => {
+    const bodies: string[] = [];
+    const capture = (args: readonly string[]) => {
+      bodies.push(readFileSync(args[args.indexOf('--body-file') + 1], 'utf8'));
+      return ok('');
+    };
+    const as = (viewer: string) =>
+      forgeWith({
+        'pr view': ok({ author: { login: 'author-a' } }),
+        'api user': { code: 0, stdout: `${viewer}\n`, stderr: '' },
+        'pr review': capture,
+        'pr comment': capture,
+      });
+
+    const other = as('reviewer-b');
+    expect(await other.forge.review(5, { event: 'approve', body: 'Shipped from DorkOS.' })).toBe(
+      'reviewed'
+    );
+    expect(other.gh.calls.at(-1)?.args.slice(0, 6)).toEqual([
+      'pr',
+      'review',
+      '5',
+      '-R',
+      'dork-labs/marketplace',
+      '--approve',
+    ]);
+    expect(
+      await other.forge.review(5, { event: 'request-changes', body: 'Rename the flag.' })
+    ).toBe('reviewed');
+    expect(other.gh.calls.at(-1)?.args).toContain('--request-changes');
+
+    const own = as('author-a');
+    expect(await own.forge.review(5, { event: 'approve', body: 'x' })).toBe('skipped');
+    expect(own.gh.calls.some((c) => c.args[1] === 'review')).toBe(false);
+    expect(await own.forge.review(5, { event: 'request-changes', body: 'Fix it.' })).toBe(
+      'commented'
+    );
+    expect(own.gh.calls.at(-1)?.args.slice(0, 3)).toEqual(['pr', 'comment', '5']);
+    expect(bodies).toEqual(['Shipped from DorkOS.', 'Rename the flag.', 'Fix it.']);
+  });
+
+  // Review finding 11: "the checks passed" needs the running ones counted too;
+  // only a finished check run or a settled commit status is done.
+  it('counts the checks that have not finished', () => {
+    expect(
+      pendingChecks(
+        (fixture('pr-view-open.json') as { statusCheckRollup: unknown }).statusCheckRollup
+      )
+    ).toBe(0);
+    expect(
+      pendingChecks([
+        { __typename: 'CheckRun', status: 'IN_PROGRESS', conclusion: '' },
+        { __typename: 'CheckRun', status: 'QUEUED', conclusion: '' },
+        { __typename: 'CheckRun', status: 'COMPLETED', conclusion: 'SUCCESS' },
+        { __typename: 'StatusContext', state: 'PENDING' },
+        { __typename: 'StatusContext', state: 'SUCCESS' },
+      ])
+    ).toBe(3);
+    // Re-review N3: no checks at all have not passed (they may not have
+    // registered yet), and an unreadable rollup is no better.
+    expect(pendingChecks([])).toBe(1);
+    expect(pendingChecks(undefined)).toBe(1);
   });
 
   // recentGroupFailures reads failed merge-group runs in the window and their failing jobs.

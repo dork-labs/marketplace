@@ -138,7 +138,7 @@ When the engine asks you versus proceeds on its own, under `involvement`:
 | --------------------------------- | ---------------------------------------------------------------------- | --------------------------------------------------------------------------------------- |
 | `comms`                           | Voice and channel-inference for how the engine talks to you.           | `"infer-from-trigger"`                                                                  |
 | `calibration.proceedSilentlyWhen` | Conditions under which the engine acts without asking.                 | `["reversible", "confident"]`                                                           |
-| `calibration.alwaysAsk`           | The non-trimmable floor: it **always** asks for these, never silently. | `["irreversible-or-destructive", "outward-facing", "secrets-or-spend", "scope-change"]` |
+| `calibration.alwaysAsk`           | The non-trimmable floor: these are **always checked**, never silently. | `["irreversible-or-destructive", "outward-facing", "secrets-or-spend", "scope-change"]` |
 | `calibration.stageBias.intake`    | Default posture during shaping stages.                                 | `"ask"`                                                                                 |
 | `calibration.stageBias.execution` | Default posture during execution.                                      | `"proceed-and-log"`                                                                     |
 | `nudge.relay`                     | Send an out-of-band Relay ping when a question parks.                  | `false`                                                                                 |
@@ -149,8 +149,30 @@ When the engine asks you versus proceeds on its own, under `involvement`:
 <Callout type="warn">
   `calibration.alwaysAsk` is a **floor, not a preference**. The schema enforces at least one entry
   (`alwaysAsk: []` fails to parse), so autonomy can never be silently widened past the four
-  irreversible-or-outward classes. You can add to the floor; you cannot empty it.
+  irreversible-or-outward classes. You can add to the floor; you cannot empty it. Something on
+  the floor is always checked: by you, or, if you choose, by the reviewer agent. Never by nobody,
+  and a decision about secrets or spending always waits for you.
 </Callout>
+
+### How much it does on its own
+
+Each project has one more dial, and it is not in any file in the repo: **Ask me first**, **Tell
+me after** or **Just do it**, set in the project's Flow settings in DorkOS. It decides who answers
+each kind of ask, so flow can run on its own without anything going unchecked.
+
+| Kind of ask            | Ask me first  | Tell me after                                    | Just do it                              |
+| ---------------------- | ------------- | ------------------------------------------------ | --------------------------------------- |
+| Ship finished work     | asks you      | the reviewer agent approves, and you're told     | the reviewer agent approves             |
+| Agent questions        | waits for you | the agent goes with its pick at the deadline     | the agent picks and writes down why     |
+| Sort new ideas         | asks you      | every morning, and you're told                   | every morning                           |
+| Retry and fix problems | asks you      | on its own, and you're told                      | on its own                              |
+
+It lives in DorkOS, not in `.agents/flow/`, because it decides who checks the agents, and an
+agent can write any file in the checkout. Only a person can change it. Flow reads a copy DorkOS
+keeps for it; with no settings chosen yet, flow asks you first, except that failing checks are
+still fixed on their own as they always were. `flow autonomy` shows what is in force. The reviewer
+agent only ships work when `review.adversarial` is on and it recorded a clean review of the latest
+commit; without it, "Ship finished work" stays at Ask me first.
 
 The `nudge` flags are the only out-of-band attention channel. In shared-account mode (the common case, where there is no separate reviewer identity), a parked question's only durable signal is a tracker comment plus the `agent/needs-input` label; turning on `nudge.relay` or `nudge.telegram` promotes that to a real ping so a parked question is seen, not buried.
 

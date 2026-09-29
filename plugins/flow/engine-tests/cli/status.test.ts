@@ -17,6 +17,7 @@ import path from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
 import type { FlowRun } from '../../scripts/flow-run.ts';
+import { formatWhen } from '../../scripts/question.ts';
 import { main, type MainDeps } from '../../scripts/flow.ts';
 import type { WorkItem } from '../../scripts/tracker/types.ts';
 import { createFakeAdapter, type FakeBacklog } from '../fixtures/cli/fake-adapter/adapter.ts';
@@ -301,6 +302,25 @@ describe('flow status', () => {
     expect(result.stdout.split('\n')[0]).toContain('Paused since 2026-09-26T08:00:00.000Z');
     const out = (await status(['--json'])).json();
     expect(out.paused).toMatchObject({ since: '2026-09-26T08:00:00.000Z' });
+  });
+
+  it('says when a timed pause ends, and forgets one that has ended', async () => {
+    // Purpose: spec flow-multiproject §5.1: a timed pause reads "Paused until",
+    // and once its end has passed flow is not paused any more.
+    mkdirSync(path.join(project, '.agents', 'flow'), { recursive: true });
+    const flag = (until: string) =>
+      writeFileSync(
+        path.join(project, '.agents', 'flow', 'paused.json'),
+        JSON.stringify({ pausedAt: '2026-09-26T08:00:00.000Z', until })
+      );
+    const later = new Date(NOW.getTime() + 3_600_000).toISOString();
+    flag(later);
+    const result = await status([]);
+    // Review finding 11: the end reads in words, the same on every machine.
+    expect(result.stdout.split('\n')[0]).toContain(`Paused until ${formatWhen(later)}`);
+    expect((await status(['--json'])).json().paused).toMatchObject({ until: later });
+    flag(new Date(NOW.getTime() - 1).toISOString());
+    expect((await status(['--json'])).json().paused).toBeNull();
   });
 
   it('lists parked items, and with an identifier shows the last parked question', async () => {

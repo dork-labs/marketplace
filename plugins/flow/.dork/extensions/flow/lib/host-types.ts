@@ -134,7 +134,13 @@ export interface SessionInfo {
   runtime: string;
   /** The account it runs on, or `null`. */
   accountId: string | null;
-  /** The tracker item it serves, when known. */
+  /**
+   * The tracker items it serves, newest first (DorkOS with multi-item chats):
+   * `this-chat` runs in this session, `own-chat` was launched from it and runs
+   * in its own chat. Read this first.
+   */
+  trackerItems?: { id: string; via: 'this-chat' | 'own-chat' }[];
+  /** The tracker item it serves, when known. Deprecated in DorkOS for {@link trackerItems}. */
   trackerItem?: { id: string };
 }
 
@@ -154,7 +160,13 @@ export interface LimitedSessionInfo {
   scope: 'account' | 'model';
   /** The session's model, or `null`. */
   model: string | null;
-  /** The tracker item it serves, when known. */
+  /**
+   * The tracker items it serves, newest first (DorkOS with multi-item chats):
+   * `this-chat` runs in this session, `own-chat` was launched from it and runs
+   * in its own chat. Read this first.
+   */
+  trackerItems?: { id: string; via: 'this-chat' | 'own-chat' }[];
+  /** The tracker item it serves, when known. Deprecated in DorkOS for {@link trackerItems}. */
   trackerItem?: { id: string };
 }
 

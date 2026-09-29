@@ -22,10 +22,23 @@
  * @module @dorkos/flow/cli/drain
  */
 
+import { randomBytes, randomUUID } from 'node:crypto';
+import { existsSync, mkdirSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 
 import { chooseAccount, rankAccounts } from '../drain/account-rank.ts';
 import { answerPointer, findAnswer } from '../drain/answer.ts';
+import type { RunQuestion } from '../flow-run.ts';
+import { belongsToPark, checkBrief, parkedAnswer, personOnly, pickComment } from '../question.ts';
+import {
+  claimAnswer,
+  claimCheck,
+  clearQuestion,
+  recordChecker,
+  releaseAnswer,
+  releaseCheck,
+} from './question-write.ts';
+import { tokenHash } from './report.ts';
 import { acquireDrainLock } from '../drain/lock.ts';
 import {
   findMintedSession,
@@ -36,7 +49,8 @@ import {
   type PlannedAccount,
 } from '../drain/runner.ts';
 import { ingestStreamLog } from '../drain/stream-log.ts';
-import { ConfigError, PausedError, UsageError } from '../errors.ts';
+import { ConfigError, FlowError, PausedError, PreconditionError, UsageError } from '../errors.ts';
+import { removeWorktree, workspacesDir } from '../drain/worktree.ts';
 import {
   loadAccounts,
   loadFleetPolicy,
@@ -53,6 +67,7 @@ import { hostPreference, resolveHost } from '../launchers/resolve.ts';
 import { DEFAULT_START_TIMEOUT_MS, launchAccountFor, sessionHome } from '../launchers/common.ts';
 import {
   HOST_NAMES,
+  LaunchError,
   type HostName,
   type LaunchAccount,
   type LaunchPermissionMode,
@@ -75,6 +90,9 @@ import {
 import { signBody, unsignedBody } from './provenance.ts';
 import { releaseItem } from './release.ts';
 import { journalUsage } from './usage-journal.ts';
+import { stopInForce, type AutonomyRead } from '../autonomy.ts';
+import { retireChecker } from './checker.ts';
+import { runtimeSession } from './session-id.ts';
 import { applyAndVerify, isOpenItem, sessionProvenance, setupWrite } from './work-write.ts';
 
 /** The permission modes a drain session may start in. */
@@ -100,6 +118,64 @@ export interface DrainOptions {
   mintToken?: () => string;
   /** Look for a session a stopped pass started (default: this machine's files, or DorkOS). */
   findSession?: PassDeps['findSession'];
+}
+
+/**
+ * A detached worktree of `branch` (else `HEAD`) at `target`, for a session that
+ * must not work in the worker's tree. Reuses one that exists.
+ *
+ * @param ctx - The verb's context.
+ * @param mainCheckout - The project's main checkout.
+ * @param branch - The run's branch.
+ * @param target - Where to put it.
+ * @throws {PreconditionError} When git cannot add it.
+ */
+async function addDetachedWorktree(
+  ctx: VerbContext,
+  mainCheckout: string,
+  branch: string,
+  target: string
+): Promise<void> {
+  if (existsSync(target)) return;
+  mkdirSync(path.dirname(target), { recursive: true });
+  for (const ref of [branch, 'HEAD']) {
+    const result = await ctx.runProcess('git', ['worktree', 'add', '-q', '--detach', target, ref], {
+      cwd: mainCheckout,
+    });
+    if (result.code === 0) return;
+  }
+  throw new PreconditionError(`could not add a worktree at ${target} for the pick check`);
+}
+
+/**
+ * A pointer to an answer `flow answer` recorded on the run, for the worker's
+ * `continue` message.
+ *
+ * @param question - The answered question.
+ * @param identifier - The item.
+ * @returns The pointer, with the answer's words.
+ */
+export function recordedAnswerPointer(question: RunQuestion, identifier: string): string {
+  const answer = question.answer;
+  if (answer === undefined) return `the latest comment on ${identifier}`;
+  const who =
+    answer.by === 'person'
+      ? 'a person, from DorkOS'
+      : answer.by === 'reviewer-agent'
+        ? 'the reviewer agent'
+        : 'your own pick, at the deadline';
+  return `the answer recorded on ${identifier} at ${answer.at} by ${who}: "${answer.text}"`;
+}
+
+/**
+ * Whether the project's dial says Ask me first for "Retry and fix problems".
+ * With no copy of the dial at all, flow fixes failing checks as it always has.
+ *
+ * @param read - What reading the dial found (`null`: not read).
+ * @returns `true` when the drain must park on red checks instead of fixing them.
+ */
+export function asksBeforeFixing(read: AutonomyRead | null): boolean {
+  return read !== null && stopInForce(read, 'retry') === 'ask';
 }
 
 /**
@@ -208,7 +284,7 @@ export async function drain(ctx: VerbContext, options: DrainOptions = {}): Promi
   if (paused !== null && !ctx.manual) {
     project.flushWarnings();
     throw new PausedError(
-      `flow is paused${paused.pausedAt ? ` (since ${paused.pausedAt})` : ''}; /flow:resume lifts it, or pass --manual when a person is driving`
+      `flow is paused${paused.until ? ` until ${paused.until}` : paused.pausedAt ? ` (since ${paused.pausedAt})` : ''}; /flow:resume lifts it${paused.until ? ' sooner' : ''}, or pass --manual when a person is driving`
     );
   }
   const parallel = parallelOf(ctx, config.drain.parallel);
@@ -240,6 +316,8 @@ export async function drain(ctx: VerbContext, options: DrainOptions = {}): Promi
 
   const setup = await setupWrite(ctx, CAPABILITIES);
   const { adapter, store, stages } = setup;
+  /** The chat running this drain: every run it starts records it as `dispatchedBy`. */
+  const launchedBy = runtimeSession(ctx.env).sessionId;
   let agent: string | undefined;
   /** The agent's account id, resolved once (`identity.agent`, or the tracker's current user for `auto`). */
   const agentId = async (): Promise<string> =>
@@ -318,6 +396,112 @@ export async function drain(ctx: VerbContext, options: DrainOptions = {}): Promi
     },
   });
 
+  /**
+   * Hand a floor question's pick to the reviewer agent (spec flow-multiproject
+   * §7.5): mint the check's token once, under the lock, then start an
+   * independent reviewer session with the brief. A spend never gets here
+   * (`parkedAnswer` refuses it); the session is a fresh one, never the worker's.
+   */
+  const handToReviewer = async (
+    issueId: string,
+    identifier: string,
+    question: RunQuestion
+  ): Promise<void> => {
+    const run = store.read()[issueId];
+    if (run === undefined || personOnly(question)) return;
+    const runtime = (run.runtime ?? 'claude-code') as RuntimeName;
+    const account = await deps.reviewerAccount(runtime);
+    if (account === null) {
+      ctx.warn(`no account may check the pick on ${identifier} now; the next pass tries again`);
+      return;
+    }
+    const token = randomBytes(16).toString('hex');
+    const hash = tokenHash(token);
+    if (!(await claimCheck(store, issueId, question.askedAt, hash))) return;
+    // Its own session and its own worktree, like the drain's code reviewer:
+    // never the worker's, and the token-bearing brief never in the worker's tree.
+    const sessionId = randomUUID();
+    const target = path.join(
+      workspacesDir(dorkHome, repoName),
+      `check-${identifier}-${Date.parse(question.askedAt)}`
+    );
+    try {
+      await addDetachedWorktree(ctx, mainCheckout, run.branch, target);
+      const promptFile = path.join(target, '.dork', 'flow', 'drain', 'briefs', 'question-check.md');
+      mkdirSync(path.dirname(promptFile), { recursive: true });
+      writeFileSync(promptFile, checkBrief(question, identifier, flowCommand, token, sessionId));
+      const host = await hostFor(account.runtime);
+      const handle = await launcher(host).start({
+        role: 'reviewer',
+        runtime: account.runtime,
+        identifier,
+        account: account.path === null ? null : launchAccountFor(account),
+        cwd: target,
+        promptFile,
+        sessionId,
+        ...(model('review') ? { model: model('review') as string } : {}),
+        permissionMode,
+        title: `${identifier} question check`,
+      });
+      await recordChecker(store, issueId, question.askedAt, {
+        host: handle.host,
+        runtime: handle.runtime,
+        sessionId: handle.sessionId,
+        account: handle.account,
+        ...(handle.pid === undefined ? {} : { pid: handle.pid }),
+        cwd: target,
+      });
+      ctx.stderr.write(`flow drain: handed the pick on ${identifier} to the reviewer agent.\n`);
+    } catch (error) {
+      // A check that never started must not hold the question forever: give it
+      // back, so the next pass tries again.
+      await releaseCheck(store, issueId, question.askedAt, hash);
+      await removeWorktree(ctx.runProcess, mainCheckout, target);
+      if (!(error instanceof LaunchError) && !(error instanceof FlowError)) throw error;
+      ctx.warn(
+        `the reviewer agent did not start to check the pick on ${identifier} (${(error as Error).message}); the next pass tries again`
+      );
+    }
+  };
+
+  /**
+   * Stop a pick checker that has no more work: its question is gone, answered
+   * elsewhere or no longer this park's, the item closed, or the checker
+   * stopped without answering (it declined, so the question waits for a
+   * person). A checker still working is left alone.
+   */
+  const reapChecker = async (
+    issueId: string,
+    facts: { closed: boolean; needsInput: boolean },
+    since: string | null | undefined
+  ): Promise<void> => {
+    const q = store.read()[issueId]?.question;
+    const checker = q?.checker;
+    if (q === undefined || checker === undefined || ctx.dryRun) return;
+    let done =
+      q.answer !== undefined ||
+      facts.closed ||
+      !facts.needsInput ||
+      since === undefined ||
+      !belongsToPark(q, since);
+    if (!done) {
+      try {
+        const state = await launcher(checker.host as HostName).state({
+          host: checker.host as HostName,
+          runtime: checker.runtime as RuntimeName,
+          sessionId: checker.sessionId,
+          account: checker.account ?? null,
+          cwd: checker.cwd,
+          ...(checker.pid === undefined ? {} : { pid: checker.pid }),
+        });
+        done = state.kind === 'exited' || state.kind === 'idle';
+      } catch {
+        done = false;
+      }
+    }
+    if (done) await retireChecker(ctx, store, mainCheckout, issueId);
+  };
+
   const deps: PassDeps = {
     store,
     mainCheckout,
@@ -329,6 +513,8 @@ export async function drain(ctx: VerbContext, options: DrainOptions = {}): Promi
       parallel,
       maxLoadPerCpu: config.drain.maxLoadPerCpu,
       maxReviewRounds: config.drain.maxReviewRounds,
+      // "Retry and fix problems" at Ask me first: park on red checks (autonomy.ts).
+      fixFailingChecks: !asksBeforeFixing(project.loaded.autonomy),
       startTimeoutMs: DEFAULT_START_TIMEOUT_MS,
       permissionMode,
       workerModel: model('implementation'),
@@ -354,6 +540,7 @@ export async function drain(ctx: VerbContext, options: DrainOptions = {}): Promi
         title: item.title,
         answer: null as string | null,
       };
+      await reapChecker(item.id, facts, parked === undefined ? undefined : parked.since);
       if (parked === undefined || !facts.needsInput || facts.closed) return facts;
       // The inbox pass leaves drain runs alone, so the drain notices the reply itself.
       const identity = { agent: await agentId(), marker: config.identity.marker };
@@ -367,14 +554,57 @@ export async function drain(ctx: VerbContext, options: DrainOptions = {}): Promi
         ),
         comments: config.comments,
       });
-      if (reply === null || ctx.dryRun) return facts;
+      // Only the question asked for this park counts (a later park, for review
+      // rounds or failing checks, is nobody's answer), spec flow-multiproject §7.5.
+      const question =
+        parked.question !== undefined && belongsToPark(parked.question, parked.since)
+          ? parked.question
+          : undefined;
+      let answer: string | null = reply === null ? null : answerPointer(reply, identifier);
+      const fromQuestion = answer === null ? parkedAnswer(question, ctx.now(), parked.since) : null;
+      if (fromQuestion === 'recorded' && question !== undefined) {
+        // `flow answer` recorded it (from DorkOS, or the pick at a deadline).
+        answer = recordedAnswerPointer(question, identifier);
+      }
+      if (fromQuestion === 'take-pick' && question !== undefined) {
+        // Nobody answered by the deadline: the agent's pick stands. Claimed
+        // under the lock first, so a person's answer or a DorkOS deadline that
+        // got there first wins and this pass posts nothing.
+        if (ctx.dryRun) return facts;
+        const text = pickComment(question, 'agent-default');
+        const recorded = { text, at: ctx.now().toISOString(), by: 'agent-default' };
+        if (await claimAnswer(store, item.id, question.askedAt, recorded)) {
+          try {
+            await adapter.comment(
+              item,
+              signBody(text, config.identity.marker, sessionProvenance(ctx, undefined))
+            );
+          } catch (error) {
+            await releaseAnswer(store, item.id, question.askedAt, recorded);
+            throw error;
+          }
+          answer = recordedAnswerPointer({ ...question, answer: recorded }, identifier);
+        } else {
+          const latest = store.read()[item.id]?.question;
+          if (latest?.answer === undefined || latest.askedAt !== question.askedAt) return facts;
+          answer = recordedAnswerPointer(latest, identifier);
+        }
+      }
+      if (fromQuestion === 'check-pick' && question !== undefined) {
+        // A floor question's wait is over: hand its pick to the reviewer agent
+        // in a session of its own. It stays parked until someone settles it.
+        if (!ctx.dryRun) await handToReviewer(item.id, identifier, question);
+        return facts;
+      }
+      if (answer === null || ctx.dryRun) return facts;
       await applyAndVerify(adapter, item, projectionFor({ type: 'claim' }, { stages }));
-      return {
-        ...facts,
-        claimed: true,
-        needsInput: false,
-        answer: answerPointer(reply, identifier),
-      };
+      // The question is answered and the work resumes on it: clear it, so a
+      // later park never mistakes it for its own.
+      if (question !== undefined) {
+        await retireChecker(ctx, store, mainCheckout, item.id);
+        await clearQuestion(store, item.id, question.askedAt);
+      }
+      return { ...facts, claimed: true, needsInput: false, answer };
     },
     async plan(slots) {
       const plan = await planNext(ctx, project, { count: slots, items, accounts: true });
@@ -428,6 +658,8 @@ export async function drain(ctx: VerbContext, options: DrainOptions = {}): Promi
         host: input.host,
         runtime: input.runtime,
         drain: input.drain,
+        // The chat that ran `flow drain`, so DorkOS lists the run in it too.
+        ...(launchedBy === null ? {} : { dispatchedBy: launchedBy }),
       });
     },
     async release(identifier) {

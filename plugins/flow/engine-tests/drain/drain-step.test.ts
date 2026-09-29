@@ -457,6 +457,24 @@ describe('drainStep: the phase table', () => {
     ]);
   });
 
+  // Spec flow-multiproject §7.7: when the project's "Retry and fix problems"
+  // is Ask me first, red checks and conflicts park the run for a person
+  // instead of going to the worker. Fails if the worker is told to fix them.
+  it('watching + failing or conflicting, fixing not allowed -> parked for a person', () => {
+    const noFix = { ...CFG, fixFailingChecks: false };
+    for (const pr of [
+      prStatus({ failing: [{ name: 'test', url: 'https://ci/1' }] }),
+      prStatus({ conflicting: true, base: 'main' } as Partial<PrStatusFact>),
+    ]) {
+      const out = drainStep(run(watchingDrain()), facts(watchingDrain(), { pr }), noFix, NOW);
+      expect(out.run.drain).toMatchObject({
+        phase: 'parked',
+        parkedReason: PARK_REASONS.checksFailed,
+      });
+      expect(out.actions.some((a) => a.kind === 'send' && a.message === 'ci-red')).toBe(false);
+    }
+  });
+
   // watching + an innocent ejection not yet re-armed at this head: arm once.
   it('watching + ejected, innocent, rearmedFor != head -> watching, arm, rearmedFor = head', () => {
     const failing = [{ name: 'e2e', url: 'https://ci/2' }];
@@ -835,6 +853,58 @@ describe('drainStep: parked runs', () => {
     // With no recorded phase it resumes as working.
     const bare = step(drain('parked', { parkedReason: 'q' }));
     expect(bare.drain.phase).toBe('working');
+  });
+
+  // Review finding 2: at "Retry and fix problems: Ask me first" a red PR parks
+  // for a person; their answer must send the worker to fix the checks, not back
+  // to watching, where the same red checks would park it again forever.
+  it('an answered park on failing checks goes to fixing-ci with the checks and the answer', () => {
+    const failing = [{ name: 'test', url: 'https://ci/1' }];
+    const d = drain('parked', {
+      parkedReason: PARK_REASONS.checksFailed,
+      parkedFrom: 'watching',
+      pr: PR,
+    });
+    const answer = 'the comment by dorian at 2026-09-26T12:05:00.000Z';
+    const out = step(d, {
+      worker: { kind: 'exited', code: 0 },
+      pr: prStatus({ failing }),
+      item: { closed: false, claimed: true, needsInput: false, title: 't', answer },
+    });
+    expect(out.drain).toMatchObject({ phase: 'fixing-ci', parkedReason: null, parkedFrom: null });
+    expect(out.actions).toEqual([
+      {
+        kind: 'send',
+        message: 'ci-red',
+        ctx: { ...BASE, prUrl: PR.url, failing, answer },
+      },
+    ]);
+    expect(render('ci-red', { ...BASE, prUrl: PR.url, failing, answer })).toContain(answer);
+    // Nothing waits on watching: fixing-ci only moves on a push.
+    const next = drainStep(
+      run(out.drain),
+      facts(out.drain, { pr: prStatus({ failing }), worker: { kind: 'busy' } }),
+      { ...CFG, fixFailingChecks: false },
+      NOW
+    );
+    expect(next.run.drain?.phase).toBe('fixing-ci');
+  });
+
+  // Re-review nit: a park on a merge conflict tells the worker about the
+  // conflict when the answer sends it to fix it, not "no failing check".
+  it('an answered park on a merge conflict sends the conflict to the worker', () => {
+    const d = drain('parked', {
+      parkedReason: PARK_REASONS.checksFailed,
+      parkedFrom: 'watching',
+      pr: PR,
+    });
+    const out = step(d, {
+      worker: { kind: 'exited', code: 0 },
+      pr: prStatus({ conflicting: true, base: 'main' } as Partial<PrStatusFact>),
+      item: { closed: false, claimed: true, needsInput: false, title: 't', answer: 'a' },
+    });
+    const sent = out.actions.find((a) => a.kind === 'send');
+    expect(JSON.stringify(sent)).toContain('merge origin/main');
   });
 
   // Who a park waits on (read by the DorkOS panel): every park the reducer

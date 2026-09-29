@@ -15,8 +15,9 @@ Each goal is a one-line **principle** plus a **Conformant when** line that an au
 can check. A goal is not aspirational prose; it is a test the system passes or fails.
 
 **Precedence (when goals tension).** The calibration floor, the always-on review
-gate, and operator override (G12, G14) are **inviolable**. Within them, the system
-pursues **maximal autonomy** (G2). Safety and operator control beat autonomy, always.
+gate, and operator override (G12, G14) are **inviolable**: someone always checks them
+(you, or an agent or rule you trust). Within them, the system pursues **maximal
+autonomy** (G2). Safety and operator control beat autonomy, always.
 
 ---
 
@@ -35,9 +36,10 @@ full spine on its own, and every stage is also a first-class manual command.
 _Conformant when:_ no human is required to _start_ any stage (the loop shapes and
 executes end to end); every stage is **also** reachable as a manual `/flow:<stage>`
 command sharing **one code path** with the autonomous trigger (one skill, two triggers,
-no divergence); and the only things that pull in a human are the calibration floor
+no divergence); and the only things that pull in a checker are the calibration floor
 (irreversible / outward-facing / spend / scope-change), genuine uncertainty, and the
-always-on review gate. Involvement is never stage-gated.
+always-on review gate; who checks is the operator's choice. Involvement is never
+stage-gated.
 
 **G3. The loop never starves.** There is always either progress or a clear, surfaced
 reason there is not.
@@ -94,9 +96,20 @@ requires infrastructure we do not have.
 
 **G12. Honest and safe by design.** The operator always knows what happened and what
 the system is waiting on.
-_Conformant when:_ the review gate and calibration floor are always on; there is no
-silent merge, no hidden truncation, and no overstated autonomy in the product or its
-docs.
+_Conformant when:_ the review gate and calibration floor are always checked, by the
+operator or by a checker they chose (the reviewer agent, or an agent's stated default
+at a deadline for questions off the floor), never by nobody; every such check leaves a
+record of who checked; a decision about secrets or spend always waits for the operator;
+there is no silent merge, no hidden truncation, and no overstated autonomy in the
+product or its docs.
+_Changed 2026-09-28 (flow-multiproject):_ this used to read "a human must answer". A
+floor only a person can clear makes a person the bottleneck for every irreversible or
+outward-facing step, and an unattended loop then waits for days. Handing the check to
+an independent reviewer agent keeps what matters (nothing on the floor goes
+unexamined, and there is a durable record of who checked) and removes the bottleneck.
+Three things stay the operator's alone, because only a person can do them: signing in
+to an outside service, spending past a limit they set, and trusting code from a new
+source.
 
 **G13. Legible and observable.** Full autonomy is only acceptable if it is visible.
 _Conformant when:_ the operator can inspect, at any time, every reconciler's state,

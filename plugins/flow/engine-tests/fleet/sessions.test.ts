@@ -160,6 +160,52 @@ describe('the DorkOS source', () => {
     expect(init.method).toBe('GET');
   });
 
+  it("reads a session's item from trackerItems first, then the older trackerItem", async () => {
+    // Purpose: spec flow-multiproject §6.4: DorkOS now lists every item a chat
+    // works on (newest first) and keeps the single trackerItem for a while, so
+    // flow fleet reads either DorkOS.
+    const row = (fields: Record<string, unknown>) => ({
+      id: '99999999-9999-4999-8999-999999999999',
+      accountId: 'acct-b',
+      cwd: '/work/app',
+      createdAt: '2026-09-26T15:00:00.000Z',
+      status: { lifecycle: 'streaming', limit: null },
+      ...fields,
+    });
+    const both = await fetchDorkosSessions('http://127.0.0.1:4242', identities, {
+      fetchImpl: respond(200, {
+        sessions: [
+          row({
+            trackerItems: [
+              { id: 'DOR-2', via: 'own-chat', runStatus: 'running' },
+              { id: 'DOR-1', via: 'this-chat', runStatus: 'running' },
+            ],
+            trackerItem: { id: 'DOR-1', runStatus: 'running' },
+          }),
+        ],
+      }) as unknown as typeof fetch,
+    });
+    expect(both.sessions.map((s) => s.item)).toEqual(['DOR-2']);
+    const older = await fetchDorkosSessions('http://127.0.0.1:4242', identities, {
+      fetchImpl: respond(200, {
+        sessions: [row({ trackerItem: { id: 'DOR-1', runStatus: 'running' } })],
+      }) as unknown as typeof fetch,
+    });
+    expect(older.sessions.map((s) => s.item)).toEqual(['DOR-1']);
+    // An idle session kept only for its active run: the run status comes from the list too.
+    const idle = await fetchDorkosSessions('http://127.0.0.1:4242', identities, {
+      fetchImpl: respond(200, {
+        sessions: [
+          row({
+            status: undefined,
+            trackerItems: [{ id: 'DOR-3', via: 'this-chat', runStatus: 'running' }],
+          }),
+        ],
+      }) as unknown as typeof fetch,
+    });
+    expect(idle.sessions.map((s) => s.item)).toEqual(['DOR-3']);
+  });
+
   it('gets nothing from a release without live status', async () => {
     // Purpose: a pre-D7 DorkOS must add no rows rather than all of its history.
     const result = await fetchDorkosSessions('http://localhost:4242', identities, {

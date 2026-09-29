@@ -90,6 +90,34 @@ export function failingChecks(rollup: unknown): FailingCheck[] {
 }
 
 /**
+ * How many checks in `statusCheckRollup` have not finished: a check run whose
+ * `status` is not `COMPLETED`, or a commit status still `PENDING` or `EXPECTED`.
+ *
+ * A PR with no checks at all, or a rollup that cannot be read, counts as one
+ * pending check: nothing has passed yet (checks may not have registered), so
+ * nothing may treat it as passed.
+ *
+ * @param rollup - The `statusCheckRollup` array from `gh pr view --json`.
+ * @returns The count; at least 1 when there are no checks.
+ */
+export function pendingChecks(rollup: unknown): number {
+  if (!Array.isArray(rollup) || rollup.length === 0) return 1;
+  let pending = 0;
+  for (const entry of rollup) {
+    const check = record(entry);
+    if (check === undefined) continue;
+    const status = str(check.status)?.toUpperCase();
+    const state = str(check.state)?.toUpperCase();
+    if (
+      status !== undefined ? status !== 'COMPLETED' : state === 'PENDING' || state === 'EXPECTED'
+    ) {
+      pending += 1;
+    }
+  }
+  return pending;
+}
+
+/**
  * Parse `gh pr view --json state,autoMergeRequest,statusCheckRollup,headRefOid,baseRefName,mergeable,mergeStateStatus`.
  *
  * @param raw - The parsed JSON.
@@ -113,6 +141,7 @@ export function parsePrView(raw: unknown, queued: boolean, where: string): PrSta
   return {
     state: (state as string).toLowerCase() as PrStatus['state'],
     failing: failingChecks(view.statusCheckRollup),
+    pendingChecks: pendingChecks(view.statusCheckRollup),
     armed: view.autoMergeRequest !== null && view.autoMergeRequest !== undefined,
     queued,
     headSha,
@@ -399,6 +428,42 @@ export function createGithubForge(options: GithubForgeOptions): Forge {
         ['pr', 'merge', String(pr), '-R', repoArg, '--disable-auto'],
         `disarming ${target.repo}#${pr}`
       );
+    },
+
+    async review(pr, input) {
+      const where = `${target.repo}#${pr}`;
+      const view = record(
+        await ghJson(
+          ['pr', 'view', String(pr), '-R', repoArg, '--json', 'author'],
+          `reading who wrote ${where}`
+        )
+      );
+      const author = str(record(view?.author)?.login);
+      const viewer = (
+        await gh(['api', ...hostArgs, 'user', '--jq', '.login'], 'reading the signed-in account')
+      ).trim();
+      const own = author !== undefined && viewer !== '' && author === viewer;
+      if (own && input.event === 'approve') return 'skipped';
+      const dir = mkdtempSync(path.join(os.tmpdir(), 'flow-review-'));
+      const bodyFile = path.join(dir, 'body.md');
+      try {
+        writeFileSync(bodyFile, input.body);
+        if (own) {
+          await gh(
+            ['pr', 'comment', String(pr), '-R', repoArg, '--body-file', bodyFile],
+            `commenting on ${where}`
+          );
+          return 'commented';
+        }
+        const flag = input.event === 'approve' ? '--approve' : '--request-changes';
+        await gh(
+          ['pr', 'review', String(pr), '-R', repoArg, flag, '--body-file', bodyFile],
+          `reviewing ${where}`
+        );
+        return 'reviewed';
+      } finally {
+        rmSync(dir, { recursive: true, force: true });
+      }
     },
 
     async recentGroupFailures(base, checkNames, sinceMinutes) {

@@ -1,0 +1,10 @@
+{
+  "v": 1,
+  "behaviour": 1,
+  "changes": [
+    {
+      "level": 1,
+      "effect": "timed pauses end on time"
+    }
+  ]
+}

@@ -123,6 +123,12 @@ export interface DrainStepConfig {
   startTimeoutMs: number;
   /** The full flow command prefix messages spell verbs with. */
   flow: string;
+  /**
+   * Whether the worker fixes failing checks and merge conflicts on its own
+   * (default `true`). `false` when the project's "Retry and fix problems" stop
+   * is Ask me first (`autonomy.ts`): the run parks for a person instead.
+   */
+  fixFailingChecks?: boolean;
 }
 
 /** A pull request an action is about. */
@@ -185,6 +191,8 @@ export const PARK_REASONS = {
   prClosed: 'the PR was closed without merging',
   itemTaken: 'the item was closed, or its claim removed, by someone else',
   rounds: (n: number) => `the review did not come back clean after ${n} rounds`,
+  checksFailed:
+    "the PR's checks failed, and this project's settings ask you before flow fixes failing checks",
 } as const;
 
 /** The phases where the worker writes code before a clean review. */
@@ -355,6 +363,14 @@ function nudge(
   return { ...next, drain: { ...next.drain, nudges: next.drain.nudges + 1 } };
 }
 
+/** The "check" that tells a worker its PR conflicts with its base, and how to fix it. */
+function conflictCheck(base: string | undefined, url: string): { name: string; url: string } {
+  return {
+    name: `a merge conflict with ${base || 'its base branch'}: merge origin/${base || 'main'}, resolve it, push, then report the push`,
+    url,
+  };
+}
+
 /** A push the review has not covered yet: the SHA, or `null`. */
 function unreviewedPush(drain: DrainState): string | null {
   return drain.pushedSha !== null && drain.pushedSha !== drain.reviewedSha ? drain.pushedSha : null;
@@ -461,17 +477,16 @@ function watching(step: Step, run: FlowRun, facts: DrainFacts, cfg: DrainStepCon
   if (headMoved(drain, facts)) return unreportedPush(step, run, facts, cfg);
   if (!pr) return step;
   const redCtx = { flow: cfg.flow, identifier: run.identifier, prUrl, failing: pr.failing };
+  const red = (pr.state === 'open' && pr.conflicting === true) || pr.failing.length > 0;
+  if (red && facts.ejection === null && cfg.fixFailingChecks === false) {
+    return park(step, PARK_REASONS.checksFailed);
+  }
   // A PR that conflicts with its base runs no checks and never merges, so it
   // would wait here for good (found live, 2026-09-27). Tell the worker.
   if (pr.state === 'open' && pr.conflicting === true) {
     return send({ ...step, drain: toPhase(drain, 'fixing-ci') }, 'ci-red', {
       ...redCtx,
-      failing: [
-        {
-          name: `a merge conflict with ${pr.base || 'its base branch'}: merge origin/${pr.base || 'main'}, resolve it, push, then report the push`,
-          url: prUrl,
-        },
-      ],
+      failing: [conflictCheck(pr.base, prUrl)],
     });
   }
   if (pr.failing.length > 0 && facts.ejection === null) {
@@ -557,6 +572,37 @@ function readopt(
 ): DrainStepResult {
   const item = facts.item;
   if (item.closed || !item.claimed || item.needsInput || run.limit) return { run, actions: [] };
+  const cleared = {
+    parkedReason: null,
+    parkedFrom: null,
+    parkedAt: null,
+    parkedFor: null,
+    nudges: 0,
+  };
+  // A park on failing checks that a person answered: the answer is the go-ahead
+  // to fix them (spec flow-multiproject §7.7, retry at Ask me first). Back to
+  // watching would meet the same red checks and park again forever.
+  if (current.parkedReason === PARK_REASONS.checksFailed && current.pr !== null) {
+    return {
+      run: { ...run, drain: { ...current, ...facts.reports, phase: 'fixing-ci', ...cleared } },
+      actions: [
+        {
+          kind: 'send',
+          message: 'ci-red',
+          ctx: {
+            flow: cfg.flow,
+            identifier: run.identifier,
+            prUrl: current.pr.url,
+            failing:
+              facts.pr?.state === 'open' && facts.pr.conflicting === true
+                ? [conflictCheck(facts.pr.base, current.pr.url), ...facts.pr.failing]
+                : (facts.pr?.failing ?? []),
+            ...(item.answer ? { answer: item.answer } : {}),
+          },
+        },
+      ],
+    };
+  }
   const from = current.parkedFrom;
   const phase = from && from !== 'parked' ? from : 'working';
   return {

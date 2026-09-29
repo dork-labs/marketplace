@@ -158,6 +158,8 @@ export interface ClaimInput {
   runtime?: string;
   /** A drain state to record with the claim (the drain's intent before launch). */
   drain?: DrainState;
+  /** The session id of the chat that launched the run, when another chat did. */
+  dispatchedBy?: string;
 }
 
 /**
@@ -220,6 +222,8 @@ export async function claimItem(
         ...(input.host === undefined ? {} : { host: input.host }),
         ...(input.runtime === undefined ? {} : { runtime: input.runtime }),
         ...(input.drain === undefined ? {} : { drain: input.drain }),
+        ...(input.dispatchedBy === undefined ? {} : { dispatchedBy: input.dispatchedBy }),
+        updatedAt: ctx.now().toISOString(),
       };
 
       if (!ctx.dryRun) {
@@ -278,6 +282,10 @@ export async function run(ctx: VerbContext): Promise<VerbResult> {
   const pid = await workerPid(ctx);
   const { worktreePath, branch } = await checkout(ctx);
   const account = ctx.args.flags.account;
+  const dispatchedBy = ctx.args.flags['dispatched-by'];
+  if (typeof dispatchedBy === 'string' && dispatchedBy.trim() === '') {
+    throw new UsageError('--dispatched-by needs the session id of the chat that launched the run');
+  }
 
   const { change, record } = await claimItem(
     ctx,
@@ -293,6 +301,7 @@ export async function run(ctx: VerbContext): Promise<VerbResult> {
       ...(typeof account === 'string' ? { account } : {}),
       ...(typeof launcher === 'string' ? { host: launcher } : {}),
       ...(runtime === null ? {} : { runtime }),
+      ...(typeof dispatchedBy === 'string' ? { dispatchedBy } : {}),
     }
   );
   const journalRuntime = (runtime ?? undefined) as Runtime | undefined;

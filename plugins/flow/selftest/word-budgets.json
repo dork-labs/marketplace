@@ -32,8 +32,8 @@
     "target": 106
   },
   "commands/pause.md": {
-    "baseline": 283,
-    "target": 283
+    "baseline": 339,
+    "target": 339
   },
   "commands/resume.md": {
     "baseline": 201,
@@ -72,12 +72,12 @@
     "target": 616
   },
   "docs/CHARTER.md": {
-    "baseline": 1123,
-    "target": 1123
+    "baseline": 1288,
+    "target": 1288
   },
   "docs/driving-it-manually.mdx": {
-    "baseline": 1979,
-    "target": 1979
+    "baseline": 2228,
+    "target": 2228
   },
   "docs/how-it-works.mdx": {
     "baseline": 3116,
@@ -100,16 +100,16 @@
     "target": 592
   },
   "docs/SPEC.md": {
-    "baseline": 2483,
-    "target": 2483
+    "baseline": 2575,
+    "target": 2575
   },
   "docs/the-dials.mdx": {
-    "baseline": 4022,
-    "target": 4022
+    "baseline": 4311,
+    "target": 4311
   },
   "docs/turning-on-autonomy.mdx": {
-    "baseline": 2835,
-    "target": 2835
+    "baseline": 2949,
+    "target": 2949
   },
   "docs/use-all-your-accounts.mdx": {
     "baseline": 201,
@@ -124,8 +124,8 @@
     "target": 1267
   },
   "README.md": {
-    "baseline": 2175,
-    "target": 2175
+    "baseline": 2251,
+    "target": 2251
   },
   "skills/building-adapters/references/conformance-harness.md": {
     "baseline": 531,
@@ -168,8 +168,8 @@
     "target": 982
   },
   "skills/flow-drain/SKILL.md": {
-    "baseline": 633,
-    "target": 633
+    "baseline": 686,
+    "target": 686
   },
   "skills/flow-groom/SKILL.md": {
     "baseline": 165,
@@ -204,15 +204,15 @@
     "target": 361
   },
   "skills/tending-tracker/SKILL.md": {
-    "baseline": 1176,
-    "target": 1176
+    "baseline": 1271,
+    "target": 1271
   },
   "skills/triaging-work/SKILL.md": {
     "baseline": 1139,
     "target": 1139
   },
   "skills/verifying-work/SKILL.md": {
-    "baseline": 1087,
-    "target": 1087
+    "baseline": 1237,
+    "target": 1237
   }
 }

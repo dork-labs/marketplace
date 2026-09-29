@@ -25,6 +25,7 @@ import { readFileSync } from 'node:fs';
 import path from 'node:path';
 
 import { findConfigRoots, pauseState } from '../config-files.ts';
+import { formatWhen } from '../question.ts';
 import { withSetupNudge } from './setup-nudge.ts';
 import { PreconditionError } from '../errors.ts';
 import type { FlowRun } from '../flow-run.ts';
@@ -204,7 +205,7 @@ export async function run(ctx: VerbContext): Promise<VerbResult> {
   const now = ctx.now();
 
   const roots = findConfigRoots(ctx.projectDir, ctx.flowRoot);
-  const pause = pauseState(roots);
+  const pause = pauseState(roots, now);
   const store = openFlowStateFile(ctx.projectDir);
   const mainCheckout = path.dirname(path.dirname(path.dirname(store.path)));
   const drain = readDrain([...new Set([roots.checkout, mainCheckout])], now);
@@ -302,7 +303,8 @@ export async function run(ctx: VerbContext): Promise<VerbResult> {
       question: focus === item.identifier ? question : null,
     }));
 
-  const paused = pause === null ? null : { since: pause.pausedAt, file: pause.file };
+  const paused =
+    pause === null ? null : { since: pause.pausedAt, until: pause.until, file: pause.file };
   // `ok` matches the exit code: false only when --strict found drift.
   const failed = strict && drift.length > 0;
   return withSetupNudge(
@@ -384,7 +386,7 @@ function ago(iso: string, now: Date): string {
 /** The human pane. */
 function render(
   pane: {
-    paused: { since: string | null } | null;
+    paused: { since: string | null; until: string | null } | null;
     drain: DrainStatus | null;
     inFlight: InFlightEntry[];
     parked: ParkedEntry[];
@@ -394,8 +396,11 @@ function render(
 ): string {
   const sections: string[] = [];
   if (pane.paused !== null) {
+    const { since, until } = pane.paused;
     sections.push(
-      `Paused since ${pane.paused.since ?? 'an unknown time'}: scheduled ticks, /flow continue and /flow auto stop at their first step; /flow:resume lifts it.`
+      until !== null
+        ? `Paused until ${formatWhen(until)}: scheduled ticks, /flow continue and /flow auto stop at their first step until then, and start again on their own after; /flow:resume lifts it sooner.`
+        : `Paused since ${since ?? 'an unknown time'}: scheduled ticks, /flow continue and /flow auto stop at their first step; /flow:resume lifts it.`
     );
   }
   const drain = pane.drain;

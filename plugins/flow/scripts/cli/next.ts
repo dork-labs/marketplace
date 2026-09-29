@@ -436,7 +436,7 @@ export async function run(ctx: VerbContext): Promise<VerbResult> {
   if (paused !== null && !ctx.manual) {
     project.flushWarnings();
     throw new PausedError(
-      `flow is paused${paused.pausedAt ? ` (since ${paused.pausedAt})` : ''}; /flow:resume lifts it, or pass --manual when a person is driving`
+      `flow is paused${paused.until ? ` until ${paused.until}` : paused.pausedAt ? ` (since ${paused.pausedAt})` : ''}; /flow:resume lifts it${paused.until ? ' sooner' : ''}, or pass --manual when a person is driving`
     );
   }
 

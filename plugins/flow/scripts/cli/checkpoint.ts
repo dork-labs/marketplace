@@ -197,7 +197,7 @@ export async function writeCheckpoint(
   if (!checked.ok) throw new PreconditionError(`checkpoint refused: ${checked.message}`);
 
   const root = await worktreeRoot(ctx);
-  const store = openFlowStateFile(root);
+  const store = openFlowStateFile(root, { now: ctx.now });
   const existing = findRun(store.read(), identifier, root);
   const stage = (stageFlag as FlowStage | undefined) ?? existing?.stage;
   if (stage === undefined) {

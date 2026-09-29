@@ -100,8 +100,12 @@ export interface BacklogSnapshot {
   v: 1;
   /** The configured tracker (the adapter slug). */
   tracker: string;
-  /** The team the pull was scoped to. */
-  team: { key: string | null; id: string | null };
+  /**
+   * The team the pull was scoped to. `url` is the team's page in the tracker,
+   * when the adapter knows it (optional: an adapter that does not set it, or
+   * sets `null`, just has no "Open in the tracker" link).
+   */
+  team: { key: string | null; id: string | null; url?: string | null };
   /** When the pull finished, ISO-8601 UTC. */
   fetchedAt: string;
   /** Every OPEN item of the team, fully normalized. */

@@ -31,6 +31,9 @@ function scriptedForge(steps: Record<string, Step[]>, groups: GroupFailure[] = [
       createPr: async () => {
         throw new Error('watch never opens a PR');
       },
+      review: async () => {
+        throw new Error('watch never reviews a PR');
+      },
       async prStatus(pr) {
         const key = `${target.repo}#${pr}`;
         reads.push(key);

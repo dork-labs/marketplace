@@ -224,6 +224,10 @@ function fakeForge() {
     async recentGroupFailures() {
       return [];
     },
+    async review(pr, input) {
+      calls.push({ method: 'review', arg: [pr, input] });
+      return 'reviewed' as const;
+    },
   };
   /** A PR that exists on the forge but no run has recorded yet (flow pr mid-flight). */
   const openPr = () => {
@@ -942,6 +946,264 @@ describe('flow drain: parked runs', () => {
     expect(sent?.handle.sessionId).toBe(first.sessionId);
     expect(sent?.text).toContain('answered');
     expect(sent?.text).toContain('dorian');
+  }, 120_000);
+});
+
+describe('flow drain: questions with a pick (spec flow-multiproject §7.5)', () => {
+  /** Write the project's autonomy dial where the Flow extension would. */
+  function dial(value: Record<string, unknown>): void {
+    const hash = createHash('sha256').update(realpathSync(project.dir)).digest('hex').slice(0, 12);
+    const file = path.join(dorkHome, 'flow', 'autonomy', `${hash}.json`);
+    mkdirSync(path.dirname(file), { recursive: true });
+    writeFileSync(file, JSON.stringify(value));
+  }
+
+  /** The worker parks a question with its pick. */
+  async function workerAsks(floor?: string) {
+    const run = runOf('ACME-1');
+    const result = await flow(
+      [
+        'ask',
+        'ACME-1',
+        '--question',
+        'Keep the old API?',
+        '--choice',
+        'Keep it',
+        '--choice',
+        'Drop it',
+        '--pick',
+        '1',
+        '--why',
+        'Keeping it is the safer choice.',
+        ...(floor ? ['--floor', floor] : []),
+      ],
+      run.worktreePath
+    );
+    expect(result.code, result.stderr).toBe(0);
+  }
+
+  const acme1 = () => world.tracker.backlog.items.find((i) => i.identifier === 'ACME-1')!;
+  const acmeComments = () => (world.tracker.backlog.comments ?? {})['ACME-1'] ?? [];
+
+  // The chat that ran `flow drain` is recorded on every run it starts, so
+  // DorkOS can show the run in that chat too (fleet contract 4.1.0).
+  it('records the launching chat as dispatchedBy', async () => {
+    supervisorEnv = { CLAUDE_CODE_SESSION_ID: 'launching-chat' };
+    world.tracker = createFakeAdapter({ user: { id: 'agent-1' }, items: [item('ACME-1')] });
+    await tick();
+    expect(runOf('ACME-1').dispatchedBy).toBe('launching-chat');
+  });
+
+  // At Tell me after, nobody answers by the deadline: the drain takes the
+  // agent's pick, posts who decided, resumes the worker with it, and clears
+  // the question so no later park reads it as its own.
+  it('takes the pick at the deadline end to end, then clears the question', async () => {
+    dial({ dial: 'tell', questionDeadlineMinutes: 60 });
+    world.tracker = createFakeAdapter({ user: { id: 'agent-1' }, items: [item('ACME-1')] });
+    await tick();
+    await workerAsks();
+    expect(runOf('ACME-1').question?.decideBy).toBe(new Date(T0 + 60 * 60_000).toISOString());
+    clock = T0 + 30 * 60_000;
+    await tick();
+    expect(drainOf('ACME-1').phase).toBe('parked');
+    clock = T0 + 61 * 60_000;
+    await tick();
+    expect(acmeComments().at(-1)?.body).toContain("(the agent's pick)");
+    expect(drainOf('ACME-1').phase).toBe('working');
+    expect(acme1().labels).not.toContain('agent/needs-input');
+    expect(runOf('ACME-1').question).toBeUndefined();
+    expect(world.log.sends.at(-1)?.text).toContain('your own pick, at the deadline');
+  }, 120_000);
+
+  // Review finding 1 (blocker): an old, answered question must never release a
+  // later park (review rounds, failing checks, a stopped worker).
+  it('keeps a later park parked when an old question was answered', async () => {
+    world.tracker = createFakeAdapter({ user: { id: 'agent-1' }, items: [item('ACME-1')] });
+    await tick();
+    const at = (minutes: number) => new Date(T0 + minutes * 60_000).toISOString();
+    const run = runOf('ACME-1');
+    project.writeRuns({
+      [run.issueId]: {
+        ...run,
+        question: {
+          text: 'Keep the old API?',
+          choices: [
+            { id: 'c1', label: 'Keep it' },
+            { id: 'c2', label: 'Drop it' },
+          ],
+          pick: 'c1',
+          why: 'Safer.',
+          askedAt: at(1),
+          decideBy: null,
+          floor: [],
+          answeredBy: 'person',
+          checkAfter: null,
+          answer: { text: 'Keep it', at: at(2), by: 'person' },
+        },
+        drain: {
+          ...(run.drain as DrainState),
+          phase: 'parked',
+          parkedReason: 'the worker stopped twice without pushing',
+          parkedFrom: 'working',
+          parkedAt: at(5),
+          parkedFor: 'other',
+        },
+      },
+    });
+    acme1().labels = [...acme1().labels.filter((l) => l !== 'agent/claimed'), 'agent/needs-input'];
+    clock = T0 + 6 * 60_000;
+    await tick();
+    expect(drainOf('ACME-1').phase).toBe('parked');
+    expect(acme1().labels).toContain('agent/needs-input');
+  }, 120_000);
+
+  // Review finding 7: a floor question at Tell me after is checked by the
+  // reviewer agent once the person's wait is over, in a session of its own,
+  // once; its approval (with the token from its brief) resumes the work.
+  it('hands a floor question to the reviewer agent after the wait, once', async () => {
+    dial({ dial: 'tell', questionDeadlineMinutes: 60 });
+    world.tracker = createFakeAdapter({ user: { id: 'agent-1' }, items: [item('ACME-1')] });
+    await tick();
+    await workerAsks('outward-facing');
+    expect(runOf('ACME-1').question).toMatchObject({ decideBy: null, floor: ['outward-facing'] });
+    clock = T0 + 61 * 60_000;
+    await tick();
+    const checks = () => world.log.starts.filter((s) => s.req.title === 'ACME-1 question check');
+    expect(checks()).toHaveLength(1);
+    const check = checks()[0];
+    expect(check.req.role).toBe('reviewer');
+    expect(check.req.sessionId).not.toBe(runOf('ACME-1').sessionId);
+    const token = /--token ([0-9a-f]{32})/.exec(readFileSync(check.req.promptFile, 'utf8'))?.[1];
+    expect(token).toBeDefined();
+    expect(runOf('ACME-1').question?.checkTokenHash).toBe(
+      createHash('sha256')
+        .update(token as string)
+        .digest('hex')
+    );
+    expect(drainOf('ACME-1').phase).toBe('parked');
+    clock = T0 + 62 * 60_000;
+    await tick();
+    expect(checks()).toHaveLength(1);
+
+    // Re-review N6: its own worktree and session, recorded so the drain can
+    // stop it; the token-bearing brief is never in the worker's worktree.
+    const worktree = runOf('ACME-1').worktreePath;
+    expect(check.req.cwd).not.toBe(worktree);
+    expect(check.req.promptFile.startsWith(worktree)).toBe(false);
+    expect(runOf('ACME-1').question?.checker).toMatchObject({
+      sessionId: check.handle.sessionId,
+      cwd: check.req.cwd,
+    });
+
+    // Re-review N1: the checker runs the brief's command exactly as written,
+    // from its own worktree, on a runtime that puts no session id in its
+    // environment (OpenCode): the brief's --session is what names it.
+    const brief = readFileSync(check.req.promptFile, 'utf8');
+    const command = /flow\.ts (answer .+)$/m.exec(brief)?.[1].trim().split(/\s+/) ?? [];
+    expect(command).toContain('--session');
+    supervisorEnv = { FLOW_SESSION_ID: '', CLAUDECODE: '' };
+    const approve = await flow(command, check.req.cwd);
+    expect(approve.code, approve.stderr).toBe(0);
+    supervisorEnv = {};
+    clock = T0 + 63 * 60_000;
+    await tick();
+    expect(drainOf('ACME-1').phase).toBe('working');
+    expect(runOf('ACME-1').question).toBeUndefined();
+    // Settled: the checker is stopped and its worktree removed.
+    expect(world.log.stops.map((h) => h.sessionId)).toContain(check.handle.sessionId);
+    expect(existsSync(check.req.cwd)).toBe(false);
+  }, 120_000);
+
+  // Re-review N6: a check whose reviewer never started must not hold the
+  // question forever: the claim is given back and the next pass tries again.
+  it('gives a check back when its reviewer does not start, and tries again', async () => {
+    dial({ dial: 'tell', questionDeadlineMinutes: 60 });
+    world.tracker = createFakeAdapter({ user: { id: 'agent-1' }, items: [item('ACME-1')] });
+    await tick();
+    await workerAsks('outward-facing');
+    clock = T0 + 61 * 60_000;
+    world.script.failNext = new LaunchError('unavailable', 'the host is down');
+    await tick();
+    expect(runOf('ACME-1').question?.checkTokenHash).toBeUndefined();
+    expect(runOf('ACME-1').question?.checker).toBeUndefined();
+    const checks = () => world.log.starts.filter((s) => s.req.title === 'ACME-1 question check');
+    expect(checks()).toHaveLength(0);
+    clock = T0 + 62 * 60_000;
+    await tick();
+    expect(checks()).toHaveLength(1);
+    expect(runOf('ACME-1').question?.checkTokenHash).toBeDefined();
+  }, 120_000);
+
+  /** Park a floor question, let its wait pass, and let the drain start its checker. */
+  async function checkerStarted() {
+    dial({ dial: 'tell', questionDeadlineMinutes: 60 });
+    world.tracker = createFakeAdapter({ user: { id: 'agent-1' }, items: [item('ACME-1')] });
+    await tick();
+    await workerAsks('outward-facing');
+    clock = T0 + 61 * 60_000;
+    await tick();
+    const check = world.log.starts.find((s) => s.req.title === 'ACME-1 question check');
+    if (check === undefined) throw new Error('no checker started');
+    expect(existsSync(check.req.cwd)).toBe(true);
+    return check;
+  }
+  const stopped = (sessionId: string) => world.log.stops.some((h) => h.sessionId === sessionId);
+
+  // Third review: a checker that stops without answering declined; the drain
+  // stops it and removes its worktree, and the question waits for a person
+  // (no second check).
+  it('retires a checker that declined, and hands out no second check', async () => {
+    const check = await checkerStarted();
+    world.script.states.set(check.handle.sessionId, { kind: 'exited', code: 0 });
+    clock = T0 + 62 * 60_000;
+    await tick();
+    expect(stopped(check.handle.sessionId)).toBe(true);
+    expect(existsSync(check.req.cwd)).toBe(false);
+    expect(runOf('ACME-1').question?.checker).toBeUndefined();
+    expect(runOf('ACME-1').question?.checkTokenHash).toBeDefined();
+    expect(drainOf('ACME-1').phase).toBe('parked');
+    clock = T0 + 63 * 60_000;
+    await tick();
+    expect(world.log.starts.filter((s) => s.req.title === 'ACME-1 question check')).toHaveLength(1);
+  }, 120_000);
+
+  // Third review: releasing the run stops its checker and removes its worktree.
+  it('stops the checker when the run is released', async () => {
+    const check = await checkerStarted();
+    const released = await flow(['release', 'ACME-1', '--to', 'ready']);
+    expect(released.code, released.stderr).toBe(0);
+    expect(stopped(check.handle.sessionId)).toBe(true);
+    expect(existsSync(check.req.cwd)).toBe(false);
+  }, 120_000);
+
+  // Third review: closing the item with flow done stops its checker too.
+  it('stops the checker when the item is closed with flow done', async () => {
+    const check = await checkerStarted();
+    const done = await flow(['done', 'ACME-1', '--summary', 'Closed by hand.']);
+    expect(done.code, done.stderr).toBe(0);
+    expect(stopped(check.handle.sessionId)).toBe(true);
+    expect(existsSync(check.req.cwd)).toBe(false);
+  }, 120_000);
+
+  // Third review: a new question replaces the old one, and the old one's checker stops.
+  it('stops the old checker when a new question replaces it', async () => {
+    const check = await checkerStarted();
+    await workerAsks();
+    expect(stopped(check.handle.sessionId)).toBe(true);
+    expect(existsSync(check.req.cwd)).toBe(false);
+    expect(runOf('ACME-1').question?.checker).toBeUndefined();
+  }, 120_000);
+
+  // Never for secrets or spending: that question waits for a person.
+  it('never hands a spend to the reviewer agent', async () => {
+    dial({ dial: 'auto' });
+    world.tracker = createFakeAdapter({ user: { id: 'agent-1' }, items: [item('ACME-1')] });
+    await tick();
+    await workerAsks('secrets-or-spend');
+    clock = T0 + 24 * 60 * 60_000;
+    await tick();
+    expect(world.log.starts.some((s) => s.req.title === 'ACME-1 question check')).toBe(false);
+    expect(drainOf('ACME-1').phase).toBe('parked');
   }, 120_000);
 });
 

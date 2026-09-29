@@ -14,7 +14,7 @@
  * @module @dorkos/flow/extension/panel
  */
 
-import { existsSync, readdirSync } from 'node:fs';
+import { existsSync, readFileSync, readdirSync } from 'node:fs';
 import path from 'node:path';
 import {
   CONFIG_FILE,
@@ -197,6 +197,29 @@ export function pauseFlagPath(mainCheckout: string): string {
   return path.join(mainCheckout, PROJECT_CONFIG_DIR, PAUSE_FILE);
 }
 
+/**
+ * Whether a project's pause flag pauses it at `now`: the flag exists and has
+ * no end, an end that cannot be read, or an end still to come. A timed pause
+ * whose end has passed is over (flow's `pauseState` reads it the same way).
+ *
+ * @param file - The flag's path.
+ * @param now - The time to judge the end against.
+ * @returns Whether the project is paused.
+ */
+export function pauseFlagPauses(file: string, now: Date = new Date()): boolean {
+  if (!existsSync(file)) return false;
+  let until: unknown;
+  try {
+    const value: unknown = JSON.parse(readFileSync(file, 'utf8'));
+    until = isObject(value) ? value.until : undefined;
+  } catch {
+    return true;
+  }
+  if (typeof until !== 'string') return true;
+  const at = Date.parse(until);
+  return !Number.isFinite(at) || at > now.getTime();
+}
+
 /** Whether a project has flow settings of its own. */
 function hasFlowSettings(mainCheckout: string): boolean {
   const dir = path.join(mainCheckout, PROJECT_CONFIG_DIR);
@@ -277,13 +300,17 @@ export function discoverCheckouts(
  * @param checkouts - Candidate main checkouts.
  * @returns The projects.
  */
-export function readProjects(checkouts: readonly string[]): PanelProject[] {
+export function readProjects(checkouts: readonly string[], now: Date = new Date()): PanelProject[] {
   const projects: PanelProject[] = [];
   for (const mainCheckout of checkouts) {
     const store = readRunStore(mainCheckout) ?? {};
     const hasRuns = Object.values(store).some(isObject);
     if (!hasRuns && !hasFlowSettings(mainCheckout)) continue;
-    projects.push({ mainCheckout, store, paused: existsSync(pauseFlagPath(mainCheckout)) });
+    projects.push({
+      mainCheckout,
+      store,
+      paused: pauseFlagPauses(pauseFlagPath(mainCheckout), now),
+    });
   }
   return projects;
 }

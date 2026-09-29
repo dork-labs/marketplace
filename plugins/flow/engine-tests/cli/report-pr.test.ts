@@ -87,6 +87,10 @@ function fakeForge(opts: { existing?: ForgePr | null; armed?: boolean } = {}) {
     async recentGroupFailures() {
       return [];
     },
+    async review(pr, input) {
+      calls.push({ method: 'review', arg: [pr, input] });
+      return 'reviewed' as const;
+    },
   };
   return { forge, calls, targets, factory: (t: ForgeTarget) => (targets.push(t), forge) };
 }

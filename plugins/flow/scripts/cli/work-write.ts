@@ -28,6 +28,7 @@ import type { Capability, CodeAdapter, ItemWithComments, WorkItem } from '../tra
 import { verifyWrite } from '../tracker/verify-write.ts';
 import { STAGE_LABEL_PREFIX, type StageTable, type WorkStateChange } from '../work-state.ts';
 import type { VerbContext } from './context.ts';
+import { verbLoadOptions } from './load-options.ts';
 import { buildProvenance } from './provenance.ts';
 
 /** Everything a write verb runs on. */
@@ -57,10 +58,14 @@ export async function setupWrite(
   ctx: VerbContext,
   needed: readonly Capability[]
 ): Promise<WriteSetup> {
-  const loaded = loadConfig(findConfigRoots(ctx.projectDir, ctx.flowRoot), ctx.env);
+  const loaded = loadConfig(
+    findConfigRoots(ctx.projectDir, ctx.flowRoot),
+    ctx.env,
+    verbLoadOptions(ctx)
+  );
   const adapter = await ctx.adapter();
   requireCapabilities(adapter, needed);
-  const store = openFlowStateFile(ctx.projectDir);
+  const store = openFlowStateFile(ctx.projectDir, { now: ctx.now });
   checkStoreWritable(store.path);
   return { loaded, stages: loaded.config.stages as StageTable, adapter, store };
 }

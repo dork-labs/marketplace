@@ -19,6 +19,8 @@ import path from 'node:path';
 
 import { UsageError } from '../errors.ts';
 import { projectionFor } from '../work-state.ts';
+import { resolveMainCheckout } from '../main-checkout.ts';
+import { retireChecker } from './checker.ts';
 import type { VerbContext, VerbResult } from './context.ts';
 import { recordEvent } from './auto-journal.ts';
 import { signBody, unsignedBody } from './provenance.ts';
@@ -85,6 +87,7 @@ export async function run(ctx: VerbContext): Promise<VerbResult> {
     if (!alreadyPosted) await adapter.comment(item, body);
     await applyAndVerify(adapter, item, change);
     if (existing !== undefined) {
+      await retireChecker(ctx, store, resolveMainCheckout(ctx.projectDir), item.id);
       const written = await store.setRunStatus(item.id, 'complete', { completedAt });
       requireStored(written.status, store.path, `run "flow done ${identifier}" again`);
     }

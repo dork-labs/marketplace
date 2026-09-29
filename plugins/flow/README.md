@@ -139,16 +139,19 @@ Involvement is **uncertainty-gated, not stage-gated** (the calibration ladder,
 spec §5). The hard gates:
 
 1. **Question / soft-escalation** — any stage, dynamic; driven by the calibration
-   ladder. Row 0 (the floor) always stops for irreversible/destructive,
+   ladder. Row 0 (the floor) is always checked for irreversible/destructive,
    outward-facing, secrets/spend/prod, or material-scope-change actions, even at
-   full confidence.
+   full confidence: by you, or by the reviewer agent if you choose. Never by
+   nobody, and secrets or spend always wait for you (charter G12).
 2. **Plan-approval gate** (after DECOMPOSE) — **off by default**
    (`gates.planApproval: false`). The engine flows DECOMPOSE → EXECUTE and
    surfaces plan assumptions at the review gate. Flip it on for a pre-code
    checkpoint.
-3. **Human-review gate** (after VERIFY) — **always on.** PR + evidence → review
-   state → assign the human → stop. On approval + green CI → auto-merge + close +
-   teardown. **v1 caveat:** the engine parks here and does **not** detect approval
+3. **Review gate** (after VERIFY) — **always checked.** PR + evidence → review
+   state → assign the human → stop. The project's "Ship finished work" setting in
+   DorkOS decides who answers: you, or the reviewer agent when it recorded a clean
+   review of the latest commit (`flow autonomy`, `flow review`). On approval +
+   green CI → auto-merge + close + teardown. **v1 caveat:** the engine parks here and does **not** detect approval
    — merge the approved PR yourself, then run `/flow:done <issue>` to close the
    item and tear down the worktree. The merge-_decision_ logic (`evaluateAutoMerge`,
    §6 below) is built + tested; the _detection + execution_ that fires it
@@ -222,7 +225,8 @@ agent session per run — so there is no scheduler to build.
   and every tick checks it first and stops, so an update cannot undo it and it works
   under any scheduler. On DorkOS it also switches this project's flow schedules off
   when it can reach them. `/flow:resume` removes the flag and switches back on only
-  the schedules the pause switched off.
+  the schedules the pause switched off. `/flow:pause for 1 hour` (or `until 9am`)
+  ends on its own at that time, even with DorkOS closed, and leaves schedules on.
 - **Crash/stall recovery** is driven by the durable `FlowRun` record + the
   next-tick recovery ladder (spec §12): a `needs-input` item is never reclaimed;
   an orphaned `agent/claimed` item is adopted + resumed (re-attach the worktree at
