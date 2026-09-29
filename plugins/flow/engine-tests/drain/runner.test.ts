@@ -1134,6 +1134,66 @@ describe('flow drain: questions with a pick (spec flow-multiproject §7.5)', () 
     expect(runOf('ACME-1').question?.checkTokenHash).toBeDefined();
   }, 120_000);
 
+  /** Park a floor question, let its wait pass, and let the drain start its checker. */
+  async function checkerStarted() {
+    dial({ dial: 'tell', questionDeadlineMinutes: 60 });
+    world.tracker = createFakeAdapter({ user: { id: 'agent-1' }, items: [item('ACME-1')] });
+    await tick();
+    await workerAsks('outward-facing');
+    clock = T0 + 61 * 60_000;
+    await tick();
+    const check = world.log.starts.find((s) => s.req.title === 'ACME-1 question check');
+    if (check === undefined) throw new Error('no checker started');
+    expect(existsSync(check.req.cwd)).toBe(true);
+    return check;
+  }
+  const stopped = (sessionId: string) => world.log.stops.some((h) => h.sessionId === sessionId);
+
+  // Third review: a checker that stops without answering declined; the drain
+  // stops it and removes its worktree, and the question waits for a person
+  // (no second check).
+  it('retires a checker that declined, and hands out no second check', async () => {
+    const check = await checkerStarted();
+    world.script.states.set(check.handle.sessionId, { kind: 'exited', code: 0 });
+    clock = T0 + 62 * 60_000;
+    await tick();
+    expect(stopped(check.handle.sessionId)).toBe(true);
+    expect(existsSync(check.req.cwd)).toBe(false);
+    expect(runOf('ACME-1').question?.checker).toBeUndefined();
+    expect(runOf('ACME-1').question?.checkTokenHash).toBeDefined();
+    expect(drainOf('ACME-1').phase).toBe('parked');
+    clock = T0 + 63 * 60_000;
+    await tick();
+    expect(world.log.starts.filter((s) => s.req.title === 'ACME-1 question check')).toHaveLength(1);
+  }, 120_000);
+
+  // Third review: releasing the run stops its checker and removes its worktree.
+  it('stops the checker when the run is released', async () => {
+    const check = await checkerStarted();
+    const released = await flow(['release', 'ACME-1', '--to', 'ready']);
+    expect(released.code, released.stderr).toBe(0);
+    expect(stopped(check.handle.sessionId)).toBe(true);
+    expect(existsSync(check.req.cwd)).toBe(false);
+  }, 120_000);
+
+  // Third review: closing the item with flow done stops its checker too.
+  it('stops the checker when the item is closed with flow done', async () => {
+    const check = await checkerStarted();
+    const done = await flow(['done', 'ACME-1', '--summary', 'Closed by hand.']);
+    expect(done.code, done.stderr).toBe(0);
+    expect(stopped(check.handle.sessionId)).toBe(true);
+    expect(existsSync(check.req.cwd)).toBe(false);
+  }, 120_000);
+
+  // Third review: a new question replaces the old one, and the old one's checker stops.
+  it('stops the old checker when a new question replaces it', async () => {
+    const check = await checkerStarted();
+    await workerAsks();
+    expect(stopped(check.handle.sessionId)).toBe(true);
+    expect(existsSync(check.req.cwd)).toBe(false);
+    expect(runOf('ACME-1').question?.checker).toBeUndefined();
+  }, 120_000);
+
   // Never for secrets or spending: that question waits for a person.
   it('never hands a spend to the reviewer agent', async () => {
     dial({ dial: 'auto' });

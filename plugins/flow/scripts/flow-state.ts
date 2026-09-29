@@ -134,6 +134,16 @@ const RunReviewSchema: z.ZodType<RunReview> = z.looseObject({
   // a newer flow adds never makes this all-or-nothing reader drop every run.
   verdict: z.custom<RunReview['verdict']>((value) => value === null || typeof value === 'string'),
   reviewedSha: z.string().nullable(),
+  reviewer: z
+    .looseObject({
+      host: z.string(),
+      runtime: z.string(),
+      sessionId: z.string(),
+      account: z.string().nullable().optional(),
+      pid: z.number().optional(),
+      cwd: z.string(),
+    })
+    .optional(),
 });
 
 /** The on-disk validator for {@link RunQuestion}. */

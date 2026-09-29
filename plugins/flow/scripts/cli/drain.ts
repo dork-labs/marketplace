@@ -91,6 +91,7 @@ import { signBody, unsignedBody } from './provenance.ts';
 import { releaseItem } from './release.ts';
 import { journalUsage } from './usage-journal.ts';
 import { stopInForce, type AutonomyRead } from '../autonomy.ts';
+import { retireChecker } from './checker.ts';
 import { runtimeSession } from './session-id.ts';
 import { applyAndVerify, isOpenItem, sessionProvenance, setupWrite } from './work-write.ts';
 
@@ -463,23 +464,42 @@ export async function drain(ctx: VerbContext, options: DrainOptions = {}): Promi
     }
   };
 
-  /** Stop the session that checked a question's pick, and remove its worktree. */
-  const stopChecker = async (question: RunQuestion): Promise<void> => {
-    const checker = question.checker;
-    if (checker === undefined) return;
-    try {
-      await launcher(checker.host as HostName).stop({
-        host: checker.host as HostName,
-        runtime: checker.runtime as RuntimeName,
-        sessionId: checker.sessionId,
-        account: checker.account ?? null,
-        cwd: checker.cwd,
-        ...(checker.pid === undefined ? {} : { pid: checker.pid }),
-      });
-    } catch (error) {
-      ctx.warn(`could not stop the pick checker ${checker.sessionId}: ${(error as Error).message}`);
+  /**
+   * Stop a pick checker that has no more work: its question is gone, answered
+   * elsewhere or no longer this park's, the item closed, or the checker
+   * stopped without answering (it declined, so the question waits for a
+   * person). A checker still working is left alone.
+   */
+  const reapChecker = async (
+    issueId: string,
+    facts: { closed: boolean; needsInput: boolean },
+    since: string | null | undefined
+  ): Promise<void> => {
+    const q = store.read()[issueId]?.question;
+    const checker = q?.checker;
+    if (q === undefined || checker === undefined || ctx.dryRun) return;
+    let done =
+      q.answer !== undefined ||
+      facts.closed ||
+      !facts.needsInput ||
+      since === undefined ||
+      !belongsToPark(q, since);
+    if (!done) {
+      try {
+        const state = await launcher(checker.host as HostName).state({
+          host: checker.host as HostName,
+          runtime: checker.runtime as RuntimeName,
+          sessionId: checker.sessionId,
+          account: checker.account ?? null,
+          cwd: checker.cwd,
+          ...(checker.pid === undefined ? {} : { pid: checker.pid }),
+        });
+        done = state.kind === 'exited' || state.kind === 'idle';
+      } catch {
+        done = false;
+      }
     }
-    await removeWorktree(ctx.runProcess, mainCheckout, checker.cwd);
+    if (done) await retireChecker(ctx, store, mainCheckout, issueId);
   };
 
   const deps: PassDeps = {
@@ -520,6 +540,7 @@ export async function drain(ctx: VerbContext, options: DrainOptions = {}): Promi
         title: item.title,
         answer: null as string | null,
       };
+      await reapChecker(item.id, facts, parked === undefined ? undefined : parked.since);
       if (parked === undefined || !facts.needsInput || facts.closed) return facts;
       // The inbox pass leaves drain runs alone, so the drain notices the reply itself.
       const identity = { agent: await agentId(), marker: config.identity.marker };
@@ -580,9 +601,8 @@ export async function drain(ctx: VerbContext, options: DrainOptions = {}): Promi
       // The question is answered and the work resumes on it: clear it, so a
       // later park never mistakes it for its own.
       if (question !== undefined) {
-        const latest = store.read()[item.id]?.question;
+        await retireChecker(ctx, store, mainCheckout, item.id);
         await clearQuestion(store, item.id, question.askedAt);
-        if (latest?.askedAt === question.askedAt) await stopChecker(latest);
       }
       return { ...facts, claimed: true, needsInput: false, answer };
     },

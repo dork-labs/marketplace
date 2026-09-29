@@ -1109,6 +1109,18 @@ describe('re-review fixes (DOR-2528)', () => {
   });
 
   // N2: with no known commit, say what happened without asking anyone to type a flag.
+  // Third review: DorkOS's handler passes --head, the commit the ask showed,
+  // so a person's 👍 on a run with no recorded review still arms that commit.
+  it('arms the commit the ask showed, passed with --head', async () => {
+    writeRun();
+    const result = await flow(['review', 'ACME-12', '--approve', '--head', 'abc1234def'], {
+      tracker: createFakeAdapter({ items: [started()] }),
+      forge: fakeForge({ head: 'abc1234def' }),
+    });
+    expect(result.code).toBe(EXIT.ok);
+    expect(result.forge.calls).toContainEqual({ method: 'arm', arg: [7, 'abc1234def'] });
+  });
+
   it('explains an approval it could not arm, without asking for a flag', async () => {
     writeRun();
     let text = '';
@@ -1119,8 +1131,9 @@ describe('re-review fixes (DOR-2528)', () => {
     expect(result.code).toBe(EXIT.ok);
     text = JSON.stringify(result.json);
     expect(result.json.armed).toBe(false);
+    // Third review: say what is true, not a promise nothing keeps.
     expect(result.json.note).toBe(
-      "Approved. Flow didn't turn on auto-merge because it can't tell which commit you approved; it will when the reviewer records one."
+      "Approved. Merge it yourself; flow didn't turn on auto-merge because it couldn't tell which commit you approved."
     );
     expect(text).not.toContain('--head');
   });
@@ -1188,6 +1201,37 @@ describe('re-review fixes (DOR-2528)', () => {
     );
     expect(verdict.code, verdict.stderr).toBe(EXIT.ok);
     expect(stored().review).toMatchObject({ verdict: 'clean', reviewedSha: head });
+  });
+
+  // Third review: the launched reviewer's session is recorded, so it can be
+  // reached or stopped.
+  it('records the launched reviewer on the run', async () => {
+    writeRun({ stage: 'verify', status: 'running' });
+    const starts: { req: LaunchRequest }[] = [];
+    const result = await flow(['report', 'ACME-12', 'review-launch', '--sha', 'HEAD'], {
+      launcher: (host) => fakeLauncher(host, starts),
+    });
+    expect(result.code, result.stderr).toBe(EXIT.ok);
+    expect(stored().review?.reviewer).toMatchObject({
+      sessionId: starts[0].req.sessionId,
+      cwd: starts[0].req.cwd,
+    });
+  });
+
+  // Third review: a failed launch never removes a worktree it did not add
+  // (an earlier launch's, a live reviewer's).
+  it('keeps a worktree it did not add when the launch fails', async () => {
+    writeRun({ stage: 'verify', status: 'running' });
+    const first: { req: LaunchRequest }[] = [];
+    await flow(['report', 'ACME-12', 'review-launch', '--sha', 'HEAD'], {
+      launcher: (host) => fakeLauncher(host, first),
+    });
+    const existing = first[0].req.cwd;
+    const again = await flow(['report', 'ACME-12', 'review-launch', '--sha', 'HEAD'], {
+      launcher: (host) => fakeLauncher(host, [], new LaunchError('unavailable', 'no claude')),
+    });
+    expect(again.code).toBe(EXIT.precondition);
+    expect(existsSync(existing)).toBe(true);
   });
 
   // A launch that fails leaves nothing behind.

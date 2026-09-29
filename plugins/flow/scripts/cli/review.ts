@@ -263,10 +263,12 @@ export async function run(ctx: VerbContext): Promise<VerbResult> {
       armAt =
         by === 'reviewer-agent'
           ? head
-          : isWritableDrain(existing)
-            ? existing.drain.reviewedSha
-            : (flag(ctx, 'head') ??
-              (existing.review?.verdict === 'clean' ? existing.review.reviewedSha : null));
+          : (flag(ctx, 'head') ??
+            (isWritableDrain(existing)
+              ? existing.drain.reviewedSha
+              : existing.review?.verdict === 'clean'
+                ? existing.review.reviewedSha
+                : null));
       if (armAt !== null) {
         const now = (await target.forge.prStatus(pr.number)).headSha;
         if (!now.toLowerCase().startsWith(armAt.toLowerCase()) && now !== armAt) {
@@ -319,7 +321,7 @@ export async function run(ctx: VerbContext): Promise<VerbResult> {
       : pr !== null && !config.gates.review.mergeOnApproval
         ? ` PR #${pr.number} waits for a person to merge it.`
         : willArm
-          ? " Approved. Flow didn't turn on auto-merge because it can't tell which commit you approved; it will when the reviewer records one."
+          ? " Approved. Merge it yourself; flow didn't turn on auto-merge because it couldn't tell which commit you approved."
           : '';
     return {
       json: {

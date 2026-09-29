@@ -44,6 +44,8 @@ import {
 } from '../question.ts';
 import { requireOtherSession, callerSessions } from './caller.ts';
 import { claimCheck } from './question-write.ts';
+import { retireChecker } from './checker.ts';
+import { resolveMainCheckout } from '../main-checkout.ts';
 import { AGENT_NEEDS_INPUT, projectionFor } from '../work-state.ts';
 import type { VerbContext, VerbResult } from './context.ts';
 import { isWritableDrain } from './drain-run.ts';
@@ -252,6 +254,8 @@ export async function run(ctx: VerbContext): Promise<VerbResult> {
     if (!alreadyPosted) await adapter.comment(item, body);
     await applyAndVerify(adapter, item, projectionFor({ type: 'needs-input' }, { stages }));
     if (existing !== undefined) {
+      // The new question replaces the old one: a checker of the old one stops.
+      await retireChecker(ctx, store, resolveMainCheckout(ctx.projectDir), existing.issueId);
       const written = await store.updateRun(existing.issueId, (current) => {
         const next: FlowRun = { ...current, question };
         if (!isWritableDrain(current)) return next;

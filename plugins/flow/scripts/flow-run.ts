@@ -192,6 +192,19 @@ export interface RunReview {
   verdict: 'clean' | 'changes' | null;
   /** The commit the recorded verdict covers, or `null` while none is recorded. */
   reviewedSha: string | null;
+  /**
+   * The reviewer session `flow report review-launch` started, and its
+   * worktree, so it can be reached or stopped. Absent for a reviewer flow did
+   * not start.
+   */
+  reviewer?: {
+    host: string;
+    runtime: string;
+    sessionId: string;
+    account?: string | null;
+    pid?: number;
+    cwd: string;
+  };
 }
 
 /** One answer an agent offers with a question (spec `flow-multiproject` §7.5). */

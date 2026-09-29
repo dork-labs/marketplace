@@ -560,7 +560,7 @@ export const VERBS: readonly VerbDefinition[] = [
         kind: 'string',
         value: 'sha',
         description:
-          "With --approve by a person: the commit you approved. Default: the review's clean commit. The PR is armed only at it, and refused if it moved.",
+          "With --approve by a person: the commit you approved (DorkOS passes the one the ask showed). Default: a drain run's reviewed commit, else the review's clean commit. The PR is armed only at it, and refused if it moved.",
       },
       {
         name: 'wait',

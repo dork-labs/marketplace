@@ -90,6 +90,9 @@ export async function reviewLaunch(
     );
   }
   const flow = `node --experimental-strip-types ${path.join(ctx.flowRoot, 'scripts', 'flow.ts')}`;
+  // Only a worktree this call adds is removed on failure: one that was already
+  // there (an earlier launch's, a live reviewer's) is someone else's.
+  let created = false;
   try {
     if (!existsSync(target)) {
       mkdirSync(path.dirname(target), { recursive: true });
@@ -103,6 +106,7 @@ export async function reviewLaunch(
           `could not add the reviewer's worktree at ${target}: ${added.stderr.trim()}`
         );
       }
+      created = true;
     }
     const findingsFile = path.join(target, VERIFY_FINDINGS_PATH);
     const brief = renderBrief(ctx.flowRoot, 'reviewer', {
@@ -142,6 +146,24 @@ export async function reviewLaunch(
       permissionMode: config.drain.permissionMode as LaunchPermissionMode,
       title: `${run.identifier} VERIFY reviewer`,
     });
+    await store.updateRun(run.issueId, (current) =>
+      current.review?.tokenHash !== hash
+        ? current
+        : {
+            ...current,
+            review: {
+              ...current.review,
+              reviewer: {
+                host: handle.host,
+                runtime: handle.runtime,
+                sessionId: handle.sessionId,
+                account: handle.account,
+                ...(handle.pid === undefined ? {} : { pid: handle.pid }),
+                cwd: target,
+              },
+            },
+          }
+    );
     return {
       json: {
         ok: true,
@@ -161,7 +183,7 @@ export async function reviewLaunch(
       const { review: _review, ...rest } = current;
       return rest;
     });
-    await removeWorktree(ctx.runProcess, mainCheckout, target);
+    if (created) await removeWorktree(ctx.runProcess, mainCheckout, target);
     if (error instanceof LaunchError || error instanceof FlowError) {
       throw new PreconditionError(
         `the reviewer did not start (${error.message}); nothing was recorded, so run the same command again`
