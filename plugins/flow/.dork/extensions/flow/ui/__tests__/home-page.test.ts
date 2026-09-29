@@ -443,7 +443,8 @@ describe('a project’s settings page', () => {
     const model = threeProjects();
     routeFetch((method, url) => {
       if (url.includes('/ext/flow/settings/')) return { status: 200, body: settingsView() };
-      if (url.includes('/runtimes/claude-code/account-eligibility')) return { status: 404, body: {} };
+      if (url.includes('/runtimes/claude-code/account-eligibility'))
+        return { status: 404, body: {} };
       return { status: 200, body: model };
     });
     const { api } = await renderPage('settings', model, { params: { name: 'dorkos' } });

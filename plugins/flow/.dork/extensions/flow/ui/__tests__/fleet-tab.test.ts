@@ -641,3 +641,51 @@ describe('FleetTab: answers that arrive out of order', () => {
     ).toBe('true');
   });
 });
+
+describe('FleetTab on a DorkOS that keeps accounts to projects (§8.5)', () => {
+  const rules = (onlyFor: Record<string, string[]>) => ({
+    onlyFor: new Map(Object.entries(onlyFor)),
+    openRuntimes: vi.fn(),
+  });
+
+  it('shows DorkOS’s rule on the account’s row, read-only, with the way to change it', async () => {
+    stubFetch({
+      status: 200,
+      body: fleet([claudeGroup([account('Work', 'rotation'), account('Acct 2', 'rotation')])]),
+    });
+    const given = rules({ Work: ['client-app', 'client-api'] });
+    render(React.createElement(FleetTab, { rules: given }));
+    await act(async () => {});
+    expect(screen.getByText(/Only for client-app, client-api/)).toBeTruthy();
+    fireEvent.click(screen.getByRole('button', { name: 'Change in Settings → Runtimes →' }));
+    expect(given.openRuntimes).toHaveBeenCalledTimes(1);
+    expect(screen.getAllByText(/Only for/)).toHaveLength(1);
+  });
+
+  it('no longer edits "Only for these repos": repos not moved yet are said, not chips', async () => {
+    stubFetch({
+      status: 200,
+      body: fleet([claudeGroup([account('Work', 'kept-out', { repos: ['acme/web'] })])]),
+    });
+    render(React.createElement(FleetTab, { rules: rules({}) }));
+    await act(async () => {});
+    expect(
+      screen.getByText(
+        'Only for acme/web. Flow moves this to DorkOS once the repo is on this computer.'
+      )
+    ).toBeTruthy();
+    expect(screen.queryByRole('button', { name: '+ add' })).toBeNull();
+    expect(screen.queryByRole('button', { name: 'Remove acme/web' })).toBeNull();
+  });
+
+  it('keeps the chips on a DorkOS without the rules', async () => {
+    stubFetch({
+      status: 200,
+      body: fleet([claudeGroup([account('Work', 'kept-out', { repos: ['acme/web'] })])]),
+    });
+    render(React.createElement(FleetTab, { rules: null }));
+    await act(async () => {});
+    expect(screen.getByRole('button', { name: '+ add' })).toBeTruthy();
+    expect(screen.getByRole('button', { name: 'Remove acme/web' })).toBeTruthy();
+  });
+});

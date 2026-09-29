@@ -194,9 +194,13 @@ export function putOnlyProjects(
   accountId: string,
   projects: string[] | null
 ): Promise<{ onlyProjects: { root: string; name: string }[] | null }> {
-  return core('PUT', `/runtimes/claude-code/accounts/${encodeURIComponent(accountId)}/only-projects`, {
-    projects,
-  });
+  return core(
+    'PUT',
+    `/runtimes/claude-code/accounts/${encodeURIComponent(accountId)}/only-projects`,
+    {
+      projects,
+    }
+  );
 }
 
 /**

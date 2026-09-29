@@ -72,7 +72,8 @@ export const READ_ONLY_TEXT =
 export const LOCAL_WINS_TEXT = "This computer's own setting wins over this one.";
 
 /** Shown when the settings could not be read. */
-export const SETTINGS_LOAD_FAILED_TEXT = "Couldn't load this project's settings. Try again in a moment.";
+export const SETTINGS_LOAD_FAILED_TEXT =
+  "Couldn't load this project's settings. Try again in a moment.";
 
 /** DorkOS's Tasks page, where flow's schedules are. */
 export const TASKS_ROUTE = '/tasks';
@@ -182,7 +183,11 @@ function Field(props: { label: string; children?: Node; notes?: Node }): Node {
   return h(
     'div',
     { role: 'group', 'aria-labelledby': labelId, style: FIELD_ROW },
-    h('span', { id: labelId, style: { display: 'block', fontWeight: 600, marginBottom: '4px' } }, props.label),
+    h(
+      'span',
+      { id: labelId, style: { display: 'block', fontWeight: 600, marginBottom: '4px' } },
+      props.label
+    ),
     props.children,
     props.notes ?? null
   );
@@ -212,7 +217,11 @@ function Stepper(props: {
       },
       '−'
     ),
-    h('output', { 'aria-live': 'polite', style: { minWidth: '1.5em', textAlign: 'center' } }, String(props.value)),
+    h(
+      'output',
+      { 'aria-live': 'polite', style: { minWidth: '1.5em', textAlign: 'center' } },
+      String(props.value)
+    ),
     h(
       'button',
       {
@@ -288,7 +297,11 @@ export function ProjectFlowSettings(props: ProjectFlowSettingsProps): Node {
       'div',
       null,
       h('p', { role: 'alert', style: ALERT }, phase.message),
-      h('button', { type: 'button', style: BUTTON, onClick: () => setAttempt((n) => n + 1) }, 'Retry')
+      h(
+        'button',
+        { type: 'button', style: BUTTON, onClick: () => setAttempt((n) => n + 1) },
+        'Retry'
+      )
     );
   }
   if (phase.kind === 'loading' || view === null) return h('div', { 'aria-busy': true });
@@ -322,7 +335,10 @@ export function ProjectFlowSettings(props: ProjectFlowSettingsProps): Node {
   ) =>
     write(
       key,
-      { ...view, shared: { ...view.shared, [key]: { ...view.shared[key], value, source: 'shared' } } },
+      {
+        ...view,
+        shared: { ...view.shared, [key]: { ...view.shared[key], value, source: 'shared' } },
+      },
       { shared: { [key]: value } }
     );
   const setLocal = <K extends keyof ProjectSettingsView['local']>(
@@ -343,7 +359,9 @@ export function ProjectFlowSettings(props: ProjectFlowSettingsProps): Node {
   return h(
     'div',
     null,
-    locked ? h('p', { role: 'status', style: { ...MUTED, margin: '8px 0 0' } }, READ_ONLY_TEXT) : null,
+    locked
+      ? h('p', { role: 'status', style: { ...MUTED, margin: '8px 0 0' } }, READ_ONLY_TEXT)
+      : null,
     h(Box, {
       title: 'Shared with the repo',
       who: 'everyone on this repo',

@@ -76,4 +76,3 @@ export interface ProjectSettingsView {
   /** False on a DorkOS that cannot tell a person from an agent: nothing here can be saved. */
   canChange: boolean;
 }
-

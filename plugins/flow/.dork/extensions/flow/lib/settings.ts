@@ -178,7 +178,11 @@ function at(object: unknown, keys: readonly string[]): unknown {
 }
 
 /** `object` with `value` at `keys`, creating objects on the way; other keys stay. */
-function withValue(object: unknown, keys: readonly string[], value: unknown): Record<string, unknown> {
+function withValue(
+  object: unknown,
+  keys: readonly string[],
+  value: unknown
+): Record<string, unknown> {
   const out: Record<string, unknown> = isObject(object) ? { ...object } : {};
   const [first, ...rest] = keys;
   out[first] = rest.length === 0 ? value : withValue(out[first], rest, value);
@@ -252,7 +256,8 @@ export function readProjectSettings(
       shared: `${PROJECT_CONFIG_DIR}/${CONFIG_FILE}`,
       local: `${PROJECT_CONFIG_DIR}/${LOCAL_CONFIG_FILE}`,
     },
-    tracker: entry.tracker === null ? null : { label: entry.tracker.label, team: entry.tracker.team },
+    tracker:
+      entry.tracker === null ? null : { label: entry.tracker.label, team: entry.tracker.team },
     shared: {
       reviewerAgent: field('reviewerAgent', files, behaviour),
       mergeOnApproval: field('mergeOnApproval', files, behaviour),
@@ -298,7 +303,8 @@ export function parseSettingsPatch(body: unknown, behaviour: number): SettingsPa
     if (!isObject(given)) refuse('Send the settings to change.');
     for (const [key, value] of Object.entries(given)) {
       const spec = (SETTING_KEYS as Record<string, KeySpec<unknown>>)[key];
-      if (spec === undefined || spec.file !== box) refuse(`Flow's settings page can't change "${key}".`);
+      if (spec === undefined || spec.file !== box)
+        refuse(`Flow's settings page can't change "${key}".`);
       if (spec.level > behaviour) refuse(UPDATE_FLOW_TEXT);
       patch[box][key as SettingKey] = spec.check(value);
     }
@@ -404,15 +410,17 @@ async function write(
   patch: SettingsPatch
 ): Promise<void> {
   const files = settingsFiles(entry.root);
-  const boxes = (['shared', 'local'] as const).filter(
-    (box) => Object.keys(patch[box]).length > 0
-  );
+  const boxes = (['shared', 'local'] as const).filter((box) => Object.keys(patch[box]).length > 0);
   if (boxes.length > 0) {
     if (!existsSync(files.shared)) {
       throw new RouteError(400, `${entry.name} has no flow settings yet. Set flow up there first.`);
     }
     const before = await problems(deps, entry.root);
-    if (before === null) throw new RouteError(502, `Flow couldn't check ${entry.name}'s settings. Nothing was changed.`);
+    if (before === null)
+      throw new RouteError(
+        502,
+        `Flow couldn't check ${entry.name}'s settings. Nothing was changed.`
+      );
     if (boxes.includes('local') && !existsSync(files.local)) {
       const prepared = await configFiles(deps, 'prepare', entry.root);
       if (prepared?.ok !== true) {
@@ -441,13 +449,19 @@ async function write(
           { onUnparsable: 'throw' }
         );
         if (result.status === 'dropped') {
-          throw new RouteError(502, `${entry.name}'s settings were busy. Nothing was changed; try again.`);
+          throw new RouteError(
+            502,
+            `${entry.name}'s settings were busy. Nothing was changed; try again.`
+          );
         }
       }
     } catch (error) {
       putBack();
       if (error instanceof RouteError) throw error;
-      throw new RouteError(400, `Flow couldn't save ${entry.name}'s settings: ${String(error instanceof Error ? error.message : error)}`);
+      throw new RouteError(
+        400,
+        `Flow couldn't save ${entry.name}'s settings: ${String(error instanceof Error ? error.message : error)}`
+      );
     }
     const after = await problems(deps, entry.root);
     const known = new Set(before.map((issue) => `${issue.path}\n${issue.message}`));

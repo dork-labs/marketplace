@@ -58,7 +58,6 @@ import {
   type AutonomyStop,
 } from './autonomy-dial.ts';
 
-
 /** What reading the copy found. */
 export type AutonomyRead =
   | { state: 'missing'; file: string }

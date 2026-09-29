@@ -83,7 +83,9 @@ export function nextAllow(answer: AccountEligibility, id: string, on: boolean): 
   const next = on
     ? [...current.filter((entry) => entry !== id), id]
     : current.filter((entry) => entry !== id);
-  return all.every((entry) => next.includes(entry)) ? null : all.filter((entry) => next.includes(entry));
+  return all.every((entry) => next.includes(entry))
+    ? null
+    : all.filter((entry) => next.includes(entry));
 }
 
 /** A question asked before a change, with what Yes does. */
@@ -269,7 +271,13 @@ export function AccountCheckboxes(props: AccountCheckboxesProps): Node {
           {
             role: 'alertdialog',
             'aria-label': 'Confirm',
-            style: { margin: '6px 0 0', display: 'flex', flexWrap: 'wrap', gap: '6px', alignItems: 'center' },
+            style: {
+              margin: '6px 0 0',
+              display: 'flex',
+              flexWrap: 'wrap',
+              gap: '6px',
+              alignItems: 'center',
+            },
           },
           h('p', { style: { margin: 0, flexBasis: '100%', fontSize: '12px' } }, confirm.text),
           h(
@@ -300,5 +308,7 @@ export function AccountCheckboxes(props: AccountCheckboxesProps): Node {
 
 /** The words for a failed call: DorkOS's own, or that it did not answer. */
 function messageOf(failure: unknown): string {
-  return failure instanceof Error && failure.message !== '' ? failure.message : CORE_UNREACHABLE_MESSAGE;
+  return failure instanceof Error && failure.message !== ''
+    ? failure.message
+    : CORE_UNREACHABLE_MESSAGE;
 }

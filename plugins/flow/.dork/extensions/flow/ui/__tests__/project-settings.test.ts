@@ -66,15 +66,18 @@ function projectSettings(initial: Record<string, unknown> = {}) {
 }
 
 /** Answer flow's settings route and DorkOS's (no eligibility routes unless given). */
-function serve(opts: {
-  view?: ReturnType<typeof settingsView>;
-  put?: (body: unknown) => { status: number; body: unknown };
-  model?: ReturnType<typeof flowModel>;
-  eligibility?: { status: number; body: unknown };
-} = {}) {
+function serve(
+  opts: {
+    view?: ReturnType<typeof settingsView>;
+    put?: (body: unknown) => { status: number; body: unknown };
+    model?: ReturnType<typeof flowModel>;
+    eligibility?: { status: number; body: unknown };
+  } = {}
+) {
   return routeFetch((method, url, body) => {
     if (url.includes('/ext/flow/settings/')) {
-      if (method === 'PUT') return opts.put?.(body) ?? { status: 200, body: opts.view ?? settingsView() };
+      if (method === 'PUT')
+        return opts.put?.(body) ?? { status: 200, body: opts.view ?? settingsView() };
       return { status: 200, body: opts.view ?? settingsView() };
     }
     if (url.includes('/runtimes/claude-code/account-eligibility')) {
@@ -84,7 +87,13 @@ function serve(opts: {
     if (url.includes('/ext/flow/fleet')) {
       return {
         status: 200,
-        body: { handoff: 'auto', crossRuntimeFallback: 'off', groups: [], anyRoleStored: false, warnings: [] },
+        body: {
+          handoff: 'auto',
+          crossRuntimeFallback: 'off',
+          groups: [],
+          anyRoleStored: false,
+          warnings: [],
+        },
       };
     }
     return { status: 200, body: opts.model ?? flowModel([newProject()]) };
@@ -95,7 +104,9 @@ type SettingsApi = Pick<ClientApi, 'navigate' | 'projectSettings' | 'getState'>;
 
 /** Render the component for one project. */
 async function renderSettings(project: FlowProject, api: Partial<SettingsApi> = {}) {
-  const full = { navigate: vi.fn(), ...api } as SettingsApi & { navigate: ReturnType<typeof vi.fn> };
+  const full = { navigate: vi.fn(), ...api } as SettingsApi & {
+    navigate: ReturnType<typeof vi.fn>;
+  };
   render(React.createElement(ProjectFlowSettings, { project, api: full }));
   await act(async () => {});
   await act(async () => {});
@@ -130,7 +141,11 @@ describe('one component, two entry points', () => {
       pageStore
     );
     const page = render(
-      React.createElement(pages.settings, { params: { name: 'dorkos' }, search: {}, setSearch: vi.fn() })
+      React.createElement(pages.settings, {
+        params: { name: 'dorkos' },
+        search: {},
+        setSearch: vi.fn(),
+      })
     );
     await act(async () => {});
     await act(async () => {});
@@ -185,6 +200,55 @@ describe('one component, two entry points', () => {
   });
 });
 
+describe('Settings → Flow moves "Only for these repos" when opened', () => {
+  it('says what moved, once, with the way to change it, and reads the accounts again', async () => {
+    serve({ model: flowModel([newProject()]) });
+    const store = new FlowStore({});
+    store.start();
+    const navigate = vi.fn();
+    const moved: MigrationDeps = {
+      ...NO_MOVE,
+      hasEligibilityRoutes: async () => true,
+      getFleet: async () => ({
+        handoff: 'auto',
+        crossRuntimeFallback: 'off',
+        groups: [
+          {
+            runtime: 'claude-code',
+            label: 'Claude Code',
+            supportsAccounts: true,
+            accounts: [
+              {
+                key: 'claude-code:work',
+                id: 'work',
+                label: 'Work',
+                color: '#000000',
+                implicit: false,
+                role: 'kept-out',
+                reservePct: 0,
+                spendDownWindowHours: 24,
+                repos: ['acme/app'],
+                effectiveReservePct: 0,
+              },
+            ],
+          },
+        ],
+        anyRoleStored: true,
+        warnings: [],
+      }),
+      listProjects: async () => [
+        { root: '/work/client-app', name: 'client-app', originRepo: 'acme/app' },
+      ],
+    };
+    render(React.createElement(createSettingsTab({ navigate }, store, moved)));
+    await act(async () => {});
+    await act(async () => {});
+    expect(screen.getByText('Moved to DorkOS: Work is now only for client-app.')).toBeTruthy();
+    fireEvent.click(screen.getByRole('button', { name: 'Change this in Settings → Runtimes →' }));
+    expect(navigate).toHaveBeenLastCalledWith('?settings=runtimes');
+  });
+});
+
 describe('the shared and just-me writes', () => {
   it('saves a shared switch to the repo’s file and then says to commit it', async () => {
     const puts: unknown[] = [];
@@ -236,7 +300,10 @@ describe('the shared and just-me writes', () => {
 
   it('puts a refused change back and says why under it', async () => {
     serve({
-      put: () => ({ status: 400, body: { error: 'Flow didn’t save that: bad value', refusedBy: 'flow' } }),
+      put: () => ({
+        status: 400,
+        body: { error: 'Flow didn’t save that: bad value', refusedBy: 'flow' },
+      }),
     });
     await renderSettings(newProject());
     const merge = screen.getByRole('switch', { name: 'Merge by itself when checks pass' });
@@ -259,7 +326,8 @@ describe('the shared and just-me writes', () => {
     await renderSettings(newProject());
     expect(screen.getByText(READ_ONLY_TEXT)).toBeTruthy();
     expect(
-      (screen.getByRole('switch', { name: 'Review before a PR opens' }) as HTMLButtonElement).disabled
+      (screen.getByRole('switch', { name: 'Review before a PR opens' }) as HTMLButtonElement)
+        .disabled
     ).toBe(true);
   });
 });
@@ -270,9 +338,9 @@ describe('the dial', () => {
     const settings = projectSettings();
     await renderSettings(newProject(), { projectSettings: settings.api });
     const dial = screen.getByRole('radiogroup', { name: 'How much it does on its own' });
-    expect(within(dial).getByRole('radio', { name: 'Tell me after' }).getAttribute('aria-checked')).toBe(
-      'true'
-    );
+    expect(
+      within(dial).getByRole('radio', { name: 'Tell me after' }).getAttribute('aria-checked')
+    ).toBe('true');
     fireEvent.click(within(dial).getByRole('radio', { name: 'Just do it' }));
     await act(async () => {});
     expect(settings.set).toHaveBeenCalledWith('/work/dorkos', {
@@ -280,9 +348,9 @@ describe('the dial', () => {
       kinds: {},
       questionDeadlineMinutes: 240,
     });
-    expect(within(dial).getByRole('radio', { name: 'Just do it' }).getAttribute('aria-checked')).toBe(
-      'true'
-    );
+    expect(
+      within(dial).getByRole('radio', { name: 'Just do it' }).getAttribute('aria-checked')
+    ).toBe('true');
   });
 
   it('keeps a project flow already knew at Ask me first until you choose, and says so', async () => {
@@ -300,9 +368,9 @@ describe('the dial', () => {
     );
     expect(screen.getByText(NOT_CHOSEN_TEXT)).toBeTruthy();
     const dial = screen.getByRole('radiogroup', { name: 'How much it does on its own' });
-    expect(within(dial).getByRole('radio', { name: 'Ask me first' }).getAttribute('aria-checked')).toBe(
-      'true'
-    );
+    expect(
+      within(dial).getByRole('radio', { name: 'Ask me first' }).getAttribute('aria-checked')
+    ).toBe('true');
     expect(settings.set).not.toHaveBeenCalled();
   });
 
@@ -365,9 +433,9 @@ describe('the dial', () => {
     fireEvent.click(within(dial).getByRole('radio', { name: 'Ask me first' }));
     await act(async () => {});
     expect(screen.getByRole('alert').textContent).toBe('Only a person can change this setting.');
-    expect(within(dial).getByRole('radio', { name: 'Tell me after' }).getAttribute('aria-checked')).toBe(
-      'true'
-    );
+    expect(
+      within(dial).getByRole('radio', { name: 'Tell me after' }).getAttribute('aria-checked')
+    ).toBe('true');
   });
 
   it('shows DorkOS’s Require login line, verbatim, only while Require login is off', async () => {

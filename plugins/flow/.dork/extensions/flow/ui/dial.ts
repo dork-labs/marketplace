@@ -162,7 +162,8 @@ export function AutonomyDial(props: AutonomyDialProps): Node {
           });
       },
       (failure: unknown) => {
-        if (live) setError(messageOf(failure, "Flow couldn't read this setting. Try again in a moment."));
+        if (live)
+          setError(messageOf(failure, "Flow couldn't read this setting. Try again in a moment."));
       }
     );
     return () => {
@@ -172,8 +173,14 @@ export function AutonomyDial(props: AutonomyDialProps): Node {
 
   const requireLogin = api.getState?.().requireLogin;
   const loginNote =
-    requireLogin === false ? h('p', { style: { ...MUTED, marginTop: '4px' } }, REQUIRE_LOGIN_TEXT) : null;
-  const label = h('span', { id: labelId, style: { fontWeight: 600 } }, 'How much it does on its own');
+    requireLogin === false
+      ? h('p', { style: { ...MUTED, marginTop: '4px' } }, REQUIRE_LOGIN_TEXT)
+      : null;
+  const label = h(
+    'span',
+    { id: labelId, style: { fontWeight: 600 } },
+    'How much it does on its own'
+  );
 
   if (settings === undefined || typeof settings.set !== 'function') {
     return h('div', null, label, h('p', { style: MUTED }, DIAL_NEEDS_NEWER_DORKOS_TEXT));
@@ -209,7 +216,8 @@ export function AutonomyDial(props: AutonomyDialProps): Node {
   const disabled = tooOld;
   const kindRow = (kind: AutonomyKind) => {
     const stop = stopOf(kind);
-    const blocked = kind === 'ship' && !props.reviewerAgent && (inForce.kinds.ship ?? inForce.dial) !== 'ask';
+    const blocked =
+      kind === 'ship' && !props.reviewerAgent && (inForce.kinds.ship ?? inForce.dial) !== 'ask';
     const words = blocked ? NO_REVIEWER_TEXT : STOP_WORDS[kind][stop];
     const rowLabel = `${project.name}: ${KIND_LABELS[kind]}`;
     return h(
@@ -218,7 +226,11 @@ export function AutonomyDial(props: AutonomyDialProps): Node {
       h(
         'div',
         { style: { display: 'flex', flexWrap: 'wrap', gap: '4px 10px', alignItems: 'baseline' } },
-        h('span', { role: 'rowheader', style: { minWidth: '11rem', fontSize: '12px' } }, KIND_LABELS[kind]),
+        h(
+          'span',
+          { role: 'rowheader', style: { minWidth: '11rem', fontSize: '12px' } },
+          KIND_LABELS[kind]
+        ),
         h('span', { role: 'cell', style: { ...MUTED, flex: 1, minWidth: '10rem' } }, words)
       ),
       customize
@@ -272,7 +284,15 @@ export function AutonomyDial(props: AutonomyDialProps): Node {
     label,
     h(
       'div',
-      { style: { margin: '6px 0 4px', display: 'flex', flexWrap: 'wrap', gap: '6px', alignItems: 'center' } },
+      {
+        style: {
+          margin: '6px 0 4px',
+          display: 'flex',
+          flexWrap: 'wrap',
+          gap: '6px',
+          alignItems: 'center',
+        },
+      },
       h(SegmentedControl<AutonomyStop>, {
         options: STOP_OPTIONS,
         // Custom: the kinds differ, so no single stop is chosen.
@@ -336,7 +356,9 @@ function messageOf(failure: unknown, fallback: string): string {
   if (!(failure instanceof Error) || failure.message === '') return fallback;
   // DorkOS's client says "<method> failed: <status>" when the server gave no sentence.
   if (/^projectSettings\.\w+ failed:/.test(failure.message)) {
-    return (failure as { status?: number }).status === 403 ? 'Only a person can change this.' : fallback;
+    return (failure as { status?: number }).status === 403
+      ? 'Only a person can change this.'
+      : fallback;
   }
   return failure.message;
 }

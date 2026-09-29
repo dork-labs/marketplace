@@ -637,7 +637,7 @@ describe('flow next: the account each pick runs on (flow-handoff-dispatch §3.5)
     });
   }
 
-  it("never picks an account DorkOS keeps to another project (fleet contract 4.2.0)", async () => {
+  it('never picks an account DorkOS keeps to another project (fleet contract 4.2.0)', async () => {
     // Purpose: a terminal run obeys the same rule as a DorkOS launch, so
     // `flow next` never assigns work to an account DorkOS would refuse here.
     temp = tempProject(config());

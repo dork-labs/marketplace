@@ -41,8 +41,7 @@ export type IneligibleBecause = 'only-projects' | 'project-allowlist';
 
 /** Whether an account may work in a project, and which rule refused it. */
 export type ProjectEligibility =
-  | { eligible: true }
-  | { eligible: false; reason: IneligibleBecause };
+  { eligible: true } | { eligible: false; reason: IneligibleBecause };
 
 /** DorkOS's two rules, canonicalised once. */
 export interface ProjectEligibilityRules {

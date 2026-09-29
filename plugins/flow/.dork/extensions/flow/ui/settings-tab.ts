@@ -104,7 +104,11 @@ export function createSettingsTab(
           if (!live || answer === null) return;
           const onlyFor = new Map<string, string[]>();
           for (const row of answer.accounts) {
-            if (row.onlyProjects !== null) onlyFor.set(row.id, row.onlyProjects.map((p) => p.name));
+            if (row.onlyProjects !== null)
+              onlyFor.set(
+                row.id,
+                row.onlyProjects.map((p) => p.name)
+              );
           }
           setRules({ onlyFor, openRuntimes });
         });
@@ -172,7 +176,8 @@ export function createSettingsTab(
                       id: switcherId,
                       value: project.name,
                       style: FIELD,
-                      onChange: (event: { target: HTMLSelectElement }) => setPicked(event.target.value),
+                      onChange: (event: { target: HTMLSelectElement }) =>
+                        setPicked(event.target.value),
                     },
                     ...[...projects]
                       .sort((a, b) => a.name.localeCompare(b.name))
@@ -182,7 +187,11 @@ export function createSettingsTab(
                   )
                 )
               : null,
-            h('h3', { id: `${switcherId}-heading`, style: { ...HEADING, marginTop: '8px' } }, `Editing ${project.name}`),
+            h(
+              'h3',
+              { id: `${switcherId}-heading`, style: { ...HEADING, marginTop: '8px' } },
+              `Editing ${project.name}`
+            ),
             h('p', { style: { ...MUTED, wordBreak: 'break-all' } }, project.root),
             h(ProjectFlowSettings, { key: project.name, project, api })
           ),

@@ -21,6 +21,13 @@ import {
   type AutonomyRead,
   type AutonomyTunables,
 } from '../scripts/autonomy.ts';
+import {
+  NEW_PROJECT_DIAL,
+  NO_COPY_DIAL,
+  isCustom,
+  withDial,
+  withKind,
+} from '../scripts/autonomy-dial.ts';
 
 let dir: string;
 
@@ -172,5 +179,57 @@ describe('loadConfig applies the dial', () => {
     expect(loaded.autonomy?.state).toBe('ok');
     expect(loaded.config.recovery.maxRetries).toBe(0);
     expect(loadConfig(roots, {}).config.recovery.maxRetries).toBe(2);
+  });
+});
+
+describe('how a person’s choice changes the dial (autonomy-dial.ts)', () => {
+  // Purpose: the settings page's dial and Customize, and the inbox's "Next
+  // time, on its own?" Yes, all store through these, so a choice moves only
+  // what it names.
+  it('a dial choice moves every kind to that stop and keeps the deadline', () => {
+    const copy = {
+      dial: 'tell' as const,
+      kinds: { sort: 'ask' as const },
+      questionDeadlineMinutes: 60,
+    };
+    expect(withDial(copy, 'auto')).toEqual({
+      dial: 'auto',
+      kinds: {},
+      questionDeadlineMinutes: 60,
+    });
+    expect(withDial(null, 'ask')).toEqual({ dial: 'ask', kinds: {}, questionDeadlineMinutes: 240 });
+  });
+
+  it('a kind choice moves only that kind, and a kind back on the dial’s stop follows the dial again', () => {
+    const copy = {
+      dial: 'tell' as const,
+      kinds: { sort: 'ask' as const },
+      questionDeadlineMinutes: 60,
+    };
+    const moved = withKind(copy, 'ship', 'auto');
+    expect(moved).toEqual({
+      dial: 'tell',
+      kinds: { sort: 'ask', ship: 'auto' },
+      questionDeadlineMinutes: 60,
+    });
+    for (const kind of AUTONOMY_KINDS.filter((k) => k !== 'ship')) {
+      expect(resolveAutonomy(moved, kind)).toBe(resolveAutonomy(copy, kind));
+    }
+    expect(withKind(copy, 'sort', 'tell')).toEqual({
+      dial: 'tell',
+      kinds: {},
+      questionDeadlineMinutes: 60,
+    });
+    expect(isCustom(copy)).toBe(true);
+    expect(isCustom(withKind(copy, 'sort', 'tell'))).toBe(false);
+  });
+
+  it('from no copy, starts from what is in force: Ask me first, with failing checks still fixed', () => {
+    expect(withKind(null, 'ship', 'tell', NO_COPY_DIAL)).toEqual({
+      dial: 'ask',
+      kinds: { retry: 'tell', ship: 'tell' },
+      questionDeadlineMinutes: 240,
+    });
+    expect(NEW_PROJECT_DIAL.dial).toBe('tell');
   });
 });

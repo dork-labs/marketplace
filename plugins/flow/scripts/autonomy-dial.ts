@@ -119,7 +119,6 @@ export function resolveAutonomy(
   return copy.kinds[kind] ?? copy.dial;
 }
 
-
 /** The default for a project flow first sees with no history: Tell me after (V10). */
 export const NEW_PROJECT_DIAL: AutonomyCopy = {
   dial: 'tell',
