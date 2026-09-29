@@ -7,8 +7,9 @@
  *   pages), else the chat's project, else the first by name. The heading
  *   always names the project being edited ("Editing dorkos"), so a change is
  *   never made to the wrong one by mistake.
- * - Opening the tab moves any "Only for these repos" into DorkOS once, where
- *   DorkOS keeps accounts to projects itself, and says what moved (§8.5).
+ * - Where DorkOS keeps accounts to projects itself, an account whose "Only
+ *   for these repos" could move there says so on its row, and moves only when
+ *   a person clicks (§8.5). Opening the tab writes nothing.
  *
  * The tab id stays `fleet`, so Settings → Runtimes' link to `flow:fleet` still
  * lands here.
@@ -20,20 +21,33 @@ import type { ComponentType } from 'react';
 import type { ClientApi } from '../lib/host-types.ts';
 import type { FlowProject } from '../lib/model.ts';
 import { RUNTIMES_SETTINGS_LINK } from './account-checkboxes.ts';
-import { getFleet, getRepoMigration, putAccount, putRepoMigration } from './api.ts';
+import {
+  UNREACHABLE_MESSAGE,
+  getFleet,
+  getRepoMigration,
+  putAccount,
+  putRepoMigration,
+} from './api.ts';
 import {
   getEligibility,
   hasEligibilityRoutes,
   listCoreProjects,
   putOnlyProjects,
 } from './core-api.ts';
-import { FleetTab, type CoreRules } from './fleet-tab.ts';
-import { migrateRepos, type MigrationDeps, type MigrationLine } from './migrate-repos.ts';
+import { FleetTab, type CoreRules, type MoveLineProps } from './fleet-tab.ts';
+import {
+  RULE_BEHAVIOUR,
+  planMoves,
+  runMove,
+  type MigrationDeps,
+  type MovePlan,
+  type MoveResult,
+} from './migrate-repos.ts';
 import { ProjectFlowSettings } from './project-settings.ts';
 import { h, useEffect, useId, useState, type Node } from './react.ts';
 import type { FlowStore } from './store.ts';
 import { useStore } from './store.ts';
-import { ALERT, FIELD, FOCUS_CSS, HEADING, MUTED, NOTICE, ROOT } from './styles.ts';
+import { FIELD, FOCUS_CSS, HEADING, MUTED, ROOT } from './styles.ts';
 
 /** The real routes the move uses. */
 export const MIGRATION_DEPS: MigrationDeps = {
@@ -84,38 +98,84 @@ export function createSettingsTab(
   function FlowSettingsTab(): Node {
     const snapshot = useStore(store);
     const projects = snapshot.model?.projects ?? [];
+    const allCurrent = projects.every((project) => project.version.behaviour >= RULE_BEHAVIOUR);
     const [picked, setPicked] = useState<string | null>(null);
-    const [moved, setMoved] = useState<MigrationLine[]>([]);
+    const [plans, setPlans] = useState<MovePlan[]>([]);
+    const [results, setResults] = useState<Record<string, MoveResult>>({});
+    const [moving, setMoving] = useState<string | null>(null);
     const [rules, setRules] = useState<CoreRules | null>(null);
     const [reloadKey, setReloadKey] = useState(0);
+    const [seen, setSeen] = useState(0);
     const switcherId = useId();
 
+    // ⚙ picks a project for this visit only.
+    useEffect(
+      () => () => {
+        store.settingsProject = null;
+      },
+      []
+    );
+
+    // Opening the tab only reads: what could move, and DorkOS's rules. Nothing is written.
     useEffect(() => {
       let live = true;
       const openRuntimes = () => api.navigate(RUNTIMES_SETTINGS_LINK);
-      migrateRepos(deps)
-        .catch((): MigrationLine[] => [])
-        .then(async (lines) => {
+      planMoves(deps, allCurrent)
+        .catch((): MovePlan[] => [])
+        .then(async (next) => {
           if (!live) return;
-          setMoved(lines);
-          if (lines.some((line) => line.kind !== 'failed')) setReloadKey((n) => n + 1);
-          if (!(await deps.hasEligibilityRoutes())) return;
+          setPlans(next);
+          if ((await deps.hasEligibilityRoutes()) !== true) return;
           const answer = await deps.getEligibility().catch(() => null);
           if (!live || answer === null) return;
           const onlyFor = new Map<string, string[]>();
           for (const row of answer.accounts) {
-            if (row.onlyProjects !== null)
-              onlyFor.set(
-                row.id,
-                row.onlyProjects.map((p) => p.name)
-              );
+            if (row.onlyProjects !== null) onlyFor.set(row.id, row.onlyProjects.map((p) => p.name));
           }
           setRules({ onlyFor, openRuntimes });
         });
       return () => {
         live = false;
       };
-    }, []);
+    }, [allCurrent, seen]);
+
+    const move = (key: string) => {
+      setMoving(key);
+      runMove(deps, key, allCurrent)
+        .catch(
+          (failure: unknown): MoveResult => ({
+            ok: false,
+            text: failure instanceof Error && failure.message !== '' ? failure.message : UNREACHABLE_MESSAGE,
+          })
+        )
+        .then((result) => {
+          setMoving(null);
+          setResults((current) => ({ ...current, [key]: result }));
+          setReloadKey((n) => n + 1);
+          setSeen((n) => n + 1);
+        });
+    };
+    const moves = new Map<string, MoveLineProps>(
+      plans.map((plan) => [
+        plan.key,
+        {
+          plan,
+          result: results[plan.key] ?? null,
+          busy: moving === plan.key,
+          onMove: () => move(plan.key),
+        },
+      ])
+    );
+    for (const [key, result] of Object.entries(results)) {
+      if (!moves.has(key)) {
+        moves.set(key, {
+          plan: { key, kind: 'core-has-rule', text: '', action: null },
+          result,
+          busy: false,
+          onMove: () => {},
+        });
+      }
+    }
 
     const current =
       snapshot.currentProject?.root ??
@@ -128,38 +188,6 @@ export function createSettingsTab(
       'div',
       { className: 'flow-fleet-tab', style: ROOT },
       h('style', null, FOCUS_CSS),
-      moved.length === 0
-        ? null
-        : h(
-            'div',
-            { role: 'status', style: { ...NOTICE, marginBottom: '12px' } },
-            ...moved.map((line, index) =>
-              h(
-                'p',
-                { key: index, style: line.kind === 'failed' ? ALERT : { margin: '0 0 4px' } },
-                line.text
-              )
-            ),
-            moved.some((line) => line.kind !== 'failed')
-              ? h(
-                  'button',
-                  {
-                    type: 'button',
-                    style: {
-                      padding: 0,
-                      border: 0,
-                      background: 'transparent',
-                      color: 'inherit',
-                      font: 'inherit',
-                      textDecoration: 'underline',
-                      cursor: 'pointer',
-                    },
-                    onClick: () => api.navigate(RUNTIMES_SETTINGS_LINK),
-                  },
-                  'Change this in Settings → Runtimes →'
-                )
-              : null
-          ),
       project === null
         ? null
         : h(
@@ -196,7 +224,7 @@ export function createSettingsTab(
             h(ProjectFlowSettings, { key: project.name, project, api })
           ),
       h('h3', { style: { ...HEADING, fontSize: '14px', margin: '8px 0 6px' } }, 'This computer'),
-      h(FleetTab, { rules, reloadKey })
+      h(FleetTab, { rules, reloadKey, moves })
     );
   }
   return FlowSettingsTab as ComponentType;

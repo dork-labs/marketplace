@@ -200,13 +200,10 @@ describe('one component, two entry points', () => {
   });
 });
 
-describe('Settings → Flow moves "Only for these repos" when opened', () => {
-  it('says what moved, once, with the way to change it, and reads the accounts again', async () => {
-    serve({ model: flowModel([newProject()]) });
-    const store = new FlowStore({});
-    store.start();
-    const navigate = vi.fn();
-    const moved: MigrationDeps = {
+describe('Settings → Flow and "Only for these repos"', () => {
+  /** One kept-out Claude account whose repo is client-app, and DorkOS with no rule for it. */
+  function movable(put: ReturnType<typeof vi.fn>): MigrationDeps {
+    return {
       ...NO_MOVE,
       hasEligibilityRoutes: async () => true,
       getFleet: async () => ({
@@ -239,13 +236,89 @@ describe('Settings → Flow moves "Only for these repos" when opened', () => {
       listProjects: async () => [
         { root: '/work/client-app', name: 'client-app', originRepo: 'acme/app' },
       ],
+      getEligibility: async () => ({
+        project: null,
+        allow: null,
+        accounts: [
+          {
+            id: 'work',
+            label: 'Work',
+            color: '#000000',
+            implicit: false,
+            onlyProjects: null,
+            allowedByAccount: true,
+            allowedByProject: true,
+            eligible: true,
+          },
+        ],
+      }),
+      putOnlyProjects: put,
     };
-    render(React.createElement(createSettingsTab({ navigate }, store, moved)));
+  }
+
+  it('writes nothing on open; the account row offers the move, which runs only on a click', async () => {
+    const fleetBody = {
+      handoff: 'auto',
+      crossRuntimeFallback: 'off',
+      groups: [
+        {
+          runtime: 'claude-code',
+          label: 'Claude Code',
+          supportsAccounts: true,
+          accounts: [
+            {
+              key: 'claude-code:work',
+              id: 'work',
+              label: 'Work',
+              color: '#000000',
+              implicit: false,
+              role: 'kept-out',
+              reservePct: 0,
+              spendDownWindowHours: 24,
+              repos: ['acme/app'],
+              effectiveReservePct: 0,
+            },
+          ],
+        },
+      ],
+      anyRoleStored: true,
+      warnings: [],
+    };
+    routeFetch((_method, url) => {
+      if (url.includes('/ext/flow/fleet')) return { status: 200, body: fleetBody };
+      if (url.includes('/ext/flow/settings/')) return { status: 200, body: settingsView() };
+      if (url.includes('/runtimes/claude-code/account-eligibility')) return { status: 404, body: {} };
+      return { status: 200, body: flowModel([newProject()]) };
+    });
+    const store = new FlowStore({});
+    store.start();
+    const put = vi.fn(async () => ({}));
+    render(React.createElement(createSettingsTab({ navigate: vi.fn() }, store, movable(put))));
     await act(async () => {});
     await act(async () => {});
-    expect(screen.getByText('Moved to DorkOS: Work is now only for client-app.')).toBeTruthy();
-    fireEvent.click(screen.getByRole('button', { name: 'Change this in Settings → Runtimes →' }));
-    expect(navigate).toHaveBeenLastCalledWith('?settings=runtimes');
+    await act(async () => {});
+    expect(
+      screen.getByText(
+        'Move "Only for these repos" into DorkOS? DorkOS will keep Work to client-app.',
+        { exact: false }
+      )
+    ).toBeTruthy();
+    expect(put).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByRole('button', { name: 'Move it' }));
+    await act(async () => {});
+    await act(async () => {});
+    expect(put).toHaveBeenCalledWith('work', ['/work/client-app']);
+  });
+
+  it('forgets the project ⚙ asked for once the tab closes', async () => {
+    serve({ model: flowModel([newProject('blintz'), newProject('dorkos')]) });
+    const store = new FlowStore({});
+    store.start();
+    store.settingsProject = 'blintz';
+    const view = render(React.createElement(createSettingsTab({ navigate: vi.fn() }, store, NO_MOVE)));
+    await act(async () => {});
+    view.unmount();
+    expect(store.settingsProject).toBeNull();
   });
 });
 

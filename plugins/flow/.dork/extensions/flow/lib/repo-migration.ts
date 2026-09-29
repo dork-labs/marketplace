@@ -27,6 +27,11 @@ export interface AccountMove {
   pendingRepos: string[];
   /** When it last changed, ISO. */
   at: string;
+  /**
+   * DorkOS's rule is set, but flow's own repo list is kept too until every
+   * project runs a flow that honours DorkOS's rule (both apply meanwhile).
+   */
+  held?: boolean;
 }
 
 /** The record, by the account's `fleet.json` key. */
@@ -61,7 +66,13 @@ export function parseRepoMigration(value: unknown): RepoMigration | null {
     const movedRoots = strings(move.movedRoots);
     const pendingRepos = strings(move.pendingRepos);
     if (movedRoots === null || pendingRepos === null || typeof move.at !== 'string') return null;
-    accounts[key] = { movedRoots, pendingRepos, at: move.at };
+    if (move.held !== undefined && typeof move.held !== 'boolean') return null;
+    accounts[key] = {
+      movedRoots,
+      pendingRepos,
+      at: move.at,
+      ...(move.held === undefined ? {} : { held: move.held }),
+    };
   }
   return { accounts };
 }

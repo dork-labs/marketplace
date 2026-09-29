@@ -131,15 +131,17 @@ async function core<T>(method: 'GET' | 'PUT', route: string, body?: unknown): Pr
   );
 }
 
-let eligibilityProbe: Promise<boolean> | null = null;
+let eligibilityProbe: Promise<boolean | null> | null = null;
 
 /**
  * Whether this DorkOS keeps account rules per project (the eligibility routes,
- * spec §10). Probed once per page load; a failed probe is tried again next time.
+ * spec §10): `true`, `false` (the routes are not there: a 404), or `null` when
+ * DorkOS could not be asked. Probed once per page load; a failed probe is
+ * forgotten, so the next caller asks again.
  *
- * @returns True when `GET /api/runtimes/claude-code/account-eligibility` answers.
+ * @returns The answer.
  */
-export function hasEligibilityRoutes(): Promise<boolean> {
+export function hasEligibilityRoutes(): Promise<boolean | null> {
   eligibilityProbe ??= fetch(`${resolveApiBaseUrl()}/runtimes/claude-code/account-eligibility`)
     .then((response) => {
       if (response.status === 404) return false;
@@ -148,7 +150,7 @@ export function hasEligibilityRoutes(): Promise<boolean> {
     })
     .catch(() => {
       eligibilityProbe = null;
-      return false;
+      return null;
     });
   return eligibilityProbe;
 }

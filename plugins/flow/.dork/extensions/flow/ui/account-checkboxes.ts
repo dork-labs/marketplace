@@ -37,6 +37,10 @@ import { ALERT } from './styles.ts';
 /** Main's id in DorkOS: this computer's own Claude sign-in. */
 const MAIN_ID = 'default';
 
+/** Said when DorkOS could not be asked whether it keeps account rules. */
+export const PROBE_FAILED_TEXT =
+  "Couldn't reach DorkOS to read which accounts this project may use. Nothing was changed.";
+
 /** Where DorkOS shows each account's own rule. */
 export const RUNTIMES_SETTINGS_LINK = '?settings=runtimes';
 
@@ -122,6 +126,7 @@ export function AccountCheckboxes(props: AccountCheckboxesProps): Node {
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [confirm, setConfirm] = useState<Confirm | null>(null);
+  const [attempt, setAttempt] = useState(0);
   const labelId = useId();
 
   useEffect(() => {
@@ -131,6 +136,11 @@ export function AccountCheckboxes(props: AccountCheckboxesProps): Node {
     setConfirm(null);
     hasEligibilityRoutes().then((has) => {
       if (!live) return;
+      if (has === null) {
+        setSupported(null);
+        setError(PROBE_FAILED_TEXT);
+        return;
+      }
       setSupported(has);
       if (!has) return;
       getEligibility(props.root).then(
@@ -145,7 +155,7 @@ export function AccountCheckboxes(props: AccountCheckboxesProps): Node {
     return () => {
       live = false;
     };
-  }, [props.root]);
+  }, [props.root, attempt]);
 
   if (supported === false) return null;
   if (answer === null) {
@@ -155,7 +165,14 @@ export function AccountCheckboxes(props: AccountCheckboxesProps): Node {
       h('span', { id: labelId, style: { fontWeight: 600 } }, 'Accounts this project may use'),
       error === null
         ? h('p', { 'aria-busy': true, style: MUTED }, 'Loading…')
-        : h('p', { role: 'alert', style: ALERT }, error)
+        : h('p', { role: 'alert', style: ALERT }, error),
+      error === null
+        ? null
+        : h(
+            'button',
+            { type: 'button', style: BUTTON, onClick: () => setAttempt((n) => n + 1) },
+            'Retry'
+          )
     );
   }
 

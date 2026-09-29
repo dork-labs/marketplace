@@ -22,6 +22,7 @@ import {
   putHandoff,
   type AccountPatch,
 } from './api.ts';
+import type { MovePlan, MoveResult } from './migrate-repos.ts';
 import { FleetNotice, pickNotice } from './notice.ts';
 import { h, useEffect, useId, useRef, useState, type Node } from './react.ts';
 import { RepoChips } from './repo-chips.ts';
@@ -201,26 +202,12 @@ function MainPanel(props: MainPanelProps): Node {
 }
 
 /**
- * The inset under a Kept out row. Before DorkOS kept accounts to projects
- * itself, this was where "Only for these repos" was chosen. On a DorkOS that
- * does (`rules` given), that choice lives in Settings → Runtimes (§8.5): the
- * repos left here are the ones not on this computer yet, shown read-only.
+ * The inset under a Kept out row: the repos it may still serve. flow keeps
+ * its own list in force until a person moves it into DorkOS and every project
+ * runs a flow that honours DorkOS's rule (§8.5), so it stays editable here.
  */
-function KeptOutPanel(props: MainPanelProps & { rules: CoreRules | null }): Node {
+function KeptOutPanel(props: MainPanelProps): Node {
   const labelId = useId();
-  if (props.rules !== null) {
-    return h(
-      'div',
-      { style: INSET },
-      props.account.repos.length === 0
-        ? h('span', null, 'Flow never uses this account.')
-        : h(
-            'span',
-            null,
-            `Only for ${props.account.repos.join(', ')}. Flow moves this to DorkOS once ${props.account.repos.length === 1 ? 'the repo is' : 'a repo is'} on this computer.`
-          )
-    );
-  }
   return h(
     'div',
     { style: INSET },
@@ -260,6 +247,53 @@ function CoreRuleLine(props: { names: readonly string[]; openRuntimes: () => voi
   );
 }
 
+/** What {@link MoveLine} takes. */
+export interface MoveLineProps {
+  /** The account's plan. */
+  plan: MovePlan;
+  /** What the last click came to, if anything. */
+  result: MoveResult | null;
+  /** True while a click is on its way. */
+  busy: boolean;
+  /** Do what the plan offers. */
+  onMove: () => void;
+}
+
+/**
+ * The line under an account whose "Only for these repos" can move into DorkOS
+ * (§8.5): what would happen, in words, and a button that does nothing until a
+ * person clicks it.
+ */
+function MoveLine(props: MoveLineProps): Node {
+  const { plan, result } = props;
+  if (result !== null) {
+    return h('p', { role: 'status', style: result.ok ? { ...MUTED, margin: '0 0 8px 20px' } : { ...ALERT, margin: '0 0 8px 20px' } }, result.text);
+  }
+  return h(
+    'p',
+    { style: { ...MUTED, margin: '0 0 8px 20px' } },
+    plan.text,
+    plan.action === null
+      ? null
+      : [
+          ' ',
+          h(
+            'button',
+            {
+              key: 'move',
+              type: 'button',
+              style: { ...CHIP, cursor: props.busy ? 'progress' : 'pointer' },
+              'aria-disabled': props.busy || undefined,
+              onClick: () => {
+                if (!props.busy) props.onMove();
+              },
+            },
+            plan.action
+          ),
+        ]
+  );
+}
+
 /** One account: its dot, its name, its role, and the inset its role brings. */
 function AccountRow(props: {
   account: FleetAccount;
@@ -267,6 +301,8 @@ function AccountRow(props: {
   onPatch: (patch: AccountPatch) => void;
   /** DorkOS's rules, for a Claude Code account on a DorkOS that keeps them. */
   rules: CoreRules | null;
+  /** Moving its "Only for these repos" into DorkOS, when there is something to say. */
+  move?: MoveLineProps;
 }): Node {
   const { account } = props;
   const onlyFor = props.rules?.onlyFor.get(account.id);
@@ -290,12 +326,11 @@ function AccountRow(props: {
       })
     ),
     account.role === 'main' ? h(MainPanel, { account, onPatch: props.onPatch }) : null,
-    account.role === 'kept-out'
-      ? h(KeptOutPanel, { account, onPatch: props.onPatch, rules: props.rules })
-      : null,
-    onlyFor !== undefined && props.rules !== null && account.role !== 'kept-out'
+    account.role === 'kept-out' ? h(KeptOutPanel, { account, onPatch: props.onPatch }) : null,
+    onlyFor !== undefined && props.rules !== null
       ? h(CoreRuleLine, { names: onlyFor, openRuntimes: props.rules.openRuntimes })
       : null,
+    props.move === undefined ? null : h(MoveLine, props.move),
     h(ErrorLine, { message: props.error })
   );
 }
@@ -396,6 +431,8 @@ export interface FleetTabProps {
   rules?: CoreRules | null;
   /** Changes when something else changed flow's accounts, to read them again. */
   reloadKey?: number;
+  /** Each account's move line, by its key (§8.5). */
+  moves?: ReadonlyMap<string, MoveLineProps>;
 }
 
 /**
@@ -549,6 +586,7 @@ export function FleetTab(props: FleetTabProps): Node {
               error: errors[account.key],
               onPatch: patchAccount(account.key),
               rules: group.runtime === 'claude-code' ? (props.rules ?? null) : null,
+              move: props.moves?.get(account.key),
             })
           )
         )

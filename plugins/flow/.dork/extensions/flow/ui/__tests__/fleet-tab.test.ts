@@ -662,20 +662,46 @@ describe('FleetTab on a DorkOS that keeps accounts to projects (§8.5)', () => {
     expect(screen.getAllByText(/Only for/)).toHaveLength(1);
   });
 
-  it('no longer edits "Only for these repos": repos not moved yet are said, not chips', async () => {
+  it("keeps 'Only for these repos' editable, since flow's own list stays in force until moved", async () => {
     stubFetch({
       status: 200,
       body: fleet([claudeGroup([account('Work', 'kept-out', { repos: ['acme/web'] })])]),
     });
     render(React.createElement(FleetTab, { rules: rules({}) }));
     await act(async () => {});
-    expect(
-      screen.getByText(
-        'Only for acme/web. Flow moves this to DorkOS once the repo is on this computer.'
-      )
-    ).toBeTruthy();
-    expect(screen.queryByRole('button', { name: '+ add' })).toBeNull();
-    expect(screen.queryByRole('button', { name: 'Remove acme/web' })).toBeNull();
+    expect(screen.getByRole('button', { name: '+ add' })).toBeTruthy();
+    expect(screen.getByRole('button', { name: 'Remove acme/web' })).toBeTruthy();
+  });
+
+  it('offers a move on the account’s row, and does nothing until it is clicked', async () => {
+    stubFetch({
+      status: 200,
+      body: fleet([claudeGroup([account('Work', 'kept-out', { repos: ['acme/app'] })])]),
+    });
+    const onMove = vi.fn();
+    const text =
+      'Move "Only for these repos" into DorkOS? DorkOS will keep Work to client-app.';
+    render(
+      React.createElement(FleetTab, {
+        rules: rules({}),
+        moves: new Map([
+          [
+            'claude-code:Work',
+            {
+              plan: { key: 'claude-code:Work', kind: 'ready' as const, text, action: 'Move it' },
+              result: null,
+              busy: false,
+              onMove,
+            },
+          ],
+        ]),
+      })
+    );
+    await act(async () => {});
+    expect(screen.getByText(text)).toBeTruthy();
+    expect(onMove).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByRole('button', { name: 'Move it' }));
+    expect(onMove).toHaveBeenCalledTimes(1);
   });
 
   it('keeps the chips on a DorkOS without the rules', async () => {

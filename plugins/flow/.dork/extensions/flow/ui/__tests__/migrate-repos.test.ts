@@ -1,15 +1,20 @@
 /**
  * Moving "Only for these repos" into DorkOS (spec `flow-multiproject` §8.5):
- * DorkOS's rule first, flow's role after; partial matches remembered and added
- * later; nothing moves without a match; a second visit changes nothing; a
- * refusal changes nothing and says so; a DorkOS without the routes is left
- * alone.
+ * planning writes nothing; a move runs only on a person's click; DorkOS is
+ * written only when it has no rule, and then to exactly the matched projects;
+ * flow's own list stays in force until every project runs flow 0.52 or newer;
+ * nothing ever widens where the account may work, on either side.
  */
 
 import { describe, expect, it, vi } from 'vitest';
 import type { RepoMigration } from '../../lib/repo-migration.ts';
 import type { AccountEligibility, CoreProject } from '../core-api.ts';
-import { migrateRepos, type MigrationDeps } from '../migrate-repos.ts';
+import {
+  WAITING_FOR_FLOW_TEXT,
+  planMoves,
+  runMove,
+  type MigrationDeps,
+} from '../migrate-repos.ts';
 import { account, claudeGroup, fleet } from './helpers.ts';
 
 const PROJECTS: CoreProject[] = [
@@ -18,6 +23,8 @@ const PROJECTS: CoreProject[] = [
   { root: '/work/dorkos', name: 'dorkos', originRepo: 'dork-labs/dorkos' },
 ];
 
+const KEY = 'claude-code:work';
+
 /** A little world: flow's fleet, DorkOS's rules and projects, the record. */
 function world(opts: {
   repos?: string[];
@@ -25,7 +32,8 @@ function world(opts: {
   projects?: CoreProject[];
   record?: RepoMigration;
   onlyWork?: { root: string; name: string }[] | null;
-  routes?: boolean;
+  listed?: boolean;
+  routes?: boolean | null;
   refuseCore?: Error;
   refuseFlow?: Error;
 }) {
@@ -36,36 +44,36 @@ function world(opts: {
     record: opts.record ?? { accounts: {} },
     projects: opts.projects ?? PROJECTS,
   };
-  const order: string[] = [];
   const deps: MigrationDeps = {
-    hasEligibilityRoutes: async () => opts.routes ?? true,
+    hasEligibilityRoutes: async () => (opts.routes === undefined ? true : opts.routes),
     getFleet: async () =>
       fleet([claudeGroup([account('work', state.role, { label: 'Work', repos: state.repos })])]),
     listProjects: async () => state.projects,
     getEligibility: async (): Promise<AccountEligibility> => ({
       project: null,
       allow: null,
-      accounts: [
-        {
-          id: 'work',
-          label: 'Work',
-          color: '#000000',
-          implicit: false,
-          onlyProjects: state.onlyWork,
-          allowedByAccount: true,
-          allowedByProject: true,
-          eligible: true,
-        },
-      ],
+      accounts:
+        opts.listed === false
+          ? []
+          : [
+              {
+                id: 'work',
+                label: 'Work',
+                color: '#000000',
+                implicit: false,
+                onlyProjects: state.onlyWork,
+                allowedByAccount: true,
+                allowedByProject: true,
+                eligible: true,
+              },
+            ],
     }),
     putOnlyProjects: vi.fn(async (_id: string, roots: string[]) => {
-      order.push('dorkos');
       if (opts.refuseCore) throw opts.refuseCore;
       state.onlyWork = roots.map((root) => ({ root, name: root.split('/').pop()! }));
       return {};
     }),
     putAccount: vi.fn(async (_key: string, patch: { role?: unknown; repos?: unknown }) => {
-      order.push('flow');
       if (opts.refuseFlow) throw opts.refuseFlow;
       state.role = patch.role as 'rotation';
       state.repos = [];
@@ -78,134 +86,187 @@ function world(opts: {
     }),
     now: () => new Date('2026-09-29T10:00:00.000Z'),
   };
-  return { deps, state, order };
+  return { deps, state };
 }
 
-describe('moving "Only for these repos" into DorkOS', () => {
-  it('moves every matched repo, DorkOS first, then makes the account Rotation, and says what moved', async () => {
-    const { deps, state, order } = world({ repos: ['acme/app', 'acme/api'] });
-    const lines = await migrateRepos(deps);
-    expect(order).toEqual(['dorkos', 'flow']);
-    expect(deps.putOnlyProjects).toHaveBeenCalledWith('work', [
-      '/work/client-app',
-      '/work/client-api',
-    ]);
-    expect(deps.putAccount).toHaveBeenCalledWith('claude-code:work', {
-      role: 'rotation',
-      repos: null,
-    });
-    expect(lines).toEqual([
-      { kind: 'moved', text: 'Moved to DorkOS: Work is now only for client-app and client-api.' },
-    ]);
-    expect(state.record.accounts['claude-code:work']).toEqual({
-      movedRoots: ['/work/client-app', '/work/client-api'],
-      pendingRepos: [],
-      at: '2026-09-29T10:00:00.000Z',
-    });
-  });
+/** Nothing was written to DorkOS, to flow's fleet or to the record. */
+function nothingWritten(deps: MigrationDeps) {
+  expect(deps.putOnlyProjects).not.toHaveBeenCalled();
+  expect(deps.putAccount).not.toHaveBeenCalled();
+  expect(deps.putRecord).not.toHaveBeenCalled();
+}
 
-  it('moves the matched part, remembers the rest, and adds it on a later visit once it is here', async () => {
-    const { deps, state } = world({
-      repos: ['acme/app', 'acme/web'],
-      projects: PROJECTS.slice(0, 1),
-    });
-    expect(await migrateRepos(deps)).toEqual([
+describe('planning a move', () => {
+  it('writes nothing: opening Settings → Flow only says what could move', async () => {
+    const { deps } = world({ repos: ['acme/app', 'acme/web'] });
+    expect(await planMoves(deps, true)).toEqual([
       {
-        kind: 'moved',
-        text: "Moved to DorkOS: Work is now only for client-app. acme/web isn't on this computer yet; it will be added when it is.",
+        key: KEY,
+        kind: 'ready',
+        text: 'Move "Only for these repos" into DorkOS? DorkOS will keep Work to client-app. acme/web isn\'t on this computer yet.',
+        action: 'Move it',
       },
     ]);
-    expect(state.record.accounts['claude-code:work'].pendingRepos).toEqual(['acme/web']);
-
-    // Nothing new yet: a visit changes nothing.
-    expect(await migrateRepos(deps)).toEqual([]);
-
-    state.projects = [...PROJECTS, { root: '/work/web', name: 'web', originRepo: 'acme/web' }];
-    expect(await migrateRepos(deps)).toEqual([
-      { kind: 'added', text: 'Added to DorkOS: Work may now also work in web.' },
-    ]);
-    expect(deps.putOnlyProjects).toHaveBeenLastCalledWith('work', [
-      '/work/client-app',
-      '/work/web',
-    ]);
-    expect(state.record.accounts['claude-code:work'].pendingRepos).toEqual([]);
+    nothingWritten(deps);
   });
 
-  it('changes nothing when none of the repos is on this computer', async () => {
-    const { deps, state } = world({ repos: ['acme/elsewhere'] });
-    expect(await migrateRepos(deps)).toEqual([]);
-    expect(deps.putOnlyProjects).not.toHaveBeenCalled();
-    expect(deps.putAccount).not.toHaveBeenCalled();
-    expect(state.role).toBe('kept-out');
-  });
-
-  it('leaves an account kept out with no repos kept out: flow never uses it', async () => {
-    const { deps } = world({ repos: [] });
-    expect(await migrateRepos(deps)).toEqual([]);
-    expect(deps.putAccount).not.toHaveBeenCalled();
-  });
-
-  it('is idempotent: a second visit after a full move changes nothing', async () => {
+  it('says flow will switch later while an older flow runs somewhere', async () => {
     const { deps } = world({ repos: ['acme/app'] });
-    await migrateRepos(deps);
-    const calls = vi.mocked(deps.putOnlyProjects).mock.calls.length;
-    expect(await migrateRepos(deps)).toEqual([]);
-    expect(vi.mocked(deps.putOnlyProjects).mock.calls.length).toBe(calls);
+    const [plan] = await planMoves(deps, false);
+    expect(plan.text).toContain(WAITING_FOR_FLOW_TEXT);
   });
 
-  it('adds to the projects DorkOS already kept the account to, never dropping one', async () => {
-    const { deps } = world({
+  it('says once, plainly, why an account DorkOS does not list stays as it is', async () => {
+    const { deps } = world({ repos: ['acme/app'], listed: false });
+    expect(await planMoves(deps, true)).toEqual([
+      {
+        key: KEY,
+        kind: 'not-in-dorkos',
+        text: "DorkOS doesn't list Work as a Claude account, so flow keeps its own repo list as it is.",
+        action: null,
+      },
+    ]);
+  });
+
+  it('offers nothing when none of the repos is here, or on a DorkOS without the rules, or one it could not ask', async () => {
+    expect(await planMoves(world({ repos: ['acme/elsewhere'] }).deps, true)).toEqual([]);
+    expect(await planMoves(world({ repos: ['acme/app'], routes: false }).deps, true)).toEqual([]);
+    expect(await planMoves(world({ repos: ['acme/app'], routes: null }).deps, true)).toEqual([]);
+  });
+
+  it('leaves an account kept out with no repos alone: flow never uses it', async () => {
+    expect(await planMoves(world({ repos: [] }).deps, true)).toEqual([]);
+  });
+});
+
+describe('never widening (the reviewer’s scenario)', () => {
+  // Work is kept to dorkos in DorkOS by a person, and kept out by flow except
+  // acme/app. Merging would let DorkOS launch Work in client-app, and make flow
+  // spend it in dorkos: somewhere each side had refused. So nothing moves.
+  it('does not touch an account DorkOS already limits, on either side, and says why', async () => {
+    const { deps, state } = world({
       repos: ['acme/app'],
       onlyWork: [{ root: '/work/dorkos', name: 'dorkos' }],
     });
-    await migrateRepos(deps);
-    expect(deps.putOnlyProjects).toHaveBeenCalledWith('work', ['/work/dorkos', '/work/client-app']);
+    const [plan] = await planMoves(deps, true);
+    expect(plan).toEqual({
+      key: KEY,
+      kind: 'core-has-rule',
+      text: 'Work already has project limits in DorkOS, so flow keeps its own repo list as it is.',
+      action: null,
+    });
+    const result = await runMove(deps, KEY, true);
+    expect(result.ok).toBe(false);
+    nothingWritten(deps);
+    expect(state.onlyWork).toEqual([{ root: '/work/dorkos', name: 'dorkos' }]);
+    expect(state.role).toBe('kept-out');
+    expect(state.repos).toEqual(['acme/app']);
   });
 
-  it('a DorkOS refusal changes nothing, says so in DorkOS’s words, and is tried again next visit', async () => {
-    const refusal = new Error('Only a person can change where an account may be used.');
-    const { deps, state } = world({ repos: ['acme/app'], refuseCore: refusal });
-    expect(await migrateRepos(deps)).toEqual([
-      {
-        kind: 'failed',
-        text: "Couldn't move Work's repo limits to DorkOS. Nothing changed. Only a person can change where an account may be used.",
-      },
-    ]);
+  it('with no rule in DorkOS, sets exactly the matched projects and keeps flow’s list while an older flow runs', async () => {
+    const { deps, state } = world({ repos: ['acme/app', 'acme/web'] });
+    const result = await runMove(deps, KEY, false);
+    expect(result).toEqual({
+      ok: true,
+      text: `DorkOS now keeps Work to client-app, and flow's own repo list stays too. ${WAITING_FOR_FLOW_TEXT}`,
+    });
+    // DorkOS: exactly client-app, nothing merged in.
+    expect(deps.putOnlyProjects).toHaveBeenCalledWith('work', ['/work/client-app']);
+    // flow: still kept out except its own repos, so both rules apply.
     expect(deps.putAccount).not.toHaveBeenCalled();
     expect(state.role).toBe('kept-out');
-    expect(deps.putRecord).not.toHaveBeenCalled();
-  });
+    expect(state.repos).toEqual(['acme/app', 'acme/web']);
+    expect(state.record.accounts[KEY]).toMatchObject({ movedRoots: ['/work/client-app'], held: true });
 
-  it('when flow’s half fails, says DorkOS already narrowed it, and finishes next time', async () => {
-    const { deps, state } = world({ repos: ['acme/app'], refuseFlow: new Error('') });
-    const [line] = await migrateRepos(deps);
-    expect(line.kind).toBe('failed');
-    expect(line.text).toMatch(/DorkOS keeps it to client-app now; flow will finish next time\.$/);
-    expect(state.onlyWork).toEqual([{ root: '/work/client-app', name: 'client-app' }]);
+    // Still an older flow somewhere: it says so, and offers nothing.
+    const [held] = await planMoves(deps, false);
+    expect(held).toMatchObject({ kind: 'held', action: null });
+    expect(held.text).toBe(`DorkOS keeps Work to client-app. ${WAITING_FOR_FLOW_TEXT}`);
   });
+});
 
-  it('does nothing on a DorkOS without the account rules', async () => {
-    const { deps } = world({ repos: ['acme/app'], routes: false });
-    expect(await migrateRepos(deps)).toEqual([]);
-    expect(deps.putOnlyProjects).not.toHaveBeenCalled();
-  });
-
-  it('drops a remembered repo when a person freed the account in Settings → Runtimes since', async () => {
-    const { deps, state } = world({
-      role: 'rotation',
-      record: {
-        accounts: {
-          'claude-code:work': {
-            movedRoots: ['/work/client-app'],
-            pendingRepos: ['acme/api'],
-            at: '2026-09-01T00:00:00.000Z',
-          },
-        },
-      },
-      onlyWork: null,
+describe('running a move', () => {
+  it('with every project current, moves exactly the matched projects, DorkOS first, then Rotation', async () => {
+    const { deps, state } = world({ repos: ['acme/app', 'acme/api'] });
+    const order: string[] = [];
+    vi.mocked(deps.putOnlyProjects).mockImplementation(async (_id, roots) => {
+      order.push('dorkos');
+      state.onlyWork = roots.map((root) => ({ root, name: root.split('/').pop()! }));
+      return {};
     });
-    expect(await migrateRepos(deps)).toEqual([]);
-    expect(deps.putOnlyProjects).not.toHaveBeenCalled();
-    expect(state.record.accounts['claude-code:work'].pendingRepos).toEqual([]);
+    vi.mocked(deps.putAccount).mockImplementation(async () => {
+      order.push('flow');
+      state.role = 'rotation';
+      state.repos = [];
+      return {};
+    });
+    expect(await runMove(deps, KEY, true)).toEqual({
+      ok: true,
+      text: 'Moved to DorkOS: Work is now only for client-app and client-api.',
+    });
+    expect(order).toEqual(['dorkos', 'flow']);
+    expect(deps.putAccount).toHaveBeenCalledWith(KEY, { role: 'rotation', repos: null });
+    // A second visit has nothing to offer.
+    expect(await planMoves(deps, true)).toEqual([]);
+  });
+
+  it('finishes a held move with a second click once every project is current', async () => {
+    const { deps, state } = world({ repos: ['acme/app'] });
+    await runMove(deps, KEY, false);
+    const [finish] = await planMoves(deps, true);
+    expect(finish).toMatchObject({ kind: 'finish', action: 'Switch to DorkOS’s rule' });
+    expect(deps.putAccount).not.toHaveBeenCalled();
+    expect(await runMove(deps, KEY, true)).toEqual({
+      ok: true,
+      text: 'Moved to DorkOS: Work is now only for client-app.',
+    });
+    expect(state.role).toBe('rotation');
+    expect(vi.mocked(deps.putOnlyProjects).mock.calls).toHaveLength(1);
+  });
+
+  it('a held move whose DorkOS rule a person changed since is left alone', async () => {
+    const { deps, state } = world({ repos: ['acme/app'] });
+    await runMove(deps, KEY, false);
+    state.onlyWork = [{ root: '/work/dorkos', name: 'dorkos' }];
+    const [plan] = await planMoves(deps, true);
+    expect(plan.kind).toBe('core-has-rule');
+  });
+
+  it('offers a remembered repo once it is here, only while DorkOS still holds flow’s rule', async () => {
+    const { deps, state } = world({ repos: ['acme/app', 'acme/web'], projects: PROJECTS.slice(0, 1) });
+    await runMove(deps, KEY, true);
+    expect(await planMoves(deps, true)).toEqual([]);
+    state.projects = [...PROJECTS, { root: '/work/web', name: 'web', originRepo: 'acme/web' }];
+    const [add] = await planMoves(deps, true);
+    expect(add).toMatchObject({ kind: 'add', action: 'Add it' });
+    expect(await runMove(deps, KEY, true)).toEqual({
+      ok: true,
+      text: 'Added to DorkOS: Work may now also work in web.',
+    });
+    expect(deps.putOnlyProjects).toHaveBeenLastCalledWith('work', ['/work/client-app', '/work/web']);
+    // If a person changed DorkOS's rule since, nothing is offered.
+    state.record.accounts[KEY].pendingRepos = ['acme/api'];
+    state.onlyWork = [{ root: '/work/dorkos', name: 'dorkos' }];
+    expect(await planMoves(deps, true)).toEqual([]);
+  });
+
+  it('a DorkOS refusal changes nothing and says so in DorkOS’s words', async () => {
+    const refusal = new Error('Only a person can change where an account may be used.');
+    const { deps, state } = world({ repos: ['acme/app'], refuseCore: refusal });
+    expect(await runMove(deps, KEY, true)).toEqual({
+      ok: false,
+      text: "Couldn't move Work's repo limits to DorkOS. Nothing changed. Only a person can change where an account may be used.",
+    });
+    expect(deps.putAccount).not.toHaveBeenCalled();
+    expect(state.role).toBe('kept-out');
+  });
+
+  it('when flow’s half fails, both rules still apply and it says so', async () => {
+    const { deps, state } = world({ repos: ['acme/app'], refuseFlow: new Error('') });
+    const result = await runMove(deps, KEY, true);
+    expect(result.ok).toBe(false);
+    expect(result.text).toMatch(/both rules still apply/);
+    expect(state.repos).toEqual(['acme/app']);
+    expect(state.record.accounts[KEY]).toMatchObject({ held: true });
   });
 });
