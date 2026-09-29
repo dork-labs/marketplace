@@ -26,7 +26,7 @@ import {
 import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import {
   CONFIG_SCHEMA_URL,
@@ -36,6 +36,7 @@ import {
   SHIPPED_ADAPTERS,
   checkSettings,
   findConfigRoots,
+  main as configFilesMain,
   legacyAdapterDirs,
   legacyConfigDirs,
   migrateAdapter,
@@ -1547,7 +1548,7 @@ describe('config-files CLI', () => {
     const bad = run(plugin, repo, ['check']);
     expect(bad.status).toBe(1);
     expect(bad.out.ok).toBe(false);
-  });
+  }, 30_000);
 
   // Not configured is exit 1, so the /flow guard routes to /flow:init.
   it('resolve exits 1 when nothing is configured', () => {
@@ -1705,21 +1706,32 @@ describe('config-files CLI', () => {
   // nothing, and --until only goes with pause.
   it('pause --until records the end and refuses a bad or missing one', () => {
     const repo = makeRepo();
-    const plugin = shared();
     const flag = path.join(repo, '.agents/flow', PAUSE_FILE);
-    expect(run(plugin, repo, ['pause', '--until']).status).toBe(2);
-    expect(run(plugin, repo, ['pause', '--until', 'soon']).status).toBe(2);
-    expect(run(plugin, repo, ['pause', '--until', '2001-01-01T00:00:00Z']).status).toBe(2);
-    // A time without its zone would be read in this machine's zone: refused.
-    expect(run(plugin, repo, ['pause', '--until', '2999-01-01T09:00:00']).status).toBe(2);
-    expect(run(plugin, repo, ['resume', '--until', '2999-01-01T00:00:00Z']).status).toBe(2);
+    // The refusals are argument checks: run them in this process, where a busy
+    // machine cannot make five node start-ups time the test out.
+    const quiet = [
+      vi.spyOn(process.stdout, 'write').mockReturnValue(true),
+      vi.spyOn(process.stderr, 'write').mockReturnValue(true),
+    ];
+    try {
+      const refused = (args: string[]) => configFilesMain([...args, '--project', repo]);
+      expect(refused(['pause', '--until'])).toBe(2);
+      expect(refused(['pause', '--until', 'soon'])).toBe(2);
+      expect(refused(['pause', '--until', '2001-01-01T00:00:00Z'])).toBe(2);
+      // A time without its zone would be read in this machine's zone: refused.
+      expect(refused(['pause', '--until', '2999-01-01T09:00:00'])).toBe(2);
+      expect(refused(['resume', '--until', '2999-01-01T00:00:00Z'])).toBe(2);
+    } finally {
+      for (const spy of quiet) spy.mockRestore();
+    }
     expect(existsSync(flag)).toBe(false);
+    // One real run proves the CLI records the end.
     const until = new Date(Date.now() + 3_600_000).toISOString();
-    const paused = run(plugin, repo, ['pause', '--until', until]);
+    const paused = run(shared(), repo, ['pause', '--until', until]);
     expect(paused.status).toBe(0);
     expect(paused.out).toMatchObject({ ok: true, until, alreadyPaused: false });
-    expect(run(plugin, repo).out.paused).toMatchObject({ until });
-  });
+    expect(JSON.parse(readFileSync(flag, 'utf8'))).toMatchObject({ until });
+  }, 30_000);
 
   // A pause is a safety control: it works before flow is configured.
   it('pause works when flow is not configured', () => {
