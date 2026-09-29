@@ -323,18 +323,22 @@ export interface DorkosDeps {
 }
 
 /**
- * The tracker item a DorkOS session row serves: the first of `trackerItems`
- * (newest first, spec `flow-multiproject` §6.4), else the single `trackerItem`
- * a DorkOS from before that list sends. Core keeps both for a while, so either
- * DorkOS works.
+ * The tracker item a DorkOS session row runs itself: the newest of
+ * `trackerItems` (newest first, spec `flow-multiproject` §6.4) that runs in
+ * this chat (`via: 'this-chat'`), else the single `trackerItem` a DorkOS from
+ * before that list sends. Core keeps both for a while, so either DorkOS works.
+ *
+ * An `own-chat` item was only launched from this chat and runs in its own, so
+ * counting it here would bill one run to two sessions: a chat that dispatched
+ * items and runs none itself serves nothing. Core's deprecated `trackerItem`
+ * is the same newest `this-chat` item, so it is never a fallback for a list.
  *
  * @param row - One session row.
- * @returns The item, or `null` when the row names none.
+ * @returns The item, or `null` when the row runs none itself.
  */
 export function trackerItemOf(row: Record<string, unknown>): Record<string, unknown> | null {
   if (Array.isArray(row.trackerItems)) {
-    const first = row.trackerItems.find(isObject);
-    if (first !== undefined) return first;
+    return row.trackerItems.find((item) => isObject(item) && item.via === 'this-chat') ?? null;
   }
   return isObject(row.trackerItem) ? row.trackerItem : null;
 }

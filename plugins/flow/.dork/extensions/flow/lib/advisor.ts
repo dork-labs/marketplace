@@ -113,7 +113,7 @@ export interface ExecError extends Error {
 export type ExecFileLike = (
   file: string,
   args: readonly string[],
-  options: { timeout: number; shell: false; encoding: 'utf8' },
+  options: { timeout: number; shell: false; encoding: 'utf8'; maxBuffer?: number },
   callback: (error: ExecError | null, stdout: string, stderr: string) => void
 ) => unknown;
 

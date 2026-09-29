@@ -1,10 +1,11 @@
 /**
- * Fixtures for the Flow tab's tests: `GET /fleet` bodies and a stubbed fetch
- * that answers flow's routes.
+ * Fixtures for the Flow tab's tests: `GET /fleet` and `GET /model` bodies, and
+ * stubbed fetches that answer flow's routes.
  */
 
 import { vi } from 'vitest';
 import type { FleetAccount, FleetGroup, FleetView } from '../../lib/fleet.ts';
+import type { FlowModel, FlowProject, FlowRunRow } from '../../lib/model.ts';
 
 /** A Claude Code account row. */
 export function account(id: string, role: FleetAccount['role'], extra: Partial<FleetAccount> = {}) {
@@ -130,4 +131,82 @@ export function stubFetch(
       entry.resolve();
     },
   };
+}
+
+/** A Flow tab project, ready and quiet unless told otherwise. */
+export function flowProject(name: string, extra: Partial<FlowProject> = {}): FlowProject {
+  return {
+    name,
+    root: `/work/${name}`,
+    setup: 'ready',
+    tracker: { label: 'Linear', team: 'DOR', url: null },
+    pause: null,
+    runs: [],
+    queue: null,
+    upNext: 'read',
+    capacity: { busy: 0, slots: 1 },
+    conditions: [],
+    version: { flow: '0.49.0', behaviour: 1, olderBehaviour: null },
+    restoreSchedules: [],
+    ...extra,
+  };
+}
+
+/** A run row. */
+export function runRow(identifier: string, extra: Partial<FlowRunRow> = {}): FlowRunRow {
+  return {
+    identifier,
+    title: null,
+    url: null,
+    sessionId: null,
+    dispatchedBy: null,
+    cwd: '/work/dorkos',
+    account: { key: 'claude-code:work', label: 'Work', color: '#2563eb' },
+    state: 'building',
+    updatedAt: null,
+    ...extra,
+  };
+}
+
+/** A `GET /model` body. */
+export function flowModel(projects: FlowProject[], extra: Partial<FlowModel> = {}): FlowModel {
+  return {
+    behaviour: 1,
+    generatedAt: '2026-09-28T12:00:00.000Z',
+    projects,
+    decisions: [],
+    cwdProject: null,
+    canChange: true,
+    ...extra,
+  };
+}
+
+/** One request a routed stub saw. */
+export interface RoutedCall {
+  method: string;
+  url: string;
+  body: unknown;
+}
+
+/**
+ * Stub `fetch` by route: `answer(method, url, body)` returns the status and
+ * body for each request. Records every call.
+ */
+export function routeFetch(
+  answer: (method: string, url: string, body: unknown) => StubAnswer | Promise<StubAnswer>
+) {
+  const calls: RoutedCall[] = [];
+  const fetchMock = vi.fn(async (url: string, init?: { method?: string; body?: string }) => {
+    const method = init?.method ?? 'GET';
+    const body = init?.body === undefined ? undefined : JSON.parse(init.body);
+    calls.push({ method, url, body });
+    const reply = await answer(method, url, body);
+    return {
+      ok: reply.status >= 200 && reply.status < 300,
+      status: reply.status,
+      json: async () => reply.body,
+    };
+  });
+  vi.stubGlobal('fetch', fetchMock);
+  return { calls, fetchMock };
 }

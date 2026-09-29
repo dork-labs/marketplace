@@ -15,7 +15,10 @@ import type {
   AccountUsage,
   DataProviderContext,
   ExtensionRouter,
+  ProjectInfo,
+  ProjectsApi,
   RouteHandler,
+  RouteMiddleware,
 } from '../lib/host-types.ts';
 
 /** The repo every fixture project's origin names. */
@@ -151,26 +154,37 @@ export interface FakeRouter extends ExtensionRouter {
   call(
     method: 'get' | 'put' | 'post',
     route: string,
-    req?: { params?: Record<string, string>; body?: unknown; query?: Record<string, unknown> }
+    req?: {
+      params?: Record<string, string>;
+      body?: unknown;
+      query?: Record<string, unknown>;
+      /** Send it as an agent would: the fake person guard refuses it. */
+      agent?: boolean;
+    }
   ): Promise<Sent>;
+  /** Whether a route is registered. */
+  has(method: 'get' | 'put' | 'post', route: string): boolean;
+  /** The handlers registered for a route, middleware first. */
+  chain(method: 'get' | 'put' | 'post', route: string): (RouteHandler | RouteMiddleware)[];
 }
 
-/** Make a fake router. */
+/** Make a fake router. Middleware runs in order and may answer instead of calling `next`. */
 export function fakeRouter(): FakeRouter {
-  const handlers = new Map<string, RouteHandler>();
+  const handlers = new Map<string, (RouteHandler | RouteMiddleware)[]>();
+  const add =
+    (method: string) =>
+    (route: string, ...chain: (RouteHandler | RouteMiddleware)[]) => {
+      handlers.set(`${method} ${route}`, chain);
+    };
   return {
-    get(route, handler) {
-      handlers.set(`get ${route}`, handler);
-    },
-    put(route, handler) {
-      handlers.set(`put ${route}`, handler);
-    },
-    post(route, handler) {
-      handlers.set(`post ${route}`, handler);
-    },
+    get: add('get'),
+    put: add('put'),
+    post: add('post'),
+    has: (method, route) => handlers.has(`${method} ${route}`),
+    chain: (method, route) => handlers.get(`${method} ${route}`) ?? [],
     async call(method, route, req = {}) {
-      const handler = handlers.get(`${method} ${route}`);
-      if (handler === undefined) throw new Error(`no ${method} ${route}`);
+      const chain = handlers.get(`${method} ${route}`);
+      if (chain === undefined) throw new Error(`no ${method} ${route}`);
       const sent: Sent = { status: 200, body: undefined };
       const res = {
         status(code: number) {
@@ -182,8 +196,74 @@ export function fakeRouter(): FakeRouter {
           return res;
         },
       };
-      await handler({ params: req.params ?? {}, body: req.body, query: req.query ?? {} }, res);
+      const request = {
+        params: req.params ?? {},
+        body: req.body,
+        query: req.query ?? {},
+        agent: req.agent === true,
+      };
+      for (const handler of chain) {
+        let next = false;
+        await (handler as RouteMiddleware)(request, res, () => {
+          next = true;
+        });
+        if (!next) break;
+      }
       return sent;
+    },
+  };
+}
+
+/** The words the fake person guard refuses with. */
+export const NOT_A_PERSON = 'Only a person can change this.';
+
+/**
+ * A fake `ctx.requirePerson`: it refuses a request the fake router sent as an
+ * agent, and lets everything else through.
+ */
+export function fakePersonGuard() {
+  return vi.fn(
+    (
+      req: object,
+      res: { status(code: number): { json(body: unknown): unknown } },
+      next: () => void
+    ) => {
+      if ((req as { agent?: boolean }).agent === true) {
+        res.status(403).json({ error: NOT_A_PERSON });
+        return;
+      }
+      next();
+    }
+  );
+}
+
+/** A fake `ctx.projects` over a list the test can change. */
+export function fakeProjects(initial: ProjectInfo[] = []) {
+  const list = [...initial];
+  const listeners: (() => void)[] = [];
+  const api = {
+    resolve: vi.fn(async (cwd: string) => {
+      const found = list
+        .filter((p) => cwd === p.root || cwd.startsWith(`${p.root}/`))
+        .sort((a, b) => b.root.length - a.root.length)[0];
+      return found === undefined ? null : { root: found.root, name: found.name };
+    }),
+    list: vi.fn(async () => [...list]),
+    report: vi.fn(async (dir: string) => ({ root: dir, name: `${path.basename(dir)}~reported` })),
+    onChange: vi.fn((listener: () => void) => {
+      listeners.push(listener);
+      return () => {
+        listeners.splice(listeners.indexOf(listener), 1);
+      };
+    }),
+  } satisfies ProjectsApi;
+  return {
+    api,
+    list,
+    listeners,
+    /** Tell every listener the list changed. */
+    changed: () => {
+      for (const listener of listeners) listener();
     },
   };
 }
@@ -198,8 +278,13 @@ export function fakeCtx(
     dorkHome?: boolean;
     usage?: AccountUsage[];
     extensionDir?: string;
+    /** Core's project registry (default: none, as on a DorkOS from before it). */
+    projects?: ProjectsApi;
+    /** Whether the host has the person guard (default: it does). */
+    personGuard?: boolean;
   } = {}
 ) {
+  const requirePerson = fakePersonGuard();
   const store = opts.storage ?? { data: null };
   const registered: AccountAdvisor[] = [];
   const unregister = vi.fn();
@@ -246,9 +331,12 @@ export function fakeCtx(
       opts.extensionDir ?? path.join(world.root, 'plugins', 'flow', '.dork', 'extensions', 'flow'),
     ...(opts.dorkHome === false ? {} : { dorkHome: world.dorkHome }),
     ...(ctxAccounts === undefined ? {} : { accounts: ctxAccounts }),
+    ...(opts.projects === undefined ? {} : { projects: opts.projects }),
+    ...(opts.personGuard === false ? {} : { requirePerson }),
   };
   return {
     ctx,
+    requirePerson,
     accounts,
     registered,
     unregister,
