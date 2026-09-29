@@ -159,6 +159,18 @@ describe("a project's own adapter", () => {
     );
     expect(adapterHash(dir, 'linear')).toBeNull();
     expect(await trust.allow(dir, 'linear')).toBe(false);
+    // Nor through require, an absolute path or a file: URL.
+    for (const line of [
+      "const run = require('../../evil.js');",
+      "import { run } from '/etc/evil.ts';",
+      "const m = await import('file:///tmp/evil.mjs');",
+    ]) {
+      writeFileSync(ownAdapterFile(dir, 'linear'), `${line}\nexport const adapter = 1;\n`);
+      expect(adapterHash(dir, 'linear')).toBeNull();
+    }
+    // A package from the project's own dependencies is its own business.
+    writeFileSync(ownAdapterFile(dir, 'linear'), "import { z } from 'zod';\nexport const a = z;\n");
+    expect(adapterHash(dir, 'linear')).not.toBeNull();
   });
 
   it('reads the tracker on the timer with the shipped adapter, and with its own only once allowed', () => {

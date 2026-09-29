@@ -396,7 +396,7 @@ describe('what is raised', () => {
     await coordinator.sync([
       plan({
         a: questionRun({
-          text: 'Pay for the REVIEW plan?',
+          text: '/pay the invoice now?',
           floor: ['secrets-or-spend'],
           decideBy: null,
         }),
@@ -979,6 +979,46 @@ describe('the review round (adversarial fixes)', () => {
     await second.coordinator.sync([plan({ a: moved() })]);
     await second.coordinator.handle(event(key));
     expect(second.cli.calls[0].args).toContain('fff9999aaa');
+  });
+
+  it('still updates rows already open when the inbox is full, and adds no new ones', async () => {
+    const inbox = fakeInbox();
+    const { coordinator } = setup({ inbox, stops: { questions: 'ask' } });
+    await coordinator.sync([plan({ b: questionRun({ decideBy: null }) })]);
+    // Full: nothing new may open, but the open row may change its words.
+    inbox.refuseWith((input) =>
+      inbox.open.has(input.key)
+        ? null
+        : Object.assign(new Error('full'), { code: 'inbox_limit', limit: 'open' })
+    );
+    // A new review gate (raised first, refused) and the open question, reworded.
+    await coordinator.sync([
+      plan({
+        a: gateRun(),
+        b: questionRun({ decideBy: null, text: 'Should the old API keep working for now?' }),
+      }),
+    ]);
+    expect(inbox.raised.map((r) => r.title)).toEqual([
+      'Should the old API keep working?',
+      'Should the old API keep working for now?',
+    ]);
+  });
+
+  it('ships nothing from a row whose commit flow never recorded', async () => {
+    const storage = { value: null as unknown };
+    const first = setup({ storage });
+    await first.coordinator.sync([plan({ a: gateRun() })]);
+    const raised = (storage.value as Record<string, Record<string, Record<string, unknown>>>)
+      .inboxRaised;
+    delete raised[key].head;
+    // Read fresh, as after a restart: the row's words match, but its commit is unknown.
+    const second = setup({ storage });
+    await second.coordinator.sync([plan({ a: gateRun() })]);
+    expect(await second.coordinator.handle(event(key))).toEqual({
+      keepOpen: true,
+      message: CHANGED_TEXT,
+    });
+    expect(second.cli.calls).toEqual([]);
   });
 
   it('takes no answer before its first pass, so none is lost as "already settled"', async () => {

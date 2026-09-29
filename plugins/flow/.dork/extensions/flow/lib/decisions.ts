@@ -53,7 +53,7 @@ import {
   MAX_NOTE,
   OFFER_TEXT,
   REVIEWER_AGENT,
-  askProblem,
+  problemOf,
   safeAsk,
   ideasAsk,
   offerDoneText,
@@ -526,7 +526,7 @@ export class DecisionCoordinator {
       if (quiet.marker === ask.marker && (!Number.isFinite(until) || now.getTime() < until)) {
         continue;
       }
-      const problem = askProblem(ask.input);
+      const problem = problemOf(ask);
       if (problem !== null) {
         // Never dropped: plain words stand in, and the ask still reaches you.
         this.logOnce(`words:${ask.key}`, `[flow] plain words for ${ask.key}: ${problem}`);
@@ -565,9 +565,13 @@ export class DecisionCoordinator {
   private async raiseAll(inbox: InboxApi, asks: readonly Ask[]): Promise<void> {
     const raised = obj(await this.deps.storage.get(RAISED_KEY)) as Record<string, RaisedMeta>;
     const fresh: Record<string, RaisedMeta> = {};
+    let full = false;
     for (const ask of asks) {
       const fp = JSON.stringify(ask.input);
       if (raised[ask.key]?.fp === fp || this.inFlight.has(ask.key)) continue;
+      // Once the inbox is full, only rows already open are updated: an update
+      // costs no new place.
+      if (full && raised[ask.key] === undefined) continue;
       try {
         await inbox.raise(ask.input);
         fresh[ask.key] = {
@@ -585,7 +589,8 @@ export class DecisionCoordinator {
             `limit:${String(limit)}`,
             `[flow] DorkOS's inbox is full for flow (${String(limit)}); the rest show on flow's pages until something is answered`
           );
-          break;
+          full = true;
+          continue;
         }
         this.logOnce(`raise:${ask.key}`, `[flow] could not raise ${ask.key}: ${String(error)}`);
       }
@@ -856,6 +861,9 @@ export class DecisionCoordinator {
       ask.key
     ];
     if (meta === undefined || (meta.base ?? meta.fp) !== fp) return false;
+    // A review row with no commit on record ships nothing until the next
+    // pass records the one it shows.
+    if (ask.kind === 'review' && meta.head === undefined) return false;
     return meta.head ?? null;
   }
 

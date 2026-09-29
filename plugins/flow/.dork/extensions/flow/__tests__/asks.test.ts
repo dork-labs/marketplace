@@ -128,15 +128,15 @@ describe('every ask', () => {
       parkedAt: null,
       actionable: true,
       question: question({
-        text: 'Should I pay for the Review plan?',
+        text: '/pay the invoice now?',
         floor: ['secrets-or-spend'],
       }),
     });
-    expect(askProblem(spend.input)).toBe('the headline names a stage');
+    expect(askProblem(spend.input)).toBe('the headline is a command');
     const safe = safeAsk(spend);
     expect(askProblem(safe.input)).toBeNull();
     expect(safe.input.title).toBe('A question needs you in dorkos');
-    expect(safe.input.detail).toContain('Should I pay for the Review plan?');
+    expect(safe.input.detail).toContain('/pay the invoice now?');
     expect(safe.input.actions).toEqual(spend.input.actions);
     expect(safe.key).toBe(spend.key);
     const noWhy = safeAsk({ ...spend, input: { ...spend.input, why: '' } });
@@ -149,7 +149,7 @@ describe('every ask', () => {
     expect(askProblem({ title: 'Ship DOR-12?', why: 'x' })).toBe('the headline carries an item id');
     expect(askProblem({ title: '/flow:triage', why: 'x' })).toBe('the headline is a command');
     expect(askProblem({ title: 'Move to EXECUTE?', why: 'x' })).toBe('the headline names a stage');
-    expect(askProblem({ title: 'Move it to execute?', why: 'x' })).toBe(
+    expect(askProblem({ title: 'Sort stage/review items?', why: 'x' })).toBe(
       'the headline names a stage'
     );
     expect(askProblem({ title: 'x'.repeat(121), why: 'x' })).toMatch(/longer than 120/);
@@ -286,6 +286,33 @@ describe("an agent's question", () => {
     expect(spend.deadline).toBeNull();
     expect(spend.input.why).toMatch(/Only you can answer this one\.$/);
     expect(spend.input.actions).not.toHaveProperty('decideBy');
+  });
+
+  it('keeps ordinary words that happen to name a stage, and falls back only for flow’s labels', () => {
+    const base = { identifier: 'DOR-1', title: null, parkedAt: null, actionable: true };
+    for (const text of ['Are we done with the old API?', 'Should I review the auth flow first?']) {
+      const ask = safeAsk(questionAsk(PROJECT, { ...base, question: question({ text }) }));
+      expect(ask.input.title).toBe(text);
+    }
+    const review = safeAsk(
+      reviewAsk(PROJECT, {
+        identifier: 'DOR-7',
+        title: 'Verify emails before sending',
+        head: null,
+        pr: null,
+        review: null,
+        checks: null,
+        actionable: true,
+      })
+    );
+    expect(review.input.title).toBe('Ship Verify emails before sending?');
+    // flow's own labels in a headline flow wrote still fall back.
+    const ideas = ideasAsk(PROJECT, 3, '2026-09-27T09:00:00.000Z', true);
+    for (const title of ['Move 3 ideas to EXECUTE', 'Sort 3 stage/review ideas']) {
+      expect(safeAsk({ ...ideas, input: { ...ideas.input, title } }).input.title).toBe(
+        'New ideas wait in dorkos'
+      );
+    }
   });
 
   it('takes every item id out of a question, not just the first', () => {

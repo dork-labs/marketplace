@@ -137,24 +137,39 @@ const ITEM_ID = /\b[A-Z][A-Z0-9]{1,9}-\d+\b/;
 /** Every tracker id in a text, for taking them all out. */
 const ITEM_IDS = /\b[A-Z][A-Z0-9]{1,9}-\d+\b/g;
 
-/** The engine's stage names, in any case, which a headline must never say. */
-const STAGE_WORDS = /\b(capture|triage|ideate|specify|decompose|execute|verify|review|done)\b/i;
+/**
+ * flow's own stage labels, which a headline must never show: the engine's
+ * uppercase names (`EXECUTE`, `REVIEW`) and the tracker label form
+ * (`stage/review`). Ordinary words ("Are we done…?", "Should I review…?")
+ * are not labels and are never matched.
+ */
+const STAGE_LABELS =
+  /\b(CAPTURE|TRIAGE|IDEATE|SPECIFY|DECOMPOSE|EXECUTE|VERIFY|REVIEW|DONE)\b|\bstage\/[a-z-]+/;
+
+/** The kinds whose headline carries an agent's own words or an item's title. */
+const OWN_WORDS_KINDS: ReadonlySet<AskKind> = new Set(['review', 'question', 'retry']);
 
 /**
  * Why an ask may not be raised as it is, or `null` when it may: a headline
- * that is empty, too long, a command, or carries an item id or a stage name;
- * a why line that is missing or too long.
+ * that is empty, too long, a command, or carries an item id or one of flow's
+ * stage labels; a why line that is missing or too long.
  *
  * @param input - What would be raised.
+ * @param opts - `stages: false` skips the stage-label check, for a headline
+ *   that carries an agent's own question or an item's title (their words are
+ *   theirs, never flow's labels).
  * @returns The problem, or `null`.
  */
-export function askProblem(input: Pick<DecisionInput, 'title' | 'why' | 'detail'>): string | null {
+export function askProblem(
+  input: Pick<DecisionInput, 'title' | 'why' | 'detail'>,
+  opts: { stages?: boolean } = {}
+): string | null {
   const title = input.title.trim();
   if (title === '') return 'the headline is empty';
   if (title.length > MAX_TITLE) return `the headline is longer than ${MAX_TITLE} characters`;
   if (title.startsWith('/')) return 'the headline is a command';
   if (ITEM_ID.test(title)) return 'the headline carries an item id';
-  if (STAGE_WORDS.test(title)) return 'the headline names a stage';
+  if (opts.stages !== false && STAGE_LABELS.test(title)) return 'the headline names a stage';
   const why = input.why.trim();
   if (why === '') return 'the ask has no why line';
   if (why.length > MAX_WHY) return `the why line is longer than ${MAX_WHY} characters`;
@@ -512,6 +527,17 @@ export function retryAsk(
 }
 
 /**
+ * Why an ask's words break a rule, or `null`: a headline built from an agent's
+ * question or an item's title is not checked for stage labels.
+ *
+ * @param ask - The ask.
+ * @returns The problem, or `null`.
+ */
+export function problemOf(ask: Ask): string | null {
+  return askProblem(ask.input, { stages: !OWN_WORDS_KINDS.has(ask.kind) });
+}
+
+/**
  * An ask whose words break a rule is never dropped: a spend question must
  * always reach a person. Its headline or why line is replaced with plain,
  * safe words, and the agent's own words move behind ⓘ.
@@ -520,9 +546,10 @@ export function retryAsk(
  * @returns The ask, fit to raise.
  */
 export function safeAsk(ask: Ask): Ask {
-  const problem = askProblem(ask.input);
+  const problem = problemOf(ask);
   if (problem === null) return ask;
-  const headlineOk = askProblem({ title: ask.input.title, why: 'x' }) === null;
+  const stages = !OWN_WORDS_KINDS.has(ask.kind);
+  const headlineOk = askProblem({ title: ask.input.title, why: 'x' }, { stages }) === null;
   const whyOk = askProblem({ title: 'x', why: ask.input.why }) === null;
   const generic: Record<AskKind, string> = {
     review: `Finished work in ${ask.project.name} waits for you`,

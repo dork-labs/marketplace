@@ -61,16 +61,25 @@ function filesUnder(dir: string): string[] | null {
 }
 
 /**
- * Whether a source file loads code from outside its adapter's folder with a
- * relative import. Such code would run unseen by the allow, so flow refuses
- * to vouch for the adapter. `import type` is erased and allowed.
+ * Whether a source file loads code from outside its adapter's folder: a
+ * relative import or `require` that leaves the folder, or an absolute or
+ * `file:` path. Such code would run unseen by the allow, so flow refuses to
+ * vouch for the adapter. `import type` is erased and allowed; a bare package
+ * name is left to the project's own dependencies.
+ *
+ * This is a best-effort text scan, not a parser: it catches the ordinary
+ * forms (static and dynamic `import`, `export … from`, `require`), not code
+ * built at run time. The allow's real guard is that a person looked at the
+ * folder and chose to trust it.
  */
 function reachesOutside(dir: string, file: string, source: string): boolean {
   const pattern =
-    /(?:^|\n)\s*(?:import|export)\s+(type\s+)?(?:[^;'"]*?\sfrom\s+)?['"](\.[^'"]*)['"]|import\(\s*['"](\.[^'"]*)['"]\s*\)/g;
+    /(?:^|\n)\s*(?:import|export)\s+(type\s+)?(?:[^;'"]*?\sfrom\s+)?['"]([^'"]+)['"]|\b(?:import|require)\(\s*['"]([^'"]+)['"]\s*\)/g;
   for (const match of source.matchAll(pattern)) {
     if (match[1] !== undefined) continue;
     const spec = match[2] ?? match[3];
+    if (spec.startsWith('file:') || path.isAbsolute(spec)) return true;
+    if (!spec.startsWith('.')) continue;
     const target = path.resolve(path.dirname(path.join(dir, file)), spec);
     const inside = path.relative(dir, target);
     if (inside.startsWith('..') || path.isAbsolute(inside)) return true;
