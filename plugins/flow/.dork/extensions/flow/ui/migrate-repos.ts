@@ -152,9 +152,7 @@ function situationOf(account: FleetAccount, world: World): Situation | null {
       );
     }
     if (move?.held === true && kept !== null && sameRoots(kept, move.movedRoots)) {
-      const where = joinNames(
-        (row.onlyProjects ?? []).map((project) => project.name)
-      );
+      const where = joinNames((row.onlyProjects ?? []).map((project) => project.name));
       return world.allCurrent
         ? plan(
             'finish',
@@ -254,7 +252,10 @@ export async function runMove(
   const world = await worldOf(deps, allCurrent);
   const found = world === null ? undefined : situations(world).find((s) => s.plan.key === key);
   if (world === null || found === undefined || found.plan.action === null) {
-    return { ok: false, text: found?.plan.text ?? 'There is nothing to move for this account now.' };
+    return {
+      ok: false,
+      text: found?.plan.text ?? 'There is nothing to move for this account now.',
+    };
   }
   const { account, matched, pending, move, plan } = found;
   const at = deps.now().toISOString();

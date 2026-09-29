@@ -130,7 +130,11 @@ export function createSettingsTab(
           if (!live || answer === null) return;
           const onlyFor = new Map<string, string[]>();
           for (const row of answer.accounts) {
-            if (row.onlyProjects !== null) onlyFor.set(row.id, row.onlyProjects.map((p) => p.name));
+            if (row.onlyProjects !== null)
+              onlyFor.set(
+                row.id,
+                row.onlyProjects.map((p) => p.name)
+              );
           }
           setRules({ onlyFor, openRuntimes });
         });
@@ -142,12 +146,13 @@ export function createSettingsTab(
     const move = (key: string) => {
       setMoving(key);
       runMove(deps, key, allCurrent)
-        .catch(
-          (failure: unknown): MoveResult => ({
-            ok: false,
-            text: failure instanceof Error && failure.message !== '' ? failure.message : UNREACHABLE_MESSAGE,
-          })
-        )
+        .catch((failure: unknown): MoveResult => ({
+          ok: false,
+          text:
+            failure instanceof Error && failure.message !== ''
+              ? failure.message
+              : UNREACHABLE_MESSAGE,
+        }))
         .then((result) => {
           setMoving(null);
           setResults((current) => ({ ...current, [key]: result }));

@@ -288,7 +288,8 @@ describe('Settings → Flow and "Only for these repos"', () => {
     routeFetch((_method, url) => {
       if (url.includes('/ext/flow/fleet')) return { status: 200, body: fleetBody };
       if (url.includes('/ext/flow/settings/')) return { status: 200, body: settingsView() };
-      if (url.includes('/runtimes/claude-code/account-eligibility')) return { status: 404, body: {} };
+      if (url.includes('/runtimes/claude-code/account-eligibility'))
+        return { status: 404, body: {} };
       return { status: 200, body: flowModel([newProject()]) };
     });
     const store = new FlowStore({});
@@ -316,7 +317,9 @@ describe('Settings → Flow and "Only for these repos"', () => {
     const store = new FlowStore({});
     store.start();
     store.settingsProject = 'blintz';
-    const view = render(React.createElement(createSettingsTab({ navigate: vi.fn() }, store, NO_MOVE)));
+    const view = render(
+      React.createElement(createSettingsTab({ navigate: vi.fn() }, store, NO_MOVE))
+    );
     await act(async () => {});
     view.unmount();
     expect(store.settingsProject).toBeNull();
@@ -401,7 +404,8 @@ describe('the shared and just-me writes', () => {
         return new Promise((resolve) => answers.push(resolve));
       }
       if (url.includes('/ext/flow/settings/')) return { status: 200, body: settingsView() };
-      if (url.includes('/runtimes/claude-code/account-eligibility')) return { status: 404, body: {} };
+      if (url.includes('/runtimes/claude-code/account-eligibility'))
+        return { status: 404, body: {} };
       return { status: 200, body: flowModel([newProject()]) };
     });
     await renderSettings(newProject());
@@ -533,7 +537,9 @@ describe('the dial', () => {
     expect(screen.queryByRole('table')).toBeNull();
     const list = screen.getByRole('list', { name: 'What each kind of ask does in dorkos' });
     const ship = within(list).getAllByRole('listitem')[0];
-    expect(within(ship).getByRole('radiogroup', { name: 'dorkos: Ship finished work' })).toBeTruthy();
+    expect(
+      within(ship).getByRole('radiogroup', { name: 'dorkos: Ship finished work' })
+    ).toBeTruthy();
   });
 
   it('while Custom, a dial key press asks before replacing the custom choices', async () => {
@@ -623,9 +629,9 @@ describe('the dial', () => {
     await act(async () => {
       refuseFirst(new Error('Busy.'));
     });
-    expect(within(dial).getByRole('radio', { name: 'Ask me first' }).getAttribute('aria-checked')).toBe(
-      'true'
-    );
+    expect(
+      within(dial).getByRole('radio', { name: 'Ask me first' }).getAttribute('aria-checked')
+    ).toBe('true');
   });
 
   it('shows DorkOS’s Require login line, verbatim, only while Require login is off', async () => {

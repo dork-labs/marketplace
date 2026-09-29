@@ -9,12 +9,7 @@
 import { describe, expect, it, vi } from 'vitest';
 import type { RepoMigration } from '../../lib/repo-migration.ts';
 import type { AccountEligibility, CoreProject } from '../core-api.ts';
-import {
-  WAITING_FOR_FLOW_TEXT,
-  planMoves,
-  runMove,
-  type MigrationDeps,
-} from '../migrate-repos.ts';
+import { WAITING_FOR_FLOW_TEXT, planMoves, runMove, type MigrationDeps } from '../migrate-repos.ts';
 import { account, claudeGroup, fleet } from './helpers.ts';
 
 const PROJECTS: CoreProject[] = [
@@ -176,7 +171,10 @@ describe('never widening (the reviewer’s scenario)', () => {
     expect(deps.putAccount).not.toHaveBeenCalled();
     expect(state.role).toBe('kept-out');
     expect(state.repos).toEqual(['acme/app', 'acme/web']);
-    expect(state.record.accounts[KEY]).toMatchObject({ movedRoots: ['/work/client-app'], held: true });
+    expect(state.record.accounts[KEY]).toMatchObject({
+      movedRoots: ['/work/client-app'],
+      held: true,
+    });
 
     // Still an older flow somewhere: it says so, and offers nothing.
     const [held] = await planMoves(deps, false);
@@ -233,7 +231,10 @@ describe('running a move', () => {
   });
 
   it('offers a remembered repo once it is here, only while DorkOS still holds flow’s rule', async () => {
-    const { deps, state } = world({ repos: ['acme/app', 'acme/web'], projects: PROJECTS.slice(0, 1) });
+    const { deps, state } = world({
+      repos: ['acme/app', 'acme/web'],
+      projects: PROJECTS.slice(0, 1),
+    });
     await runMove(deps, KEY, true);
     expect(await planMoves(deps, true)).toEqual([]);
     state.projects = [...PROJECTS, { root: '/work/web', name: 'web', originRepo: 'acme/web' }];
@@ -243,7 +244,10 @@ describe('running a move', () => {
       ok: true,
       text: 'Added to DorkOS: Work may now also work in web.',
     });
-    expect(deps.putOnlyProjects).toHaveBeenLastCalledWith('work', ['/work/client-app', '/work/web']);
+    expect(deps.putOnlyProjects).toHaveBeenLastCalledWith('work', [
+      '/work/client-app',
+      '/work/web',
+    ]);
     // If a person changed DorkOS's rule since, nothing is offered.
     state.record.accounts[KEY].pendingRepos = ['acme/api'];
     state.onlyWork = [{ root: '/work/dorkos', name: 'dorkos' }];

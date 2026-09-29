@@ -214,7 +214,9 @@ describe('PUT /settings/:name', () => {
           held.push(existsSync(`${files().shared}.lock`), existsSync(`${files().local}.lock`));
         }
         const errors = checks === 1 ? [] : [{ path: '/x', message: 'no' }];
-        queueMicrotask(() => callback(null, `${JSON.stringify({ ok: errors.length === 0, errors })}\n`, ''));
+        queueMicrotask(() =>
+          callback(null, `${JSON.stringify({ ok: errors.length === 0, errors })}\n`, '')
+        );
         return undefined;
       }
       return realExec(file, args, opts, callback);

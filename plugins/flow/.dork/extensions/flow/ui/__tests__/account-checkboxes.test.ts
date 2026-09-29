@@ -200,7 +200,11 @@ describe('Accounts this project may use', () => {
     let up = false;
     routeFetch(() => (up ? { status: 200, body: eligibility() } : { status: 500, body: {} }));
     render(
-      React.createElement(AccountCheckboxes, { root: ROOT, projectName: 'dorkos', navigate: vi.fn() })
+      React.createElement(AccountCheckboxes, {
+        root: ROOT,
+        projectName: 'dorkos',
+        navigate: vi.fn(),
+      })
     );
     await act(async () => {});
     await act(async () => {});

@@ -240,11 +240,7 @@ export function AutonomyDial(props: AutonomyDialProps): Node {
       h(
         'div',
         { style: { display: 'flex', flexWrap: 'wrap', gap: '4px 10px', alignItems: 'baseline' } },
-        h(
-          'span',
-          { style: { minWidth: '11rem', fontSize: '12px' } },
-          KIND_LABELS[kind]
-        ),
+        h('span', { style: { minWidth: '11rem', fontSize: '12px' } }, KIND_LABELS[kind]),
         h('span', { style: { ...MUTED, flex: 1, minWidth: '10rem' } }, words)
       ),
       customize
@@ -328,9 +324,19 @@ export function AutonomyDial(props: AutonomyDialProps): Node {
           {
             role: 'alertdialog',
             'aria-label': 'Replace your custom choices?',
-            style: { display: 'flex', flexWrap: 'wrap', gap: '6px', alignItems: 'center', margin: '0 0 6px' },
+            style: {
+              display: 'flex',
+              flexWrap: 'wrap',
+              gap: '6px',
+              alignItems: 'center',
+              margin: '0 0 6px',
+            },
           },
-          h('p', { style: { margin: 0, flexBasis: '100%', fontSize: '12px' } }, REPLACE_CUSTOM_TEXT),
+          h(
+            'p',
+            { style: { margin: 0, flexBasis: '100%', fontSize: '12px' } },
+            REPLACE_CUSTOM_TEXT
+          ),
           h(
             'button',
             {

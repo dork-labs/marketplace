@@ -679,8 +679,7 @@ describe('FleetTab on a DorkOS that keeps accounts to projects (§8.5)', () => {
       body: fleet([claudeGroup([account('Work', 'kept-out', { repos: ['acme/app'] })])]),
     });
     const onMove = vi.fn();
-    const text =
-      'Move "Only for these repos" into DorkOS? DorkOS will keep Work to client-app.';
+    const text = 'Move "Only for these repos" into DorkOS? DorkOS will keep Work to client-app.';
     render(
       React.createElement(FleetTab, {
         rules: rules({}),

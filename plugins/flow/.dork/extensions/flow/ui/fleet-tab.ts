@@ -267,7 +267,16 @@ export interface MoveLineProps {
 function MoveLine(props: MoveLineProps): Node {
   const { plan, result } = props;
   if (result !== null) {
-    return h('p', { role: 'status', style: result.ok ? { ...MUTED, margin: '0 0 8px 20px' } : { ...ALERT, margin: '0 0 8px 20px' } }, result.text);
+    return h(
+      'p',
+      {
+        role: 'status',
+        style: result.ok
+          ? { ...MUTED, margin: '0 0 8px 20px' }
+          : { ...ALERT, margin: '0 0 8px 20px' },
+      },
+      result.text
+    );
   }
   return h(
     'p',
