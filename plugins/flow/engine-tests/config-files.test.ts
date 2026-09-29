@@ -1494,7 +1494,9 @@ describe('checkSettings', () => {
   });
 });
 
-describe('config-files CLI', () => {
+// Every test here starts real node processes (about 0.3s each, far more on a
+// loaded machine), so the block gets an explicit budget instead of vitest's 5s.
+describe('config-files CLI', { timeout: 30_000 }, () => {
   /**
    * A copy of the flow scripts in a throwaway install folder, so the CLI's own
    * plugin root (found from its file location, as in a real install) is under the
