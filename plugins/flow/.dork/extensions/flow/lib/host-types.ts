@@ -1,14 +1,20 @@
 /**
  * The DorkOS host types this extension uses, mirrored from
- * `@dorkos/extension-api/server` (DorkOS `packages/extension-api/src/server-extension-api.ts`,
- * spec `claude-account-fleet` §X) because that package is not published to npm.
+ * `@dorkos/extension-api` (DorkOS `packages/extension-api/src/`) because that
+ * package is not published to npm.
  *
  * Only the subset the Flow extension touches is here, spelled exactly as the
- * host spells it. The DorkOS harness check (UI task 4.3) is the drift guard.
- * Types only: nothing here exists at run time.
+ * host spells it. The seams the multi-project work added (spec
+ * `flow-multiproject` §10) are optional, because an older DorkOS lacks them and
+ * the extension probes for each before use. `__tests__/host-types.contract.test.ts`
+ * is the drift guard: it checks these against core's vendored seam contract
+ * (`lib/__contract__/seams.contract.ts`). Types only: nothing here exists at
+ * run time.
  *
  * @module @dorkos/flow/extension/host-types
  */
+
+import type { ComponentType } from 'react';
 
 /**
  * The longest `seedContext` DorkOS accepts on a carried-over session
@@ -250,14 +256,67 @@ export interface RouteResponse {
 /** A route handler. */
 export type RouteHandler = (req: RouteRequest, res: RouteResponse) => void | Promise<void>;
 
+/**
+ * Method syntax keeps a middleware's parameters bivariant, so Express's own
+ * `RequestHandler` fits {@link RouteMiddleware}. The request is any object:
+ * flow never reads it in a middleware, and Express's `params` (which may hold
+ * arrays) is wider than {@link RouteRequest}'s.
+ */
+interface RouteMiddlewareShape {
+  run(req: object, res: RouteResponse, next: (error?: unknown) => void): unknown;
+}
+
+/** Express middleware, such as the host's `requirePerson`: it answers, or calls `next`. */
+export type RouteMiddleware = RouteMiddlewareShape['run'];
+
 /** The scoped router DorkOS mounts at `/api/ext/<id>/` (a subset of Express's `Router`). */
 export interface ExtensionRouter {
   /** Register a GET route. */
-  get(path: string, handler: RouteHandler): unknown;
+  get(path: string, ...handlers: (RouteHandler | RouteMiddleware)[]): unknown;
   /** Register a PUT route. */
-  put(path: string, handler: RouteHandler): unknown;
+  put(path: string, ...handlers: (RouteHandler | RouteMiddleware)[]): unknown;
   /** Register a POST route. */
-  post(path: string, handler: RouteHandler): unknown;
+  post(path: string, ...handlers: (RouteHandler | RouteMiddleware)[]): unknown;
+}
+
+/** A project as core knows it: a git main checkout (DorkOS `ProjectRef`). */
+export interface ProjectRef {
+  /** Absolute, canonical path of the main checkout. */
+  readonly root: string;
+  /** Short display name: URL-safe, unique, and stable once assigned. */
+  readonly name: string;
+}
+
+/** A known project, with what core learned about it (DorkOS `ProjectInfo`). */
+export interface ProjectInfo extends ProjectRef {
+  /** "owner/name" from the origin remote, or null. */
+  readonly originRepo: string | null;
+  /** ISO-8601 time core last saw it. */
+  readonly lastSeenAt: string;
+}
+
+/** Core's project registry, as one extension sees it (`ctx.projects`, DorkOS `ProjectsApi`). */
+export interface ProjectsApi {
+  /** The project a folder belongs to. */
+  resolve(cwd: string): Promise<ProjectRef | null>;
+  /** Known projects that hold a copy of this extension or were reported by it. */
+  list(): Promise<ProjectInfo[]>;
+  /** Tell core about a project it may not have seen. */
+  report(path: string): Promise<ProjectRef | null>;
+  /** Called when the list changes; returns a function that stops listening. */
+  onChange(listener: () => void): () => void;
+}
+
+/**
+ * The client state the extension reads (a subset of DorkOS
+ * `ExtensionReadableState`). `currentProject` is missing on a DorkOS from
+ * before the project registry, so it is optional here.
+ */
+export interface ReadableState {
+  /** The folder of the chat the UI is beside, or null. */
+  currentCwd: string | null;
+  /** The project of `currentCwd`; null for no project or while resolving. */
+  currentProject?: ProjectRef | null;
 }
 
 /**
@@ -283,4 +342,61 @@ export interface DataProviderContext {
   readonly dorkHome?: string;
   /** The accounts API. Missing on hosts older than 0.88.0. */
   readonly accounts?: Partial<AccountsApi>;
+  /** Core's project registry. Missing on a DorkOS from before it; probe before use. */
+  readonly projects?: ProjectsApi;
+  /**
+   * Middleware that admits only a person (a person's browser, not an agent or
+   * a relay message). Missing on a DorkOS from before it: then no route that
+   * changes something is registered at all (spec `flow-multiproject` §10).
+   */
+  readonly requirePerson?: RouteMiddleware;
+}
+
+/**
+ * The part of DorkOS's client `ExtensionAPI` this extension uses. The methods
+ * a DorkOS from before 0.88.0 may lack are optional, and each is probed
+ * before use (spec `flow-multiproject` §10).
+ */
+export interface ClientApi {
+  /** Go to a client route. */
+  navigate(path: string): void;
+  /** A snapshot of the host's state. */
+  getState?(): ReadableState;
+  /** Call `callback` when the selected part of the state changes; returns a function that stops. */
+  subscribe?(
+    selector: (state: ReadableState) => unknown,
+    callback: (value: unknown) => void
+  ): () => void;
+  /**
+   * Add a tab to Settings.
+   *
+   * @returns A function that removes it.
+   */
+  registerSettingsTab(
+    id: string,
+    label: string,
+    component: ComponentType,
+    options?: { group?: string }
+  ): () => void;
+  /**
+   * Add a component to a UI slot; for `right-panel`, a tab with `label` and `icon`.
+   *
+   * @returns A function that removes it.
+   */
+  registerComponent(
+    slot: 'right-panel',
+    id: string,
+    component: ComponentType,
+    options?: { label?: string; icon?: ComponentType<{ className?: string }> }
+  ): () => void;
+  /**
+   * Add a command palette item.
+   *
+   * @returns A function that removes it.
+   */
+  registerCommand?(id: string, label: string, callback: () => void): () => void;
+  /** Add a dialog; returns its controls. */
+  registerDialog?(id: string, component: ComponentType): { open: () => void; close: () => void };
+  /** Show a toast. */
+  notify?(message: string, options?: { type?: 'info' | 'success' | 'error' }): void;
 }

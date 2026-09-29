@@ -160,7 +160,7 @@ describe('the DorkOS source', () => {
     expect(init.method).toBe('GET');
   });
 
-  it("reads a session's item from trackerItems first, then the older trackerItem", async () => {
+  it("reads a session's own item from trackerItems first, then the older trackerItem", async () => {
     // Purpose: spec flow-multiproject §6.4: DorkOS now lists every item a chat
     // works on (newest first) and keeps the single trackerItem for a while, so
     // flow fleet reads either DorkOS.
@@ -185,7 +185,21 @@ describe('the DorkOS source', () => {
         ],
       }) as unknown as typeof fetch,
     });
-    expect(both.sessions.map((s) => s.item)).toEqual(['DOR-2']);
+    // DOR-2 runs in its own chat; counting it here would bill one run to two sessions.
+    expect(both.sessions.map((s) => s.item)).toEqual(['DOR-1']);
+    // A chat that only dispatched items runs none itself, and never borrows one.
+    const dispatcher = await fetchDorkosSessions('http://127.0.0.1:4242', identities, {
+      fetchImpl: respond(200, {
+        sessions: [
+          row({
+            status: undefined,
+            trackerItems: [{ id: 'DOR-2', via: 'own-chat', runStatus: 'running' }],
+          }),
+          row({ id: '88888888-8888-4888-8888-888888888888', trackerItems: [] }),
+        ],
+      }) as unknown as typeof fetch,
+    });
+    expect(dispatcher.sessions.map((s) => s.item)).toEqual([null]);
     const older = await fetchDorkosSessions('http://127.0.0.1:4242', identities, {
       fetchImpl: respond(200, {
         sessions: [row({ trackerItem: { id: 'DOR-1', runStatus: 'running' } })],

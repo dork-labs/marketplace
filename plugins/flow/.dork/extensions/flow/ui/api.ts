@@ -6,7 +6,7 @@
  */
 
 import type { FleetAccount, FleetView } from '../lib/fleet.ts';
-import type { PanelModel } from '../lib/panel.ts';
+import type { FlowModel } from '../lib/model.ts';
 
 /** The desktop shell's bridge, when the tab runs inside the DorkOS app. */
 interface ElectronBridge {
@@ -53,6 +53,9 @@ export class HostTooOldError extends Error {
   }
 }
 
+/** Shown when DorkOS refused a change because it could not tell a person made it. */
+export const PERSON_ONLY_MESSAGE = 'Only a person can change this.';
+
 /** Shown when a request fails without a message from flow. */
 export const UNREACHABLE_MESSAGE = "Flow didn't respond, so nothing was changed. Try again.";
 
@@ -98,6 +101,10 @@ async function call<T = FleetView>(
     answer.refusedBy === 'flow' &&
     typeof answer.error === 'string' &&
     answer.error !== '';
+  if (!refusal && response.status === 403) {
+    // DorkOS's person guard: the change came from something it could not tell was you.
+    throw new FleetRequestError(403, PERSON_ONLY_MESSAGE);
+  }
   throw new FleetRequestError(
     response.status,
     refusal ? (answer.error as string) : UNREACHABLE_MESSAGE,
@@ -148,30 +155,49 @@ export function putCrossRuntime(
 }
 
 /**
- * Read the Flow panel's model. The folder of the chat the panel sits beside is
- * passed along, so flow covers that project too.
+ * Read the Flow tab's model. The folder of the chat the tab sits beside is
+ * passed along, so flow looks for a project there too and says which project
+ * it is (for a DorkOS that does not say so itself).
  *
  * @param cwd - The chat's folder, or `null`.
- * @returns The `GET /panel` body.
+ * @returns The `GET /model` body.
  */
-export function getPanel(cwd: string | null): Promise<PanelModel> {
-  return call<PanelModel>('GET', cwd ? `/panel?cwd=${encodeURIComponent(cwd)}` : '/panel');
+export function getModel(cwd: string | null): Promise<FlowModel> {
+  return call<FlowModel>('GET', cwd ? `/model?cwd=${encodeURIComponent(cwd)}` : '/model');
+}
+
+/** Which projects a pause or resume acts on: one, by name, or every set-up one. */
+export type PauseTarget = { project: string } | { all: true };
+
+/**
+ * Pause flow in one project or all of them.
+ *
+ * @param target - Which.
+ * @param until - When it ends by itself (ISO with its offset), or `null` for "until I resume".
+ * @returns The new model.
+ */
+export function pauseFlow(target: PauseTarget, until: string | null): Promise<FlowModel> {
+  return call<FlowModel>('POST', '/pause', { ...target, until });
 }
 
 /**
- * Pause flow in every project the panel shows.
+ * Resume flow in one project or all of them.
  *
+ * @param target - Which.
  * @returns The new model.
  */
-export function pauseFlow(): Promise<PanelModel> {
-  return call<PanelModel>('POST', '/pause');
+export function resumeFlow(target: PauseTarget): Promise<FlowModel> {
+  return call<FlowModel>('POST', '/resume', target);
 }
 
 /**
- * Resume flow in every project the panel shows.
+ * Tell flow which DorkOS schedules the Flow tab switched back on (or found
+ * gone), so it stops asking.
  *
+ * @param project - The project's name.
+ * @param ids - The schedule ids.
  * @returns The new model.
  */
-export function resumeFlow(): Promise<PanelModel> {
-  return call<PanelModel>('POST', '/resume');
+export function schedulesRestored(project: string, ids: readonly string[]): Promise<FlowModel> {
+  return call<FlowModel>('POST', '/schedules/restored', { project, ids });
 }
