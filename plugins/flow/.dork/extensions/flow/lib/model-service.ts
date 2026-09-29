@@ -1,18 +1,46 @@
 /**
- * The Flow tab's server side (spec `flow-multiproject` §2, §5.2, §9): builds
- * the model over every flow project, pauses and resumes one project or all of
- * them with an end time, lifts a timed pause when its end passes (the expiry
- * sweep), keeps each project's tracker read on its timer, and pushes a new
- * model as the `model` event, at most once a second, when it changed.
+ * The Flow tab's server side (spec `flow-multiproject` §2, §5.2, §7, §9):
+ * builds the model over every flow project, pauses and resumes one project or
+ * all of them with an end time, lifts a timed pause when its end passes (the
+ * expiry sweep), keeps each project's tracker read on its timer, keeps the
+ * engine's copy of each project's dial, raises and settles flow's asks in
+ * DorkOS's inbox, starts the morning's sorting, and pushes a new model as the
+ * `model` event, at most once a second, when it changed.
  *
  * @module @dorkos/flow/extension/model-service
  */
 
 import os from 'node:os';
+import path from 'node:path';
+import {
+  AUTONOMY_KINDS,
+  type AutonomyKind,
+  type AutonomyStop,
+} from '../../../../scripts/autonomy.ts';
+import { readJsonFile } from '../../../../scripts/atomic-json.ts';
+import {
+  CONFIG_FILE,
+  LOCAL_CONFIG_FILE,
+  PROJECT_CONFIG_DIR,
+} from '../../../../scripts/config-names.ts';
 import { loadAccounts } from '../../../../scripts/fleet/accounts.ts';
+import { readRunStore } from '../../../../scripts/fleet/sessions.ts';
+import { AdapterTrust } from './adapter-trust.ts';
 import type { ExecFileLike } from './advisor.ts';
+import { sortRecord, type AskProject } from './asks.ts';
+import { AutonomyStore } from './autonomy-store.ts';
+import { IdleClock, ideasAskDue, ideasWaiting } from './conditions.ts';
+import { DailySort } from './daily-sort.ts';
+import { DecisionCoordinator, type PlanProject } from './decisions.ts';
 import { RouteError, buildFleetView } from './fleet.ts';
-import type { AccountsApi, ProjectsApi } from './host-types.ts';
+import type {
+  AccountsApi,
+  DecisionActionEvent,
+  InboxApi,
+  ProjectSettingsReader,
+  ProjectsApi,
+  SessionsApi,
+} from './host-types.ts';
 import {
   CheckoutResolver,
   buildProject,
@@ -22,11 +50,14 @@ import {
   runPauseCommand,
   schedulesOf,
   type AccountLook,
+  type FlowCondition,
   type FlowModel,
+  type FlowProject,
+  type ProjectExtras,
 } from './model.ts';
 import { ProjectDirectory, type FlowProjectEntry } from './projects.ts';
 import type { SharedStorage } from './shared-storage.ts';
-import { TrackerReader } from './tracker-reads.ts';
+import { TrackerReader, projectIdOf } from './tracker-reads.ts';
 
 /** The shortest gap between two `model` events, in ms. */
 export const EMIT_INTERVAL_MS = 1_000;
@@ -71,6 +102,50 @@ export interface ModelServiceDeps {
   osHome?: string;
   /** Where to log. */
   log: (message: string) => void;
+  /** Core's inbox, when the host has one. */
+  inbox?: InboxApi;
+  /** Core's read-only per-project settings, when the host has them. */
+  settings?: ProjectSettingsReader;
+  /** Starting work in a new chat, when the host has it. */
+  sessions?: SessionsApi;
+  /** How long an answer waits before "Sending…" (tests). */
+  answerWaitMs?: number;
+}
+
+/**
+ * Whether a reviewer agent checks a project's work (`review.adversarial`, its
+ * own machine's file over the committed one; on when neither says).
+ *
+ * @param root - The project's main checkout.
+ * @returns True unless turned off.
+ */
+export function reviewerAgentOf(root: string): boolean {
+  let on = true;
+  for (const file of [CONFIG_FILE, LOCAL_CONFIG_FILE]) {
+    const { value } = readJsonFile(path.join(root, PROJECT_CONFIG_DIR, file));
+    const review =
+      typeof value === 'object' && value !== null
+        ? (value as Record<string, unknown>).review
+        : undefined;
+    const adversarial =
+      typeof review === 'object' && review !== null
+        ? (review as Record<string, unknown>).adversarial
+        : undefined;
+    if (typeof adversarial === 'boolean') on = adversarial;
+  }
+  return on;
+}
+
+/** The body of the no-inbox answer route (§7.6). */
+export interface LocalAnswer {
+  /** `approve`, `reject`, `word` or `choice`. */
+  action: DecisionActionEvent['action'];
+  /** The "Send it back" note. */
+  note?: string;
+  /** A typed answer. */
+  text?: string;
+  /** A chosen chip. */
+  choiceId?: string;
 }
 
 /** What `POST /pause` and `POST /resume` act on. */
@@ -166,11 +241,62 @@ export class ModelService {
   private commands: Promise<unknown> = Promise.resolve();
   /** Failed attempts to end a pause on time, by root. */
   private readonly sweepFailures = new Map<string, { count: number; retryAt: number }>();
+  /** Each project's dial. */
+  readonly autonomy: AutonomyStore;
+  /** Which projects' own adapters a person allowed. */
+  readonly trust: AdapterTrust;
+  /** flow's asks. */
+  readonly decisions: DecisionCoordinator;
+  private readonly idleClock: IdleClock;
+  private readonly dailySort: DailySort;
+  /** Since when each project has run nothing, from the last poll. */
+  private idle = new Map<string, string | null>();
+  /** Projects whose morning sorting waits until tomorrow. */
+  private sortWaits = new Set<string>();
+  /** Roots whose own adapter a person allowed, from the last poll. */
+  private allowed = new Set<string>();
 
   /**
    * @param deps - The host, machine and clock.
    */
   constructor(private readonly deps: ModelServiceDeps) {
+    this.autonomy = new AutonomyStore({
+      dorkHome: deps.dorkHome,
+      settings: deps.settings,
+      storage: deps.storage,
+      log: deps.log,
+      now: () => deps.now().getTime(),
+    });
+    this.trust = new AdapterTrust(deps.storage);
+    this.idleClock = new IdleClock(deps.storage);
+    this.dailySort = new DailySort({
+      storage: deps.storage,
+      sessions: deps.sessions,
+      now: deps.now,
+      log: deps.log,
+      record: async (candidate) => {
+        const plan = this.lastPlans.get(candidate.root);
+        if (plan === undefined) return;
+        await this.decisions.recordOnce(
+          sortRecord(plan.ask, candidate.stop, candidate.waiting),
+          `sort:${candidate.root}:${deps.now().toISOString().slice(0, 10)}`
+        );
+      },
+    });
+    this.decisions = new DecisionCoordinator({
+      inbox: deps.inbox,
+      sessions: deps.sessions,
+      storage: deps.storage,
+      flowRoot: deps.flowRoot,
+      dorkHome: deps.dorkHome,
+      execFile: deps.execFile,
+      now: deps.now,
+      log: deps.log,
+      autonomy: this.autonomy,
+      onChange: () => this.request(),
+      onStarted: () => void this.dailySort.noteStart().catch(() => {}),
+      answerWaitMs: deps.answerWaitMs,
+    });
     this.resolver = deps.resolver ?? new CheckoutResolver();
     this.directory = new ProjectDirectory({
       flowRoot: deps.flowRoot,
@@ -197,6 +323,9 @@ export class ModelService {
     if (typeof cwd !== 'string' || cwd === '' || this.cwds.includes(cwd)) return;
     this.cwds.push(cwd);
     if (this.cwds.length > REMEMBERED_CWDS) this.cwds.shift();
+    // "Set up flow here" starts work in this folder's project, which DorkOS
+    // accepts only for a project flow reported (§7.9).
+    void this.deps.projects?.report(cwd).catch(() => null);
   }
 
   /** Every flow project now. */
@@ -301,23 +430,118 @@ export class ModelService {
         this.reader.tick(entries);
       }
     }
+    const projects = entries.map((entry) =>
+      buildProject({
+        entry,
+        read: this.reader.latest(entry.root),
+        accounts,
+        registry,
+        pidAlive: this.deps.pidAlive,
+        now,
+        restoreSchedules: restore[entry.root] ?? [],
+        extras: this.extrasOf(entry),
+      })
+    );
+    const names = new Set(projects.map((project) => project.name));
     return {
       behaviour: this.directory.behaviour,
       generatedAt: now.toISOString(),
-      projects: entries.map((entry) =>
-        buildProject({
-          entry,
-          read: this.reader.latest(entry.root),
-          accounts,
-          registry,
-          pidAlive: this.deps.pidAlive,
-          now,
-          restoreSchedules: restore[entry.root] ?? [],
-        })
-      ),
-      decisions: [],
+      projects,
+      decisions: this.decisions.decisions().filter((decision) => names.has(decision.project)),
       cwdProject,
       canChange: this.deps.canChange,
+    };
+  }
+
+  /** What the model adds to a project from the dial, the asks and the adapter allows. */
+  private extrasOf(entry: FlowProjectEntry): ProjectExtras {
+    const id = projectIdOf(entry.root);
+    const open = this.decisions.keys();
+    const escalated = new Set<FlowCondition['kind']>();
+    if (open.has(`tracker:${id}`)) escalated.add('sign-in');
+    if (open.has(`idle:${id}`)) escalated.add('nothing-ready');
+    const dial = this.autonomy.of(entry.root);
+    const reviewer = reviewerAgentOf(entry.root);
+    const stops = Object.fromEntries(
+      AUTONOMY_KINDS.map((kind) => [kind, this.autonomy.stop(entry.root, kind, reviewer)])
+    ) as Record<AutonomyKind, AutonomyStop>;
+    return {
+      ownAdapterAllowed: this.allowed.has(entry.root),
+      autonomy:
+        dial === null || !this.autonomy.available
+          ? null
+          : { chosen: dial.chosen, firstSeen: dial.firstSeen, stops },
+      idleSince: this.idle.get(entry.root) ?? null,
+      escalated,
+      sortWaits: this.sortWaits.has(entry.root),
+    };
+  }
+
+  /** The last pass's plans, by root. */
+  private lastPlans = new Map<string, PlanProject>();
+
+  /**
+   * Allow a project's own tracker adapter as it is now (§2.2). Called only
+   * from the person-only route.
+   *
+   * @param name - The project, by name.
+   * @returns The new model.
+   */
+  async allowAdapter(name: unknown): Promise<FlowModel> {
+    const entry = await this.named(name);
+    if (entry.tracker === null || entry.tracker.adapter !== 'project') {
+      throw new RouteError(400, `${entry.name} doesn't use an adapter of its own.`);
+    }
+    if (!(await this.trust.allow(entry.root, entry.tracker.id))) {
+      throw new RouteError(400, `Flow couldn't read ${entry.name}'s own adapter.`);
+    }
+    this.allowed.add(entry.root);
+    this.reader.view(entry.root);
+    this.reader.tick(await this.projects(), this.allowed);
+    return this.answer();
+  }
+
+  /**
+   * Answer an ask from flow's own pages on a DorkOS without the inbox (§7.6).
+   *
+   * @param key - The ask's key.
+   * @param body - What was chosen.
+   * @returns Whether it settled, what to tell the person, and a chat to watch.
+   */
+  async answerLocal(
+    key: string,
+    body: unknown
+  ): Promise<{
+    resolved: boolean;
+    message: string | null;
+    watch: { sessionId: string; label: string } | null;
+    model: FlowModel;
+  }> {
+    const value =
+      typeof body === 'object' && body !== null ? (body as Record<string, unknown>) : {};
+    const action = value.action;
+    if (action !== 'approve' && action !== 'reject' && action !== 'word' && action !== 'choice') {
+      throw new RouteError(400, 'Choose an answer.');
+    }
+    const str = (field: unknown) => (typeof field === 'string' ? field : null);
+    const result = await this.decisions.handle({
+      key,
+      action,
+      choiceId: str(value.choiceId),
+      decidedBy: 'person',
+      offerId: null,
+      pendingActionId: null,
+      note: str(value.note),
+      text: str(value.text),
+      project: null,
+    });
+    const model = await this.answer();
+    if ('settled' in result) return { resolved: true, message: null, watch: null, model };
+    return {
+      resolved: 'resolve' in result,
+      message: result.message ?? null,
+      watch: result.watch ?? null,
+      model,
     };
   }
 
@@ -465,8 +689,111 @@ export class ModelService {
       this.sweeping = null;
     });
     await this.sweeping;
-    this.reader.tick(entries);
+    try {
+      await this.autonomy.sync(entries.map((entry) => entry.root));
+    } catch (error) {
+      this.deps.log(`[flow] could not read the Flow settings: ${String(error)}`);
+    }
+    const allowed = new Set<string>();
+    for (const entry of entries) {
+      if (
+        entry.tracker?.adapter === 'project' &&
+        (await this.trust.isAllowed(entry.root, entry.tracker.id))
+      ) {
+        allowed.add(entry.root);
+      }
+    }
+    this.allowed = allowed;
+    this.reader.tick(entries, allowed);
+    try {
+      await this.askPass(entries);
+    } catch (error) {
+      this.deps.log(`[flow] could not update flow's asks: ${String(error)}`);
+    }
     this.request();
+  }
+
+  /**
+   * Plan each project's asks, raise and settle them, and start the morning's
+   * sorting where it is due.
+   */
+  private async askPass(entries: readonly FlowProjectEntry[]): Promise<void> {
+    const now = this.deps.now();
+    const registry = loadAccounts(this.deps.dorkHome, {
+      home: this.deps.osHome ?? os.homedir(),
+    }).accounts;
+    const accounts = await this.accountLook();
+    const built: { entry: FlowProjectEntry; project: FlowProject }[] = entries.map((entry) => ({
+      entry,
+      project: buildProject({
+        entry,
+        read: this.reader.latest(entry.root),
+        accounts,
+        registry,
+        pidAlive: this.deps.pidAlive,
+        now,
+        extras: this.extrasOf(entry),
+      }),
+    }));
+    this.idle = await this.idleClock.note(
+      new Map(
+        built.map(({ project }) => [project.root, project.runs.some((run) => run.state !== 'done')])
+      ),
+      now
+    );
+    const plans: PlanProject[] = built.map(({ entry, project }) => {
+      const read = this.reader.latest(entry.root);
+      const reviewerAgent = reviewerAgentOf(entry.root);
+      const waiting = ideasWaiting(read);
+      const idleSince = this.idle.get(entry.root) ?? null;
+      const trackerName = entry.tracker?.label ?? null;
+      const team = entry.tracker?.team ?? null;
+      const ask: AskProject = {
+        name: project.name,
+        root: project.root,
+        id: projectIdOf(project.root),
+        label: trackerName === null ? null : team === null ? trackerName : `${trackerName} ${team}`,
+        tracker: trackerName,
+        link: `/x/flow/p/${encodeURIComponent(project.name)}`,
+      };
+      return {
+        project,
+        store: readRunStore(entry.root) ?? {},
+        read,
+        reviewerAgent,
+        actionable:
+          entry.tracker !== null &&
+          entry.tracker.transport === 'cli' &&
+          (entry.tracker.adapter === 'shipped' || this.allowed.has(entry.root)),
+        ideas: {
+          waiting,
+          idleSince,
+          due: ideasAskDue({
+            waiting,
+            stop: this.autonomy.stop(entry.root, 'sort', reviewerAgent),
+            idleSince,
+            busy: project.capacity.busy,
+            slots: project.capacity.slots,
+            paused: project.pause !== null,
+            now,
+          }),
+        },
+        ask,
+      };
+    });
+    this.lastPlans = new Map(plans.map((plan) => [plan.project.root, plan]));
+    await this.decisions.sync(plans);
+    this.sortWaits = await this.dailySort.tick(
+      plans
+        .filter((plan) => plan.project.setup === 'ready' && this.autonomy.available)
+        .map((plan) => ({
+          root: plan.project.root,
+          name: plan.project.name,
+          waiting: plan.read?.facts?.shapeableCount ?? 0,
+          paused: plan.project.pause !== null,
+          stop: this.autonomy.stop(plan.project.root, 'sort', plan.reviewerAgent),
+        }))
+    );
   }
 
   /** Core's project list changed: ask core for names again and send a new model. */
@@ -525,6 +852,8 @@ export class ModelService {
   dispose(): void {
     this.disposed = true;
     this.reader.dispose();
+    this.autonomy.dispose();
+    this.decisions.dispose();
     if (this.timer !== null) clearTimeout(this.timer);
     this.timer = null;
   }

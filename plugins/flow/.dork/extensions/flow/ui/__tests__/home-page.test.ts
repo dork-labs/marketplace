@@ -32,6 +32,7 @@ import {
   registerPages,
   unknownProjectText,
 } from '../home-page.ts';
+import { ANSWERED_IN_FLOW_NOTE, type AnswerApi } from '../answers.ts';
 import { FlowIcon } from '../flow-icon.ts';
 import { NOT_HERE_YET_TEXT, SHARED_FILE } from '../project-settings.ts';
 import { FlowStore } from '../store.ts';
@@ -54,11 +55,44 @@ function decision(project: string, extra: Partial<FlowDecision> = {}): FlowDecis
     detail: null,
     identifier: 'DOR-2387',
     raisedAt: '2026-09-28T09:00:00.000Z',
-    actions: 'ship',
+    actions: {
+      kind: 'yes-no',
+      approveLabel: 'Ship it',
+      rejectLabel: 'Send it back',
+      rejectAsksForNote: true,
+    },
+    answerIn: 'activity',
     why: "It's built, tests pass, and the reviewer agent found nothing.",
     defaultChoice: null,
     decideBy: null,
     ...extra,
+  };
+}
+
+/** A host with the inbox, over a model's asks. */
+function inboxApi(model: FlowModel) {
+  return {
+    listDecisions: vi.fn(async () =>
+      model.decisions.map((d) => ({
+        id: `core-${d.key}`,
+        key: d.key,
+        title: d.title,
+        why: d.why,
+        detail: d.detail,
+        project: null,
+        projectLabel: null,
+        since: null,
+        actions: d.actions,
+        link: null,
+        raisedAt: d.raisedAt,
+      }))
+    ),
+    answerDecision: vi.fn(async () => ({
+      resolved: true,
+      message: null,
+      navigate: null,
+      watch: { sessionId: 'chat-9', label: 'Sorting 12 ideas…' },
+    })),
   };
 }
 
@@ -86,8 +120,9 @@ function threeProjects(): FlowModel {
       decisions: [
         decision('dorkos'),
         decision('blintz', {
-          kind: 'nothing-ready',
-          actions: 'sort',
+          kind: 'ideas',
+          actions: { kind: 'word', label: 'Sort them' },
+          answerIn: 'flow',
           raisedAt: '2026-09-28T08:00:00.000Z',
           title: '12 new ideas haven’t been sorted',
         }),
@@ -183,11 +218,15 @@ function capacity(): CapacityView {
 async function renderPage(
   page: 'home' | 'project' | 'settings',
   model: FlowModel,
-  opts: { params?: Record<string, string>; search?: Record<string, string> } = {}
+  opts: {
+    params?: Record<string, string>;
+    search?: Record<string, string>;
+    api?: Partial<AnswerApi>;
+  } = {}
 ) {
   const store = new FlowStore({});
   store.start();
-  const api = { navigate: vi.fn() };
+  const api = { navigate: vi.fn(), ...opts.api };
   const Page = createPages(api, store)[page];
   const address = { search: { ...(opts.search ?? {}) } as Record<string, string> };
   const writes: Record<string, string | null>[] = [];
@@ -215,17 +254,22 @@ async function renderPage(
 }
 
 describe('Flow home', () => {
-  it('shows three bands with counts, and each ask opens Activity', async () => {
+  it('shows three bands with counts; a review gate goes to Activity, the rest are answered here', async () => {
     serve(threeProjects());
-    const { api } = await renderPage('home', threeProjects());
+    const inbox = inboxApi(threeProjects());
+    const { api } = await renderPage('home', threeProjects(), { api: inbox });
     expect(screen.getByRole('heading', { level: 1, name: 'Flow' })).toBeTruthy();
     expect(screen.getByText('Needs you · 2')).toBeTruthy();
     expect(screen.getByText("Something's off · 2")).toBeTruthy();
     expect(screen.getByText('All fine · 1')).toBeTruthy();
     const needs = screen.getByRole('region', { name: 'Needs you' });
-    expect(within(needs).getByRole('button', { name: 'Review in Activity →' })).toBeTruthy();
-    fireEvent.click(within(needs).getByRole('button', { name: 'Open in Activity →' }));
+    // A review gate has no buttons here: shipping must be credited to you.
+    expect(within(needs).queryByRole('button', { name: /Ship it/ })).toBeNull();
+    fireEvent.click(within(needs).getByRole('button', { name: 'Review in Activity →' }));
     expect(api.navigate).toHaveBeenLastCalledWith('/activity');
+    // The note that such answers are credited to Flow shows once.
+    expect(within(needs).getAllByText(ANSWERED_IN_FLOW_NOTE)).toHaveLength(1);
+    expect(within(needs).getByRole('button', { name: 'Sort them' })).toBeTruthy();
     fireEvent.click(
       within(screen.getByRole('region', { name: 'All fine' })).getByRole('button', {
         name: 'dorkos',

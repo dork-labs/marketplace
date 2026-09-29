@@ -96,14 +96,17 @@ function isObject(value: unknown): value is Record<string, unknown> {
  * Whether flow can read a project's tracker on its own, from here.
  *
  * @param entry - The project.
- * @returns True for a set-up project on the `cli` transport whose adapter flow ships.
+ * @param ownAdapterAllowed - Whether a person allowed the project's own adapter.
+ * @returns True for a set-up project on the `cli` transport whose adapter flow
+ *   ships, or whose own adapter a person allowed.
  */
-export function canReadOnTimer(entry: FlowProjectEntry): boolean {
+export function canReadOnTimer(entry: FlowProjectEntry, ownAdapterAllowed = false): boolean {
   return (
     entry.setup === 'ready' &&
     entry.tracker !== null &&
     entry.tracker.transport === 'cli' &&
-    entry.tracker.adapter === 'shipped'
+    (entry.tracker.adapter === 'shipped' ||
+      (entry.tracker.adapter === 'project' && ownAdapterAllowed))
   );
 }
 
@@ -195,12 +198,15 @@ export class TrackerReader {
    * Returns at once; each read reports through `onChange`.
    *
    * @param projects - Every flow project now.
+   * @param allowed - The roots whose own adapter a person allowed.
    */
-  tick(projects: readonly FlowProjectEntry[]): void {
+  tick(projects: readonly FlowProjectEntry[], allowed: ReadonlySet<string> = new Set()): void {
     if (this.disposed) return;
     const now = this.deps.now().getTime();
     const readable = new Map(
-      projects.filter(canReadOnTimer).map((entry) => [entry.root, entry] as const)
+      projects
+        .filter((entry) => canReadOnTimer(entry, allowed.has(entry.root)))
+        .map((entry) => [entry.root, entry] as const)
     );
     for (const root of [...this.states.keys()]) {
       if (!readable.has(root)) this.states.delete(root);

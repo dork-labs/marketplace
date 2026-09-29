@@ -19,6 +19,20 @@ import { describe, expect, expectTypeOf, it } from 'vitest';
 import type * as Contract from '../lib/__contract__/seams.contract.ts';
 import type {
   DataProviderContext,
+  DecisionActionEvent,
+  DecisionActionResult,
+  DecisionActions,
+  DecisionActor,
+  DecisionAnswer,
+  DecisionAnswerResult,
+  DecisionInput,
+  DecisionOffer,
+  DecisionOutcome,
+  ExtensionDecisionView,
+  InboxApi,
+  ProjectSettingsReader,
+  RaisedDecision,
+  RecordedDecisionInput,
   ExtensionPageOptions,
   ExtensionPageProps,
   LimitedSessionInfo,
@@ -96,6 +110,51 @@ describe('lib/host-types.ts against the contract', () => {
     >();
     expectTypeOf<Contract.ExtensionAPISeams['setTabMarker']>().toExtend<
       NonNullable<FlowExtensionApi['setTabMarker']>
+    >();
+  });
+
+  it('mirrors the inbox exactly as core ships it', () => {
+    expectTypeOf<Contract.DecisionActions>().toExtend<DecisionActions>();
+    expectTypeOf<Contract.DecisionInput>().toExtend<DecisionInput>();
+    expectTypeOf<Contract.RaisedDecision>().toExtend<RaisedDecision>();
+    expectTypeOf<Contract.DecisionOutcome>().toExtend<DecisionOutcome>();
+    expectTypeOf<Contract.DecisionActor>().toExtend<DecisionActor>();
+    expectTypeOf<Contract.DecisionActionEvent>().toExtend<DecisionActionEvent>();
+    expectTypeOf<Contract.DecisionOffer>().toExtend<DecisionOffer>();
+    expectTypeOf<Contract.RecordedDecisionInput>().toExtend<RecordedDecisionInput>();
+    // flow's answers must be answers core takes.
+    expectTypeOf<DecisionActionResult>().toExtend<Contract.DecisionActionResult>();
+    expectTypeOf<DecisionInput>().toExtend<Contract.DecisionInput>();
+    expectTypeOf<RecordedDecisionInput>().toExtend<Contract.RecordedDecisionInput>();
+    expectTypeOf<Contract.InboxApi>().toExtend<InboxApi>();
+    expectTypeOf<Contract.DataProviderContextSeams['inbox']>().toExtend<
+      NonNullable<DataProviderContext['inbox']>
+    >();
+  });
+
+  it('reads per-project settings without any way to write them', () => {
+    expectTypeOf<Contract.ProjectSettingsReader>().toExtend<ProjectSettingsReader>();
+    expectTypeOf<Contract.DataProviderContextSeams['projectSettings']>().toExtend<
+      NonNullable<DataProviderContext['projectSettings']>
+    >();
+    // The server half has no setter (spec §7.7): the dial is written only by a person.
+    expectTypeOf<ProjectSettingsReader>().not.toHaveProperty('set');
+    expectTypeOf<Contract.ProjectSettingsReader>().not.toHaveProperty('set');
+  });
+
+  it('answers from its own pages the way the client API does', () => {
+    expectTypeOf<Contract.DecisionAnswer>().toExtend<DecisionAnswer>();
+    expectTypeOf<DecisionAnswer>().toExtend<Contract.DecisionAnswer>();
+    expectTypeOf<Contract.DecisionAnswerResult>().toExtend<DecisionAnswerResult>();
+    expectTypeOf<Contract.ExtensionDecisionView>().toExtend<ExtensionDecisionView>();
+    expectTypeOf<Contract.ExtensionAPISeams['listDecisions']>().toExtend<
+      NonNullable<FlowExtensionApi['listDecisions']>
+    >();
+    expectTypeOf<Contract.ExtensionAPISeams['answerDecision']>().toExtend<
+      NonNullable<FlowExtensionApi['answerDecision']>
+    >();
+    expectTypeOf<Contract.ExtensionReadableStateSeams['requireLogin']>().toExtend<
+      NonNullable<ReadableState['requireLogin']>
     >();
   });
 });

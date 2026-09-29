@@ -32,6 +32,7 @@ import {
   schedulesWaitingText,
 } from './project-lens.ts';
 import { ProjectSettings } from './project-settings.ts';
+import { ANSWERED_IN_FLOW_NOTE, answeredHere, hasInbox, type AnswerApi } from './answers.ts';
 import { BAND, BAND_ROW, DecisionRow, SR_ONLY, loadingState, pageRoot } from './page-parts.ts';
 import { pausedText } from './panel-format.ts';
 import { FROM_CHAT_HINT, FROM_CHAT_TEXT } from './palette.ts';
@@ -440,13 +441,31 @@ function Tabs(props: {
 }
 
 /**
+ * The note above asks answered on flow's pages (§4.2): shown once, only on a
+ * DorkOS with the inbox (where such answers are credited to Flow), and only
+ * when at least one ask here is answered in place.
+ *
+ * @param decisions - The asks shown.
+ * @param api - The host API.
+ * @returns The note, or `null`.
+ */
+function answeredInFlowNote(decisions: readonly FlowDecision[], api: AnswerApi): Node {
+  if (!hasInbox(api) || !decisions.some((decision) => answeredHere(decision, api))) return null;
+  return h(
+    'p',
+    { key: 'answered-in-flow', style: { ...MUTED, margin: '0 0 4px' } },
+    ANSWERED_IN_FLOW_NOTE
+  );
+}
+
+/**
  * A project's lens as a page: its open decisions first (a phone has no inbox
  * beside it), then the lens full width.
  */
 function LensPage(props: {
   project: FlowProject;
   model: FlowModel;
-  api: Pick<ClientApi, 'navigate'>;
+  api: AnswerApi;
   store: FlowStore;
   schedulesStuck: boolean;
   /** Shown under the lens: the way to Capacity at one project. */
@@ -467,8 +486,16 @@ function LensPage(props: {
           'section',
           { 'aria-label': 'Needs you', style: { marginTop: '8px' } },
           h('h2', { style: BAND }, `Needs you · ${decisions.length}`),
+          answeredInFlowNote(decisions, api),
           ...decisions.map((decision) =>
-            h(DecisionRow, { key: decision.key, decision, showProject: false, api })
+            h(DecisionRow, {
+              key: decision.key,
+              decision,
+              showProject: false,
+              api,
+              root: project.root,
+              store: props.store,
+            })
           )
         )
       : null,
@@ -482,6 +509,8 @@ function LensPage(props: {
         store: props.store,
         schedulesStuck: props.schedulesStuck,
         pages: true,
+        // The page shows the project's asks in its own band above.
+        decisionsOnTop: false,
       })
     ),
     props.footer ?? null
@@ -496,7 +525,7 @@ function LensPage(props: {
  * @returns The home, a project's page, and its settings page.
  */
 export function createPages(
-  api: Pick<ClientApi, 'navigate'>,
+  api: AnswerApi,
   store: FlowStore
 ): {
   home: ComponentType<ExtensionPageProps>;
@@ -611,13 +640,19 @@ export function createPages(
       h(
         'div',
         { role: 'tabpanel', id: HOME_PANEL_ID, 'aria-labelledby': homeTabId('projects') },
-        band(
-          'Needs you',
-          bands.needsYou.length,
-          bands.needsYou.map((decision) =>
-            h(DecisionRow, { key: decision.key, decision, showProject: true, api })
-          )
-        ),
+        band('Needs you', bands.needsYou.length, [
+          answeredInFlowNote(bands.needsYou, api),
+          ...bands.needsYou.map((decision) =>
+            h(DecisionRow, {
+              key: decision.key,
+              decision,
+              showProject: true,
+              api,
+              root: model.projects.find((p) => p.name === decision.project)?.root ?? null,
+              store,
+            })
+          ),
+        ]),
         band(
           "Something's off",
           bands.off.length,
@@ -753,7 +788,7 @@ function ResumeButton(props: { project: string; store: FlowStore }): Node {
  * @returns A function that removes them.
  */
 export function registerPages(
-  api: Pick<ClientApi, 'navigate' | 'registerPage'>,
+  api: AnswerApi & Pick<ClientApi, 'registerPage'>,
   store: FlowStore
 ): () => void {
   const registerPage = api.registerPage;

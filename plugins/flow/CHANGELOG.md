@@ -4,6 +4,21 @@ Installs of this plugin are pinned to a commit SHA, so a fix here does not reach
 you until you **reinstall it** (Marketplace → flow → reinstall, or re-run your
 `--plugin-dir` checkout's `git pull`). Each entry below says whether that matters.
 
+## 0.51.0
+
+**Flow now asks in the Activity inbox, but only when only you can help, and each project can do more on its own. Reinstall to get it.**
+
+- Every ask says what will happen and why, in plain words: "Ship the new out-of-usage banner?" with 👍 Ship it and 👎 Send it back (which asks what should change), an agent's question with its own pick marked, "Sign in to Linear again", and "12 new ideas haven't been sorted". No ask shows a command or an item number as its headline.
+- Shipping from the inbox approves exactly the version you saw. If more work was pushed since, flow says so and ships nothing.
+- A slow or unreachable tracker never reaches your inbox. Flow keeps trying and shows a quiet line on the project's page. Only a sign-in that is really gone asks you, because only you can sign in.
+- Each project's setting for how much flow does on its own decides who answers: you, the reviewer agent, or the agent's own pick at a deadline. A new project starts at "Tell me after". A project flow already knew keeps asking you until you choose, and its page says you can. You can't change this setting from flow yet; that comes next.
+- After you answer, flow offers once to do that kind of thing on its own next time. Saying yes changes only that kind, for that project.
+- Things flow settled without asking leave a short "While you were away" note in Activity: work the reviewer agent shipped, failing checks flow went back to fix, and new ideas it started sorting.
+- Buttons that need an agent ("Sign in", "Sort them", "Connect a tracker", "Set up flow here") start the work in a new chat with a plain title, and the row then offers "Watch". On a DorkOS that can't start a chat yet, the button says what to type instead.
+- Where "Sort new ideas" is set to happen on its own, flow sorts each project's new ideas once each morning from 9:00, one project at a time, leaving room for your own clicks.
+- A project that reads its tracker with an adapter of its own now asks once before flow runs that code, and asks again if the file changes.
+- On a DorkOS without the inbox, flow's pages answer each ask in place instead.
+
 ## 0.50.0
 
 **Flow now has a page of its own, a dot on its tab when something needs you, and a chip in each chat's status bar. Reinstall to get it.**

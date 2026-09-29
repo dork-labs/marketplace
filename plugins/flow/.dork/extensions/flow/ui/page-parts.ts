@@ -11,7 +11,7 @@
  */
 
 import type { FlowDecision } from '../lib/model.ts';
-import type { ClientApi } from '../lib/host-types.ts';
+import { DecisionAnswers, answeredHere, type AnswerApi } from './answers.ts';
 import { ACTIVITY_ROUTE, projectPath } from './links.ts';
 import { FOCUS_CSS, LINK, MUTED } from './parts.ts';
 import { h, type Node, type Style } from './react.ts';
@@ -126,9 +126,9 @@ export function loadingState(snapshot: StoreSnapshot, store: FlowStore): Node | 
 }
 
 /**
- * Where a decision is answered from flow's pages. flow's pages cannot yet
- * answer in place, so every ask opens Activity, where DorkOS's inbox answers
- * it as you. A review gate and an agent's question say "Review".
+ * The words of the link that sends an ask to Activity: a review gate and a
+ * floor question are answered there, so DorkOS credits the answer to you
+ * (§4.2, A21).
  *
  * @param decision - The decision.
  * @returns The link's words.
@@ -140,16 +140,19 @@ export function decisionLinkText(decision: FlowDecision): string {
 }
 
 /**
- * One decision's row: its project (on Flow home), the ask and why, and where
- * to answer it.
+ * One decision's row: its project (on Flow home), the ask and why, and its
+ * buttons, or, for an ask that must be credited to you, the way to Activity.
  *
- * @param props - The decision, whether to show its project, and the host API.
+ * @param props - The decision, whether to show its project, its project's
+ *   folder, the host API and the store.
  * @returns The row.
  */
 export function DecisionRow(props: {
   decision: FlowDecision;
   showProject: boolean;
-  api: Pick<ClientApi, 'navigate'>;
+  api: AnswerApi;
+  root?: string | null;
+  store?: FlowStore;
 }): Node {
   const { decision, api } = props;
   return h(
@@ -179,14 +182,16 @@ export function DecisionRow(props: {
       h('div', { style: { fontWeight: 600 } }, decision.title),
       h('p', { style: MUTED }, decision.why)
     ),
-    h(
-      'button',
-      {
-        type: 'button',
-        style: { ...LINK, flex: 'none' },
-        onClick: () => api.navigate(ACTIVITY_ROUTE),
-      },
-      decisionLinkText(decision)
-    )
+    answeredHere(decision, api)
+      ? h(DecisionAnswers, { decision, root: props.root ?? null, api, store: props.store })
+      : h(
+          'button',
+          {
+            type: 'button',
+            style: { ...LINK, flex: 'none' },
+            onClick: () => api.navigate(ACTIVITY_ROUTE),
+          },
+          decisionLinkText(decision)
+        )
   );
 }
