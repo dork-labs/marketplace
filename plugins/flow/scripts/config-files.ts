@@ -83,9 +83,23 @@ import { hasZone, invokedDirectly, isPlainObject } from './_shared.ts';
 import { addExcludeLines } from './git-exclude.ts';
 import { validateConfig, type ValidationIssue } from './validate-config.ts';
 
-import { CONFIG_FILE, LOCAL_CONFIG_FILE, PAUSE_FILE, PROJECT_CONFIG_DIR } from './config-names.ts';
+import {
+  CONFIG_FILE,
+  JOURNAL_FILE,
+  LOCAL_CONFIG_FILE,
+  PAUSE_FILE,
+  PROJECT_CONFIG_DIR,
+  RUN_FILES_DIR,
+} from './config-names.ts';
 
-export { CONFIG_FILE, LOCAL_CONFIG_FILE, PAUSE_FILE, PROJECT_CONFIG_DIR };
+export {
+  CONFIG_FILE,
+  JOURNAL_FILE,
+  LOCAL_CONFIG_FILE,
+  PAUSE_FILE,
+  PROJECT_CONFIG_DIR,
+  RUN_FILES_DIR,
+};
 /**
  * The file a migration leaves in the old plugin `config/` folder, holding the
  * path of the project the settings moved to. A folder carrying it is never read
@@ -122,14 +136,6 @@ export const ADAPTER_FILE = 'SKILL.md';
 export const SHIPPED_ADAPTERS: readonly string[] = ['linear'];
 /** The tracker a config names when it names none (the schema default). */
 export const DEFAULT_TRACKER = 'linear';
-/**
- * The folder, relative to the project's main checkout, holding flow's local run
- * files: the journal, the self-test results. Kept out of git through
- * `info/exclude`.
- */
-export const RUN_FILES_DIR = '.dork/flow';
-/** The journal file in {@link RUN_FILES_DIR} (spec `flow-self-improvement` §2). */
-export const JOURNAL_FILE = 'journal.jsonl';
 /**
  * The journal settings a config that says nothing resolves to. They mirror
  * `JournalConfigSchema` in `config-schema.ts`, which this zod-free module cannot

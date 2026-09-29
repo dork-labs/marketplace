@@ -12,6 +12,8 @@
  * - `POST /pause` and `POST /resume` pause or resume one project or all of
  *   them, with an end time, and answer the new model. `POST /schedules/restored`
  *   forgets DorkOS schedules the Flow tab switched back on after a pause.
+ * - `GET /capacity` answers "Capacity this week" on Flow home: each account's
+ *   weekly use and each project's work from its journal. Read on demand, never pushed.
  * - Every route that changes something runs behind DorkOS's person guard
  *   (`ctx.requirePerson`): an agent calling flow's routes cannot pause a
  *   project or change an account's policy. On a DorkOS without the guard the
@@ -31,6 +33,7 @@ import { execFile, execFileSync } from 'node:child_process';
 import path from 'node:path';
 import { updateFleetPolicy } from '../../../scripts/fleet/accounts.ts';
 import { createAdvisor, type ExecFileLike, type FlowAdvisor } from './lib/advisor.ts';
+import { buildCapacity, parseSince } from './lib/capacity.ts';
 import { ContinuedWatcher } from './lib/continued-watcher.ts';
 import { ModelService } from './lib/model-service.ts';
 import { SharedStorage } from './lib/shared-storage.ts';
@@ -200,6 +203,7 @@ export function createFlowExtension(
     router.post('/pause', tooOld);
     router.post('/resume', tooOld);
     router.post('/schedules/restored', tooOld);
+    router.get('/capacity', tooOld);
     return { advisor: null, watcher: null, model: null, dispose: () => {} };
   }
 
@@ -278,6 +282,24 @@ export function createFlowExtension(
       const cwd = typeof req.query?.cwd === 'string' ? req.query.cwd : undefined;
       model.noteCwd(cwd);
       res.status(200).json(await model.model(cwd));
+    })
+  );
+  router.get(
+    '/capacity',
+    handle(async (req, res) => {
+      const at = now();
+      const usage =
+        typeof accounts.usage === 'function' ? await accounts.usage().catch(() => []) : [];
+      res.status(200).json(
+        await buildCapacity({
+          dorkHome,
+          summaries: await accounts.list(),
+          usage,
+          projects: await model.projects(),
+          since: parseSince(req.query?.since, at),
+          now: at,
+        })
+      );
     })
   );
   if (guard !== undefined) {

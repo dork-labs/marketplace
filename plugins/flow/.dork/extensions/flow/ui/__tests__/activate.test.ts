@@ -11,7 +11,9 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import { activate } from '../../index.ts';
 import { FleetTab } from '../fleet-tab.ts';
 import { FlowIcon } from '../flow-icon.ts';
+import { PANEL_TAB_ID } from '../marker.ts';
 import { COMMANDS, NOT_IN_PROJECT_TEXT } from '../palette.ts';
+import { CHIP_LABEL, chipUrgent, chipWhen } from '../run-chip.ts';
 import { flowModel, flowProject, routeFetch } from './helpers.ts';
 
 afterEach(() => {
@@ -203,5 +205,78 @@ describe('activate', () => {
       answer(null);
     });
     cleanup();
+  });
+
+  it('adds Flow home, the project pages, the run chip and the tab dot on a DorkOS that has them', async () => {
+    const decision = {
+      key: 'k',
+      project: 'dorkos',
+      kind: 'review',
+      title: 'Ship it?',
+      detail: null,
+      identifier: 'DOR-1',
+      raisedAt: '2026-09-28T09:00:00.000Z',
+      actions: 'ship',
+      why: 'It is built.',
+      defaultChoice: null,
+      decideBy: null,
+    };
+    routeFetch(() => ({
+      status: 200,
+      body: flowModel([flowProject('dorkos')], { decisions: [decision as never] }),
+    }));
+    const { api, removed } = fullHost();
+    const full = {
+      ...api,
+      registerPage: vi.fn((path: string) => () => removed.push(`page:${path}`)),
+      registerStatusBarItem: vi.fn(() => () => removed.push('chip')),
+      setTabMarker: vi.fn(),
+    };
+    const cleanup = activate(full);
+    expect(full.registerPage.mock.calls.map((call) => call[0])).toEqual([
+      '',
+      'p/:name',
+      'p/:name/settings',
+    ]);
+    expect(full.registerStatusBarItem).toHaveBeenCalledWith('run', expect.any(Function), {
+      label: CHIP_LABEL,
+      priority: 50,
+      when: chipWhen,
+      urgent: chipUrgent,
+    });
+    await act(async () => {});
+    expect(full.setTabMarker).toHaveBeenCalledWith(PANEL_TAB_ID, 'attention');
+    cleanup();
+    expect(removed).toEqual(
+      expect.arrayContaining(['chip', 'page:', 'page:p/:name', 'page:p/:name/settings'])
+    );
+  });
+
+  it('skips each newer surface cleanly on a DorkOS without its seam', async () => {
+    routeFetch(() => ({ status: 200, body: flowModel([flowProject('dorkos')]) }));
+    const { api } = fullHost();
+    for (const missing of ['registerPage', 'registerStatusBarItem', 'setTabMarker'] as const) {
+      const host = {
+        ...api,
+        registerPage: vi.fn(() => () => {}),
+        registerStatusBarItem: vi.fn(() => () => {}),
+        setTabMarker: vi.fn(),
+        [missing]: undefined,
+      };
+      const cleanup = activate(host);
+      await act(async () => {});
+      // The Flow tab and everything the host does have are still there.
+      expect(api.registerComponent).toHaveBeenLastCalledWith(
+        'right-panel',
+        'panel',
+        expect.any(Function),
+        expect.anything()
+      );
+      if (missing !== 'registerPage') expect(host.registerPage).toHaveBeenCalledTimes(3);
+      if (missing !== 'registerStatusBarItem') {
+        expect(host.registerStatusBarItem).toHaveBeenCalledTimes(1);
+      }
+      expect(() => cleanup()).not.toThrow();
+    }
   });
 });

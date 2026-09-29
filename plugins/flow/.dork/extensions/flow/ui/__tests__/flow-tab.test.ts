@@ -12,7 +12,7 @@ import { act, fireEvent, render, screen } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { FlowModel } from '../../lib/model.ts';
 import type { ProjectRef, ReadableState } from '../../lib/host-types.ts';
-import { NO_PROJECTS_TEXT, SET_UP_HERE_TEXT } from '../all-projects.ts';
+import { NO_PROJECTS_TEXT, OPEN_HOME_TEXT, SET_UP_HERE_TEXT } from '../all-projects.ts';
 import { PERSON_ONLY_MESSAGE } from '../api.ts';
 import { LOAD_FAILED_TEXT, createFlowTab } from '../flow-tab.ts';
 import {
@@ -388,5 +388,97 @@ describe('the pause menu in the lens', () => {
       fireEvent.click(pause);
     });
     expect(screen.queryByRole('menu')).toBeNull();
+  });
+});
+
+describe('with flow’s pages', () => {
+  /** A host with pages, whose chat is in `project`. */
+  function pagesHost(project: ProjectRef | null) {
+    return { ...host(project), registerPage: vi.fn(() => () => {}) };
+  }
+
+  it('opens each all-projects line on its project’s page, and Flow home from the bottom', async () => {
+    const api = pagesHost(null);
+    await renderTab(
+      flowModel([
+        flowProject('blintz', {
+          pause: { since: null, until: null },
+          conditions: [
+            { kind: 'paused', since: '2026-09-28T08:00:00.000Z', escalated: false, detail: {} },
+          ],
+        }),
+        flowProject('dorkos'),
+      ]),
+      api
+    );
+    fireEvent.click(screen.getByRole('button', { name: /blintz/ }));
+    expect(api.navigate).toHaveBeenLastCalledWith('/x/flow/p/blintz');
+    fireEvent.click(screen.getByRole('button', { name: OPEN_HOME_TEXT }));
+    expect(api.navigate).toHaveBeenLastCalledWith('/x/flow');
+  });
+
+  it('opens the project’s settings page from ⚙, and Flow home from “need you elsewhere”', async () => {
+    const api = pagesHost(DORKOS);
+    await renderTab(
+      flowModel([flowProject('dorkos'), flowProject('blintz')], {
+        decisions: [
+          {
+            key: 'k',
+            project: 'blintz',
+            kind: 'review',
+            title: 'Ship it?',
+            detail: null,
+            identifier: 'B-1',
+            raisedAt: '2026-09-28T09:00:00.000Z',
+            actions: 'ship',
+            why: 'It is built.',
+            defaultChoice: null,
+            decideBy: null,
+          },
+        ],
+      }),
+      api
+    );
+    fireEvent.click(screen.getByRole('button', { name: 'Flow settings for dorkos' }));
+    expect(api.navigate).toHaveBeenLastCalledWith('/x/flow/p/dorkos/settings');
+    fireEvent.click(screen.getByRole('button', { name: '1 needs you elsewhere →' }));
+    expect(api.navigate).toHaveBeenLastCalledWith('/x/flow');
+  });
+
+  it('without pages, keeps lines plain, sends ⚙ to Settings → Flow, and has no Flow home link', async () => {
+    const api = host(null);
+    await renderTab(
+      flowModel([
+        flowProject('blintz', {
+          pause: { since: null, until: null },
+          conditions: [
+            { kind: 'paused', since: '2026-09-28T08:00:00.000Z', escalated: false, detail: {} },
+          ],
+        }),
+      ]),
+      api
+    );
+    expect(screen.getByText('blintz')).toBeTruthy();
+    expect(screen.queryByRole('button', { name: /blintz/ })).toBeNull();
+    expect(screen.queryByRole('button', { name: OPEN_HOME_TEXT })).toBeNull();
+    document.body.innerHTML = '';
+    const inProject = host(DORKOS);
+    await renderTab(flowModel([flowProject('dorkos')]), inProject);
+    fireEvent.click(screen.getByRole('button', { name: 'Flow settings for dorkos' }));
+    expect(inProject.navigate).toHaveBeenLastCalledWith('?settings=flow:fleet');
+  });
+});
+
+describe('tracker links', () => {
+  it('links only to a web address', async () => {
+    await renderTab(
+      flowModel([
+        flowProject('dorkos', {
+          tracker: { label: 'Linear', team: 'DOR', url: 'javascript:alert(1)' },
+        }),
+      ]),
+      host(DORKOS)
+    );
+    expect(screen.queryByRole('link')).toBeNull();
   });
 });

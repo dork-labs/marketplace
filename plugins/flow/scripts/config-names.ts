@@ -18,3 +18,11 @@ export const LOCAL_CONFIG_FILE = 'config.local.json';
  * it, is never committed.
  */
 export const PAUSE_FILE = 'paused.json';
+/**
+ * The folder, relative to the project's main checkout, holding flow's local run
+ * files: the journal, the self-test results. Kept out of git through
+ * `info/exclude`.
+ */
+export const RUN_FILES_DIR = '.dork/flow';
+/** The journal file in {@link RUN_FILES_DIR} (spec `flow-self-improvement` §2). */
+export const JOURNAL_FILE = 'journal.jsonl';

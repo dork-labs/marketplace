@@ -196,6 +196,7 @@ describe('GET /model', () => {
       ['post', '/pause'],
       ['post', '/resume'],
       ['post', '/schedules/restored'],
+      ['get', '/capacity'],
     ] as const) {
       expect(await router.call(method, route)).toEqual({
         status: 501,
@@ -228,6 +229,7 @@ describe('the person guard', () => {
     // Reading is open to anyone.
     expect(router.chain('get', '/model')).toHaveLength(1);
     expect(router.chain('get', '/fleet')).toHaveLength(1);
+    expect(router.chain('get', '/capacity')).toHaveLength(1);
   });
 
   it('registers no pause route on a host that cannot tell a person from an agent', async () => {

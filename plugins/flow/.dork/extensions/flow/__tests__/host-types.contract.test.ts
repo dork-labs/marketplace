@@ -19,12 +19,17 @@ import { describe, expect, expectTypeOf, it } from 'vitest';
 import type * as Contract from '../lib/__contract__/seams.contract.ts';
 import type {
   DataProviderContext,
+  ExtensionPageOptions,
+  ExtensionPageProps,
   LimitedSessionInfo,
   ProjectInfo,
   ProjectRef,
   ProjectsApi,
   ReadableState,
   SessionInfo,
+  StatusBarItemOptions,
+  StatusBarSlotContext,
+  TrackerItemRef,
 } from '../lib/host-types.ts';
 import type { FlowExtensionApi } from '../index.ts';
 
@@ -75,5 +80,22 @@ describe('lib/host-types.ts against the contract', () => {
       ReadableState['currentProject']
     >();
     expectTypeOf<Contract.ExtensionAPISeams['navigate']>().toExtend<FlowExtensionApi['navigate']>();
+  });
+
+  it('registers pages, the status-bar item and the tab marker as core takes them', () => {
+    expectTypeOf<Contract.ExtensionPageProps>().toExtend<ExtensionPageProps>();
+    expectTypeOf<Contract.ExtensionPageOptions>().toExtend<ExtensionPageOptions>();
+    expectTypeOf<Contract.TrackerItemRef>().toExtend<TrackerItemRef>();
+    expectTypeOf<Contract.StatusBarSlotContext>().toExtend<StatusBarSlotContext>();
+    expectTypeOf<Contract.StatusBarItemOptions>().toExtend<StatusBarItemOptions>();
+    expectTypeOf<Contract.ExtensionAPISeams['registerPage']>().toExtend<
+      NonNullable<FlowExtensionApi['registerPage']>
+    >();
+    expectTypeOf<Contract.ExtensionAPISeams['registerStatusBarItem']>().toExtend<
+      NonNullable<FlowExtensionApi['registerStatusBarItem']>
+    >();
+    expectTypeOf<Contract.ExtensionAPISeams['setTabMarker']>().toExtend<
+      NonNullable<FlowExtensionApi['setTabMarker']>
+    >();
   });
 });
