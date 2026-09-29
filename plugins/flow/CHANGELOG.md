@@ -9,13 +9,13 @@ you until you **reinstall it** (Marketplace → flow → reinstall, or re-run yo
 **Flow's parts in the DorkOS app now load and stay out of the way, and the guides cover them. Reinstall to get it.**
 
 - On DorkOS, flow's server side failed to start since 0.49.0, so the Flow tab, Flow home, pausing and the inbox asks had nothing behind them. It starts now.
-- "Flow: Pause this project" and "Flow: Pause all projects" in the command palette drew their menus across the bottom of every page, even when closed, which pushed the rest of the app out of place. They now open only when you run the command, as a proper dialog that Escape or a click outside closes.
+- "Flow: Pause this project" and "Flow: Pause all projects" in the command palette drew their menus across the bottom of every page, even when closed, which pushed the rest of the app out of place. They now open only when you run the command, one at a time, as a proper dialog: it takes the keyboard focus, keeps Tab inside, closes on Escape or a click outside, and gives the focus back.
 - Work waiting at the review gate outside a drain showed as "Building". It now shows "In review".
 - A check of all of this on a separate DorkOS, with four projects, is written up in the flow-multiproject spec's live-check folder, with what could not be checked there.
 - The README has a new "In the DorkOS app" section: the Flow tab, Flow home, the run chip, the Activity inbox, pausing for a set time, and settings split by who a change reaches.
-- "Turning on the automatic loop" explains the "How much it does on its own" setting in plain words, what "While you were away" shows, and that a pause with an end time ends on its own, even with DorkOS closed.
+- "Turning on the automatic loop" and "The dials" explain the "How much it does on its own" setting in plain words, including that a new project starts at Tell me after while a project flow already worked in stays at Ask me first, what "While you were away" shows, and that a pause with an end time ends on its own, even with DorkOS closed.
 - "The dials" says which settings are shared with the repo, which stay on this computer, and which live in DorkOS, with the real file names.
-- "Use all your accounts" explains "Accounts this project may use" and how an old "Only for these repos" list moves into DorkOS.
+- "Use all your accounts" explains "Accounts this project may use", what **Move it** and **Switch to DorkOS's rule** each change for an old "Only for these repos" list, and how to undo them. While flow waits for every project to update, Settings → Flow now says a button will appear.
 - A few pages still said you always merge approved work yourself. They now say when flow arms it for you, and "Driving it manually" shows how to answer the review gate with `flow review`.
 
 ## 0.52.0

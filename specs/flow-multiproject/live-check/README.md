@@ -25,7 +25,7 @@ repeating it on the real setup.
   lens's **Allow** button.
 - **A fake forge.** A small `gh` stand-in first on the server's `PATH` kept pull requests in a
   JSON file and logged every call. Checks always pass, and `gh pr merge --auto
-  --match-head-commit <sha>` merges the branch into the repo's `main` at once, as GitHub's
+--match-head-commit <sha>` merges the branch into the repo's `main` at once, as GitHub's
   auto-merge would.
 - **Runs were seeded, not worked.** Each project got one run record in `.dork/flow/flow-state.json`
   (`beta`'s at the review gate with a clean review at its head and PR #7 open), so no agent ran.
@@ -35,12 +35,12 @@ repeating it on the real setup.
 
 ## Results
 
-| # | Check | Result |
-| - | ----- | ------ |
-| 1 | The lens follows the chat across all four projects | **Pass**, after two fixes (below) |
-| 2 | A timed pause ends on time with DorkOS quit | **Pass** |
-| 3 | A review gate approved from the inbox arms and merges | **Pass** (fake forge) |
-| 4 | The account move moves "Only for these repos", and another project refuses the account | **Pass** for the move and both rules; a chat launch could not be tried |
+| #   | Check                                                                                  | Result                                                                 |
+| --- | -------------------------------------------------------------------------------------- | ---------------------------------------------------------------------- |
+| 1   | The lens follows the chat across all four projects                                     | **Pass**, after two fixes (below)                                      |
+| 2   | A timed pause ends on time with DorkOS quit                                            | **Pass**                                                               |
+| 3   | A review gate approved from the inbox arms and merges                                  | **Pass** (fake forge)                                                  |
+| 4   | The account move moves "Only for these repos", and another project refuses the account | **Pass** for the move and both rules; a chat launch could not be tried |
 
 ### 1. The lens follows the chat
 
@@ -123,9 +123,15 @@ Settings, split by who a change reaches: ![settings](5-settings-by-who.png)
 
 ## For DorkOS core (not changed here)
 
-- **`registerDialog(...).open()` opens nothing.** In `extension-api-factory.ts` it only sets a
-  local variable; `DialogHost` reads the app store, so an extension's dialog never gets
-  `open: true`. flow now keeps its own open state, so it does not depend on this.
+- **`registerDialog(...).open()` opens nothing** (filed as DOR-2576). In
+  `extension-api-factory.ts` it only sets a local variable; `DialogHost` reads the app store, so
+  an extension's dialog never gets `open: true`. flow now keeps its own open state, so it does not
+  depend on this.
+- **An extension dialog's `onOpenChange` throws.** `DialogHost` hands every dialog a setter built
+  from its `openStateKey` (`setExt-dialog:<id>`), a key the app store does not have, so calling
+  `onOpenChange(false)` is a `TypeError` that core's client error reporter records. flow now calls
+  it only for a dialog core itself opened, and never lets it break closing. Worth fixing with
+  DOR-2576.
 - **"Review in Activity →" lands where the ask is not.** The Activity page lists history; the open
   ask lives only in the "waiting on you" popover. On the same screen the Pulse tab said "All
   quiet. Nothing needs you." while the bell said 1 was waiting.
@@ -163,5 +169,13 @@ Settings, split by who a change reaches: ![settings](5-settings-by-who.png)
 5. When a real item reaches the review gate, press **Ship it** in the waiting-on-you popover: the
    PR is approved (unless you wrote it) and merges once checks pass; the item gets "Shipped from
    DorkOS.". Note whether the "Next time, ship on its own…" line appears.
-6. If an account had "Only for these repos", press **Move it** in Settings → Flow, then start a
-   chat on that account in a project outside the list: DorkOS should refuse it.
+6. If an account has "Only for these repos", read this before pressing anything. **Move it** gives
+   the account project limits in DorkOS (Settings → Runtimes shows "Only for …"): DorkOS will then
+   refuse that account for every chat, schedule and handoff outside those projects, not just
+   flow's. If every project already runs flow 0.52 or newer, the same press also turns flow's role
+   for the account from Kept out to Rotation and drops flow's repo list; otherwise that waits for
+   a second button, **Switch to DorkOS's rule**, which appears once every project is updated. To
+   undo it, clear the account's limits in Settings → Runtimes and run
+   `flow accounts set <id> --role kept-out --repos owner/name,...`. When you're ready, press
+   **Move it**, then start a chat on that account in a project outside the list: DorkOS should
+   refuse it.
