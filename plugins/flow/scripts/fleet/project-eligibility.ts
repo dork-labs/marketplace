@@ -111,6 +111,8 @@ export function readProjectEligibilityRules(
     const seen = new Set<string>();
     for (const row of section.accounts) {
       if (!isObject(row) || typeof row.id !== 'string' || row.id === '') continue;
+      // Main is judged only by defaultAccountOnlyProjects, as DorkOS judges it.
+      if (row.id === MAIN_ACCOUNT_ID) continue;
       // The first row with an id is the one DorkOS reads.
       if (seen.has(row.id)) continue;
       seen.add(row.id);

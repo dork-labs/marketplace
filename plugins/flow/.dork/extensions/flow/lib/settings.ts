@@ -17,16 +17,27 @@
  * from. A write changes only the keys it names and leaves every other key as
  * it was, then checks the two files with this extension's own flow
  * (`config-files.ts check`, which runs nothing from the project). If the check
- * finds a problem the write caused, both files are put back as they were.
+ * finds a problem the write caused, the files are put back as they were,
+ * bytes and mode, still under the locks the write took. A write keeps each
+ * file's own indentation, ending and mode, so a committed file changes only
+ * in the lines the setting touched.
  *
  * Bundled by DorkOS, so zod-free: flow's own validator runs as a subprocess.
  *
  * @module @dorkos/flow/extension/settings
  */
 
-import { existsSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import {
+  chmodSync,
+  existsSync,
+  readFileSync,
+  renameSync,
+  rmSync,
+  statSync,
+  writeFileSync,
+} from 'node:fs';
 import path from 'node:path';
-import { readJsonFile, updateJsonFile } from '../../../../scripts/atomic-json.ts';
+import { acquireLock, readJsonFile, releaseLock } from '../../../../scripts/atomic-json.ts';
 import {
   CONFIG_FILE,
   LOCAL_CONFIG_FILE,
@@ -368,15 +379,47 @@ async function problems(deps: SettingsWriteDeps, root: string): Promise<Issue[] 
   );
 }
 
-/** A file's bytes, to put back after a failed check; `null` when it does not exist. */
-function snapshot(file: string): Buffer | null {
-  return existsSync(file) ? readFileSync(file) : null;
+/** A file as it was: its bytes and mode, or `null` when it did not exist. */
+interface Snapshot {
+  bytes: Buffer;
+  mode: number;
+}
+
+/** A file's bytes and mode, to put back after a failed check; `null` when it does not exist. */
+function snapshot(file: string): Snapshot | null {
+  if (!existsSync(file)) return null;
+  return { bytes: readFileSync(file), mode: statSync(file).mode & 0o777 };
+}
+
+/** Write `contents` whole, through a file beside it and a rename, with `mode`. */
+function writeWhole(file: string, contents: Buffer | string, mode: number): void {
+  const temp = `${file}.${process.pid}.${Date.now()}.tmp`;
+  writeFileSync(temp, contents, { mode });
+  chmodSync(temp, mode);
+  renameSync(temp, file);
 }
 
 /** Put a file back the way {@link snapshot} found it. */
-function restore(file: string, bytes: Buffer | null): void {
-  if (bytes === null) rmSync(file, { force: true });
-  else writeFileSync(file, bytes);
+function restore(file: string, before: Snapshot | null): void {
+  if (before === null) rmSync(file, { force: true });
+  else writeWhole(file, before.bytes, before.mode);
+}
+
+/**
+ * Write settings in the file's own style: its indentation, whether it ended
+ * with a newline, and its mode. A committed file then changes only in the
+ * lines the setting touched.
+ */
+function writeKeepingStyle(
+  file: string,
+  value: Record<string, unknown>,
+  before: Snapshot | null,
+  newMode: number
+): void {
+  const text = before?.bytes.toString('utf8') ?? null;
+  const indent = (text === null ? null : /\n([ \t]+)"/.exec(text)?.[1]) ?? '  ';
+  const ending = text === null || text.endsWith('\n') ? '\n' : '';
+  writeWhole(file, `${JSON.stringify(value, null, indent)}${ending}`, before?.mode ?? newMode);
 }
 
 let queue: Promise<unknown> = Promise.resolve();
@@ -430,50 +473,71 @@ async function write(
         );
       }
     }
-    const saved = { shared: snapshot(files.shared), local: snapshot(files.local) };
-    const putBack = () => {
-      restore(files.shared, saved.shared);
-      restore(files.local, saved.local);
-    };
+    // Every file this write touches stays locked through the write, the check
+    // and any putting back, so no other writer (the flow CLI takes the same
+    // lock) lands in between.
+    const held: { lock: string; token: string }[] = [];
     try {
       for (const box of boxes) {
-        const result = await updateJsonFile(
-          files[box],
-          (current) => {
-            let next: unknown = current;
-            for (const [key, value] of Object.entries(patch[box])) {
-              next = withValue(next, SETTING_KEYS[key as SettingKey].path, value);
-            }
-            return next;
-          },
-          { onUnparsable: 'throw' }
-        );
-        if (result.status === 'dropped') {
+        const lock = `${files[box]}.lock`;
+        const taken = await acquireLock(lock);
+        if (taken === null) {
           throw new RouteError(
             502,
             `${entry.name}'s settings were busy. Nothing was changed; try again.`
           );
         }
+        held.push({ lock, token: taken.token });
       }
-    } catch (error) {
-      putBack();
-      if (error instanceof RouteError) throw error;
-      throw new RouteError(
-        400,
-        `Flow couldn't save ${entry.name}'s settings: ${String(error instanceof Error ? error.message : error)}`
-      );
-    }
-    const after = await problems(deps, entry.root);
-    const known = new Set(before.map((issue) => `${issue.path}\n${issue.message}`));
-    const fresh = after?.filter((issue) => !known.has(`${issue.path}\n${issue.message}`));
-    if (after === null || (fresh !== undefined && fresh.length > 0)) {
-      putBack();
-      throw new RouteError(
-        after === null ? 502 : 400,
-        after === null
-          ? `Flow couldn't check ${entry.name}'s settings, so it put them back.`
-          : `Flow didn't save that: ${fresh![0].message}`
-      );
+      const saved = new Map(boxes.map((box) => [box, snapshot(files[box])]));
+      const putBack = () => {
+        for (const [box, before] of saved) restore(files[box], before);
+      };
+      try {
+        for (const box of boxes) {
+          const before = saved.get(box) ?? null;
+          let current: unknown = {};
+          if (before !== null) {
+            try {
+              current = JSON.parse(before.bytes.toString('utf8'));
+            } catch {
+              current = undefined;
+            }
+          }
+          if (!isObject(current)) {
+            throw new RouteError(
+              400,
+              `${path.basename(files[box])} in ${entry.name} isn't settings flow can change. Nothing was changed.`
+            );
+          }
+          let next: Record<string, unknown> = current;
+          for (const [key, value] of Object.entries(patch[box])) {
+            next = withValue(next, SETTING_KEYS[key as SettingKey].path, value);
+          }
+          writeKeepingStyle(files[box], next, before, box === 'shared' ? 0o644 : 0o600);
+        }
+      } catch (error) {
+        putBack();
+        if (error instanceof RouteError) throw error;
+        throw new RouteError(
+          400,
+          `Flow couldn't save ${entry.name}'s settings: ${String(error instanceof Error ? error.message : error)}`
+        );
+      }
+      const after = await problems(deps, entry.root);
+      const known = new Set(before.map((issue) => `${issue.path}\n${issue.message}`));
+      const fresh = after?.filter((issue) => !known.has(`${issue.path}\n${issue.message}`));
+      if (after === null || (fresh !== undefined && fresh.length > 0)) {
+        putBack();
+        throw new RouteError(
+          after === null ? 502 : 400,
+          after === null
+            ? `Flow couldn't check ${entry.name}'s settings, so it put them back.`
+            : `Flow didn't save that: ${fresh![0].message}`
+        );
+      }
+    } finally {
+      for (const { lock, token } of held.reverse()) releaseLock(lock, token);
     }
   }
   if (patch.pauseDefault !== undefined) {

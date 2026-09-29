@@ -23,6 +23,7 @@ import { createPages } from '../home-page.ts';
 import {
   ProjectFlowSettings,
   READ_ONLY_TEXT,
+  SAVED_LOCAL_WINS_TEXT,
   SHARED_NOTE,
   SHARED_SAVED_TEXT,
 } from '../project-settings.ts';
@@ -393,6 +394,58 @@ describe('the shared and just-me writes', () => {
     expect(screen.getByRole('alert').textContent).toBe('Flow didn’t save that: bad value');
   });
 
+  it('puts a refused change back to the latest saved value, not an older one', async () => {
+    const answers: ((reply: { status: number; body: unknown }) => void)[] = [];
+    routeFetch((method, url) => {
+      if (url.includes('/ext/flow/settings/') && method === 'PUT') {
+        return new Promise((resolve) => answers.push(resolve));
+      }
+      if (url.includes('/ext/flow/settings/')) return { status: 200, body: settingsView() };
+      if (url.includes('/runtimes/claude-code/account-eligibility')) return { status: 404, body: {} };
+      return { status: 200, body: flowModel([newProject()]) };
+    });
+    await renderSettings(newProject());
+    const review = screen.getByRole('switch', { name: 'Review before a PR opens' });
+    fireEvent.click(review);
+    fireEvent.click(screen.getByRole('switch', { name: 'Merge when I approve' }));
+    await act(async () => {
+      answers[0]({
+        status: 200,
+        body: settingsView({
+          shared: {
+            ...settingsView().shared,
+            reviewerAgent: { value: false, source: 'shared', locked: null },
+          },
+        }),
+      });
+    });
+    await act(async () => {
+      answers[1]({ status: 400, body: { error: 'No.', refusedBy: 'flow' } });
+    });
+    expect(review.getAttribute('aria-checked')).toBe('false');
+    expect(
+      screen.getByRole('switch', { name: 'Merge when I approve' }).getAttribute('aria-checked')
+    ).toBe('true');
+  });
+
+  it('says so when this computer’s own setting still wins over a shared change', async () => {
+    serve({
+      put: () => ({
+        status: 200,
+        body: settingsView({
+          shared: {
+            ...settingsView().shared,
+            reviewerAgent: { value: true, source: 'local', locked: null },
+          },
+        }),
+      }),
+    });
+    await renderSettings(newProject());
+    fireEvent.click(screen.getByRole('switch', { name: 'Review before a PR opens' }));
+    await act(async () => {});
+    expect(screen.getByText(SAVED_LOCAL_WINS_TEXT)).toBeTruthy();
+  });
+
   it('says DorkOS’s person bar refused, in plain words', async () => {
     serve({ put: () => ({ status: 403, body: { error: 'Forbidden' } }) });
     await renderSettings(newProject());
@@ -550,6 +603,29 @@ describe('the dial', () => {
     expect(
       within(dial).getByRole('radio', { name: 'Tell me after' }).getAttribute('aria-checked')
     ).toBe('true');
+  });
+
+  it('a late refusal goes back to the latest saved dial, never an older one', async () => {
+    serve();
+    const settings = projectSettings();
+    let refuseFirst: (error: Error) => void = () => {};
+    settings.set.mockImplementationOnce(
+      () =>
+        new Promise<void>((_resolve, reject) => {
+          refuseFirst = reject;
+        })
+    );
+    await renderSettings(newProject(), { projectSettings: settings.api });
+    const dial = screen.getByRole('radiogroup', { name: 'How much it does on its own' });
+    fireEvent.click(within(dial).getByRole('radio', { name: 'Just do it' }));
+    fireEvent.click(within(dial).getByRole('radio', { name: 'Ask me first' }));
+    await act(async () => {});
+    await act(async () => {
+      refuseFirst(new Error('Busy.'));
+    });
+    expect(within(dial).getByRole('radio', { name: 'Ask me first' }).getAttribute('aria-checked')).toBe(
+      'true'
+    );
   });
 
   it('shows DorkOS’s Require login line, verbatim, only while Require login is off', async () => {

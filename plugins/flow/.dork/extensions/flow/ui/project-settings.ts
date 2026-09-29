@@ -47,7 +47,7 @@ import {
 import { AutonomyDial } from './dial.ts';
 import { PAUSE_CHOICES } from './pause-menu.ts';
 import { BUTTON, Hint, LINK, MUTED, PILL } from './parts.ts';
-import { h, useEffect, useId, useState, type Node, type Style } from './react.ts';
+import { h, useEffect, useId, useRef, useState, type Node, type Style } from './react.ts';
 import { RepoChips, type ChipRule } from './repo-chips.ts';
 import { SegmentedControl } from './segmented.ts';
 import { ALERT, hostColor } from './styles.ts';
@@ -70,6 +70,9 @@ export const READ_ONLY_TEXT =
 
 /** Said when a value set on this computer wins over the repo's. */
 export const LOCAL_WINS_TEXT = "This computer's own setting wins over this one.";
+
+/** Said right after a shared change that this computer's own setting still overrides. */
+export const SAVED_LOCAL_WINS_TEXT = "Saved, but this computer's local setting still wins.";
 
 /** Shown when the settings could not be read. */
 export const SETTINGS_LOAD_FAILED_TEXT =
@@ -127,6 +130,8 @@ function Switch(props: {
   disabled: boolean;
   onChange: (value: boolean) => void;
   error?: string;
+  /** This field was just saved to the shared file. */
+  justSaved?: boolean;
 }): Node {
   const labelId = useId();
   const descId = useId();
@@ -162,16 +167,20 @@ function Switch(props: {
     props.description === undefined
       ? null
       : h('p', { id: descId, style: { ...MUTED, margin: '2px 0 0' } }, props.description),
-    fieldNotes(props.field, props.error)
+    fieldNotes(props.field, props.error, props.justSaved)
   );
 }
 
 /** The notes under a field: its lock, a local override, and an error. */
-function fieldNotes(field: SettingField<unknown>, error?: string): Node {
+function fieldNotes(field: SettingField<unknown>, error?: string, justSaved = false): Node {
   return [
     field.locked === null ? null : h('p', { key: 'l', style: MUTED }, field.locked),
     field.source === 'local' && field.locked === null
-      ? h('p', { key: 'o', style: MUTED }, LOCAL_WINS_TEXT)
+      ? h(
+          'p',
+          { key: 'o', role: justSaved ? 'status' : undefined, style: MUTED },
+          justSaved ? SAVED_LOCAL_WINS_TEXT : LOCAL_WINS_TEXT
+        )
       : null,
     error === undefined ? null : h('p', { key: 'e', role: 'alert', style: ALERT }, error),
   ];
@@ -257,7 +266,9 @@ export function ProjectFlowSettings(props: ProjectFlowSettingsProps): Node {
   const { project, api } = props;
   const [phase, setPhase] = useState<Phase>({ kind: 'loading' });
   const [view, setView] = useState<ProjectSettingsView | null>(null);
-  const [saved, setSaved] = useState<ProjectSettingsView | null>(null);
+  // The latest view flow answered: a refused change goes back to it, never to an older one.
+  const saved = useRef<ProjectSettingsView | null>(null);
+  const [justSaved, setJustSaved] = useState<string | null>(null);
   const [errors, setErrors] = useState<Record<string, string>>({});
   const [sharedSaved, setSharedSaved] = useState(false);
   const [attempt, setAttempt] = useState(0);
@@ -271,7 +282,7 @@ export function ProjectFlowSettings(props: ProjectFlowSettingsProps): Node {
       (next) => {
         if (!live) return;
         setView(next);
-        setSaved(next);
+        saved.current = next;
         setPhase({ kind: 'ready' });
       },
       (failure: unknown) => {
@@ -314,14 +325,18 @@ export function ProjectFlowSettings(props: ProjectFlowSettingsProps): Node {
       return next;
     });
     setView(optimistic);
+    setJustSaved(null);
     putSettings(project.name, body).then(
       (answer) => {
         setView(answer);
-        setSaved(answer);
-        if (body.shared !== undefined) setSharedSaved(true);
+        saved.current = answer;
+        if (body.shared !== undefined) {
+          setSharedSaved(true);
+          setJustSaved(scope);
+        }
       },
       (failure: unknown) => {
-        setView(saved);
+        setView(saved.current);
         setErrors((current) => ({
           ...current,
           [scope]: failure instanceof Error ? failure.message : UNREACHABLE_MESSAGE,
@@ -385,6 +400,7 @@ export function ProjectFlowSettings(props: ProjectFlowSettingsProps): Node {
           field: view.shared.reviewerAgent,
           disabled: locked,
           error: errors.reviewerAgent,
+          justSaved: justSaved === 'reviewerAgent',
           onChange: (value) => setShared('reviewerAgent', value),
         }),
         h(Switch, {
@@ -393,6 +409,7 @@ export function ProjectFlowSettings(props: ProjectFlowSettingsProps): Node {
           field: view.shared.mergeOnApproval,
           disabled: locked,
           error: errors.mergeOnApproval,
+          justSaved: justSaved === 'mergeOnApproval',
           onChange: (value) => setShared('mergeOnApproval', value),
         }),
         h(Switch, {
@@ -401,6 +418,7 @@ export function ProjectFlowSettings(props: ProjectFlowSettingsProps): Node {
           field: view.shared.armAutoMerge,
           disabled: locked,
           error: errors.armAutoMerge,
+          justSaved: justSaved === 'armAutoMerge',
           onChange: (value) => setShared('armAutoMerge', value),
         }),
         h(
@@ -408,7 +426,7 @@ export function ProjectFlowSettings(props: ProjectFlowSettingsProps): Node {
           {
             key: 'labels',
             label: 'Labels flow accepts without a group',
-            notes: fieldNotes(view.shared.labels, errors.labels),
+            notes: fieldNotes(view.shared.labels, errors.labels, justSaved === 'labels'),
           },
           h(RepoChips, {
             repos: view.shared.labels.value,

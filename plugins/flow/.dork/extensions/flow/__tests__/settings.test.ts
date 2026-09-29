@@ -11,7 +11,15 @@
  */
 
 import { execFile } from 'node:child_process';
-import { existsSync, mkdirSync, readFileSync, readdirSync, writeFileSync } from 'node:fs';
+import {
+  chmodSync,
+  existsSync,
+  mkdirSync,
+  readFileSync,
+  readdirSync,
+  statSync,
+  writeFileSync,
+} from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
@@ -176,6 +184,50 @@ describe('PUT /settings/:name', () => {
     });
     expect(readFileSync(files().shared)).toEqual(before.shared);
     expect(readFileSync(files().local)).toEqual(before.local);
+  });
+
+  it('keeps the committed file’s own indentation, ending and mode', async () => {
+    const paths = files();
+    mkdirSync(paths.dir, { recursive: true });
+    writeFileSync(paths.shared, JSON.stringify({ tracker: 'linear' }, null, 4), { mode: 0o644 });
+    chmodSync(paths.shared, 0o644);
+    const { router } = await setup();
+    const sent = await router.call('put', '/settings/:name', {
+      params: { name: 'main' },
+      body: { shared: { mergeOnApproval: false } },
+    });
+    expect(sent.status).toBe(200);
+    expect(readFileSync(paths.shared, 'utf8')).toBe(
+      JSON.stringify({ tracker: 'linear', gates: { review: { mergeOnApproval: false } } }, null, 4)
+    );
+    expect(statSync(paths.shared).mode & 0o777).toBe(0o644);
+  });
+
+  it('holds both files’ locks through the check and the putting back', async () => {
+    configure({ tracker: 'linear' }, {});
+    const held: boolean[] = [];
+    let checks = 0;
+    const exec: ExecFileLike = (file, args, opts, callback) => {
+      if (args.includes('check')) {
+        checks += 1;
+        if (checks === 2) {
+          held.push(existsSync(`${files().shared}.lock`), existsSync(`${files().local}.lock`));
+        }
+        const errors = checks === 1 ? [] : [{ path: '/x', message: 'no' }];
+        queueMicrotask(() => callback(null, `${JSON.stringify({ ok: errors.length === 0, errors })}\n`, ''));
+        return undefined;
+      }
+      return realExec(file, args, opts, callback);
+    };
+    const { router } = await setup({}, exec);
+    const sent = await router.call('put', '/settings/:name', {
+      params: { name: 'main' },
+      body: { shared: { armAutoMerge: true }, local: { parallel: 2 } },
+    });
+    expect(sent.status).toBe(400);
+    expect(held).toEqual([true, true]);
+    expect(existsSync(`${files().shared}.lock`)).toBe(false);
+    expect(existsSync(`${files().local}.lock`)).toBe(false);
   });
 
   it('saves over a problem that was already there, which this write did not cause', async () => {

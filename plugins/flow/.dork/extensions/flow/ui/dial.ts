@@ -34,7 +34,7 @@ import {
 import type { ClientApi } from '../lib/host-types.ts';
 import type { FlowProject } from '../lib/model.ts';
 import { BUTTON, MUTED } from './parts.ts';
-import { h, useEffect, useId, useState, type Node } from './react.ts';
+import { h, useEffect, useId, useRef, useState, type Node } from './react.ts';
 import { SegmentedControl, type SegmentOption } from './segmented.ts';
 import { ALERT, FIELD } from './styles.ts';
 
@@ -145,6 +145,8 @@ export function AutonomyDial(props: AutonomyDialProps): Node {
   const [customize, setCustomize] = useState(false);
   // A dial choice made while Custom waits here until the person confirms it.
   const [replacing, setReplacing] = useState<AutonomyStop | null>(null);
+  const confirmed = useRef<Stored>({ state: 'loading' });
+  const latest = useRef(0);
   const labelId = useId();
   const noteId = useId();
   const panelId = useId();
@@ -158,13 +160,13 @@ export function AutonomyDial(props: AutonomyDialProps): Node {
     settings.get(project.root).then(
       (value) => {
         if (!live) return;
-        if (value === null || value === undefined) setStored({ state: 'none' });
         // A stored value that is not a dial reads as Ask me first for everything, as the engine reads it.
-        else
-          setStored({
-            state: 'set',
-            copy: parseAutonomyCopy(value) ?? { ...NO_COPY_DIAL, kinds: {} },
-          });
+        const read: Stored =
+          value === null || value === undefined
+            ? { state: 'none' }
+            : { state: 'set', copy: parseAutonomyCopy(value) ?? { ...NO_COPY_DIAL, kinds: {} } };
+        confirmed.current = read;
+        setStored(read);
       },
       (failure: unknown) => {
         if (live)
@@ -209,13 +211,20 @@ export function AutonomyDial(props: AutonomyDialProps): Node {
     resolveAutonomy(inForce, kind, { reviewerAgent: props.reviewerAgent });
 
   const save = (next: AutonomyCopy) => {
-    const before = stored;
+    const seq = ++latest.current;
     setStored({ state: 'set', copy: next });
     setError(null);
-    settings.set(project.root, next).catch((failure: unknown) => {
-      setStored(before);
-      setError(messageOf(failure, "Flow couldn't save this. Nothing was changed; try again."));
-    });
+    settings.set(project.root, next).then(
+      () => {
+        confirmed.current = { state: 'set', copy: next };
+      },
+      (failure: unknown) => {
+        // Only the newest choice decides what shows; a refusal goes back to the
+        // latest value DorkOS confirmed, never an older one.
+        if (seq === latest.current) setStored(confirmed.current);
+        setError(messageOf(failure, "Flow couldn't save this. Nothing was changed; try again."));
+      }
+    );
   };
 
   const disabled = tooOld;

@@ -10,7 +10,7 @@
 import * as React from 'react';
 import { act, fireEvent, render, screen } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { AccountCheckboxes, nextAllow } from '../account-checkboxes.ts';
+import { AccountCheckboxes, PROBE_FAILED_TEXT, nextAllow } from '../account-checkboxes.ts';
 import { forgetEligibilityProbe, type AccountEligibility } from '../core-api.ts';
 import { routeFetch } from './helpers.ts';
 
@@ -194,6 +194,22 @@ describe('Accounts this project may use', () => {
     await act(async () => {});
     await act(async () => {});
     expect(screen.getByRole('alert').textContent).toBe('That project changed; try again.');
+  });
+
+  it('says plainly when DorkOS could not be asked, and Retry asks again', async () => {
+    let up = false;
+    routeFetch(() => (up ? { status: 200, body: eligibility() } : { status: 500, body: {} }));
+    render(
+      React.createElement(AccountCheckboxes, { root: ROOT, projectName: 'dorkos', navigate: vi.fn() })
+    );
+    await act(async () => {});
+    await act(async () => {});
+    expect(screen.getByRole('alert').textContent).toBe(PROBE_FAILED_TEXT);
+    up = true;
+    fireEvent.click(screen.getByRole('button', { name: 'Retry' }));
+    await act(async () => {});
+    await act(async () => {});
+    expect((box('Work') as HTMLInputElement).checked).toBe(true);
   });
 
   it('draws nothing on a DorkOS without the account rules', async () => {
