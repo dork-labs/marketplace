@@ -85,11 +85,20 @@ interface Controls {
   hostClose: () => void;
   /** The other pause dialog: only one is ever on screen. */
   sibling: Controls | null;
+  /** Put the dialog's own state (Pause all instead, an error) back; set by the dialog. */
+  reset: () => void;
 }
 
 /** A fresh, closed dialog state. */
 function newControls(): Controls {
-  return { shown: false, returnTo: null, listeners: new Set(), hostClose: () => {}, sibling: null };
+  return {
+    shown: false,
+    returnTo: null,
+    listeners: new Set(),
+    hostClose: () => {},
+    sibling: null,
+    reset: () => {},
+  };
 }
 
 /** Show or hide a dialog. */
@@ -109,6 +118,12 @@ function openDialog(controls: Controls): void {
     controls.returnTo = sibling.returnTo;
     sibling.returnTo = null;
     setShown(sibling, false);
+    sibling.reset();
+    try {
+      sibling.hostClose();
+    } catch {
+      // DorkOS could not record the close; the dialog is hidden all the same.
+    }
   } else if (!controls.shown) {
     const active = typeof document === 'undefined' ? null : document.activeElement;
     controls.returnTo = active instanceof HTMLElement ? active : null;
@@ -161,8 +176,15 @@ function createPauseDialog(
     const snapshot = useStore(store);
     const shown = props.open === true || controls.shown;
     const box = useRef<HTMLDivElement | null>(null);
+    const guarding = useRef(false);
+    controls.reset = () => {
+      setMode(scope);
+      setError(null);
+    };
     const close = () => {
       if (!shown) return;
+      // From here on the focus guard below lets focus leave.
+      guarding.current = false;
       const hostOpened = props.open === true;
       setShown(controls, false);
       setMode(scope);
@@ -184,7 +206,13 @@ function createPauseDialog(
       }
       const back = controls.returnTo;
       controls.returnTo = null;
-      if (back !== null && back.isConnected) back.focus();
+      if (back !== null && back.isConnected) {
+        back.focus();
+      } else if (box.current?.contains(document.activeElement)) {
+        // What opened it is gone (the palette's input): leave focus on the page,
+        // not on a control that is about to disappear.
+        (document.activeElement as HTMLElement).blur();
+      }
     };
     useEffect(() => {
       const listener = () => redraw((n) => n + 1);
@@ -212,6 +240,21 @@ function createPauseDialog(
       if (active !== node && node.contains(active)) return;
       if (active === node && control === null) return;
       (control ?? node).focus();
+    });
+    // While it is open, focus stays in it: anything outside that takes focus
+    // (the closing palette restoring it to the chat box) gives it back, so
+    // Enter never reaches the chat behind the dialog.
+    useEffect(() => {
+      if (!shown) return undefined;
+      guarding.current = true;
+      const onFocusIn = (event: FocusEvent) => {
+        const node = box.current;
+        if (!guarding.current || node === null) return;
+        if (node.contains(event.target as globalThis.Node)) return;
+        (node.querySelector<HTMLElement>(FOCUSABLE) ?? node).focus();
+      };
+      document.addEventListener('focusin', onFocusIn);
+      return () => document.removeEventListener('focusin', onFocusIn);
     });
     if (!shown) return null;
     /** Tab and Shift+Tab stay inside the dialog. */

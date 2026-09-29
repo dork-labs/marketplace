@@ -255,6 +255,63 @@ describe('activate', () => {
     cleanup();
   });
 
+  it('pulls focus back when something behind takes it, and closes cleanly when the opener is gone (DOR-2533 re-review)', async () => {
+    const { commands, cleanup, opener } = await openableHost();
+    const composer = document.createElement('textarea');
+    document.body.append(composer);
+    const errors: unknown[] = [];
+    const onError = (event: ErrorEvent) => errors.push(event.error);
+    window.addEventListener('error', onError);
+    act(() => commands.get('pause-all')?.());
+    // The command palette closes: its input (the opener) goes, and its focus
+    // scope hands focus back to the chat box behind the dialog.
+    opener.remove();
+    act(() => composer.focus());
+    const dialog = screen.getByRole('dialog');
+    expect(dialog.contains(document.activeElement)).toBe(true);
+    expect(document.activeElement).not.toBe(composer);
+    fireEvent.keyDown(window, { key: 'Escape' });
+    expect(screen.queryByRole('dialog')).toBeNull();
+    expect(errors).toEqual([]);
+    expect(document.activeElement).toBe(document.body);
+    // Closed, the guard is gone: focus goes wherever it is sent.
+    composer.focus();
+    expect(document.activeElement).toBe(composer);
+    window.removeEventListener('error', onError);
+    composer.remove();
+    cleanup();
+  });
+
+  it('puts the hidden dialog back as it was, and tells DorkOS it closed, when the other replaces it', async () => {
+    const { api, commands, dialogs } = fullHost({ currentCwd: '/x', currentProject: null });
+    routeFetch(() => ({ status: 200, body: flowModel([flowProject('dorkos')]) }));
+    const cleanup = activate(api);
+    await act(async () => {});
+    const props = coreDialogProps();
+    render(
+      React.createElement(
+        React.Fragment,
+        null,
+        React.createElement(dialogs.get('pause-project')!.component, props as never),
+        React.createElement(dialogs.get('pause-all')!.component, props as never)
+      )
+    );
+    const project = dialogs.get('pause-project')! as unknown as { close: ReturnType<typeof vi.fn> };
+    project.close.mockImplementation(() => {
+      throw new TypeError('not yet');
+    });
+    act(() => commands.get('pause-project')?.());
+    fireEvent.click(screen.getByRole('button', { name: 'Pause all projects instead' }));
+    expect(screen.getByRole('menu', { name: 'Pause all projects' })).toBeTruthy();
+    act(() => commands.get('pause-all')?.());
+    expect(project.close).toHaveBeenCalledTimes(1);
+    fireEvent.keyDown(window, { key: 'Escape' });
+    act(() => commands.get('pause-project')?.());
+    // Back to its own first state: this chat is in no flow project.
+    expect(screen.getByText(NOT_IN_PROJECT_TEXT)).toBeTruthy();
+    cleanup();
+  });
+
   it('keeps an error inside the dialog clickable, and shows one pause dialog at a time', async () => {
     const { commands, cleanup, opener } = await openableHost();
     routeFetch((method) =>

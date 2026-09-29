@@ -24,9 +24,9 @@ repeating it on the real setup.
   self-contained `adapter.ts`, with its backlog beside the config. It was allowed with the
   lens's **Allow** button.
 - **A fake forge.** A small `gh` stand-in first on the server's `PATH` kept pull requests in a
-  JSON file and logged every call. Checks always pass, and `gh pr merge --auto
---match-head-commit <sha>` merges the branch into the repo's `main` at once, as GitHub's
-  auto-merge would.
+  JSON file and logged every call. Checks always pass, and its auto-merge
+  (`gh pr merge --auto --match-head-commit <sha>`) merges the branch into the repo's `main` at
+  once, as GitHub's would.
 - **Runs were seeded, not worked.** Each project got one run record in `.dork/flow/flow-state.json`
   (`beta`'s at the review gate with a clean review at its head and PR #7 open), so no agent ran.
 - **Accounts.** Two fake Claude Code accounts (`work`, `side`) in the scratch `config.json`.
