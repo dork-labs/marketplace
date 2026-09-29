@@ -93,11 +93,15 @@ export function failingChecks(rollup: unknown): FailingCheck[] {
  * How many checks in `statusCheckRollup` have not finished: a check run whose
  * `status` is not `COMPLETED`, or a commit status still `PENDING` or `EXPECTED`.
  *
+ * A PR with no checks at all, or a rollup that cannot be read, counts as one
+ * pending check: nothing has passed yet (checks may not have registered), so
+ * nothing may treat it as passed.
+ *
  * @param rollup - The `statusCheckRollup` array from `gh pr view --json`.
- * @returns The count (0 when the rollup is not a list).
+ * @returns The count; at least 1 when there are no checks.
  */
 export function pendingChecks(rollup: unknown): number {
-  if (!Array.isArray(rollup)) return 0;
+  if (!Array.isArray(rollup) || rollup.length === 0) return 1;
   let pending = 0;
   for (const entry of rollup) {
     const check = record(entry);

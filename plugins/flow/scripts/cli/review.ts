@@ -62,6 +62,22 @@ type Approver = 'person' | 'reviewer-agent';
 /** The drain phases in which a drain run's work waits at the review gate (a clean review, a PR). */
 const GATE_PHASES = new Set(['pr-ready', 'watching']);
 
+/** How often `--wait` looks at the PR's checks again. */
+const CHECK_POLL_MS = 60_000;
+
+/** `--wait [minutes]`: how long the reviewer agent waits for checks to finish (0 without it). */
+function waitMinutes(ctx: VerbContext): number {
+  const value = ctx.args.flags['wait-minutes'];
+  if (typeof value === 'string') {
+    const n = Number(value);
+    if (!Number.isInteger(n) || n < 0 || n > 24 * 60) {
+      throw new UsageError('--wait-minutes must be a whole number of minutes, at most 1440');
+    }
+    return n;
+  }
+  return ctx.args.flags.wait === true ? 120 : 0;
+}
+
 /** A string flag's value, if given. */
 function flag(ctx: VerbContext, name: string): string | undefined {
   const value = ctx.args.flags[name];
@@ -206,23 +222,34 @@ export async function run(ctx: VerbContext): Promise<VerbResult> {
           `${identifier} has no clean review recorded with the reviewer's token at the branch head (${short(head)}); the reviewer agent ships only work it checked`
         );
       }
-      // Only checks that passed: none failing, none still running, and a PR
-      // whose checks the forge can read at all.
+      // Never past a failing check. When the PR will be armed, a check still
+      // running is fine: the forge's auto-merge waits for the required ones.
+      // Without the arm, the reviewer agent's approval is the last check before
+      // a person merges, so every check must have passed; --wait waits for them.
       if (pr === null) {
         throw new PreconditionError(
-          `${identifier} has no open PR, so there are no checks the reviewer agent can see pass`
+          `${identifier} has no open PR, so there are no checks the reviewer agent can see`
         );
       }
-      const status = await target.forge.prStatus(pr.number);
-      if (status.failing.length > 0) {
-        throw new PreconditionError(
-          `${identifier}'s PR has failing checks (${status.failing.map((c) => c.name).join(', ')}), so the reviewer agent does not ship it`
-        );
-      }
-      if (status.pendingChecks !== 0) {
-        throw new PreconditionError(
-          `${identifier}'s PR has checks that have not passed yet${status.pendingChecks === undefined ? '' : ` (${status.pendingChecks} still running)`}, so the reviewer agent waits`
-        );
+      const forge = target.forge;
+      const needsPassed = !config.gates.review.mergeOnApproval;
+      const waitMs = waitMinutes(ctx) * 60_000;
+      let waited = 0;
+      for (;;) {
+        const status = await forge.prStatus(pr.number);
+        if (status.failing.length > 0) {
+          throw new PreconditionError(
+            `${identifier}'s PR has failing checks (${status.failing.map((c) => c.name).join(', ')}), so the reviewer agent does not ship it`
+          );
+        }
+        if (!needsPassed || status.pendingChecks === 0) break;
+        if (waited >= waitMs) {
+          throw new PreconditionError(
+            `${identifier}'s PR has checks that have not passed yet${status.pendingChecks === undefined ? '' : ` (${status.pendingChecks} not finished)`}${waitMs > 0 ? `, after ${waitMinutes(ctx)} minutes of waiting` : ''}, so the reviewer agent does not ship it yet`
+          );
+        }
+        await ctx.io.sleep(CHECK_POLL_MS);
+        waited += CHECK_POLL_MS;
       }
     }
 
@@ -238,7 +265,8 @@ export async function run(ctx: VerbContext): Promise<VerbResult> {
           ? head
           : isWritableDrain(existing)
             ? existing.drain.reviewedSha
-            : (flag(ctx, 'head') ?? null);
+            : (flag(ctx, 'head') ??
+              (existing.review?.verdict === 'clean' ? existing.review.reviewedSha : null));
       if (armAt !== null) {
         const now = (await target.forge.prStatus(pr.number)).headSha;
         if (!now.toLowerCase().startsWith(armAt.toLowerCase()) && now !== armAt) {
@@ -291,7 +319,7 @@ export async function run(ctx: VerbContext): Promise<VerbResult> {
       : pr !== null && !config.gates.review.mergeOnApproval
         ? ` PR #${pr.number} waits for a person to merge it.`
         : willArm
-          ? ` PR #${pr?.number} was not armed: flow does not know which commit you approved (pass --head <sha>), so a person merges it.`
+          ? " Approved. Flow didn't turn on auto-merge because it can't tell which commit you approved; it will when the reviewer records one."
           : '';
     return {
       json: {
@@ -303,6 +331,7 @@ export async function run(ctx: VerbContext): Promise<VerbResult> {
         pr: pr === null ? null : { number: pr.number, url: pr.url },
         forgeReview,
         armed,
+        note: armText.trim() === '' ? null : armText.trim(),
         forgeSkipped: target.forge === null ? target.why : null,
       },
       text: `${ctx.dryRun ? 'Would ship' : 'Shipped'} ${identifier}${by === 'reviewer-agent' ? ' (the reviewer agent approved it)' : ''}.${armText}`,

@@ -23,14 +23,21 @@
  */
 
 import { randomBytes, randomUUID } from 'node:crypto';
-import { mkdirSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 
 import { chooseAccount, rankAccounts } from '../drain/account-rank.ts';
 import { answerPointer, findAnswer } from '../drain/answer.ts';
 import type { RunQuestion } from '../flow-run.ts';
 import { belongsToPark, checkBrief, parkedAnswer, personOnly, pickComment } from '../question.ts';
-import { claimAnswer, claimCheck, clearQuestion, releaseAnswer } from './question-write.ts';
+import {
+  claimAnswer,
+  claimCheck,
+  clearQuestion,
+  recordChecker,
+  releaseAnswer,
+  releaseCheck,
+} from './question-write.ts';
 import { tokenHash } from './report.ts';
 import { acquireDrainLock } from '../drain/lock.ts';
 import {
@@ -42,7 +49,8 @@ import {
   type PlannedAccount,
 } from '../drain/runner.ts';
 import { ingestStreamLog } from '../drain/stream-log.ts';
-import { ConfigError, PausedError, UsageError } from '../errors.ts';
+import { ConfigError, FlowError, PausedError, PreconditionError, UsageError } from '../errors.ts';
+import { removeWorktree, workspacesDir } from '../drain/worktree.ts';
 import {
   loadAccounts,
   loadFleetPolicy,
@@ -59,6 +67,7 @@ import { hostPreference, resolveHost } from '../launchers/resolve.ts';
 import { DEFAULT_START_TIMEOUT_MS, launchAccountFor, sessionHome } from '../launchers/common.ts';
 import {
   HOST_NAMES,
+  LaunchError,
   type HostName,
   type LaunchAccount,
   type LaunchPermissionMode,
@@ -108,6 +117,33 @@ export interface DrainOptions {
   mintToken?: () => string;
   /** Look for a session a stopped pass started (default: this machine's files, or DorkOS). */
   findSession?: PassDeps['findSession'];
+}
+
+/**
+ * A detached worktree of `branch` (else `HEAD`) at `target`, for a session that
+ * must not work in the worker's tree. Reuses one that exists.
+ *
+ * @param ctx - The verb's context.
+ * @param mainCheckout - The project's main checkout.
+ * @param branch - The run's branch.
+ * @param target - Where to put it.
+ * @throws {PreconditionError} When git cannot add it.
+ */
+async function addDetachedWorktree(
+  ctx: VerbContext,
+  mainCheckout: string,
+  branch: string,
+  target: string
+): Promise<void> {
+  if (existsSync(target)) return;
+  mkdirSync(path.dirname(target), { recursive: true });
+  for (const ref of [branch, 'HEAD']) {
+    const result = await ctx.runProcess('git', ['worktree', 'add', '-q', '--detach', target, ref], {
+      cwd: mainCheckout,
+    });
+    if (result.code === 0) return;
+  }
+  throw new PreconditionError(`could not add a worktree at ${target} for the pick check`);
 }
 
 /**
@@ -379,24 +415,71 @@ export async function drain(ctx: VerbContext, options: DrainOptions = {}): Promi
       return;
     }
     const token = randomBytes(16).toString('hex');
-    if (!(await claimCheck(store, issueId, question.askedAt, tokenHash(token)))) return;
-    const promptFile = path.join(run.worktreePath, '.dork', 'flow', 'drain', 'question-check.md');
-    mkdirSync(path.dirname(promptFile), { recursive: true });
-    writeFileSync(promptFile, checkBrief(question, identifier, flowCommand, token));
-    const host = await hostFor(account.runtime);
-    await launcher(host).start({
-      role: 'reviewer',
-      runtime: account.runtime,
-      identifier,
-      account: account.path === null ? null : launchAccountFor(account),
-      cwd: run.worktreePath,
-      promptFile,
-      sessionId: randomUUID(),
-      ...(model('review') ? { model: model('review') as string } : {}),
-      permissionMode,
-      title: `${identifier} question check`,
-    });
-    ctx.stderr.write(`flow drain: handed the pick on ${identifier} to the reviewer agent.\n`);
+    const hash = tokenHash(token);
+    if (!(await claimCheck(store, issueId, question.askedAt, hash))) return;
+    // Its own session and its own worktree, like the drain's code reviewer:
+    // never the worker's, and the token-bearing brief never in the worker's tree.
+    const sessionId = randomUUID();
+    const target = path.join(
+      workspacesDir(dorkHome, repoName),
+      `check-${identifier}-${Date.parse(question.askedAt)}`
+    );
+    try {
+      await addDetachedWorktree(ctx, mainCheckout, run.branch, target);
+      const promptFile = path.join(target, '.dork', 'flow', 'drain', 'briefs', 'question-check.md');
+      mkdirSync(path.dirname(promptFile), { recursive: true });
+      writeFileSync(promptFile, checkBrief(question, identifier, flowCommand, token, sessionId));
+      const host = await hostFor(account.runtime);
+      const handle = await launcher(host).start({
+        role: 'reviewer',
+        runtime: account.runtime,
+        identifier,
+        account: account.path === null ? null : launchAccountFor(account),
+        cwd: target,
+        promptFile,
+        sessionId,
+        ...(model('review') ? { model: model('review') as string } : {}),
+        permissionMode,
+        title: `${identifier} question check`,
+      });
+      await recordChecker(store, issueId, question.askedAt, {
+        host: handle.host,
+        runtime: handle.runtime,
+        sessionId: handle.sessionId,
+        account: handle.account,
+        ...(handle.pid === undefined ? {} : { pid: handle.pid }),
+        cwd: target,
+      });
+      ctx.stderr.write(`flow drain: handed the pick on ${identifier} to the reviewer agent.\n`);
+    } catch (error) {
+      // A check that never started must not hold the question forever: give it
+      // back, so the next pass tries again.
+      await releaseCheck(store, issueId, question.askedAt, hash);
+      await removeWorktree(ctx.runProcess, mainCheckout, target);
+      if (!(error instanceof LaunchError) && !(error instanceof FlowError)) throw error;
+      ctx.warn(
+        `the reviewer agent did not start to check the pick on ${identifier} (${(error as Error).message}); the next pass tries again`
+      );
+    }
+  };
+
+  /** Stop the session that checked a question's pick, and remove its worktree. */
+  const stopChecker = async (question: RunQuestion): Promise<void> => {
+    const checker = question.checker;
+    if (checker === undefined) return;
+    try {
+      await launcher(checker.host as HostName).stop({
+        host: checker.host as HostName,
+        runtime: checker.runtime as RuntimeName,
+        sessionId: checker.sessionId,
+        account: checker.account ?? null,
+        cwd: checker.cwd,
+        ...(checker.pid === undefined ? {} : { pid: checker.pid }),
+      });
+    } catch (error) {
+      ctx.warn(`could not stop the pick checker ${checker.sessionId}: ${(error as Error).message}`);
+    }
+    await removeWorktree(ctx.runProcess, mainCheckout, checker.cwd);
   };
 
   const deps: PassDeps = {
@@ -496,7 +579,11 @@ export async function drain(ctx: VerbContext, options: DrainOptions = {}): Promi
       await applyAndVerify(adapter, item, projectionFor({ type: 'claim' }, { stages }));
       // The question is answered and the work resumes on it: clear it, so a
       // later park never mistakes it for its own.
-      if (question !== undefined) await clearQuestion(store, item.id, question.askedAt);
+      if (question !== undefined) {
+        const latest = store.read()[item.id]?.question;
+        await clearQuestion(store, item.id, question.askedAt);
+        if (latest?.askedAt === question.askedAt) await stopChecker(latest);
+      }
       return { ...facts, claimed: true, needsInput: false, answer };
     },
     async plan(slots) {

@@ -1345,17 +1345,26 @@ function writeFlag(file: string, flag: Omit<PauseFlag, 'file'>, create: boolean)
  * @param roots - The checkouts to act for.
  * @param now - The time to record.
  * @param hostSchedules - Host schedule ids to record in the flag.
+ * An end on a pause whose host schedules were switched off is refused unless
+ * `options.hostRestores` says the caller is a host that switches them back on
+ * when the pause ends (DorkOS's expiry sweep, spec `flow-multiproject` §5.2).
+ * With it, the ids stay recorded on the timed flag, and `resumeFlow` hands them
+ * back even after the end has passed, so the host can restore exactly those.
+ *
  * @param until - When the pause ends by itself (ISO), or `null` for no end.
+ * @param options - `hostRestores`: the caller restores the schedules at the end.
  * @returns The flag in effect, and whether git ignores it.
+ * @throws {PauseRefused} On an end over switched-off schedules without `hostRestores`.
  */
 export function pauseFlow(
   roots: ConfigRoots,
   now: Date = new Date(),
   hostSchedules: readonly string[] = [],
-  until: string | null = null
+  until: string | null = null,
+  options: { hostRestores?: boolean } = {}
 ): PauseResult {
   const file = pauseFile(roots);
-  if (until !== null) {
+  if (until !== null && options.hostRestores !== true) {
     const live = readPauseFlag(roots);
     const switchedOff = [
       ...hostSchedules,
@@ -1425,7 +1434,8 @@ export function resumeFlow(roots: ConfigRoots, now: Date = new Date()): ResumeRe
 const HELP = `config-files — find, migrate and prepare flow's project files.
 
 Usage: config-files.ts [resolve|migrate|prepare|pause|resume] [--confirm|--decline]
-                      [--host-schedule <id>]... [--until <iso>] [--project <dir>]
+                      [--host-schedule <id>]... [--until <iso>] [--host-restores]
+                      [--project <dir>]
 
   resolve   (default) Which config.json and config.local.json flow reads, with
             config.json checked against config.schema.json, which tracker adapter
@@ -1453,7 +1463,9 @@ Usage: config-files.ts [resolve|migrate|prepare|pause|resume] [--confirm|--decli
             caller switched off, so resume can switch it back on. --until <iso>
             ends the pause by itself at that time (a time in the future, with
             its zone); without it the pause lasts until resume. Pausing again
-            keeps the start time and replaces the end. Prints
+            keeps the start time and replaces the end. An end on a pause that
+            switched host schedules off is refused, unless --host-restores says
+            the caller switches them back on at the end (DorkOS). Prints
             { ok, file, pausedAt, until, hostSchedules, alreadyPaused, ignored }.
   resume    Lift the pause (and remove a timed pause that has already ended).
             Prints { ok, wasPaused, removed, hostSchedules }: switch those host
@@ -1600,6 +1612,7 @@ export function main(argv: readonly string[]): number {
   let decline = false;
   const hostSchedules: string[] = [];
   let until: string | undefined;
+  let hostRestores = false;
   for (let i = 0; i < argv.length; i += 1) {
     const arg = argv[i];
     if (arg === '--help' || arg === '-h') {
@@ -1614,6 +1627,8 @@ export function main(argv: readonly string[]): number {
       confirm = true;
     } else if (arg === '--decline') {
       decline = true;
+    } else if (arg === '--host-restores') {
+      hostRestores = true;
     } else if (arg === '--until' || arg.startsWith('--until=')) {
       const value = arg === '--until' ? argv[i + 1] : arg.slice('--until='.length);
       if (value === undefined || value === '' || value.startsWith('--')) {
@@ -1689,7 +1704,7 @@ export function main(argv: readonly string[]): number {
   } else if (command === 'pause') {
     let result: PauseResult;
     try {
-      result = pauseFlow(roots, now, hostSchedules, until ?? null);
+      result = pauseFlow(roots, now, hostSchedules, until ?? null, { hostRestores });
     } catch (error) {
       if (!(error instanceof PauseRefused)) throw error;
       process.stderr.write(`config-files: ${error.message}\n`);

@@ -18,7 +18,10 @@
  * VERIFY's adversarial reviewer (a run `flow drain` did not start) uses the
  * same token mechanism (spec `flow-multiproject` §7.5):
  *
- * - `review-brief --sha <sha>` (VERIFY): mints a token for a review of `sha`,
+ * - `review-launch --sha <sha>` (VERIFY): starts its reviewer as a session of
+ *   its own through the launcher, with the token only in that session's brief
+ *   (`review-launch.ts`). The usual way.
+ * - `review-brief --sha <sha>` (a reviewer session VERIFY did not start): mints a token for a review of `sha`,
  *   stores only its hash on the run (`review`), and prints the token, which goes
  *   in the reviewer's brief and nowhere else.
  * - `verdict --sha <sha> --token <t> (--clean | --changes --findings-file <f>)`
@@ -50,11 +53,18 @@ import {
   type DrainRun,
 } from './drain-run.ts';
 import { requireOtherSession } from './caller.ts';
+import { reviewLaunch } from './review-launch.ts';
 import { signBody, unsignedBody } from './provenance.ts';
 import { applyAndVerify, sessionProvenance, setupWrite } from './work-write.ts';
 
 /** The report kinds, in help order. */
-export const REPORT_KINDS = ['pushed', 'verdict', 'blocked', 'review-brief'] as const;
+export const REPORT_KINDS = [
+  'pushed',
+  'verdict',
+  'blocked',
+  'review-brief',
+  'review-launch',
+] as const;
 
 /** How many of the latest comments are checked for an earlier post of the question. */
 const RECENT_COMMENTS = 10;
@@ -436,6 +446,11 @@ export async function run(ctx: VerbContext): Promise<VerbResult> {
     throw new UsageError(`the report must be one of ${REPORT_KINDS.join(', ')}, not "${kind}"`);
   }
   if (kind === 'review-brief') return reviewBrief(ctx, identifier);
+  if (kind === 'review-launch') {
+    onlyFlags(ctx, 'review-launch', ['sha']);
+    const run = findReviewRun(openFlowStateFile(ctx.projectDir, { now: ctx.now }), identifier);
+    return reviewLaunch(ctx, run, await resolveSha(ctx, run));
+  }
   const store = openFlowStateFile(ctx.projectDir, { now: ctx.now });
   if (kind === 'verdict' && !hasDrainRun(store, identifier)) return reviewVerdict(ctx, identifier);
   const drainRun = findDrainRun(store, identifier, 'report');

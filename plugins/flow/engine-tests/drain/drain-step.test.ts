@@ -890,6 +890,23 @@ describe('drainStep: parked runs', () => {
     expect(next.run.drain?.phase).toBe('fixing-ci');
   });
 
+  // Re-review nit: a park on a merge conflict tells the worker about the
+  // conflict when the answer sends it to fix it, not "no failing check".
+  it('an answered park on a merge conflict sends the conflict to the worker', () => {
+    const d = drain('parked', {
+      parkedReason: PARK_REASONS.checksFailed,
+      parkedFrom: 'watching',
+      pr: PR,
+    });
+    const out = step(d, {
+      worker: { kind: 'exited', code: 0 },
+      pr: prStatus({ conflicting: true, base: 'main' } as Partial<PrStatusFact>),
+      item: { closed: false, claimed: true, needsInput: false, title: 't', answer: 'a' },
+    });
+    const sent = out.actions.find((a) => a.kind === 'send');
+    expect(JSON.stringify(sent)).toContain('merge origin/main');
+  });
+
   // Who a park waits on (read by the DorkOS panel): every park the reducer
   // decides is flow's own, so it records `other`; only `flow report blocked`
   // records `person` (report-pr.test.ts). Fails if park() stops writing it.

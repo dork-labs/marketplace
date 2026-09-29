@@ -21,6 +21,12 @@ import type { DrainState } from '../../scripts/drain/state.ts';
 import { EXIT } from '../../scripts/errors.ts';
 import type { FlowRun } from '../../scripts/flow-run.ts';
 import { main } from '../../scripts/flow.ts';
+import {
+  LaunchError,
+  type HostName,
+  type LaunchRequest,
+  type Launcher,
+} from '../../scripts/launchers/types.ts';
 import type { Forge, ForgeTarget, ReviewInput } from '../../scripts/forge/types.ts';
 import { canonicalProjectRoot } from '../../scripts/main-checkout.ts';
 import { createFakeAdapter, type FakeTracker } from '../fixtures/cli/fake-adapter/adapter.ts';
@@ -59,7 +65,12 @@ function dial(value: Record<string, unknown>): void {
 
 /** A fake forge recording its calls; `head` is the branch's head on origin. */
 function fakeForge(
-  opts: { head?: string | null; pr?: boolean; failing?: string[]; pending?: number } = {}
+  opts: {
+    head?: string | null;
+    pr?: boolean;
+    failing?: string[];
+    pending?: number | number[];
+  } = {}
 ) {
   const calls: { method: string; arg?: unknown }[] = [];
   const forge: Forge = {
@@ -80,7 +91,9 @@ function fakeForge(
       return {
         state: 'open',
         failing: (opts.failing ?? []).map((name) => ({ name, url: null })),
-        pendingChecks: opts.pending ?? 0,
+        pendingChecks: Array.isArray(opts.pending)
+          ? (opts.pending.shift() ?? 0)
+          : (opts.pending ?? 0),
         armed: false,
         queued: false,
         headSha: opts.head ?? 'feedface',
@@ -104,6 +117,23 @@ function fakeForge(
   return { forge, calls, factory: (_t: ForgeTarget) => forge };
 }
 
+/** A launcher that records each start and starts nothing (or throws `fail`). */
+function fakeLauncher(host: HostName, starts: { req: LaunchRequest }[], fail?: Error): Launcher {
+  return {
+    host,
+    supports: () => ({ ok: true }),
+    probe: async () => ({ ok: true }),
+    async start(req) {
+      if (fail) throw fail;
+      starts.push({ req });
+      return { host, runtime: req.runtime, sessionId: req.sessionId, account: null, cwd: req.cwd };
+    },
+    send: async (handle) => ({ result: 'delivered', handle }),
+    state: async () => ({ kind: 'busy' }),
+    stop: async () => 'stopped',
+  } as Launcher;
+}
+
 /** Real git, except `remote get-url origin` answers a GitHub address. */
 const runner: ProcessRunner = async (cmd, args, opts) => {
   if (cmd === 'git' && args.join(' ') === 'remote get-url origin') {
@@ -120,6 +150,8 @@ async function flow(
     tracker?: FakeTracker;
     now?: string;
     clock?: () => Date;
+    launcher?: (host: HostName) => Launcher;
+    cwd?: string;
   } = {}
 ) {
   const forge = options.forge ?? fakeForge();
@@ -128,13 +160,16 @@ async function flow(
   let err = '';
   const code = await main([...argv, '--json'], {
     env: { FLOW_SESSION_ID: 'session-abcdef123456', CLAUDECODE: '1', DORK_HOME: dorkHome },
-    cwd: project.dir,
+    cwd: options.cwd ?? project.dir,
     now: options.clock ?? (() => new Date(options.now ?? NOW)),
     stdout: { write: (c: string) => (out += c) },
     stderr: { write: (c: string) => (err += c) },
     createAdapter: async () => tracker.adapter,
     runProcess: runner,
     createForge: forge.factory,
+    // --wait polls with the host's sleep; a test never waits for real.
+    io: { sleep: async () => undefined },
+    ...(options.launcher === undefined ? {} : { createLauncher: options.launcher }),
   });
   return { code, json: JSON.parse(out) as Record<string, unknown>, stderr: err, forge, tracker };
 }
@@ -880,6 +915,8 @@ describe('review fixes (DOR-2528 FIX-FIRST)', () => {
     };
     const result = await flow(['answer', 'ACME-12', '--text', 'Hold it.'], { tracker, clock });
     expect(result.code).toBe(EXIT.precondition);
+    // Re-review nit: the loser says it lost the race, not that nothing waited.
+    expect(result.stderr).toContain('got there first');
     expect(comments(tracker)).toEqual([]);
     expect(stored().question?.answer?.by).toBe('agent-default');
   });
@@ -1000,6 +1037,11 @@ describe('review fixes (DOR-2528 FIX-FIRST)', () => {
   // Finding 11: the reviewer agent ships only when the checks passed: not
   // while any still runs, and not without a PR whose checks it can read.
   it('lets the reviewer agent ship only past passed checks', async () => {
+    project.config({
+      tracker: 'fake',
+      identity: { agent: 'agent-1' },
+      gates: { review: { mergeOnApproval: false } },
+    });
     dial({ dial: 'auto' });
     const clean = {
       tokenHash: 'h',
@@ -1043,5 +1085,118 @@ describe('review fixes (DOR-2528 FIX-FIRST)', () => {
         item: 'ACME-12',
       })
     );
+  });
+});
+
+describe('re-review fixes (DOR-2528)', () => {
+  const clean = {
+    tokenHash: 'h',
+    sha: 'abc1234def',
+    verdict: 'clean' as const,
+    reviewedSha: 'abc1234def',
+  };
+
+  // N2: DorkOS's handler ships with `flow review --approve --by person` and no
+  // --head; the run's clean reviewed commit is what gets armed.
+  it("arms the run's clean reviewed commit when no --head is given", async () => {
+    writeRun({ review: clean });
+    const result = await flow(['review', 'ACME-12', '--approve'], {
+      tracker: createFakeAdapter({ items: [started()] }),
+      forge: fakeForge({ head: 'abc1234def' }),
+    });
+    expect(result.code).toBe(EXIT.ok);
+    expect(result.forge.calls).toContainEqual({ method: 'arm', arg: [7, 'abc1234def'] });
+  });
+
+  // N2: with no known commit, say what happened without asking anyone to type a flag.
+  it('explains an approval it could not arm, without asking for a flag', async () => {
+    writeRun();
+    let text = '';
+    const result = await flow(['review', 'ACME-12', '--approve'], {
+      tracker: createFakeAdapter({ items: [started()] }),
+      forge: fakeForge({ head: 'abc1234def' }),
+    });
+    expect(result.code).toBe(EXIT.ok);
+    text = JSON.stringify(result.json);
+    expect(result.json.armed).toBe(false);
+    expect(result.json.note).toBe(
+      "Approved. Flow didn't turn on auto-merge because it can't tell which commit you approved; it will when the reviewer records one."
+    );
+    expect(text).not.toContain('--head');
+  });
+
+  // N4: when the PR will be armed, checks still running are fine (the forge's
+  // auto-merge waits for them); failing ones are not.
+  it('lets the reviewer agent ship past running checks when the PR is armed', async () => {
+    dial({ dial: 'auto' });
+    writeRun({ review: clean });
+    const result = await flow(['review', 'ACME-12', '--approve', '--by', 'reviewer-agent'], {
+      tracker: createFakeAdapter({ items: [started()] }),
+      forge: fakeForge({ head: 'abc1234def', pending: 2 }),
+    });
+    expect(result.code).toBe(EXIT.ok);
+    expect(result.forge.calls).toContainEqual({ method: 'arm', arg: [7, 'abc1234def'] });
+  });
+
+  // N4: without the arm every check must pass, and --wait is the retry point:
+  // it waits for the checks instead of handing the gate to a person.
+  it('waits for the checks with --wait when the PR will not be armed', async () => {
+    project.config({
+      tracker: 'fake',
+      identity: { agent: 'agent-1' },
+      gates: { review: { mergeOnApproval: false } },
+    });
+    dial({ dial: 'auto' });
+    writeRun({ review: clean });
+    const result = await flow(
+      ['review', 'ACME-12', '--approve', '--by', 'reviewer-agent', '--wait'],
+      {
+        tracker: createFakeAdapter({ items: [started()] }),
+        forge: fakeForge({ head: 'abc1234def', pending: [2, 1, 0] }),
+      }
+    );
+    expect(result.code).toBe(EXIT.ok);
+    expect(result.json).toMatchObject({ verdict: 'approved', by: 'reviewer-agent' });
+  });
+
+  // N4: VERIFY's reviewer runs as a session of its own, started through the
+  // launcher, in its own worktree; the token is only in its brief.
+  it("launches VERIFY's reviewer as its own session with the token only in its brief", async () => {
+    const head = git('rev-parse', 'HEAD');
+    writeRun({ stage: 'verify', status: 'running' });
+    const starts: { req: LaunchRequest }[] = [];
+    const result = await flow(['report', 'ACME-12', 'review-launch', '--sha', 'HEAD'], {
+      launcher: (host) => fakeLauncher(host, starts),
+    });
+    expect(result.code, result.stderr).toBe(EXIT.ok);
+    expect(starts).toHaveLength(1);
+    const { req } = starts[0];
+    expect(req.role).toBe('reviewer');
+    expect(req.cwd).not.toBe(project.dir);
+    expect(git('-C', req.cwd, 'rev-parse', 'HEAD')).toBe(head);
+    const brief = readFileSync(req.promptFile, 'utf8');
+    const token = /--token ([0-9a-f]{32})/.exec(brief)?.[1] as string;
+    expect(token).toBeDefined();
+    expect(JSON.stringify(result.json)).not.toContain(token);
+    expect(stored().review?.tokenHash).toBe(
+      (await import('node:crypto')).createHash('sha256').update(token).digest('hex')
+    );
+    // The launched reviewer's verdict (from its own worktree) is token-bound.
+    const verdict = await flow(
+      ['report', 'ACME-12', 'verdict', '--sha', head, '--token', token, '--clean'],
+      { cwd: req.cwd }
+    );
+    expect(verdict.code, verdict.stderr).toBe(EXIT.ok);
+    expect(stored().review).toMatchObject({ verdict: 'clean', reviewedSha: head });
+  });
+
+  // A launch that fails leaves nothing behind.
+  it('leaves no review behind when the reviewer does not start', async () => {
+    writeRun({ stage: 'verify', status: 'running' });
+    const result = await flow(['report', 'ACME-12', 'review-launch', '--sha', 'HEAD'], {
+      launcher: (host) => fakeLauncher(host, [], new LaunchError('unavailable', 'no claude')),
+    });
+    expect(result.code).toBe(EXIT.precondition);
+    expect(stored().review).toBeUndefined();
   });
 });

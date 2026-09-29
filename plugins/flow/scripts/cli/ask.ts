@@ -26,7 +26,7 @@
  * @module @dorkos/flow/cli/ask
  */
 
-import { randomBytes } from 'node:crypto';
+import { randomBytes, randomUUID } from 'node:crypto';
 import path from 'node:path';
 
 import { stopInForce } from '../autonomy.ts';
@@ -132,9 +132,20 @@ async function checkPick(ctx: VerbContext, identifier: string): Promise<VerbResu
     );
   }
   const flow = `node --experimental-strip-types ${path.join(ctx.flowRoot, 'scripts', 'flow.ts')}`;
-  const brief = checkBrief(question, identifier, flow, token);
+  // The checker runs the command with this session id, so it works on a
+  // runtime that sets none, and is never taken for the asker.
+  const session = randomUUID();
+  const brief = checkBrief(question, identifier, flow, token, session);
   return {
-    json: { ok: true, identifier, checkPick: true, token, brief, question: { ...question } },
+    json: {
+      ok: true,
+      identifier,
+      checkPick: true,
+      token,
+      session,
+      brief,
+      question: { ...question },
+    },
     text: brief,
   };
 }

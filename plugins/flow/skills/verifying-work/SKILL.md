@@ -47,10 +47,12 @@ independent review converges. Run it before the evidence: converging changes the
   `review.rubric` file (default `REVIEW.md`; relative to the repo root, else the
   current folder; absolute as is); the item's description or its `03-tasks.json` task.
   Never your account of what you did.
-- For a reviewer launched as a session of its own, that session runs `flow report <id>
-  review-brief --sha <head> --json` (flow refuses the session that wrote the code) and keeps
-  its `token`; the reviewer records its verdict with `flow report
-  <id> verdict --sha <head> --token <t> --clean` (or `--changes --findings-file <f>`). A
+- **When the reviewer agent may ship** (`flow autonomy --kind ship --json` says
+  `reviewer-agent`), the reviewer must be a session of its own, not a subagent here: a
+  subagent shares this session, and only another session's verdict is token-bound. Start
+  it with `flow report <id> review-launch --sha <head> --json`; it gets its own worktree
+  and token and records its verdict with `flow report <id> verdict --token …`. Wait for
+  that verdict (the run's `review.verdict` in `.dork/flow/flow-state.json`). Otherwise dispatch as below; a
   verdict written any other way does not count.
 - Pool findings from all reviewers: **any blocking finding blocks unless rebutted.**
 - **Converge:** fix what is justified, rebut in writing what is wrong, re-review the new
@@ -133,10 +135,11 @@ The review gate is always checked. VERIFY never advances to DONE.
 
 1. `flow stage <id> review --checkpoint-file <f>`.
 2. `flow autonomy --kind ship --json`. `answeredBy: person`: `assignToHuman(item)` and
-   **stop**. Otherwise, when the adversarial review above recorded a clean verdict at the
-   branch head (`flow report <id> review-brief` gave the reviewer its token; the reviewer
-   ran `flow report <id> verdict --clean`): `flow review <id> --approve --by
-   reviewer-agent --json`. Refused, or no clean verdict: `assignToHuman(item)` and stop.
+   **stop**. Otherwise, when the launched reviewer recorded a clean verdict at the branch
+   head: `flow review <id> --approve --by reviewer-agent --wait --json`. `--wait` is the
+   retry point: with `gates.review.mergeOnApproval` off it waits for the checks to finish
+   (with it on, the forge's auto-merge waits). Refused, or no clean verdict:
+   `assignToHuman(item)` and stop.
 3. REVIEW has no skill: never invent one, never approve without a clean check. After the
    PR merges, `/flow:done <issue>` closes the item.
 

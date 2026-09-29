@@ -494,13 +494,19 @@ export const VERBS: readonly VerbDefinition[] = [
       "                         The reviewer's verdict. The token comes from the reviewer's brief. A verdict on an older push is ignored.",
       '  blocked --question-file <f>',
       '                         Post the question on the item, mark it needs-input, and park the run.',
+      '  review-launch --sha <sha>',
+      '                         VERIFY: start an independent reviewer of a run flow drain did not start, in a session of its own. It records its verdict with verdict --token.',
       '  review-brief --sha <sha>',
-      "                         VERIFY: start a review of a run flow drain did not start. Prints the token for the reviewer's brief; the reviewer records its verdict with verdict --token.",
+      "                         A reviewer session VERIFY did not start (not the author's own session): mint its token and print it for its brief.",
     ].join('\n'),
     common: ['project', 'session'],
     positionals: [
       { name: 'identifier', required: true, description: 'The work item, e.g. ACME-12.' },
-      { name: 'kind', required: true, description: 'pushed, verdict, blocked or review-brief.' },
+      {
+        name: 'kind',
+        required: true,
+        description: 'pushed, verdict, blocked, review-launch or review-brief.',
+      },
     ],
     flags: [
       { name: 'sha', kind: 'string', value: 'sha', description: 'The commit pushed or reviewed.' },
@@ -554,7 +560,19 @@ export const VERBS: readonly VerbDefinition[] = [
         kind: 'string',
         value: 'sha',
         description:
-          'With --approve by a person: the commit you approved. The PR is armed only at it, and refused if it moved.',
+          "With --approve by a person: the commit you approved. Default: the review's clean commit. The PR is armed only at it, and refused if it moved.",
+      },
+      {
+        name: 'wait',
+        kind: 'boolean',
+        description:
+          'With --by reviewer-agent and mergeOnApproval off: wait up to 2 hours for the checks to finish.',
+      },
+      {
+        name: 'wait-minutes',
+        kind: 'string',
+        value: 'n',
+        description: 'With --wait: how long to wait instead.',
       },
       { name: 'changes', kind: 'boolean', description: 'Send it back.' },
       { name: 'note', kind: 'string', value: 'text', description: 'What should change.' },

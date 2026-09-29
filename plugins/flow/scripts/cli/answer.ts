@@ -172,7 +172,11 @@ export async function run(ctx: VerbContext): Promise<VerbResult> {
       existing !== undefined && question !== undefined
         ? await claimAnswer(store, existing.issueId, question.askedAt, recorded)
         : null;
-    if (claimed === false) throw settled();
+    if (claimed === false) {
+      throw new PreconditionError(
+        `another answer to ${identifier}'s question got there first (a person, the deadline or the reviewer agent), so nothing was posted`
+      );
+    }
     try {
       await adapter.comment(item, body);
     } catch (error) {

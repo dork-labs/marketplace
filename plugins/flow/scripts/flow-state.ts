@@ -149,6 +149,16 @@ const RunQuestionSchema: z.ZodType<RunQuestion> = z.looseObject({
   answeredBy: z.string(),
   checkAfter: z.string().nullable(),
   checkTokenHash: z.string().optional(),
+  checker: z
+    .looseObject({
+      host: z.string(),
+      runtime: z.string(),
+      sessionId: z.string(),
+      account: z.string().nullable().optional(),
+      pid: z.number().optional(),
+      cwd: z.string(),
+    })
+    .optional(),
   answer: z.looseObject({ text: z.string(), at: z.string(), by: z.string() }).optional(),
 });
 

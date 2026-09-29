@@ -1358,6 +1358,23 @@ describe('pause', () => {
     });
   });
 
+  // Re-review N5: DorkOS's Pause all may give an end to a pause that switched
+  // schedules off, because its expiry sweep switches them back on: the ids
+  // stay on the timed flag, and resume hands them back after the end.
+  it('lets a host that restores schedules give an end, and keeps the ids for it', () => {
+    const repo = makeRepo();
+    const r = roots(repo, makePlugin(path.join(base, 'p')));
+    const now = new Date('2026-09-23T12:00:00.000Z');
+    pauseFlow(r, now, ['s1']);
+    const timed = pauseFlow(r, now, ['s2'], '2026-09-23T13:00:00.000Z', { hostRestores: true });
+    expect(timed).toMatchObject({ until: '2026-09-23T13:00:00.000Z', hostSchedules: ['s1', 's2'] });
+    expect(pauseState(r, new Date('2026-09-23T14:00:00.000Z'))).toBeNull();
+    expect(resumeFlow(r, new Date('2026-09-23T14:00:00.000Z'))).toMatchObject({
+      wasPaused: false,
+      hostSchedules: ['s1', 's2'],
+    });
+  });
+
   // A pause whose end has passed is over, so pausing again starts a new pause.
   it('starts a new pause over one that has already ended', () => {
     const repo = makeRepo();

@@ -8,6 +8,7 @@ import { describe, expect, it } from 'vitest';
 
 import type { RunQuestion } from '../scripts/flow-run.ts';
 import {
+  checkBrief,
   choicesOf,
   formatWhen,
   pickComment,
@@ -186,5 +187,22 @@ describe('review fixes (DOR-2528 FIX-FIRST)', () => {
         NOW.toISOString()
       )
     ).toBeNull();
+  });
+});
+
+describe('re-review fixes (DOR-2528)', () => {
+  // N1: the checker runs the brief's command on a runtime that puts no session
+  // id in its environment (OpenCode), so the brief carries --session.
+  it("names the checking session in the brief's command", () => {
+    const brief = checkBrief(
+      question({ floor: ['outward-facing'], checkAfter: SINCE }),
+      'ACME-1',
+      'flow',
+      'tok',
+      'checker-1'
+    );
+    expect(brief).toContain(
+      'flow answer ACME-1 --pick --by reviewer-agent --token tok --session checker-1'
+    );
   });
 });

@@ -1085,17 +1085,53 @@ describe('flow drain: questions with a pick (spec flow-multiproject §7.5)', () 
     await tick();
     expect(checks()).toHaveLength(1);
 
-    supervisorEnv = { FLOW_SESSION_ID: 'question-checker' };
-    const approve = await flow(
-      ['answer', 'ACME-1', '--pick', '--by', 'reviewer-agent', '--token', token as string],
-      runOf('ACME-1').worktreePath
-    );
+    // Re-review N6: its own worktree and session, recorded so the drain can
+    // stop it; the token-bearing brief is never in the worker's worktree.
+    const worktree = runOf('ACME-1').worktreePath;
+    expect(check.req.cwd).not.toBe(worktree);
+    expect(check.req.promptFile.startsWith(worktree)).toBe(false);
+    expect(runOf('ACME-1').question?.checker).toMatchObject({
+      sessionId: check.handle.sessionId,
+      cwd: check.req.cwd,
+    });
+
+    // Re-review N1: the checker runs the brief's command exactly as written,
+    // from its own worktree, on a runtime that puts no session id in its
+    // environment (OpenCode): the brief's --session is what names it.
+    const brief = readFileSync(check.req.promptFile, 'utf8');
+    const command = /flow\.ts (answer .+)$/m.exec(brief)?.[1].trim().split(/\s+/) ?? [];
+    expect(command).toContain('--session');
+    supervisorEnv = { FLOW_SESSION_ID: '', CLAUDECODE: '' };
+    const approve = await flow(command, check.req.cwd);
     expect(approve.code, approve.stderr).toBe(0);
     supervisorEnv = {};
     clock = T0 + 63 * 60_000;
     await tick();
     expect(drainOf('ACME-1').phase).toBe('working');
     expect(runOf('ACME-1').question).toBeUndefined();
+    // Settled: the checker is stopped and its worktree removed.
+    expect(world.log.stops.map((h) => h.sessionId)).toContain(check.handle.sessionId);
+    expect(existsSync(check.req.cwd)).toBe(false);
+  }, 120_000);
+
+  // Re-review N6: a check whose reviewer never started must not hold the
+  // question forever: the claim is given back and the next pass tries again.
+  it('gives a check back when its reviewer does not start, and tries again', async () => {
+    dial({ dial: 'tell', questionDeadlineMinutes: 60 });
+    world.tracker = createFakeAdapter({ user: { id: 'agent-1' }, items: [item('ACME-1')] });
+    await tick();
+    await workerAsks('outward-facing');
+    clock = T0 + 61 * 60_000;
+    world.script.failNext = new LaunchError('unavailable', 'the host is down');
+    await tick();
+    expect(runOf('ACME-1').question?.checkTokenHash).toBeUndefined();
+    expect(runOf('ACME-1').question?.checker).toBeUndefined();
+    const checks = () => world.log.starts.filter((s) => s.req.title === 'ACME-1 question check');
+    expect(checks()).toHaveLength(0);
+    clock = T0 + 62 * 60_000;
+    await tick();
+    expect(checks()).toHaveLength(1);
+    expect(runOf('ACME-1').question?.checkTokenHash).toBeDefined();
   }, 120_000);
 
   // Never for secrets or spending: that question waits for a person.

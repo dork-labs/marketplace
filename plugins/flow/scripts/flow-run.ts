@@ -250,6 +250,19 @@ export interface RunQuestion {
    */
   checkTokenHash?: string;
   /**
+   * The reviewer session the drain started to check the pick, and its own
+   * worktree, so the drain can stop it and remove the worktree once the
+   * question is settled. Absent when no drain started one.
+   */
+  checker?: {
+    host: string;
+    runtime: string;
+    sessionId: string;
+    account?: string | null;
+    pid?: number;
+    cwd: string;
+  };
+  /**
    * The answer, once someone gave it through `flow answer` (the text, when, and
    * who: `person`, `agent-default` at the deadline, or `reviewer-agent`). The
    * drain resumes on it even when the tracker comment it also posts would not

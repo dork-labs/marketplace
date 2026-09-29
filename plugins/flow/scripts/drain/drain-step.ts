@@ -363,6 +363,14 @@ function nudge(
   return { ...next, drain: { ...next.drain, nudges: next.drain.nudges + 1 } };
 }
 
+/** The "check" that tells a worker its PR conflicts with its base, and how to fix it. */
+function conflictCheck(base: string | undefined, url: string): { name: string; url: string } {
+  return {
+    name: `a merge conflict with ${base || 'its base branch'}: merge origin/${base || 'main'}, resolve it, push, then report the push`,
+    url,
+  };
+}
+
 /** A push the review has not covered yet: the SHA, or `null`. */
 function unreviewedPush(drain: DrainState): string | null {
   return drain.pushedSha !== null && drain.pushedSha !== drain.reviewedSha ? drain.pushedSha : null;
@@ -478,12 +486,7 @@ function watching(step: Step, run: FlowRun, facts: DrainFacts, cfg: DrainStepCon
   if (pr.state === 'open' && pr.conflicting === true) {
     return send({ ...step, drain: toPhase(drain, 'fixing-ci') }, 'ci-red', {
       ...redCtx,
-      failing: [
-        {
-          name: `a merge conflict with ${pr.base || 'its base branch'}: merge origin/${pr.base || 'main'}, resolve it, push, then report the push`,
-          url: prUrl,
-        },
-      ],
+      failing: [conflictCheck(pr.base, prUrl)],
     });
   }
   if (pr.failing.length > 0 && facts.ejection === null) {
@@ -590,7 +593,10 @@ function readopt(
             flow: cfg.flow,
             identifier: run.identifier,
             prUrl: current.pr.url,
-            failing: facts.pr?.failing ?? [],
+            failing:
+              facts.pr?.state === 'open' && facts.pr.conflicting === true
+                ? [conflictCheck(facts.pr.base, current.pr.url), ...facts.pr.failing]
+                : (facts.pr?.failing ?? []),
             ...(item.answer ? { answer: item.answer } : {}),
           },
         },

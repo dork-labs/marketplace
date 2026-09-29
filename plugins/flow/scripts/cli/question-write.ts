@@ -139,3 +139,48 @@ export async function clearQuestion(
     return rest;
   });
 }
+
+/**
+ * Give back a check {@link claimCheck} handed out whose reviewer never
+ * started, so the next pass can try again. Only this exact token's hash is
+ * removed, and only while nobody answered.
+ *
+ * @param store - The run store.
+ * @param issueId - The run's key.
+ * @param askedAt - The question's `askedAt`.
+ * @param hash - The hash this call recorded.
+ */
+export async function releaseCheck(
+  store: FlowStateFile,
+  issueId: string,
+  askedAt: string,
+  hash: string
+): Promise<void> {
+  await store.updateRun(issueId, (current) => {
+    const q = current.question;
+    if (!same(q, askedAt) || q.checkTokenHash !== hash) return current;
+    const { checkTokenHash: _hash, checker: _checker, ...rest } = q;
+    return { ...current, question: rest };
+  });
+}
+
+/**
+ * Record the reviewer session that checks the pick, so the drain can stop it.
+ *
+ * @param store - The run store.
+ * @param issueId - The run's key.
+ * @param askedAt - The question's `askedAt`.
+ * @param checker - The session's handle and worktree.
+ */
+export async function recordChecker(
+  store: FlowStateFile,
+  issueId: string,
+  askedAt: string,
+  checker: NonNullable<RunQuestion['checker']>
+): Promise<void> {
+  await store.updateRun(issueId, (current) => {
+    const q = current.question;
+    if (!same(q, askedAt)) return current;
+    return { ...current, question: { ...q, checker } };
+  });
+}

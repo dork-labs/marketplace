@@ -278,13 +278,17 @@ export function parkedAnswer(
  * @param identifier - The item.
  * @param flow - The command prefix that runs flow.
  * @param token - The check's token.
+ * @param session - The checking session's id, passed with `--session` so the
+ *   command works on a runtime that puts no session id in its environment
+ *   (OpenCode), and names a session other than the asker's.
  * @returns The brief.
  */
 export function checkBrief(
   question: RunQuestion,
   identifier: string,
   flow: string,
-  token: string
+  token: string,
+  session: string
 ): string {
   const pick = pickOf(question);
   return [
@@ -297,7 +301,7 @@ export function checkBrief(
     `Why it picked "${pick?.label ?? question.pick}": ${question.why}`,
     `It is on the floor because it is ${question.floor.join(' and ')}.`,
     '',
-    `If the pick is sound, approve it: ${flow} answer ${identifier} --pick --by reviewer-agent --token ${token}`,
+    `If the pick is sound, approve it: ${flow} answer ${identifier} --pick --by reviewer-agent --token ${token} --session ${session}`,
     'If you have any doubt, do nothing: the question waits for a person.',
   ].join('\n');
 }

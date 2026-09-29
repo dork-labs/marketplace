@@ -346,7 +346,10 @@ describe('the other gh calls', () => {
         { __typename: 'StatusContext', state: 'SUCCESS' },
       ])
     ).toBe(3);
-    expect(pendingChecks(undefined)).toBe(0);
+    // Re-review N3: no checks at all have not passed (they may not have
+    // registered yet), and an unreadable rollup is no better.
+    expect(pendingChecks([])).toBe(1);
+    expect(pendingChecks(undefined)).toBe(1);
   });
 
   // recentGroupFailures reads failed merge-group runs in the window and their failing jobs.
