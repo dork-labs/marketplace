@@ -32,9 +32,12 @@ import {
 } from '../../../../scripts/fleet/sessions.ts';
 import { isRuntimeSlug } from '../../../../scripts/fleet/usage-ledger.ts';
 import { pidExists } from '../../../../scripts/cli/host-io.ts';
+import type { AutonomyKind, AutonomyStop } from '../../../../scripts/autonomy.ts';
 import type { ExecFileLike } from './advisor.ts';
+import { ideasAskDue, ideasWaiting } from './conditions.ts';
 import { readDrainSettings } from './drain-settings.ts';
 import { RouteError } from './fleet.ts';
+import type { DecisionActions } from './host-types.ts';
 import type { FlowProjectEntry } from './projects.ts';
 import { GIT_TIMEOUT_MS } from './run-store.ts';
 import type { TrackerRead } from './tracker-reads.ts';
@@ -82,30 +85,44 @@ export interface FlowCondition {
   kind: 'paused' | 'tracker-unreachable' | 'sign-in' | 'settings-problem' | 'nothing-ready';
   /** When it began. */
   since: string;
-  /** Whether an inbox item is live for it (always false until flow asks in the inbox). */
+  /** Whether an ask in the inbox is live for it. */
   escalated: boolean;
   /** For nothing-ready: items waiting to be sorted. */
   detail: { untriaged?: number };
 }
 
-/** An open decision flow raised (spec §2.1); none are raised until flow asks in the inbox. */
+/**
+ * An open ask (spec §2.1, §7.3): raised in DorkOS's inbox where it has one,
+ * and shown on flow's own pages either way.
+ */
 export interface FlowDecision {
   /** flow's key, before core namespaces it. */
   key: string;
   /** The project's name. */
   project: string;
   /** What kind of ask. */
-  kind: 'review' | 'question' | 'tracker-unreachable' | 'nothing-ready';
+  kind: 'review' | 'question' | 'sign-in' | 'ideas' | 'retry';
   /** The headline. */
   title: string;
   /** Behind ⓘ, or `null`. */
   detail: string | null;
-  /** The item, for review and question. */
+  /** The item, for review, question and retry. */
   identifier: string | null;
-  /** When it was raised. */
+  /** When flow first asked it. */
   raisedAt: string;
-  /** Which buttons it has. */
-  actions: 'ship' | 'question' | 'sign-in' | 'sort' | 'retry';
+  /** Its buttons, exactly as raised. */
+  actions: DecisionActions;
+  /**
+   * Where a person answers it: `activity` for a review gate and a floor
+   * question, whose answer must be credited to the person (§4.2, A21);
+   * `flow` for the rest, which flow's pages answer in place.
+   */
+  answerIn: 'activity' | 'flow';
+  /**
+   * The ask's words as flow's pages show them. An answer from a page sends it
+   * back, and flow refuses it if the ask changed since (§7.4).
+   */
+  shown: string;
   /** What happens, why now, what "no" means. */
   why: string;
   /** Questions: the agent's pick. */
@@ -143,6 +160,18 @@ export interface FlowProject {
   conditions: FlowCondition[];
   /** Its flow's version, its behaviour level, and what an older one lacks. */
   version: { flow: string | null; behaviour: number; olderBehaviour: string | null };
+  /**
+   * How much flow does on its own here (§7.7): the stop in force for each
+   * kind, whether a person chose it, and how flow first saw the project.
+   * `null` on a DorkOS without per-project settings.
+   */
+  autonomy: {
+    chosen: boolean;
+    firstSeen: 'new' | 'existing';
+    stops: Record<AutonomyKind, AutonomyStop>;
+  } | null;
+  /** The morning's sorting could not start by 13:00 and waits until tomorrow (§7.9). */
+  sortWaits: boolean;
   /**
    * DorkOS schedules a pause switched off that are now due back on. Only a
    * person's browser can switch a schedule on, so the Flow tab does it and
@@ -565,7 +594,11 @@ export const UNREACHABLE_SHOWN_AFTER_MS = 15 * 60_000;
 export function conditionsOf(
   pause: FlowProject['pause'],
   read: TrackerRead | null,
-  now: Date
+  now: Date,
+  extra: {
+    ideas?: { waiting: number | null; idleSince: string | null; due: boolean };
+    escalated?: ReadonlySet<FlowCondition['kind']>;
+  } = {}
 ): FlowCondition[] {
   const conditions: FlowCondition[] = [];
   if (pause !== null) {
@@ -576,16 +609,26 @@ export function conditionsOf(
       detail: {},
     });
   }
+  const escalated = (kind: FlowCondition['kind']) => extra.escalated?.has(kind) === true;
   if (read?.failure !== undefined && read.failure !== null) {
     const { kind, since } = read.failure;
     const age = now.getTime() - Date.parse(since);
     if (kind === 'auth') {
-      conditions.push({ kind: 'sign-in', since, escalated: false, detail: {} });
+      conditions.push({ kind: 'sign-in', since, escalated: escalated('sign-in'), detail: {} });
     } else if (kind === 'settings') {
       conditions.push({ kind: 'settings-problem', since, escalated: false, detail: {} });
     } else if (age >= UNREACHABLE_SHOWN_AFTER_MS) {
       conditions.push({ kind: 'tracker-unreachable', since, escalated: false, detail: {} });
     }
+  }
+  const ideas = extra.ideas;
+  if (ideas?.due === true && ideas.waiting !== null && ideas.idleSince !== null) {
+    conditions.push({
+      kind: 'nothing-ready',
+      since: ideas.idleSince,
+      escalated: escalated('nothing-ready'),
+      detail: { untriaged: ideas.waiting },
+    });
   }
   return conditions;
 }
@@ -596,10 +639,28 @@ export function conditionsOf(
  * @param entry - The project.
  * @returns How "Up next" is reached.
  */
-export function upNextOf(entry: FlowProjectEntry): FlowProject['upNext'] {
+export function upNextOf(
+  entry: FlowProjectEntry,
+  ownAdapterAllowed = false
+): FlowProject['upNext'] {
   if (entry.tracker === null) return 'read';
   if (entry.tracker.transport === 'mcp') return 'agent-only';
-  return entry.tracker.adapter === 'shipped' ? 'read' : 'own-code';
+  if (entry.tracker.adapter === 'shipped') return 'read';
+  return entry.tracker.adapter === 'project' && ownAdapterAllowed ? 'read' : 'own-code';
+}
+
+/** What the model adds to a project beyond its files (its dial, its asks, its adapter). */
+export interface ProjectExtras {
+  /** A person allowed the project's own adapter. */
+  ownAdapterAllowed?: boolean;
+  /** Its dial, or `null` without per-project settings. */
+  autonomy?: FlowProject['autonomy'];
+  /** Since when nothing has run there, or `null` while something runs. */
+  idleSince?: string | null;
+  /** The conditions an ask is live for. */
+  escalated?: ReadonlySet<FlowCondition['kind']>;
+  /** The morning's sorting waits until tomorrow. */
+  sortWaits?: boolean;
 }
 
 /**
@@ -617,8 +678,10 @@ export function buildProject(input: {
   pidAlive?: (pid: number) => boolean;
   now: Date;
   restoreSchedules?: readonly string[];
+  extras?: ProjectExtras;
 }): FlowProject {
   const { entry, read, now } = input;
+  const extras = input.extras ?? {};
   const pidAlive = input.pidAlive ?? pidExists;
   const store = readRunStore(entry.root) ?? {};
   const runs = projectRuns({
@@ -643,6 +706,20 @@ export function buildProject(input: {
   }
   const flag = readPauseFlag(pauseFlagPath(entry.root), now);
   const pause = flag?.pauses ? { since: flag.since, until: flag.until } : null;
+  const slots = slotsOf(readDrainSettings(entry.root).parallel);
+  const waiting = ideasWaiting(read);
+  const idleSince = extras.idleSince ?? null;
+  const autonomy = extras.autonomy ?? null;
+  const due = ideasAskDue({
+    waiting,
+    // Without the dial, sorting is never automatic, so the ask is the only way.
+    stop: autonomy === null ? 'ask' : autonomy.stops.sort,
+    idleSince,
+    busy,
+    slots,
+    paused: pause !== null,
+    now,
+  });
   return {
     name: entry.name,
     root: entry.root,
@@ -654,10 +731,15 @@ export function buildProject(input: {
     pause,
     runs,
     queue: read?.queue ?? null,
-    upNext: upNextOf(entry),
-    capacity: { busy, slots: slotsOf(readDrainSettings(entry.root).parallel) },
-    conditions: conditionsOf(pause, read, now),
+    upNext: upNextOf(entry, extras.ownAdapterAllowed === true),
+    capacity: { busy, slots },
+    conditions: conditionsOf(pause, read, now, {
+      ideas: { waiting, idleSince, due },
+      escalated: extras.escalated,
+    }),
     version: entry.version,
+    autonomy,
+    sortWaits: extras.sortWaits === true,
     restoreSchedules: [...(input.restoreSchedules ?? [])],
   };
 }

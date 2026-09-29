@@ -282,6 +282,8 @@ export function fakeCtx(
     projects?: ProjectsApi;
     /** Whether the host has the person guard (default: it does). */
     personGuard?: boolean;
+    /** More seams: the inbox, per-project settings, starting work. */
+    extra?: Pick<DataProviderContext, 'inbox' | 'projectSettings' | 'sessions'>;
   } = {}
 ) {
   const requirePerson = fakePersonGuard();
@@ -333,6 +335,7 @@ export function fakeCtx(
     ...(ctxAccounts === undefined ? {} : { accounts: ctxAccounts }),
     ...(opts.projects === undefined ? {} : { projects: opts.projects }),
     ...(opts.personGuard === false ? {} : { requirePerson }),
+    ...opts.extra,
   };
   return {
     ctx,

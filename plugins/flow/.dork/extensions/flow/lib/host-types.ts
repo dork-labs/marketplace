@@ -317,6 +317,8 @@ export interface ReadableState {
   currentCwd: string | null;
   /** The project of `currentCwd`; null for no project or while resolving. */
   currentProject?: ProjectRef | null;
+  /** Whether Require login is on. Missing on a DorkOS from before it. */
+  requireLogin?: boolean;
 }
 
 /**
@@ -350,6 +352,219 @@ export interface DataProviderContext {
    * changes something is registered at all (spec `flow-multiproject` §10).
    */
   readonly requirePerson?: RouteMiddleware;
+  /** Core's inbox. Missing on a DorkOS from before it: then flow raises nothing (§7.6). */
+  readonly inbox?: InboxApi;
+  /** flow's per-project settings, read-only. Missing on a DorkOS from before them. */
+  readonly projectSettings?: ProjectSettingsReader;
+  /**
+   * Starting work in a new chat (contract 1.3.0). Missing on a DorkOS from
+   * before it: then an ask's button opens the project's page, which says what
+   * to type (§7.9).
+   */
+  readonly sessions?: SessionsApi;
+}
+
+/**
+ * How a person can answer an inbox decision (DorkOS `DecisionActions`): 👎/👍
+ * each labelled as its outcome, one word button (an in-app `href`, or an
+ * inline text field), or a question's chips with the agent's pick and deadline.
+ */
+export type DecisionActions =
+  | { kind: 'yes-no'; approveLabel: string; rejectLabel: string; rejectAsksForNote?: boolean }
+  | {
+      kind: 'word';
+      label: string;
+      /** In-app path; core route or '/x/<this extension id>/…'. Ignored when `input` is set. */
+      href?: string;
+      /** Show an inline text field; its text reaches onAction. maxLength ≤ 2000. */
+      input?: { placeholder: string; maxLength: number };
+    }
+  | {
+      kind: 'choice';
+      /** 2-5 choices; label ≤ 40. */
+      choices: { id: string; label: string }[];
+      /** The agent's pick. Required when decideBy is set. */
+      defaultChoice?: string;
+      /** ISO deadline; at it core calls onAction with defaultChoice, decidedBy 'deadline'. */
+      decideBy?: string;
+      /** Offer "Reply…". */
+      allowReply?: boolean;
+    };
+
+/** What `ctx.inbox.raise` takes (DorkOS `DecisionInput`). */
+export interface DecisionInput {
+  /** Extension-local; core namespaces it. */
+  key: string;
+  /** A question or an outcome, never a command or id. ≤ 120. */
+  title: string;
+  /** What happens, why now, what a "no" means. 1-300. */
+  why: string;
+  /** ≤ 500, behind ⓘ. */
+  detail?: string;
+  /** Any path inside the project. */
+  project?: string;
+  /** The project heading's muted label, e.g. "Linear DOR". */
+  projectLabel?: string;
+  /** ISO time the condition began. */
+  since?: string;
+  /** How a person answers it. */
+  actions: DecisionActions;
+  /** In-app path the row's title opens. */
+  link?: string;
+}
+
+/** One decision as core stored it (DorkOS `RaisedDecision`). */
+export interface RaisedDecision {
+  /** Core's id for the row. */
+  readonly id: string;
+  /** The extension's own key. */
+  readonly key: string;
+  /** A question or an outcome. */
+  readonly title: string;
+  /** The second line. */
+  readonly why: string;
+  /** Shown behind ⓘ, or null. */
+  readonly detail: string | null;
+  /** The project core resolved, or null. */
+  readonly project: ProjectRef | null;
+  /** The project heading's muted label, or null. */
+  readonly projectLabel: string | null;
+  /** When the condition began, or null. */
+  readonly since: string | null;
+  /** How a person answers it. */
+  readonly actions: DecisionActions;
+  /** In-app path the title opens, or null. */
+  readonly link: string | null;
+  /** When it was first raised. */
+  readonly raisedAt: string;
+  /** When it was last raised or changed. */
+  readonly updatedAt: string;
+}
+
+/** `cleared` = resolved on its own; `cancelled` = no longer needed. */
+export type DecisionOutcome = 'approved' | 'rejected' | 'answered' | 'cleared' | 'cancelled';
+
+/** Who settled a decision, when it was not a person (DorkOS `DecisionActor`). */
+export type DecisionActor = { kind: 'agent' | 'rule'; label: string } | { kind: 'deadline' };
+
+/** What the `onAction` handler is told (DorkOS `DecisionActionEvent`). */
+export interface DecisionActionEvent {
+  /** The decision's key. */
+  readonly key: string;
+  /** 'offer' is the second call when a person said Yes to a follow-up offer. */
+  readonly action: 'approve' | 'reject' | 'word' | 'choice' | 'offer';
+  /** The chosen chip, for 'choice'. */
+  readonly choiceId: string | null;
+  /** 'person', or 'deadline' when core applied defaultChoice at decideBy. */
+  readonly decidedBy: 'person' | 'deadline';
+  /** The offer being accepted, for 'offer'. */
+  readonly offerId: string | null;
+  /** Set when a person answered in core's UI; pass back as `answering` after a keepOpen. */
+  readonly pendingActionId: string | null;
+  /** The "Send it back" note, when the reject asked for one. */
+  readonly note: string | null;
+  /** The typed answer. */
+  readonly text: string | null;
+  /** The decision's project, or null. */
+  readonly project: ProjectRef | null;
+}
+
+/** A chat this extension started, drawn on the row ("Sorting 12 ideas… · Watch"). */
+export interface DecisionWatch {
+  /** The chat's session id. */
+  sessionId: string;
+  /** What it is doing, ≤ 40. */
+  label: string;
+}
+
+/** A one-time "do this on its own next time" line under the answered row. */
+export interface DecisionOffer {
+  /** Plain text, ≤ 160. */
+  text: string;
+  /** ≤ 64; comes back as `offerId` when the person says Yes. */
+  offerId: string;
+  /** Applied by core on the person's Yes: a shallow merge into the project's settings. */
+  settingsPatch?: { project: string; patch: Record<string, unknown> };
+}
+
+/** What the `onAction` handler answers (DorkOS `DecisionActionResult`). */
+export type DecisionActionResult =
+  | {
+      resolve: 'approved' | 'rejected' | 'answered';
+      navigate?: string;
+      offer?: DecisionOffer;
+      message?: string;
+      watch?: DecisionWatch;
+    }
+  | { keepOpen: true; message?: string; navigate?: string; watch?: DecisionWatch }
+  | { settled: true };
+
+/** What `ctx.inbox.record` takes: a decision made without asking. */
+export type RecordedDecisionInput = Omit<DecisionInput, 'actions' | 'since'> & {
+  outcome: 'approved' | 'rejected' | 'answered';
+  by: DecisionActor;
+  /** true (Tell me after): unread in Activity. false (Just do it): quiet. */
+  tell?: boolean;
+  /** What was chosen, in words (≤ 40). */
+  choiceLabel?: string;
+};
+
+/** Core's inbox, as one extension sees it (DorkOS `InboxApi`). */
+export interface InboxApi {
+  /** Raise, or update in place, the one open decision for `key`. */
+  raise(input: DecisionInput): Promise<RaisedDecision>;
+  /** Settle it. False when nothing was open. */
+  resolve(
+    key: string,
+    opts: {
+      outcome: DecisionOutcome;
+      by?: DecisionActor;
+      answering?: string;
+      offer?: DecisionOffer;
+      watch?: DecisionWatch;
+    }
+  ): Promise<boolean>;
+  /** Write a history-only row for something decided without asking. */
+  record(input: RecordedDecisionInput): Promise<void>;
+  /** This extension's open decisions. */
+  list(): Promise<RaisedDecision[]>;
+  /** The one handler for a person's answer; bounded at 5s. */
+  onAction(
+    handler: (event: DecisionActionEvent) => DecisionActionResult | Promise<DecisionActionResult>
+  ): () => void;
+}
+
+/** The server half's read-only view of flow's per-project settings. */
+export interface ProjectSettingsReader {
+  /** The stored value for a project, or null. */
+  get<T = unknown>(projectRoot: string): Promise<T | null>;
+  /** Called with the project root whenever a person changes that project's value. */
+  onChange(listener: (projectRoot: string) => void): () => void;
+}
+
+/**
+ * What starting work in a new chat takes (DorkOS `StartWorkInput`, contract
+ * 1.3.0). The vendored fixture is 1.2.0, so this mirror is checked when the
+ * fixture is refreshed; until then flow probes for the seam at run time.
+ */
+export interface StartWorkInput {
+  /** Any path inside a known project. */
+  project: string;
+  /** Sent at once as the first message (≤ 20,000). Never shown as the headline. */
+  prompt: string;
+  /** The chat's title, plain words (1-80). */
+  title: string;
+  /** Why it was started (1-200), shown as the chat's first line. */
+  reason: string;
+}
+
+/** Why a start was refused (DorkOS `StartWorkError.code`). */
+export type StartWorkErrorCode = 'not_a_project' | 'account_not_allowed_here' | 'start_limit';
+
+/** `ctx.sessions` (contract 1.3.0). */
+export interface SessionsApi {
+  /** Start work in a new chat in a project, without a person. */
+  start(input: StartWorkInput): Promise<{ sessionId: string }>;
 }
 
 /** One tracker item a chat works on, newest first in lists (DorkOS `TrackerItemRef`). */
@@ -488,4 +703,61 @@ export interface ClientApi {
    * DorkOS from before tab markers: then the Flow tab gets no dot.
    */
   setTabMarker?(tabId: string, marker: 'attention' | null): void;
+  /**
+   * This extension's open decisions. Missing on a DorkOS without the inbox:
+   * then flow's pages answer through flow's own route (§7.6).
+   */
+  listDecisions?(): Promise<ExtensionDecisionView[]>;
+  /** Answer one of this extension's decisions from its own page. */
+  answerDecision?(decisionId: string, answer: DecisionAnswer): Promise<DecisionAnswerResult>;
+  /**
+   * Start work in a NEW chat, as the person (contract 1.3.0). Missing on a
+   * DorkOS from before it: then a button says what to type instead (§7.9).
+   */
+  startWork?(input: StartWorkInput): Promise<{ sessionId: string }>;
+}
+
+/** An answer given on the extension's own page (DorkOS `DecisionAnswer`). */
+export type DecisionAnswer =
+  | { action: 'approve' }
+  | { action: 'reject'; note?: string }
+  | { action: 'word'; text?: string }
+  | { action: 'choice'; choiceId?: string; text?: string };
+
+/** What `api.answerDecision` answers (DorkOS `DecisionAnswerResult`). */
+export interface DecisionAnswerResult {
+  /** Whether the answer settled it. */
+  readonly resolved: boolean;
+  /** Something to tell the person, or null. */
+  readonly message: string | null;
+  /** The checked in-app path the extension answered with, or null. */
+  readonly navigate: string | null;
+  /** "Sorting 12 ideas… · Watch", when the handler returned one. */
+  readonly watch: { sessionId: string; label: string } | null;
+}
+
+/** One open decision as the client sees it (DorkOS `ExtensionDecisionView`). */
+export interface ExtensionDecisionView {
+  /** Core's id for the row: what `answerDecision` takes. */
+  readonly id: string;
+  /** The extension's own key. */
+  readonly key: string;
+  /** A question or an outcome. */
+  readonly title: string;
+  /** What happens, why now, what "no" means. */
+  readonly why: string;
+  /** Shown behind ⓘ, or null. */
+  readonly detail: string | null;
+  /** The project it belongs to, or null. */
+  readonly project: ProjectRef | null;
+  /** The project heading's muted label, or null. */
+  readonly projectLabel: string | null;
+  /** When the condition began, or null. */
+  readonly since: string | null;
+  /** How to answer it. */
+  readonly actions: DecisionActions;
+  /** In-app path the title opens, or null. */
+  readonly link: string | null;
+  /** When it was first raised. */
+  readonly raisedAt: string;
 }

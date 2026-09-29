@@ -147,6 +147,8 @@ export function flowProject(name: string, extra: Partial<FlowProject> = {}): Flo
     capacity: { busy: 0, slots: 1 },
     conditions: [],
     version: { flow: '0.49.0', behaviour: 1, olderBehaviour: null },
+    autonomy: null,
+    sortWaits: false,
     restoreSchedules: [],
     ...extra,
   };

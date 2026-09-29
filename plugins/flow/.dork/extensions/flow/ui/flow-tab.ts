@@ -19,6 +19,7 @@
 import type { ComponentType } from 'react';
 import type { FlowModel, FlowProject } from '../lib/model.ts';
 import type { ClientApi } from '../lib/host-types.ts';
+import type { AnswerApi } from './answers.ts';
 import { AllProjects } from './all-projects.ts';
 import { hasPages } from './links.ts';
 import { FOCUS_CSS, PANEL } from './parts.ts';
@@ -58,7 +59,7 @@ export function chatProject(snapshot: StoreSnapshot, model: FlowModel): FlowProj
  * @returns The tab's component.
  */
 export function createFlowTab(
-  api: Pick<ClientApi, 'navigate' | 'registerPage'>,
+  api: AnswerApi & Pick<ClientApi, 'registerPage'>,
   store: FlowStore
 ): ComponentType {
   const pages = hasPages(api);

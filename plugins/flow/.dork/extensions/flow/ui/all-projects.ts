@@ -12,6 +12,7 @@ import type { ClientApi, ProjectRef } from '../lib/host-types.ts';
 import { HOME_PATH, projectPath } from './links.ts';
 import { pausedText } from './panel-format.ts';
 import { CONDITION, GROW, LINK, MUTED, ROW } from './parts.ts';
+import { StartButton } from './answers.ts';
 import { MARKETPLACE_ROUTE, conditionLine } from './project-lens.ts';
 import { h, type Node } from './react.ts';
 
@@ -102,7 +103,7 @@ export function projectLine(
 export function AllProjects(props: {
   model: FlowModel;
   currentProject: ProjectRef | null | undefined;
-  api: Pick<ClientApi, 'navigate'>;
+  api: Pick<ClientApi, 'navigate' | 'startWork'>;
   pages?: boolean;
 }): Node {
   const { model, currentProject, api } = props;
@@ -167,11 +168,18 @@ export function AllProjects(props: {
         'p',
         { key: 'setup', style: { ...CONDITION, background: 'transparent' } },
         `${SET_UP_HERE_TEXT} `,
-        h(
-          'button',
-          { type: 'button', style: LINK, onClick: () => api.navigate(MARKETPLACE_ROUTE) },
-          'Set up flow here'
-        )
+        typeof api.startWork === 'function'
+          ? h(StartButton, {
+              kind: 'set-up',
+              label: 'Set up flow here',
+              project: { name: currentProject.name, root: currentProject.root },
+              api,
+            })
+          : h(
+              'button',
+              { type: 'button', style: LINK, onClick: () => api.navigate(MARKETPLACE_ROUTE) },
+              'Set up flow here'
+            )
       )
     );
   }

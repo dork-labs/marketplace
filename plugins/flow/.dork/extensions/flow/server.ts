@@ -14,6 +14,14 @@
  *   forgets DorkOS schedules the Flow tab switched back on after a pause.
  * - `GET /capacity` answers "Capacity this week" on Flow home: each account's
  *   weekly use and each project's work from its journal. Read on demand, never pushed.
+ * - flow asks in DorkOS's inbox (`ctx.inbox`) only when only a person can
+ *   help, with the words on every ask saying what happens and why, and
+ *   answers through one handler (`lib/decisions.ts`). Who answers each kind is
+ *   the project's dial, read from core's person-only per-project settings
+ *   (`ctx.projectSettings`); flow's server half never writes it. On a DorkOS
+ *   without the inbox, `POST /decisions/:key` answers from flow's own pages.
+ * - `POST /projects/:name/allow-adapter` lets flow run a project's own tracker
+ *   adapter, as it is now.
  * - Every route that changes something runs behind DorkOS's person guard
  *   (`ctx.requirePerson`): an agent calling flow's routes cannot pause a
  *   project or change an account's policy. On a DorkOS without the guard the
@@ -50,7 +58,10 @@ import type {
   AccountsApi,
   DataProviderContext,
   ExtensionRouter,
+  InboxApi,
+  ProjectSettingsReader,
   ProjectsApi,
+  SessionsApi,
   RouteHandler,
   RouteMiddleware,
   RouteResponse,
@@ -78,6 +89,8 @@ export interface FlowExtensionOverrides {
   clockMs?: () => number;
   /** Whether a process is alive. */
   pidAlive?: (pid: number) => boolean;
+  /** How long an inbox answer waits before "Sending…". */
+  answerWaitMs?: number;
 }
 
 /** What {@link createFlowExtension} built. */
@@ -179,6 +192,56 @@ export function hostSupportsPersonGuard(
 }
 
 /**
+ * Whether the host has core's inbox (`ctx.inbox`).
+ *
+ * @param ctx - The host's context.
+ * @returns True when it does.
+ */
+export function hostSupportsInbox(
+  ctx: DataProviderContext
+): ctx is DataProviderContext & { inbox: InboxApi } {
+  const inbox = ctx.inbox;
+  return (
+    typeof inbox?.raise === 'function' &&
+    typeof inbox.resolve === 'function' &&
+    typeof inbox.record === 'function' &&
+    typeof inbox.list === 'function' &&
+    typeof inbox.onAction === 'function'
+  );
+}
+
+/**
+ * Whether the host keeps flow's per-project settings (`ctx.projectSettings`).
+ *
+ * @param ctx - The host's context.
+ * @returns True when it does.
+ */
+export function hostSupportsProjectSettings(
+  ctx: DataProviderContext
+): ctx is DataProviderContext & { projectSettings: ProjectSettingsReader } {
+  return (
+    typeof ctx.projectSettings?.get === 'function' &&
+    typeof ctx.projectSettings.onChange === 'function'
+  );
+}
+
+/**
+ * Whether the host can start work in a new chat (`ctx.sessions.start`,
+ * contract 1.3.0).
+ *
+ * @param ctx - The host's context.
+ * @returns True when it can.
+ */
+export function hostSupportsStartWork(
+  ctx: DataProviderContext
+): ctx is DataProviderContext & { sessions: SessionsApi } {
+  return typeof ctx.sessions?.start === 'function';
+}
+
+/** What the answer route says on a DorkOS with the inbox (§7.6). */
+export const ANSWER_IN_INBOX = 'Answer this in the Activity inbox.';
+
+/**
  * Register the routes and the advisor.
  *
  * @param router - The router DorkOS mounts at `/api/ext/flow/`.
@@ -204,6 +267,8 @@ export function createFlowExtension(
     router.post('/resume', tooOld);
     router.post('/schedules/restored', tooOld);
     router.get('/capacity', tooOld);
+    router.post('/decisions/:key', tooOld);
+    router.post('/projects/:name/allow-adapter', tooOld);
     return { advisor: null, watcher: null, model: null, dispose: () => {} };
   }
 
@@ -275,7 +340,17 @@ export function createFlowExtension(
     canChange: guard !== undefined,
     log,
     pidAlive: overrides.pidAlive,
+    inbox: hostSupportsInbox(ctx) ? ctx.inbox : undefined,
+    settings: hostSupportsProjectSettings(ctx) ? ctx.projectSettings : undefined,
+    sessions: hostSupportsStartWork(ctx) ? ctx.sessions : undefined,
+    answerWaitMs: overrides.answerWaitMs,
   });
+  // The first pass runs now, and answers are taken only once it is done.
+  void model.decisions.start();
+  void model.poll();
+  const stopSettings = hostSupportsProjectSettings(ctx)
+    ? ctx.projectSettings.onChange(() => void model.poll())
+    : () => {};
   router.get(
     '/model',
     handle(async (req, res) => {
@@ -316,6 +391,27 @@ export function createFlowExtension(
       ...guarded(
         handle(async (req, res) => {
           res.status(200).json(await model.resume(req.body));
+        })
+      )
+    );
+    router.post(
+      '/decisions/:key',
+      ...guarded(
+        handle(async (req, res) => {
+          // With the inbox, core's person bar and history are the path (§7.4).
+          if (hostSupportsInbox(ctx)) {
+            res.status(410).json({ error: ANSWER_IN_INBOX, refusedBy: 'flow' });
+            return;
+          }
+          res.status(200).json(await model.answerLocal(req.params.key, req.body));
+        })
+      )
+    );
+    router.post(
+      '/projects/:name/allow-adapter',
+      ...guarded(
+        handle(async (req, res) => {
+          res.status(200).json(await model.allowAdapter(req.params.name));
         })
       )
     );
@@ -362,6 +458,7 @@ export function createFlowExtension(
       stopWatching();
       stopModelPoll();
       stopProjects();
+      stopSettings();
       model.dispose();
       unregister();
     },

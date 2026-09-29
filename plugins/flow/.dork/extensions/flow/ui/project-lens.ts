@@ -7,8 +7,10 @@
  */
 
 import type { FlowCondition, FlowModel, FlowProject, FlowRunRow } from '../lib/model.ts';
-import type { ClientApi } from '../lib/host-types.ts';
-import { UNREACHABLE_MESSAGE, pauseFlow, resumeFlow } from './api.ts';
+import type { StartKind } from '../lib/start-words.ts';
+import { UNREACHABLE_MESSAGE, allowAdapter, pauseFlow, resumeFlow } from './api.ts';
+import { StartButton, hasInbox, type AnswerApi } from './answers.ts';
+import { DecisionRow } from './page-parts.ts';
 import { HOME_PATH, SETTINGS_TAB_LINK, settingsPath, webHref } from './links.ts';
 import { PILL_TEXT, clockTime, pausedText, runningCaption } from './panel-format.ts';
 import { PauseMenu } from './pause-menu.ts';
@@ -48,6 +50,12 @@ const SR_ONLY: Style = {
 /** The not-set-up line (§3.2 item 6). */
 export const NOT_SET_UP_TEXT = "Flow is installed but doesn't know where your work lives yet.";
 
+/** The line for a project flow saw before the dial existed (§7.7), until a person chooses. */
+export const CHOOSE_AUTONOMY_TEXT = 'Flow can do more on its own now.';
+
+/** The line when the morning's sorting could not start by 13:00 (§7.9). */
+export const SORT_WAITS_TEXT = 'Sorting waits until tomorrow: flow is busy.';
+
 /** The words where Pause would be, on a DorkOS that cannot tell a person from an agent. */
 export const PAUSE_FROM_CHAT_TEXT = 'Pause from a chat in this project.';
 
@@ -82,7 +90,12 @@ export function conditionLine(
   condition: FlowCondition,
   project: FlowProject,
   locale?: string
-): { text: string; hint: string | null } | null {
+): {
+  text: string;
+  hint: string | null;
+  /** The button that fixes it by starting work in a new chat (§7.9), when there is one. */
+  start?: { kind: StartKind; label: string; count: number | null };
+} | null {
   const tracker = trackerName(project);
   switch (condition.kind) {
     case 'tracker-unreachable':
@@ -94,6 +107,7 @@ export function conditionLine(
       return {
         text: `Sign in to ${tracker} again. Flow can't read or update ${project.name}'s work in ${tracker} until you do. Nothing is lost; it's waiting.`,
         hint: `In a chat in ${project.name}, type /flow:init and ask it to reconnect ${tracker}.`,
+        start: { kind: 'sign-in', label: 'Sign in', count: null },
       };
     case 'settings-problem':
       return {
@@ -104,6 +118,7 @@ export function conditionLine(
       return {
         text: `${condition.detail.untriaged ?? 'Some'} new ideas haven't been sorted. Flow has had nothing ready to work on in ${project.name} for a day.`,
         hint: `In a chat in ${project.name}, type /flow:triage to sort them.`,
+        start: { kind: 'sort', label: 'Sort them', count: condition.detail.untriaged ?? null },
       };
     default:
       return null;
@@ -122,7 +137,7 @@ export function upNextNote(project: FlowProject): string | null {
     return `Up next is shown when flow can reach ${trackerName(project)} from here.`;
   }
   if (project.upNext === 'own-code') {
-    return `Up next isn't shown: ${project.name} reaches ${trackerName(project)} with code of its own, and flow doesn't run it without your say.`;
+    return `Read ${trackerName(project)} with this project's own adapter? It runs code from this repo.`;
   }
   return null;
 }
@@ -179,12 +194,17 @@ export function settingsLabel(name: string): string {
 export function ProjectLens(props: {
   project: FlowProject;
   model: FlowModel;
-  api: Pick<ClientApi, 'navigate'>;
+  api: AnswerApi;
   store: FlowStore;
   schedulesStuck?: boolean;
   /** Whether flow's pages exist: then ⚙ and "need you elsewhere" open them. */
   pages?: boolean;
   onShowAll?: () => void;
+  /**
+   * Whether the project's asks show at the top: by default only on a DorkOS
+   * without the inbox, where the lens is where they are answered (§3.2, §7.6).
+   */
+  decisionsOnTop?: boolean;
 }): Node {
   const { project, model, api, store } = props;
   const [menu, setMenu] = useState(false);
@@ -362,13 +382,31 @@ export function ProjectLens(props: {
     );
   }
 
+  const canStart = typeof api.startWork === 'function';
+  const place = { name: project.name, root: project.root, tracker: project.tracker?.label ?? null };
+  if (props.decisionsOnTop ?? !hasInbox(api)) {
+    for (const decision of model.decisions.filter((d) => d.project === project.name)) {
+      body.push(
+        h(DecisionRow, {
+          key: `ask-${decision.key}`,
+          decision,
+          showProject: false,
+          api,
+          root: project.root,
+          store,
+        })
+      );
+    }
+  }
   if (project.setup === 'not-set-up') {
     body.push(
       h(
         'p',
         { key: 'setup', style: CONDITION },
         NOT_SET_UP_TEXT,
-        h(Hint, { text: `Type /flow:init in a chat in ${project.name} to connect a tracker.` })
+        canStart
+          ? h(StartButton, { kind: 'connect', label: 'Connect a tracker', project: place, api })
+          : h(Hint, { text: `Type /flow:init in a chat in ${project.name} to connect a tracker.` })
       )
     );
   } else {
@@ -380,7 +418,40 @@ export function ProjectLens(props: {
           'p',
           { key: `condition-${condition.kind}`, style: CONDITION },
           line.text,
-          line.hint === null ? null : h(Hint, { text: line.hint })
+          line.start !== undefined && canStart
+            ? h(StartButton, {
+                kind: line.start.kind,
+                label: line.start.label,
+                project: place,
+                count: line.start.count,
+                api,
+              })
+            : line.hint === null
+              ? null
+              : h(Hint, { text: line.hint })
+        )
+      );
+    }
+    if (project.sortWaits) {
+      body.push(h('p', { key: 'sort-waits', style: CONDITION }, SORT_WAITS_TEXT));
+    }
+    const dial = project.autonomy;
+    if (dial !== null && !dial.chosen && dial.firstSeen === 'existing') {
+      body.push(
+        h(
+          'p',
+          { key: 'autonomy', style: { ...MUTED, marginTop: '6px' } },
+          `${CHOOSE_AUTONOMY_TEXT} `,
+          h(
+            'button',
+            {
+              type: 'button',
+              style: LINK,
+              onClick: () =>
+                api.navigate(props.pages === true ? settingsPath(project.name) : SETTINGS_TAB_LINK),
+            },
+            'Choose how much →'
+          )
         )
       );
     }
@@ -414,8 +485,21 @@ export function ProjectLens(props: {
       }
     } else {
       const note = upNextNote(project);
-      if (note !== null)
-        body.push(h('p', { key: 'next-note', style: { ...MUTED, marginTop: '8px' } }, note));
+      if (note !== null) {
+        const allow =
+          project.upNext === 'own-code' && model.canChange
+            ? h(
+                'button',
+                {
+                  type: 'button',
+                  style: { ...LINK, marginLeft: '4px' },
+                  onClick: () => act(() => allowAdapter(project.name)),
+                },
+                'Allow'
+              )
+            : null;
+        body.push(h('p', { key: 'next-note', style: { ...MUTED, marginTop: '8px' } }, note, allow));
+      }
     }
   }
 

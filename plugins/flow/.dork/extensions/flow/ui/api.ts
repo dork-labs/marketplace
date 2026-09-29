@@ -7,6 +7,7 @@
 
 import type { CapacityView } from '../lib/capacity.ts';
 import type { FleetAccount, FleetView } from '../lib/fleet.ts';
+import type { DecisionAnswer } from '../lib/host-types.ts';
 import type { FlowModel } from '../lib/model.ts';
 
 /** The desktop shell's bridge, when the tab runs inside the DorkOS app. */
@@ -211,4 +212,46 @@ export function schedulesRestored(project: string, ids: readonly string[]): Prom
  */
 export function getCapacity(since: string): Promise<CapacityView> {
   return call<CapacityView>('GET', `/capacity?since=${encodeURIComponent(since)}`);
+}
+
+/** What flow's own answer route says (a DorkOS without the inbox, §7.6). */
+export interface LocalAnswerReply {
+  /** Whether the answer settled the ask. */
+  resolved: boolean;
+  /** Something to tell the person, or `null`. */
+  message: string | null;
+  /** A chat flow started for it, or `null`. */
+  watch: { sessionId: string; label: string } | null;
+  /** The new model. */
+  model: FlowModel;
+}
+
+/**
+ * Answer an ask through flow's own route, on a DorkOS without the inbox.
+ *
+ * @param key - The ask's key.
+ * @param body - The answer, as DorkOS's `DecisionAnswer` shapes it.
+ * @param shown - The ask's words as the page showed them; flow refuses the
+ *   answer when the ask changed since.
+ * @returns What happened, and the new model.
+ */
+export function answerHere(
+  key: string,
+  body: DecisionAnswer,
+  shown: string
+): Promise<LocalAnswerReply> {
+  return call<LocalAnswerReply>('POST', `/decisions/${encodeURIComponent(key)}`, {
+    ...body,
+    shown,
+  });
+}
+
+/**
+ * Let flow run a project's own tracker adapter, as it is now.
+ *
+ * @param project - The project's name.
+ * @returns The new model.
+ */
+export function allowAdapter(project: string): Promise<FlowModel> {
+  return call<FlowModel>('POST', `/projects/${encodeURIComponent(project)}/allow-adapter`);
 }
