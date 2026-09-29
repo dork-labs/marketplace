@@ -36,7 +36,7 @@ export const RULE_BEHAVIOUR = 2;
 
 /** Said while an older flow still runs somewhere. */
 export const WAITING_FOR_FLOW_TEXT =
-  "Flow will switch to DorkOS's rule once every project runs flow 0.52 or newer.";
+  "Until every project runs flow 0.52 or newer, flow keeps its own list too; then a button here lets flow switch to DorkOS's rule.";
 
 /** Said when DorkOS was written but flow could not note the move. */
 function unrecordedText(label: string, names: string): string {

@@ -110,13 +110,232 @@ describe('activate', () => {
     const { api, commands, dialogs } = fullHost({ currentCwd: '/x', currentProject: null });
     const cleanup = activate(api);
     await act(async () => {});
-    commands.get('pause-project')?.();
     const dialog = dialogs.get('pause-project')!;
+    // DorkOS draws every registered dialog all the time, closed.
+    render(React.createElement(dialog.component, { open: false } as never));
+    expect(screen.queryByText(NOT_IN_PROJECT_TEXT)).toBeNull();
+    act(() => commands.get('pause-project')?.());
     expect(dialog.open).toHaveBeenCalledTimes(1);
-    render(React.createElement(dialog.component));
+    expect(screen.getByRole('dialog', { name: COMMANDS.pauseProject })).toBeTruthy();
     expect(screen.getByText(NOT_IN_PROJECT_TEXT)).toBeTruthy();
     fireEvent.click(screen.getByRole('button', { name: 'Pause all projects instead' }));
     expect(screen.getByRole('menu', { name: 'Pause all projects' })).toBeTruthy();
+    cleanup();
+  });
+
+  /** DorkOS 0.92's DialogHost: `open` from a store key flow's dialog never has, and a setter that throws. */
+  function coreDialogProps() {
+    return {
+      open: false,
+      onOpenChange: vi.fn(() => {
+        throw new TypeError('setStoreOpen is not a function');
+      }),
+    };
+  }
+
+  /** A host with a model, the chat in dorkos, and both pause dialogs drawn as DorkOS draws them. */
+  async function openableHost(model = flowModel([flowProject('dorkos')])) {
+    routeFetch(() => ({ status: 200, body: model }));
+    const host = fullHost({
+      currentCwd: '/work/dorkos',
+      currentProject: { root: '/work/dorkos', name: 'dorkos' },
+    });
+    const cleanup = activate(host.api);
+    await act(async () => {});
+    const props = coreDialogProps();
+    const opener = document.createElement('button');
+    opener.textContent = 'palette';
+    document.body.append(opener);
+    opener.focus();
+    const view = render(
+      React.createElement(
+        React.Fragment,
+        null,
+        React.createElement(host.dialogs.get('pause-project')!.component, props as never),
+        React.createElement(host.dialogs.get('pause-all')!.component, props as never)
+      )
+    );
+    return { ...host, cleanup, props, opener, view };
+  }
+
+  it('draws nothing until opened, and closes on Escape or outside it (DOR-2533 live check)', async () => {
+    const { commands, cleanup, view, props, opener } = await openableHost();
+    const errors: unknown[] = [];
+    const onError = (event: ErrorEvent) => errors.push(event.error);
+    window.addEventListener('error', onError);
+    expect(view.container.innerHTML).toBe('');
+    act(() => commands.get('pause-all')?.());
+    expect(screen.getByRole('menu', { name: 'Pause all projects' })).toBeTruthy();
+    fireEvent.keyDown(window, { key: 'Escape' });
+    expect(view.container.innerHTML).toBe('');
+    act(() => commands.get('pause-all')?.());
+    fireEvent.click(screen.getByRole('dialog').parentElement!);
+    expect(view.container.innerHTML).toBe('');
+    // DorkOS did not open it, so its setter (which throws) is never called.
+    expect(props.onOpenChange).not.toHaveBeenCalled();
+    expect(errors).toEqual([]);
+    expect(document.activeElement).toBe(opener);
+    window.removeEventListener('error', onError);
+    opener.remove();
+    cleanup();
+  });
+
+  it('never lets DorkOS’s close setter break closing, when DorkOS did open it', async () => {
+    routeFetch(() => ({ status: 200, body: flowModel([flowProject('dorkos')]) }));
+    const { api, dialogs } = fullHost();
+    const cleanup = activate(api);
+    await act(async () => {});
+    const onOpenChange = vi.fn(() => {
+      throw new TypeError('setStoreOpen is not a function');
+    });
+    const errors: unknown[] = [];
+    const onError = (event: ErrorEvent) => errors.push(event.error);
+    window.addEventListener('error', onError);
+    render(
+      React.createElement(dialogs.get('pause-all')!.component, {
+        open: true,
+        onOpenChange,
+      } as never)
+    );
+    fireEvent.keyDown(window, { key: 'Escape' });
+    expect(onOpenChange).toHaveBeenCalledWith(false);
+    expect(errors).toEqual([]);
+    window.removeEventListener('error', onError);
+    cleanup();
+  });
+
+  it('takes focus in every state, keeps Tab inside, and gives focus back (DOR-2533 review)', async () => {
+    // Loading: no model yet.
+    let answer: (value: unknown) => void = () => {};
+    routeFetch(
+      () =>
+        new Promise((resolve) => {
+          answer = () => resolve({ status: 200, body: flowModel([flowProject('dorkos')]) });
+        })
+    );
+    const { api, commands, dialogs } = fullHost({ currentCwd: '/x', currentProject: null });
+    const cleanup = activate(api);
+    const opener = document.createElement('button');
+    document.body.append(opener);
+    opener.focus();
+    render(
+      React.createElement(dialogs.get('pause-project')!.component, coreDialogProps() as never)
+    );
+    act(() => commands.get('pause-project')?.());
+    const dialog = screen.getByRole('dialog');
+    expect(screen.getByText('Loading…')).toBeTruthy();
+    expect(dialog.contains(document.activeElement)).toBe(true);
+    // Not in a flow project: the one button takes focus, and Tab stays on it.
+    await act(async () => answer(null));
+    const instead = screen.getByRole('button', { name: 'Pause all projects instead' });
+    expect(document.activeElement).toBe(instead);
+    fireEvent.keyDown(instead, { key: 'Tab' });
+    fireEvent.keyDown(instead, { key: 'Tab', shiftKey: true });
+    expect(screen.getByRole('dialog')).toBeTruthy();
+    expect(document.activeElement).toBe(instead);
+    // The menu: Tab moves between its choices and never closes the dialog.
+    fireEvent.click(instead);
+    const first = screen.getByRole('menuitem', { name: 'Until tomorrow 9am' });
+    expect(document.activeElement).toBe(first);
+    fireEvent.keyDown(first, { key: 'Tab' });
+    expect(screen.getByRole('dialog')).toBeTruthy();
+    expect(document.activeElement).toBe(screen.getByRole('menuitem', { name: 'For 1 hour' }));
+    fireEvent.keyDown(document.activeElement!, { key: 'Tab', shiftKey: true });
+    fireEvent.keyDown(document.activeElement!, { key: 'Tab', shiftKey: true });
+    expect(document.activeElement).toBe(screen.getByRole('menuitem', { name: 'Until I resume' }));
+    // A click inside, off the menu (the heading), leaves it open.
+    const heading = screen.getByText('Pause all projects', { selector: 'b' });
+    fireEvent.pointerDown(heading);
+    fireEvent.click(heading);
+    expect(screen.getByRole('dialog')).toBeTruthy();
+    fireEvent.keyDown(window, { key: 'Escape' });
+    expect(screen.queryByRole('dialog')).toBeNull();
+    expect(document.activeElement).toBe(opener);
+    opener.remove();
+    cleanup();
+  });
+
+  it('pulls focus back when something behind takes it, and closes cleanly when the opener is gone (DOR-2533 re-review)', async () => {
+    const { commands, cleanup, opener } = await openableHost();
+    const composer = document.createElement('textarea');
+    document.body.append(composer);
+    const errors: unknown[] = [];
+    const onError = (event: ErrorEvent) => errors.push(event.error);
+    window.addEventListener('error', onError);
+    act(() => commands.get('pause-all')?.());
+    // The command palette closes: its input (the opener) goes, and its focus
+    // scope hands focus back to the chat box behind the dialog.
+    opener.remove();
+    act(() => composer.focus());
+    const dialog = screen.getByRole('dialog');
+    expect(dialog.contains(document.activeElement)).toBe(true);
+    expect(document.activeElement).not.toBe(composer);
+    fireEvent.keyDown(window, { key: 'Escape' });
+    expect(screen.queryByRole('dialog')).toBeNull();
+    expect(errors).toEqual([]);
+    expect(document.activeElement).toBe(document.body);
+    // Closed, the guard is gone: focus goes wherever it is sent.
+    composer.focus();
+    expect(document.activeElement).toBe(composer);
+    window.removeEventListener('error', onError);
+    composer.remove();
+    cleanup();
+  });
+
+  it('puts the hidden dialog back as it was, and tells DorkOS it closed, when the other replaces it', async () => {
+    const { api, commands, dialogs } = fullHost({ currentCwd: '/x', currentProject: null });
+    routeFetch(() => ({ status: 200, body: flowModel([flowProject('dorkos')]) }));
+    const cleanup = activate(api);
+    await act(async () => {});
+    const props = coreDialogProps();
+    render(
+      React.createElement(
+        React.Fragment,
+        null,
+        React.createElement(dialogs.get('pause-project')!.component, props as never),
+        React.createElement(dialogs.get('pause-all')!.component, props as never)
+      )
+    );
+    const project = dialogs.get('pause-project')! as unknown as { close: ReturnType<typeof vi.fn> };
+    project.close.mockImplementation(() => {
+      throw new TypeError('not yet');
+    });
+    act(() => commands.get('pause-project')?.());
+    fireEvent.click(screen.getByRole('button', { name: 'Pause all projects instead' }));
+    expect(screen.getByRole('menu', { name: 'Pause all projects' })).toBeTruthy();
+    act(() => commands.get('pause-all')?.());
+    expect(project.close).toHaveBeenCalledTimes(1);
+    fireEvent.keyDown(window, { key: 'Escape' });
+    act(() => commands.get('pause-project')?.());
+    // Back to its own first state: this chat is in no flow project.
+    expect(screen.getByText(NOT_IN_PROJECT_TEXT)).toBeTruthy();
+    cleanup();
+  });
+
+  it('keeps an error inside the dialog clickable, and shows one pause dialog at a time', async () => {
+    const { commands, cleanup, opener } = await openableHost();
+    routeFetch((method) =>
+      method === 'POST'
+        ? { status: 500, body: { error: 'Flow could not pause it.' } }
+        : { status: 200, body: flowModel([flowProject('dorkos')]) }
+    );
+    act(() => commands.get('pause-project')?.());
+    expect(screen.getAllByRole('dialog')).toHaveLength(1);
+    await act(async () => {
+      fireEvent.click(screen.getByRole('menuitem', { name: 'For 1 hour' }));
+    });
+    const alert = screen.getByRole('alert');
+    fireEvent.pointerDown(alert);
+    fireEvent.click(alert);
+    expect(screen.getByRole('dialog')).toBeTruthy();
+    // Opening the other pause dialog replaces this one, never stacks on it.
+    act(() => commands.get('pause-all')?.());
+    expect(screen.getAllByRole('dialog')).toHaveLength(1);
+    expect(screen.getByRole('dialog', { name: COMMANDS.pauseAll })).toBeTruthy();
+    fireEvent.keyDown(window, { key: 'Escape' });
+    expect(screen.queryByRole('dialog')).toBeNull();
+    expect(document.activeElement).toBe(opener);
+    opener.remove();
     cleanup();
   });
 
@@ -193,7 +412,7 @@ describe('activate', () => {
     });
     const cleanup = activate(api);
     const dialog = dialogs.get('pause-project')!;
-    render(React.createElement(dialog.component));
+    render(React.createElement(dialog.component, { open: true } as never));
     expect(screen.getByText('Loading…')).toBeTruthy();
     await act(async () => {});
     // The model arrived after the dialog opened, and the dialog followed it.

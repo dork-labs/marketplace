@@ -46,16 +46,21 @@ export class SharedStorage {
    * @returns The view.
    */
   view(): StorageView {
+    // Method shorthand, not generic arrows: DorkOS parses `.ts` as TSX, where
+    // `async <T>() =>` reads as a JSX tag and fails the whole server bundle.
+    const shared = this;
     return {
-      loadData: async <T>() => (await this.read()) as T,
-      saveData: async <T>(data: T) => {
-        const run = this.queue.then(async () => {
-          const current = await this.read();
+      async loadData<T>(): Promise<T> {
+        return (await shared.read()) as T;
+      },
+      async saveData<T>(data: T): Promise<void> {
+        const run = shared.queue.then(async () => {
+          const current = await shared.read();
           const next = { ...current, ...(isObject(data) ? data : {}) };
-          await this.storage.saveData(next);
-          this.cache = next;
+          await shared.storage.saveData(next);
+          shared.cache = next;
         });
-        this.queue = run.catch(() => {});
+        shared.queue = run.catch(() => {});
         await run;
       },
     };

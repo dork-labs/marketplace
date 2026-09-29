@@ -19,4 +19,15 @@ flow accounts setup --help   # every flag, for scripts and agents
 flow accounts                # each account's role and room left
 ```
 
+## Which projects an account may work in
+
+DorkOS decides which accounts each project may use: each project's Flow settings have **Accounts this project may use**, one checkbox per account, and DorkOS holds every chat, schedule and handoff there to it. `flow next` and `flow drain` in the terminal follow the same rule.
+
+This replaces flow's older **Only for these repos** list on a kept-out account. In Settings → Flow, that account's row says what DorkOS would do, and nothing moves until you press a button:
+
+1. **Move it** gives the account project limits in DorkOS: only the projects your repo list names. It never lets an account work anywhere it couldn't before, and it leaves alone an account DorkOS already limits.
+2. **Switch to DorkOS's rule** then lets flow use the account in rotation within those limits, and drops flow's own list. If every project already runs flow 0.52 or newer, this happens with the first press. If not, flow keeps its own list too, both rules apply, and this second button appears on the row once every project is updated.
+
+To undo it, clear the account's project limits in Settings → Runtimes, and put flow's list back with `flow accounts set <id> --role kept-out --repos owner/name,...`.
+
 To see each account's limits, see [Account usage](./account-usage.mdx).

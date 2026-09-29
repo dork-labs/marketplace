@@ -7,11 +7,19 @@
  *
  * This walks the value imports from `server.ts` and `index.ts` the way a
  * bundler would, and fails naming the file that brings in a package.
+ *
+ * DorkOS also parses every `.ts` file as TSX (its esbuild `loader` maps `.ts`
+ * to `tsx`), so a generic arrow such as `async <T>() => …` reads as a JSX tag
+ * and the whole server half fails to compile. Each reached file must parse as
+ * TSX: with esbuild's `tsx` loader, the parser DorkOS itself uses, and with
+ * TypeScript's, which names the line more plainly.
  */
 
 import { readFileSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { transformSync } from 'esbuild';
+import ts from 'typescript';
 import { describe, expect, it } from 'vitest';
 
 const EXTENSION_DIR = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
@@ -51,6 +59,36 @@ describe('the bundle DorkOS builds', () => {
     expect(packages).toEqual([]);
     const withMeta = files.filter((file) => readFileSync(file, 'utf8').includes('import.meta'));
     expect(withMeta.map((file) => path.relative(EXTENSION_DIR, file))).toEqual([]);
+    const unparsable = files.flatMap((file) => {
+      const out = ts.transpileModule(readFileSync(file, 'utf8'), {
+        fileName: file.replace(/\.ts$/, '.tsx'),
+        reportDiagnostics: true,
+        compilerOptions: { jsx: ts.JsxEmit.Preserve, target: ts.ScriptTarget.ES2022 },
+      });
+      return (out.diagnostics ?? []).map((d) => {
+        const at =
+          d.file && d.start !== undefined ? d.file.getLineAndCharacterOfPosition(d.start) : null;
+        return `${path.relative(EXTENSION_DIR, file)}${at ? `:${at.line + 1}` : ''}: ${ts.flattenDiagnosticMessageText(d.messageText, ' ')}`;
+      });
+    });
+    expect(unparsable).toEqual([]);
+    const esbuildRefuses = files.flatMap((file) => {
+      try {
+        transformSync(readFileSync(file, 'utf8'), {
+          loader: 'tsx',
+          sourcefile: file,
+          logLevel: 'silent',
+        });
+        return [];
+      } catch (error) {
+        const first = (error as { errors?: { text: string; location?: { line: number } | null }[] })
+          .errors?.[0];
+        return [
+          `${path.relative(EXTENSION_DIR, file)}:${first?.location?.line ?? '?'}: ${first?.text ?? String(error)}`,
+        ];
+      }
+    });
+    expect(esbuildRefuses).toEqual([]);
     if (entry === 'server.ts') {
       // It does reach flow's own modules, so the walk is real.
       expect(

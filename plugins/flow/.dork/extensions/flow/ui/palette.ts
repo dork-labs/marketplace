@@ -17,9 +17,9 @@ import { chatProject } from './flow-tab.ts';
 import { formatWhen } from './panel-format.ts';
 import { PauseMenu } from './pause-menu.ts';
 import { BUTTON, FOCUS_CSS, Hint, MUTED, PANEL } from './parts.ts';
-import { h, useState, type Node } from './react.ts';
+import { h, useEffect, useRef, useState, type Node } from './react.ts';
 import { useStore, type FlowStore } from './store.ts';
-import { ALERT } from './styles.ts';
+import { ALERT, hostColor } from './styles.ts';
 
 /** The palette's command labels. */
 export const COMMANDS = {
@@ -68,10 +68,89 @@ export function listNames(names: readonly string[]): string {
 /** Which dialog: one project or all of them. */
 type Scope = 'project' | 'all';
 
-/** A dialog's close control, filled in once DorkOS registers the dialog. */
+/**
+ * Whether one pause dialog is showing. DorkOS draws every registered dialog all
+ * the time and passes `open`, but the `open()` it hands back does not reach
+ * that prop (DorkOS 0.92), so flow keeps the dialog's own open state here and
+ * shows it when either says so.
+ */
 interface Controls {
-  close: () => void;
+  /** Whether flow opened it. */
+  shown: boolean;
+  /** Where focus was when it opened, to give it back on close. */
+  returnTo: HTMLElement | null;
+  /** Re-render the open dialog. */
+  listeners: Set<() => void>;
+  /** Tell DorkOS it closed; filled in once DorkOS registers the dialog. */
+  hostClose: () => void;
+  /** The other pause dialog: only one is ever on screen. */
+  sibling: Controls | null;
+  /** Put the dialog's own state (Pause all instead, an error) back; set by the dialog. */
+  reset: () => void;
 }
+
+/** A fresh, closed dialog state. */
+function newControls(): Controls {
+  return {
+    shown: false,
+    returnTo: null,
+    listeners: new Set(),
+    hostClose: () => {},
+    sibling: null,
+    reset: () => {},
+  };
+}
+
+/** Show or hide a dialog. */
+function setShown(controls: Controls, shown: boolean): void {
+  controls.shown = shown;
+  for (const listener of controls.listeners) listener();
+}
+
+/**
+ * Open a dialog, closing the other pause dialog first so two never stack, and
+ * remember where focus was.
+ */
+function openDialog(controls: Controls): void {
+  const sibling = controls.sibling;
+  if (sibling !== null && sibling.shown) {
+    // Hand the focus the first one saved to the second, so closing it returns there.
+    controls.returnTo = sibling.returnTo;
+    sibling.returnTo = null;
+    setShown(sibling, false);
+    sibling.reset();
+    try {
+      sibling.hostClose();
+    } catch {
+      // DorkOS could not record the close; the dialog is hidden all the same.
+    }
+  } else if (!controls.shown) {
+    const active = typeof document === 'undefined' ? null : document.activeElement;
+    controls.returnTo = active instanceof HTMLElement ? active : null;
+  }
+  setShown(controls, true);
+}
+
+/** The elements Tab moves between inside a dialog. */
+const FOCUSABLE =
+  'button:not([disabled]), [href], input, select, textarea, [tabindex]:not([tabindex="-1"])';
+
+/** What DorkOS passes every dialog it draws. */
+interface DialogProps {
+  open?: boolean;
+  onOpenChange?: (open: boolean) => void;
+}
+
+/** The dimmed layer under an open dialog. */
+const BACKDROP = {
+  position: 'fixed',
+  inset: 0,
+  zIndex: 50,
+  display: 'flex',
+  alignItems: 'center',
+  justifyContent: 'center',
+  background: 'hsl(0 0% 0% / 0.4)',
+} as const;
 
 /**
  * The pause dialog for one scope.
@@ -79,8 +158,8 @@ interface Controls {
  * @param api - The host API (toasts).
  * @param store - The live store.
  * @param scope - This project or all.
- * @param controls - How to close it.
- * @returns The dialog's component.
+ * @param controls - Its open state.
+ * @returns The dialog's component: nothing until it is opened.
  */
 function createPauseDialog(
   api: Pick<ClientApi, 'notify'>,
@@ -88,20 +167,143 @@ function createPauseDialog(
   scope: Scope,
   controls: Controls
 ): ComponentType {
-  function PauseDialog(): Node {
+  function PauseDialog(props: DialogProps): Node {
     const [mode, setMode] = useState<Scope>(scope);
     const [error, setError] = useState<string | null>(null);
     const [busy, setBusy] = useState(false);
+    const [, redraw] = useState(0);
     // Follows the store, so the dialog never acts on a model that has moved on.
     const snapshot = useStore(store);
+    const shown = props.open === true || controls.shown;
+    const box = useRef<HTMLDivElement | null>(null);
+    const guarding = useRef(false);
+    controls.reset = () => {
+      setMode(scope);
+      setError(null);
+    };
+    const close = () => {
+      if (!shown) return;
+      // From here on the focus guard below lets focus leave.
+      guarding.current = false;
+      const hostOpened = props.open === true;
+      setShown(controls, false);
+      setMode(scope);
+      setError(null);
+      // DorkOS's onOpenChange sets a store key only a dialog it opened has; on
+      // one flow opened it throws (DorkOS 0.92), so it is called only when
+      // DorkOS opened this one, and never allowed to break closing.
+      if (hostOpened) {
+        try {
+          props.onOpenChange?.(false);
+        } catch {
+          // DorkOS could not record the close; the dialog is closed all the same.
+        }
+      }
+      try {
+        controls.hostClose();
+      } catch {
+        // As above.
+      }
+      const back = controls.returnTo;
+      controls.returnTo = null;
+      if (back !== null && back.isConnected) {
+        back.focus();
+      } else if (box.current?.contains(document.activeElement)) {
+        // What opened it is gone (the palette's input): leave focus on the page,
+        // not on a control that is about to disappear.
+        (document.activeElement as HTMLElement).blur();
+      }
+    };
+    useEffect(() => {
+      const listener = () => redraw((n) => n + 1);
+      controls.listeners.add(listener);
+      return () => {
+        controls.listeners.delete(listener);
+      };
+    }, []);
+    useEffect(() => {
+      if (!shown) return undefined;
+      const onKey = (event: KeyboardEvent) => {
+        if (event.key === 'Escape') close();
+      };
+      window.addEventListener('keydown', onKey);
+      return () => window.removeEventListener('keydown', onKey);
+    });
+    // Focus moves into the dialog in every state (the menu focuses its default
+    // choice itself; otherwise the first control, else the dialog).
+    useEffect(() => {
+      const node = box.current;
+      if (!shown || node === null) return;
+      const active = document.activeElement;
+      // Already on a control inside; or on the dialog itself with nothing to move to.
+      const control = node.querySelector<HTMLElement>(FOCUSABLE);
+      if (active !== node && node.contains(active)) return;
+      if (active === node && control === null) return;
+      (control ?? node).focus();
+    });
+    // While it is open, focus stays in it: anything outside that takes focus
+    // (the closing palette restoring it to the chat box) gives it back, so
+    // Enter never reaches the chat behind the dialog.
+    useEffect(() => {
+      if (!shown) return undefined;
+      guarding.current = true;
+      const onFocusIn = (event: FocusEvent) => {
+        const node = box.current;
+        if (!guarding.current || node === null) return;
+        if (node.contains(event.target as globalThis.Node)) return;
+        (node.querySelector<HTMLElement>(FOCUSABLE) ?? node).focus();
+      };
+      document.addEventListener('focusin', onFocusIn);
+      return () => document.removeEventListener('focusin', onFocusIn);
+    });
+    if (!shown) return null;
+    /** Tab and Shift+Tab stay inside the dialog. */
+    const trap = (event: { key: string; shiftKey: boolean; preventDefault(): void }) => {
+      if (event.key !== 'Tab' || box.current === null) return;
+      event.preventDefault();
+      const items = [...box.current.querySelectorAll<HTMLElement>(FOCUSABLE)];
+      if (items.length === 0) {
+        box.current.focus();
+        return;
+      }
+      const at = items.indexOf(document.activeElement as HTMLElement);
+      const step = event.shiftKey ? -1 : 1;
+      items[at === -1 ? 0 : (at + step + items.length) % items.length]?.focus();
+    };
     const model = snapshot.model;
     const project = model === null ? null : chatProject(snapshot, model);
     const root = (...children: Node[]) =>
       h(
         'div',
-        { className: 'flow-tab', style: { ...PANEL, minWidth: '240px' } },
-        h('style', null, FOCUS_CSS),
-        ...children
+        {
+          style: BACKDROP,
+          onClick: (event: { target: unknown; currentTarget: unknown }) => {
+            if (event.target === event.currentTarget) close();
+          },
+        },
+        h(
+          'div',
+          {
+            ref: box,
+            role: 'dialog',
+            'aria-modal': true,
+            tabIndex: -1,
+            onKeyDown: trap,
+            'aria-label': mode === 'all' ? COMMANDS.pauseAll : COMMANDS.pauseProject,
+            className: 'flow-tab',
+            style: {
+              ...PANEL,
+              minWidth: '240px',
+              padding: '14px 16px',
+              borderRadius: '0.5rem',
+              border: `1px solid ${hostColor('border')}`,
+              background: hostColor('popover'),
+              boxShadow: '0 8px 24px hsl(0 0% 0% / 0.2)',
+            },
+          },
+          h('style', null, FOCUS_CSS),
+          ...children
+        )
       );
     if (model === null) return root(h('p', { style: MUTED }, 'Loading…'));
     if (!model.canChange) {
@@ -140,7 +342,7 @@ function createPauseDialog(
               setBusy(false);
               store.apply(next);
               api.notify?.(pausedToast(who, until, new Date()), { type: 'success' });
-              controls.close();
+              close();
             },
             (failure: unknown) => {
               setBusy(false);
@@ -148,12 +350,13 @@ function createPauseDialog(
             }
           );
         },
-        onClose: () => controls.close(),
+        // Escape and clicks outside are the dialog's to handle; Tab moves
+        // within it. The menu's own close (Tab, a click beside it) is not used.
       }),
       error === null ? null : h('p', { role: 'alert', style: ALERT }, error)
     );
   }
-  return PauseDialog as ComponentType;
+  return PauseDialog as ComponentType<DialogProps>;
 }
 
 /**
@@ -221,15 +424,27 @@ export function registerPalette(
 ): () => void {
   if (typeof api.registerCommand !== 'function') return () => {};
   const removers: (() => void)[] = [];
+  const projectControls = newControls();
+  const allControls = newControls();
+  projectControls.sibling = allControls;
+  allControls.sibling = projectControls;
   if (typeof api.registerDialog === 'function') {
     for (const [scope, id, label] of [
       ['project', 'pause-project', COMMANDS.pauseProject],
       ['all', 'pause-all', COMMANDS.pauseAll],
     ] as const) {
-      const controls: Controls = { close: () => {} };
-      const dialog = api.registerDialog(id, createPauseDialog(api, store, scope, controls));
-      controls.close = dialog.close;
-      removers.push(api.registerCommand(id, label, () => dialog.open()));
+      const controls = scope === 'project' ? projectControls : allControls;
+      const dialog = api.registerDialog(
+        id,
+        createPauseDialog(api, store, scope, controls) as ComponentType
+      );
+      controls.hostClose = dialog.close;
+      removers.push(
+        api.registerCommand(id, label, () => {
+          openDialog(controls);
+          dialog.open();
+        })
+      );
     }
   }
   removers.push(

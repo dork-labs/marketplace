@@ -94,6 +94,17 @@ describe('runState', () => {
     ['reviewing', { drain: { phase: 'reviewing' } }, 'in-review'],
     ['PR ready', { drain: { phase: 'pr-ready' } }, 'in-review'],
     ['watching the PR', { drain: { phase: 'watching' } }, 'in-review'],
+    // DOR-2533 live check: VERIFY's own gate (no drain) read as Building.
+    [
+      'at the review gate VERIFY left',
+      { stage: 'review', status: 'waiting_for_review' },
+      'in-review',
+    ],
+    [
+      'a drain run working, whatever its stage',
+      { stage: 'review', drain: { phase: 'fixing' } },
+      'building',
+    ],
     ['working', { drain: { phase: 'working' } }, 'building'],
     ['fixing CI', { drain: { phase: 'fixing-ci' } }, 'building'],
     ['queued', { status: 'queued' }, 'building'],

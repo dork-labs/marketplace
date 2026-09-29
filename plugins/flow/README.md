@@ -57,10 +57,37 @@ node --experimental-strip-types "${CLAUDE_PLUGIN_ROOT}/scripts/flow.ts" <verb> -
 | `usage`           | Record each account's usage.                                                    |
 | `fleet`           | Show every account and running session. Changes nothing.                        |
 | `drain`           | Carry several items at once.                                                    |
+| `review`          | Ship finished work at the review gate, or send it back with a note.             |
+| `ask`, `answer`   | Park a question with the agent's own pick; post a person's answer.              |
+| `autonomy`        | Show how much flow does on its own in this project.                             |
 | `note`, `journal` | Write to or read flow's journal.                                                |
 
 `flow <verb> --help` lists a verb's flags. Exit codes and the `--json` shape are in
 [`SPEC.md`](./docs/SPEC.md#the-flow-cli).
+
+## In the DorkOS app
+
+In DorkOS, flow's work shows beside your chats. None of it is needed to run flow: it
+reads the same files and tracker the commands do.
+
+- **The Flow tab** follows the chat. In a flow project it shows that project: what is
+  running, what is up next, and anything wrong. Anywhere else it lists only the
+  projects that need a look. A dot on the tab means something waits for you.
+- **Flow home** (the command palette, under Add-ons) lists every project as needs you,
+  something's off, or all fine. Each project has its own page, and "Capacity this
+  week" shows each account's weekly use.
+- **The run chip** in a chat's status bar names the item the chat works on and where
+  it stands: "DOR-2387 · Building", or "3 items · 1 needs you".
+- **The Activity inbox** is where flow asks, and only when only you can help: ship
+  this work, answer an agent's question (it marks its own pick), or sign in again.
+  Every ask says what happens and why. What flow settled on its own shows there as
+  "While you were away".
+- **Pause** asks how long: until tomorrow 9am, for 1 hour, or until you resume.
+- **Settings** (⚙ on a project's page, or Settings → Flow) are split by who a change
+  reaches. "Shared with the repo" saves to `.agents/flow/config.json`, which reaches
+  everyone once you commit it; "Just me" stays on this computer. The "How much it does
+  on its own" dial and "Accounts this project may use" are here, and only a person
+  can change them.
 
 ## Stages
 
@@ -108,25 +135,20 @@ the same skill. The mapping is generated from [`config.json`](./config/config.ex
 | REVIEW    | — (human gate)    | —                   | —                 | started           |
 | DONE      | `/flow:done`      | `closing-work`      | `stage/done`      | completed         |
 
-`/flow` (no stage) is the orchestrator: it resolves a stage name, a work item, a
-**project** (by name, spec slug, or umbrella id), or `auto`, then routes to the matching
-command. Naming a project routes by its state: project-scoped single-item dispatch when it
-has `agent/ready` children, or advancing its umbrella one stage when it has none yet
-(`/flow auto|continue <project>` narrow the queue modes to that one project). **With no
-arguments at all**, it offers four intents: **Capture** new · **Work on a project** (pick
-from the active projects) · **Continue the queue** (claim the next-ranked item, carry it to
-its gate, then stop) · **Triage** the backlog, with a specific item or `auto` (drain the
-whole queue) reachable as free text. "Continue the queue" is one tick of `auto`.
+Two commands sit outside the stages: `/flow:pause [<item> | for <duration> | until <time>]`
+halts autonomy (with a duration it ends on its own at that time), and `/flow:resume` lifts it.
 
-Beside the stages sits the whole-backlog sweep: **`/flow:groom`**
-(`grooming-backlog`) audits every open item against the fifteen groom
-invariants (`scripts/audit-backlog.ts`), closes shipped/duplicate/junk work
-with cited evidence behind a human gate, reconciles projects with reality, and
-applies the readiness gate honestly — then proves the result with a
-before/after run of the dispatch oracle. `/flow:groom check` is the read-only
-audit half. Run it when the queue starves, after a large programme lands, or
-before turning on autonomy: the dispatch policy is only as truthful as the
-labels it reads, and a ready label nobody audits decays into noise.
+`/flow` (no stage) is the orchestrator: it resolves a stage name, a work item, a
+**project** (by name, spec slug, or umbrella id), or `auto`, and routes to the matching
+command (`/flow auto|continue <project>` narrow the queue to one project). **With no
+arguments**, it offers **Capture** new · **Work on a project** · **Continue the queue**
+(one tick of `auto`: claim the next item, carry it to its gate, stop) · **Triage**.
+
+Beside the stages sits the whole-backlog sweep: **`/flow:groom`** audits every open
+item against the fifteen groom invariants, closes shipped, duplicate and junk work
+with cited evidence behind a human gate, and proves the result with a before/after
+run of the dispatch oracle (`/flow:groom check` is the read-only half). Run it when
+the queue starves or before turning on autonomy.
 
 Two schedules keep the ready queue fed, both shipped switched off until you
 approve them: `flow-triage` (daily: readies or parks untriaged work, releases
@@ -148,14 +170,12 @@ spec §5). The hard gates:
    surfaces plan assumptions at the review gate. Flip it on for a pre-code
    checkpoint.
 3. **Review gate** (after VERIFY) — **always checked.** PR + evidence → review
-   state → assign the human → stop. The project's "Ship finished work" setting in
-   DorkOS decides who answers: you, or the reviewer agent when it recorded a clean
-   review of the latest commit (`flow autonomy`, `flow review`). On approval +
-   green CI → auto-merge + close + teardown. **v1 caveat:** the engine parks here and does **not** detect approval
-   — merge the approved PR yourself, then run `/flow:done <issue>` to close the
-   item and tear down the worktree. The merge-_decision_ logic (`evaluateAutoMerge`,
-   §6 below) is built + tested; the _detection + execution_ that fires it
-   unattended (poll/webhook-driven resume-on-approval) is the P2 server Extension.
+   state → stop. The project's "Ship finished work" setting in DorkOS decides who
+   answers: you, or the reviewer agent when it recorded a clean review of the
+   latest commit (`flow autonomy`, `flow review`). With
+   `gates.review.mergeOnApproval` on, an approval arms that commit and it merges
+   once checks pass; a drain run then closes the item, otherwise run
+   `/flow:done <issue>`.
 4. **Circuit breaker** — stop + escalate if a unit exceeds `estimate × N`
    wall-clock or the token budget.
 
@@ -167,37 +187,24 @@ and announce; real tradeoff → bounce; behavior drift → re-request approval).
 
 ## Adapter interface
 
-The **tracker adapter skill** is the v1 **`PMClient`**: it owns **every** tracker
-call over a config-driven transport (`connection.transport`: an account-pinned
-CLI or an in-session MCP server) and fulfils the capability verbs as a
-**documented prose contract**. Generic stage skills and commands call it by naming
-a verb (e.g. _"via the adapter, transition the item …"_) and never touch a tracker
-string — a grep guard enforces zero tracker API strings outside the adapter.
+The **tracker adapter skill** owns **every** tracker call, over a config-driven
+transport (`connection.transport`: an account-pinned CLI or an in-session MCP
+server), and fulfils the capability verbs as a documented contract. Stage skills
+and commands name a verb (_"via the adapter, transition the item …"_) and never
+touch a tracker string; a grep guard enforces it.
 
-Which adapter is a **config value, not a code path**. `tracker` in `config.json`
-is an adapter slug. This repo ships **`linear-adapter`** as the reference adapter
-(`skills/linear-adapter/SKILL.md`), and `linear` is the default; `/flow:init`
-generates the adapter for any other tracker you pick into your project, at
-`.agents/flow/adapters/<tracker>/SKILL.md` (committed, so a plugin update never
-touches it), and gates it on the same conformance harness, so adopting Jira or
-GitHub Issues is a setup run, not a fork. `scripts/config-files.ts` decides which
-adapter is read (the project's, then the shipped one) and prints its path as
-`adapter.path`; every command and skill reads it from there.
+Which adapter is a **config value, not a code path**: `tracker` in `config.json` is
+an adapter slug. flow ships **`linear-adapter`** (`skills/linear-adapter/SKILL.md`),
+the default. `/flow:init` generates an adapter for any other tracker into
+`.agents/flow/adapters/<tracker>/SKILL.md` (committed, so an update never touches
+it) and gates it on the same conformance harness, so adopting Jira or GitHub Issues
+is a setup run, not a fork. `scripts/config-files.ts` decides which adapter is read
+(the project's, then the shipped one) and prints its path as `adapter.path`.
 
-The verbs: `getCurrentUser`, `getProjects`, `resolveProject`, `getProject`,
-`getProjectWork`, `getEligibleWork`, `getInbox`, `getRelations`, `claim`,
-`transition`, `comment`, `assignToHuman`, `attachEvidence`, `needsInput`, `link`,
-`createSubIssue`, plus the contract's one **optional** verb, `completeProject`
-(this adapter supports it; another tracker's adapter may not, and callers
-degrade rather than fail when it is absent). The adapter normalizes
-every tracker into one `WorkItem` shape so the dispatch policy and stage skills
-never see a tracker-specific field. Full verb contract: the reference adapter's
-[`SKILL.md`](./skills/linear-adapter/SKILL.md) and the tracker-neutral
-[`adapters/SPEC.md`](./adapters/SPEC.md); the typed `interface PMClient`
-the P5 server build promotes it into is in [`SPEC.md`](./docs/SPEC.md).
-
-The adapter also owns the **display convention**: how a work item is shown to a
-person.
+The adapter normalizes every tracker into one `WorkItem` shape and owns how a work
+item is shown to a person. The verbs, including the one optional verb
+(`completeProject`), are in [`adapters/SPEC.md`](./adapters/SPEC.md) and the
+reference adapter's [`SKILL.md`](./skills/linear-adapter/SKILL.md).
 
 ## Autonomous mode & the server dependency
 
@@ -209,24 +216,18 @@ agent session per run — so there is no scheduler to build.
 - **One tick = one issue.** Each croner fire is a fresh run-session
   (`sessionId = run.id`) that claims and works exactly one issue to its gate, then
   ends — preserving fresh-session-per-issue.
-- **Activation** is install at project scope, then approve. The `schedule:` block
-  in `skills/flow-drain/SKILL.md` is what makes the file a scheduled task; a
-  DorkOS release that has schedule discovery reads it straight out of the skills
-  roots it watches, with nothing copied by hand, and the tick waits on the
-  **Schedules** page until you approve it — installing a package can never arm its
-  own cron. On a DorkOS build without schedule discovery, or on any other harness,
-  wire an external scheduler instead (see `docs/bring-your-own-scheduler.mdx`).
-  Running it still needs the DorkOS server (it hosts the watcher + croner) and the
-  project's DorkOS agent registered. The on/off switch and the timing are both set
-  on the Schedules page (Edit changes when it runs; "Reset to the package's
-  default" goes back), and both outlast updates; the file is the package's and an
-  update replaces it.
+- **Activation** is install at project scope, then approve. The `schedule:` block in
+  `skills/flow-drain/SKILL.md` makes the file a scheduled task; DorkOS reads it from
+  the project's skills root, and it waits on the **Schedules** page until you approve
+  it, so installing a package never arms its own cron. The switch and the timing you
+  set there outlast updates. Without DorkOS schedule discovery, wire an external
+  scheduler (`docs/bring-your-own-scheduler.mdx`). Running it needs the DorkOS server
+  and the project's DorkOS agent registered.
 - **Pausing** is `/flow:pause`: it writes `.agents/flow/paused.json` in the project,
-  and every tick checks it first and stops, so an update cannot undo it and it works
-  under any scheduler. On DorkOS it also switches this project's flow schedules off
-  when it can reach them. `/flow:resume` removes the flag and switches back on only
-  the schedules the pause switched off. `/flow:pause for 1 hour` (or `until 9am`)
-  ends on its own at that time, even with DorkOS closed, and leaves schedules on.
+  and every tick checks it first and stops. On DorkOS it also switches this project's
+  flow schedules off; `/flow:resume` switches back on only those. A timed pause
+  (`for 1 hour`, `until 9am`) ends on its own, even with DorkOS closed, and leaves
+  schedules on.
 - **Crash/stall recovery** is driven by the durable `FlowRun` record + the
   next-tick recovery ladder (spec §12): a `needs-input` item is never reclaimed;
   an orphaned `agent/claimed` item is adopted + resumed (re-attach the worktree at
@@ -249,12 +250,9 @@ defaults encode the key decisions: `planApproval: false`, `subIssueThreshold: "x
 `perIssue: "fresh-session"`, `seat: "pulse"`. See [`SPEC.md`](./docs/SPEC.md) →
 _Config schema reference_ for the full contract.
 
-`tracker` is an **adapter slug**, not a fixed list: it names the adapter the engine
-reads (`.agents/flow/adapters/<tracker>/`, or the shipped `skills/<tracker>-adapter/`),
-so it accepts any lowercase slug
-(`^[a-z][a-z0-9-]*$`) `/flow:init` has generated a conforming adapter for. It
-defaults to `linear`, the reference adapter shipped here. Full detail:
-[`config/CONFIG.md`](./config/CONFIG.md).
+How much flow does on its own, and which accounts a project may use, are not in
+either file: they live in DorkOS, where only a person can change them (see
+[In the DorkOS app](#in-the-dorkos-app)). Full detail: [`config/CONFIG.md`](./config/CONFIG.md).
 
 A per-repo `WORKFLOW.md` override is part of the config contract (Decision #15),
 but v1 reads only the two files above, so a `WORKFLOW.md` does not take effect yet.
