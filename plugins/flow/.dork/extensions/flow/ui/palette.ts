@@ -128,6 +128,8 @@ function createPauseDialog(
       ),
       h(PauseMenu, {
         label: who === null ? 'Pause all projects' : `Pause flow in ${who}`,
+        // A project's own default; "Until tomorrow 9am" for every project (V4).
+        defaultChoice: who === null || project === null ? 'tomorrow' : project.pauseDefault,
         onChoose: (until) => {
           // One pause at a time: a second click while the first is on its way does nothing.
           if (busy) return;

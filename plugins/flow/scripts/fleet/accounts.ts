@@ -46,6 +46,7 @@ import {
 import os from 'node:os';
 import path from 'node:path';
 import { readJsonFile, updateJsonFile, type AtomicUpdateResult } from '../atomic-json.ts';
+import { judgeProjectEligibility, type ProjectRule } from './project-eligibility.ts';
 import { ConfigError, PreconditionError, UsageError } from '../errors.ts';
 import {
   IMPLICIT_ACCOUNT_ID,
@@ -1455,20 +1456,53 @@ export function parseOriginRepo(origin: string | null | undefined): string | nul
 }
 
 /**
- * Whether an account may serve a repo (spec §1.1b): main and rotation serve any
- * repo; kept-out serves only a repo in `scope.repos`, compared
- * case-insensitively. A checkout with no parsable origin (`null`) matches no
- * scope.
+ * Whether flow's own role lets an account serve a repo (spec §1.1b): main and
+ * rotation serve any repo; kept-out serves only a repo in `scope.repos`,
+ * compared case-insensitively. A checkout with no parsable origin (`null`)
+ * matches no scope.
  *
  * @param policy - The account's resolved policy.
  * @param repo - `owner/name` from {@link parseOriginRepo}, or `null`.
- * @returns True when flow may spend this account on the repo.
+ * @returns True when flow's role allows it.
  */
-export function mayServe(policy: ResolvedAccountPolicy, repo: string | null): boolean {
+export function roleServes(policy: ResolvedAccountPolicy, repo: string | null): boolean {
   if (policy.role === 'main' || policy.role === 'rotation') return true;
   if (repo === null) return false;
   const wanted = repo.toLowerCase();
   return policy.scope.repos.some((entry) => entry.toLowerCase() === wanted);
+}
+
+/**
+ * Whether DorkOS's rule lets a Claude Code account work in the project (fleet
+ * contract 4.2.0, spec `flow-multiproject` §8.6). Other runtimes have no such
+ * rule yet, so they are always allowed; so is every account when no project
+ * rule was read (`project` absent).
+ *
+ * @param policy - The account's resolved policy (its runtime and id).
+ * @param project - The project and DorkOS's rules, when known.
+ * @returns True when DorkOS allows it.
+ */
+export function projectAllows(policy: ResolvedAccountPolicy, project?: ProjectRule): boolean {
+  if (project === undefined || policy.runtime !== 'claude-code') return true;
+  return judgeProjectEligibility(project.rules, policy.id, project.root).eligible;
+}
+
+/**
+ * Whether flow may spend an account on a repo in a project: flow's own role
+ * allows it ({@link roleServes}) **and** DorkOS's rule does
+ * ({@link projectAllows}). Without `project`, only flow's role is judged.
+ *
+ * @param policy - The account's resolved policy.
+ * @param repo - `owner/name` from {@link parseOriginRepo}, or `null`.
+ * @param project - The project's canonical root and DorkOS's rules, when known.
+ * @returns True when flow may spend this account there.
+ */
+export function mayServe(
+  policy: ResolvedAccountPolicy,
+  repo: string | null,
+  project?: ProjectRule
+): boolean {
+  return roleServes(policy, repo) && projectAllows(policy, project);
 }
 
 /** A ledger's `windows`, or nothing. */

@@ -34,9 +34,9 @@ import {
 } from '../home-page.ts';
 import { ANSWERED_IN_FLOW_NOTE, type AnswerApi } from '../answers.ts';
 import { FlowIcon } from '../flow-icon.ts';
-import { NOT_HERE_YET_TEXT, SHARED_FILE } from '../project-settings.ts';
+import { SHARED_FILE, SHARED_NOTE } from '../project-settings.ts';
 import { FlowStore } from '../store.ts';
-import { flowModel, flowProject, routeFetch, runRow } from './helpers.ts';
+import { flowModel, flowProject, routeFetch, runRow, settingsView } from './helpers.ts';
 
 afterEach(() => {
   vi.unstubAllGlobals();
@@ -439,17 +439,25 @@ describe('a project’s page', () => {
 });
 
 describe('a project’s settings page', () => {
-  it('says what it can’t do yet, where the settings live, and who a change reaches', async () => {
-    serve(threeProjects());
-    const { api } = await renderPage('settings', threeProjects(), { params: { name: 'dorkos' } });
+  it('shows the project’s settings, split by who a change reaches, under its name', async () => {
+    const model = threeProjects();
+    routeFetch((method, url) => {
+      if (url.includes('/ext/flow/settings/')) return { status: 200, body: settingsView() };
+      if (url.includes('/runtimes/claude-code/account-eligibility'))
+        return { status: 404, body: {} };
+      return { status: 200, body: model };
+    });
+    const { api } = await renderPage('settings', model, { params: { name: 'dorkos' } });
+    await act(async () => {});
     expect(screen.getByRole('heading', { level: 1, name: 'dorkos' })).toBeTruthy();
-    expect(screen.getByText(NOT_HERE_YET_TEXT)).toBeTruthy();
-    expect(screen.getByText(SHARED_FILE)).toBeTruthy();
+    expect(screen.getByRole('heading', { name: 'Shared with the repo' })).toBeTruthy();
+    expect(screen.getByRole('heading', { name: 'Just me' })).toBeTruthy();
+    expect(screen.getByText(SHARED_NOTE)).toBeTruthy();
     expect(SHARED_FILE).toBe('.agents/flow/config.json');
     expect(screen.getByText('everyone on this repo')).toBeTruthy();
     expect(screen.getByText('only this computer')).toBeTruthy();
-    fireEvent.click(screen.getByRole('button', { name: 'Settings → Flow' }));
-    expect(api.navigate).toHaveBeenLastCalledWith('?settings=flow:fleet');
+    fireEvent.click(screen.getByRole('button', { name: '← dorkos' }));
+    expect(api.navigate).toHaveBeenLastCalledWith('/x/flow/p/dorkos');
   });
 });
 

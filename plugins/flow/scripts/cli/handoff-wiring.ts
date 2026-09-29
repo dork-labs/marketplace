@@ -175,6 +175,7 @@ export function handoffWiring(wiring: HandoffWiringInput): HandoffWiring {
     return rankAccounts({
       now: view.input.now,
       repo: view.input.repo,
+      ...(view.input.project === undefined ? {} : { project: view.input.project }),
       accounts: view.input.accounts,
       runtime,
       runtimes: view.input.runtimes,

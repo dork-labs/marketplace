@@ -629,6 +629,7 @@ export async function drain(ctx: VerbContext, options: DrainOptions = {}): Promi
       const rank = rankAccounts({
         now: input.now,
         repo: input.repo,
+        ...(input.project === undefined ? {} : { project: input.project }),
         accounts: input.accounts,
         runtime,
         runtimes: input.runtimes,

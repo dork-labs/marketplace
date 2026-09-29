@@ -522,6 +522,7 @@ describe('the fleet modules stay dependency-free', () => {
       'atomic-json.ts',
       'errors.ts',
       'fleet/accounts.ts',
+      'fleet/project-eligibility.ts',
       'fleet/usage-ledger.ts',
     ]);
   });

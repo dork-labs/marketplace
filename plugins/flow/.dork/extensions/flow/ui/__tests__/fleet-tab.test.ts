@@ -641,3 +641,76 @@ describe('FleetTab: answers that arrive out of order', () => {
     ).toBe('true');
   });
 });
+
+describe('FleetTab on a DorkOS that keeps accounts to projects (§8.5)', () => {
+  const rules = (onlyFor: Record<string, string[]>) => ({
+    onlyFor: new Map(Object.entries(onlyFor)),
+    openRuntimes: vi.fn(),
+  });
+
+  it('shows DorkOS’s rule on the account’s row, read-only, with the way to change it', async () => {
+    stubFetch({
+      status: 200,
+      body: fleet([claudeGroup([account('Work', 'rotation'), account('Acct 2', 'rotation')])]),
+    });
+    const given = rules({ Work: ['client-app', 'client-api'] });
+    render(React.createElement(FleetTab, { rules: given }));
+    await act(async () => {});
+    expect(screen.getByText(/Only for client-app, client-api/)).toBeTruthy();
+    fireEvent.click(screen.getByRole('button', { name: 'Change in Settings → Runtimes →' }));
+    expect(given.openRuntimes).toHaveBeenCalledTimes(1);
+    expect(screen.getAllByText(/Only for/)).toHaveLength(1);
+  });
+
+  it("keeps 'Only for these repos' editable, since flow's own list stays in force until moved", async () => {
+    stubFetch({
+      status: 200,
+      body: fleet([claudeGroup([account('Work', 'kept-out', { repos: ['acme/web'] })])]),
+    });
+    render(React.createElement(FleetTab, { rules: rules({}) }));
+    await act(async () => {});
+    expect(screen.getByRole('button', { name: '+ add' })).toBeTruthy();
+    expect(screen.getByRole('button', { name: 'Remove acme/web' })).toBeTruthy();
+  });
+
+  it('offers a move on the account’s row, and does nothing until it is clicked', async () => {
+    stubFetch({
+      status: 200,
+      body: fleet([claudeGroup([account('Work', 'kept-out', { repos: ['acme/app'] })])]),
+    });
+    const onMove = vi.fn();
+    const text = 'Move "Only for these repos" into DorkOS? DorkOS will keep Work to client-app.';
+    render(
+      React.createElement(FleetTab, {
+        rules: rules({}),
+        moves: new Map([
+          [
+            'claude-code:Work',
+            {
+              plan: { key: 'claude-code:Work', kind: 'ready' as const, text, action: 'Move it' },
+              result: null,
+              busy: false,
+              onMove,
+            },
+          ],
+        ]),
+      })
+    );
+    await act(async () => {});
+    expect(screen.getByText(text)).toBeTruthy();
+    expect(onMove).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByRole('button', { name: 'Move it' }));
+    expect(onMove).toHaveBeenCalledTimes(1);
+  });
+
+  it('keeps the chips on a DorkOS without the rules', async () => {
+    stubFetch({
+      status: 200,
+      body: fleet([claudeGroup([account('Work', 'kept-out', { repos: ['acme/web'] })])]),
+    });
+    render(React.createElement(FleetTab, { rules: null }));
+    await act(async () => {});
+    expect(screen.getByRole('button', { name: '+ add' })).toBeTruthy();
+    expect(screen.getByRole('button', { name: 'Remove acme/web' })).toBeTruthy();
+  });
+});

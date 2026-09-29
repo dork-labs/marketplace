@@ -22,6 +22,12 @@
  *   without the inbox, `POST /decisions/:key` answers from flow's own pages.
  * - `POST /projects/:name/allow-adapter` lets flow run a project's own tracker
  *   adapter, as it is now.
+ * - `GET /settings/:name` answers a project's settings by who a change
+ *   reaches, and `PUT /settings/:name` changes them: the shared file, the
+ *   local file and the pause default. The dial and the accounts a project may
+ *   use are DorkOS's, written only from the person's browser, never here.
+ * - `GET /fleet/migration` and `PUT /fleet/migration` keep the record of
+ *   moving "Only for these repos" into DorkOS, which the browser does.
  * - Every route that changes something runs behind DorkOS's person guard
  *   (`ctx.requirePerson`): an agent calling flow's routes cannot pause a
  *   project or change an account's policy. On a DorkOS without the guard the
@@ -44,6 +50,7 @@ import { createAdvisor, type ExecFileLike, type FlowAdvisor } from './lib/adviso
 import { buildCapacity, parseSince } from './lib/capacity.ts';
 import { ContinuedWatcher } from './lib/continued-watcher.ts';
 import { ModelService } from './lib/model-service.ts';
+import { readRepoMigration, writeRepoMigration } from './lib/repo-migration.ts';
 import { SharedStorage } from './lib/shared-storage.ts';
 import { GIT_TIMEOUT_MS } from './lib/run-store.ts';
 import {
@@ -269,6 +276,10 @@ export function createFlowExtension(
     router.get('/capacity', tooOld);
     router.post('/decisions/:key', tooOld);
     router.post('/projects/:name/allow-adapter', tooOld);
+    router.get('/settings/:name', tooOld);
+    router.put('/settings/:name', tooOld);
+    router.get('/fleet/migration', tooOld);
+    router.put('/fleet/migration', tooOld);
     return { advisor: null, watcher: null, model: null, dispose: () => {} };
   }
 
@@ -360,6 +371,18 @@ export function createFlowExtension(
     })
   );
   router.get(
+    '/settings/:name',
+    handle(async (req, res) => {
+      res.status(200).json(await model.settings(req.params.name));
+    })
+  );
+  router.get(
+    '/fleet/migration',
+    handle(async (_req, res) => {
+      res.status(200).json(await readRepoMigration(storage));
+    })
+  );
+  router.get(
     '/capacity',
     handle(async (req, res) => {
       const at = now();
@@ -412,6 +435,22 @@ export function createFlowExtension(
       ...guarded(
         handle(async (req, res) => {
           res.status(200).json(await model.allowAdapter(req.params.name));
+        })
+      )
+    );
+    router.put(
+      '/settings/:name',
+      ...guarded(
+        handle(async (req, res) => {
+          res.status(200).json(await model.saveSettings(req.params.name, req.body));
+        })
+      )
+    );
+    router.put(
+      '/fleet/migration',
+      ...guarded(
+        handle(async (req, res) => {
+          res.status(200).json(await writeRepoMigration(storage, req.body));
         })
       )
     );

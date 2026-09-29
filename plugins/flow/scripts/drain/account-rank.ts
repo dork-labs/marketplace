@@ -37,8 +37,9 @@ import {
   accountRoom,
   effectiveReservePct,
   fiveHourRoom,
-  mayServe,
   modelRoom,
+  projectAllows,
+  roleServes,
   spendRoom,
   weeklyRoom,
   type CrossRuntimeFallback,
@@ -55,6 +56,7 @@ import {
   type RuntimeSlug,
   type WindowReading,
 } from '../fleet/usage-ledger.ts';
+import type { ProjectRule } from '../fleet/project-eligibility.ts';
 
 /** A ledger's `windows` object, or `null` when the account has no ledger. */
 export type LedgerWindows = Record<string, unknown> | null;
@@ -94,7 +96,13 @@ export interface LimitSignalInput {
 
 /** Why an account may not take an item (§3.2). */
 export type IneligibleReason =
-  'not-routable' | 'excluded' | 'out-of-scope' | 'limited' | 'near-limit' | 'at-capacity';
+  | 'not-routable'
+  | 'excluded'
+  | 'out-of-scope'
+  | 'not-allowed-here'
+  | 'limited'
+  | 'near-limit'
+  | 'at-capacity';
 
 /** One (runtime, account) pair offered to {@link rankAccounts}. */
 export interface RankableAccount {
@@ -134,6 +142,12 @@ export interface RankAccountsInput {
   now: Instant;
   /** The item's repo, `owner/name`, or `null` when the checkout has no parsable origin. */
   repo: string | null;
+  /**
+   * The item's project and DorkOS's account rules for it (fleet contract
+   * 4.2.0): a Claude Code account DorkOS does not allow there is left out as
+   * `not-allowed-here`. Absent: only flow's own roles are judged.
+   */
+  project?: ProjectRule;
   /** Every account of every runtime from S1 `resolveAccounts` (each runtime's `default` included), with its policy, windows and spend. */
   accounts: readonly RankableAccount[];
   /** The item's runtime ({@link itemRuntime}). */
@@ -506,7 +520,9 @@ function runtimeGroup(
  *   only with `crossRuntimeFallback: on` (while it is off they are left out
  *   entirely, not listed as ineligible).
  * - Ineligible accounts are listed with every reason that applies; an `unknown`
- *   signal is eligible. A model's buckets are checked only on the item's own
+ *   signal is eligible. `out-of-scope` is flow's own role (kept out of this
+ *   repo); `not-allowed-here` is DorkOS's rule for the project (`input.project`,
+ *   fleet contract 4.2.0), which flow obeys as DorkOS does. A model's buckets are checked only on the item's own
  *   runtime (model fallback stays within a runtime).
  * - Order: the item's runtime first, then other runtimes by
  *   {@link runtimeGroup}; within one runtime by tier (affinity, then
@@ -537,7 +553,8 @@ export function rankAccounts(input: RankAccountsInput): AccountRank {
     const reasons: IneligibleReason[] = [];
     if (!account.routable || !isValidAccountId(account.id)) reasons.push('not-routable');
     if (excluded.has(key)) reasons.push('excluded');
-    if (!mayServe(account.policy, repo)) reasons.push('out-of-scope');
+    if (!roleServes(account.policy, repo)) reasons.push('out-of-scope');
+    if (!projectAllows(account.policy, input.project)) reasons.push('not-allowed-here');
     if (signal.level === 'exhausted') reasons.push('limited');
     if (signal.level === 'warning') reasons.push('near-limit');
     if ((input.liveByAccount[key] ?? 0) >= opts.maxLivePerAccount) reasons.push('at-capacity');

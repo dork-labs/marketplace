@@ -47,6 +47,8 @@ import {
   resolveDorkHome,
   type RuntimeAccount,
 } from '../fleet/accounts.ts';
+import type { ProjectRule } from '../fleet/project-eligibility.ts';
+import { loadProjectRule } from '../fleet/project-rule.ts';
 import { readLedger, type RuntimeSlug } from '../fleet/usage-ledger.ts';
 import type { FlowRun } from '../flow-run.ts';
 import { openFlowStateFile } from '../flow-state-file.ts';
@@ -159,6 +161,11 @@ export interface AssignmentInput {
   now: Date;
   /** The checkout's `owner/name`, or `null`. */
   repo: string | null;
+  /**
+   * The checkout's project and DorkOS's account rules for it (fleet contract
+   * 4.2.0). Absent: only flow's own roles are judged.
+   */
+  project?: ProjectRule;
   /** The implementation model, or `null`. */
   model: string | null;
   /**
@@ -206,6 +213,7 @@ export function assignAccounts(picked: readonly WorkItem[], input: AssignmentInp
     const rank = rankAccounts({
       now: input.now,
       repo: input.repo,
+      ...(input.project === undefined ? {} : { project: input.project }),
       accounts: input.accounts,
       runtime,
       runtimes: input.runtimes,
@@ -260,7 +268,13 @@ export function noAccountMessage(repo: string | null, account: ItemAccount): str
   const reasons = account.ineligible
     .map((entry) => `${accountKey(entry.runtime, entry.id)}: ${entry.reasons.join(', ')}`)
     .join('; ');
-  return `No account may take work for ${repo ?? 'this checkout (no origin repo)'}: ${reasons || 'no account of this runtime'}. Run \`flow accounts set <id> --role rotation\` to allow one.`;
+  const onlyDorkOS =
+    account.ineligible.length > 0 &&
+    account.ineligible.every((entry) => entry.reasons.includes('not-allowed-here'));
+  const remedy = onlyDorkOS
+    ? "Choose which accounts this project may use in the project's Flow settings in DorkOS."
+    : 'Run `flow accounts set <id> --role rotation` to allow one.';
+  return `No account may take work for ${repo ?? 'this checkout (no origin repo)'}: ${reasons || 'no account of this runtime'}. ${remedy}`;
 }
 
 /** The fields of an outcome the human text needs. */
@@ -528,6 +542,7 @@ export async function gatherAssignmentInput(
   const origin = await ctx.runProcess('git', ['remote', 'get-url', 'origin'], {
     cwd: ctx.projectDir,
   });
+  const project = loadProjectRule(dorkHome, ctx.projectDir);
   let runs: Record<string, FlowRun> = {};
   try {
     runs = openFlowStateFile(ctx.projectDir).read();
@@ -538,6 +553,7 @@ export async function gatherAssignmentInput(
   return {
     now: ctx.now(),
     repo: origin.code === 0 ? parseOriginRepo(origin.stdout) : null,
+    project,
     model,
     accounts,
     runtimes: policy.runtimes,

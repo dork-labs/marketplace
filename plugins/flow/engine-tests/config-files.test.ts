@@ -26,7 +26,7 @@ import {
 import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import {
   CONFIG_SCHEMA_URL,
@@ -34,7 +34,9 @@ import {
   MIGRATED_MARKER,
   PAUSE_FILE,
   SHIPPED_ADAPTERS,
+  checkSettings,
   findConfigRoots,
+  main as configFilesMain,
   legacyAdapterDirs,
   legacyConfigDirs,
   migrateAdapter,
@@ -1445,7 +1447,56 @@ describe('pause', () => {
   });
 });
 
-describe('config-files CLI', () => {
+describe('checkSettings', () => {
+  const settings = (repo: string, config: unknown, local?: unknown) => {
+    write(path.join(repo, '.agents/flow/config.json'), JSON.stringify(config));
+    if (local !== undefined) {
+      write(path.join(repo, '.agents/flow/config.local.json'), JSON.stringify(local));
+    }
+    return checkSettings(roots(repo, path.join(base, 'plugin')));
+  };
+
+  // Purpose: the settings page saves through this check; a clean pair passes,
+  // secrets in the local file included (flow reads them apart from the policy).
+  it('passes config.json alone, and with a local file over it', () => {
+    const repo = makeRepo();
+    expect(settings(repo, { tracker: 'linear' })).toMatchObject({ ok: true, errors: [] });
+    expect(
+      settings(
+        repo,
+        { tracker: 'linear' },
+        { secrets: { trackerToken: 't' }, drain: { parallel: 3 } }
+      )
+    ).toMatchObject({ ok: true, errors: [] });
+  });
+
+  // Purpose: a bad value that lives only in config.local.json still breaks
+  // flow's loader, so the check must see the two files together.
+  it('fails a bad value in config.local.json, naming the local file', () => {
+    const repo = makeRepo();
+    const result = settings(repo, { tracker: 'linear' }, { drain: { parallel: -1 } });
+    expect(result.ok).toBe(false);
+    expect(result.errors[0].message).toMatch(/config\.local\.json/);
+  });
+
+  // Purpose: a bad value in config.json fails once, not once per file.
+  it('fails a bad value in config.json once', () => {
+    const repo = makeRepo();
+    const result = settings(repo, { tracker: 'linear', review: { adversarial: 'yes' } }, {});
+    expect(result.ok).toBe(false);
+    expect(result.errors).toHaveLength(1);
+  });
+
+  // Purpose: with no settings there is nothing to save into.
+  it('fails with no config.json', () => {
+    const repo = makeRepo();
+    expect(checkSettings(roots(repo, path.join(base, 'plugin'))).ok).toBe(false);
+  });
+});
+
+// Every test here starts real node processes (about 0.3s each, far more on a
+// loaded machine), so the block gets an explicit budget instead of vitest's 5s.
+describe('config-files CLI', { timeout: 30_000 }, () => {
   /**
    * A copy of the flow scripts in a throwaway install folder, so the CLI's own
    * plugin root (found from its file location, as in a real install) is under the
@@ -1485,6 +1536,21 @@ describe('config-files CLI', () => {
   }
 
   const shared = () => installCopy(path.join(base, 'install'));
+
+  // Purpose: `check` runs no adapter: a project whose adapter is missing still
+  // passes when its settings are sound, and fails when they are not.
+  it('check judges the settings files alone', () => {
+    const repo = makeRepo();
+    write(path.join(repo, '.agents/flow/config.json'), '{"tracker":"nosuch"}');
+    const plugin = shared();
+    const good = run(plugin, repo, ['check']);
+    expect(good.status).toBe(0);
+    expect(good.out).toMatchObject({ ok: true, errors: [] });
+    write(path.join(repo, '.agents/flow/config.local.json'), '{"autonomy":{"default":"always"}}');
+    const bad = run(plugin, repo, ['check']);
+    expect(bad.status).toBe(1);
+    expect(bad.out.ok).toBe(false);
+  }, 30_000);
 
   // Not configured is exit 1, so the /flow guard routes to /flow:init.
   it('resolve exits 1 when nothing is configured', () => {
@@ -1642,21 +1708,32 @@ describe('config-files CLI', () => {
   // nothing, and --until only goes with pause.
   it('pause --until records the end and refuses a bad or missing one', () => {
     const repo = makeRepo();
-    const plugin = shared();
     const flag = path.join(repo, '.agents/flow', PAUSE_FILE);
-    expect(run(plugin, repo, ['pause', '--until']).status).toBe(2);
-    expect(run(plugin, repo, ['pause', '--until', 'soon']).status).toBe(2);
-    expect(run(plugin, repo, ['pause', '--until', '2001-01-01T00:00:00Z']).status).toBe(2);
-    // A time without its zone would be read in this machine's zone: refused.
-    expect(run(plugin, repo, ['pause', '--until', '2999-01-01T09:00:00']).status).toBe(2);
-    expect(run(plugin, repo, ['resume', '--until', '2999-01-01T00:00:00Z']).status).toBe(2);
+    // The refusals are argument checks: run them in this process, where a busy
+    // machine cannot make five node start-ups time the test out.
+    const quiet = [
+      vi.spyOn(process.stdout, 'write').mockReturnValue(true),
+      vi.spyOn(process.stderr, 'write').mockReturnValue(true),
+    ];
+    try {
+      const refused = (args: string[]) => configFilesMain([...args, '--project', repo]);
+      expect(refused(['pause', '--until'])).toBe(2);
+      expect(refused(['pause', '--until', 'soon'])).toBe(2);
+      expect(refused(['pause', '--until', '2001-01-01T00:00:00Z'])).toBe(2);
+      // A time without its zone would be read in this machine's zone: refused.
+      expect(refused(['pause', '--until', '2999-01-01T09:00:00'])).toBe(2);
+      expect(refused(['resume', '--until', '2999-01-01T00:00:00Z'])).toBe(2);
+    } finally {
+      for (const spy of quiet) spy.mockRestore();
+    }
     expect(existsSync(flag)).toBe(false);
+    // One real run proves the CLI records the end.
     const until = new Date(Date.now() + 3_600_000).toISOString();
-    const paused = run(plugin, repo, ['pause', '--until', until]);
+    const paused = run(shared(), repo, ['pause', '--until', until]);
     expect(paused.status).toBe(0);
     expect(paused.out).toMatchObject({ ok: true, until, alreadyPaused: false });
-    expect(run(plugin, repo).out.paused).toMatchObject({ until });
-  });
+    expect(JSON.parse(readFileSync(flag, 'utf8'))).toMatchObject({ until });
+  }, 30_000);
 
   // A pause is a safety control: it works before flow is configured.
   it('pause works when flow is not configured', () => {

@@ -29,6 +29,12 @@ export interface SegmentedControlProps<T extends string> {
   label?: string;
   /** The id of the element that names the group, in place of `label`. */
   labelledBy?: string;
+  /** The id of an element that says more about the group. */
+  describedBy?: string;
+  /** Shown but not changeable. */
+  disabled?: boolean;
+  /** Let the choices wrap onto more lines on a narrow screen (long labels). */
+  wrap?: boolean;
 }
 
 /** The index a key moves to from `index` among `count` choices, or `null` for other keys. */
@@ -65,6 +71,7 @@ export function SegmentedControl<T extends string>(props: SegmentedControlProps<
   );
 
   const choose = (index: number, focus: boolean): void => {
+    if (props.disabled === true) return;
     const option = options[index];
     if (focus) {
       group.current?.querySelectorAll<HTMLButtonElement>('[role="radio"]')[index]?.focus();
@@ -79,7 +86,13 @@ export function SegmentedControl<T extends string>(props: SegmentedControlProps<
       role: 'radiogroup',
       'aria-label': props.label,
       'aria-labelledby': props.labelledBy,
-      style: SEGMENTED,
+      'aria-describedby': props.describedBy,
+      'aria-disabled': props.disabled === true || undefined,
+      style: {
+        ...SEGMENTED,
+        ...(props.wrap === true ? { height: 'auto', flexWrap: 'wrap', maxWidth: '100%' } : {}),
+        ...(props.disabled === true ? { opacity: 0.6 } : {}),
+      },
     },
     ...options.map((option, index) =>
       h(
@@ -90,7 +103,11 @@ export function SegmentedControl<T extends string>(props: SegmentedControlProps<
           role: 'radio',
           'aria-checked': option.value === value,
           tabIndex: index === selected ? 0 : -1,
-          style: segment(option.value === value, index === options.length - 1),
+          style: {
+            ...segment(option.value === value, index === options.length - 1),
+            ...(props.wrap === true ? { minHeight: '28px' } : {}),
+            ...(props.disabled === true ? { cursor: 'not-allowed' } : {}),
+          },
           onClick: () => choose(index, false),
           onKeyDown: (event: KeyEvent) => {
             const next = nextIndex(event.key, index, options.length);

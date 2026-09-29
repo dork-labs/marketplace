@@ -10,7 +10,9 @@
  * - **A project's page** at `/x/flow/p/<name>`: the project lens, full width,
  *   under its open decisions. On a phone, which has no side panel, this is
  *   where a project is looked at.
- * - **A project's settings** at `/x/flow/p/<name>/settings` (`project-settings.ts`).
+ * - **A project's settings** at `/x/flow/p/<name>/settings`: `ProjectFlowSettings`
+ *   for that one project (`project-settings.ts`), the same component Settings →
+ *   Flow shows under its project switcher.
  *
  * All three read the one live store. They are registered only on a DorkOS
  * that has pages.
@@ -31,9 +33,17 @@ import {
   conditionLine,
   schedulesWaitingText,
 } from './project-lens.ts';
-import { ProjectSettings } from './project-settings.ts';
+import { ProjectFlowSettings } from './project-settings.ts';
 import { ANSWERED_IN_FLOW_NOTE, answeredHere, hasInbox, type AnswerApi } from './answers.ts';
-import { BAND, BAND_ROW, DecisionRow, SR_ONLY, loadingState, pageRoot } from './page-parts.ts';
+import {
+  BAND,
+  BAND_ROW,
+  DecisionRow,
+  SR_ONLY,
+  TITLE,
+  loadingState,
+  pageRoot,
+} from './page-parts.ts';
 import { pausedText } from './panel-format.ts';
 import { FROM_CHAT_HINT, FROM_CHAT_TEXT } from './palette.ts';
 import { PauseMenu } from './pause-menu.ts';
@@ -525,7 +535,7 @@ function LensPage(props: {
  * @returns The home, a project's page, and its settings page.
  */
 export function createPages(
-  api: AnswerApi,
+  api: AnswerApi & Pick<ClientApi, 'getState' | 'projectSettings'>,
   store: FlowStore
 ): {
   home: ComponentType<ExtensionPageProps>;
@@ -718,7 +728,17 @@ export function createPages(
     const name = props.params.name ?? '';
     const project = snapshot.model!.projects.find((candidate) => candidate.name === name);
     if (project === undefined) return unknownProject(name, api);
-    return pageRoot(h(ProjectSettings, { project, api }));
+    return pageRoot(
+      h(
+        'button',
+        { type: 'button', style: LINK, onClick: () => api.navigate(projectPath(project.name)) },
+        `← ${project.name}`
+      ),
+      // DorkOS's bar over the page already says "Flow settings".
+      h('h1', { style: { ...TITLE, marginTop: '8px' } }, project.name),
+      h('p', { style: { ...MUTED, wordBreak: 'break-all' } }, project.root),
+      h(ProjectFlowSettings, { project, api })
+    );
   }
 
   return {
@@ -788,7 +808,7 @@ function ResumeButton(props: { project: string; store: FlowStore }): Node {
  * @returns A function that removes them.
  */
 export function registerPages(
-  api: AnswerApi & Pick<ClientApi, 'registerPage'>,
+  api: AnswerApi & Pick<ClientApi, 'registerPage' | 'getState' | 'projectSettings'>,
   store: FlowStore
 ): () => void {
   const registerPage = api.registerPage;

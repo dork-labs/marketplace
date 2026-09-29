@@ -3749,6 +3749,274 @@
           }
         ]
       }
+    },
+    {
+      "name": "not-allowed-here: DorkOS keeps a Claude Code account to another project (fleet contract 4.2.0)",
+      "input": {
+        "now": "2026-09-26T16:00:00.000Z",
+        "project": {
+          "root": "/work/app",
+          "config": {
+            "runtimes": {
+              "claudeCode": {
+                "accounts": [
+                  {
+                    "id": "work",
+                    "path": "/accounts/work",
+                    "onlyProjects": ["/work/other"]
+                  }
+                ]
+              }
+            }
+          }
+        },
+        "accounts": [
+          {
+            "runtime": "claude-code",
+            "id": "work",
+            "routable": true,
+            "policy": {
+              "role": "rotation",
+              "reservePct": 0,
+              "spendDownWindowHours": 24,
+              "scope": {
+                "repos": []
+              }
+            },
+            "windows": {
+              "five_hour": {
+                "usedPct": 10,
+                "resetsAt": "2026-09-26T19:00:00.000Z",
+                "status": null,
+                "observedAt": "2026-09-26T15:59:00.000Z",
+                "source": "statusline"
+              },
+              "seven_day": {
+                "usedPct": 20,
+                "resetsAt": "2026-10-02T16:00:00.000Z",
+                "status": null,
+                "observedAt": "2026-09-26T15:59:00.000Z",
+                "source": "statusline"
+              }
+            }
+          },
+          {
+            "runtime": "claude-code",
+            "id": "home",
+            "routable": true,
+            "policy": {
+              "role": "rotation",
+              "reservePct": 0,
+              "spendDownWindowHours": 24,
+              "scope": {
+                "repos": []
+              }
+            },
+            "windows": {
+              "five_hour": {
+                "usedPct": 10,
+                "resetsAt": "2026-09-26T19:00:00.000Z",
+                "status": null,
+                "observedAt": "2026-09-26T15:59:00.000Z",
+                "source": "statusline"
+              },
+              "seven_day": {
+                "usedPct": 20,
+                "resetsAt": "2026-10-02T16:00:00.000Z",
+                "status": null,
+                "observedAt": "2026-09-26T15:59:00.000Z",
+                "source": "statusline"
+              }
+            }
+          }
+        ]
+      },
+      "expected": {
+        "pick": {
+          "runtime": "claude-code",
+          "id": "home"
+        },
+        "ranked": [
+          {
+            "runtime": "claude-code",
+            "id": "home",
+            "tier": 1
+          }
+        ],
+        "ineligible": [
+          {
+            "runtime": "claude-code",
+            "id": "work",
+            "reasons": ["not-allowed-here"]
+          }
+        ]
+      }
+    },
+    {
+      "name": "flow's role and DorkOS's rule each give their own reason, flow's first",
+      "input": {
+        "now": "2026-09-26T16:00:00.000Z",
+        "project": {
+          "root": "/work/app",
+          "config": {
+            "runtimes": {
+              "claudeCode": {
+                "projectAccounts": {
+                  "/work/app": {
+                    "allow": ["home"]
+                  }
+                }
+              }
+            }
+          }
+        },
+        "accounts": [
+          {
+            "runtime": "claude-code",
+            "id": "work",
+            "routable": true,
+            "policy": {
+              "role": "kept-out",
+              "reservePct": 0,
+              "spendDownWindowHours": 24,
+              "scope": {
+                "repos": []
+              }
+            },
+            "windows": {
+              "five_hour": {
+                "usedPct": 10,
+                "resetsAt": "2026-09-26T19:00:00.000Z",
+                "status": null,
+                "observedAt": "2026-09-26T15:59:00.000Z",
+                "source": "statusline"
+              },
+              "seven_day": {
+                "usedPct": 20,
+                "resetsAt": "2026-10-02T16:00:00.000Z",
+                "status": null,
+                "observedAt": "2026-09-26T15:59:00.000Z",
+                "source": "statusline"
+              }
+            }
+          },
+          {
+            "runtime": "claude-code",
+            "id": "home",
+            "routable": true,
+            "policy": {
+              "role": "rotation",
+              "reservePct": 0,
+              "spendDownWindowHours": 24,
+              "scope": {
+                "repos": []
+              }
+            },
+            "windows": {
+              "five_hour": {
+                "usedPct": 10,
+                "resetsAt": "2026-09-26T19:00:00.000Z",
+                "status": null,
+                "observedAt": "2026-09-26T15:59:00.000Z",
+                "source": "statusline"
+              },
+              "seven_day": {
+                "usedPct": 20,
+                "resetsAt": "2026-10-02T16:00:00.000Z",
+                "status": null,
+                "observedAt": "2026-09-26T15:59:00.000Z",
+                "source": "statusline"
+              }
+            }
+          }
+        ]
+      },
+      "expected": {
+        "pick": {
+          "runtime": "claude-code",
+          "id": "home"
+        },
+        "ranked": [
+          {
+            "runtime": "claude-code",
+            "id": "home",
+            "tier": 1
+          }
+        ],
+        "ineligible": [
+          {
+            "runtime": "claude-code",
+            "id": "work",
+            "reasons": ["out-of-scope", "not-allowed-here"]
+          }
+        ]
+      }
+    },
+    {
+      "name": "DorkOS's rule binds only Claude Code accounts: a Codex account with the same id is untouched",
+      "input": {
+        "now": "2026-09-26T16:00:00.000Z",
+        "runtime": "codex",
+        "project": {
+          "root": "/work/app",
+          "config": {
+            "runtimes": {
+              "claudeCode": {
+                "projectAccounts": {
+                  "/work/app": {
+                    "allow": []
+                  }
+                }
+              }
+            }
+          }
+        },
+        "accounts": [
+          {
+            "runtime": "codex",
+            "id": "work",
+            "routable": true,
+            "policy": {
+              "role": "rotation",
+              "reservePct": 0,
+              "spendDownWindowHours": 24,
+              "scope": {
+                "repos": []
+              }
+            },
+            "windows": {
+              "five_hour": {
+                "usedPct": 10,
+                "resetsAt": "2026-09-26T19:00:00.000Z",
+                "status": null,
+                "observedAt": "2026-09-26T15:59:00.000Z",
+                "source": "statusline"
+              },
+              "seven_day": {
+                "usedPct": 20,
+                "resetsAt": "2026-10-02T16:00:00.000Z",
+                "status": null,
+                "observedAt": "2026-09-26T15:59:00.000Z",
+                "source": "statusline"
+              }
+            }
+          }
+        ]
+      },
+      "expected": {
+        "pick": {
+          "runtime": "codex",
+          "id": "work"
+        },
+        "ranked": [
+          {
+            "runtime": "codex",
+            "id": "work",
+            "tier": 1
+          }
+        ],
+        "ineligible": []
+      }
     }
   ],
   "chooseAccount": [

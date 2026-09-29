@@ -36,53 +36,33 @@
 import { createHash } from 'node:crypto';
 import { readFileSync } from 'node:fs';
 import path from 'node:path';
-
-/** The kinds of ask the dial covers, in the order the settings page lists them. */
-export const AUTONOMY_KINDS = ['ship', 'questions', 'sort', 'retry'] as const;
-
-/** One kind of ask. */
-export type AutonomyKind = (typeof AUTONOMY_KINDS)[number];
-
-/** The dial's three stops. */
-export const AUTONOMY_STOPS = ['ask', 'tell', 'auto'] as const;
-
-/** One stop: Ask me first, Tell me after, Just do it. */
-export type AutonomyStop = (typeof AUTONOMY_STOPS)[number];
-
-/** How long an agent waits for an answer at Tell me after, when the copy says nothing. */
-export const DEFAULT_QUESTION_DEADLINE_MINUTES = 240;
-
-/** The shortest wait a question may have (DorkOS's floor for a deadline). */
-export const MIN_QUESTION_DEADLINE_MINUTES = 5;
-
-/** The longest wait a question may have: seven days. */
-export const MAX_QUESTION_DEADLINE_MINUTES = 7 * 24 * 60;
-
-/** The dial as the copy holds it. */
-export interface AutonomyCopy {
-  /** The stop every kind follows unless {@link kinds} sets it apart. */
-  dial: AutonomyStop;
-  /** Kinds set apart from the dial ("Customize…"); a missing kind follows the dial. */
-  kinds: Partial<Record<AutonomyKind, AutonomyStop>>;
-  /** How long an agent waits for an answer at Tell me after. */
-  questionDeadlineMinutes: number;
-}
+export {
+  AUTONOMY_KINDS,
+  AUTONOMY_STOPS,
+  DEFAULT_QUESTION_DEADLINE_MINUTES,
+  MAX_QUESTION_DEADLINE_MINUTES,
+  MIN_QUESTION_DEADLINE_MINUTES,
+  parseAutonomyCopy,
+  resolveAutonomy,
+  type AutonomyContext,
+  type AutonomyCopy,
+  type AutonomyKind,
+  type AutonomyStop,
+} from './autonomy-dial.ts';
+import {
+  parseAutonomyCopy,
+  resolveAutonomy,
+  type AutonomyContext,
+  type AutonomyCopy,
+  type AutonomyKind,
+  type AutonomyStop,
+} from './autonomy-dial.ts';
 
 /** What reading the copy found. */
 export type AutonomyRead =
   | { state: 'missing'; file: string }
   | { state: 'unreadable'; file: string }
   | { state: 'ok'; file: string; copy: AutonomyCopy };
-
-/** Whether `value` is a non-null, non-array object. */
-function isObject(value: unknown): value is Record<string, unknown> {
-  return typeof value === 'object' && value !== null && !Array.isArray(value);
-}
-
-/** Whether `value` is one of the three stops. */
-function isStop(value: unknown): value is AutonomyStop {
-  return typeof value === 'string' && (AUTONOMY_STOPS as readonly string[]).includes(value);
-}
 
 /**
  * The project id the copy's file is named by: the first 12 hex characters of
@@ -109,43 +89,6 @@ export function autonomyCopyPath(dorkHome: string, root: string): string {
 }
 
 /**
- * Check a copy's contents. Anything that is not a dial as described (an
- * unknown stop, a deadline outside 5 minutes to 7 days) is not a copy flow can
- * trust, and reads as `null`, which the resolver treats as `ask`. Unknown keys
- * are ignored, so a newer extension's copy still reads.
- *
- * @param value - The parsed JSON.
- * @returns The dial, or `null`.
- */
-export function parseAutonomyCopy(value: unknown): AutonomyCopy | null {
-  if (!isObject(value) || !isStop(value.dial)) return null;
-  const kinds: Partial<Record<AutonomyKind, AutonomyStop>> = {};
-  if (value.kinds !== undefined) {
-    if (!isObject(value.kinds)) return null;
-    for (const kind of AUTONOMY_KINDS) {
-      const stop = value.kinds[kind];
-      if (stop === undefined) continue;
-      if (!isStop(stop)) return null;
-      kinds[kind] = stop;
-    }
-  }
-  let minutes = DEFAULT_QUESTION_DEADLINE_MINUTES;
-  if (value.questionDeadlineMinutes !== undefined) {
-    const given = value.questionDeadlineMinutes;
-    if (
-      typeof given !== 'number' ||
-      !Number.isInteger(given) ||
-      given < MIN_QUESTION_DEADLINE_MINUTES ||
-      given > MAX_QUESTION_DEADLINE_MINUTES
-    ) {
-      return null;
-    }
-    minutes = given;
-  }
-  return { dial: value.dial, kinds, questionDeadlineMinutes: minutes };
-}
-
-/**
  * Read the copy of a project's dial.
  *
  * @param file - The copy's path ({@link autonomyCopyPath}).
@@ -169,39 +112,6 @@ export function readAutonomyCopy(file: string): AutonomyRead {
   }
   const copy = parseAutonomyCopy(parsed);
   return copy === null ? { state: 'unreadable', file } : { state: 'ok', file, copy };
-}
-
-/** What the resolver needs to know about the project beyond the dial. */
-export interface AutonomyContext {
-  /**
-   * Whether a reviewer agent checks this project's work (`review.adversarial`).
-   * Without one, "someone must check" would have no checker for the review
-   * gate, so `ship` never leaves `ask`. Default `true`.
-   */
-  reviewerAgent?: boolean;
-}
-
-/**
- * The stop in force for one kind of ask. The one resolver the engine, the
- * skills (through `flow autonomy`) and the Flow extension all use.
- *
- * - No copy, or one that is not a dial: `ask`.
- * - Else the kind's own stop when Customize set one, else the dial's.
- * - `ship` stays `ask` without a reviewer agent ({@link AutonomyContext}).
- *
- * @param copy - The dial, or `null` when there is none or it could not be read.
- * @param kind - The kind of ask.
- * @param context - Facts about the project.
- * @returns The stop.
- */
-export function resolveAutonomy(
-  copy: AutonomyCopy | null,
-  kind: AutonomyKind,
-  context: AutonomyContext = {}
-): AutonomyStop {
-  if (copy === null) return 'ask';
-  if (kind === 'ship' && context.reviewerAgent === false) return 'ask';
-  return copy.kinds[kind] ?? copy.dial;
 }
 
 /**

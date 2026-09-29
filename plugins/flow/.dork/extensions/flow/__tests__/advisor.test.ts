@@ -190,6 +190,21 @@ describe('rank for a person', () => {
     expect(ranking.accounts.map((a) => a.id)).toEqual(['personal']);
   });
 
+  it("hides an account DorkOS doesn't allow in this project, even on a person's own session", async () => {
+    // Purpose: fleet contract 4.2.0. The advisor ranks only what DorkOS would
+    // launch here; the rule is read from config.json and the worktree maps to
+    // its main checkout, as DorkOS keys it.
+    writeFileSync(
+      path.join(world.dorkHome, 'config.json'),
+      JSON.stringify({
+        runtimes: { claudeCode: { projectAccounts: { [world.main]: { allow: ['personal'] } } } },
+      })
+    );
+    const { advisor } = setup();
+    const ranking = await advisor.rank(CANDIDATES, rankCtx({ sessionId: 'someone-else' }));
+    expect(ranking.accounts.map((a) => a.id)).toEqual(['personal']);
+  });
+
   it('hides every account flow could not move a flow run to', async () => {
     writeRuns(world, { i1: runRecord(world) });
     writeFleet(world.dorkHome, { accounts: { 'claude-code:personal': { role: 'rotation' } } });

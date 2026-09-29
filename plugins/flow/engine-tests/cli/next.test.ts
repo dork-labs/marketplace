@@ -618,6 +618,67 @@ describe('flow next: the account each pick runs on (flow-handoff-dispatch §3.5)
     expect(json.picked[0].account.pick).toEqual({ runtime: 'claude-code', id: 'client' });
   });
 
+  /** Register `work` and `home` as rotation, with DorkOS's rules in config.json. */
+  function dorkosRules(rules: Record<string, unknown>, onlyWork: string[] | null): void {
+    fleet({ work: { role: 'rotation' }, home: { role: 'rotation' } });
+    put('config.json', {
+      runtimes: {
+        claudeCode: {
+          defaultAccount: path.join(temp!.dorkHome, 'claude', 'work'),
+          accounts: ['work', 'home'].map((id) => ({
+            id,
+            path: path.join(temp!.dorkHome, 'claude', id),
+            label: `Label ${id}`,
+            ...(id === 'work' && onlyWork !== null ? { onlyProjects: onlyWork } : {}),
+          })),
+          ...rules,
+        },
+      },
+    });
+  }
+
+  it('never picks an account DorkOS keeps to another project (fleet contract 4.2.0)', async () => {
+    // Purpose: a terminal run obeys the same rule as a DorkOS launch, so
+    // `flow next` never assigns work to an account DorkOS would refuse here.
+    temp = tempProject(config());
+    execFileSync('git', ['init', '-q'], { cwd: temp.project });
+    dorkosRules({}, [path.join(temp.dorkHome, 'elsewhere')]);
+    weekly('claude-code', 'work', 0, '2026-09-27T12:00:00.000Z');
+    weekly('claude-code', 'home', 40, '2026-10-02T12:00:00.000Z');
+    const { json } = await next(['--json']);
+    expect(json.picked[0].account.pick).toEqual({ runtime: 'claude-code', id: 'home' });
+    expect(json.picked[0].account.ineligible).toEqual([
+      { runtime: 'claude-code', id: 'work', reasons: ['not-allowed-here'] },
+    ]);
+  });
+
+  it("follows the project's own account list, keyed by its main checkout, trailing slash and all", async () => {
+    // Purpose: projectAccounts narrows which accounts a project may use; the
+    // root is compared canonically, as DorkOS stores it.
+    temp = tempProject(config());
+    execFileSync('git', ['init', '-q'], { cwd: temp.project });
+    dorkosRules({ projectAccounts: { [`${temp.project}/`]: { allow: ['work'] } } }, null);
+    weekly('claude-code', 'work', 40, '2026-10-02T12:00:00.000Z');
+    weekly('claude-code', 'home', 0, '2026-09-27T12:00:00.000Z');
+    const { json } = await next(['--json']);
+    expect(json.picked[0].account.pick).toEqual({ runtime: 'claude-code', id: 'work' });
+    expect(json.picked[0].account.ineligible).toEqual([
+      { runtime: 'claude-code', id: 'home', reasons: ['not-allowed-here'] },
+    ]);
+  });
+
+  it('when only DorkOS refuses every account, says to choose them in the Flow settings', async () => {
+    // Purpose: `flow accounts set --role rotation` cannot fix DorkOS's rule, so
+    // the message names where the person can.
+    temp = tempProject(config());
+    execFileSync('git', ['init', '-q'], { cwd: temp.project });
+    dorkosRules({ projectAccounts: { [temp.project]: { allow: [] } } }, null);
+    const human = await next([]);
+    expect(human.stderr).toContain(
+      "claude-code:work: not-allowed-here; claude-code:home: not-allowed-here. Choose which accounts this project may use in the project's Flow settings in DorkOS."
+    );
+  });
+
   it('ranks for the first of fleet.runtimes when the item has no run', async () => {
     // Purpose: the item's runtime decides which registry it draws from.
     temp = tempProject(config());

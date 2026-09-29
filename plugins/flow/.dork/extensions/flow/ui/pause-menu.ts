@@ -9,11 +9,12 @@
  * @module @dorkos/flow/extension/ui/pause-menu
  */
 
+import type { PauseDefault } from '../lib/settings-shape.ts';
 import { h, useEffect, useRef, type Node, type Style } from './react.ts';
 import { hostColor } from './styles.ts';
 
-/** One of the menu's choices. */
-export type PauseChoice = 'tomorrow' | 'hour' | 'resume';
+/** One of the menu's choices (a project's pause default is one too, §8.2). */
+export type PauseChoice = PauseDefault;
 
 /** Each choice's words, in the menu's order. */
 export const PAUSE_CHOICES: readonly { id: PauseChoice; label: string }[] = [

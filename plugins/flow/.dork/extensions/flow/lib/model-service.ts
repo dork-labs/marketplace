@@ -57,6 +57,13 @@ import {
 } from './model.ts';
 import { ProjectDirectory, type FlowProjectEntry } from './projects.ts';
 import type { SharedStorage } from './shared-storage.ts';
+import {
+  parseSettingsPatch,
+  pauseDefaults,
+  readProjectSettings,
+  writeProjectSettings,
+  type ProjectSettingsView,
+} from './settings.ts';
 import { TrackerReader, projectIdOf } from './tracker-reads.ts';
 
 /** The shortest gap between two `model` events, in ms. */
@@ -419,7 +426,11 @@ export class ModelService {
     const registry = loadAccounts(this.deps.dorkHome, {
       home: this.deps.osHome ?? os.homedir(),
     }).accounts;
-    const [accounts, restore] = await Promise.all([this.accountLook(), this.restoreList()]);
+    const [accounts, restore, pauseDefaultOf] = await Promise.all([
+      this.accountLook(),
+      this.restoreList(),
+      pauseDefaults(this.deps.storage),
+    ]);
     let cwdProject: string | null = null;
     if (typeof cwd === 'string' && cwd !== '') {
       const root = await this.rootOf(cwd);
@@ -439,7 +450,7 @@ export class ModelService {
         pidAlive: this.deps.pidAlive,
         now,
         restoreSchedules: restore[entry.root] ?? [],
-        extras: this.extrasOf(entry),
+        extras: { ...this.extrasOf(entry), pauseDefault: pauseDefaultOf(entry.root) },
       })
     );
     const names = new Set(projects.map((project) => project.name));
@@ -479,6 +490,40 @@ export class ModelService {
 
   /** The last pass's plans, by root. */
   private lastPlans = new Map<string, PlanProject>();
+
+  /**
+   * A project's settings, by who a change reaches (§8.3).
+   *
+   * @param name - The project, by name.
+   * @returns The settings page's view.
+   */
+  async settings(name: unknown): Promise<ProjectSettingsView> {
+    const entry = await this.named(name);
+    const pauseDefaultOf = await pauseDefaults(this.deps.storage);
+    return readProjectSettings(entry, {
+      pauseDefault: pauseDefaultOf(entry.root),
+      canChange: this.deps.canChange,
+    });
+  }
+
+  /**
+   * Change a project's settings. Called only from the person-only route.
+   *
+   * @param name - The project, by name.
+   * @param body - `{ shared?, local?, pauseDefault? }`.
+   * @returns The settings page's new view.
+   */
+  async saveSettings(name: unknown, body: unknown): Promise<ProjectSettingsView> {
+    const entry = await this.named(name);
+    const patch = parseSettingsPatch(body, entry.version.behaviour);
+    await writeProjectSettings(
+      { execFile: this.deps.execFile, flowRoot: this.deps.flowRoot, storage: this.deps.storage },
+      entry,
+      patch
+    );
+    this.request();
+    return this.settings(name);
+  }
 
   /**
    * Allow a project's own tracker adapter as it is now (§2.2). Called only

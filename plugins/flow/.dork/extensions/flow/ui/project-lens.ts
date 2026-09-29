@@ -207,6 +207,15 @@ export function ProjectLens(props: {
   decisionsOnTop?: boolean;
 }): Node {
   const { project, model, api, store } = props;
+  // Without pages, Settings → Flow is the only settings flow has: it opens on this project.
+  const openSettings = () => {
+    if (props.pages === true) {
+      api.navigate(settingsPath(project.name));
+      return;
+    }
+    store.settingsProject = project.name;
+    api.navigate(SETTINGS_TAB_LINK);
+  };
   const [menu, setMenu] = useState(false);
   const [busy, setBusy] = useState(false);
   const [focusHeader, setFocusHeader] = useState(false);
@@ -309,9 +318,7 @@ export function ProjectLens(props: {
           title: 'Settings',
           'aria-label': settingsLabel(project.name),
           style: BUTTON,
-          // Without pages, Settings → Flow is the only settings flow has.
-          onClick: () =>
-            api.navigate(props.pages === true ? settingsPath(project.name) : SETTINGS_TAB_LINK),
+          onClick: openSettings,
         },
         '⚙'
       )
@@ -361,6 +368,7 @@ export function ProjectLens(props: {
         },
         h(PauseMenu, {
           label: `Pause flow in ${project.name}`,
+          defaultChoice: project.pauseDefault,
           onChoose: (until) => act(() => pauseFlow(target, until)),
           opener: () => headerButton.current,
           onClose: (returnFocus) => {
@@ -447,8 +455,7 @@ export function ProjectLens(props: {
             {
               type: 'button',
               style: LINK,
-              onClick: () =>
-                api.navigate(props.pages === true ? settingsPath(project.name) : SETTINGS_TAB_LINK),
+              onClick: openSettings,
             },
             'Choose how much →'
           )

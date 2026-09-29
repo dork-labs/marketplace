@@ -6,6 +6,7 @@
 import { vi } from 'vitest';
 import type { FleetAccount, FleetGroup, FleetView } from '../../lib/fleet.ts';
 import type { FlowModel, FlowProject, FlowRunRow } from '../../lib/model.ts';
+import type { ProjectSettingsView } from '../../lib/settings-shape.ts';
 
 /** A Claude Code account row. */
 export function account(id: string, role: FleetAccount['role'], extra: Partial<FleetAccount> = {}) {
@@ -149,6 +150,7 @@ export function flowProject(name: string, extra: Partial<FlowProject> = {}): Flo
     version: { flow: '0.49.0', behaviour: 1, olderBehaviour: null },
     autonomy: null,
     sortWaits: false,
+    pauseDefault: 'tomorrow',
     restoreSchedules: [],
     ...extra,
   };
@@ -211,4 +213,29 @@ export function routeFetch(
   });
   vi.stubGlobal('fetch', fetchMock);
   return { calls, fetchMock };
+}
+
+/** A `GET /settings/:name` body: every field at its default, a person able to save. */
+export function settingsView(extra: Partial<ProjectSettingsView> = {}): ProjectSettingsView {
+  const field = <T>(value: T) => ({ value, source: 'default' as const, locked: null });
+  return {
+    project: 'dorkos',
+    root: '/work/dorkos',
+    behaviour: 2,
+    files: { shared: '.agents/flow/config.json', local: '.agents/flow/config.local.json' },
+    tracker: { label: 'Linear', team: 'DOR' },
+    shared: {
+      reviewerAgent: field(true),
+      mergeOnApproval: field(true),
+      armAutoMerge: field(false),
+      labels: field<string[]>([]),
+    },
+    local: {
+      startsOnItsOwn: field<'auto' | 'manual'>('auto'),
+      parallel: field(1),
+    },
+    pauseDefault: 'tomorrow',
+    canChange: true,
+    ...extra,
+  };
 }
