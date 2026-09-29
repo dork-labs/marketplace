@@ -15,7 +15,12 @@
  * @module @dorkos/flow/extension/ui/answers
  */
 
-import type { ClientApi, DecisionAnswer } from '../lib/host-types.ts';
+import type {
+  ClientApi,
+  DecisionActions,
+  DecisionAnswer,
+  ExtensionDecisionView,
+} from '../lib/host-types.ts';
 import type { FlowDecision } from '../lib/model.ts';
 import { isStartRefusal, startRefusal, startWords, type StartKind } from '../lib/start-words.ts';
 import { UNREACHABLE_MESSAGE, answerHere } from './api.ts';
@@ -74,6 +79,34 @@ export function answeredHere(
   return !hasInbox(api) || decision.answerIn === 'flow';
 }
 
+/** Shown when the ask changed since the page showed it. */
+export const CHANGED_TEXT = 'This question changed. Take another look.';
+
+/** An action's shape without the deadline, which core may have moved to its floor. */
+function actionShape(actions: DecisionActions): unknown {
+  if (actions.kind !== 'choice') return actions;
+  return { ...actions, decideBy: undefined };
+}
+
+/**
+ * Whether core's row still says what flow's page showed: the same headline,
+ * why line and buttons.
+ *
+ * @param view - Core's row.
+ * @param decision - What the page showed.
+ * @returns True when they match.
+ */
+export function sameAsk(
+  view: Pick<ExtensionDecisionView, 'title' | 'why' | 'actions'>,
+  decision: Pick<FlowDecision, 'title' | 'why' | 'actions'>
+): boolean {
+  return (
+    view.title === decision.title &&
+    view.why === decision.why &&
+    JSON.stringify(actionShape(view.actions)) === JSON.stringify(actionShape(decision.actions))
+  );
+}
+
 /**
  * Send one answer: through core where it has the inbox, else flow's route.
  *
@@ -94,11 +127,13 @@ export async function sendAnswer(
   if (typeof list === 'function' && typeof answerDecision === 'function') {
     const view = (await list()).find((open) => open.key === decision.key);
     if (view === undefined) return { resolved: false, message: ALREADY_SETTLED_TEXT, watch: null };
+    // Answer only what the person saw: core's row must still say the same.
+    if (!sameAsk(view, decision)) return { resolved: false, message: CHANGED_TEXT, watch: null };
     const result = await answerDecision(view.id, answer);
     if (result.resolved) void store?.refresh();
     return { resolved: result.resolved, message: result.message, watch: result.watch };
   }
-  const reply = await answerHere(decision.key, answer);
+  const reply = await answerHere(decision.key, answer, decision.shown);
   store?.apply(reply.model);
   return { resolved: reply.resolved, message: reply.message, watch: reply.watch };
 }

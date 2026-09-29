@@ -17,6 +17,7 @@ import type { FlowDecision, FlowModel } from '../../lib/model.ts';
 import { SET_UP_HERE_TEXT } from '../all-projects.ts';
 import {
   ALREADY_SETTLED_TEXT,
+  CHANGED_TEXT,
   DecisionAnswers,
   StartButton,
   sendAnswer,
@@ -43,6 +44,7 @@ function ask(actions: DecisionActions, extra: Partial<FlowDecision> = {}): FlowD
     raisedAt: '2026-09-28T09:00:00.000Z',
     actions,
     answerIn: 'flow',
+    shown: 'shown-words',
     why: 'Flow has had nothing ready to work on in dorkos for a day.',
     defaultChoice: null,
     decideBy: null,
@@ -50,11 +52,22 @@ function ask(actions: DecisionActions, extra: Partial<FlowDecision> = {}): FlowD
   };
 }
 
-/** A host with the inbox: core lists the ask under its own id and answers it. */
-function inboxHost(keys: string[], result: Record<string, unknown> = {}) {
+/** A host with the inbox: core lists each ask under its own id, as flow raised it, and answers it. */
+function inboxHost(decisions: FlowDecision[], result: Record<string, unknown> = {}) {
   return {
     navigate: vi.fn(),
-    listDecisions: vi.fn(async () => keys.map((key) => ({ id: `core-${key}`, key }) as never)),
+    listDecisions: vi.fn(async () =>
+      decisions.map(
+        (d) =>
+          ({
+            id: `core-${d.key}`,
+            key: d.key,
+            title: d.title,
+            why: d.why,
+            actions: d.actions,
+          }) as never
+      )
+    ),
     answerDecision: vi.fn(async () => ({
       resolved: true,
       message: null,
@@ -67,8 +80,9 @@ function inboxHost(keys: string[], result: Record<string, unknown> = {}) {
 
 describe('sending an answer', () => {
   it("answers through core by core's id where DorkOS has the inbox", async () => {
-    const api = inboxHost(['idle:3f2a00000000']);
-    const result = await sendAnswer(api, ask({ kind: 'word', label: 'Sort them' }), {
+    const sort = ask({ kind: 'word', label: 'Sort them' });
+    const api = inboxHost([sort]);
+    const result = await sendAnswer(api, sort, {
       action: 'word',
     });
     expect(api.answerDecision).toHaveBeenCalledWith('core-idle:3f2a00000000', { action: 'word' });
@@ -80,6 +94,27 @@ describe('sending an answer', () => {
       message: ALREADY_SETTLED_TEXT,
       watch: null,
     });
+  });
+
+  it('refuses to answer when core’s row no longer says what the page showed', async () => {
+    const api = {
+      navigate: vi.fn(),
+      listDecisions: vi.fn(async () => [
+        {
+          id: 'core-1',
+          key: 'idle:3f2a00000000',
+          title: "13 new ideas haven't been sorted",
+          why: 'Flow has had nothing ready to work on in dorkos for a day.',
+          actions: { kind: 'word', label: 'Sort them' },
+        } as never,
+      ]),
+      answerDecision: vi.fn(),
+    };
+    const result = await sendAnswer(api, ask({ kind: 'word', label: 'Sort them' }), {
+      action: 'word',
+    });
+    expect(result).toEqual({ resolved: false, message: CHANGED_TEXT, watch: null });
+    expect(api.answerDecision).not.toHaveBeenCalled();
   });
 
   it("answers through flow's own route on a DorkOS without the inbox", async () => {
@@ -99,7 +134,7 @@ describe('sending an answer', () => {
     expect(fetch.calls[0]).toMatchObject({
       method: 'POST',
       url: '/api/ext/flow/decisions/idle%3A3f2a00000000',
-      body: { action: 'word' },
+      body: { action: 'word', shown: 'shown-words' },
     });
     expect(apply).toHaveBeenCalledWith(model);
   });
@@ -107,18 +142,19 @@ describe('sending an answer', () => {
 
 describe("an ask's buttons", () => {
   it('reads 👎/👍 as outcomes and asks for a note before sending back', async () => {
-    const api = inboxHost(['k']);
+    const retry = ask(
+      {
+        kind: 'yes-no',
+        approveLabel: 'Fix it',
+        rejectLabel: 'Leave it',
+        rejectAsksForNote: true,
+      },
+      { key: 'k', kind: 'retry' }
+    );
+    const api = inboxHost([retry]);
     render(
       React.createElement(DecisionAnswers, {
-        decision: ask(
-          {
-            kind: 'yes-no',
-            approveLabel: 'Fix it',
-            rejectLabel: 'Leave it',
-            rejectAsksForNote: true,
-          },
-          { key: 'k', kind: 'retry' }
-        ),
+        decision: retry,
         root: '/work/dorkos',
         api,
       })
@@ -138,22 +174,23 @@ describe("an ask's buttons", () => {
   });
 
   it("marks the agent's pick among a question's chips, and sends a reply", async () => {
-    const api = inboxHost(['q']);
+    const question = ask(
+      {
+        kind: 'choice',
+        choices: [
+          { id: 'c1', label: 'Keep it' },
+          { id: 'c2', label: 'Remove it' },
+        ],
+        defaultChoice: 'c1',
+        decideBy: '2026-09-28T17:00:00.000Z',
+        allowReply: true,
+      },
+      { key: 'q', kind: 'question' }
+    );
+    const api = inboxHost([question]);
     render(
       React.createElement(DecisionAnswers, {
-        decision: ask(
-          {
-            kind: 'choice',
-            choices: [
-              { id: 'c1', label: 'Keep it' },
-              { id: 'c2', label: 'Remove it' },
-            ],
-            defaultChoice: 'c1',
-            decideBy: '2026-09-28T17:00:00.000Z',
-            allowReply: true,
-          },
-          { key: 'q', kind: 'question' }
-        ),
+        decision: question,
         root: null,
         api,
       })
@@ -173,12 +210,13 @@ describe("an ask's buttons", () => {
   });
 
   it('shows "Sorting 12 ideas… · Watch" after a start, and Watch opens the new chat', async () => {
-    const api = inboxHost(['idle:3f2a00000000'], {
+    const sort = ask({ kind: 'word', label: 'Sort them' });
+    const api = inboxHost([sort], {
       watch: { sessionId: 'chat-9', label: 'Sorting 12 ideas…' },
     });
     render(
       React.createElement(DecisionAnswers, {
-        decision: ask({ kind: 'word', label: 'Sort them' }),
+        decision: sort,
         root: '/work/dorkos',
         api,
       })

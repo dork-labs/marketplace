@@ -437,6 +437,7 @@ describe('with flow’s pages', () => {
               rejectAsksForNote: true,
             },
             answerIn: 'activity',
+            shown: '',
             why: 'It is built.',
             defaultChoice: null,
             decideBy: null,

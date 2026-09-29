@@ -118,6 +118,11 @@ export interface FlowDecision {
    * `flow` for the rest, which flow's pages answer in place.
    */
   answerIn: 'activity' | 'flow';
+  /**
+   * The ask's words as flow's pages show them. An answer from a page sends it
+   * back, and flow refuses it if the ask changed since (§7.4).
+   */
+  shown: string;
   /** What happens, why now, what "no" means. */
   why: string;
   /** Questions: the agent's pick. */

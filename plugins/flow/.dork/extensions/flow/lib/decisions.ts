@@ -54,6 +54,7 @@ import {
   OFFER_TEXT,
   REVIEWER_AGENT,
   askProblem,
+  safeAsk,
   ideasAsk,
   offerDoneText,
   questionAsk,
@@ -147,10 +148,27 @@ export interface PlanProject {
 
 /** What is kept for a raised ask. */
 interface RaisedMeta {
+  /** The words core's row carries: flow answers only an ask whose words match it. */
   fp: string;
   root: string;
   kind: Ask['kind'];
+  /**
+   * The words of the ask the row stands for. Usually `fp`; after a slow
+   * answer failed, the row says so while this keeps the ask it is about.
+   */
+  base?: string;
+  /** A review gate: the commit the row showed, which a 👍 arms. */
+  head?: string | null;
 }
+
+/** What a person sees when the ask moved on since the row they answered was raised. */
+export const CHANGED_TEXT = 'This changed. Take another look.';
+
+/** What an answer from flow's page gets for an ask only a person's own answer may settle. */
+export const ANSWER_IN_ACTIVITY_TEXT = 'Answer this in Activity, so it counts as yours.';
+
+/** Where an answer came from: core's inbox (or `answerDecision`), or flow's own route. */
+export type AnswerPath = 'core' | 'local';
 
 /** What a finished command came to. */
 interface VerbResult {
@@ -264,13 +282,9 @@ function openQuestion(run: Record<string, unknown>) {
     askedAt: typeof q.askedAt === 'string' ? q.askedAt : '',
     decideBy: text(q.decideBy),
     floor: Array.isArray(q.floor) ? q.floor.filter((t): t is string => typeof t === 'string') : [],
+    answeredBy: text(q.answeredBy),
+    checkAfter: text(q.checkAfter),
   };
-}
-
-/** The deadline in words, as the server's clock reads it ("5:00 PM"). */
-function when(iso: string): string {
-  const at = new Date(iso);
-  return at.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' });
 }
 
 /**
@@ -309,20 +323,17 @@ export function planProject(input: {
     }
     const question = openQuestion(run);
     if (question !== null) {
-      const questionsStop = stop('questions');
       const personOnly = question.floor.includes('secrets-or-spend');
-      // At Just do it a floor question goes to the reviewer agent at once;
-      // only a spend still waits for a person.
-      if (questionsStop === 'auto' && !personOnly) continue;
+      // Asked at Just do it, a floor question went to the reviewer agent at
+      // once (as `flow ask` stored it); only a spend still waits for a person.
+      if (question.answeredBy === 'reviewer-agent' && !personOnly) continue;
       asks.push(
         questionAsk(plan.ask, {
           identifier,
           title,
           question,
-          stop: questionsStop,
           parkedAt: text(drain.parkedAt),
           actionable: plan.actionable,
-          when,
         })
       );
       continue;
@@ -333,10 +344,8 @@ export function planProject(input: {
           identifier,
           title,
           question: null,
-          stop: stop('questions'),
           parkedAt: text(drain.parkedAt),
           actionable: plan.actionable,
-          when,
         })
       );
       continue;
@@ -388,6 +397,7 @@ function toFlowDecision(ask: Ask, raisedAt: string): FlowDecision {
     raisedAt,
     actions,
     answerIn: ask.answerIn,
+    shown: JSON.stringify(ask.input),
     defaultChoice: actions.kind === 'choice' ? (actions.defaultChoice ?? null) : null,
     decideBy: actions.kind === 'choice' ? (actions.decideBy ?? null) : null,
   };
@@ -401,6 +411,13 @@ export class DecisionCoordinator {
   private readonly loggedLimits = new Set<string>();
   private stopHandler: () => void = () => {};
   private started = false;
+  /** Asks whose answer is still being sent: held open until it finishes. */
+  private readonly inFlight = new Set<string>();
+  private markReady: () => void = () => {};
+  /** Settles after the first pass, so no answer meets an empty list of asks. */
+  private readonly firstPass = new Promise<void>((resolve) => {
+    this.markReady = resolve;
+  });
 
   /**
    * @param deps - The host, storage, command runner, clock and dial.
@@ -426,7 +443,6 @@ export class DecisionCoordinator {
     this.started = true;
     const inbox = this.deps.inbox;
     if (inbox === undefined) return;
-    this.stopHandler = inbox.onAction((event) => this.handle(event));
     try {
       const open = await inbox.list();
       await this.deps.storage.update(RAISED_KEY, (current) => {
@@ -443,6 +459,18 @@ export class DecisionCoordinator {
     } catch (error) {
       this.deps.log(`[flow] could not read flow's open asks from DorkOS: ${String(error)}`);
     }
+    // Answers wait for the first pass: before it flow knows no ask, and would
+    // wrongly call a person's answer (or an overdue deadline) settled.
+    await this.firstPass;
+    this.stopHandler = inbox.onAction((event) => this.handle(event));
+  }
+
+  /**
+   * Mark the first pass done (also called when a pass could not run, so the
+   * handler is never held back for good).
+   */
+  ready(): void {
+    this.markReady();
   }
 
   /** Stop answering. */
@@ -500,10 +528,10 @@ export class DecisionCoordinator {
       }
       const problem = askProblem(ask.input);
       if (problem !== null) {
-        this.logOnce(`words:${ask.key}`, `[flow] not raising ${ask.key}: ${problem}`);
-        continue;
+        // Never dropped: plain words stand in, and the ask still reaches you.
+        this.logOnce(`words:${ask.key}`, `[flow] plain words for ${ask.key}: ${problem}`);
       }
-      planned.push(ask);
+      planned.push(safeAsk(ask));
     }
     for (const ask of planned) {
       if (!this.firstSeen.has(ask.key)) this.firstSeen.set(ask.key, now.toISOString());
@@ -523,6 +551,7 @@ export class DecisionCoordinator {
       await this.recordAway(this.deps.inbox, plans);
     }
     if (JSON.stringify(planned.map((ask) => ask.input)) !== before) this.deps.onChange();
+    this.markReady();
   }
 
   /** Log a message once per key. */
@@ -538,10 +567,16 @@ export class DecisionCoordinator {
     const fresh: Record<string, RaisedMeta> = {};
     for (const ask of asks) {
       const fp = JSON.stringify(ask.input);
-      if (raised[ask.key]?.fp === fp) continue;
+      if (raised[ask.key]?.fp === fp || this.inFlight.has(ask.key)) continue;
       try {
         await inbox.raise(ask.input);
-        fresh[ask.key] = { fp, root: ask.project.root, kind: ask.kind };
+        fresh[ask.key] = {
+          fp,
+          base: fp,
+          root: ask.project.root,
+          kind: ask.kind,
+          head: ask.head,
+        };
       } catch (error) {
         const code = obj(error).code;
         const limit = obj(error).limit;
@@ -570,7 +605,8 @@ export class DecisionCoordinator {
     const roots = new Set(plans.map((plan) => plan.project.root));
     const gone: string[] = [];
     for (const [key, meta] of Object.entries(raised)) {
-      if (wanted.has(key)) continue;
+      // An answer still being sent settles its own row, crediting the person.
+      if (wanted.has(key) || this.inFlight.has(key)) continue;
       let outcome: DecisionOutcome = 'cleared';
       let by: DecisionActor | undefined;
       if (meta.root !== '' && !roots.has(meta.root)) outcome = 'cancelled';
@@ -757,7 +793,11 @@ export class DecisionCoordinator {
    * @param event - What the person (or the deadline) chose.
    * @returns What the row should do.
    */
-  async handle(event: DecisionActionEvent): Promise<DecisionActionResult> {
+  async handle(
+    event: DecisionActionEvent,
+    via: AnswerPath = 'core',
+    shown?: string
+  ): Promise<DecisionActionResult> {
     const ask = this.askOf(event.key);
     if (event.action === 'offer') {
       const name = ask?.project.name ?? event.project?.name ?? 'this project';
@@ -769,9 +809,23 @@ export class DecisionCoordinator {
       await this.deps.inbox?.resolve(event.key, { outcome: 'cleared' }).catch(() => false);
       return { keepOpen: true, message: 'This was already settled.' };
     }
+    if (this.inFlight.has(ask.key)) return { keepOpen: true, message: SENDING_TEXT };
+    // Shipping, and a floor question, are settled only by a person's own
+    // answer, which core credits to them: never by one given on flow's page.
+    if (
+      via === 'core' &&
+      event.decidedBy === 'person' &&
+      event.pendingActionId === null &&
+      this.deps.inbox !== undefined &&
+      (ask.kind === 'review' || ask.floor)
+    ) {
+      return { keepOpen: true, message: ANSWER_IN_ACTIVITY_TEXT };
+    }
+    const shownHead = await this.shownAs(ask, via, shown);
+    if (shownHead === false) return { keepOpen: true, message: CHANGED_TEXT };
     switch (ask.kind) {
       case 'review':
-        return this.answerReview(ask, event);
+        return this.answerReview(ask, event, shownHead);
       case 'question':
         return this.answerQuestion(ask, event);
       case 'retry':
@@ -783,11 +837,37 @@ export class DecisionCoordinator {
     }
   }
 
-  /** 👍 ships the commit the ask showed; 👎 sends it back with the note. */
-  private async answerReview(ask: Ask, event: DecisionActionEvent): Promise<DecisionActionResult> {
+  /**
+   * Whether the answer is to the ask as it is now: the row core shows (or the
+   * one flow's page showed) must carry the ask's current words. A sign-in or
+   * ideas row only counts differently, so it is always current. Answers
+   * `false` when it moved on, else the commit the row showed.
+   */
+  private async shownAs(
+    ask: Ask,
+    via: AnswerPath,
+    shown: string | undefined
+  ): Promise<string | null | false> {
+    if (ask.kind === 'sign-in' || ask.kind === 'ideas') return ask.head;
+    const fp = JSON.stringify(ask.input);
+    if (via === 'local') return shown === fp ? ask.head : false;
+    if (this.deps.inbox === undefined) return ask.head;
+    const meta = (obj(await this.deps.storage.get(RAISED_KEY)) as Record<string, RaisedMeta>)[
+      ask.key
+    ];
+    if (meta === undefined || (meta.base ?? meta.fp) !== fp) return false;
+    return meta.head ?? null;
+  }
+
+  /** 👍 ships the commit the row showed; 👎 sends it back with the note. */
+  private async answerReview(
+    ask: Ask,
+    event: DecisionActionEvent,
+    head: string | null
+  ): Promise<DecisionActionResult> {
     if (event.action === 'approve') {
       const args = ['review', ask.identifier ?? '', '--approve', '--by', 'person'];
-      if (ask.head !== null) args.push('--head', ask.head);
+      if (head !== null) args.push('--head', head);
       return this.runAnswer(ask, event, args, null, 'approved');
     }
     if (event.action === 'reject') {
@@ -814,8 +894,9 @@ export class DecisionCoordinator {
     event: DecisionActionEvent
   ): Promise<DecisionActionResult> {
     if (event.decidedBy === 'deadline') {
-      const stop = this.stopFor(ask, 'questions');
-      if (ask.floor || stop !== 'tell') return { keepOpen: true };
+      // Only a question `flow ask` gave a deadline takes its pick at it;
+      // never a floor question, whatever the dial says now.
+      if (ask.deadline === null || ask.floor) return { keepOpen: true };
       return this.runAnswer(
         ask,
         event,
@@ -892,6 +973,9 @@ export class DecisionCoordinator {
     const kind = ASK_AUTONOMY[ask.kind];
     if (kind === null || event.decidedBy !== 'person' || event.pendingActionId === null)
       return undefined;
+    // "Let the agent go with its pick" never covers a floor question: someone
+    // must check it, and a spend is only ever yours.
+    if (ask.kind === 'question' && ask.floor) return undefined;
     const plan = this.plans.get(ask.project.root);
     if (plan === undefined || !this.deps.autonomy.available) return undefined;
     if (this.stopFor(ask, kind) !== 'ask') return undefined;
@@ -939,11 +1023,13 @@ export class DecisionCoordinator {
     const first = await Promise.race([run, timeout]);
     if (timer !== undefined) clearTimeout(timer);
     if (first !== 'slow') return this.finish(ask, event, first, outcome);
-    void run.then(async (result) => {
-      const answer = await this.finish(ask, event, result, outcome);
-      const inbox = this.deps.inbox;
-      if (inbox === undefined) return;
-      try {
+    // Held open until it finishes: no pass clears or rewrites the row meanwhile.
+    this.inFlight.add(ask.key);
+    void run
+      .then(async (result) => {
+        const answer = await this.finish(ask, event, result, outcome);
+        const inbox = this.deps.inbox;
+        if (inbox === undefined) return;
         if ('resolve' in answer) {
           await inbox.resolve(ask.key, {
             outcome: answer.resolve,
@@ -952,20 +1038,64 @@ export class DecisionCoordinator {
               ? {}
               : { offer: answer.offer }),
           });
-        } else if ('settled' in answer) {
-          // Resolved by finish() already.
-        } else if (answer.message === SEND_FAILED_TEXT) {
-          await inbox.raise({ ...ask.input, detail: DID_NOT_GO_THROUGH });
+        } else if (
+          'keepOpen' in answer &&
+          (answer.message === SEND_FAILED_TEXT ||
+            answer.message?.startsWith("Flow didn't ship") === true)
+        ) {
+          await this.sayFailed(inbox, ask);
         }
-      } catch (error) {
+      })
+      .catch((error: unknown) => {
         this.deps.log(`[flow] could not settle ${ask.key} after sending: ${String(error)}`);
-      }
-    });
+      })
+      .finally(() => {
+        this.inFlight.delete(ask.key);
+      });
     return { keepOpen: true, message: SENDING_TEXT };
+  }
+
+  /**
+   * Say on the row that a slow answer didn't go through, keeping what it was
+   * about (the commit) behind ⓘ. The row still stands for the same ask, so it
+   * can be answered again at once; the next pass restores its own words.
+   */
+  private async sayFailed(inbox: InboxApi, ask: Ask): Promise<void> {
+    const detail = [DID_NOT_GO_THROUGH, ask.input.detail ?? null]
+      .filter((part): part is string => part !== null && part !== '')
+      .join(' · ');
+    const input = { ...ask.input, detail: detail.slice(0, 500) };
+    await inbox.raise(input);
+    const base = JSON.stringify(ask.input);
+    await this.deps.storage.update(RAISED_KEY, (current) => ({
+      ...obj(current),
+      [ask.key]: {
+        fp: JSON.stringify(input),
+        base,
+        root: ask.project.root,
+        kind: ask.kind,
+        head: ask.head,
+      },
+    }));
   }
 
   /** What a finished command means for the row. */
   private async finish(
+    ask: Ask,
+    event: DecisionActionEvent,
+    result: VerbResult,
+    outcome: 'approved' | 'rejected' | 'answered'
+  ): Promise<DecisionActionResult> {
+    try {
+      return await this.finishOrThrow(ask, event, result, outcome);
+    } catch (error) {
+      this.deps.log(`[flow] could not finish answering ${ask.key}: ${String(error)}`);
+      return { keepOpen: true, message: SEND_FAILED_TEXT };
+    }
+  }
+
+  /** {@link finish}, which may throw on a storage or inbox failure. */
+  private async finishOrThrow(
     ask: Ask,
     event: DecisionActionEvent,
     result: VerbResult,

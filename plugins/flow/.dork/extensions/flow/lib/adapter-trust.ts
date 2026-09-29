@@ -5,15 +5,18 @@
  * The adapter flow ships runs on its own. A project's own adapter
  * (`<root>/.agents/flow/adapters/<tracker>/adapter.ts`) is code committed to
  * that repo, so flow runs it (to read "Up next", or to post a person's answer)
- * only after a person allowed that exact file once. The allow is kept in the
- * extension's storage by root and the file's SHA-256, so a changed adapter
- * asks again. Only the person-only route records one.
+ * only after a person allowed it once. The allow covers every file in the
+ * adapter's folder: it is kept in the extension's storage by root and the
+ * SHA-256 of all of them, so a change to any file asks again, and an adapter
+ * that loads code from outside its folder is never vouched for. Only the
+ * person-only route records one: trusting a new code source is a person's
+ * call (N11).
  *
  * @module @dorkos/flow/extension/adapter-trust
  */
 
 import { createHash } from 'node:crypto';
-import { readFileSync } from 'node:fs';
+import { readFileSync, readdirSync } from 'node:fs';
 import path from 'node:path';
 import { PROJECT_CONFIG_DIR } from '../../../../scripts/config-names.ts';
 import type { SharedStorage } from './shared-storage.ts';
@@ -32,21 +35,75 @@ export function ownAdapterFile(root: string, tracker: string): string {
   return path.join(root, PROJECT_CONFIG_DIR, 'adapters', tracker, 'adapter.ts');
 }
 
+/** The most files an adapter's folder may hold for flow to vouch for it. */
+const MAX_FILES = 200;
+
+/** Every file under `dir`, relative, sorted; `null` past {@link MAX_FILES} or unreadable. */
+function filesUnder(dir: string): string[] | null {
+  const found: string[] = [];
+  const walk = (at: string): boolean => {
+    for (const entry of readdirSync(path.join(dir, at), { withFileTypes: true })) {
+      const rel = path.join(at, entry.name);
+      if (entry.isDirectory()) {
+        if (!walk(rel)) return false;
+      } else {
+        found.push(rel);
+        if (found.length > MAX_FILES) return false;
+      }
+    }
+    return true;
+  };
+  try {
+    return walk('') ? found.sort() : null;
+  } catch {
+    return null;
+  }
+}
+
 /**
- * The SHA-256 of a project's own adapter, or `null` when it cannot be read.
+ * Whether a source file loads code from outside its adapter's folder with a
+ * relative import. Such code would run unseen by the allow, so flow refuses
+ * to vouch for the adapter. `import type` is erased and allowed.
+ */
+function reachesOutside(dir: string, file: string, source: string): boolean {
+  const pattern =
+    /(?:^|\n)\s*(?:import|export)\s+(type\s+)?(?:[^;'"]*?\sfrom\s+)?['"](\.[^'"]*)['"]|import\(\s*['"](\.[^'"]*)['"]\s*\)/g;
+  for (const match of source.matchAll(pattern)) {
+    if (match[1] !== undefined) continue;
+    const spec = match[2] ?? match[3];
+    const target = path.resolve(path.dirname(path.join(dir, file)), spec);
+    const inside = path.relative(dir, target);
+    if (inside.startsWith('..') || path.isAbsolute(inside)) return true;
+  }
+  return false;
+}
+
+/**
+ * The SHA-256 of a project's own adapter: every file in its folder, by name
+ * and contents, so a change to any of them asks again. `null` when the folder
+ * cannot be read, holds too many files, or loads code from outside itself.
  *
  * @param root - The project's main checkout.
  * @param tracker - flow's tracker id.
  * @returns The hash.
  */
 export function adapterHash(root: string, tracker: string): string | null {
+  const dir = path.dirname(ownAdapterFile(root, tracker));
+  const files = filesUnder(dir);
+  if (files === null || !files.includes('adapter.ts')) return null;
+  const hash = createHash('sha256');
   try {
-    return createHash('sha256')
-      .update(readFileSync(ownAdapterFile(root, tracker)))
-      .digest('hex');
+    for (const file of files) {
+      const body = readFileSync(path.join(dir, file));
+      if (/\.(?:[cm]?[jt]sx?)$/.test(file) && reachesOutside(dir, file, body.toString('utf8'))) {
+        return null;
+      }
+      hash.update(`${file}\0${body.length}\0`).update(body);
+    }
   } catch {
     return null;
   }
+  return hash.digest('hex');
 }
 
 /** Remembers which projects' own adapters a person allowed. */

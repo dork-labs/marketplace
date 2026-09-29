@@ -35,6 +35,7 @@ function decision(project: string): FlowDecision {
       rejectAsksForNote: true,
     },
     answerIn: 'activity',
+    shown: '',
     why: "It's built, tests pass, and the reviewer agent found nothing.",
     defaultChoice: null,
     decideBy: null,

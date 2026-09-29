@@ -345,7 +345,9 @@ export function createFlowExtension(
     sessions: hostSupportsStartWork(ctx) ? ctx.sessions : undefined,
     answerWaitMs: overrides.answerWaitMs,
   });
+  // The first pass runs now, and answers are taken only once it is done.
   void model.decisions.start();
+  void model.poll();
   const stopSettings = hostSupportsProjectSettings(ctx)
     ? ctx.projectSettings.onChange(() => void model.poll())
     : () => {};

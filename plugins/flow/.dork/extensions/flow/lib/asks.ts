@@ -86,6 +86,13 @@ export interface Ask {
   head: string | null;
   /** A question: whether it is on the calibration floor. */
   floor: boolean;
+  /** A question: only a person may answer it (`secrets-or-spend`). */
+  personOnly: boolean;
+  /**
+   * A question: the deadline at which the agent's pick stands, as `flow ask`
+   * stored it; `null` when none (a floor question, or one that waits for you).
+   */
+  deadline: string | null;
   /** A question's choices, by id. */
   choices: { id: string; label: string }[];
 }
@@ -127,8 +134,11 @@ export function askKey(kind: AskKind, projectId: string, identifier?: string | n
 /** Tracker ids look like `DOR-2387`; a headline must never carry one. */
 const ITEM_ID = /\b[A-Z][A-Z0-9]{1,9}-\d+\b/;
 
-/** The engine's stage names, which a headline must never say. */
-const STAGE_WORDS = /\b(CAPTURE|TRIAGE|IDEATE|SPECIFY|DECOMPOSE|EXECUTE|VERIFY|REVIEW|DONE)\b/;
+/** Every tracker id in a text, for taking them all out. */
+const ITEM_IDS = /\b[A-Z][A-Z0-9]{1,9}-\d+\b/g;
+
+/** The engine's stage names, in any case, which a headline must never say. */
+const STAGE_WORDS = /\b(capture|triage|ideate|specify|decompose|execute|verify|review|done)\b/i;
 
 /**
  * Why an ask may not be raised as it is, or `null` when it may: a headline
@@ -156,7 +166,7 @@ export function askProblem(input: Pick<DecisionInput, 'title' | 'why' | 'detail'
 
 /** An item's title fit for a headline: its ids taken out, and short enough. */
 function itemTitle(title: string | null, room: number): string | null {
-  const plain = (title ?? '').replace(ITEM_ID, '').replace(/\s+/g, ' ').trim();
+  const plain = (title ?? '').replace(ITEM_IDS, '').replace(/\s+/g, ' ').trim();
   if (plain === '') return null;
   return clip(plain.replace(/[?.!]+$/, ''), room);
 }
@@ -255,6 +265,8 @@ export function reviewAsk(project: AskProject, facts: ReviewFacts): Ask {
     answerIn: 'activity',
     head: facts.head,
     floor: false,
+    personOnly: false,
+    deadline: null,
     choices: [],
   };
 }
@@ -274,20 +286,23 @@ export interface QuestionFacts {
     askedAt: string;
     decideBy: string | null;
     floor: string[];
+    /** Who answers it first, as `flow ask` stored it (`person`, `reviewer-agent`). */
+    answeredBy: string | null;
+    /** When the reviewer agent may check a floor question's pick, as stored; `null` for never. */
+    checkAfter: string | null;
   } | null;
-  /** The "Agent questions" stop in force. */
-  stop: AutonomyStop;
   /** When the run parked, for an older engine's question. */
   parkedAt: string | null;
   /** Whether flow can post an answer from here. */
   actionable: boolean;
-  /** How to say the deadline ("5:00 PM"). */
-  when: (iso: string) => string;
 }
 
 /**
  * An agent's question (§7.3): the agent's own words, its pick and, only for a
- * question off the floor at Tell me after, a deadline.
+ * question off the floor that `flow ask` gave one, a deadline. Who answers is
+ * read from what `flow ask` stored when it asked, never from the dial now: a
+ * dial moved since changes the next question, not this one, and the engine
+ * settles this one by what it stored.
  *
  * @param project - The project.
  * @param facts - The question's facts.
@@ -320,24 +335,30 @@ export function questionAsk(project: AskProject, facts: QuestionFacts): Ask {
       answerIn: 'flow',
       head: null,
       floor: false,
+      personOnly: false,
+      deadline: null,
       choices: [],
     };
   }
+  const personOnly = q.floor.includes('secrets-or-spend');
   const floor = q.floor.length > 0;
   const pick = q.choices.find((choice) => choice.id === q.pick) ?? null;
-  const deadline =
-    !floor && facts.stop === 'tell' && q.decideBy !== null && pick !== null ? q.decideBy : null;
-  const tail =
-    deadline !== null
-      ? ` If you don't answer by ${facts.when(deadline)}, it goes with "${pick?.label}".`
-      : floor
-        ? " It won't go ahead until someone checks."
-        : " It won't go ahead until you answer.";
+  const deadline = !floor && q.decideBy !== null && pick !== null ? q.decideBy : null;
+  // DorkOS shows the deadline's time in the viewer's own zone beside the chips.
+  const tail = personOnly
+    ? ' Only you can answer this one.'
+    : deadline !== null
+      ? ` If you don't answer by the deadline, it goes with "${pick?.label}".`
+      : floor && q.checkAfter !== null
+        ? q.answeredBy === 'reviewer-agent'
+          ? " The reviewer agent checks the agent's pick unless you answer first."
+          : " If you don't answer, the reviewer agent checks the agent's pick."
+        : floor
+          ? " It won't go ahead until someone checks."
+          : " It won't go ahead until you answer.";
   const why = `${clip(q.why.trim(), MAX_WHY - tail.length)}${tail}`;
   const firstLine = q.text.trim().split('\n')[0];
-  const title = ITEM_ID.test(firstLine)
-    ? firstLine.replace(ITEM_ID, 'this').replace(/\s+/g, ' ')
-    : firstLine;
+  const title = firstLine.replace(ITEM_IDS, 'this').replace(/\s+/g, ' ');
   const actions: DecisionActions = facts.actionable
     ? {
         kind: 'choice',
@@ -364,6 +385,8 @@ export function questionAsk(project: AskProject, facts: QuestionFacts): Ask {
     answerIn: floor ? 'activity' : 'flow',
     head: null,
     floor,
+    personOnly,
+    deadline,
     choices: q.choices,
   };
 }
@@ -397,6 +420,8 @@ export function signInAsk(project: AskProject, since: string, startable: boolean
     answerIn: 'flow',
     head: null,
     floor: false,
+    personOnly: false,
+    deadline: null,
     choices: [],
   };
 }
@@ -439,6 +464,8 @@ export function ideasAsk(
     answerIn: 'flow',
     head: null,
     floor: false,
+    personOnly: false,
+    deadline: null,
     choices: [],
   };
 }
@@ -478,8 +505,44 @@ export function retryAsk(
     answerIn: 'flow',
     head: null,
     floor: false,
+    personOnly: false,
+    deadline: null,
     choices: [],
   };
+}
+
+/**
+ * An ask whose words break a rule is never dropped: a spend question must
+ * always reach a person. Its headline or why line is replaced with plain,
+ * safe words, and the agent's own words move behind ⓘ.
+ *
+ * @param ask - The ask as built.
+ * @returns The ask, fit to raise.
+ */
+export function safeAsk(ask: Ask): Ask {
+  const problem = askProblem(ask.input);
+  if (problem === null) return ask;
+  const headlineOk = askProblem({ title: ask.input.title, why: 'x' }) === null;
+  const whyOk = askProblem({ title: 'x', why: ask.input.why }) === null;
+  const generic: Record<AskKind, string> = {
+    review: `Finished work in ${ask.project.name} waits for you`,
+    question: `A question needs you in ${ask.project.name}`,
+    retry: `Checks failed in ${ask.project.name}`,
+    'sign-in': 'Sign in again',
+    ideas: `New ideas wait in ${ask.project.name}`,
+  };
+  const moved = [headlineOk ? null : ask.input.title, ask.input.detail ?? null]
+    .filter((part): part is string => part !== null && part !== '')
+    .join(' · ');
+  const input: DecisionInput = {
+    ...ask.input,
+    title: headlineOk ? ask.input.title : clip(generic[ask.kind], MAX_TITLE),
+    why: whyOk
+      ? ask.input.why
+      : `Flow needs someone to look at this in ${ask.project.name}. The details are behind ⓘ.`,
+    ...(moved === '' ? {} : { detail: clip(moved, MAX_DETAIL) }),
+  };
+  return { ...ask, input };
 }
 
 /** The answer a person gives to "Fix it", posted on the item so the drain goes back to fixing. */

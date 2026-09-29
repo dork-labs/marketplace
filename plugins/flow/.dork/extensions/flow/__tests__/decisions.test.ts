@@ -19,7 +19,10 @@ import type { ExecFileLike } from '../lib/advisor.ts';
 import { FIX_IT_ANSWER, type AskProject } from '../lib/asks.ts';
 import type { AutonomyStore } from '../lib/autonomy-store.ts';
 import {
+  ANSWER_IN_ACTIVITY_TEXT,
+  CHANGED_TEXT,
   CHECKS_FAILED_REASON,
+  DID_NOT_GO_THROUGH,
   DecisionCoordinator,
   SENDING_TEXT,
   SEND_FAILED_TEXT,
@@ -323,7 +326,7 @@ describe('what is raised', () => {
     expect(inbox?.raised.map((r) => r.key)).toEqual(['review:3f2a00000000:DOR-2387']);
   });
 
-  it("raises a question with the agent's pick and deadline only off the floor at Tell me after", async () => {
+  it("raises a question with the agent's pick and the deadline flow ask stored, and none without one", async () => {
     const tell = setup({ stops: { questions: 'tell' } });
     await tell.coordinator.sync([plan({ a: questionRun() })]);
     expect(tell.inbox?.raised[0].actions).toMatchObject({
@@ -333,25 +336,73 @@ describe('what is raised', () => {
       allowReply: true,
     });
     const ask = setup({ stops: { questions: 'ask' } });
-    await ask.coordinator.sync([plan({ a: questionRun() })]);
+    await ask.coordinator.sync([plan({ a: questionRun({ decideBy: null }) })]);
     expect(ask.inbox?.raised[0].actions).not.toHaveProperty('decideBy');
     const floor = setup({ stops: { questions: 'tell' } });
-    await floor.coordinator.sync([plan({ a: questionRun({ floor: ['outward-facing'] }) })]);
+    await floor.coordinator.sync([
+      plan({ a: questionRun({ floor: ['outward-facing'], decideBy: null }) }),
+    ]);
     expect(floor.inbox?.raised[0].actions).not.toHaveProperty('decideBy');
   });
 
-  it('asks nothing at Just do it, except a spend, which always waits for a person', async () => {
+  it('leaves a floor question asked at Just do it to the reviewer agent, except a spend', async () => {
     const auto = setup({ stops: { questions: 'auto' } });
     await auto.coordinator.sync([
       plan({
-        a: questionRun(),
-        b: { ...questionRun({ floor: ['outward-facing'] }), identifier: 'DOR-9' },
+        b: {
+          ...questionRun({
+            floor: ['outward-facing'],
+            decideBy: null,
+            answeredBy: 'reviewer-agent',
+            checkAfter: '2026-09-28T09:00:00.000Z',
+          }),
+          identifier: 'DOR-9',
+        },
       }),
     ]);
     expect(auto.inbox?.raised).toEqual([]);
     const spend = setup({ stops: { questions: 'auto' } });
-    await spend.coordinator.sync([plan({ a: questionRun({ floor: ['secrets-or-spend'] }) })]);
+    await spend.coordinator.sync([
+      plan({ a: questionRun({ floor: ['secrets-or-spend'], decideBy: null }) }),
+    ]);
     expect(spend.inbox?.raised.map((r) => r.title)).toEqual(['Should the old API keep working?']);
+  });
+
+  it('keeps a question asked at Ask me first open after the dial moves to Just do it', async () => {
+    // Asked while the project asked you first: flow ask stored no deadline.
+    const { coordinator, inbox } = setup({ stops: { questions: 'ask' } });
+    const asked = plan({ a: questionRun({ decideBy: null }) });
+    await coordinator.sync([asked]);
+    expect(inbox?.raised).toHaveLength(1);
+    // The person moves the dial; the question is still the same one, still waiting.
+    (coordinator as unknown as { deps: { autonomy: AutonomyStore } }).deps.autonomy = dial({
+      questions: 'auto',
+    });
+    await coordinator.sync([asked]);
+    expect(inbox?.resolved).toEqual([]);
+    expect(coordinator.decisions().map((d) => d.kind)).toEqual(['question']);
+    expect(inbox?.raised.at(-1)?.why).toMatch(/until you answer\.$/);
+  });
+
+  it('says a stored deadline even after the dial moves back to Ask me first', async () => {
+    const { coordinator, inbox } = setup({ stops: { questions: 'ask' } });
+    await coordinator.sync([plan({ a: questionRun() })]);
+    expect(inbox?.raised[0].why).toMatch(/by the deadline, it goes with "Keep it"/);
+    expect(inbox?.raised[0].actions).toMatchObject({ decideBy: '2026-09-28T17:00:00.000Z' });
+  });
+
+  it('never drops a spend question whose words break a rule', async () => {
+    const { coordinator, inbox } = setup();
+    await coordinator.sync([
+      plan({
+        a: questionRun({
+          text: 'Pay for the REVIEW plan?',
+          floor: ['secrets-or-spend'],
+          decideBy: null,
+        }),
+      }),
+    ]);
+    expect(inbox?.raised.map((r) => r.title)).toEqual(['A question needs you in dorkos']);
   });
 
   it('asks to fix failing checks only at Ask me first, when the drain parked on them', async () => {
@@ -485,9 +536,10 @@ describe('one row per key, settled on its own', () => {
       { key: 'review:3f2a00000000:DOR-2387', project: { root: '/work/dorkos', name: 'dorkos' } },
     ]);
     const { coordinator } = setup({ inbox });
-    await coordinator.start();
-    expect(inbox.inbox.onAction).toHaveBeenCalledTimes(1);
+    const started = coordinator.start();
     await coordinator.sync([plan({ a: gateRun() })]);
+    await started;
+    expect(inbox.inbox.onAction).toHaveBeenCalledTimes(1);
     // The sign-in came back while flow was stopped; the review gate still waits.
     expect(inbox.resolved).toEqual([{ key: 'tracker:3f2a00000000', opts: { outcome: 'cleared' } }]);
     expect(inbox.raised.map((r) => r.key)).toEqual(['review:3f2a00000000:DOR-2387']);
@@ -541,9 +593,12 @@ describe('answering', () => {
     expect(await again.coordinator.handle(event(key))).toEqual({ resolve: 'approved' });
     const page = setup();
     await page.coordinator.sync([plan({ a: gateRun() })]);
+    // From flow's page (core credits it to Flow, no pending id): shipping goes to Activity.
     expect(await page.coordinator.handle(event(key, { pendingActionId: null }))).toEqual({
-      resolve: 'approved',
+      keepOpen: true,
+      message: ANSWER_IN_ACTIVITY_TEXT,
     });
+    expect(page.cli.calls).toEqual([]);
     const old = setup();
     await old.coordinator.sync([plan({ a: gateRun() }, { behaviour: 0 })]);
     expect(await old.coordinator.handle(event(key))).toEqual({ resolve: 'approved' });
@@ -646,12 +701,20 @@ describe('answering', () => {
     });
     expect(floor.cli.calls).toEqual([]);
     const ask = setup({ stops: { questions: 'ask' } });
-    await ask.coordinator.sync([plan({ a: questionRun() })]);
+    await ask.coordinator.sync([plan({ a: questionRun({ decideBy: null }) })]);
     expect(
       await ask.coordinator.handle(event(qkey, { action: 'choice', decidedBy: 'deadline' }))
     ).toEqual({
       keepOpen: true,
     });
+    // A deadline flow ask stored stands even if the dial moved to Ask me first since.
+    const moved = setup({ stops: { questions: 'ask' } });
+    await moved.coordinator.sync([plan({ a: questionRun() })]);
+    expect(
+      await moved.coordinator.handle(
+        event(qkey, { action: 'choice', decidedBy: 'deadline', pendingActionId: null })
+      )
+    ).toEqual({ resolve: 'answered' });
   });
 
   it('settles quietly when the question was answered elsewhere first', async () => {
@@ -878,5 +941,164 @@ describe('"While you were away"', () => {
         by: { kind: 'rule', label: "your 'Just do it' setting" },
       }),
     ]);
+  });
+});
+
+describe('the review round (adversarial fixes)', () => {
+  const key = 'review:3f2a00000000:DOR-2387';
+  const moved = () =>
+    gateRun({ drain: { ...gateRun().drain, reviewedSha: 'fff9999aaa', pushedSha: 'fff9999aaa' } });
+
+  it('ships only the commit the row showed: a newer head that could not be raised is refused', async () => {
+    const storage = { value: null as unknown };
+    const inbox = fakeInbox();
+    const first = setup({ inbox, storage });
+    await first.coordinator.sync([plan({ a: gateRun() })]);
+    // New commits land, and the inbox is full: core's row still shows abc1234.
+    inbox.refuseWith(() =>
+      Object.assign(new Error('full'), { code: 'inbox_limit', limit: 'open' })
+    );
+    await first.coordinator.sync([plan({ a: moved() })]);
+    expect(await first.coordinator.handle(event(key))).toEqual({
+      keepOpen: true,
+      message: CHANGED_TEXT,
+    });
+    expect(first.cli.calls).toEqual([]);
+    // After a restart, the same: flow remembers what the row showed.
+    const second = setup({ inbox, storage });
+    const started = second.coordinator.start();
+    await second.coordinator.sync([plan({ a: moved() })]);
+    await started;
+    expect(await second.coordinator.handle(event(key))).toEqual({
+      keepOpen: true,
+      message: CHANGED_TEXT,
+    });
+    expect(second.cli.calls).toEqual([]);
+    // Once the row shows the new commit, 👍 ships exactly that one.
+    inbox.refuseWith(null);
+    await second.coordinator.sync([plan({ a: moved() })]);
+    await second.coordinator.handle(event(key));
+    expect(second.cli.calls[0].args).toContain('fff9999aaa');
+  });
+
+  it('takes no answer before its first pass, so none is lost as "already settled"', async () => {
+    const inbox = fakeInbox();
+    const { coordinator } = setup({ inbox, stops: { questions: 'tell' } });
+    const started = coordinator.start();
+    await Promise.resolve();
+    expect(inbox.inbox.onAction).not.toHaveBeenCalled();
+    await coordinator.sync([plan({ a: questionRun() })]);
+    await started;
+    expect(inbox.inbox.onAction).toHaveBeenCalledTimes(1);
+    const overdue = await (inbox.handler() as (e: DecisionActionEvent) => Promise<unknown>)(
+      event('question:3f2a00000000:DOR-2401', {
+        action: 'choice',
+        decidedBy: 'deadline',
+        pendingActionId: null,
+      })
+    );
+    expect(overdue).toEqual({ resolve: 'answered' });
+  });
+
+  it('offers nothing after a floor question, and a spend is never handed over', async () => {
+    const floor = setup({ stops: { questions: 'ask' } });
+    await floor.coordinator.sync([
+      plan({ a: questionRun({ floor: ['outward-facing'], decideBy: null }) }),
+    ]);
+    expect(
+      await floor.coordinator.handle(
+        event('question:3f2a00000000:DOR-2401', { action: 'choice', choiceId: 'c1' })
+      )
+    ).toEqual({ resolve: 'answered' });
+    const plain = setup({ stops: { questions: 'ask' } });
+    await plain.coordinator.sync([plan({ a: questionRun({ decideBy: null }) })]);
+    expect(
+      await plain.coordinator.handle(
+        event('question:3f2a00000000:DOR-2401', { action: 'choice', choiceId: 'c1' })
+      )
+    ).toHaveProperty('offer');
+  });
+
+  it('sends a floor question answered on flow’s page to Activity', async () => {
+    const { coordinator, cli } = setup();
+    await coordinator.sync([
+      plan({ a: questionRun({ floor: ['outward-facing'], decideBy: null }) }),
+    ]);
+    expect(
+      await coordinator.handle(
+        event('question:3f2a00000000:DOR-2401', {
+          action: 'choice',
+          choiceId: 'c1',
+          pendingActionId: null,
+        })
+      )
+    ).toEqual({ keepOpen: true, message: ANSWER_IN_ACTIVITY_TEXT });
+    expect(cli.calls).toEqual([]);
+  });
+
+  it('answers on flow’s own route only the ask the page showed', async () => {
+    const { coordinator, cli } = setup({ inbox: null, stops: { retry: 'ask' } });
+    const run = {
+      identifier: 'DOR-2410',
+      status: 'running',
+      drain: { v: 1, phase: 'parked', parkedReason: CHECKS_FAILED_REASON, parkedAt: 'p1' },
+    };
+    await coordinator.sync([plan({ a: run })]);
+    const [shown] = coordinator.decisions();
+    const rkey = 'retry:3f2a00000000:DOR-2410';
+    expect(await coordinator.handle(event(rkey), 'local', 'something else')).toEqual({
+      keepOpen: true,
+      message: CHANGED_TEXT,
+    });
+    expect(cli.calls).toEqual([]);
+    expect(await coordinator.handle(event(rkey), 'local', shown.shown)).toMatchObject({
+      resolve: 'approved',
+    });
+  });
+
+  it('holds a row open while a slow answer is sent, even if the ask goes meanwhile', async () => {
+    vi.useFakeTimers();
+    const { coordinator, inbox } = setup({
+      cli: fakeCli(() => ({ code: 0, delayMs: 3_000 })),
+      answerWaitMs: 1_000,
+    });
+    await coordinator.sync([plan({ a: gateRun() })]);
+    const answer = coordinator.handle(event(key));
+    await vi.advanceTimersByTimeAsync(1_000);
+    expect(await answer).toEqual({ keepOpen: true, message: SENDING_TEXT });
+    // The run leaves the gate before the command finishes: not "resolved on its own".
+    await coordinator.sync([plan({})]);
+    expect(inbox?.resolved).toEqual([]);
+    // A second click meanwhile runs nothing twice.
+    expect(await coordinator.handle(event(key))).toMatchObject({ keepOpen: true });
+    await vi.advanceTimersByTimeAsync(2_500);
+    expect(inbox?.resolved.at(-1)).toMatchObject({
+      key,
+      opts: { outcome: 'approved', answering: 'pending-1' },
+    });
+  });
+
+  it('says a failed slow answer on the row, keeps what it was about, and can be answered again', async () => {
+    vi.useFakeTimers();
+    let code = 4;
+    const { coordinator, inbox, cli } = setup({
+      cli: fakeCli(() => ({ code, delayMs: 3_000 })),
+      answerWaitMs: 1_000,
+    });
+    await coordinator.sync([plan({ a: gateRun() })]);
+    const answer = coordinator.handle(event(key));
+    await vi.advanceTimersByTimeAsync(4_000);
+    expect(await answer).toEqual({ keepOpen: true, message: SENDING_TEXT });
+    const failed = inbox?.raised.at(-1);
+    expect(failed?.detail).toBe(
+      `${DID_NOT_GO_THROUGH} · DOR-2387 · PR #12 · at abc1234`.replace('#12', '#2303')
+    );
+    code = 0;
+    const again = coordinator.handle(event(key));
+    await vi.advanceTimersByTimeAsync(4_000);
+    expect(await again).toEqual({ keepOpen: true, message: SENDING_TEXT });
+    expect(cli.calls).toHaveLength(2);
+    // The next pass puts the row's own words back.
+    await coordinator.sync([plan({ a: gateRun() })]);
   });
 });

@@ -16,7 +16,7 @@ you until you **reinstall it** (Marketplace → flow → reinstall, or re-run yo
 - Things flow settled without asking leave a short "While you were away" note in Activity: work the reviewer agent shipped, failing checks flow went back to fix, and new ideas it started sorting.
 - Buttons that need an agent ("Sign in", "Sort them", "Connect a tracker", "Set up flow here") start the work in a new chat with a plain title, and the row then offers "Watch". On a DorkOS that can't start a chat yet, the button says what to type instead.
 - Where "Sort new ideas" is set to happen on its own, flow sorts each project's new ideas once each morning from 9:00, one project at a time, leaving room for your own clicks.
-- A project that reads its tracker with an adapter of its own now asks once before flow runs that code, and asks again if the file changes.
+- A project that reads its tracker with an adapter of its own now asks once before flow runs that code, and asks again if any file in the adapter's folder changes. Flow won't run an adapter that loads code from outside its folder.
 - On a DorkOS without the inbox, flow's pages answer each ask in place instead.
 
 ## 0.50.0

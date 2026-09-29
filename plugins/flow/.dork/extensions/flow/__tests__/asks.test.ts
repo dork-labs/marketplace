@@ -12,6 +12,7 @@ import {
   OFFER_TEXT,
   askKey,
   askProblem,
+  safeAsk,
   ideasAsk,
   questionAsk,
   retryAsk,
@@ -34,8 +35,6 @@ const PROJECT: AskProject = {
   link: '/x/flow/p/dorkos',
 };
 
-const when = () => '5:00 PM';
-
 /** A structured question from `flow ask`. */
 function question(extra: Partial<Parameters<typeof questionAsk>[1]['question'] & object> = {}) {
   return {
@@ -47,8 +46,10 @@ function question(extra: Partial<Parameters<typeof questionAsk>[1]['question'] &
     pick: 'c1',
     why: "It's changing how sessions load.",
     askedAt: '2026-09-28T09:00:00.000Z',
-    decideBy: '2026-09-28T17:00:00.000Z',
-    floor: [],
+    decideBy: '2026-09-28T17:00:00.000Z' as string | null,
+    floor: [] as string[],
+    answeredBy: 'person' as string | null,
+    checkAfter: null as string | null,
     ...extra,
   };
 }
@@ -78,19 +79,15 @@ function everyAsk(): Ask[] {
       identifier: 'DOR-2401',
       title: 'Session loading',
       question: question(),
-      stop: 'tell',
       parkedAt: null,
       actionable: true,
-      when,
     }),
     questionAsk(PROJECT, {
       identifier: 'DOR-2401',
       title: 'Session loading',
       question: null,
-      stop: 'ask',
       parkedAt: '2026-09-28T09:00:00.000Z',
       actionable: true,
-      when,
     }),
     signInAsk(PROJECT, '2026-09-28T09:14:00.000Z', true),
     ideasAsk(PROJECT, 12, '2026-09-27T09:00:00.000Z', true),
@@ -124,12 +121,37 @@ describe('every ask', () => {
     }
   });
 
+  it('never drops an ask whose words break a rule: plain words stand in, the rest goes behind ⓘ', () => {
+    const spend = questionAsk(PROJECT, {
+      identifier: 'DOR-9',
+      title: null,
+      parkedAt: null,
+      actionable: true,
+      question: question({
+        text: 'Should I pay for the Review plan?',
+        floor: ['secrets-or-spend'],
+      }),
+    });
+    expect(askProblem(spend.input)).toBe('the headline names a stage');
+    const safe = safeAsk(spend);
+    expect(askProblem(safe.input)).toBeNull();
+    expect(safe.input.title).toBe('A question needs you in dorkos');
+    expect(safe.input.detail).toContain('Should I pay for the Review plan?');
+    expect(safe.input.actions).toEqual(spend.input.actions);
+    expect(safe.key).toBe(spend.key);
+    const noWhy = safeAsk({ ...spend, input: { ...spend.input, why: '' } });
+    expect(askProblem(noWhy.input)).toBeNull();
+  });
+
   it('refuses an ask with no why line, or a headline that is an id or a command', () => {
     expect(askProblem({ title: 'Ship it?', why: '' })).toBe('the ask has no why line');
     expect(askProblem({ title: 'Ship it?', why: '   ' })).toBe('the ask has no why line');
     expect(askProblem({ title: 'Ship DOR-12?', why: 'x' })).toBe('the headline carries an item id');
     expect(askProblem({ title: '/flow:triage', why: 'x' })).toBe('the headline is a command');
     expect(askProblem({ title: 'Move to EXECUTE?', why: 'x' })).toBe('the headline names a stage');
+    expect(askProblem({ title: 'Move it to execute?', why: 'x' })).toBe(
+      'the headline names a stage'
+    );
     expect(askProblem({ title: 'x'.repeat(121), why: 'x' })).toMatch(/longer than 120/);
     expect(askProblem({ title: 'Ship it?', why: 'x'.repeat(301) })).toMatch(/longer than 300/);
   });
@@ -192,11 +214,11 @@ describe('the review gate', () => {
 });
 
 describe("an agent's question", () => {
-  it("offers the chips with the agent's pick and a deadline only off the floor at Tell me after", () => {
+  it("offers the chips with the agent's pick and the deadline flow ask stored", () => {
     const tell = everyAsk()[2];
     expect(tell.input.title).toBe('Should the old API keep working?');
     expect(tell.input.why).toBe(
-      `It's changing how sessions load. If you don't answer by 5:00 PM, it goes with "Keep it".`
+      `It's changing how sessions load. If you don't answer by the deadline, it goes with "Keep it".`
     );
     expect(tell.input.actions).toEqual({
       kind: 'choice',
@@ -217,21 +239,65 @@ describe("an agent's question", () => {
       title: null,
       parkedAt: null,
       actionable: true,
-      when,
     };
     const floor = questionAsk(PROJECT, {
       ...base,
-      question: question({ floor: ['outward-facing'] }),
-      stop: 'tell',
+      question: question({ floor: ['outward-facing'], decideBy: null }),
     });
     expect(floor.input.why).toMatch(/It won't go ahead until someone checks\.$/);
     expect(floor.input.actions).not.toHaveProperty('decideBy');
     expect(floor.input.actions).not.toHaveProperty('defaultChoice');
     expect(floor.answerIn).toBe('activity');
     expect(floor.floor).toBe(true);
-    const ask = questionAsk(PROJECT, { ...base, question: question(), stop: 'ask' });
+    const ask = questionAsk(PROJECT, { ...base, question: question({ decideBy: null }) });
     expect(ask.input.why).toMatch(/It won't go ahead until you answer\.$/);
     expect(ask.input.actions).not.toHaveProperty('decideBy');
+  });
+
+  it('words who answers from what flow ask stored, not from the dial now', () => {
+    const base = { identifier: 'DOR-2401', title: null, parkedAt: null, actionable: true };
+    // Asked at Ask me first: no deadline stored, so it waits for you whatever the dial says now.
+    const waits = questionAsk(PROJECT, { ...base, question: question({ decideBy: null }) });
+    expect(waits.deadline).toBeNull();
+    expect(waits.input.why).toMatch(/until you answer\.$/);
+    // Asked at Tell me after: the stored deadline stands, and says so.
+    const timed = questionAsk(PROJECT, { ...base, question: question() });
+    expect(timed.deadline).toBe('2026-09-28T17:00:00.000Z');
+    expect(timed.input.why).toMatch(/by the deadline, it goes with "Keep it"\.$/);
+    expect(timed.input.why).not.toMatch(/\d:\d\d/);
+    // A floor question at Tell me after: the reviewer agent checks, not the agent's pick.
+    const checked = questionAsk(PROJECT, {
+      ...base,
+      question: question({
+        floor: ['outward-facing'],
+        decideBy: null,
+        checkAfter: '2026-09-28T13:00:00.000Z',
+      }),
+    });
+    expect(checked.input.why).toMatch(/the reviewer agent checks the agent's pick\.$/);
+    expect(checked.input.why).not.toMatch(/goes with/);
+    expect(checked.deadline).toBeNull();
+    // A spend: only you, ever.
+    const spend = questionAsk(PROJECT, {
+      ...base,
+      question: question({ floor: ['secrets-or-spend'], decideBy: '2026-09-28T17:00:00.000Z' }),
+    });
+    expect(spend.personOnly).toBe(true);
+    expect(spend.deadline).toBeNull();
+    expect(spend.input.why).toMatch(/Only you can answer this one\.$/);
+    expect(spend.input.actions).not.toHaveProperty('decideBy');
+  });
+
+  it('takes every item id out of a question, not just the first', () => {
+    const ask = questionAsk(PROJECT, {
+      identifier: 'DOR-1',
+      title: null,
+      parkedAt: null,
+      actionable: true,
+      question: question({ text: 'Merge DOR-1 before DOR-2?' }),
+    });
+    expect(ask.input.title).toBe('Merge this before this?');
+    expect(askProblem(ask.input)).toBeNull();
   });
 
   it('reads an older engine’s question as "An agent needs an answer on <title>" with Reply', () => {
@@ -249,10 +315,8 @@ describe("an agent's question", () => {
       identifier: 'DOR-1',
       title: null,
       question: question({ why: 'w'.repeat(400) }),
-      stop: 'tell',
       parkedAt: null,
       actionable: true,
-      when,
     });
     expect(long.input.why.length).toBeLessThanOrEqual(300);
     expect(long.input.why).toMatch(/goes with "Keep it"\.$/);

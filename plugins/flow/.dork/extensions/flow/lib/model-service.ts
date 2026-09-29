@@ -493,7 +493,10 @@ export class ModelService {
       throw new RouteError(400, `${entry.name} doesn't use an adapter of its own.`);
     }
     if (!(await this.trust.allow(entry.root, entry.tracker.id))) {
-      throw new RouteError(400, `Flow couldn't read ${entry.name}'s own adapter.`);
+      throw new RouteError(
+        400,
+        `Flow can't vouch for ${entry.name}'s own adapter: it couldn't read its folder, or the adapter loads code from outside it.`
+      );
     }
     this.allowed.add(entry.root);
     this.reader.view(entry.root);
@@ -524,17 +527,21 @@ export class ModelService {
       throw new RouteError(400, 'Choose an answer.');
     }
     const str = (field: unknown) => (typeof field === 'string' ? field : null);
-    const result = await this.decisions.handle({
-      key,
-      action,
-      choiceId: str(value.choiceId),
-      decidedBy: 'person',
-      offerId: null,
-      pendingActionId: null,
-      note: str(value.note),
-      text: str(value.text),
-      project: null,
-    });
+    const result = await this.decisions.handle(
+      {
+        key,
+        action,
+        choiceId: str(value.choiceId),
+        decidedBy: 'person',
+        offerId: null,
+        pendingActionId: null,
+        note: str(value.note),
+        text: str(value.text),
+        project: null,
+      },
+      'local',
+      str(value.shown) ?? undefined
+    );
     const model = await this.answer();
     if ('settled' in result) return { resolved: true, message: null, watch: null, model };
     return {
@@ -677,6 +684,21 @@ export class ModelService {
    * due, and send a model when it changed.
    */
   async poll(): Promise<void> {
+    // One pass at a time: the 5-second timer and a settings change can both
+    // ask for one, and two passes at once could start the same morning's
+    // sorting twice or write a history row twice.
+    this.polling ??= this.pollOnce().finally(() => {
+      this.polling = null;
+      this.decisions.ready();
+    });
+    await this.polling;
+  }
+
+  /** The pass in progress, if any. */
+  private polling: Promise<void> | null = null;
+
+  /** One poll pass. */
+  private async pollOnce(): Promise<void> {
     if (this.disposed) return;
     let entries: FlowProjectEntry[];
     try {
