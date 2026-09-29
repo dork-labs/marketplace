@@ -9,6 +9,7 @@
 import type { FlowCondition, FlowModel, FlowProject, FlowRunRow } from '../lib/model.ts';
 import type { ClientApi } from '../lib/host-types.ts';
 import { UNREACHABLE_MESSAGE, pauseFlow, resumeFlow } from './api.ts';
+import { HOME_PATH, SETTINGS_TAB_LINK, settingsPath } from './links.ts';
 import { PILL_TEXT, clockTime, pausedText, runningCaption } from './panel-format.ts';
 import { PauseMenu } from './pause-menu.ts';
 import { BUTTON, CAPTION, CONDITION, Dot, GROW, Hint, LINK, MUTED, PILL, ROW } from './parts.ts';
@@ -158,10 +159,21 @@ const FOOTER: Style = {
 };
 
 /**
+ * The ⚙ button's accessible name.
+ *
+ * @param name - The project's name.
+ * @returns The words.
+ */
+export function settingsLabel(name: string): string {
+  return `Flow settings for ${name}`;
+}
+
+/**
  * The project lens.
  *
  * @param props - The project, the model it came from, the host API, the store,
- *   and how to show every project instead.
+ *   whether this DorkOS shows flow's pages, and how to show every project
+ *   instead where it does not.
  * @returns The lens.
  */
 export function ProjectLens(props: {
@@ -170,6 +182,8 @@ export function ProjectLens(props: {
   api: Pick<ClientApi, 'navigate'>;
   store: FlowStore;
   schedulesStuck?: boolean;
+  /** Whether flow's pages exist: then ⚙ and "need you elsewhere" open them. */
+  pages?: boolean;
   onShowAll?: () => void;
 }): Node {
   const { project, model, api, store } = props;
@@ -266,6 +280,22 @@ export function ProjectLens(props: {
         );
       }
     }
+    children.push(
+      h(
+        'button',
+        {
+          key: 'settings',
+          type: 'button',
+          title: 'Settings',
+          'aria-label': settingsLabel(project.name),
+          style: BUTTON,
+          // Without pages, Settings → Flow is the only settings flow has.
+          onClick: () =>
+            api.navigate(props.pages === true ? settingsPath(project.name) : SETTINGS_TAB_LINK),
+        },
+        '⚙'
+      )
+    );
     return h('div', { key: 'header', style: HEADER }, ...children);
   };
 
@@ -406,16 +436,18 @@ export function ProjectLens(props: {
   }
 
   const elsewhere = model.decisions.filter((decision) => decision.project !== project.name).length;
+  const showElsewhere =
+    props.pages === true ? () => api.navigate(HOME_PATH) : (props.onShowAll ?? null);
   const trackerUrl = project.tracker?.url ?? null;
-  if (elsewhere > 0 || trackerUrl !== null) {
+  if ((elsewhere > 0 && showElsewhere !== null) || trackerUrl !== null) {
     body.push(
       h(
         'div',
         { key: 'footer', style: FOOTER },
-        elsewhere > 0 && props.onShowAll !== undefined
+        elsewhere > 0 && showElsewhere !== null
           ? h(
               'button',
-              { type: 'button', style: LINK, onClick: props.onShowAll },
+              { type: 'button', style: LINK, onClick: showElsewhere },
               `${elsewhere} need${elsewhere === 1 ? 's' : ''} you elsewhere →`
             )
           : h('span'),

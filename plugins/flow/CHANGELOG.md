@@ -4,6 +4,17 @@ Installs of this plugin are pinned to a commit SHA, so a fix here does not reach
 you until you **reinstall it** (Marketplace → flow → reinstall, or re-run your
 `--plugin-dir` checkout's `git pull`). Each entry below says whether that matters.
 
+## 0.50.0
+
+**Flow now has a page of its own, a dot on its tab when something needs you, and a chip in each chat's status bar. Reinstall to get it.**
+
+- Flow home lists every project in three groups: what needs you, what's off, and what's fine. A filter narrows it to one project and stays in the page's address, so you can bookmark it. "Pause all projects" asks how long, as every pause does. With one project, Flow home shows that project.
+- Each project has its own page, the Flow tab's view of it at full width. On a phone, which has no side panel, that is where you see a project. In the Flow tab, each project in the all-projects list now opens its page, and ⚙ opens the project's settings page. That page doesn't let you change anything yet; it says where the settings live and who a change reaches.
+- "Capacity this week" shows each account's use of its weekly limit, and each project's hours of agent work, items finished and handoffs since Monday. It never forecasts. It keeps accounts and projects apart, because flow doesn't record which account paid for which project's work.
+- The Flow tab gets a small dot when something waits for you, or when every project is paused.
+- A chip in the chat's status bar says which item the chat is working on and where it stands, such as "DOR-2387 · Building", or "3 items · 1 needs you". Press it for the list; an item worked on in its own chat has "Open its chat". When an item hasn't moved for an hour, it says when it last did.
+- On a DorkOS without pages, the status bar or tab dots, flow leaves that part out and the rest works as in 0.49.0.
+
 ## 0.49.0
 
 **The Flow tab beside each chat now follows the chat's project, and every pause asks how long. Reinstall to get it.**

@@ -9,7 +9,13 @@
 import { act } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { ReadableState } from '../../lib/host-types.ts';
-import { FALLBACK_POLL_MS, FlowStore, MODEL_EVENT } from '../store.ts';
+import {
+  FALLBACK_POLL_MS,
+  FlowStore,
+  MODEL_EVENT,
+  STALE_STORE_MS,
+  storeIsFresh,
+} from '../store.ts';
 import { flowModel, flowProject, routeFetch } from './helpers.ts';
 
 afterEach(() => {
@@ -162,6 +168,31 @@ describe('FlowStore', () => {
     store.start();
     await settle();
     expect(fetch.calls.filter((call) => call.method !== 'GET')).toEqual([]);
+    store.stop();
+  });
+
+  it('knows how fresh its facts are: current while the stream is open, or for five minutes after a read', async () => {
+    FakeEventSource.instances = [];
+    vi.stubGlobal('EventSource', FakeEventSource);
+    routeFetch(() => ({ status: 200, body: flowModel([]) }));
+    let now = 1_000_000;
+    const store = new FlowStore(host({ currentCwd: null, currentProject: null }), () => now);
+    expect(storeIsFresh(store.get(), now)).toBe(false);
+    store.start();
+    await settle();
+    expect(store.get().heardAt).toBe(1_000_000);
+    now += STALE_STORE_MS;
+    expect(storeIsFresh(store.get(), now)).toBe(true);
+    now += 1;
+    expect(storeIsFresh(store.get(), now)).toBe(false);
+    const stream = FakeEventSource.instances[0];
+    stream.readyState = 1;
+    stream.emit('open');
+    expect(store.get().live).toBe(true);
+    expect(storeIsFresh(store.get(), now + STALE_STORE_MS * 10)).toBe(true);
+    stream.readyState = 2;
+    stream.emit('error');
+    expect(store.get().live).toBe(false);
     store.stop();
   });
 });

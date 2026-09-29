@@ -9,6 +9,7 @@
 
 import type { FlowModel, FlowProject } from '../lib/model.ts';
 import type { ClientApi, ProjectRef } from '../lib/host-types.ts';
+import { HOME_PATH, projectPath } from './links.ts';
 import { pausedText } from './panel-format.ts';
 import { CONDITION, GROW, LINK, MUTED, ROW } from './parts.ts';
 import { MARKETPLACE_ROUTE, conditionLine } from './project-lens.ts';
@@ -16,6 +17,9 @@ import { h, type Node } from './react.ts';
 
 /** Shown when no project on this computer has flow. */
 export const NO_PROJECTS_TEXT = "Flow isn't set up in any project yet.";
+
+/** The link to Flow home at the bottom of the lens. */
+export const OPEN_HOME_TEXT = 'Open Flow home →';
 
 /** The quiet offer for a repo without flow (§3.3). */
 export const SET_UP_HERE_TEXT = 'This folder is a repo.';
@@ -88,15 +92,21 @@ export function projectLine(
 /**
  * The all-projects lens.
  *
- * @param props - The model, the chat's project (when DorkOS knows it), and the host API.
+ * On a DorkOS with flow's pages, each line opens its project's page and the
+ * lens ends with a link to Flow home.
+ *
+ * @param props - The model, the chat's project (when DorkOS knows it), the
+ *   host API, and whether flow's pages exist.
  * @returns The lens.
  */
 export function AllProjects(props: {
   model: FlowModel;
   currentProject: ProjectRef | null | undefined;
   api: Pick<ClientApi, 'navigate'>;
+  pages?: boolean;
 }): Node {
   const { model, currentProject, api } = props;
+  const pages = props.pages === true;
   const now = new Date();
   const body: Node[] = [h('b', { key: 'title', style: { fontSize: '13px' } }, 'All projects')];
   if (model.projects.length === 0) {
@@ -107,17 +117,26 @@ export function AllProjects(props: {
     .filter((line): line is ProjectLine => line !== null)
     .sort((a, b) => a.rank - b.rank || a.project.name.localeCompare(b.project.name));
   for (const line of lines) {
+    const words = h(
+      'span',
+      { style: GROW },
+      h('b', null, line.project.name),
+      h('span', { style: MUTED }, ` · ${line.text}`)
+    );
     body.push(
-      h(
-        'div',
-        { key: line.project.root, style: { ...ROW, marginTop: '4px' } },
-        h(
-          'span',
-          { style: GROW },
-          h('b', null, line.project.name),
-          h('span', { style: MUTED }, ` · ${line.text}`)
-        )
-      )
+      pages
+        ? h(
+            'button',
+            {
+              key: line.project.root,
+              type: 'button',
+              'data-row': 'project',
+              style: { ...ROW, marginTop: '4px', cursor: 'pointer' },
+              onClick: () => api.navigate(projectPath(line.project.name)),
+            },
+            words
+          )
+        : h('div', { key: line.project.root, style: { ...ROW, marginTop: '4px' } }, words)
     );
   }
   const fine = model.projects.length - lines.length;
@@ -152,6 +171,19 @@ export function AllProjects(props: {
           'button',
           { type: 'button', style: LINK, onClick: () => api.navigate(MARKETPLACE_ROUTE) },
           'Set up flow here'
+        )
+      )
+    );
+  }
+  if (pages && model.projects.length > 0) {
+    body.push(
+      h(
+        'p',
+        { key: 'home', style: { margin: '10px 0 0' } },
+        h(
+          'button',
+          { type: 'button', style: LINK, onClick: () => api.navigate(HOME_PATH) },
+          OPEN_HOME_TEXT
         )
       )
     );

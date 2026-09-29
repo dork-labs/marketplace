@@ -55,6 +55,30 @@ export interface StoreSnapshot {
   currentProject: ProjectRef | null | undefined;
   /** Projects whose schedules could not be switched back on, by name. */
   schedulesStuck: ReadonlySet<string>;
+  /** When a model last arrived (ms since the epoch), or `null` before one. */
+  heardAt: number | null;
+  /** Whether the live stream is open, so a quiet model is still current. */
+  live: boolean;
+}
+
+/** How long without a model, while the live stream is down, before flow's facts count as old, in ms. */
+export const STALE_STORE_MS = 5 * 60_000;
+
+/**
+ * Whether the store's facts are current: the live stream is open (the server
+ * sends a model whenever one changes), or a model arrived in the last five
+ * minutes.
+ *
+ * @param snapshot - The store.
+ * @param now - The clock, in ms.
+ * @returns True when current.
+ */
+export function storeIsFresh(
+  snapshot: Pick<StoreSnapshot, 'heardAt' | 'live'>,
+  now: number
+): boolean {
+  if (snapshot.live) return true;
+  return snapshot.heardAt !== null && now - snapshot.heardAt <= STALE_STORE_MS;
 }
 
 /** The live Flow model. */
@@ -66,6 +90,8 @@ export class FlowStore {
     cwd: null,
     currentProject: undefined,
     schedulesStuck: new Set(),
+    heardAt: null,
+    live: false,
   };
   private readonly listeners = new Set<() => void>();
   private source: EventSource | null = null;
@@ -84,8 +110,12 @@ export class FlowStore {
 
   /**
    * @param api - DorkOS's client API (state and its changes).
+   * @param clock - The clock, in ms, for when a model last arrived (tests).
    */
-  constructor(private readonly api: Pick<ClientApi, 'getState' | 'subscribe'>) {}
+  constructor(
+    private readonly api: Pick<ClientApi, 'getState' | 'subscribe'>,
+    private readonly clock: () => number = Date.now
+  ) {}
 
   /** What the store holds now. */
   get(): StoreSnapshot {
@@ -129,7 +159,7 @@ export class FlowStore {
    * @param model - The model.
    */
   apply(model: FlowModel): void {
-    this.set({ model, phase: 'ready', failures: 0 });
+    this.set({ model, phase: 'ready', failures: 0, heardAt: this.clock() });
     void this.restoreSchedules(model);
   }
 
@@ -199,10 +229,14 @@ export class FlowStore {
       }
     });
     stream.addEventListener('error', () => {
-      if (stream.readyState !== OPEN_STATE) startPolling();
+      if (stream.readyState !== OPEN_STATE) {
+        if (this.snapshot.live) this.set({ live: false });
+        startPolling();
+      }
     });
     stream.addEventListener('open', () => {
       stopPolling();
+      this.set({ live: true });
       void this.refresh();
     });
   }
@@ -212,6 +246,7 @@ export class FlowStore {
     this.started = false;
     this.source?.close();
     this.source = null;
+    if (this.snapshot.live) this.set({ live: false });
     if (this.poll !== null) clearInterval(this.poll);
     this.poll = null;
     this.stopState?.();

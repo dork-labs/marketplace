@@ -5,6 +5,7 @@
  * @module @dorkos/flow/extension/ui/api
  */
 
+import type { CapacityView } from '../lib/capacity.ts';
 import type { FleetAccount, FleetView } from '../lib/fleet.ts';
 import type { FlowModel } from '../lib/model.ts';
 
@@ -200,4 +201,14 @@ export function resumeFlow(target: PauseTarget): Promise<FlowModel> {
  */
 export function schedulesRestored(project: string, ids: readonly string[]): Promise<FlowModel> {
   return call<FlowModel>('POST', '/schedules/restored', { project, ids });
+}
+
+/**
+ * Read "Capacity this week".
+ *
+ * @param since - The start of the person's week (their Monday 00:00), ISO.
+ * @returns The `GET /capacity` body.
+ */
+export function getCapacity(since: string): Promise<CapacityView> {
+  return call<CapacityView>('GET', `/capacity?since=${encodeURIComponent(since)}`);
 }

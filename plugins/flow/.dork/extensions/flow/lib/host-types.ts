@@ -352,6 +352,68 @@ export interface DataProviderContext {
   readonly requirePerson?: RouteMiddleware;
 }
 
+/** One tracker item a chat works on, newest first in lists (DorkOS `TrackerItemRef`). */
+export interface TrackerItemRef {
+  /** The tracker identifier. */
+  readonly id: string;
+  /** The flow stage, or null. */
+  readonly stage: string | null;
+  /** The run's own status, or null. */
+  readonly runStatus: string | null;
+  /** ISO-8601 time the run started. */
+  readonly startedAt: string;
+  /** How the chat relates to the item: it runs here, or in its own chat launched from here. */
+  readonly via: 'this-chat' | 'own-chat';
+  /** The chat the work runs in, or null. */
+  readonly ownChatSessionId: string | null;
+}
+
+/** Props every extension page receives (DorkOS `ExtensionPageProps`). */
+export interface ExtensionPageProps {
+  /** Values of the page path's `:param` segments. */
+  readonly params: Readonly<Record<string, string>>;
+  /** The URL's query, flat. */
+  readonly search: Readonly<Record<string, string>>;
+  /** Replace query keys; null removes a key. Writes the URL. */
+  setSearch(next: Record<string, string | null>): void;
+}
+
+/** How an extension page is named and listed (DorkOS `ExtensionPageOptions`). */
+export interface ExtensionPageOptions {
+  /** Title for the page bar, tab, palette and phone menu. */
+  title: string;
+  /** Icon, sized by the host with `className`. */
+  icon?: ComponentType<{ className?: string }>;
+  /** List it in the palette and the phone "Add-ons" menu. Default true. */
+  menu?: boolean;
+}
+
+/** What a status-bar item is given, for the chat whose status bar it sits in (DorkOS `StatusBarSlotContext`). */
+export interface StatusBarSlotContext {
+  /** The chat's session id. */
+  readonly sessionId: string;
+  /** The chat's working folder, or null. */
+  readonly cwd: string | null;
+  /** The project of `cwd`, or null. */
+  readonly project: ProjectRef | null;
+  /** Every tracker item the chat works on, newest first. */
+  readonly trackerItems: readonly TrackerItemRef[];
+  /** True at phone width. */
+  readonly compact: boolean;
+}
+
+/** How a status-bar item is named, ordered and shown (DorkOS `StatusBarItemOptions`). */
+export interface StatusBarItemOptions {
+  /** Accessible name of the item's region. */
+  label: string;
+  /** Order among extension items; lower first. Default 100. */
+  priority?: number;
+  /** Whether to show for this chat. Pure; reads only `ctx`. */
+  when?(ctx: StatusBarSlotContext): boolean;
+  /** Whether it needs attention. Pure; reads only `ctx`. */
+  urgent?(ctx: StatusBarSlotContext): boolean;
+}
+
 /**
  * The part of DorkOS's client `ExtensionAPI` this extension uses. The methods
  * a DorkOS from before 0.88.0 may lack are optional, and each is probed
@@ -399,4 +461,31 @@ export interface ClientApi {
   registerDialog?(id: string, component: ComponentType): { open: () => void; close: () => void };
   /** Show a toast. */
   notify?(message: string, options?: { type?: 'info' | 'success' | 'error' }): void;
+  /**
+   * Mount a full page at `/x/flow/<path>`. Missing on a DorkOS from before
+   * extension pages: then flow has no home, lens page or settings page.
+   *
+   * @returns A function that removes it.
+   */
+  registerPage?(
+    path: string,
+    component: ComponentType<ExtensionPageProps>,
+    options: ExtensionPageOptions
+  ): () => void;
+  /**
+   * Add an item to the chat status bar. Missing on a DorkOS from before the
+   * status-bar slot: then there is no run chip.
+   *
+   * @returns A function that removes it.
+   */
+  registerStatusBarItem?(
+    id: string,
+    component: ComponentType<StatusBarSlotContext>,
+    options: StatusBarItemOptions
+  ): () => void;
+  /**
+   * Mark one of this extension's right-panel tabs; null clears it. Missing on a
+   * DorkOS from before tab markers: then the Flow tab gets no dot.
+   */
+  setTabMarker?(tabId: string, marker: 'attention' | null): void;
 }

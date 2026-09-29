@@ -9,6 +9,10 @@
  * lens from DorkOS's `currentProject`, or, on a DorkOS that does not say, from
  * the project flow found for the chat's folder (`cwdProject`).
  *
+ * On a DorkOS with extension pages, the lenses link out to flow's pages
+ * (`home-page.ts`): a project's line opens its page, ⚙ its settings page, and
+ * "need you elsewhere" Flow home. Without pages they stay in the tab.
+ *
  * @module @dorkos/flow/extension/ui/flow-tab
  */
 
@@ -16,6 +20,7 @@ import type { ComponentType } from 'react';
 import type { FlowModel, FlowProject } from '../lib/model.ts';
 import type { ClientApi } from '../lib/host-types.ts';
 import { AllProjects } from './all-projects.ts';
+import { hasPages } from './links.ts';
 import { FOCUS_CSS, PANEL } from './parts.ts';
 import { ProjectLens } from './project-lens.ts';
 import { h, useEffect, useState, type Node } from './react.ts';
@@ -52,7 +57,11 @@ export function chatProject(snapshot: StoreSnapshot, model: FlowModel): FlowProj
  * @param store - The live store.
  * @returns The tab's component.
  */
-export function createFlowTab(api: Pick<ClientApi, 'navigate'>, store: FlowStore): ComponentType {
+export function createFlowTab(
+  api: Pick<ClientApi, 'navigate' | 'registerPage'>,
+  store: FlowStore
+): ComponentType {
+  const pages = hasPages(api);
   function FlowTab(): Node {
     const snapshot = useStore(store);
     const [showAll, setShowAll] = useState(false);
@@ -91,11 +100,12 @@ export function createFlowTab(api: Pick<ClientApi, 'navigate'>, store: FlowStore
           api,
           store,
           schedulesStuck: snapshot.schedulesStuck.has(project.name),
+          pages,
           onShowAll: () => setShowAll(true),
         })
       );
     }
-    return root(h(AllProjects, { model, currentProject: snapshot.currentProject, api }));
+    return root(h(AllProjects, { model, currentProject: snapshot.currentProject, api, pages }));
   }
   return FlowTab as ComponentType;
 }
