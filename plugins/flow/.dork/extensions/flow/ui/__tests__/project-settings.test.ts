@@ -29,7 +29,7 @@ import {
 } from '../project-settings.ts';
 import { createSettingsTab } from '../settings-tab.ts';
 import { FlowStore } from '../store.ts';
-import type { MigrationDeps } from '../migrate-repos.ts';
+import { WAITING_FOR_FLOW_TEXT, type MigrationDeps } from '../migrate-repos.ts';
 import { flowModel, flowProject, routeFetch, settingsView } from './helpers.ts';
 
 afterEach(() => {
@@ -310,6 +310,34 @@ describe('Settings → Flow and "Only for these repos"', () => {
     await act(async () => {});
     await act(async () => {});
     expect(put).toHaveBeenCalledWith('work', ['/work/client-app']);
+  });
+
+  it('with no model loaded, a click holds flow’s own rule and no Switch is offered', async () => {
+    // flow's model never loads: it can't know every project runs flow 0.52 yet.
+    const fleetWithWork = await movable(vi.fn()).getFleet();
+    routeFetch((_method, url) => {
+      if (url.includes('/ext/flow/fleet')) return { status: 200, body: fleetWithWork };
+      return { status: 500, body: {} };
+    });
+    const store = new FlowStore({});
+    store.start();
+    const put = vi.fn(async () => ({}));
+    const putAccount = vi.fn(async () => ({}));
+    render(
+      React.createElement(
+        createSettingsTab({ navigate: vi.fn() }, store, { ...movable(put), putAccount })
+      )
+    );
+    await act(async () => {});
+    await act(async () => {});
+    await act(async () => {});
+    expect(screen.getByText(WAITING_FOR_FLOW_TEXT, { exact: false })).toBeTruthy();
+    fireEvent.click(screen.getByRole('button', { name: 'Move it' }));
+    await act(async () => {});
+    await act(async () => {});
+    expect(put).toHaveBeenCalledWith('work', ['/work/client-app']);
+    expect(putAccount).not.toHaveBeenCalled();
+    expect(screen.queryByRole('button', { name: 'Switch to DorkOS’s rule' })).toBeNull();
   });
 
   it('forgets the project ⚙ asked for once the tab closes', async () => {

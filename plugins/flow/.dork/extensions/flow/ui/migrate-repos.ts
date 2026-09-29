@@ -38,6 +38,11 @@ export const RULE_BEHAVIOUR = 2;
 export const WAITING_FOR_FLOW_TEXT =
   "Flow will switch to DorkOS's rule once every project runs flow 0.52 or newer.";
 
+/** Said when DorkOS was written but flow could not note the move. */
+function unrecordedText(label: string, names: string): string {
+  return `DorkOS now keeps ${label} to ${names}, but flow couldn't note that it moved it there. Try again so flow can finish the move later.`;
+}
+
 /** What the move needs, so tests can stand in for flow and DorkOS. */
 export interface MigrationDeps {
   /** Whether DorkOS keeps account rules per project: yes, no, or it could not be asked. */
@@ -72,6 +77,11 @@ export type MoveKind =
   | 'add'
   /** DorkOS already limits the account: nothing to do. */
   | 'core-has-rule'
+  /**
+   * DorkOS holds exactly the rule a move would set, but flow's note of the move
+   * was never saved. A click saves it, so the move can finish later.
+   */
+  | 'unrecorded'
   /** DorkOS does not list the account: nothing to do. */
   | 'not-in-dorkos';
 
@@ -160,6 +170,15 @@ function situationOf(account: FleetAccount, world: World): Situation | null {
             'Switch to DorkOS’s rule'
           )
         : plan('held', `DorkOS keeps ${account.label} to ${where}. ${WAITING_FOR_FLOW_TEXT}`);
+    }
+    const matchedRoots = unique(matched.map((project) => project.root));
+    if (
+      kept !== null &&
+      move === undefined &&
+      matched.length > 0 &&
+      sameRoots(kept, matchedRoots)
+    ) {
+      return plan('unrecorded', unrecordedText(account.label, names(matched)), 'Try again');
     }
     if (kept !== null) {
       return plan(
@@ -261,10 +280,12 @@ export async function runMove(
   const at = deps.now().toISOString();
   const why = (failure: unknown) =>
     failure instanceof Error && failure.message !== '' ? ` ${failure.message}` : '';
-  const store = async (next: AccountMove) => {
-    // The record is a courtesy for later visits: failing to keep it never undoes a move.
-    await deps.putRecord({ accounts: { ...world.record.accounts, [key]: next } }).catch(() => null);
-  };
+  /** Save flow's note of the move; false when it could not be saved (the move itself stands). */
+  const store = async (next: AccountMove): Promise<boolean> =>
+    deps.putRecord({ accounts: { ...world.record.accounts, [key]: next } }).then(
+      () => true,
+      () => false
+    );
   const flipToRotation = async (movedRoots: string[], pendingRepos: string[], names: string) => {
     try {
       await deps.putAccount(key, { role: 'rotation', repos: null });
@@ -275,8 +296,15 @@ export async function runMove(
         text: `DorkOS keeps ${account.label} to ${names} now, but flow couldn't switch to DorkOS's rule, so both rules still apply. Try again.${why(failure)}`,
       };
     }
-    await store({ movedRoots, pendingRepos, at, held: false });
-    return { ok: true, text: `Moved to DorkOS: ${account.label} is now only for ${names}.` };
+    const noted = await store({ movedRoots, pendingRepos, at, held: false });
+    const later =
+      noted || pendingRepos.length === 0
+        ? ''
+        : ` Flow couldn't note ${joinNames(pendingRepos)} for later, so add ${pendingRepos.length === 1 ? 'it' : 'them'} in Settings → Runtimes once ${pendingRepos.length === 1 ? "it's" : "they're"} on this computer.`;
+    return {
+      ok: true,
+      text: `Moved to DorkOS: ${account.label} is now only for ${names}.${later}`,
+    };
   };
 
   if (plan.kind === 'ready') {
@@ -291,13 +319,29 @@ export async function runMove(
       };
     }
     if (!allCurrent) {
-      await store({ movedRoots: roots, pendingRepos: [], at, held: true });
+      if (!(await store({ movedRoots: roots, pendingRepos: [], at, held: true }))) {
+        return { ok: false, text: unrecordedText(account.label, names) };
+      }
       return {
         ok: true,
         text: `DorkOS now keeps ${account.label} to ${names}, and flow's own repo list stays too. ${WAITING_FOR_FLOW_TEXT}`,
       };
     }
     return flipToRotation(roots, pending, names);
+  }
+
+  if (plan.kind === 'unrecorded') {
+    const roots = unique(matched.map((project) => project.root));
+    const names = joinNames(unique(matched.map((project) => project.name)));
+    if (!(await store({ movedRoots: roots, pendingRepos: [], at, held: true }))) {
+      return { ok: false, text: unrecordedText(account.label, names) };
+    }
+    return {
+      ok: true,
+      text: allCurrent
+        ? `DorkOS keeps ${account.label} to ${names}. Flow can now switch to DorkOS's rule.`
+        : `DorkOS keeps ${account.label} to ${names}. ${WAITING_FOR_FLOW_TEXT}`,
+    };
   }
 
   if (plan.kind === 'finish') {
@@ -319,7 +363,7 @@ export async function runMove(
       text: `Couldn't add ${joinNames(here)} to where ${account.label} may work. Nothing changed.${why(failure)}`,
     };
   }
-  await store({
+  const noted = await store({
     movedRoots: roots,
     pendingRepos: moved.pendingRepos.filter((repo) => !here.includes(repo)),
     at,
@@ -327,6 +371,6 @@ export async function runMove(
   });
   return {
     ok: true,
-    text: `Added to DorkOS: ${account.label} may now also work in ${joinNames(unique(added.map((p) => p.name)))}.`,
+    text: `Added to DorkOS: ${account.label} may now also work in ${joinNames(unique(added.map((p) => p.name)))}.${noted ? '' : " Flow couldn't note it, so it won't offer the rest of the repos here; add them in Settings → Runtimes."}`,
   };
 }

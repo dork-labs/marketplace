@@ -265,6 +265,31 @@ describe('running a move', () => {
     expect(state.role).toBe('kept-out');
   });
 
+  it('if flow can’t note the move after DorkOS was written, it says so and offers Try again', async () => {
+    const { deps, state } = world({ repos: ['acme/app'] });
+    vi.mocked(deps.putRecord).mockRejectedValueOnce(new Error('busy'));
+    const result = await runMove(deps, KEY, false);
+    expect(result).toEqual({
+      ok: false,
+      text: "DorkOS now keeps Work to client-app, but flow couldn't note that it moved it there. Try again so flow can finish the move later.",
+    });
+    // Not mistaken for a person's own DorkOS rule.
+    const [retry] = await planMoves(deps, false);
+    expect(retry).toMatchObject({ kind: 'unrecorded', action: 'Try again' });
+    expect(await runMove(deps, KEY, false)).toEqual({
+      ok: true,
+      text: `DorkOS keeps Work to client-app. ${WAITING_FOR_FLOW_TEXT}`,
+    });
+    expect(state.record.accounts[KEY]).toMatchObject({
+      movedRoots: ['/work/client-app'],
+      held: true,
+    });
+    expect(vi.mocked(deps.putOnlyProjects).mock.calls).toHaveLength(1);
+    expect(deps.putAccount).not.toHaveBeenCalled();
+    const [held] = await planMoves(deps, false);
+    expect(held.kind).toBe('held');
+  });
+
   it('when flow’s half fails, both rules still apply and it says so', async () => {
     const { deps, state } = world({ repos: ['acme/app'], refuseFlow: new Error('') });
     const result = await runMove(deps, KEY, true);

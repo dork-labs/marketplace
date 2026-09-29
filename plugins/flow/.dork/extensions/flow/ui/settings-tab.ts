@@ -98,7 +98,13 @@ export function createSettingsTab(
   function FlowSettingsTab(): Node {
     const snapshot = useStore(store);
     const projects = snapshot.model?.projects ?? [];
-    const allCurrent = projects.every((project) => project.version.behaviour >= RULE_BEHAVIOUR);
+    // Unknown is not current: with no model (still loading, or it failed) or no
+    // projects, flow can't know every project honours DorkOS's rule, so the
+    // move holds flow's own list and no Switch is offered.
+    const allCurrent =
+      snapshot.model !== null &&
+      projects.length > 0 &&
+      projects.every((project) => project.version.behaviour >= RULE_BEHAVIOUR);
     const [picked, setPicked] = useState<string | null>(null);
     const [plans, setPlans] = useState<MovePlan[]>([]);
     const [results, setResults] = useState<Record<string, MoveResult>>({});

@@ -37,7 +37,7 @@ import {
   writeFileSync,
 } from 'node:fs';
 import path from 'node:path';
-import { acquireLock, readJsonFile, releaseLock } from '../../../../scripts/atomic-json.ts';
+import { readJsonFile, withHeldLock } from '../../../../scripts/atomic-json.ts';
 import {
   CONFIG_FILE,
   LOCAL_CONFIG_FILE,
@@ -475,31 +475,28 @@ async function write(
     }
     // Every file this write touches stays locked through the write, the check
     // and any putting back, so no other writer (the flow CLI takes the same
-    // lock) lands in between.
-    const held: { lock: string; token: string }[] = [];
-    try {
-      for (const box of boxes) {
-        const lock = `${files[box]}.lock`;
-        const taken = await acquireLock(lock);
-        if (taken === null) {
-          throw new RouteError(
-            502,
-            `${entry.name}'s settings were busy. Nothing was changed; try again.`
-          );
-        }
-        held.push({ lock, token: taken.token });
-      }
+    // lock) lands in between. withHeldLock keeps each lock fresh while the
+    // check runs, so a slow check never lets another writer judge it stale.
+    const busy = () =>
+      new RouteError(502, `${entry.name}'s settings were busy. Nothing was changed; try again.`);
+    const underLocks = async (remaining: readonly ('shared' | 'local')[]): Promise<void> => {
+      if (remaining.length === 0) return writeAndCheck();
+      const [box, ...rest] = remaining;
+      const result = await withHeldLock(`${files[box]}.lock`, () => underLocks(rest));
+      if (!result.held) throw busy();
+    };
+    const writeAndCheck = async (): Promise<void> => {
       const saved = new Map(boxes.map((box) => [box, snapshot(files[box])]));
       const putBack = () => {
-        for (const [box, before] of saved) restore(files[box], before);
+        for (const [box, prior] of saved) restore(files[box], prior);
       };
       try {
         for (const box of boxes) {
-          const before = saved.get(box) ?? null;
+          const prior = saved.get(box) ?? null;
           let current: unknown = {};
-          if (before !== null) {
+          if (prior !== null) {
             try {
-              current = JSON.parse(before.bytes.toString('utf8'));
+              current = JSON.parse(prior.bytes.toString('utf8'));
             } catch {
               current = undefined;
             }
@@ -514,7 +511,7 @@ async function write(
           for (const [key, value] of Object.entries(patch[box])) {
             next = withValue(next, SETTING_KEYS[key as SettingKey].path, value);
           }
-          writeKeepingStyle(files[box], next, before, box === 'shared' ? 0o644 : 0o600);
+          writeKeepingStyle(files[box], next, prior, box === 'shared' ? 0o644 : 0o600);
         }
       } catch (error) {
         putBack();
@@ -536,9 +533,8 @@ async function write(
             : `Flow didn't save that: ${fresh![0].message}`
         );
       }
-    } finally {
-      for (const { lock, token } of held.reverse()) releaseLock(lock, token);
-    }
+    };
+    await underLocks(boxes);
   }
   if (patch.pauseDefault !== undefined) {
     const choice = patch.pauseDefault;

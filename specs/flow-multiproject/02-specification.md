@@ -625,6 +625,7 @@ Today a kept-out account may list repos in `fleet.json` (`accounts.<key>.scope.r
 
 - The chips are replaced by core's rule, read-only: "Only for client-app · Change in Settings → Runtimes →". The "+ add" chip goes; `PUT /fleet/accounts/:key` still accepts `repos` for the flow CLI, but the tab no longer sends it.
 - On a host without the eligibility routes, nothing migrates and the chips stay as today.
+- **Review change (DOR-2532):** the move runs only when a person clicks it on the account's row, writes DorkOS only when it has no rule for the account (then exactly the matched roots), and holds flow's role change until every project runs behaviour level 2 or newer; until then both rules apply. "Every project" means the projects flow's store knows (its model); a user-scoped install of flow elsewhere is not counted and still reads `fleet.json`.
 
 #### 8.6 The flow CLI honours core's rule (fleet contract 4.2.0)
 
