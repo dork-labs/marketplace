@@ -182,8 +182,12 @@ describe('GET /model', () => {
     expect(body.projects.map((p) => p.name)).toEqual(['app~acme']);
     expect(body.cwdProject).toBe('app~acme');
     expect(core.api.resolve).toHaveBeenCalledWith(world.worktree);
-    // A change in core's list sends a new model without waiting for the poll.
-    expect(host.emit).not.toHaveBeenCalled();
+    // A change in core's list sends a new model without waiting for the poll
+    // (after the first pass, which runs at start).
+    await vi.waitFor(() => expect(host.emit).toHaveBeenCalled());
+    await new Promise((resolve) => setTimeout(resolve, EMIT_INTERVAL_MS + 50));
+    host.emit.mockClear();
+    core.list[0] = { ...core.list[0], name: 'app~renamed' };
     core.changed();
     await vi.waitFor(() => expect(host.emit).toHaveBeenCalledWith('model', expect.any(Object)));
   });

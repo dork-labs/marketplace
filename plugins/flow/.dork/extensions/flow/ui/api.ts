@@ -238,10 +238,19 @@ export interface LocalAnswerReply {
  *
  * @param key - The ask's key.
  * @param body - The answer, as DorkOS's `DecisionAnswer` shapes it.
+ * @param shown - The ask's words as the page showed them; flow refuses the
+ *   answer when the ask changed since.
  * @returns What happened, and the new model.
  */
-export function answerHere(key: string, body: DecisionAnswer): Promise<LocalAnswerReply> {
-  return call<LocalAnswerReply>('POST', `/decisions/${encodeURIComponent(key)}`, body);
+export function answerHere(
+  key: string,
+  body: DecisionAnswer,
+  shown: string
+): Promise<LocalAnswerReply> {
+  return call<LocalAnswerReply>('POST', `/decisions/${encodeURIComponent(key)}`, {
+    ...body,
+    shown,
+  });
 }
 
 /**

@@ -9,7 +9,7 @@ import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { AdapterTrust, ownAdapterFile } from '../lib/adapter-trust.ts';
+import { AdapterTrust, adapterHash, ownAdapterFile } from '../lib/adapter-trust.ts';
 import { IDLE_BEFORE_ASK_MS, IdleClock, ideasAskDue, ideasWaiting } from '../lib/conditions.ts';
 import { conditionsOf } from '../lib/model.ts';
 import type { FlowProjectEntry } from '../lib/projects.ts';
@@ -137,6 +137,40 @@ describe("a project's own adapter", () => {
     writeFileSync(ownAdapterFile(dir, 'linear'), 'export const adapter = 2;\n');
     expect(await trust.isAllowed(dir, 'linear')).toBe(false);
     expect(await trust.allow(dir, 'nope')).toBe(false);
+  });
+
+  it('covers every file in the adapter’s folder, and never vouches for code loaded from outside it', async () => {
+    const folder = path.dirname(ownAdapterFile(dir, 'linear'));
+    writeFileSync(path.join(folder, 'helpers.ts'), 'export const x = 1;\n');
+    writeFileSync(
+      ownAdapterFile(dir, 'linear'),
+      "import { x } from './helpers.ts';\nimport type { Y } from '../../../../types.ts';\nexport const adapter = x;\n"
+    );
+    const trust = new AdapterTrust(memory());
+    expect(await trust.allow(dir, 'linear')).toBe(true);
+    expect(await trust.isAllowed(dir, 'linear')).toBe(true);
+    // A change to a file the adapter loads asks again.
+    writeFileSync(path.join(folder, 'helpers.ts'), 'export const x = 2;\n');
+    expect(await trust.isAllowed(dir, 'linear')).toBe(false);
+    // An adapter that runs code from outside its folder is refused outright.
+    writeFileSync(
+      ownAdapterFile(dir, 'linear'),
+      "import { run } from '../../../../scripts/evil.ts';\nexport const adapter = run;\n"
+    );
+    expect(adapterHash(dir, 'linear')).toBeNull();
+    expect(await trust.allow(dir, 'linear')).toBe(false);
+    // Nor through require, an absolute path or a file: URL.
+    for (const line of [
+      "const run = require('../../evil.js');",
+      "import { run } from '/etc/evil.ts';",
+      "const m = await import('file:///tmp/evil.mjs');",
+    ]) {
+      writeFileSync(ownAdapterFile(dir, 'linear'), `${line}\nexport const adapter = 1;\n`);
+      expect(adapterHash(dir, 'linear')).toBeNull();
+    }
+    // A package from the project's own dependencies is its own business.
+    writeFileSync(ownAdapterFile(dir, 'linear'), "import { z } from 'zod';\nexport const a = z;\n");
+    expect(adapterHash(dir, 'linear')).not.toBeNull();
   });
 
   it('reads the tracker on the timer with the shipped adapter, and with its own only once allowed', () => {

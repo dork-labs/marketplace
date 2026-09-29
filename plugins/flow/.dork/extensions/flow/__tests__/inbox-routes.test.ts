@@ -241,7 +241,7 @@ describe('without the inbox', () => {
     expect(cli.calls.some((args) => args[0] === 'review')).toBe(false);
     const sent = await router.call('post', '/decisions/:key', {
       params: { key: decision.key },
-      body: { action: 'approve' },
+      body: { action: 'approve', shown: decision.shown },
     });
     expect(sent.status).toBe(200);
     expect(sent.body).toMatchObject({ resolved: true, message: null, watch: null });
@@ -345,5 +345,18 @@ describe('the dial', () => {
       expect(JSON.parse(readFileSync(file, 'utf8'))).toMatchObject({ dial: 'auto' })
     );
     expect(existsSync(file)).toBe(true);
+  });
+});
+
+describe('one pass at a time', () => {
+  it('runs a single pass when the timer and a settings change ask at once', async () => {
+    const inbox = fakeInbox();
+    const { seen, host } = setup({ inbox: inbox.inbox });
+    await seen;
+    // The timer's pass and one a settings change asked for, at the same moment.
+    await Promise.all([host.scheduled[0](), host.scheduled[0]()]);
+    // Two overlapping passes would each raise the same new ask (and could
+    // each start the same morning's sorting).
+    expect(inbox.raised.map((r) => r.title)).toEqual(['Ship Faster sidebar?']);
   });
 });
