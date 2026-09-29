@@ -17,7 +17,7 @@ import { chatProject } from './flow-tab.ts';
 import { formatWhen } from './panel-format.ts';
 import { PauseMenu } from './pause-menu.ts';
 import { BUTTON, FOCUS_CSS, Hint, MUTED, PANEL } from './parts.ts';
-import { h, useEffect, useState, type Node } from './react.ts';
+import { h, useEffect, useRef, useState, type Node } from './react.ts';
 import { useStore, type FlowStore } from './store.ts';
 import { ALERT, hostColor } from './styles.ts';
 
@@ -77,15 +77,19 @@ type Scope = 'project' | 'all';
 interface Controls {
   /** Whether flow opened it. */
   shown: boolean;
+  /** Where focus was when it opened, to give it back on close. */
+  returnTo: HTMLElement | null;
   /** Re-render the open dialog. */
   listeners: Set<() => void>;
   /** Tell DorkOS it closed; filled in once DorkOS registers the dialog. */
   hostClose: () => void;
+  /** The other pause dialog: only one is ever on screen. */
+  sibling: Controls | null;
 }
 
 /** A fresh, closed dialog state. */
 function newControls(): Controls {
-  return { shown: false, listeners: new Set(), hostClose: () => {} };
+  return { shown: false, returnTo: null, listeners: new Set(), hostClose: () => {}, sibling: null };
 }
 
 /** Show or hide a dialog. */
@@ -93,6 +97,28 @@ function setShown(controls: Controls, shown: boolean): void {
   controls.shown = shown;
   for (const listener of controls.listeners) listener();
 }
+
+/**
+ * Open a dialog, closing the other pause dialog first so two never stack, and
+ * remember where focus was.
+ */
+function openDialog(controls: Controls): void {
+  const sibling = controls.sibling;
+  if (sibling !== null && sibling.shown) {
+    // Hand the focus the first one saved to the second, so closing it returns there.
+    controls.returnTo = sibling.returnTo;
+    sibling.returnTo = null;
+    setShown(sibling, false);
+  } else if (!controls.shown) {
+    const active = typeof document === 'undefined' ? null : document.activeElement;
+    controls.returnTo = active instanceof HTMLElement ? active : null;
+  }
+  setShown(controls, true);
+}
+
+/** The elements Tab moves between inside a dialog. */
+const FOCUSABLE =
+  'button:not([disabled]), [href], input, select, textarea, [tabindex]:not([tabindex="-1"])';
 
 /** What DorkOS passes every dialog it draws. */
 interface DialogProps {
@@ -134,12 +160,31 @@ function createPauseDialog(
     // Follows the store, so the dialog never acts on a model that has moved on.
     const snapshot = useStore(store);
     const shown = props.open === true || controls.shown;
+    const box = useRef<HTMLDivElement | null>(null);
     const close = () => {
+      if (!shown) return;
+      const hostOpened = props.open === true;
       setShown(controls, false);
       setMode(scope);
       setError(null);
-      props.onOpenChange?.(false);
-      controls.hostClose();
+      // DorkOS's onOpenChange sets a store key only a dialog it opened has; on
+      // one flow opened it throws (DorkOS 0.92), so it is called only when
+      // DorkOS opened this one, and never allowed to break closing.
+      if (hostOpened) {
+        try {
+          props.onOpenChange?.(false);
+        } catch {
+          // DorkOS could not record the close; the dialog is closed all the same.
+        }
+      }
+      try {
+        controls.hostClose();
+      } catch {
+        // As above.
+      }
+      const back = controls.returnTo;
+      controls.returnTo = null;
+      if (back !== null && back.isConnected) back.focus();
     };
     useEffect(() => {
       const listener = () => redraw((n) => n + 1);
@@ -156,7 +201,32 @@ function createPauseDialog(
       window.addEventListener('keydown', onKey);
       return () => window.removeEventListener('keydown', onKey);
     });
+    // Focus moves into the dialog in every state (the menu focuses its default
+    // choice itself; otherwise the first control, else the dialog).
+    useEffect(() => {
+      const node = box.current;
+      if (!shown || node === null) return;
+      const active = document.activeElement;
+      // Already on a control inside; or on the dialog itself with nothing to move to.
+      const control = node.querySelector<HTMLElement>(FOCUSABLE);
+      if (active !== node && node.contains(active)) return;
+      if (active === node && control === null) return;
+      (control ?? node).focus();
+    });
     if (!shown) return null;
+    /** Tab and Shift+Tab stay inside the dialog. */
+    const trap = (event: { key: string; shiftKey: boolean; preventDefault(): void }) => {
+      if (event.key !== 'Tab' || box.current === null) return;
+      event.preventDefault();
+      const items = [...box.current.querySelectorAll<HTMLElement>(FOCUSABLE)];
+      if (items.length === 0) {
+        box.current.focus();
+        return;
+      }
+      const at = items.indexOf(document.activeElement as HTMLElement);
+      const step = event.shiftKey ? -1 : 1;
+      items[at === -1 ? 0 : (at + step + items.length) % items.length]?.focus();
+    };
     const model = snapshot.model;
     const project = model === null ? null : chatProject(snapshot, model);
     const root = (...children: Node[]) =>
@@ -171,8 +241,11 @@ function createPauseDialog(
         h(
           'div',
           {
+            ref: box,
             role: 'dialog',
             'aria-modal': true,
+            tabIndex: -1,
+            onKeyDown: trap,
             'aria-label': mode === 'all' ? COMMANDS.pauseAll : COMMANDS.pauseProject,
             className: 'flow-tab',
             style: {
@@ -234,7 +307,8 @@ function createPauseDialog(
             }
           );
         },
-        onClose: close,
+        // Escape and clicks outside are the dialog's to handle; Tab moves
+        // within it. The menu's own close (Tab, a click beside it) is not used.
       }),
       error === null ? null : h('p', { role: 'alert', style: ALERT }, error)
     );
@@ -307,12 +381,16 @@ export function registerPalette(
 ): () => void {
   if (typeof api.registerCommand !== 'function') return () => {};
   const removers: (() => void)[] = [];
+  const projectControls = newControls();
+  const allControls = newControls();
+  projectControls.sibling = allControls;
+  allControls.sibling = projectControls;
   if (typeof api.registerDialog === 'function') {
     for (const [scope, id, label] of [
       ['project', 'pause-project', COMMANDS.pauseProject],
       ['all', 'pause-all', COMMANDS.pauseAll],
     ] as const) {
-      const controls = newControls();
+      const controls = scope === 'project' ? projectControls : allControls;
       const dialog = api.registerDialog(
         id,
         createPauseDialog(api, store, scope, controls) as ComponentType
@@ -320,7 +398,7 @@ export function registerPalette(
       controls.hostClose = dialog.close;
       removers.push(
         api.registerCommand(id, label, () => {
-          setShown(controls, true);
+          openDialog(controls);
           dialog.open();
         })
       );

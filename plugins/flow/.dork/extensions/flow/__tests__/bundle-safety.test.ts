@@ -11,12 +11,14 @@
  * DorkOS also parses every `.ts` file as TSX (its esbuild `loader` maps `.ts`
  * to `tsx`), so a generic arrow such as `async <T>() => …` reads as a JSX tag
  * and the whole server half fails to compile. Each reached file must parse as
- * TSX.
+ * TSX: with esbuild's `tsx` loader, the parser DorkOS itself uses, and with
+ * TypeScript's, which names the line more plainly.
  */
 
 import { readFileSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { transformSync } from 'esbuild';
 import ts from 'typescript';
 import { describe, expect, it } from 'vitest';
 
@@ -70,6 +72,23 @@ describe('the bundle DorkOS builds', () => {
       });
     });
     expect(unparsable).toEqual([]);
+    const esbuildRefuses = files.flatMap((file) => {
+      try {
+        transformSync(readFileSync(file, 'utf8'), {
+          loader: 'tsx',
+          sourcefile: file,
+          logLevel: 'silent',
+        });
+        return [];
+      } catch (error) {
+        const first = (error as { errors?: { text: string; location?: { line: number } | null }[] })
+          .errors?.[0];
+        return [
+          `${path.relative(EXTENSION_DIR, file)}:${first?.location?.line ?? '?'}: ${first?.text ?? String(error)}`,
+        ];
+      }
+    });
+    expect(esbuildRefuses).toEqual([]);
     if (entry === 'server.ts') {
       // It does reach flow's own modules, so the walk is real.
       expect(

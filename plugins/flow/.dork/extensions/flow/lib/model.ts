@@ -228,9 +228,12 @@ export const DONE_SHOWN_MS = 24 * 60 * 60_000;
  *    a person (`drain.phase: 'parked'`, `drain.parkedFor: 'person'`).
  * 3. **parked**: the drain parked it for any other reason; or `limit.state` is
  *    `waiting-reset` or `awaiting-handoff`; or any other `limit.heldBy` hold.
- * 4. **in review**: `drain.phase` is `reviewing`, `pr-ready` or `watching`.
+ * 4. **in review**: `drain.phase` is `reviewing`, `pr-ready` or `watching`; or,
+ *    with no drain record, the run is at the `review` stage or
+ *    `waiting_for_review` (VERIFY carried it to the gate on its own).
  * 5. **building**: everything else: `working`, `fixing`, `fixing-ci` or
- *    `closing`, a `queued` run, and a run with no drain record.
+ *    `closing` (whatever the stage), a `queued` run, and any other run with
+ *    no drain record.
  *
  * A run whose `status` is `complete` is `done` before any of these.
  *
