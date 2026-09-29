@@ -349,6 +349,13 @@ describe('the shared and just-me writes', () => {
     ).toBe('false');
   });
 
+  it('shows the schedules read-only, with a link to DorkOS’s Schedules page', async () => {
+    serve();
+    const api = await renderSettings(newProject());
+    fireEvent.click(screen.getByRole('button', { name: 'Change in Schedules →' }));
+    expect(api.navigate).toHaveBeenLastCalledWith('/tasks');
+  });
+
   it('saves "at most at once" and the pause default for this computer only', async () => {
     const puts: unknown[] = [];
     serve({
@@ -463,6 +470,40 @@ describe('the dial', () => {
       questionDeadlineMinutes: 60,
     });
     expect(screen.getByText('Custom')).toBeTruthy();
+  });
+
+  it('draws its kinds as a plain list, with Customize’s choices inside each kind', async () => {
+    serve();
+    await renderSettings(newProject(), { projectSettings: projectSettings().api });
+    fireEvent.click(screen.getByRole('button', { name: 'Customize…' }));
+    // No table roles to put controls outside a cell.
+    expect(screen.queryByRole('table')).toBeNull();
+    const list = screen.getByRole('list', { name: 'What each kind of ask does in dorkos' });
+    const ship = within(list).getAllByRole('listitem')[0];
+    expect(within(ship).getByRole('radiogroup', { name: 'dorkos: Ship finished work' })).toBeTruthy();
+  });
+
+  it('while Custom, a dial key press asks before replacing the custom choices', async () => {
+    serve();
+    const settings = projectSettings({
+      '/work/dorkos': { dial: 'tell', kinds: { sort: 'ask' }, questionDeadlineMinutes: 240 },
+    });
+    await renderSettings(newProject(), { projectSettings: settings.api });
+    const dial = screen.getByRole('radiogroup', { name: 'How much it does on its own' });
+    fireEvent.keyDown(within(dial).getAllByRole('radio')[0], { key: 'ArrowRight' });
+    await act(async () => {});
+    expect(settings.set).not.toHaveBeenCalled();
+    expect(screen.getByText('This replaces your custom choices for each kind.')).toBeTruthy();
+    fireEvent.click(screen.getByRole('button', { name: 'Keep them' }));
+    expect(settings.set).not.toHaveBeenCalled();
+    fireEvent.keyDown(within(dial).getAllByRole('radio')[0], { key: 'ArrowRight' });
+    fireEvent.click(screen.getByRole('button', { name: 'Replace them' }));
+    await act(async () => {});
+    expect(settings.set).toHaveBeenCalledWith('/work/dorkos', {
+      dial: 'tell',
+      kinds: {},
+      questionDeadlineMinutes: 240,
+    });
   });
 
   it('asks how long an agent waits at Tell me after, and stores it', async () => {

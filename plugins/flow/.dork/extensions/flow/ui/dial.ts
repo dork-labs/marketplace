@@ -84,6 +84,9 @@ export const NO_REVIEWER_TEXT = "Asks you, because no reviewer agent checks this
 export const REQUIRE_LOGIN_TEXT =
   'Anyone on this computer can change this. Turn on Require login so only you can.';
 
+/** Asked before a dial choice replaces each kind's own choice. */
+export const REPLACE_CUSTOM_TEXT = 'This replaces your custom choices for each kind.';
+
 /** Said on a project whose flow cannot read the dial yet. */
 export const DIAL_NEEDS_NEWER_FLOW_TEXT = 'Update flow in this project to choose this.';
 
@@ -140,6 +143,8 @@ export function AutonomyDial(props: AutonomyDialProps): Node {
   const [stored, setStored] = useState<Stored>({ state: 'loading' });
   const [error, setError] = useState<string | null>(null);
   const [customize, setCustomize] = useState(false);
+  // A dial choice made while Custom waits here until the person confirms it.
+  const [replacing, setReplacing] = useState<AutonomyStop | null>(null);
   const labelId = useId();
   const noteId = useId();
   const panelId = useId();
@@ -222,16 +227,16 @@ export function AutonomyDial(props: AutonomyDialProps): Node {
     const rowLabel = `${project.name}: ${KIND_LABELS[kind]}`;
     return h(
       'div',
-      { key: kind, role: 'row', style: { padding: '3px 0' } },
+      { key: kind, style: { padding: '3px 0' } },
       h(
         'div',
         { style: { display: 'flex', flexWrap: 'wrap', gap: '4px 10px', alignItems: 'baseline' } },
         h(
           'span',
-          { role: 'rowheader', style: { minWidth: '11rem', fontSize: '12px' } },
+          { style: { minWidth: '11rem', fontSize: '12px' } },
           KIND_LABELS[kind]
         ),
-        h('span', { role: 'cell', style: { ...MUTED, flex: 1, minWidth: '10rem' } }, words)
+        h('span', { style: { ...MUTED, flex: 1, minWidth: '10rem' } }, words)
       ),
       customize
         ? h(
@@ -301,10 +306,41 @@ export function AutonomyDial(props: AutonomyDialProps): Node {
         describedBy: noteId,
         disabled,
         wrap: true,
-        onChange: (next) => save(withDial(copy, next)),
+        // Arrow keys choose as they move; while Custom that would silently wipe
+        // each kind's own choice, so it asks first.
+        onChange: (next) => (custom ? setReplacing(next) : save(withDial(copy, next))),
       }),
       custom ? h('span', { style: MUTED }, 'Custom') : null
     ),
+    replacing === null
+      ? null
+      : h(
+          'div',
+          {
+            role: 'alertdialog',
+            'aria-label': 'Replace your custom choices?',
+            style: { display: 'flex', flexWrap: 'wrap', gap: '6px', alignItems: 'center', margin: '0 0 6px' },
+          },
+          h('p', { style: { margin: 0, flexBasis: '100%', fontSize: '12px' } }, REPLACE_CUSTOM_TEXT),
+          h(
+            'button',
+            {
+              type: 'button',
+              style: BUTTON,
+              onClick: () => {
+                const next = replacing;
+                setReplacing(null);
+                save(withDial(copy, next));
+              },
+            },
+            'Replace them'
+          ),
+          h(
+            'button',
+            { type: 'button', style: BUTTON, autoFocus: true, onClick: () => setReplacing(null) },
+            'Keep them'
+          )
+        ),
     h(
       'p',
       { id: noteId, style: { ...MUTED, margin: '0 0 4px' } },
@@ -315,13 +351,13 @@ export function AutonomyDial(props: AutonomyDialProps): Node {
           : 'Whatever you pick, someone checks: you, the reviewer agent, or a safe default at a deadline.'
     ),
     h(
-      'div',
+      'ul',
       {
         id: panelId,
-        role: 'table',
         'aria-label': `What each kind of ask does in ${project.name}`,
+        style: { listStyle: 'none', margin: 0, padding: 0 },
       },
-      ...AUTONOMY_KINDS.map(kindRow)
+      ...AUTONOMY_KINDS.map((kind) => h('li', { key: kind }, kindRow(kind)))
     ),
     h(
       'button',

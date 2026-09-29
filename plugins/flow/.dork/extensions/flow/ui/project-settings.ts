@@ -75,7 +75,7 @@ export const LOCAL_WINS_TEXT = "This computer's own setting wins over this one."
 export const SETTINGS_LOAD_FAILED_TEXT =
   "Couldn't load this project's settings. Try again in a moment.";
 
-/** DorkOS's Tasks page, where flow's schedules are. */
+/** DorkOS's Schedules page (its route is `/tasks`), where flow's schedules are. */
 export const TASKS_ROUTE = '/tasks';
 
 /** The labels chips' rule: a bare label, no group. */
@@ -428,7 +428,7 @@ export function ProjectFlowSettings(props: ProjectFlowSettingsProps): Node {
             h(
               'button',
               { type: 'button', style: LINK, onClick: () => api.navigate(TASKS_ROUTE) },
-              'Change in Tasks →'
+              'Change in Schedules →'
             )
           )
         ),
