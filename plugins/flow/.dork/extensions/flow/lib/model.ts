@@ -251,6 +251,10 @@ export function runState(run: unknown): RunPill {
   if (typeof limit?.state === 'string' && WAITING_LIMIT_STATES.has(limit.state)) return 'parked';
   if (limit !== null && limit.heldBy !== undefined && limit.heldBy !== null) return 'parked';
   if (typeof drain?.phase === 'string' && REVIEW_PHASES.has(drain.phase)) return 'in-review';
+  // A run VERIFY carried to the gate on its own, outside a drain.
+  if (drain === null && (record.stage === 'review' || record.status === 'waiting_for_review')) {
+    return 'in-review';
+  }
   return 'building';
 }
 

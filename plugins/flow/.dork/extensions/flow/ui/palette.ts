@@ -17,9 +17,9 @@ import { chatProject } from './flow-tab.ts';
 import { formatWhen } from './panel-format.ts';
 import { PauseMenu } from './pause-menu.ts';
 import { BUTTON, FOCUS_CSS, Hint, MUTED, PANEL } from './parts.ts';
-import { h, useState, type Node } from './react.ts';
+import { h, useEffect, useState, type Node } from './react.ts';
 import { useStore, type FlowStore } from './store.ts';
-import { ALERT } from './styles.ts';
+import { ALERT, hostColor } from './styles.ts';
 
 /** The palette's command labels. */
 export const COMMANDS = {
@@ -68,10 +68,48 @@ export function listNames(names: readonly string[]): string {
 /** Which dialog: one project or all of them. */
 type Scope = 'project' | 'all';
 
-/** A dialog's close control, filled in once DorkOS registers the dialog. */
+/**
+ * Whether one pause dialog is showing. DorkOS draws every registered dialog all
+ * the time and passes `open`, but the `open()` it hands back does not reach
+ * that prop (DorkOS 0.92), so flow keeps the dialog's own open state here and
+ * shows it when either says so.
+ */
 interface Controls {
-  close: () => void;
+  /** Whether flow opened it. */
+  shown: boolean;
+  /** Re-render the open dialog. */
+  listeners: Set<() => void>;
+  /** Tell DorkOS it closed; filled in once DorkOS registers the dialog. */
+  hostClose: () => void;
 }
+
+/** A fresh, closed dialog state. */
+function newControls(): Controls {
+  return { shown: false, listeners: new Set(), hostClose: () => {} };
+}
+
+/** Show or hide a dialog. */
+function setShown(controls: Controls, shown: boolean): void {
+  controls.shown = shown;
+  for (const listener of controls.listeners) listener();
+}
+
+/** What DorkOS passes every dialog it draws. */
+interface DialogProps {
+  open?: boolean;
+  onOpenChange?: (open: boolean) => void;
+}
+
+/** The dimmed layer under an open dialog. */
+const BACKDROP = {
+  position: 'fixed',
+  inset: 0,
+  zIndex: 50,
+  display: 'flex',
+  alignItems: 'center',
+  justifyContent: 'center',
+  background: 'hsl(0 0% 0% / 0.4)',
+} as const;
 
 /**
  * The pause dialog for one scope.
@@ -79,8 +117,8 @@ interface Controls {
  * @param api - The host API (toasts).
  * @param store - The live store.
  * @param scope - This project or all.
- * @param controls - How to close it.
- * @returns The dialog's component.
+ * @param controls - Its open state.
+ * @returns The dialog's component: nothing until it is opened.
  */
 function createPauseDialog(
   api: Pick<ClientApi, 'notify'>,
@@ -88,20 +126,68 @@ function createPauseDialog(
   scope: Scope,
   controls: Controls
 ): ComponentType {
-  function PauseDialog(): Node {
+  function PauseDialog(props: DialogProps): Node {
     const [mode, setMode] = useState<Scope>(scope);
     const [error, setError] = useState<string | null>(null);
     const [busy, setBusy] = useState(false);
+    const [, redraw] = useState(0);
     // Follows the store, so the dialog never acts on a model that has moved on.
     const snapshot = useStore(store);
+    const shown = props.open === true || controls.shown;
+    const close = () => {
+      setShown(controls, false);
+      setMode(scope);
+      setError(null);
+      props.onOpenChange?.(false);
+      controls.hostClose();
+    };
+    useEffect(() => {
+      const listener = () => redraw((n) => n + 1);
+      controls.listeners.add(listener);
+      return () => {
+        controls.listeners.delete(listener);
+      };
+    }, []);
+    useEffect(() => {
+      if (!shown) return undefined;
+      const onKey = (event: KeyboardEvent) => {
+        if (event.key === 'Escape') close();
+      };
+      window.addEventListener('keydown', onKey);
+      return () => window.removeEventListener('keydown', onKey);
+    });
+    if (!shown) return null;
     const model = snapshot.model;
     const project = model === null ? null : chatProject(snapshot, model);
     const root = (...children: Node[]) =>
       h(
         'div',
-        { className: 'flow-tab', style: { ...PANEL, minWidth: '240px' } },
-        h('style', null, FOCUS_CSS),
-        ...children
+        {
+          style: BACKDROP,
+          onClick: (event: { target: unknown; currentTarget: unknown }) => {
+            if (event.target === event.currentTarget) close();
+          },
+        },
+        h(
+          'div',
+          {
+            role: 'dialog',
+            'aria-modal': true,
+            'aria-label': mode === 'all' ? COMMANDS.pauseAll : COMMANDS.pauseProject,
+            className: 'flow-tab',
+            style: {
+              ...PANEL,
+              minWidth: '240px',
+              padding: '14px 16px',
+              borderRadius: '0.5rem',
+              border: `1px solid ${hostColor('border')}`,
+              background: hostColor('popover'),
+              boxShadow: '0 8px 24px hsl(0 0% 0% / 0.2)',
+            },
+          },
+          h('style', null, FOCUS_CSS),
+          ...children
+        )
       );
     if (model === null) return root(h('p', { style: MUTED }, 'Loading…'));
     if (!model.canChange) {
@@ -140,7 +226,7 @@ function createPauseDialog(
               setBusy(false);
               store.apply(next);
               api.notify?.(pausedToast(who, until, new Date()), { type: 'success' });
-              controls.close();
+              close();
             },
             (failure: unknown) => {
               setBusy(false);
@@ -148,12 +234,12 @@ function createPauseDialog(
             }
           );
         },
-        onClose: () => controls.close(),
+        onClose: close,
       }),
       error === null ? null : h('p', { role: 'alert', style: ALERT }, error)
     );
   }
-  return PauseDialog as ComponentType;
+  return PauseDialog as ComponentType<DialogProps>;
 }
 
 /**
@@ -226,10 +312,18 @@ export function registerPalette(
       ['project', 'pause-project', COMMANDS.pauseProject],
       ['all', 'pause-all', COMMANDS.pauseAll],
     ] as const) {
-      const controls: Controls = { close: () => {} };
-      const dialog = api.registerDialog(id, createPauseDialog(api, store, scope, controls));
-      controls.close = dialog.close;
-      removers.push(api.registerCommand(id, label, () => dialog.open()));
+      const controls = newControls();
+      const dialog = api.registerDialog(
+        id,
+        createPauseDialog(api, store, scope, controls) as ComponentType
+      );
+      controls.hostClose = dialog.close;
+      removers.push(
+        api.registerCommand(id, label, () => {
+          setShown(controls, true);
+          dialog.open();
+        })
+      );
     }
   }
   removers.push(

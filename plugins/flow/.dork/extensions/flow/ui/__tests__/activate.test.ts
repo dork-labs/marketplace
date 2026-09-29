@@ -110,13 +110,41 @@ describe('activate', () => {
     const { api, commands, dialogs } = fullHost({ currentCwd: '/x', currentProject: null });
     const cleanup = activate(api);
     await act(async () => {});
-    commands.get('pause-project')?.();
     const dialog = dialogs.get('pause-project')!;
+    // DorkOS draws every registered dialog all the time, closed.
+    render(React.createElement(dialog.component, { open: false } as never));
+    expect(screen.queryByText(NOT_IN_PROJECT_TEXT)).toBeNull();
+    act(() => commands.get('pause-project')?.());
     expect(dialog.open).toHaveBeenCalledTimes(1);
-    render(React.createElement(dialog.component));
+    expect(screen.getByRole('dialog', { name: COMMANDS.pauseProject })).toBeTruthy();
     expect(screen.getByText(NOT_IN_PROJECT_TEXT)).toBeTruthy();
     fireEvent.click(screen.getByRole('button', { name: 'Pause all projects instead' }));
     expect(screen.getByRole('menu', { name: 'Pause all projects' })).toBeTruthy();
+    cleanup();
+  });
+
+  it('draws nothing until opened, and closes on Escape or outside it (DOR-2533 live check)', async () => {
+    routeFetch(() => ({ status: 200, body: flowModel([flowProject('dorkos')]) }));
+    const { api, commands, dialogs } = fullHost({
+      currentCwd: '/work/dorkos',
+      currentProject: { root: '/work/dorkos', name: 'dorkos' },
+    });
+    const cleanup = activate(api);
+    await act(async () => {});
+    const dialog = dialogs.get('pause-all')!;
+    const onOpenChange = vi.fn();
+    const { container } = render(
+      React.createElement(dialog.component, { open: false, onOpenChange } as never)
+    );
+    expect(container.innerHTML).toBe('');
+    act(() => commands.get('pause-all')?.());
+    expect(screen.getByRole('menu', { name: 'Pause all projects' })).toBeTruthy();
+    fireEvent.keyDown(window, { key: 'Escape' });
+    expect(container.innerHTML).toBe('');
+    expect(onOpenChange).toHaveBeenLastCalledWith(false);
+    act(() => commands.get('pause-all')?.());
+    fireEvent.click(screen.getByRole('dialog').parentElement!);
+    expect(container.innerHTML).toBe('');
     cleanup();
   });
 
@@ -193,7 +221,7 @@ describe('activate', () => {
     });
     const cleanup = activate(api);
     const dialog = dialogs.get('pause-project')!;
-    render(React.createElement(dialog.component));
+    render(React.createElement(dialog.component, { open: true } as never));
     expect(screen.getByText('Loading…')).toBeTruthy();
     await act(async () => {});
     // The model arrived after the dialog opened, and the dialog followed it.
