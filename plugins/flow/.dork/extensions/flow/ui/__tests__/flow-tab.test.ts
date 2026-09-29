@@ -20,6 +20,7 @@ import {
   NOT_SET_UP_TEXT,
   PAUSE_FROM_CHAT_TEXT,
   SCHEDULES_OFF_TEXT,
+  schedulesWaitingText,
 } from '../project-lens.ts';
 import { FlowStore } from '../store.ts';
 import { flowModel, flowProject, routeFetch, runRow } from './helpers.ts';
@@ -196,12 +197,38 @@ describe('the project lens', () => {
     expect(api.navigate).toHaveBeenCalledWith('/marketplace');
   });
 
-  it('says to switch schedules back on by hand when DorkOS would not', async () => {
-    const { store } = await renderTab(flowModel([flowProject('dorkos')]), host(DORKOS));
+  it('says while a finished pause’s schedules are still off, and to switch them on when DorkOS would not', async () => {
+    // The PATCH is refused, so the schedule stays on the list.
+    routeFetch((method) =>
+      method === 'PATCH'
+        ? { status: 403, body: {} }
+        : { status: 200, body: flowModel([flowProject('dorkos', { restoreSchedules: ['s-1'] })]) }
+    );
+    const api = host(DORKOS);
+    const store = new FlowStore(api);
+    render(React.createElement(createFlowTab(api, store)));
     await act(async () => {
-      (store as unknown as { set(p: object): void }).set({ schedulesStuck: new Set(['dorkos']) });
+      store.apply(
+        flowModel([flowProject('dorkos', { restoreSchedules: ['s-1'] }), flowProject('blintz')], {
+          canChange: false,
+          cwdProject: 'dorkos',
+        })
+      );
     });
+    expect(screen.getByText(schedulesWaitingText('dorkos'))).toBeTruthy();
+    await act(async () => {
+      store.apply(
+        flowModel([flowProject('dorkos', { restoreSchedules: ['s-1'] })], { cwdProject: 'dorkos' })
+      );
+    });
+    await act(async () => {});
     expect(screen.getByText(SCHEDULES_OFF_TEXT)).toBeTruthy();
+    expect(SCHEDULES_OFF_TEXT).toMatch(/in Schedules\.$/);
+  });
+
+  it('names the account of a run with no chat for screen readers', async () => {
+    await renderTab(flowModel([flowProject('dorkos', { runs: [runRow('DOR-1')] })]), host(DORKOS));
+    expect(screen.getByText(', on Work')).toBeTruthy();
   });
 });
 
@@ -305,5 +332,61 @@ describe('the all-projects lens', () => {
     await renderTab(flowModel([]), host(null));
     expect(screen.queryByRole('button', { name: 'Set up flow here' })).toBeNull();
     expect(screen.getByText(NO_PROJECTS_TEXT)).toBeTruthy();
+  });
+});
+
+describe('schedules a finished pause left off', () => {
+  it('shows the project in the all-projects lens until they are back on', async () => {
+    await renderTab(
+      flowModel([flowProject('dorkos', { restoreSchedules: ['s-1'] }), flowProject('quiet')], {
+        canChange: false,
+      }),
+      host(null)
+    );
+    const line = screen.getByText(/^· Schedules stay off/).parentElement?.textContent;
+    expect(line).toBe('dorkos · Schedules stay off until DorkOS is open');
+  });
+});
+
+describe('the pause menu in the lens', () => {
+  /** Render the lens and open its pause menu. */
+  async function openMenu() {
+    await renderTab(flowModel([flowProject('dorkos')]), host(DORKOS));
+    fireEvent.click(screen.getByRole('button', { name: 'Pause' }));
+    expect(screen.getByRole('menu')).toBeTruthy();
+  }
+
+  it('gives focus back to Pause on Escape', async () => {
+    await openMenu();
+    await act(async () => {
+      fireEvent.keyDown(screen.getByRole('menuitem', { name: 'Until tomorrow 9am' }), {
+        key: 'Escape',
+      });
+    });
+    expect(screen.queryByRole('menu')).toBeNull();
+    expect(document.activeElement).toBe(screen.getByRole('button', { name: 'Pause' }));
+  });
+
+  it('closes on a click elsewhere, and on Tab', async () => {
+    await openMenu();
+    await act(async () => {
+      fireEvent.pointerDown(document.body);
+    });
+    expect(screen.queryByRole('menu')).toBeNull();
+    fireEvent.click(screen.getByRole('button', { name: 'Pause' }));
+    await act(async () => {
+      fireEvent.keyDown(screen.getByRole('menuitem', { name: 'For 1 hour' }), { key: 'Tab' });
+    });
+    expect(screen.queryByRole('menu')).toBeNull();
+  });
+
+  it('toggles from the Pause button without the click counting as elsewhere', async () => {
+    await openMenu();
+    const pause = screen.getByRole('button', { name: 'Pause' });
+    await act(async () => {
+      fireEvent.pointerDown(pause);
+      fireEvent.click(pause);
+    });
+    expect(screen.queryByRole('menu')).toBeNull();
   });
 });

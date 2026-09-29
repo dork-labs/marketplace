@@ -146,4 +146,62 @@ describe('activate', () => {
     expect(api.notify).toHaveBeenLastCalledWith("Flow isn't paused in dorkos.", { type: 'info' });
     cleanup();
   });
+
+  it('says exactly what Resume all projects did', async () => {
+    const paused = flowModel([
+      flowProject('dorkos', { pause: { since: null, until: null } }),
+      flowProject('blintz', { pause: { since: null, until: null } }),
+      flowProject('quiet'),
+    ]);
+    const fetch = routeFetch((method) =>
+      method === 'POST'
+        ? { status: 200, body: flowModel([flowProject('dorkos'), flowProject('blintz')]) }
+        : { status: 200, body: paused }
+    );
+    const { api, commands } = fullHost();
+    const cleanup = activate(api);
+    await act(async () => {});
+    await act(async () => {
+      commands.get('resume-all')?.();
+    });
+    expect(fetch.calls.at(-1)).toMatchObject({ url: '/api/ext/flow/resume', body: { all: true } });
+    expect(api.notify).toHaveBeenLastCalledWith('Flow is running again in dorkos and blintz.', {
+      type: 'success',
+    });
+    await act(async () => {
+      commands.get('resume-all')?.();
+    });
+    expect(api.notify).toHaveBeenLastCalledWith('Nothing was paused.', { type: 'info' });
+    cleanup();
+  });
+
+  it('sends one pause from the dialog however often it is clicked, and follows the store', async () => {
+    let answer: (value: unknown) => void = () => {};
+    const quiet = flowModel([flowProject('dorkos')]);
+    const fetch = routeFetch((method) =>
+      method === 'POST'
+        ? new Promise((resolve) => {
+            answer = () => resolve({ status: 200, body: quiet });
+          })
+        : { status: 200, body: quiet }
+    );
+    const { api, dialogs } = fullHost({
+      currentCwd: '/work/dorkos',
+      currentProject: { root: '/work/dorkos', name: 'dorkos' },
+    });
+    const cleanup = activate(api);
+    const dialog = dialogs.get('pause-project')!;
+    render(React.createElement(dialog.component));
+    expect(screen.getByText('Loading…')).toBeTruthy();
+    await act(async () => {});
+    // The model arrived after the dialog opened, and the dialog followed it.
+    const item = screen.getByRole('menuitem', { name: 'For 1 hour' });
+    fireEvent.click(item);
+    fireEvent.click(item);
+    expect(fetch.calls.filter((call) => call.method === 'POST')).toHaveLength(1);
+    await act(async () => {
+      answer(null);
+    });
+    cleanup();
+  });
 });

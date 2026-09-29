@@ -15,6 +15,7 @@
  * @module @dorkos/flow/extension/model
  */
 
+import { execFile } from 'node:child_process';
 import { existsSync, readFileSync, readdirSync } from 'node:fs';
 import path from 'node:path';
 import { PAUSE_FILE, PROJECT_CONFIG_DIR } from '../../../../scripts/config-names.ts';
@@ -35,7 +36,7 @@ import type { ExecFileLike } from './advisor.ts';
 import { readDrainSettings } from './drain-settings.ts';
 import { RouteError } from './fleet.ts';
 import type { FlowProjectEntry } from './projects.ts';
-import { mainCheckoutOf } from './run-store.ts';
+import { GIT_TIMEOUT_MS } from './run-store.ts';
 import type { TrackerRead } from './tracker-reads.ts';
 
 /** A run's state pill. `done` is only for the run chip (a run completed in the last day). */
@@ -316,14 +317,46 @@ export function readPauseFlag(file: string, now: Date = new Date()): PauseFlag |
   return { since, until: raw, pauses: at > now.getTime() };
 }
 
-/** Resolves folders to main checkouts, remembering each answer. */
+/** The most folders a {@link CheckoutResolver} remembers. */
+export const RESOLVER_CACHE_SIZE = 500;
+
+/**
+ * The main checkout of a folder, from git, without blocking the event loop:
+ * the parent of `git rev-parse --git-common-dir` (flow's `resolveMainCheckout`).
+ *
+ * @param cwd - Any folder.
+ * @returns The main checkout, or `null` outside git (or when git is slow).
+ */
+export function gitMainCheckout(cwd: string): Promise<string | null> {
+  return new Promise((resolve) => {
+    execFile(
+      'git',
+      ['rev-parse', '--path-format=absolute', '--git-common-dir'],
+      { cwd, encoding: 'utf8', timeout: GIT_TIMEOUT_MS },
+      (error, stdout) => {
+        if (error !== null || stdout.trim() === '') resolve(null);
+        else resolve(path.dirname(path.resolve(cwd, stdout.trim())));
+      }
+    );
+  });
+}
+
+/**
+ * Resolves folders to main checkouts, remembering the most recent answers
+ * (the least recently used is forgotten first), and asking git once for a
+ * folder asked about twice at once.
+ */
 export class CheckoutResolver {
-  private readonly cache = new Map<string, string | null>();
+  private readonly cache = new Map<string, Promise<string | null>>();
 
   /**
-   * @param resolve - The resolver (default: flow's `resolveMainCheckout`, through {@link mainCheckoutOf}).
+   * @param resolve - The resolver (default: git, off the event loop).
+   * @param max - How many answers to remember.
    */
-  constructor(private readonly resolve: (cwd: string) => string | null = mainCheckoutOf) {}
+  constructor(
+    private readonly resolve: (cwd: string) => Promise<string | null> = gitMainCheckout,
+    private readonly max: number = RESOLVER_CACHE_SIZE
+  ) {}
 
   /**
    * The main checkout of `cwd`, or `null` outside git.
@@ -331,9 +364,25 @@ export class CheckoutResolver {
    * @param cwd - Any folder.
    * @returns The main checkout, or `null`.
    */
-  of(cwd: string): string | null {
-    if (!this.cache.has(cwd)) this.cache.set(cwd, this.resolve(cwd));
-    return this.cache.get(cwd) ?? null;
+  of(cwd: string): Promise<string | null> {
+    let answer = this.cache.get(cwd);
+    if (answer === undefined) {
+      answer = this.resolve(cwd).catch(() => null);
+    } else {
+      this.cache.delete(cwd);
+    }
+    this.cache.set(cwd, answer);
+    while (this.cache.size > this.max) {
+      const oldest = this.cache.keys().next().value;
+      if (oldest === undefined) break;
+      this.cache.delete(oldest);
+    }
+    return answer;
+  }
+
+  /** How many answers it remembers now. */
+  get size(): number {
+    return this.cache.size;
   }
 }
 
@@ -360,16 +409,16 @@ function subdirs(dir: string): string[] {
  * @param resolver - Folder to main checkout.
  * @returns The main checkouts, each once, sorted.
  */
-export function discoverCheckouts(
+export async function discoverCheckouts(
   dorkHome: string,
   cwds: Iterable<string>,
   resolver: CheckoutResolver
-): string[] {
+): Promise<string[]> {
   const found = new Set<string>();
   for (const repoDir of subdirs(path.join(dorkHome, 'workspaces'))) {
     for (const worktree of subdirs(repoDir)) {
       if (!existsSync(path.join(worktree, '.git'))) continue;
-      const main = resolver.of(worktree);
+      const main = await resolver.of(worktree);
       if (main !== null) {
         found.add(main);
         break;
@@ -377,7 +426,7 @@ export function discoverCheckouts(
     }
   }
   for (const cwd of cwds) {
-    const main = resolver.of(cwd);
+    const main = await resolver.of(cwd);
     if (main !== null) found.add(main);
   }
   return [...found].sort();

@@ -72,12 +72,34 @@ export class SharedStorage {
   }
 
   /**
+   * Change one key from its current value, leaving the others as they are.
+   * The read, the change and the save run inside the save queue, so two
+   * changes to one key never lose each other's work.
+   *
+   * @param key - The key.
+   * @param change - Its new value, from its current one (`undefined` when unset).
+   * @returns The new value.
+   */
+  update<T>(key: string, change: (current: unknown) => T): Promise<T> {
+    const run = this.queue.then(async () => {
+      const current = await this.read();
+      const value = change(current[key]);
+      const next = { ...current, [key]: value };
+      await this.storage.saveData(next);
+      this.cache = next;
+      return value;
+    });
+    this.queue = run.catch(() => {});
+    return run;
+  }
+
+  /**
    * Write one key, leaving the others as they are.
    *
    * @param key - The key.
    * @param value - Its new value.
    */
   async set(key: string, value: unknown): Promise<void> {
-    await this.view().saveData({ [key]: value });
+    await this.update(key, () => value);
   }
 }

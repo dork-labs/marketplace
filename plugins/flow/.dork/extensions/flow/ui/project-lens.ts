@@ -12,7 +12,7 @@ import { UNREACHABLE_MESSAGE, pauseFlow, resumeFlow } from './api.ts';
 import { PILL_TEXT, clockTime, pausedText, runningCaption } from './panel-format.ts';
 import { PauseMenu } from './pause-menu.ts';
 import { BUTTON, CAPTION, CONDITION, Dot, GROW, Hint, LINK, MUTED, PILL, ROW } from './parts.ts';
-import { h, useState, type Node, type Style } from './react.ts';
+import { h, useEffect, useRef, useState, type Node, type Style } from './react.ts';
 import type { FlowStore } from './store.ts';
 import { ALERT, hostColor } from './styles.ts';
 
@@ -20,7 +20,29 @@ import { ALERT, hostColor } from './styles.ts';
 export const NOTHING_RUNNING_TEXT = 'Nothing is running.';
 
 /** Shown after a resume when DorkOS would not switch flow's schedules back on. */
-export const SCHEDULES_OFF_TEXT = "Turn flow's schedules back on in Tasks.";
+export const SCHEDULES_OFF_TEXT =
+  "DorkOS didn't let flow switch its schedules back on after the pause, so they are still off. Turn them on in Schedules.";
+
+/**
+ * Shown while a finished pause's schedules wait to be switched back on: only
+ * a DorkOS page open in a browser can do it, as the person.
+ *
+ * @param name - The project's name.
+ * @returns The words.
+ */
+export function schedulesWaitingText(name: string): string {
+  return `Schedules for ${name} stay off until DorkOS is open. Flow switches them back on as soon as it is.`;
+}
+
+/** Hidden from sight, read by screen readers. */
+const SR_ONLY: Style = {
+  position: 'absolute',
+  width: '1px',
+  height: '1px',
+  overflow: 'hidden',
+  clip: 'rect(0 0 0 0)',
+  whiteSpace: 'nowrap',
+};
 
 /** The not-set-up line (§3.2 item 6). */
 export const NOT_SET_UP_TEXT = "Flow is installed but doesn't know where your work lives yet.";
@@ -153,6 +175,15 @@ export function ProjectLens(props: {
   const { project, model, api, store } = props;
   const [menu, setMenu] = useState(false);
   const [busy, setBusy] = useState(false);
+  const [focusHeader, setFocusHeader] = useState(false);
+  const headerButton = useRef<HTMLButtonElement | null>(null);
+  // After the menu closes or a pause lands, focus goes back to Pause (or the
+  // Resume that replaced it), never to the top of the page.
+  useEffect(() => {
+    if (!focusHeader || busy) return;
+    headerButton.current?.focus();
+    setFocusHeader(false);
+  }, [focusHeader, busy]);
   const [error, setError] = useState<string | null>(null);
   const now = new Date();
   const target = { project: project.name };
@@ -166,9 +197,11 @@ export function ProjectLens(props: {
       (next) => {
         store.apply(next);
         setBusy(false);
+        setFocusHeader(true);
       },
       (failure: unknown) => {
         setBusy(false);
+        setFocusHeader(true);
         setError(failure instanceof Error ? failure.message : UNREACHABLE_MESSAGE);
       }
     );
@@ -205,6 +238,7 @@ export function ProjectLens(props: {
             'button',
             {
               key: 'resume',
+              ref: headerButton,
               type: 'button',
               style: { ...BUTTON, cursor: busy ? 'progress' : 'pointer' },
               'aria-disabled': busy || undefined,
@@ -219,6 +253,7 @@ export function ProjectLens(props: {
             'button',
             {
               key: 'pause',
+              ref: headerButton,
               type: 'button',
               style: { ...BUTTON, cursor: busy ? 'progress' : 'pointer' },
               'aria-haspopup': 'menu',
@@ -242,7 +277,14 @@ export function ProjectLens(props: {
       h('span', { key: 'pill', style: PILL }, PILL_TEXT[run.state]),
     ];
     const key = `${run.identifier}:${index}`;
-    if (run.sessionId === null) return h('div', { key, style: ROW }, ...children);
+    if (run.sessionId === null) {
+      return h(
+        'div',
+        { key, style: ROW },
+        ...children,
+        h('span', { key: 'account', style: SR_ONLY }, `, on ${run.account.label}`)
+      );
+    }
     const sessionId = run.sessionId;
     return h(
       'button',
@@ -270,15 +312,23 @@ export function ProjectLens(props: {
         h(PauseMenu, {
           label: `Pause flow in ${project.name}`,
           onChoose: (until) => act(() => pauseFlow(target, until)),
-          onClose: () => setMenu(false),
+          opener: () => headerButton.current,
+          onClose: (returnFocus) => {
+            setMenu(false);
+            if (returnFocus) setFocusHeader(true);
+          },
         })
       )
     );
   }
   if (error !== null) body.push(h('p', { key: 'error', role: 'alert', style: ALERT }, error));
-  if (props.schedulesStuck === true) {
+  if (project.restoreSchedules.length > 0) {
     body.push(
-      h('p', { key: 'schedules', style: { ...MUTED, marginTop: '6px' } }, SCHEDULES_OFF_TEXT)
+      h(
+        'p',
+        { key: 'schedules', style: CONDITION },
+        props.schedulesStuck === true ? SCHEDULES_OFF_TEXT : schedulesWaitingText(project.name)
+      )
     );
   }
 

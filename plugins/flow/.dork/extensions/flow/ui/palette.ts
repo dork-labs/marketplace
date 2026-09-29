@@ -18,7 +18,7 @@ import { formatWhen } from './panel-format.ts';
 import { PauseMenu } from './pause-menu.ts';
 import { BUTTON, FOCUS_CSS, Hint, MUTED, PANEL } from './parts.ts';
 import { h, useState, type Node } from './react.ts';
-import type { FlowStore } from './store.ts';
+import { useStore, type FlowStore } from './store.ts';
 import { ALERT } from './styles.ts';
 
 /** The palette's command labels. */
@@ -54,6 +54,17 @@ export function pausedToast(who: string | null, until: string | null, now: Date)
     : `Flow is paused in ${where} until ${formatWhen(until, now)}.`;
 }
 
+/**
+ * Names in a sentence: "dorkos", "dorkos and blintz", "a, b and c".
+ *
+ * @param names - The names.
+ * @returns The words.
+ */
+export function listNames(names: readonly string[]): string {
+  if (names.length <= 1) return names[0] ?? '';
+  return `${names.slice(0, -1).join(', ')} and ${names[names.length - 1]}`;
+}
+
 /** Which dialog: one project or all of them. */
 type Scope = 'project' | 'all';
 
@@ -80,7 +91,9 @@ function createPauseDialog(
   function PauseDialog(): Node {
     const [mode, setMode] = useState<Scope>(scope);
     const [error, setError] = useState<string | null>(null);
-    const snapshot = store.get();
+    const [busy, setBusy] = useState(false);
+    // Follows the store, so the dialog never acts on a model that has moved on.
+    const snapshot = useStore(store);
     const model = snapshot.model;
     const project = model === null ? null : chatProject(snapshot, model);
     const root = (...children: Node[]) =>
@@ -116,15 +129,21 @@ function createPauseDialog(
       h(PauseMenu, {
         label: who === null ? 'Pause all projects' : `Pause flow in ${who}`,
         onChoose: (until) => {
+          // One pause at a time: a second click while the first is on its way does nothing.
+          if (busy) return;
+          setBusy(true);
           setError(null);
           pauseFlow(target, until).then(
             (next) => {
+              setBusy(false);
               store.apply(next);
               api.notify?.(pausedToast(who, until, new Date()), { type: 'success' });
               controls.close();
             },
-            (failure: unknown) =>
-              setError(failure instanceof Error ? failure.message : UNREACHABLE_MESSAGE)
+            (failure: unknown) => {
+              setBusy(false);
+              setError(failure instanceof Error ? failure.message : UNREACHABLE_MESSAGE);
+            }
           );
         },
         onClose: () => controls.close(),
@@ -155,8 +174,15 @@ async function resumeNow(
     return;
   }
   let target: PauseTarget = { all: true };
-  let who = 'every project';
-  if (scope === 'project') {
+  let who: string;
+  if (scope === 'all') {
+    const paused = model.projects.filter((project) => project.pause !== null);
+    if (paused.length === 0) {
+      api.notify?.('Nothing was paused.', { type: 'info' });
+      return;
+    }
+    who = listNames(paused.map((project) => project.name));
+  } else {
     const project = chatProject(snapshot, model);
     if (project === null) {
       api.notify?.(NOT_IN_PROJECT_TEXT, { type: 'info' });

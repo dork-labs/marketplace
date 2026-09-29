@@ -75,8 +75,12 @@ export class FlowStore {
   private loading: Promise<void> | null = null;
   /** Schedule ids already being switched back on, so no two tries overlap. */
   private readonly restoring = new Set<string>();
-  /** When switching a schedule back on last failed, by id. */
-  private readonly failedAt = new Map<string, number>();
+  /**
+   * When switching a schedule back on was last tried, by id: a schedule is
+   * tried at most every few minutes, whether it failed or flow has not yet
+   * heard that it worked.
+   */
+  private readonly triedAt = new Map<string, number>();
 
   /**
    * @param api - DorkOS's client API (state and its changes).
@@ -225,21 +229,18 @@ export class FlowStore {
       const now = Date.now();
       const ids = project.restoreSchedules.filter(
         (id) =>
-          !this.restoring.has(id) && now - (this.failedAt.get(id) ?? -Infinity) >= RESTORE_RETRY_MS
+          !this.restoring.has(id) && now - (this.triedAt.get(id) ?? -Infinity) >= RESTORE_RETRY_MS
       );
       if (ids.length === 0) continue;
       for (const id of ids) this.restoring.add(id);
       try {
         const results: EnableResult[] = await Promise.all(ids.map((id) => enableSchedule(id)));
         const done = ids.filter((_, i) => results[i] !== 'failed');
-        ids.forEach((id, i) => {
-          if (results[i] === 'failed') this.failedAt.set(id, now);
-          else this.failedAt.delete(id);
-        });
+        for (const id of ids) this.triedAt.set(id, now);
         this.markStuck(project, results.includes('failed'));
         if (done.length > 0) this.apply(await schedulesRestored(project.name, done));
       } catch {
-        for (const id of ids) this.failedAt.set(id, now);
+        for (const id of ids) this.triedAt.set(id, now);
         this.markStuck(project, true);
       } finally {
         for (const id of ids) this.restoring.delete(id);

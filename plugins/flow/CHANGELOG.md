@@ -11,10 +11,10 @@ you until you **reinstall it** (Marketplace → flow → reinstall, or re-run yo
 - In a chat inside a flow project, the Flow tab shows just that project: what is running and in what state, what is up next, and anything wrong, such as a tracker that stopped answering or a sign-in that needs you. Anywhere else it lists only the projects that need a look, and says how many are fine.
 - Pause now asks for how long: until tomorrow 9am, for 1 hour, or until you resume. The button then says when the pause ends, with Resume beside it. It pauses one project, not every project at once.
 - The command palette can pause or resume the chat's project, or every project.
-- When a pause ends, any DorkOS schedules it had switched off are switched back on for you.
+- When a pause ends, flow switches back on any DorkOS schedules the pause had switched off, as soon as a DorkOS page is open: only a page open in your browser can do it. Until then the Flow tab says those schedules are still off.
 - Flow finds every project it runs in, not only the ones you opened a chat in since DorkOS started, and says when a project runs an older flow that works differently.
 - Accounts left the Flow tab: the account chip and Settings already show them.
-- Only a person can pause, resume or change flow's account settings from DorkOS; an agent calling the same address is turned away. On a DorkOS too old to tell the two apart, the tab says to pause from a chat instead.
+- On a DorkOS that can tell a person from an agent, only a person can pause, resume or change flow's account settings from DorkOS; an agent calling the same address is turned away. On an older DorkOS that can't, the Flow tab can't pause or resume and says to do it from a chat, and flow's account settings can still be changed from there by anything that can reach it, as before.
 - `flow fleet` no longer counts an item a chat only handed to another chat as that chat's own work.
 
 ## 0.48.0

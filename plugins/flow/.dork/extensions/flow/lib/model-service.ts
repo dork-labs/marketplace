@@ -63,7 +63,7 @@ export interface ModelServiceDeps {
   now: () => Date;
   /** Whether pausing and resuming routes exist on this host. */
   canChange: boolean;
-  /** Folder to main checkout (default: flow's `resolveMainCheckout`). */
+  /** Folder to main checkout (default: git, off the event loop, remembering recent answers). */
   resolver?: CheckoutResolver;
   /** Whether a pid exists (default: `process.kill(pid, 0)`, as `flow fleet`). */
   pidAlive?: (pid: number) => boolean;
@@ -130,6 +130,27 @@ export function parseUntil(body: unknown, now: Date): string | null {
   return until as string;
 }
 
+/**
+ * Read the stored restore list leniently: root to schedule ids, empty lists dropped.
+ *
+ * @param stored - The stored value.
+ * @returns The list.
+ */
+export function parseRestoreList(stored: unknown): Record<string, string[]> {
+  const list: Record<string, string[]> = {};
+  if (!isObject(stored)) return list;
+  for (const [root, ids] of Object.entries(stored)) {
+    if (Array.isArray(ids)) {
+      const kept = ids.filter((id): id is string => typeof id === 'string' && id !== '');
+      if (kept.length > 0) list[root] = kept;
+    }
+  }
+  return list;
+}
+
+/** The waits after each failed attempt to end a pause on time, in ms; the last repeats. */
+export const SWEEP_RETRY_MS = [60_000, 5 * 60_000, 15 * 60_000, 60 * 60_000] as const;
+
 /** The Flow tab's model, its writes, the expiry sweep and its live event. */
 export class ModelService {
   private readonly resolver: CheckoutResolver;
@@ -141,6 +162,10 @@ export class ModelService {
   private timer: ReturnType<typeof setTimeout> | null = null;
   private disposed = false;
   private sweeping: Promise<void> | null = null;
+  /** Pause and resume commands run one at a time, so the sweep never undoes a fresh pause. */
+  private commands: Promise<unknown> = Promise.resolve();
+  /** Failed attempts to end a pause on time, by root. */
+  private readonly sweepFailures = new Map<string, { count: number; retryAt: number }>();
 
   /**
    * @param deps - The host, machine and clock.
@@ -176,7 +201,9 @@ export class ModelService {
 
   /** Every flow project now. */
   async projects(): Promise<FlowProjectEntry[]> {
-    return this.directory.list(discoverCheckouts(this.deps.dorkHome, this.cwds, this.resolver));
+    return this.directory.list(
+      await discoverCheckouts(this.deps.dorkHome, this.cwds, this.resolver)
+    );
   }
 
   /** The project a folder belongs to: core's answer, else the main checkout of it. */
@@ -189,7 +216,7 @@ export class ModelService {
         // Fall back to flow's own resolver below.
       }
     }
-    return this.resolver.of(cwd);
+    return await this.resolver.of(cwd);
   }
 
   /** What to call each account a run may bill, and its dot's color. */
@@ -210,24 +237,21 @@ export class ModelService {
 
   /** The schedules each project needs switched back on, by root. */
   private async restoreList(): Promise<Record<string, string[]>> {
-    const stored = await this.deps.storage.get(RESTORE_KEY);
-    const list: Record<string, string[]> = {};
-    if (!isObject(stored)) return list;
-    for (const [root, ids] of Object.entries(stored)) {
-      if (Array.isArray(ids)) {
-        const kept = ids.filter((id): id is string => typeof id === 'string' && id !== '');
-        if (kept.length > 0) list[root] = kept;
-      }
-    }
-    return list;
+    return parseRestoreList(await this.deps.storage.get(RESTORE_KEY));
   }
 
-  /** Add schedules for a project to switch back on. */
+  /**
+   * Add schedules for a project to switch back on. The list is changed inside
+   * the storage's save queue, so a sweep and a Flow tab's report never lose
+   * each other's change.
+   */
   private async addRestore(root: string, ids: readonly string[]): Promise<void> {
     if (ids.length === 0) return;
-    const list = await this.restoreList();
-    list[root] = [...new Set([...(list[root] ?? []), ...ids])];
-    await this.deps.storage.set(RESTORE_KEY, list);
+    await this.deps.storage.update(RESTORE_KEY, (current) => {
+      const list = parseRestoreList(current);
+      list[root] = [...new Set([...(list[root] ?? []), ...ids])];
+      return list;
+    });
   }
 
   /**
@@ -242,11 +266,13 @@ export class ModelService {
     const done = new Set(
       Array.isArray(ids) ? ids.filter((id): id is string => typeof id === 'string') : []
     );
-    const list = await this.restoreList();
-    const left = (list[entry.root] ?? []).filter((id) => !done.has(id));
-    if (left.length > 0) list[entry.root] = left;
-    else delete list[entry.root];
-    await this.deps.storage.set(RESTORE_KEY, list);
+    await this.deps.storage.update(RESTORE_KEY, (current) => {
+      const list = parseRestoreList(current);
+      const left = (list[entry.root] ?? []).filter((id) => !done.has(id));
+      if (left.length > 0) list[entry.root] = left;
+      else delete list[entry.root];
+      return list;
+    });
     return this.answer();
   }
 
@@ -323,16 +349,26 @@ export class ModelService {
   async pause(body: unknown): Promise<FlowModel> {
     const target = parseTarget(body);
     const until = parseUntil(body, this.deps.now());
-    for (const entry of await this.targets(target)) {
-      await runPauseCommand({
-        ...this.commandDeps(),
-        command: 'pause',
-        mainCheckout: entry.root,
-        until,
-        name: entry.name,
-      });
-    }
+    const entries = await this.targets(target);
+    await this.serial(async () => {
+      for (const entry of entries) {
+        await runPauseCommand({
+          ...this.commandDeps(),
+          command: 'pause',
+          mainCheckout: entry.root,
+          until,
+          name: entry.name,
+        });
+      }
+    });
     return this.answer();
+  }
+
+  /** Run pause and resume commands one at a time, in order. */
+  private serial<T>(fn: () => Promise<T>): Promise<T> {
+    const run = this.commands.then(fn);
+    this.commands = run.catch(() => {});
+    return run;
   }
 
   /**
@@ -344,16 +380,19 @@ export class ModelService {
    */
   async resume(body: unknown): Promise<FlowModel> {
     const target = parseTarget(body);
-    for (const entry of await this.targets(target)) {
-      if (readPauseFlag(pauseFlagPath(entry.root), this.deps.now()) === null) continue;
-      const output = await runPauseCommand({
-        ...this.commandDeps(),
-        command: 'resume',
-        mainCheckout: entry.root,
-        name: entry.name,
-      });
-      await this.addRestore(entry.root, schedulesOf(output));
-    }
+    const entries = await this.targets(target);
+    await this.serial(async () => {
+      for (const entry of entries) {
+        if (readPauseFlag(pauseFlagPath(entry.root), this.deps.now()) === null) continue;
+        const output = await runPauseCommand({
+          ...this.commandDeps(),
+          command: 'resume',
+          mainCheckout: entry.root,
+          name: entry.name,
+        });
+        await this.addRestore(entry.root, schedulesOf(output));
+      }
+    });
     return this.answer();
   }
 
@@ -366,24 +405,47 @@ export class ModelService {
    * @param entries - Every flow project now.
    */
   private async sweep(entries: readonly FlowProjectEntry[]): Promise<void> {
-    const now = this.deps.now();
     for (const entry of entries) {
-      const flag = readPauseFlag(pauseFlagPath(entry.root), now);
-      if (flag === null || flag.pauses || flag.until === null) continue;
-      try {
-        const output = await runPauseCommand({
-          ...this.commandDeps(),
-          command: 'resume',
-          mainCheckout: entry.root,
-          name: entry.name,
-        });
-        await this.addRestore(entry.root, schedulesOf(output));
-      } catch (error) {
-        this.deps.log(
-          `[flow] could not end the pause in ${entry.name} on time: ${String(error)}; trying again`
-        );
+      if (!this.ended(entry.root)) {
+        this.sweepFailures.delete(entry.root);
+        continue;
       }
+      const failed = this.sweepFailures.get(entry.root);
+      if (failed !== undefined && this.deps.now().getTime() < failed.retryAt) continue;
+      await this.serial(async () => {
+        // Read again in the queue: a person may have paused afresh since.
+        if (!this.ended(entry.root)) return;
+        try {
+          const output = await runPauseCommand({
+            ...this.commandDeps(),
+            command: 'resume',
+            mainCheckout: entry.root,
+            name: entry.name,
+          });
+          this.sweepFailures.delete(entry.root);
+          await this.addRestore(entry.root, schedulesOf(output));
+        } catch (error) {
+          const count = (failed?.count ?? 0) + 1;
+          const wait = SWEEP_RETRY_MS[Math.min(count, SWEEP_RETRY_MS.length) - 1];
+          this.sweepFailures.set(entry.root, {
+            count,
+            retryAt: this.deps.now().getTime() + wait,
+          });
+          // Said once; the retries that follow are quiet until one works.
+          if (count === 1) {
+            this.deps.log(
+              `[flow] could not end the pause in ${entry.name} on time: ${String(error)}; trying again later`
+            );
+          }
+        }
+      });
     }
+  }
+
+  /** Whether a project's pause flag has an end that has passed. */
+  private ended(root: string): boolean {
+    const flag = readPauseFlag(pauseFlagPath(root), this.deps.now());
+    return flag !== null && !flag.pauses && flag.until !== null;
   }
 
   /**

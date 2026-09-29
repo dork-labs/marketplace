@@ -235,11 +235,16 @@ export function flowSetupOf(root: string): FlowProjectEntry['setup'] | null {
  * order, so the same set of projects always gets the same names.
  *
  * @param roots - The projects' main checkouts.
+ * @param reserved - Names already given to other projects (core's), which a
+ *   fallback name must never repeat.
  * @returns Each root's name.
  */
-export function fallbackNames(roots: readonly string[]): Map<string, string> {
+export function fallbackNames(
+  roots: readonly string[],
+  reserved: Iterable<string> = []
+): Map<string, string> {
   const sanitize = (segment: string) => segment.replace(/[^A-Za-z0-9._-]/g, '-');
-  const taken = new Set<string>();
+  const taken = new Set<string>(reserved);
   const names = new Map<string, string>();
   for (const root of [...new Set(roots)].sort()) {
     const base = sanitize(path.basename(root)) || 'project';
@@ -265,14 +270,21 @@ export interface ProjectDirectoryDeps {
   storage: SharedStorage;
   /** Where to log. */
   log: (message: string) => void;
+  /** The clock, in ms (default: `Date.now`). */
+  now?: () => number;
 }
+
+/** The waits after each failed report of a root to core, in ms; the last repeats. */
+export const REPORT_RETRY_MS = [60_000, 5 * 60_000, 30 * 60_000] as const;
 
 /** Finds, names and remembers the flow projects on this computer. */
 export class ProjectDirectory {
   private readonly own: Behaviour;
   private seen: Set<string> | null = null;
   /** Names core gave roots it did not list, from `report`. */
-  private readonly reported = new Map<string, string | null>();
+  private readonly reported = new Map<string, string>();
+  /** Reports that failed (threw, or got no name), and when to try again. */
+  private readonly unreported = new Map<string, { count: number; retryAt: number }>();
 
   /**
    * @param deps - flow's folder, core's registry, storage and a logger.
@@ -351,27 +363,49 @@ export class ProjectDirectory {
     roots: readonly string[],
     core: ReadonlyMap<string, string>
   ): Promise<Map<string, string>> {
-    const fallback = fallbackNames(roots);
-    if (this.deps.projects === undefined) return fallback;
+    if (this.deps.projects === undefined) return fallbackNames(roots);
+    const now = (this.deps.now ?? Date.now)();
     const names = new Map<string, string>();
+    const unnamed: string[] = [];
     for (const root of roots) {
-      const listed = core.get(root);
-      if (listed !== undefined) {
-        names.set(root, listed);
-        continue;
-      }
-      if (!this.reported.has(root)) {
-        let ref: { name: string } | null = null;
-        try {
-          ref = await this.deps.projects.report(root);
-        } catch (error) {
-          this.deps.log(`[flow] could not tell DorkOS about ${root}: ${String(error)}`);
-        }
-        this.reported.set(root, ref?.name ?? null);
-      }
-      names.set(root, this.reported.get(root) ?? fallback.get(root) ?? path.basename(root));
+      const listed = core.get(root) ?? (await this.reportedName(root, now));
+      if (listed === null) unnamed.push(root);
+      else names.set(root, listed);
     }
+    // A root core could not name gets the folder-name fallback, never a name
+    // core gave another project, so two projects never share a page.
+    const reserved = new Set([...core.values(), ...names.values()]);
+    for (const [root, name] of fallbackNames(unnamed, reserved)) names.set(root, name);
     return names;
+  }
+
+  /**
+   * Core's name for a root it does not list, reporting the root to core once.
+   * A failed report is tried again later (after 1, 5, then every 30 minutes),
+   * never cached for good.
+   */
+  private async reportedName(root: string, now: number): Promise<string | null> {
+    const known = this.reported.get(root);
+    if (known !== undefined) return known;
+    const failed = this.unreported.get(root);
+    if (failed !== undefined && now < failed.retryAt) return null;
+    let ref: { name: string } | null = null;
+    try {
+      ref = (await this.deps.projects?.report(root)) ?? null;
+    } catch (error) {
+      if (failed === undefined) {
+        this.deps.log(`[flow] could not tell DorkOS about ${root}: ${String(error)}`);
+      }
+    }
+    if (ref !== null) {
+      this.unreported.delete(root);
+      this.reported.set(root, ref.name);
+      return ref.name;
+    }
+    const count = (failed?.count ?? 0) + 1;
+    const wait = REPORT_RETRY_MS[Math.min(count, REPORT_RETRY_MS.length) - 1];
+    this.unreported.set(root, { count, retryAt: now + wait });
+    return null;
   }
 
   /** Remember new flow projects; a failure is logged, never thrown. */
@@ -392,5 +426,6 @@ export class ProjectDirectory {
   /** Forget the names core gave on report, so the next list asks again (core's list changed). */
   refresh(): void {
     this.reported.clear();
+    this.unreported.clear();
   }
 }

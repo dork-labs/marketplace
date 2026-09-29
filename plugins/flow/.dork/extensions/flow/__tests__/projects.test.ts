@@ -11,6 +11,7 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import {
   INSTALL_DIR,
   ProjectDirectory,
+  REPORT_RETRY_MS,
   SEEN_KEY,
   fallbackNames,
   flowSetupOf,
@@ -100,6 +101,12 @@ describe('flowSetupOf', () => {
 });
 
 describe('fallbackNames', () => {
+  it('never repeats a name already given to another project', () => {
+    expect(Object.fromEntries(fallbackNames(['/w/work/app'], ['app']))).toEqual({
+      '/w/work/app': 'app~work',
+    });
+  });
+
   it("applies core's clash rule, the same way every time", () => {
     const names = fallbackNames([
       '/Volumes/y/work/dorkos',
@@ -248,6 +255,41 @@ describe('ProjectDirectory', () => {
       log: () => {},
     });
     expect((await directory.list([b, a])).map((p) => p.name)).toEqual(['app', 'app~work']);
+  });
+
+  it('never gives a root core could not name a name core gave another project, and asks again later', async () => {
+    const flow = flowRoot();
+    const listed = repo(path.join(world.root, 'dev', 'app'));
+    const unnamed = repo(path.join(world.root, 'work', 'app'));
+    configure(listed);
+    configure(unnamed);
+    const core = fakeProjects([
+      { root: listed, name: 'app', originRepo: null, lastSeenAt: '2026-09-28T00:00:00Z' },
+    ]);
+    core.api.report.mockRejectedValue(new Error('down'));
+    let now = 0;
+    const logs: string[] = [];
+    const directory = new ProjectDirectory({
+      flowRoot: flow,
+      projects: core.api,
+      storage: storage().shared,
+      log: (line) => logs.push(line),
+      now: () => now,
+    });
+    const names = async () =>
+      Object.fromEntries((await directory.list([unnamed])).map((p) => [p.root, p.name]));
+    expect(await names()).toEqual({ [listed]: 'app', [unnamed]: 'app~work' });
+    // Not asked again until its wait is over, and said only once.
+    await names();
+    expect(core.api.report).toHaveBeenCalledTimes(1);
+    now = REPORT_RETRY_MS[0];
+    await names();
+    expect(core.api.report).toHaveBeenCalledTimes(2);
+    expect(logs).toHaveLength(1);
+    // Once core answers, its name is used.
+    core.api.report.mockResolvedValue({ root: unnamed, name: 'app~work-2' });
+    now += REPORT_RETRY_MS[1];
+    expect(await names()).toEqual({ [listed]: 'app', [unnamed]: 'app~work-2' });
   });
 
   it('keeps working when core’s list fails', async () => {

@@ -183,22 +183,44 @@ describe('isStaleRun and runAccountKey', () => {
 });
 
 describe('discoverCheckouts', () => {
-  it("finds the projects behind the drain's worktrees and the chats' folders, once each", () => {
+  it("finds the projects behind the drain's worktrees and the chats' folders, once each", async () => {
     const repoDir = path.join(world.dorkHome, 'workspaces', 'app');
     mkdirSync(repoDir, { recursive: true });
     git(world.main, 'worktree', 'add', '-q', '-b', 'dork/acme-2', path.join(repoDir, 'ACME-2'));
-    const resolve = vi.fn((cwd: string) =>
+    const resolve = vi.fn(async (cwd: string) =>
       cwd.startsWith(world.root) && !cwd.endsWith('elsewhere') ? world.main : null
     );
     const resolver = new CheckoutResolver(resolve);
-    const found = discoverCheckouts(
+    const found = await discoverCheckouts(
       world.dorkHome,
       [world.worktree, path.join(world.root, 'elsewhere')],
       resolver
     );
     expect(found).toEqual([world.main]);
-    discoverCheckouts(world.dorkHome, [world.worktree], resolver);
+    await discoverCheckouts(world.dorkHome, [world.worktree], resolver);
     expect(resolve).toHaveBeenCalledTimes(3);
+  });
+});
+
+describe('CheckoutResolver', () => {
+  it('asks git without blocking, and finds the main checkout of a worktree', async () => {
+    const resolver = new CheckoutResolver();
+    expect(await resolver.of(world.worktree)).toBe(world.main);
+    expect(await resolver.of(world.root)).toBeNull();
+  });
+
+  it('remembers only the most recent answers', async () => {
+    const resolve = vi.fn(async (cwd: string) => `${cwd}-main`);
+    const resolver = new CheckoutResolver(resolve, 2);
+    await resolver.of('/a');
+    await resolver.of('/b');
+    await resolver.of('/a');
+    await resolver.of('/c');
+    expect(resolver.size).toBe(2);
+    // /b was the least recently used, so it is asked again; /a is not.
+    await resolver.of('/a');
+    await resolver.of('/b');
+    expect(resolve.mock.calls.map(([cwd]) => cwd)).toEqual(['/a', '/b', '/c', '/b']);
   });
 });
 

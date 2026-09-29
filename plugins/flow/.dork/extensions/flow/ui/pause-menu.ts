@@ -95,7 +95,7 @@ function itemStyle(highlighted: boolean): Style {
 
 /**
  * The menu: three choices, the default first in focus and highlighted.
- * Arrow keys move between them; Escape closes it.
+ * Arrow keys move between them; Escape, Tab or a click elsewhere closes it.
  *
  * @param props - The highlighted default, what to do with a choice, and how to close.
  * @returns The menu.
@@ -104,13 +104,27 @@ export function PauseMenu(props: {
   defaultChoice?: PauseChoice;
   label: string;
   onChoose: (until: string | null) => void;
-  onClose?: () => void;
+  /**
+   * Close it. `returnFocus` is true for Escape (focus goes back to the button
+   * that opened it), false for Tab or a click elsewhere (focus goes where the
+   * person sent it).
+   */
+  onClose?: (returnFocus: boolean) => void;
+  /** The button that opens it: a press there toggles, so it is not a click elsewhere. */
+  opener?: () => HTMLElement | null;
   now?: () => Date;
 }): Node {
   const chosen = props.defaultChoice ?? 'tomorrow';
   const ref = useRef<HTMLDivElement | null>(null);
   useEffect(() => {
     ref.current?.querySelector<HTMLButtonElement>('[data-default="true"]')?.focus();
+    const onPointer = (event: PointerEvent) => {
+      const target = event.target as globalThis.Node;
+      if (props.opener?.()?.contains(target)) return;
+      if (ref.current !== null && !ref.current.contains(target)) props.onClose?.(false);
+    };
+    document.addEventListener('pointerdown', onPointer);
+    return () => document.removeEventListener('pointerdown', onPointer);
   }, []);
   const move = (event: { key: string; preventDefault(): void }) => {
     const items = [
@@ -119,7 +133,9 @@ export function PauseMenu(props: {
     const at = items.indexOf(document.activeElement as HTMLButtonElement);
     if (event.key === 'Escape') {
       event.preventDefault();
-      props.onClose?.();
+      props.onClose?.(true);
+    } else if (event.key === 'Tab') {
+      props.onClose?.(false);
     } else if (event.key === 'ArrowDown' || event.key === 'ArrowUp') {
       event.preventDefault();
       const step = event.key === 'ArrowDown' ? 1 : -1;
