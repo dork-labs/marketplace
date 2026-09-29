@@ -28,12 +28,20 @@ import path from 'node:path';
 
 import { PreconditionError, UsageError } from '../errors.ts';
 import type { FlowRun } from '../flow-run.ts';
-import { MAX_ANSWER_LENGTH, pickComment, pickIsDue, type QuestionSettler } from '../question.ts';
+import {
+  MAX_ANSWER_LENGTH,
+  personOnly,
+  pickComment,
+  pickIsDue,
+  type QuestionSettler,
+} from '../question.ts';
+import { requireOtherSession } from './caller.ts';
+import { claimAnswer, releaseAnswer } from './question-write.ts';
 import { AGENT_NEEDS_INPUT } from '../work-state.ts';
 import type { VerbContext, VerbResult } from './context.ts';
 import { signBody } from './provenance.ts';
 import { tokenHash } from './report.ts';
-import { requireStored, runFor, sessionProvenance, setupWrite } from './work-write.ts';
+import { runFor, sessionProvenance, setupWrite } from './work-write.ts';
 
 /** The last line of a person's answer posted from DorkOS. */
 export const ANSWERED_IN_DORKOS = 'Answered in DorkOS.';
@@ -114,9 +122,16 @@ export async function run(ctx: VerbContext): Promise<VerbResult> {
     body = `${text}\n\n${ANSWERED_IN_DORKOS}`;
     answer = text;
   } else {
-    if (question === undefined) {
+    if (question === undefined || existing === undefined) {
       throw new PreconditionError(
         `${identifier} has no recorded question, so there is no pick to take`
+      );
+    }
+    // Read from the triggers, not the stored who-answers fields, so a record
+    // edited by hand cannot let a pick settle a spend.
+    if (personOnly(question)) {
+      throw new PreconditionError(
+        `${identifier}'s question is about secrets or spending, so only a person answers it`
       );
     }
     if (by === 'agent-default' && !pickIsDue(question, ctx.now())) {
@@ -127,6 +142,11 @@ export async function run(ctx: VerbContext): Promise<VerbResult> {
       );
     }
     if (by === 'reviewer-agent') {
+      requireOtherSession(
+        ctx,
+        [question.askedBy, existing.sessionId],
+        'answer its own question as the reviewer agent'
+      );
       const token = flag(ctx, 'token');
       const expected = question.checkTokenHash;
       if (token === undefined || expected === undefined || tokenHash(token) !== expected) {
@@ -139,24 +159,27 @@ export async function run(ctx: VerbContext): Promise<VerbResult> {
       question,
       by === 'reviewer-agent' ? 'reviewer-agent' : 'agent-default'
     );
-    body = signBody(comment, loaded.config.identity.marker, sessionProvenance(ctx, existing?.host));
+    body = signBody(comment, loaded.config.identity.marker, sessionProvenance(ctx, existing.host));
     answer = comment;
   }
 
-  const at = ctx.now().toISOString();
   if (!ctx.dryRun) {
-    await adapter.comment(item, body);
-    if (existing !== undefined && question !== undefined) {
-      const written = await store.updateRun(existing.issueId, (current) =>
-        current.question === undefined
-          ? current
-          : { ...current, question: { ...current.question, answer: { text: answer, at, by } } }
-      );
-      requireStored(
-        written.status,
-        store.path,
-        `the answer is posted on ${identifier}; the drain and the inbox pass still find it there`
-      );
+    const recorded = { text: answer, at: ctx.now().toISOString(), by };
+    // Claim the answer under the lock before posting anything: a person, the
+    // DorkOS deadline and the drain can all reach one question, and only the
+    // first may answer it. The loser posts nothing (exit 5).
+    const claimed =
+      existing !== undefined && question !== undefined
+        ? await claimAnswer(store, existing.issueId, question.askedAt, recorded)
+        : null;
+    if (claimed === false) throw settled();
+    try {
+      await adapter.comment(item, body);
+    } catch (error) {
+      if (claimed === true && existing !== undefined && question !== undefined) {
+        await releaseAnswer(store, existing.issueId, question.askedAt, recorded);
+      }
+      throw error;
     }
   }
   const who =

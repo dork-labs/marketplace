@@ -57,8 +57,11 @@ treats such an entry as invalid, and never drops the file over it.
 `FlowRun` fields. `dispatchedBy` is the session id of the chat that launched a
 run, when another chat did (a `flow drain`, or `flow claim --dispatched-by`), so
 DorkOS can show the run in that chat too. `updatedAt` is when the record was last
-written; every writer stamps it. Both are plain strings; a record from before
-4.1.0 has neither and still reads (`flow-run` cases).
+written; every writer stamps it on the record it writes, and only there. Both
+are plain strings; a record from before 4.1.0 has neither and still reads. A
+`flow-run` write case gives the writer's clock as `input.now`: the written
+record reads back with `updatedAt` equal to it. flow's runner checks this on
+both the pure upsert and the real run store.
 
 ## What is here
 

@@ -12,7 +12,10 @@
  * @module @dorkos/flow/question
  */
 
+import { hasZone } from './_shared.ts';
 import type { RunQuestion, RunQuestionChoice } from './flow-run.ts';
+
+export { hasZone };
 
 /** The fewest choices a question offers. */
 export const MIN_CHOICES = 2;
@@ -89,8 +92,9 @@ export function questionProblem(
   }
   if (input.decideBy !== null) {
     const at = Date.parse(input.decideBy);
-    if (!Number.isFinite(at))
-      return `--decide-by must be a time with its zone, not "${input.decideBy}"`;
+    if (!Number.isFinite(at) || !hasZone(input.decideBy)) {
+      return `--decide-by must be a time with its zone, e.g. 2026-09-29T17:00:00+02:00 or …Z, not "${input.decideBy}"`;
+    }
     const minutes = (at - now.getTime()) / 60_000;
     if (minutes < MIN_DEADLINE_MINUTES || minutes > MAX_DEADLINE_MINUTES) {
       return '--decide-by must be between 5 minutes and 7 days from now';
@@ -141,9 +145,13 @@ export function questionComment(question: RunQuestion): string {
     lines.push(
       `If you don't answer by ${formatWhen(question.decideBy)}, I'll go with "${pick.label}". Reply to this comment to answer.`
     );
-  } else if (question.floor.length > 0 && question.answeredBy !== 'person') {
+  } else if (question.checkAfter !== null && question.answeredBy === 'reviewer-agent') {
     lines.push(
-      "I won't go ahead until someone checks: you, or the reviewer agent. Reply to this comment to answer."
+      "I won't go ahead until someone checks: the reviewer agent checks my pick, or you can answer first. Reply to this comment to answer."
+    );
+  } else if (question.checkAfter !== null) {
+    lines.push(
+      `I won't go ahead until someone checks: you, or, if you haven't answered, the reviewer agent checks my pick after ${formatWhen(question.checkAfter)}. Reply to this comment to answer.`
     );
   } else {
     lines.push("I won't go ahead until you answer. Reply to this comment to answer.");
@@ -163,7 +171,7 @@ export function questionComment(question: RunQuestion): string {
  */
 export function pickIsDue(question: RunQuestion, now: Date): boolean {
   if (question.answer !== undefined || question.decideBy === null) return false;
-  if (question.floor.length > 0) return false;
+  if (question.floor.length > 0 || personOnly(question)) return false;
   const at = Date.parse(question.decideBy);
   return Number.isFinite(at) && at <= now.getTime() && pickOf(question) !== undefined;
 }
@@ -184,21 +192,112 @@ export function pickComment(question: RunQuestion, by: 'agent-default' | 'review
   return `No answer by ${when}, so going with "${label}" (the agent's pick).`;
 }
 
+/** The trigger whose questions only a person answers, at every stop. */
+export const PERSON_ONLY_TRIGGER = 'secrets-or-spend';
+
+/**
+ * Whether only a person may answer this question: it carries
+ * `secrets-or-spend`. Read from the triggers themselves, never from the stored
+ * `answeredBy` or `checkAfter`, so a hand-edited record cannot widen it.
+ *
+ * @param question - The question.
+ * @returns `true` when no pick and no reviewer agent may settle it.
+ */
+export function personOnly(question: RunQuestion): boolean {
+  return question.floor.includes(PERSON_ONLY_TRIGGER);
+}
+
+/**
+ * Whether a question belongs to the park that began at `since`: it was asked
+ * at or after the park began. A question left on the run from an earlier park
+ * (a later park for review rounds or failing checks) belongs to no park.
+ *
+ * @param question - The run's question.
+ * @param since - When the current park began (ISO), or `null` when unknown.
+ * @returns `true` when the question is this park's.
+ */
+export function belongsToPark(question: RunQuestion, since: string | null): boolean {
+  if (since === null) return false;
+  const asked = Date.parse(question.askedAt);
+  const parked = Date.parse(since);
+  return Number.isFinite(asked) && Number.isFinite(parked) && asked >= parked;
+}
+
+/**
+ * Whether the reviewer agent may now check a floor question's pick: it is
+ * this park's, unanswered, not a person's alone, its wait is over, and no
+ * check was handed out yet.
+ *
+ * @param question - The question.
+ * @param now - The time now.
+ * @returns `true` when the check is due.
+ */
+export function checkIsDue(question: RunQuestion, now: Date): boolean {
+  if (question.answer !== undefined || question.checkAfter === null) return false;
+  if (question.floor.length === 0 || personOnly(question)) return false;
+  if (question.checkTokenHash !== undefined) return false;
+  const at = Date.parse(question.checkAfter);
+  return Number.isFinite(at) && at <= now.getTime();
+}
+
 /**
  * What a parked run's recorded question says about resuming it, when no reply
- * on the tracker did: `recorded` when `flow answer` recorded an answer,
- * `take-pick` when the deadline passed and the agent's pick now stands, else
- * `null` (keep waiting).
+ * on the tracker did. Only a question asked for the current park counts
+ * ({@link belongsToPark}):
+ *
+ * - `recorded`: `flow answer` recorded an answer to it.
+ * - `take-pick`: its deadline passed and the agent's pick now stands.
+ * - `check-pick`: a floor question's wait is over; hand the pick to the
+ *   reviewer agent.
+ * - `null`: keep waiting.
  *
  * @param question - The run's question, if it has one.
  * @param now - The time now.
+ * @param since - When the current park began (the drain's `parkedAt`).
  * @returns What to do.
  */
 export function parkedAnswer(
   question: RunQuestion | undefined,
-  now: Date
-): 'recorded' | 'take-pick' | null {
-  if (question === undefined) return null;
-  if (question.answer !== undefined) return 'recorded';
-  return pickIsDue(question, now) ? 'take-pick' : null;
+  now: Date,
+  since: string | null
+): 'recorded' | 'take-pick' | 'check-pick' | null {
+  if (question === undefined || !belongsToPark(question, since)) return null;
+  if (question.answer !== undefined) {
+    const answered = Date.parse(question.answer.at);
+    return answered >= Date.parse(question.askedAt) ? 'recorded' : null;
+  }
+  if (pickIsDue(question, now)) return 'take-pick';
+  return checkIsDue(question, now) ? 'check-pick' : null;
+}
+
+/**
+ * The brief the reviewer agent gets to check a floor question's pick. The
+ * token appears only here.
+ *
+ * @param question - The question.
+ * @param identifier - The item.
+ * @param flow - The command prefix that runs flow.
+ * @param token - The check's token.
+ * @returns The brief.
+ */
+export function checkBrief(
+  question: RunQuestion,
+  identifier: string,
+  flow: string,
+  token: string
+): string {
+  const pick = pickOf(question);
+  return [
+    `Check an agent's pick on ${identifier} before it goes ahead.`,
+    '',
+    `Question: ${question.text}`,
+    ...question.choices.map(
+      (choice, i) => `${i + 1}. ${choice.label}${choice.id === question.pick ? ' (its pick)' : ''}`
+    ),
+    `Why it picked "${pick?.label ?? question.pick}": ${question.why}`,
+    `It is on the floor because it is ${question.floor.join(' and ')}.`,
+    '',
+    `If the pick is sound, approve it: ${flow} answer ${identifier} --pick --by reviewer-agent --token ${token}`,
+    'If you have any doubt, do nothing: the question waits for a person.',
+  ].join('\n');
 }

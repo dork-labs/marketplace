@@ -22,12 +22,16 @@
  * @module @dorkos/flow/cli/drain
  */
 
+import { randomBytes, randomUUID } from 'node:crypto';
+import { mkdirSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 
 import { chooseAccount, rankAccounts } from '../drain/account-rank.ts';
 import { answerPointer, findAnswer } from '../drain/answer.ts';
 import type { RunQuestion } from '../flow-run.ts';
-import { parkedAnswer, pickComment } from '../question.ts';
+import { belongsToPark, checkBrief, parkedAnswer, personOnly, pickComment } from '../question.ts';
+import { claimAnswer, claimCheck, clearQuestion, releaseAnswer } from './question-write.ts';
+import { tokenHash } from './report.ts';
 import { acquireDrainLock } from '../drain/lock.ts';
 import {
   findMintedSession,
@@ -355,6 +359,46 @@ export async function drain(ctx: VerbContext, options: DrainOptions = {}): Promi
     },
   });
 
+  /**
+   * Hand a floor question's pick to the reviewer agent (spec flow-multiproject
+   * §7.5): mint the check's token once, under the lock, then start an
+   * independent reviewer session with the brief. A spend never gets here
+   * (`parkedAnswer` refuses it); the session is a fresh one, never the worker's.
+   */
+  const handToReviewer = async (
+    issueId: string,
+    identifier: string,
+    question: RunQuestion
+  ): Promise<void> => {
+    const run = store.read()[issueId];
+    if (run === undefined || personOnly(question)) return;
+    const runtime = (run.runtime ?? 'claude-code') as RuntimeName;
+    const account = await deps.reviewerAccount(runtime);
+    if (account === null) {
+      ctx.warn(`no account may check the pick on ${identifier} now; the next pass tries again`);
+      return;
+    }
+    const token = randomBytes(16).toString('hex');
+    if (!(await claimCheck(store, issueId, question.askedAt, tokenHash(token)))) return;
+    const promptFile = path.join(run.worktreePath, '.dork', 'flow', 'drain', 'question-check.md');
+    mkdirSync(path.dirname(promptFile), { recursive: true });
+    writeFileSync(promptFile, checkBrief(question, identifier, flowCommand, token));
+    const host = await hostFor(account.runtime);
+    await launcher(host).start({
+      role: 'reviewer',
+      runtime: account.runtime,
+      identifier,
+      account: account.path === null ? null : launchAccountFor(account),
+      cwd: run.worktreePath,
+      promptFile,
+      sessionId: randomUUID(),
+      ...(model('review') ? { model: model('review') as string } : {}),
+      permissionMode,
+      title: `${identifier} question check`,
+    });
+    ctx.stderr.write(`flow drain: handed the pick on ${identifier} to the reviewer agent.\n`);
+  };
+
   const deps: PassDeps = {
     store,
     mainCheckout,
@@ -406,38 +450,53 @@ export async function drain(ctx: VerbContext, options: DrainOptions = {}): Promi
         ),
         comments: config.comments,
       });
-      const question = parked.question;
+      // Only the question asked for this park counts (a later park, for review
+      // rounds or failing checks, is nobody's answer), spec flow-multiproject §7.5.
+      const question =
+        parked.question !== undefined && belongsToPark(parked.question, parked.since)
+          ? parked.question
+          : undefined;
       let answer: string | null = reply === null ? null : answerPointer(reply, identifier);
-      const fromQuestion = answer === null ? parkedAnswer(question, ctx.now()) : null;
+      const fromQuestion = answer === null ? parkedAnswer(question, ctx.now(), parked.since) : null;
       if (fromQuestion === 'recorded' && question !== undefined) {
         // `flow answer` recorded it (from DorkOS, or the pick at a deadline).
         answer = recordedAnswerPointer(question, identifier);
       }
       if (fromQuestion === 'take-pick' && question !== undefined) {
-        // Nobody answered by the deadline: the agent's pick stands (spec
-        // flow-multiproject §7.5). Posted as the agent, and recorded, so a
-        // DorkOS deadline arriving later finds it settled and does nothing.
+        // Nobody answered by the deadline: the agent's pick stands. Claimed
+        // under the lock first, so a person's answer or a DorkOS deadline that
+        // got there first wins and this pass posts nothing.
         if (ctx.dryRun) return facts;
-        await adapter.comment(
-          item,
-          signBody(
-            pickComment(question, 'agent-default'),
-            config.identity.marker,
-            sessionProvenance(ctx, undefined)
-          )
-        );
-        const at = ctx.now().toISOString();
-        const settled = {
-          ...question,
-          answer: { text: pickComment(question, 'agent-default'), at, by: 'agent-default' },
-        };
-        await store.updateRun(item.id, (current) =>
-          current.question === undefined ? current : { ...current, question: settled }
-        );
-        answer = recordedAnswerPointer(settled, identifier);
+        const text = pickComment(question, 'agent-default');
+        const recorded = { text, at: ctx.now().toISOString(), by: 'agent-default' };
+        if (await claimAnswer(store, item.id, question.askedAt, recorded)) {
+          try {
+            await adapter.comment(
+              item,
+              signBody(text, config.identity.marker, sessionProvenance(ctx, undefined))
+            );
+          } catch (error) {
+            await releaseAnswer(store, item.id, question.askedAt, recorded);
+            throw error;
+          }
+          answer = recordedAnswerPointer({ ...question, answer: recorded }, identifier);
+        } else {
+          const latest = store.read()[item.id]?.question;
+          if (latest?.answer === undefined || latest.askedAt !== question.askedAt) return facts;
+          answer = recordedAnswerPointer(latest, identifier);
+        }
+      }
+      if (fromQuestion === 'check-pick' && question !== undefined) {
+        // A floor question's wait is over: hand its pick to the reviewer agent
+        // in a session of its own. It stays parked until someone settles it.
+        if (!ctx.dryRun) await handToReviewer(item.id, identifier, question);
+        return facts;
       }
       if (answer === null || ctx.dryRun) return facts;
       await applyAndVerify(adapter, item, projectionFor({ type: 'claim' }, { stages }));
+      // The question is answered and the work resumes on it: clear it, so a
+      // later park never mistakes it for its own.
+      if (question !== undefined) await clearQuestion(store, item.id, question.askedAt);
       return { ...facts, claimed: true, needsInput: false, answer };
     },
     async plan(slots) {

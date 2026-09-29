@@ -90,6 +90,30 @@ export function failingChecks(rollup: unknown): FailingCheck[] {
 }
 
 /**
+ * How many checks in `statusCheckRollup` have not finished: a check run whose
+ * `status` is not `COMPLETED`, or a commit status still `PENDING` or `EXPECTED`.
+ *
+ * @param rollup - The `statusCheckRollup` array from `gh pr view --json`.
+ * @returns The count (0 when the rollup is not a list).
+ */
+export function pendingChecks(rollup: unknown): number {
+  if (!Array.isArray(rollup)) return 0;
+  let pending = 0;
+  for (const entry of rollup) {
+    const check = record(entry);
+    if (check === undefined) continue;
+    const status = str(check.status)?.toUpperCase();
+    const state = str(check.state)?.toUpperCase();
+    if (
+      status !== undefined ? status !== 'COMPLETED' : state === 'PENDING' || state === 'EXPECTED'
+    ) {
+      pending += 1;
+    }
+  }
+  return pending;
+}
+
+/**
  * Parse `gh pr view --json state,autoMergeRequest,statusCheckRollup,headRefOid,baseRefName,mergeable,mergeStateStatus`.
  *
  * @param raw - The parsed JSON.
@@ -113,6 +137,7 @@ export function parsePrView(raw: unknown, queued: boolean, where: string): PrSta
   return {
     state: (state as string).toLowerCase() as PrStatus['state'],
     failing: failingChecks(view.statusCheckRollup),
+    pendingChecks: pendingChecks(view.statusCheckRollup),
     armed: view.autoMergeRequest !== null && view.autoMergeRequest !== undefined,
     queued,
     headSha,

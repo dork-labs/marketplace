@@ -17,6 +17,7 @@ import path from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
 import type { FlowRun } from '../../scripts/flow-run.ts';
+import { formatWhen } from '../../scripts/question.ts';
 import { main, type MainDeps } from '../../scripts/flow.ts';
 import type { WorkItem } from '../../scripts/tracker/types.ts';
 import { createFakeAdapter, type FakeBacklog } from '../fixtures/cli/fake-adapter/adapter.ts';
@@ -315,7 +316,8 @@ describe('flow status', () => {
     const later = new Date(NOW.getTime() + 3_600_000).toISOString();
     flag(later);
     const result = await status([]);
-    expect(result.stdout.split('\n')[0]).toContain(`Paused until ${later}`);
+    // Review finding 11: the end reads in words, the same on every machine.
+    expect(result.stdout.split('\n')[0]).toContain(`Paused until ${formatWhen(later)}`);
     expect((await status(['--json'])).json().paused).toMatchObject({ until: later });
     flag(new Date(NOW.getTime() - 1).toISOString());
     expect((await status(['--json'])).json().paused).toBeNull();

@@ -8,8 +8,8 @@ you until you **reinstall it** (Marketplace → flow → reinstall, or re-run yo
 
 **A pause can now end on its own, and flow is ready for DorkOS to answer its questions for you. Reinstall to get it.**
 
-- `/flow:pause for 1 hour` or `/flow:pause until 9am` ends the pause at that time by itself, even with DorkOS closed. A timed pause leaves your schedules on; each run just stops at its first step until the end. `/flow:status` says "Paused until …".
-- New `flow review` ships finished work at the review gate, or sends it back with a note. Shipping comments on the item, approves the pull request (unless you wrote it) and arms it to merge; sending it back never closes anything.
+- `/flow:pause for 1 hour` or `/flow:pause until 9am` ends the pause at that time by itself, even with DorkOS closed. A timed pause leaves your schedules on; each run just stops at its first step until the end. `/flow:status` says "Paused until …". A pause that switched schedules off has to be resumed before it can be given an end.
+- New `flow review` ships finished work at the review gate, or sends it back with a note. Shipping comments on the item, approves the pull request (unless you wrote it) and arms exactly the commit you approved, refusing if the pull request moved since; sending it back never closes anything.
 - New `flow ask` is how an agent parks a question now: it always offers its own pick and says why, so you can answer with one click. New `flow answer` posts your answer; whoever answers first wins.
 - Each project can now say how much flow does on its own: ask you first, tell you after, or just do it. You choose it in the project's Flow settings in DorkOS once DorkOS ships that page; `flow autonomy` shows what is in force. Until you choose, nothing changes.
 - The safety floor now means "someone always checks", not "only a person answers". You can let the reviewer agent ship work it reviewed clean, or let an agent go with its own pick after a deadline. A decision about secrets or spending always waits for you, and nothing on the floor is ever settled by nobody.

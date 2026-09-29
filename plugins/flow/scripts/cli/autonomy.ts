@@ -131,7 +131,7 @@ function sourceText(read: AutonomyRead): string {
   if (read.state === 'unreadable') {
     return `The copy of this project's settings at ${read.file} could not be read, so flow asks you first about everything.`;
   }
-  return "This project's Flow settings in DorkOS have not been chosen yet, so flow asks you first.";
+  return "This project's Flow settings in DorkOS have not been chosen yet, so flow asks you first, and fixes failing checks on its own as it always has.";
 }
 
 /**
@@ -164,6 +164,7 @@ export async function run(ctx: VerbContext): Promise<VerbResult> {
     source: read.state === 'ok' ? 'copy' : read.state,
     file: read.file,
     questionDeadlineMinutes: minutes,
+    summary: sourceText(read),
   };
 
   if (typeof kindFlag === 'string') {

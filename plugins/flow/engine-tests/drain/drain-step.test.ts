@@ -855,6 +855,41 @@ describe('drainStep: parked runs', () => {
     expect(bare.drain.phase).toBe('working');
   });
 
+  // Review finding 2: at "Retry and fix problems: Ask me first" a red PR parks
+  // for a person; their answer must send the worker to fix the checks, not back
+  // to watching, where the same red checks would park it again forever.
+  it('an answered park on failing checks goes to fixing-ci with the checks and the answer', () => {
+    const failing = [{ name: 'test', url: 'https://ci/1' }];
+    const d = drain('parked', {
+      parkedReason: PARK_REASONS.checksFailed,
+      parkedFrom: 'watching',
+      pr: PR,
+    });
+    const answer = 'the comment by dorian at 2026-09-26T12:05:00.000Z';
+    const out = step(d, {
+      worker: { kind: 'exited', code: 0 },
+      pr: prStatus({ failing }),
+      item: { closed: false, claimed: true, needsInput: false, title: 't', answer },
+    });
+    expect(out.drain).toMatchObject({ phase: 'fixing-ci', parkedReason: null, parkedFrom: null });
+    expect(out.actions).toEqual([
+      {
+        kind: 'send',
+        message: 'ci-red',
+        ctx: { ...BASE, prUrl: PR.url, failing, answer },
+      },
+    ]);
+    expect(render('ci-red', { ...BASE, prUrl: PR.url, failing, answer })).toContain(answer);
+    // Nothing waits on watching: fixing-ci only moves on a push.
+    const next = drainStep(
+      run(out.drain),
+      facts(out.drain, { pr: prStatus({ failing }), worker: { kind: 'busy' } }),
+      { ...CFG, fixFailingChecks: false },
+      NOW
+    );
+    expect(next.run.drain?.phase).toBe('fixing-ci');
+  });
+
   // Who a park waits on (read by the DorkOS panel): every park the reducer
   // decides is flow's own, so it records `other`; only `flow report blocked`
   // records `person` (report-pr.test.ts). Fails if park() stops writing it.

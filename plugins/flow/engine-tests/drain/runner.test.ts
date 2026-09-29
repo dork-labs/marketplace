@@ -949,6 +949,168 @@ describe('flow drain: parked runs', () => {
   }, 120_000);
 });
 
+describe('flow drain: questions with a pick (spec flow-multiproject §7.5)', () => {
+  /** Write the project's autonomy dial where the Flow extension would. */
+  function dial(value: Record<string, unknown>): void {
+    const hash = createHash('sha256').update(realpathSync(project.dir)).digest('hex').slice(0, 12);
+    const file = path.join(dorkHome, 'flow', 'autonomy', `${hash}.json`);
+    mkdirSync(path.dirname(file), { recursive: true });
+    writeFileSync(file, JSON.stringify(value));
+  }
+
+  /** The worker parks a question with its pick. */
+  async function workerAsks(floor?: string) {
+    const run = runOf('ACME-1');
+    const result = await flow(
+      [
+        'ask',
+        'ACME-1',
+        '--question',
+        'Keep the old API?',
+        '--choice',
+        'Keep it',
+        '--choice',
+        'Drop it',
+        '--pick',
+        '1',
+        '--why',
+        'Keeping it is the safer choice.',
+        ...(floor ? ['--floor', floor] : []),
+      ],
+      run.worktreePath
+    );
+    expect(result.code, result.stderr).toBe(0);
+  }
+
+  const acme1 = () => world.tracker.backlog.items.find((i) => i.identifier === 'ACME-1')!;
+  const acmeComments = () => (world.tracker.backlog.comments ?? {})['ACME-1'] ?? [];
+
+  // The chat that ran `flow drain` is recorded on every run it starts, so
+  // DorkOS can show the run in that chat too (fleet contract 4.1.0).
+  it('records the launching chat as dispatchedBy', async () => {
+    supervisorEnv = { CLAUDE_CODE_SESSION_ID: 'launching-chat' };
+    world.tracker = createFakeAdapter({ user: { id: 'agent-1' }, items: [item('ACME-1')] });
+    await tick();
+    expect(runOf('ACME-1').dispatchedBy).toBe('launching-chat');
+  });
+
+  // At Tell me after, nobody answers by the deadline: the drain takes the
+  // agent's pick, posts who decided, resumes the worker with it, and clears
+  // the question so no later park reads it as its own.
+  it('takes the pick at the deadline end to end, then clears the question', async () => {
+    dial({ dial: 'tell', questionDeadlineMinutes: 60 });
+    world.tracker = createFakeAdapter({ user: { id: 'agent-1' }, items: [item('ACME-1')] });
+    await tick();
+    await workerAsks();
+    expect(runOf('ACME-1').question?.decideBy).toBe(new Date(T0 + 60 * 60_000).toISOString());
+    clock = T0 + 30 * 60_000;
+    await tick();
+    expect(drainOf('ACME-1').phase).toBe('parked');
+    clock = T0 + 61 * 60_000;
+    await tick();
+    expect(acmeComments().at(-1)?.body).toContain("(the agent's pick)");
+    expect(drainOf('ACME-1').phase).toBe('working');
+    expect(acme1().labels).not.toContain('agent/needs-input');
+    expect(runOf('ACME-1').question).toBeUndefined();
+    expect(world.log.sends.at(-1)?.text).toContain('your own pick, at the deadline');
+  }, 120_000);
+
+  // Review finding 1 (blocker): an old, answered question must never release a
+  // later park (review rounds, failing checks, a stopped worker).
+  it('keeps a later park parked when an old question was answered', async () => {
+    world.tracker = createFakeAdapter({ user: { id: 'agent-1' }, items: [item('ACME-1')] });
+    await tick();
+    const at = (minutes: number) => new Date(T0 + minutes * 60_000).toISOString();
+    const run = runOf('ACME-1');
+    project.writeRuns({
+      [run.issueId]: {
+        ...run,
+        question: {
+          text: 'Keep the old API?',
+          choices: [
+            { id: 'c1', label: 'Keep it' },
+            { id: 'c2', label: 'Drop it' },
+          ],
+          pick: 'c1',
+          why: 'Safer.',
+          askedAt: at(1),
+          decideBy: null,
+          floor: [],
+          answeredBy: 'person',
+          checkAfter: null,
+          answer: { text: 'Keep it', at: at(2), by: 'person' },
+        },
+        drain: {
+          ...(run.drain as DrainState),
+          phase: 'parked',
+          parkedReason: 'the worker stopped twice without pushing',
+          parkedFrom: 'working',
+          parkedAt: at(5),
+          parkedFor: 'other',
+        },
+      },
+    });
+    acme1().labels = [...acme1().labels.filter((l) => l !== 'agent/claimed'), 'agent/needs-input'];
+    clock = T0 + 6 * 60_000;
+    await tick();
+    expect(drainOf('ACME-1').phase).toBe('parked');
+    expect(acme1().labels).toContain('agent/needs-input');
+  }, 120_000);
+
+  // Review finding 7: a floor question at Tell me after is checked by the
+  // reviewer agent once the person's wait is over, in a session of its own,
+  // once; its approval (with the token from its brief) resumes the work.
+  it('hands a floor question to the reviewer agent after the wait, once', async () => {
+    dial({ dial: 'tell', questionDeadlineMinutes: 60 });
+    world.tracker = createFakeAdapter({ user: { id: 'agent-1' }, items: [item('ACME-1')] });
+    await tick();
+    await workerAsks('outward-facing');
+    expect(runOf('ACME-1').question).toMatchObject({ decideBy: null, floor: ['outward-facing'] });
+    clock = T0 + 61 * 60_000;
+    await tick();
+    const checks = () => world.log.starts.filter((s) => s.req.title === 'ACME-1 question check');
+    expect(checks()).toHaveLength(1);
+    const check = checks()[0];
+    expect(check.req.role).toBe('reviewer');
+    expect(check.req.sessionId).not.toBe(runOf('ACME-1').sessionId);
+    const token = /--token ([0-9a-f]{32})/.exec(readFileSync(check.req.promptFile, 'utf8'))?.[1];
+    expect(token).toBeDefined();
+    expect(runOf('ACME-1').question?.checkTokenHash).toBe(
+      createHash('sha256')
+        .update(token as string)
+        .digest('hex')
+    );
+    expect(drainOf('ACME-1').phase).toBe('parked');
+    clock = T0 + 62 * 60_000;
+    await tick();
+    expect(checks()).toHaveLength(1);
+
+    supervisorEnv = { FLOW_SESSION_ID: 'question-checker' };
+    const approve = await flow(
+      ['answer', 'ACME-1', '--pick', '--by', 'reviewer-agent', '--token', token as string],
+      runOf('ACME-1').worktreePath
+    );
+    expect(approve.code, approve.stderr).toBe(0);
+    supervisorEnv = {};
+    clock = T0 + 63 * 60_000;
+    await tick();
+    expect(drainOf('ACME-1').phase).toBe('working');
+    expect(runOf('ACME-1').question).toBeUndefined();
+  }, 120_000);
+
+  // Never for secrets or spending: that question waits for a person.
+  it('never hands a spend to the reviewer agent', async () => {
+    dial({ dial: 'auto' });
+    world.tracker = createFakeAdapter({ user: { id: 'agent-1' }, items: [item('ACME-1')] });
+    await tick();
+    await workerAsks('secrets-or-spend');
+    clock = T0 + 24 * 60 * 60_000;
+    await tick();
+    expect(world.log.starts.some((s) => s.req.title === 'ACME-1 question check')).toBe(false);
+    expect(drainOf('ACME-1').phase).toBe('parked');
+  }, 120_000);
+});
+
 describe('flow drain: a PR from flow pr is not an early one', () => {
   it('neither parks, disarms nor comments when a pass lands between creating the PR and recording it', async () => {
     // Purpose: flow pr opens the PR, then records it. A pass that gathers in

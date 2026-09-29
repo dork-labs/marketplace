@@ -72,7 +72,9 @@ Never on a scheduled firing: the scheduler repeats ticks itself.
    say the drain will stop after each item.
 3. **Each iteration.** **Pause check.** Run step 0 of
    `<flow-root>/skills/flow-drain/SKILL.md` again. Stop whenever it says to stop; then
-   claim nothing more and keep the sentinel, `active` set to `false`. Otherwise run one
+   claim nothing more and keep the sentinel, `active` set to `false`. A pause with an
+   `until` ends by itself, so delete the sentinel instead and say "paused until <until>;
+   run `/flow auto` after that". Otherwise run one
    tick and write the new `ready` and `shapeable` counts.
 4. End early with `<promise>ABORT</promise>`, cleanly with `<promise>PHASE_COMPLETE:auto</promise>`.
 5. **Stop.** Drained or aborted: delete the sentinel. Never leave a stale one.

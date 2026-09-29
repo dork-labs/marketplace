@@ -254,6 +254,21 @@ describe('writing runs', () => {
     expect(store.read().b.updatedAt).toBe(now);
   });
 
+  // Review finding 11: a write that changes nothing is not a write, so it
+  // leaves updatedAt alone; otherwise a run that is waiting would look busy.
+  it('leaves updatedAt alone on a write that changes nothing', async () => {
+    let now = '2026-09-28T09:00:00.000Z';
+    const store = openFlowStateFile(repo, { now: () => new Date(now) });
+    await store.upsertRun(run('a'));
+    now = '2026-09-28T10:00:00.000Z';
+    expect((await store.updateRun('a', (current) => current)).status).toBe('unchanged');
+    expect((await store.setRunStage('a', 'execute')).status).toBe('unchanged');
+    expect((await store.setRunStatus('a', 'running')).status).toBe('unchanged');
+    const same = store.read().a;
+    expect((await store.upsertRun(same)).status).toBe('unchanged');
+    expect(store.read().a.updatedAt).toBe('2026-09-28T09:00:00.000Z');
+  });
+
   // Purpose: writes take the lock at flow-state.json.lock; reads take none, so
   // a reader is never blocked by a writer.
   it('writes under flow-state.json.lock and reads without it', async () => {

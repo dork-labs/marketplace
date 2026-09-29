@@ -143,6 +143,7 @@ const RunQuestionSchema: z.ZodType<RunQuestion> = z.looseObject({
   pick: z.string(),
   why: z.string(),
   askedAt: z.string(),
+  askedBy: z.string().optional(),
   decideBy: z.string().nullable(),
   floor: z.array(z.string()),
   answeredBy: z.string(),

@@ -25,6 +25,7 @@ import { readFileSync } from 'node:fs';
 import path from 'node:path';
 
 import { findConfigRoots, pauseState } from '../config-files.ts';
+import { formatWhen } from '../question.ts';
 import { withSetupNudge } from './setup-nudge.ts';
 import { PreconditionError } from '../errors.ts';
 import type { FlowRun } from '../flow-run.ts';
@@ -398,7 +399,7 @@ function render(
     const { since, until } = pane.paused;
     sections.push(
       until !== null
-        ? `Paused until ${until}: scheduled ticks, /flow continue and /flow auto stop at their first step until then, and start again on their own after; /flow:resume lifts it sooner.`
+        ? `Paused until ${formatWhen(until)}: scheduled ticks, /flow continue and /flow auto stop at their first step until then, and start again on their own after; /flow:resume lifts it sooner.`
         : `Paused since ${since ?? 'an unknown time'}: scheduled ticks, /flow continue and /flow auto stop at their first step; /flow:resume lifts it.`
     );
   }

@@ -569,6 +569,34 @@ function readopt(
 ): DrainStepResult {
   const item = facts.item;
   if (item.closed || !item.claimed || item.needsInput || run.limit) return { run, actions: [] };
+  const cleared = {
+    parkedReason: null,
+    parkedFrom: null,
+    parkedAt: null,
+    parkedFor: null,
+    nudges: 0,
+  };
+  // A park on failing checks that a person answered: the answer is the go-ahead
+  // to fix them (spec flow-multiproject §7.7, retry at Ask me first). Back to
+  // watching would meet the same red checks and park again forever.
+  if (current.parkedReason === PARK_REASONS.checksFailed && current.pr !== null) {
+    return {
+      run: { ...run, drain: { ...current, ...facts.reports, phase: 'fixing-ci', ...cleared } },
+      actions: [
+        {
+          kind: 'send',
+          message: 'ci-red',
+          ctx: {
+            flow: cfg.flow,
+            identifier: run.identifier,
+            prUrl: current.pr.url,
+            failing: facts.pr?.failing ?? [],
+            ...(item.answer ? { answer: item.answer } : {}),
+          },
+        },
+      ],
+    };
+  }
   const from = current.parkedFrom;
   const phase = from && from !== 'parked' ? from : 'working';
   return {

@@ -91,6 +91,8 @@ export interface MessageContexts {
     failing: FailingCheck[];
     /** `true` when the PR was ejected from the merge queue rather than failing in place. */
     ejected?: boolean;
+    /** Where a person's go-ahead to fix them is, when the run had parked to ask. */
+    answer?: string;
   };
   /** The pull request merged. */
   merged: MessageContextBase & {
@@ -285,8 +287,18 @@ export function render<K extends MessageKind>(kind: K, ctx: MessageContexts[K]):
         c.failing.length === 0
           ? 'No failing check was reported. Open the pull request and read its checks.'
           : ['Failing checks:', ...c.failing.map((f) => `- ${f.name}: ${f.url}`)].join('\n');
+      const answered = c.answer
+        ? [
+            `A person answered before you fix them: ${c.answer}. Read it through the adapter first and follow it.`,
+          ]
+        : [];
       return compose(
-        [lead, checks, 'Read each failing run and fix the cause. ' + pushSteps(ctx, 'fix')],
+        [
+          lead,
+          checks,
+          ...answered,
+          'Read each failing run and fix the cause. ' + pushSteps(ctx, 'fix'),
+        ],
         reportPushed
       );
     }

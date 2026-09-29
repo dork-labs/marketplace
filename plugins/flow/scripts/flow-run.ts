@@ -219,6 +219,11 @@ export interface RunQuestion {
   /** When it asked (ISO). */
   askedAt: string;
   /**
+   * The session that asked, when known. That session may not hand the pick to
+   * the reviewer agent, nor answer as the reviewer agent.
+   */
+  askedBy?: string;
+  /**
    * When the agent goes ahead with its pick if nobody answers (ISO), or `null`
    * when it waits for someone however long it takes.
    */

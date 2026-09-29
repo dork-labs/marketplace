@@ -17,7 +17,12 @@ import { describe, expect, it } from 'vitest';
 
 import type { ProcessOptions, ProcessResult } from '../../scripts/cli/context.ts';
 import { ConfigError, EXIT } from '../../scripts/errors.ts';
-import { createGithubForge, failingChecks, parsePrView } from '../../scripts/forge/github.ts';
+import {
+  createGithubForge,
+  failingChecks,
+  parsePrView,
+  pendingChecks,
+} from '../../scripts/forge/github.ts';
 import { ForgeError, forgeTargetFor } from '../../scripts/forge/types.ts';
 import { parsePrView as parseForConflict } from '../../scripts/forge/github.ts';
 
@@ -322,6 +327,26 @@ describe('the other gh calls', () => {
     );
     expect(own.gh.calls.at(-1)?.args.slice(0, 3)).toEqual(['pr', 'comment', '5']);
     expect(bodies).toEqual(['Shipped from DorkOS.', 'Rename the flag.', 'Fix it.']);
+  });
+
+  // Review finding 11: "the checks passed" needs the running ones counted too;
+  // only a finished check run or a settled commit status is done.
+  it('counts the checks that have not finished', () => {
+    expect(
+      pendingChecks(
+        (fixture('pr-view-open.json') as { statusCheckRollup: unknown }).statusCheckRollup
+      )
+    ).toBe(0);
+    expect(
+      pendingChecks([
+        { __typename: 'CheckRun', status: 'IN_PROGRESS', conclusion: '' },
+        { __typename: 'CheckRun', status: 'QUEUED', conclusion: '' },
+        { __typename: 'CheckRun', status: 'COMPLETED', conclusion: 'SUCCESS' },
+        { __typename: 'StatusContext', state: 'PENDING' },
+        { __typename: 'StatusContext', state: 'SUCCESS' },
+      ])
+    ).toBe(3);
+    expect(pendingChecks(undefined)).toBe(0);
   });
 
   // recentGroupFailures reads failed merge-group runs in the window and their failing jobs.

@@ -206,13 +206,47 @@ export async function run(ctx: VerbContext): Promise<VerbResult> {
           `${identifier} has no clean review recorded with the reviewer's token at the branch head (${short(head)}); the reviewer agent ships only work it checked`
         );
       }
-      if (pr !== null) {
-        const status = await target.forge.prStatus(pr.number);
-        if (status.failing.length > 0) {
+      // Only checks that passed: none failing, none still running, and a PR
+      // whose checks the forge can read at all.
+      if (pr === null) {
+        throw new PreconditionError(
+          `${identifier} has no open PR, so there are no checks the reviewer agent can see pass`
+        );
+      }
+      const status = await target.forge.prStatus(pr.number);
+      if (status.failing.length > 0) {
+        throw new PreconditionError(
+          `${identifier}'s PR has failing checks (${status.failing.map((c) => c.name).join(', ')}), so the reviewer agent does not ship it`
+        );
+      }
+      if (status.pendingChecks !== 0) {
+        throw new PreconditionError(
+          `${identifier}'s PR has checks that have not passed yet${status.pendingChecks === undefined ? '' : ` (${status.pendingChecks} still running)`}, so the reviewer agent waits`
+        );
+      }
+    }
+
+    // What to arm: the commit that was approved, never whatever the head is now.
+    // The reviewer agent approved the head it checked; a drain run's person
+    // approves its reviewed commit; any other run, the head the person names
+    // with --head. A PR whose head moved since is refused before anything is posted.
+    let armAt: string | null = null;
+    const willArm = pr !== null && target.forge !== null && config.gates.review.mergeOnApproval;
+    if (willArm && pr !== null && target.forge !== null) {
+      armAt =
+        by === 'reviewer-agent'
+          ? head
+          : isWritableDrain(existing)
+            ? existing.drain.reviewedSha
+            : (flag(ctx, 'head') ?? null);
+      if (armAt !== null) {
+        const now = (await target.forge.prStatus(pr.number)).headSha;
+        if (!now.toLowerCase().startsWith(armAt.toLowerCase()) && now !== armAt) {
           throw new PreconditionError(
-            `${identifier}'s PR has failing checks (${status.failing.map((c) => c.name).join(', ')}), so the reviewer agent does not ship it`
+            `${identifier}'s PR moved to ${short(now)} since ${short(armAt)} was approved; review the new commits, then ship again`
           );
         }
+        armAt = now;
       }
     }
 
@@ -235,9 +269,8 @@ export async function run(ctx: VerbContext): Promise<VerbResult> {
             body: 'Shipped from DorkOS.',
           });
         }
-        if (config.gates.review.mergeOnApproval) {
-          const status = await target.forge.prStatus(pr.number);
-          await target.forge.arm(pr.number, head ?? status.headSha);
+        if (armAt !== null) {
+          await target.forge.arm(pr.number, armAt);
           armed = true;
         }
       }
@@ -257,7 +290,9 @@ export async function run(ctx: VerbContext): Promise<VerbResult> {
       ? ` Armed PR #${pr?.number} to merge when its checks pass.`
       : pr !== null && !config.gates.review.mergeOnApproval
         ? ` PR #${pr.number} waits for a person to merge it.`
-        : '';
+        : willArm
+          ? ` PR #${pr?.number} was not armed: flow does not know which commit you approved (pass --head <sha>), so a person merges it.`
+          : '';
     return {
       json: {
         ok: true,

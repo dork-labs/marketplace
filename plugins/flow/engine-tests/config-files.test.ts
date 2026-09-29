@@ -41,6 +41,7 @@ import {
   migrateAll,
   migrateConfig,
   pauseFlow,
+  PauseRefused,
   pauseState,
   prepareConfigDirs,
   refusalFor,
@@ -1339,6 +1340,24 @@ describe('pause', () => {
     });
   });
 
+  // Review finding 6: DorkOS schedules an untimed pause switched off come back
+  // only through /flow:resume, so a timed pause over it would end with the
+  // schedules still off. Refuse the end there, and refuse an end together with
+  // switching schedules off; the flag is left as it was.
+  it('refuses an end on a pause that switched schedules off', () => {
+    const repo = makeRepo();
+    const r = roots(repo, makePlugin(path.join(base, 'p')));
+    const now = new Date('2026-09-23T12:00:00.000Z');
+    expect(() => pauseFlow(r, now, ['s1'], '2026-09-23T13:00:00.000Z')).toThrow(PauseRefused);
+    expect(pauseState(r, now)).toBeNull();
+    pauseFlow(r, now, ['s1']);
+    expect(() => pauseFlow(r, now, [], '2026-09-23T13:00:00.000Z')).toThrow(/resume first/);
+    expect(pauseState(r, new Date('2026-09-24T00:00:00.000Z'))).toMatchObject({
+      until: null,
+      hostSchedules: ['s1'],
+    });
+  });
+
   // A pause whose end has passed is over, so pausing again starts a new pause.
   it('starts a new pause over one that has already ended', () => {
     const repo = makeRepo();
@@ -1611,6 +1630,8 @@ describe('config-files CLI', () => {
     expect(run(plugin, repo, ['pause', '--until']).status).toBe(2);
     expect(run(plugin, repo, ['pause', '--until', 'soon']).status).toBe(2);
     expect(run(plugin, repo, ['pause', '--until', '2001-01-01T00:00:00Z']).status).toBe(2);
+    // A time without its zone would be read in this machine's zone: refused.
+    expect(run(plugin, repo, ['pause', '--until', '2999-01-01T09:00:00']).status).toBe(2);
     expect(run(plugin, repo, ['resume', '--until', '2999-01-01T00:00:00Z']).status).toBe(2);
     expect(existsSync(flag)).toBe(false);
     const until = new Date(Date.now() + 3_600_000).toISOString();

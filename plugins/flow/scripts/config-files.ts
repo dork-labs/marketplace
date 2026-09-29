@@ -79,7 +79,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { isDeepStrictEqual } from 'node:util';
 
-import { invokedDirectly, isPlainObject } from './_shared.ts';
+import { hasZone, invokedDirectly, isPlainObject } from './_shared.ts';
 import { addExcludeLines } from './git-exclude.ts';
 import { validateConfig, type ValidationIssue } from './validate-config.ts';
 
@@ -1254,6 +1254,19 @@ function recordedSchedules(value: unknown): string[] {
   return value.hostSchedules.filter((id): id is string => typeof id === 'string' && id !== '');
 }
 
+/**
+ * A pause flow refuses to write: an end time on a pause that switched DorkOS
+ * schedules off. Only `/flow:resume` switches those back on, so the pause would
+ * end with them still off.
+ */
+export class PauseRefused extends Error {
+  /** @param message - Why, and what to do instead. */
+  constructor(message: string) {
+    super(message);
+    this.name = 'PauseRefused';
+  }
+}
+
 /** The pause flag as written: present or not, and what it records, whatever its end time. */
 interface PauseFlag {
   /** The flag file. */
@@ -1342,6 +1355,20 @@ export function pauseFlow(
   until: string | null = null
 ): PauseResult {
   const file = pauseFile(roots);
+  if (until !== null) {
+    const live = readPauseFlag(roots);
+    const switchedOff = [
+      ...hostSchedules,
+      ...(live !== null && !expired(live, now) ? live.hostSchedules : []),
+    ];
+    if (switchedOff.length > 0) {
+      throw new PauseRefused(
+        hostSchedules.length > 0
+          ? 'a pause with an end leaves schedules on: nothing would switch them back on when it ends'
+          : 'this pause switched DorkOS schedules off, and only /flow:resume switches them back on; resume first, then pause with an end'
+      );
+    }
+  }
   keepOutOfGit(roots, path.dirname(file));
   const ignored = !inGitRepo(path.dirname(file)) || gitIgnores(file);
 
@@ -1627,7 +1654,7 @@ export function main(argv: readonly string[]): number {
       return 2;
     }
     const at = Date.parse(until);
-    if (!Number.isFinite(at)) {
+    if (!Number.isFinite(at) || !hasZone(until)) {
       process.stderr.write(
         `config-files: --until must be a time with its zone, e.g. 2026-09-29T09:00:00+02:00, not "${until}"\n`
       );
@@ -1660,7 +1687,14 @@ export function main(argv: readonly string[]): number {
     process.stderr.write(`config-files: adapter: ${result.adapter.reason}\n`);
     output = { result, ok: result.ok };
   } else if (command === 'pause') {
-    const result = pauseFlow(roots, now, hostSchedules, until ?? null);
+    let result: PauseResult;
+    try {
+      result = pauseFlow(roots, now, hostSchedules, until ?? null);
+    } catch (error) {
+      if (!(error instanceof PauseRefused)) throw error;
+      process.stderr.write(`config-files: ${error.message}\n`);
+      return 2;
+    }
     if (!result.ignored) {
       process.stderr.write(
         `config-files: warning — git does not ignore ${result.file}, so the pause could be committed by mistake\n`

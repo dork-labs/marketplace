@@ -38,6 +38,12 @@ export interface PrStatus {
   state: 'open' | 'merged' | 'closed';
   /** Every failing check on the head commit (empty when none fails). */
   failing: FailingCheck[];
+  /**
+   * How many checks on the head commit have not finished, when the forge says;
+   * absent from a forge that cannot tell (then nothing may treat the checks as
+   * passed).
+   */
+  pendingChecks?: number;
   /** Whether auto-merge is armed. */
   armed: boolean;
   /** Whether the PR sits in the merge queue. */

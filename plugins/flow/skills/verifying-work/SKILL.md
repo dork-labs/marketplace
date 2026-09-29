@@ -47,8 +47,9 @@ independent review converges. Run it before the evidence: converging changes the
   `review.rubric` file (default `REVIEW.md`; relative to the repo root, else the
   current folder; absolute as is); the item's description or its `03-tasks.json` task.
   Never your account of what you did.
-- Before each pass, `flow report <id> review-brief --sha <head> --json` and put its
-  `token` in the reviewer's brief only; the reviewer records its verdict with `flow report
+- For a reviewer launched as a session of its own, that session runs `flow report <id>
+  review-brief --sha <head> --json` (flow refuses the session that wrote the code) and keeps
+  its `token`; the reviewer records its verdict with `flow report
   <id> verdict --sha <head> --token <t> --clean` (or `--changes --findings-file <f>`). A
   verdict written any other way does not count.
 - Pool findings from all reviewers: **any blocking finding blocks unless rebutted.**

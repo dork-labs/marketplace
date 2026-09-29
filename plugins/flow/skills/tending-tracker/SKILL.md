@@ -122,7 +122,8 @@ path**: (a) delivered into `<id>`, (b) fresh session, (c) handled here, origin o
 - **Who answers** is `flow ask`'s `answeredBy`: the person; the agent's pick once
   `decideBy` passes (the inbox pass runs `flow answer <id> --pick --by agent-default`,
   then resumes); or, for a floor question once `checkAfter` passes, the reviewer agent
-  (`flow ask <id> --check-pick`, handed to an independent reviewer with its brief). A
+  (`flow ask <id> --check-pick` from a session other than the asker's, handed to an
+  independent reviewer with its brief). A
   question about secrets or spending always waits for a person.
 - **Stuck means stop and ask, never guess.** Walk the calibration ladder; a
   `stop-and-ask` (a floor row, sticky and not confident, or the ambiguous middle routed to `ask`) is the

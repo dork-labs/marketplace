@@ -49,6 +49,7 @@ import {
   writeDrain,
   type DrainRun,
 } from './drain-run.ts';
+import { requireOtherSession } from './caller.ts';
 import { signBody, unsignedBody } from './provenance.ts';
 import { applyAndVerify, sessionProvenance, setupWrite } from './work-write.ts';
 
@@ -328,6 +329,8 @@ async function reviewBrief(ctx: VerbContext, identifier: string): Promise<VerbRe
   onlyFlags(ctx, 'review-brief', ['sha']);
   const store = openFlowStateFile(ctx.projectDir, { now: ctx.now });
   const run = findReviewRun(store, identifier);
+  // The code's author does not mint the token its own reviewer uses.
+  requireOtherSession(ctx, [run.sessionId], 'start the review of its own work');
   const sha = await resolveSha(ctx, run);
   const token = randomBytes(16).toString('hex');
   const written = await store.updateRun(run.issueId, (current) => ({

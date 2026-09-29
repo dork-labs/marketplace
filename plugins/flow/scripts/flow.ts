@@ -549,6 +549,13 @@ export const VERBS: readonly VerbDefinition[] = [
         value: 'person|reviewer-agent',
         description: 'Who approves. Default person.',
       },
+      {
+        name: 'head',
+        kind: 'string',
+        value: 'sha',
+        description:
+          'With --approve by a person: the commit you approved. The PR is armed only at it, and refused if it moved.',
+      },
       { name: 'changes', kind: 'boolean', description: 'Send it back.' },
       { name: 'note', kind: 'string', value: 'text', description: 'What should change.' },
       {

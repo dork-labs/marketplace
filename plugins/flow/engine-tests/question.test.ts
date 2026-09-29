@@ -18,6 +18,8 @@ import {
 } from '../scripts/question.ts';
 
 const NOW = new Date('2026-09-28T12:00:00.000Z');
+/** When the park the test questions belong to began: when they were asked. */
+const SINCE = NOW.toISOString();
 
 const ok = {
   text: 'Should the old API keep working?',
@@ -119,15 +121,70 @@ describe('parkedAnswer', () => {
   // when flow posts through the agent's own account), and takes a due pick.
   it('resumes on a recorded answer, takes a due pick, and otherwise waits', () => {
     const later = new Date('2026-09-28T18:00:00.000Z');
-    expect(parkedAnswer(undefined, later)).toBeNull();
-    expect(parkedAnswer(question(), NOW)).toBeNull();
-    expect(parkedAnswer(question(), later)).toBe('take-pick');
-    expect(parkedAnswer(question({ floor: ['scope-change'] }), later)).toBeNull();
+    expect(parkedAnswer(undefined, later, SINCE)).toBeNull();
+    expect(parkedAnswer(question(), NOW, SINCE)).toBeNull();
+    expect(parkedAnswer(question(), later, SINCE)).toBe('take-pick');
+    expect(parkedAnswer(question({ floor: ['scope-change'] }), later, SINCE)).toBeNull();
     expect(
       parkedAnswer(
         question({ answer: { text: 'Drop it', at: NOW.toISOString(), by: 'person' } }),
-        NOW
+        NOW,
+        SINCE
       )
     ).toBe('recorded');
+  });
+});
+
+describe('review fixes (DOR-2528 FIX-FIRST)', () => {
+  const answered = (at: string) => question({ answer: { text: 'Drop it', at, by: 'person' } });
+
+  // Finding 1: an old question's answer must never release a later park. The
+  // question belongs to the park only when it was asked at or after the park
+  // began; a later park (review rounds, failing checks) is nobody's answer.
+  it('releases only the park the question was asked for', () => {
+    const later = '2026-09-28T13:00:00.000Z';
+    expect(parkedAnswer(answered('2026-09-28T12:30:00.000Z'), NOW, later)).toBeNull();
+    expect(parkedAnswer(question(), new Date('2026-09-29T00:00:00.000Z'), later)).toBeNull();
+    expect(parkedAnswer(answered('2026-09-28T12:30:00.000Z'), NOW, NOW.toISOString())).toBe(
+      'recorded'
+    );
+    // An answer recorded before the question was asked answers something else.
+    expect(parkedAnswer(answered('2026-09-28T11:00:00.000Z'), NOW, NOW.toISOString())).toBeNull();
+  });
+
+  // Finding 9: at Tell me after a floor question is checked by the reviewer
+  // agent after the wait; the comment must say so, not "until you answer".
+  it('tells a floor question at Tell me after that the reviewer agent checks it after the wait', () => {
+    const text = questionComment(
+      question({
+        decideBy: null,
+        floor: ['outward-facing'],
+        answeredBy: 'person',
+        checkAfter: '2026-09-28T16:00:00.000Z',
+      })
+    );
+    expect(text).toContain('the reviewer agent checks my pick after Sep 28, 16:00 UTC');
+    expect(text).not.toContain('until you answer');
+  });
+
+  // Finding 7: the drain hands a due floor question to the reviewer agent, once,
+  // and never one about secrets or spending.
+  it('hands a due floor question to the reviewer agent, never a spend', () => {
+    const floorQ = question({
+      decideBy: null,
+      floor: ['outward-facing'],
+      checkAfter: '2026-09-28T13:00:00.000Z',
+    });
+    const at = new Date('2026-09-28T14:00:00.000Z');
+    expect(parkedAnswer(floorQ, at, NOW.toISOString())).toBe('check-pick');
+    expect(parkedAnswer(floorQ, NOW, NOW.toISOString())).toBeNull();
+    expect(parkedAnswer({ ...floorQ, checkTokenHash: 'h' }, at, NOW.toISOString())).toBeNull();
+    expect(
+      parkedAnswer(
+        { ...floorQ, floor: ['outward-facing', 'secrets-or-spend'] },
+        at,
+        NOW.toISOString()
+      )
+    ).toBeNull();
   });
 });

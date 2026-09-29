@@ -32,8 +32,8 @@
     "target": 106
   },
   "commands/pause.md": {
-    "baseline": 320,
-    "target": 320
+    "baseline": 339,
+    "target": 339
   },
   "commands/resume.md": {
     "baseline": 201,
@@ -76,8 +76,8 @@
     "target": 1288
   },
   "docs/driving-it-manually.mdx": {
-    "baseline": 2214,
-    "target": 2214
+    "baseline": 2228,
+    "target": 2228
   },
   "docs/how-it-works.mdx": {
     "baseline": 3116,
@@ -168,8 +168,8 @@
     "target": 982
   },
   "skills/flow-drain/SKILL.md": {
-    "baseline": 663,
-    "target": 663
+    "baseline": 686,
+    "target": 686
   },
   "skills/flow-groom/SKILL.md": {
     "baseline": 165,
@@ -204,15 +204,15 @@
     "target": 361
   },
   "skills/tending-tracker/SKILL.md": {
-    "baseline": 1264,
-    "target": 1264
+    "baseline": 1271,
+    "target": 1271
   },
   "skills/triaging-work/SKILL.md": {
     "baseline": 1139,
     "target": 1139
   },
   "skills/verifying-work/SKILL.md": {
-    "baseline": 1191,
-    "target": 1191
+    "baseline": 1204,
+    "target": 1204
   }
 }

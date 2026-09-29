@@ -58,7 +58,9 @@ function dial(value: Record<string, unknown>): void {
 }
 
 /** A fake forge recording its calls; `head` is the branch's head on origin. */
-function fakeForge(opts: { head?: string | null; pr?: boolean; failing?: string[] } = {}) {
+function fakeForge(
+  opts: { head?: string | null; pr?: boolean; failing?: string[]; pending?: number } = {}
+) {
   const calls: { method: string; arg?: unknown }[] = [];
   const forge: Forge = {
     repo: 'acme/app',
@@ -78,6 +80,7 @@ function fakeForge(opts: { head?: string | null; pr?: boolean; failing?: string[
       return {
         state: 'open',
         failing: (opts.failing ?? []).map((name) => ({ name, url: null })),
+        pendingChecks: opts.pending ?? 0,
         armed: false,
         queued: false,
         headSha: opts.head ?? 'feedface',
@@ -112,7 +115,12 @@ const runner: ProcessRunner = async (cmd, args, opts) => {
 /** Run `flow <argv> --json` in the project. */
 async function flow(
   argv: string[],
-  options: { forge?: ReturnType<typeof fakeForge>; tracker?: FakeTracker; now?: string } = {}
+  options: {
+    forge?: ReturnType<typeof fakeForge>;
+    tracker?: FakeTracker;
+    now?: string;
+    clock?: () => Date;
+  } = {}
 ) {
   const forge = options.forge ?? fakeForge();
   const tracker = options.tracker ?? createFakeAdapter({ items: [] });
@@ -121,7 +129,7 @@ async function flow(
   const code = await main([...argv, '--json'], {
     env: { FLOW_SESSION_ID: 'session-abcdef123456', CLAUDECODE: '1', DORK_HOME: dorkHome },
     cwd: project.dir,
-    now: () => new Date(options.now ?? NOW),
+    now: options.clock ?? (() => new Date(options.now ?? NOW)),
     stdout: { write: (c: string) => (out += c) },
     stderr: { write: (c: string) => (err += c) },
     createAdapter: async () => tracker.adapter,
@@ -212,7 +220,7 @@ describe('flow review --approve by a person', () => {
   it('comments, approves the PR and arms it, and closes nothing', async () => {
     writeRun();
     const tracker = createFakeAdapter({ items: [started()] });
-    const result = await flow(['review', 'ACME-12', '--approve'], {
+    const result = await flow(['review', 'ACME-12', '--approve', '--head', 'abc1234def'], {
       tracker,
       forge: fakeForge({ head: 'abc1234def' }),
     });
@@ -394,7 +402,15 @@ describe('flow report review-brief and verdict for VERIFY', () => {
   it('records a token-bound verdict and refuses a wrong token or another commit', async () => {
     const head = git('rev-parse', 'HEAD');
     writeRun({ stage: 'verify', status: 'running' });
-    const brief = await flow(['report', 'ACME-12', 'review-brief', '--sha', 'HEAD']);
+    const brief = await flow([
+      'report',
+      'ACME-12',
+      'review-brief',
+      '--sha',
+      'HEAD',
+      '--session',
+      'verify-orchestrator',
+    ]);
     expect(brief.code).toBe(EXIT.ok);
     const token = brief.json.token as string;
     expect(stored().review).toMatchObject({ sha: head, verdict: null });
@@ -642,14 +658,28 @@ describe('flow answer', () => {
       (await flow(['answer', 'ACME-12', '--pick', '--by', 'agent-default'], { tracker, now: late }))
         .code
     ).toBe(EXIT.precondition);
-    expect((await flow(['ask', 'ACME-12', '--check-pick'], { tracker })).code).toBe(
-      EXIT.precondition
-    );
-    const check = await flow(['ask', 'ACME-12', '--check-pick'], { tracker, now: late });
+    // Before the wait is over, even an independent session cannot check it.
+    expect(
+      (await flow(['ask', 'ACME-12', '--check-pick', '--session', 'reviewer-1'], { tracker })).code
+    ).toBe(EXIT.precondition);
+    const check = await flow(['ask', 'ACME-12', '--check-pick', '--session', 'reviewer-1'], {
+      tracker,
+      now: late,
+    });
     expect(check.code).toBe(EXIT.ok);
     const token = check.json.token as string;
     const wrong = await flow(
-      ['answer', 'ACME-12', '--pick', '--by', 'reviewer-agent', '--token', 'x'],
+      [
+        'answer',
+        'ACME-12',
+        '--pick',
+        '--by',
+        'reviewer-agent',
+        '--token',
+        'x',
+        '--session',
+        'reviewer-1',
+      ],
       {
         tracker,
         now: late,
@@ -657,7 +687,17 @@ describe('flow answer', () => {
     );
     expect(wrong.code).toBe(EXIT.precondition);
     const right = await flow(
-      ['answer', 'ACME-12', '--pick', '--by', 'reviewer-agent', '--token', token],
+      [
+        'answer',
+        'ACME-12',
+        '--pick',
+        '--by',
+        'reviewer-agent',
+        '--token',
+        token,
+        '--session',
+        'reviewer-1',
+      ],
       {
         tracker,
         now: late,
@@ -683,6 +723,8 @@ describe('flow autonomy', () => {
         retry: { stop: 'tell' },
       },
     });
+    // Review finding 11: the summary says what really happens with no dial chosen.
+    expect(result.json.summary).toContain('fixes failing checks on its own');
   });
 
   // Purpose: VERIFY asks `--kind ship` to learn whether the reviewer agent may
@@ -698,5 +740,308 @@ describe('flow autonomy', () => {
     });
     expect((await flow(['autonomy', '--kind', 'everything'])).code).toBe(EXIT.usage);
     expect(existsSync(autonomyCopyPath(dorkHome, canonicalProjectRoot(project.dir)))).toBe(true);
+  });
+});
+
+describe('review fixes (DOR-2528 FIX-FIRST)', () => {
+  const parkedItem = () => started(['type/task', 'agent/claimed', 'agent/needs-input']);
+  const TOKEN = '0123456789abcdef0123456789abcdef';
+  const floorQuestion = (overrides: Record<string, unknown> = {}) => ({
+    text: 'Publish the post?',
+    choices: [
+      { id: 'c1', label: 'Publish' },
+      { id: 'c2', label: 'Hold' },
+    ],
+    pick: 'c1',
+    why: 'Safer.',
+    askedAt: '2026-09-26T11:00:00.000Z',
+    askedBy: 'worker-session',
+    decideBy: null,
+    floor: ['outward-facing'],
+    answeredBy: 'person',
+    checkAfter: '2026-09-26T11:30:00.000Z',
+    ...overrides,
+  });
+
+  // Finding 3: a question about secrets or spending is a person's alone, read
+  // from its triggers, whatever the stored fields claim: no check is handed
+  // out and no pick is taken, even with a token planted by hand.
+  it('refuses every pick path on a spend, whatever the record says', async () => {
+    const { createHash } = await import('node:crypto');
+    writeRun({
+      stage: 'execute',
+      status: 'running',
+      question: floorQuestion({
+        floor: ['secrets-or-spend'],
+        answeredBy: 'reviewer-agent',
+        decideBy: '2026-09-26T11:30:00.000Z',
+        checkTokenHash: createHash('sha256').update(TOKEN).digest('hex'),
+      }),
+    });
+    const tracker = createFakeAdapter({ items: [parkedItem()] });
+    const as = ['--session', 'reviewer-1'];
+    expect((await flow(['ask', 'ACME-12', '--check-pick', ...as], { tracker })).code).toBe(
+      EXIT.precondition
+    );
+    expect(
+      (
+        await flow(
+          ['answer', 'ACME-12', '--pick', '--by', 'reviewer-agent', '--token', TOKEN, ...as],
+          { tracker }
+        )
+      ).code
+    ).toBe(EXIT.precondition);
+    expect(
+      (await flow(['answer', 'ACME-12', '--pick', '--by', 'agent-default', ...as], { tracker }))
+        .code
+    ).toBe(EXIT.precondition);
+    expect(comments(tracker)).toEqual([]);
+  });
+
+  // Finding 3: the session that asked (or did the work) cannot hand its own
+  // pick to the reviewer agent, nor answer as the reviewer agent.
+  it('refuses a check or a reviewer answer from the asking session', async () => {
+    writeRun({ stage: 'execute', status: 'running', question: floorQuestion() });
+    const tracker = createFakeAdapter({ items: [parkedItem()] });
+    expect(
+      (await flow(['ask', 'ACME-12', '--check-pick', '--session', 'worker-session'], { tracker }))
+        .code
+    ).toBe(EXIT.precondition);
+    expect((await flow(['ask', 'ACME-12', '--check-pick'], { tracker })).code).toBe(
+      EXIT.precondition
+    );
+    const check = await flow(['ask', 'ACME-12', '--check-pick', '--session', 'reviewer-1'], {
+      tracker,
+    });
+    expect(check.code).toBe(EXIT.ok);
+    const self = await flow(
+      [
+        'answer',
+        'ACME-12',
+        '--pick',
+        '--by',
+        'reviewer-agent',
+        '--token',
+        check.json.token as string,
+        '--session',
+        'worker-session',
+      ],
+      { tracker }
+    );
+    expect(self.code).toBe(EXIT.precondition);
+    expect(stored().question?.answer).toBeUndefined();
+  });
+
+  // Finding 3: VERIFY's token is minted by a session other than the one that
+  // wrote the code.
+  it("refuses a review brief from the run's own session", async () => {
+    writeRun({ stage: 'verify', status: 'running' });
+    const own = await flow(['report', 'ACME-12', 'review-brief', '--sha', 'HEAD']);
+    expect(own.code).toBe(EXIT.precondition);
+    expect(stored().review).toBeUndefined();
+  });
+
+  // Finding 5: two paths settling one question: the second must lose and post
+  // nothing. Here the DorkOS deadline records the pick between this answer's
+  // read and its write.
+  it('loses cleanly when another path answers first', async () => {
+    writeRun({
+      stage: 'execute',
+      status: 'running',
+      question: floorQuestion({
+        floor: [],
+        checkAfter: null,
+        decideBy: '2026-09-26T15:00:00.000Z',
+      }),
+    });
+    const tracker = createFakeAdapter({ items: [parkedItem()] });
+    let read = false;
+    const getItem = tracker.adapter.getItem.bind(tracker.adapter);
+    tracker.adapter.getItem = async (...args: Parameters<typeof getItem>) => {
+      read = true;
+      return getItem(...args);
+    };
+    let raced = false;
+    const clock = () => {
+      if (read && !raced) {
+        raced = true;
+        const run = stored();
+        project.writeRuns({
+          'id-ACME-12': {
+            ...run,
+            question: {
+              ...run.question!,
+              answer: { text: 'Keep it', at: NOW, by: 'agent-default' },
+            },
+          },
+        });
+      }
+      return new Date(NOW);
+    };
+    const result = await flow(['answer', 'ACME-12', '--text', 'Hold it.'], { tracker, clock });
+    expect(result.code).toBe(EXIT.precondition);
+    expect(comments(tracker)).toEqual([]);
+    expect(stored().question?.answer?.by).toBe('agent-default');
+  });
+
+  // Finding 10: the floor the deadline was promised on is the one the pick is
+  // judged by. A trigger the project took off its floor gets a deadline, and
+  // the pick then stands at it.
+  it('judges the pick by the same floor that set the deadline', async () => {
+    project.config({
+      tracker: 'fake',
+      identity: { agent: 'agent-1' },
+      involvement: { calibration: { alwaysAsk: ['scope-change'] } },
+    });
+    dial({ dial: 'tell', questionDeadlineMinutes: 60 });
+    writeRun({ stage: 'execute', status: 'running' });
+    const tracker = createFakeAdapter({ items: [started()] });
+    const ask = await flow(
+      [
+        'ask',
+        'ACME-12',
+        '--question',
+        'Rename it?',
+        '--choice',
+        'Yes',
+        '--choice',
+        'No',
+        '--pick',
+        '1',
+        '--why',
+        'Clearer.',
+        '--floor',
+        'outward-facing',
+      ],
+      { tracker }
+    );
+    expect(ask.code).toBe(EXIT.ok);
+    expect(stored().question).toMatchObject({ floor: [], decideBy: '2026-09-26T13:00:00.000Z' });
+    const pick = await flow(['answer', 'ACME-12', '--pick', '--by', 'agent-default'], {
+      tracker,
+      now: '2026-09-26T13:00:00.000Z',
+    });
+    expect(pick.code).toBe(EXIT.ok);
+  });
+
+  // Finding 11: with no run, nothing keeps a deadline, so none is promised;
+  // and a deadline without its zone is refused.
+  it('promises no deadline without a run, and wants a zone on --decide-by', async () => {
+    dial({ dial: 'tell' });
+    const tracker = createFakeAdapter({ items: [started()] });
+    const ask = [
+      'ask',
+      'ACME-12',
+      '--question',
+      'Rename it?',
+      '--choice',
+      'Yes',
+      '--choice',
+      'No',
+      '--pick',
+      '1',
+      '--why',
+      'Clearer.',
+    ];
+    const result = await flow(ask, { tracker });
+    expect(result.code).toBe(EXIT.ok);
+    expect(result.json).toMatchObject({ answeredBy: 'person', answeredByAtDeadline: null });
+    expect(comments(tracker)[0]).toContain("I won't go ahead until you answer.");
+    writeRun({ stage: 'execute', status: 'running' });
+    const noZone = await flow([...ask, '--decide-by', '2026-09-26T15:00:00'], {
+      tracker: createFakeAdapter({ items: [started()] }),
+    });
+    expect(noZone.code).toBe(EXIT.usage);
+  });
+
+  // Finding 4: a person ships the commit they saw. A drain run arms the
+  // reviewed commit; any other run arms the head the person names with
+  // --head, and a head that moved since is refused.
+  it('arms only the commit the person approved', async () => {
+    writeRun({
+      stage: 'verify',
+      drain: drain({
+        phase: 'watching',
+        pushedSha: 'abc1234def',
+        verdict: 'clean',
+        reviewedSha: 'abc1234def',
+      }),
+    });
+    const drained = await flow(['review', 'ACME-12', '--approve'], {
+      tracker: createFakeAdapter({ items: [started()] }),
+      forge: fakeForge({ head: 'abc1234def' }),
+    });
+    expect(drained.code).toBe(EXIT.ok);
+    expect(drained.forge.calls).toContainEqual({ method: 'arm', arg: [7, 'abc1234def'] });
+    const drainMoved = await flow(['review', 'ACME-12', '--approve'], {
+      tracker: createFakeAdapter({ items: [started()] }),
+      forge: fakeForge({ head: 'feed999' }),
+    });
+    expect(drainMoved.code).toBe(EXIT.precondition);
+    expect(drainMoved.forge.calls.some((call) => call.method === 'arm')).toBe(false);
+
+    writeRun();
+    const moved = await flow(['review', 'ACME-12', '--approve', '--head', 'abc1234def'], {
+      tracker: createFakeAdapter({ items: [started()] }),
+      forge: fakeForge({ head: 'feed999' }),
+    });
+    expect(moved.code).toBe(EXIT.precondition);
+    expect(moved.forge.calls.some((call) => call.method === 'arm')).toBe(false);
+
+    const unknown = await flow(['review', 'ACME-12', '--approve'], {
+      tracker: createFakeAdapter({ items: [started()] }),
+      forge: fakeForge({ head: 'feed999' }),
+    });
+    expect(unknown.code).toBe(EXIT.ok);
+    expect(unknown.json.armed).toBe(false);
+    expect(unknown.forge.calls.some((call) => call.method === 'arm')).toBe(false);
+  });
+
+  // Finding 11: the reviewer agent ships only when the checks passed: not
+  // while any still runs, and not without a PR whose checks it can read.
+  it('lets the reviewer agent ship only past passed checks', async () => {
+    dial({ dial: 'auto' });
+    const clean = {
+      tokenHash: 'h',
+      sha: 'abc1234def',
+      verdict: 'clean' as const,
+      reviewedSha: 'abc1234def',
+    };
+    writeRun({ review: clean });
+    const pending = await flow(['review', 'ACME-12', '--approve', '--by', 'reviewer-agent'], {
+      tracker: createFakeAdapter({ items: [started()] }),
+      forge: fakeForge({ head: 'abc1234def', pending: 1 }),
+    });
+    expect(pending.code).toBe(EXIT.precondition);
+    const noPr = await flow(['review', 'ACME-12', '--approve', '--by', 'reviewer-agent'], {
+      tracker: createFakeAdapter({ items: [started()] }),
+      forge: fakeForge({ head: 'abc1234def', pr: false }),
+    });
+    expect(noPr.code).toBe(EXIT.precondition);
+  });
+
+  // The review.approved journal line records who shipped it.
+  it('journals a reviewer agent approval as review.approved', async () => {
+    dial({ dial: 'auto' });
+    writeRun({
+      review: { tokenHash: 'h', sha: 'abc1234def', verdict: 'clean', reviewedSha: 'abc1234def' },
+    });
+    const result = await flow(['review', 'ACME-12', '--approve', '--by', 'reviewer-agent'], {
+      tracker: createFakeAdapter({ items: [started()] }),
+      forge: fakeForge({ head: 'abc1234def' }),
+    });
+    expect(result.code).toBe(EXIT.ok);
+    const journal = readFileSync(path.join(project.dir, '.dork', 'flow', 'journal.jsonl'), 'utf8')
+      .trim()
+      .split('\n')
+      .map((line) => JSON.parse(line) as Record<string, unknown>);
+    expect(journal).toContainEqual(
+      expect.objectContaining({
+        kind: 'review.approved',
+        by: 'reviewer-agent',
+        sha7: 'abc1234',
+        item: 'ACME-12',
+      })
+    );
   });
 });

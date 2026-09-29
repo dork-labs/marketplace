@@ -27,12 +27,23 @@
  */
 
 import { randomBytes } from 'node:crypto';
+import path from 'node:path';
 
 import { stopInForce } from '../autonomy.ts';
 import { whoAnswers, type FloorTrigger } from '../calibration.ts';
 import { PreconditionError, UsageError } from '../errors.ts';
 import type { FlowRun, RunQuestion } from '../flow-run.ts';
-import { choicesOf, formatWhen, pickOf, questionComment, questionProblem } from '../question.ts';
+import {
+  checkBrief,
+  choicesOf,
+  formatWhen,
+  personOnly,
+  pickOf,
+  questionComment,
+  questionProblem,
+} from '../question.ts';
+import { requireOtherSession, callerSessions } from './caller.ts';
+import { claimCheck } from './question-write.ts';
 import { AGENT_NEEDS_INPUT, projectionFor } from '../work-state.ts';
 import type { VerbContext, VerbResult } from './context.ts';
 import { isWritableDrain } from './drain-run.ts';
@@ -93,6 +104,14 @@ async function checkPick(ctx: VerbContext, identifier: string): Promise<VerbResu
   if (run === undefined || question === undefined) {
     throw new PreconditionError(`${identifier} has no open question to check`);
   }
+  // Read from the triggers, not the stored who-answers fields, so a record
+  // edited by hand cannot hand a spend to the reviewer agent.
+  if (personOnly(question)) {
+    throw new PreconditionError(
+      `${identifier}'s question is about secrets or spending, so only a person answers it`
+    );
+  }
+  requireOtherSession(ctx, [question.askedBy, run.sessionId], 'check the pick of its own question');
   if (question.answer !== undefined || !item.labels.includes(AGENT_NEEDS_INPUT)) {
     throw new PreconditionError(`${identifier}'s question was already answered`);
   }
@@ -107,28 +126,13 @@ async function checkPick(ctx: VerbContext, identifier: string): Promise<VerbResu
     );
   }
   const token = randomBytes(16).toString('hex');
-  if (!ctx.dryRun) {
-    const written = await store.updateRun(run.issueId, (current) =>
-      current.question === undefined
-        ? current
-        : { ...current, question: { ...current.question, checkTokenHash: tokenHash(token) } }
+  if (!ctx.dryRun && !(await claimCheck(store, run.issueId, question.askedAt, tokenHash(token)))) {
+    throw new PreconditionError(
+      `${identifier}'s pick was already handed to the reviewer agent, or the question was answered`
     );
-    requireStored(written.status, store.path, `run "flow ask ${identifier} --check-pick" again`);
   }
-  const pick = pickOf(question);
-  const brief = [
-    `Check an agent's pick on ${identifier} before it goes ahead.`,
-    '',
-    `Question: ${question.text}`,
-    ...question.choices.map(
-      (choice, i) => `${i + 1}. ${choice.label}${choice.id === question.pick ? ' (its pick)' : ''}`
-    ),
-    `Why it picked "${pick?.label ?? question.pick}": ${question.why}`,
-    `It is on the floor because it is ${question.floor.join(' and ')}.`,
-    '',
-    `If the pick is sound, approve it: flow answer ${identifier} --pick --by reviewer-agent --token ${token}`,
-    'If you have any doubt, do nothing: the question waits for a person.',
-  ].join('\n');
+  const flow = `node --experimental-strip-types ${path.join(ctx.flowRoot, 'scripts', 'flow.ts')}`;
+  const brief = checkBrief(question, identifier, flow, token);
   return {
     json: { ok: true, identifier, checkPick: true, token, brief, question: { ...question } },
     text: brief,
@@ -171,8 +175,21 @@ export async function run(ctx: VerbContext): Promise<VerbResult> {
   const read = loaded.autonomy;
   const stop = read === null ? 'ask' : stopInForce(read, 'questions');
   const alwaysAsk = new Set<string>(config.involvement.calibration.alwaysAsk);
+  // The floor as the project's calibration defines it, stored as such, so the
+  // deadline promised here and the one `pickIsDue` honours agree. A spend
+  // stays on the record whatever alwaysAsk says: only a person answers it.
+  const effectiveFloor = floorTriggers.filter(
+    (trigger) => alwaysAsk.has(trigger) || trigger === 'secrets-or-spend'
+  );
   const floor = floorTriggers.some((trigger) => alwaysAsk.has(trigger));
-  const who = whoAnswers(floor, floorTriggers, stop);
+  const item = await adapter.getItem(identifier, { comments: RECENT_COMMENTS });
+  const existing: FlowRun | undefined = runFor(store, item);
+  // With no run on this machine nothing would keep a deadline or hand out a
+  // check, so the question promises neither: it waits for a person.
+  const who =
+    existing === undefined
+      ? ({ answeredBy: 'person', answeredByAtDeadline: null } as const)
+      : whoAnswers(floor, floorTriggers, stop);
   if (who.answeredBy === 'agent-default') {
     throw new PreconditionError(
       "this project's settings let the agent go ahead with its own pick (Agent questions: Just do it); go ahead and write down why instead of asking"
@@ -181,9 +198,11 @@ export async function run(ctx: VerbContext): Promise<VerbResult> {
   const deadlineApplies = who.answeredByAtDeadline === 'agent-default';
   if (decideByFlag !== null && !deadlineApplies) {
     throw new UsageError(
-      floor
-        ? 'a floor question has no deadline: someone must check it, so leave out --decide-by'
-        : "this project's settings wait for a person to answer (Agent questions: Ask me first), so leave out --decide-by"
+      existing === undefined
+        ? `${identifier} has no run on this machine, so nothing would keep a deadline; leave out --decide-by`
+        : floor
+          ? 'a floor question has no deadline: someone must check it, so leave out --decide-by'
+          : "this project's settings wait for a person to answer (Agent questions: Ask me first), so leave out --decide-by"
     );
   }
   const minutes = read?.state === 'ok' ? read.copy.questionDeadlineMinutes : null;
@@ -203,14 +222,13 @@ export async function run(ctx: VerbContext): Promise<VerbResult> {
     pick: choices[pickNumber - 1].id,
     why: why.trim(),
     askedAt: now.toISOString(),
+    ...(callerSessions(ctx)[0] === undefined ? {} : { askedBy: callerSessions(ctx)[0] }),
     decideBy,
-    floor: floorTriggers,
+    floor: effectiveFloor,
     answeredBy: who.answeredBy,
     checkAfter,
   };
 
-  const item = await adapter.getItem(identifier, { comments: RECENT_COMMENTS });
-  const existing: FlowRun | undefined = runFor(store, item);
   const body = signBody(
     questionComment(question),
     config.identity.marker,
