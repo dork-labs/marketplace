@@ -13,6 +13,7 @@ import path from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import {
   buildCapacity,
+  fileMarks,
   journalEnabled,
   parseSince,
   readJournalWeek,
@@ -22,6 +23,7 @@ import {
 } from '../lib/capacity.ts';
 import type { AccountUsage } from '../lib/host-types.ts';
 import { createFlowExtension } from '../server.ts';
+import { append } from '../../../../scripts/journal.ts';
 import { SUMMARIES, fakeCtx, fakeRouter, makeWorld, type World } from './fixtures.ts';
 
 let world: World;
@@ -60,7 +62,7 @@ describe('the week', () => {
 });
 
 describe('sumJournal', () => {
-  it('adds each stage’s start-to-end time inside the week, and nothing for one still running', () => {
+  it('honours an end line, clips to the week, and counts a stage still open up to now', () => {
     const week = sumJournal(
       [
         // Started before the week: only the part inside it counts (1h).
@@ -93,7 +95,7 @@ describe('sumJournal', () => {
           stage: 'verify',
           phase: 'end',
         }),
-        // Still running: nothing.
+        // Still open: up to now (1h).
         line({
           ts: '2026-09-30T11:00:00.000Z',
           kind: 'stage',
@@ -115,7 +117,7 @@ describe('sumJournal', () => {
       SINCE,
       NOW
     );
-    expect(week.hours).toBe(3);
+    expect(week.hours).toBe(4);
   });
 
   it('counts items finished and handoffs this week only', () => {
@@ -183,7 +185,67 @@ function configure(root: string, file: string, config: Record<string, unknown>):
   writeFileSync(path.join(root, '.agents', 'flow', file), JSON.stringify(config));
 }
 
+/**
+ * Write journal lines with flow's own writer, exactly as the engine does:
+ * `flow stage` writes only a stage's start, and `flow done` writes the one
+ * end, `done`'s.
+ */
+function engineWrites(root: string, events: [string, 'start' | 'done-end', string][]): void {
+  const target = {
+    path: path.join(root, '.dork', 'flow', 'journal.jsonl'),
+    checkout: root,
+    enabled: true,
+    maxBytes: 5_000_000,
+    keep: 3,
+  };
+  for (const [ts, what, stageOrItem] of events) {
+    const [item, stage] = stageOrItem.split(' ');
+    const event =
+      what === 'start'
+        ? { kind: 'stage' as const, stage, phase: 'start' as const, item }
+        : {
+            kind: 'stage' as const,
+            stage: 'done',
+            phase: 'end' as const,
+            outcome: 'ok' as const,
+            item,
+          };
+    expect(
+      append(target, event, { now: new Date(ts), flowVersion: '0.50.0', warn: () => {} })
+    ).toBe('written');
+  }
+}
+
+describe('the engine’s own journal', () => {
+  it('times each stage from its start to the item’s next stage, done’s end, or now', async () => {
+    engineWrites(world.main, [
+      // A-1: execute 2h, verify 1h, review 30m, done until its end 10m.
+      ['2026-09-29T08:00:00.000Z', 'start', 'A-1 execute'],
+      ['2026-09-29T10:00:00.000Z', 'start', 'A-1 verify'],
+      ['2026-09-29T11:00:00.000Z', 'start', 'A-1 review'],
+      ['2026-09-29T11:30:00.000Z', 'start', 'A-1 done'],
+      ['2026-09-29T11:40:00.000Z', 'done-end', 'A-1'],
+      // A-2: started before the week, still open: counted from Monday to now (2.5 days).
+      ['2026-09-27T12:00:00.000Z', 'start', 'A-2 execute'],
+    ]);
+    const week = await readJournalWeek(world.main, SINCE, NOW);
+    expect(week.finished).toBe(1);
+    expect(week.hours).toBeCloseTo(2 + 1 + 0.5 + 10 / 60 + 60, 5);
+  });
+});
+
 describe('reading a project', () => {
+  it('parses a journal file once, and again only when it changes', async () => {
+    engineWrites(world.main, [['2026-09-29T08:00:00.000Z', 'start', 'A-1 execute']]);
+    const file = path.join(world.main, '.dork', 'flow', 'journal.jsonl');
+    const first = await fileMarks(file);
+    expect(await fileMarks(file)).toBe(first);
+    engineWrites(world.main, [['2026-09-29T09:00:00.000Z', 'start', 'A-1 verify']]);
+    const second = await fileMarks(file);
+    expect(second).not.toBe(first);
+    expect(second.map((mark) => mark.stage)).toEqual(['execute', 'verify']);
+  });
+
   it('reads the rotated file before the current one, so a pair split across them counts', async () => {
     writeJournal(world.main, 'journal.1.jsonl', [
       line({

@@ -53,3 +53,20 @@ export function projectPath(name: string): string {
 export function settingsPath(name: string): string {
   return `${projectPath(name)}/settings`;
 }
+
+/**
+ * A tracker link that is safe to open: an `http:` or `https:` address, or
+ * `null` for anything else (a `javascript:` URL in a run record, say).
+ *
+ * @param url - The address, as recorded.
+ * @returns The address, or `null`.
+ */
+export function webHref(url: string | null | undefined): string | null {
+  if (typeof url !== 'string') return null;
+  try {
+    const { protocol } = new URL(url);
+    return protocol === 'http:' || protocol === 'https:' ? url : null;
+  } catch {
+    return null;
+  }
+}

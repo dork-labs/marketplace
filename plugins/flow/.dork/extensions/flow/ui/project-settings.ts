@@ -75,7 +75,8 @@ export function ProjectSettings(props: {
       { type: 'button', style: LINK, onClick: () => api.navigate(projectPath(project.name)) },
       `← ${project.name}`
     ),
-    h('h1', { style: { ...TITLE, marginTop: '8px' } }, `${project.name} · Flow settings`),
+    // DorkOS's bar over the page already says "Flow settings".
+    h('h1', { style: { ...TITLE, marginTop: '8px' } }, project.name),
     h('p', { style: { ...MUTED, ...MONO } }, project.root),
     h('p', { style: { margin: '14px 0 0' } }, NOT_HERE_YET_TEXT),
     h(

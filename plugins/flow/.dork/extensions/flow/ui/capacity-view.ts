@@ -16,6 +16,17 @@ import { isoWithOffset } from './pause-menu.ts';
 import { h, useEffect, useState, type Node } from './react.ts';
 import { ALERT } from './styles.ts';
 
+/** How long a read of Capacity is reused, so opening the tab again doesn't read again, in ms. */
+export const CAPACITY_REUSE_MS = 60_000;
+
+/** The last read, for the week it was for. */
+let lastRead: { since: string; at: number; view: CapacityView } | null = null;
+
+/** Forget the last read (tests). */
+export function forgetCapacity(): void {
+  lastRead = null;
+}
+
 /** Said for a project whose journal is off. */
 export const JOURNAL_OFF_TEXT = 'Not recorded: the journal is off in this project.';
 
@@ -76,13 +87,22 @@ export function projectWeekText(project: CapacityProject): string {
  * @returns The tab's content.
  */
 export function CapacityTab(props: { project: string | null; now?: () => Date }): Node {
-  const [view, setView] = useState<CapacityView | null>(null);
-  const [error, setError] = useState<string | null>(null);
   const clock = props.now ?? (() => new Date());
+  const reusable = (since: string) =>
+    lastRead !== null &&
+    lastRead.since === since &&
+    clock().getTime() - lastRead.at < CAPACITY_REUSE_MS
+      ? lastRead.view
+      : null;
+  const [view, setView] = useState<CapacityView | null>(() => reusable(browserWeekStart(clock())));
+  const [error, setError] = useState<string | null>(null);
   useEffect(() => {
+    const since = browserWeekStart(clock());
+    if (reusable(since) !== null) return;
     let live = true;
-    getCapacity(browserWeekStart(clock())).then(
+    getCapacity(since).then(
       (next) => {
+        lastRead = { since, at: clock().getTime(), view: next };
         if (live) setView(next);
       },
       (failure: unknown) => {

@@ -20,7 +20,7 @@
 import type { ComponentType } from 'react';
 import type { FlowModel, FlowProject, FlowRunRow, RunPill } from '../lib/model.ts';
 import type { ClientApi, StatusBarSlotContext, TrackerItemRef } from '../lib/host-types.ts';
-import { hasPages, projectPath } from './links.ts';
+import { hasPages, projectPath, webHref } from './links.ts';
 import { PILL_TEXT } from './panel-format.ts';
 import { FOCUS_CSS, GROW, LINK, MUTED, PILL, ROW } from './parts.ts';
 import { sessionRoute } from './project-lens.ts';
@@ -79,9 +79,20 @@ export function chipWhen(ctx: StatusBarSlotContext): boolean {
  * @returns True when something waits on you.
  */
 export function chipUrgent(ctx: StatusBarSlotContext): boolean {
-  return ctx.trackerItems.some(
-    (item) =>
-      item.stage === 'review' || (item.runStatus !== null && WAITING_ON_PERSON.has(item.runStatus))
+  return ctx.trackerItems.some(waitsOnYou);
+}
+
+/**
+ * Whether core's facts say an item waits on a person: it is at review, or its
+ * run waits for one. The chip's words follow this, so the chip never reads
+ * "In review" while DorkOS draws it as needing you.
+ *
+ * @param item - Core's item.
+ * @returns True when it waits on you.
+ */
+export function waitsOnYou(item: TrackerItemRef): boolean {
+  return (
+    item.stage === 'review' || (item.runStatus !== null && WAITING_ON_PERSON.has(item.runStatus))
   );
 }
 
@@ -95,8 +106,7 @@ export function chipUrgent(ctx: StatusBarSlotContext): boolean {
 export function pillFromCore(item: TrackerItemRef): RunPill {
   if (item.runStatus === 'complete') return 'done';
   if (item.runStatus === 'failed') return 'parked';
-  if (item.runStatus !== null && WAITING_ON_PERSON.has(item.runStatus)) return 'needs-you';
-  if (item.stage === 'review') return 'in-review';
+  if (waitsOnYou(item)) return 'needs-you';
   return 'building';
 }
 
@@ -130,7 +140,8 @@ export function chipItems(ctx: StatusBarSlotContext, model: FlowModel | null): C
     for (const project of projects) {
       const run = project.runs.find((row) => row.identifier === ref.id);
       if (run !== undefined) {
-        return { ref, run, project, pill: run.state, lastUpdate: run.updatedAt ?? ref.startedAt };
+        const pill = run.state !== 'done' && waitsOnYou(ref) ? 'needs-you' : run.state;
+        return { ref, run, project, pill, lastUpdate: run.updatedAt ?? ref.startedAt };
       }
     }
     return { ref, run: null, project: null, pill: pillFromCore(ref), lastUpdate: ref.startedAt };
@@ -289,6 +300,32 @@ export function listPosition(
   };
 }
 
+/**
+ * Whether an element sits inside a box that moves or scales what it holds (a
+ * popover or a drawer). There, `position: fixed` measures from that box rather
+ * than the window, so the list opens in place instead.
+ *
+ * @param element - The chip.
+ * @returns True inside such a box.
+ */
+export function insideMovedBox(element: Element | null): boolean {
+  for (let at = element?.parentElement ?? null; at !== null; at = at.parentElement) {
+    const style = getComputedStyle(at);
+    const willChange = style.willChange ?? '';
+    const contain = style.contain ?? '';
+    if (
+      (style.transform !== '' && style.transform !== 'none') ||
+      (style.filter !== '' && style.filter !== 'none') ||
+      (style.perspective !== '' && style.perspective !== 'none') ||
+      /transform|filter|perspective/.test(willChange) ||
+      /paint|layout|strict|content/.test(contain)
+    ) {
+      return true;
+    }
+  }
+  return false;
+}
+
 const LIST: Style = {
   zIndex: 50,
   maxHeight: '60vh',
@@ -321,9 +358,11 @@ export function createRunChip(
   function RunChip(ctx: StatusBarSlotContext): Node {
     const snapshot = useStore(store);
     const [open, setOpen] = useState(false);
+    const [inPlace, setInPlace] = useState(false);
     const [, setTick] = useState(0);
     const button = useRef<HTMLButtonElement | null>(null);
     const list = useRef<HTMLDivElement | null>(null);
+    const wrapper = useRef<HTMLSpanElement | null>(null);
     // Ages move on their own: redraw every minute.
     useEffect(() => {
       const timer = setInterval(() => setTick((n: number) => n + 1), 60_000);
@@ -331,14 +370,28 @@ export function createRunChip(
     }, []);
     useEffect(() => {
       if (!open) return;
-      list.current?.querySelector<HTMLElement>('a, button')?.focus();
+      (list.current?.querySelector<HTMLElement>('a, button') ?? list.current)?.focus();
       const onPointer = (event: PointerEvent) => {
         const target = event.target as globalThis.Node;
         if (button.current?.contains(target) || list.current?.contains(target)) return;
         setOpen(false);
       };
+      // Escape closes the list first, wherever focus is, and goes no further:
+      // caught on the window before a popover around the chip (which listens
+      // on the document) would close as well.
+      const onKey = (event: KeyboardEvent) => {
+        if (event.key !== 'Escape') return;
+        event.stopPropagation();
+        event.preventDefault();
+        setOpen(false);
+        button.current?.focus();
+      };
       document.addEventListener('pointerdown', onPointer);
-      return () => document.removeEventListener('pointerdown', onPointer);
+      window.addEventListener('keydown', onKey, true);
+      return () => {
+        document.removeEventListener('pointerdown', onPointer);
+        window.removeEventListener('keydown', onKey, true);
+      };
     }, [open]);
 
     const items = chipItems(ctx, snapshot.model);
@@ -380,7 +433,7 @@ export function createRunChip(
           )
         );
       }
-      const url = item.run?.url ?? null;
+      const url = webHref(item.run?.url);
       if (url !== null) {
         const tracker = item.project?.tracker?.label ?? 'the tracker';
         links.push(
@@ -426,10 +479,21 @@ export function createRunChip(
       );
     };
 
-    const label = `${words.subject}, ${words.state}${words.ago === null ? '' : ` ${words.ago}`}. Show ${several ? 'the items' : 'the item'}`;
+    // The age moves every minute; the name says only that it has gone quiet,
+    // so nothing re-reads it.
+    const state = words.ago === null ? words.state : 'no recent update';
+    const label = `${words.subject}, ${state}. Show ${several ? 'the items' : 'the item'}`;
     return h(
       'span',
-      { className: 'flow-tab', style: { display: 'inline-flex', minWidth: 0 } },
+      {
+        ref: wrapper,
+        className: 'flow-tab',
+        style: { display: 'inline-flex', flexWrap: 'wrap', alignItems: 'center', minWidth: 0 },
+        onBlur: (event: { relatedTarget: EventTarget | null }) => {
+          const next = event.relatedTarget as globalThis.Node | null;
+          if (open && (next === null || !wrapper.current?.contains(next))) setOpen(false);
+        },
+      },
       h('style', null, FOCUS_CSS),
       h(
         'button',
@@ -440,7 +504,11 @@ export function createRunChip(
           'aria-haspopup': 'dialog',
           'aria-expanded': open,
           'aria-label': label,
-          onClick: () => setOpen((value: boolean) => !value),
+          'aria-live': 'off',
+          onClick: () => {
+            setInPlace(insideMovedBox(button.current));
+            setOpen((value: boolean) => !value);
+          },
         },
         h('span', { style: SUBJECT }, words.subject),
         h('span', { 'aria-hidden': true }, '·'),
@@ -454,22 +522,19 @@ export function createRunChip(
             {
               ref: list,
               role: 'dialog',
+              tabIndex: -1,
               'aria-label': several
                 ? 'Items this chat is working on'
                 : 'The item this chat is working on',
-              style: {
-                ...LIST,
-                ...listPosition(button.current?.getBoundingClientRect() ?? { top: 0, right: 0 }, {
-                  width: window.innerWidth,
-                  height: window.innerHeight,
-                }),
-              },
-              onKeyDown: (event: { key: string; preventDefault(): void }) => {
-                if (event.key === 'Escape') {
-                  event.preventDefault();
-                  close(true);
-                }
-              },
+              style: inPlace
+                ? { ...LIST, flexBasis: '100%', marginTop: '6px', maxWidth: `${LIST_WIDTH}px` }
+                : {
+                    ...LIST,
+                    ...listPosition(
+                      button.current?.getBoundingClientRect() ?? { top: 0, right: 0 },
+                      { width: window.innerWidth, height: window.innerHeight }
+                    ),
+                  },
             },
             h('ul', { style: { margin: 0, padding: 0 } }, ...items.map(row)),
             pages && project !== null

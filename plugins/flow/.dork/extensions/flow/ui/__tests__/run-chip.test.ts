@@ -184,7 +184,8 @@ describe('the words', () => {
       model([])
     );
     expect(items[0].run).toBeNull();
-    expect(chipWords(items, FRESH, false)).toMatchObject({ subject: 'DOR-9', state: 'In review' });
+    // At review, DorkOS marks the chip as needing you, so the words say so too.
+    expect(chipWords(items, FRESH, false)).toMatchObject({ subject: 'DOR-9', state: 'Needs you' });
     expect(pillFromCore(item('x', { runStatus: 'complete' }))).toBe('done');
     expect(pillFromCore(item('x', { runStatus: 'waiting_for_review' }))).toBe('needs-you');
     expect(pillFromCore(item('x', { stage: 'execute' }))).toBe('building');
@@ -303,5 +304,106 @@ describe('registerRunChip', () => {
 
   it('adds nothing on a DorkOS without a status bar for extensions', () => {
     expect(() => registerRunChip({ navigate: vi.fn() }, new FlowStore({}))()).not.toThrow();
+  });
+});
+
+describe('review fixes', () => {
+  /** A store holding `model`. */
+  function storeOf(model: FlowModel) {
+    const store = new FlowStore({}, () => NOW);
+    store.apply(model);
+    return store;
+  }
+  const quiet = () =>
+    flowModel([flowProject('dorkos', { runs: [runRow('DOR-1', { updatedAt: ago(1) })] })]);
+
+  it('closes on Escape pressed on the chip itself, without the Escape reaching the popover around it', () => {
+    const outer = vi.fn();
+    document.addEventListener('keydown', outer, true);
+    const Chip = createRunChip({ navigate: vi.fn() }, storeOf(quiet()), () => NOW);
+    render(React.createElement(Chip, ctx([item('DOR-1')])));
+    const chip = screen.getByRole('button', { name: /^DOR-1/ });
+    fireEvent.click(chip);
+    expect(screen.getByRole('dialog')).toBeTruthy();
+    chip.focus();
+    fireEvent.keyDown(chip, { key: 'Escape' });
+    expect(screen.queryByRole('dialog')).toBeNull();
+    expect(outer).not.toHaveBeenCalled();
+    // Closed, Escape is the popover's again.
+    fireEvent.keyDown(chip, { key: 'Escape' });
+    expect(outer).toHaveBeenCalledTimes(1);
+    document.removeEventListener('keydown', outer, true);
+  });
+
+  it('closes when focus leaves the chip and its list', () => {
+    const Chip = createRunChip({ navigate: vi.fn() }, storeOf(quiet()), () => NOW);
+    render(
+      React.createElement(
+        'div',
+        null,
+        React.createElement(Chip, ctx([item('DOR-1')])),
+        React.createElement('button', { type: 'button' }, 'elsewhere')
+      )
+    );
+    const chip = screen.getByRole('button', { name: /^DOR-1/ });
+    fireEvent.click(chip);
+    const list = screen.getByRole('dialog');
+    fireEvent.blur(chip, { relatedTarget: list });
+    expect(screen.getByRole('dialog')).toBeTruthy();
+    fireEvent.blur(list, { relatedTarget: screen.getByRole('button', { name: 'elsewhere' }) });
+    expect(screen.queryByRole('dialog')).toBeNull();
+  });
+
+  it('opens below the chip, in place, inside a moved or scaled container such as a popover', () => {
+    const Chip = createRunChip({ navigate: vi.fn() }, storeOf(quiet()), () => NOW);
+    render(
+      React.createElement(
+        'div',
+        { style: { transform: 'translate(10px, 20px)' } },
+        React.createElement(Chip, ctx([item('DOR-1')]))
+      )
+    );
+    fireEvent.click(screen.getByRole('button', { name: /^DOR-1/ }));
+    expect(screen.getByRole('dialog').style.position).not.toBe('fixed');
+    document.body.innerHTML = '';
+    render(React.createElement(Chip, ctx([item('DOR-1')])));
+    fireEvent.click(screen.getByRole('button', { name: /^DOR-1/ }));
+    expect(screen.getByRole('dialog').style.position).toBe('fixed');
+  });
+
+  it('says "Needs you" whenever DorkOS marks the chip as needing you', () => {
+    const model = flowModel([
+      flowProject('dorkos', {
+        runs: [runRow('DOR-1', { state: 'in-review' }), runRow('DOR-2', { updatedAt: ago(1) })],
+      }),
+    ]);
+    const one = ctx([item('DOR-1', { stage: 'review' })]);
+    expect(chipUrgent(one)).toBe(true);
+    expect(chipWords(chipItems(one, model), FRESH, false).state).toBe('Needs you');
+    const two = ctx([item('DOR-1', { stage: 'review' }), item('DOR-2')]);
+    expect(chipWords(chipItems(two, model), FRESH, false).state).toBe('1 needs you');
+  });
+
+  it('links only to a web address in the tracker', () => {
+    const model = flowModel([
+      flowProject('dorkos', {
+        runs: [runRow('DOR-1', { url: 'javascript:alert(1)', updatedAt: ago(1) })],
+      }),
+    ]);
+    const Chip = createRunChip({ navigate: vi.fn() }, storeOf(model), () => NOW);
+    render(React.createElement(Chip, ctx([item('DOR-1')])));
+    fireEvent.click(screen.getByRole('button', { name: /^DOR-1/ }));
+    expect(screen.queryByRole('link')).toBeNull();
+  });
+
+  it('keeps the minute-by-minute age out of what a screen reader re-reads', () => {
+    const model = flowModel([
+      flowProject('dorkos', { runs: [runRow('DOR-1', { updatedAt: ago(120) })] }),
+    ]);
+    const Chip = createRunChip({ navigate: vi.fn() }, storeOf(model), () => NOW);
+    render(React.createElement(Chip, ctx([item('DOR-1')])));
+    const chip = screen.getByRole('button', { name: /^DOR-1/ });
+    expect(chip.getAttribute('aria-live')).toBe('off');
+    expect(chip.getAttribute('aria-label')).not.toMatch(/ago/);
   });
 });

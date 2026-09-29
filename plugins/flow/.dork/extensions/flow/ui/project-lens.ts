@@ -9,7 +9,7 @@
 import type { FlowCondition, FlowModel, FlowProject, FlowRunRow } from '../lib/model.ts';
 import type { ClientApi } from '../lib/host-types.ts';
 import { UNREACHABLE_MESSAGE, pauseFlow, resumeFlow } from './api.ts';
-import { HOME_PATH, SETTINGS_TAB_LINK, settingsPath } from './links.ts';
+import { HOME_PATH, SETTINGS_TAB_LINK, settingsPath, webHref } from './links.ts';
 import { PILL_TEXT, clockTime, pausedText, runningCaption } from './panel-format.ts';
 import { PauseMenu } from './pause-menu.ts';
 import { BUTTON, CAPTION, CONDITION, Dot, GROW, Hint, LINK, MUTED, PILL, ROW } from './parts.ts';
@@ -438,7 +438,7 @@ export function ProjectLens(props: {
   const elsewhere = model.decisions.filter((decision) => decision.project !== project.name).length;
   const showElsewhere =
     props.pages === true ? () => api.navigate(HOME_PATH) : (props.onShowAll ?? null);
-  const trackerUrl = project.tracker?.url ?? null;
+  const trackerUrl = webHref(project.tracker?.url);
   if ((elsewhere > 0 && showElsewhere !== null) || trackerUrl !== null) {
     body.push(
       h(

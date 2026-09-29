@@ -18,6 +18,7 @@ import {
   JOURNAL_OFF_TEXT,
   accountWeekText,
   browserWeekStart,
+  forgetCapacity,
   projectWeekText,
 } from '../capacity-view.ts';
 import {
@@ -38,6 +39,7 @@ import { flowModel, flowProject, routeFetch, runRow } from './helpers.ts';
 
 afterEach(() => {
   vi.unstubAllGlobals();
+  forgetCapacity();
 });
 
 const NOW = new Date('2026-09-28T12:00:00.000Z');
@@ -394,7 +396,7 @@ describe('a project’s settings page', () => {
   it('says what it can’t do yet, where the settings live, and who a change reaches', async () => {
     serve(threeProjects());
     const { api } = await renderPage('settings', threeProjects(), { params: { name: 'dorkos' } });
-    expect(screen.getByRole('heading', { level: 1, name: 'dorkos · Flow settings' })).toBeTruthy();
+    expect(screen.getByRole('heading', { level: 1, name: 'dorkos' })).toBeTruthy();
     expect(screen.getByText(NOT_HERE_YET_TEXT)).toBeTruthy();
     expect(screen.getByText(SHARED_FILE)).toBeTruthy();
     expect(SHARED_FILE).toBe('.agents/flow/config.json');
@@ -418,5 +420,51 @@ describe('registerPages', () => {
 
   it('registers nothing on a DorkOS without pages', () => {
     expect(() => registerPages({ navigate: vi.fn() }, new FlowStore({}))()).not.toThrow();
+  });
+});
+
+describe('review fixes', () => {
+  it('reads an empty ?project= as no filter', async () => {
+    serve(threeProjects());
+    await renderPage('home', threeProjects(), { search: { project: '' } });
+    expect(screen.queryByRole('status')).toBeNull();
+    expect(screen.getByText('Needs you · 2')).toBeTruthy();
+  });
+
+  it('ties each tab to its panel and moves between them with the arrow keys', async () => {
+    serve(threeProjects());
+    const { writes } = await renderPage('home', threeProjects());
+    const projects = screen.getByRole('tab', { name: 'Projects' });
+    const panel = screen.getByRole('tabpanel');
+    expect(projects.getAttribute('aria-controls')).toBe(panel.id);
+    expect(panel.getAttribute('aria-labelledby')).toBe(projects.id);
+    expect(projects.getAttribute('tabindex')).toBe('0');
+    expect(screen.getByRole('tab', { name: 'Capacity this week' }).getAttribute('tabindex')).toBe(
+      '-1'
+    );
+    fireEvent.keyDown(projects, { key: 'ArrowRight' });
+    expect(writes.at(-1)).toEqual({ tab: 'capacity' });
+    await act(async () => {});
+    const capacityTab = screen.getByRole('tab', { name: 'Capacity this week' });
+    expect(document.activeElement).toBe(capacityTab);
+    fireEvent.keyDown(capacityTab, { key: 'ArrowLeft' });
+    expect(writes.at(-1)).toEqual({ tab: null });
+  });
+
+  it('reads Capacity once a minute at most, however often the tab opens', async () => {
+    const fetch = serve(threeProjects());
+    await renderPage('home', threeProjects(), { search: { tab: 'capacity' } });
+    document.body.innerHTML = '';
+    await renderPage('home', threeProjects(), { search: { tab: 'capacity' } });
+    expect(screen.getByText('64% of this week')).toBeTruthy();
+    expect(fetch.calls.filter((call) => call.url.includes('/capacity'))).toHaveLength(1);
+  });
+
+  it('leaves the page title to DorkOS’s bar, keeping a heading for screen readers', async () => {
+    serve(threeProjects());
+    await renderPage('home', threeProjects());
+    const heading = screen.getByRole('heading', { level: 1, name: 'Flow' });
+    expect(heading.style.position).toBe('absolute');
+    expect(heading.style.width).toBe('1px');
   });
 });

@@ -32,12 +32,12 @@ import {
   schedulesWaitingText,
 } from './project-lens.ts';
 import { ProjectSettings } from './project-settings.ts';
-import { BAND, BAND_ROW, DecisionRow, TITLE, loadingState, pageRoot } from './page-parts.ts';
+import { BAND, BAND_ROW, DecisionRow, SR_ONLY, loadingState, pageRoot } from './page-parts.ts';
 import { pausedText } from './panel-format.ts';
 import { FROM_CHAT_HINT, FROM_CHAT_TEXT } from './palette.ts';
 import { PauseMenu } from './pause-menu.ts';
 import { BUTTON, Hint, LINK, MUTED } from './parts.ts';
-import { h, useRef, useState, type Node, type Style } from './react.ts';
+import { h, useEffect, useRef, useState, type Node, type Style } from './react.ts';
 import { useStore, type FlowStore } from './store.ts';
 import { ALERT } from './styles.ts';
 
@@ -354,19 +354,51 @@ function PauseAll(props: { model: FlowModel; store: FlowStore }): Node {
   );
 }
 
-/** One of the home's two tabs. */
+/** The home's two tabs, in order. */
+const TAB_IDS = ['projects', 'capacity'] as const;
+
+/** The id of the home's tab panel, which both tabs control. */
+export const HOME_PANEL_ID = 'flow-home-panel';
+
+/**
+ * A tab's element id.
+ *
+ * @param id - The tab.
+ * @returns Its id.
+ */
+export function homeTabId(id: (typeof TAB_IDS)[number]): string {
+  return `flow-home-tab-${id}`;
+}
+
+/** A tab the arrow keys just moved to, focused once it has drawn. */
+let focusNext: string | null = null;
+
+/**
+ * The home's tabs, Projects and Capacity this week. The chosen one lives in
+ * the page's address. Left and right arrows move between them, as tabs do.
+ */
 function Tabs(props: {
   tab: 'projects' | 'capacity';
   setSearch: ExtensionPageProps['setSearch'];
 }): Node {
-  const tab = (id: 'projects' | 'capacity', label: string) =>
+  useEffect(() => {
+    if (focusNext === null) return;
+    document.getElementById(focusNext)?.focus();
+    focusNext = null;
+  });
+  const choose = (id: (typeof TAB_IDS)[number]) =>
+    props.setSearch({ tab: id === 'capacity' ? 'capacity' : null });
+  const tab = (id: (typeof TAB_IDS)[number], label: string) =>
     h(
       'button',
       {
         key: id,
+        id: homeTabId(id),
         type: 'button',
         role: 'tab',
         'aria-selected': props.tab === id,
+        'aria-controls': HOME_PANEL_ID,
+        tabIndex: props.tab === id ? 0 : -1,
         style: {
           padding: '0 0 5px',
           border: 0,
@@ -378,7 +410,15 @@ function Tabs(props: {
           opacity: props.tab === id ? 1 : 0.7,
           cursor: 'pointer',
         },
-        onClick: () => props.setSearch({ tab: id === 'capacity' ? 'capacity' : null }),
+        onClick: () => choose(id),
+        onKeyDown: (event: { key: string; preventDefault(): void }) => {
+          const step = event.key === 'ArrowRight' ? 1 : event.key === 'ArrowLeft' ? -1 : 0;
+          if (step === 0) return;
+          event.preventDefault();
+          const next = TAB_IDS[(TAB_IDS.indexOf(id) + step + TAB_IDS.length) % TAB_IDS.length];
+          focusNext = homeTabId(next);
+          choose(next);
+        },
       },
       label
     );
@@ -471,7 +511,7 @@ export function createPages(
     const tab = props.search.tab === 'capacity' ? 'capacity' : 'projects';
     if (model.projects.length === 0) {
       return pageRoot(
-        h('h1', { style: TITLE }, 'Flow'),
+        h('h1', { style: SR_ONLY }, 'Flow'),
         h('p', { style: { margin: '12px 0 4px' } }, HOME_EMPTY_TEXT),
         h(
           'button',
@@ -499,13 +539,16 @@ export function createPages(
         ),
       });
     }
-    const asked = props.search.project ?? null;
+    // An empty ?project= is no filter at all.
+    const asked = props.search.project || null;
     const known = asked !== null && model.projects.some((project) => project.name === asked);
     const filter = known ? asked : null;
     const header = h(
       'div',
       { style: { display: 'flex', alignItems: 'center', gap: '12px', flexWrap: 'wrap' } },
-      h('h1', { style: { ...TITLE, flex: 1 } }, 'Flow'),
+      // DorkOS's bar over the page already shows "Flow"; the heading stays for screen readers.
+      h('h1', { style: SR_ONLY }, 'Flow'),
+      h('span', { style: { flex: 1 } }),
       h(PauseAll, { model, store })
     );
     const filterControl =
@@ -541,7 +584,11 @@ export function createPages(
         missing,
         h(
           'div',
-          { role: 'tabpanel', 'aria-label': 'Capacity this week' },
+          {
+            role: 'tabpanel',
+            id: HOME_PANEL_ID,
+            'aria-labelledby': homeTabId('capacity'),
+          },
           h(CapacityTab, { project: filter })
         )
       );
@@ -563,7 +610,7 @@ export function createPages(
       missing,
       h(
         'div',
-        { role: 'tabpanel', 'aria-label': 'Projects' },
+        { role: 'tabpanel', id: HOME_PANEL_ID, 'aria-labelledby': homeTabId('projects') },
         band(
           'Needs you',
           bands.needsYou.length,

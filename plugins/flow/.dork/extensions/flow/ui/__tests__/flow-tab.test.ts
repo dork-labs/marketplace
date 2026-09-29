@@ -468,3 +468,17 @@ describe('with flow’s pages', () => {
     expect(inProject.navigate).toHaveBeenLastCalledWith('?settings=flow:fleet');
   });
 });
+
+describe('tracker links', () => {
+  it('links only to a web address', async () => {
+    await renderTab(
+      flowModel([
+        flowProject('dorkos', {
+          tracker: { label: 'Linear', team: 'DOR', url: 'javascript:alert(1)' },
+        }),
+      ]),
+      host(DORKOS)
+    );
+    expect(screen.queryByRole('link')).toBeNull();
+  });
+});

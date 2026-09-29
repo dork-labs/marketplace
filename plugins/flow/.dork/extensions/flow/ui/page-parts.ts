@@ -49,6 +49,20 @@ const PAGE: Style = {
 /** A page heading. */
 export const TITLE: Style = { margin: 0, fontSize: '18px', fontWeight: 600, lineHeight: 1.3 };
 
+/**
+ * A heading kept for screen readers but not drawn: DorkOS's bar over the page
+ * already shows the page's title.
+ */
+export const SR_ONLY: Style = {
+  position: 'absolute',
+  width: '1px',
+  height: '1px',
+  margin: 0,
+  overflow: 'hidden',
+  clip: 'rect(0 0 0 0)',
+  whiteSpace: 'nowrap',
+};
+
 /** A band's caption ("Needs you · 3"). */
 export const BAND: Style = {
   margin: '18px 0 4px',
