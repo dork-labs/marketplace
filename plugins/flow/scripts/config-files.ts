@@ -1439,7 +1439,7 @@ export function resumeFlow(roots: ConfigRoots, now: Date = new Date()): ResumeRe
 
 const HELP = `config-files — find, migrate and prepare flow's project files.
 
-Usage: config-files.ts [resolve|migrate|prepare|pause|resume] [--confirm|--decline]
+Usage: config-files.ts [resolve|check|migrate|prepare|pause|resume] [--confirm|--decline]
                       [--host-schedule <id>]... [--until <iso>] [--host-restores]
                       [--project <dir>]
 
@@ -1452,6 +1452,10 @@ Usage: config-files.ts [resolve|migrate|prepare|pause|resume] [--confirm|--decli
             { path, enabled }. Exit 0 when
             configured, valid and with an adapter to read, 1 otherwise. Being
             paused is not an error: act on "paused".
+  check     Check the settings alone: config.json, and config.json with
+            config.local.json over it (as flow reads them), against
+            config.schema.json. Runs no adapter and nothing from the project.
+            Prints { ok, committed, local, errors }. Exit 0 when both check out.
   migrate   Copy settings, and the tracker adapter they name, from inside the
             plugin into the project's .agents/flow/. Anything in a plugin folder
             outside the project is only copied with --confirm, after a person
@@ -1481,7 +1485,7 @@ Usage: config-files.ts [resolve|migrate|prepare|pause|resume] [--confirm|--decli
 Only paths and non-secret facts are printed, never a credential.
 `;
 
-const COMMANDS = ['resolve', 'migrate', 'prepare', 'pause', 'resume'] as const;
+const COMMANDS = ['resolve', 'check', 'migrate', 'prepare', 'pause', 'resume'] as const;
 type Command = (typeof COMMANDS)[number];
 
 /** The installed plugin this script belongs to. */
@@ -1558,6 +1562,80 @@ function resolveCommand(roots: ConfigRoots): { result: object; ok: boolean } {
     warnings,
   };
   return { result, ok };
+}
+
+/** What {@link checkSettings} found. */
+export interface SettingsCheck {
+  /** True when both checks passed. */
+  ok: boolean;
+  /** The config.json checked, or `null` when there is none. */
+  committed: string | null;
+  /** The config.local.json laid over it, or `null` when there is none. */
+  local: string | null;
+  /** Every problem, config.json's first. */
+  errors: ValidationIssue[];
+}
+
+/** `settings` without its `secrets` block, which flow reads apart from the policy. */
+function withoutSecrets(settings: Record<string, unknown>): Record<string, unknown> {
+  const { secrets: _secrets, ...policy } = settings;
+  return policy;
+}
+
+/** Lay `over` onto `under` the way flow's loader does: objects key by key, anything else replaces. */
+function layered(
+  under: Record<string, unknown>,
+  over: Record<string, unknown>
+): Record<string, unknown> {
+  const out: Record<string, unknown> = { ...under };
+  for (const [key, value] of Object.entries(over)) {
+    const current = out[key];
+    out[key] = isPlainObject(current) && isPlainObject(value) ? layered(current, value) : value;
+  }
+  return out;
+}
+
+/**
+ * Check a project's settings files alone, as the Flow extension's settings page
+ * does after a save (spec `flow-multiproject` §8.3): `config.json` against the
+ * schema, and `config.json` with `config.local.json` over it, which is what
+ * flow's loader parses. It runs no adapter and nothing the project holds.
+ *
+ * @param roots - The checkouts to find the files in.
+ * @returns Whether both check out, and every problem.
+ */
+export function checkSettings(roots: ConfigRoots): SettingsCheck {
+  const files = resolveConfigFiles(roots);
+  const errors: ValidationIssue[] = [];
+  const result = (): SettingsCheck => ({
+    ok: errors.length === 0,
+    committed: files.committed,
+    local: files.local,
+    errors,
+  });
+  if (files.committed === null) {
+    errors.push({ path: '(file)', message: 'there is no config.json to check' });
+    return result();
+  }
+  const committed = parseOrUndefined(readOrNull(files.committed));
+  if (!isPlainObject(committed)) {
+    errors.push({ path: '(root)', message: `${files.committed} is not a JSON object` });
+    return result();
+  }
+  errors.push(...validateConfig(committed).errors);
+  if (files.local === null) return result();
+  const local = parseOrUndefined(readOrNull(files.local));
+  if (!isPlainObject(local)) {
+    errors.push({ path: '(root)', message: `${files.local} is not a JSON object` });
+    return result();
+  }
+  const seen = new Set(errors.map((e) => `${e.path}\n${e.message}`));
+  for (const issue of validateConfig(layered(withoutSecrets(committed), withoutSecrets(local)))
+    .errors) {
+    if (seen.has(`${issue.path}\n${issue.message}`)) continue;
+    errors.push({ path: issue.path, message: `${issue.message} (with ${LOCAL_CONFIG_FILE})` });
+  }
+  return result();
 }
 
 /** What `resolve` says about the adapter of a configured project. */
@@ -1724,6 +1802,11 @@ export function main(argv: readonly string[]): number {
     output = { result, ok: result.ok };
   } else if (command === 'resume') {
     const result = resumeFlow(roots, now);
+    output = { result, ok: result.ok };
+  } else if (command === 'check') {
+    const result = checkSettings(roots);
+    for (const e of result.errors)
+      process.stderr.write(`config-files: error at ${e.path} — ${e.message}\n`);
     output = { result, ok: result.ok };
   } else if (command === 'prepare') {
     const result = prepareConfigDirs(roots, resolveConfigFiles(roots));

@@ -39,6 +39,8 @@ import {
   parseCheckpoint,
 } from '../../../../scripts/drain/checkpoint.ts';
 import { liveByAccount } from '../../../../scripts/drain/live-count.ts';
+import type { ProjectRule } from '../../../../scripts/fleet/project-eligibility.ts';
+import { loadProjectRule } from '../../../../scripts/fleet/project-rule.ts';
 import { liveDrainPid } from '../../../../scripts/drain/lock.ts';
 import { render } from '../../../../scripts/drain/messages.ts';
 import { PreconditionError } from '../../../../scripts/errors.ts';
@@ -99,7 +101,12 @@ export const TOO_SLOW_MESSAGE =
   'Flow took too long to check this move, so it did not start it. Try again.';
 
 /** Reasons that hide an account from a strict (flow-policy) ranking. */
-const HIDING_REASONS: readonly IneligibleReason[] = ['not-routable', 'excluded', 'out-of-scope'];
+const HIDING_REASONS: readonly IneligibleReason[] = [
+  'not-routable',
+  'excluded',
+  'out-of-scope',
+  'not-allowed-here',
+];
 
 /** The error `execFile` reports. */
 export interface ExecError extends Error {
@@ -131,6 +138,11 @@ export interface AdvisorDeps {
   execFile: ExecFileLike;
   /** The `origin` URL of the checkout at a folder, or `null`. */
   originOf: (cwd: string) => string | null;
+  /**
+   * The project a folder belongs to and DorkOS's account rules for it (fleet
+   * contract 4.2.0). Default: read from git and `<dorkHome>/config.json`.
+   */
+  projectRuleOf?: (cwd: string) => ProjectRule;
   /** The watcher that reports moves flow made on its own. */
   watcher: ContinuedWatcher;
   /** Where to log. */
@@ -249,6 +261,9 @@ export function createAdvisor(deps: AdvisorDeps): FlowAdvisor {
     const subjects = fleetSubjects(await deps.accounts.list());
     const { policy, raw } = readPolicy(deps.dorkHome, subjects);
     const repo = parseOriginRepo(deps.originOf(opts.cwd));
+    const project = (deps.projectRuleOf ?? ((cwd) => loadProjectRule(deps.dorkHome, cwd)))(
+      opts.cwd
+    );
     const accounts: RankableAccount[] = [];
     subjects.forEach((subject, index) => {
       const own = subject.runtime === opts.runtime;
@@ -278,6 +293,7 @@ export function createAdvisor(deps: AdvisorDeps): FlowAdvisor {
     const rank = rankAccounts({
       now: deps.now(),
       repo,
+      project,
       accounts,
       runtime: opts.runtime,
       runtimes: policy.runtimes,
@@ -464,8 +480,10 @@ export function createAdvisor(deps: AdvisorDeps): FlowAdvisor {
         const account = byKey.get(accountKey(out.runtime, out.id));
         if (account === undefined || out.reasons.includes('excluded')) continue;
         if (strict && out.reasons.some((r) => HIDING_REASONS.includes(r))) continue;
-        // A person's own session hides only what the operator explicitly kept out.
+        // A person's own session hides only what the operator explicitly kept
+        // out, and what DorkOS itself would refuse in this project.
         if (!strict && out.reasons.includes('out-of-scope')) continue;
+        if (out.reasons.includes('not-allowed-here')) continue;
         const signal = limitSignal({
           runtime: account.runtime,
           windows: account.windows,

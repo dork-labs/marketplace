@@ -200,9 +200,27 @@ function MainPanel(props: MainPanelProps): Node {
   );
 }
 
-/** The inset under a Kept out row: the repos it may still serve. */
-function KeptOutPanel(props: MainPanelProps): Node {
+/**
+ * The inset under a Kept out row. Before DorkOS kept accounts to projects
+ * itself, this was where "Only for these repos" was chosen. On a DorkOS that
+ * does (`rules` given), that choice lives in Settings → Runtimes (§8.5): the
+ * repos left here are the ones not on this computer yet, shown read-only.
+ */
+function KeptOutPanel(props: MainPanelProps & { rules: CoreRules | null }): Node {
   const labelId = useId();
+  if (props.rules !== null) {
+    return h(
+      'div',
+      { style: INSET },
+      props.account.repos.length === 0
+        ? h('span', null, 'Flow never uses this account.')
+        : h(
+            'span',
+            null,
+            `Only for ${props.account.repos.join(', ')}. Flow moves this to DorkOS once ${props.account.repos.length === 1 ? 'the repo is' : 'a repo is'} on this computer.`
+          )
+    );
+  }
   return h(
     'div',
     { style: INSET },
@@ -215,13 +233,43 @@ function KeptOutPanel(props: MainPanelProps): Node {
   );
 }
 
+/** DorkOS's own rule for each Claude account, and how to get to where it is changed. */
+export interface CoreRules {
+  /** The projects each account is kept to, by id; an account not here may work anywhere. */
+  onlyFor: ReadonlyMap<string, readonly string[]>;
+  /** Open Settings → Runtimes. */
+  openRuntimes: () => void;
+}
+
+/** "Only for client-app · Change in Settings → Runtimes →", DorkOS's rule on an account's row. */
+function CoreRuleLine(props: { names: readonly string[]; openRuntimes: () => void }): Node {
+  return h(
+    'p',
+    { style: { ...MUTED, margin: '0 0 8px 20px' } },
+    props.names.length === 0 ? 'Not used in any project' : `Only for ${props.names.join(', ')}`,
+    ' · ',
+    h(
+      'button',
+      {
+        type: 'button',
+        style: { ...CHIP, height: 'auto', border: 0, padding: 0, textDecoration: 'underline' },
+        onClick: props.openRuntimes,
+      },
+      'Change in Settings → Runtimes →'
+    )
+  );
+}
+
 /** One account: its dot, its name, its role, and the inset its role brings. */
 function AccountRow(props: {
   account: FleetAccount;
   error: string | undefined;
   onPatch: (patch: AccountPatch) => void;
+  /** DorkOS's rules, for a Claude Code account on a DorkOS that keeps them. */
+  rules: CoreRules | null;
 }): Node {
   const { account } = props;
+  const onlyFor = props.rules?.onlyFor.get(account.id);
   return h(
     'div',
     { 'data-account': account.key },
@@ -242,7 +290,12 @@ function AccountRow(props: {
       })
     ),
     account.role === 'main' ? h(MainPanel, { account, onPatch: props.onPatch }) : null,
-    account.role === 'kept-out' ? h(KeptOutPanel, { account, onPatch: props.onPatch }) : null,
+    account.role === 'kept-out'
+      ? h(KeptOutPanel, { account, onPatch: props.onPatch, rules: props.rules })
+      : null,
+    onlyFor !== undefined && props.rules !== null && account.role !== 'kept-out'
+      ? h(CoreRuleLine, { names: onlyFor, openRuntimes: props.rules.openRuntimes })
+      : null,
     h(ErrorLine, { message: props.error })
   );
 }
@@ -334,12 +387,24 @@ type Phase =
   | { kind: 'failed'; message: string; failures: number }
   | { kind: 'ready' };
 
+/** What {@link FleetTab} takes. */
+export interface FleetTabProps {
+  /**
+   * DorkOS's own account rules, on a DorkOS that keeps accounts to projects
+   * (§8.5): then "Only for these repos" is DorkOS's, shown read-only.
+   */
+  rules?: CoreRules | null;
+  /** Changes when something else changed flow's accounts, to read them again. */
+  reloadKey?: number;
+}
+
 /**
- * The Flow settings tab.
+ * The accounts part of the Flow settings tab: "This computer".
  *
+ * @param props - See {@link FleetTabProps}.
  * @returns The tab.
  */
-export function FleetTab(): Node {
+export function FleetTab(props: FleetTabProps): Node {
   const [phase, setPhase] = useState<Phase>({ kind: 'loading' });
   const [body, setBody] = useState<FleetView | null>(null);
   const [errors, setErrors] = useState<Record<Scope, string>>({});
@@ -384,7 +449,7 @@ export function FleetTab(): Node {
     return () => {
       live = false;
     };
-  }, [attempt]);
+  }, [attempt, props.reloadKey]);
 
   const write = (
     scope: Scope,
@@ -483,6 +548,7 @@ export function FleetTab(): Node {
               account,
               error: errors[account.key],
               onPatch: patchAccount(account.key),
+              rules: group.runtime === 'claude-code' ? (props.rules ?? null) : null,
             })
           )
         )

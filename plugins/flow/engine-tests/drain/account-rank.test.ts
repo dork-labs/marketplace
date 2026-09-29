@@ -30,6 +30,7 @@ import {
   type RankAccountsInput,
 } from '../../scripts/drain/account-rank.ts';
 import type { ResolvedAccountPolicy } from '../../scripts/fleet/accounts.ts';
+import { readProjectEligibilityRules } from '../../scripts/fleet/project-eligibility.ts';
 import type { RuntimeSlug } from '../../scripts/fleet/usage-ledger.ts';
 
 /** One case: `{ name, input, expected }`. */
@@ -80,9 +81,18 @@ function rankInput(input: Record<string, unknown>): RankAccountsInput {
       spend: raw.spend,
     };
   });
+  const project = input.project as { root: string | null; config: unknown } | undefined;
   return {
     now: input.now as string,
     repo: (input.repo as string | null | undefined) ?? 'dork-labs/marketplace',
+    ...(project === undefined
+      ? {}
+      : {
+          project: {
+            root: project.root,
+            rules: readProjectEligibilityRules(project.config, (folder) => folder),
+          },
+        }),
     accounts,
     runtime: (input.runtime as RuntimeSlug | undefined) ?? 'claude-code',
     runtimes: (input.runtimes as RuntimeSlug[] | undefined) ?? [],

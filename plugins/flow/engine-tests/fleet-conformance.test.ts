@@ -59,6 +59,11 @@ import {
   type FlowStateStore,
 } from '../scripts/flow-state.ts';
 import type { FlowRun } from '../scripts/flow-run.ts';
+import {
+  canonicalRoot,
+  projectEligibility,
+  readProjectEligibilityRules,
+} from '../scripts/fleet/project-eligibility.ts';
 import { openFlowStateFile } from '../scripts/flow-state-file.ts';
 
 const FIXTURE_DIR = path.resolve(
@@ -200,6 +205,32 @@ const RUNNERS: Record<string, (c: Case) => void | Promise<void>> = {
     }).toEqual(expected);
   },
 
+  'project-eligibility.cases.json': ({ input, expected }) => {
+    const git = input.git as Record<string, string>;
+    const links = (input.realpath ?? {}) as Record<string, string>;
+    const realpath = (folder: string) => links[folder] ?? folder;
+    const folder = input.folder as string | null;
+    const root = folder === null ? null : (git[folder] ?? null);
+    const account = input.account as string;
+    expect(projectEligibility(input.config, account, root, realpath)).toEqual(expected);
+    // flow's routing agrees: an account flow would spend anywhere (rotation)
+    // may serve the project exactly when DorkOS's rule allows it.
+    const rotation: ResolvedAccountPolicy = {
+      runtime: 'claude-code',
+      id: account,
+      key: `claude-code:${account}`,
+      role: 'rotation',
+      reservePct: 0,
+      spendDownWindowHours: 24,
+      scope: { repos: [] },
+    };
+    const project = {
+      root: root === null ? null : canonicalRoot(root, realpath),
+      rules: readProjectEligibilityRules(input.config, realpath),
+    };
+    expect(mayServe(rotation, null, project)).toBe(expected.eligible);
+  },
+
   'prune.cases.json': ({ input, expected }) => {
     expect(
       pruneTargets(
@@ -255,8 +286,8 @@ describe('the fleet conformance fixture', () => {
   // Purpose: the folder is the contract DorkOS vendors. Pin its version and the
   // exact set of case files, so a case file added without a runner (and so never
   // run here) fails instead of passing silently.
-  it('is contract 4.1.0 with exactly the known case files', () => {
-    expect(readFileSync(path.join(FIXTURE_DIR, 'CONTRACT_VERSION'), 'utf8').trim()).toBe('4.1.0');
+  it('is contract 4.2.0 with exactly the known case files', () => {
+    expect(readFileSync(path.join(FIXTURE_DIR, 'CONTRACT_VERSION'), 'utf8').trim()).toBe('4.2.0');
     expect(caseFiles).toEqual(Object.keys(RUNNERS).sort());
   });
 

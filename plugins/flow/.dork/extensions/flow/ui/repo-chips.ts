@@ -1,7 +1,9 @@
 /**
- * The repos a kept-out account may serve, as chips (spec `claude-account-ui`
- * §8.3 item 4, Q9): one chip per `owner/name` with a remove button, and an
- * "+ add" chip that turns into a small text field.
+ * A list as chips (spec `claude-account-ui` §8.3 item 4, Q9): one chip per
+ * entry with a remove button, and an "+ add" chip that turns into a small text
+ * field. By default the entries are the `owner/name` repos a kept-out account
+ * may serve; the project settings page uses it for labels too
+ * (`flow-multiproject` §8.2).
  *
  * @module @dorkos/flow/extension/ui/repo-chips
  */
@@ -15,12 +17,31 @@ export const REPO_PATTERN = /^[A-Za-z0-9._-]+\/[A-Za-z0-9._-]+$/;
 /** Shown under the field when what was typed is not `owner/name`. */
 export const REPO_INVALID_TEXT = 'Use owner/name, like acme/app.';
 
+/** What a chip list accepts, and what it says otherwise. */
+export interface ChipRule {
+  /** What a chip must look like. */
+  pattern: RegExp;
+  /** The field's placeholder. */
+  placeholder: string;
+  /** Shown when what was typed does not fit. */
+  invalidText: string;
+}
+
+/** The default rule: `owner/name` repos. */
+export const REPO_RULE: ChipRule = {
+  pattern: REPO_PATTERN,
+  placeholder: 'owner/name',
+  invalidText: REPO_INVALID_TEXT,
+};
+
 /** What {@link RepoAddChip} takes. */
 export interface RepoAddChipProps {
-  /** Called with a valid `owner/name`. */
+  /** Called with a valid entry. */
   onAdd: (repo: string) => void;
   /** The id of the element that names the field. */
   labelledBy?: string;
+  /** What an entry must look like (default: `owner/name`). */
+  rule?: ChipRule;
 }
 
 /**
@@ -32,6 +53,7 @@ export interface RepoAddChipProps {
  * @returns The chip or its field.
  */
 export function RepoAddChip(props: RepoAddChipProps): Node {
+  const rule = props.rule ?? REPO_RULE;
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState('');
   const [invalid, setInvalid] = useState(false);
@@ -57,7 +79,7 @@ export function RepoAddChip(props: RepoAddChipProps): Node {
     h('input', {
       type: 'text',
       autoFocus: true,
-      placeholder: 'owner/name',
+      placeholder: rule.placeholder,
       value: draft,
       'aria-labelledby': props.labelledBy,
       'aria-invalid': invalid || undefined,
@@ -76,7 +98,7 @@ export function RepoAddChip(props: RepoAddChipProps): Node {
         if (event.key !== 'Enter') return;
         event.preventDefault();
         const repo = draft.trim();
-        if (!REPO_PATTERN.test(repo)) {
+        if (!rule.pattern.test(repo)) {
           setInvalid(true);
           return;
         }
@@ -87,7 +109,7 @@ export function RepoAddChip(props: RepoAddChipProps): Node {
         if (draft.trim() === '') close();
       },
     }),
-    invalid ? h('span', { id: errorId, role: 'alert', style: ALERT }, REPO_INVALID_TEXT) : null
+    invalid ? h('span', { id: errorId, role: 'alert', style: ALERT }, rule.invalidText) : null
   );
 }
 
@@ -99,6 +121,10 @@ export interface RepoChipsProps {
   onChange: (repos: string[]) => void;
   /** The id of the element that names the list. */
   labelledBy?: string;
+  /** What an entry must look like (default: `owner/name`). */
+  rule?: ChipRule;
+  /** Shown but not changeable: no remove buttons and no "+ add". */
+  readOnly?: boolean;
 }
 
 /**
@@ -117,24 +143,29 @@ export function RepoChips(props: RepoChipsProps): Node {
         'span',
         { key: repo, style: CHIP },
         repo,
-        h(
-          'button',
-          {
-            type: 'button',
-            'aria-label': `Remove ${repo}`,
-            style: CHIP_REMOVE,
-            onClick: () => props.onChange(repos.filter((entry) => entry !== repo)),
-          },
-          h('span', { 'aria-hidden': true }, '✕')
-        )
+        props.readOnly === true
+          ? null
+          : h(
+              'button',
+              {
+                type: 'button',
+                'aria-label': `Remove ${repo}`,
+                style: CHIP_REMOVE,
+                onClick: () => props.onChange(repos.filter((entry) => entry !== repo)),
+              },
+              h('span', { 'aria-hidden': true }, '✕')
+            )
       )
     ),
-    h(RepoAddChip, {
-      key: '+add',
-      labelledBy: props.labelledBy,
-      onAdd: (repo: string) => {
-        if (!repos.includes(repo)) props.onChange([...repos, repo]);
-      },
-    })
+    props.readOnly === true
+      ? null
+      : h(RepoAddChip, {
+          key: '+add',
+          labelledBy: props.labelledBy,
+          rule: props.rule,
+          onAdd: (repo: string) => {
+            if (!repos.includes(repo)) props.onChange([...repos, repo]);
+          },
+        })
   );
 }

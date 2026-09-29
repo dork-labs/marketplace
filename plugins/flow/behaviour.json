@@ -1,10 +1,14 @@
 {
   "v": 1,
-  "behaviour": 1,
+  "behaviour": 2,
   "changes": [
     {
       "level": 1,
       "effect": "timed pauses end on time"
+    },
+    {
+      "level": 2,
+      "effect": "terminal runs use only the accounts DorkOS allows in this project"
     }
   ]
 }

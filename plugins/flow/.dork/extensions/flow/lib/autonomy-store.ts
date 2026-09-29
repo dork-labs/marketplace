@@ -39,6 +39,9 @@ import {
   type AutonomyKind,
   type AutonomyStop,
 } from '../../../../scripts/autonomy.ts';
+import { NEW_PROJECT_DIAL, NO_COPY_DIAL, withKind } from '../../../../scripts/autonomy-dial.ts';
+
+export { NEW_PROJECT_DIAL, NO_COPY_DIAL };
 import { JOURNAL_FILE, RUN_FILES_DIR } from '../../../../scripts/config-names.ts';
 import { readRunStore } from '../../../../scripts/fleet/sessions.ts';
 import type { ProjectSettingsReader } from './host-types.ts';
@@ -59,13 +62,6 @@ export interface ProjectAutonomy {
   /** How flow first saw the project. */
   firstSeen: 'new' | 'existing';
 }
-
-/** The default for a project first seen with no history: Tell me after. */
-export const NEW_PROJECT_DIAL: AutonomyCopy = {
-  dial: 'tell',
-  kinds: {},
-  questionDeadlineMinutes: DEFAULT_QUESTION_DEADLINE_MINUTES,
-};
 
 /** What a stored value that is not a dial reads as: Ask me first for everything. */
 const BROKEN_DIAL: AutonomyCopy = {
@@ -107,21 +103,20 @@ export function stopOf(
 /**
  * The patch an accepted "Next time, on its own?" offer asks core to apply:
  * that one kind moves to Tell me after, everything else stays as it is in
- * force now. Core merges it shallowly, so the whole `kinds` is sent, and a
- * project with no copy keeps retry as it was.
+ * force now. It is built by the same `withKind` the settings page's Customize
+ * writes with, so an offer and a person's own choice store the same value.
+ * Core merges it shallowly, so the whole `kinds` is sent, and a project with no
+ * copy keeps retry as it was (the committed `recovery` settings fix failing
+ * checks on their own).
  *
  * @param copy - The dial in force, or `null`.
  * @param kind - The kind to move.
  * @returns The patch.
  */
 export function offerPatch(copy: AutonomyCopy | null, kind: AutonomyKind): Record<string, unknown> {
-  if (copy === null) {
-    return {
-      dial: 'ask',
-      kinds: { ...(kind === 'retry' ? {} : { retry: 'tell' }), [kind]: 'tell' },
-    };
-  }
-  return { dial: copy.dial, kinds: { ...copy.kinds, [kind]: 'tell' } };
+  const value = withKind(copy, kind, 'tell', NO_COPY_DIAL);
+  // Core merges shallowly: the stored deadline stays as it is.
+  return { dial: value.dial, kinds: value.kinds };
 }
 
 /** The copy's file contents for a dial. */

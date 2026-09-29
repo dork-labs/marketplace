@@ -142,6 +142,13 @@ describe('lib/host-types.ts against the contract', () => {
     expectTypeOf<Contract.ProjectSettingsReader>().not.toHaveProperty('set');
   });
 
+  it('writes the dial only through the client API, as core ships it', () => {
+    // The browser's `set` is the one writer (spec §7.7), behind the person bar.
+    expectTypeOf<Contract.ExtensionAPISeams['projectSettings']>().toExtend<
+      NonNullable<FlowExtensionApi['projectSettings']>
+    >();
+  });
+
   it('answers from its own pages the way the client API does', () => {
     expectTypeOf<Contract.DecisionAnswer>().toExtend<DecisionAnswer>();
     expectTypeOf<DecisionAnswer>().toExtend<Contract.DecisionAnswer>();

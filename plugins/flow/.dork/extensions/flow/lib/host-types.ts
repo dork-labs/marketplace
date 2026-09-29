@@ -715,6 +715,20 @@ export interface ClientApi {
    * DorkOS from before it: then a button says what to type instead (§7.9).
    */
   startWork?(input: StartWorkInput): Promise<{ sessionId: string }>;
+  /**
+   * flow's per-project settings in DorkOS (§7.7): the dial lives here. `set`
+   * is the only writer anywhere, behind DorkOS's person bar. Missing on a
+   * DorkOS from before it: then the dial can't be chosen from flow's page.
+   */
+  readonly projectSettings?: ClientProjectSettings;
+}
+
+/** The client's per-project settings (DorkOS `ExtensionAPI['projectSettings']`). */
+export interface ClientProjectSettings {
+  /** The stored value for a project (any folder inside it), or null. */
+  get<T = unknown>(projectRoot: string): Promise<T | null>;
+  /** The only writer; behind the person bar. Value is JSON, at most 16 KiB. */
+  set(projectRoot: string, value: unknown): Promise<void>;
 }
 
 /** An answer given on the extension's own page (DorkOS `DecisionAnswer`). */

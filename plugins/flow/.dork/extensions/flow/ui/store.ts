@@ -109,6 +109,12 @@ export class FlowStore {
   private readonly triedAt = new Map<string, number>();
 
   /**
+   * The project Settings → Flow opens on, when ⚙ asked for one on a DorkOS
+   * without flow's pages (§10); `null` for the chat's project.
+   */
+  settingsProject: string | null = null;
+
+  /**
    * @param api - DorkOS's client API (state and its changes).
    * @param clock - The clock, in ms, for when a model last arrived (tests).
    */

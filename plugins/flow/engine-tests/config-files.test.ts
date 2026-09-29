@@ -34,6 +34,7 @@ import {
   MIGRATED_MARKER,
   PAUSE_FILE,
   SHIPPED_ADAPTERS,
+  checkSettings,
   findConfigRoots,
   legacyAdapterDirs,
   legacyConfigDirs,
@@ -1445,6 +1446,53 @@ describe('pause', () => {
   });
 });
 
+describe('checkSettings', () => {
+  const settings = (repo: string, config: unknown, local?: unknown) => {
+    write(path.join(repo, '.agents/flow/config.json'), JSON.stringify(config));
+    if (local !== undefined) {
+      write(path.join(repo, '.agents/flow/config.local.json'), JSON.stringify(local));
+    }
+    return checkSettings(roots(repo, path.join(base, 'plugin')));
+  };
+
+  // Purpose: the settings page saves through this check; a clean pair passes,
+  // secrets in the local file included (flow reads them apart from the policy).
+  it('passes config.json alone, and with a local file over it', () => {
+    const repo = makeRepo();
+    expect(settings(repo, { tracker: 'linear' })).toMatchObject({ ok: true, errors: [] });
+    expect(
+      settings(
+        repo,
+        { tracker: 'linear' },
+        { secrets: { trackerToken: 't' }, drain: { parallel: 3 } }
+      )
+    ).toMatchObject({ ok: true, errors: [] });
+  });
+
+  // Purpose: a bad value that lives only in config.local.json still breaks
+  // flow's loader, so the check must see the two files together.
+  it('fails a bad value in config.local.json, naming the local file', () => {
+    const repo = makeRepo();
+    const result = settings(repo, { tracker: 'linear' }, { drain: { parallel: -1 } });
+    expect(result.ok).toBe(false);
+    expect(result.errors[0].message).toMatch(/config\.local\.json/);
+  });
+
+  // Purpose: a bad value in config.json fails once, not once per file.
+  it('fails a bad value in config.json once', () => {
+    const repo = makeRepo();
+    const result = settings(repo, { tracker: 'linear', review: { adversarial: 'yes' } }, {});
+    expect(result.ok).toBe(false);
+    expect(result.errors).toHaveLength(1);
+  });
+
+  // Purpose: with no settings there is nothing to save into.
+  it('fails with no config.json', () => {
+    const repo = makeRepo();
+    expect(checkSettings(roots(repo, path.join(base, 'plugin'))).ok).toBe(false);
+  });
+});
+
 describe('config-files CLI', () => {
   /**
    * A copy of the flow scripts in a throwaway install folder, so the CLI's own
@@ -1485,6 +1533,21 @@ describe('config-files CLI', () => {
   }
 
   const shared = () => installCopy(path.join(base, 'install'));
+
+  // Purpose: `check` runs no adapter: a project whose adapter is missing still
+  // passes when its settings are sound, and fails when they are not.
+  it('check judges the settings files alone', () => {
+    const repo = makeRepo();
+    write(path.join(repo, '.agents/flow/config.json'), '{"tracker":"nosuch"}');
+    const plugin = shared();
+    const good = run(plugin, repo, ['check']);
+    expect(good.status).toBe(0);
+    expect(good.out).toMatchObject({ ok: true, errors: [] });
+    write(path.join(repo, '.agents/flow/config.local.json'), '{"autonomy":{"default":"always"}}');
+    const bad = run(plugin, repo, ['check']);
+    expect(bad.status).toBe(1);
+    expect(bad.out.ok).toBe(false);
+  });
 
   // Not configured is exit 1, so the /flow guard routes to /flow:init.
   it('resolve exits 1 when nothing is configured', () => {

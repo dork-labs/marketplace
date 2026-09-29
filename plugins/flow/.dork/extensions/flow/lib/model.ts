@@ -33,6 +33,7 @@ import {
 import { isRuntimeSlug } from '../../../../scripts/fleet/usage-ledger.ts';
 import { pidExists } from '../../../../scripts/cli/host-io.ts';
 import type { AutonomyKind, AutonomyStop } from '../../../../scripts/autonomy.ts';
+import type { PauseDefault } from './settings-shape.ts';
 import type { ExecFileLike } from './advisor.ts';
 import { ideasAskDue, ideasWaiting } from './conditions.ts';
 import { readDrainSettings } from './drain-settings.ts';
@@ -167,6 +168,8 @@ export interface FlowProject {
   } | null;
   /** The morning's sorting could not start by 13:00 and waits until tomorrow (§7.9). */
   sortWaits: boolean;
+  /** The pause menu's highlighted choice here (§8.2), kept in the extension's storage. */
+  pauseDefault: PauseDefault;
   /**
    * DorkOS schedules a pause switched off that are now due back on. Only a
    * person's browser can switch a schedule on, so the Flow tab does it and
@@ -656,6 +659,8 @@ export interface ProjectExtras {
   escalated?: ReadonlySet<FlowCondition['kind']>;
   /** The morning's sorting waits until tomorrow. */
   sortWaits?: boolean;
+  /** The pause menu's highlighted choice. */
+  pauseDefault?: PauseDefault;
 }
 
 /**
@@ -735,6 +740,7 @@ export function buildProject(input: {
     version: entry.version,
     autonomy,
     sortWaits: extras.sortWaits === true,
+    pauseDefault: extras.pauseDefault ?? 'tomorrow',
     restoreSchedules: [...(input.restoreSchedules ?? [])],
   };
 }

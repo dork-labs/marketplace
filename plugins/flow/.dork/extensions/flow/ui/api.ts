@@ -9,6 +9,13 @@ import type { CapacityView } from '../lib/capacity.ts';
 import type { FleetAccount, FleetView } from '../lib/fleet.ts';
 import type { DecisionAnswer } from '../lib/host-types.ts';
 import type { FlowModel } from '../lib/model.ts';
+import type { RepoMigration } from '../lib/repo-migration.ts';
+import type {
+  LocalSettings,
+  PauseDefault,
+  ProjectSettingsView,
+  SharedSettings,
+} from '../lib/settings-shape.ts';
 
 /** The desktop shell's bridge, when the tab runs inside the DorkOS app. */
 interface ElectronBridge {
@@ -245,4 +252,54 @@ export function answerHere(key: string, body: DecisionAnswer): Promise<LocalAnsw
  */
 export function allowAdapter(project: string): Promise<FlowModel> {
   return call<FlowModel>('POST', `/projects/${encodeURIComponent(project)}/allow-adapter`);
+}
+
+/**
+ * Read a project's settings, by who a change reaches.
+ *
+ * @param project - The project's name.
+ * @returns The `GET /settings/:name` body.
+ */
+export function getSettings(project: string): Promise<ProjectSettingsView> {
+  return call<ProjectSettingsView>('GET', `/settings/${encodeURIComponent(project)}`);
+}
+
+/** What a settings write may change. */
+export interface SettingsWrite {
+  /** Keys for the shared file. */
+  shared?: Partial<{ [K in keyof SharedSettings]: SharedSettings[K]['value'] }>;
+  /** Keys for the local file. */
+  local?: Partial<{ [K in keyof LocalSettings]: LocalSettings[K]['value'] }>;
+  /** The pause menu's highlighted choice. */
+  pauseDefault?: PauseDefault;
+}
+
+/**
+ * Change a project's settings.
+ *
+ * @param project - The project's name.
+ * @param body - What to change.
+ * @returns The new `GET /settings/:name` body.
+ */
+export function putSettings(project: string, body: SettingsWrite): Promise<ProjectSettingsView> {
+  return call<ProjectSettingsView>('PUT', `/settings/${encodeURIComponent(project)}`, body);
+}
+
+/**
+ * Read the record of moving "Only for these repos" into DorkOS.
+ *
+ * @returns The record.
+ */
+export function getRepoMigration(): Promise<RepoMigration> {
+  return call<RepoMigration>('GET', '/fleet/migration');
+}
+
+/**
+ * Replace the record of moving "Only for these repos" into DorkOS.
+ *
+ * @param record - The new record.
+ * @returns The record as stored.
+ */
+export function putRepoMigration(record: RepoMigration): Promise<RepoMigration> {
+  return call<RepoMigration>('PUT', '/fleet/migration', record);
 }

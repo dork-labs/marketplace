@@ -82,6 +82,7 @@ export function ineligibleReason(
   }
   if (reasons.includes('not-routable')) return "Flow can't use this account's id";
   if (reasons.includes('out-of-scope')) return 'Kept out of this repo';
+  if (reasons.includes('not-allowed-here')) return 'Not allowed in this project';
   if (reasons.includes('excluded')) return 'The account that ran out';
   return 'Busy with other work';
 }

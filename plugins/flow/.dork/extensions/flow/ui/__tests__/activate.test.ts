@@ -9,7 +9,6 @@ import { act, fireEvent, render, screen } from '@testing-library/react';
 import type { ComponentType } from 'react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { activate } from '../../index.ts';
-import { FleetTab } from '../fleet-tab.ts';
 import { FlowIcon } from '../flow-icon.ts';
 import { PANEL_TAB_ID } from '../marker.ts';
 import { COMMANDS, NOT_IN_PROJECT_TEXT } from '../palette.ts';
@@ -52,7 +51,8 @@ describe('activate', () => {
     routeFetch(() => ({ status: 200, body: flowModel([]) }));
     const { api, removed } = fullHost();
     const cleanup = activate(api);
-    expect(api.registerSettingsTab).toHaveBeenCalledWith('fleet', 'Flow', FleetTab, {
+    // The same tab id, so Settings → Runtimes' link to flow:fleet still lands here.
+    expect(api.registerSettingsTab).toHaveBeenCalledWith('fleet', 'Flow', expect.any(Function), {
       group: 'Add-ons',
     });
     expect(api.registerComponent).toHaveBeenCalledWith(
