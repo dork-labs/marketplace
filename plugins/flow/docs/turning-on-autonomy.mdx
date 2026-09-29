@@ -125,7 +125,7 @@ fastest way to put the loop to work and the easiest to watch.
 
 - Attended only: it runs while your terminal session is open, not while you sleep. Close the
   session and the drain stops.
-- You merge and run `/flow:done` by hand: approval detection and auto-merge are not wired in v1.
+- Outside DorkOS you merge and run `/flow:done` by hand.
 
 ## B — the Pulse seat (the scheduled background loop)
 
@@ -179,74 +179,34 @@ This is real today, but it ships **disabled by default** and depends on a runnin
 
 - Unattended progress: ticks fire on a schedule with your terminal closed.
 - Tracker-driven: the loop reacts to what is `agent/ready` in the tracker, polled on an interval.
-- Fresh, isolated session per item, with crash and stall recovery driven by the durable `FlowRun`
-  record and the recovery reconciler (an orphaned claim is adopted and resumed at HEAD, or
-  restarted clean, guarded against runaway retries).
+- Fresh, isolated session per item, with crash and stall recovery from the durable `FlowRun`
+  record.
 
 **Cons**
 
 - Needs a running DorkOS server: the seat cannot fire without it.
-- Still parks at the review gate: it carries an item to REVIEW and stops; you merge and run
-  `/flow:done`.
+- Still stops at the review gate until someone checks it: you, or the reviewer agent if you let it
+  ([below](#how-much-it-does-on-its-own)).
 - Polls, not pushed: it reacts on the poll interval, not instantly (the webhook transport is
   deferred).
 
 <Callout type="info">
-  **What the Pulse seat is, precisely.** Today it is a *per-tick* scheduled
-  drain: each fire is a fresh session that runs `recovery → inbox/resume →
-  dispatch` in prose and carries one item to its gate. The **always-on server
-  runner** that executes the typed reconciler registry as one continuous
-  process, plus **approval detection and auto-merge execution**, are the P5
-  server build (see [Still the server build](#still-the-server-build)). The seat
-  gives you unattended progress to the gate; it does not yet merge for you.
+  **What the Pulse seat is, precisely.** A *per-tick* scheduled drain: each fire is a fresh session
+  that runs `recovery → inbox/resume → dispatch` and carries one item to its gate. The always-on
+  runner that executes the reconciler registry as one process is the P5 server build.
 </Callout>
 
 ## C — the `claude -p` watcher (portable, you build it)
 
-The watcher seat is for repositories that are **not** DorkOS projects and have no always-on server.
-It is an external poller you operate that fires a headless `claude -p` tick per ready issue, reading
-the same normalized event stream the Pulse seat does. Because the inbound event seam
-(`TrackerEvent` + `InboundTransport` + `PollingTransport`) is generic, the watcher needs no DorkOS
-infrastructure: it is the portable promotion of the same loop.
+The watcher seat is for repositories that are **not** DorkOS projects: an external poller you
+operate (a cron entry, a CI loop, a small daemon) that fetches ready work through the same
+`PollingTransport` seam and fires one headless `claude -p` tick per ready item. It needs no DorkOS
+infrastructure, and nothing about the engine changes.
 
 <Callout type="warn">
-  **Not shipped in v1.** The watcher seat is designed but not built.
-  `autonomy.seat` accepts only `pulse` today; setting it to `watcher` is
-  rejected by config. `watcher` rejoins the enum when the seat ships. The steps
-  below describe the intended shape, not a working feature.
+  **Not shipped in v1.** The watcher seat is designed but not built: `autonomy.seat` accepts only
+  `pulse` today, and there is no `/flow:status` pane or recovery around it yet.
 </Callout>
-
-### What it would look like
-
-<Steps>
-  <Step>
-    **Run an external poller** on whatever cadence you choose (a cron entry, a
-    CI loop, a small daemon). It is the scheduler; there is no DorkOS server in
-    this picture.
-  </Step>
-  <Step>
-    **Each tick, fetch ready work** through the same `PollingTransport` seam and
-    claim the top-ranked `agent/ready` item.
-  </Step>
-  <Step>
-    **Fire one headless `claude -p` tick** that carries that single item to its
-    review gate, then exits. One tick, one issue, a fresh session each time.
-  </Step>
-</Steps>
-
-**Pros**
-
-- Server-free and portable: runs against any repo and any tracker the adapter speaks to.
-- Same loop, same seam: the reconciler model and the event seam are shared with the Pulse seat, so
-  nothing about the engine changes.
-- A fresh, headless session per tick keeps each item isolated and resumable.
-
-**Cons**
-
-- Not available in v1: you would build and operate the poller yourself once the seat ships.
-- No DorkOS surface around it: no built-in `/flow:status` pane, recovery reconciler, or
-  observability until it is a first-class seat.
-- `autonomy.seat: "watcher"` does not validate today.
 
 ## The dials that govern any setup
 
@@ -286,6 +246,29 @@ A short way to decide: **attended and server-free → A. Unattended and you run 
 Portable, no server, non-DorkOS repo → C, once it lands.** A and B carry work to the _same_ review
 gate and stop there; the only difference is who keeps the loop ticking.
 
+## How much it does on its own
+
+In DorkOS, each project has one dial in its Flow settings: **Ask me first**, **Tell me after** or
+**Just do it**. It decides who answers each kind of ask, and whatever you pick, someone checks.
+
+- **Ask me first.** Flow asks you in the Activity inbox before it ships finished work, and an
+  agent's question waits for you. New ideas wait until you press **Sort them**, and failing checks
+  until you press **Fix it**.
+- **Tell me after.** The reviewer agent ships work it reviewed clean. An agent's question shows its
+  own pick and a deadline, and if you haven't answered by then, the agent goes with its pick. Flow
+  sorts new ideas each morning and fixes failing checks by itself. Each of these leaves an unread
+  note in Activity.
+- **Just do it.** The same, with quiet notes, and agents go with their own pick without asking,
+  writing down why.
+
+A question about secrets or spending always waits for you, and nothing on the calibration floor is
+settled by a deadline alone. **Customize** sets one kind apart from the dial. The full table is in
+[The dials](/docs/guides/flow/the-dials#how-much-it-does-on-its-own).
+
+**While you were away.** What flow settled without asking shows in Activity as one row saying who
+decided, such as "Ship the new sidebar? · Shipped · the reviewer agent at 2:14pm". Several in a
+row fold into one "While you were away" group. None of them sends a notification.
+
 ## Staying in control
 
 Autonomy is never a loss of control, in any setup:
@@ -300,10 +283,12 @@ Autonomy is never a loss of control, in any setup:
   Schedules page when it can reach them, and resume switches back on only those. Elsewhere the
   scheduler still starts each tick on time and the tick stops at its first step; disable your cron
   or CI job to stop it starting at all.
-- **A pause can end on its own.** `/flow pause for 1 hour` or `/flow pause until 9am` records the
-  end in the flag, and flow reads it itself, so the pause ends on time even with DorkOS closed. A
-  timed pause leaves your schedules on: each tick stops at its first step until the end, then
-  starts work again. `/flow resume` still lifts it sooner.
+- **A pause can end on its own.** In DorkOS every Pause asks how long: until tomorrow 9am, for 1
+  hour, or until you resume. The Flow tab then says "Paused until 9:00" with Resume beside it, and
+  the command palette can pause or resume one project or all of them. In a chat, `/flow pause for 1
+  hour` or `/flow pause until 9am` does the same. The end is written into the flag and flow reads it
+  itself, so the pause ends on time even with DorkOS closed. A timed pause leaves your schedules on:
+  each tick stops at its first step until the end. Resume lifts it sooner.
 - **Reprioritize or disable a loop** by editing its `loops.<id>` block.
 - **Reclaim or redirect an item** by reassigning it; the running tick honors the change at the next
   stage boundary.
@@ -320,9 +305,9 @@ Deferred to the P5 server build:
 
 - **The always-on running scheduler** that executes the reconciler registry continuously and
   unattended. v1 invokes the reconciler model from prose, per tick.
-- **Approval detection and auto-merge execution.** Every setup parks at the review gate; you merge
-  the approved PR and run `/flow:done`. The merge _decision_ logic is built and tested, but the
-  detection and execution that fire it unattended are deferred.
+- **Approval detection outside DorkOS.** In DorkOS, approving from the inbox (or the reviewer
+  agent's approval) arms the approved commit when `gates.review.mergeOnApproval` is on. Without
+  DorkOS you merge the approved PR and run `/flow:done`.
 - **Atomic concurrency and fencing** (heartbeats, atomic multi-claim, a stall detector). v1 stays
   `sequential`, WIP-1.
 - **The webhook transport.** v1 ships `PollingTransport` and the seam; the webhook producer is the
@@ -331,11 +316,10 @@ Deferred to the P5 server build:
 
 </Callout>
 
-What _is_ real after this revision: readiness produced at TRIAGE and DECOMPOSE; starvation detected
-and surfaced; the typed reconciler registry, scheduler, and `loops` config; the `FlowRun` store and
-recovery reconciler; the `TrackerEvent` seam with `PollingTransport`; identity-aware question routing
-with the inbox/resume reconciler; `/flow:status`, `/flow pause` (with an optional end), and
-`/flow resume`; and the non-trimmable calibration floor, always checked.
+What _is_ real: readiness produced at TRIAGE and DECOMPOSE; starvation surfaced; the reconciler
+registry and `loops` config; the `FlowRun` store and recovery; polling for tracker events;
+question routing with resume; `/flow:status`, timed and open-ended pauses, `/flow resume`; and the
+calibration floor, always checked.
 
 ## Next steps
 

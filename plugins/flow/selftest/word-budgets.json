@@ -76,8 +76,8 @@
     "target": 1288
   },
   "docs/driving-it-manually.mdx": {
-    "baseline": 2228,
-    "target": 2228
+    "baseline": 2223,
+    "target": 2223
   },
   "docs/how-it-works.mdx": {
     "baseline": 3116,
@@ -104,16 +104,16 @@
     "target": 2575
   },
   "docs/the-dials.mdx": {
-    "baseline": 4311,
-    "target": 4311
+    "baseline": 4301,
+    "target": 4301
   },
   "docs/turning-on-autonomy.mdx": {
-    "baseline": 2949,
-    "target": 2949
+    "baseline": 2940,
+    "target": 2940
   },
   "docs/use-all-your-accounts.mdx": {
-    "baseline": 201,
-    "target": 201
+    "baseline": 327,
+    "target": 327
   },
   "docs/what-flow-is.mdx": {
     "baseline": 1691,
@@ -124,8 +124,8 @@
     "target": 1267
   },
   "README.md": {
-    "baseline": 2251,
-    "target": 2251
+    "baseline": 2250,
+    "target": 2250
   },
   "skills/building-adapters/references/conformance-harness.md": {
     "baseline": 531,

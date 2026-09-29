@@ -29,7 +29,7 @@ Work moves along one canonical spine. Every command below advances an item one s
 CAPTURE → TRIAGE → IDEATE → SPECIFY → DECOMPOSE → EXECUTE → VERIFY → ⟦REVIEW⟧ → DONE
 ```
 
-`REVIEW` is a **human gate**, not a command. The engine parks there. You review the PR, and on approval the work moves to DONE. Everything before and after REVIEW has a command.
+`REVIEW` is a **gate**, not a command. The engine parks there until the PR is approved, then the work moves to DONE. Everything before and after REVIEW has a command.
 
 ## The orchestrator: `/flow`
 
@@ -76,11 +76,11 @@ A specific item, an explicit stage, or `auto` (drain the whole queue) are all re
 | `/flow:resume`    | (control) | engine              | Lift the pause and let work flow again.                                                            |
 | `/flow:self-test` | (observe) | engine              | Check this flow install and its instructions in a few seconds, and report what is broken.          |
 
-There is no `/flow:review`. REVIEW is the human gate; the engine parks and waits for you.
+There is no `/flow:review`: the engine parks at REVIEW until someone answers it.
 
 ## A worked walkthrough
 
-This is one item moving from a raw thought to a merged change, driven entirely by hand. Each command advances one stage and stops; questions arrive interactively, and you decide when to run the next command.
+This is one item moving from a raw thought to a merged change, driven entirely by hand. Each command advances one stage and stops; questions arrive interactively.
 
 <Steps>
 
@@ -164,20 +164,17 @@ EXECUTE implements the tasks across dependency-aware batches in an **isolated wo
 /flow:verify DOR-201
 ```
 
-VERIFY runs the touched surface, captures proof-of-completion evidence scaled to the change, opens the PR, and hands off to the human-review gate.
+VERIFY runs the touched surface, captures proof-of-completion evidence scaled to the change, opens the PR, and hands off to the review gate.
 
 </Step>
 
 <Step>
 
-### Review (the human gate)
+### Review (the gate)
 
-The engine parks. There is no command here: you review the PR yourself.
-
-<Callout type="warn">
-  In v1 the engine does **not** notice your approval. **Merge the approved PR yourself**, then run
-  the next command.
-</Callout>
+The engine parks. Review the PR, then ship it with `flow review <id> --approve` or send it back
+with `--changes`; in DorkOS it is one click in Activity. Approval arms the PR when
+`gates.review.mergeOnApproval` is on; else merge it yourself. Then run the next command.
 
 </Step>
 
