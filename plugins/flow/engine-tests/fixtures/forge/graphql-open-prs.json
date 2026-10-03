@@ -1,0 +1,161 @@
+{
+  "data": {
+    "viewer": { "login": "octo-person" },
+    "repository": {
+      "pullRequests": {
+        "totalCount": 4,
+        "nodes": [
+          {
+            "number": 41,
+            "title": "Add the export button (ACME-12)",
+            "url": "https://github.com/acme/app/pull/41",
+            "isDraft": false,
+            "createdAt": "2026-10-01T09:00:00Z",
+            "headRefName": "acme-12-export",
+            "body": "Closes ACME-12. Also touches OPS-3.",
+            "author": { "login": "octo-agent" },
+            "reviewDecision": "REVIEW_REQUIRED",
+            "reviewRequests": {
+              "nodes": [
+                { "requestedReviewer": { "__typename": "User", "login": "octo-person" } },
+                { "requestedReviewer": { "__typename": "Team", "slug": "maintainers" } }
+              ]
+            },
+            "isInMergeQueue": false,
+            "mergeQueueEntry": null,
+            "autoMergeRequest": null,
+            "mergeable": "MERGEABLE",
+            "commits": {
+              "nodes": [
+                {
+                  "commit": {
+                    "statusCheckRollup": {
+                      "state": "FAILURE",
+                      "contexts": {
+                        "nodes": [
+                          {
+                            "__typename": "CheckRun",
+                            "name": "test",
+                            "conclusion": "FAILURE",
+                            "status": "COMPLETED",
+                            "detailsUrl": "https://github.com/acme/app/actions/runs/1/job/2"
+                          },
+                          {
+                            "__typename": "CheckRun",
+                            "name": "lint",
+                            "conclusion": "SUCCESS",
+                            "status": "COMPLETED",
+                            "detailsUrl": "https://github.com/acme/app/actions/runs/1/job/3"
+                          }
+                        ]
+                      }
+                    }
+                  }
+                }
+              ]
+            }
+          },
+          {
+            "number": 40,
+            "title": "Queue me",
+            "url": "https://github.com/acme/app/pull/40",
+            "isDraft": false,
+            "createdAt": "2026-09-30T09:00:00Z",
+            "headRefName": "tidy",
+            "body": "",
+            "author": { "login": "octo-person" },
+            "reviewDecision": "APPROVED",
+            "reviewRequests": { "nodes": [] },
+            "isInMergeQueue": true,
+            "mergeQueueEntry": { "position": 2 },
+            "autoMergeRequest": { "enabledAt": "2026-10-01T10:00:00Z" },
+            "mergeable": "MERGEABLE",
+            "commits": {
+              "nodes": [
+                {
+                  "commit": {
+                    "statusCheckRollup": {
+                      "state": "PENDING",
+                      "contexts": {
+                        "nodes": [
+                          {
+                            "__typename": "CheckRun",
+                            "name": "test",
+                            "conclusion": null,
+                            "status": "IN_PROGRESS",
+                            "detailsUrl": "https://github.com/acme/app/actions/runs/4/job/5"
+                          },
+                          {
+                            "__typename": "StatusContext",
+                            "context": "deploy/preview",
+                            "state": "SUCCESS",
+                            "targetUrl": "https://preview.example.invalid/40"
+                          }
+                        ]
+                      }
+                    }
+                  }
+                }
+              ]
+            }
+          },
+          {
+            "number": 39,
+            "title": "Draft: try a new layout",
+            "url": "https://github.com/acme/app/pull/39",
+            "isDraft": true,
+            "createdAt": "2026-09-20T09:00:00Z",
+            "headRefName": "layout",
+            "body": "No tracker item.",
+            "author": null,
+            "reviewDecision": null,
+            "reviewRequests": { "nodes": [] },
+            "isInMergeQueue": false,
+            "mergeQueueEntry": null,
+            "autoMergeRequest": null,
+            "mergeable": "CONFLICTING",
+            "commits": { "nodes": [{ "commit": { "statusCheckRollup": null } }] }
+          },
+          {
+            "number": 38,
+            "title": "Green and approved",
+            "url": "https://github.com/acme/app/pull/38",
+            "isDraft": false,
+            "createdAt": "2026-09-19T09:00:00Z",
+            "headRefName": "ops-7-green",
+            "body": "",
+            "author": { "login": "dependabot", "__typename": "Bot" },
+            "reviewDecision": "CHANGES_REQUESTED",
+            "reviewRequests": { "nodes": [] },
+            "isInMergeQueue": false,
+            "mergeQueueEntry": null,
+            "autoMergeRequest": null,
+            "mergeable": "UNKNOWN",
+            "commits": {
+              "nodes": [
+                {
+                  "commit": {
+                    "statusCheckRollup": {
+                      "state": "SUCCESS",
+                      "contexts": {
+                        "nodes": [
+                          {
+                            "__typename": "CheckRun",
+                            "name": "test",
+                            "conclusion": "SUCCESS",
+                            "status": "COMPLETED",
+                            "detailsUrl": "https://github.com/acme/app/actions/runs/6/job/7"
+                          }
+                        ]
+                      }
+                    }
+                  }
+                }
+              ]
+            }
+          }
+        ]
+      }
+    }
+  }
+}

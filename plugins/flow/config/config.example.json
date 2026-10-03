@@ -117,5 +117,11 @@
     "windDownGraceMinutes": 20,
     "pollSeconds": 60,
     "armAutoMerge": false
+  },
+  "dashboard": {
+    "teams": [],
+    "repos": [],
+    "products": [],
+    "views": ["next", "roadmap", "issues", "prs", "releases"]
   }
 }

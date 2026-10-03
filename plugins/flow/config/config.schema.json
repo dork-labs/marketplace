@@ -1180,6 +1180,117 @@
         }
       },
       "additionalProperties": false
+    },
+    "dashboard": {
+      "default": {},
+      "type": "object",
+      "properties": {
+        "teams": {
+          "default": [],
+          "type": "array",
+          "items": {
+            "type": "string",
+            "pattern": "^[A-Z][A-Z0-9_]*$"
+          }
+        },
+        "repos": {
+          "default": [],
+          "type": "array",
+          "items": {
+            "type": "string",
+            "pattern": "^[A-Za-z0-9_.-]+\\/[A-Za-z0-9_.-]+$"
+          }
+        },
+        "products": {
+          "default": [],
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "id": {
+                "type": "string",
+                "pattern": "^[a-z0-9][a-z0-9-]*$"
+              },
+              "repo": {
+                "type": "string",
+                "pattern": "^[A-Za-z0-9_.-]+\\/[A-Za-z0-9_.-]+$"
+              },
+              "versionFile": {
+                "type": "string",
+                "pattern": "^(?![/\\\\])(?![A-Za-z]:)(?!(?:.*[/\\\\])?\\.\\.(?:[/\\\\]|$)).+$"
+              },
+              "unreleased": {
+                "type": "string",
+                "pattern": "^(?![/\\\\])(?![A-Za-z]:)(?!(?:.*[/\\\\])?\\.\\.(?:[/\\\\]|$)).+$"
+              },
+              "release": {
+                "type": "object",
+                "properties": {
+                  "kind": {
+                    "type": "string",
+                    "const": "agent-command"
+                  },
+                  "command": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "dryRunFlag": {
+                    "type": "string",
+                    "minLength": 1
+                  }
+                },
+                "required": ["kind", "command", "dryRunFlag"],
+                "additionalProperties": false
+              },
+              "watchWorkflows": {
+                "default": [],
+                "type": "array",
+                "items": {
+                  "type": "string",
+                  "pattern": "\\S"
+                }
+              }
+            },
+            "required": ["id", "repo", "versionFile", "unreleased"],
+            "additionalProperties": false
+          }
+        },
+        "views": {
+          "default": ["next", "roadmap", "issues", "prs", "releases"],
+          "type": "array",
+          "items": {
+            "type": "string",
+            "enum": ["next", "roadmap", "issues", "prs", "releases"]
+          }
+        },
+        "next": {
+          "type": "object",
+          "properties": {
+            "limit": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 50
+            }
+          },
+          "required": ["limit"],
+          "additionalProperties": false
+        },
+        "roadmap": {
+          "type": "object",
+          "properties": {
+            "lanes": {
+              "type": "array",
+              "items": {
+                "type": "string",
+                "minLength": 1
+              }
+            }
+          },
+          "required": ["lanes"],
+          "additionalProperties": false
+        }
+      },
+      "additionalProperties": false
     }
   },
   "additionalProperties": false

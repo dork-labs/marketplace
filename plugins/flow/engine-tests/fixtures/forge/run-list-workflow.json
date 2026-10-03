@@ -1,0 +1,13 @@
+[
+  {
+    "conclusion": "success",
+    "createdAt": "2026-10-03T12:22:26Z",
+    "databaseId": 900,
+    "displayTitle": "Release v1.4.0",
+    "event": "push",
+    "headBranch": "v1.4.0",
+    "status": "completed",
+    "url": "https://github.com/acme/app/actions/runs/900",
+    "workflowName": "Publish"
+  }
+]

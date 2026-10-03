@@ -28,6 +28,12 @@
  *   use are DorkOS's, written only from the person's browser, never here.
  * - `GET /fleet/migration` and `PUT /fleet/migration` keep the record of
  *   moving "Only for these repos" into DorkOS, which the browser does.
+ * - `GET /dashboard` lists each project's dashboard pages, and
+ *   `GET /dashboard/issues`, `/prs` and `/releases` answer one project's page
+ *   (`?project=`) from the dashboard's cache, read again when over a minute
+ *   old and every 5 minutes (`lib/dashboard/`). `POST /dashboard/refresh`
+ *   reads a page now, for a person only. They only read: nothing is written to
+ *   the tracker or to GitHub.
  * - Every route that changes something runs behind DorkOS's person guard
  *   (`ctx.requirePerson`): an agent calling flow's routes cannot pause a
  *   project or change an account's policy. On a DorkOS without the guard the
@@ -46,9 +52,12 @@
 import { execFile, execFileSync } from 'node:child_process';
 import path from 'node:path';
 import { updateFleetPolicy } from '../../../scripts/fleet/accounts.ts';
+import { createGithubReads, type GithubReads } from '../../../scripts/forge/github.ts';
 import { createAdvisor, type ExecFileLike, type FlowAdvisor } from './lib/advisor.ts';
 import { buildCapacity, parseSince } from './lib/capacity.ts';
 import { ContinuedWatcher } from './lib/continued-watcher.ts';
+import { DashboardService } from './lib/dashboard/service.ts';
+import { DASHBOARD_KINDS, type DashboardKind } from './lib/dashboard/types.ts';
 import { ModelService } from './lib/model-service.ts';
 import { readRepoMigration, writeRepoMigration } from './lib/repo-migration.ts';
 import { SharedStorage } from './lib/shared-storage.ts';
@@ -61,6 +70,7 @@ import {
   putHandoff,
   type FleetWriter,
 } from './lib/fleet.ts';
+import type { ProcessRunner } from '../../../scripts/cli/context.ts';
 import type {
   AccountsApi,
   DataProviderContext,
@@ -80,6 +90,12 @@ const WATCH_INTERVAL_SECONDS = 5;
 /** How often the projects are read again for changes, in seconds (the host's minimum). */
 const MODEL_INTERVAL_SECONDS = 5;
 
+/** How often the dashboard looks for pages 5 minutes old, in seconds. */
+const DASHBOARD_TICK_SECONDS = 60;
+
+/** The most one `gh` read may print: a page of PRs with their checks. */
+const GH_MAX_BUFFER = 16 * 1024 * 1024;
+
 /** What {@link createFlowExtension} can be given in place of the real machine. */
 export interface FlowExtensionOverrides {
   /** The fleet writer (default: flow's `updateFleetPolicy`). */
@@ -98,6 +114,8 @@ export interface FlowExtensionOverrides {
   pidAlive?: (pid: number) => boolean;
   /** How long an inbox answer waits before "Sending…". */
   answerWaitMs?: number;
+  /** The dashboard's GitHub reads (default: `gh`, through {@link execFile}). */
+  githubReads?: GithubReads;
 }
 
 /** What {@link createFlowExtension} built. */
@@ -124,6 +142,31 @@ function gitOrigin(cwd: string): string | null {
   } catch {
     return null;
   }
+}
+
+/**
+ * flow's process runner over an `execFile`: no shell, a timeout, and the exit
+ * code whatever it is. A command that could not start rejects.
+ *
+ * @param exec - The `execFile` to run through.
+ * @returns The runner.
+ */
+export function processRunnerOf(exec: ExecFileLike): ProcessRunner {
+  return (cmd, args, opts = {}) =>
+    new Promise((resolve, reject) => {
+      exec(
+        cmd,
+        args,
+        { timeout: opts.timeoutMs ?? 60_000, shell: false, encoding: 'utf8', maxBuffer: GH_MAX_BUFFER },
+        (error, stdout, stderr) => {
+          if (error !== null && typeof error.code !== 'number') {
+            reject(error);
+            return;
+          }
+          resolve({ code: error === null ? 0 : (error.code as number), stdout, stderr });
+        }
+      );
+    });
 }
 
 /**
@@ -280,6 +323,9 @@ export function createFlowExtension(
     router.put('/settings/:name', tooOld);
     router.get('/fleet/migration', tooOld);
     router.put('/fleet/migration', tooOld);
+    router.get('/dashboard', tooOld);
+    for (const kind of DASHBOARD_KINDS) router.get(`/dashboard/${kind}`, tooOld);
+    router.post('/dashboard/refresh', tooOld);
     return { advisor: null, watcher: null, model: null, dispose: () => {} };
   }
 
@@ -400,7 +446,42 @@ export function createFlowExtension(
       );
     })
   );
+  const dashboard = new DashboardService({
+    dorkHome,
+    projects: () => model.projects(),
+    adapterAllowed: async (entry) =>
+      entry.tracker !== null && (await model.trust.isAllowed(entry.root, entry.tracker.id)),
+    viewTracker: (root) => model.viewTracker(root),
+    reads: overrides.githubReads ?? createGithubReads({ runProcess: processRunnerOf(exec) }),
+    originOf: overrides.originOf ?? gitOrigin,
+    now,
+    log,
+    canRefresh: guard !== undefined,
+  });
+  router.get(
+    '/dashboard',
+    handle(async (_req, res) => {
+      res.status(200).json(await dashboard.index());
+    })
+  );
+  for (const kind of DASHBOARD_KINDS) {
+    router.get(
+      `/dashboard/${kind}`,
+      handle(async (req, res) => {
+        res.status(200).json(await dashboard.view(kind as DashboardKind, req.query?.project));
+      })
+    );
+  }
   if (guard !== undefined) {
+    router.post(
+      '/dashboard/refresh',
+      ...guarded(
+        handle(async (req, res) => {
+          const body = (req.body ?? {}) as { project?: unknown; kind?: unknown };
+          res.status(200).json(await dashboard.refresh(body.kind, body.project));
+        })
+      )
+    );
     router.post(
       '/pause',
       ...guarded(
@@ -467,6 +548,7 @@ export function createFlowExtension(
   const stopProjects =
     projects !== undefined ? projects.onChange(() => model.projectsChanged()) : () => {};
   const stopModelPoll = ctx.schedule(MODEL_INTERVAL_SECONDS, async () => model.poll());
+  const stopDashboard = ctx.schedule(DASHBOARD_TICK_SECONDS, async () => dashboard.tick());
 
   let advisor: FlowAdvisor | null = null;
   const watcher = new ContinuedWatcher({
@@ -496,6 +578,8 @@ export function createFlowExtension(
     dispose() {
       stopWatching();
       stopModelPoll();
+      stopDashboard();
+      dashboard.dispose();
       stopProjects();
       stopSettings();
       model.dispose();

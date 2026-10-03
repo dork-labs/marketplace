@@ -335,6 +335,20 @@ export class ModelService {
     void this.deps.projects?.report(cwd).catch(() => null);
   }
 
+  /**
+   * Ask for a read of a project's tracker soon, as a Flow tab looking at it
+   * does (the dashboard's Refresh on its Issues page).
+   *
+   * @param root - The project's main checkout.
+   */
+  viewTracker(root: string): void {
+    this.reader.view(root);
+    void this.projects().then(
+      (entries) => this.reader.tick(entries, this.allowed),
+      () => {}
+    );
+  }
+
   /** Every flow project now. */
   async projects(): Promise<FlowProjectEntry[]> {
     return this.directory.list(

@@ -1,0 +1,17 @@
+{
+  "data": {
+    "repository": {
+      "defaultBranchRef": {
+        "name": "main",
+        "target": { "oid": "0123456789abcdef0123456789abcdef01234567", "statusCheckRollup": { "state": "FAILURE" } }
+      },
+      "latestRelease": {
+        "tagName": "v1.4.0",
+        "name": "v1.4.0",
+        "publishedAt": "2026-09-30T12:00:00Z",
+        "url": "https://github.com/acme/app/releases/tag/v1.4.0"
+      },
+      "refs": { "nodes": [{ "name": "v1.4.1-rc.1" }] }
+    }
+  }
+}

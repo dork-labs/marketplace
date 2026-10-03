@@ -18,6 +18,24 @@ export const HOME_PATH = '/x/flow';
 /** The page paths flow registers, relative to {@link HOME_PATH}. */
 export const PAGE_PATHS = { home: '', project: 'p/:name', settings: 'p/:name/settings' } as const;
 
+/** The dashboard's pages, relative to {@link HOME_PATH}. */
+export const DASHBOARD_PATHS = { issues: 'issues', prs: 'prs', releases: 'releases' } as const;
+
+/**
+ * A dashboard page, for one project or the first with a dashboard.
+ *
+ * @param kind - The page.
+ * @param project - Core's project name, or `null`.
+ * @returns `/x/flow/<kind>`, with `?project=<name>` when one is named.
+ */
+export function dashboardPath(
+  kind: keyof typeof DASHBOARD_PATHS,
+  project: string | null = null
+): string {
+  const page = `${HOME_PATH}/${DASHBOARD_PATHS[kind]}`;
+  return project === null ? page : `${page}?project=${encodeURIComponent(project)}`;
+}
+
 /** Settings → Flow, on a DorkOS without pages (the Settings tab is `flow:fleet`). */
 export const SETTINGS_TAB_LINK = '?settings=flow:fleet';
 

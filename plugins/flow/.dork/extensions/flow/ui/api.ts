@@ -6,6 +6,7 @@
  */
 
 import type { CapacityView } from '../lib/capacity.ts';
+import type { DashboardBody, DashboardIndex, DashboardKind } from '../lib/dashboard/types.ts';
 import type { FleetAccount, FleetView } from '../lib/fleet.ts';
 import type { DecisionAnswer } from '../lib/host-types.ts';
 import type { FlowModel } from '../lib/model.ts';
@@ -311,4 +312,42 @@ export function getRepoMigration(): Promise<RepoMigration> {
  */
 export function putRepoMigration(record: RepoMigration): Promise<RepoMigration> {
   return call<RepoMigration>('PUT', '/fleet/migration', record);
+}
+
+/**
+ * Read every project's dashboard pages.
+ *
+ * @returns The `GET /dashboard` body.
+ */
+export function getDashboardIndex(): Promise<DashboardIndex> {
+  return call<DashboardIndex>('GET', '/dashboard');
+}
+
+/**
+ * Read one dashboard page of one project.
+ *
+ * @param kind - The page.
+ * @param project - The project's name, or `null` for the first with a dashboard.
+ * @returns The `GET /dashboard/<kind>` body.
+ */
+export function getDashboard<T>(
+  kind: DashboardKind,
+  project: string | null
+): Promise<DashboardBody<T>> {
+  const query = project === null ? '' : `?project=${encodeURIComponent(project)}`;
+  return call<DashboardBody<T>>('GET', `/dashboard/${kind}${query}`);
+}
+
+/**
+ * Read one dashboard page again now.
+ *
+ * @param kind - The page.
+ * @param project - The project's name.
+ * @returns The page's new body.
+ */
+export function refreshDashboard<T>(
+  kind: DashboardKind,
+  project: string
+): Promise<DashboardBody<T>> {
+  return call<DashboardBody<T>>('POST', '/dashboard/refresh', { project, kind });
 }

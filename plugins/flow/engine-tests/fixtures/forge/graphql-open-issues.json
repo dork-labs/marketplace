@@ -1,0 +1,32 @@
+{
+  "data": {
+    "viewer": { "login": "octo-person" },
+    "repository": {
+      "issues": {
+        "totalCount": 2,
+        "nodes": [
+          {
+            "number": 7,
+            "title": "Export fails on <script>alert(1)</script> names",
+            "url": "https://github.com/acme/app/issues/7",
+            "createdAt": "2026-09-29T09:00:00Z",
+            "updatedAt": "2026-10-01T09:00:00Z",
+            "author": { "login": "a-reporter" },
+            "assignees": { "nodes": [{ "login": "octo-person" }] },
+            "labels": { "nodes": [{ "name": "bug" }] }
+          },
+          {
+            "number": 6,
+            "title": "Docs typo",
+            "url": "https://github.com/acme/app/issues/6",
+            "createdAt": "2026-09-28T09:00:00Z",
+            "updatedAt": "2026-09-28T09:00:00Z",
+            "author": null,
+            "assignees": { "nodes": [] },
+            "labels": { "nodes": [] }
+          }
+        ]
+      }
+    }
+  }
+}

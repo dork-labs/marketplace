@@ -20,6 +20,15 @@
 
 import { z } from 'zod';
 
+import {
+  DASHBOARD_VIEWS,
+  NEXT_LIMIT_MAX,
+  PRODUCT_ID_PATTERN,
+  RELATIVE_PATH_PATTERN,
+  REPO_PATTERN,
+  TEAM_KEY_PATTERN,
+} from './dashboard-config.ts';
+
 /**
  * The active project tracker, as an **adapter slug** (§3).
  *
@@ -975,6 +984,80 @@ export const FleetConfigSchema = z
   })
   .prefault({});
 
+/** A path inside a repository, relative to its root (`dashboard-config.ts`). */
+const RepoPathSchema = z
+  .string()
+  .regex(
+    RELATIVE_PATH_PATTERN,
+    'must be a path inside the repository, relative to its root, with no ..'
+  );
+
+/** How a product is released: an agent runs a command (reserved; flow does not run it yet). */
+export const DashboardReleaseSchema = z.object({
+  /** The only kind today. */
+  kind: z.literal('agent-command'),
+  /** The command an agent runs, such as `/release`. */
+  command: z.string().min(1),
+  /** The flag that makes that command a dry run. */
+  dryRunFlag: z.string().min(1),
+});
+
+/** One product a repository releases, for the dashboard's Releases page. */
+export const DashboardProductSchema = z.object({
+  /** Its id, unique in the block. */
+  id: z.string().regex(PRODUCT_ID_PATTERN, 'must be lowercase letters, digits and dashes'),
+  /** The repository it is released from, `owner/name`. */
+  repo: z.string().regex(REPO_PATTERN, 'must be a GitHub repository as owner/name'),
+  /** The file that holds its version, relative to the repository root. */
+  versionFile: RepoPathSchema,
+  /** The folder of changes not yet released, relative to the repository root. */
+  unreleased: RepoPathSchema,
+  /** How it is released. Reserved: checked, not run, in this version. */
+  release: DashboardReleaseSchema.optional(),
+  /** Workflows whose latest run the Releases page shows, by file or name. */
+  watchWorkflows: z.array(z.string().regex(/\S/, 'must be a workflow file or name')).default([]),
+});
+
+/**
+ * What Flow's dashboard pages show (Issues, Pull requests, Releases): tracker
+ * teams, GitHub repositories and products. Every field has a default, so a
+ * config without the block is valid; the dashboard itself is on only for a
+ * project whose config has the block. `dashboard-config.ts` reads it without
+ * zod by the same rules, and a test holds the two together. No secrets: the
+ * reads use the tracker connection and the `gh` sign-in flow already has.
+ */
+export const DashboardSchema = z
+  .object({
+    /** Tracker team keys whose issues the Issues page lists; empty means the project's own team. */
+    teams: z
+      .array(z.string().regex(TEAM_KEY_PATTERN, 'must be a team key such as ACME'))
+      .default([]),
+    /** GitHub repositories, `owner/name`, whose issues and pull requests the pages list. */
+    repos: z
+      .array(z.string().regex(REPO_PATTERN, 'must be a GitHub repository as owner/name'))
+      .default([]),
+    /** Products the Releases page shows. */
+    products: z
+      .array(DashboardProductSchema)
+      .default([])
+      .superRefine((products, ctx) => {
+        const seen = new Set<string>();
+        for (const product of products) {
+          if (seen.has(product.id)) {
+            ctx.addIssue({ code: 'custom', message: `product id ${product.id} is used twice` });
+          }
+          seen.add(product.id);
+        }
+      }),
+    /** Which pages are on. `next` and `roadmap` are reserved for later versions. */
+    views: z.array(z.enum(DASHBOARD_VIEWS)).default([...DASHBOARD_VIEWS]),
+    /** Reserved for the Next page: how many items it shows. Unused in this version. */
+    next: z.object({ limit: z.number().int().min(1).max(NEXT_LIMIT_MAX) }).optional(),
+    /** Reserved for the Roadmap page: its lanes. Unused in this version. */
+    roadmap: z.object({ lanes: z.array(z.string().min(1)) }).optional(),
+  })
+  .prefault({});
+
 /**
  * The authoritative `/flow` engine configuration schema (§9).
  *
@@ -1032,6 +1115,8 @@ export const FlowConfigSchema = z
     selfImprovement: SelfImprovementSchema,
     /** Whether flow suggests setting up this machine's accounts. */
     fleet: FleetConfigSchema,
+    /** What Flow's dashboard pages show. */
+    dashboard: DashboardSchema,
   })
   .strict();
 
