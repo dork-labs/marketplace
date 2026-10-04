@@ -225,6 +225,8 @@ export const FlowRunSchema = z.looseObject({
   // schema gives: a newer writer's extra keys must survive an older reader.
   review: RunReviewSchema.optional(),
   question: RunQuestionSchema.optional(),
+  // The reviewer agent's ship waiting on checks (spec flow-multiproject §7.5).
+  shipWait: z.looseObject({ sha: z.string(), since: z.string(), checkedAt: z.string() }).optional(),
 });
 
 /**

@@ -118,6 +118,58 @@ export function pendingChecks(rollup: unknown): number {
 }
 
 /**
+ * How many checks in `statusCheckRollup` the head commit has reported at all,
+ * finished or not; `undefined` when the rollup cannot be read, so nothing
+ * mistakes an unreadable answer for "no checks".
+ *
+ * @param rollup - The `statusCheckRollup` array from `gh pr view --json`.
+ * @returns The count, or `undefined`.
+ */
+export function reportedChecks(rollup: unknown): number | undefined {
+  return Array.isArray(rollup) ? rollup.length : undefined;
+}
+
+/**
+ * The checks a merge into a branch requires, from two `gh api` answers:
+ * `repos/{repo}/rules/branches/{branch}` (rulesets: every
+ * `required_status_checks` rule's contexts) and `repos/{repo}/branches/{branch}`
+ * (classic protection: its `required_status_checks` contexts and checks, unless
+ * `enforcement_level` is `off`). Both shapes are the ones GitHub returned for
+ * dork-labs/marketplace and dork-labs/loop on 2026-10-03.
+ *
+ * @param rules - The parsed rules answer (an array).
+ * @param branch - The parsed branch answer (an object).
+ * @returns The required check names, deduplicated and sorted (empty when none
+ *   is required), or `null` when either answer is not in a shape it knows.
+ */
+export function parseRequiredChecks(rules: unknown, branch: unknown): string[] | null {
+  const branchView = record(branch);
+  if (!Array.isArray(rules) || branchView === undefined) return null;
+  const names = new Set<string>();
+  for (const entry of rules) {
+    const rule = record(entry);
+    if (rule?.type !== 'required_status_checks') continue;
+    const checks = record(rule.parameters)?.required_status_checks;
+    if (!Array.isArray(checks)) return null;
+    for (const check of checks) {
+      const context = str(record(check)?.context);
+      if (context !== undefined) names.add(context);
+    }
+  }
+  const classic = record(record(branchView.protection)?.required_status_checks);
+  if (classic !== undefined && str(classic.enforcement_level) !== 'off') {
+    for (const context of Array.isArray(classic.contexts) ? classic.contexts : []) {
+      if (typeof context === 'string') names.add(context);
+    }
+    for (const check of Array.isArray(classic.checks) ? classic.checks : []) {
+      const context = str(record(check)?.context);
+      if (context !== undefined) names.add(context);
+    }
+  }
+  return [...names].sort();
+}
+
+/**
  * Parse `gh pr view --json state,autoMergeRequest,statusCheckRollup,headRefOid,baseRefName,mergeable,mergeStateStatus`.
  *
  * @param raw - The parsed JSON.
@@ -142,6 +194,7 @@ export function parsePrView(raw: unknown, queued: boolean, where: string): PrSta
     state: (state as string).toLowerCase() as PrStatus['state'],
     failing: failingChecks(view.statusCheckRollup),
     pendingChecks: pendingChecks(view.statusCheckRollup),
+    checksReported: reportedChecks(view.statusCheckRollup),
     armed: view.autoMergeRequest !== null && view.autoMergeRequest !== undefined,
     queued,
     headSha,
@@ -464,6 +517,19 @@ export function createGithubForge(options: GithubForgeOptions): Forge {
       } finally {
         rmSync(dir, { recursive: true, force: true });
       }
+    },
+
+    async requiredChecks(base) {
+      const ref = base.split('/').map(encodeURIComponent).join('/');
+      const rules = await ghJson(
+        ['api', ...hostArgs, `repos/${target.repo}/rules/branches/${ref}`],
+        `reading the rules for ${target.repo} ${base}`
+      );
+      const branch = await ghJson(
+        ['api', ...hostArgs, `repos/${target.repo}/branches/${ref}`],
+        `reading the protection of ${target.repo} ${base}`
+      );
+      return parseRequiredChecks(rules, branch);
     },
 
     async recentGroupFailures(base, checkNames, sinceMinutes) {

@@ -70,7 +70,8 @@
       "onConflict": "resolve-if-mechanical",
       "ciRetries": 1,
       "reapproveOnFunctionalChange": true,
-      "maxMergeAttempts": 3
+      "maxMergeAttempts": 3,
+      "noChecksPassAfterMinutes": 10
     },
     "circuitBreaker": { "estimateMultiplier": 2, "tokenBudget": 2000000 },
     "projectCompletion": "advisory"

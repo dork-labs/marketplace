@@ -21,7 +21,9 @@ import {
   createGithubForge,
   failingChecks,
   parsePrView,
+  parseRequiredChecks,
   pendingChecks,
+  reportedChecks,
 } from '../../scripts/forge/github.ts';
 import { ForgeError, forgeTargetFor } from '../../scripts/forge/types.ts';
 import { parsePrView as parseForConflict } from '../../scripts/forge/github.ts';
@@ -438,5 +440,97 @@ describe('forgeTargetFor', () => {
     expect(() => forgeTargetFor('/tmp/origin.git', {})).toThrow(
       'flow drain supports GitHub only today'
     );
+  });
+});
+
+// DOR-2535: a repo with no CI reports no checks at all, and flow's reviewer
+// agent may count that as passed only when the base requires none. The rules
+// and branch answers are trimmed from what GitHub returned on 2026-10-03 for
+// dork-labs/marketplace (a ruleset requiring three checks, classic protection
+// off) and dork-labs/loop (nothing required).
+describe('required checks and reported checks', () => {
+  const marketplaceRules = [
+    { type: 'merge_queue', parameters: { merge_method: 'SQUASH' } },
+    {
+      type: 'required_status_checks',
+      parameters: {
+        strict_required_status_checks_policy: false,
+        required_status_checks: [
+          { context: 'flow plugin', integration_id: 15368 },
+          { context: 'skills and manifests', integration_id: 15368 },
+          { context: 'script fixtures', integration_id: 15368 },
+        ],
+      },
+    },
+    { type: 'deletion' },
+  ];
+  const off = {
+    protected: true,
+    protection: {
+      enabled: false,
+      required_status_checks: { checks: [], contexts: [], enforcement_level: 'off' },
+    },
+  };
+
+  it('reads a ruleset, ignores classic protection that is off, and reads none as empty', () => {
+    expect(parseRequiredChecks(marketplaceRules, off)).toEqual([
+      'flow plugin',
+      'script fixtures',
+      'skills and manifests',
+    ]);
+    expect(parseRequiredChecks([], { ...off, protected: false })).toEqual([]);
+  });
+
+  it('reads classic protection when it is enforced, deduplicated with the rules', () => {
+    const classic = {
+      protected: true,
+      protection: {
+        enabled: true,
+        required_status_checks: {
+          enforcement_level: 'non_admins',
+          contexts: ['build', 'flow plugin'],
+          checks: [{ context: 'lint', app_id: 1 }],
+        },
+      },
+    };
+    expect(parseRequiredChecks(marketplaceRules, classic)).toEqual([
+      'build',
+      'flow plugin',
+      'lint',
+      'script fixtures',
+      'skills and manifests',
+    ]);
+  });
+
+  it('says it cannot tell when an answer is not in a shape it knows', () => {
+    expect(parseRequiredChecks({ message: 'Not Found' }, off)).toBeNull();
+    expect(parseRequiredChecks([], [])).toBeNull();
+    expect(
+      parseRequiredChecks([{ type: 'required_status_checks', parameters: {} }], off)
+    ).toBeNull();
+  });
+
+  it('counts reported checks, and never reads an unreadable rollup as none', () => {
+    expect(reportedChecks([])).toBe(0);
+    expect(reportedChecks([{}, {}])).toBe(2);
+    expect(reportedChecks(undefined)).toBeUndefined();
+    const view = parsePrView(
+      { state: 'OPEN', headRefOid: 'abc', baseRefName: 'main', statusCheckRollup: [] },
+      false,
+      'r#1'
+    );
+    expect(view).toMatchObject({ checksReported: 0, pendingChecks: 1 });
+  });
+
+  it('asks gh for the rules and the branch of the base', async () => {
+    const { gh, forge } = forgeWith({
+      'api repos/dork-labs/marketplace/rules/branches/main': ok([]),
+      'api repos/dork-labs/marketplace/branches/main': ok({ ...off, protected: false }),
+    });
+    expect(await forge.requiredChecks?.('main')).toEqual([]);
+    expect(gh.calls.map((c) => c.args.join(' '))).toEqual([
+      'api repos/dork-labs/marketplace/rules/branches/main',
+      'api repos/dork-labs/marketplace/branches/main',
+    ]);
   });
 });

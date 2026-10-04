@@ -136,10 +136,10 @@ The review gate is always checked. VERIFY never advances to DONE.
 1. `flow stage <id> review --checkpoint-file <f>`.
 2. `flow autonomy --kind ship --json`. `answeredBy: person`: `assignToHuman(item)` and
    **stop**. Otherwise, when the launched reviewer recorded a clean verdict at the branch
-   head: `flow review <id> --approve --by reviewer-agent --wait --json`. `--wait` is the
-   retry point: with `gates.review.mergeOnApproval` off it waits for the checks to finish
-   (with it on, the forge's auto-merge waits). Refused, or no clean verdict:
-   `assignToHuman(item)` and stop.
+   head: `flow review <id> --approve --by reviewer-agent --json`, never `--wait` (it
+   outlives your command timeout). `"verdict": "pending"`: checks still running; leave the
+   item at the gate, unassigned: the drain re-checks it (`flow-drain` step 2a). Any other
+   refusal, or no clean verdict: `assignToHuman(item)` and stop.
 3. REVIEW has no skill: never invent one, never approve without a clean check. After the
    PR merges, `/flow:done <issue>` closes the item.
 

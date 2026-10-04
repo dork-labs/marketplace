@@ -18,8 +18,19 @@
  * `--by reviewer-agent` is refused unless the project's "Ship finished work"
  * stop is not Ask me first, `review.adversarial` is on, a token-bound clean
  * verdict exists at the branch's head on the forge (`flow report verdict`,
- * drain or VERIFY), and the PR's checks pass. A verdict written any other way
- * is not a verdict.
+ * drain or VERIFY), and no check fails. A verdict written any other way is not
+ * a verdict.
+ *
+ * With `gates.review.mergeOnApproval` off nothing is armed, so the reviewer
+ * agent's approval is the last check before a person merges, and every check
+ * must have passed. When they have not finished, it ships nothing and returns
+ * at once (exit 5, `verdict: "pending"`), saving the run's `shipWait`: the
+ * retry point the drain's tick re-checks with the same command. One long
+ * blocking call outlived an agent's command timeout and handed the gate to a
+ * person (DOR-2535). `--wait [--wait-minutes n]` still waits in one call, for
+ * a person at a terminal. A PR no check ever reports on counts as passed
+ * `gates.review.noChecksPassAfterMinutes` after the first look, only when the
+ * base branch requires no checks; the approval then says no checks ran.
  *
  * `--changes (--note <text> | --note-file <file>)`: comments "Sent back: <note>"
  * as the person, requests changes on the PR (a plain comment when the forge
@@ -38,8 +49,9 @@ import path from 'node:path';
 
 import { stopInForce } from '../autonomy.ts';
 import { ConfigError, PreconditionError, UsageError } from '../errors.ts';
-import type { FlowRun } from '../flow-run.ts';
-import type { Forge, ReviewOutcome } from '../forge/types.ts';
+import type { FlowRun, RunShipWait } from '../flow-run.ts';
+import type { FlowStateFile } from '../flow-state-file.ts';
+import { ForgeError, type Forge, type ReviewOutcome } from '../forge/types.ts';
 import { reviewFindingsPath } from '../drain/messages.ts';
 import { MAX_ANSWER_LENGTH } from '../question.ts';
 import { projectionFor } from '../work-state.ts';
@@ -150,6 +162,165 @@ async function forgeFor(
 }
 
 /**
+ * What the reviewer agent found on the PR's checks:
+ *
+ * - `passed` — every check finished without failing (or the PR will be armed,
+ *   and the forge's auto-merge waits for the required ones).
+ * - `none` — no check ever reported on the head, the base requires none, and
+ *   `gates.review.noChecksPassAfterMinutes` went by since the reviewer agent
+ *   first looked: counted as passed, and said so in `note`.
+ * - `pending` — not yet: `why` says what is awaited, `since` when the wait
+ *   began, `recorded` whether the run's retry point was saved.
+ */
+export type ShipChecks =
+  | { kind: 'passed' }
+  | { kind: 'none'; note: string }
+  | {
+      kind: 'pending';
+      pending: number | undefined;
+      why: string;
+      since: string;
+      recorded: boolean;
+    };
+
+/** What {@link awaitChecks} needs. */
+interface AwaitChecksInput {
+  forge: Forge;
+  pr: number;
+  identifier: string;
+  /** The branch head the reviewer agent checked. */
+  head: string;
+  /** `true` with `mergeOnApproval` off: every check must have passed. */
+  needsPassed: boolean;
+  /** `gates.review.noChecksPassAfterMinutes`. */
+  noChecksPassAfterMinutes: number | null;
+  /** The run's saved wait, if any. */
+  prior: RunShipWait | undefined;
+  /** Save the wait on the run; resolves `false` when the store stayed locked. */
+  record(wait: RunShipWait): Promise<boolean>;
+}
+
+/** `n minutes`, singular for one. */
+function minutes(n: number): string {
+  return `${n} minute${n === 1 ? '' : 's'}`;
+}
+
+/**
+ * Read the PR's checks for the reviewer agent's ship, and with `--wait` keep
+ * reading until they settle or the wait runs out. Without `--wait` it reads
+ * once and returns at once, so an agent's command timeout never kills it.
+ *
+ * Every `pending` answer saves the run's {@link RunShipWait} first (not on a
+ * dry run), so a `--wait` killed midway still leaves the retry point for the
+ * drain's next tick. The no-checks clock starts at the saved wait's `since` when
+ * it is for the same commit, so it keeps running across ticks.
+ *
+ * @param ctx - The verb's context (clock, sleep, dry run, `--wait` flags).
+ * @param input - The forge, PR, head and settings.
+ * @returns What the checks say.
+ * @throws {PreconditionError} When a check is failing (exit 5).
+ */
+export async function awaitChecks(ctx: VerbContext, input: AwaitChecksInput): Promise<ShipChecks> {
+  const { forge, pr, identifier, head } = input;
+  const waitMs = waitMinutes(ctx) * 60_000;
+  const startedAt = ctx.now();
+  const priorSince =
+    input.prior !== undefined && input.prior.sha.toLowerCase() === head.toLowerCase()
+      ? Date.parse(input.prior.since)
+      : Number.NaN;
+  const since = Number.isNaN(priorSince) ? startedAt : new Date(priorSince);
+  let required: string[] | null | undefined;
+  let requiredWhy = '';
+  let waited = 0;
+  for (;;) {
+    const status = await forge.prStatus(pr);
+    if (status.failing.length > 0) {
+      throw new PreconditionError(
+        `${identifier}'s PR has failing checks (${status.failing.map((c) => c.name).join(', ')}), so the reviewer agent does not ship it`
+      );
+    }
+    if (!input.needsPassed || status.pendingChecks === 0) return { kind: 'passed' };
+
+    let why = `${status.pendingChecks === undefined ? 'its checks have' : `${status.pendingChecks} of its checks have`} not finished on PR #${pr}`;
+    if (status.checksReported === 0) {
+      const grace = input.noChecksPassAfterMinutes;
+      if (grace === null) {
+        why = `no checks have reported on PR #${pr}, and this project never counts that as passed (gates.review.noChecksPassAfterMinutes is null)`;
+      } else {
+        if (required === undefined) {
+          try {
+            required =
+              forge.requiredChecks === undefined ? null : await forge.requiredChecks(status.base);
+          } catch (error) {
+            if (!(error instanceof ForgeError)) throw error;
+            required = null;
+            requiredWhy = ` (${error.message})`;
+          }
+        }
+        if (required === null) {
+          why = `no checks have reported on PR #${pr}, and flow cannot tell whether ${status.base || 'its base branch'} requires any${requiredWhy}`;
+        } else if (required.length > 0) {
+          why = `${required.length === 1 ? 'a required check has' : 'required checks have'} not started on PR #${pr} (${required.join(', ')})`;
+        } else {
+          const elapsed = Math.max(
+            ctx.now().getTime() - since.getTime(),
+            startedAt.getTime() - since.getTime() + waited
+          );
+          if (elapsed >= grace * 60_000) {
+            return {
+              kind: 'none',
+              note: `No checks ran on PR #${pr}, and ${status.base || 'its base branch'} requires none, so flow counted that as passed after ${minutes(grace)}.`,
+            };
+          }
+          const left = Math.max(1, Math.ceil((grace * 60_000 - elapsed) / 60_000));
+          why = `no checks have reported on PR #${pr} yet; none are required, so flow counts that as passed in about ${minutes(left)}`;
+        }
+      }
+    }
+
+    const recorded = ctx.dryRun
+      ? false
+      : await input.record({
+          sha: head,
+          since: since.toISOString(),
+          checkedAt: ctx.now().toISOString(),
+        });
+    if (waited >= waitMs) {
+      return {
+        kind: 'pending',
+        pending: status.pendingChecks,
+        why: waitMs > 0 ? `${why}, after ${minutes(waitMinutes(ctx))} of waiting` : why,
+        since: since.toISOString(),
+        recorded,
+      };
+    }
+    await ctx.io.sleep(CHECK_POLL_MS);
+    waited += CHECK_POLL_MS;
+  }
+}
+
+/**
+ * Save or clear the run's {@link RunShipWait}.
+ *
+ * @param store - The run store.
+ * @param issueId - The run's key.
+ * @param wait - The wait to save, or `undefined` to clear it.
+ * @returns `false` when the store stayed locked by another flow command.
+ */
+async function setShipWait(
+  store: FlowStateFile,
+  issueId: string,
+  wait: RunShipWait | undefined
+): Promise<boolean> {
+  const result = await store.updateRun(issueId, (current) => {
+    if (wait !== undefined) return { ...current, shipWait: wait };
+    const { shipWait: _cleared, ...rest } = current;
+    return rest;
+  });
+  return result.status !== 'dropped';
+}
+
+/**
  * Run `flow review`.
  *
  * @param ctx - The verb's context.
@@ -197,60 +368,80 @@ export async function run(ctx: VerbContext): Promise<VerbResult> {
   if (approve) {
     let head: string | null = null;
     let sha: string | null = null;
+    let noChecksNote: string | null = null;
     if (by === 'reviewer-agent') {
-      const read = loaded.autonomy;
-      const stop =
-        read === null
-          ? 'ask'
-          : stopInForce(read, 'ship', { reviewerAgent: config.review.adversarial });
-      if (stop === 'ask') {
-        throw new PreconditionError(
-          config.review.adversarial
-            ? `this project's settings ask you before finished work ships (Ship finished work: Ask me first), so the reviewer agent cannot ship ${identifier}`
-            : `no reviewer agent checks this repo's work (review.adversarial is off), so only a person can ship ${identifier}`
-        );
-      }
-      if (target.forge === null) {
-        throw new PreconditionError(
-          `the reviewer agent can only ship a branch it can check on the forge: ${target.why}`
-        );
-      }
-      head = await target.forge.branchHead(existing.branch);
-      sha = cleanVerdictSha(existing);
-      if (head === null || sha === null || sha.toLowerCase() !== head.toLowerCase()) {
-        throw new PreconditionError(
-          `${identifier} has no clean review recorded with the reviewer's token at the branch head (${short(head)}); the reviewer agent ships only work it checked`
-        );
-      }
-      // Never past a failing check. When the PR will be armed, a check still
-      // running is fine: the forge's auto-merge waits for the required ones.
-      // Without the arm, the reviewer agent's approval is the last check before
-      // a person merges, so every check must have passed; --wait waits for them.
-      if (pr === null) {
-        throw new PreconditionError(
-          `${identifier} has no open PR, so there are no checks the reviewer agent can see`
-        );
-      }
-      const forge = target.forge;
-      const needsPassed = !config.gates.review.mergeOnApproval;
-      const waitMs = waitMinutes(ctx) * 60_000;
-      let waited = 0;
-      for (;;) {
-        const status = await forge.prStatus(pr.number);
-        if (status.failing.length > 0) {
+      let checked: ShipChecks;
+      try {
+        const read = loaded.autonomy;
+        const stop =
+          read === null
+            ? 'ask'
+            : stopInForce(read, 'ship', { reviewerAgent: config.review.adversarial });
+        if (stop === 'ask') {
           throw new PreconditionError(
-            `${identifier}'s PR has failing checks (${status.failing.map((c) => c.name).join(', ')}), so the reviewer agent does not ship it`
+            config.review.adversarial
+              ? `this project's settings ask you before finished work ships (Ship finished work: Ask me first), so the reviewer agent cannot ship ${identifier}`
+              : `no reviewer agent checks this repo's work (review.adversarial is off), so only a person can ship ${identifier}`
           );
         }
-        if (!needsPassed || status.pendingChecks === 0) break;
-        if (waited >= waitMs) {
+        if (target.forge === null) {
           throw new PreconditionError(
-            `${identifier}'s PR has checks that have not passed yet${status.pendingChecks === undefined ? '' : ` (${status.pendingChecks} not finished)`}${waitMs > 0 ? `, after ${waitMinutes(ctx)} minutes of waiting` : ''}, so the reviewer agent does not ship it yet`
+            `the reviewer agent can only ship a branch it can check on the forge: ${target.why}`
           );
         }
-        await ctx.io.sleep(CHECK_POLL_MS);
-        waited += CHECK_POLL_MS;
+        head = await target.forge.branchHead(existing.branch);
+        sha = cleanVerdictSha(existing);
+        if (head === null || sha === null || sha.toLowerCase() !== head.toLowerCase()) {
+          throw new PreconditionError(
+            `${identifier} has no clean review recorded with the reviewer's token at the branch head (${short(head)}); the reviewer agent ships only work it checked`
+          );
+        }
+        if (pr === null) {
+          throw new PreconditionError(
+            `${identifier} has no open PR, so there are no checks the reviewer agent can see`
+          );
+        }
+        checked = await awaitChecks(ctx, {
+          forge: target.forge,
+          pr: pr.number,
+          identifier,
+          head,
+          needsPassed: !config.gates.review.mergeOnApproval,
+          noChecksPassAfterMinutes: config.gates.review.noChecksPassAfterMinutes,
+          prior: existing.shipWait,
+          record: (wait) => setShipWait(store, existing.issueId, wait),
+        });
+      } catch (error) {
+        // A refusal ends the wait: the drain stops re-checking, and the caller
+        // hands the gate to a person.
+        // (The wait may have been saved by this very call, before a check failed.)
+        if (error instanceof PreconditionError && !ctx.dryRun) {
+          await setShipWait(store, existing.issueId, undefined);
+        }
+        throw error;
       }
+      if (checked.kind === 'pending') {
+        return {
+          exitCode: 5,
+          json: {
+            ok: false,
+            dryRun: ctx.dryRun,
+            identifier,
+            verdict: 'pending',
+            by,
+            pr: pr === null ? null : { number: pr.number, url: pr.url },
+            checks: {
+              state: 'pending',
+              pending: checked.pending ?? null,
+              why: checked.why,
+              waitingSince: checked.since,
+            },
+            retryRecorded: checked.recorded,
+          },
+          text: `Not shipped yet: ${checked.why}. Nothing was posted. Run the same command again later${checked.recorded ? '; a drain tick does that by itself' : ''}.`,
+        };
+      }
+      noChecksNote = checked.kind === 'none' ? checked.note : null;
     }
 
     // What to arm: the commit that was approved, never whatever the head is now.
@@ -304,6 +495,9 @@ export async function run(ctx: VerbContext): Promise<VerbResult> {
           armed = true;
         }
       }
+      if (existing.shipWait !== undefined || by === 'reviewer-agent') {
+        await setShipWait(store, existing.issueId, undefined);
+      }
       recordEvent(
         ctx,
         by === 'person'
@@ -316,6 +510,7 @@ export async function run(ctx: VerbContext): Promise<VerbResult> {
             }
       );
     }
+    const checksText = noChecksNote === null ? '' : ` ${noChecksNote}`;
     const armText = armed
       ? ` Armed PR #${pr?.number} to merge when its checks pass.`
       : pr !== null && !config.gates.review.mergeOnApproval
@@ -333,10 +528,11 @@ export async function run(ctx: VerbContext): Promise<VerbResult> {
         pr: pr === null ? null : { number: pr.number, url: pr.url },
         forgeReview,
         armed,
-        note: armText.trim() === '' ? null : armText.trim(),
+        note: `${checksText}${armText}`.trim() === '' ? null : `${checksText}${armText}`.trim(),
+        checks: noChecksNote === null ? null : 'none',
         forgeSkipped: target.forge === null ? target.why : null,
       },
-      text: `${ctx.dryRun ? 'Would ship' : 'Shipped'} ${identifier}${by === 'reviewer-agent' ? ' (the reviewer agent approved it)' : ''}.${armText}`,
+      text: `${ctx.dryRun ? 'Would ship' : 'Shipped'} ${identifier}${by === 'reviewer-agent' ? ' (the reviewer agent approved it)' : ''}.${checksText}${armText}`,
     };
   }
 
@@ -351,6 +547,7 @@ export async function run(ctx: VerbContext): Promise<VerbResult> {
   }
   if (!ctx.dryRun) {
     await adapter.comment(item, `Sent back: ${text}`);
+    if (existing.shipWait !== undefined) await setShipWait(store, existing.issueId, undefined);
     if (pr !== null && target.forge !== null) {
       forgeReview = await target.forge.review(pr.number, { event: 'request-changes', body: text });
     }
