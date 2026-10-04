@@ -371,14 +371,24 @@ export async function run(ctx: VerbContext): Promise<VerbResult> {
   }
 }
 
-/** Clear the wait on the run for `identifier`, if it has one (best effort). */
+/**
+ * Clear the wait on the run for `identifier`, if it has one. Best effort: it
+ * runs while a refusal is on its way out, and must never replace it, so any
+ * failure here is swallowed (the next tick's refusal tries again). Identifiers
+ * match without regard to case, as trackers treat them.
+ */
 async function clearShipWaitFor(ctx: VerbContext, identifier: string | undefined): Promise<void> {
   if (identifier === undefined) return;
-  const store = openFlowStateFile(ctx.projectDir, { now: ctx.now });
-  const waiting = Object.values(store.read()).find(
-    (r) => r.identifier === identifier && r.shipWait !== undefined
-  );
-  if (waiting !== undefined) await setShipWait(store, waiting.issueId, undefined);
+  const wanted = identifier.toLowerCase();
+  try {
+    const store = openFlowStateFile(ctx.projectDir, { now: ctx.now });
+    const waiting = Object.values(store.read()).find(
+      (r) => r.identifier.toLowerCase() === wanted && r.shipWait !== undefined
+    );
+    if (waiting !== undefined) await setShipWait(store, waiting.issueId, undefined);
+  } catch {
+    // Keep the refusal: it is the answer the caller acts on.
+  }
 }
 
 /** The "not shipped yet" answer (exit 5, `verdict: "pending"`); nothing was posted. */

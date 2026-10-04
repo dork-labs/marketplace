@@ -8,7 +8,15 @@
  */
 
 import { execFileSync } from 'node:child_process';
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import {
+  chmodSync,
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  rmSync,
+  writeFileSync,
+} from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
@@ -1540,6 +1548,49 @@ describe('the reviewer agent ships with auto-merge off (DOR-2535)', () => {
     });
     expect(closed.code).toBe(EXIT.precondition);
     expect(stored().shipWait).toBeUndefined();
+  });
+
+  // Re-review (a): the wait is found whatever case the identifier was typed in.
+  it('clears the wait for an identifier typed in another case', async () => {
+    setUp();
+    writeRun({
+      review: clean,
+      stage: 'execute',
+      status: 'running',
+      shipWait: { sha: HEAD, since: NOW, checkedAt: NOW },
+    });
+    const result = await flow(['review', 'acme-12', '--approve', '--by', 'reviewer-agent'], {
+      tracker: createFakeAdapter({ items: [started()] }),
+      forge: fakeForge({ head: HEAD }),
+    });
+    expect(result.code).toBe(EXIT.precondition);
+    expect(stored().shipWait).toBeUndefined();
+  });
+
+  // Re-review (b): a store that cannot be written while clearing the wait
+  // never replaces the refusal (exit 5) with an internal error.
+  it('keeps the refusal when the wait cannot be cleared', async () => {
+    setUp();
+    writeRun({
+      review: clean,
+      stage: 'execute',
+      status: 'running',
+      shipWait: { sha: HEAD, since: NOW, checkedAt: NOW },
+    });
+    const dir = path.join(project.dir, '.dork', 'flow');
+    chmodSync(dir, 0o555);
+    try {
+      const result = await flow(ship, {
+        tracker: createFakeAdapter({ items: [started()] }),
+        forge: fakeForge({ head: HEAD }),
+      });
+      expect(result.code, result.stderr).toBe(EXIT.precondition);
+      expect(result.stderr + JSON.stringify(result.json)).toContain(
+        'not waiting at the review gate'
+      );
+    } finally {
+      chmodSync(dir, 0o755);
+    }
   });
 
   // Review fix 4: a forge outage is not a refusal: the wait stays for the next tick.
