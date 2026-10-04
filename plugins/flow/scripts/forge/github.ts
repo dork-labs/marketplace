@@ -3,9 +3,10 @@
  * the `gh` CLI run through the injected process runner with an argv array, so
  * no argument can reach a shell and tests replay recorded `gh` output.
  *
- * The failing-check rule is the one the retired `watch.sh` used: a check run
- * whose conclusion is `FAILURE`, `CANCELLED`, `TIMED_OUT` or `ACTION_REQUIRED`,
- * or a commit status whose state is `FAILURE` or `ERROR`.
+ * The failing-check rule: a check run that concluded with anything but
+ * `SUCCESS`, `NEUTRAL` or `SKIPPED` (so `STARTUP_FAILURE`, `STALE` and any
+ * conclusion GitHub adds later count as failing, never as passed), or a commit
+ * status whose state is `FAILURE` or `ERROR`.
  *
  * Merge groups: GitHub names each merge-group branch
  * `gh-readonly-queue/<base>/pr-<n>-<base sha>`, which names the PR the attempt
@@ -34,8 +35,14 @@ import {
   type PrStatus,
 } from './types.ts';
 
-/** A check run conclusion that counts as failing (`watch.sh`'s rule). */
-const FAILING_CONCLUSIONS = new Set(['FAILURE', 'CANCELLED', 'TIMED_OUT', 'ACTION_REQUIRED']);
+/** The check run conclusions that do not count as failing; every other conclusion does. */
+const PASSING_CONCLUSIONS = new Set(['SUCCESS', 'NEUTRAL', 'SKIPPED']);
+
+/** Whether a conclusion (any case; empty while running) counts as failing. */
+function concludedFailing(conclusion: unknown): boolean {
+  const value = (str(conclusion) ?? '').toUpperCase();
+  return value !== '' && !PASSING_CONCLUSIONS.has(value);
+}
 /** A commit status state that counts as failing. */
 const FAILING_STATES = new Set(['FAILURE', 'ERROR']);
 /** How many merge-group runs one {@link Forge.recentGroupFailures} call reads. */
@@ -78,9 +85,8 @@ export function failingChecks(rollup: unknown): FailingCheck[] {
   for (const entry of rollup) {
     const check = record(entry);
     if (check === undefined) continue;
-    const conclusion = (str(check.conclusion) ?? '').toUpperCase();
     const state = (str(check.state) ?? '').toUpperCase();
-    if (!FAILING_CONCLUSIONS.has(conclusion) && !FAILING_STATES.has(state)) continue;
+    if (!concludedFailing(check.conclusion) && !FAILING_STATES.has(state)) continue;
     failing.push({
       name: str(check.name) ?? str(check.context) ?? '(unnamed check)',
       url: str(check.detailsUrl) ?? str(check.targetUrl) ?? null,
@@ -130,6 +136,23 @@ export function reportedChecks(rollup: unknown): number | undefined {
 }
 
 /**
+ * The names of the checks in `statusCheckRollup`: a check run's `name`, a
+ * commit status's `context` (the names branch protection requires);
+ * `undefined` when the rollup cannot be read.
+ *
+ * @param rollup - The `statusCheckRollup` array from `gh pr view --json`.
+ * @returns The names, in rollup order, or `undefined`.
+ */
+export function checkNames(rollup: unknown): string[] | undefined {
+  if (!Array.isArray(rollup)) return undefined;
+  return rollup.flatMap((entry) => {
+    const check = record(entry);
+    const name = str(check?.name) ?? str(check?.context);
+    return name === undefined ? [] : [name];
+  });
+}
+
+/**
  * The checks a merge into a branch requires, from two `gh api` answers:
  * `repos/{repo}/rules/branches/{branch}` (rulesets: every
  * `required_status_checks` rule's contexts) and `repos/{repo}/branches/{branch}`
@@ -137,7 +160,10 @@ export function reportedChecks(rollup: unknown): number | undefined {
  * `enforcement_level` is `off`). Both shapes are the ones GitHub returned for
  * dork-labs/marketplace and dork-labs/loop on 2026-10-03.
  *
- * @param rules - The parsed rules answer (an array).
+ * A protected branch whose answer carries no `protection` object (GitHub
+ * leaves it out for some tokens) is unknown, never "requires none".
+ *
+ * @param rules - The parsed rules answer: every rule, all pages flattened.
  * @param branch - The parsed branch answer (an object).
  * @returns The required check names, deduplicated and sorted (empty when none
  *   is required), or `null` when either answer is not in a shape it knows.
@@ -145,6 +171,7 @@ export function reportedChecks(rollup: unknown): number | undefined {
 export function parseRequiredChecks(rules: unknown, branch: unknown): string[] | null {
   const branchView = record(branch);
   if (!Array.isArray(rules) || branchView === undefined) return null;
+  if (branchView.protected === true && record(branchView.protection) === undefined) return null;
   const names = new Set<string>();
   for (const entry of rules) {
     const rule = record(entry);
@@ -195,6 +222,7 @@ export function parsePrView(raw: unknown, queued: boolean, where: string): PrSta
     failing: failingChecks(view.statusCheckRollup),
     pendingChecks: pendingChecks(view.statusCheckRollup),
     checksReported: reportedChecks(view.statusCheckRollup),
+    checkNames: checkNames(view.statusCheckRollup),
     armed: view.autoMergeRequest !== null && view.autoMergeRequest !== undefined,
     queued,
     headSha,
@@ -247,7 +275,7 @@ export function parseGroupRuns(raw: unknown, base: string, since: Date): GroupRu
       pr: Number(match[2]),
       baseSha: match[3],
       branch: match[0],
-      failed: FAILING_CONCLUSIONS.has((str(run.conclusion) ?? '').toUpperCase()),
+      failed: concludedFailing(run.conclusion),
     });
   }
   return runs;
@@ -264,7 +292,7 @@ export function failingJobs(raw: unknown): string[] {
   if (!Array.isArray(jobs)) throw new ForgeError('gh run view returned no jobs');
   return jobs
     .map(record)
-    .filter((job) => FAILING_CONCLUSIONS.has((str(job?.conclusion) ?? '').toUpperCase()))
+    .filter((job) => concludedFailing(job?.conclusion))
     .map((job) => str(job?.name) ?? '(unnamed job)');
 }
 
@@ -521,10 +549,33 @@ export function createGithubForge(options: GithubForgeOptions): Forge {
 
     async requiredChecks(base) {
       const ref = base.split('/').map(encodeURIComponent).join('/');
-      const rules = await ghJson(
-        ['api', ...hostArgs, `repos/${target.repo}/rules/branches/${ref}`],
-        `reading the rules for ${target.repo} ${base}`
-      );
+      // Every ruleset's rules, 30 to a page by default: one page could miss the
+      // required-checks rule and read as "requires none". --paginate with
+      // --jq '.[]' prints each rule of every page on a line of its own.
+      const rulesWhat = `reading the rules for ${target.repo} ${base}`;
+      const lines = (
+        await gh(
+          [
+            'api',
+            ...hostArgs,
+            '--paginate',
+            '--jq',
+            '.[]',
+            `repos/${target.repo}/rules/branches/${ref}?per_page=100`,
+          ],
+          rulesWhat
+        )
+      )
+        .split('\n')
+        .filter((line) => line.trim() !== '');
+      const rules: unknown[] = [];
+      for (const line of lines) {
+        const rule = safeJson(line);
+        if (record(rule) === undefined) {
+          throw new ForgeError(`${rulesWhat}: gh printed something other than one rule per line`);
+        }
+        rules.push(rule);
+      }
       const branch = await ghJson(
         ['api', ...hostArgs, `repos/${target.repo}/branches/${ref}`],
         `reading the protection of ${target.repo} ${base}`

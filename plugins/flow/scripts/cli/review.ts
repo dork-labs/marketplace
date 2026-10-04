@@ -50,7 +50,7 @@ import path from 'node:path';
 import { stopInForce } from '../autonomy.ts';
 import { ConfigError, PreconditionError, UsageError } from '../errors.ts';
 import type { FlowRun, RunShipWait } from '../flow-run.ts';
-import type { FlowStateFile } from '../flow-state-file.ts';
+import { openFlowStateFile, type FlowStateFile } from '../flow-state-file.ts';
 import { ForgeError, type Forge, type ReviewOutcome } from '../forge/types.ts';
 import { reviewFindingsPath } from '../drain/messages.ts';
 import { MAX_ANSWER_LENGTH } from '../question.ts';
@@ -232,50 +232,76 @@ export async function awaitChecks(ctx: VerbContext, input: AwaitChecksInput): Pr
   let required: string[] | null | undefined;
   let requiredWhy = '';
   let waited = 0;
+  /** The base's required checks, read once per call; `null` when unknown. */
+  const readRequired = async (base: string): Promise<string[] | null> => {
+    if (required === undefined) {
+      try {
+        required = forge.requiredChecks === undefined ? null : await forge.requiredChecks(base);
+      } catch (error) {
+        if (!(error instanceof ForgeError)) throw error;
+        required = null;
+        requiredWhy = ` (${error.message})`;
+      }
+    }
+    return required;
+  };
   for (;;) {
     const status = await forge.prStatus(pr);
+    // Every look is at the commit the reviewer agent checked: a push since
+    // would otherwise be approved under the old head's review (and inherit
+    // its no-checks clock).
+    const prHead = status.headSha.toLowerCase();
+    if (
+      prHead === '' ||
+      !(prHead.startsWith(head.toLowerCase()) || head.toLowerCase().startsWith(prHead))
+    ) {
+      throw new PreconditionError(
+        `${identifier}'s PR moved to ${short(status.headSha)} since the reviewer agent checked ${short(head)}; the new commits need their own review`
+      );
+    }
     if (status.failing.length > 0) {
       throw new PreconditionError(
         `${identifier}'s PR has failing checks (${status.failing.map((c) => c.name).join(', ')}), so the reviewer agent does not ship it`
       );
     }
-    if (!input.needsPassed || status.pendingChecks === 0) return { kind: 'passed' };
+    if (!input.needsPassed) return { kind: 'passed' };
 
     let why = `${status.pendingChecks === undefined ? 'its checks have' : `${status.pendingChecks} of its checks have`} not finished on PR #${pr}`;
+    const base = status.base || 'its base branch';
     if (status.checksReported === 0) {
       const grace = input.noChecksPassAfterMinutes;
+      const needed = grace === null ? null : await readRequired(status.base);
       if (grace === null) {
         why = `no checks have reported on PR #${pr}, and this project never counts that as passed (gates.review.noChecksPassAfterMinutes is null)`;
+      } else if (needed === null) {
+        why = `no checks have reported on PR #${pr}, and flow cannot tell whether ${base} requires any${requiredWhy}`;
+      } else if (needed.length > 0) {
+        why = `${needed.length === 1 ? 'a required check has' : 'required checks have'} not started on PR #${pr} (${needed.join(', ')})`;
       } else {
-        if (required === undefined) {
-          try {
-            required =
-              forge.requiredChecks === undefined ? null : await forge.requiredChecks(status.base);
-          } catch (error) {
-            if (!(error instanceof ForgeError)) throw error;
-            required = null;
-            requiredWhy = ` (${error.message})`;
-          }
+        const elapsed = Math.max(
+          ctx.now().getTime() - since.getTime(),
+          startedAt.getTime() - since.getTime() + waited
+        );
+        if (elapsed >= grace * 60_000) {
+          return {
+            kind: 'none',
+            note: `No checks ran on PR #${pr}, and ${base} requires none, so flow counted that as passed after ${minutes(grace)}.`,
+          };
         }
-        if (required === null) {
-          why = `no checks have reported on PR #${pr}, and flow cannot tell whether ${status.base || 'its base branch'} requires any${requiredWhy}`;
-        } else if (required.length > 0) {
-          why = `${required.length === 1 ? 'a required check has' : 'required checks have'} not started on PR #${pr} (${required.join(', ')})`;
-        } else {
-          const elapsed = Math.max(
-            ctx.now().getTime() - since.getTime(),
-            startedAt.getTime() - since.getTime() + waited
-          );
-          if (elapsed >= grace * 60_000) {
-            return {
-              kind: 'none',
-              note: `No checks ran on PR #${pr}, and ${status.base || 'its base branch'} requires none, so flow counted that as passed after ${minutes(grace)}.`,
-            };
-          }
-          const left = Math.max(1, Math.ceil((grace * 60_000 - elapsed) / 60_000));
-          why = `no checks have reported on PR #${pr} yet; none are required, so flow counts that as passed in about ${minutes(left)}`;
-        }
+        const left = Math.max(1, Math.ceil((grace * 60_000 - elapsed) / 60_000));
+        why = `no checks have reported on PR #${pr} yet; none are required, so flow counts that as passed in about ${minutes(left)}`;
       }
+    } else if (status.pendingChecks === 0) {
+      // Every reported check finished. A required check that never reported
+      // has not started, and an optional one passing does not stand in for it.
+      const needed = await readRequired(status.base);
+      const reported = new Set(status.checkNames ?? []);
+      const missing =
+        needed === null || status.checkNames === undefined
+          ? []
+          : needed.filter((name) => !reported.has(name));
+      if (missing.length === 0) return { kind: 'passed' };
+      why = `${missing.length === 1 ? 'a required check has' : 'required checks have'} not started on PR #${pr} (${missing.join(', ')})`;
     }
 
     const recorded = ctx.dryRun
@@ -330,6 +356,61 @@ async function setShipWait(
  *   reviewer agent may not answer it (exit 5).
  */
 export async function run(ctx: VerbContext): Promise<VerbResult> {
+  try {
+    return await review(ctx);
+  } catch (error) {
+    // Any refusal of the reviewer agent ends its wait, wherever it came from
+    // (the item closed, left the gate, lost its PR, a check failed): the drain
+    // stops re-checking it and hands the gate to a person once. A forge or
+    // tracker outage (exit 4) keeps the wait, so the next tick tries again.
+    const reviewer = ctx.args.flags.approve === true && flag(ctx, 'by') === 'reviewer-agent';
+    if (reviewer && !ctx.dryRun && error instanceof PreconditionError) {
+      await clearShipWaitFor(ctx, ctx.args.positionals[0]);
+    }
+    throw error;
+  }
+}
+
+/** Clear the wait on the run for `identifier`, if it has one (best effort). */
+async function clearShipWaitFor(ctx: VerbContext, identifier: string | undefined): Promise<void> {
+  if (identifier === undefined) return;
+  const store = openFlowStateFile(ctx.projectDir, { now: ctx.now });
+  const waiting = Object.values(store.read()).find(
+    (r) => r.identifier === identifier && r.shipWait !== undefined
+  );
+  if (waiting !== undefined) await setShipWait(store, waiting.issueId, undefined);
+}
+
+/** The "not shipped yet" answer (exit 5, `verdict: "pending"`); nothing was posted. */
+function pendingResult(
+  ctx: VerbContext,
+  identifier: string,
+  pr: { number: number; url: string } | null,
+  checked: Extract<ShipChecks, { kind: 'pending' }>
+): VerbResult {
+  return {
+    exitCode: 5,
+    json: {
+      ok: false,
+      dryRun: ctx.dryRun,
+      identifier,
+      verdict: 'pending',
+      by: 'reviewer-agent',
+      pr: pr === null ? null : { number: pr.number, url: pr.url },
+      checks: {
+        state: 'pending',
+        pending: checked.pending ?? null,
+        why: checked.why,
+        waitingSince: checked.since,
+      },
+      retryRecorded: checked.recorded,
+    },
+    text: `Not shipped yet: ${checked.why}. Nothing was posted. Run the same command again later${checked.recorded ? '; a drain tick does that by itself' : ''}.`,
+  };
+}
+
+/** {@link run}'s body; `run` adds ending the reviewer agent's wait on a refusal. */
+async function review(ctx: VerbContext): Promise<VerbResult> {
   const [identifier] = ctx.args.positionals;
   const approve = ctx.args.flags.approve === true;
   const changes = ctx.args.flags.changes === true;
@@ -369,9 +450,11 @@ export async function run(ctx: VerbContext): Promise<VerbResult> {
     let head: string | null = null;
     let sha: string | null = null;
     let noChecksNote: string | null = null;
+    /** The wait saved on the run: before this call, or by it. */
+    let savedWait: RunShipWait | undefined = existing.shipWait;
     if (by === 'reviewer-agent') {
       let checked: ShipChecks;
-      try {
+      {
         const read = loaded.autonomy;
         const stop =
           read === null
@@ -409,38 +492,13 @@ export async function run(ctx: VerbContext): Promise<VerbResult> {
           needsPassed: !config.gates.review.mergeOnApproval,
           noChecksPassAfterMinutes: config.gates.review.noChecksPassAfterMinutes,
           prior: existing.shipWait,
-          record: (wait) => setShipWait(store, existing.issueId, wait),
-        });
-      } catch (error) {
-        // A refusal ends the wait: the drain stops re-checking, and the caller
-        // hands the gate to a person.
-        // (The wait may have been saved by this very call, before a check failed.)
-        if (error instanceof PreconditionError && !ctx.dryRun) {
-          await setShipWait(store, existing.issueId, undefined);
-        }
-        throw error;
-      }
-      if (checked.kind === 'pending') {
-        return {
-          exitCode: 5,
-          json: {
-            ok: false,
-            dryRun: ctx.dryRun,
-            identifier,
-            verdict: 'pending',
-            by,
-            pr: pr === null ? null : { number: pr.number, url: pr.url },
-            checks: {
-              state: 'pending',
-              pending: checked.pending ?? null,
-              why: checked.why,
-              waitingSince: checked.since,
-            },
-            retryRecorded: checked.recorded,
+          record: (wait) => {
+            savedWait = wait;
+            return setShipWait(store, existing.issueId, wait);
           },
-          text: `Not shipped yet: ${checked.why}. Nothing was posted. Run the same command again later${checked.recorded ? '; a drain tick does that by itself' : ''}.`,
-        };
+        });
       }
+      if (checked.kind === 'pending') return pendingResult(ctx, identifier, pr, checked);
       noChecksNote = checked.kind === 'none' ? checked.note : null;
     }
 
@@ -482,7 +540,28 @@ export async function run(ctx: VerbContext): Promise<VerbResult> {
     let forgeReview: ReviewOutcome | null = null;
     let armed = false;
     if (!ctx.dryRun) {
-      await adapter.comment(item, body);
+      // End the wait BEFORE posting: a wait left behind after the comment
+      // would make the drain's next tick ship (and comment) a second time.
+      if (savedWait !== undefined && !(await setShipWait(store, existing.issueId, undefined))) {
+        const why = `${store.path} stayed locked by another flow command`;
+        if (by === 'person') {
+          throw new PreconditionError(`${why}, so nothing was posted; run the same command again`);
+        }
+        return pendingResult(ctx, identifier, pr, {
+          kind: 'pending',
+          pending: undefined,
+          why,
+          since: savedWait.since,
+          recorded: true,
+        });
+      }
+      try {
+        await adapter.comment(item, body);
+      } catch (error) {
+        // Nothing was posted: put the wait back, so the drain tries again.
+        if (savedWait !== undefined) await setShipWait(store, existing.issueId, savedWait);
+        throw error;
+      }
       if (pr !== null && target.forge !== null) {
         if (by === 'person') {
           forgeReview = await target.forge.review(pr.number, {
@@ -494,9 +573,6 @@ export async function run(ctx: VerbContext): Promise<VerbResult> {
           await target.forge.arm(pr.number, armAt);
           armed = true;
         }
-      }
-      if (existing.shipWait !== undefined || by === 'reviewer-agent') {
-        await setShipWait(store, existing.issueId, undefined);
       }
       recordEvent(
         ctx,

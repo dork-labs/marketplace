@@ -50,6 +50,12 @@ export interface PrStatus {
    * without CI stays at forever (`flow review`'s no-checks rule reads it).
    */
   checksReported?: number;
+  /**
+   * The names of the checks the head commit reported (a check run's name, a
+   * commit status's context), when the forge says; a required check missing
+   * from it has not started.
+   */
+  checkNames?: string[];
   /** Whether auto-merge is armed. */
   armed: boolean;
   /** Whether the PR sits in the merge queue. */

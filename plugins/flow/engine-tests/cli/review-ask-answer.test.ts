@@ -18,7 +18,7 @@ import { realProcessRunner, type ProcessRunner } from '../../scripts/cli/context
 import { shouldRespondToComment } from '../../scripts/comment-response.ts';
 import { FlowConfigSchema } from '../../scripts/config-schema.ts';
 import type { DrainState } from '../../scripts/drain/state.ts';
-import { EXIT } from '../../scripts/errors.ts';
+import { EXIT, TrackerError } from '../../scripts/errors.ts';
 import type { FlowRun } from '../../scripts/flow-run.ts';
 import { main } from '../../scripts/flow.ts';
 import {
@@ -79,6 +79,12 @@ function fakeForge(
     reported?: number;
     /** What `requiredChecks` answers; `'missing'` leaves the method off, `'throw'` fails it. */
     required?: string[] | null | 'missing' | 'throw';
+    /** The names of the reported checks. */
+    checkNames?: string[];
+    /** The PR's head per `prStatus` call (default `head`); a list is used in turn. */
+    prHead?: string | string[];
+    /** `prStatus` throws this forge error. */
+    statusError?: string;
   } = {}
 ) {
   const calls: { method: string; arg?: unknown }[] = [];
@@ -97,6 +103,8 @@ function fakeForge(
     },
     async prStatus(pr) {
       calls.push({ method: 'prStatus', arg: pr });
+      if (opts.statusError !== undefined) throw new ForgeError(opts.statusError);
+      const prHead = Array.isArray(opts.prHead) ? opts.prHead.shift() : opts.prHead;
       const failing = Array.isArray(opts.failing?.[0])
         ? ((opts.failing as string[][]).shift() ?? [])
         : ((opts.failing as string[] | undefined) ?? []);
@@ -108,9 +116,10 @@ function fakeForge(
         failing: failing.map((name) => ({ name, url: null })),
         pendingChecks,
         checksReported: opts.reported ?? Math.max(1, pendingChecks),
+        ...(opts.checkNames === undefined ? {} : { checkNames: opts.checkNames }),
         armed: false,
         queued: false,
-        headSha: opts.head ?? 'feedface',
+        headSha: prHead ?? opts.head ?? 'feedface',
         base: 'work',
       };
     },
@@ -1483,6 +1492,124 @@ describe('the reviewer agent ships with auto-merge off (DOR-2535)', () => {
     });
     expect(result.code, result.stderr).toBe(EXIT.ok);
     expect(stored().shipWait).toBeUndefined();
+  });
+
+  // Review fix 3: a push since the reviewer agent checked HEAD must not be
+  // approved under HEAD's review (nor inherit its no-checks clock).
+  it('refuses when the PR moves to another commit, mid-wait or between ticks', async () => {
+    setUp();
+    const midWait = await flow([...ship, '--wait-minutes', '5'], {
+      tracker: createFakeAdapter({ items: [started()] }),
+      forge: fakeForge({ head: HEAD, pending: 1, prHead: [HEAD, 'beef0001'] }),
+    });
+    expect(midWait.code).toBe(EXIT.precondition);
+    expect(midWait.stderr + JSON.stringify(midWait.json)).toContain('moved to beef000');
+    expect(stored().shipWait).toBeUndefined();
+    writeRun({ review: clean, shipWait: { sha: HEAD, since: later(-60), checkedAt: later(-1) } });
+    const tracker = createFakeAdapter({ items: [started()] });
+    const later_ = await flow(ship, {
+      tracker,
+      forge: fakeForge({ head: HEAD, pending: 1, reported: 0, prHead: 'beef0001' }),
+    });
+    expect(later_.code).toBe(EXIT.precondition);
+    expect(comments(tracker)).toEqual([]);
+  });
+
+  // Review fix 4: a refusal from anywhere ends the wait, so step 2a stops
+  // handing the same item to a person every tick.
+  it('clears the wait when the run has left the gate or the item is closed', async () => {
+    setUp();
+    writeRun({
+      review: clean,
+      stage: 'execute',
+      status: 'running',
+      shipWait: { sha: HEAD, since: NOW, checkedAt: NOW },
+    });
+    const left = await flow(ship, {
+      tracker: createFakeAdapter({ items: [started()] }),
+      forge: fakeForge({ head: HEAD }),
+    });
+    expect(left.code).toBe(EXIT.precondition);
+    expect(stored().shipWait).toBeUndefined();
+    writeRun({ review: clean, shipWait: { sha: HEAD, since: NOW, checkedAt: NOW } });
+    const closed = await flow(ship, {
+      tracker: createFakeAdapter({
+        items: [item('ACME-12', { stateCategory: 'completed', stateName: 'Done' })],
+      }),
+      forge: fakeForge({ head: HEAD }),
+    });
+    expect(closed.code).toBe(EXIT.precondition);
+    expect(stored().shipWait).toBeUndefined();
+  });
+
+  // Review fix 4: a forge outage is not a refusal: the wait stays for the next tick.
+  it('keeps the wait when the forge cannot be read (exit 4)', async () => {
+    setUp();
+    writeRun({ review: clean, shipWait: { sha: HEAD, since: NOW, checkedAt: NOW } });
+    const result = await flow(ship, {
+      tracker: createFakeAdapter({ items: [started()] }),
+      forge: fakeForge({ head: HEAD, statusError: 'gh: HTTP 502' }),
+    });
+    expect(result.code).toBe(EXIT.tracker);
+    expect(stored().shipWait).toEqual({ sha: HEAD, since: NOW, checkedAt: NOW });
+  });
+
+  // Review fix 6: the wait ends BEFORE the comment, so a later tick can never
+  // ship (and comment) twice; a comment that fails puts the wait back.
+  it('ends the wait before posting, and restores it when posting fails', async () => {
+    setUp();
+    writeRun({ review: clean, shipWait: { sha: HEAD, since: NOW, checkedAt: NOW } });
+    const tracker = createFakeAdapter({ items: [started()] });
+    const post = tracker.adapter.comment.bind(tracker.adapter);
+    let waitAtPost: unknown = 'unread';
+    tracker.adapter.comment = async (...args: Parameters<typeof post>) => {
+      waitAtPost = stored().shipWait;
+      return post(...args);
+    };
+    const shipped = await flow(ship, { tracker, forge: fakeForge({ head: HEAD, pending: 0 }) });
+    expect(shipped.code, shipped.stderr).toBe(EXIT.ok);
+    expect(waitAtPost).toBeUndefined();
+
+    writeRun({ review: clean, shipWait: { sha: HEAD, since: NOW, checkedAt: NOW } });
+    const down = createFakeAdapter({ items: [started()] });
+    down.adapter.comment = async () => {
+      throw new TrackerError('tracker unreachable');
+    };
+    const failed = await flow(ship, {
+      tracker: down,
+      forge: fakeForge({ head: HEAD, pending: 0 }),
+    });
+    expect(failed.code).toBe(EXIT.tracker);
+    expect(stored().shipWait).toEqual({ sha: HEAD, since: NOW, checkedAt: NOW });
+  });
+
+  // Review fix 8: an optional check passing does not stand in for a required
+  // one that never reported.
+  it('waits for a required check that never reported, even when others passed', async () => {
+    setUp();
+    const missing = await flow(ship, {
+      tracker: createFakeAdapter({ items: [started()] }),
+      forge: fakeForge({
+        head: HEAD,
+        pending: 0,
+        reported: 1,
+        checkNames: ['lint'],
+        required: ['build'],
+      }),
+    });
+    expect(missing.code).toBe(EXIT.precondition);
+    expect((missing.json.checks as { why: string }).why).toContain('not started on PR #7 (build)');
+    const present = await flow(ship, {
+      tracker: createFakeAdapter({ items: [started()] }),
+      forge: fakeForge({
+        head: HEAD,
+        pending: 0,
+        reported: 2,
+        checkNames: ['lint', 'build'],
+        required: ['build'],
+      }),
+    });
+    expect(present.code, present.stderr).toBe(EXIT.ok);
   });
 
   // Purpose: the default setup (auto-merge on) is untouched: running or absent

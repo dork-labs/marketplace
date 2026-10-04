@@ -21,6 +21,7 @@ import {
   createGithubForge,
   failingChecks,
   parsePrView,
+  checkNames,
   parseRequiredChecks,
   pendingChecks,
   reportedChecks,
@@ -522,15 +523,64 @@ describe('required checks and reported checks', () => {
     expect(view).toMatchObject({ checksReported: 0, pendingChecks: 1 });
   });
 
-  it('asks gh for the rules and the branch of the base', async () => {
+  const RULES =
+    'api --paginate --jq .[] repos/dork-labs/marketplace/rules/branches/main?per_page=100';
+
+  it('asks gh for every page of the rules, and the branch of the base', async () => {
     const { gh, forge } = forgeWith({
-      'api repos/dork-labs/marketplace/rules/branches/main': ok([]),
+      [RULES]: { code: 0, stdout: '', stderr: '' },
       'api repos/dork-labs/marketplace/branches/main': ok({ ...off, protected: false }),
     });
     expect(await forge.requiredChecks?.('main')).toEqual([]);
     expect(gh.calls.map((c) => c.args.join(' '))).toEqual([
-      'api repos/dork-labs/marketplace/rules/branches/main',
+      RULES,
       'api repos/dork-labs/marketplace/branches/main',
     ]);
+  });
+
+  // Review fix 1: rules come 30 to a page across every ruleset; a required-
+  // checks rule past the first page must still be read. gh --paginate --jq
+  // '.[]' prints one rule per line from every page.
+  it('reads a required-checks rule that sits past the first page', async () => {
+    const page1 = Array.from({ length: 30 }, () => JSON.stringify({ type: 'deletion' }));
+    const page2 = [JSON.stringify(marketplaceRules[1])];
+    const { forge } = forgeWith({
+      [RULES]: { code: 0, stdout: `${[...page1, ...page2].join('\n')}\n`, stderr: '' },
+      'api repos/dork-labs/marketplace/branches/main': ok(off),
+    });
+    expect(await forge.requiredChecks?.('main')).toEqual([
+      'flow plugin',
+      'script fixtures',
+      'skills and manifests',
+    ]);
+  });
+
+  // Review fix 7: protected, but the answer hides its protection: unknown.
+  it('reads a protected branch with no protection object as unknown', () => {
+    expect(parseRequiredChecks([], { protected: true })).toBeNull();
+  });
+
+  it('names the reported checks: a check run by name, a status by context', () => {
+    expect(checkNames([{ name: 'build' }, { context: 'ci/legacy' }, {}])).toEqual([
+      'build',
+      'ci/legacy',
+    ]);
+    expect(checkNames(null)).toBeUndefined();
+  });
+
+  // Review fix 2: any concluded run outside SUCCESS/NEUTRAL/SKIPPED fails,
+  // STARTUP_FAILURE and STALE included; a running one (no conclusion) does not.
+  it('counts every conclusion but success, neutral and skipped as failing', () => {
+    const rollup = ['SUCCESS', 'NEUTRAL', 'SKIPPED', '', 'STARTUP_FAILURE', 'STALE', 'FAILURE'].map(
+      (conclusion, i) => ({
+        __typename: 'CheckRun',
+        name: `c${i}`,
+        conclusion,
+        status: 'COMPLETED',
+      })
+    );
+    expect(
+      failingChecks([...rollup, { name: 'running', conclusion: null }]).map((c) => c.name)
+    ).toEqual(['c4', 'c5', 'c6']);
   });
 });

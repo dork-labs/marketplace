@@ -168,8 +168,8 @@
     "target": 982
   },
   "skills/flow-drain/SKILL.md": {
-    "baseline": 713,
-    "target": 713
+    "baseline": 720,
+    "target": 720
   },
   "skills/flow-groom/SKILL.md": {
     "baseline": 165,
@@ -212,7 +212,7 @@
     "target": 1139
   },
   "skills/verifying-work/SKILL.md": {
-    "baseline": 1242,
-    "target": 1242
+    "baseline": 1256,
+    "target": 1256
   }
 }
