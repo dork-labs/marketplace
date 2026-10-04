@@ -134,7 +134,8 @@ Settings, split by who a change reaches: ![settings](5-settings-by-who.png)
   DOR-2576.
 - **"Review in Activity →" lands where the ask is not.** The Activity page lists history; the open
   ask lives only in the "waiting on you" popover. On the same screen the Pulse tab said "All
-  quiet. Nothing needs you." while the bell said 1 was waiting.
+  quiet. Nothing needs you." while the bell said 1 was waiting. Fixed in flow 0.55.0 with
+  DOR-2577: the link now reads "Answer in Inbox →" and opens the Inbox on the ask.
 - **The right panel closes when you move to another project's chat,** so the Flow tab has to be
   reopened each time. The lens itself follows.
 

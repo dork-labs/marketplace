@@ -4,6 +4,14 @@ Installs of this plugin are pinned to a commit SHA, so a fix here does not reach
 you until you **reinstall it** (Marketplace → flow → reinstall, or re-run your
 `--plugin-dir` checkout's `git pull`). Each entry below says whether that matters.
 
+## 0.55.0
+
+**On Flow home and a project's page, the link for shipping work or answering a question now opens the Inbox right on that ask. Reinstall to get it.**
+
+- The link used to say "Review in Activity" and open the Activity page, which lists what already happened but not open questions, so there was nothing there to answer. It now says "Answer in Inbox" and opens DorkOS's Inbox with that ask highlighted, on a phone too. If the ask was already answered, the Inbox still opens.
+- On a DorkOS too old to open the Inbox from a link, it still opens Activity, as before. Answer from the Inbox there.
+- The message for an answer flow can't take from its own page now points to the Inbox too.
+
 ## 0.54.0
 
 **The reviewer agent can now ship work in a project where auto-merge is off, including a repo with no CI. Reinstall to get it.**

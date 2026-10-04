@@ -78,7 +78,7 @@ reads the same files and tracker the commands do.
   week" shows each account's weekly use.
 - **The run chip** in a chat's status bar names the item the chat works on and where
   it stands: "DOR-2387 · Building", or "3 items · 1 needs you".
-- **The Activity inbox** is where flow asks, and only when only you can help: ship
+- **The Inbox** is where flow asks, and only when only you can help: ship
   this work, answer an agent's question (it marks its own pick), or sign in again.
   Every ask says what happens and why. What flow settled on its own shows there as
   "While you were away".

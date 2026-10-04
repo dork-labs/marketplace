@@ -2,7 +2,7 @@
  * Answering and starting work from flow's own surfaces (spec
  * `flow-multiproject` §3.2, §3.3, §7.4, §7.6, §7.9): an ask's buttons read as
  * outcomes and answer through core's `answerDecision` (or flow's route on a
- * DorkOS without the inbox); a review gate goes to Activity where the inbox
+ * DorkOS without the inbox); a review gate opens the Inbox on it where the inbox
  * exists; "Sign in", "Sort them", "Connect a tracker" and "Set up flow here"
  * start work in a new chat with `api.startWork`, and fall back to what to
  * type on a DorkOS without it; the adapter's allow line; the dial's line for

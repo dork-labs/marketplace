@@ -4,8 +4,8 @@
  *
  * - On a DorkOS with the inbox, an ask is answered through core's
  *   `api.answerDecision`, so the inbox and flow's pages always agree. A review
- *   gate and a floor question go to Activity instead: DorkOS credits an answer
- *   on flow's page to Flow, and those must be credited to you.
+ *   gate and a floor question open DorkOS's Inbox on the ask instead: DorkOS
+ *   credits an answer on flow's page to Flow, and those must be credited to you.
  * - On a DorkOS without the inbox, flow's own person-only route answers it.
  * - A button that needs an agent ("Sign in", "Sort them", "Connect a
  *   tracker", "Set up flow here") starts the work in a new chat with
@@ -24,6 +24,7 @@ import type {
 import type { FlowDecision } from '../lib/model.ts';
 import { isStartRefusal, startRefusal, startWords, type StartKind } from '../lib/start-words.ts';
 import { UNREACHABLE_MESSAGE, answerHere } from './api.ts';
+import { inboxLink } from './links.ts';
 import { BUTTON, MUTED } from './parts.ts';
 import { h, useState, type Node } from './react.ts';
 import type { FlowStore } from './store.ts';
@@ -53,7 +54,7 @@ export const START_FAILED_TEXT = "Flow couldn't start that. Try again.";
 
 /** The note above asks answered on flow's pages, where DorkOS credits them to Flow. */
 export const ANSWERED_IN_FLOW_NOTE =
-  'Answers you give here show in Activity as answered in Flow. Shipping, and checks only you can make, are answered in Activity so they count as yours.';
+  'Answers you give here show in Activity as answered in Flow. Shipping, and checks only you can make, are answered in the Inbox so they count as yours.';
 
 /**
  * Whether this DorkOS has the inbox, seen from the page.
@@ -66,7 +67,7 @@ export function hasInbox(api: Pick<ClientApi, 'listDecisions' | 'answerDecision'
 }
 
 /**
- * Whether an ask is answered in place on flow's pages, not in Activity.
+ * Whether an ask is answered in place on flow's pages, not in the Inbox.
  *
  * @param decision - The ask.
  * @param api - The host API.
@@ -136,6 +137,28 @@ export async function sendAnswer(
   const reply = await answerHere(decision.key, answer, decision.shown);
   store?.apply(reply.model);
   return { resolved: reply.resolved, message: reply.message, watch: reply.watch };
+}
+
+/**
+ * Open DorkOS's Inbox on an ask that must be answered there. Core's id for
+ * it is found the way {@link sendAnswer} finds it, by flow's key; when core
+ * no longer lists it, or can't be asked, the Inbox opens plain.
+ *
+ * @param api - The host API.
+ * @param decision - The ask.
+ * @returns Once it has navigated.
+ */
+export async function openInInbox(
+  api: Pick<AnswerApi, 'navigate' | 'listDecisions'>,
+  decision: Pick<FlowDecision, 'key'>
+): Promise<void> {
+  let id: string | undefined;
+  try {
+    id = (await api.listDecisions?.())?.find((open) => open.key === decision.key)?.id;
+  } catch {
+    // The Inbox still opens; it just can't single the ask out.
+  }
+  api.navigate(inboxLink(id));
 }
 
 /**

@@ -72,7 +72,8 @@ type Scope = 'project' | 'all';
  * Whether one pause dialog is showing. DorkOS draws every registered dialog all
  * the time and passes `open`, but the `open()` it hands back does not reach
  * that prop (DorkOS 0.92), so flow keeps the dialog's own open state here and
- * shows it when either says so.
+ * shows it when either says so. This can go once `minHostVersion` is a release
+ * with DorkOS's `registerDialog` fix (DOR-2576).
  */
 interface Controls {
   /** Whether flow opened it. */

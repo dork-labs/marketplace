@@ -3,7 +3,7 @@
  * and their counts; the project filter kept in the page's address, read back
  * on a fresh load, and a gone name; one project shows its page and none says
  * so; "Pause all projects" asks how long with tomorrow first and resumes all;
- * asks open Activity; a project's page with its decisions, and an unknown
+ * asks open the Inbox on the ask; a project's page with its decisions, and an unknown
  * name; the settings page's frame; "Capacity this week"; and registration
  * only on a DorkOS with pages.
  */
@@ -256,7 +256,7 @@ async function renderPage(
 }
 
 describe('Flow home', () => {
-  it('shows three bands with counts; a review gate goes to Activity, the rest are answered here', async () => {
+  it('shows three bands with counts; a review gate opens the Inbox on it, the rest are answered here', async () => {
     serve(threeProjects());
     const inbox = inboxApi(threeProjects());
     const { api } = await renderPage('home', threeProjects(), { api: inbox });
@@ -267,8 +267,10 @@ describe('Flow home', () => {
     const needs = screen.getByRole('region', { name: 'Needs you' });
     // A review gate has no buttons here: shipping must be credited to you.
     expect(within(needs).queryByRole('button', { name: /Ship it/ })).toBeNull();
-    fireEvent.click(within(needs).getByRole('button', { name: 'Review in Activity →' }));
-    expect(api.navigate).toHaveBeenLastCalledWith('/activity');
+    fireEvent.click(within(needs).getByRole('button', { name: 'Answer in Inbox →' }));
+    await act(async () => {});
+    // Core's id, not flow's key, under Activity so an older DorkOS still lands there.
+    expect(api.navigate).toHaveBeenLastCalledWith('/activity?inbox=core-k%3Adorkos%3Areview');
     // The note that such answers are credited to Flow shows once.
     expect(within(needs).getAllByText(ANSWERED_IN_FLOW_NOTE)).toHaveLength(1);
     expect(within(needs).getByRole('button', { name: 'Sort them' })).toBeTruthy();
@@ -278,6 +280,27 @@ describe('Flow home', () => {
       })
     );
     expect(api.navigate).toHaveBeenLastCalledWith('/x/flow/p/dorkos');
+  });
+
+  it('opens the Inbox plain when core no longer lists the ask, or cannot be asked', async () => {
+    const listed = inboxApi(threeProjects());
+    for (const listDecisions of [
+      vi.fn(async () => []),
+      vi.fn(async () => {
+        throw new Error('offline');
+      }),
+    ]) {
+      document.body.innerHTML = '';
+      serve(threeProjects());
+      const { api } = await renderPage('home', threeProjects(), {
+        api: { ...listed, listDecisions },
+      });
+      const needs = screen.getByRole('region', { name: 'Needs you' });
+      fireEvent.click(within(needs).getByRole('button', { name: 'Answer in Inbox →' }));
+      await act(async () => {});
+      expect(listDecisions).toHaveBeenCalled();
+      expect(api.navigate).toHaveBeenLastCalledWith('/activity?inbox=open');
+    }
   });
 
   it('keeps the project filter in the address, and reads it back on a fresh load', async () => {
