@@ -246,7 +246,7 @@ export function hostSupportsStartWork(
 }
 
 /** What the answer route says on a DorkOS with the inbox (§7.6). */
-export const ANSWER_IN_INBOX = 'Answer this in the Activity inbox.';
+export const ANSWER_IN_INBOX = 'Answer this in the Inbox.';
 
 /**
  * Register the routes and the advisor.

@@ -116,7 +116,9 @@ export interface FlowDecision {
   /**
    * Where a person answers it: `activity` for a review gate and a floor
    * question, whose answer must be credited to the person (§4.2, A21);
-   * `flow` for the rest, which flow's pages answer in place.
+   * `flow` for the rest, which flow's pages answer in place. `activity` means
+   * core's Inbox, not the Activity page; the value keeps its old name because
+   * it is part of the model flow's pages read.
    */
   answerIn: 'activity' | 'flow';
   /**

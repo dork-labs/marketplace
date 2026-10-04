@@ -452,6 +452,18 @@ describe('a project’s page', () => {
     expect(api.navigate).toHaveBeenLastCalledWith('/x/flow');
   });
 
+  it('opens the Inbox on its review gate, by core’s id', async () => {
+    serve(threeProjects());
+    const { api } = await renderPage('project', threeProjects(), {
+      params: { name: 'dorkos' },
+      api: inboxApi(threeProjects()),
+    });
+    expect(screen.queryByRole('button', { name: /Ship it/ })).toBeNull();
+    fireEvent.click(screen.getByRole('button', { name: 'Answer in Inbox →' }));
+    await act(async () => {});
+    expect(api.navigate).toHaveBeenLastCalledWith('/activity?inbox=core-k%3Adorkos%3Areview');
+  });
+
   it('says so for a name flow does not know', async () => {
     serve(threeProjects());
     const { api } = await renderPage('project', threeProjects(), { params: { name: 'nope' } });

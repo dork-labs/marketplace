@@ -131,15 +131,8 @@ export function loadingState(snapshot: StoreSnapshot, store: FlowStore): Node | 
  * you (§4.2, A21). They name the Inbox, not the page the link lands on: a
  * DorkOS too old to open the Inbox from a link shows Activity instead, and
  * the Inbox is still where the ask is answered.
- *
- * @param decision - The decision.
- * @returns The link's words.
  */
-export function decisionLinkText(decision: FlowDecision): string {
-  return decision.kind === 'review' || decision.kind === 'question'
-    ? 'Answer in Inbox →'
-    : 'Open in Inbox →';
-}
+export const INBOX_LINK_TEXT = 'Answer in Inbox →';
 
 /**
  * One decision's row: its project (on Flow home), the ask and why, and its
@@ -193,7 +186,7 @@ export function DecisionRow(props: {
             style: { ...LINK, flex: 'none' },
             onClick: () => void openInInbox(api, decision),
           },
-          decisionLinkText(decision)
+          INBOX_LINK_TEXT
         )
   );
 }
