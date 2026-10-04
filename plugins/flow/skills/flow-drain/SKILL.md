@@ -36,6 +36,10 @@ point your own scheduler (OS cron, CI) at it.
    `resume`: re-attach the worktree at HEAD and resume its `sessionId`. Otherwise act on
    `restart-clean`, `escalate` (`agent/blocked`) or `re-derive`. Skip runs with `drain`
    set: `flow drain` recovers its own.
+2a. **Ships waiting on checks.** For each run with `shipWait` set:
+   `flow review <id> --approve --by reviewer-agent --json`, never `--wait`. `"verdict":
+   "pending"` or exit 4 (forge or tracker down): next tick. Other refusals:
+   `assignToHuman(item)`.
 3. **Inbox.** Before claiming anything new, un-park answered `agent/needs-input` items:
    poll the adapter's `getInbox`, apply the comment-response rules in
    `<flow-root>/skills/tending-tracker/SKILL.md`, resume with `--resume <sessionId>`.

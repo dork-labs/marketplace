@@ -443,6 +443,15 @@ export const ReviewGateSchema = z
     reapproveOnFunctionalChange: z.boolean().default(true),
     /** Maximum merge attempts before escalating. */
     maxMergeAttempts: z.number().int().positive().default(3),
+    /**
+     * With `mergeOnApproval` off, the reviewer agent ships only past passed
+     * checks. A repo with no CI never reports any, so: when the PR's head has
+     * no checks at all and the base branch requires none, how many minutes
+     * after the reviewer agent first looked it counts that as passed (and says
+     * "no checks ran"). The wait lets a slow CI register its checks first.
+     * `null`: never; a PR with no checks waits for a person.
+     */
+    noChecksPassAfterMinutes: z.number().int().nonnegative().max(1440).nullable().default(10),
   })
   .prefault({});
 

@@ -4,6 +4,16 @@ Installs of this plugin are pinned to a commit SHA, so a fix here does not reach
 you until you **reinstall it** (Marketplace → flow → reinstall, or re-run your
 `--plugin-dir` checkout's `git pull`). Each entry below says whether that matters.
 
+## 0.54.0
+
+**The reviewer agent can now ship work in a project where auto-merge is off, including a repo with no CI. Reinstall to get it.**
+
+- With "Merge when I approve" off (`gates.review.mergeOnApproval: false`), the reviewer agent ships only after every check has passed. It used to wait for them in one command that could run for two hours, longer than an agent may run one command, so the command was cut off and the work went to you anyway. Now, while checks are still running, it ships nothing, notes that it is waiting, and checks again on the drain's next run. Default projects, with auto-merge on, work as before.
+- A repo with no CI never runs any checks, so the reviewer agent could never ship there. Now, when a pull request has no checks at all and the main branch requires none, it waits 10 minutes in case CI is just slow to start, then ships and says "No checks ran". The new `gates.review.noChecksPassAfterMinutes` setting changes the wait; set it to `null` to always leave such work for you. If flow can't tell whether checks are required, it keeps waiting rather than guess.
+- With auto-merge off, the reviewer agent also waits for a required check that hasn't started yet, even when other checks have passed, and it never ships a commit pushed after its review.
+- A check that couldn't start (GitHub's "startup failure") or went stale now counts as failing everywhere flow reads checks, including the drain. It used to count as neither failing nor passed.
+- `flow review --approve --by reviewer-agent --wait` still works for a person at a terminal. Without `--wait`, a check that isn't finished now exits 5 with `"verdict": "pending"`, and a refusal is still a plain error.
+
 ## 0.53.0
 
 **Flow's parts in the DorkOS app now load and stay out of the way, and the guides cover them. Reinstall to get it.**

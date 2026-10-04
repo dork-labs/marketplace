@@ -540,7 +540,8 @@ export const VERBS: readonly VerbDefinition[] = [
       'Record a verdict at the review gate. Nothing is ever closed, released or reassigned.',
       '  --approve [--by person|reviewer-agent]',
       '      Comment "Shipped" on the item, approve the PR (a person only, and not their own PR), and arm it to merge when gates.review.mergeOnApproval is on.',
-      "      --by reviewer-agent needs a clean review recorded with the reviewer's token at the branch head, passing checks, review.adversarial on, and the project's Ship finished work setting past Ask me first.",
+      "      --by reviewer-agent needs a clean review recorded with the reviewer's token at the branch head, no failing check, review.adversarial on, and the project's Ship finished work setting past Ask me first.",
+      '      With mergeOnApproval off every check must have passed. Checks still running: ships nothing, exits 5 with verdict "pending", and records the retry the drain re-checks. A PR no check reports on counts as passed after gates.review.noChecksPassAfterMinutes, when the base requires none.',
       '  --changes (--note <text> | --note-file <file>)',
       '      Comment "Sent back: <note>", request changes on the PR, and send the work back: a drain run gets the note as review findings; any other run returns to execute.',
       'Exits 5 when the item is not at the review gate.',
@@ -566,7 +567,7 @@ export const VERBS: readonly VerbDefinition[] = [
         name: 'wait',
         kind: 'boolean',
         description:
-          'With --by reviewer-agent and mergeOnApproval off: wait up to 2 hours for the checks to finish.',
+          'With --by reviewer-agent and mergeOnApproval off: keep waiting, up to 2 hours, for the checks to finish. For a person at a terminal; an agent runs without it and lets the drain re-check.',
       },
       {
         name: 'wait-minutes',

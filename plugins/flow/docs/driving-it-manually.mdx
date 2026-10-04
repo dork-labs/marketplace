@@ -252,7 +252,7 @@ flow answer DOR-201 --text "Drop it."               # answer a parked question
 flow autonomy                                       # how much flow does on its own here
 ```
 
-`flow review` answers the review gate: your approval comments "Shipped from DorkOS." on the item, approves the PR (unless you wrote it), and, when `gates.review.mergeOnApproval` is on, arms the commit you approved (`--head`; a drain run's reviewed commit), refusing if the PR moved since. `flow ask` is how an agent parks a question: it always offers its own pick and says why, so you can answer with one click, and at "Tell me after" it goes with its pick if nobody answers by the deadline. `flow answer` posts your answer; whoever answers first wins, and the second is told it was already answered.
+`flow review` answers the review gate: your approval comments "Shipped from DorkOS." on the item, approves the PR (unless you wrote it), and, when `gates.review.mergeOnApproval` is on, arms the commit you approved (`--head`; a drain run's reviewed commit), refusing if the PR moved since. With auto-merge off, the reviewer agent ships only past passed checks; until then it exits 5 with `"verdict": "pending"` and the drain retries. `--wait` waits in one command instead. `flow ask` is how an agent parks a question: it always offers its own pick and says why, so you can answer with one click, and at "Tell me after" it goes with its pick if nobody answers by the deadline. `flow answer` posts your answer; whoever answers first wins, and the second is told it was already answered.
 
 ## Manual versus autonomous
 

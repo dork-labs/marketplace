@@ -207,6 +207,23 @@ export interface RunReview {
   };
 }
 
+/**
+ * The reviewer agent's ship waiting on checks (spec `flow-multiproject` §7.5):
+ * with `gates.review.mergeOnApproval` off, `flow review --approve --by
+ * reviewer-agent` ships only past passed checks, and when they have not
+ * finished it records this instead of blocking. It is the drain's retry point:
+ * each tick runs the same command again for a run that has it. Cleared when the
+ * work ships, is sent back, or the reviewer agent is refused.
+ */
+export interface RunShipWait {
+  /** The commit whose checks are awaited (the branch head the reviewer agent checked). */
+  sha: string;
+  /** When the reviewer agent first found this commit's checks unfinished (ISO). */
+  since: string;
+  /** When it last looked (ISO). */
+  checkedAt: string;
+}
+
 /** One answer an agent offers with a question (spec `flow-multiproject` §7.5). */
 export interface RunQuestionChoice {
   /** A short stable id, `c1` to `c5`, in the order the agent gave them. */
@@ -422,6 +439,8 @@ export interface FlowRun {
   dispatchedBy?: string;
   /** VERIFY's adversarial review of a run that is not a drain run. See {@link RunReview}. */
   review?: RunReview;
+  /** The reviewer agent's ship, waiting on checks. See {@link RunShipWait}. */
+  shipWait?: RunShipWait;
   /** The question the run is parked on, while one is open. See {@link RunQuestion}. */
   question?: RunQuestion;
 }

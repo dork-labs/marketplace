@@ -44,6 +44,18 @@ export interface PrStatus {
    * passed).
    */
   pendingChecks?: number;
+  /**
+   * How many checks the head commit has reported at all, finished or not, when
+   * the forge says. `0` is a commit no check has reported on yet, which a repo
+   * without CI stays at forever (`flow review`'s no-checks rule reads it).
+   */
+  checksReported?: number;
+  /**
+   * The names of the checks the head commit reported (a check run's name, a
+   * commit status's context), when the forge says; a required check missing
+   * from it has not started.
+   */
+  checkNames?: string[];
   /** Whether auto-merge is armed. */
   armed: boolean;
   /** Whether the PR sits in the merge queue. */
@@ -130,6 +142,13 @@ export interface Forge {
    * it, an approval posts nothing and a request for changes posts a comment.
    */
   review(pr: number, input: ReviewInput): Promise<ReviewOutcome>;
+  /**
+   * The checks a merge into `base` requires (branch protection and rulesets
+   * together), an empty list when it requires none, or `null` when the forge
+   * cannot tell. Optional: a forge without it can never show that a repo
+   * requires no checks, so a PR with no checks never counts as passed there.
+   */
+  requiredChecks?(base: string): Promise<string[] | null>;
   /**
    * Merge-group attempts on `base` in the last `sinceMinutes` minutes that had
    * failing checks. `checkNames` narrows `failing` to those names; empty keeps

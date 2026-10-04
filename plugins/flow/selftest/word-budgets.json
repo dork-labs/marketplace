@@ -76,8 +76,8 @@
     "target": 1288
   },
   "docs/driving-it-manually.mdx": {
-    "baseline": 2223,
-    "target": 2223
+    "baseline": 2252,
+    "target": 2252
   },
   "docs/how-it-works.mdx": {
     "baseline": 3116,
@@ -104,8 +104,8 @@
     "target": 2575
   },
   "docs/the-dials.mdx": {
-    "baseline": 4301,
-    "target": 4301
+    "baseline": 4357,
+    "target": 4357
   },
   "docs/turning-on-autonomy.mdx": {
     "baseline": 2940,
@@ -168,8 +168,8 @@
     "target": 982
   },
   "skills/flow-drain/SKILL.md": {
-    "baseline": 686,
-    "target": 686
+    "baseline": 720,
+    "target": 720
   },
   "skills/flow-groom/SKILL.md": {
     "baseline": 165,
@@ -212,7 +212,7 @@
     "target": 1139
   },
   "skills/verifying-work/SKILL.md": {
-    "baseline": 1237,
-    "target": 1237
+    "baseline": 1256,
+    "target": 1256
   }
 }

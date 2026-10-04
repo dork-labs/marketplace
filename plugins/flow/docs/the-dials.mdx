@@ -199,6 +199,7 @@ The checkpoints between stages, under `gates`:
 | `planApproval`                       | Stop after DECOMPOSE for human sign-off before EXECUTE.             | `false`      | Off by default: the engine flows DECOMPOSE to EXECUTE. Turn on for a plan gate. |
 | `review.requireCiGreen`              | Require green CI before the review gate clears.                     | `true`       | Part of the review gate, which is **always on**.                                |
 | `review.reapproveOnFunctionalChange` | Re-request approval if the change shifts functionally after review. | `true`       | Keeps a stale approval from carrying a changed diff.                            |
+| `review.noChecksPassAfterMinutes`    | Minutes before a PR with no checks counts as passed (auto-merge off). | `10` | Only if none are required. `null`: never. |
 | `circuitBreaker.estimateMultiplier`  | Trip the breaker when actual work exceeds the estimate by N times.  | `2`          | Lower to fail fast on runaway items.                                            |
 | `circuitBreaker.tokenBudget`         | Hard token ceiling per item before the breaker trips.               | `2000000`    | Raise for genuinely large items; lower to cap spend.                            |
 | `projectCompletion`                  | Whether DONE closes a finished project itself or recommends it.     | `"advisory"` | `"auto"` also needs an adapter supporting the optional `completeProject` verb.  |
@@ -208,6 +209,10 @@ The checkpoints between stages, under `gates`:
   Who checks it is [How much it does on its own](#how-much-it-does-on-its-own). With
   `review.mergeOnApproval` on, an approval arms the approved commit to merge once checks pass.
 </Callout>
+
+With `review.mergeOnApproval` off, the reviewer agent ships only once every check passed; while
+they run, the drain's next tick checks again. A PR with no checks, on a branch that requires none,
+ships after `review.noChecksPassAfterMinutes` and says "No checks ran".
 
 `projectCompletion` is a ceiling, not a promise. On `"auto"`, DONE closes a project only when nothing inside it is still open, its progress is complete, no active spec points at it, and your adapter supports closing projects (an optional verb). Otherwise you get `"advisory"` plus a line saying which condition stopped it. The strictness is the point: a closed project hides every issue left open inside it from the work queue for good.
 

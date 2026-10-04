@@ -1,7 +1,7 @@
 {
   "id": "flow",
   "name": "Flow",
-  "version": "0.53.0",
+  "version": "0.54.0",
   "description": "See what flow is doing in each project and across all of them, pause it for as long as you choose, and choose how much it does on its own and which accounts each project may use.",
   "minHostVersion": "0.88.0"
 }
