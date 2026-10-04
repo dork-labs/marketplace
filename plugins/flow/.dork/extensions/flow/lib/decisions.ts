@@ -165,7 +165,7 @@ interface RaisedMeta {
 export const CHANGED_TEXT = 'This changed. Take another look.';
 
 /** What an answer from flow's page gets for an ask only a person's own answer may settle. */
-export const ANSWER_IN_ACTIVITY_TEXT = 'Answer this in Activity, so it counts as yours.';
+export const ANSWER_IN_INBOX_TEXT = 'Answer this in the Inbox, so it counts as yours.';
 
 /** Where an answer came from: core's inbox (or `answerDecision`), or flow's own route. */
 export type AnswerPath = 'core' | 'local';
@@ -824,7 +824,7 @@ export class DecisionCoordinator {
       this.deps.inbox !== undefined &&
       (ask.kind === 'review' || ask.floor)
     ) {
-      return { keepOpen: true, message: ANSWER_IN_ACTIVITY_TEXT };
+      return { keepOpen: true, message: ANSWER_IN_INBOX_TEXT };
     }
     const shownHead = await this.shownAs(ask, via, shown);
     if (shownHead === false) return { keepOpen: true, message: CHANGED_TEXT };

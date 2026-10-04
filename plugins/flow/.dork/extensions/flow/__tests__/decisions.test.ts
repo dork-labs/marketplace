@@ -19,7 +19,7 @@ import type { ExecFileLike } from '../lib/advisor.ts';
 import { FIX_IT_ANSWER, type AskProject } from '../lib/asks.ts';
 import type { AutonomyStore } from '../lib/autonomy-store.ts';
 import {
-  ANSWER_IN_ACTIVITY_TEXT,
+  ANSWER_IN_INBOX_TEXT,
   CHANGED_TEXT,
   CHECKS_FAILED_REASON,
   DID_NOT_GO_THROUGH,
@@ -593,10 +593,10 @@ describe('answering', () => {
     expect(await again.coordinator.handle(event(key))).toEqual({ resolve: 'approved' });
     const page = setup();
     await page.coordinator.sync([plan({ a: gateRun() })]);
-    // From flow's page (core credits it to Flow, no pending id): shipping goes to Activity.
+    // From flow's page (core credits it to Flow, no pending id): shipping goes to the Inbox.
     expect(await page.coordinator.handle(event(key, { pendingActionId: null }))).toEqual({
       keepOpen: true,
-      message: ANSWER_IN_ACTIVITY_TEXT,
+      message: ANSWER_IN_INBOX_TEXT,
     });
     expect(page.cli.calls).toEqual([]);
     const old = setup();
@@ -1059,7 +1059,7 @@ describe('the review round (adversarial fixes)', () => {
     ).toHaveProperty('offer');
   });
 
-  it('sends a floor question answered on flow’s page to Activity', async () => {
+  it('sends a floor question answered on flow’s page to the Inbox', async () => {
     const { coordinator, cli } = setup();
     await coordinator.sync([
       plan({ a: questionRun({ floor: ['outward-facing'], decideBy: null }) }),
@@ -1072,7 +1072,7 @@ describe('the review round (adversarial fixes)', () => {
           pendingActionId: null,
         })
       )
-    ).toEqual({ keepOpen: true, message: ANSWER_IN_ACTIVITY_TEXT });
+    ).toEqual({ keepOpen: true, message: ANSWER_IN_INBOX_TEXT });
     expect(cli.calls).toEqual([]);
   });
 

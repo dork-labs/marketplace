@@ -21,8 +21,19 @@ export const PAGE_PATHS = { home: '', project: 'p/:name', settings: 'p/:name/set
 /** Settings → Flow, on a DorkOS without pages (the Settings tab is `flow:fleet`). */
 export const SETTINGS_TAB_LINK = '?settings=flow:fleet';
 
-/** DorkOS's Activity page, where flow's asks are answered. */
-export const ACTIVITY_ROUTE = '/activity';
+/**
+ * The link that opens DorkOS's Inbox on one of flow's asks, or on nothing in
+ * particular. It names Activity so it still lands somewhere on a DorkOS too
+ * old to read `?inbox=`; a newer one opens the Inbox over Activity, on that
+ * ask, and opens it plain when the ask is no longer waiting.
+ *
+ * @param id - Core's id for the ask (`ExtensionDecisionView.id`, not flow's
+ *   key), or nothing to open the Inbox plain.
+ * @returns `/activity?inbox=<id>`, or `/activity?inbox=open`.
+ */
+export function inboxLink(id?: string): string {
+  return `/activity?inbox=${id === undefined ? 'open' : encodeURIComponent(id)}`;
+}
 
 /**
  * Whether this DorkOS can show flow's pages.

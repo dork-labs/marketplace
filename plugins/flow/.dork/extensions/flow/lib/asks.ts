@@ -80,7 +80,7 @@ export interface Ask {
    * same thing: a review's head, a question's time, a park's time.
    */
   marker: string;
-  /** Where a person answers it: only in Activity (credited to them), or on flow's pages too. */
+  /** Where a person answers it: only in DorkOS's Inbox (credited to them), or on flow's pages too. */
   answerIn: 'activity' | 'flow';
   /** A review gate: the commit the ask showed, which a 👍 arms. */
   head: string | null;

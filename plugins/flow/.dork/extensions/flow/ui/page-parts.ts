@@ -11,8 +11,8 @@
  */
 
 import type { FlowDecision } from '../lib/model.ts';
-import { DecisionAnswers, answeredHere, type AnswerApi } from './answers.ts';
-import { ACTIVITY_ROUTE, projectPath } from './links.ts';
+import { DecisionAnswers, answeredHere, openInInbox, type AnswerApi } from './answers.ts';
+import { projectPath } from './links.ts';
 import { FOCUS_CSS, LINK, MUTED } from './parts.ts';
 import { h, type Node, type Style } from './react.ts';
 import type { FlowStore, StoreSnapshot } from './store.ts';
@@ -126,22 +126,17 @@ export function loadingState(snapshot: StoreSnapshot, store: FlowStore): Node | 
 }
 
 /**
- * The words of the link that sends an ask to Activity: a review gate and a
- * floor question are answered there, so DorkOS credits the answer to you
- * (§4.2, A21).
- *
- * @param decision - The decision.
- * @returns The link's words.
+ * The words of the link that opens DorkOS's Inbox on an ask: a review gate
+ * and a floor question are answered there, so DorkOS credits the answer to
+ * you (§4.2, A21). They name the Inbox, not the page the link lands on: a
+ * DorkOS too old to open the Inbox from a link shows Activity instead, and
+ * the Inbox is still where the ask is answered.
  */
-export function decisionLinkText(decision: FlowDecision): string {
-  return decision.kind === 'review' || decision.kind === 'question'
-    ? 'Review in Activity →'
-    : 'Open in Activity →';
-}
+export const INBOX_LINK_TEXT = 'Answer in Inbox →';
 
 /**
  * One decision's row: its project (on Flow home), the ask and why, and its
- * buttons, or, for an ask that must be credited to you, the way to Activity.
+ * buttons, or, for an ask that must be credited to you, the way to the Inbox.
  *
  * @param props - The decision, whether to show its project, its project's
  *   folder, the host API and the store.
@@ -189,9 +184,9 @@ export function DecisionRow(props: {
           {
             type: 'button',
             style: { ...LINK, flex: 'none' },
-            onClick: () => api.navigate(ACTIVITY_ROUTE),
+            onClick: () => void openInInbox(api, decision),
           },
-          decisionLinkText(decision)
+          INBOX_LINK_TEXT
         )
   );
 }
