@@ -2,7 +2,7 @@
 
 ## What This Is
 
-The official DorkOS marketplace repository — a catalog of packages (agents, plugins, skill-packs, adapters) that extend DorkOS. Currently at marketplace version 0.1.0, listing 15 packages in `.claude-plugin/marketplace.json`. Serves as both the canonical regression fixture for the marketplace validator and the publication hub for DorkOS packages.
+The official DorkOS marketplace repository — a catalog of packages (agents, plugins, skill-packs, adapters, shapes) that extend DorkOS. Currently at marketplace version 0.1.0, listing 15 packages in `.claude-plugin/marketplace.json` (14 in `plugins/`, plus `lifeos-starter` from its own repo). Serves as both the canonical regression fixture for the marketplace validator and the publication hub for DorkOS packages.
 
 This repo is also the workspace for the `dork-os-marketing` agent, which handles DorkOS marketing tasks.
 
