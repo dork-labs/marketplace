@@ -2,32 +2,42 @@
 
 ## What This Is
 
-The official DorkOS marketplace repository — a catalog of packages (agents, plugins, skill-packs, adapters) that extend DorkOS. Currently at marketplace version 0.1.0, listing 15 packages in `.claude-plugin/marketplace.json`. Serves as both the canonical regression fixture for the marketplace validator and the publication hub for DorkOS packages.
+The official DorkOS marketplace repository — a catalog of packages (agents, plugins, skill-packs, adapters, shapes) that extend DorkOS. Currently at marketplace version 0.1.0, listing 15 packages in `.claude-plugin/marketplace.json` (14 in `plugins/`, plus `lifeos-starter` from its own repo). Serves as both the canonical regression fixture for the marketplace validator and the publication hub for DorkOS packages.
 
 This repo is also the workspace for the `dork-os-marketing` agent, which handles DorkOS marketing tasks.
 
 ## What DorkOS Is
 
-DorkOS is the operating system for autonomous AI agents. It provides scheduling, communication, discovery, memory, and one place for every AI agent you run, so coding agents (Claude Code, Codex, OpenCode, side by side) can work autonomously — overnight, across projects, coordinated with each other.
+DorkOS is a workspace for people and agents: DMs, group DMs, channels and threads, where your agents join your team chat and take on real work. That is the category, not the lead. The canonical strategy is `../dorkos/meta/positioning-202610/00-overview.md`; where this section and that file disagree, that file wins.
 
-**Tagline:** "You, Multiplied." (hero surfaces)
+**The message stack** (use it wherever a tagline or description of DorkOS is wanted):
+1. **"You, Multiplied."** The tagline, hero surfaces only.
+2. **"Build and run your business with an agent team."** The title and main headline.
+3. **"Your agents join your team chat, take on real work, and build the custom tools your company runs on."** The supporting line.
 
-**Manifesto line:** "Intelligence doesn't scale. Coordination does." (essays and anti-positioning only, never a hero opening)
+**What sets us apart, always in this order:**
+1. **Mini apps.** Ask for a tool your business needs, and your agents build it inside DorkOS. Today these are extensions an agent builds and a person approves; docs say "mini apps (the app calls them extensions)".
+2. **Built for founders.** Not general purpose. Ready-made founder mini apps and goals are roadmap: say "coming" or leave them out.
+3. **Ownership.** Your agents, tools, files and data stay yours, wherever they run.
 
-**Banned in user-facing prose:** "mission control" and "cockpit" (retired 2026-08, DOR-1517). Say "one place" or "one window".
+**Who it is for:** the founder (primary), semi-technical, building a big or complex business mostly with agents; Kai (secondary), the developer running many agents across many projects.
 
-**Four pillars:**
-- **Tasks** — Schedule and dispatch agent work (cron-based)
-- **Relay** — Message bus between agents and humans (Telegram, Slack, webhooks)
-- **Mesh** — Agent discovery and coordination across projects
-- **Console** — Web dashboard to chat with and control all agents
+**Manifesto line:** "Intelligence doesn't scale. Coordination does." (essays only, never a headline)
+
+**Never in user-facing prose:**
+- "mission control" or "cockpit". Say "the DorkOS app", "the app" or "one window".
+- Retired framing: "operating system for AI agents", "one place for every AI agent you run", "Claude Code, Codex and OpenCode side by side" as the pitch, "local first" (say "ownership" or "yours"), "generative UI" (say "mini apps").
+- "On your computer" or "open source" in a headline: DorkOS Cloud runs on our servers too. Plain factual notes (MIT license, install steps) are fine.
+- Agents as "equals" or "peers", "equal accounts", "no human required", or agents running the place. "Co-workers" and "teammates" are fine.
+- Discord as the DorkOS community. The community will be the DorkOS Community Space, which is not built yet: never claim it works or link to it.
+- Anything that is not built yet as if it works. Runtimes (Claude Code, Codex, OpenCode) are a docs fact, never the headline.
 
 **Related products:**
 - **Loop** — a separate product, the autonomous improvement engine (github.com/dork-labs/loop)
 - **Wing** — vision only, with no code yet; never market it as "coming soon"
 
 **Key facts:**
-- Open source, MIT licensed, self-hosted; telemetry is off unless you turn it on
+- MIT licensed; runs on your own computer, with DorkOS Cloud as an optional hosted layer; telemetry is off unless you turn it on
 - Runs Claude Code, Codex and OpenCode agents; speaks MCP
 - Tech stack: TypeScript, React 19, Vite 6, Express, SQLite, Turborepo monorepo
 - Website: https://dorkos.ai
@@ -35,7 +45,7 @@ DorkOS is the operating system for autonomous AI agents. It provides scheduling,
 - npm: `dorkos`
 - Contact: hey@dorkos.ai
 - Creator: Dorian Collier / Dork Labs
-- Current version: v0.81.0 (check `git tag` in the dorkos repo; this line goes stale)
+- Current version: v0.98.0 (check `git tag` in the dorkos repo; this line goes stale)
 
 ## Repository Structure
 
