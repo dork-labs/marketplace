@@ -54,14 +54,6 @@ export class FleetRequestError extends Error {
   }
 }
 
-/** Thrown by {@link getFleet} when DorkOS is too old for the Flow tab. */
-export class HostTooOldError extends Error {
-  constructor() {
-    super('host-too-old');
-    this.name = 'HostTooOldError';
-  }
-}
-
 /** Shown when DorkOS refused a change because it could not tell a person made it. */
 export const PERSON_ONLY_MESSAGE = 'Only a person can change this.';
 
@@ -100,8 +92,7 @@ async function call<T = FleetView>(
   }
   const json: unknown = await response.json().catch(() => null);
   if (response.ok) return json as T;
-  const answer = (json ?? {}) as { error?: unknown; reason?: unknown; refusedBy?: unknown };
-  if (response.status === 501 && answer.reason === 'host-too-old') throw new HostTooOldError();
+  const answer = (json ?? {}) as { error?: unknown; refusedBy?: unknown };
   // Only flow's own refusal (a 4xx its routes send on purpose, in plain words)
   // is shown; the host's errors and any 5xx read as "could not be reached".
   const refusal =

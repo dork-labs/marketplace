@@ -56,9 +56,6 @@ export const CHOOSE_AUTONOMY_TEXT = 'Flow can do more on its own now.';
 /** The line when the morning's sorting could not start by 13:00 (§7.9). */
 export const SORT_WAITS_TEXT = 'Sorting waits until tomorrow: flow is busy.';
 
-/** The words where Pause would be, on a DorkOS that cannot tell a person from an agent. */
-export const PAUSE_FROM_CHAT_TEXT = 'Pause from a chat in this project.';
-
 /** The route that opens the Marketplace, where flow is updated or installed. */
 export const MARKETPLACE_ROUTE = '/marketplace';
 
@@ -260,21 +257,7 @@ export function ProjectLens(props: {
     }
     children.push(h('span', { key: 'gap', style: { flex: 1 } }));
     if (project.setup === 'ready') {
-      if (!model.canChange) {
-        children.push(
-          h(
-            'span',
-            { key: 'pause-hint', style: MUTED },
-            project.pause === null ? PAUSE_FROM_CHAT_TEXT : pausedText(project.pause, now),
-            h(Hint, {
-              text:
-                project.pause === null
-                  ? `Type /flow:pause in a chat in ${project.name}. This DorkOS can't yet tell you apart from an agent, so the button is off.`
-                  : `Type /flow:resume in a chat in ${project.name}.`,
-            })
-          )
-        );
-      } else if (project.pause !== null) {
+      if (project.pause !== null) {
         children.push(
           h('span', { key: 'paused', style: MUTED }, pausedText(project.pause, now)),
           h(
@@ -358,7 +341,7 @@ export function ProjectLens(props: {
   };
 
   const body: Node[] = [header()];
-  if (menu && model.canChange && project.pause === null) {
+  if (menu && project.pause === null) {
     body.push(
       h(
         'div',
@@ -494,7 +477,7 @@ export function ProjectLens(props: {
       const note = upNextNote(project);
       if (note !== null) {
         const allow =
-          project.upNext === 'own-code' && model.canChange
+          project.upNext === 'own-code'
             ? h(
                 'button',
                 {

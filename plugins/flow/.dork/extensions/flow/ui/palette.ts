@@ -16,7 +16,7 @@ import { UNREACHABLE_MESSAGE, pauseFlow, resumeFlow, type PauseTarget } from './
 import { chatProject } from './flow-tab.ts';
 import { formatWhen } from './panel-format.ts';
 import { PauseMenu } from './pause-menu.ts';
-import { BUTTON, FOCUS_CSS, Hint, MUTED, PANEL } from './parts.ts';
+import { BUTTON, FOCUS_CSS, MUTED, PANEL } from './parts.ts';
 import { h, useEffect, useRef, useState, type Node } from './react.ts';
 import { useStore, type FlowStore } from './store.ts';
 import { ALERT, hostColor } from './styles.ts';
@@ -31,13 +31,6 @@ export const COMMANDS = {
 
 /** Said when the chat is in no flow project. */
 export const NOT_IN_PROJECT_TEXT = "This chat isn't in a flow project.";
-
-/** Said on a DorkOS that cannot tell a person from an agent. */
-export const FROM_CHAT_TEXT =
-  "Pause and resume from a chat in the project: this DorkOS can't yet tell you apart from an agent.";
-
-/** Behind ⓘ beside {@link FROM_CHAT_TEXT}: the only place the commands appear. */
-export const FROM_CHAT_HINT = 'Type /flow:pause or /flow:resume in a chat in the project.';
 
 /**
  * What a toast says after a pause.
@@ -307,9 +300,6 @@ function createPauseDialog(
         )
       );
     if (model === null) return root(h('p', { style: MUTED }, 'Loading…'));
-    if (!model.canChange) {
-      return root(h('p', { style: MUTED }, FROM_CHAT_TEXT, h(Hint, { text: FROM_CHAT_HINT })));
-    }
     if (mode === 'project' && project === null) {
       return root(
         h('p', { style: { margin: '0 0 8px' } }, NOT_IN_PROJECT_TEXT),
@@ -375,10 +365,6 @@ async function resumeNow(
   const snapshot = store.get();
   const model: FlowModel | null = snapshot.model;
   if (model === null) return;
-  if (!model.canChange) {
-    api.notify?.(FROM_CHAT_TEXT, { type: 'info' });
-    return;
-  }
   let target: PauseTarget = { all: true };
   let who: string;
   if (scope === 'all') {

@@ -45,7 +45,6 @@ import {
   pageRoot,
 } from './page-parts.ts';
 import { pausedText } from './panel-format.ts';
-import { FROM_CHAT_HINT, FROM_CHAT_TEXT } from './palette.ts';
 import { PauseMenu } from './pause-menu.ts';
 import { BUTTON, Hint, LINK, MUTED } from './parts.ts';
 import { h, useEffect, useRef, useState, type Node, type Style } from './react.ts';
@@ -282,9 +281,6 @@ function PauseAll(props: { model: FlowModel; store: FlowStore }): Node {
   const opener = useRef<HTMLButtonElement | null>(null);
   const state = pauseAllState(model, new Date());
   if (state.kind === 'none') return null;
-  if (!model.canChange) {
-    return h('span', { style: MUTED }, FROM_CHAT_TEXT, h(Hint, { text: FROM_CHAT_HINT }));
-  }
   const act = (write: () => Promise<FlowModel>) => {
     if (busy) return;
     setBusy(true);
@@ -677,9 +673,7 @@ export function createPages(
                 line.text,
                 line.hint === null ? null : h(Hint, { text: line.hint })
               ),
-              line.paused && model.canChange
-                ? h(ResumeButton, { project: line.project.name, store })
-                : null
+              line.paused ? h(ResumeButton, { project: line.project.name, store }) : null
             )
           )
         ),

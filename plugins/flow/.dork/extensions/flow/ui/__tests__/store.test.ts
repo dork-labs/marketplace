@@ -159,18 +159,6 @@ describe('FlowStore', () => {
     store.stop();
   });
 
-  it('switches nothing on where DorkOS cannot tell a person from an agent', async () => {
-    const fetch = routeFetch(() => ({
-      status: 200,
-      body: flowModel([flowProject('dorkos', { restoreSchedules: ['s-1'] })], { canChange: false }),
-    }));
-    const store = new FlowStore(host({ currentCwd: null }));
-    store.start();
-    await settle();
-    expect(fetch.calls.filter((call) => call.method !== 'GET')).toEqual([]);
-    store.stop();
-  });
-
   it('knows how fresh its facts are: current while the stream is open, or for five minutes after a read', async () => {
     FakeEventSource.instances = [];
     vi.stubGlobal('EventSource', FakeEventSource);

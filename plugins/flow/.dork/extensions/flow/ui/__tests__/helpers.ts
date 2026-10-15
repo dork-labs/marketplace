@@ -180,7 +180,6 @@ export function flowModel(projects: FlowProject[], extra: Partial<FlowModel> = {
     projects,
     decisions: [],
     cwdProject: null,
-    canChange: true,
     ...extra,
   };
 }
@@ -215,7 +214,7 @@ export function routeFetch(
   return { calls, fetchMock };
 }
 
-/** A `GET /settings/:name` body: every field at its default, a person able to save. */
+/** A `GET /settings/:name` body: every field at its default. */
 export function settingsView(extra: Partial<ProjectSettingsView> = {}): ProjectSettingsView {
   const field = <T>(value: T) => ({ value, source: 'default' as const, locked: null });
   return {
@@ -235,7 +234,6 @@ export function settingsView(extra: Partial<ProjectSettingsView> = {}): ProjectS
       parallel: field(1),
     },
     pauseDefault: 'tomorrow',
-    canChange: true,
     ...extra,
   };
 }

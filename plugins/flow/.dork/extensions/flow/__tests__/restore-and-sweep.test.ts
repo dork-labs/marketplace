@@ -82,7 +82,6 @@ function service(
     emit: () => {},
     execFile: exec,
     now: opts.now ?? (() => new Date('2026-09-28T12:00:00Z')),
-    canChange: true,
     log: opts.log ?? (() => {}),
     pidAlive: () => true,
   });

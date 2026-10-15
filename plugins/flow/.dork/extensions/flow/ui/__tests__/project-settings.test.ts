@@ -22,7 +22,6 @@ import {
 import { createPages } from '../home-page.ts';
 import {
   ProjectFlowSettings,
-  READ_ONLY_TEXT,
   SAVED_LOCAL_WINS_TEXT,
   SHARED_NOTE,
   SHARED_SAVED_TEXT,
@@ -484,16 +483,6 @@ describe('the shared and just-me writes', () => {
     fireEvent.click(screen.getByRole('switch', { name: 'Merge when I approve' }));
     await act(async () => {});
     expect(screen.getByRole('alert').textContent).toBe('Only a person can change this.');
-  });
-
-  it('shows every setting but changes none on a DorkOS that can’t tell a person from an agent', async () => {
-    serve({ view: settingsView({ canChange: false }) });
-    await renderSettings(newProject());
-    expect(screen.getByText(READ_ONLY_TEXT)).toBeTruthy();
-    expect(
-      (screen.getByRole('switch', { name: 'Review before a PR opens' }) as HTMLButtonElement)
-        .disabled
-    ).toBe(true);
   });
 });
 

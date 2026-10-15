@@ -99,8 +99,6 @@ export interface ModelServiceDeps {
   execFile: ExecFileLike;
   /** The clock. */
   now: () => Date;
-  /** Whether pausing and resuming routes exist on this host. */
-  canChange: boolean;
   /** Folder to main checkout (default: git, off the event loop, remembering recent answers). */
   resolver?: CheckoutResolver;
   /** Whether a pid exists (default: `process.kill(pid, 0)`, as `flow fleet`). */
@@ -461,7 +459,6 @@ export class ModelService {
       projects,
       decisions: this.decisions.decisions().filter((decision) => names.has(decision.project)),
       cwdProject,
-      canChange: this.deps.canChange,
     };
   }
 
@@ -501,10 +498,7 @@ export class ModelService {
   async settings(name: unknown): Promise<ProjectSettingsView> {
     const entry = await this.named(name);
     const pauseDefaultOf = await pauseDefaults(this.deps.storage);
-    return readProjectSettings(entry, {
-      pauseDefault: pauseDefaultOf(entry.root),
-      canChange: this.deps.canChange,
-    });
+    return readProjectSettings(entry, { pauseDefault: pauseDefaultOf(entry.root) });
   }
 
   /**

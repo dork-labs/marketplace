@@ -319,8 +319,6 @@ export function createFlowExtension(
     emit: (event, data) => ctx.emit(event, data),
     execFile: exec,
     now,
-    // Every route that changes something is served, behind the person bar.
-    canChange: true,
     log,
     pidAlive: overrides.pidAlive,
     inbox: hostSupportsInbox(ctx) ? ctx.inbox : undefined,

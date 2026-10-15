@@ -325,7 +325,7 @@ describe('key skew (§8.3 step 1)', () => {
   });
 
   it('marks such a field locked, with the same words, when it is read', () => {
-    const view = readProjectSettings(entry, { pauseDefault: 'tomorrow', canChange: true });
+    const view = readProjectSettings(entry, { pauseDefault: 'tomorrow' });
     expect(view.shared.reviewerAgent.locked).toBe(UPDATE_FLOW_TEXT);
   });
 });

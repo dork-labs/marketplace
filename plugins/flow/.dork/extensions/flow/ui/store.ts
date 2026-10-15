@@ -265,7 +265,6 @@ export class FlowStore {
    * DorkOS would not switch on stays on the list, and the project says so.
    */
   private async restoreSchedules(model: FlowModel): Promise<void> {
-    if (!model.canChange) return;
     for (const project of model.projects) {
       const now = Date.now();
       const ids = project.restoreSchedules.filter(

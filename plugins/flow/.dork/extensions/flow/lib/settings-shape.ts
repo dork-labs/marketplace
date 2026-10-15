@@ -73,6 +73,4 @@ export interface ProjectSettingsView {
   local: LocalSettings;
   /** The pause menu's highlighted choice for this project. */
   pauseDefault: PauseDefault;
-  /** False on a DorkOS that cannot tell a person from an agent: nothing here can be saved. */
-  canChange: boolean;
 }

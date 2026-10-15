@@ -110,8 +110,6 @@ export interface AccountCheckboxesProps {
   projectName: string;
   /** Go to a DorkOS page. */
   navigate: (path: string) => void;
-  /** Whether a person may change anything here. */
-  canChange?: boolean;
 }
 
 /**
@@ -195,7 +193,7 @@ export function AccountCheckboxes(props: AccountCheckboxesProps): Node {
   };
 
   const toggle = (row: AccountEligibilityRow) => {
-    if (busy || props.canChange === false) return;
+    if (busy) return;
     const name = accountName(row);
     if (!isChecked(row)) {
       if (!row.allowedByAccount) {
@@ -251,13 +249,13 @@ export function AccountCheckboxes(props: AccountCheckboxesProps): Node {
             gap: '8px',
             padding: '4px 0',
             minHeight: '28px',
-            cursor: props.canChange === false ? 'default' : 'pointer',
+            cursor: 'pointer',
           },
         },
         h('input', {
           type: 'checkbox',
           checked: isChecked(row),
-          disabled: busy || props.canChange === false,
+          disabled: busy,
           onChange: () => toggle(row),
         }),
         h('span', {

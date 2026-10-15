@@ -18,12 +18,11 @@ import { LOAD_FAILED_TEXT, createFlowTab } from '../flow-tab.ts';
 import {
   NOTHING_RUNNING_TEXT,
   NOT_SET_UP_TEXT,
-  PAUSE_FROM_CHAT_TEXT,
   SCHEDULES_OFF_TEXT,
   schedulesWaitingText,
 } from '../project-lens.ts';
 import { FlowStore } from '../store.ts';
-import { flowModel, flowProject, routeFetch, runRow } from './helpers.ts';
+import { flowModel, flowProject, routeFetch, runRow, type StubAnswer } from './helpers.ts';
 
 afterEach(() => {
   vi.unstubAllGlobals();
@@ -198,10 +197,13 @@ describe('the project lens', () => {
   });
 
   it('says while a finished pause’s schedules are still off, and to switch them on when DorkOS would not', async () => {
-    // The PATCH is refused, so the schedule stays on the list.
+    // The PATCH waits, then is refused, so the schedule stays on the list.
+    let refuse: (answer: StubAnswer) => void = () => {};
     routeFetch((method) =>
       method === 'PATCH'
-        ? { status: 403, body: {} }
+        ? new Promise<StubAnswer>((resolve) => {
+            refuse = resolve;
+          })
         : { status: 200, body: flowModel([flowProject('dorkos', { restoreSchedules: ['s-1'] })]) }
     );
     const api = host(DORKOS);
@@ -210,12 +212,14 @@ describe('the project lens', () => {
     await act(async () => {
       store.apply(
         flowModel([flowProject('dorkos', { restoreSchedules: ['s-1'] }), flowProject('blintz')], {
-          canChange: false,
           cwdProject: 'dorkos',
         })
       );
     });
     expect(screen.getByText(schedulesWaitingText('dorkos'))).toBeTruthy();
+    await act(async () => {
+      refuse({ status: 403, body: {} });
+    });
     await act(async () => {
       store.apply(
         flowModel([flowProject('dorkos', { restoreSchedules: ['s-1'] })], { cwdProject: 'dorkos' })
@@ -286,13 +290,6 @@ describe('pausing from the lens', () => {
     });
     expect(screen.getByRole('alert').textContent).toBe(PERSON_ONLY_MESSAGE);
   });
-
-  it('offers no Pause button where DorkOS cannot tell a person from an agent', async () => {
-    await renderTab(flowModel([flowProject('dorkos')], { canChange: false }), host(DORKOS));
-    expect(screen.queryByRole('button', { name: 'Pause' })).toBeNull();
-    const words = screen.getByText(PAUSE_FROM_CHAT_TEXT);
-    expect(words.textContent).not.toMatch(/\/flow:pause.*\/flow:pause/);
-  });
 });
 
 describe('the all-projects lens', () => {
@@ -338,9 +335,7 @@ describe('the all-projects lens', () => {
 describe('schedules a finished pause left off', () => {
   it('shows the project in the all-projects lens until they are back on', async () => {
     await renderTab(
-      flowModel([flowProject('dorkos', { restoreSchedules: ['s-1'] }), flowProject('quiet')], {
-        canChange: false,
-      }),
+      flowModel([flowProject('dorkos', { restoreSchedules: ['s-1'] }), flowProject('quiet')]),
       host(null)
     );
     const line = screen.getByText(/^· Schedules stay off/).parentElement?.textContent;

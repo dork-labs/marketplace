@@ -34,7 +34,6 @@ import { CONFIG_FILE, LOCAL_CONFIG_FILE, PROJECT_CONFIG_DIR } from '../shared/co
 import { AccountCheckboxes } from './account-checkboxes.ts';
 import {
   FleetRequestError,
-  HostTooOldError,
   UNREACHABLE_MESSAGE,
   getSettings,
   putSettings,
@@ -59,10 +58,6 @@ export const SHARED_NOTE = `Saving changes ${SHARED_FILE} in this repo.`;
 
 /** Said after a shared save: flow never commits. */
 export const SHARED_SAVED_TEXT = `Saved. Commit ${SHARED_FILE} to share it.`;
-
-/** Said on a DorkOS that can't tell a person from an agent: nothing can be saved here. */
-export const READ_ONLY_TEXT =
-  "This DorkOS can't tell you from an agent, so these settings can be read here but not changed. Update DorkOS to change them.";
 
 /** Said when a value set on this computer wins over the repo's. */
 export const LOCAL_WINS_TEXT = "This computer's own setting wins over this one.";
@@ -123,7 +118,6 @@ function Switch(props: {
   label: string;
   description?: string;
   field: SettingField<boolean>;
-  disabled: boolean;
   onChange: (value: boolean) => void;
   error?: string;
   /** This field was just saved to the shared file. */
@@ -147,7 +141,7 @@ function Switch(props: {
           'aria-checked': on,
           'aria-labelledby': labelId,
           'aria-describedby': props.description === undefined ? undefined : descId,
-          disabled: props.disabled || props.field.locked !== null,
+          disabled: props.field.locked !== null,
           onClick: () => props.onChange(!on),
           style: {
             ...BUTTON,
@@ -286,11 +280,9 @@ export function ProjectFlowSettings(props: ProjectFlowSettingsProps): Node {
         setPhase({
           kind: 'failed',
           message:
-            failure instanceof HostTooOldError
-              ? 'Update DorkOS to change flow’s settings here.'
-              : failure instanceof FleetRequestError && failure.refusedByFlow
-                ? failure.message
-                : SETTINGS_LOAD_FAILED_TEXT,
+            failure instanceof FleetRequestError && failure.refusedByFlow
+              ? failure.message
+              : SETTINGS_LOAD_FAILED_TEXT,
         });
       }
     );
@@ -313,7 +305,6 @@ export function ProjectFlowSettings(props: ProjectFlowSettingsProps): Node {
   }
   if (phase.kind === 'loading' || view === null) return h('div', { 'aria-busy': true });
 
-  const locked = !view.canChange;
   const write = (scope: string, optimistic: ProjectSettingsView, body: SettingsWrite) => {
     setErrors((current) => {
       const next = { ...current };
@@ -370,9 +361,6 @@ export function ProjectFlowSettings(props: ProjectFlowSettingsProps): Node {
   return h(
     'div',
     null,
-    locked
-      ? h('p', { role: 'status', style: { ...MUTED, margin: '8px 0 0' } }, READ_ONLY_TEXT)
-      : null,
     h(Box, {
       title: 'Shared with the repo',
       who: 'everyone on this repo',
@@ -394,7 +382,6 @@ export function ProjectFlowSettings(props: ProjectFlowSettingsProps): Node {
           label: 'Review before a PR opens',
           description: 'Another agent reviews every change before the PR opens.',
           field: view.shared.reviewerAgent,
-          disabled: locked,
           error: errors.reviewerAgent,
           justSaved: justSaved === 'reviewerAgent',
           onChange: (value) => setShared('reviewerAgent', value),
@@ -403,7 +390,6 @@ export function ProjectFlowSettings(props: ProjectFlowSettingsProps): Node {
           key: 'merge',
           label: 'Merge when I approve',
           field: view.shared.mergeOnApproval,
-          disabled: locked,
           error: errors.mergeOnApproval,
           justSaved: justSaved === 'mergeOnApproval',
           onChange: (value) => setShared('mergeOnApproval', value),
@@ -412,7 +398,6 @@ export function ProjectFlowSettings(props: ProjectFlowSettingsProps): Node {
           key: 'auto-merge',
           label: 'Merge by itself when checks pass',
           field: view.shared.armAutoMerge,
-          disabled: locked,
           error: errors.armAutoMerge,
           justSaved: justSaved === 'armAutoMerge',
           onChange: (value) => setShared('armAutoMerge', value),
@@ -427,7 +412,7 @@ export function ProjectFlowSettings(props: ProjectFlowSettingsProps): Node {
           h(RepoChips, {
             repos: view.shared.labels.value,
             rule: LABEL_RULE,
-            readOnly: locked || view.shared.labels.locked !== null,
+            readOnly: view.shared.labels.locked !== null,
             onChange: (labels: string[]) => setShared('labels', labels),
           })
         ),
@@ -480,7 +465,7 @@ export function ProjectFlowSettings(props: ProjectFlowSettingsProps): Node {
             ],
             value: view.local.startsOnItsOwn.value,
             label: 'Starts work on its own',
-            disabled: locked || view.local.startsOnItsOwn.locked !== null,
+            disabled: view.local.startsOnItsOwn.locked !== null,
             wrap: true,
             onChange: (value) => setLocal('startsOnItsOwn', value),
           })
@@ -494,7 +479,7 @@ export function ProjectFlowSettings(props: ProjectFlowSettingsProps): Node {
           },
           h(Stepper, {
             value: view.local.parallel.value,
-            disabled: locked || view.local.parallel.locked !== null,
+            disabled: view.local.parallel.locked !== null,
             onChange: (value) => setLocal('parallel', value),
           })
         ),
@@ -512,7 +497,6 @@ export function ProjectFlowSettings(props: ProjectFlowSettingsProps): Node {
             options: PAUSE_CHOICES.map((choice) => ({ value: choice.id, label: choice.label })),
             value: view.pauseDefault,
             label: 'When you pause, the menu starts on',
-            disabled: locked,
             wrap: true,
             onChange: (value) =>
               write('pauseDefault', { ...view, pauseDefault: value }, { pauseDefault: value }),
@@ -525,7 +509,6 @@ export function ProjectFlowSettings(props: ProjectFlowSettingsProps): Node {
             root: project.root,
             projectName: project.name,
             navigate: (path: string) => api.navigate(path),
-            canChange: !locked,
           })
         ),
         h(
