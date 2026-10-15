@@ -263,7 +263,9 @@ export function createFlowExtension(
   const log = overrides.log ?? ((message: string) => console.warn(message));
   const view = async () => buildFleetView(dorkHome, await accounts.list(), now());
 
-  // `strict: false` keeps the router's leniency about a trailing slash.
+  // `strict: false` keeps the old router's leniency about a trailing slash
+  // (`/fleet/` is `/fleet`). Paths now match case-sensitively, which the
+  // Express router did not; the Flow tab only ever sends them in lower case.
   const app = new Hono<FlowEnv>({ strict: false });
   app.onError((error, c) => fail(c, error));
   app.notFound((c) => c.json({ error: `Flow has no ${c.req.method} ${c.req.path} route.` }, 404));

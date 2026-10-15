@@ -4,8 +4,8 @@
  * week only, a stage still running adds nothing, `done` ends count items
  * finished, handoffs count; broken lines are skipped; a project with its
  * journal off says so; each account's weekly window comes from DorkOS; and
- * `GET /capacity` answers it (its 501 on an older DorkOS is in
- * `model-routes.test.ts`, with every other route's).
+ * `GET /capacity` answers it (that anyone may read it, agents included, is
+ * in `model-routes.test.ts`, with every other route's person bar).
  */
 
 import { mkdirSync, writeFileSync } from 'node:fs';
