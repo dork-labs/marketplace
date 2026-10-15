@@ -9,8 +9,7 @@
  * - On a DorkOS without the inbox, flow's own person-only route answers it.
  * - A button that needs an agent ("Sign in", "Sort them", "Connect a
  *   tracker", "Set up flow here") starts the work in a new chat with
- *   `api.startWork`, and then says "Sorting 12 ideas… · Watch". On a DorkOS
- *   without it, the caller shows what to type instead.
+ *   `api.startWork`, and then says "Sorting 12 ideas… · Watch".
  *
  * @module @dorkos/flow/extension/ui/answers
  */
@@ -380,8 +379,6 @@ export function StartButton(props: {
   const [busy, setBusy] = useState(false);
   const [watch, setWatch] = useState<{ sessionId: string; label: string } | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const startWork = api.startWork;
-  if (typeof startWork !== 'function') return null;
   if (watch !== null) return h(WatchLine, { watch, root: props.project.root, api });
   const words = startWords(props.kind, {
     name: props.project.name,
@@ -392,25 +389,27 @@ export function StartButton(props: {
     if (busy) return;
     setBusy(true);
     setError(null);
-    startWork({
-      project: props.project.root,
-      prompt: words.prompt,
-      title: words.title,
-      reason: words.reason,
-    }).then(
-      ({ sessionId }) => {
-        setBusy(false);
-        setWatch({ sessionId, label: words.watch });
-      },
-      (failure: unknown) => {
-        setBusy(false);
-        setError(
-          isStartRefusal(failure)
-            ? startRefusal(failure.code, failure.message, props.project.name)
-            : START_FAILED_TEXT
-        );
-      }
-    );
+    api
+      .startWork({
+        project: props.project.root,
+        prompt: words.prompt,
+        title: words.title,
+        reason: words.reason,
+      })
+      .then(
+        ({ sessionId }) => {
+          setBusy(false);
+          setWatch({ sessionId, label: words.watch });
+        },
+        (failure: unknown) => {
+          setBusy(false);
+          setError(
+            isStartRefusal(failure)
+              ? startRefusal(failure.code, failure.message, props.project.name)
+              : START_FAILED_TEXT
+          );
+        }
+      );
   };
   return h(
     'span',

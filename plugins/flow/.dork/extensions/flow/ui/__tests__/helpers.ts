@@ -1,9 +1,10 @@
 /**
- * Fixtures for the Flow tab's tests: `GET /fleet` and `GET /model` bodies, and
- * stubbed fetches that answer flow's routes.
+ * Fixtures for the Flow tab's tests: `GET /fleet` and `GET /model` bodies,
+ * stubbed fetches that answer flow's routes, and a stub host API.
  */
 
 import { vi } from 'vitest';
+import type { ReadableState } from '../../lib/host-types.ts';
 import type { FleetAccount, FleetGroup, FleetView } from '../../lib/fleet.ts';
 import type { FlowModel, FlowProject, FlowRunRow } from '../../lib/model.ts';
 import type { ProjectSettingsView } from '../../lib/settings-shape.ts';
@@ -235,5 +236,25 @@ export function settingsView(extra: Partial<ProjectSettingsView> = {}): ProjectS
     },
     pauseDefault: 'tomorrow',
     ...extra,
+  };
+}
+
+/**
+ * A stub of DorkOS's client API with every method flow's `minHostVersion`
+ * guarantees: the chat is nowhere, and nothing registered or started does
+ * anything. Spread it under a test's own fields.
+ *
+ * @param state - What `getState` answers.
+ */
+export function clientApi(state: ReadableState = { currentCwd: null }) {
+  return {
+    navigate: vi.fn(),
+    getState: () => state,
+    subscribe: vi.fn(() => () => {}),
+    registerSettingsTab: vi.fn(() => () => {}),
+    registerComponent: vi.fn(() => () => {}),
+    registerDialog: vi.fn(() => ({ open: vi.fn(), close: vi.fn() })),
+    registerPage: vi.fn(() => () => {}),
+    startWork: vi.fn(async () => ({ sessionId: 'started' })),
   };
 }

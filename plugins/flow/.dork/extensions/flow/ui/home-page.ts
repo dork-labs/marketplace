@@ -514,7 +514,6 @@ function LensPage(props: {
         api,
         store: props.store,
         schedulesStuck: props.schedulesStuck,
-        pages: true,
         // The page shows the project's asks in its own band above.
         decisionsOnTop: false,
       })
@@ -805,17 +804,15 @@ export function registerPages(
   api: AnswerApi & Pick<ClientApi, 'registerPage' | 'getState' | 'projectSettings'>,
   store: FlowStore
 ): () => void {
-  const registerPage = api.registerPage;
-  if (typeof registerPage !== 'function') return () => {};
   const pages = createPages(api, store);
   const removers = [
-    registerPage.call(api, PAGE_PATHS.home, pages.home, { title: 'Flow', icon: FlowIcon }),
-    registerPage.call(api, PAGE_PATHS.project, pages.project, {
+    api.registerPage(PAGE_PATHS.home, pages.home, { title: 'Flow', icon: FlowIcon }),
+    api.registerPage(PAGE_PATHS.project, pages.project, {
       title: 'Flow project',
       icon: FlowIcon,
       menu: false,
     }),
-    registerPage.call(api, PAGE_PATHS.settings, pages.settings, {
+    api.registerPage(PAGE_PATHS.settings, pages.settings, {
       title: 'Flow settings',
       icon: FlowIcon,
       menu: false,

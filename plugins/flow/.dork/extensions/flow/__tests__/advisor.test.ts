@@ -12,7 +12,6 @@ import {
   TOO_SLOW_MESSAGE,
   type ExecError,
   type ExecFileLike,
-  type FlowAdvisor,
 } from '../lib/advisor.ts';
 import { ledgerWindowsFor } from '../lib/fleet.ts';
 import { SEED_CONTEXT_MAX_LENGTH, type AdvisorContext } from '../lib/host-types.ts';

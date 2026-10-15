@@ -22,6 +22,8 @@ import type * as Contract from '../lib/__contract__/seams.contract.ts';
 import type {
   DataProviderContext,
   ExtensionCaller,
+  ExtensionDialogControls,
+  ExtensionDialogProps,
   ExtensionFetchHandler,
   PersonCheck,
   PersonRefusal,
@@ -149,6 +151,15 @@ describe('lib/host-types.ts against the contract', () => {
     >();
     expectTypeOf<Contract.ExtensionAPISeams['setTabMarker']>().toExtend<
       NonNullable<FlowExtensionApi['setTabMarker']>
+    >();
+  });
+
+  it('registers its dialogs as core takes them, mounted only while open', () => {
+    expectTypeOf<Contract.ExtensionDialogProps>().toExtend<ExtensionDialogProps>();
+    expectTypeOf<ExtensionDialogProps>().toExtend<Contract.ExtensionDialogProps>();
+    expectTypeOf<Contract.ExtensionDialogControls>().toExtend<ExtensionDialogControls>();
+    expectTypeOf<Contract.ExtensionAPISeams['registerDialog']>().toExtend<
+      FlowExtensionApi['registerDialog']
     >();
   });
 

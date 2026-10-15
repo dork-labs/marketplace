@@ -4,8 +4,7 @@
  * outcomes and answer through core's `answerDecision` (or flow's route on a
  * DorkOS without the inbox); a review gate opens the Inbox on it where the inbox
  * exists; "Sign in", "Sort them", "Connect a tracker" and "Set up flow here"
- * start work in a new chat with `api.startWork`, and fall back to what to
- * type on a DorkOS without it; the adapter's allow line; the dial's line for
+ * start work in a new chat with `api.startWork`; the adapter's allow line; the dial's line for
  * a project flow knew before.
  */
 
@@ -26,7 +25,7 @@ import {
 import { createFlowTab } from '../flow-tab.ts';
 import { CHOOSE_AUTONOMY_TEXT, NOT_SET_UP_TEXT, SORT_WAITS_TEXT } from '../project-lens.ts';
 import { FlowStore } from '../store.ts';
-import { flowModel, flowProject, routeFetch } from './helpers.ts';
+import { clientApi, flowModel, flowProject, routeFetch } from './helpers.ts';
 
 afterEach(() => {
   vi.unstubAllGlobals();
@@ -55,7 +54,7 @@ function ask(actions: DecisionActions, extra: Partial<FlowDecision> = {}): FlowD
 /** A host with the inbox: core lists each ask under its own id, as flow raised it, and answers it. */
 function inboxHost(decisions: FlowDecision[], result: Record<string, unknown> = {}) {
   return {
-    navigate: vi.fn(),
+    ...clientApi(),
     listDecisions: vi.fn(async () =>
       decisions.map(
         (d) =>
@@ -98,7 +97,7 @@ describe('sending an answer', () => {
 
   it('refuses to answer when core’s row no longer says what the page showed', async () => {
     const api = {
-      navigate: vi.fn(),
+      ...clientApi(),
       listDecisions: vi.fn(async () => [
         {
           id: 'core-1',
@@ -123,14 +122,9 @@ describe('sending an answer', () => {
       status: 200,
       body: { resolved: true, message: null, watch: null, model },
     }));
-    const store = new FlowStore({});
+    const store = new FlowStore(clientApi());
     const apply = vi.spyOn(store, 'apply');
-    await sendAnswer(
-      { navigate: vi.fn() },
-      ask({ kind: 'word', label: 'x' }),
-      { action: 'word' },
-      store
-    );
+    await sendAnswer(clientApi(), ask({ kind: 'word', label: 'x' }), { action: 'word' }, store);
     expect(fetch.calls[0]).toMatchObject({
       method: 'POST',
       url: '/api/ext/flow/decisions/idle%3A3f2a00000000',
@@ -236,7 +230,7 @@ describe("an ask's buttons", () => {
 describe('starting work', () => {
   it('starts the work in a new chat with a plain title and reason, never the prompt as a headline', async () => {
     const startWork = vi.fn(async () => ({ sessionId: 'chat-1' }));
-    const api = { navigate: vi.fn(), startWork };
+    const api = { ...clientApi(), startWork };
     render(
       React.createElement(StartButton, {
         kind: 'sort',
@@ -270,25 +264,13 @@ describe('starting work', () => {
         kind: 'sign-in',
         label: 'Sign in',
         project: { name: 'dorkos', root: '/work/dorkos', tracker: 'Linear' },
-        api: { navigate: vi.fn(), startWork },
+        api: { ...clientApi(), startWork },
       })
     );
     await act(async () => {
       fireEvent.click(screen.getByRole('button', { name: 'Sign in' }));
     });
     expect(screen.getByRole('alert').textContent).toBe('Flow started 10 chats in the last hour.');
-  });
-
-  it('is absent on a DorkOS that cannot start a chat', () => {
-    const { container } = render(
-      React.createElement(StartButton, {
-        kind: 'connect',
-        label: 'Connect a tracker',
-        project: { name: 'dorkos', root: '/work/dorkos' },
-        api: { navigate: vi.fn() },
-      })
-    );
-    expect(container.textContent).toBe('');
   });
 });
 
@@ -300,7 +282,7 @@ async function renderTab(
 ) {
   routeFetch(() => ({ status: 200, body: model }));
   const state: ReadableState = { currentCwd: project?.root ?? '/x', currentProject: project };
-  const host = { navigate: vi.fn(), getState: () => state, ...api };
+  const host = { ...clientApi(state), ...api };
   const store = new FlowStore(host);
   store.start();
   const Tab = createFlowTab(host as never, store);
@@ -312,7 +294,7 @@ async function renderTab(
 const DORKOS: ProjectRef = { root: '/work/dorkos', name: 'dorkos' };
 
 describe('the lens', () => {
-  it('puts a Sign in button on the condition line where DorkOS can start a chat, else says what to type', async () => {
+  it('puts a Sign in button on the condition line', async () => {
     const signIn = flowProject('dorkos', {
       conditions: [
         { kind: 'sign-in', since: '2026-09-28T09:14:00.000Z', escalated: true, detail: {} },
@@ -326,9 +308,6 @@ describe('the lens', () => {
     expect(startWork).toHaveBeenCalledWith(
       expect.objectContaining({ project: '/work/dorkos', title: 'Signing in to Linear for dorkos' })
     );
-    document.body.innerHTML = '';
-    await renderTab(flowModel([signIn]), {}, DORKOS);
-    expect(screen.queryByRole('button', { name: 'Sign in' })).toBeNull();
   });
 
   it('offers "Connect a tracker" for a project flow is installed in but not set up', async () => {
@@ -349,7 +328,7 @@ describe('the lens', () => {
     const model = flowModel([flowProject('dorkos', { upNext: 'own-code' })]);
     const fetch = routeFetch(() => ({ status: 200, body: model }));
     const state: ReadableState = { currentCwd: DORKOS.root, currentProject: DORKOS };
-    const host = { navigate: vi.fn(), getState: () => state };
+    const host = clientApi(state);
     const store = new FlowStore(host);
     store.start();
     render(React.createElement(createFlowTab(host, store)));

@@ -29,7 +29,7 @@ import {
 import { createSettingsTab } from '../settings-tab.ts';
 import { FlowStore } from '../store.ts';
 import { WAITING_FOR_FLOW_TEXT, type MigrationDeps } from '../migrate-repos.ts';
-import { flowModel, flowProject, routeFetch, settingsView } from './helpers.ts';
+import { clientApi, flowModel, flowProject, routeFetch, settingsView } from './helpers.ts';
 
 afterEach(() => {
   vi.unstubAllGlobals();
@@ -104,7 +104,7 @@ type SettingsApi = Pick<ClientApi, 'navigate' | 'projectSettings' | 'getState'>;
 
 /** Render the component for one project. */
 async function renderSettings(project: FlowProject, api: Partial<SettingsApi> = {}) {
-  const full = { navigate: vi.fn(), ...api } as SettingsApi & {
+  const full = { ...clientApi(), ...api } as SettingsApi & {
     navigate: ReturnType<typeof vi.fn>;
   };
   render(React.createElement(ProjectFlowSettings, { project, api: full }));
@@ -134,12 +134,9 @@ describe('one component, two entry points', () => {
     serve({ model });
     const settings = projectSettings();
 
-    const pageStore = new FlowStore({});
+    const pageStore = new FlowStore(clientApi());
     pageStore.start();
-    const pages = createPages(
-      { navigate: vi.fn(), projectSettings: settings.api, getState: () => ({ currentCwd: null }) },
-      pageStore
-    );
+    const pages = createPages({ ...clientApi(), projectSettings: settings.api }, pageStore);
     const page = render(
       React.createElement(pages.settings, {
         params: { name: 'dorkos' },
@@ -184,17 +181,6 @@ describe('one component, two entry points', () => {
     fireEvent.change(screen.getByRole('combobox', { name: 'Project:' }), {
       target: { value: 'blintz' },
     });
-    await act(async () => {});
-    expect(screen.getByRole('heading', { name: 'Editing blintz' })).toBeTruthy();
-  });
-
-  it('opens on the project ⚙ asked for, on a DorkOS without flow’s pages', async () => {
-    serve({ model: flowModel([newProject('blintz'), newProject('dorkos')]) });
-    const store = new FlowStore({});
-    store.start();
-    store.settingsProject = 'blintz';
-    render(React.createElement(createSettingsTab({ navigate: vi.fn() }, store, NO_MOVE)));
-    await act(async () => {});
     await act(async () => {});
     expect(screen.getByRole('heading', { name: 'Editing blintz' })).toBeTruthy();
   });
@@ -291,10 +277,10 @@ describe('Settings → Flow and "Only for these repos"', () => {
         return { status: 404, body: {} };
       return { status: 200, body: flowModel([newProject()]) };
     });
-    const store = new FlowStore({});
+    const store = new FlowStore(clientApi());
     store.start();
     const put = vi.fn(async () => ({}));
-    render(React.createElement(createSettingsTab({ navigate: vi.fn() }, store, movable(put))));
+    render(React.createElement(createSettingsTab(clientApi(), store, movable(put))));
     await act(async () => {});
     await act(async () => {});
     await act(async () => {});
@@ -318,14 +304,12 @@ describe('Settings → Flow and "Only for these repos"', () => {
       if (url.includes('/ext/flow/fleet')) return { status: 200, body: fleetWithWork };
       return { status: 500, body: {} };
     });
-    const store = new FlowStore({});
+    const store = new FlowStore(clientApi());
     store.start();
     const put = vi.fn(async () => ({}));
     const putAccount = vi.fn(async () => ({}));
     render(
-      React.createElement(
-        createSettingsTab({ navigate: vi.fn() }, store, { ...movable(put), putAccount })
-      )
+      React.createElement(createSettingsTab(clientApi(), store, { ...movable(put), putAccount }))
     );
     await act(async () => {});
     await act(async () => {});
@@ -337,19 +321,6 @@ describe('Settings → Flow and "Only for these repos"', () => {
     expect(put).toHaveBeenCalledWith('work', ['/work/client-app']);
     expect(putAccount).not.toHaveBeenCalled();
     expect(screen.queryByRole('button', { name: 'Switch to DorkOS’s rule' })).toBeNull();
-  });
-
-  it('forgets the project ⚙ asked for once the tab closes', async () => {
-    serve({ model: flowModel([newProject('blintz'), newProject('dorkos')]) });
-    const store = new FlowStore({});
-    store.start();
-    store.settingsProject = 'blintz';
-    const view = render(
-      React.createElement(createSettingsTab({ navigate: vi.fn() }, store, NO_MOVE))
-    );
-    await act(async () => {});
-    view.unmount();
-    expect(store.settingsProject).toBeNull();
   });
 });
 

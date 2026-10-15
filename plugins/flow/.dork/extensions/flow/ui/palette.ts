@@ -11,7 +11,7 @@
 
 import type { ComponentType } from 'react';
 import type { FlowModel } from '../lib/model.ts';
-import type { ClientApi } from '../lib/host-types.ts';
+import type { ClientApi, ExtensionDialogProps } from '../lib/host-types.ts';
 import { UNREACHABLE_MESSAGE, pauseFlow, resumeFlow, type PauseTarget } from './api.ts';
 import { chatProject } from './flow-tab.ts';
 import { formatWhen } from './panel-format.ts';
@@ -62,78 +62,20 @@ export function listNames(names: readonly string[]): string {
 type Scope = 'project' | 'all';
 
 /**
- * Whether one pause dialog is showing. DorkOS draws every registered dialog all
- * the time and passes `open`, but the `open()` it hands back does not reach
- * that prop (DorkOS 0.92), so flow keeps the dialog's own open state here and
- * shows it when either says so. This can go once `minHostVersion` is a release
- * with DorkOS's `registerDialog` fix (DOR-2576).
+ * Where focus was before a pause dialog opened, shared by both: DorkOS shows
+ * one extension dialog at a time, and opening the other pause dialog keeps
+ * the place the first one came from.
  */
-interface Controls {
-  /** Whether flow opened it. */
-  shown: boolean;
-  /** Where focus was when it opened, to give it back on close. */
-  returnTo: HTMLElement | null;
-  /** Re-render the open dialog. */
-  listeners: Set<() => void>;
-  /** Tell DorkOS it closed; filled in once DorkOS registers the dialog. */
-  hostClose: () => void;
-  /** The other pause dialog: only one is ever on screen. */
-  sibling: Controls | null;
-  /** Put the dialog's own state (Pause all instead, an error) back; set by the dialog. */
-  reset: () => void;
-}
-
-/** A fresh, closed dialog state. */
-function newControls(): Controls {
-  return {
-    shown: false,
-    returnTo: null,
-    listeners: new Set(),
-    hostClose: () => {},
-    sibling: null,
-    reset: () => {},
-  };
-}
-
-/** Show or hide a dialog. */
-function setShown(controls: Controls, shown: boolean): void {
-  controls.shown = shown;
-  for (const listener of controls.listeners) listener();
-}
-
-/**
- * Open a dialog, closing the other pause dialog first so two never stack, and
- * remember where focus was.
- */
-function openDialog(controls: Controls): void {
-  const sibling = controls.sibling;
-  if (sibling !== null && sibling.shown) {
-    // Hand the focus the first one saved to the second, so closing it returns there.
-    controls.returnTo = sibling.returnTo;
-    sibling.returnTo = null;
-    setShown(sibling, false);
-    sibling.reset();
-    try {
-      sibling.hostClose();
-    } catch {
-      // DorkOS could not record the close; the dialog is hidden all the same.
-    }
-  } else if (!controls.shown) {
-    const active = typeof document === 'undefined' ? null : document.activeElement;
-    controls.returnTo = active instanceof HTMLElement ? active : null;
-  }
-  setShown(controls, true);
+interface FocusReturn {
+  /** The element to give focus back to on close. */
+  to: HTMLElement | null;
+  /** Whether a pause dialog is open now. */
+  open: boolean;
 }
 
 /** The elements Tab moves between inside a dialog. */
 const FOCUSABLE =
   'button:not([disabled]), [href], input, select, textarea, [tabindex]:not([tabindex="-1"])';
-
-/** What DorkOS passes every dialog it draws. */
-interface DialogProps {
-  open?: boolean;
-  onOpenChange?: (open: boolean) => void;
-}
 
 /** The dimmed layer under an open dialog. */
 const BACKDROP = {
@@ -147,59 +89,40 @@ const BACKDROP = {
 } as const;
 
 /**
- * The pause dialog for one scope.
+ * The pause dialog for one scope. DorkOS mounts it only while it is open, so
+ * each opening starts from its first state.
  *
  * @param api - The host API (toasts).
  * @param store - The live store.
  * @param scope - This project or all.
- * @param controls - Its open state.
- * @returns The dialog's component: nothing until it is opened.
+ * @param focus - Where to give focus back on close.
+ * @returns The dialog's component.
  */
 function createPauseDialog(
   api: Pick<ClientApi, 'notify'>,
   store: FlowStore,
   scope: Scope,
-  controls: Controls
-): ComponentType {
-  function PauseDialog(props: DialogProps): Node {
+  focus: FocusReturn
+): ComponentType<ExtensionDialogProps> {
+  function PauseDialog(props: ExtensionDialogProps): Node {
     const [mode, setMode] = useState<Scope>(scope);
     const [error, setError] = useState<string | null>(null);
     const [busy, setBusy] = useState(false);
-    const [, redraw] = useState(0);
     // Follows the store, so the dialog never acts on a model that has moved on.
     const snapshot = useStore(store);
-    const shown = props.open === true || controls.shown;
     const box = useRef<HTMLDivElement | null>(null);
     const guarding = useRef(false);
-    controls.reset = () => {
-      setMode(scope);
-      setError(null);
-    };
+    useEffect(() => {
+      focus.open = true;
+      return () => {
+        focus.open = false;
+      };
+    }, []);
     const close = () => {
-      if (!shown) return;
       // From here on the focus guard below lets focus leave.
       guarding.current = false;
-      const hostOpened = props.open === true;
-      setShown(controls, false);
-      setMode(scope);
-      setError(null);
-      // DorkOS's onOpenChange sets a store key only a dialog it opened has; on
-      // one flow opened it throws (DorkOS 0.92), so it is called only when
-      // DorkOS opened this one, and never allowed to break closing.
-      if (hostOpened) {
-        try {
-          props.onOpenChange?.(false);
-        } catch {
-          // DorkOS could not record the close; the dialog is closed all the same.
-        }
-      }
-      try {
-        controls.hostClose();
-      } catch {
-        // As above.
-      }
-      const back = controls.returnTo;
-      controls.returnTo = null;
+      const back = focus.to;
+      focus.to = null;
       if (back !== null && back.isConnected) {
         back.focus();
       } else if (box.current?.contains(document.activeElement)) {
@@ -207,16 +130,9 @@ function createPauseDialog(
         // not on a control that is about to disappear.
         (document.activeElement as HTMLElement).blur();
       }
+      props.onOpenChange(false);
     };
     useEffect(() => {
-      const listener = () => redraw((n) => n + 1);
-      controls.listeners.add(listener);
-      return () => {
-        controls.listeners.delete(listener);
-      };
-    }, []);
-    useEffect(() => {
-      if (!shown) return undefined;
       const onKey = (event: KeyboardEvent) => {
         if (event.key === 'Escape') close();
       };
@@ -227,7 +143,7 @@ function createPauseDialog(
     // choice itself; otherwise the first control, else the dialog).
     useEffect(() => {
       const node = box.current;
-      if (!shown || node === null) return;
+      if (node === null) return;
       const active = document.activeElement;
       // Already on a control inside; or on the dialog itself with nothing to move to.
       const control = node.querySelector<HTMLElement>(FOCUSABLE);
@@ -239,7 +155,6 @@ function createPauseDialog(
     // (the closing palette restoring it to the chat box) gives it back, so
     // Enter never reaches the chat behind the dialog.
     useEffect(() => {
-      if (!shown) return undefined;
       guarding.current = true;
       const onFocusIn = (event: FocusEvent) => {
         const node = box.current;
@@ -250,7 +165,6 @@ function createPauseDialog(
       document.addEventListener('focusin', onFocusIn);
       return () => document.removeEventListener('focusin', onFocusIn);
     });
-    if (!shown) return null;
     /** Tab and Shift+Tab stay inside the dialog. */
     const trap = (event: { key: string; shiftKey: boolean; preventDefault(): void }) => {
       if (event.key !== 'Tab' || box.current === null) return;
@@ -347,7 +261,7 @@ function createPauseDialog(
       error === null ? null : h('p', { role: 'alert', style: ALERT }, error)
     );
   }
-  return PauseDialog as ComponentType<DialogProps>;
+  return PauseDialog as ComponentType<ExtensionDialogProps>;
 }
 
 /**
@@ -398,8 +312,8 @@ async function resumeNow(
 }
 
 /**
- * Register the four palette commands and the two pause dialogs, where the
- * host has the seams for them.
+ * Register the four palette commands and the two pause dialogs, on a host
+ * with a command palette.
  *
  * @param api - The host API.
  * @param store - The live store.
@@ -411,28 +325,22 @@ export function registerPalette(
 ): () => void {
   if (typeof api.registerCommand !== 'function') return () => {};
   const removers: (() => void)[] = [];
-  const projectControls = newControls();
-  const allControls = newControls();
-  projectControls.sibling = allControls;
-  allControls.sibling = projectControls;
-  if (typeof api.registerDialog === 'function') {
-    for (const [scope, id, label] of [
-      ['project', 'pause-project', COMMANDS.pauseProject],
-      ['all', 'pause-all', COMMANDS.pauseAll],
-    ] as const) {
-      const controls = scope === 'project' ? projectControls : allControls;
-      const dialog = api.registerDialog(
-        id,
-        createPauseDialog(api, store, scope, controls) as ComponentType
-      );
-      controls.hostClose = dialog.close;
-      removers.push(
-        api.registerCommand(id, label, () => {
-          openDialog(controls);
-          dialog.open();
-        })
-      );
-    }
+  const focus: FocusReturn = { to: null, open: false };
+  for (const [scope, id, label] of [
+    ['project', 'pause-project', COMMANDS.pauseProject],
+    ['all', 'pause-all', COMMANDS.pauseAll],
+  ] as const) {
+    const dialog = api.registerDialog(id, createPauseDialog(api, store, scope, focus));
+    removers.push(
+      api.registerCommand(id, label, () => {
+        // Switching from the other pause dialog keeps where that one came from.
+        if (!focus.open) {
+          const active = typeof document === 'undefined' ? null : document.activeElement;
+          focus.to = active instanceof HTMLElement ? active : null;
+        }
+        dialog.open();
+      })
+    );
   }
   removers.push(
     api.registerCommand('resume-project', COMMANDS.resumeProject, () => {

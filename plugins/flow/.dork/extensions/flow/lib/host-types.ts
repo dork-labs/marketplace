@@ -623,18 +623,34 @@ export interface StatusBarItemOptions {
   urgent?(ctx: StatusBarSlotContext): boolean;
 }
 
+/** Props a registered dialog receives; it is mounted only while open (DorkOS `ExtensionDialogProps`). */
+export interface ExtensionDialogProps {
+  /** Whether the dialog is open. Always true while mounted. */
+  readonly open: boolean;
+  /** Report a change; `false` closes and unmounts it. Never throws. */
+  readonly onOpenChange: (open: boolean) => void;
+}
+
+/** Controls `registerDialog` returns (DorkOS `ExtensionDialogControls`). */
+export interface ExtensionDialogControls {
+  /** Show the dialog. */
+  open(): void;
+  /** Hide and unmount the dialog. */
+  close(): void;
+}
+
 /**
- * The part of DorkOS's client `ExtensionAPI` this extension uses. The methods
- * a DorkOS from before 0.88.0 may lack are optional, and each is probed
- * before use (spec `flow-multiproject` §10).
+ * The part of DorkOS's client `ExtensionAPI` this extension uses. Flow's
+ * `minHostVersion` guarantees the methods that are not optional; each optional
+ * one is probed before use (spec `flow-multiproject` §10).
  */
 export interface ClientApi {
   /** Go to a client route. */
   navigate(path: string): void;
   /** A snapshot of the host's state. */
-  getState?(): ReadableState;
+  getState(): ReadableState;
   /** Call `callback` when the selected part of the state changes; returns a function that stops. */
-  subscribe?(
+  subscribe(
     selector: (state: ReadableState) => unknown,
     callback: (value: unknown) => void
   ): () => void;
@@ -666,17 +682,19 @@ export interface ClientApi {
    * @returns A function that removes it.
    */
   registerCommand?(id: string, label: string, callback: () => void): () => void;
-  /** Add a dialog; returns its controls. */
-  registerDialog?(id: string, component: ComponentType): { open: () => void; close: () => void };
+  /** Add a dialog, closed until opened; the host keeps its open state. */
+  registerDialog(
+    id: string,
+    component: ComponentType<ExtensionDialogProps>
+  ): ExtensionDialogControls;
   /** Show a toast. */
   notify?(message: string, options?: { type?: 'info' | 'success' | 'error' }): void;
   /**
-   * Mount a full page at `/x/flow/<path>`. Missing on a DorkOS from before
-   * extension pages: then flow has no home, lens page or settings page.
+   * Mount a full page at `/x/flow/<path>`.
    *
    * @returns A function that removes it.
    */
-  registerPage?(
+  registerPage(
     path: string,
     component: ComponentType<ExtensionPageProps>,
     options: ExtensionPageOptions
@@ -704,11 +722,8 @@ export interface ClientApi {
   listDecisions?(): Promise<ExtensionDecisionView[]>;
   /** Answer one of this extension's decisions from its own page. */
   answerDecision?(decisionId: string, answer: DecisionAnswer): Promise<DecisionAnswerResult>;
-  /**
-   * Start work in a NEW chat, as the person (contract 1.3.0). Missing on a
-   * DorkOS from before it: then a button says what to type instead (§7.9).
-   */
-  startWork?(input: StartWorkInput): Promise<{ sessionId: string }>;
+  /** Start work in a NEW chat, as the person (contract 1.3.0). */
+  startWork(input: StartWorkInput): Promise<{ sessionId: string }>;
   /**
    * flow's per-project settings in DorkOS (§7.7): the dial lives here. `set`
    * is the only writer anywhere, behind DorkOS's person bar. Missing on a

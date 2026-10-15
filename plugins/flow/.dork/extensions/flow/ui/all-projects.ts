@@ -13,7 +13,7 @@ import { HOME_PATH, projectPath } from './links.ts';
 import { pausedText } from './panel-format.ts';
 import { CONDITION, GROW, LINK, MUTED, ROW } from './parts.ts';
 import { StartButton } from './answers.ts';
-import { MARKETPLACE_ROUTE, conditionLine } from './project-lens.ts';
+import { conditionLine } from './project-lens.ts';
 import { h, type Node } from './react.ts';
 
 /** Shown when no project on this computer has flow. */
@@ -93,21 +93,19 @@ export function projectLine(
 /**
  * The all-projects lens.
  *
- * On a DorkOS with flow's pages, each line opens its project's page and the
- * lens ends with a link to Flow home.
+ * Each line opens its project's page, and the lens ends with a link to Flow
+ * home.
  *
- * @param props - The model, the chat's project (when DorkOS knows it), the
- *   host API, and whether flow's pages exist.
+ * @param props - The model, the chat's project (when DorkOS knows it), and the
+ *   host API.
  * @returns The lens.
  */
 export function AllProjects(props: {
   model: FlowModel;
   currentProject: ProjectRef | null | undefined;
   api: Pick<ClientApi, 'navigate' | 'startWork'>;
-  pages?: boolean;
 }): Node {
   const { model, currentProject, api } = props;
-  const pages = props.pages === true;
   const now = new Date();
   const body: Node[] = [h('b', { key: 'title', style: { fontSize: '13px' } }, 'All projects')];
   if (model.projects.length === 0) {
@@ -125,19 +123,17 @@ export function AllProjects(props: {
       h('span', { style: MUTED }, ` · ${line.text}`)
     );
     body.push(
-      pages
-        ? h(
-            'button',
-            {
-              key: line.project.root,
-              type: 'button',
-              'data-row': 'project',
-              style: { ...ROW, marginTop: '4px', cursor: 'pointer' },
-              onClick: () => api.navigate(projectPath(line.project.name)),
-            },
-            words
-          )
-        : h('div', { key: line.project.root, style: { ...ROW, marginTop: '4px' } }, words)
+      h(
+        'button',
+        {
+          key: line.project.root,
+          type: 'button',
+          'data-row': 'project',
+          style: { ...ROW, marginTop: '4px', cursor: 'pointer' },
+          onClick: () => api.navigate(projectPath(line.project.name)),
+        },
+        words
+      )
     );
   }
   const fine = model.projects.length - lines.length;
@@ -168,22 +164,16 @@ export function AllProjects(props: {
         'p',
         { key: 'setup', style: { ...CONDITION, background: 'transparent' } },
         `${SET_UP_HERE_TEXT} `,
-        typeof api.startWork === 'function'
-          ? h(StartButton, {
-              kind: 'set-up',
-              label: 'Set up flow here',
-              project: { name: currentProject.name, root: currentProject.root },
-              api,
-            })
-          : h(
-              'button',
-              { type: 'button', style: LINK, onClick: () => api.navigate(MARKETPLACE_ROUTE) },
-              'Set up flow here'
-            )
+        h(StartButton, {
+          kind: 'set-up',
+          label: 'Set up flow here',
+          project: { name: currentProject.name, root: currentProject.root },
+          api,
+        })
       )
     );
   }
-  if (pages && model.projects.length > 0) {
+  if (model.projects.length > 0) {
     body.push(
       h(
         'p',

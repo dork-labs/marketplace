@@ -11,7 +11,7 @@ import type { StartKind } from '../lib/start-words.ts';
 import { UNREACHABLE_MESSAGE, allowAdapter, pauseFlow, resumeFlow } from './api.ts';
 import { StartButton, hasInbox, type AnswerApi } from './answers.ts';
 import { DecisionRow } from './page-parts.ts';
-import { HOME_PATH, SETTINGS_TAB_LINK, settingsPath, webHref } from './links.ts';
+import { HOME_PATH, settingsPath, webHref } from './links.ts';
 import { PILL_TEXT, clockTime, pausedText, runningCaption } from './panel-format.ts';
 import { PauseMenu } from './pause-menu.ts';
 import { BUTTON, CAPTION, CONDITION, Dot, GROW, Hint, LINK, MUTED, PILL, ROW } from './parts.ts';
@@ -183,9 +183,8 @@ export function settingsLabel(name: string): string {
 /**
  * The project lens.
  *
- * @param props - The project, the model it came from, the host API, the store,
- *   whether this DorkOS shows flow's pages, and how to show every project
- *   instead where it does not.
+ * @param props - The project, the model it came from, the host API, and the
+ *   store.
  * @returns The lens.
  */
 export function ProjectLens(props: {
@@ -194,9 +193,6 @@ export function ProjectLens(props: {
   api: AnswerApi;
   store: FlowStore;
   schedulesStuck?: boolean;
-  /** Whether flow's pages exist: then ⚙ and "need you elsewhere" open them. */
-  pages?: boolean;
-  onShowAll?: () => void;
   /**
    * Whether the project's asks show at the top: by default only on a DorkOS
    * without the inbox, where the lens is where they are answered (§3.2, §7.6).
@@ -204,15 +200,7 @@ export function ProjectLens(props: {
   decisionsOnTop?: boolean;
 }): Node {
   const { project, model, api, store } = props;
-  // Without pages, Settings → Flow is the only settings flow has: it opens on this project.
-  const openSettings = () => {
-    if (props.pages === true) {
-      api.navigate(settingsPath(project.name));
-      return;
-    }
-    store.settingsProject = project.name;
-    api.navigate(SETTINGS_TAB_LINK);
-  };
+  const openSettings = () => api.navigate(settingsPath(project.name));
   const [menu, setMenu] = useState(false);
   const [busy, setBusy] = useState(false);
   const [focusHeader, setFocusHeader] = useState(false);
@@ -373,7 +361,6 @@ export function ProjectLens(props: {
     );
   }
 
-  const canStart = typeof api.startWork === 'function';
   const place = { name: project.name, root: project.root, tracker: project.tracker?.label ?? null };
   if (props.decisionsOnTop ?? !hasInbox(api)) {
     for (const decision of model.decisions.filter((d) => d.project === project.name)) {
@@ -395,9 +382,7 @@ export function ProjectLens(props: {
         'p',
         { key: 'setup', style: CONDITION },
         NOT_SET_UP_TEXT,
-        canStart
-          ? h(StartButton, { kind: 'connect', label: 'Connect a tracker', project: place, api })
-          : h(Hint, { text: `Type /flow:init in a chat in ${project.name} to connect a tracker.` })
+        h(StartButton, { kind: 'connect', label: 'Connect a tracker', project: place, api })
       )
     );
   } else {
@@ -409,7 +394,7 @@ export function ProjectLens(props: {
           'p',
           { key: `condition-${condition.kind}`, style: CONDITION },
           line.text,
-          line.start !== undefined && canStart
+          line.start !== undefined
             ? h(StartButton, {
                 kind: line.start.kind,
                 label: line.start.label,
@@ -510,8 +495,7 @@ export function ProjectLens(props: {
   }
 
   const elsewhere = model.decisions.filter((decision) => decision.project !== project.name).length;
-  const showElsewhere =
-    props.pages === true ? () => api.navigate(HOME_PATH) : (props.onShowAll ?? null);
+  const showElsewhere = () => api.navigate(HOME_PATH);
   const trackerUrl = webHref(project.tracker?.url);
   if ((elsewhere > 0 && showElsewhere !== null) || trackerUrl !== null) {
     body.push(

@@ -20,7 +20,7 @@
 import type { ComponentType } from 'react';
 import type { FlowModel, FlowProject, FlowRunRow, RunPill } from '../lib/model.ts';
 import type { ClientApi, StatusBarSlotContext, TrackerItemRef } from '../lib/host-types.ts';
-import { hasPages, projectPath, webHref } from './links.ts';
+import { projectPath, webHref } from './links.ts';
 import { PILL_TEXT } from './panel-format.ts';
 import { FOCUS_CSS, GROW, LINK, MUTED, PILL, ROW } from './parts.ts';
 import { sessionRoute } from './project-lens.ts';
@@ -344,17 +344,16 @@ const LIST: Style = {
 /**
  * Build the run chip over the live store.
  *
- * @param api - The host API (navigation, and whether flow's pages exist).
+ * @param api - The host API (navigation).
  * @param store - The live store.
  * @param clock - The clock, in ms (tests).
  * @returns The chip's component.
  */
 export function createRunChip(
-  api: Pick<ClientApi, 'navigate' | 'registerPage'>,
+  api: Pick<ClientApi, 'navigate'>,
   store: FlowStore,
   clock: () => number = Date.now
 ): ComponentType<StatusBarSlotContext> {
-  const pages = hasPages(api);
   function RunChip(ctx: StatusBarSlotContext): Node {
     const snapshot = useStore(store);
     const [open, setOpen] = useState(false);
@@ -537,7 +536,7 @@ export function createRunChip(
                   },
             },
             h('ul', { style: { margin: 0, padding: 0 } }, ...items.map(row)),
-            pages && project !== null
+            project !== null
               ? h(
                   'button',
                   {
@@ -563,7 +562,7 @@ export function createRunChip(
  * @returns A function that removes it.
  */
 export function registerRunChip(
-  api: Pick<ClientApi, 'navigate' | 'registerPage' | 'registerStatusBarItem'>,
+  api: Pick<ClientApi, 'navigate' | 'registerStatusBarItem'>,
   store: FlowStore
 ): () => void {
   if (typeof api.registerStatusBarItem !== 'function') return () => {};

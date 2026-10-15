@@ -109,12 +109,6 @@ export class FlowStore {
   private readonly triedAt = new Map<string, number>();
 
   /**
-   * The project Settings → Flow opens on, when ⚙ asked for one on a DorkOS
-   * without flow's pages (§10); `null` for the chat's project.
-   */
-  settingsProject: string | null = null;
-
-  /**
    * @param api - DorkOS's client API (state and its changes).
    * @param clock - The clock, in ms, for when a model last arrived (tests).
    */
@@ -149,13 +143,10 @@ export class FlowStore {
 
   /** The chat's folder and project, as the host says now. */
   private readState(): Pick<StoreSnapshot, 'cwd' | 'currentProject'> {
-    const state: ReadableState | undefined = this.api.getState?.();
+    const state: ReadableState = this.api.getState();
     return {
-      cwd: state?.currentCwd ?? null,
-      currentProject:
-        state !== undefined && 'currentProject' in state
-          ? (state.currentProject ?? null)
-          : undefined,
+      cwd: state.currentCwd ?? null,
+      currentProject: 'currentProject' in state ? (state.currentProject ?? null) : undefined,
     };
   }
 
@@ -204,16 +195,15 @@ export class FlowStore {
     this.started = true;
     this.set(this.readState());
     void this.refresh();
-    this.stopState =
-      this.api.subscribe?.(
-        (state) => `${state.currentCwd ?? ''}\n${state.currentProject?.root ?? ''}`,
-        () => {
-          const next = this.readState();
-          const moved = next.cwd !== this.snapshot.cwd;
-          this.set(next);
-          if (moved) void this.refresh();
-        }
-      ) ?? null;
+    this.stopState = this.api.subscribe(
+      (state) => `${state.currentCwd ?? ''}\n${state.currentProject?.root ?? ''}`,
+      () => {
+        const next = this.readState();
+        const moved = next.cwd !== this.snapshot.cwd;
+        this.set(next);
+        if (moved) void this.refresh();
+      }
+    );
     const startPolling = () => {
       this.poll ??= setInterval(() => void this.refresh(), FALLBACK_POLL_MS);
     };

@@ -9,22 +9,19 @@
  * lens from DorkOS's `currentProject`, or, on a DorkOS that does not say, from
  * the project flow found for the chat's folder (`cwdProject`).
  *
- * On a DorkOS with extension pages, the lenses link out to flow's pages
- * (`home-page.ts`): a project's line opens its page, ⚙ its settings page, and
- * "need you elsewhere" Flow home. Without pages they stay in the tab.
+ * The lenses link out to flow's pages (`home-page.ts`): a project's line opens
+ * its page, ⚙ its settings page, and "need you elsewhere" Flow home.
  *
  * @module @dorkos/flow/extension/ui/flow-tab
  */
 
 import type { ComponentType } from 'react';
 import type { FlowModel, FlowProject } from '../lib/model.ts';
-import type { ClientApi } from '../lib/host-types.ts';
 import type { AnswerApi } from './answers.ts';
 import { AllProjects } from './all-projects.ts';
-import { hasPages } from './links.ts';
 import { FOCUS_CSS, PANEL } from './parts.ts';
 import { ProjectLens } from './project-lens.ts';
-import { h, useEffect, useState, type Node } from './react.ts';
+import { h, type Node } from './react.ts';
 import { useStore, type FlowStore, type StoreSnapshot } from './store.ts';
 import { ALERT, CHIP } from './styles.ts';
 
@@ -58,18 +55,11 @@ export function chatProject(snapshot: StoreSnapshot, model: FlowModel): FlowProj
  * @param store - The live store.
  * @returns The tab's component.
  */
-export function createFlowTab(
-  api: AnswerApi & Pick<ClientApi, 'registerPage'>,
-  store: FlowStore
-): ComponentType {
-  const pages = hasPages(api);
+export function createFlowTab(api: AnswerApi, store: FlowStore): ComponentType {
   function FlowTab(): Node {
     const snapshot = useStore(store);
-    const [showAll, setShowAll] = useState(false);
     const model = snapshot.model;
     const project = model === null ? null : chatProject(snapshot, model);
-    // A new chat's project replaces a lens someone switched away from.
-    useEffect(() => setShowAll(false), [project?.root ?? null]);
 
     const root = (...children: Node[]): Node =>
       h('div', { className: 'flow-tab', style: PANEL }, h('style', null, FOCUS_CSS), ...children);
@@ -93,7 +83,7 @@ export function createFlowTab(
       );
     }
     if (model === null) return root(h('div', { 'aria-busy': true }));
-    if (project !== null && !showAll) {
+    if (project !== null) {
       return root(
         h(ProjectLens, {
           project,
@@ -101,12 +91,10 @@ export function createFlowTab(
           api,
           store,
           schedulesStuck: snapshot.schedulesStuck.has(project.name),
-          pages,
-          onShowAll: () => setShowAll(true),
         })
       );
     }
-    return root(h(AllProjects, { model, currentProject: snapshot.currentProject, api, pages }));
+    return root(h(AllProjects, { model, currentProject: snapshot.currentProject, api }));
   }
   return FlowTab as ComponentType;
 }
