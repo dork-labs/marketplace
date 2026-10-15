@@ -202,23 +202,38 @@ describe('the person bar', () => {
     writeFleet(world.dorkHome, { handoff: 'auto' });
     const { app } = setup();
     await model(app);
-    for (const [method, route] of [
-      ['PUT', '/fleet/accounts/claude-code%3Awork'],
-      ['PUT', '/fleet/handoff'],
-      ['PUT', '/fleet/cross-runtime'],
-      ['POST', '/pause'],
-      ['POST', '/resume'],
-      ['POST', '/schedules/restored'],
-      ['POST', '/decisions/review%3Ax%3AACME-1'],
-      ['POST', '/projects/main/allow-adapter'],
-      ['PUT', '/settings/main'],
-      ['PUT', '/fleet/migration'],
-    ] as const) {
+    // Every route the app serves that is not a read, so a write route added
+    // later is held to the same bar without anyone listing it here.
+    const writes = [
+      ...new Set(
+        app.routes
+          .filter((route) => !['GET', 'HEAD', 'ALL'].includes(route.method))
+          .map((route) => `${route.method} ${route.path}`)
+      ),
+    ];
+    expect(writes.sort()).toEqual(
+      expect.arrayContaining([
+        'POST /decisions/:key',
+        'POST /pause',
+        'POST /projects/:name/allow-adapter',
+        'POST /resume',
+        'POST /schedules/restored',
+        'PUT /fleet/accounts/:key',
+        'PUT /fleet/cross-runtime',
+        'PUT /fleet/handoff',
+        'PUT /fleet/migration',
+        'PUT /settings/:name',
+      ])
+    );
+    for (const write of writes) {
+      const [method, pattern] = write.split(' ') as ['PUT' | 'POST', string];
+      // A real value for each parameter: the project, or an account's key.
+      const route = pattern.replace(/:name/g, 'main').replace(/:key/g, 'claude-code%3Awork');
       const sent = await send(app, method, route, {
         agent: true,
         body: { all: true, handoff: 'ask', role: 'main' },
       });
-      expect(sent).toEqual(REFUSED_AGENT);
+      expect(sent, write).toEqual(REFUSED_AGENT);
     }
     // The routes never ran: nothing was paused or written.
     expect(flag(world.main)).toBeNull();
