@@ -24,7 +24,7 @@ import {
 import type { AccountUsage } from '../lib/host-types.ts';
 import { createFlowExtension } from '../server.ts';
 import { append } from '../../../../scripts/journal.ts';
-import { SUMMARIES, fakeCtx, fakeRouter, makeWorld, type World } from './fixtures.ts';
+import { SUMMARIES, fakeCtx, makeWorld, send, type World } from './fixtures.ts';
 
 let world: World;
 
@@ -347,9 +347,8 @@ describe('GET /capacity', () => {
         reason: 'limit',
       }),
     ]);
-    const router = fakeRouter();
     const host = fakeCtx(world, { usage: [usage('claude-code', 'work', 40)] });
-    const ext = createFlowExtension(router, host.ctx, {
+    const ext = createFlowExtension(host.ctx, {
       originOf: () => null,
       log: () => {},
       execFile: (_file, _args, _opts, callback) => {
@@ -358,9 +357,9 @@ describe('GET /capacity', () => {
       },
       pidAlive: () => true,
     });
-    await router.call('get', '/model', { query: { cwd: world.worktree } });
+    await send(ext.app, 'GET', `/model?cwd=${encodeURIComponent(world.worktree)}`);
     const since = new Date(Date.now() - 24 * 3_600_000).toISOString();
-    const sent = await router.call('get', '/capacity', { query: { since } });
+    const sent = await send(ext.app, 'GET', `/capacity?since=${encodeURIComponent(since)}`);
     expect(sent.status).toBe(200);
     const view = sent.body as CapacityView;
     expect(view.accounts.find((a) => a.key === 'claude-code:work')?.usedPct).toBe(40);

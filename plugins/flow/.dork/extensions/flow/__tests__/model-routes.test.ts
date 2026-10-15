@@ -3,9 +3,9 @@
  * `GET /model` over every flow project; `POST /pause` and `POST /resume` for
  * one project or all, with an end time, through flow's own `config-files.ts`;
  * the expiry sweep that lifts an ended pause and queues the schedules it had
- * switched off; the person guard in front of every route that changes
- * something (and those routes missing on a host without it); and the
- * throttled `model` event.
+ * switched off; the person bar in front of every route that changes
+ * something; the fetch handler DorkOS serves, with a JSON 404 for a path flow
+ * does not serve; and the throttled `model` event.
  *
  * Tracker reads are faked: a test never runs a real adapter.
  */
@@ -24,15 +24,19 @@ import {
   parseUntil,
 } from '../lib/model-service.ts';
 import { pauseFlagPath } from '../lib/model.ts';
-import { createFlowExtension } from '../server.ts';
+import register, { createFlowExtension } from '../server.ts';
 import {
-  NOT_A_PERSON,
+  AGENT,
+  PERSON,
+  REFUSED_AGENT,
   fakeCtx,
   fakeProjects,
-  fakeRouter,
   git,
   makeWorld,
+  readFleet,
   runRecord,
+  send,
+  writeFleet,
   writeRuns,
   type World,
 } from './fixtures.ts';
@@ -86,24 +90,24 @@ function setup(
   opts: Parameters<typeof fakeCtx>[1] = {},
   machine: { now?: () => Date; execFile?: ExecFileLike } = {}
 ) {
-  const router = fakeRouter();
   const host = fakeCtx(world, { extensionDir: EXTENSION_DIR, ...opts });
-  const ext = createFlowExtension(router, host.ctx, {
+  const ext = createFlowExtension(host.ctx, {
     now: machine.now ?? (() => NOW),
     originOf: () => null,
     log: () => {},
     execFile: machine.execFile ?? execOrFakeRead,
     pidAlive: () => true,
   });
-  return { router, host, ext };
+  return { app: ext.app, host, ext };
 }
 
 /** `GET /model`'s body. */
 async function model(
-  router: ReturnType<typeof fakeRouter>,
+  app: ReturnType<typeof setup>['app'],
   cwd: string | null = world.worktree
 ): Promise<FlowModel> {
-  const sent = await router.call('get', '/model', { query: cwd === null ? {} : { cwd } });
+  const query = cwd === null ? '' : `?cwd=${encodeURIComponent(cwd)}`;
+  const sent = await send(app, 'GET', `/model${query}`);
   expect(sent.status).toBe(200);
   return sent.body as FlowModel;
 }
@@ -155,11 +159,10 @@ describe('GET /model', () => {
     configure(world.main, { drain: { parallel: 2 } });
     writeRuns(world, { a: runRecord(world, { title: 'Out-of-usage banner' }) });
     const other = otherProject();
-    const { router } = setup();
-    await model(router, other);
-    const body = await model(router);
+    const { app } = setup();
+    await model(app, other);
+    const body = await model(app);
     expect(body.cwdProject).toBe('main');
-    expect(body.canChange).toBe(true);
     expect(body.decisions).toEqual([]);
     expect(body.projects.map((p) => [p.name, p.setup, p.capacity])).toEqual([
       ['main', 'ready', { busy: 1, slots: 2 }],
@@ -177,8 +180,8 @@ describe('GET /model', () => {
     const core = fakeProjects([
       { root: world.main, name: 'app~acme', originRepo: 'acme/app', lastSeenAt: NOW.toISOString() },
     ]);
-    const { router, host } = setup({ projects: core.api });
-    const body = await model(router);
+    const { app, host } = setup({ projects: core.api });
+    const body = await model(app);
     expect(body.projects.map((p) => p.name)).toEqual(['app~acme']);
     expect(body.cwdProject).toBe('app~acme');
     expect(core.api.resolve).toHaveBeenCalledWith(world.worktree);
@@ -191,60 +194,73 @@ describe('GET /model', () => {
     core.changed();
     await vi.waitFor(() => expect(host.emit).toHaveBeenCalledWith('model', expect.any(Object)));
   });
+});
 
-  it('answers 501 host-too-old for every route on an older DorkOS', async () => {
-    const router = fakeRouter();
-    createFlowExtension(router, fakeCtx(world, { dorkHome: false }).ctx);
+describe('the person bar', () => {
+  it('stands in front of every route that changes something, and answers an agent with its verdict', async () => {
+    configure(world.main);
+    writeFleet(world.dorkHome, { handoff: 'auto' });
+    const { app } = setup();
+    await model(app);
     for (const [method, route] of [
-      ['get', '/model'],
-      ['post', '/pause'],
-      ['post', '/resume'],
-      ['post', '/schedules/restored'],
-      ['get', '/capacity'],
+      ['PUT', '/fleet/accounts/claude-code%3Awork'],
+      ['PUT', '/fleet/handoff'],
+      ['PUT', '/fleet/cross-runtime'],
+      ['POST', '/pause'],
+      ['POST', '/resume'],
+      ['POST', '/schedules/restored'],
+      ['POST', '/decisions/review%3Ax%3AACME-1'],
+      ['POST', '/projects/main/allow-adapter'],
+      ['PUT', '/settings/main'],
+      ['PUT', '/fleet/migration'],
     ] as const) {
-      expect(await router.call(method, route)).toEqual({
-        status: 501,
-        body: { reason: 'host-too-old' },
+      const sent = await send(app, method, route, {
+        agent: true,
+        body: { all: true, handoff: 'ask', role: 'main' },
       });
+      expect(sent).toEqual(REFUSED_AGENT);
     }
-    expect(router.has('get', '/panel')).toBe(false);
+    // The routes never ran: nothing was paused or written.
+    expect(flag(world.main)).toBeNull();
+    expect(readFleet(world.dorkHome)).toEqual({ v: 1, handoff: 'auto' });
+    // Reading is open to anyone.
+    for (const route of ['/model', '/fleet', '/capacity', '/settings/main', '/fleet/migration']) {
+      expect((await send(app, 'GET', route, { agent: true })).status).toBe(200);
+    }
   });
 });
 
-describe('the person guard', () => {
-  it('stands in front of every route that changes something, and refuses an agent', async () => {
-    configure(world.main);
-    const { router, host } = setup();
-    for (const [method, route] of [
-      ['put', '/fleet/accounts/:key'],
-      ['put', '/fleet/handoff'],
-      ['put', '/fleet/cross-runtime'],
-      ['post', '/pause'],
-      ['post', '/resume'],
-      ['post', '/schedules/restored'],
-    ] as const) {
-      expect(router.chain(method, route)[0]).toBe(host.requirePerson);
-      expect(await router.call(method, route, { agent: true, body: { all: true } })).toEqual({
-        status: 403,
-        body: { error: NOT_A_PERSON },
-      });
-    }
-    expect(flag(world.main)).toBeNull();
-    // Reading is open to anyone.
-    expect(router.chain('get', '/model')).toHaveLength(1);
-    expect(router.chain('get', '/fleet')).toHaveLength(1);
-    expect(router.chain('get', '/capacity')).toHaveLength(1);
+describe('the fetch handler', () => {
+  it('serves the routes below the mount with the caller as c.env, and stops on cleanup', async () => {
+    const core = fakeProjects();
+    const host = fakeCtx(world, { extensionDir: EXTENSION_DIR, projects: core.api });
+    const handlers = register(undefined, host.ctx);
+    const fleet = await handlers.fetch(new Request('http://localhost/fleet'), PERSON);
+    expect(fleet.status).toBe(200);
+    expect(fleet.headers.get('content-type')).toMatch(/^application\/json/);
+    const refused = await handlers.fetch(
+      new Request('http://localhost/fleet/handoff', {
+        method: 'PUT',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ handoff: 'ask' }),
+      }),
+      AGENT
+    );
+    expect(refused.status).toBe(403);
+    expect(core.listeners).toHaveLength(1);
+    await handlers.cleanup();
+    expect(core.listeners).toHaveLength(0);
+    expect(host.unregister).toHaveBeenCalledTimes(1);
   });
 
-  it('registers no pause route on a host that cannot tell a person from an agent', async () => {
-    configure(world.main);
-    const { router } = setup({ personGuard: false });
-    expect(router.has('post', '/pause')).toBe(false);
-    expect(router.has('post', '/resume')).toBe(false);
-    expect(router.has('post', '/schedules/restored')).toBe(false);
-    expect((await model(router)).canChange).toBe(false);
-    // The fleet writes keep working there, as they always have.
-    expect(router.chain('put', '/fleet/handoff')).toHaveLength(1);
+  it('answers a path flow does not serve with a JSON 404', async () => {
+    const { app } = setup();
+    expect(await send(app, 'GET', '/panel')).toEqual({
+      status: 404,
+      body: { error: 'Flow has no GET /panel route.' },
+    });
+    // A known path with a method it does not take is not served either.
+    expect((await send(app, 'POST', '/fleet')).status).toBe(404);
   });
 });
 
@@ -252,12 +268,12 @@ describe('POST /pause and /resume', () => {
   it('pauses one project until a time, then every project, then resumes one', async () => {
     configure(world.main);
     const other = otherProject();
-    const { router } = setup({}, REAL_CLOCK);
-    await model(router);
-    await model(router, other);
+    const { app } = setup({}, REAL_CLOCK);
+    await model(app);
+    await model(app, other);
 
     const first = inMinutes(60);
-    const one = await router.call('post', '/pause', { body: { project: 'main', until: first } });
+    const one = await send(app, 'POST', '/pause', { body: { project: 'main', until: first } });
     expect(one.status).toBe(200);
     const paused = one.body as FlowModel;
     expect(paused.projects.map((p) => [p.name, p.pause?.until ?? null])).toEqual([
@@ -268,10 +284,10 @@ describe('POST /pause and /resume', () => {
 
     // Pause all applies one new end everywhere, the paused project included.
     const second = inMinutes(120);
-    const all = await router.call('post', '/pause', { body: { all: true, until: second } });
+    const all = await send(app, 'POST', '/pause', { body: { all: true, until: second } });
     expect((all.body as FlowModel).projects.map((p) => p.pause?.until)).toEqual([second, second]);
 
-    const resumed = await router.call('post', '/resume', { body: { project: 'other' } });
+    const resumed = await send(app, 'POST', '/resume', { body: { project: 'other' } });
     expect((resumed.body as FlowModel).projects.map((p) => p.pause !== null)).toEqual([
       true,
       false,
@@ -281,9 +297,9 @@ describe('POST /pause and /resume', () => {
 
   it('pauses every project with no end for a client from before (empty body)', async () => {
     configure(world.main);
-    const { router } = setup();
-    await model(router);
-    const sent = await router.call('post', '/pause');
+    const { app } = setup();
+    await model(app);
+    const sent = await send(app, 'POST', '/pause');
     expect(sent.status).toBe(200);
     expect((sent.body as FlowModel).projects[0].pause).toMatchObject({ until: null });
     expect(flag(world.main)).toMatchObject({ until: null });
@@ -291,20 +307,18 @@ describe('POST /pause and /resume', () => {
 
   it('refuses an end in the past or more than 30 days away, and an unknown project', async () => {
     configure(world.main);
-    const { router } = setup();
-    await model(router);
+    const { app } = setup();
+    await model(app);
     for (const until of ['2026-09-28T11:00:00Z', '2026-11-28T11:00:00Z']) {
-      expect(await router.call('post', '/pause', { body: { all: true, until } })).toEqual({
+      expect(await send(app, 'POST', '/pause', { body: { all: true, until } })).toEqual({
         status: 400,
         body: { error: PAUSE_RANGE_MESSAGE, refusedBy: 'flow' },
       });
     }
-    expect(await router.call('post', '/pause', { body: { project: 'nope', until: null } })).toEqual(
-      {
-        status: 404,
-        body: { error: 'No flow project is called nope on this computer.', refusedBy: 'flow' },
-      }
-    );
+    expect(await send(app, 'POST', '/pause', { body: { project: 'nope', until: null } })).toEqual({
+      status: 404,
+      body: { error: 'No flow project is called nope on this computer.', refusedBy: 'flow' },
+    });
     expect(flag(world.main)).toBeNull();
   });
 
@@ -317,17 +331,17 @@ describe('POST /pause and /resume', () => {
       pauseFlagPath(world.main),
       JSON.stringify({ pausedAt: NOW.toISOString(), hostSchedules: ['sched-1'] })
     );
-    const { router } = setup({}, REAL_CLOCK);
-    await model(router);
+    const { app } = setup({}, REAL_CLOCK);
+    await model(app);
     const until = inMinutes(60);
-    const timed = await router.call('post', '/pause', { body: { project: 'main', until } });
+    const timed = await send(app, 'POST', '/pause', { body: { project: 'main', until } });
     expect(timed.status).toBe(200);
     expect(flag(world.main)).toMatchObject({ until, hostSchedules: ['sched-1'] });
-    const resumed = (await router.call('post', '/resume', { body: { project: 'main' } }))
+    const resumed = (await send(app, 'POST', '/resume', { body: { project: 'main' } }))
       .body as FlowModel;
     expect(resumed.projects[0].restoreSchedules).toEqual(['sched-1']);
     const done = (
-      await router.call('post', '/schedules/restored', {
+      await send(app, 'POST', '/schedules/restored', {
         body: { project: 'main', ids: ['sched-1'] },
       })
     ).body as FlowModel;
@@ -336,7 +350,7 @@ describe('POST /pause and /resume', () => {
 
   it('answers 502 in plain words when flow could not pause', async () => {
     configure(world.main);
-    const { router } = setup(
+    const { app } = setup(
       {},
       {
         execFile: ((_file, _args, _opts, callback) => {
@@ -344,10 +358,11 @@ describe('POST /pause and /resume', () => {
         }) satisfies ExecFileLike,
       }
     );
-    await model(router);
-    expect(await router.call('post', '/pause', { body: { project: 'main', until: null } })).toEqual(
-      { status: 502, body: { error: "Flow couldn't pause main. Try again.", refusedBy: 'flow' } }
-    );
+    await model(app);
+    expect(await send(app, 'POST', '/pause', { body: { project: 'main', until: null } })).toEqual({
+      status: 502,
+      body: { error: "Flow couldn't pause main. Try again.", refusedBy: 'flow' },
+    });
   });
 });
 
@@ -368,14 +383,14 @@ describe('the expiry sweep', () => {
       if (args.includes('resume')) calls.push('resume');
       return execOrFakeRead(file, args, opts, callback);
     };
-    const { router, host } = setup({}, { execFile: counting });
-    await model(router);
+    const { app, host } = setup({}, { execFile: counting });
+    await model(app);
     const poll = host.scheduled[0];
     await poll();
     expect(flag(world.main)).toBeNull();
     await poll();
     expect(calls).toEqual(['resume']);
-    const body = await model(router);
+    const body = await model(app);
     expect(body.projects[0].pause).toBeNull();
     expect(body.projects[0].restoreSchedules).toEqual(['sched-2']);
   }, 30_000);
@@ -384,8 +399,8 @@ describe('the expiry sweep', () => {
     configure(world.main);
     mkdirSync(path.dirname(pauseFlagPath(world.main)), { recursive: true });
     writeFileSync(pauseFlagPath(world.main), JSON.stringify({ until: '2026-09-28T13:00:00Z' }));
-    const { router, host } = setup();
-    await model(router);
+    const { app, host } = setup();
+    await model(app);
     await host.scheduled[0]();
     expect(flag(world.main)).not.toBeNull();
   });
@@ -395,8 +410,8 @@ describe('the model event', () => {
   it('is sent when the model changed, at most once a second, and polls the run stores', async () => {
     vi.useFakeTimers({ now: NOW, toFake: ['setTimeout', 'clearTimeout', 'Date'] });
     configure(world.main);
-    const { host, router } = setup();
-    await model(router);
+    const { host, app } = setup();
+    await model(app);
     const poll = host.scheduled[0];
     await poll();
     await vi.advanceTimersByTimeAsync(0);

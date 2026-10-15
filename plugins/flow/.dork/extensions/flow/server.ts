@@ -28,28 +28,34 @@
  *   use are DorkOS's, written only from the person's browser, never here.
  * - `GET /fleet/migration` and `PUT /fleet/migration` keep the record of
  *   moving "Only for these repos" into DorkOS, which the browser does.
- * - Every route that changes something runs behind DorkOS's person guard
- *   (`ctx.requirePerson`): an agent calling flow's routes cannot pause a
- *   project or change an account's policy. On a DorkOS without the guard the
- *   pause routes are not registered at all; the fleet writes keep working as
- *   they always have there, since that DorkOS has no other way to change them.
- * - On a DorkOS without `ctx.dorkHome` and the accounts API (before 0.88.0),
- *   no advisor is registered and every route answers `501 { reason: 'host-too-old' }`.
+ * - Every route that changes something runs behind DorkOS's person bar
+ *   (`lib/person.ts`): an agent calling flow's routes cannot pause a project
+ *   or change an account's policy. A path flow does not serve answers a JSON 404.
+ *
+ * The routes are a Hono app, served by the fetch handler `register()` returns:
+ * DorkOS hands it each request under `/api/ext/flow/` with the path below the
+ * mount (`GET /api/ext/flow/fleet` arrives as `GET /fleet`), and the person
+ * bar's verdict on the caller as Hono's `c.env`. DorkOS builds `hono` into the
+ * bundle itself, so nothing needs installing. Every answer is JSON, so the
+ * reply headers DorkOS drops or rewrites (cookies, a redirect) never come up.
  *
  * DorkOS bundles this file and its relative imports with esbuild, so it uses
- * only flow's zod-free modules (`engine-tests/extension-zod-free.test.ts`
- * guards that).
+ * only node builtins, `hono` and flow's zod-free modules
+ * (`__tests__/bundle-safety.test.ts` guards that).
  *
  * @module @dorkos/flow/extension/server
  */
 
 import { execFile, execFileSync } from 'node:child_process';
 import path from 'node:path';
+import { Hono, type Context } from 'hono';
+import type { ContentfulStatusCode } from 'hono/utils/http-status';
 import { updateFleetPolicy } from '../../../scripts/fleet/accounts.ts';
 import { createAdvisor, type ExecFileLike, type FlowAdvisor } from './lib/advisor.ts';
 import { buildCapacity, parseSince } from './lib/capacity.ts';
 import { ContinuedWatcher } from './lib/continued-watcher.ts';
 import { ModelService } from './lib/model-service.ts';
+import { requirePerson, type FlowEnv } from './lib/person.ts';
 import { readRepoMigration, writeRepoMigration } from './lib/repo-migration.ts';
 import { getDrainBypass, GrantStore, setDrainBypass } from './lib/drain-bypass-tools.ts';
 import { SharedStorage } from './lib/shared-storage.ts';
@@ -63,16 +69,12 @@ import {
   type FleetWriter,
 } from './lib/fleet.ts';
 import type {
-  AccountsApi,
   DataProviderContext,
-  ExtensionRouter,
   InboxApi,
   ProjectSettingsReader,
   ProjectsApi,
+  ServerExtensionHandlers,
   SessionsApi,
-  RouteHandler,
-  RouteMiddleware,
-  RouteResponse,
 } from './lib/host-types.ts';
 
 /** How often the watcher looks at the claimed runs' stores, in seconds (the host's minimum). */
@@ -103,12 +105,14 @@ export interface FlowExtensionOverrides {
 
 /** What {@link createFlowExtension} built. */
 export interface FlowExtension {
-  /** The advisor, or `null` on a host too old for one. */
-  advisor: FlowAdvisor | null;
-  /** The watcher, or `null` on a host too old for one. */
-  watcher: ContinuedWatcher | null;
-  /** The Flow tab's model service, or `null` on a host too old for one. */
-  model: ModelService | null;
+  /** The routes, as the Hono app whose `fetch` DorkOS serves under `/api/ext/flow/`. */
+  app: Hono<FlowEnv>;
+  /** The advisor. */
+  advisor: FlowAdvisor;
+  /** The watcher. */
+  watcher: ContinuedWatcher;
+  /** The Flow tab's model service. */
+  model: ModelService;
   /** Stop the watcher and remove the advisor. */
   dispose(): void;
 }
@@ -128,45 +132,51 @@ function gitOrigin(cwd: string): string | null {
 }
 
 /**
- * Send a route error, or a 500 for anything else. A refusal flow made on
+ * Answer a route error, or a 500 for anything else. A refusal flow made on
  * purpose carries `refusedBy: 'flow'`, so the Flow tab shows its words and
- * never the host's own (such as a 404 for routes that are not mounted).
+ * never the host's own.
+ *
+ * @param c - The request's context.
+ * @param error - What the route threw.
+ * @returns The JSON answer.
  */
-function fail(res: RouteResponse, error: unknown): void {
+function fail(c: Context<FlowEnv>, error: unknown): Response {
   if (error instanceof RouteError) {
-    res.status(error.status).json({ error: error.message, refusedBy: 'flow' });
-    return;
+    return c.json(
+      { error: error.message, refusedBy: 'flow' },
+      error.status as ContentfulStatusCode
+    );
   }
-  res.status(500).json({ error: error instanceof Error ? error.message : String(error) });
-}
-
-/** Wrap a handler so a thrown error becomes a JSON answer. */
-function handle(fn: RouteHandler): RouteHandler {
-  return async (req, res) => {
-    try {
-      await fn(req, res);
-    } catch (error) {
-      fail(res, error);
-    }
-  };
+  return c.json({ error: error instanceof Error ? error.message : String(error) }, 500);
 }
 
 /**
- * Whether the host gives this extension what it needs: `dorkHome` and the
- * accounts API with `list`, `registerAdvisor` and `markContinued`.
+ * The request's JSON body, as the old router's `req.body` held it: DorkOS
+ * parses only an `application/json` body, so any other body, and no body at
+ * all, reads as `undefined`.
  *
- * @param ctx - The host's context.
- * @returns True on a host new enough.
+ * @param c - The request's context.
+ * @returns The parsed body, or `undefined`.
  */
-export function hostSupportsFlow(
-  ctx: DataProviderContext
-): ctx is DataProviderContext & { dorkHome: string; accounts: AccountsApi } {
-  return (
-    typeof ctx.dorkHome === 'string' &&
-    typeof ctx.accounts?.list === 'function' &&
-    typeof ctx.accounts.registerAdvisor === 'function' &&
-    typeof ctx.accounts.markContinued === 'function'
-  );
+async function jsonBody(c: Context<FlowEnv>): Promise<unknown> {
+  const type = c.req.header('content-type')?.split(';')[0].trim().toLowerCase();
+  if (type !== 'application/json') return undefined;
+  const text = await c.req.text();
+  return text === '' ? undefined : JSON.parse(text);
+}
+
+/**
+ * A query parameter as the old router's `req.query` held it: missing, one
+ * string, or every value when it is repeated.
+ *
+ * @param c - The request's context.
+ * @param name - The parameter.
+ * @returns Its value or values, or `undefined`.
+ */
+function queryValue(c: Context<FlowEnv>, name: string): string | string[] | undefined {
+  const values = c.req.queries(name);
+  if (values === undefined || values.length === 0) return undefined;
+  return values.length === 1 ? values[0] : values;
 }
 
 /**
@@ -184,19 +194,6 @@ export function hostSupportsProjects(
     typeof ctx.projects.report === 'function' &&
     typeof ctx.projects.onChange === 'function'
   );
-}
-
-/**
- * Whether the host can tell a person from an agent (`ctx.requirePerson`).
- * Without it, no route that pauses or resumes a project is registered.
- *
- * @param ctx - The host's context.
- * @returns True when it can.
- */
-export function hostSupportsPersonGuard(
-  ctx: DataProviderContext
-): ctx is DataProviderContext & { requirePerson: RouteMiddleware } {
-  return typeof ctx.requirePerson === 'function';
 }
 
 /**
@@ -250,90 +247,48 @@ export function hostSupportsStartWork(
 export const ANSWER_IN_INBOX = 'Answer this in the Inbox.';
 
 /**
- * Register the routes and the advisor.
+ * Build the routes and the advisor.
  *
- * @param router - The router DorkOS mounts at `/api/ext/flow/`.
  * @param ctx - The host's context.
  * @param overrides - Replacements for the real machine (tests).
  * @returns What was built.
  */
 export function createFlowExtension(
-  router: ExtensionRouter,
   ctx: DataProviderContext,
   overrides: FlowExtensionOverrides = {}
 ): FlowExtension {
-  if (!hostSupportsFlow(ctx)) {
-    const tooOld: RouteHandler = (_req, res) => {
-      res.status(501).json({ reason: 'host-too-old' });
-    };
-    router.get('/fleet', tooOld);
-    router.put('/fleet/accounts/:key', tooOld);
-    router.put('/fleet/handoff', tooOld);
-    router.put('/fleet/cross-runtime', tooOld);
-    router.get('/model', tooOld);
-    router.post('/pause', tooOld);
-    router.post('/resume', tooOld);
-    router.post('/schedules/restored', tooOld);
-    router.get('/capacity', tooOld);
-    router.post('/decisions/:key', tooOld);
-    router.post('/projects/:name/allow-adapter', tooOld);
-    router.get('/settings/:name', tooOld);
-    router.put('/settings/:name', tooOld);
-    router.get('/fleet/migration', tooOld);
-    router.put('/fleet/migration', tooOld);
-    return { advisor: null, watcher: null, model: null, dispose: () => {} };
-  }
-
   const { dorkHome, accounts } = ctx;
-  const guard: RouteMiddleware | undefined = hostSupportsPersonGuard(ctx)
-    ? ctx.requirePerson
-    : undefined;
-  // A route that changes something runs behind the person guard when the host has one.
-  const guarded = (handler: RouteHandler) => (guard === undefined ? [handler] : [guard, handler]);
   const writer = overrides.writer ?? updateFleetPolicy;
   const now = overrides.now ?? (() => new Date());
   const log = overrides.log ?? ((message: string) => console.warn(message));
   const view = async () => buildFleetView(dorkHome, await accounts.list(), now());
 
-  router.get(
-    '/fleet',
-    handle(async (_req, res) => {
-      res.status(200).json(await view());
-    })
-  );
-  router.put(
-    '/fleet/accounts/:key',
-    ...guarded(
-      handle(async (req, res) => {
-        await putAccountPolicy({
-          dorkHome,
-          summaries: await accounts.list(),
-          key: req.params.key,
-          body: req.body,
-          writer,
-        });
-        res.status(200).json(await view());
-      })
-    )
-  );
-  router.put(
-    '/fleet/handoff',
-    ...guarded(
-      handle(async (req, res) => {
-        await putHandoff({ dorkHome, body: req.body, writer });
-        res.status(200).json(await view());
-      })
-    )
-  );
-  router.put(
-    '/fleet/cross-runtime',
-    ...guarded(
-      handle(async (req, res) => {
-        await putCrossRuntime({ dorkHome, body: req.body, writer });
-        res.status(200).json(await view());
-      })
-    )
-  );
+  // `strict: false` keeps the router's leniency about a trailing slash.
+  const app = new Hono<FlowEnv>({ strict: false });
+  app.onError((error, c) => fail(c, error));
+  app.notFound((c) => c.json({ error: `Flow has no ${c.req.method} ${c.req.path} route.` }, 404));
+  // Every route that changes something runs behind the person bar.
+  const person = requirePerson();
+
+  app.get('/fleet', async (c) => c.json(await view()));
+  app.put('/fleet/accounts/:key', person, async (c) => {
+    await putAccountPolicy({
+      dorkHome,
+      summaries: await accounts.list(),
+      key: c.req.param('key'),
+      body: await jsonBody(c),
+      writer,
+    });
+    return c.json(await view());
+  });
+  app.put('/fleet/handoff', person, async (c) => {
+    await putHandoff({ dorkHome, body: await jsonBody(c), writer });
+    return c.json(await view());
+  });
+  app.put('/fleet/cross-runtime', person, async (c) => {
+    await putCrossRuntime({ dorkHome, body: await jsonBody(c), writer });
+    return c.json(await view());
+  });
 
   // extensionDir is <flow plugin>/.dork/extensions/flow.
   const flowRoot = path.resolve(ctx.extensionDir, '../../..');
@@ -364,7 +319,8 @@ export function createFlowExtension(
     emit: (event, data) => ctx.emit(event, data),
     execFile: exec,
     now,
-    canChange: guard !== undefined,
+    // Every route that changes something is served, behind the person bar.
+    canChange: true,
     log,
     pidAlive: overrides.pidAlive,
     inbox: hostSupportsInbox(ctx) ? ctx.inbox : undefined,
@@ -378,108 +334,50 @@ export function createFlowExtension(
   const stopSettings = hostSupportsProjectSettings(ctx)
     ? ctx.projectSettings.onChange(() => void model.poll())
     : () => {};
-  router.get(
-    '/model',
-    handle(async (req, res) => {
-      const cwd = typeof req.query?.cwd === 'string' ? req.query.cwd : undefined;
-      model.noteCwd(cwd);
-      res.status(200).json(await model.model(cwd));
-    })
+  app.get('/model', async (c) => {
+    const cwd = queryValue(c, 'cwd');
+    const one = typeof cwd === 'string' ? cwd : undefined;
+    model.noteCwd(one);
+    return c.json(await model.model(one));
+  });
+  app.get('/settings/:name', async (c) => c.json(await model.settings(c.req.param('name'))));
+  app.get('/fleet/migration', async (c) => c.json(await readRepoMigration(storage)));
+  app.get('/capacity', async (c) => {
+    const at = now();
+    const usage = await accounts.usage().catch(() => []);
+    return c.json(
+      await buildCapacity({
+        dorkHome,
+        summaries: await accounts.list(),
+        usage,
+        projects: await model.projects(),
+        since: parseSince(queryValue(c, 'since'), at),
+        now: at,
+      })
+    );
+  });
+  app.post('/pause', person, async (c) => c.json(await model.pause(await jsonBody(c))));
+  app.post('/resume', person, async (c) => c.json(await model.resume(await jsonBody(c))));
+  app.post('/decisions/:key', person, async (c) => {
+    // With the inbox, core's person bar and history are the path (§7.4).
+    if (hostSupportsInbox(ctx)) {
+      return c.json({ error: ANSWER_IN_INBOX, refusedBy: 'flow' }, 410);
+    }
+    return c.json(await model.answerLocal(c.req.param('key'), await jsonBody(c)));
+  });
+  app.post('/projects/:name/allow-adapter', person, async (c) =>
+    c.json(await model.allowAdapter(c.req.param('name')))
   );
-  router.get(
-    '/settings/:name',
-    handle(async (req, res) => {
-      res.status(200).json(await model.settings(req.params.name));
-    })
+  app.put('/settings/:name', person, async (c) =>
+    c.json(await model.saveSettings(c.req.param('name'), await jsonBody(c)))
   );
-  router.get(
-    '/fleet/migration',
-    handle(async (_req, res) => {
-      res.status(200).json(await readRepoMigration(storage));
-    })
+  app.put('/fleet/migration', person, async (c) =>
+    c.json(await writeRepoMigration(storage, await jsonBody(c)))
   );
-  router.get(
-    '/capacity',
-    handle(async (req, res) => {
-      const at = now();
-      const usage =
-        typeof accounts.usage === 'function' ? await accounts.usage().catch(() => []) : [];
-      res.status(200).json(
-        await buildCapacity({
-          dorkHome,
-          summaries: await accounts.list(),
-          usage,
-          projects: await model.projects(),
-          since: parseSince(req.query?.since, at),
-          now: at,
-        })
-      );
-    })
-  );
-  if (guard !== undefined) {
-    router.post(
-      '/pause',
-      ...guarded(
-        handle(async (req, res) => {
-          res.status(200).json(await model.pause(req.body));
-        })
-      )
-    );
-    router.post(
-      '/resume',
-      ...guarded(
-        handle(async (req, res) => {
-          res.status(200).json(await model.resume(req.body));
-        })
-      )
-    );
-    router.post(
-      '/decisions/:key',
-      ...guarded(
-        handle(async (req, res) => {
-          // With the inbox, core's person bar and history are the path (§7.4).
-          if (hostSupportsInbox(ctx)) {
-            res.status(410).json({ error: ANSWER_IN_INBOX, refusedBy: 'flow' });
-            return;
-          }
-          res.status(200).json(await model.answerLocal(req.params.key, req.body));
-        })
-      )
-    );
-    router.post(
-      '/projects/:name/allow-adapter',
-      ...guarded(
-        handle(async (req, res) => {
-          res.status(200).json(await model.allowAdapter(req.params.name));
-        })
-      )
-    );
-    router.put(
-      '/settings/:name',
-      ...guarded(
-        handle(async (req, res) => {
-          res.status(200).json(await model.saveSettings(req.params.name, req.body));
-        })
-      )
-    );
-    router.put(
-      '/fleet/migration',
-      ...guarded(
-        handle(async (req, res) => {
-          res.status(200).json(await writeRepoMigration(storage, req.body));
-        })
-      )
-    );
-    router.post(
-      '/schedules/restored',
-      ...guarded(
-        handle(async (req, res) => {
-          const body = (req.body ?? {}) as { project?: unknown; ids?: unknown };
-          res.status(200).json(await model.schedulesRestored(body.project, body.ids));
-        })
-      )
-    );
-  }
+  app.post('/schedules/restored', person, async (c) => {
+    const body = ((await jsonBody(c)) ?? {}) as { project?: unknown; ids?: unknown };
+    return c.json(await model.schedulesRestored(body.project, body.ids));
+  });
   const stopProjects =
     projects !== undefined ? projects.onChange(() => model.projectsChanged()) : () => {};
   const stopModelPoll = ctx.schedule(MODEL_INTERVAL_SECONDS, async () => model.poll());
@@ -506,6 +404,7 @@ export function createFlowExtension(
   const unregister = accounts.registerAdvisor(advisor);
   const stopWatching = ctx.schedule(WATCH_INTERVAL_SECONDS, () => watcher.check());
   return {
+    app,
     advisor,
     watcher,
     model,
@@ -521,12 +420,18 @@ export function createFlowExtension(
 }
 
 /**
- * The server entry point DorkOS calls.
+ * The server entry point DorkOS calls. Flow serves its routes with the fetch
+ * handler it returns, so it adds nothing to the router DorkOS passes.
  *
- * @param router - The router DorkOS mounts at `/api/ext/flow/`.
+ * @param _router - The router DorkOS passes; flow does not use it.
  * @param ctx - The host's context.
- * @returns The cleanup DorkOS runs on shutdown or reload.
+ * @returns The fetch handler DorkOS serves under `/api/ext/flow/`, and the
+ *   cleanup it runs on shutdown or reload.
  */
-export default function register(router: ExtensionRouter, ctx: DataProviderContext): () => void {
-  return createFlowExtension(router, ctx).dispose;
+export default function register(
+  _router: unknown,
+  ctx: DataProviderContext
+): Required<ServerExtensionHandlers> {
+  const flow = createFlowExtension(ctx);
+  return { fetch: flow.app.fetch, cleanup: flow.dispose };
 }

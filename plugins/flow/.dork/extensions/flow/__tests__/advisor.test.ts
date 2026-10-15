@@ -20,7 +20,6 @@ import { createFlowExtension } from '../server.ts';
 import {
   REPO,
   fakeCtx,
-  fakeRouter,
   makeWorld,
   readStore,
   runRecord,
@@ -92,7 +91,7 @@ function setup(
   const exec = opts.exec ?? fakeExec();
   const host = fakeCtx(world, { storage: opts.storage });
   const log = vi.fn();
-  const ext = createFlowExtension(fakeRouter(), host.ctx, {
+  const ext = createFlowExtension(host.ctx, {
     now: () => NOW,
     execFile: exec.execFile,
     originOf: () => (opts.origin === undefined ? `https://github.com/${REPO}.git` : opts.origin),
@@ -100,7 +99,7 @@ function setup(
     clockMs: opts.clockMs,
     pidAlive: opts.pidAlive,
   });
-  const advisor = ext.advisor as FlowAdvisor;
+  const advisor = ext.advisor;
   return { advisor, host, exec, log, ext };
 }
 

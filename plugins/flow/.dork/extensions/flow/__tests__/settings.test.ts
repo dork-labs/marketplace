@@ -34,7 +34,7 @@ import {
 } from '../lib/settings.ts';
 import { REPO_MIGRATION_KEY } from '../lib/repo-migration.ts';
 import { createFlowExtension } from '../server.ts';
-import { NOT_A_PERSON, fakeCtx, fakeRouter, makeWorld, type World } from './fixtures.ts';
+import { REFUSED_AGENT, fakeCtx, makeWorld, send, type World } from './fixtures.ts';
 
 const EXTENSION_DIR = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const NOW = new Date('2026-09-29T12:00:00.000Z');
@@ -74,21 +74,22 @@ const realExec: ExecFileLike = (file, args, opts, callback) => {
 
 /** Build the extension, and make it see the project (its name is its folder's: `main`). */
 async function setup(opts: Parameters<typeof fakeCtx>[1] = {}, exec: ExecFileLike = realExec) {
-  const router = fakeRouter();
   const host = fakeCtx(world, { extensionDir: EXTENSION_DIR, ...opts });
-  const ext = createFlowExtension(router, host.ctx, {
+  const ext = createFlowExtension(host.ctx, {
     now: () => NOW,
     originOf: () => null,
     log: () => {},
     execFile: exec,
     pidAlive: () => true,
   });
-  await router.call('get', '/model', { query: { cwd: world.main } });
-  return { router, host, ext };
+  await send(ext.app, 'GET', `/model?cwd=${encodeURIComponent(world.main)}`);
+  return { app: ext.app, host, ext };
 }
 
-async function settings(router: ReturnType<typeof fakeRouter>): Promise<ProjectSettingsView> {
-  const sent = await router.call('get', '/settings/:name', { params: { name: 'main' } });
+async function settings(
+  app: Awaited<ReturnType<typeof setup>>['app']
+): Promise<ProjectSettingsView> {
+  const sent = await send(app, 'GET', '/settings/main');
   expect(sent.status).toBe(200);
   return sent.body as ProjectSettingsView;
 }
@@ -99,8 +100,8 @@ describe('GET /settings/:name', () => {
       { tracker: 'linear', review: { adversarial: false }, drain: { parallel: 3 } },
       { drain: { parallel: 0 }, autonomy: { default: 'bogus' } }
     );
-    const { router } = await setup();
-    const view = await settings(router);
+    const { app } = await setup();
+    const view = await settings(app);
     expect(view.files).toEqual({
       shared: '.agents/flow/config.json',
       local: '.agents/flow/config.local.json',
@@ -112,13 +113,12 @@ describe('GET /settings/:name', () => {
     // A value flow can't read is its default.
     expect(view.local.startsOnItsOwn).toEqual({ value: 'auto', source: 'default', locked: null });
     expect(view.pauseDefault).toBe('tomorrow');
-    expect(view.canChange).toBe(true);
   });
 
   it('answers 404 in plain words for a project flow does not know', async () => {
     configure({ tracker: 'linear' });
-    const { router } = await setup();
-    const sent = await router.call('get', '/settings/:name', { params: { name: 'nope' } });
+    const { app } = await setup();
+    const sent = await send(app, 'GET', '/settings/nope');
     expect(sent).toEqual({
       status: 404,
       body: { error: 'No flow project is called nope on this computer.', refusedBy: 'flow' },
@@ -129,9 +129,8 @@ describe('GET /settings/:name', () => {
 describe('PUT /settings/:name', () => {
   it('changes only the keys it names, in the right file, and leaves every other key as it was', async () => {
     configure({ $schema: './x.json', tracker: 'linear', connection: { team: { key: 'DOR' } } });
-    const { router } = await setup();
-    const sent = await router.call('put', '/settings/:name', {
-      params: { name: 'main' },
+    const { app } = await setup();
+    const sent = await send(app, 'PUT', '/settings/main', {
       body: {
         shared: { reviewerAgent: false, labels: ['bug', 'bug', 'idea'] },
         local: { parallel: 3, startsOnItsOwn: 'manual' },
@@ -173,9 +172,8 @@ describe('PUT /settings/:name', () => {
       }
       return realExec(file, args, opts, callback);
     };
-    const { router } = await setup({}, exec);
-    const sent = await router.call('put', '/settings/:name', {
-      params: { name: 'main' },
+    const { app } = await setup({}, exec);
+    const sent = await send(app, 'PUT', '/settings/main', {
       body: { shared: { armAutoMerge: true }, local: { parallel: 5 } },
     });
     expect(sent).toEqual({
@@ -191,9 +189,8 @@ describe('PUT /settings/:name', () => {
     mkdirSync(paths.dir, { recursive: true });
     writeFileSync(paths.shared, JSON.stringify({ tracker: 'linear' }, null, 4), { mode: 0o644 });
     chmodSync(paths.shared, 0o644);
-    const { router } = await setup();
-    const sent = await router.call('put', '/settings/:name', {
-      params: { name: 'main' },
+    const { app } = await setup();
+    const sent = await send(app, 'PUT', '/settings/main', {
       body: { shared: { mergeOnApproval: false } },
     });
     expect(sent.status).toBe(200);
@@ -221,9 +218,8 @@ describe('PUT /settings/:name', () => {
       }
       return realExec(file, args, opts, callback);
     };
-    const { router } = await setup({}, exec);
-    const sent = await router.call('put', '/settings/:name', {
-      params: { name: 'main' },
+    const { app } = await setup({}, exec);
+    const sent = await send(app, 'PUT', '/settings/main', {
       body: { shared: { armAutoMerge: true }, local: { parallel: 2 } },
     });
     expect(sent.status).toBe(400);
@@ -242,9 +238,8 @@ describe('PUT /settings/:name', () => {
       }
       return realExec(file, args, opts, callback);
     };
-    const { router } = await setup({}, exec);
-    const sent = await router.call('put', '/settings/:name', {
-      params: { name: 'main' },
+    const { app } = await setup({}, exec);
+    const sent = await send(app, 'PUT', '/settings/main', {
       body: { shared: { mergeOnApproval: false } },
     });
     expect(sent.status).toBe(200);
@@ -258,9 +253,8 @@ describe('PUT /settings/:name', () => {
       if (script !== undefined) scripts.push(script);
       return realExec(file, args, opts, callback);
     };
-    const { router } = await setup({}, exec);
-    await router.call('put', '/settings/:name', {
-      params: { name: 'main' },
+    const { app } = await setup({}, exec);
+    await send(app, 'PUT', '/settings/main', {
       body: { shared: { reviewerAgent: false } },
     });
     expect(scripts.length).toBeGreaterThan(0);
@@ -270,9 +264,8 @@ describe('PUT /settings/:name', () => {
 
   it('keeps the pause default in the extension’s storage, and the model carries it', async () => {
     configure({ tracker: 'linear' });
-    const { router, host } = await setup();
-    const sent = await router.call('put', '/settings/:name', {
-      params: { name: 'main' },
+    const { app, host } = await setup();
+    const sent = await send(app, 'PUT', '/settings/main', {
       body: { pauseDefault: 'hour' },
     });
     expect((sent.body as ProjectSettingsView).pauseDefault).toBe('hour');
@@ -280,7 +273,7 @@ describe('PUT /settings/:name', () => {
       [world.main]: 'hour',
     });
     expect(existsSync(files().local)).toBe(false);
-    const model = (await router.call('get', '/model', { query: {} })).body as FlowModel;
+    const model = (await send(app, 'GET', '/model')).body as FlowModel;
     expect(model.projects[0].pauseDefault).toBe('hour');
   });
 
@@ -293,8 +286,8 @@ describe('PUT /settings/:name', () => {
   ])('refuses %j before writing anything', async (body, words) => {
     configure({ tracker: 'linear' });
     const before = readFileSync(files().shared, 'utf8');
-    const { router } = await setup();
-    const sent = await router.call('put', '/settings/:name', { params: { name: 'main' }, body });
+    const { app } = await setup();
+    const sent = await send(app, 'PUT', '/settings/main', { body });
     expect(sent).toEqual({ status: 400, body: { error: words, refusedBy: 'flow' } });
     expect(readFileSync(files().shared, 'utf8')).toBe(before);
   });
@@ -302,31 +295,13 @@ describe('PUT /settings/:name', () => {
   it('is person-only: an agent is refused, and nothing is written', async () => {
     configure({ tracker: 'linear' });
     const before = readFileSync(files().shared, 'utf8');
-    const { router } = await setup();
-    const sent = await router.call('put', '/settings/:name', {
-      params: { name: 'main' },
+    const { app } = await setup();
+    const sent = await send(app, 'PUT', '/settings/main', {
       body: { shared: { reviewerAgent: false } },
       agent: true,
     });
-    expect(sent).toEqual({ status: 403, body: { error: NOT_A_PERSON } });
+    expect(sent).toEqual(REFUSED_AGENT);
     expect(readFileSync(files().shared, 'utf8')).toBe(before);
-  });
-
-  it('is not registered at all on a DorkOS without the person guard, and says so in the view', async () => {
-    configure({ tracker: 'linear' });
-    const { router } = await setup({ personGuard: false });
-    expect(router.has('put', '/settings/:name')).toBe(false);
-    expect(router.has('put', '/fleet/migration')).toBe(false);
-    expect((await settings(router)).canChange).toBe(false);
-  });
-
-  it('answers host-too-old on a DorkOS from before 0.88.0', async () => {
-    const router = fakeRouter();
-    createFlowExtension(router, fakeCtx(world, { dorkHome: false }).ctx);
-    expect(await router.call('get', '/settings/:name', { params: { name: 'x' } })).toEqual({
-      status: 501,
-      body: { reason: 'host-too-old' },
-    });
   });
 });
 
@@ -358,8 +333,8 @@ describe('key skew (§8.3 step 1)', () => {
 describe('the record of moving "Only for these repos"', () => {
   it('reads empty, stores a record a person sends, and refuses anything else', async () => {
     configure({ tracker: 'linear' });
-    const { router, host } = await setup();
-    expect((await router.call('get', '/fleet/migration')).body).toEqual({ accounts: {} });
+    const { app, host } = await setup();
+    expect((await send(app, 'GET', '/fleet/migration')).body).toEqual({ accounts: {} });
     const record = {
       accounts: {
         'claude-code:work': {
@@ -369,12 +344,12 @@ describe('the record of moving "Only for these repos"', () => {
         },
       },
     };
-    expect(
-      (await router.call('put', '/fleet/migration', { body: record, agent: true })).status
-    ).toBe(403);
-    expect((await router.call('put', '/fleet/migration', { body: record })).body).toEqual(record);
+    expect((await send(app, 'PUT', '/fleet/migration', { body: record, agent: true })).status).toBe(
+      403
+    );
+    expect((await send(app, 'PUT', '/fleet/migration', { body: record })).body).toEqual(record);
     expect((host.store.data as Record<string, unknown>)[REPO_MIGRATION_KEY]).toEqual(record);
-    expect((await router.call('put', '/fleet/migration', { body: { accounts: 3 } })).status).toBe(
+    expect((await send(app, 'PUT', '/fleet/migration', { body: { accounts: 3 } })).status).toBe(
       400
     );
   });

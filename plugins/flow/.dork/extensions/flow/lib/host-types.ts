@@ -235,48 +235,37 @@ export interface AccountsApi {
   registerAdvisor(advisor: AccountAdvisor): () => void;
 }
 
-/** The request fields the Flow routes read (a subset of Express's `Request`). */
-export interface RouteRequest {
-  /** Route parameters, decoded. */
-  params: Record<string, string>;
-  /** The parsed JSON body; `undefined` on an empty body (Express 5). */
-  body?: unknown;
-  /** The query string, parsed. */
-  query?: Record<string, unknown>;
+/** What DorkOS answers a caller who is not a person with (DorkOS `PersonRefusal`). */
+export interface PersonRefusal {
+  /** Not a person. */
+  readonly ok: false;
+  /** The HTTP status to answer with. */
+  readonly status: number;
+  /** The JSON body to answer with. */
+  readonly body: { readonly error: string; readonly code: string; readonly message: string };
 }
 
-/** The response calls the Flow routes make (a subset of Express's `Response`). */
-export interface RouteResponse {
-  /** Set the status code. */
-  status(code: number): RouteResponse;
-  /** Send a JSON body. */
-  json(body: unknown): unknown;
+/** Whether the caller passed the person bar (DorkOS `PersonCheck`). */
+export type PersonCheck = { readonly ok: true } | PersonRefusal;
+
+/** Who sent a request: the fetch handler's second argument, a Hono app's `c.env`. */
+export interface ExtensionCaller {
+  /** Whether the caller is a person. */
+  readonly person: PersonCheck;
 }
 
-/** A route handler. */
-export type RouteHandler = (req: RouteRequest, res: RouteResponse) => void | Promise<void>;
+/** A web-standard request handler, given the path below `/api/ext/flow`. */
+export type ExtensionFetchHandler = (
+  request: Request,
+  caller: ExtensionCaller
+) => Response | Promise<Response>;
 
-/**
- * Method syntax keeps a middleware's parameters bivariant, so Express's own
- * `RequestHandler` fits {@link RouteMiddleware}. The request is any object:
- * flow never reads it in a middleware, and Express's `params` (which may hold
- * arrays) is wider than {@link RouteRequest}'s.
- */
-interface RouteMiddlewareShape {
-  run(req: object, res: RouteResponse, next: (error?: unknown) => void): unknown;
-}
-
-/** Express middleware, such as the host's `requirePerson`: it answers, or calls `next`. */
-export type RouteMiddleware = RouteMiddlewareShape['run'];
-
-/** The scoped router DorkOS mounts at `/api/ext/<id>/` (a subset of Express's `Router`). */
-export interface ExtensionRouter {
-  /** Register a GET route. */
-  get(path: string, ...handlers: (RouteHandler | RouteMiddleware)[]): unknown;
-  /** Register a PUT route. */
-  put(path: string, ...handlers: (RouteHandler | RouteMiddleware)[]): unknown;
-  /** Register a POST route. */
-  post(path: string, ...handlers: (RouteHandler | RouteMiddleware)[]): unknown;
+/** What `register()` returns to serve its API with a fetch handler (DorkOS `ServerExtensionHandlers`). */
+export interface ServerExtensionHandlers {
+  /** Answers every request under `/api/ext/flow/`. */
+  fetch?: ExtensionFetchHandler;
+  /** Called when the extension stops. */
+  cleanup?: () => void | Promise<void>;
 }
 
 /** A project as core knows it: a git main checkout (DorkOS `ProjectRef`). */
@@ -322,9 +311,9 @@ export interface ReadableState {
 }
 
 /**
- * The server context DorkOS injects (DorkOS `DataProviderContext`), as an
- * older host may deliver it: `dorkHome` and `accounts` arrived with DorkOS
- * 0.88.0, so both are optional here and checked before use.
+ * The server context DorkOS injects (DorkOS `DataProviderContext`). Flow's
+ * `minHostVersion` guarantees `dorkHome` and `accounts` (DorkOS 0.88.0); the
+ * seams marked optional below are still probed before use.
  */
 export interface DataProviderContext {
   /** Scoped persistent storage for extension data. */
@@ -340,20 +329,14 @@ export interface DataProviderContext {
   readonly extensionId: string;
   /** Absolute path of this extension's folder. */
   readonly extensionDir: string;
-  /** The resolved DorkOS data folder. Missing on hosts older than 0.88.0. */
-  readonly dorkHome?: string;
+  /** The resolved DorkOS data folder. */
+  readonly dorkHome: string;
   /** The one folder this extension writes files to: `<dorkHome>/extension-data/<id>/files`. */
   readonly filesDir?: string;
-  /** The accounts API. Missing on hosts older than 0.88.0. */
-  readonly accounts?: Partial<AccountsApi>;
+  /** The agent accounts DorkOS knows, their usage, and the account advisor seam. */
+  readonly accounts: AccountsApi;
   /** Core's project registry. Missing on a DorkOS from before it; probe before use. */
   readonly projects?: ProjectsApi;
-  /**
-   * Middleware that admits only a person (a person's browser, not an agent or
-   * a relay message). Missing on a DorkOS from before it: then no route that
-   * changes something is registered at all (spec `flow-multiproject` §10).
-   */
-  readonly requirePerson?: RouteMiddleware;
   /** Core's inbox. Missing on a DorkOS from before it: then flow raises nothing (§7.6). */
   readonly inbox?: InboxApi;
   /** flow's per-project settings, read-only. Missing on a DorkOS from before them. */
@@ -556,8 +539,7 @@ export interface ProjectSettingsReader {
 
 /**
  * What starting work in a new chat takes (DorkOS `StartWorkInput`, contract
- * 1.3.0). The vendored fixture is 1.2.0, so this mirror is checked when the
- * fixture is refreshed; until then flow probes for the seam at run time.
+ * 1.3.0).
  */
 export interface StartWorkInput {
   /** Any path inside a known project. */
