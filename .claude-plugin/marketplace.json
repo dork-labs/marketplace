@@ -11,96 +11,6 @@
   },
   "plugins": [
     {
-      "name": "code-reviewer",
-      "source": "./plugins/code-reviewer",
-      "description": "Reviews your PRs every weekday morning, posts findings to Slack, files Linear issues for blockers",
-      "author": {
-        "name": "Dork Labs"
-      },
-      "license": "MIT",
-      "category": "code-review",
-      "tags": ["review", "pr", "ci"],
-      "keywords": ["code-review", "quality"]
-    },
-    {
-      "name": "security-auditor",
-      "source": "./plugins/security-auditor",
-      "description": "Continuously audits dependencies, configurations, and code for security vulnerabilities",
-      "author": {
-        "name": "Dork Labs"
-      },
-      "license": "MIT",
-      "category": "security",
-      "tags": ["security", "audit"],
-      "keywords": ["security", "vulnerability"]
-    },
-    {
-      "name": "docs-keeper",
-      "source": "./plugins/docs-keeper",
-      "description": "Keeps documentation in sync with code changes by monitoring git activity",
-      "author": {
-        "name": "Dork Labs"
-      },
-      "license": "MIT",
-      "category": "documentation",
-      "tags": ["docs", "sync"]
-    },
-    {
-      "name": "linear-integration",
-      "source": "./plugins/linear-integration",
-      "description": "Two-way sync between agent activity and Linear issues",
-      "author": {
-        "name": "Dork Labs"
-      },
-      "license": "MIT",
-      "category": "project-management",
-      "tags": ["linear", "issues"]
-    },
-    {
-      "name": "posthog-monitor",
-      "source": "./plugins/posthog-monitor",
-      "description": "PostHog analytics integration for tracking agent runs",
-      "author": {
-        "name": "Dork Labs"
-      },
-      "license": "MIT",
-      "category": "observability",
-      "tags": ["posthog", "analytics"]
-    },
-    {
-      "name": "security-audit-pack",
-      "source": "./plugins/security-audit-pack",
-      "description": "Skill pack for security auditing tasks",
-      "author": {
-        "name": "Dork Labs"
-      },
-      "license": "MIT",
-      "category": "security",
-      "tags": ["skills", "security"]
-    },
-    {
-      "name": "release-pack",
-      "source": "./plugins/release-pack",
-      "description": "Skill pack for release management workflows",
-      "author": {
-        "name": "Dork Labs"
-      },
-      "license": "MIT",
-      "category": "release-ops",
-      "tags": ["skills", "release"]
-    },
-    {
-      "name": "discord-adapter",
-      "source": "./plugins/discord-adapter",
-      "description": "Send agent notifications and receive commands via Discord",
-      "author": {
-        "name": "Dork Labs"
-      },
-      "license": "MIT",
-      "category": "integrations",
-      "tags": ["discord", "adapter"]
-    },
-    {
       "name": "marketplace-dev",
       "source": "./plugins/marketplace-dev",
       "description": "Guides AI agents through developing, validating, and publishing DorkOS marketplace packages",
@@ -111,26 +21,6 @@
       "category": "dev-tools",
       "tags": ["marketplace", "development", "authoring"],
       "keywords": ["marketplace", "plugin", "skill-pack", "packaging"]
-    },
-    {
-      "name": "lifeos-starter",
-      "source": {
-        "source": "github",
-        "repo": "doriancollier/lifeos-starter",
-        "ref": "main"
-      },
-      "description": "Coaches your planning, habits, and goals like a personal chief-of-staff, built in Obsidian.",
-      "author": { "name": "Dorian Collier" },
-      "license": "MIT",
-      "category": "productivity",
-      "tags": [
-        "productivity",
-        "coaching",
-        "obsidian",
-        "planning",
-        "life-management"
-      ],
-      "keywords": ["lifeos", "personal-productivity", "coaching", "obsidian"]
     },
     {
       "name": "flow",
