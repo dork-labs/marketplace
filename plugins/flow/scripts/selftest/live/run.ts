@@ -45,7 +45,7 @@ import { findBreach, type ToolUse } from './breach.ts';
 import { childEnv, makeSandbox } from './sandbox.ts';
 
 /** The ceiling when neither `--max-usd` nor config says otherwise, in US dollars. */
-export const DEFAULT_LIVE_BUDGET_USD = 1.0;
+export const DEFAULT_LIVE_BUDGET_USD = 2.0;
 
 /** The tools a live child may use without asking; everything else is denied. */
 export const ALLOWED_TOOLS: readonly string[] = [
@@ -130,6 +130,20 @@ export interface StreamSummary {
   finished: boolean;
 }
 
+/** How Claude Code words a permission denial in a tool result. */
+const DENIAL = /^Permission to use \S+ has been denied/;
+
+/** A tool result's text, whether it came as a string or as content blocks. */
+function resultText(content: unknown): string {
+  if (typeof content === 'string') return content;
+  if (!Array.isArray(content)) return '';
+  return content
+    .map((c) =>
+      typeof (c as { text?: unknown })?.text === 'string' ? (c as { text: string }).text : ''
+    )
+    .join('');
+}
+
 /**
  * Read a `--output-format stream-json` stream: one JSON event per line. Lines
  * that are not JSON are ignored; a stream with no `result` event did not finish.
@@ -139,6 +153,7 @@ export interface StreamSummary {
  */
 export function parseStream(text: string): StreamSummary {
   const summary: StreamSummary = { toolUses: [], finished: false };
+  const byId = new Map<string, ToolUse>();
   for (const line of text.split('\n')) {
     if (line.trim() === '') continue;
     let event: Record<string, unknown>;
@@ -159,13 +174,24 @@ export function parseStream(text: string): StreamSummary {
       if (!Array.isArray(content)) continue;
       for (const block of content as Record<string, unknown>[]) {
         if (block?.type !== 'tool_use') continue;
-        summary.toolUses.push({
+        const use: ToolUse = {
           name: typeof block.name === 'string' ? block.name : '?',
           input:
             block.input !== null && typeof block.input === 'object'
               ? (block.input as Record<string, unknown>)
               : {},
-        });
+        };
+        summary.toolUses.push(use);
+        if (typeof block.id === 'string') byId.set(block.id, use);
+      }
+    } else if (event.type === 'user') {
+      // A tool call Claude Code refused never ran: its result is the denial.
+      const content = (event.message as { content?: unknown } | undefined)?.content;
+      if (!Array.isArray(content)) continue;
+      for (const block of content as Record<string, unknown>[]) {
+        if (block?.type !== 'tool_result' || block.is_error !== true) continue;
+        const use = typeof block.tool_use_id === 'string' ? byId.get(block.tool_use_id) : undefined;
+        if (use !== undefined && DENIAL.test(resultText(block.content))) use.denied = true;
       }
     } else if (event.type === 'result') {
       summary.finished = true;

@@ -12,7 +12,7 @@ Set up `/flow` in this repo: $ARGUMENTS
 Read `${CLAUDE_PLUGIN_ROOT}/skills/initializing-flow/SKILL.md` and follow its process
 exactly. `--reconfigure` goes straight to reconfiguring an existing install.
 
-Run `flow <verb>` exactly as `node --experimental-strip-types "${CLAUDE_PLUGIN_ROOT}/scripts/flow.ts" <verb>`, and `cf` as `node --experimental-strip-types "${CLAUDE_PLUGIN_ROOT}/scripts/config-files.ts"`.
+Run `flow <verb>` exactly as `node --experimental-strip-types "${CLAUDE_PLUGIN_ROOT}/scripts/flow.ts" <verb>` alone in its Bash call, and `cf` as `node --experimental-strip-types "${CLAUDE_PLUGIN_ROOT}/scripts/config-files.ts"`.
 
 - Install `zod` into the plugin (`npm install --omit=dev --prefix "${CLAUDE_PLUGIN_ROOT}"`) only after checking it is missing, and at a terminal only after asking.
 - Never overwrite committed config without the operator's confirmation.

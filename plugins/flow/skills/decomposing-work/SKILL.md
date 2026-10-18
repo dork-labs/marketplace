@@ -78,8 +78,8 @@ The Task API is a live display of `03-tasks.json`, not a second source of truth.
 - Mirror the **active phase** as a plan checklist generated from `03-tasks.json`; never
   hand-edit it, regenerate it.
 - Optionally a breadcrumb `comment`.
-- **Ready the execute-ready work:** add `agent/ready` to the item (and any promoted
-  sub-issue). Without it dispatch never picks it up; DECOMPOSE is the second readiness
+- **Ready it** (and promoted sub-issues): `flow triage <id> --ready --stage decompose`.
+  Without `agent/ready` dispatch never picks it up; DECOMPOSE is the second readiness
   producer after TRIAGE.
 
 No linked item or no tracker: skip the mirror; the files on disk are the result.

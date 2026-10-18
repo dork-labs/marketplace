@@ -19,7 +19,7 @@ flow tests itself, keeps notes while it works, and once a week can suggest fixes
 FLOW_SELFTEST_LIVE=1 node --experimental-strip-types <flow-root>/scripts/selftest.ts --tier live
 ```
 
-It pays with `ANTHROPIC_API_KEY`, then `CLAUDE_CODE_OAUTH_TOKEN`, then your `claude` sign-in, says which one paid, and stops at `selfImprovement.selftest.liveBudgetUsd` ($1.00 by default, or `--max-usd`).
+It pays with `ANTHROPIC_API_KEY`, then `CLAUDE_CODE_OAUTH_TOKEN`, then your `claude` sign-in, says which one paid, and stops at `selfImprovement.selftest.liveBudgetUsd` ($2.00 by default, or `--max-usd`).
 
 Each run is saved in `.dork/flow/selftest/`.
 

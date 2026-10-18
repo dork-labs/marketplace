@@ -948,7 +948,7 @@ export const RetroConfigSchema = z
 export const SelftestConfigSchema = z
   .object({
     /** The most one live-tier run may spend, in US dollars. */
-    liveBudgetUsd: z.number().nonnegative().default(1.0),
+    liveBudgetUsd: z.number().nonnegative().default(2.0),
   })
   .prefault({});
 

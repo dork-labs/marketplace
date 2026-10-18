@@ -17,7 +17,7 @@ Links and project reads go through the adapter at `adapter.path` (`link`, `getPr
 ### 1. Identify the item
 
 The given identifier; else strong local context (the spec's provenance block, an item
-claimed this session); else ask.
+claimed this session); else ask. Read it: `flow show <id> --json`.
 
 ### 2. Write the summary
 
@@ -46,7 +46,7 @@ Always a type, a priority and a project (this item's); never an `agent/*` label.
 `<flow-root>/skills/capturing-work/SKILL.md` step 3 says.
 
 Then triage it right away (`<flow-root>/skills/triaging-work/SKILL.md`, Path B): ready
-only if it passes the six readiness rules (`<flow-root>/skills/grooming-backlog/SKILL.md`,
+only if it has a size and an `## On Completion` section and passes the six readiness rules (`<flow-root>/skills/grooming-backlog/SKILL.md`,
 phase 4 step 5), otherwise park it with one question. Note any items this one was
 blocking as unblocked (`getRelations`); `link` only real typed relations.
 

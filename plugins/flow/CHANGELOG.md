@@ -4,6 +4,17 @@ Installs of this plugin are pinned to a commit SHA, so a fix here does not reach
 you until you **reinstall it** (Marketplace → flow → reinstall, or re-run your
 `--plugin-dir` checkout's `git pull`). Each entry below says whether that matters.
 
+## 0.58.0
+
+**`/flow:decompose` no longer writes a task list flow then rejects, and `/flow:done` reads the item before it files follow-ups. Reinstall to get it.**
+
+- `03-tasks.json` files written the way the DECOMPOSE skill and its template show, with `"issue": null` for a task not promoted to a sub-issue, failed flow's own task-list check. They pass now.
+- New `flow show <id>`: one item, with its description and latest comments. `/flow:done` reads the item with it first, because its `## On Completion` section says which follow-ups to file. Before, nothing read it, so follow-ups were often missed.
+- `/flow:decompose` readies the item with `flow triage <id> --ready --stage decompose`, which keeps it at the decompose stage. Before, it could move the item to `stage/execute` while readying it.
+- `/flow:done` readies a follow-up only if it has a size and an `## On Completion` section, otherwise it asks.
+- Each command now says to run each `flow` call on its own Bash line. Chained commands, pipes and shell variables are refused, and agents used to give up after one refusal.
+- The self-test's live tier no longer fails a case for a command Claude Code refused, since a refused command never ran. Its default budget is now $2.00, because five cases cost about $1.30. It runs weekly in CI, never on pull requests, once a person adds a `CLAUDE_CODE_OAUTH_TOKEN` or `ANTHROPIC_API_KEY` secret.
+
 ## 0.56.0
 
 **Security fix: flow's commands no longer let the agent write files anywhere on your computer, or run `node` and shell commands of its choosing, without asking you. Reinstall now.**

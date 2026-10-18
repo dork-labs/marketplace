@@ -1,18 +1,18 @@
 {
   "commands/capture.md": {
-    "baseline": 71,
+    "baseline": 76,
     "target": 71
   },
   "commands/decompose.md": {
-    "baseline": 50,
+    "baseline": 55,
     "target": 41
   },
   "commands/done.md": {
-    "baseline": 57,
+    "baseline": 62,
     "target": 48
   },
   "commands/execute.md": {
-    "baseline": 60,
+    "baseline": 65,
     "target": 51
   },
   "commands/flow.md": {
@@ -20,15 +20,15 @@
     "target": 705
   },
   "commands/groom.md": {
-    "baseline": 97,
+    "baseline": 102,
     "target": 88
   },
   "commands/ideate.md": {
-    "baseline": 68,
+    "baseline": 73,
     "target": 59
   },
   "commands/init.md": {
-    "baseline": 104,
+    "baseline": 109,
     "target": 87
   },
   "commands/pause.md": {
@@ -44,7 +44,7 @@
     "target": 137
   },
   "commands/specify.md": {
-    "baseline": 77,
+    "baseline": 82,
     "target": 68
   },
   "commands/status.md": {
@@ -52,7 +52,7 @@
     "target": 294
   },
   "commands/triage.md": {
-    "baseline": 86,
+    "baseline": 91,
     "target": 77
   },
   "commands/verify.md": {
@@ -144,7 +144,7 @@
     "target": 477
   },
   "skills/closing-work/SKILL.md": {
-    "baseline": 598,
+    "baseline": 614,
     "target": 598
   },
   "skills/decomposing-work/SKILL.md": {

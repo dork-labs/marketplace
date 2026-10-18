@@ -11,7 +11,7 @@ Implement the specification at: $ARGUMENTS
 
 Read `${CLAUDE_PLUGIN_ROOT}/skills/executing-specs/SKILL.md` and follow its process exactly.
 
-Run `flow <verb>` exactly as `node --experimental-strip-types "${CLAUDE_PLUGIN_ROOT}/scripts/flow.ts" <verb>`.
+Run `flow <verb>` exactly as `node --experimental-strip-types "${CLAUDE_PLUGIN_ROOT}/scripts/flow.ts" <verb>`, alone in its Bash call.
 
 Worktree script, exactly: `${CLAUDE_PLUGIN_ROOT}/scripts/spec-worktree.sh <SLUG>`.
 Read its supporting files in `${CLAUDE_PLUGIN_ROOT}/skills/executing-specs/` only when told.

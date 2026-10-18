@@ -43,6 +43,11 @@ export interface ToolUse {
   name: string;
   /** Its input. */
   input: Record<string, unknown>;
+  /**
+   * Claude Code refused it (a permission denial), so it never ran. A call that
+   * never ran cannot leave the fences, whatever it names.
+   */
+  denied?: boolean;
 }
 
 /** Where a case may read and write. */
@@ -445,6 +450,7 @@ export function findBreach(uses: readonly ToolUse[], bounds: BreachBounds): stri
   };
 
   for (const use of uses) {
+    if (use.denied === true) continue;
     const raw = use.input.command;
     if (typeof raw === 'string') {
       const command = expandPluginRoot(raw, bounds);

@@ -1173,7 +1173,7 @@
           "type": "object",
           "properties": {
             "liveBudgetUsd": {
-              "default": 1,
+              "default": 2,
               "type": "number",
               "minimum": 0
             }

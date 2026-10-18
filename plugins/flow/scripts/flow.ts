@@ -243,6 +243,15 @@ export const VERBS: readonly VerbDefinition[] = [
     load: () => import('./cli/status.ts'),
   },
   {
+    name: 'show',
+    summary: 'Read one item: its type, labels, description and latest comments.',
+    description:
+      "One item as the adapter reads it, read-only. The stage skills read an item's type and its ## On Completion section from here.",
+    common: ['project'],
+    positionals: [{ name: 'identifier', required: true, description: 'The item, e.g. DOR-123.' }],
+    load: () => import('./cli/show.ts'),
+  },
+  {
     name: 'claim',
     summary: 'Start working an item: mark it claimed and record the run.',
     description:
