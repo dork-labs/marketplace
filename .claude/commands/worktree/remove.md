@@ -9,7 +9,7 @@ category: git
 
 Remove a git worktree after checking for uncommitted changes.
 
-Git runs through `scripts/worktree-git.sh` (from the repo root) wherever a command takes a branch or a path: it checks each argument, then runs one fixed git command. Pass worktree paths exactly as `git worktree list` prints them. Do not reach for raw `git -C`, `git log` or `git ls-remote` instead: those are the prefix rules this command no longer allows, because their options can write files and run commands.
+Git runs through `scripts/worktree-git.sh`, run from the main checkout's root (never a worktree's copy), wherever a command takes a branch or a path: it checks each argument, then runs one fixed git command. Pass worktree paths exactly as `git worktree list` prints them. Do not reach for raw `git -C`, `git log` or `git ls-remote` instead: those are the prefix rules this command no longer allows, because their options can write files and run commands.
 
 ## Arguments
 

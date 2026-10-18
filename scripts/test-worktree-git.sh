@@ -82,6 +82,9 @@ refused "folder starting with a dot" add .hidden new-branch origin/main
 refused "base other than origin/main or HEAD" add ok new-branch "--output=$pwned"
 refused "remove the main checkout" remove "$tmp/repo"
 refused "delete main" delete-branch main
+refused "delete main as @{-1}" delete-branch '@{-1}'
+refused "upstream shorthand as branch" tip '@{u}'
+refused "worktree path with a newline" status "$tmp/wt"$'\n'"x"
 
 # A GIT_* variable the caller sets must not reach git.
 check "GIT_DIR from the caller is ignored" 0 "$(GIT_DIR=/nonexistent run tip main)"

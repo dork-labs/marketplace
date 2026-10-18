@@ -9,7 +9,7 @@ category: git
 
 Create an isolated git worktree under `.worktrees/` (gitignored). This repo has no `.gtrconfig` and no post-create hook, so the worktree is plain git: install dependencies yourself only if the work needs them.
 
-Git runs through `scripts/worktree-git.sh` (from the repo root) wherever a command takes a branch or a path: it checks each argument, then runs one fixed git command. Pass worktree paths exactly as `git worktree list` prints them. Do not reach for raw `git -C`, `git log` or `git ls-remote` instead: those are the prefix rules this command no longer allows, because their options can write files and run commands.
+Git runs through `scripts/worktree-git.sh`, run from the main checkout's root (never a worktree's copy), wherever a command takes a branch or a path: it checks each argument, then runs one fixed git command. Pass worktree paths exactly as `git worktree list` prints them. Do not reach for raw `git -C`, `git log` or `git ls-remote` instead: those are the prefix rules this command no longer allows, because their options can write files and run commands.
 
 ## Arguments
 

@@ -49,14 +49,23 @@ need() {
   [ "$1" -eq "$2" ] || refuse "$verb takes $2 argument(s), got $1"
 }
 
-# A local branch name git accepts, which can never be read as an option.
+# No argument may hold a newline: grep below would read it as a second pattern.
+oneline() {
+  case $1 in *$'\n'*) refuse "argument holds a newline" ;; esac
+}
+
+# A local branch name git accepts, which can never be read as an option. No
+# `@`: check-ref-format expands `@{-1}` to another branch (main, say) and
+# accepts it, so the name checked would not be the branch git acts on.
 branch() {
-  case $1 in -*|'') refuse "not a branch name: '$1'" ;; esac
-  git check-ref-format --branch "$1" >/dev/null 2>&1 || refuse "not a branch name: '$1'"
+  oneline "$1"
+  case $1 in -*|''|*@*) refuse "not a branch name: '$1'" ;; esac
+  [ "$(git check-ref-format --branch "$1" 2>/dev/null)" = "$1" ] || refuse "not a branch name: '$1'"
 }
 
 # A worktree `git worktree list` prints, character for character.
 worktree() {
+  oneline "$1"
   case $1 in -*|'') refuse "not a worktree: '$1'" ;; esac
   git worktree list --porcelain | grep -qxF "worktree $1" || refuse "not a worktree: '$1'"
 }
