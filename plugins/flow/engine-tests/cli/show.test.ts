@@ -42,6 +42,13 @@ describe('flow show', () => {
     expect(text.stdout).toContain('File a follow-up');
   });
 
+  it('fails plainly on an item the tracker does not have', async () => {
+    const result = await runFlow(['show', 'FAKE-99', '--json'], temp, backlog());
+    expect(result.code).not.toBe(EXIT.ok);
+    expect(result.code).not.toBe(EXIT.internal);
+    expect(JSON.parse(result.stdout).error.message).toMatch(/FAKE-99/);
+  });
+
   it('needs an identifier', async () => {
     const result = await runFlow(['show'], temp, backlog());
     expect(result.code).toBe(EXIT.usage);

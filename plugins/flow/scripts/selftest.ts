@@ -97,7 +97,8 @@ const HELP = `flow selftest: check this flow install, its prose, and how its com
   --tier <tier>      fast (free, offline checks), scenarios (the flow commands
                      against a fake tracker), live (a real model against the
                      fake tracker; costs money, needs FLOW_SELFTEST_LIVE=1,
-                     never runs in CI) or all; default: fast and scenarios
+                     and in CI also FLOW_SELFTEST_LIVE_CI=1) or all; default:
+                     fast and scenarios
   --max-usd <n>      the most the live tier may spend (default: the config's
                      selfImprovement.selftest.liveBudgetUsd, else 2.00)
   --json             print the report as one JSON object

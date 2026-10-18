@@ -13,7 +13,7 @@ flow tests itself, keeps notes while it works, and once a week can suggest fixes
 
 - **fast**: your settings, the tracker adapter, and flow's own instructions. Free, offline, a few seconds.
 - **scenarios**: whole pieces of work played through the real flow commands against a pretend tracker. Also free and offline.
-- **live**: a real agent session runs a few flow commands against the pretend tracker. **It costs money**, so it runs only with `FLOW_SELFTEST_LIVE=1`, and never in CI:
+- **live**: a real agent session runs a few flow commands against the pretend tracker. **It costs money**, so it runs only with `FLOW_SELFTEST_LIVE=1`, and in CI only with `FLOW_SELFTEST_LIVE_CI=1`:
 
 ```bash
 FLOW_SELFTEST_LIVE=1 node --experimental-strip-types <flow-root>/scripts/selftest.ts --tier live

@@ -10,7 +10,7 @@ you until you **reinstall it** (Marketplace → flow → reinstall, or re-run yo
 
 - `03-tasks.json` files written the way the DECOMPOSE skill and its template show, with `"issue": null` for a task not promoted to a sub-issue, failed flow's own task-list check. They pass now.
 - New `flow show <id>`: one item, with its description and latest comments. `/flow:done` reads the item with it first, because its `## On Completion` section says which follow-ups to file. Before, nothing read it, so follow-ups were often missed.
-- `/flow:decompose` readies the item with `flow triage <id> --ready --stage decompose`, which keeps it at the decompose stage. Before, it could move the item to `stage/execute` while readying it.
+- `/flow:decompose` now names how to hand the item on: `flow release <id> --stage execute` if it claimed the item, else `flow triage <id> --ready --stage execute`. Both leave it ready at `stage/execute`, where the next session starts. Before, the skill said to "add `agent/ready`" with no command that does only that.
 - `/flow:done` readies a follow-up only if it has a size and an `## On Completion` section, otherwise it asks.
 - Each command now says to run each `flow` call on its own Bash line. Chained commands, pipes and shell variables are refused, and agents used to give up after one refusal.
 - The self-test's live tier no longer fails a case for a command Claude Code refused, since a refused command never ran. Its default budget is now $2.00, because five cases cost about $1.30. It runs weekly in CI, never on pull requests, once a person adds a `CLAUDE_CODE_OAUTH_TOKEN` or `ANTHROPIC_API_KEY` secret.

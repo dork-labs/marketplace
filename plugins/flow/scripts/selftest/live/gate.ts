@@ -30,6 +30,12 @@ import { spawnSync } from 'node:child_process';
 /** The environment variable that arms the live tier. Only the exact value `1` does. */
 export const LIVE_FLAG = 'FLOW_SELFTEST_LIVE';
 
+/**
+ * The one way a CI run may spend: the scheduled live-selftest workflow sets
+ * this (DOR-3063). Any other workflow, with `CI` set, is refused.
+ */
+export const LIVE_CI_FLAG = 'FLOW_SELFTEST_LIVE_CI';
+
 /** The first credential tried: an Anthropic API key. */
 export const API_KEY_VAR = 'ANTHROPIC_API_KEY';
 
@@ -64,8 +70,8 @@ function isSet(env: Readonly<Record<string, string | undefined>>, name: string):
  * @returns The refusal message, or `undefined`.
  */
 export function liveRefusal(env: Readonly<Record<string, string | undefined>>): string | undefined {
-  if (isSet(env, 'CI')) {
-    return `the live tier never runs in CI, and CI is set here; it spends money, so it runs only on a person's machine`;
+  if (isSet(env, 'CI') && env[LIVE_CI_FLAG] !== '1') {
+    return `the live tier runs in CI only where a workflow opts in with ${LIVE_CI_FLAG}=1, and CI is set here; it spends money, so a stray workflow must not start it`;
   }
   if (env[LIVE_FLAG] !== '1') {
     return `the live tier runs a real model and spends money; set ${LIVE_FLAG}=1 to run it (a credential alone is not enough)`;

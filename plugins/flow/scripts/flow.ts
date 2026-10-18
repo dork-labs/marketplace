@@ -953,7 +953,7 @@ export const VERBS: readonly VerbDefinition[] = [
         kind: 'string',
         value: 'fast|scenarios|live|all',
         description:
-          'The tier to run. Default: fast and scenarios. live runs a real model and costs money: it needs FLOW_SELFTEST_LIVE=1 and never runs in CI.',
+          'The tier to run. Default: fast and scenarios. live runs a real model and costs money: it needs FLOW_SELFTEST_LIVE=1, and in CI also FLOW_SELFTEST_LIVE_CI=1, which only the weekly live-selftest workflow sets.',
       },
       {
         name: 'max-usd',

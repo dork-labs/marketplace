@@ -154,6 +154,10 @@ function resultText(content: unknown): string {
 export function parseStream(text: string): StreamSummary {
   const summary: StreamSummary = { toolUses: [], finished: false };
   const byId = new Map<string, ToolUse>();
+  // A call counts as refused only when Claude Code lists it in the result's
+  // permission_denials AND its tool result is the denial: both signals, so no
+  // tool output can forge one.
+  const deniedText = new Set<ToolUse>();
   for (const line of text.split('\n')) {
     if (line.trim() === '') continue;
     let event: Record<string, unknown>;
@@ -191,13 +195,20 @@ export function parseStream(text: string): StreamSummary {
       for (const block of content as Record<string, unknown>[]) {
         if (block?.type !== 'tool_result' || block.is_error !== true) continue;
         const use = typeof block.tool_use_id === 'string' ? byId.get(block.tool_use_id) : undefined;
-        if (use !== undefined && DENIAL.test(resultText(block.content))) use.denied = true;
+        if (use !== undefined && DENIAL.test(resultText(block.content))) deniedText.add(use);
       }
     } else if (event.type === 'result') {
       summary.finished = true;
       if (typeof event.total_cost_usd === 'number') summary.costUsd = event.total_cost_usd;
       if (typeof event.num_turns === 'number') summary.turns = event.num_turns;
       if (typeof event.subtype === 'string') summary.subtype = event.subtype;
+      if (Array.isArray(event.permission_denials)) {
+        for (const denial of event.permission_denials as Record<string, unknown>[]) {
+          const use =
+            typeof denial?.tool_use_id === 'string' ? byId.get(denial.tool_use_id) : undefined;
+          if (use !== undefined && deniedText.has(use)) use.denied = true;
+        }
+      }
     }
   }
   return summary;

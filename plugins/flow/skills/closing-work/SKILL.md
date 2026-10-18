@@ -46,7 +46,8 @@ Always a type, a priority and a project (this item's); never an `agent/*` label.
 `<flow-root>/skills/capturing-work/SKILL.md` step 3 says.
 
 Then triage it right away (`<flow-root>/skills/triaging-work/SKILL.md`, Path B): ready
-only if it has a size and an `## On Completion` section and passes the six readiness rules (`<flow-root>/skills/grooming-backlog/SKILL.md`,
+only if it has a size and an `## On Completion` section and passes the six readiness
+rules (`<flow-root>/skills/grooming-backlog/SKILL.md`,
 phase 4 step 5), otherwise park it with one question. Note any items this one was
 blocking as unblocked (`getRelations`); `link` only real typed relations.
 
