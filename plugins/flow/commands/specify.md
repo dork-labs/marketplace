@@ -1,7 +1,7 @@
 ---
 description: '/flow SPECIFY stage — turn an ideation artifact into a validated specification'
 category: workflow
-allowed-tools: Read, Grep, Glob, Task, TaskOutput, Write, Edit, AskUserQuestion, Bash(git:*), Bash(node:*), Bash(npx:*), Bash(python3:*), Bash(mkdir:*)
+allowed-tools: Read, Grep, Glob, Task, TaskOutput, Write, Edit, AskUserQuestion, Bash(git rev-parse --show-toplevel), Bash(node:*), Bash(mkdir:*)
 argument-hint: '<path-to-01-ideation.md>'
 ---
 

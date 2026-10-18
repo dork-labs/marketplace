@@ -14,6 +14,9 @@ name: scripts
 # - test-run-node-hook.sh pins the wrapper those guards start through, which
 #   refuses the tool call when node cannot be found instead of letting it
 #   through unguarded, and checks settings.json wires all three that way.
+# - test-worktree-git.sh pins the wrapper the /worktree:* commands allow in
+#   place of prefix rules on git, which would hand out a shell (DOR git allow
+#   rules audit): every refusal is a way an option could reach git.
 # - .claude/skills/creating-pull-requests/scripts/test-watch-prs.sh pins the
 #   PR watcher's classifications, which agents act on when a PR stalls.
 #
@@ -71,6 +74,10 @@ jobs:
       - name: Guards fail closed without node
         if: ${{ !cancelled() }}
         run: bash scripts/test-run-node-hook.sh
+
+      - name: Worktree git wrapper
+        if: ${{ !cancelled() }}
+        run: bash scripts/test-worktree-git.sh
 
       - name: PR watcher
         if: ${{ !cancelled() }}

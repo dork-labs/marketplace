@@ -4,6 +4,14 @@ Installs of this plugin are pinned to a commit SHA, so a fix here does not reach
 you until you **reinstall it** (Marketplace → flow → reinstall, or re-run your
 `--plugin-dir` checkout's `git pull`). Each entry below says whether that matters.
 
+## 0.55.1
+
+**Security fix: `/flow:verify` could be steered into writing any file or running any command without asking you. Reinstall now.**
+
+- `/flow:verify` let the agent run `git diff` and `git log` with any options, without asking. Some of those options write a file anywhere you can write (`--output`), so text the agent read, in a ticket or a diff, could have turned that into a way to change files or run commands on your computer. It now runs only a short list of exact git commands without asking, the ones it needs to read your branch. Anything else asks you first.
+- `/flow:ideate` and `/flow:specify` let the agent run any git command at all, and `npx` and `python3`, without asking. They now run one, `git rev-parse --show-toplevel`, without asking; nothing in either stage used the rest.
+- The live tier of `/flow:self-test` gave its test session the same any-git-command rule. It now gets three exact read-only ones.
+
 ## 0.55.0
 
 **On Flow home and a project's page, the link for shipping work or answering a question now opens the Inbox right on that ask. Reinstall to get it.**

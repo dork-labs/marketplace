@@ -1,12 +1,14 @@
 ---
 description: List all git worktrees with their branch and state
-allowed-tools: Bash(git worktree list:*), Bash(git -C:*)
+allowed-tools: Bash(git worktree list), Bash(scripts/worktree-git.sh status:*)
 category: git
 ---
 
 # Worktree List
 
 Show all worktrees of this repo, with branch, HEAD, and whether each has uncommitted work.
+
+Git runs through `scripts/worktree-git.sh` (from the repo root) wherever a command takes a branch or a path: it checks each argument, then runs one fixed git command. Pass worktree paths exactly as `git worktree list` prints them. Do not reach for raw `git -C`, `git log` or `git ls-remote` instead: those are the prefix rules this command no longer allows, because their options can write files and run commands.
 
 ## Task
 
@@ -23,10 +25,10 @@ This gives each worktree's path, HEAD, and checked-out branch (or `detached HEAD
 For each path from Step 1:
 
 ```bash
-git -C <path> status --porcelain | wc -l
+scripts/worktree-git.sh status <path>
 ```
 
-A non-zero count means that worktree has uncommitted or untracked files. Report the count; do not read or change them.
+Count the lines it prints. A non-zero count means that worktree has uncommitted or untracked files. Report the count; do not read or change them.
 
 ## Output Format
 
