@@ -5,7 +5,17 @@
  * with a line saying why.
  */
 
-import { mkdirSync, mkdtempSync, realpathSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
+import {
+  mkdirSync,
+  mkdtempSync,
+  readdirSync,
+  readFileSync,
+  realpathSync,
+  rmSync,
+  symlinkSync,
+  writeFileSync,
+} from 'node:fs';
+import { fileURLToPath } from 'node:url';
 import os from 'node:os';
 import path from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
@@ -147,5 +157,28 @@ describe('effectivePermissionMode', () => {
     expect(resolve().mode).toBe('acceptEdits');
     writeFileSync(extensionDataFile(dorkHome), 'not json');
     expect(resolve().mode).toBe('acceptEdits');
+  });
+});
+
+describe('who can grant', () => {
+  it('no flow CLI script can reach set_drain_bypass or write the grant', () => {
+    // Purpose: the CLI only reads the grant; a person grants it on DorkOS's
+    // approval card. A flow verb that wrote it would be a way around the card.
+    const scripts = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', 'scripts');
+    const files: string[] = [];
+    const walk = (dir: string): void => {
+      for (const entry of readdirSync(dir, { withFileTypes: true })) {
+        const full = path.join(dir, entry.name);
+        if (entry.isDirectory()) walk(full);
+        else if (entry.name.endsWith('.ts')) files.push(full);
+      }
+    };
+    walk(scripts);
+    const offenders = files
+      .filter((f) => !f.endsWith(`${path.sep}drain-bypass.ts`))
+      .filter((f) => /set_drain_bypass|extension-data/.test(readFileSync(f, 'utf8')));
+    expect(offenders).toEqual([]);
+    const module = readFileSync(path.join(scripts, 'drain-bypass.ts'), 'utf8');
+    expect(module).not.toMatch(/writeFileSync|renameSync|appendFileSync|rmSync/);
   });
 });

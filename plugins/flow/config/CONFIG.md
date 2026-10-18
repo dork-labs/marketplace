@@ -304,7 +304,7 @@ default, so a config that never mentions it keeps the one-item tick.
 | `modelFallback`        | `{ runtime: [model, ...] }`, `{}`                                | When only one model's allowance runs out, the models to continue on, in order (names from `models.bindings` or model ids). Empty: off. |
 | `armAutoMerge`         | boolean, `false`                                                 | Whether the PRs the drain opens are set to merge once checks pass.             |
 | `host`                 | `auto` \| `cli` \| `cmux` \| `dorkos`, `auto`                    | Where sessions start. About this machine: set it in `config.local.json`.       |
-| `permissionMode`       | `default` \| `acceptEdits` \| `bypassPermissions`, `acceptEdits` | The mode sessions start in. About this machine: set it in `config.local.json`. |
+| `permissionMode`       | `default` \| `acceptEdits` \| `bypassPermissions`, `acceptEdits` | The mode sessions start in. About this machine: set it in `config.local.json`. `bypassPermissions` also needs a person's approval in DorkOS (Flow's **Allow unattended bypass**), for 30 days or until the settings change; without it, sessions start in `acceptEdits`. |
 
 Which accounts the drain may use, and whether it moves an item to another account
 by itself when one runs out, is not here: that is `handoff` in the machine's

@@ -77,7 +77,7 @@ import {
 } from '../launchers/types.ts';
 import { AGENT_CLAIMED, AGENT_NEEDS_INPUT, projectionFor } from '../work-state.ts';
 import { loadProjectConfig } from './backlog.ts';
-import { launchPermissionMode } from './launch-mode.ts';
+import { guardLaunch, launchPermissionMode } from './launch-mode.ts';
 import { claimItem } from './claim.ts';
 import type { VerbContext, VerbResult } from './context.ts';
 import { handoffWiring } from './handoff-wiring.ts';
@@ -288,6 +288,7 @@ export async function drain(ctx: VerbContext, options: DrainOptions = {}): Promi
       `flow is paused${paused.until ? ` until ${paused.until}` : paused.pausedAt ? ` (since ${paused.pausedAt})` : ''}; /flow:resume lifts it${paused.until ? ' sooner' : ''}, or pass --manual when a person is driving`
     );
   }
+  guardLaunch(ctx, project.loaded.files);
   const parallel = parallelOf(ctx, config.drain.parallel);
   const pref = hostPreference(flag(ctx, 'host'), config.drain.host);
   const modeFlag = flag(ctx, 'permission-mode');

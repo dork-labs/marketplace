@@ -661,6 +661,19 @@ describe('flow drain: filling slots', () => {
     expect(world.log.starts[0]?.req.permissionMode).toBe('default');
   });
 
+  it('refuses to start sessions on settings that are not committed', async () => {
+    // Purpose: an agent that edited config.json must not steer the next
+    // unattended run (DOR-3062).
+    writeFileSync(
+      path.join(project.dir, '.agents', 'flow', 'config.json'),
+      JSON.stringify({ tracker: 'fake', identity: { agent: 'agent-1' }, drain: { parallel: 1 } })
+    );
+    const result = await tick();
+    expect(result.code).toBe(EXIT.precondition);
+    expect(result.stderr).toContain('changes that are not committed');
+    expect(world.log.starts).toEqual([]);
+  });
+
   it('starts in acceptEdits, saying why, when bypassPermissions has no grant', async () => {
     // Purpose: config an agent may edit cannot raise unattended sessions to
     // bypassPermissions on its own (DOR-3062).

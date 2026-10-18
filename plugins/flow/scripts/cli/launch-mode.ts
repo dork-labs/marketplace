@@ -7,15 +7,34 @@
  * @module @dorkos/flow/cli/launch-mode
  */
 
+import { findConfigRoots, resolveAdapter } from '../config-files.ts';
 import type { LoadedConfig } from '../config-load.ts';
 import { effectivePermissionMode } from '../drain-bypass.ts';
 import { resolveDorkHome } from '../fleet/accounts.ts';
+import { assertLaunchable } from '../launch-guard.ts';
 import type { LaunchPermissionMode } from '../launchers/types.ts';
 import { canonicalProjectRoot } from '../main-checkout.ts';
 import type { VerbContext } from './context.ts';
 
 /** How long the project-root lookup may take. */
 const ROOT_TIMEOUT_MS = 10_000;
+
+/**
+ * Refuse to start unattended sessions unless `config.json` and the project's
+ * own tracker adapter are committed and unchanged (DOR-3062).
+ *
+ * @param ctx - The verb's context.
+ * @param files - The settings files flow read.
+ * @throws {PreconditionError} Naming the file and the fix.
+ */
+export function guardLaunch(ctx: VerbContext, files: LoadedConfig['files']): void {
+  const adapter = resolveAdapter(findConfigRoots(ctx.projectDir, ctx.flowRoot), files);
+  assertLaunchable({
+    committedConfig: files.committed,
+    adapterPath: adapter.path,
+    flowRoot: ctx.flowRoot,
+  });
+}
 
 /**
  * The mode sessions start in for this project.

@@ -42,7 +42,7 @@ In a terminal, `flow drain` repeats every `drain.pollSeconds` until done or Ctrl
 
 ## Permissions
 
-Workers start in `drain.permissionMode`, default `acceptEdits`, which runs only what your repo's settings allow. `bypassPermissions` is your call per project; your guard hooks still run.
+Workers start in `drain.permissionMode`, default `acceptEdits`, which runs only what your repo's settings allow. `bypassPermissions` also needs a person to approve Flow's **Allow unattended bypass** card in DorkOS, for 30 days or until your flow settings change; without it, workers start in `acceptEdits`. The drain won't start on uncommitted settings or adapter code. Your guard hooks still run.
 
 ## Parts
 

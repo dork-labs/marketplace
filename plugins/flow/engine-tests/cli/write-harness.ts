@@ -77,8 +77,23 @@ export function makeProject(): WriteProject {
   const project: WriteProject = {
     dir,
     cleanup: () => rmSync(dir, { recursive: true, force: true }),
-    config: (value) =>
-      write(path.join(dir, '.agents', 'flow', 'config.json'), JSON.stringify(value, null, 2)),
+    // Committed, as a real project's is: flow starts unattended sessions only
+    // on committed settings (DOR-3062).
+    config: (value) => {
+      write(path.join(dir, '.agents', 'flow', 'config.json'), JSON.stringify(value, null, 2));
+      git('add', '.agents/flow/config.json');
+      git(
+        '-c',
+        'user.email=t@example.test',
+        '-c',
+        'user.name=t',
+        'commit',
+        '-q',
+        '--allow-empty',
+        '-m',
+        'flow settings'
+      );
+    },
     pause: () =>
       write(
         path.join(dir, '.agents', 'flow', 'paused.json'),

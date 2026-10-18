@@ -41,7 +41,7 @@ import {
   type RuntimeName,
 } from '../launchers/types.ts';
 import { loadProjectConfig } from './backlog.ts';
-import { launchPermissionMode } from './launch-mode.ts';
+import { guardLaunch, launchPermissionMode } from './launch-mode.ts';
 import type { VerbContext, VerbResult } from './context.ts';
 import { parker, sessionFinder } from './drain.ts';
 import { handoffWiring } from './handoff-wiring.ts';
@@ -88,6 +88,7 @@ export async function run(ctx: VerbContext): Promise<VerbResult> {
 
   const project = loadProjectConfig(ctx);
   const { config } = project.loaded;
+  guardLaunch(ctx, project.loaded.files);
   const mainCheckout = resolveMainCheckout(ctx.projectDir);
   const store = openFlowStateFile(mainCheckout, { now: ctx.now });
   const found = findRun(store.read(), identifier);
