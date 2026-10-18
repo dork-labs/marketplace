@@ -18,6 +18,7 @@ import {
   checkLinks,
   checkWarStories,
   checkWords,
+  budgetedWords,
   countWords,
   headingSlugs,
   lintCorpus,
@@ -47,6 +48,16 @@ describe('doc-lint/words (the ratchet)', () => {
   it('counts whitespace-separated words', () => {
     expect(countWords('  one\ntwo  three\n\n')).toBe(3);
     expect(countWords('')).toBe(0);
+  });
+
+  it("leaves a command's allowed-tools line out of its budget, and nothing else", () => {
+    // Purpose: narrowing a broad permission to exact rules lengthens that line;
+    // the ratchet measures prose, so it must not count it.
+    const text =
+      '---\ndescription: d e\nallowed-tools: Read, Bash(git diff), Edit(specs/**)\n---\nbody words';
+    expect(budgetedWords(text)).toBe(countWords(text) - 5);
+    expect(budgetedWords('allowed-tools appears in prose here')).toBe(5);
+    expect(budgetedWords('no front matter\nallowed-tools: a b c')).toBe(7);
   });
 
   it('passes a file at or under its baseline', () => {

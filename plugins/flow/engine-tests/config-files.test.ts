@@ -1846,6 +1846,66 @@ describe('config-files CLI', { timeout: 30_000 }, () => {
     expect(existsSync(path.join(home, '.agents'))).toBe(false);
   });
 
+  /** An install copy that also has the two files scaffold copies from. */
+  function scaffoldInstall(): string {
+    const plugin = shared();
+    copyFileSync(
+      path.join(PLUGIN_DIR, 'config', 'config.local.example.json'),
+      path.join(plugin, 'config', 'config.local.example.json')
+    );
+    mkdirSync(path.join(plugin, 'templates'));
+    copyFileSync(
+      path.join(PLUGIN_DIR, 'templates', 'review-rubric.md'),
+      path.join(plugin, 'templates', 'review-rubric.md')
+    );
+    return plugin;
+  }
+
+  // Purpose: init creates these through scaffold instead of a `cp` rule, so the
+  // credentials file must come out private and nothing may be overwritten.
+  it('scaffold creates config.local.json (mode 600) and the rubric, only when absent', () => {
+    const repo = makeRepo();
+    const plugin = scaffoldInstall();
+    const first = run(plugin, repo, ['scaffold', '--rubric', 'REVIEW.md']);
+    expect(first.status).toBe(0);
+    const local = path.join(repo, '.agents/flow/config.local.json');
+    expect(first.out).toMatchObject({
+      ok: true,
+      local,
+      localCreated: true,
+      rubric: path.join(repo, 'REVIEW.md'),
+      rubricCreated: true,
+    });
+    expect(statSync(local).mode & 0o777).toBe(0o600);
+    expect(readFileSync(path.join(repo, 'REVIEW.md'), 'utf8')).toBe(
+      readFileSync(path.join(PLUGIN_DIR, 'templates', 'review-rubric.md'), 'utf8')
+    );
+
+    write(local, '{"mine":true}');
+    write(path.join(repo, 'REVIEW.md'), '# ours\n');
+    const again = run(plugin, repo, ['scaffold', '--rubric', 'REVIEW.md']);
+    expect(again.out).toMatchObject({ localCreated: false, rubricCreated: false });
+    expect(readFileSync(local, 'utf8')).toBe('{"mine":true}');
+    expect(readFileSync(path.join(repo, 'REVIEW.md'), 'utf8')).toBe('# ours\n');
+  });
+
+  it.each([
+    ['outside the project', '../escape.md'],
+    ['an absolute path elsewhere', '/tmp/flow-rubric-elsewhere.md'],
+    ['inside .git', '.git/hooks/rubric.md'],
+    ['not a .md file', '.bashrc'],
+  ])('scaffold refuses a rubric %s, writing nothing', (_name, rubric) => {
+    const repo = makeRepo();
+    const result = run(scaffoldInstall(), repo, ['scaffold', '--rubric', rubric]);
+    expect(result.status).toBe(2);
+    expect(existsSync(path.resolve(repo, rubric))).toBe(false);
+    expect(existsSync(path.join(repo, '.agents/flow'))).toBe(false);
+  });
+
+  it('takes --rubric only with scaffold', () => {
+    expect(run(shared(), makeRepo(), ['prepare', '--rubric', 'REVIEW.md']).status).toBe(2);
+  });
+
   // An unknown subcommand is a usage error, not a silent resolve.
   it('rejects an unknown subcommand', () => {
     const repo = makeRepo();

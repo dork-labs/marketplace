@@ -19,18 +19,17 @@ credentials and overrides are never committed.
 Run `/flow:init`. It writes both files for you. By hand:
 
 ```bash
-node --experimental-strip-types "<flow-root>/scripts/config-files.ts" prepare
-# prints { "ok": true, "committed": "…/config.json", "local": "…/config.local.json", … }
-(umask 077 && cp "<flow-root>/config/config.local.example.json" "<the local path it printed>")
-# then edit config.local.json and fill in your values
+node --experimental-strip-types "<flow-root>/scripts/config-files.ts" scaffold
+# prints { "ok": true, "committed": "…/config.json", "local": "…/config.local.json", "localCreated": true, … }
+# then edit config.local.json (created readable by you alone, never overwritten) and fill in your values
 ```
 
-`prepare` creates the `.agents/flow/` folders, keeps the local file out of git in
-each (a `.gitignore` in your checkout; in a worktree, the main checkout's folder
-through the repo's `.git/info/exclude`, so it never blocks a merge there), and asks
-git to prove it before you put a token in it. Copy to
-the exact `local` path it prints: in a git worktree that is the main checkout's
-folder, not the one you are standing in.
+`scaffold` first does what `prepare` does: it creates the `.agents/flow/` folders, keeps
+the local file out of git in each (a `.gitignore` in your checkout; in a worktree, the
+main checkout's folder through the repo's `.git/info/exclude`, so it never blocks a
+merge there), and asks git to prove it before you put a token in it. Then it creates
+`config.local.json` at the exact `local` path it prints: in a git worktree that is the
+main checkout's folder, not the one you are standing in.
 
 Delete any block in `config.local.json` you do not need. If your host already
 supplies tracker auth (for example through a connected MCP server or CLI

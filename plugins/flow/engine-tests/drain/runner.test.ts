@@ -646,6 +646,27 @@ describe('flow drain: filling slots', () => {
     expect(existsSync(lock)).toBe(false);
   });
 
+  it('lets --permission-mode lower the configured mode, never raise it', async () => {
+    // Purpose: commands run `flow <verb>` without asking, so a steered agent
+    // must not start sessions with every approval bypassed by passing a flag.
+    configure({ permissionMode: 'acceptEdits' });
+    const raised = await tick('--permission-mode', 'bypassPermissions');
+    expect(raised.code).toBe(EXIT.usage);
+    expect(raised.stderr).toContain('above drain.permissionMode');
+    expect(world.log.starts).toEqual([]);
+
+    const lowered = await tick('--permission-mode', 'default');
+    expect(lowered.code, lowered.stderr).toBe(0);
+    expect(world.log.starts[0]?.req.permissionMode).toBe('default');
+  });
+
+  it('allows bypassPermissions by flag when the settings already give it', async () => {
+    configure({ permissionMode: 'bypassPermissions' });
+    const result = await tick('--permission-mode', 'bypassPermissions');
+    expect(result.code, result.stderr).toBe(0);
+    expect(world.log.starts[0]?.req.permissionMode).toBe('bypassPermissions');
+  });
+
   it('--dry-run reports what it would do and writes nothing', async () => {
     // Purpose: a dry run is safe to run against a live project: no claim, no
     // run record, no worktree, no session, no lock.

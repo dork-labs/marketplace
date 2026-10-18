@@ -1,67 +1,67 @@
 {
   "commands/capture.md": {
-    "baseline": 76,
-    "target": 76
+    "baseline": 71,
+    "target": 71
   },
   "commands/decompose.md": {
-    "baseline": 56,
-    "target": 56
+    "baseline": 50,
+    "target": 41
   },
   "commands/done.md": {
-    "baseline": 59,
-    "target": 59
+    "baseline": 57,
+    "target": 48
   },
   "commands/execute.md": {
-    "baseline": 77,
-    "target": 77
+    "baseline": 60,
+    "target": 51
   },
   "commands/flow.md": {
-    "baseline": 714,
-    "target": 714
+    "baseline": 705,
+    "target": 705
   },
   "commands/groom.md": {
-    "baseline": 91,
-    "target": 91
+    "baseline": 97,
+    "target": 88
   },
   "commands/ideate.md": {
-    "baseline": 73,
-    "target": 73
+    "baseline": 68,
+    "target": 59
   },
   "commands/init.md": {
-    "baseline": 106,
-    "target": 106
+    "baseline": 104,
+    "target": 87
   },
   "commands/pause.md": {
-    "baseline": 339,
-    "target": 339
+    "baseline": 331,
+    "target": 331
   },
   "commands/resume.md": {
-    "baseline": 201,
-    "target": 201
+    "baseline": 193,
+    "target": 193
   },
   "commands/self-test.md": {
-    "baseline": 140,
-    "target": 140
+    "baseline": 137,
+    "target": 137
   },
   "commands/specify.md": {
-    "baseline": 82,
-    "target": 82
-  },
-  "commands/status.md": {
-    "baseline": 301,
-    "target": 301
-  },
-  "commands/triage.md": {
-    "baseline": 83,
-    "target": 83
-  },
-  "commands/verify.md": {
-    "baseline": 84,
+    "baseline": 77,
     "target": 68
   },
+  "commands/status.md": {
+    "baseline": 294,
+    "target": 294
+  },
+  "commands/triage.md": {
+    "baseline": 86,
+    "target": 77
+  },
+  "commands/verify.md": {
+    "baseline": 54,
+    "target": 54
+  },
   "docs/account-usage.mdx": {
-    "baseline": 1123,
-    "target": 1123
+    "baseline": 1118,
+    "target": 1118
   },
   "docs/bring-your-own-scheduler.mdx": {
     "baseline": 669,
@@ -88,8 +88,8 @@
     "target": 1077
   },
   "docs/parallel-drain.mdx": {
-    "baseline": 355,
-    "target": 355
+    "baseline": 353,
+    "target": 353
   },
   "docs/provenance.md": {
     "baseline": 2056,
@@ -108,8 +108,8 @@
     "target": 4357
   },
   "docs/turning-on-autonomy.mdx": {
-    "baseline": 2940,
-    "target": 2940
+    "baseline": 2871,
+    "target": 2871
   },
   "docs/use-all-your-accounts.mdx": {
     "baseline": 409,
@@ -124,8 +124,8 @@
     "target": 1267
   },
   "README.md": {
-    "baseline": 2250,
-    "target": 2250
+    "baseline": 2249,
+    "target": 2249
   },
   "skills/building-adapters/references/conformance-harness.md": {
     "baseline": 531,
@@ -165,7 +165,7 @@
   },
   "skills/executing-specs/SKILL.md": {
     "baseline": 981,
-    "target": 982
+    "target": 981
   },
   "skills/flow-drain/SKILL.md": {
     "baseline": 720,
@@ -192,8 +192,8 @@
     "target": 250
   },
   "skills/initializing-flow/SKILL.md": {
-    "baseline": 1165,
-    "target": 1165
+    "baseline": 1126,
+    "target": 1126
   },
   "skills/linear-adapter/SKILL.md": {
     "baseline": 1381,

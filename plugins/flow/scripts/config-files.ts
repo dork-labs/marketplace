@@ -1439,9 +1439,9 @@ export function resumeFlow(roots: ConfigRoots, now: Date = new Date()): ResumeRe
 
 const HELP = `config-files — find, migrate and prepare flow's project files.
 
-Usage: config-files.ts [resolve|check|migrate|prepare|pause|resume] [--confirm|--decline]
-                      [--host-schedule <id>]... [--until <iso>] [--host-restores]
-                      [--project <dir>]
+Usage: config-files.ts [resolve|check|migrate|prepare|scaffold|pause|resume]
+                      [--confirm|--decline] [--host-schedule <id>]... [--until <iso>]
+                      [--host-restores] [--rubric <path>] [--project <dir>]
 
   resolve   (default) Which config.json and config.local.json flow reads, with
             config.json checked against config.schema.json, which tracker adapter
@@ -1467,6 +1467,13 @@ Usage: config-files.ts [resolve|check|migrate|prepare|pause|resume] [--confirm|-
   prepare   Create the .agents/flow/ folders and make git ignore config.local.json
             in each. Prints { ok, committed, local, ignoreFiles }: write the files to
             exactly those paths. Exit 1 when git would still track the local file.
+  scaffold  prepare, then create config.local.json from the plugin's example,
+            readable by you alone (mode 600), only when it is absent. With
+            --rubric <path>, also copy the review rubric template there when
+            absent: a .md path inside the project (relative to its root), never
+            .git. Never overwrites. Prints { ok, local, localCreated, rubric,
+            rubricCreated } (plus prepare's fields). Exit 1 when prepare refuses,
+            2 for a rubric path outside the project.
   pause     Pause flow's autonomy on this machine (the project's
             .agents/flow/paused.json, in the main checkout from a worktree, kept
             out of git). --host-schedule <id> records a host schedule row the
@@ -1485,8 +1492,85 @@ Usage: config-files.ts [resolve|check|migrate|prepare|pause|resume] [--confirm|-
 Only paths and non-secret facts are printed, never a credential.
 `;
 
-const COMMANDS = ['resolve', 'check', 'migrate', 'prepare', 'pause', 'resume'] as const;
+const COMMANDS = ['resolve', 'check', 'migrate', 'prepare', 'scaffold', 'pause', 'resume'] as const;
 type Command = (typeof COMMANDS)[number];
+
+/** The result of `scaffold`: prepare's paths, and what it created. */
+interface ScaffoldResult extends PrepareResult {
+  /** Whether config.local.json was created now (false: it already existed). */
+  localCreated: boolean;
+  /** The resolved rubric path, or null when none was asked for. */
+  rubric: string | null;
+  /** Whether the rubric was created now. */
+  rubricCreated: boolean;
+}
+
+/** A rubric path `scaffold` will not write. */
+class RubricRefused extends Error {}
+
+/**
+ * Copy a file only when the target is absent, with the given mode. `wx` makes
+ * the check and the create one step, so an existing file is never replaced.
+ *
+ * @returns Whether the file was created.
+ */
+function copyIfAbsent(from: string, to: string, mode: number): boolean {
+  mkdirSync(path.dirname(to), { recursive: true });
+  try {
+    writeFileSync(to, readFileSync(from), { flag: 'wx', mode });
+    return true;
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === 'EEXIST') return false;
+    throw error;
+  }
+}
+
+/**
+ * Resolve the rubric path against the project root and keep it inside: a `.md`
+ * file under the root, never in `.git`. Commands may run `config-files.ts`
+ * without asking, so this verb must not write outside the project.
+ *
+ * @throws {RubricRefused} For any other path.
+ */
+function rubricTarget(root: string, rubric: string): string {
+  const target = path.resolve(root, rubric);
+  const rel = path.relative(root, target);
+  const parts = rel.split(path.sep);
+  if (
+    rel === '' ||
+    rel.startsWith('..') ||
+    path.isAbsolute(rel) ||
+    parts.includes('.git') ||
+    !target.endsWith('.md')
+  ) {
+    throw new RubricRefused(
+      `the rubric must be a .md file inside the project (${root}), not ${rubric}; copy ${'templates/review-rubric.md'} there yourself`
+    );
+  }
+  return target;
+}
+
+/**
+ * `scaffold`: prepare, then create the local settings file and, when asked,
+ * the rubric, each only when absent.
+ */
+function scaffold(roots: ConfigRoots, rubric: string | undefined): ScaffoldResult {
+  // Refuse a bad rubric path before anything is created.
+  const target = rubric === undefined ? null : rubricTarget(roots.checkout, rubric);
+  const prepared = prepareConfigDirs(roots, resolveConfigFiles(roots));
+  const none = { localCreated: false, rubric: null, rubricCreated: false };
+  if (!prepared.ok) return { ...prepared, ...none };
+  const localCreated = copyIfAbsent(
+    path.join(roots.pluginRoot, 'config', 'config.local.example.json'),
+    prepared.local,
+    0o600
+  );
+  const rubricCreated =
+    target === null
+      ? false
+      : copyIfAbsent(path.join(roots.pluginRoot, 'templates', 'review-rubric.md'), target, 0o644);
+  return { ...prepared, localCreated, rubric: target, rubricCreated };
+}
 
 /** The installed plugin this script belongs to. */
 function pluginRoot(): string {
@@ -1697,6 +1781,7 @@ export function main(argv: readonly string[]): number {
   const hostSchedules: string[] = [];
   let until: string | undefined;
   let hostRestores = false;
+  let rubric: string | undefined;
   for (let i = 0; i < argv.length; i += 1) {
     const arg = argv[i];
     if (arg === '--help' || arg === '-h') {
@@ -1723,6 +1808,9 @@ export function main(argv: readonly string[]): number {
       }
       until = value;
       if (arg === '--until') i += 1;
+    } else if (arg === '--rubric' && argv[i + 1] !== undefined && argv[i + 1] !== '') {
+      rubric = argv[i + 1];
+      i += 1;
     } else if (arg === '--host-schedule' && argv[i + 1] !== undefined && argv[i + 1] !== '') {
       hostSchedules.push(argv[i + 1]);
       i += 1;
@@ -1742,6 +1830,10 @@ export function main(argv: readonly string[]): number {
     return 1;
   }
 
+  if (rubric !== undefined && command !== 'scaffold') {
+    process.stderr.write(`config-files: --rubric only goes with scaffold\n`);
+    return 2;
+  }
   if (hostSchedules.length > 0 && command !== 'pause') {
     process.stderr.write(`config-files: --host-schedule only goes with pause\n`);
     return 2;
@@ -1807,6 +1899,17 @@ export function main(argv: readonly string[]): number {
     const result = checkSettings(roots);
     for (const e of result.errors)
       process.stderr.write(`config-files: error at ${e.path} — ${e.message}\n`);
+    output = { result, ok: result.ok };
+  } else if (command === 'scaffold') {
+    let result: ScaffoldResult;
+    try {
+      result = scaffold(roots, rubric);
+    } catch (error) {
+      if (!(error instanceof RubricRefused)) throw error;
+      process.stderr.write(`config-files: ${error.message}\n`);
+      return 2;
+    }
+    if (result.reason !== undefined) process.stderr.write(`config-files: ${result.reason}\n`);
     output = { result, ok: result.ok };
   } else if (command === 'prepare') {
     const result = prepareConfigDirs(roots, resolveConfigFiles(roots));
