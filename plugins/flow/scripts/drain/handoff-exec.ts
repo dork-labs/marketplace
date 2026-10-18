@@ -52,6 +52,7 @@ import type { AccountRef } from './account-rank.ts';
 import { windowLabel, type HandoffReason } from './handoff.ts';
 import { render as renderMessage } from './messages.ts';
 import type { DrainState, DrainWorkerHandle, RunLimit } from './state.ts';
+import { lowerMode } from '../drain-bypass.ts';
 
 /** Where the supervisor writes the messages it sends, relative to the worker's worktree. */
 export const MESSAGES_DIR = '.dork/flow/drain/messages';
@@ -411,7 +412,7 @@ export async function executeHandoff(
       promptFile: file,
       sessionId: minted,
       ...(model ? { model } : {}),
-      permissionMode: old?.permissionMode ?? deps.permissionMode,
+      permissionMode: lowerMode(old?.permissionMode, deps.permissionMode),
       title: `${run.identifier} worker`,
     });
   } catch (error) {

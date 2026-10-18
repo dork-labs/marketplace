@@ -25,7 +25,7 @@ import {
   type BypassGrant,
 } from '../../../../scripts/drain-bypass.ts';
 import { canonicalProjectRoot } from '../../../../scripts/main-checkout.ts';
-import type { StorageView } from './shared-storage.ts';
+import type { SharedStorage } from './shared-storage.ts';
 
 /** The tool input both tools take. */
 interface ProjectInput {
@@ -55,10 +55,8 @@ export function exactRoot(project: string): string {
   return root;
 }
 
-/** The stored grants, by root. */
-async function grants(storage: StorageView): Promise<Record<string, BypassGrant>> {
-  const data = (await storage.loadData()) as Record<string, unknown> | null;
-  const value = data?.[DRAIN_BYPASS_KEY];
+/** The stored grants, by root, from a stored value. */
+function asGrants(value: unknown): Record<string, BypassGrant> {
   return typeof value === 'object' && value !== null && !Array.isArray(value)
     ? { ...(value as Record<string, BypassGrant>) }
     : {};
@@ -73,19 +71,20 @@ async function grants(storage: StorageView): Promise<Record<string, BypassGrant>
  * @param now - The time now.
  */
 export async function setDrainBypass(
-  storage: StorageView,
+  storage: SharedStorage,
   input: unknown,
   now: Date
 ): Promise<Record<string, unknown>> {
   const { project, allow } = input as ProjectInput;
   const root = exactRoot(project);
-  const next = await grants(storage);
-  if (allow === true) {
-    next[root] = makeGrant(root, now);
-  } else {
-    delete next[root];
-  }
-  await storage.saveData({ [DRAIN_BYPASS_KEY]: next });
+  // Read, change and save inside the storage queue, so a grant and a revoke
+  // made at the same time never undo each other.
+  await storage.update(DRAIN_BYPASS_KEY, (current) => {
+    const next = asGrants(current);
+    if (allow === true) next[root] = makeGrant(root, now);
+    else delete next[root];
+    return next;
+  });
   if (allow !== true) return { project: root, allowed: false };
   const expires = new Date(now.getTime() + GRANT_DAYS * 24 * 60 * 60 * 1000);
   return {
@@ -104,13 +103,13 @@ export async function setDrainBypass(
  * @param now - The time now.
  */
 export async function getDrainBypass(
-  storage: StorageView,
+  storage: SharedStorage,
   input: unknown,
   now: Date
 ): Promise<Record<string, unknown>> {
   const { project } = input as ProjectInput;
   const root = exactRoot(project);
-  const grant = (await grants(storage))[root];
+  const grant = asGrants(await storage.get(DRAIN_BYPASS_KEY))[root];
   if (grant === undefined) return { project: root, allowed: false, reason: 'no grant' };
   const problem = grantProblem(grant, root, now);
   return problem === null

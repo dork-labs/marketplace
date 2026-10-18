@@ -50,6 +50,23 @@ export const MODES_WITHOUT_GRANT: readonly string[] = ['default', 'acceptEdits',
 /** The mode a session falls back to when a grant is missing or no longer holds. */
 export const FALLBACK_MODE = 'acceptEdits';
 
+/** How much each mode allows, lowest first; a mode not listed counts as the most. */
+const MODE_RANK: Readonly<Record<string, number>> = { plan: 0, default: 1, acceptEdits: 2 };
+
+/**
+ * The lower of a stored mode and the mode resolved now. A worker's stored mode
+ * (in the run store, which a project-editing command can write) never raises a
+ * resume or handoff above what the resolver allows today.
+ *
+ * @param stored - The mode a stored handle carries, if any.
+ * @param ceiling - The mode resolved now.
+ */
+export function lowerMode<T extends string>(stored: string | undefined, ceiling: T): T {
+  if (stored === undefined) return ceiling;
+  const rank = (m: string) => MODE_RANK[m] ?? 3;
+  return (rank(stored) < rank(ceiling) ? stored : ceiling) as T;
+}
+
 /** A person's grant for one project, as the extension stores it. */
 export interface BypassGrant {
   /** When it was granted (ISO 8601). */
@@ -79,6 +96,12 @@ function real(file: string): string {
       return path.resolve(file);
     }
   }
+}
+
+/** Whether `child` is `parent` or inside it. */
+function within(parent: string, child: string): boolean {
+  const rel = path.relative(parent, child);
+  return rel === '' || (!rel.startsWith('..') && !path.isAbsolute(rel));
 }
 
 /** SHA-256 of a file's bytes, or `absent` when it cannot be read. */
@@ -181,8 +204,10 @@ export function effectivePermissionMode(opts: {
   dorkHome: string | null;
   loadedFrom: { committed: string | null; local: string | null };
   now: Date;
+  /** The flow plugin's root: a grant means nothing when the project can edit flow itself. */
+  flowRoot?: string;
 }): EffectiveMode {
-  const { configured, root, dorkHome, loadedFrom, now } = opts;
+  const { configured, root, dorkHome, loadedFrom, now, flowRoot } = opts;
   if (MODES_WITHOUT_GRANT.includes(configured)) return { mode: configured };
   const fallback = (why: string): EffectiveMode => ({
     mode: FALLBACK_MODE,
@@ -190,15 +215,32 @@ export function effectivePermissionMode(opts: {
   });
   if (root === null) return fallback('this project has no git root to grant it for');
   if (dorkHome === null) return fallback('DorkOS is not here to hold a grant');
+  const realRoot = real(root);
+  if (flowRoot !== undefined && within(realRoot, real(flowRoot))) {
+    return fallback('flow is installed inside this project, where an agent may edit it');
+  }
+  if (within(realRoot, real(dorkHome))) {
+    return fallback("DorkOS's data folder is inside this project, where an agent may edit it");
+  }
   const files = settingsFiles(root);
+  // A linked worktree reads its own committed config.json; it counts when it
+  // is byte for byte the main checkout's, which is what the grant hashed.
+  const sameCommitted =
+    loadedFrom.committed === null ||
+    real(loadedFrom.committed) === real(files.committed) ||
+    hashFile(loadedFrom.committed) === hashFile(files.committed);
   if (
-    (loadedFrom.committed !== null && real(loadedFrom.committed) !== real(files.committed)) ||
+    !sameCommitted ||
     (loadedFrom.local !== null && real(loadedFrom.local) !== real(files.local))
   ) {
     return fallback(`flow read settings from outside ${path.join(root, PROJECT_CONFIG_DIR)}`);
   }
   const grant = readGrant(dorkHome, root);
-  if (grant === null) return fallback('no person has granted it for this project');
+  if (grant === null) {
+    return fallback(
+      `no person has granted it for this project (looked in ${extensionDataFile(dorkHome)})`
+    );
+  }
   const problem = grantProblem(grant, root, now);
   return problem === null ? { mode: configured } : fallback(problem);
 }

@@ -70,7 +70,7 @@ describe('set_drain_bypass and get_drain_bypass', () => {
   it('records a grant the CLI then honours, and keeps the other owners’ data', async () => {
     const host = fileStorage();
     await host.saveData({ adapterTrust: { x: 'kept' } });
-    const view = new SharedStorage(host).view();
+    const view = new SharedStorage(host);
 
     const set = await setDrainBypass(view, { project: root, allow: true }, NOW);
     expect(set).toMatchObject({ project: root, allowed: true });
@@ -92,8 +92,25 @@ describe('set_drain_bypass and get_drain_bypass', () => {
     ).toEqual({ mode: 'bypassPermissions' });
   });
 
+  it('never loses a revoke that races a grant for another project', async () => {
+    // Purpose: both read and write inside the storage queue.
+    const other = path.join(base, 'other');
+    mkdirSync(other);
+    execFileSync('git', ['init', '-q'], { cwd: other });
+    const view = new SharedStorage(fileStorage());
+    await setDrainBypass(view, { project: root, allow: true }, NOW);
+    await Promise.all([
+      setDrainBypass(view, { project: root, allow: false }, NOW),
+      setDrainBypass(view, { project: realpathSync(other), allow: true }, NOW),
+    ]);
+    expect(await getDrainBypass(view, { project: root }, NOW)).toMatchObject({ allowed: false });
+    expect(await getDrainBypass(view, { project: realpathSync(other) }, NOW)).toMatchObject({
+      allowed: true,
+    });
+  });
+
   it('takes a grant back with allow false', async () => {
-    const view = new SharedStorage(fileStorage()).view();
+    const view = new SharedStorage(fileStorage());
     await setDrainBypass(view, { project: root, allow: true }, NOW);
     await setDrainBypass(view, { project: root, allow: false }, NOW);
     expect(await getDrainBypass(view, { project: root }, NOW)).toMatchObject({
@@ -103,7 +120,7 @@ describe('set_drain_bypass and get_drain_bypass', () => {
   });
 
   it('reports why a grant no longer holds', async () => {
-    const view = new SharedStorage(fileStorage()).view();
+    const view = new SharedStorage(fileStorage());
     await setDrainBypass(view, { project: root, allow: true }, NOW);
     writeFileSync(settingsFiles(root).local, '{"changed":true}\n');
     expect(await getDrainBypass(view, { project: root }, NOW)).toMatchObject({
@@ -117,14 +134,14 @@ describe('set_drain_bypass and get_drain_bypass', () => {
     ['a missing folder', () => path.join(base, 'nope')],
     ['a subfolder of the project', () => path.join(root, '.agents')],
   ])('refuses %s, so the card always names the exact project', async (_name, project) => {
-    const view = new SharedStorage(fileStorage()).view();
+    const view = new SharedStorage(fileStorage());
     await expect(setDrainBypass(view, { project: project(), allow: true }, NOW)).rejects.toThrow();
   });
 
   it('refuses a linked worktree: the grant belongs to the main checkout', async () => {
     const wt = path.join(base, 'wt');
     git('worktree', 'add', '-q', wt, '-b', 'side');
-    const view = new SharedStorage(fileStorage()).view();
+    const view = new SharedStorage(fileStorage());
     await expect(setDrainBypass(view, { project: wt, allow: true }, NOW)).rejects.toThrow(
       /its root is/
     );

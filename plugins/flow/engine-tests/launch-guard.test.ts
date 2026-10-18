@@ -11,6 +11,8 @@ import path from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
 import { PreconditionError } from '../scripts/errors.ts';
+import { guardLaunch } from '../scripts/cli/launch-mode.ts';
+import type { VerbContext } from '../scripts/cli/context.ts';
 import { assertLaunchable } from '../scripts/launch-guard.ts';
 
 let base: string;
@@ -116,6 +118,21 @@ describe('assertLaunchable', () => {
     );
   });
 
+  it("checks flow's own adapter like project code when flow is installed inside the project", () => {
+    const inProject = path.join(repo, 'plugins', 'flow');
+    const shipped = path.join(inProject, 'skills', 'linear-adapter');
+    write(path.join(shipped, 'SKILL.md'), '# linear\n');
+    git('add', '-A');
+    git('commit', '-q', '-m', 'flow inside');
+    expect(() =>
+      check({ adapterPath: path.join(shipped, 'SKILL.md'), flowRoot: inProject })
+    ).not.toThrow();
+    write(path.join(shipped, 'adapter.ts'), 'planted\n');
+    expect(() =>
+      check({ adapterPath: path.join(shipped, 'SKILL.md'), flowRoot: inProject })
+    ).toThrow(/files git does not track/);
+  });
+
   it('refuses settings outside any git checkout', () => {
     const loose = path.join(base, 'loose', 'config.json');
     write(loose, '{}\n');
@@ -131,5 +148,16 @@ describe('assertLaunchable', () => {
       if (saved === undefined) delete process.env.GIT_DIR;
       else process.env.GIT_DIR = saved;
     }
+  });
+
+  it('sends settings still inside the plugin to migrate, not to commit', () => {
+    const ctx = { projectDir: repo, flowRoot: plugin } as unknown as VerbContext;
+    expect(() =>
+      guardLaunch(ctx, {
+        origin: 'legacy',
+        committed: path.join(plugin, 'config', 'config.json'),
+        local: null,
+      } as never)
+    ).toThrow(/run config-files\.ts migrate/);
   });
 });

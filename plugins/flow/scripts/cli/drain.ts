@@ -720,7 +720,19 @@ export async function drain(ctx: VerbContext, options: DrainOptions = {}): Promi
   const events: PassEvent[] = [];
   const lines: string[] = [];
   try {
-    for (;;) {
+    for (let pass = 0; ; pass += 1) {
+      if (pass > 0) {
+        // A continuous drain checks again each pass: a revoked or lapsed
+        // grant, or settings or adapter code changed since, take effect now.
+        guardLaunch(ctx, project.loaded.files);
+        const now = launchPermissionMode(ctx, project.loaded.files, modeFlag ?? configured, {
+          quiet: true,
+        });
+        if (now !== deps.settings.permissionMode) {
+          launchPermissionMode(ctx, project.loaded.files, modeFlag ?? configured);
+          deps.settings = { ...deps.settings, permissionMode: now };
+        }
+      }
       const report = await runPass(deps);
       events.push(...report.events);
       const passLines = report.events.map(line);

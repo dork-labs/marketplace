@@ -14,6 +14,7 @@ import { resolveDorkHome } from '../fleet/accounts.ts';
 import { assertLaunchable } from '../launch-guard.ts';
 import type { LaunchPermissionMode } from '../launchers/types.ts';
 import { canonicalProjectRoot } from '../main-checkout.ts';
+import { PreconditionError } from '../errors.ts';
 import type { VerbContext } from './context.ts';
 
 /** How long the project-root lookup may take. */
@@ -28,6 +29,11 @@ const ROOT_TIMEOUT_MS = 10_000;
  * @throws {PreconditionError} Naming the file and the fix.
  */
 export function guardLaunch(ctx: VerbContext, files: LoadedConfig['files']): void {
+  if (files.origin === 'legacy') {
+    throw new PreconditionError(
+      `flow's settings are still inside the plugin at ${files.committed ?? 'an old location'}, where nothing checks them; run config-files.ts migrate before flow starts unattended sessions`
+    );
+  }
   const adapter = resolveAdapter(findConfigRoots(ctx.projectDir, ctx.flowRoot), files);
   assertLaunchable({
     committedConfig: files.committed,
@@ -47,7 +53,8 @@ export function guardLaunch(ctx: VerbContext, files: LoadedConfig['files']): voi
 export function launchPermissionMode(
   ctx: VerbContext,
   files: Pick<LoadedConfig['files'], 'committed' | 'local'>,
-  configured: string
+  configured: string,
+  opts: { quiet?: boolean } = {}
 ): LaunchPermissionMode {
   let root: string | null = null;
   try {
@@ -61,7 +68,8 @@ export function launchPermissionMode(
     dorkHome: resolveDorkHome({ ...ctx.env }, ctx.io.osHome),
     loadedFrom: { committed: files.committed, local: files.local },
     now: ctx.now(),
+    flowRoot: ctx.flowRoot,
   });
-  if (result.notice !== undefined) ctx.warn(result.notice);
+  if (result.notice !== undefined && opts.quiet !== true) ctx.warn(result.notice);
   return result.mode as LaunchPermissionMode;
 }

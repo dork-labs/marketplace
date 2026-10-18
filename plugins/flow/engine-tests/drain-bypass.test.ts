@@ -25,6 +25,7 @@ import {
   effectivePermissionMode,
   extensionDataFile,
   GRANT_DAYS,
+  lowerMode,
   makeGrant,
   settingsFiles,
   type BypassGrant,
@@ -147,6 +148,41 @@ describe('effectivePermissionMode', () => {
     expect(result.notice).toMatch(/read settings from outside/);
   });
 
+  it("accepts a worktree config.json identical to the main checkout's", () => {
+    // Purpose: the reviewer launches from the item's worktree, which reads its own copy.
+    storeGrant(makeGrant(root, NOW));
+    const copy = path.join(base, 'wt', '.agents', 'flow', 'config.json');
+    mkdirSync(path.dirname(copy), { recursive: true });
+    writeFileSync(copy, '{"drain":{}}\n');
+    const files = settingsFiles(root);
+    expect(
+      resolve('bypassPermissions', { loadedFrom: { committed: copy, local: files.local } })
+    ).toEqual({ mode: 'bypassPermissions' });
+    writeFileSync(copy, '{"drain":{"parallel":3}}\n');
+    expect(
+      resolve('bypassPermissions', { loadedFrom: { committed: copy, local: files.local } }).mode
+    ).toBe('acceptEdits');
+  });
+
+  it("refuses when flow itself, or DorkOS's data folder, sits inside the project", () => {
+    // Purpose: a project-editing command could then edit the code that checks the grant.
+    storeGrant(makeGrant(root, NOW));
+    expect(
+      resolve('bypassPermissions', { flowRoot: path.join(root, 'plugins', 'flow') }).notice
+    ).toMatch(/flow is installed inside this project/);
+    expect(
+      resolve('bypassPermissions', { dorkHome: path.join(root, '.dork-home') }).notice
+    ).toMatch(/data folder is inside this project/);
+  });
+
+  it('lowerMode keeps the lower of a stored mode and the mode now', () => {
+    expect(lowerMode('bypassPermissions', 'acceptEdits')).toBe('acceptEdits');
+    expect(lowerMode('default', 'acceptEdits')).toBe('default');
+    expect(lowerMode(undefined, 'acceptEdits')).toBe('acceptEdits');
+    expect(lowerMode('somethingNew', 'default')).toBe('default');
+    expect(lowerMode('plan', 'bypassPermissions')).toBe('plan');
+  });
+
   it('falls back with no git root or no DorkOS folder', () => {
     expect(resolve('bypassPermissions', { root: null }).notice).toMatch(/no git root/);
     expect(resolve('bypassPermissions', { dorkHome: null }).notice).toMatch(/DorkOS is not here/);
@@ -176,7 +212,11 @@ describe('who can grant', () => {
     walk(scripts);
     const offenders = files
       .filter((f) => !f.endsWith(`${path.sep}drain-bypass.ts`))
-      .filter((f) => /set_drain_bypass|extension-data/.test(readFileSync(f, 'utf8')));
+      .filter((f) =>
+        /set_drain_bypass|extension-data|extensionDataFile|DRAIN_BYPASS_KEY|makeGrant/.test(
+          readFileSync(f, 'utf8')
+        )
+      );
     expect(offenders).toEqual([]);
     const module = readFileSync(path.join(scripts, 'drain-bypass.ts'), 'utf8');
     expect(module).not.toMatch(/writeFileSync|renameSync|appendFileSync|rmSync/);

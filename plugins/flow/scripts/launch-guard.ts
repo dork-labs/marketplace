@@ -17,6 +17,12 @@
  * git runs with hooks, fsmonitor and signature programs switched off, so
  * repo-local config cannot name a program for these checks to run.
  *
+ * What the config.json check does not cover: `config.local.json` is never
+ * committed and is merged over `config.json`, so the same keys can be set
+ * there. Its one dangerous key, the permission mode, is covered by the grant's
+ * hash (`drain-bypass.ts`); the adapter check covers the code a changed
+ * `tracker` would run.
+ *
  * @module @dorkos/flow/launch-guard
  */
 
@@ -147,8 +153,16 @@ export function assertLaunchable(opts: {
   const folder = real(path.dirname(adapterPath));
   const pluginRoot = real(flowRoot);
   if (folder === null) throw new PreconditionError(`the adapter folder for ${adapterPath} is gone`);
-  if (pluginRoot !== null && inside(pluginRoot, folder)) return; // flow's own adapter
   const top = checkoutOf(adapterPath);
+  // flow's own adapter, unless flow is installed inside this project, where
+  // its files are project files a steered agent could edit like any other.
+  if (
+    pluginRoot !== null &&
+    inside(pluginRoot, folder) &&
+    (top === null || !inside(top, pluginRoot))
+  ) {
+    return;
+  }
   if (top === null || !inside(top, folder)) {
     throw new PreconditionError(
       `the tracker adapter at ${folder} is neither flow's own nor inside the project; flow will not start sessions that would run it`

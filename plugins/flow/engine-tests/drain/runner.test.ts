@@ -30,6 +30,7 @@ import { realProcessRunner, type ProcessRunner } from '../../scripts/cli/context
 import { drain, type DrainOptions } from '../../scripts/cli/drain.ts';
 import { DRAIN_BYPASS_KEY, makeGrant } from '../../scripts/drain-bypass.ts';
 import { BRIEF_VARS, renderBrief, renderTemplate } from '../../scripts/drain/briefs.ts';
+import { cappedHandle } from '../../scripts/drain/runner.ts';
 import type { DrainState } from '../../scripts/drain/state.ts';
 import { dueForSnapshot } from '../../scripts/drain/usage-sample.ts';
 import { EXIT } from '../../scripts/errors.ts';
@@ -58,6 +59,8 @@ let project: WriteProject;
 let origin: string;
 let dorkHome: string;
 let clock: number;
+/** Runs during the continuous drain's sleep between passes. */
+let onSleep: (() => void) | undefined;
 let load: { load1: number; cpus: number };
 /** The supervisor's own extra environment (a test may run it on another account). */
 let supervisorEnv: Record<string, string>;
@@ -287,7 +290,13 @@ async function flow(argv: string[], cwd = project.dir) {
     createForge: () => world.forge.forge,
     createLauncher: fakeLaunchers(world.log, world.script),
     // A private OS home, so `default` (machine-wide, rev 6d) never reads the real ~/.claude.
-    io: { load: () => load, sleep: async () => undefined, osHome: path.join(dorkHome, 'os-home') },
+    io: {
+      load: () => load,
+      sleep: async () => {
+        onSleep?.();
+      },
+      osHome: path.join(dorkHome, 'os-home'),
+    },
     verbs,
   });
   let json: Record<string, unknown> = {};
@@ -447,6 +456,7 @@ beforeEach(() => {
   git(project.dir, 'remote', 'set-head', 'origin', 'work');
   dorkHome = realpathSync(mkdtempSync(path.join(os.tmpdir(), 'flow-drain-home-')));
   clock = T0;
+  onSleep = undefined;
   load = { load1: 0.5, cpus: 8 };
   supervisorEnv = {};
   configure();
@@ -672,6 +682,38 @@ describe('flow drain: filling slots', () => {
     expect(result.code).toBe(EXIT.precondition);
     expect(result.stderr).toContain('changes that are not committed');
     expect(world.log.starts).toEqual([]);
+  });
+
+  it("caps a stored worker's mode at the mode resolved now when it resumes it", () => {
+    // Purpose: a resume restarts the session from its stored handle, which the
+    // run store holds and a project-editing command could change (DOR-3062).
+    const worker = {
+      host: 'cli' as const,
+      runtime: 'claude-code' as const,
+      sessionId: 's',
+      account: null,
+      cwd: '/w',
+      permissionMode: 'bypassPermissions' as const,
+    };
+    expect(cappedHandle(worker, 'acceptEdits').permissionMode).toBe('acceptEdits');
+    expect(
+      cappedHandle({ ...worker, permissionMode: 'default' }, 'acceptEdits').permissionMode
+    ).toBe('default');
+  });
+
+  it('a continuous drain checks again each pass, and stops on settings changed since', async () => {
+    // Purpose: a revoke, a lapse or an edit takes effect without a restart.
+    configure({ parallel: 1 });
+    onSleep = () => {
+      writeFileSync(
+        path.join(project.dir, '.agents', 'flow', 'config.json'),
+        JSON.stringify({ tracker: 'fake', identity: { agent: 'agent-1' }, drain: { parallel: 2 } })
+      );
+    };
+    const result = await flow(['drain', '--parallel', '1', '--host', 'cli']);
+    expect(world.log.starts).toHaveLength(1);
+    expect(result.code).toBe(EXIT.precondition);
+    expect(result.stderr).toContain('changes that are not committed');
   });
 
   it('starts in acceptEdits, saying why, when bypassPermissions has no grant', async () => {

@@ -343,9 +343,12 @@ export function createFlowExtension(
   // set_drain_bypass only after a person grants its approval card (it is
   // destructive in extension.json); hosts before 0.98.0 have no tools.
   if (ctx.tools !== undefined) {
-    const grants = storage.view();
-    ctx.tools.handle('set_drain_bypass', (input) => setDrainBypass(grants, input, new Date(now())));
-    ctx.tools.handle('get_drain_bypass', (input) => getDrainBypass(grants, input, new Date(now())));
+    ctx.tools.handle('set_drain_bypass', (input) =>
+      setDrainBypass(storage, input, new Date(now()))
+    );
+    ctx.tools.handle('get_drain_bypass', (input) =>
+      getDrainBypass(storage, input, new Date(now()))
+    );
   }
   const projects = hostSupportsProjects(ctx) ? ctx.projects : undefined;
   const model = new ModelService({
