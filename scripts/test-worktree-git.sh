@@ -89,6 +89,17 @@ refused "worktree path with a newline" status "$tmp/wt"$'\n'"x"
 # A GIT_* variable the caller sets must not reach git.
 check "GIT_DIR from the caller is ignored" 0 "$(GIT_DIR=/nonexistent run tip main)"
 
+# Every git call carries config that cannot name a program. A stand-in git on
+# PATH logs its arguments, then runs the real one.
+real_git=$(command -v git)
+mkdir -p "$tmp/bin"
+printf '#!/bin/sh\necho "$*" >> "%s"\nexec "%s" "$@"\n' "$tmp/git-calls.log" "$real_git" >"$tmp/bin/git"
+chmod +x "$tmp/bin/git"
+PATH="$tmp/bin:$PATH" "$script" status "$tmp/wt" >/dev/null 2>&1
+check "git calls were logged" yes "$([ -s "$tmp/git-calls.log" ] && echo yes || echo no)"
+check "every git call disables fsmonitor, signature display and gpg" "" \
+  "$(grep -v '^-c core.fsmonitor=false -c log.showSignature=false -c gpg.program=false ' "$tmp/git-calls.log")"
+
 # --- what the verbs do
 
 check "status shows the dirty worktree" 0 "$(run status "$tmp/wt")"

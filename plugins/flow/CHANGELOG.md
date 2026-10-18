@@ -4,6 +4,14 @@ Installs of this plugin are pinned to a commit SHA, so a fix here does not reach
 you until you **reinstall it** (Marketplace → flow → reinstall, or re-run your
 `--plugin-dir` checkout's `git pull`). Each entry below says whether that matters.
 
+## 0.55.2
+
+**Security fix: `/flow:execute` could be steered into running any command on your computer without asking you. Reinstall now.**
+
+- `/flow:execute` let the agent create a git worktree in any folder without asking. A worktree made in the right folder (your global git settings, for one) could change those settings so that your next git command ran something else. It now creates a worktree only through a small script that always puts it beside your project as `spec-<name>` and checks the name first. Anything else asks you.
+- Its other git commands (`rev-parse`, `branch`, `status`) are now exact spellings too, not open to any option.
+- The script also tells git to ignore any program your project's git settings name for file watching or signatures, so those settings can't make it run something either.
+
 ## 0.55.1
 
 **Security fix: `/flow:verify` could be steered into writing any file or running any command without asking you. Reinstall now.**
