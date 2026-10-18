@@ -1,3 +1,17 @@
 {
-  "sentences": []
+  "sentences": [
+    {
+      "text": "run exactly as alone in its bash call",
+      "paths": [
+        "commands/decompose.md",
+        "commands/done.md",
+        "commands/execute.md",
+        "commands/groom.md",
+        "commands/ideate.md",
+        "commands/specify.md",
+        "commands/triage.md"
+      ],
+      "reason": "Each command spells the exact flow call its allow rule matches, where ${CLAUDE_PLUGIN_ROOT} expands; one shared file cannot carry it (DOR-3055, DOR-3063)."
+    }
+  ]
 }

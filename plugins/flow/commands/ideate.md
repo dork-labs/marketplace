@@ -11,7 +11,7 @@ IDEATE the work described by: $ARGUMENTS
 
 Read `${CLAUDE_PLUGIN_ROOT}/skills/ideating-features/SKILL.md` and follow its process exactly.
 
-Run `flow <verb>` exactly as `node --experimental-strip-types "${CLAUDE_PLUGIN_ROOT}/scripts/flow.ts" <verb>`.
+Run `flow <verb>` exactly as `node --experimental-strip-types "${CLAUDE_PLUGIN_ROOT}/scripts/flow.ts" <verb>`, alone in its Bash call.
 
 Produce the shape of `${CLAUDE_PLUGIN_ROOT}/templates/docs/ideation.md`. Next stage: `/flow:specify`.
 

@@ -319,7 +319,7 @@ leaves it out gets exactly this:
 "selfImprovement": {
   "journal": { "enabled": true, "maxBytes": 5000000, "keep": 3 },
   "retro": { "window": "7d", "maxItemsPerRun": 5, "project": null, "labels": [] },
-  "selftest": { "liveBudgetUsd": 1.0 }
+  "selftest": { "liveBudgetUsd": 2.0 }
 }
 ```
 

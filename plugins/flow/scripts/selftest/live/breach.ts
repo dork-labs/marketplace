@@ -43,6 +43,11 @@ export interface ToolUse {
   name: string;
   /** Its input. */
   input: Record<string, unknown>;
+  /**
+   * Claude Code refused it (a permission denial), so it never ran. A call that
+   * never ran cannot leave the fences, whatever it names.
+   */
+  denied?: boolean;
 }
 
 /** Where a case may read and write. */
@@ -448,8 +453,17 @@ export function findBreach(uses: readonly ToolUse[], bounds: BreachBounds): stri
     const raw = use.input.command;
     if (typeof raw === 'string') {
       const command = expandPluginRoot(raw, bounds);
+      // A forbidden tool fails the case even when refused: the attempt shows a
+      // skill steering the agent toward the real tracker.
       const named = forbiddenName(command);
-      if (named !== undefined) return `${use.name} ran a command naming ${named}: ${command}`;
+      if (named !== undefined) {
+        return `${use.name} ${use.denied === true ? 'tried' : 'ran'} a command naming ${named}: ${command}`;
+      }
+    }
+    // Anything else in a call Claude Code refused never ran, so it cannot breach.
+    if (use.denied === true) continue;
+    if (typeof raw === 'string') {
+      const command = expandPluginRoot(raw, bounds);
       const variable = VARIABLE_PATH.exec(command);
       if (variable !== null) {
         return `${use.name} used ${variable[1]} as a path, which the check cannot follow: ${command}`;

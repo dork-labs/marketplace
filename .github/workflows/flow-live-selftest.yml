@@ -1,0 +1,99 @@
+name: flow live selftest
+
+# Runs the /flow self-test's live tier: real Claude Code sessions, in
+# `dontAsk` mode with only the rules flow's commands grant, against a fake
+# tracker (`plugins/flow/scripts/selftest/live/`). It is the only check that
+# shows whether the commands still work as shipped: unit tests cannot see a
+# skill example that disagrees with a schema, or an allow rule the agent's
+# spelling misses.
+#
+# Why it exists (DOR-3063): the live tier was opt-in and paid, so nothing ran
+# it, and it failed 4 of its 5 cases on main for weeks without anyone seeing.
+#
+# It costs money (up to `--max-usd` per run, about $1.30 today), so it runs
+# weekly and on demand, never on pull requests. It is NOT a required check and
+# must not become one: a model's run varies, and a required check that can fail
+# for no code reason blocks every merge. Read a red run as "look at this case",
+# not "main is broken".
+#
+# It needs one repository secret, set by a person: `CLAUDE_CODE_OAUTH_TOKEN`
+# (from `claude setup-token`, billed to that subscription) or
+# `ANTHROPIC_API_KEY` (billed to that API account). Without either, the job
+# says so and passes. The secret reaches only the two steps that need it, never
+# `npm ci` or the Claude Code install, whose package scripts could read it.
+#
+# The live tier refuses to run under CI unless FLOW_SELFTEST_LIVE_CI=1 is set,
+# so no other workflow can start it by accident. Only this one sets it.
+#
+# GitHub pauses a scheduled workflow after 60 days with no activity in a public
+# repository. If the weekly run stops appearing, re-enable it on the Actions tab.
+#
+# Claude Code is pinned to the version flow's permission rules were measured on
+# (DOR-3044). Raise it on purpose, after a passing run on the new version.
+
+on:
+  schedule:
+    - cron: "17 6 * * 1" # Mondays, 06:17 UTC
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: "${{ github.workflow }}"
+  cancel-in-progress: false
+
+jobs:
+  live:
+    name: flow live selftest
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    defaults:
+      run:
+        working-directory: plugins/flow
+
+    steps:
+      - name: Check for a credential
+        id: credential
+        working-directory: .
+        env:
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          CLAUDE_CODE_OAUTH_TOKEN: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+        run: |
+          if [ -n "$ANTHROPIC_API_KEY" ] || [ -n "$CLAUDE_CODE_OAUTH_TOKEN" ]; then
+            echo "present=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "::notice::No ANTHROPIC_API_KEY or CLAUDE_CODE_OAUTH_TOKEN secret is set, so the live tier was skipped."
+            echo "present=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - uses: actions/checkout@v5
+        if: steps.credential.outputs.present == 'true'
+        with:
+          # The agents in the run may read any file; leave no token in .git/config.
+          persist-credentials: false
+
+      - uses: actions/setup-node@v5
+        if: steps.credential.outputs.present == 'true'
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: plugins/flow/package-lock.json
+
+      - name: Install dependencies and Claude Code
+        if: steps.credential.outputs.present == 'true'
+        run: |
+          npm ci --ignore-scripts
+          # Claude Code's install script fetches its native binary, so it runs;
+          # no secret is in this step's environment.
+          npm install --global @anthropic-ai/claude-code@2.1.300
+          claude --version
+
+      - name: Run the live tier
+        if: steps.credential.outputs.present == 'true'
+        env:
+          FLOW_SELFTEST_LIVE: "1"
+          FLOW_SELFTEST_LIVE_CI: "1"
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          CLAUDE_CODE_OAUTH_TOKEN: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+        run: node --experimental-strip-types scripts/selftest.ts --tier live --max-usd 2 --no-save

@@ -314,9 +314,11 @@ export const LIVE_CASES: readonly LiveCase[] = [
         const phrase = FORBIDDEN_PHRASES.find((p) => text.includes(p));
         if (phrase !== undefined) return `task ${task.id} summarizes with "${phrase}"`;
       }
+      // Decomposed work is handed on where the next session starts: agent/ready
+      // at stage/execute (the skill's step 5; `--stage` names where work resumes).
       const labels = find(after, 'FAKE-1')?.labels ?? [];
-      if (!labels.includes('stage/decompose')) {
-        return `FAKE-1 does not carry stage/decompose (labels: ${labels.join(', ') || 'none'})`;
+      if (!labels.includes('stage/execute') || !labels.includes('agent/ready')) {
+        return `FAKE-1 is not handed on at stage/execute with agent/ready (labels: ${labels.join(', ') || 'none'})`;
       }
       return undefined;
     },

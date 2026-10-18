@@ -187,4 +187,24 @@ describe('ProvenanceSchema — names exactly one tracker home (§8)', () => {
       expect(result.success, `expected tracker ${JSON.stringify(bad)} to be rejected`).toBe(false);
     }
   });
+
+  it('accepts issue and parentIssue as null, as the DECOMPOSE skill and scaffold write them', () => {
+    // Purpose: the live self-test's decompose case failed on exactly this
+    // (DOR-3063): the skill's example writes null, and the schema refused it.
+    const template = JSON.parse(
+      readFileSync(
+        path.join(
+          path.dirname(fileURLToPath(import.meta.url)),
+          '..',
+          'templates',
+          'docs',
+          'tasks.json'
+        ),
+        'utf8'
+      )
+    ) as Record<string, unknown>;
+    delete template['//'];
+    const parsed = TasksFileSchema.safeParse(template);
+    expect(parsed.success, JSON.stringify(parsed.error?.issues)).toBe(true);
+  });
 });

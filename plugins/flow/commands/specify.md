@@ -13,6 +13,6 @@ Read `${CLAUDE_PLUGIN_ROOT}/skills/specifying-work/SKILL.md` and follow its proc
 exactly. Produce the spec and draft-ADR shapes under `${CLAUDE_PLUGIN_ROOT}/templates/docs/`.
 Next stage: `/flow:decompose`.
 
-Run `flow <verb>` exactly as `node --experimental-strip-types "${CLAUDE_PLUGIN_ROOT}/scripts/flow.ts" <verb>`.
+Run `flow <verb>` exactly as `node --experimental-strip-types "${CLAUDE_PLUGIN_ROOT}/scripts/flow.ts" <verb>`, alone in its Bash call.
 
 Tracked work: the adapter is the `SKILL.md` at `adapter.path`. With no tracked item or no adapter, leave the tracker alone.
