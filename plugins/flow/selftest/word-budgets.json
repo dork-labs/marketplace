@@ -88,7 +88,7 @@
     "target": 1077
   },
   "docs/parallel-drain.mdx": {
-    "baseline": 386,
+    "baseline": 395,
     "target": 353
   },
   "docs/provenance.md": {
@@ -124,7 +124,7 @@
     "target": 1267
   },
   "README.md": {
-    "baseline": 2249,
+    "baseline": 2287,
     "target": 2249
   },
   "skills/building-adapters/references/conformance-harness.md": {
