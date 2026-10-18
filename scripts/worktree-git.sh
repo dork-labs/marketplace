@@ -40,6 +40,14 @@ while IFS='=' read -r name _; do
   case $name in GIT_*) unset "$name" ;; esac
 done < <(env)
 
+# Repo-local config and hooks must not name a program for these calls to run.
+# Hooks matter most: a checkout fires post-checkout, and a hook manager such as
+# husky keeps hooks in tracked files the agent may edit.
+g() {
+  git -c core.fsmonitor=false -c log.showSignature=false -c gpg.program=false \
+    -c core.hooksPath=/dev/null "$@"
+}
+
 refuse() {
   echo "worktree-git: $*" >&2
   exit 2
@@ -60,19 +68,19 @@ oneline() {
 branch() {
   oneline "$1"
   case $1 in -*|''|*@*) refuse "not a branch name: '$1'" ;; esac
-  [ "$(git check-ref-format --branch "$1" 2>/dev/null)" = "$1" ] || refuse "not a branch name: '$1'"
+  [ "$(g check-ref-format --branch "$1" 2>/dev/null)" = "$1" ] || refuse "not a branch name: '$1'"
 }
 
 # A worktree `git worktree list` prints, character for character.
 worktree() {
   oneline "$1"
   case $1 in -*|'') refuse "not a worktree: '$1'" ;; esac
-  git worktree list --porcelain | grep -qxF "worktree $1" || refuse "not a worktree: '$1'"
+  g worktree list --porcelain | grep -qxF "worktree $1" || refuse "not a worktree: '$1'"
 }
 
 # The first worktree git lists is the main checkout.
 main_checkout() {
-  git worktree list --porcelain | sed -n '1s/^worktree //p'
+  g worktree list --porcelain | sed -n '1s/^worktree //p'
 }
 
 # One path segment under .worktrees/.
@@ -86,48 +94,48 @@ verb=${1:-}
 case $verb in
   status)
     need $# 1; worktree "$1"
-    git -C "$1" status --porcelain ;;
+    g -C "$1" status --porcelain ;;
   status-ignored)
     need $# 1; worktree "$1"
-    git -C "$1" status --porcelain --ignored ;;
+    g -C "$1" status --porcelain --ignored ;;
   describe)
     need $# 1; worktree "$1"
-    git -C "$1" branch --show-current
-    git -C "$1" log --no-ext-diff --oneline -1 ;;
+    g -C "$1" branch --show-current
+    g -C "$1" log --no-ext-diff --oneline -1 ;;
   branch-exists)
     need $# 1; branch "$1"
-    git branch --list "$1" ;;
+    g branch --list "$1" ;;
   tip)
     need $# 1; branch "$1"
-    git rev-parse --verify --quiet "refs/heads/$1" ;;
+    g rev-parse --verify --quiet "refs/heads/$1" ;;
   on-origin)
     need $# 1; branch "$1"
-    git ls-remote origin "refs/heads/$1" ;;
+    g ls-remote origin "refs/heads/$1" ;;
   unmerged)
     need $# 1; branch "$1"
-    git log --no-ext-diff --oneline "origin/main..refs/heads/$1" ;;
+    g log --no-ext-diff --oneline "origin/main..refs/heads/$1" ;;
   remote-contains)
     need $# 1
     [[ $1 =~ ^[0-9a-f]{7,40}$ ]] || refuse "not a commit SHA: '$1'"
-    git branch -r --contains "$1" ;;
+    g branch -r --contains "$1" ;;
   add)
     need $# 3; folder "$1"; branch "$2"
     case $3 in origin/main|HEAD) ;; *) refuse "base must be origin/main or HEAD, got '$3'" ;; esac
-    git worktree add ".worktrees/$1" -b "$2" "$3" ;;
+    g worktree add ".worktrees/$1" -b "$2" "$3" ;;
   add-existing)
     need $# 2; folder "$1"; branch "$2"
-    git worktree add ".worktrees/$1" "$2" ;;
+    g worktree add ".worktrees/$1" "$2" ;;
   remove)
     need $# 1; worktree "$1"
     [ "$1" != "$(main_checkout)" ] || refuse "will not remove the main checkout"
-    git worktree remove "$1" ;;
+    g worktree remove "$1" ;;
   delete-merged-branch)
     need $# 1; branch "$1"
-    git branch -d "$1" ;;
+    g branch -d "$1" ;;
   delete-branch)
     need $# 1; branch "$1"
     [ "$1" != main ] || refuse "will not delete main"
-    git branch -D "$1" ;;
+    g branch -D "$1" ;;
   *)
     refuse "unknown verb '$verb' (see the usage at the top of this script)" ;;
 esac

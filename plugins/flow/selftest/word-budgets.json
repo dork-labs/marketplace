@@ -12,8 +12,8 @@
     "target": 59
   },
   "commands/execute.md": {
-    "baseline": 79,
-    "target": 79
+    "baseline": 77,
+    "target": 77
   },
   "commands/flow.md": {
     "baseline": 714,
@@ -164,7 +164,7 @@
     "target": 95
   },
   "skills/executing-specs/SKILL.md": {
-    "baseline": 982,
+    "baseline": 981,
     "target": 982
   },
   "skills/flow-drain/SKILL.md": {
