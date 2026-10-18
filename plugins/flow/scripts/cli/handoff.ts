@@ -41,6 +41,7 @@ import {
   type RuntimeName,
 } from '../launchers/types.ts';
 import { loadProjectConfig } from './backlog.ts';
+import { launchPermissionMode } from './launch-mode.ts';
 import type { VerbContext, VerbResult } from './context.ts';
 import { parker, sessionFinder } from './drain.ts';
 import { handoffWiring } from './handoff-wiring.ts';
@@ -149,7 +150,7 @@ export async function run(ctx: VerbContext): Promise<VerbResult> {
     now: () => ctx.now(),
     flow: flowCommand,
     startTimeoutMs: DEFAULT_START_TIMEOUT_MS,
-    permissionMode: config.drain.permissionMode,
+    permissionMode: launchPermissionMode(ctx, project.loaded.files, config.drain.permissionMode),
     workerModel: config.models.bindings[config.models.tiers.implementation] ?? null,
     mintId: () => randomUUID(),
     mintToken: () => randomBytes(16).toString('hex'),

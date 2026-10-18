@@ -77,6 +77,7 @@ import {
 } from '../launchers/types.ts';
 import { AGENT_CLAIMED, AGENT_NEEDS_INPUT, projectionFor } from '../work-state.ts';
 import { loadProjectConfig } from './backlog.ts';
+import { launchPermissionMode } from './launch-mode.ts';
 import { claimItem } from './claim.ts';
 import type { VerbContext, VerbResult } from './context.ts';
 import { handoffWiring } from './handoff-wiring.ts';
@@ -308,7 +309,7 @@ export async function drain(ctx: VerbContext, options: DrainOptions = {}): Promi
       `--permission-mode ${modeFlag} is above drain.permissionMode (${configured}); a person raises it in the project's flow settings, never by flag`
     );
   }
-  const permissionMode = (modeFlag ?? configured) as LaunchPermissionMode;
+  const permissionMode = launchPermissionMode(ctx, project.loaded.files, modeFlag ?? configured);
   const items = flag(ctx, 'items')
     ?.split(',')
     .map((id) => id.trim())

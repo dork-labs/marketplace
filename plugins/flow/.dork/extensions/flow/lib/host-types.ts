@@ -362,6 +362,16 @@ export interface DataProviderContext {
    * to type (§7.9).
    */
   readonly sessions?: SessionsApi;
+  /**
+   * Binds the handlers for the tools `extension.json` declares, only while
+   * `register()` runs. Missing on a DorkOS before 0.98.0.
+   */
+  readonly tools?: {
+    handle(
+      name: string,
+      handler: (input: unknown, call: { signal: AbortSignal; agentId: string | null }) => unknown
+    ): void;
+  };
 }
 
 /**

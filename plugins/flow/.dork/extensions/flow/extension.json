@@ -3,5 +3,55 @@
   "name": "Flow",
   "version": "0.56.0",
   "description": "See what flow is doing in each project and across all of them, pause it for as long as you choose, and choose how much it does on its own and which accounts each project may use.",
-  "minHostVersion": "0.88.0"
+  "minHostVersion": "0.98.0",
+  "serverCapabilities": {
+    "serverEntry": "./server.ts"
+  },
+  "tools": [
+    {
+      "name": "set_drain_bypass",
+      "title": "Allow unattended bypass for a project",
+      "description": "Lets flow's unattended sessions in one project start with every approval bypassed (drain.permissionMode bypassPermissions), or takes that back. Only a person can grant it. It lapses after 30 days, or when the project's flow settings change.",
+      "tier": "destructive",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "project": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 4096,
+            "description": "The project's main checkout, as an absolute path."
+          },
+          "allow": {
+            "type": "boolean",
+            "description": "true to allow, false to take it back."
+          }
+        },
+        "required": ["project", "allow"],
+        "additionalProperties": false
+      },
+      "approvalDisplayFields": ["project", "allow"],
+      "timeoutSeconds": 30
+    },
+    {
+      "name": "get_drain_bypass",
+      "title": "Check unattended bypass for a project",
+      "description": "Says whether flow's unattended sessions in one project may start with every approval bypassed right now, and if not, why.",
+      "tier": "observe",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "project": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 4096,
+            "description": "The project's main checkout, as an absolute path."
+          }
+        },
+        "required": ["project"],
+        "additionalProperties": false
+      },
+      "timeoutSeconds": 30
+    }
+  ]
 }

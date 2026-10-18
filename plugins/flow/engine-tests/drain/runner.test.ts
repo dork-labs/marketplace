@@ -28,6 +28,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { realProcessRunner, type ProcessRunner } from '../../scripts/cli/context.ts';
 import { drain, type DrainOptions } from '../../scripts/cli/drain.ts';
+import { DRAIN_BYPASS_KEY, makeGrant } from '../../scripts/drain-bypass.ts';
 import { BRIEF_VARS, renderBrief, renderTemplate } from '../../scripts/drain/briefs.ts';
 import type { DrainState } from '../../scripts/drain/state.ts';
 import { dueForSnapshot } from '../../scripts/drain/usage-sample.ts';
@@ -660,8 +661,25 @@ describe('flow drain: filling slots', () => {
     expect(world.log.starts[0]?.req.permissionMode).toBe('default');
   });
 
-  it('allows bypassPermissions by flag when the settings already give it', async () => {
+  it('starts in acceptEdits, saying why, when bypassPermissions has no grant', async () => {
+    // Purpose: config an agent may edit cannot raise unattended sessions to
+    // bypassPermissions on its own (DOR-3062).
     configure({ permissionMode: 'bypassPermissions' });
+    const result = await tick();
+    expect(result.code, result.stderr).toBe(0);
+    expect(world.log.starts[0]?.req.permissionMode).toBe('acceptEdits');
+    expect(result.stderr).toContain('no person has granted it for this project');
+  });
+
+  it("starts in bypassPermissions while a person's grant in DorkOS still holds", async () => {
+    configure({ permissionMode: 'bypassPermissions' });
+    const root = realpathSync(project.dir);
+    const data = path.join(dorkHome, 'extension-data', 'flow', 'data.json');
+    mkdirSync(path.dirname(data), { recursive: true });
+    writeFileSync(
+      data,
+      JSON.stringify({ [DRAIN_BYPASS_KEY]: { [root]: makeGrant(root, new Date(clock)) } })
+    );
     const result = await tick('--permission-mode', 'bypassPermissions');
     expect(result.code, result.stderr).toBe(0);
     expect(world.log.starts[0]?.req.permissionMode).toBe('bypassPermissions');

@@ -51,6 +51,7 @@ import { buildCapacity, parseSince } from './lib/capacity.ts';
 import { ContinuedWatcher } from './lib/continued-watcher.ts';
 import { ModelService } from './lib/model-service.ts';
 import { readRepoMigration, writeRepoMigration } from './lib/repo-migration.ts';
+import { getDrainBypass, setDrainBypass } from './lib/drain-bypass-tools.ts';
 import { SharedStorage } from './lib/shared-storage.ts';
 import { GIT_TIMEOUT_MS } from './lib/run-store.ts';
 import {
@@ -338,6 +339,14 @@ export function createFlowExtension(
   const flowRoot = path.resolve(ctx.extensionDir, '../../..');
   const exec = overrides.execFile ?? (execFile as unknown as ExecFileLike);
   const storage = new SharedStorage(ctx.storage);
+  // A person's grant for unattended bypass (DOR-3062). DorkOS runs
+  // set_drain_bypass only after a person grants its approval card (it is
+  // destructive in extension.json); hosts before 0.98.0 have no tools.
+  if (ctx.tools !== undefined) {
+    const grants = storage.view();
+    ctx.tools.handle('set_drain_bypass', (input) => setDrainBypass(grants, input, new Date(now())));
+    ctx.tools.handle('get_drain_bypass', (input) => getDrainBypass(grants, input, new Date(now())));
+  }
   const projects = hostSupportsProjects(ctx) ? ctx.projects : undefined;
   const model = new ModelService({
     dorkHome,
