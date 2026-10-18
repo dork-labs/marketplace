@@ -114,14 +114,16 @@ export const TaskSchema = z.object({
   parallelWith: z.array(z.string()).default([]),
   /**
    * Tracker id of this task's promoted sub-issue, if any (§8). The ONLY home
-   * for the task→issue mapping. Absent for the common checklist-only task.
+   * for the task→issue mapping. Absent or `null` for the common checklist-only
+   * task: the DECOMPOSE skill and the `templates/docs/tasks.json` scaffold both
+   * write `null` until a promotion fills it.
    */
-  issue: z.string().optional(),
+  issue: z.string().nullable().optional(),
   /**
    * Tracker id of the umbrella issue this task's sub-issue hangs under (§8).
-   * Set alongside {@link TaskSchema | `issue`} on promotion.
+   * Set alongside {@link TaskSchema | `issue`} on promotion; `null` until then.
    */
-  parentIssue: z.string().optional(),
+  parentIssue: z.string().nullable().optional(),
 });
 
 /** A single decomposition task as parsed from `03-tasks.json`. */

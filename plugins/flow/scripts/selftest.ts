@@ -97,9 +97,10 @@ const HELP = `flow selftest: check this flow install, its prose, and how its com
   --tier <tier>      fast (free, offline checks), scenarios (the flow commands
                      against a fake tracker), live (a real model against the
                      fake tracker; costs money, needs FLOW_SELFTEST_LIVE=1,
-                     never runs in CI) or all; default: fast and scenarios
+                     and in CI also FLOW_SELFTEST_LIVE_CI=1) or all; default:
+                     fast and scenarios
   --max-usd <n>      the most the live tier may spend (default: the config's
-                     selfImprovement.selftest.liveBudgetUsd, else 1.00)
+                     selfImprovement.selftest.liveBudgetUsd, else 2.00)
   --json             print the report as one JSON object
   --strict           a skipped check fails the run
   --file             turn each failure into tracker work (see the report)
@@ -254,7 +255,7 @@ export interface SelftestRun {
   warn: (message: string) => void;
   /** Builds the scenarios' fake tracker (a test seam). */
   makeTracker?: TrackerFactory;
-  /** The live tier's ceiling (default: the project's config, else 1.00). */
+  /** The live tier's ceiling (default: the project's config, else 2.00). */
   maxUsd?: number;
 }
 

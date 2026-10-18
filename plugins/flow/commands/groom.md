@@ -12,7 +12,7 @@ Groom the backlog: $ARGUMENTS
 Read `${CLAUDE_PLUGIN_ROOT}/skills/grooming-backlog/SKILL.md` and follow its
 process exactly. Its tracker adapter is the `SKILL.md` at `adapter.path`.
 
-Run `flow <verb>` exactly as `node --experimental-strip-types "${CLAUDE_PLUGIN_ROOT}/scripts/flow.ts" <verb>`.
+Run `flow <verb>` exactly as `node --experimental-strip-types "${CLAUDE_PLUGIN_ROOT}/scripts/flow.ts" <verb>`, alone in its Bash call.
 
 Its `<scratch>` (the scratchpad) is `.dork/flow/tmp/groom/`.
 

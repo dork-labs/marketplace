@@ -243,6 +243,15 @@ export const VERBS: readonly VerbDefinition[] = [
     load: () => import('./cli/status.ts'),
   },
   {
+    name: 'show',
+    summary: 'Read one item: its type, labels, description and latest comments.',
+    description:
+      "One item as the adapter reads it, read-only. The stage skills read an item's type and its ## On Completion section from here.",
+    common: ['project'],
+    positionals: [{ name: 'identifier', required: true, description: 'The item, e.g. DOR-123.' }],
+    load: () => import('./cli/show.ts'),
+  },
+  {
     name: 'claim',
     summary: 'Start working an item: mark it claimed and record the run.',
     description:
@@ -944,7 +953,7 @@ export const VERBS: readonly VerbDefinition[] = [
         kind: 'string',
         value: 'fast|scenarios|live|all',
         description:
-          'The tier to run. Default: fast and scenarios. live runs a real model and costs money: it needs FLOW_SELFTEST_LIVE=1 and never runs in CI.',
+          'The tier to run. Default: fast and scenarios. live runs a real model and costs money: it needs FLOW_SELFTEST_LIVE=1, and in CI also FLOW_SELFTEST_LIVE_CI=1, which only the weekly live-selftest workflow sets.',
       },
       {
         name: 'max-usd',

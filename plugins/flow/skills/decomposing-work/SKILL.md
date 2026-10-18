@@ -1,6 +1,6 @@
 ---
 name: decomposing-work
-description: The /flow engine's DECOMPOSE stage — break a validated specification into actionable tasks in 03-tasks.json, mirror the active phase into the tracker as a plan checklist, and project the stage/decompose label. Use when running /flow:decompose or advancing a work item into the DECOMPOSE stage.
+description: The /flow engine's DECOMPOSE stage — break a validated specification into actionable tasks in 03-tasks.json, mirror the active phase into the tracker as a plan checklist, project the stage/decompose label, then hand the item on at stage/execute. Use when running /flow:decompose or advancing a work item into the DECOMPOSE stage.
 ---
 
 # Decomposing Work — the DECOMPOSE stage
@@ -78,9 +78,11 @@ The Task API is a live display of `03-tasks.json`, not a second source of truth.
 - Mirror the **active phase** as a plan checklist generated from `03-tasks.json`; never
   hand-edit it, regenerate it.
 - Optionally a breadcrumb `comment`.
-- **Ready the execute-ready work:** add `agent/ready` to the item (and any promoted
-  sub-issue). Without it dispatch never picks it up; DECOMPOSE is the second readiness
-  producer after TRIAGE.
+- **Hand it on** (and promoted sub-issues) at `stage/execute`, where the next session
+  starts. In a drain run: `flow stage <id> execute` and go on. Otherwise
+  `flow release <id> --stage execute` if this session claimed it, else
+  `flow triage <id> --ready --stage execute`. Without `agent/ready` dispatch never picks
+  it up; DECOMPOSE is the second readiness producer after TRIAGE.
 
 No linked item or no tracker: skip the mirror; the files on disk are the result.
 

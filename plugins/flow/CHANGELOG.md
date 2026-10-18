@@ -4,7 +4,7 @@ Installs of this plugin are pinned to a commit SHA, so a fix here does not reach
 you until you **reinstall it** (Marketplace → flow → reinstall, or re-run your
 `--plugin-dir` checkout's `git pull`). Each entry below says whether that matters.
 
-## 0.57.0
+## 0.59.0
 
 **Security fix: flow's unattended sessions start with every approval bypassed only if a person allowed it in DorkOS. Reinstall now, on DorkOS 0.98.0 or later.**
 
@@ -15,6 +15,16 @@ you until you **reinstall it** (Marketplace → flow → reinstall, or re-run yo
 - Unattended bypass needs flow installed globally. A per-agent install, which lives inside the project at `<project>/.dork/plugins/flow`, never gets it. Bypass is never honoured when flow itself, or DorkOS's data folder, is inside the project, because the agent could then edit the code that checks the approval. If you run flow from a checkout inside your project (`--plugin-dir`, as when working on flow itself), unattended runs never get bypass there, and flow's own adapter files must be committed and unchanged before a drain starts. Settings still inside the plugin get a message to run `config-files.ts migrate` before unattended runs.
 - Flow's DorkOS extension needs DorkOS 0.98.0 or later. It adds two tools: **Allow unattended bypass for a project** (a person must approve it) and **Check unattended bypass for a project**.
 - Known limit: this stops an agent steered inside flow's commands. An agent with a full shell as your user can reach anything on your computer, and with DorkOS login off any local program can approve the card (DOR-505). Turn on DorkOS login if this matters to you.
+## 0.58.0
+
+**`/flow:decompose` no longer writes a task list flow then rejects, and `/flow:done` reads the item before it files follow-ups. Reinstall to get it.**
+
+- `03-tasks.json` files written the way the DECOMPOSE skill and its template show, with `"issue": null` for a task not promoted to a sub-issue, failed flow's own task-list check. They pass now.
+- New `flow show <id>`: one item, with its description and latest comments. `/flow:done` reads the item with it first, because its `## On Completion` section says which follow-ups to file. Before, nothing read it, so follow-ups were often missed.
+- `/flow:decompose` now names how to hand the item on: `flow release <id> --stage execute` if it claimed the item, else `flow triage <id> --ready --stage execute`. Both leave it ready at `stage/execute`, where the next session starts. Before, the skill said to "add `agent/ready`" with no command that does only that.
+- `/flow:done` readies a follow-up only if it has a size and an `## On Completion` section, otherwise it asks.
+- Each command now says to run each `flow` call on its own Bash line. Chained commands, pipes and shell variables are refused, and agents used to give up after one refusal.
+- The self-test's live tier no longer fails a case for a command Claude Code refused, since a refused command never ran. Its default budget is now $2.00, because five cases cost about $1.30. It runs weekly in CI, never on pull requests, once a person adds a `CLAUDE_CODE_OAUTH_TOKEN` or `ANTHROPIC_API_KEY` secret.
 
 ## 0.56.0
 
