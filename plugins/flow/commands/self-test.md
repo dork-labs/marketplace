@@ -1,7 +1,7 @@
 ---
 description: Check this flow install, its prose and how its commands behave, and report what is broken
 category: flow
-allowed-tools: Bash(node:*), Read
+allowed-tools: Read, Bash(node --experimental-strip-types "${CLAUDE_PLUGIN_ROOT}/scripts/flow.ts" selftest:*)
 argument-hint: '[--tier fast|scenarios] [--strict] [--json] [--file]'
 ---
 

@@ -4,7 +4,7 @@
  * with `--out` for `--snapshot` reuse.
  */
 
-import { readFileSync } from 'node:fs';
+import { readFileSync, symlinkSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
@@ -85,6 +85,38 @@ describe('flow snapshot', () => {
     // Purpose: a person types `--out snap.json` and expects it where they are.
     await runFlow(['snapshot', '--out', 'snap.json'], temp, backlog());
     expect(JSON.parse(readFileSync(path.join(temp.project, 'snap.json'), 'utf8')).v).toBe(1);
+  });
+
+  it('replaces an earlier snapshot at --out', async () => {
+    // Purpose: groom re-pulls into the same scratch file.
+    const out = path.join(temp.project, 'again.json');
+    await runFlow(['snapshot', '--out', out], temp, backlog());
+    const result = await runFlow(['snapshot', '--out', out], temp, backlog());
+    expect(result.code).toBe(EXIT.ok);
+  });
+
+  it.each([
+    ['a file that is not .json', 'profile', 'export PATH=/usr/bin\n'],
+    ['an existing file that is not a snapshot', 'settings.json', '{"hooks":{}}\n'],
+    ['an existing file that is not JSON', 'notes.json', 'hello\n'],
+  ])('refuses --out naming %s, and leaves it alone', async (_name, file, content) => {
+    // Purpose: commands allow `flow <verb>` without asking, so --out must not
+    // overwrite any file with tracker text.
+    const out = path.join(temp.project, file);
+    writeFileSync(out, content);
+    const result = await runFlow(['snapshot', '--json', '--out', out], temp, backlog());
+    expect(result.code).toBe(EXIT.usage);
+    expect(readFileSync(out, 'utf8')).toBe(content);
+  });
+
+  it('refuses --out naming a symlink, and leaves its target alone', async () => {
+    const target = path.join(temp.project, 'real.json');
+    writeFileSync(target, '{"keep":true}\n');
+    const link = path.join(temp.project, 'link.json');
+    symlinkSync(target, link);
+    const result = await runFlow(['snapshot', '--json', '--out', link], temp, backlog());
+    expect(result.code).toBe(EXIT.usage);
+    expect(readFileSync(target, 'utf8')).toBe('{"keep":true}\n');
   });
 
   it('exits 3 naming the capability when the adapter cannot pull a snapshot', async () => {

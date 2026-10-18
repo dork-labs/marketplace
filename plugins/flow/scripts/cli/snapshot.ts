@@ -11,9 +11,11 @@
  * @module @dorkos/flow/cli/snapshot
  */
 
-import { mkdirSync, renameSync, writeFileSync } from 'node:fs';
+import { lstatSync, mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 
+import { UsageError } from '../errors.ts';
+import { ensureIgnored } from '../git-exclude.ts';
 import { requireCapabilities } from '../tracker/load.ts';
 import type { BacklogSnapshot } from '../tracker/types.ts';
 import type { VerbContext, VerbResult } from './context.ts';
@@ -95,6 +97,47 @@ export function renderSnapshotSummary(snapshot: BacklogSnapshot, includeClosed: 
  * @param file - The absolute target path.
  * @param json - The JSON text.
  */
+/**
+ * Refuse an `--out` target that is not a snapshot file. Commands allow
+ * `flow <verb>` without asking, so `--out` must not become a way to overwrite
+ * any file (a shell profile, a settings file) with tracker text: the target
+ * ends in `.json`, is not a symlink, and, when it exists, is already a flow
+ * snapshot (a JSON object with `v` and an `items` array).
+ *
+ * @param file - The absolute target path.
+ * @throws {UsageError} When the target is anything else.
+ */
+function checkSnapshotTarget(file: string): void {
+  if (!file.endsWith('.json')) {
+    throw new UsageError(`--out must name a .json file, got ${file}`);
+  }
+  let stat;
+  try {
+    stat = lstatSync(file);
+  } catch {
+    return; // A new file.
+  }
+  if (!stat.isFile()) {
+    throw new UsageError(`--out must name a plain file, not a link or folder: ${file}`);
+  }
+  let existing: unknown;
+  try {
+    existing = JSON.parse(readFileSync(file, 'utf8'));
+  } catch {
+    existing = undefined;
+  }
+  const isSnapshot =
+    typeof existing === 'object' &&
+    existing !== null &&
+    'v' in existing &&
+    Array.isArray((existing as { items?: unknown }).items);
+  if (!isSnapshot) {
+    throw new UsageError(
+      `--out will only replace an earlier flow snapshot, and ${file} is not one. Pick a new file.`
+    );
+  }
+}
+
 function writeSnapshotFile(file: string, json: string): void {
   mkdirSync(path.dirname(file), { recursive: true });
   const temp = `${file}.${process.pid}.tmp`;
@@ -111,6 +154,8 @@ function writeSnapshotFile(file: string, json: string): void {
 export async function run(ctx: VerbContext): Promise<VerbResult> {
   const includeClosed = ctx.args.flags['include-closed'] === true;
   const out = ctx.args.flags.out;
+  const target = typeof out === 'string' ? path.resolve(ctx.cwd, out) : undefined;
+  if (target !== undefined) checkSnapshotTarget(target);
 
   const adapter = await ctx.adapter();
   requireCapabilities(adapter, ['getBacklogSnapshot']);
@@ -119,8 +164,14 @@ export async function run(ctx: VerbContext): Promise<VerbResult> {
   // `v` first, the same order `--json` prints, so the file equals the output.
   const { v, ...rest } = snapshot;
   const json = { v, ...rest };
-  if (typeof out === 'string')
-    writeSnapshotFile(path.resolve(ctx.cwd, out), `${JSON.stringify(json)}\n`);
+  if (target !== undefined) {
+    // Groom keeps its snapshot in .dork/flow/tmp/groom/: keep flow's folder out of git.
+    const rel = path.relative(ctx.cwd, target);
+    if (rel.split(path.sep).slice(0, 2).join('/') === '.dork/flow') {
+      ensureIgnored(ctx.cwd, rel, '.dork/flow/');
+    }
+    writeSnapshotFile(target, `${JSON.stringify(json)}\n`);
+  }
 
   return {
     json: json as unknown as Record<string, unknown>,

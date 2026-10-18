@@ -1,7 +1,7 @@
 ---
 description: Capture a thought as a low-commitment work item (the /flow CAPTURE stage)
 category: flow
-allowed-tools: Read, Glob, Skill, Bash(node:*)
+allowed-tools: Read, Glob, Skill, Bash(node --experimental-strip-types "${CLAUDE_PLUGIN_ROOT}/scripts/flow.ts":*)
 argument-hint: '<idea or work description, or a file path>'
 ---
 

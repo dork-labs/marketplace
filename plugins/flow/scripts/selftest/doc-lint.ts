@@ -169,6 +169,19 @@ export function countWords(text: string): number {
 }
 
 /**
+ * The words a file's budget counts: all of it except a command's
+ * `allowed-tools:` line. That line is a permission list the harness reads, not
+ * prose an agent reads, and narrowing a broad rule to exact ones makes it
+ * longer; counting it would make the ratchet fight a security fix.
+ *
+ * @param text - A corpus file's text.
+ * @returns The words its budget counts.
+ */
+export function budgetedWords(text: string): number {
+  return countWords(text.replace(/^allowed-tools:.*$/m, ''));
+}
+
+/**
  * The word ratchet: every corpus file needs a budget, and may not grow past its
  * baseline.
  *
@@ -179,7 +192,7 @@ export function countWords(text: string): number {
 export function checkWords(files: readonly DocFile[], budgets: WordBudgets): Finding[] {
   const findings: Finding[] = [];
   for (const file of files) {
-    const count = countWords(file.text);
+    const count = budgetedWords(file.text);
     const budget = budgets[file.path];
     if (budget === undefined) {
       findings.push({
@@ -212,7 +225,7 @@ export function checkWords(files: readonly DocFile[], budgets: WordBudgets): Fin
 export function rebaseline(files: readonly DocFile[], budgets: WordBudgets): WordBudgets {
   const next: WordBudgets = {};
   for (const file of [...files].sort((a, b) => a.path.localeCompare(b.path))) {
-    const count = countWords(file.text);
+    const count = budgetedWords(file.text);
     const budget = budgets[file.path];
     if (budget === undefined) {
       next[file.path] = { baseline: count, target: count };
@@ -238,7 +251,7 @@ export function wordSummary(
   let total = 0;
   let overTarget = 0;
   for (const file of files) {
-    const count = countWords(file.text);
+    const count = budgetedWords(file.text);
     total += count;
     const budget = budgets[file.path];
     if (budget !== undefined && count > budget.target) overTarget += count - budget.target;

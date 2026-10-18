@@ -4,6 +4,17 @@ Installs of this plugin are pinned to a commit SHA, so a fix here does not reach
 you until you **reinstall it** (Marketplace → flow → reinstall, or re-run your
 `--plugin-dir` checkout's `git pull`). Each entry below says whether that matters.
 
+## 0.56.0
+
+**Security fix: flow's commands no longer let the agent write files anywhere or run any program without asking you. Reinstall now.**
+
+- Several commands let the agent write files anywhere on your computer without asking, not just in your project. Each now writes without asking only where it needs to: `/flow:ideate`, `/flow:specify` and `/flow:decompose` in `specs/` (and `decisions/` for specify), `/flow:pause` in its one switch file, `/flow:groom` in its scratch folder `.dork/flow/tmp/groom/`, and `/flow:init`, `/flow:execute` and `/flow:verify` inside your project. `/flow:resume` writes nothing itself. Git's own folder and Claude's settings are never among them.
+- Nine commands let the agent run any `node` program, and `/flow:groom` any shell command at all, without asking. Each now runs only flow's own scripts that way. Anything else asks you.
+- `/flow:init` no longer needs `cp`, `npm install` with any arguments, or other shell commands. A new `config-files.ts scaffold` creates your private settings file (readable by you alone) and the review rubric, and never overwrites either. It only puts the rubric inside your project.
+- `/flow:execute` and `/flow:decompose` dropped `jq`, `grep`, `cat`, `echo`, `date`, `hostname`, `basename` and `mkdir`, which nothing used. They, and `/flow:done`, can now run flow's own commands without asking. They used to ask every time.
+- The live tier of `/flow:self-test` gives its test sessions the same limits you get: no blanket `node`, and writes only inside the test project.
+- `flow snapshot --out` only replaces an earlier snapshot. It refuses a symlink, a file that isn't `.json`, or an existing file that isn't a flow snapshot. When it writes inside `.dork/flow/`, it keeps that folder out of git.
+
 ## 0.55.2
 
 **Security fix: `/flow:execute` could be steered into running any command on your computer without asking you. Reinstall now.**

@@ -1,7 +1,7 @@
 ---
 description: Restore autonomous /flow operation that /flow:pause halted
 category: flow
-allowed-tools: Read, Edit, Write, Glob, SlashCommand, Bash(node:*), mcp__dorkos__tasks_update
+allowed-tools: Read, Glob, SlashCommand, Bash(node --experimental-strip-types "${CLAUDE_PLUGIN_ROOT}/scripts/flow.ts":*), Bash(node --experimental-strip-types "${CLAUDE_PLUGIN_ROOT}/scripts/config-files.ts":*), mcp__dorkos__tasks_update
 argument-hint: '[issue-id to un-pause, or empty to restore all autonomy]'
 ---
 

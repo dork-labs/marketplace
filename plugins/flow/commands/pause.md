@@ -1,7 +1,7 @@
 ---
 description: Halt every autonomous /flow mode from one place (drain sentinel + pause flag)
 category: flow
-allowed-tools: Read, Edit, Write, Glob, Bash(node:*), mcp__dorkos__tasks_list, mcp__dorkos__tasks_update
+allowed-tools: Read, Glob, Edit(.dork/flow/auto-run.json), Bash(node --experimental-strip-types "${CLAUDE_PLUGIN_ROOT}/scripts/flow.ts":*), Bash(node --experimental-strip-types "${CLAUDE_PLUGIN_ROOT}/scripts/config-files.ts":*), mcp__dorkos__tasks_list, mcp__dorkos__tasks_update
 argument-hint: '[issue-id to reclaim | for <duration> | until <time> | empty to halt all autonomy]'
 ---
 

@@ -92,26 +92,16 @@ needs none generated unless overriding it on purpose: validate it and move on.
    block. Leave `models.bindings` empty and `connection.team` / `connection.workspace`
    `null`. **Never a token, key or account handle here.** On a re-run, rewrite only after
    Step 1's confirmation.
-2. **`config.local.json`** (ignored): create it only if absent,
-   `test -f "$LOCAL" || (umask 077 && cp <flow-root>/config/config.local.example.json "$LOCAL")`.
+2. **`config.local.json`** (ignored): `cf scaffold` creates it, private, only if absent.
    Fill `secrets.trackerAccount` (and `secrets.trackerToken` if the host gives no auth),
    `connection.team`, `connection.workspace.slug`, `identity.reviewer`, and
    `models.bindings`. Merge into an existing file; never overwrite it.
 3. Tell the operator to commit `.agents/flow/config.json` and `.agents/flow/.gitignore`,
    never `config.local.json`.
-4. **Rubric**, only when `review.adversarial` is true. Resolve `review.rubric`: absolute →
-   as is; relative → the repo root, or the current folder outside a repo. Then:
-
-   ```bash
-   RUBRIC="REVIEW.md"   # set to the configured review.rubric
-   ROOT="$(git rev-parse --show-toplevel 2>/dev/null || pwd)"
-   case "$RUBRIC" in /*) TARGET="$RUBRIC" ;; *) TARGET="$ROOT/$RUBRIC" ;; esac
-   mkdir -p "$(dirname "$TARGET")"
-   test -f "$TARGET" || cp <flow-root>/templates/review-rubric.md "$TARGET"
-   echo "rubric: $TARGET"
-   ```
-
-   **Never overwrite an existing rubric.** Print the resolved path; for a new one, ask the
+4. **Rubric**, only when `review.adversarial` is true: `cf scaffold --rubric <review.rubric>`
+   copies the template there if absent, never overwriting. It takes only a `.md` path
+   inside the project; exit 2 otherwise: ask the operator to copy
+   `<flow-root>/templates/review-rubric.md` there. Print the resolved path; for a new one, ask the
    operator to fill its two **FILL IN** sections. The rubric is committed.
 
 ## Step 4b — Accounts

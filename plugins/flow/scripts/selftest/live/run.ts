@@ -50,11 +50,12 @@ export const DEFAULT_LIVE_BUDGET_USD = 1.0;
 /** The tools a live child may use without asking; everything else is denied. */
 export const ALLOWED_TOOLS: readonly string[] = [
   'Read',
-  'Write',
-  'Edit',
+  // Writes stay inside the sandbox project; a bare Write or Edit reaches the whole disk.
+  'Edit(./**)',
   'Glob',
   'Grep',
-  'Bash(node *)',
+  // No interpreter rule: the commands' own allowed-tools must carry their
+  // `flow <verb>` calls, as they do for a person (DOR-3055).
   // Exact spellings only: a git rule ending in a wildcard allows `--output=<file>`.
   'Bash(git rev-parse --git-dir --git-common-dir)',
   'Bash(git status --porcelain)',

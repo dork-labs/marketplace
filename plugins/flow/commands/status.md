@@ -1,7 +1,7 @@
 ---
 description: Show every in-flight item, parked question and drift across the /flow loop, plus this project's flow schedules
 category: flow
-allowed-tools: Read, Glob, Skill, AskUserQuestion, Bash(node:*), mcp__dorkos__tasks_list
+allowed-tools: Read, Glob, Skill, AskUserQuestion, Bash(node --experimental-strip-types "${CLAUDE_PLUGIN_ROOT}/scripts/flow.ts":*), Bash(node --experimental-strip-types "${CLAUDE_PLUGIN_ROOT}/scripts/config-files.ts"), mcp__dorkos__tasks_list
 argument-hint: '[issue-id to focus on, or empty for the whole loop]'
 ---
 

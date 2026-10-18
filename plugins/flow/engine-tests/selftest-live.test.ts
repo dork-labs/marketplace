@@ -415,11 +415,9 @@ describe('the live tier runner', { timeout: LIVE_TIMEOUT }, () => {
       argv.slice(argv.indexOf('--allowed-tools') + 1, argv.indexOf('--disallowed-tools'))
     ).toEqual([
       'Read',
-      'Write',
-      'Edit',
+      'Edit(./**)',
       'Glob',
       'Grep',
-      'Bash(node *)',
       'Bash(git rev-parse --git-dir --git-common-dir)',
       'Bash(git status --porcelain)',
       'Bash(git branch --show-current)',
