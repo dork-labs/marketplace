@@ -393,7 +393,6 @@ function launchHandle(handle: DrainWorkerHandle): SessionHandle {
   return { ...rest, runtime: handleRuntime(handle) };
 }
 
-/** Same JSON, for "did anything change". */
 /**
  * A stored worker's handle for a send that may restart it, its mode capped at
  * the mode resolved now: the run store is project data a steered agent could
@@ -407,6 +406,7 @@ export function cappedHandle(
   return { ...base, permissionMode: lowerMode(base.permissionMode, ceiling) };
 }
 
+/** Same JSON, for "did anything change". */
 function same(a: unknown, b: unknown): boolean {
   return JSON.stringify(a) === JSON.stringify(b);
 }
