@@ -342,6 +342,8 @@ export interface DataProviderContext {
   readonly extensionDir: string;
   /** The resolved DorkOS data folder. Missing on hosts older than 0.88.0. */
   readonly dorkHome?: string;
+  /** The one folder this extension writes files to: `<dorkHome>/extension-data/<id>/files`. */
+  readonly filesDir?: string;
   /** The accounts API. Missing on hosts older than 0.88.0. */
   readonly accounts?: Partial<AccountsApi>;
   /** Core's project registry. Missing on a DorkOS from before it; probe before use. */

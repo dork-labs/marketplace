@@ -21,9 +21,9 @@ import path from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
 import {
-  DRAIN_BYPASS_KEY,
   effectivePermissionMode,
-  extensionDataFile,
+  grantFile,
+  extensionFilesDir,
   GRANT_DAYS,
   lowerMode,
   makeGrant,
@@ -46,9 +46,9 @@ function writeSettings(committed: string, local: string): void {
 }
 
 function storeGrant(grant: BypassGrant, forRoot = root): void {
-  const file = extensionDataFile(dorkHome);
+  const file = grantFile(dorkHome);
   mkdirSync(path.dirname(file), { recursive: true });
-  writeFileSync(file, JSON.stringify({ other: 1, [DRAIN_BYPASS_KEY]: { [forRoot]: grant } }));
+  writeFileSync(file, JSON.stringify({ [forRoot]: grant }));
 }
 
 function resolve(
@@ -134,9 +134,9 @@ describe('effectivePermissionMode', () => {
 
   it('refuses a data file that is a symlink', () => {
     const real = path.join(base, 'planted.json');
-    writeFileSync(real, JSON.stringify({ [DRAIN_BYPASS_KEY]: { [root]: makeGrant(root, NOW) } }));
-    mkdirSync(path.dirname(extensionDataFile(dorkHome)), { recursive: true });
-    symlinkSync(real, extensionDataFile(dorkHome));
+    writeFileSync(real, JSON.stringify({ [root]: makeGrant(root, NOW) }));
+    mkdirSync(extensionFilesDir(dorkHome), { recursive: true });
+    symlinkSync(real, grantFile(dorkHome));
     expect(resolve().mode).toBe('acceptEdits');
   });
 
@@ -188,10 +188,19 @@ describe('effectivePermissionMode', () => {
     expect(resolve('bypassPermissions', { dorkHome: null }).notice).toMatch(/DorkOS is not here/);
   });
 
+  it("ignores a grant planted in the extension's general data file", () => {
+    // Purpose: DorkOS's PUT /api/extensions/flow/data writes that file with no
+    // person check, so a grant there must never count (Security, DOR-3062).
+    const blob = path.join(dorkHome, 'extension-data', 'flow', 'data.json');
+    mkdirSync(path.dirname(blob), { recursive: true });
+    writeFileSync(blob, JSON.stringify({ drainBypass: { [root]: makeGrant(root, NOW) } }));
+    expect(resolve().mode).toBe('acceptEdits');
+  });
+
   it('ignores a malformed grant', () => {
     storeGrant({ grantedAt: 'soon', configHash: 'x', localHash: 'y' });
     expect(resolve().mode).toBe('acceptEdits');
-    writeFileSync(extensionDataFile(dorkHome), 'not json');
+    writeFileSync(grantFile(dorkHome), 'not json');
     expect(resolve().mode).toBe('acceptEdits');
   });
 });
@@ -213,7 +222,7 @@ describe('who can grant', () => {
     const offenders = files
       .filter((f) => !f.endsWith(`${path.sep}drain-bypass.ts`))
       .filter((f) =>
-        /set_drain_bypass|extension-data|extensionDataFile|DRAIN_BYPASS_KEY|makeGrant/.test(
+        /set_drain_bypass|extension-data|grantFile|extensionFilesDir|GRANT_FILE|makeGrant/.test(
           readFileSync(f, 'utf8')
         )
       );

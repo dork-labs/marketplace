@@ -10,8 +10,12 @@
  * So only `default`, `acceptEdits` and `plan` are taken as configured. Any
  * other mode needs a grant a person gave in DorkOS, through the flow
  * extension's destructive `set_drain_bypass` tool (an approval card only a
- * person can grant). The extension stores the grant in DorkOS's own data
- * folder, outside every project, and this module reads it from there:
+ * person can grant). The extension stores the grant in a file of its own,
+ * `<dorkHome>/extension-data/flow/files/drain-bypass.json`, outside every
+ * project, and this module reads it from there. Not the extension's general
+ * data blob (`…/flow/data.json`): DorkOS's `PUT /api/extensions/:id/data`
+ * writes that file with no person check, so a grant there could be minted
+ * without the card. No DorkOS route writes the extension's `files/` folder:
  *
  * - keyed by the project's canonical root (the main checkout's real path), so
  *   worktrees share it and a copied folder does not;
@@ -38,8 +42,8 @@ import path from 'node:path';
 
 import { CONFIG_FILE, LOCAL_CONFIG_FILE, PROJECT_CONFIG_DIR } from './config-names.ts';
 
-/** The key the flow extension keeps grants under in its stored data. */
-export const DRAIN_BYPASS_KEY = 'drainBypass';
+/** The file the flow extension keeps grants in, inside its own files folder. */
+export const GRANT_FILE = 'drain-bypass.json';
 
 /** How long a grant lasts. */
 export const GRANT_DAYS = 30;
@@ -128,9 +132,14 @@ export function makeGrant(root: string, now: Date): BypassGrant {
   };
 }
 
-/** Where DorkOS keeps the flow extension's stored data. */
-export function extensionDataFile(dorkHome: string): string {
-  return path.join(dorkHome, 'extension-data', 'flow', 'data.json');
+/** The flow extension's files folder, as DorkOS gives it (`ctx.filesDir`). */
+export function extensionFilesDir(dorkHome: string): string {
+  return path.join(dorkHome, 'extension-data', 'flow', 'files');
+}
+
+/** Where the grants live: `{ [canonical root]: BypassGrant }`. */
+export function grantFile(dorkHome: string): string {
+  return path.join(extensionFilesDir(dorkHome), GRANT_FILE);
 }
 
 /**
@@ -142,11 +151,10 @@ export function extensionDataFile(dorkHome: string): string {
  * @returns The grant, or null when there is none or the file cannot be trusted.
  */
 export function readGrant(dorkHome: string, root: string): BypassGrant | null {
-  const file = extensionDataFile(dorkHome);
+  const file = grantFile(dorkHome);
   try {
     if (!lstatSync(file).isFile()) return null;
-    const data = JSON.parse(readFileSync(file, 'utf8')) as Record<string, unknown>;
-    const grants = data?.[DRAIN_BYPASS_KEY] as Record<string, unknown> | undefined;
+    const grants = JSON.parse(readFileSync(file, 'utf8')) as Record<string, unknown> | null;
     const grant = grants?.[root] as Partial<BypassGrant> | undefined;
     if (
       typeof grant?.grantedAt !== 'string' ||
@@ -237,9 +245,7 @@ export function effectivePermissionMode(opts: {
   }
   const grant = readGrant(dorkHome, root);
   if (grant === null) {
-    return fallback(
-      `no person has granted it for this project (looked in ${extensionDataFile(dorkHome)})`
-    );
+    return fallback(`no person has granted it for this project (looked in ${grantFile(dorkHome)})`);
   }
   const problem = grantProblem(grant, root, now);
   return problem === null ? { mode: configured } : fallback(problem);
