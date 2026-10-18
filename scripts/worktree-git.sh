@@ -40,9 +40,12 @@ while IFS='=' read -r name _; do
   case $name in GIT_*) unset "$name" ;; esac
 done < <(env)
 
-# Repo-local config must not name a program for these calls to run.
+# Repo-local config and hooks must not name a program for these calls to run.
+# Hooks matter most: a checkout fires post-checkout, and a hook manager such as
+# husky keeps hooks in tracked files the agent may edit.
 g() {
-  git -c core.fsmonitor=false -c log.showSignature=false -c gpg.program=false "$@"
+  git -c core.fsmonitor=false -c log.showSignature=false -c gpg.program=false \
+    -c core.hooksPath=/dev/null "$@"
 }
 
 refuse() {

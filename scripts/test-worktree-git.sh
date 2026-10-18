@@ -97,8 +97,8 @@ printf '#!/bin/sh\necho "$*" >> "%s"\nexec "%s" "$@"\n' "$tmp/git-calls.log" "$r
 chmod +x "$tmp/bin/git"
 PATH="$tmp/bin:$PATH" "$script" status "$tmp/wt" >/dev/null 2>&1
 check "git calls were logged" yes "$([ -s "$tmp/git-calls.log" ] && echo yes || echo no)"
-check "every git call disables fsmonitor, signature display and gpg" "" \
-  "$(grep -v '^-c core.fsmonitor=false -c log.showSignature=false -c gpg.program=false ' "$tmp/git-calls.log")"
+check "every git call disables fsmonitor, signature display, gpg and hooks" "" \
+  "$(grep -v '^-c core.fsmonitor=false -c log.showSignature=false -c gpg.program=false -c core.hooksPath=/dev/null ' "$tmp/git-calls.log")"
 
 # --- what the verbs do
 
