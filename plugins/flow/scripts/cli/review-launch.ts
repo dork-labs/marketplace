@@ -43,6 +43,7 @@ import {
 import { resolveMainCheckout } from '../main-checkout.ts';
 import type { VerbContext, VerbResult } from './context.ts';
 import { tokenHash } from './report.ts';
+import { guardLaunch, launchPermissionMode } from './launch-mode.ts';
 
 /** Where the VERIFY reviewer's brief goes inside its own worktree. */
 export const VERIFY_BRIEF_PATH = path.join('.dork', 'flow', 'review', 'brief.md');
@@ -64,9 +65,10 @@ export async function reviewLaunch(
   run: FlowRun,
   sha: string
 ): Promise<VerbResult> {
-  const { config } = loadConfig(findConfigRoots(ctx.projectDir, ctx.flowRoot), ctx.env, {
+  const { config, files } = loadConfig(findConfigRoots(ctx.projectDir, ctx.flowRoot), ctx.env, {
     now: () => ctx.now(),
   });
+  guardLaunch(ctx, files);
   const mainCheckout = resolveMainCheckout(ctx.projectDir);
   const dorkHome = resolveDorkHome({ ...ctx.env }, ctx.io.osHome);
   const origin = await ctx.runProcess('git', ['remote', 'get-url', 'origin'], {
@@ -143,7 +145,7 @@ export async function reviewLaunch(
       promptFile,
       sessionId: randomUUID(),
       ...(reviewModel ? { model: reviewModel } : {}),
-      permissionMode: config.drain.permissionMode as LaunchPermissionMode,
+      permissionMode: launchPermissionMode(ctx, files, config.drain.permissionMode),
       title: `${run.identifier} VERIFY reviewer`,
     });
     await store.updateRun(run.issueId, (current) =>

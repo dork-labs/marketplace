@@ -77,6 +77,7 @@ import {
 } from '../launchers/types.ts';
 import { AGENT_CLAIMED, AGENT_NEEDS_INPUT, projectionFor } from '../work-state.ts';
 import { loadProjectConfig } from './backlog.ts';
+import { guardLaunch, launchPermissionMode } from './launch-mode.ts';
 import { claimItem } from './claim.ts';
 import type { VerbContext, VerbResult } from './context.ts';
 import { handoffWiring } from './handoff-wiring.ts';
@@ -287,6 +288,7 @@ export async function drain(ctx: VerbContext, options: DrainOptions = {}): Promi
       `flow is paused${paused.until ? ` until ${paused.until}` : paused.pausedAt ? ` (since ${paused.pausedAt})` : ''}; /flow:resume lifts it${paused.until ? ' sooner' : ''}, or pass --manual when a person is driving`
     );
   }
+  guardLaunch(ctx, project.loaded.files);
   const parallel = parallelOf(ctx, config.drain.parallel);
   const pref = hostPreference(flag(ctx, 'host'), config.drain.host);
   const modeFlag = flag(ctx, 'permission-mode');
@@ -308,7 +310,7 @@ export async function drain(ctx: VerbContext, options: DrainOptions = {}): Promi
       `--permission-mode ${modeFlag} is above drain.permissionMode (${configured}); a person raises it in the project's flow settings, never by flag`
     );
   }
-  const permissionMode = (modeFlag ?? configured) as LaunchPermissionMode;
+  const permissionMode = launchPermissionMode(ctx, project.loaded.files, modeFlag ?? configured);
   const items = flag(ctx, 'items')
     ?.split(',')
     .map((id) => id.trim())
@@ -718,7 +720,19 @@ export async function drain(ctx: VerbContext, options: DrainOptions = {}): Promi
   const events: PassEvent[] = [];
   const lines: string[] = [];
   try {
-    for (;;) {
+    for (let pass = 0; ; pass += 1) {
+      if (pass > 0) {
+        // A continuous drain checks again each pass: a revoked or lapsed
+        // grant, or settings or adapter code changed since, take effect now.
+        guardLaunch(ctx, project.loaded.files);
+        const now = launchPermissionMode(ctx, project.loaded.files, modeFlag ?? configured, {
+          quiet: true,
+        });
+        if (now !== deps.settings.permissionMode) {
+          launchPermissionMode(ctx, project.loaded.files, modeFlag ?? configured);
+          deps.settings = { ...deps.settings, permissionMode: now };
+        }
+      }
       const report = await runPass(deps);
       events.push(...report.events);
       const passLines = report.events.map(line);

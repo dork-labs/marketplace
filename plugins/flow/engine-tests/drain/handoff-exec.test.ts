@@ -204,6 +204,22 @@ describe('executeHandoff: one writer per worktree', () => {
   });
 
   it.each([
+    ['a stored bypassPermissions', 'bypassPermissions', 'acceptEdits'],
+    ['a stored default', 'default', 'default'],
+  ] as const)(
+    'starts the new session at the lower of %s and the mode resolved now',
+    async (_n, stored, expected) => {
+      // Purpose: the run store is project data an agent could edit, and a grant
+      // may have lapsed since the worker started (DOR-3062).
+      runs = { 'i-1': limitedRun('cli') };
+      runs['i-1'].drain!.worker = { ...runs['i-1'].drain!.worker!, permissionMode: stored };
+      const out = await executeHandoff(deps(), runs['i-1'], TO, 'rejected');
+      expect(out.status).toBe('moved');
+      expect(script.starts[0]?.permissionMode).toBe(expected);
+    }
+  );
+
+  it.each([
     ['cli, still busy after stop', 'cli', 'busy', false],
     ['a stop that threw', 'cli', 'exited', true],
     ['DorkOS still busy (stop only leaves it idle)', 'dorkos', 'busy', false],

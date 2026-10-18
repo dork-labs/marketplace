@@ -99,6 +99,7 @@ import {
   reviewWorktreePath,
   workspacesDir,
 } from './worktree.ts';
+import { lowerMode } from '../drain-bypass.ts';
 
 /** How far back merge-group failures count when judging an ejection (minutes). */
 const EJECTION_WINDOW_MINUTES = 30;
@@ -390,6 +391,19 @@ function isActive(run: FlowRun): run is DrainRun {
 function launchHandle(handle: DrainWorkerHandle): SessionHandle {
   const { pending: _pending, pendingSince: _since, ...rest } = handle;
   return { ...rest, runtime: handleRuntime(handle) };
+}
+
+/**
+ * A stored worker's handle for a send that may restart it, its mode capped at
+ * the mode resolved now: the run store is project data a steered agent could
+ * edit, and a grant may have lapsed since the worker started (DOR-3062).
+ */
+export function cappedHandle(
+  handle: DrainWorkerHandle,
+  ceiling: LaunchPermissionMode
+): SessionHandle {
+  const base = launchHandle(handle);
+  return { ...base, permissionMode: lowerMode(base.permissionMode, ceiling) };
 }
 
 /** Same JSON, for "did anything change". */
@@ -1002,7 +1016,9 @@ export async function runPass(deps: PassDeps): Promise<PassReport> {
   ): Promise<string> => {
     let sent;
     try {
-      sent = await deps.launcher(worker.host).send(launchHandle(worker), file, { model });
+      sent = await deps
+        .launcher(worker.host)
+        .send(cappedHandle(worker, deps.settings.permissionMode), file, { model });
     } catch (error) {
       if (!(error instanceof LaunchError) || error.code !== 'unsupported') throw error;
       await supervisorWrite(run.issueId, (r) =>
@@ -1071,7 +1087,9 @@ export async function runPass(deps: PassDeps): Promise<PassReport> {
         const file = writeMessage(run.worktreePath, action.message, text);
         const model = action.model;
         if (model !== undefined) return switchModel(run, worker, file, model);
-        const sent = await deps.launcher(worker.host).send(launchHandle(worker), file);
+        const sent = await deps
+          .launcher(worker.host)
+          .send(cappedHandle(worker, deps.settings.permissionMode), file);
         if (!same(sent.handle, launchHandle(worker))) {
           await supervisorWrite(run.issueId, (r) =>
             r.drain.worker?.sessionId === worker.sessionId

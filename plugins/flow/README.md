@@ -228,6 +228,9 @@ agent session per run — so there is no scheduler to build.
   flow schedules off; `/flow:resume` switches back on only those. A timed pause
   (`for 1 hour`, `until 9am`) ends on its own, even with DorkOS closed, and leaves
   schedules on.
+- **Unattended bypass** needs a person's approval in DorkOS (Flow's **Allow
+  unattended bypass** card) and flow **installed globally**. A per-agent install sits
+  inside the project, where an agent could edit flow's own checks, so it never gets it.
 - **Crash/stall recovery** is driven by the durable `FlowRun` record + the
   next-tick recovery ladder (spec §12): a `needs-input` item is never reclaimed;
   an orphaned `agent/claimed` item is adopted + resumed (re-attach the worktree at

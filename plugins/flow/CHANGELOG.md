@@ -4,6 +4,17 @@ Installs of this plugin are pinned to a commit SHA, so a fix here does not reach
 you until you **reinstall it** (Marketplace → flow → reinstall, or re-run your
 `--plugin-dir` checkout's `git pull`). Each entry below says whether that matters.
 
+## 0.59.0
+
+**Security fix: flow's unattended sessions start with every approval bypassed only if a person allowed it in DorkOS. Reinstall now, on DorkOS 0.98.0 or later.**
+
+- `drain.permissionMode: bypassPermissions` used to be enough on its own, and three flow commands may edit the file it lives in without asking. So an agent steered in one turn could have switched every later unattended run to bypass. Now a person also allows it in DorkOS by approving Flow's **Allow unattended bypass** card for that project; ask an agent to "allow unattended bypass" for it. The approval lasts 30 days, or until `config.json` or `config.local.json` changes. Without it, sessions start in `acceptEdits` and say why in one line. There is no way to allow it outside DorkOS.
+- Any mode other than `default`, `acceptEdits` or `plan` needs that approval, so modes added later are covered too.
+- `flow drain`, `flow handoff` and the reviewer `flow report … review-launch` starts now stop, naming the file, if `config.json` or your project's own tracker adapter isn't committed or has changes. That includes a new or ignored file in the adapter's folder, or a link out of the project. The adapters flow ships are recognised by where they really are, not by their name.
+- A worker that was started in bypass doesn't stay in bypass once the approval lapses or is taken back. Resuming it, or handing it to another account, starts it at the lower of its old mode and what's allowed now. A continuous `flow drain` checks the approval, the settings and the adapter again before every pass.
+- Unattended bypass needs flow installed globally. A per-agent install, which lives inside the project at `<project>/.dork/plugins/flow`, never gets it. Bypass is never honoured when flow itself, or DorkOS's data folder, is inside the project, because the agent could then edit the code that checks the approval. If you run flow from a checkout inside your project (`--plugin-dir`, as when working on flow itself), unattended runs never get bypass there, and flow's own adapter files must be committed and unchanged before a drain starts. Settings still inside the plugin get a message to run `config-files.ts migrate` before unattended runs.
+- Flow's DorkOS extension needs DorkOS 0.98.0 or later. It adds two tools: **Allow unattended bypass for a project** (a person must approve it) and **Check unattended bypass for a project**.
+- Known limit: this stops an agent steered inside flow's commands. An agent with a full shell as your user can reach anything on your computer, and with DorkOS login off any local program can approve the card (DOR-505). Turn on DorkOS login if this matters to you.
 ## 0.58.0
 
 **`/flow:decompose` no longer writes a task list flow then rejects, and `/flow:done` reads the item before it files follow-ups. Reinstall to get it.**
