@@ -1,7 +1,7 @@
 ---
 description: Groom the whole backlog — audit, correct, and verify it against the dispatch contract (check = read-only report)
 category: flow
-allowed-tools: Read, Glob, Grep, Edit(.dork/flow/tmp/groom/**), Bash(node --experimental-strip-types "${CLAUDE_PLUGIN_ROOT}/scripts/flow.ts":*), Bash(node --experimental-strip-types "${CLAUDE_PLUGIN_ROOT}/scripts/audit-backlog.ts":*), Skill, Agent, AskUserQuestion, TaskCreate, TaskUpdate
+allowed-tools: Read, Glob, Grep, Edit(.dork/flow/tmp/**), Bash(node --experimental-strip-types "${CLAUDE_PLUGIN_ROOT}/scripts/flow.ts":*), Bash(node --experimental-strip-types "${CLAUDE_PLUGIN_ROOT}/scripts/config-files.ts"), Bash(node --experimental-strip-types "${CLAUDE_PLUGIN_ROOT}/scripts/audit-backlog.ts":*), Skill, Agent, AskUserQuestion, TaskCreate, TaskUpdate
 argument-hint: '[check]'
 ---
 

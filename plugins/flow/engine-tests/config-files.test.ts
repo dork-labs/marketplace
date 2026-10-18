@@ -1899,7 +1899,7 @@ describe('config-files CLI', { timeout: 30_000 }, () => {
     const result = run(scaffoldInstall(), repo, ['scaffold', '--rubric', rubric]);
     expect(result.status).toBe(2);
     expect(existsSync(path.resolve(repo, rubric))).toBe(false);
-    expect(existsSync(path.join(repo, '.agents/flow/config.local.json'))).toBe(false);
+    expect(existsSync(path.join(repo, '.agents/flow'))).toBe(false);
   });
 
   it('takes --rubric only with scaffold', () => {

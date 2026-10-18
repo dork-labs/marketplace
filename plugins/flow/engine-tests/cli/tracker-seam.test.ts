@@ -20,6 +20,7 @@ import {
   symlinkSync,
   writeFileSync,
 } from 'node:fs';
+import { execFileSync } from 'node:child_process';
 import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -260,6 +261,7 @@ describe('tracker failures (exit 4)', () => {
   it('maps a read that throws a plain error to exit 4 through the real factory', async () => {
     // Purpose: a read that cannot reach the tracker must never read as a bug in
     // flow (exit 70) or as an empty result: the CLI exits 4.
+    execFileSync('git', ['init', '-q'], { cwd: project }); // project adapter code loads only in git
     writeConfig({ tracker: 'fake' });
     linkFakeAdapter(path.join(project, '.agents/flow/adapters/fake'));
     const backlogFile = path.join(base, 'backlog.json');
@@ -294,6 +296,37 @@ describe('tracker failures (exit 4)', () => {
       ok: false,
       error: { code: EXIT.tracker, message: expect.stringMatching(/connection reset/) },
     });
+  });
+
+  it("refuses a project's own adapter code outside a git checkout", async () => {
+    // Purpose: commands run `flow <verb>` without asking, so a folder an agent
+    // can write to (say specs/x) must not pose as a project and run its own code.
+    writeConfig({ tracker: 'fake' });
+    linkFakeAdapter(path.join(project, '.agents/flow/adapters/fake'));
+    const probe: VerbDefinition = {
+      name: 'probe',
+      summary: 'A test-only verb that loads the adapter.',
+      common: ['project'],
+      load: async () => ({
+        run: async (ctx) => {
+          await ctx.adapter();
+          return { json: {}, text: '' };
+        },
+      }),
+    };
+    let out = '';
+    const code = await main(['probe', '--json', '--project', project], {
+      env: {},
+      cwd: base,
+      now: () => new Date('2026-09-26T12:00:00.000Z'),
+      stdout: { write: (chunk: string) => (out += chunk) },
+      stderr: { write: () => true },
+      createAdapter: (request) => createCodeAdapter({ ...request, flowRoot: plugin }),
+      runProcess: realProcessRunner,
+      verbs: [probe],
+    });
+    expect(code).toBe(EXIT.config);
+    expect(JSON.parse(out).error.message).toMatch(/only inside a git checkout/);
   });
 
   it('keeps a typed error from the adapter at its own exit code', async () => {

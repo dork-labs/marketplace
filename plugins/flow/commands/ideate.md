@@ -1,7 +1,7 @@
 ---
 description: '/flow IDEATE stage — shape a brief into a structured ideation artifact'
 category: workflow
-allowed-tools: Read, Grep, Glob, Task, TaskOutput, Edit(specs/**), AskUserQuestion, Bash(git rev-parse --show-toplevel), Bash(node --experimental-strip-types "${CLAUDE_PLUGIN_ROOT}/scripts/flow.ts":*)
+allowed-tools: Read, Grep, Glob, Task, TaskOutput, Edit(specs/**), AskUserQuestion, Bash(git rev-parse --show-toplevel), Bash(node --experimental-strip-types "${CLAUDE_PLUGIN_ROOT}/scripts/flow.ts":*), Bash(node --experimental-strip-types "${CLAUDE_PLUGIN_ROOT}/scripts/config-files.ts")
 argument-hint: '<task-brief-or-path-to-notes>'
 ---
 

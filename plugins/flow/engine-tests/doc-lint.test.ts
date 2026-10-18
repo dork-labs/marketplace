@@ -57,6 +57,7 @@ describe('doc-lint/words (the ratchet)', () => {
       '---\ndescription: d e\nallowed-tools: Read, Bash(git diff), Edit(specs/**)\n---\nbody words';
     expect(budgetedWords(text)).toBe(countWords(text) - 5);
     expect(budgetedWords('allowed-tools appears in prose here')).toBe(5);
+    expect(budgetedWords('no front matter\nallowed-tools: a b c')).toBe(7);
   });
 
   it('passes a file at or under its baseline', () => {

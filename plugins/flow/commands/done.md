@@ -1,7 +1,7 @@
 ---
 description: Run the DONE stage — report completion, close the work item, and check project follow-ups
 category: flow
-allowed-tools: Read, Grep, Glob, Bash(git rev-parse --git-dir --git-common-dir), Bash(git status --porcelain), Bash(node --experimental-strip-types "${CLAUDE_PLUGIN_ROOT}/scripts/flow.ts":*), ExitWorktree, AskUserQuestion
+allowed-tools: Read, Grep, Glob, Bash(git rev-parse --git-dir --git-common-dir), Bash(git status --porcelain), Edit(.dork/flow/tmp/**), Bash(node --experimental-strip-types "${CLAUDE_PLUGIN_ROOT}/scripts/flow.ts":*), Bash(node --experimental-strip-types "${CLAUDE_PLUGIN_ROOT}/scripts/config-files.ts"), ExitWorktree, AskUserQuestion
 argument-hint: '[issue-id]'
 ---
 

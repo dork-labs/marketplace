@@ -178,7 +178,10 @@ export function countWords(text: string): number {
  * @returns The words its budget counts.
  */
 export function budgetedWords(text: string): number {
-  return countWords(text.replace(/^allowed-tools:.*$/m, ''));
+  const front = /^---\n[\s\S]*?\n---\n/.exec(text);
+  if (front === null) return countWords(text);
+  const kept = front[0].replace(/^allowed-tools:.*$/m, '');
+  return countWords(kept + text.slice(front[0].length));
 }
 
 /**

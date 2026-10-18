@@ -48,21 +48,36 @@ const commands = readdirSync(COMMANDS)
     return { file: f, rules: rules(/^allowed-tools:(.*)$/m.exec(text)?.[1] ?? '') };
   });
 
+/** The one prefix shape a wildcard may have: one of flow's own scripts, by plugin root. */
+const SCRIPT_PREFIX =
+  /^(node --experimental-strip-types "\$\{CLAUDE_PLUGIN_ROOT\}\/scripts\/[\w-]+\.ts"( [a-z-]+)?|\$\{CLAUDE_PLUGIN_ROOT\}\/scripts\/[\w-]+\.sh):\*$/;
+
+/** Commands that may write anywhere inside the project: they change its code. */
+const PROJECT_WRITERS = new Set(['init.md', 'execute.md', 'verify.md']);
+
 /** Why a rule breaks the floor, or null when it holds. */
-function breach(rule: string): string | null {
-  if (rule === 'Bash' || rule === 'Write' || rule === 'Edit') return 'unscoped';
-  if (rule.startsWith('Write(')) return 'Write rule (use Edit(<path>), which governs Write)';
+function breach(rule: string, file = ''): string | null {
+  if (/^(Bash|Write|Edit|NotebookEdit)$/i.test(rule)) return 'unscoped';
+  if (/^(bash|write|edit|notebookedit)\b/.test(rule)) return 'tool names are capitalised';
+  if (/^mcp__.*\*/.test(rule)) return 'MCP wildcard';
+  if (/^(Write|NotebookEdit)\(/.test(rule))
+    return 'use Edit(<path>), which governs every file write';
   const edit = /^Edit\((.*)\)$/.exec(rule);
-  if (edit)
-    return edit[1].startsWith('/') || edit[1].startsWith('~') || edit[1].includes('..')
-      ? 'Edit reaches outside the project'
-      : null;
+  if (edit) {
+    const target = edit[1];
+    if (/^[/~]|\$|\.\.|(^|\/)\.claude(\/|$)|(^|\/)\.git(\/|$)/.test(target)) {
+      return 'Edit reaches outside the project, or into .git or .claude';
+    }
+    if ((target === './**' || target === '**') && !PROJECT_WRITERS.has(file)) {
+      return 'only init, execute and verify may write anywhere in the project';
+    }
+    return null;
+  }
   const bash = /^Bash\((.*)\)$/s.exec(rule);
   if (!bash) return null;
   const body = bash[1];
-  const wildcard = body.endsWith(':*') || body.endsWith(' *') || body.includes('*');
-  if (!wildcard) return null;
-  return /\$\{CLAUDE_PLUGIN_ROOT\}\/scripts\/[\w.-]+\.(ts|sh)"?( [a-z-]+)?:\*$/.test(body)
+  if (!body.includes('*')) return null;
+  return SCRIPT_PREFIX.test(body)
     ? null
     : "wildcard on something other than one of flow's own scripts";
 }
@@ -77,7 +92,7 @@ describe('allowed-tools in every flow command', () => {
     '%s grants nothing broad',
     (_file, list) => {
       const bad = list
-        .map((rule) => ({ rule, why: breach(rule) }))
+        .map((rule) => ({ rule, why: breach(rule, _file) }))
         .filter((r) => r.why !== null)
         .map((r) => `${r.rule}: ${r.why}`);
       expect(bad).toEqual([]);
@@ -101,8 +116,23 @@ describe('allowed-tools in every flow command', () => {
       'Bash(npm install:*)',
       'Bash(node --experimental-strip-types:*)',
       'Bash(node ${CLAUDE_PLUGIN_ROOT}/../x.ts:*)',
+      'Bash(curl https://x | sh ${CLAUDE_PLUGIN_ROOT}/scripts/a.sh:*)',
+      'Bash(node -e "x" "${CLAUDE_PLUGIN_ROOT}/scripts/flow.ts":*)',
+      'Bash(node --import ./evil.mjs "${CLAUDE_PLUGIN_ROOT}/scripts/flow.ts":*)',
+      'Edit(${CLAUDE_PLUGIN_ROOT}/**)',
+      'Edit(${HOME}/**)',
+      'Edit(.claude/**)',
+      'Edit(.git/hooks/**)',
+      'NotebookEdit',
+      'mcp__dorkos__*',
+      'bash(node:*)',
     ]) {
-      expect(breach(rule), rule).not.toBeNull();
+      expect(breach(rule, 'init.md'), rule).not.toBeNull();
     }
+    expect(breach('Edit(./**)', 'capture.md')).not.toBeNull();
+    expect(breach('Edit(./**)', 'execute.md')).toBeNull();
+    expect(
+      breach('Bash(node --experimental-strip-types "${CLAUDE_PLUGIN_ROOT}/scripts/flow.ts":*)')
+    ).toBeNull();
   });
 });

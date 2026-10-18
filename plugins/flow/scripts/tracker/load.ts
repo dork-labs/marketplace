@@ -95,6 +95,14 @@ export async function loadCodeAdapter(options: LoadCodeAdapterOptions): Promise<
   }
 
   const file = path.join(path.dirname(adapterFiles.path), ADAPTER_CODE_FILE);
+  // Outside a git checkout, any folder an agent can write to can pose as a
+  // project (`--project specs/x`) and name its own adapter code. Commands run
+  // `flow <verb>` without asking, so only the shipped adapters load there.
+  if (!roots.inGit && adapterFiles.origin !== 'shipped') {
+    throw new ConfigError(
+      `flow loads a project's own adapter code only inside a git checkout, and ${roots.checkout} is not one`
+    );
+  }
   if (!existsSync(file)) {
     throw new ConfigError(
       `the ${tracker} adapter has no code; the flow CLI cannot reach the tracker. The skill still works through the adapter's prose`

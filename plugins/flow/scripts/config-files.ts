@@ -1555,10 +1555,11 @@ function rubricTarget(root: string, rubric: string): string {
  * the rubric, each only when absent.
  */
 function scaffold(roots: ConfigRoots, rubric: string | undefined): ScaffoldResult {
+  // Refuse a bad rubric path before anything is created.
+  const target = rubric === undefined ? null : rubricTarget(roots.checkout, rubric);
   const prepared = prepareConfigDirs(roots, resolveConfigFiles(roots));
   const none = { localCreated: false, rubric: null, rubricCreated: false };
   if (!prepared.ok) return { ...prepared, ...none };
-  const target = rubric === undefined ? null : rubricTarget(roots.checkout, rubric);
   const localCreated = copyIfAbsent(
     path.join(roots.pluginRoot, 'config', 'config.local.example.json'),
     prepared.local,

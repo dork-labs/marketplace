@@ -295,7 +295,20 @@ export async function drain(ctx: VerbContext, options: DrainOptions = {}): Promi
       `--permission-mode must be one of ${PERMISSION_MODES.join(', ')}, not "${modeFlag}"`
     );
   }
-  const permissionMode = (modeFlag ?? config.drain.permissionMode) as LaunchPermissionMode;
+  // The flag may lower the configured mode, never raise it: commands run
+  // `flow <verb>` without asking, so a steered agent must not be able to start
+  // sessions with more power than the project's settings give them.
+  const configured = config.drain.permissionMode as LaunchPermissionMode;
+  if (
+    modeFlag !== undefined &&
+    PERMISSION_MODES.indexOf(modeFlag as LaunchPermissionMode) >
+      PERMISSION_MODES.indexOf(configured)
+  ) {
+    throw new UsageError(
+      `--permission-mode ${modeFlag} is above drain.permissionMode (${configured}); a person raises it in the project's flow settings, never by flag`
+    );
+  }
+  const permissionMode = (modeFlag ?? configured) as LaunchPermissionMode;
   const items = flag(ctx, 'items')
     ?.split(',')
     .map((id) => id.trim())

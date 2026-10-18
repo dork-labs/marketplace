@@ -91,13 +91,6 @@ export function renderSnapshotSummary(snapshot: BacklogSnapshot, includeClosed: 
 }
 
 /**
- * Write the snapshot JSON to a file through a temp file and a rename, so a
- * reader never sees half of it.
- *
- * @param file - The absolute target path.
- * @param json - The JSON text.
- */
-/**
  * Refuse an `--out` target that is not a snapshot file. Commands allow
  * `flow <verb>` without asking, so `--out` must not become a way to overwrite
  * any file (a shell profile, a settings file) with tracker text: the target
@@ -138,6 +131,13 @@ function checkSnapshotTarget(file: string): void {
   }
 }
 
+/**
+ * Write the snapshot JSON to a file through a temp file and a rename, so a
+ * reader never sees half of it.
+ *
+ * @param file - The absolute target path.
+ * @param json - The JSON text.
+ */
 function writeSnapshotFile(file: string, json: string): void {
   mkdirSync(path.dirname(file), { recursive: true });
   const temp = `${file}.${process.pid}.tmp`;

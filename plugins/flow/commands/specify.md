@@ -1,7 +1,7 @@
 ---
 description: '/flow SPECIFY stage — turn an ideation artifact into a validated specification'
 category: workflow
-allowed-tools: Read, Grep, Glob, Task, TaskOutput, Edit(specs/**), Edit(decisions/**), AskUserQuestion, Bash(git rev-parse --show-toplevel), Bash(node --experimental-strip-types "${CLAUDE_PLUGIN_ROOT}/scripts/flow.ts":*)
+allowed-tools: Read, Grep, Glob, Task, TaskOutput, Edit(specs/**), Edit(decisions/**), AskUserQuestion, Bash(git rev-parse --show-toplevel), Edit(.dork/flow/tmp/**), Bash(node --experimental-strip-types "${CLAUDE_PLUGIN_ROOT}/scripts/flow.ts":*), Bash(node --experimental-strip-types "${CLAUDE_PLUGIN_ROOT}/scripts/config-files.ts")
 argument-hint: '<path-to-01-ideation.md>'
 ---
 

@@ -1,7 +1,7 @@
 ---
 description: Classify and route incoming work, simple-vs-complex (the /flow TRIAGE stage)
 category: flow
-allowed-tools: Read, Glob, Skill, AskUserQuestion, Bash(node --experimental-strip-types "${CLAUDE_PLUGIN_ROOT}/scripts/flow.ts":*)
+allowed-tools: Read, Glob, Skill, AskUserQuestion, Edit(.dork/flow/tmp/**), Bash(node --experimental-strip-types "${CLAUDE_PLUGIN_ROOT}/scripts/flow.ts":*), Bash(node --experimental-strip-types "${CLAUDE_PLUGIN_ROOT}/scripts/config-files.ts")
 argument-hint: '<freeform brief/idea/bug, a file path, or an existing item identifier>'
 ---
 
