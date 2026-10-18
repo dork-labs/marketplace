@@ -1,13 +1,15 @@
 ---
 description: Create an isolated git worktree for parallel work
 argument-hint: '<branch-name> [--from-current]'
-allowed-tools: Bash(git worktree:*), Bash(git rev-parse:*), Bash(git fetch:*), Bash(git -C:*), Bash(git branch:*), Bash(npm ci:*), Read, EnterWorktree, AskUserQuestion
+allowed-tools: Bash(git worktree list), Bash(git rev-parse --git-dir --git-common-dir), Bash(git fetch origin), Bash(scripts/worktree-git.sh branch-exists:*), Bash(scripts/worktree-git.sh add:*), Bash(scripts/worktree-git.sh add-existing:*), Bash(scripts/worktree-git.sh describe:*), Bash(npm ci:*), Read, EnterWorktree, AskUserQuestion
 category: git
 ---
 
 # Worktree Create
 
 Create an isolated git worktree under `.worktrees/` (gitignored). This repo has no `.gtrconfig` and no post-create hook, so the worktree is plain git: install dependencies yourself only if the work needs them.
+
+Git runs through `scripts/worktree-git.sh`, run from the main checkout's root (never a worktree's copy), wherever a command takes a branch or a path: it checks each argument, then runs one fixed git command. Pass worktree paths exactly as `git worktree list` prints them. Do not reach for raw `git -C`, `git log` or `git ls-remote` instead: those are the prefix rules this command no longer allows, because their options can write files and run commands.
 
 ## Arguments
 
@@ -45,10 +47,10 @@ If the two paths differ, the current directory is a secondary worktree — warn 
 
 ```bash
 git worktree list
-git branch --list <branch-name>
+scripts/worktree-git.sh branch-exists <branch-name>
 ```
 
-If a worktree already exists for `<branch-name>`, report its location and stop. If the branch exists locally but has no worktree, ask whether to check it out (`git worktree add .worktrees/<folder> <branch-name>`) instead of creating a new one.
+If a worktree already exists for `<branch-name>`, report its location and stop. If the branch exists locally but has no worktree, ask whether to check it out (`scripts/worktree-git.sh add-existing <folder> <branch-name>`) instead of creating a new one.
 
 ### Step 2: Create Worktree
 
@@ -56,10 +58,10 @@ If a worktree already exists for `<branch-name>`, report its location and stop. 
 git fetch origin
 
 # From origin/main (default)
-git worktree add .worktrees/<folder> -b <branch-name> origin/main
+scripts/worktree-git.sh add <folder> <branch-name> origin/main
 
 # OR from the current branch (if --from-current)
-git worktree add .worktrees/<folder> -b <branch-name> HEAD
+scripts/worktree-git.sh add <folder> <branch-name> HEAD
 ```
 
 **Always base on `origin/main`, not local `main`.** Local `main` drifts behind origin, and a worktree started there carries a stale base into its PR diff.
@@ -83,17 +85,11 @@ Manifest-only or prose-only work needs neither. If `npm ci` fails, report the er
 Confirm the worktree exists before reporting a path to anyone:
 
 ```bash
-W="$(git rev-parse --show-toplevel)/.worktrees/<folder>"
-if [ -d "$W" ]; then
-  git -C "$W" log --oneline -1
-  git -C "$W" branch --show-current
-else
-  echo "MISSING — recreate it"
-fi
 git worktree list
+scripts/worktree-git.sh describe <absolute path of .worktrees/<folder>, as the list prints it>
 ```
 
-Keep every `git -C "$W"` inside the guard: `git -C ""` falls back to the current directory and would report success for a path that does not exist.
+`describe` prints the branch, then the last commit. It refuses any path `git worktree list` does not print, so a refusal here means the worktree is missing: recreate it.
 
 ### Step 5: Offer to Switch the Session
 

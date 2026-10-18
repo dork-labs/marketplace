@@ -1,13 +1,15 @@
 ---
 description: Find worktrees and local branches whose work has landed, and remove them when asked
 argument-hint: '[--fix]'
-allowed-tools: Bash(git worktree:*), Bash(git -C:*), Bash(git fetch:*), Bash(git branch:*), Bash(git log:*), Bash(git rev-parse:*), Bash(git ls-remote:*), Bash(gh pr list:*), Bash(gh pr view:*)
+allowed-tools: Bash(git fetch origin --prune), Bash(git worktree list --porcelain), Bash(git worktree prune), Bash(git branch), Bash(scripts/worktree-git.sh status-ignored:*), Bash(scripts/worktree-git.sh tip:*), Bash(scripts/worktree-git.sh on-origin:*), Bash(scripts/worktree-git.sh unmerged:*), Bash(scripts/worktree-git.sh remote-contains:*), Bash(scripts/worktree-git.sh remove:*), Bash(scripts/worktree-git.sh delete-branch:*), Bash(gh pr list:*), Bash(gh pr view:*)
 category: git
 ---
 
 # Worktree Prune
 
 Delete the worktrees and local branches that finished work left behind. Reports by default and writes only when asked.
+
+Git runs through `scripts/worktree-git.sh`, run from the main checkout's root (never a worktree's copy), wherever a command takes a branch or a path: it checks each argument, then runs one fixed git command. Pass worktree paths exactly as `git worktree list` prints them. Do not reach for raw `git -C`, `git log` or `git ls-remote` instead: those are the prefix rules this command no longer allows, because their options can write files and run commands.
 
 This repo has no janitor script, so this command is a procedure: gather the facts per worktree, classify each one with the table below, and remove only what is provably safe. When in doubt, it is `KEEP`.
 
@@ -33,10 +35,10 @@ If `gh` fails, or the listing returns exactly the limit (it may be truncated), e
 For each secondary worktree (skip the first entry, the main checkout) and each local branch without a worktree, collect:
 
 ```bash
-git -C <path> status --porcelain --ignored   # uncommitted, untracked, and ignored files
-git rev-parse <branch>                        # local tip
-git ls-remote origin refs/heads/<branch>      # still on origin?
-git log --oneline origin/main..<branch>       # commits main has not seen by ancestry
+scripts/worktree-git.sh status-ignored <path>   # uncommitted, untracked, and ignored files
+scripts/worktree-git.sh tip <branch>            # local tip
+scripts/worktree-git.sh on-origin <branch>      # still on origin?
+scripts/worktree-git.sh unmerged <branch>       # commits origin/main has not seen by ancestry
 ```
 
 `main` merges by squash, so `origin/main..<branch>` is usually non-empty even for merged work. Merged state comes from the PR, not from ancestry.
@@ -45,7 +47,7 @@ git log --oneline origin/main..<branch>       # commits main has not seen by anc
 
 `REAP` only when **all** hold: not protected, not the current worktree, no uncommitted or untracked files, and either
 - its PR is `MERGED` and the local tip equals the PR's `headRefOid` (nothing pushed after the merge), or
-- the branch is gone from origin **and** every local commit is reachable from some remote ref (`git branch -r --contains <tip>`), and no open PR exists.
+- the branch is gone from origin **and** every local commit is reachable from some remote ref (`scripts/worktree-git.sh remote-contains <tip>`), and no open PR exists.
 
 Everything else is `KEEP <slug>`:
 
@@ -69,9 +71,9 @@ Present the plan as one line per worktree or branch: `REAP <path|branch>` or `KE
 Only when `$ARGUMENTS` contains `--fix`, and only for `REAP` lines. Record each tip SHA first, because `git branch -D` deletes the branch's reflog too:
 
 ```bash
-git rev-parse <branch>            # write this down in your report
-git worktree remove <path>        # no --force: let git refuse anything that changed since Step 1
-git branch -D <branch>            # squash-merged branches fail `-d`; -D is safe here only because Step 2 proved the PR merged
+scripts/worktree-git.sh tip <branch>            # write this down in your report
+scripts/worktree-git.sh remove <path>           # never --force: let git refuse anything that changed since Step 1
+scripts/worktree-git.sh delete-branch <branch>  # git branch -D: squash-merged branches fail `-d`; -D is safe here only because Step 2 proved the PR merged
 git worktree prune
 ```
 

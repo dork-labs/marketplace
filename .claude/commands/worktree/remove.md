@@ -1,13 +1,15 @@
 ---
 description: Remove a git worktree safely
 argument-hint: '<branch-name> [--delete-branch]'
-allowed-tools: Bash(git worktree list:*), Bash(git worktree remove:*), Bash(git worktree prune:*), Bash(git -C:*), Bash(git branch -d:*), Bash(git rev-parse:*)
+allowed-tools: Bash(git worktree list), Bash(git worktree prune), Bash(scripts/worktree-git.sh status:*), Bash(scripts/worktree-git.sh tip:*), Bash(scripts/worktree-git.sh remove:*), Bash(scripts/worktree-git.sh delete-merged-branch:*)
 category: git
 ---
 
 # Worktree Remove
 
 Remove a git worktree after checking for uncommitted changes.
+
+Git runs through `scripts/worktree-git.sh`, run from the main checkout's root (never a worktree's copy), wherever a command takes a branch or a path: it checks each argument, then runs one fixed git command. Pass worktree paths exactly as `git worktree list` prints them. Do not reach for raw `git -C`, `git log` or `git ls-remote` instead: those are the prefix rules this command no longer allows, because their options can write files and run commands.
 
 ## Arguments
 
@@ -46,7 +48,7 @@ Scan the output for `[<branch-name>]`. If no worktree matches, report and stop. 
 **Check for uncommitted changes:**
 
 ```bash
-git -C <worktree-path> status --porcelain
+scripts/worktree-git.sh status <worktree-path>
 ```
 
 If there are uncommitted changes, warn the user and ask for confirmation before proceeding.
@@ -56,20 +58,20 @@ If there are uncommitted changes, warn the user and ask for confirmation before 
 Record the branch tip first, so the report carries a recovery handle:
 
 ```bash
-git rev-parse <branch-name>
-git worktree remove <worktree-path>
+scripts/worktree-git.sh tip <branch-name>
+scripts/worktree-git.sh remove <worktree-path>
 git worktree prune
 ```
 
-`git worktree remove` refuses a worktree with modified or untracked files. If the user confirmed in Step 1 that those changes can go, say so explicitly before retrying with `--force`; never add `--force` on your own.
+`git worktree remove` refuses a worktree with modified or untracked files. If the user confirmed in Step 1 that those changes can go, say so explicitly before retrying with `git worktree remove --force <worktree-path>`, which asks for permission; never add `--force` on your own.
 
 If `--delete-branch` was specified:
 
 ```bash
-git branch -d <branch-name>
+scripts/worktree-git.sh delete-merged-branch <branch-name>
 ```
 
-If the branch hasn't been merged, `git branch -d` will fail safely. Because `main` merges by squash, a merged PR's branch also fails `-d`. Report this and suggest `git branch -D` only after confirming the PR merged (`gh pr view <branch-name> --json state`).
+If the branch hasn't been merged, `delete-merged-branch` (`git branch -d`) will fail safely. Because `main` merges by squash, a merged PR's branch also fails `-d`. Report this and suggest `git branch -D` only after confirming the PR merged (`gh pr view <branch-name> --json state`).
 
 ### Step 3: Verify
 

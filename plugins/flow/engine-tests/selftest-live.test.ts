@@ -413,7 +413,17 @@ describe('the live tier runner', { timeout: LIVE_TIMEOUT }, () => {
     expect(after('--max-turns')).toBe('5');
     expect(
       argv.slice(argv.indexOf('--allowed-tools') + 1, argv.indexOf('--disallowed-tools'))
-    ).toEqual(['Read', 'Write', 'Edit', 'Glob', 'Grep', 'Bash(node *)', 'Bash(git *)']);
+    ).toEqual([
+      'Read',
+      'Write',
+      'Edit',
+      'Glob',
+      'Grep',
+      'Bash(node *)',
+      'Bash(git rev-parse --git-dir --git-common-dir)',
+      'Bash(git status --porcelain)',
+      'Bash(git branch --show-current)',
+    ]);
     const denied = argv.slice(argv.indexOf('--disallowed-tools') + 1);
     expect(denied).toContain(`Edit(/${FLOW_ROOT}/**)`);
     expect(denied).toContain(`Write(/${FLOW_ROOT}/**)`);

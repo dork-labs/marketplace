@@ -55,7 +55,10 @@ export const ALLOWED_TOOLS: readonly string[] = [
   'Glob',
   'Grep',
   'Bash(node *)',
-  'Bash(git *)',
+  // Exact spellings only: a git rule ending in a wildcard allows `--output=<file>`.
+  'Bash(git rev-parse --git-dir --git-common-dir)',
+  'Bash(git status --porcelain)',
+  'Bash(git branch --show-current)',
 ];
 
 /**
