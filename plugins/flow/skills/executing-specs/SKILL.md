@@ -65,8 +65,7 @@ or a loud stop, never a silent 2; `"never"` starts at 2. With `context.perIssue`
    re-ask. `"worktree"` (default): isolate without asking, and say so in one line (one
    checkout, one writer). `"none"`: execute in place; if another agent or session works
    in this checkout, warn and proceed. Prefer the harness's worktree tooling; else
-   the worktree script, at the exact path `/flow:execute` spells (makes `../spec-<SLUG>`).
-   It refuses, or `../spec-<SLUG>` exists: ask the person.
+   `/flow:execute`'s worktree script (refused: ask).
 3. Only two things override the config: an explicit human instruction for this run
    (logged as an assumption), or a config that cannot decide.
 4. Config cannot decide: recommend a worktree if the tree has unrelated changes, the
