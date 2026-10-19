@@ -8,7 +8,7 @@
 // Zero dependencies. Configuration is all environment:
 //   BRAINSTORM_DIR       session directory (content/, state/, shots/)
 //   BRAINSTORM_PORT      port (vc passes one; random if unset)
-//   BRAINSTORM_HOST      bind host (127.0.0.1)
+//   BRAINSTORM_HOST      bind host (127.0.0.1); only 127.0.0.1, ::1 or localhost
 //   BRAINSTORM_URL_HOST  host printed in URLs (localhost)
 //   BRAINSTORM_IDLE_MS   idle shutdown, ms (4h; 0 disables)
 //   BRAINSTORM_THEME     default theme for screens with no ?theme= or meta (light)
@@ -98,6 +98,17 @@ function decodeFrame(buffer) {
 
 const PORT = Number(process.env.BRAINSTORM_PORT || 49152 + Math.floor(Math.random() * 16383));
 const HOST = process.env.BRAINSTORM_HOST || '127.0.0.1';
+// The server takes notes and Sends that wake an agent, so it listens on this
+// computer only. Reach it from elsewhere by forwarding the port (ssh -L).
+const LOOPBACK_HOSTS = ['127.0.0.1', '::1', 'localhost'];
+if (!LOOPBACK_HOSTS.includes(HOST)) {
+  console.error(
+    JSON.stringify({
+      error: `the visual companion listens on this computer only (127.0.0.1, ::1 or localhost), not ${HOST}; to see it from another machine, forward the port, e.g. ssh -L <port>:localhost:<port>`,
+    })
+  );
+  process.exit(2);
+}
 const URL_HOST = process.env.BRAINSTORM_URL_HOST || (HOST === '127.0.0.1' ? 'localhost' : HOST);
 const SESSION_DIR = process.env.BRAINSTORM_DIR || '/tmp/brainstorm';
 const CONTENT_DIR = path.join(SESSION_DIR, 'content');

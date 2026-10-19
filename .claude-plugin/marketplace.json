@@ -79,6 +79,16 @@
       "category": "dev-tools",
       "tags": ["docker", "cleanup"],
       "keywords": ["docker", "containers", "disk"]
+    },
+    {
+      "name": "visual-companion",
+      "source": "./plugins/visual-companion",
+      "description": "Show a person what you mean instead of describing it: the agent puts screens, mockups and clickable prototypes in a browser window beside the chat, and the person points at what they want changed and sends it back.",
+      "author": { "name": "Dork Labs" },
+      "license": "MIT",
+      "category": "dev-tools",
+      "tags": ["design", "prototyping", "mockups", "review", "ui"],
+      "keywords": ["visual-companion", "mockup", "prototype", "design-review", "canvas"]
     }
   ]
 }

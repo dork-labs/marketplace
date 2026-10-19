@@ -1,7 +1,7 @@
 ---
 name: visual-companion
 description: Browser-based visual companion for showing mockups, diagrams, comparisons, and interactive options. Use when the user would understand something better by seeing it than reading it.
-license: Complete terms in LICENSE.txt
+license: MIT; portions MIT (c) 2025 Jesse Vincent (superpowers). See LICENSE and NOTICE in the package.
 ---
 
 # Visual companion

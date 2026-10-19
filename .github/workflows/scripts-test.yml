@@ -17,6 +17,10 @@ name: scripts
 # - test-worktree-git.sh pins the wrapper the /worktree:* commands allow in
 #   place of prefix rules on git, which would hand out a shell (DOR git allow
 #   rules audit): every refusal is a way an option could reach git.
+# - plugins/visual-companion/tests/install-smoke.sh runs the package from a copy
+#   made the way an install makes one (no dependencies, no DorkOS checkout), and
+#   17-loopback.test.cjs pins that its server refuses any non-loopback address.
+#   Node only, a few seconds; the browser tests run with `npm test` there.
 # - .claude/skills/creating-pull-requests/scripts/test-watch-prs.sh pins the
 #   PR watcher's classifications, which agents act on when a PR stalls.
 #
@@ -78,6 +82,12 @@ jobs:
       - name: Worktree git wrapper
         if: ${{ !cancelled() }}
         run: bash scripts/test-worktree-git.sh
+
+      - name: Visual companion installs and stays on loopback
+        if: ${{ !cancelled() }}
+        run: |
+          bash plugins/visual-companion/tests/install-smoke.sh
+          node --test plugins/visual-companion/skills/visual-companion/tests/17-loopback.test.cjs
 
       - name: PR watcher
         if: ${{ !cancelled() }}

@@ -7,7 +7,7 @@
   "displayName": "Visual Companion",
   "author": "Dork Labs",
   "license": "MIT",
-  "category": "design",
+  "category": "dev-tools",
   "tags": ["design", "prototyping", "mockups", "review", "ui"],
   "icon": "🖼️",
   "layers": ["skills"]
