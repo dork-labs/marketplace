@@ -1045,6 +1045,19 @@ const WRONG_HOST = {
   message: 'The visual companion answers only to localhost, 127.0.0.1 or [::1] on its own port.',
 };
 
+// Event types a page may not write. The server records where a Send is
+// (`delivery`), and only the agent answers a note (`pin-resolve`, from
+// `vc review`, a local tool with no Origin). A page faking either could mark a
+// Send delivered, answer a note in the agent's name, or (a malformed delivery)
+// break every read of the notes.
+const SERVER_ONLY = new Set(['delivery']);
+const AGENT_ONLY = new Set(['pin-resolve']);
+const SERVER_ONLY_MESSAGE = 'Pages cannot write delivery records or answer notes.';
+function pageMayWrite(type, fromPage) {
+  if (SERVER_ONLY.has(type)) return false;
+  return !(fromPage && AGENT_ONLY.has(type));
+}
+
 // A cross-origin write must carry the token `vc review open` minted for that
 // review (the `vt` in its link). Without it any local page could post a Send
 // that wakes the agent.
@@ -1215,6 +1228,8 @@ function routeRequest(req, res) {
         return send(res, 400, { ok: false, error: 'bad event' });
       const { vt, ...rest } = event;
       if (!originOk(req)) return send(res, 403, FOREIGN_ORIGIN);
+      if (!pageMayWrite(rest.type, req.headers.origin !== undefined))
+        return send(res, 403, { ok: false, error: 'not-yours', message: SERVER_ONLY_MESSAGE });
       if (crossOrigin(req) && !tokenOk(rest.screen, vt))
         return send(res, 403, {
           ok: false,
@@ -1348,6 +1363,8 @@ function handleMessage(text) {
   // `null`, a number or an array parses fine but is no event (and `null.type` throws).
   if (!event || typeof event !== 'object' || Array.isArray(event)) return;
   if (event.type === 'ping') return;
+  // Every socket is a page.
+  if (!pageMayWrite(event.type, true)) return;
   // One bad frame must not take the server (and every open page) down with it.
   try {
     recordEvent(event);

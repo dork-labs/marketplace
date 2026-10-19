@@ -369,6 +369,6 @@ app's tokens are newer, and `scripts/vc build` rebuilds both.
 - `scripts/shoot.cjs`: screenshots; `scripts/locate.cjs` finds the repo, playwright-core and Chromium
 - `scripts/assets/tokens.css`, `app.css`: the palette and the DorkOS app's stylesheet, shipped built.
   `scripts/build-assets.mjs` (`vc build`) rebuilds them from a DorkOS checkout when one is found
-- `tests/run.sh`: 89 headless checks (playwright-core + Chromium; `npm ci` in the package folder)
+- `tests/run.sh`: 90 headless checks (playwright-core + Chromium; `npm ci` in the package folder)
 - `examples/components.html`: every component on one screen
 - `scripts/start-server.sh`, `stop-server.sh`: the v1 entry points, still working

@@ -37,11 +37,14 @@ function notes(events, screen, shotsDir) {
       if (same && was.delivery) next.delivery = was.delivery;
       if (!same) delete next.reply;
       delete next.quiet;
+      // A crop is a file found on disk (below), never a path an event names.
+      delete next.crop;
       m.set(e.n, next);
     } else if (e.type === 'pin-delete') m.delete(e.n);
     else if (e.type === 'delivery') {
       // Where a sent note is: queued, delivered or failed (with why). New text resets it.
-      for (const n of e.notes || [])
+      // A malformed line (notes not a list) is skipped, not fatal to every read.
+      for (const n of Array.isArray(e.notes) ? e.notes : [])
         if (m.has(n))
           m.set(n, {
             ...m.get(n),

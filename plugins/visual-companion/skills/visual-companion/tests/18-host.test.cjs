@@ -314,3 +314,48 @@ test('a Send with malformed fields neither crashes the server nor replays on res
   await new Promise((resolve) => setTimeout(resolve, 2500));
   assert.strictEqual(again.child.exitCode, null, 'the restarted server is still running');
 });
+
+test('a page cannot write delivery records or answer notes, and a bad record cannot break notes', async () => {
+  const s = await start('127.0.0.1');
+  assert.ok(s.port > 0, s.error);
+  const host = `localhost:${s.port}`;
+  const post = (ev, origin) => {
+    const body = JSON.stringify(ev);
+    return raw(
+      s.port,
+      `POST /vc/event HTTP/1.1\r\nHost: ${host}\r\nContent-Type: text/plain\r\n` +
+        (origin ? `Origin: ${origin}\r\nSec-Fetch-Site: same-origin\r\n` : '') +
+        `Content-Length: ${Buffer.byteLength(body)}\r\nConnection: close\r\n\r\n${body}`
+    );
+  };
+  const page = `http://${host}`;
+  assert.match(
+    await post({ type: 'pin', screen: 'a', n: 1, note: 'fix', crop: '/etc/passwd' }, page),
+    /^HTTP\/1\.1 200/
+  );
+  // Server-only, from anywhere; the agent's answer, from no page.
+  assert.match(
+    await post({ type: 'delivery', screen: 'a', notes: 5 }, page),
+    /^HTTP\/1\.1 403[\s\S]*not-yours/
+  );
+  assert.match(await post({ type: 'delivery', screen: 'a', notes: 5 }), /^HTTP\/1\.1 403/);
+  assert.match(
+    await post({ type: 'pin-resolve', screen: 'a', n: 1, reply: 'done' }, page),
+    /^HTTP\/1\.1 403/
+  );
+  // A malformed record already in the log (an older version wrote it) is skipped.
+  fs.appendFileSync(
+    path.join(s.dir, 'state', 'events'),
+    JSON.stringify({ type: 'delivery', screen: 'a', notes: 5, timestamp: Date.now() }) + '\n'
+  );
+  const pins = await get(s.port, host, '/vc/pins?screen=a');
+  assert.match(pins, /^HTTP\/1\.1 200/);
+  assert.doesNotMatch(pins, /etc\/passwd/, 'a crop is a file on disk, never a path a page names');
+  assert.match(await get(s.port, host, '/vc/review'), /^HTTP\/1\.1 200/);
+  // `vc review` answers with no Origin, and that still works.
+  assert.match(
+    await post({ type: 'pin-resolve', screen: 'a', n: 1, reply: 'done', by: 'agent' }),
+    /^HTTP\/1\.1 200/
+  );
+  assert.match(await get(s.port, host, '/vc/pins?screen=a'), /"status":"resolved"/);
+});
