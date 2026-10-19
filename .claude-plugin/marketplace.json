@@ -79,6 +79,16 @@
       "category": "dev-tools",
       "tags": ["docker", "cleanup"],
       "keywords": ["docker", "containers", "disk"]
+    },
+    {
+      "name": "visual-companion",
+      "source": "./plugins/visual-companion",
+      "description": "Your agent shows you screens, mockups and clickable prototypes beside the chat. Pin a note on the exact spot you want changed, press Send, and it gets to work. It runs on this computer only, with no share or guest links. Any page this renders can message the agent that owns it. Don't open pages you don't trust.",
+      "author": { "name": "Dork Labs" },
+      "license": "MIT",
+      "category": "dev-tools",
+      "tags": ["design", "prototyping", "mockups", "review", "feedback"],
+      "keywords": ["visual-companion", "mockup", "prototype", "design-review", "canvas"]
     }
   ]
 }

@@ -1,0 +1,14 @@
+{
+  "schemaVersion": 1,
+  "name": "visual-companion",
+  "version": "0.1.0",
+  "type": "skill-pack",
+  "description": "Your agent shows you screens, mockups and clickable prototypes beside the chat. Pin a note on the exact spot you want changed, press Send, and it gets to work. It runs on this computer only, with no share or guest links. Any page this renders can message the agent that owns it. Don't open pages you don't trust.",
+  "displayName": "Visual Companion",
+  "author": "Dork Labs",
+  "license": "MIT",
+  "category": "dev-tools",
+  "tags": ["design", "prototyping", "mockups", "review", "feedback"],
+  "icon": "🖼️",
+  "layers": ["skills"]
+}

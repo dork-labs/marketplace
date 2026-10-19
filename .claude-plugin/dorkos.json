@@ -49,6 +49,14 @@
       "layers": ["skills"],
       "icon": "🧹",
       "pricing": { "model": "free" }
+    },
+    "visual-companion": {
+      "type": "skill-pack",
+      "displayName": "Visual Companion",
+      "categories": ["dev-tools", "productivity"],
+      "layers": ["skills"],
+      "icon": "🖼️",
+      "pricing": { "model": "free" }
     }
   }
 }
