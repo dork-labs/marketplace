@@ -47,6 +47,9 @@ companion, opens the screen, and tells you where to look.
 
 ## What runs on your computer
 
+**Any page this renders can message the agent that owns it. Don't open pages you don't trust.**
+It's made for one person on one machine: there are no share or guest links.
+
 This package runs code. When the agent uses it, it starts a small local web
 server written in Node (`skills/visual-companion/scripts/server.cjs`), with no
 dependencies of its own.
@@ -54,9 +57,10 @@ dependencies of its own.
 - **This computer only.** The server listens on `127.0.0.1` (or `::1` /
   `localhost`) and refuses any other address. To see it from another machine,
   forward the port, for example `ssh -L <port>:localhost:<port>`.
-- **Other local pages can't write or Send.** A page served from another port on
-  this computer can read notes, but writing a note or pressing Send from there
-  needs the token the agent created for that review, which other pages never see.
+- **Pages from other local ports need a token.** A page served from another port
+  on this computer can read notes, but writing a note or pressing Send from there
+  needs the token the agent created for that review. A page the companion itself
+  renders needs no token, which is why the warning above matters.
 - **It stops on its own** after four hours idle (`vc stop` stops it at once).
 - **It writes only** to its session folder in your project (`.dork/visual-companion/`).
 
