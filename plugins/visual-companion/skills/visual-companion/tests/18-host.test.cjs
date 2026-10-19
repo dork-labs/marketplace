@@ -207,7 +207,7 @@ test('a malformed path costs one 400 or 404, never the server', async () => {
   const s = await start('127.0.0.1');
   assert.ok(s.port > 0, s.error);
   const host = `localhost:${s.port}`;
-  for (const p of ['/files/%E0', '/vc/shot/%E0.png', '//']) {
+  for (const p of ['/files/%E0', '/vc/shot/%E0.png', '//', '/files/%2E%2E%2F']) {
     const r = await get(s.port, host, p);
     assert.match(r, /^HTTP\/1\.1 (400|404)/, p);
   }

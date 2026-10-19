@@ -1021,6 +1021,23 @@ function readBody(req, cb) {
   req.on('end', () => cb(data));
 }
 
+// Whether a path is a regular file (a folder, like `files/%2E%2E%2F`, is not).
+function isFile(f) {
+  try {
+    return fs.statSync(f).isFile();
+  } catch {
+    return false;
+  }
+}
+
+// Stream a file; a read that fails later (gone, unreadable) drops the response.
+function stream(f, res) {
+  return fs
+    .createReadStream(f)
+    .on('error', () => res.destroy())
+    .pipe(res);
+}
+
 // A path segment decoded, or null when it is not valid percent-encoding.
 function safeDecode(s) {
   try {
@@ -1124,15 +1141,15 @@ function routeRequest(req, res) {
   if (req.method === 'GET' && tail.startsWith('vc/shot/')) {
     const name = safeDecode(tail.slice(8));
     const f = name === null ? '' : path.join(SHOTS_DIR, path.basename(name));
-    if (!f.endsWith('.png') || !fs.existsSync(f)) return send(res, 404, 'Not found', 'text/plain');
+    if (!f.endsWith('.png') || !isFile(f)) return send(res, 404, 'Not found', 'text/plain');
     res.writeHead(200, { 'Content-Type': 'image/png', 'Cache-Control': 'no-cache' });
-    return fs.createReadStream(f).pipe(res);
+    return stream(f, res);
   }
   if (req.method === 'GET' && tail === 'vc/app.css') {
-    if (!fs.existsSync(APP_CSS_FILE))
+    if (!isFile(APP_CSS_FILE))
       return send(res, 404, 'app.css is not built yet: run scripts/vc build', 'text/plain');
     res.writeHead(200, { 'Content-Type': MIME_TYPES['.css'], 'Cache-Control': 'max-age=300' });
-    return fs.createReadStream(APP_CSS_FILE).pipe(res);
+    return stream(APP_CSS_FILE, res);
   }
   if (req.method === 'POST' && tail === 'vc/event') {
     return readBody(req, (body) => {
@@ -1160,10 +1177,10 @@ function routeRequest(req, res) {
     const name = safeDecode(tail.slice(6));
     if (name === null) return send(res, 404, 'Not found', 'text/plain');
     const filePath = path.join(CONTENT_DIR, path.basename(name));
-    if (!fs.existsSync(filePath)) return send(res, 404, 'Not found', 'text/plain');
+    if (!isFile(filePath)) return send(res, 404, 'Not found', 'text/plain');
     const ext = path.extname(filePath).toLowerCase();
     res.writeHead(200, { 'Content-Type': MIME_TYPES[ext] || 'application/octet-stream' });
-    return fs.createReadStream(filePath).pipe(res);
+    return stream(filePath, res);
   }
   if (req.method === 'GET' && (p.endsWith('/') || p.endsWith('.html') || !p.includes('.'))) {
     const html = renderScreen(url.searchParams.get('screen'), {
