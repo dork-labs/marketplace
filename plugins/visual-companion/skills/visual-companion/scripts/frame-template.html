@@ -1,0 +1,23 @@
+<!doctype html>
+<html lang="en" class="light">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title><!-- TITLE --> · Visual companion</title>
+    <!-- Layer order, declared before any stylesheet: the frame's content styles
+         sit under the app's components and utilities (so `text-sm` beats `h3`),
+         and the frame's chrome sits over everything. -->
+    <style>
+      @layer theme, base, vc, components, blintz, border-defaults, utilities, vc-chrome;
+    </style>
+    <!-- HEAD -->
+  </head>
+  <body class="vc-framed">
+    <main class="vc-main" id="vc-main">
+      <div id="claude-content">
+        <!-- CONTENT -->
+      </div>
+    </main>
+    <!-- SCRIPTS -->
+  </body>
+</html>

@@ -1,0 +1,5 @@
+{
+  "name": "visual-companion",
+  "version": "0.1.0",
+  "description": "Show a person what you mean instead of describing it: the agent puts screens, mockups and clickable prototypes in a browser window beside the chat, and the person points at what they want changed and sends it back."
+}

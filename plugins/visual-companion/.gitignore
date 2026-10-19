@@ -1,0 +1,5 @@
+node_modules/
+# Built from the prototype sources by build-proto.
+skills/visual-companion/examples/prototype/index.html
+# Screenshots the skill and its tests take.
+skills/visual-companion/**/shots/

@@ -1,0 +1,15 @@
+{
+  "name": "@dorkos/visual-companion",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Development dependencies for the visual-companion skill's tests. The skill itself runs on Node alone.",
+  "license": "MIT",
+  "scripts": {
+    "test": "bash skills/visual-companion/tests/run.sh"
+  },
+  "devDependencies": {
+    "@babel/core": "7.29.7",
+    "axe-core": "4.13.0",
+    "playwright-core": "1.63.0"
+  }
+}
