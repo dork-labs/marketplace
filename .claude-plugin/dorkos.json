@@ -2,82 +2,11 @@
   "$schema": "https://dorkos.ai/schemas/dorkos-marketplace.schema.json",
   "schemaVersion": 1,
   "plugins": {
-    "code-reviewer": {
-      "type": "agent",
-      "displayName": "Code Reviewer",
-      "categories": ["code-review"],
-      "layers": ["agents", "tasks"],
-      "icon": "🔍",
-      "featured": true,
-      "pricing": { "model": "free" }
-    },
-    "security-auditor": {
-      "type": "agent",
-      "displayName": "Security Auditor",
-      "categories": ["security"],
-      "layers": ["agents", "tasks"],
-      "icon": "🛡️",
-      "featured": true,
-      "pricing": { "model": "free" }
-    },
-    "docs-keeper": {
-      "type": "agent",
-      "displayName": "Docs Keeper",
-      "categories": ["documentation"],
-      "layers": ["agents"],
-      "icon": "📚",
-      "featured": true,
-      "pricing": { "model": "free" }
-    },
-    "linear-integration": {
-      "type": "plugin",
-      "categories": ["project-management", "integrations"],
-      "layers": ["extensions", "adapters"],
-      "icon": "📋",
-      "pricing": { "model": "free" }
-    },
-    "posthog-monitor": {
-      "type": "plugin",
-      "categories": ["observability"],
-      "layers": ["extensions", "tasks"],
-      "icon": "📊",
-      "pricing": { "model": "free" }
-    },
-    "security-audit-pack": {
-      "type": "skill-pack",
-      "categories": ["security"],
-      "layers": ["tasks"],
-      "icon": "🔐",
-      "pricing": { "model": "free" }
-    },
-    "release-pack": {
-      "type": "skill-pack",
-      "categories": ["release-ops"],
-      "layers": ["tasks", "skills"],
-      "icon": "🚀",
-      "pricing": { "model": "free" }
-    },
-    "discord-adapter": {
-      "type": "adapter",
-      "categories": ["integrations"],
-      "layers": ["adapters"],
-      "icon": "💬",
-      "pricing": { "model": "free" }
-    },
     "marketplace-dev": {
       "type": "skill-pack",
       "categories": ["dev-tools"],
       "layers": ["skills"],
       "icon": "📦",
-      "featured": true,
-      "pricing": { "model": "free" }
-    },
-    "lifeos-starter": {
-      "type": "agent",
-      "displayName": "LifeOS Starter",
-      "categories": ["productivity"],
-      "layers": ["skills", "tasks", "agents", "commands", "hooks"],
-      "icon": "🧬",
       "featured": true,
       "pricing": { "model": "free" }
     },

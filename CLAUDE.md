@@ -2,7 +2,7 @@
 
 ## What This Is
 
-The official DorkOS marketplace repository — a catalog of packages (agents, plugins, skill-packs, adapters, shapes) that extend DorkOS. Currently at marketplace version 0.1.0, listing 15 packages in `.claude-plugin/marketplace.json` (14 in `plugins/`, plus `lifeos-starter` from its own repo). Serves as both the canonical regression fixture for the marketplace validator and the publication hub for DorkOS packages.
+The official DorkOS marketplace repository — a catalog of packages (agents, plugins, skill-packs, adapters, shapes) that extend DorkOS. Currently at marketplace version 0.1.0, listing 6 packages in `.claude-plugin/marketplace.json`, all in `plugins/`. Serves as both the canonical regression fixture for the marketplace validator and the publication hub for DorkOS packages.
 
 This repo is also the workspace for the `dork-os-marketing` agent, which handles DorkOS marketing tasks.
 
@@ -70,10 +70,11 @@ marketplace/
 
 | Type | Description | Examples |
 |------|-------------|---------|
-| **agent** | Full AI agent with persona, skills, tasks | code-reviewer, security-auditor, docs-keeper |
-| **plugin** | Claude Code extension with commands/hooks/UI | linear-integration, posthog-monitor |
-| **skill-pack** | Bundles of reusable SKILL.md expertise files | security-audit-pack, release-pack |
-| **adapter** | Integration bridge for external services | discord-adapter |
+| **agent** | Full AI agent with persona, skills, tasks | none in the catalog yet |
+| **plugin** | Claude Code extension with commands/hooks/UI | flow, safety-hooks |
+| **skill-pack** | Bundles of reusable SKILL.md expertise files | writing-pack, marketplace-dev, ephemeral-infra |
+| **adapter** | Integration bridge for external services | none in the catalog yet |
+| **shape** | A bundle of packages, extensions, agents and schedules that sets DorkOS up for one job | linear-ops |
 
 ## Key Manifests
 

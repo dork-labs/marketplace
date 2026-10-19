@@ -35,7 +35,7 @@ Each package lives in its own folder under `plugins/<name>/`, with a `README.md`
 - `.claude-plugin/marketplace.json` is the catalog: each package's name, folder, description and tags.
 - `.claude-plugin/dorkos.json` adds what DorkOS needs on top: the package type, icon and category.
 
-One package, `lifeos-starter`, lives in its own repository, and the catalog points to it there.
+A package can also live in its own repository. Its catalog entry then points there instead of to a folder here.
 
 ## Contributing
 

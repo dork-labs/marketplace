@@ -86,7 +86,7 @@ dorkos package init <name> [--type agent|plugin|skill-pack|adapter] \
 
 **Layer enum:** `skills`, `tasks`, `commands`, `hooks`, `extensions`, `adapters`, `mcp-servers`, `lsp-servers`, `agents`
 
-**Requires format:** `<type>:<name>[@<version>]` — e.g., `adapter:slack@^1.0.0`, `plugin:linear-integration`
+**Requires format:** `<type>:<name>[@<version>]` — e.g., `adapter:slack@^1.0.0`, `plugin:flow`
 
 #### Type-Specific Fields
 
@@ -258,7 +258,7 @@ The official marketplace at `dork-labs/marketplace` uses a same-repo monorepo pa
 
 | Form             | Example                                                                                  |
 | ---------------- | ---------------------------------------------------------------------------------------- |
-| Relative path    | `"./plugins/code-reviewer"`                                                              |
+| Relative path    | `"./plugins/writing-pack"`                                                               |
 | GitHub           | `{ "source": "github", "repo": "owner/repo", "ref": "main" }`                            |
 | URL              | `{ "source": "url", "url": "https://gitlab.com/foo/bar.git" }`                           |
 | Git subdirectory | `{ "source": "git-subdir", "url": "https://...", "path": "packages/plugin-a" }`          |
@@ -333,7 +333,7 @@ Declare extension IDs in the manifest: `"extensions": ["my-extension-id"]`
 | Don't                                                    | Do Instead                                                  |
 | -------------------------------------------------------- | ----------------------------------------------------------- |
 | Put DorkOS fields in marketplace.json plugin entries     | Use dorkos.json sidecar                                     |
-| Use `"source": "code-reviewer"` (relative to pluginRoot) | Use `"source": "./plugins/code-reviewer"` (explicit path)   |
+| Use `"source": "writing-pack"` (relative to pluginRoot)  | Use `"source": "./plugins/writing-pack"` (explicit path)    |
 | Skip `.claude-plugin/plugin.json` for non-agent types    | Always create it — validation will fail without it          |
 | Use uppercase or underscores in package names            | Use kebab-case: `my-cool-plugin`                            |
 | Leave SKILL.md without frontmatter                       | Always include `name`, `description`, `kind` in `---` block |
