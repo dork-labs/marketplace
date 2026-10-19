@@ -33,6 +33,11 @@ function notes(events, screen, shotsDir) {
       const was = m.get(e.n);
       const same = was && was.note === e.note;
       const next = { ...e, kind: e.kind || 'request', status: same ? was.status : 'open' };
+      // An answer and a delivery state come only from pin-resolve and delivery
+      // events, never from the pin a page posts.
+      delete next.reply;
+      delete next.answered;
+      delete next.delivery;
       if (same && was.reply) Object.assign(next, { reply: was.reply, answered: was.answered });
       if (same && was.delivery) next.delivery = was.delivery;
       if (!same) delete next.reply;

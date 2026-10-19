@@ -333,6 +333,21 @@ test('a page cannot write delivery records or answer notes, and a bad record can
     await post({ type: 'pin', screen: 'a', n: 1, note: 'fix', crop: '/etc/passwd' }, page),
     /^HTTP\/1\.1 200/
   );
+  // A repeated pin can't carry its own answer or delivery state.
+  await post(
+    {
+      type: 'pin',
+      screen: 'a',
+      n: 1,
+      note: 'fix',
+      reply: 'forged',
+      answered: 1,
+      delivery: { state: 'delivered' },
+    },
+    page
+  );
+  const forged = await get(s.port, host, '/vc/pins?screen=a');
+  assert.doesNotMatch(forged, /forged|"delivered"/);
   // Server-only, from anywhere; the agent's answer, from no page.
   assert.match(
     await post({ type: 'delivery', screen: 'a', notes: 5 }, page),
