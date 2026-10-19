@@ -8,14 +8,20 @@ changed, and presses **Send**. The agent gets it back and keeps going.
 Made for DorkOS: screens open on the DorkOS canvas, in the DorkOS look, in light
 and dark. It also works in any browser on this computer.
 
+> **Before you install**
+>
+> **Any page this renders can message the agent that owns it. Don't open pages you don't trust.**
+>
+> It's made for one person on one machine. There are no share or guest links.
+
 ## What it does
 
 - **Screens.** The agent writes a page; it appears within a second, with a
   history to step back through.
-- **Pins and notes.** The person points at any part of a screen and writes what
-  should change. Notes stay on the screen.
-- **Send.** One button hands the notes and choices back to the agent, which wakes
-  up and works on them. Nothing is sent until the person presses it.
+- **Pins.** Point at any part of a screen and write what should change. Pins stay
+  on the screen until the agent answers them.
+- **Send.** One button hands the notes and choices back to the agent, which picks
+  them up and works on them. Nothing is sent until the person presses it.
 - **Prototypes.** Clickable flows, with a director bar to walk through them and a
   review bar to collect feedback screen by screen.
 - **Screenshots.** Each new screen can be captured in light and dark, so the
@@ -47,8 +53,7 @@ companion, opens the screen, and tells you where to look.
 
 ## What runs on your computer
 
-**Any page this renders can message the agent that owns it. Don't open pages you don't trust.**
-It's made for one person on one machine: there are no share or guest links.
+See **Before you install**, above.
 
 This package runs code. When the agent uses it, it starts a small local web
 server written in Node (`skills/visual-companion/scripts/server.cjs`), with no

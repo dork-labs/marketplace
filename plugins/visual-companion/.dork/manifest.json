@@ -3,7 +3,7 @@
   "name": "visual-companion",
   "version": "0.1.0",
   "type": "skill-pack",
-  "description": "Show a person what you mean instead of describing it: the agent puts screens, mockups and clickable prototypes in a browser window beside the chat, and the person points at what they want changed and sends it back.",
+  "description": "Your agent shows you screens, mockups and clickable prototypes beside the chat. Pin a note on the exact spot you want changed, press Send, and it gets to work.",
   "displayName": "Visual Companion",
   "author": "Dork Labs",
   "license": "MIT",
