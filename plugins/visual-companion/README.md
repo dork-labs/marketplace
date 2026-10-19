@@ -18,8 +18,8 @@ and dark. It also works in any browser on this computer.
 
 - **Screens.** The agent writes a page; it appears within a second, with a
   history to step back through.
-- **Pins.** Point at any part of a screen and write what should change. Pins stay
-  on the screen until the agent answers them.
+- **Pins.** Point at any part of a screen and write what should change. The
+  agent's reply shows up on the pin, and the pin stays until you clear it.
 - **Send.** One button hands the notes and choices back to the agent, which picks
   them up and works on them. Nothing is sent until the person presses it.
 - **Prototypes.** Clickable flows, with a director bar to walk through them and a
