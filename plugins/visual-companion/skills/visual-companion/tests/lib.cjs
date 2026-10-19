@@ -135,14 +135,19 @@ function events(dir) {
  * reads colours as they settle, not halfway through a fade (the review hint
  * fades in over 200ms, and axe once caught it at a contrast it never rests at).
  * Waits on the condition, never on a timer; looks inside open shadow roots.
+ * Looping animations are skipped: they never settle.
  */
 async function settled(page, ms = 5000) {
   await page.waitForFunction(
     () => {
       const roots = [document];
       for (const el of document.querySelectorAll('*')) if (el.shadowRoot) roots.push(el.shadowRoot);
+      // A looping animation (a breathing dot) never ends, so it can't be waited out.
+      const finite = (a) => a.effect?.getComputedTiming?.().iterations !== Infinity;
       const running = roots.some((r) =>
-        r.getAnimations().some((a) => a.playState === 'running' || a.playState === 'pending')
+        r
+          .getAnimations()
+          .some((a) => (a.playState === 'running' || a.playState === 'pending') && finite(a))
       );
       if (running) return false;
       // An element partly transparent is mid-fade even when no animation reports it.

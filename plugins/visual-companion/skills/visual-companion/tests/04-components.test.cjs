@@ -129,11 +129,18 @@ test('motion playground: plays, retargets mid-flight, reports, and copies values
   const x = () => subject.evaluate((el) => new DOMMatrix(getComputedStyle(el).transform).m41);
   assert.equal(await x(), 0);
   await page.locator('.vc-motion .vc-btn', { hasText: 'Play' }).click();
-  await page.waitForTimeout(60);
-  const mid = await x();
-  assert.ok(mid > 0, 'moving after 60ms');
-  // Interrupt mid-flight. Velocity must stay continuous: no frame step beyond
-  // the spring's own peak speed on a clean run.
+  // Moving within a few frames (a wait for the condition, not a timer).
+  await page.waitForFunction(
+    () =>
+      new DOMMatrix(getComputedStyle(document.querySelector('.vc-motion-subject')).transform).m41 >
+      0,
+    null,
+    { timeout: 2000 }
+  );
+  // Interrupt mid-flight. Velocity must stay continuous: no speed beyond the
+  // spring's own peak speed on a clean run. Speed, not pixels per frame: the
+  // spring steps by elapsed time (capped at 32ms), so a frame dropped under
+  // load moves twice as far without being any faster.
   const sample = (interruptAt) =>
     page.evaluate(async (at) => {
       const el = document.querySelector('.vc-motion-subject');
@@ -142,28 +149,38 @@ test('motion playground: plays, retargets mid-flight, reports, and copies values
       );
       const x = () => new DOMMatrix(getComputedStyle(el).transform).m41;
       const xs = [];
+      const ts = [];
       btn.click();
       for (let i = 0; i < 40; i++) {
         if (i === at) btn.click();
-        await new Promise((r) => requestAnimationFrame(r));
+        ts.push(await new Promise((r) => requestAnimationFrame(r)));
         xs.push(x());
       }
-      return xs;
+      return { xs, ts };
     }, interruptAt);
+  // px per ms between samples, with the gap capped as the spring caps its step.
+  const speeds = ({ xs, ts }) =>
+    xs.slice(1).map((v, i) => Math.abs(v - xs[i]) / Math.min(32, Math.max(1, ts[i + 1] - ts[i])));
   await page.reload();
-  const free = await sample(-1);
-  const peak = Math.max(...free.slice(1).map((v, i) => Math.abs(v - free[i])));
+  const peak = Math.max(...speeds(await sample(-1)));
   await page.reload();
-  const xs = await sample(5);
-  const steps = xs.slice(1).map((v, i) => Math.abs(v - xs[i]));
+  const run = await sample(5);
+  const xs = run.xs;
+  const top = Math.max(...speeds(run));
   assert.ok(
-    Math.max(...steps) <= peak * 1.15 + 2,
-    'retarget step ' + Math.max(...steps).toFixed(1) + 'px vs peak ' + peak.toFixed(1)
+    top <= peak * 1.15 + 0.12,
+    'retarget speed ' + top.toFixed(2) + 'px/ms vs peak ' + peak.toFixed(2)
   );
   assert.ok(xs[4] > xs[0], 'was moving out');
   assert.ok(xs[39] < Math.max(...xs), 'turned around');
-  await page.waitForTimeout(700);
-  assert.ok(Math.abs(await x()) < 1, 'settled back home');
+  await page.waitForFunction(
+    () =>
+      Math.abs(
+        new DOMMatrix(getComputedStyle(document.querySelector('.vc-motion-subject')).transform).m41
+      ) < 1,
+    null,
+    { timeout: 3000 }
+  );
   assert.match(await page.locator('.vc-motion-stats').textContent(), /Settles in \d+ms/);
   assert.match(await page.locator('.vc-motion-stats').textContent(), /Damping ratio 0\.75/);
   // Stiffness slider updates the values.

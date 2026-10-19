@@ -57,12 +57,14 @@ dependencies of its own.
 - **This computer only.** The server listens on `127.0.0.1` (or `::1` /
   `localhost`) and refuses any other address. It also answers only requests
   addressed to `localhost`, `127.0.0.1` or `[::1]` on its own port, so a website
-  can't reach it by pointing its own domain at your computer. To see it from
+  can't reach it by pointing its own domain at your computer (a proxy in front
+  of it must send `Host: localhost:<port>`, as DorkOS's preview does). To see it from
   another machine, forward the port, for example `ssh -L <port>:localhost:<port>`.
-- **Pages from other local ports can read, but need a token to write.** A page
-  served from another port on this computer can read the notes, the session
-  folder's path and the id of the chat it wakes. Writing a note or pressing Send
-  from there needs the token the agent created for that review. A page the
+- **Pages from other local ports can read notes, but need a token to write.** A
+  page served from another port on this computer can read a screen's notes and
+  its review status, which includes the id of the chat a Send wakes. It can't
+  read the screens themselves. Writing a note or pressing Send from there needs
+  the token the agent created for that review. A page the
   companion itself renders needs no token, which is why the warning above matters.
 - **It stops on its own** after four hours idle (`vc stop` stops it at once).
 - **What it writes.** Its session folder in your project, `.dork/visual-companion/`,
