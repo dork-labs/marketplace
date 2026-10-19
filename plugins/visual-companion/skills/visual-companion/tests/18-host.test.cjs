@@ -39,8 +39,7 @@ test.after(async () => {
 });
 
 // Start a server on `host`, port 0; resolves { port, info } or { error } (stderr).
-function start(host, extra = {}) {
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'vc-host-'));
+function start(host, extra = {}, dir = fs.mkdtempSync(path.join(os.tmpdir(), 'vc-host-'))) {
   const child = spawn(process.execPath, [SERVER], {
     env: {
       ...process.env,
@@ -268,4 +267,50 @@ test('reads only what other local pages need: screens stay private', async () =>
   for (const p of ['/vc/state', '/vc/health', '/']) {
     assert.doesNotMatch(await read(p), /Access-Control-Allow-Origin/i, p);
   }
+});
+
+test('a Send with malformed fields neither crashes the server nor replays on restart', async () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'vc-host-'));
+  fs.mkdirSync(path.join(dir, 'content'), { recursive: true });
+  fs.writeFileSync(
+    path.join(dir, 'content', 'a.html'),
+    '<meta name="vc-wake" content="on"><h2>Routed</h2>\n'
+  );
+  // A session to wake, and a DorkOS port nothing listens on, so a delivery
+  // that gets as far as fetching fails quietly instead of reaching anything.
+  const closed = await new Promise((resolve) => {
+    const srv = net.createServer().listen(0, '127.0.0.1', () => {
+      const p = srv.address().port;
+      srv.close(() => resolve(p));
+    });
+  });
+  const env = { VC_AGENT_SESSION: 'test-session', DORKOS_PORT: String(closed) };
+  const s = await start('127.0.0.1', env, dir);
+  assert.ok(s.port > 0, s.error);
+  const body = JSON.stringify({
+    type: 'send',
+    screen: 'a',
+    message: 7,
+    selection: [null, 3, { choice: 'x' }],
+    review: { notes: [null, { n: 1 }] },
+  });
+  const r = await raw(
+    s.port,
+    `POST /vc/event HTTP/1.1\r\nHost: localhost:${s.port}\r\nContent-Type: text/plain\r\n` +
+      `Content-Length: ${Buffer.byteLength(body)}\r\nConnection: close\r\n\r\n${body}`
+  );
+  assert.match(r, /"routed":true/);
+  // Delivery runs about 0.8s later; give it time to fail if it is going to.
+  await new Promise((resolve) => setTimeout(resolve, 2500));
+  assert.strictEqual(s.child.exitCode, null, 'the server is still running');
+  assert.match(await get(s.port, `localhost:${s.port}`), /^HTTP\/1\.1 200/);
+  // Restart on the same folder: whatever was queued is replayed, and must not crash it.
+  await new Promise((resolve) => {
+    s.child.once('exit', resolve);
+    s.child.kill();
+  });
+  const again = await start('127.0.0.1', env, dir);
+  assert.ok(again.port > 0, again.error);
+  await new Promise((resolve) => setTimeout(resolve, 2500));
+  assert.strictEqual(again.child.exitCode, null, 'the restarted server is still running');
 });

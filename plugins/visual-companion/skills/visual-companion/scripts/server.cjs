@@ -275,7 +275,7 @@ function savedFor(name, events) {
     if (e.screen !== name) continue;
     if (e.type === 'select' && Array.isArray(e.choices)) choices = e.choices;
     if (e.type === 'send') {
-      const sel = Array.isArray(e.selection) ? e.selection : [];
+      const sel = Array.isArray(e.selection) ? e.selection.filter(isObj) : [];
       sent = sel.map((x) => x.choice);
       sentLabels = sel.map((x) => x.label || x.choice);
       sentAt = e.timestamp || null;
@@ -599,10 +599,42 @@ function scheduleRoute(ms) {
   if (routeTimer) return;
   routeTimer = setTimeout(() => {
     routeTimer = null;
-    deliverRoute();
+    deliverRoute().catch(dropFailedBatch);
   }, ms);
   routeTimer.unref();
 }
+
+// A delivery that throws must not take the server down, and must not stay
+// queued: it would be replayed, and throw again, on every restart. Mark the
+// head chat's batch failed and move on.
+function dropFailedBatch(e) {
+  console.error('Delivery failed:', e && e.message);
+  const head = routeQueue[0];
+  if (!head) return;
+  let session = null;
+  try {
+    session = readRoute(head.screen)?.session || null;
+  } catch {
+    // An unreadable route: drop just the head.
+  }
+  const batch = routeQueue.filter((x) => {
+    if (x === head) return true;
+    try {
+      return session !== null && readRoute(x.screen)?.session === session;
+    } catch {
+      return false;
+    }
+  });
+  try {
+    markDelivery(batch, 'failed', 'bad-event');
+  } catch {
+    // Best effort: the queue still moves on.
+  }
+  for (const x of batch) routeQueue.splice(routeQueue.indexOf(x), 1);
+  scheduleRoute(0);
+}
+
+const isObj = (x) => !!x && typeof x === 'object' && !Array.isArray(x);
 
 const clip = (s, n) => (typeof s === 'string' && s.length > n ? s.slice(0, n) + '…' : s);
 
@@ -630,13 +662,14 @@ function buildPayload(batch) {
     if (!groups.has(k))
       groups.set(k, { selection: [], newPins: [], trigger: 'pin', message: null, messageAt: null });
     const g = groups.get(k);
-    if (Array.isArray(e.selection)) g.selection = e.selection;
+    // Events come from pages: take only fields of the shape they should have.
+    if (Array.isArray(e.selection)) g.selection = e.selection.filter(isObj);
     if (e.type === 'pin' && !e.quiet) g.newPins.push(e.n);
-    if (e.type === 'send' && e.review && Array.isArray(e.review.notes))
-      g.newPins.push(...e.review.notes.map((n) => n.n));
+    if (e.type === 'send' && isObj(e.review) && Array.isArray(e.review.notes))
+      g.newPins.push(...e.review.notes.filter(isObj).map((n) => n.n));
     if (e.type === 'send') g.trigger = 'send';
     // The whole reply; deliverRoute trims to DorkOS's budget, and only if it must.
-    if (e.message) {
+    if (typeof e.message === 'string' && e.message) {
       g.message = e.message;
       g.messageAt = e.timestamp;
     }
@@ -851,8 +884,27 @@ function scrubToken(v, depth = 0) {
   return out;
 }
 
+// Events come from pages, so the fields other code reads are kept to the shapes
+// it expects before anything is stored: a stored event is read again on every
+// page load and replayed after a restart.
+function cleanFields(e) {
+  if ('screen' in e && typeof e.screen !== 'string') delete e.screen;
+  if ('message' in e && typeof e.message !== 'string') delete e.message;
+  if ('selection' in e) e.selection = Array.isArray(e.selection) ? e.selection.filter(isObj) : [];
+  if ('choices' in e && !Array.isArray(e.choices)) delete e.choices;
+  if ('review' in e) {
+    if (!isObj(e.review)) delete e.review;
+    else if ('notes' in e.review)
+      e.review = {
+        ...e.review,
+        notes: Array.isArray(e.review.notes) ? e.review.notes.filter(isObj) : [],
+      };
+  }
+  return e;
+}
+
 function recordEvent(event) {
-  const clean = scrubToken({ ...event });
+  const clean = cleanFields(scrubToken({ ...event }));
   if (!clean.timestamp) clean.timestamp = Date.now();
   if (!clean.type) clean.type = 'event';
   fs.appendFileSync(EVENTS_FILE, JSON.stringify(clean) + '\n');
@@ -1169,7 +1221,13 @@ function routeRequest(req, res) {
           error: 'stale-link',
           message: 'This page needs the link from `vc review open` (its vt token).',
         });
-      const saved = recordEvent(rest);
+      let saved;
+      try {
+        saved = recordEvent(rest);
+      } catch (e) {
+        console.error('Failed to record event:', e.message);
+        return send(res, 400, { ok: false, error: 'bad event' });
+      }
       send(res, 200, { ok: true, routed: saved.routed, timestamp: saved.timestamp });
     });
   }
@@ -1356,7 +1414,14 @@ function startServer() {
         debounceTimers.delete(filename);
         const filePath = path.join(CONTENT_DIR, filename);
         const name = filename.replace(/\.html$/, '');
-        if (!fs.existsSync(filePath)) {
+        // One stat, not exists-then-stat: a file deleted in between would throw here.
+        let st = null;
+        try {
+          st = fs.statSync(filePath);
+        } catch {
+          // Gone: handled below as a removed screen.
+        }
+        if (!st) {
           knownFiles.delete(filename);
           bump();
           broadcast({ type: 'screens', version: stateVersion });
@@ -1364,7 +1429,7 @@ function startServer() {
         }
         touchActivity();
         bump();
-        const mtime = Math.round(fs.statSync(filePath).mtimeMs);
+        const mtime = Math.round(st.mtimeMs);
 
         if (!knownFiles.has(filename)) {
           knownFiles.add(filename);
