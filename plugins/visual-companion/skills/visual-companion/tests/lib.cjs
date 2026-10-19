@@ -130,6 +130,34 @@ function events(dir) {
     .map((l) => JSON.parse(l));
 }
 
+/**
+ * Wait until nothing on the page is mid-animation, so an accessibility check
+ * reads colours as they settle, not halfway through a fade (the review hint
+ * fades in over 200ms, and axe once caught it at a contrast it never rests at).
+ * Waits on the condition, never on a timer; looks inside open shadow roots.
+ */
+async function settled(page, ms = 5000) {
+  await page.waitForFunction(
+    () => {
+      const roots = [document];
+      for (const el of document.querySelectorAll('*')) if (el.shadowRoot) roots.push(el.shadowRoot);
+      const running = roots.some((r) =>
+        r.getAnimations().some((a) => a.playState === 'running' || a.playState === 'pending')
+      );
+      if (running) return false;
+      // An element partly transparent is mid-fade even when no animation reports it.
+      return roots.every((r) =>
+        [...r.querySelectorAll('.vc-hint')].every((h) => {
+          const o = Number(getComputedStyle(h).opacity);
+          return o === 0 || o === 1;
+        })
+      );
+    },
+    null,
+    { timeout: ms, polling: 50 }
+  );
+}
+
 async function waitFor(fn, ms = 5000, step = 50, label = '') {
   const t0 = Date.now();
   for (;;) {
@@ -221,6 +249,7 @@ module.exports = {
   waitFor,
   stopAll,
   listen,
+  settled,
   findChrome,
   ART,
   buildExample,

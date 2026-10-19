@@ -8,5 +8,6 @@
 - Pins and notes on any part of a screen, and a Send button that hands them back to the agent.
 - A director bar to walk through a prototype and a review bar to collect feedback screen by screen.
 - Screenshots of each new screen in light and dark, when `playwright-core` and a Chromium are installed.
-- The local server listens on this computer only, and refuses any other address.
+- The local server listens on this computer only, refuses any other address, and answers only requests addressed to this computer (so a website can't reach it through DNS rebinding).
+- The session folder gets a `.gitignore`, so notes and screenshots stay out of your commits.
 - The DorkOS colours and stylesheet ship built, so it works outside a DorkOS checkout.

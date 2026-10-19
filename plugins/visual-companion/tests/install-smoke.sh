@@ -57,8 +57,11 @@ check "the screen is served" "$(grep -q 'Smoke screen' <<<"$page" && echo yes ||
 check "the screen carries the DorkOS palette" \
   "$(grep -q -- '--background' <<<"$page" && echo yes || echo no)" "$url"
 
+check "the session folder keeps itself out of git" \
+  "$([ "$(cat "$tmp/project/.dork/visual-companion/.gitignore" 2>/dev/null)" = '*' ] && echo yes || echo no)"
+
 stop=$("$vc" stop --project-dir "$tmp/project" 2>&1)
-check "vc stop stops it" "$(grep -qi 'stopped\|"ok":true\|not running' <<<"$stop" && echo yes || echo no)" "$stop"
+check "vc stop stops it" "$(grep -q '"status": *"stopped"' <<<"$stop" && echo yes || echo no)" "$stop"
 
 printf 'visual-companion install smoke: %d passed, %d failed\n' "$pass" "$fail"
 [ "$fail" -eq 0 ]

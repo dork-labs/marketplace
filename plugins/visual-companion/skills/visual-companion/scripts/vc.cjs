@@ -120,6 +120,10 @@ function sessionDir(create) {
     fs.mkdirSync(path.join(baseDir, id, 'content'), { recursive: true });
     fs.mkdirSync(path.join(baseDir, id, 'state'), { recursive: true });
     fs.writeFileSync(currentFile, id + '\n');
+    // Notes, screens and screenshots are the person's working files: keep them
+    // out of the project's commits unless someone chooses otherwise.
+    const ignore = path.join(baseDir, '.gitignore');
+    if (!fs.existsSync(ignore)) fs.writeFileSync(ignore, '*\n');
   }
   return path.join(baseDir, id);
 }

@@ -16,6 +16,7 @@ const {
   ART,
   buildExample,
   serveDir,
+  settled,
 } = require('./lib.cjs');
 
 let PROTO;
@@ -288,6 +289,7 @@ for (const theme of ['light', 'dark']) {
     await waitFor(async () => /Queued/.test(await txt(page, '.vc-rpanel')), 10000, 100, 'queued');
     await note(page, 3, 'Third, not sent yet');
     await page.evaluate(() => window.__review.openPanel(true));
+    await settled(page);
     await page.addScriptTag({ path: AXE });
     const res = await page.evaluate(async () => {
       const r = await window.axe.run(document, { runOnly: ['wcag2a', 'wcag2aa', 'wcag22aa'] });

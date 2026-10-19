@@ -3,8 +3,8 @@
 // size, focus rings and the keyboard.
 //
 // axe's colour-contrast only judges text inside the viewport, so each run
-// first proves the page fits the viewport (contributing/design-system.md:
-// "an axe run is not a gate until you have proved it can fail").
+// first proves the page fits the viewport: an axe run is not a gate until it
+// has been shown that it can fail.
 const test = require('node:test');
 const assert = require('node:assert');
 const path = require('path');
@@ -20,6 +20,7 @@ const {
   browser,
   stopAll,
   listen,
+  settled,
 } = require('./lib.cjs');
 
 const dirs = [];
@@ -47,6 +48,7 @@ async function axe(page, wanted) {
     const bar = document.querySelector('.vc-bar');
     return !bar || bar.getAnimations({ subtree: true }).every((a) => a.playState !== 'running');
   });
+  await settled(page);
   await page.addScriptTag({ path: AXE });
   return page.evaluate(async (wanted) => {
     const r = await window.axe.run(document, {
@@ -113,7 +115,7 @@ for (const theme of ['light', 'dark']) {
     const box = await page.locator('h2').boundingBox();
     await page.mouse.click(box.x + 200, box.y + 10);
     await page.locator('.vc-note textarea').fill('A note');
-    await page.waitForTimeout(250); // let entrances finish so axe sees settled colours
+    await settled(page); // let entrances finish so axe sees settled colours
     await fits(page);
     const chrome = [
       'vc-count',

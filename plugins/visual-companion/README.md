@@ -55,14 +55,21 @@ server written in Node (`skills/visual-companion/scripts/server.cjs`), with no
 dependencies of its own.
 
 - **This computer only.** The server listens on `127.0.0.1` (or `::1` /
-  `localhost`) and refuses any other address. To see it from another machine,
-  forward the port, for example `ssh -L <port>:localhost:<port>`.
-- **Pages from other local ports need a token.** A page served from another port
-  on this computer can read notes, but writing a note or pressing Send from there
-  needs the token the agent created for that review. A page the companion itself
-  renders needs no token, which is why the warning above matters.
+  `localhost`) and refuses any other address. It also answers only requests
+  addressed to `localhost`, `127.0.0.1` or `[::1]` on its own port, so a website
+  can't reach it by pointing its own domain at your computer. To see it from
+  another machine, forward the port, for example `ssh -L <port>:localhost:<port>`.
+- **Pages from other local ports can read, but need a token to write.** A page
+  served from another port on this computer can read the notes, the session
+  folder's path and the id of the chat it wakes. Writing a note or pressing Send
+  from there needs the token the agent created for that review. A page the
+  companion itself renders needs no token, which is why the warning above matters.
 - **It stops on its own** after four hours idle (`vc stop` stops it at once).
-- **It writes only** to its session folder in your project (`.dork/visual-companion/`).
+- **What it writes.** Its session folder in your project, `.dork/visual-companion/`,
+  which gets a `.gitignore` so notes and screenshots stay out of your commits.
+  Started by hand without a session folder (`BRAINSTORM_DIR`), the server uses
+  `/tmp/brainstorm`. Rebuilding the styles (below) writes
+  `skills/visual-companion/scripts/assets/`.
 
 The package lists no tools to run without asking, so each command it runs goes
 through your usual permission prompts.

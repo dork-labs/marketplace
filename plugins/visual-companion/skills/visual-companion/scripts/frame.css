@@ -45,7 +45,7 @@
   --vc-radius: 12px;
 
   /* v1 names, kept so older screens still render. `--accent` and `--border`
-     now carry the app's meaning (HSL channels); see CHANGES.md. */
+     now carry the app's meaning (HSL channels). */
   --bg-primary: var(--vc-page);
   --bg-secondary: var(--vc-raised);
   --bg-tertiary: var(--vc-tint);

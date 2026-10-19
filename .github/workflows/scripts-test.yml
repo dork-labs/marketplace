@@ -19,7 +19,8 @@ name: scripts
 #   rules audit): every refusal is a way an option could reach git.
 # - plugins/visual-companion/tests/install-smoke.sh runs the package from a copy
 #   made the way an install makes one (no dependencies, no DorkOS checkout), and
-#   17-loopback.test.cjs pins that its server refuses any non-loopback address.
+#   17-loopback and 18-host pin that its server refuses any non-loopback address
+#   and any request whose Host is not this computer's (DNS rebinding).
 #   Node only, a few seconds; the browser tests run with `npm test` there.
 # - .claude/skills/creating-pull-requests/scripts/test-watch-prs.sh pins the
 #   PR watcher's classifications, which agents act on when a PR stalls.
@@ -87,7 +88,8 @@ jobs:
         if: ${{ !cancelled() }}
         run: |
           bash plugins/visual-companion/tests/install-smoke.sh
-          node --test plugins/visual-companion/skills/visual-companion/tests/17-loopback.test.cjs
+          node --test plugins/visual-companion/skills/visual-companion/tests/17-loopback.test.cjs \
+            plugins/visual-companion/skills/visual-companion/tests/18-host.test.cjs
 
       - name: PR watcher
         if: ${{ !cancelled() }}

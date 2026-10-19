@@ -22,6 +22,7 @@ const {
   ART,
   buildExample,
   serveDir,
+  settled,
 } = require('./lib.cjs');
 
 let PROTO;
@@ -305,6 +306,7 @@ for (const theme of ['light', 'dark']) {
     await page.locator('.vc-note textarea').fill('Draft note');
     await page.waitForTimeout(250);
     await page.screenshot({ path: path.join(ART, `proto-chrome-${theme}.png`) });
+    await settled(page);
     await page.addScriptTag({ path: AXE });
     const res = await page.evaluate(async () => {
       const r = await window.axe.run(document, {
