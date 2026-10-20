@@ -596,7 +596,7 @@ function Banner({
     case 'invalid': {
       title = `roadmap.json doesn't parse · ${view.parseError?.message ?? ''}`;
       const by = view.head
-        ? `${view.head.author}'s change ${agoWords(view.head.date, now)} broke it. `
+        ? `${who(view.head.author)}'s change ${agoWords(view.head.date, now)} broke it. `
         : '';
       detail = view.stale
         ? `${by}Showing the last good version, from ${clockTime(view.asOf!)}.`
