@@ -16,7 +16,7 @@
 import type { BoardView, HistoryEntry } from '../lib/board-service.ts';
 import { HORIZONS, type Board, type Horizon, type Item } from '../lib/roadmap.ts';
 import type { PanelConfig } from '../server.ts';
-import { getBoard, getConfig } from './api.ts';
+import { getBoard, getConfig, getSeen, putSeen } from './api.ts';
 import { askInRoom, copyStarter, moveRequest, roadmapRequest } from './ask.ts';
 import {
   HORIZON_LABEL,
@@ -52,8 +52,6 @@ export const POLL_MS = 60_000;
 export const COLUMN_LIMIT = 12;
 /** Changes the feed shows before "Show N more". */
 const FEED_LIMIT = 5;
-/** Bare pull request numbers in `links` belong to this repo (the schema says so). */
-const DEFAULT_PR_REPO = 'dork-labs/dorkos';
 
 /** The part of DorkOS's `ExtensionAPI` the panel uses. */
 export interface PanelHostApi {
@@ -61,24 +59,17 @@ export interface PanelHostApi {
   navigate(path: string): void;
   /** Show a toast. */
   notify(message: string, options?: { type?: 'info' | 'success' | 'error' }): void;
-  /** This extension's saved data. */
-  loadData<T>(): Promise<T | null>;
-  /** Save this extension's data. */
-  saveData<T>(data: T): Promise<void>;
 }
 
 /** What the panel can be given in place of the real machine (tests). */
 export interface PanelDeps {
   getBoard?: (refresh?: boolean) => Promise<BoardView>;
   getConfig?: () => Promise<PanelConfig>;
+  getSeen?: () => Promise<string | null>;
+  putSeen?: (sha: string) => Promise<void>;
   now?: () => Date;
   /** Whether the person can see the page right now. */
   visible?: () => boolean;
-}
-
-/** What the panel saves: the newest commit the person marked seen. */
-interface Saved {
-  seen?: string;
 }
 
 /** Everything a section of the board reads. */
@@ -299,7 +290,7 @@ function Details({ item, ctx }: { item: Item; ctx: Ctx }) {
           'div',
           { className: 'rm-links' },
           item.links.map((link, i) => {
-            const href = linkHref(link, DEFAULT_PR_REPO);
+            const href = linkHref(link, ctx.config.prRepo);
             const text = link.label ?? link.ref;
             return href
               ? h(
@@ -390,6 +381,12 @@ function Card({ item, ctx, placed }: { item: Item; ctx: Ctx; placed: HistoryEntr
             role: 'menu',
             onKeyDown: (event: { key: string }) => {
               if (event.key === 'Escape') closeMenu();
+            },
+            // Leaving the menu closes it, unless focus went to ⋯, whose click toggles it.
+            onBlur: (event: { currentTarget: HTMLElement; relatedTarget: EventTarget | null }) => {
+              const to = event.relatedTarget as globalThis.Node | null;
+              if (to && (event.currentTarget.contains(to) || to === menuButton.current)) return;
+              setMenu(false);
             },
           },
           h(
@@ -582,10 +579,12 @@ function Header({ ctx }: { ctx: Ctx }) {
 function Banner({
   view,
   config,
+  now,
   onRetry,
 }: {
   view: BoardView;
   config: PanelConfig;
+  now: Date;
   onRetry: () => void;
 }) {
   const copy = view.asOf ? `Showing the copy from ${clockTime(view.asOf)}.` : '';
@@ -596,7 +595,7 @@ function Banner({
     case 'invalid': {
       title = `roadmap.json doesn't parse · ${view.parseError?.message ?? ''}`;
       const by = view.head
-        ? `${view.head.author}'s change ${agoWords(view.head.date, new Date())} broke it. `
+        ? `${view.head.author}'s change ${agoWords(view.head.date, now)} broke it. `
         : '';
       detail = view.stale
         ? `${by}Showing the last good version, from ${clockTime(view.asOf!)}.`
@@ -686,6 +685,7 @@ function emptyFor(
   view: BoardView,
   config: PanelConfig,
   api: PanelHostApi,
+  now: Date,
   onRetry: () => void
 ): Node {
   const owner = config.deciderName ?? 'The owner';
@@ -726,7 +726,7 @@ function emptyFor(
         )
       );
     default:
-      return h(Banner, { view, config, onRetry });
+      return h(Banner, { view, config, now, onRetry });
   }
 }
 
@@ -740,13 +740,19 @@ function emptyFor(
 export function createPanel(api: PanelHostApi, deps: PanelDeps = {}) {
   const readBoard = deps.getBoard ?? getBoard;
   const readConfig = deps.getConfig ?? getConfig;
+  const readSeen = deps.getSeen ?? getSeen;
+  const writeSeen = deps.putSeen ?? putSeen;
   const clock = deps.now ?? (() => new Date());
   const visible = deps.visible ?? (() => document.visibilityState === 'visible');
 
   return function RoadmapPanel() {
     const [shown, setShown] = useState<BoardView | null>(null);
     const [pending, setPending] = useState<BoardView | null>(null);
-    const [config, setConfig] = useState<PanelConfig>({ deciderName: null, keeperHandle: null });
+    const [config, setConfig] = useState<PanelConfig>({
+      deciderName: null,
+      keeperHandle: null,
+      prRepo: null,
+    });
     const [seen, setSeen] = useState<string | null | undefined>(undefined);
     const [down, setDown] = useState(false);
     const [, setTick] = useState(0);
@@ -763,13 +769,12 @@ export function createPanel(api: PanelHostApi, deps: PanelDeps = {}) {
     /** Take a new answer: show it, or hold it behind the pill if it would reorder the board. */
     const accept = (next: BoardView) => {
       const current = shownRef.current;
+      // Compare the boards themselves, not their commits: a commit can be
+      // unknown (GitHub listed none) while the file still changed.
       const reorders =
         current?.board != null &&
         next.board != null &&
-        !next.stale &&
-        next.revision !== null &&
-        current.revision !== null &&
-        next.revision !== current.revision;
+        JSON.stringify(current.board) !== JSON.stringify(next.board);
       if (reorders && visible()) {
         pendingRef.current = next;
         setPending(next);
@@ -793,9 +798,8 @@ export function createPanel(api: PanelHostApi, deps: PanelDeps = {}) {
       void readConfig()
         .then((c) => live && setConfig(c))
         .catch(() => {});
-      void api
-        .loadData<Saved>()
-        .then((saved) => live && setSeen(saved?.seen ?? null))
+      void readSeen()
+        .then((sha) => live && setSeen(sha))
         .catch(() => live && setSeen(null));
       void load();
       const timer = setInterval(() => void load(), POLL_MS);
@@ -816,7 +820,9 @@ export function createPanel(api: PanelHostApi, deps: PanelDeps = {}) {
       const head = shownRef.current?.history[0]?.sha;
       if (!head) return;
       setSeen(head);
-      void api.saveData<Saved>({ seen: head }).catch(() => {});
+      void writeSeen(head).catch(() =>
+        api.notify("Couldn't save where you left off.", { type: 'error' })
+      );
     };
 
     const retry = () => void load(true);
@@ -830,7 +836,7 @@ export function createPanel(api: PanelHostApi, deps: PanelDeps = {}) {
           )
         : h(Empty, { title: 'Loading the roadmap…', body: '' });
     } else if (!shown.board) {
-      body = emptyFor(shown, config, api, retry);
+      body = emptyFor(shown, config, api, clock(), retry);
     } else {
       const now = clock();
       const unseen = seen ? entriesSince(shown.history, seen) : null;
@@ -838,7 +844,7 @@ export function createPanel(api: PanelHostApi, deps: PanelDeps = {}) {
       const placed = placedBy(unseen ?? []);
       body = [
         h(Header, { key: 'header', ctx }),
-        h(Banner, { key: 'banner', view: shown, config, onRetry: retry }),
+        h(Banner, { key: 'banner', view: shown, config, now, onRetry: retry }),
         h(Skipped, { key: 'skipped', view: shown }),
         h(
           'div',
@@ -849,7 +855,10 @@ export function createPanel(api: PanelHostApi, deps: PanelDeps = {}) {
         ),
       ];
     }
-    const pill = pending ? pillText(entriesSince(pending.history, shown?.revision ?? null)) : null;
+    // With no known commit on screen, name no cards rather than count the whole history.
+    const pill = pending
+      ? pillText(shown?.revision ? entriesSince(pending.history, shown.revision) : [])
+      : null;
     return h(
       'div',
       { className: 'rm' },

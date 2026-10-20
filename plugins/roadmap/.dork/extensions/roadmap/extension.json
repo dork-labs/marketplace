@@ -44,6 +44,13 @@
         "label": "Who keeps the roadmap",
         "description": "The handle that \"Ask in this room\" mentions, without the @.",
         "placeholder": "roadmap-keeper"
+      },
+      {
+        "type": "text",
+        "key": "pr_repo",
+        "label": "Repo for PR numbers",
+        "description": "A link to a pull request written as a bare number opens in this repo (owner/name). Leave it empty to show bare numbers as text.",
+        "placeholder": "owner/name"
       }
     ]
   }

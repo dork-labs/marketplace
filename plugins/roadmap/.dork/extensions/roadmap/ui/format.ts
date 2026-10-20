@@ -115,6 +115,8 @@ export function changeParts(change: Change, deciderName: string | null): ChangeP
       return { before: 'started the roadmap', title: null, after: '' };
     case 'unreadable':
       return { before: "saved a version that doesn't parse", title: null, after: '' };
+    case 'fixed':
+      return { before: 'fixed roadmap.json so it parses again', title: null, after: '' };
     case 'milestones':
       return { before: 'changed the milestones', title: null, after: '' };
     case 'reordered':
@@ -183,7 +185,8 @@ export function pillText(entries: HistoryEntry[]): string {
   const subject = authors.length === 1 ? who(authors[0]!) : `${authors.length} people`;
   const cards = changedIds(entries).size;
   if (cards === 0) return `${subject} changed the roadmap`;
-  const allMoves = entries.every((e) => e.changes.every((c) => c.kind === 'moved'));
+  const all = entries.flatMap((e) => e.changes);
+  const allMoves = all.length > 0 && all.every((c) => c.kind === 'moved');
   return `${subject} ${allMoves ? 'moved' : 'changed'} ${cards} ${cards === 1 ? 'card' : 'cards'}`;
 }
 
@@ -306,11 +309,11 @@ export function threadPath(thread: { roomId: string; entryId: string }): string 
 }
 
 /** A link chip's address, or null for a reference shown as text. Only https leaves the app. */
-export function linkHref(link: Item['links'][number], prRepo: string): string | null {
+export function linkHref(link: Item['links'][number], prRepo: string | null): string | null {
   if (link.kind === 'url') return /^https:\/\//i.test(link.ref) ? link.ref : null;
   if (link.kind === 'pr') {
     const bare = /^\d{1,7}$/.exec(link.ref);
-    if (bare) return `https://github.com/${prRepo}/pull/${link.ref}`;
+    if (bare) return prRepo ? `https://github.com/${prRepo}/pull/${link.ref}` : null;
     const full = /^([A-Za-z0-9-]{1,39})\/([A-Za-z0-9._-]{1,100})#(\d{1,7})$/.exec(link.ref);
     return full ? `https://github.com/${full[1]}/${full[2]}/pull/${full[3]}` : null;
   }

@@ -50,6 +50,7 @@ describe('the server half', () => {
   it('refuses anything but GET on its two routes', async () => {
     const handler = createHandler(ctx(), { fetch: fakeGitHub([]).fetch });
     expect((await handler(get('/board', 'POST'))).status).toBe(405);
+    expect((await handler(get('/seen', 'POST'))).status).toBe(405);
     expect((await handler(get('/elsewhere'))).status).toBe(404);
   });
 
@@ -60,11 +61,13 @@ describe('the server half', () => {
     expect(await (await handler(get('/config'))).json()).toEqual({
       deciderName: 'Sam',
       keeperHandle: 'plan-keeper',
+      prRepo: null,
     });
     const bad = createHandler(ctx({ keeper_handle: 'Not A Handle' }));
     expect(await (await bad(get('/config'))).json()).toEqual({
       deciderName: null,
       keeperHandle: null,
+      prRepo: null,
     });
   });
 
@@ -76,6 +79,34 @@ describe('the server half', () => {
     const response = await createHandler(context)(get('/board'));
     expect(response.status).toBe(500);
     expect(await response.text()).not.toContain(TOKEN);
+  });
+
+  it('lets only a person mark the board seen, and keeps the last good board when they do', async () => {
+    const gh = fakeGitHub([{ sha: sha('1'), text: sampleText() }]);
+    const context = ctx();
+    const handler = createHandler(context, { fetch: gh.fetch, log: vi.fn() });
+    await handler(get('/board'));
+    const put = (caller: unknown, seen: unknown = sha('1')) =>
+      handler(
+        new Request('http://ext/seen', {
+          method: 'PUT',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({ seen }),
+        }),
+        caller
+      );
+    const agent = {
+      person: { ok: false, status: 403, body: { error: 'x', code: 'y', message: 'z' } },
+    };
+    expect((await put(agent)).status).toBe(403);
+    expect((await put(undefined)).status).toBe(403);
+    expect((await put({ person: { ok: true } }, 'main')).status).toBe(400);
+    expect((await put({ person: { ok: true } })).status).toBe(200);
+    expect(await (await handler(get('/seen'))).json()).toEqual({ seen: sha('1') });
+    const stored = (await context.storage.loadData()) as Record<string, unknown>;
+    expect(stored.seen).toBe(sha('1'));
+    expect(stored.lastGood).toBeDefined();
+    expect(stored.tokenExpiresAt).toBeDefined();
   });
 
   it('registers as a fetch handler', () => {

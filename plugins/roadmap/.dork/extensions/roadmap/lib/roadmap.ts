@@ -1,6 +1,6 @@
 /**
- * `roadmap.json`, read and checked. The contract is `roadmap.schema.json`
- * (v1): bets only, each with an id, `kind: "project"`, a
+ * `roadmap.json`, read and checked. The contract is the roadmap v1 schema
+ * (the README's "The file"): bets only, each with an id, `kind: "project"`, a
  * horizon, a MoSCoW, an owner, a status and a why, plus optional target, links
  * and asks. Unknown keys are allowed and ignored here (this extension never
  * writes the file, so it can't drop them).
@@ -183,7 +183,13 @@ export function jsonErrorOffset(text: string): number {
     if (!match || match[0] === '-') fail();
     i += match![0].length;
   };
+  /** How deep the current value sits inside objects and arrays. */
   let depth = 0;
+  /** Step past a closing `}` or `]`, one level up. */
+  const close = () => {
+    i += 1;
+    depth -= 1;
+  };
   const value = (): void => {
     space();
     const char = text[i];
@@ -192,7 +198,7 @@ export function jsonErrorOffset(text: string): number {
     if (char === '{') {
       i += 1;
       space();
-      if (text[i] === '}') return void (i += 1);
+      if (text[i] === '}') return close();
       for (;;) {
         space();
         if (text[i] !== '"') fail();
@@ -203,19 +209,19 @@ export function jsonErrorOffset(text: string): number {
         value();
         space();
         if (text[i] === ',') i += 1;
-        else if (text[i] === '}') return void (i += 1);
+        else if (text[i] === '}') return close();
         else fail();
       }
     }
     if (char === '[') {
       i += 1;
       space();
-      if (text[i] === ']') return void (i += 1);
+      if (text[i] === ']') return close();
       for (;;) {
         value();
         space();
         if (text[i] === ',') i += 1;
-        else if (text[i] === ']') return void (i += 1);
+        else if (text[i] === ']') return close();
         else fail();
       }
     }

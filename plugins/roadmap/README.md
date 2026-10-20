@@ -21,15 +21,16 @@ It reads one file, `roadmap/roadmap.json`, from a GitHub repo you choose. People
 3. **Name the repo.** In the same place, set **Repo** to `owner/name`.
 4. **Pick the room.** Still on the Roadmap card, use **Roadmap tab shows** to choose the room the tab belongs in. Until you do, the tab doesn't show anywhere.
 
-Two optional settings:
+Three optional settings:
 
 - **Who decides** puts a name on the decisions lane ("Needs Sam"). Empty means "Needs you".
 - **Who keeps the roadmap** is the handle that **Ask in this room** mentions, without the @.
+- **Repo for PR numbers** is where a pull request link written as a bare number (`"ref": "42"`) opens, as `owner/name`. Empty shows bare numbers as text.
 
 ## What you see
 
 - **Needs you**: every open ask in the file, the one due soonest first. Each one links to where it gets answered: its thread, or the approval card on Home. The board has no approve or deny buttons, and an ask taken off the file is never treated as a yes.
-- **Since you last looked**: each change since you pressed **Mark seen**, with who made it and why. A change with no reason says "No reason given".
+- **Since you last looked**: each change since you pressed **Mark seen**, with who made it and why. A change with no reason says "No reason given". Before your first Mark seen, it shows the five newest changes.
 - **Now, Next, Later**: the bets in file order. Click one to see why it matters, its fields and links, and its last few changes. Later starts folded.
 - **A change while you're looking** waits behind a pill, such as "@sam moved 2 cards · Show". Nothing moves until you press Show.
 - **Ask in this room** (on a card's ⋯ menu) copies a message asking for a move and puts your cursor in the room's message box. Finish it and send it yourself.

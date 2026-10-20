@@ -152,7 +152,7 @@ export class GitHubClient {
     try {
       response = await this.#fetch(`${API}/repos/${this.#repo}${path}`, {
         method: 'GET',
-        redirect: 'error',
+        redirect: 'manual',
         signal: AbortSignal.timeout(TIMEOUT_MS),
         headers: {
           Accept: 'application/vnd.github+json',

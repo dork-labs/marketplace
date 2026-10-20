@@ -107,7 +107,7 @@ describe('format', () => {
         entry('1', 'nose', [{ kind: 'moscow', id: 'b', title: 't', to: 'could' }]),
       ])
     ).toBe('2 people changed 2 cards');
-    expect(pillText([entry('1', 'chef', [{ kind: 'milestones' }])])).toBe(
+    expect(pillText([entry('2', 'chef', []), entry('1', 'chef', [{ kind: 'milestones' }])])).toBe(
       '@chef changed the roadmap'
     );
   });
@@ -163,6 +163,7 @@ describe('format', () => {
     expect(linkHref({ kind: 'url', ref: 'https://example.com', label: null }, 'a/b')).toBe(
       'https://example.com'
     );
+    expect(linkHref({ kind: 'pr', ref: '42', label: null }, null)).toBeNull();
     expect(linkHref({ kind: 'linear', ref: 'TEA-12', label: null }, 'a/b')).toBeNull();
     expect(linkHref({ kind: 'doc', ref: 'docs/x.md', label: null }, 'a/b')).toBeNull();
   });

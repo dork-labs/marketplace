@@ -62,26 +62,22 @@ function view(extra: Partial<BoardView> = {}): BoardView {
   };
 }
 
-function host(saved: unknown = null): PanelHostApi & {
+function host(): PanelHostApi & {
   navigate: ReturnType<typeof vi.fn>;
   notify: ReturnType<typeof vi.fn>;
-  saveData: ReturnType<typeof vi.fn>;
 } {
-  return {
-    navigate: vi.fn(),
-    notify: vi.fn(),
-    loadData: vi.fn(async () => saved) as PanelHostApi['loadData'],
-    saveData: vi.fn(async () => {}),
-  };
+  return { navigate: vi.fn(), notify: vi.fn() };
 }
 
-const CONFIG: PanelConfig = { deciderName: 'Sam', keeperHandle: 'plan-keeper' };
+const CONFIG: PanelConfig = { deciderName: 'Sam', keeperHandle: 'plan-keeper', prRepo: null };
 
 async function mount(first: BoardView, deps: Partial<PanelDeps> = {}, api = host()) {
   const getBoard = vi.fn(async () => first);
   const Panel = createPanel(api, {
     getBoard,
     getConfig: async () => CONFIG,
+    getSeen: async () => null,
+    putSeen: async () => {},
     now: () => NOW,
     visible: () => true,
     ...deps,
@@ -288,16 +284,58 @@ describe('the panel', () => {
   });
 
   it('marks a card moved since you last looked, and Mark seen saves the newest commit', async () => {
-    const api = host({ seen: '1'.repeat(40) });
+    const putSeen = vi.fn(async () => {});
     const { container } = await mount(
       view({ board: board((doc) => void (itemsOf(doc)[2]!.horizon = 'now')) }),
-      {},
-      api
+      { getSeen: async () => '1'.repeat(40), putSeen }
     );
     expect(container.querySelector('[data-new]')!.textContent).toContain('moved it here 2h ago');
     expect(screen.getByText(/^Since you last looked/)).toBeTruthy();
     fireEvent.click(screen.getByRole('button', { name: 'Mark seen' }));
-    expect(api.saveData).toHaveBeenCalledWith({ seen: '2'.repeat(40) });
+    expect(putSeen).toHaveBeenCalledWith('2'.repeat(40));
+  });
+
+  it('holds a changed board behind the pill even when its commit is unknown', async () => {
+    const next = view({
+      board: board((doc) => void (itemsOf(doc)[2]!.horizon = 'now')),
+      history: [],
+      revision: null,
+      head: null,
+    });
+    const getBoard = vi.fn().mockResolvedValueOnce(view()).mockResolvedValue(next);
+    vi.useFakeTimers({ toFake: ['setInterval', 'clearInterval'] });
+    try {
+      const { container } = await mount(view(), { getBoard });
+      await act(async () => {
+        vi.advanceTimersByTime(60_000);
+      });
+      expect(screen.getByText('The roadmap changed')).toBeTruthy();
+      const now = container.querySelector('[aria-labelledby="rm-col-now"]')!.textContent;
+      expect(now).not.toContain('Fridge inventory');
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('links a bare PR number only when a PR repo is set', async () => {
+    const withPr = view({
+      board: board((doc) => void (itemsOf(doc)[0]!.links = [{ kind: 'pr', ref: '42' }])),
+    });
+    await mount(withPr, { getConfig: async () => ({ ...CONFIG, prRepo: 'acme/app' }) });
+    fireEvent.click(screen.getByRole('button', { name: 'Teach the kettle to whistle in tune' }));
+    expect(screen.getByText('42 ↗').getAttribute('href')).toBe(
+      'https://github.com/acme/app/pull/42'
+    );
+  });
+
+  it('closes the card menu when focus leaves it', async () => {
+    await mount(view());
+    fireEvent.click(
+      screen.getByRole('button', { name: 'More for Teach the kettle to whistle in tune' })
+    );
+    const item = screen.getByRole('menuitem', { name: 'Ask in this room' });
+    fireEvent.blur(item, { relatedTarget: document.body });
+    expect(screen.queryByRole('menuitem')).toBeNull();
   });
 
   it('shows the first twelve cards of a long column and offers the rest', async () => {

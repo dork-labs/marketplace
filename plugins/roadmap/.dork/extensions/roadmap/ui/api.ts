@@ -33,10 +33,15 @@ export class RoadmapRequestError extends Error {
   }
 }
 
-async function get<T>(path: string): Promise<T> {
+async function call<T>(path: string, body?: unknown): Promise<T> {
   let response: Response;
   try {
-    response = await fetch(`${apiBase()}/ext/roadmap${path}`, { cache: 'no-store' });
+    response = await fetch(`${apiBase()}/ext/roadmap${path}`, {
+      method: body === undefined ? 'GET' : 'PUT',
+      cache: 'no-store',
+      headers: body === undefined ? undefined : { 'Content-Type': 'application/json' },
+      body: body === undefined ? undefined : JSON.stringify(body),
+    });
   } catch {
     throw new RoadmapRequestError();
   }
@@ -51,7 +56,7 @@ async function get<T>(path: string): Promise<T> {
  * @returns The `GET /board` body.
  */
 export function getBoard(refresh = false): Promise<BoardView> {
-  return get<BoardView>(refresh ? '/board?refresh=1' : '/board');
+  return call<BoardView>(refresh ? '/board?refresh=1' : '/board');
 }
 
 /**
@@ -60,5 +65,23 @@ export function getBoard(refresh = false): Promise<BoardView> {
  * @returns The `GET /config` body.
  */
 export function getConfig(): Promise<PanelConfig> {
-  return get<PanelConfig>('/config');
+  return call<PanelConfig>('/config');
+}
+
+/**
+ * Read the commit the person last marked seen.
+ *
+ * @returns Its sha, or null.
+ */
+export async function getSeen(): Promise<string | null> {
+  return (await call<{ seen: string | null }>('/seen')).seen;
+}
+
+/**
+ * Mark the board seen up to a commit.
+ *
+ * @param sha - The newest commit on screen.
+ */
+export async function putSeen(sha: string): Promise<void> {
+  await call('/seen', { seen: sha });
 }

@@ -110,6 +110,9 @@ describe('jsonErrorOffset', () => {
     expect(jsonErrorOffset('{"a": 1} x')).toBe(9);
     expect(jsonErrorOffset('{"a": ')).toBe(6);
     expect(jsonErrorOffset('['.repeat(5000))).toBeLessThan(5000);
+    // Depth is nesting, not a count: many sibling arrays are fine.
+    const many = `[${Array.from({ length: 400 }, () => '[1]').join(',\n')}\n`;
+    expect(jsonErrorOffset(many)).toBe(many.length);
   });
 
   it('agrees with JSON.parse on text that is valid', () => {

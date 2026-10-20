@@ -99,9 +99,17 @@ interface Stored {
     fileUrl: string | null;
     asOf: string;
   };
-  /** Keyed by repo: a token's expiry only means something for the repo it was read with. */
+  /**
+   * Keyed by repo. Set from GitHub's header on every answer that wasn't a 401,
+   * and cleared when an answer carries none, so a replaced token never keeps
+   * the old one's date.
+   */
   tokenExpiresAt?: { repo: string; at: string };
+  /** The newest commit the person marked seen. */
+  seen?: string;
 }
+
+const SHA = /^[0-9a-f]{40}$/;
 
 /** What {@link BoardService} needs from the host. */
 export interface BoardServiceOptions {
@@ -152,6 +160,8 @@ export class BoardService {
   #inFlight: { key: string; promise: Promise<BoardView> } | null = null;
   /** Old versions by `<repo>@<sha>`. */
   readonly #versions = new Map<string, Version>();
+  /** The last storage change, which the next one waits for. */
+  #writes: Promise<void> = Promise.resolve();
 
   /** @param options - The host's stores, a fetch and a clock. */
   constructor(options: BoardServiceOptions) {
@@ -222,12 +232,46 @@ export class BoardService {
     }
   }
 
-  async #save(data: Stored): Promise<void> {
-    try {
-      await this.#options.storage.saveData(data);
-    } catch {
-      this.#log('Roadmap: could not save the last good board');
-    }
+  /**
+   * Change the stored data. Changes run one at a time, each on a fresh read,
+   * so a board read and a "Mark seen" never overwrite each other.
+   */
+  #update(change: (data: Stored) => void): Promise<void> {
+    const run = this.#writes.then(async () => {
+      const data = await this.#load();
+      change(data);
+      try {
+        await this.#options.storage.saveData(data);
+      } catch {
+        this.#log('Roadmap: could not save its data');
+      }
+    });
+    this.#writes = run;
+    return run;
+  }
+
+  /**
+   * The newest commit the person marked seen.
+   *
+   * @returns Its sha, or null when they never have.
+   */
+  async seen(): Promise<string | null> {
+    await this.#writes;
+    const seen = (await this.#load()).seen;
+    return typeof seen === 'string' && SHA.test(seen) ? seen : null;
+  }
+
+  /**
+   * Mark the board seen up to a commit.
+   *
+   * @param sha - A full commit sha.
+   * @throws Error when it isn't one.
+   */
+  async markSeen(sha: string): Promise<void> {
+    if (!SHA.test(sha)) throw new Error('seen must be a full commit sha');
+    await this.#update((data) => {
+      data.seen = sha;
+    });
   }
 
   /** One version of the file, read once per sha. */
@@ -264,14 +308,25 @@ export class BoardService {
       this.#version(github, repo, sha)
     );
     const versions = new Map(list.map((sha, i) => [sha, read[i]]));
+    const beforeShas = commits.map((c, i) => commits[i + 1]?.sha ?? c.parentSha);
     return commits.map((commit, i): HistoryEntry => {
       const after = versions.get(commit.sha);
-      const beforeSha = commits[i + 1]?.sha ?? commit.parentSha;
+      const beforeSha = beforeShas[i];
       const before: Version | undefined = beforeSha ? versions.get(beforeSha) : 'missing';
       if (after === undefined || after === 'missing' || before === undefined) {
         return { ...commit, changes: [] };
       }
-      return { ...commit, changes: diffBoards(before === 'missing' ? null : before, after) };
+      if (before === 'missing') return { ...commit, changes: diffBoards(null, after) };
+      if (before !== null) return { ...commit, changes: diffBoards(before, after) };
+      // The version before didn't parse: this commit fixed the file. Compare it
+      // with the last version that did parse, when there is one in reach.
+      if (after === null) return { ...commit, changes: [{ kind: 'unreadable' }] };
+      const lastGood = beforeShas
+        .slice(i + 1)
+        .map((sha) => (sha ? versions.get(sha) : undefined))
+        .find((v): v is Board => v !== null && v !== undefined && v !== 'missing');
+      const changes = lastGood ? diffBoards(lastGood, after) : [];
+      return { ...commit, changes: [{ kind: 'fixed' }, ...changes] };
     });
   }
 
@@ -281,9 +336,16 @@ export class BoardService {
     const [file, commits] = await Promise.all([github.readFile(), github.listCommits()]);
     const now = this.#now();
 
+    // GitHub answered for this token unless the read failed outright or was a
+    // 401: then its header (or its absence) is the truth about the expiry.
+    const answered =
+      file.kind !== 'unreachable' && !(file.kind === 'refused' && file.status === 401);
     const seenExpiry = file.expiresAt ?? commits.expiresAt;
-    if (seenExpiry) stored.tokenExpiresAt = { repo, at: seenExpiry };
-    const tokenExpiresAt = stored.tokenExpiresAt?.repo === repo ? stored.tokenExpiresAt.at : null;
+    let expiry = stored.tokenExpiresAt?.repo === repo ? stored.tokenExpiresAt.at : null;
+    if (answered) expiry = seenExpiry;
+    else if (seenExpiry) expiry = seenExpiry;
+    const tokenExpiresAt = expiry;
+    let newLastGood: Stored['lastGood'] | undefined;
 
     const commitList = commits.kind === 'ok' ? commits.commits : [];
     const head = commitList[0] ?? null;
@@ -318,7 +380,7 @@ export class BoardService {
           revision: head?.sha ?? null,
           asOf: now.toISOString(),
         };
-        stored.lastGood = {
+        newLastGood = {
           repo,
           board: parsed.board,
           skipped: parsed.skipped,
@@ -333,7 +395,10 @@ export class BoardService {
     } else {
       result = this.#failure(file, fallBack, tokenExpiresAt, now);
     }
-    await this.#save(stored);
+    await this.#update((data) => {
+      data.tokenExpiresAt = tokenExpiresAt ? { repo, at: tokenExpiresAt } : undefined;
+      if (newLastGood) data.lastGood = newLastGood;
+    });
     return result;
   }
 
@@ -351,7 +416,10 @@ export class BoardService {
       this.#log("Roadmap: GitHub didn't answer");
       return fallBack('unreachable', { problem: "GitHub didn't answer" });
     }
-    const problem = `GitHub refused (${file.status})`;
+    const problem =
+      file.status >= 300 && file.status < 400
+        ? 'The repo has moved. Update the Repo setting'
+        : `GitHub refused (${file.status})`;
     this.#log(`Roadmap: ${problem}`);
     if (file.status === 401) {
       const expired = tokenExpiresAt !== null && now.getTime() >= Date.parse(tokenExpiresAt);

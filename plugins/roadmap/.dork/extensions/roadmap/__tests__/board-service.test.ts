@@ -220,6 +220,41 @@ describe('BoardService', () => {
     expect(view.problem).toBe('GitHub refused (401)');
   });
 
+  it('forgets an old token’s expiry once GitHub answers without one', async () => {
+    const gh = fakeGitHub([{ sha: sha('1'), text: V1 }]);
+    gh.state.expiry = '2030-01-18 12:00:00 UTC';
+    const h = host();
+    const service = new BoardService(h.options(gh.fetch));
+    expect((await service.view()).tokenExpiresAt).toBe('2030-01-18T12:00:00.000Z');
+    gh.state.expiry = null;
+    h.clock.advance(61_000);
+    expect((await service.view()).tokenExpiresAt).toBeNull();
+  });
+
+  it('says a commit fixed the file, and what it changed since the last good version', async () => {
+    const V3 = sampleText((doc) => {
+      itemsOf(doc)[2]!.horizon = 'later';
+    });
+    const gh = fakeGitHub([
+      { sha: sha('3'), text: V3, message: 'Fix the file' },
+      { sha: sha('2'), text: '{ broken', message: 'oops' },
+      { sha: sha('1'), text: V1 },
+    ]);
+    const view = await new BoardService(host().options(gh.fetch)).view();
+    expect(view.history.map((e) => e.changes.map((c) => c.kind))).toEqual([
+      ['fixed', 'moved'],
+      ['unreadable'],
+      ['created'],
+    ]);
+  });
+
+  it('says the repo moved when GitHub redirects', async () => {
+    const gh = fakeGitHub([{ sha: sha('1'), text: V1 }]);
+    gh.state.status = 301;
+    const view = await new BoardService(host().options(gh.fetch)).view();
+    expect(view.problem).toBe('The repo has moved. Update the Repo setting');
+  });
+
   it('starts again when the token or the repo changes', async () => {
     const gh = fakeGitHub([{ sha: sha('1'), text: V1 }]);
     const h = host();

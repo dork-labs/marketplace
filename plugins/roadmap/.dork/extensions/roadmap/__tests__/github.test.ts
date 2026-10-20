@@ -55,7 +55,8 @@ describe('GitHubClient', () => {
     const [url, init] = fetchImpl.mock.calls[0] as unknown as [string, RequestInit];
     expect(url).toBe('https://api.github.com/repos/acme/plans/contents/roadmap/roadmap.json');
     expect((init.headers as Record<string, string>).Authorization).toBe(`Bearer ${TOKEN}`);
-    expect(init.redirect).toBe('error');
+    // A redirect is answered, never followed, so the token goes nowhere else.
+    expect(init.redirect).toBe('manual');
     expect(result).toMatchObject({ kind: 'ok', text: sampleText() });
   });
 
@@ -92,6 +93,7 @@ describe('GitHubClient', () => {
       [json({}, 502), { kind: 'refused', status: 502 }],
       [new Error(`connect failed with ${TOKEN}`), { kind: 'unreachable' }],
       [json({ type: 'dir' }), { kind: 'refused', status: 200 }],
+      [json({ message: 'Moved Permanently' }, 301), { kind: 'refused', status: 301 }],
     ];
     for (const [answer, expected] of cases) {
       const fetchImpl = vi.fn(async () => {

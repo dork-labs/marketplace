@@ -22,6 +22,7 @@ import {
 export type Change =
   | { kind: 'created' }
   | { kind: 'unreadable' }
+  | { kind: 'fixed' }
   | { kind: 'milestones' }
   | { kind: 'reordered'; horizon: Horizon }
   | { kind: 'added'; id: string; title: string; horizon: Horizon }
