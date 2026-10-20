@@ -21,6 +21,7 @@ export const CSS = `
 .rm-h1{font-size:15px;font-weight:600}
 .rm-muted{color:hsl(var(--muted-foreground))}
 .rm-small{font-size:12px}
+.rm-nowrap{white-space:nowrap;flex:none}
 .rm-faint{color:hsl(var(--muted-foreground));opacity:.75}
 .rm-red{color:hsl(var(--status-error))}
 .rm-row{display:flex;flex-wrap:wrap;align-items:center;gap:4px 8px}
@@ -36,7 +37,7 @@ export const CSS = `
 .rm-chip{display:inline-block;font-size:10px;font-weight:600;letter-spacing:.04em;text-transform:uppercase;border-radius:4px;padding:1px 5px;background:hsl(var(--muted));color:hsl(var(--muted-foreground))}
 .rm-chip[data-must]{background:hsl(var(--foreground));color:hsl(var(--background))}
 .rm-meta{display:flex;flex-wrap:wrap;align-items:center;gap:4px 8px;margin-top:6px;font-size:12px;color:hsl(var(--muted-foreground))}
-.rm-btn{font:inherit;font-size:12px;line-height:1.2;border:1px solid hsl(var(--border));background:hsl(var(--background));color:inherit;border-radius:6px;padding:5px 10px;min-height:28px;cursor:pointer}
+.rm-btn{font:inherit;font-size:12px;line-height:1.2;white-space:nowrap;flex:none;border:1px solid hsl(var(--border));background:hsl(var(--background));color:inherit;border-radius:6px;padding:5px 10px;min-height:28px;cursor:pointer}
 .rm-btn[data-solid]{background:hsl(var(--foreground));color:hsl(var(--background));border-color:hsl(var(--foreground))}
 .rm-link{font:inherit;font-size:12px;background:none;border:0;padding:0;color:inherit;font-weight:500;text-decoration:underline;text-decoration-color:hsl(var(--muted-foreground) / .5);text-underline-offset:2px;cursor:pointer}
 .rm-cardbtn{font:inherit;color:inherit;background:none;border:0;padding:0;margin:0;text-align:left;cursor:pointer;width:100%;display:block}

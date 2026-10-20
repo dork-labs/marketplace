@@ -41,6 +41,7 @@ import {
   subline,
   targetLabel,
   threadPath,
+  who,
   type LaneCard,
 } from './format.ts';
 import { h, useEffect, useRef, useState, type Node } from './react.ts';
@@ -125,14 +126,14 @@ function FeedItem({ entry, ctx }: { entry: HistoryEntry; ctx: Ctx }) {
           h(
             'p',
             { key: i },
-            h('strong', null, entry.author),
+            h('strong', null, who(entry.author)),
             ' ',
             h(ChangeLine, { entry, ctx, index: i })
           )
         ),
         more > 0 ? h(Muted, null, `and ${more} more`) : null
       ),
-      h(Muted, null, agoWords(entry.date, ctx.now))
+      h('span', { className: 'rm-muted rm-small rm-nowrap' }, agoWords(entry.date, ctx.now))
     ),
     h(Reason, { reason: entry.reason }),
     entry.url
@@ -428,7 +429,7 @@ function Card({ item, ctx, placed }: { item: Item; ctx: Ctx; placed: HistoryEntr
       ? h(
           'p',
           { className: 'rm-small', style: { marginTop: 6 } },
-          h('strong', null, placed.author),
+          h('strong', null, who(placed.author)),
           ` moved it here ${agoWords(placed.date, ctx.now)}: `,
           placed.reason
             ? h('span', { className: 'rm-muted' }, placed.reason)

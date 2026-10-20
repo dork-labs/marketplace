@@ -149,7 +149,7 @@ describe('the panel', () => {
 
   it('RM-3: every change shows its author and its reason, or "No reason given"', async () => {
     await mount(view());
-    expect(screen.getAllByText('chef').length).toBeGreaterThan(0);
+    expect(screen.getAllByText('@chef').length).toBeGreaterThan(0);
     expect(screen.getByText('“Fridge first”')).toBeTruthy();
     expect(screen.getByText('No reason given')).toBeTruthy();
   });
