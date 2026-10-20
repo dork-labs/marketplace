@@ -2,7 +2,7 @@
  * The Roadmap extension's client entry: one right-panel tab, read-only.
  *
  * The tab shows nowhere until someone picks where: on the extension's card in
- * Settings → Extensions ("Roadmap tab shows"), or with an agent's
+ * Settings → Extensions ("Panel tab shows"), or with an agent's
  * `config_patch` of `ui.panelTabs`. Room ids belong to one computer, so a
  * shared package leaves them to the person (and this repo is public).
  *

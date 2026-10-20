@@ -17,11 +17,11 @@ It reads one file, `roadmap/roadmap.json`, from a GitHub repo you choose. People
    - Expiration: 90 days.
    - Repository access: **Only select repositories**, and pick only the repo that holds `roadmap/roadmap.json`.
    - Repository permissions: **Contents: Read-only**. GitHub adds **Metadata: Read-only** by itself. Leave everything else at No access.
-2. **Paste it in.** In DorkOS, open Settings → Extensions, find **Roadmap**, and paste the token into **GitHub token**.
-3. **Name the repo.** In the same place, set **Repo** to `owner/name`.
-4. **Pick the room.** Still on the Roadmap card, use **Roadmap tab shows** to choose the room the tab belongs in. Until you do, the tab doesn't show anywhere.
+2. **Paste it in.** In DorkOS, open Settings. Under Add-ons, open **Roadmap** and paste the token into **GitHub token**.
+3. **Name the repo.** On the same page, set **Repo** to `owner/name`.
+4. **Pick the room.** Under Add-ons, open **Extensions**. On the Roadmap card, set **Panel tab shows** to **Only in…** and add the room the tab belongs in. Until you do, the tab doesn't show anywhere.
 
-Three optional settings:
+Three optional settings, on the same Roadmap page as the token:
 
 - **Who decides** puts a name on the decisions lane ("Needs Sam"). Empty means "Needs you".
 - **Who keeps the roadmap** is the handle that **Ask in this room** mentions, without the @.
