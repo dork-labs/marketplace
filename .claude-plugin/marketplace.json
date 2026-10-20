@@ -89,6 +89,16 @@
       "category": "dev-tools",
       "tags": ["design", "prototyping", "mockups", "review", "feedback"],
       "keywords": ["visual-companion", "mockup", "prototype", "design-review", "canvas"]
+    },
+    {
+      "name": "roadmap",
+      "source": "./plugins/roadmap",
+      "description": "A read-only roadmap board beside a room: what needs a decision, what's Now, Next and Later, and who changed what and why. It reads roadmap/roadmap.json from one GitHub repo, with a read-only token you add in its settings.",
+      "author": { "name": "Dork Labs" },
+      "license": "MIT",
+      "category": "project-management",
+      "tags": ["roadmap", "planning", "github", "decisions"],
+      "keywords": ["roadmap", "moscow", "now-next-later", "planning", "read-only"]
     }
   ]
 }

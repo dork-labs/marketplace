@@ -57,6 +57,14 @@
       "layers": ["skills"],
       "icon": "🖼️",
       "pricing": { "model": "free" }
+    },
+    "roadmap": {
+      "type": "plugin",
+      "displayName": "Roadmap",
+      "categories": ["project-management", "productivity"],
+      "layers": ["extensions"],
+      "icon": "🗺️",
+      "pricing": { "model": "free" }
     }
   }
 }
