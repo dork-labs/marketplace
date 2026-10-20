@@ -1,0 +1,51 @@
+name: roadmap
+
+# Quality gates for the Roadmap plugin (plugins/roadmap), the second package with
+# its own package.json. A job of its own, per flow-tests.yml's rule that one
+# plugin's red gate never hides another's.
+#
+# Not a required check yet. It still has no `paths:` filter and listens for
+# `merge_group`, for the reasons flow-tests.yml gives, so it can be made
+# required without changing this file.
+
+on:
+  pull_request:
+  merge_group:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: "${{ github.workflow }}-${{ github.ref }}"
+  cancel-in-progress: true
+
+jobs:
+  roadmap:
+    name: roadmap plugin
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: plugins/roadmap
+
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/setup-node@v5
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: plugins/roadmap/package-lock.json
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Typecheck
+        run: npm run typecheck
+
+      - name: Tests
+        run: npm test
+
+      - name: Format check
+        run: npm run format:check

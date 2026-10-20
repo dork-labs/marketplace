@@ -1,0 +1,50 @@
+{
+  "id": "roadmap",
+  "name": "Roadmap",
+  "version": "0.1.0",
+  "description": "A read-only board of your team's roadmap: what needs a decision, what's Now, Next and Later, and who changed what and why. It reads roadmap/roadmap.json from one GitHub repo.",
+  "purpose": "shows your team's roadmap from GitHub, read-only",
+  "author": "Dork Labs",
+  "minHostVersion": "0.114.0",
+  "contributions": { "right-panel": true },
+  "serverCapabilities": {
+    "serverEntry": "./server.ts",
+    "runtime": "subprocess",
+    "allow": { "net": ["api.github.com:443"], "run": [], "agents": false },
+    "limits": { "memoryMb": 128 },
+    "secrets": [
+      {
+        "key": "github_token",
+        "label": "GitHub token",
+        "description": "A fine-grained personal access token for the one repo that holds roadmap/roadmap.json: Contents read-only and Metadata read-only, nothing else. It stays on this computer and is only sent to api.github.com.",
+        "placeholder": "github_pat_…",
+        "required": true,
+        "group": "GitHub"
+      }
+    ],
+    "settings": [
+      {
+        "type": "text",
+        "key": "repo",
+        "label": "Repo",
+        "description": "The GitHub repo that holds roadmap/roadmap.json, as owner/name.",
+        "placeholder": "owner/name",
+        "required": true,
+        "group": "GitHub"
+      },
+      {
+        "type": "text",
+        "key": "decider_name",
+        "label": "Who decides",
+        "description": "The name on the decisions lane, as in \"Needs Sam\". Leave it empty for \"Needs you\"."
+      },
+      {
+        "type": "text",
+        "key": "keeper_handle",
+        "label": "Who keeps the roadmap",
+        "description": "The handle that \"Ask in this room\" mentions, without the @.",
+        "placeholder": "roadmap-keeper"
+      }
+    ]
+  }
+}
