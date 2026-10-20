@@ -317,6 +317,65 @@ describe('the panel', () => {
     }
   });
 
+  it('shows a GitHub failure at once, even while a change waits behind the pill', async () => {
+    const changed = view({
+      board: board((doc) => void (itemsOf(doc)[2]!.horizon = 'now')),
+      history: [entry('4'.repeat(40)), entry('2'.repeat(40))],
+    });
+    const failed = {
+      ...changed,
+      status: 'auth-failed' as const,
+      stale: true,
+      problem: 'GitHub refused (401)',
+    };
+    const getBoard = vi
+      .fn()
+      .mockResolvedValueOnce(view())
+      .mockResolvedValueOnce(changed)
+      .mockResolvedValue(failed);
+    vi.useFakeTimers({ toFake: ['setInterval', 'clearInterval'] });
+    try {
+      const { container } = await mount(view(), { getBoard });
+      await act(async () => {
+        vi.advanceTimersByTime(60_000);
+      });
+      expect(screen.getByText('@chef moved 1 card')).toBeTruthy();
+      await act(async () => {
+        vi.advanceTimersByTime(60_000);
+      });
+      expect(screen.getByText('GitHub access stopped working.')).toBeTruthy();
+      expect(container.querySelector('.rm-dim')).not.toBeNull();
+      expect(screen.queryByText('@chef moved 1 card')).toBeNull();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('clears the expired line at once when access works again, though the board changed', async () => {
+    const expired = view({
+      status: 'auth-expired',
+      stale: true,
+      tokenExpiresAt: '2030-01-14T00:00:00Z',
+    });
+    const back = view({
+      board: board((doc) => void (itemsOf(doc)[2]!.horizon = 'now')),
+      history: [entry('4'.repeat(40)), entry('2'.repeat(40))],
+    });
+    const getBoard = vi.fn().mockResolvedValueOnce(expired).mockResolvedValue(back);
+    vi.useFakeTimers({ toFake: ['setInterval', 'clearInterval'] });
+    try {
+      await mount(expired, { getBoard });
+      expect(screen.getByText('GitHub access expired on Jan 14.')).toBeTruthy();
+      await act(async () => {
+        vi.advanceTimersByTime(60_000);
+      });
+      expect(screen.queryByText('GitHub access expired on Jan 14.')).toBeNull();
+      expect(screen.queryByRole('button', { name: 'Show' })).toBeNull();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it('links a bare PR number only when a PR repo is set', async () => {
     const withPr = view({
       board: board((doc) => void (itemsOf(doc)[0]!.links = [{ kind: 'pr', ref: '42' }])),

@@ -770,12 +770,16 @@ export function createPanel(api: PanelHostApi, deps: PanelDeps = {}) {
     /** Take a new answer: show it, or hold it behind the pill if it would reorder the board. */
     const accept = (next: BoardView) => {
       const current = shownRef.current;
-      // Compare the boards themselves, not their commits: a commit can be
-      // unknown (GitHub listed none) while the file still changed.
+      // Only a fresh board replacing a fresh board waits behind the pill. A
+      // change of state (GitHub failing, or working again) is news and shows
+      // at once. Boards are compared by content, since a commit can be unknown
+      // (GitHub listed none) while the file still changed.
+      const fresh = (view: BoardView | null) =>
+        view?.board != null && view.status === 'ok' && !view.stale;
       const reorders =
-        current?.board != null &&
-        next.board != null &&
-        JSON.stringify(current.board) !== JSON.stringify(next.board);
+        fresh(current) &&
+        fresh(next) &&
+        JSON.stringify(current!.board) !== JSON.stringify(next.board);
       if (reorders && visible()) {
         pendingRef.current = next;
         setPending(next);
@@ -857,9 +861,13 @@ export function createPanel(api: PanelHostApi, deps: PanelDeps = {}) {
       ];
     }
     // With no known commit on screen, name no cards rather than count the whole history.
-    const pill = pending
-      ? pillText(shown?.revision ? entriesSince(pending.history, shown.revision) : [])
-      : null;
+    // Name the commits since the one on screen; when that one isn't in the new
+    // history (unknown, or too far back), name no cards rather than all of them.
+    const since =
+      pending && shown?.revision && pending.history.some((e) => e.sha === shown.revision)
+        ? entriesSince(pending.history, shown.revision)
+        : [];
+    const pill = pending ? pillText(since) : null;
     return h(
       'div',
       { className: 'rm' },

@@ -246,7 +246,8 @@ export class BoardService {
         this.#log('Roadmap: could not save its data');
       }
     });
-    this.#writes = run;
+    // One failed change must never block every later one.
+    this.#writes = run.catch(() => {});
     return run;
   }
 
