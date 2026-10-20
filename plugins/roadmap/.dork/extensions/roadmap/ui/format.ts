@@ -319,3 +319,19 @@ export function linkHref(link: Item['links'][number], prRepo: string | null): st
   }
   return null;
 }
+
+/**
+ * A link chip's text. A url link also names the host it really goes to, so a label written
+ * to look like one site can't hide another. new URL() gives the ASCII (punycode) host and
+ * drops any user@ part, which is the trick a misleading address leans on.
+ */
+export function linkText(link: Item['links'][number]): string {
+  const text = link.label ?? link.ref;
+  if (link.kind !== 'url') return text;
+  try {
+    const host = new URL(link.ref).hostname;
+    return host ? `${text} · ${host}` : text;
+  } catch {
+    return text;
+  }
+}

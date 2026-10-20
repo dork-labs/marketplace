@@ -280,7 +280,7 @@ describe('the panel', () => {
     await mount(view());
     fireEvent.click(screen.getByRole('button', { name: 'Teach the kettle to whistle in tune' }));
     expect(screen.getByText('Every morning starts with a flat note.')).toBeTruthy();
-    const link = screen.getByText('Notes ↗') as HTMLAnchorElement;
+    const link = screen.getByText('Notes · example.com ↗') as HTMLAnchorElement;
     expect(link.getAttribute('href')).toBe('https://example.com/kettle');
     expect(link.getAttribute('rel')).toBe('noopener noreferrer');
     expect(screen.getByText('TEA-12').tagName).toBe('SPAN');
@@ -377,6 +377,26 @@ describe('the panel', () => {
     } finally {
       vi.useRealTimers();
     }
+  });
+
+  it('shows the real host beside a url link whose label names another site', async () => {
+    const misleading = view({
+      board: board(
+        (doc) =>
+          void (itemsOf(doc)[0]!.links = [
+            {
+              kind: 'url',
+              ref: 'https://docs.example.org@trap.example/spec',
+              label: 'docs.example.org',
+            },
+          ])
+      ),
+    });
+    await mount(misleading);
+    fireEvent.click(screen.getByRole('button', { name: 'Teach the kettle to whistle in tune' }));
+    const link = screen.getByRole('link', { name: 'docs.example.org · trap.example ↗' });
+    expect(link.getAttribute('href')).toBe('https://docs.example.org@trap.example/spec');
+    expect(link.children).toHaveLength(0);
   });
 
   it('links a bare PR number only when a PR repo is set', async () => {

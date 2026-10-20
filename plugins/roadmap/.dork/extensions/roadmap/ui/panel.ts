@@ -33,6 +33,7 @@ import {
   itemHistory,
   laneCards,
   linkHref,
+  linkText,
   milestoneParts,
   pillText,
   placedBy,
@@ -292,7 +293,7 @@ function Details({ item, ctx }: { item: Item; ctx: Ctx }) {
           { className: 'rm-links' },
           item.links.map((link, i) => {
             const href = linkHref(link, ctx.config.prRepo);
-            const text = link.label ?? link.ref;
+            const text = linkText(link);
             return href
               ? h(
                   'a',

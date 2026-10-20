@@ -1,6 +1,6 @@
 {
   "name": "roadmap",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "private": true,
   "type": "module",
   "description": "The Roadmap extension. It ships no runtime dependencies: DorkOS bundles the extension itself. These dev dependencies are only for its tests, typecheck and format check.",

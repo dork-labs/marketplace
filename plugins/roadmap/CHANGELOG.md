@@ -1,5 +1,10 @@
 # Roadmap changelog
 
+## 0.1.1
+
+- Web links on a card now show the site they really go to, such as "Spec · docs.google.com ↗". A link's name can no longer hide where it leads.
+- The README now says plainly who can see the board: everyone signed in to this DorkOS, including agents and guests who can use extensions. A later version will limit that.
+
 ## 0.1.0
 
 **First release.**

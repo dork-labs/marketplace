@@ -8,6 +8,7 @@ import {
   expiryWarning,
   laneCards,
   linkHref,
+  linkText,
   milestoneParts,
   pillText,
   placedBy,
@@ -166,5 +167,23 @@ describe('format', () => {
     expect(linkHref({ kind: 'pr', ref: '42', label: null }, null)).toBeNull();
     expect(linkHref({ kind: 'linear', ref: 'TEA-12', label: null }, 'a/b')).toBeNull();
     expect(linkHref({ kind: 'doc', ref: 'docs/x.md', label: null }, 'a/b')).toBeNull();
+  });
+
+  it('names the host a url link really goes to, whatever its label says', () => {
+    expect(linkText({ kind: 'url', ref: 'https://docs.example.org/spec', label: 'Spec' })).toBe(
+      'Spec · docs.example.org'
+    );
+    expect(
+      linkText({
+        kind: 'url',
+        ref: 'https://docs.example.org@trap.example/x',
+        label: 'docs.example.org',
+      })
+    ).toBe('docs.example.org · trap.example');
+    expect(linkText({ kind: 'url', ref: 'https://kéttle.example/', label: 'Kettle' })).toBe(
+      'Kettle · xn--kttle-bsa.example'
+    );
+    expect(linkText({ kind: 'linear', ref: 'TEA-12', label: null })).toBe('TEA-12');
+    expect(linkText({ kind: 'pr', ref: '42', label: 'Fix' })).toBe('Fix');
   });
 });

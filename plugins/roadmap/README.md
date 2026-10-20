@@ -8,6 +8,7 @@ It reads one file, `roadmap/roadmap.json`, from a GitHub repo you choose. People
 
 - **It needs a GitHub token.** You make a fine-grained token that can only read one repo, and paste it into the extension's settings. It stays on this computer and is only sent to api.github.com.
 - **Its server code runs in its own process.** That process may connect to api.github.com and nothing else. It can't read your other files or DorkOS's data.
+- **Everyone signed in to this DorkOS can see the board.** That means every person and agent on it, and any guest who can use its extensions. Picking a room only decides where the tab shows. A later version will limit who sees the board, once DorkOS tells extensions who is asking.
 - **It shows nowhere until you pick a room.** See step 4 below.
 
 ## Set it up
@@ -32,6 +33,7 @@ Three optional settings, on the same Roadmap page as the token:
 - **Needs you**: every open ask in the file, the one due soonest first. Each one links to where it gets answered: its thread, or the approval card on Home. The board has no approve or deny buttons, and an ask taken off the file is never treated as a yes.
 - **Since you last looked**: each change since you pressed **Mark seen**, with who made it and why. A change with no reason says "No reason given". Before your first Mark seen, it shows the five newest changes.
 - **Now, Next, Later**: the bets in file order. Click one to see why it matters, its fields and links, and its last few changes. Later starts folded.
+- **Web links** show the site they really go to after their name, such as "Spec · docs.google.com ↗". Whoever wrote the link can't hide that behind its name.
 - **A change while you're looking** waits behind a pill, such as "@sam moved 2 cards · Show". Nothing moves until you press Show.
 - **Ask in this room** (on a card's ⋯ menu) copies a message asking for a move and puts your cursor in the room's message box. Finish it and send it yourself.
 

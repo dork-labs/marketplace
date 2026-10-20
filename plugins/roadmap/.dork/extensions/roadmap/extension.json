@@ -1,7 +1,7 @@
 {
   "id": "roadmap",
   "name": "Roadmap",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "A read-only board of your team's roadmap: what needs a decision, what's Now, Next and Later, and who changed what and why. It reads roadmap/roadmap.json from one GitHub repo.",
   "purpose": "shows your team's roadmap from GitHub, read-only",
   "author": "Dork Labs",
