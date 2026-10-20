@@ -258,7 +258,7 @@ describe('the panel', () => {
     const writeText = vi.fn(async () => {});
     Object.assign(navigator, { clipboard: { writeText } });
     const getBoard = vi.fn(async () => view());
-    await mount(view(), { getBoard });
+    const { api } = await mount(view(), { getBoard });
     const calls = getBoard.mock.calls.length;
     fireEvent.click(
       screen.getByRole('button', { name: 'More for Teach the kettle to whistle in tune' })
@@ -270,6 +270,9 @@ describe('the panel', () => {
     expect(writeText).toHaveBeenCalledWith(
       '@plan-keeper move "Teach the kettle to whistle in tune" to … because …'
     );
+    expect(api.notify).toHaveBeenCalledWith('Copied. Paste it in the message box', {
+      type: 'info',
+    });
     expect(getBoard.mock.calls.length).toBe(calls);
   });
 
@@ -412,11 +415,18 @@ describe('the panel', () => {
     expect(screen.getByRole('button', { name: 'Show 4 more' })).toBeTruthy();
   });
 
-  it('lists skipped items by id and reason', async () => {
+  it('lists skipped items by title, or by id when they have none', async () => {
     await mount(
-      view({ skipped: [{ id: '01HZZZZZZZZZZZZZZZZZZZZZQ1', reason: 'has no horizon' }] })
+      view({
+        skipped: [
+          { id: '01HZZZZZZZZZZZZZZZZZZZZZQ1', title: null, reason: 'has no horizon' },
+          { id: '01HZZZZZZZZZZZZZZZZZZZZZQ2', title: 'Robot butler', reason: 'moscow is "maybe"' },
+        ],
+      })
     );
-    expect(screen.getByText('1 item skipped')).toBeTruthy();
-    expect(screen.getByText('01HZZZ… has no horizon')).toBeTruthy();
+    expect(screen.getByText('2 items skipped')).toBeTruthy();
+    expect(
+      screen.getByText('01HZZZ… has no horizon · Robot butler moscow is "maybe"')
+    ).toBeTruthy();
   });
 });

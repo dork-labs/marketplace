@@ -63,7 +63,7 @@ export async function askInRoom(host: AskHost, text: string): Promise<void> {
   focusComposer();
   host.notify(
     copied
-      ? 'Copied a message for this room. Paste it in the message box, finish it and send.'
+      ? 'Copied. Paste it in the message box'
       : `Couldn't copy. Write this in the room: ${text}`,
     { type: 'info' }
   );

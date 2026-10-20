@@ -420,7 +420,7 @@ function Card({ item, ctx, placed }: { item: Item; ctx: Ctx; placed: HistoryEntr
       asks > 0
         ? h(
             'span',
-            { className: 'rm-red', 'aria-label': `${asks} open ${asks === 1 ? 'ask' : 'asks'}` },
+            { className: 'rm-ask', 'aria-label': `${asks} open ${asks === 1 ? 'ask' : 'asks'}` },
             `⚑ ${asks}`
           )
         : null
@@ -437,6 +437,27 @@ function Card({ item, ctx, placed }: { item: Item; ctx: Ctx; placed: HistoryEntr
         )
       : null,
     open ? h(Details, { item, ctx }) : null
+  );
+}
+
+/** The Later disclosure's chevron: points right when folded, down when open. */
+function Chevron({ open }: { open: boolean }) {
+  return h(
+    'svg',
+    {
+      className: 'rm-chevron',
+      'data-open': open ? '' : undefined,
+      viewBox: '0 0 16 16',
+      width: 14,
+      height: 14,
+      fill: 'none',
+      stroke: 'currentColor',
+      strokeWidth: 2,
+      strokeLinecap: 'round',
+      strokeLinejoin: 'round',
+      'aria-hidden': true,
+    },
+    h('path', { d: 'M6 4l4 4-4 4' })
   );
 }
 
@@ -471,11 +492,18 @@ function Column({
             {
               type: 'button',
               className: 'rm-cardbtn',
-              style: { width: 'auto', fontWeight: 600 },
+              style: {
+                width: 'auto',
+                fontWeight: 600,
+                display: 'inline-flex',
+                alignItems: 'center',
+                gap: 4,
+                minHeight: 24,
+              },
               'aria-expanded': !folded,
               onClick: () => setFolded(!folded),
             },
-            folded ? '▸ ' : '▾ ',
+            h(Chevron, { open: !folded }),
             label
           )
         : label
@@ -664,7 +692,7 @@ function Skipped({ view }: { view: BoardView }) {
         'p',
         { className: 'rm-muted' },
         view.skipped
-          .map((s) => `${s.id.length > 8 ? `${s.id.slice(0, 6)}…` : s.id} ${s.reason}`)
+          .map((s) => `${s.title ?? (s.id.length > 8 ? `${s.id.slice(0, 6)}…` : s.id)} ${s.reason}`)
           .join(' · ')
       )
     )

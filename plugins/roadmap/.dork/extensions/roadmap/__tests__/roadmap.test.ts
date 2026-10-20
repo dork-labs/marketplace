@@ -45,10 +45,22 @@ describe('parseRoadmap', () => {
     if (!result.ok) throw new Error('expected ok');
     expect(result.board.items.map((i) => i.id.slice(-2))).toEqual(['A4', 'A5']);
     expect(result.skipped).toEqual([
-      { id: '01HZZZZZZZZZZZZZZZZZZZZZA1', reason: 'has no horizon' },
-      { id: '01HZZZZZZZZZZZZZZZZZZZZZA2', reason: 'moscow is "maybe"' },
-      { id: 'not-a-ulid', reason: 'id is not a ULID' },
-      { id: '01HZZZZZZZZZZZZZZZZZZZZZA4', reason: 'id is used twice' },
+      {
+        id: '01HZZZZZZZZZZZZZZZZZZZZZA1',
+        title: 'Teach the kettle to whistle in tune',
+        reason: 'has no horizon',
+      },
+      {
+        id: '01HZZZZZZZZZZZZZZZZZZZZZA2',
+        title: 'Toaster that tells you the weather',
+        reason: 'moscow is "maybe"',
+      },
+      { id: 'not-a-ulid', title: 'Fridge inventory by smell', reason: 'id is not a ULID' },
+      {
+        id: '01HZZZZZZZZZZZZZZZZZZZZZA4',
+        title: 'A copy with the same id',
+        reason: 'id is used twice',
+      },
     ]);
   });
 
@@ -61,7 +73,11 @@ describe('parseRoadmap', () => {
     if (!result.ok) throw new Error('expected ok');
     expect(result.board.items[1]!.needs).toEqual([]);
     expect(result.skipped).toEqual([
-      { id: '01HZZZZZZZZZZZZZZZZZZZZZA2', reason: 'a permission ask has no approval' },
+      {
+        id: '01HZZZZZZZZZZZZZZZZZZZZZA2',
+        title: 'Toaster that tells you the weather',
+        reason: 'a permission ask has no approval',
+      },
     ]);
   });
 

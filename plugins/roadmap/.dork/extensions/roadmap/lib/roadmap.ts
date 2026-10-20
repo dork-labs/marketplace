@@ -86,6 +86,8 @@ export interface Board {
 /** An item (or part of one) the board left out, and why. */
 export interface Skipped {
   id: string;
+  /** The item's title when it has one, so the strip can name it. */
+  title: string | null;
   reason: string;
 }
 
@@ -367,7 +369,8 @@ function readItem(raw: unknown, skipped: Skipped[]): Item | { reason: string } {
   if (Array.isArray(raw.needs)) {
     for (const entry of raw.needs.slice(0, 5)) {
       const need = readNeed(entry);
-      if (failed(need)) skipped.push({ id, reason: need.reason });
+      if (failed(need))
+        skipped.push({ id, title: cleanText(title, 120) || null, reason: need.reason });
       else needs.push(need);
     }
   }
@@ -424,13 +427,14 @@ export function parseRoadmap(text: string): ParseResult {
   const seen = new Set<string>();
   for (const raw of doc.items.slice(0, MAX_ITEMS)) {
     const rawId = isObject(raw) && typeof raw.id === 'string' ? cleanText(raw.id, 40) : '(no id)';
+    const rawTitle = (isObject(raw) && cleanText(raw.title, 120)) || null;
     if (seen.has(rawId)) {
-      skipped.push({ id: rawId, reason: 'id is used twice' });
+      skipped.push({ id: rawId, title: rawTitle, reason: 'id is used twice' });
       continue;
     }
     const item = readItem(raw, skipped);
     if (failed(item)) {
-      skipped.push({ id: rawId, reason: item.reason });
+      skipped.push({ id: rawId, title: rawTitle, reason: item.reason });
       continue;
     }
     seen.add(item.id);
