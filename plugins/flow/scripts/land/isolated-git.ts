@@ -255,7 +255,7 @@ export async function scratchRepo(
     const shallow = await git(['rev-parse', '--is-shallow-repository']);
     if (shallow.code !== 0 || shallow.stdout.trim() !== 'false') {
       remove();
-      return 'the repository is shallow, so its history may stop before the merge base';
+      return 'the repository is shallow, so its history may stop before the merge base; run "git fetch --unshallow" in it';
     }
   }
   return { dir, git, remove };
