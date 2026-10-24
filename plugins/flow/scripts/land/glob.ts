@@ -89,8 +89,11 @@ export function matchesAny(
   opts: { ignoreCase?: boolean } = {}
 ): boolean {
   if (!opts.ignoreCase) return globs.some((glob) => globToRegExp(glob).test(file));
-  return globs.some((glob) =>
-    FOLD_FORMS.some((form) => globToRegExp(form(glob), { ignoreCase: true }).test(form(file)))
+  // The exact match first, so folding can only ever add to what matched before.
+  return globs.some(
+    (glob) =>
+      globToRegExp(glob).test(file) ||
+      FOLD_FORMS.some((form) => globToRegExp(form(glob), { ignoreCase: true }).test(form(file)))
   );
 }
 
@@ -113,6 +116,12 @@ export const FOLD_FORMS: readonly ((text: string) => string)[] = [
  * @returns A test for one path, or `null` when the source is not a valid expression.
  */
 export function foldingPattern(source: string): ((file: string) => boolean) | null {
+  let exact: RegExp;
+  try {
+    exact = new RegExp(source);
+  } catch {
+    return null;
+  }
   let pattern: RegExp;
   try {
     pattern = new RegExp(source, 'iu');
@@ -123,5 +132,7 @@ export function foldingPattern(source: string): ((file: string) => boolean) | nu
       return null;
     }
   }
-  return (file) => FOLD_FORMS.some((form) => pattern.test(form(file)));
+  // The exact, flagless match first, so folding can only ever add to what
+  // matched before (a negative lookahead or class still matches as written).
+  return (file) => exact.test(file) || FOLD_FORMS.some((form) => pattern.test(form(file)));
 }

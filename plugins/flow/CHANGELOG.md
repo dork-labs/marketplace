@@ -12,7 +12,7 @@ you until you **reinstall it** (Marketplace → flow → reinstall, or re-run yo
 - `land.preArm` entries match their paths the same way, so a PR that touches `SRC/App.ts` runs the entry for `src/**`.
 - Folding only ever adds matches; everything that matched before still does.
 - `patches/` and `.yarn/patches/` folders, at any depth (pnpm, patch-package per workspace, Yarn), where patches to installed dependencies live, are now built-in security paths.
-- Your own `land.securityPaths.globs` and `pattern` match the same way, so `APPS/Server/src/auth/x.ts` counts for `apps/server/src/auth/**`. The pattern is compiled with the `i` and `u` flags and tried against all three spellings.
+- Your own `land.securityPaths.globs` and `pattern` match the same way, so `APPS/Server/src/auth/x.ts` counts for `apps/server/src/auth/**`. The pattern also matches with the `i` and `u` flags (just `i` when it isn't valid with `u`) against all three spellings, on top of matching as written. Write it in plain ASCII: its own text isn't folded. A pattern that relied on case, such as `^[A-Z]`, now matches more, so recheck it.
 
 ## 0.60.0
 

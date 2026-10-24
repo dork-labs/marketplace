@@ -242,7 +242,7 @@ describe.skipIf(!runnable)(
       for (const file of [
         'apps/server/src/auth/x.ts',
         'APPS/Server/src/auth/x.ts',
-        'apps/server/src/\u212Auth/x.ts'.replace('\u212Auth', 'auth'),
+        'apps/\u017Ferver/src/auth/x.ts',
       ]) {
         expect(
           formatDecision(decideArm(payload(`.files = [${JSON.stringify(file)}]`), own)),
@@ -273,6 +273,20 @@ describe.skipIf(!runnable)(
       expect(formatDecision(decideArm(payload('.files = ["apps/client/routes/a.ts"]'), own))).toBe(
         'ARM'
       );
+    });
+
+    it('folding never drops what the pattern matched as written', () => {
+      for (const [pattern, file] of [
+        ['^(?!docs/)', 'DOCS/run.sh'],
+        ['^[^a-z]', 'Secrets/a'],
+        ['^(?!.*\\.md$)', 'x.MD'],
+      ]) {
+        const own: ArmPolicy = { ...policy, securityGlobs: [], securityPattern: pattern };
+        expect(
+          formatDecision(decideArm(payload(`.files = [${JSON.stringify(file)}]`), own)),
+          pattern
+        ).toBe('REFUSE security-path-unlabelled');
+      }
     });
 
     it('a pattern that only compiles without the u flag still folds case', () => {
