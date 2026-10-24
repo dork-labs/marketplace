@@ -52,6 +52,8 @@ export interface ProcessOptions {
   timeoutMs?: number;
   /** Working directory for the command. Default: the process's own. */
   cwd?: string;
+  /** The command's whole environment. Default: this process's. */
+  env?: Readonly<Record<string, string | undefined>>;
 }
 
 /**
@@ -323,6 +325,7 @@ export const realProcessRunner: ProcessRunner = (cmd, args, opts = {}) =>
       [...args],
       {
         cwd: opts.cwd,
+        ...(opts.env === undefined ? {} : { env: { ...opts.env } }),
         timeout: opts.timeoutMs ?? 60_000,
         maxBuffer: MAX_OUTPUT_BYTES,
         encoding: 'utf8',

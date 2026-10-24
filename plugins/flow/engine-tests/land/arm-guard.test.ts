@@ -8,7 +8,15 @@
  */
 
 import { execFileSync } from 'node:child_process';
-import { mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
+import {
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  realpathSync,
+  rmSync,
+  writeFileSync,
+} from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
@@ -143,14 +151,20 @@ function fakeForge(opts: ForgeOptions = {}) {
 function recordingRunner(
   answer: (
     cmd: string,
-    args: readonly string[]
+    args: readonly string[],
+    cwd: string | undefined
   ) => { code: number; stdout?: string; stderr?: string } | 'throw' = () => ({ code: 0 })
 ) {
-  const ran: { cmd: string; args: readonly string[]; cwd?: string }[] = [];
+  const ran: {
+    cmd: string;
+    args: readonly string[];
+    cwd?: string;
+    env?: Readonly<Record<string, string | undefined>>;
+  }[] = [];
   const runner: ProcessRunner = async (cmd, args, opts) => {
     if (cmd === 'git') return realProcessRunner(cmd, args, opts);
-    ran.push({ cmd, args, cwd: opts?.cwd });
-    const result = answer(cmd, args);
+    ran.push({ cmd, args, cwd: opts?.cwd, env: opts?.env });
+    const result = answer(cmd, args, opts?.cwd);
     if (result === 'throw') throw new Error('timed out');
     return { code: result.code, stdout: result.stdout ?? '', stderr: result.stderr ?? '' };
   };
@@ -230,7 +244,8 @@ describe('the land config the guard obeys', () => {
     const result = await guard(forge, runner);
     expect(result.ok).toBe(true);
     expect(ran.map((r) => [r.cmd, ...r.args])).toEqual([['check-main', '--strict']]);
-    expect(ran[0].cwd).toBe(repo);
+    // In a fresh checkout of the reviewed head, never the worker's worktree.
+    expect(ran[0].cwd).not.toBe(repo);
   });
 
   it('is read from the remote, not a stale local main', async () => {
@@ -488,23 +503,102 @@ describe('land.preArm run entries', () => {
     expect(!result.ok && result.detail).toMatch(/within 1 minutes/);
   });
 
-  it('refuses to run in a worktree that is not at the reviewed commit, or has changes', async () => {
+  // Security (DOR-3262): a run entry runs in a fresh, clean checkout of the
+  // reviewed head, never in the worker's worktree, with a minimal environment,
+  // and the checkout is removed afterwards.
+  it("runs in a fresh checkout of the reviewed head: untracked, ignored and changed files in the worker's worktree cannot reach it", async () => {
     baseLand({ preArm: [{ paths: ['src/**'], run: 'check' }] });
-    writeFileSync(path.join(repo, 'src', 'app.ts'), 'changed\n');
-    const { runner, ran } = recordingRunner();
-    const result = await guard(fakeForge().forge, runner);
-    expect(!result.ok && result.detail).toMatch(/changes that are not in the reviewed commit/);
-    expect(ran).toEqual([]);
-  });
-
-  it('refuses when the command changed the worktree', async () => {
-    baseLand({ preArm: [{ paths: ['src/**'], run: 'mutate' }] });
-    const { runner } = recordingRunner(() => {
-      writeFileSync(path.join(repo, 'src', 'app.ts'), 'mutated\n');
+    writeFileSync(path.join(repo, '.gitignore'), 'ignored.txt\n');
+    writeFileSync(path.join(repo, 'ignored.txt'), 'a steered worker wrote this\n');
+    writeFileSync(path.join(repo, 'untracked.txt'), 'and this\n');
+    writeFileSync(path.join(repo, 'src', 'app.ts'), 'export const tampered = true;\n');
+    let seen: Record<string, unknown> = {};
+    const { runner, ran } = recordingRunner((_cmd, _args, cwd) => {
+      const dir = cwd as string;
+      seen = {
+        head: execFileSync('git', ['rev-parse', 'HEAD'], { cwd: dir, encoding: 'utf8' }).trim(),
+        app: readFileSync(path.join(dir, 'src', 'app.ts'), 'utf8'),
+        ignored: existsSync(path.join(dir, 'ignored.txt')),
+        untracked: existsSync(path.join(dir, 'untracked.txt')),
+        gitignore: existsSync(path.join(dir, '.gitignore')),
+      };
       return { code: 0 };
     });
     const result = await guard(fakeForge().forge, runner);
-    expect(!result.ok && result.detail).toMatch(/changed the worktree/);
+    expect(result.ok).toBe(true);
+    expect(seen).toEqual({
+      head,
+      app: 'export {};\n',
+      ignored: false,
+      untracked: false,
+      gitignore: false,
+    });
+    // The checkout is gone, and git no longer lists it.
+    expect(existsSync(ran[0].cwd as string)).toBe(false);
+    expect(git(repo, 'worktree', 'list', '--porcelain').match(/^worktree /gm)).toHaveLength(1);
+  });
+
+  it('removes the checkout when the command fails or times out too', async () => {
+    baseLand({ preArm: [{ paths: ['src/**'], run: 'check' }] });
+    for (const answer of [() => ({ code: 1 }), () => 'throw' as const]) {
+      const { runner, ran } = recordingRunner(answer);
+      expect((await guard(fakeForge().forge, runner)).ok).toBe(false);
+      expect(existsSync(ran[0].cwd as string)).toBe(false);
+    }
+    expect(git(repo, 'worktree', 'list', '--porcelain').match(/^worktree /gm)).toHaveLength(1);
+  });
+
+  it('the command gets a minimal environment: no tokens, no GH_* or *_TOKEN', async () => {
+    baseLand({ preArm: [{ paths: ['src/**'], run: 'check' }] });
+    const saved = { ...process.env };
+    Object.assign(process.env, {
+      GH_TOKEN: 'ghp_secret',
+      GITHUB_TOKEN: 'ghs_secret',
+      NPM_TOKEN: 'npm_secret',
+      ANTHROPIC_API_KEY: 'sk-secret',
+      GH_HOST: 'example.invalid',
+      AWS_SECRET_ACCESS_KEY: 'aws',
+    });
+    try {
+      const { runner, ran } = recordingRunner();
+      expect((await guard(fakeForge().forge, runner)).ok).toBe(true);
+      const env = ran[0].env ?? {};
+      expect(Object.keys(env).sort()).toEqual(
+        Object.keys(env)
+          .filter(
+            (k) =>
+              ['PATH', 'HOME', 'LANG', 'TMPDIR', 'TZ', 'TERM', 'CI'].includes(k) ||
+              k.startsWith('LC_')
+          )
+          .sort()
+      );
+      expect(env.CI).toBe('true');
+      expect(env.PATH).toBe(process.env.PATH);
+      expect(JSON.stringify(env)).not.toMatch(/secret|aws|example\.invalid/);
+    } finally {
+      for (const key of Object.keys(process.env)) if (!(key in saved)) delete process.env[key];
+      Object.assign(process.env, saved);
+    }
+  });
+
+  it('a real command sees none of the tokens', async () => {
+    baseLand({
+      preArm: [
+        {
+          paths: ['src/**'],
+          run: 'node -e "process.exit(process.env.GH_TOKEN ? 3 : process.env.MY_SERVICE_TOKEN ? 4 : 0)"',
+        },
+      ],
+    });
+    const saved = { ...process.env };
+    Object.assign(process.env, { GH_TOKEN: 'ghp_secret', MY_SERVICE_TOKEN: 'x' });
+    try {
+      // Every program runs for real here, git and node alike.
+      expect(await guard(fakeForge().forge, realProcessRunner)).toMatchObject({ ok: true });
+    } finally {
+      for (const key of Object.keys(process.env)) if (!(key in saved)) delete process.env[key];
+      Object.assign(process.env, saved);
+    }
   });
 
   it('runs entries in order and stops at the first refusal', async () => {

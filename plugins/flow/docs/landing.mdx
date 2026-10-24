@@ -25,7 +25,7 @@ A refused `flow pr --arm` still opens the PR, unarmed, and the drain asks again 
 
 ## Your own checks: `land.preArm`
 
-`land.preArm` lists checks to run before arming, each only when the PR touches one of its paths. An entry either runs a command in the PR's worktree, or dispatches a GitHub workflow and waits for that one run:
+`land.preArm` lists checks to run before arming, each only when the PR touches one of its paths. An entry either dispatches a GitHub workflow and waits for that one run, or runs a command. Prefer the workflow wherever your repo has CI. A command is the fallback for a repo without it, and runs in a fresh, clean checkout of the reviewed commit, with only PATH, HOME, the locale and `CI=true` in its environment, never your tokens:
 
 ```json
 "land": {

@@ -6,11 +6,13 @@
  *
  * Two forms:
  *
- * - `run: "<command>"` runs the command in the PR's worktree, which must sit at
- *   the reviewed commit with no tracked changes. There is no shell: the command
- *   is split on spaces (single or double quotes group words) and run as an argv
- *   array with the agent's own permissions. A non-zero exit, a timeout, or a
- *   worktree that moved refuses, with the output's tail in the refusal.
+ * - `run: "<command>"` runs the command in a fresh, clean checkout of the
+ *   reviewed head (never the worker's worktree), with a minimal environment,
+ *   and removes the checkout afterwards. There is no shell: the command is
+ *   split on spaces (single or double quotes group words) and run as an argv
+ *   array. A non-zero exit or a timeout refuses, with the output's tail in the
+ *   refusal. `wait: workflow` is the form to prefer wherever a repo has CI;
+ *   `run` is the fallback for a repo without it.
  * - `wait: "workflow"` dispatches exactly
  *   `gh workflow run <workflow> --ref <pr-branch> -f sha=<reviewed-head> -f nonce=<random>`
  *   and waits only on the run whose title contains that nonce and whose
@@ -25,6 +27,9 @@
  */
 
 import { randomBytes } from 'node:crypto';
+import { mkdtempSync, rmSync } from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
 
 import type { ProcessRunner } from '../cli/context.ts';
 import { PRE_ARM_COMMAND_PATTERN, type PreArmEntry } from '../config-schema.ts';
@@ -131,24 +136,33 @@ export function entryTouched(entry: PreArmEntry, files: readonly string[] | null
   return files === null || files.some((file) => matchesAny(file, entry.paths));
 }
 
-/** The worktree's HEAD and whether it has tracked changes, or why it cannot tell. */
-async function worktreeState(
-  io: PreArmIo,
-  worktree: string
-): Promise<{ head: string; dirty: boolean } | string> {
-  try {
-    const head = await io.runProcess('git', ['rev-parse', 'HEAD'], { cwd: worktree });
-    const status = await io.runProcess('git', ['status', '--porcelain', '--untracked-files=no'], {
-      cwd: worktree,
-    });
-    if (head.code !== 0 || status.code !== 0) return `git could not read ${worktree}`;
-    return { head: head.stdout.trim().toLowerCase(), dirty: status.stdout.trim() !== '' };
-  } catch (error) {
-    return `git could not read ${worktree}: ${(error as Error).message}`;
+/**
+ * The environment a `run` entry gets: an allow-list, never this process's.
+ * PATH, HOME, the locale, the temp folder, the time zone and the terminal, plus
+ * `CI=true`; no token, no `GH_*`, no `*_TOKEN` and no cloud credential reaches
+ * the command, whatever the agent's own environment holds.
+ */
+export function minimalEnv(
+  from: Readonly<Record<string, string | undefined>> = process.env
+): Record<string, string> {
+  const env: Record<string, string> = { CI: 'true' };
+  for (const [key, value] of Object.entries(from)) {
+    if (value === undefined) continue;
+    if (['PATH', 'HOME', 'LANG', 'TMPDIR', 'TZ', 'TERM'].includes(key) || /^LC_[A-Z]+$/.test(key)) {
+      env[key] = value;
+    }
   }
+  return env;
 }
 
-/** Run one `run` entry. */
+/**
+ * Run one `run` entry in a fresh, clean checkout of the reviewed head, never in
+ * the worker's worktree: `git worktree add --detach <tmp> <reviewedSha>` (with
+ * hooks off, so nothing in the repository runs on checkout), `git clean -ffdx`,
+ * the command with {@link minimalEnv}, then the checkout is removed whatever
+ * happened. Nothing untracked, ignored or uncommitted in the worker's worktree
+ * can reach the command.
+ */
 async function runCommand(
   entry: Extract<PreArmEntry, { run: string }>,
   target: PreArmTarget,
@@ -158,33 +172,46 @@ async function runCommand(
   if (argv === null) {
     return `the command "${entry.run}" has shell syntax or an unclosed quote; flow runs commands with no shell`;
   }
-  const before = await worktreeState(io, target.worktree);
-  if (typeof before === 'string') return before;
-  if (before.head !== target.reviewedSha) {
-    return `the worktree ${target.worktree} is at ${before.head.slice(0, 7)}, not the reviewed ${target.reviewedSha.slice(0, 7)}`;
-  }
-  if (before.dirty) {
-    return `the worktree ${target.worktree} has changes that are not in the reviewed commit`;
-  }
-  let result;
+  if (!isFullSha(target.reviewedSha))
+    return `the reviewed commit "${target.reviewedSha}" is not a full SHA`;
+  const git = (args: string[], cwd: string) =>
+    io
+      .runProcess('git', ['-c', 'core.hooksPath=/dev/null', ...args], { cwd, timeoutMs: 300_000 })
+      .catch((error: unknown) => ({ code: -1, stdout: '', stderr: (error as Error).message }));
+  const checkout = mkdtempSync(path.join(os.tmpdir(), 'flow-prearm-'));
   try {
-    result = await io.runProcess(argv[0], argv.slice(1), {
-      cwd: target.worktree,
-      timeoutMs: entry.timeout * 60_000,
-    });
-  } catch (error) {
-    return `"${entry.run}" did not finish within ${entry.timeout} minutes or could not start: ${(error as Error).message}`;
+    const added = await git(
+      ['worktree', 'add', '--detach', '--quiet', checkout, target.reviewedSha],
+      target.worktree
+    );
+    if (added.code !== 0) {
+      return `could not check out the reviewed commit ${target.reviewedSha.slice(0, 7)} to run "${entry.run}": ${added.stderr.trim() || `git exited ${added.code}`}`;
+    }
+    const cleaned = await git(['clean', '-ffdx', '--quiet'], checkout);
+    const head = await git(['rev-parse', 'HEAD'], checkout);
+    if (cleaned.code !== 0 || head.stdout.trim().toLowerCase() !== target.reviewedSha) {
+      return `the fresh checkout for "${entry.run}" is not a clean copy of ${target.reviewedSha.slice(0, 7)}`;
+    }
+    let result;
+    try {
+      result = await io.runProcess(argv[0], argv.slice(1), {
+        cwd: checkout,
+        env: minimalEnv(),
+        timeoutMs: entry.timeout * 60_000,
+      });
+    } catch (error) {
+      return `"${entry.run}" did not finish within ${entry.timeout} minutes or could not start: ${(error as Error).message}`;
+    }
+    if (result.code !== 0) {
+      const output = tail(result.stdout, result.stderr);
+      return `"${entry.run}" exited ${result.code}${output ? `:\n${output}` : ''}`;
+    }
+    return null;
+  } finally {
+    await git(['worktree', 'remove', '--force', '--force', checkout], target.worktree);
+    rmSync(checkout, { recursive: true, force: true });
+    await git(['worktree', 'prune'], target.worktree);
   }
-  if (result.code !== 0) {
-    const output = tail(result.stdout, result.stderr);
-    return `"${entry.run}" exited ${result.code}${output ? `:\n${output}` : ''}`;
-  }
-  const after = await worktreeState(io, target.worktree);
-  if (typeof after === 'string') return after;
-  if (after.head !== target.reviewedSha || after.dirty) {
-    return `"${entry.run}" changed the worktree ${target.worktree}, so its pass says nothing about the reviewed commit`;
-  }
-  return null;
 }
 
 /**
