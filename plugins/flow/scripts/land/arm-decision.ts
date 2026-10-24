@@ -55,6 +55,8 @@ export const BUILTIN_SECURITY_GLOBS: readonly string[] = [
   '**/pnpm-lock.yaml',
   '**/pnpm-workspace.yaml',
   '**/.pnpmfile.cjs',
+  // Patches pnpm and patch-package apply to installed dependencies.
+  'patches/**',
   '**/yarn.lock',
   '**/.yarnrc',
   '**/.yarnrc.yml',

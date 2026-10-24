@@ -88,6 +88,41 @@ function payload(mutation: string): unknown {
   return JSON.parse(out) as unknown;
 }
 
+/** The case and Unicode spellings shared with dork-labs/dorkos (#3191). */
+const variantsPath = path.resolve(here, '../../../../scripts/fixtures/security-path-variants.json');
+const variants = existsSync(variantsPath)
+  ? (JSON.parse(readFileSync(variantsPath, 'utf8')) as { match: string[]; noMatch: string[] })
+  : null;
+if (variants === null && process.env.CI) throw new Error(`${variantsPath} is missing in CI`);
+
+describe.skipIf(variants === null)('security path spellings (shared with dork-labs/dorkos)', () => {
+  const builtin: ArmPolicy = {
+    securityGlobs: [],
+    securityPattern: null,
+    securityLabel: 'security-reviewed',
+  };
+  const facts = (file: string) => ({
+    state: 'OPEN',
+    isDraft: false,
+    labels: [],
+    reviewDecision: 'APPROVED',
+    checks: [],
+    headRefOid: '1'.repeat(40),
+    reviewedSha: '1'.repeat(40),
+    baseRefName: 'main',
+    isCrossRepository: false,
+    requiredChecks: [],
+    files: [file],
+    freeze: null,
+  });
+  it.each(variants?.match ?? [])('%s counts as a security path', (file) => {
+    expect(formatDecision(decideArm(facts(file), builtin))).toBe('REFUSE security-path-unlabelled');
+  });
+  it.each(variants?.noMatch ?? [])('%s does not', (file) => {
+    expect(formatDecision(decideArm(facts(file), builtin))).toBe('ARM');
+  });
+});
+
 describe.skipIf(!runnable)(
   'arm guard decisions (shared with scripts/should-arm-automerge.sh)',
   () => {
