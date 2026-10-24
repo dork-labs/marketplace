@@ -4,6 +4,14 @@ Installs of this plugin are pinned to a commit SHA, so a fix here does not reach
 you until you **reinstall it** (Marketplace → flow → reinstall, or re-run your
 `--plugin-dir` checkout's `git pull`). Each entry below says whether that matters.
 
+## 0.60.1
+
+**Security paths and `land.preArm` paths now match the way a case-insensitive disk opens a file. Reinstall to get it.**
+
+- macOS and Windows open `pacKage.json` (with a Kelvin sign for the k), `PACKAGE.JSON` or a fullwidth `ｐackage.json` as `package.json`. The built-in security paths only matched plain ASCII case, so those spellings slipped past the security label. Flow now NFKC-normalises the path and compares with Unicode case folding.
+- `land.preArm` entries match their paths the same way, so a PR that touches `SRC/App.ts` runs the entry for `src/**`.
+- Your own `land.securityPaths.globs` and `pattern` still match exactly as you wrote them.
+
 ## 0.60.0
 
 **Flow now checks a pull request before it turns on auto-merge, and names the reviewer on the PRs it opens (DOR-3262). Reinstall to get it.**

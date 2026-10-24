@@ -27,7 +27,8 @@ function escape(text: string): string {
  * Compile one glob to a regular expression that must match the whole path.
  *
  * @param glob - The glob.
- * @param opts - `ignoreCase`: match letters in any case.
+ * @param opts - `ignoreCase`: match letters in any case, by Unicode case
+ *   folding (the `iu` flags); pair it with NFKC-normalised input ({@link matchesAny}).
  * @returns The expression.
  */
 export function globToRegExp(glob: string, opts: { ignoreCase?: boolean } = {}): RegExp {
@@ -55,7 +56,7 @@ export function globToRegExp(glob: string, opts: { ignoreCase?: boolean } = {}):
       i += 1;
     }
   }
-  return new RegExp(`^${out}$`, opts.ignoreCase ? 'i' : '');
+  return new RegExp(`^${out}$`, opts.ignoreCase ? 'iu' : '');
 }
 
 /**
@@ -63,7 +64,10 @@ export function globToRegExp(glob: string, opts: { ignoreCase?: boolean } = {}):
  *
  * @param file - A repo-relative path.
  * @param globs - The globs.
- * @param opts - `ignoreCase`: match letters in any case.
+ * @param opts - `ignoreCase`: match the way a case-insensitive disk opens a
+ *   path (APFS, NTFS). Both sides are NFKC-normalised first, so a Kelvin sign
+ *   or a fullwidth letter is the letter it stands for, then compared with
+ *   Unicode case folding.
  * @returns `true` on a match.
  */
 export function matchesAny(
@@ -71,5 +75,7 @@ export function matchesAny(
   globs: readonly string[],
   opts: { ignoreCase?: boolean } = {}
 ): boolean {
-  return globs.some((glob) => globToRegExp(glob, opts).test(file));
+  if (!opts.ignoreCase) return globs.some((glob) => globToRegExp(glob).test(file));
+  const folded = file.normalize('NFKC');
+  return globs.some((glob) => globToRegExp(glob.normalize('NFKC'), opts).test(folded));
 }

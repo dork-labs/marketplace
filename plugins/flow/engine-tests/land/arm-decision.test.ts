@@ -174,6 +174,30 @@ describe.skipIf(!runnable)(
       expect(formatDecision(decideArm(payload('.'), broken))).toBe('REFUSE files-unreadable');
     });
 
+    it('built-in security paths match after NFKC folding, in any case', () => {
+      const builtin: ArmPolicy = { ...policy, securityGlobs: [] };
+      for (const file of [
+        'pac\u212Aage.json',
+        'PACKAGE.JSON',
+        'apps/web/Package.json',
+        '.NPMRC',
+        '\uFF50ackage.json',
+      ]) {
+        expect(
+          formatDecision(decideArm(payload(`.files = [${JSON.stringify(file)}]`), builtin)),
+          file
+        ).toBe('REFUSE security-path-unlabelled');
+      }
+    });
+
+    it("the repo's own security globs stay exact-case", () => {
+      const own: ArmPolicy = { ...policy, securityGlobs: ['Secrets/**'] };
+      expect(formatDecision(decideArm(payload('.files = ["Secrets/a"]'), own))).toBe(
+        'REFUSE security-path-unlabelled'
+      );
+      expect(formatDecision(decideArm(payload('.files = ["secrets/a"]'), own))).toBe('ARM');
+    });
+
     it('the built-in security paths cover the common manifests and lockfiles at any depth', () => {
       const builtin: ArmPolicy = { ...policy, securityGlobs: [] };
       for (const file of [

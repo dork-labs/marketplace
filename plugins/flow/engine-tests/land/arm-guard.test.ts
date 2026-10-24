@@ -28,7 +28,12 @@ import type { ArmFacts, Forge, WorkflowRun } from '../../scripts/forge/types.ts'
 import { guardArm, refusalSticksToCommit } from '../../scripts/land/arm-guard.ts';
 import { readBaseLand } from '../../scripts/land/base-config.ts';
 import { setFreeze } from '../../scripts/land/freeze.ts';
-import { runWorkflow, splitCommand, WORKFLOW_POLL_MS } from '../../scripts/land/pre-arm.ts';
+import {
+  entryTouched,
+  runWorkflow,
+  splitCommand,
+  WORKFLOW_POLL_MS,
+} from '../../scripts/land/pre-arm.ts';
 import { isBranchName, isFullSha, isNonce, isWorkflowName } from '../../scripts/land/validate.ts';
 
 const NONCE = '0123456789abcdef0123456789abcdef';
@@ -461,6 +466,28 @@ describe('land.preArm run entries', () => {
     const { runner, ran } = recordingRunner();
     expect(await guard(fakeForge().forge, runner)).toEqual({ ok: true, preArm: [] });
     expect(ran).toEqual([]);
+  });
+
+  // S3b: a case-insensitive disk (APFS) opens SRC/App.ts as src/app.ts, so a
+  // preArm entry's paths match in any case, Unicode-folded.
+  it.each([['SRC/app.ts'], ['Src/App.ts'], ['src/app.ts']])(
+    'a preArm entry matches %s whatever its case',
+    (file) => {
+      expect(entryTouched({ paths: ['src/**'], run: 'check', timeout: 30 }, [file])).toBe(true);
+    }
+  );
+
+  it('a preArm entry matches a Kelvin-sign spelling of its path', () => {
+    expect(
+      entryTouched({ paths: ['pkg/**'], run: 'check', timeout: 30 }, ['p\u212Ag/index.ts'])
+    ).toBe(true);
+  });
+
+  it('a case variant of a touched path runs the entry', async () => {
+    baseLand({ preArm: [{ paths: ['SRC/**'], run: 'check' }] });
+    const { runner, ran } = recordingRunner();
+    expect((await guard(fakeForge().forge, runner)).ok).toBe(true);
+    expect(ran.map((r) => r.cmd)).toEqual(['check']);
   });
 
   it('an entry whose paths the PR does not touch is skipped', async () => {
