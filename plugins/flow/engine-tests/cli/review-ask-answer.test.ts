@@ -351,8 +351,9 @@ describe('flow review --approve by a person', () => {
     ]);
   });
 
-  // Purpose: a refusal still ships the approval, but arms nothing, exits 5 and
-  // says why, so a person merges it once that is settled.
+  // Purpose: a refusal still ships the approval, but arms nothing and says why,
+  // so a person merges it once that is settled. Exit 0: it shipped, and the
+  // DorkOS inbox reads exit 5 on a review as "did not ship" and would offer 👍 again.
   it('approves but does not arm when the guard refuses', async () => {
     writeRun();
     const tracker = createFakeAdapter({ items: [started()] });
@@ -361,7 +362,7 @@ describe('flow review --approve by a person', () => {
       forge: fakeForge({ head: 'abc1234def' }),
       guard: recordingGuard(() => refusal('freeze')),
     });
-    expect(result.code).toBe(EXIT.precondition);
+    expect(result.code).toBe(EXIT.ok);
     expect(comments(tracker)).toEqual(['Shipped from DorkOS.']);
     expect(result.forge.calls.some((call) => call.method === 'arm')).toBe(false);
     expect(result.json).toMatchObject({

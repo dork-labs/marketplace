@@ -15,7 +15,7 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
 import { realProcessRunner, type ProcessRunner } from '../../scripts/cli/context.ts';
 import type { ArmFacts, Forge, WorkflowRun } from '../../scripts/forge/types.ts';
-import { ArmRefusedError, assertArmable, guardArm } from '../../scripts/land/arm-guard.ts';
+import { guardArm } from '../../scripts/land/arm-guard.ts';
 import { readBaseLand } from '../../scripts/land/base-config.ts';
 import { setFreeze } from '../../scripts/land/freeze.ts';
 import { runWorkflow, splitCommand, WORKFLOW_POLL_MS } from '../../scripts/land/pre-arm.ts';
@@ -358,16 +358,32 @@ describe('the guard only refuses', () => {
     expect(await guard(forge)).toMatchObject({ ok: false, reason: 'forge-unreadable' });
   });
 
-  it('assertArmable throws a precondition error (exit 5) carrying the refusal', async () => {
-    const { forge } = fakeForge({ facts: { baseRefName: 'release' } });
-    const time = virtualTime();
-    const error = await assertArmable(
-      { forge, pr: 7, reviewedSha: head, worktree: repo, mainCheckout: repo },
-      { runProcess: realProcessRunner, ...time }
-    ).catch((e: unknown) => e);
-    expect(error).toBeInstanceOf(ArmRefusedError);
-    expect((error as ArmRefusedError).exitCode).toBe(5);
-    expect((error as ArmRefusedError).refusal.reason).toBe('base-not-main');
+  it('decides again after its pre-arm checks: a freeze set meanwhile still refuses', async () => {
+    baseLand({ preArm: [{ paths: ['src/**'], run: 'slow-suite' }] });
+    const { runner, ran } = recordingRunner(() => {
+      setFreeze(repo, 'release started mid-check', new Date());
+      return { code: 0 };
+    });
+    const result = await guard(fakeForge().forge, runner);
+    expect(ran).toHaveLength(1);
+    expect(result).toMatchObject({ ok: false, reason: 'freeze', ranPreArm: true });
+    expect(!result.ok && result.detail).toMatch(/after its pre-arm checks passed/);
+  });
+
+  it('decides again after its pre-arm checks: a hold label added meanwhile still refuses', async () => {
+    baseLand({ preArm: [{ paths: ['src/**'], run: 'slow-suite' }] });
+    let held = false;
+    const { forge } = fakeForge();
+    const plain = forge.armFacts.bind(forge);
+    forge.armFacts = async (pr) => ({
+      ...(await plain(pr)),
+      labels: held ? [{ name: 'hold' }] : [],
+    });
+    const { runner } = recordingRunner(() => {
+      held = true;
+      return { code: 0 };
+    });
+    expect(await guard(forge, runner)).toMatchObject({ ok: false, reason: 'held-by-label' });
   });
 });
 

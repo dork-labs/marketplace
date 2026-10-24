@@ -13,7 +13,7 @@
  * 3. When `gates.review.mergeOnApproval` is on, arms the PR at its head, so it
  *    merges when its checks pass, once the arm guard allows it
  *    (`land/arm-guard.ts`, run before anything is posted). A refusal still
- *    ships the approval, exits 5 and says why; a person merges it. Otherwise
+ *    ships the approval and says why in `armRefused` (exit 0); a person merges it. Otherwise
  *    a person merges it.
  * 4. Journals `operator.wait` end (a person) or `review.approved` (the reviewer
  *    agent).
@@ -627,8 +627,9 @@ async function review(ctx: VerbContext): Promise<VerbResult> {
           : willArm
             ? " Approved. Merge it yourself; flow didn't turn on auto-merge because it couldn't tell which commit you approved."
             : '';
+    // A refused arm is not a failed approval: it shipped, and armRefused says
+    // why nothing was armed. Exit 5 here would read as "did not ship".
     return {
-      ...(armRefused === null ? {} : { exitCode: 5 as const }),
       json: {
         ok: true,
         dryRun: ctx.dryRun,

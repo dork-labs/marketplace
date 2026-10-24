@@ -1118,11 +1118,12 @@ export async function runPass(deps: PassDeps): Promise<PassReport> {
         const n = action.pr.number;
         const status = await deps.forge.prStatus(n);
         if (status.state === 'open' && status.headSha === action.sha) {
-          // The arm guard (DOR-3262). A refusal from the PR's own state (a
-          // freeze, a red check) is asked again next pass, so the arm follows
-          // once it clears. One that came from a land.preArm entry is not:
-          // re-running a browser suite or a dispatched workflow every pass would
-          // never end, so the PR waits, unarmed, for a person or a new push.
+          // The arm guard (DOR-3262). Any refusal records the PR unarmed and
+          // waiting to re-arm, so the next pass asks again (a freeze lifts, a
+          // red check reruns), never an ejection's "fix CI". One from a
+          // land.preArm check also records the commit it refused: re-running a
+          // browser suite or a dispatched workflow every pass would never end,
+          // so only a new reviewed commit is asked about again.
           const guard = await deps.armGuard({
             forge: deps.forge,
             pr: n,
@@ -1130,19 +1131,24 @@ export async function runPass(deps: PassDeps): Promise<PassReport> {
             worktree: run.worktreePath,
           });
           if (!guard.ok) {
-            if (guard.ranPreArm) {
-              await supervisorWrite(run.issueId, (r) =>
-                r.drain.pr?.number === n
-                  ? {
-                      ...r,
-                      drain: {
-                        ...r.drain,
-                        pr: { ...r.drain.pr, armed: false, disarmedForReview: false },
+            await supervisorWrite(run.issueId, (r) =>
+              r.drain.pr?.number === n
+                ? {
+                    ...r,
+                    drain: {
+                      ...r.drain,
+                      pr: {
+                        ...r.drain.pr,
+                        armed: false,
+                        disarmedForReview: true,
+                        armRefusedAt: guard.ranPreArm
+                          ? action.sha
+                          : (r.drain.pr.armRefusedAt ?? null),
                       },
-                    }
-                  : undefined
-              );
-            }
+                    },
+                  }
+                : undefined
+            );
             return `did not arm #${n} at ${short(action.sha)} (${guard.reason}): ${guard.detail}`;
           }
         }
@@ -1157,7 +1163,12 @@ export async function runPass(deps: PassDeps): Promise<PassReport> {
                   ...r,
                   drain: {
                     ...r.drain,
-                    pr: { ...r.drain.pr, armed: true, disarmedForReview: false },
+                    pr: {
+                      ...r.drain.pr,
+                      armed: true,
+                      disarmedForReview: false,
+                      armRefusedAt: null,
+                    },
                   },
                 }
               : undefined

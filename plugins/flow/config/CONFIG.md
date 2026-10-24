@@ -318,7 +318,8 @@ whom it names on a PR it opens. Flow reads the checks (`preArm` and
 never from the PR's branch, your working tree or `config.local.json`. A PR that
 changes them is still held to `main`'s version; its own takes effect once it
 merges. The two reviewer handles are account handles, so they go in
-`config.local.json` like every other handle, and flow reads them from there.
+`config.local.json` like every other handle; flow reads them from this
+machine's settings (`config.local.json` over `config.json`).
 
 ```jsonc
 "land": {
@@ -342,13 +343,13 @@ and in `config.local.json`:
 
 | Field | Type, default | Meaning |
 | --- | --- | --- |
-| `preArm` | list, `[]` | Checks to run before arming, each only when the PR touches one of its `paths`. No entries: arming works as before. |
-| `preArm[].paths` | globs | `**` any folders, `*` within one folder, `?` one character. |
+| `preArm` | list, `[]` | Checks to run before arming, each only when the PR touches one of its `paths`. No entries: only the guard's own checks below. |
+| `preArm[].paths` | globs | `**` any folders, `*` within one folder, `?` one character. Repo-relative: no leading `./` or `/`, no trailing `/`. |
 | `preArm[].run` | command | Runs in the PR's worktree at the reviewed commit, with no shell: words split on spaces, quotes group them, and `; & \| < > $` or a backslash are refused. A non-zero exit refuses to arm, with the output in the message. |
 | `preArm[].wait`, `.workflow` | `"workflow"`, a workflow file name | Dispatches `gh workflow run <workflow> --ref <pr-branch> -f sha=<reviewed commit> -f nonce=<random>` and waits for that one run. The workflow must take `sha` and `nonce` inputs, put the nonce in its `run-name`, and fail unless it checked out `sha`. |
 | `preArm[].timeout` | minutes 1–360, `30` | How long the check may take before flow refuses. |
 | `securityPaths.globs`, `.pattern` | globs, `[]`; a regular expression, `null` | This repo's security paths. Package manifests, lockfiles and `.agents/flow/config.json` always count, and `.github/workflows/**` and `.github/actions/**` do too while any `wait: workflow` entry exists. |
-| `securityPaths.label` | label, `security-reviewed` | The label that says Security has looked. Flow only reads it, and never adds or removes it. |
+| `securityPaths.label` | label, `security-reviewed` | The label that says Security has looked. Flow only reads it, and never adds or removes it. It is not tied to a commit, so it carries over to later pushes. |
 | `securityPaths.reviewer` | handle, `null` | Who flow names on a new PR that touches a security path (by `main`'s list), or when it cannot tell. Set it in `config.local.json`. |
 | `reviewer` | handle, `null` | Who flow names on any other new PR. Set it in `config.local.json`. A handle is `user`, `@user` or `org/team`. |
 
@@ -366,8 +367,8 @@ Before every arm (`flow pr --arm`, `flow review --approve` with
 
 and also when it is closed, a draft, labelled `hold`, `do-not-merge`, `wip` or
 `blocked`, or a reviewer asked for changes. Then it runs the `preArm` entries
-the PR touches, and refuses if one fails. These are a guard rail for flow's own
-arms. The rules that hold for everyone belong on GitHub, in required checks and
+the PR touches, and refuses if one fails, then reads the PR and the freeze again
+before it arms. These are a guard rail for flow's own arms. The rules that hold for everyone belong on GitHub, in required checks and
 rulesets.
 
 ## `selfImprovement`: how flow checks and records itself

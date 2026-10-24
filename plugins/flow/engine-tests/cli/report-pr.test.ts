@@ -541,20 +541,39 @@ describe('flow pr', () => {
     expect(r.json.armRefused).toBeNull();
   });
 
-  // A refusal leaves the PR open, recorded and unarmed, and exits 5 saying why.
+  // A refusal leaves the PR open and unarmed, says why, and records it waiting
+  // to re-arm so the drain asks again. It is not a failed `flow pr` (exit 0).
   it('opens the PR but does not arm it when the guard refuses', async () => {
     writeRun(drain({ pushedSha: head, reviewedSha: head, verdict: 'clean' }), head);
     armGuard = recordingGuard(() => refusal('security-path-unlabelled'));
     const r = await flow([...args, '--arm']);
-    expect(r.code).toBe(EXIT.precondition);
+    expect(r.code).toBe(0);
     expect(r.forge.calls.some((c) => c.method === 'createPr')).toBe(true);
     expect(r.forge.calls.some((c) => c.method === 'arm')).toBe(false);
     expect(r.json).toMatchObject({
-      ok: false,
+      ok: true,
       pr: { number: 7, armed: false },
       armRefused: { reason: 'security-path-unlabelled' },
     });
-    expect(stored().pr).toMatchObject({ number: 7, armed: false });
+    expect(stored().pr).toEqual({
+      repo: 'acme/app',
+      number: 7,
+      url: 'https://github.com/acme/app/pull/7',
+      armed: false,
+      disarmedForReview: true,
+    });
+  });
+
+  // A refusal from a land.preArm check also records the commit it refused.
+  it('records the commit a pre-arm check refused', async () => {
+    writeRun(drain({ pushedSha: head, reviewedSha: head, verdict: 'clean' }), head);
+    armGuard = recordingGuard(() => refusal('pre-arm-failed', true));
+    await flow([...args, '--arm']);
+    expect(stored().pr).toMatchObject({
+      armed: false,
+      disarmedForReview: true,
+      armRefusedAt: head,
+    });
   });
 
   // With no guard injected, the real one runs. This origin has no main, so it
@@ -563,7 +582,7 @@ describe('flow pr', () => {
     writeRun(drain({ pushedSha: head, reviewedSha: head, verdict: 'clean' }), head);
     armGuard = null;
     const r = await flow([...args, '--arm']);
-    expect(r.code).toBe(EXIT.precondition);
+    expect(r.code).toBe(0);
     expect(r.forge.calls.some((c) => c.method === 'arm')).toBe(false);
     expect(r.json.armRefused).toMatchObject({ reason: 'config-unreadable' });
   });

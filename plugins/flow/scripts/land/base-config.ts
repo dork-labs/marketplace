@@ -36,13 +36,16 @@ export type BaseLand =
  */
 export async function readBaseLand(runProcess: ProcessRunner, worktree: string): Promise<BaseLand> {
   const git = (args: string[]) =>
-    runProcess('git', args, { cwd: worktree, timeoutMs: GIT_TIMEOUT_MS }).catch(
-      (error: unknown) => ({
-        code: -1,
-        stdout: '',
-        stderr: error instanceof Error ? error.message : String(error),
-      })
-    );
+    // --no-replace-objects: a local `git replace` must not stand in for the
+    // config main really has.
+    runProcess('git', ['--no-replace-objects', ...args], {
+      cwd: worktree,
+      timeoutMs: GIT_TIMEOUT_MS,
+    }).catch((error: unknown) => ({
+      code: -1,
+      stdout: '',
+      stderr: error instanceof Error ? error.message : String(error),
+    }));
   const ref = `refs/remotes/origin/${ARM_BASE}`;
   const fetched = await git([
     'fetch',

@@ -76,6 +76,11 @@ describe('land config', () => {
     ['a reviewer that is not a handle', { reviewer: 'security auditor' }],
     ['a security label with a slash', { securityPaths: { label: 'security/reviewed' } }],
     ['a misspelt land key', { preArms: [] }],
+    ['a path glob starting with ./', { preArm: [{ paths: ['./apps/**'], run: 'x' }] }],
+    ['a path glob starting with /', { preArm: [{ paths: ['/apps/**'], run: 'x' }] }],
+    ['a path glob ending with /', { preArm: [{ paths: ['apps/'], run: 'x' }] }],
+    ['a security glob with a backslash', { securityPaths: { globs: ['apps\\x'] } }],
+    ['a security glob with an empty segment', { securityPaths: { globs: ['apps//x'] } }],
   ])('refuses %s, in Zod and the JSON Schema alike', (_name, land) => {
     expect(verdicts(land)).toEqual({ zod: false, json: false });
   });

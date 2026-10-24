@@ -1,0 +1,53 @@
+---
+title: Before flow arms a PR
+description: The checks flow runs before it turns on auto-merge, the land settings, and the release freeze.
+---
+
+# Before flow arms a PR
+
+Flow can turn on auto-merge for a pull request: `flow pr --arm`, `flow review --approve` when `gates.review.mergeOnApproval` is on, and the drain when it re-arms after a review. Every one of those asks flow's arm guard first. The guard only ever says no. It never arms anything itself, and never sets a status or a label.
+
+## What it refuses
+
+Flow doesn't arm a PR when:
+
+- a required check failed or was cancelled. A check that is still running is fine, because GitHub waits for it;
+- the PR's head isn't the commit that was reviewed, or no full commit SHA was recorded;
+- it doesn't merge into `main`;
+- it touches a security path and has no `security-reviewed` label;
+- a release freeze is on;
+- it comes from a fork;
+- it's closed or a draft, carries `hold`, `do-not-merge`, `wip` or `blocked`, or a reviewer asked for changes.
+
+Package manifests, lockfiles and `.agents/flow/config.json` are always security paths. Your repo adds its own in `land.securityPaths`.
+
+A refused `flow pr --arm` still opens the PR, unarmed, and the drain asks again on later passes. A refused `flow review --approve` still posts your approval, and you merge the PR yourself. Both say why in `armRefused`. Name the whole commit in `--head`: a short SHA ships but arms nothing.
+
+## Your own checks: `land.preArm`
+
+`land.preArm` lists checks to run before arming, each only when the PR touches one of its paths. An entry either runs a command in the PR's worktree, or dispatches a GitHub workflow and waits for that one run:
+
+```json
+"land": {
+  "preArm": [
+    { "paths": ["apps/client/**"], "run": "npm run test:browser", "timeout": 20 },
+    { "paths": ["apps/**"], "wait": "workflow", "workflow": "browser-shards.yml" }
+  ]
+}
+```
+
+Flow reads `land.preArm` and `land.securityPaths` only from the committed config on `main`. A PR that changes them is still held to `main`'s version. Commands run with no shell. A workflow must take `sha` and `nonce` inputs, put the nonce in its `run-name`, and fail unless it checked out `sha`. `config/CONFIG.md` in the plugin has every field.
+
+## The release freeze
+
+```bash
+flow freeze on --reason "cutting 1.4"   # arm nothing in this project until...
+flow freeze off                         # ...the release is out
+flow freeze                             # is a freeze on?
+```
+
+Have your release process turn it on before a release and off after. The freeze is kept on this computer, never committed.
+
+## What this is not
+
+The guard is a rail for flow's own arms. Flow runs inside the agent, so the rules that hold for everyone belong on GitHub, as required checks and rulesets. The `security-reviewed` label is a person's signal and carries over to later pushes. A per-commit security approval belongs on GitHub too.

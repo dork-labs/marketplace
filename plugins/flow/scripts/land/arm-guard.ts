@@ -25,7 +25,7 @@
  */
 
 import type { ProcessRunner } from '../cli/context.ts';
-import { PreconditionError } from '../errors.ts';
+import type { LandConfig } from '../config-schema.ts';
 import type { Forge } from '../forge/types.ts';
 import { ARM_BASE, decideArm, type ArmPolicy, type RefusalSlug } from './arm-decision.ts';
 import { readBaseLand } from './base-config.ts';
@@ -83,6 +83,26 @@ export interface GuardIo {
   nonce?(): string;
 }
 
+/**
+ * The security-path policy `land` sets: the repository's globs and pattern,
+ * plus `.github/workflows/` and `.github/actions/` while a `wait: workflow`
+ * entry exists. The guard and `flow pr`'s reviewer route both use it.
+ *
+ * @param land - The `land` block from `origin/main`.
+ * @returns The policy.
+ */
+export function policyFor(land: LandConfig): ArmPolicy {
+  const waitsOnWorkflow = land.preArm.some((entry) => 'workflow' in entry);
+  return {
+    securityGlobs: [
+      ...land.securityPaths.globs,
+      ...(waitsOnWorkflow ? WORKFLOW_SECURITY_GLOBS : []),
+    ],
+    securityPattern: land.securityPaths.pattern,
+    securityLabel: land.securityPaths.label,
+  };
+}
+
 /** A refusal before any `land.preArm` entry ran. */
 function early(reason: GuardRefusal, detail: string): GuardResult {
   return { ok: false, reason, detail, ranPreArm: false, preArm: [] };
@@ -113,15 +133,7 @@ export async function guardArm(input: GuardInput, io: GuardIo): Promise<GuardRes
     requiredChecks = null;
   }
   const reviewedSha = input.reviewedSha?.toLowerCase() ?? null;
-  const waitsOnWorkflow = land.preArm.some((entry) => 'workflow' in entry);
-  const policy: ArmPolicy = {
-    securityGlobs: [
-      ...land.securityPaths.globs,
-      ...(waitsOnWorkflow ? WORKFLOW_SECURITY_GLOBS : []),
-    ],
-    securityPattern: land.securityPaths.pattern,
-    securityLabel: land.securityPaths.label,
-  };
+  const policy = policyFor(land);
   const decision = decideArm(
     { ...facts, requiredChecks, reviewedSha, freeze: readFreeze(input.mainCheckout) },
     policy
@@ -149,33 +161,32 @@ export async function guardArm(input: GuardInput, io: GuardIo): Promise<GuardRes
       preArm: pre.outcomes,
     };
   }
-  return { ok: true, preArm: pre.outcomes };
-}
-
-/** The guard refused to arm (exit 5). */
-export class ArmRefusedError extends PreconditionError {
-  /** The refusal. */
-  readonly refusal: Extract<GuardResult, { ok: false }>;
-  /**
-   * @param pr - The PR.
-   * @param refusal - The guard's refusal.
-   */
-  constructor(pr: number, refusal: Extract<GuardResult, { ok: false }>) {
-    super(`flow did not arm #${pr} (${refusal.reason}): ${refusal.detail}`);
-    this.refusal = refusal;
+  // A preArm check can take hours. Read the PR and the freeze again, so a hold,
+  // a freeze or a red check that arrived meanwhile still refuses.
+  let after;
+  try {
+    after = await input.forge.armFacts(input.pr);
+  } catch (error) {
+    return {
+      ok: false,
+      reason: 'forge-unreadable',
+      detail: `could not read #${input.pr} again after its pre-arm checks: ${(error as Error).message}`,
+      ranPreArm: true,
+      preArm: pre.outcomes,
+    };
   }
-}
-
-/**
- * Run the guard and throw when it refuses.
- *
- * @param input - As for {@link guardArm}.
- * @param io - As for {@link guardArm}.
- * @returns The pre-arm outcomes, when it may arm.
- * @throws {ArmRefusedError} When it may not.
- */
-export async function assertArmable(input: GuardInput, io: GuardIo): Promise<PreArmOutcome[]> {
-  const result = await guardArm(input, io);
-  if (!result.ok) throw new ArmRefusedError(input.pr, result);
-  return result.preArm;
+  const again = decideArm(
+    { ...after, requiredChecks, reviewedSha, freeze: readFreeze(input.mainCheckout) },
+    policy
+  );
+  if (again.verdict === 'REFUSE') {
+    return {
+      ok: false,
+      reason: again.reason,
+      detail: `${again.detail} (after its pre-arm checks passed)`,
+      ranPreArm: true,
+      preArm: pre.outcomes,
+    };
+  }
+  return { ok: true, preArm: pre.outcomes };
 }

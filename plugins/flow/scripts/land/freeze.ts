@@ -1,7 +1,7 @@
 /**
  * The release freeze (DOR-3262): while it is on, flow's arm guard arms nothing
- * in this project. The release step sets it before it cuts a release and clears
- * it after (`flow freeze on|off`).
+ * in this project. A release process turns it on before it cuts a release and
+ * off after (`flow freeze on|off`); flow ships no release step of its own.
  *
  * It is a file in flow's local run files, `<main checkout>/.dork/flow/freeze.json`,
  * so every worktree of the project sees the same freeze, and it is never

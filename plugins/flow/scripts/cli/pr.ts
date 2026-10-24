@@ -18,8 +18,9 @@
  *    list on `origin/main`), else `land.reviewer`. Both are handles, so they
  *    come from this machine's settings (`config.local.json`);
  * 6. on `--arm` or `drain.armAutoMerge`, arms it only when the arm guard
- *    allows (`land/arm-guard.ts`). A refusal leaves the PR open and unarmed
- *    and exits 5 saying why.
+ *    allows (`land/arm-guard.ts`). A refusal leaves the PR open and unarmed,
+ *    says why in `armRefused`, and records the PR waiting to re-arm so the
+ *    drain asks the guard again; the verb still exits 0.
  *
  * @module @dorkos/flow/cli/pr
  */
@@ -32,6 +33,7 @@ import { loadConfig } from '../config-load.ts';
 import { PreconditionError, UsageError } from '../errors.ts';
 import type { LandConfig } from '../config-schema.ts';
 import { securityPathsTouched } from '../land/arm-decision.ts';
+import { policyFor } from '../land/arm-guard.ts';
 import { readBaseLand } from '../land/base-config.ts';
 import { openFlowStateFile } from '../flow-state-file.ts';
 import type { Forge, ForgePr } from '../forge/types.ts';
@@ -150,12 +152,7 @@ async function mentionReviewer(
     try {
       const facts = await forge.armFacts(pr.number);
       security =
-        facts.files === null ||
-        securityPathsTouched(facts.files, {
-          securityGlobs: land.securityPaths.globs,
-          securityPattern: land.securityPaths.pattern,
-          securityLabel: land.securityPaths.label,
-        }).length > 0;
+        facts.files === null || securityPathsTouched(facts.files, policyFor(land)).length > 0;
     } catch {
       security = true;
     }
@@ -178,20 +175,33 @@ async function mentionReviewer(
   }
 }
 
-/** Record `pr` on the run. */
+/**
+ * Record `pr` on the run. `refused` marks an arm the guard turned down: the PR
+ * is recorded waiting to re-arm, so the drain asks the guard again on a later
+ * pass, and a refusal from a `land.preArm` check records the commit it refused,
+ * so that check runs again only for a new reviewed commit.
+ */
 async function recordPr(
   ctx: VerbContext,
   run: DrainRun,
   forge: Forge,
   pr: ForgePr,
-  armed: boolean
+  armed: boolean,
+  refused?: { sha: string; ranPreArm: boolean }
 ): Promise<void> {
   await writeDrain(
     openFlowStateFile(ctx.projectDir, { now: ctx.now }),
     run,
     (drain) => ({
       ...drain,
-      pr: { repo: forge.repo, number: pr.number, url: pr.url, armed, disarmedForReview: false },
+      pr: {
+        repo: forge.repo,
+        number: pr.number,
+        url: pr.url,
+        armed,
+        disarmedForReview: refused !== undefined,
+        ...(refused?.ranPreArm ? { armRefusedAt: refused.sha } : {}),
+      },
     }),
     `run "flow pr ${run.identifier}" again (it will find the PR and record it)`
   );
@@ -249,9 +259,13 @@ export async function run(ctx: VerbContext): Promise<VerbResult> {
   }
 
   const base = await defaultBranch(ctx, worktree);
-  // Which paths count as security paths comes from main, like the guard's checks.
-  const baseLand = await readBaseLand(ctx.runProcess, worktree);
   const reviewers = reviewersFor(ctx);
+  // Which paths count as security paths comes from main, like the guard's
+  // checks; read only when there is a security reviewer to route to.
+  const baseLand =
+    typeof reviewers !== 'string' && reviewers.security !== null
+      ? await readBaseLand(ctx.runProcess, worktree)
+      : null;
   const created = await forge.createPr({
     head: branch,
     base,
@@ -269,7 +283,7 @@ export async function run(ctx: VerbContext): Promise<VerbResult> {
       forge,
       created,
       reviewers,
-      baseLand.ok ? baseLand.land : null,
+      baseLand?.ok ? baseLand.land : null,
       head,
       drainRun.host
     );
@@ -284,6 +298,10 @@ export async function run(ctx: VerbContext): Promise<VerbResult> {
       armed = true;
     } else {
       armRefused = { reason: guard.reason, detail: guard.detail };
+      await recordPr(ctx, drainRun, forge, created, false, {
+        sha: head,
+        ranPreArm: guard.ranPreArm,
+      });
     }
   }
   const mentionText =
@@ -292,10 +310,11 @@ export async function run(ctx: VerbContext): Promise<VerbResult> {
       : mention.posted
         ? ` Asked ${mention.reviewer} to review it.`
         : ` Could not ask ${mention.reviewer} to review it: ${mention.error}.`;
+  // A refused arm is not a failed `flow pr`: the PR is open and recorded, and
+  // armRefused says why it is unarmed.
   return {
-    ...(armRefused === null ? {} : { exitCode: 5 as const }),
     json: {
-      ok: armRefused === null,
+      ok: true,
       identifier,
       pr: { repo: forge.repo, number: created.number, url: created.url, armed },
       base,

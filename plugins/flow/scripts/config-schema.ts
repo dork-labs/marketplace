@@ -919,8 +919,19 @@ export const PRE_ARM_COMMAND_PATTERN = /^[^;&|<>$`\\\r\n\t\0]+$/;
 export const REVIEWER_HANDLE_PATTERN =
   /^@?[A-Za-z0-9](?:[A-Za-z0-9-]{0,38})(?:\/[A-Za-z0-9][A-Za-z0-9._-]{0,99})?$/;
 
+/**
+ * A repo-relative path glob that can match something: no leading `./` or `/`,
+ * no trailing `/`, no backslash and no empty segment. Each of those would match
+ * no changed path at all, so a typo would silently switch a check off.
+ */
+export const PATH_GLOB_PATTERN = /^(?!\.\/)(?!\/)(?!.*\/\/)(?!.*\/$)[^\\\s][^\\]*$/;
+/** One path glob (`**`, `*`, `?`). */
+const PathGlobSchema = z.string().regex(PATH_GLOB_PATTERN, {
+  message:
+    'must be a repo-relative glob like "apps/client/**": no leading "./" or "/", no trailing "/", no backslash',
+});
 /** The paths that send an entry's check, as globs (`**`, `*`, `?`). */
-const PreArmPathsSchema = z.array(z.string().min(1)).min(1);
+const PreArmPathsSchema = z.array(PathGlobSchema).min(1);
 /** Minutes an entry may take before the guard refuses. */
 const PreArmTimeoutSchema = z.number().int().min(1).max(360).default(30);
 
@@ -971,7 +982,7 @@ const ReviewerHandleSchema = z
 export const SecurityPathsSchema = z
   .object({
     /** Globs (`**`, `*`, `?`) for the repository's security paths. */
-    globs: z.array(z.string().min(1)).default([]),
+    globs: z.array(PathGlobSchema).default([]),
     /** A regular expression tested against each changed path, or `null`. */
     pattern: z.string().min(1).nullable().default(null),
     /** The label that says Security has looked. Flow only reads it. */

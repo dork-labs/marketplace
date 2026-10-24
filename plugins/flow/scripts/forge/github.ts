@@ -293,9 +293,12 @@ export function parseArmFacts(raw: unknown, files: unknown[] | null, where: stri
     return name === undefined ? [] : [{ name }];
   });
   let paths: string[] | null = null;
+  // A count of 0 is what GitHub reports while it is still working out a new
+  // PR's diff, so it never stands for "touches nothing".
   if (
     files !== null &&
     typeof view.changedFiles === 'number' &&
+    view.changedFiles > 0 &&
     files.length === view.changedFiles
   ) {
     paths = [];
@@ -706,7 +709,18 @@ export function createGithubForge(options: GithubForgeOptions): Forge {
       } catch {
         files = null;
       }
-      return parseArmFacts(raw, files, where);
+      const facts = parseArmFacts(raw, files, where);
+      // The file list is the head's only if the head did not move while it was read.
+      if (facts.files !== null) {
+        const again = record(
+          await ghJson(
+            ['pr', 'view', String(pr), '-R', repoArg, '--json', 'headRefOid'],
+            `reading ${where} again for the arm guard`
+          )
+        );
+        if (str(again?.headRefOid) !== facts.headRefOid) return { ...facts, files: null };
+      }
+      return facts;
     },
 
     async comment(pr, body) {

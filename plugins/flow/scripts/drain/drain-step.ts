@@ -432,6 +432,8 @@ function rearmIfReviewed(step: Step, facts: DrainFacts): Step {
   const pr = step.drain.pr;
   if (pr === null || !pr.disarmedForReview || !reviewedIsHead(step.drain, facts)) return step;
   if (facts.pr?.armed) return step;
+  // A land.preArm check already refused this commit; only a new one is asked.
+  if (pr.armRefusedAt != null && pr.armRefusedAt === step.drain.reviewedSha) return step;
   return {
     drain: step.drain,
     actions: [...step.actions, { kind: 'arm', pr: ref(pr), sha: step.drain.reviewedSha }],

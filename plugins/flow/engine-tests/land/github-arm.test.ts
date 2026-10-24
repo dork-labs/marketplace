@@ -108,6 +108,10 @@ describe('parseArmFacts', () => {
     expect(parseArmFacts(VIEW, [{ filename: 'a' }, { nope: 1 }], 'x').files).toBeNull();
   });
 
+  it('a count of 0 changed files is unknown: GitHub reports it while a new diff is computed', () => {
+    expect(parseArmFacts({ ...VIEW, changedFiles: 0 }, [], 'x').files).toBeNull();
+  });
+
   it('only an explicit false is "not a fork"', () => {
     expect(
       parseArmFacts({ ...VIEW, isCrossRepository: undefined }, files, 'x').isCrossRepository
@@ -150,6 +154,20 @@ describe('the GitHub forge', () => {
       '.[] | {filename, previous_filename}',
       'repos/acme/app/pulls/7/files?per_page=100',
     ]);
+  });
+
+  it('armFacts reports an unknown file list when the head moved while it was read', async () => {
+    let views = 0;
+    const { forge } = forgeWith((args) => {
+      if (args[0] !== 'pr')
+        return { code: 0, stdout: '{"filename":"a.ts"}\n{"filename":"b.ts"}\n' };
+      views += 1;
+      return {
+        code: 0,
+        stdout: JSON.stringify(views === 1 ? VIEW : { headRefOid: 'b'.repeat(40) }),
+      };
+    });
+    expect((await forge.armFacts(7)).files).toBeNull();
   });
 
   it('armFacts reports an unknown file list when the files read fails', async () => {

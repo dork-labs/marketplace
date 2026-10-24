@@ -1,7 +1,7 @@
 /**
  * `flow freeze [on|off] [--reason <text>]` (DOR-3262): the release freeze.
- * While it is on, flow arms auto-merge on nothing in this project; the release
- * step turns it on before it cuts a release and off after. With no action it
+ * While it is on, flow arms auto-merge on nothing in this project; a release
+ * process turns it on before it cuts a release and off after. With no action it
  * says whether a freeze is on. Local to this machine and never committed
  * (`land/freeze.ts`).
  *

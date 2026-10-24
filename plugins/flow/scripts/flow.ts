@@ -548,7 +548,7 @@ export const VERBS: readonly VerbDefinition[] = [
     description: [
       'Record a verdict at the review gate. Nothing is ever closed, released or reassigned.',
       '  --approve [--by person|reviewer-agent]',
-      '      Comment "Shipped" on the item, approve the PR (a person only, and not their own PR), and arm it to merge when gates.review.mergeOnApproval is on.',
+      '      Comment "Shipped" on the item, approve the PR (a person only, and not their own PR), and arm it to merge when gates.review.mergeOnApproval is on and the arm guard allows it (checks, head, base, fork, freeze, security label, land.preArm). A refusal still ships; armRefused in the JSON says why nothing was armed.',
       "      --by reviewer-agent needs a clean review recorded with the reviewer's token at the branch head, no failing check, review.adversarial on, and the project's Ship finished work setting past Ask me first.",
       '      With mergeOnApproval off every check must have passed. Checks still running: ships nothing, exits 5 with verdict "pending", and records the retry the drain re-checks. A PR no check reports on counts as passed after gates.review.noChecksPassAfterMinutes, when the base requires none.',
       '  --changes (--note <text> | --note-file <file>)',
@@ -570,7 +570,7 @@ export const VERBS: readonly VerbDefinition[] = [
         kind: 'string',
         value: 'sha',
         description:
-          "With --approve by a person: the commit you approved (DorkOS passes the one the ask showed). Default: a drain run's reviewed commit, else the review's clean commit. The PR is armed only at it, and refused if it moved.",
+          "With --approve by a person: the commit you approved, as a full SHA (DorkOS passes the one the ask showed). Default: a drain run's reviewed commit, else the review's clean commit. The PR is armed only at it, and refused if it moved; a short SHA ships but arms nothing.",
       },
       {
         name: 'wait',
@@ -697,7 +697,7 @@ export const VERBS: readonly VerbDefinition[] = [
     name: 'pr',
     summary: "Open a drain run's pull request after a clean review.",
     description:
-      "Open the run's pull request into origin's default branch. Refuses unless the latest review is CLEAN at the branch head on origin. Adds a provenance line to the body. If a PR is already open for the branch, records it and exits 5.",
+      "Open the run's pull request into origin's default branch. Refuses unless the latest review is CLEAN at the branch head on origin. Adds a provenance line to the body, and names the reviewer from land.reviewer (land.securityPaths.reviewer when it touches a security path) in a comment. With --arm, arms only when the arm guard allows it; a refusal leaves the PR open and unarmed, says why in armRefused, and the drain asks again. If a PR is already open for the branch, records it and exits 5.",
     common: ['project', 'session'],
     positionals: [
       { name: 'identifier', required: true, description: 'The work item, e.g. ACME-12.' },
@@ -718,7 +718,7 @@ export const VERBS: readonly VerbDefinition[] = [
     name: 'freeze',
     summary: 'Stop flow arming auto-merge in this project while a release is cut.',
     description:
-      'flow freeze on --reason <text> turns the release freeze on: flow arms auto-merge on no pull request here until flow freeze off. The release step sets it before a release and clears it after. With no action it says whether a freeze is on. Local to this machine (<main checkout>/.dork/flow/freeze.json), never committed.',
+      'flow freeze on --reason <text> turns the release freeze on: flow arms auto-merge on no pull request here until flow freeze off. Your release process runs flow freeze on before a release and flow freeze off after. With no action it says whether a freeze is on. Local to this machine (<main checkout>/.dork/flow/freeze.json), never committed.',
     common: ['project', 'dry-run'],
     positionals: [{ name: 'action', description: 'on, off, or nothing to show it.' }],
     flags: [

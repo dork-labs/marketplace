@@ -218,7 +218,7 @@
       "mutation": ".freeze = {\"reason\": \"cutting 1.2\", \"since\": \"2026-10-24T00:00:00Z\"}",
       "gate": "ARM",
       "guard": "REFUSE freeze",
-      "why": "Security condition 5: flow freeze on, set and cleared by the release step."
+      "why": "Security condition 5: flow freeze on, set and cleared by a release process."
     },
 
     {

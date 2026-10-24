@@ -140,7 +140,7 @@ The review gate is always checked. VERIFY never advances to DONE.
    outlives your command timeout). `"verdict": "pending"`: checks still running. Leave the
    item at the gate for the drain (`flow-drain` step 2a) only when `retryRecorded` is true
    and a scheduled drain or `/flow auto` will run; otherwise `assignToHuman(item)`. Any
-   other refusal, or no clean verdict: `assignToHuman(item)` and stop.
+   other refusal, `armRefused` or no clean verdict: `assignToHuman(item)`, stop.
 3. REVIEW has no skill: never invent one, never approve without a clean check. After the
    PR merges, `/flow:done <issue>` closes the item.
 
