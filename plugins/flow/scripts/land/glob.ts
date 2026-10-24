@@ -27,7 +27,8 @@ function escape(text: string): string {
  * Compile one glob to a regular expression that must match the whole path.
  *
  * @param glob - The glob.
- * @param opts - `ignoreCase`: match letters in any case.
+ * @param opts - `ignoreCase`: the `iu` flags (simple Unicode case folding);
+ *   {@link matchesAny} adds full folding on top.
  * @returns The expression.
  */
 export function globToRegExp(glob: string, opts: { ignoreCase?: boolean } = {}): RegExp {
@@ -55,7 +56,17 @@ export function globToRegExp(glob: string, opts: { ignoreCase?: boolean } = {}):
       i += 1;
     }
   }
-  return new RegExp(`^${out}$`, opts.ignoreCase ? 'i' : '');
+  return new RegExp(`^${out}$`, opts.ignoreCase ? 'iu' : '');
+}
+
+/**
+ * Full case folding, where JavaScript's own is simple: lower, upper, lower.
+ * It folds what a case-insensitive APFS disk treats as one name that the `iu`
+ * flags miss, `ß` and `ẞ` as `ss`, the ligatures as their letters, and the
+ * Kelvin sign and long s as `k` and `s`.
+ */
+function fullFold(text: string): string {
+  return text.normalize('NFC').toLowerCase().toUpperCase().toLowerCase();
 }
 
 /**
@@ -63,7 +74,13 @@ export function globToRegExp(glob: string, opts: { ignoreCase?: boolean } = {}):
  *
  * @param file - A repo-relative path.
  * @param globs - The globs.
- * @param opts - `ignoreCase`: match letters in any case.
+ * @param opts - `ignoreCase`: match in any case, the way a case-insensitive
+ *   disk (APFS) opens a path, and then some. The path counts as matching when
+ *   any of three spellings of it does: as written (with the `iu` flags), fully
+ *   case-folded, or NFKC-normalised then folded (which also takes a
+ *   fullwidth letter for its letter, though APFS does not). Folding only ever
+ *   adds a match, never removes one: a fullwidth slash in a name still
+ *   matches as the name it is.
  * @returns `true` on a match.
  */
 export function matchesAny(
@@ -71,5 +88,51 @@ export function matchesAny(
   globs: readonly string[],
   opts: { ignoreCase?: boolean } = {}
 ): boolean {
-  return globs.some((glob) => globToRegExp(glob, opts).test(file));
+  if (!opts.ignoreCase) return globs.some((glob) => globToRegExp(glob).test(file));
+  // The exact match first, so folding can only ever add to what matched before.
+  return globs.some(
+    (glob) =>
+      globToRegExp(glob).test(file) ||
+      FOLD_FORMS.some((form) => globToRegExp(form(glob), { ignoreCase: true }).test(form(file)))
+  );
+}
+
+/**
+ * The three spellings a case-insensitive match tries, path and pattern alike:
+ * as written, fully case-folded, and NFKC then folded. Each only adds matches.
+ */
+export const FOLD_FORMS: readonly ((text: string) => string)[] = [
+  (text) => text,
+  fullFold,
+  (text) => fullFold(text.normalize('NFKC')),
+];
+
+/**
+ * A regular expression that matches the way {@link matchesAny} does with
+ * `ignoreCase`: compiled with `iu` (or `i` when it is not valid with `u`) and
+ * tested against each of {@link FOLD_FORMS} of the path.
+ *
+ * @param source - The expression's source.
+ * @returns A test for one path, or `null` when the source is not a valid expression.
+ */
+export function foldingPattern(source: string): ((file: string) => boolean) | null {
+  let exact: RegExp;
+  try {
+    exact = new RegExp(source);
+  } catch {
+    return null;
+  }
+  let pattern: RegExp;
+  try {
+    pattern = new RegExp(source, 'iu');
+  } catch {
+    try {
+      pattern = new RegExp(source, 'i');
+    } catch {
+      return null;
+    }
+  }
+  // The exact, flagless match first, so folding can only ever add to what
+  // matched before (a negative lookahead or class still matches as written).
+  return (file) => exact.test(file) || FOLD_FORMS.some((form) => pattern.test(form(file)));
 }

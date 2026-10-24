@@ -88,6 +88,41 @@ function payload(mutation: string): unknown {
   return JSON.parse(out) as unknown;
 }
 
+/** The case and Unicode spellings dork-labs/dorkos copies as-is (its #3191). */
+const variantsPath = path.resolve(here, '../../../../scripts/fixtures/security-path-variants.json');
+const variants = existsSync(variantsPath)
+  ? (JSON.parse(readFileSync(variantsPath, 'utf8')) as { match: string[]; noMatch: string[] })
+  : null;
+if (variants === null && process.env.CI) throw new Error(`${variantsPath} is missing in CI`);
+
+describe.skipIf(variants === null)('security path spellings (shared with dork-labs/dorkos)', () => {
+  const builtin: ArmPolicy = {
+    securityGlobs: [],
+    securityPattern: null,
+    securityLabel: 'security-reviewed',
+  };
+  const facts = (file: string) => ({
+    state: 'OPEN',
+    isDraft: false,
+    labels: [],
+    reviewDecision: 'APPROVED',
+    checks: [],
+    headRefOid: '1'.repeat(40),
+    reviewedSha: '1'.repeat(40),
+    baseRefName: 'main',
+    isCrossRepository: false,
+    requiredChecks: [],
+    files: [file],
+    freeze: null,
+  });
+  it.each(variants?.match ?? [])('%s counts as a security path', (file) => {
+    expect(formatDecision(decideArm(facts(file), builtin))).toBe('REFUSE security-path-unlabelled');
+  });
+  it.each(variants?.noMatch ?? [])('%s does not', (file) => {
+    expect(formatDecision(decideArm(facts(file), builtin))).toBe('ARM');
+  });
+});
+
 describe.skipIf(!runnable)(
   'arm guard decisions (shared with scripts/should-arm-automerge.sh)',
   () => {
@@ -172,6 +207,93 @@ describe.skipIf(!runnable)(
     it('a pattern that is not a valid regular expression refuses rather than matching nothing', () => {
       const broken: ArmPolicy = { ...policy, securityPattern: '(' };
       expect(formatDecision(decideArm(payload('.'), broken))).toBe('REFUSE files-unreadable');
+    });
+
+    it('built-in security paths match after NFKC folding, in any case', () => {
+      const builtin: ArmPolicy = { ...policy, securityGlobs: [] };
+      for (const file of [
+        'pac\u212Aage.json',
+        'PACKAGE.JSON',
+        'apps/web/Package.json',
+        '.NPMRC',
+        '\uFF50ackage.json',
+      ]) {
+        expect(
+          formatDecision(decideArm(payload(`.files = [${JSON.stringify(file)}]`), builtin)),
+          file
+        ).toBe('REFUSE security-path-unlabelled');
+      }
+    });
+
+    it('built-in security paths still match what they matched before folding (a fullwidth slash in a name)', () => {
+      const builtin: ArmPolicy = { ...policy, securityGlobs: [] };
+      for (const file of ['Podfile\uFF0Fx', 'android/gradlew\uFF0Fx', 'constraints\uFF0Fa.txt']) {
+        expect(
+          formatDecision(decideArm(payload(`.files = [${JSON.stringify(file)}]`), builtin)),
+          file
+        ).toBe('REFUSE security-path-unlabelled');
+      }
+    });
+
+    // Security's Must on #121: a Mac opens APPS/Server/src/auth/x.ts in the
+    // real auth/ folder, so the repo's own globs and pattern fold too.
+    it("the repo's own security globs match in any case", () => {
+      const own: ArmPolicy = { ...policy, securityGlobs: ['apps/server/src/auth/**'] };
+      for (const file of [
+        'apps/server/src/auth/x.ts',
+        'APPS/Server/src/auth/x.ts',
+        'apps/\u017Ferver/src/auth/x.ts',
+      ]) {
+        expect(
+          formatDecision(decideArm(payload(`.files = [${JSON.stringify(file)}]`), own)),
+          file
+        ).toBe('REFUSE security-path-unlabelled');
+      }
+      expect(
+        formatDecision(decideArm(payload('.files = ["apps/server/src/other/x.ts"]'), own))
+      ).toBe('ARM');
+    });
+
+    it("the repo's own pattern matches in any case, under the same folds", () => {
+      const own: ArmPolicy = {
+        ...policy,
+        securityGlobs: [],
+        securityPattern: '^apps/server/src/(http|routes)/',
+      };
+      for (const file of [
+        'apps/server/src/routes/a.ts',
+        'Apps/Server/SRC/Routes/a.ts',
+        'apps/server/src/\uFF52outes/a.ts',
+      ]) {
+        expect(
+          formatDecision(decideArm(payload(`.files = [${JSON.stringify(file)}]`), own)),
+          file
+        ).toBe('REFUSE security-path-unlabelled');
+      }
+      expect(formatDecision(decideArm(payload('.files = ["apps/client/routes/a.ts"]'), own))).toBe(
+        'ARM'
+      );
+    });
+
+    it('folding never drops what the pattern matched as written', () => {
+      for (const [pattern, file] of [
+        ['^(?!docs/)', 'DOCS/run.sh'],
+        ['^[^a-z]', 'Secrets/a'],
+        ['^(?!.*\\.md$)', 'x.MD'],
+      ]) {
+        const own: ArmPolicy = { ...policy, securityGlobs: [], securityPattern: pattern };
+        expect(
+          formatDecision(decideArm(payload(`.files = [${JSON.stringify(file)}]`), own)),
+          pattern
+        ).toBe('REFUSE security-path-unlabelled');
+      }
+    });
+
+    it('a pattern that only compiles without the u flag still folds case', () => {
+      const own: ArmPolicy = { ...policy, securityGlobs: [], securityPattern: '^ops\\-scripts/' };
+      expect(formatDecision(decideArm(payload('.files = ["OPS-scripts/x.sh"]'), own))).toBe(
+        'REFUSE security-path-unlabelled'
+      );
     });
 
     it('the built-in security paths cover the common manifests and lockfiles at any depth', () => {

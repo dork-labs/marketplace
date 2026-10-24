@@ -21,7 +21,7 @@ import {
 import os from 'node:os';
 import path from 'node:path';
 import { deflateSync } from 'node:zlib';
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import {
   resetGitProbe,
@@ -33,6 +33,10 @@ import {
   type GitRunner,
 } from '../../scripts/land/squash-verify.ts';
 import { scratchRepo } from '../../scripts/land/isolated-git.ts';
+
+// Each case builds real repositories and verified scratch copies with git; on
+// a loaded machine that outlasts vitest's 5-second default.
+vi.setConfig({ testTimeout: 60_000 });
 
 let repo: string;
 

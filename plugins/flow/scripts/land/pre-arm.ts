@@ -136,7 +136,10 @@ export function splitCommand(command: string): string[] | null {
 
 /** Whether a PR's files send this entry (an unknown list sends every entry). */
 export function entryTouched(entry: PreArmEntry, files: readonly string[] | null): boolean {
-  return files === null || files.some((file) => matchesAny(file, entry.paths));
+  // In any case, Unicode-folded: a case-insensitive disk opens SRC/App.ts as src/app.ts.
+  return (
+    files === null || files.some((file) => matchesAny(file, entry.paths, { ignoreCase: true }))
+  );
 }
 
 /**

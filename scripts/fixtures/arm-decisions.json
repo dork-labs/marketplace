@@ -204,6 +204,13 @@
       "guard": "REFUSE security-path-unlabelled",
       "why": "Built-in security paths match in any case: on macOS's case-insensitive disk, Package.json is package.json."
     },
+    {
+      "name": "a manifest spelt with a Kelvin sign, without the label",
+      "mutation": ".files = [\"pac\\u212aage.json\"]",
+      "gate": "ARM",
+      "guard": "REFUSE security-path-unlabelled",
+      "why": "APFS opens pac\u212aage.json (a Kelvin sign for the k) as package.json, so the built-ins match after NFKC folding, not only ASCII case."
+    },
     { "name": "an upper-case .npmrc without the label", "mutation": ".files = [\".NPMRC\"]", "gate": "ARM", "guard": "REFUSE security-path-unlabelled" },
     { "name": "a Gradle wrapper without the label", "mutation": ".files = [\"gradle/wrapper/gradle-wrapper.properties\"]", "gate": "ARM", "guard": "REFUSE security-path-unlabelled" },
     { "name": "gradlew without the label", "mutation": ".files = [\"android/gradlew\"]", "gate": "ARM", "guard": "REFUSE security-path-unlabelled" },
