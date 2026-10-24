@@ -35,6 +35,7 @@ import {
   type ForgeTarget,
   type GroupFailure,
   type MergeInfo,
+  type QueuedPr,
   type PrStatus,
   type WorkflowRun,
 } from './types.ts';
@@ -374,6 +375,80 @@ export function parseMergeInfo(raw: unknown, where: string): MergeInfo {
     mergeCommit: oid !== undefined && isFullSha(oid) ? oid : null,
     author: str(record(view.author)?.login) ?? null,
   };
+}
+
+/**
+ * The read-only GraphQL query {@link Forge.dependencyQueue} pages through: the
+ * base's merge queue and the open PRs, each with its changed-file count and
+ * first 100 files. A fixed string; only the variables change.
+ */
+export const DEPENDENCY_QUEUE_QUERY =
+  'query($owner:String!,$name:String!,$base:String!,$cursor:String){repository(owner:$owner,name:$name){' +
+  'mergeQueue(branch:$base){entries(first:100){totalCount nodes{pullRequest{number}}}}' +
+  'pullRequests(states:OPEN,baseRefName:$base,first:50,after:$cursor){pageInfo{hasNextPage endCursor}' +
+  'nodes{number isInMergeQueue autoMergeRequest{enabledAt} changedFiles files(first:100){nodes{path}}}}}}';
+
+/** How many pages of open PRs one read takes before it calls the queue unreadable. */
+const DEPENDENCY_QUEUE_PAGES = 10;
+
+/**
+ * One page of {@link DEPENDENCY_QUEUE_QUERY}'s answer.
+ *
+ * @param raw - The parsed JSON.
+ * @returns The queued or armed PRs on the page, whether there is another page
+ *   and its cursor, and the queue's PR numbers; `null` when the answer is not
+ *   in the shape asked for.
+ */
+export function parseDependencyPage(raw: unknown): {
+  prs: QueuedPr[];
+  queued: Set<number>;
+  queueComplete: boolean;
+  next: string | null;
+} | null {
+  const repo = record(record(record(raw)?.data)?.repository);
+  const pulls = record(repo?.pullRequests);
+  const page = record(pulls?.pageInfo);
+  if (
+    repo === undefined ||
+    pulls === undefined ||
+    page === undefined ||
+    !Array.isArray(pulls.nodes)
+  ) {
+    return null;
+  }
+  const queue = record(record(repo.mergeQueue)?.entries);
+  const queued = new Set<number>();
+  let queueComplete = true;
+  if (queue !== undefined) {
+    const nodes = Array.isArray(queue.nodes) ? queue.nodes : [];
+    for (const node of nodes) {
+      const n = record(record(node)?.pullRequest)?.number;
+      if (typeof n === 'number') queued.add(n);
+    }
+    queueComplete = typeof queue.totalCount === 'number' && queue.totalCount === nodes.length;
+  }
+  const prs: QueuedPr[] = [];
+  for (const node of pulls.nodes) {
+    const pr = record(node);
+    if (pr === undefined || typeof pr.number !== 'number') return null;
+    const armed = record(pr.autoMergeRequest) !== undefined;
+    const inQueue = pr.isInMergeQueue === true || queued.has(pr.number);
+    if (!armed && !inQueue) continue;
+    const fileNodes = record(pr.files)?.nodes;
+    const paths = Array.isArray(fileNodes)
+      ? fileNodes.flatMap((f) => {
+          const p = str(record(f)?.path);
+          return p === undefined ? [] : [p];
+        })
+      : null;
+    const whole =
+      paths !== null && typeof pr.changedFiles === 'number' && paths.length === pr.changedFiles;
+    prs.push({ number: pr.number, queued: inQueue, armed, files: whole ? paths : null });
+  }
+  const more = page.hasNextPage === true;
+  const cursor = str(page.endCursor) ?? null;
+  if (more && cursor === null) return null;
+  return { prs, queued, queueComplete, next: more ? cursor : null };
 }
 
 /** One merge-group workflow run from `gh run list --json`. */
@@ -753,6 +828,55 @@ export function createGithubForge(options: GithubForgeOptions): Forge {
         `reading how ${where} merged`
       );
       return parseMergeInfo(raw, where);
+    },
+
+    async dependencyQueue(base) {
+      const prs: QueuedPr[] = [];
+      const seen = new Set<number>();
+      let queued = new Set<number>();
+      let cursor: string | null = null;
+      for (let page = 0; page < DEPENDENCY_QUEUE_PAGES; page++) {
+        let raw: unknown;
+        try {
+          raw = await ghJson(
+            [
+              'api',
+              'graphql',
+              ...hostArgs,
+              '-f',
+              `query=${DEPENDENCY_QUEUE_QUERY}`,
+              '-f',
+              `owner=${owner}`,
+              '-f',
+              `name=${name}`,
+              '-f',
+              `base=${base}`,
+              ...(cursor === null ? [] : ['-f', `cursor=${cursor}`]),
+            ],
+            `reading the merge queue of ${target.repo}`
+          );
+        } catch {
+          return null;
+        }
+        const parsed = parseDependencyPage(raw);
+        if (parsed === null || !parsed.queueComplete) return null;
+        if (page === 0) queued = parsed.queued;
+        for (const pr of parsed.prs) {
+          if (!seen.has(pr.number)) {
+            seen.add(pr.number);
+            prs.push(pr);
+          }
+        }
+        if (parsed.next === null) {
+          // A queue entry not among the open PRs read is unknown: fail closed.
+          for (const n of queued) {
+            if (!seen.has(n)) prs.push({ number: n, queued: true, armed: false, files: null });
+          }
+          return prs;
+        }
+        cursor = parsed.next;
+      }
+      return null;
     },
 
     async comment(pr, body) {

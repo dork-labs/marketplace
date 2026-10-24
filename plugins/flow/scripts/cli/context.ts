@@ -15,7 +15,7 @@
  * @module @dorkos/flow/cli/context
  */
 
-import { execFile } from 'node:child_process';
+import { execFile, spawn } from 'node:child_process';
 import path from 'node:path';
 
 import { createGithubForge } from '../forge/github.ts';
@@ -54,6 +54,12 @@ export interface ProcessOptions {
   cwd?: string;
   /** The command's whole environment. Default: this process's. */
   env?: Readonly<Record<string, string | undefined>>;
+  /**
+   * Run it in a process group of its own, and on a timeout, or when it exits,
+   * kill the whole group. A descendant that starts a session of its own
+   * (`setsid`) leaves the group and is not stopped.
+   */
+  processGroup?: boolean;
 }
 
 /**
@@ -319,7 +325,133 @@ const MAX_OUTPUT_BYTES = 64 * 1024 * 1024;
  * @returns The exit code and captured output.
  */
 export const realProcessRunner: ProcessRunner = (cmd, args, opts = {}) =>
-  new Promise((resolve, reject) => {
+  opts.processGroup ? runInGroup(cmd, args, opts) : runPlain(cmd, args, opts);
+
+/** Process groups a {@link runInGroup} command is running in right now. */
+const liveGroups = new Set<number>();
+
+/** Stop every live group: flow is exiting, and nothing it started should outlive it. */
+function stopLiveGroups(): void {
+  for (const pid of liveGroups) {
+    try {
+      process.kill(-pid, 'SIGKILL');
+    } catch {
+      // Already gone.
+    }
+  }
+  liveGroups.clear();
+}
+let exitHookInstalled = false;
+
+/** {@link realProcessRunner} for a command in its own process group. */
+function runInGroup(
+  cmd: string,
+  args: readonly string[],
+  opts: ProcessOptions
+): Promise<ProcessResult> {
+  return new Promise((resolve, reject) => {
+    let child: ReturnType<typeof spawn>;
+    try {
+      child = spawn(cmd, [...args], {
+        cwd: opts.cwd,
+        ...(opts.env === undefined ? {} : { env: { ...opts.env } }),
+        shell: false,
+        detached: true,
+        stdio: ['ignore', 'pipe', 'pipe'],
+      });
+    } catch (error) {
+      reject(error as Error);
+      return;
+    }
+    if (!exitHookInstalled) {
+      exitHookInstalled = true;
+      process.on('exit', stopLiveGroups);
+      // A scheduler or a closed terminal stops flow with SIGTERM or SIGHUP, and
+      // 'exit' never fires for those: stop the groups, then let the signal do
+      // what it would have done. Where flow has its own handler for it, that
+      // handler stays in charge.
+      for (const signal of ['SIGTERM', 'SIGHUP'] as const) {
+        const onSignal = () => {
+          stopLiveGroups();
+          if (process.listenerCount(signal) === 1) {
+            process.removeListener(signal, onSignal);
+            process.kill(process.pid, signal);
+          }
+        };
+        process.on(signal, onSignal);
+      }
+    }
+    if (child.pid !== undefined) liveGroups.add(child.pid);
+    let stdout = '';
+    let stderr = '';
+    let done = false;
+    // Once the command has exited and its group was stopped, its pid may be
+    // reused: nothing signals the group after that.
+    let exited = false;
+    let grace: ReturnType<typeof setTimeout> | undefined;
+    const killGroup = () => {
+      if (exited) return;
+      try {
+        if (child.pid !== undefined) process.kill(-child.pid, 'SIGKILL');
+      } catch {
+        // Already gone.
+      }
+    };
+    const finish = (settle: () => void) => {
+      if (done) return;
+      done = true;
+      clearTimeout(timer);
+      if (grace !== undefined) clearTimeout(grace);
+      settle();
+    };
+    const timer = setTimeout(() => {
+      killGroup();
+      if (child.pid !== undefined) liveGroups.delete(child.pid);
+      finish(() =>
+        reject(
+          new Error(
+            `${cmd} timed out after ${opts.timeoutMs ?? 60_000} ms; its process group was stopped`
+          )
+        )
+      );
+    }, opts.timeoutMs ?? 60_000);
+    const add = (which: 'out' | 'err') => (chunk: string) => {
+      if (which === 'out') stdout += chunk;
+      else stderr += chunk;
+      if (Buffer.byteLength(stdout) + Buffer.byteLength(stderr) > MAX_OUTPUT_BYTES) {
+        killGroup();
+        finish(() => reject(new Error(`${cmd} printed more than ${MAX_OUTPUT_BYTES} bytes`)));
+      }
+    };
+    child.stdout?.setEncoding('utf8').on('data', add('out'));
+    child.stderr?.setEncoding('utf8').on('data', add('err'));
+    child.on('error', (error) => finish(() => reject(error)));
+    // When the command itself ends, whatever it left running in its group goes
+    // with it. Its result is its exit code: a descendant that left the group
+    // and still holds the output pipes cannot turn a finished command into a
+    // timeout, because the pipes are let go after a short grace period.
+    child.on('exit', (code) => {
+      killGroup();
+      exited = true;
+      if (child.pid !== undefined) liveGroups.delete(child.pid);
+      clearTimeout(timer);
+      grace = setTimeout(() => {
+        child.stdout?.destroy();
+        child.stderr?.destroy();
+        finish(() => resolve({ code: code ?? -1, stdout, stderr }));
+      }, 2_000);
+    });
+    child.on('close', (code) => finish(() => resolve({ code: code ?? -1, stdout, stderr })));
+  });
+}
+
+/** {@link realProcessRunner} for a plain command. */
+function runPlain(
+  cmd: string,
+  args: readonly string[],
+  opts: ProcessOptions
+): Promise<ProcessResult> {
+  return new Promise((resolve, reject) => {
     execFile(
       cmd,
       [...args],
@@ -340,3 +472,4 @@ export const realProcessRunner: ProcessRunner = (cmd, args, opts = {}) =>
       }
     );
   });
+}

@@ -29,14 +29,13 @@
  */
 
 import { randomBytes } from 'node:crypto';
-import { mkdtempSync, rmSync } from 'node:fs';
-import os from 'node:os';
+import { rmSync } from 'node:fs';
 import path from 'node:path';
 
 import type { ProcessRunner } from '../cli/context.ts';
 import { PRE_ARM_COMMAND_PATTERN, type PreArmEntry } from '../config-schema.ts';
 import type { Forge } from '../forge/types.ts';
-import { scratchRepo } from './isolated-git.ts';
+import { FIXED_PATH, privateTempDir, scratchRepo } from './isolated-git.ts';
 import { matchesAny } from './glob.ts';
 import { isBranchName, isFullSha, isNonce, isWorkflowName } from './validate.ts';
 
@@ -144,7 +143,7 @@ export function entryTouched(entry: PreArmEntry, files: readonly string[] | null
 
 /**
  * The environment a `run` entry gets: an allow-list, never this process's.
- * PATH, the locale, the temp folder, the time zone and the terminal, plus
+ * A fixed system PATH ({@link FIXED_PATH}), the locale, the temp folder, the time zone and the terminal, plus
  * `CI=true` and `HOME` set to `home` (an empty scratch folder, so the PR's code
  * finds no `~/.config/gh`, `~/.npmrc` or other credentials there). No token, no
  * `GH_*`, no `*_TOKEN` and no cloud credential reaches the command, whatever
@@ -154,10 +153,10 @@ export function minimalEnv(
   home: string,
   from: Readonly<Record<string, string | undefined>> = process.env
 ): Record<string, string> {
-  const env: Record<string, string> = { CI: 'true', HOME: home };
+  const env: Record<string, string> = { CI: 'true', HOME: home, PATH: FIXED_PATH };
   for (const [key, value] of Object.entries(from)) {
     if (value === undefined) continue;
-    if (['PATH', 'LANG', 'TMPDIR', 'TZ', 'TERM'].includes(key) || /^LC_[A-Z]+$/.test(key)) {
+    if (['LANG', 'TMPDIR', 'TZ', 'TERM'].includes(key) || /^LC_[A-Z]+$/.test(key)) {
       env[key] = value;
     }
   }
@@ -208,13 +207,17 @@ async function runCommand(
     ) {
       return `the fresh checkout for "${entry.run}" is not a clean copy of ${target.reviewedSha.slice(0, 7)}`;
     }
-    home = mkdtempSync(path.join(os.tmpdir(), 'flow-prearm-home-'));
+    const madeHome = privateTempDir('home-');
+    if (typeof madeHome !== 'string') return `could not run "${entry.run}": ${madeHome.error}`;
+    home = madeHome;
     let result;
     try {
       result = await io.runProcess(argv[0], argv.slice(1), {
         cwd: scratch.dir,
         env: minimalEnv(home),
         timeoutMs: entry.timeout * 60_000,
+        // A timeout stops everything the command started, not just the command.
+        processGroup: true,
       });
     } catch (error) {
       return `"${entry.run}" did not finish within ${entry.timeout} minutes or could not start: ${(error as Error).message}`;

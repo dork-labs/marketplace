@@ -563,7 +563,11 @@ async function review(ctx: VerbContext): Promise<VerbResult> {
             // checks and arms it once they pass. That is a hand-off, not a
             // refusal, so armRefused stays null for it.
             handToDrain =
-              guard.reason === 'pre-arm-deferred' &&
+              // Refusals the drain clears by itself: its pre-arm checks, and
+              // another dependency PR ahead in the queue.
+              ['pre-arm-deferred', 'dependency-queue-busy', 'dependency-queue-unreadable'].includes(
+                guard.reason
+              ) &&
               isWritableDrain(existing) &&
               existing.drain.pr?.number === pr.number &&
               existing.drain.reviewedSha?.toLowerCase() === approved.toLowerCase();
@@ -654,7 +658,7 @@ async function review(ctx: VerbContext): Promise<VerbResult> {
     const armText = armed
       ? ` Armed PR #${pr?.number} to merge when its checks pass.`
       : handToDrain
-        ? ` Approved. The drain arms PR #${pr?.number} once its pre-arm checks pass.`
+        ? ` Approved. The drain arms PR #${pr?.number} as soon as flow's arm guard allows it.`
         : armRefused !== null
           ? ` Approved, but flow did not arm PR #${pr?.number} (${armRefused.reason}): ${armRefused.detail}. Merge it yourself once that is settled.`
           : pr !== null && !config.gates.review.mergeOnApproval

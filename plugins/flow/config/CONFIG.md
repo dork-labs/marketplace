@@ -345,7 +345,7 @@ and in `config.local.json`:
 | --- | --- | --- |
 | `preArm` | list, `[]` | Checks to run before arming, each only when the PR touches one of its `paths`. No entries: only the guard's own checks below. |
 | `preArm[].paths` | globs | `**` any folders, `*` within one folder, `?` one character. Repo-relative: no leading `./` or `/`, no trailing `/`. Matched in any case, the way macOS's case-insensitive disk opens a path (`SRC/App.ts` for `src/app.ts`, `ß` for `ss`), and fullwidth letters too. |
-| `preArm[].run` | command | The fallback for a repo without CI; prefer `wait: workflow` wherever there is CI. Runs in a fresh, clean checkout of the reviewed commit, made in a scratch repository that reads only your repository's objects (never the worker's worktree, its git config, attributes, filters or replace refs; removed afterwards). No shell: words split on spaces, quotes group them, and `; & \| < > $` or a backslash are refused. A minimal environment: PATH, TMPDIR, TZ, TERM, the locale, `CI=true` and an empty scratch HOME, no tokens. The checkout has no installed dependencies, so a command that needs them is a committed script that installs them; list it as a security path. A non-zero exit refuses to arm, with the output in the message. |
+| `preArm[].run` | command | The fallback for a repo without CI; prefer `wait: workflow` wherever there is CI. Runs in a fresh, clean checkout of the reviewed commit, made in a scratch repository that reads only your repository's objects (never the worker's worktree, its git config, attributes, filters or replace refs; removed afterwards). No shell: words split on spaces, quotes group them, and `; & \| < > $` or a backslash are refused. A minimal environment: a fixed PATH (node's own folder, then `/opt/homebrew/bin`, `/usr/local/bin`, `/usr/bin`, `/bin`, `/usr/sbin`, `/sbin`; call anything else by its absolute path), TMPDIR, TZ, TERM, the locale, `CI=true` and an empty scratch HOME, no tokens. The checkout has no installed dependencies, so a command that needs them is a committed script that installs them; list it as a security path. A non-zero exit refuses to arm, with the output in the message. |
 | `preArm[].wait`, `.workflow` | `"workflow"`, a workflow file name | Dispatches `gh workflow run <workflow> --ref <pr-branch> -f sha=<reviewed commit> -f nonce=<random>` and waits for that one run. The workflow must take `sha` and `nonce` inputs, put the nonce in its `run-name`, and fail unless it checked out `sha`. |
 | `preArm[].timeout` | minutes 1–360, `30` | How long the check may take before flow refuses. |
 | `securityPaths.globs`, `.pattern` | globs, `[]`; a regular expression, `null` | This repo's security paths, matched as written and also in any case like the built-ins (the pattern with the `i` and `u` flags, or just `i`; write it in plain ASCII). Package manifests, lockfiles and `.agents/flow/config.json` always count, in any case, and `.github/workflows/**` and `.github/actions/**` do too while any `wait: workflow` entry exists. |
@@ -364,6 +364,13 @@ Before every arm (`flow pr --arm`, `flow review --approve` with
 4. it touches a security path and has no `securityPaths.label`;
 5. a release freeze is on (`flow freeze on`);
 6. it comes from a fork;
+7. it changes a dependency file (any built-in security path but flow's config)
+   while another such PR into `main`
+   is in the merge queue or armed, or flow cannot read the queue to tell. A
+   queued or armed PR with more than 100 changed files counts as one, and two
+   arms at the same moment can still both see an empty queue. A queue flow can't
+   read in full (over 100 entries, over 500 open PRs into `main`, or a GitHub
+   Enterprise Server too old to know merge queues) refuses every dependency PR;
 
 and also when it is closed, a draft, labelled `hold`, `do-not-merge`, `wip` or
 `blocked`, or a reviewer asked for changes. Then it runs the `preArm` entries

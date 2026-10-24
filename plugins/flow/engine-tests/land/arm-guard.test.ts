@@ -15,6 +15,7 @@ import {
   mkdtempSync,
   readFileSync,
   realpathSync,
+  statSync,
   rmSync,
   writeFileSync,
 } from 'node:fs';
@@ -34,6 +35,7 @@ import {
   splitCommand,
   WORKFLOW_POLL_MS,
 } from '../../scripts/land/pre-arm.ts';
+import { FIXED_PATH } from '../../scripts/land/isolated-git.ts';
 import { isBranchName, isFullSha, isNonce, isWorkflowName } from '../../scripts/land/validate.ts';
 
 // Each case builds real repositories and verified scratch copies with git; on
@@ -528,8 +530,69 @@ describe('land.preArm run entries', () => {
     const { forge } = fakeForge({
       facts: { files: null, labels: [{ name: 'security-reviewed' }] },
     });
+    // An unknown file list may hold a lockfile, so the queue is read too.
+    forge.dependencyQueue = async () => [];
     expect((await guard(forge, runner)).ok).toBe(true);
     expect(ran).toHaveLength(1);
+  });
+
+  // One dependency PR at a time (follow-up to DOR-3262).
+  it('refuses a lockfile PR while another is queued, and arms it once the queue is clear', async () => {
+    const files = ['pnpm-lock.yaml'];
+    const busy = fakeForge({ facts: { files, labels: [{ name: 'security-reviewed' }] } });
+    busy.forge.dependencyQueue = async () => [
+      { number: 5, queued: true, armed: false, files: ['package-lock.json'] },
+    ];
+    expect(await guard(busy.forge)).toMatchObject({
+      ok: false,
+      reason: 'dependency-queue-busy',
+      detail: 'another dependency PR is in the queue: #5; arm this after it lands',
+      ranPreArm: false,
+    });
+    const clear = fakeForge({ facts: { files, labels: [{ name: 'security-reviewed' }] } });
+    clear.forge.dependencyQueue = async () => [];
+    expect((await guard(clear.forge)).ok).toBe(true);
+  });
+
+  it('a forge that cannot read the queue refuses a lockfile PR (fails closed)', async () => {
+    const { forge } = fakeForge({
+      facts: { files: ['yarn.lock'], labels: [{ name: 'security-reviewed' }] },
+    });
+    expect(await guard(forge)).toMatchObject({ ok: false, reason: 'dependency-queue-unreadable' });
+    forge.dependencyQueue = async () => {
+      throw new Error('HTTP 502');
+    };
+    expect(await guard(forge)).toMatchObject({ ok: false, reason: 'dependency-queue-unreadable' });
+  });
+
+  it('checks the queue again after the pre-arm checks: a dependency PR armed meanwhile still refuses', async () => {
+    baseLand({ preArm: [{ paths: ['**'], run: 'slow-suite' }] });
+    let armedMeanwhile = false;
+    const { forge } = fakeForge({
+      facts: { files: ['pnpm-lock.yaml'], labels: [{ name: 'security-reviewed' }] },
+    });
+    forge.dependencyQueue = async () =>
+      armedMeanwhile ? [{ number: 5, queued: false, armed: true, files: ['yarn.lock'] }] : [];
+    const { runner } = recordingRunner(() => {
+      armedMeanwhile = true;
+      return { code: 0 };
+    });
+    expect(await guard(forge, runner)).toMatchObject({
+      ok: false,
+      reason: 'dependency-queue-busy',
+      ranPreArm: false,
+    });
+  });
+
+  it('a code PR never reads the queue', async () => {
+    const { forge } = fakeForge();
+    let asked = false;
+    forge.dependencyQueue = async () => {
+      asked = true;
+      return null;
+    };
+    expect((await guard(forge)).ok).toBe(true);
+    expect(asked).toBe(false);
   });
 
   it('a failing command refuses, with its output', async () => {
@@ -671,6 +734,34 @@ describe('land.preArm run entries', () => {
     ).toMatch(/^## feature/);
   });
 
+  it("a command on the agent's PATH but not the fixed one cannot run", async () => {
+    const bin = mkdtempSync(path.join(os.tmpdir(), 'flow-evil-bin-'));
+    writeFileSync(path.join(bin, 'evil-check'), '#!/bin/sh\nexit 0\n', { mode: 0o755 });
+    baseLand({ preArm: [{ paths: ['src/**'], run: 'evil-check' }] });
+    const saved = process.env.PATH;
+    process.env.PATH = `${bin}${path.delimiter}${saved}`;
+    try {
+      const result = await guard(fakeForge().forge, realProcessRunner);
+      expect(result).toMatchObject({ ok: false, reason: 'pre-arm-failed' });
+    } finally {
+      process.env.PATH = saved;
+      rmSync(bin, { recursive: true, force: true });
+    }
+  });
+
+  it('scratch copies live in a private folder flow owns', async () => {
+    baseLand({ preArm: [{ paths: ['src/**'], run: 'check' }] });
+    let where: string | undefined;
+    const { runner } = recordingRunner((_cmd, _args, cwd) => {
+      where = cwd;
+      return { code: 0 };
+    });
+    expect((await guard(fakeForge().forge, runner)).ok).toBe(true);
+    const root = path.dirname(where as string);
+    expect(path.basename(root)).toMatch(/^dorkos-flow-/);
+    expect(statSync(root).mode & 0o777).toBe(0o700);
+  });
+
   it('removes the checkout when the command fails or times out too', async () => {
     baseLand({ preArm: [{ paths: ['src/**'], run: 'check' }] });
     for (const answer of [() => ({ code: 1 }), () => 'throw' as const]) {
@@ -706,7 +797,8 @@ describe('land.preArm run entries', () => {
           .sort()
       );
       expect(env.CI).toBe('true');
-      expect(env.PATH).toBe(process.env.PATH);
+      // A fixed system PATH, never the agent's.
+      expect(env.PATH).toBe(FIXED_PATH);
       // A scratch HOME, so the PR's code finds no ~/.config/gh or ~/.npmrc.
       expect(env.HOME).toBeTruthy();
       expect(env.HOME).not.toBe(process.env.HOME);

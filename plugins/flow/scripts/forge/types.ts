@@ -157,6 +157,18 @@ export interface MergeInfo {
   author: string | null;
 }
 
+/** A PR in the merge queue, or armed to merge, as {@link Forge.dependencyQueue} reads it. */
+export interface QueuedPr {
+  /** Its number. */
+  number: number;
+  /** Whether it sits in the merge queue. */
+  queued: boolean;
+  /** Whether auto-merge is armed on it. */
+  armed: boolean;
+  /** Every path it touches, or `null` when the forge could not give them all. */
+  files: string[] | null;
+}
+
 /** One run of a dispatched workflow. */
 export interface WorkflowRun {
   /** The run id. */
@@ -205,6 +217,12 @@ export interface Forge {
    * it. Optional: a forge without it cannot be squash-checked.
    */
   mergeInfo?(pr: number): Promise<MergeInfo>;
+  /**
+   * Every PR in the base's merge queue or armed to merge, with its files, or
+   * `null` when the forge could not read them all. Read-only. Optional: a
+   * forge without it cannot arm a dependency PR.
+   */
+  dependencyQueue?(base: string): Promise<QueuedPr[] | null>;
   /** Everything the arm guard reads about a PR. */
   armFacts(pr: number): Promise<ArmFacts>;
   /** Post a plain comment on a PR as the signed-in account. */
