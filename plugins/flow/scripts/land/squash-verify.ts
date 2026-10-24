@@ -121,6 +121,30 @@ export type SquashVerdict =
       reviewed: string;
     };
 
+/** The empty tree's SHA (SHA-1), where the merge reads its attributes from. */
+export const EMPTY_TREE = '4b825dc642cb6eb9a060e54bf8d69288fbee4904';
+
+/** Whether this git knows the global `--attr-source` option, once per process. */
+let attrSourceProbe: Promise<boolean> | undefined;
+
+/**
+ * Whether git accepts `--attr-source` (git 2.40+), asked once and remembered.
+ *
+ * @param git - Runs git.
+ * @returns `true` when it does.
+ */
+function supportsAttrSource(git: GitRunner): Promise<boolean> {
+  attrSourceProbe ??= git([`--attr-source=${EMPTY_TREE}`, 'version']).then(
+    (result) => result.code === 0
+  );
+  return attrSourceProbe;
+}
+
+/** Forget the probe's answer (tests). */
+export function resetGitProbe(): void {
+  attrSourceProbe = undefined;
+}
+
 /** One line of output, trimmed. */
 function firstLine(text: string): string {
   return (text.split('\n')[0] ?? '').trim();
@@ -218,10 +242,20 @@ export async function verifySquash(
 
   // The check: merge the reviewed head into the squash's parent. merge-tree
   // exits 1 on a conflict and higher on an error (or a git without --write-tree).
-  // The merge settings are pinned, so this machine's git config (renames off,
-  // directory renames on) cannot turn a clean squash into a conflict, or a
-  // conflict into a clean tree.
+  // Attributes come from the empty tree, so a `.gitattributes` in either
+  // commit (a `merge=union` driver, say) cannot turn a conflict into a clean
+  // merge. `--attr-source` is a global option (git 2.40+), so it goes before
+  // the subcommand; a git that does not know it is refused up front.
+  if (!(await supportsAttrSource(git))) {
+    return fail('git too old for a safe squash check: it needs git 2.40 or later (--attr-source)', {
+      squashTree,
+      patchIdMatch,
+    });
+  }
+  // The merge settings are pinned too, so this machine's git config (renames
+  // off, directory renames on) cannot flip the verdict either way.
   const merged = await git([
+    `--attr-source=${EMPTY_TREE}`,
     '-c',
     'merge.renames=true',
     '-c',
@@ -250,9 +284,14 @@ export async function verifySquash(
       { squashTree, files, patchIdMatch }
     );
   }
+  // Exit 1 is a conflict (above); any other non-zero exit, 129 for an option
+  // this git does not know included, fails closed.
   if (merged.code !== 0 || !isFullSha(reviewedTree)) {
-    return unverified(
-      `git merge-tree --write-tree failed (it needs git 2.38 or later): ${merged.stderr.trim() || `exit ${merged.code}`}`
+    return fail(
+      merged.code === 129
+        ? `git too old for a safe squash check: ${merged.stderr.trim() || 'merge-tree exited 129'}`
+        : `git merge-tree --write-tree failed (exit ${merged.code}): ${merged.stderr.trim() || 'no output'}`,
+      { squashTree, patchIdMatch }
     );
   }
   if (reviewedTree === squashTree) {

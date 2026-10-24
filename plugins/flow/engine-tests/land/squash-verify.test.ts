@@ -14,7 +14,14 @@ import os from 'node:os';
 import path from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
-import { gitIn, squashReport, verifySquash } from '../../scripts/land/squash-verify.ts';
+import {
+  gitIn,
+  resetGitProbe,
+  squashReport,
+  verifySquash,
+  type GitResult,
+  type GitRunner,
+} from '../../scripts/land/squash-verify.ts';
 
 let repo: string;
 
@@ -134,6 +141,25 @@ describe('verifySquash', () => {
     commitAll('main changes the same line');
     write('a.txt', lines({ 10: 'line 10, the feature' }));
     const squash = commitAll('a squash made by hand');
+    const result = await verifySquash(gitIn(repo), { squash, reviewed });
+    expect(result).toMatchObject({ verdict: 'fail', reviewedTree: null, files: ['a.txt'] });
+    expect(result.verdict === 'fail' && result.reason).toMatch(/conflicts/);
+  });
+
+  it('a conflict still fails with `* merge=union` planted in .gitattributes', async () => {
+    // A union driver would merge the conflicting line both ways and exit 0, so
+    // a squash that kept both lines would match. The check reads attributes
+    // from the empty tree, so the conflict stays a conflict.
+    write('.gitattributes', '* merge=union\n');
+    commitAll('plant a union driver on the feature');
+    write('a.txt', lines({ 10: 'line 10, the feature' }));
+    const reviewed = commitAll('feature');
+    git('checkout', '-q', 'main');
+    write('.gitattributes', '* merge=union\n');
+    write('a.txt', lines({ 10: 'line 10, main' }));
+    commitAll('main changes the same line, with a union driver too');
+    write('a.txt', lines({ 10: 'line 10, main\nline 10, the feature' }));
+    const squash = commitAll('a squash keeping both lines');
     const result = await verifySquash(gitIn(repo), { squash, reviewed });
     expect(result).toMatchObject({ verdict: 'fail', reviewedTree: null, files: ['a.txt'] });
     expect(result.verdict === 'fail' && result.reason).toMatch(/conflicts/);
@@ -270,5 +296,78 @@ describe('squashReport', () => {
     );
     expect(body).toMatch(/^@octocat: \*\*Squash check could not run\.\*\*/);
     expect(body).toContain('reverted nothing');
+  });
+});
+
+describe('the merge-tree call', () => {
+  afterEach(resetGitProbe);
+
+  const SQ = 'a'.repeat(40);
+  const RV = 'b'.repeat(40);
+  const PARENT = 'c'.repeat(40);
+  const TREE = 'd'.repeat(40);
+
+  /** A git that answers every call the check makes, recording each argv. */
+  function fakeGit(
+    mergeTree: GitResult,
+    probe: GitResult = { code: 0, stdout: 'git version 2.53.0', stderr: '' }
+  ) {
+    const calls: (readonly string[])[] = [];
+    const run: GitRunner = async (args) => {
+      calls.push(args);
+      if (args.includes('version')) return probe;
+      if (args.includes('merge-tree')) return mergeTree;
+      if (args[0] === 'rev-list') return { code: 0, stdout: `${SQ} ${PARENT}\n`, stderr: '' };
+      if (args[0] === 'rev-parse') return { code: 0, stdout: `${TREE}\n`, stderr: '' };
+      if (args[0] === 'merge-base') return { code: 0, stdout: `${PARENT}\n`, stderr: '' };
+      if (args[0] === 'diff-tree') return { code: 0, stdout: '', stderr: '' };
+      return { code: 0, stdout: '', stderr: '' };
+    };
+    return { run, calls };
+  }
+
+  it('is exactly git --attr-source=<empty tree> <pinned merge settings> merge-tree --write-tree <squash>^ <reviewed>', async () => {
+    resetGitProbe();
+    const { run, calls } = fakeGit({ code: 0, stdout: `${TREE}\n`, stderr: '' });
+    expect(await verifySquash(run, { squash: SQ, reviewed: RV })).toMatchObject({
+      verdict: 'pass',
+    });
+    expect(calls.find((c) => c.includes('merge-tree'))).toEqual([
+      '--attr-source=4b825dc642cb6eb9a060e54bf8d69288fbee4904',
+      '-c',
+      'merge.renames=true',
+      '-c',
+      'diff.renames=true',
+      '-c',
+      'merge.directoryRenames=conflict',
+      '-c',
+      'merge.renormalize=false',
+      'merge-tree',
+      '--write-tree',
+      PARENT,
+      RV,
+    ]);
+  });
+
+  it.each([129, 2, 128, -1])('a merge-tree exit of %i fails, never passes', async (code) => {
+    resetGitProbe();
+    const { run } = fakeGit({ code, stdout: '', stderr: 'error: unknown option' });
+    expect(await verifySquash(run, { squash: SQ, reviewed: RV })).toMatchObject({
+      verdict: 'fail',
+    });
+  });
+
+  it('a git that does not know --attr-source fails closed, detected once', async () => {
+    resetGitProbe();
+    const old = { code: 129, stdout: '', stderr: 'unknown option: --attr-source=4b825dc' };
+    const { run, calls } = fakeGit({ code: 0, stdout: `${TREE}\n`, stderr: '' }, old);
+    for (let i = 0; i < 2; i++) {
+      expect(await verifySquash(run, { squash: SQ, reviewed: RV })).toMatchObject({
+        verdict: 'fail',
+        reason: expect.stringMatching(/git too old for a safe squash check/),
+      });
+    }
+    expect(calls.filter((c) => c.includes('version'))).toHaveLength(1);
+    expect(calls.some((c) => c.includes('merge-tree'))).toBe(false);
   });
 });
