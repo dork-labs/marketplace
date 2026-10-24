@@ -564,7 +564,7 @@ export async function drain(ctx: VerbContext, options: DrainOptions = {}): Promi
         final,
         sign: signer(ctx, undefined),
       });
-      return { settled: squashSettled(outcome), line: describeOutcome(pr, outcome) };
+      return { settled: squashSettled(outcome, ctx.dryRun), line: describeOutcome(pr, outcome) };
     },
     async item(identifier, parked) {
       const item = await adapter.getItem(

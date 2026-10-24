@@ -18,6 +18,8 @@ import { main } from '../../scripts/flow.ts';
 import type { Forge, MergeInfo } from '../../scripts/forge/types.ts';
 import { createFakeAdapter } from '../fixtures/cli/fake-adapter/adapter.ts';
 import { makeProject, type WriteProject } from '../cli/write-harness.ts';
+import { squashSettled } from '../../scripts/cli/squash-check.ts';
+import type { SquashVerdict } from '../../scripts/land/squash-verify.ts';
 
 let project: WriteProject;
 let origin: string;
@@ -247,5 +249,37 @@ describe('flow squash-check', () => {
     const { forge } = fakeForge({ state: 'merged', mergeCommit: squash(), author: null });
     expect((await flow(['squash-check', 'ACME-12'], forge)).code).toBe(EXIT.precondition);
     expect((await flow(['squash-check', 'ACME-12', '--pr', '7; rm'], forge)).code).toBe(EXIT.usage);
+  });
+});
+
+describe('squashSettled', () => {
+  const fail: SquashVerdict = {
+    verdict: 'fail',
+    reason: 'r',
+    squash: 'a'.repeat(40),
+    reviewed: 'b'.repeat(40),
+    squashTree: null,
+    reviewedTree: null,
+    files: [],
+    patchIdMatch: false,
+  };
+  it('settles a pass, and a failure only once it was reported', () => {
+    const pass = {
+      verdict: 'pass',
+      check: 'tree',
+      patchIdMatch: true,
+      squash: 'a',
+      reviewed: 'b',
+    } as const;
+    expect(squashSettled({ status: 'checked', verdict: pass, reported: false })).toBe(true);
+    expect(squashSettled({ status: 'checked', verdict: fail, reported: true })).toBe(true);
+    expect(
+      squashSettled({ status: 'checked', verdict: fail, reported: false, reportError: 'HTTP 502' })
+    ).toBe(false);
+    expect(squashSettled({ status: 'checked', verdict: fail, reported: false }, true)).toBe(true);
+    expect(
+      squashSettled({ status: 'unreviewed', why: 'w', reported: false, reportError: 'x' })
+    ).toBe(false);
+    expect(squashSettled({ status: 'unknown', why: 'w', reported: true })).toBe(false);
   });
 });

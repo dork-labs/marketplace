@@ -420,6 +420,13 @@ describe('drainStep: the phase table', () => {
     expect(settled.actions.some((a) => a.kind === 'squash-check')).toBe(false);
   });
 
+  it("the pass that stops a closed run's last session makes its squash check final", () => {
+    const closing = watchingDrain({ phase: 'closing' } as Partial<DrainState>);
+    const out = step(closing, { pr: prStatus({ state: 'merged' }), runComplete: true });
+    expect(out.actions.map((a) => a.kind)).toEqual(['stop', 'squash-check']);
+    expect(out.actions.find((a) => a.kind === 'squash-check')).toMatchObject({ final: true });
+  });
+
   it('a merge whose last review asked for changes is checked against no reviewed head', () => {
     const out = step(watchingDrain({ verdict: 'changes' }), { pr: prStatus({ state: 'merged' }) });
     expect(out.actions.find((a) => a.kind === 'squash-check')).toMatchObject({ reviewed: null });

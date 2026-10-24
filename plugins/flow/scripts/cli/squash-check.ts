@@ -12,8 +12,8 @@
  * It is a verdict and a report only: nothing is reverted, and no status or
  * label is touched.
  *
- * Exits 0 on a pass, 1 on a failed check, 5 when the PR has not merged or no
- * reviewed head is recorded.
+ * Exits 0 on a pass, 1 on anything else (a failed check, a check that could not
+ * run, a merge with no clean review), 5 when the PR has not merged.
  *
  * @module @dorkos/flow/cli/squash-check
  */
@@ -68,13 +68,18 @@ function at(handle: string): string {
 }
 
 /**
- * Whether an outcome is a verdict the drain need not ask for again: a pass, a
- * fail, or a merge with no clean review (all reported). A check that could not
- * run is asked again.
+ * Whether an outcome is a verdict the drain need not ask for again: a pass, or
+ * a fail or a merge with no clean review that was reported. A check that could
+ * not run, or a failure whose report the forge refused, is asked again.
  */
-export function squashSettled(outcome: SquashOutcome): boolean {
-  if (outcome.status === 'unreviewed') return true;
-  return outcome.status === 'checked' && outcome.verdict.verdict !== 'unverified';
+export function squashSettled(outcome: SquashOutcome, dryRun = false): boolean {
+  if (outcome.status === 'checked' && outcome.verdict.verdict === 'pass') return true;
+  const verdict =
+    outcome.status === 'unreviewed' ||
+    (outcome.status === 'checked' && outcome.verdict.verdict === 'fail');
+  // A failure is settled only once someone was told: a report the forge
+  // refused is posted again on the next pass.
+  return verdict && (dryRun || outcome.reported);
 }
 
 /**
@@ -147,13 +152,17 @@ export async function checkSquash(input: SquashCheckInput): Promise<SquashOutcom
   // went to), and the reviewed head from the PR's own ref, since its branch is
   // often deleted on merge. Fixed argv; both SHAs are checked whole, the PR
   // number is a number. A failed fetch shows up as a missing commit below.
+  const fetch = ['fetch', '--quiet', '--no-tags', '--no-recurse-submodules', 'origin'];
   for (const sha of [info.mergeCommit, input.reviewed]) {
-    if ((await git(['cat-file', '-e', `${sha}^{commit}`])).code !== 0 && isFullSha(sha)) {
-      await git(['fetch', '--quiet', '--no-tags', 'origin', sha]);
+    if (isFullSha(sha) && (await git(['cat-file', '-e', `${sha}^{commit}`])).code !== 0) {
+      await git([...fetch, sha]);
     }
   }
-  if ((await git(['cat-file', '-e', `${input.reviewed}^{commit}`])).code !== 0) {
-    await git(['fetch', '--quiet', '--no-tags', 'origin', `refs/pull/${input.pr}/head`]);
+  if (
+    isFullSha(input.reviewed) &&
+    (await git(['cat-file', '-e', `${input.reviewed}^{commit}`])).code !== 0
+  ) {
+    await git([...fetch, `refs/pull/${input.pr}/head`]);
   }
   const verdict = await verifySquash(git, { squash: info.mergeCommit, reviewed: input.reviewed });
   const loud = verdict.verdict === 'fail' || (verdict.verdict === 'unverified' && input.final);

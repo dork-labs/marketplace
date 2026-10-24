@@ -59,6 +59,8 @@ export function gitIn(cwd: string): GitRunner {
       try {
         child = spawn('git', ['--no-replace-objects', ...args], {
           cwd,
+          // Never wait on a credential prompt.
+          env: { ...process.env, GIT_TERMINAL_PROMPT: '0' },
           shell: false,
           stdio: ['pipe', 'pipe', 'pipe'],
           timeout: GIT_TIMEOUT_MS,
@@ -139,8 +141,10 @@ async function patchId(git: GitRunner, patch: GitResult): Promise<string | null>
  * passes on its own: `git patch-id --stable` ignores whitespace and line
  * numbers, so a re-indented line, or the same hunk moved to another place with
  * the same context, has the reviewed patch's id while changing what the code
- * does. Every squash GitHub makes is `merge-tree(<squash>^, reviewed)`, a
- * context-only shift included, so the tree check passes them all.
+ * does. A squash merge of the reviewed head is expected to have the tree
+ * `merge-tree(<squash>^, reviewed)` gives (a context-only shift included), so
+ * the tree check passes those; a merge GitHub resolves differently is a loud
+ * false alarm, never a false pass.
  *
  * @param git - Runs git in a checkout holding both commits.
  * @param input - The squash commit on `main` and the reviewed head, both full SHAs.
@@ -214,7 +218,23 @@ export async function verifySquash(
 
   // The check: merge the reviewed head into the squash's parent. merge-tree
   // exits 1 on a conflict and higher on an error (or a git without --write-tree).
-  const merged = await git(['merge-tree', '--write-tree', parent, reviewed]);
+  // The merge settings are pinned, so this machine's git config (renames off,
+  // directory renames on) cannot turn a clean squash into a conflict, or a
+  // conflict into a clean tree.
+  const merged = await git([
+    '-c',
+    'merge.renames=true',
+    '-c',
+    'diff.renames=true',
+    '-c',
+    'merge.directoryRenames=conflict',
+    '-c',
+    'merge.renormalize=false',
+    'merge-tree',
+    '--write-tree',
+    parent,
+    reviewed,
+  ]);
   const reviewedTree = firstLine(merged.stdout);
   if (merged.code === 1) {
     const files = [

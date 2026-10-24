@@ -205,6 +205,22 @@ describe('verifySquash', () => {
     }
   });
 
+  it("this machine's git config cannot turn a clean squash into a conflict", async () => {
+    // main renames a file, the PR edits it: a clean merge with renames on.
+    git('checkout', '-q', 'main');
+    git('mv', 'a.txt', 'renamed.txt');
+    commitAll('main renames a.txt');
+    git('checkout', '-q', 'feature');
+    write('a.txt', lines({ 10: 'line 10, changed' }));
+    const reviewed = commitAll('feature edits a.txt');
+    const squash = squashOnto(reviewed);
+    git('config', 'diff.renames', 'false');
+    git('config', 'merge.renames', 'false');
+    expect(await verifySquash(gitIn(repo), { squash, reviewed })).toMatchObject({
+      verdict: 'pass',
+    });
+  });
+
   it('a local git replace cannot make a slipped-in change pass', async () => {
     write('a.txt', lines({ 10: 'line 10, changed' }));
     const reviewed = commitAll('feature');

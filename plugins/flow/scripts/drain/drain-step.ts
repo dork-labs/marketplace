@@ -678,6 +678,14 @@ function withSquashCheck(result: DrainStepResult, facts: DrainFacts): DrainStepR
   if (prior.settled || prior.attempts >= SQUASH_CHECK_ATTEMPTS) return result;
   const attempts = prior.attempts + 1;
   const reviewed = drain.verdict === 'clean' ? drain.reviewedSha : null;
+  // The pass that stops a closed run's last session is the last one to look
+  // at it, so that check is the final one too, and reports even a check that
+  // could not run.
+  const lastLook =
+    drain.phase === 'closing' &&
+    facts.runComplete &&
+    drain.worker === null &&
+    drain.reviewer === null;
   return {
     run: { ...result.run, drain: { ...drain, squashCheck: { attempts, settled: false } } },
     actions: [
@@ -686,7 +694,7 @@ function withSquashCheck(result: DrainStepResult, facts: DrainFacts): DrainStepR
         kind: 'squash-check',
         pr: ref(drain.pr),
         reviewed,
-        final: attempts >= SQUASH_CHECK_ATTEMPTS,
+        final: attempts >= SQUASH_CHECK_ATTEMPTS || lastLook,
       },
     ],
   };
