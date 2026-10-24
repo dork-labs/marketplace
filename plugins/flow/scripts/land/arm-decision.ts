@@ -95,6 +95,20 @@ export const BUILTIN_SECURITY_GLOBS: readonly string[] = [
   '**/gradle.lockfile',
   '**/Package.swift',
   '**/Package.resolved',
+  // Build wrappers that download and run a tool.
+  '**/gradlew*',
+  '**/gradle/wrapper/**',
+  '**/mvnw*',
+  '**/.mvn/**',
+  // More toolchains and lockfiles.
+  '**/.cargo/config*',
+  '**/rust-toolchain*',
+  '**/.pnp.cjs',
+  '**/*.csproj',
+  '**/packages.lock.json',
+  '**/mix.lock',
+  '**/pubspec.*',
+  '**/Podfile*',
   // Code fetched from elsewhere at checkout.
   '.gitmodules',
   // Flow's own committed config, which holds the commands it runs before arming.
@@ -217,8 +231,14 @@ function securityHits(files: readonly string[], policy: ArmPolicy): string[] | n
       return null;
     }
   }
-  const globs = [...BUILTIN_SECURITY_GLOBS, ...policy.securityGlobs];
-  return files.filter((file) => matchesAny(file, globs) || (pattern?.test(file) ?? false));
+  // The built-ins match in any case: on a case-insensitive disk (macOS's
+  // default) `Package.json` and `.NPMRC` are the files the tools read.
+  return files.filter(
+    (file) =>
+      matchesAny(file, BUILTIN_SECURITY_GLOBS, { ignoreCase: true }) ||
+      matchesAny(file, policy.securityGlobs) ||
+      (pattern?.test(file) ?? false)
+  );
 }
 
 /**

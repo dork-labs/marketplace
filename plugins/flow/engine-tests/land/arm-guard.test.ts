@@ -600,6 +600,29 @@ describe('land.preArm run entries', () => {
     expect(app).toBeNull();
   });
 
+  // Security S1: a checkout only flow controls. A tracked file edited (and
+  // put back) in the worker's worktree while the command runs never reaches it.
+  it("a tracked file edited and restored in the worker's worktree mid-run does not reach the command", async () => {
+    baseLand({ preArm: [{ paths: ['src/**'], run: 'check' }] });
+    const original = readFileSync(path.join(repo, 'src', 'app.ts'), 'utf8');
+    let seen: string | null = null;
+    let where: string | undefined;
+    const { runner } = recordingRunner((_cmd, _args, cwd) => {
+      where = cwd;
+      writeFileSync(path.join(repo, 'src', 'app.ts'), 'export const swapped = true;\n');
+      seen = readFileSync(path.join(cwd as string, 'src', 'app.ts'), 'utf8');
+      writeFileSync(path.join(repo, 'src', 'app.ts'), original);
+      return { code: 0 };
+    });
+    expect((await guard(fakeForge().forge, runner)).ok).toBe(true);
+    expect(seen).toBe('export {};\n');
+    // A detached checkout of its own, outside the worker's worktree.
+    expect(path.relative(repo, where as string).startsWith('..')).toBe(true);
+    expect(
+      execFileSync('git', ['status', '--porcelain', '--branch'], { cwd: repo, encoding: 'utf8' })
+    ).toMatch(/^## feature/);
+  });
+
   it('removes the checkout when the command fails or times out too', async () => {
     baseLand({ preArm: [{ paths: ['src/**'], run: 'check' }] });
     for (const answer of [() => ({ code: 1 }), () => 'throw' as const]) {

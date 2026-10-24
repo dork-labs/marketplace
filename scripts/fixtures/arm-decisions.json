@@ -198,6 +198,20 @@
     { "name": "root lockfile without the label", "mutation": ".files = [\"package-lock.json\"]", "gate": "ARM", "guard": "REFUSE security-path-unlabelled" },
     { "name": "nested pnpm lockfile without the label", "mutation": ".files = [\"apps/web/pnpm-lock.yaml\"]", "gate": "ARM", "guard": "REFUSE security-path-unlabelled" },
     {
+      "name": "a manifest in another case, without the label",
+      "mutation": ".files = [\"apps/web/Package.json\"]",
+      "gate": "ARM",
+      "guard": "REFUSE security-path-unlabelled",
+      "why": "Built-in security paths match in any case: on macOS's case-insensitive disk, Package.json is package.json."
+    },
+    { "name": "an upper-case .npmrc without the label", "mutation": ".files = [\".NPMRC\"]", "gate": "ARM", "guard": "REFUSE security-path-unlabelled" },
+    { "name": "a Gradle wrapper without the label", "mutation": ".files = [\"gradle/wrapper/gradle-wrapper.properties\"]", "gate": "ARM", "guard": "REFUSE security-path-unlabelled" },
+    { "name": "gradlew without the label", "mutation": ".files = [\"android/gradlew\"]", "gate": "ARM", "guard": "REFUSE security-path-unlabelled" },
+    { "name": "a Maven wrapper without the label", "mutation": ".files = [\".mvn/wrapper/maven-wrapper.jar\"]", "gate": "ARM", "guard": "REFUSE security-path-unlabelled" },
+    { "name": "a cargo config without the label", "mutation": ".files = [\".cargo/config.toml\"]", "gate": "ARM", "guard": "REFUSE security-path-unlabelled" },
+    { "name": "a Podfile.lock without the label", "mutation": ".files = [\"ios/Podfile.lock\"]", "gate": "ARM", "guard": "REFUSE security-path-unlabelled" },
+    { "name": "a .csproj without the label", "mutation": ".files = [\"src/App/App.csproj\"]", "gate": "ARM", "guard": "REFUSE security-path-unlabelled" },
+    {
       "name": "flow's committed config without the label",
       "mutation": ".files = [\".agents/flow/config.json\"]",
       "gate": "ARM",

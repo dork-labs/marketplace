@@ -27,9 +27,10 @@ function escape(text: string): string {
  * Compile one glob to a regular expression that must match the whole path.
  *
  * @param glob - The glob.
+ * @param opts - `ignoreCase`: match letters in any case.
  * @returns The expression.
  */
-export function globToRegExp(glob: string): RegExp {
+export function globToRegExp(glob: string, opts: { ignoreCase?: boolean } = {}): RegExp {
   let out = '';
   let i = 0;
   while (i < glob.length) {
@@ -54,7 +55,7 @@ export function globToRegExp(glob: string): RegExp {
       i += 1;
     }
   }
-  return new RegExp(`^${out}$`);
+  return new RegExp(`^${out}$`, opts.ignoreCase ? 'i' : '');
 }
 
 /**
@@ -62,8 +63,13 @@ export function globToRegExp(glob: string): RegExp {
  *
  * @param file - A repo-relative path.
  * @param globs - The globs.
+ * @param opts - `ignoreCase`: match letters in any case.
  * @returns `true` on a match.
  */
-export function matchesAny(file: string, globs: readonly string[]): boolean {
-  return globs.some((glob) => globToRegExp(glob).test(file));
+export function matchesAny(
+  file: string,
+  globs: readonly string[],
+  opts: { ignoreCase?: boolean } = {}
+): boolean {
+  return globs.some((glob) => globToRegExp(glob, opts).test(file));
 }
