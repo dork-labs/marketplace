@@ -20,7 +20,12 @@ import path from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
 import { realProcessRunner } from '../../scripts/cli/context.ts';
-import { privateTempDir, privateTempRoot } from '../../scripts/land/isolated-git.ts';
+import {
+  gitPath,
+  isolatedGitEnv,
+  privateTempDir,
+  privateTempRoot,
+} from '../../scripts/land/isolated-git.ts';
 
 let tmp: string;
 let saved: string | undefined;
@@ -121,5 +126,19 @@ describe('a process-group run', () => {
       processGroup: true,
     });
     expect(result).toEqual({ code: 3, stdout: 'out\n', stderr: 'err\n' });
+  });
+});
+
+describe("isolated git's PATH", () => {
+  it("holds only system folders that only root can write to, never the agent's PATH", () => {
+    const env = isolatedGitEnv({ PATH: '/tmp/evil-bin:/Users/someone/.nvm/bin', LANG: 'C' });
+    expect(env.PATH).toBe(gitPath());
+    for (const dir of env.PATH.split(path.delimiter)) {
+      const info = statSync(dir);
+      expect(info.uid, dir).toBe(0);
+      expect(info.mode & 0o022, dir).toBe(0);
+    }
+    expect(env.PATH).not.toContain('/tmp/evil-bin');
+    expect(env.PATH).not.toContain('.nvm');
   });
 });

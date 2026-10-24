@@ -55,8 +55,9 @@ export interface ProcessOptions {
   /** The command's whole environment. Default: this process's. */
   env?: Readonly<Record<string, string | undefined>>;
   /**
-   * Run it in a process group of its own, and on a timeout kill the whole
-   * group, so nothing the command started outlives it.
+   * Run it in a process group of its own, and on a timeout, or when it exits,
+   * kill the whole group. A descendant that starts a session of its own
+   * (`setsid`) leaves the group and is not stopped.
    */
   processGroup?: boolean;
 }
@@ -326,6 +327,22 @@ const MAX_OUTPUT_BYTES = 64 * 1024 * 1024;
 export const realProcessRunner: ProcessRunner = (cmd, args, opts = {}) =>
   opts.processGroup ? runInGroup(cmd, args, opts) : runPlain(cmd, args, opts);
 
+/** Process groups a {@link runInGroup} command is running in right now. */
+const liveGroups = new Set<number>();
+
+/** Stop every live group: flow is exiting, and nothing it started should outlive it. */
+function stopLiveGroups(): void {
+  for (const pid of liveGroups) {
+    try {
+      process.kill(-pid, 'SIGKILL');
+    } catch {
+      // Already gone.
+    }
+  }
+  liveGroups.clear();
+}
+let exitHookInstalled = false;
+
 /** {@link realProcessRunner} for a command in its own process group. */
 function runInGroup(
   cmd: string,
@@ -346,6 +363,11 @@ function runInGroup(
       reject(error as Error);
       return;
     }
+    if (!exitHookInstalled) {
+      exitHookInstalled = true;
+      process.on('exit', stopLiveGroups);
+    }
+    if (child.pid !== undefined) liveGroups.add(child.pid);
     let stdout = '';
     let stderr = '';
     let done = false;
@@ -370,6 +392,7 @@ function runInGroup(
     };
     const timer = setTimeout(() => {
       killGroup();
+      if (child.pid !== undefined) liveGroups.delete(child.pid);
       finish(() =>
         reject(
           new Error(
@@ -396,6 +419,7 @@ function runInGroup(
     child.on('exit', (code) => {
       killGroup();
       exited = true;
+      if (child.pid !== undefined) liveGroups.delete(child.pid);
       clearTimeout(timer);
       grace = setTimeout(() => {
         child.stdout?.destroy();
