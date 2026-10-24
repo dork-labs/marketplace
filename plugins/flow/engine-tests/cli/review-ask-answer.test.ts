@@ -1147,7 +1147,9 @@ describe('review fixes (DOR-2528 FIX-FIRST)', () => {
     expect(comments(tracker)).toEqual(['Shipped from DorkOS.']);
     expect(result.forge.calls.some((call) => call.method === 'arm')).toBe(false);
     expect(result.json).toMatchObject({ armed: false, armHandedToDrain: true, armRefused: null });
-    expect(String(result.json.note)).toMatch(/The drain arms PR #7 once its pre-arm checks pass/);
+    expect(String(result.json.note)).toMatch(
+      /The drain arms PR #7 as soon as flow's arm guard allows it/
+    );
     // A fresh request: a pre-arm refusal recorded before is cleared.
     expect(stored().drain?.pr).toMatchObject({
       number: 7,
@@ -1155,6 +1157,33 @@ describe('review fixes (DOR-2528 FIX-FIRST)', () => {
       disarmedForReview: true,
       armRefusedAt: null,
     });
+  });
+
+  it('hands a drain run blocked by another dependency PR to the drain, not to a person', async () => {
+    writeRun({
+      stage: 'verify',
+      drain: drain({
+        phase: 'watching',
+        pushedSha: 'abc1234def',
+        verdict: 'clean',
+        reviewedSha: 'abc1234def',
+        pr: {
+          repo: 'acme/app',
+          number: 7,
+          url: 'https://github.com/acme/app/pull/7',
+          armed: false,
+          disarmedForReview: false,
+        },
+      }),
+    });
+    const result = await flow(['review', 'ACME-12', '--approve'], {
+      tracker: createFakeAdapter({ items: [started()] }),
+      forge: fakeForge({ head: 'abc1234def' }),
+      guard: recordingGuard(() => refusal('dependency-queue-busy')),
+    });
+    expect(result.json).toMatchObject({ armed: false, armHandedToDrain: true, armRefused: null });
+    expect(String(result.json.note)).not.toMatch(/Merge it yourself/);
+    expect(stored().drain?.pr).toMatchObject({ disarmedForReview: true });
   });
 
   it('a run outside the drain whose pre-arm checks apply is left for a person to merge', async () => {

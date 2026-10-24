@@ -385,7 +385,7 @@ export function parseMergeInfo(raw: unknown, where: string): MergeInfo {
 export const DEPENDENCY_QUEUE_QUERY =
   'query($owner:String!,$name:String!,$base:String!,$cursor:String){repository(owner:$owner,name:$name){' +
   'mergeQueue(branch:$base){entries(first:100){totalCount nodes{pullRequest{number}}}}' +
-  'pullRequests(states:OPEN,first:50,after:$cursor){pageInfo{hasNextPage endCursor}' +
+  'pullRequests(states:OPEN,baseRefName:$base,first:50,after:$cursor){pageInfo{hasNextPage endCursor}' +
   'nodes{number isInMergeQueue autoMergeRequest{enabledAt} changedFiles files(first:100){nodes{path}}}}}}';
 
 /** How many pages of open PRs one read takes before it calls the queue unreadable. */

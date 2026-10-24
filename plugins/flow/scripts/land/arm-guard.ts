@@ -234,6 +234,25 @@ export async function guardArm(input: GuardInput, io: GuardIo): Promise<GuardRes
       preArm: pre.outcomes,
     };
   }
+  // Another dependency PR may have armed while the checks ran.
+  if (touchesDependency(after.files)) {
+    let queue = null;
+    try {
+      queue = (await input.forge.dependencyQueue?.(ARM_BASE)) ?? null;
+    } catch {
+      queue = null;
+    }
+    const dependency = dependencyConflict(input.pr, after.files, queue);
+    if (!dependency.ok) {
+      return {
+        ok: false,
+        reason: dependency.reason,
+        detail: `${dependency.detail} (after its pre-arm checks passed)`,
+        ranPreArm: false,
+        preArm: pre.outcomes,
+      };
+    }
+  }
   return { ok: true, preArm: pre.outcomes };
 }
 

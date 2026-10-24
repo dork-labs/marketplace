@@ -565,6 +565,25 @@ describe('land.preArm run entries', () => {
     expect(await guard(forge)).toMatchObject({ ok: false, reason: 'dependency-queue-unreadable' });
   });
 
+  it('checks the queue again after the pre-arm checks: a dependency PR armed meanwhile still refuses', async () => {
+    baseLand({ preArm: [{ paths: ['**'], run: 'slow-suite' }] });
+    let armedMeanwhile = false;
+    const { forge } = fakeForge({
+      facts: { files: ['pnpm-lock.yaml'], labels: [{ name: 'security-reviewed' }] },
+    });
+    forge.dependencyQueue = async () =>
+      armedMeanwhile ? [{ number: 5, queued: false, armed: true, files: ['yarn.lock'] }] : [];
+    const { runner } = recordingRunner(() => {
+      armedMeanwhile = true;
+      return { code: 0 };
+    });
+    expect(await guard(forge, runner)).toMatchObject({
+      ok: false,
+      reason: 'dependency-queue-busy',
+      ranPreArm: false,
+    });
+  });
+
   it('a code PR never reads the queue', async () => {
     const { forge } = fakeForge();
     let asked = false;

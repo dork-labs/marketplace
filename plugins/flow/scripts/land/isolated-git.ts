@@ -48,20 +48,30 @@ export interface GitResult {
 /** Runs git with no shell, optionally feeding it standard input. */
 export type GitRunner = (args: readonly string[], input?: string) => Promise<GitResult>;
 
-/**
- * The PATH every isolated git call and every `run:` command gets: the folder of
- * the node running flow (so `node` is found), then the system's own folders.
- * Never the agent's PATH, which a worker can point at a folder of its own.
- */
-export const FIXED_PATH: string = [
-  path.dirname(process.execPath),
+/** The system's own folders, in order. */
+const SYSTEM_PATH: readonly string[] = [
   '/opt/homebrew/bin',
   '/usr/local/bin',
   '/usr/bin',
   '/bin',
   '/usr/sbin',
   '/sbin',
-].join(path.delimiter);
+];
+
+/**
+ * The PATH every isolated git call gets: the system's folders only. Never the
+ * agent's PATH, which a worker can point at a folder of its own, and not
+ * node's folder either (under nvm a user-writable one).
+ */
+export const GIT_PATH: string = SYSTEM_PATH.join(path.delimiter);
+
+/**
+ * The PATH every `run:` command gets: the folder of the node running flow (so
+ * `node` is found), then the system's folders. Never the agent's PATH.
+ */
+export const FIXED_PATH: string = [path.dirname(process.execPath), ...SYSTEM_PATH].join(
+  path.delimiter
+);
 
 /**
  * A folder only this user can use, owned by flow, for scratch copies:
@@ -121,10 +131,11 @@ export function privateTempDir(prefix: string): string | { error: string } {
 }
 
 /**
- * The environment every isolated git call gets: PATH and the locale, and the
- * switches that keep git from reading anything but the scratch repository.
+ * The environment every isolated git call gets: {@link GIT_PATH}, the locale,
+ * and the switches that keep git from reading anything but the scratch
+ * repository.
  *
- * @param from - The environment to take PATH and the locale from.
+ * @param from - The environment to take the locale and TMPDIR from.
  * @returns The environment.
  */
 export function isolatedGitEnv(
@@ -137,7 +148,7 @@ export function isolatedGitEnv(
     GIT_TERMINAL_PROMPT: '0',
     GIT_ATTR_NOSYSTEM: '1',
   };
-  env.PATH = FIXED_PATH;
+  env.PATH = GIT_PATH;
   for (const key of ['LANG', 'TMPDIR']) {
     const value = from[key];
     if (value !== undefined) env[key] = value;

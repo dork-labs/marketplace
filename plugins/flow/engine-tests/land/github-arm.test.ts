@@ -402,6 +402,9 @@ describe('the dependency queue read', () => {
     ]);
     expect(calls[1]).toContain('cursor=c1');
     expect(DEPENDENCY_QUEUE_QUERY).not.toMatch(/mutation/);
+    // Only PRs into the base count: one armed into a release branch never blocks main.
+    expect(DEPENDENCY_QUEUE_QUERY).toContain('pullRequests(states:OPEN,baseRefName:$base,');
+    expect(calls[0]).toContain('base=main');
   });
 
   it('a gh failure is unreadable', async () => {
