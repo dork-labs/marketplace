@@ -82,7 +82,7 @@ export interface PreArmResult {
 }
 
 /** What an entry is, for a person. */
-function describe(entry: PreArmEntry): string {
+export function describeEntry(entry: PreArmEntry): string {
   return 'run' in entry ? `run "${entry.run}"` : `workflow ${entry.workflow}`;
 }
 
@@ -272,7 +272,7 @@ export async function runPreArm(
   const allowed = entries.flatMap((entry) => ('workflow' in entry ? [entry.workflow] : []));
   const outcomes: PreArmOutcome[] = [];
   for (const entry of entries) {
-    const name = describe(entry);
+    const name = describeEntry(entry);
     if (!entryTouched(entry, target.files)) {
       outcomes.push({ entry: name, result: 'skipped' });
       continue;

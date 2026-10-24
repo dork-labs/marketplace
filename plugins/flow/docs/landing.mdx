@@ -36,6 +36,8 @@ A refused `flow pr --arm` still opens the PR, unarmed, and the drain asks again 
 }
 ```
 
+These checks run only in the drain, because `flow pr` and `flow review` are stopped long before a browser suite finishes. When one applies, those commands leave the arm to the drain, which runs the checks and arms the PR once they pass. Outside the drain, you merge it yourself.
+
 Flow reads `land.preArm` and `land.securityPaths` only from the committed config on `main`. A PR that changes them is still held to `main`'s version. Commands run with no shell. A workflow must take `sha` and `nonce` inputs, put the nonce in its `run-name`, and fail unless it checked out `sha`. `config/CONFIG.md` in the plugin has every field.
 
 ## The release freeze

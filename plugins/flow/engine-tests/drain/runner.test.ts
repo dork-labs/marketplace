@@ -683,6 +683,31 @@ describe('flow drain: the arm guard on a re-arm (DOR-3262)', () => {
     expect(drainOf('ACME-1').pr).toMatchObject({ armed: true, disarmedForReview: false });
   }, 120_000);
 
+  it('runs the land.preArm checks flow pr left to it, then arms', async () => {
+    world.tracker = createFakeAdapter({ user: { id: 'agent-1' }, items: [item('ACME-1')] });
+    await tick();
+    const s1 = await workerPushes('ACME-1', 'one');
+    await tick();
+    await reviewerSays('ACME-1', s1, 'clean');
+    await tick();
+    const bodyFile = path.join(runOf('ACME-1').worktreePath, 'pr-body.md');
+    writeFileSync(bodyFile, 'What changes.\n');
+    // The guard leaves preArm to whoever runs it; the drain's pass runs it.
+    armGuard = recordingGuard((request) =>
+      request.preArm === 'defer' ? refusal('pre-arm-deferred') : { ok: true, preArm: [] }
+    );
+    const pr = await flow(
+      ['pr', 'ACME-1', '--title', 'Title of ACME-1', '--body-file', bodyFile, '--arm'],
+      runOf('ACME-1').worktreePath
+    );
+    expect(pr.code, pr.stderr).toBe(0);
+    expect(arms()).toEqual([]);
+    await tick(); // pr-ready -> watching
+    await tick(); // the re-arm, with the checks
+    expect(armGuard.requests.map((r) => r.preArm ?? 'run')).toEqual(['defer', 'run']);
+    expect(arms()).toEqual([{ method: 'arm', arg: [7, s1] }]);
+  }, 120_000);
+
   it('after a land.preArm refusal, a new reviewed push is asked about again', async () => {
     await toReArm();
     armGuard = recordingGuard(() => refusal('pre-arm-failed', true));

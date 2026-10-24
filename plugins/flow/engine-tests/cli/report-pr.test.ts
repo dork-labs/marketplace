@@ -536,7 +536,7 @@ describe('flow pr', () => {
     writeRun(drain({ pushedSha: head, reviewedSha: head, verdict: 'clean' }), head);
     const r = await flow([...args, '--arm']);
     expect(armGuard?.requests).toEqual([
-      { forge: r.forge.forge, pr: 7, reviewedSha: head, worktree: project.dir },
+      { forge: r.forge.forge, pr: 7, reviewedSha: head, worktree: project.dir, preArm: 'defer' },
     ]);
     expect(r.json.armRefused).toBeNull();
   });
@@ -561,6 +561,54 @@ describe('flow pr', () => {
       url: 'https://github.com/acme/app/pull/7',
       armed: false,
       disarmedForReview: true,
+    });
+  });
+
+  // land.preArm checks are left to the drain: the PR is recorded waiting to
+  // arm, and the guard is asked with preArm: defer.
+  it('leaves land.preArm checks to the drain', async () => {
+    writeRun(drain({ pushedSha: head, reviewedSha: head, verdict: 'clean' }), head);
+    armGuard = recordingGuard(() => refusal('pre-arm-deferred'));
+    const r = await flow([...args, '--arm']);
+    expect(armGuard?.requests[0].preArm).toBe('defer');
+    expect(r.json.armRefused).toMatchObject({ reason: 'pre-arm-deferred' });
+    expect(stored().pr).toEqual({
+      repo: 'acme/app',
+      number: 7,
+      url: 'https://github.com/acme/app/pull/7',
+      armed: false,
+      disarmedForReview: true,
+    });
+  });
+
+  // Recorded waiting before the guard runs, so a command stopped mid-guard still
+  // leaves the drain a PR to arm.
+  it('records the PR waiting to arm before it asks the guard', async () => {
+    writeRun(drain({ pushedSha: head, reviewedSha: head, verdict: 'clean' }), head);
+    let seen: unknown;
+    armGuard = recordingGuard(() => {
+      seen = stored().pr;
+      return { ok: true, preArm: [] };
+    });
+    await flow([...args, '--arm']);
+    expect(seen).toMatchObject({ armed: false, disarmedForReview: true });
+    expect(stored().pr).toMatchObject({ armed: true, disarmedForReview: false });
+  });
+
+  // Re-running flow pr on the PR it opened keeps the drain's re-arm.
+  it('a re-run on the existing PR keeps it waiting to arm', async () => {
+    writeRun(drain({ pushedSha: head, reviewedSha: head, verdict: 'clean' }), head);
+    armGuard = recordingGuard(() => refusal('pre-arm-failed', true));
+    await flow([...args, '--arm']);
+    const forge = fakeForge({
+      existing: { number: 7, url: 'https://github.com/acme/app/pull/7', headSha: head },
+    });
+    const again = await flow(args, forge);
+    expect(again.code).toBe(EXIT.precondition);
+    expect(stored().pr).toMatchObject({
+      armed: false,
+      disarmedForReview: true,
+      armRefusedAt: head,
     });
   });
 

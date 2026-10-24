@@ -521,6 +521,7 @@ async function review(ctx: VerbContext): Promise<VerbResult> {
     // with --head. A PR whose head moved since is refused before anything is posted.
     let armAt: string | null = null;
     let armRefused: { reason: string; detail: string } | null = null;
+    let handToDrain = false;
     const willArm = pr !== null && target.forge !== null && config.gates.review.mergeOnApproval;
     if (willArm && pr !== null && target.forge !== null) {
       armAt =
@@ -546,15 +547,26 @@ async function review(ctx: VerbContext): Promise<VerbResult> {
         // standing for whatever commit shares its prefix. A refusal still
         // ships the approval; it only leaves the merge to a person.
         if (!ctx.dryRun) {
+          // land.preArm checks are left to the drain (preArm: 'defer'): DorkOS
+          // stops this command after a few minutes, long before a browser
+          // suite or a dispatched workflow finishes.
           const guard = await ctx.armGuard({
             forge: target.forge,
             pr: pr.number,
             reviewedSha: approved,
             worktree: existing.worktreePath,
+            preArm: 'defer',
           });
           if (!guard.ok) {
             armRefused = { reason: guard.reason, detail: guard.detail };
             armAt = null;
+            // A drain run approved at its reviewed commit: the drain runs the
+            // checks and arms it once they pass.
+            handToDrain =
+              guard.reason === 'pre-arm-deferred' &&
+              isWritableDrain(existing) &&
+              existing.drain.pr?.number === pr.number &&
+              existing.drain.reviewedSha?.toLowerCase() === approved.toLowerCase();
           }
         }
       }
@@ -603,6 +615,16 @@ async function review(ctx: VerbContext): Promise<VerbResult> {
         if (armAt !== null) {
           await target.forge.arm(pr.number, armAt);
           armed = true;
+        } else if (handToDrain && isWritableDrain(existing)) {
+          await writeDrain(
+            store,
+            existing,
+            (drain) =>
+              drain.pr !== null && drain.pr.number === pr.number
+                ? { ...drain, pr: { ...drain.pr, armed: false, disarmedForReview: true } }
+                : undefined,
+            `the approval is posted, but flow could not record that the drain should arm PR #${pr.number}; arm it yourself`
+          );
         }
       }
       recordEvent(
@@ -620,13 +642,15 @@ async function review(ctx: VerbContext): Promise<VerbResult> {
     const checksText = noChecksNote === null ? '' : ` ${noChecksNote}`;
     const armText = armed
       ? ` Armed PR #${pr?.number} to merge when its checks pass.`
-      : armRefused !== null
-        ? ` Approved, but flow did not arm PR #${pr?.number} (${armRefused.reason}): ${armRefused.detail}. Merge it yourself once that is settled.`
-        : pr !== null && !config.gates.review.mergeOnApproval
-          ? ` PR #${pr.number} waits for a person to merge it.`
-          : willArm
-            ? " Approved. Merge it yourself; flow didn't turn on auto-merge because it couldn't tell which commit you approved."
-            : '';
+      : handToDrain
+        ? ` Approved. The drain arms PR #${pr?.number} once its pre-arm checks pass.`
+        : armRefused !== null
+          ? ` Approved, but flow did not arm PR #${pr?.number} (${armRefused.reason}): ${armRefused.detail}. Merge it yourself once that is settled.`
+          : pr !== null && !config.gates.review.mergeOnApproval
+            ? ` PR #${pr.number} waits for a person to merge it.`
+            : willArm
+              ? " Approved. Merge it yourself; flow didn't turn on auto-merge because it couldn't tell which commit you approved."
+              : '';
     // A refused arm is not a failed approval: it shipped, and armRefused says
     // why nothing was armed. Exit 5 here would read as "did not ship".
     return {
@@ -636,6 +660,7 @@ async function review(ctx: VerbContext): Promise<VerbResult> {
         identifier,
         verdict: 'approved',
         armRefused,
+        armHandedToDrain: handToDrain,
         by,
         pr: pr === null ? null : { number: pr.number, url: pr.url },
         forgeReview,

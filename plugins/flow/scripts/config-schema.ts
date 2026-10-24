@@ -921,10 +921,11 @@ export const REVIEWER_HANDLE_PATTERN =
 
 /**
  * A repo-relative path glob that can match something: no leading `./` or `/`,
- * no trailing `/`, no backslash and no empty segment. Each of those would match
+ * no trailing `/` or space, no `..` segment, no backslash and no empty segment. Each of those would match
  * no changed path at all, so a typo would silently switch a check off.
  */
-export const PATH_GLOB_PATTERN = /^(?!\.\/)(?!\/)(?!.*\/\/)(?!.*\/$)[^\\\s][^\\]*$/;
+export const PATH_GLOB_PATTERN =
+  /^(?!\.\/)(?!\/)(?!.*\/\/)(?!.*\/$)(?!(?:.*\/)?\.\.(?:\/|$))(?!.*\s$)[^\\\s][^\\]*$/;
 /** One path glob (`**`, `*`, `?`). */
 const PathGlobSchema = z.string().regex(PATH_GLOB_PATTERN, {
   message:

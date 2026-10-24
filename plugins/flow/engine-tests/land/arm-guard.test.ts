@@ -15,7 +15,7 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
 import { realProcessRunner, type ProcessRunner } from '../../scripts/cli/context.ts';
 import type { ArmFacts, Forge, WorkflowRun } from '../../scripts/forge/types.ts';
-import { guardArm } from '../../scripts/land/arm-guard.ts';
+import { guardArm, refusalSticksToCommit } from '../../scripts/land/arm-guard.ts';
 import { readBaseLand } from '../../scripts/land/base-config.ts';
 import { setFreeze } from '../../scripts/land/freeze.ts';
 import { runWorkflow, splitCommand, WORKFLOW_POLL_MS } from '../../scripts/land/pre-arm.ts';
@@ -366,8 +366,10 @@ describe('the guard only refuses', () => {
     });
     const result = await guard(fakeForge().forge, runner);
     expect(ran).toHaveLength(1);
-    expect(result).toMatchObject({ ok: false, reason: 'freeze', ranPreArm: true });
+    // About the PR's state, not the checks: asked again once the freeze lifts.
+    expect(result).toMatchObject({ ok: false, reason: 'freeze', ranPreArm: false });
     expect(!result.ok && result.detail).toMatch(/after its pre-arm checks passed/);
+    expect(!result.ok && refusalSticksToCommit(result)).toBe(false);
   });
 
   it('decides again after its pre-arm checks: a hold label added meanwhile still refuses', async () => {
@@ -384,6 +386,56 @@ describe('the guard only refuses', () => {
       return { code: 0 };
     });
     expect(await guard(forge, runner)).toMatchObject({ ok: false, reason: 'held-by-label' });
+  });
+});
+
+describe('preArm: defer (flow pr, flow review)', () => {
+  async function deferred(forge: Forge, runner: ProcessRunner = recordingRunner().runner) {
+    const time = virtualTime();
+    return guardArm(
+      { forge, pr: 7, reviewedSha: head, worktree: repo, mainCheckout: repo, preArm: 'defer' },
+      { runProcess: runner, now: time.now, sleep: time.sleep, nonce: () => NONCE }
+    );
+  }
+
+  it('leaves a touched entry to the drain, running nothing', async () => {
+    baseLand({ preArm: [{ paths: ['src/**'], wait: 'workflow', workflow: 'shards.yml' }] });
+    const { runner, ran } = recordingRunner();
+    const { forge, calls } = fakeForge();
+    const result = await deferred(forge, runner);
+    expect(result).toMatchObject({ ok: false, reason: 'pre-arm-deferred', ranPreArm: false });
+    expect(!result.ok && result.detail).toMatch(/workflow shards\.yml.*only in the drain/);
+    expect(ran).toEqual([]);
+    expect(calls.some((c) => c.method === 'dispatchWorkflow')).toBe(false);
+  });
+
+  it('arms at once when no entry applies', async () => {
+    baseLand({ preArm: [{ paths: ['apps/client/**'], run: 'browser-tests' }] });
+    expect(await deferred(fakeForge().forge)).toMatchObject({ ok: true });
+  });
+
+  it('still refuses on the PR itself first', async () => {
+    baseLand({ preArm: [{ paths: ['src/**'], run: 'browser-tests' }] });
+    expect(await deferred(fakeForge({ facts: { isCrossRepository: true } }).forge)).toMatchObject({
+      ok: false,
+      reason: 'fork',
+    });
+  });
+});
+
+describe('which refusals stick to the commit', () => {
+  it.each([
+    ['pre-arm-failed', true, true],
+    ['fork', false, true],
+    ['base-not-main', false, true],
+    ['freeze', false, false],
+    ['security-path-unlabelled', false, false],
+    ['failing-checks', false, false],
+    ['pre-arm-deferred', false, false],
+  ] as const)('%s sticks: %s', (reason, ranPreArm, sticks) => {
+    expect(refusalSticksToCommit({ ok: false, reason, detail: '', ranPreArm, preArm: [] })).toBe(
+      sticks
+    );
   });
 });
 

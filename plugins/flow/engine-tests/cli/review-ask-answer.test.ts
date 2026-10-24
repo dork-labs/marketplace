@@ -1113,6 +1113,59 @@ describe('review fixes (DOR-2528 FIX-FIRST)', () => {
     expect(noZone.code).toBe(EXIT.usage);
   });
 
+  // DOR-3262: land.preArm checks never run inside flow review (DorkOS stops it
+  // after a few minutes). A drain run approved at its reviewed commit is handed
+  // to the drain, which runs them and arms; the approval ships either way.
+  it('hands a drain run whose pre-arm checks apply to the drain', async () => {
+    const pr = {
+      repo: 'acme/app',
+      number: 7,
+      url: 'https://github.com/acme/app/pull/7',
+      armed: false,
+      disarmedForReview: false,
+    };
+    writeRun({
+      stage: 'verify',
+      drain: drain({
+        phase: 'watching',
+        pushedSha: 'abc1234def',
+        verdict: 'clean',
+        reviewedSha: 'abc1234def',
+        pr,
+      }),
+    });
+    const tracker = createFakeAdapter({ items: [started()] });
+    const guard = recordingGuard(() => refusal('pre-arm-deferred'));
+    const result = await flow(['review', 'ACME-12', '--approve'], {
+      tracker,
+      forge: fakeForge({ head: 'abc1234def' }),
+      guard,
+    });
+    expect(result.code).toBe(EXIT.ok);
+    expect(guard.requests[0].preArm).toBe('defer');
+    expect(comments(tracker)).toEqual(['Shipped from DorkOS.']);
+    expect(result.forge.calls.some((call) => call.method === 'arm')).toBe(false);
+    expect(result.json).toMatchObject({ armed: false, armHandedToDrain: true });
+    expect(String(result.json.note)).toMatch(/The drain arms PR #7 once its pre-arm checks pass/);
+    expect(stored().drain?.pr).toMatchObject({ number: 7, armed: false, disarmedForReview: true });
+  });
+
+  it('a run outside the drain whose pre-arm checks apply is left for a person to merge', async () => {
+    writeRun();
+    const result = await flow(['review', 'ACME-12', '--approve', '--head', 'abc1234def'], {
+      tracker: createFakeAdapter({ items: [started()] }),
+      forge: fakeForge({ head: 'abc1234def' }),
+      guard: recordingGuard(() => refusal('pre-arm-deferred')),
+    });
+    expect(result.code).toBe(EXIT.ok);
+    expect(result.json).toMatchObject({
+      armed: false,
+      armHandedToDrain: false,
+      armRefused: { reason: 'pre-arm-deferred' },
+    });
+    expect(String(result.json.note)).toMatch(/Merge it yourself/);
+  });
+
   // Finding 4: a person ships the commit they saw. A drain run arms the
   // reviewed commit; any other run arms the head the person names with
   // --head, and a head that moved since is refused.

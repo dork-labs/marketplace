@@ -56,6 +56,7 @@ import type { FlowStateFile } from '../flow-state-file.ts';
 import { judgeEjection } from '../forge/ejection.ts';
 import type { Forge } from '../forge/types.ts';
 import type { ArmGuard } from '../cli/context.ts';
+import { refusalSticksToCommit } from '../land/arm-guard.ts';
 import { launchAccountFor } from '../launchers/common.ts';
 import { findTranscript } from '../launchers/prove-account.ts';
 import {
@@ -1118,12 +1119,13 @@ export async function runPass(deps: PassDeps): Promise<PassReport> {
         const n = action.pr.number;
         const status = await deps.forge.prStatus(n);
         if (status.state === 'open' && status.headSha === action.sha) {
-          // The arm guard (DOR-3262). Any refusal records the PR unarmed and
-          // waiting to re-arm, so the next pass asks again (a freeze lifts, a
-          // red check reruns), never an ejection's "fix CI". One from a
-          // land.preArm check also records the commit it refused: re-running a
-          // browser suite or a dispatched workflow every pass would never end,
-          // so only a new reviewed commit is asked about again.
+          // The arm guard (DOR-3262), with its land.preArm checks: the drain is
+          // the one place that runs them (flow pr and flow review leave them
+          // here). Any refusal records the PR unarmed and waiting to re-arm, so
+          // the next pass asks again (a freeze lifts, a red check reruns), never
+          // an ejection's "fix CI". A refusal that sticks to the commit (a
+          // failed check, a fork, a base other than main) also records it, so
+          // only a new reviewed commit is asked about again.
           const guard = await deps.armGuard({
             forge: deps.forge,
             pr: n,
@@ -1141,7 +1143,7 @@ export async function runPass(deps: PassDeps): Promise<PassReport> {
                         ...r.drain.pr,
                         armed: false,
                         disarmedForReview: true,
-                        armRefusedAt: guard.ranPreArm
+                        armRefusedAt: refusalSticksToCommit(guard)
                           ? action.sha
                           : (r.drain.pr.armRefusedAt ?? null),
                       },

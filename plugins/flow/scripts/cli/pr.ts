@@ -17,10 +17,11 @@
  *    `land.securityPaths.reviewer` when the PR touches a security path (by the
  *    list on `origin/main`), else `land.reviewer`. Both are handles, so they
  *    come from this machine's settings (`config.local.json`);
- * 6. on `--arm` or `drain.armAutoMerge`, arms it only when the arm guard
- *    allows (`land/arm-guard.ts`). A refusal leaves the PR open and unarmed,
- *    says why in `armRefused`, and records the PR waiting to re-arm so the
- *    drain asks the guard again; the verb still exits 0.
+ * 6. on `--arm` or `drain.armAutoMerge`, records the PR waiting to arm and
+ *    arms it at once when the arm guard allows (`land/arm-guard.ts`). The
+ *    guard's `land.preArm` checks are left to the drain, which arms it after
+ *    they pass. A refusal leaves the PR open and unarmed and says why in
+ *    `armRefused`; the drain asks the guard again. The verb still exits 0.
  *
  * @module @dorkos/flow/cli/pr
  */
@@ -33,7 +34,7 @@ import { loadConfig } from '../config-load.ts';
 import { PreconditionError, UsageError } from '../errors.ts';
 import type { LandConfig } from '../config-schema.ts';
 import { securityPathsTouched } from '../land/arm-decision.ts';
-import { policyFor } from '../land/arm-guard.ts';
+import { policyFor, refusalSticksToCommit } from '../land/arm-guard.ts';
 import { readBaseLand } from '../land/base-config.ts';
 import { openFlowStateFile } from '../flow-state-file.ts';
 import type { Forge, ForgePr } from '../forge/types.ts';
@@ -176,10 +177,11 @@ async function mentionReviewer(
 }
 
 /**
- * Record `pr` on the run. `refused` marks an arm the guard turned down: the PR
- * is recorded waiting to re-arm, so the drain asks the guard again on a later
- * pass, and a refusal from a `land.preArm` check records the commit it refused,
- * so that check runs again only for a new reviewed commit.
+ * Record `pr` on the run. `waiting` records it waiting to arm, so the drain
+ * asks the arm guard again on a later pass; `refusedAt` is a commit the guard
+ * refused for good, which the drain asks about again only once the reviewed
+ * commit changes. With neither, a PR already recorded under the same number
+ * keeps its waiting state, so re-running `flow pr` never cancels a re-arm.
  */
 async function recordPr(
   ctx: VerbContext,
@@ -187,22 +189,28 @@ async function recordPr(
   forge: Forge,
   pr: ForgePr,
   armed: boolean,
-  refused?: { sha: string; ranPreArm: boolean }
+  arming?: { waiting: boolean; refusedAt?: string }
 ): Promise<void> {
   await writeDrain(
     openFlowStateFile(ctx.projectDir, { now: ctx.now }),
     run,
-    (drain) => ({
-      ...drain,
-      pr: {
-        repo: forge.repo,
-        number: pr.number,
-        url: pr.url,
-        armed,
-        disarmedForReview: refused !== undefined,
-        ...(refused?.ranPreArm ? { armRefusedAt: refused.sha } : {}),
-      },
-    }),
+    (drain) => {
+      const same = drain.pr !== null && drain.pr.number === pr.number;
+      const waiting = arming?.waiting ?? (same && !armed && drain.pr?.disarmedForReview === true);
+      const refusedAt =
+        arming?.refusedAt ?? (same && arming === undefined ? drain.pr?.armRefusedAt : undefined);
+      return {
+        ...drain,
+        pr: {
+          repo: forge.repo,
+          number: pr.number,
+          url: pr.url,
+          armed,
+          disarmedForReview: waiting,
+          ...(refusedAt ? { armRefusedAt: refusedAt } : {}),
+        },
+      };
+    },
     `run "flow pr ${run.identifier}" again (it will find the PR and record it)`
   );
 }
@@ -291,17 +299,27 @@ export async function run(ctx: VerbContext): Promise<VerbResult> {
   let armed = false;
   let armRefused: { reason: string; detail: string } | null = null;
   if (arm) {
-    const guard = await ctx.armGuard({ forge, pr: created.number, reviewedSha: head, worktree });
+    // Recorded as waiting to arm first: if this command is stopped while the
+    // guard runs, the drain still arms the PR on a later pass.
+    await recordPr(ctx, drainRun, forge, created, false, { waiting: true });
+    // land.preArm checks are left to the drain (preArm: 'defer'): a worker's
+    // command is killed long before a browser suite finishes.
+    const guard = await ctx.armGuard({
+      forge,
+      pr: created.number,
+      reviewedSha: head,
+      worktree,
+      preArm: 'defer',
+    });
     if (guard.ok) {
       await forge.arm(created.number, head);
       await recordPr(ctx, drainRun, forge, created, true);
       armed = true;
     } else {
       armRefused = { reason: guard.reason, detail: guard.detail };
-      await recordPr(ctx, drainRun, forge, created, false, {
-        sha: head,
-        ranPreArm: guard.ranPreArm,
-      });
+      if (refusalSticksToCommit(guard)) {
+        await recordPr(ctx, drainRun, forge, created, false, { waiting: true, refusedAt: head });
+      }
     }
   }
   const mentionText =

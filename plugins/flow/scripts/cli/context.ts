@@ -97,6 +97,8 @@ export interface ArmGuardRequest {
   reviewedSha: string | null;
   /** The PR's worktree. */
   worktree: string;
+  /** Run the `land.preArm` checks (`run`, default) or leave them to the drain (`defer`). */
+  preArm?: 'run' | 'defer';
 }
 
 /**

@@ -548,7 +548,7 @@ export const VERBS: readonly VerbDefinition[] = [
     description: [
       'Record a verdict at the review gate. Nothing is ever closed, released or reassigned.',
       '  --approve [--by person|reviewer-agent]',
-      '      Comment "Shipped" on the item, approve the PR (a person only, and not their own PR), and arm it to merge when gates.review.mergeOnApproval is on and the arm guard allows it (checks, head, base, fork, freeze, security label, land.preArm). A refusal still ships; armRefused in the JSON says why nothing was armed.',
+      '      Comment "Shipped" on the item, approve the PR (a person only, and not their own PR), and arm it to merge when gates.review.mergeOnApproval is on and the arm guard allows it (checks, head, base, fork, freeze, security label). A drain run whose land.preArm checks apply is armed by the drain once they pass (armHandedToDrain). A refusal still ships; armRefused in the JSON says why nothing was armed.',
       "      --by reviewer-agent needs a clean review recorded with the reviewer's token at the branch head, no failing check, review.adversarial on, and the project's Ship finished work setting past Ask me first.",
       '      With mergeOnApproval off every check must have passed. Checks still running: ships nothing, exits 5 with verdict "pending", and records the retry the drain re-checks. A PR no check reports on counts as passed after gates.review.noChecksPassAfterMinutes, when the base requires none.',
       '  --changes (--note <text> | --note-file <file>)',
@@ -697,7 +697,7 @@ export const VERBS: readonly VerbDefinition[] = [
     name: 'pr',
     summary: "Open a drain run's pull request after a clean review.",
     description:
-      "Open the run's pull request into origin's default branch. Refuses unless the latest review is CLEAN at the branch head on origin. Adds a provenance line to the body, and names the reviewer from land.reviewer (land.securityPaths.reviewer when it touches a security path) in a comment. With --arm, arms only when the arm guard allows it; a refusal leaves the PR open and unarmed, says why in armRefused, and the drain asks again. If a PR is already open for the branch, records it and exits 5.",
+      "Open the run's pull request into origin's default branch. Refuses unless the latest review is CLEAN at the branch head on origin. Adds a provenance line to the body, and names the reviewer from land.reviewer (land.securityPaths.reviewer when it touches a security path) in a comment. With --arm, arms only when the arm guard allows it, leaving land.preArm checks to the drain, which arms it after they pass; a refusal leaves the PR open and unarmed, says why in armRefused, and the drain asks again. If a PR is already open for the branch, records it and exits 5.",
     common: ['project', 'session'],
     positionals: [
       { name: 'identifier', required: true, description: 'The work item, e.g. ACME-12.' },

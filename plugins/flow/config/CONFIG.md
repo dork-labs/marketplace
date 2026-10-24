@@ -368,7 +368,8 @@ Before every arm (`flow pr --arm`, `flow review --approve` with
 and also when it is closed, a draft, labelled `hold`, `do-not-merge`, `wip` or
 `blocked`, or a reviewer asked for changes. Then it runs the `preArm` entries
 the PR touches, and refuses if one fails, then reads the PR and the freeze again
-before it arms. These are a guard rail for flow's own arms. The rules that hold for everyone belong on GitHub, in required checks and
+before it arms. Only the drain runs `preArm` entries: `flow pr --arm` and
+`flow review --approve` leave the arm to the drain when one applies. These are a guard rail for flow's own arms. The rules that hold for everyone belong on GitHub, in required checks and
 rulesets.
 
 ## `selfImprovement`: how flow checks and records itself

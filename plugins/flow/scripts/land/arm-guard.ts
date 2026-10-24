@@ -30,7 +30,7 @@ import type { Forge } from '../forge/types.ts';
 import { ARM_BASE, decideArm, type ArmPolicy, type RefusalSlug } from './arm-decision.ts';
 import { readBaseLand } from './base-config.ts';
 import { readFreeze } from './freeze.ts';
-import { runPreArm, type PreArmOutcome } from './pre-arm.ts';
+import { describeEntry, entryTouched, runPreArm, type PreArmOutcome } from './pre-arm.ts';
 
 /** Paths that count as security paths while a `wait: workflow` entry exists. */
 export const WORKFLOW_SECURITY_GLOBS: readonly string[] = [
@@ -40,7 +40,7 @@ export const WORKFLOW_SECURITY_GLOBS: readonly string[] = [
 
 /** Why the guard refused, beyond the decision's own reasons. */
 export type GuardRefusal =
-  RefusalSlug | 'config-unreadable' | 'forge-unreadable' | 'pre-arm-failed';
+  RefusalSlug | 'config-unreadable' | 'forge-unreadable' | 'pre-arm-failed' | 'pre-arm-deferred';
 
 /** The guard's answer. */
 export type GuardResult =
@@ -51,7 +51,10 @@ export type GuardResult =
       reason: GuardRefusal;
       /** What is wrong and what to do, for a person. */
       detail: string;
-      /** Whether a `land.preArm` entry ran before the refusal (the drain does not retry those on its own). */
+      /**
+       * Whether a `land.preArm` check refused (`pre-arm-failed`). Only that
+       * refusal is expensive to repeat; any other is asked again next time.
+       */
       ranPreArm: boolean;
       /** Every entry's outcome so far. */
       preArm: PreArmOutcome[];
@@ -69,6 +72,14 @@ export interface GuardInput {
   worktree: string;
   /** The project's main checkout (where the freeze marker lives). */
   mainCheckout: string;
+  /**
+   * `run` (default): run the `land.preArm` checks the PR touches. `defer`:
+   * when any applies, refuse with `pre-arm-deferred` instead of running it.
+   * A command a person or an agent waits on (`flow pr`, `flow review`) is
+   * killed long before a browser suite or a dispatched workflow finishes, so
+   * only the drain, which keeps running, runs them.
+   */
+  preArm?: 'run' | 'defer';
 }
 
 /** What the guard needs from the world. */
@@ -141,6 +152,19 @@ export async function guardArm(input: GuardInput, io: GuardIo): Promise<GuardRes
   if (decision.verdict === 'REFUSE') return early(decision.reason, decision.detail);
 
   // decideArm checked reviewedSha is a full SHA equal to the head.
+  const touched = land.preArm.filter((entry) => entryTouched(entry, facts.files));
+  if (touched.length === 0) {
+    return {
+      ok: true,
+      preArm: land.preArm.map((entry) => ({ entry: describeEntry(entry), result: 'skipped' })),
+    };
+  }
+  if (input.preArm === 'defer') {
+    return early(
+      'pre-arm-deferred',
+      `land.preArm checks apply to it (${touched.map(describeEntry).join(', ')}); flow runs them only in the drain, which arms the PR once they pass`
+    );
+  }
   const pre = await runPreArm(
     land.preArm,
     {
@@ -162,7 +186,9 @@ export async function guardArm(input: GuardInput, io: GuardIo): Promise<GuardRes
     };
   }
   // A preArm check can take hours. Read the PR and the freeze again, so a hold,
-  // a freeze or a red check that arrived meanwhile still refuses.
+  // a freeze or a red check that arrived meanwhile still refuses. These
+  // refusals are about the PR's state, not the checks, so they are asked again
+  // (ranPreArm false): the first decision refuses cheaply until it clears.
   let after;
   try {
     after = await input.forge.armFacts(input.pr);
@@ -171,7 +197,7 @@ export async function guardArm(input: GuardInput, io: GuardIo): Promise<GuardRes
       ok: false,
       reason: 'forge-unreadable',
       detail: `could not read #${input.pr} again after its pre-arm checks: ${(error as Error).message}`,
-      ranPreArm: true,
+      ranPreArm: false,
       preArm: pre.outcomes,
     };
   }
@@ -184,9 +210,23 @@ export async function guardArm(input: GuardInput, io: GuardIo): Promise<GuardRes
       ok: false,
       reason: again.reason,
       detail: `${again.detail} (after its pre-arm checks passed)`,
-      ranPreArm: true,
+      ranPreArm: false,
       preArm: pre.outcomes,
     };
   }
   return { ok: true, preArm: pre.outcomes };
+}
+
+/**
+ * Whether a refusal holds for the commit it was about, so a caller that
+ * retries asks again only for a new reviewed commit: a failed `land.preArm`
+ * check (expensive to repeat), a fork, or a base other than `main` (neither
+ * changes while the commit does not). Every other refusal can clear on its own
+ * (a freeze lifts, a label is added, a check reruns) and is asked again.
+ *
+ * @param result - A refusal.
+ * @returns `true` when it sticks to the commit.
+ */
+export function refusalSticksToCommit(result: Extract<GuardResult, { ok: false }>): boolean {
+  return result.ranPreArm || result.reason === 'fork' || result.reason === 'base-not-main';
 }

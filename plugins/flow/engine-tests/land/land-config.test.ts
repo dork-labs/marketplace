@@ -81,6 +81,8 @@ describe('land config', () => {
     ['a path glob ending with /', { preArm: [{ paths: ['apps/'], run: 'x' }] }],
     ['a security glob with a backslash', { securityPaths: { globs: ['apps\\x'] } }],
     ['a security glob with an empty segment', { securityPaths: { globs: ['apps//x'] } }],
+    ['a path glob with a .. segment', { preArm: [{ paths: ['../x'], run: 'x' }] }],
+    ['a path glob ending in a space', { preArm: [{ paths: ['apps/** '], run: 'x' }] }],
   ])('refuses %s, in Zod and the JSON Schema alike', (_name, land) => {
     expect(verdicts(land)).toEqual({ zod: false, json: false });
   });
