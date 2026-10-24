@@ -533,9 +533,50 @@ describe('land.preArm run entries', () => {
       untracked: false,
       gitignore: false,
     });
-    // The checkout is gone, and git no longer lists it.
+    // The checkout is gone, and the project's repository gained no worktree.
     expect(existsSync(ran[0].cwd as string)).toBe(false);
     expect(git(repo, 'worktree', 'list', '--porcelain').match(/^worktree /gm)).toHaveLength(1);
+  });
+
+  // Review of the isolation change: the checkout must come from a repository
+  // the worker cannot configure, not from the worker's own settings.
+  it.each([
+    [
+      'a sparse checkout',
+      () => {
+        git(repo, 'sparse-checkout', 'set', '--no-cone', '/README.md');
+      },
+    ],
+    [
+      'a git replace of the reviewed commit',
+      () => {
+        writeFileSync(path.join(repo, 'src', 'app.ts'), 'export const evil = true;\n');
+        git(repo, 'add', '-A');
+        git(repo, 'commit', '-q', '-m', 'not reviewed');
+        const evil = git(repo, 'rev-parse', 'HEAD');
+        git(repo, 'reset', '-q', '--hard', head);
+        git(repo, 'replace', head, evil);
+      },
+    ],
+    [
+      'a smudge filter in .git/info/attributes and the repo config',
+      () => {
+        mkdirSync(path.join(repo, '.git', 'info'), { recursive: true });
+        writeFileSync(path.join(repo, '.git', 'info', 'attributes'), '*.ts filter=evil\n');
+        git(repo, 'config', 'filter.evil.smudge', 'sed s/{}/{evil}/');
+      },
+    ],
+  ])("a worker's %s cannot change what the command sees", async (_name, plant) => {
+    baseLand({ preArm: [{ paths: ['src/**'], run: 'check' }] });
+    plant();
+    let app: string | null = null;
+    const { runner } = recordingRunner((_cmd, _args, cwd) => {
+      const file = path.join(cwd as string, 'src', 'app.ts');
+      app = existsSync(file) ? readFileSync(file, 'utf8') : null;
+      return { code: 0 };
+    });
+    expect((await guard(fakeForge().forge, runner)).ok).toBe(true);
+    expect(app).toBe('export {};\n');
   });
 
   it('removes the checkout when the command fails or times out too', async () => {
@@ -574,6 +615,9 @@ describe('land.preArm run entries', () => {
       );
       expect(env.CI).toBe('true');
       expect(env.PATH).toBe(process.env.PATH);
+      // A scratch HOME, so the PR's code finds no ~/.config/gh or ~/.npmrc.
+      expect(env.HOME).toBeTruthy();
+      expect(env.HOME).not.toBe(process.env.HOME);
       expect(JSON.stringify(env)).not.toMatch(/secret|aws|example\.invalid/);
     } finally {
       for (const key of Object.keys(process.env)) if (!(key in saved)) delete process.env[key];

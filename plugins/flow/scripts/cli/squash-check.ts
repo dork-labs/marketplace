@@ -24,7 +24,12 @@ import { PreconditionError, UsageError } from '../errors.ts';
 import type { FlowRun } from '../flow-run.ts';
 import { openFlowStateFile } from '../flow-state-file.ts';
 import type { Forge } from '../forge/types.ts';
-import { gitIn, squashReport, verifySquash, type SquashVerdict } from '../land/squash-verify.ts';
+import {
+  gitIn,
+  squashReport,
+  verifySquashIsolated,
+  type SquashVerdict,
+} from '../land/squash-verify.ts';
 import { isFullSha } from '../land/validate.ts';
 import type { VerbContext, VerbResult } from './context.ts';
 import { originForge, short } from './drain-run.ts';
@@ -164,7 +169,12 @@ export async function checkSquash(input: SquashCheckInput): Promise<SquashOutcom
   ) {
     await git([...fetch, `refs/pull/${input.pr}/head`]);
   }
-  const verdict = await verifySquash(git, { squash: info.mergeCommit, reviewed: input.reviewed });
+  // Fetched through the project's repository; checked in a scratch one the
+  // worker cannot configure.
+  const verdict = await verifySquashIsolated(input.worktree, {
+    squash: info.mergeCommit,
+    reviewed: input.reviewed,
+  });
   const loud = verdict.verdict === 'fail' || (verdict.verdict === 'unverified' && input.final);
   if (!loud) return { status: 'checked', verdict, reported: false };
   return {

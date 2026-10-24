@@ -324,7 +324,7 @@ machine's settings (`config.local.json` over `config.json`).
 ```jsonc
 "land": {
   "preArm": [
-    { "paths": ["apps/client/**"], "run": "npm run test:browser", "timeout": 20 },
+    { "paths": ["apps/client/**"], "run": "bash scripts/ci/browser-tests.sh", "timeout": 20 },
     { "paths": ["apps/**"], "wait": "workflow", "workflow": "browser-shards.yml", "timeout": 45 }
   ],
   "securityPaths": {
@@ -345,7 +345,7 @@ and in `config.local.json`:
 | --- | --- | --- |
 | `preArm` | list, `[]` | Checks to run before arming, each only when the PR touches one of its `paths`. No entries: only the guard's own checks below. |
 | `preArm[].paths` | globs | `**` any folders, `*` within one folder, `?` one character. Repo-relative: no leading `./` or `/`, no trailing `/`. |
-| `preArm[].run` | command | The fallback for a repo without CI; prefer `wait: workflow` wherever there is CI. Runs in a fresh, clean checkout of the reviewed commit (never the worker's worktree, removed afterwards), with no shell (words split on spaces, quotes group them, and `; & \| < > $` or a backslash are refused) and a minimal environment: PATH, HOME, TMPDIR, TZ, TERM, the locale and `CI=true`, no tokens. A non-zero exit refuses to arm, with the output in the message. |
+| `preArm[].run` | command | The fallback for a repo without CI; prefer `wait: workflow` wherever there is CI. Runs in a fresh, clean checkout of the reviewed commit, made in a scratch repository that reads only your repository's objects (never the worker's worktree, its git config, attributes, filters or replace refs; removed afterwards). No shell: words split on spaces, quotes group them, and `; & \| < > $` or a backslash are refused. A minimal environment: PATH, TMPDIR, TZ, TERM, the locale, `CI=true` and an empty scratch HOME, no tokens. The checkout has no installed dependencies, so a command that needs them is a committed script that installs them; list it as a security path. A non-zero exit refuses to arm, with the output in the message. |
 | `preArm[].wait`, `.workflow` | `"workflow"`, a workflow file name | Dispatches `gh workflow run <workflow> --ref <pr-branch> -f sha=<reviewed commit> -f nonce=<random>` and waits for that one run. The workflow must take `sha` and `nonce` inputs, put the nonce in its `run-name`, and fail unless it checked out `sha`. |
 | `preArm[].timeout` | minutes 1–360, `30` | How long the check may take before flow refuses. |
 | `securityPaths.globs`, `.pattern` | globs, `[]`; a regular expression, `null` | This repo's security paths. Package manifests, lockfiles and `.agents/flow/config.json` always count, and `.github/workflows/**` and `.github/actions/**` do too while any `wait: workflow` entry exists. |

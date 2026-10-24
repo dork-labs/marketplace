@@ -7,8 +7,10 @@
  * Two forms:
  *
  * - `run: "<command>"` runs the command in a fresh, clean checkout of the
- *   reviewed head (never the worker's worktree), with a minimal environment,
- *   and removes the checkout afterwards. There is no shell: the command is
+ *   reviewed head, made in a scratch repository the worker cannot configure
+ *   (never the worker's worktree), with a minimal environment and a scratch
+ *   HOME, and removes both afterwards. The checkout has no installed
+ *   dependencies: a command that needs them installs them itself. There is no shell: the command is
  *   split on spaces (single or double quotes group words) and run as an argv
  *   array. A non-zero exit or a timeout refuses, with the output's tail in the
  *   refusal. `wait: workflow` is the form to prefer wherever a repo has CI;
@@ -34,6 +36,7 @@ import path from 'node:path';
 import type { ProcessRunner } from '../cli/context.ts';
 import { PRE_ARM_COMMAND_PATTERN, type PreArmEntry } from '../config-schema.ts';
 import type { Forge } from '../forge/types.ts';
+import { scratchRepo } from './isolated-git.ts';
 import { matchesAny } from './glob.ts';
 import { isBranchName, isFullSha, isNonce, isWorkflowName } from './validate.ts';
 
@@ -44,7 +47,7 @@ const OUTPUT_TAIL_CHARS = 4_000;
 
 /** The PR a pre-arm pass checks. */
 export interface PreArmTarget {
-  /** The PR's worktree (a `run` entry runs there). */
+  /** A folder inside the project's repository (its objects are read from there). */
   worktree: string;
   /** The PR's branch on the forge. */
   branch: string;
@@ -138,17 +141,20 @@ export function entryTouched(entry: PreArmEntry, files: readonly string[] | null
 
 /**
  * The environment a `run` entry gets: an allow-list, never this process's.
- * PATH, HOME, the locale, the temp folder, the time zone and the terminal, plus
- * `CI=true`; no token, no `GH_*`, no `*_TOKEN` and no cloud credential reaches
- * the command, whatever the agent's own environment holds.
+ * PATH, the locale, the temp folder, the time zone and the terminal, plus
+ * `CI=true` and `HOME` set to `home` (an empty scratch folder, so the PR's code
+ * finds no `~/.config/gh`, `~/.npmrc` or other credentials there). No token, no
+ * `GH_*`, no `*_TOKEN` and no cloud credential reaches the command, whatever
+ * the agent's own environment holds.
  */
 export function minimalEnv(
+  home: string,
   from: Readonly<Record<string, string | undefined>> = process.env
 ): Record<string, string> {
-  const env: Record<string, string> = { CI: 'true' };
+  const env: Record<string, string> = { CI: 'true', HOME: home };
   for (const [key, value] of Object.entries(from)) {
     if (value === undefined) continue;
-    if (['PATH', 'HOME', 'LANG', 'TMPDIR', 'TZ', 'TERM'].includes(key) || /^LC_[A-Z]+$/.test(key)) {
+    if (['PATH', 'LANG', 'TMPDIR', 'TZ', 'TERM'].includes(key) || /^LC_[A-Z]+$/.test(key)) {
       env[key] = value;
     }
   }
@@ -157,11 +163,13 @@ export function minimalEnv(
 
 /**
  * Run one `run` entry in a fresh, clean checkout of the reviewed head, never in
- * the worker's worktree: `git worktree add --detach <tmp> <reviewedSha>` (with
- * hooks off, so nothing in the repository runs on checkout), `git clean -ffdx`,
- * the command with {@link minimalEnv}, then the checkout is removed whatever
- * happened. Nothing untracked, ignored or uncommitted in the worker's worktree
- * can reach the command.
+ * the worker's worktree, and never through the project's own git settings:
+ * the checkout is made in a scratch repository that borrows the project's
+ * objects and nothing else (`land/isolated-git.ts`), so a worker's sparse
+ * checkout, `git replace`, smudge filter or hook cannot change what it holds.
+ * Then `git clean -ffdx`, a check that the checkout is exactly the reviewed
+ * commit, the command with {@link minimalEnv}, and the checkout and its
+ * scratch HOME are removed whatever happened.
  */
 async function runCommand(
   entry: Extract<PreArmEntry, { run: string }>,
@@ -172,31 +180,36 @@ async function runCommand(
   if (argv === null) {
     return `the command "${entry.run}" has shell syntax or an unclosed quote; flow runs commands with no shell`;
   }
-  if (!isFullSha(target.reviewedSha))
+  if (!isFullSha(target.reviewedSha)) {
     return `the reviewed commit "${target.reviewedSha}" is not a full SHA`;
-  const git = (args: string[], cwd: string) =>
-    io
-      .runProcess('git', ['-c', 'core.hooksPath=/dev/null', ...args], { cwd, timeoutMs: 300_000 })
-      .catch((error: unknown) => ({ code: -1, stdout: '', stderr: (error as Error).message }));
-  const checkout = mkdtempSync(path.join(os.tmpdir(), 'flow-prearm-'));
+  }
+  const scratch = await scratchRepo(target.worktree);
+  if (typeof scratch === 'string')
+    return `could not make a checkout to run "${entry.run}": ${scratch}`;
+  let home: string | null = null;
   try {
-    const added = await git(
-      ['worktree', 'add', '--detach', '--quiet', checkout, target.reviewedSha],
-      target.worktree
-    );
-    if (added.code !== 0) {
-      return `could not check out the reviewed commit ${target.reviewedSha.slice(0, 7)} to run "${entry.run}": ${added.stderr.trim() || `git exited ${added.code}`}`;
+    const git = (args: string[]) => scratch.git(['-c', 'core.hooksPath=/dev/null', ...args]);
+    const checkout = await git(['checkout', '--quiet', '--detach', target.reviewedSha]);
+    if (checkout.code !== 0) {
+      return `could not check out the reviewed commit ${target.reviewedSha.slice(0, 7)} to run "${entry.run}": ${checkout.stderr.trim() || `git exited ${checkout.code}`}`;
     }
-    const cleaned = await git(['clean', '-ffdx', '--quiet'], checkout);
-    const head = await git(['rev-parse', 'HEAD'], checkout);
-    if (cleaned.code !== 0 || head.stdout.trim().toLowerCase() !== target.reviewedSha) {
+    const cleaned = await git(['clean', '-ffdx', '--quiet']);
+    const head = await git(['rev-parse', 'HEAD']);
+    const status = await git(['status', '--porcelain', '--ignored']);
+    if (
+      cleaned.code !== 0 ||
+      head.stdout.trim().toLowerCase() !== target.reviewedSha ||
+      status.code !== 0 ||
+      status.stdout.trim() !== ''
+    ) {
       return `the fresh checkout for "${entry.run}" is not a clean copy of ${target.reviewedSha.slice(0, 7)}`;
     }
+    home = mkdtempSync(path.join(os.tmpdir(), 'flow-prearm-home-'));
     let result;
     try {
       result = await io.runProcess(argv[0], argv.slice(1), {
-        cwd: checkout,
-        env: minimalEnv(),
+        cwd: scratch.dir,
+        env: minimalEnv(home),
         timeoutMs: entry.timeout * 60_000,
       });
     } catch (error) {
@@ -207,10 +220,17 @@ async function runCommand(
       return `"${entry.run}" exited ${result.code}${output ? `:\n${output}` : ''}`;
     }
     return null;
+  } catch (error) {
+    return `could not run "${entry.run}": ${(error as Error).message}`;
   } finally {
-    await git(['worktree', 'remove', '--force', '--force', checkout], target.worktree);
-    rmSync(checkout, { recursive: true, force: true });
-    await git(['worktree', 'prune'], target.worktree);
+    scratch.remove();
+    if (home !== null) {
+      try {
+        rmSync(home, { recursive: true, force: true });
+      } catch {
+        // Left in the temp folder.
+      }
+    }
   }
 }
 

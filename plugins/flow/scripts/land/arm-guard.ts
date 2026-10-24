@@ -68,7 +68,7 @@ export interface GuardInput {
   pr: number;
   /** The commit the review covered: what flow means to arm. */
   reviewedSha: string | null;
-  /** The PR's worktree (base config is read through it; `run` entries run there). */
+  /** The PR's worktree (base config is read through it; `run` entries check out from its objects). */
   worktree: string;
   /** The project's main checkout (where the freeze marker lives). */
   mainCheckout: string;

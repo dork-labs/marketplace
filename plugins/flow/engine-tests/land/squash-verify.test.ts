@@ -9,16 +9,16 @@
  */
 
 import { execFileSync } from 'node:child_process';
-import { mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
 import {
-  gitIn,
   resetGitProbe,
   squashReport,
   verifySquash,
+  verifySquashIsolated,
   type GitResult,
   type GitRunner,
 } from '../../scripts/land/squash-verify.ts';
@@ -90,7 +90,7 @@ describe('verifySquash', () => {
     write('a.txt', lines({ 10: 'line 10, changed' }));
     const reviewed = commitAll('feature');
     const squash = squashOnto(reviewed);
-    expect(await verifySquash(gitIn(repo), { squash, reviewed })).toEqual({
+    expect(await verifySquashIsolated(repo, { squash, reviewed })).toEqual({
       verdict: 'pass',
       check: 'tree',
       patchIdMatch: true,
@@ -110,7 +110,7 @@ describe('verifySquash', () => {
     expect(readFileSync(path.join(repo, 'a.txt'), 'utf8')).toBe(
       lines({ 8: 'line 8, moved on main', 10: 'line 10, changed' })
     );
-    expect(await verifySquash(gitIn(repo), { squash, reviewed })).toEqual({
+    expect(await verifySquashIsolated(repo, { squash, reviewed })).toEqual({
       verdict: 'pass',
       check: 'tree',
       patchIdMatch: false,
@@ -123,7 +123,7 @@ describe('verifySquash', () => {
     write('a.txt', lines({ 10: 'line 10, changed' }));
     const reviewed = commitAll('feature');
     const squash = squashOnto(reviewed, () => write('b.txt', 'b\nslipped in\n'));
-    const result = await verifySquash(gitIn(repo), { squash, reviewed });
+    const result = await verifySquashIsolated(repo, { squash, reviewed });
     expect(result).toMatchObject({ verdict: 'fail', files: ['b.txt'] });
     if (result.verdict !== 'fail') throw new Error('expected a fail');
     expect(result.squashTree).toBe(git('rev-parse', `${squash}^{tree}`));
@@ -141,7 +141,7 @@ describe('verifySquash', () => {
     commitAll('main changes the same line');
     write('a.txt', lines({ 10: 'line 10, the feature' }));
     const squash = commitAll('a squash made by hand');
-    const result = await verifySquash(gitIn(repo), { squash, reviewed });
+    const result = await verifySquashIsolated(repo, { squash, reviewed });
     expect(result).toMatchObject({ verdict: 'fail', reviewedTree: null, files: ['a.txt'] });
     expect(result.verdict === 'fail' && result.reason).toMatch(/conflicts/);
   });
@@ -160,9 +160,52 @@ describe('verifySquash', () => {
     commitAll('main changes the same line, with a union driver too');
     write('a.txt', lines({ 10: 'line 10, main\nline 10, the feature' }));
     const squash = commitAll('a squash keeping both lines');
-    const result = await verifySquash(gitIn(repo), { squash, reviewed });
+    const result = await verifySquashIsolated(repo, { squash, reviewed });
     expect(result).toMatchObject({ verdict: 'fail', reviewedTree: null, files: ['a.txt'] });
     expect(result.verdict === 'fail' && result.reason).toMatch(/conflicts/);
+  });
+
+  // The project's own repository is worker-writable: none of its settings may
+  // turn a conflict into a pass (review of the attr-source change).
+  it.each([
+    [
+      '* merge=union in .git/info/attributes',
+      () => {
+        mkdirSync(path.join(repo, '.git', 'info'), { recursive: true });
+        writeFileSync(path.join(repo, '.git', 'info', 'attributes'), '* merge=union\n');
+      },
+    ],
+    ['merge.default=union in the repo config', () => git('config', 'merge.default', 'union')],
+    [
+      'a merge.text.driver override in the repo config',
+      () => {
+        // A driver that writes exactly the squash's content and exits 0. Git 2.53
+        // keeps its built-in text merge here; the row guards a git that would not.
+        writeFileSync(
+          path.join(repo, 'evil-merged.txt'),
+          lines({ 10: 'line 10, main\nline 10, the feature' })
+        );
+        git('config', 'merge.text.driver', `cp ${path.join(repo, 'evil-merged.txt')} %A`);
+      },
+    ],
+    [
+      'core.attributesFile in the repo config',
+      () => {
+        writeFileSync(path.join(repo, 'evil-attributes'), '* merge=union\n');
+        git('config', 'core.attributesFile', path.join(repo, 'evil-attributes'));
+      },
+    ],
+  ])('a conflict still fails with %s', async (_name, plant) => {
+    write('a.txt', lines({ 10: 'line 10, the feature' }));
+    const reviewed = commitAll('feature');
+    git('checkout', '-q', 'main');
+    write('a.txt', lines({ 10: 'line 10, main' }));
+    commitAll('main changes the same line');
+    write('a.txt', lines({ 10: 'line 10, main\nline 10, the feature' }));
+    const squash = commitAll('a squash keeping both lines');
+    plant();
+    const result = await verifySquashIsolated(repo, { squash, reviewed });
+    expect(result).toMatchObject({ verdict: 'fail', files: ['a.txt'] });
   });
 
   it('a re-indented line keeps the patch-id but fails', async () => {
@@ -172,7 +215,7 @@ describe('verifySquash', () => {
     const squash = squashOnto(reviewed, () =>
       write('c.py', 'def f(x):\n    if x:\n        pass\n    return None\n    return x\n')
     );
-    expect(await verifySquash(gitIn(repo), { squash, reviewed })).toMatchObject({
+    expect(await verifySquashIsolated(repo, { squash, reviewed })).toMatchObject({
       verdict: 'fail',
       patchIdMatch: true,
       files: ['c.py'],
@@ -188,7 +231,7 @@ describe('verifySquash', () => {
     const squash = squashOnto(reviewed, () =>
       write('d.py', `${block('admin', false)}\n${block('public', true)}`)
     );
-    expect(await verifySquash(gitIn(repo), { squash, reviewed })).toMatchObject({
+    expect(await verifySquashIsolated(repo, { squash, reviewed })).toMatchObject({
       verdict: 'fail',
       patchIdMatch: true,
       files: ['d.py'],
@@ -201,7 +244,7 @@ describe('verifySquash', () => {
     write('a.txt', lines({ 10: 'line 10, changed', 12: 'pushed after the review' }));
     const later = commitAll('after the review');
     const squash = squashOnto(later);
-    expect(await verifySquash(gitIn(repo), { squash, reviewed })).toMatchObject({
+    expect(await verifySquashIsolated(repo, { squash, reviewed })).toMatchObject({
       verdict: 'fail',
       files: ['a.txt'],
     });
@@ -213,7 +256,7 @@ describe('verifySquash', () => {
     git('checkout', '-q', 'main');
     git('merge', '-q', '--no-ff', '-m', 'merge', reviewed);
     const merge = git('rev-parse', 'HEAD');
-    expect(await verifySquash(gitIn(repo), { squash: merge, reviewed })).toMatchObject({
+    expect(await verifySquashIsolated(repo, { squash: merge, reviewed })).toMatchObject({
       verdict: 'fail',
       reason: expect.stringMatching(/not a squash commit/),
     });
@@ -227,7 +270,7 @@ describe('verifySquash', () => {
       [head, 'HEAD'],
       [head, 'f'.repeat(40)],
     ]) {
-      expect((await verifySquash(gitIn(repo), { squash, reviewed })).verdict).toBe('unverified');
+      expect((await verifySquashIsolated(repo, { squash, reviewed })).verdict).toBe('unverified');
     }
   });
 
@@ -242,7 +285,7 @@ describe('verifySquash', () => {
     const squash = squashOnto(reviewed);
     git('config', 'diff.renames', 'false');
     git('config', 'merge.renames', 'false');
-    expect(await verifySquash(gitIn(repo), { squash, reviewed })).toMatchObject({
+    expect(await verifySquashIsolated(repo, { squash, reviewed })).toMatchObject({
       verdict: 'pass',
     });
   });
@@ -255,7 +298,7 @@ describe('verifySquash', () => {
     const squash = squashOnto(reviewed, () => write('b.txt', 'b\nslipped in\n'));
     // Point the bad squash at the clean one's objects; the check ignores it.
     git('replace', squash, clean);
-    expect((await verifySquash(gitIn(repo), { squash, reviewed })).verdict).toBe('fail');
+    expect((await verifySquashIsolated(repo, { squash, reviewed })).verdict).toBe('fail');
   });
 });
 

@@ -15,8 +15,12 @@
  *   `git patch-id --stable` as the reviewed head's diff from its merge-base.
  *   It never passes on its own (see {@link verifySquash}).
  * - Anything else fails, with both trees and the files that differ; a check
- *   that could not run (a missing commit, a git error) is `unverified`, which
- *   is reported too and never counts as a pass.
+ *   that could not run (a missing commit) is `unverified`, which is reported
+ *   too and never counts as a pass. A git that cannot do the merge safely
+ *   (before 2.40, or any merge-tree exit but 0 or 1) fails.
+ * - The check runs in a scratch repository that reads the project's objects
+ *   and nothing else ({@link verifySquashIsolated}), so the project's config,
+ *   `info/attributes`, merge drivers and replace refs never reach the merge.
  *
  * A verdict and a report only: nothing here reverts, pushes, or touches a
  * status or label. Every git call is a fixed argv with full SHAs checked
@@ -28,26 +32,19 @@
 
 import { spawn } from 'node:child_process';
 
+import { scratchRepo, type GitResult, type GitRunner } from './isolated-git.ts';
 import { isFullSha } from './validate.ts';
 
 /** How long one git call may take. */
 const GIT_TIMEOUT_MS = 120_000;
 
-/** One git call's result. */
-export interface GitResult {
-  /** The exit code (`-1` when git could not start or timed out). */
-  code: number;
-  /** Standard output. */
-  stdout: string;
-  /** Standard error. */
-  stderr: string;
-}
-
-/** Runs git with no shell in a checkout, optionally feeding it standard input. */
-export type GitRunner = (args: readonly string[], input?: string) => Promise<GitResult>;
+export type { GitResult, GitRunner } from './isolated-git.ts';
 
 /**
- * The real {@link GitRunner}: `git --no-replace-objects <args>` in `cwd`.
+ * The real {@link GitRunner} for the project's own repository:
+ * `git --no-replace-objects <args>` in `cwd`, with this process's environment.
+ * Only for fetching what the check needs; the check itself runs in a scratch
+ * repository ({@link verifySquashIsolated}).
  *
  * @param cwd - A checkout of the repository.
  * @returns The runner.
@@ -134,9 +131,11 @@ let attrSourceProbe: Promise<boolean> | undefined;
  * @returns `true` when it does.
  */
 function supportsAttrSource(git: GitRunner): Promise<boolean> {
-  attrSourceProbe ??= git([`--attr-source=${EMPTY_TREE}`, 'version']).then(
-    (result) => result.code === 0
-  );
+  attrSourceProbe ??= git([`--attr-source=${EMPTY_TREE}`, 'version']).then((result) => {
+    // A git that could not start is asked again next time; only an answer is kept.
+    if (result.code === -1) attrSourceProbe = undefined;
+    return result.code === 0;
+  });
   return attrSourceProbe;
 }
 
@@ -312,6 +311,36 @@ export async function verifySquash(
   );
 }
 
+/**
+ * {@link verifySquash} in a scratch repository that reads `source`'s objects
+ * and nothing else (`land/isolated-git.ts`): the project's config, its
+ * `info/attributes`, merge drivers, `merge.default` and replace refs, all of
+ * which a worker can write, never reach the merge.
+ *
+ * @param source - A folder inside the project's repository, holding both commits.
+ * @param input - The squash commit and the reviewed head.
+ * @returns The verdict; `unverified` when the scratch repository could not be made.
+ */
+export async function verifySquashIsolated(
+  source: string,
+  input: { squash: string; reviewed: string }
+): Promise<SquashVerdict> {
+  const scratch = await scratchRepo(source);
+  if (typeof scratch === 'string') {
+    return {
+      verdict: 'unverified',
+      reason: scratch,
+      squash: input.squash.toLowerCase(),
+      reviewed: input.reviewed.toLowerCase(),
+    };
+  }
+  try {
+    return await verifySquash(scratch.git, input);
+  } finally {
+    scratch.remove();
+  }
+}
+
 /** A name from the repository, safe inside a fenced block (no backtick runs, one line). */
 function fenced(name: string): string {
   return name.replace(/`/g, "'").replace(/[\r\n]/g, ' ');
@@ -344,7 +373,7 @@ export function squashReport(
     `${who}**Squash check failed.** ${verdict.reason}.`,
     '',
     `- Squash commit: \`${verdict.squash}\`, tree \`${verdict.squashTree ?? 'unknown'}\``,
-    `- Reviewed head: \`${verdict.reviewed}\`, merged into the squash's parent: tree \`${verdict.reviewedTree ?? 'none (it conflicts)'}\``,
+    `- Reviewed head: \`${verdict.reviewed}\`, merged into the squash's parent: tree \`${verdict.reviewedTree ?? 'none'}\``,
     `- Patch-ids ${verdict.patchIdMatch ? 'match, but that alone proves nothing' : 'differ'}`,
     '- Files that differ:',
     '',
