@@ -89,12 +89,39 @@ export function matchesAny(
   opts: { ignoreCase?: boolean } = {}
 ): boolean {
   if (!opts.ignoreCase) return globs.some((glob) => globToRegExp(glob).test(file));
-  const forms: ((text: string) => string)[] = [
-    (text) => text,
-    fullFold,
-    (text) => fullFold(text.normalize('NFKC')),
-  ];
   return globs.some((glob) =>
-    forms.some((form) => globToRegExp(form(glob), { ignoreCase: true }).test(form(file)))
+    FOLD_FORMS.some((form) => globToRegExp(form(glob), { ignoreCase: true }).test(form(file)))
   );
+}
+
+/**
+ * The three spellings a case-insensitive match tries, path and pattern alike:
+ * as written, fully case-folded, and NFKC then folded. Each only adds matches.
+ */
+export const FOLD_FORMS: readonly ((text: string) => string)[] = [
+  (text) => text,
+  fullFold,
+  (text) => fullFold(text.normalize('NFKC')),
+];
+
+/**
+ * A regular expression that matches the way {@link matchesAny} does with
+ * `ignoreCase`: compiled with `iu` (or `i` when it is not valid with `u`) and
+ * tested against each of {@link FOLD_FORMS} of the path.
+ *
+ * @param source - The expression's source.
+ * @returns A test for one path, or `null` when the source is not a valid expression.
+ */
+export function foldingPattern(source: string): ((file: string) => boolean) | null {
+  let pattern: RegExp;
+  try {
+    pattern = new RegExp(source, 'iu');
+  } catch {
+    try {
+      pattern = new RegExp(source, 'i');
+    } catch {
+      return null;
+    }
+  }
+  return (file) => FOLD_FORMS.some((form) => pattern.test(form(file)));
 }

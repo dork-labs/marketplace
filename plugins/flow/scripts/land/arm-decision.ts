@@ -39,7 +39,7 @@
  * @module @dorkos/flow/land/arm-decision
  */
 
-import { matchesAny } from './glob.ts';
+import { foldingPattern, matchesAny } from './glob.ts';
 
 /**
  * Paths that count as security paths whatever the repository's own list says:
@@ -56,7 +56,7 @@ export const BUILTIN_SECURITY_GLOBS: readonly string[] = [
   '**/pnpm-workspace.yaml',
   '**/.pnpmfile.cjs',
   // Patches pnpm and patch-package apply to installed dependencies.
-  'patches/**',
+  '**/patches/**',
   '**/.yarn/patches/**',
   '**/yarn.lock',
   '**/.yarnrc',
@@ -234,21 +234,19 @@ function redRequiredChecks(facts: Record<string, unknown>): string[] {
  * a valid regular expression (a list that cannot be read never matches nothing).
  */
 function securityHits(files: readonly string[], policy: ArmPolicy): string[] | null {
-  let pattern: RegExp | null = null;
+  let pattern: ((file: string) => boolean) | null = null;
   if (policy.securityPattern !== null && policy.securityPattern !== '') {
-    try {
-      pattern = new RegExp(policy.securityPattern);
-    } catch {
-      return null;
-    }
+    pattern = foldingPattern(policy.securityPattern);
+    if (pattern === null) return null;
   }
-  // The built-ins match in any case: on a case-insensitive disk (macOS's
-  // default) `Package.json` and `.NPMRC` are the files the tools read.
+  // Every security path matches in any case, the built-ins and the repo's own
+  // alike: on a case-insensitive disk (macOS's default) `Package.json` and
+  // `APPS/Server/src/auth/x.ts` are the files the tools read.
   return files.filter(
     (file) =>
       matchesAny(file, BUILTIN_SECURITY_GLOBS, { ignoreCase: true }) ||
-      matchesAny(file, policy.securityGlobs) ||
-      (pattern?.test(file) ?? false)
+      matchesAny(file, policy.securityGlobs, { ignoreCase: true }) ||
+      (pattern?.(file) ?? false)
   );
 }
 

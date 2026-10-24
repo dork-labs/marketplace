@@ -235,12 +235,51 @@ describe.skipIf(!runnable)(
       }
     });
 
-    it("the repo's own security globs stay exact-case", () => {
-      const own: ArmPolicy = { ...policy, securityGlobs: ['Secrets/**'] };
-      expect(formatDecision(decideArm(payload('.files = ["Secrets/a"]'), own))).toBe(
+    // Security's Must on #121: a Mac opens APPS/Server/src/auth/x.ts in the
+    // real auth/ folder, so the repo's own globs and pattern fold too.
+    it("the repo's own security globs match in any case", () => {
+      const own: ArmPolicy = { ...policy, securityGlobs: ['apps/server/src/auth/**'] };
+      for (const file of [
+        'apps/server/src/auth/x.ts',
+        'APPS/Server/src/auth/x.ts',
+        'apps/server/src/\u212Auth/x.ts'.replace('\u212Auth', 'auth'),
+      ]) {
+        expect(
+          formatDecision(decideArm(payload(`.files = [${JSON.stringify(file)}]`), own)),
+          file
+        ).toBe('REFUSE security-path-unlabelled');
+      }
+      expect(
+        formatDecision(decideArm(payload('.files = ["apps/server/src/other/x.ts"]'), own))
+      ).toBe('ARM');
+    });
+
+    it("the repo's own pattern matches in any case, under the same folds", () => {
+      const own: ArmPolicy = {
+        ...policy,
+        securityGlobs: [],
+        securityPattern: '^apps/server/src/(http|routes)/',
+      };
+      for (const file of [
+        'apps/server/src/routes/a.ts',
+        'Apps/Server/SRC/Routes/a.ts',
+        'apps/server/src/\uFF52outes/a.ts',
+      ]) {
+        expect(
+          formatDecision(decideArm(payload(`.files = [${JSON.stringify(file)}]`), own)),
+          file
+        ).toBe('REFUSE security-path-unlabelled');
+      }
+      expect(formatDecision(decideArm(payload('.files = ["apps/client/routes/a.ts"]'), own))).toBe(
+        'ARM'
+      );
+    });
+
+    it('a pattern that only compiles without the u flag still folds case', () => {
+      const own: ArmPolicy = { ...policy, securityGlobs: [], securityPattern: '^ops\\-scripts/' };
+      expect(formatDecision(decideArm(payload('.files = ["OPS-scripts/x.sh"]'), own))).toBe(
         'REFUSE security-path-unlabelled'
       );
-      expect(formatDecision(decideArm(payload('.files = ["secrets/a"]'), own))).toBe('ARM');
     });
 
     it('the built-in security paths cover the common manifests and lockfiles at any depth', () => {
