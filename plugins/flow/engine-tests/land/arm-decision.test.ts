@@ -190,6 +190,16 @@ describe.skipIf(!runnable)(
       }
     });
 
+    it('built-in security paths still match what they matched before folding (a fullwidth slash in a name)', () => {
+      const builtin: ArmPolicy = { ...policy, securityGlobs: [] };
+      for (const file of ['Podfile\uFF0Fx', 'android/gradlew\uFF0Fx', 'constraints\uFF0Fa.txt']) {
+        expect(
+          formatDecision(decideArm(payload(`.files = [${JSON.stringify(file)}]`), builtin)),
+          file
+        ).toBe('REFUSE security-path-unlabelled');
+      }
+    });
+
     it("the repo's own security globs stay exact-case", () => {
       const own: ArmPolicy = { ...policy, securityGlobs: ['Secrets/**'] };
       expect(formatDecision(decideArm(payload('.files = ["Secrets/a"]'), own))).toBe(

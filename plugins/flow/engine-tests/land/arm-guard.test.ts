@@ -21,7 +21,7 @@ import {
 import os from 'node:os';
 import path from 'node:path';
 import { deflateSync } from 'node:zlib';
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { realProcessRunner, type ProcessRunner } from '../../scripts/cli/context.ts';
 import type { ArmFacts, Forge, WorkflowRun } from '../../scripts/forge/types.ts';
@@ -35,6 +35,10 @@ import {
   WORKFLOW_POLL_MS,
 } from '../../scripts/land/pre-arm.ts';
 import { isBranchName, isFullSha, isNonce, isWorkflowName } from '../../scripts/land/validate.ts';
+
+// Each case builds real repositories and verified scratch copies with git; on
+// a loaded machine that outlasts vitest's 5-second default.
+vi.setConfig({ testTimeout: 60_000 });
 
 const NONCE = '0123456789abcdef0123456789abcdef';
 
@@ -480,6 +484,23 @@ describe('land.preArm run entries', () => {
   it('a preArm entry matches a Kelvin-sign spelling of its path', () => {
     expect(
       entryTouched({ paths: ['pkg/**'], run: 'check', timeout: 30 }, ['p\u212Ag/index.ts'])
+    ).toBe(true);
+  });
+
+  it('a preArm entry matches ß and ẞ as ss, the way APFS does', () => {
+    for (const file of ['app/styles.c\u00DF', 'app/styles.C\u1E9E']) {
+      expect(entryTouched({ paths: ['**/*.css'], run: 'check', timeout: 30 }, [file]), file).toBe(
+        true
+      );
+    }
+  });
+
+  it('folding never narrows a match: a fullwidth slash stays part of the name', () => {
+    expect(entryTouched({ paths: ['src/*'], run: 'check', timeout: 30 }, ['src/a\uFF0Fb.ts'])).toBe(
+      true
+    );
+    expect(
+      entryTouched({ paths: ['docs/*.md'], run: 'check', timeout: 30 }, ['docs/x\uFF0Fy.md'])
     ).toBe(true);
   });
 
