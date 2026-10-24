@@ -609,7 +609,7 @@ describe('answering', () => {
     await handed.coordinator.sync([plan({ a: gateRun() })]);
     expect(await handed.coordinator.handle(event(key))).toMatchObject({
       resolve: 'approved',
-      message: 'Shipped. Flow turns on auto-merge once its pre-arm checks pass.',
+      message: 'Shipped. Flow turns on auto-merge as soon as its checks allow.',
     });
   });
 

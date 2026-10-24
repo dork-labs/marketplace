@@ -349,53 +349,61 @@ function runInGroup(
     let stdout = '';
     let stderr = '';
     let done = false;
+    // Once the command has exited and its group was stopped, its pid may be
+    // reused: nothing signals the group after that.
+    let exited = false;
+    let grace: ReturnType<typeof setTimeout> | undefined;
     const killGroup = () => {
+      if (exited) return;
       try {
         if (child.pid !== undefined) process.kill(-child.pid, 'SIGKILL');
       } catch {
         // Already gone.
       }
     };
-    const timer = setTimeout(() => {
-      killGroup();
+    const finish = (settle: () => void) => {
       if (done) return;
       done = true;
-      reject(
-        new Error(
-          `${cmd} timed out after ${opts.timeoutMs ?? 60_000} ms; its process group was stopped`
+      clearTimeout(timer);
+      if (grace !== undefined) clearTimeout(grace);
+      settle();
+    };
+    const timer = setTimeout(() => {
+      killGroup();
+      finish(() =>
+        reject(
+          new Error(
+            `${cmd} timed out after ${opts.timeoutMs ?? 60_000} ms; its process group was stopped`
+          )
         )
       );
     }, opts.timeoutMs ?? 60_000);
     const add = (which: 'out' | 'err') => (chunk: string) => {
       if (which === 'out') stdout += chunk;
       else stderr += chunk;
-      if (stdout.length + stderr.length > MAX_OUTPUT_BYTES) {
+      if (Buffer.byteLength(stdout) + Buffer.byteLength(stderr) > MAX_OUTPUT_BYTES) {
         killGroup();
-        if (!done) {
-          done = true;
-          clearTimeout(timer);
-          reject(new Error(`${cmd} printed more than ${MAX_OUTPUT_BYTES} bytes`));
-        }
+        finish(() => reject(new Error(`${cmd} printed more than ${MAX_OUTPUT_BYTES} bytes`)));
       }
     };
     child.stdout?.setEncoding('utf8').on('data', add('out'));
     child.stderr?.setEncoding('utf8').on('data', add('err'));
-    child.on('error', (error) => {
-      if (done) return;
-      done = true;
-      clearTimeout(timer);
-      reject(error);
-    });
+    child.on('error', (error) => finish(() => reject(error)));
     // When the command itself ends, whatever it left running in its group goes
-    // with it; that also lets the output pipes close, which a left-behind child
-    // holding them open would otherwise keep from happening.
-    child.on('exit', () => killGroup());
-    child.on('close', (code) => {
+    // with it. Its result is its exit code: a descendant that left the group
+    // and still holds the output pipes cannot turn a finished command into a
+    // timeout, because the pipes are let go after a short grace period.
+    child.on('exit', (code) => {
+      killGroup();
+      exited = true;
       clearTimeout(timer);
-      if (done) return;
-      done = true;
-      resolve({ code: code ?? -1, stdout, stderr });
+      grace = setTimeout(() => {
+        child.stdout?.destroy();
+        child.stderr?.destroy();
+        finish(() => resolve({ code: code ?? -1, stdout, stderr }));
+      }, 2_000);
     });
+    child.on('close', (code) => finish(() => resolve({ code: code ?? -1, stdout, stderr })));
   });
 }
 

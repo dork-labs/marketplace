@@ -76,7 +76,7 @@ export function dependencyConflict(
     return {
       ok: false,
       reason: 'dependency-queue-busy',
-      detail: `another dependency PR is in the queue: #${other.number}; arm this after it lands`,
+      detail: `another dependency PR is in the queue: #${other.number}${other.queued ? '' : ' (armed)'}; arm this after it lands`,
     };
   }
   return { ok: true };

@@ -105,6 +105,17 @@ describe('a process-group run', () => {
     expect(alive(pid)).toBe(false);
   });
 
+  it('a descendant that left the group and holds the pipes cannot turn a finished command into a timeout', async () => {
+    const started = Date.now();
+    const result = await realProcessRunner(
+      '/bin/sh',
+      ['-c', `perl -e 'use POSIX; POSIX::setsid(); sleep 6' & sleep 0.2; exit 0`],
+      { timeoutMs: 4_000, processGroup: true }
+    );
+    expect(result.code).toBe(0);
+    expect(Date.now() - started).toBeLessThan(3_900);
+  });
+
   it('returns the exit code and output like the plain runner', async () => {
     const result = await realProcessRunner('/bin/sh', ['-c', 'echo out; echo err >&2; exit 3'], {
       processGroup: true,
