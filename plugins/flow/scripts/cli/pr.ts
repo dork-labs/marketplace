@@ -11,8 +11,17 @@
  * 2. appends a provenance line to the body when it has none;
  * 3. when an open PR already exists for the branch, records it and exits 5
  *    naming it, so a retry is safe;
- * 4. otherwise opens the PR against origin's default branch, arms it on
- *    `--arm` or `drain.armAutoMerge`, and records `drain.pr`.
+ * 4. otherwise opens the PR against origin's default branch and records
+ *    `drain.pr`;
+ * 5. names the PR's reviewer in a comment of its own (DOR-3262):
+ *    `land.securityPaths.reviewer` when the PR touches a security path (by the
+ *    list on `origin/main`), else `land.reviewer`. Both are handles, so they
+ *    come from this machine's settings (`config.local.json`);
+ * 6. on `--arm` or `drain.armAutoMerge`, records the PR waiting to arm and
+ *    arms it at once when the arm guard allows (`land/arm-guard.ts`). The
+ *    guard's `land.preArm` checks are left to the drain, which arms it after
+ *    they pass. A refusal leaves the PR open and unarmed and says why in
+ *    `armRefused`; the drain asks the guard again. The verb still exits 0.
  *
  * @module @dorkos/flow/cli/pr
  */
@@ -23,6 +32,10 @@ import path from 'node:path';
 import { findConfigRoots } from '../config-files.ts';
 import { loadConfig } from '../config-load.ts';
 import { PreconditionError, UsageError } from '../errors.ts';
+import type { LandConfig } from '../config-schema.ts';
+import { securityPathsTouched } from '../land/arm-decision.ts';
+import { policyFor, refusalSticksToCommit } from '../land/arm-guard.ts';
+import { readBaseLand } from '../land/base-config.ts';
 import { openFlowStateFile } from '../flow-state-file.ts';
 import type { Forge, ForgePr } from '../forge/types.ts';
 import type { VerbContext, VerbResult } from './context.ts';
@@ -85,21 +98,119 @@ function wantsArm(ctx: VerbContext): boolean {
   return config.drain.armAutoMerge;
 }
 
-/** Record `pr` on the run. */
+/** What the reviewer mention did. */
+interface Mention {
+  /** Who was named. */
+  reviewer: string;
+  /** Why them: the PR touches a security path, or the default reviewer. */
+  route: 'security' | 'default';
+  /** Whether the comment was posted. */
+  posted: boolean;
+  /** Why it was not, when it was not. */
+  error?: string;
+}
+
+/** Who flow may name on a new PR: handles from this machine's settings. */
+interface Reviewers {
+  /** The default reviewer (`land.reviewer`). */
+  reviewer: string | null;
+  /** Who a PR touching a security path goes to (`land.securityPaths.reviewer`). */
+  security: string | null;
+}
+
+/**
+ * The reviewer handles from the project's settings (`config.local.json` over
+ * `config.json`). Handles are account handles, which this repo keeps out of
+ * committed config, so unlike the guard's checks they are not read from
+ * `origin/main`; a wrong one only misnames the reviewer.
+ */
+function reviewersFor(ctx: VerbContext): Reviewers | string {
+  try {
+    const { config } = loadConfig(findConfigRoots(ctx.projectDir, ctx.flowRoot), ctx.env);
+    return { reviewer: config.land.reviewer, security: config.land.securityPaths.reviewer };
+  } catch (error) {
+    return (error as Error).message;
+  }
+}
+
+/**
+ * Name the new PR's reviewer in a comment: the security reviewer when the PR
+ * touches a security path (by the list on `origin/main`; also when flow cannot
+ * tell), else the default reviewer; nothing when neither is set. A failure is
+ * reported, never thrown: the PR is open either way.
+ */
+async function mentionReviewer(
+  ctx: VerbContext,
+  forge: Forge,
+  pr: ForgePr,
+  reviewers: Reviewers,
+  land: LandConfig | null,
+  head: string,
+  launcher: string | undefined
+): Promise<Mention | null> {
+  let security = true;
+  if (reviewers.security !== null && land !== null) {
+    try {
+      const facts = await forge.armFacts(pr.number);
+      security =
+        facts.files === null || securityPathsTouched(facts.files, policyFor(land)).length > 0;
+    } catch {
+      security = true;
+    }
+  }
+  const route = reviewers.security !== null && security ? 'security' : 'default';
+  const handle = route === 'security' ? reviewers.security : reviewers.reviewer;
+  if (handle === null) return null;
+  const reviewer = handle.startsWith('@') ? handle : `@${handle}`;
+  const body =
+    route === 'security'
+      ? `${reviewer}: this PR touches security paths. Please review it at ${short(head)}.`
+      : `${reviewer}: this PR is ready for your review at ${short(head)}.`;
+  try {
+    await forge.comment(pr.number, signedPrBody(ctx, body, launcher));
+    return { reviewer, route, posted: true };
+  } catch (error) {
+    const message = (error as Error).message;
+    ctx.warn(`flow opened ${pr.url} but could not mention ${reviewer}: ${message}`);
+    return { reviewer, route, posted: false, error: message };
+  }
+}
+
+/**
+ * Record `pr` on the run. `waiting` records it waiting to arm, so the drain
+ * asks the arm guard again on a later pass; `refusedAt` is a commit the guard
+ * refused for good, which the drain asks about again only once the reviewed
+ * commit changes. With neither, a PR already recorded under the same number
+ * keeps its waiting state, so re-running `flow pr` never cancels a re-arm.
+ */
 async function recordPr(
   ctx: VerbContext,
   run: DrainRun,
   forge: Forge,
   pr: ForgePr,
-  armed: boolean
+  armed: boolean,
+  arming?: { waiting: boolean; refusedAt?: string }
 ): Promise<void> {
   await writeDrain(
     openFlowStateFile(ctx.projectDir, { now: ctx.now }),
     run,
-    (drain) => ({
-      ...drain,
-      pr: { repo: forge.repo, number: pr.number, url: pr.url, armed, disarmedForReview: false },
-    }),
+    (drain) => {
+      const same = drain.pr !== null && drain.pr.number === pr.number;
+      const waiting = arming?.waiting ?? (same && !armed && drain.pr?.disarmedForReview === true);
+      const refusedAt =
+        arming?.refusedAt ?? (same && arming === undefined ? drain.pr?.armRefusedAt : undefined);
+      return {
+        ...drain,
+        pr: {
+          repo: forge.repo,
+          number: pr.number,
+          url: pr.url,
+          armed,
+          disarmedForReview: waiting,
+          ...(refusedAt ? { armRefusedAt: refusedAt } : {}),
+        },
+      };
+    },
     `run "flow pr ${run.identifier}" again (it will find the PR and record it)`
   );
 }
@@ -156,6 +267,13 @@ export async function run(ctx: VerbContext): Promise<VerbResult> {
   }
 
   const base = await defaultBranch(ctx, worktree);
+  const reviewers = reviewersFor(ctx);
+  // Which paths count as security paths comes from main, like the guard's
+  // checks; read only when there is a security reviewer to route to.
+  const baseLand =
+    typeof reviewers !== 'string' && reviewers.security !== null
+      ? await readBaseLand(ctx.runProcess, worktree)
+      : null;
   const created = await forge.createPr({
     head: branch,
     base,
@@ -164,18 +282,66 @@ export async function run(ctx: VerbContext): Promise<VerbResult> {
   });
   // Recorded before arming, so a failed arm never leaves an unrecorded PR.
   await recordPr(ctx, drainRun, forge, created, false);
-  if (arm) {
-    await forge.arm(created.number, head);
-    await recordPr(ctx, drainRun, forge, created, true);
+  let mention: Mention | null = null;
+  if (typeof reviewers === 'string') {
+    ctx.warn(`flow opened ${created.url} but named no reviewer: ${reviewers}`);
+  } else {
+    mention = await mentionReviewer(
+      ctx,
+      forge,
+      created,
+      reviewers,
+      baseLand?.ok ? baseLand.land : null,
+      head,
+      drainRun.host
+    );
   }
+  let armed = false;
+  let armRefused: { reason: string; detail: string } | null = null;
+  if (arm) {
+    // Recorded as waiting to arm first: if this command is stopped while the
+    // guard runs, the drain still arms the PR on a later pass.
+    await recordPr(ctx, drainRun, forge, created, false, { waiting: true });
+    // land.preArm checks are left to the drain (preArm: 'defer'): a worker's
+    // command is killed long before a browser suite finishes.
+    const guard = await ctx.armGuard({
+      forge,
+      pr: created.number,
+      reviewedSha: head,
+      worktree,
+      preArm: 'defer',
+    });
+    if (guard.ok) {
+      await forge.arm(created.number, head);
+      await recordPr(ctx, drainRun, forge, created, true);
+      armed = true;
+    } else {
+      armRefused = { reason: guard.reason, detail: guard.detail };
+      if (refusalSticksToCommit(guard)) {
+        await recordPr(ctx, drainRun, forge, created, false, { waiting: true, refusedAt: head });
+      }
+    }
+  }
+  const mentionText =
+    mention === null
+      ? ''
+      : mention.posted
+        ? ` Asked ${mention.reviewer} to review it.`
+        : ` Could not ask ${mention.reviewer} to review it: ${mention.error}.`;
+  // A refused arm is not a failed `flow pr`: the PR is open and recorded, and
+  // armRefused says why it is unarmed.
   return {
     json: {
       ok: true,
       identifier,
-      pr: { repo: forge.repo, number: created.number, url: created.url, armed: arm },
+      pr: { repo: forge.repo, number: created.number, url: created.url, armed },
       base,
       head,
+      mention,
+      armRefused,
     },
-    text: `Opened ${created.url} for ${identifier} into ${base}${arm ? ', auto-merge armed' : ''}.`,
+    text: `Opened ${created.url} for ${identifier} into ${base}${armed ? ', auto-merge armed' : ''}.${mentionText}${
+      armRefused === null ? '' : ` Did not arm it (${armRefused.reason}): ${armRefused.detail}.`
+    }`,
   };
 }

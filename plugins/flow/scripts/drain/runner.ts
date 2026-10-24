@@ -55,6 +55,8 @@ import type { FlowRun, RunQuestion } from '../flow-run.ts';
 import type { FlowStateFile } from '../flow-state-file.ts';
 import { judgeEjection } from '../forge/ejection.ts';
 import type { Forge } from '../forge/types.ts';
+import type { ArmGuard } from '../cli/context.ts';
+import { refusalSticksToCommit } from '../land/arm-guard.ts';
 import { launchAccountFor } from '../launchers/common.ts';
 import { findTranscript } from '../launchers/prove-account.ts';
 import {
@@ -276,6 +278,19 @@ export interface PassDeps {
   hostFor(runtime: RuntimeName): Promise<HostName>;
   /** The project's forge. */
   forge: Forge;
+  /** The arm guard (DOR-3262), asked before every arm. */
+  armGuard: ArmGuard;
+  /**
+   * The post-merge squash check (DOR-3262): checks a merged PR against the
+   * head a clean review recorded (`null`: none, itself reported), reports a
+   * failure on the PR, and says whether it reached a verdict (`settled`) and
+   * one line for the pass report. `final` reports even a check that could not run.
+   */
+  squashCheck(input: {
+    pr: number;
+    reviewed: string | null;
+    final: boolean;
+  }): Promise<{ settled: boolean; line: string }>;
   /** The tracker item's facts (one `getItem`). */
   /**
    * The tracker item's facts (one `getItem`). For a parked run (`parked`), it
@@ -427,6 +442,7 @@ function actionRank(action: DrainAction | HandoffAction): number {
       return 3;
     case 'arm':
     case 'disarm':
+    case 'squash-check':
       return 4;
     case 'park':
       return 5;
@@ -448,6 +464,8 @@ function describe(action: DrainAction, reviewerAccount: string | null): string {
       return `armed #${action.pr.number}`;
     case 'disarm':
       return `disarmed #${action.pr.number}`;
+    case 'squash-check':
+      return `squash-checked #${action.pr.number}`;
     case 'park':
       return `parked: ${action.reason}`;
     case 'adopt-or-release':
@@ -1114,6 +1132,42 @@ export async function runPass(deps: PassDeps): Promise<PassReport> {
         // too once the head is any other commit (--match-head-commit).
         const n = action.pr.number;
         const status = await deps.forge.prStatus(n);
+        if (status.state === 'open' && status.headSha === action.sha) {
+          // The arm guard (DOR-3262), with its land.preArm checks: the drain is
+          // the one place that runs them (flow pr and flow review leave them
+          // here). Any refusal records the PR unarmed and waiting to re-arm, so
+          // the next pass asks again (a freeze lifts, a red check reruns), never
+          // an ejection's "fix CI". A refusal that sticks to the commit (a
+          // failed check, a fork, a base other than main) also records it, so
+          // only a new reviewed commit is asked about again.
+          const guard = await deps.armGuard({
+            forge: deps.forge,
+            pr: n,
+            reviewedSha: action.sha,
+            worktree: run.worktreePath,
+          });
+          if (!guard.ok) {
+            await supervisorWrite(run.issueId, (r) =>
+              r.drain.pr?.number === n
+                ? {
+                    ...r,
+                    drain: {
+                      ...r.drain,
+                      pr: {
+                        ...r.drain.pr,
+                        armed: false,
+                        disarmedForReview: true,
+                        armRefusedAt: refusalSticksToCommit(guard)
+                          ? action.sha
+                          : (r.drain.pr.armRefusedAt ?? null),
+                      },
+                    },
+                  }
+                : undefined
+            );
+            return `did not arm #${n} at ${short(action.sha)} (${guard.reason}): ${guard.detail}`;
+          }
+        }
         let reserved = false;
         if (status.state === 'open' && status.headSha === action.sha) {
           reserved = await supervisorWrite(run.issueId, (r) =>
@@ -1125,7 +1179,12 @@ export async function runPass(deps: PassDeps): Promise<PassReport> {
                   ...r,
                   drain: {
                     ...r.drain,
-                    pr: { ...r.drain.pr, armed: true, disarmedForReview: false },
+                    pr: {
+                      ...r.drain.pr,
+                      armed: true,
+                      disarmedForReview: false,
+                      armRefusedAt: null,
+                    },
                   },
                 }
               : undefined
@@ -1151,6 +1210,30 @@ export async function runPass(deps: PassDeps): Promise<PassReport> {
           return `did not arm #${n} at ${short(action.sha)}: ${(error as Error).message}`;
         }
         return `armed #${n} at ${short(action.sha)}`;
+      }
+      case 'squash-check': {
+        const checked = await deps.squashCheck({
+          pr: action.pr.number,
+          reviewed: action.reviewed,
+          final: action.final,
+        });
+        if (checked.settled || action.final) {
+          await supervisorWrite(run.issueId, (r) =>
+            r.drain.pr?.number === action.pr.number
+              ? {
+                  ...r,
+                  drain: {
+                    ...r.drain,
+                    squashCheck: {
+                      attempts: r.drain.squashCheck?.attempts ?? 1,
+                      settled: true,
+                    },
+                  },
+                }
+              : undefined
+          );
+        }
+        return checked.line;
       }
       case 'disarm': {
         await deps.forge.disarm(action.pr.number);

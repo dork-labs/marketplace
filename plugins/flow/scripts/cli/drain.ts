@@ -82,6 +82,13 @@ import { claimItem } from './claim.ts';
 import type { VerbContext, VerbResult } from './context.ts';
 import { handoffWiring } from './handoff-wiring.ts';
 import {
+  checkSquash,
+  describeOutcome,
+  securityReviewerFor,
+  signer,
+  squashSettled,
+} from './squash-check.ts';
+import {
   gatherAssignmentInput,
   liveByAccount,
   noAccountMessage,
@@ -543,6 +550,22 @@ export async function drain(ctx: VerbContext, options: DrainOptions = {}): Promi
     launcher,
     hostFor,
     forge,
+    armGuard: ctx.armGuard,
+    // In the main checkout, which shares the objects and is never removed
+    // (the worker's worktree may be gone by the time a merge is seen).
+    squashCheck: async ({ pr, reviewed, final }) => {
+      const outcome = await checkSquash({
+        forge,
+        pr,
+        reviewed,
+        worktree: mainCheckout,
+        securityReviewer: securityReviewerFor(ctx),
+        dryRun: ctx.dryRun,
+        final,
+        sign: signer(ctx, undefined),
+      });
+      return { settled: squashSettled(outcome, ctx.dryRun), line: describeOutcome(pr, outcome) };
+    },
     async item(identifier, parked) {
       const item = await adapter.getItem(
         identifier,

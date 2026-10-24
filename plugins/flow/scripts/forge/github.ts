@@ -25,14 +25,18 @@ import os from 'node:os';
 import path from 'node:path';
 
 import type { ProcessRunner } from '../cli/context.ts';
+import { isBranchName, isFullSha, isNonce, isWorkflowName } from '../land/validate.ts';
 import {
   ForgeError,
+  type ArmFacts,
   type FailingCheck,
   type Forge,
   type ForgePr,
   type ForgeTarget,
   type GroupFailure,
+  type MergeInfo,
   type PrStatus,
+  type WorkflowRun,
 } from './types.ts';
 
 /** The check run conclusions that do not count as failing; every other conclusion does. */
@@ -230,6 +234,145 @@ export function parsePrView(raw: unknown, queued: boolean, where: string): PrSta
     conflicting:
       str(view.mergeable)?.toUpperCase() === 'CONFLICTING' ||
       str(view.mergeStateStatus)?.toUpperCase() === 'DIRTY',
+  };
+}
+
+/**
+ * One `statusCheckRollup` entry's `gh pr checks` bucket: a check run by its
+ * status and conclusion, a commit status by its state. Anything unfinished is
+ * `pending`; a conclusion this file does not count as passing is `fail`.
+ *
+ * @param entry - One rollup entry.
+ * @returns pass, fail, pending, skipping or cancel.
+ */
+export function checkBucket(entry: Record<string, unknown>): string {
+  const status = str(entry.status)?.toUpperCase();
+  if (status !== undefined) {
+    if (status !== 'COMPLETED') return 'pending';
+    const conclusion = (str(entry.conclusion) ?? '').toUpperCase();
+    if (conclusion === 'SKIPPED') return 'skipping';
+    if (conclusion === 'CANCELLED') return 'cancel';
+    return concludedFailing(conclusion) || conclusion === '' ? 'fail' : 'pass';
+  }
+  const state = (str(entry.state) ?? '').toUpperCase();
+  if (state === 'SUCCESS') return 'pass';
+  if (state === 'PENDING' || state === 'EXPECTED') return 'pending';
+  return 'fail';
+}
+
+/**
+ * Parse the arm guard's read of a PR: `gh pr view --json
+ * state,isDraft,labels,reviewDecision,statusCheckRollup,headRefOid,headRefName,baseRefName,isCrossRepository,changedFiles`
+ * plus the PR's file list (`files`, each `{ filename, previous_filename }`).
+ *
+ * @param raw - The parsed `gh pr view` JSON.
+ * @param files - Every file entry from the files endpoint, or `null` when it could not be read.
+ * @param where - `owner/name#n`, for the error.
+ * @returns The facts; `files` is `null` unless the list is whole (its length equals `changedFiles`).
+ * @throws {ForgeError} When the answer has no state or head.
+ */
+export function parseArmFacts(raw: unknown, files: unknown[] | null, where: string): ArmFacts {
+  const view = record(raw);
+  const headRefOid = str(view?.headRefOid);
+  const state = str(view?.state);
+  if (view === undefined || headRefOid === undefined || state === undefined) {
+    throw new ForgeError(`gh returned an unreadable pull request for ${where}`);
+  }
+  const rollup = Array.isArray(view.statusCheckRollup) ? view.statusCheckRollup : [];
+  const checks = rollup.flatMap((entry) => {
+    const check = record(entry);
+    if (check === undefined) return [];
+    return [
+      {
+        name: str(check.name) ?? str(check.context) ?? '(unnamed check)',
+        bucket: checkBucket(check),
+      },
+    ];
+  });
+  const labels = (Array.isArray(view.labels) ? view.labels : []).flatMap((label) => {
+    const name = str(record(label)?.name);
+    return name === undefined ? [] : [{ name }];
+  });
+  let paths: string[] | null = null;
+  // A count of 0 is what GitHub reports while it is still working out a new
+  // PR's diff, so it never stands for "touches nothing".
+  if (
+    files !== null &&
+    typeof view.changedFiles === 'number' &&
+    view.changedFiles > 0 &&
+    files.length === view.changedFiles
+  ) {
+    paths = [];
+    for (const entry of files) {
+      const file = record(entry);
+      const name = str(file?.filename);
+      if (name === undefined) {
+        paths = null;
+        break;
+      }
+      paths.push(name);
+      const previous = str(file?.previous_filename);
+      if (previous !== undefined && previous !== '') paths.push(previous);
+    }
+  }
+  return {
+    state: state.toUpperCase(),
+    isDraft: view.isDraft === true,
+    labels,
+    reviewDecision: str(view.reviewDecision) ?? '',
+    checks,
+    headRefOid,
+    headRefName: str(view.headRefName) ?? '',
+    baseRefName: str(view.baseRefName) ?? '',
+    // Only an explicit false is "not a fork"; anything else the guard refuses.
+    isCrossRepository: view.isCrossRepository === false ? false : true,
+    files: paths,
+  };
+}
+
+/**
+ * Parse `gh run list --json databaseId,displayTitle,headSha,status,conclusion,url`.
+ *
+ * @param raw - The parsed JSON.
+ * @returns The runs that parse; others are dropped.
+ */
+export function parseWorkflowRuns(raw: unknown): WorkflowRun[] {
+  if (!Array.isArray(raw)) throw new ForgeError('gh run list returned something other than a list');
+  return raw.flatMap((entry) => {
+    const run = record(entry);
+    if (run === undefined || typeof run.databaseId !== 'number') return [];
+    return [
+      {
+        id: run.databaseId,
+        title: str(run.displayTitle) ?? '',
+        headSha: (str(run.headSha) ?? '').toLowerCase(),
+        completed: (str(run.status) ?? '').toLowerCase() === 'completed',
+        conclusion: (str(run.conclusion) ?? '').toLowerCase(),
+        url: str(run.url) ?? null,
+      },
+    ];
+  });
+}
+
+/**
+ * Parse `gh pr view --json state,mergeCommit,author`.
+ *
+ * @param raw - The parsed JSON.
+ * @param where - `owner/name#n`, for the error.
+ * @returns The merge info; `mergeCommit` only when it is a full SHA.
+ * @throws {ForgeError} When the answer has no recognizable state.
+ */
+export function parseMergeInfo(raw: unknown, where: string): MergeInfo {
+  const view = record(raw);
+  const state = str(view?.state)?.toUpperCase();
+  if (view === undefined || !['OPEN', 'MERGED', 'CLOSED'].includes(state ?? '')) {
+    throw new ForgeError(`gh returned an unreadable pull request for ${where}`);
+  }
+  const oid = str(record(view.mergeCommit)?.oid)?.toLowerCase();
+  return {
+    state: (state as string).toLowerCase() as MergeInfo['state'],
+    mergeCommit: oid !== undefined && isFullSha(oid) ? oid : null,
+    author: str(record(view.author)?.login) ?? null,
   };
 }
 
@@ -545,6 +688,144 @@ export function createGithubForge(options: GithubForgeOptions): Forge {
       } finally {
         rmSync(dir, { recursive: true, force: true });
       }
+    },
+
+    async armFacts(pr) {
+      const where = `${target.repo}#${pr}`;
+      const raw = await ghJson(
+        [
+          'pr',
+          'view',
+          String(pr),
+          '-R',
+          repoArg,
+          '--json',
+          'state,isDraft,labels,reviewDecision,statusCheckRollup,headRefOid,headRefName,baseRefName,isCrossRepository,changedFiles',
+        ],
+        `reading ${where} for the arm guard`
+      );
+      // The files endpoint pages 100 at a time and stops at 3,000; a list that
+      // comes back short is never read as the whole list (parseArmFacts).
+      let files: unknown[] | null = null;
+      try {
+        const out = await gh(
+          [
+            'api',
+            ...hostArgs,
+            '--paginate',
+            '--jq',
+            '.[] | {filename, previous_filename}',
+            `repos/${target.repo}/pulls/${pr}/files?per_page=100`,
+          ],
+          `listing the files of ${where}`
+        );
+        files = [];
+        for (const line of out.split('\n')) {
+          if (line.trim() === '') continue;
+          const file = safeJson(line);
+          if (record(file) === undefined) {
+            files = null;
+            break;
+          }
+          files.push(file);
+        }
+      } catch {
+        files = null;
+      }
+      const facts = parseArmFacts(raw, files, where);
+      // The file list is the head's only if the head did not move while it was read.
+      if (facts.files !== null) {
+        const again = record(
+          await ghJson(
+            ['pr', 'view', String(pr), '-R', repoArg, '--json', 'headRefOid'],
+            `reading ${where} again for the arm guard`
+          )
+        );
+        if (str(again?.headRefOid) !== facts.headRefOid) return { ...facts, files: null };
+      }
+      return facts;
+    },
+
+    async mergeInfo(pr) {
+      const where = `${target.repo}#${pr}`;
+      const raw = await ghJson(
+        ['pr', 'view', String(pr), '-R', repoArg, '--json', 'state,mergeCommit,author'],
+        `reading how ${where} merged`
+      );
+      return parseMergeInfo(raw, where);
+    },
+
+    async comment(pr, body) {
+      const dir = mkdtempSync(path.join(os.tmpdir(), 'flow-comment-'));
+      const bodyFile = path.join(dir, 'body.md');
+      try {
+        writeFileSync(bodyFile, body);
+        await gh(
+          ['pr', 'comment', String(pr), '-R', repoArg, '--body-file', bodyFile],
+          `commenting on ${target.repo}#${pr}`
+        );
+      } finally {
+        rmSync(dir, { recursive: true, force: true });
+      }
+    },
+
+    async dispatchWorkflow(workflow, ref, inputs) {
+      // Checked again here, whoever calls: nothing reaches gh that is not
+      // exactly a workflow name, a branch name, a full SHA and a nonce.
+      if (
+        !isWorkflowName(workflow) ||
+        !isBranchName(ref) ||
+        !isFullSha(inputs.sha) ||
+        !isNonce(inputs.nonce)
+      ) {
+        throw new ForgeError(
+          `refusing to dispatch ${JSON.stringify(workflow)} on ${JSON.stringify(ref)}: an argument is not what it should be`
+        );
+      }
+      await gh(
+        [
+          'workflow',
+          'run',
+          workflow,
+          '--ref',
+          ref,
+          '-f',
+          `sha=${inputs.sha}`,
+          '-f',
+          `nonce=${inputs.nonce}`,
+          '-R',
+          repoArg,
+        ],
+        `dispatching ${workflow} on ${target.repo} ${ref}`
+      );
+    },
+
+    async workflowRuns(workflow, branch) {
+      if (!isWorkflowName(workflow) || !isBranchName(branch)) {
+        throw new ForgeError(
+          `refusing to list runs of ${JSON.stringify(workflow)} on ${JSON.stringify(branch)}`
+        );
+      }
+      const raw = await ghJson(
+        [
+          'run',
+          'list',
+          '-R',
+          repoArg,
+          '--workflow',
+          workflow,
+          '--branch',
+          branch,
+          '--event',
+          'workflow_dispatch',
+          '--limit',
+          '50',
+          '--json',
+          'databaseId,displayTitle,headSha,status,conclusion,url',
+        ],
+        `listing runs of ${workflow} on ${target.repo} ${branch}`
+      );
+      return parseWorkflowRuns(raw);
     },
 
     async requiredChecks(base) {

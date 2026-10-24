@@ -87,6 +87,10 @@
     "baseline": 1077,
     "target": 1077
   },
+  "docs/landing.mdx": {
+    "baseline": 786,
+    "target": 786
+  },
   "docs/parallel-drain.mdx": {
     "baseline": 395,
     "target": 353

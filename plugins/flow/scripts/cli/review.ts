@@ -11,7 +11,10 @@
  *    the signed-in account did not write it; else the tracker comment is the
  *    approval of record). The reviewer agent never approves on the forge.
  * 3. When `gates.review.mergeOnApproval` is on, arms the PR at its head, so it
- *    merges when its checks pass. Otherwise a person merges it.
+ *    merges when its checks pass, once the arm guard allows it
+ *    (`land/arm-guard.ts`, run before anything is posted). A refusal still
+ *    ships the approval and says why in `armRefused` (exit 0); a person merges it. Otherwise
+ *    a person merges it.
  * 4. Journals `operator.wait` end (a person) or `review.approved` (the reviewer
  *    agent).
  *
@@ -517,6 +520,8 @@ async function review(ctx: VerbContext): Promise<VerbResult> {
     // approves its reviewed commit; any other run, the head the person names
     // with --head. A PR whose head moved since is refused before anything is posted.
     let armAt: string | null = null;
+    let armRefused: { reason: string; detail: string } | null = null;
+    let handToDrain = false;
     const willArm = pr !== null && target.forge !== null && config.gates.review.mergeOnApproval;
     if (willArm && pr !== null && target.forge !== null) {
       armAt =
@@ -535,7 +540,36 @@ async function review(ctx: VerbContext): Promise<VerbResult> {
             `${identifier}'s PR moved to ${short(now)} since ${short(armAt)} was approved; review the new commits, then ship again`
           );
         }
+        const approved = armAt;
         armAt = now;
+        // The arm guard (DOR-3262), before anything is posted. It is held to
+        // the commit as approved, so a short --head refuses rather than
+        // standing for whatever commit shares its prefix. A refusal still
+        // ships the approval; it only leaves the merge to a person.
+        if (!ctx.dryRun) {
+          // land.preArm checks are left to the drain (preArm: 'defer'): DorkOS
+          // stops this command after a few minutes, long before a browser
+          // suite or a dispatched workflow finishes.
+          const guard = await ctx.armGuard({
+            forge: target.forge,
+            pr: pr.number,
+            reviewedSha: approved,
+            worktree: existing.worktreePath,
+            preArm: 'defer',
+          });
+          if (!guard.ok) {
+            armAt = null;
+            // A drain run approved at its reviewed commit: the drain runs the
+            // checks and arms it once they pass. That is a hand-off, not a
+            // refusal, so armRefused stays null for it.
+            handToDrain =
+              guard.reason === 'pre-arm-deferred' &&
+              isWritableDrain(existing) &&
+              existing.drain.pr?.number === pr.number &&
+              existing.drain.reviewedSha?.toLowerCase() === approved.toLowerCase();
+            if (!handToDrain) armRefused = { reason: guard.reason, detail: guard.detail };
+          }
+        }
       }
     }
 
@@ -582,6 +616,26 @@ async function review(ctx: VerbContext): Promise<VerbResult> {
         if (armAt !== null) {
           await target.forge.arm(pr.number, armAt);
           armed = true;
+        } else if (handToDrain && isWritableDrain(existing)) {
+          await writeDrain(
+            store,
+            existing,
+            (drain) =>
+              drain.pr !== null && drain.pr.number === pr.number
+                ? {
+                    ...drain,
+                    // A person's approval is a fresh request: a pre-arm check
+                    // that refused this commit before runs again.
+                    pr: {
+                      ...drain.pr,
+                      armed: false,
+                      disarmedForReview: true,
+                      armRefusedAt: null,
+                    },
+                  }
+                : undefined,
+            `the approval is posted, but flow could not record that the drain should arm PR #${pr.number}; arm it yourself`
+          );
         }
       }
       recordEvent(
@@ -599,17 +653,25 @@ async function review(ctx: VerbContext): Promise<VerbResult> {
     const checksText = noChecksNote === null ? '' : ` ${noChecksNote}`;
     const armText = armed
       ? ` Armed PR #${pr?.number} to merge when its checks pass.`
-      : pr !== null && !config.gates.review.mergeOnApproval
-        ? ` PR #${pr.number} waits for a person to merge it.`
-        : willArm
-          ? " Approved. Merge it yourself; flow didn't turn on auto-merge because it couldn't tell which commit you approved."
-          : '';
+      : handToDrain
+        ? ` Approved. The drain arms PR #${pr?.number} once its pre-arm checks pass.`
+        : armRefused !== null
+          ? ` Approved, but flow did not arm PR #${pr?.number} (${armRefused.reason}): ${armRefused.detail}. Merge it yourself once that is settled.`
+          : pr !== null && !config.gates.review.mergeOnApproval
+            ? ` PR #${pr.number} waits for a person to merge it.`
+            : willArm
+              ? " Approved. Merge it yourself; flow didn't turn on auto-merge because it couldn't tell which commit you approved."
+              : '';
+    // A refused arm is not a failed approval: it shipped, and armRefused says
+    // why nothing was armed. Exit 5 here would read as "did not ship".
     return {
       json: {
         ok: true,
         dryRun: ctx.dryRun,
         identifier,
         verdict: 'approved',
+        armRefused,
+        armHandedToDrain: handToDrain,
         by,
         pr: pr === null ? null : { number: pr.number, url: pr.url },
         forgeReview,
