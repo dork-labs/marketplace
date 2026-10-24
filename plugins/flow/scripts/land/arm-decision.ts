@@ -98,17 +98,25 @@ export const BUILTIN_SECURITY_GLOBS: readonly string[] = [
   // Build wrappers that download and run a tool.
   '**/gradlew*',
   '**/gradle/wrapper/**',
+  '**/gradle/libs.versions.toml',
+  '**/gradle.properties',
   '**/mvnw*',
   '**/.mvn/**',
   // More toolchains and lockfiles.
   '**/.cargo/config*',
   '**/rust-toolchain*',
   '**/.pnp.cjs',
+  '**/.pnp.loader.mjs',
   '**/*.csproj',
+  '**/nuget.config',
+  '**/Directory.Packages.props',
+  '**/Directory.Build.props',
   '**/packages.lock.json',
   '**/mix.lock',
+  '**/mix.exs',
   '**/pubspec.*',
   '**/Podfile*',
+  '**/*.podspec',
   // Code fetched from elsewhere at checkout.
   '.gitmodules',
   // Flow's own committed config, which holds the commands it runs before arming.

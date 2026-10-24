@@ -8,21 +8,25 @@
  * those can change what a checkout contains or what a merge gives, while every
  * SHA still looks right.
  *
- * So both run git in a scratch repository instead: a blob-less `--no-local`
- * clone of the project over `file://`, into a temp folder, with no template.
- * Every object reaches it through git's fetch protocol, which re-hashes each
- * one and checks that the history connects, so a swapped object fails the
- * fetch rather than reaching the check; the blobs a checkout or a merge needs
- * later are fetched the same way. Its config is fresh, its `info/` is empty,
- * and it has no replace refs. Every git call runs with {@link isolatedGitEnv}:
- * no system or global config, no replace objects, no inherited `GIT_*`
- * variable, no credential prompt.
+ * So both run git in a scratch repository instead: `git init` in a temp
+ * folder with no template, then a blob-less fetch of exactly the commits the
+ * check needs, by SHA, from the project's repository (a plain path, so no URL
+ * decoding). Every object reaches it through git's fetch protocol, which
+ * re-hashes each one and checks that the history connects, so a swapped object
+ * fails the copy rather than reaching the check; the blobs a checkout or a
+ * merge needs later are fetched the same way. Its config is fresh, its `info/`
+ * is empty, it has no replace refs, and background maintenance is off. The
+ * copy runs with `GIT_NO_LAZY_FETCH=1`, so a shallow project cannot set off
+ * an endless chain of lazy fetches; it needs git 2.44 or later, checked once.
+ * Every git call runs with {@link isolatedGitEnv}: no system or global config,
+ * no replace objects, no inherited `GIT_*` variable, no credential prompt,
+ * and a timeout kills git's whole process group.
  *
  * @module @dorkos/flow/land/isolated-git
  */
 
 import { spawn } from 'node:child_process';
-import { existsSync, mkdtempSync, rmSync } from 'node:fs';
+import { mkdtempSync, rmSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 
@@ -81,14 +85,15 @@ export function isolatedGitEnv(
 export function gitWith(cwd: string, env: Readonly<Record<string, string>>): GitRunner {
   return (args, input) =>
     new Promise((resolve) => {
-      let child;
+      let child: ReturnType<typeof spawn>;
       try {
+        // Its own process group, so a timeout stops every git it started.
         child = spawn('git', ['--no-replace-objects', ...args], {
           cwd,
           env: { ...env },
           shell: false,
+          detached: true,
           stdio: ['pipe', 'pipe', 'pipe'],
-          timeout: GIT_TIMEOUT_MS,
         });
       } catch (error) {
         resolve({ code: -1, stdout: '', stderr: (error as Error).message });
@@ -96,16 +101,52 @@ export function gitWith(cwd: string, env: Readonly<Record<string, string>>): Git
       }
       let stdout = '';
       let stderr = '';
-      child.stdout.setEncoding('utf8').on('data', (chunk: string) => (stdout += chunk));
-      child.stderr.setEncoding('utf8').on('data', (chunk: string) => (stderr += chunk));
-      child.on('error', (error) => resolve({ code: -1, stdout, stderr: error.message }));
-      child.on('close', (code) => resolve({ code: code ?? -1, stdout, stderr }));
-      child.stdin.on('error', () => undefined);
-      child.stdin.end(input ?? '');
+      let settled = false;
+      const finish = (result: GitResult) => {
+        if (settled) return;
+        settled = true;
+        clearTimeout(timer);
+        resolve(result);
+      };
+      const timer = setTimeout(() => {
+        try {
+          if (child.pid !== undefined) process.kill(-child.pid, 'SIGKILL');
+        } catch {
+          // Already gone.
+        }
+        finish({ code: -1, stdout, stderr: `${stderr}\ngit timed out after ${GIT_TIMEOUT_MS} ms` });
+      }, GIT_TIMEOUT_MS);
+      child.stdout?.setEncoding('utf8').on('data', (chunk: string) => (stdout += chunk));
+      child.stderr?.setEncoding('utf8').on('data', (chunk: string) => (stderr += chunk));
+      child.on('error', (error) => finish({ code: -1, stdout, stderr: error.message }));
+      child.on('close', (code) => finish({ code: code ?? -1, stdout, stderr }));
+      child.stdin?.on('error', () => undefined);
+      child.stdin?.end(input ?? '');
     });
 }
 
-/** A scratch repository borrowing a project's objects. */
+/** The first git that has `GIT_NO_LAZY_FETCH` (2.44). */
+const MIN_GIT: readonly [number, number] = [2, 44];
+
+/** Whether this git is new enough, asked once per process (only an answer is kept). */
+let gitVersionProbe: Promise<boolean> | undefined;
+
+/** Whether git is at least {@link MIN_GIT}. */
+function gitIsNewEnough(env: Readonly<Record<string, string>>): Promise<boolean> {
+  gitVersionProbe ??= gitWith(
+    os.tmpdir(),
+    env
+  )(['version']).then((result) => {
+    if (result.code === -1) gitVersionProbe = undefined;
+    const match = /git version (\d+)\.(\d+)/.exec(result.stdout);
+    if (match === null) return false;
+    const [major, minor] = [Number(match[1]), Number(match[2])];
+    return major > MIN_GIT[0] || (major === MIN_GIT[0] && minor >= MIN_GIT[1]);
+  });
+  return gitVersionProbe;
+}
+
+/** A scratch repository holding verified copies of a project's commits. */
 export interface ScratchRepo {
   /** Its folder (the work tree; the repository is `<dir>/.git`). */
   dir: string;
@@ -126,19 +167,25 @@ const UPLOAD_PACK =
  * Make a scratch repository holding verified copies of `source`'s commits.
  *
  * @param source - Any folder inside the project's repository.
- * @param shas - Commits it must hold (fetched by SHA when the clone lacks them).
- * @param opts - `refuseShallow`: refuse a shallow project, whose history
- *   stops where a merge base may lie (and whose `shallow` file is worker-writable).
+ * @param shas - The commits it must hold, fetched by SHA.
+ * @param opts - `depth`: fetch only this much history (a `run:` checkout
+ *   needs one commit). `refuseShallow`: refuse when the copy is shallow, whose
+ *   history may stop before a merge base (the squash check).
  * @returns The scratch repository, or why it could not be made.
  */
 export async function scratchRepo(
   source: string,
   shas: readonly string[],
-  opts: { refuseShallow?: boolean } = {}
+  opts: { depth?: number; refuseShallow?: boolean } = {}
 ): Promise<ScratchRepo | string> {
   // Checked whole before git sees any of them, so none can be read as an option.
-  if (!shas.every((sha) => isFullSha(sha))) return 'every commit to copy must be a full SHA';
+  if (shas.length === 0 || !shas.every((sha) => isFullSha(sha))) {
+    return 'every commit to copy must be a full SHA';
+  }
   const env = isolatedGitEnv();
+  if (!(await gitIsNewEnough(env))) {
+    return `git too old for a safe copy: it needs git ${MIN_GIT.join('.')} or later`;
+  }
   const common = await gitWith(
     source,
     env
@@ -146,9 +193,6 @@ export async function scratchRepo(
   const commonDir = common.stdout.trim();
   if (common.code !== 0 || commonDir === '' || !path.isAbsolute(commonDir)) {
     return `git could not find the repository of ${source}`;
-  }
-  if (opts.refuseShallow && existsSync(path.join(commonDir, 'shallow'))) {
-    return `the repository at ${commonDir} is shallow, so its history may stop before the merge base`;
   }
   let dir: string;
   try {
@@ -163,43 +207,55 @@ export async function scratchRepo(
       // A folder the command left read-only stays behind in the temp folder.
     }
   };
-  const outside = gitWith(os.tmpdir(), env);
-  const cloned = await outside([
-    'clone',
-    '--quiet',
-    '--no-checkout',
-    '--no-local',
-    '--no-tags',
-    '--template=',
-    '--filter=blob:none',
-    `--upload-pack=${UPLOAD_PACK}`,
-    `file://${commonDir}`,
-    dir,
-  ]);
-  if (cloned.code !== 0) {
-    remove();
-    return `could not copy the repository's commits into a scratch repository: ${cloned.stderr.trim() || `git exited ${cloned.code}`}`;
-  }
   const git = gitWith(dir, env);
-  // Later fetches (the blobs a checkout or merge needs) use the same upload-pack.
-  const configured = await git(['config', 'remote.origin.uploadpack', UPLOAD_PACK]);
-  if (configured.code !== 0) {
+  const copying = gitWith(dir, { ...env, GIT_NO_LAZY_FETCH: '1' });
+  const steps: string[][] = [
+    ['init', '--quiet', '--template='],
+    ['config', 'core.repositoryformatversion', '1'],
+    ['config', 'extensions.partialClone', 'origin'],
+    ['config', 'remote.origin.url', commonDir],
+    ['config', 'remote.origin.uploadpack', UPLOAD_PACK],
+    ['config', 'remote.origin.promisor', 'true'],
+    ['config', 'remote.origin.partialclonefilter', 'blob:none'],
+    ['config', 'maintenance.auto', 'false'],
+    ['config', 'gc.auto', '0'],
+    ['config', 'fetch.writeCommitGraph', 'false'],
+  ];
+  for (const step of steps) {
+    const result = await git(step);
+    if (result.code !== 0) {
+      remove();
+      return `could not set up a scratch repository: ${result.stderr.trim() || step.join(' ')}`;
+    }
+  }
+  const fetched = await copying([
+    'fetch',
+    '--quiet',
+    '--no-tags',
+    '--no-write-fetch-head',
+    '--filter=blob:none',
+    // A shallow project's boundary is recorded, never silently dropped, so
+    // history walks stop at it and the copy knows it is shallow.
+    '--update-shallow',
+    ...(opts.depth === undefined ? [] : [`--depth=${opts.depth}`]),
+    'origin',
+    ...shas,
+  ]);
+  if (fetched.code !== 0) {
     remove();
-    return 'could not configure the scratch repository';
+    return `could not copy the commits from the repository: ${fetched.stderr.trim() || `git exited ${fetched.code}`}`;
   }
   for (const sha of shas) {
-    if ((await git(['cat-file', '-e', `${sha}^{commit}`])).code === 0) continue;
-    const fetched = await git([
-      'fetch',
-      '--quiet',
-      '--no-tags',
-      '--filter=blob:none',
-      'origin',
-      sha,
-    ]);
-    if (fetched.code !== 0 || (await git(['cat-file', '-e', `${sha}^{commit}`])).code !== 0) {
+    if ((await git(['cat-file', '-e', `${sha}^{commit}`])).code !== 0) {
       remove();
-      return `the commit ${sha.slice(0, 7)} could not be copied from the repository: ${fetched.stderr.trim() || 'not there'}`;
+      return `the commit ${sha.slice(0, 7)} did not arrive in the scratch repository`;
+    }
+  }
+  if (opts.refuseShallow) {
+    const shallow = await git(['rev-parse', '--is-shallow-repository']);
+    if (shallow.code !== 0 || shallow.stdout.trim() !== 'false') {
+      remove();
+      return 'the repository is shallow, so its history may stop before the merge base';
     }
   }
   return { dir, git, remove };

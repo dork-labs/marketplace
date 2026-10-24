@@ -18,9 +18,10 @@
  *   that could not run (a missing commit) is `unverified`, which is reported
  *   too and never counts as a pass. A git that cannot do the merge safely
  *   (before 2.40, or any merge-tree exit but 0 or 1) fails.
- * - The check runs in a scratch repository that reads the project's objects
- *   and nothing else ({@link verifySquashIsolated}), so the project's config,
- *   `info/attributes`, merge drivers and replace refs never reach the merge.
+ * - The check runs in a scratch repository holding verified copies of the
+ *   two commits' history ({@link verifySquashIsolated}), so the project's
+ *   config, `info/attributes`, merge drivers, replace refs and an overwritten
+ *   object never reach the merge. A shallow project is `unverified`.
  *
  * A verdict and a report only: nothing here reverts, pushes, or touches a
  * status or label. Every git call is a fixed argv with full SHAs checked
@@ -312,7 +313,7 @@ export async function verifySquash(
 }
 
 /**
- * {@link verifySquash} in a scratch repository that reads `source`'s objects
+ * {@link verifySquash} in a scratch repository holding verified copies of `source`'s commits
  * and nothing else (`land/isolated-git.ts`): the project's config, its
  * `info/attributes`, merge drivers, `merge.default` and replace refs, all of
  * which a worker can write, never reach the merge.

@@ -19,7 +19,7 @@ Flow doesn't arm a PR when:
 - it comes from a fork;
 - it's closed or a draft, carries `hold`, `do-not-merge`, `wip` or `blocked`, or a reviewer asked for changes.
 
-Package manifests, lockfiles and `.agents/flow/config.json` are always security paths. Your repo adds its own in `land.securityPaths`.
+Package manifests, lockfiles, build wrappers (`gradlew`, `mvnw`), toolchain files (`.cargo/config`, `rust-toolchain`) and `.agents/flow/config.json` are always security paths, matched in any case. Your repo adds its own in `land.securityPaths`.
 
 A refused `flow pr --arm` still opens the PR, unarmed, and the drain asks again on later passes. A refused `flow review --approve` still posts your approval, and you merge the PR yourself. Both say why in `armRefused`. Name the whole commit in `--head`: a short SHA ships but arms nothing.
 
@@ -52,7 +52,7 @@ Have your release process turn it on before a release and off after. The freeze 
 
 ## After the merge: the squash check
 
-Once a PR has merged, flow checks that the squash commit on `main` is what a clean review saw. It passes only when merging the reviewed commit into the squash's parent gives exactly the squash's tree, which also covers `main` moving lines nearby. A matching patch-id is noted but never enough: it ignores whitespace and where a change sits. A conflict, any other difference, or a merge with no clean review fails. Flow then comments on the PR, naming its author and `land.securityPaths.reviewer`, with both trees and the files that differ. A check that couldn't run (a commit missing, say) is retried, then reported too; a git too old to merge safely fails. Flow reverts nothing. The drain runs the check by itself. Outside the drain, run `flow squash-check <id>`.
+Once a PR has merged, flow checks that the squash commit on `main` is what a clean review saw. It passes only when merging the reviewed commit into the squash's parent gives exactly the squash's tree, which also covers `main` moving lines nearby. A matching patch-id is noted but never enough: it ignores whitespace and where a change sits. A conflict, any other difference, or a merge with no clean review fails. Flow then comments on the PR, naming its author and `land.securityPaths.reviewer`, with both trees and the files that differ. A check that couldn't run (a commit missing, say) is retried, then reported too. A shallow clone can't be squash-checked, and every merge there says so. A git too old to merge safely fails. Flow reverts nothing. The drain runs the check by itself. Outside the drain, run `flow squash-check <id>`.
 
 ## What this is not
 

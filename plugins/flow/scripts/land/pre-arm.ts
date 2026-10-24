@@ -184,7 +184,7 @@ async function runCommand(
   if (!isFullSha(target.reviewedSha)) {
     return `the reviewed commit "${target.reviewedSha}" is not a full SHA`;
   }
-  const scratch = await scratchRepo(target.worktree, [target.reviewedSha]);
+  const scratch = await scratchRepo(target.worktree, [target.reviewedSha], { depth: 1 });
   if (typeof scratch === 'string')
     return `could not make a checkout to run "${entry.run}": ${scratch}`;
   let home: string | null = null;

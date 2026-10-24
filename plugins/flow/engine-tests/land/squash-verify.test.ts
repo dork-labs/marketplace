@@ -32,6 +32,7 @@ import {
   type GitResult,
   type GitRunner,
 } from '../../scripts/land/squash-verify.ts';
+import { scratchRepo } from '../../scripts/land/isolated-git.ts';
 
 let repo: string;
 
@@ -244,15 +245,57 @@ describe('verifySquash', () => {
   });
 
   it('a shallow project is unverified, never a pass or a false alarm', async () => {
+    // History before the branch point, then a shallow boundary that cuts it.
+    git('checkout', '-q', 'main');
+    write('c.txt', 'c\n');
+    const cut = commitAll('more history on main');
+    git('checkout', '-q', '-B', 'feature');
     write('a.txt', lines({ 10: 'line 10, changed' }));
     const reviewed = commitAll('feature');
     const squash = squashOnto(reviewed);
-    writeFileSync(path.join(repo, '.git', 'shallow'), `${git('rev-parse', 'main~1')}\n`);
+    writeFileSync(path.join(repo, '.git', 'shallow'), `${cut}\n`);
     expect(await verifySquashIsolated(repo, { squash, reviewed })).toMatchObject({
       verdict: 'unverified',
       reason: expect.stringMatching(/shallow/),
     });
   });
+
+  it('copies from a --depth 1 clone without running away, and calls it shallow', async () => {
+    write('a.txt', lines({ 10: 'line 10, changed' }));
+    commitAll('feature');
+    const shallow = `${repo}-depth1`;
+    execFileSync('git', [
+      'clone',
+      '-q',
+      '--depth',
+      '1',
+      '--branch',
+      'feature',
+      `file://${repo}`,
+      shallow,
+    ]);
+    try {
+      const tip = execFileSync('git', ['rev-parse', 'HEAD'], {
+        cwd: shallow,
+        encoding: 'utf8',
+      }).trim();
+      const started = Date.now();
+      const copy = await scratchRepo(shallow, [tip], { depth: 1 });
+      expect(typeof copy).not.toBe('string');
+      if (typeof copy !== 'string') {
+        const checkout = await copy.git(['checkout', '--quiet', '--detach', tip]);
+        expect(checkout.code).toBe(0);
+        expect(readFileSync(path.join(copy.dir, 'a.txt'), 'utf8')).toBe(
+          lines({ 10: 'line 10, changed' })
+        );
+        copy.remove();
+      }
+      expect(Date.now() - started).toBeLessThan(20_000);
+      expect(await scratchRepo(shallow, [tip], { refuseShallow: true })).toMatch(/shallow/);
+    } finally {
+      rmSync(shallow, { recursive: true, force: true });
+    }
+  }, 60_000);
 
   it('refuses SHAs that are not whole before any git call', async () => {
     const head = git('rev-parse', 'HEAD');
