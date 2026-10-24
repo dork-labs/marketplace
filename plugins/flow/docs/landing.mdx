@@ -19,7 +19,7 @@ Flow doesn't arm a PR when:
 - it comes from a fork;
 - it's closed or a draft, carries `hold`, `do-not-merge`, `wip` or `blocked`, or a reviewer asked for changes.
 
-Package manifests, lockfiles, build wrappers (`gradlew`, `mvnw`), toolchain files (`.cargo/config`, `rust-toolchain`) and `.agents/flow/config.json` are always security paths, matched in any case. Your repo adds its own in `land.securityPaths`.
+Manifests, lockfiles, build wrappers (`gradlew`, `mvnw`), toolchains (`.cargo/config`, `rust-toolchain`), patches (`patches/`, `.yarn/patches/`) and `.agents/flow/config.json` always count as security paths, any case. Your repo adds its own in `land.securityPaths`.
 
 A refused `flow pr --arm` still opens the PR, unarmed, and the drain asks again on later passes. A refused `flow review --approve` still posts your approval, and you merge the PR yourself. Both say why in `armRefused`. Name the whole commit in `--head`: a short SHA ships but arms nothing.
 

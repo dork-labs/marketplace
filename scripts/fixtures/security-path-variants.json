@@ -1,7 +1,7 @@
 {
   "about": [
-    "Case and Unicode spellings of security paths, shared with dork-labs/dorkos so both repos test the same list. Copy this file as-is.",
-    "Every path in `match` must count as a built-in security path once it is folded the way a case-insensitive disk opens it (at least `normalize('NFKC')` and `toLowerCase()`); no path in `noMatch` may."
+    "Case and Unicode spellings of security paths, for dork-labs/dorkos to copy as-is (its #3191) so both repos test the same list.",
+    "Every path in `match` must count as a built-in security path when folded at least as broadly as a case-insensitive disk does (at least `normalize('NFKC')` and `toLowerCase()`); no path in `noMatch` may."
   ],
   "match": [
     "Package.json",

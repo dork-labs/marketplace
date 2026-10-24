@@ -88,7 +88,7 @@ function payload(mutation: string): unknown {
   return JSON.parse(out) as unknown;
 }
 
-/** The case and Unicode spellings shared with dork-labs/dorkos (#3191). */
+/** The case and Unicode spellings dork-labs/dorkos copies as-is (its #3191). */
 const variantsPath = path.resolve(here, '../../../../scripts/fixtures/security-path-variants.json');
 const variants = existsSync(variantsPath)
   ? (JSON.parse(readFileSync(variantsPath, 'utf8')) as { match: string[]; noMatch: string[] })

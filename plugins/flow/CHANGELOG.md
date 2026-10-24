@@ -11,7 +11,7 @@ you until you **reinstall it** (Marketplace → flow → reinstall, or re-run yo
 - macOS's APFS opens `pacKage.json` (a Kelvin sign for the k), `PACKAGE.JSON` and `styles.cß` (for `styles.css`) as the same files as their plain spellings. The built-in security paths only matched plain ASCII case, so those spellings slipped past the security label. Flow now counts a path as matching when its spelling as written, its full case fold (`ß` as `ss`, ligatures as their letters) or its NFKC form does. To be safe that also covers fullwidth letters, which APFS itself keeps apart.
 - `land.preArm` entries match their paths the same way, so a PR that touches `SRC/App.ts` runs the entry for `src/**`.
 - Folding only ever adds matches; everything that matched before still does.
-- The root `patches/` folder, where pnpm and patch-package keep patches to installed dependencies, is now a built-in security path.
+- The root `patches/` folder (pnpm, patch-package) and `.yarn/patches/` (Yarn), where patches to installed dependencies live, are now built-in security paths.
 - Your own `land.securityPaths.globs` and `pattern` still match exactly as you wrote them.
 
 ## 0.60.0
