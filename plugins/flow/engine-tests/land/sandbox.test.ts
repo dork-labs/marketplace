@@ -39,7 +39,10 @@ beforeEach(() => {
 });
 
 afterEach(() => {
-  process.env.TMPDIR = saved;
+  // Assigning undefined to process.env stores the string "undefined", so a
+  // runner with no TMPDIR (Linux CI) would point every later test there.
+  if (saved === undefined) delete process.env.TMPDIR;
+  else process.env.TMPDIR = saved;
   rmSync(tmp, { recursive: true, force: true });
 });
 
