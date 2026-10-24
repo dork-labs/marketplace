@@ -26,7 +26,7 @@
  */
 
 import { spawn } from 'node:child_process';
-import { chmodSync, lstatSync, mkdirSync, mkdtempSync, rmSync } from 'node:fs';
+import { chmodSync, lstatSync, mkdirSync, mkdtempSync, rmSync, statSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 
@@ -59,11 +59,23 @@ const SYSTEM_PATH: readonly string[] = [
 ];
 
 /**
- * The PATH every isolated git call gets: the system's folders only. Never the
- * agent's PATH, which a worker can point at a folder of its own, and not
- * node's folder either (under nvm a user-writable one).
+ * The PATH every isolated git call gets: the system folders that only root
+ * can write to, read at run time. Never the agent's PATH, and never a folder
+ * the user owns (Homebrew's `/opt/homebrew/bin`, node's folder under nvm),
+ * where a worker could plant a `git` that lies to the checks.
+ *
+ * @returns The PATH.
  */
-export const GIT_PATH: string = SYSTEM_PATH.join(path.delimiter);
+export function gitPath(): string {
+  return SYSTEM_PATH.filter((dir) => {
+    try {
+      const info = statSync(dir);
+      return info.isDirectory() && info.uid === 0 && (info.mode & 0o022) === 0;
+    } catch {
+      return false;
+    }
+  }).join(path.delimiter);
+}
 
 /**
  * The PATH every `run:` command gets: the folder of the node running flow (so
@@ -131,7 +143,7 @@ export function privateTempDir(prefix: string): string | { error: string } {
 }
 
 /**
- * The environment every isolated git call gets: {@link GIT_PATH}, the locale,
+ * The environment every isolated git call gets: {@link gitPath}, the locale,
  * and the switches that keep git from reading anything but the scratch
  * repository.
  *
@@ -148,7 +160,7 @@ export function isolatedGitEnv(
     GIT_TERMINAL_PROMPT: '0',
     GIT_ATTR_NOSYSTEM: '1',
   };
-  env.PATH = GIT_PATH;
+  env.PATH = gitPath();
   for (const key of ['LANG', 'TMPDIR']) {
     const value = from[key];
     if (value !== undefined) env[key] = value;

@@ -364,10 +364,13 @@ Before every arm (`flow pr --arm`, `flow review --approve` with
 4. it touches a security path and has no `securityPaths.label`;
 5. a release freeze is on (`flow freeze on`);
 6. it comes from a fork;
-7. it changes a lockfile or package manifest while another such PR into `main`
+7. it changes a dependency file (any built-in security path but flow's config)
+   while another such PR into `main`
    is in the merge queue or armed, or flow cannot read the queue to tell. A
    queued or armed PR with more than 100 changed files counts as one, and two
-   arms at the same moment can still both see an empty queue;
+   arms at the same moment can still both see an empty queue. A queue flow can't
+   read in full (over 100 entries, over 500 open PRs into `main`, or a GitHub
+   without merge queues) refuses every dependency PR;
 
 and also when it is closed, a draft, labelled `hold`, `do-not-merge`, `wip` or
 `blocked`, or a reviewer asked for changes. Then it runs the `preArm` entries
