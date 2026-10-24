@@ -14,9 +14,11 @@ import {
   rmSync,
   statSync,
   symlinkSync,
+  writeFileSync,
 } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
 import { realProcessRunner } from '../../scripts/cli/context.ts';
@@ -120,6 +122,36 @@ describe('a process-group run', () => {
     expect(result.code).toBe(0);
     expect(Date.now() - started).toBeLessThan(3_900);
   });
+
+  it.each(['SIGTERM', 'SIGHUP'] as const)(
+    "when flow is stopped with %s mid-check, the check's group goes too",
+    async (signal) => {
+      const script = path.join(tmp, 'flow-like.ts');
+      const pidFile = path.join(tmp, `${signal}.pid`);
+      const context = fileURLToPath(new URL('../../scripts/cli/context.ts', import.meta.url));
+      writeFileSync(
+        script,
+        `import { realProcessRunner } from ${JSON.stringify(context)};\n` +
+          `void realProcessRunner('/bin/sh', ['-c', 'echo $$ > ${pidFile}; sleep 30'], { timeoutMs: 60_000, processGroup: true });\n` +
+          `setTimeout(() => process.kill(process.pid, '${signal}'), 1_500);\n`
+      );
+      // The signal ends it, as it would have without flow's handler (the plain
+      // runner reports a death by signal as a failure).
+      const ended = await realProcessRunner(
+        process.execPath,
+        ['--experimental-strip-types', '--no-warnings', script],
+        { timeoutMs: 20_000 }
+      ).then(
+        (result) => `exit ${result.code}`,
+        (error: Error & { signal?: string }) => error.signal ?? error.message
+      );
+      expect(ended).toBe(signal);
+      const pid = Number(readFileSync(pidFile, 'utf8').trim());
+      await new Promise((r) => setTimeout(r, 300));
+      expect(alive(pid)).toBe(false);
+    },
+    30_000
+  );
 
   it('returns the exit code and output like the plain runner', async () => {
     const result = await realProcessRunner('/bin/sh', ['-c', 'echo out; echo err >&2; exit 3'], {

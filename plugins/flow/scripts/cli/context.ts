@@ -366,6 +366,20 @@ function runInGroup(
     if (!exitHookInstalled) {
       exitHookInstalled = true;
       process.on('exit', stopLiveGroups);
+      // A scheduler or a closed terminal stops flow with SIGTERM or SIGHUP, and
+      // 'exit' never fires for those: stop the groups, then let the signal do
+      // what it would have done. Where flow has its own handler for it, that
+      // handler stays in charge.
+      for (const signal of ['SIGTERM', 'SIGHUP'] as const) {
+        const onSignal = () => {
+          stopLiveGroups();
+          if (process.listenerCount(signal) === 1) {
+            process.removeListener(signal, onSignal);
+            process.kill(process.pid, signal);
+          }
+        };
+        process.on(signal, onSignal);
+      }
     }
     if (child.pid !== undefined) liveGroups.add(child.pid);
     let stdout = '';

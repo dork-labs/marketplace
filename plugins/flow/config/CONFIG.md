@@ -370,7 +370,7 @@ Before every arm (`flow pr --arm`, `flow review --approve` with
    queued or armed PR with more than 100 changed files counts as one, and two
    arms at the same moment can still both see an empty queue. A queue flow can't
    read in full (over 100 entries, over 500 open PRs into `main`, or a GitHub
-   without merge queues) refuses every dependency PR;
+   Enterprise Server too old to know merge queues) refuses every dependency PR;
 
 and also when it is closed, a draft, labelled `hold`, `do-not-merge`, `wip` or
 `blocked`, or a reviewer asked for changes. Then it runs the `preArm` entries
