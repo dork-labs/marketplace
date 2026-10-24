@@ -29,6 +29,7 @@ import type { LandConfig } from '../config-schema.ts';
 import type { Forge } from '../forge/types.ts';
 import { ARM_BASE, decideArm, type ArmPolicy, type RefusalSlug } from './arm-decision.ts';
 import { readBaseLand } from './base-config.ts';
+import { dependencyConflict, touchesDependency } from './dependency-queue.ts';
 import { readFreeze } from './freeze.ts';
 import { describeEntry, entryTouched, runPreArm, type PreArmOutcome } from './pre-arm.ts';
 
@@ -40,7 +41,13 @@ export const WORKFLOW_SECURITY_GLOBS: readonly string[] = [
 
 /** Why the guard refused, beyond the decision's own reasons. */
 export type GuardRefusal =
-  RefusalSlug | 'config-unreadable' | 'forge-unreadable' | 'pre-arm-failed' | 'pre-arm-deferred';
+  | RefusalSlug
+  | 'config-unreadable'
+  | 'forge-unreadable'
+  | 'pre-arm-failed'
+  | 'pre-arm-deferred'
+  | 'dependency-queue-busy'
+  | 'dependency-queue-unreadable';
 
 /** The guard's answer. */
 export type GuardResult =
@@ -150,6 +157,19 @@ export async function guardArm(input: GuardInput, io: GuardIo): Promise<GuardRes
     policy
   );
   if (decision.verdict === 'REFUSE') return early(decision.reason, decision.detail);
+
+  // One dependency PR at a time: refused, and asked again next pass, while
+  // another lockfile or manifest PR is queued or armed (fails closed).
+  if (touchesDependency(facts.files)) {
+    let queue = null;
+    try {
+      queue = (await input.forge.dependencyQueue?.(ARM_BASE)) ?? null;
+    } catch {
+      queue = null;
+    }
+    const dependency = dependencyConflict(input.pr, facts.files, queue);
+    if (!dependency.ok) return early(dependency.reason, dependency.detail);
+  }
 
   // decideArm checked reviewedSha is a full SHA equal to the head.
   const touched = land.preArm.filter((entry) => entryTouched(entry, facts.files));

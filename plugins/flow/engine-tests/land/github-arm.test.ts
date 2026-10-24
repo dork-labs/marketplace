@@ -11,7 +11,9 @@ import {
   checkBucket,
   createGithubForge,
   parseArmFacts,
+  parseDependencyPage,
   parseMergeInfo,
+  DEPENDENCY_QUEUE_QUERY,
   parseWorkflowRuns,
 } from '../../scripts/forge/github.ts';
 
@@ -305,5 +307,105 @@ describe('parseMergeInfo', () => {
       '--json',
       'state,mergeCommit,author',
     ]);
+  });
+});
+
+describe('the dependency queue read', () => {
+  const page = (nodes: unknown[], more = false, queue: number[] = [], total = queue.length) => ({
+    data: {
+      repository: {
+        mergeQueue: {
+          entries: {
+            totalCount: total,
+            nodes: queue.map((number) => ({ pullRequest: { number } })),
+          },
+        },
+        pullRequests: { pageInfo: { hasNextPage: more, endCursor: more ? 'c1' : null }, nodes },
+      },
+    },
+  });
+
+  it('keeps only queued or armed PRs, with files only when the list is whole', () => {
+    const parsed = parseDependencyPage(
+      page(
+        [
+          {
+            number: 1,
+            isInMergeQueue: true,
+            autoMergeRequest: null,
+            changedFiles: 1,
+            files: { nodes: [{ path: 'yarn.lock' }] },
+          },
+          {
+            number: 2,
+            isInMergeQueue: false,
+            autoMergeRequest: { enabledAt: 'x' },
+            changedFiles: 300,
+            files: { nodes: [{ path: 'a' }] },
+          },
+          {
+            number: 3,
+            isInMergeQueue: false,
+            autoMergeRequest: null,
+            changedFiles: 1,
+            files: { nodes: [{ path: 'b' }] },
+          },
+        ],
+        false,
+        [1]
+      )
+    );
+    expect(parsed?.prs).toEqual([
+      { number: 1, queued: true, armed: false, files: ['yarn.lock'] },
+      { number: 2, queued: false, armed: true, files: null },
+    ]);
+  });
+
+  it('a queue with more entries than were read, or an answer in another shape, is unreadable', () => {
+    expect(parseDependencyPage(page([], false, [1], 101))?.queueComplete).toBe(false);
+    expect(parseDependencyPage({ data: {} })).toBeNull();
+    expect(parseDependencyPage(page([{ number: 'x' }]))).toBeNull();
+  });
+
+  it('the forge pages with the fixed query, and a queue entry it did not see counts as unknown', async () => {
+    const calls: (readonly string[])[] = [];
+    const answers = [
+      page(
+        [
+          {
+            number: 4,
+            isInMergeQueue: true,
+            autoMergeRequest: null,
+            changedFiles: 0,
+            files: { nodes: [] },
+          },
+        ],
+        true,
+        [4, 8]
+      ),
+      page([]),
+    ];
+    const { forge } = forgeWith((args) => {
+      calls.push(args);
+      return { code: 0, stdout: JSON.stringify(answers.shift()) };
+    });
+    const queue = await forge.dependencyQueue?.('main');
+    expect(queue).toEqual([
+      { number: 4, queued: true, armed: false, files: [] },
+      { number: 8, queued: true, armed: false, files: null },
+    ]);
+    expect(calls[0].slice(0, 4)).toEqual([
+      'api',
+      'graphql',
+      '-f',
+      `query=${DEPENDENCY_QUEUE_QUERY}`,
+    ]);
+    expect(calls[1]).toContain('cursor=c1');
+    expect(DEPENDENCY_QUEUE_QUERY).not.toMatch(/mutation/);
+  });
+
+  it('a gh failure is unreadable', async () => {
+    const { forge } = forgeWith(() => ({ code: 1, stdout: '', stderr: 'HTTP 502' }));
+    expect(await forge.dependencyQueue?.('main')).toBeNull();
   });
 });

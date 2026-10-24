@@ -4,7 +4,16 @@ Installs of this plugin are pinned to a commit SHA, so a fix here does not reach
 you until you **reinstall it** (Marketplace → flow → reinstall, or re-run your
 `--plugin-dir` checkout's `git pull`). Each entry below says whether that matters.
 
-## 0.60.1
+## 0.60.2
+
+**Flow arms one dependency PR at a time, and its pre-arm checks run more tightly sandboxed. Reinstall to get it.**
+
+- Flow refuses to arm a PR that changes a lockfile or package manifest while another such PR is in the merge queue or armed: "another dependency PR is in the queue: #N; arm this after it lands". Two such PRs conflict once the first merges, and the queue ejects the second. The drain asks again on later passes, so the PR arms once the other lands. If flow can't read the queue, it refuses. This replaces the team's manual "one lockfile PR at a time" rule.
+- Scratch copies for `run:` checks and the squash check now live in a folder only you can use (`dorkos-flow-<uid>` in your temp folder, mode 700). Flow refuses one that is a link, or that belongs to someone else.
+- A `run:` command that times out is stopped along with everything it started. Anything it leaves running when it exits is stopped too.
+- `run:` commands and flow's git calls get a fixed system PATH (the folder of the node running flow, then the system's folders), never the agent's PATH.
+- The docs now say a check that couldn't run is unverified, never a pass, rather than that it fails.
+
 
 **Security paths and `land.preArm` paths now match the way a case-insensitive Mac disk opens a file. Reinstall to get it.**
 

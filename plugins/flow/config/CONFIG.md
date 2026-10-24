@@ -364,6 +364,8 @@ Before every arm (`flow pr --arm`, `flow review --approve` with
 4. it touches a security path and has no `securityPaths.label`;
 5. a release freeze is on (`flow freeze on`);
 6. it comes from a fork;
+7. it changes a lockfile or package manifest while another such PR is in the
+   merge queue or armed, or flow cannot read the queue to tell;
 
 and also when it is closed, a draft, labelled `hold`, `do-not-merge`, `wip` or
 `blocked`, or a reviewer asked for changes. Then it runs the `preArm` entries
