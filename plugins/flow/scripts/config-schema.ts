@@ -976,7 +976,11 @@ export const SecurityPathsSchema = z
     pattern: z.string().min(1).nullable().default(null),
     /** The label that says Security has looked. Flow only reads it. */
     label: BareLabelSchema.default('security-reviewed'),
-    /** Who flow mentions on a new PR that touches a security path. */
+    /**
+     * Who flow mentions on a new PR that touches a security path. A handle:
+     * set it in `config.local.json`. Unlike the rest of `land`, flow reads it
+     * from this machine's settings, not from `origin/main`.
+     */
     reviewer: ReviewerHandleSchema,
   })
   .strict()
@@ -984,9 +988,11 @@ export const SecurityPathsSchema = z
 
 /**
  * Landing (DOR-3262): what flow checks before it arms auto-merge, and whom it
- * names on a PR it opens. Read only from the committed config on `origin/main`,
- * never from the PR's branch or `config.local.json`, so a PR cannot change the
- * checks it is held to.
+ * names on a PR it opens. The checks (`preArm`, `securityPaths` but its
+ * `reviewer`) are read only from the committed config on `origin/main`, never
+ * from the PR's branch or `config.local.json`, so a PR cannot change the checks
+ * it is held to. The two reviewer handles are read from this machine's
+ * settings, where handles belong.
  */
 export const LandSchema = z
   .object({
@@ -994,7 +1000,11 @@ export const LandSchema = z
     preArm: z.array(PreArmEntrySchema).default([]),
     /** The repository's security paths and label. */
     securityPaths: SecurityPathsSchema,
-    /** Who flow mentions on a new PR (unless a security path routes it to `securityPaths.reviewer`). */
+    /**
+     * Who flow mentions on a new PR (unless a security path routes it to
+     * `securityPaths.reviewer`). A handle: set it in `config.local.json`. Read
+     * from this machine's settings, not from `origin/main`.
+     */
     reviewer: ReviewerHandleSchema,
   })
   .strict()

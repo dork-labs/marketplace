@@ -13,9 +13,10 @@
  *    naming it, so a retry is safe;
  * 4. otherwise opens the PR against origin's default branch and records
  *    `drain.pr`;
- * 5. names the PR's reviewer in a comment of its own (DOR-3262): the
- *    committed config on `origin/main` says who, `land.securityPaths.reviewer`
- *    when the PR touches a security path, else `land.reviewer`;
+ * 5. names the PR's reviewer in a comment of its own (DOR-3262):
+ *    `land.securityPaths.reviewer` when the PR touches a security path (by the
+ *    list on `origin/main`), else `land.reviewer`. Both are handles, so they
+ *    come from this machine's settings (`config.local.json`);
  * 6. on `--arm` or `drain.armAutoMerge`, arms it only when the arm guard
  *    allows (`land/arm-guard.ts`). A refusal leaves the PR open and unarmed
  *    and exits 5 saying why.
@@ -106,22 +107,46 @@ interface Mention {
   error?: string;
 }
 
+/** Who flow may name on a new PR: handles from this machine's settings. */
+interface Reviewers {
+  /** The default reviewer (`land.reviewer`). */
+  reviewer: string | null;
+  /** Who a PR touching a security path goes to (`land.securityPaths.reviewer`). */
+  security: string | null;
+}
+
 /**
- * Name the new PR's reviewer in a comment, from `land` on `origin/main`: the
- * security reviewer when the PR touches a security path (or flow cannot tell),
- * else the default reviewer; nothing when neither is set. A failure is
+ * The reviewer handles from the project's settings (`config.local.json` over
+ * `config.json`). Handles are account handles, which this repo keeps out of
+ * committed config, so unlike the guard's checks they are not read from
+ * `origin/main`; a wrong one only misnames the reviewer.
+ */
+function reviewersFor(ctx: VerbContext): Reviewers | string {
+  try {
+    const { config } = loadConfig(findConfigRoots(ctx.projectDir, ctx.flowRoot), ctx.env);
+    return { reviewer: config.land.reviewer, security: config.land.securityPaths.reviewer };
+  } catch (error) {
+    return (error as Error).message;
+  }
+}
+
+/**
+ * Name the new PR's reviewer in a comment: the security reviewer when the PR
+ * touches a security path (by the list on `origin/main`; also when flow cannot
+ * tell), else the default reviewer; nothing when neither is set. A failure is
  * reported, never thrown: the PR is open either way.
  */
 async function mentionReviewer(
   ctx: VerbContext,
   forge: Forge,
   pr: ForgePr,
-  land: LandConfig,
+  reviewers: Reviewers,
+  land: LandConfig | null,
   head: string,
   launcher: string | undefined
 ): Promise<Mention | null> {
   let security = true;
-  if (land.securityPaths.reviewer !== null) {
+  if (reviewers.security !== null && land !== null) {
     try {
       const facts = await forge.armFacts(pr.number);
       security =
@@ -135,8 +160,8 @@ async function mentionReviewer(
       security = true;
     }
   }
-  const route = land.securityPaths.reviewer !== null && security ? 'security' : 'default';
-  const handle = route === 'security' ? land.securityPaths.reviewer : land.reviewer;
+  const route = reviewers.security !== null && security ? 'security' : 'default';
+  const handle = route === 'security' ? reviewers.security : reviewers.reviewer;
   if (handle === null) return null;
   const reviewer = handle.startsWith('@') ? handle : `@${handle}`;
   const body =
@@ -224,8 +249,9 @@ export async function run(ctx: VerbContext): Promise<VerbResult> {
   }
 
   const base = await defaultBranch(ctx, worktree);
-  // Who to name comes from main's committed config, like the guard's checks.
+  // Which paths count as security paths comes from main, like the guard's checks.
   const baseLand = await readBaseLand(ctx.runProcess, worktree);
+  const reviewers = reviewersFor(ctx);
   const created = await forge.createPr({
     head: branch,
     base,
@@ -234,11 +260,20 @@ export async function run(ctx: VerbContext): Promise<VerbResult> {
   });
   // Recorded before arming, so a failed arm never leaves an unrecorded PR.
   await recordPr(ctx, drainRun, forge, created, false);
-  const mention = baseLand.ok
-    ? await mentionReviewer(ctx, forge, created, baseLand.land, head, drainRun.host)
-    : null;
-  if (!baseLand.ok)
-    ctx.warn(`flow opened ${created.url} but named no reviewer: ${baseLand.detail}`);
+  let mention: Mention | null = null;
+  if (typeof reviewers === 'string') {
+    ctx.warn(`flow opened ${created.url} but named no reviewer: ${reviewers}`);
+  } else {
+    mention = await mentionReviewer(
+      ctx,
+      forge,
+      created,
+      reviewers,
+      baseLand.ok ? baseLand.land : null,
+      head,
+      drainRun.host
+    );
+  }
   let armed = false;
   let armRefused: { reason: string; detail: string } | null = null;
   if (arm) {

@@ -313,10 +313,12 @@ by itself when one runs out, is not here: that is `handoff` in the machine's
 ## The `land` block
 
 `land` says what flow checks before it arms auto-merge on a pull request, and
-whom it names on a PR it opens. Flow reads it **only from the committed
-`config.json` on `origin/main`**, never from the PR's branch, your working tree
-or `config.local.json`. A PR that changes `land` is still held to `main`'s
-version; its own takes effect once it merges.
+whom it names on a PR it opens. Flow reads the checks (`preArm` and
+`securityPaths`) **only from the committed `config.json` on `origin/main`**,
+never from the PR's branch, your working tree or `config.local.json`. A PR that
+changes them is still held to `main`'s version; its own takes effect once it
+merges. The two reviewer handles are account handles, so they go in
+`config.local.json` like every other handle, and flow reads them from there.
 
 ```jsonc
 "land": {
@@ -327,11 +329,15 @@ version; its own takes effect once it merges.
   "securityPaths": {
     "globs": ["apps/server/src/routes/**", ".github/**"],
     "pattern": null,
-    "label": "security-reviewed",
-    "reviewer": "acme-security"
-  },
-  "reviewer": "octocat"
+    "label": "security-reviewed"
+  }
 }
+```
+
+and in `config.local.json`:
+
+```jsonc
+"land": { "reviewer": "octocat", "securityPaths": { "reviewer": "acme/security" } }
 ```
 
 | Field | Type, default | Meaning |
@@ -343,8 +349,8 @@ version; its own takes effect once it merges.
 | `preArm[].timeout` | minutes 1–360, `30` | How long the check may take before flow refuses. |
 | `securityPaths.globs`, `.pattern` | globs, `[]`; a regular expression, `null` | This repo's security paths. Package manifests, lockfiles and `.agents/flow/config.json` always count, and `.github/workflows/**` and `.github/actions/**` do too while any `wait: workflow` entry exists. |
 | `securityPaths.label` | label, `security-reviewed` | The label that says Security has looked. Flow only reads it, and never adds or removes it. |
-| `securityPaths.reviewer` | handle, `null` | Who flow names on a new PR that touches a security path (or when it cannot tell). |
-| `reviewer` | handle, `null` | Who flow names on any other new PR. A handle is `user`, `@user` or `org/team`. |
+| `securityPaths.reviewer` | handle, `null` | Who flow names on a new PR that touches a security path (by `main`'s list), or when it cannot tell. Set it in `config.local.json`. |
+| `reviewer` | handle, `null` | Who flow names on any other new PR. Set it in `config.local.json`. A handle is `user`, `@user` or `org/team`. |
 
 Before every arm (`flow pr --arm`, `flow review --approve` with
 `gates.review.mergeOnApproval`, and the drain's re-arm), flow refuses when:

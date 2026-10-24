@@ -601,8 +601,16 @@ describe('flow pr', () => {
       return calls.filter((c) => c.method === 'comment').map((c) => (c.arg as [number, string])[1]);
     }
 
-    it('mentions land.reviewer from main on the new PR', async () => {
-      mainConfig({ reviewer: 'octocat' });
+    /** This machine's reviewer handles, in config.local.json where handles belong. */
+    function reviewers(land: unknown): void {
+      writeFileSync(
+        path.join(project.dir, '.agents', 'flow', 'config.local.json'),
+        JSON.stringify({ land })
+      );
+    }
+
+    it('mentions land.reviewer on the new PR', async () => {
+      reviewers({ reviewer: 'octocat' });
       writeRun(drain({ pushedSha: head, reviewedSha: head, verdict: 'clean' }), head);
       const r = await flow(args);
       expect(r.code).toBe(0);
@@ -614,11 +622,9 @@ describe('flow pr', () => {
       expect(r.json.mention).toEqual({ reviewer: '@octocat', route: 'default', posted: true });
     });
 
-    it('routes a PR that touches a security path to the security reviewer', async () => {
-      mainConfig({
-        reviewer: 'octocat',
-        securityPaths: { globs: ['src/**'], reviewer: '@acme-security' },
-      });
+    it("routes a PR that touches a security path on main's list to the security reviewer", async () => {
+      mainConfig({ securityPaths: { globs: ['src/**'] } });
+      reviewers({ reviewer: 'octocat', securityPaths: { reviewer: '@acme-security' } });
       writeRun(drain({ pushedSha: head, reviewedSha: head, verdict: 'clean' }), head);
       const forge = fakeForge();
       forge.forge.armFacts = async () => facts(['src/app.ts']);
@@ -627,8 +633,22 @@ describe('flow pr', () => {
       expect(r.json.mention).toMatchObject({ reviewer: '@acme-security', route: 'security' });
     });
 
+    it('a security list set only on this machine does not route', async () => {
+      mainConfig({});
+      reviewers({
+        reviewer: 'octocat',
+        securityPaths: { globs: ['src/**'], reviewer: 'acme-security' },
+      });
+      writeRun(drain({ pushedSha: head, reviewedSha: head, verdict: 'clean' }), head);
+      const forge = fakeForge();
+      forge.forge.armFacts = async () => facts(['src/app.ts']);
+      const r = await flow(args, forge);
+      expect(r.json.mention).toMatchObject({ reviewer: '@octocat', route: 'default' });
+    });
+
     it('a package manifest routes to the security reviewer too', async () => {
-      mainConfig({ reviewer: 'octocat', securityPaths: { reviewer: 'acme-security' } });
+      mainConfig({});
+      reviewers({ reviewer: 'octocat', securityPaths: { reviewer: 'acme-security' } });
       writeRun(drain({ pushedSha: head, reviewedSha: head, verdict: 'clean' }), head);
       const forge = fakeForge();
       forge.forge.armFacts = async () => facts(['package.json']);
@@ -637,10 +657,8 @@ describe('flow pr', () => {
     });
 
     it('a PR that touches none goes to the default reviewer', async () => {
-      mainConfig({
-        reviewer: 'octocat',
-        securityPaths: { globs: ['src/**'], reviewer: 'acme-security' },
-      });
+      mainConfig({ securityPaths: { globs: ['src/**'] } });
+      reviewers({ reviewer: 'octocat', securityPaths: { reviewer: 'acme-security' } });
       writeRun(drain({ pushedSha: head, reviewedSha: head, verdict: 'clean' }), head);
       const forge = fakeForge();
       forge.forge.armFacts = async () => facts(['docs/readme.md']);
@@ -648,14 +666,19 @@ describe('flow pr', () => {
       expect(r.json.mention).toMatchObject({ reviewer: '@octocat', route: 'default' });
     });
 
-    it('when flow cannot read the files, the security reviewer is named', async () => {
-      mainConfig({ reviewer: 'octocat', securityPaths: { reviewer: 'acme-security' } });
+    it("when flow cannot read the files or main's list, the security reviewer is named", async () => {
+      reviewers({ reviewer: 'octocat', securityPaths: { reviewer: 'acme-security' } });
       writeRun(drain({ pushedSha: head, reviewedSha: head, verdict: 'clean' }), head);
-      const r = await flow(args); // this fake's armFacts throws
+      // No main on origin, and this fake's armFacts throws.
+      const r = await flow(args);
       expect(r.json.mention).toMatchObject({ reviewer: '@acme-security', route: 'security' });
+      mainConfig({});
+      writeRun(drain({ pushedSha: head, reviewedSha: head, verdict: 'clean' }), head);
+      const again = await flow(args);
+      expect(again.json.mention).toMatchObject({ reviewer: '@acme-security', route: 'security' });
     });
 
-    it('names nobody when main names nobody', async () => {
+    it('names nobody when no reviewer is set', async () => {
       mainConfig({});
       writeRun(drain({ pushedSha: head, reviewedSha: head, verdict: 'clean' }), head);
       const r = await flow(args);
@@ -664,7 +687,7 @@ describe('flow pr', () => {
     });
 
     it('a mention that fails to post is reported, and the PR stays open', async () => {
-      mainConfig({ reviewer: 'octocat' });
+      reviewers({ reviewer: 'octocat' });
       writeRun(drain({ pushedSha: head, reviewedSha: head, verdict: 'clean' }), head);
       const forge = fakeForge();
       forge.forge.comment = async () => {
