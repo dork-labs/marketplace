@@ -1105,6 +1105,131 @@
       },
       "additionalProperties": false
     },
+    "land": {
+      "default": {},
+      "type": "object",
+      "properties": {
+        "preArm": {
+          "default": [],
+          "type": "array",
+          "items": {
+            "anyOf": [
+              {
+                "type": "object",
+                "properties": {
+                  "paths": {
+                    "minItems": 1,
+                    "type": "array",
+                    "items": {
+                      "type": "string",
+                      "pattern": "^(?!\\.\\/)(?!\\/)(?!.*\\/\\/)(?!.*\\/$)(?!(?:.*\\/)?\\.\\.(?:\\/|$))(?!.*\\s$)[^\\\\\\s][^\\\\]*$"
+                    }
+                  },
+                  "run": {
+                    "type": "string",
+                    "pattern": "^[^;&|<>$`\\\\\\r\\n\\t\\0]+$"
+                  },
+                  "timeout": {
+                    "default": 30,
+                    "type": "integer",
+                    "minimum": 1,
+                    "maximum": 360
+                  }
+                },
+                "required": ["paths", "run"],
+                "additionalProperties": false
+              },
+              {
+                "type": "object",
+                "properties": {
+                  "paths": {
+                    "minItems": 1,
+                    "type": "array",
+                    "items": {
+                      "type": "string",
+                      "pattern": "^(?!\\.\\/)(?!\\/)(?!.*\\/\\/)(?!.*\\/$)(?!(?:.*\\/)?\\.\\.(?:\\/|$))(?!.*\\s$)[^\\\\\\s][^\\\\]*$"
+                    }
+                  },
+                  "wait": {
+                    "type": "string",
+                    "const": "workflow"
+                  },
+                  "workflow": {
+                    "type": "string",
+                    "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,99}$"
+                  },
+                  "timeout": {
+                    "default": 30,
+                    "type": "integer",
+                    "minimum": 1,
+                    "maximum": 360
+                  }
+                },
+                "required": ["paths", "wait", "workflow"],
+                "additionalProperties": false
+              }
+            ]
+          }
+        },
+        "securityPaths": {
+          "default": {},
+          "type": "object",
+          "properties": {
+            "globs": {
+              "default": [],
+              "type": "array",
+              "items": {
+                "type": "string",
+                "pattern": "^(?!\\.\\/)(?!\\/)(?!.*\\/\\/)(?!.*\\/$)(?!(?:.*\\/)?\\.\\.(?:\\/|$))(?!.*\\s$)[^\\\\\\s][^\\\\]*$"
+              }
+            },
+            "pattern": {
+              "default": null,
+              "anyOf": [
+                {
+                  "type": "string",
+                  "minLength": 1
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "label": {
+              "default": "security-reviewed",
+              "type": "string",
+              "pattern": "^[^/\\s](?:[^/]*[^/\\s])?$"
+            },
+            "reviewer": {
+              "default": null,
+              "anyOf": [
+                {
+                  "type": "string",
+                  "pattern": "^@?[A-Za-z0-9](?:[A-Za-z0-9-]{0,38})(?:\\/[A-Za-z0-9][A-Za-z0-9._-]{0,99})?$"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            }
+          },
+          "additionalProperties": false
+        },
+        "reviewer": {
+          "default": null,
+          "anyOf": [
+            {
+              "type": "string",
+              "pattern": "^@?[A-Za-z0-9](?:[A-Za-z0-9-]{0,38})(?:\\/[A-Za-z0-9][A-Za-z0-9._-]{0,99})?$"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "additionalProperties": false
+    },
     "selfImprovement": {
       "default": {},
       "type": "object",

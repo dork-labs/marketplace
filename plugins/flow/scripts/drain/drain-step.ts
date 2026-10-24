@@ -163,6 +163,11 @@ export type SendAction = {
  *   exists, else release the claim (§4.3).
  * - `park`: apply the park; `trackerWrite: false` when the item was taken away,
  *   so the runner writes nothing to the tracker.
+ * - `squash-check`: the PR merged; check its squash commit against the head
+ *   a clean review recorded (`reviewed`, `null` when there is none, which is
+ *   itself reported), and report a failure (DOR-3262). Asked again each pass
+ *   until it reaches a verdict, at most {@link SQUASH_CHECK_ATTEMPTS} times;
+ *   `final` marks the last, which reports even a check that could not run.
  */
 export type DrainAction =
   | { kind: 'start-reviewer'; sha: string; deltaFrom: string | null }
@@ -170,6 +175,7 @@ export type DrainAction =
   | SendAction
   | { kind: 'arm'; pr: PrRef; sha: string }
   | { kind: 'disarm'; pr: PrRef }
+  | { kind: 'squash-check'; pr: PrRef; reviewed: string | null; final: boolean }
   | { kind: 'adopt-or-release' }
   | { kind: 'park'; reason: string; trackerWrite: boolean };
 
@@ -432,6 +438,8 @@ function rearmIfReviewed(step: Step, facts: DrainFacts): Step {
   const pr = step.drain.pr;
   if (pr === null || !pr.disarmedForReview || !reviewedIsHead(step.drain, facts)) return step;
   if (facts.pr?.armed) return step;
+  // A land.preArm check already refused this commit; only a new one is asked.
+  if (pr.armRefusedAt != null && pr.armRefusedAt === step.drain.reviewedSha) return step;
   return {
     drain: step.drain,
     actions: [...step.actions, { kind: 'arm', pr: ref(pr), sha: step.drain.reviewedSha }],
@@ -646,6 +654,54 @@ function readopt(
  * @returns The run with its next drain state, and the actions to apply in order.
  */
 export function drainStep(
+  run: FlowRun,
+  facts: DrainFacts,
+  cfg: DrainStepConfig,
+  now: Date
+): DrainStepResult {
+  return withSquashCheck(drainStepCore(run, facts, cfg, now), facts);
+}
+
+/** How many passes ask for a merged PR's squash check before the last one reports regardless. */
+export const SQUASH_CHECK_ATTEMPTS = 5;
+
+/**
+ * Once the run's PR merged, ask for the squash check (DOR-3262), whatever the
+ * phase: every pass until it reaches a verdict, at most
+ * {@link SQUASH_CHECK_ATTEMPTS} times. The attempt is counted here; the
+ * runner records the verdict.
+ */
+function withSquashCheck(result: DrainStepResult, facts: DrainFacts): DrainStepResult {
+  const drain = result.run.drain;
+  if (!drain || drain.v !== 1 || drain.pr === null || facts.pr?.state !== 'merged') return result;
+  const prior = drain.squashCheck ?? { attempts: 0, settled: false };
+  if (prior.settled || prior.attempts >= SQUASH_CHECK_ATTEMPTS) return result;
+  const attempts = prior.attempts + 1;
+  const reviewed = drain.verdict === 'clean' ? drain.reviewedSha : null;
+  // The pass that stops a closed run's last session is the last one to look
+  // at it, so that check is the final one too, and reports even a check that
+  // could not run.
+  const lastLook =
+    drain.phase === 'closing' &&
+    facts.runComplete &&
+    drain.worker === null &&
+    drain.reviewer === null;
+  return {
+    run: { ...result.run, drain: { ...drain, squashCheck: { attempts, settled: false } } },
+    actions: [
+      ...result.actions,
+      {
+        kind: 'squash-check',
+        pr: ref(drain.pr),
+        reviewed,
+        final: attempts >= SQUASH_CHECK_ATTEMPTS || lastLook,
+      },
+    ],
+  };
+}
+
+/** {@link drainStep} without the squash check. */
+function drainStepCore(
   run: FlowRun,
   facts: DrainFacts,
   cfg: DrainStepConfig,

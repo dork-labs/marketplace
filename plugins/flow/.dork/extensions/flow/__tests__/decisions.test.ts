@@ -581,6 +581,38 @@ describe('answering', () => {
     expect(coordinator.decisions()).toEqual([]);
   });
 
+  // DOR-3262: an approval that shipped but armed nothing resolves, and says so.
+  it('says when the approval shipped but flow did not turn on auto-merge', async () => {
+    const refused = setup({
+      cli: fakeCli(() => ({
+        code: 0,
+        json: {
+          ok: true,
+          verdict: 'approved',
+          armed: false,
+          armRefused: { reason: 'freeze', detail: 'a release freeze is on (cutting 1.4)' },
+        },
+      })),
+    });
+    await refused.coordinator.sync([plan({ a: gateRun() })]);
+    expect(await refused.coordinator.handle(event(key))).toMatchObject({
+      resolve: 'approved',
+      message:
+        "Shipped, but flow didn't turn on auto-merge: a release freeze is on (cutting 1.4). Merge it yourself.",
+    });
+    const handed = setup({
+      cli: fakeCli(() => ({
+        code: 0,
+        json: { ok: true, verdict: 'approved', armed: false, armHandedToDrain: true },
+      })),
+    });
+    await handed.coordinator.sync([plan({ a: gateRun() })]);
+    expect(await handed.coordinator.handle(event(key))).toMatchObject({
+      resolve: 'approved',
+      message: 'Shipped. Flow turns on auto-merge once its pre-arm checks pass.',
+    });
+  });
+
   it('offers at most once a month, never without a person core credits, and never where the flow is too old', async () => {
     const storage = { value: null as unknown };
     const first = setup({ storage });

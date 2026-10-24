@@ -310,6 +310,68 @@ Which accounts the drain may use, and whether it moves an item to another accoun
 by itself when one runs out, is not here: that is `handoff` in the machine's
 `fleet.json`.
 
+## The `land` block
+
+`land` says what flow checks before it arms auto-merge on a pull request, and
+whom it names on a PR it opens. Flow reads the checks (`preArm` and
+`securityPaths`) **only from the committed `config.json` on `origin/main`**,
+never from the PR's branch, your working tree or `config.local.json`. A PR that
+changes them is still held to `main`'s version; its own takes effect once it
+merges. The two reviewer handles are account handles, so they go in
+`config.local.json` like every other handle; flow reads them from this
+machine's settings (`config.local.json` over `config.json`).
+
+```jsonc
+"land": {
+  "preArm": [
+    { "paths": ["apps/client/**"], "run": "bash scripts/ci/browser-tests.sh", "timeout": 20 },
+    { "paths": ["apps/**"], "wait": "workflow", "workflow": "browser-shards.yml", "timeout": 45 }
+  ],
+  "securityPaths": {
+    "globs": ["apps/server/src/routes/**", ".github/**"],
+    "pattern": null,
+    "label": "security-reviewed"
+  }
+}
+```
+
+and in `config.local.json`:
+
+```jsonc
+"land": { "reviewer": "octocat", "securityPaths": { "reviewer": "acme/security" } }
+```
+
+| Field | Type, default | Meaning |
+| --- | --- | --- |
+| `preArm` | list, `[]` | Checks to run before arming, each only when the PR touches one of its `paths`. No entries: only the guard's own checks below. |
+| `preArm[].paths` | globs | `**` any folders, `*` within one folder, `?` one character. Repo-relative: no leading `./` or `/`, no trailing `/`. |
+| `preArm[].run` | command | The fallback for a repo without CI; prefer `wait: workflow` wherever there is CI. Runs in a fresh, clean checkout of the reviewed commit, made in a scratch repository that reads only your repository's objects (never the worker's worktree, its git config, attributes, filters or replace refs; removed afterwards). No shell: words split on spaces, quotes group them, and `; & \| < > $` or a backslash are refused. A minimal environment: PATH, TMPDIR, TZ, TERM, the locale, `CI=true` and an empty scratch HOME, no tokens. The checkout has no installed dependencies, so a command that needs them is a committed script that installs them; list it as a security path. A non-zero exit refuses to arm, with the output in the message. |
+| `preArm[].wait`, `.workflow` | `"workflow"`, a workflow file name | Dispatches `gh workflow run <workflow> --ref <pr-branch> -f sha=<reviewed commit> -f nonce=<random>` and waits for that one run. The workflow must take `sha` and `nonce` inputs, put the nonce in its `run-name`, and fail unless it checked out `sha`. |
+| `preArm[].timeout` | minutes 1–360, `30` | How long the check may take before flow refuses. |
+| `securityPaths.globs`, `.pattern` | globs, `[]`; a regular expression, `null` | This repo's security paths. Package manifests, lockfiles and `.agents/flow/config.json` always count, and `.github/workflows/**` and `.github/actions/**` do too while any `wait: workflow` entry exists. |
+| `securityPaths.label` | label, `security-reviewed` | The label that says Security has looked. Flow only reads it, and never adds or removes it. It is not tied to a commit, so it carries over to later pushes. |
+| `securityPaths.reviewer` | handle, `null` | Who flow names on a new PR that touches a security path (by `main`'s list), or when it cannot tell. Set it in `config.local.json`. |
+| `reviewer` | handle, `null` | Who flow names on any other new PR. Set it in `config.local.json`. A handle is `user`, `@user` or `org/team`. |
+
+Before every arm (`flow pr --arm`, `flow review --approve` with
+`gates.review.mergeOnApproval`, and the drain's re-arm), flow refuses when:
+
+1. a required check failed or was cancelled. A check still running is fine:
+   GitHub waits for it;
+2. the PR's head is not the commit that was reviewed, or no full commit SHA was
+   recorded;
+3. the PR does not merge into `main`;
+4. it touches a security path and has no `securityPaths.label`;
+5. a release freeze is on (`flow freeze on`);
+6. it comes from a fork;
+
+and also when it is closed, a draft, labelled `hold`, `do-not-merge`, `wip` or
+`blocked`, or a reviewer asked for changes. Then it runs the `preArm` entries
+the PR touches, and refuses if one fails, then reads the PR and the freeze again
+before it arms. Only the drain runs `preArm` entries: `flow pr --arm` and
+`flow review --approve` leave the arm to the drain when one applies. These are a guard rail for flow's own arms. The rules that hold for everyone belong on GitHub, in required checks and
+rulesets.
+
 ## `selfImprovement`: how flow checks and records itself
 
 This block is committed team policy. Every field has a default, so a config that

@@ -86,6 +86,12 @@ export interface DrainPullRequest {
   armed: boolean;
   /** Whether flow disarmed auto-merge while a review round runs. */
   disarmedForReview: boolean;
+  /**
+   * The reviewed commit a `land.preArm` check refused to arm (DOR-3262). The
+   * drain does not run that check again for the same commit; a new reviewed
+   * commit is asked about afresh. Absent or `null`: none.
+   */
+  armRefusedAt?: string | null;
 }
 
 /** One move of a run between accounts. */
@@ -134,6 +140,11 @@ export interface DrainState {
   parkedReason: string | null;
   /** The phase the run parked from, which an answer resumes; absent on older records. */
   parkedFrom?: DrainPhase | null;
+  /**
+   * The post-merge squash check (DOR-3262): how many times it has been asked
+   * for, and whether it reached a verdict. Absent until the PR merged.
+   */
+  squashCheck?: { attempts: number; settled: boolean };
   /** When the run parked (ISO): only a reply after it answers the park. */
   parkedAt?: string | null;
   /**

@@ -8,7 +8,7 @@
 
 import { execFileSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
-import { existsSync, readFileSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
@@ -19,6 +19,7 @@ import type { FlowRun } from '../../scripts/flow-run.ts';
 import { main } from '../../scripts/flow.ts';
 import type { CreatePrInput, Forge, ForgePr, ForgeTarget } from '../../scripts/forge/types.ts';
 import { createFakeAdapter, type FakeTracker } from '../fixtures/cli/fake-adapter/adapter.ts';
+import { recordingGuard, refusal, type RecordingGuard } from '../fixtures/land/recording-guard.ts';
 import { item, makeProject, type WriteProject } from './write-harness.ts';
 
 const TOKEN = '0123456789abcdef0123456789abcdef';
@@ -26,6 +27,8 @@ const TOKEN_HASH = createHash('sha256').update(TOKEN).digest('hex');
 
 let project: WriteProject;
 let origin: string;
+/** The arm guard every run gets; a test swaps it to see a refusal. */
+let armGuard: RecordingGuard | null;
 
 /** Run git in the project with a fixed identity. */
 function git(...args: string[]): string {
@@ -84,6 +87,18 @@ function fakeForge(opts: { existing?: ForgePr | null; armed?: boolean } = {}) {
     async disarm(pr) {
       calls.push({ method: 'disarm', arg: pr });
     },
+    async armFacts(): Promise<never> {
+      throw new Error('the arm guard is injected in this test; nothing reads armFacts');
+    },
+    async comment(pr: number, body: string) {
+      calls.push({ method: 'comment', arg: [pr, body] });
+    },
+    async dispatchWorkflow(): Promise<never> {
+      throw new Error('the arm guard is injected in this test; nothing dispatches');
+    },
+    async workflowRuns() {
+      return [];
+    },
     async recentGroupFailures() {
       return [];
     },
@@ -93,6 +108,22 @@ function fakeForge(opts: { existing?: ForgePr | null; armed?: boolean } = {}) {
     },
   };
   return { forge, calls, targets, factory: (t: ForgeTarget) => (targets.push(t), forge) };
+}
+
+/** What the arm guard reads about PR 7, touching `files`. */
+function facts(files: string[]) {
+  return {
+    state: 'OPEN',
+    isDraft: false,
+    labels: [],
+    reviewDecision: '',
+    checks: [],
+    headRefOid: 'x',
+    headRefName: 'work',
+    baseRefName: 'main',
+    isCrossRepository: false,
+    files,
+  };
 }
 
 /** Real git, except `remote get-url origin` answers a GitHub address. */
@@ -120,6 +151,7 @@ async function flow(
     createAdapter: async () => tracker.adapter,
     runProcess: runner,
     createForge: forge.factory,
+    ...(armGuard === null ? {} : { armGuard: armGuard.guard }),
   });
   return { code, json: JSON.parse(out) as Record<string, unknown>, stderr: err, forge, tracker };
 }
@@ -191,6 +223,7 @@ function stored(): DrainState {
 }
 
 beforeEach(() => {
+  armGuard = recordingGuard();
   project = makeProject();
   origin = `${project.dir}-origin.git`;
   execFileSync('git', ['init', '-q', '--bare', '-b', 'work', origin]);
@@ -496,6 +529,247 @@ describe('flow pr', () => {
     expect(forge.calls.some((c) => c.method === 'createPr')).toBe(false);
     expect(stored().pr).toMatchObject({ number: 9, armed: true });
     expect(stored().rev).toBe(4);
+  });
+
+  // The arm guard (DOR-3262) is asked about the reviewed commit before the arm.
+  it('asks the arm guard about the reviewed commit before arming', async () => {
+    writeRun(drain({ pushedSha: head, reviewedSha: head, verdict: 'clean' }), head);
+    const r = await flow([...args, '--arm']);
+    expect(armGuard?.requests).toEqual([
+      { forge: r.forge.forge, pr: 7, reviewedSha: head, worktree: project.dir, preArm: 'defer' },
+    ]);
+    expect(r.json.armRefused).toBeNull();
+  });
+
+  // A refusal leaves the PR open and unarmed, says why, and records it waiting
+  // to re-arm so the drain asks again. It is not a failed `flow pr` (exit 0).
+  it('opens the PR but does not arm it when the guard refuses', async () => {
+    writeRun(drain({ pushedSha: head, reviewedSha: head, verdict: 'clean' }), head);
+    armGuard = recordingGuard(() => refusal('security-path-unlabelled'));
+    const r = await flow([...args, '--arm']);
+    expect(r.code).toBe(0);
+    expect(r.forge.calls.some((c) => c.method === 'createPr')).toBe(true);
+    expect(r.forge.calls.some((c) => c.method === 'arm')).toBe(false);
+    expect(r.json).toMatchObject({
+      ok: true,
+      pr: { number: 7, armed: false },
+      armRefused: { reason: 'security-path-unlabelled' },
+    });
+    expect(stored().pr).toEqual({
+      repo: 'acme/app',
+      number: 7,
+      url: 'https://github.com/acme/app/pull/7',
+      armed: false,
+      disarmedForReview: true,
+    });
+  });
+
+  // land.preArm checks are left to the drain: the PR is recorded waiting to
+  // arm, and the guard is asked with preArm: defer.
+  it('leaves land.preArm checks to the drain', async () => {
+    writeRun(drain({ pushedSha: head, reviewedSha: head, verdict: 'clean' }), head);
+    armGuard = recordingGuard(() => refusal('pre-arm-deferred'));
+    const r = await flow([...args, '--arm']);
+    expect(armGuard?.requests[0].preArm).toBe('defer');
+    expect(r.json.armRefused).toMatchObject({ reason: 'pre-arm-deferred' });
+    expect(stored().pr).toEqual({
+      repo: 'acme/app',
+      number: 7,
+      url: 'https://github.com/acme/app/pull/7',
+      armed: false,
+      disarmedForReview: true,
+    });
+  });
+
+  // Recorded waiting before the guard runs, so a command stopped mid-guard still
+  // leaves the drain a PR to arm.
+  it('records the PR waiting to arm before it asks the guard', async () => {
+    writeRun(drain({ pushedSha: head, reviewedSha: head, verdict: 'clean' }), head);
+    let seen: unknown;
+    armGuard = recordingGuard(() => {
+      seen = stored().pr;
+      return { ok: true, preArm: [] };
+    });
+    await flow([...args, '--arm']);
+    expect(seen).toMatchObject({ armed: false, disarmedForReview: true });
+    expect(stored().pr).toMatchObject({ armed: true, disarmedForReview: false });
+  });
+
+  // Re-running flow pr on the PR it opened keeps the drain's re-arm.
+  it('a re-run on the existing PR keeps it waiting to arm', async () => {
+    writeRun(drain({ pushedSha: head, reviewedSha: head, verdict: 'clean' }), head);
+    armGuard = recordingGuard(() => refusal('pre-arm-failed', true));
+    await flow([...args, '--arm']);
+    const forge = fakeForge({
+      existing: { number: 7, url: 'https://github.com/acme/app/pull/7', headSha: head },
+    });
+    const again = await flow(args, forge);
+    expect(again.code).toBe(EXIT.precondition);
+    expect(stored().pr).toMatchObject({
+      armed: false,
+      disarmedForReview: true,
+      armRefusedAt: head,
+    });
+  });
+
+  // A refusal from a land.preArm check also records the commit it refused.
+  it('records the commit a pre-arm check refused', async () => {
+    writeRun(drain({ pushedSha: head, reviewedSha: head, verdict: 'clean' }), head);
+    armGuard = recordingGuard(() => refusal('pre-arm-failed', true));
+    await flow([...args, '--arm']);
+    expect(stored().pr).toMatchObject({
+      armed: false,
+      disarmedForReview: true,
+      armRefusedAt: head,
+    });
+  });
+
+  // With no guard injected, the real one runs. This origin has no main, so it
+  // cannot read the base config and refuses: the default is never "allow".
+  it('runs the real guard by default, which refuses what it cannot read', async () => {
+    writeRun(drain({ pushedSha: head, reviewedSha: head, verdict: 'clean' }), head);
+    armGuard = null;
+    const r = await flow([...args, '--arm']);
+    expect(r.code).toBe(0);
+    expect(r.forge.calls.some((c) => c.method === 'arm')).toBe(false);
+    expect(r.json.armRefused).toMatchObject({ reason: 'config-unreadable' });
+  });
+
+  describe('naming the reviewer', () => {
+    /** Push a main whose committed flow config holds `land`. */
+    function mainConfig(land: unknown): void {
+      const clone = `${project.dir}-main`;
+      rmSync(clone, { recursive: true, force: true });
+      execFileSync('git', ['clone', '-q', origin, clone]);
+      const run = (...a: string[]) =>
+        execFileSync(
+          'git',
+          [
+            '-c',
+            'user.email=t@example.invalid',
+            '-c',
+            'user.name=t',
+            '-c',
+            'commit.gpgsign=false',
+            ...a,
+          ],
+          { cwd: clone, stdio: 'ignore' }
+        );
+      run('checkout', '-q', '--orphan', 'main');
+      mkdirSync(path.join(clone, '.agents', 'flow'), { recursive: true });
+      writeFileSync(path.join(clone, '.agents', 'flow', 'config.json'), JSON.stringify({ land }));
+      run('add', '.agents/flow/config.json');
+      run('commit', '-q', '-m', 'main config');
+      run('push', '-q', 'origin', 'main');
+      rmSync(clone, { recursive: true, force: true });
+    }
+
+    function mentions(calls: { method: string; arg?: unknown }[]): string[] {
+      return calls.filter((c) => c.method === 'comment').map((c) => (c.arg as [number, string])[1]);
+    }
+
+    /** This machine's reviewer handles, in config.local.json where handles belong. */
+    function reviewers(land: unknown): void {
+      writeFileSync(
+        path.join(project.dir, '.agents', 'flow', 'config.local.json'),
+        JSON.stringify({ land })
+      );
+    }
+
+    it('mentions land.reviewer on the new PR', async () => {
+      reviewers({ reviewer: 'octocat' });
+      writeRun(drain({ pushedSha: head, reviewedSha: head, verdict: 'clean' }), head);
+      const r = await flow(args);
+      expect(r.code).toBe(0);
+      const [body] = mentions(r.forge.calls);
+      expect(body).toMatch(
+        new RegExp(`^@octocat: this PR is ready for your review at ${head.slice(0, 7)}\\.`)
+      );
+      expect(body).toContain('agent:provenance');
+      expect(r.json.mention).toEqual({ reviewer: '@octocat', route: 'default', posted: true });
+    });
+
+    it("routes a PR that touches a security path on main's list to the security reviewer", async () => {
+      mainConfig({ securityPaths: { globs: ['src/**'] } });
+      reviewers({ reviewer: 'octocat', securityPaths: { reviewer: '@acme-security' } });
+      writeRun(drain({ pushedSha: head, reviewedSha: head, verdict: 'clean' }), head);
+      const forge = fakeForge();
+      forge.forge.armFacts = async () => facts(['src/app.ts']);
+      const r = await flow(args, forge);
+      expect(mentions(r.forge.calls)[0]).toMatch(/^@acme-security: this PR touches security paths/);
+      expect(r.json.mention).toMatchObject({ reviewer: '@acme-security', route: 'security' });
+    });
+
+    it('a security list set only on this machine does not route', async () => {
+      mainConfig({});
+      reviewers({
+        reviewer: 'octocat',
+        securityPaths: { globs: ['src/**'], reviewer: 'acme-security' },
+      });
+      writeRun(drain({ pushedSha: head, reviewedSha: head, verdict: 'clean' }), head);
+      const forge = fakeForge();
+      forge.forge.armFacts = async () => facts(['src/app.ts']);
+      const r = await flow(args, forge);
+      expect(r.json.mention).toMatchObject({ reviewer: '@octocat', route: 'default' });
+    });
+
+    it('a package manifest routes to the security reviewer too', async () => {
+      mainConfig({});
+      reviewers({ reviewer: 'octocat', securityPaths: { reviewer: 'acme-security' } });
+      writeRun(drain({ pushedSha: head, reviewedSha: head, verdict: 'clean' }), head);
+      const forge = fakeForge();
+      forge.forge.armFacts = async () => facts(['package.json']);
+      const r = await flow(args, forge);
+      expect(r.json.mention).toMatchObject({ reviewer: '@acme-security', route: 'security' });
+    });
+
+    it('a PR that touches none goes to the default reviewer', async () => {
+      mainConfig({ securityPaths: { globs: ['src/**'] } });
+      reviewers({ reviewer: 'octocat', securityPaths: { reviewer: 'acme-security' } });
+      writeRun(drain({ pushedSha: head, reviewedSha: head, verdict: 'clean' }), head);
+      const forge = fakeForge();
+      forge.forge.armFacts = async () => facts(['docs/readme.md']);
+      const r = await flow(args, forge);
+      expect(r.json.mention).toMatchObject({ reviewer: '@octocat', route: 'default' });
+    });
+
+    it("when flow cannot read the files or main's list, the security reviewer is named", async () => {
+      reviewers({ reviewer: 'octocat', securityPaths: { reviewer: 'acme-security' } });
+      writeRun(drain({ pushedSha: head, reviewedSha: head, verdict: 'clean' }), head);
+      // No main on origin, and this fake's armFacts throws.
+      const r = await flow(args);
+      expect(r.json.mention).toMatchObject({ reviewer: '@acme-security', route: 'security' });
+      mainConfig({});
+      writeRun(drain({ pushedSha: head, reviewedSha: head, verdict: 'clean' }), head);
+      const again = await flow(args);
+      expect(again.json.mention).toMatchObject({ reviewer: '@acme-security', route: 'security' });
+    });
+
+    it('names nobody when no reviewer is set', async () => {
+      mainConfig({});
+      writeRun(drain({ pushedSha: head, reviewedSha: head, verdict: 'clean' }), head);
+      const r = await flow(args);
+      expect(mentions(r.forge.calls)).toEqual([]);
+      expect(r.json.mention).toBeNull();
+    });
+
+    it('a mention that fails to post is reported, and the PR stays open', async () => {
+      reviewers({ reviewer: 'octocat' });
+      writeRun(drain({ pushedSha: head, reviewedSha: head, verdict: 'clean' }), head);
+      const forge = fakeForge();
+      forge.forge.comment = async () => {
+        throw new Error('HTTP 502');
+      };
+      const r = await flow(args, forge);
+      expect(r.code).toBe(0);
+      expect(r.json.mention).toEqual({
+        reviewer: '@octocat',
+        route: 'default',
+        posted: false,
+        error: 'HTTP 502',
+      });
+      expect(r.stderr).toContain('could not mention @octocat');
+    });
   });
 });
 

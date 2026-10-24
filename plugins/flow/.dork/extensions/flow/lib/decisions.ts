@@ -237,6 +237,22 @@ export function waitsAtGate(run: Record<string, unknown>): boolean {
   return !(drain !== null && isObject(drain.pr) && drain.pr.armed === true);
 }
 
+/**
+ * What a shipped review says about auto-merge when the arm guard held it back
+ * (`flow review`'s `armHandedToDrain` and `armRefused`), or `undefined` when it
+ * was armed or never meant to be.
+ */
+export function armMessage(json: unknown): string | undefined {
+  const answer = obj(json);
+  if (answer.armHandedToDrain === true) {
+    return 'Shipped. Flow turns on auto-merge once its pre-arm checks pass.';
+  }
+  const detail = obj(answer.armRefused).detail;
+  return typeof detail === 'string' && detail !== ''
+    ? `Shipped, but flow didn't turn on auto-merge: ${detail}. Merge it yourself.`
+    : undefined;
+}
+
 /** The commit a review gate shows: the reviewed one, else none. */
 function gateHead(run: Record<string, unknown>): string | null {
   const drain = obj(run.drain);
@@ -1111,9 +1127,15 @@ export class DecisionCoordinator {
   ): Promise<DecisionActionResult> {
     if (result.code === 0) {
       await this.settle(ask);
-      if (event.decidedBy === 'deadline') return { resolve: outcome };
+      // An approval that shipped but armed nothing (the arm guard, DOR-3262)
+      // says so, or the person waits on a merge that never comes.
+      const message = ask.kind === 'review' ? armMessage(result.json) : undefined;
+      const said = message === undefined ? {} : { message };
+      if (event.decidedBy === 'deadline') return { resolve: outcome, ...said };
       const offer = outcome === 'rejected' ? undefined : await this.offerFor(ask, event);
-      return offer === undefined ? { resolve: outcome } : { resolve: outcome, offer };
+      return offer === undefined
+        ? { resolve: outcome, ...said }
+        : { resolve: outcome, offer, ...said };
     }
     if (result.code === EXIT_PRECONDITION && ask.kind === 'question') {
       // Already settled: the engine's deadline pass or a tracker reply got there first.

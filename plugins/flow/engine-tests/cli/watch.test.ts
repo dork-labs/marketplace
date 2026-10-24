@@ -55,6 +55,12 @@ function scriptedForge(steps: Record<string, Step[]>, groups: GroupFailure[] = [
       arm: async () => {},
       disarm: async () => {},
       recentGroupFailures: async () => groups,
+      armFacts: async () => {
+        throw new Error('watch never arms');
+      },
+      comment: async () => undefined,
+      dispatchWorkflow: async () => undefined,
+      workflowRuns: async () => [],
     };
   };
   return { factory, reads, made };
