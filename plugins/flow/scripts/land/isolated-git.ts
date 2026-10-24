@@ -26,7 +26,7 @@
  */
 
 import { spawn } from 'node:child_process';
-import { mkdtempSync, rmSync } from 'node:fs';
+import { chmodSync, lstatSync, mkdirSync, mkdtempSync, rmSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 
@@ -49,6 +49,78 @@ export interface GitResult {
 export type GitRunner = (args: readonly string[], input?: string) => Promise<GitResult>;
 
 /**
+ * The PATH every isolated git call and every `run:` command gets: the folder of
+ * the node running flow (so `node` is found), then the system's own folders.
+ * Never the agent's PATH, which a worker can point at a folder of its own.
+ */
+export const FIXED_PATH: string = [
+  path.dirname(process.execPath),
+  '/opt/homebrew/bin',
+  '/usr/local/bin',
+  '/usr/bin',
+  '/bin',
+  '/usr/sbin',
+  '/sbin',
+].join(path.delimiter);
+
+/**
+ * A folder only this user can use, owned by flow, for scratch copies:
+ * `<temp>/dorkos-flow-<uid>`, mode 700. One that already exists is used only
+ * when it is a real folder (not a link) owned by this user; a looser mode is
+ * tightened. Anything else refuses, so another user cannot plant or watch a
+ * scratch copy.
+ *
+ * @returns The folder, or why it cannot be used.
+ */
+export function privateTempRoot(): string | { error: string } {
+  const uid = typeof process.getuid === 'function' ? process.getuid() : null;
+  const root = path.join(os.tmpdir(), `dorkos-flow-${uid ?? 'user'}`);
+  try {
+    mkdirSync(root, { mode: 0o700 });
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code !== 'EEXIST') {
+      return { error: `could not make ${root}: ${(error as Error).message}` };
+    }
+  }
+  let info;
+  try {
+    info = lstatSync(root);
+  } catch (error) {
+    return { error: `could not read ${root}: ${(error as Error).message}` };
+  }
+  if (!info.isDirectory() || info.isSymbolicLink()) {
+    return { error: `${root} is not a folder flow made; remove it and try again` };
+  }
+  if (uid !== null && info.uid !== uid) {
+    return { error: `${root} belongs to another user; flow will not use it` };
+  }
+  if ((info.mode & 0o077) !== 0) {
+    try {
+      chmodSync(root, 0o700);
+    } catch (error) {
+      return { error: `could not make ${root} private: ${(error as Error).message}` };
+    }
+  }
+  return root;
+}
+
+/**
+ * A fresh folder inside {@link privateTempRoot}.
+ *
+ * @param prefix - Its name's start.
+ * @returns The folder, or why it could not be made.
+ */
+export function privateTempDir(prefix: string): string | { error: string } {
+  const root = privateTempRoot();
+  if (typeof root !== 'string') return root;
+  try {
+    return mkdtempSync(path.join(root, prefix));
+  } catch (error) {
+    return { error: `could not make a scratch folder: ${(error as Error).message}` };
+  }
+}
+
+/**
  * The environment every isolated git call gets: PATH and the locale, and the
  * switches that keep git from reading anything but the scratch repository.
  *
@@ -65,7 +137,8 @@ export function isolatedGitEnv(
     GIT_TERMINAL_PROMPT: '0',
     GIT_ATTR_NOSYSTEM: '1',
   };
-  for (const key of ['PATH', 'LANG', 'TMPDIR']) {
+  env.PATH = FIXED_PATH;
+  for (const key of ['LANG', 'TMPDIR']) {
     const value = from[key];
     if (value !== undefined) env[key] = value;
   }
@@ -194,12 +267,9 @@ export async function scratchRepo(
   if (common.code !== 0 || commonDir === '' || !path.isAbsolute(commonDir)) {
     return `git could not find the repository of ${source}`;
   }
-  let dir: string;
-  try {
-    dir = mkdtempSync(path.join(os.tmpdir(), 'flow-scratch-'));
-  } catch (error) {
-    return `could not make a scratch folder: ${(error as Error).message}`;
-  }
+  const made = privateTempDir('scratch-');
+  if (typeof made !== 'string') return made.error;
+  const dir = made;
   const remove = () => {
     try {
       rmSync(dir, { recursive: true, force: true });

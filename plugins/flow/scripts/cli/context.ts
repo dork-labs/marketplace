@@ -15,7 +15,7 @@
  * @module @dorkos/flow/cli/context
  */
 
-import { execFile } from 'node:child_process';
+import { execFile, spawn } from 'node:child_process';
 import path from 'node:path';
 
 import { createGithubForge } from '../forge/github.ts';
@@ -54,6 +54,11 @@ export interface ProcessOptions {
   cwd?: string;
   /** The command's whole environment. Default: this process's. */
   env?: Readonly<Record<string, string | undefined>>;
+  /**
+   * Run it in a process group of its own, and on a timeout kill the whole
+   * group, so nothing the command started outlives it.
+   */
+  processGroup?: boolean;
 }
 
 /**
@@ -319,7 +324,88 @@ const MAX_OUTPUT_BYTES = 64 * 1024 * 1024;
  * @returns The exit code and captured output.
  */
 export const realProcessRunner: ProcessRunner = (cmd, args, opts = {}) =>
-  new Promise((resolve, reject) => {
+  opts.processGroup ? runInGroup(cmd, args, opts) : runPlain(cmd, args, opts);
+
+/** {@link realProcessRunner} for a command in its own process group. */
+function runInGroup(
+  cmd: string,
+  args: readonly string[],
+  opts: ProcessOptions
+): Promise<ProcessResult> {
+  return new Promise((resolve, reject) => {
+    let child: ReturnType<typeof spawn>;
+    try {
+      child = spawn(cmd, [...args], {
+        cwd: opts.cwd,
+        ...(opts.env === undefined ? {} : { env: { ...opts.env } }),
+        shell: false,
+        detached: true,
+        stdio: ['ignore', 'pipe', 'pipe'],
+      });
+    } catch (error) {
+      reject(error as Error);
+      return;
+    }
+    let stdout = '';
+    let stderr = '';
+    let done = false;
+    const killGroup = () => {
+      try {
+        if (child.pid !== undefined) process.kill(-child.pid, 'SIGKILL');
+      } catch {
+        // Already gone.
+      }
+    };
+    const timer = setTimeout(() => {
+      killGroup();
+      if (done) return;
+      done = true;
+      reject(
+        new Error(
+          `${cmd} timed out after ${opts.timeoutMs ?? 60_000} ms; its process group was stopped`
+        )
+      );
+    }, opts.timeoutMs ?? 60_000);
+    const add = (which: 'out' | 'err') => (chunk: string) => {
+      if (which === 'out') stdout += chunk;
+      else stderr += chunk;
+      if (stdout.length + stderr.length > MAX_OUTPUT_BYTES) {
+        killGroup();
+        if (!done) {
+          done = true;
+          clearTimeout(timer);
+          reject(new Error(`${cmd} printed more than ${MAX_OUTPUT_BYTES} bytes`));
+        }
+      }
+    };
+    child.stdout?.setEncoding('utf8').on('data', add('out'));
+    child.stderr?.setEncoding('utf8').on('data', add('err'));
+    child.on('error', (error) => {
+      if (done) return;
+      done = true;
+      clearTimeout(timer);
+      reject(error);
+    });
+    // When the command itself ends, whatever it left running in its group goes
+    // with it; that also lets the output pipes close, which a left-behind child
+    // holding them open would otherwise keep from happening.
+    child.on('exit', () => killGroup());
+    child.on('close', (code) => {
+      clearTimeout(timer);
+      if (done) return;
+      done = true;
+      resolve({ code: code ?? -1, stdout, stderr });
+    });
+  });
+}
+
+/** {@link realProcessRunner} for a plain command. */
+function runPlain(
+  cmd: string,
+  args: readonly string[],
+  opts: ProcessOptions
+): Promise<ProcessResult> {
+  return new Promise((resolve, reject) => {
     execFile(
       cmd,
       [...args],
@@ -340,3 +426,4 @@ export const realProcessRunner: ProcessRunner = (cmd, args, opts = {}) =>
       }
     );
   });
+}
