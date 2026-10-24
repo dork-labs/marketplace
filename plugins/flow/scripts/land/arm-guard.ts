@@ -162,7 +162,7 @@ export async function guardArm(input: GuardInput, io: GuardIo): Promise<GuardRes
   if (input.preArm === 'defer') {
     return early(
       'pre-arm-deferred',
-      `land.preArm checks apply to it (${touched.map(describeEntry).join(', ')}); flow runs them only in the drain, which arms the PR once they pass`
+      `land.preArm checks apply to it (${touched.map(describeEntry).join(', ')}); flow runs them only in the drain`
     );
   }
   const pre = await runPreArm(

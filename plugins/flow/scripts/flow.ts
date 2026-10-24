@@ -718,7 +718,7 @@ export const VERBS: readonly VerbDefinition[] = [
     name: 'squash-check',
     summary: "Check that a merged PR's squash commit is what was reviewed.",
     description:
-      "After the run's PR merged: pass when the squash commit's patch-id equals the reviewed head's diff from its merge-base, or when merging the reviewed head into the squash's parent gives the squash's tree; otherwise fail and report it on the PR to its author and land.securityPaths.reviewer. The reviewed head is always the one recorded at review. Reverts nothing. The drain runs it by itself on a merge. Exits 1 on a failed check, 5 when the PR has not merged.",
+      "After the run's PR merged: pass only when merging the head a clean review recorded into the squash's parent gives the squash's tree (a matching patch-id is noted, never enough); otherwise report it on the PR to its author and land.securityPaths.reviewer, with both trees and the files that differ. Reverts nothing. The drain runs it by itself on a merge. Exits 1 unless it passes, 5 when the PR has not merged.",
     common: ['project', 'session', 'dry-run'],
     positionals: [
       { name: 'identifier', required: true, description: 'The work item, e.g. ACME-12.' },

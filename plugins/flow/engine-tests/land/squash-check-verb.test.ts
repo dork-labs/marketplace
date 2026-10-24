@@ -169,7 +169,7 @@ describe('flow squash-check', () => {
     const { forge, comments } = fakeForge({ state: 'merged', mergeCommit: sha, author: 'octocat' });
     const r = await flow(['squash-check', 'ACME-12'], forge);
     expect(r.code).toBe(0);
-    expect(r.json).toMatchObject({ ok: true, verdict: { verdict: 'pass', check: 'patch-id' } });
+    expect(r.json).toMatchObject({ ok: true, verdict: { verdict: 'pass', check: 'tree' } });
     expect(comments).toEqual([]);
   });
 
@@ -187,7 +187,7 @@ describe('flow squash-check', () => {
     expect(comments).toHaveLength(1);
     expect(comments[0][0]).toBe(7);
     expect(comments[0][1]).toMatch(/^@octocat @acme-security: \*\*Squash check failed\.\*\*/);
-    expect(comments[0][1]).toContain('`extra.txt`');
+    expect(comments[0][1]).toContain('```text\nextra.txt\n');
   });
 
   it('a dry run reports nothing', async () => {
@@ -211,13 +211,35 @@ describe('flow squash-check', () => {
     expect((await flow(['squash-check', 'ACME-12'], forge)).code).toBe(1);
   });
 
-  it('refuses (exit 5) a PR that has not merged, and a run with no reviewed head', async () => {
+  it('refuses (exit 5) a PR that has not merged', async () => {
     writeRun({});
     const open = fakeForge({ state: 'open', mergeCommit: null, author: null });
     expect((await flow(['squash-check', 'ACME-12'], open.forge)).code).toBe(EXIT.precondition);
-    writeRun({ reviewedSha: null, verdict: null });
-    const merged = fakeForge({ state: 'merged', mergeCommit: squash(), author: null });
-    expect((await flow(['squash-check', 'ACME-12'], merged.forge)).code).toBe(EXIT.precondition);
+    expect(open.comments).toEqual([]);
+  });
+
+  it('a merge with no clean review at its head fails loudly', async () => {
+    writeRun({ verdict: 'changes' });
+    const merged = fakeForge({ state: 'merged', mergeCommit: squash(), author: 'octocat' });
+    const r = await flow(['squash-check', 'ACME-12'], merged.forge);
+    expect(r.code).toBe(1);
+    expect(r.json).toMatchObject({ status: 'unreviewed', reported: true });
+    expect(merged.comments[0][1]).toMatch(
+      /^@octocat @acme-security: \*\*Squash check failed\.\*\* #7 merged with no clean review/
+    );
+  });
+
+  it('a check that could not run says so on the PR', async () => {
+    writeRun({});
+    const { forge, comments } = fakeForge({
+      state: 'merged',
+      mergeCommit: 'f'.repeat(40),
+      author: null,
+    });
+    const r = await flow(['squash-check', 'ACME-12'], forge);
+    expect(r.code).toBe(1);
+    expect(r.json).toMatchObject({ verdict: { verdict: 'unverified' }, reported: true });
+    expect(comments[0][1]).toMatch(/^@acme-security: \*\*Squash check could not run\.\*\*/);
   });
 
   it('needs --pr for a run with no PR recorded, and takes only a number', async () => {

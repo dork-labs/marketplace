@@ -558,15 +558,16 @@ async function review(ctx: VerbContext): Promise<VerbResult> {
             preArm: 'defer',
           });
           if (!guard.ok) {
-            armRefused = { reason: guard.reason, detail: guard.detail };
             armAt = null;
             // A drain run approved at its reviewed commit: the drain runs the
-            // checks and arms it once they pass.
+            // checks and arms it once they pass. That is a hand-off, not a
+            // refusal, so armRefused stays null for it.
             handToDrain =
               guard.reason === 'pre-arm-deferred' &&
               isWritableDrain(existing) &&
               existing.drain.pr?.number === pr.number &&
               existing.drain.reviewedSha?.toLowerCase() === approved.toLowerCase();
+            if (!handToDrain) armRefused = { reason: guard.reason, detail: guard.detail };
           }
         }
       }
@@ -621,7 +622,17 @@ async function review(ctx: VerbContext): Promise<VerbResult> {
             existing,
             (drain) =>
               drain.pr !== null && drain.pr.number === pr.number
-                ? { ...drain, pr: { ...drain.pr, armed: false, disarmedForReview: true } }
+                ? {
+                    ...drain,
+                    // A person's approval is a fresh request: a pre-arm check
+                    // that refused this commit before runs again.
+                    pr: {
+                      ...drain.pr,
+                      armed: false,
+                      disarmedForReview: true,
+                      armRefusedAt: null,
+                    },
+                  }
                 : undefined,
             `the approval is posted, but flow could not record that the drain should arm PR #${pr.number}; arm it yourself`
           );

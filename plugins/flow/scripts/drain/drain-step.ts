@@ -164,8 +164,10 @@ export type SendAction = {
  * - `park`: apply the park; `trackerWrite: false` when the item was taken away,
  *   so the runner writes nothing to the tracker.
  * - `squash-check`: the PR merged; check its squash commit against the head
- *   recorded at review, and report a failure (DOR-3262). Once, on the move
- *   to `closing`.
+ *   a clean review recorded (`reviewed`, `null` when there is none, which is
+ *   itself reported), and report a failure (DOR-3262). Asked again each pass
+ *   until it reaches a verdict, at most {@link SQUASH_CHECK_ATTEMPTS} times;
+ *   `final` marks the last, which reports even a check that could not run.
  */
 export type DrainAction =
   | { kind: 'start-reviewer'; sha: string; deltaFrom: string | null }
@@ -173,7 +175,7 @@ export type DrainAction =
   | SendAction
   | { kind: 'arm'; pr: PrRef; sha: string }
   | { kind: 'disarm'; pr: PrRef }
-  | { kind: 'squash-check'; pr: PrRef; reviewed: string }
+  | { kind: 'squash-check'; pr: PrRef; reviewed: string | null; final: boolean }
   | { kind: 'adopt-or-release' }
   | { kind: 'park'; reason: string; trackerWrite: boolean };
 
@@ -466,18 +468,6 @@ function unreportedPush(step: Step, run: FlowRun, facts: DrainFacts, cfg: DrainS
   return nudge(disarmIfArmed(step, facts), run, facts, cfg, true);
 }
 
-/** The squash check that goes with a merge, when a reviewed head is recorded. */
-function withSquashCheck(step: Step, drain: DrainState): Step {
-  if (drain.pr === null || drain.reviewedSha === null) return step;
-  return {
-    ...step,
-    actions: [
-      ...step.actions,
-      { kind: 'squash-check', pr: ref(drain.pr), reviewed: drain.reviewedSha },
-    ],
-  };
-}
-
 /** `watching`: follow the PR until it merges, closes, or goes red. */
 function watching(step: Step, run: FlowRun, facts: DrainFacts, cfg: DrainStepConfig): Step {
   const drain = step.drain;
@@ -485,14 +475,11 @@ function watching(step: Step, run: FlowRun, facts: DrainFacts, cfg: DrainStepCon
   if (!drain.pr) return step;
   const prUrl = drain.pr.url;
   if (pr?.state === 'merged') {
-    return withSquashCheck(
-      send({ ...step, drain: toPhase(drain, 'closing') }, 'merged', {
-        flow: cfg.flow,
-        identifier: run.identifier,
-        prUrl,
-      }),
-      drain
-    );
+    return send({ ...step, drain: toPhase(drain, 'closing') }, 'merged', {
+      flow: cfg.flow,
+      identifier: run.identifier,
+      prUrl,
+    });
   }
   if (pr?.state === 'closed') return park(step, PARK_REASONS.prClosed);
   if (headMoved(drain, facts)) return unreportedPush(step, run, facts, cfg);
@@ -672,6 +659,46 @@ export function drainStep(
   cfg: DrainStepConfig,
   now: Date
 ): DrainStepResult {
+  return withSquashCheck(drainStepCore(run, facts, cfg, now), facts);
+}
+
+/** How many passes ask for a merged PR's squash check before the last one reports regardless. */
+export const SQUASH_CHECK_ATTEMPTS = 5;
+
+/**
+ * Once the run's PR merged, ask for the squash check (DOR-3262), whatever the
+ * phase: every pass until it reaches a verdict, at most
+ * {@link SQUASH_CHECK_ATTEMPTS} times. The attempt is counted here; the
+ * runner records the verdict.
+ */
+function withSquashCheck(result: DrainStepResult, facts: DrainFacts): DrainStepResult {
+  const drain = result.run.drain;
+  if (!drain || drain.v !== 1 || drain.pr === null || facts.pr?.state !== 'merged') return result;
+  const prior = drain.squashCheck ?? { attempts: 0, settled: false };
+  if (prior.settled || prior.attempts >= SQUASH_CHECK_ATTEMPTS) return result;
+  const attempts = prior.attempts + 1;
+  const reviewed = drain.verdict === 'clean' ? drain.reviewedSha : null;
+  return {
+    run: { ...result.run, drain: { ...drain, squashCheck: { attempts, settled: false } } },
+    actions: [
+      ...result.actions,
+      {
+        kind: 'squash-check',
+        pr: ref(drain.pr),
+        reviewed,
+        final: attempts >= SQUASH_CHECK_ATTEMPTS,
+      },
+    ],
+  };
+}
+
+/** {@link drainStep} without the squash check. */
+function drainStepCore(
+  run: FlowRun,
+  facts: DrainFacts,
+  cfg: DrainStepConfig,
+  now: Date
+): DrainStepResult {
   const current = run.drain;
   if (!current || current.v !== 1) return { run, actions: [] };
   // The run's own PR merged: the tracker closes the item on its `Closes` line,
@@ -703,8 +730,7 @@ export function drainStep(
       'merged',
       { flow: cfg.flow, identifier: run.identifier, prUrl: current.pr.url }
     );
-    const checked = withSquashCheck(step, recorded);
-    return { run: { ...run, drain: checked.drain }, actions: checked.actions };
+    return { run: { ...run, drain: step.drain }, actions: step.actions };
   }
   if (current.phase === 'parked') return readopt(run, current, facts, cfg);
 

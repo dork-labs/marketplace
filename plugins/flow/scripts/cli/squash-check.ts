@@ -24,8 +24,8 @@ import { PreconditionError, UsageError } from '../errors.ts';
 import type { FlowRun } from '../flow-run.ts';
 import { openFlowStateFile } from '../flow-state-file.ts';
 import type { Forge } from '../forge/types.ts';
-import { ARM_BASE } from '../land/arm-decision.ts';
 import { gitIn, squashReport, verifySquash, type SquashVerdict } from '../land/squash-verify.ts';
+import { isFullSha } from '../land/validate.ts';
 import type { VerbContext, VerbResult } from './context.ts';
 import { originForge, short } from './drain-run.ts';
 import { provenanceLine } from './provenance.ts';
@@ -34,7 +34,8 @@ import { sessionProvenance } from './work-write.ts';
 /** What one squash check came to. */
 export type SquashOutcome =
   | { status: 'checked'; verdict: SquashVerdict; reported: boolean; reportError?: string }
-  | { status: 'not-merged' | 'unknown'; why: string };
+  | { status: 'unreviewed'; why: string; reported: boolean; reportError?: string }
+  | { status: 'not-merged' | 'unknown'; why: string; reported: boolean; reportError?: string };
 
 /** What {@link checkSquash} needs. */
 export interface SquashCheckInput {
@@ -42,16 +43,23 @@ export interface SquashCheckInput {
   forge: Forge;
   /** The PR. */
   pr: number;
-  /** The head recorded at review. */
-  reviewed: string;
-  /** A checkout of the repository to run git in. */
+  /** The head a clean review recorded, or `null` when there is none (itself reported). */
+  reviewed: string | null;
+  /** A checkout of the repository to run git in (the main checkout). */
   worktree: string;
   /** The security reviewer's handle, or `null`. */
   securityReviewer: string | null;
   /** Report nothing (a dry run). */
   dryRun: boolean;
+  /** The last try: report even a check that could not run. */
+  final: boolean;
   /** Signs a comment body with flow's provenance line. */
   sign(body: string): string;
+}
+
+/** The mentions that open a report: `@a @b: `, or nothing. */
+function whoOf(mentions: readonly string[]): string {
+  return mentions.length > 0 ? `${mentions.join(' ')}: ` : '';
 }
 
 /** `@handle`, from a handle with or without its `@`. */
@@ -60,62 +68,108 @@ function at(handle: string): string {
 }
 
 /**
- * Check a merged PR's squash commit against the head recorded at review, and
- * report a failure on the PR.
+ * Whether an outcome is a verdict the drain need not ask for again: a pass, a
+ * fail, or a merge with no clean review (all reported). A check that could not
+ * run is asked again.
+ */
+export function squashSettled(outcome: SquashOutcome): boolean {
+  if (outcome.status === 'unreviewed') return true;
+  return outcome.status === 'checked' && outcome.verdict.verdict !== 'unverified';
+}
+
+/**
+ * Check a merged PR's squash commit against the head a clean review recorded,
+ * and report on the PR when it does not pass: always for a fail or a merge with
+ * no clean review, and for a check that could not run on the last try.
  *
  * @param input - The PR, its reviewed head and where to run git.
  * @returns The outcome.
  */
 export async function checkSquash(input: SquashCheckInput): Promise<SquashOutcome> {
+  let author: string | null = null;
+  const report = async (
+    body: (mentions: string[]) => string
+  ): Promise<{ reported: boolean; reportError?: string }> => {
+    if (input.dryRun) return { reported: false };
+    const mentions = [
+      ...new Set([author, input.securityReviewer].filter((h): h is string => h !== null).map(at)),
+    ];
+    try {
+      await input.forge.comment(input.pr, input.sign(body(mentions)));
+      return { reported: true };
+    } catch (error) {
+      return { reported: false, reportError: (error as Error).message };
+    }
+  };
+  const couldNot = async (why: string): Promise<SquashOutcome> => ({
+    status: 'unknown',
+    why,
+    ...(input.final
+      ? await report(
+          (m) =>
+            `${whoOf(m)}**Squash check could not run.** ${why}. Nobody has shown the squash is what was reviewed; check it by hand. Flow reverted nothing and changed no status.`
+        )
+      : { reported: false }),
+  });
   if (input.forge.mergeInfo === undefined) {
-    return { status: 'unknown', why: 'this forge does not say which commit a merge made' };
+    return couldNot('this forge does not say which commit a merge made');
   }
   let info;
   try {
     info = await input.forge.mergeInfo(input.pr);
   } catch (error) {
-    return { status: 'unknown', why: (error as Error).message };
+    return couldNot(`could not read how #${input.pr} merged: ${(error as Error).message}`);
   }
+  author = info.author;
   if (info.state !== 'merged') {
-    return { status: 'not-merged', why: `#${input.pr} is ${info.state}, not merged` };
+    return {
+      status: 'not-merged',
+      why: `#${input.pr} is ${info.state}, not merged`,
+      reported: false,
+    };
   }
   if (info.mergeCommit === null) {
-    return { status: 'unknown', why: `the forge did not say which commit #${input.pr} merged as` };
+    return couldNot(`the forge did not say which commit #${input.pr} merged as`);
+  }
+  if (input.reviewed === null) {
+    const why = `#${input.pr} merged with no clean review recorded at its head, so nothing shows the merge is what was reviewed`;
+    return {
+      status: 'unreviewed',
+      why,
+      ...(await report(
+        (m) =>
+          `${whoOf(m)}**Squash check failed.** ${why}. Flow reverted nothing and changed no status.`
+      )),
+    };
   }
   const git = gitIn(input.worktree);
-  // Both commits must be here: main from origin, and the reviewed head from
-  // the PR's own ref (its branch is often deleted on merge). Fixed refspecs
-  // only; the PR number is a number.
-  await git([
-    'fetch',
-    '--quiet',
-    '--no-tags',
-    'origin',
-    `+refs/heads/${ARM_BASE}:refs/remotes/origin/${ARM_BASE}`,
-  ]);
+  // Both commits must be here: the merge commit by its SHA (whatever branch it
+  // went to), and the reviewed head from the PR's own ref, since its branch is
+  // often deleted on merge. Fixed argv; both SHAs are checked whole, the PR
+  // number is a number. A failed fetch shows up as a missing commit below.
+  for (const sha of [info.mergeCommit, input.reviewed]) {
+    if ((await git(['cat-file', '-e', `${sha}^{commit}`])).code !== 0 && isFullSha(sha)) {
+      await git(['fetch', '--quiet', '--no-tags', 'origin', sha]);
+    }
+  }
   if ((await git(['cat-file', '-e', `${input.reviewed}^{commit}`])).code !== 0) {
     await git(['fetch', '--quiet', '--no-tags', 'origin', `refs/pull/${input.pr}/head`]);
   }
   const verdict = await verifySquash(git, { squash: info.mergeCommit, reviewed: input.reviewed });
-  if (verdict.verdict === 'pass' || input.dryRun) {
-    return { status: 'checked', verdict, reported: false };
-  }
-  const mentions = [
-    ...new Set(
-      [info.author, input.securityReviewer].filter((h): h is string => h !== null).map(at)
-    ),
-  ];
-  try {
-    await input.forge.comment(input.pr, input.sign(squashReport(verdict, mentions)));
-    return { status: 'checked', verdict, reported: true };
-  } catch (error) {
-    return { status: 'checked', verdict, reported: false, reportError: (error as Error).message };
-  }
+  const loud = verdict.verdict === 'fail' || (verdict.verdict === 'unverified' && input.final);
+  if (!loud) return { status: 'checked', verdict, reported: false };
+  return {
+    status: 'checked',
+    verdict,
+    ...(await report((m) => squashReport(verdict, m))),
+  };
 }
 
-/** The head recorded at review for a run, or `null`. */
+/** The head a clean review recorded for a run, or `null`. */
 export function reviewedHeadOf(run: FlowRun): string | null {
-  if (run.drain?.reviewedSha) return run.drain.reviewedSha;
+  if (run.drain !== undefined) {
+    return run.drain.verdict === 'clean' ? (run.drain.reviewedSha ?? null) : null;
+  }
   if (run.review?.verdict === 'clean' && run.review.reviewedSha) return run.review.reviewedSha;
   return null;
 }
@@ -145,16 +199,19 @@ export function signer(ctx: VerbContext, launcher: string | undefined): (body: s
 
 /** One line for a person. */
 export function describeOutcome(pr: number, outcome: SquashOutcome): string {
-  if (outcome.status !== 'checked') return `could not squash-check #${pr}: ${outcome.why}`;
-  const v = outcome.verdict;
-  if (v.verdict === 'pass') {
-    return `squash check passed for #${pr}: ${short(v.squash)} matches the reviewed ${short(v.reviewed)} (${v.check})`;
-  }
   const where = outcome.reported
     ? ', reported on the PR'
     : outcome.reportError
       ? `; the report could not be posted: ${outcome.reportError}`
       : '';
+  if (outcome.status === 'unreviewed')
+    return `SQUASH CHECK FAILED for #${pr}: ${outcome.why}${where}`;
+  if (outcome.status !== 'checked') return `could not squash-check #${pr}: ${outcome.why}${where}`;
+  const v = outcome.verdict;
+  if (v.verdict === 'pass') {
+    return `squash check passed for #${pr}: ${short(v.squash)} matches the reviewed ${short(v.reviewed)}`;
+  }
+  if (v.verdict === 'unverified') return `could not squash-check #${pr}: ${v.reason}${where}`;
   return `SQUASH CHECK FAILED for #${pr}: ${v.reason}${where}`;
 }
 
@@ -181,11 +238,6 @@ export async function run(ctx: VerbContext): Promise<VerbResult> {
     throw new PreconditionError(`${identifier} has no PR recorded; pass --pr <number>`);
   }
   const reviewed = reviewedHeadOf(found);
-  if (reviewed === null) {
-    throw new PreconditionError(
-      `${identifier} has no reviewed head recorded, so there is nothing to check the squash against`
-    );
-  }
   const forge = await originForge(ctx, ctx.projectDir);
   const outcome = await checkSquash({
     forge,
@@ -194,14 +246,15 @@ export async function run(ctx: VerbContext): Promise<VerbResult> {
     worktree: ctx.projectDir,
     securityReviewer: securityReviewerFor(ctx),
     dryRun: ctx.dryRun,
+    final: true,
     sign: signer(ctx, found.host),
   });
   const text = describeOutcome(pr, outcome);
-  if (outcome.status !== 'checked') throw new PreconditionError(text);
-  const failed = outcome.verdict.verdict === 'fail';
+  if (outcome.status === 'not-merged') throw new PreconditionError(text);
+  const passed = outcome.status === 'checked' && outcome.verdict.verdict === 'pass';
   return {
-    ...(failed ? { exitCode: 1 as const } : {}),
-    json: { ok: !failed, identifier, pr, ...outcome },
+    ...(passed ? {} : { exitCode: 1 as const }),
+    json: { ok: passed, identifier, pr, ...outcome },
     text,
   };
 }

@@ -282,10 +282,15 @@ export interface PassDeps {
   armGuard: ArmGuard;
   /**
    * The post-merge squash check (DOR-3262): checks a merged PR against the
-   * head recorded at review, reports a failure on the PR, and returns one line
-   * for the pass report.
+   * head a clean review recorded (`null`: none, itself reported), reports a
+   * failure on the PR, and says whether it reached a verdict (`settled`) and
+   * one line for the pass report. `final` reports even a check that could not run.
    */
-  squashCheck(input: { pr: number; reviewed: string; worktree: string }): Promise<string>;
+  squashCheck(input: {
+    pr: number;
+    reviewed: string | null;
+    final: boolean;
+  }): Promise<{ settled: boolean; line: string }>;
   /** The tracker item's facts (one `getItem`). */
   /**
    * The tracker item's facts (one `getItem`). For a parked run (`parked`), it
@@ -1206,12 +1211,30 @@ export async function runPass(deps: PassDeps): Promise<PassReport> {
         }
         return `armed #${n} at ${short(action.sha)}`;
       }
-      case 'squash-check':
-        return deps.squashCheck({
+      case 'squash-check': {
+        const checked = await deps.squashCheck({
           pr: action.pr.number,
           reviewed: action.reviewed,
-          worktree: run.worktreePath,
+          final: action.final,
         });
+        if (checked.settled || action.final) {
+          await supervisorWrite(run.issueId, (r) =>
+            r.drain.pr?.number === action.pr.number
+              ? {
+                  ...r,
+                  drain: {
+                    ...r.drain,
+                    squashCheck: {
+                      attempts: r.drain.squashCheck?.attempts ?? 1,
+                      settled: true,
+                    },
+                  },
+                }
+              : undefined
+          );
+        }
+        return checked.line;
+      }
       case 'disarm': {
         await deps.forge.disarm(action.pr.number);
         // Recorded, so a clean review of what comes next re-arms it.

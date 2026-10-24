@@ -1123,6 +1123,7 @@ describe('review fixes (DOR-2528 FIX-FIRST)', () => {
       url: 'https://github.com/acme/app/pull/7',
       armed: false,
       disarmedForReview: false,
+      armRefusedAt: 'abc1234def',
     };
     writeRun({
       stage: 'verify',
@@ -1145,9 +1146,15 @@ describe('review fixes (DOR-2528 FIX-FIRST)', () => {
     expect(guard.requests[0].preArm).toBe('defer');
     expect(comments(tracker)).toEqual(['Shipped from DorkOS.']);
     expect(result.forge.calls.some((call) => call.method === 'arm')).toBe(false);
-    expect(result.json).toMatchObject({ armed: false, armHandedToDrain: true });
+    expect(result.json).toMatchObject({ armed: false, armHandedToDrain: true, armRefused: null });
     expect(String(result.json.note)).toMatch(/The drain arms PR #7 once its pre-arm checks pass/);
-    expect(stored().drain?.pr).toMatchObject({ number: 7, armed: false, disarmedForReview: true });
+    // A fresh request: a pre-arm refusal recorded before is cleared.
+    expect(stored().drain?.pr).toMatchObject({
+      number: 7,
+      armed: false,
+      disarmedForReview: true,
+      armRefusedAt: null,
+    });
   });
 
   it('a run outside the drain whose pre-arm checks apply is left for a person to merge', async () => {

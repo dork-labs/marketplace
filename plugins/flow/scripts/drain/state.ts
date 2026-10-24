@@ -140,6 +140,11 @@ export interface DrainState {
   parkedReason: string | null;
   /** The phase the run parked from, which an answer resumes; absent on older records. */
   parkedFrom?: DrainPhase | null;
+  /**
+   * The post-merge squash check (DOR-3262): how many times it has been asked
+   * for, and whether it reached a verdict. Absent until the PR merged.
+   */
+  squashCheck?: { attempts: number; settled: boolean };
   /** When the run parked (ISO): only a reply after it answers the park. */
   parkedAt?: string | null;
   /**

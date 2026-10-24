@@ -10,6 +10,7 @@ import { describe, expect, it } from 'vitest';
 import {
   drainStep,
   PARK_REASONS,
+  SQUASH_CHECK_ATTEMPTS,
   type DrainAction,
   type DrainFacts,
   type DrainStepConfig,
@@ -364,7 +365,7 @@ describe('drainStep: the phase table', () => {
     expect(out.actions).toEqual([
       { kind: 'send', message: 'merged', ctx: { ...BASE, prUrl: PR.url } },
       // DOR-3262: the merge's squash is checked against the head recorded at review.
-      { kind: 'squash-check', pr: { repo: PR.repo, number: PR.number }, reviewed: S },
+      { kind: 'squash-check', pr: { repo: PR.repo, number: PR.number }, reviewed: S, final: false },
     ]);
   });
 
@@ -379,7 +380,7 @@ describe('drainStep: the phase table', () => {
     expect(out.drain.phase).toBe('closing');
     expect(out.actions).toEqual([
       { kind: 'send', message: 'merged', ctx: { ...BASE, prUrl: PR.url } },
-      { kind: 'squash-check', pr: { repo: PR.repo, number: PR.number }, reviewed: S },
+      { kind: 'squash-check', pr: { repo: PR.repo, number: PR.number }, reviewed: S, final: false },
     ]);
   });
 
@@ -398,6 +399,30 @@ describe('drainStep: the phase table', () => {
     expect(out.drain.parkedReason).toBeNull();
     expect(out.drain.parkedFrom).toBeNull();
     expect(out.actions.map((a) => a.kind)).toEqual(['send', 'squash-check']);
+  });
+
+  // DOR-3262: the squash check is asked for each pass until it settles, at
+  // most SQUASH_CHECK_ATTEMPTS times, and the last is marked final.
+  it('asks for the squash check again until it settles, then stops', () => {
+    let d = watchingDrain();
+    const kinds: boolean[] = [];
+    for (let i = 0; i < SQUASH_CHECK_ATTEMPTS + 2; i++) {
+      const out = step(d, { pr: prStatus({ state: 'merged' }) });
+      const check = out.actions.find((a) => a.kind === 'squash-check');
+      if (check?.kind === 'squash-check') kinds.push(check.final);
+      d = out.drain;
+    }
+    expect(kinds).toEqual([false, false, false, false, true]);
+    const settled = step(
+      watchingDrain({ squashCheck: { attempts: 1, settled: true } } as Partial<DrainState>),
+      { pr: prStatus({ state: 'merged' }) }
+    );
+    expect(settled.actions.some((a) => a.kind === 'squash-check')).toBe(false);
+  });
+
+  it('a merge whose last review asked for changes is checked against no reviewed head', () => {
+    const out = step(watchingDrain({ verdict: 'changes' }), { pr: prStatus({ state: 'merged' }) });
+    expect(out.actions.find((a) => a.kind === 'squash-check')).toMatchObject({ reviewed: null });
   });
 
   // The rescue has limits (review, 2026-09-27). A person who reopened and
@@ -423,7 +448,8 @@ describe('drainStep: the phase table', () => {
       item: { closed: true, claimed: false, needsInput: false, title: 't' },
     });
     expect(out.drain.phase).toBe('parked');
-    expect(out.actions).toEqual([]);
+    // It stays parked, but the merge's squash is still checked (DOR-3262).
+    expect(out.actions.map((a) => a.kind)).toEqual(['squash-check']);
   });
   it('a limited run is not rescued by a merge; the handoff reducer owns it', () => {
     const out = step(
@@ -1078,7 +1104,10 @@ describe('drainStep: properties over every row', () => {
         // head recorded at review, never the PR's head.
         if (a.kind === 'squash-check') {
           expect(f.pr?.state).toBe('merged');
-          expect(a.reviewed).toBe({ ...d, ...f.reports }.reviewedSha);
+          // Only a clean review's head counts; never the PR's own head.
+          const recorded = out.run.drain;
+          expect(a.reviewed).toBe(recorded?.verdict === 'clean' ? recorded.reviewedSha : null);
+          expect(out.run.drain?.squashCheck?.attempts).toBeGreaterThan(0);
         }
         if (a.kind === 'arm') {
           arms++;

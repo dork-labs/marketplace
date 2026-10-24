@@ -237,7 +237,6 @@ export function waitsAtGate(run: Record<string, unknown>): boolean {
   return !(drain !== null && isObject(drain.pr) && drain.pr.armed === true);
 }
 
-/** The commit a review gate shows: the reviewed one, else none. */
 /**
  * What a shipped review says about auto-merge when the arm guard held it back
  * (`flow review`'s `armHandedToDrain` and `armRefused`), or `undefined` when it
@@ -254,6 +253,7 @@ export function armMessage(json: unknown): string | undefined {
     : undefined;
 }
 
+/** The commit a review gate shows: the reviewed one, else none. */
 function gateHead(run: Record<string, unknown>): string | null {
   const drain = obj(run.drain);
   const review = obj(run.review);
