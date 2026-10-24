@@ -1,0 +1,208 @@
+/**
+ * The post-merge squash check (DOR-3262), on real repositories built the way
+ * GitHub squashes: one commit on `main` whose tree is what merged. Security's
+ * four cases each have a fixture: patch-id match passes, a context-only shift
+ * passes on the tree, one extra line fails, a conflict fails.
+ */
+
+import { execFileSync } from 'node:child_process';
+import { mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
+import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+
+import { gitIn, squashReport, verifySquash } from '../../scripts/land/squash-verify.ts';
+
+let repo: string;
+
+function git(...args: string[]): string {
+  return execFileSync(
+    'git',
+    [
+      '-c',
+      'user.email=t@example.invalid',
+      '-c',
+      'user.name=t',
+      '-c',
+      'commit.gpgsign=false',
+      ...args,
+    ],
+    { cwd: repo, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] }
+  ).trim();
+}
+
+function write(file: string, text: string): void {
+  writeFileSync(path.join(repo, file), text);
+}
+
+function commitAll(message: string): string {
+  git('add', '-A');
+  git('commit', '-q', '-m', message);
+  return git('rev-parse', 'HEAD');
+}
+
+/** Twenty numbered lines, with `edits` replacing some of them. */
+function lines(edits: Record<number, string> = {}): string {
+  return Array.from({ length: 20 }, (_, i) => edits[i + 1] ?? `line ${i + 1}`).join('\n') + '\n';
+}
+
+/**
+ * Squash `reviewed` onto main as GitHub does: a single commit on main whose
+ * tree is `tree` (default: what merging the reviewed head gives).
+ */
+function squashOnto(reviewed: string, change?: () => void): string {
+  git('checkout', '-q', 'main');
+  git('merge', '-q', '--squash', reviewed);
+  change?.();
+  return commitAll('the squash');
+}
+
+beforeEach(() => {
+  repo = realpathSync(mkdtempSync(path.join(os.tmpdir(), 'flow-squash-')));
+  git('init', '-q', '-b', 'main');
+  write('a.txt', lines());
+  write('b.txt', 'b\n');
+  commitAll('base');
+  git('checkout', '-q', '-b', 'feature');
+});
+
+afterEach(() => {
+  rmSync(repo, { recursive: true, force: true });
+});
+
+describe('verifySquash', () => {
+  it('a clean squash passes on patch-id', async () => {
+    write('a.txt', lines({ 10: 'line 10, changed' }));
+    const reviewed = commitAll('feature');
+    const squash = squashOnto(reviewed);
+    expect(await verifySquash(gitIn(repo), { squash, reviewed })).toEqual({
+      verdict: 'pass',
+      check: 'patch-id',
+      squash,
+      reviewed,
+    });
+  });
+
+  it('a context-only shift passes on the tree: main moved lines next to the change (#3180)', async () => {
+    write('a.txt', lines({ 10: 'line 10, changed' }));
+    const reviewed = commitAll('feature');
+    // main moves a neighbouring line after the branch point, inside the diff's context.
+    git('checkout', '-q', 'main');
+    write('a.txt', lines({ 8: 'line 8, moved on main' }));
+    commitAll('main moves on');
+    const squash = squashOnto(reviewed);
+    expect(readFileSync(path.join(repo, 'a.txt'), 'utf8')).toBe(
+      lines({ 8: 'line 8, moved on main', 10: 'line 10, changed' })
+    );
+    expect(await verifySquash(gitIn(repo), { squash, reviewed })).toEqual({
+      verdict: 'pass',
+      check: 'tree',
+      squash,
+      reviewed,
+    });
+  });
+
+  it('one extra line slipped into the squash fails, with both trees and the file', async () => {
+    write('a.txt', lines({ 10: 'line 10, changed' }));
+    const reviewed = commitAll('feature');
+    const squash = squashOnto(reviewed, () => write('b.txt', 'b\nslipped in\n'));
+    const result = await verifySquash(gitIn(repo), { squash, reviewed });
+    expect(result).toMatchObject({ verdict: 'fail', files: ['b.txt'] });
+    expect(result.verdict === 'fail' && result.squashTree).toBe(
+      git('rev-parse', `${squash}^{tree}`)
+    );
+    expect(result.verdict === 'fail' && result.reviewedTree).toMatch(/^[0-9a-f]{40}$/);
+    expect(result.verdict === 'fail' && result.reviewedTree).not.toBe(
+      result.verdict === 'fail' && result.squashTree
+    );
+  });
+
+  it('a conflict fails, never passes', async () => {
+    write('a.txt', lines({ 10: 'line 10, the feature' }));
+    const reviewed = commitAll('feature');
+    // main changes the same line another way; the "squash" lands the feature's
+    // text anyway, so its tree may even look right.
+    git('checkout', '-q', 'main');
+    write('a.txt', lines({ 10: 'line 10, main' }));
+    commitAll('main changes the same line');
+    write('a.txt', lines({ 10: 'line 10, the feature' }));
+    const squash = commitAll('a squash made by hand');
+    const result = await verifySquash(gitIn(repo), { squash, reviewed });
+    expect(result).toMatchObject({ verdict: 'fail', reviewedTree: null, files: ['a.txt'] });
+    expect(result.verdict === 'fail' && result.reason).toMatch(/conflicts/);
+  });
+
+  it('a squash that only matches a later head, not the reviewed one, fails', async () => {
+    write('a.txt', lines({ 10: 'line 10, changed' }));
+    const reviewed = commitAll('reviewed');
+    write('a.txt', lines({ 10: 'line 10, changed', 12: 'pushed after the review' }));
+    const later = commitAll('after the review');
+    const squash = squashOnto(later);
+    expect(await verifySquash(gitIn(repo), { squash, reviewed })).toMatchObject({
+      verdict: 'fail',
+      files: ['a.txt'],
+    });
+  });
+
+  it('a merge commit is not a squash', async () => {
+    write('a.txt', lines({ 10: 'line 10, changed' }));
+    const reviewed = commitAll('feature');
+    git('checkout', '-q', 'main');
+    git('merge', '-q', '--no-ff', '-m', 'merge', reviewed);
+    const merge = git('rev-parse', 'HEAD');
+    expect(await verifySquash(gitIn(repo), { squash: merge, reviewed })).toMatchObject({
+      verdict: 'fail',
+      reason: expect.stringMatching(/not a squash commit/),
+    });
+  });
+
+  it('refuses anything but two full SHAs, and commits it does not have', async () => {
+    const head = git('rev-parse', 'HEAD');
+    for (const [squash, reviewed] of [
+      [head.slice(0, 7), head],
+      [head, '--all'],
+      [head, 'HEAD'],
+    ]) {
+      expect((await verifySquash(gitIn(repo), { squash, reviewed })).verdict).toBe('fail');
+    }
+    expect(
+      await verifySquash(gitIn(repo), { squash: head, reviewed: 'f'.repeat(40) })
+    ).toMatchObject({
+      verdict: 'fail',
+      reason: expect.stringMatching(/not in this checkout/),
+    });
+  });
+
+  it('a local git replace cannot make a slipped-in change pass', async () => {
+    write('a.txt', lines({ 10: 'line 10, changed' }));
+    const reviewed = commitAll('feature');
+    const clean = squashOnto(reviewed);
+    git('reset', '-q', '--hard', `${clean}^`);
+    const squash = squashOnto(reviewed, () => write('b.txt', 'b\nslipped in\n'));
+    // Point the bad squash at the clean one's objects; the check ignores it.
+    git('replace', squash, clean);
+    expect((await verifySquash(gitIn(repo), { squash, reviewed })).verdict).toBe('fail');
+  });
+});
+
+describe('squashReport', () => {
+  it('names who to tell, both trees and the files, and that nothing was reverted', () => {
+    const body = squashReport(
+      {
+        verdict: 'fail',
+        reason: 'the squash commit 1111111 is not what was reviewed at 2222222',
+        squash: '1'.repeat(40),
+        reviewed: '2'.repeat(40),
+        squashTree: '3'.repeat(40),
+        reviewedTree: '4'.repeat(40),
+        files: ['b.txt'],
+      },
+      ['@octocat', '@acme-security']
+    );
+    expect(body).toMatch(/^@octocat @acme-security: \*\*Squash check failed\.\*\*/);
+    expect(body).toContain('3'.repeat(40));
+    expect(body).toContain('4'.repeat(40));
+    expect(body).toContain('`b.txt`');
+    expect(body).toContain('reverted nothing');
+  });
+});

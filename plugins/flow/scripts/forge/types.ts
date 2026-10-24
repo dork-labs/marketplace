@@ -147,6 +147,16 @@ export interface ArmFacts {
   files: string[] | null;
 }
 
+/** What {@link Forge.mergeInfo} reads. */
+export interface MergeInfo {
+  /** Open, merged, or closed without merging. */
+  state: 'open' | 'merged' | 'closed';
+  /** The commit the merge put on the base branch, once merged. */
+  mergeCommit: string | null;
+  /** The PR author's login, when the forge says. */
+  author: string | null;
+}
+
 /** One run of a dispatched workflow. */
 export interface WorkflowRun {
   /** The run id. */
@@ -189,6 +199,12 @@ export interface Forge {
    * it, an approval posts nothing and a request for changes posts a comment.
    */
   review(pr: number, input: ReviewInput): Promise<ReviewOutcome>;
+  /**
+   * What a merge made (the post-merge squash check): the PR's state, the
+   * commit its merge put on the base (`null` until it merged), and who wrote
+   * it. Optional: a forge without it cannot be squash-checked.
+   */
+  mergeInfo?(pr: number): Promise<MergeInfo>;
   /** Everything the arm guard reads about a PR. */
   armFacts(pr: number): Promise<ArmFacts>;
   /** Post a plain comment on a PR as the signed-in account. */

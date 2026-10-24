@@ -34,6 +34,7 @@ import {
   type ForgePr,
   type ForgeTarget,
   type GroupFailure,
+  type MergeInfo,
   type PrStatus,
   type WorkflowRun,
 } from './types.ts';
@@ -351,6 +352,28 @@ export function parseWorkflowRuns(raw: unknown): WorkflowRun[] {
       },
     ];
   });
+}
+
+/**
+ * Parse `gh pr view --json state,mergeCommit,author`.
+ *
+ * @param raw - The parsed JSON.
+ * @param where - `owner/name#n`, for the error.
+ * @returns The merge info; `mergeCommit` only when it is a full SHA.
+ * @throws {ForgeError} When the answer has no recognizable state.
+ */
+export function parseMergeInfo(raw: unknown, where: string): MergeInfo {
+  const view = record(raw);
+  const state = str(view?.state)?.toUpperCase();
+  if (view === undefined || !['OPEN', 'MERGED', 'CLOSED'].includes(state ?? '')) {
+    throw new ForgeError(`gh returned an unreadable pull request for ${where}`);
+  }
+  const oid = str(record(view.mergeCommit)?.oid)?.toLowerCase();
+  return {
+    state: (state as string).toLowerCase() as MergeInfo['state'],
+    mergeCommit: oid !== undefined && isFullSha(oid) ? oid : null,
+    author: str(record(view.author)?.login) ?? null,
+  };
 }
 
 /** One merge-group workflow run from `gh run list --json`. */
@@ -721,6 +744,15 @@ export function createGithubForge(options: GithubForgeOptions): Forge {
         if (str(again?.headRefOid) !== facts.headRefOid) return { ...facts, files: null };
       }
       return facts;
+    },
+
+    async mergeInfo(pr) {
+      const where = `${target.repo}#${pr}`;
+      const raw = await ghJson(
+        ['pr', 'view', String(pr), '-R', repoArg, '--json', 'state,mergeCommit,author'],
+        `reading how ${where} merged`
+      );
+      return parseMergeInfo(raw, where);
     },
 
     async comment(pr, body) {

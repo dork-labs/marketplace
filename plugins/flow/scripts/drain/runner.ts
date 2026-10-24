@@ -280,6 +280,12 @@ export interface PassDeps {
   forge: Forge;
   /** The arm guard (DOR-3262), asked before every arm. */
   armGuard: ArmGuard;
+  /**
+   * The post-merge squash check (DOR-3262): checks a merged PR against the
+   * head recorded at review, reports a failure on the PR, and returns one line
+   * for the pass report.
+   */
+  squashCheck(input: { pr: number; reviewed: string; worktree: string }): Promise<string>;
   /** The tracker item's facts (one `getItem`). */
   /**
    * The tracker item's facts (one `getItem`). For a parked run (`parked`), it
@@ -431,6 +437,7 @@ function actionRank(action: DrainAction | HandoffAction): number {
       return 3;
     case 'arm':
     case 'disarm':
+    case 'squash-check':
       return 4;
     case 'park':
       return 5;
@@ -452,6 +459,8 @@ function describe(action: DrainAction, reviewerAccount: string | null): string {
       return `armed #${action.pr.number}`;
     case 'disarm':
       return `disarmed #${action.pr.number}`;
+    case 'squash-check':
+      return `squash-checked #${action.pr.number}`;
     case 'park':
       return `parked: ${action.reason}`;
     case 'adopt-or-release':
@@ -1197,6 +1206,12 @@ export async function runPass(deps: PassDeps): Promise<PassReport> {
         }
         return `armed #${n} at ${short(action.sha)}`;
       }
+      case 'squash-check':
+        return deps.squashCheck({
+          pr: action.pr.number,
+          reviewed: action.reviewed,
+          worktree: run.worktreePath,
+        });
       case 'disarm': {
         await deps.forge.disarm(action.pr.number);
         // Recorded, so a clean review of what comes next re-arms it.

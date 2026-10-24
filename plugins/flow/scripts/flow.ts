@@ -715,6 +715,25 @@ export const VERBS: readonly VerbDefinition[] = [
     load: () => import('./cli/pr.ts'),
   },
   {
+    name: 'squash-check',
+    summary: "Check that a merged PR's squash commit is what was reviewed.",
+    description:
+      "After the run's PR merged: pass when the squash commit's patch-id equals the reviewed head's diff from its merge-base, or when merging the reviewed head into the squash's parent gives the squash's tree; otherwise fail and report it on the PR to its author and land.securityPaths.reviewer. The reviewed head is always the one recorded at review. Reverts nothing. The drain runs it by itself on a merge. Exits 1 on a failed check, 5 when the PR has not merged.",
+    common: ['project', 'session', 'dry-run'],
+    positionals: [
+      { name: 'identifier', required: true, description: 'The work item, e.g. ACME-12.' },
+    ],
+    flags: [
+      {
+        name: 'pr',
+        kind: 'string',
+        value: 'n',
+        description: 'The PR, when the run has none recorded.',
+      },
+    ],
+    load: () => import('./cli/squash-check.ts'),
+  },
+  {
     name: 'freeze',
     summary: 'Stop flow arming auto-merge in this project while a release is cut.',
     description:

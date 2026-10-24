@@ -603,8 +603,11 @@ describe('flow drain: one item from pick to closing', () => {
 
     // Merged -> the worker is told to close; flow done -> its session is stopped.
     world.forge.status.state = 'merged';
-    await tick();
+    const merged = await tick();
     expect(world.log.sends.at(-1)?.text).toContain('flow.ts done ACME-1');
+    // The merge's squash is checked (DOR-3262). This fake forge cannot say which
+    // commit the merge made, so the pass says it could not check.
+    expect(JSON.stringify(merged.json)).toContain('could not squash-check #7');
     expect(drainOf('ACME-1').phase).toBe('closing');
     const done = await flow(
       ['done', 'ACME-1', '--summary', 'Shipped.'],

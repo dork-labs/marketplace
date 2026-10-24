@@ -11,6 +11,7 @@ import {
   checkBucket,
   createGithubForge,
   parseArmFacts,
+  parseMergeInfo,
   parseWorkflowRuns,
 } from '../../scripts/forge/github.ts';
 
@@ -263,5 +264,46 @@ describe('the GitHub forge', () => {
     const { forge, calls } = forgeWith(() => ({ code: 0, stdout: '' }));
     await forge.comment(7, '@sec please look');
     expect(calls[0].slice(0, 6)).toEqual(['pr', 'comment', '7', '-R', 'acme/app', '--body-file']);
+  });
+});
+
+describe('parseMergeInfo', () => {
+  it('reads the merge commit only as a full SHA, and the author', () => {
+    expect(
+      parseMergeInfo(
+        { state: 'MERGED', mergeCommit: { oid: SHA.toUpperCase() }, author: { login: 'octocat' } },
+        'x'
+      )
+    ).toEqual({ state: 'merged', mergeCommit: SHA, author: 'octocat' });
+    expect(parseMergeInfo({ state: 'OPEN', mergeCommit: null }, 'x')).toEqual({
+      state: 'open',
+      mergeCommit: null,
+      author: null,
+    });
+    expect(
+      parseMergeInfo({ state: 'MERGED', mergeCommit: { oid: 'abc' } }, 'x').mergeCommit
+    ).toBeNull();
+    expect(() => parseMergeInfo({}, 'x')).toThrow(/unreadable/);
+  });
+
+  it('the forge reads state, mergeCommit and author', async () => {
+    const { forge, calls } = forgeWith(() => ({
+      code: 0,
+      stdout: JSON.stringify({
+        state: 'MERGED',
+        mergeCommit: { oid: SHA },
+        author: { login: 'a' },
+      }),
+    }));
+    expect((await forge.mergeInfo?.(7))?.mergeCommit).toBe(SHA);
+    expect(calls[0]).toEqual([
+      'pr',
+      'view',
+      '7',
+      '-R',
+      'acme/app',
+      '--json',
+      'state,mergeCommit,author',
+    ]);
   });
 });

@@ -81,6 +81,7 @@ import { guardLaunch, launchPermissionMode } from './launch-mode.ts';
 import { claimItem } from './claim.ts';
 import type { VerbContext, VerbResult } from './context.ts';
 import { handoffWiring } from './handoff-wiring.ts';
+import { checkSquash, describeOutcome, securityReviewerFor, signer } from './squash-check.ts';
 import {
   gatherAssignmentInput,
   liveByAccount,
@@ -544,6 +545,19 @@ export async function drain(ctx: VerbContext, options: DrainOptions = {}): Promi
     hostFor,
     forge,
     armGuard: ctx.armGuard,
+    squashCheck: async ({ pr, reviewed, worktree }) =>
+      describeOutcome(
+        pr,
+        await checkSquash({
+          forge,
+          pr,
+          reviewed,
+          worktree: existsSync(worktree) ? worktree : mainCheckout,
+          securityReviewer: securityReviewerFor(ctx),
+          dryRun: ctx.dryRun,
+          sign: signer(ctx, undefined),
+        })
+      ),
     async item(identifier, parked) {
       const item = await adapter.getItem(
         identifier,

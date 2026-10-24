@@ -363,6 +363,8 @@ describe('drainStep: the phase table', () => {
     expect(out.drain.phase).toBe('closing');
     expect(out.actions).toEqual([
       { kind: 'send', message: 'merged', ctx: { ...BASE, prUrl: PR.url } },
+      // DOR-3262: the merge's squash is checked against the head recorded at review.
+      { kind: 'squash-check', pr: { repo: PR.repo, number: PR.number }, reviewed: S },
     ]);
   });
 
@@ -377,6 +379,7 @@ describe('drainStep: the phase table', () => {
     expect(out.drain.phase).toBe('closing');
     expect(out.actions).toEqual([
       { kind: 'send', message: 'merged', ctx: { ...BASE, prUrl: PR.url } },
+      { kind: 'squash-check', pr: { repo: PR.repo, number: PR.number }, reviewed: S },
     ]);
   });
 
@@ -394,7 +397,7 @@ describe('drainStep: the phase table', () => {
     expect(out.drain.phase).toBe('closing');
     expect(out.drain.parkedReason).toBeNull();
     expect(out.drain.parkedFrom).toBeNull();
-    expect(out.actions.map((a) => a.kind)).toEqual(['send']);
+    expect(out.actions.map((a) => a.kind)).toEqual(['send', 'squash-check']);
   });
 
   // The rescue has limits (review, 2026-09-27). A person who reopened and
@@ -986,6 +989,7 @@ describe('drainStep: properties over every row', () => {
     'send',
     'arm',
     'disarm',
+    'squash-check',
     'adopt-or-release',
     'park',
   ]);
@@ -1070,6 +1074,12 @@ describe('drainStep: properties over every row', () => {
       for (const a of out.actions) {
         expect(ALLOWED.has(a.kind)).toBe(true);
         expect(JSON.stringify(a)).not.toMatch(/create/i);
+        // A squash is checked only after a merge, and always against the
+        // head recorded at review, never the PR's head.
+        if (a.kind === 'squash-check') {
+          expect(f.pr?.state).toBe('merged');
+          expect(a.reviewed).toBe({ ...d, ...f.reports }.reviewedSha);
+        }
         if (a.kind === 'arm') {
           arms++;
           expect(a.sha).toBe(f.reports.reviewedSha);

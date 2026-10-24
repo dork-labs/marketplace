@@ -50,6 +50,10 @@ flow freeze                             # is a freeze on?
 
 Have your release process turn it on before a release and off after. The freeze is kept on this computer, never committed.
 
+## After the merge: the squash check
+
+Once a PR has merged, flow checks that the squash commit on `main` is what was reviewed. It passes when the squash's patch matches the reviewed commit's, or when merging the reviewed commit into the squash's parent gives exactly the squash's tree (`main` moved lines nearby). A conflict, or any other difference, fails. Flow then comments on the PR, naming its author and `land.securityPaths.reviewer`, with both trees and the files that differ. It reverts nothing. The drain runs the check by itself. Outside the drain, run `flow squash-check <id>`.
+
 ## What this is not
 
 The guard is a rail for flow's own arms. Flow runs inside the agent, so the rules that hold for everyone belong on GitHub, as required checks and rulesets. The `security-reviewed` label is a person's signal and carries over to later pushes. A per-commit security approval belongs on GitHub too.

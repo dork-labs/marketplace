@@ -163,6 +163,9 @@ export type SendAction = {
  *   exists, else release the claim (§4.3).
  * - `park`: apply the park; `trackerWrite: false` when the item was taken away,
  *   so the runner writes nothing to the tracker.
+ * - `squash-check`: the PR merged; check its squash commit against the head
+ *   recorded at review, and report a failure (DOR-3262). Once, on the move
+ *   to `closing`.
  */
 export type DrainAction =
   | { kind: 'start-reviewer'; sha: string; deltaFrom: string | null }
@@ -170,6 +173,7 @@ export type DrainAction =
   | SendAction
   | { kind: 'arm'; pr: PrRef; sha: string }
   | { kind: 'disarm'; pr: PrRef }
+  | { kind: 'squash-check'; pr: PrRef; reviewed: string }
   | { kind: 'adopt-or-release' }
   | { kind: 'park'; reason: string; trackerWrite: boolean };
 
@@ -462,6 +466,18 @@ function unreportedPush(step: Step, run: FlowRun, facts: DrainFacts, cfg: DrainS
   return nudge(disarmIfArmed(step, facts), run, facts, cfg, true);
 }
 
+/** The squash check that goes with a merge, when a reviewed head is recorded. */
+function withSquashCheck(step: Step, drain: DrainState): Step {
+  if (drain.pr === null || drain.reviewedSha === null) return step;
+  return {
+    ...step,
+    actions: [
+      ...step.actions,
+      { kind: 'squash-check', pr: ref(drain.pr), reviewed: drain.reviewedSha },
+    ],
+  };
+}
+
 /** `watching`: follow the PR until it merges, closes, or goes red. */
 function watching(step: Step, run: FlowRun, facts: DrainFacts, cfg: DrainStepConfig): Step {
   const drain = step.drain;
@@ -469,11 +485,14 @@ function watching(step: Step, run: FlowRun, facts: DrainFacts, cfg: DrainStepCon
   if (!drain.pr) return step;
   const prUrl = drain.pr.url;
   if (pr?.state === 'merged') {
-    return send({ ...step, drain: toPhase(drain, 'closing') }, 'merged', {
-      flow: cfg.flow,
-      identifier: run.identifier,
-      prUrl,
-    });
+    return withSquashCheck(
+      send({ ...step, drain: toPhase(drain, 'closing') }, 'merged', {
+        flow: cfg.flow,
+        identifier: run.identifier,
+        prUrl,
+      }),
+      drain
+    );
   }
   if (pr?.state === 'closed') return park(step, PARK_REASONS.prClosed);
   if (headMoved(drain, facts)) return unreportedPush(step, run, facts, cfg);
@@ -684,7 +703,8 @@ export function drainStep(
       'merged',
       { flow: cfg.flow, identifier: run.identifier, prUrl: current.pr.url }
     );
-    return { run: { ...run, drain: step.drain }, actions: step.actions };
+    const checked = withSquashCheck(step, recorded);
+    return { run: { ...run, drain: checked.drain }, actions: checked.actions };
   }
   if (current.phase === 'parked') return readopt(run, current, facts, cfg);
 
