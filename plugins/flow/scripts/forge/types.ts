@@ -116,6 +116,53 @@ export interface ReviewInput {
  */
 export type ReviewOutcome = 'reviewed' | 'commented' | 'skipped';
 
+/**
+ * What the arm guard reads about a pull request (DOR-3262), in the shape of
+ * `scripts/fixtures/arm-decisions.json`'s payload so the guard's decision runs
+ * on exactly what the fixtures pin.
+ */
+export interface ArmFacts {
+  /** `OPEN`, `MERGED` or `CLOSED`. */
+  state: string;
+  /** Whether it is a draft. */
+  isDraft: boolean;
+  /** Its labels. */
+  labels: { name: string }[];
+  /** `APPROVED`, `CHANGES_REQUESTED`, `REVIEW_REQUIRED` or empty. */
+  reviewDecision: string;
+  /** Every check on the head, by `gh pr checks` bucket: pass, fail, pending, skipping or cancel. */
+  checks: { name: string; bucket: string }[];
+  /** The head commit. */
+  headRefOid: string;
+  /** The branch with the work. */
+  headRefName: string;
+  /** The branch it merges into. */
+  baseRefName: string;
+  /** Whether the head lives in another repository (a fork). */
+  isCrossRepository: boolean;
+  /**
+   * Every path the PR touches (both names of a rename), or `null` when the
+   * forge could not give the whole list.
+   */
+  files: string[] | null;
+}
+
+/** One run of a dispatched workflow. */
+export interface WorkflowRun {
+  /** The run id. */
+  id: number;
+  /** Its title (a workflow's `run-name`). */
+  title: string;
+  /** The commit it ran on. */
+  headSha: string;
+  /** Whether it has finished. */
+  completed: boolean;
+  /** How it finished (`success`, `failure` …), empty while running. */
+  conclusion: string;
+  /** Where to read it, when the forge gave a link. */
+  url: string | null;
+}
+
 /** One repository on a forge. Every method throws {@link ForgeError} when the forge cannot answer. */
 export interface Forge {
   /** `owner/name`. */
@@ -142,6 +189,21 @@ export interface Forge {
    * it, an approval posts nothing and a request for changes posts a comment.
    */
   review(pr: number, input: ReviewInput): Promise<ReviewOutcome>;
+  /** Everything the arm guard reads about a PR. */
+  armFacts(pr: number): Promise<ArmFacts>;
+  /** Post a plain comment on a PR as the signed-in account. */
+  comment(pr: number, body: string): Promise<void>;
+  /**
+   * Dispatch `workflow` on `ref` with exactly the inputs `sha` and `nonce`
+   * (GitHub: `gh workflow run <workflow> --ref <ref> -f sha=… -f nonce=…`).
+   */
+  dispatchWorkflow(
+    workflow: string,
+    ref: string,
+    inputs: { sha: string; nonce: string }
+  ): Promise<void>;
+  /** The recent dispatched runs of `workflow` on `branch`, newest first. */
+  workflowRuns(workflow: string, branch: string): Promise<WorkflowRun[]>;
   /**
    * The checks a merge into `base` requires (branch protection and rulesets
    * together), an empty list when it requires none, or `null` when the forge

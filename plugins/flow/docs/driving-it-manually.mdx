@@ -254,6 +254,16 @@ flow autonomy                                       # how much flow does on its 
 
 `flow review` answers the review gate: your approval comments "Shipped from DorkOS." on the item, approves the PR (unless you wrote it), and, when `gates.review.mergeOnApproval` is on, arms the commit you approved (`--head`; a drain run's reviewed commit), refusing if the PR moved since. With auto-merge off, the reviewer agent ships only past passed checks; until then it exits 5 with `"verdict": "pending"` and the drain retries. `--wait` waits in one command instead. `flow ask` is how an agent parks a question: it always offers its own pick and says why, so you can answer with one click, and at "Tell me after" it goes with its pick if nobody answers by the deadline. `flow answer` posts your answer; whoever answers first wins, and the second is told it was already answered.
 
+### Before flow arms a PR
+
+Whenever flow is about to turn on auto-merge, it checks first, and refuses with a sentence saying why. It refuses when a required check failed, the PR moved past the commit that was reviewed, it doesn't merge into `main`, it touches a security path without the `security-reviewed` label, it comes from a fork, or a release freeze is on. A check that is still running doesn't stop it: GitHub waits. `land` in your committed config adds checks of your own, such as a browser suite to run when the PR touches the client (see `config/CONFIG.md`). A refused `flow pr --arm` still opens the PR, unarmed. A refused `flow review --approve` still posts your approval. Both exit 5.
+
+```bash
+flow freeze on --reason "cutting 1.4"   # arm nothing in this project until...
+flow freeze off                         # ...the release is out
+flow freeze                             # is a freeze on?
+```
+
 ## Manual versus autonomous
 
 Manual driving and the autonomous loop are not different engines. They are the same skills reached by different triggers, with a different amount of human throttle:

@@ -11,7 +11,10 @@
  *    the signed-in account did not write it; else the tracker comment is the
  *    approval of record). The reviewer agent never approves on the forge.
  * 3. When `gates.review.mergeOnApproval` is on, arms the PR at its head, so it
- *    merges when its checks pass. Otherwise a person merges it.
+ *    merges when its checks pass, once the arm guard allows it
+ *    (`land/arm-guard.ts`, run before anything is posted). A refusal still
+ *    ships the approval, exits 5 and says why; a person merges it. Otherwise
+ *    a person merges it.
  * 4. Journals `operator.wait` end (a person) or `review.approved` (the reviewer
  *    agent).
  *
@@ -517,6 +520,7 @@ async function review(ctx: VerbContext): Promise<VerbResult> {
     // approves its reviewed commit; any other run, the head the person names
     // with --head. A PR whose head moved since is refused before anything is posted.
     let armAt: string | null = null;
+    let armRefused: { reason: string; detail: string } | null = null;
     const willArm = pr !== null && target.forge !== null && config.gates.review.mergeOnApproval;
     if (willArm && pr !== null && target.forge !== null) {
       armAt =
@@ -535,7 +539,24 @@ async function review(ctx: VerbContext): Promise<VerbResult> {
             `${identifier}'s PR moved to ${short(now)} since ${short(armAt)} was approved; review the new commits, then ship again`
           );
         }
+        const approved = armAt;
         armAt = now;
+        // The arm guard (DOR-3262), before anything is posted. It is held to
+        // the commit as approved, so a short --head refuses rather than
+        // standing for whatever commit shares its prefix. A refusal still
+        // ships the approval; it only leaves the merge to a person.
+        if (!ctx.dryRun) {
+          const guard = await ctx.armGuard({
+            forge: target.forge,
+            pr: pr.number,
+            reviewedSha: approved,
+            worktree: existing.worktreePath,
+          });
+          if (!guard.ok) {
+            armRefused = { reason: guard.reason, detail: guard.detail };
+            armAt = null;
+          }
+        }
       }
     }
 
@@ -599,17 +620,21 @@ async function review(ctx: VerbContext): Promise<VerbResult> {
     const checksText = noChecksNote === null ? '' : ` ${noChecksNote}`;
     const armText = armed
       ? ` Armed PR #${pr?.number} to merge when its checks pass.`
-      : pr !== null && !config.gates.review.mergeOnApproval
-        ? ` PR #${pr.number} waits for a person to merge it.`
-        : willArm
-          ? " Approved. Merge it yourself; flow didn't turn on auto-merge because it couldn't tell which commit you approved."
-          : '';
+      : armRefused !== null
+        ? ` Approved, but flow did not arm PR #${pr?.number} (${armRefused.reason}): ${armRefused.detail}. Merge it yourself once that is settled.`
+        : pr !== null && !config.gates.review.mergeOnApproval
+          ? ` PR #${pr.number} waits for a person to merge it.`
+          : willArm
+            ? " Approved. Merge it yourself; flow didn't turn on auto-merge because it couldn't tell which commit you approved."
+            : '';
     return {
+      ...(armRefused === null ? {} : { exitCode: 5 as const }),
       json: {
         ok: true,
         dryRun: ctx.dryRun,
         identifier,
         verdict: 'approved',
+        armRefused,
         by,
         pr: pr === null ? null : { number: pr.number, url: pr.url },
         forgeReview,

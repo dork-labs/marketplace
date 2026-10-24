@@ -12,7 +12,7 @@
 #
 # Ported from dork-labs/dorkos (scripts/test-should-arm-automerge.sh) with the
 # gate it tests. Keep the two gates' rules in step; the check names in the green
-# fixture below are this repo's own.
+# fixture (scripts/fixtures/arm-decisions.json) are this repo's own.
 #
 #   bash scripts/test-should-arm-automerge.sh
 #   GATE=/path/to/other.sh bash scripts/test-should-arm-automerge.sh
@@ -29,37 +29,37 @@ if ! command -v jq >/dev/null 2>&1; then
   exit 2
 fi
 
+fixtures=$repo_root/scripts/fixtures/arm-decisions.json
+
 pass=0
 fail=0
 
-# A pull request in the one state that should arm: open, undrafted, unarmed,
-# unlabelled, cleanly mergeable, reviewed, every check settled green. Each case
-# below is this shape with exactly one field bent, so a failure names the field.
-green() {
-  cat <<'JSON'
-{
-  "number": 1,
-  "state": "OPEN",
-  "isDraft": false,
-  "mergeStateStatus": "BEHIND",
-  "autoMergeRequest": null,
-  "reviewDecision": "APPROVED",
-  "labels": [],
-  "unresolvedThreads": 0,
-  "checks": [
-    {"name": "flow plugin", "bucket": "pass"},
-    {"name": "skills and manifests", "bucket": "pass"},
-    {"name": "script fixtures", "bucket": "pass"},
-    {"name": "some-optional-job", "bucket": "skipping"}
-  ]
-}
-JSON
-}
+# The cases live in scripts/fixtures/arm-decisions.json, shared with flow's arm
+# guard (plugins/flow/engine-tests/land/arm-decision.test.ts), so the two cannot
+# drift: every row says what this gate answers (`gate`) and what the guard
+# answers (`guard`), and each suite checks its own column. The file's `about`
+# and each row's `why` say why a case exists. A case is the `green` payload
+# there (open, undrafted, unarmed, unlabelled, cleanly mergeable, reviewed,
+# every check settled green) with exactly one field bent by a jq `mutation`, so
+# a failure names the field.
+if ! jq -e '.green and (.cases | length > 0)' "$fixtures" >/dev/null 2>&1; then
+  echo "should-arm-automerge fixtures: cannot read $fixtures" >&2
+  exit 2
+fi
+
+# A row without both answers would let one rule change unseen by the other.
+missing_answers=$(jq -r '.cases[] | select((.gate | type) != "string" or (.guard | type) != "string") | .name' "$fixtures")
+if [[ -n "$missing_answers" ]]; then
+  while IFS= read -r name; do
+    fail=$(( fail + 1 ))
+    printf 'FAIL  %-34s needs both a gate and a guard answer\n' "$name"
+  done <<<"$missing_answers"
+fi
 
 # check <name> <expected-verdict> <jq-mutation-of-the-green-fixture>
 check() {
   local name=$1 expected=$2 mutation=$3 got
-  got=$(green | jq "$mutation" | "$gate" - 2>/dev/null)
+  got=$(jq '.green' "$fixtures" | jq "$mutation" | "$gate" - 2>/dev/null)
   if [[ "$got" == "$expected" ]]; then
     pass=$(( pass + 1 ))
   else
@@ -68,56 +68,9 @@ check() {
   fi
 }
 
-# The one ARM case. If this regresses to a SKIP the bot silently does nothing,
-# which is the pre-existing bug it was written to fix.
-check "fully green PR"            "ARM"                       '.'
-
-# Lifecycle states that are not a finished PR.
-check "closed"                    "SKIP not-open"             '.state = "CLOSED"'
-check "merged"                    "SKIP not-open"             '.state = "MERGED"'
-check "draft"                     "SKIP draft"                '.isDraft = true'
-check "already armed"             "SKIP already-armed"        '.autoMergeRequest = {"enabledAt": "now"}'
-
-# A queued PR reports autoMergeRequest:null, so the armed check above cannot see
-# it. Without its own branch the bot re-arms every queued PR on every tick.
-check "already queued"            "SKIP already-queued"       '.mergeQueueEntry = {"position": 1, "state": "AWAITING_CHECKS"}'
-check "queued and armed"          "SKIP already-armed"        '.mergeQueueEntry = {"position": 1} | .autoMergeRequest = {"enabledAt": "now"}'
-
-# A hold label outranks every green signal, including on an otherwise
-# perfect PR. Both payload shapes gh can produce are covered: objects and
-# bare strings.
-check "hold label (object)"       "SKIP held-by-label"        '.labels = [{"name": "hold"}]'
-check "hold label (string)"       "SKIP held-by-label"        '.labels = ["do-not-merge"]'
-check "hold label (mixed case)"   "SKIP held-by-label"        '.labels = [{"name": "WIP"}]'
-check "hold label (spaced)"       "SKIP held-by-label"        '.labels = [{"name": "Do Not Merge"}]'
-check "hold among others"         "SKIP held-by-label"        '.labels = [{"name": "bug"}, {"name": "blocked"}]'
-check "unrelated label is fine"   "ARM"                       '.labels = [{"name": "review:light"}]'
-
-# A conflicting PR runs no CI at all, so its green checks are stale and
-# meaningless.
-check "conflicting"               "SKIP conflicting"          '.mergeStateStatus = "DIRTY"'
-
-# GitHub reports UNKNOWN until it has computed mergeability. Treating that as
-# clean would arm the conflicting case the line above refuses, one poll early.
-check "mergeability unknown"      "SKIP mergeability-unknown" '.mergeStateStatus = "UNKNOWN"'
-check "mergeability absent"       "SKIP mergeability-unknown" 'del(.mergeStateStatus)'
-
-# Human review signals.
-check "changes requested"         "SKIP changes-requested"    '.reviewDecision = "CHANGES_REQUESTED"'
-check "unresolved threads"        "SKIP unresolved-threads"   '.unresolvedThreads = 3'
-check "no review decision yet"    "ARM"                       '.reviewDecision = ""'
-
-# Check buckets. Anything unsettled or unhappy refuses.
-check "a failing check"           "SKIP failing-checks"       '.checks[0].bucket = "fail"'
-check "a cancelled check"         "SKIP cancelled-checks"     '.checks[0].bucket = "cancel"'
-check "a check still running"     "SKIP checks-in-flight"     '.checks[0].bucket = "pending"'
-check "no checks at all"          "SKIP no-checks"            '.checks = []'
-check "all checks skipped"        "ARM"                       '.checks = [{"name":"a","bucket":"skipping"}]'
-check "fail outranks pending"     "SKIP failing-checks"       '.checks[0].bucket = "fail" | .checks[1].bucket = "pending"'
-
-# Precedence: a held PR that is also broken still reports the hold, so the
-# operator sees the human signal rather than chasing CI.
-check "hold outranks failure"     "SKIP held-by-label"        '.labels = [{"name": "hold"}] | .checks[0].bucket = "fail"'
+while IFS=$'\t' read -r name expected mutation; do
+  check "$name" "$expected" "$mutation"
+done < <(jq -r '.cases[] | select((.gate | type) == "string") | [.name, .gate, .mutation] | @tsv' "$fixtures")
 
 # Missing fields must never read as permission. An empty object has no state, so
 # it is not open.

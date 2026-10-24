@@ -543,6 +543,7 @@ export async function drain(ctx: VerbContext, options: DrainOptions = {}): Promi
     launcher,
     hostFor,
     forge,
+    armGuard: ctx.armGuard,
     async item(identifier, parked) {
       const item = await adapter.getItem(
         identifier,

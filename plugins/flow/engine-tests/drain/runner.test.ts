@@ -47,6 +47,7 @@ import {
   type SessionState,
 } from '../../scripts/launchers/types.ts';
 import { createFakeAdapter, type FakeTracker } from '../fixtures/cli/fake-adapter/adapter.ts';
+import { recordingGuard, refusal, type RecordingGuard } from '../fixtures/land/recording-guard.ts';
 import { item, makeProject, type WriteProject } from '../cli/write-harness.ts';
 
 // Every case drives real git and several CLI runs; a loaded machine needs the room.
@@ -225,6 +226,18 @@ function fakeForge() {
       calls.push({ method: 'disarm', arg: pr });
       armed = false;
     },
+    async armFacts(): Promise<never> {
+      throw new Error('the arm guard is injected in this test; nothing reads armFacts');
+    },
+    async comment(pr: number, body: string) {
+      calls.push({ method: 'comment', arg: [pr, body] });
+    },
+    async dispatchWorkflow(): Promise<never> {
+      throw new Error('the arm guard is injected in this test; nothing dispatches');
+    },
+    async workflowRuns() {
+      return [];
+    },
     async recentGroupFailures() {
       return [];
     },
@@ -259,6 +272,8 @@ interface World {
 }
 
 let world: World;
+/** The arm guard every pass gets; a test swaps it to see a refusal. */
+let armGuard: RecordingGuard;
 
 /** Run `flow <argv> --json` with the fakes; `drain` gets the test's options. */
 async function flow(argv: string[], cwd = project.dir) {
@@ -288,6 +303,7 @@ async function flow(argv: string[], cwd = project.dir) {
     createAdapter: async () => world.tracker.adapter,
     runProcess: runner,
     createForge: () => world.forge.forge,
+    armGuard: armGuard.guard,
     createLauncher: fakeLaunchers(world.log, world.script),
     // A private OS home, so `default` (machine-wide, rev 6d) never reads the real ~/.claude.
     io: {
@@ -447,6 +463,7 @@ function configure(drainSettings: Record<string, unknown> = {}): void {
 }
 
 beforeEach(() => {
+  armGuard = recordingGuard();
   project = makeProject();
   origin = `${project.dir}-origin.git`;
   execFileSync('git', ['init', '-q', '--bare', '-b', 'work', origin]);
@@ -578,6 +595,11 @@ describe('flow drain: one item from pick to closing', () => {
       { method: 'arm', arg: [7, s3] },
     ]);
     expect(drainOf('ACME-1')).toMatchObject({ phase: 'watching', pr: { armed: true } });
+    // Both arms went through the arm guard first, each for its reviewed commit.
+    expect(armGuard.requests.map((r) => [r.pr, r.reviewedSha])).toEqual([
+      [7, s2],
+      [7, s3],
+    ]);
 
     // Merged -> the worker is told to close; flow done -> its session is stopped.
     world.forge.status.state = 'merged';
@@ -594,6 +616,59 @@ describe('flow drain: one item from pick to closing', () => {
 
     expect(world.forge.violations).toEqual([]);
     expect(world.log.starts.filter((s) => s.req.role === 'worker')).toHaveLength(1);
+  }, 120_000);
+});
+
+describe('flow drain: the arm guard on a re-arm (DOR-3262)', () => {
+  /** Carry ACME-1 to an armed PR at s1, then a reviewed fix push s2 waiting to re-arm. */
+  async function toReArm() {
+    world.tracker = createFakeAdapter({ user: { id: 'agent-1' }, items: [item('ACME-1')] });
+    await tick();
+    const s1 = await workerPushes('ACME-1', 'one');
+    await tick();
+    await reviewerSays('ACME-1', s1, 'clean');
+    await tick();
+    const bodyFile = path.join(runOf('ACME-1').worktreePath, 'pr-body.md');
+    writeFileSync(bodyFile, 'What changes.\n');
+    const pr = await flow(
+      ['pr', 'ACME-1', '--title', 'Title of ACME-1', '--body-file', bodyFile, '--arm'],
+      runOf('ACME-1').worktreePath
+    );
+    expect(pr.code, pr.stderr).toBe(0);
+    await tick();
+    const s2 = await workerPushes('ACME-1', 'two', 'fix');
+    await tick();
+    await reviewerSays('ACME-1', s2, 'clean');
+    return s2;
+  }
+
+  const arms = () => world.forge.calls.filter((c) => c.method === 'arm');
+
+  it('a refusal from the PR itself arms nothing now and asks again next pass', async () => {
+    const s2 = await toReArm();
+    expect(arms()).toHaveLength(1);
+    armGuard = recordingGuard(() => refusal('freeze'));
+    const pass = await tick();
+    expect(arms()).toHaveLength(1);
+    expect(JSON.stringify(pass.json)).toContain('did not arm #7');
+    expect(drainOf('ACME-1').pr).toMatchObject({ armed: false, disarmedForReview: true });
+    // The freeze lifts: the next pass asks again and arms the reviewed commit.
+    armGuard = recordingGuard();
+    await tick();
+    expect(arms().at(-1)).toEqual({ method: 'arm', arg: [7, s2] });
+    expect(armGuard.requests.map((r) => r.reviewedSha)).toEqual([s2]);
+  }, 120_000);
+
+  it('a refusal from a land.preArm check is not re-run every pass', async () => {
+    await toReArm();
+    armGuard = recordingGuard(() => refusal('pre-arm-failed', true));
+    await tick();
+    expect(drainOf('ACME-1').pr).toMatchObject({ armed: false, disarmedForReview: false });
+    const asked = armGuard.requests.length;
+    await tick();
+    await tick();
+    expect(armGuard.requests).toHaveLength(asked);
+    expect(arms()).toHaveLength(1);
   }, 120_000);
 });
 

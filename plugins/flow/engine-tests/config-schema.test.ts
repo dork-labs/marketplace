@@ -679,6 +679,7 @@ describe('z.toJSONSchema bridge', () => {
       'evidence',
       'groom',
       'drain',
+      'land',
       'selfImprovement',
       'fleet',
     ];

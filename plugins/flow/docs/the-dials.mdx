@@ -214,6 +214,8 @@ With `review.mergeOnApproval` off, the reviewer agent ships only once every chec
 they run, the drain's next tick checks again. A PR with no checks, on a branch that requires none,
 ships after `review.noChecksPassAfterMinutes` and says "No checks ran".
 
+Every arm also passes flow's arm guard first. It refuses on a red required check, a head that moved since the review, a base other than `main`, a fork, a release freeze (`flow freeze on`), or a security path without the `security-reviewed` label. `land` in your committed config, read only from `main`, adds the repo's own security paths, checks to run before arming (`land.preArm`) and whom to name on a new PR. `config/CONFIG.md` has the fields.
+
 `projectCompletion` is a ceiling, not a promise. On `"auto"`, DONE closes a project only when nothing inside it is still open, its progress is complete, no active spec points at it, and your adapter supports closing projects (an optional verb). Otherwise you get `"advisory"` plus a line saying which condition stopped it. The strictness is the point: a closed project hides every issue left open inside it from the work queue for good.
 
 ## Review

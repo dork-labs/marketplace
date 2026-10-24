@@ -8,7 +8,7 @@
 
 import { execFileSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
-import { existsSync, readFileSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
@@ -19,6 +19,7 @@ import type { FlowRun } from '../../scripts/flow-run.ts';
 import { main } from '../../scripts/flow.ts';
 import type { CreatePrInput, Forge, ForgePr, ForgeTarget } from '../../scripts/forge/types.ts';
 import { createFakeAdapter, type FakeTracker } from '../fixtures/cli/fake-adapter/adapter.ts';
+import { recordingGuard, refusal, type RecordingGuard } from '../fixtures/land/recording-guard.ts';
 import { item, makeProject, type WriteProject } from './write-harness.ts';
 
 const TOKEN = '0123456789abcdef0123456789abcdef';
@@ -26,6 +27,8 @@ const TOKEN_HASH = createHash('sha256').update(TOKEN).digest('hex');
 
 let project: WriteProject;
 let origin: string;
+/** The arm guard every run gets; a test swaps it to see a refusal. */
+let armGuard: RecordingGuard | null;
 
 /** Run git in the project with a fixed identity. */
 function git(...args: string[]): string {
@@ -84,6 +87,18 @@ function fakeForge(opts: { existing?: ForgePr | null; armed?: boolean } = {}) {
     async disarm(pr) {
       calls.push({ method: 'disarm', arg: pr });
     },
+    async armFacts(): Promise<never> {
+      throw new Error('the arm guard is injected in this test; nothing reads armFacts');
+    },
+    async comment(pr: number, body: string) {
+      calls.push({ method: 'comment', arg: [pr, body] });
+    },
+    async dispatchWorkflow(): Promise<never> {
+      throw new Error('the arm guard is injected in this test; nothing dispatches');
+    },
+    async workflowRuns() {
+      return [];
+    },
     async recentGroupFailures() {
       return [];
     },
@@ -93,6 +108,22 @@ function fakeForge(opts: { existing?: ForgePr | null; armed?: boolean } = {}) {
     },
   };
   return { forge, calls, targets, factory: (t: ForgeTarget) => (targets.push(t), forge) };
+}
+
+/** What the arm guard reads about PR 7, touching `files`. */
+function facts(files: string[]) {
+  return {
+    state: 'OPEN',
+    isDraft: false,
+    labels: [],
+    reviewDecision: '',
+    checks: [],
+    headRefOid: 'x',
+    headRefName: 'work',
+    baseRefName: 'main',
+    isCrossRepository: false,
+    files,
+  };
 }
 
 /** Real git, except `remote get-url origin` answers a GitHub address. */
@@ -120,6 +151,7 @@ async function flow(
     createAdapter: async () => tracker.adapter,
     runProcess: runner,
     createForge: forge.factory,
+    ...(armGuard === null ? {} : { armGuard: armGuard.guard }),
   });
   return { code, json: JSON.parse(out) as Record<string, unknown>, stderr: err, forge, tracker };
 }
@@ -191,6 +223,7 @@ function stored(): DrainState {
 }
 
 beforeEach(() => {
+  armGuard = recordingGuard();
   project = makeProject();
   origin = `${project.dir}-origin.git`;
   execFileSync('git', ['init', '-q', '--bare', '-b', 'work', origin]);
@@ -496,6 +529,157 @@ describe('flow pr', () => {
     expect(forge.calls.some((c) => c.method === 'createPr')).toBe(false);
     expect(stored().pr).toMatchObject({ number: 9, armed: true });
     expect(stored().rev).toBe(4);
+  });
+
+  // The arm guard (DOR-3262) is asked about the reviewed commit before the arm.
+  it('asks the arm guard about the reviewed commit before arming', async () => {
+    writeRun(drain({ pushedSha: head, reviewedSha: head, verdict: 'clean' }), head);
+    const r = await flow([...args, '--arm']);
+    expect(armGuard?.requests).toEqual([
+      { forge: r.forge.forge, pr: 7, reviewedSha: head, worktree: project.dir },
+    ]);
+    expect(r.json.armRefused).toBeNull();
+  });
+
+  // A refusal leaves the PR open, recorded and unarmed, and exits 5 saying why.
+  it('opens the PR but does not arm it when the guard refuses', async () => {
+    writeRun(drain({ pushedSha: head, reviewedSha: head, verdict: 'clean' }), head);
+    armGuard = recordingGuard(() => refusal('security-path-unlabelled'));
+    const r = await flow([...args, '--arm']);
+    expect(r.code).toBe(EXIT.precondition);
+    expect(r.forge.calls.some((c) => c.method === 'createPr')).toBe(true);
+    expect(r.forge.calls.some((c) => c.method === 'arm')).toBe(false);
+    expect(r.json).toMatchObject({
+      ok: false,
+      pr: { number: 7, armed: false },
+      armRefused: { reason: 'security-path-unlabelled' },
+    });
+    expect(stored().pr).toMatchObject({ number: 7, armed: false });
+  });
+
+  // With no guard injected, the real one runs. This origin has no main, so it
+  // cannot read the base config and refuses: the default is never "allow".
+  it('runs the real guard by default, which refuses what it cannot read', async () => {
+    writeRun(drain({ pushedSha: head, reviewedSha: head, verdict: 'clean' }), head);
+    armGuard = null;
+    const r = await flow([...args, '--arm']);
+    expect(r.code).toBe(EXIT.precondition);
+    expect(r.forge.calls.some((c) => c.method === 'arm')).toBe(false);
+    expect(r.json.armRefused).toMatchObject({ reason: 'config-unreadable' });
+  });
+
+  describe('naming the reviewer', () => {
+    /** Push a main whose committed flow config holds `land`. */
+    function mainConfig(land: unknown): void {
+      const clone = `${project.dir}-main`;
+      rmSync(clone, { recursive: true, force: true });
+      execFileSync('git', ['clone', '-q', origin, clone]);
+      const run = (...a: string[]) =>
+        execFileSync(
+          'git',
+          [
+            '-c',
+            'user.email=t@example.invalid',
+            '-c',
+            'user.name=t',
+            '-c',
+            'commit.gpgsign=false',
+            ...a,
+          ],
+          { cwd: clone, stdio: 'ignore' }
+        );
+      run('checkout', '-q', '--orphan', 'main');
+      mkdirSync(path.join(clone, '.agents', 'flow'), { recursive: true });
+      writeFileSync(path.join(clone, '.agents', 'flow', 'config.json'), JSON.stringify({ land }));
+      run('add', '.agents/flow/config.json');
+      run('commit', '-q', '-m', 'main config');
+      run('push', '-q', 'origin', 'main');
+      rmSync(clone, { recursive: true, force: true });
+    }
+
+    function mentions(calls: { method: string; arg?: unknown }[]): string[] {
+      return calls.filter((c) => c.method === 'comment').map((c) => (c.arg as [number, string])[1]);
+    }
+
+    it('mentions land.reviewer from main on the new PR', async () => {
+      mainConfig({ reviewer: 'octocat' });
+      writeRun(drain({ pushedSha: head, reviewedSha: head, verdict: 'clean' }), head);
+      const r = await flow(args);
+      expect(r.code).toBe(0);
+      const [body] = mentions(r.forge.calls);
+      expect(body).toMatch(
+        new RegExp(`^@octocat: this PR is ready for your review at ${head.slice(0, 7)}\\.`)
+      );
+      expect(body).toContain('agent:provenance');
+      expect(r.json.mention).toEqual({ reviewer: '@octocat', route: 'default', posted: true });
+    });
+
+    it('routes a PR that touches a security path to the security reviewer', async () => {
+      mainConfig({
+        reviewer: 'octocat',
+        securityPaths: { globs: ['src/**'], reviewer: '@acme-security' },
+      });
+      writeRun(drain({ pushedSha: head, reviewedSha: head, verdict: 'clean' }), head);
+      const forge = fakeForge();
+      forge.forge.armFacts = async () => facts(['src/app.ts']);
+      const r = await flow(args, forge);
+      expect(mentions(r.forge.calls)[0]).toMatch(/^@acme-security: this PR touches security paths/);
+      expect(r.json.mention).toMatchObject({ reviewer: '@acme-security', route: 'security' });
+    });
+
+    it('a package manifest routes to the security reviewer too', async () => {
+      mainConfig({ reviewer: 'octocat', securityPaths: { reviewer: 'acme-security' } });
+      writeRun(drain({ pushedSha: head, reviewedSha: head, verdict: 'clean' }), head);
+      const forge = fakeForge();
+      forge.forge.armFacts = async () => facts(['package.json']);
+      const r = await flow(args, forge);
+      expect(r.json.mention).toMatchObject({ reviewer: '@acme-security', route: 'security' });
+    });
+
+    it('a PR that touches none goes to the default reviewer', async () => {
+      mainConfig({
+        reviewer: 'octocat',
+        securityPaths: { globs: ['src/**'], reviewer: 'acme-security' },
+      });
+      writeRun(drain({ pushedSha: head, reviewedSha: head, verdict: 'clean' }), head);
+      const forge = fakeForge();
+      forge.forge.armFacts = async () => facts(['docs/readme.md']);
+      const r = await flow(args, forge);
+      expect(r.json.mention).toMatchObject({ reviewer: '@octocat', route: 'default' });
+    });
+
+    it('when flow cannot read the files, the security reviewer is named', async () => {
+      mainConfig({ reviewer: 'octocat', securityPaths: { reviewer: 'acme-security' } });
+      writeRun(drain({ pushedSha: head, reviewedSha: head, verdict: 'clean' }), head);
+      const r = await flow(args); // this fake's armFacts throws
+      expect(r.json.mention).toMatchObject({ reviewer: '@acme-security', route: 'security' });
+    });
+
+    it('names nobody when main names nobody', async () => {
+      mainConfig({});
+      writeRun(drain({ pushedSha: head, reviewedSha: head, verdict: 'clean' }), head);
+      const r = await flow(args);
+      expect(mentions(r.forge.calls)).toEqual([]);
+      expect(r.json.mention).toBeNull();
+    });
+
+    it('a mention that fails to post is reported, and the PR stays open', async () => {
+      mainConfig({ reviewer: 'octocat' });
+      writeRun(drain({ pushedSha: head, reviewedSha: head, verdict: 'clean' }), head);
+      const forge = fakeForge();
+      forge.forge.comment = async () => {
+        throw new Error('HTTP 502');
+      };
+      const r = await flow(args, forge);
+      expect(r.code).toBe(0);
+      expect(r.json.mention).toEqual({
+        reviewer: '@octocat',
+        route: 'default',
+        posted: false,
+        error: 'HTTP 502',
+      });
+      expect(r.stderr).toContain('could not mention @octocat');
+    });
   });
 });
 

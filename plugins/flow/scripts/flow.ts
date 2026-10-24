@@ -715,6 +715,18 @@ export const VERBS: readonly VerbDefinition[] = [
     load: () => import('./cli/pr.ts'),
   },
   {
+    name: 'freeze',
+    summary: 'Stop flow arming auto-merge in this project while a release is cut.',
+    description:
+      'flow freeze on --reason <text> turns the release freeze on: flow arms auto-merge on no pull request here until flow freeze off. The release step sets it before a release and clears it after. With no action it says whether a freeze is on. Local to this machine (<main checkout>/.dork/flow/freeze.json), never committed.',
+    common: ['project', 'dry-run'],
+    positionals: [{ name: 'action', description: 'on, off, or nothing to show it.' }],
+    flags: [
+      { name: 'reason', kind: 'string', value: 'text', description: 'on: why, in a few words.' },
+    ],
+    load: () => import('./cli/freeze.ts'),
+  },
+  {
     name: 'drain',
     summary:
       'Carry several ready items at once: a worker per item on its own account, and a review before any PR.',

@@ -55,6 +55,7 @@ import type { FlowRun, RunQuestion } from '../flow-run.ts';
 import type { FlowStateFile } from '../flow-state-file.ts';
 import { judgeEjection } from '../forge/ejection.ts';
 import type { Forge } from '../forge/types.ts';
+import type { ArmGuard } from '../cli/context.ts';
 import { launchAccountFor } from '../launchers/common.ts';
 import { findTranscript } from '../launchers/prove-account.ts';
 import {
@@ -276,6 +277,8 @@ export interface PassDeps {
   hostFor(runtime: RuntimeName): Promise<HostName>;
   /** The project's forge. */
   forge: Forge;
+  /** The arm guard (DOR-3262), asked before every arm. */
+  armGuard: ArmGuard;
   /** The tracker item's facts (one `getItem`). */
   /**
    * The tracker item's facts (one `getItem`). For a parked run (`parked`), it
@@ -1114,6 +1117,35 @@ export async function runPass(deps: PassDeps): Promise<PassReport> {
         // too once the head is any other commit (--match-head-commit).
         const n = action.pr.number;
         const status = await deps.forge.prStatus(n);
+        if (status.state === 'open' && status.headSha === action.sha) {
+          // The arm guard (DOR-3262). A refusal from the PR's own state (a
+          // freeze, a red check) is asked again next pass, so the arm follows
+          // once it clears. One that came from a land.preArm entry is not:
+          // re-running a browser suite or a dispatched workflow every pass would
+          // never end, so the PR waits, unarmed, for a person or a new push.
+          const guard = await deps.armGuard({
+            forge: deps.forge,
+            pr: n,
+            reviewedSha: action.sha,
+            worktree: run.worktreePath,
+          });
+          if (!guard.ok) {
+            if (guard.ranPreArm) {
+              await supervisorWrite(run.issueId, (r) =>
+                r.drain.pr?.number === n
+                  ? {
+                      ...r,
+                      drain: {
+                        ...r.drain,
+                        pr: { ...r.drain.pr, armed: false, disarmedForReview: false },
+                      },
+                    }
+                  : undefined
+              );
+            }
+            return `did not arm #${n} at ${short(action.sha)} (${guard.reason}): ${guard.detail}`;
+          }
+        }
         let reserved = false;
         if (status.state === 'open' && status.headSha === action.sha) {
           reserved = await supervisorWrite(run.issueId, (r) =>

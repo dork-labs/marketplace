@@ -4,6 +4,19 @@ Installs of this plugin are pinned to a commit SHA, so a fix here does not reach
 you until you **reinstall it** (Marketplace → flow → reinstall, or re-run your
 `--plugin-dir` checkout's `git pull`). Each entry below says whether that matters.
 
+## 0.60.0
+
+**Flow now checks a pull request before it turns on auto-merge, and names the reviewer on the PRs it opens (DOR-3262). Reinstall to get it.**
+
+- Before every arm (`flow pr --arm`, `flow review --approve` with `gates.review.mergeOnApproval`, and the drain's re-arm), flow refuses if a required check failed or was cancelled, or the PR's head isn't the commit that was reviewed. It also refuses if the PR merges into anything but `main`, comes from a fork, or touches a security path without the `security-reviewed` label. So does a closed or draft PR, one labelled `hold`, `do-not-merge`, `wip` or `blocked`, or one where a reviewer asked for changes. A check that is still running doesn't stop it, because GitHub waits for it. The refusal says why in one sentence.
+- Package manifests, lockfiles and `.agents/flow/config.json` always count as security paths. Your repo adds its own in the new `land.securityPaths` setting.
+- New `land.preArm` setting: checks to run before arming, each only when the PR touches its paths. An entry either runs a command in the PR's worktree, with no shell, or dispatches a workflow on GitHub and waits for that one run. Flow reads `land` only from the committed config on `main`, so a PR can't change the checks it's held to.
+- New `flow freeze on --reason <text>` and `flow freeze off`: while a freeze is on, flow arms nothing in the project. A release sets it first and clears it after. It's kept on this computer only, never committed.
+- `flow pr` names the reviewer in a comment on the new PR: `land.securityPaths.reviewer` when the PR touches a security path, else `land.reviewer`.
+- A refused `flow pr --arm` still opens the PR, unarmed. A refused `flow review --approve` still posts the approval. Both exit 5. If a `land.preArm` check refused a drain re-arm, the drain doesn't run it again every pass. The PR waits, unarmed, for a person or a new push.
+- These checks are a guard rail for flow's own arms, not the gate. Flow runs inside the agent. The rules that hold for everyone belong on GitHub, as required checks and rulesets. Flow never sets a security status or the `security-reviewed` label.
+- Known limit: a `wait: workflow` check blocks a drain pass until its run finishes or times out.
+
 ## 0.59.0
 
 **Security fix: flow's unattended sessions start with every approval bypassed only if a person allowed it in DorkOS. Reinstall now, on DorkOS 0.98.0 or later.**

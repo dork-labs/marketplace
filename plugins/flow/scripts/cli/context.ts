@@ -20,6 +20,8 @@ import path from 'node:path';
 
 import { createGithubForge } from '../forge/github.ts';
 import type { Forge, ForgeFactory, ForgeTarget } from '../forge/types.ts';
+import type { GuardResult } from '../land/arm-guard.ts';
+import { resolveMainCheckout } from '../main-checkout.ts';
 import type { HostName, Launcher } from '../launchers/types.ts';
 import type { CodeAdapter } from '../tracker/types.ts';
 import type { ParsedArgs, VerbSpec } from './args.ts';
@@ -85,6 +87,25 @@ export interface AdapterRequest {
  */
 export type AdapterFactory = (request: AdapterRequest) => Promise<CodeAdapter>;
 
+/** What a verb asks the arm guard about (DOR-3262). */
+export interface ArmGuardRequest {
+  /** The forge the PR lives on. */
+  forge: Forge;
+  /** The PR. */
+  pr: number;
+  /** The commit the review covered: what the verb means to arm. */
+  reviewedSha: string | null;
+  /** The PR's worktree. */
+  worktree: string;
+}
+
+/**
+ * The arm guard every arm path calls just before `Forge.arm`. The real one
+ * (`land/arm-guard.ts`) is the default; a test of a verb's own logic passes
+ * a recording one.
+ */
+export type ArmGuard = (request: ArmGuardRequest) => Promise<GuardResult>;
+
 /** Everything `main` needs from the world; the script entry wires the real ones. */
 export interface CliDeps {
   /** Environment variables (`process.env`). */
@@ -105,6 +126,8 @@ export interface CliDeps {
   io?: Partial<HostIo>;
   /** Builds the forge for a repository. Default: the GitHub forge over {@link runProcess}. */
   createForge?: ForgeFactory;
+  /** The arm guard. Default: the real one over {@link runProcess}, the clock and `io.sleep`. */
+  armGuard?: ArmGuard;
   /**
    * Builds the launcher for a host (`flow drain`, `flow status`). Default: the
    * real launcher (`scripts/launchers/real.ts`), which the verbs load themselves
@@ -191,6 +214,8 @@ export interface VerbContext {
   io: HostIo;
   /** The forge for one repository (GitHub unless a test injects another). */
   forge(target: ForgeTarget): Forge;
+  /** The arm guard: called before every arm (DOR-3262). */
+  armGuard: ArmGuard;
   /**
    * Standard output, for a verb that prints as it goes (`flow watch --follow`).
    * Every other verb returns its result instead.
@@ -235,6 +260,15 @@ export function createVerbContext(
   const projectDir = pathFlag('project') ?? deps.cwd;
 
   let adapter: Promise<CodeAdapter> | undefined;
+  const io = { ...realHostIo(), ...deps.io };
+  // Loaded only when a verb arms: it pulls in zod, which most verbs never need.
+  const realArmGuard: ArmGuard = async (request) => {
+    const { guardArm } = await import('../land/arm-guard.ts');
+    return guardArm(
+      { ...request, mainCheckout: resolveMainCheckout(request.worktree) },
+      { runProcess: deps.runProcess, now: () => deps.now(), sleep: (ms) => io.sleep(ms) }
+    );
+  };
   return {
     args,
     json: args.json,
@@ -257,10 +291,11 @@ export function createVerbContext(
         warn,
       })),
     warn,
-    io: { ...realHostIo(), ...deps.io },
+    io,
     forge: (target) =>
       deps.createForge?.(target) ??
       createGithubForge({ target, runProcess: deps.runProcess, now: () => deps.now() }),
+    armGuard: deps.armGuard ?? realArmGuard,
     stdout: deps.stdout,
     stderr: deps.stderr,
     createLauncher: deps.createLauncher,

@@ -11,8 +11,14 @@
  * 2. appends a provenance line to the body when it has none;
  * 3. when an open PR already exists for the branch, records it and exits 5
  *    naming it, so a retry is safe;
- * 4. otherwise opens the PR against origin's default branch, arms it on
- *    `--arm` or `drain.armAutoMerge`, and records `drain.pr`.
+ * 4. otherwise opens the PR against origin's default branch and records
+ *    `drain.pr`;
+ * 5. names the PR's reviewer in a comment of its own (DOR-3262): the
+ *    committed config on `origin/main` says who, `land.securityPaths.reviewer`
+ *    when the PR touches a security path, else `land.reviewer`;
+ * 6. on `--arm` or `drain.armAutoMerge`, arms it only when the arm guard
+ *    allows (`land/arm-guard.ts`). A refusal leaves the PR open and unarmed
+ *    and exits 5 saying why.
  *
  * @module @dorkos/flow/cli/pr
  */
@@ -23,6 +29,9 @@ import path from 'node:path';
 import { findConfigRoots } from '../config-files.ts';
 import { loadConfig } from '../config-load.ts';
 import { PreconditionError, UsageError } from '../errors.ts';
+import type { LandConfig } from '../config-schema.ts';
+import { securityPathsTouched } from '../land/arm-decision.ts';
+import { readBaseLand } from '../land/base-config.ts';
 import { openFlowStateFile } from '../flow-state-file.ts';
 import type { Forge, ForgePr } from '../forge/types.ts';
 import type { VerbContext, VerbResult } from './context.ts';
@@ -83,6 +92,65 @@ function wantsArm(ctx: VerbContext): boolean {
   if (arm || noArm) return arm;
   const { config } = loadConfig(findConfigRoots(ctx.projectDir, ctx.flowRoot), ctx.env);
   return config.drain.armAutoMerge;
+}
+
+/** What the reviewer mention did. */
+interface Mention {
+  /** Who was named. */
+  reviewer: string;
+  /** Why them: the PR touches a security path, or the default reviewer. */
+  route: 'security' | 'default';
+  /** Whether the comment was posted. */
+  posted: boolean;
+  /** Why it was not, when it was not. */
+  error?: string;
+}
+
+/**
+ * Name the new PR's reviewer in a comment, from `land` on `origin/main`: the
+ * security reviewer when the PR touches a security path (or flow cannot tell),
+ * else the default reviewer; nothing when neither is set. A failure is
+ * reported, never thrown: the PR is open either way.
+ */
+async function mentionReviewer(
+  ctx: VerbContext,
+  forge: Forge,
+  pr: ForgePr,
+  land: LandConfig,
+  head: string,
+  launcher: string | undefined
+): Promise<Mention | null> {
+  let security = true;
+  if (land.securityPaths.reviewer !== null) {
+    try {
+      const facts = await forge.armFacts(pr.number);
+      security =
+        facts.files === null ||
+        securityPathsTouched(facts.files, {
+          securityGlobs: land.securityPaths.globs,
+          securityPattern: land.securityPaths.pattern,
+          securityLabel: land.securityPaths.label,
+        }).length > 0;
+    } catch {
+      security = true;
+    }
+  }
+  const route = land.securityPaths.reviewer !== null && security ? 'security' : 'default';
+  const handle = route === 'security' ? land.securityPaths.reviewer : land.reviewer;
+  if (handle === null) return null;
+  const reviewer = handle.startsWith('@') ? handle : `@${handle}`;
+  const body =
+    route === 'security'
+      ? `${reviewer}: this PR touches security paths. Please review it at ${short(head)}.`
+      : `${reviewer}: this PR is ready for your review at ${short(head)}.`;
+  try {
+    await forge.comment(pr.number, signedPrBody(ctx, body, launcher));
+    return { reviewer, route, posted: true };
+  } catch (error) {
+    const message = (error as Error).message;
+    ctx.warn(`flow opened ${pr.url} but could not mention ${reviewer}: ${message}`);
+    return { reviewer, route, posted: false, error: message };
+  }
 }
 
 /** Record `pr` on the run. */
@@ -156,6 +224,8 @@ export async function run(ctx: VerbContext): Promise<VerbResult> {
   }
 
   const base = await defaultBranch(ctx, worktree);
+  // Who to name comes from main's committed config, like the guard's checks.
+  const baseLand = await readBaseLand(ctx.runProcess, worktree);
   const created = await forge.createPr({
     head: branch,
     base,
@@ -164,18 +234,42 @@ export async function run(ctx: VerbContext): Promise<VerbResult> {
   });
   // Recorded before arming, so a failed arm never leaves an unrecorded PR.
   await recordPr(ctx, drainRun, forge, created, false);
+  const mention = baseLand.ok
+    ? await mentionReviewer(ctx, forge, created, baseLand.land, head, drainRun.host)
+    : null;
+  if (!baseLand.ok)
+    ctx.warn(`flow opened ${created.url} but named no reviewer: ${baseLand.detail}`);
+  let armed = false;
+  let armRefused: { reason: string; detail: string } | null = null;
   if (arm) {
-    await forge.arm(created.number, head);
-    await recordPr(ctx, drainRun, forge, created, true);
+    const guard = await ctx.armGuard({ forge, pr: created.number, reviewedSha: head, worktree });
+    if (guard.ok) {
+      await forge.arm(created.number, head);
+      await recordPr(ctx, drainRun, forge, created, true);
+      armed = true;
+    } else {
+      armRefused = { reason: guard.reason, detail: guard.detail };
+    }
   }
+  const mentionText =
+    mention === null
+      ? ''
+      : mention.posted
+        ? ` Asked ${mention.reviewer} to review it.`
+        : ` Could not ask ${mention.reviewer} to review it: ${mention.error}.`;
   return {
+    ...(armRefused === null ? {} : { exitCode: 5 as const }),
     json: {
-      ok: true,
+      ok: armRefused === null,
       identifier,
-      pr: { repo: forge.repo, number: created.number, url: created.url, armed: arm },
+      pr: { repo: forge.repo, number: created.number, url: created.url, armed },
       base,
       head,
+      mention,
+      armRefused,
     },
-    text: `Opened ${created.url} for ${identifier} into ${base}${arm ? ', auto-merge armed' : ''}.`,
+    text: `Opened ${created.url} for ${identifier} into ${base}${armed ? ', auto-merge armed' : ''}.${mentionText}${
+      armRefused === null ? '' : ` Did not arm it (${armRefused.reason}): ${armRefused.detail}.`
+    }`,
   };
 }

@@ -20,6 +20,8 @@
 
 import { z } from 'zod';
 
+import { WORKFLOW_NAME_PATTERN } from './land/validate.ts';
+
 /**
  * The active project tracker, as an **adapter slug** (§3).
  *
@@ -908,6 +910,97 @@ export const DrainSchema = z
   .prefault({});
 
 /**
+ * A command `land.preArm[].run` may hold. It runs with no shell, split on
+ * spaces (simple single or double quotes group words), so anything that only
+ * means something to a shell is refused here rather than passed on literally.
+ */
+export const PRE_ARM_COMMAND_PATTERN = /^[^;&|<>$`\\\r\n\t\0]+$/;
+/** A forge handle to mention: `user`, `@user`, or `org/team`. */
+export const REVIEWER_HANDLE_PATTERN =
+  /^@?[A-Za-z0-9](?:[A-Za-z0-9-]{0,38})(?:\/[A-Za-z0-9][A-Za-z0-9._-]{0,99})?$/;
+
+/** The paths that send an entry's check, as globs (`**`, `*`, `?`). */
+const PreArmPathsSchema = z.array(z.string().min(1)).min(1);
+/** Minutes an entry may take before the guard refuses. */
+const PreArmTimeoutSchema = z.number().int().min(1).max(360).default(30);
+
+/** A `land.preArm` entry that runs a command in the PR's worktree. */
+export const PreArmRunSchema = z
+  .object({
+    /** The paths that send this check. */
+    paths: PreArmPathsSchema,
+    /** The command, run with no shell in the worktree at the reviewed commit. */
+    run: z.string().regex(PRE_ARM_COMMAND_PATTERN, {
+      message: 'must be one command with no shell syntax (; & | < > $ ` \\ or a line break)',
+    }),
+    /** Minutes it may take. */
+    timeout: PreArmTimeoutSchema,
+  })
+  .strict();
+
+/** A `land.preArm` entry that dispatches a workflow on the forge and waits for it. */
+export const PreArmWorkflowSchema = z
+  .object({
+    /** The paths that send this check. */
+    paths: PreArmPathsSchema,
+    /** Dispatch a workflow and wait for its run. */
+    wait: z.literal('workflow'),
+    /** The workflow to dispatch (its file name, e.g. `browser-shards.yml`). */
+    workflow: z.string().regex(WORKFLOW_NAME_PATTERN, {
+      message: 'must be a workflow file name or a plain name: letters, digits, . _ -',
+    }),
+    /** Minutes to wait for its run. */
+    timeout: PreArmTimeoutSchema,
+  })
+  .strict();
+
+/** One check flow runs before it arms, when the PR touches its paths. */
+export const PreArmEntrySchema = z.union([PreArmRunSchema, PreArmWorkflowSchema]);
+
+/** A forge handle, or `null`. */
+const ReviewerHandleSchema = z
+  .string()
+  .regex(REVIEWER_HANDLE_PATTERN, { message: 'must be a forge handle: user, @user or org/team' })
+  .nullable()
+  .default(null);
+
+/**
+ * The repository's security paths (DOR-3262). Package manifests, lockfiles and
+ * flow's own committed config always count; these add the repository's own.
+ */
+export const SecurityPathsSchema = z
+  .object({
+    /** Globs (`**`, `*`, `?`) for the repository's security paths. */
+    globs: z.array(z.string().min(1)).default([]),
+    /** A regular expression tested against each changed path, or `null`. */
+    pattern: z.string().min(1).nullable().default(null),
+    /** The label that says Security has looked. Flow only reads it. */
+    label: BareLabelSchema.default('security-reviewed'),
+    /** Who flow mentions on a new PR that touches a security path. */
+    reviewer: ReviewerHandleSchema,
+  })
+  .strict()
+  .prefault({});
+
+/**
+ * Landing (DOR-3262): what flow checks before it arms auto-merge, and whom it
+ * names on a PR it opens. Read only from the committed config on `origin/main`,
+ * never from the PR's branch or `config.local.json`, so a PR cannot change the
+ * checks it is held to.
+ */
+export const LandSchema = z
+  .object({
+    /** Checks to run before arming, each when the PR touches its paths. */
+    preArm: z.array(PreArmEntrySchema).default([]),
+    /** The repository's security paths and label. */
+    securityPaths: SecurityPathsSchema,
+    /** Who flow mentions on a new PR (unless a security path routes it to `securityPaths.reviewer`). */
+    reviewer: ReviewerHandleSchema,
+  })
+  .strict()
+  .prefault({});
+
+/**
  * The journal (spec `flow-self-improvement` §2): a local, redacted record of how
  * flow's runs go, at `<main checkout>/.dork/flow/journal.jsonl`. On by default;
  * `enabled: false` makes every write a no-op. The file rotates once it reaches
@@ -1037,6 +1130,8 @@ export const FlowConfigSchema = z
     groom: GroomSchema,
     /** The parallel drain: workers at once, its limits, and how sessions start. */
     drain: DrainSchema,
+    /** What flow checks before it arms auto-merge, and whom it names on a new PR. */
+    land: LandSchema,
     /** Self-test, journal and retro policy. */
     selfImprovement: SelfImprovementSchema,
     /** Whether flow suggests setting up this machine's accounts. */
@@ -1046,6 +1141,11 @@ export const FlowConfigSchema = z
 
 /** The fully-resolved `/flow` engine configuration (§9). */
 export type FlowConfig = z.infer<typeof FlowConfigSchema>;
+
+/** The resolved `land` block. */
+export type LandConfig = z.infer<typeof LandSchema>;
+/** One resolved `land.preArm` entry. */
+export type PreArmEntry = z.infer<typeof PreArmEntrySchema>;
 
 /** A single stage definition in the spine. */
 export type Stage = z.infer<typeof StageSchema>;

@@ -43,6 +43,7 @@ import {
 } from '../../scripts/forge/types.ts';
 import { canonicalProjectRoot } from '../../scripts/main-checkout.ts';
 import { createFakeAdapter, type FakeTracker } from '../fixtures/cli/fake-adapter/adapter.ts';
+import { recordingGuard, refusal, type RecordingGuard } from '../fixtures/land/recording-guard.ts';
 import { item, makeProject, type WriteProject } from './write-harness.ts';
 
 const MARKER = '— 🤖 /flow';
@@ -51,6 +52,8 @@ const NOW = '2026-09-26T12:00:00.000Z';
 let project: WriteProject;
 let origin: string;
 let dorkHome: string;
+/** The arm guard every run gets unless a test passes its own. */
+let armGuard: RecordingGuard;
 
 /** Run git in the project with a fixed identity. */
 function git(...args: string[]): string {
@@ -137,6 +140,18 @@ function fakeForge(
     async disarm(pr) {
       calls.push({ method: 'disarm', arg: pr });
     },
+    async armFacts(): Promise<never> {
+      throw new Error('the arm guard is injected in this test; nothing reads armFacts');
+    },
+    async comment(pr: number, body: string) {
+      calls.push({ method: 'comment', arg: [pr, body] });
+    },
+    async dispatchWorkflow(): Promise<never> {
+      throw new Error('the arm guard is injected in this test; nothing dispatches');
+    },
+    async workflowRuns() {
+      return [];
+    },
     async recentGroupFailures() {
       return [];
     },
@@ -192,6 +207,7 @@ async function flow(
     launcher?: (host: HostName) => Launcher;
     cwd?: string;
     sleep?: (ms: number) => Promise<void>;
+    guard?: RecordingGuard;
   } = {}
 ) {
   const forge = options.forge ?? fakeForge();
@@ -207,6 +223,7 @@ async function flow(
     createAdapter: async () => tracker.adapter,
     runProcess: runner,
     createForge: forge.factory,
+    armGuard: (options.guard ?? armGuard).guard,
     // --wait polls with the host's sleep; a test never waits for real.
     io: { sleep: options.sleep ?? (async () => undefined) },
     ...(options.launcher === undefined ? {} : { createLauncher: options.launcher }),
@@ -274,6 +291,7 @@ function comments(tracker: FakeTracker): string[] {
 }
 
 beforeEach(() => {
+  armGuard = recordingGuard();
   project = makeProject();
   origin = `${project.dir}-origin.git`;
   dorkHome = mkdtempSync(path.join(tmpdir(), 'flow-dorkhome-'));
@@ -308,6 +326,67 @@ describe('flow review --approve by a person', () => {
     });
     expect(result.forge.calls).toContainEqual({ method: 'arm', arg: [7, 'abc1234def'] });
     expect(result.json).toMatchObject({ verdict: 'approved', by: 'person', armed: true });
+  });
+
+  // Purpose: the arm guard (DOR-3262) is asked about the commit as approved,
+  // before anything is posted.
+  it('asks the arm guard about the approved commit before posting anything', async () => {
+    writeRun();
+    const tracker = createFakeAdapter({ items: [started()] });
+    const guard = recordingGuard(() => {
+      // Nothing posted yet when the guard is asked.
+      expect(comments(tracker)).toEqual([]);
+      return { ok: true, preArm: [] };
+    });
+    const result = await flow(['review', 'ACME-12', '--approve', '--head', 'abc1234'], {
+      tracker,
+      forge: fakeForge({ head: 'abc1234def' }),
+      guard,
+    });
+    expect(result.code).toBe(EXIT.ok);
+    // The person named 7 characters; the guard is held to that, not to the head
+    // it prefix-matched (the real guard refuses a short SHA).
+    expect(guard.requests.map((r) => [r.pr, r.reviewedSha, r.worktree])).toEqual([
+      [7, 'abc1234', project.dir],
+    ]);
+  });
+
+  // Purpose: a refusal still ships the approval, but arms nothing, exits 5 and
+  // says why, so a person merges it once that is settled.
+  it('approves but does not arm when the guard refuses', async () => {
+    writeRun();
+    const tracker = createFakeAdapter({ items: [started()] });
+    const result = await flow(['review', 'ACME-12', '--approve', '--head', 'abc1234def'], {
+      tracker,
+      forge: fakeForge({ head: 'abc1234def' }),
+      guard: recordingGuard(() => refusal('freeze')),
+    });
+    expect(result.code).toBe(EXIT.precondition);
+    expect(comments(tracker)).toEqual(['Shipped from DorkOS.']);
+    expect(result.forge.calls.some((call) => call.method === 'arm')).toBe(false);
+    expect(result.json).toMatchObject({
+      verdict: 'approved',
+      armed: false,
+      armRefused: { reason: 'freeze' },
+    });
+    expect(String(result.json.note)).toMatch(/did not arm PR #7 \(freeze\)/);
+  });
+
+  // Purpose: with mergeOnApproval off nothing is armed, so the guard is not asked.
+  it('does not ask the guard when nothing will be armed', async () => {
+    project.config({
+      tracker: 'fake',
+      identity: { agent: 'agent-1' },
+      gates: { review: { mergeOnApproval: false } },
+    });
+    writeRun();
+    const guard = recordingGuard();
+    await flow(['review', 'ACME-12', '--approve', '--head', 'abc1234def'], {
+      tracker: createFakeAdapter({ items: [started()] }),
+      forge: fakeForge({ head: 'abc1234def' }),
+      guard,
+    });
+    expect(guard.requests).toEqual([]);
   });
 
   // Purpose: with mergeOnApproval off, a person merges: nothing is armed.
@@ -416,6 +495,8 @@ describe('flow review --approve --by reviewer-agent', () => {
     expect(body).toContain(MARKER);
     expect(result.forge.calls.some((call) => call.method === 'review')).toBe(false);
     expect(result.forge.calls).toContainEqual({ method: 'arm', arg: [7, 'abc1234def'] });
+    // The arm guard was asked about the head the reviewer agent checked.
+    expect(armGuard.requests.map((r) => r.reviewedSha)).toEqual(['abc1234def']);
   });
 
   // Purpose: each missing condition refuses, and nothing is posted.
