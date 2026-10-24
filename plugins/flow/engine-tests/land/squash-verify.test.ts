@@ -9,14 +9,24 @@
  */
 
 import { execFileSync } from 'node:child_process';
-import { mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
+import {
+  chmodSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  realpathSync,
+  rmSync,
+  writeFileSync,
+} from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
+import { deflateSync } from 'node:zlib';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
 import {
   resetGitProbe,
   squashReport,
+  gitIn,
   verifySquash,
   verifySquashIsolated,
   type GitResult,
@@ -206,6 +216,49 @@ describe('verifySquash', () => {
     plant();
     const result = await verifySquashIsolated(repo, { squash, reviewed });
     expect(result).toMatchObject({ verdict: 'fail', files: ['a.txt'] });
+  });
+
+  // The project's object folder is worker-writable too, and git does not
+  // re-hash objects on most reads: the check copies them in through the fetch
+  // protocol, which does.
+  it('an overwritten object in the project cannot make a slipped-in line pass', async () => {
+    write('a.txt', lines({ 10: 'line 10, changed' }));
+    const reviewed = commitAll('feature changes line 10');
+    git('checkout', '-q', 'main');
+    write('a.txt', lines({ 1: 'line 1, main' }));
+    commitAll('main changes line 1');
+    // The squash merges both and slips a line in.
+    const squash = squashOnto(reviewed, () =>
+      write('a.txt', lines({ 1: 'line 1, main', 10: 'line 10, changed', 15: 'slipped in' }))
+    );
+    // Overwrite the reviewed blob's loose object with the slipped-in content,
+    // under the same SHA.
+    const blob = git('rev-parse', `${reviewed}:a.txt`);
+    const file = path.join(repo, '.git', 'objects', blob.slice(0, 2), blob.slice(2));
+    const evil = Buffer.from(lines({ 10: 'line 10, changed', 15: 'slipped in' }));
+    chmodSync(file, 0o644);
+    writeFileSync(file, deflateSync(Buffer.concat([Buffer.from(`blob ${evil.length}\0`), evil])));
+    // Reading through the project's own object folder would pass it.
+    expect((await verifySquash(gitIn(repo), { squash, reviewed })).verdict).toBe('pass');
+    expect((await verifySquashIsolated(repo, { squash, reviewed })).verdict).not.toBe('pass');
+  });
+
+  it('a shallow project is unverified, never a pass or a false alarm', async () => {
+    write('a.txt', lines({ 10: 'line 10, changed' }));
+    const reviewed = commitAll('feature');
+    const squash = squashOnto(reviewed);
+    writeFileSync(path.join(repo, '.git', 'shallow'), `${git('rev-parse', 'main~1')}\n`);
+    expect(await verifySquashIsolated(repo, { squash, reviewed })).toMatchObject({
+      verdict: 'unverified',
+      reason: expect.stringMatching(/shallow/),
+    });
+  });
+
+  it('refuses SHAs that are not whole before any git call', async () => {
+    const head = git('rev-parse', 'HEAD');
+    expect((await verifySquashIsolated(repo, { squash: '--all', reviewed: head })).verdict).toBe(
+      'unverified'
+    );
   });
 
   it('a re-indented line keeps the patch-id but fails', async () => {

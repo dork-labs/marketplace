@@ -9,6 +9,7 @@
 
 import { execFileSync } from 'node:child_process';
 import {
+  chmodSync,
   existsSync,
   mkdirSync,
   mkdtempSync,
@@ -19,6 +20,7 @@ import {
 } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
+import { deflateSync } from 'node:zlib';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
 import { realProcessRunner, type ProcessRunner } from '../../scripts/cli/context.ts';
@@ -577,6 +579,25 @@ describe('land.preArm run entries', () => {
     });
     expect((await guard(fakeForge().forge, runner)).ok).toBe(true);
     expect(app).toBe('export {};\n');
+  });
+
+  it('an overwritten object in the project never reaches the command', async () => {
+    baseLand({ preArm: [{ paths: ['src/**'], run: 'check' }] });
+    const blob = git(repo, 'rev-parse', `${head}:src/app.ts`);
+    const file = path.join(repo, '.git', 'objects', blob.slice(0, 2), blob.slice(2));
+    const evil = Buffer.from('export const evil = true;\n');
+    chmodSync(file, 0o644);
+    writeFileSync(file, deflateSync(Buffer.concat([Buffer.from(`blob ${evil.length}\0`), evil])));
+    let app: string | null = null;
+    const { runner } = recordingRunner((_cmd, _args, cwd) => {
+      app = readFileSync(path.join(cwd as string, 'src', 'app.ts'), 'utf8');
+      return { code: 0 };
+    });
+    const result = await guard(fakeForge().forge, runner);
+    // The copy is verified, so the swap fails the checkout: refused, and the
+    // command never ran on content nobody reviewed.
+    expect(result.ok).toBe(false);
+    expect(app).toBeNull();
   });
 
   it('removes the checkout when the command fails or times out too', async () => {

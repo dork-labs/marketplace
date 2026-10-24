@@ -3,23 +3,30 @@
  * and the squash check both read commits from the project's repository, which
  * every worktree shares and any worker can write to: its config (filters,
  * merge drivers, `merge.default`), `info/attributes`, `refs/replace`, sparse
- * checkout. Any of those can change what a checkout contains or what a merge
- * gives, while every SHA still looks right.
+ * checkout, and its object folder itself (a loose object or the commit-graph
+ * can be overwritten, and git does not re-hash objects on most reads). Any of
+ * those can change what a checkout contains or what a merge gives, while every
+ * SHA still looks right.
  *
- * So both run git in a scratch repository instead: `git init` in a temp
- * folder, with the project's object folder added as an alternate
- * (`objects/info/alternates`). It reads the same commits, and nothing else: its
- * config is fresh, its `info/` is empty, it has no refs. Every git call runs
- * with {@link isolatedGitEnv}: no system or global config, no replace objects,
- * no inherited `GIT_*` variable, no credential prompt.
+ * So both run git in a scratch repository instead: a blob-less `--no-local`
+ * clone of the project over `file://`, into a temp folder, with no template.
+ * Every object reaches it through git's fetch protocol, which re-hashes each
+ * one and checks that the history connects, so a swapped object fails the
+ * fetch rather than reaching the check; the blobs a checkout or a merge needs
+ * later are fetched the same way. Its config is fresh, its `info/` is empty,
+ * and it has no replace refs. Every git call runs with {@link isolatedGitEnv}:
+ * no system or global config, no replace objects, no inherited `GIT_*`
+ * variable, no credential prompt.
  *
  * @module @dorkos/flow/land/isolated-git
  */
 
 import { spawn } from 'node:child_process';
-import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdtempSync, rmSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
+
+import { isFullSha } from './validate.ts';
 
 /** How long one git call may take. */
 const GIT_TIMEOUT_MS = 300_000;
@@ -109,12 +116,28 @@ export interface ScratchRepo {
 }
 
 /**
- * Make a scratch repository that reads `source`'s objects and nothing else.
+ * The upload-pack the scratch repository fetches with: filters and fetching
+ * any commit by SHA allowed, nothing else. A fixed string, never configurable.
+ */
+const UPLOAD_PACK =
+  'git -c uploadpack.allowFilter=true -c uploadpack.allowAnySHA1InWant=true upload-pack';
+
+/**
+ * Make a scratch repository holding verified copies of `source`'s commits.
  *
  * @param source - Any folder inside the project's repository.
+ * @param shas - Commits it must hold (fetched by SHA when the clone lacks them).
+ * @param opts - `refuseShallow`: refuse a shallow project, whose history
+ *   stops where a merge base may lie (and whose `shallow` file is worker-writable).
  * @returns The scratch repository, or why it could not be made.
  */
-export async function scratchRepo(source: string): Promise<ScratchRepo | string> {
+export async function scratchRepo(
+  source: string,
+  shas: readonly string[],
+  opts: { refuseShallow?: boolean } = {}
+): Promise<ScratchRepo | string> {
+  // Checked whole before git sees any of them, so none can be read as an option.
+  if (!shas.every((sha) => isFullSha(sha))) return 'every commit to copy must be a full SHA';
   const env = isolatedGitEnv();
   const common = await gitWith(
     source,
@@ -123,6 +146,9 @@ export async function scratchRepo(source: string): Promise<ScratchRepo | string>
   const commonDir = common.stdout.trim();
   if (common.code !== 0 || commonDir === '' || !path.isAbsolute(commonDir)) {
     return `git could not find the repository of ${source}`;
+  }
+  if (opts.refuseShallow && existsSync(path.join(commonDir, 'shallow'))) {
+    return `the repository at ${commonDir} is shallow, so its history may stop before the merge base`;
   }
   let dir: string;
   try {
@@ -137,20 +163,44 @@ export async function scratchRepo(source: string): Promise<ScratchRepo | string>
       // A folder the command left read-only stays behind in the temp folder.
     }
   };
-  const git = gitWith(dir, env);
-  const init = await git(['init', '--quiet']);
-  if (init.code !== 0) {
+  const outside = gitWith(os.tmpdir(), env);
+  const cloned = await outside([
+    'clone',
+    '--quiet',
+    '--no-checkout',
+    '--no-local',
+    '--no-tags',
+    '--template=',
+    '--filter=blob:none',
+    `--upload-pack=${UPLOAD_PACK}`,
+    `file://${commonDir}`,
+    dir,
+  ]);
+  if (cloned.code !== 0) {
     remove();
-    return `could not make a scratch repository: ${init.stderr.trim()}`;
+    return `could not copy the repository's commits into a scratch repository: ${cloned.stderr.trim() || `git exited ${cloned.code}`}`;
   }
-  try {
-    writeFileSync(
-      path.join(dir, '.git', 'objects', 'info', 'alternates'),
-      `${path.join(commonDir, 'objects')}\n`
-    );
-  } catch (error) {
+  const git = gitWith(dir, env);
+  // Later fetches (the blobs a checkout or merge needs) use the same upload-pack.
+  const configured = await git(['config', 'remote.origin.uploadpack', UPLOAD_PACK]);
+  if (configured.code !== 0) {
     remove();
-    return `could not point the scratch repository at ${commonDir}: ${(error as Error).message}`;
+    return 'could not configure the scratch repository';
+  }
+  for (const sha of shas) {
+    if ((await git(['cat-file', '-e', `${sha}^{commit}`])).code === 0) continue;
+    const fetched = await git([
+      'fetch',
+      '--quiet',
+      '--no-tags',
+      '--filter=blob:none',
+      'origin',
+      sha,
+    ]);
+    if (fetched.code !== 0 || (await git(['cat-file', '-e', `${sha}^{commit}`])).code !== 0) {
+      remove();
+      return `the commit ${sha.slice(0, 7)} could not be copied from the repository: ${fetched.stderr.trim() || 'not there'}`;
+    }
   }
   return { dir, git, remove };
 }

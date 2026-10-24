@@ -325,7 +325,23 @@ export async function verifySquashIsolated(
   source: string,
   input: { squash: string; reviewed: string }
 ): Promise<SquashVerdict> {
-  const scratch = await scratchRepo(source);
+  const squash = input.squash.toLowerCase();
+  const reviewed = input.reviewed.toLowerCase();
+  if (!isFullSha(squash) || !isFullSha(reviewed)) {
+    return {
+      verdict: 'unverified',
+      reason: 'the squash commit and the reviewed head must both be full SHAs',
+      squash,
+      reviewed,
+    };
+  }
+  const scratch = await scratchRepo(
+    source,
+    [input.squash.toLowerCase(), input.reviewed.toLowerCase()],
+    {
+      refuseShallow: true,
+    }
+  );
   if (typeof scratch === 'string') {
     return {
       verdict: 'unverified',

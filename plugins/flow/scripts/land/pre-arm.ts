@@ -164,9 +164,10 @@ export function minimalEnv(
 /**
  * Run one `run` entry in a fresh, clean checkout of the reviewed head, never in
  * the worker's worktree, and never through the project's own git settings:
- * the checkout is made in a scratch repository that borrows the project's
- * objects and nothing else (`land/isolated-git.ts`), so a worker's sparse
- * checkout, `git replace`, smudge filter or hook cannot change what it holds.
+ * the checkout is made in a scratch repository holding verified copies of the
+ * project's commits (`land/isolated-git.ts`), so a worker's sparse checkout,
+ * `git replace`, smudge filter, hook or overwritten object cannot change what
+ * it holds.
  * Then `git clean -ffdx`, a check that the checkout is exactly the reviewed
  * commit, the command with {@link minimalEnv}, and the checkout and its
  * scratch HOME are removed whatever happened.
@@ -183,7 +184,7 @@ async function runCommand(
   if (!isFullSha(target.reviewedSha)) {
     return `the reviewed commit "${target.reviewedSha}" is not a full SHA`;
   }
-  const scratch = await scratchRepo(target.worktree);
+  const scratch = await scratchRepo(target.worktree, [target.reviewedSha]);
   if (typeof scratch === 'string')
     return `could not make a checkout to run "${entry.run}": ${scratch}`;
   let home: string | null = null;
