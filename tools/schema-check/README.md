@@ -1,6 +1,6 @@
 # schema-check
 
-Repo-wide CI gate. It checks three things about everything in `plugins/`:
+Repo-wide CI gate. It checks four things about everything in `plugins/`:
 
 1. **Every `SKILL.md` still says what its author meant.** Not just "does it
    parse" — every line the author wrote has to survive the parse still meaning
@@ -9,6 +9,8 @@ Repo-wide CI gate. It checks three things about everything in `plugins/`:
    the DorkOS schema _and_ the Claude Code standard one), `.claude-plugin/dorkos.json`,
    and any plugin's `.dork/manifest.json`.
 3. **Every package states one version.** See [Version agreement](#version-agreement).
+4. **No package grants more than it names.** Every command's and skill's
+   `allowed-tools` holds to a permission floor. See [Allow rules](#allow-rules).
 
 Run it:
 
@@ -119,6 +121,30 @@ CI runs it on every pull request (base against head), on every merge-queue run
 `main` (`before` against `after`). A queue entry's base is the entry ahead of it
 (or `main` when it is first), so two PRs that each bumped a package to the same
 version cannot both merge: the second one fails in the queue.
+
+## Allow rules
+
+A command's or skill's `allowed-tools` runs without asking, so a broad rule is
+a grant to whatever the agent gets steered into. On Claude Code 2.1.300 a bare
+`Write` or `Edit` writes anywhere on disk, `Bash(node:*)` runs `node -e`, and
+`Bash(git log:*)` writes files with `--output`. Flow narrowed its own rules in
+0.56.0; `src/allowed-tools.ts` holds every package to the same floor:
+
+- No bare `Bash`, `Write`, `Edit` or `NotebookEdit`, no lowercase tool names,
+  and no MCP wildcard (`mcp__server__*`).
+- File writes are `Edit(<path>)`, which also governs `Write`. The path stays in
+  the project and out of `.git` and `.claude`. `Edit(./**)` is allowed only for
+  the files listed in `PROJECT_WRITERS`, and adding one is a security decision
+  that should get its own review.
+- A `Bash` rule is an exact command, or a `:*` prefix on one of the package's
+  own scripts by `${CLAUDE_PLUGIN_ROOT}` (`node --experimental-strip-types
+  "${CLAUDE_PLUGIN_ROOT}/scripts/x.ts":*` or `${CLAUDE_PLUGIN_ROOT}/scripts/x.sh:*`).
+  The script has to exist in the package.
+
+Read-only tools (`Read`, `Grep`, `Glob`) and exact commands pass. Every `.md`
+under `plugins/` whose frontmatter has `allowed-tools` is checked, dot folders
+included; frontmatter that mentions it but can't be read is an error, never a
+skip.
 
 ## Reading a SKILL.md safely
 

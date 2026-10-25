@@ -112,6 +112,9 @@ leaves the PR waiting forever. Keep it that way, or un-require the check first.
   root `package.json` versions disagree, or the manifest has a version and `plugin.json`
   has none; and when a package's files changed without its declared version going up
   (`npm run check:bump`). A package that declares no version is exempt; declaring one opts in.
+  And it fails on a broad `allowed-tools` rule in any package: a bare `Bash`, `Write` or
+  `Edit`, an MCP wildcard, an `Edit` path outside the project or into `.git`/`.claude`, or a
+  `Bash` wildcard on anything but the package's own script (README, "Allow rules").
 - `scripts-test.yml`, check **`script fixtures`** (required). Runs the fixture suites for
   the auto-merge arming gate, the three `.claude/hooks` guards (git, process, admin merge),
   the wrapper that makes those guards refuse rather than skip when node is missing, and the

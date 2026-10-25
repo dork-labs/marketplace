@@ -1,7 +1,7 @@
 /**
  * The checks behind `npm run check` in `tools/schema-check`.
  *
- * Three checks. The first two run against the real DorkOS Zod schemas pinned
+ * Four checks. The first two run against the real DorkOS Zod schemas pinned
  * in `upstream.json`:
  *
  * - {@link validateSkills} — every `SKILL.md` under `plugins/` parses as skill
@@ -15,6 +15,10 @@
  * every package's `.dork/manifest.json`, `.claude-plugin/plugin.json` and root
  * `package.json` must declare the same version, and a manifest with a version
  * needs a `plugin.json` that has one too.
+ *
+ * The fourth, {@link checkAllowedTools} (in `allowed-tools.ts`), holds every
+ * command's and skill's `allowed-tools` to a permission floor: no unscoped
+ * Bash or file writes, and wildcards only on the package's own scripts.
  *
  * **A passing zod parse is not the bar.** DorkOS frontmatter is built to absorb
  * bad input rather than reject it: unknown keys are dropped, most optional
@@ -52,6 +56,7 @@ import {
   parseFrontmatter,
 } from '@dorkos/skills/frontmatter';
 import { SCHEDULED_SKILLS } from './scheduled-skills.ts';
+import { checkAllowedTools } from './allowed-tools.ts';
 import { PLUGINS_DIR, checkVersionAgreement, pluginDirs } from './versions.ts';
 
 /** One thing that is wrong, in terms of the file it is wrong in. */
@@ -532,5 +537,6 @@ export function validateRepo(repoRoot: string): Finding[] {
     ...validateSkills(repoRoot),
     ...validateManifests(repoRoot),
     ...checkVersionAgreement(repoRoot),
+    ...checkAllowedTools(repoRoot),
   ];
 }
