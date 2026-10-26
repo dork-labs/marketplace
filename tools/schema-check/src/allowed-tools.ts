@@ -200,9 +200,7 @@ export const SAFE_COMMANDS: ReadonlySet<string> = new Set([
   'tail',
   'wc',
   'pwd',
-  'date',
   'echo',
-  'printf',
   'true',
   'false',
   'uname',
@@ -259,6 +257,38 @@ export const REVIEWED_COMMANDS: ReadonlyMap<string, ReadonlySet<string>> = new M
   ],
 ]);
 
+/**
+ * Every tool name a rule may use. Anything else, including a tool Claude Code
+ * adds later (`Monitor` runs a command and can open a WebSocket), is refused
+ * until it is reviewed and added here. Bash, Edit, the readers and WebFetch
+ * get their own shape checks below; the rest pass bare or with a spec.
+ */
+export const KNOWN_TOOLS: ReadonlySet<string> = new Set([
+  'Bash',
+  'Edit',
+  'Read',
+  'Grep',
+  'Glob',
+  'LS',
+  'NotebookRead',
+  'WebFetch',
+  'Task',
+  'Agent',
+  'Skill',
+  'SlashCommand',
+  'AskUserQuestion',
+  'TodoWrite',
+  'TaskCreate',
+  'TaskGet',
+  'TaskList',
+  'TaskUpdate',
+  'TaskOutput',
+  'EnterWorktree',
+  'ExitWorktree',
+  'EnterPlanMode',
+  'ExitPlanMode',
+]);
+
 /** Tools whose spec is a path they read. */
 const READERS: ReadonlySet<string> = new Set(['Read', 'Grep', 'Glob', 'LS', 'NotebookRead']);
 
@@ -267,11 +297,11 @@ const READERS: ReadonlySet<string> = new Set(['Read', 'Grep', 'Glob', 'LS', 'Not
  * a path). A read rule may never name one.
  */
 const SECRET_NAMES =
-  /^\.(ssh|aws|gnupg|gpg|config|dork|docker|kube|azure|gcloud|netrc|npmrc|pypirc|pgpass|vault-token|git|git-credentials|envrc|yarnrc(\.yml)?|env(\..*)?|claude.*)$/i;
+  /^\.(ssh|aws|gnupg|gpg|config|dork|docker|kube|azure|gcloud|netrc|npmrc|pypirc|pgpass|vault-token|git|git-credentials|envrc|dev\.vars|.*_history|yarnrc(\.yml)?|env(\..*)?|claude.*)$/i;
 
 /** Secret files that don't start with a dot: SSH keys, certificates, cloud credentials. */
 const SECRET_FILES =
-  /^(id_(rsa|dsa|ecdsa|ed25519)(\.pub)?|credentials(\.json)?|.*\.(pem|key|p12|pfx|keystore|jks))$/i;
+  /^(id_(rsa|dsa|ecdsa|ed25519)(\.pub)?|credentials(\.json)?|service-account.*\.json|.*\.tfstate(\.backup)?|.*_history|.*\.(pem|key|p12|pfx|keystore|jks))$/i;
 
 /** An exact run of one of the package's own scripts, with fixed lowercase words after it. */
 const SCRIPT_EXACT =
@@ -340,7 +370,9 @@ export function breach(
     if (rule === 'WebFetch') {
       return 'a bare WebFetch can send anything anywhere; use WebFetch(domain:<host>)';
     }
-    return null;
+    return KNOWN_TOOLS.has(rule)
+      ? null
+      : `${rule} is not on KNOWN_TOOLS; a tool is reviewed before a package may grant it`;
   }
   if (rule.startsWith('mcp__')) {
     return /^mcp__[A-Za-z0-9-]+(?:_[A-Za-z0-9-]+)*__[A-Za-z0-9_-]*[A-Za-z0-9-]$/.test(rule)
@@ -353,16 +385,23 @@ export function breach(
     return 'it is not a rule shape this check knows: Tool, Tool(spec) with no nested parentheses, or mcp__server__tool';
   }
   const [, tool, body] = call;
+  if (tool === 'PowerShell') return 'PowerShell rules are not allowed; use an exact Bash command';
+  if (UNSCOPED.has(tool) && tool !== 'Bash' && tool !== 'Edit') {
+    return 'use Edit(<path>), which governs every file write';
+  }
+  if (!KNOWN_TOOLS.has(tool)) {
+    return `${tool} is not on KNOWN_TOOLS; a tool is reviewed before a package may grant it`;
+  }
   if (tool === 'Edit') return editBreach(rule, body, file);
   if (READERS.has(tool)) return readBreach(body);
   if (tool === 'WebFetch') {
-    return /^domain:[a-z0-9-]+(\.[a-z0-9-]+)+$/i.test(body)
-      ? null
-      : 'WebFetch has to name one literal host, as WebFetch(domain:<host>)';
-  }
-  if (tool === 'PowerShell') return 'PowerShell rules are not allowed; use an exact Bash command';
-  if (UNSCOPED.has(tool) && tool !== 'Bash') {
-    return 'use Edit(<path>), which governs every file write';
+    const host = /^domain:((?:[a-z0-9-]+\.)+([a-z]{2,63}))$/i.exec(body);
+    if (!host) {
+      return 'WebFetch has to name one literal host with a real top-level domain, as WebFetch(domain:docs.example.com); no IP addresses';
+    }
+    return /^(local|localhost|internal|lan|home|corp|intranet)$/i.test(host[2])
+      ? `WebFetch may not reach a private network name (.${host[2]})`
+      : null;
   }
   if (tool !== 'Bash') return null;
 
@@ -407,23 +446,41 @@ export function breach(
     return 'grep may not take long options or -r, -R or -d, since recursion reads secret dot-files';
   }
   for (const arg of body.trim().split(/\s+/).slice(1)) {
-    const value = arg.replace(/^-+[A-Za-z-]*=?/, '');
-    if (value === '' || /^\d+$/.test(value)) continue;
-    const why = readBreach(value);
-    if (why) return `its argument ${arg} reaches past the project: ${why}`;
+    // A long option's value can name a file of file names (--files0-from),
+    // so exact commands take none.
+    if (arg.startsWith('--')) {
+      return `its argument ${arg} is a long option, whose value can name a file this check never sees`;
+    }
+    // A short flag can carry its value attached (-fcredentials, -f/etc/x), so
+    // every suffix after the dash gets the path check, not just the whole word.
+    const candidates = arg.startsWith('-')
+      ? [...arg.slice(1)].map((_, i) => arg.slice(1 + i))
+      : [arg];
+    for (const value of candidates) {
+      if (value === '' || /^[A-Za-z]$|^\d+$/.test(value)) continue;
+      const why = readBreach(value);
+      if (why) return `its argument ${arg} reaches past the project: ${why}`;
+    }
   }
   return null;
 }
 
 /** Every `.md` file under `plugins/` (any case), plus every symlink there. */
-function walkPlugins(repoRoot: string): { markdown: string[]; symlinks: string[] } {
+function walkPlugins(repoRoot: string): {
+  markdown: string[];
+  symlinks: string[];
+  unreadable: string[];
+} {
   const markdown: string[] = [];
   const symlinks: string[] = [];
+  const unreadable: string[] = [];
   const walk = (relDir: string): void => {
     let entries;
     try {
       entries = readdirSync(path.join(repoRoot, relDir), { withFileTypes: true });
     } catch {
+      // A folder this check can't list may still hold grants Claude Code reads.
+      if (relDir !== PLUGINS_DIR) unreadable.push(relDir);
       return;
     }
     for (const entry of entries) {
@@ -435,7 +492,7 @@ function walkPlugins(repoRoot: string): { markdown: string[]; symlinks: string[]
     }
   };
   walk(PLUGINS_DIR);
-  return { markdown: markdown.sort(), symlinks: symlinks.sort() };
+  return { markdown: markdown.sort(), symlinks: symlinks.sort(), unreadable: unreadable.sort() };
 }
 
 /** What a file's frontmatter says under `allowed-tools`, read one way. */
@@ -563,7 +620,14 @@ function sourceDir(source: unknown): string {
 export function collectGrants(repoRoot: string): { grants: Grant[]; findings: Finding[] } {
   const findings: Finding[] = [];
   const grants: Grant[] = [];
-  const { markdown, symlinks } = walkPlugins(repoRoot);
+  const { markdown, symlinks, unreadable } = walkPlugins(repoRoot);
+
+  for (const file of unreadable) {
+    findings.push({
+      file,
+      message: 'This folder cannot be read, so the grants in it cannot be checked.',
+    });
+  }
 
   for (const file of symlinks) {
     findings.push({
@@ -654,7 +718,7 @@ export function checkAllowedTools(repoRoot: string): Finding[] {
  * warning a reviewer has to see. Security's call, 2026-10-26.
  */
 const SECRET_PRONE_FOLDERS =
-  /^(config|configs|secret|secrets|env|envs|deploy|deployment|infra|\.github|credentials|certs|keys)$/i;
+  /^(config|configs|secret|secrets|env|envs|deploy|deployment|infra|\.github|credentials|certs|keys|apps|packages)$/i;
 
 /**
  * Read rules that pass the floor but name a folder that commonly holds

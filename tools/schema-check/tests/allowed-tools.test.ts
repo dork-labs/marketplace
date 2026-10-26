@@ -1,4 +1,4 @@
-import { mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
+import { chmodSync, mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -240,6 +240,19 @@ describe('breach', () => {
       'Bash(ls specs/{a,b})',
       'Bash(grep --include=.env x specs)',
       'Bash(grep x specs --include=id_rsa)',
+      // Security's pass at 047a68f, M1: flag values hide paths.
+      'Bash(wc --files0-from=/proc/self/environ)',
+      'Bash(du --files0-from=/etc/passwd)',
+      'Bash(wc --files0-from config/list)',
+      'Bash(date -fcredentials.json)',
+      'Bash(head -fcredentials)',
+      'Bash(cat -nconfig/.env)',
+      'Bash(printf -v x y)',
+      // Security's Should 5: more secret names.
+      'Bash(cat .dev.vars)',
+      'Bash(cat infra/prod.tfstate)',
+      'Bash(cat deploy/service-account-prod.json)',
+      'Bash(cat .bash_history)',
       // Round 6.
       'Bash(grep --recur KEY config)',
       'Bash(grep --direc=recurse KEY config)',
@@ -356,6 +369,44 @@ describe('breach', () => {
       expect(breach(rule, verify, 'plugins/flow', r), rule).toBeNull();
     }
     expect(breach('LS', verify, 'plugins/flow', r)).not.toBeNull();
+  });
+
+  it('refuses tools nobody has reviewed (Security M2)', () => {
+    const r = root();
+    for (const rule of [
+      'Monitor',
+      'Monitor(*)',
+      'Monitor(ws://x)',
+      'Frobnicate',
+      'Frobnicate(x)',
+      'WebSearch',
+    ]) {
+      expect(breach(rule, file, pkg, r), rule).toMatch(/KNOWN_TOOLS/);
+    }
+    for (const rule of [
+      'Task',
+      'Skill',
+      'Skill(flow:verify)',
+      'AskUserQuestion',
+      'TaskOutput',
+      'EnterWorktree',
+    ]) {
+      expect(breach(rule, file, pkg, r), rule).toBeNull();
+    }
+  });
+
+  it('refuses unreadable folders, IP hosts and private network names', () => {
+    const r = root();
+    for (const rule of [
+      'WebFetch(domain:169.254.169.254)',
+      'WebFetch(domain:127.0.0.1)',
+      'WebFetch(domain:0x7f.0x1)',
+      'WebFetch(domain:metadata.google.internal)',
+      'WebFetch(domain:printer.local)',
+      'WebFetch(domain:dev.localhost)',
+    ]) {
+      expect(breach(rule, file, pkg, r), rule).not.toBeNull();
+    }
   });
 
   it('allows WebFetch only for one literal host', () => {
@@ -524,6 +575,16 @@ describe('checkAllowedTools', () => {
     expect(allowedToolsWarnings(r).map((w) => w.message.split(' reads ')[1].split('/')[0])).toEqual(
       ['config', '.github']
     );
+  });
+
+  it('reports a folder under plugins/ it cannot read', () => {
+    const r = fixtureRepo({ 'plugins/demo/locked/c.md': command('Bash') });
+    chmodSync(path.join(r, 'plugins/demo/locked'), 0o000);
+    try {
+      expect(checkAllowedTools(r).map((f) => f.file)).toEqual(['plugins/demo/locked']);
+    } finally {
+      chmodSync(path.join(r, 'plugins/demo/locked'), 0o755);
+    }
   });
 
   it('refuses any symlink under plugins/', () => {

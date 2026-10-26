@@ -133,8 +133,10 @@ a grant to whatever the agent gets steered into. On Claude Code 2.1.300 a bare
 It is an allow-list: a rule passes only when it matches one of these shapes,
 and anything else is refused.
 
-- A bare tool name, except the ones that are a whole shell or every file write:
-  `Bash`, `PowerShell`, `Write`, `Edit`, `MultiEdit`, `NotebookEdit`.
+- Only tools on `KNOWN_TOOLS`. A tool nobody has reviewed is refused, bare or
+  with a spec (`Monitor` runs a command and can open a WebSocket). The ones
+  that are a whole shell or every file write are refused bare: `Bash`,
+  `PowerShell`, `Write`, `Edit`, `MultiEdit`, `NotebookEdit`.
 - One MCP tool, `mcp__<server>__<tool>`. A bare server or a `*` is refused.
 - `Edit(<path>)`, which also governs `Write`. The path starts with a literal
   folder (`specs/**`, `.dork/flow/tmp/**`), never uses `\`, `%`, `$`, `~` or
@@ -151,8 +153,10 @@ and anything else is refused.
   few more). It's an allow-list because a deny-list of "programs that run
   programs" kept leaking (`python3.12`, `gawk`, `caffeinate -i sh`). The command
   can't chain, pipe, redirect, substitute, quote or glob, and each argument
-  gets the same checks as a read path. `grep` takes no long options and no
-  `-r`, `-R` or `-d`. Anything else goes in `REVIEWED_COMMANDS`, per package,
+  gets the same checks as a read path, short-flag values included
+  (`-fcredentials`). No long options at all, since a value like
+  `--files0-from=` names a file of file names. `grep` takes no `-r`, `-R` or
+  `-d`. Anything else goes in `REVIEWED_COMMANDS`, per package,
   as its own reviewed diff, or becomes the package's own script.
 - `Read`/`Grep`/`Glob`/`LS`/`NotebookRead(<path>)` stay inside the project and
   start with a literal folder (a leading `*` or `**` reaches dot-files). No `/`,
@@ -160,9 +164,10 @@ and anything else is refused.
   `.ssh`, `.aws`, `.config`, `.dork`, `.git`, `.claude*`, `.env*`, `.envrc`,
   `.npmrc`, `.yarnrc*`, `.netrc`, `.git-credentials`, `id_rsa`, `*.pem`,
   `*.key`, `credentials` and the like.
-- `WebFetch` only as `WebFetch(domain:<one literal host>)`. A bare `WebFetch`
-  can send anything anywhere.
-- `<Tool>(<spec>)` for any other tool, with no nested parentheses.
+- `WebFetch` only as `WebFetch(domain:<one literal host>)` with a real
+  top-level domain: no IP addresses (`169.254.169.254`), and no `.local`,
+  `.internal` or `.localhost`. A bare `WebFetch` can send anything anywhere.
+- `<Tool>(<spec>)` for any other known tool, with no nested parentheses.
 
 A bare `Read`, `Grep`, `Glob`, `LS` or `NotebookRead` is refused: in plain
 Claude Code a bare read allow reads `~/.ssh` with no prompt. Scope it to a
@@ -176,7 +181,7 @@ dot-files. The floor keeps reads off the project's root secrets (`.env`,
 can't see what a folder happens to hold.
 
 So a read scoped to a folder that often holds secrets (`config`, `secrets`,
-`env`, `deploy`, `infra`, `.github`, `certs`, `keys`, `credentials`) passes
+`env`, `deploy`, `infra`, `.github`, `certs`, `keys`, `credentials`, `apps`, `packages`) passes
 but prints a warning, which CI turns into an annotation on the pull request.
 The reviewer confirms nothing secret lives there. It never fails the check.
 
@@ -189,8 +194,10 @@ depth, dot folders included, plus `allowedTools` in a `plugin.json` or
 can't be read is an error, not a skip, and so is any symlink under `plugins/`.
 A marketplace entry with a local `source` must point at `./plugins/<name>`, so
 nothing ships from a folder the walk skips. The floor covers packages shipped
-from this repo only: a remote `source` (GitHub, a URL) isn't checked here, and
-neither are plugin hooks that approve tool calls.
+from this repo only: a remote `source` (GitHub, a URL) isn't checked here.
+Also out of scope: a plugin's `hooks.json` (a hook can approve tool calls or
+run commands) and servers in its `.mcp.json`. Both are tracked as follow-ups.
+A folder under `plugins/` this check can't read is an error.
 
 ## Reading a SKILL.md safely
 
