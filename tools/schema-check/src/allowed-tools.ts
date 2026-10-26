@@ -647,3 +647,39 @@ export function checkAllowedTools(repoRoot: string): Finding[] {
   }
   return findings;
 }
+
+/**
+ * Folders that commonly hold secrets. A read rule scoped to one passes the
+ * floor (a static check can't know what a named folder holds), but it gets a
+ * warning a reviewer has to see. Security's call, 2026-10-26.
+ */
+const SECRET_PRONE_FOLDERS =
+  /^(config|configs|secret|secrets|env|envs|deploy|deployment|infra|\.github|credentials|certs|keys)$/i;
+
+/**
+ * Read rules that pass the floor but name a folder that commonly holds
+ * secrets. These never fail the check; the CLI prints them as warnings (and
+ * as annotations on the pull request in CI) so a reviewer sees them.
+ *
+ * @param repoRoot - Absolute path to the repository root.
+ */
+export function allowedToolsWarnings(repoRoot: string): Finding[] {
+  const warnings: Finding[] = [];
+  for (const grant of collectGrants(repoRoot).grants) {
+    for (const rule of grant.rules) {
+      const read = /^(Read|Grep|Glob|LS|NotebookRead)\(([^()]*)\)$/.exec(rule);
+      if (!read || breach(rule, grant.file, grant.pkgDir, repoRoot) !== null) continue;
+      const folder = read[2]
+        .replace(/^\.\//, '')
+        .split('/')
+        .find((segment) => SECRET_PRONE_FOLDERS.test(segment));
+      if (folder) {
+        warnings.push({
+          file: grant.file,
+          message: `\`${rule}\` reads ${folder}/, which often holds secrets. A reviewer should confirm nothing secret lives there.`,
+        });
+      }
+    }
+  }
+  return warnings;
+}

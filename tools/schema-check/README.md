@@ -175,6 +175,11 @@ dot-files. The floor keeps reads off the project's root secrets (`.env`,
 `.git`, `.claude`, `.dork`) and off named secrets anywhere in the path; it
 can't see what a folder happens to hold.
 
+So a read scoped to a folder that often holds secrets (`config`, `secrets`,
+`env`, `deploy`, `infra`, `.github`, `certs`, `keys`, `credentials`) passes
+but prints a warning, which CI turns into an annotation on the pull request.
+The reviewer confirms nothing secret lives there. It never fails the check.
+
 It reads grants the way Claude Code does, as well as the way DorkOS does, and
 both readings have to pass. Claude Code strips a BOM, ends frontmatter at the
 first `---` anywhere, retries YAML with tabs as spaces, and splits rules with an

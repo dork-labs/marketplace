@@ -10,11 +10,21 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { readPin } from '../scripts/fetch-upstream.ts';
 import { validateRepo } from './validate.ts';
+import { allowedToolsWarnings } from './allowed-tools.ts';
 
 // This file is tools/schema-check/src/cli.ts, so the repo root is three up.
 const repoRoot = path.resolve(fileURLToPath(new URL('../../..', import.meta.url)));
 const pin = readPin();
 const findings = validateRepo(repoRoot);
+
+// Warnings never fail the check. In CI they become annotations on the PR.
+for (const warning of allowedToolsWarnings(repoRoot)) {
+  console.log(
+    process.env.GITHUB_ACTIONS === 'true'
+      ? `::warning file=${warning.file}::${warning.message}`
+      : `⚠ ${warning.file}: ${warning.message}`
+  );
+}
 
 if (findings.length === 0) {
   console.log(`✓ Skills, manifests and versions match DorkOS ${pin.repo}@${pin.ref.slice(0, 12)}`);

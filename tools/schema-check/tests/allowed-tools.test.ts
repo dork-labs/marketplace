@@ -6,6 +6,7 @@ import { afterEach, describe, expect, it } from 'vitest';
 import {
   PROJECT_WRITERS,
   breach,
+  allowedToolsWarnings,
   checkAllowedTools,
   collectGrants,
   splitRules,
@@ -511,6 +512,18 @@ describe('checkAllowedTools', () => {
     const r = fixtureRepo({ 'secrets/id_rsa': 'x', 'plugins/demo/README.md': '# x\n' });
     symlinkSync(path.join(r, 'secrets'), path.join(r, 'plugins/demo/keys'));
     expect(checkAllowedTools(r).map((f) => f.file)).toEqual(['plugins/demo/keys']);
+  });
+
+  it('warns, without failing, on a read scoped to a folder that often holds secrets', () => {
+    const r = fixtureRepo({
+      'plugins/demo/commands/a.md': command(
+        'Read(config/**), Grep(src/**), Glob(.github/workflows/*.yml)'
+      ),
+    });
+    expect(checkAllowedTools(r)).toEqual([]);
+    expect(allowedToolsWarnings(r).map((w) => w.message.split(' reads ')[1].split('/')[0])).toEqual(
+      ['config', '.github']
+    );
   });
 
   it('refuses any symlink under plugins/', () => {
