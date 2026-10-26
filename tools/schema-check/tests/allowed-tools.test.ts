@@ -154,9 +154,6 @@ describe('breach', () => {
   it('passes scoped rules', () => {
     const r = root();
     for (const rule of [
-      'Read',
-      'Grep',
-      'Glob',
       'Task',
       'mcp__dorkos__tasks_list',
       'Edit(specs/**)',
@@ -250,6 +247,18 @@ describe('breach', () => {
     }
   });
 
+  it('refuses bare reads except in a reviewed package', () => {
+    const r = root();
+    for (const rule of ['Read', 'Grep', 'Glob', 'LS', 'NotebookRead']) {
+      expect(breach(rule, file, pkg, r), rule).toMatch(/reads any file/);
+    }
+    const verify = 'plugins/flow/commands/verify.md';
+    for (const rule of ['Read', 'Grep', 'Glob']) {
+      expect(breach(rule, verify, 'plugins/flow', r), rule).toBeNull();
+    }
+    expect(breach('LS', verify, 'plugins/flow', r)).not.toBeNull();
+  });
+
   it('allows WebFetch only for one literal host', () => {
     const r = root();
     for (const rule of [
@@ -293,7 +302,7 @@ describe('breach', () => {
 describe('checkAllowedTools', () => {
   it('reports each broad rule with its file', () => {
     const r = fixtureRepo({
-      'plugins/demo/commands/a.md': command('Read, Bash(git:*), Write'),
+      'plugins/demo/commands/a.md': command('Read(specs/**), Bash(git:*), Write'),
     });
     const found = checkAllowedTools(r);
     expect(found.map((f) => f.file)).toEqual([
@@ -307,7 +316,7 @@ describe('checkAllowedTools', () => {
   it('checks skills, agents and dot folders, and YAML lists', () => {
     const r = fixtureRepo({
       'plugins/demo/skills/s/SKILL.md':
-        '---\nname: s\ndescription: d\nallowed-tools:\n  - Read\n  - Bash\n---\n',
+        '---\nname: s\ndescription: d\nallowed-tools:\n  - Read(specs/**)\n  - Bash\n---\n',
       'plugins/demo/.claude/commands/c.md': command('Edit'),
     });
     expect(checkAllowedTools(r).map((f) => f.file)).toEqual([
@@ -364,7 +373,7 @@ describe('checkAllowedTools', () => {
     const r = fixtureRepo({
       'plugins/demo/.claude-plugin/plugin.json': JSON.stringify({
         name: 'demo',
-        commands: { x: { source: './x.md', allowedTools: ['Read', 'Bash'] } },
+        commands: { x: { source: './x.md', allowedTools: ['Read(specs/**)', 'Bash'] } },
       }),
       '.claude-plugin/marketplace.json': JSON.stringify({
         plugins: [

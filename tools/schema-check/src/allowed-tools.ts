@@ -312,8 +312,9 @@ export const ANY_PROGRAM: ReadonlySet<string> = new Set([
 ]);
 
 /**
- * Exact commands a package may hold even though their first word is on
- * {@link ANY_PROGRAM}, each reviewed for what it runs. Package folder → rules.
+ * Rules a package may hold that the floor otherwise refuses: exact commands
+ * whose first word is on {@link ANY_PROGRAM}, and bare reads. Each is reviewed
+ * for what it reaches. Package folder → rules.
  * Adding one is a security decision, like {@link PROJECT_WRITERS}.
  *
  * Flow's: read-only git plumbing its verify and execute steps need (they run
@@ -336,6 +337,11 @@ export const REVIEWED_COMMANDS: ReadonlyMap<string, ReadonlySet<string>> = new M
       'Bash(git diff --stat origin/HEAD...HEAD)',
       'Bash(node --version)',
       'Bash(npm install --omit=dev --prefix "${CLAUDE_PLUGIN_ROOT}")',
+      // Bare reads, until flow moves to Read(./**) (follow-up). In plain
+      // Claude Code a bare Read allow reads ~/.ssh with no prompt.
+      'Read',
+      'Grep',
+      'Glob',
     ]),
   ],
 ]);
@@ -399,6 +405,9 @@ export function breach(
 ): string | null {
   if (/^[A-Z][A-Za-z]*$/.test(rule)) {
     if (UNSCOPED.has(rule)) return 'it is unscoped, so it allows any command or any file write';
+    if (READERS.has(rule) && !REVIEWED_COMMANDS.get(pkgDir)?.has(rule)) {
+      return `a bare ${rule} reads any file, ~/.ssh included; scope it, as ${rule}(./**) or ${rule}(specs/**)`;
+    }
     if (rule === 'WebFetch') {
       return 'a bare WebFetch can send anything anywhere; use WebFetch(domain:<host>)';
     }

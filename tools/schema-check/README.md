@@ -160,8 +160,10 @@ and anything else is refused.
   can send anything anywhere.
 - `<Tool>(<spec>)` for any other tool, with no nested parentheses.
 
-A bare `Read`, `Grep`, `Glob` and `Agent`/`Task` still pass: they don't write
-or run anything themselves. Flow's commands use a bare `Read`.
+A bare `Read`, `Grep`, `Glob`, `LS` or `NotebookRead` is refused: in plain
+Claude Code a bare read allow reads `~/.ssh` with no prompt. Scope it, as
+`Read(./**)` or `Read(specs/**)`. Flow's bare reads sit in `REVIEWED_COMMANDS`
+until flow moves to `Read(./**)`. `Agent`/`Task` pass bare.
 
 It reads grants the way Claude Code does, as well as the way DorkOS does, and
 both readings have to pass. Claude Code strips a BOM, ends frontmatter at the
