@@ -189,12 +189,43 @@ describe('breach', () => {
       'Bash(curl https://example.com)',
       'Bash(gh pr list)',
       'Bash("${CLAUDE_PLUGIN_ROOT}/scripts/run.sh)',
+      // Round 4: names the deny-list missed. Exact commands are an allow-list now.
+      'Bash(python3.12 specs/run.py)',
+      'Bash(nodejs specs/x.js)',
+      'Bash(perl5.34 x.pl)',
+      'Bash(gawk -f x.awk)',
+      'Bash(gmake)',
+      'Bash(yarnpkg run x)',
+      'Bash(ex -s -c q x)',
+      'Bash(view x)',
+      'Bash(caffeinate -i sh)',
+      'Bash(arch -arm64 sh)',
+      'Bash(xcrun python3 x.py)',
+      'Bash(sandbox-exec -p x sh)',
+      'Bash(gdb -batch -x specs/g)',
+      'Bash(expect specs/x.exp)',
+      'Bash(Rscript x.R)',
+      'Bash(swift x.swift)',
+      'Bash(irb)',
+      'Bash(LS)',
+      // Round 4: an exact command's arguments get the read-path checks.
+      'Bash(cat ~/.ssh/id_rsa)',
+      'Bash(cat .env)',
+      'Bash(cat /etc/passwd)',
+      'Bash(cat ../x)',
+      'Bash(head --file=/etc/hosts)',
+      'Bash(cp specs/x .claude/settings.json)',
+      'Bash(grep -r token .git)',
+      'Bash(cat *)',
     ]) {
       expect(breach(rule, file, pkg, r), rule).not.toBeNull();
     }
     for (const rule of [
       'Bash(ls)',
       'Bash(pwd)',
+      'Bash(ls -la specs)',
+      'Bash(wc -l specs/a.md)',
+      'Bash(grep -n TODO src/index.ts)',
       'Bash(node --experimental-strip-types "${CLAUDE_PLUGIN_ROOT}/scripts/tool.ts")',
       'Bash(node --experimental-strip-types "${CLAUDE_PLUGIN_ROOT}/scripts/tool.ts" check)',
       'Bash(${CLAUDE_PLUGIN_ROOT}/scripts/run.sh)',
@@ -232,6 +263,19 @@ describe('breach', () => {
       'Read(.claude.json)',
       'Read(.npmrc)',
       'Grep(.git-credentials)',
+      // Round 4: a leading wildcard matches dot-files under gitignore rules.
+      'Read(*)',
+      'Read(**)',
+      'Read(./**)',
+      'Grep(./**)',
+      'Glob(**/*.md)',
+      'Read(.envrc)',
+      'Read(.yarnrc.yml)',
+      'Read(.git/config)',
+      'Read(specs/**/id_rsa)',
+      'Read(certs/server.pem)',
+      'Read(keys/prod.key)',
+      'Read(home/.aws/credentials)',
       'Glob(.s*/**)',
       'LS(~)',
     ]) {
@@ -240,7 +284,7 @@ describe('breach', () => {
     for (const rule of [
       'Read(specs/**)',
       'Grep(src/**)',
-      'Glob(**/*.md)',
+      'Glob(specs/**/*.md)',
       'Read(.github/workflows/**)',
     ]) {
       expect(breach(rule, file, pkg, r), rule).toBeNull();

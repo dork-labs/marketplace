@@ -48,12 +48,12 @@ trying to switch off.
 
 Four failure modes, four answers:
 
-| What breaks                                      | What catches it                                          |
-| ------------------------------------------------ | -------------------------------------------------------- |
-| A rejected **value** (`permissions: acceptEditz`) | `ScheduleBlockSchema.safeParse` fails                    |
-| A **swallowed** value (`enabled: maybe`)          | Comparing what was written against what the schema kept  |
-| A bad **key** (`permissionz:`, `modle:`)          | Comparison against the schema's own key set              |
-| The **whole block** gone, or `schedul:`           | The list in `src/scheduled-skills.ts`                    |
+| What breaks                                       | What catches it                                         |
+| ------------------------------------------------- | ------------------------------------------------------- |
+| A rejected **value** (`permissions: acceptEditz`) | `ScheduleBlockSchema.safeParse` fails                   |
+| A **swallowed** value (`enabled: maybe`)          | Comparing what was written against what the schema kept |
+| A bad **key** (`permissionz:`, `modle:`)          | Comparison against the schema's own key set             |
+| The **whole block** gone, or `schedul:`           | The list in `src/scheduled-skills.ts`                   |
 
 The second answer is generic on purpose: it compares the raw mapping to the
 parsed one key by key, so it needs no list of which fields degrade and cannot
@@ -144,26 +144,29 @@ and anything else is refused.
   review.
 - `Bash(<exact command>)`, or a `:*` prefix on one of the package's own scripts
   by `${CLAUDE_PLUGIN_ROOT}` (`node --experimental-strip-types
-  "${CLAUDE_PLUGIN_ROOT}/scripts/x.ts":*` or `${CLAUDE_PLUGIN_ROOT}/scripts/x.sh:*`).
+"${CLAUDE_PLUGIN_ROOT}/scripts/x.ts":*` or `${CLAUDE_PLUGIN_ROOT}/scripts/x.sh:*`).
   The script has to be a plain file in the package, not a symlink.
-- An exact `Bash(<command>)` passes unless its first word can run any program
-  (Security's DOR-3294 list in `ANY_PROGRAM`: shells and interpreters, `npm`,
-  `npx`, `make`, `git`, `find`, `env`, `curl` and the rest), it starts with a
-  path or a variable, or it sets a variable first. A reviewed exception goes in
-  `REVIEWED_COMMANDS`, per package, as its own reviewed diff. Running the
-  package's own script by `${CLAUDE_PLUGIN_ROOT}` is always fine.
-- `Read`/`Grep`/`Glob`/`LS`/`NotebookRead(<path>)` stay inside the project
-  (no `/`, `//`, `~`, `$`, `%`, `\`, `..` or whitespace) and never name a
-  secret file or folder: `.ssh`, `.aws`, `.config`, `.dork`, `.claude*`,
-  `.env*`, `.npmrc`, `.netrc`, `.git-credentials` and the like.
+- Any other exact `Bash(<command>)` starts with a word on `SAFE_COMMANDS`,
+  commands that only read or print (`ls`, `cat`, `head`, `wc`, `grep`, `diff`
+  and a few more). It's an allow-list because a deny-list of "programs that run
+  programs" kept leaking (`python3.12`, `gawk`, `caffeinate -i sh`). The command
+  can't chain, pipe, redirect or substitute, and each argument gets the same
+  checks as a read path. Anything else goes in `REVIEWED_COMMANDS`, per package,
+  as its own reviewed diff, or becomes the package's own script.
+- `Read`/`Grep`/`Glob`/`LS`/`NotebookRead(<path>)` stay inside the project and
+  start with a literal folder (a leading `*` or `**` reaches dot-files). No `/`,
+  `//`, `~`, `$`, `%`, `\`, `..` or whitespace, and no secret file or folder:
+  `.ssh`, `.aws`, `.config`, `.dork`, `.git`, `.claude*`, `.env*`, `.envrc`,
+  `.npmrc`, `.yarnrc*`, `.netrc`, `.git-credentials`, `id_rsa`, `*.pem`,
+  `*.key`, `credentials` and the like.
 - `WebFetch` only as `WebFetch(domain:<one literal host>)`. A bare `WebFetch`
   can send anything anywhere.
 - `<Tool>(<spec>)` for any other tool, with no nested parentheses.
 
 A bare `Read`, `Grep`, `Glob`, `LS` or `NotebookRead` is refused: in plain
-Claude Code a bare read allow reads `~/.ssh` with no prompt. Scope it, as
-`Read(./**)` or `Read(specs/**)`. Flow's bare reads sit in `REVIEWED_COMMANDS`
-until flow moves to `Read(./**)`. `Agent`/`Task` pass bare.
+Claude Code a bare read allow reads `~/.ssh` with no prompt. Scope it to a
+folder, as `Read(specs/**)`. Flow's bare reads sit in `REVIEWED_COMMANDS`
+until flow moves to folder-scoped reads. `Agent`/`Task` pass bare.
 
 It reads grants the way Claude Code does, as well as the way DorkOS does, and
 both readings have to pass. Claude Code strips a BOM, ends frontmatter at the
