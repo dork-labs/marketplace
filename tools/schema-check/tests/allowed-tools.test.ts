@@ -217,6 +217,28 @@ describe('breach', () => {
       'Bash(cp specs/x .claude/settings.json)',
       'Bash(grep -r token .git)',
       'Bash(cat *)',
+      // Security's 15:51 checks: pagers, editors and writers; shell syntax;
+      // globs; grep --include on secret names.
+      'Bash(less x)',
+      'Bash(more x)',
+      'Bash(man ls)',
+      'Bash(vi x)',
+      'Bash(sort -o x y)',
+      'Bash(tee x)',
+      'Bash(split x)',
+      'Bash(cat x; sh)',
+      'Bash(cat x && sh)',
+      'Bash(cat x | sh)',
+      'Bash(cat x > y)',
+      'Bash(cat < x)',
+      'Bash(cat $(x))',
+      'Bash(cat `x`)',
+      'Bash(cat x &)',
+      'Bash(ls specs/?.md)',
+      'Bash(ls specs/[ab].md)',
+      'Bash(ls specs/{a,b})',
+      'Bash(grep --include=.env x specs)',
+      'Bash(grep x specs --include=id_rsa)',
       // Round 5.
       'Bash(uniq specs/a package.json)',
       'Bash(file -C -m specs/magic)',
@@ -470,6 +492,12 @@ describe('checkAllowedTools', () => {
       'plugins[evil].source',
       'plugins[up].source',
     ]);
+  });
+
+  it('refuses a symlinked folder under plugins/, so a path check never resolves through one', () => {
+    const r = fixtureRepo({ 'secrets/id_rsa': 'x', 'plugins/demo/README.md': '# x\n' });
+    symlinkSync(path.join(r, 'secrets'), path.join(r, 'plugins/demo/keys'));
+    expect(checkAllowedTools(r).map((f) => f.file)).toEqual(['plugins/demo/keys']);
   });
 
   it('refuses any symlink under plugins/', () => {

@@ -396,6 +396,8 @@ export function breach(
   // values included (`--file=/x`, `-f/x`). Quotes would hide a path from the
   // check, so an exact command may not use them.
   if (/["']/.test(body)) return 'it uses quotes, which can hide a path from this check';
+  if (/[*?[\]{}]/.test(body))
+    return 'it uses a glob, which the shell expands to paths this check never sees';
   // Recursion walks into .env, .git and .claude, whatever folder it starts in.
   if (
     (first === 'grep' || first === 'diff') &&
