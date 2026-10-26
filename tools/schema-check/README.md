@@ -1,6 +1,6 @@
 # schema-check
 
-Repo-wide CI gate. It checks three things about everything in `plugins/`:
+Repo-wide CI gate. It checks four things about everything in `plugins/`:
 
 1. **Every `SKILL.md` still says what its author meant.** Not just "does it
    parse" — every line the author wrote has to survive the parse still meaning
@@ -9,6 +9,8 @@ Repo-wide CI gate. It checks three things about everything in `plugins/`:
    the DorkOS schema _and_ the Claude Code standard one), `.claude-plugin/dorkos.json`,
    and any plugin's `.dork/manifest.json`.
 3. **Every package states one version.** See [Version agreement](#version-agreement).
+4. **No package grants more than it names.** Every command's and skill's
+   `allowed-tools` holds to a permission floor. See [Allow rules](#allow-rules).
 
 Run it:
 
@@ -46,12 +48,12 @@ trying to switch off.
 
 Four failure modes, four answers:
 
-| What breaks                                      | What catches it                                          |
-| ------------------------------------------------ | -------------------------------------------------------- |
-| A rejected **value** (`permissions: acceptEditz`) | `ScheduleBlockSchema.safeParse` fails                    |
-| A **swallowed** value (`enabled: maybe`)          | Comparing what was written against what the schema kept  |
-| A bad **key** (`permissionz:`, `modle:`)          | Comparison against the schema's own key set              |
-| The **whole block** gone, or `schedul:`           | The list in `src/scheduled-skills.ts`                    |
+| What breaks                                       | What catches it                                         |
+| ------------------------------------------------- | ------------------------------------------------------- |
+| A rejected **value** (`permissions: acceptEditz`) | `ScheduleBlockSchema.safeParse` fails                   |
+| A **swallowed** value (`enabled: maybe`)          | Comparing what was written against what the schema kept |
+| A bad **key** (`permissionz:`, `modle:`)          | Comparison against the schema's own key set             |
+| The **whole block** gone, or `schedul:`           | The list in `src/scheduled-skills.ts`                   |
 
 The second answer is generic on purpose: it compares the raw mapping to the
 parsed one key by key, so it needs no list of which fields degrade and cannot
@@ -119,6 +121,83 @@ CI runs it on every pull request (base against head), on every merge-queue run
 `main` (`before` against `after`). A queue entry's base is the entry ahead of it
 (or `main` when it is first), so two PRs that each bumped a package to the same
 version cannot both merge: the second one fails in the queue.
+
+## Allow rules
+
+A command's or skill's `allowed-tools` runs without asking, so a broad rule is
+a grant to whatever the agent gets steered into. On Claude Code 2.1.300 a bare
+`Write` or `Edit` writes anywhere on disk, `Bash(node:*)` runs `node -e`, and
+`Bash(git log:*)` writes files with `--output`. Flow narrowed its own rules in
+0.56.0; `src/allowed-tools.ts` holds every package to the same floor.
+
+It is an allow-list: a rule passes only when it matches one of these shapes,
+and anything else is refused.
+
+- Only tools on `KNOWN_TOOLS`. A tool nobody has reviewed is refused, bare or
+  with a spec (`Monitor` runs a command and can open a WebSocket). The ones
+  that are a whole shell or every file write are refused bare: `Bash`,
+  `PowerShell`, `Write`, `Edit`, `MultiEdit`, `NotebookEdit`.
+- One MCP tool, `mcp__<server>__<tool>`. A bare server or a `*` is refused.
+- `Edit(<path>)`, which also governs `Write`. The path starts with a literal
+  folder (`specs/**`, `.dork/flow/tmp/**`), never uses `\`, `%`, `$`, `~` or
+  `..`, never names `.git` or `.claude`, and spells every dot-folder out with no
+  wildcard. `Edit(./**)` is allowed only for the files listed in
+  `PROJECT_WRITERS`, and adding one is a security decision that gets its own
+  review.
+- `Bash(<exact command>)`, or a `:*` prefix on one of the package's own scripts
+  by `${CLAUDE_PLUGIN_ROOT}` (`node --experimental-strip-types
+"${CLAUDE_PLUGIN_ROOT}/scripts/x.ts":*` or `${CLAUDE_PLUGIN_ROOT}/scripts/x.sh:*`).
+  The script has to be a plain file in the package, not a symlink.
+- Any other exact `Bash(<command>)` starts with a word on `SAFE_COMMANDS`,
+  commands that only read or print (`ls`, `cat`, `head`, `wc`, `grep` and a
+  few more). It's an allow-list because a deny-list of "programs that run
+  programs" kept leaking (`python3.12`, `gawk`, `caffeinate -i sh`). The command
+  can't chain, pipe, redirect, substitute, quote or glob, and each argument
+  gets the same checks as a read path, short-flag values included
+  (`-fcredentials`). No long options at all, since a value like
+  `--files0-from=` names a file of file names. `grep` takes no `-r`, `-R` or
+  `-d`. Anything else goes in `REVIEWED_COMMANDS`, per package,
+  as its own reviewed diff, or becomes the package's own script.
+- `Read`/`Grep`/`Glob`/`LS`/`NotebookRead(<path>)` stay inside the project and
+  start with a literal folder (a leading `*` or `**` reaches dot-files). No `/`,
+  `//`, `~`, `$`, `%`, `\`, `..` or whitespace, and no secret file or folder:
+  `.ssh`, `.aws`, `.config`, `.dork`, `.git`, `.claude*`, `.env*`, `.envrc`,
+  `.npmrc`, `.yarnrc*`, `.netrc`, `.git-credentials`, `id_rsa`, `*.pem`,
+  `*.key`, `credentials` and the like.
+- `WebFetch` only as `WebFetch(domain:<one literal host>)` with a real
+  top-level domain: no IP addresses (`169.254.169.254`), and no `.local`,
+  `.internal` or `.localhost`. A bare `WebFetch` can send anything anywhere.
+- `<Tool>(<spec>)` for any other known tool, with no nested parentheses.
+
+A bare `Read`, `Grep`, `Glob`, `LS` or `NotebookRead` is refused: in plain
+Claude Code a bare read allow reads `~/.ssh` with no prompt. Scope it to a
+folder, as `Read(specs/**)`. Flow's bare reads sit in `REVIEWED_COMMANDS`
+until flow moves to folder-scoped reads (DOR-3310). `Agent`/`Task` pass bare.
+
+The known limit: a folder-scoped read like `Read(config/**)` still reads a
+secret file inside that folder, such as `config/.env`, because `*` matches
+dot-files. The floor keeps reads off the project's root secrets (`.env`,
+`.git`, `.claude`, `.dork`) and off named secrets anywhere in the path; it
+can't see what a folder happens to hold.
+
+So a read scoped to a folder that often holds secrets (`config`, `secrets`,
+`env`, `deploy`, `infra`, `.github`, `certs`, `keys`, `credentials`, `apps`, `packages`) passes
+but prints a warning, which CI turns into an annotation on the pull request.
+The reviewer confirms nothing secret lives there. It never fails the check.
+
+It reads grants the way Claude Code does, as well as the way DorkOS does, and
+both readings have to pass. Claude Code strips a BOM, ends frontmatter at the
+first `---` anywhere, retries YAML with tabs as spaces, and splits rules with an
+on/off parenthesis flag. It checks every `.md` under `plugins/`, any case and any
+depth, dot folders included, plus `allowedTools` in a `plugin.json` or
+`marketplace.json` command entry. Frontmatter that mentions `allowed-tools` but
+can't be read is an error, not a skip, and so is any symlink under `plugins/`.
+A marketplace entry with a local `source` must point at `./plugins/<name>`, so
+nothing ships from a folder the walk skips. The floor covers packages shipped
+from this repo only: a remote `source` (GitHub, a URL) isn't checked here.
+Also out of scope: a plugin's `hooks.json` (a hook can approve tool calls or
+run commands) and servers in its `.mcp.json`. Both are tracked as follow-ups.
+A folder under `plugins/` this check can't read is an error.
 
 ## Reading a SKILL.md safely
 
