@@ -146,10 +146,22 @@ and anything else is refused.
   by `${CLAUDE_PLUGIN_ROOT}` (`node --experimental-strip-types
   "${CLAUDE_PLUGIN_ROOT}/scripts/x.ts":*` or `${CLAUDE_PLUGIN_ROOT}/scripts/x.sh:*`).
   The script has to be a plain file in the package, not a symlink.
+- An exact `Bash(<command>)` passes unless its first word can run any program
+  (Security's DOR-3294 list in `ANY_PROGRAM`: shells and interpreters, `npm`,
+  `npx`, `make`, `git`, `find`, `env`, `curl` and the rest), it starts with a
+  path or a variable, or it sets a variable first. A reviewed exception goes in
+  `REVIEWED_COMMANDS`, per package, as its own reviewed diff. Running the
+  package's own script by `${CLAUDE_PLUGIN_ROOT}` is always fine.
+- `Read`/`Grep`/`Glob`/`LS`/`NotebookRead(<path>)` stay inside the project
+  (no `/`, `//`, `~`, `$`, `%`, `\`, `..` or whitespace) and never name a
+  secret file or folder: `.ssh`, `.aws`, `.config`, `.dork`, `.claude*`,
+  `.env*`, `.npmrc`, `.netrc`, `.git-credentials` and the like.
+- `WebFetch` only as `WebFetch(domain:<one literal host>)`. A bare `WebFetch`
+  can send anything anywhere.
 - `<Tool>(<spec>)` for any other tool, with no nested parentheses.
 
-`Read`, `WebFetch` and `Agent`/`Task` pass bare on purpose: they don't write
-or run anything themselves.
+A bare `Read`, `Grep`, `Glob` and `Agent`/`Task` still pass: they don't write
+or run anything themselves. Flow's commands use a bare `Read`.
 
 It reads grants the way Claude Code does, as well as the way DorkOS does, and
 both readings have to pass. Claude Code strips a BOM, ends frontmatter at the

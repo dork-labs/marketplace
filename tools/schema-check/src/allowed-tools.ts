@@ -24,7 +24,16 @@
  * - `Bash(<exact command>)`, or a `:*` prefix on one of the package's own
  *   scripts by `${CLAUDE_PLUGIN_ROOT}`, so its arguments reach that script and
  *   never an interpreter. The script has to be a real file in the package.
- * - `<Tool>(<spec>)` for any other tool, e.g. `WebFetch(domain:x)`.
+ * - `Bash(<exact command>)` is refused when its first word can run any
+ *   program ({@link ANY_PROGRAM}: shells, interpreters, package runners,
+ *   `git`, `find`, `xargs`, network tools), unless the exact rule is on
+ *   {@link REVIEWED_COMMANDS}. Its first word has to be a plain name, and the
+ *   command can't chain, pipe, redirect or substitute (Security, round 2).
+ * - `Read`/`Grep`/`Glob(<path>)` only inside the project: never `/`, `//`,
+ *   `~`, `..` or a variable, and never a secret folder or file by name
+ *   (`.ssh`, `.aws`, `.config`, `.dork`, `.claude*`, `.env`; DOR-3299).
+ * - `WebFetch(domain:<literal host>)`, never bare and never a wildcard host.
+ * - `<Tool>(<spec>)` for any other tool.
  *
  * **It reads what Claude Code reads.** Claude Code cuts frontmatter at the
  * first `---` anywhere (after a BOM) and splits rules with an on/off
@@ -34,8 +43,9 @@
  * checked as well. Symlinks anywhere under `plugins/` are refused, since a link
  * can point the check and Claude Code at different files.
  *
- * Deliberately outside the floor: `Read`, `WebFetch` and `Agent`/`Task` pass
- * bare. They don't write or run anything themselves.
+ * Deliberately outside the floor: `Read`, `Grep`, `Glob` and `Agent`/`Task`
+ * pass bare. They don't write, run or send anything themselves. A bare
+ * `WebFetch` no longer passes: it can send what an agent read to any host.
  *
  * @module allowed-tools
  */
@@ -175,6 +185,205 @@ function editBreach(rule: string, target: string, file: string): string | null {
 }
 
 /**
+ * First words that turn "one command" into any program (Security's allow-rule
+ * warn list, DOR-3294): shells and interpreters, package runners that run the
+ * folder's own scripts, tools with an exec option or a hook (`git status` runs
+ * fsmonitor and filters from repo config), and tools that reach the network.
+ * An exact `Bash(...)` rule starting with one of these is refused unless it is
+ * in {@link REVIEWED_COMMANDS}.
+ */
+export const ANY_PROGRAM: ReadonlySet<string> = new Set([
+  // Shells and interpreters.
+  'sh',
+  'bash',
+  'zsh',
+  'fish',
+  'node',
+  'deno',
+  'bun',
+  'python',
+  'python3',
+  'perl',
+  'ruby',
+  'php',
+  'osascript',
+  'env',
+  'exec',
+  'eval',
+  'xargs',
+  'nohup',
+  'time',
+  'timeout',
+  'command',
+  'builtin',
+  'source',
+  '.',
+  'sudo',
+  'doas',
+  'su',
+  'csh',
+  'tcsh',
+  'ksh',
+  'dash',
+  'pwsh',
+  'busybox',
+  'tsx',
+  'ts-node',
+  'lua',
+  'tclsh',
+  'java',
+  'nice',
+  'watch',
+  'script',
+  'screen',
+  'tmux',
+  'parallel',
+  'chroot',
+  'strace',
+  'stdbuf',
+  // Package runners and build tools.
+  'npx',
+  'pnpm',
+  'npm',
+  'yarn',
+  'pip',
+  'pip3',
+  'uv',
+  'uvx',
+  'make',
+  'cargo',
+  'go',
+  'just',
+  'bunx',
+  'pnpx',
+  'corepack',
+  'pipx',
+  'poetry',
+  'gem',
+  'bundle',
+  'rake',
+  'composer',
+  'mvn',
+  'gradle',
+  'cmake',
+  'ninja',
+  'bazel',
+  'turbo',
+  'nx',
+  // Tools with an exec option or a hook.
+  'git',
+  'find',
+  'awk',
+  'sed',
+  'tar',
+  'rsync',
+  'ssh',
+  'docker',
+  'open',
+  'rg',
+  'zip',
+  'vi',
+  'vim',
+  'nvim',
+  'emacs',
+  'less',
+  'more',
+  'man',
+  'ed',
+  'crontab',
+  'at',
+  'launchctl',
+  'systemctl',
+  // Tools that reach the internet.
+  'curl',
+  'wget',
+  'nc',
+  'scp',
+  'gh',
+  'ncat',
+  'netcat',
+  'socat',
+  'sftp',
+  'ftp',
+  'telnet',
+  'aws',
+  'gcloud',
+  'kubectl',
+]);
+
+/**
+ * Exact commands a package may hold even though their first word is on
+ * {@link ANY_PROGRAM}, each reviewed for what it runs. Package folder → rules.
+ * Adding one is a security decision, like {@link PROJECT_WRITERS}.
+ *
+ * Flow's: read-only git plumbing its verify and execute steps need (they run
+ * in the project the person pointed flow at, whose repo config is theirs),
+ * `node --version` for init's check, and init's one dependency install, which
+ * is exact, `--omit=dev`, and into flow's own folder.
+ */
+export const REVIEWED_COMMANDS: ReadonlyMap<string, ReadonlySet<string>> = new Map([
+  [
+    'plugins/flow',
+    new Set([
+      'Bash(git rev-parse --show-toplevel)',
+      'Bash(git rev-parse --git-dir --git-common-dir)',
+      'Bash(git rev-parse HEAD)',
+      'Bash(git status --porcelain)',
+      'Bash(git merge-base HEAD origin/HEAD)',
+      'Bash(git log --oneline origin/HEAD..HEAD)',
+      'Bash(git diff)',
+      'Bash(git diff origin/HEAD...HEAD)',
+      'Bash(git diff --stat origin/HEAD...HEAD)',
+      'Bash(node --version)',
+      'Bash(npm install --omit=dev --prefix "${CLAUDE_PLUGIN_ROOT}")',
+    ]),
+  ],
+]);
+
+/** Tools whose spec is a path they read. */
+const READERS: ReadonlySet<string> = new Set(['Read', 'Grep', 'Glob', 'LS', 'NotebookRead']);
+
+/**
+ * Dot-folders and files that hold secrets (the DOR-3299 list, as names inside
+ * a path). A read rule may never name one.
+ */
+const SECRET_NAMES =
+  /^\.(ssh|aws|gnupg|gpg|config|dork|docker|kube|azure|gcloud|netrc|npmrc|pypirc|pgpass|vault-token|git-credentials|env(\..*)?|claude.*)$/i;
+
+/** An exact run of one of the package's own scripts, with fixed lowercase words after it. */
+const SCRIPT_EXACT =
+  /^(?:node --experimental-strip-types "\$\{CLAUDE_PLUGIN_ROOT\}\/((?:[\w-]+\/)*[\w-]+\.ts)"|"\$\{CLAUDE_PLUGIN_ROOT\}\/((?:[\w-]+\/)*[\w-]+\.sh)"|\$\{CLAUDE_PLUGIN_ROOT\}\/((?:[\w-]+\/)*[\w-]+\.sh))(?: [a-z-]+)*$/;
+
+/** Why a script path inside the package is unusable, or null when it is a plain file. */
+function scriptBreach(pkgDir: string, rel: string, repoRoot: string): string | null {
+  const scriptPath = path.posix.join(pkgDir, rel);
+  try {
+    return lstatSync(path.join(repoRoot, scriptPath)).isFile()
+      ? null
+      : `its script ${scriptPath} is not a plain file`;
+  } catch {
+    return `its script ${scriptPath} does not exist`;
+  }
+}
+
+/**
+ * Why a read rule's path is too broad, or null when it holds: it stays inside
+ * the project and never names a secret folder or file.
+ */
+function readBreach(target: string): string | null {
+  if (/^[/~]|[\\%$\s]|\.\./.test(target)) {
+    return 'the path can leave the project (/, //, ~, $, %, \\, .. or whitespace)';
+  }
+  for (const segment of target.replace(/^\.\//, '').split('/')) {
+    if (SECRET_NAMES.test(segment)) return `it reads ${segment}, which holds secrets`;
+    if (segment.startsWith('.') && isGlob(segment)) {
+      return 'a dot-folder in the path has to be spelled out, with no wildcard';
+    }
+  }
+  return null;
+}
+
+/**
  * Why a rule breaks the floor, or null when it holds.
  *
  * @param rule - One rule, e.g. `Bash(git status)`.
@@ -189,7 +398,11 @@ export function breach(
   repoRoot: string
 ): string | null {
   if (/^[A-Z][A-Za-z]*$/.test(rule)) {
-    return UNSCOPED.has(rule) ? 'it is unscoped, so it allows any command or any file write' : null;
+    if (UNSCOPED.has(rule)) return 'it is unscoped, so it allows any command or any file write';
+    if (rule === 'WebFetch') {
+      return 'a bare WebFetch can send anything anywhere; use WebFetch(domain:<host>)';
+    }
+    return null;
   }
   if (rule.startsWith('mcp__')) {
     return /^mcp__[A-Za-z0-9-]+(?:_[A-Za-z0-9-]+)*__[A-Za-z0-9_-]*[A-Za-z0-9-]$/.test(rule)
@@ -203,24 +416,48 @@ export function breach(
   }
   const [, tool, body] = call;
   if (tool === 'Edit') return editBreach(rule, body, file);
+  if (READERS.has(tool)) return readBreach(body);
+  if (tool === 'WebFetch') {
+    return /^domain:[a-z0-9-]+(\.[a-z0-9-]+)+$/i.test(body)
+      ? null
+      : 'WebFetch has to name one literal host, as WebFetch(domain:<host>)';
+  }
   if (tool === 'PowerShell') return 'PowerShell rules are not allowed; use an exact Bash command';
   if (UNSCOPED.has(tool) && tool !== 'Bash') {
     return 'use Edit(<path>), which governs every file write';
   }
-  if (tool !== 'Bash' || !body.includes('*')) return null;
+  if (tool !== 'Bash') return null;
 
-  const script = SCRIPT_PREFIX.exec(body);
-  if (!script || pkgDir === '') {
-    return "a wildcard is only allowed on one of the package's own scripts, by ${CLAUDE_PLUGIN_ROOT}";
+  if (body.includes('*')) {
+    const script = SCRIPT_PREFIX.exec(body);
+    if (!script || pkgDir === '') {
+      return "a wildcard is only allowed on one of the package's own scripts, by ${CLAUDE_PLUGIN_ROOT}";
+    }
+    return scriptBreach(pkgDir, script[1] ?? script[2] ?? script[3], repoRoot);
   }
-  const scriptPath = path.posix.join(pkgDir, script[1] ?? script[2] ?? script[3]);
-  try {
-    return lstatSync(path.join(repoRoot, scriptPath)).isFile()
-      ? null
-      : `its script ${scriptPath} is not a plain file`;
-  } catch {
-    return `its script ${scriptPath} does not exist`;
+
+  // An exact command. Its own script by plugin root is fine; otherwise the
+  // first word must not be one that runs any program.
+  const script = SCRIPT_EXACT.exec(body);
+  if (script && pkgDir !== '') {
+    return scriptBreach(pkgDir, script[1] ?? script[2] ?? script[3], repoRoot);
   }
+  if (REVIEWED_COMMANDS.get(pkgDir)?.has(rule)) return null;
+  if (/[;&|<>`$\n\r\\]/.test(body)) {
+    return 'it chains, pipes, redirects or substitutes, so it is more than one command';
+  }
+  const first = body.trim().split(/\s+/)[0] ?? '';
+  if (first.includes('=')) {
+    return 'it sets a variable before the command, which can change what runs';
+  }
+  if (!/^[A-Za-z0-9][\w.+-]*$/.test(first)) {
+    return 'its first word is not a plain command name; use a script by ${CLAUDE_PLUGIN_ROOT}';
+  }
+  const name = first.toLowerCase();
+  if (ANY_PROGRAM.has(name)) {
+    return `\`${name}\` can run any program (DOR-3294); add the exact rule to REVIEWED_COMMANDS for review, or use a package script`;
+  }
+  return null;
 }
 
 /** Every `.md` file under `plugins/` (any case), plus every symlink there. */

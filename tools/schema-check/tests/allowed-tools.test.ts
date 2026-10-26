@@ -161,13 +161,107 @@ describe('breach', () => {
       'mcp__dorkos__tasks_list',
       'Edit(specs/**)',
       'Edit(.dork/flow/tmp/**)',
-      'Bash(git status --porcelain)',
+      'Bash(ls -la)',
       'Bash(node --experimental-strip-types "${CLAUDE_PLUGIN_ROOT}/scripts/tool.ts":*)',
       'Bash(node --experimental-strip-types "${CLAUDE_PLUGIN_ROOT}/scripts/tool.ts" selftest:*)',
       'Bash(${CLAUDE_PLUGIN_ROOT}/scripts/run.sh:*)',
     ]) {
       expect(breach(rule, file, pkg, r), rule).toBeNull();
     }
+  });
+
+  it('refuses exact commands whose first word runs any program (DOR-3294)', () => {
+    const r = root();
+    for (const rule of [
+      'Bash(git status)',
+      'Bash(npm test)',
+      'Bash(npx vitest)',
+      'Bash(make)',
+      'Bash(node scripts/x.js)',
+      'Bash(env)',
+      'Bash(find . -name x)',
+      'Bash(xargs rm)',
+      'Bash(sh -c ls)',
+      'Bash(python3 -V)',
+      'Bash("git" status)',
+      'Bash(GIT_DIR=x git status)',
+      'Bash(./scripts/build.sh)',
+      'Bash(/bin/ls)',
+      'Bash(~/bin/x)',
+      'Bash($HOME/x)',
+      'Bash(curl https://example.com)',
+      'Bash(gh pr list)',
+      'Bash("${CLAUDE_PLUGIN_ROOT}/scripts/run.sh)',
+    ]) {
+      expect(breach(rule, file, pkg, r), rule).not.toBeNull();
+    }
+    for (const rule of [
+      'Bash(ls)',
+      'Bash(pwd)',
+      'Bash(node --experimental-strip-types "${CLAUDE_PLUGIN_ROOT}/scripts/tool.ts")',
+      'Bash(node --experimental-strip-types "${CLAUDE_PLUGIN_ROOT}/scripts/tool.ts" check)',
+      'Bash(${CLAUDE_PLUGIN_ROOT}/scripts/run.sh)',
+      'Bash("${CLAUDE_PLUGIN_ROOT}/scripts/run.sh" check)',
+    ]) {
+      expect(breach(rule, file, pkg, r), rule).toBeNull();
+    }
+    expect(breach('Bash(${CLAUDE_PLUGIN_ROOT}/scripts/gone.sh)', file, pkg, r)).toMatch(
+      /does not exist/
+    );
+  });
+
+  it('allows a reviewed any-program command only in its own package', () => {
+    const r = fixtureRepo({});
+    const verify = 'plugins/flow/commands/verify.md';
+    expect(breach('Bash(git status --porcelain)', verify, 'plugins/flow', r)).toBeNull();
+    expect(breach('Bash(git status --porcelain)', file, pkg, r)).not.toBeNull();
+    expect(breach('Bash(git status)', verify, 'plugins/flow', r)).not.toBeNull();
+  });
+
+  it('keeps read rules inside the project and off secrets', () => {
+    const r = root();
+    for (const rule of [
+      'Read(~/.ssh/**)',
+      'Read(/etc/passwd)',
+      'Read(//Users/x/.aws/credentials)',
+      'Read(../other/**)',
+      'Read($HOME/x)',
+      'Read(.env)',
+      'Read(config/.env.local)',
+      'Read(.aws/credentials)',
+      'Read(.config/gh/hosts.yml)',
+      'Read(.dork/**)',
+      'Read(.claude/**)',
+      'Read(.claude.json)',
+      'Read(.npmrc)',
+      'Grep(.git-credentials)',
+      'Glob(.s*/**)',
+      'LS(~)',
+    ]) {
+      expect(breach(rule, file, pkg, r), rule).not.toBeNull();
+    }
+    for (const rule of [
+      'Read(specs/**)',
+      'Grep(src/**)',
+      'Glob(**/*.md)',
+      'Read(.github/workflows/**)',
+    ]) {
+      expect(breach(rule, file, pkg, r), rule).toBeNull();
+    }
+  });
+
+  it('allows WebFetch only for one literal host', () => {
+    const r = root();
+    for (const rule of [
+      'WebFetch',
+      'WebFetch(domain:*)',
+      'WebFetch(domain:*.example.com)',
+      'WebFetch(domain:localhost)',
+      'WebFetch(https://example.com)',
+    ]) {
+      expect(breach(rule, file, pkg, r), rule).not.toBeNull();
+    }
+    expect(breach('WebFetch(domain:docs.example.com)', file, pkg, r)).toBeNull();
   });
 
   it('refuses a wildcard on a script that is a symlink', () => {
