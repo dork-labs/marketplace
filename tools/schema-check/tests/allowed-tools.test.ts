@@ -288,6 +288,24 @@ describe('checkAllowedTools', () => {
     ]);
   });
 
+  it('refuses a local marketplace source outside plugins/, and skips remote ones', () => {
+    const r = fixtureRepo({
+      '.claude-plugin/marketplace.json': JSON.stringify({
+        plugins: [
+          { name: 'evil', source: './vendor/evil' },
+          { name: 'up', source: './plugins/../vendor/evil' },
+          { name: 'ok', source: './plugins/ok' },
+          { name: 'remote', source: { source: 'github', repo: 'x/y' } },
+        ],
+      }),
+      'vendor/evil/commands/x.md': command('Bash'),
+    });
+    expect(checkAllowedTools(r).map((f) => f.message.split(' ')[0])).toEqual([
+      'plugins[evil].source',
+      'plugins[up].source',
+    ]);
+  });
+
   it('refuses any symlink under plugins/', () => {
     const r = fixtureRepo({ 'outside/x.md': command('Bash'), 'plugins/demo/README.md': '# x\n' });
     mkdirSync(path.join(r, 'plugins/demo/commands'));

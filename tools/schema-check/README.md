@@ -158,7 +158,10 @@ on/off parenthesis flag. It checks every `.md` under `plugins/`, any case and an
 depth, dot folders included, plus `allowedTools` in a `plugin.json` or
 `marketplace.json` command entry. Frontmatter that mentions `allowed-tools` but
 can't be read is an error, not a skip, and so is any symlink under `plugins/`.
-Plugin hooks that approve tool calls are out of scope.
+A marketplace entry with a local `source` must point at `./plugins/<name>`, so
+nothing ships from a folder the walk skips. The floor covers packages shipped
+from this repo only: a remote `source` (GitHub, a URL) isn't checked here, and
+neither are plugin hooks that approve tool calls.
 
 ## Reading a SKILL.md safely
 

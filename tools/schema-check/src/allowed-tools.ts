@@ -357,8 +357,8 @@ function readJson(abs: string): unknown {
 /** The package folder a marketplace entry's `source` points at, or ''. */
 function sourceDir(source: unknown): string {
   if (typeof source !== 'string') return '';
-  const match = /^(?:\.\/)?(plugins\/[\w.-]+)\/?$/.exec(source);
-  return match && !match[1].endsWith('/..') ? match[1] : '';
+  const match = /^(?:\.\/)?(plugins\/[\w-][\w.-]*)\/?$/.exec(source);
+  return match ? match[1] : '';
 }
 
 /**
@@ -416,6 +416,14 @@ export function collectGrants(repoRoot: string): { grants: Grant[]; findings: Fi
   const marketplace = readJson(path.join(repoRoot, marketplaceFile)) as
     { plugins?: { name?: string; source?: unknown; commands?: unknown }[] } | undefined;
   for (const entry of Array.isArray(marketplace?.plugins) ? marketplace.plugins : []) {
+    // A local source outside plugins/ would install a package this walk never
+    // reads. Remote sources (an object) aren't in this repo and aren't checked.
+    if (typeof entry?.source === 'string' && sourceDir(entry.source) === '') {
+      findings.push({
+        file: marketplaceFile,
+        message: `plugins[${String(entry?.name)}].source is ${JSON.stringify(entry.source)}; a local package lives at ./plugins/<name>, where its grants are checked.`,
+      });
+    }
     const found = manifestGrants(
       marketplaceFile,
       sourceDir(entry?.source),
