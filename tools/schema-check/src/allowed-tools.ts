@@ -391,10 +391,13 @@ export function breach(
   if (!SAFE_COMMANDS.has(first)) {
     return `\`${first}\` is not on SAFE_COMMANDS (commands that only read or print); add the exact rule to REVIEWED_COMMANDS for review, or use a package script`;
   }
-  // Its arguments get the same path checks a Read or Edit rule would.
+  // Its arguments get the same path checks a Read or Edit rule would, flag
+  // values included (`--file=/x`, `-f/x`). Quotes would hide a path from the
+  // check, so an exact command may not use them.
+  if (/["']/.test(body)) return 'it uses quotes, which can hide a path from this check';
   for (const arg of body.trim().split(/\s+/).slice(1)) {
-    const value = arg.replace(/^-[\w-]*=/, '');
-    if (/^-/.test(value)) continue;
+    const value = arg.replace(/^-+[A-Za-z-]*=?/, '');
+    if (value === '' || /^\d+$/.test(value)) continue;
     const why = readBreach(value);
     if (why) return `its argument ${arg} reaches past the project: ${why}`;
   }

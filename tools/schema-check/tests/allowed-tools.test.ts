@@ -217,6 +217,9 @@ describe('breach', () => {
       'Bash(cp specs/x .claude/settings.json)',
       'Bash(grep -r token .git)',
       'Bash(cat *)',
+      'Bash(head -f/etc/hosts)',
+      'Bash(cat "~/.ssh/id_rsa")',
+      "Bash(cat '.env')",
     ]) {
       expect(breach(rule, file, pkg, r), rule).not.toBeNull();
     }
@@ -226,6 +229,8 @@ describe('breach', () => {
       'Bash(ls -la specs)',
       'Bash(wc -l specs/a.md)',
       'Bash(grep -n TODO src/index.ts)',
+      'Bash(tail -n 20 specs/log.md)',
+      'Bash(head -5 specs/a.md)',
       'Bash(node --experimental-strip-types "${CLAUDE_PLUGIN_ROOT}/scripts/tool.ts")',
       'Bash(node --experimental-strip-types "${CLAUDE_PLUGIN_ROOT}/scripts/tool.ts" check)',
       'Bash(${CLAUDE_PLUGIN_ROOT}/scripts/run.sh)',
