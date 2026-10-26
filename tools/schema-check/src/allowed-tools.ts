@@ -159,7 +159,11 @@ function editBreach(rule: string, target: string, file: string): string | null {
     return 'the path uses \\, %, $, ~ or .., so it can leave the project';
   }
   const segments = target.replace(/^\.\//, '').split('/');
-  if (segments[0] === '' || isGlob(segments[0])) {
+  if (/\s/.test(target)) return 'the path has whitespace, which gitignore rules drop';
+  if (segments.some((segment) => segment === '.' || segment === '')) {
+    return 'the path has an empty or . segment';
+  }
+  if (isGlob(segments[0])) {
     return 'the path has to start with a literal folder, like specs/**';
   }
   for (const segment of segments) {
@@ -288,20 +292,57 @@ export interface Grant {
   rules: string[];
 }
 
-/** Grants in a manifest's `commands` entries (`allowedTools: string[]`). */
-function manifestGrants(file: string, pkgDir: string, commands: unknown, prefix: string): Grant[] {
-  if (commands === null || typeof commands !== 'object' || Array.isArray(commands)) return [];
+/**
+ * Grants in a manifest's `commands`, and findings for entries this check can't
+ * see into. An entry's `allowedTools` is checked as rules. Inline `content`, or
+ * a source that isn't a `.md` file, carries frontmatter the walk never reads, so
+ * both are refused.
+ */
+function manifestGrants(
+  file: string,
+  pkgDir: string,
+  commands: unknown,
+  prefix: string
+): { grants: Grant[]; findings: Finding[] } {
   const grants: Grant[] = [];
-  for (const [name, entry] of Object.entries(commands as Record<string, unknown>)) {
-    if (entry === null || typeof entry !== 'object' || !('allowedTools' in entry)) continue;
-    grants.push({
+  const findings: Finding[] = [];
+  if (commands == null) return { grants, findings };
+  const notMarkdown = (where: string, source: unknown): void => {
+    if (typeof source === 'string' && /\.md$/i.test(source)) return;
+    findings.push({
       file,
-      pkgDir,
-      where: `${prefix}commands.${name}.allowedTools`,
-      rules: splitRules((entry as Record<string, unknown>).allowedTools),
+      message: `${where} names ${JSON.stringify(source)}, not a .md file, so its frontmatter can't be checked.`,
     });
+  };
+  if (typeof commands === 'string' || Array.isArray(commands)) {
+    for (const source of [commands].flat()) notMarkdown(`${prefix}commands`, source);
+    return { grants, findings };
   }
-  return grants;
+  if (typeof commands !== 'object') return { grants, findings };
+  for (const [name, entry] of Object.entries(commands as Record<string, unknown>)) {
+    const where = `${prefix}commands.${name}`;
+    if (entry === null || typeof entry !== 'object') {
+      notMarkdown(where, entry);
+      continue;
+    }
+    const fields = entry as Record<string, unknown>;
+    if ('content' in fields) {
+      findings.push({
+        file,
+        message: `${where} has inline content; ship the command as a .md file so its frontmatter is checked.`,
+      });
+    }
+    if ('source' in fields) notMarkdown(`${where}.source`, fields.source);
+    if ('allowedTools' in fields) {
+      grants.push({
+        file,
+        pkgDir,
+        where: `${where}.allowedTools`,
+        rules: splitRules(fields.allowedTools),
+      });
+    }
+  }
+  return { grants, findings };
 }
 
 /** Read a JSON file, or undefined when it is missing or unreadable (other checks report that). */
@@ -344,10 +385,13 @@ export function collectGrants(repoRoot: string): { grants: Grant[]; findings: Fi
     const text = readFileSync(path.join(repoRoot, file), 'utf8');
     const readings = [readAsDorkOS(text), readAsClaudeCode(text)];
     const failed = readings.find((r): r is { error: string } => 'error' in r);
-    if (failed && /^\uFEFF?---/.test(text) && /allowed[-_]?tools/i.test(text)) {
+    // Any frontmatter that won't parse is an error, mention or not: Claude Code
+    // has its own YAML reader and repairs, so a block this check can't read may
+    // still be a grant to it (an escaped key, a duplicate key).
+    if (failed && /^\uFEFF?---/.test(text)) {
       findings.push({
         file,
-        message: `It mentions allowed-tools, but its frontmatter cannot be read, so its rules can't be checked (${failed.error}).`,
+        message: `Its frontmatter cannot be read, so any allowed-tools in it can't be checked (${failed.error}).`,
       });
     }
     const rules = readings.flatMap((r) => ('found' in r && r.found ? splitRules(r.value) : []));
@@ -364,20 +408,22 @@ export function collectGrants(repoRoot: string): { grants: Grant[]; findings: Fi
     const pkgDir = path.posix.join(PLUGINS_DIR, name);
     const file = `${pkgDir}/.claude-plugin/plugin.json`;
     const manifest = readJson(path.join(repoRoot, file)) as { commands?: unknown } | undefined;
-    grants.push(...manifestGrants(file, pkgDir, manifest?.commands, ''));
+    const found = manifestGrants(file, pkgDir, manifest?.commands, '');
+    grants.push(...found.grants);
+    findings.push(...found.findings);
   }
   const marketplaceFile = '.claude-plugin/marketplace.json';
   const marketplace = readJson(path.join(repoRoot, marketplaceFile)) as
     { plugins?: { name?: string; source?: unknown; commands?: unknown }[] } | undefined;
   for (const entry of Array.isArray(marketplace?.plugins) ? marketplace.plugins : []) {
-    grants.push(
-      ...manifestGrants(
-        marketplaceFile,
-        sourceDir(entry?.source),
-        entry?.commands,
-        `plugins[${String(entry?.name)}].`
-      )
+    const found = manifestGrants(
+      marketplaceFile,
+      sourceDir(entry?.source),
+      entry?.commands,
+      `plugins[${String(entry?.name)}].`
     );
+    grants.push(...found.grants);
+    findings.push(...found.findings);
   }
   return { grants, findings };
 }

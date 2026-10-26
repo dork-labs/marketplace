@@ -140,6 +140,12 @@ describe('breach', () => {
       'Bash---',
       'bAsh(*)',
       'Bash("${CLAUDE_PLUGIN_ROOT}/scripts/run.sh:*)',
+      // Round 2: gitignore drops trailing spaces, so `.claude ` is `.claude`.
+      'Edit(.claude )',
+      'Edit(.git )',
+      'Edit(src/.claude )',
+      'Edit(.)',
+      'Edit(specs//x)',
     ]) {
       expect(breach(rule, file, pkg, r), rule).not.toBeNull();
     }
@@ -289,6 +295,37 @@ describe('checkAllowedTools', () => {
     const found = checkAllowedTools(r);
     expect(found.map((f) => f.file)).toEqual(['plugins/demo/commands/link.md']);
     expect(found[0].message).toMatch(/symlink/);
+  });
+
+  it('reports any frontmatter it cannot read, even with the key escaped', () => {
+    const r = fixtureRepo({
+      'plugins/demo/commands/dupkey.md':
+        '---\ndescription: x\ndescription: y\n"allowed\\x2dtools": Bash\n---\n',
+      'plugins/demo/commands/colon.md': '---\ndescription: a: b\n"allowed\\x2dtools": Bash\n---\n',
+      'plugins/demo/commands/fine.md': '---\ndescription: fine\n---\n',
+    });
+    expect(
+      checkAllowedTools(r)
+        .map((f) => path.basename(f.file))
+        .sort()
+    ).toEqual(['colon.md', 'dupkey.md']);
+  });
+
+  it('refuses command entries whose frontmatter the walk never reads', () => {
+    const r = fixtureRepo({
+      'plugins/demo/.claude-plugin/plugin.json': JSON.stringify({
+        name: 'demo',
+        commands: {
+          inline: { content: '---\nallowed-tools: Bash\n---\n' },
+          txt: { source: './cmds/x.txt' },
+          ok: { source: './commands/ok.md' },
+        },
+      }),
+    });
+    expect(checkAllowedTools(r).map((f) => f.message.split(' ')[0])).toEqual([
+      'commands.inline',
+      'commands.txt.source',
+    ]);
   });
 
   it("reports frontmatter it can't read rather than skipping it", () => {
