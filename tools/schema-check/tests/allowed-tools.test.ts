@@ -1,4 +1,4 @@
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -7,7 +7,7 @@ import {
   PROJECT_WRITERS,
   breach,
   checkAllowedTools,
-  findAllowedToolsFiles,
+  collectGrants,
   splitRules,
 } from '../src/allowed-tools.ts';
 
@@ -39,7 +39,7 @@ const command = (allowed: string): string =>
 
 describe('the real repository', () => {
   it('finds every flow command and passes', () => {
-    const files = findAllowedToolsFiles(repoRoot);
+    const files = collectGrants(repoRoot).grants.map((g) => g.file);
     expect(
       files.filter((f) => f.startsWith('plugins/flow/commands/')).length
     ).toBeGreaterThanOrEqual(15);
@@ -47,7 +47,7 @@ describe('the real repository', () => {
   });
 
   it('lists only files that exist and still need the grant', () => {
-    const files = new Set(findAllowedToolsFiles(repoRoot));
+    const files = new Set(collectGrants(repoRoot).grants.map((g) => g.file));
     for (const file of PROJECT_WRITERS.keys()) expect(files.has(file), file).toBe(true);
   });
 });
@@ -115,6 +115,31 @@ describe('breach', () => {
       'Bash(node --import ./evil.mjs "${CLAUDE_PLUGIN_ROOT}/scripts/tool.ts":*)',
       'mcp__dorkos__*',
       'mcp__*',
+      // Found by the adversarial review: shapes a deny-list let through.
+      'mcp__linear',
+      'mcp__linear__',
+      'PowerShell',
+      'PowerShell(Get-ChildItem)',
+      'MultiEdit',
+      'MultiEdit(specs/**)',
+      'Edit(*)',
+      'Edit(./*)',
+      'Edit(**/*)',
+      'Edit(./**/*)',
+      'Edit(*/**)',
+      'Edit(//etc/**)',
+      'Edit(.claude*/settings.json)',
+      'Edit(.c*/**)',
+      'Edit(.[c]laude/settings.json)',
+      'Edit(**/.git*/**)',
+      'Edit(specs/.git/hooks/**)',
+      'Edit(specs/.c*/**)',
+      'Edit(specs\\..\\x)',
+      'Edit(%2e%2e/x)',
+      'Edit(a(b)',
+      'Bash---',
+      'bAsh(*)',
+      'Bash("${CLAUDE_PLUGIN_ROOT}/scripts/run.sh:*)',
     ]) {
       expect(breach(rule, file, pkg, r), rule).not.toBeNull();
     }
@@ -137,6 +162,14 @@ describe('breach', () => {
     ]) {
       expect(breach(rule, file, pkg, r), rule).toBeNull();
     }
+  });
+
+  it('refuses a wildcard on a script that is a symlink', () => {
+    const r = root();
+    symlinkSync('/bin/bash', path.join(r, 'plugins/demo/scripts/shell.sh'));
+    expect(breach('Bash(${CLAUDE_PLUGIN_ROOT}/scripts/shell.sh:*)', file, pkg, r)).toMatch(
+      /not a plain file/
+    );
   });
 
   it("refuses a wildcard on a script the package doesn't ship", () => {
@@ -189,6 +222,73 @@ describe('checkAllowedTools', () => {
       'plugins/demo/node_modules/x/commands/c.md': command('Bash'),
     });
     expect(checkAllowedTools(r)).toEqual([]);
+  });
+
+  it('reads the frontmatter the way Claude Code does, too', () => {
+    const r = fixtureRepo({
+      'plugins/demo/commands/bom.md': '\uFEFF---\nallowed-tools: Bash\n---\n',
+      'plugins/demo/commands/trailspace.md': '--- \nallowed-tools: Bash\n---\n',
+      'plugins/demo/commands/quotedkey.md': '---\n"allowed-tools": Bash\n---\n',
+      'plugins/demo/commands/flowmap.md': '---\n{"allowed-tools": "Bash"}\n---\n',
+      'plugins/demo/commands/explicitkey.md': '---\n? allowed-tools\n: Bash\n---\n',
+      'plugins/demo/commands/indent.md': '---\n  allowed-tools: Bash\n---\n',
+      'plugins/demo/commands/tab.md': '---\n\tallowed-tools: Bash\n---\n',
+      'plugins/demo/commands/dashclose.md': '---\nallowed-tools: Read, Bash---\n---\n',
+      'plugins/demo/commands/parens.md': command('Read, Edit(a(b) Bash'),
+      'plugins/demo/skills/s/SKILL.MD': '---\nname: s\nallowed-tools: Bash\n---\n',
+      'plugins/demo/commands/a/b/c/d/e/f/g/h/deep.md': command('Bash'),
+    });
+    const flagged = new Set(
+      checkAllowedTools(r)
+        .filter((f) => f.message.includes('`Bash`'))
+        .map((f) => path.basename(f.file))
+    );
+    expect([...flagged].sort()).toEqual(
+      [
+        'bom.md',
+        'trailspace.md',
+        'quotedkey.md',
+        'flowmap.md',
+        'explicitkey.md',
+        'indent.md',
+        'tab.md',
+        'dashclose.md',
+        'parens.md',
+        'SKILL.MD',
+        'deep.md',
+      ].sort()
+    );
+  });
+
+  it('checks allowedTools in plugin.json and marketplace.json command entries', () => {
+    const r = fixtureRepo({
+      'plugins/demo/.claude-plugin/plugin.json': JSON.stringify({
+        name: 'demo',
+        commands: { x: { source: './x.md', allowedTools: ['Read', 'Bash'] } },
+      }),
+      '.claude-plugin/marketplace.json': JSON.stringify({
+        plugins: [
+          {
+            name: 'demo',
+            source: './plugins/demo',
+            commands: { y: { source: './y.md', allowedTools: ['Edit'] } },
+          },
+        ],
+      }),
+    });
+    expect(checkAllowedTools(r).map((f) => `${f.file}: ${f.message.split(' rule')[0]}`)).toEqual([
+      'plugins/demo/.claude-plugin/plugin.json: commands.x.allowedTools',
+      '.claude-plugin/marketplace.json: plugins[demo].commands.y.allowedTools',
+    ]);
+  });
+
+  it('refuses any symlink under plugins/', () => {
+    const r = fixtureRepo({ 'outside/x.md': command('Bash'), 'plugins/demo/README.md': '# x\n' });
+    mkdirSync(path.join(r, 'plugins/demo/commands'));
+    symlinkSync(path.join(r, 'outside/x.md'), path.join(r, 'plugins/demo/commands/link.md'));
+    const found = checkAllowedTools(r);
+    expect(found.map((f) => f.file)).toEqual(['plugins/demo/commands/link.md']);
+    expect(found[0].message).toMatch(/symlink/);
   });
 
   it("reports frontmatter it can't read rather than skipping it", () => {

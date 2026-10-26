@@ -10,42 +10,63 @@
  * package in the marketplace to the same floor, so the next package can't
  * ship what flow took out.
  *
- * The floor:
+ * **It is an allow-list, not a deny-list.** A rule passes only when it matches
+ * one of the shapes below; anything else, including a shape nobody thought of,
+ * is refused:
  *
- * - No bare `Bash`, `Write`, `Edit` or `NotebookEdit`, and no lowercase tool
- *   names (they are a different, unmatched spelling, not a scoped rule).
- * - No MCP wildcard (`mcp__server__*`): name each tool.
- * - File writes are `Edit(<path>)`, which also governs `Write`. The path stays
- *   inside the project, and out of `.git` and `.claude`. Writing anywhere in
- *   the project (`Edit(./**)`) needs an entry in {@link PROJECT_WRITERS}.
- * - A `Bash` rule is an exact command, or a prefix (`:*`) that names one of the
- *   package's own scripts by `${CLAUDE_PLUGIN_ROOT}`, so its arguments reach
- *   that script and never an interpreter. The script has to exist.
+ * - A bare tool name (`Read`, `Grep`), except the ones that are a whole shell
+ *   or every file write: {@link UNSCOPED}.
+ * - One MCP tool, `mcp__<server>__<tool>`. A bare server, or any `*`, is every
+ *   tool on it.
+ * - `Edit(<path>)`, which also governs `Write`, on a path that starts with a
+ *   literal folder and never names `.git` or `.claude` (see `editBreach`).
+ *   `Edit(./**)` only for the files in {@link PROJECT_WRITERS}.
+ * - `Bash(<exact command>)`, or a `:*` prefix on one of the package's own
+ *   scripts by `${CLAUDE_PLUGIN_ROOT}`, so its arguments reach that script and
+ *   never an interpreter. The script has to be a real file in the package.
+ * - `<Tool>(<spec>)` for any other tool, e.g. `WebFetch(domain:x)`.
  *
- * Read-only tools (`Read`, `Grep`, `Glob`, ...) and exact commands pass: this
- * floor is about grants that reach past what the author named.
+ * **It reads what Claude Code reads.** Claude Code cuts frontmatter at the
+ * first `---` anywhere (after a BOM) and splits rules with an on/off
+ * parenthesis flag; DorkOS's own reader cuts at a line. Every file is read both
+ * ways and both readings must pass, and rules are split both ways too. Grants
+ * in a `plugin.json` or `marketplace.json` command entry (`allowedTools`) are
+ * checked as well. Symlinks anywhere under `plugins/` are refused, since a link
+ * can point the check and Claude Code at different files.
+ *
+ * Deliberately outside the floor: `Read`, `WebFetch` and `Agent`/`Task` pass
+ * bare. They don't write or run anything themselves.
  *
  * @module allowed-tools
  */
 
-import { existsSync, readFileSync, readdirSync } from 'node:fs';
+import { lstatSync, readFileSync, readdirSync } from 'node:fs';
 import path from 'node:path';
-import {
-  NonMappingFrontmatterError,
-  UnsupportedFrontmatterError,
-  parseFrontmatter,
-} from '@dorkos/skills/frontmatter';
-import { PLUGINS_DIR } from './versions.ts';
+import yaml from 'js-yaml';
+import { parseFrontmatter } from '@dorkos/skills/frontmatter';
+import { PLUGINS_DIR, pluginDirs } from './versions.ts';
 import type { Finding } from './validate.ts';
 
-/** How deep to descend under `plugins/` looking for Markdown files. */
-const MAX_DEPTH = 8;
+/**
+ * Tools that, bare, run anything or write anywhere. `MultiEdit` is an older
+ * name Claude Code still knows; `PowerShell` is a shell like `Bash`.
+ */
+export const UNSCOPED: ReadonlySet<string> = new Set([
+  'Bash',
+  'PowerShell',
+  'Write',
+  'Edit',
+  'MultiEdit',
+  'NotebookEdit',
+]);
 
 /**
  * Files that may write anywhere inside the project, because changing the
  * project's code is their job. Repo-relative path → the one rule allowed.
  * Adding a line here is a security decision: it shows up in review as its own
- * diff, which is the point.
+ * diff, which is the point. `Edit(./**)` also reaches `.git` and `.claude`;
+ * Claude Code refuses those itself (measured on 2.1.300), and this list is the
+ * only place such a rule is allowed.
  */
 export const PROJECT_WRITERS: ReadonlyMap<string, string> = new Map([
   ['plugins/flow/commands/init.md', 'Edit(./**)'],
@@ -55,22 +76,18 @@ export const PROJECT_WRITERS: ReadonlyMap<string, string> = new Map([
 
 /**
  * The one shape a `Bash` wildcard may have: one of the package's own scripts,
- * by plugin root, optionally with one fixed subcommand. Group 1 or 2 is the
+ * by plugin root, optionally with one fixed subcommand. Group 1, 2 or 3 is the
  * script's path inside the package. Every path segment is `[\w-]+`, so `..`
- * and other tricks can't appear.
+ * and other tricks can't appear, and quotes come in pairs.
  */
 const SCRIPT_PREFIX =
-  /^(?:node --experimental-strip-types "\$\{CLAUDE_PLUGIN_ROOT\}\/((?:[\w-]+\/)*[\w-]+\.ts)"(?: [a-z-]+)?|"?\$\{CLAUDE_PLUGIN_ROOT\}\/((?:[\w-]+\/)*[\w-]+\.sh)"?):\*$/;
+  /^(?:node --experimental-strip-types "\$\{CLAUDE_PLUGIN_ROOT\}\/((?:[\w-]+\/)*[\w-]+\.ts)"(?: [a-z-]+)?|"\$\{CLAUDE_PLUGIN_ROOT\}\/((?:[\w-]+\/)*[\w-]+\.sh)"|\$\{CLAUDE_PLUGIN_ROOT\}\/((?:[\w-]+\/)*[\w-]+\.sh)):\*$/;
 
-/**
- * Split an `allowed-tools` value into rules: on commas or whitespace between
- * rules, never inside a rule's parentheses. A YAML list is taken item by item.
- *
- * @param value - Whatever sat under the `allowed-tools` key.
- */
-export function splitRules(value: unknown): string[] {
-  if (Array.isArray(value)) return value.flatMap((item) => splitRules(item));
-  if (typeof value !== 'string') return [];
+/** How Claude Code cuts frontmatter: from a leading `---` to the first `---` anywhere. */
+const CC_FRONTMATTER = /^---\s*\n([\s\S]*?)---\s*\n?/;
+
+/** Split on commas or whitespace between rules, counting parentheses by depth. */
+function splitByDepth(value: string): string[] {
   const out: string[] = [];
   let depth = 0;
   let current = '';
@@ -89,11 +106,76 @@ export function splitRules(value: unknown): string[] {
 }
 
 /**
+ * Split the way Claude Code does: `(` sets a flag, `)` clears it, and a comma
+ * or a space splits only while the flag is clear. `Edit(a(b) Bash` is one rule
+ * by depth and two here, the second a bare `Bash`.
+ */
+function splitByFlag(value: string): string[] {
+  const out: string[] = [];
+  let inside = false;
+  let current = '';
+  const flush = (): void => {
+    if (current.trim() !== '') out.push(current.trim());
+    current = '';
+  };
+  for (const c of value) {
+    if (c === '(') inside = true;
+    if (c === ')') inside = false;
+    if (!inside && (c === ',' || c === ' ')) flush();
+    else current += c;
+  }
+  flush();
+  return out;
+}
+
+/**
+ * Every rule an `allowed-tools` value can mean, under either way of splitting
+ * it. A YAML list is taken item by item.
+ *
+ * @param value - Whatever sat under the `allowed-tools` key.
+ */
+export function splitRules(value: unknown): string[] {
+  if (Array.isArray(value)) return [...new Set(value.flatMap((item) => splitRules(item)))];
+  if (value == null) return [];
+  const text = String(value);
+  return [...new Set([...splitByDepth(text), ...splitByFlag(text)])];
+}
+
+/** True when a path segment is a glob, not a literal name. */
+const isGlob = (segment: string): boolean => /[*?[\]{}!]/.test(segment);
+
+/**
+ * Why an `Edit(...)` path is too broad, or null when it holds. The path has to
+ * start with a literal folder, never name `.git` or `.claude`, and spell every
+ * dot-folder out, so no glob can reach them.
+ */
+function editBreach(rule: string, target: string, file: string): string | null {
+  if (/^(\.\/)?\*\*$/.test(target)) {
+    return PROJECT_WRITERS.get(file) === rule
+      ? null
+      : 'only files listed in PROJECT_WRITERS (tools/schema-check/src/allowed-tools.ts) may write anywhere in the project';
+  }
+  if (/[\\%$~]|\.\./.test(target)) {
+    return 'the path uses \\, %, $, ~ or .., so it can leave the project';
+  }
+  const segments = target.replace(/^\.\//, '').split('/');
+  if (segments[0] === '' || isGlob(segments[0])) {
+    return 'the path has to start with a literal folder, like specs/**';
+  }
+  for (const segment of segments) {
+    if (!segment.startsWith('.')) continue;
+    if (isGlob(segment)) return 'a dot-folder in the path has to be spelled out, with no wildcard';
+    if (/^\.(git|claude)$/i.test(segment)) return 'it writes into .git or .claude';
+  }
+  return null;
+}
+
+/**
  * Why a rule breaks the floor, or null when it holds.
  *
  * @param rule - One rule, e.g. `Bash(git status)`.
  * @param file - Repo-relative path of the file that declares it.
- * @param pkgDir - Repo-relative path of the package the file belongs to.
+ * @param pkgDir - Repo-relative path of the package the rule belongs to.
  * @param repoRoot - Absolute path to the repository root, to check scripts exist.
  */
 export function breach(
@@ -102,111 +184,219 @@ export function breach(
   pkgDir: string,
   repoRoot: string
 ): string | null {
-  if (/^(Bash|Write|Edit|NotebookEdit)$/i.test(rule)) {
-    return 'it is unscoped, so it allows any command or any file write';
+  if (/^[A-Z][A-Za-z]*$/.test(rule)) {
+    return UNSCOPED.has(rule) ? 'it is unscoped, so it allows any command or any file write' : null;
   }
-  if (/^(bash|write|edit|notebookedit)\b/.test(rule)) {
-    return 'tool names are capitalised (Bash, Edit), so this rule never matches';
+  if (rule.startsWith('mcp__')) {
+    return /^mcp__[A-Za-z0-9-]+(?:_[A-Za-z0-9-]+)*__[A-Za-z0-9_-]*[A-Za-z0-9-]$/.test(rule)
+      ? null
+      : 'it names a whole MCP server or a wildcard; name each tool, as mcp__<server>__<tool>';
   }
-  if (/^mcp__.*\*/.test(rule)) return 'MCP wildcards are not allowed; name each tool';
-  if (/^(Write|NotebookEdit)\(/.test(rule)) {
+
+  const call = /^([A-Z][A-Za-z]*)\(([^()]*)\)$/s.exec(rule);
+  if (!call) {
+    return 'it is not a rule shape this check knows: Tool, Tool(spec) with no nested parentheses, or mcp__server__tool';
+  }
+  const [, tool, body] = call;
+  if (tool === 'Edit') return editBreach(rule, body, file);
+  if (tool === 'PowerShell') return 'PowerShell rules are not allowed; use an exact Bash command';
+  if (UNSCOPED.has(tool) && tool !== 'Bash') {
     return 'use Edit(<path>), which governs every file write';
   }
+  if (tool !== 'Bash' || !body.includes('*')) return null;
 
-  const edit = /^Edit\((.*)\)$/s.exec(rule);
-  if (edit) {
-    const target = edit[1];
-    if (/^[/~]|\$|\.\.|(^|\/)\.claude(\/|$)|(^|\/)\.git(\/|$)/i.test(target)) {
-      return 'it writes outside the project, or into .git or .claude';
-    }
-    if (/^(\.\/)?\*\*$/.test(target) && PROJECT_WRITERS.get(file) !== rule) {
-      return 'only files listed in PROJECT_WRITERS (tools/schema-check/src/allowed-tools.ts) may write anywhere in the project';
-    }
-    return null;
-  }
-
-  const bash = /^Bash\((.*)\)$/s.exec(rule);
-  if (!bash) return null;
-  const body = bash[1];
-  if (!body.includes('*')) return null;
   const script = SCRIPT_PREFIX.exec(body);
-  if (!script) {
+  if (!script || pkgDir === '') {
     return "a wildcard is only allowed on one of the package's own scripts, by ${CLAUDE_PLUGIN_ROOT}";
   }
-  const scriptPath = path.posix.join(pkgDir, script[1] ?? script[2]);
-  if (!existsSync(path.join(repoRoot, scriptPath))) {
+  const scriptPath = path.posix.join(pkgDir, script[1] ?? script[2] ?? script[3]);
+  try {
+    return lstatSync(path.join(repoRoot, scriptPath)).isFile()
+      ? null
+      : `its script ${scriptPath} is not a plain file`;
+  } catch {
     return `its script ${scriptPath} does not exist`;
   }
-  return null;
 }
 
-/** True when a file opens with frontmatter that mentions `allowed-tools`. */
-function declaresAllowedTools(text: string): boolean {
-  if (!/^---\r?\n/.test(text)) return false;
-  const end = text.indexOf('\n---', 3);
-  const head = end === -1 ? text : text.slice(0, end);
-  return /^allowed-tools\s*:/m.test(head);
-}
-
-/**
- * Every Markdown file under `plugins/` that declares `allowed-tools`, by
- * repo-relative path. Dot folders are walked too (a package may ship
- * `.claude/commands/`); only `node_modules` and `.git` are skipped.
- *
- * @param repoRoot - Absolute path to the repository root.
- */
-export function findAllowedToolsFiles(repoRoot: string): string[] {
-  const found: string[] = [];
-  const walk = (relDir: string, depth: number): void => {
-    if (depth > MAX_DEPTH) return;
-    const absDir = path.join(repoRoot, relDir);
-    if (!existsSync(absDir)) return;
-    for (const entry of readdirSync(absDir, { withFileTypes: true })) {
+/** Every `.md` file under `plugins/` (any case), plus every symlink there. */
+function walkPlugins(repoRoot: string): { markdown: string[]; symlinks: string[] } {
+  const markdown: string[] = [];
+  const symlinks: string[] = [];
+  const walk = (relDir: string): void => {
+    let entries;
+    try {
+      entries = readdirSync(path.join(repoRoot, relDir), { withFileTypes: true });
+    } catch {
+      return;
+    }
+    for (const entry of entries) {
       if (entry.name === 'node_modules' || entry.name === '.git') continue;
       const rel = path.posix.join(relDir, entry.name);
-      if (entry.isDirectory()) walk(rel, depth + 1);
-      else if (
-        entry.isFile() &&
-        entry.name.endsWith('.md') &&
-        declaresAllowedTools(readFileSync(path.join(repoRoot, rel), 'utf8'))
-      ) {
-        found.push(rel);
-      }
+      if (entry.isSymbolicLink()) symlinks.push(rel);
+      else if (entry.isDirectory()) walk(rel);
+      else if (entry.isFile() && /\.md$/i.test(entry.name)) markdown.push(rel);
     }
   };
-  walk(PLUGINS_DIR, 0);
-  return found.sort();
+  walk(PLUGINS_DIR);
+  return { markdown: markdown.sort(), symlinks: symlinks.sort() };
+}
+
+/** What a file's frontmatter says under `allowed-tools`, read one way. */
+type Reading = { found: true; value: unknown } | { found: false } | { error: string };
+
+/** Pick `allowed-tools` out of a parsed frontmatter value. */
+function pick(data: unknown): Reading {
+  if (data === null || typeof data !== 'object' || Array.isArray(data)) return { found: false };
+  return 'allowed-tools' in data
+    ? { found: true, value: (data as Record<string, unknown>)['allowed-tools'] }
+    : { found: false };
+}
+
+/** DorkOS's reader: frontmatter ends at a line that starts with `---`. */
+function readAsDorkOS(text: string): Reading {
+  try {
+    return pick(parseFrontmatter(text).data);
+  } catch (cause) {
+    return { error: (cause as Error).message };
+  }
+}
+
+/** Claude Code's reader: strip a BOM, cut at the first `---`, YAML, then YAML with tabs as spaces. */
+function readAsClaudeCode(text: string): Reading {
+  const block = CC_FRONTMATTER.exec(text.replace(/^﻿/, ''));
+  if (!block) return { found: false };
+  const detabbed = block[1].replace(/^\t+/gm, (tabs) => '  '.repeat(tabs.length));
+  for (const source of [block[1], detabbed]) {
+    try {
+      return pick(yaml.load(source));
+    } catch {
+      // Try the next form.
+    }
+  }
+  return { error: 'it is not valid YAML' };
+}
+
+/** One place that grants tools, and every rule it can mean. */
+export interface Grant {
+  /** Repo-relative path of the file declaring it. */
+  file: string;
+  /** The package the rules run in, for checking scripts; '' when unknown. */
+  pkgDir: string;
+  /** Where in a JSON manifest, e.g. `commands.x.allowedTools`. */
+  where?: string;
+  rules: string[];
+}
+
+/** Grants in a manifest's `commands` entries (`allowedTools: string[]`). */
+function manifestGrants(file: string, pkgDir: string, commands: unknown, prefix: string): Grant[] {
+  if (commands === null || typeof commands !== 'object' || Array.isArray(commands)) return [];
+  const grants: Grant[] = [];
+  for (const [name, entry] of Object.entries(commands as Record<string, unknown>)) {
+    if (entry === null || typeof entry !== 'object' || !('allowedTools' in entry)) continue;
+    grants.push({
+      file,
+      pkgDir,
+      where: `${prefix}commands.${name}.allowedTools`,
+      rules: splitRules((entry as Record<string, unknown>).allowedTools),
+    });
+  }
+  return grants;
+}
+
+/** Read a JSON file, or undefined when it is missing or unreadable (other checks report that). */
+function readJson(abs: string): unknown {
+  try {
+    return JSON.parse(readFileSync(abs, 'utf8'));
+  } catch {
+    return undefined;
+  }
+}
+
+/** The package folder a marketplace entry's `source` points at, or ''. */
+function sourceDir(source: unknown): string {
+  if (typeof source !== 'string') return '';
+  const match = /^(?:\.\/)?(plugins\/[\w.-]+)\/?$/.exec(source);
+  return match && !match[1].endsWith('/..') ? match[1] : '';
 }
 
 /**
- * Check every `allowed-tools` rule in every package against the floor.
+ * Every place under `plugins/` (and in the marketplace index) that grants
+ * tools, plus findings for what can't be read: symlinks, and frontmatter that
+ * mentions `allowed-tools` but won't parse.
  *
  * @param repoRoot - Absolute path to the repository root.
- * @returns One finding per broad rule, or per file whose rules can't be read.
  */
-export function checkAllowedTools(repoRoot: string): Finding[] {
+export function collectGrants(repoRoot: string): { grants: Grant[]; findings: Finding[] } {
   const findings: Finding[] = [];
-  for (const file of findAllowedToolsFiles(repoRoot)) {
-    const pkgDir = file.split('/').slice(0, 2).join('/');
-    let data: Record<string, unknown>;
-    try {
-      data = parseFrontmatter(readFileSync(path.join(repoRoot, file), 'utf8')).data;
-    } catch (cause) {
-      const why =
-        cause instanceof UnsupportedFrontmatterError || cause instanceof NonMappingFrontmatterError
-          ? cause.message
-          : (cause as Error).message;
+  const grants: Grant[] = [];
+  const { markdown, symlinks } = walkPlugins(repoRoot);
+
+  for (const file of symlinks) {
+    findings.push({
+      file,
+      message:
+        'It is a symlink. Packages ship real files, so this check and Claude Code read the same thing.',
+    });
+  }
+
+  for (const file of markdown) {
+    const text = readFileSync(path.join(repoRoot, file), 'utf8');
+    const readings = [readAsDorkOS(text), readAsClaudeCode(text)];
+    const failed = readings.find((r): r is { error: string } => 'error' in r);
+    if (failed && /^\uFEFF?---/.test(text) && /allowed[-_]?tools/i.test(text)) {
       findings.push({
         file,
-        message: `It mentions allowed-tools, but its frontmatter cannot be read, so its rules can't be checked (${why}).`,
+        message: `It mentions allowed-tools, but its frontmatter cannot be read, so its rules can't be checked (${failed.error}).`,
       });
-      continue;
     }
-    if (!('allowed-tools' in data)) continue;
-    for (const rule of splitRules(data['allowed-tools'])) {
-      const why = breach(rule, file, pkgDir, repoRoot);
-      if (why)
-        findings.push({ file, message: `allowed-tools rule \`${rule}\` is too broad: ${why}.` });
+    const rules = readings.flatMap((r) => ('found' in r && r.found ? splitRules(r.value) : []));
+    if (rules.length > 0) {
+      grants.push({
+        file,
+        pkgDir: file.split('/').slice(0, 2).join('/'),
+        rules: [...new Set(rules)],
+      });
+    }
+  }
+
+  for (const name of pluginDirs(repoRoot)) {
+    const pkgDir = path.posix.join(PLUGINS_DIR, name);
+    const file = `${pkgDir}/.claude-plugin/plugin.json`;
+    const manifest = readJson(path.join(repoRoot, file)) as { commands?: unknown } | undefined;
+    grants.push(...manifestGrants(file, pkgDir, manifest?.commands, ''));
+  }
+  const marketplaceFile = '.claude-plugin/marketplace.json';
+  const marketplace = readJson(path.join(repoRoot, marketplaceFile)) as
+    { plugins?: { name?: string; source?: unknown; commands?: unknown }[] } | undefined;
+  for (const entry of Array.isArray(marketplace?.plugins) ? marketplace.plugins : []) {
+    grants.push(
+      ...manifestGrants(
+        marketplaceFile,
+        sourceDir(entry?.source),
+        entry?.commands,
+        `plugins[${String(entry?.name)}].`
+      )
+    );
+  }
+  return { grants, findings };
+}
+
+/**
+ * Check every grant in every package against the floor.
+ *
+ * @param repoRoot - Absolute path to the repository root.
+ * @returns One finding per broad rule, per file whose grants can't be read, and per symlink.
+ */
+export function checkAllowedTools(repoRoot: string): Finding[] {
+  const { grants, findings } = collectGrants(repoRoot);
+  for (const grant of grants) {
+    const label = grant.where ? `${grant.where} rule` : 'allowed-tools rule';
+    for (const rule of grant.rules) {
+      const why = breach(rule, grant.file, grant.pkgDir, repoRoot);
+      if (why) {
+        findings.push({ file: grant.file, message: `${label} \`${rule}\` is too broad: ${why}.` });
+      }
     }
   }
   return findings;

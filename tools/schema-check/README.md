@@ -128,23 +128,37 @@ A command's or skill's `allowed-tools` runs without asking, so a broad rule is
 a grant to whatever the agent gets steered into. On Claude Code 2.1.300 a bare
 `Write` or `Edit` writes anywhere on disk, `Bash(node:*)` runs `node -e`, and
 `Bash(git log:*)` writes files with `--output`. Flow narrowed its own rules in
-0.56.0; `src/allowed-tools.ts` holds every package to the same floor:
+0.56.0; `src/allowed-tools.ts` holds every package to the same floor.
 
-- No bare `Bash`, `Write`, `Edit` or `NotebookEdit`, no lowercase tool names,
-  and no MCP wildcard (`mcp__server__*`).
-- File writes are `Edit(<path>)`, which also governs `Write`. The path stays in
-  the project and out of `.git` and `.claude`. `Edit(./**)` is allowed only for
-  the files listed in `PROJECT_WRITERS`, and adding one is a security decision
-  that should get its own review.
-- A `Bash` rule is an exact command, or a `:*` prefix on one of the package's
-  own scripts by `${CLAUDE_PLUGIN_ROOT}` (`node --experimental-strip-types
+It is an allow-list: a rule passes only when it matches one of these shapes,
+and anything else is refused.
+
+- A bare tool name, except the ones that are a whole shell or every file write:
+  `Bash`, `PowerShell`, `Write`, `Edit`, `MultiEdit`, `NotebookEdit`.
+- One MCP tool, `mcp__<server>__<tool>`. A bare server or a `*` is refused.
+- `Edit(<path>)`, which also governs `Write`. The path starts with a literal
+  folder (`specs/**`, `.dork/flow/tmp/**`), never uses `\`, `%`, `$`, `~` or
+  `..`, never names `.git` or `.claude`, and spells every dot-folder out with no
+  wildcard. `Edit(./**)` is allowed only for the files listed in
+  `PROJECT_WRITERS`, and adding one is a security decision that gets its own
+  review.
+- `Bash(<exact command>)`, or a `:*` prefix on one of the package's own scripts
+  by `${CLAUDE_PLUGIN_ROOT}` (`node --experimental-strip-types
   "${CLAUDE_PLUGIN_ROOT}/scripts/x.ts":*` or `${CLAUDE_PLUGIN_ROOT}/scripts/x.sh:*`).
-  The script has to exist in the package.
+  The script has to be a plain file in the package, not a symlink.
+- `<Tool>(<spec>)` for any other tool, with no nested parentheses.
 
-Read-only tools (`Read`, `Grep`, `Glob`) and exact commands pass. Every `.md`
-under `plugins/` whose frontmatter has `allowed-tools` is checked, dot folders
-included; frontmatter that mentions it but can't be read is an error, never a
-skip.
+`Read`, `WebFetch` and `Agent`/`Task` pass bare on purpose: they don't write
+or run anything themselves.
+
+It reads grants the way Claude Code does, as well as the way DorkOS does, and
+both readings have to pass. Claude Code strips a BOM, ends frontmatter at the
+first `---` anywhere, retries YAML with tabs as spaces, and splits rules with an
+on/off parenthesis flag. It checks every `.md` under `plugins/`, any case and any
+depth, dot folders included, plus `allowedTools` in a `plugin.json` or
+`marketplace.json` command entry. Frontmatter that mentions `allowed-tools` but
+can't be read is an error, not a skip, and so is any symlink under `plugins/`.
+Plugin hooks that approve tool calls are out of scope.
 
 ## Reading a SKILL.md safely
 
