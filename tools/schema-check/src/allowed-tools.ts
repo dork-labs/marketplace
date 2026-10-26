@@ -210,13 +210,11 @@ export const SAFE_COMMANDS: ReadonlySet<string> = new Set([
   'basename',
   'dirname',
   'stat',
-  'file',
   'diff',
   'cmp',
   'cut',
   'tr',
   'grep',
-  'uniq',
   'shasum',
   'md5',
   'cksum',
@@ -301,6 +299,9 @@ function readBreach(target: string): string | null {
     return 'the path can leave the project (/, //, ~, $, %, \\, .. or whitespace)';
   }
   const segments = target.replace(/^\.\//, '').split('/');
+  if (segments.some((segment) => segment === '.' || segment === '')) {
+    return 'the path has an empty or . segment, which means the whole folder';
+  }
   if (isGlob(segments[0])) {
     return 'the path has to start with a literal folder, like specs/**; a leading wildcard reaches dot-files';
   }
@@ -395,6 +396,15 @@ export function breach(
   // values included (`--file=/x`, `-f/x`). Quotes would hide a path from the
   // check, so an exact command may not use them.
   if (/["']/.test(body)) return 'it uses quotes, which can hide a path from this check';
+  // Recursion walks into .env, .git and .claude, whatever folder it starts in.
+  if (
+    (first === 'grep' || first === 'diff') &&
+    /(^|\s)(-[A-Za-z]*[rR][A-Za-z]*|--recursive|--dereference-recursive|-d|--directories(=\S*)?)(\s|$)/.test(
+      body
+    )
+  ) {
+    return `${first} may not recurse, since that reads secret dot-files`;
+  }
   for (const arg of body.trim().split(/\s+/).slice(1)) {
     const value = arg.replace(/^-+[A-Za-z-]*=?/, '');
     if (value === '' || /^\d+$/.test(value)) continue;
