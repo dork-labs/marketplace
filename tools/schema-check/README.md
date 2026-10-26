@@ -147,11 +147,12 @@ and anything else is refused.
 "${CLAUDE_PLUGIN_ROOT}/scripts/x.ts":*` or `${CLAUDE_PLUGIN_ROOT}/scripts/x.sh:*`).
   The script has to be a plain file in the package, not a symlink.
 - Any other exact `Bash(<command>)` starts with a word on `SAFE_COMMANDS`,
-  commands that only read or print (`ls`, `cat`, `head`, `wc`, `grep`, `diff`
-  and a few more). It's an allow-list because a deny-list of "programs that run
+  commands that only read or print (`ls`, `cat`, `head`, `wc`, `grep` and a
+  few more). It's an allow-list because a deny-list of "programs that run
   programs" kept leaking (`python3.12`, `gawk`, `caffeinate -i sh`). The command
-  can't chain, pipe, redirect or substitute, and each argument gets the same
-  checks as a read path. Anything else goes in `REVIEWED_COMMANDS`, per package,
+  can't chain, pipe, redirect, substitute, quote or glob, and each argument
+  gets the same checks as a read path. `grep` takes no long options and no
+  `-r`, `-R` or `-d`. Anything else goes in `REVIEWED_COMMANDS`, per package,
   as its own reviewed diff, or becomes the package's own script.
 - `Read`/`Grep`/`Glob`/`LS`/`NotebookRead(<path>)` stay inside the project and
   start with a literal folder (a leading `*` or `**` reaches dot-files). No `/`,
@@ -166,7 +167,13 @@ and anything else is refused.
 A bare `Read`, `Grep`, `Glob`, `LS` or `NotebookRead` is refused: in plain
 Claude Code a bare read allow reads `~/.ssh` with no prompt. Scope it to a
 folder, as `Read(specs/**)`. Flow's bare reads sit in `REVIEWED_COMMANDS`
-until flow moves to folder-scoped reads. `Agent`/`Task` pass bare.
+until flow moves to folder-scoped reads (DOR-3310). `Agent`/`Task` pass bare.
+
+The known limit: a folder-scoped read like `Read(config/**)` still reads a
+secret file inside that folder, such as `config/.env`, because `*` matches
+dot-files. The floor keeps reads off the project's root secrets (`.env`,
+`.git`, `.claude`, `.dork`) and off named secrets anywhere in the path; it
+can't see what a folder happens to hold.
 
 It reads grants the way Claude Code does, as well as the way DorkOS does, and
 both readings have to pass. Claude Code strips a BOM, ends frontmatter at the

@@ -210,7 +210,6 @@ export const SAFE_COMMANDS: ReadonlySet<string> = new Set([
   'basename',
   'dirname',
   'stat',
-  'diff',
   'cmp',
   'cut',
   'tr',
@@ -297,6 +296,9 @@ function scriptBreach(pkgDir: string, rel: string, repoRoot: string): string | n
 function readBreach(target: string): string | null {
   if (/^[/~]|[\\%$\s]|\.\./.test(target)) {
     return 'the path can leave the project (/, //, ~, $, %, \\, .. or whitespace)';
+  }
+  if (/[?[\]{}]/.test(target)) {
+    return 'the path uses ?, [], or {}, which can match a secret name this check never sees; use * or **';
   }
   const segments = target.replace(/^\.\//, '').split('/');
   if (segments.some((segment) => segment === '.' || segment === '')) {
@@ -399,13 +401,10 @@ export function breach(
   if (/[*?[\]{}]/.test(body))
     return 'it uses a glob, which the shell expands to paths this check never sees';
   // Recursion walks into .env, .git and .claude, whatever folder it starts in.
-  if (
-    (first === 'grep' || first === 'diff') &&
-    /(^|\s)(-[A-Za-z]*[rR][A-Za-z]*|--recursive|--dereference-recursive|-d|--directories(=\S*)?)(\s|$)/.test(
-      body
-    )
-  ) {
-    return `${first} may not recurse, since that reads secret dot-files`;
+  // grep takes any unique prefix of a long option (--recur) and digits inside
+  // a short cluster (-1r), so it gets no long options and no r, R or d at all.
+  if (first === 'grep' && /(^|\s)(--\S*|-[\w]*[rRd][\w]*)(\s|$)/.test(body)) {
+    return 'grep may not take long options or -r, -R or -d, since recursion reads secret dot-files';
   }
   for (const arg of body.trim().split(/\s+/).slice(1)) {
     const value = arg.replace(/^-+[A-Za-z-]*=?/, '');
