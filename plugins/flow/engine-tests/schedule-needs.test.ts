@@ -192,7 +192,7 @@ function ruleGaps(rule: string): string[] {
     ],
     [
       'a person-does-it answer stops the run',
-      /never\s+do the step yourself: hand the item to a person/,
+      /never\s+do the step yourself: let go of it with `flow release <id> --to none --json`[\s\S]*hand it to a person \(`assignToHuman`\), and stop/,
     ],
     ['parking may be refused too', /Parking writes to the tracker, so it may\s+be refused too/],
     ['notes it in the journal', /`flow note --kind friction/],
@@ -315,6 +315,10 @@ describe('a refused tool ends the run red, in every scheduled skill', () => {
       )
     ).toEqual(['its default pick never grants']);
     expect(ruleGaps(rule.replace(/never\s+do the step yourself/, 'do the step'))).toEqual([
+      'a person-does-it answer stops the run',
+    ]);
+    // Handing over without letting go leaves it claimed, and recovery resumes it.
+    expect(ruleGaps(rule.replace('`flow release <id> --to none --json`', '`flow note`'))).toEqual([
       'a person-does-it answer stops the run',
     ]);
   });

@@ -10,11 +10,11 @@ it asks. Flow's shipped schedules keep their careful permission setting (`defaul
 and retro, Accept edits for the drain tick), and flow never raises it. Instead each one lists the
 read tools it needs under `metadata.flow-needs` in its `SKILL.md`:
 
-| Schedule      | What it needs to read                                                                                                                      |
-| ------------- | ------------------------------------------------------------------------------------------------------------------------------------------ |
-| `flow-triage` | flow's settings check, `flow snapshot`, `flow prs`, `git worktree list --porcelain`, `git ls-remote --heads origin`, flow's files, tracker |
-| `flow-groom`  | flow's settings check, `flow snapshot`, `flow audit`, `flow next`, `flow prs`, flow's files, tracker                                       |
-| `flow-retro`  | flow's settings check, `flow selftest --json`, `flow retro --json`, flow's files                                                           |
+| Schedule      | What it needs to read                                                                                                                                           |
+| ------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `flow-triage` | flow's settings check, `flow snapshot`, `flow prs`, `git worktree list --porcelain`, `git ls-remote --heads origin`, flow's files, tracker                      |
+| `flow-groom`  | flow's settings check, `flow snapshot`, `flow audit`, `flow next`, `flow prs`, flow's files, tracker                                                            |
+| `flow-retro`  | flow's settings check, `flow selftest --json`, `flow retro --json`, flow's files                                                                                |
 | `flow-drain`  | flow's settings check, `flow next`, `flow prs`, `flow autonomy`, flow's recovery and involvement checks, `git worktree list --porcelain`, flow's files, tracker |
 
 Every list also has `flow note --kind friction`, so a run can write a refusal down in flow's journal.
@@ -45,7 +45,8 @@ Each of those ends the way the next section says, so you see where it stopped.
 **Listing a tool grants nothing.** Until DorkOS lets a schedule carry an allow list of its own, allow
 the tools for your project: add each one to `permissions.allow` in the project's
 `.claude/settings.json`, with `${CLAUDE_PLUGIN_ROOT}` written out as the folder flow is installed in.
-Flow's settings check prints that folder as `flowRoot`. In a `Read` rule, a path from the top of the
+To find that folder, ask your agent to run flow's settings check (`scripts/config-files.ts` in
+flow's folder) and read `flowRoot` from its output. In a `Read` rule, a path from the top of the
 disk starts with two slashes, as in `Read(//path/to/flow/**)`; with one slash it is read as a path
 inside your project and never matches. A reinstall can move flow's folder, so check these rules after
 each one.
@@ -61,8 +62,9 @@ A refused tool never ends the run quietly, and never as done. The run:
 1. Stops starting new steps, and never retries the tool or reaches for another one to do the same
    job.
 2. Tries to park the item it was working on with one question: allow the tool, or a person does the
-   step. Flow's own pick is always the second, and that answer hands the item to a person. Parking writes to the tracker, so it happens only if you allowed that; if not, the report
-   names the item instead.
+   step. Triage parks without a pick; elsewhere flow's own pick is always the second, and that
+   answer lets go of the item and hands it to a person. Parking writes to the tracker, so it
+   happens only if you allowed that; if not, the report names the item instead.
 3. Notes the refusal in flow's journal, so the weekly retro sees it.
 4. Ends with a report whose first line is `FLOW RUN NEEDS YOU: refused <tool> at step <n>`.
 
