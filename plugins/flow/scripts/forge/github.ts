@@ -685,25 +685,6 @@ export function headArrival(
 }
 
 /**
- * The latest of one ISO time per line, or `null` when there is none.
- *
- * @param out - The lines.
- * @returns The latest time.
- * @throws {ForgeError} On a line that is not a time.
- */
-export function latestTime(out: string): string | null {
-  let latest: string | null = null;
-  for (const line of out.split('\n')) {
-    const time = line.trim().replace(/^"|"$/g, '');
-    if (time === '') continue;
-    if (!Number.isFinite(Date.parse(time)))
-      throw new ForgeError(`gh returned "${time}", not a time`);
-    if (latest === null || Date.parse(time) > Date.parse(latest)) latest = time;
-  }
-  return latest;
-}
-
-/**
  * Build the GitHub forge for one repository.
  *
  * @param options - The repository, the process runner and the clock.

@@ -8,7 +8,6 @@ import { describe, expect, it } from 'vitest';
 import {
   createGithubForge,
   headArrival,
-  latestTime,
   parseForcePushes,
   parseLabelledAt,
 } from '../../scripts/forge/github.ts';
@@ -185,14 +184,6 @@ describe('label history and when the head arrived', () => {
     ).toBeNull();
     expect(parseLabelledAt('', 'qa-go')).toBeNull();
     expect(() => parseLabelledAt('{"event":"labeled"}', 'qa-go')).toThrow(ForgeError);
-  });
-
-  it('the latest of the times is the one kept', () => {
-    expect(latestTime('"2026-09-03T00:00:00Z"\n2026-09-01T00:00:00Z\n')).toBe(
-      '2026-09-03T00:00:00Z'
-    );
-    expect(latestTime('')).toBeNull();
-    expect(() => latestTime('soon')).toThrow(ForgeError);
   });
 
   it('a suite a labeled workflow makes after the label does not move the arrival', () => {
