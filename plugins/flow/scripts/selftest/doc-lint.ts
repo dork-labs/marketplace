@@ -170,9 +170,10 @@ export function countWords(text: string): number {
 
 /**
  * The words a file's budget counts: all of it except a command's
- * `allowed-tools:` line. That line is a permission list the harness reads, not
- * prose an agent reads, and narrowing a broad rule to exact ones makes it
- * longer; counting it would make the ratchet fight a security fix.
+ * `allowed-tools:` line and a scheduled skill's `metadata.flow-needs` list.
+ * Both are permission lists the harness or a person reads, not prose an agent
+ * reads, and narrowing a broad rule to exact ones makes them longer; counting
+ * them would make the ratchet fight a security fix.
  *
  * @param text - A corpus file's text.
  * @returns The words its budget counts.
@@ -180,7 +181,9 @@ export function countWords(text: string): number {
 export function budgetedWords(text: string): number {
   const front = /^---\n[\s\S]*?\n---\n/.exec(text);
   if (front === null) return countWords(text);
-  const kept = front[0].replace(/^allowed-tools:.*$/m, '');
+  const kept = front[0]
+    .replace(/^allowed-tools:.*$/m, '')
+    .replace(/^ {2}flow-needs:\n(?: {4}- .*\n)*/m, '');
   return countWords(kept + text.slice(front[0].length));
 }
 

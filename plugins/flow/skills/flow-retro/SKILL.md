@@ -8,14 +8,24 @@ schedule:
   enabled: false
   max-runtime: 20m
   permissions: default
+metadata:
+  flow-needs:
+    - 'Bash(node --experimental-strip-types "${CLAUDE_PLUGIN_ROOT}/scripts/config-files.ts")'
+    - 'Bash(node --experimental-strip-types "${CLAUDE_PLUGIN_ROOT}/scripts/flow.ts" note --kind friction:*)'
+    - 'Bash(node --experimental-strip-types "${CLAUDE_PLUGIN_ROOT}/scripts/flow.ts" selftest --json)'
+    - 'Bash(node --experimental-strip-types "${CLAUDE_PLUGIN_ROOT}/scripts/flow.ts" retro --json)'
+    - 'Read(${CLAUDE_PLUGIN_ROOT}/**)'
+    - 'Read(.dork/flow/**)'
 ---
 
 `<flow-root>` is two folders above this file's `realpath`.
 
 The schedulable **weekly retro**: flow reads its own journal and self-test
-results and files what should change in flow itself. Off until you approve it on the Schedules page, or point your own scheduler at it.
+results and files what should change in flow itself. Switched off until you approve it on the Schedules page.
 
 `flow` below means `node --experimental-strip-types "<flow-root>/scripts/flow.ts"`.
+
+**Refused tool:** `<flow-root>/skills/flow-drain/refused-tool.md`.
 
 Each firing:
 

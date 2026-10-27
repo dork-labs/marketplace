@@ -128,7 +128,7 @@ function releaseGaps(triage: string): string[] {
     ['skips work that may live in another repo', /lives in this repo[\s\S]*skip it and report it/],
     ['matches the id in any case', /Match its id in any case/],
     ['checks worktrees by command', /git worktree list --porcelain/],
-    ['checks pushed branches by command', /git ls-remote --heads origin/],
+    ['never asks the remote about branches', /A branch pushed with no pull request isn't checked/],
     [
       'checks open PRs on this host',
       /No open pull request on this repo's host[\s\S]*scripts\/flow\.ts" prs --json/,
@@ -239,7 +239,7 @@ describe('both schedules ship and are documented', () => {
     ['skips work that may live in another repo', /lives in this repo[\s\S]*skip it and report it/],
     ['matches the id in any case', /Match its id in any case/],
     ['checks worktrees by command', /git worktree list --porcelain/],
-    ['checks pushed branches by command', /git ls-remote --heads origin/],
+    ['never asks the remote about branches', /A branch pushed with no pull request isn't checked/],
     [
       'checks open PRs on this host',
       /No open pull request on this repo's host[\s\S]*scripts\/flow\.ts" prs --json/,
@@ -250,7 +250,11 @@ describe('both schedules ship and are documented', () => {
     ],
     ['does not restore readiness', /Do not restore `agent\/ready`/],
   ])('the release guard bites when it drops: %s', (label, cut) => {
-    const triage = read('skills/flow-triage/SKILL.md').replace(cut, 'x');
+    // Cut inside the release step: the same commands also sit in the
+    // frontmatter's `metadata.flow-needs` list, which this guard does not read.
+    const skill = read('skills/flow-triage/SKILL.md');
+    const at = skill.indexOf('**Release stale claims');
+    const triage = skill.slice(0, at) + skill.slice(at).replace(cut, 'x');
     expect(releaseGaps(triage)).toEqual([label]);
   });
 
