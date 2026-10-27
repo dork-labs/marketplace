@@ -101,7 +101,7 @@ function forgeFor(prs: OpenPr[], worlds: Record<number, PrWorld>) {
     async labelledAt(n: number, label: string) {
       return worlds[n].labelledAt?.[label] ?? null;
     },
-    async commitSeenAt() {
+    async headPushedAt() {
       return PUSHED;
     },
     async behindBy(_base: string, _sha: string) {
@@ -152,7 +152,7 @@ describe('flow sweep', () => {
       1: { files: ['src/a.ts'], labelledAt: allLabels },
     });
     const guard = recordingGuard();
-    const r = await flow(['sweep'], forge, { guard });
+    const r = await flow(['sweep', '--arm'], forge, { guard });
     expect(r.code, r.stderr).toBe(0);
     expect(r.json.results).toMatchObject([{ number: 1, outcome: 'armed', head: HEAD }]);
     expect(guard.requests).toMatchObject([{ pr: 1, reviewedSha: HEAD, preArm: 'defer' }]);
@@ -164,7 +164,7 @@ describe('flow sweep', () => {
       2: { files: ['src/a.ts'], labelledAt: { 'security-reviewed': BEFORE, 'qa-go': AFTER } },
     });
     const guard = recordingGuard();
-    const r = await flow(['sweep'], forge, { guard });
+    const r = await flow(['sweep', '--arm'], forge, { guard });
     expect(r.json.results).toMatchObject([
       { number: 2, outcome: 'not-cleared', reason: 'security-label-stale' },
     ]);
@@ -177,7 +177,7 @@ describe('flow sweep', () => {
     const { forge, armed } = forgeFor([open(3)], {
       3: { files: ['src/a.ts'], labelledAt: allLabels, checks: [{ name: 'ci', bucket: 'fail' }] },
     });
-    const r = await flow(['sweep'], forge, { guard: recordingGuard() });
+    const r = await flow(['sweep', '--arm'], forge, { guard: recordingGuard() });
     expect(r.json.results).toMatchObject([{ outcome: 'not-cleared', reason: 'checks-not-green' }]);
     expect(armed).toEqual([]);
   });
@@ -191,7 +191,7 @@ describe('flow sweep', () => {
       },
       5: { files: ['src/a.ts'], labelledAt: allLabels, checks: [] },
     });
-    const r = await flow(['sweep'], forge, { guard: recordingGuard() });
+    const r = await flow(['sweep', '--arm'], forge, { guard: recordingGuard() });
     expect(r.json.results.map((x: { reason: string }) => x.reason)).toEqual([
       'checks-not-green',
       'checks-not-green',
@@ -202,7 +202,7 @@ describe('flow sweep', () => {
     const { forge, armed } = forgeFor([open(6)], {
       6: { files: ['src/a.ts'], labelledAt: allLabels },
     });
-    const r = await flow(['sweep'], forge, {
+    const r = await flow(['sweep', '--arm'], forge, {
       guard: recordingGuard(() => refusal('held-by-label')),
     });
     expect(r.json.results).toMatchObject([{ outcome: 'refused', reason: 'held-by-label' }]);
@@ -214,7 +214,7 @@ describe('flow sweep', () => {
       7: { files: ['package-lock.json'], labelledAt: { 'security-reviewed': AFTER } },
       8: { files: ['package-lock.json'], labelledAt: { 'qa-go': AFTER } },
     });
-    const r = await flow(['sweep'], forge, { guard: recordingGuard() });
+    const r = await flow(['sweep', '--arm'], forge, { guard: recordingGuard() });
     expect(r.json.results).toMatchObject([
       { number: 7, outcome: 'armed', route: { class: 'light' } },
       { number: 8, outcome: 'not-cleared', reason: 'security-label-missing' },
@@ -226,7 +226,7 @@ describe('flow sweep', () => {
     const { forge } = forgeFor([open(9)], {
       9: { files: ['apps/client/src/Button.tsx'], labelledAt: allLabels },
     });
-    const r = await flow(['sweep'], forge, {
+    const r = await flow(['sweep', '--arm'], forge, {
       guard: recordingGuard(),
       config: { review: { designPaths: ['apps/client/**'] } },
     });
@@ -240,10 +240,26 @@ describe('flow sweep', () => {
       10: { files: ['src/a.ts'] },
       11: { files: ['src/a.ts'], labelledAt: allLabels, queued: true },
     });
-    const r = await flow(['sweep'], forge, { guard: recordingGuard() });
+    const r = await flow(['sweep', '--arm'], forge, { guard: recordingGuard() });
     expect(r.json.results).toMatchObject([
       { number: 11, outcome: 'not-cleared', reason: 'queued' },
     ]);
+  });
+
+  it('arms nothing unless drain.armAutoMerge is on or --arm is passed', async () => {
+    const { forge, armed } = forgeFor([open(13)], {
+      13: { files: ['src/a.ts'], labelledAt: allLabels },
+    });
+    const guard = recordingGuard();
+    const r = await flow(['sweep'], forge, { guard });
+    expect(r.json.results).toMatchObject([{ outcome: 'would-arm' }]);
+    expect(guard.requests).toEqual([]);
+    expect(armed).toEqual([]);
+    temp?.cleanup();
+    temp = undefined;
+    const on = await flow(['sweep'], forge, { guard, config: { drain: { armAutoMerge: true } } });
+    expect(on.json.results).toMatchObject([{ outcome: 'armed' }]);
+    expect(armed).toEqual([[13, HEAD]]);
   });
 
   it('--dry-run arms nothing', async () => {
@@ -251,7 +267,7 @@ describe('flow sweep', () => {
       12: { files: ['src/a.ts'], labelledAt: allLabels },
     });
     const guard = recordingGuard();
-    const r = await flow(['sweep', '--dry-run'], forge, { guard });
+    const r = await flow(['sweep', '--arm', '--dry-run'], forge, { guard });
     expect(r.json.results).toMatchObject([{ outcome: 'would-arm' }]);
     expect(guard.requests).toEqual([]);
     expect(armed).toEqual([]);
@@ -276,6 +292,7 @@ describe('flow prs', () => {
       { number: 20, owner: 'priya', stale: true, farBehind: false },
       { number: 21, owner: 'kai', stale: false, farBehind: true, behind: 25 },
     ]);
+    expect(r.json.prs[0].headRefName).toBe('b-20');
     expect(r.json.stuck[0].prompt).toBe(
       '#20 is open 10 days (over 3): @priya, ship it, split it or close it?'
     );

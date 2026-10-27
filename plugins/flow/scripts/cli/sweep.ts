@@ -4,14 +4,16 @@
  * The drain runs it on every tick.
  *
  * For each open PR that is not armed, it reads the PR's queue state, the arm
- * guard's facts, when the forge first saw its head, and when each review label
+ * guard's facts, when its head last arrived, and when each review label
  * its route needs was added (`land/sweep.ts`). A cleared PR goes to the arm
  * guard with its current head as the reviewed commit, and is armed only when
  * the guard allows, at exactly that head (`--match-head-commit`). The guard
  * refuses on a moved head, red checks, a hold label, a freeze and the rest; its
  * `land.preArm` checks are left to the drain (`pre-arm-deferred`).
  *
- * Every PR it does not arm comes back with a reason. Exits 4 when the open PRs
+ * It arms only when `drain.armAutoMerge` is on or `--arm` is passed, like
+ * `flow pr`; otherwise, and always with `--dry-run`, it judges and arms
+ * nothing (`would-arm`). Every PR it does not arm comes back with a reason. Exits 4 when the open PRs
  * cannot be read at all, 7 while flow is paused (unless `--manual`).
  *
  * @module @dorkos/flow/cli/sweep
@@ -83,7 +85,9 @@ async function sweepOne(
         forge.labelledAt === undefined ? null : await forge.labelledAt(pr.number, label);
     }
     const headSeenAt =
-      forge.commitSeenAt === undefined ? null : await forge.commitSeenAt(facts.headRefOid);
+      forge.headPushedAt === undefined
+        ? null
+        : await forge.headPushedAt(pr.number, facts.headRefOid);
     const verdict = clearance(
       {
         armed: status.armed || pr.armed,
@@ -175,7 +179,9 @@ export async function run(ctx: VerbContext): Promise<VerbResult> {
   const project = loadProjectConfig(ctx);
   const { config, paused } = project.loaded;
   project.flushWarnings();
-  const dryRun = ctx.dryRun;
+  // Arming follows the repo's policy, as flow pr's does: drain.armAutoMerge,
+  // or --arm from a person who means it.
+  const dryRun = ctx.dryRun || !(ctx.args.flags.arm === true || config.drain.armAutoMerge);
   if (paused !== null && !ctx.manual && !dryRun) {
     throw new PausedError(
       'flow is paused; /flow:resume lifts it, or pass --manual when a person is driving'

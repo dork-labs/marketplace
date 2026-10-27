@@ -110,6 +110,7 @@ export async function run(ctx: VerbContext): Promise<VerbResult> {
     number: pr.number,
     url: pr.url,
     title: pr.title,
+    headRefName: pr.headRefName,
     author: pr.author,
     createdAt: pr.createdAt,
     ageDays: Math.floor((now.getTime() - Date.parse(pr.createdAt)) / day),

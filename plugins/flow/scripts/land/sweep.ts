@@ -8,8 +8,10 @@
  * 1. it is neither armed nor in the merge queue;
  * 2. every required check passed (a check still running is not green, and a
  *    required check that never reported has not passed);
- * 3. the security label was added after the forge first saw the current head
- *    (`Forge.commitSeenAt`: a server time a commit's own dates cannot move);
+ * 3. the security label was added after the current head
+ *    last arrived as the PR's head (`Forge.headPushedAt`: the newest check
+ *    suite or force-push, server times a commit's own dates cannot move, so a
+ *    force-push back to an older commit counts as a new head);
  * 4. the QA label likewise, when the route has a QA step (not `light`);
  * 5. the design label likewise, when the route has a design step.
  *
@@ -56,7 +58,7 @@ export interface ClearanceFacts {
   facts: ArmFacts;
   /** The checks `main` requires, or `null` when the forge cannot tell (every check counts). */
   requiredChecks: string[] | null;
-  /** When the forge first saw the head, or `null` when unknown. */
+  /** When the head last arrived as the PR's head, or `null` when unknown. */
   headSeenAt: string | null;
   /** When each review label was last added, by label name (lower case); `null` when it is not on. */
   labelledAt: Readonly<Record<string, string | null>>;

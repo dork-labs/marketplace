@@ -89,6 +89,19 @@ describe('the light class', () => {
     }
   });
 
+  it('dependency files that are code, and the review rubric, are never light', () => {
+    for (const file of [
+      'patches/left-pad+1.0.0.patch',
+      '.pnpmfile.cjs',
+      '.yarn/releases/yarn-4.1.0.cjs',
+      'gradlew',
+      'setup.py',
+      'REVIEW.md',
+    ]) {
+      expect(reviewRoute([file], policy).class, file).toBe('standard');
+    }
+  });
+
   it('a fixture is not a test: a script may read it at run time', () => {
     expect(reviewRoute(['scripts/fixtures/arm-decisions.json'], policy).class).toBe('standard');
   });

@@ -241,11 +241,12 @@ export interface Forge {
    */
   labelledAt?(pr: number, label: string): Promise<string | null>;
   /**
-   * When the forge first saw `sha` pushed, ISO-8601 (the earliest check suite
-   * created for it: a server time a commit's own dates cannot move), or `null`
-   * when nothing ran on it. Optional; absent reads as unknown.
+   * When `sha` last arrived as PR `pr`'s head, ISO-8601: the later of the
+   * newest check suite created for it and the PR's last force-push (server
+   * times a commit's own dates cannot move), or `null` when nothing ran on it.
+   * Optional; absent reads as unknown.
    */
-  commitSeenAt?(sha: string): Promise<string | null>;
+  headPushedAt?(pr: number, sha: string): Promise<string | null>;
   /** Post a plain comment on a PR as the signed-in account. */
   comment(pr: number, body: string): Promise<void>;
   /**

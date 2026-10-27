@@ -5,7 +5,7 @@
 
 import { describe, expect, it } from 'vitest';
 
-import { createGithubForge, earliestTime, parseLabelledAt } from '../../scripts/forge/github.ts';
+import { createGithubForge, latestTime, parseLabelledAt } from '../../scripts/forge/github.ts';
 import {
   capRefusal,
   openPrListArgs,
@@ -178,11 +178,38 @@ describe('label history and first-seen time', () => {
     expect(() => parseLabelledAt('{"event":"labeled"}', 'qa-go')).toThrow(ForgeError);
   });
 
-  it('the earliest check suite is when the commit was first seen', () => {
-    expect(earliestTime('"2026-09-03T00:00:00Z"\n2026-09-01T00:00:00Z\n')).toBe(
-      '2026-09-01T00:00:00Z'
+  it('the latest of the times is the one kept', () => {
+    expect(latestTime('"2026-09-03T00:00:00Z"\n2026-09-01T00:00:00Z\n')).toBe(
+      '2026-09-03T00:00:00Z'
     );
-    expect(earliestTime('')).toBeNull();
-    expect(() => earliestTime('soon')).toThrow(ForgeError);
+    expect(latestTime('')).toBeNull();
+    expect(() => latestTime('soon')).toThrow(ForgeError);
+  });
+
+  it("a force-push back to an older commit is that head's arrival, not the commit's first suite", async () => {
+    const sha = 'b'.repeat(40);
+    const forge = createGithubForge({
+      target: { host: 'github.com', repo: 'acme/app' },
+      now: () => new Date(),
+      runProcess: async (_cmd, args) => {
+        const url = args[args.length - 1];
+        if (url.includes('/check-suites')) {
+          // The commit's first suite ran days ago, when it was first pushed.
+          return { code: 0, stdout: '"2026-09-01T00:00:00Z"\n', stderr: '' };
+        }
+        // Then the branch moved on, and was force-pushed back to it.
+        return { code: 0, stdout: '"2026-09-05T00:00:00Z"\n', stderr: '' };
+      },
+    });
+    expect(await forge.headPushedAt?.(7, sha)).toBe('2026-09-05T00:00:00Z');
+  });
+
+  it('a head no check suite ran on is unknown, never old', async () => {
+    const forge = createGithubForge({
+      target: { host: 'github.com', repo: 'acme/app' },
+      now: () => new Date(),
+      runProcess: async () => ({ code: 0, stdout: '', stderr: '' }),
+    });
+    expect(await forge.headPushedAt?.(7, 'b'.repeat(40))).toBeNull();
   });
 });

@@ -427,8 +427,10 @@ paths the PR touches (`flow pr` reports it as `route`; `flow sweep` reads it):
 - **QA** is on unless the PR is `light`: every path it touches is a dependency
   manifest or lockfile, docs (`*.md`, `*.mdx`, `docs/`), a test, CI (`.github/`),
   or one of `lightPaths` (copy: string tables, content). Agent prose (`SKILL.md`,
-  `AGENTS.md`, `CLAUDE.md`, `commands/`, `skills/`, `agents/`, `.claude/`,
-  `.agents/`, `.dork/`) is behaviour, so it is never light. A light PR still gets
+  `AGENTS.md`, `CLAUDE.md`, `REVIEW.md`, `commands/`, `skills/`, `agents/`,
+  `.claude/`, `.agents/`, `.dork/`) is behaviour, so it is never light, and so are
+  dependency files that are code (`patches/`, `.pnpmfile.cjs`, `.yarn/releases/`,
+  `.pnp.cjs`, `setup.py`, the Gradle and Maven wrappers). A light PR still gets
   Security's read, and a lockfile or manifest still needs `securityPaths.label`
   before flow arms it.
 - **Design** is on only when the PR touches `designPaths`. It runs at PR open,
@@ -446,14 +448,15 @@ paths the PR touches (`flow pr` reports it as `route`; `flow sweep` reads it):
 
 **The sweep** (`flow sweep`, and every drain pass) arms each open PR that is
 cleared but unarmed: every required check green, and the security label (plus
-`qaLabel` and `designLabel` where the route needs them) added **after** the forge
-first saw the PR's current head (its first check suite: a server time a commit's
-own dates cannot move). A label from before a push covers an older commit; the
+`qaLabel` and `designLabel` where the route needs them) added **after** the PR's
+current head last arrived (its newest check suite or the PR's last force-push:
+server times a commit's own dates cannot move, so a force-push back to an older
+commit counts as a new head). A label from before a push covers an older commit; the
 reviewer reads the range-diff and adds it back, which is how an OK carries over
 by diff. Flow never moves a label itself. A cleared PR is armed only when the arm
-guard allows, at exactly that head; every other unarmed PR is listed with why. The
-drain's sweep arms only when `drain.armAutoMerge` is on, and otherwise says what
-it would arm. It leaves `land.preArm` checks alone: a PR they apply to is
+guard allows, at exactly that head; every other unarmed PR is listed with why. Like
+`flow pr`, it arms only when `drain.armAutoMerge` is on or you pass `--arm`;
+otherwise it says what it would arm. It leaves `land.preArm` checks alone: a PR they apply to is
 reported `pre-arm-deferred`.
 
 ## `selfImprovement`: how flow checks and records itself

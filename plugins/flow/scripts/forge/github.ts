@@ -577,22 +577,22 @@ export function parseLabelledAt(out: string, label: string): string | null {
 }
 
 /**
- * The earliest of one ISO time per line, or `null` when there is none.
+ * The latest of one ISO time per line, or `null` when there is none.
  *
  * @param out - The lines.
- * @returns The earliest time.
+ * @returns The latest time.
  * @throws {ForgeError} On a line that is not a time.
  */
-export function earliestTime(out: string): string | null {
-  let earliest: string | null = null;
+export function latestTime(out: string): string | null {
+  let latest: string | null = null;
   for (const line of out.split('\n')) {
     const time = line.trim().replace(/^"|"$/g, '');
     if (time === '') continue;
     if (!Number.isFinite(Date.parse(time)))
       throw new ForgeError(`gh returned "${time}", not a time`);
-    if (earliest === null || Date.parse(time) < Date.parse(earliest)) earliest = time;
+    if (latest === null || Date.parse(time) > Date.parse(latest)) latest = time;
   }
-  return earliest;
+  return latest;
 }
 
 /**
@@ -904,20 +904,40 @@ export function createGithubForge(options: GithubForgeOptions): Forge {
       return parseLabelledAt(out, label);
     },
 
-    async commitSeenAt(sha) {
+    async headPushedAt(pr, sha) {
       if (!isFullSha(sha)) throw new ForgeError(`not a full commit: ${sha}`);
-      const out = await gh(
-        [
-          'api',
-          ...hostArgs,
-          '--paginate',
-          '--jq',
-          '.check_suites[] | .created_at',
-          `repos/${target.repo}/commits/${sha}/check-suites?per_page=100`,
-        ],
-        `reading when ${target.repo} first saw ${sha.slice(0, 7)}`
+      // Every push to a PR's head (a force-push back to an older commit
+      // included) starts new check suites for that commit, and a force-push
+      // leaves an event on the PR: the later of the two is when this head
+      // last arrived. A commit's own dates play no part.
+      const suites = latestTime(
+        await gh(
+          [
+            'api',
+            ...hostArgs,
+            '--paginate',
+            '--jq',
+            '.check_suites[] | .created_at',
+            `repos/${target.repo}/commits/${sha}/check-suites?per_page=100`,
+          ],
+          `reading the check suites of ${target.repo} ${sha.slice(0, 7)}`
+        )
       );
-      return earliestTime(out);
+      if (suites === null) return null;
+      const forced = latestTime(
+        await gh(
+          [
+            'api',
+            ...hostArgs,
+            '--paginate',
+            '--jq',
+            '.[] | select(.event == "head_ref_force_pushed") | .created_at',
+            `repos/${target.repo}/issues/${pr}/events?per_page=100`,
+          ],
+          `reading the force-pushes of ${target.repo}#${pr}`
+        )
+      );
+      return forced !== null && Date.parse(forced) > Date.parse(suites) ? forced : suites;
     },
 
     async mergeInfo(pr) {

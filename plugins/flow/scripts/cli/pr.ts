@@ -16,11 +16,11 @@
  *    cannot be read refuses too (`cli/open-prs-read.ts`);
  * 5. otherwise opens the PR against origin's default branch and records
  *    `drain.pr`, and reports its review route (`land/review-route.ts`);
- * 5. names the PR's reviewer in a comment of its own (DOR-3262):
+ * 6. names the PR's reviewer in a comment of its own (DOR-3262):
  *    `land.securityPaths.reviewer` when the PR touches a security path (by the
  *    list on `origin/main`), else `land.reviewer`. Both are handles, so they
  *    come from this machine's settings (`config.local.json`);
- * 6. on `--arm` or `drain.armAutoMerge`, records the PR waiting to arm and
+ * 7. on `--arm` or `drain.armAutoMerge`, records the PR waiting to arm and
  *    arms it at once when the arm guard allows (`land/arm-guard.ts`). The
  *    guard's `land.preArm` checks are left to the drain, which arms it after
  *    they pass. A refusal leaves the PR open and unarmed and says why in

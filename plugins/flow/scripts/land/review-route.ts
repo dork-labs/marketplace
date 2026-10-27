@@ -47,11 +47,28 @@ export const LIGHT_TEST_GLOBS: readonly string[] = [
 export const LIGHT_CI_GLOBS: readonly string[] = ['.github/**'];
 
 /**
- * Paths that are never light, even when a light glob matches them: prose an
- * agent executes as instructions (skills, commands, agent definitions, the
- * project's agent rules), so a change to them is a change in behaviour.
+ * Paths that are never light, even when a light glob matches them: dependency
+ * files that are themselves code, and prose an agent executes as instructions
+ * (skills, commands, agent definitions, the project's agent rules and review
+ * rubric), so a change to them is a change in behaviour.
  */
 export const NEVER_LIGHT_GLOBS: readonly string[] = [
+  // Dependency files that are code a package manager or build runs, not a
+  // list of versions: patches, install hooks, vendored tool releases, wrappers.
+  '**/patches/**',
+  '**/.yarn/patches/**',
+  '**/.pnpmfile.cjs',
+  '**/.yarn/releases/**',
+  '**/.yarn/plugins/**',
+  '**/.pnp.cjs',
+  '**/.pnp.loader.mjs',
+  '**/setup.py',
+  '**/gradlew*',
+  '**/gradle/wrapper/**',
+  '**/mvnw*',
+  '**/.mvn/**',
+  // Prose an agent executes.
+  '**/REVIEW.md',
   '**/SKILL.md',
   '**/AGENTS.md',
   '**/CLAUDE.md',

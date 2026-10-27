@@ -132,8 +132,15 @@ export const VERBS: readonly VerbDefinition[] = [
     name: 'sweep',
     summary: 'Arm every open PR that is cleared but unarmed, through the arm guard.',
     description:
-      'For each open pull request that is not armed or queued: when every required check is green and the security label (and the QA and design labels its review route needs) were added after its current head was pushed, ask the arm guard and arm it at that head if the guard allows. Every PR it does not arm is listed with the reason. Never arms past the guard. The drain runs it every tick. Exits 7 while flow is paused, unless --manual or --dry-run.',
+      'For each open pull request that is not armed or queued: when every required check is green and the security label (and the QA and design labels its review route needs) were added after its current head was pushed, ask the arm guard and arm it at that head if the guard allows. Every PR it does not arm is listed with the reason. Never arms past the guard. It arms only when drain.armAutoMerge is on or --arm is passed; otherwise it says what it would arm. The drain runs it every pass. Exits 7 while flow is paused, unless --manual or --dry-run.',
     common: ['project', 'manual', 'dry-run'],
+    flags: [
+      {
+        name: 'arm',
+        kind: 'boolean',
+        description: 'Arm cleared PRs even when drain.armAutoMerge is off.',
+      },
+    ],
     load: () => import('./cli/sweep.ts'),
   },
   {

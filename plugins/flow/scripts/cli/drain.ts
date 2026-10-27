@@ -759,6 +759,7 @@ export async function drain(ctx: VerbContext, options: DrainOptions = {}): Promi
   if (!tick) process.once('SIGINT', onSigint);
   const events: PassEvent[] = [];
   const lines: string[] = [];
+  /** The latest sweep result per PR this run. */
   const sweeps: SweepResult[] = [];
   try {
     for (let pass = 0; ; pass += 1) {
@@ -841,8 +842,11 @@ async function drainSweep(
   if (swept.repo === null) return [];
   const lines: string[] = [];
   for (const result of swept.results) {
-    const before = [...seen].reverse().find((r) => r.number === result.number);
-    seen.push(result);
+    const at = seen.findIndex((r) => r.number === result.number);
+    const before = at === -1 ? undefined : seen[at];
+    // One entry per PR, its latest: a continuous drain never grows this.
+    if (at === -1) seen.push(result);
+    else seen[at] = result;
     if (
       before?.outcome === result.outcome &&
       before.reason === result.reason &&

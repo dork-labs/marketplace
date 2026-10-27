@@ -43,8 +43,7 @@ switched off: approve it on DorkOS's Schedules page, or point any scheduler at i
    poll the adapter's `getInbox`, apply the comment-response rules in
    `<flow-root>/skills/tending-tracker/SKILL.md`, resume with `--resume <sessionId>`.
    Skip runs with `drain` set.
-3a. **Sweep.** `flow sweep --json` (`--dry-run` unless `drain.armAutoMerge`); report each
-   `detail`.
+3a. **Sweep.** `flow sweep --json`; report each unarmed PR's `detail`.
 3b. **Land first.** `flow next --json`'s `land`: rebase, re-gate, answer review, push;
    skip it while it waits on a person.
 4. **Dispatch.** A scheduled firing with `drain.parallel` at 1 or more runs
