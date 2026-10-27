@@ -12,10 +12,9 @@ metadata:
   flow-needs:
     - 'Bash(node --experimental-strip-types "${CLAUDE_PLUGIN_ROOT}/scripts/config-files.ts")'
     - 'Bash(node --experimental-strip-types "${CLAUDE_PLUGIN_ROOT}/scripts/flow.ts" note --kind friction:*)'
-    - 'Bash(node --experimental-strip-types "${CLAUDE_PLUGIN_ROOT}/scripts/flow.ts" snapshot:*)'
+    - 'Bash(node --experimental-strip-types "${CLAUDE_PLUGIN_ROOT}/scripts/flow.ts" snapshot --json)'
     - 'Bash(node --experimental-strip-types "${CLAUDE_PLUGIN_ROOT}/scripts/flow.ts" prs:*)'
     - 'Bash(git worktree list --porcelain)'
-    - 'Bash(git ls-remote --heads origin)'
     - 'Read(${CLAUDE_PLUGIN_ROOT}/**)'
     - 'Read(.dork/flow/**)'
     - 'tracker:read'
@@ -33,7 +32,7 @@ Each firing:
 0. **Pause check.** Run step 0 of
    `<flow-root>/skills/flow-drain/SKILL.md`. Stop whenever it says to stop. Tracker
    I/O goes through the adapter at `adapter.path`.
-1. Take a backlog snapshot.
+1. Take a backlog snapshot: `flow snapshot --json`.
 2. **Release stale claims:** items with `agent/claimed` that have been
    untouched for 7 or more days (no tracker update and no comment). Release one
    only when ALL of these hold; otherwise list it in the report and leave it:
@@ -44,9 +43,8 @@ Each firing:
    - Its work lives in this repo. If it may live in another, skip it and report it.
    - Match its id in any case (a branch may be `proj-123-…` for `PROJ-123`).
    - No worktree carries its id: `git worktree list --porcelain`.
-   - No pushed branch carries its id: `git ls-remote --heads origin`.
    - No open pull request on this repo's host carries its id in a `prs` entry's
-     `headRefName` or `title` (`node --experimental-strip-types "<flow-root>/scripts/flow.ts" prs --json --no-behind`; exit 4: release none).
+     `headRefName` or `title` (`node --experimental-strip-types "<flow-root>/scripts/flow.ts" prs --json --no-behind`; exit 4: release none). A branch pushed with no pull request isn't checked here.
    - Its own links, attachments and comments name no pull
      request or branch in any repo.
 

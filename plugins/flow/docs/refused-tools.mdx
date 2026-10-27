@@ -12,8 +12,8 @@ read tools it needs under `metadata.flow-needs` in its `SKILL.md`:
 
 | Schedule      | What it needs to read                                                                                                                                           |
 | ------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `flow-triage` | flow's settings check, `flow snapshot`, `flow prs`, `git worktree list --porcelain`, `git ls-remote --heads origin`, flow's files, tracker                      |
-| `flow-groom`  | flow's settings check, `flow snapshot`, `flow audit`, `flow next`, `flow prs`, flow's files, tracker                                                            |
+| `flow-triage` | flow's settings check, `flow snapshot --json`, `flow prs`, `git worktree list --porcelain`, flow's files, tracker                                               |
+| `flow-groom`  | flow's settings check, `flow snapshot` (one fixed file), `flow audit`, `flow next`, `flow prs`, flow's files, tracker                                           |
 | `flow-retro`  | flow's settings check, `flow selftest --json`, `flow retro --json`, flow's files                                                                                |
 | `flow-drain`  | flow's settings check, `flow next`, `flow prs`, `flow autonomy`, flow's recovery and involvement checks, `git worktree list --porcelain`, flow's files, tracker |
 

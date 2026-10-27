@@ -101,14 +101,30 @@ function flowNeeds(fm: string): string[] | null {
 const ROOT = '${CLAUDE_PLUGIN_ROOT}';
 const NODE = 'node --experimental-strip-types';
 
-/** `flow` verbs that only read (or keep flow's own records), allowed as a prefix rule. */
-const READ_VERBS = ['snapshot', 'audit', 'next', 'prs', 'autonomy'];
+/**
+ * `flow` verbs that only read, allowed as a prefix rule: none of their flags
+ * writes a file or picks a remote (`prs` takes only `--for` and `--no-behind`).
+ * Never `snapshot`: its `--out` writes to any path it is given.
+ */
+const READ_VERBS = ['audit', 'next', 'prs', 'autonomy'];
 
-/** `flow` invocations allowed only exactly: their other flags write (`retro --file`). */
-const READ_EXACT = ['selftest --json', 'retro --json'];
+/**
+ * `flow` invocations allowed only exactly: their other flags write (`retro --file`,
+ * `snapshot --out`). The one `snapshot --out` is flow's own fixed scratch file.
+ */
+const READ_EXACT = [
+  'selftest --json',
+  'retro --json',
+  'snapshot --json',
+  'snapshot --include-closed --out .dork/flow/tmp/groom/backlog.json',
+];
 
-/** Exact read-only commands outside flow. */
-const READ_COMMANDS = ['git worktree list --porcelain', 'git ls-remote --heads origin'];
+/**
+ * Exact read-only commands outside flow. Never a git command that talks to a
+ * remote (`ls-remote`, `fetch`, `pull`): it runs whatever the repo's own config
+ * names (`core.sshCommand`, `url.*.insteadOf`), and an agent can write that.
+ */
+const READ_COMMANDS = ['git worktree list --porcelain'];
 
 /**
  * Folders a read may be scoped to: flow's own, in the plugin and in the
@@ -230,6 +246,22 @@ describe('every scheduled skill lists read-tier needs and keeps its mode', () =>
     // A prefix on `retro` would also allow `retro --file`, which files items.
     const retroPrefix = `Bash(${NODE} "${ROOT}/scripts/flow.ts" retro:*)`;
     expect(scheduleGaps('flow-triage', plant(retroPrefix))).toEqual([`${retroPrefix}: not a read`]);
+    // `snapshot --out` writes wherever it is pointed, so no prefix and no other path.
+    for (const snapshot of [
+      'snapshot:*',
+      'snapshot --out ../x.json',
+      'snapshot --out ~/x.json',
+      'snapshot --include-closed --out ../groom/backlog.json',
+    ]) {
+      const entry = `Bash(${NODE} "${ROOT}/scripts/flow.ts" ${snapshot})`;
+      expect(scheduleGaps('flow-triage', plant(entry))).toEqual([`${entry}: not a read`]);
+    }
+    // Git that talks to a remote runs whatever the repo's own config names.
+    for (const remote of ['git ls-remote --heads origin', 'git fetch', 'git pull']) {
+      expect(scheduleGaps('flow-triage', plant(`Bash(${remote})`))).toEqual([
+        `Bash(${remote}): not a read`,
+      ]);
+    }
     const claim = `Bash(${NODE} "${ROOT}/scripts/flow.ts" claim:*)`;
     expect(scheduleGaps('flow-triage', plant(claim))).toEqual([`${claim}: not a read`]);
     expect(scheduleGaps('flow-triage', plant('Read(.dork/flow/../../**)'))).toEqual([
