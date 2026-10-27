@@ -192,7 +192,7 @@ function ruleGaps(rule: string): string[] {
     ],
     [
       'a person-does-it answer stops the run',
-      /never\s+do the step yourself: let go of it with `flow release <id> --to none --json`[\s\S]*hand it to a person \(`assignToHuman`\), and stop/,
+      /never\s+do the step yourself\.[\s\S]*`flow release <id> --to none --json`[\s\S]*hand it to a person\s+\(`assignToHuman`\) and stop\.[\s\S]*never park it again/,
     ],
     ['parking may be refused too', /Parking writes to the tracker, so it may\s+be refused too/],
     ['notes it in the journal', /`flow note --kind friction/],

@@ -21,8 +21,10 @@ as done.** The first time a tool call comes back refused, denied or waiting for 
    item you parked. Never call the run done, finished or complete.
 
 When that question comes back "A person does it", whoever settled it (a deadline included), never
-do the step yourself: let go of it with `flow release <id> --to none --json`, so no later run
-picks it up, hand it to a person (`assignToHuman`), and stop.
+do the step yourself. If the item is claimed (`agent/claimed` or a run record), let go of it with
+`flow release <id> --to none --json`, so no later run picks it up. Then hand it to a person
+(`assignToHuman`) and stop. If the release is refused, still hand it over and name it in the
+report, and never park it again.
 
 Never raise the schedule's `permissions` to get past a refusal. The read tools each schedule needs
 are under `metadata.flow-needs` in its `SKILL.md`, and `<flow-root>/docs/refused-tools.mdx` says how
