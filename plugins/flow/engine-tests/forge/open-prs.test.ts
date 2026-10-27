@@ -5,7 +5,13 @@
 
 import { describe, expect, it } from 'vitest';
 
-import { createGithubForge, latestTime, parseLabelledAt } from '../../scripts/forge/github.ts';
+import {
+  createGithubForge,
+  headArrival,
+  latestTime,
+  parseForcePushes,
+  parseLabelledAt,
+} from '../../scripts/forge/github.ts';
 import {
   capRefusal,
   openPrListArgs,
@@ -159,7 +165,10 @@ describe('stuck PRs', () => {
   });
 });
 
-describe('label history and first-seen time', () => {
+const SHA_A = 'a'.repeat(40);
+const SHA_B = 'b'.repeat(40);
+
+describe('label history and when the head arrived', () => {
   const line = (event: string, created_at: string, name: string) =>
     JSON.stringify({ event, created_at, name });
 
@@ -186,30 +195,111 @@ describe('label history and first-seen time', () => {
     expect(() => latestTime('soon')).toThrow(ForgeError);
   });
 
-  it("a force-push back to an older commit is that head's arrival, not the commit's first suite", async () => {
-    const sha = 'b'.repeat(40);
+  it('a suite a labeled workflow makes after the label does not move the arrival', () => {
+    // Pushed at 10:00 (first suite), labelled at 11:00, and the label itself
+    // started another workflow run at 11:00:05: the head still arrived at 10:00.
+    const suites = [
+      { createdAt: '2026-09-05T10:00:00Z', headBranch: 'acme-1-fix' },
+      { createdAt: '2026-09-05T11:00:05Z', headBranch: 'acme-1-fix' },
+    ];
+    expect(headArrival(suites, [], SHA_A, 'acme-1-fix')).toBe('2026-09-05T10:00:00Z');
+  });
+
+  it('a force-push back to an older commit is when that head arrived', () => {
+    const suites = [{ createdAt: '2026-09-01T00:00:00Z', headBranch: 'acme-1-fix' }];
+    const pushes = [
+      { createdAt: '2026-09-03T00:00:00Z', after: SHA_B },
+      { createdAt: '2026-09-05T00:00:00Z', after: SHA_A },
+    ];
+    expect(headArrival(suites, pushes, SHA_A, 'acme-1-fix')).toBe('2026-09-05T00:00:00Z');
+  });
+
+  it('a head that came back by fast-forward after a force-push away is unknown', () => {
+    // A was pushed, the branch was force-pushed to an older C, then fast-forwarded back to A.
+    const suites = [{ createdAt: '2026-09-01T00:00:00Z', headBranch: 'acme-1-fix' }];
+    const pushes = [{ createdAt: '2026-09-03T00:00:00Z', after: SHA_B }];
+    expect(headArrival(suites, pushes, SHA_A, 'acme-1-fix')).toBeNull();
+  });
+
+  it('a commit first pushed to another branch counts from its push to this one', () => {
+    const suites = [
+      { createdAt: '2026-09-01T00:00:00Z', headBranch: 'elsewhere' },
+      { createdAt: '2026-09-06T00:00:00Z', headBranch: 'acme-1-fix' },
+    ];
+    expect(headArrival(suites, [], SHA_A, 'acme-1-fix')).toBe('2026-09-06T00:00:00Z');
+    expect(headArrival(suites.slice(0, 1), [], SHA_A, 'acme-1-fix')).toBeNull();
+  });
+
+  it('force-pushes that cannot be read in full are unknown', () => {
+    expect(
+      headArrival([{ createdAt: '2026-09-06T00:00:00Z', headBranch: 'b' }], null, SHA_A, 'b')
+    ).toBeNull();
+    const page = (totalCount: number) => ({
+      data: {
+        repository: {
+          pullRequest: {
+            timelineItems: {
+              totalCount,
+              nodes: [{ createdAt: '2026-09-03T00:00:00Z', afterCommit: { oid: SHA_B } }],
+            },
+          },
+        },
+      },
+    });
+    expect(parseForcePushes(page(1))).toEqual([
+      { createdAt: '2026-09-03T00:00:00Z', after: SHA_B },
+    ]);
+    expect(parseForcePushes(page(101))).toBeNull();
+    expect(parseForcePushes({})).toBeNull();
+  });
+
+  it('the GitHub forge reads the suites and the force-pushes, and judges from them', async () => {
     const forge = createGithubForge({
       target: { host: 'github.com', repo: 'acme/app' },
       now: () => new Date(),
       runProcess: async (_cmd, args) => {
-        const url = args[args.length - 1];
-        if (url.includes('/check-suites')) {
-          // The commit's first suite ran days ago, when it was first pushed.
-          return { code: 0, stdout: '"2026-09-01T00:00:00Z"\n', stderr: '' };
+        if (args.includes('graphql')) {
+          return {
+            code: 0,
+            stdout: JSON.stringify({
+              data: {
+                repository: { pullRequest: { timelineItems: { totalCount: 0, nodes: [] } } },
+              },
+            }),
+            stderr: '',
+          };
         }
-        // Then the branch moved on, and was force-pushed back to it.
-        return { code: 0, stdout: '"2026-09-05T00:00:00Z"\n', stderr: '' };
+        return {
+          code: 0,
+          stdout:
+            JSON.stringify({ created_at: '2026-09-05T10:00:00Z', head_branch: 'acme-1-fix' }) +
+            '\n' +
+            JSON.stringify({ created_at: '2026-09-05T11:00:05Z', head_branch: 'acme-1-fix' }) +
+            '\n',
+          stderr: '',
+        };
       },
     });
-    expect(await forge.headPushedAt?.(7, sha)).toBe('2026-09-05T00:00:00Z');
+    expect(await forge.headPushedAt?.(7, SHA_A, 'acme-1-fix')).toBe('2026-09-05T10:00:00Z');
   });
 
   it('a head no check suite ran on is unknown, never old', async () => {
     const forge = createGithubForge({
       target: { host: 'github.com', repo: 'acme/app' },
       now: () => new Date(),
-      runProcess: async () => ({ code: 0, stdout: '', stderr: '' }),
+      runProcess: async (_cmd, args) =>
+        args.includes('graphql')
+          ? {
+              code: 0,
+              stdout: JSON.stringify({
+                data: {
+                  repository: { pullRequest: { timelineItems: { totalCount: 0, nodes: [] } } },
+                },
+              }),
+              stderr: '',
+            }
+          : { code: 0, stdout: '', stderr: '' },
     });
-    expect(await forge.headPushedAt?.(7, 'b'.repeat(40))).toBeNull();
+    expect(await forge.headPushedAt?.(7, SHA_A, 'acme-1-fix')).toBeNull();
   });
 });

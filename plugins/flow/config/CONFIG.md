@@ -430,7 +430,9 @@ paths the PR touches (`flow pr` reports it as `route`; `flow sweep` reads it):
   `AGENTS.md`, `CLAUDE.md`, `REVIEW.md`, `commands/`, `skills/`, `agents/`,
   `.claude/`, `.agents/`, `.dork/`) is behaviour, so it is never light, and so are
   dependency files that are code (`patches/`, `.pnpmfile.cjs`, `.yarn/releases/`,
-  `.pnp.cjs`, `setup.py`, the Gradle and Maven wrappers). A light PR still gets
+  `.pnp.cjs`, `setup.py`, the Gradle and Maven wrappers). `package.json` counts as
+  light although its `scripts` can run on install: that skips QA only, and its
+  security label is still required. A light PR still gets
   Security's read, and a lockfile or manifest still needs `securityPaths.label`
   before flow arms it.
 - **Design** is on only when the PR touches `designPaths`. It runs at PR open,
@@ -449,9 +451,10 @@ paths the PR touches (`flow pr` reports it as `route`; `flow sweep` reads it):
 **The sweep** (`flow sweep`, and every drain pass) arms each open PR that is
 cleared but unarmed: every required check green, and the security label (plus
 `qaLabel` and `designLabel` where the route needs them) added **after** the PR's
-current head last arrived (its newest check suite or the PR's last force-push:
-server times a commit's own dates cannot move, so a force-push back to an older
-commit counts as a new head). A label from before a push covers an older commit; the
+current head arrived: the PR's last force-push when it left that head, else the
+first check suite a push to the PR's branch made for it. These are server times
+a commit's own dates cannot move; a suite a workflow makes when a label is added
+does not count; a head whose arrival flow cannot tell is not cleared. A label from before a push covers an older commit; the
 reviewer reads the range-diff and adds it back, which is how an OK carries over
 by diff. Flow never moves a label itself. A cleared PR is armed only when the arm
 guard allows, at exactly that head; every other unarmed PR is listed with why. Like

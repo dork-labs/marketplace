@@ -833,9 +833,19 @@ async function drainSweep(
   config: NextConfig,
   seen: SweepResult[]
 ): Promise<string[]> {
+  // A continuous drain reads the pause again each pass: a /flow:pause made
+  // after it started stops it arming, as it stops everything else flow does.
+  let paused = false;
+  try {
+    paused = !ctx.manual && loadProjectConfig(ctx).loaded.paused !== null;
+  } catch {
+    paused = true;
+  }
   let swept;
   try {
-    swept = await sweepOpenPrs(ctx, config, { dryRun: ctx.dryRun || !config.drain.armAutoMerge });
+    swept = await sweepOpenPrs(ctx, config, {
+      dryRun: ctx.dryRun || paused || !config.drain.armAutoMerge,
+    });
   } catch (error) {
     return [`Sweep: ${(error as Error).message}.`];
   }

@@ -87,7 +87,7 @@ async function sweepOne(
     const headSeenAt =
       forge.headPushedAt === undefined
         ? null
-        : await forge.headPushedAt(pr.number, facts.headRefOid);
+        : await forge.headPushedAt(pr.number, facts.headRefOid, facts.headRefName);
     const verdict = clearance(
       {
         armed: status.armed || pr.armed,

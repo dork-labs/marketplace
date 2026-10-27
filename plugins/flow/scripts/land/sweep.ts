@@ -9,9 +9,11 @@
  * 2. every required check passed (a check still running is not green, and a
  *    required check that never reported has not passed);
  * 3. the security label was added after the current head
- *    last arrived as the PR's head (`Forge.headPushedAt`: the newest check
- *    suite or force-push, server times a commit's own dates cannot move, so a
- *    force-push back to an older commit counts as a new head);
+ *    arrived as the PR's head (`Forge.headPushedAt`: the last force-push
+ *    that left it, else the first check suite a push to the PR's branch made
+ *    for it; server times a commit's own dates cannot move, and a suite a
+ *    `labeled` workflow makes later does not count). A head whose arrival
+ *    cannot be told is not cleared;
  * 4. the QA label likewise, when the route has a QA step (not `light`);
  * 5. the design label likewise, when the route has a design step.
  *
