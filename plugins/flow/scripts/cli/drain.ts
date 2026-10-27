@@ -96,6 +96,7 @@ import {
   type NextConfig,
 } from './next.ts';
 import { signBody, unsignedBody } from './provenance.ts';
+import { renderSweep, sweepOpenPrs, type SweepResult } from './sweep.ts';
 import { releaseItem } from './release.ts';
 import { journalUsage } from './usage-journal.ts';
 import { stopInForce, type AutonomyRead } from '../autonomy.ts';
@@ -323,6 +324,8 @@ export async function drain(ctx: VerbContext, options: DrainOptions = {}): Promi
     .map((id) => id.trim())
     .filter((id) => id !== '');
   const tick = ctx.args.flags.tick === true;
+  /** What slot filling said this pass about landing and the open-PR cap. */
+  const planNotes: string[] = [];
 
   const mainCheckout = resolveMainCheckout(ctx.projectDir);
   const dorkHome = resolveDorkHome({ ...ctx.env }, ctx.io.osHome);
@@ -646,6 +649,20 @@ export async function drain(ctx: VerbContext, options: DrainOptions = {}): Promi
     },
     async plan(slots) {
       const plan = await planNext(ctx, project, { count: slots, items, accounts: true });
+      // Merging before starting (DOR-3341): say which PR to land, and when the
+      // open-PR cap holds new work back.
+      if (plan.land !== null) {
+        planNotes.push(
+          `Land first: #${plan.land.number} (${plan.land.identifier}) is your oldest open PR.`
+        );
+      }
+      if (plan.prCap?.atCap) {
+        planNotes.push(
+          plan.prCap.readable
+            ? `The open-PR cap is reached (${plan.prCap.open} of ${plan.prCap.max}: ${plan.prCap.holding.map((n) => `#${n}`).join(', ')}), so only urgent work starts.`
+            : `The open PRs could not be counted (${plan.prCap.error}), so only urgent work starts.`
+        );
+      }
       const accounts = plan.assignment?.accounts ?? [];
       const picks = plan.picked.map((item, i) => {
         const pick = plan.accounts?.[i]?.pick ?? null;
@@ -742,6 +759,7 @@ export async function drain(ctx: VerbContext, options: DrainOptions = {}): Promi
   if (!tick) process.once('SIGINT', onSigint);
   const events: PassEvent[] = [];
   const lines: string[] = [];
+  const sweeps: SweepResult[] = [];
   try {
     for (let pass = 0; ; pass += 1) {
       if (pass > 0) {
@@ -756,9 +774,12 @@ export async function drain(ctx: VerbContext, options: DrainOptions = {}): Promi
           deps.settings = { ...deps.settings, permissionMode: now };
         }
       }
+      // Merging before starting (DOR-3341): arm what is cleared before the
+      // pass advances runs and fills slots with new work.
+      const sweepLines = await drainSweep(ctx, config, sweeps);
       const report = await runPass(deps);
       events.push(...report.events);
-      const passLines = report.events.map(line);
+      const passLines = [...sweepLines, ...report.events.map(line), ...planNotes.splice(0)];
       if (report.held === 'machine-busy') {
         passLines.push('The machine is busy, so no new session started this pass.');
       }
@@ -788,9 +809,50 @@ export async function drain(ctx: VerbContext, options: DrainOptions = {}): Promi
         host,
         event,
       })),
+      sweep: sweeps,
     },
     text,
   };
+}
+
+/**
+ * The cleared-but-unarmed sweep, once per pass (`cli/sweep.ts`). It arms only
+ * when `drain.armAutoMerge` is on and this is not a dry run; otherwise it says
+ * what it would arm. A PR's line is printed when its outcome changes, so a
+ * continuous drain does not repeat the same reason every pass. A sweep that
+ * cannot read the open PRs says so and the pass goes on.
+ *
+ * @param ctx - The verb's context.
+ * @param config - The project config.
+ * @param seen - Every result so far this run (appended to).
+ * @returns The lines to print.
+ */
+async function drainSweep(
+  ctx: VerbContext,
+  config: NextConfig,
+  seen: SweepResult[]
+): Promise<string[]> {
+  let swept;
+  try {
+    swept = await sweepOpenPrs(ctx, config, { dryRun: ctx.dryRun || !config.drain.armAutoMerge });
+  } catch (error) {
+    return [`Sweep: ${(error as Error).message}.`];
+  }
+  if (swept.repo === null) return [];
+  const lines: string[] = [];
+  for (const result of swept.results) {
+    const before = [...seen].reverse().find((r) => r.number === result.number);
+    seen.push(result);
+    if (
+      before?.outcome === result.outcome &&
+      before.reason === result.reason &&
+      before.head === result.head
+    ) {
+      continue;
+    }
+    lines.push(renderSweep(swept.repo, [result]).split('\n')[1].trim());
+  }
+  return lines.map((l) => `Sweep: ${l}`);
 }
 
 /**

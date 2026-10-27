@@ -68,6 +68,8 @@ export interface RunResult {
 export interface RunOptions {
   /** Answers external commands (`git remote get-url origin`). Default: exit 0, no output. */
   runProcess?: CliDeps['runProcess'];
+  /** Builds the forge (open-PR reads). Default: the GitHub one over `runProcess`. */
+  createForge?: CliDeps['createForge'];
 }
 
 /**
@@ -102,6 +104,7 @@ export async function runFlow(
       return createFakeAdapter(backlog).adapter;
     },
     runProcess: options.runProcess ?? (async () => ({ code: 0, stdout: '', stderr: '' })),
+    ...(options.createForge === undefined ? {} : { createForge: options.createForge }),
     flowRoot: temp.plugin,
     io: { osHome: temp.osHome },
     verbs: VERBS,

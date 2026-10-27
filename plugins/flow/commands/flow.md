@@ -61,7 +61,7 @@ the operator. With a valid config present, route as below.
 4. Triage the backlog → `/flow:triage`.
 5. Check loop status → `/flow:status`.
 
-Recommend 4 when `starved` and not `atWipCap`; else 3.
+Recommend 4 when `starved` and not `atWipCap` or `atPrCap`; else 3.
 
 **With arguments**, first match wins:
 
@@ -72,7 +72,7 @@ Recommend 4 when `starved` and not `atWipCap`; else 3.
 5. A project name, spec slug or umbrella id (`resolveProject`; `resume <project>` lands here) → **Projects**.
 6. Anything else: a description; resolve the item, advance one stage.
 
-Several matches: ask with `AskUserQuestion`. A bare stage name is the stage; a colliding project is named by `/flow resume <project>` or its umbrella id.
+Several matches: ask with `AskUserQuestion`. A bare stage name is the stage; name a colliding project by `/flow resume <project>` or its umbrella id.
 
 **Projects.** With `agent/ready` children in a non-terminal state: rank with `flow next --for-project <project> --json`, claim the top item, carry it to its review gate, stop (no sentinel). With none: advance the umbrella issue one stage by its `stage/*` label. `continue <project>` is one such tick; `auto <project>` is **auto** ranked with `--for-project`.
 
@@ -80,5 +80,5 @@ Several matches: ask with `AskUserQuestion`. A bare stage name is the stage; a c
 
 Both follow `${CLAUDE_PLUGIN_ROOT}/skills/flow-drain/SKILL.md`, which holds the tick.
 
-- **`continue`**: one tick, no sentinel, then stop. Never loops.
+- **`continue`**: one tick, no sentinel, then stop.
 - **`auto`**: that skill's **Auto** section: tick after tick in this terminal. No server needed.

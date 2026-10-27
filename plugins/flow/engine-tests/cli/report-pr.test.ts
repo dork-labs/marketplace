@@ -17,6 +17,7 @@ import type { DrainState } from '../../scripts/drain/state.ts';
 import { EXIT } from '../../scripts/errors.ts';
 import type { FlowRun } from '../../scripts/flow-run.ts';
 import { main } from '../../scripts/flow.ts';
+import type { OpenPr } from '../../scripts/forge/open-prs.ts';
 import type { CreatePrInput, Forge, ForgePr, ForgeTarget } from '../../scripts/forge/types.ts';
 import { createFakeAdapter, type FakeTracker } from '../fixtures/cli/fake-adapter/adapter.ts';
 import { recordingGuard, refusal, type RecordingGuard } from '../fixtures/land/recording-guard.ts';
@@ -54,7 +55,9 @@ function commit(message: string): string {
 }
 
 /** A fake forge recording its calls. */
-function fakeForge(opts: { existing?: ForgePr | null; armed?: boolean } = {}) {
+function fakeForge(
+  opts: { existing?: ForgePr | null; armed?: boolean; openPrs?: OpenPr[] | Error } = {}
+) {
   const calls: { method: string; arg?: unknown }[] = [];
   const targets: ForgeTarget[] = [];
   const forge: Forge = {
@@ -90,6 +93,11 @@ function fakeForge(opts: { existing?: ForgePr | null; armed?: boolean } = {}) {
     async armFacts(): Promise<never> {
       throw new Error('the arm guard is injected in this test; nothing reads armFacts');
     },
+    async openPrs() {
+      const prs = opts.openPrs ?? [];
+      if (prs instanceof Error) throw prs;
+      return prs;
+    },
     async comment(pr: number, body: string) {
       calls.push({ method: 'comment', arg: [pr, body] });
     },
@@ -108,6 +116,23 @@ function fakeForge(opts: { existing?: ForgePr | null; armed?: boolean } = {}) {
     },
   };
   return { forge, calls, targets, factory: (t: ForgeTarget) => (targets.push(t), forge) };
+}
+
+/** `n` open PRs, oldest first, numbered from 100. */
+function openPrs(n: number): OpenPr[] {
+  return Array.from({ length: n }, (_, i) => ({
+    number: 100 + i,
+    title: `PR ${100 + i}`,
+    url: `https://github.com/acme/app/pull/${100 + i}`,
+    createdAt: `2026-09-${String(i + 1).padStart(2, '0')}T00:00:00Z`,
+    author: 'kai',
+    headRefName: `other-${i}`,
+    headSha: 'b'.repeat(40),
+    baseRefName: 'main',
+    isDraft: false,
+    labels: [],
+    armed: false,
+  }));
 }
 
 /** What the arm guard reads about PR 7, touching `files`. */
@@ -514,6 +539,42 @@ describe('flow pr', () => {
       { method: 'arm', arg: [7, head] },
     ]);
     expect(stored().pr?.armed).toBe(true);
+  });
+
+  // The open-PR cap (DOR-3341): at pr.maxOpen (8 by default) no new PR opens,
+  // and the refusal names the PRs that hold the slots.
+  it('refuses at the open-PR cap, naming the PRs holding the slots', async () => {
+    writeRun(drain({ pushedSha: head, reviewedSha: head, verdict: 'clean' }), head);
+    const r = await flow(args, fakeForge({ openPrs: openPrs(8) }));
+    expect(r.code).toBe(EXIT.precondition);
+    expect(r.stderr).toMatch(/8 pull requests are open, at the cap of 8/);
+    expect(r.stderr).toMatch(/#100, #101, .*#107/);
+    expect(r.forge.calls.some((c) => c.method === 'createPr')).toBe(false);
+    expect(stored().pr).toBeNull();
+  });
+
+  it('an urgent (P0) item opens its PR at the cap', async () => {
+    writeRun(drain({ pushedSha: head, reviewedSha: head, verdict: 'clean' }), head);
+    const urgent = createFakeAdapter({ items: [{ ...claimedItem(), priority: 1 }] });
+    const r = await flow(args, fakeForge({ openPrs: openPrs(8) }), urgent);
+    expect(r.code, r.stderr).toBe(0);
+    expect(r.forge.calls.some((c) => c.method === 'createPr')).toBe(true);
+  });
+
+  it('an open-PR count that cannot be read refuses (fails closed)', async () => {
+    writeRun(drain({ pushedSha: head, reviewedSha: head, verdict: 'clean' }), head);
+    const r = await flow(args, fakeForge({ openPrs: new Error('gh: HTTP 502') }));
+    expect(r.code).toBe(EXIT.precondition);
+    expect(r.stderr).toMatch(/could not count the open pull requests \(gh: HTTP 502\)/);
+    expect(r.forge.calls.some((c) => c.method === 'createPr')).toBe(false);
+  });
+
+  it('under the cap the PR opens and reports its review route', async () => {
+    writeRun(drain({ pushedSha: head, reviewedSha: head, verdict: 'clean' }), head);
+    const r = await flow(args, fakeForge({ openPrs: openPrs(7) }));
+    expect(r.code, r.stderr).toBe(0);
+    // This fake cannot list the files, so the route is standard with Security on.
+    expect(r.json.route).toMatchObject({ class: 'standard', steps: { security: true, qa: true } });
   });
 
   // A PR already open for the branch is recorded, not duplicated, and the verb exits 5 naming it.

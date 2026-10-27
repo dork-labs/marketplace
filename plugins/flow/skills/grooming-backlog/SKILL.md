@@ -39,7 +39,7 @@ lists them.
 2. Build a ledger file in the scratchpad (one row per item, current values, empty
    proposal slots). Later phases read and write it, never memory.
 3. Record the baseline: `flow audit --snapshot <scratch>/before.json --json` and
-   `flow next --snapshot <scratch>/before.json -n 10 --json`. Check mode: go to phase 7's report.
+   `flow next --snapshot <scratch>/before.json -n 10 --json`, and `flow prs --json`. Check mode: go to phase 7's report.
 
 ### Phase 2 — Project architecture
 
@@ -108,12 +108,12 @@ path, then is reported, never dropped.
 
 ### Phase 7 — Verify and report
 
-1. `flow audit --json`: every invariant green over the groomed scope. Violations on items
-   another session made mid-groom are out of scope: report, do not touch.
+1. `flow audit --json`: every invariant green over the groomed scope. Items another
+   session made mid-groom are out of scope: report them.
 2. `flow next -n 10 --json` against the baseline. **The top picks must be work the
    operator would want an agent doing next**; a bigger pool with a wrong top pick fails.
 3. Report the before/after numbers, closures with evidence, the project map, the ready-set
-   size, every flag and question, and file follow-ups (`origin/from-agent`).
+   size, each stuck PR's `prompt` (never touch the PR), every flag and question, and file follow-ups (`origin/from-agent`).
 
 ## Guardrails
 
@@ -126,5 +126,4 @@ path, then is reported, never dropped.
 - **Concurrent writers exist.** Re-read before every label write; leave other sessions'
   in-flight items alone and flag them.
 - **A description rewrite re-signs, it does not accumulate.** It replaces the
-  provenance signature already there (`<flow-root>/docs/provenance.md`); two in one body
-  leave a reader guessing.
+  provenance signature already there (`<flow-root>/docs/provenance.md`).

@@ -91,6 +91,10 @@
     "baseline": 786,
     "target": 786
   },
+  "docs/open-prs.mdx": {
+    "baseline": 467,
+    "target": 467
+  },
   "docs/parallel-drain.mdx": {
     "baseline": 395,
     "target": 353

@@ -19,7 +19,7 @@ Each firing:
 
 0. **Pause check.** Run step 0 of
    `<flow-root>/skills/flow-drain/SKILL.md`. Stop whenever it says to stop. Tracker
-   reads and writes below go through the adapter at `adapter.path`.
+   I/O goes through the adapter at `adapter.path`.
 1. Take a backlog snapshot.
 2. **Release stale claims:** items with `agent/claimed` that have been
    untouched for 7 or more days (no tracker update and no comment). Release one
@@ -33,8 +33,8 @@ Each firing:
    - Match its id in any case (a branch may be `proj-123-…` for `PROJ-123`).
    - No worktree carries its id: `git worktree list --porcelain`.
    - No pushed branch carries its id: `git ls-remote --heads origin`.
-   - No open pull request on this repo's host carries its id
-     (`gh pr list --state open --search <id>`, or the host's equivalent).
+   - No open pull request on this repo's host carries its id (`node --experimental-strip-types "<flow-root>/scripts/flow.ts" prs --json`;
+     exit 4: release none).
    - Its own links, attachments and comments name no pull
      request or branch in any repo.
 
@@ -46,7 +46,7 @@ Each firing:
    ready it only if it passes the six readiness rules
    (`<flow-root>/skills/grooming-backlog/SKILL.md`, phase 4 step 5); otherwise park
    it with one question (`needsInput`).
-4. Report what was readied, parked, released and skipped.
+4. Report what was readied, parked, released and skipped, and stuck PRs' prompts.
 
 **Floor gates never run unattended.** No rejecting or cancelling, no new
 projects, no replies to outside reporters: list those items for the operator.

@@ -76,7 +76,15 @@
     "circuitBreaker": { "estimateMultiplier": 2, "tokenBudget": 2000000 },
     "projectCompletion": "advisory"
   },
-  "review": { "adversarial": true, "rubric": "REVIEW.md", "reviewers": 1 },
+  "review": {
+    "adversarial": true,
+    "rubric": "REVIEW.md",
+    "reviewers": 1,
+    "designPaths": [],
+    "lightPaths": [],
+    "qaLabel": "qa-go",
+    "designLabel": "design-ok"
+  },
   "context": {
     "perIssue": "fresh-session",
     "perStage": "fresh-subagent",
@@ -118,5 +126,6 @@
     "windDownGraceMinutes": 20,
     "pollSeconds": 60,
     "armAutoMerge": false
-  }
+  },
+  "pr": { "maxOpen": 8, "staleDays": 3, "maxBehind": 20 }
 }

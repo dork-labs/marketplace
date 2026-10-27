@@ -25,13 +25,12 @@ callees; trace the logic and fix what is wrong. This is the only review of your 
 
 **No completion claim without fresh evidence:** run the proving command in this pass
 and read its whole output. Scale to the change: tests (0 failures), lint, typecheck,
-build, and for a bug the symptom test going red→green. Prefer package-filtered commands.
+build, and for a bug the symptom test going red→green.
 Check the VCS diff; never trust an agent's "success".
 
 ## 3. Advisory review — only when step 4 is off
 
-With `review.adversarial` false, have a fresh reviewer (or the harness's code-review
-skill) read the diff against the task and the project's standards. It is advisory: you
+With `review.adversarial` false, have a fresh reviewer read the diff against the task and the project's standards. It is advisory: you
 may open the PR with a finding outstanding if the PR body says so.
 
 ## 4. Adversarial review — before the PR exists
@@ -84,11 +83,13 @@ Evidence is config-driven, never hand-picked: follow the `EvidencePlan` that
 - **Temporal:** `evidence.temporal` `"video"` (default), `"gif"` or `"off"`.
 - **Logic:** `evidence.logic` `"test-summary"` (default), `"full-output"` or `"off"`.
 
-The format keys off whether a live session is attached now, never off autonomy. v1
-attaches links, not binary uploads. A capture that cannot be produced is reported as a
-gap; never fake proof.
+The format keys off whether a live session is attached now. v1
+attaches links. A capture that cannot be produced is a reported gap; never fake proof.
 
 ## 6. Attach the evidence and open the PR
+
+Before a new PR, `flow prs --for <identifier>`; exit 5: open nothing, report why, stop.
+Request its route's review steps (`docs/open-prs.mdx`).
 
 `attachTo` (default `["pr", "tracker"]`) decides:
 
@@ -127,7 +128,7 @@ public-repository rules: truncate `sessionId` and omit `resumeUrl`.
 - The branch name can close it too. After a partial PR merges, read the item's state;
   if automation closed it, `transition` it back to the stage the remaining work is at
   and say automation closed it. Recommend once that the adopter turn off branch-name
-  auto-close. The adapter documents what the tracker honours.
+  auto-close.
 
 ## 7. Hand off to the review gate
 

@@ -260,6 +260,7 @@ export function render<K extends MessageKind>(kind: K, ctx: MessageContexts[K]):
         [
           `The review of ${id} came back clean at ${short(c.sha)}, the head of your branch on origin.`,
           `Open the pull request with flow, never with \`gh pr create\`: flow checks the clean review first. Write the pull request's body to \`${PR_BODY_FILE}\`, then run the command below. Push nothing more until it has run.`,
+          `If it refuses because the repository is at its open-pull-request cap, write its message to \`.dork/flow/drain/question.md\` and run \`${command(ctx, 'report', id, 'blocked', '--question-file', '.dork/flow/drain/question.md')}\`: a person lands one of the PRs it names first.`,
         ],
         command(ctx, 'pr', id, '--title', title, '--body-file', PR_BODY_FILE)
       );

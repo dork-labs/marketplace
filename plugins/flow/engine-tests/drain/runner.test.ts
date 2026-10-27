@@ -229,6 +229,25 @@ function fakeForge() {
     async armFacts(): Promise<never> {
       throw new Error('the arm guard is injected in this test; nothing reads armFacts');
     },
+    async openPrs() {
+      if (prNumber === null) return [];
+      const run = Object.values(project.runs()).find((r) => r.identifier === 'ACME-1');
+      return [
+        {
+          number: prNumber,
+          title: 'ACME-1',
+          url: `u/${prNumber}`,
+          createdAt: '2026-01-01T00:00:00Z',
+          author: 'flow-bot',
+          headRefName: run?.branch ?? 'acme-1',
+          headSha: head(),
+          baseRefName: 'work',
+          isDraft: false,
+          labels: [],
+          armed,
+        },
+      ];
+    },
     async comment(pr: number, body: string) {
       calls.push({ method: 'comment', arg: [pr, body] });
     },

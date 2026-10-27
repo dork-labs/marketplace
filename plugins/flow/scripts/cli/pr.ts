@@ -11,8 +11,11 @@
  * 2. appends a provenance line to the body when it has none;
  * 3. when an open PR already exists for the branch, records it and exits 5
  *    naming it, so a retry is safe;
- * 4. otherwise opens the PR against origin's default branch and records
- *    `drain.pr`;
+ * 4. refuses (exit 5) at the open-PR cap (`pr.maxOpen`, DOR-3341) unless the
+ *    item is urgent (P0), naming the PRs that hold the slots; a count that
+ *    cannot be read refuses too (`cli/open-prs-read.ts`);
+ * 5. otherwise opens the PR against origin's default branch and records
+ *    `drain.pr`, and reports its review route (`land/review-route.ts`);
  * 5. names the PR's reviewer in a comment of its own (DOR-3262):
  *    `land.securityPaths.reviewer` when the PR touches a security path (by the
  *    list on `origin/main`), else `land.reviewer`. Both are handles, so they
@@ -36,6 +39,7 @@ import type { LandConfig } from '../config-schema.ts';
 import { securityPathsTouched } from '../land/arm-decision.ts';
 import { policyFor, refusalSticksToCommit } from '../land/arm-guard.ts';
 import { readBaseLand } from '../land/base-config.ts';
+import { describeRoute, reviewRoute, type ReviewRoute } from '../land/review-route.ts';
 import { openFlowStateFile } from '../flow-state-file.ts';
 import type { Forge, ForgePr } from '../forge/types.ts';
 import type { VerbContext, VerbResult } from './context.ts';
@@ -48,6 +52,7 @@ import {
   writeDrain,
   type DrainRun,
 } from './drain-run.ts';
+import { prCapGate } from './open-prs-read.ts';
 import { provenanceLine } from './provenance.ts';
 import { sessionProvenance } from './work-write.ts';
 
@@ -266,6 +271,12 @@ export async function run(ctx: VerbContext): Promise<VerbResult> {
     );
   }
 
+  // The open-PR cap (DOR-3341): at pr.maxOpen, only an urgent item opens a PR.
+  const gate = await prCapGate(ctx, { dir: worktree, identifier: drainRun.identifier, forge });
+  if (!gate.ok) {
+    throw new PreconditionError(`no new pull request for ${drainRun.identifier}: ${gate.detail}`);
+  }
+
   const base = await defaultBranch(ctx, worktree);
   const reviewers = reviewersFor(ctx);
   // Which paths count as security paths comes from main, like the guard's
@@ -328,6 +339,7 @@ export async function run(ctx: VerbContext): Promise<VerbResult> {
       : mention.posted
         ? ` Asked ${mention.reviewer} to review it.`
         : ` Could not ask ${mention.reviewer} to review it: ${mention.error}.`;
+  const route = await routeFor(ctx, forge, created.number, baseLand?.ok ? baseLand.land : null);
   // A refused arm is not a failed `flow pr`: the PR is open and recorded, and
   // armRefused says why it is unarmed.
   return {
@@ -339,9 +351,36 @@ export async function run(ctx: VerbContext): Promise<VerbResult> {
       head,
       mention,
       armRefused,
+      route,
     },
     text: `Opened ${created.url} for ${identifier} into ${base}${armed ? ', auto-merge armed' : ''}.${mentionText}${
       armRefused === null ? '' : ` Did not arm it (${armRefused.reason}): ${armRefused.detail}.`
-    }`,
+    } Review route: ${describeRoute(route)}.`,
   };
+}
+
+/**
+ * The new PR's review route (DOR-3341): Security always, QA unless it is
+ * `light`, design when it touches `review.designPaths`. The security paths are
+ * `origin/main`'s when they were read, else this checkout's. A file list the
+ * forge cannot give routes as standard, with every configured step.
+ */
+async function routeFor(
+  ctx: VerbContext,
+  forge: Forge,
+  pr: number,
+  baseLand: LandConfig | null
+): Promise<ReviewRoute> {
+  const { config } = loadConfig(findConfigRoots(ctx.projectDir, ctx.flowRoot), ctx.env);
+  let files: string[] | null = null;
+  try {
+    files = (await forge.armFacts(pr)).files;
+  } catch {
+    files = null;
+  }
+  return reviewRoute(files, {
+    arm: policyFor(baseLand ?? config.land),
+    designPaths: config.review.designPaths,
+    lightPaths: config.review.lightPaths,
+  });
 }

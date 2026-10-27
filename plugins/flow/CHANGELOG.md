@@ -4,6 +4,19 @@ Installs of this plugin are pinned to a commit SHA, so a fix here does not reach
 you until you **reinstall it** (Marketplace → flow → reinstall, or re-run your
 `--plugin-dir` checkout's `git pull`). Each entry below says whether that matters.
 
+## 0.61.0
+
+**Flow stops opening pull requests faster than people can land them. Reinstall to get it.**
+
+- An item with an open PR now counts as work in progress until that PR merges or closes, whatever its tracker state or claim. Before, an item stopped counting once it reached review or its claim dropped, so `flow next` and the drain kept handing out new work while open PRs piled up. Flow finds an item's PR by its identifier in the PR's branch name or title, from one fixed, read-only `gh pr list` call.
+- New `pr.maxOpen` (default 8): at that many open PRs, `flow pr` and `/flow:verify` open no new one unless the item is urgent (P0), and say which PRs hold the slots. `flow next` reports `atPrCap` and `prCap`, and picks only urgent work while at the cap. If flow can't count the open PRs, it treats that as the cap.
+- `flow next` names `land`: your oldest open PR that isn't armed. The drain lands it (rebase, re-gate, answer review) before it claims new work, and each `flow drain` pass sweeps before it starts anything.
+- New `flow prs`: the open PRs with their age, author and how far behind their base they are. PRs older than `pr.staleDays` (3) or more than `pr.maxBehind` (20) commits behind are listed as stuck, with a ship / split / close prompt naming the owner. Groom and the daily triage report them. `flow prs --for <id>` is the cap check `/flow:verify` runs.
+- The review route: every PR gets Security. A PR that only touches dependency manifests and lockfiles, docs, copy (`review.lightPaths`), tests or CI is `light` and skips QA, but a lockfile or manifest still needs the security label to arm. Agent prose (skills, commands, `AGENTS.md`) is never light. The design read runs only when a PR touches `review.designPaths`, at PR open alongside Security. `flow pr` reports the route.
+- New `flow sweep`: arms each open PR that is cleared but unarmed (required checks green, and the security label, plus `review.qaLabel` and `review.designLabel` where its route needs them, added after its current head was pushed) through the arm guard, and says why every other unarmed PR isn't armed. A label from before a push doesn't count: the reviewer adds it again after reading what changed. The drain runs it every pass, and arms only when `drain.armAutoMerge` is on. The sweep leaves `land.preArm` checks to the drain's own runs, so a PR they apply to is reported `pre-arm-deferred`.
+- A drain worker refused at the cap reports itself blocked with the refusal, so a person sees which PRs to land.
+- New page: [Keeping open PRs few](/docs/guides/flow/open-prs).
+
 ## 0.60.2
 
 **Flow arms one dependency PR at a time, and its pre-arm checks run more tightly sandboxed. Reinstall to get it.**

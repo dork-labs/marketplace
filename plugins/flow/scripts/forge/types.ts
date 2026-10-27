@@ -13,6 +13,7 @@
  */
 
 import { ConfigError, EXIT, FlowError } from '../errors.ts';
+import type { OpenPr } from './open-prs.ts';
 
 /** An open pull request found or created on a branch. */
 export interface ForgePr {
@@ -225,6 +226,26 @@ export interface Forge {
   dependencyQueue?(base: string): Promise<QueuedPr[] | null>;
   /** Everything the arm guard reads about a PR. */
   armFacts(pr: number): Promise<ArmFacts>;
+  /**
+   * Every open PR of the repository, oldest first, from one fixed read-only
+   * call (`open-prs.ts`). Optional: a forge without it cannot count open PRs,
+   * so the open-PR cap reads as unreadable there and refuses.
+   */
+  openPrs?(): Promise<OpenPr[]>;
+  /** How many commits `sha` is behind `base`. Optional; absent reads as unknown. */
+  behindBy?(base: string, sha: string): Promise<number>;
+  /**
+   * When `label` was last added to the PR, ISO-8601, or `null` when it is not
+   * on the PR by its event history (never added, or removed since).
+   * Optional; absent reads as never.
+   */
+  labelledAt?(pr: number, label: string): Promise<string | null>;
+  /**
+   * When the forge first saw `sha` pushed, ISO-8601 (the earliest check suite
+   * created for it: a server time a commit's own dates cannot move), or `null`
+   * when nothing ran on it. Optional; absent reads as unknown.
+   */
+  commitSeenAt?(sha: string): Promise<string | null>;
   /** Post a plain comment on a PR as the signed-in account. */
   comment(pr: number, body: string): Promise<void>;
   /**

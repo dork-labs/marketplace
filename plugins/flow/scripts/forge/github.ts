@@ -26,6 +26,7 @@ import path from 'node:path';
 
 import type { ProcessRunner } from '../cli/context.ts';
 import { isBranchName, isFullSha, isNonce, isWorkflowName } from '../land/validate.ts';
+import { openPrListArgs, parseOpenPrs } from './open-prs.ts';
 import {
   ForgeError,
   type ArmFacts,
@@ -551,6 +552,50 @@ export function foldGroups(
 }
 
 /**
+ * When `label` was last added, from the label events of an issue's event list
+ * (one `{event, created_at, name}` JSON object per line, oldest first, as
+ * GitHub lists them): the latest `labeled` with no `unlabeled` after it.
+ *
+ * @param out - The lines.
+ * @param label - The label, in any case.
+ * @returns The time, or `null` when the label is not on by its history.
+ * @throws {ForgeError} On a line that is not such an object.
+ */
+export function parseLabelledAt(out: string, label: string): string | null {
+  let at: string | null = null;
+  for (const line of out.split('\n')) {
+    if (line.trim() === '') continue;
+    const event = record(safeJson(line));
+    const time = str(event?.created_at);
+    if (event === undefined || time === undefined || !Number.isFinite(Date.parse(time))) {
+      throw new ForgeError('gh returned a label event flow cannot read');
+    }
+    if ((str(event.name) ?? '').toLowerCase() !== label.toLowerCase()) continue;
+    at = event.event === 'labeled' ? time : null;
+  }
+  return at;
+}
+
+/**
+ * The earliest of one ISO time per line, or `null` when there is none.
+ *
+ * @param out - The lines.
+ * @returns The earliest time.
+ * @throws {ForgeError} On a line that is not a time.
+ */
+export function earliestTime(out: string): string | null {
+  let earliest: string | null = null;
+  for (const line of out.split('\n')) {
+    const time = line.trim().replace(/^"|"$/g, '');
+    if (time === '') continue;
+    if (!Number.isFinite(Date.parse(time)))
+      throw new ForgeError(`gh returned "${time}", not a time`);
+    if (earliest === null || Date.parse(time) < Date.parse(earliest)) earliest = time;
+  }
+  return earliest;
+}
+
+/**
  * Build the GitHub forge for one repository.
  *
  * @param options - The repository, the process runner and the clock.
@@ -819,6 +864,60 @@ export function createGithubForge(options: GithubForgeOptions): Forge {
         if (str(again?.headRefOid) !== facts.headRefOid) return { ...facts, files: null };
       }
       return facts;
+    },
+
+    async openPrs() {
+      return parseOpenPrs(
+        await ghJson(openPrListArgs(repoArg), `listing the open pull requests of ${target.repo}`)
+      );
+    },
+
+    async behindBy(base, sha) {
+      if (!isBranchName(base) || !isFullSha(sha)) {
+        throw new ForgeError(`not a branch and a full commit: ${base}, ${sha}`);
+      }
+      const out = await gh(
+        ['api', ...hostArgs, `repos/${target.repo}/compare/${base}...${sha}`, '--jq', '.behind_by'],
+        `reading how far ${sha.slice(0, 7)} is behind ${base} on ${target.repo}`
+      );
+      const count = Number(out.trim());
+      if (out.trim() === '' || !Number.isInteger(count) || count < 0) {
+        throw new ForgeError(
+          `gh returned no behind count for ${sha.slice(0, 7)} on ${target.repo}`
+        );
+      }
+      return count;
+    },
+
+    async labelledAt(pr, label) {
+      const out = await gh(
+        [
+          'api',
+          ...hostArgs,
+          '--paginate',
+          '--jq',
+          '.[] | select(.event == "labeled" or .event == "unlabeled") | {event, created_at, name: .label.name}',
+          `repos/${target.repo}/issues/${pr}/events?per_page=100`,
+        ],
+        `reading the label history of ${target.repo}#${pr}`
+      );
+      return parseLabelledAt(out, label);
+    },
+
+    async commitSeenAt(sha) {
+      if (!isFullSha(sha)) throw new ForgeError(`not a full commit: ${sha}`);
+      const out = await gh(
+        [
+          'api',
+          ...hostArgs,
+          '--paginate',
+          '--jq',
+          '.check_suites[] | .created_at',
+          `repos/${target.repo}/commits/${sha}/check-suites?per_page=100`,
+        ],
+        `reading when ${target.repo} first saw ${sha.slice(0, 7)}`
+      );
+      return earliestTime(out);
     },
 
     async mergeInfo(pr) {

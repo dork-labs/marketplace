@@ -496,38 +496,6 @@ export const GatesSchema = z
   .prefault({});
 
 /**
- * Adversarial pre-PR review policy (§6) — the independent review a branch faces
- * **before** its PR exists, distinct from two neighbors it is easy to confuse:
- * `gates.review` is the auto-merge policy that runs *after* a human approves,
- * and `stages.review` is the human gate itself. This block governs the machine
- * review in between.
- *
- * The default is on. An implementing agent is the worst reviewer of its own
- * branch — it reviews the story it remembers writing rather than the diff it
- * actually produced — so a separate reviewer reading the real diff against a
- * written rubric is what makes the PR's first human read cheap.
- */
-export const ReviewSchema = z
-  .object({
-    /** Dispatch an independent adversarial review before any PR opens. */
-    adversarial: z.boolean().default(true),
-    /**
-     * Path to the review rubric the reviewer reads. Resolved against the repo
-     * root, or the current directory when flow runs outside a repo; an absolute
-     * path is used as-is.
-     */
-    rubric: z.string().default('REVIEW.md'),
-    /**
-     * Independent reviewer agents dispatched per review. Raise for risky or
-     * wide-blast-radius changes. Findings from all of them are pooled: any
-     * blocking finding blocks unless it is rebutted, so more reviewers can only
-     * ever find more, never out-vote a real defect.
-     */
-    reviewers: z.number().int().positive().default(1),
-  })
-  .prefault({});
-
-/**
  * Context lifetime per issue (§7.7).
  *
  * - `fresh-session` (the default) — every claim starts a new session.
@@ -1023,6 +991,75 @@ export const LandSchema = z
   .prefault({});
 
 /**
+ * Adversarial pre-PR review policy (§6) — the independent review a branch faces
+ * **before** its PR exists, distinct from two neighbors it is easy to confuse:
+ * `gates.review` is the auto-merge policy that runs *after* a human approves,
+ * and `stages.review` is the human gate itself. This block governs the machine
+ * review in between.
+ *
+ * The default is on. An implementing agent is the worst reviewer of its own
+ * branch — it reviews the story it remembers writing rather than the diff it
+ * actually produced — so a separate reviewer reading the real diff against a
+ * written rubric is what makes the PR's first human read cheap.
+ */
+export const ReviewSchema = z
+  .object({
+    /** Dispatch an independent adversarial review before any PR opens. */
+    adversarial: z.boolean().default(true),
+    /**
+     * Path to the review rubric the reviewer reads. Resolved against the repo
+     * root, or the current directory when flow runs outside a repo; an absolute
+     * path is used as-is.
+     */
+    rubric: z.string().default('REVIEW.md'),
+    /**
+     * Independent reviewer agents dispatched per review. Raise for risky or
+     * wide-blast-radius changes. Findings from all of them are pooled: any
+     * blocking finding blocks unless it is rebutted, so more reviewers can only
+     * ever find more, never out-vote a real defect.
+     */
+    reviewers: z.number().int().positive().default(1),
+    /**
+     * The review route (`land/review-route.ts`): the paths that send a PR to
+     * the design step, as globs. Empty: no PR gets a design step. A PR that
+     * touches one gets the design read at PR open, from the diff, alongside
+     * Security; every other PR skips it.
+     */
+    designPaths: z.array(PathGlobSchema).default([]),
+    /**
+     * More paths, on top of the built-in list, that count as copy for the
+     * `light` class (string tables, content files). A PR that touches only
+     * light paths skips the QA step. It never skips Security.
+     */
+    lightPaths: z.array(PathGlobSchema).default([]),
+    /** The label that says QA passed the PR's current head. Flow only reads it. */
+    qaLabel: BareLabelSchema.default('qa-go'),
+    /** The label that says the design read passed the PR's current head. Flow only reads it. */
+    designLabel: BareLabelSchema.default('design-ok'),
+  })
+  .prefault({});
+
+/**
+ * Open pull requests (DOR-3341, the Flow half): how many may be open at once,
+ * and when an open one counts as stuck. Committed policy; the counts are read
+ * from the forge with one fixed `gh pr list` call (`forge/open-prs.ts`).
+ */
+export const PrSchema = z
+  .object({
+    /**
+     * The most open PRs the repository may have before flow refuses to open
+     * another. An urgent (P0) item is exempt. Unreadable counts refuse.
+     */
+    maxOpen: z.number().int().positive().default(8),
+    /** Days after which an open PR is stale and groom asks to ship, split or close it. */
+    staleDays: z.number().int().positive().default(3),
+    /** Commits behind `main` after which an open PR is flagged the same way. */
+    maxBehind: z.number().int().positive().default(20),
+  })
+  .strict()
+  .prefault({});
+
+/**
  * The journal (spec `flow-self-improvement` §2): a local, redacted record of how
  * flow's runs go, at `<main checkout>/.dork/flow/journal.jsonl`. On by default;
  * `enabled: false` makes every write a no-op. The file rotates once it reaches
@@ -1154,6 +1191,8 @@ export const FlowConfigSchema = z
     drain: DrainSchema,
     /** What flow checks before it arms auto-merge, and whom it names on a new PR. */
     land: LandSchema,
+    /** The open-PR cap and when an open PR counts as stuck. */
+    pr: PrSchema,
     /** Self-test, journal and retro policy. */
     selfImprovement: SelfImprovementSchema,
     /** Whether flow suggests setting up this machine's accounts. */
@@ -1166,6 +1205,10 @@ export type FlowConfig = z.infer<typeof FlowConfigSchema>;
 
 /** The resolved `land` block. */
 export type LandConfig = z.infer<typeof LandSchema>;
+/** The resolved `review` block. */
+export type ReviewConfig = z.infer<typeof ReviewSchema>;
+/** The resolved `pr` block. */
+export type PrConfig = z.infer<typeof PrSchema>;
 /** One resolved `land.preArm` entry. */
 export type PreArmEntry = z.infer<typeof PreArmEntrySchema>;
 
