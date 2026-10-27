@@ -798,6 +798,32 @@
           "type": "integer",
           "exclusiveMinimum": 0,
           "maximum": 9007199254740991
+        },
+        "designPaths": {
+          "default": [],
+          "type": "array",
+          "items": {
+            "type": "string",
+            "pattern": "^(?!\\.\\/)(?!\\/)(?!.*\\/\\/)(?!.*\\/$)(?!(?:.*\\/)?\\.\\.(?:\\/|$))(?!.*\\s$)[^\\\\\\s][^\\\\]*$"
+          }
+        },
+        "lightPaths": {
+          "default": [],
+          "type": "array",
+          "items": {
+            "type": "string",
+            "pattern": "^(?!\\.\\/)(?!\\/)(?!.*\\/\\/)(?!.*\\/$)(?!(?:.*\\/)?\\.\\.(?:\\/|$))(?!.*\\s$)[^\\\\\\s][^\\\\]*$"
+          }
+        },
+        "qaLabel": {
+          "default": "qa-go",
+          "type": "string",
+          "pattern": "^[^/\\s](?:[^/]*[^/\\s])?$"
+        },
+        "designLabel": {
+          "default": "design-ok",
+          "type": "string",
+          "pattern": "^[^/\\s](?:[^/]*[^/\\s])?$"
         }
       },
       "additionalProperties": false
@@ -1226,6 +1252,31 @@
               "type": "null"
             }
           ]
+        }
+      },
+      "additionalProperties": false
+    },
+    "pr": {
+      "default": {},
+      "type": "object",
+      "properties": {
+        "maxOpen": {
+          "default": 8,
+          "type": "integer",
+          "exclusiveMinimum": 0,
+          "maximum": 9007199254740991
+        },
+        "staleDays": {
+          "default": 3,
+          "type": "integer",
+          "exclusiveMinimum": 0,
+          "maximum": 9007199254740991
+        },
+        "maxBehind": {
+          "default": 20,
+          "type": "integer",
+          "exclusiveMinimum": 0,
+          "maximum": 9007199254740991
         }
       },
       "additionalProperties": false

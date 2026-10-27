@@ -26,6 +26,7 @@ import path from 'node:path';
 
 import type { ProcessRunner } from '../cli/context.ts';
 import { isBranchName, isFullSha, isNonce, isWorkflowName } from '../land/validate.ts';
+import { openPrListArgs, parseOpenPrs } from './open-prs.ts';
 import {
   ForgeError,
   type ArmFacts,
@@ -551,6 +552,139 @@ export function foldGroups(
 }
 
 /**
+ * When `label` was last added, from the label events of an issue's event list
+ * (one `{event, created_at, name}` JSON object per line, oldest first, as
+ * GitHub lists them): the latest `labeled` with no `unlabeled` after it.
+ *
+ * @param out - The lines.
+ * @param label - The label, in any case.
+ * @returns The time, or `null` when the label is not on by its history.
+ * @throws {ForgeError} On a line that is not such an object.
+ */
+export function parseLabelledAt(out: string, label: string): string | null {
+  let at: string | null = null;
+  for (const line of out.split('\n')) {
+    if (line.trim() === '') continue;
+    const event = record(safeJson(line));
+    const time = str(event?.created_at);
+    if (event === undefined || time === undefined || !Number.isFinite(Date.parse(time))) {
+      throw new ForgeError('gh returned a label event flow cannot read');
+    }
+    if ((str(event.name) ?? '').toLowerCase() !== label.toLowerCase()) continue;
+    at = event.event === 'labeled' ? time : null;
+  }
+  return at;
+}
+
+/**
+ * The read-only GraphQL query for a PR's force-pushes: when each happened and
+ * the commit it left as the head. A fixed string; only the variables change.
+ */
+export const FORCE_PUSHES_QUERY =
+  'query($owner:String!,$name:String!,$number:Int!){repository(owner:$owner,name:$name){pullRequest(number:$number){' +
+  'timelineItems(last:100,itemTypes:[HEAD_REF_FORCE_PUSHED_EVENT]){totalCount nodes{... on HeadRefForcePushedEvent{createdAt afterCommit{oid}}}}}}}';
+
+/** One check suite on a commit: when it was made, and for which branch. */
+export interface SuiteSeen {
+  /** When GitHub made it. */
+  createdAt: string;
+  /** The branch the push that made it went to, or `null`. */
+  headBranch: string | null;
+}
+
+/** One force-push of a PR's head. */
+export interface ForcePush {
+  /** When it happened. */
+  createdAt: string;
+  /** The head it left, or `null` when GitHub no longer has it. */
+  after: string | null;
+}
+
+/**
+ * Parse `.check_suites[] | {created_at, head_branch}`, one object per line.
+ *
+ * @param out - The lines.
+ * @returns The suites.
+ * @throws {ForgeError} On a line it cannot read.
+ */
+export function parseSuites(out: string): SuiteSeen[] {
+  const suites: SuiteSeen[] = [];
+  for (const line of out.split('\n')) {
+    if (line.trim() === '') continue;
+    const suite = record(safeJson(line));
+    const createdAt = str(suite?.created_at);
+    if (suite === undefined || createdAt === undefined || !Number.isFinite(Date.parse(createdAt))) {
+      throw new ForgeError('gh returned a check suite flow cannot read');
+    }
+    suites.push({ createdAt, headBranch: str(suite.head_branch) ?? null });
+  }
+  return suites;
+}
+
+/**
+ * Parse {@link FORCE_PUSHES_QUERY}'s answer.
+ *
+ * @param raw - The parsed JSON.
+ * @returns Every force-push, or `null` when the answer is not whole (more than
+ *   the page holds, or not in the shape asked for): unknown, never "none".
+ */
+export function parseForcePushes(raw: unknown): ForcePush[] | null {
+  const items = record(
+    record(record(record(record(raw)?.data)?.repository)?.pullRequest)?.timelineItems
+  );
+  if (items === undefined || !Array.isArray(items.nodes)) return null;
+  if (typeof items.totalCount !== 'number' || items.totalCount !== items.nodes.length) return null;
+  const pushes: ForcePush[] = [];
+  for (const node of items.nodes) {
+    const createdAt = str(record(node)?.createdAt);
+    if (createdAt === undefined || !Number.isFinite(Date.parse(createdAt))) return null;
+    pushes.push({
+      createdAt,
+      after: str(record(record(node)?.afterCommit)?.oid)?.toLowerCase() ?? null,
+    });
+  }
+  return pushes;
+}
+
+/**
+ * When `sha` arrived as the head of the PR whose branch is `branch`, from the
+ * events that move a head, never from every suite (a workflow that runs on
+ * `labeled` makes a new suite each time a label is added):
+ *
+ * - the PR's last force-push left `sha` as the head: that push's time;
+ * - else the earliest suite made for `sha` by a push to `branch` (a commit
+ *   pushed to another branch first does not count), when it came after the
+ *   last force-push: that suite's time;
+ * - else unknown (`null`): the head may have come back by a fast-forward after
+ *   a force-push away, or the force-pushes could not be read in full.
+ *
+ * @param suites - The commit's check suites.
+ * @param forcePushes - The PR's force-pushes, or `null` when unknown.
+ * @param sha - The head.
+ * @param branch - The PR's head branch.
+ * @returns The arrival time, or `null`.
+ */
+export function headArrival(
+  suites: readonly SuiteSeen[],
+  forcePushes: readonly ForcePush[] | null,
+  sha: string,
+  branch: string
+): string | null {
+  if (forcePushes === null) return null;
+  const last = [...forcePushes]
+    .sort((a, b) => Date.parse(a.createdAt) - Date.parse(b.createdAt))
+    .at(-1);
+  if (last !== undefined && last.after === sha.toLowerCase()) return last.createdAt;
+  const first = suites
+    .filter((suite) => suite.headBranch === branch)
+    .map((suite) => suite.createdAt)
+    .sort((a, b) => Date.parse(a) - Date.parse(b))[0];
+  if (first === undefined) return null;
+  if (last !== undefined && Date.parse(first) <= Date.parse(last.createdAt)) return null;
+  return first;
+}
+
+/**
  * Build the GitHub forge for one repository.
  *
  * @param options - The repository, the process runner and the clock.
@@ -819,6 +953,76 @@ export function createGithubForge(options: GithubForgeOptions): Forge {
         if (str(again?.headRefOid) !== facts.headRefOid) return { ...facts, files: null };
       }
       return facts;
+    },
+
+    async openPrs() {
+      return parseOpenPrs(
+        await ghJson(openPrListArgs(repoArg), `listing the open pull requests of ${target.repo}`)
+      );
+    },
+
+    async behindBy(base, sha) {
+      if (!isBranchName(base) || !isFullSha(sha)) {
+        throw new ForgeError(`not a branch and a full commit: ${base}, ${sha}`);
+      }
+      const out = await gh(
+        ['api', ...hostArgs, `repos/${target.repo}/compare/${base}...${sha}`, '--jq', '.behind_by'],
+        `reading how far ${sha.slice(0, 7)} is behind ${base} on ${target.repo}`
+      );
+      const count = Number(out.trim());
+      if (out.trim() === '' || !Number.isInteger(count) || count < 0) {
+        throw new ForgeError(
+          `gh returned no behind count for ${sha.slice(0, 7)} on ${target.repo}`
+        );
+      }
+      return count;
+    },
+
+    async labelledAt(pr, label) {
+      const out = await gh(
+        [
+          'api',
+          ...hostArgs,
+          '--paginate',
+          '--jq',
+          '.[] | select(.event == "labeled" or .event == "unlabeled") | {event, created_at, name: .label.name}',
+          `repos/${target.repo}/issues/${pr}/events?per_page=100`,
+        ],
+        `reading the label history of ${target.repo}#${pr}`
+      );
+      return parseLabelledAt(out, label);
+    },
+
+    async headPushedAt(pr, sha, branch) {
+      if (!isFullSha(sha)) throw new ForgeError(`not a full commit: ${sha}`);
+      const suitesOut = await gh(
+        [
+          'api',
+          ...hostArgs,
+          '--paginate',
+          '--jq',
+          '.check_suites[] | {created_at, head_branch}',
+          `repos/${target.repo}/commits/${sha}/check-suites?per_page=100`,
+        ],
+        `reading the check suites of ${target.repo} ${sha.slice(0, 7)}`
+      );
+      const raw = await ghJson(
+        [
+          'api',
+          'graphql',
+          ...hostArgs,
+          '-f',
+          `query=${FORCE_PUSHES_QUERY}`,
+          '-f',
+          `owner=${owner}`,
+          '-f',
+          `name=${name}`,
+          '-F',
+          `number=${pr}`,
+        ],
+        `reading the force-pushes of ${target.repo}#${pr}`
+      );
+      return headArrival(parseSuites(suitesOut), parseForcePushes(raw), sha, branch);
     },
 
     async mergeInfo(pr) {

@@ -96,7 +96,16 @@ describe('FlowConfigSchema — parsing the §9 config.json', () => {
     expect(cfg.dispatch.sizeOrder).toBe('small-first');
     expect(cfg.gates.circuitBreaker.tokenBudget).toBe(2_000_000);
     expect(cfg.gates.projectCompletion).toBe('advisory');
-    expect(cfg.review).toEqual({ adversarial: true, rubric: 'REVIEW.md', reviewers: 1 });
+    expect(cfg.review).toEqual({
+      adversarial: true,
+      rubric: 'REVIEW.md',
+      reviewers: 1,
+      designPaths: [],
+      lightPaths: [],
+      qaLabel: 'qa-go',
+      designLabel: 'design-ok',
+    });
+    expect(cfg.pr).toEqual({ maxOpen: 8, staleDays: 3, maxBehind: 20 });
     expect(cfg.context.compactionTrigger).toBe(0.65);
     expect(cfg.workspace.isolation).toBe('worktree');
     expect(cfg.recovery.staleAfter).toBe('5m');
@@ -680,6 +689,7 @@ describe('z.toJSONSchema bridge', () => {
       'groom',
       'drain',
       'land',
+      'pr',
       'selfImprovement',
       'fleet',
     ];

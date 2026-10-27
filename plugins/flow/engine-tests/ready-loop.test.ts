@@ -129,7 +129,10 @@ function releaseGaps(triage: string): string[] {
     ['matches the id in any case', /Match its id in any case/],
     ['checks worktrees by command', /git worktree list --porcelain/],
     ['checks pushed branches by command', /git ls-remote --heads origin/],
-    ['checks open PRs on this host', /No open pull request on this repo's host[\s\S]*gh pr list/],
+    [
+      'checks open PRs on this host',
+      /No open pull request on this repo's host[\s\S]*scripts\/flow\.ts" prs --json/,
+    ],
     [
       'skips an item whose links name a PR or branch',
       /links, attachments and comments[\s\S]*name no pull\s+request or branch in any repo/,
@@ -237,7 +240,10 @@ describe('both schedules ship and are documented', () => {
     ['matches the id in any case', /Match its id in any case/],
     ['checks worktrees by command', /git worktree list --porcelain/],
     ['checks pushed branches by command', /git ls-remote --heads origin/],
-    ['checks open PRs on this host', /No open pull request on this repo's host[\s\S]*gh pr list/],
+    [
+      'checks open PRs on this host',
+      /No open pull request on this repo's host[\s\S]*scripts\/flow\.ts" prs --json/,
+    ],
     [
       'skips an item whose links name a PR or branch',
       /links, attachments and comments[\s\S]*name no pull\s+request or branch in any repo/,

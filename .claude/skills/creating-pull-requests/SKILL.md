@@ -13,16 +13,31 @@ How marketplace PRs are opened, gated, and landed. This repo is worked by severa
 - You are about to open a PR (from an agent or by hand).
 - A PR is open and you are waiting for it to go green or merge.
 
+## One plain command per Bash call
+
+Every Bash call is one plain command. Each compound command is a new approval card for
+the person watching, and a flood of them buries the one that matters.
+
+- **No `cd X && …`.** Point the tool at the folder instead: `git -C <dir> …`,
+  `gh … -R dork-labs/marketplace`, `npm --prefix <dir> …`.
+- **No loops, no `$(…)`, no `;` or `&&` chains.** Run each step as its own call, and
+  read a value from one call's output before you use it in the next.
+- **No `VAR=…` set in one call for use in another.** Shell state does not carry over;
+  paste the value itself.
+
+The commands below are written that way. Keep them that way when you add one.
+
 ## How this repo is set up
 
 Ask the repo rather than trusting this list, because settings change:
 
 ```bash
-gh api repos/{owner}/{repo}/rules/branches/main \
-  --jq '[.[] | select(.type=="required_status_checks") | .parameters.required_status_checks[].context]'
-gh api repos/{owner}/{repo}/rules/branches/main --jq '[.[].type]'   # merge_queue, deletion, non_fast_forward, ...
-gh api repos/{owner}/{repo} --jq '{allow_auto_merge, delete_branch_on_merge, allow_squash_merge}'
+gh api repos/dork-labs/marketplace/rules/branches/main --jq '[.[] | select(.type=="required_status_checks") | .parameters.required_status_checks[].context]'
+gh api repos/dork-labs/marketplace/rules/branches/main --jq '[.[].type]'
+gh api repos/dork-labs/marketplace --jq '{allow_auto_merge, delete_branch_on_merge, allow_squash_merge}'
 ```
+
+One call each. The second lists the rule types (merge_queue, deletion, non_fast_forward).
 
 A repository ruleset protects `main`, so read the rules API. The older
 `branches/main/protection` endpoint reads classic branch protection only, which this repo
@@ -46,7 +61,8 @@ Every check runs on **every** PR and every merge-queue run (`merge_group`), with
 
 The independent review runs **against a pushed branch, before a PR exists**. Opening the PR is the last step, not the first:
 
-1. Build in an isolated worktree and run the local gates.
+1. Build in an isolated worktree and run the local gates: lint (the format check) and
+   the tests, every time, before every push.
 2. Push the branch. **Open nothing.**
 3. A reviewer (the `requesting-code-review` skill, or `/flow:verify`) fetches and checks out that branch. It does not need a PR.
 4. Findings, fixes, convergence.
@@ -69,39 +85,69 @@ Commit conventions and the pre-push gate live in the `/git:commit` and `/git:pus
 
 ## Run the CI gates locally
 
-CI runs these; run the ones your diff touches before you push:
+**Before every push and before opening the PR, run the lint and the tests for what you
+changed.** CI runs the same gates; a red one found after the push costs a review round.
+`<wt>` is your worktree's absolute path. One command per call:
 
 ```bash
-# flow plugin (required) — from plugins/flow, after npm ci
-npm run generate:schema && git diff --exit-code -- config/config.schema.json   # schema drift
-npm run typecheck
-npm test
-npm run format:check
+# flow plugin (required), after: npm --prefix <wt>/plugins/flow ci
+npm --prefix <wt>/plugins/flow run generate:schema
+git -C <wt> diff --exit-code -- plugins/flow/config/config.schema.json
+npm --prefix <wt>/plugins/flow run typecheck
+npm --prefix <wt>/plugins/flow test
+npm --prefix <wt>/plugins/flow run format:check
 
-# skills and manifests (required) — from tools/schema-check, after npm ci (needs network)
-npm run check
-npm run check:bump -- origin/main HEAD      # every package you changed raised its version
+# skills and manifests (required), after: npm --prefix <wt>/tools/schema-check ci (needs network)
+npm --prefix <wt>/tools/schema-check run check
+npm --prefix <wt>/tools/schema-check run check:bump -- origin/main HEAD
 
-# script fixtures (required) — from the repo root; one suite per run, so loop
-for t in scripts/test-*.sh .claude/skills/creating-pull-requests/scripts/test-watch-prs.sh; do bash "$t" || echo "FAILED: $t"; done
+# script fixtures (required): one suite per call
+bash <wt>/scripts/test-should-arm-automerge.sh
+bash <wt>/scripts/test-git-guard.sh
+bash <wt>/scripts/test-process-guard.sh
+bash <wt>/scripts/test-merge-guard.sh
+bash <wt>/scripts/test-run-node-hook.sh
+bash <wt>/scripts/test-worktree-git.sh
+bash <wt>/plugins/visual-companion/tests/install-smoke.sh
+node --test <wt>/plugins/visual-companion/skills/visual-companion/tests/17-loopback.test.cjs <wt>/plugins/visual-companion/skills/visual-companion/tests/18-host.test.cjs
+bash <wt>/.claude/skills/creating-pull-requests/scripts/test-watch-prs.sh
 
-# Claude Code manifest validity — from the repo root
-claude plugin validate .
-claude plugin validate ./plugins/<name>
+# Claude Code manifest validity
+claude plugin validate <wt>
+claude plugin validate <wt>/plugins/<name>
 ```
+
+The flow test suite is heavy. When `uptime` shows a load average of 16 or more, run the
+test files your change touches (`npm --prefix <wt>/plugins/flow test -- engine-tests/<file>`)
+and the full suite once the machine is quieter. `check:bump` confirms every package you
+changed raised its version; the script fixtures list is `scripts-test.yml`'s steps.
 
 **Schema drift is the easy one to miss.** CI regenerates `plugins/flow/config/config.schema.json` from its Zod source and fails if the committed file differs. Never hand-edit it; run `npm run generate:schema` and commit the result.
 
 **A new or renamed package touches three places.** `plugins/<name>/.claude-plugin/plugin.json`, its entry in `.claude-plugin/marketplace.json`, and its entry in `.claude-plugin/dorkos.json`. A PR that updates one without the others is incomplete even when CI is green.
 
-**Never commit local config.** `plugins/flow/config/config.json` and `*.local.json` are gitignored; only the `*.example.json` templates are committed. Check `git diff --name-only origin/main...HEAD` before opening.
+**Never commit local config.** `plugins/flow/config/config.json` and `*.local.json` are gitignored; only the `*.example.json` templates are committed. Check `git -C <wt> diff --name-only origin/main...HEAD` before opening.
+
+## Check the open-PR cap first
+
+Open PRs pile up faster than people review them. Before you open one, count them:
+
+```bash
+gh pr list -R dork-labs/marketplace --state open --limit 200 --json number,createdAt,author
+```
+
+At 8 or more (flow's `pr.maxOpen` default), open nothing new unless the work is urgent
+(P0). Land one of the open PRs first, oldest first: review, rebase, re-gate. Say which
+PRs hold the slots when you report that you are waiting. A list that cannot be read
+counts as the cap. In a project where flow is set up, `flow prs --for <identifier>`
+makes the same check and exits 5 at the cap.
 
 ## Opening the PR
 
 Open it once the branch has converged:
 
 ```bash
-gh pr create --title "<type>(<scope>): <summary>" --body "<body>"
+gh pr create -R dork-labs/marketplace --title "<type>(<scope>): <summary>" --body-file <file>
 ```
 
 PR body: lead with what changed and why, link the issue, list the gates you ran, and call out anything reviewers should look at first. This repo is public: nothing from private repos (prices, plan names, hostnames, private paths) goes in a title or body.
@@ -109,8 +155,8 @@ PR body: lead with what changed and why, link the issue, list the gates you ran,
 Open a **draft** instead when you still need CI to tell you something:
 
 ```bash
-gh pr create --draft --title "<type>(<scope>): <summary>" --body "<body>"
-gh pr ready <number>
+gh pr create -R dork-labs/marketplace --draft --title "<type>(<scope>): <summary>" --body-file <file>
+gh pr ready <number> -R dork-labs/marketplace
 ```
 
 ### A merged PR closes the ticket it names — from the title, the branch, or a magic word
@@ -142,7 +188,7 @@ So: **rebase onto `origin/main` and push before you open the PR.** If GitHub's P
 Once review has converged and the PR is open, arm it and let it land itself:
 
 ```bash
-gh pr merge --auto --squash <number>
+gh pr merge --auto --squash <number> -R dork-labs/marketplace
 ```
 
 It joins the merge queue and merges as soon as the required checks pass there. The queue tests your PR on top of `main` and everything ahead of it, so being behind blocks nothing: **never update a branch to satisfy a gate** (no `gh pr update-branch`, no merging `main` in). The queue owns the merge method, so gh may print `! The merge strategy for main is set by the merge queue`; that is not a refusal. Confirm with `gh pr view <number>`.
@@ -196,14 +242,14 @@ Three rules for any PR watcher:
 
 Two recurring conflict shapes when several branches share files and `main` merges by squash:
 
-- **Your own squashed base conflicts with you.** A branch stacked on another branch (or on its own earlier PR) hits "changed in both" conflicts against the squash commit, with byte-identical content on both sides. Pin the base first — `BASE=$(git rev-parse origin/main)` — then verify each conflicted file is identical between the merge base and `$BASE` (`git diff <base>:<file> "$BASE":<file>` — empty means the conflict is pure squash noise), then keep the branch side wholesale. Write files out with `git show HEAD:<file> > <file>` — `git checkout -- <path>` is blocked by the git-guard hook. Confirm with a three-dot diff against `$BASE` showing only the branch's own work. **Reuse `$BASE`; never name `origin/main` twice in one comparison** — see `working-in-worktrees` → _Two readers, one ref namespace_.
+- **Your own squashed base conflicts with you.** A branch stacked on another branch (or on its own earlier PR) hits "changed in both" conflicts against the squash commit, with byte-identical content on both sides. Pin the base first: run `git -C <wt> rev-parse origin/main` and use the SHA it prints as `<base-sha>` from then on. Verify each conflicted file is identical between the merge base and `<base-sha>` (`git -C <wt> diff <merge-base>:<file> <base-sha>:<file>`; empty means the conflict is pure squash noise), then keep the branch side wholesale. Write files out with the Write tool from `git -C <wt> show HEAD:<file>` — `git checkout -- <path>` is blocked by the git-guard hook. Confirm with a three-dot diff against `<base-sha>` showing only the branch's own work. **Reuse that SHA; never name `origin/main` twice in one comparison** — see `working-in-worktrees` → _Two readers, one ref namespace_.
 - **A textually clean merge is not a semantically clean one.** When sibling branches landed on one seam, `git merge origin/main` can resolve cleanly while leaving a call to a renamed helper, a test asserting behaviour another PR changed, or a stale generated schema. After merging `main` into any branch whose neighbours touched the same area: run the typecheck and tests, and regenerate `config/config.schema.json`, before pushing.
 
-**A push is not landed until the remote says so.** A compound command ending in `; echo ...` exits 0 whatever the push did. Confirm with `git ls-remote origin <branch>` showing the SHA.
+**A push is not landed until the remote says so.** Confirm with `git -C <wt> ls-remote origin <branch>` showing the SHA.
 
 ## Gotchas
 
-- **A fresh worktree has no `node_modules`.** The gates above fail with missing-module errors until you run `npm ci` in `plugins/flow` (and `tools/schema-check` if you need it). That is setup, not a real failure. Prettier drift you never saw locally then shows up as a red `format:check` step inside the `flow plugin` check.
+- **A fresh worktree has no `node_modules`.** The gates above fail with missing-module errors until you run `npm --prefix <wt>/plugins/flow ci` (and the same for `tools/schema-check` if you need it). That is setup, not a real failure. Prettier drift you never saw locally then shows up as a red `format:check` step inside the `flow plugin` check.
 - **A red `flow plugin` check is not always the tests.** It runs schema drift, typecheck, tests, and format check in that order; read which step failed before debugging.
 - **`skills and manifests` needs network.** It fetches the pinned upstream DorkOS schemas; an offline local run fails before checking anything.
 - **A new Linear issue lands in Triage, not the backlog.** Creating an issue without an explicit state leaves it in the team's triage queue, where it is easy to miss. Tracker I/O normally routes through the `/flow` `linear-adapter` skill, which sets state for you.

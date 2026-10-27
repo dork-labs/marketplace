@@ -379,6 +379,89 @@ before it arms. Only the drain runs `preArm` entries: `flow pr --arm` and
 `flow review --approve` leave the arm to the drain when one applies. These are a guard rail for flow's own arms. The rules that hold for everyone belong on GitHub, in required checks and
 rulesets.
 
+## The `pr` block: the open-PR cap and stuck PRs
+
+Committed team policy. Every field has a default:
+
+```jsonc
+"pr": { "maxOpen": 8, "staleDays": 3, "maxBehind": 20 }
+```
+
+| Field | Type, default | Meaning |
+| --- | --- | --- |
+| `maxOpen` | whole number, `8` | The most open pull requests the repository may have. At the cap, `flow pr` and `/flow:verify` open no new one unless the item is urgent (P0), and the refusal names the PRs holding the slots; `flow next` says `atPrCap` and picks only urgent work. |
+| `staleDays` | whole number, `3` | An open PR older than this many days is stuck: `flow prs`, groom and triage ask its owner to ship it, split it or close it. |
+| `maxBehind` | whole number, `20` | An open PR more than this many commits behind its base is stuck the same way. |
+
+**Where the count comes from.** Flow reads every open PR with one fixed, read-only
+call: `gh pr list -R <owner/name> --state open --limit 200 --json number,title,url,createdAt,author,headRefName,headRefOid,baseRefName,isDraft,labels,autoMergeRequest`.
+The tracker snapshot carries no PR links, so a PR belongs to an item when the
+item's identifier is a whole token of its branch name or title (`dor-12-fix` and
+`Fix it (DOR-12)` are DOR-12's; `dor-123` is not). Flow names every branch it
+makes after the identifier. A count that cannot be read counts as the cap: flow
+opens nothing new rather than guess. A checkout with no GitHub `origin` has no cap.
+
+**Work in progress counts open PRs.** An open item with an open PR counts toward
+`autonomy.wipCap` until that PR merges or closes, whatever its tracker state or
+claim label. Only an item still open in the tracker counts this way; a PR whose
+item is closed still counts toward `maxOpen`.
+
+**How far behind** is one `gh api repos/<owner/name>/compare/<base>...<head>` read
+per PR, in `flow prs` only. A count that cannot be read flags the PR as stuck.
+
+## The review route: `light`, QA and design
+
+`review` also says which review steps a PR needs. Flow works it out from the
+paths the PR touches (`flow pr` reports it as `route`; `flow sweep` reads it):
+
+```jsonc
+"review": {
+  "designPaths": ["apps/client/**", "apps/site/**", "packages/ui/**", "docs/**"],
+  "lightPaths": ["apps/client/src/locales/**"],
+  "qaLabel": "qa-go",
+  "designLabel": "design-ok"
+}
+```
+
+- **Security** is on every route. Nothing takes it off.
+- **QA** is on unless the PR is `light`: every path it touches is a dependency
+  manifest or lockfile, docs (`*.md`, `*.mdx`, `docs/`), a test, CI (`.github/`),
+  or one of `lightPaths` (copy: string tables, content). Agent prose (`SKILL.md`,
+  `AGENTS.md`, `CLAUDE.md`, `REVIEW.md`, `commands/`, `skills/`, `agents/`,
+  `.claude/`, `.agents/`, `.dork/`) is behaviour, so it is never light, and so are
+  dependency files that are code (`patches/`, `.pnpmfile.cjs`, `.yarn/releases/`,
+  `.pnp.cjs`, `setup.py`, the Gradle and Maven wrappers). `package.json` counts as
+  light although its `scripts` can run on install: that skips QA only, and its
+  security label is still required. A light PR still gets
+  Security's read, and a lockfile or manifest still needs `securityPaths.label`
+  before flow arms it.
+- **Design** is on only when the PR touches `designPaths`. It runs at PR open,
+  from the diff, alongside Security, and does not wait for QA. A copy-only PR under
+  a design path is light with the design read on.
+- A file list the forge cannot give whole is never light, and turns design on
+  whenever `designPaths` is set.
+
+| Field | Type, default | Meaning |
+| --- | --- | --- |
+| `designPaths` | globs, `[]` | The paths that send a PR to the design step. Empty: no design step. |
+| `lightPaths` | globs, `[]` | More copy paths that count as light, on top of the built-ins. |
+| `qaLabel` | label, `qa-go` | The label that says QA passed the PR's current head. Flow only reads it. |
+| `designLabel` | label, `design-ok` | The label that says the design read passed the current head. Flow only reads it. |
+
+**The sweep** (`flow sweep`, and every drain pass) arms each open PR that is
+cleared but unarmed: every required check green, and the security label (plus
+`qaLabel` and `designLabel` where the route needs them) added **after** the PR's
+current head arrived: the PR's last force-push when it left that head, else the
+first check suite a push to the PR's branch made for it. These are server times
+a commit's own dates cannot move; a suite a workflow makes when a label is added
+does not count; a head whose arrival flow cannot tell is not cleared. A label from before a push covers an older commit; the
+reviewer reads the range-diff and adds it back, which is how an OK carries over
+by diff. Flow never moves a label itself. A cleared PR is armed only when the arm
+guard allows, at exactly that head; every other unarmed PR is listed with why. Like
+`flow pr`, it arms only when `drain.armAutoMerge` is on or you pass `--arm`;
+otherwise it says what it would arm. It leaves `land.preArm` checks alone: a PR they apply to is
+reported `pre-arm-deferred`.
+
 ## `selfImprovement`: how flow checks and records itself
 
 This block is committed team policy. Every field has a default, so a config that

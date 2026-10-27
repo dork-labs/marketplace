@@ -1,0 +1,37 @@
+---
+title: Keeping open PRs few
+description: The open-PR cap, how open PRs count as work in progress, stuck PRs, the review route, and the sweep that arms cleared PRs.
+---
+
+# Keeping open PRs few
+
+An agent can start work faster than people can review it. Left alone, open pull requests pile up, each one older and further behind `main`. Flow keeps the pile small in five ways.
+
+## An open PR is work in progress
+
+An item counts toward `autonomy.wipCap` while it has an open PR, whatever its tracker state or claim, until the PR merges or closes. Flow finds an item's PR by its identifier in the PR's branch name or title (`dor-12-fix`, `Fix it (DOR-12)`). Flow names every branch it makes that way.
+
+## The open-PR cap
+
+`pr.maxOpen` (8) is the most open PRs a repository may have. At the cap:
+
+- `flow pr` and `/flow:verify` open no new PR, and say which PRs hold the slots;
+- `flow next` says `atPrCap` and picks only urgent (P0) work.
+
+An urgent item is always exempt. If flow can't count the open PRs, it treats that as the cap and opens nothing new. Check one item with `flow prs --for <id>`.
+
+## Merging comes before starting
+
+`flow next` names `land`: your oldest open PR that isn't armed. The drain lands it first (rebase, re-run its gates, answer its review) and moves on when it only waits on a person. Each drain pass also runs the sweep below before it starts anything new.
+
+## Stuck PRs
+
+`flow prs` lists the open PRs: their age, author, and how far behind their base they are. A PR older than `pr.staleDays` (3) or more than `pr.maxBehind` (20) commits behind is stuck. Groom and triage list each one with a prompt for its owner: ship it, split it, or close it. Flow never closes a PR itself.
+
+## The review route
+
+Every PR gets Security's review. QA runs unless the PR is light: it only touches dependency manifests and lockfiles, docs, copy (`review.lightPaths`), tests or CI. A light PR still needs the security label to arm when it touches a lockfile or manifest. The design read runs only when the PR touches `review.designPaths`, at PR open and alongside Security. `flow pr` reports the route.
+
+## The sweep
+
+`flow sweep` arms every open PR that is cleared but unarmed: required checks green, and the security label, plus `review.qaLabel` and `review.designLabel` where the route needs them, added after the current head last arrived (a new push, or a force-push back to an older commit). A label from before a push covers an older commit. The reviewer reads what changed and adds it back. Flow arms only through the arm guard ([Before flow arms a PR](/docs/guides/flow/landing)), and lists why each other PR isn't armed. It arms only when `drain.armAutoMerge` is on or you pass `--arm`; otherwise it says what it would arm.

@@ -8,8 +8,18 @@
  * - Ownership: `classifyOwnership` per item. With `issues` in `ownership.scope`
  *   an item is classified by its assignee (the claim is per item); with only
  *   `projects`, by its project's lead.
- * - WIP load: open items that are `started` and carry `agent/claimed`, counted
- *   by project id and in total, over the whole snapshot.
+ * - WIP load: open items that are `started` and carry `agent/claimed`, plus
+ *   every open item with an open PR whatever its state or claim (DOR-3341),
+ *   counted by project id and in total, over the whole snapshot. The PRs come
+ *   from the checkout's forge (`cli/open-prs-read.ts`): an item has one when
+ *   its identifier is a token of an open PR's branch name or title.
+ * - The open-PR cap (`pr.maxOpen`): `prCap` says how many PRs are open and
+ *   which hold the slots, and `atPrCap` whether the repository is at the cap.
+ *   At the cap only urgent (P0) items are picked: new work would only wait for
+ *   a PR slot. A count that cannot be read counts as the cap (fails closed); a
+ *   checkout with no forge has no cap (`prCap: null`).
+ * - `land`: the oldest open PR, not armed, whose item is the agent's own. The
+ *   drain lands it (review, rebase, re-gate) before it claims new work.
  * - `--for-project` narrows the candidates (project id, else case-insensitive
  *   name) before dispatch; the WIP load still counts every project.
  * - `-n` (default 1) keeps the first N picks, already capped by WIP.
@@ -55,33 +65,52 @@ import { openFlowStateFile } from '../flow-state-file.ts';
 import { liveByAccount, liveKey } from '../drain/live-count.ts';
 
 export { liveByAccount };
+import {
+  itemsWithOpenPrs,
+  prCap,
+  prMatchesItem,
+  URGENT_PRIORITY,
+  type PrCap,
+} from '../forge/open-prs.ts';
 import { classifyOwnership, type Identity, type OwnershipScope } from '../identity.ts';
 import type { BacklogSnapshot, WorkItem, WorkItemProject } from '../tracker/types.ts';
 import { AGENT_CLAIMED } from '../work-state.ts';
 import { loadProjectConfig, readBacklog, resolveAgentId } from './backlog.ts';
+import { readOpenPrs, type OpenPrRead } from './open-prs-read.ts';
 import type { VerbContext, VerbResult } from './context.ts';
 import { formatColumns } from './output.ts';
 import { withSetupNudge } from './setup-nudge.ts';
 
 /** The live in-progress load the WIP cap measures. */
 export interface WipLoad {
-  /** Claimed, started items across every project. */
+  /** Items in progress across every project. */
   total: number;
-  /** Claimed, started items per project id. */
+  /** Items in progress per project id. */
   byProject: Record<string, number>;
+  /** How many of {@link total} count only because they have an open PR. */
+  fromOpenPrs: number;
 }
 
 /**
- * Count the WIP load: open items that are `started` and carry `agent/claimed`.
+ * Count the WIP load: open items that are `started` and carry `agent/claimed`,
+ * and every open item with an open PR, whatever its state or claim, until that
+ * PR merges or closes (DOR-3341). An item counts once.
  *
  * @param items - Every open item of the snapshot.
+ * @param withOpenPr - The identifiers of items with an open PR.
  * @returns The total and the per-project counts.
  */
-export function wipLoad(items: readonly WorkItem[]): WipLoad {
-  const load: WipLoad = { total: 0, byProject: {} };
+export function wipLoad(
+  items: readonly WorkItem[],
+  withOpenPr: ReadonlySet<string> = new Set()
+): WipLoad {
+  const load: WipLoad = { total: 0, byProject: {}, fromOpenPrs: 0 };
   for (const item of items) {
-    if (item.stateCategory !== 'started' || !item.labels.includes(AGENT_CLAIMED)) continue;
+    const claimed = item.stateCategory === 'started' && item.labels.includes(AGENT_CLAIMED);
+    const hasPr = withOpenPr.has(item.identifier);
+    if (!claimed && !hasPr) continue;
     load.total += 1;
+    if (!claimed) load.fromOpenPrs += 1;
     if (item.project) load.byProject[item.project.id] = (load.byProject[item.project.id] ?? 0) + 1;
   }
   return load;
@@ -289,6 +318,36 @@ interface NextSummary {
   atWipCap: boolean;
   wip: WipLoad;
   wipCap: { global: number; perProject: number };
+  /** The open-PR cap, or `null` with no forge. */
+  prCap: PrCap | null;
+  /** The PR to land first, or `null`. */
+  land: LandTarget | null;
+}
+
+/** The open PR the drain lands before it claims new work. */
+export interface LandTarget {
+  /** The PR's number. */
+  number: number;
+  /** Its web address. */
+  url: string;
+  /** The item it belongs to. */
+  identifier: string;
+  /** When it opened. */
+  createdAt: string;
+}
+
+/**
+ * The PR line of the human text, or `null` with no forge.
+ *
+ * @param cap - The cap state.
+ * @returns The line.
+ */
+function prCapLine(cap: PrCap | null): string | null {
+  if (cap === null) return null;
+  if (!cap.readable)
+    return `Open PRs: unreadable (${cap.error}); counted as the cap of ${cap.max}.`;
+  const holding = cap.atCap ? `: ${cap.holding.map((n) => `#${n}`).join(', ')}` : '';
+  return `Open PRs: ${cap.open} (cap ${cap.max}${cap.atCap ? ', reached' : ''})${holding}.`;
 }
 
 /**
@@ -299,13 +358,23 @@ interface NextSummary {
  * @returns The text.
  */
 export function renderNext(summary: NextSummary): string {
-  const wipLine = `In progress: ${summary.wip.total} (cap ${summary.wipCap.global} in total, ${summary.wipCap.perProject} per project).`;
+  const wipLine = [
+    `In progress: ${summary.wip.total} (cap ${summary.wipCap.global} in total, ${summary.wipCap.perProject} per project).`,
+    prCapLine(summary.prCap),
+    summary.land === null
+      ? null
+      : `Land first: #${summary.land.number} (${summary.land.identifier}), your oldest open PR.`,
+  ]
+    .filter((line): line is string => line !== null)
+    .join('\n');
   if (summary.picked.length === 0) {
-    const why = summary.atWipCap
-      ? 'Nothing is eligible now: ready work waits because work in progress is at its cap. Finish or release an item first.'
-      : summary.starved
-        ? `Nothing is eligible, but ${summary.shapeableCount} item(s) wait behind the agent/ready gate: a triage pass would ready them.`
-        : 'Nothing is eligible, and nothing waits behind the agent/ready gate: the queue is drained.';
+    const why = summary.prCap?.atCap
+      ? 'Nothing urgent is eligible, and the open-PR cap is reached: land an open PR before starting new work.'
+      : summary.atWipCap
+        ? 'Nothing is eligible now: ready work waits because work in progress is at its cap. Finish or release an item first.'
+        : summary.starved
+          ? `Nothing is eligible, but ${summary.shapeableCount} item(s) wait behind the agent/ready gate: a triage pass would ready them.`
+          : 'Nothing is eligible, and nothing waits behind the agent/ready gate: the queue is drained.';
     return [why, wipLine].join('\n');
   }
   const rows = summary.picked.map((item, i) => {
@@ -353,6 +422,10 @@ export interface NextPlan {
   atWipCap: boolean;
   /** The WIP load. */
   wip: WipLoad;
+  /** The open-PR cap, or `null` when the checkout has no forge. */
+  prCap: PrCap | null;
+  /** The oldest open PR of the agent's own, not armed, or `null`. */
+  land: LandTarget | null;
   /** The checkout's `owner/name`, when accounts were assigned. */
   repo: string | null;
   /** What accounts were assigned from (with each account's path), when they were. */
@@ -385,16 +458,33 @@ export async function planNext(
   project.flushWarnings();
 
   const scope: OwnershipScope = config.ownership.scope.includes('issues') ? 'issues' : 'projects';
-  const wip = wipLoad(snapshot.items);
+  const open = await readOpenPrs(ctx, ctx.projectDir);
+  const prsByItem =
+    open.kind === 'read'
+      ? itemsWithOpenPrs(
+          open.prs,
+          snapshot.items.map((item) => item.identifier)
+        )
+      : new Map<string, number[]>();
+  const prCapState: PrCap | null =
+    open.kind === 'none'
+      ? null
+      : prCap(open.kind === 'read' ? open.prs : open.error, config.pr.maxOpen);
+  const wip = wipLoad(snapshot.items, new Set(prsByItem.keys()));
   const projectId =
     request.forProject === undefined
       ? undefined
       : resolveProjectFilter(snapshot, request.forProject);
   const wanted = request.items === undefined ? undefined : new Set(request.items);
+  // An item with an open PR is in progress, never picked again. At the open-PR
+  // cap, only urgent work may start: anything else would wait for a PR slot,
+  // and its PR would only add to the pile.
   const candidates = snapshot.items.filter(
     (item) =>
       (projectId === undefined || item.project?.id === projectId) &&
-      (wanted === undefined || wanted.has(item.identifier))
+      (wanted === undefined || wanted.has(item.identifier)) &&
+      !prsByItem.has(item.identifier) &&
+      (prCapState?.atCap !== true || item.priority === URGENT_PRIORITY)
   );
 
   const ownershipOf = Object.fromEntries(
@@ -419,6 +509,7 @@ export async function planNext(
     { ownershipOf, inProgressByProject: wip.byProject, inProgressTotal: wip.total }
   );
   const atWipCap = outcome.eligibleCount === 0 && uncapped.eligibleCount > 0;
+  const land = landTarget(open, snapshot.items, (item) => classifyOwnership(item, identity, scope));
 
   const order = request.items;
   const ranked =
@@ -434,7 +525,48 @@ export async function planNext(
     assignment = await gatherAssignmentInput(ctx, config);
     accounts = assignAccounts(picked, assignment);
   }
-  return { picked, accounts, outcome, atWipCap, wip, repo: assignment?.repo ?? null, assignment };
+  return {
+    picked,
+    accounts,
+    outcome,
+    atWipCap,
+    wip,
+    prCap: prCapState,
+    land,
+    repo: assignment?.repo ?? null,
+    assignment,
+  };
+}
+
+/**
+ * The PR to land first: the oldest open PR, not armed, tied to an item the
+ * agent owns.
+ *
+ * @param open - The open PRs, when read.
+ * @param items - Every open item.
+ * @param ownership - The agent's ownership of an item.
+ * @returns The target, or `null`.
+ */
+export function landTarget(
+  open: OpenPrRead,
+  items: readonly WorkItem[],
+  ownership: (item: WorkItem) => string
+): LandTarget | null {
+  if (open.kind !== 'read') return null;
+  const mine = items.filter((item) => ownership(item) === 'mine');
+  for (const pr of open.prs) {
+    if (pr.armed) continue;
+    const item = mine.find((candidate) => prMatchesItem(pr, candidate.identifier));
+    if (item !== undefined) {
+      return {
+        number: pr.number,
+        url: pr.url,
+        identifier: item.identifier,
+        createdAt: pr.createdAt,
+      };
+    }
+  }
+  return null;
 }
 
 /**
@@ -460,7 +592,7 @@ export async function run(ctx: VerbContext): Promise<VerbResult> {
       typeof ctx.args.flags['for-project'] === 'string' ? ctx.args.flags['for-project'] : undefined,
     accounts: ctx.args.flags['no-account'] !== true,
   });
-  const { picked, accounts, outcome, atWipCap, wip } = plan;
+  const { picked, accounts, outcome, atWipCap, wip, prCap: cap, land } = plan;
   const blocked = accounts?.find((account) => account.pick === null);
   if (blocked !== undefined) ctx.warn(noAccountMessage(plan.repo, blocked));
   return withSetupNudge(ctx, {
@@ -474,6 +606,9 @@ export async function run(ctx: VerbContext): Promise<VerbResult> {
       shapeableCount: outcome.shapeableCount,
       atWipCap,
       wip,
+      atPrCap: cap?.atCap ?? false,
+      prCap: cap,
+      land,
     },
     text: renderNext({
       ...outcome,
@@ -482,6 +617,8 @@ export async function run(ctx: VerbContext): Promise<VerbResult> {
       atWipCap,
       wip,
       wipCap: config.autonomy.wipCap,
+      prCap: cap,
+      land,
     }),
   });
 }

@@ -15,8 +15,7 @@ schedule:
 
 This file holds the one tick of the `/flow` loop. A scheduled firing, and
 `/flow continue`, run one tick and stop; `/flow auto` runs **Auto** below. It ships
-`schedule.enabled: false`: on DorkOS, approve it on the Schedules page; elsewhere,
-point your own scheduler (OS cron, CI) at it.
+switched off: approve it on DorkOS's Schedules page, or point any scheduler at it.
 
 ## One tick
 
@@ -44,9 +43,13 @@ point your own scheduler (OS cron, CI) at it.
    poll the adapter's `getInbox`, apply the comment-response rules in
    `<flow-root>/skills/tending-tracker/SKILL.md`, resume with `--resume <sessionId>`.
    Skip runs with `drain` set.
+3a. **Sweep.** `flow sweep --json`; report each unarmed PR's `detail`.
+3b. **Land first.** `flow next --json`'s `land`: rebase, re-gate, answer review, push;
+   skip it while it waits on a person.
 4. **Dispatch.** A scheduled firing with `drain.parallel` at 1 or more runs
    `flow drain --tick` and stops. Otherwise take `flow next --json`:
-   - Empty `picked`: at `atWipCap`, offer no triage. `starved`: report "Queue starved:
+   - Empty `picked`: at `atPrCap` or `atWipCap`, offer no triage; at `atPrCap` name
+     `prCap.holding` (or its `error`). `starved`: report "Queue starved:
      0 ready, <M> shapeable: run a triage pass?" and offer `/flow:triage` or stop. Else
      the queue is drained.
    - Otherwise provision `picked[0]`'s worktree and claim it:
@@ -60,7 +63,6 @@ point your own scheduler (OS cron, CI) at it.
      terminal asks inline with `AskUserQuestion`, never a parked tracker comment.
    - At each stage boundary, if the item carries `agent/paused`: advance it no
      further, run `flow release <id> --to none --json`, leave the worktree, move on.
-     Reassigning an item on the tracker hands it to a person or another agent.
 
 Stop at the review gate (unless the reviewer agent answered it) or a genuine question.
 
@@ -81,8 +83,7 @@ Never on a scheduled firing: the scheduler repeats ticks itself.
    run `/flow auto` after that". Otherwise run one
    tick and write the new `ready` and `shapeable` counts.
 4. End early with `<promise>ABORT</promise>`, cleanly with `<promise>PHASE_COMPLETE:auto</promise>`.
-5. **Stop.** Drained or aborted: delete the sentinel. Never leave a stale one.
+5. **Stop.** Drained or aborted: delete the sentinel.
 
-`/flow:pause` halts every tick through the pause flag step 0 reads. Neither pause nor
-resume edits this file: an update replaces it. To stop a scheduler starting the tick,
-switch it off where it is scheduled.
+`/flow:pause` halts every tick through the pause flag step 0 reads. A scheduler is
+switched off where it is scheduled.

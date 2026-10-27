@@ -108,6 +108,42 @@ export const VERBS: readonly VerbDefinition[] = [
     load: () => import('./cli/next.ts'),
   },
   {
+    name: 'prs',
+    summary: 'Show the open pull requests: the open-PR cap, and the stuck ones.',
+    description:
+      'Read-only. Lists the open pull requests with one fixed "gh pr list" call: how many are open against the cap (pr.maxOpen), each one\'s age, author and how far it is behind its base, and the stuck ones (older than pr.staleDays, or more than pr.maxBehind commits behind), each with a ship / split / close prompt naming its owner. --for <identifier> instead checks whether that item may open a new pull request: at the cap only an urgent (P0) item may, and a count that cannot be read refuses; a refusal exits 5 naming the PRs holding the slots. Exits 4 when the open PRs cannot be read.',
+    common: ['project'],
+    flags: [
+      {
+        name: 'for',
+        kind: 'string',
+        value: 'identifier',
+        description: 'Check whether this item may open a new pull request.',
+      },
+      {
+        name: 'no-behind',
+        kind: 'boolean',
+        description: 'Skip the per-PR read of how far each one is behind its base.',
+      },
+    ],
+    load: () => import('./cli/prs.ts'),
+  },
+  {
+    name: 'sweep',
+    summary: 'Arm every open PR that is cleared but unarmed, through the arm guard.',
+    description:
+      'For each open pull request that is not armed or queued: when every required check is green and the security label (and the QA and design labels its review route needs) were added after its current head was pushed, ask the arm guard and arm it at that head if the guard allows. Every PR it does not arm is listed with the reason. Never arms past the guard. It arms only when drain.armAutoMerge is on or --arm is passed; otherwise it says what it would arm. The drain runs it every pass. Exits 7 while flow is paused, unless --manual or --dry-run.',
+    common: ['project', 'manual', 'dry-run'],
+    flags: [
+      {
+        name: 'arm',
+        kind: 'boolean',
+        description: 'Arm cleared PRs even when drain.armAutoMerge is off.',
+      },
+    ],
+    load: () => import('./cli/sweep.ts'),
+  },
+  {
     name: 'accounts',
     summary: 'List the accounts flow may spend, add one, or set how flow routes work to them.',
     description: [
