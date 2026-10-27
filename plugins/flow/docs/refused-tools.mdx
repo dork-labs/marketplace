@@ -32,7 +32,8 @@ those.
 
 Reads are only half of most runs. Every write still asks, so with only these reads allowed:
 
-- **groom** can finish on its own: it only reads and reports.
+- **groom** can usually finish on its own: its check reads and reports, though a scratch file or a
+  filed follow-up still asks.
 - **triage** stops at the first item it releases, readies or parks: those are tracker writes.
 - **retro** stops when it files its proposals (`flow retro --file`) or writes their temp file.
 - **drain** stops at its first write: a claim, a stage move, a review or the PR sweep.
@@ -44,6 +45,10 @@ Each of those ends the way the next section says, so you see where it stopped.
 **Listing a tool grants nothing.** Until DorkOS lets a schedule carry an allow list of its own, allow
 the tools for your project: add each one to `permissions.allow` in the project's
 `.claude/settings.json`, with `${CLAUDE_PLUGIN_ROOT}` written out as the folder flow is installed in.
+Flow's settings check prints that folder as `flowRoot`. In a `Read` rule, a path from the top of the
+disk starts with two slashes, as in `Read(//path/to/flow/**)`; with one slash it is read as a path
+inside your project and never matches. A reinstall can move flow's folder, so check these rules after
+each one.
 
 Never switch a flow schedule to a looser permission setting to get past a refusal. Accept edits,
 Bypass and the rest hand the run far more than reads, and a run that reads text other people wrote
@@ -55,8 +60,8 @@ A refused tool never ends the run quietly, and never as done. The run:
 
 1. Stops starting new steps, and never retries the tool or reaches for another one to do the same
    job.
-2. Tries to park the item it was working on with one question: allow the tool, or do the step by
-   hand. Parking writes to the tracker, so it happens only if you allowed that; if not, the report
+2. Tries to park the item it was working on with one question: allow the tool, or a person does the
+   step. Flow's own pick is always the second, and that answer hands the item to a person. Parking writes to the tracker, so it happens only if you allowed that; if not, the report
    names the item instead.
 3. Notes the refusal in flow's journal, so the weekly retro sees it.
 4. Ends with a report whose first line is `FLOW RUN NEEDS YOU: refused <tool> at step <n>`.

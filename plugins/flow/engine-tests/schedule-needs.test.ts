@@ -186,7 +186,14 @@ function ruleGaps(rule: string): string[] {
     ['parks through triage', /`flow triage <id> --park '<question>'`/],
     ['parks through flow ask', /`flow ask <id>`/],
     ['never takes its own pick', /only a person\s+can allow a tool/],
-    ['its default pick never grants', /`--pick 2`[\s\S]*Your pick is never "Allow it"/],
+    [
+      'its default pick never grants',
+      /the choices "Allow it" and "A person does it", `--pick 2`[\s\S]*Your pick is never "Allow it"/,
+    ],
+    [
+      'a person-does-it answer stops the run',
+      /never\s+do the step yourself: hand the item to a person/,
+    ],
     ['parking may be refused too', /Parking writes to the tracker, so it may\s+be refused too/],
     ['notes it in the journal', /`flow note --kind friction/],
     ['a fixed first line', /`FLOW RUN NEEDS YOU: refused <tool> at step <n>`/],
@@ -300,6 +307,15 @@ describe('a refused tool ends the run red, in every scheduled skill', () => {
     ]);
     expect(ruleGaps(rule.replace('`--pick 2`', '`--pick 1`'))).toEqual([
       'its default pick never grants',
+    ]);
+    // Swapping the choices makes pick 2 the grant.
+    expect(
+      ruleGaps(
+        rule.replace('"Allow it" and "A person does it"', '"A person does it" and "Allow it"')
+      )
+    ).toEqual(['its default pick never grants']);
+    expect(ruleGaps(rule.replace(/never\s+do the step yourself/, 'do the step'))).toEqual([
+      'a person-does-it answer stops the run',
     ]);
   });
 });

@@ -26,9 +26,9 @@ metadata:
 The schedulable **daily triage**: without it, nothing moves new work to ready on its
 own. It ships switched off: approve it on the Schedules page.
 
-Each firing:
-
 **Refused tool:** `<flow-root>/skills/flow-drain/refused-tool.md`.
+
+Each firing:
 
 0. **Pause check.** Run step 0 of
    `<flow-root>/skills/flow-drain/SKILL.md`. Stop whenever it says to stop. Tracker
