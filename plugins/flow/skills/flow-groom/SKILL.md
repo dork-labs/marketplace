@@ -15,13 +15,13 @@ schedule:
 
 The schedulable **groom health check**: a weekly, read-only
 `/flow:groom check`. The full groom closes items, so it stays operator-run. Off
-until you approve it on the Schedules page (DorkOS) or wire your own scheduler.
+until you approve it on the Schedules page or schedule it yourself.
 
 Each firing runs the CHECK mode of `<flow-root>/skills/grooming-backlog/SKILL.md`:
 
 0. **Pause check.** Run step 0 of
    `<flow-root>/skills/flow-drain/SKILL.md`. Stop whenever it says to stop.
-1. `flow snapshot --include-closed --out <scratch>/backlog.json`.
+1. Pull once: `flow snapshot --include-closed --out <scratch>/backlog.json`.
    Run `flow audit --snapshot <scratch>/backlog.json --json`, `flow next --snapshot <scratch>/backlog.json --json` and `flow prs --json`.
 2. Report failing invariants with their items, the eligible-pool size, starvation
    stats and stuck PRs' `prompt`s; anything red: recommend `/flow:groom`.
