@@ -8,6 +8,16 @@ schedule:
   enabled: false
   max-runtime: 2h
   permissions: acceptEdits
+metadata:
+  flow-needs:
+    - 'Bash(node --experimental-strip-types "${CLAUDE_PLUGIN_ROOT}/scripts/config-files.ts")'
+    - 'Bash(node --experimental-strip-types "${CLAUDE_PLUGIN_ROOT}/scripts/flow.ts" next:*)'
+    - 'Bash(node --experimental-strip-types "${CLAUDE_PLUGIN_ROOT}/scripts/flow.ts" prs:*)'
+    - 'Bash(node --experimental-strip-types "${CLAUDE_PLUGIN_ROOT}/scripts/recovery.ts":*)'
+    - 'Bash(git worktree list --porcelain)'
+    - 'Read(${CLAUDE_PLUGIN_ROOT}/**)'
+    - 'Read(.dork/flow/**)'
+    - 'tracker:read'
 ---
 
 `<flow-root>` is two folders above this file's `realpath`. `flow <verb>` means
@@ -15,9 +25,11 @@ schedule:
 
 This file holds the one tick of the `/flow` loop. A scheduled firing, and
 `/flow continue`, run one tick and stop; `/flow auto` runs **Auto** below. It ships
-switched off: approve it on DorkOS's Schedules page, or point any scheduler at it.
+switched off: approve it on DorkOS's Schedules page.
 
 ## One tick
+
+**Refused tool:** `<flow-root>/skills/flow-drain/refused-tool.md`.
 
 0. **Pause check, before anything else.** Run
    `node --experimental-strip-types "<flow-root>/scripts/config-files.ts"`. If the check cannot run or its output cannot be read, stop: never act without knowing

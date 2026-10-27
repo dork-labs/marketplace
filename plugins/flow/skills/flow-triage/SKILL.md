@@ -8,14 +8,26 @@ schedule:
   enabled: false
   max-runtime: 30m
   permissions: default
+metadata:
+  flow-needs:
+    - 'Bash(node --experimental-strip-types "${CLAUDE_PLUGIN_ROOT}/scripts/config-files.ts")'
+    - 'Bash(node --experimental-strip-types "${CLAUDE_PLUGIN_ROOT}/scripts/flow.ts" snapshot:*)'
+    - 'Bash(node --experimental-strip-types "${CLAUDE_PLUGIN_ROOT}/scripts/flow.ts" prs:*)'
+    - 'Bash(git worktree list --porcelain)'
+    - 'Bash(git ls-remote --heads origin)'
+    - 'Read(${CLAUDE_PLUGIN_ROOT}/**)'
+    - 'Read(.dork/flow/**)'
+    - 'tracker:read'
 ---
 
 `<flow-root>` is two folders above this file's `realpath`.
 
 The schedulable **daily triage**: without it, nothing moves new work to ready on its
-own. It ships switched off: approve it on the Schedules page, or use any scheduler.
+own. It ships switched off: approve it on the Schedules page.
 
 Each firing:
+
+**Refused tool:** `<flow-root>/skills/flow-drain/refused-tool.md`.
 
 0. **Pause check.** Run step 0 of
    `<flow-root>/skills/flow-drain/SKILL.md`. Stop whenever it says to stop. Tracker

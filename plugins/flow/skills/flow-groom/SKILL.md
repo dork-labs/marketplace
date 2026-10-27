@@ -8,6 +8,16 @@ schedule:
   enabled: false
   max-runtime: 30m
   permissions: default
+metadata:
+  flow-needs:
+    - 'Bash(node --experimental-strip-types "${CLAUDE_PLUGIN_ROOT}/scripts/config-files.ts")'
+    - 'Bash(node --experimental-strip-types "${CLAUDE_PLUGIN_ROOT}/scripts/flow.ts" snapshot:*)'
+    - 'Bash(node --experimental-strip-types "${CLAUDE_PLUGIN_ROOT}/scripts/flow.ts" audit:*)'
+    - 'Bash(node --experimental-strip-types "${CLAUDE_PLUGIN_ROOT}/scripts/flow.ts" next:*)'
+    - 'Bash(node --experimental-strip-types "${CLAUDE_PLUGIN_ROOT}/scripts/flow.ts" prs:*)'
+    - 'Read(${CLAUDE_PLUGIN_ROOT}/**)'
+    - 'Read(.dork/flow/**)'
+    - 'tracker:read'
 ---
 
 `<flow-root>` is two folders above this file's `realpath`. `flow <verb>` means
@@ -15,9 +25,11 @@ schedule:
 
 The schedulable **groom health check**: a weekly, read-only
 `/flow:groom check`. The full groom closes items, so it stays operator-run. Off
-until you approve it on the Schedules page or schedule it yourself.
+until you approve it on the Schedules page.
 
 Each firing runs the CHECK mode of `<flow-root>/skills/grooming-backlog/SKILL.md`:
+
+**Refused tool:** `<flow-root>/skills/flow-drain/refused-tool.md`.
 
 0. **Pause check.** Run step 0 of
    `<flow-root>/skills/flow-drain/SKILL.md`. Stop whenever it says to stop.

@@ -250,7 +250,11 @@ describe('both schedules ship and are documented', () => {
     ],
     ['does not restore readiness', /Do not restore `agent\/ready`/],
   ])('the release guard bites when it drops: %s', (label, cut) => {
-    const triage = read('skills/flow-triage/SKILL.md').replace(cut, 'x');
+    // Cut inside the release step: the same commands also sit in the
+    // frontmatter's `metadata.flow-needs` list, which this guard does not read.
+    const skill = read('skills/flow-triage/SKILL.md');
+    const at = skill.indexOf('**Release stale claims');
+    const triage = skill.slice(0, at) + skill.slice(at).replace(cut, 'x');
     expect(releaseGaps(triage)).toEqual([label]);
   });
 

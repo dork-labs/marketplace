@@ -1,0 +1,49 @@
+---
+title: Scheduled runs and refused tools
+description: What each scheduled flow run needs to read, how to allow it, and what a run does when a tool is still refused.
+---
+
+# Scheduled runs and refused tools
+
+Nobody is there to approve a tool during a scheduled run, so a tool that asks is refused the moment
+it asks. Flow's shipped schedules keep their careful permission setting (`default` for triage, groom
+and retro, Accept edits for the drain tick), and flow never raises it. Instead each one lists the
+read tools it needs under `metadata.flow-needs` in its `SKILL.md`:
+
+| Schedule      | What it needs to read                                                                                                                       |
+| ------------- | ------------------------------------------------------------------------------------------------------------------------------------------- |
+| `flow-triage` | flow's settings check, `flow snapshot`, `flow prs`, `git worktree list --porcelain`, `git ls-remote --heads origin`, flow's files, tracker  |
+| `flow-groom`  | flow's settings check, `flow snapshot`, `flow audit`, `flow next`, `flow prs`, flow's files, tracker                                        |
+| `flow-retro`  | flow's settings check, `flow selftest --json`, `flow retro --json`, flow's files                                                            |
+| `flow-drain`  | flow's settings check, `flow next`, `flow prs`, flow's recovery check, `git worktree list --porcelain`, flow's files, tracker               |
+
+"Flow's files" are the plugin's own folder and `.dork/flow/` in your project. `tracker:read` in a
+list means your tracker adapter's read tools, whatever your tracker calls them; the adapter's
+`SKILL.md` names them. Apart from reading, these commands only keep flow's own records in its
+gitignored folders: `flow snapshot` saves its snapshot, and `flow selftest` and `flow retro` save
+their results. None of them writes to your tracker or your code, and every write still asks.
+
+## Allowing them
+
+**Listing a tool grants nothing.** Until DorkOS lets a schedule carry an allow list of its own, allow
+the tools for your project: add each one to `permissions.allow` in the project's
+`.claude/settings.json`, with `${CLAUDE_PLUGIN_ROOT}` written out as the folder flow is installed in.
+
+Never switch a flow schedule to a looser permission setting to get past a refusal. Accept edits,
+Bypass and the rest hand the run far more than reads, and a run that reads text other people wrote
+should never hold more than it needs.
+
+## When a tool is still refused
+
+A refused tool never ends the run quietly, and never as done. The run:
+
+1. Stops starting new steps, and never retries the tool or reaches for another one to do the same
+   job.
+2. Parks the item it was working on with one question: allow the tool, or do the step by hand.
+3. Notes the refusal in flow's journal, so the weekly retro sees it.
+4. Ends with a report whose first line is `FLOW RUN NEEDS YOU: refused <tool> at step <n>`.
+
+On a DorkOS release after 0.125.4, a run that was refused a tool shows as needing attention on the
+Schedules page, not as completed. On 0.125.4 and earlier, read the report's first line. With another
+scheduler, treat that first line as a failed run, for example by checking the run's output with
+`grep -q '^FLOW RUN NEEDS YOU:'`.

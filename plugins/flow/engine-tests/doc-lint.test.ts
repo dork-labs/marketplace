@@ -60,6 +60,19 @@ describe('doc-lint/words (the ratchet)', () => {
     expect(budgetedWords('no front matter\nallowed-tools: a b c')).toBe(7);
   });
 
+  it("leaves a scheduled skill's flow-needs list out of its budget, and nothing else", () => {
+    // The list is the schedule's permission declaration (DOR-3257): exact rules
+    // are long, and counting them would make the ratchet fight a narrower list.
+    const needs =
+      "metadata:\n  flow-needs:\n    - 'Bash(git worktree list --porcelain)'\n    - 'Read(.dork/flow/**)'\n";
+    const text = `---\nname: n\n${needs}---\nbody words`;
+    expect(budgetedWords(text)).toBe(countWords(text) - 8);
+    // Another metadata key still counts, and so does a flow-needs line in prose.
+    const other = '---\nname: n\nmetadata:\n  owner: a b\n---\nbody';
+    expect(budgetedWords(other)).toBe(countWords(other));
+    expect(budgetedWords('no front matter\n  flow-needs:\n    - a b')).toBe(7);
+  });
+
   it('passes a file at or under its baseline', () => {
     expect(checkWords(files, { 'commands/a.md': { baseline: 4, target: 2 } })).toEqual([]);
   });

@@ -103,6 +103,10 @@
     "baseline": 2056,
     "target": 2056
   },
+  "docs/refused-tools.mdx": {
+    "baseline": 504,
+    "target": 504
+  },
   "docs/self-improvement.mdx": {
     "baseline": 595,
     "target": 592
@@ -174,6 +178,10 @@
   "skills/executing-specs/SKILL.md": {
     "baseline": 981,
     "target": 981
+  },
+  "skills/flow-drain/refused-tool.md": {
+    "baseline": 296,
+    "target": 296
   },
   "skills/flow-drain/SKILL.md": {
     "baseline": 720,
