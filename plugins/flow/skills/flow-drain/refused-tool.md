@@ -11,9 +11,10 @@ as done.** The first time a tool call comes back refused, denied or waiting for 
 2. If you were working on an item, park it with one question, the way flow always parks. The
    question is "This run was refused `<tool>`. Allow it for this schedule, or do this step by
    hand?". In triage that is `flow triage <id> --park '<question>'`; anywhere else it is
-   `flow ask <id>` with that question, the choices "Allow it" and "Do it by hand", `--pick 1`,
-   and the blocked step as `--why`. If flow says to go ahead with your pick, don't: only a person
-   can allow a tool. If the park is refused too, go on to step 3.
+   `flow ask <id>` with that question, the choices "Allow it" and "Do it by hand", `--pick 2`,
+   and the blocked step as `--why`. Your pick is never "Allow it", and if flow says to go ahead
+   with your pick, don't: only a person can allow a tool. Parking writes to the tracker, so it may
+   be refused too; then go on to step 3 and name the item in the report.
 3. Run `flow note --kind friction --skill <the scheduled skill's name> "refused <tool> at step <n>"`.
 4. End the run. The report's first line is exactly
    `FLOW RUN NEEDS YOU: refused <tool> at step <n>`, followed by what was left undone and every

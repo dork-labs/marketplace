@@ -73,23 +73,36 @@ function scheduleMode(fm: string): string | undefined {
   return /^ {2}permissions:\s*["']?([\w]+)["']?\s*$/m.exec(block)?.[1];
 }
 
-/** The entries of `metadata.flow-needs`, quotes stripped; `null` when it is absent. */
+/**
+ * The entries of `metadata.flow-needs`, quotes stripped; `null` when it is
+ * absent. Every line under the key, up to the next key at its level or above,
+ * must be a `    - ` entry: a comment or blank line would otherwise end the
+ * list early and hide what follows it from the read-tier check, so it reads as
+ * an entry named `unreadable: <line>`, which is never read-tier.
+ */
 function flowNeeds(fm: string): string[] | null {
-  const block = /^metadata:\n((?: {2}.*\n?)*)/m.exec(fm)?.[1];
-  if (block === undefined) return null;
-  const list = /^ {2}flow-needs:\n((?: {4}- .*\n?)*)/m.exec(block)?.[1];
-  if (list === undefined) return null;
-  return list
-    .split('\n')
-    .filter((line) => line.trim() !== '')
-    .map((line) => line.replace(/^ {4}- /, '').replace(/^'(.*)'$/, '$1'));
+  const lines = fm.split('\n');
+  const start = lines.indexOf('  flow-needs:');
+  // It must sit under `metadata:`: the nearest top-level key above it.
+  const owner = lines
+    .slice(0, Math.max(start, 0))
+    .reverse()
+    .find((line) => /^\S/.test(line));
+  if (start === -1 || owner !== 'metadata:') return null;
+  const out: string[] = [];
+  for (const line of lines.slice(start + 1)) {
+    if (/^ {0,2}\S/.test(line)) break;
+    const entry = /^ {4}- (.*)$/.exec(line);
+    out.push(entry ? entry[1].replace(/^'(.*)'$/, '$1') : `unreadable: ${line}`);
+  }
+  return out;
 }
 
 const ROOT = '${CLAUDE_PLUGIN_ROOT}';
 const NODE = 'node --experimental-strip-types';
 
 /** `flow` verbs that only read (or keep flow's own records), allowed as a prefix rule. */
-const READ_VERBS = ['snapshot', 'audit', 'next', 'prs'];
+const READ_VERBS = ['snapshot', 'audit', 'next', 'prs', 'autonomy'];
 
 /** `flow` invocations allowed only exactly: their other flags write (`retro --file`). */
 const READ_EXACT = ['selftest --json', 'retro --json'];
@@ -97,13 +110,25 @@ const READ_EXACT = ['selftest --json', 'retro --json'];
 /** Exact read-only commands outside flow. */
 const READ_COMMANDS = ['git worktree list --porcelain', 'git ls-remote --heads origin'];
 
-/** Folders a read may be scoped to: flow's own, in the plugin and in the project. */
-const READ_FOLDERS = [`${ROOT}/`, '.dork/flow/', '.agents/flow/'];
+/**
+ * Folders a read may be scoped to: flow's own, in the plugin and in the
+ * project. Never `.agents/flow/`: it holds `config.local.json`, the project's
+ * secrets and account handles.
+ */
+const READ_FOLDERS = [`${ROOT}/`, '.dork/flow/'];
+
+/**
+ * The one write every list carries: `flow note` adds a line to flow's own
+ * journal, which is how a refused tool reaches the weekly retro.
+ */
+const NOTE_RULE = `Bash(${NODE} "${ROOT}/scripts/flow.ts" note --kind friction:*)`;
 
 /** Every exact entry that is read-tier, built from the lists above. */
 const READ_TIER = new Set([
   `Bash(${NODE} "${ROOT}/scripts/config-files.ts")`,
   `Bash(${NODE} "${ROOT}/scripts/recovery.ts":*)`,
+  `Bash(${NODE} "${ROOT}/scripts/involvement.ts":*)`,
+  NOTE_RULE,
   ...READ_VERBS.map((verb) => `Bash(${NODE} "${ROOT}/scripts/flow.ts" ${verb}:*)`),
   ...READ_EXACT.map((call) => `Bash(${NODE} "${ROOT}/scripts/flow.ts" ${call})`),
   ...READ_COMMANDS.map((command) => `Bash(${command})`),
@@ -131,6 +156,7 @@ function scheduleGaps(name: string, text: string): string[] {
   const gaps: string[] = [];
   const needs = flowNeeds(fm);
   if (needs === null || needs.length === 0) gaps.push('lists no flow-needs');
+  else if (!needs.includes(NOTE_RULE)) gaps.push('cannot note a refusal');
   for (const entry of needs ?? []) {
     const why = notReadTier(entry);
     if (why) gaps.push(why);
@@ -160,6 +186,8 @@ function ruleGaps(rule: string): string[] {
     ['parks through triage', /`flow triage <id> --park '<question>'`/],
     ['parks through flow ask', /`flow ask <id>`/],
     ['never takes its own pick', /only a person\s+can allow a tool/],
+    ['its default pick never grants', /`--pick 2`[\s\S]*Your pick is never "Allow it"/],
+    ['parking may be refused too', /Parking writes to the tracker, so it may\s+be refused too/],
     ['notes it in the journal', /`flow note --kind friction/],
     ['a fixed first line', /`FLOW RUN NEEDS YOU: refused <tool> at step <n>`/],
     ['never calls the run done', /Never call the run done/],
@@ -204,6 +232,18 @@ describe('every scheduled skill lists read-tier needs and keeps its mode', () =>
       "Read(~/.ssh/**): reads outside flow's folders",
     ]);
     expect(scheduleGaps('flow-triage', plant('Read'))).toEqual(['Read: not a read']);
+    expect(scheduleGaps('flow-triage', plant('Read(.agents/flow/**)'))).toEqual([
+      "Read(.agents/flow/**): reads outside flow's folders",
+    ]);
+    // A comment line must not end the list and hide the entry after it.
+    const hidden = triage.replace('  flow-needs:\n', "  flow-needs:\n    # reads\n    - 'Bash'\n");
+    expect(scheduleGaps('flow-triage', hidden)).toEqual([
+      'unreadable:     # reads: not a read',
+      'Bash: not a read',
+    ]);
+    expect(scheduleGaps('flow-triage', triage.replace(`    - '${NOTE_RULE}'\n`, ''))).toEqual([
+      'cannot note a refusal',
+    ]);
     expect(
       scheduleGaps('flow-triage', triage.replace('permissions: default', 'permissions: dontAsk'))
     ).toEqual(['mode dontAsk is not default']);
@@ -257,6 +297,9 @@ describe('a refused tool ends the run red, in every scheduled skill', () => {
     ]);
     expect(ruleGaps(rule.replace(/only a person\s+can allow a tool/, 'use your pick'))).toEqual([
       'never takes its own pick',
+    ]);
+    expect(ruleGaps(rule.replace('`--pick 2`', '`--pick 1`'))).toEqual([
+      'its default pick never grants',
     ]);
   });
 });

@@ -11,9 +11,12 @@ schedule:
 metadata:
   flow-needs:
     - 'Bash(node --experimental-strip-types "${CLAUDE_PLUGIN_ROOT}/scripts/config-files.ts")'
+    - 'Bash(node --experimental-strip-types "${CLAUDE_PLUGIN_ROOT}/scripts/flow.ts" note --kind friction:*)'
     - 'Bash(node --experimental-strip-types "${CLAUDE_PLUGIN_ROOT}/scripts/flow.ts" next:*)'
     - 'Bash(node --experimental-strip-types "${CLAUDE_PLUGIN_ROOT}/scripts/flow.ts" prs:*)'
     - 'Bash(node --experimental-strip-types "${CLAUDE_PLUGIN_ROOT}/scripts/recovery.ts":*)'
+    - 'Bash(node --experimental-strip-types "${CLAUDE_PLUGIN_ROOT}/scripts/involvement.ts":*)'
+    - 'Bash(node --experimental-strip-types "${CLAUDE_PLUGIN_ROOT}/scripts/flow.ts" autonomy:*)'
     - 'Bash(git worktree list --porcelain)'
     - 'Read(${CLAUDE_PLUGIN_ROOT}/**)'
     - 'Read(.dork/flow/**)'

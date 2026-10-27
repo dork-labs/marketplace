@@ -10,18 +10,34 @@ it asks. Flow's shipped schedules keep their careful permission setting (`defaul
 and retro, Accept edits for the drain tick), and flow never raises it. Instead each one lists the
 read tools it needs under `metadata.flow-needs` in its `SKILL.md`:
 
-| Schedule      | What it needs to read                                                                                                                       |
-| ------------- | ------------------------------------------------------------------------------------------------------------------------------------------- |
-| `flow-triage` | flow's settings check, `flow snapshot`, `flow prs`, `git worktree list --porcelain`, `git ls-remote --heads origin`, flow's files, tracker  |
-| `flow-groom`  | flow's settings check, `flow snapshot`, `flow audit`, `flow next`, `flow prs`, flow's files, tracker                                        |
-| `flow-retro`  | flow's settings check, `flow selftest --json`, `flow retro --json`, flow's files                                                            |
-| `flow-drain`  | flow's settings check, `flow next`, `flow prs`, flow's recovery check, `git worktree list --porcelain`, flow's files, tracker               |
+| Schedule      | What it needs to read                                                                                                                      |
+| ------------- | ------------------------------------------------------------------------------------------------------------------------------------------ |
+| `flow-triage` | flow's settings check, `flow snapshot`, `flow prs`, `git worktree list --porcelain`, `git ls-remote --heads origin`, flow's files, tracker |
+| `flow-groom`  | flow's settings check, `flow snapshot`, `flow audit`, `flow next`, `flow prs`, flow's files, tracker                                       |
+| `flow-retro`  | flow's settings check, `flow selftest --json`, `flow retro --json`, flow's files                                                           |
+| `flow-drain`  | flow's settings check, `flow next`, `flow prs`, `flow autonomy`, flow's recovery and involvement checks, `git worktree list --porcelain`, flow's files, tracker |
 
-"Flow's files" are the plugin's own folder and `.dork/flow/` in your project. `tracker:read` in a
-list means your tracker adapter's read tools, whatever your tracker calls them; the adapter's
-`SKILL.md` names them. Apart from reading, these commands only keep flow's own records in its
-gitignored folders: `flow snapshot` saves its snapshot, and `flow selftest` and `flow retro` save
-their results. None of them writes to your tracker or your code, and every write still asks.
+Every list also has `flow note --kind friction`, so a run can write a refusal down in flow's journal.
+
+"Flow's files" are the plugin's own folder and `.dork/flow/` in your project. None of these commands
+writes to your tracker or your code. Besides reading, they only write flow's own records: `flow note`
+adds a journal line, `flow selftest` and `flow retro` save their results under `.dork/flow/`, and
+`flow snapshot` saves the snapshot to the file it is given.
+
+`tracker:read` means your tracker adapter's reads, such as listing and fetching items. An adapter has
+no list of its own read tools yet, so look at the calls its `SKILL.md` makes to read, and allow
+those.
+
+## What still stops for you
+
+Reads are only half of most runs. Every write still asks, so with only these reads allowed:
+
+- **groom** can finish on its own: it only reads and reports.
+- **triage** stops at the first item it releases, readies or parks: those are tracker writes.
+- **retro** stops when it files its proposals (`flow retro --file`) or writes their temp file.
+- **drain** stops at its first write: a claim, a stage move, a review or the PR sweep.
+
+Each of those ends the way the next section says, so you see where it stopped.
 
 ## Allowing them
 
@@ -39,7 +55,9 @@ A refused tool never ends the run quietly, and never as done. The run:
 
 1. Stops starting new steps, and never retries the tool or reaches for another one to do the same
    job.
-2. Parks the item it was working on with one question: allow the tool, or do the step by hand.
+2. Tries to park the item it was working on with one question: allow the tool, or do the step by
+   hand. Parking writes to the tracker, so it happens only if you allowed that; if not, the report
+   names the item instead.
 3. Notes the refusal in flow's journal, so the weekly retro sees it.
 4. Ends with a report whose first line is `FLOW RUN NEEDS YOU: refused <tool> at step <n>`.
 
