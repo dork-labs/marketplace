@@ -270,12 +270,15 @@ export const VERBS: readonly VerbDefinition[] = [
   },
   {
     name: 'status',
-    summary: 'Show what is in flight, what is parked, the drain, the pause and any drift.',
+    summary: 'Show what is in flight, what is parked, the drain, the pause, any drift, and Health.',
     description:
-      'Joins the run records, the drain sentinel, the pause and the backlog. Drift is a running run whose item is not started, a claimed item with no run, a run whose worker is gone, or a STATE-n breach on an in-flight item. With an identifier: that item only, plus its last parked question.',
+      "Joins the run records, the drain sentinel, the pause and the backlog. Drift is a running run whose item is not started, a claimed item with no run, a run whose worker is gone, or a STATE-n breach on an in-flight item. With an identifier: that item only, plus its last parked question. Health shows each of this project's flow schedules as fresh, stale, never ran, disabled or pending approval (its last successful run, read from the DorkOS on this machine), and when each intake source was last read; whatever it cannot read is unknown, with why.",
     common: ['project', 'snapshot'],
     positionals: [{ name: 'identifier', description: 'Show only this item.' }],
-    flags: [{ name: 'strict', kind: 'boolean', description: 'Exit 1 when there is drift.' }],
+    flags: [
+      { name: 'strict', kind: 'boolean', description: 'Exit 1 when there is drift.' },
+      { name: 'no-health', kind: 'boolean', description: 'Skip the Health block.' },
+    ],
     load: () => import('./cli/status.ts'),
   },
   {

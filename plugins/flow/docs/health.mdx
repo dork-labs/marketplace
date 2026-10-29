@@ -1,0 +1,29 @@
+---
+title: Is flow healthy?
+description: The Health block in flow status, and where its answers come from.
+---
+
+# Is flow healthy?
+
+The last block `/flow:status` prints is **Health**. It answers two questions: are this project's flow schedules running, and when was each intake source last read?
+
+## Schedules
+
+Each flow schedule of this project (drain, groom, triage, retro, and any you made that runs `/flow continue`) gets one row, with its cron and timezone, in one of these states:
+
+- **fresh**: its last successful run is within one cron interval;
+- **stale**: its last successful run is older than that, as in "stale: last success 3d ago, runs daily";
+- **never ran**: it's on, and has no successful run yet;
+- **disabled**: it's switched off, or DorkOS paused it because its file or agent is gone;
+- **pending approval**: it waits for you to approve it in DorkOS;
+- **unknown**: something it needed couldn't be read, and it says what. Unknown is never counted as healthy.
+
+One cron interval is the longest gap between two firings of the cron, plus an hour for a run that started late.
+
+Flow keeps no record of its own scheduled runs. DorkOS runs the schedules and keeps each run's outcome, so flow reads that from the DorkOS on this machine: the schedule list, then each schedule's last completed run. It asks only a DorkOS at localhost, follows no redirect, and needs no extra permission. Without DorkOS, every schedule is unknown, and the block says why.
+
+## Intake
+
+One row per intake source in `connection.intake`, or the plain tracker intake when there's none. Flow doesn't record when it reads an intake source yet, so each row says unknown for now. Once flow keeps a last-read mark per source, these rows show it.
+
+`flow status --no-health` skips the block.

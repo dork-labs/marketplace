@@ -9,7 +9,11 @@
  *   sentinel is an orphan when its pid is not alive or it started more than
  *   24 hours ago (a pid can be recycled), the same rule the Stop hook reaps by;
  * - the pause (`paused.json`);
- * - the backlog: the tracker, or a saved `flow snapshot --json` with `--snapshot`.
+ * - the backlog: the tracker, or a saved `flow snapshot --json` with `--snapshot`;
+ * - Health (DOR-3260): how fresh each of this project's flow schedules is and
+ *   when each intake source was last read (`cli/health-read.ts`, which reads
+ *   the schedules' run record from the DorkOS on this machine). Whatever it
+ *   cannot read shows as unknown with why. `--no-health` skips it.
  *
  * Drift is where these disagree: a running run whose item is not started, a
  * claimed item with no run, a running run whose worker is gone (for a
@@ -25,6 +29,7 @@ import { readFileSync } from 'node:fs';
 import path from 'node:path';
 
 import { findConfigRoots, pauseState } from '../config-files.ts';
+import { loadConfig } from '../config-load.ts';
 import { formatWhen } from '../question.ts';
 import { withSetupNudge } from './setup-nudge.ts';
 import { PreconditionError } from '../errors.ts';
@@ -40,6 +45,7 @@ import { AGENT_CLAIMED, stateCoherence } from '../work-state.ts';
 import { readSnapshotFile } from './backlog.ts';
 import { formatColumns } from './output.ts';
 import type { VerbContext, VerbResult } from './context.ts';
+import { readHealth, renderHealth, type Health } from './health-read.ts';
 
 /** The parked label. */
 const AGENT_NEEDS_INPUT = 'agent/needs-input';
@@ -305,17 +311,46 @@ export async function run(ctx: VerbContext): Promise<VerbResult> {
 
   const paused =
     pause === null ? null : { since: pause.pausedAt, until: pause.until, file: pause.file };
+  const health = ctx.args.flags['no-health'] === true ? null : await healthFor(ctx, roots, now);
   // `ok` matches the exit code: false only when --strict found drift.
   const failed = strict && drift.length > 0;
   return withSetupNudge(
     ctx,
     {
       exitCode: failed ? 1 : 0,
-      json: { ok: !failed, paused, drain, inFlight, parked, drift },
-      text: render({ paused, drain, inFlight, parked, drift }, now),
+      json: { ok: !failed, paused, drain, inFlight, parked, drift, health },
+      text: render({ paused, drain, inFlight, parked, drift, health }, now),
     },
     roots
   );
+}
+
+/**
+ * The Health block. The intake sources and tracker come from the project's
+ * config; a config that cannot be read leaves the plain tracker intake.
+ */
+async function healthFor(
+  ctx: VerbContext,
+  roots: ReturnType<typeof findConfigRoots>,
+  now: Date
+): Promise<Health> {
+  let intake: { id: string; name?: string }[] = [];
+  let tracker = 'tracker';
+  try {
+    const { config } = loadConfig(roots, ctx.env);
+    intake = config.connection.intake;
+    tracker = config.tracker;
+  } catch {
+    // The rest of status reports a config problem; Health shows the plain intake.
+  }
+  return readHealth({
+    roots: [roots.checkout, ...(roots.mainCheckout === null ? [] : [roots.mainCheckout])],
+    env: ctx.env,
+    fetchImpl: ctx.io.fetch,
+    now,
+    intake,
+    tracker,
+  });
 }
 
 /** One in-flight entry from a run record and/or a tracker item. */
@@ -391,6 +426,7 @@ function render(
     inFlight: InFlightEntry[];
     parked: ParkedEntry[];
     drift: DriftEntry[];
+    health: Health | null;
   },
   now: Date
 ): string {
@@ -442,5 +478,6 @@ function render(
   if (pane.inFlight.length === 0 && pane.parked.length === 0 && !(drain?.active ?? false)) {
     sections.push('Nothing is in flight and no drain is live.');
   }
+  if (pane.health !== null) sections.push(renderHealth(pane.health));
   return sections.join('\n\n');
 }

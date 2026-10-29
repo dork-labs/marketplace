@@ -91,6 +91,10 @@
     "baseline": 786,
     "target": 786
   },
+  "docs/health.mdx": {
+    "baseline": 305,
+    "target": 305
+  },
   "docs/open-prs.mdx": {
     "baseline": 486,
     "target": 486
