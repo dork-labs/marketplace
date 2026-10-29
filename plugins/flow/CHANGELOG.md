@@ -4,6 +4,15 @@ Installs of this plugin are pinned to a commit SHA, so a fix here does not reach
 you until you **reinstall it** (Marketplace → flow → reinstall, or re-run your
 `--plugin-dir` checkout's `git pull`). Each entry below says whether that matters.
 
+## 0.63.0
+
+**`/flow:status` now ends with a Health block: are this project's flow schedules running, and when was each intake source last read? Reinstall to get it.**
+
+- One row per flow schedule (drain, groom, triage, retro, and any you made that runs `/flow continue`), with its cron and timezone: fresh, stale ("stale: last successful run started 3d ago, runs daily"), never ran, disabled, or pending approval. Stale means a firing came and went with no successful run after it, allowing the schedule's max runtime (at least an hour), so a long run still going isn't stale.
+- Flow keeps no record of its own scheduled runs, so it reads DorkOS's: the schedule list, and each schedule's last completed run, from the DorkOS on this machine only, following no redirect. It needs no new permission. Without DorkOS, or with an answer flow can't read, the row says unknown and why, never healthy.
+- One row per intake source (`connection.intake`, else the plain tracker intake). Flow doesn't record when it reads one yet, so these say unknown for now, ready for a last-read mark per source.
+- `flow status --no-health` skips the block. The new page [Is flow healthy?](/docs/guides/flow/health) explains each state.
+
 ## 0.62.0
 
 **A scheduled flow run that is refused a tool no longer ends quietly as done. Reinstall to get it.**

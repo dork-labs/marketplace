@@ -106,7 +106,13 @@ export async function runFlow(
     runProcess: options.runProcess ?? (async () => ({ code: 0, stdout: '', stderr: '' })),
     ...(options.createForge === undefined ? {} : { createForge: options.createForge }),
     flowRoot: temp.plugin,
-    io: { osHome: temp.osHome },
+    // No DorkOS: status's Health reads fail as unreachable, never the real one here.
+    io: {
+      osHome: temp.osHome,
+      fetch: async () => {
+        throw new Error('no DorkOS in this test');
+      },
+    },
     verbs: VERBS,
   });
   return { code, stdout, stderr, adapterBuilds };

@@ -11,8 +11,8 @@ Show the `/flow` loop: $ARGUMENTS
 
 This command only reads.
 
-1. Run `node --experimental-strip-types "${CLAUDE_PLUGIN_ROOT}/scripts/flow.ts" status $ARGUMENTS` (it reaches the tracker through the adapter's code) and show what it prints. On a non-zero exit, show its message; it names the fix.
-2. **The schedules, only when the `tasks_list` tool is available** (DorkOS: `mcp__dorkos__tasks_list`). DorkOS tools may be deferred: when one is not loaded, load it with ToolSearch first, and treat it as absent only when that finds nothing. Call `tasks_list` and keep **this project's flow schedules**. Take the `committedDir` and the `localDir` that
+1. Run `node --experimental-strip-types "${CLAUDE_PLUGIN_ROOT}/scripts/flow.ts" status $ARGUMENTS` (it reaches the tracker through the adapter's code) and show what it prints, Health (`docs/health.mdx`) and its unknown rows too. On a non-zero exit, show its message; it names the fix.
+2. **The schedules, only when the `tasks_list` tool is available** (DorkOS: `mcp__dorkos__tasks_list`). Load a deferred DorkOS tool with ToolSearch first; it is absent only when that finds nothing. Call `tasks_list` and keep **this project's flow schedules**. Take the `committedDir` and the `localDir` that
    `node --experimental-strip-types "${CLAUDE_PLUGIN_ROOT}/scripts/config-files.ts"` prints, each with its trailing `/.agents/flow` removed: the project's roots. A schedule is in this project only when its `filePath` starts with one of those
    roots followed by `/`; a root that is merely the start of another folder's name (`/work/app` against `/work/app-2/...`) is another project. Of those, keep each whose `name` is `flow-drain`, `flow-groom` or `flow-triage`, and each a person made whose `prompt` runs `/flow continue`. This command never calls `tasks_update`.
 

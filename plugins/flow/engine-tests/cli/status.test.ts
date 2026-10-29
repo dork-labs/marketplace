@@ -104,7 +104,13 @@ async function status(
     runProcess: async () => ({ code: 0, stdout: '', stderr: '' }),
     createLauncher,
     // A private OS home: the setup nudge looks for account folders there.
-    io: { osHome: path.join(project, 'home') },
+    // No DorkOS: Health's reads fail as unreachable, never the real one here.
+    io: {
+      osHome: path.join(project, 'home'),
+      fetch: async () => {
+        throw new Error('no DorkOS in this test');
+      },
+    },
   };
   const code = await main(['status', ...argv], deps);
   return { code, stdout, stderr, json: () => JSON.parse(stdout), calls: fake.calls };
@@ -398,8 +404,9 @@ describe('flow status', () => {
   });
 
   it('says so plainly when nothing is in flight', async () => {
-    // Purpose: an empty loop is one sentence, not an empty pane.
-    const result = await status([]);
+    // Purpose: an empty loop is one sentence, not an empty pane (Health, which
+    // always follows, is skipped here; status-health.test.ts covers it).
+    const result = await status(['--no-health']);
     expect(result.code).toBe(0);
     expect(result.stdout.trim()).toBe('Nothing is in flight and no drain is live.');
   });
