@@ -24,7 +24,8 @@ function facts(overrides: Partial<ScheduleFacts> = {}): ScheduleFacts {
   return {
     name: 'flow-triage',
     cron: '0 8 * * *',
-    timezone: 'America/Los_Angeles',
+    // UTC, so the cases below read in plain UTC; the timezone cases set one.
+    timezone: null,
     enabled: true,
     status: 'active',
     lastSuccess: ago(2 * HOUR),
@@ -128,6 +129,43 @@ describe('a schedule', () => {
       expect(row.detail).toMatch(/^unknown \(/);
       expect(row.detail).toMatch(detail);
     }
+  });
+});
+
+describe("a schedule's timezone", () => {
+  const la = (overrides: Partial<ScheduleFacts>) =>
+    facts({ timezone: 'America/Los_Angeles', ...overrides });
+
+  it('a daily 08:00 Los Angeles run that ran on time is fresh until its next firing', () => {
+    // 08:00 PDT yesterday is 15:00 UTC; at 12:00 UTC today the next one is hours away.
+    expect(scheduleHealth(la({ lastSuccess: '2026-10-28T15:00:05Z' }), NOW).state).toBe('fresh');
+    // An hour after today's 15:00 UTC firing, with no run since, it is stale.
+    expect(
+      scheduleHealth(la({ lastSuccess: '2026-10-28T15:00:05Z' }), new Date('2026-10-29T16:01:00Z'))
+        .state
+    ).toBe('stale');
+  });
+
+  it("a weekly Monday 09:00 Los Angeles run is fresh on Monday morning UTC, before this week's firing", () => {
+    const groom = la({
+      name: 'flow-groom',
+      cron: '0 9 * * 1',
+      lastSuccess: '2026-10-19T16:00:05Z',
+    });
+    expect(scheduleHealth(groom, new Date('2026-10-26T12:00:00Z')).state).toBe('fresh');
+  });
+
+  it('follows the daylight-saving change (Los Angeles leaves PDT on 1 November 2026)', () => {
+    // 08:00 PST on 1 and 2 November is 16:00 UTC.
+    const run = la({ lastSuccess: '2026-11-01T16:00:05Z' });
+    expect(scheduleHealth(run, new Date('2026-11-02T16:59:00Z')).state).toBe('fresh');
+    expect(scheduleHealth(run, new Date('2026-11-02T17:01:00Z')).state).toBe('stale');
+  });
+
+  it('a timezone flow cannot read is unknown, never judged in UTC', () => {
+    const row = scheduleHealth(facts({ timezone: 'Mars/Olympus_Mons' }), NOW);
+    expect(row.state).toBe('unknown');
+    expect(row.detail).toBe('unknown (flow cannot read its timezone "Mars/Olympus_Mons")');
   });
 });
 

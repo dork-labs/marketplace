@@ -5,8 +5,9 @@
  *
  * A schedule is one of:
  *
- * - `fresh` — its last successful run is within one cron interval;
- * - `stale` — its last successful run is older than one cron interval allows;
+ * - `fresh` — its last successful run started at or after the last firing it
+ *   was due for;
+ * - `stale` — a firing came and went with no successful run after it;
  * - `never-ran` — it is on, and DorkOS records no completed run for it (a
  *   run DorkOS left marked running is not counted, so this can undercount);
  * - `disabled` — switched off (`enabled: false`), or paused by DorkOS;
@@ -19,7 +20,9 @@
  * So a run still going, or a firing DorkOS skipped because the previous run
  * was still going, is not stale; and an uneven cron (weekdays 9 to 5) is
  * judged by the firing it missed, not by its longest quiet stretch. The cron
- * is read in UTC, so a daylight-saving change can shift a firing by an hour.
+ * is read in the schedule's own timezone (UTC when it has none), so a 08:00
+ * America/Los_Angeles schedule fires at 15:00 or 16:00 UTC; a timezone flow
+ * cannot read is unknown.
  *
  * Dependency-free.
  *
@@ -29,7 +32,7 @@
 /** The least grace a firing gets before it counts as missed. */
 export const STALE_GRACE_MS = 60 * 60 * 1000;
 
-/** How far ahead the cron's gaps are measured: covers monthly crons. */
+/** How far the cron is scanned, back for its last firing and ahead for its gaps: covers monthly crons. */
 const GAP_WINDOW_MS = 62 * 24 * 60 * 60 * 1000;
 
 const MINUTE = 60_000;
@@ -106,7 +109,57 @@ export function parseCron(cron: string): Cron | null {
   };
 }
 
-/** Whether `cron` fires at the UTC minute `at`. */
+/** Turns a moment (ms) into the same wall-clock time written as UTC, in one timezone. */
+export type ToLocal = (t: number) => number;
+
+/**
+ * A {@link ToLocal} for a timezone: the zone's offset is read once per UTC
+ * hour (offsets change only on an hour or half-hour boundary) and reused for
+ * that hour's minutes, so a 62-day scan stays cheap.
+ *
+ * @param timeZone - An IANA zone (`America/Los_Angeles`), or `null` for UTC.
+ * @returns The converter, or `null` when the zone is not one this runtime knows.
+ */
+export function zoneClock(timeZone: string | null): ToLocal | null {
+  if (timeZone === null || timeZone === '' || timeZone === 'UTC') return (t) => t;
+  let format: Intl.DateTimeFormat;
+  try {
+    format = new Intl.DateTimeFormat('en-US', {
+      timeZone,
+      hourCycle: 'h23',
+      year: 'numeric',
+      month: 'numeric',
+      day: 'numeric',
+      hour: 'numeric',
+      minute: 'numeric',
+    });
+  } catch {
+    return null;
+  }
+  const offsets = new Map<number, number>();
+  const HALF_HOUR = 30 * MINUTE;
+  return (t) => {
+    const slot = Math.floor(t / HALF_HOUR) * HALF_HOUR;
+    let offset = offsets.get(slot);
+    if (offset === undefined) {
+      const parts = Object.fromEntries(
+        format.formatToParts(new Date(slot)).map((part) => [part.type, part.value])
+      );
+      const wall = Date.UTC(
+        Number(parts.year),
+        Number(parts.month) - 1,
+        Number(parts.day),
+        Number(parts.hour),
+        Number(parts.minute)
+      );
+      offset = wall - slot;
+      offsets.set(slot, offset);
+    }
+    return t + offset;
+  };
+}
+
+/** Whether `cron` fires at the wall-clock minute `at` (its UTC fields are the local time). */
 function fires(cron: Cron, at: Date): boolean {
   if (!cron.minute.has(at.getUTCMinutes()) || !cron.hour.has(at.getUTCHours())) return false;
   if (!cron.month.has(at.getUTCMonth() + 1)) return false;
@@ -122,12 +175,17 @@ function fires(cron: Cron, at: Date): boolean {
  *
  * @param cron - The parsed cron.
  * @param at - The moment to look back from.
+ * @param toLocal - The schedule's timezone (default UTC).
  * @returns The firing, in ms, or `null` when there is none in that window.
  */
-export function latestFiringAtOrBefore(cron: Cron, at: Date): number | null {
+export function latestFiringAtOrBefore(
+  cron: Cron,
+  at: Date,
+  toLocal: ToLocal = (t) => t
+): number | null {
   const end = Math.floor(at.getTime() / MINUTE) * MINUTE;
   for (let t = end; t > end - GAP_WINDOW_MS; t -= MINUTE) {
-    if (fires(cron, new Date(t))) return t;
+    if (fires(cron, new Date(toLocal(t)))) return t;
   }
   return null;
 }
@@ -138,15 +196,16 @@ export function latestFiringAtOrBefore(cron: Cron, at: Date): number | null {
  *
  * @param cron - The parsed cron.
  * @param from - Where to start measuring.
+ * @param toLocal - The schedule's timezone (default UTC).
  * @returns The gap in ms, or `null` when it fires fewer than twice in that window.
  */
-export function longestGapMs(cron: Cron, from: Date): number | null {
+export function longestGapMs(cron: Cron, from: Date, toLocal: ToLocal = (t) => t): number | null {
   const start = Math.floor(from.getTime() / MINUTE) * MINUTE;
   let previous: number | null = null;
   let first: number | null = null;
   let longest = 0;
   for (let t = start; t < start + GAP_WINDOW_MS; t += MINUTE) {
-    if (!fires(cron, new Date(t))) continue;
+    if (!fires(cron, new Date(toLocal(t)))) continue;
     if (first === null) first = t;
     if (previous !== null) longest = Math.max(longest, t - previous);
     previous = t;
@@ -204,8 +263,9 @@ export function cadenceWords(ms: number): string {
   const hours = ms / (60 * MINUTE);
   if (hours <= 1)
     return ms === 60 * MINUTE ? 'runs hourly' : `runs every ${Math.round(ms / MINUTE)} min`;
-  if (hours === 24) return 'runs daily';
-  if (hours === 168) return 'runs weekly';
+  // A daylight-saving change makes one gap an hour longer or shorter.
+  if (Math.abs(hours - 24) <= 1) return 'runs daily';
+  if (Math.abs(hours - 168) <= 1) return 'runs weekly';
   return hours < 48
     ? `runs at least every ${Math.round(hours)} h`
     : `runs at least every ${Math.round(hours / 24)} days`;
@@ -259,12 +319,16 @@ export function scheduleHealth(facts: ScheduleFacts, now: Date): ScheduleHealth 
   if (cron === null) {
     return row('unknown', `unknown (flow cannot read its cron "${facts.cron ?? ''}")`, last);
   }
+  const toLocal = zoneClock(facts.timezone);
+  if (toLocal === null) {
+    return row('unknown', `unknown (flow cannot read its timezone "${facts.timezone}")`, last);
+  }
   const grace = Math.max(facts.maxRuntimeMs ?? 0, STALE_GRACE_MS);
-  const due = latestFiringAtOrBefore(cron, new Date(now.getTime() - grace));
+  const due = latestFiringAtOrBefore(cron, new Date(now.getTime() - grace), toLocal);
   if (due === null) {
     return row('unknown', `unknown (its cron "${facts.cron}" fires too rarely to judge)`, last);
   }
-  const gap = longestGapMs(cron, now);
+  const gap = longestGapMs(cron, now, toLocal);
   const cadence = gap === null ? 'runs rarely' : cadenceWords(gap);
   const when = `last successful run started ${agoWords(now.getTime() - lastMs)}, ${cadence}`;
   // A minute of slack: a run starts a moment after its firing, never before.
