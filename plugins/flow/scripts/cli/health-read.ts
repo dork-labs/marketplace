@@ -13,7 +13,10 @@
  *   whose name is a flow schedule (`flow-drain`, `flow-groom`, `flow-triage`,
  *   `flow-retro`), or whose prompt runs `/flow continue`.
  * - `GET /api/tasks/runs?scheduleId=<id>&status=completed&limit=1`, per
- *   schedule that is on: its last successful run.
+ *   schedule that is on: its last successful run, newest by start (DorkOS
+ *   lists runs newest first by when they were created). A run DorkOS left
+ *   marked running is not completed here, so a schedule can look older than
+ *   it is, never fresher. A 400 or 404 is a DorkOS too old for these routes.
  *
  * Nothing here needs a new tool, permission or allow rule: it is flow's own
  * script making a loopback read, like `flow fleet`. No DorkOS, a DorkOS that
@@ -101,6 +104,9 @@ async function getJson(base: URL, route: string, fetchImpl: typeof fetch): Promi
   }
   if (response.status >= 300 && response.status < 400) {
     throw new Error(`DorkOS answered ${route} with a redirect, which flow does not follow`);
+  }
+  if (response.status === 400 || response.status === 404) {
+    throw new Error(`this DorkOS is too old to answer ${route.split('?')[0]}`);
   }
   if (!response.ok) throw new Error(`DorkOS answered ${route} with ${response.status}`);
   try {

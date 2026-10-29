@@ -117,7 +117,9 @@ describe('flow status: Health', () => {
         ['my-continue', 'pending-approval'],
       ]
     );
-    expect(health.schedules[3].detail).toBe('stale: last success 3d ago, runs daily');
+    expect(health.schedules[3].detail).toBe(
+      'stale: last successful run started 3d ago, runs daily'
+    );
     // Run history is read only for schedules that are on, and only completed runs.
     expect(urls.filter((u) => u.startsWith('/api/tasks/runs')).sort()).toEqual([
       '/api/tasks/runs?scheduleId=task-flow-drain&status=completed&limit=1',
@@ -142,6 +144,15 @@ describe('flow status: Health', () => {
     expect(row.state).toBe('unknown');
     expect(row.detail).toMatch(
       /^unknown \(its run history could not be read: DorkOS answered .* with 500\)$/
+    );
+  });
+
+  it('a DorkOS too old for the run route is unknown, never "no runs"', async () => {
+    const { fetchImpl } = dorkos([task('flow-triage')], { 'task-flow-triage': 400 });
+    const [row] = (await status(fetchImpl)).schedules;
+    expect(row.state).toBe('unknown');
+    expect(row.detail).toBe(
+      'unknown (its run history could not be read: this DorkOS is too old to answer /api/tasks/runs)'
     );
   });
 

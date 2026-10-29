@@ -12,8 +12,8 @@ The last block `/flow:status` prints is **Health**. It answers two questions: ar
 Each flow schedule of this project (drain, groom, triage, retro, and any you made that runs `/flow continue`) gets one row, with its cron and timezone, in one of these states:
 
 - **fresh**: its last successful run is within one cron interval;
-- **stale**: its last successful run is older than that, as in "stale: last success 3d ago, runs daily";
-- **never ran**: it's on, and has no successful run yet;
+- **stale**: its last successful run is older than that, as in "stale: last successful run started 3d ago, runs daily";
+- **never ran**: it's on, and DorkOS records no completed run for it;
 - **disabled**: it's switched off, or DorkOS paused it because its file or agent is gone;
 - **pending approval**: it waits for you to approve it in DorkOS;
 - **unknown**: something it needed couldn't be read, and it says what. Unknown is never counted as healthy.

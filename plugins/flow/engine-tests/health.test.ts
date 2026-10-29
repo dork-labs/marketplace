@@ -58,13 +58,13 @@ describe('a schedule', () => {
   it('fresh: its last success is within one interval', () => {
     const row = scheduleHealth(facts({ lastSuccess: ago(20 * HOUR) }), NOW);
     expect(row.state).toBe('fresh');
-    expect(row.detail).toBe('fresh: last success 20 h ago, runs daily');
+    expect(row.detail).toBe('fresh: last successful run started 20 h ago, runs daily');
   });
 
   it('stale: its last success is older than one interval allows', () => {
     const row = scheduleHealth(facts({ lastSuccess: ago(3 * DAY) }), NOW);
     expect(row).toMatchObject({ state: 'stale', lastSuccess: ago(3 * DAY) });
-    expect(row.detail).toBe('stale: last success 3d ago, runs daily');
+    expect(row.detail).toBe('stale: last successful run started 3d ago, runs daily');
   });
 
   it('one interval plus an hour of grace is still fresh; past it is stale', () => {
@@ -74,7 +74,10 @@ describe('a schedule', () => {
 
   it('never ran: on, with no successful run', () => {
     const row = scheduleHealth(facts({ lastSuccess: null }), NOW);
-    expect(row).toMatchObject({ state: 'never-ran', detail: 'never ran: no successful run yet' });
+    expect(row).toMatchObject({
+      state: 'never-ran',
+      detail: 'never ran: DorkOS records no completed run for it',
+    });
   });
 
   it('disabled: switched off, or paused by DorkOS; not stale, whatever its last run', () => {

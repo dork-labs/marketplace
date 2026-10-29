@@ -7,7 +7,8 @@
  *
  * - `fresh` — its last successful run is within one cron interval;
  * - `stale` — its last successful run is older than one cron interval allows;
- * - `never-ran` — it is on, and has no successful run;
+ * - `never-ran` — it is on, and DorkOS records no completed run for it (a
+ *   run DorkOS left marked running is not counted, so this can undercount);
  * - `disabled` — switched off (`enabled: false`), or paused by DorkOS;
  * - `pending-approval` — it waits for the operator to approve it;
  * - `unknown` — something it needs could not be read, with why. Never healthy.
@@ -227,7 +228,8 @@ export function scheduleHealth(facts: ScheduleFacts, now: Date): ScheduleHealth 
       `unknown (its run history could not be read: ${facts.lastSuccess.error})`
     );
   }
-  if (facts.lastSuccess === null) return row('never-ran', 'never ran: no successful run yet');
+  if (facts.lastSuccess === null)
+    return row('never-ran', 'never ran: DorkOS records no completed run for it');
   const last = facts.lastSuccess;
   const lastMs = Date.parse(last);
   if (!Number.isFinite(lastMs)) {
@@ -242,7 +244,7 @@ export function scheduleHealth(facts: ScheduleFacts, now: Date): ScheduleHealth 
     return row('unknown', `unknown (its cron "${facts.cron}" fires too rarely to judge)`, last);
   }
   const age = now.getTime() - lastMs;
-  const when = `last success ${agoWords(age)}, ${cadenceWords(gap)}`;
+  const when = `last successful run started ${agoWords(age)}, ${cadenceWords(gap)}`;
   return age > gap + STALE_GRACE_MS
     ? row('stale', `stale: ${when}`, last)
     : row('fresh', `fresh: ${when}`, last);
