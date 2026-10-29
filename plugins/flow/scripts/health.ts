@@ -114,8 +114,11 @@ export type ToLocal = (t: number) => number;
 
 /**
  * A {@link ToLocal} for a timezone: the zone's offset is read once per UTC
- * hour (offsets change only on an hour or half-hour boundary) and reused for
- * that hour's minutes, so a 62-day scan stays cheap.
+ * half hour (offsets change only on an hour or half-hour boundary) and reused
+ * for that half hour's minutes, so a 62-day scan stays cheap. A cron minute in
+ * a daylight-saving fall-back's repeated hour matches its second occurrence,
+ * and one in a spring-forward's skipped hour never fires; no shipped flow cron
+ * runs in those hours.
  *
  * @param timeZone - An IANA zone (`America/Los_Angeles`), or `null` for UTC.
  * @returns The converter, or `null` when the zone is not one this runtime knows.
