@@ -13,17 +13,20 @@
  * - `pending-approval` — it waits for the operator to approve it;
  * - `unknown` — something it needs could not be read, with why. Never healthy.
  *
- * "One cron interval" is the longest gap between two firings of the cron, over
- * the next 62 days, plus {@link STALE_GRACE_MS} for a run that started late.
- * The cron is read in UTC: a gap does not depend on the timezone, but for the
- * hour a daylight-saving change adds or removes.
+ * Stale means a firing was missed: the cron's most recent firing at or before
+ * now minus the grace (the schedule's max runtime, at least
+ * {@link STALE_GRACE_MS}) is later than the start of its last successful run.
+ * So a run still going, or a firing DorkOS skipped because the previous run
+ * was still going, is not stale; and an uneven cron (weekdays 9 to 5) is
+ * judged by the firing it missed, not by its longest quiet stretch. The cron
+ * is read in UTC, so a daylight-saving change can shift a firing by an hour.
  *
  * Dependency-free.
  *
  * @module @dorkos/flow/health
  */
 
-/** Slack on top of one cron interval before a schedule counts as stale. */
+/** The least grace a firing gets before it counts as missed. */
 export const STALE_GRACE_MS = 60 * 60 * 1000;
 
 /** How far ahead the cron's gaps are measured: covers monthly crons. */
@@ -115,6 +118,21 @@ function fires(cron: Cron, at: Date): boolean {
 }
 
 /**
+ * The cron's most recent firing at or before `at`, looking back 62 days.
+ *
+ * @param cron - The parsed cron.
+ * @param at - The moment to look back from.
+ * @returns The firing, in ms, or `null` when there is none in that window.
+ */
+export function latestFiringAtOrBefore(cron: Cron, at: Date): number | null {
+  const end = Math.floor(at.getTime() / MINUTE) * MINUTE;
+  for (let t = end; t > end - GAP_WINDOW_MS; t -= MINUTE) {
+    if (fires(cron, new Date(t))) return t;
+  }
+  return null;
+}
+
+/**
  * The longest gap between two firings of `cron`, measured over the 62 days
  * after `from`.
  *
@@ -148,6 +166,8 @@ export interface ScheduleFacts {
   enabled: boolean;
   /** DorkOS's status: `active`, `paused` or `pending_approval` (anything else is unknown). */
   status: string;
+  /** How long one run may take, in ms, or `null` when it has no limit. */
+  maxRuntimeMs?: number | null;
   /**
    * When its last successful run started (else finished), `null` when it has
    * none, or an error message when the run history could not be read.
@@ -239,13 +259,16 @@ export function scheduleHealth(facts: ScheduleFacts, now: Date): ScheduleHealth 
   if (cron === null) {
     return row('unknown', `unknown (flow cannot read its cron "${facts.cron ?? ''}")`, last);
   }
-  const gap = longestGapMs(cron, now);
-  if (gap === null) {
+  const grace = Math.max(facts.maxRuntimeMs ?? 0, STALE_GRACE_MS);
+  const due = latestFiringAtOrBefore(cron, new Date(now.getTime() - grace));
+  if (due === null) {
     return row('unknown', `unknown (its cron "${facts.cron}" fires too rarely to judge)`, last);
   }
-  const age = now.getTime() - lastMs;
-  const when = `last successful run started ${agoWords(age)}, ${cadenceWords(gap)}`;
-  return age > gap + STALE_GRACE_MS
+  const gap = longestGapMs(cron, now);
+  const cadence = gap === null ? 'runs rarely' : cadenceWords(gap);
+  const when = `last successful run started ${agoWords(now.getTime() - lastMs)}, ${cadence}`;
+  // A minute of slack: a run starts a moment after its firing, never before.
+  return lastMs + MINUTE < due
     ? row('stale', `stale: ${when}`, last)
     : row('fresh', `fresh: ${when}`, last);
 }

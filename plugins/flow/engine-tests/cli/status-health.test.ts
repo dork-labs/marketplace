@@ -152,7 +152,7 @@ describe('flow status: Health', () => {
     const [row] = (await status(fetchImpl)).schedules;
     expect(row.state).toBe('unknown');
     expect(row.detail).toBe(
-      'unknown (its run history could not be read: this DorkOS is too old to answer /api/tasks/runs)'
+      'unknown (its run history could not be read: DorkOS answered /api/tasks/runs with 400: it is too old for it, or its Tasks are switched off)'
     );
   });
 
@@ -188,7 +188,9 @@ describe('flow status: Health', () => {
     );
     expect(asked).toBe(false);
     expect(health.schedules).toBeNull();
-    expect(health.schedulesUnknown).toMatch(/only asks a DorkOS on this machine/);
+    expect(health.schedulesUnknown).toBe(
+      'flow only asks a DorkOS on this machine, and https://dorkos.example.com is not one'
+    );
   });
 
   it('lists each intake source; with no read recorded, each is unknown', async () => {

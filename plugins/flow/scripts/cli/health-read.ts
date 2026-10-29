@@ -26,6 +26,7 @@
  * @module @dorkos/flow/cli/health-read
  */
 
+import { realpathSync } from 'node:fs';
 import path from 'node:path';
 
 import { assertLoopback, resolveDorkosUrl } from '../fleet/sessions.ts';
@@ -106,7 +107,9 @@ async function getJson(base: URL, route: string, fetchImpl: typeof fetch): Promi
     throw new Error(`DorkOS answered ${route} with a redirect, which flow does not follow`);
   }
   if (response.status === 400 || response.status === 404) {
-    throw new Error(`this DorkOS is too old to answer ${route.split('?')[0]}`);
+    throw new Error(
+      `DorkOS answered ${route.split('?')[0]} with ${response.status}: it is too old for it, or its Tasks are switched off`
+    );
   }
   if (!response.ok) throw new Error(`DorkOS answered ${route} with ${response.status}`);
   try {
@@ -116,9 +119,22 @@ async function getJson(base: URL, route: string, fetchImpl: typeof fetch): Promi
   }
 }
 
+/** A path with its symlinks resolved when it exists (`/var` and `/private/var` compare equal). */
+function real(p: string): string {
+  try {
+    return realpathSync(p);
+  } catch {
+    return path.resolve(p);
+  }
+}
+
 /** Whether `file` is inside one of `roots` (a root that only starts another folder's name is not). */
 function underRoot(file: string, roots: readonly string[]): boolean {
-  return roots.some((root) => file.startsWith(path.resolve(root) + path.sep));
+  const target = real(file);
+  return roots.some((root) => {
+    const base = real(root) + path.sep;
+    return target.startsWith(base) || path.resolve(file).startsWith(path.resolve(root) + path.sep);
+  });
 }
 
 /**
@@ -131,10 +147,11 @@ export async function readHealth(input: HealthInput): Promise<Health> {
   const intake = intakeHealth(input.intake, input.tracker, input.now);
   const unknown = (why: string): Health => ({ schedules: null, schedulesUnknown: why, intake });
   let base: URL;
+  const url = resolveDorkosUrl(undefined, input.env);
   try {
-    base = assertLoopback(resolveDorkosUrl(undefined, input.env));
-  } catch (error) {
-    return unknown((error as Error).message);
+    base = assertLoopback(url);
+  } catch {
+    return unknown(`flow only asks a DorkOS on this machine, and ${url} is not one`);
   }
   let tasks: unknown;
   try {
@@ -159,6 +176,7 @@ export async function readHealth(input: HealthInput): Promise<Health> {
       timezone: str(task.timezone),
       enabled: task.enabled !== false,
       status: str(task.status) ?? 'unknown',
+      maxRuntimeMs: typeof task.maxRuntime === 'number' ? task.maxRuntime : null,
       lastSuccess: null,
     };
     if (facts.enabled && facts.status === 'active') {

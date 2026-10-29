@@ -311,7 +311,11 @@ export async function run(ctx: VerbContext): Promise<VerbResult> {
 
   const paused =
     pause === null ? null : { since: pause.pausedAt, until: pause.until, file: pause.file };
-  const health = ctx.args.flags['no-health'] === true ? null : await healthFor(ctx, roots, now);
+  // Health is about the loop, not one item: a focused status skips it.
+  const health =
+    ctx.args.flags['no-health'] === true || focus !== undefined
+      ? null
+      : await healthFor(ctx, roots, now);
   // `ok` matches the exit code: false only when --strict found drift.
   const failed = strict && drift.length > 0;
   return withSetupNudge(

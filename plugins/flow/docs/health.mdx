@@ -11,14 +11,14 @@ The last block `/flow:status` prints is **Health**. It answers two questions: ar
 
 Each flow schedule of this project (drain, groom, triage, retro, and any you made that runs `/flow continue`) gets one row, with its cron and timezone, in one of these states:
 
-- **fresh**: its last successful run is within one cron interval;
-- **stale**: its last successful run is older than that, as in "stale: last successful run started 3d ago, runs daily";
+- **fresh**: its last successful run started after the last firing it was due for;
+- **stale**: a firing came and went with no successful run after it, as in "stale: last successful run started 3d ago, runs daily";
 - **never ran**: it's on, and DorkOS records no completed run for it;
 - **disabled**: it's switched off, or DorkOS paused it because its file or agent is gone;
 - **pending approval**: it waits for you to approve it in DorkOS;
 - **unknown**: something it needed couldn't be read, and it says what. Unknown is never counted as healthy.
 
-One cron interval is the longest gap between two firings of the cron, plus an hour for a run that started late.
+A firing counts as missed only after the schedule's max runtime, or an hour if that's shorter, so a long run still going isn't stale.
 
 Flow keeps no record of its own scheduled runs. DorkOS runs the schedules and keeps each run's outcome, so flow reads that from the DorkOS on this machine: the schedule list, then each schedule's last completed run. It asks only a DorkOS at localhost, follows no redirect, and needs no extra permission. Without DorkOS, every schedule is unknown, and the block says why.
 

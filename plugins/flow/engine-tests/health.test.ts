@@ -55,21 +55,39 @@ describe('reading a cron', () => {
 });
 
 describe('a schedule', () => {
-  it('fresh: its last success is within one interval', () => {
-    const row = scheduleHealth(facts({ lastSuccess: ago(20 * HOUR) }), NOW);
+  // NOW is Thursday 2026-10-29 12:00 UTC; the daily cron fires at 08:00 UTC.
+  it('fresh: its last success started at or after the firing it was due for', () => {
+    const row = scheduleHealth(facts({ lastSuccess: ago(4 * HOUR) }), NOW);
     expect(row.state).toBe('fresh');
-    expect(row.detail).toBe('fresh: last successful run started 20 h ago, runs daily');
+    expect(row.detail).toBe('fresh: last successful run started 4 h ago, runs daily');
   });
 
-  it('stale: its last success is older than one interval allows', () => {
+  it('stale: a firing came and went with no successful run after it', () => {
     const row = scheduleHealth(facts({ lastSuccess: ago(3 * DAY) }), NOW);
     expect(row).toMatchObject({ state: 'stale', lastSuccess: ago(3 * DAY) });
     expect(row.detail).toBe('stale: last successful run started 3d ago, runs daily');
   });
 
-  it('one interval plus an hour of grace is still fresh; past it is stale', () => {
-    expect(scheduleHealth(facts({ lastSuccess: ago(DAY + 59 * 60_000) }), NOW).state).toBe('fresh');
-    expect(scheduleHealth(facts({ lastSuccess: ago(DAY + 61 * 60_000) }), NOW).state).toBe('stale');
+  it('a firing gets an hour of grace before it counts as missed', () => {
+    // Yesterday's 08:00 run; today's 08:00 firing is due until 09:00.
+    const yesterday = facts({ lastSuccess: ago(28 * HOUR) });
+    expect(scheduleHealth(yesterday, new Date('2026-10-29T08:59:00Z')).state).toBe('fresh');
+    expect(scheduleHealth(yesterday, new Date('2026-10-29T09:01:00Z')).state).toBe('stale');
+  });
+
+  it("a long run is not stale: the grace is the schedule's max runtime", () => {
+    // The hourly drain may run 2 h. Its 10:00 run completed; the 11:00 one is
+    // still going at 12:00 and DorkOS skipped the 12:00 firing meanwhile.
+    const drain = facts({ name: 'flow-drain', cron: '0 * * * *', lastSuccess: ago(2 * HOUR) });
+    expect(scheduleHealth({ ...drain, maxRuntimeMs: 2 * HOUR }, NOW).state).toBe('fresh');
+    // With no max runtime, the hour of grace alone marks the missed 11:00 firing.
+    expect(scheduleHealth(drain, NOW).state).toBe('stale');
+  });
+
+  it('an uneven cron is judged by the firing it missed, not its longest quiet stretch', () => {
+    // Weekdays 09:00 to 17:00 hourly; the last success was Monday 09:00.
+    const office = facts({ cron: '0 9-17 * * 1-5', lastSuccess: '2026-10-26T09:00:00.000Z' });
+    expect(scheduleHealth(office, NOW).state).toBe('stale');
   });
 
   it('never ran: on, with no successful run', () => {
