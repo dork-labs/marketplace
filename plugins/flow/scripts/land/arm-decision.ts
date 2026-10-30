@@ -25,6 +25,13 @@
  * | `failing-checks` | a required check failed or was cancelled |
  * | `files-unreadable` | the file list is incomplete, and the PR has no security label |
  * | `security-path-unlabelled` | it touches a security path without the security label |
+ * | `security-label-unverified` | it needs the security label, and flow cannot tell when the label was added or when the head arrived |
+ * | `security-label-stale` | it needs the security label, and the label was added before the head arrived |
+ *
+ * The security label counts only when it was added after the current head
+ * arrived (`securityLabelledAt` against `headArrivedAt`, server times a
+ * commit's own dates cannot move: `Forge.labelledAt` and `Forge.headPushedAt`).
+ * A label on a PR that needs none is never read.
  *
  * A pending check passes (GitHub's auto-merge waits for it; a check stuck
  * pending is the watcher's job). Which checks are required comes from the
@@ -164,7 +171,9 @@ export type RefusalSlug =
   | 'changes-requested'
   | 'failing-checks'
   | 'files-unreadable'
-  | 'security-path-unlabelled';
+  | 'security-path-unlabelled'
+  | 'security-label-unverified'
+  | 'security-label-stale';
 
 /** The guard's answer. */
 export type ArmDecision =
@@ -271,7 +280,9 @@ export function securityPathsTouched(files: readonly string[], policy: ArmPolicy
  *   isCrossRepository), plus `requiredChecks` (`null`: unknown), `files` (every
  *   path the PR touches, both names of a rename; `null`: the list is
  *   incomplete), `reviewedSha` (the commit the review covered) and `freeze`
- *   (`null`, or the freeze marker).
+ *   (`null`, or the freeze marker), and, for a PR with the security label,
+ *   `securityLabelledAt` (when it was last added) and `headArrivedAt` (when
+ *   the head arrived), ISO-8601 or `null` when unknown.
  * @param policy - The repository's security paths and label.
  * @returns `ARM`, or a refusal with its reason.
  */
@@ -335,27 +346,62 @@ export function decideArm(input: unknown, policy: ArmPolicy): ArmDecision {
     return refuse('failing-checks', `required checks are red: ${red.join(', ')}`);
   }
   const labelled = labels.includes(policy.securityLabel.toLowerCase());
-  if (labelled) return { verdict: 'ARM' };
   const files = Array.isArray(facts.files)
     ? facts.files.filter((f): f is string => typeof f === 'string')
     : null;
   if (files === null || files.length !== (facts.files as unknown[]).length) {
-    return refuse(
-      'files-unreadable',
-      `the forge did not give the full list of changed files, so flow cannot rule out a security path; it needs the "${policy.securityLabel}" label`
-    );
+    if (!labelled) {
+      return refuse(
+        'files-unreadable',
+        `the forge did not give the full list of changed files, so flow cannot rule out a security path; it needs the "${policy.securityLabel}" label`
+      );
+    }
+    return labelFresh(facts, policy.securityLabel, reviewed);
   }
   const hits = securityHits(files, policy);
   if (hits === null) {
-    return refuse(
-      'files-unreadable',
-      `land.securityPaths.pattern is not a valid regular expression, so flow cannot rule out a security path; it needs the "${policy.securityLabel}" label`
-    );
+    if (!labelled) {
+      return refuse(
+        'files-unreadable',
+        `land.securityPaths.pattern is not a valid regular expression, so flow cannot rule out a security path; it needs the "${policy.securityLabel}" label`
+      );
+    }
+    return labelFresh(facts, policy.securityLabel, reviewed);
   }
-  if (hits.length > 0) {
+  if (hits.length === 0) return { verdict: 'ARM' };
+  if (!labelled) {
     return refuse(
       'security-path-unlabelled',
       `it touches security paths (${hits.join(', ')}) and has no "${policy.securityLabel}" label; Security reviews it first`
+    );
+  }
+  return labelFresh(facts, policy.securityLabel, reviewed);
+}
+
+/**
+ * Whether the security label on a PR that needs it was added after the head
+ * arrived. An unknown or unreadable time on either side refuses, and so does a
+ * tie: the label has to come after the head, not with it.
+ */
+function labelFresh(facts: Record<string, unknown>, label: string, head: string): ArmDecision {
+  const labelledAt = Date.parse(str(facts.securityLabelledAt) ?? '');
+  const arrivedAt = Date.parse(str(facts.headArrivedAt) ?? '');
+  if (Number.isNaN(arrivedAt)) {
+    return refuse(
+      'security-label-unverified',
+      `flow cannot tell when ${short(head)} arrived as the head, so it cannot tell whether "${label}" covers it`
+    );
+  }
+  if (Number.isNaN(labelledAt)) {
+    return refuse(
+      'security-label-unverified',
+      `flow cannot tell when "${label}" was added, so it cannot tell whether it covers ${short(head)}`
+    );
+  }
+  if (labelledAt <= arrivedAt) {
+    return refuse(
+      'security-label-stale',
+      `"${label}" predates the head: it was added before ${short(head)} arrived, so Security looks at the new commits and adds it again`
     );
   }
   return { verdict: 'ARM' };

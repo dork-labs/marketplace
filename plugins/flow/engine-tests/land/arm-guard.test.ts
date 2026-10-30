@@ -90,7 +90,14 @@ interface ForgeOptions {
   runs?: (call: number) => WorkflowRun[];
   branchHead?: (call: number) => string | null;
   required?: string[] | null;
+  /** What `labelledAt` answers; `'throw'` fails the read. Default: after the head arrived. */
+  labelledAt?: string | null | 'throw';
+  /** What `headPushedAt` answers; `'throw'` fails the read, `'absent'` drops the method. */
+  headPushedAt?: string | null | 'throw' | 'absent';
 }
+
+const ARRIVED = '2026-10-01T00:00:00Z';
+const LABELLED = '2026-10-02T00:00:00Z';
 
 /** A fake forge recording every call. */
 function fakeForge(opts: ForgeOptions = {}) {
@@ -145,6 +152,18 @@ function fakeForge(opts: ForgeOptions = {}) {
         ...opts.facts,
       };
     },
+    async labelledAt(...args) {
+      calls.push({ method: 'labelledAt', args });
+      if (opts.labelledAt === 'throw') throw new Error('HTTP 502');
+      return opts.labelledAt === undefined ? LABELLED : opts.labelledAt;
+    },
+    async headPushedAt(...args) {
+      calls.push({ method: 'headPushedAt', args });
+      if (opts.headPushedAt === 'throw') throw new Error('HTTP 502');
+      return opts.headPushedAt === undefined || opts.headPushedAt === 'absent'
+        ? ARRIVED
+        : opts.headPushedAt;
+    },
     async comment(...args) {
       calls.push({ method: 'comment', args });
     },
@@ -157,6 +176,7 @@ function fakeForge(opts: ForgeOptions = {}) {
       return opts.runs ? opts.runs(runsCall) : [];
     },
   };
+  if (opts.headPushedAt === 'absent') delete forge.headPushedAt;
   return { forge, calls };
 }
 
@@ -325,6 +345,60 @@ describe('the land config the guard obeys', () => {
   });
 });
 
+describe('the security label covers only the head it was added after', () => {
+  // A security path from main's own list, so the dependency-queue rule stays out of it.
+  const touching = { files: ['src/auth.ts'], labels: [{ name: 'security-reviewed' }] };
+  beforeEach(() => baseLand({ securityPaths: { globs: ['src/auth.ts'] } }));
+
+  it('arms when the label was added after the head arrived', async () => {
+    const { forge, calls } = fakeForge({ facts: touching });
+    expect((await guard(forge)).ok).toBe(true);
+    expect(calls.find((c) => c.method === 'labelledAt')?.args).toEqual([7, 'security-reviewed']);
+    expect(calls.find((c) => c.method === 'headPushedAt')?.args).toEqual([7, head, 'feature']);
+  });
+
+  it('refuses a label older than the head, saying it predates the head', async () => {
+    const result = await guard(
+      fakeForge({ facts: touching, labelledAt: '2026-09-30T00:00:00Z' }).forge
+    );
+    expect(result).toMatchObject({ ok: false, reason: 'security-label-stale' });
+    expect(!result.ok && result.detail).toMatch(/predates the head/);
+  });
+
+  it('refuses a security path with no label, and reads no times', async () => {
+    const { forge, calls } = fakeForge({ facts: { files: ['src/auth.ts'] } });
+    expect(await guard(forge)).toMatchObject({ ok: false, reason: 'security-path-unlabelled' });
+    expect(calls.map((c) => c.method)).not.toContain('labelledAt');
+    expect(calls.map((c) => c.method)).not.toContain('headPushedAt');
+  });
+
+  it.each([
+    ['unknown', null],
+    ['unreadable', 'throw'],
+    ['not offered by the forge', 'absent'],
+  ] as const)('refuses when the head arrival is %s', async (_, headPushedAt) => {
+    const result = await guard(fakeForge({ facts: touching, headPushedAt }).forge);
+    expect(result).toMatchObject({ ok: false, reason: 'security-label-unverified' });
+  });
+
+  it('refuses when the label time cannot be read', async () => {
+    expect(await guard(fakeForge({ facts: touching, labelledAt: 'throw' }).forge)).toMatchObject({
+      ok: false,
+      reason: 'security-label-unverified',
+    });
+  });
+
+  it('leaves a PR with no security path alone, whatever its label times say', async () => {
+    const stale = fakeForge({
+      facts: { labels: [{ name: 'security-reviewed' }] },
+      labelledAt: '2026-09-30T00:00:00Z',
+      headPushedAt: null,
+    });
+    expect((await guard(stale.forge)).ok).toBe(true);
+    expect((await guard(fakeForge().forge)).ok).toBe(true);
+  });
+});
+
 describe('the guard only refuses', () => {
   it('never arms, comments, labels or reviews, whatever it answers', async () => {
     baseLand({ preArm: [{ paths: ['src/**'], wait: 'workflow', workflow: 'shards.yml' }] });
@@ -340,7 +414,15 @@ describe('the guard only refuses', () => {
         calls
           .map((c) => c.method)
           .filter(
-            (m) => !['armFacts', 'branchHead', 'dispatchWorkflow', 'workflowRuns'].includes(m)
+            (m) =>
+              ![
+                'armFacts',
+                'branchHead',
+                'dispatchWorkflow',
+                'workflowRuns',
+                'labelledAt',
+                'headPushedAt',
+              ].includes(m)
           )
       ).toEqual([]);
     }

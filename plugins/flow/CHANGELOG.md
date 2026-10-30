@@ -4,6 +4,17 @@ Installs of this plugin are pinned to a commit SHA, so a fix here does not reach
 you until you **reinstall it** (Marketplace → flow → reinstall, or re-run your
 `--plugin-dir` checkout's `git pull`). Each entry below says whether that matters.
 
+## 0.66.1
+
+**Security fix: before flow arms a PR, its `security-reviewed` label must have been added after the PR's current head arrived. Reinstall to get it.**
+
+- A PR that needs the label (it touches a security path, or flow can't read its whole file list) now arms only if the label was added after its head arrived. Before, a label added for an older head still counted after later pushes.
+- "Arrived" means the last force-push that left the head there. With no such push, it means the first check suite a push made for the head. Both times are GitHub's own, and a commit's dates can't move them. These are the same reads `flow sweep` already used.
+- A label added before the head arrived refuses as `security-label-stale`. The message says the label predates the head, so Security looks at the new commits and adds it again.
+- If flow can't tell when the head arrived or when the label was added, it refuses as `security-label-unverified`.
+- A PR that doesn't need the label arms as before, whatever its labels say.
+- `config/CONFIG.md` and `docs/landing.mdx` no longer say the label carries over to later pushes.
+
 ## 0.66.0
 
 **Flow's schedules now belong to the projects that use flow, even when flow is installed globally. Reinstall to get it; it needs a DorkOS that reads `scope: project` and `projectFile`.**

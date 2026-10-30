@@ -12,7 +12,9 @@
  *
  * 1. Read `land` from the committed config on `origin/main` (`base-config.ts`).
  * 2. Read the PR (`Forge.armFacts`), the checks `main` requires, and the
- *    release freeze (`freeze.ts`).
+ *    release freeze (`freeze.ts`); for a PR with the security label, also when
+ *    the label was added and when the head arrived (`Forge.labelledAt`,
+ *    `Forge.headPushedAt`), so a label from an older head never counts.
  * 3. Decide (`arm-decision.ts`, pinned by `scripts/fixtures/arm-decisions.json`).
  * 4. Run the `land.preArm` entries the PR's files send (`pre-arm.ts`).
  *
@@ -26,7 +28,7 @@
 
 import type { ProcessRunner } from '../cli/context.ts';
 import type { LandConfig } from '../config-schema.ts';
-import type { Forge } from '../forge/types.ts';
+import type { ArmFacts, Forge } from '../forge/types.ts';
 import { ARM_BASE, decideArm, type ArmPolicy, type RefusalSlug } from './arm-decision.ts';
 import { readBaseLand } from './base-config.ts';
 import { dependencyConflict, touchesDependency } from './dependency-queue.ts';
@@ -121,6 +123,33 @@ export function policyFor(land: LandConfig): ArmPolicy {
   };
 }
 
+/**
+ * When the security label was last added and when the head arrived, read only
+ * when the label is on the PR (the decision reads them only then). A forge
+ * without the reads, or a read that fails, gives `null`, and the decision
+ * refuses a PR that needs the label on it.
+ */
+async function labelTimes(
+  forge: Forge,
+  pr: number,
+  facts: ArmFacts,
+  label: string
+): Promise<{ securityLabelledAt: string | null; headArrivedAt: string | null }> {
+  const on = facts.labels.some((l) => l.name.toLowerCase() === label.toLowerCase());
+  if (!on) return { securityLabelledAt: null, headArrivedAt: null };
+  const read = async (fn: () => Promise<string | null> | undefined): Promise<string | null> => {
+    try {
+      return (await fn()) ?? null;
+    } catch {
+      return null;
+    }
+  };
+  return {
+    securityLabelledAt: await read(() => forge.labelledAt?.(pr, label)),
+    headArrivedAt: await read(() => forge.headPushedAt?.(pr, facts.headRefOid, facts.headRefName)),
+  };
+}
+
 /** A refusal before any `land.preArm` entry ran. */
 function early(reason: GuardRefusal, detail: string): GuardResult {
   return { ok: false, reason, detail, ranPreArm: false, preArm: [] };
@@ -153,7 +182,13 @@ export async function guardArm(input: GuardInput, io: GuardIo): Promise<GuardRes
   const reviewedSha = input.reviewedSha?.toLowerCase() ?? null;
   const policy = policyFor(land);
   const decision = decideArm(
-    { ...facts, requiredChecks, reviewedSha, freeze: readFreeze(input.mainCheckout) },
+    {
+      ...facts,
+      ...(await labelTimes(input.forge, input.pr, facts, policy.securityLabel)),
+      requiredChecks,
+      reviewedSha,
+      freeze: readFreeze(input.mainCheckout),
+    },
     policy
   );
   if (decision.verdict === 'REFUSE') return early(decision.reason, decision.detail);
@@ -222,7 +257,13 @@ export async function guardArm(input: GuardInput, io: GuardIo): Promise<GuardRes
     };
   }
   const again = decideArm(
-    { ...after, requiredChecks, reviewedSha, freeze: readFreeze(input.mainCheckout) },
+    {
+      ...after,
+      ...(await labelTimes(input.forge, input.pr, after, policy.securityLabel)),
+      requiredChecks,
+      reviewedSha,
+      freeze: readFreeze(input.mainCheckout),
+    },
     policy
   );
   if (again.verdict === 'REFUSE') {
