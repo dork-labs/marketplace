@@ -2,7 +2,7 @@
   "about": [
     "The decision cases for the two things in this repo that decide whether a pull request may be armed to merge by itself: scripts/should-arm-automerge.sh (the repo gate, a future merge-tail bot) and flow's arm guard (plugins/flow/scripts/land/arm-decision.ts, run by flow before it arms).",
     "Both suites run every row: scripts/test-should-arm-automerge.sh checks `gate`, plugins/flow/engine-tests/land/arm-decision.test.ts checks `guard`. A row with only one of them fails both suites, so a change to either rule has to say what the other does with the same pull request.",
-    "Each case is the `green` payload bent by one jq `mutation`, so a failure names the field. The two answers differ on purpose where the guard is not a bot: GitHub's auto-merge waits for pending checks and for mergeability on its own, so the guard lets those through, and it refuses things the repo gate never looks at (a moved head, a fork, a base other than main, a release freeze, a security path without its label). `why` says why the row exists."
+    "Each case is the `green` payload bent by one jq `mutation`, so a failure names the field. The two answers differ on purpose where the guard is not a bot: GitHub's auto-merge waits for pending checks and for mergeability on its own, so the guard lets those through, and it refuses things the repo gate never looks at (a moved head, a fork, a base other than main, a release freeze, a security path without its label, or with a label added before the head arrived: `securityLabelledAt` against `headArrivedAt`). `why` says why the row exists."
   ],
   "green": {
     "number": 1,
@@ -25,7 +25,9 @@
     "isCrossRepository": false,
     "requiredChecks": ["flow plugin", "skills and manifests", "script fixtures"],
     "files": ["plugins/flow/README.md"],
-    "freeze": null
+    "freeze": null,
+    "headArrivedAt": "2026-10-01T00:00:00Z",
+    "securityLabelledAt": null
   },
   "guardPolicy": {
     "securityGlobs": ["scripts/release/**"],
@@ -186,8 +188,39 @@
       "guard": "REFUSE security-path-unlabelled",
       "why": "Security condition 4, from the repo's own list (guardPolicy.securityGlobs here)."
     },
-    { "name": "security path with the label", "mutation": ".files += [\"scripts/release/publish.sh\"] | .labels = [{\"name\": \"security-reviewed\"}]", "gate": "ARM", "guard": "ARM" },
-    { "name": "security path, label as a string", "mutation": ".files += [\"scripts/release/publish.sh\"] | .labels = [\"Security-Reviewed\"]", "gate": "ARM", "guard": "ARM" },
+    {
+      "name": "security path with the label",
+      "mutation": ".files += [\"scripts/release/publish.sh\"] | .labels = [{\"name\": \"security-reviewed\"}] | .securityLabelledAt = \"2026-10-02T00:00:00Z\"",
+      "gate": "ARM",
+      "guard": "ARM",
+      "why": "The label was added after the head arrived, so it covers the head."
+    },
+    { "name": "security path, label as a string", "mutation": ".files += [\"scripts/release/publish.sh\"] | .labels = [\"Security-Reviewed\"] | .securityLabelledAt = \"2026-10-02T00:00:00Z\"", "gate": "ARM", "guard": "ARM" },
+    {
+      "name": "security path, label older than the head",
+      "mutation": ".files += [\"scripts/release/publish.sh\"] | .labels = [{\"name\": \"security-reviewed\"}] | .securityLabelledAt = \"2026-09-30T00:00:00Z\"",
+      "gate": "ARM",
+      "guard": "REFUSE security-label-stale",
+      "why": "A label from an older head covers older commits. Security looks at the new ones and adds it again."
+    },
+    { "name": "security path, label added as the head arrived", "mutation": ".files += [\"scripts/release/publish.sh\"] | .labels = [{\"name\": \"security-reviewed\"}] | .securityLabelledAt = .headArrivedAt", "gate": "ARM", "guard": "REFUSE security-label-stale" },
+    {
+      "name": "security path, head arrival unknown",
+      "mutation": ".files += [\"scripts/release/publish.sh\"] | .labels = [{\"name\": \"security-reviewed\"}] | .securityLabelledAt = \"2026-10-02T00:00:00Z\" | .headArrivedAt = null",
+      "gate": "ARM",
+      "guard": "REFUSE security-label-unverified",
+      "why": "When flow cannot tell when the head arrived, it cannot tell whether the label covers it."
+    },
+    { "name": "security path, head arrival absent", "mutation": ".files += [\"scripts/release/publish.sh\"] | .labels = [{\"name\": \"security-reviewed\"}] | .securityLabelledAt = \"2026-10-02T00:00:00Z\" | del(.headArrivedAt)", "gate": "ARM", "guard": "REFUSE security-label-unverified" },
+    { "name": "security path, head arrival not a time", "mutation": ".files += [\"scripts/release/publish.sh\"] | .labels = [{\"name\": \"security-reviewed\"}] | .securityLabelledAt = \"2026-10-02T00:00:00Z\" | .headArrivedAt = \"soon\"", "gate": "ARM", "guard": "REFUSE security-label-unverified" },
+    { "name": "security path, label time unknown", "mutation": ".files += [\"scripts/release/publish.sh\"] | .labels = [{\"name\": \"security-reviewed\"}]", "gate": "ARM", "guard": "REFUSE security-label-unverified" },
+    {
+      "name": "no security path, label older than the head",
+      "mutation": ".labels = [{\"name\": \"security-reviewed\"}] | .securityLabelledAt = \"2026-09-30T00:00:00Z\" | .headArrivedAt = null",
+      "gate": "ARM",
+      "guard": "ARM",
+      "why": "A PR that needs no security label arms as before, whatever its label's times say."
+    },
     {
       "name": "package manifest without the label",
       "mutation": ".files = [\"plugins/flow/package.json\"]",
@@ -232,7 +265,8 @@
       "guard": "REFUSE files-unreadable",
       "why": "A file list the forge could not give in full is never read as touching nothing."
     },
-    { "name": "file list unreadable, labelled", "mutation": ".files = null | .labels = [{\"name\": \"security-reviewed\"}]", "gate": "ARM", "guard": "ARM" },
+    { "name": "file list unreadable, labelled", "mutation": ".files = null | .labels = [{\"name\": \"security-reviewed\"}] | .securityLabelledAt = \"2026-10-02T00:00:00Z\"", "gate": "ARM", "guard": "ARM" },
+    { "name": "file list unreadable, label older than the head", "mutation": ".files = null | .labels = [{\"name\": \"security-reviewed\"}] | .securityLabelledAt = \"2026-09-30T00:00:00Z\"", "gate": "ARM", "guard": "REFUSE security-label-stale" },
 
     {
       "name": "release freeze on",

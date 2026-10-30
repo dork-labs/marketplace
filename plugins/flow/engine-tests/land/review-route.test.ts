@@ -37,6 +37,8 @@ function armFacts(files: string[], labels: string[] = []): Record<string, unknow
     files,
     reviewedSha: SHA,
     freeze: null,
+    headArrivedAt: '2026-10-01T00:00:00Z',
+    securityLabelledAt: labels.length > 0 ? '2026-10-02T00:00:00Z' : null,
   };
 }
 

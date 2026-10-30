@@ -14,7 +14,7 @@ Flow doesn't arm a PR when:
 - a required check failed or was cancelled (one still running is fine: GitHub waits);
 - the head isn't the reviewed commit, or none was recorded;
 - it doesn't target `main`;
-- it touches a security path and has no `security-reviewed` label;
+- it touches a security path and has no `security-reviewed` label, or one older than the head;
 - a release freeze is on;
 - it comes from a fork;
 - it changes dependencies while another such PR is queued or armed;
@@ -49,7 +49,7 @@ flow freeze off                         # ...the release is out
 flow freeze                             # is a freeze on?
 ```
 
-Have your release process turn it on before a release and off after. The freeze is kept on this computer, never committed.
+Have your release process turn it on before a release, then off. The freeze is kept on this computer, never committed.
 
 ## After the merge: the squash check
 
@@ -57,4 +57,4 @@ Once a PR has merged, flow checks that the squash commit on `main` is what a cle
 
 ## What this is not
 
-The guard is a rail for flow's own arms. Flow runs inside the agent, so the rules that hold for everyone belong on GitHub, as required checks and rulesets. The `security-reviewed` label is a person's signal and carries over to later pushes. A per-commit security approval belongs on GitHub too.
+The guard is a rail for flow's own arms. Flow runs inside the agent, so the rules that hold for everyone belong on GitHub, as required checks and rulesets. The `security-reviewed` label must postdate the head's arrival. A per-commit security approval belongs on GitHub too.

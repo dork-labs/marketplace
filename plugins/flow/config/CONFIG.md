@@ -349,7 +349,7 @@ and in `config.local.json`:
 | `preArm[].wait`, `.workflow` | `"workflow"`, a workflow file name | Dispatches `gh workflow run <workflow> --ref <pr-branch> -f sha=<reviewed commit> -f nonce=<random>` and waits for that one run. The workflow must take `sha` and `nonce` inputs, put the nonce in its `run-name`, and fail unless it checked out `sha`. |
 | `preArm[].timeout` | minutes 1–360, `30` | How long the check may take before flow refuses. |
 | `securityPaths.globs`, `.pattern` | globs, `[]`; a regular expression, `null` | This repo's security paths, matched as written and also in any case like the built-ins (the pattern with the `i` and `u` flags, or just `i`; write it in plain ASCII). Package manifests, lockfiles and `.agents/flow/config.json` always count, in any case, and `.github/workflows/**` and `.github/actions/**` do too while any `wait: workflow` entry exists. |
-| `securityPaths.label` | label, `security-reviewed` | The label that says Security has looked. Flow only reads it, and never adds or removes it. It is not tied to a commit, so it carries over to later pushes. |
+| `securityPaths.label` | label, `security-reviewed` | The label that says Security has looked. Flow only reads it, and never adds or removes it. It counts only when it was added after the PR's head arrived, so after a push Security adds it again. |
 | `securityPaths.reviewer` | handle, `null` | Who flow names on a new PR that touches a security path (by `main`'s list), or when it cannot tell. Set it in `config.local.json`. |
 | `reviewer` | handle, `null` | Who flow names on any other new PR. Set it in `config.local.json`. A handle is `user`, `@user` or `org/team`. |
 
