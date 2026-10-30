@@ -14,7 +14,7 @@ import {
   latestReview,
   githubApi,
 } from './security-gate.mjs';
-import { manifestPaths, withManifestPaths } from './security-manifest-paths.mjs';
+import { pluginsPointingAtTests, withManifestPaths } from './security-manifest-paths.mjs';
 
 const workflow = readFileSync(new URL('../workflows/security-gate.yml', import.meta.url), 'utf8');
 const initializerWorkflow = readFileSync(
@@ -796,49 +796,52 @@ test('exemptions match whole folder names only', () => {
   }
 });
 
-test('a file a plugin manifest points at counts, even inside an exempt folder', () => {
+test('a plugin whose manifests mention a test folder loses its test exemptions', () => {
   const dir = mkdtempSync(join(tmpdir(), 'security-manifests-'));
   try {
     const write = (path, json) => {
       mkdirSync(join(dir, path, '..'), { recursive: true });
-      writeFileSync(join(dir, path), JSON.stringify(json));
+      writeFileSync(join(dir, path), typeof json === 'string' ? json : JSON.stringify(json));
     };
-    write('plugins/x/hooks/hooks.json', {
-      hooks: { PreToolUse: [{ hooks: [{ type: 'command', command: 'node ${CLAUDE_PLUGIN_ROOT}/tests/run.mjs --strict' }] }] },
+    // Forms a shell-parsing scan would miss.
+    write('plugins/a/hooks/hooks.json', {
+      hooks: { PreToolUse: [{ hooks: [{ type: 'command', command: 'sh ${CLAUDE_PLUGIN_ROOT:-.}/tests/a.sh' }] }] },
     });
-    write('plugins/x/.claude-plugin/plugin.json', { name: 'x', commands: ['./tests/commands/'] });
-    write('plugins/y/.mcp.json', { mcpServers: { s: { command: 'bash', args: ['$CLAUDE_PLUGIN_ROOT/engine-tests/serve.sh'] } } });
-    write('plugins/z/.claude-plugin/plugin.json', { name: 'z', hooks: '../w/tests/hook.sh', url: 'https://x.test/a/b' });
-    const paths = manifestPaths(dir);
-    assert.deepEqual(paths, [
-      'plugins/w/tests/hook.sh',
-      'plugins/x/tests/commands',
-      'plugins/x/tests/run.mjs',
-      'plugins/y/engine-tests/serve.sh',
-    ]);
-    const extended = withManifestPaths(pattern, paths);
+    write('plugins/b/.mcp.json', { mcpServers: { s: { command: 'pwsh', args: ['${CLAUDE_PLUGIN_ROOT}\\engine-tests\\serve.ps1'] } } });
+    // A manifest that names another JSON file, which names the script.
+    write('plugins/c/.claude-plugin/plugin.json', { name: 'c', hooks: './config/more-hooks.json' });
+    write('plugins/c/config/more-hooks.json', { hooks: { Stop: [{ hooks: [{ command: 'bash tests/x.sh' }] }] } });
+    write('plugins/d/.lsp.json', { s: { command: 'node', args: ['skills/s/tests/lsp.mjs'] } });
+    // No mention: stays exempt. A word like "attests" is not a mention.
+    write('plugins/e/.claude-plugin/plugin.json', { name: 'e', description: 'attests to contests' });
+    assert.deepEqual(pluginsPointingAtTests(dir), ['a', 'b', 'c', 'd']);
+    const extended = withManifestPaths(pattern, pluginsPointingAtTests(dir));
     for (const filename of [
-      'plugins/x/tests/run.mjs',
-      'plugins/x/tests/commands/evil.md',
-      'plugins/y/engine-tests/serve.sh',
-      'plugins/w/tests/hook.sh',
+      'plugins/a/tests/a.sh',
+      'plugins/a/tests/other.sh',
+      'plugins/b/engine-tests/serve.ps1',
+      'plugins/c/tests/x.sh',
+      'plugins/d/skills/s/tests/lsp.mjs',
     ]) {
       assert.equal(touchesSecurity([{ filename }], pattern), false, `exempt without the manifest: ${filename}`);
       assert.ok(touchesSecurity([{ filename }], extended), filename);
     }
-    // Other test files stay exempt.
-    assert.equal(touchesSecurity([{ filename: 'plugins/x/tests/other.mjs' }], extended), false);
-    assert.equal(touchesSecurity([{ filename: 'plugins/x/tests/run.mjs.bak' }], extended), false);
+    assert.equal(touchesSecurity([{ filename: 'plugins/e/tests/a.sh' }], extended), false);
+    // A mention that climbs out of its plugin can't be pinned down: every plugin loses it.
+    write('plugins/e/hooks/hooks.json', { hooks: { Stop: [{ hooks: [{ command: 'bash ../w/tests/x.sh' }] }] } });
+    assert.deepEqual(pluginsPointingAtTests(dir), ['a', 'b', 'c', 'd', 'e']);
     // A manifest that does not parse fails the run rather than shrinking the list.
-    writeFileSync(join(dir, 'plugins/y/.mcp.json'), '{ not json');
-    assert.throws(() => manifestPaths(dir));
+    write('plugins/b/.mcp.json', '{ not json');
+    assert.throws(() => pluginsPointingAtTests(dir));
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }
 });
 
-test('this repo’s manifests extend the list to one line', () => {
-  const paths = manifestPaths(new URL('../..', import.meta.url).pathname);
-  assert.ok(paths.includes('plugins/safety-hooks/hooks/git-guard.mjs'));
-  assert.doesNotMatch(withManifestPaths(pattern, paths), /[\r\n]/);
+test('this repo’s manifests extend the list to one line, and the verifier fails with the script', () => {
+  const plugins = pluginsPointingAtTests(new URL('../..', import.meta.url).pathname);
+  assert.doesNotMatch(withManifestPaths(pattern, plugins), /[\r\n]/);
+  // Assigned on its own line under bash -e, so a non-zero exit fails the step.
+  assert.match(workflow, /^ {10}SECURITY_PATH_PATTERN="\$\(node \.github\/scripts\/security-manifest-paths\.mjs\)"$/m);
+  assert.doesNotMatch(workflow, />> *"?\$GITHUB_ENV/);
 });
