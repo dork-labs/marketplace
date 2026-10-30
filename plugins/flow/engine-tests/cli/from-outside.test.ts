@@ -9,7 +9,9 @@
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
 import { EXIT } from '../../scripts/errors.ts';
-import { AGENT_FROM_OUTSIDE } from '../../scripts/work-state.ts';
+import { applyAndVerify, fromOutsideChange } from '../../scripts/cli/work-write.ts';
+import { AGENT_FROM_OUTSIDE, projectionFor } from '../../scripts/work-state.ts';
+import { createFakeAdapter } from '../fixtures/cli/fake-adapter/adapter.ts';
 import { item, makeProject, runFlow, type WriteProject } from './write-harness.ts';
 
 let project: WriteProject;
@@ -78,5 +80,30 @@ describe('agent/from-outside', () => {
       'execute',
     ]);
     expect(result.code).toBe(EXIT.ok);
+  });
+
+  it.each([
+    [
+      'release it to ready',
+      projectionFor({ type: 'release', to: 'ready', stage: 'execute' }, {
+        stages: { execute: { label: 'stage/execute' } },
+      } as never),
+    ],
+    ['release it to nothing', { agentLabel: null }],
+    ['claim it', { stateCategory: 'started', agentLabel: 'agent/claimed' }],
+    ['park it', { agentLabel: 'agent/needs-input' }],
+  ] as const)('the write guard refuses to %s', (_what, change) => {
+    expect(() => fromOutsideChange(captured(), change)).toThrow(/only a person/);
+  });
+
+  it('closing it is allowed, and leaves the label on so a reopened item is never triage-able', async () => {
+    const tracker = createFakeAdapter({ items: [captured()] });
+    const done = projectionFor({ type: 'done' }, { stages: {} } as never);
+    expect(fromOutsideChange(captured(), done)).not.toHaveProperty('agentLabel');
+    await applyAndVerify(tracker.adapter, captured(), done);
+    const [after] = tracker.backlog.items;
+    expect(after.stateCategory).toBe('completed');
+    expect(after.labels).toContain(AGENT_FROM_OUTSIDE);
+    expect(after.labels).not.toContain('agent/completed');
   });
 });

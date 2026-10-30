@@ -379,10 +379,14 @@ describe('a refused tool ends the run red, in every scheduled skill', () => {
 const FROM_OUTSIDE_RULE: Record<string, RegExp> = {
   'skills/flow-triage/SKILL.md': /never removing `agent\/from-outside`/,
   'skills/triaging-work/SKILL.md': /Never remove `agent\/from-outside`\*\*, attended or not/,
-  'skills/grooming-backlog/SKILL.md':
-    /Never for `agent\/from-outside` items\. Propose `agent\/ready`/,
   'docs/intake.mdx': /Flow never removes it, attended or not/,
 };
+
+/** Groom's two places, both required (the second keeps operator-only work from stripping it). */
+const GROOM_RULES = [
+  /Never remove `agent\/from-outside`\*\*, in any phase/,
+  /no agent label \(an `agent\/from-outside` item keeps it\)/,
+];
 
 /** Every shipped prose file: skills, commands and docs. */
 function shippedProse(): Record<string, string> {
@@ -399,23 +403,40 @@ function shippedProse(): Record<string, string> {
   return out;
 }
 
-/** Sentences that tell flow to remove the label (any that mention removing it without forbidding it). */
+/** A file's sentences: list items and paragraphs apart, then split at sentence ends. */
+function sentences(text: string): string[] {
+  return text.split(/\n\s*\n|\n(?=\s*(?:[-*]|\d+\.)\s)/).flatMap((block) =>
+    block
+      .replace(/\s+/g, ' ')
+      .trim()
+      .split(/(?<=[.!?])\s/)
+  );
+}
+
+/** Words that take the label off, in any form. */
+const REMOVE =
+  /\b(?:remov|clear|drop|delet|strip|replac|swap|relabel|unset|untag|take off|takes off)\w*|agentLabel:\s*null/i;
+/** Words that forbid it, or say who alone may do it; they must come BEFORE the verb. */
+const FORBID = /\b(?:never|not|no|nothing|refuses?|only a person|only the PM)\b/i;
+
+/** Gaps: the rule missing where it is taught, or a sentence that tells flow to remove the label. */
 function fromOutsideGaps(files: Record<string, string>): string[] {
   const gaps: string[] = [];
   for (const [file, rule] of Object.entries(FROM_OUTSIDE_RULE)) {
     if (!rule.test(files[file] ?? '')) gaps.push(`${file}: states the rule`);
   }
+  for (const rule of GROOM_RULES) {
+    if (!rule.test(files['skills/grooming-backlog/SKILL.md'] ?? '')) {
+      gaps.push('skills/grooming-backlog/SKILL.md: states the rule');
+    }
+  }
   for (const [file, text] of Object.entries(files)) {
-    for (const sentence of text.replace(/\s+/g, ' ').split(/(?<=[.!?])\s/)) {
-      if (!sentence.includes('agent/from-outside') && !/this label/.test(sentence)) continue;
-      if (!/\b(remove|clear|drop|delete|strip)/i.test(sentence)) continue;
-      if (/\b(never|only|refuse)/i.test(sentence)) continue;
-      // The reviewer's own steps (a person or the PM), in the one file that teaches them.
-      if (
-        file === 'docs/intake.mdx' &&
-        /^Re-state the work in our words, remove the label/.test(sentence)
-      )
-        continue;
+    for (const sentence of sentences(text)) {
+      if (!sentence.includes('agent/from-outside') && !/this label/i.test(sentence)) continue;
+      const verb = REMOVE.exec(sentence);
+      if (verb === null) continue;
+      const forbid = FORBID.exec(sentence);
+      if (forbid !== null && forbid.index < verb.index) continue;
       gaps.push(`${file}: "${sentence.slice(0, 80)}"`);
     }
   }
@@ -433,11 +454,26 @@ describe('agent/from-outside: no flow skill removes it', () => {
       'Never remove `agent/from-outside`',
       'Mind `agent/from-outside`'
     );
-    files['skills/flow-groom/SKILL.md'] +=
-      '\nRemove `agent/from-outside` once the item reads well.\n';
+    files['skills/grooming-backlog/SKILL.md'] = files['skills/grooming-backlog/SKILL.md'].replace(
+      ' (an `agent/from-outside` item keeps it)',
+      ''
+    );
+    files['skills/flow-groom/SKILL.md'] += [
+      '',
+      '- Remove `agent/from-outside` only once the item reads well',
+      '- Drop `agent/from-outside`; never leave it on a readied item.',
+      '- Replace `agent/from-outside` with `agent/ready`.',
+      '- Write `agentLabel: null` on an `agent/from-outside` item.',
+      '- Nothing removes `agent/from-outside`.',
+      '',
+    ].join('\n');
     expect(fromOutsideGaps(files)).toEqual([
       'skills/triaging-work/SKILL.md: states the rule',
-      'skills/flow-groom/SKILL.md: "Remove `agent/from-outside` once the item reads well."',
+      'skills/grooming-backlog/SKILL.md: states the rule',
+      'skills/flow-groom/SKILL.md: "- Remove `agent/from-outside` only once the item reads well"',
+      'skills/flow-groom/SKILL.md: "- Drop `agent/from-outside`; never leave it on a readied item."',
+      'skills/flow-groom/SKILL.md: "- Replace `agent/from-outside` with `agent/ready`."',
+      'skills/flow-groom/SKILL.md: "- Write `agentLabel: null` on an `agent/from-outside` item."',
     ]);
   });
 });
