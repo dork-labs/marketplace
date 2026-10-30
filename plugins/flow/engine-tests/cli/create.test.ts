@@ -413,6 +413,18 @@ describe('flow create', () => {
     ['a priority above 4', [...CAPTURE, '--priority', '5']],
     ['a priority that is not a number', [...CAPTURE, '--priority', 'high']],
     ['a key that could close its marker', [...CAPTURE, '--key', 'a -->']],
+    [
+      'a title ending in a capture tag without agent/from-outside',
+      [
+        'create',
+        '--title',
+        'Export as CSV [acme/app#7]',
+        '--description',
+        'd',
+        '--label',
+        'type/idea',
+      ],
+    ],
   ])('refuses %s with exit 2 before any tracker call', async (_what, argv) => {
     // Purpose: a malformed request never reaches the tracker, not even as a read.
     const t = tracker({ items: [], failReads: 'the tracker must not be reached' });

@@ -401,7 +401,7 @@ export const VERBS: readonly VerbDefinition[] = [
     name: 'create',
     summary: 'File a new item in the tracker.',
     description:
-      'File one new item through the adapter, with a signed description (identity marker and provenance). Refuses before any tracker call an empty title, an agent/* label (except agent/from-outside, for an item captured from outside the team), two labels in one group, and a priority outside 0-4. With --key, an open item already filed with that key is returned instead of a new one (created: false), and a retry after a timeout gets the same item. Needs the createItem capability (exit 3).',
+      'File one new item through the adapter, with a signed description (identity marker and provenance). Refuses before any tracker call an empty title, an agent/* label (except agent/from-outside, for an item captured from outside the team), two labels in one group, a priority outside 0-4, and a title ending in a capture tag ([owner/name#N]) without --label agent/from-outside. With --key, an open item already filed with that key is returned instead of a new one (created: false), and a retry after a timeout gets the same item. Needs the createItem capability (exit 3).',
     common: ['project', 'dry-run', 'session'],
     flags: [
       { name: 'title', kind: 'string', value: 'text', description: 'The title.' },
