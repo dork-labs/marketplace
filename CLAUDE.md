@@ -91,7 +91,7 @@ dorkos marketplace validate   # Validates the full registry (CC compat + sidecar
 
 ## CI
 
-All three checks below are required on `main`. Each runs on every pull request, every
+The first three checks below are required on `main`. Each runs on every pull request, every
 merge-queue run (`merge_group`) and every push to `main`, with no `paths:` filter and no
 job-level `if:`. That is what lets a
 check be required: a required check that skips a PR, or never reports on the queue's run,

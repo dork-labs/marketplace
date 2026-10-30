@@ -106,7 +106,7 @@ test('labelled, new push: pending, then fails in the queue despite old success',
 });
 
 test('unlabelled, no security paths: automatically approved', async () => {
-  const f = fixture({ files: ['plugins/flow/docs/example.md'] });
+  const f = fixture({ files: ['specs/example.md'] });
   const pr = f.api.pr;
   f.api.pr = async (n) => ({ ...(await pr(n)), labels: [] });
   await checkPullRequest(f.api, prEvent, pattern, { write: true, requireApproval: false });
@@ -197,6 +197,20 @@ test('workflow path list covers Security’s marketplace list and both sides of 
     'plugins/flow/templates/review.md',
     'plugins/flow/behaviour.json',
     'plugins/new-package/anything/new.js',
+    // Docs and templates agents read at run time, and folders whose names only look exempt.
+    'plugins/flow/docs/intake.mdx',
+    'plugins/flow/docs/provenance.md',
+    'plugins/flow/templates/docs/spec.md',
+    'plugins/flow/adapters/reference/fixtures/a.json',
+    'plugins/flow/commands/tests/evil.md',
+    'plugins/flow/commands/docs/evil.md',
+    'plugins/x/.dork/extensions/tests/index.js',
+    'plugins/x/skills/docs/scripts/run.sh',
+    'plugins/x/skills/tests/references/a.md',
+    'plugins/x/hooks/fixtures/run.sh',
+    'plugins/x/agents/fixtures/a.md',
+    'plugins/x/CLAUDE.md',
+    'plugins/x/AGENTS.md',
     // CI, agent config, guard scripts and tools.
     '.github/workflows/security-gate.yml',
     '.github/scripts/security-gate.mjs',
@@ -206,6 +220,11 @@ test('workflow path list covers Security’s marketplace list and both sides of 
     'scripts/should-arm-automerge.sh',
     'scripts/fixtures/arm-decisions.json',
     'tools/schema-check/check.mjs',
+    // Root agent config: what agents working here are told and allowed.
+    'CLAUDE.md',
+    'AGENTS.md',
+    'REVIEW.md',
+    '.mcp.json',
     // Dependencies, anywhere.
     'package.json',
     'plugins/flow/package.json',
@@ -221,7 +240,6 @@ test('workflow path list covers Security’s marketplace list and both sides of 
     'plugins/flow//docs/a.md',
     // Case-insensitive disks.
     'Plugins/Flow/Hooks/a.sh',
-    'plugins/flow/Docs/a.md',
     '.GitHub/workflows/a.yml',
   ]) {
     assert.ok(touchesSecurity([{ filename }], pattern), filename);
@@ -233,30 +251,28 @@ test('workflow path list covers Security’s marketplace list and both sides of 
   // Docs and tests: no label needed.
   for (const filename of [
     'README.md',
-    'CLAUDE.md',
     'specs/security-gate/01-ideation.md',
     'plugins/flow/README.md',
     'plugins/flow/CHANGELOG.md',
     'plugins/visual-companion/LICENSE',
     'plugins/visual-companion/NOTICE',
-    'plugins/flow/docs/drain.md',
+    'specs/drain.md',
     'plugins/flow/engine-tests/config-schema.test.ts',
     'plugins/visual-companion/tests/install-smoke.sh',
     'plugins/visual-companion/skills/visual-companion/tests/18-host.test.cjs',
-    'plugins/flow/scripts/fixtures/sample.json',
   ]) {
     assert.equal(touchesSecurity([{ filename }], pattern), false, filename);
   }
 });
 
 test('a docs-only PR passes; a security-path PR without the App’s approval fails', async () => {
-  const docs = fixture({ files: ['plugins/flow/docs/drain.md', 'README.md'] });
+  const docs = fixture({ files: ['specs/drain.md', 'README.md'] });
   assert.equal(
     await checkPullRequest(docs.api, prEvent, pattern),
     'no security paths (computed)'
   );
   // The fixture's PR carries the security-reviewed label: a label alone never passes.
-  const sensitive = fixture({ files: ['plugins/flow/docs/drain.md', 'plugins/flow/hooks/a.sh'] });
+  const sensitive = fixture({ files: ['specs/drain.md', 'plugins/flow/hooks/a.sh'] });
   await assert.rejects(checkPullRequest(sensitive.api, prEvent, pattern), /security-review pending/);
 });
 
@@ -538,7 +554,7 @@ test('pinned-main fixture blocks a branch whose workflow and script both exit 0'
 });
 
 test('old client-only PR without status passes computed and never writes', async () => {
-  const f = fixture({ files: ['plugins/flow/docs/old.md'] });
+  const f = fixture({ files: ['specs/old.md'] });
   assert.equal(await checkPullRequest(f.api, prEvent, pattern), 'no security paths (computed)');
   assert.match(await checkMergeGroup(f.api, groupEvent, pattern), /no security paths \(computed\)/);
   assert.deepEqual(f.writes, []);
@@ -556,7 +572,7 @@ test('old security PR without status fails pending without writing', async () =>
 test('computed clearance cannot override an explicit nonsensitive refusal', async () => {
   for (const state of ['pending', 'failure', 'error']) {
     const f = fixture({
-      files: ['plugins/flow/docs/old.md'],
+      files: ['specs/old.md'],
       statuses: { head1: [{ ...approved, state }] },
     });
     await assert.rejects(checkPullRequest(f.api, prEvent, pattern), /pending/);
@@ -565,7 +581,7 @@ test('computed clearance cannot override an explicit nonsensitive refusal', asyn
 });
 
 test('missing-status PR fails on failed, truncated, capped or malformed file lists', async () => {
-  const f = fixture({ files: ['plugins/flow/docs/old.md'] });
+  const f = fixture({ files: ['specs/old.md'] });
   f.api.files = async () => [];
   await assert.rejects(checkPullRequest(f.api, prEvent, pattern), /Incomplete/);
   f.api.files = async () => {
@@ -582,7 +598,7 @@ test('missing-status PR fails on failed, truncated, capped or malformed file lis
 });
 
 test('queued sensitive head cannot borrow the later client-only PR file list', async () => {
-  const f = fixture({ files: ['plugins/flow/docs/later.md'] });
+  const f = fixture({ files: ['specs/later.md'] });
   f.heads[1] = 'laterHead';
   f.api.files = async () => {
     throw new Error('Must not read mutable PR files');
@@ -669,7 +685,7 @@ test('GitHub compare requests pin both SHA inputs and return page-one files', as
 });
 
 test('later current PR head in queue snapshot cannot replace immutable queued diff', async () => {
-  const f = fixture({ files: ['plugins/flow/docs/later.md'] });
+  const f = fixture({ files: ['specs/later.md'] });
   f.heads[1] = 'laterHead';
   f.api.queue = async () =>
     entries.map((entry, i) =>
@@ -692,7 +708,7 @@ test('later current PR head in queue snapshot cannot replace immutable queued di
 });
 
 test('each queue entry compares its immutable base/head, not a cumulative or live PR diff', async () => {
-  const f = fixture({ files: ['plugins/flow/docs/a.md'] });
+  const f = fixture({ files: ['specs/a.md'] });
   const comparisons = [];
   f.api.compare = async (base, head) => {
     comparisons.push([base, head]);

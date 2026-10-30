@@ -12,10 +12,13 @@ Security's path list for this repo.
 ## What counts as a security path
 
 `SECURITY_PATH_PATTERN` in `workflows/security-gate.yml` is the only list. In
-short: the catalog files; everything inside `plugins/<name>/` except docs,
-tests, fixtures and plain files at a plugin's root (README, CHANGELOG, LICENSE,
-NOTICE); every `SKILL.md`; `.github`, `.claude`, `.agents`, `.dork`,
-`scripts`, `tools`; `package.json`, lockfiles and npm config anywhere. A path
+short: everything inside `plugins/<name>/` (including docs and templates, which
+agents read at run time, and any folder merely named `docs`, `tests` or
+`fixtures`), except a plugin's root `tests/` and `engine-tests/`, a skill's own
+`tests/`, and a plugin's root README.md, CHANGELOG.md, LICENSE and NOTICE.
+Also: the catalog files; every `SKILL.md`; `.github`, `.claude`, `.agents`,
+`.dork`, `scripts`, `tools`; the root `CLAUDE.md`, `AGENTS.md`, `REVIEW.md`
+and `.mcp.json`; and `package.json`, lockfiles and npm config anywhere. A path
 with a `.`, `..` or empty segment always counts. Both sides of a rename count.
 `scripts/fixtures/security-path-variants.json` holds case and Unicode spellings
 that both repos test.
@@ -32,14 +35,17 @@ that both repos test.
   `SECURITY_APPROVAL_BOT_USER_ID`. The `security-reviewed` label is a human
   signal only: every agent here acts through one GitHub account, so anyone
   could add it.
-- In the merge queue, every queued PR's exact head must be approved, and its
-  queued diff is compared on its own.
+- In the merge queue, every queued PR that touches a security path needs that
+  approval on its exact head, and its queued diff is compared on its own.
 
 ## Turning it on (Dorian)
 
 1. Install the Security App on this repo (the one dorkos uses, or a new one),
    and put its numeric bot user id in `SECURITY_APPROVAL_BOT_USER_ID`. While it
-   is `'0'`, no security-path PR can pass.
+   is `'0'`, no security-path PR can pass. **Blocked today:** dorkos's approval
+   helper (`tools/security-approve/` there) is hard-wired to dork-labs/dorkos
+   and its path list, so nothing can post a marketplace approval yet. It needs a
+   reviewed change to take the repository and pattern, or a tool of its own.
 2. Add an organization ruleset rule **Require workflows to pass before
    merging** for this repo's `main`: source `dork-labs/marketplace`, path
    `.github/workflows/security-gate.yml`, ref `refs/heads/main`. Not a named
