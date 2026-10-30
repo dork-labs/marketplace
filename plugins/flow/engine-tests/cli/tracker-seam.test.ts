@@ -281,9 +281,10 @@ describe('tracker failures (exit 4)', () => {
       }),
     };
     let out = '';
+    // Run from the project itself: --project may not reach into a checkout from outside it (DOR-3377).
     const code = await main(['probe', '--json', '--project', project], {
       env: {},
-      cwd: base,
+      cwd: project,
       now: () => new Date('2026-09-26T12:00:00.000Z'),
       stdout: { write: (chunk: string) => (out += chunk) },
       stderr: { write: () => true },

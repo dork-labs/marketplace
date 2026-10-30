@@ -176,9 +176,7 @@ export interface ProofFacts {
 export async function worktreeTop(ctx: VerbContext, dir: string): Promise<string> {
   const top = await git(ctx, dir, ['rev-parse', '--show-toplevel']);
   if (top.code !== 0 || top.stdout.trim() === '') {
-    throw new PreconditionError(
-      `${dir} is not a git worktree; run flow in the item's worktree, or pass --project`
-    );
+    throw new PreconditionError(`${dir} is not a git worktree; run flow in the item's worktree`);
   }
   return top.stdout.trim();
 }

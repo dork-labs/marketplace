@@ -251,14 +251,23 @@ export class TrackerReader {
     return state;
   }
 
-  /** Run one command of flow's CLI against a project. */
-  private run(args: readonly string[]): Promise<CommandResult> {
+  /**
+   * Run one command of flow's CLI against a project, from the project's own
+   * folder: flow refuses a `--project` outside the checkout it runs in (DOR-3377).
+   */
+  private run(root: string, args: readonly string[]): Promise<CommandResult> {
     const script = path.join(this.deps.flowRoot, 'scripts', 'flow.ts');
     return new Promise((resolve) => {
       this.deps.execFile(
         'node',
-        ['--experimental-strip-types', script, ...args],
-        { timeout: READ_TIMEOUT_MS, shell: false, encoding: 'utf8', maxBuffer: READ_MAX_BUFFER },
+        ['--experimental-strip-types', script, ...args, '--project', root],
+        {
+          timeout: READ_TIMEOUT_MS,
+          shell: false,
+          encoding: 'utf8',
+          maxBuffer: READ_MAX_BUFFER,
+          cwd: root,
+        },
         (error: ExecError | null, stdout: string) => {
           if (error === null) resolve({ code: 0, stdout });
           else resolve({ code: typeof error.code === 'number' ? error.code : null, stdout });
@@ -283,19 +292,12 @@ export class TrackerReader {
         projectIdOf(entry.root),
         'snapshot.json'
       );
-      const snapshot = await this.run([
-        'snapshot',
-        '--json',
-        '--out',
-        file,
-        '--project',
-        entry.root,
-      ]);
+      const snapshot = await this.run(entry.root, ['snapshot', '--json', '--out', file]);
       if (snapshot.code !== 0) {
         this.failed(entry, state, snapshot, started);
         return;
       }
-      const next = await this.run([
+      const next = await this.run(entry.root, [
         'next',
         '--count',
         String(UP_NEXT_COUNT),
@@ -304,8 +306,6 @@ export class TrackerReader {
         '--manual',
         '--snapshot',
         file,
-        '--project',
-        entry.root,
       ]);
       if (next.code !== 0) {
         this.failed(entry, state, next, started);

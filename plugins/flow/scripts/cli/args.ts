@@ -101,7 +101,8 @@ export const COMMON_FLAGS: Readonly<Record<CommonFlag, FlagSpec>> = {
     name: 'project',
     kind: 'string',
     value: 'dir',
-    description: 'The checkout to read config and run state from. Default: the current folder.',
+    description:
+      'The checkout to read config and run state from: the current folder or a folder in the same checkout. Default: the current folder.',
   },
   snapshot: {
     name: 'snapshot',

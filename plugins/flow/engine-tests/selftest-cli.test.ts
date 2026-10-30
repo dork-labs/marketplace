@@ -113,6 +113,20 @@ describe('flow selftest', () => {
     expect((await run(['--bogus'])).code).toBe(2);
   });
 
+  it('refuses a --project in another checkout, with exit 2, before checking anything', async () => {
+    // The tracker tier loads that checkout's adapter code (DOR-3377).
+    const other = mkdtempSync(path.join(os.tmpdir(), 'flow-selftest-other-'));
+    try {
+      execFileSync('git', ['init', '-q'], { cwd: other });
+      const refused = await run(['--tier', 'fast', '--no-save', '--project', other]);
+      expect(refused.code).toBe(2);
+      expect(refused.stdout).toBe('');
+      expect(refused.stderr).toMatch(/--project .* is outside this checkout/);
+    } finally {
+      rmSync(other, { recursive: true, force: true });
+    }
+  });
+
   it('saves latest.json and one history line, and keeps .dork/flow/ out of git', async () => {
     await run(['--tier', 'fast', '--no-save']);
     expect(existsSync(path.join(project, SELFTEST_DIR))).toBe(false);

@@ -108,6 +108,7 @@ function fakeInbox() {
 interface Call {
   args: string[];
   file: string | null;
+  cwd?: string;
 }
 
 /**
@@ -121,11 +122,11 @@ function fakeCli(
   })
 ) {
   const calls: Call[] = [];
-  const execFile: ExecFileLike = (_file, args, _opts, callback) => {
+  const execFile: ExecFileLike = (_file, args, opts, callback) => {
     const rest = args.slice(2);
     const fileFlag = rest.findIndex((arg) => arg === '--note-file' || arg === '--text-file');
     const file = fileFlag === -1 ? null : readFileSync(rest[fileFlag + 1], 'utf8');
-    calls.push({ args: rest, file });
+    calls.push({ args: rest, file, cwd: opts.cwd });
     const reply = answer(rest);
     const done = () => {
       const stdout = reply.json === undefined ? '{"ok":true}' : JSON.stringify(reply.json);
@@ -565,6 +566,8 @@ describe('answering', () => {
       '--project',
       '/work/dorkos',
     ]);
+    // From the project's own folder: flow refuses a --project outside it (DOR-3377).
+    expect(cli.calls[0].cwd).toBe('/work/dorkos');
     expect(result).toEqual({
       resolve: 'approved',
       offer: {

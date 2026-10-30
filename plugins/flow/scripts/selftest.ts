@@ -38,6 +38,7 @@ import { findConfigRoots } from './config-files.ts';
 import { UsageError } from './errors.ts';
 import { ensureIgnored } from './git-exclude.ts';
 import { append, journalFor, runtimeOf } from './journal.ts';
+import { assertProjectInRunCheckout } from './project-boundary.ts';
 import {
   LINT_CONFIG_DIR,
   WORD_BUDGETS_FILE,
@@ -422,6 +423,14 @@ export async function main(argv: readonly string[], deps: SelftestDeps): Promise
     return 0;
   }
 
+  // The tracker tier loads the project's adapter code: the same boundary as the CLI (DOR-3377).
+  if (flags.project !== undefined) {
+    try {
+      assertProjectInRunCheckout(deps.cwd, flags.project);
+    } catch (error) {
+      return refuse((error as Error).message);
+    }
+  }
   const projectDir = path.resolve(deps.cwd, flags.project ?? '.');
   const warn = (message: string) => deps.stderr(`flow selftest: ${message}\n`);
   let outcome: Awaited<ReturnType<typeof runSelftest>>;

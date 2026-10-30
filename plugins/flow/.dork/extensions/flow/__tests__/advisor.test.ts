@@ -409,7 +409,8 @@ describe('move', () => {
       world.main,
       '--json',
     ]);
-    expect(call.options).toMatchObject({ timeout: 120_000, shell: false });
+    // From the main checkout: flow refuses a --project outside the folder it runs in (DOR-3377).
+    expect(call.options).toMatchObject({ timeout: 120_000, shell: false, cwd: world.main });
     expect(advisor.inFlight.has('s-old')).toBe(true);
   });
 
