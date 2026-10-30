@@ -160,6 +160,14 @@ async function readGithub(
     }
     return { ...base, lastReadAt, ok: false, error };
   };
+  // Drop any older pending window before reading: if this read's own window
+  // cannot be written, done must not capture one from a run that died.
+  if (!ctx.dryRun && mark?.pending !== undefined) {
+    await updateIntakeMarks(main, (marks) => {
+      const { pending: _dropped, ...rest } = marks.sources[key] ?? {};
+      marks.sources[key] = rest;
+    });
+  }
   const fetchLimit = source.limit + from.seen.length;
   let result;
   try {

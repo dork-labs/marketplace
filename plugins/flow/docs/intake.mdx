@@ -17,7 +17,7 @@ Your configured team is always a source. `intake.sources` adds more; it can name
 ```
 
 - **tracker**: an intake queue the adapter's Path C verbs read. Triage reads it; flow keeps no mark for it.
-- **github**: one repository on github.com as `owner/name`. `labels` keeps only issues carrying all of them (no spaces in a label). `limit` caps one read (default 30, at most 100); the rest come next read.
+- **github**: one repository on github.com as `owner/name`. `labels` keeps only issues carrying all of them (characters `A-Za-z0-9_./-`). `limit` caps one read (default 30, at most 100); the rest come next read.
 
 The older `connection.intake` list still reads as tracker sources, with a warning to move it.
 
