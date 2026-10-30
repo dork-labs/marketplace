@@ -193,10 +193,16 @@ describe('flow status: Health', () => {
     );
   });
 
-  it('lists each intake source; with no read recorded, each is unknown', async () => {
+  it('lists the team, then each intake source; with no read recorded, each is unknown', async () => {
     const { fetchImpl } = dorkos([]);
     const health = await status(fetchImpl);
     expect(health.intake).toEqual([
+      {
+        id: 'fake',
+        name: null,
+        lastReadAt: null,
+        detail: 'unknown (flow records no read of this source yet)',
+      },
       {
         id: 'q-1',
         name: 'Support',

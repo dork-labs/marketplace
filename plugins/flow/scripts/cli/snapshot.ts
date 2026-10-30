@@ -154,7 +154,7 @@ function writeSnapshotFile(file: string, json: string): void {
  * @param ctx - The verb's context.
  * @param snapshot - The pulled snapshot.
  */
-function markTeamRead(ctx: VerbContext, snapshot: BacklogSnapshot): void {
+async function markTeamRead(ctx: VerbContext, snapshot: BacklogSnapshot): Promise<void> {
   const ids = [snapshot.team.key, snapshot.team.id].filter(
     (id): id is string => typeof id === 'string' && id !== ''
   );
@@ -162,7 +162,7 @@ function markTeamRead(ctx: VerbContext, snapshot: BacklogSnapshot): void {
   try {
     const main = resolveMainCheckout(ctx.projectDir);
     const at = ctx.now().toISOString();
-    updateIntakeMarks(main, (marks) => {
+    await updateIntakeMarks(main, (marks) => {
       for (const id of ids) {
         const key = sourceKey({ kind: 'tracker', id });
         marks.sources[key] = { ...marks.sources[key], lastReadAt: at };
@@ -191,7 +191,7 @@ export async function run(ctx: VerbContext): Promise<VerbResult> {
   const snapshot = await adapter.getBacklogSnapshot({ includeClosed });
 
   // `v` first, the same order `--json` prints, so the file equals the output.
-  markTeamRead(ctx, snapshot);
+  await markTeamRead(ctx, snapshot);
 
   const { v, ...rest } = snapshot;
   const json = { v, ...rest };

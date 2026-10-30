@@ -161,8 +161,11 @@ export const ConnectionSchema = z
 export const GITHUB_REPO_PATTERN =
   /^[A-Za-z0-9](?:[A-Za-z0-9]|-(?=[A-Za-z0-9])){0,38}\/[A-Za-z0-9_][A-Za-z0-9._-]{0,99}$/;
 
-/** An issue label to filter on: no comma (gh splits on it) and no leading dash. */
-export const GITHUB_LABEL_PATTERN = /^[A-Za-z0-9_][A-Za-z0-9 _.:/-]{0,49}$/;
+/**
+ * An issue label to filter on: no comma (gh splits on it), no space or colon
+ * (gh puts it in a search query), and no leading dash.
+ */
+export const GITHUB_LABEL_PATTERN = /^[A-Za-z0-9_][A-Za-z0-9_./-]{0,49}$/;
 
 /** A tracker team or intake queue that TRIAGE reads (DOR-3258). */
 export const TrackerIntakeSourceSchema = z
@@ -189,7 +192,9 @@ export const GithubIntakeSourceSchema = z
     name: z.string().optional(),
     /** Only issues with all of these labels. Empty: every open issue. */
     labels: z
-      .array(z.string().regex(GITHUB_LABEL_PATTERN, 'must be a plain label with no comma'))
+      .array(
+        z.string().regex(GITHUB_LABEL_PATTERN, 'must be a plain label: letters, digits, _ . / -')
+      )
       .max(5)
       .default([]),
     /** How many new issues one read takes at most; the rest come next read. */

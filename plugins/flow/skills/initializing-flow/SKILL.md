@@ -66,9 +66,9 @@ always needs a person.
    and **fast** (mechanical work). Never ask for the orchestrating model. One model:
    bind both to it. Unknown: leave them unbound (runs use the harness default).
    Headless: no bindings.
-6. **Intake sources** (`intake.sources`, `<flow-root>/docs/intake.mdx`): which tracker
-   teams and GitHub repos (`owner/name`) triage reads. Offer the team and `origin`'s
-   repo. Headless: empty (the team alone).
+6. **Intake sources** (`intake.sources`, `<flow-root>/docs/intake.mdx`): GitHub repos
+   (`owner/name`) and tracker intake queues triage reads besides the team. Offer
+   `origin`'s repo. Headless: none.
 
 ## Step 3 — Generate and verify the adapter (the gate)
 

@@ -22,14 +22,19 @@ import { loadConfig } from '../config-load.ts';
 import { UsageError } from '../errors.ts';
 import { ensureIgnored } from '../git-exclude.ts';
 import {
+  isTeamSource,
   issueListArgs,
+  nextWindow,
   parseIssues,
   readIntakeMarks,
   resolveIntakeSources,
   sourceKey,
   sourceLabel,
   updateIntakeMarks,
+  WINDOW_MARGIN_MS,
   type IntakeIssue,
+  type IntakeMark,
+  type IntakeMarks,
   type IntakeSource,
 } from '../intake.ts';
 import { resolveMainCheckout } from '../main-checkout.ts';
@@ -55,6 +60,8 @@ interface SourceRead {
   baseline?: boolean;
   /** GitHub: more new issues wait than one read takes. */
   more?: boolean;
+  /** Tracker: whether it is the configured team (`flow snapshot` reads it). */
+  team?: boolean;
   issues?: IntakeIssue[];
 }
 
@@ -65,7 +72,7 @@ function firstLine(text: string): string {
       .split('\n')
       .map((l) => l.trim())
       .find((l) => l !== '') ?? 'no output';
-  return line.replace(/[\u0000-\u001f\u007f-\u009f]/g, '').slice(0, 200);
+  return line.replace(/[\u0000-\u001f\u007f-\u009f\u2028\u2029]/g, '').slice(0, 200);
 }
 
 /** A fence longer than any run of backticks in `text`. */
@@ -74,13 +81,15 @@ function fenceFor(text: string): string {
   return '`'.repeat(longest + 1);
 }
 
-/** Render a read for a person, each issue body fenced as data. */
+/** Render a read for a person, each issue's title and body fenced together as data. */
 function renderRead(reads: readonly SourceRead[]): string {
   const lines: string[] = [];
   for (const read of reads) {
     const when = read.lastReadAt === null ? 'never read' : `last read ${read.lastReadAt}`;
     if (read.kind === 'tracker') {
-      lines.push(`${read.label} (tracker): ${when}; flow snapshot reads it.`);
+      const how =
+        read.team === true ? 'flow snapshot reads it' : 'triage reads it through the adapter';
+      lines.push(`${read.label} (tracker): ${when}; ${how}.`);
       continue;
     }
     if (!read.ok) {
@@ -96,7 +105,7 @@ function renderRead(reads: readonly SourceRead[]): string {
       `${read.label} (GitHub): ${issues.length} new issue${issues.length === 1 ? '' : 's'}${read.more === true ? ', and more next read' : ''}.`
     );
     for (const issue of issues) {
-      const fence = fenceFor(issue.body);
+      const fence = fenceFor(`${issue.title}\n${issue.body}`);
       lines.push(
         '',
         `${issue.tag} ${issue.url}`,
@@ -113,7 +122,9 @@ function renderRead(reads: readonly SourceRead[]): string {
 }
 
 /**
- * Read one GitHub source and record its pending window.
+ * Read one GitHub source and record its pending window. A read that fails
+ * drops any pending window, so `flow intake done` can never mark captured a
+ * window no run that captured has seen.
  *
  * @returns The source's result.
  */
@@ -121,54 +132,60 @@ async function readGithub(
   ctx: VerbContext,
   main: string,
   source: Extract<IntakeSource, { kind: 'github' }>,
-  lastReadAt: string | null,
-  capturedThrough: string | undefined,
-  now: string
+  mark: IntakeMark | undefined,
+  now: Date
 ): Promise<SourceRead> {
   const key = sourceKey(source);
   const base = { key, kind: source.kind, label: sourceLabel(source) };
-  if (capturedThrough === undefined) {
+  const at = now.toISOString();
+  const lastReadAt = mark?.lastReadAt ?? null;
+  const from = mark?.captured;
+  // No capture point, or one in the future (flow never writes that): start over from now.
+  if (from === undefined || Date.parse(from.through) > now.getTime()) {
+    const start = { through: new Date(now.getTime() - WINDOW_MARGIN_MS).toISOString(), seen: [] };
     if (!ctx.dryRun) {
-      updateIntakeMarks(main, (marks) => {
-        marks.sources[key] = { lastReadAt: now, capturedThrough: now };
+      await updateIntakeMarks(main, (marks) => {
+        marks.sources[key] = { lastReadAt: at, captured: start };
       });
     }
-    return { ...base, lastReadAt: now, ok: true, baseline: true, issues: [] };
+    return { ...base, lastReadAt: at, ok: true, baseline: true, issues: [] };
   }
+  const failed = async (error: string): Promise<SourceRead> => {
+    if (!ctx.dryRun) {
+      await updateIntakeMarks(main, (marks) => {
+        const { pending: _dropped, ...rest } = marks.sources[key] ?? {};
+        marks.sources[key] = rest;
+      });
+    }
+    return { ...base, lastReadAt, ok: false, error };
+  };
+  const fetchLimit = source.limit + from.seen.length;
   let result;
   try {
-    result = await ctx.runProcess('gh', issueListArgs(source, capturedThrough), {
+    result = await ctx.runProcess('gh', issueListArgs(source, from.through, fetchLimit), {
       timeoutMs: GH_TIMEOUT_MS,
     });
   } catch (error) {
-    return { ...base, lastReadAt, ok: false, error: firstLine((error as Error).message) };
+    return failed(firstLine((error as Error).message));
   }
-  if (result.code !== 0) {
-    return { ...base, lastReadAt, ok: false, error: firstLine(result.stderr || result.stdout) };
-  }
-  let issues: IntakeIssue[];
+  if (result.code !== 0) return failed(firstLine(result.stderr || result.stdout));
+  let fetched: IntakeIssue[];
   try {
-    issues = parseIssues(result.stdout, source.repo);
+    fetched = parseIssues(result.stdout, source.repo);
   } catch (error) {
-    return { ...base, lastReadAt, ok: false, error: (error as Error).message };
+    return failed((error as Error).message);
   }
-  const more = issues.length >= source.limit;
-  const last = issues.at(-1)?.createdAt;
-  // With more waiting, the next read starts at the newest issue taken; else at this read.
-  const through =
-    more && last !== undefined && Number.isFinite(Date.parse(last))
-      ? new Date(last).toISOString()
-      : now;
+  const { issues, more, next } = nextWindow(from, fetched, fetchLimit, source.limit, now);
   if (!ctx.dryRun) {
-    updateIntakeMarks(main, (marks) => {
+    await updateIntakeMarks(main, (marks) => {
       marks.sources[key] = {
         ...marks.sources[key],
-        lastReadAt: now,
-        pending: { readAt: now, through },
+        lastReadAt: at,
+        pending: { ...next, readAt: at },
       };
     });
   }
-  return { ...base, lastReadAt: now, ok: true, more, issues };
+  return { ...base, lastReadAt: at, ok: true, more, issues };
 }
 
 /**
@@ -186,46 +203,52 @@ export async function run(ctx: VerbContext): Promise<VerbResult> {
   const { config } = loadConfig(findConfigRoots(ctx.projectDir, ctx.flowRoot), ctx.env);
   const main = resolveMainCheckout(ctx.projectDir);
   const sources = resolveIntakeSources(config);
-  const marks = readIntakeMarks(main);
+  const githubKeys = new Set(sources.filter((s) => s.kind === 'github').map(sourceKey));
   if (!ctx.dryRun) ensureIgnored(main, '.dork/flow/intake.json', '.dork/flow/');
 
   if (action === 'done') {
-    const moved: { key: string; capturedThrough: string }[] = [];
-    for (const source of sources) {
-      const key = sourceKey(source);
-      const pending = marks.sources[key]?.pending;
-      if (source.kind === 'github' && pending !== undefined) {
-        moved.push({ key, capturedThrough: pending.through });
+    const moved: { key: string; through: string }[] = [];
+    // Worked out under the lock, from the marks as they are now.
+    const capture = (marks: IntakeMarks) => {
+      for (const key of githubKeys) {
+        const { pending, ...rest } = marks.sources[key] ?? {};
+        if (pending === undefined) continue;
+        moved.push({ key, through: pending.through });
+        marks.sources[key] = {
+          ...rest,
+          captured: { through: pending.through, seen: pending.seen },
+        };
       }
-    }
-    if (!ctx.dryRun && moved.length > 0) {
-      updateIntakeMarks(main, (next) => {
-        for (const { key, capturedThrough } of moved) {
-          const { pending: _pending, ...rest } = next.sources[key] ?? {};
-          next.sources[key] = { ...rest, capturedThrough };
-        }
-      });
-    }
+    };
+    if (ctx.dryRun) capture(readIntakeMarks(main));
+    else await updateIntakeMarks(main, capture);
     return {
       json: { ok: true, ...(ctx.dryRun ? { dryRun: true } : {}), captured: moved },
       text:
         moved.length === 0
           ? 'No read was waiting to be marked captured.'
-          : moved.map((m) => `${m.key}: captured through ${m.capturedThrough}.`).join('\n'),
+          : moved.map((m) => `${m.key}: captured through ${m.through}.`).join('\n'),
     };
   }
 
-  const now = ctx.now().toISOString();
+  const now = ctx.now();
+  const marks = readIntakeMarks(main);
   const reads: SourceRead[] = [];
   for (const source of sources) {
     const key = sourceKey(source);
     const mark = marks.sources[key];
-    const lastReadAt = mark?.lastReadAt ?? null;
     if (source.kind === 'tracker') {
-      reads.push({ key, kind: 'tracker', label: sourceLabel(source), lastReadAt, ok: true });
+      reads.push({
+        key,
+        kind: 'tracker',
+        label: sourceLabel(source),
+        lastReadAt: mark?.lastReadAt ?? null,
+        ok: true,
+        team: isTeamSource(config, source),
+      });
       continue;
     }
-    reads.push(await readGithub(ctx, main, source, lastReadAt, mark?.capturedThrough, now));
+    reads.push(await readGithub(ctx, main, source, mark, now));
   }
   const ok = reads.every((r) => r.ok);
   return {

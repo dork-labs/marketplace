@@ -838,7 +838,7 @@ declaration.
   report from outside the team into work without moving or mirroring it. Their
   outward text carries the 1.2.0 marker and signature. Additive and declared
   all-or-none: an adapter declaring `1.2.0`, `1.1.0` or `1.0.0` still conforms,
-  and an install with no `connection.intake` source never reaches them.
+  and an install with no tracker intake source (`intake.sources`, or the older `connection.intake`) never reaches them.
 - **1.2.0** - outward writes carry the **`agent:provenance` signature**
   ([`../docs/provenance.md`](../docs/provenance.md)) alongside the identity marker:
   `comment`, `needsInput`'s question, and the description `createSubIssue` authors.
