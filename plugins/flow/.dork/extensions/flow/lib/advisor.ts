@@ -120,7 +120,7 @@ export interface ExecError extends Error {
 export type ExecFileLike = (
   file: string,
   args: readonly string[],
-  options: { timeout: number; shell: false; encoding: 'utf8'; maxBuffer?: number },
+  options: { timeout: number; shell: false; encoding: 'utf8'; maxBuffer?: number; cwd?: string },
   callback: (error: ExecError | null, stdout: string, stderr: string) => void
 ) => unknown;
 
@@ -193,12 +193,18 @@ export function createAdvisor(deps: AdvisorDeps): FlowAdvisor {
   const flowCommand = `node --experimental-strip-types ${path.join(deps.flowRoot, 'scripts', 'flow.ts')}`;
 
   /** Run a command, resolving with its output and rejecting with its error. */
-  function exec(args: readonly string[], timeout: number): Promise<string> {
+  function exec(args: readonly string[], timeout: number, cwd?: string): Promise<string> {
+    const options = { timeout, shell: false as const, encoding: 'utf8' as const };
     return new Promise((resolve, reject) => {
-      deps.execFile('node', args, { timeout, shell: false, encoding: 'utf8' }, (error, stdout) => {
-        if (error) reject(error);
-        else resolve(stdout);
-      });
+      deps.execFile(
+        'node',
+        args,
+        cwd === undefined ? options : { ...options, cwd },
+        (error, stdout) => {
+          if (error) reject(error);
+          else resolve(stdout);
+        }
+      );
     });
   }
 
@@ -356,7 +362,9 @@ export function createAdvisor(deps: AdvisorDeps): FlowAdvisor {
           mainCheckout,
           '--json',
         ],
-        HANDOFF_TIMEOUT_MS
+        HANDOFF_TIMEOUT_MS,
+        // flow refuses a --project outside the checkout it runs in (DOR-3377).
+        mainCheckout
       );
     } catch (error) {
       const e = error as ExecError & { stderr?: string };

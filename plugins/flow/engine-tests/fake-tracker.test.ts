@@ -15,6 +15,7 @@ import {
   symlinkSync,
   writeFileSync,
 } from 'node:fs';
+import { execFileSync } from 'node:child_process';
 import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -61,10 +62,13 @@ function roots(): ConfigRoots {
 }
 
 async function load() {
+  // roots() says the project is a checkout; make it one, as the import-time check asks git.
+  execFileSync('git', ['init', '-q'], { cwd: project });
   return loadCodeAdapter({
     roots: roots(),
     loaded: loadConfig(roots(), {}),
     warn: () => undefined,
+    runDir: project,
   });
 }
 

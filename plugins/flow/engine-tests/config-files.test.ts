@@ -1511,6 +1511,8 @@ describe('config-files CLI', { timeout: 30_000 }, () => {
       'validate-config.ts',
       '_shared.ts',
       'git-exclude.ts',
+      'project-boundary.ts',
+      'errors.ts',
     ]) {
       copyFileSync(path.join(PLUGIN_DIR, 'scripts', name), path.join(plugin, 'scripts', name));
     }

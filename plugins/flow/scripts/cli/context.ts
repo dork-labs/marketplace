@@ -77,6 +77,11 @@ export type ProcessRunner = (
 export interface AdapterRequest {
   /** The checkout whose config names the tracker (the resolved `--project`). */
   projectDir: string;
+  /**
+   * The folder flow was started in. A project's own adapter code loads only
+   * when `projectDir`'s checkout is this folder's (DOR-3377).
+   */
+  runDir: string;
   /** The plugin folder (`<flow-root>`), where a shipped adapter lives. */
   flowRoot: string;
   /** Environment variables (`FLOW_TRACKER_*` fill the secrets). */
@@ -295,6 +300,7 @@ export function createVerbContext(
     adapter: () =>
       (adapter ??= deps.createAdapter({
         projectDir,
+        runDir: deps.cwd,
         flowRoot,
         env: deps.env,
         runProcess: deps.runProcess,

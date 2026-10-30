@@ -178,6 +178,7 @@ describe('the module', () => {
       loaded: loadConfig(roots, {}),
       warn: () => {},
       transport,
+      runDir: project,
     });
     expect(await adapter.getCurrentUser()).toEqual({ id: 'user-agent', name: 'Flow bot' });
     expect(calls[0].account).toBe('flow-bot');
