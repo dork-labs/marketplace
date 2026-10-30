@@ -1231,7 +1231,14 @@ export class DecisionCoordinator {
       this.deps.execFile(
         'node',
         ['--experimental-strip-types', script, ...full],
-        { timeout: VERB_TIMEOUT_MS, shell: false, encoding: 'utf8', maxBuffer: 4 * 1024 * 1024 },
+        {
+          timeout: VERB_TIMEOUT_MS,
+          shell: false,
+          encoding: 'utf8',
+          maxBuffer: 4 * 1024 * 1024,
+          // flow refuses a --project outside the checkout it runs in (DOR-3377).
+          cwd: root,
+        },
         (error: ExecError | null, stdout: string) => {
           if (temp !== null) rmSync(temp, { force: true });
           let json: Record<string, unknown> | null = null;

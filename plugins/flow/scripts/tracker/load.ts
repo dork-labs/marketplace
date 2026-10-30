@@ -29,6 +29,7 @@ import type { AdapterFactory } from '../cli/context.ts';
 import { findConfigRoots, resolveAdapter, type ConfigRoots } from '../config-files.ts';
 import { loadConfig, type LoadedConfig } from '../config-load.ts';
 import { ConfigError, FlowError, TrackerError } from '../errors.ts';
+import { assertCheckoutIsRunCheckout } from '../project-boundary.ts';
 import { createExternalCliTransport } from './external-cli.ts';
 import {
   ALL_CAPABILITIES,
@@ -51,6 +52,11 @@ export interface LoadCodeAdapterOptions {
   warn(message: string): void;
   /** The transport to hand the adapter. Default: the real `cli` transport. */
   transport?: TrackerTransport;
+  /**
+   * The folder flow was started in. A project's own adapter code loads only
+   * if `roots.checkout` is this folder's checkout (DOR-3377).
+   */
+  runDir: string;
 }
 
 /** Whether an error is Node failing to find the `zod` package, which must surface as exit 6. */
@@ -102,6 +108,11 @@ export async function loadCodeAdapter(options: LoadCodeAdapterOptions): Promise<
     throw new ConfigError(
       `flow loads a project's own adapter code only inside a git checkout, and ${roots.checkout} is not one`
     );
+  }
+  // Checked again here, on the checkout the code is actually loaded from, so no
+  // second answer from git can differ from the one `--project` was checked on.
+  if (adapterFiles.origin !== 'shipped') {
+    assertCheckoutIsRunCheckout(options.runDir, roots.checkout);
   }
   if (!existsSync(file)) {
     throw new ConfigError(
@@ -237,5 +248,6 @@ export const createCodeAdapter: AdapterFactory = async (request) => {
     loaded,
     warn: request.warn,
     transport: createExternalCliTransport(request.runProcess),
+    runDir: request.runDir,
   });
 };

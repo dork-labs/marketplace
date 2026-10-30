@@ -42,6 +42,7 @@ import {
   type ExitCode,
   type TrackerErrorKind,
 } from './errors.ts';
+import { assertProjectInRunCheckout } from './project-boundary.ts';
 import type { Runtime } from './runtime-detect.ts';
 
 /**
@@ -1239,6 +1240,10 @@ export async function main(argv: readonly string[], deps: MainDeps): Promise<num
     }
 
     const args = parseVerbArgs(argv, location, verb);
+    // Before the context, so a refused run writes nothing in the other folder.
+    if (typeof args.flags.project === 'string') {
+      assertProjectInRunCheckout(deps.cwd, args.flags.project);
+    }
     const ctx = createVerbContext(args, deps, flowRoot, (message) => output.warn(message));
     // From here the run is a verb run, and it is journaled however it ends.
     run = { ctx, verb, startedMs: elapsed() };

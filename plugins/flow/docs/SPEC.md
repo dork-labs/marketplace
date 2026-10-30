@@ -136,13 +136,13 @@ each one's flags.
 
 - `--json` prints one JSON object (`"v": 1`) on stdout, even on failure
   (`"ok": false` with an `error`). Warnings go to stderr.
-- `--project <dir>` is the checkout to read (every verb but `accounts` and
+- `--project <dir>` is a folder in the run's checkout (every verb but `accounts` and
   `usage`). `--snapshot <file>` lets `next`, `audit` and `status` read a saved
   `flow snapshot --json`. `--dry-run` prints the plan and writes nothing, on
   `claim`, `release`, `done`, `stage`, `accounts` and `usage`. `--manual` lets
   `next` and `claim` run while paused. `--session <id>` defaults to
   `FLOW_SESSION_ID`, then the runtime's own session id.
-- Every write is read back from the tracker; one that does not stick exits 4.
+- Every tracker write is read back; one that does not stick exits 4.
 
 | Exit | Meaning                                                                 |
 | ---- | ----------------------------------------------------------------------- |

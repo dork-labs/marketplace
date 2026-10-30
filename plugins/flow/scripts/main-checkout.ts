@@ -42,7 +42,7 @@ export function resolveMainCheckout(project: string, opts: { timeoutMs?: number 
     }).trim();
   } catch {
     throw new ConfigError(
-      `${project} is not inside a git checkout, so flow cannot find its run store. Run flow from the project's checkout or pass --project.`
+      `${project} is not inside a git checkout, so flow cannot find its run store. Run flow from the project's checkout.`
     );
   }
   return path.dirname(path.resolve(project, commonDir));

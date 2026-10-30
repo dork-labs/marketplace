@@ -56,12 +56,12 @@ interface Answer {
  * each call until `release`, and writes the snapshot file a real snapshot would.
  */
 function fakeExec(script: (verb: string, root: string) => Answer, opts: { hold?: boolean } = {}) {
-  const calls: { verb: string; root: string; args: string[] }[] = [];
+  const calls: { verb: string; root: string; args: string[]; cwd?: string }[] = [];
   const held: (() => void)[] = [];
-  const exec: ExecFileLike = (_file, args, _opts, callback) => {
+  const exec: ExecFileLike = (_file, args, execOpts, callback) => {
     const verb = args[2];
     const root = args[args.indexOf('--project') + 1];
-    calls.push({ verb, root, args: [...args] });
+    calls.push({ verb, root, args: [...args], cwd: execOpts.cwd });
     const answer = script(verb, root);
     const finish = () => {
       if (verb === 'snapshot' && answer.code === 0) {
@@ -177,6 +177,8 @@ describe('TrackerReader', () => {
         '/p',
       ],
     ]);
+    // From the project's own folder: flow refuses a --project outside it (DOR-3377).
+    expect(fake.calls.map((call) => call.cwd)).toEqual(['/p', '/p']);
     expect(instance.latest('/p')).toEqual({
       at: new Date(T0).toISOString(),
       queue: {

@@ -1,0 +1,202 @@
+/**
+ * `--project` stays inside the checkout flow runs in (DOR-3377).
+ *
+ * A scheduled run may call `flow <verb>` without asking, and `--project` picks
+ * whose tracker adapter code loads. These cases run `main` against real
+ * temporary git checkouts and check that a verb never starts for a folder in
+ * another checkout, however it is spelled.
+ */
+
+import { execFileSync } from 'node:child_process';
+import { mkdirSync, mkdtempSync, realpathSync, rmSync, symlinkSync } from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+
+import type { VerbDefinition } from '../../scripts/cli/context.ts';
+import { EXIT } from '../../scripts/errors.ts';
+import { findConfigRoots } from '../../scripts/config-files.ts';
+import { main } from '../../scripts/flow.ts';
+import { gitTopLevel } from '../../scripts/project-boundary.ts';
+
+let base: string;
+let repo: string;
+let other: string;
+
+function gitInit(dir: string): void {
+  mkdirSync(dir, { recursive: true });
+  execFileSync('git', ['init', '-q'], { cwd: dir });
+}
+
+beforeEach(() => {
+  base = realpathSync(mkdtempSync(path.join(os.tmpdir(), 'flow-project-boundary-')));
+  repo = path.join(base, 'repo');
+  other = path.join(base, 'other');
+  gitInit(repo);
+  gitInit(other);
+  mkdirSync(path.join(repo, 'sub', 'deeper'), { recursive: true });
+});
+
+afterEach(() => {
+  vi.unstubAllEnvs();
+  rmSync(base, { recursive: true, force: true });
+});
+
+/** Run a test-only verb that takes `--project` and records the folder it was handed. */
+async function run(
+  cwd: string,
+  project: string
+): Promise<{ code: number; ran: string | null; out: string }> {
+  let ran: string | null = null;
+  const probe: VerbDefinition = {
+    name: 'probe',
+    summary: 'A test-only verb that records its project.',
+    common: ['project'],
+    load: async () => ({
+      run: async (ctx) => {
+        ran = ctx.projectDir;
+        return { json: {}, text: '' };
+      },
+    }),
+  };
+  let out = '';
+  const code = await main(['probe', '--json', '--project', project], {
+    env: {},
+    cwd,
+    now: () => new Date('2026-10-30T12:00:00.000Z'),
+    stdout: { write: (chunk: string) => (out += chunk) },
+    stderr: { write: () => true },
+    createAdapter: async () => {
+      throw new Error('no adapter in this test');
+    },
+    runProcess: async () => ({ code: 0, stdout: '', stderr: '' }),
+    verbs: [probe],
+  });
+  return { code, ran, out };
+}
+
+/**
+ * Expect the run refused with exit 2, the verb never started, and a message
+ * naming --project that ends by saying exactly where to run flow instead.
+ */
+function expectRefused(
+  result: { code: number; ran: string | null; out: string },
+  runFrom: string
+): void {
+  expect(result.code).toBe(EXIT.usage);
+  expect(result.ran).toBeNull();
+  const message: string = JSON.parse(result.out).error.message;
+  expect(message).toMatch(/^--project .* is outside /);
+  expect(message.endsWith(`. Run flow from inside ${runFrom}`)).toBe(true);
+}
+
+describe('inside a git checkout', () => {
+  it('passes the checkout itself', async () => {
+    expect((await run(repo, repo)).code).toBe(EXIT.ok);
+    expect((await run(repo, '.')).code).toBe(EXIT.ok);
+  });
+
+  it('passes a subfolder, and the top level from a subfolder', async () => {
+    expect((await run(repo, 'sub/deeper')).code).toBe(EXIT.ok);
+    expect((await run(path.join(repo, 'sub'), repo)).code).toBe(EXIT.ok);
+    expect((await run(path.join(repo, 'sub'), '..')).code).toBe(EXIT.ok);
+  });
+
+  it('refuses another checkout, by absolute or relative path', async () => {
+    expectRefused(await run(repo, other), other);
+    expectRefused(await run(repo, '../other'), other);
+    // A subfolder of the other checkout still names that checkout's top level.
+    mkdirSync(path.join(other, 'deep'));
+    expectRefused(await run(repo, '../other/deep'), other);
+  });
+
+  it('refuses a symlink to another checkout, inside this one or not, naming the real one', async () => {
+    symlinkSync(other, path.join(repo, 'sub', 'link'));
+    symlinkSync(other, path.join(base, 'link'));
+    expectRefused(await run(repo, 'sub/link'), other);
+    expectRefused(await run(repo, path.join(base, 'link')), other);
+  });
+
+  it('refuses a linked worktree of the same repository', async () => {
+    // A worktree has a top level of its own and its own adapter code on its branch.
+    execFileSync(
+      'git',
+      ['-c', 'commit.gpgsign=false', 'commit', '-q', '--allow-empty', '-m', 'init'],
+      {
+        cwd: repo,
+        env: {
+          ...process.env,
+          GIT_AUTHOR_NAME: 't',
+          GIT_AUTHOR_EMAIL: 't@example.com',
+          GIT_COMMITTER_NAME: 't',
+          GIT_COMMITTER_EMAIL: 't@example.com',
+        },
+      }
+    );
+    const worktree = path.join(base, 'wt');
+    execFileSync('git', ['worktree', 'add', '-q', '-b', 'side', worktree], { cwd: repo });
+    expectRefused(await run(repo, worktree), worktree);
+  });
+
+  it('names a --project that does not exist as missing', async () => {
+    const result = await run(repo, 'sbu');
+    expect(result.code).toBe(EXIT.usage);
+    expect(result.ran).toBeNull();
+    expect(JSON.parse(result.out).error.message).toBe('--project sbu does not exist');
+  });
+
+  it('refuses a folder outside every checkout, naming that folder', async () => {
+    mkdirSync(path.join(base, 'plain'));
+    expectRefused(await run(repo, path.join(base, 'plain')), path.join(base, 'plain'));
+  });
+
+  it('prints the path as it is, with no shell quoting', async () => {
+    // A person may copy it: a space or a quote in the name stays as written.
+    const odd = path.join(base, "it's a repo");
+    mkdirSync(odd);
+    execFileSync('git', ['init', '-q'], { cwd: odd });
+    expectRefused(await run(repo, odd), odd);
+  });
+
+  it('ignores GIT_DIR and GIT_WORK_TREE when it asks git', async () => {
+    // Either variable would otherwise make git answer for the run's checkout
+    // whatever folder it was asked about.
+    vi.stubEnv('GIT_DIR', path.join(repo, '.git'));
+    vi.stubEnv('GIT_WORK_TREE', repo);
+    expectRefused(await run(repo, other), other);
+  });
+});
+
+describe('GIT_CEILING_DIRECTORIES', () => {
+  it('is kept: a repo above the ceiling stays out of view', () => {
+    // It only narrows what git finds, as for a dotfiles repo in the home folder.
+    const scratch = path.join(repo, 'sub');
+    expect(gitTopLevel(scratch)).toBe(repo);
+    vi.stubEnv('GIT_CEILING_DIRECTORIES', repo);
+    expect(gitTopLevel(scratch)).toBeNull();
+    expect(findConfigRoots(scratch, base).inGit).toBe(false);
+  });
+});
+
+describe('outside git', () => {
+  it('passes the folder itself and a subfolder', async () => {
+    const plain = path.join(base, 'plain');
+    mkdirSync(path.join(plain, 'sub'), { recursive: true });
+    mkdirSync(path.join(plain, '..dots'));
+    expect((await run(plain, plain)).code).toBe(EXIT.ok);
+    expect((await run(plain, 'sub')).code).toBe(EXIT.ok);
+    // A name that only starts with two dots is still inside.
+    expect((await run(plain, '..dots')).code).toBe(EXIT.ok);
+  });
+
+  it('refuses a folder beside it', async () => {
+    const plain = path.join(base, 'plain');
+    mkdirSync(path.join(base, 'beside'), { recursive: true });
+    mkdirSync(plain);
+    expectRefused(await run(plain, '../beside'), path.join(base, 'beside'));
+  });
+
+  it('refuses a git checkout below it, where adapter code would load', async () => {
+    expectRefused(await run(base, path.join(repo, 'sub')), repo);
+  });
+});

@@ -4,6 +4,16 @@ Installs of this plugin are pinned to a commit SHA, so a fix here does not reach
 you until you **reinstall it** (Marketplace → flow → reinstall, or re-run your
 `--plugin-dir` checkout's `git pull`). Each entry below says whether that matters.
 
+## 0.65.1
+
+**Security fix: a flow command can no longer be pointed at another project's folder. Reinstall now.**
+
+- `--project` chooses whose settings and tracker adapter code a flow command uses, and the adapter code is code flow runs. Until now it could name any folder, so a scheduled run allowed to call flow could have run another project's adapter code. Flow now refuses a `--project` outside the checkout it runs in, with exit 2, before it reads or writes anything there. The message ends with the folder to run flow from instead: "Run flow from inside" that project's checkout. Symlinks are followed first, so a link to another checkout is refused too, and so are a linked worktree and a submodule, which count as checkouts of their own. A subfolder of the same checkout still works.
+- Outside git, `--project` must be the folder flow runs in or a folder inside it, and not inside a git checkout.
+- Flow checks again just before it loads a project's adapter code, on the checkout it is about to load from. When it asks git which checkout a folder is in, it now leaves out the variables that point git somewhere else (`GIT_DIR`, `GIT_WORK_TREE`, `GIT_CONFIG*` and the like), so they can't point it at another checkout. `GIT_CEILING_DIRECTORIES` still works.
+- This holds for every run, not only scheduled ones, because nothing tells flow which runs a schedule started. If you used `--project` to reach another checkout, run flow from that checkout instead.
+- The Flow panel in DorkOS now starts flow in each project's own folder, so it keeps working.
+
 ## 0.65.0
 
 **Flow can now take new work from more than one place: tracker teams and GitHub issues, each with a record of when flow last read it. Reinstall to get it.**

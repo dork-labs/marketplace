@@ -81,6 +81,7 @@ import { isDeepStrictEqual } from 'node:util';
 
 import { hasZone, invokedDirectly, isPlainObject } from './_shared.ts';
 import { addExcludeLines } from './git-exclude.ts';
+import { gitFreeEnv } from './project-boundary.ts';
 import { validateConfig, type ValidationIssue } from './validate-config.ts';
 
 import {
@@ -373,11 +374,16 @@ export interface ResumeResult {
   hostSchedules: string[];
 }
 
-/** Run git in `cwd`, returning trimmed stdout, or `null` when it fails. */
+/**
+ * Run git in `cwd`, returning trimmed stdout, or `null` when it fails. Without
+ * the caller's variables that redirect git, so it answers for `cwd` and nothing else
+ * (`project-boundary.ts`).
+ */
 function gitOutput(cwd: string, args: readonly string[]): string | null {
   try {
     return execFileSync('git', ['-C', cwd, ...args], {
       encoding: 'utf8',
+      env: gitFreeEnv(),
       stdio: ['ignore', 'pipe', 'ignore'],
     }).trim();
   } catch {
@@ -393,7 +399,7 @@ function gitIgnores(file: string): boolean {
   const res = spawnSync(
     'git',
     ['-C', path.dirname(file), 'check-ignore', '-q', path.basename(file)],
-    { stdio: 'ignore' }
+    { stdio: 'ignore', env: gitFreeEnv() }
   );
   return res.status === 0;
 }

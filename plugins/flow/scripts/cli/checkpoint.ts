@@ -62,7 +62,7 @@ async function worktreeRoot(ctx: VerbContext): Promise<string> {
   const result = await git(ctx, ctx.projectDir, ['rev-parse', '--show-toplevel']);
   if (result.code !== 0 || result.stdout.trim() === '') {
     throw new PreconditionError(
-      `${ctx.projectDir} is not a git worktree; run flow checkpoint in the item's worktree, or pass --project`
+      `${ctx.projectDir} is not a git worktree; run flow checkpoint in the item's worktree`
     );
   }
   return result.stdout.trim();
