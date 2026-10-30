@@ -91,7 +91,7 @@ dorkos marketplace validate   # Validates the full registry (CC compat + sidecar
 
 ## CI
 
-All three checks below are required on `main`. Each runs on every pull request, every
+The first three checks below are required on `main`. Those three run on every pull request, every
 merge-queue run (`merge_group`) and every push to `main`, with no `paths:` filter and no
 job-level `if:`. That is what lets a
 check be required: a required check that skips a PR, or never reports on the queue's run,
@@ -118,7 +118,12 @@ leaves the PR waiting forever. Keep it that way, or un-require the check first.
 - `scripts-test.yml`, check **`script fixtures`** (required). Runs the fixture suites for
   the auto-merge arming gate, the three `.claude/hooks` guards (git, process, admin merge),
   the wrapper that makes those guards refuse rather than skip when node is missing, and the
-  PR watcher.
+  PR watcher, plus the security gate's own fixtures.
+- `security-gate.yml`, check **`security-gate`** (not required yet). A change to a
+  security path (anything a package installs or runs, CI, agent config, dependencies)
+  needs DorkOS Security's approval on that exact commit, through the Security App; a
+  label is not enough. `.github/SECURITY-GATE.md` has the path list, how approval
+  works, and the steps to make it required.
 
 ## Landing changes
 

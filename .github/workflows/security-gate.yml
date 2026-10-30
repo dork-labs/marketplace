@@ -1,0 +1,59 @@
+name: security-gate
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened, edited]
+  merge_group:
+
+permissions:
+  contents: read
+  statuses: read
+  pull-requests: read
+
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+  # PLACEHOLDER: Dorian must create/install the App, then pin its numeric bot user ID here.
+  SECURITY_APPROVAL_BOT_USER_ID: '0'
+  # Security's list for the marketplace (security-auditor research,
+  # marketplace-security-gate-scope.md, 2026-10-30): everything a package ships
+  # into users' DorkOS (catalog, manifests, hooks, extensions, commands, skills,
+  # scripts, config, and docs agents read at run time), plus CI, agent config and
+  # dependencies. Exempt: a plugin's root tests/ and engine-tests/, a skill's own
+  # tests/, and a plugin's root README, CHANGELOG, LICENSE and NOTICE. The workflow
+  # and its implementation are covered by .github/. Match both sides of renames.
+  SECURITY_PATH_PATTERN: '^\.claude-plugin/|^(CLAUDE|AGENTS|REVIEW)\.md$|^\.mcp\.json$|^\.github/|^\.claude/|^\.agents/|^\.dork/|^scripts/|^tools/|^plugins/[^/]+/(?!(?:tests|engine-tests)/)(?!skills/[^/]+/tests/)(?!(?:README|CHANGELOG)\.md$)(?!LICENSE$)(?!NOTICE$)|^plugins/.*SKILL\.md$|(^|/)\.\.?(/|$)|//|(^|/)[pP][aA][cC][kK][aA][gG][eE]\.[jJ][sS][oO][nN]$|(^|/)package-lock\.json$|(^|/)npm-shrinkwrap\.json$|(^|/)pnpm-lock\.yaml$|(^|/)pnpm-workspace\.yaml$|(^|/)yarn\.lock$|(^|/)bun\.lockb?$|(^|/)\.npmrc$|(^|/)\.yarnrc(\.yml)?$|(^|/)\.nvmrc$|(^|/)\.node-version$|(^|/)patches/|(^|/)\.pnpmfile\.cjs$|(^|/)codeowners$'
+
+jobs:
+  security-gate:
+    # Enforcement requires the ruleset workflow source pinned to main. A named
+    # status check alone lets a candidate replace this YAML. See .github/SECURITY-GATE.md.
+    permissions:
+      contents: read
+      statuses: read
+      pull-requests: read
+    env:
+      SECURITY_BASE_SHA: ${{ github.event.pull_request.base.sha || github.event.merge_group.base_sha }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Require an immutable base SHA
+        run: '[[ "$SECURITY_BASE_SHA" =~ ^[0-9a-f]{40}$ ]]'
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ env.SECURITY_BASE_SHA }}
+          persist-credentials: false
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: '24'
+      - name: Security gate fixtures
+        run: node --test .github/scripts/security-*.test.mjs
+      # Marketplace only: a plugin whose base-commit manifests mention a test
+      # folder loses its test-folder exemptions (a hook script in tests/, say).
+      # Computed here, not via GITHUB_ENV, so a failure fails this step.
+      - name: Check approval on each exact PR head
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          SECURITY_PATH_PATTERN="$(node .github/scripts/security-manifest-paths.mjs)"
+          export SECURITY_PATH_PATTERN
+          node .github/scripts/security-gate.mjs
