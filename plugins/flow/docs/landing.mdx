@@ -49,7 +49,7 @@ flow freeze off                         # ...the release is out
 flow freeze                             # is a freeze on?
 ```
 
-Have your release process turn it on, then off after. The freeze is kept on this computer, never committed.
+Have your release process turn it on before a release, then off. The freeze is kept on this computer, never committed.
 
 ## After the merge: the squash check
 
@@ -57,4 +57,4 @@ Once a PR has merged, flow checks that the squash commit on `main` is what a cle
 
 ## What this is not
 
-The guard is a rail for flow's own arms. Flow runs inside the agent, so the rules that hold for everyone belong on GitHub, as required checks and rulesets. The `security-reviewed` label must be added after the head arrived. A per-commit security approval belongs on GitHub too.
+The guard is a rail for flow's own arms. Flow runs inside the agent, so the rules that hold for everyone belong on GitHub, as required checks and rulesets. The `security-reviewed` label must postdate the head's arrival. A per-commit security approval belongs on GitHub too.

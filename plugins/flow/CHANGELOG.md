@@ -11,7 +11,7 @@ you until you **reinstall it** (Marketplace → flow → reinstall, or re-run yo
 - A PR that needs the label (it touches a security path, or flow can't read its whole file list) now arms only if the label was added after its head arrived. Before, a label added for an older head still counted after later pushes.
 - "Arrived" means the last force-push that left the head there. With no such push, it means the first check suite a push made for the head. Both times are GitHub's own, and a commit's dates can't move them. These are the same reads `flow sweep` already used.
 - A label added before the head arrived refuses as `security-label-stale`. The message says the label predates the head, so Security looks at the new commits and adds it again.
-- If flow can't tell when the head arrived or when the label was added, it refuses as `security-label-unverified`.
+- If flow can't tell when the head arrived or when the label was added, it refuses as `security-label-unverified`. In a repo where a push starts no check suite, flow can tell only after a force-push.
 - A PR that doesn't need the label arms as before, whatever its labels say.
 - `config/CONFIG.md` and `docs/landing.mdx` no longer say the label carries over to later pushes.
 

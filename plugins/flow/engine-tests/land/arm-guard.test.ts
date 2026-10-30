@@ -388,6 +388,36 @@ describe('the security label covers only the head it was added after', () => {
     });
   });
 
+  it('asks the forge with the configured label, whatever case the PR spells it in', async () => {
+    const { forge, calls } = fakeForge({
+      facts: { files: ['src/auth.ts'], labels: [{ name: 'Security-Reviewed' }] },
+    });
+    expect((await guard(forge)).ok).toBe(true);
+    expect(calls.find((c) => c.method === 'labelledAt')?.args).toEqual([7, 'security-reviewed']);
+  });
+
+  it.each([
+    ['older than the head', '2026-09-30T00:00:00Z', 'security-label-stale'],
+    ['unreadable', null, 'security-label-unverified'],
+  ] as const)(
+    'reads the times again after its pre-arm checks: a label %s by then refuses',
+    async (_, later, reason) => {
+      baseLand({
+        securityPaths: { globs: ['src/auth.ts'] },
+        preArm: [{ paths: ['src/**'], run: 'slow-suite' }],
+      });
+      const { forge } = fakeForge({ facts: touching });
+      let reads = 0;
+      forge.labelledAt = async () => (++reads === 1 ? LABELLED : later);
+      const { runner, ran } = recordingRunner();
+      const result = await guard(forge, runner);
+      expect(ran).toHaveLength(1);
+      expect(reads).toBe(2);
+      expect(result).toMatchObject({ ok: false, reason, ranPreArm: false });
+      expect(!result.ok && result.detail).toMatch(/after its pre-arm checks passed/);
+    }
+  );
+
   it('leaves a PR with no security path alone, whatever its label times say', async () => {
     const stale = fakeForge({
       facts: { labels: [{ name: 'security-reviewed' }] },
