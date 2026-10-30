@@ -23,6 +23,13 @@ with a `.`, `..` or empty segment always counts. Both sides of a rename count.
 `scripts/fixtures/security-path-variants.json` holds case and Unicode spellings
 that both repos test.
 
+**Accepted residual risk.** Test folders are exempt because they change too
+often to gate, but two of them can run on a machine: `/flow:self-test` runs
+flow's `engine-tests/` through vitest when dev dependencies are installed (and
+reads its fixtures), and visual-companion's `npm test` runs its skill's
+`tests/`. Pointing anything else at a test folder means changing a manifest,
+`hooks.json` or `package.json`, which are security paths.
+
 ## How approval works
 
 - `security-review-initialize.yml` (`pull_request_target`, runs code from the
