@@ -314,7 +314,7 @@ describe('/flow:status reads the schedules and never changes them', () => {
     ).toEqual(['keeps a person-made /flow continue schedule']);
     // DOR-3376: a global install's per-project copy has the shared filePath.
     const copyRule =
-      " Or its `projectOnly` is `true` and its `agentId` is the `id` in a root's `.dork/agent.json` (a global install's copy).";
+      ", or when its `projectOnly` is `true` and its `agentId` is the `id` in a root's `.dork/agent.json` (a global install's copy)";
     expect(status).toContain(copyRule);
     expect(statusGaps(status.replace(copyRule, ''))).toEqual([
       "keeps a global install's per-project copy",
