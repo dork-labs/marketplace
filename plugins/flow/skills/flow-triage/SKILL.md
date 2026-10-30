@@ -26,7 +26,7 @@ metadata:
 
 `<flow-root>` is two folders above this file's `realpath`.
 
-The **daily triage**, off until approved on the Schedules page.
+The **daily triage**, off until you approve it on the Schedules page.
 
 **Refused tool:** `<flow-root>/skills/flow-drain/refused-tool.md`.
 
@@ -65,4 +65,4 @@ Each firing:
 
 **Floor gates never run unattended.** No rejecting or cancelling, no new
 projects, no replies to outside reporters, and never removing `agent/from-outside`:
-list them for the operator.
+list them.

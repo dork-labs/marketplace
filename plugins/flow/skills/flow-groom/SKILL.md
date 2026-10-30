@@ -27,12 +27,12 @@ metadata:
 `node --experimental-strip-types "<flow-root>/scripts/flow.ts" <verb>`.
 
 The schedulable **groom health check**: a weekly, read-only
-`/flow:groom check`. The full groom closes items, so it stays operator-run. Off
-until approved on the Schedules page.
+`/flow:groom check`. The full groom, which closes items, stays operator-run. Off
+until you approve it on the Schedules page.
 
 **Refused tool:** `<flow-root>/skills/flow-drain/refused-tool.md`.
 
-Each firing runs the CHECK mode of `<flow-root>/skills/grooming-backlog/SKILL.md`:
+Each firing runs CHECK mode of `<flow-root>/skills/grooming-backlog/SKILL.md`:
 
 0. **Pause check.** Run step 0 of
    `<flow-root>/skills/flow-drain/SKILL.md`. Stop whenever it says to stop.
