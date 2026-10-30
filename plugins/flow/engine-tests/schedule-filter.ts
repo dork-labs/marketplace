@@ -23,7 +23,17 @@ export function projectFilterGaps(passage: string): string[] {
     ['strips the flow folder from each root', /trailing `\/\.agents\/flow` removed/],
     ['requires a separator after the root', /starts with one of those\s+roots followed by `\/`/],
     ['rejects a mere name prefix', /merely the start of another folder's name/],
-    ['keeps every shipped flow schedule', /`name` is `flow-drain`, `flow-groom` or `flow-triage`/],
+    [
+      'keeps every shipped flow schedule',
+      /`name` is `flow-drain`, `flow-groom`, `flow-triage` or `flow-retro`/,
+    ],
+    // DOR-3376: a global install's per-project copy keeps the shared file's
+    // `filePath`, so the folder test alone would miss it, and a pause would
+    // switch nothing off.
+    [
+      "keeps a global install's per-project copy",
+      /`projectOnly` is `true` and its `agentId` is the `id` in a root's `\.dork\/agent\.json`/,
+    ],
     [
       'keeps a person-made /flow continue schedule',
       /made[\s\S]{0,20}whose `prompt` runs `\/flow continue`/,

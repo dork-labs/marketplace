@@ -8,6 +8,8 @@ schedule:
   enabled: false
   max-runtime: 30m
   permissions: default
+  scope: project
+  projectFile: .agents/flow/config.json
 metadata:
   flow-needs:
     - 'Bash(node --experimental-strip-types "${CLAUDE_PLUGIN_ROOT}/scripts/config-files.ts")'
@@ -24,7 +26,7 @@ metadata:
 
 `<flow-root>` is two folders above this file's `realpath`.
 
-The **daily triage**; it ships switched off: approve it on the Schedules page.
+The **daily triage**, off until you approve it on the Schedules page.
 
 **Refused tool:** `<flow-root>/skills/flow-drain/refused-tool.md`.
 
@@ -45,7 +47,7 @@ Each firing:
    - No worktree carries its id: `git worktree list --porcelain`.
    - No open pull request on this repo's host carries its id in a `prs` entry's
      `headRefName` or `title` (`node --experimental-strip-types "<flow-root>/scripts/flow.ts" prs --json --no-behind`; exit 4: release none). A branch pushed with no pull request isn't checked here.
-   - Its own links, attachments and comments name no pull
+   - Its links, attachments and comments name no pull
      request or branch in any repo.
 
    Remove `agent/claimed`, move the item to an `unstarted`-category state, and
@@ -63,4 +65,4 @@ Each firing:
 
 **Floor gates never run unattended.** No rejecting or cancelling, no new
 projects, no replies to outside reporters, and never removing `agent/from-outside`:
-list them for the operator.
+list them.

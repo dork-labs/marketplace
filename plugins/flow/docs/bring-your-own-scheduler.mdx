@@ -1,6 +1,6 @@
 ---
 title: Bring your own scheduler
-description: A DorkOS release with schedule discovery picks the /flow tick up from a project-scope install and asks you to approve it. This page is for every other harness, and for the wiring until then.
+description: A DorkOS release with schedule discovery picks the /flow tick up from any install; you approve it per project. This page is for every other harness, and for the wiring until then.
 ---
 
 import { Callout } from 'fumadocs-ui/components/callout';
@@ -13,12 +13,13 @@ import { Cards, Card } from 'fumadocs-ui/components/card';
 carries it to your review gate, and stops. One tick, one item, a fresh session each time. Something
 outside the tick has to provide the repetition.
 
-## On DorkOS: install at project scope, then approve
+## On DorkOS: install, then approve per project
 
 Any skill whose frontmatter carries a `schedule:` block is a scheduled task. A DorkOS release that
-has schedule discovery reads that straight out of the skills roots it watches, so **installing
-`/flow` at project scope is the whole setup step** — no file to copy, no scheduler to stand up. The
-tick then appears on your **Schedules** page waiting to be approved.
+has schedule discovery reads that from the skills roots it watches — no file to copy, no scheduler
+to stand up. The tick then appears, off, on the **Schedules** page: a project install's own project,
+or, from a global install, each project `/flow:init` set up (`scope: project`,
+`projectFile: .agents/flow/config.json`).
 
 <Callout type="warn">
   **Check your DorkOS version before relying on this.** Schedule discovery is rolling out; on a build

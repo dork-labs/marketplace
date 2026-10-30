@@ -8,6 +8,8 @@ schedule:
   enabled: false
   max-runtime: 2h
   permissions: acceptEdits
+  scope: project
+  projectFile: .agents/flow/config.json
 metadata:
   flow-needs:
     - 'Bash(node --experimental-strip-types "${CLAUDE_PLUGIN_ROOT}/scripts/config-files.ts")'
@@ -26,9 +28,9 @@ metadata:
 `<flow-root>` is two folders above this file's `realpath`. `flow <verb>` means
 `node --experimental-strip-types "<flow-root>/scripts/flow.ts" <verb>`.
 
-This file holds the one tick of the `/flow` loop. A scheduled firing, and
-`/flow continue`, run one tick and stop; `/flow auto` runs **Auto** below. It ships
-switched off: approve it on DorkOS's Schedules page.
+This file holds one tick of the `/flow` loop. A scheduled firing, and
+`/flow continue`, run one tick and stop; `/flow auto` runs **Auto** below. Off until
+approved on DorkOS's Schedules page.
 
 ## One tick
 

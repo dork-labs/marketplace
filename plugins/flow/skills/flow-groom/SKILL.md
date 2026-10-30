@@ -8,6 +8,8 @@ schedule:
   enabled: false
   max-runtime: 30m
   permissions: default
+  scope: project
+  projectFile: .agents/flow/config.json
 metadata:
   flow-needs:
     - 'Bash(node --experimental-strip-types "${CLAUDE_PLUGIN_ROOT}/scripts/config-files.ts")'
@@ -25,12 +27,12 @@ metadata:
 `node --experimental-strip-types "<flow-root>/scripts/flow.ts" <verb>`.
 
 The schedulable **groom health check**: a weekly, read-only
-`/flow:groom check`. The full groom closes items, so it stays operator-run. Off
+`/flow:groom check`. The full groom, which closes items, stays operator-run. Off
 until you approve it on the Schedules page.
 
 **Refused tool:** `<flow-root>/skills/flow-drain/refused-tool.md`.
 
-Each firing runs the CHECK mode of `<flow-root>/skills/grooming-backlog/SKILL.md`:
+Each firing runs CHECK mode of `<flow-root>/skills/grooming-backlog/SKILL.md`:
 
 0. **Pause check.** Run step 0 of
    `<flow-root>/skills/flow-drain/SKILL.md`. Stop whenever it says to stop.
@@ -39,4 +41,4 @@ Each firing runs the CHECK mode of `<flow-root>/skills/grooming-backlog/SKILL.md
 2. Report failing invariants with their items, the eligible-pool size, starvation
    stats and stuck PRs' `prompt`s; anything red: recommend `/flow:groom`.
 
-**This tick never writes.** Closing and restructuring sit behind a human gate.
+**This tick never writes.** Closing and restructuring need a person.

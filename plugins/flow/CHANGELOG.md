@@ -4,6 +4,18 @@ Installs of this plugin are pinned to a commit SHA, so a fix here does not reach
 you until you **reinstall it** (Marketplace → flow → reinstall, or re-run your
 `--plugin-dir` checkout's `git pull`). Each entry below says whether that matters.
 
+## 0.66.0
+
+**Flow's schedules now belong to the projects that use flow, even when flow is installed globally. Reinstall to get it; it needs a DorkOS that reads `scope: project` and `projectFile`.**
+
+- `flow-drain`, `flow-groom`, `flow-triage` and `flow-retro` each say `scope: project` and `projectFile: .agents/flow/config.json` in their `schedule:` block. Each needs a project to work in. From a global install, DorkOS used to list them as global schedules with no project, waiting for an approval that should never be given.
+- Now each project that has flow set up (it holds `.agents/flow/config.json`, which `/flow:init` writes) gets its own copy of each schedule, switched off, on that project's **Schedules** page, and a person approves it there, project by project. Other projects get no copies. A project you set flow up in later gets its copies at DorkOS's next sync. None of them shows or asks for approval as a global schedule.
+- With a global install, a project still on the old in-plugin settings gets no copies until `/flow` or `/flow:init` moves them into `.agents/flow/`.
+- `/flow:status`, `/flow:pause` and `/flow:resume` now find those per-project copies too (they share the global file's path, so the folder test alone missed them), and they now include `flow-retro`.
+- Nothing is switched on for you.
+- A DorkOS older than this setting ignores it, so a global install still lists the four as global schedules there, as before. Leave those off, and update DorkOS.
+- The README's activation section and `docs/bring-your-own-scheduler.mdx` say so.
+
 ## 0.65.1
 
 **Security fix: a flow command can no longer be pointed at another project's folder. Reinstall now.**
