@@ -4,6 +4,14 @@ Installs of this plugin are pinned to a commit SHA, so a fix here does not reach
 you until you **reinstall it** (Marketplace → flow → reinstall, or re-run your
 `--plugin-dir` checkout's `git pull`). Each entry below says whether that matters.
 
+## 0.64.0
+
+**A bug fix now ships a test that proves the whole kind of bug is gone, and `/flow:verify` won't hand a bug to review without one. Reinstall to get it.**
+
+- The test fails on the code before the fix and passes after, and it covers the whole class of the bug (every variant of the mistake), not just the one case that was reported. The new `skills/verifying-work/proof-test.md` says how to write one and run it both ways.
+- A new command, `flow proof <id>`, records it: the test files, one sentence naming the class, the command, and the output of the failing and the passing run. Flow checks that each test is committed and changed on the branch and that the two runs differ. It runs no test itself; the independent reviewer runs it on the code before the fix and blocks a test that only replays the report.
+- `flow stage <id> review` refuses a bug (an item of type `signal`) with no proof recorded at the branch head, so a commit after the proof, a review fix included, means recording it again. When no such test is possible, the item goes to a person instead of to review. Other items, and other stages, are unchanged.
+
 ## 0.63.0
 
 **`/flow:status` now ends with a Health block: are this project's flow schedules running, and when was each intake source last read? Reinstall to get it.**

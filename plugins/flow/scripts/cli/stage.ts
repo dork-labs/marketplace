@@ -14,11 +14,15 @@
  * of a drain leaves a checkpoint the next session can resume from. Outside a
  * drain, a move without one warns.
  *
+ * A bug item (`signal`) moving to `review` needs its proof test recorded at the
+ * branch head by `flow proof` (DOR-3261; exit 5 otherwise, before any write).
+ *
  * @module @dorkos/flow/cli/stage
  */
 
 import { PreconditionError } from '../errors.ts';
 import type { FlowStage } from '../flow-run.ts';
+import { requireProof } from '../proof.ts';
 import { projectionFor } from '../work-state.ts';
 import { checkpointLine, writeCheckpoint, type WrittenCheckpoint } from './checkpoint.ts';
 import type { VerbContext, VerbResult } from './context.ts';
@@ -40,6 +44,7 @@ export async function run(ctx: VerbContext): Promise<VerbResult> {
   const change = projectionFor({ type: 'stage', stage }, { stages });
   const item = await adapter.getItem(identifier);
   const existing = runFor(store, item);
+  await requireProof(ctx, item, stage);
 
   if (bodyFile === undefined) {
     if (existing?.drain !== undefined) {
