@@ -312,6 +312,16 @@ describe('/flow:status reads the schedules and never changes them', () => {
     expect(
       statusGaps(status.replace(/made whose `prompt` runs `\/flow continue`/, 'made'))
     ).toEqual(['keeps a person-made /flow continue schedule']);
+    // DOR-3376: a global install's per-project copy has the shared filePath.
+    const copyRule =
+      " Or its `projectOnly` is `true` and its `agentId` is the `id` in a root's `.dork/agent.json` (a global install's copy).";
+    expect(status).toContain(copyRule);
+    expect(statusGaps(status.replace(copyRule, ''))).toEqual([
+      "keeps a global install's per-project copy",
+    ]);
+    expect(
+      statusGaps(status.replace(', `flow-triage` or `flow-retro`', ' or `flow-triage`'))
+    ).toEqual(['keeps every shipped flow schedule']);
     for (const wide of ['mcp__dorkos__*', 'mcp__dorkos']) {
       expect(
         statusGaps(status.replace('mcp__dorkos__tasks_list', `mcp__dorkos__tasks_list, ${wide}`))
