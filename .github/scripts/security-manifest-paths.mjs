@@ -25,8 +25,8 @@ const MANIFESTS = [
   '.dork/manifest.json',
 ];
 
-/** `tests` or `engine-tests` as a whole path segment, either separator. */
-const MENTIONS_TESTS = /(^|[^\w-])(engine-)?tests([/\\]|$)/i;
+/** `tests` or `engine-tests` as a whole word: a path segment, `cd …/tests && …`, or prose. */
+const MENTIONS_TESTS = /(^|[^\w-])(engine-)?te[sſ]ts(?![\w-])/iu;
 
 const ROOT_VARS = /\$\{?CLAUDE_PLUGIN_ROOT[^}/\\\s]*\}?/g;
 
@@ -45,7 +45,7 @@ function strings(value, out = []) {
 /** JSON files a manifest string names, inside plugins/. */
 function namedJson(text, plugin) {
   const out = [];
-  for (const token of text.replace(ROOT_VARS, '.').split(/[\s"'`=;|&<>(){},]+/)) {
+  for (const token of text.replace(ROOT_VARS, '.').split(/[\s"'`=:;|&<>(){},]+/)) {
     if (!/\.json$/i.test(token)) continue;
     const path = posix.normalize(posix.join(plugin, token.replace(/\\/g, '/')));
     if (path.startsWith('plugins/')) out.push(path);
