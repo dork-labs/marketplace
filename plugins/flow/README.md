@@ -216,13 +216,14 @@ agent session per run — so there is no scheduler to build.
 - **One tick = one issue.** Each croner fire is a fresh run-session
   (`sessionId = run.id`) that claims and works exactly one issue to its gate, then
   ends — preserving fresh-session-per-issue.
-- **Activation** is install at project scope, then approve. The `schedule:` block in
-  `skills/flow-drain/SKILL.md` makes the file a scheduled task; DorkOS reads it from
-  the project's skills root, and it waits on the **Schedules** page until you approve
-  it, so installing a package never arms its own cron. The switch and the timing you
-  set there outlast updates. Without DorkOS schedule discovery, wire an external
-  scheduler (`docs/bring-your-own-scheduler.mdx`). Running it needs the DorkOS server
-  and the project's DorkOS agent registered.
+- **Activation** is install, then approve per project. Flow's four schedules
+  (`flow-drain`, `flow-groom`, `flow-triage`, `flow-retro`) say `scope: project`: even
+  from a global install, each project gets its own copy, switched off, on its
+  **Schedules** page, and a person approves it there. None runs as a global schedule,
+  and installing never arms a cron. Switch and timing outlast updates. Without
+  DorkOS schedule discovery, wire an external scheduler
+  (`docs/bring-your-own-scheduler.mdx`). Running it needs the DorkOS server and the
+  project's DorkOS agent registered.
 - **Pausing** is `/flow:pause`: it writes `.agents/flow/paused.json` in the project,
   and every tick checks it first and stops. On DorkOS it also switches this project's
   flow schedules off; `/flow:resume` switches back on only those. A timed pause

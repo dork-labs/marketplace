@@ -8,6 +8,7 @@ schedule:
   enabled: false
   max-runtime: 30m
   permissions: default
+  scope: project
 metadata:
   flow-needs:
     - 'Bash(node --experimental-strip-types "${CLAUDE_PLUGIN_ROOT}/scripts/config-files.ts")'
@@ -39,4 +40,4 @@ Each firing runs the CHECK mode of `<flow-root>/skills/grooming-backlog/SKILL.md
 2. Report failing invariants with their items, the eligible-pool size, starvation
    stats and stuck PRs' `prompt`s; anything red: recommend `/flow:groom`.
 
-**This tick never writes.** Closing and restructuring sit behind a human gate.
+**This tick never writes.** Closing and restructuring need a person.

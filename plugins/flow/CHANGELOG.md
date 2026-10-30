@@ -4,6 +4,16 @@ Installs of this plugin are pinned to a commit SHA, so a fix here does not reach
 you until you **reinstall it** (Marketplace → flow → reinstall, or re-run your
 `--plugin-dir` checkout's `git pull`). Each entry below says whether that matters.
 
+## 0.66.0
+
+**Flow's schedules now belong to projects, even when flow is installed globally. Reinstall to get it; it needs a DorkOS that reads `scope: project`.**
+
+- `flow-drain`, `flow-groom`, `flow-triage` and `flow-retro` each say `scope: project` in their `schedule:` block. Each needs a project to work in. From a global install, DorkOS used to list them as global schedules with no project, waiting for an approval that should never be given.
+- Now each project that uses flow gets its own copy of each schedule, switched off, on that project's **Schedules** page, and a person approves it there, project by project. None of them shows or asks for approval as a global schedule.
+- Nothing is switched on for you.
+- A DorkOS older than this setting ignores it, so a global install still lists the four as global schedules there, as before. Leave those off, and update DorkOS.
+- The README's activation section and `docs/bring-your-own-scheduler.mdx` say so.
+
 ## 0.65.0
 
 **Flow can now take new work from more than one place: tracker teams and GitHub issues, each with a record of when flow last read it. Reinstall to get it.**
