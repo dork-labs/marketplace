@@ -73,7 +73,7 @@ export interface HealthInput {
   /** The moment to judge at. */
   now: Date;
   /** The intake sources in force, each with its last-read mark when recorded. */
-  intake: readonly { id: string; name?: string; lastReadAt?: string | null }[];
+  intake: readonly { id: string; name?: string; lastReadAt?: string | null; untracked?: boolean }[];
   /** The configured tracker (the plain intake). */
   tracker: string;
 }

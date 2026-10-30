@@ -364,7 +364,12 @@ export interface IntakeHealth {
  * @returns One row per source.
  */
 export function intakeHealth(
-  sources: readonly { id: string; name?: string; lastReadAt?: string | null }[],
+  sources: readonly {
+    id: string;
+    name?: string;
+    lastReadAt?: string | null;
+    untracked?: boolean;
+  }[],
   tracker: string,
   now: Date
 ): IntakeHealth[] {
@@ -378,7 +383,9 @@ export function intakeHealth(
       lastReadAt: Number.isFinite(markMs) ? mark : null,
       detail: Number.isFinite(markMs)
         ? `last read ${agoWords(now.getTime() - markMs)}`
-        : 'unknown (flow records no read of this source yet)',
+        : source.untracked === true
+          ? 'not tracked (triage reads this queue through the adapter; flow keeps no mark for it)'
+          : 'unknown (flow records no read of this source yet)',
     };
   });
 }

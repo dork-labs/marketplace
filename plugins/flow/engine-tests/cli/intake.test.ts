@@ -356,6 +356,35 @@ describe('the capture window', () => {
     expect(nextWindow(read.next, [late], 31, 30, NOW).issues).toEqual([]);
   });
 
+  it('an issue shown before stays remembered when the window moves past the margin', () => {
+    // Read A at 12:00 shows #5 (11:55:30); read B at 12:05:10 moves the start to 11:55:10.
+    const five = at(5, '2026-10-30T11:55:30Z');
+    const a = nextWindow(
+      { through: T0, seen: [] },
+      [five],
+      30,
+      30,
+      new Date('2026-10-30T12:00:00Z')
+    );
+    expect(a.next.seen).toEqual([5]);
+    const b = nextWindow(a.next, [five], 31, 30, new Date('2026-10-30T12:05:10Z'));
+    expect(b.issues).toEqual([]);
+    expect(b.next.seen).toEqual([5]);
+    expect(nextWindow(b.next, [five], 31, 30, new Date('2026-10-30T12:06:00Z')).issues).toEqual([]);
+  });
+
+  it('a late-indexed older issue in a cut-short read does not make a shown one show again', () => {
+    const five = at(5, '2026-10-30T11:55:30Z');
+    const four = at(4, '2026-10-30T11:54:00Z');
+    const a = nextWindow({ through: T0, seen: [] }, [five], 1, 1, new Date('2026-10-30T12:00:00Z'));
+    // #4 becomes searchable late; with limit 1 the read keeps only #4 and is cut short there.
+    const b = nextWindow(a.next, [four, five], 2, 1, new Date('2026-10-30T12:01:00Z'));
+    expect(b.issues.map((i) => i.number)).toEqual([4]);
+    expect(b.next.seen.sort()).toEqual([4, 5]);
+    const c = nextWindow(b.next, [four, five], 3, 1, new Date('2026-10-30T12:02:00Z'));
+    expect(c.issues).toEqual([]);
+  });
+
   it('the window never moves backwards', () => {
     const read = nextWindow({ through: T1, seen: [] }, [], 30, 30, NOW);
     expect(read.next.through).toBe(T1);

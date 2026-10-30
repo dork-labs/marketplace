@@ -304,7 +304,15 @@ export function nextWindow(
       ? Date.parse(toSecond(Date.parse(last.createdAt)))
       : Math.max(fromMs, Date.parse(toSecond(now.getTime() - WINDOW_MARGIN_MS)));
   const through = new Date(throughMs).toISOString();
-  const seen = new Set(throughMs === fromMs ? from.seen : []);
+  // An issue shown before keeps its number while it can still come back: it
+  // was fetched at or after the new start, or this read was cut short before
+  // reaching it. One not fetched by a read that was not cut short is closed.
+  const fetchedAt = new Map(fetched.map((issue) => [issue.number, Date.parse(issue.createdAt)]));
+  const seen = new Set<number>();
+  for (const number of from.seen) {
+    const created = fetchedAt.get(number);
+    if (created === undefined ? more : created >= throughMs) seen.add(number);
+  }
   for (const issue of issues) {
     if (Date.parse(issue.createdAt) >= throughMs) seen.add(issue.number);
   }
@@ -369,7 +377,8 @@ export interface IntakeIssue {
 }
 
 /** Terminal control characters: never passed on, so issue text cannot drive a terminal. */
-const CONTROL = /[\u0000-\u0008\u000b-\u001f\u007f-\u009f\u200b-\u200f\u2028-\u202e\u2066-\u2069]/g;
+const CONTROL =
+  /[\u0000-\u0008\u000b-\u001f\u007f-\u009f\u200b-\u200f\u2028-\u202e\u2066-\u2069\u061c\ufeff]/g;
 
 /** Text with control and direction characters removed. */
 function clean(text: string): string {

@@ -30,7 +30,7 @@ import path from 'node:path';
 
 import { findConfigRoots, pauseState } from '../config-files.ts';
 import { loadConfig } from '../config-load.ts';
-import { readIntakeMarks, resolveIntakeSources, sourceKey } from '../intake.ts';
+import { isTeamSource, readIntakeMarks, resolveIntakeSources, sourceKey } from '../intake.ts';
 import { formatWhen } from '../question.ts';
 import { withSetupNudge } from './setup-nudge.ts';
 import { PreconditionError } from '../errors.ts';
@@ -339,7 +339,7 @@ async function healthFor(
   roots: ReturnType<typeof findConfigRoots>,
   now: Date
 ): Promise<Health> {
-  let intake: { id: string; name?: string; lastReadAt?: string }[] = [];
+  let intake: { id: string; name?: string; lastReadAt?: string; untracked?: boolean }[] = [];
   let tracker = 'tracker';
   try {
     const { config } = loadConfig(roots, ctx.env);
@@ -349,6 +349,7 @@ async function healthFor(
       id: source.kind === 'tracker' ? source.id : source.repo,
       ...(source.name === undefined ? {} : { name: source.name }),
       lastReadAt: marks.sources[sourceKey(source)]?.lastReadAt,
+      ...(source.kind === 'tracker' && !isTeamSource(config, source) ? { untracked: true } : {}),
     }));
   } catch {
     // The rest of status reports a config problem; Health shows the plain intake.

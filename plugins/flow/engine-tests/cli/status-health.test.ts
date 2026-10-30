@@ -207,7 +207,8 @@ describe('flow status: Health', () => {
         id: 'q-1',
         name: 'Support',
         lastReadAt: null,
-        detail: 'unknown (flow records no read of this source yet)',
+        detail:
+          'not tracked (triage reads this queue through the adapter; flow keeps no mark for it)',
       },
     ]);
   });

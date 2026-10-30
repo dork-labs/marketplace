@@ -2,17 +2,18 @@
  * `flow intake [done]` (DOR-3258, DOR-3259): read the configured intake
  * sources and keep each one's last-read mark (`intake.ts`).
  *
- * - `flow intake`: each GitHub source's open issues created since it was last
- *   captured, with one fixed read-only `gh issue list` call per source, and the
- *   window it pulled recorded as pending. A source with no mark yet starts from
- *   now and pulls nothing. Tracker sources are listed with their marks; `flow
- *   snapshot` reads and marks those. Exits 1, after reporting every source, when a
- *   GitHub source could not be read; its mark is left alone.
- * - `flow intake done`: the issues read are captured; move each source's
- *   capture point up to its pending window.
+ * - `flow intake`: each GitHub source's open issues created since its capture
+ *   point, with one fixed read-only `gh issue list` call per source, and the
+ *   window it pulled recorded as pending. A source with no capture point yet
+ *   starts ten minutes before now and pulls nothing. Tracker sources are
+ *   listed with their marks. Exits 1, after reporting every source, when a
+ *   GitHub source could not be read or its mark could not be written; a
+ *   failed read drops that source's pending window.
+ * - `flow intake done`: the issues read are captured; each pending window
+ *   becomes its source's capture point.
  *
  * Issue text is outside words. The JSON says so, and the text output fences
- * each body as data.
+ * each issue's title and body together as data.
  *
  * @module @dorkos/flow/cli/intake
  */
@@ -248,7 +249,20 @@ export async function run(ctx: VerbContext): Promise<VerbResult> {
       });
       continue;
     }
-    reads.push(await readGithub(ctx, main, source, mark, now));
+    try {
+      reads.push(await readGithub(ctx, main, source, mark, now));
+    } catch (error) {
+      const label = sourceLabel(source);
+      const why = `flow could not record this read: ${firstLine((error as Error).message)}`;
+      reads.push({
+        key,
+        kind: 'github',
+        label,
+        lastReadAt: mark?.lastReadAt ?? null,
+        ok: false,
+        error: why,
+      });
+    }
   }
   const ok = reads.every((r) => r.ok);
   return {
