@@ -5,9 +5,10 @@
  * stays in the skill.
  *
  * - Refuses (exit 2) before any tracker call: an empty title or description,
- *   an `agent/*` label (a new item is never ready: readiness is triage's
- *   decision), two labels of one group (a tracker applies one per group), a
- *   priority outside 0-4, and a malformed key.
+ *   an `agent/*` label other than `agent/from-outside` (a new item is never
+ *   ready: readiness is triage's decision), two labels of one group (a tracker applies one per group), a
+ *   priority outside 0-4, a malformed key, and a title ending in a capture
+ *   tag (`[owner/name#N]`) without `agent/from-outside`.
  * - Needs the `createItem` capability (exit 3 naming it), and
  *   `getBacklogSnapshot` too when there is a `--key`.
  * - Signs the description with the project's identity marker and this
@@ -37,7 +38,7 @@ import { loadConfig } from '../config-load.ts';
 import { UsageError } from '../errors.ts';
 import { requireCapabilities } from '../tracker/load.ts';
 import type { Capability, NewItem } from '../tracker/types.ts';
-import { labelGroup } from '../work-state.ts';
+import { AGENT_FROM_OUTSIDE, labelGroup } from '../work-state.ts';
 import type { VerbContext, VerbResult } from './context.ts';
 import { flagText, removeScratch } from './scratch-file.ts';
 import { signBody } from './provenance.ts';
@@ -59,14 +60,26 @@ export function keyMarker(key: string): string {
   return `<!-- flow-create:key=${key} -->`;
 }
 
-/** The labels, each once, refused when one is `agent/*` or two share a group. */
+/**
+ * A title ending in a capture tag, `[owner/name#N]` (DOR-3258): the mark of an
+ * item captured from an outside issue. Matched loosely, so a near-tag fails
+ * closed too.
+ */
+const CAPTURE_TAG = /\[[^[\]]*\/[^[\]]*#\d+\]\s*$/;
+
+/**
+ * The labels, each once, refused when one is `agent/*` (other than
+ * `agent/from-outside`) or two share a group.
+ */
 function labelList(ctx: VerbContext): string[] {
   const labels = [...new Set(ctx.args.repeated?.label ?? [])];
   const groups = new Map<string, string>();
   for (const label of labels) {
     if (label.trim() === '') throw new UsageError('a --label is empty');
     const group = labelGroup(label);
-    if (group === 'agent') {
+    // The one exception: an item captured from outside the team carries
+    // agent/from-outside, which keeps it from ever being readied unattended.
+    if (group === 'agent' && label !== AGENT_FROM_OUTSIDE) {
       throw new UsageError(
         `a new item never carries an agent/* label ("${label}"); readiness is triage's decision`
       );
@@ -136,6 +149,11 @@ export async function run(ctx: VerbContext): Promise<VerbResult> {
   const description = text.trimEnd();
   if (description.trim() === '') throw new UsageError('the description is empty');
   const labels = labelList(ctx);
+  if (CAPTURE_TAG.test(title) && !labels.includes(AGENT_FROM_OUTSIDE)) {
+    throw new UsageError(
+      `a title ending in a capture tag ("${title.match(CAPTURE_TAG)?.[0]}") is an item captured from outside the team: add --label ${AGENT_FROM_OUTSIDE}`
+    );
+  }
   const priority = priorityOf(ctx);
   const key = keyOf(ctx);
   const project = optional(ctx, 'for-project');

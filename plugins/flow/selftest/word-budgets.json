@@ -16,8 +16,8 @@
     "target": 51
   },
   "commands/flow.md": {
-    "baseline": 705,
-    "target": 705
+    "baseline": 704,
+    "target": 704
   },
   "commands/groom.md": {
     "baseline": 102,
@@ -48,8 +48,8 @@
     "target": 68
   },
   "commands/status.md": {
-    "baseline": 294,
-    "target": 294
+    "baseline": 292,
+    "target": 292
   },
   "commands/triage.md": {
     "baseline": 91,
@@ -79,6 +79,10 @@
     "baseline": 2252,
     "target": 2252
   },
+  "docs/health.mdx": {
+    "baseline": 310,
+    "target": 310
+  },
   "docs/how-it-works.mdx": {
     "baseline": 3116,
     "target": 3116
@@ -87,13 +91,13 @@
     "baseline": 1077,
     "target": 1077
   },
-  "docs/landing.mdx": {
-    "baseline": 786,
-    "target": 786
+  "docs/intake.mdx": {
+    "baseline": 426,
+    "target": 426
   },
-  "docs/health.mdx": {
-    "baseline": 319,
-    "target": 319
+  "docs/landing.mdx": {
+    "baseline": 785,
+    "target": 785
   },
   "docs/open-prs.mdx": {
     "baseline": 486,
@@ -120,8 +124,8 @@
     "target": 2575
   },
   "docs/the-dials.mdx": {
-    "baseline": 4357,
-    "target": 4357
+    "baseline": 4356,
+    "target": 4356
   },
   "docs/turning-on-autonomy.mdx": {
     "baseline": 2871,
@@ -188,20 +192,20 @@
     "target": 395
   },
   "skills/flow-drain/SKILL.md": {
-    "baseline": 720,
-    "target": 720
+    "baseline": 716,
+    "target": 716
   },
   "skills/flow-groom/SKILL.md": {
-    "baseline": 165,
-    "target": 165
+    "baseline": 163,
+    "target": 163
   },
   "skills/flow-retro/SKILL.md": {
-    "baseline": 230,
-    "target": 230
+    "baseline": 228,
+    "target": 228
   },
   "skills/flow-triage/SKILL.md": {
-    "baseline": 380,
-    "target": 380
+    "baseline": 378,
+    "target": 378
   },
   "skills/grooming-backlog/SKILL.md": {
     "baseline": 1156,
@@ -212,12 +216,12 @@
     "target": 250
   },
   "skills/initializing-flow/SKILL.md": {
-    "baseline": 1126,
-    "target": 1126
+    "baseline": 1117,
+    "target": 1117
   },
   "skills/linear-adapter/SKILL.md": {
-    "baseline": 1381,
-    "target": 1381
+    "baseline": 1380,
+    "target": 1380
   },
   "skills/specifying-work/SKILL.md": {
     "baseline": 361,
@@ -228,15 +232,15 @@
     "target": 1271
   },
   "skills/triaging-work/SKILL.md": {
-    "baseline": 1139,
-    "target": 1139
-  },
-  "skills/verifying-work/SKILL.md": {
-    "baseline": 1256,
-    "target": 1256
+    "baseline": 1135,
+    "target": 1135
   },
   "skills/verifying-work/proof-test.md": {
-    "baseline": 313,
-    "target": 313
+    "baseline": 307,
+    "target": 307
+  },
+  "skills/verifying-work/SKILL.md": {
+    "baseline": 1255,
+    "target": 1255
   }
 }

@@ -91,9 +91,9 @@ WorkItem {
 
 ## The state machine
 
-- The `agent/*` labels are the durable state machine, not the plan field: `agent/ready`, `agent/claimed`, `agent/completed`, `agent/needs-input`, one at a time.
+- The `agent/*` labels are the durable state machine, not the plan field: `agent/ready`, `agent/claimed`, `agent/completed`, `agent/needs-input`, `agent/from-outside`, one at a time.
 - State, `agent/*` and `stage/*` agree; the `flow` verbs keep them so (`scripts/work-state.ts`). A claimed started item without `agent/needs-input` is orphaned work.
-- A merged PR whose body says `Closes <identifier>` closes the item at merge; use a non-closing reference to keep it open.
+- A merged PR whose body says `Closes <identifier>` closes the item at merge; a non-closing reference keeps it open.
 - `agent/needs-input` is parked on a person: the stall sweep never reclaims it.
 
 ## Showing an item to a person

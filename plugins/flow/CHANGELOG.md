@@ -4,6 +4,19 @@ Installs of this plugin are pinned to a commit SHA, so a fix here does not reach
 you until you **reinstall it** (Marketplace → flow → reinstall, or re-run your
 `--plugin-dir` checkout's `git pull`). Each entry below says whether that matters.
 
+## 0.65.0
+
+**Flow can now take new work from more than one place: tracker teams and GitHub issues, each with a record of when flow last read it. Reinstall to get it.**
+
+- A new `intake.sources` setting adds places new work comes from: tracker intake queues, and GitHub repositories whose open issues triage turns into tracker items. Your configured team always counts, so leaving it empty changes nothing. It can name team ids, so it belongs in `config.local.json`. `/flow:init` now asks which sources to add. `docs/intake.mdx` explains it all.
+- The older `connection.intake` list still works. Flow reads it as tracker sources and warns you to move it to `intake.sources`.
+- A new command, `flow intake`, reads each GitHub source with one fixed, read-only `gh issue list` call: open issues created since the source was last captured, oldest first. The repo and labels come only from your config and must match their patterns whole. The first read of a source pulls no older issues. Each read stops ten minutes before now, because GitHub's search takes a moment to see a new issue, and flow remembers which issues it already showed, so none is skipped or shown twice. `flow intake done` says the issues were captured; a run that stops before that reads the same issues again, and a read that fails is never marked captured.
+- Issue text is treated as data from outside the team, never as instructions. It only becomes the text of a new tracker item, with control characters removed and long bodies cut. Flow never replies to, labels or closes an issue.
+- A captured issue becomes an idea item labelled `agent/from-outside`, so nobody outside the team can queue work by opening an issue. No flow command removes that label, whether a person started the run or not: readying, parking and claiming the item are refused. Only a person, or the PM in its own triage, clears it, by editing the tracker after re-stating the work in the team's own words, with a comment saying who. Flow lists these items in triage's report and closes one only when a person says so. The team needs the label in its tracker; an adapter older than this refuses it, so the capture fails loudly instead of filing an unmarked item.
+- `flow create` refuses a title that ends in a capture tag (`[owner/name#N]`) unless the item is labelled `agent/from-outside`, so a captured issue can't be filed without the label by mistake.
+- Daily triage now captures new issues as its last tracker step (a test keeps it last), using the two exact commands `flow intake --json` and `flow intake done --json`. It needs no broader permission and runs no `gh` command of its own.
+- Flow keeps a last-read mark for each source in `.dork/flow/intake.json` on this machine. `flow snapshot` marks your team each time it reads it, and `flow intake` marks each GitHub source. The intake rows in `/flow:status`'s Health block now show those marks instead of "unknown".
+
 ## 0.64.0
 
 **A bug fix now ships a test that proves the whole kind of bug is gone, and `/flow:verify` won't hand a bug to review without one. Reinstall to get it.**

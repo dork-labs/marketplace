@@ -413,6 +413,18 @@ describe('flow create', () => {
     ['a priority above 4', [...CAPTURE, '--priority', '5']],
     ['a priority that is not a number', [...CAPTURE, '--priority', 'high']],
     ['a key that could close its marker', [...CAPTURE, '--key', 'a -->']],
+    [
+      'a title ending in a capture tag without agent/from-outside',
+      [
+        'create',
+        '--title',
+        'Export as CSV [acme/app#7]',
+        '--description',
+        'd',
+        '--label',
+        'type/idea',
+      ],
+    ],
   ])('refuses %s with exit 2 before any tracker call', async (_what, argv) => {
     // Purpose: a malformed request never reaches the tracker, not even as a read.
     const t = tracker({ items: [], failReads: 'the tracker must not be reached' });
@@ -420,6 +432,27 @@ describe('flow create', () => {
     expect(run.code).toBe(EXIT.usage);
     expect(t.calls).toEqual([]);
     expect(t.fake.writes).toEqual([]);
+  });
+
+  it('files an item captured from outside with agent/from-outside, the one agent/* label it takes', async () => {
+    // Purpose: a captured GitHub issue is never readied unattended (DOR-3258).
+    const t = tracker({ items: [existing('FAKE-1')] });
+    const captured = await flow(
+      [
+        'create',
+        '--title',
+        'Let people export the report as CSV [acme/app#7]',
+        '--description',
+        'People ask for the report as a CSV file.',
+        '--label',
+        'type/idea',
+        '--label',
+        'agent/from-outside',
+      ],
+      t
+    );
+    expect(captured.code).toBe(EXIT.ok);
+    expect(added(t, ['FAKE-1'])[0].labels).toEqual(['type/idea', 'agent/from-outside']);
   });
 
   it('writes nothing on --dry-run and prints the planned item', async () => {

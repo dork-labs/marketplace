@@ -80,16 +80,16 @@ proposal file to the scratchpad. **Triage agents make no tracker writes.** Per i
 4. `stage/execute` (one component, no new pattern) or `stage/ideate` (multi-layer, new
    pattern, architectural decision). In doubt: complex.
 5. **The six readiness rules.** Propose `agent/ready` only when ALL hold: (a) concrete
-   problem with a recognizable definition of done; (b) executable unsupervised, no
+   problem with a clear done; (b) executable unsupervised, no
    operator decision embedded; (c) unblocked; (d) not a question, decision or tracker;
    (e) needs no real-world credentials, live third-party accounts or a person at a
    keyboard; (f) sized, with both engine-read sections (`## Validation criteria`,
    `## On Completion`) written from the item, not boilerplate. Too thin: `needs-input`
-   plus one crisp question. Readying 100% of a set means the bar was not applied.
+   plus one question. Readying a whole set means the bar wasn't applied.
 6. Missing `blockedBy`/`blocks` edges. An item whose tracked blockers are closed may
    still wait on something untracked (an unaccepted decision): park it with a comment.
 7. Operator-only work (real accounts, legal, spend, hardware) stays assigned to the
-   operator with no agent label; everything else agent-executable is unassigned.
+   operator with no agent label (an `agent/from-outside` item keeps it); everything else agent-executable is unassigned.
 
 ### Phase 5 — Review gate (human)
 
@@ -101,15 +101,15 @@ evidence, the project changes, the ready-set size with a sample, and every flag.
 
 ### Phase 6 — Ordered write pass
 
-**Projects → closures → item fields → relations.** Small batches, each re-read after
-writing (partial application happens). Label writes are unions against a read taken just
-before the write (other sessions write too). A failed write retries by the adapter's safer
+**Projects → closures → item fields → relations.** Small batches, re-read after
+writing. Label writes are unions against a read taken just
+before the write. A failed write retries by the adapter's safer
 path, then is reported, never dropped.
 
 ### Phase 7 — Verify and report
 
-1. `flow audit --json`: every invariant green over the groomed scope. Items another
-   session made mid-groom are out of scope: report them.
+1. `flow audit --json`: every invariant green over the groomed scope. Report items other
+   sessions made mid-groom.
 2. `flow next -n 10 --json` against the baseline. **The top picks must be work the
    operator would want an agent doing next**; a bigger pool with a wrong top pick fails.
 3. Report the before/after numbers, closures with evidence, the project map, the ready-set
@@ -117,9 +117,10 @@ path, then is reported, never dropped.
 
 ## Guardrails
 
+- **Never remove `agent/from-outside`**, in any phase: only a person or the PM clears it.
 - **Evidence before assertion.** Check the artifact, not the citation.
 - **Check the code, not the ticket.** "Shipped" needs a commit or PR and a read
-  of the code or test (phase 3). "Open" needs the same read: an item the code
+  of the code or test. "Open" needs the same read: an item the code
   already satisfies is closed, not readied.
 - **A new invariant ships with its failing fixture row.** Proves the check bites.
 - **Per-run helpers stay in the scratchpad.** Only the invariants are code.

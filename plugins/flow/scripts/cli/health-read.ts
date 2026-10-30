@@ -72,8 +72,8 @@ export interface HealthInput {
   fetchImpl: typeof fetch;
   /** The moment to judge at. */
   now: Date;
-  /** `connection.intake`. */
-  intake: readonly { id: string; name?: string }[];
+  /** The intake sources in force, each with its last-read mark when recorded. */
+  intake: readonly { id: string; name?: string; lastReadAt?: string | null; untracked?: boolean }[];
   /** The configured tracker (the plain intake). */
   tracker: string;
 }

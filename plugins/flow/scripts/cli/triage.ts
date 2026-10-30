@@ -24,7 +24,8 @@
  * Refuses before any tracker write: not exactly one of `--ready` and a question,
  * `--stage` without `--ready` (or `--ready` without it), an empty question, a
  * stage that is not in config or has no label, a closed item, and an item an
- * agent is on (started, or `agent/claimed`). Setting the type, priority or
+ * agent is on (started, or `agent/claimed`), and an item carrying
+ * `agent/from-outside`, which only a person or the PM clears. Setting the type, priority or
  * size is not this verb's job: no adapter capability writes them.
  *
  * `--dry-run` prints the change and writes nothing.
@@ -44,7 +45,13 @@ import { recordEvent } from './auto-journal.ts';
 import type { VerbContext, VerbResult } from './context.ts';
 import { signBody, unsignedBody } from './provenance.ts';
 import { flagText, removeScratch } from './scratch-file.ts';
-import { applyAndVerify, requireOpen, sessionProvenance, setupWrite } from './work-write.ts';
+import {
+  applyAndVerify,
+  requireNotFromOutside,
+  requireOpen,
+  sessionProvenance,
+  setupWrite,
+} from './work-write.ts';
 
 /** How many of the latest comments are read to spot a retried question. */
 const RECENT_COMMENTS = 10;
@@ -92,6 +99,8 @@ export async function run(ctx: VerbContext): Promise<VerbResult> {
   const change: WorkStateChange = ready
     ? projectionFor({ type: 'release', to: 'ready', stage }, { stages })
     : projectionFor({ type: 'needs-input' }, { stages });
+  // Before the question is posted, so a refused park writes nothing at all.
+  requireNotFromOutside(item, change);
 
   let commented = false;
   if (park !== undefined) {

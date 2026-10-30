@@ -41,6 +41,14 @@ export const AGENT_READY = 'agent/ready';
 export const AGENT_COMPLETED = 'agent/completed';
 /** The `agent/*` label on an item parked until a person answers the agent's question. */
 export const AGENT_NEEDS_INPUT = 'agent/needs-input';
+/**
+ * The `agent/*` label on an item captured from outside the team (a GitHub
+ * issue, DOR-3258). Flow never removes it and no flow write replaces it: only
+ * a person, or the PM in its own triage, clears it by editing the tracker,
+ * after re-stating the work in the team's own words, with a comment saying
+ * who. Until then the item is never ready, so nothing unattended builds it.
+ */
+export const AGENT_FROM_OUTSIDE = 'agent/from-outside';
 
 /**
  * The one change a writer applies to an item (spec §4, `applyWorkState`).

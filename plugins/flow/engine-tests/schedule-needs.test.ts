@@ -117,6 +117,10 @@ const READ_EXACT = [
   'retro --json',
   'snapshot --json',
   'snapshot --include-closed --out .dork/flow/tmp/groom/backlog.json',
+  // DOR-3258: one fixed `gh issue list` per configured repo, and flow's own
+  // mark file. The repos come from config, never from an argument.
+  'intake --json',
+  'intake done --json',
 ];
 
 /**
@@ -256,6 +260,16 @@ describe('every scheduled skill lists read-tier needs and keeps its mode', () =>
       const entry = `Bash(${NODE} "${ROOT}/scripts/flow.ts" ${snapshot})`;
       expect(scheduleGaps('flow-triage', plant(entry))).toEqual([`${entry}: not a read`]);
     }
+    // Intake is exact only (DOR-3258): a prefix would take --project, and no rule names gh.
+    for (const intake of ['intake:*', 'intake --project ../other --json']) {
+      const entry = `Bash(${NODE} "${ROOT}/scripts/flow.ts" ${intake})`;
+      expect(scheduleGaps('flow-triage', plant(entry))).toEqual([`${entry}: not a read`]);
+    }
+    for (const gh of ['gh:*', 'gh issue list:*', 'gh issue list -R acme/app --json number']) {
+      expect(scheduleGaps('flow-triage', plant(`Bash(${gh})`))).toEqual([
+        `Bash(${gh}): not a read`,
+      ]);
+    }
     // Git that talks to a remote runs whatever the repo's own config names.
     for (const remote of ['git ls-remote --heads origin', 'git fetch', 'git pull']) {
       expect(scheduleGaps('flow-triage', plant(`Bash(${remote})`))).toEqual([
@@ -352,6 +366,114 @@ describe('a refused tool ends the run red, in every scheduled skill', () => {
     // Handing over without letting go leaves it claimed, and recovery resumes it.
     expect(ruleGaps(rule.replace('`flow release <id> --to none --json`', '`flow note`'))).toEqual([
       'a person-does-it answer stops the run',
+    ]);
+  });
+});
+
+/**
+ * `agent/from-outside` (Security on #128): only a person, or the PM in its own
+ * triage, clears it. No flow skill removes it, attended or not; flow lists the
+ * items and closes one when a person says so. The rule is stated where triage,
+ * readiness and capture are taught, and no shipped prose says otherwise.
+ */
+const FROM_OUTSIDE_RULE: Record<string, RegExp> = {
+  'skills/flow-triage/SKILL.md': /never removing `agent\/from-outside`/,
+  'skills/triaging-work/SKILL.md': /Never remove `agent\/from-outside`\*\*, attended or not/,
+  'docs/intake.mdx': /Flow never removes it, attended or not/,
+};
+
+/** Groom's two places, both required (the second keeps operator-only work from stripping it). */
+const GROOM_RULES = [
+  /Never remove `agent\/from-outside`\*\*, in any phase/,
+  /no agent label \(an `agent\/from-outside` item keeps it\)/,
+];
+
+/** Every shipped prose file: skills, commands and docs. */
+function shippedProse(): Record<string, string> {
+  const out: Record<string, string> = {};
+  const walk = (rel: string) => {
+    for (const entry of readdirSync(path.join(FLOW_ROOT, rel), { withFileTypes: true })) {
+      const child = path.join(rel, entry.name);
+      if (entry.isDirectory()) walk(child);
+      else if (/\.mdx?$/.test(entry.name))
+        out[child] = readFileSync(path.join(FLOW_ROOT, child), 'utf8');
+    }
+  };
+  for (const rel of ['skills', 'commands', 'docs']) walk(rel);
+  return out;
+}
+
+/** A file's sentences: list items and paragraphs apart, then split at sentence ends. */
+function sentences(text: string): string[] {
+  return text.split(/\n\s*\n|\n(?=\s*(?:[-*]|\d+\.)\s)/).flatMap((block) =>
+    block
+      .replace(/\s+/g, ' ')
+      .trim()
+      .split(/(?<=[.!?])\s/)
+  );
+}
+
+/** Words that take the label off, in any form. */
+const REMOVE =
+  /\b(?:remov|clear|drop|delet|strip|replac|swap|relabel|unset|untag|take off|takes off)\w*|agentLabel:\s*null/i;
+/** Words that forbid it, or say who alone may do it; they must come BEFORE the verb. */
+const FORBID = /\b(?:never|not|no|nothing|refuses?|only a person|only the PM)\b/i;
+
+/** Gaps: the rule missing where it is taught, or a sentence that tells flow to remove the label. */
+function fromOutsideGaps(files: Record<string, string>): string[] {
+  const gaps: string[] = [];
+  for (const [file, rule] of Object.entries(FROM_OUTSIDE_RULE)) {
+    if (!rule.test(files[file] ?? '')) gaps.push(`${file}: states the rule`);
+  }
+  for (const rule of GROOM_RULES) {
+    if (!rule.test(files['skills/grooming-backlog/SKILL.md'] ?? '')) {
+      gaps.push('skills/grooming-backlog/SKILL.md: states the rule');
+    }
+  }
+  for (const [file, text] of Object.entries(files)) {
+    for (const sentence of sentences(text)) {
+      if (!sentence.includes('agent/from-outside') && !/this label/i.test(sentence)) continue;
+      const verb = REMOVE.exec(sentence);
+      if (verb === null) continue;
+      const forbid = FORBID.exec(sentence);
+      if (forbid !== null && forbid.index < verb.index) continue;
+      gaps.push(`${file}: "${sentence.slice(0, 80)}"`);
+    }
+  }
+  return gaps;
+}
+
+describe('agent/from-outside: no flow skill removes it', () => {
+  it('the rule is stated where it is taught, and nothing shipped says otherwise', () => {
+    expect(fromOutsideGaps(shippedProse())).toEqual([]);
+  });
+
+  it('bites on a dropped rule, or a step that removes the label', () => {
+    const files = shippedProse();
+    files['skills/triaging-work/SKILL.md'] = files['skills/triaging-work/SKILL.md'].replace(
+      'Never remove `agent/from-outside`',
+      'Mind `agent/from-outside`'
+    );
+    files['skills/grooming-backlog/SKILL.md'] = files['skills/grooming-backlog/SKILL.md'].replace(
+      ' (an `agent/from-outside` item keeps it)',
+      ''
+    );
+    files['skills/flow-groom/SKILL.md'] += [
+      '',
+      '- Remove `agent/from-outside` only once the item reads well',
+      '- Drop `agent/from-outside`; never leave it on a readied item.',
+      '- Replace `agent/from-outside` with `agent/ready`.',
+      '- Write `agentLabel: null` on an `agent/from-outside` item.',
+      '- Nothing removes `agent/from-outside`.',
+      '',
+    ].join('\n');
+    expect(fromOutsideGaps(files)).toEqual([
+      'skills/triaging-work/SKILL.md: states the rule',
+      'skills/grooming-backlog/SKILL.md: states the rule',
+      'skills/flow-groom/SKILL.md: "- Remove `agent/from-outside` only once the item reads well"',
+      'skills/flow-groom/SKILL.md: "- Drop `agent/from-outside`; never leave it on a readied item."',
+      'skills/flow-groom/SKILL.md: "- Replace `agent/from-outside` with `agent/ready`."',
+      'skills/flow-groom/SKILL.md: "- Write `agentLabel: null` on an `agent/from-outside` item."',
     ]);
   });
 });

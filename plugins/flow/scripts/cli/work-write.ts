@@ -26,7 +26,12 @@ import { FlowStateSchema } from '../flow-state.ts';
 import { requireCapabilities } from '../tracker/load.ts';
 import type { Capability, CodeAdapter, ItemWithComments, WorkItem } from '../tracker/types.ts';
 import { verifyWrite } from '../tracker/verify-write.ts';
-import { STAGE_LABEL_PREFIX, type StageTable, type WorkStateChange } from '../work-state.ts';
+import {
+  AGENT_FROM_OUTSIDE,
+  STAGE_LABEL_PREFIX,
+  type StageTable,
+  type WorkStateChange,
+} from '../work-state.ts';
 import type { VerbContext } from './context.ts';
 import { verbLoadOptions } from './load-options.ts';
 import { buildProvenance } from './provenance.ts';
@@ -99,7 +104,43 @@ function checkStoreWritable(file: string): void {
 }
 
 /**
- * Apply one change and confirm the tracker kept it.
+ * The change flow may write to an item carrying `agent/from-outside`
+ * (DOR-3258). Only a person, or the PM in its own triage, clears that label,
+ * by editing the tracker with a comment saying who; no flow write may, attended
+ * or not. Closing the item is allowed (a person may ask for it), and it closes
+ * with the label still on, so reopening it never makes it triage-able.
+ *
+ * @param item - The item as read before the write.
+ * @param change - The change asked for.
+ * @returns The change to write: as asked, or a close that leaves `agent/*` alone.
+ * @throws {PreconditionError} When the change would replace the label on an open item (exit 5).
+ */
+export function fromOutsideChange(item: WorkItem, change: WorkStateChange): WorkStateChange {
+  if (!item.labels.includes(AGENT_FROM_OUTSIDE) || change.agentLabel === undefined) return change;
+  if (change.stateCategory === 'completed' || change.stateCategory === 'canceled') {
+    const { agentLabel: _kept, ...close } = change;
+    return close;
+  }
+  throw new PreconditionError(
+    `${item.identifier} carries ${AGENT_FROM_OUTSIDE}: it came from outside the team, and only a person (or the PM in its own triage) clears that label, by editing the tracker after re-stating the work in our words, with a comment saying who. Flow leaves it alone.`
+  );
+}
+
+/**
+ * Refuse, before anything is written, a change {@link fromOutsideChange} would refuse.
+ *
+ * @param item - The item as read before the write.
+ * @param change - The change about to be written.
+ * @throws {PreconditionError} When the change would replace the label (exit 5).
+ */
+export function requireNotFromOutside(item: WorkItem, change: WorkStateChange): void {
+  fromOutsideChange(item, change);
+}
+
+/**
+ * Apply one change and confirm the tracker kept it. On an item carrying
+ * `agent/from-outside`, a change that would replace the label is refused
+ * before any write, and a close leaves the label on.
  *
  * @param adapter - The adapter.
  * @param item - The item as read before the write.
@@ -112,8 +153,9 @@ export async function applyAndVerify(
   item: WorkItem,
   change: WorkStateChange
 ): Promise<ItemWithComments> {
-  await adapter.applyWorkState(item, change);
-  return verifyWrite(adapter, item, change);
+  const effective = fromOutsideChange(item, change);
+  await adapter.applyWorkState(item, effective);
+  return verifyWrite(adapter, item, effective);
 }
 
 /**

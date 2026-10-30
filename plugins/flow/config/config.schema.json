@@ -85,6 +85,73 @@
       },
       "additionalProperties": false
     },
+    "intake": {
+      "default": {},
+      "type": "object",
+      "properties": {
+        "sources": {
+          "default": [],
+          "maxItems": 20,
+          "type": "array",
+          "items": {
+            "oneOf": [
+              {
+                "type": "object",
+                "properties": {
+                  "kind": {
+                    "type": "string",
+                    "const": "tracker"
+                  },
+                  "id": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "name": {
+                    "type": "string"
+                  }
+                },
+                "required": ["kind", "id"],
+                "additionalProperties": false
+              },
+              {
+                "type": "object",
+                "properties": {
+                  "kind": {
+                    "type": "string",
+                    "const": "github"
+                  },
+                  "repo": {
+                    "type": "string",
+                    "pattern": "^[A-Za-z0-9](?:[A-Za-z0-9]|-(?=[A-Za-z0-9])){0,38}\\/[A-Za-z0-9_][A-Za-z0-9._-]{0,99}$"
+                  },
+                  "name": {
+                    "type": "string"
+                  },
+                  "labels": {
+                    "default": [],
+                    "maxItems": 5,
+                    "type": "array",
+                    "items": {
+                      "type": "string",
+                      "pattern": "^[A-Za-z0-9_][A-Za-z0-9_./-]{0,49}$"
+                    }
+                  },
+                  "limit": {
+                    "default": 30,
+                    "type": "integer",
+                    "minimum": 1,
+                    "maximum": 100
+                  }
+                },
+                "required": ["kind", "repo"],
+                "additionalProperties": false
+              }
+            ]
+          }
+        }
+      },
+      "additionalProperties": false
+    },
     "identity": {
       "default": {},
       "type": "object",

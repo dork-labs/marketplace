@@ -99,7 +99,9 @@ tracker's native labels into the generic families before placing them on
 
 - **`agent/*`** - the durable disposition state machine: `agent/ready`,
   `agent/claimed`, `agent/completed`, `agent/needs-input`. `agentDisposition` is
-  derived from this family.
+  derived from this family. Also `agent/from-outside`, on an item captured from
+  outside the team: it has no disposition, no flow write replaces it, and only a
+  person or the PM clears it (`../docs/intake.mdx`).
 - **`stage/*`** - where the next session resumes. At most one, and only while
   the item is not started (`backlog` or `unstarted`); while it is started, the
   run record carries the stage.
@@ -167,7 +169,7 @@ Supporting types: `Account` is the acting account `{ id, name? }`.
 `SubIssueSpec = { title, description, type, size? }`.
 `InboxEntry = { item: WorkItem, comment: { author: string, mentions: string[], body: string } }`.
 `ProjectOutcome = 'completed' | 'canceled'` — the two terminal project states.
-`IntakeSource = { id: string, name?: string }` — one configured intake queue, named by the install's `connection.intake` list.
+`IntakeSource = { id: string, name?: string }` — one configured intake queue, named by a `kind: tracker` entry in the install's `intake.sources` (or the older `connection.intake`).
 `IntakeReport = { id: string, source: IntakeSource, title: string, body: string, reporter?: string, receivedAt?: string, url?: string }` — a report from outside the team. Deliberately **not** a `WorkItem`: it has a different lifecycle and is never dispatched.
 `IntakeOutcome = { exit: 'duplicate' | 'promote' | 'attach' | 'needsInfo' | 'decline' | 'junk', linkedItem?: WorkItem, message?: string }` — Path C's six exits. `message` carries the reason for `decline` and the question for `needsInfo`; `linkedItem` is required for `promote`, `attach` and `duplicate`.
 
@@ -666,7 +668,10 @@ interface WorkStateChange {
 - It reads the team's labels first and refuses, creating nothing: a label the
   team does not have (an adapter never creates labels), two labels of one group
   (a tracker applies one label per group), and any `agent/*` label (a new item
-  is never ready: readiness is triage's decision). It finds the project by id or
+  is never ready: readiness is triage's decision) except `agent/from-outside`,
+  which marks an item captured from outside the team. An adapter that predates
+  that exception refuses it, so a capture fails loudly instead of filing an
+  unmarked item. It finds the project by id or
   exact name with a filtered read, so no page limit can miss it, and refuses a
   project or parent that is missing or another team's.
 - The item lands where the tracker puts new work (Linear: its triage state).
@@ -838,7 +843,7 @@ declaration.
   report from outside the team into work without moving or mirroring it. Their
   outward text carries the 1.2.0 marker and signature. Additive and declared
   all-or-none: an adapter declaring `1.2.0`, `1.1.0` or `1.0.0` still conforms,
-  and an install with no `connection.intake` source never reaches them.
+  and an install with no tracker intake source (`intake.sources`, or the older `connection.intake`) never reaches them.
 - **1.2.0** - outward writes carry the **`agent:provenance` signature**
   ([`../docs/provenance.md`](../docs/provenance.md)) alongside the identity marker:
   `comment`, `needsInput`'s question, and the description `createSubIssue` authors.

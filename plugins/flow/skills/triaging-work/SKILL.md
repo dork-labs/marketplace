@@ -8,8 +8,7 @@ description: The /flow engine's TRIAGE stage — classify and route incoming wor
 `<flow-root>` is two folders above this file's `realpath`. `flow <verb>` means
 `node --experimental-strip-types "<flow-root>/scripts/flow.ts" <verb>`.
 
-TRIAGE classifies incoming work and routes it simple-vs-complex. It does not run the
-loop, dispatch work or audit the backlog. Tracker reads and writes other than the
+TRIAGE classifies incoming work and routes it simple-vs-complex. Tracker reads and writes other than the
 outcome go through the adapter at `adapter.path`.
 
 **The outcome is one command:**
@@ -46,7 +45,7 @@ From an intake source → C; the trigger names an item → B; else A.
    | **Brief**        | 3+ distinct deliverables or workstreams      | a project plus typed items (step 4)             |
    | **Ambiguous**    | no confident class                           | ask the operator                                |
 
-   No strong signal: **Idea** (cheapest to re-classify).
+   No strong signal: **Idea**.
 
 3. Create the item(s): imperative title, the full input as description (with its source
    path), the type, origin `human`, priority and size only when scope is clear. A
@@ -86,8 +85,9 @@ From an intake source → C; the trigger names an item → B; else A.
 
 ## Path C — Report
 
-**Off unless `connection.intake` names an intake source.** It needs the optional adapter
-verbs `listIntake`, `promote` and `resolveIntake`; an adapter without them says it cannot.
+**Off unless `intake.sources` names a tracker queue.** It needs the adapter verbs
+`listIntake`, `promote` and `resolveIntake`, or says it cannot. GitHub issues:
+`<flow-root>/docs/intake.mdx`.
 
 A report belongs to its reporter (their receipt); the work belongs to the team. Many
 reports can share one fix, and most reports are not work. So: **promote, not convert.
@@ -99,8 +99,7 @@ Every report leaves by exactly one exit: **Duplicate** (reporter follows the ori
 
 In this order:
 
-1. **Dedupe first**, across the intake source and the tracker. It changes every later
-   step. Batch the reading, serialise the writing.
+1. **Dedupe first**, across the intake source and the tracker. Batch the reading, serialise the writing.
 2. **Validate:** unintelligible → Needs info; not about this product → Junk.
 3. **Classify** with Path A's vocabulary. This is the reporter's claim; never overwrite
    a triage verdict with it.
@@ -127,7 +126,7 @@ After any action, post a comment (the adapter adds the marker and signature):
 **Next steps:** [the route]
 ```
 
-Report the items (by the adapter's display convention), their types, the decision and
+Report the items, their types, the decision and
 what happens next.
 
 ## Guardrails
@@ -139,4 +138,6 @@ what happens next.
 - **Check the code, not the ticket.** Before calling an item open or shipped, read the
   code or tests it names. Work that already shipped is closed with the commit or PR as
   evidence, not triaged.
+- **Never remove `agent/from-outside`**, attended or not: list it for a person or the
+  PM; close it only when told to (`<flow-root>/docs/intake.mdx`).
 - Tracker unavailable: say so and stop. Never fabricate an outcome.

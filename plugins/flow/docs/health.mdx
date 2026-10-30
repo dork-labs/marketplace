@@ -24,6 +24,6 @@ Flow keeps no record of its own scheduled runs. DorkOS runs the schedules and ke
 
 ## Intake
 
-One row per intake source in `connection.intake`, or the plain tracker intake when there's none. Flow doesn't record when it reads an intake source yet, so each row says unknown for now. Once flow keeps a last-read mark per source, these rows show it.
+One row for your configured team, then one per source in `intake.sources`, with its last read. Never read says unknown; a Path C queue says not tracked. [Where new work comes from](/docs/guides/flow/intake) explains the marks.
 
 `flow status --no-health` skips the block.
