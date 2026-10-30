@@ -86,8 +86,9 @@ From an intake source → C; the trigger names an item → B; else A.
 
 ## Path C — Report
 
-**Off unless `connection.intake` names an intake source.** It needs the optional adapter
-verbs `listIntake`, `promote` and `resolveIntake`; an adapter without them says it cannot.
+**Off unless `intake.sources` names a tracker queue.** It needs the adapter verbs
+`listIntake`, `promote` and `resolveIntake`, or says it cannot. GitHub issues:
+`<flow-root>/docs/intake.mdx`.
 
 A report belongs to its reporter (their receipt); the work belongs to the team. Many
 reports can share one fix, and most reports are not work. So: **promote, not convert.

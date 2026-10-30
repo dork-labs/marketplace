@@ -502,6 +502,16 @@ CI or handoff event by hand.
 **`selftest.liveBudgetUsd`** is the most one run of the self-test's live tier may
 spend, in US dollars.
 
+## The `intake` block: where new work comes from
+
+`intake.sources` lists tracker teams (`{"kind": "tracker", "id": "DOR"}`) and
+GitHub repositories whose open issues triage captures
+(`{"kind": "github", "repo": "owner/name", "labels": [], "limit": 30}`). Empty means
+the configured team alone. Repo names are not secrets, so the list may live in
+`config.json`. The older `connection.intake` queues read as tracker sources, with a
+warning to move them. Last-read marks, the `flow intake` read and how issue text is
+handled: [`../docs/intake.mdx`](../docs/intake.mdx).
+
 ## `groom`: bare labels the audit accepts
 
 The backlog audit (`flow audit`, invariant GRM-12) fails any label without a

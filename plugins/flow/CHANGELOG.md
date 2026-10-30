@@ -4,6 +4,17 @@ Installs of this plugin are pinned to a commit SHA, so a fix here does not reach
 you until you **reinstall it** (Marketplace → flow → reinstall, or re-run your
 `--plugin-dir` checkout's `git pull`). Each entry below says whether that matters.
 
+## 0.65.0
+
+**Flow can now take new work from more than one place: tracker teams and GitHub issues, each with a record of when flow last read it. Reinstall to get it.**
+
+- A new `intake.sources` setting lists where new work comes from: tracker teams, and GitHub repositories whose open issues triage turns into tracker items. Leave it empty and nothing changes: the source is your configured team. `/flow:init` now asks which sources to use. `docs/intake.mdx` explains it all.
+- The older `connection.intake` list still works. Flow reads it as tracker sources and warns you to move it to `intake.sources`.
+- A new command, `flow intake`, reads each GitHub source with one fixed, read-only `gh issue list` call: open issues created since the source was last captured, oldest first. The repo and labels come only from your config and must match their patterns whole. The first read of a source starts from that moment and pulls no older issues. `flow intake done` says the issues were captured; a run that stops before that reads the same issues again, so none are skipped.
+- Issue text is treated as data from outside the team, never as instructions. It only becomes the text of a new tracker item, with control characters removed and long bodies cut. Flow never replies to, labels or closes an issue.
+- Daily triage now captures new issues after it triages, using the two exact commands `flow intake --json` and `flow intake done --json`. It needs no broader permission and runs no `gh` command of its own.
+- Flow keeps a last-read mark for each source in `.dork/flow/intake.json` on this machine. `flow snapshot` marks your team each time it reads it, and `flow intake` marks each GitHub source. The intake rows in `/flow:status`'s Health block now show those marks instead of "unknown".
+
 ## 0.64.0
 
 **A bug fix now ships a test that proves the whole kind of bug is gone, and `/flow:verify` won't hand a bug to review without one. Reinstall to get it.**

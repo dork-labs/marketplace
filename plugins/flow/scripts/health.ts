@@ -353,14 +353,13 @@ export interface IntakeHealth {
 }
 
 /**
- * The intake sources and when each was last read. Flow records no read of an
- * intake source yet (F2 and F3, DOR-3258 and DOR-3259, add a mark per source),
- * so every row is unknown with that reason; a source that carries a mark
- * shows it.
+ * The intake sources and when each was last read. `flow snapshot` marks the
+ * configured team and `flow intake` each GitHub source (DOR-3258, DOR-3259); a
+ * source with no mark is unknown, with that reason, never healthy.
  *
- * @param sources - The configured sources (`connection.intake`), each with its
- *   mark when one is recorded.
- * @param tracker - The tracker the plain intake reads, used when no source is configured.
+ * @param sources - The sources in force (`intake.sources`), each with its mark
+ *   when one is recorded.
+ * @param tracker - The tracker the plain intake reads, used when no source is given.
  * @param now - The moment to judge at.
  * @returns One row per source.
  */

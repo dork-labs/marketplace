@@ -669,6 +669,7 @@ describe('z.toJSONSchema bridge', () => {
     const topLevelBlocks = [
       'tracker',
       'connection',
+      'intake',
       'identity',
       'ownership',
       'comments',

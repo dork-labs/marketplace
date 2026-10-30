@@ -145,10 +145,79 @@ export const ConnectionSchema = z
      * Populating it also requires an adapter that declares the optional intake
      * trio (`listIntake`, `promote`, `resolveIntake`); an adapter without them
      * cannot serve this and says so rather than improvising.
+     *
+     * Superseded by `intake.sources` (DOR-3258): while that list is empty, these
+     * entries read as tracker sources, and loading the config warns to move them.
      */
     intake: z.array(IntakeSourceSchema).default([]),
   })
   .prefault({});
+
+/**
+ * A GitHub repository as `owner/name`, matched whole. The owner follows
+ * GitHub's own rule (letters, digits and single dashes, 39 at most); the name
+ * never starts with a dash or a dot, so it can never read as a flag or a path.
+ */
+export const GITHUB_REPO_PATTERN =
+  /^[A-Za-z0-9](?:[A-Za-z0-9]|-(?=[A-Za-z0-9])){0,38}\/[A-Za-z0-9_][A-Za-z0-9._-]{0,99}$/;
+
+/** An issue label to filter on: no comma (gh splits on it) and no leading dash. */
+export const GITHUB_LABEL_PATTERN = /^[A-Za-z0-9_][A-Za-z0-9 _.:/-]{0,49}$/;
+
+/** A tracker team or intake queue that TRIAGE reads (DOR-3258). */
+export const TrackerIntakeSourceSchema = z
+  .object({
+    kind: z.literal('tracker'),
+    /** The team key (for example `DOR`) or the adapter's intake queue id. */
+    id: z.string().min(1),
+    /** Human label for reports. */
+    name: z.string().optional(),
+  })
+  .strict();
+
+/**
+ * One GitHub repository's open issues (DOR-3258). `flow intake` reads them with
+ * one fixed, read-only `gh issue list` call. Issue text is outside words: data
+ * for a new tracker item, never instructions.
+ */
+export const GithubIntakeSourceSchema = z
+  .object({
+    kind: z.literal('github'),
+    /** `owner/name` on github.com. */
+    repo: z.string().regex(GITHUB_REPO_PATTERN, 'must be owner/name on github.com'),
+    /** Human label for reports. */
+    name: z.string().optional(),
+    /** Only issues with all of these labels. Empty: every open issue. */
+    labels: z
+      .array(z.string().regex(GITHUB_LABEL_PATTERN, 'must be a plain label with no comma'))
+      .max(5)
+      .default([]),
+    /** How many new issues one read takes at most; the rest come next read. */
+    limit: z.number().int().min(1).max(100).default(30),
+  })
+  .strict();
+
+/** One configured intake source. */
+export const IntakeSourceEntrySchema = z.discriminatedUnion('kind', [
+  TrackerIntakeSourceSchema,
+  GithubIntakeSourceSchema,
+]);
+
+/**
+ * Where new work comes from (DOR-3258, DOR-3259): tracker teams and GitHub
+ * repositories' issues. Empty means the configured team alone, as before.
+ * `connection.intake` (the older list of queues) still reads as tracker
+ * sources until it moves here.
+ */
+export const IntakeSchema = z
+  .object({
+    sources: z.array(IntakeSourceEntrySchema).max(20).default([]),
+  })
+  .strict()
+  .prefault({});
+
+/** One resolved intake source. */
+export type IntakeSourceEntry = z.infer<typeof IntakeSourceEntrySchema>;
 
 /**
  * Agent identity & authorship marker (§7). No personal identity ships in the
@@ -1151,6 +1220,8 @@ export const FlowConfigSchema = z
     tracker: TrackerSchema.default('linear'),
     /** Tracker-connection coordinates (team, workspace) + transport preference. */
     connection: ConnectionSchema,
+    /** Where new work comes from: tracker teams and GitHub issues. */
+    intake: IntakeSchema,
     /** Agent identity & authorship marker. */
     identity: IdentitySchema,
     /** Ownership claim policy. */

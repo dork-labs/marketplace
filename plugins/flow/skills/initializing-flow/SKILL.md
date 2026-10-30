@@ -18,8 +18,8 @@ and their precedence are in `<flow-root>/config/CONFIG.md`.
 
 **Calibration.** A person present: ask each choice with `AskUserQuestion`, the safe
 option marked. Headless: apply each default, record it as an assumption, carry on.
-Setup is reversible by re-running `/flow:init`; the one exception is overwriting
-committed config, which always needs a person.
+Re-running `/flow:init` reverses setup, except overwriting committed config, which
+always needs a person.
 
 ## Step 1 — Detect
 
@@ -63,9 +63,12 @@ committed config, which always needs a person.
    operator to turn off branch-name auto-close in the tracker's git integration, so the
    PR body is the only closing signal.
 5. **Model tiers.** Ask for two models: **workhorse** (implementation, review, analysis)
-   and **fast** (mechanical work). The orchestrating model is never a delegate tier, so
-   do not ask for it. One model: bind both to it. Unknown: leave them unbound (each run
-   falls back to the harness default and says so). Headless: no bindings.
+   and **fast** (mechanical work). Never ask for the orchestrating model. One model:
+   bind both to it. Unknown: leave them unbound (runs use the harness default).
+   Headless: no bindings.
+6. **Intake sources** (`intake.sources`, `<flow-root>/docs/intake.mdx`): which tracker
+   teams and GitHub repos (`owner/name`) triage reads. Offer the team and `origin`'s
+   repo. Headless: empty (the team alone).
 
 ## Step 3 — Generate and verify the adapter (the gate)
 
@@ -80,16 +83,15 @@ node --experimental-strip-types "<flow-root>/scripts/validate-adapter.ts" --fixt
 Exit `0` with `{ "ok": true }` passes; otherwise fix the mapping behind the named
 invariant (`INV-1 .. INV-5`). **Never go to Step 4 until it is green.** On Node before
 22.6, run the scripts with `tsx`. An existing adapter: re-validate first, regenerate
-only if it fails. A tracker flow ships an adapter for (`adapter.origin: "shipped"`)
-needs none generated unless overriding it on purpose: validate it and move on.
+only if it fails. A shipped adapter (`adapter.origin: "shipped"`): validate it and move on.
 
 ## Step 4 — Write the settings and the rubric
 
 0. `cf prepare` prints `{ ok, committed, local, ignoreFiles }`; write to exactly those
    paths. `"ok": false`: **stop**, show `reason`; git would commit the credentials file.
 1. **`config.json`** (committed): from `config.example.json`, keeping `$schema`; set
-   `tracker`, `connection.transport`, `identity.agent`, `ownership.scope` and the `review`
-   block. Leave `models.bindings` empty and `connection.team` / `connection.workspace`
+   `tracker`, `connection.transport`, `identity.agent`, `ownership.scope`, `intake.sources`
+   and the `review` block. Leave `models.bindings` empty and `connection.team` / `connection.workspace`
    `null`. **Never a token, key or account handle here.** On a re-run, rewrite only after
    Step 1's confirmation.
 2. **`config.local.json`** (ignored): `cf scaffold` creates it, private, only if absent.
@@ -101,8 +103,8 @@ needs none generated unless overriding it on purpose: validate it and move on.
 4. **Rubric**, only when `review.adversarial` is true: `cf scaffold --rubric <review.rubric>`
    copies the template there if absent, never overwriting. It takes only a `.md` path
    inside the project; exit 2 otherwise: ask the operator to copy
-   `<flow-root>/templates/review-rubric.md` there. Print the resolved path; for a new one, ask the
-   operator to fill its two **FILL IN** sections. The rubric is committed.
+   `<flow-root>/templates/review-rubric.md` there. For a new one, ask the operator to fill
+   its two **FILL IN** sections. The rubric is committed.
 
 ## Step 4b — Accounts
 
@@ -122,7 +124,7 @@ Two checks answering different questions; report each by name.
   empty queue says "the oracle ran on zero candidates". **5b alone is never a green light.**
 
 Only after 5a passes, report ready: the tracker, the account 5a resolved, the identity
-mode, the routing scope, the review posture and rubric path, each tier's model (or
+mode, the routing scope, the intake sources, the review posture and rubric path, each tier's model (or
 unbound), the entry points, a reminder to commit a generated adapter, and every headless
 assumption.
 

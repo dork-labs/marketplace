@@ -117,6 +117,10 @@ const READ_EXACT = [
   'retro --json',
   'snapshot --json',
   'snapshot --include-closed --out .dork/flow/tmp/groom/backlog.json',
+  // DOR-3258: one fixed `gh issue list` per configured repo, and flow's own
+  // mark file. The repos come from config, never from an argument.
+  'intake --json',
+  'intake done --json',
 ];
 
 /**
@@ -255,6 +259,16 @@ describe('every scheduled skill lists read-tier needs and keeps its mode', () =>
     ]) {
       const entry = `Bash(${NODE} "${ROOT}/scripts/flow.ts" ${snapshot})`;
       expect(scheduleGaps('flow-triage', plant(entry))).toEqual([`${entry}: not a read`]);
+    }
+    // Intake is exact only (DOR-3258): a prefix would take --project, and no rule names gh.
+    for (const intake of ['intake:*', 'intake --project ../other --json']) {
+      const entry = `Bash(${NODE} "${ROOT}/scripts/flow.ts" ${intake})`;
+      expect(scheduleGaps('flow-triage', plant(entry))).toEqual([`${entry}: not a read`]);
+    }
+    for (const gh of ['gh:*', 'gh issue list:*', 'gh issue list -R acme/app --json number']) {
+      expect(scheduleGaps('flow-triage', plant(`Bash(${gh})`))).toEqual([
+        `Bash(${gh}): not a read`,
+      ]);
     }
     // Git that talks to a remote runs whatever the repo's own config names.
     for (const remote of ['git ls-remote --heads origin', 'git fetch', 'git pull']) {

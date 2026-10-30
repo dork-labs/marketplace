@@ -155,6 +155,13 @@ export function loadConfig(
 
   const merged = deepMerge(committed.policy, local.policy);
   const parsed = parsePolicy(merged, warnings);
+  if (parsed.connection.intake.length > 0) {
+    warnings.push(
+      parsed.intake.sources.length > 0
+        ? 'connection.intake is ignored because intake.sources is set; remove it'
+        : 'connection.intake has moved to intake.sources (each entry as {"kind": "tracker", "id": ...}); flow reads it as tracker sources until you move it'
+    );
+  }
   const autonomy = options.dorkHome === undefined ? null : readDial(roots, options.dorkHome);
   return {
     config: autonomy === null ? parsed : withDial(parsed, autonomy),

@@ -167,7 +167,7 @@ Supporting types: `Account` is the acting account `{ id, name? }`.
 `SubIssueSpec = { title, description, type, size? }`.
 `InboxEntry = { item: WorkItem, comment: { author: string, mentions: string[], body: string } }`.
 `ProjectOutcome = 'completed' | 'canceled'` — the two terminal project states.
-`IntakeSource = { id: string, name?: string }` — one configured intake queue, named by the install's `connection.intake` list.
+`IntakeSource = { id: string, name?: string }` — one configured intake queue, named by a `kind: tracker` entry in the install's `intake.sources` (or the older `connection.intake`).
 `IntakeReport = { id: string, source: IntakeSource, title: string, body: string, reporter?: string, receivedAt?: string, url?: string }` — a report from outside the team. Deliberately **not** a `WorkItem`: it has a different lifecycle and is never dispatched.
 `IntakeOutcome = { exit: 'duplicate' | 'promote' | 'attach' | 'needsInfo' | 'decline' | 'junk', linkedItem?: WorkItem, message?: string }` — Path C's six exits. `message` carries the reason for `decline` and the question for `needsInfo`; `linkedItem` is required for `promote`, `attach` and `duplicate`.
 
