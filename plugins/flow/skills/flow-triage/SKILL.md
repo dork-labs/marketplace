@@ -9,6 +9,7 @@ schedule:
   max-runtime: 30m
   permissions: default
   scope: project
+  projectFile: .agents/flow/config.json
 metadata:
   flow-needs:
     - 'Bash(node --experimental-strip-types "${CLAUDE_PLUGIN_ROOT}/scripts/config-files.ts")'
@@ -25,7 +26,7 @@ metadata:
 
 `<flow-root>` is two folders above this file's `realpath`.
 
-The **daily triage**, off until you approve it on the Schedules page.
+The **daily triage**, off until approved on the Schedules page.
 
 **Refused tool:** `<flow-root>/skills/flow-drain/refused-tool.md`.
 

@@ -79,6 +79,12 @@ function scheduleScope(fm: string): string | undefined {
   return /^ {2}scope:\s*["']?([\w]+)["']?\s*$/m.exec(block)?.[1];
 }
 
+/** The `projectFile:` value inside a frontmatter's `schedule:` block, if any. */
+function scheduleProjectFile(fm: string): string | undefined {
+  const block = /^schedule:\n((?: {2}.*\n?)*)/m.exec(fm)?.[1] ?? '';
+  return /^ {2}projectFile:\s*["']?([^"'\s]+)["']?\s*$/m.exec(block)?.[1];
+}
+
 /**
  * The entries of `metadata.flow-needs`, quotes stripped; `null` when it is
  * absent. Every line under the key, up to the next key at its level or above,
@@ -331,7 +337,9 @@ describe('every scheduled skill lists read-tier needs and keeps its mode', () =>
 
 // DOR-3376: every flow schedule needs a project to work in. From a global
 // install DorkOS would otherwise list it as a global schedule with no project;
-// `scope: project` makes it one switch per project instead, off until approved.
+// `scope: project` makes it one switch per project instead, off until approved,
+// and `projectFile` limits that to projects holding the file /flow:init writes.
+// With no `projectFile`, DorkOS gives no project a copy at all.
 describe('every scheduled skill is project-only', () => {
   it('says scope: project in its schedule block', () => {
     const skills = scheduledSkills();
@@ -339,6 +347,26 @@ describe('every scheduled skill is project-only', () => {
     for (const [name, text] of Object.entries(skills)) {
       expect({ name, scope: scheduleScope(frontmatter(text)) }).toEqual({ name, scope: 'project' });
     }
+  });
+
+  it('names the file /flow:init writes as its projectFile', () => {
+    for (const [name, text] of Object.entries(scheduledSkills())) {
+      expect({ name, projectFile: scheduleProjectFile(frontmatter(text)) }).toEqual({
+        name,
+        projectFile: '.agents/flow/config.json',
+      });
+    }
+  });
+
+  it('bites on a missing projectFile, another path, or one outside the block', () => {
+    const line = '  projectFile: .agents/flow/config.json\n';
+    const groom = scheduledSkills()['flow-groom'];
+    expect(scheduleProjectFile(frontmatter(groom.replace(line, '')))).toBeUndefined();
+    expect(
+      scheduleProjectFile(frontmatter(groom.replace('.agents/flow/config.json', '.dork/flow')))
+    ).toBe('.dork/flow');
+    const moved = groom.replace(line, '').replace('metadata:\n', `metadata:\n${line}`);
+    expect(scheduleProjectFile(frontmatter(moved))).toBeUndefined();
   });
 
   it('bites on a missing scope, another value, or a scope outside the block', () => {

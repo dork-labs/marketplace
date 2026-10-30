@@ -9,6 +9,7 @@ schedule:
   max-runtime: 20m
   permissions: default
   scope: project
+  projectFile: .agents/flow/config.json
 metadata:
   flow-needs:
     - 'Bash(node --experimental-strip-types "${CLAUDE_PLUGIN_ROOT}/scripts/config-files.ts")'
@@ -22,7 +23,7 @@ metadata:
 `<flow-root>` is two folders above this file's `realpath`.
 
 The schedulable **weekly retro**: flow reads its own journal and self-test
-results and files what should change in flow itself. Off until approved on the Schedules page.
+results and files what should change in flow. Off until approved on the Schedules page.
 
 `flow` below means `node --experimental-strip-types "<flow-root>/scripts/flow.ts"`.
 

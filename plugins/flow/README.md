@@ -217,10 +217,10 @@ agent session per run — so there is no scheduler to build.
   (`sessionId = run.id`) that claims and works exactly one issue to its gate, then
   ends — preserving fresh-session-per-issue.
 - **Activation** is install, then approve per project. Flow's four schedules
-  (`flow-drain`, `flow-groom`, `flow-triage`, `flow-retro`) say `scope: project`: even
-  from a global install, each project gets its own copy, switched off, on its
-  **Schedules** page, and a person approves it there. None runs as a global schedule,
-  and installing never arms a cron. Switch and timing outlast updates. Without
+  (`flow-drain`, `flow-groom`, `flow-triage`, `flow-retro`) say `scope: project` and
+  `projectFile: .agents/flow/config.json`: even from a global install, each project
+  `/flow:init` set up gets its own copy, off, on its **Schedules** page, for a person
+  to approve. None runs globally; installing never arms a cron. Switch and timing outlast updates. Without
   DorkOS schedule discovery, wire an external scheduler
   (`docs/bring-your-own-scheduler.mdx`). Running it needs the DorkOS server and the
   project's DorkOS agent registered.

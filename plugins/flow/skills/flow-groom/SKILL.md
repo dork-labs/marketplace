@@ -9,6 +9,7 @@ schedule:
   max-runtime: 30m
   permissions: default
   scope: project
+  projectFile: .agents/flow/config.json
 metadata:
   flow-needs:
     - 'Bash(node --experimental-strip-types "${CLAUDE_PLUGIN_ROOT}/scripts/config-files.ts")'
@@ -27,7 +28,7 @@ metadata:
 
 The schedulable **groom health check**: a weekly, read-only
 `/flow:groom check`. The full groom closes items, so it stays operator-run. Off
-until you approve it on the Schedules page.
+until approved on the Schedules page.
 
 **Refused tool:** `<flow-root>/skills/flow-drain/refused-tool.md`.
 

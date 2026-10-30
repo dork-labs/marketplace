@@ -1,6 +1,6 @@
 {
   "repo": "dork-labs/dorkos",
-  "ref": "c6d85f1060f731eb0e93504cc2acf16174ebf006",
+  "ref": "ccd718ef5fb1c1db4abae4e1f63c20e5e28776f6",
   "files": [
     "packages/shared/src/constants.ts",
     "packages/skills/src/duration.ts",
