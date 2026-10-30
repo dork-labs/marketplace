@@ -113,18 +113,25 @@ function isWithin(child: string, parent: string): boolean {
 export function assertProjectInRunCheckout(cwd: string, project: string): void {
   const target = path.resolve(cwd, project);
   const runTop = gitTopLevel(cwd);
+  // Only `rev-parse` may ever run against a `--project` target: its own
+  // `.git/config` still applies, and `rev-parse --show-toplevel` runs nothing it
+  // names. Never `status`, `diff` or anything else that runs fsmonitor, filters
+  // or hooks, which that config can point at any program.
   const targetTop = gitTopLevel(target);
+  // Where to run flow instead: the target's checkout, or the folder itself
+  // outside git. A plain path, printed as data, never quoted for a shell.
+  const runFrom = targetTop ?? real(target);
   if (runTop !== null) {
     if (targetTop === runTop) return;
     // Git cannot place a missing folder, so say what is really wrong with a typo.
     if (!existsSync(target)) throw new UsageError(`--project ${project} does not exist`);
     throw new UsageError(
-      `--project ${project} is outside this checkout (${runTop}); flow only acts for the checkout it runs in. Run flow from that project's own folder instead`
+      `--project ${project} is outside this checkout (${runTop}); flow only acts for the checkout it runs in. Run flow from inside ${runFrom}`
     );
   }
   if (targetTop === null && isWithin(real(target), real(cwd))) return;
   throw new UsageError(
-    `--project ${project} is outside the folder flow runs in (${real(cwd)}); flow only acts for the folder it runs in. Run flow from that project's own folder instead`
+    `--project ${project} is outside the folder flow runs in (${real(cwd)}); flow only acts for the folder it runs in. Run flow from inside ${runFrom}`
   );
 }
 

@@ -75,14 +75,19 @@ async function run(
   return { code, ran, out };
 }
 
-/** Expect the run refused with exit 2 and a message naming --project, the verb never started. */
+/**
+ * Expect the run refused with exit 2, the verb never started, and a message
+ * naming --project that ends by saying exactly where to run flow instead.
+ */
 function expectRefused(
   result: { code: number; ran: string | null; out: string },
-  why: RegExp = /^--project .* is outside /
+  runFrom: string
 ): void {
   expect(result.code).toBe(EXIT.usage);
   expect(result.ran).toBeNull();
-  expect(JSON.parse(result.out).error.message).toMatch(why);
+  const message: string = JSON.parse(result.out).error.message;
+  expect(message).toMatch(/^--project .* is outside /);
+  expect(message.endsWith(`. Run flow from inside ${runFrom}`)).toBe(true);
 }
 
 describe('inside a git checkout', () => {
@@ -98,15 +103,18 @@ describe('inside a git checkout', () => {
   });
 
   it('refuses another checkout, by absolute or relative path', async () => {
-    expectRefused(await run(repo, other));
-    expectRefused(await run(repo, '../other'));
+    expectRefused(await run(repo, other), other);
+    expectRefused(await run(repo, '../other'), other);
+    // A subfolder of the other checkout still names that checkout's top level.
+    mkdirSync(path.join(other, 'deep'));
+    expectRefused(await run(repo, '../other/deep'), other);
   });
 
-  it('refuses a symlink to another checkout, inside this one or not', async () => {
+  it('refuses a symlink to another checkout, inside this one or not, naming the real one', async () => {
     symlinkSync(other, path.join(repo, 'sub', 'link'));
     symlinkSync(other, path.join(base, 'link'));
-    expectRefused(await run(repo, 'sub/link'));
-    expectRefused(await run(repo, path.join(base, 'link')));
+    expectRefused(await run(repo, 'sub/link'), other);
+    expectRefused(await run(repo, path.join(base, 'link')), other);
   });
 
   it('refuses a linked worktree of the same repository', async () => {
@@ -127,16 +135,27 @@ describe('inside a git checkout', () => {
     );
     const worktree = path.join(base, 'wt');
     execFileSync('git', ['worktree', 'add', '-q', '-b', 'side', worktree], { cwd: repo });
-    expectRefused(await run(repo, worktree));
+    expectRefused(await run(repo, worktree), worktree);
   });
 
   it('names a --project that does not exist as missing', async () => {
-    expectRefused(await run(repo, 'sbu'), /^--project sbu does not exist$/);
+    const result = await run(repo, 'sbu');
+    expect(result.code).toBe(EXIT.usage);
+    expect(result.ran).toBeNull();
+    expect(JSON.parse(result.out).error.message).toBe('--project sbu does not exist');
   });
 
-  it('refuses a folder outside every checkout', async () => {
+  it('refuses a folder outside every checkout, naming that folder', async () => {
     mkdirSync(path.join(base, 'plain'));
-    expectRefused(await run(repo, path.join(base, 'plain')));
+    expectRefused(await run(repo, path.join(base, 'plain')), path.join(base, 'plain'));
+  });
+
+  it('prints the path as it is, with no shell quoting', async () => {
+    // A person may copy it: a space or a quote in the name stays as written.
+    const odd = path.join(base, "it's a repo");
+    mkdirSync(odd);
+    execFileSync('git', ['init', '-q'], { cwd: odd });
+    expectRefused(await run(repo, odd), odd);
   });
 
   it('ignores GIT_DIR and GIT_WORK_TREE when it asks git', async () => {
@@ -144,7 +163,7 @@ describe('inside a git checkout', () => {
     // whatever folder it was asked about.
     vi.stubEnv('GIT_DIR', path.join(repo, '.git'));
     vi.stubEnv('GIT_WORK_TREE', repo);
-    expectRefused(await run(repo, other));
+    expectRefused(await run(repo, other), other);
   });
 });
 
@@ -174,10 +193,10 @@ describe('outside git', () => {
     const plain = path.join(base, 'plain');
     mkdirSync(path.join(base, 'beside'), { recursive: true });
     mkdirSync(plain);
-    expectRefused(await run(plain, '../beside'));
+    expectRefused(await run(plain, '../beside'), path.join(base, 'beside'));
   });
 
   it('refuses a git checkout below it, where adapter code would load', async () => {
-    expectRefused(await run(base, repo));
+    expectRefused(await run(base, path.join(repo, 'sub')), repo);
   });
 });
