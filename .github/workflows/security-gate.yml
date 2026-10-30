@@ -17,15 +17,16 @@ env:
   # Security's list for the marketplace (security-auditor research,
   # marketplace-security-gate-scope.md, 2026-10-30): everything a package ships
   # into users' DorkOS (catalog, manifests, hooks, extensions, commands, skills,
-  # scripts, config), plus CI, agent config and dependencies. Docs, tests and
-  # fixtures inside a plugin are exempt. The workflow and its implementation are
-  # covered by .github/. Match both sides of renames.
-  SECURITY_PATH_PATTERN: '^\.claude-plugin/|^\.github/|^\.claude/|^\.agents/|^\.dork/|^scripts/|^tools/|^plugins/[^/]+/(?!(?:[^/]+/)*(?:docs|tests|engine-tests|fixtures)/)(?![^/]+\.md$)(?!LICENSE$)(?!NOTICE$)|^plugins/.*SKILL\.md$|(^|/)\.\.?(/|$)|//|(^|/)[pP][aA][cC][kK][aA][gG][eE]\.[jJ][sS][oO][nN]$|(^|/)package-lock\.json$|(^|/)npm-shrinkwrap\.json$|(^|/)pnpm-lock\.yaml$|(^|/)pnpm-workspace\.yaml$|(^|/)yarn\.lock$|(^|/)bun\.lockb?$|(^|/)\.npmrc$|(^|/)\.yarnrc(\.yml)?$|(^|/)\.nvmrc$|(^|/)\.node-version$|(^|/)patches/|(^|/)\.pnpmfile\.cjs$|(^|/)codeowners$'
+  # scripts, config, and docs agents read at run time), plus CI, agent config and
+  # dependencies. Exempt: a plugin's root tests/ and engine-tests/, a skill's own
+  # tests/, and a plugin's root README, CHANGELOG, LICENSE and NOTICE. The workflow
+  # and its implementation are covered by .github/. Match both sides of renames.
+  SECURITY_PATH_PATTERN: '^\.claude-plugin/|^(CLAUDE|AGENTS|REVIEW)\.md$|^\.mcp\.json$|^\.github/|^\.claude/|^\.agents/|^\.dork/|^scripts/|^tools/|^plugins/[^/]+/(?!(?:tests|engine-tests)/)(?!skills/[^/]+/tests/)(?!(?:README|CHANGELOG)\.md$)(?!LICENSE$)(?!NOTICE$)|^plugins/.*SKILL\.md$|(^|/)\.\.?(/|$)|//|(^|/)[pP][aA][cC][kK][aA][gG][eE]\.[jJ][sS][oO][nN]$|(^|/)package-lock\.json$|(^|/)npm-shrinkwrap\.json$|(^|/)pnpm-lock\.yaml$|(^|/)pnpm-workspace\.yaml$|(^|/)yarn\.lock$|(^|/)bun\.lockb?$|(^|/)\.npmrc$|(^|/)\.yarnrc(\.yml)?$|(^|/)\.nvmrc$|(^|/)\.node-version$|(^|/)patches/|(^|/)\.pnpmfile\.cjs$|(^|/)codeowners$'
 
 jobs:
   security-gate:
     # Enforcement requires the ruleset workflow source pinned to main. A named
-    # status check alone lets a candidate replace this YAML. See ci/security-gate-promotion.md.
+    # status check alone lets a candidate replace this YAML. See .github/SECURITY-GATE.md.
     permissions:
       contents: read
       statuses: read
