@@ -48,7 +48,8 @@ function real(p: string): string {
 /**
  * The variables that point git at a repository, work tree or config other than
  * the one it would find from the folder. `GIT_CEILING_DIRECTORIES` and
- * `GIT_DISCOVERY_ACROSS_FILESYSTEM` stay: they only ever narrow what git finds.
+ * `GIT_DISCOVERY_ACROSS_FILESYSTEM` stay: they only change how far up from the
+ * folder git looks, so it still finds the folder's own repository or none.
  */
 const REDIRECTING_GIT_VARS = new Set([
   'GIT_DIR',
