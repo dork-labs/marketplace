@@ -21,21 +21,28 @@ Also: the catalog files; every `SKILL.md`; `.github`, `.claude`, `.agents`,
 and `.mcp.json`; and `package.json`, lockfiles and npm config anywhere. A path
 with a `.`, `..` or empty segment always counts. Both sides of a rename count.
 
-Files a plugin's manifests point at count too, wherever they sit: every path
-named in a plugin's `.claude-plugin/plugin.json`, `hooks/hooks.json`,
-`.mcp.json` or `.dork/manifest.json` in the base commit, even inside a test
-folder (`scripts/security-manifest-paths.mjs`; the verifier adds them before it
-checks, and fails if a manifest doesn't parse).
-`scripts/fixtures/security-path-variants.json` holds case and Unicode spellings
-that both repos test.
+A plugin whose manifests mention a test folder loses its test-folder
+exemptions: if any string in its `.claude-plugin/plugin.json`,
+`hooks/hooks.json`, `.mcp.json`, `.lsp.json`, `.dork/manifest.json`, or any
+JSON file those name, contains `tests` or `engine-tests` as a path segment, all
+of that plugin's test folders count (`scripts/security-manifest-paths.mjs`,
+run by the verifier from the base commit; it fails the check if a manifest
+doesn't parse). A mention that climbs out with `..` counts for every plugin.
 
 **Accepted residual risk.** Test folders are exempt because they change too
 often to gate, but two of them can run on a machine: `/flow:self-test` runs
 flow's `engine-tests/` through vitest when dev dependencies are installed (and
 reads its fixtures), and visual-companion's `npm test` runs its skill's
-`tests/`. A test folder a manifest points at is covered (above); one reached
-another way, such as a `package.json` script, needs that file changed first,
-and it is a security path.
+`tests/`. A test folder a manifest mentions is covered (above). One reached
+another way (a `package.json` script, `hooks:` in a skill's or command's
+frontmatter, a `!` line in a command) needs that file changed first, and it is
+a security path, so the pointer itself gets reviewed.
+
+**Known mismatch.** The initializer reads only the workflow's list, not the
+manifest rule, so for a PR that edits only a manifest-mentioned test file it
+posts "no security paths" while the verifier refuses the PR. That fails
+closed: an automatic success never counts for a security-path diff. Security
+will still need to look at the PR.
 
 ## How approval works
 
