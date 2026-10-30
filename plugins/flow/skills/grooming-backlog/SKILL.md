@@ -101,10 +101,10 @@ evidence, the project changes, the ready-set size with a sample, and every flag.
 
 ### Phase 6 — Ordered write pass
 
-**Projects → closures → item fields → relations.** Small batches, each re-read after
+**Projects → closures → item fields → relations.** Small batches, re-read after
 writing. Label writes are unions against a read taken just
 before the write. A failed write retries by the adapter's safer
-path, then is reported.
+path, then is reported, never dropped.
 
 ### Phase 7 — Verify and report
 
