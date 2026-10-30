@@ -330,6 +330,65 @@ describe('tracker failures (exit 4)', () => {
     expect(JSON.parse(out).error.message).toMatch(/only inside a git checkout/);
   });
 
+  it("loads a project's own adapter code only for the run's own checkout", async () => {
+    // Purpose: the check at the import itself (DOR-3377), on the checkout the
+    // code is really loaded from, whatever was said about --project before.
+    execFileSync('git', ['init', '-q'], { cwd: project });
+    const other = path.join(base, 'other');
+    mkdirSync(other);
+    execFileSync('git', ['init', '-q'], { cwd: other });
+    writeConfig({ tracker: 'fake' });
+    linkFakeAdapter(path.join(project, '.agents/flow/adapters/fake'));
+    const from = (runDir: string) =>
+      loadCodeAdapter({
+        roots: roots(),
+        loaded: loadConfig(roots(), {}),
+        warn: () => undefined,
+        runDir,
+      });
+    const error = await rejection(from(other));
+    expect(error).toBeInstanceOf(ConfigError);
+    expect((error as Error).message).toMatch(/only for the checkout it runs in/);
+    await expect(from(path.join(project, '.agents'))).resolves.toBeDefined();
+  });
+
+  it('finds the checkout from the folder, not from GIT_DIR or GIT_WORK_TREE', async () => {
+    // Purpose: either variable would make git answer for another checkout, and
+    // flow would then load that checkout's adapter code with no --project at all.
+    const other = path.join(base, 'other');
+    mkdirSync(other);
+    execFileSync('git', ['init', '-q'], { cwd: other });
+    execFileSync('git', ['init', '-q'], { cwd: project });
+    write(path.join(other, '.agents/flow/config.json'), { tracker: 'fake' });
+    linkFakeAdapter(path.join(other, '.agents/flow/adapters/fake'));
+    vi.stubEnv('GIT_DIR', path.join(other, '.git'));
+    vi.stubEnv('GIT_WORK_TREE', other);
+    const probe: VerbDefinition = {
+      name: 'probe',
+      summary: 'A test-only verb that loads the adapter.',
+      load: async () => ({
+        run: async (ctx) => {
+          await ctx.adapter();
+          return { json: {}, text: '' };
+        },
+      }),
+    };
+    let out = '';
+    const code = await main(['probe', '--json'], {
+      env: {},
+      cwd: project,
+      now: () => new Date('2026-10-30T12:00:00.000Z'),
+      stdout: { write: (chunk: string) => (out += chunk) },
+      stderr: { write: () => true },
+      createAdapter: (request) => createCodeAdapter({ ...request, flowRoot: plugin }),
+      runProcess: realProcessRunner,
+      verbs: [probe],
+    });
+    // The project itself has no config; other's adapter never loads.
+    expect(code).toBe(EXIT.config);
+    expect(JSON.parse(out).error.message).toMatch(/not configured in this project/);
+  });
+
   it('keeps a typed error from the adapter at its own exit code', async () => {
     // Purpose: the guard wraps only untyped throws; an adapter saying "item not
     // found" (exit 5) must not be flattened to exit 4.

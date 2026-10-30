@@ -19,8 +19,11 @@
  *   a git checkout. Flow loads only its shipped adapters outside git (0.56.0),
  *   so this keeps a run from reaching into one that has adapter code.
  *
- * Git runs without the caller's `GIT_*` variables, so `GIT_DIR` or
- * `GIT_WORK_TREE` cannot make one checkout answer for another.
+ * It is checked twice: on `--project` before a verb starts, for a clear exit 2,
+ * and on the checkout the adapter code is loaded from, just before the import.
+ * Git always runs without the caller's `GIT_*` variables, here and when
+ * `config-files.ts` finds the checkout, so `GIT_DIR`, `GIT_WORK_TREE` or a
+ * `GIT_CONFIG_*` setting cannot make the two answers differ.
  *
  * Dependency-free: node builtins and other zero-dependency local modules only.
  *
@@ -28,10 +31,10 @@
  */
 
 import { execFileSync } from 'node:child_process';
-import { realpathSync } from 'node:fs';
+import { existsSync, realpathSync } from 'node:fs';
 import path from 'node:path';
 
-import { UsageError } from './errors.ts';
+import { ConfigError, UsageError } from './errors.ts';
 
 /** A path with every symlink resolved, or the path made absolute when it does not exist. */
 function real(p: string): string {
@@ -42,8 +45,13 @@ function real(p: string): string {
   }
 }
 
-/** This process's environment without any `GIT_*` variable. */
-function gitFreeEnv(): NodeJS.ProcessEnv {
+/**
+ * This process's environment without any `GIT_*` variable, for every git call
+ * that decides which checkout flow acts for.
+ *
+ * @returns A copy of `process.env` with the `GIT_*` names removed.
+ */
+export function gitFreeEnv(): NodeJS.ProcessEnv {
   return Object.fromEntries(
     Object.entries(process.env).filter(([name]) => !name.toUpperCase().startsWith('GIT_'))
   );
@@ -71,7 +79,7 @@ export function gitTopLevel(dir: string): string | null {
 /** Whether `child` is `parent` or inside it. */
 function isWithin(child: string, parent: string): boolean {
   const rel = path.relative(parent, child);
-  return rel === '' || (!rel.startsWith('..') && !path.isAbsolute(rel));
+  return rel === '' || (rel !== '..' && !rel.startsWith(`..${path.sep}`) && !path.isAbsolute(rel));
 }
 
 /**
@@ -79,14 +87,17 @@ function isWithin(child: string, parent: string): boolean {
  *
  * @param cwd - The folder flow was started in.
  * @param project - The `--project` value as given, relative to `cwd` or absolute.
- * @throws {UsageError} When `project` is outside `cwd`'s checkout (exit 2).
+ * @throws {UsageError} When `project` is outside `cwd`'s checkout, or, inside
+ *   one, does not exist (exit 2).
  */
 export function assertProjectInRunCheckout(cwd: string, project: string): void {
-  const runTop = gitTopLevel(cwd);
   const target = path.resolve(cwd, project);
+  const runTop = gitTopLevel(cwd);
   const targetTop = gitTopLevel(target);
   if (runTop !== null) {
     if (targetTop === runTop) return;
+    // Git cannot place a missing folder, so say what is really wrong with a typo.
+    if (!existsSync(target)) throw new UsageError(`--project ${project} does not exist`);
     throw new UsageError(
       `--project ${project} is outside this checkout (${runTop}); flow only acts for the checkout it runs in. Run flow from that project's own folder instead`
     );
@@ -94,5 +105,20 @@ export function assertProjectInRunCheckout(cwd: string, project: string): void {
   if (targetTop === null && isWithin(real(target), real(cwd))) return;
   throw new UsageError(
     `--project ${project} is outside the folder flow runs in (${real(cwd)}); flow only acts for the folder it runs in. Run flow from that project's own folder instead`
+  );
+}
+
+/**
+ * Refuse to load a project's own adapter code from any checkout but the run's.
+ *
+ * @param runDir - The folder flow was started in.
+ * @param checkout - The checkout the adapter code would be loaded for.
+ * @throws {ConfigError} When `checkout` is not `runDir`'s git top level (exit 3).
+ */
+export function assertCheckoutIsRunCheckout(runDir: string, checkout: string): void {
+  const runTop = gitTopLevel(runDir);
+  if (runTop !== null && real(checkout) === runTop) return;
+  throw new ConfigError(
+    `flow loads a project's own adapter code only for the checkout it runs in, and ${checkout} is not ${runTop ?? runDir}`
   );
 }

@@ -74,10 +74,13 @@ async function run(
 }
 
 /** Expect the run refused with exit 2 and a message naming --project, the verb never started. */
-function expectRefused(result: { code: number; ran: string | null; out: string }): void {
+function expectRefused(
+  result: { code: number; ran: string | null; out: string },
+  why: RegExp = /^--project .* is outside /
+): void {
   expect(result.code).toBe(EXIT.usage);
   expect(result.ran).toBeNull();
-  expect(JSON.parse(result.out).error.message).toMatch(/^--project .* is outside /);
+  expect(JSON.parse(result.out).error.message).toMatch(why);
 }
 
 describe('inside a git checkout', () => {
@@ -106,19 +109,27 @@ describe('inside a git checkout', () => {
 
   it('refuses a linked worktree of the same repository', async () => {
     // A worktree has a top level of its own and its own adapter code on its branch.
-    execFileSync('git', ['commit', '-q', '--allow-empty', '-m', 'init'], {
-      cwd: repo,
-      env: {
-        ...process.env,
-        GIT_AUTHOR_NAME: 't',
-        GIT_AUTHOR_EMAIL: 't@example.com',
-        GIT_COMMITTER_NAME: 't',
-        GIT_COMMITTER_EMAIL: 't@example.com',
-      },
-    });
+    execFileSync(
+      'git',
+      ['-c', 'commit.gpgsign=false', 'commit', '-q', '--allow-empty', '-m', 'init'],
+      {
+        cwd: repo,
+        env: {
+          ...process.env,
+          GIT_AUTHOR_NAME: 't',
+          GIT_AUTHOR_EMAIL: 't@example.com',
+          GIT_COMMITTER_NAME: 't',
+          GIT_COMMITTER_EMAIL: 't@example.com',
+        },
+      }
+    );
     const worktree = path.join(base, 'wt');
     execFileSync('git', ['worktree', 'add', '-q', '-b', 'side', worktree], { cwd: repo });
     expectRefused(await run(repo, worktree));
+  });
+
+  it('names a --project that does not exist as missing', async () => {
+    expectRefused(await run(repo, 'sbu'), /^--project sbu does not exist$/);
   });
 
   it('refuses a folder outside every checkout', async () => {
@@ -139,8 +150,11 @@ describe('outside git', () => {
   it('passes the folder itself and a subfolder', async () => {
     const plain = path.join(base, 'plain');
     mkdirSync(path.join(plain, 'sub'), { recursive: true });
+    mkdirSync(path.join(plain, '..dots'));
     expect((await run(plain, plain)).code).toBe(EXIT.ok);
     expect((await run(plain, 'sub')).code).toBe(EXIT.ok);
+    // A name that only starts with two dots is still inside.
+    expect((await run(plain, '..dots')).code).toBe(EXIT.ok);
   });
 
   it('refuses a folder beside it', async () => {

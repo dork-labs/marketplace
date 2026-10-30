@@ -450,6 +450,7 @@ export async function main(argv: readonly string[], deps: SelftestDeps): Promise
           : import('./tracker/load.ts').then((load) =>
               load.createCodeAdapter({
                 projectDir,
+                runDir: deps.cwd,
                 flowRoot,
                 env: deps.env,
                 runProcess: realProcessRunner,
