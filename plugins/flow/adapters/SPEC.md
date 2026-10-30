@@ -99,7 +99,9 @@ tracker's native labels into the generic families before placing them on
 
 - **`agent/*`** - the durable disposition state machine: `agent/ready`,
   `agent/claimed`, `agent/completed`, `agent/needs-input`. `agentDisposition` is
-  derived from this family.
+  derived from this family. Also `agent/from-outside`, on an item captured from
+  outside the team: it has no disposition, no flow write replaces it, and only a
+  person or the PM clears it (`../docs/intake.mdx`).
 - **`stage/*`** - where the next session resumes. At most one, and only while
   the item is not started (`backlog` or `unstarted`); while it is started, the
   run record carries the stage.
@@ -666,7 +668,10 @@ interface WorkStateChange {
 - It reads the team's labels first and refuses, creating nothing: a label the
   team does not have (an adapter never creates labels), two labels of one group
   (a tracker applies one label per group), and any `agent/*` label (a new item
-  is never ready: readiness is triage's decision). It finds the project by id or
+  is never ready: readiness is triage's decision) except `agent/from-outside`,
+  which marks an item captured from outside the team. An adapter that predates
+  that exception refuses it, so a capture fails loudly instead of filing an
+  unmarked item. It finds the project by id or
   exact name with a filtered read, so no page limit can miss it, and refuses a
   project or parent that is missing or another team's.
 - The item lands where the tracker puts new work (Linear: its triage state).

@@ -422,6 +422,27 @@ describe('flow create', () => {
     expect(t.fake.writes).toEqual([]);
   });
 
+  it('files an item captured from outside with agent/from-outside, the one agent/* label it takes', async () => {
+    // Purpose: a captured GitHub issue is never readied unattended (DOR-3258).
+    const t = tracker({ items: [existing('FAKE-1')] });
+    const captured = await flow(
+      [
+        'create',
+        '--title',
+        'Let people export the report as CSV [acme/app#7]',
+        '--description',
+        'People ask for the report as a CSV file.',
+        '--label',
+        'type/idea',
+        '--label',
+        'agent/from-outside',
+      ],
+      t
+    );
+    expect(captured.code).toBe(EXIT.ok);
+    expect(added(t, ['FAKE-1'])[0].labels).toEqual(['type/idea', 'agent/from-outside']);
+  });
+
   it('writes nothing on --dry-run and prints the planned item', async () => {
     const t = tracker();
     const run = await flow([...CAPTURE, '--dry-run', '--priority', '4'], t);

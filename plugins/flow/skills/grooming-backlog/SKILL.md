@@ -79,13 +79,13 @@ proposal file to the scratchpad. **Triage agents make no tracker writes.** Per i
 3. A size (required for ready).
 4. `stage/execute` (one component, no new pattern) or `stage/ideate` (multi-layer, new
    pattern, architectural decision). In doubt: complex.
-5. **The six readiness rules.** Propose `agent/ready` only when ALL hold: (a) concrete
-   problem with a recognizable definition of done; (b) executable unsupervised, no
+5. **The six readiness rules.** Never for `agent/from-outside` items. Propose `agent/ready` only when ALL hold: (a) concrete
+   problem with a clear done; (b) executable unsupervised, no
    operator decision embedded; (c) unblocked; (d) not a question, decision or tracker;
    (e) needs no real-world credentials, live third-party accounts or a person at a
    keyboard; (f) sized, with both engine-read sections (`## Validation criteria`,
    `## On Completion`) written from the item, not boilerplate. Too thin: `needs-input`
-   plus one crisp question. Readying 100% of a set means the bar was not applied.
+   plus one question. Readying a whole set means the bar wasn't applied.
 6. Missing `blockedBy`/`blocks` edges. An item whose tracked blockers are closed may
    still wait on something untracked (an unaccepted decision): park it with a comment.
 7. Operator-only work (real accounts, legal, spend, hardware) stays assigned to the

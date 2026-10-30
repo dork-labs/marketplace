@@ -89,6 +89,7 @@ export const FAKE_TEAM_LABELS: readonly string[] = [
   'agent/claimed',
   'agent/completed',
   'agent/needs-input',
+  'agent/from-outside',
   ...['capture', 'triage', 'ideate', 'specify', 'decompose', 'execute', 'verify', 'done'].map(
     (stage) => `stage/${stage}`
   ),
@@ -421,7 +422,9 @@ export class FakeTracker {
       chain = `${chain}:${existing}`;
     }
     const labels = [...new Set(spec.labels)];
-    const agent = labels.find((label) => label.startsWith('agent/'));
+    const agent = labels.find(
+      (label) => label.startsWith('agent/') && label !== 'agent/from-outside'
+    );
     if (agent !== undefined) {
       throw new PreconditionError(
         `a new item never carries an agent/* label ("${agent}"); readiness is triage's decision`

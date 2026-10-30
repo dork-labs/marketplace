@@ -369,3 +369,75 @@ describe('a refused tool ends the run red, in every scheduled skill', () => {
     ]);
   });
 });
+
+/**
+ * `agent/from-outside` (Security on #128): only a person, or the PM in its own
+ * triage, clears it. No flow skill removes it, attended or not; flow lists the
+ * items and closes one when a person says so. The rule is stated where triage,
+ * readiness and capture are taught, and no shipped prose says otherwise.
+ */
+const FROM_OUTSIDE_RULE: Record<string, RegExp> = {
+  'skills/flow-triage/SKILL.md': /never removing `agent\/from-outside`/,
+  'skills/triaging-work/SKILL.md': /Never remove `agent\/from-outside`\*\*, attended or not/,
+  'skills/grooming-backlog/SKILL.md':
+    /Never for `agent\/from-outside` items\. Propose `agent\/ready`/,
+  'docs/intake.mdx': /Flow never removes it, attended or not/,
+};
+
+/** Every shipped prose file: skills, commands and docs. */
+function shippedProse(): Record<string, string> {
+  const out: Record<string, string> = {};
+  const walk = (rel: string) => {
+    for (const entry of readdirSync(path.join(FLOW_ROOT, rel), { withFileTypes: true })) {
+      const child = path.join(rel, entry.name);
+      if (entry.isDirectory()) walk(child);
+      else if (/\.mdx?$/.test(entry.name))
+        out[child] = readFileSync(path.join(FLOW_ROOT, child), 'utf8');
+    }
+  };
+  for (const rel of ['skills', 'commands', 'docs']) walk(rel);
+  return out;
+}
+
+/** Sentences that tell flow to remove the label (any that mention removing it without forbidding it). */
+function fromOutsideGaps(files: Record<string, string>): string[] {
+  const gaps: string[] = [];
+  for (const [file, rule] of Object.entries(FROM_OUTSIDE_RULE)) {
+    if (!rule.test(files[file] ?? '')) gaps.push(`${file}: states the rule`);
+  }
+  for (const [file, text] of Object.entries(files)) {
+    for (const sentence of text.replace(/\s+/g, ' ').split(/(?<=[.!?])\s/)) {
+      if (!sentence.includes('agent/from-outside') && !/this label/.test(sentence)) continue;
+      if (!/\b(remove|clear|drop|delete|strip)/i.test(sentence)) continue;
+      if (/\b(never|only|refuse)/i.test(sentence)) continue;
+      // The reviewer's own steps (a person or the PM), in the one file that teaches them.
+      if (
+        file === 'docs/intake.mdx' &&
+        /^Re-state the work in our words, remove the label/.test(sentence)
+      )
+        continue;
+      gaps.push(`${file}: "${sentence.slice(0, 80)}"`);
+    }
+  }
+  return gaps;
+}
+
+describe('agent/from-outside: no flow skill removes it', () => {
+  it('the rule is stated where it is taught, and nothing shipped says otherwise', () => {
+    expect(fromOutsideGaps(shippedProse())).toEqual([]);
+  });
+
+  it('bites on a dropped rule, or a step that removes the label', () => {
+    const files = shippedProse();
+    files['skills/triaging-work/SKILL.md'] = files['skills/triaging-work/SKILL.md'].replace(
+      'Never remove `agent/from-outside`',
+      'Mind `agent/from-outside`'
+    );
+    files['skills/flow-groom/SKILL.md'] +=
+      '\nRemove `agent/from-outside` once the item reads well.\n';
+    expect(fromOutsideGaps(files)).toEqual([
+      'skills/triaging-work/SKILL.md: states the rule',
+      'skills/flow-groom/SKILL.md: "Remove `agent/from-outside` once the item reads well."',
+    ]);
+  });
+});

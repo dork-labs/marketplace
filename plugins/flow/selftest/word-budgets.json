@@ -80,8 +80,8 @@
     "target": 2252
   },
   "docs/health.mdx": {
-    "baseline": 311,
-    "target": 311
+    "baseline": 310,
+    "target": 310
   },
   "docs/how-it-works.mdx": {
     "baseline": 3116,
@@ -92,8 +92,8 @@
     "target": 1077
   },
   "docs/intake.mdx": {
-    "baseline": 433,
-    "target": 433
+    "baseline": 428,
+    "target": 428
   },
   "docs/landing.mdx": {
     "baseline": 785,
@@ -204,12 +204,12 @@
     "target": 228
   },
   "skills/flow-triage/SKILL.md": {
-    "baseline": 380,
-    "target": 380
+    "baseline": 378,
+    "target": 378
   },
   "skills/grooming-backlog/SKILL.md": {
-    "baseline": 1156,
-    "target": 1156
+    "baseline": 1155,
+    "target": 1155
   },
   "skills/ideating-features/SKILL.md": {
     "baseline": 250,
@@ -220,8 +220,8 @@
     "target": 1117
   },
   "skills/linear-adapter/SKILL.md": {
-    "baseline": 1381,
-    "target": 1381
+    "baseline": 1380,
+    "target": 1380
   },
   "skills/specifying-work/SKILL.md": {
     "baseline": 361,
@@ -232,8 +232,8 @@
     "target": 1271
   },
   "skills/triaging-work/SKILL.md": {
-    "baseline": 1138,
-    "target": 1138
+    "baseline": 1135,
+    "target": 1135
   },
   "skills/verifying-work/proof-test.md": {
     "baseline": 307,

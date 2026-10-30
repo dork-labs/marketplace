@@ -1049,7 +1049,11 @@ export function createAdapter(ctx: AdapterContext): CodeAdapter {
 
     async createItem(spec: NewItem): Promise<CreatedItem> {
       const { id: teamId, key } = await team();
-      const agent = spec.labels.find((label) => label.startsWith('agent/'));
+      // agent/from-outside is the one exception: it marks an item captured from
+      // outside the team, which keeps it from being readied unattended.
+      const agent = spec.labels.find(
+        (label) => label.startsWith('agent/') && label !== 'agent/from-outside'
+      );
       if (agent !== undefined) {
         throw new PreconditionError(
           `a new item never carries an agent/* label ("${agent}"); readiness is triage's decision`

@@ -26,7 +26,12 @@ import { FlowStateSchema } from '../flow-state.ts';
 import { requireCapabilities } from '../tracker/load.ts';
 import type { Capability, CodeAdapter, ItemWithComments, WorkItem } from '../tracker/types.ts';
 import { verifyWrite } from '../tracker/verify-write.ts';
-import { STAGE_LABEL_PREFIX, type StageTable, type WorkStateChange } from '../work-state.ts';
+import {
+  AGENT_FROM_OUTSIDE,
+  STAGE_LABEL_PREFIX,
+  type StageTable,
+  type WorkStateChange,
+} from '../work-state.ts';
 import type { VerbContext } from './context.ts';
 import { verbLoadOptions } from './load-options.ts';
 import { buildProvenance } from './provenance.ts';
@@ -99,7 +104,27 @@ function checkStoreWritable(file: string): void {
 }
 
 /**
- * Apply one change and confirm the tracker kept it.
+ * Refuse a change that would replace `agent/from-outside` (DOR-3258). Only a
+ * person, or the PM in its own triage, clears that label, by editing the
+ * tracker with a comment saying who; no flow write may, attended or not.
+ * Closing the item is allowed: a person may ask for it, and a closed item is
+ * never built.
+ *
+ * @param item - The item as read before the write.
+ * @param change - The change about to be written.
+ * @throws {PreconditionError} When the change would replace the label (exit 5).
+ */
+export function requireNotFromOutside(item: WorkItem, change: WorkStateChange): void {
+  if (!item.labels.includes(AGENT_FROM_OUTSIDE) || change.agentLabel === undefined) return;
+  if (change.stateCategory === 'completed' || change.stateCategory === 'canceled') return;
+  throw new PreconditionError(
+    `${item.identifier} carries ${AGENT_FROM_OUTSIDE}: it came from outside the team, and only a person (or the PM in its own triage) clears that label, by editing the tracker after re-stating the work in our words, with a comment saying who. Flow leaves it alone.`
+  );
+}
+
+/**
+ * Apply one change and confirm the tracker kept it. A change that would
+ * replace `agent/from-outside` is refused before any write.
  *
  * @param adapter - The adapter.
  * @param item - The item as read before the write.
@@ -112,6 +137,7 @@ export async function applyAndVerify(
   item: WorkItem,
   change: WorkStateChange
 ): Promise<ItemWithComments> {
+  requireNotFromOutside(item, change);
   await adapter.applyWorkState(item, change);
   return verifyWrite(adapter, item, change);
 }
