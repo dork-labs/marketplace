@@ -389,7 +389,7 @@ function labelFresh(facts: Record<string, unknown>, label: string, head: string)
   if (Number.isNaN(arrivedAt)) {
     return refuse(
       'security-label-unverified',
-      `flow cannot tell when ${short(head)} arrived as the head (GitHub shows no force-push to it and no check suite a push made for it), so it cannot tell whether "${label}" covers it`
+      `flow cannot tell when ${short(head)} arrived as the head (flow found no force-push or push-made check suite it could date it by), so it cannot tell whether "${label}" covers it`
     );
   }
   if (Number.isNaN(labelledAt)) {
