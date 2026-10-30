@@ -265,7 +265,7 @@ test('workflow path list covers Security’s marketplace list and both sides of 
   }
 });
 
-test('a docs-only PR passes; a security-path PR without the App’s approval fails', async () => {
+test('a specs-and-README PR passes; a security-path PR without the App’s approval fails', async () => {
   const docs = fixture({ files: ['specs/drain.md', 'README.md'] });
   assert.equal(
     await checkPullRequest(docs.api, prEvent, pattern),
