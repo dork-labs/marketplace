@@ -117,7 +117,7 @@ export async function reviewLaunch(
       sha,
       base: await reviewBase(ctx.runProcess, target, sha),
       deltaFrom: 'This is the VERIFY review of this item, before its pull request opens.',
-      proof: proofBriefSection(run, sha),
+      proof: proofBriefSection(run, run.worktreePath || ctx.projectDir, sha),
       rubric: config.review.rubric,
       flow,
       findingsFile,

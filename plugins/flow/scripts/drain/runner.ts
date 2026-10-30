@@ -910,7 +910,7 @@ export async function runPass(deps: PassDeps): Promise<PassReport> {
         deltaFrom: deltaFrom
           ? `This is a re-review. Also read \`git diff ${deltaFrom} ${handle.sha}\` first: it is what changed since the last review.`
           : 'This is the first review of this branch.',
-        proof: proofBriefSection(run, handle.sha),
+        proof: proofBriefSection(run, run.worktreePath, handle.sha),
         rubric: deps.settings.rubric,
         flow: deps.flow,
         findingsFile: path.join(handle.worktree, REVIEWER_FINDINGS_PATH),
