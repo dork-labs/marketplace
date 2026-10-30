@@ -376,7 +376,7 @@ export interface ResumeResult {
 
 /**
  * Run git in `cwd`, returning trimmed stdout, or `null` when it fails. Without
- * the caller's `GIT_*` variables, so git answers for `cwd` and nothing else
+ * the caller's variables that redirect git, so it answers for `cwd` and nothing else
  * (`project-boundary.ts`).
  */
 function gitOutput(cwd: string, args: readonly string[]): string | null {

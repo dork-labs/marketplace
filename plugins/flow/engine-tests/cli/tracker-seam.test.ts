@@ -93,11 +93,14 @@ function proseOnlyAdapter(tracker: string): void {
 
 async function load(transport?: Parameters<typeof loadCodeAdapter>[0]['transport']) {
   const warnings: string[] = [];
+  // roots() says the project is a checkout; make it one, as the import-time check asks git.
+  execFileSync('git', ['init', '-q'], { cwd: project });
   const adapter = await loadCodeAdapter({
     roots: roots(),
     loaded: loadConfig(roots(), {}),
     warn: (message) => warnings.push(message),
     transport,
+    runDir: project,
   });
   return { adapter, warnings };
 }

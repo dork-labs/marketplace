@@ -21,9 +21,9 @@
  *
  * It is checked twice: on `--project` before a verb starts, for a clear exit 2,
  * and on the checkout the adapter code is loaded from, just before the import.
- * Git always runs without the caller's `GIT_*` variables, here and when
- * `config-files.ts` finds the checkout, so `GIT_DIR`, `GIT_WORK_TREE` or a
- * `GIT_CONFIG_*` setting cannot make the two answers differ.
+ * Git runs without the caller's variables that redirect it (`GIT_DIR`,
+ * `GIT_WORK_TREE`, `GIT_CONFIG*` and the like), here and when `config-files.ts`
+ * finds the checkout, so they cannot make the two answers differ.
  *
  * Dependency-free: node builtins and other zero-dependency local modules only.
  *
@@ -46,15 +46,34 @@ function real(p: string): string {
 }
 
 /**
- * This process's environment without any `GIT_*` variable, for every git call
- * that decides which checkout flow acts for.
+ * The variables that point git at a repository, work tree or config other than
+ * the one it would find from the folder. `GIT_CEILING_DIRECTORIES` and
+ * `GIT_DISCOVERY_ACROSS_FILESYSTEM` stay: they only ever narrow what git finds.
+ */
+const REDIRECTING_GIT_VARS = new Set([
+  'GIT_DIR',
+  'GIT_WORK_TREE',
+  'GIT_COMMON_DIR',
+  'GIT_INDEX_FILE',
+  'GIT_OBJECT_DIRECTORY',
+  'GIT_ALTERNATE_OBJECT_DIRECTORIES',
+  'GIT_NAMESPACE',
+]);
+
+/** Whether a variable redirects git: one of {@link REDIRECTING_GIT_VARS}, or any `GIT_CONFIG*`. */
+function redirectsGit(name: string): boolean {
+  const upper = name.toUpperCase();
+  return REDIRECTING_GIT_VARS.has(upper) || upper.startsWith('GIT_CONFIG');
+}
+
+/**
+ * This process's environment without the variables that redirect git, for
+ * every git call that decides which checkout flow acts for.
  *
- * @returns A copy of `process.env` with the `GIT_*` names removed.
+ * @returns A copy of `process.env` without them.
  */
 export function gitFreeEnv(): NodeJS.ProcessEnv {
-  return Object.fromEntries(
-    Object.entries(process.env).filter(([name]) => !name.toUpperCase().startsWith('GIT_'))
-  );
+  return Object.fromEntries(Object.entries(process.env).filter(([name]) => !redirectsGit(name)));
 }
 
 /**

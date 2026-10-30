@@ -53,10 +53,10 @@ export interface LoadCodeAdapterOptions {
   /** The transport to hand the adapter. Default: the real `cli` transport. */
   transport?: TrackerTransport;
   /**
-   * The folder flow was started in. When given, a project's own adapter code
-   * loads only if `roots.checkout` is this folder's checkout (DOR-3377).
+   * The folder flow was started in. A project's own adapter code loads only
+   * if `roots.checkout` is this folder's checkout (DOR-3377).
    */
-  runDir?: string;
+  runDir: string;
 }
 
 /** Whether an error is Node failing to find the `zod` package, which must surface as exit 6. */
@@ -111,7 +111,7 @@ export async function loadCodeAdapter(options: LoadCodeAdapterOptions): Promise<
   }
   // Checked again here, on the checkout the code is actually loaded from, so no
   // second answer from git can differ from the one `--project` was checked on.
-  if (options.runDir !== undefined && adapterFiles.origin !== 'shipped') {
+  if (adapterFiles.origin !== 'shipped') {
     assertCheckoutIsRunCheckout(options.runDir, roots.checkout);
   }
   if (!existsSync(file)) {

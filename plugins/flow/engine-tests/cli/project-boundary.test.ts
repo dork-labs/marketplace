@@ -15,7 +15,9 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import type { VerbDefinition } from '../../scripts/cli/context.ts';
 import { EXIT } from '../../scripts/errors.ts';
+import { findConfigRoots } from '../../scripts/config-files.ts';
 import { main } from '../../scripts/flow.ts';
+import { gitTopLevel } from '../../scripts/project-boundary.ts';
 
 let base: string;
 let repo: string;
@@ -143,6 +145,17 @@ describe('inside a git checkout', () => {
     vi.stubEnv('GIT_DIR', path.join(repo, '.git'));
     vi.stubEnv('GIT_WORK_TREE', repo);
     expectRefused(await run(repo, other));
+  });
+});
+
+describe('GIT_CEILING_DIRECTORIES', () => {
+  it('is kept: a repo above the ceiling stays out of view', () => {
+    // It only narrows what git finds, as for a dotfiles repo in the home folder.
+    const scratch = path.join(repo, 'sub');
+    expect(gitTopLevel(scratch)).toBe(repo);
+    vi.stubEnv('GIT_CEILING_DIRECTORIES', repo);
+    expect(gitTopLevel(scratch)).toBeNull();
+    expect(findConfigRoots(scratch, base).inGit).toBe(false);
   });
 });
 
