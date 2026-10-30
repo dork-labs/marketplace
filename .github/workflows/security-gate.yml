@@ -47,6 +47,10 @@ jobs:
           node-version: '24'
       - name: Security gate fixtures
         run: node --test .github/scripts/security-*.test.mjs
+      # Marketplace only: files the base commit's plugin manifests point at count
+      # wherever they sit (a hook script in tests/, say). Fails closed.
+      - name: Add the files plugin manifests point at
+        run: echo "SECURITY_PATH_PATTERN=$(node .github/scripts/security-manifest-paths.mjs)" >> "$GITHUB_ENV"
       - name: Check approval on each exact PR head
         env:
           GH_TOKEN: ${{ github.token }}

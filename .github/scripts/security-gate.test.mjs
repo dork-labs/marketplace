@@ -14,6 +14,7 @@ import {
   latestReview,
   githubApi,
 } from './security-gate.mjs';
+import { manifestPaths, withManifestPaths } from './security-manifest-paths.mjs';
 
 const workflow = readFileSync(new URL('../workflows/security-gate.yml', import.meta.url), 'utf8');
 const initializerWorkflow = readFileSync(
@@ -754,4 +755,90 @@ test('only the newest exact-head App success authorizes a sensitive diff', async
   await checkPullRequest(api, prEvent, pattern);
   await assert.rejects(runPullRequest(api, prEvent, pattern, { botUserId: 0 }));
   await assert.rejects(runPullRequest(api, prEvent, pattern));
+});
+
+test('the gate covers its own files: a PR touching only the gate script needs approval', async () => {
+  for (const file of [
+    '.github/scripts/security-gate.mjs',
+    '.github/scripts/security-manifest-paths.mjs',
+    '.github/workflows/security-gate.yml',
+    '.github/workflows/security-review-initialize.yml',
+  ]) {
+    const f = fixture({ files: [file] });
+    await assert.rejects(checkPullRequest(f.api, prEvent, pattern), /security-review pending/, file);
+  }
+});
+
+test('the base commit’s list decides: a PR that edits the list and a covered file still needs approval', async () => {
+  // The verifier is handed the base commit's pattern (it checks out the base,
+  // and GitHub runs main's workflow). Whatever the PR does to its own copy of the
+  // list, the base list still covers the PR's files.
+  const f = fixture({ files: ['.github/workflows/security-gate.yml', 'plugins/flow/hooks/a.sh'] });
+  await assert.rejects(checkPullRequest(f.api, prEvent, pattern), /security-review pending/);
+  assert.match(workflow, /ref: \$\{\{ env\.SECURITY_BASE_SHA \}\}/);
+  assert.match(workflow, /node \.github\/scripts\/security-manifest-paths\.mjs/);
+});
+
+test('exemptions match whole folder names only', () => {
+  for (const filename of [
+    'plugins/flow/docs-runner.js',
+    'plugins/x/tests.js',
+    'plugins/x/tests',
+    'plugins/x/testsuite/a.sh',
+    'plugins/x/engine-tests.ts',
+    'plugins/x/skills/s/tests.md',
+    'plugins/x/skills/s/testing/a.sh',
+    'plugins/x/README.md.sh',
+    'plugins/x/agents/reviewer.md',
+    'plugins/x/LICENSE.sh',
+  ]) {
+    assert.ok(touchesSecurity([{ filename }], pattern), filename);
+  }
+});
+
+test('a file a plugin manifest points at counts, even inside an exempt folder', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'security-manifests-'));
+  try {
+    const write = (path, json) => {
+      mkdirSync(join(dir, path, '..'), { recursive: true });
+      writeFileSync(join(dir, path), JSON.stringify(json));
+    };
+    write('plugins/x/hooks/hooks.json', {
+      hooks: { PreToolUse: [{ hooks: [{ type: 'command', command: 'node ${CLAUDE_PLUGIN_ROOT}/tests/run.mjs --strict' }] }] },
+    });
+    write('plugins/x/.claude-plugin/plugin.json', { name: 'x', commands: ['./tests/commands/'] });
+    write('plugins/y/.mcp.json', { mcpServers: { s: { command: 'bash', args: ['$CLAUDE_PLUGIN_ROOT/engine-tests/serve.sh'] } } });
+    write('plugins/z/.claude-plugin/plugin.json', { name: 'z', hooks: '../w/tests/hook.sh', url: 'https://x.test/a/b' });
+    const paths = manifestPaths(dir);
+    assert.deepEqual(paths, [
+      'plugins/w/tests/hook.sh',
+      'plugins/x/tests/commands',
+      'plugins/x/tests/run.mjs',
+      'plugins/y/engine-tests/serve.sh',
+    ]);
+    const extended = withManifestPaths(pattern, paths);
+    for (const filename of [
+      'plugins/x/tests/run.mjs',
+      'plugins/x/tests/commands/evil.md',
+      'plugins/y/engine-tests/serve.sh',
+      'plugins/w/tests/hook.sh',
+    ]) {
+      assert.equal(touchesSecurity([{ filename }], pattern), false, `exempt without the manifest: ${filename}`);
+      assert.ok(touchesSecurity([{ filename }], extended), filename);
+    }
+    // Other test files stay exempt.
+    assert.equal(touchesSecurity([{ filename: 'plugins/x/tests/other.mjs' }], extended), false);
+    assert.equal(touchesSecurity([{ filename: 'plugins/x/tests/run.mjs.bak' }], extended), false);
+    // A manifest that does not parse fails the run rather than shrinking the list.
+    writeFileSync(join(dir, 'plugins/y/.mcp.json'), '{ not json');
+    assert.throws(() => manifestPaths(dir));
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('this repo’s manifests extend the list to one line', () => {
+  const paths = manifestPaths(new URL('../..', import.meta.url).pathname);
+  assert.ok(paths.includes('plugins/safety-hooks/hooks/git-guard.mjs'));
+  assert.doesNotMatch(withManifestPaths(pattern, paths), /[\r\n]/);
 });
