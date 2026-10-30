@@ -811,10 +811,14 @@ test('a plugin whose manifests mention a test folder loses its test exemptions',
     // A manifest that names another JSON file, which names the script.
     write('plugins/c/.claude-plugin/plugin.json', { name: 'c', hooks: './config/more-hooks.json' });
     write('plugins/c/config/more-hooks.json', { hooks: { Stop: [{ hooks: [{ command: 'bash tests/x.sh' }] }] } });
+    write('plugins/f/hooks/hooks.json', {
+      hooks: { Stop: [{ hooks: [{ command: 'cd ${CLAUDE_PLUGIN_ROOT}/tests && bash run.sh' }] }] },
+    });
+    write('plugins/g/.mcp.json', { mcpServers: { s: { command: 'node', args: ['--dir=./tests', '--x'] } } });
     write('plugins/d/.lsp.json', { s: { command: 'node', args: ['skills/s/tests/lsp.mjs'] } });
     // No mention: stays exempt. A word like "attests" is not a mention.
-    write('plugins/e/.claude-plugin/plugin.json', { name: 'e', description: 'attests to contests' });
-    assert.deepEqual(pluginsPointingAtTests(dir), ['a', 'b', 'c', 'd']);
+    write('plugins/e/.claude-plugin/plugin.json', { name: 'e', description: 'attests to contests', dirs: ['tests-old/', 'my-tests/'] });
+    assert.deepEqual(pluginsPointingAtTests(dir), ['a', 'b', 'c', 'd', 'f', 'g']);
     const extended = withManifestPaths(pattern, pluginsPointingAtTests(dir));
     for (const filename of [
       'plugins/a/tests/a.sh',
@@ -822,6 +826,8 @@ test('a plugin whose manifests mention a test folder loses its test exemptions',
       'plugins/b/engine-tests/serve.ps1',
       'plugins/c/tests/x.sh',
       'plugins/d/skills/s/tests/lsp.mjs',
+      'plugins/f/tests/run.sh',
+      'plugins/g/tests/a.mjs',
     ]) {
       assert.equal(touchesSecurity([{ filename }], pattern), false, `exempt without the manifest: ${filename}`);
       assert.ok(touchesSecurity([{ filename }], extended), filename);
@@ -829,7 +835,7 @@ test('a plugin whose manifests mention a test folder loses its test exemptions',
     assert.equal(touchesSecurity([{ filename: 'plugins/e/tests/a.sh' }], extended), false);
     // A mention that climbs out of its plugin can't be pinned down: every plugin loses it.
     write('plugins/e/hooks/hooks.json', { hooks: { Stop: [{ hooks: [{ command: 'bash ../w/tests/x.sh' }] }] } });
-    assert.deepEqual(pluginsPointingAtTests(dir), ['a', 'b', 'c', 'd', 'e']);
+    assert.deepEqual(pluginsPointingAtTests(dir), ['a', 'b', 'c', 'd', 'e', 'f', 'g']);
     // A manifest that does not parse fails the run rather than shrinking the list.
     write('plugins/b/.mcp.json', '{ not json');
     assert.throws(() => pluginsPointingAtTests(dir));
