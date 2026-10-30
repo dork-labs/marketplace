@@ -10,7 +10,7 @@ you until you **reinstall it** (Marketplace → flow → reinstall, or re-run yo
 
 - `flow-drain`, `flow-groom`, `flow-triage` and `flow-retro` each say `scope: project` and `projectFile: .agents/flow/config.json` in their `schedule:` block. Each needs a project to work in. From a global install, DorkOS used to list them as global schedules with no project, waiting for an approval that should never be given.
 - Now each project that has flow set up (it holds `.agents/flow/config.json`, which `/flow:init` writes) gets its own copy of each schedule, switched off, on that project's **Schedules** page, and a person approves it there, project by project. Other projects get no copies. A project you set flow up in later gets its copies at DorkOS's next sync. None of them shows or asks for approval as a global schedule.
-- A project still using the old settings inside the plugin folder gets no copies until `/flow:init` moves them into `.agents/flow/`.
+- With a global install, a project still on the old in-plugin settings gets no copies until `/flow` or `/flow:init` moves them into `.agents/flow/`.
 - `/flow:status`, `/flow:pause` and `/flow:resume` now find those per-project copies too (they share the global file's path, so the folder test alone missed them), and they now include `flow-retro`.
 - Nothing is switched on for you.
 - A DorkOS older than this setting ignores it, so a global install still lists the four as global schedules there, as before. Leave those off, and update DorkOS.

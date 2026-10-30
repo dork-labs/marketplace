@@ -16,9 +16,9 @@ outside the tick has to provide the repetition.
 ## On DorkOS: install, then approve per project
 
 Any skill whose frontmatter carries a `schedule:` block is a scheduled task. A DorkOS release that
-has schedule discovery reads that from the skills roots it watches, so **installing
-`/flow` anywhere is the whole setup step** — no file to copy, no scheduler to stand up. The tick
-then appears, off, on the **Schedules** page of each project `/flow:init` set up (`scope: project`,
+has schedule discovery reads that from the skills roots it watches — no file to copy, no scheduler
+to stand up. The tick then appears, off, on the **Schedules** page: a project install's own project,
+or, from a global install, each project `/flow:init` set up (`scope: project`,
 `projectFile: .agents/flow/config.json`).
 
 <Callout type="warn">
