@@ -584,7 +584,7 @@ export const VERBS: readonly VerbDefinition[] = [
     summary: 'Record a push, a review verdict or a question (drain workers, reviewers, VERIFY).',
     description: [
       'Record what happened on a run. flow checks each claim before recording it.',
-      '  pushed [--sha <sha>]   The commit (default HEAD) is on origin and has a checkpoint. Disarms an armed PR until it is reviewed.',
+      '  pushed [--sha <sha>]   The commit (default HEAD) is on origin and has a checkpoint; a bug also has its flow proof at it. Disarms an armed PR until it is reviewed.',
       '  verdict --sha <sha> --token <t> (--clean | --changes --findings-file <f>)',
       "                         The reviewer's verdict. The token comes from the reviewer's brief. A verdict on an older push is ignored.",
       '  blocked --question-file <f>',

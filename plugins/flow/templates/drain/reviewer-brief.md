@@ -19,6 +19,7 @@ Read `git diff {{base}} {{sha}}`. {{deltaFrom}}
 - Does it meet every validation criterion? Check each one.
 - Edge cases, error paths, races, clocks and time zones, IO failures, cleanup.
 - Does each new test fail without the fix? Revert the fix in your worktree and run it.
+- A bug fix (type `signal`) ships a proof test for the whole class of the bug. One that only replays the reported case is a blocker.
 - Scope creep, dead code, lingering TODOs, missing docs on exports.
 
 ## Findings

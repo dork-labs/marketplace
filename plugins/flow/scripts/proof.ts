@@ -2,11 +2,13 @@
  * The proof test a bug fix ships (DOR-3261): one class-level test that fails on
  * the code before the fix and passes after, covering the whole class of the bug.
  *
- * `flow proof` records it in `<worktree>/.dork/flow/proof/<identifier>.json`;
- * `flow stage <id> review` reads it back for a bug item (`signal`) and refuses
- * the hand-off unless it was recorded at the branch head and every test it
- * names is still changed on the branch. flow runs no test itself: the record
- * carries the red and green output, and the independent reviewer checks it.
+ * `flow proof` records it in `<worktree>/.dork/flow/proof/<identifier>.json`.
+ * Both hand-offs to review read it back for a bug item (`signal`): `flow stage
+ * <id> review`, and a drain worker's `flow report <id> pushed` (the item's
+ * type is on its run from `flow claim`). Each refuses unless it was recorded at
+ * that commit and every test it names is still added or changed on the branch.
+ * flow runs no test itself: the record carries the red and green output, and
+ * the independent reviewer checks it.
  *
  * @module @dorkos/flow/proof
  */
@@ -103,44 +105,82 @@ export interface ProofFacts {
 }
 
 /**
- * Measure the worktree, HEAD, the merge base and the committed diff.
+ * The worktree's top-level folder.
  *
- * @param ctx - The verb context; git runs in `ctx.projectDir`.
+ * @param ctx - The verb context.
+ * @param dir - Any folder in the worktree.
+ * @returns Its top level.
+ * @throws {PreconditionError} Outside a git worktree (exit 5).
+ */
+export async function worktreeTop(ctx: VerbContext, dir: string): Promise<string> {
+  const top = await git(ctx, dir, ['rev-parse', '--show-toplevel']);
+  if (top.code !== 0 || top.stdout.trim() === '') {
+    throw new PreconditionError(
+      `${dir} is not a git worktree; run flow in the item's worktree, or pass --project`
+    );
+  }
+  return top.stdout.trim();
+}
+
+/**
+ * Measure a commit, its merge base with `base`, and the files the branch adds
+ * or changes between them (a deleted test cannot be run, so it never counts).
+ *
+ * @param ctx - The verb context.
  * @param base - The base ref, e.g. `origin/HEAD`.
+ * @param where - The worktree (default `ctx.projectDir`) and the commit (default `HEAD`).
  * @returns The facts.
  * @throws {PreconditionError} Outside a git worktree, or when the base cannot be resolved (exit 5).
  */
-export async function measureProof(ctx: VerbContext, base: string): Promise<ProofFacts> {
-  const top = await git(ctx, ctx.projectDir, ['rev-parse', '--show-toplevel']);
-  if (top.code !== 0 || top.stdout.trim() === '') {
-    throw new PreconditionError(
-      `${ctx.projectDir} is not a git worktree; run flow in the item's worktree, or pass --project`
-    );
-  }
-  const root = top.stdout.trim();
-  const head = await git(ctx, root, ['rev-parse', 'HEAD']);
+export async function measureProof(
+  ctx: VerbContext,
+  base: string,
+  where: { dir?: string; head?: string } = {}
+): Promise<ProofFacts> {
+  const root = await worktreeTop(ctx, where.dir ?? ctx.projectDir);
+  const head = await git(ctx, root, ['rev-parse', '--verify', `${where.head ?? 'HEAD'}^{commit}`]);
   if (head.code !== 0) throw new PreconditionError(`${root} has no commit yet`);
-  const mergeBase = await git(ctx, root, ['merge-base', 'HEAD', base]);
+  const headSha = head.stdout.trim();
+  const mergeBase = await git(ctx, root, ['merge-base', headSha, base]);
   if (mergeBase.code !== 0 || mergeBase.stdout.trim() === '') {
     throw new PreconditionError(
       `cannot find where this branch left ${base}: ${mergeBase.stderr.trim() || 'no merge base'}; pass --base <ref>`
     );
   }
   const baseSha = mergeBase.stdout.trim();
-  const diff = await git(ctx, root, ['diff', '--name-only', '-z', baseSha, 'HEAD']);
+  const diff = await git(ctx, root, [
+    'diff',
+    '--name-only',
+    '--no-renames',
+    '--diff-filter=AM',
+    '-z',
+    baseSha,
+    headSha,
+  ]);
   if (diff.code !== 0) {
     throw new PreconditionError(`git diff failed in ${root}: ${diff.stderr.trim()}`);
   }
   const changed = new Set(diff.stdout.split('\0').filter((name) => name !== ''));
-  return { root, headSha: head.stdout.trim(), baseSha, changed };
+  return { root, headSha, baseSha, changed };
 }
 
 /**
- * The tests a branch does not change, in order. A proof test must be new or
- * changed on the branch: a test that already passed before the fix proves nothing.
+ * A test path as git names it: forward slashes, no leading `./`.
+ *
+ * @param test - The path as given.
+ * @returns It normalised.
+ */
+export function normaliseTestPath(test: string): string {
+  return path.posix.normalize(test.trim().replaceAll('\\', '/')).replace(/^(\.\/)+/, '');
+}
+
+/**
+ * The tests a branch does not add or change, in order. A proof test must be
+ * new or changed on the branch: a test that already passed before the fix
+ * proves nothing.
  *
  * @param tests - The test paths, relative to the repository root.
- * @param changed - The paths the branch changes.
+ * @param changed - The paths the branch adds or changes.
  * @returns The ones missing from the diff.
  */
 export function unchangedTests(tests: readonly string[], changed: ReadonlySet<string>): string[] {
@@ -196,7 +236,7 @@ export function checkProof(
   if (missing.length > 0) {
     return {
       ok: false,
-      message: `the proof for ${identifier} names tests this branch no longer changes: ${missing.join(', ')}`,
+      message: `the proof for ${identifier} names tests this branch no longer adds or changes: ${missing.join(', ')}`,
     };
   }
   return { ok: true, record: proof };
@@ -242,21 +282,33 @@ export async function requireProof(
   stage: string
 ): Promise<void> {
   if (!needsProof(item, stage)) return;
-  const text = await proofTextFor(ctx, item.identifier);
+  await requireProofAt(ctx, item.identifier, {});
+}
+
+/**
+ * Refuse unless the item's proof in a worktree holds at a commit (DOR-3261).
+ * The shared check behind `flow stage <id> review` (the worktree's HEAD) and a
+ * drain worker's `flow report <id> pushed` (the pushed commit).
+ *
+ * @param ctx - The verb context.
+ * @param identifier - The work item.
+ * @param where - The worktree (default `ctx.projectDir`) and commit (default `HEAD`).
+ * @throws {PreconditionError} When there is no proof that holds there (exit 5).
+ */
+export async function requireProofAt(
+  ctx: VerbContext,
+  identifier: string,
+  where: { dir?: string; head?: string }
+): Promise<void> {
+  const root = await worktreeTop(ctx, where.dir ?? ctx.projectDir);
+  const text = readProofText(proofPath(root, identifier));
   // No record: refuse before measuring, so a missing base cannot hide the reason.
   const facts =
     text === null
       ? { headSha: '', changed: new Set<string>() }
-      : await measureProof(ctx, proofBase(text));
-  const checked = checkProof(item.identifier, text, facts);
+      : await measureProof(ctx, proofBase(text), { dir: root, head: where.head });
+  const checked = checkProof(identifier, text, facts);
   if (!checked.ok) throw new PreconditionError(`review refused: ${checked.message}`);
-}
-
-/** The worktree root, then the record's text there. */
-async function proofTextFor(ctx: VerbContext, identifier: string): Promise<string | null> {
-  const top = await git(ctx, ctx.projectDir, ['rev-parse', '--show-toplevel']);
-  if (top.code !== 0 || top.stdout.trim() === '') return null;
-  return readProofText(proofPath(top.stdout.trim(), identifier));
 }
 
 /**

@@ -189,6 +189,8 @@ export const FlowRunSchema = z.looseObject({
   identifier: z.string(),
   // The item's title at claim; absent when unknown (never null or "").
   title: z.string().optional(),
+  // The item's type at claim; `signal` asks for a proof test (DOR-3261).
+  type: z.string().optional(),
   sessionId: z.string(),
   worktreePath: z.string(),
   branch: z.string(),

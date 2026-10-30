@@ -94,7 +94,7 @@ describe('flow proof', () => {
     git('update-ref', 'refs/remotes/origin/main', 'HEAD');
     const result = await runFlow(project, { items: [bug] }, proofArgs());
     expect(result.code).toBe(EXIT.precondition);
-    expect(JSON.stringify(result.json)).toContain('not changed on this branch');
+    expect(JSON.stringify(result.json)).toContain('not added or changed on this branch');
     expect(existsSync(proofPath(project.dir, 'FAKE-1'))).toBe(false);
   });
 
@@ -103,6 +103,26 @@ describe('flow proof', () => {
     writeFileSync(path.join(project.dir, 'tests', 'other.test.ts'), 'x\n');
     const result = await runFlow(project, { items: [bug] }, proofArgs('tests/other.test.ts'));
     expect(result.code).toBe(EXIT.precondition);
+    expect(JSON.stringify(result.json)).toContain('not added or changed on this branch');
+  });
+
+  it('refuses a test the branch deleted: it cannot be run', async () => {
+    // Purpose: a deleted file shows in the diff, but proves nothing.
+    git('update-ref', 'refs/remotes/origin/main', 'HEAD');
+    git('rm', '-q', 'tests/paths.test.ts');
+    git('-c', 'user.email=t@example.test', '-c', 'user.name=t', 'commit', '-q', '-m', 'rm');
+    const result = await runFlow(project, { items: [bug] }, proofArgs());
+    expect(result.code).toBe(EXIT.precondition);
+    expect(JSON.stringify(result.json)).toContain('not added or changed on this branch');
+  });
+
+  it('takes ./ and backslash forms of a test path as git names it', async () => {
+    // Purpose: a correct path in another spelling must not read as "not changed".
+    const result = await runFlow(project, { items: [bug] }, proofArgs('./tests/paths.test.ts'));
+    expect(result.code).toBe(EXIT.ok);
+    expect(result.json).toMatchObject({ record: { tests: ['tests/paths.test.ts'] } });
+    const back = await runFlow(project, { items: [bug] }, proofArgs('tests\\paths.test.ts'));
+    expect(back.code).toBe(EXIT.ok);
   });
 
   it('refuses identical red and green output, and empty output', async () => {

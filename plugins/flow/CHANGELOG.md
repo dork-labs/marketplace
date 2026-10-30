@@ -9,8 +9,9 @@ you until you **reinstall it** (Marketplace → flow → reinstall, or re-run yo
 **A bug fix now ships a test that proves the whole kind of bug is gone, and `/flow:verify` won't hand a bug to review without one. Reinstall to get it.**
 
 - The test fails on the code before the fix and passes after, and it covers the whole class of the bug (every variant of the mistake), not just the one case that was reported. The new `skills/verifying-work/proof-test.md` says how to write one and run it both ways.
-- A new command, `flow proof <id>`, records it: the test files, one sentence naming the class, the command, and the output of the failing and the passing run. Flow checks that each test is committed and changed on the branch and that the two runs differ. It runs no test itself; the independent reviewer runs it on the code before the fix and blocks a test that only replays the report.
-- `flow stage <id> review` refuses a bug (an item of type `signal`) with no proof recorded at the branch head, so a commit after the proof, a review fix included, means recording it again. When no such test is possible, the item goes to a person instead of to review. Other items, and other stages, are unchanged.
+- A new command, `flow proof <id>`, records it: the test files, one sentence naming the class, the command, and the output of the failing and the passing run. Flow checks that each test is committed and added or changed on the branch (a deleted one doesn't count) and that the two runs differ. It runs no test itself; the independent reviewer runs it on the code before the fix, and the drain reviewer's brief now says a test that only replays the report is a blocker.
+- Both ways a bug (an item of type `signal`) reaches review refuse it with no proof recorded at that commit: `flow stage <id> review`, and a drain worker's `flow report <id> pushed`. A commit after the proof, a review fix included, means recording it again. When no such test is possible, the item goes to a person instead of to review. Other items, and other stages, are unchanged.
+- `flow claim` now records the item's type on its run, which is how the drain knows a bug without asking the tracker. A run claimed before this version has no type, so it isn't asked for a proof.
 
 ## 0.63.0
 

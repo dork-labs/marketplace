@@ -164,7 +164,7 @@ EXECUTE implements the tasks across dependency-aware batches in an **isolated wo
 /flow:verify DOR-201
 ```
 
-VERIFY runs the touched surface, captures proof-of-completion evidence scaled to the change, opens the PR, and hands off to the review gate.
+VERIFY runs the touched surface, captures proof-of-completion evidence scaled to the change, opens the PR, and hands off to the review gate. A bug fix also records a proof test (`flow proof`).
 
 </Step>
 
@@ -192,11 +192,11 @@ DONE closes the item, creates any follow-up work, runs the project-pulse check f
 
 </Steps>
 
-You do not have to run every command in one sitting. The filesystem and tracker are ground truth, so you can stop after any stage, come back later, and pick up exactly where the work stands.
+You need not run every command in one sitting: the filesystem and tracker are ground truth, so you can stop after any stage and resume where the work stands.
 
 ## Observing and controlling: status, self-test, pause, resume
 
-Four commands sit outside the spine. They let you see what is happening and take control.
+Four commands sit outside the spine: see what is happening, and take control.
 
 ### `/flow:status`
 

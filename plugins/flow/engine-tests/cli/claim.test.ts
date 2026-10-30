@@ -54,6 +54,7 @@ describe('flow claim writes the claim projection and records the run', () => {
         issueId: 'id-FAKE-1',
         identifier: 'FAKE-1',
         title: 'Title of FAKE-1',
+        type: 'task',
         sessionId: 'session-abc',
         worktreePath: project.dir,
         branch: 'work',
@@ -95,6 +96,16 @@ describe('flow claim writes the claim projection and records the run', () => {
     expect(untitled.code).toBe(EXIT.ok);
     expect(project.runs()['id-FAKE-2']).toBeDefined();
     expect('title' in project.runs()['id-FAKE-2']).toBe(false);
+  });
+
+  it("records the item's type on the run, so a drain asks a bug for its proof test", async () => {
+    // Purpose: DOR-3261 — `flow report pushed` reads the type from the run, with no tracker call.
+    const bug = await runFlow(project, { items: [item('FAKE-1', { type: 'signal' })] }, [
+      'claim',
+      'FAKE-1',
+    ]);
+    expect(bug.code).toBe(EXIT.ok);
+    expect(project.runs()['id-FAKE-1'].type).toBe('signal');
   });
 
   it('defaults the stage to execute and counts a repeat claim as a new attempt', async () => {

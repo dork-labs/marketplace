@@ -27,8 +27,8 @@ callees; trace the logic and fix what is wrong. It is your only self-review.
 and read its whole output. Scale to the change: tests (0 failures), lint, typecheck,
 build. Check the VCS diff; never trust an agent's "success".
 
-**A bug fix ships a proof test**, recorded before step 4: follow `proof-test.md` here.
-Step 7 refuses without it.
+**A bug fix ships a proof test** (`proof-test.md` here), recorded at the head after
+step 4 converges, before step 6.
 
 ## 3. Advisory review — only when step 4 is off
 

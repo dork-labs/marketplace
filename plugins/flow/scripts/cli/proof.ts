@@ -20,6 +20,7 @@ import {
   DEFAULT_BASE,
   PROOF_EXCLUDE_LINE,
   measureProof,
+  normaliseTestPath,
   outputTail,
   proofPath,
   unchangedTests,
@@ -61,8 +62,8 @@ export async function run(ctx: VerbContext): Promise<VerbResult> {
   const identifier = ctx.args.positionals[0];
   const tests = required(ctx, 'tests', 'the proof test files, comma-separated')
     .split(',')
-    .map((test) => test.trim())
-    .filter((test) => test !== '');
+    .filter((test) => test.trim() !== '')
+    .map(normaliseTestPath);
   const bugClass = required(ctx, 'class', 'the class of bug the test covers, in one sentence');
   const command = required(ctx, 'command', 'the command that runs the proof test');
   const red = readOutput(ctx, 'red-file', required(ctx, 'red-file', 'its output before the fix'));
@@ -84,7 +85,7 @@ export async function run(ctx: VerbContext): Promise<VerbResult> {
   const missing = unchangedTests(tests, facts.changed);
   if (missing.length > 0) {
     throw new PreconditionError(
-      `not changed on this branch since ${facts.baseSha.slice(0, 7)}: ${missing.join(', ')}. A proof test is new or changed, and committed; paths are relative to the repository root`
+      `not added or changed on this branch since ${facts.baseSha.slice(0, 7)}: ${missing.join(', ')}. A proof test is new or changed, and committed; paths are relative to the repository root`
     );
   }
 
