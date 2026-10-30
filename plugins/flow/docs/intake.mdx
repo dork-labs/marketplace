@@ -5,12 +5,12 @@ description: Intake sources (tracker teams and GitHub issues), their last-read m
 
 # Where new work comes from
 
-`intake.sources` in `.agents/flow/config.json` lists where flow looks for new work. Leave it empty and the source is your configured team, as before. `/flow:init` asks which sources to use.
+`intake.sources` lists where flow looks for new work. It names team ids, so keep it in `.agents/flow/config.local.json`. Empty means your configured team. `/flow:init` asks which sources to use.
 
 ```json
 "intake": {
   "sources": [
-    { "kind": "tracker", "id": "DOR" },
+    { "kind": "tracker", "id": "ENG" },
     { "kind": "github", "repo": "acme/app", "name": "App issues", "labels": ["bug"], "limit": 30 }
   ]
 }

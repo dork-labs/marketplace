@@ -90,14 +90,14 @@ only if it fails. A shipped adapter (`adapter.origin: "shipped"`): validate it a
 0. `cf prepare` prints `{ ok, committed, local, ignoreFiles }`; write to exactly those
    paths. `"ok": false`: **stop**, show `reason`; git would commit the credentials file.
 1. **`config.json`** (committed): from `config.example.json`, keeping `$schema`; set
-   `tracker`, `connection.transport`, `identity.agent`, `ownership.scope`, `intake.sources`
-   and the `review` block. Leave `models.bindings` empty and `connection.team` / `connection.workspace`
+   `tracker`, `connection.transport`, `identity.agent`, `ownership.scope` and the `review`
+   block. Leave `models.bindings` empty and `connection.team` / `connection.workspace`
    `null`. **Never a token, key or account handle here.** On a re-run, rewrite only after
    Step 1's confirmation.
 2. **`config.local.json`** (ignored): `cf scaffold` creates it, private, only if absent.
    Fill `secrets.trackerAccount` (and `secrets.trackerToken` if the host gives no auth),
-   `connection.team`, `connection.workspace.slug`, `identity.reviewer`, and
-   `models.bindings`. Merge into an existing file; never overwrite it.
+   `connection.team`, `connection.workspace.slug`, `identity.reviewer`, `intake.sources`
+   and `models.bindings`. Merge into an existing file; never overwrite it.
 3. Tell the operator to commit `.agents/flow/config.json` and `.agents/flow/.gitignore`,
    never `config.local.json`.
 4. **Rubric**, only when `review.adversarial` is true: `cf scaffold --rubric <review.rubric>`

@@ -504,11 +504,11 @@ spend, in US dollars.
 
 ## The `intake` block: where new work comes from
 
-`intake.sources` lists tracker teams (`{"kind": "tracker", "id": "DOR"}`) and
+`intake.sources` lists tracker teams (`{"kind": "tracker", "id": "ENG"}`) and
 GitHub repositories whose open issues triage captures
 (`{"kind": "github", "repo": "owner/name", "labels": [], "limit": 30}`). Empty means
-the configured team alone. Repo names are not secrets, so the list may live in
-`config.json`. The older `connection.intake` queues read as tracker sources, with a
+the configured team alone. Tracker sources name team ids, so the list belongs in
+`config.local.json` beside `connection.team`. The older `connection.intake` queues read as tracker sources, with a
 warning to move them. Last-read marks, the `flow intake` read and how issue text is
 handled: [`../docs/intake.mdx`](../docs/intake.mdx).
 
