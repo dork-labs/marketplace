@@ -22,7 +22,7 @@
 
 import { PreconditionError } from '../errors.ts';
 import type { FlowStage } from '../flow-run.ts';
-import { requireProof } from '../proof.ts';
+import { proofSummary, requireProof } from '../proof.ts';
 import { projectionFor } from '../work-state.ts';
 import { checkpointLine, writeCheckpoint, type WrittenCheckpoint } from './checkpoint.ts';
 import type { VerbContext, VerbResult } from './context.ts';
@@ -44,7 +44,7 @@ export async function run(ctx: VerbContext): Promise<VerbResult> {
   const change = projectionFor({ type: 'stage', stage }, { stages });
   const item = await adapter.getItem(identifier);
   const existing = runFor(store, item);
-  await requireProof(ctx, item, stage);
+  const proof = await requireProof(ctx, item, stage);
 
   if (bodyFile === undefined) {
     if (existing?.drain !== undefined) {
@@ -87,7 +87,15 @@ export async function run(ctx: VerbContext): Promise<VerbResult> {
       change,
       checkpoint: checkpoint === null ? null : { path: checkpoint.path, header: checkpoint.header },
       run: existing === undefined ? null : { ...existing, stage },
+      // What let a bug into review, so the reviewer and the PR can show it (a waiver's reason too).
+      ...(proof === null ? {} : { proof: { ...proof, summary: proofSummary(proof) } }),
     },
-    text: checkpoint === null ? moved : `${checkpointLine(checkpoint)}\n${moved}`,
+    text: [
+      checkpoint === null ? null : checkpointLine(checkpoint),
+      moved,
+      proof === null ? null : `With its ${proofSummary(proof)}.`,
+    ]
+      .filter((line) => line !== null)
+      .join('\n'),
   };
 }

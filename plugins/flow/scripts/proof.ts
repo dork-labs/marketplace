@@ -8,7 +8,10 @@
  * type is on its run from `flow claim`). Each refuses unless it was recorded at
  * that commit and every test it names is still added or changed on the branch.
  * flow runs no test itself: the record carries the red and green output, and
- * the independent reviewer checks it.
+ * the independent reviewer checks it. When no class-level test is possible,
+ * `flow proof <id> --waive "<reason>"` records a waiver in the same file, at
+ * the same commit rule, so the gate never dead-ends an agent; reviewers see
+ * the reason in their brief.
  *
  * @module @dorkos/flow/proof
  */
@@ -55,6 +58,64 @@ export const ProofRecordSchema = z.object({
 
 /** A parsed proof record. */
 export type ProofRecord = z.infer<typeof ProofRecordSchema>;
+
+/**
+ * A waiver, recorded in place of a proof when no class-level test is possible
+ * (`flow proof <id> --waive "<reason>"`). Like a proof it holds only at the
+ * commit it was recorded at, so the gate never dead-ends an agent and a later
+ * push still has to be waived again.
+ */
+export const WaiverRecordSchema = z.object({
+  v: z.literal(1),
+  kind: z.literal('waiver'),
+  identifier: z.string().min(1),
+  headSha: z.string().regex(/^[0-9a-f]{40}$/),
+  reason: z.string().refine((reason) => reason.trim() !== '', 'a waiver needs a reason'),
+  recordedAt: z.string().min(1),
+});
+
+/** A parsed waiver. */
+export type WaiverRecord = z.infer<typeof WaiverRecordSchema>;
+
+/** What a proof file holds: a proof, or a waiver. */
+export type ProofOrWaiver = ProofRecord | WaiverRecord;
+
+/** Parse a proof file's text as a waiver first (it carries `kind`), else a proof. */
+function parseRecord(text: string): ProofOrWaiver | null {
+  let value: unknown;
+  try {
+    value = JSON.parse(text);
+  } catch {
+    return null;
+  }
+  const waiver = WaiverRecordSchema.safeParse(value);
+  if (waiver.success) return waiver.data;
+  const proof = ProofRecordSchema.safeParse(value);
+  return proof.success ? proof.data : null;
+}
+
+/**
+ * Whether a record is a waiver.
+ *
+ * @param record - A proof or a waiver.
+ * @returns `true` for a waiver.
+ */
+export function isWaiver(record: ProofOrWaiver): record is WaiverRecord {
+  return 'kind' in record && record.kind === 'waiver';
+}
+
+/**
+ * One line naming what let a bug into review, for the hand-off's output.
+ *
+ * @param record - The proof or the waiver.
+ * @returns E.g. `proof waived at abc1234: no harness for the GPU path`.
+ */
+export function proofSummary(record: ProofOrWaiver): string {
+  const at = record.headSha.slice(0, 7);
+  return isWaiver(record)
+    ? `proof waived at ${at}: ${record.reason}`
+    : `proof at ${at}: ${record.tests.join(', ')} (${record.bugClass})`;
+}
 
 /**
  * The record's path for an identifier. Identifiers are tracker keys
@@ -187,11 +248,11 @@ export function unchangedTests(tests: readonly string[], changed: ReadonlySet<st
   return tests.filter((test) => !changed.has(test));
 }
 
-/** Why a proof does or does not let an item into review. */
-export type ProofCheck = { ok: true; record: ProofRecord } | { ok: false; message: string };
+/** Why a proof or waiver does or does not let an item into review. */
+export type ProofCheck = { ok: true; record: ProofOrWaiver } | { ok: false; message: string };
 
 /**
- * Check a bug item's proof against the branch as it is now (DOR-3261).
+ * Check a bug item's proof or waiver against the branch as it is now (DOR-3261).
  *
  * @param identifier - The work item.
  * @param text - The record's text, or `null` when there is none.
@@ -203,43 +264,36 @@ export function checkProof(
   text: string | null,
   facts: Pick<ProofFacts, 'headSha' | 'changed'>
 ): ProofCheck {
-  const record = `flow proof ${identifier} --tests <paths> --class <the bug class> --command <cmd> --red-file <f> --green-file <f>`;
+  const ways = `record it with flow proof ${identifier} --tests <paths> --class <the bug class> --command <cmd> --red-file <f> --green-file <f>, or, when no such test is possible, flow proof ${identifier} --waive "<reason>"`;
   if (text === null) {
     return {
       ok: false,
-      message: `${identifier} is a bug fix with no proof test: write a class-level test that fails before the fix and passes after, then record it with ${record}`,
+      message: `${identifier} is a bug fix with no proof test and no waiver: write a class-level test that fails before the fix and passes after, then ${ways}`,
     };
   }
-  let parsed: ReturnType<typeof ProofRecordSchema.safeParse>;
-  try {
-    parsed = ProofRecordSchema.safeParse(JSON.parse(text));
-  } catch {
+  const record = parseRecord(text);
+  if (record === null || record.identifier !== identifier) {
     return {
       ok: false,
-      message: `the proof record for ${identifier} is not JSON; record it again with ${record}`,
+      message: `the proof record for ${identifier} is not valid; ${ways}`,
     };
   }
-  if (!parsed.success || parsed.data.identifier !== identifier) {
+  const what = isWaiver(record) ? 'waiver' : 'proof';
+  if (record.headSha !== facts.headSha) {
     return {
       ok: false,
-      message: `the proof record for ${identifier} is not valid; record it again with ${record}`,
+      message: `the ${what} for ${identifier} was recorded at ${record.headSha.slice(0, 7)}, but the branch is at ${facts.headSha.slice(0, 7)}: run the proof test at the head and record it again, or waive it again there`,
     };
   }
-  const proof = parsed.data;
-  if (proof.headSha !== facts.headSha) {
-    return {
-      ok: false,
-      message: `the proof for ${identifier} was recorded at ${proof.headSha.slice(0, 7)}, but the branch is at ${facts.headSha.slice(0, 7)}: run the proof test at the head and record it again`,
-    };
-  }
-  const missing = unchangedTests(proof.tests, facts.changed);
+  if (isWaiver(record)) return { ok: true, record };
+  const missing = unchangedTests(record.tests, facts.changed);
   if (missing.length > 0) {
     return {
       ok: false,
       message: `the proof for ${identifier} names tests this branch no longer adds or changes: ${missing.join(', ')}`,
     };
   }
-  return { ok: true, record: proof };
+  return { ok: true, record };
 }
 
 /**
@@ -268,59 +322,53 @@ export function readProofText(file: string): string | null {
 }
 
 /**
- * Refuse a bug item's move into review without a current proof (DOR-3261).
- * Called by `flow stage` before any write, dry runs included.
+ * Refuse a bug item's move into review without a current proof or waiver
+ * (DOR-3261). Called by `flow stage` before any write, dry runs included.
  *
  * @param ctx - The verb context.
  * @param item - The work item.
  * @param stage - The stage it moves to.
+ * @returns The proof or waiver that let it through, or `null` when the move needs none.
  * @throws {PreconditionError} When the move needs a proof and has none that holds (exit 5).
  */
 export async function requireProof(
   ctx: VerbContext,
   item: Pick<WorkItem, 'type' | 'identifier'>,
   stage: string
-): Promise<void> {
-  if (!needsProof(item, stage)) return;
-  await requireProofAt(ctx, item.identifier, {});
+): Promise<ProofOrWaiver | null> {
+  if (!needsProof(item, stage)) return null;
+  return requireProofAt(ctx, item.identifier, {});
 }
 
 /**
- * Refuse unless the item's proof in a worktree holds at a commit (DOR-3261).
- * The shared check behind `flow stage <id> review` (the worktree's HEAD) and a
- * drain worker's `flow report <id> pushed` (the pushed commit).
+ * Refuse unless the item's proof or waiver in a worktree holds at a commit
+ * (DOR-3261). The shared check behind `flow stage <id> review` (the worktree's
+ * HEAD) and a drain worker's `flow report <id> pushed` (the pushed commit).
  *
  * @param ctx - The verb context.
  * @param identifier - The work item.
  * @param where - The worktree (default `ctx.projectDir`) and commit (default `HEAD`).
- * @throws {PreconditionError} When there is no proof that holds there (exit 5).
+ * @returns The proof or waiver that holds.
+ * @throws {PreconditionError} When there is none that holds there (exit 5).
  */
 export async function requireProofAt(
   ctx: VerbContext,
   identifier: string,
   where: { dir?: string; head?: string }
-): Promise<void> {
+): Promise<ProofOrWaiver> {
   const root = await worktreeTop(ctx, where.dir ?? ctx.projectDir);
   const text = readProofText(proofPath(root, identifier));
+  const parsed = text === null ? null : parseRecord(text);
   // No record: refuse before measuring, so a missing base cannot hide the reason.
+  // A waiver names no tests, so it is measured against its own commit.
   const facts =
-    text === null
+    parsed === null
       ? { headSha: '', changed: new Set<string>() }
-      : await measureProof(ctx, proofBase(text), { dir: root, head: where.head });
+      : await measureProof(ctx, isWaiver(parsed) ? (where.head ?? 'HEAD') : parsed.baseSha, {
+          dir: root,
+          head: where.head,
+        });
   const checked = checkProof(identifier, text, facts);
   if (!checked.ok) throw new PreconditionError(`review refused: ${checked.message}`);
-}
-
-/**
- * The base to diff against when checking: the record's own merge base, so a
- * moved `origin/HEAD` does not change the answer; else the default.
- */
-function proofBase(text: string | null): string {
-  if (text === null) return DEFAULT_BASE;
-  try {
-    const parsed = ProofRecordSchema.safeParse(JSON.parse(text));
-    return parsed.success ? parsed.data.baseSha : DEFAULT_BASE;
-  } catch {
-    return DEFAULT_BASE;
-  }
+  return checked.record;
 }

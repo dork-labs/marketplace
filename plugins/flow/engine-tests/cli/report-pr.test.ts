@@ -359,6 +359,33 @@ describe('flow report pushed', () => {
       expect(r.stderr).toContain('record it again');
     });
 
+    it('takes a waiver at the pushed commit in place of a proof, and says so', async () => {
+      // Purpose: PM ruling — the drain's gate never dead-ends a worker either.
+      const { sha } = bugFix();
+      writeRun(drain(), sha, 'signal');
+      expect((await flow(['proof', 'ACME-12', '--waive', 'no harness for this path'])).code).toBe(
+        0
+      );
+      const r = await flow(['report', 'ACME-12', 'pushed']);
+      expect(r.code).toBe(0);
+      expect(r.json).toMatchObject({
+        proof: { kind: 'waiver', reason: 'no harness for this path' },
+      });
+      expect(stored()).toMatchObject({ pushedSha: sha, rev: 4 });
+    });
+
+    it('does not count a waiver from an older commit after a new push', async () => {
+      bugFix();
+      expect((await flow(['proof', 'ACME-12', '--waive', 'no harness'])).code).toBe(0);
+      const later = commit('review fix');
+      git('push', '-q', 'origin', 'work');
+      writeRun(drain(), later, 'signal');
+      const r = await flow(['report', 'ACME-12', 'pushed']);
+      expect(r.code).toBe(EXIT.precondition);
+      expect(r.stderr).toContain('the waiver for ACME-12 was recorded at');
+      expect(stored()).toMatchObject({ pushedSha: null, rev: 3 });
+    });
+
     it('asks nothing of a task, or of a run claimed before the type was recorded', async () => {
       const { sha } = bugFix();
       writeRun(drain(), sha, 'task');

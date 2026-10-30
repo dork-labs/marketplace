@@ -25,6 +25,7 @@ import path from 'node:path';
 import { findConfigRoots } from '../config-files.ts';
 import { loadConfig } from '../config-load.ts';
 import { renderBrief } from '../drain/briefs.ts';
+import { proofBriefSection } from '../proof-brief.ts';
 import { removeWorktree, reviewBase, reviewWorktreePath } from '../drain/worktree.ts';
 import { FlowError, PreconditionError } from '../errors.ts';
 import type { FlowRun } from '../flow-run.ts';
@@ -116,6 +117,7 @@ export async function reviewLaunch(
       sha,
       base: await reviewBase(ctx.runProcess, target, sha),
       deltaFrom: 'This is the VERIFY review of this item, before its pull request opens.',
+      proof: proofBriefSection(run, sha),
       rubric: config.review.rubric,
       flow,
       findingsFile,

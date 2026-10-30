@@ -491,7 +491,7 @@ export const VERBS: readonly VerbDefinition[] = [
     name: 'proof',
     summary: "Record a bug fix's class-level proof test (VERIFY).",
     description:
-      'Record the test a bug fix ships: it fails on the code before the fix and passes after, and covers the whole class of the bug. flow checks every test is committed and changed on the branch since its merge base with --base, and that the two runs differ, then writes .dork/flow/proof/<id>.json at HEAD. flow stage <id> review refuses a bug without one at the head. flow runs no test: the reviewer checks the red run.',
+      'Record the test a bug fix ships: it fails on the code before the fix and passes after, and covers the whole class of the bug. flow checks every test is committed and changed on the branch since its merge base with --base, and that the two runs differ, then writes .dork/flow/proof/<id>.json at HEAD. flow stage <id> review refuses a bug without one at the head. flow runs no test: the reviewer checks the red run. With --waive "<reason>", records a waiver at HEAD instead.',
     common: ['project', 'dry-run'],
     positionals: [{ name: 'identifier', required: true, description: 'The item, e.g. DOR-123.' }],
     flags: [
@@ -530,6 +530,13 @@ export const VERBS: readonly VerbDefinition[] = [
         kind: 'string',
         value: 'ref',
         description: 'The branch the fix leaves from. Default: origin/HEAD.',
+      },
+      {
+        name: 'waive',
+        kind: 'string',
+        value: 'reason',
+        description:
+          'Instead of a proof: why no class-level test is possible. Recorded at HEAD, shown to the reviewer; a later commit needs a new one.',
       },
     ],
     load: () => import('./cli/proof.ts'),

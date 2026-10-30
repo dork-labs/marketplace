@@ -14,6 +14,8 @@ You are already in your own worktree, detached at `{{sha}}`. The author works in
 
 Read `git diff {{base}} {{sha}}`. {{deltaFrom}}
 
+{{proof}}
+
 ## Hunt for concrete failure modes
 
 - Does it meet every validation criterion? Check each one.

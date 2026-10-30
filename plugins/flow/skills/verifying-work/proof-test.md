@@ -8,8 +8,8 @@ class of the bug, not the one input that was reported.
 
 Write one sentence that names the class, not the instance. "Paths compare without case
 or Unicode folding" is a class; "`APPS/Server` slips past" is an instance of it. The
-test enumerates the class: a table of its variants, a property over its input space, or
-every caller that shares the flaw. A test that only replays the report fails review.
+test enumerates it: a table of variants, a property over the inputs, or every caller
+sharing the flaw.
 
 ## Red, then green
 
@@ -20,18 +20,18 @@ every caller that shares the flaw. A test that only replays the report fails rev
 3. Commit the test, then record it:
    `flow proof <id> --tests <paths> --class "<the sentence>" --command "<cmd>" --red-file <f> --green-file <f>`.
 
-flow checks each test is committed and added or changed on the branch, and that the two
-runs differ, then records the proof at HEAD. It runs no test itself.
+flow checks each test is committed and added or changed on the branch, and that the runs
+differ. It runs no test itself.
 
 ## The gate
 
 Both hand-offs to review refuse a `signal` item without a proof at that commit (exit 5):
 `flow stage <id> review`, and a drain worker's `flow report <id> pushed`. Any later
 commit, a review fix included, means record it again. When no class-level test is
-possible, do not hand off: park the item and ask a person.
+possible, waive it at that commit: `flow proof <id> --waive "<reason>"`.
 
 ## For the reviewer
 
-Pass the record (`.dork/flow/proof/<id>.json`) with the diff. The reviewer runs the
-test at the merge base, confirms it fails, and blocks a test that covers only the
-reported instance.
+flow puts the proof or waiver in the reviewer's brief; put a waiver's reason in the PR
+body too. The reviewer runs the test at the merge base, confirms it fails, and blocks a
+test covering only the reported instance, or a waiver whose reason does not hold.
