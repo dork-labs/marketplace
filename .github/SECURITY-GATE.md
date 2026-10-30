@@ -20,6 +20,12 @@ Also: the catalog files; every `SKILL.md`; `.github`, `.claude`, `.agents`,
 `.dork`, `scripts`, `tools`; the root `CLAUDE.md`, `AGENTS.md`, `REVIEW.md`
 and `.mcp.json`; and `package.json`, lockfiles and npm config anywhere. A path
 with a `.`, `..` or empty segment always counts. Both sides of a rename count.
+
+Files a plugin's manifests point at count too, wherever they sit: every path
+named in a plugin's `.claude-plugin/plugin.json`, `hooks/hooks.json`,
+`.mcp.json` or `.dork/manifest.json` in the base commit, even inside a test
+folder (`scripts/security-manifest-paths.mjs`; the verifier adds them before it
+checks, and fails if a manifest doesn't parse).
 `scripts/fixtures/security-path-variants.json` holds case and Unicode spellings
 that both repos test.
 
@@ -27,8 +33,9 @@ that both repos test.
 often to gate, but two of them can run on a machine: `/flow:self-test` runs
 flow's `engine-tests/` through vitest when dev dependencies are installed (and
 reads its fixtures), and visual-companion's `npm test` runs its skill's
-`tests/`. Pointing anything else at a test folder means changing a manifest,
-`hooks.json` or `package.json`, which are security paths.
+`tests/`. A test folder a manifest points at is covered (above); one reached
+another way, such as a `package.json` script, needs that file changed first,
+and it is a security path.
 
 ## How approval works
 
