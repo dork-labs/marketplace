@@ -132,7 +132,8 @@ describe('F14 — every runtime import of a shipped oracle is a declared depende
     // `config-schema.ts` — `dispatch.ts` and `transport.ts` contain no `zod`
     // token at all and still die. Pinning the direct set keeps this test honest
     // about what it measures; if a refactor moves a script in or out of it, that
-    // should be a deliberate edit here, not a silent drift.
+    // should be a deliberate edit here, not a silent drift. `proof.ts` joined for
+    // `flow proof` and `flow stage`, which already reach zod through config.
     const directZodImporters = [...runtimeImportsByScript]
       .filter(([, packages]) => packages.includes('zod'))
       .map(([file]) => file)
@@ -143,6 +144,7 @@ describe('F14 — every runtime import of a shipped oracle is a declared depende
       'config-schema.ts',
       'flow-state.ts',
       'journal-schema.ts',
+      'proof.ts',
       'tasks-schema.ts',
     ]);
   });

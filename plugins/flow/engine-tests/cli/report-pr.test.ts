@@ -223,11 +223,12 @@ function reviewer(sha: string) {
   };
 }
 
-/** Write the ACME-12 run with this drain and checkpoint. */
-function writeRun(d: DrainState, checkpointSha?: string): void {
+/** Write the ACME-12 run with this drain and checkpoint, and the item's type when given. */
+function writeRun(d: DrainState, checkpointSha?: string, type?: string): void {
   const run: FlowRun = {
     issueId: 'id-ACME-12',
     identifier: 'ACME-12',
+    ...(type === undefined ? {} : { type }),
     sessionId: 'session-abcdef123456',
     worktreePath: project.dir,
     branch: 'work',
@@ -296,6 +297,102 @@ describe('flow report pushed', () => {
     expect(r.code).toBe(0);
     expect(stored()).toMatchObject({ pushedSha: sha, rev: 4 });
     expect(r.forge.calls).toEqual([]);
+  });
+
+  // DOR-3261: a drain worker hands a bug to review only with its proof test at the pushed commit.
+  describe('for a bug (type signal on the run)', () => {
+    /** Commit a proof test, push it, and write the red and green output. */
+    function bugFix(): { base: string; sha: string } {
+      const base = git('rev-parse', 'HEAD');
+      mkdirSync(path.join(project.dir, 'tests'), { recursive: true });
+      writeFileSync(path.join(project.dir, 'tests', 'fold.test.ts'), 'test("every fold");\n');
+      git('add', 'tests/fold.test.ts');
+      const sha = commit('proof test and fix');
+      git('push', '-q', 'origin', 'work');
+      writeFileSync(path.join(project.dir, 'red.txt'), 'FAIL 1');
+      writeFileSync(path.join(project.dir, 'green.txt'), 'PASS 1');
+      return { base, sha };
+    }
+    const record = (base: string) => [
+      'proof',
+      'ACME-12',
+      '--tests',
+      './tests/fold.test.ts',
+      '--class',
+      'every path comparison folds case',
+      '--command',
+      'npm test',
+      '--red-file',
+      'red.txt',
+      '--green-file',
+      'green.txt',
+      '--base',
+      base,
+    ];
+
+    it('refuses a bug with no proof, recording nothing', async () => {
+      const { sha } = bugFix();
+      writeRun(drain(), sha, 'signal');
+      const r = await flow(['report', 'ACME-12', 'pushed']);
+      expect(r.code).toBe(EXIT.precondition);
+      expect(r.stderr).toContain('is a bug fix with no proof test');
+      expect(stored()).toMatchObject({ pushedSha: null, rev: 3 });
+    });
+
+    it('records the push of a bug whose proof is at that commit', async () => {
+      const { base, sha } = bugFix();
+      writeRun(drain(), sha, 'signal');
+      expect((await flow(record(base))).code).toBe(0);
+      const r = await flow(['report', 'ACME-12', 'pushed']);
+      expect(r.code).toBe(0);
+      expect(stored()).toMatchObject({ pushedSha: sha, rev: 4 });
+    });
+
+    it('refuses once a later push moves past the proof', async () => {
+      const { base } = bugFix();
+      expect((await flow(record(base))).code).toBe(0);
+      const later = commit('review fix');
+      git('push', '-q', 'origin', 'work');
+      writeRun(drain(), later, 'signal');
+      const r = await flow(['report', 'ACME-12', 'pushed']);
+      expect(r.code).toBe(EXIT.precondition);
+      expect(r.stderr).toContain('record it again');
+    });
+
+    it('takes a waiver at the pushed commit in place of a proof, and says so', async () => {
+      // Purpose: PM ruling — the drain's gate never dead-ends a worker either.
+      const { sha } = bugFix();
+      writeRun(drain(), sha, 'signal');
+      expect((await flow(['proof', 'ACME-12', '--waive', 'no harness for this path'])).code).toBe(
+        0
+      );
+      const r = await flow(['report', 'ACME-12', 'pushed']);
+      expect(r.code).toBe(0);
+      expect(r.json).toMatchObject({
+        proof: { kind: 'waiver', reason: 'no harness for this path' },
+      });
+      expect(stored()).toMatchObject({ pushedSha: sha, rev: 4 });
+    });
+
+    it('does not count a waiver from an older commit after a new push', async () => {
+      bugFix();
+      expect((await flow(['proof', 'ACME-12', '--waive', 'no harness'])).code).toBe(0);
+      const later = commit('review fix');
+      git('push', '-q', 'origin', 'work');
+      writeRun(drain(), later, 'signal');
+      const r = await flow(['report', 'ACME-12', 'pushed']);
+      expect(r.code).toBe(EXIT.precondition);
+      expect(r.stderr).toContain('the waiver for ACME-12 was recorded at');
+      expect(stored()).toMatchObject({ pushedSha: null, rev: 3 });
+    });
+
+    it('asks nothing of a task, or of a run claimed before the type was recorded', async () => {
+      const { sha } = bugFix();
+      writeRun(drain(), sha, 'task');
+      expect((await flow(['report', 'ACME-12', 'pushed'])).code).toBe(0);
+      writeRun(drain(), sha);
+      expect((await flow(['report', 'ACME-12', 'pushed'])).code).toBe(0);
+    });
   });
 
   // A push onto an armed PR disarms it, so unreviewed commits cannot merge.

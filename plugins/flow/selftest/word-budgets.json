@@ -234,5 +234,9 @@
   "skills/verifying-work/SKILL.md": {
     "baseline": 1256,
     "target": 1256
+  },
+  "skills/verifying-work/proof-test.md": {
+    "baseline": 313,
+    "target": 313
   }
 }

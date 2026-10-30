@@ -332,6 +332,13 @@ export interface FlowRun {
    */
   title?: string;
   /**
+   * The item's type at claim (`signal` is a bug), so a drain worker's `flow
+   * report pushed` can ask for a bug's proof test without a tracker call
+   * (DOR-3261). Absent on runs claimed before it was recorded. Optional and
+   * additive, like `title`.
+   */
+  type?: string;
+  /**
    * The Claude SDK JSONL session id captured for this run — the resume handle.
    * With the Pulse seat, `sessionId = run.id` is captured per run, making each
    * issue independently resumable. Empty (`""`) when the claiming session could

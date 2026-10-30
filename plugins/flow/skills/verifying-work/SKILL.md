@@ -9,7 +9,7 @@ description: The /flow engine's VERIFY stage — trace recent work for correctne
 `node --experimental-strip-types "<flow-root>/scripts/flow.ts" <verb>`.
 
 VERIFY proves, with evidence, that the change does what the spec asked, then parks at
-the human-review gate. It never declares the work done. Tracker writes
+the review gate; it never declares the work done. Tracker writes
 (`attachEvidence`, `assignToHuman`, `comment`, `transition`) go through the adapter at
 `adapter.path`.
 
@@ -19,24 +19,26 @@ steps: run `flow report <id> pushed`, then wait for the supervisor.
 ## 1. Correctness trace
 
 For each file and function changed since the base: what it does, its callers and
-callees; trace the logic and fix what is wrong. This is the only review of your own work.
+callees; trace the logic and fix what is wrong. It is your only self-review.
 
 ## 2. The verification gate
 
 **No completion claim without fresh evidence:** run the proving command in this pass
 and read its whole output. Scale to the change: tests (0 failures), lint, typecheck,
-build, and for a bug the symptom test going red→green.
-Check the VCS diff; never trust an agent's "success".
+build. Check the VCS diff; never trust an agent's "success".
+
+**A bug fix ships a proof test** (`proof-test.md` here), recorded before step 4 and
+again after each fix commit.
 
 ## 3. Advisory review — only when step 4 is off
 
-With `review.adversarial` false, have a fresh reviewer read the diff against the task and the project's standards. It is advisory: you
-may open the PR with a finding outstanding if the PR body says so.
+With `review.adversarial` false, a fresh reviewer reads the diff against the task and the project's standards. Advisory: a
+finding may stay outstanding if the PR body says so.
 
 ## 4. Adversarial review — before the PR exists
 
-With `review.adversarial` true (the default), the PR does not open until an
-independent review converges. Run it before the evidence: converging changes the diff.
+With `review.adversarial` true (the default), no PR opens until an independent review
+converges. Run it before the evidence: converging changes the diff.
 
 - Dispatch `review.reviewers` (default 1) fresh reviewers, **never the agent that
   implemented the change, from its own context**.
@@ -44,8 +46,8 @@ independent review converges. Run it before the evidence: converging changes the
   `<flow-root>/skills/executing-specs/SKILL.md`.
 - Give each **the diff, the rubric and the intent**: the base/head SHAs; the
   `review.rubric` file (default `REVIEW.md`; relative to the repo root, else the
-  current folder; absolute as is); the item's description or its `03-tasks.json` task.
-  Never your account of what you did.
+  current folder; absolute as is); the item's description or its `03-tasks.json` task;
+  for a bug, its proof record. Never your account of what you did.
 - **When the reviewer agent may ship** (`flow autonomy --kind ship --json` says
   `reviewer-agent`), the reviewer must be a session of its own, not a subagent here: a
   subagent shares this session, and only another session's verdict is token-bound. Start
@@ -83,8 +85,8 @@ Evidence is config-driven, never hand-picked: follow the `EvidencePlan` that
 - **Temporal:** `evidence.temporal` `"video"` (default), `"gif"` or `"off"`.
 - **Logic:** `evidence.logic` `"test-summary"` (default), `"full-output"` or `"off"`.
 
-The format keys off whether a live session is attached now. v1
-attaches links. A capture that cannot be produced is a reported gap; never fake proof.
+The format keys off whether a live session is attached now. v1 attaches links. A missing
+capture is a reported gap; never fake proof.
 
 ## 6. Attach the evidence and open the PR
 

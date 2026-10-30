@@ -5,8 +5,9 @@
  * recorded, and every record bumps `drain.rev` in the same locked write.
  *
  * - `pushed [--sha <sha>]` (worker): the SHA must be the branch head on origin
- *   and the run's last checkpoint. An armed PR is disarmed first, since the new
- *   commits are not reviewed yet.
+ *   and the run's last checkpoint, and a bug (`type: signal` on the run) needs
+ *   its proof test recorded at it (`flow proof`, DOR-3261). An armed PR is
+ *   disarmed first, since the new commits are not reviewed yet.
  * - `verdict --sha <sha> --token <t> (--clean | --changes --findings-file <f>)`
  *   (reviewer): the token's SHA-256 must equal `drain.reviewer.tokenHash`, so
  *   only the reviewer whose brief carried the token can record a verdict. A
@@ -41,6 +42,7 @@ import { PreconditionError, UsageError } from '../errors.ts';
 import type { FlowRun } from '../flow-run.ts';
 import type { FlowStateFile } from '../flow-state-file.ts';
 import { openFlowStateFile } from '../flow-state-file.ts';
+import { BUG_TYPE, proofSummary, requireProofAt } from '../proof.ts';
 import { projectionFor } from '../work-state.ts';
 import type { VerbContext, VerbResult } from './context.ts';
 import {
@@ -136,6 +138,11 @@ async function pushed(ctx: VerbContext, run: DrainRun): Promise<VerbResult> {
       `write a checkpoint at this commit first: flow checkpoint ${run.identifier} --trigger task --task <task>, or --trigger fix for a review or CI fix (the last checkpoint is at ${short(run.checkpointSha)})`
     );
   }
+  // A bug goes to review only with its proof test, or a waiver, at this commit (DOR-3261).
+  const proof =
+    run.type === BUG_TYPE
+      ? await requireProofAt(ctx, run.identifier, { dir: worktree, head: sha })
+      : null;
 
   // Disarm before recording: an armed PR could merge commits nobody reviewed.
   const pr = run.drain.pr;
@@ -156,8 +163,15 @@ async function pushed(ctx: VerbContext, run: DrainRun): Promise<VerbResult> {
     `run "flow report ${run.identifier} pushed" again`
   );
   return {
-    json: { ok: true, identifier: run.identifier, report: 'pushed', sha, disarmed: disarm },
-    text: `Recorded the push of ${short(sha)} for ${run.identifier}${disarm ? `; disarmed auto-merge on #${pr.number} until it is reviewed` : ''}.`,
+    json: {
+      ok: true,
+      identifier: run.identifier,
+      report: 'pushed',
+      sha,
+      disarmed: disarm,
+      ...(proof === null ? {} : { proof: { ...proof, summary: proofSummary(proof) } }),
+    },
+    text: `Recorded the push of ${short(sha)} for ${run.identifier}${disarm ? `; disarmed auto-merge on #${pr.number} until it is reviewed` : ''}${proof === null ? '' : `, with its ${proofSummary(proof)}`}.`,
   };
 }
 

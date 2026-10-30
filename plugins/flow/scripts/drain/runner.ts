@@ -71,6 +71,7 @@ import {
   type SessionState,
 } from '../launchers/types.ts';
 import { launchBudget, type AccountRef } from './account-rank.ts';
+import { proofBriefSection } from '../proof-brief.ts';
 import { renderBrief } from './briefs.ts';
 import { ensureCheckpointExcludes, WORKER_BRIEF_PATH } from './checkpoint.ts';
 import {
@@ -909,6 +910,7 @@ export async function runPass(deps: PassDeps): Promise<PassReport> {
         deltaFrom: deltaFrom
           ? `This is a re-review. Also read \`git diff ${deltaFrom} ${handle.sha}\` first: it is what changed since the last review.`
           : 'This is the first review of this branch.',
+        proof: proofBriefSection(run, run.worktreePath, handle.sha),
         rubric: deps.settings.rubric,
         flow: deps.flow,
         findingsFile: path.join(handle.worktree, REVIEWER_FINDINGS_PATH),

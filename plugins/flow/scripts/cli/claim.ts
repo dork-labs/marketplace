@@ -209,6 +209,8 @@ export async function claimItem(
         issueId: item.id,
         identifier: item.identifier,
         ...titleOf(item),
+        // A non-conformant adapter may hand back no type; record none then.
+        ...(typeof item.type === 'string' && item.type.length > 0 ? { type: item.type } : {}),
         sessionId: input.sessionId,
         worktreePath: input.worktreePath,
         branch: input.branch,

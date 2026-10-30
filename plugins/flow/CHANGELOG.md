@@ -4,6 +4,16 @@ Installs of this plugin are pinned to a commit SHA, so a fix here does not reach
 you until you **reinstall it** (Marketplace → flow → reinstall, or re-run your
 `--plugin-dir` checkout's `git pull`). Each entry below says whether that matters.
 
+## 0.64.0
+
+**A bug fix now ships a test that proves the whole kind of bug is gone, and `/flow:verify` won't hand a bug to review without one. Reinstall to get it.**
+
+- The test fails on the code before the fix and passes after, and it covers the whole class of the bug (every variant of the mistake), not just the one case that was reported. The new `skills/verifying-work/proof-test.md` says how to write one and run it both ways.
+- A new command, `flow proof <id>`, records it: the test files, one sentence naming the class, the command, and the output of the failing and the passing run. Flow checks that each test is committed and added or changed on the branch (a deleted one doesn't count) and that the two runs differ. It runs no test itself; the independent reviewer runs it on the code before the fix, and the drain reviewer's brief now says a test that only replays the report is a blocker.
+- Both ways a bug (an item of type `signal`) reaches review refuse it with no proof recorded at that commit: `flow stage <id> review`, and a drain worker's `flow report <id> pushed`. A commit after the proof, a review fix included, means recording it again. Other items, and other stages, are unchanged.
+- When no such test is possible, `flow proof <id> --waive "<reason>"` records why instead, so the check never leaves an agent stuck. A waiver counts only at the commit it was recorded at, just like a proof, and an empty reason is refused. A refusal names `--waive` as the way through. Both hand-offs report what let the bug through (the proof, or the waiver and its reason), and the reviewer's brief now shows it: the tests, the class, the command and the failing output, or the waiver's reason, which a reviewer blocks when it doesn't hold.
+- `flow claim` now records the item's type on its run, which is how the drain knows a bug without asking the tracker. A run claimed before this version has no type, so it isn't asked for a proof.
+
 ## 0.63.0
 
 **`/flow:status` now ends with a Health block: are this project's flow schedules running, and when was each intake source last read? Reinstall to get it.**

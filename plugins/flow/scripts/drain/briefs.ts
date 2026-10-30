@@ -32,7 +32,17 @@ export const BRIEF_TEMPLATES = {
 /** The placeholders each brief takes (spec §4.7). */
 export const BRIEF_VARS = {
   worker: ['identifier', 'title', 'worktree', 'branch', 'flow', 'accountLabel', 'rubric'],
-  reviewer: ['identifier', 'sha', 'base', 'deltaFrom', 'rubric', 'flow', 'findingsFile', 'token'],
+  reviewer: [
+    'identifier',
+    'sha',
+    'base',
+    'deltaFrom',
+    'proof',
+    'rubric',
+    'flow',
+    'findingsFile',
+    'token',
+  ],
 } as const;
 
 /**

@@ -470,7 +470,7 @@ export const VERBS: readonly VerbDefinition[] = [
     name: 'stage',
     summary: 'Move an item to another stage.',
     description:
-      'Move an item to a stage from config. A started or completed stage removes every stage/* label; any other stage sets its label. Updates the run record when there is one. With --checkpoint-file, first writes the HANDOFF.md checkpoint for the new stage; a drain run must pass it.',
+      'Move an item to a stage from config. A started or completed stage removes every stage/* label; any other stage sets its label. Updates the run record when there is one. With --checkpoint-file, first writes the HANDOFF.md checkpoint for the new stage; a drain run must pass it. A bug (type signal) moves to review only with a proof recorded at the head (flow proof).',
     common: ['project', 'dry-run', 'session'],
     positionals: [
       { name: 'identifier', required: true, description: 'The item, e.g. DOR-123.' },
@@ -486,6 +486,60 @@ export const VERBS: readonly VerbDefinition[] = [
       },
     ],
     load: () => import('./cli/stage.ts'),
+  },
+  {
+    name: 'proof',
+    summary: "Record a bug fix's class-level proof test (VERIFY).",
+    description:
+      'Record the test a bug fix ships: it fails on the code before the fix and passes after, and covers the whole class of the bug. flow checks every test is committed and changed on the branch since its merge base with --base, and that the two runs differ, then writes .dork/flow/proof/<id>.json at HEAD. flow stage <id> review refuses a bug without one at the head. flow runs no test: the reviewer checks the red run. With --waive "<reason>", records a waiver at HEAD instead.',
+    common: ['project', 'dry-run'],
+    positionals: [{ name: 'identifier', required: true, description: 'The item, e.g. DOR-123.' }],
+    flags: [
+      {
+        name: 'tests',
+        kind: 'string',
+        value: 'paths',
+        description: 'The proof test files, comma-separated, relative to the repository root.',
+      },
+      {
+        name: 'class',
+        kind: 'string',
+        value: 'text',
+        description: 'The class of bug the test covers, in one sentence.',
+      },
+      {
+        name: 'command',
+        kind: 'string',
+        value: 'cmd',
+        description: 'The command that runs the proof test.',
+      },
+      {
+        name: 'red-file',
+        kind: 'string',
+        value: 'file',
+        description: 'Its output on the code before the fix. Relative to --project.',
+      },
+      {
+        name: 'green-file',
+        kind: 'string',
+        value: 'file',
+        description: 'Its output at the head. Relative to --project.',
+      },
+      {
+        name: 'base',
+        kind: 'string',
+        value: 'ref',
+        description: 'The branch the fix leaves from. Default: origin/HEAD.',
+      },
+      {
+        name: 'waive',
+        kind: 'string',
+        value: 'reason',
+        description:
+          'Instead of a proof: why no class-level test is possible. Recorded at HEAD, shown to the reviewer; a later commit needs a new one.',
+      },
+    ],
+    load: () => import('./cli/proof.ts'),
   },
   {
     name: 'checkpoint',
@@ -537,7 +591,7 @@ export const VERBS: readonly VerbDefinition[] = [
     summary: 'Record a push, a review verdict or a question (drain workers, reviewers, VERIFY).',
     description: [
       'Record what happened on a run. flow checks each claim before recording it.',
-      '  pushed [--sha <sha>]   The commit (default HEAD) is on origin and has a checkpoint. Disarms an armed PR until it is reviewed.',
+      '  pushed [--sha <sha>]   The commit (default HEAD) is on origin and has a checkpoint; a bug also has its flow proof at it. Disarms an armed PR until it is reviewed.',
       '  verdict --sha <sha> --token <t> (--clean | --changes --findings-file <f>)',
       "                         The reviewer's verdict. The token comes from the reviewer's brief. A verdict on an older push is ignored.",
       '  blocked --question-file <f>',
