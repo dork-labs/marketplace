@@ -445,6 +445,7 @@ export class ModelService {
       buildProject({
         entry,
         read: this.reader.latest(entry.root),
+        closedRuns: this.reader.closedRuns(entry.root),
         accounts,
         registry,
         pidAlive: this.deps.pidAlive,
@@ -795,6 +796,7 @@ export class ModelService {
       project: buildProject({
         entry,
         read: this.reader.latest(entry.root),
+        closedRuns: this.reader.closedRuns(entry.root),
         accounts,
         registry,
         pidAlive: this.deps.pidAlive,
@@ -827,6 +829,7 @@ export class ModelService {
         project,
         store: readRunStore(entry.root) ?? {},
         read,
+        closedRuns: this.reader.closedRuns(entry.root),
         reviewerAgent,
         actionable:
           entry.tracker !== null &&

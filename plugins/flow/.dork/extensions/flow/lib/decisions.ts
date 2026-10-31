@@ -23,7 +23,8 @@
  * raised still shows in the model and on flow's pages.
  *
  * **Settling** (§7.3, §7.4): an ask that is no longer true is resolved
- * `cleared` ("resolved on its own"), `cancelled` when its project is gone. An
+ * `cleared` ("resolved on its own"); a run whose item the tracker says closed
+ * (`PlanProject.closedRuns`) asks nothing, so its asks clear (DOR-2924); `cancelled` when its project is gone. An
  * answered ask is not raised again for the same thing (the same head, the same
  * question, the same park), and ideas answered with "Sort them" wait a day.
  *
@@ -81,7 +82,7 @@ import type {
 import type { FlowDecision, FlowProject } from './model.ts';
 import type { SharedStorage } from './shared-storage.ts';
 import { isStartRefusal, startRefusal, startWords, type StartKind } from './start-words.ts';
-import type { TrackerRead } from './tracker-reads.ts';
+import { isClosedRun, type ClosedRun, type TrackerRead } from './tracker-reads.ts';
 
 /**
  * Why the drain parks a run on red checks at Ask me first. The drain's own
@@ -136,6 +137,8 @@ export interface PlanProject {
   store: Record<string, unknown>;
   /** Its last tracker read. */
   read: TrackerRead | null;
+  /** Its runs whose item the tracker says closed: they ask nothing. */
+  closedRuns: readonly ClosedRun[];
   /** Whether a reviewer agent checks this repo's work (`review.adversarial`). */
   reviewerAgent: boolean;
   /** Whether flow can post to its tracker from here (cli transport, an adapter it may run). */
@@ -320,6 +323,8 @@ export function planProject(input: {
   for (const run of Object.values(plan.store)) {
     if (!isObject(run) || typeof run.identifier !== 'string') continue;
     if (typeof run.status !== 'string' || !ACTIVE_RUN_STATUSES.has(run.status)) continue;
+    // Its item closed: nothing waits on a person there any more.
+    if (isClosedRun(run, plan.closedRuns)) continue;
     const identifier = run.identifier;
     const title = text(run.title);
     const drain = obj(run.drain);

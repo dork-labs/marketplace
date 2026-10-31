@@ -184,6 +184,7 @@ function plan(
     } as FlowProject,
     store,
     read: null,
+    closedRuns: [],
     reviewerAgent: true,
     actionable: true,
     ideas: { waiting: null, due: false, idleSince: null },
@@ -486,6 +487,40 @@ describe('one row per key, settled on its own', () => {
         { key: 'review:b1b1b1b1b1b1:DOR-2387', opts: { outcome: 'cancelled' } },
       ])
     );
+  });
+
+  it("clears a review gate and a question once the tracker says the run's item closed (DOR-2924)", async () => {
+    // Purpose: a run whose item closed (its PR merged, a person cancelled it)
+    // stays in the run store until someone releases it; its asks must not
+    // wait there forever, and none is raised for it again.
+    const { coordinator, inbox } = setup({ stops: { questions: 'ask' } });
+    const verifyGate = {
+      identifier: 'DOR-2390',
+      title: 'Gate VERIFY left',
+      status: 'waiting_for_review',
+      stage: 'review',
+      review: { verdict: 'clean', reviewedSha: 'abc1234def' },
+    };
+    const store = { a: gateRun(), b: questionRun(), c: verifyGate };
+    await coordinator.sync([plan(store)]);
+    expect(inbox?.raised.map((r) => r.key)).toEqual([
+      'review:3f2a00000000:DOR-2387',
+      'review:3f2a00000000:DOR-2390',
+      'question:3f2a00000000:DOR-2401',
+    ]);
+    const closedRuns = ['DOR-2387', 'DOR-2390', 'DOR-2401'].map((identifier) => ({
+      identifier,
+      sessionId: null,
+    }));
+    await coordinator.sync([plan(store, { closedRuns })]);
+    expect(inbox?.resolved).toEqual([
+      { key: 'review:3f2a00000000:DOR-2387', opts: { outcome: 'cleared' } },
+      { key: 'review:3f2a00000000:DOR-2390', opts: { outcome: 'cleared' } },
+      { key: 'question:3f2a00000000:DOR-2401', opts: { outcome: 'cleared' } },
+    ]);
+    expect(coordinator.decisions()).toEqual([]);
+    await coordinator.sync([plan(store, { closedRuns })]);
+    expect(inbox?.raised).toHaveLength(3);
   });
 
   it('credits the reviewer agent or the deadline when a question was settled that way', async () => {

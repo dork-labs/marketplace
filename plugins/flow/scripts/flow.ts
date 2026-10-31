@@ -273,7 +273,7 @@ export const VERBS: readonly VerbDefinition[] = [
     name: 'status',
     summary: 'Show what is in flight, what is parked, the drain, the pause, any drift, and Health.',
     description:
-      "Joins the run records, the drain sentinel, the pause and the backlog. Drift is a running run whose item is not started, a claimed item with no run, a run whose worker is gone, or a STATE-n breach on an in-flight item. With an identifier: that item only, plus its last parked question. Health shows each of this project's flow schedules as fresh, stale, never ran, disabled or pending approval (its last successful run, read from the DorkOS on this machine), and when each intake source was last read; whatever it cannot read is unknown, with why.",
+      "Joins the run records, the drain sentinel, the pause and the backlog. Drift is a running run whose item is not started, a claimed item with no run, a run whose worker is gone, a run whose item closed, or a STATE-n breach on an in-flight item. A run whose item closed or whose worker is gone is listed as ended, not in flight, until flow release clears it; an item the backlog leaves out is read once to tell. With an identifier: that item only, plus its last parked question. Health shows each of this project's flow schedules as fresh, stale, never ran, disabled or pending approval (its last successful run, read from the DorkOS on this machine), and when each intake source was last read; whatever it cannot read is unknown, with why.",
     common: ['project', 'snapshot'],
     positionals: [{ name: 'identifier', description: 'Show only this item.' }],
     flags: [
@@ -349,7 +349,7 @@ export const VERBS: readonly VerbDefinition[] = [
     name: 'release',
     summary: 'Let go of an item: back to the ready queue, or unowned.',
     description:
-      'Let go of an item. --to ready (the default) makes it unstarted with agent/ready and a stage/* label to resume at; --to none leaves it unowned. Deletes the run record. Posts a signed comment only with --reason.',
+      'Let go of an item. --to ready (the default) makes it unstarted with agent/ready and a stage/* label to resume at; --to none leaves it unowned. Deletes the run record. Posts a signed comment only with --reason. A closed item that still has a run: deletes the run record and leaves the item as it is.',
     common: ['project', 'dry-run', 'session'],
     positionals: [{ name: 'identifier', required: true, description: 'The item, e.g. DOR-123.' }],
     flags: [

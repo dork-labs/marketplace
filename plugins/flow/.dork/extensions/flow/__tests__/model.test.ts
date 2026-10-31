@@ -369,6 +369,50 @@ describe('buildProject', () => {
     expect(project.conditions.map((condition) => condition.kind)).toEqual(['paused']);
   });
 
+  it('neither shows nor counts a run whose item the tracker says closed (DOR-2924)', () => {
+    // Purpose: a closed item's run left in the store is not waiting at review
+    // and holds no drain slot; `flow release` clears it from the store.
+    mkdirSync(path.join(world.main, '.dork', 'flow'), { recursive: true });
+    writeFileSync(
+      path.join(world.main, '.dork', 'flow', 'flow-state.json'),
+      JSON.stringify({
+        a: runRecord(world),
+        b: runRecord(world, {
+          issueId: 'b',
+          identifier: 'ACME-2',
+          stage: 'review',
+          status: 'waiting_for_review',
+          drain: undefined,
+        }),
+      })
+    );
+    const build = (closedRuns: { identifier: string; sessionId: string | null }[]) =>
+      buildProject({
+        entry: entry(),
+        read: read(),
+        closedRuns,
+        accounts: new Map(),
+        registry: [],
+        pidAlive: () => true,
+        now: NOW,
+      });
+    const open = build([]);
+    expect(open.runs.map((run) => [run.identifier, run.state])).toEqual([
+      ['ACME-1', 'building'],
+      ['ACME-2', 'in-review'],
+    ]);
+    const closed = build([
+      { identifier: 'ACME-1', sessionId: 's-old' },
+      { identifier: 'ACME-2', sessionId: 's-old' },
+    ]);
+    expect(closed.runs).toEqual([]);
+    expect(closed.capacity.busy).toBe(0);
+    // Reopened and claimed again: a new session is a new run, shown and counted.
+    const reclaimed = build([{ identifier: 'ACME-1', sessionId: 'an-earlier-session' }]);
+    expect(reclaimed.runs.map((run) => run.identifier)).toEqual(['ACME-1', 'ACME-2']);
+    expect(reclaimed.capacity.busy).toBe(1);
+  });
+
   it('says how Up next is reached for each kind of tracker', () => {
     const tracker = entry().tracker!;
     expect(upNextOf(entry())).toBe('read');
