@@ -6,7 +6,7 @@ you until you **reinstall it** (Marketplace → flow → reinstall, or re-run yo
 
 ## 0.67.1
 
-**Fix: flow installs again. On current DorkOS, installing 0.66.1 and 0.67.0 failed with "could not compile … outside this plugin's folder" and rolled back. Install 0.67.1.**
+**Fix: flow installs again. On current DorkOS, installing 0.66.1 or 0.67.0 failed with "Extension 'flow' failed to compile: Compilation failed for flow" (the detail says an import "resolves to …, outside this plugin's folder") and rolled back. Install 0.67.1.**
 
 - DorkOS builds the Flow extension's page half while installing, and holds that build to the extension's own folder. The page half imported two engine modules from `scripts/`, so the build was refused and the install rolled back.
 - The page half now uses its own copies of those two modules, `autonomy-dial.ts` and `config-names.ts`, in the extension folder. A test keeps each copy byte for byte the same as the engine's.

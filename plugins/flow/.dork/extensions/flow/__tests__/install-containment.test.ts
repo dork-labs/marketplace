@@ -1,9 +1,9 @@
 /**
  * DorkOS compiles the extension's page half once while installing, from the
  * staging folder, and holds that build to the extension's own folder: an import
- * that resolves outside `.dork/extensions/flow/` fails the install ("resolves
- * to …, outside this plugin's folder", DorkOS DOR-3068). Flow 0.66.1 failed
- * to install that way, because `ui/` imported `scripts/autonomy-dial.ts`.
+ * that resolves outside `.dork/extensions/flow/` fails the install ("Extension
+ * 'flow' failed to compile", DorkOS DOR-3068, DOR-3537). Flow 0.66.1 failed to
+ * install that way, because `ui/` imported `scripts/autonomy-dial.ts`.
  *
  * So this bundles `index.ts` the way that install step does: esbuild, the
  * host's externals left alone, every other import checked against the
@@ -44,7 +44,8 @@ function containedTo(root: string, outside: string[]): Plugin {
           resolveDir: args.resolveDir,
           pluginData: { contained: true },
         });
-        if (resolved.errors.length > 0 || resolved.external || !resolved.path) return undefined;
+        if (resolved.errors.length > 0) return { errors: resolved.errors };
+        if (resolved.external || !resolved.path) return undefined;
         const real = realpathSync(resolved.path);
         const rel = path.relative(root, real);
         if (rel.startsWith('..') || path.isAbsolute(rel)) {
@@ -76,7 +77,7 @@ describe('the install-time build of the page half', () => {
 
 describe('the engine modules the page half keeps its own copies of', () => {
   it.each(['autonomy-dial.ts', 'config-names.ts'])(
-    'shared/%s is byte for byte scripts/%s',
+    'shared/$0 is byte for byte scripts/$0',
     (name) => {
       const plugin = path.resolve(EXTENSION_DIR, '..', '..', '..');
       expect(readFileSync(path.join(EXTENSION_DIR, 'shared', name), 'utf8')).toBe(
