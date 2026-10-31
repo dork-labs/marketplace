@@ -68,6 +68,7 @@ function read(overrides: Partial<TrackerRead> = {}): TrackerRead {
     teamUrl: 'https://linear.app/acme/team/DOR',
     facts: { eligibleCount: 5, shapeableCount: 0, starved: false, atWipCap: false },
     failure: null,
+    closedRuns: [],
     ...overrides,
   };
 }
@@ -367,6 +368,42 @@ describe('buildProject', () => {
     });
     expect(project.runs.map((run) => run.identifier)).toEqual(['ACME-1']);
     expect(project.conditions.map((condition) => condition.kind)).toEqual(['paused']);
+  });
+
+  it('neither shows nor counts a run whose item the tracker says closed (DOR-2924)', () => {
+    // Purpose: a closed item's run left in the store is not waiting at review
+    // and holds no drain slot; `flow release` clears it from the store.
+    mkdirSync(path.join(world.main, '.dork', 'flow'), { recursive: true });
+    writeFileSync(
+      path.join(world.main, '.dork', 'flow', 'flow-state.json'),
+      JSON.stringify({
+        a: runRecord(world),
+        b: runRecord(world, {
+          issueId: 'b',
+          identifier: 'ACME-2',
+          stage: 'review',
+          status: 'waiting_for_review',
+          drain: undefined,
+        }),
+      })
+    );
+    const build = (closedRuns: string[]) =>
+      buildProject({
+        entry: entry(),
+        read: read({ closedRuns }),
+        accounts: new Map(),
+        registry: [],
+        pidAlive: () => true,
+        now: NOW,
+      });
+    const open = build([]);
+    expect(open.runs.map((run) => [run.identifier, run.state])).toEqual([
+      ['ACME-1', 'building'],
+      ['ACME-2', 'in-review'],
+    ]);
+    const closed = build(['ACME-1', 'ACME-2']);
+    expect(closed.runs).toEqual([]);
+    expect(closed.capacity.busy).toBe(0);
   });
 
   it('says how Up next is reached for each kind of tracker', () => {

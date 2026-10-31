@@ -8,10 +8,16 @@
  * resume stage is known. `--to none` leaves it unowned. The run record is
  * deleted. A signed comment is posted only with `--reason`.
  *
+ * A closed item's run is cleared too (DOR-2706): its item closed under it (a
+ * merged PR's `Closes` line, a person cancelling it), so the run record is
+ * deleted and the item is left exactly as the tracker has it, never reopened
+ * or relabelled. A closed item with no run has nothing to release.
+ *
  * @module @dorkos/flow/cli/release
  */
 
-import { UsageError } from '../errors.ts';
+import { PreconditionError, UsageError } from '../errors.ts';
+import { isClosedItem } from '../run-ended.ts';
 import { projectionFor, type WorkStateChange } from '../work-state.ts';
 import { resolveMainCheckout } from '../main-checkout.ts';
 import { retireChecker } from './checker.ts';
@@ -50,21 +56,30 @@ export interface ReleaseInput {
  * @param ctx - The verb's context.
  * @param setup - The loaded config, adapter (with `comment` when a reason is given) and run store.
  * @param input - The item, where it goes, and why.
- * @returns The change, whether a run record was removed, and whether a comment was posted.
+ * @returns The change (`null` for a closed item, whose state is never
+ *   written), whether a run record was removed, and whether a comment was posted.
  */
 export async function releaseItem(
   ctx: VerbContext,
   setup: WriteSetup,
   input: ReleaseInput
-): Promise<{ change: WorkStateChange; runRemoved: boolean; commented: boolean }> {
+): Promise<{ change: WorkStateChange | null; runRemoved: boolean; commented: boolean }> {
   const { loaded, stages, adapter, store } = setup;
   const item = await adapter.getItem(input.identifier);
-  requireOpen(item, 'release');
   const existing = runFor(store, item);
-  const change = projectionFor(
-    { type: 'release', to: input.to, stage: input.stage },
-    { stages, runStage: existing?.stage, removedStageLabel: currentStageLabel(item) }
-  );
+  const closed = isClosedItem(item);
+  if (closed && existing === undefined) {
+    throw new PreconditionError(
+      `${item.identifier} is ${item.stateCategory} and this machine has no run for it, so there is nothing to release`
+    );
+  }
+  if (!closed) requireOpen(item, 'release');
+  const change = closed
+    ? null
+    : projectionFor(
+        { type: 'release', to: input.to, stage: input.stage },
+        { stages, runStage: existing?.stage, removedStageLabel: currentStageLabel(item) }
+      );
   const body =
     input.reason === undefined
       ? undefined
@@ -75,7 +90,7 @@ export async function releaseItem(
         );
 
   if (!ctx.dryRun) {
-    await applyAndVerify(adapter, item, change);
+    if (change !== null) await applyAndVerify(adapter, item, change);
     if (existing !== undefined) {
       // A pick checker must not outlive the run it checks.
       await retireChecker(ctx, store, resolveMainCheckout(ctx.projectDir), item.id);
@@ -123,6 +138,9 @@ export async function run(ctx: VerbContext): Promise<VerbResult> {
       runRemoved,
       commented,
     },
-    text: `${ctx.dryRun ? 'Would release' : 'Released'} ${identifier} ${to === 'ready' ? `to the ready queue at ${change.stageLabel}` : 'with no owner'}.`,
+    text:
+      change === null
+        ? `${ctx.dryRun ? 'Would clear' : 'Cleared'} the run of ${identifier}, which is closed; the item is unchanged.`
+        : `${ctx.dryRun ? 'Would release' : 'Released'} ${identifier} ${to === 'ready' ? `to the ready queue at ${change.stageLabel}` : 'with no owner'}.`,
   };
 }

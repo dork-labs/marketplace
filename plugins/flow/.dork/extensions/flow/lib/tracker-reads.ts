@@ -11,6 +11,12 @@
  * 2. `flow next --count 3 --json --no-account --manual --snapshot <file>` ranks
  *    it. `--manual` only lets the read run while the project is paused; `next`
  *    writes nothing.
+ * 3. Only when the project's run store holds an active run: `flow status --json
+ *    --no-health --snapshot <file>` names the runs whose item closed (its
+ *    `ended` list, reason `item-closed`), asking the tracker through the
+ *    adapter about any the snapshot left out. The run store never hears that
+ *    an item closed, so without this a closed item's run would wait at review
+ *    forever (DOR-2924). A status that fails keeps the last answer.
  *
  * Rules:
  *
@@ -34,6 +40,7 @@
 import { createHash } from 'node:crypto';
 import { readFileSync } from 'node:fs';
 import path from 'node:path';
+import { ACTIVE_RUN_STATUSES, readRunStore } from '../../../../scripts/fleet/sessions.ts';
 import type { ExecError, ExecFileLike } from './advisor.ts';
 import type { QueueItem } from './model.ts';
 import type { FlowProjectEntry } from './projects.ts';
@@ -80,6 +87,12 @@ export interface TrackerRead {
   } | null;
   /** Why the tracker does not answer now, and since when; `null` when it does. */
   failure: { kind: 'unreachable' | 'auth' | 'settings'; since: string } | null;
+  /**
+   * The runs whose item the tracker says closed, by identifier, from the last
+   * `flow status` that answered. They wait at no gate and hold no slot; their
+   * records stay until `flow release` clears them.
+   */
+  closedRuns: string[];
 }
 
 /** The short id of a project: the first 12 hex characters of the SHA-256 of its root. */
@@ -126,6 +139,24 @@ function lastJson(stdout: string): unknown {
   } catch {
     return null;
   }
+}
+
+/** Whether a project's run store holds a run that is not finished. */
+function hasActiveRun(root: string): boolean {
+  return Object.values(readRunStore(root) ?? {}).some(
+    (run) => isObject(run) && typeof run.status === 'string' && ACTIVE_RUN_STATUSES.has(run.status)
+  );
+}
+
+/** The identifiers `flow status --json` lists as ended because their item closed. */
+function closedRunsOf(stdout: string): string[] {
+  const body = lastJson(stdout);
+  const ended = isObject(body) && Array.isArray(body.ended) ? body.ended : [];
+  return ended.flatMap((entry) =>
+    isObject(entry) && entry.reason === 'item-closed' && typeof entry.identifier === 'string'
+      ? [entry.identifier]
+      : []
+  );
 }
 
 /** Per-project read state. */
@@ -239,7 +270,14 @@ export class TrackerReader {
     let state = this.states.get(root);
     if (state === undefined) {
       state = {
-        read: { at: null, queue: null, teamUrl: null, facts: null, failure: null },
+        read: {
+          at: null,
+          queue: null,
+          teamUrl: null,
+          facts: null,
+          failure: null,
+          closedRuns: [],
+        },
         inFlight: false,
         dueAt: 0,
         startedAt: null,
@@ -312,6 +350,22 @@ export class TrackerReader {
         return;
       }
       this.answered(state, next.stdout, file, started);
+      if (hasActiveRun(entry.root)) {
+        const status = await this.run(entry.root, [
+          'status',
+          '--json',
+          '--no-health',
+          '--snapshot',
+          file,
+        ]);
+        if (status.code === 0)
+          state.read = { ...state.read, closedRuns: closedRunsOf(status.stdout) };
+        else {
+          this.deps.log(
+            `[flow] could not tell which runs of ${entry.name} closed (exit ${String(status.code)}); trying again later`
+          );
+        }
+      }
     } finally {
       state.inFlight = false;
       this.running -= 1;
@@ -360,6 +414,7 @@ export class TrackerReader {
         atWipCap: flag('atWipCap'),
       },
       failure: null,
+      closedRuns: state.read.closedRuns,
     };
     state.failures = 0;
     state.refusals = 0;

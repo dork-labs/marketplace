@@ -164,11 +164,107 @@ describe('flow status', () => {
     ]);
   });
 
-  it('flags a running run whose worker pid is dead', async () => {
-    // Purpose: drift kind 3. The run record outlived its worker.
+  it('flags a running run whose worker pid is dead, and lists it as ended, not in flight', async () => {
+    // Purpose: drift kind 3. The run record outlived its worker, so nothing is
+    // in flight there any more (DOR-2706); `flow release` clears it.
     writeRuns([runRecord('FAKE-3', { workerPid: DEAD_PID })]);
     const out = (await status(['--json'], { items: [item('FAKE-3')] })).json();
     expect(kinds(out)).toEqual(['FAKE-3 worker-gone']);
+    expect(out.inFlight).toEqual([]);
+    expect(out.ended).toMatchObject([
+      { identifier: 'FAKE-3', reason: 'worker-gone', stage: 'execute', status: 'running' },
+    ]);
+    const text = (await status(['--no-health'], { items: [item('FAKE-3')] })).stdout;
+    expect(text).toMatch(/Ended, not cleared:\n {2}FAKE-3 .*flow release FAKE-3/);
+    expect(text).not.toContain('In flight');
+  });
+
+  describe('a run whose item closed (DOR-2924, DOR-2706)', () => {
+    const closed = (identifier: string, category: 'completed' | 'canceled' = 'completed') =>
+      item(identifier, { stateCategory: category, stateName: 'Done', labels: ['agent/claimed'] });
+
+    it('is ended, not in flight, while it waits at review', async () => {
+      // Purpose: VERIFY left the run at the gate, then the PR merged and the
+      // tracker closed the item. Nothing waits at review any more.
+      writeRuns([
+        runRecord('FAKE-1', { stage: 'review', status: 'waiting_for_review', workerPid: DEAD_PID }),
+      ]);
+      const out = (await status(['--json'], { items: [closed('FAKE-1')] })).json();
+      expect(out.inFlight).toEqual([]);
+      expect(out.ended).toMatchObject([
+        { identifier: 'FAKE-1', reason: 'item-closed', stage: 'review' },
+      ]);
+      expect(kinds(out)).toEqual(['FAKE-1 item-closed']);
+    });
+
+    it("asks the tracker for a run's item that the open backlog leaves out", async () => {
+      // Purpose: a real tracker's snapshot holds only open items, so a closed
+      // item is missing from it; one getItem through the adapter says closed.
+      const file = path.join(project, 'snap.json');
+      writeFileSync(file, JSON.stringify({ v: 1, items: [] }));
+      writeRuns([runRecord('FAKE-1', { status: 'waiting_for_review', stage: 'review' })]);
+      const out = (
+        await status(['--snapshot', file, '--json'], { items: [closed('FAKE-1', 'canceled')] })
+      ).json();
+      expect(out.inFlight).toEqual([]);
+      expect(out.ended).toMatchObject([{ identifier: 'FAKE-1', reason: 'item-closed' }]);
+    });
+
+    it('keeps a run in flight when the tracker cannot say the item closed', async () => {
+      // Purpose: never lose a run on a guess. An item the tracker cannot find
+      // (another team, deleted) or a read that fails is not a close.
+      const file = path.join(project, 'snap.json');
+      writeFileSync(file, JSON.stringify({ v: 1, items: [] }));
+      writeRuns([runRecord('FAKE-1', { status: 'waiting_for_review', stage: 'review' })]);
+      const missing = (await status(['--snapshot', file, '--json'], { items: [] })).json();
+      expect(missing.inFlight).toMatchObject([{ identifier: 'FAKE-1' }]);
+      expect(missing.ended).toEqual([]);
+      const failing = (
+        await status(['--snapshot', file, '--json'], { items: [], failReads: 'down' })
+      ).json();
+      expect(failing.inFlight).toMatchObject([{ identifier: 'FAKE-1' }]);
+    });
+
+    it('keeps a running run in flight while its worker is alive', async () => {
+      // Purpose: a live session may be closing the item itself (/flow:done).
+      writeRuns([runRecord('FAKE-1')]);
+      const out = (await status(['--json'], { items: [closed('FAKE-1')] })).json();
+      expect(out.inFlight).toMatchObject([{ identifier: 'FAKE-1' }]);
+      expect(out.ended).toEqual([]);
+    });
+
+    it('leaves a drain run to the drain until the drain parks it', async () => {
+      // Purpose: the drain closes the item itself in `closing`, and a merged
+      // PR closes it on its Closes line; only a drain run parked on the close
+      // has ended.
+      const drain = (phase: string) =>
+        ({
+          v: 1,
+          rev: 1,
+          phase,
+          worker: null,
+          reviewer: null,
+          pushedSha: null,
+          reviewedSha: null,
+          verdict: null,
+          reviewRound: 0,
+          pr: null,
+          rearmedFor: null,
+          nudges: 0,
+          wakeAfter: null,
+          handoffs: [],
+          parkedReason: phase === 'parked' ? 'the item was closed' : null,
+        }) as unknown as FlowRun['drain'];
+      writeRuns([
+        runRecord('FAKE-1', { drain: drain('watching') }),
+        runRecord('FAKE-2', { drain: drain('parked') }),
+      ]);
+      const out = (
+        await status(['--json'], { items: [closed('FAKE-1'), closed('FAKE-2')] })
+      ).json();
+      expect(out.inFlight.map((f: { identifier: string }) => f.identifier)).toEqual(['FAKE-1']);
+      expect(out.ended).toMatchObject([{ identifier: 'FAKE-2', reason: 'item-closed' }]);
+    });
   });
 
   it('asks the launcher about a drain run instead of its pid, and shows its phase, account and host', async () => {

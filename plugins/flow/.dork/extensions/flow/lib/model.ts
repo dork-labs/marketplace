@@ -537,8 +537,9 @@ function text(value: unknown): string | null {
 }
 
 /**
- * The runs of one project to show: active ones that are not stale, then those
- * completed in the last day, in the store's order within each.
+ * The runs of one project to show: active ones that are not stale and whose
+ * item the tracker has not said closed, then those completed in the last day,
+ * in the store's order within each.
  *
  * @param input - The project, its raw run store, the account names, flow's
  *   registry, the pid check and the clock.
@@ -551,6 +552,8 @@ export function projectRuns(input: {
   registry: readonly RuntimeAccount[];
   pidAlive: (pid: number) => boolean;
   now: Date;
+  /** Runs whose item closed (`TrackerRead.closedRuns`): waiting at no gate. */
+  closedRuns?: ReadonlySet<string>;
 }): FlowRunRow[] {
   const active: FlowRunRow[] = [];
   const done: FlowRunRow[] = [];
@@ -560,7 +563,7 @@ export function projectRuns(input: {
     }
     let into: FlowRunRow[];
     if (ACTIVE_RUN_STATUSES.has(run.status)) {
-      if (isStaleRun(run, input.pidAlive)) continue;
+      if (isStaleRun(run, input.pidAlive) || input.closedRuns?.has(run.identifier)) continue;
       into = active;
     } else if (run.status === 'complete') {
       const at = Date.parse(text(run.completedAt) ?? lastUpdateOf(run) ?? '');
@@ -698,6 +701,7 @@ export function buildProject(input: {
   const extras = input.extras ?? {};
   const pidAlive = input.pidAlive ?? pidExists;
   const store = readRunStore(entry.root) ?? {};
+  const closedRuns = new Set(read?.closedRuns ?? []);
   const runs = projectRuns({
     root: entry.root,
     store,
@@ -705,6 +709,7 @@ export function buildProject(input: {
     registry: input.registry,
     pidAlive,
     now,
+    closedRuns,
   });
   let busy = 0;
   for (const run of Object.values(store)) {
@@ -713,6 +718,7 @@ export function buildProject(input: {
       typeof run.status === 'string' &&
       ACTIVE_RUN_STATUSES.has(run.status) &&
       !isStaleRun(run, pidAlive) &&
+      !(typeof run.identifier === 'string' && closedRuns.has(run.identifier)) &&
       isLiveDrainRun(run)
     ) {
       busy += 1;

@@ -192,6 +192,7 @@ describe('TrackerReader', () => {
       teamUrl: 'https://linear.app/t/DOR',
       facts: { eligibleCount: 7, shapeableCount: 2, starved: false, atWipCap: false },
       failure: null,
+      closedRuns: [],
     });
     expect(onChange).toHaveBeenCalledTimes(1);
     expect(projectIdOf('/p')).toMatch(/^[0-9a-f]{12}$/);
@@ -205,6 +206,65 @@ describe('TrackerReader', () => {
     instance.tick([project('/p')]);
     await settle();
     expect(fake.calls).toHaveLength(4);
+  });
+
+  it("asks flow status which runs' items closed, only for a project with an active run (DOR-2924)", async () => {
+    // Purpose: the Flow tab's asks and run rows come from the run store, which
+    // never hears that an item closed. flow status asks the tracker, through
+    // the adapter, and its `ended` list names them; a failed status keeps the
+    // last answer rather than raising every ask again.
+    const root = mkdtempSync(path.join(tmpdir(), 'flow-reads-root-'));
+    try {
+      let statusAnswer: Answer = {
+        code: 0,
+        stdout: JSON.stringify({
+          v: 1,
+          ok: true,
+          ended: [
+            { identifier: 'DOR-7', reason: 'item-closed' },
+            { identifier: 'DOR-8', reason: 'worker-gone' },
+          ],
+        }),
+      };
+      const fake = fakeExec((verb) =>
+        verb === 'next' ? { code: 0, stdout: NEXT } : verb === 'status' ? statusAnswer : { code: 0 }
+      );
+      const clock = { now: T0 };
+      const { instance } = reader(fake.exec, clock);
+
+      instance.tick([project(root)]);
+      await settle();
+      expect(fake.calls.map((call) => call.verb)).toEqual(['snapshot', 'next']);
+      expect(instance.latest(root)?.closedRuns).toEqual([]);
+
+      mkdirSync(path.join(root, '.dork', 'flow'), { recursive: true });
+      writeFileSync(
+        path.join(root, '.dork', 'flow', 'flow-state.json'),
+        JSON.stringify({
+          a: { identifier: 'DOR-7', status: 'waiting_for_review' },
+          b: { identifier: 'DOR-6', status: 'complete' },
+        })
+      );
+      clock.now += READ_INTERVAL_MS;
+      instance.tick([project(root)]);
+      await settle();
+      const file = path.join(dorkHome, 'flow', 'cache', projectIdOf(root), 'snapshot.json');
+      expect(fake.calls.slice(2).map((call) => call.args.slice(2))).toEqual([
+        ['snapshot', '--json', '--out', file, '--project', root],
+        expect.arrayContaining(['next']),
+        ['status', '--json', '--no-health', '--snapshot', file, '--project', root],
+      ]);
+      expect(instance.latest(root)).toMatchObject({ failure: null, closedRuns: ['DOR-7'] });
+
+      statusAnswer = { code: 4 };
+      clock.now += READ_INTERVAL_MS;
+      instance.tick([project(root)]);
+      await settle();
+      expect(fake.calls.map((call) => call.verb).slice(5)).toEqual(['snapshot', 'next', 'status']);
+      expect(instance.latest(root)).toMatchObject({ failure: null, closedRuns: ['DOR-7'] });
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
   });
 
   it('never reads over mcp, or with the project’s own adapter', async () => {

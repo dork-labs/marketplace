@@ -4,6 +4,15 @@ Installs of this plugin are pinned to a commit SHA, so a fix here does not reach
 you until you **reinstall it** (Marketplace → flow → reinstall, or re-run your
 `--plugin-dir` checkout's `git pull`). Each entry below says whether that matters.
 
+## 0.67.0
+
+**A run whose item closed, or whose worker died, no longer shows as in flight or waiting at review, and `flow release` clears it (DOR-2924, DOR-2706). Reinstall to get it.**
+
+- `flow status` lists such a run under **Ended, not cleared**, not under In flight. In its JSON it's in a new `ended` list, with `reason` set to `item-closed` or `worker-gone`, and a drift line says `flow release <id>` clears it. A real tracker's backlog holds only open items. So for a run whose item isn't in the backlog, status asks the tracker about that item once, through the adapter, and only when a close would end the run.
+- A run that may still be live stays in flight. That covers a running run whose worker may be alive, a `flow drain` run the drain hasn't parked (the drain closes the item itself), and an item the tracker can't find or doesn't answer for.
+- `flow release` now clears the run of a closed item. It deletes the run record and leaves the item exactly as the tracker has it, never reopened or relabelled. With `--reason` it still posts the comment. A closed item with no run is still refused.
+- In the DorkOS app, the Flow tab no longer shows such a run as waiting at review or counts it as busy, and its ship or question ask in the Inbox clears by itself. For a project with an active run, the tab's tracker read now also runs `flow status`. That covers projects flow reads on its own (the `cli` transport); over MCP, release the run by hand.
+
 ## 0.66.1
 
 **Security fix: before flow arms a PR, its `security-reviewed` label must have been added after the PR's current head arrived. Reinstall to get it.**

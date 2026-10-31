@@ -18,9 +18,16 @@
  * Drift is where these disagree: a running run whose item is not started, a
  * claimed item with no run, a running run whose worker is gone (for a
  * `flow drain` run, its launcher reports the sessions instead, since a drain
- * worker has no long-lived pid), and any
+ * worker has no long-lived pid), a run whose item closed, and any
  * `STATE-n` breach (`work-state.ts`) on an in-flight item. `--strict` exits 1
  * on any drift.
+ *
+ * A run that outlived its work (`run-ended.ts`: its item closed, or its worker
+ * is gone) is listed under `ended`, not in flight (DOR-2924, DOR-2706); its
+ * record stays until `flow release` clears it. A run whose item the backlog
+ * leaves out (a real tracker's snapshot holds only open items) is checked
+ * with one `getItem` through the adapter, only when a close would end it; a
+ * read that fails or finds nothing is not a close.
  *
  * @module @dorkos/flow/cli/status
  */
@@ -40,8 +47,9 @@ import { limitLine } from '../drain/handoff-exec.ts';
 import type { DrainWorkerHandle } from '../drain/state.ts';
 import { realLauncher } from '../launchers/real.ts';
 import { handleRuntime, HOST_NAMES } from '../launchers/types.ts';
+import { runEnded, type RunEndReason } from '../run-ended.ts';
 import { requireCapabilities } from '../tracker/load.ts';
-import type { ItemComment, WorkItem } from '../tracker/types.ts';
+import type { CodeAdapter, ItemComment, WorkItem } from '../tracker/types.ts';
 import { AGENT_CLAIMED, stateCoherence } from '../work-state.ts';
 import { readSnapshotFile } from './backlog.ts';
 import { formatColumns } from './output.ts';
@@ -110,6 +118,12 @@ export interface InFlightEntry {
   } | null;
 }
 
+/** A run that outlived its work: not in flight, its record kept until `flow release`. */
+export interface EndedEntry extends InFlightEntry {
+  /** Its item closed, or its worker is gone. */
+  reason: RunEndReason;
+}
+
 /** One parked item. */
 export interface ParkedEntry {
   identifier: string;
@@ -119,7 +133,8 @@ export interface ParkedEntry {
 }
 
 /** The kinds of drift status reports. */
-export type DriftKind = 'run-not-started' | 'claimed-no-run' | 'worker-gone' | 'state-breach';
+export type DriftKind =
+  'run-not-started' | 'claimed-no-run' | 'worker-gone' | 'item-closed' | 'state-breach';
 
 /** One drift line. */
 export interface DriftEntry {
@@ -140,6 +155,31 @@ function pidAlive(pid: unknown): boolean | null {
   } catch (error) {
     return (error as NodeJS.ErrnoException).code === 'EPERM';
   }
+}
+
+/** What a closed item looks like to `runEnded`: asks whether a close would end a run. */
+const CLOSED = { stateCategory: 'completed' } as const;
+
+/**
+ * Read one item the backlog left out, through the adapter, loaded at most once.
+ * Anything that goes wrong (no adapter, no `getItem`, an item the tracker
+ * cannot find, a tracker that does not answer) is `undefined`: not a close.
+ */
+function lazyItemReader(ctx: VerbContext): (identifier: string) => Promise<WorkItem | undefined> {
+  let adapter: Promise<CodeAdapter | null> | undefined;
+  return async (identifier) => {
+    adapter ??= ctx.adapter().then(
+      (loaded) => (loaded.capabilities.includes('getItem') ? loaded : null),
+      () => null
+    );
+    const loaded = await adapter;
+    if (loaded === null) return undefined;
+    try {
+      return await loaded.getItem(identifier);
+    } catch {
+      return undefined;
+    }
+  };
 }
 
 /** Read the drain sentinel from the first checkout that has one. */
@@ -247,14 +287,40 @@ export async function run(ctx: VerbContext): Promise<VerbResult> {
   const labels = (item: WorkItem | undefined) => (Array.isArray(item?.labels) ? item.labels : []);
 
   const inFlight: InFlightEntry[] = [];
+  const ended: EndedEntry[] = [];
   const drift: DriftEntry[] = [];
   const seen = new Set<string>();
+  const outside = lazyItemReader(ctx);
 
   for (const run of runs) {
     if (run.status === 'complete') continue;
     const item = byIdentifier.get(run.identifier) ?? items.find((i) => i.id === run.issueId);
     seen.add(item?.identifier ?? run.identifier);
-    inFlight.push(entry(run.identifier, item, run, await drainSessions(ctx, run)));
+    // Ask the tracker about an item the backlog left out only when its close
+    // would end the run.
+    const closedState =
+      item ??
+      (runEnded(run, CLOSED, pidAlive) === null ? undefined : await outside(run.identifier));
+    const reason = runEnded(run, closedState, pidAlive);
+    const row = entry(run.identifier, item ?? closedState, run, await drainSessions(ctx, run));
+    if (reason !== null) {
+      ended.push({ ...row, reason });
+      drift.push(
+        reason === 'item-closed'
+          ? {
+              identifier: run.identifier,
+              kind: 'item-closed',
+              detail: `has a run, but its item is ${String(closedState?.stateCategory)}; flow release ${run.identifier} clears the run`,
+            }
+          : {
+              identifier: run.identifier,
+              kind: 'worker-gone',
+              detail: `has a running run, but its worker (pid ${run.workerPid}) is gone; flow release ${run.identifier} clears the run`,
+            }
+      );
+      continue;
+    }
+    inFlight.push(row);
     if (run.status === 'running') {
       if (item?.stateCategory !== 'started') {
         drift.push({
@@ -264,15 +330,6 @@ export async function run(ctx: VerbContext): Promise<VerbResult> {
             item === undefined
               ? 'has a running run, but the item is not open in the backlog'
               : `has a running run, but the item is ${item.stateCategory}, not started`,
-        });
-      }
-      // A drain run's worker is the supervisor's: a cli worker exits after each
-      // turn and a DorkOS worker has no pid, so its launcher reports it instead.
-      if (run.drain === undefined && pidAlive(run.workerPid) === false) {
-        drift.push({
-          identifier: run.identifier,
-          kind: 'worker-gone',
-          detail: `has a running run, but its worker (pid ${run.workerPid}) is gone`,
         });
       }
     }
@@ -323,8 +380,8 @@ export async function run(ctx: VerbContext): Promise<VerbResult> {
     ctx,
     {
       exitCode: failed ? 1 : 0,
-      json: { ok: !failed, paused, drain, inFlight, parked, drift, health },
-      text: render({ paused, drain, inFlight, parked, drift, health }, now),
+      json: { ok: !failed, paused, drain, inFlight, ended, parked, drift, health },
+      text: render({ paused, drain, inFlight, ended, parked, drift, health }, now),
     },
     roots
   );
@@ -435,6 +492,7 @@ function render(
     paused: { since: string | null; until: string | null } | null;
     drain: DrainStatus | null;
     inFlight: InFlightEntry[];
+    ended: EndedEntry[];
     parked: ParkedEntry[];
     drift: DriftEntry[];
     health: Health | null;
@@ -473,6 +531,16 @@ function render(
     sections.push(
       `In flight:\n${formatColumns([['  ITEM', 'TITLE', 'STAGE', 'STATUS', 'ACCOUNT', 'HOST', 'WORKTREE @ BRANCH'], ...rows])}`
     );
+  }
+  if (pane.ended.length > 0) {
+    const lines = pane.ended.map((e) => {
+      const why =
+        e.reason === 'item-closed'
+          ? `its item is ${e.stateCategory ?? 'closed'}`
+          : `its worker (pid ${e.workerPid ?? '?'}) is gone`;
+      return `  ${e.identifier} - ${e.title ?? '(not in the backlog)'}: ${why}; flow release ${e.identifier} clears it.`;
+    });
+    sections.push(`Ended, not cleared:\n${lines.join('\n')}`);
   }
   if (pane.parked.length > 0) {
     const lines = pane.parked.map((p) => {

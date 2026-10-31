@@ -23,7 +23,8 @@
  * raised still shows in the model and on flow's pages.
  *
  * **Settling** (§7.3, §7.4): an ask that is no longer true is resolved
- * `cleared` ("resolved on its own"), `cancelled` when its project is gone. An
+ * `cleared` ("resolved on its own"); a run whose item the tracker says closed
+ * (`TrackerRead.closedRuns`) asks nothing, so its asks clear (DOR-2924); `cancelled` when its project is gone. An
  * answered ask is not raised again for the same thing (the same head, the same
  * question, the same park), and ideas answered with "Sort them" wait a day.
  *
@@ -317,9 +318,12 @@ export function planProject(input: {
   const { plan, stop } = input;
   const asks: Ask[] = [];
   if (plan.project.setup !== 'ready') return asks;
+  const closedRuns = new Set(plan.read?.closedRuns ?? []);
   for (const run of Object.values(plan.store)) {
     if (!isObject(run) || typeof run.identifier !== 'string') continue;
     if (typeof run.status !== 'string' || !ACTIVE_RUN_STATUSES.has(run.status)) continue;
+    // Its item closed: nothing waits on a person there any more.
+    if (closedRuns.has(run.identifier)) continue;
     const identifier = run.identifier;
     const title = text(run.title);
     const drain = obj(run.drain);

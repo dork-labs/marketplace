@@ -204,7 +204,7 @@ Four commands sit outside the spine: see what is happening, and take control.
 /flow:status
 ```
 
-Runs `flow status`: every item in flight (with its worktree, branch and session), every parked question, the pause, the drain, and any drift, such as a claimed item with no run behind it. Add an item id to see just that item.
+Runs `flow status`: items in flight (worktree, branch, session), parked questions, the pause, the drain and drift. A run whose item closed or worker died shows as ended; `flow release <id>` clears it. Add an item id to see just that item.
 
 ### `/flow:pause` and `/flow:resume`
 

@@ -136,6 +136,49 @@ describe('flow release refusals, failure and dry run', () => {
       ['release', 'FAKE-1', '--stage', 'execute']
     );
     expect(result.code).toBe(EXIT.precondition);
+    expect(result.tracker.calls).toEqual([]);
+  });
+
+  it("clears a closed item's run without touching the tracker (DOR-2706)", async () => {
+    // Purpose: a run whose item closed under it (a merged PR's Closes line, a
+    // person cancelling it) must be clearable. The item stays exactly as the
+    // tracker has it: releasing must never reopen or relabel a closed item.
+    project.writeRuns(runAt('review'));
+    const result = await runFlow(
+      project,
+      { items: [item('FAKE-1', { stateCategory: 'completed', labels: ['agent/claimed'] })] },
+      ['release', 'FAKE-1']
+    );
+    expect(result.code).toBe(EXIT.ok);
+    expect(result.tracker.calls).toEqual([]);
+    expect(project.runs()).toEqual({});
+    expect(result.json).toMatchObject({ runRemoved: true, commented: false, change: null });
+  });
+
+  it("posts --reason on a closed item's release, and still writes no state", async () => {
+    // Purpose: the reason is the one tracker write a closed release makes.
+    project.writeRuns(runAt('review'));
+    const result = await runFlow(
+      project,
+      { items: [item('FAKE-1', { stateCategory: 'canceled' })] },
+      ['release', 'FAKE-1', '--reason', 'Closed by hand.']
+    );
+    expect(result.code).toBe(EXIT.ok);
+    expect(result.tracker.calls.map((call) => call.method)).toEqual(['comment']);
+    expect(project.runs()).toEqual({});
+  });
+
+  it("keeps a closed item's run with --dry-run", async () => {
+    // Purpose: --dry-run says what it would clear and clears nothing.
+    project.writeRuns(runAt('review'));
+    const result = await runFlow(
+      project,
+      { items: [item('FAKE-1', { stateCategory: 'completed' })] },
+      ['release', 'FAKE-1', '--dry-run']
+    );
+    expect(result.code).toBe(EXIT.ok);
+    expect(result.json).toMatchObject({ runRemoved: true, change: null });
+    expect(Object.keys(project.runs())).toEqual(['id-FAKE-1']);
   });
 
   it('exits 4 and keeps the run when the tracker drops the write', async () => {
