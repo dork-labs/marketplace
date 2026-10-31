@@ -184,6 +184,7 @@ function plan(
     } as FlowProject,
     store,
     read: null,
+    closedRuns: [],
     reviewerAgent: true,
     actionable: true,
     ideas: { waiting: null, due: false, idleSince: null },
@@ -440,7 +441,6 @@ describe('what is raised', () => {
       teamUrl: null,
       facts: null,
       failure: { kind: 'auth', since: '2026-09-28T09:14:00.000Z' },
-      closedRuns: [],
     };
     const { coordinator, inbox } = setup({
       stops: { ship: 'auto', questions: 'auto', sort: 'auto', retry: 'auto' },
@@ -508,22 +508,18 @@ describe('one row per key, settled on its own', () => {
       'review:3f2a00000000:DOR-2390',
       'question:3f2a00000000:DOR-2401',
     ]);
-    const closed = {
-      at: NOW.toISOString(),
-      queue: null,
-      teamUrl: null,
-      facts: null,
-      failure: null,
-      closedRuns: ['DOR-2387', 'DOR-2390', 'DOR-2401'],
-    };
-    await coordinator.sync([plan(store, { read: closed })]);
+    const closedRuns = ['DOR-2387', 'DOR-2390', 'DOR-2401'].map((identifier) => ({
+      identifier,
+      sessionId: null,
+    }));
+    await coordinator.sync([plan(store, { closedRuns })]);
     expect(inbox?.resolved).toEqual([
       { key: 'review:3f2a00000000:DOR-2387', opts: { outcome: 'cleared' } },
       { key: 'review:3f2a00000000:DOR-2390', opts: { outcome: 'cleared' } },
       { key: 'question:3f2a00000000:DOR-2401', opts: { outcome: 'cleared' } },
     ]);
     expect(coordinator.decisions()).toEqual([]);
-    await coordinator.sync([plan(store, { read: closed })]);
+    await coordinator.sync([plan(store, { closedRuns })]);
     expect(inbox?.raised).toHaveLength(3);
   });
 
@@ -855,7 +851,6 @@ describe('starting work from an ask', () => {
     teamUrl: null,
     facts: null,
     failure: { kind: 'auth', since: '2026-09-28T09:14:00.000Z' },
-    closedRuns: [],
   };
 
   it('starts the sign-in in a new chat and keeps the row open with Watch', async () => {

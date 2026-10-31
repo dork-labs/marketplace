@@ -41,7 +41,7 @@ import { RouteError } from './fleet.ts';
 import type { DecisionActions } from './host-types.ts';
 import type { FlowProjectEntry } from './projects.ts';
 import { GIT_TIMEOUT_MS } from './run-store.ts';
-import type { TrackerRead } from './tracker-reads.ts';
+import { isClosedRun, type ClosedRun, type TrackerRead } from './tracker-reads.ts';
 
 /** A run's state pill. `done` is only for the run chip (a run completed in the last day). */
 export type RunPill = 'building' | 'needs-you' | 'in-review' | 'handing-off' | 'parked' | 'done';
@@ -552,8 +552,8 @@ export function projectRuns(input: {
   registry: readonly RuntimeAccount[];
   pidAlive: (pid: number) => boolean;
   now: Date;
-  /** Runs whose item closed (`TrackerRead.closedRuns`): waiting at no gate. */
-  closedRuns?: ReadonlySet<string>;
+  /** Runs whose item closed (`TrackerReader.closedRuns`): waiting at no gate. */
+  closedRuns?: readonly ClosedRun[];
 }): FlowRunRow[] {
   const active: FlowRunRow[] = [];
   const done: FlowRunRow[] = [];
@@ -563,7 +563,7 @@ export function projectRuns(input: {
     }
     let into: FlowRunRow[];
     if (ACTIVE_RUN_STATUSES.has(run.status)) {
-      if (isStaleRun(run, input.pidAlive) || input.closedRuns?.has(run.identifier)) continue;
+      if (isStaleRun(run, input.pidAlive) || isClosedRun(run, input.closedRuns ?? [])) continue;
       into = active;
     } else if (run.status === 'complete') {
       const at = Date.parse(text(run.completedAt) ?? lastUpdateOf(run) ?? '');
@@ -696,12 +696,14 @@ export function buildProject(input: {
   now: Date;
   restoreSchedules?: readonly string[];
   extras?: ProjectExtras;
+  /** Runs whose item the tracker says closed (`TrackerReader.closedRuns`). */
+  closedRuns?: readonly ClosedRun[];
 }): FlowProject {
   const { entry, read, now } = input;
   const extras = input.extras ?? {};
   const pidAlive = input.pidAlive ?? pidExists;
   const store = readRunStore(entry.root) ?? {};
-  const closedRuns = new Set(read?.closedRuns ?? []);
+  const closedRuns = input.closedRuns ?? [];
   const runs = projectRuns({
     root: entry.root,
     store,
@@ -718,7 +720,7 @@ export function buildProject(input: {
       typeof run.status === 'string' &&
       ACTIVE_RUN_STATUSES.has(run.status) &&
       !isStaleRun(run, pidAlive) &&
-      !(typeof run.identifier === 'string' && closedRuns.has(run.identifier)) &&
+      !isClosedRun(run, closedRuns) &&
       isLiveDrainRun(run)
     ) {
       busy += 1;

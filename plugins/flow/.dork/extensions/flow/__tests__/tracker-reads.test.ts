@@ -192,7 +192,6 @@ describe('TrackerReader', () => {
       teamUrl: 'https://linear.app/t/DOR',
       facts: { eligibleCount: 7, shapeableCount: 2, starved: false, atWipCap: false },
       failure: null,
-      closedRuns: [],
     });
     expect(onChange).toHaveBeenCalledTimes(1);
     expect(projectIdOf('/p')).toMatch(/^[0-9a-f]{12}$/);
@@ -221,8 +220,8 @@ describe('TrackerReader', () => {
           v: 1,
           ok: true,
           ended: [
-            { identifier: 'DOR-7', reason: 'item-closed' },
-            { identifier: 'DOR-8', reason: 'worker-gone' },
+            { identifier: 'DOR-7', sessionId: 's-7', reason: 'item-closed' },
+            { identifier: 'DOR-8', sessionId: 's-8', reason: 'worker-gone' },
           ],
         }),
       };
@@ -235,7 +234,7 @@ describe('TrackerReader', () => {
       instance.tick([project(root)]);
       await settle();
       expect(fake.calls.map((call) => call.verb)).toEqual(['snapshot', 'next']);
-      expect(instance.latest(root)?.closedRuns).toEqual([]);
+      expect(instance.closedRuns(root)).toEqual([]);
 
       mkdirSync(path.join(root, '.dork', 'flow'), { recursive: true });
       writeFileSync(
@@ -254,14 +253,32 @@ describe('TrackerReader', () => {
         expect.arrayContaining(['next']),
         ['status', '--json', '--no-health', '--snapshot', file, '--project', root],
       ]);
-      expect(instance.latest(root)).toMatchObject({ failure: null, closedRuns: ['DOR-7'] });
+      expect(instance.closedRuns(root)).toEqual([{ identifier: 'DOR-7', sessionId: 's-7' }]);
+      expect(instance.latest(root)?.failure).toBeNull();
+
+      // A restart, or a tracker that does not answer at startup: the answer
+      // was saved, so the closed run's asks are not raised again.
+      const restarted = reader(fakeExec(() => ({ code: 4 })).exec, clock).instance;
+      expect(restarted.closedRuns(root)).toEqual([{ identifier: 'DOR-7', sessionId: 's-7' }]);
 
       statusAnswer = { code: 4 };
       clock.now += READ_INTERVAL_MS;
       instance.tick([project(root)]);
       await settle();
       expect(fake.calls.map((call) => call.verb).slice(5)).toEqual(['snapshot', 'next', 'status']);
-      expect(instance.latest(root)).toMatchObject({ failure: null, closedRuns: ['DOR-7'] });
+      expect(instance.closedRuns(root)).toEqual([{ identifier: 'DOR-7', sessionId: 's-7' }]);
+
+      // Released: no active run is left, so nothing is remembered as closed.
+      writeFileSync(
+        path.join(root, '.dork', 'flow', 'flow-state.json'),
+        JSON.stringify({ b: { identifier: 'DOR-6', status: 'complete' } })
+      );
+      clock.now += READ_INTERVAL_MS;
+      instance.tick([project(root)]);
+      await settle();
+      expect(fake.calls.map((call) => call.verb).slice(8)).toEqual(['snapshot', 'next']);
+      expect(instance.closedRuns(root)).toEqual([]);
+      expect(reader(fake.exec, clock).instance.closedRuns(root)).toEqual([]);
     } finally {
       rmSync(root, { recursive: true, force: true });
     }

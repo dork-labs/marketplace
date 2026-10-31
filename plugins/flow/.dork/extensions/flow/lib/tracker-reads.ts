@@ -16,7 +16,11 @@
  *    `ended` list, reason `item-closed`), asking the tracker through the
  *    adapter about any the snapshot left out. The run store never hears that
  *    an item closed, so without this a closed item's run would wait at review
- *    forever (DOR-2924). A status that fails keeps the last answer.
+ *    forever (DOR-2924). A status that fails keeps the last answer. The answer
+ *    is saved beside the snapshot (`closed-runs.json`), so a restart or a
+ *    tracker that does not answer never raises those runs' asks again, and is
+ *    emptied once the project has no active run. Each entry names the run's
+ *    session too: a closed item reopened and claimed again is a new run.
  *
  * Rules:
  *
@@ -38,7 +42,7 @@
  */
 
 import { createHash } from 'node:crypto';
-import { readFileSync } from 'node:fs';
+import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 import { ACTIVE_RUN_STATUSES, readRunStore } from '../../../../scripts/fleet/sessions.ts';
 import type { ExecError, ExecFileLike } from './advisor.ts';
@@ -87,12 +91,23 @@ export interface TrackerRead {
   } | null;
   /** Why the tracker does not answer now, and since when; `null` when it does. */
   failure: { kind: 'unreachable' | 'auth' | 'settings'; since: string } | null;
-  /**
-   * The runs whose item the tracker says closed, by identifier, from the last
-   * `flow status` that answered. They wait at no gate and hold no slot; their
-   * records stay until `flow release` clears them.
-   */
-  closedRuns: string[];
+}
+
+/**
+ * A run whose item the tracker says closed, from the last `flow status` that
+ * answered: it waits at no gate and holds no slot, and its record stays until
+ * `flow release` clears it. The session tells it from a later run of the same
+ * item.
+ */
+export interface ClosedRun {
+  identifier: string;
+  sessionId: string | null;
+}
+
+/** Whether a stored run is one of the closed runs. */
+export function isClosedRun(run: Record<string, unknown>, closed: readonly ClosedRun[]): boolean {
+  const sessionId = typeof run.sessionId === 'string' ? run.sessionId : null;
+  return closed.some((c) => c.identifier === run.identifier && c.sessionId === sessionId);
 }
 
 /** The short id of a project: the first 12 hex characters of the SHA-256 of its root. */
@@ -148,13 +163,17 @@ function hasActiveRun(root: string): boolean {
   );
 }
 
-/** The identifiers `flow status --json` lists as ended because their item closed. */
-function closedRunsOf(stdout: string): string[] {
-  const body = lastJson(stdout);
+/** The runs `flow status --json` lists as ended because their item closed. */
+function closedRunsOf(body: unknown): ClosedRun[] {
   const ended = isObject(body) && Array.isArray(body.ended) ? body.ended : [];
   return ended.flatMap((entry) =>
     isObject(entry) && entry.reason === 'item-closed' && typeof entry.identifier === 'string'
-      ? [entry.identifier]
+      ? [
+          {
+            identifier: entry.identifier,
+            sessionId: typeof entry.sessionId === 'string' ? entry.sessionId : null,
+          },
+        ]
       : []
   );
 }
@@ -193,6 +212,8 @@ export interface TrackerReaderDeps {
 export class TrackerReader {
   private readonly states = new Map<string, ReadState>();
   private readonly wanted = new Set<string>();
+  private readonly closed = new Map<string, ClosedRun[]>();
+  private readonly closedChanged = new Set<string>();
   private running = 0;
   private disposed = false;
 
@@ -260,6 +281,49 @@ export class TrackerReader {
     }
   }
 
+  /**
+   * The runs of a project whose item the tracker says closed, from the last
+   * `flow status` that answered, saved across restarts.
+   *
+   * @param root - The project's main checkout.
+   * @returns The closed runs; empty before any answer.
+   */
+  closedRuns(root: string): readonly ClosedRun[] {
+    let closed = this.closed.get(root);
+    if (closed === undefined) {
+      closed = [];
+      try {
+        const saved: unknown = JSON.parse(readFileSync(this.closedFile(root), 'utf8'));
+        closed = closedRunsOf({ ended: Array.isArray(saved) ? saved : [] });
+      } catch {
+        // Nothing saved yet, or unreadable: no run is known closed.
+      }
+      this.closed.set(root, closed);
+    }
+    return closed;
+  }
+
+  /** Where a project's closed runs are saved. */
+  private closedFile(root: string): string {
+    return path.join(this.deps.dorkHome, 'flow', 'cache', projectIdOf(root), 'closed-runs.json');
+  }
+
+  /** Keep and save a project's closed runs, when they changed. */
+  private saveClosed(root: string, closed: ClosedRun[]): void {
+    if (JSON.stringify(this.closedRuns(root)) === JSON.stringify(closed)) return;
+    this.closed.set(root, closed);
+    this.closedChanged.add(root);
+    try {
+      mkdirSync(path.dirname(this.closedFile(root)), { recursive: true });
+      writeFileSync(
+        this.closedFile(root),
+        JSON.stringify(closed.map((c) => ({ ...c, reason: 'item-closed' })))
+      );
+    } catch (error) {
+      this.deps.log(`[flow] could not save which runs closed: ${String(error)}`);
+    }
+  }
+
   /** Stop starting reads. */
   dispose(): void {
     this.disposed = true;
@@ -270,14 +334,7 @@ export class TrackerReader {
     let state = this.states.get(root);
     if (state === undefined) {
       state = {
-        read: {
-          at: null,
-          queue: null,
-          teamUrl: null,
-          facts: null,
-          failure: null,
-          closedRuns: [],
-        },
+        read: { at: null, queue: null, teamUrl: null, facts: null, failure: null },
         inFlight: false,
         dueAt: 0,
         startedAt: null,
@@ -350,7 +407,8 @@ export class TrackerReader {
         return;
       }
       this.answered(state, next.stdout, file, started);
-      if (hasActiveRun(entry.root)) {
+      if (!hasActiveRun(entry.root)) this.saveClosed(entry.root, []);
+      else {
         const status = await this.run(entry.root, [
           'status',
           '--json',
@@ -358,9 +416,10 @@ export class TrackerReader {
           '--snapshot',
           file,
         ]);
-        if (status.code === 0)
-          state.read = { ...state.read, closedRuns: closedRunsOf(status.stdout) };
-        else {
+        const body = status.code === 0 ? lastJson(status.stdout) : null;
+        if (isObject(body) && Array.isArray(body.ended)) {
+          this.saveClosed(entry.root, closedRunsOf(body));
+        } else {
           this.deps.log(
             `[flow] could not tell which runs of ${entry.name} closed (exit ${String(status.code)}); trying again later`
           );
@@ -369,7 +428,11 @@ export class TrackerReader {
     } finally {
       state.inFlight = false;
       this.running -= 1;
-      if (this.states.get(entry.root) === state && JSON.stringify(state.read) !== before) {
+      const closedChanged = this.closedChanged.delete(entry.root);
+      if (
+        this.states.get(entry.root) === state &&
+        (JSON.stringify(state.read) !== before || closedChanged)
+      ) {
         this.deps.onChange();
       }
     }
@@ -414,7 +477,6 @@ export class TrackerReader {
         atWipCap: flag('atWipCap'),
       },
       failure: null,
-      closedRuns: state.read.closedRuns,
     };
     state.failures = 0;
     state.refusals = 0;

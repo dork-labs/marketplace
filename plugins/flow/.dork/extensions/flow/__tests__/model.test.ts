@@ -68,7 +68,6 @@ function read(overrides: Partial<TrackerRead> = {}): TrackerRead {
     teamUrl: 'https://linear.app/acme/team/DOR',
     facts: { eligibleCount: 5, shapeableCount: 0, starved: false, atWipCap: false },
     failure: null,
-    closedRuns: [],
     ...overrides,
   };
 }
@@ -387,10 +386,11 @@ describe('buildProject', () => {
         }),
       })
     );
-    const build = (closedRuns: string[]) =>
+    const build = (closedRuns: { identifier: string; sessionId: string | null }[]) =>
       buildProject({
         entry: entry(),
-        read: read({ closedRuns }),
+        read: read(),
+        closedRuns,
         accounts: new Map(),
         registry: [],
         pidAlive: () => true,
@@ -401,9 +401,16 @@ describe('buildProject', () => {
       ['ACME-1', 'building'],
       ['ACME-2', 'in-review'],
     ]);
-    const closed = build(['ACME-1', 'ACME-2']);
+    const closed = build([
+      { identifier: 'ACME-1', sessionId: 's-old' },
+      { identifier: 'ACME-2', sessionId: 's-old' },
+    ]);
     expect(closed.runs).toEqual([]);
     expect(closed.capacity.busy).toBe(0);
+    // Reopened and claimed again: a new session is a new run, shown and counted.
+    const reclaimed = build([{ identifier: 'ACME-1', sessionId: 'an-earlier-session' }]);
+    expect(reclaimed.runs.map((run) => run.identifier)).toEqual(['ACME-1', 'ACME-2']);
+    expect(reclaimed.capacity.busy).toBe(1);
   });
 
   it('says how Up next is reached for each kind of tracker', () => {

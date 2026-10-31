@@ -16,7 +16,7 @@
  * - **worker gone**: a `running` run, not the drain's, whose worker pid is
  *   certainly dead. A drain worker has no long-lived pid; its launcher knows.
  *
- * Dependency-free: no imports, so the extension can load it.
+ * Dependency-free: no imports.
  *
  * @module @dorkos/flow/run-ended
  */

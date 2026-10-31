@@ -315,7 +315,7 @@ export async function run(ctx: VerbContext): Promise<VerbResult> {
           : {
               identifier: run.identifier,
               kind: 'worker-gone',
-              detail: `has a running run, but its worker (pid ${run.workerPid}) is gone; flow release ${run.identifier} clears the run`,
+              detail: `has a running run, but its worker (pid ${run.workerPid}) is gone; flow release ${run.identifier} clears the run and returns the item to the ready queue`,
             }
       );
       continue;
@@ -538,7 +538,11 @@ function render(
         e.reason === 'item-closed'
           ? `its item is ${e.stateCategory ?? 'closed'}`
           : `its worker (pid ${e.workerPid ?? '?'}) is gone`;
-      return `  ${e.identifier} - ${e.title ?? '(not in the backlog)'}: ${why}; flow release ${e.identifier} clears it.`;
+      const release =
+        e.reason === 'item-closed'
+          ? 'clears it'
+          : 'clears it and returns the item to the ready queue';
+      return `  ${e.identifier} - ${e.title ?? '(not in the backlog)'}: ${why}; flow release ${e.identifier} ${release}.`;
     });
     sections.push(`Ended, not cleared:\n${lines.join('\n')}`);
   }

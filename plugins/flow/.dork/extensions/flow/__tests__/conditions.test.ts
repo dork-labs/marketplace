@@ -26,7 +26,6 @@ function read(facts: Partial<NonNullable<TrackerRead['facts']>>): TrackerRead {
     teamUrl: null,
     facts: { eligibleCount: 0, shapeableCount: 12, starved: true, atWipCap: false, ...facts },
     failure: null,
-    closedRuns: [],
   };
 }
 
