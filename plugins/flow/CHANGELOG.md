@@ -4,6 +4,14 @@ Installs of this plugin are pinned to a commit SHA, so a fix here does not reach
 you until you **reinstall it** (Marketplace → flow → reinstall, or re-run your
 `--plugin-dir` checkout's `git pull`). Each entry below says whether that matters.
 
+## 0.67.1
+
+**Fix: flow installs again. On current DorkOS, installing 0.66.1 and 0.67.0 failed with "could not compile … outside this plugin's folder" and rolled back. Install 0.67.1.**
+
+- DorkOS builds the Flow extension's page half while installing, and holds that build to the extension's own folder. The page half imported two engine modules from `scripts/`, so the build was refused and the install rolled back.
+- The page half now uses its own copies of those two modules, `autonomy-dial.ts` and `config-names.ts`, in the extension folder. A test keeps each copy byte for byte the same as the engine's.
+- A new test builds the page half the way that install step does and fails if it reaches outside the extension folder.
+
 ## 0.67.0
 
 **A run whose item closed, or whose worker died, no longer shows as in flight or waiting at review, and `flow release` clears it (DOR-2924, DOR-2706). Reinstall to get it.**

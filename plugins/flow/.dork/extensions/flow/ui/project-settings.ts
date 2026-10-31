@@ -30,11 +30,7 @@ import {
   type ProjectSettingsView,
   type SettingField,
 } from '../lib/settings-shape.ts';
-import {
-  CONFIG_FILE,
-  LOCAL_CONFIG_FILE,
-  PROJECT_CONFIG_DIR,
-} from '../../../../scripts/config-names.ts';
+import { CONFIG_FILE, LOCAL_CONFIG_FILE, PROJECT_CONFIG_DIR } from '../shared/config-names.ts';
 import { AccountCheckboxes } from './account-checkboxes.ts';
 import {
   FleetRequestError,

@@ -30,7 +30,7 @@ import {
   type AutonomyCopy,
   type AutonomyKind,
   type AutonomyStop,
-} from '../../../../scripts/autonomy-dial.ts';
+} from '../shared/autonomy-dial.ts';
 import type { ClientApi } from '../lib/host-types.ts';
 import type { FlowProject } from '../lib/model.ts';
 import { BUTTON, MUTED } from './parts.ts';
