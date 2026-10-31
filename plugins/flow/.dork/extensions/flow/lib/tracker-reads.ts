@@ -42,7 +42,7 @@
  */
 
 import { createHash } from 'node:crypto';
-import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 import { ACTIVE_RUN_STATUSES, readRunStore } from '../../../../scripts/fleet/sessions.ts';
 import type { ExecError, ExecFileLike } from './advisor.ts';
@@ -214,6 +214,8 @@ export class TrackerReader {
   private readonly wanted = new Set<string>();
   private readonly closed = new Map<string, ClosedRun[]>();
   private readonly closedChanged = new Set<string>();
+  /** Projects whose closed runs changed but could not be saved. */
+  private readonly unsaved = new Set<string>();
   private running = 0;
   private disposed = false;
 
@@ -310,18 +312,25 @@ export class TrackerReader {
 
   /** Keep and save a project's closed runs, when they changed. */
   private saveClosed(root: string, closed: ClosedRun[]): void {
-    if (JSON.stringify(this.closedRuns(root)) === JSON.stringify(closed)) return;
-    this.closed.set(root, closed);
-    this.closedChanged.add(root);
+    const same = JSON.stringify(this.closedRuns(root)) === JSON.stringify(closed);
+    if (same && !this.unsaved.has(root)) return;
+    // Kept even when the save fails; the save is retried on the next answer.
+    if (!same) this.closedChanged.add(root);
+    const file = this.closedFile(root);
     try {
-      mkdirSync(path.dirname(this.closedFile(root)), { recursive: true });
-      writeFileSync(
-        this.closedFile(root),
-        JSON.stringify(closed.map((c) => ({ ...c, reason: 'item-closed' })))
-      );
+      mkdirSync(path.dirname(file), { recursive: true });
+      // Written whole, then renamed over the old one: a crash never leaves half a file.
+      const temp = `${file}.${process.pid}.tmp`;
+      writeFileSync(temp, JSON.stringify(closed.map((c) => ({ ...c, reason: 'item-closed' }))));
+      renameSync(temp, file);
+      this.closed.set(root, closed);
     } catch (error) {
+      this.closed.set(root, closed);
+      this.unsaved.add(root);
       this.deps.log(`[flow] could not save which runs closed: ${String(error)}`);
+      return;
     }
+    this.unsaved.delete(root);
   }
 
   /** Stop starting reads. */
