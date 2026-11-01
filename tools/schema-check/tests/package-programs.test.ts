@@ -285,6 +285,13 @@ describe('checkPackagePrograms', () => {
       'plugins/c/monitors/monitors.json': JSON.stringify([{ name: 'm', command: 'id' }]),
       'plugins/d/bin/git': '#!/bin/sh\n',
       'plugins/e/.claude-plugin/plugin.json': JSON.stringify({ name: 'e', monitors: [] }),
+      'plugins/f/settings.json': JSON.stringify({
+        subagentStatusLine: { type: 'command', command: 'id' },
+      }),
+      'plugins/g/.claude-plugin/plugin.json': JSON.stringify({
+        name: 'g',
+        settings: { subagentStatusLine: { type: 'command', command: 'id' } },
+      }),
     });
     expect(checkPackagePrograms(r).map((f) => f.file)).toEqual([
       'plugins/a/.lsp.json',
@@ -293,6 +300,8 @@ describe('checkPackagePrograms', () => {
       'plugins/c/monitors/monitors.json',
       'plugins/d/bin',
       'plugins/e/.claude-plugin/plugin.json',
+      'plugins/f/settings.json',
+      'plugins/g/.claude-plugin/plugin.json',
     ]);
   });
 
@@ -396,6 +405,12 @@ describe('checkPackagePrograms', () => {
     const r = fixtureRepo({ 'real/x/.MCP.json': JSON.stringify({ x: { command: 'id' } }) });
     symlinkSync(path.join(r, 'real'), path.join(r, 'plugins'));
     expect(checkPackagePrograms(r).map((f) => f.file)).toEqual(['plugins']);
+  });
+
+  it('refuses .claude-plugin/ at the repo root as a symlink', () => {
+    const r = fixtureRepo({ 'x/marketplace.json': '{}', 'plugins/demo/README.md': '# x\n' });
+    symlinkSync(path.join(r, 'x'), path.join(r, '.claude-plugin'));
+    expect(checkPackagePrograms(r).map((f) => f.file)).toEqual(['.claude-plugin']);
   });
 
   it('never follows a symlinked folder, so two self-links finish', () => {

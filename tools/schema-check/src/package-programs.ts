@@ -21,7 +21,8 @@
  * Every declaration that can't be read is an error, never skipped: "declares
  * something this check can't read" must not look like "declares nothing".
  *
- * - **Language servers, monitors and `bin/` programs** are refused outright
+ * - **Language servers, monitors, `bin/` programs and plugin settings** (which
+ *   can set a `subagentStatusLine` command) are refused outright
  *   until someone reviews what shape is safe (no package ships one yet).
  *
  * @module package-programs
@@ -255,6 +256,7 @@ const KNOWN_PATHS: ReadonlySet<string> = new Set([
   'monitors',
   'monitors/monitors.json',
   'bin',
+  'settings.json',
   'skills',
   'commands',
   'agents',
@@ -333,7 +335,9 @@ export function caseVariants(list: (rel: string) => string[]): Finding[] {
       const child = `${rel}/${name}`;
       const segments = child.split('/');
       // plugins/<pkg>/node_modules is npm's; committed files there are refused
-      // by committedNodeModules instead.
+      // by committedNodeModules instead. Skipped before twinOf, so a
+      // `Node_modules` beside it isn't a twin here; nodeModulesPaths folds
+      // case, so no component path can reach either spelling.
       if (name === '.git' || (segments.length === 3 && name === 'node_modules')) continue;
       const inPackage = segments.slice(2).join('/');
       if (
@@ -473,6 +477,10 @@ function unreviewedPrograms(repoRoot: string, pkgDir: string): Finding[] {
   }
   if (exists('monitors/monitors.json')) refuse(`${pkgDir}/monitors/monitors.json`, 'monitors');
   if (exists('bin')) refuse(`${pkgDir}/bin`, 'programs in bin/, which go on the PATH');
+  // Plugin settings can set subagentStatusLine, a command Claude Code runs
+  // for the agent panel with no permission check (Claude Code 2.1.309).
+  if (exists('settings.json')) refuse(`${pkgDir}/settings.json`, 'plugin settings');
+  if (manifest?.settings !== undefined) refuse(manifestFile, 'plugin settings (settings)');
   return findings;
 }
 
@@ -483,20 +491,22 @@ function unreviewedPrograms(repoRoot: string, pkgDir: string): Finding[] {
  * @returns One finding per hook or server that breaks the floor, and per declaration that can't be read.
  */
 export function checkPackagePrograms(repoRoot: string): Finding[] {
-  // The case walk never follows a link, so a linked plugins/ would look empty
-  // to it while everything else reads through; refuse it outright.
-  try {
-    if (lstatSync(path.join(repoRoot, PLUGINS_DIR)).isSymbolicLink()) {
-      return [
-        {
-          file: PLUGINS_DIR,
-          message:
-            'It is a symlink. Packages ship real files, so this check and Claude Code read the same thing.',
-        },
-      ];
+  // The case walk never follows a link, so a linked plugins/ or
+  // .claude-plugin/ would look empty to it while everything else reads
+  // through; refuse them outright.
+  const linked = [PLUGINS_DIR, '.claude-plugin'].filter((dir) => {
+    try {
+      return lstatSync(path.join(repoRoot, dir)).isSymbolicLink();
+    } catch {
+      return false;
     }
-  } catch {
-    // No plugins/ at all.
+  });
+  if (linked.length > 0) {
+    return linked.map((file) => ({
+      file,
+      message:
+        'It is a symlink. Packages ship real files, so this check and Claude Code read the same thing.',
+    }));
   }
   // Until a package's names are the same on a Mac and on CI, what the rest of
   // this reads for it differs between them, so its findings stop there.

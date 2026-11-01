@@ -260,16 +260,18 @@ or it is refused.
   `${CLAUDE_PLUGIN_ROOT}` directly, followed by plain words or flags. Remote
   servers (`http`, `sse`), and any `env`, `cwd`, headers or helper, are refused.
 
-- **Language servers, monitors and `bin/` programs** (`.lsp.json`,
+- **Language servers, monitors, `bin/` programs and plugin settings** (`.lsp.json`,
   `lspServers` in plugin.json or a marketplace entry, `monitors/monitors.json`,
-  `monitors`, `experimental.monitors`, a `bin/` folder) are refused outright until someone reviews a safe shape. No
+  `monitors`, `experimental.monitors`, a `bin/` folder, a plugin `settings.json` or plugin.json `settings`, which can
+  set a `subagentStatusLine` command) are refused outright until someone reviews a safe shape. No
   package ships one.
 
 - **Spelling.** CI runs on Linux, where `.MCP.json` and `.mcp.json` are two
   files, while Claude Code on a Mac's case-blind disk opens either for the
   other. So two names in one folder anywhere under `plugins/` (or at the repo
   root, or in `.claude-plugin/`) that differ only in capitals are refused, and
-  so is a second `Plugins/` or `.Claude-Plugin/` at the root, and a part
+  so is a second `Plugins/` or `.Claude-Plugin/` at the root (or either one as
+  a symlink), and a part
   Claude Code finds by name
   (`.mcp.json`, `hooks/hooks.json`, `bin`, `.claude-plugin/plugin.json`,
   `skills`, ...) spelled in other capitals.
