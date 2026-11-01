@@ -167,6 +167,16 @@ function checkHooks(raw: unknown, file: string, pkgDir: string, repoRoot: string
     unreadable('A declaration with a hooks key beside other events');
     return findings;
   }
+  // Hook modules load the plugin's own JavaScript into Claude Code with no
+  // prompt (Claude Code 2.1.309); this check can't vet code, so they're refused.
+  if (isRecord(raw) && 'modules' in raw) {
+    findings.push({
+      file,
+      message:
+        'It declares hook modules, which load plugin code into Claude Code with no permission check; this check refuses them until one is reviewed.',
+    });
+    return findings;
+  }
   const events = isRecord(raw) && 'hooks' in raw ? raw.hooks : raw;
   if (!isRecord(events)) {
     unreadable('The declaration');
@@ -464,7 +474,7 @@ function unreviewedPrograms(repoRoot: string, pkgDir: string): Finding[] {
   const refuse = (file: string, what: string): void => {
     findings.push({
       file,
-      message: `It declares ${what}, which Claude Code starts with no permission check; this check refuses them until one is reviewed.`,
+      message: `It declares ${what}, which can run a command with no permission check; this check refuses them until one is reviewed.`,
     });
   };
   const manifest = pluginJson(repoRoot, pkgDir);
@@ -494,7 +504,19 @@ export function checkPackagePrograms(repoRoot: string): Finding[] {
   // The case walk never follows a link, so a linked plugins/ or
   // .claude-plugin/ would look empty to it while everything else reads
   // through; refuse them outright.
-  const linked = [PLUGINS_DIR, '.claude-plugin'].filter((dir) => {
+  // A link inside .claude-plugin/ too: it can point at a file whose case twin
+  // a Mac checks out in its place.
+  let manifests: string[] = [];
+  try {
+    if (lstatSync(path.join(repoRoot, '.claude-plugin')).isDirectory()) {
+      manifests = readdirSync(path.join(repoRoot, '.claude-plugin')).map(
+        (n) => `.claude-plugin/${n}`
+      );
+    }
+  } catch {
+    // No .claude-plugin/ at all.
+  }
+  const linked = [PLUGINS_DIR, '.claude-plugin', ...manifests].filter((dir) => {
     try {
       return lstatSync(path.join(repoRoot, dir)).isSymbolicLink();
     } catch {

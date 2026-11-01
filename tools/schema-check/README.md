@@ -251,7 +251,8 @@ or it is refused.
   by fixed lowercase words or flags. The script has to be a plain file in the
   package. The one thing allowed before the script is a change to the project
   root, as one of the two exact `cd ... && ` prefixes in `PROJECT_CD`. `http`,
-  `prompt`, `agent` and `mcp_tool` hooks are refused. So is an object with a
+  `prompt`, `agent` and `mcp_tool` hooks are refused, and so are hook
+  `modules`, which load the plugin's own JavaScript into Claude Code. So is an object with a
   `hooks` key next to other events: Claude Code runs those events and ignores
   `hooks`, so unwrapping it would skip what runs.
 - **MCP servers** are read from `.mcp.json`, plugin.json's `mcpServers` and a
@@ -270,8 +271,8 @@ or it is refused.
   files, while Claude Code on a Mac's case-blind disk opens either for the
   other. So two names in one folder anywhere under `plugins/` (or at the repo
   root, or in `.claude-plugin/`) that differ only in capitals are refused, and
-  so is a second `Plugins/` or `.Claude-Plugin/` at the root (or either one as
-  a symlink), and a part
+  so is a second `Plugins/` or `.Claude-Plugin/` at the root (or either one, or
+  a file in `.claude-plugin/`, as a symlink), and a part
   Claude Code finds by name
   (`.mcp.json`, `hooks/hooks.json`, `bin`, `.claude-plugin/plugin.json`,
   `skills`, ...) spelled in other capitals.

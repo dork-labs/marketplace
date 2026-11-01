@@ -413,6 +413,28 @@ describe('checkPackagePrograms', () => {
     expect(checkPackagePrograms(r).map((f) => f.file)).toEqual(['.claude-plugin']);
   });
 
+  it('refuses a symlink inside .claude-plugin/', () => {
+    const r = fixtureRepo({ 'real/marketplace.json': '{}', 'plugins/demo/README.md': '# x\n' });
+    mkdirSync(path.join(r, '.claude-plugin'));
+    symlinkSync('../real/marketplace.json', path.join(r, '.claude-plugin/marketplace.json'));
+    expect(checkPackagePrograms(r).map((f) => f.file)).toEqual(['.claude-plugin/marketplace.json']);
+  });
+
+  it('refuses hook modules, which load plugin code with no prompt', () => {
+    const r = fixtureRepo({
+      'plugins/a/hooks/hooks.json': JSON.stringify({ modules: ['./register.js'] }),
+      'plugins/b/hooks/hooks.json': JSON.stringify({ description: 'x', modules: ['./r.js'] }),
+    });
+    const found = checkPackagePrograms(r);
+    expect(found.map((f) => f.file)).toEqual([
+      'plugins/a/hooks/hooks.json',
+      'plugins/b/hooks/hooks.json',
+    ]);
+    expect(found.every((f) => /modules/.test(f.message) && /plugin code/.test(f.message))).toBe(
+      true
+    );
+  });
+
   it('never follows a symlinked folder, so two self-links finish', () => {
     const r = fixtureRepo({ 'plugins/x/README.md': '# x\n' });
     symlinkSync('.', path.join(r, 'plugins/x/a'));
