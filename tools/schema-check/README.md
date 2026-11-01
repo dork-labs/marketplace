@@ -265,16 +265,18 @@ or it is refused.
   a `bin/` folder) are refused outright until someone reviews a safe shape. No
   package ships one.
 
-- **Spelling.** Each of those files and folders (`.mcp.json`, `hooks/hooks.json`,
-  `bin`, `.claude-plugin/plugin.json`, `skills`, ...) has to be spelled exactly,
-  in lowercase. CI runs on Linux, where `.MCP.json` is a different file the check
-  never opens, while Claude Code on a Mac's case-blind disk opens it as
-  `.mcp.json`. Two names in one folder that differ only in capitals are refused
-  too.
-- **No parts in `node_modules`.** A `skills`, `commands`, `agents`,
-  `outputStyles`, `hooks`, `mcpServers` or `lspServers` path in plugin.json or a
-  marketplace entry may not point into `node_modules`, the one folder the walk
-  skips.
+- **Spelling.** CI runs on Linux, where `.MCP.json` and `.mcp.json` are two
+  files, while Claude Code on a Mac's case-blind disk opens either for the
+  other. So two names in one folder anywhere under `plugins/` that differ only
+  in capitals are refused, and so is a part Claude Code finds by name
+  (`.mcp.json`, `hooks/hooks.json`, `bin`, `.claude-plugin/plugin.json`,
+  `skills`, ...) spelled in other capitals.
+- **No `node_modules`.** A package may not commit files in its root
+  `node_modules`, the one folder the walk skips; it installs dependencies
+  instead. A `skills`, `commands`, `agents`, `outputStyles`, `hooks`,
+  `mcpServers` or `lspServers` path in plugin.json or a marketplace entry
+  (a command's `source` included) may not point there either, however it's
+  spelled.
 
 A declaration this check can't read is an error, never a skip. Anything
 outside these shapes needs a change to this check, reviewed as its own diff.

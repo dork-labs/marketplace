@@ -3,7 +3,13 @@ import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { afterEach, describe, expect, it } from 'vitest';
-import { checkPackagePrograms, hookBreach, serverBreach } from '../src/package-programs.ts';
+import { execFileSync } from 'node:child_process';
+import {
+  caseVariants,
+  checkPackagePrograms,
+  hookBreach,
+  serverBreach,
+} from '../src/package-programs.ts';
 
 const repoRoot = path.resolve(fileURLToPath(new URL('../../..', import.meta.url)));
 
@@ -311,16 +317,24 @@ describe('checkPackagePrograms', () => {
       'plugins/demo/.claude-plugin/plugin.json': JSON.stringify({
         name: 'demo',
         skills: './node_modules/s',
-        commands: ['./commands', './Node_Modules/c'],
+        commands: ['./commands', './Node_Modules/c', './/node_modules/d', './x/../node_modules/e'],
+        agents: { a: { source: './node_modules/a.md' } },
       }),
       '.claude-plugin/marketplace.json': JSON.stringify({
-        plugins: [{ name: 'demo', source: './plugins/demo', agents: 'node_modules/a' }],
+        plugins: [
+          {
+            name: 'demo',
+            source: './plugins/demo',
+            agents: 'node_modules/a',
+            commands: { c: { source: './/node_modules/c.md' } },
+          },
+        ],
       }),
     });
     const found = checkPackagePrograms(r);
     expect(found.map((f) => f.file)).toEqual([
-      'plugins/demo/.claude-plugin/plugin.json',
-      'plugins/demo/.claude-plugin/plugin.json',
+      ...Array(5).fill('plugins/demo/.claude-plugin/plugin.json'),
+      '.claude-plugin/marketplace.json',
       '.claude-plugin/marketplace.json',
     ]);
     expect(found.every((f) => /node_modules/.test(f.message))).toBe(true);
@@ -335,5 +349,60 @@ describe('checkPackagePrograms', () => {
       }),
     });
     expect(checkPackagePrograms(r)).toEqual([]);
+  });
+
+  it("refuses committed files in a package's node_modules, the one folder the walk skips", () => {
+    const r = fixtureRepo({
+      'plugins/demo/node_modules/evil/SKILL.md': '---\nname: evil\nallowed-tools: Bash\n---\n',
+      'plugins/demo/.gitignore': 'node_modules/\n',
+      'plugins/clean/README.md': '# x\n',
+    });
+    // Not a git repo: whatever is on disk counts.
+    expect(checkPackagePrograms(r).map((f) => f.file)).toEqual(['plugins/demo/node_modules']);
+    // In a git repo, only what git tracks ships.
+    const git = (...args: string[]): void => {
+      execFileSync('git', ['-C', r, ...args], { stdio: 'ignore' });
+    };
+    git('init', '-q');
+    git('add', '.');
+    expect(checkPackagePrograms(r)).toEqual([]);
+    git('add', '-f', 'plugins/demo/node_modules/evil/SKILL.md');
+    expect(checkPackagePrograms(r).map((f) => f.file)).toEqual(['plugins/demo/node_modules']);
+  });
+});
+
+describe('caseVariants', () => {
+  /** A fake case-sensitive disk: folder → its names. */
+  const disk =
+    (tree: Record<string, string[]>) =>
+    (rel: string): string[] =>
+      tree[rel] ?? [];
+
+  it('finds twins at any depth, and package folders that fold together', () => {
+    const list = disk({
+      plugins: ['demo', 'DEMO'],
+      'plugins/demo': ['config', 'hooks', '.claude-plugin'],
+      'plugins/demo/config': ['Hooks.json', 'hooks.json'],
+      'plugins/demo/hooks': ['sub'],
+      'plugins/demo/hooks/sub': ['A.json', 'a.json'],
+      'plugins/demo/.claude-plugin': ['plugin.json'],
+    });
+    expect(caseVariants(list).map((f) => f.file)).toEqual([
+      'plugins/demo',
+      'plugins/demo/config/hooks.json',
+      'plugins/demo/hooks/sub/a.json',
+    ]);
+  });
+
+  it('finds a known part spelled in other capitals, with no twin', () => {
+    const list = disk({
+      plugins: ['demo'],
+      'plugins/demo': ['.MCP.json', 'Skills'],
+      'plugins/demo/Skills': ['x'],
+    });
+    expect(caseVariants(list).map((f) => f.file)).toEqual([
+      'plugins/demo/.MCP.json',
+      'plugins/demo/Skills',
+    ]);
   });
 });

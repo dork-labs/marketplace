@@ -41,6 +41,7 @@ import {
 } from './declarations.ts';
 import { PLUGINS_DIR, pluginDirs } from './versions.ts';
 import type { Finding } from './validate.ts';
+import { execFileSync } from 'node:child_process';
 import { existsSync, readFileSync, readdirSync } from 'node:fs';
 
 /**
@@ -259,47 +260,98 @@ const KNOWN_PATHS: ReadonlySet<string> = new Set([
   'output-styles',
 ]);
 
-/** Fold a name the way a case-blind disk compares it. */
+/**
+ * Fold a name at least as broadly as a case-blind disk compares it. NFKC
+ * equates more than APFS does (`ª` and `a`), so this refuses a few names a
+ * Mac would keep apart; never the other way.
+ */
 const fold = (name: string): string => name.normalize('NFKC').toLowerCase();
 
-/**
- * Findings for any of {@link KNOWN_PATHS} spelled in other capitals, and for
- * two names in one folder that a case-blind disk can't tell apart. Either
- * means CI checks one file while a Mac runs another (DOR-3311 review).
- */
-function caseVariants(repoRoot: string, pkgDir: string): Finding[] {
-  const findings: Finding[] = [];
-  const walk = (rel: string, depth: number): void => {
-    let names: string[];
+/** List a repo-relative folder, or nothing when it isn't one. */
+function listDir(repoRoot: string): (rel: string) => string[] {
+  return (rel) => {
     try {
-      names = readdirSync(path.join(repoRoot, pkgDir, rel)).sort();
+      return readdirSync(path.join(repoRoot, rel));
     } catch {
-      return;
-    }
-    const seen = new Map<string, string>();
-    for (const name of names) {
-      const child = rel === '' ? name : `${rel}/${name}`;
-      const twin = seen.get(fold(name));
-      seen.set(fold(name), name);
-      if (twin !== undefined) {
-        findings.push({
-          file: `${pkgDir}/${child}`,
-          message: `It differs from ${twin} only in capitals, so a case-blind disk sees one file where CI checks two.`,
-        });
-        continue;
-      }
-      if (KNOWN_PATHS.has(fold(child)) && child !== fold(child)) {
-        findings.push({
-          file: `${pkgDir}/${child}`,
-          message: `Claude Code on a case-blind disk opens it as ${fold(child)}, which this check reads by that exact name; spell it ${fold(child)}.`,
-        });
-        continue;
-      }
-      if (depth < 1 && KNOWN_PATHS.has(fold(child))) walk(child, depth + 1);
+      return [];
     }
   };
-  walk('', 0);
+}
+
+/**
+ * Findings for two names in one folder anywhere under `plugins/` that a
+ * case-blind disk can't tell apart, and for any of {@link KNOWN_PATHS} spelled
+ * in other capitals. Either way CI, on Linux, checks one file while Claude
+ * Code on a Mac opens another: plugin.json can name a declaration at any path
+ * (DOR-3311 review).
+ *
+ * @param list - Lists a repo-relative folder's names; empty for a file.
+ */
+export function caseVariants(list: (rel: string) => string[]): Finding[] {
+  const findings: Finding[] = [];
+  const walk = (rel: string): void => {
+    const seen = new Map<string, string>();
+    for (const name of [...list(rel)].sort()) {
+      const child = `${rel}/${name}`;
+      const segments = child.split('/');
+      // plugins/<pkg>/node_modules is npm's; committed files there are refused
+      // by committedNodeModules instead.
+      if (name === '.git' || (segments.length === 3 && name === 'node_modules')) continue;
+      const twin = seen.get(fold(name));
+      seen.set(fold(name), name);
+      const inPackage = segments.slice(2).join('/');
+      if (twin !== undefined) {
+        findings.push({
+          file: child,
+          message: `It differs from ${twin} only in capitals, so a case-blind disk sees one file where CI checks two.`,
+        });
+      } else if (KNOWN_PATHS.has(fold(inPackage)) && inPackage !== fold(inPackage)) {
+        findings.push({
+          file: child,
+          message: `Claude Code on a case-blind disk opens it as ${fold(inPackage)}, which this check reads by that exact name; spell it ${fold(inPackage)}.`,
+        });
+        continue;
+      }
+      walk(child);
+    }
+  };
+  walk(PLUGINS_DIR);
   return findings;
+}
+
+/**
+ * Findings for files a package ships in its root `node_modules`, the one
+ * folder the walk skips as npm's. Claude Code loads skills and commands from
+ * there when plugin.json points at it, by any spelling of the path. Only what
+ * git tracks ships, so in a git checkout only tracked files count; anywhere
+ * else, whatever is on disk does.
+ */
+function committedNodeModules(repoRoot: string): Finding[] {
+  let packages: Set<string>;
+  if (existsSync(path.join(repoRoot, '.git'))) {
+    const tracked = execFileSync(
+      'git',
+      ['-C', repoRoot, 'ls-files', '-z', '--', ':(glob)plugins/*/node_modules/**'],
+      { encoding: 'utf8' }
+    );
+    packages = new Set(
+      tracked
+        .split('\0')
+        .filter(Boolean)
+        .map((f) => f.split('/').slice(0, 3).join('/'))
+    );
+  } else {
+    packages = new Set(
+      pluginDirs(repoRoot)
+        .map((name) => `${PLUGINS_DIR}/${name}/node_modules`)
+        .filter((dir) => listDir(repoRoot)(dir).length > 0)
+    );
+  }
+  return [...packages].sort().map((file) => ({
+    file,
+    message:
+      'The package ships files in node_modules, which this check never reads; packages install their dependencies instead.',
+  }));
 }
 
 /** Plugin.json and marketplace-entry fields that name where a package's parts live. */
@@ -313,16 +365,25 @@ const COMPONENT_FIELDS = [
   'lspServers',
 ];
 
+/** Every path string in a component field: the value, list items, and any `source` inside a map. */
+function componentPaths(value: unknown): string[] {
+  if (typeof value === 'string') return [value];
+  if (Array.isArray(value)) return value.flatMap(componentPaths);
+  if (!isRecord(value)) return [];
+  return Object.values(value).flatMap((entry) =>
+    isRecord(entry) && typeof entry.source === 'string' ? [entry.source] : []
+  );
+}
+
 /**
- * Findings for component paths into the package root's `node_modules`, which
- * the walk skips as npm's: a skill there would load unchecked.
+ * Findings for component paths into the package root's `node_modules`, however
+ * spelled (`.//node_modules`, `x/../node_modules`, a command's `source`).
  */
 function nodeModulesPaths(fields: Record<string, unknown>, file: string, where: string): Finding[] {
   const findings: Finding[] = [];
   for (const field of COMPONENT_FIELDS) {
-    for (const item of [fields[field]].flat()) {
-      if (typeof item !== 'string') continue;
-      const first = path.posix.normalize(item.replace(/^\.\//, '')).split('/')[0];
+    for (const item of componentPaths(fields[field])) {
+      const first = path.posix.resolve('/', item.replace(/\\/g, '/')).split('/')[1] ?? '';
       if (fold(first) === 'node_modules') {
         findings.push({
           file,
@@ -368,16 +429,13 @@ function unreviewedPrograms(repoRoot: string, pkgDir: string): Finding[] {
  * @returns One finding per hook or server that breaks the floor, and per declaration that can't be read.
  */
 export function checkPackagePrograms(repoRoot: string): Finding[] {
-  const findings: Finding[] = [];
+  // Until a package's names are the same on a Mac and on CI, what the rest of
+  // this reads for it differs between them, so its findings stop there.
+  const variants = caseVariants(listDir(repoRoot));
+  const findings: Finding[] = [...variants, ...committedNodeModules(repoRoot)];
   for (const name of pluginDirs(repoRoot)) {
     const pkgDir = path.posix.join(PLUGINS_DIR, name);
-    // Until its parts are spelled as Claude Code expects, what the rest of
-    // this reads differs between a Mac and CI, so stop at that.
-    const variants = caseVariants(repoRoot, pkgDir);
-    if (variants.length > 0) {
-      findings.push(...variants);
-      continue;
-    }
+    if (variants.some((v) => v.file === pkgDir || v.file.startsWith(`${pkgDir}/`))) continue;
     const manifest = pluginJson(repoRoot, pkgDir);
     if (manifest) {
       findings.push(...nodeModulesPaths(manifest, `${pkgDir}/.claude-plugin/plugin.json`, ''));
