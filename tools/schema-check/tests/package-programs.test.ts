@@ -1,4 +1,4 @@
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -368,6 +368,34 @@ describe('checkPackagePrograms', () => {
     expect(checkPackagePrograms(r)).toEqual([]);
     git('add', '-f', 'plugins/demo/node_modules/evil/SKILL.md');
     expect(checkPackagePrograms(r).map((f) => f.file)).toEqual(['plugins/demo/node_modules']);
+  });
+
+  it('refuses a node_modules committed as a symlink or a submodule', () => {
+    const r = fixtureRepo({ 'plugins/w/README.md': '# w\n', 'plugins/y/README.md': '# y\n' });
+    mkdirSync(path.join(r, 'plugins/x'));
+    symlinkSync('../w', path.join(r, 'plugins/x/node_modules'));
+    const git = (...args: string[]): void => {
+      execFileSync('git', ['-C', r, ...args], { stdio: 'ignore' });
+    };
+    git('init', '-q');
+    git('add', '-f', '.');
+    git(
+      'update-index',
+      '--add',
+      '--cacheinfo',
+      '160000,1111111111111111111111111111111111111111,plugins/y/node_modules'
+    );
+    expect(checkPackagePrograms(r).map((f) => f.file)).toEqual([
+      'plugins/x/node_modules',
+      'plugins/y/node_modules',
+    ]);
+  });
+
+  it('never follows a symlinked folder, so two self-links finish', () => {
+    const r = fixtureRepo({ 'plugins/x/README.md': '# x\n' });
+    symlinkSync('.', path.join(r, 'plugins/x/a'));
+    symlinkSync('.', path.join(r, 'plugins/x/b'));
+    expect(checkPackagePrograms(r)).toEqual([]);
   });
 });
 

@@ -271,9 +271,9 @@ or it is refused.
   in capitals are refused, and so is a part Claude Code finds by name
   (`.mcp.json`, `hooks/hooks.json`, `bin`, `.claude-plugin/plugin.json`,
   `skills`, ...) spelled in other capitals.
-- **No `node_modules`.** A package may not commit files in its root
-  `node_modules`, the one folder the walk skips; it installs dependencies
-  instead. A `skills`, `commands`, `agents`, `outputStyles`, `hooks`,
+- **No `node_modules`.** A package may not commit anything in its root
+  `node_modules`, the one folder the walk skips (not files, and not the folder
+  itself as a symlink or a submodule); it installs dependencies instead. A `skills`, `commands`, `agents`, `outputStyles`, `hooks`,
   `mcpServers` or `lspServers` path in plugin.json or a marketplace entry
   (a command's `source` included) may not point there either, however it's
   spelled.

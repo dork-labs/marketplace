@@ -591,9 +591,9 @@ export function walkPlugins(repoRoot: string): {
       // Only the package root's node_modules is npm's; one anywhere else (a
       // skill folder named node_modules) is loaded by Claude Code like any other.
       const pkgRoot = relDir.split('/').length === 2;
-      if ((entry.name === 'node_modules' && pkgRoot) || entry.name === '.git') continue;
       const rel = path.posix.join(relDir, entry.name);
       if (entry.isSymbolicLink()) symlinks.push(rel);
+      else if ((entry.name === 'node_modules' && pkgRoot) || entry.name === '.git') continue;
       else if (entry.isDirectory()) walk(rel);
       else if (entry.isFile() && /\.md$/i.test(entry.name)) markdown.push(rel);
     }

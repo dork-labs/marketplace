@@ -42,7 +42,7 @@ import {
 import { PLUGINS_DIR, pluginDirs } from './versions.ts';
 import type { Finding } from './validate.ts';
 import { execFileSync } from 'node:child_process';
-import { existsSync, readFileSync, readdirSync } from 'node:fs';
+import { existsSync, lstatSync, readFileSync, readdirSync } from 'node:fs';
 
 /**
  * The only folder changes a hook may make before its script: to the project
@@ -267,11 +267,16 @@ const KNOWN_PATHS: ReadonlySet<string> = new Set([
  */
 const fold = (name: string): string => name.normalize('NFKC').toLowerCase();
 
-/** List a repo-relative folder, or nothing when it isn't one. */
+/**
+ * List a repo-relative folder, or nothing when it isn't a real one. A symlink
+ * is never followed (two self-links would never finish); walkPlugins refuses
+ * every symlink, and reports a folder it can't read.
+ */
 function listDir(repoRoot: string): (rel: string) => string[] {
   return (rel) => {
     try {
-      return readdirSync(path.join(repoRoot, rel));
+      const abs = path.join(repoRoot, rel);
+      return lstatSync(abs).isDirectory() ? readdirSync(abs) : [];
     } catch {
       return [];
     }
@@ -331,7 +336,16 @@ function committedNodeModules(repoRoot: string): Finding[] {
   if (existsSync(path.join(repoRoot, '.git'))) {
     const tracked = execFileSync(
       'git',
-      ['-C', repoRoot, 'ls-files', '-z', '--', ':(glob)plugins/*/node_modules/**'],
+      // The folder itself too: a symlink or a submodule is one entry.
+      [
+        '-C',
+        repoRoot,
+        'ls-files',
+        '-z',
+        '--',
+        ':(glob)plugins/*/node_modules',
+        ':(glob)plugins/*/node_modules/**',
+      ],
       { encoding: 'utf8' }
     );
     packages = new Set(
@@ -344,7 +358,14 @@ function committedNodeModules(repoRoot: string): Finding[] {
     packages = new Set(
       pluginDirs(repoRoot)
         .map((name) => `${PLUGINS_DIR}/${name}/node_modules`)
-        .filter((dir) => listDir(repoRoot)(dir).length > 0)
+        .filter((dir) => {
+          try {
+            const stat = lstatSync(path.join(repoRoot, dir));
+            return stat.isSymbolicLink() || readdirSync(path.join(repoRoot, dir)).length > 0;
+          } catch {
+            return false;
+          }
+        })
     );
   }
   return [...packages].sort().map((file) => ({

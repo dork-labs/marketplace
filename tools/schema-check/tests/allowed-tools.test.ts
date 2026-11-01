@@ -634,6 +634,15 @@ describe('checkAllowedTools', () => {
     ]);
   });
 
+  it('refuses a package-root node_modules that is a symlink', () => {
+    const r = fixtureRepo({
+      'outside/SKILL.md': command('Bash'),
+      'plugins/demo/README.md': '# x\n',
+    });
+    symlinkSync(path.join(r, 'outside'), path.join(r, 'plugins/demo/node_modules'));
+    expect(checkAllowedTools(r).map((f) => f.file)).toEqual(['plugins/demo/node_modules']);
+  });
+
   it('walks a node_modules folder anywhere but the package root', () => {
     const r = fixtureRepo({
       'plugins/demo/skills/node_modules/SKILL.md': command('Bash'),
