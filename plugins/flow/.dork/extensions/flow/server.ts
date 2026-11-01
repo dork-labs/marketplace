@@ -8,7 +8,9 @@
  *   change `<dorkHome>/flow/fleet.json` under the contract's lock and answer the
  *   new `GET /fleet` body.
  * - `GET /model` answers the Flow tab's model over every flow project, and the
- *   model is pushed as the `model` event when it changes.
+ *   model is pushed as the `model` event when it changes. It only reads:
+ *   `POST /folders` makes flow look for a project in a chat's folder, and
+ *   report it to DorkOS's project registry (DOR-3581).
  * - `POST /pause` and `POST /resume` pause or resume one project or all of
  *   them, with an end time, and answer the new model. `POST /schedules/restored`
  *   forgets DorkOS schedules the Flow tab switched back on after a pause.
@@ -330,12 +332,13 @@ export function createFlowExtension(
   const stopSettings = hostSupportsProjectSettings(ctx)
     ? ctx.projectSettings.onChange(() => void model.poll())
     : () => {};
+  // A read never registers a project (DOR-3581): `?cwd=` only says which
+  // project the chat is in. Looking in a new folder is POST /folders.
   app.get('/model', async (c) => {
     const cwd = queryValue(c, 'cwd');
-    const one = typeof cwd === 'string' ? cwd : undefined;
-    model.noteCwd(one);
-    return c.json(await model.model(one));
+    return c.json(await model.model(typeof cwd === 'string' ? cwd : undefined));
   });
+  app.post('/folders', person, async (c) => c.json(await model.addFolder(await jsonBody(c))));
   app.get('/settings/:name', async (c) => c.json(await model.settings(c.req.param('name'))));
   app.get('/fleet/migration', async (c) => c.json(await readRepoMigration(storage)));
   app.get('/capacity', async (c) => {

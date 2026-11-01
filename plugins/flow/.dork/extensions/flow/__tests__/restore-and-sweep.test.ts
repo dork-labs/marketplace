@@ -103,8 +103,8 @@ describe('the restore list', () => {
       return undefined;
     };
     const model = service(held.storage, exec);
-    model.noteCwd(world.worktree);
-    model.noteCwd(other);
+    await model.addFolder({ cwd: world.worktree });
+    await model.addFolder({ cwd: other });
     await model.projects();
     held.hold();
     // The sweep ends other's pause and saves z-1; its save is held.
@@ -142,7 +142,7 @@ describe('the expiry sweep', () => {
     };
     const { storage } = heldStorage({});
     const model = service(storage, exec);
-    model.noteCwd(world.worktree);
+    await model.addFolder({ cwd: world.worktree });
     const paused = model.pause({ project: 'main', until: '2026-09-29T09:00:00Z' });
     await vi.waitFor(() => expect(calls).toEqual(['pause']));
     // The old flag has ended, so the sweep queues a resume behind the pause.
@@ -167,7 +167,7 @@ describe('the expiry sweep', () => {
     const log = vi.fn();
     const { storage } = heldStorage({});
     const model = service(storage, exec, { now: () => new Date(now), log });
-    model.noteCwd(world.worktree);
+    await model.addFolder({ cwd: world.worktree });
     const start = now;
     await model.poll();
     now = start + SWEEP_RETRY_MS[0] - 1;

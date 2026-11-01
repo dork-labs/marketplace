@@ -82,7 +82,7 @@ async function setup(opts: Parameters<typeof fakeCtx>[1] = {}, exec: ExecFileLik
     execFile: exec,
     pidAlive: () => true,
   });
-  await send(ext.app, 'GET', `/model?cwd=${encodeURIComponent(world.main)}`);
+  await send(ext.app, 'POST', '/folders', { body: { cwd: world.main } });
   return { app: ext.app, host, ext };
 }
 
