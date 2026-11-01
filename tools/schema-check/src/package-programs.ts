@@ -450,6 +450,21 @@ function unreviewedPrograms(repoRoot: string, pkgDir: string): Finding[] {
  * @returns One finding per hook or server that breaks the floor, and per declaration that can't be read.
  */
 export function checkPackagePrograms(repoRoot: string): Finding[] {
+  // The case walk never follows a link, so a linked plugins/ would look empty
+  // to it while everything else reads through; refuse it outright.
+  try {
+    if (lstatSync(path.join(repoRoot, PLUGINS_DIR)).isSymbolicLink()) {
+      return [
+        {
+          file: PLUGINS_DIR,
+          message:
+            'It is a symlink. Packages ship real files, so this check and Claude Code read the same thing.',
+        },
+      ];
+    }
+  } catch {
+    // No plugins/ at all.
+  }
   // Until a package's names are the same on a Mac and on CI, what the rest of
   // this reads for it differs between them, so its findings stop there.
   const variants = caseVariants(listDir(repoRoot));

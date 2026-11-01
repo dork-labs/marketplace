@@ -391,6 +391,12 @@ describe('checkPackagePrograms', () => {
     ]);
   });
 
+  it('refuses plugins/ itself as a symlink, which the case walk would not follow', () => {
+    const r = fixtureRepo({ 'real/x/.MCP.json': JSON.stringify({ x: { command: 'id' } }) });
+    symlinkSync(path.join(r, 'real'), path.join(r, 'plugins'));
+    expect(checkPackagePrograms(r).map((f) => f.file)).toEqual(['plugins']);
+  });
+
   it('never follows a symlinked folder, so two self-links finish', () => {
     const r = fixtureRepo({ 'plugins/x/README.md': '# x\n' });
     symlinkSync('.', path.join(r, 'plugins/x/a'));

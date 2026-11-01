@@ -634,6 +634,12 @@ describe('checkAllowedTools', () => {
     ]);
   });
 
+  it('refuses plugins/ itself as a symlink', () => {
+    const r = fixtureRepo({ 'real/demo/commands/a.md': command('Read(specs/**)') });
+    symlinkSync(path.join(r, 'real'), path.join(r, 'plugins'));
+    expect(checkAllowedTools(r).map((f) => f.file)).toEqual(['plugins']);
+  });
+
   it('refuses a package-root node_modules that is a symlink', () => {
     const r = fixtureRepo({
       'outside/SKILL.md': command('Bash'),

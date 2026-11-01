@@ -598,7 +598,15 @@ export function walkPlugins(repoRoot: string): {
       else if (entry.isFile() && /\.md$/i.test(entry.name)) markdown.push(rel);
     }
   };
-  walk(PLUGINS_DIR);
+  // plugins/ itself as a link would point every check at files elsewhere.
+  let linked = false;
+  try {
+    linked = lstatSync(path.join(repoRoot, PLUGINS_DIR)).isSymbolicLink();
+  } catch {
+    // No plugins/ at all: nothing to walk.
+  }
+  if (linked) symlinks.push(PLUGINS_DIR);
+  else walk(PLUGINS_DIR);
   return { markdown: markdown.sort(), symlinks: symlinks.sort(), unreadable: unreadable.sort() };
 }
 
