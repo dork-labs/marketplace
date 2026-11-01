@@ -59,7 +59,7 @@ import path from 'node:path';
 import yaml from 'js-yaml';
 import { parseFrontmatter } from '@dorkos/skills/frontmatter';
 import { PLUGINS_DIR, pluginDirs } from './versions.ts';
-import { ownServerPrefixes, packageName, readJson } from './declarations.ts';
+import { ownServerPrefixes, packageName, readJson, sourceDir } from './declarations.ts';
 import type { Finding } from './validate.ts';
 
 /**
@@ -721,13 +721,6 @@ function manifestGrants(
     }
   }
   return { grants, findings };
-}
-
-/** The package folder a marketplace entry's `source` points at, or ''. */
-function sourceDir(source: unknown): string {
-  if (typeof source !== 'string') return '';
-  const match = /^(?:\.\/)?(plugins\/[\w-][\w.-]*)\/?$/.exec(source);
-  return match ? match[1] : '';
 }
 
 /**

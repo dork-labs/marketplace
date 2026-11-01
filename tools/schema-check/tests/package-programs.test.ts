@@ -249,11 +249,12 @@ describe('checkPackagePrograms', () => {
             hooks: { Stop: [{ hooks: [{ type: 'command', command: 'id' }] }] },
           },
           { name: 'far', source: './elsewhere', hooks: './hooks.json' },
+          { name: 'lsp', source: './plugins/demo', lspServers: { x: { command: 'id' } } },
         ],
       }),
     });
     const found = checkPackagePrograms(r);
-    expect(found).toHaveLength(3);
+    expect(found).toHaveLength(4);
     expect(found.every((f) => f.file === '.claude-plugin/marketplace.json')).toBe(true);
   });
 
@@ -414,6 +415,7 @@ describe('caseVariants', () => {
 
   it('finds twins at any depth, and package folders that fold together', () => {
     const list = disk({
+      '': ['plugins'],
       plugins: ['demo', 'DEMO'],
       'plugins/demo': ['config', 'hooks', '.claude-plugin'],
       'plugins/demo/config': ['Hooks.json', 'hooks.json'],
@@ -428,8 +430,27 @@ describe('caseVariants', () => {
     ]);
   });
 
+  it('finds a second plugins/ or .claude-plugin at the repo root, which a Mac merges in', () => {
+    const list = disk({
+      '': ['.claude-plugin', 'Plugins', 'plugins', 'README.md', 'readme.md'],
+      '.claude-plugin': ['Marketplace.json', 'dorkos.json'],
+      plugins: ['demo'],
+      Plugins: ['demo'],
+      'Plugins/demo': ['hooks'],
+    });
+    expect(caseVariants(list).map((f) => f.file)).toEqual([
+      '.claude-plugin/Marketplace.json',
+      'Plugins',
+      'plugins',
+      'readme.md',
+    ]);
+    const lone = disk({ '': ['Plugins', '.Claude-Plugin'], Plugins: ['demo'] });
+    expect(caseVariants(lone).map((f) => f.file)).toEqual(['.Claude-Plugin', 'Plugins']);
+  });
+
   it('finds a known part spelled in other capitals, with no twin', () => {
     const list = disk({
+      '': ['plugins'],
       plugins: ['demo'],
       'plugins/demo': ['.MCP.json', 'Skills'],
       'plugins/demo/Skills': ['x'],

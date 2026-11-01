@@ -15,6 +15,13 @@
 import { readFileSync } from 'node:fs';
 import path from 'node:path';
 
+/** The package folder a marketplace entry's `source` points at, or ''. */
+export function sourceDir(source: unknown): string {
+  if (typeof source !== 'string') return '';
+  const match = /^(?:\.\/)?(plugins\/[\w-][\w.-]*)\/?$/.exec(source);
+  return match ? match[1] : '';
+}
+
 /** A plain object, as opposed to an array, `null` or a scalar. */
 export function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value);
@@ -54,8 +61,7 @@ export function packageName(repoRoot: string, pkgDir: string): string | null {
     isRecord(marketplace) && Array.isArray(marketplace.plugins) ? marketplace.plugins : [];
   for (const entry of entries) {
     if (!isRecord(entry) || typeof entry.source !== 'string') continue;
-    const source = /^(?:\.\/)?(plugins\/[\w-][\w.-]*)\/?$/.exec(entry.source)?.[1];
-    if (source === pkgDir) names.add(entry.name);
+    if (sourceDir(entry.source) === pkgDir) names.add(entry.name);
   }
   return names.size === 1 ? folder : null;
 }

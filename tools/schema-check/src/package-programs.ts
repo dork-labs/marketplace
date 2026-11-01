@@ -37,6 +37,7 @@ import {
   readJson,
   serverDeclarations,
   serverMap,
+  sourceDir,
   type Declaration,
 } from './declarations.ts';
 import { PLUGINS_DIR, pluginDirs } from './versions.ts';
@@ -294,6 +295,38 @@ function listDir(repoRoot: string): (rel: string) => string[] {
  */
 export function caseVariants(list: (rel: string) => string[]): Finding[] {
   const findings: Finding[] = [];
+  const twinOf = (seen: Map<string, string>, name: string, child: string): boolean => {
+    const twin = seen.get(fold(name));
+    seen.set(fold(name), name);
+    if (twin === undefined) return false;
+    findings.push({
+      file: child,
+      message: `It differs from ${twin} only in capitals, so a case-blind disk sees one file where CI checks two.`,
+    });
+    return true;
+  };
+  const misspelled = (child: string, known: string): void => {
+    findings.push({
+      file: child,
+      message: `Claude Code on a case-blind disk opens it as ${known}, which this check reads by that exact name; spell it ${known}.`,
+    });
+  };
+
+  // The repo root and .claude-plugin/: a Mac merges `Plugins/` into `plugins/`
+  // on checkout, so a package could ship files from a folder no walk reads.
+  const top = (rel: string, known: ReadonlySet<string>): void => {
+    const seen = new Map<string, string>();
+    for (const name of [...list(rel)].sort()) {
+      const child = rel === '' ? name : `${rel}/${name}`;
+      if (name === '.git') continue;
+      twinOf(seen, name, child);
+      if (!known.has(fold(name))) continue;
+      if (name !== fold(name)) misspelled(child, fold(name));
+      else if (name === '.claude-plugin') top(child, ROOT_MANIFESTS);
+      else if (name === PLUGINS_DIR) walk(child);
+    }
+  };
+
   const walk = (rel: string): void => {
     const seen = new Map<string, string>();
     for (const name of [...list(rel)].sort()) {
@@ -302,27 +335,27 @@ export function caseVariants(list: (rel: string) => string[]): Finding[] {
       // plugins/<pkg>/node_modules is npm's; committed files there are refused
       // by committedNodeModules instead.
       if (name === '.git' || (segments.length === 3 && name === 'node_modules')) continue;
-      const twin = seen.get(fold(name));
-      seen.set(fold(name), name);
       const inPackage = segments.slice(2).join('/');
-      if (twin !== undefined) {
-        findings.push({
-          file: child,
-          message: `It differs from ${twin} only in capitals, so a case-blind disk sees one file where CI checks two.`,
-        });
-      } else if (KNOWN_PATHS.has(fold(inPackage)) && inPackage !== fold(inPackage)) {
-        findings.push({
-          file: child,
-          message: `Claude Code on a case-blind disk opens it as ${fold(inPackage)}, which this check reads by that exact name; spell it ${fold(inPackage)}.`,
-        });
+      if (
+        !twinOf(seen, name, child) &&
+        KNOWN_PATHS.has(fold(inPackage)) &&
+        inPackage !== fold(inPackage)
+      ) {
+        misspelled(child, fold(inPackage));
         continue;
       }
       walk(child);
     }
   };
-  walk(PLUGINS_DIR);
+  top('', ROOT_NAMES);
   return findings;
 }
+
+/** Repo-root names the checks open by exact spelling. */
+const ROOT_NAMES: ReadonlySet<string> = new Set([PLUGINS_DIR, '.claude-plugin']);
+
+/** The marketplace's own manifests in `.claude-plugin/`, opened by exact name. */
+const ROOT_MANIFESTS: ReadonlySet<string> = new Set(['marketplace.json', 'dorkos.json']);
 
 /**
  * Findings for files a package ships in its root `node_modules`, the one
@@ -495,8 +528,14 @@ export function checkPackagePrograms(repoRoot: string): Finding[] {
   for (const entry of entries) {
     if (!isRecord(entry)) continue;
     const source = typeof entry.source === 'string' ? entry.source : '';
-    const pkgDir = /^(?:\.\/)?(plugins\/[\w-][\w.-]*)\/?$/.exec(source)?.[1] ?? '';
+    const pkgDir = sourceDir(source);
     findings.push(...nodeModulesPaths(entry, marketplaceFile, `plugins[${String(entry.name)}].`));
+    if (entry.lspServers !== undefined) {
+      findings.push({
+        file: marketplaceFile,
+        message: `plugins[${String(entry.name)}].lspServers declares language servers, which Claude Code starts with no permission check; this check refuses them until one is reviewed.`,
+      });
+    }
     for (const [field, check] of [
       ['mcpServers', checkServers],
       ['hooks', checkHooks],
