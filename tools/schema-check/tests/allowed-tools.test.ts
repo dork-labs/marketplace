@@ -156,9 +156,7 @@ describe('breach', () => {
     const r = root();
     for (const rule of [
       'Task',
-      'mcp__dorkos__tasks_list',
       'Edit(specs/**)',
-      'Edit(.dork/flow/tmp/**)',
       'Bash(ls -la)',
       'Bash(node --experimental-strip-types "${CLAUDE_PLUGIN_ROOT}/scripts/tool.ts":*)',
       'Bash(node --experimental-strip-types "${CLAUDE_PLUGIN_ROOT}/scripts/tool.ts" selftest:*)',
@@ -435,6 +433,93 @@ describe('breach', () => {
     expect(breach('Bash(${CLAUDE_PLUGIN_ROOT}/scripts/missing.sh:*)', file, pkg, root())).toMatch(
       /does not exist/
     );
+  });
+
+  it('refuses Edit paths to files that run later, unless reviewed (DOR-3311 S1)', () => {
+    const r = root();
+    for (const rule of [
+      'Edit(.husky/pre-commit)',
+      'Edit(.githooks/pre-push)',
+      'Edit(.envrc)',
+      'Edit(src/.envrc)',
+      'Edit(.vscode/tasks.json)',
+      'Edit(.devcontainer/devcontainer.json)',
+      'Edit(.github/workflows/x.yml)',
+      'Edit(.mcp.json)',
+      'Edit(.npmrc)',
+      'Edit(.pnpmfile.cjs)',
+      'Edit(.dork/NOPE.md)',
+      'Edit(.dork/flow/tmp/**)',
+      'Edit(package.json)',
+      'Edit(Package.JSON)',
+      'Edit(apps/web/package.json)',
+      'Edit(Makefile)',
+      'Edit(GNUmakefile)',
+      'Edit(lefthook.yml)',
+      'Edit(mise.toml)',
+    ]) {
+      expect(breach(rule, file, pkg, r), rule).toMatch(/runs later|dot-file or dot-folder/);
+    }
+    for (const rule of ['Edit(specs/**)', 'Edit(src/app.ts)', 'Edit(docs/package-notes.md)']) {
+      expect(breach(rule, file, pkg, r), rule).toBeNull();
+    }
+    // A reviewed exact rule passes in its own package only.
+    const pause = 'plugins/flow/commands/pause.md';
+    expect(breach('Edit(.dork/flow/auto-run.json)', pause, 'plugins/flow', r)).toBeNull();
+    expect(breach('Edit(.dork/flow/tmp/**)', pause, 'plugins/flow', r)).toBeNull();
+    expect(breach('Edit(.dork/flow/**)', pause, 'plugins/flow', r)).not.toBeNull();
+    expect(breach('Edit(.dork/flow/auto-run.json)', file, pkg, r)).not.toBeNull();
+  });
+
+  it("refuses MCP tools on servers the package doesn't ship, unless reviewed (DOR-3311 S3)", () => {
+    const r = fixtureRepo({
+      'plugins/demo/.claude-plugin/plugin.json': JSON.stringify({ name: 'demo' }),
+      'plugins/demo/.mcp.json': JSON.stringify({
+        mcpServers: { notes: { command: 'node', args: ['${CLAUDE_PLUGIN_ROOT}/server.mjs'] } },
+      }),
+      'plugins/demo/server.mjs': '',
+      'plugins/inline/.claude-plugin/plugin.json': JSON.stringify({
+        name: 'inline',
+        mcpServers: { kv: { command: '${CLAUDE_PLUGIN_ROOT}/bin/kv.sh' } },
+      }),
+    });
+    for (const rule of [
+      'mcp__dorkos__mcp_add_server',
+      'mcp__playwright__browser_run_code_unsafe',
+      'mcp__dorkos__tasks_list',
+      'mcp__plugin_demo_other__search',
+      'mcp__plugin_other_notes__search',
+      'mcp__plugin_demo_notes_x__search',
+    ]) {
+      expect(breach(rule, file, pkg, r), rule).toMatch(/not one the package ships/);
+    }
+    expect(breach('mcp__plugin_demo_notes__search', file, pkg, r)).toBeNull();
+    expect(
+      breach('mcp__plugin_inline_kv__get', 'plugins/inline/commands/a.md', 'plugins/inline', r)
+    ).toBeNull();
+    // A wildcard or a bare server is still refused for the package's own server.
+    expect(breach('mcp__plugin_demo_notes__*', file, pkg, r)).toMatch(/whole MCP server/);
+    // Flow's reviewed DorkOS tools pass in flow only.
+    const status = 'plugins/flow/commands/status.md';
+    expect(breach('mcp__dorkos__tasks_list', status, 'plugins/flow', r)).toBeNull();
+    expect(breach('mcp__dorkos__mcp_add_server', status, 'plugins/flow', r)).not.toBeNull();
+  });
+
+  it("limits SlashCommand to the package's own commands (Security, #123)", () => {
+    const r = fixtureRepo({ 'plugins/demo/commands/run.md': command('Read(specs/**)') });
+    for (const rule of [
+      'SlashCommand',
+      'SlashCommand(*)',
+      'SlashCommand(/deploy)',
+      'SlashCommand(/other:run)',
+      'SlashCommand(/demo:gone)',
+      'SlashCommand(/demo:../x)',
+    ]) {
+      expect(breach(rule, file, pkg, r), rule).toMatch(/SlashCommand/);
+    }
+    expect(breach('SlashCommand(/demo:run)', file, pkg, r)).toBeNull();
+    expect(breach('SlashCommand(/demo:run:*)', file, pkg, r)).toBeNull();
+    expect(breach('SlashCommand', 'plugins/flow/commands/flow.md', 'plugins/flow', r)).toBeNull();
   });
 
   it('lets only a listed file write anywhere in the project', () => {

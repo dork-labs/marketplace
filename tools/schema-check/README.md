@@ -1,6 +1,6 @@
 # schema-check
 
-Repo-wide CI gate. It checks four things about everything in `plugins/`:
+Repo-wide CI gate. It checks five things about everything in `plugins/`:
 
 1. **Every `SKILL.md` still says what its author meant.** Not just "does it
    parse" — every line the author wrote has to survive the parse still meaning
@@ -11,6 +11,8 @@ Repo-wide CI gate. It checks four things about everything in `plugins/`:
 3. **Every package states one version.** See [Version agreement](#version-agreement).
 4. **No package grants more than it names.** Every command's and skill's
    `allowed-tools` holds to a permission floor. See [Allow rules](#allow-rules).
+5. **Nothing runs on its own but the package's own scripts.** Every hook and
+   MCP server. See [Hooks and MCP servers](#hooks-and-mcp-servers).
 
 Run it:
 
@@ -138,10 +140,20 @@ and anything else is refused.
   that are a whole shell or every file write are refused bare: `Bash`,
   `PowerShell`, `Write`, `Edit`, `MultiEdit`, `NotebookEdit`.
 - One MCP tool, `mcp__<server>__<tool>`. A bare server or a `*` is refused.
+  The server has to be one the package ships in `.mcp.json` or plugin.json's
+  `mcpServers` (Claude Code names its tools `mcp__plugin_<package>_<server>__<tool>`).
+  A tool on any other server (`mcp__dorkos__mcp_add_server`,
+  `mcp__playwright__browser_run_code_unsafe`) needs its exact name in
+  `REVIEWED_COMMANDS`. Flow's two DorkOS schedule tools are there.
 - `Edit(<path>)`, which also governs `Write`. The path starts with a literal
-  folder (`specs/**`, `.dork/flow/tmp/**`), never uses `\`, `%`, `$`, `~` or
-  `..`, never names `.git` or `.claude`, and spells every dot-folder out with no
-  wildcard. `Edit(./**)` is allowed only for the files listed in
+  folder (`specs/**`), never uses `\`, `%`, `$`, `~` or `..`, and never names a
+  file that a tool runs later without asking: no dot-file or dot-folder at all
+  (`.husky`, `.githooks`, `.github`, `.vscode`, `.devcontainer`, `.envrc`,
+  `.mcp.json`, `.npmrc`, `.dork`, `.git`, `.claude`), and no `package.json`,
+  `Makefile`, `GNUmakefile`, `justfile`, `lefthook.yml` or `mise.toml`, at any
+  depth and in any case. An exact rule to one of those goes in
+  `REVIEWED_COMMANDS`; flow's `.dork/flow/tmp/**` and `.dork/flow/auto-run.json`
+  are there. `Edit(./**)` is allowed only for the files listed in
   `PROJECT_WRITERS`, and adding one is a security decision that gets its own
   review.
 - `Bash(<exact command>)`, or a `:*` prefix on one of the package's own scripts
@@ -167,6 +179,10 @@ and anything else is refused.
 - `WebFetch` only as `WebFetch(domain:<one literal host>)` with a real
   top-level domain: no IP addresses (`169.254.169.254`), and no `.local`,
   `.internal` or `.localhost`. A bare `WebFetch` can send anything anywhere.
+- `SlashCommand(/<package>:<command>)`, optionally with `:*`, only for a
+  command the package ships in `commands/`. A slash command runs with its own
+  `allowed-tools`, so a grant to someone else's can reach whatever that one
+  allows. A bare `SlashCommand` needs a `REVIEWED_COMMANDS` entry; flow has one.
 - `<Tool>(<spec>)` for any other known tool, with no nested parentheses.
 
 A bare `Read`, `Grep`, `Glob`, `LS` or `NotebookRead` is refused: in plain
@@ -178,7 +194,11 @@ The known limit: a folder-scoped read like `Read(config/**)` still reads a
 secret file inside that folder, such as `config/.env`, because `*` matches
 dot-files. The floor keeps reads off the project's root secrets (`.env`,
 `.git`, `.claude`, `.dork`) and off named secrets anywhere in the path; it
-can't see what a folder happens to hold.
+can't see what a folder happens to hold. Writes have the same limit:
+`Edit(specs/**)` can still write `specs/.envrc` or `specs/package.json`, which
+matters where direnv or an npm workspace picks them up. The floor keeps writes
+off the root files that run on their own (hooks, CI, editor tasks, `.mcp.json`,
+the root `package.json`).
 
 So a read scoped to a folder that often holds secrets (`config`, `secrets`,
 `env`, `deploy`, `infra`, `.github`, `certs`, `keys`, `credentials`, `apps`, `packages`) passes
@@ -195,9 +215,35 @@ can't be read is an error, not a skip, and so is any symlink under `plugins/`.
 A marketplace entry with a local `source` must point at `./plugins/<name>`, so
 nothing ships from a folder the walk skips. The floor covers packages shipped
 from this repo only: a remote `source` (GitHub, a URL) isn't checked here.
-Also out of scope: a plugin's `hooks.json` (a hook can approve tool calls or
-run commands) and servers in its `.mcp.json`. Both are tracked as follow-ups.
 A folder under `plugins/` this check can't read is an error.
+
+## Hooks and MCP servers
+
+`allowed-tools` only says what an agent may do without asking. A plugin's
+hooks run on events and its MCP servers start with Claude Code, with no
+permission check at all. So `src/package-programs.ts` holds them to the same
+allow-list stance (DOR-3311): each one runs one of the package's own scripts,
+or it is refused.
+
+- **Hooks** are read from `hooks/hooks.json`, plugin.json's `hooks` (a path, an
+  inline value or a list of both), a marketplace entry's `hooks`, and the
+  `hooks` in any skill or command frontmatter. A path has to stay inside the
+  package and exist. Only `command` hooks pass, as `node` on a `.mjs`, `.cjs`,
+  `.js` or `.ts` file, or a `.sh` file, by `${CLAUDE_PLUGIN_ROOT}`, followed only
+  by fixed lowercase words or flags. The script has to be a plain file in the
+  package. The one thing allowed before the script is a change to the project
+  root, as one of the two exact `cd ... && ` prefixes in `PROJECT_CD`. `http`,
+  `prompt`, `agent` and `mcp_tool` hooks are refused.
+- **MCP servers** are read from `.mcp.json`, plugin.json's `mcpServers` and a
+  marketplace entry's `mcpServers`. A server passes only as a local one that runs
+  `node "${CLAUDE_PLUGIN_ROOT}/<script>"`, or runs a script by
+  `${CLAUDE_PLUGIN_ROOT}` directly, followed by plain words or flags. Remote
+  servers (`http`, `sse`), and any `env`, `cwd`, headers or helper, are refused.
+
+A declaration this check can't read is an error, never a skip. Language
+servers (`.lsp.json`), monitors and `bin/` programs aren't checked yet; no
+package ships one. Anything outside these shapes needs a change to this check,
+reviewed as its own diff.
 
 ## Reading a SKILL.md safely
 
