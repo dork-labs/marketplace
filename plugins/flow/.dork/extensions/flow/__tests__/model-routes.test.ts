@@ -243,6 +243,13 @@ describe('the person bar', () => {
     for (const route of ['/model', '/fleet', '/capacity', '/settings/main', '/fleet/migration']) {
       expect((await send(app, 'GET', route, { agent: true })).status).toBe(200);
     }
+    // A trailing slash reaches the same route, and the same bar.
+    for (const route of ['/pause/', '/fleet/handoff/']) {
+      const method = route === '/pause/' ? 'POST' : 'PUT';
+      expect(await send(app, method, route, { agent: true, body: { all: true } }), route).toEqual(
+        REFUSED_AGENT
+      );
+    }
     // No verdict, or one flow cannot read, fails closed on every write.
     for (const caller of [undefined, {}, { person: { ok: 'yes' } }, { person: { ok: false } }]) {
       for (const write of writes) {
