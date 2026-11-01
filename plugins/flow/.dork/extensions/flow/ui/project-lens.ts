@@ -60,6 +60,23 @@ export const SORT_WAITS_TEXT = 'Sorting waits until tomorrow: flow is busy.';
 export const MARKETPLACE_ROUTE = '/marketplace';
 
 /**
+ * What a stopped run says under its row: a DorkOS-hosted drain run whose
+ * worker's or reviewer's chat is gone, which the drain would otherwise wait on
+ * forever (DOR-2490).
+ *
+ * @param identifier - The run's item, such as `DOR-2490`.
+ * @param chat - Whose chat is gone.
+ * @returns The sentence.
+ */
+export function stoppedText(identifier: string, chat: 'worker' | 'reviewer'): string {
+  const why =
+    chat === 'reviewer'
+      ? "Its reviewer's chat is gone, so its review is stuck."
+      : 'Its chat is gone, so nothing is working on it.';
+  return `${why} Run flow release ${identifier} to put it back in the queue.`;
+}
+
+/**
  * The route that opens a run's session: `/session?session=<id>&dir=<folder>`.
  *
  * @param run - The run, with a session.
@@ -297,6 +314,10 @@ export function ProjectLens(props: {
     return h('div', { key: 'header', style: HEADER }, ...children);
   };
 
+  /** The id of a stopped run's sentence, which its row's button points at. */
+  const stoppedId = (run: FlowRunRow, index: number): string =>
+    `flow-stopped-${project.name.replace(/\s+/g, '-')}-${run.identifier}-${index}`;
+
   const runRow = (run: FlowRunRow, index: number): Node => {
     const name = run.title === null ? run.identifier : `${run.identifier} ${run.title}`;
     const children = [
@@ -305,7 +326,8 @@ export function ProjectLens(props: {
       h('span', { key: 'pill', style: PILL }, PILL_TEXT[run.state]),
     ];
     const key = `${run.identifier}:${index}`;
-    if (run.sessionId === null) {
+    // A worker whose chat is gone has nothing to open.
+    if (run.sessionId === null || (run.state === 'stopped' && run.stopped !== 'reviewer')) {
       return h(
         'div',
         { key, style: ROW },
@@ -321,6 +343,7 @@ export function ProjectLens(props: {
         type: 'button',
         'data-row': 'run',
         'aria-label': `${name}, ${PILL_TEXT[run.state]}, on ${run.account.label}. Open its chat`,
+        'aria-describedby': run.state === 'stopped' ? stoppedId(run, index) : undefined,
         style: { ...ROW, cursor: 'pointer' },
         onClick: () => api.navigate(sessionRoute({ sessionId, cwd: run.cwd })),
       },
@@ -435,7 +458,22 @@ export function ProjectLens(props: {
     if (running.length === 0) {
       body.push(h('p', { key: 'none', style: MUTED }, NOTHING_RUNNING_TEXT));
     } else {
-      body.push(...running.map(runRow));
+      running.forEach((run, index) => {
+        body.push(runRow(run, index));
+        if (run.state === 'stopped') {
+          body.push(
+            h(
+              'p',
+              {
+                key: `stopped-${run.identifier}:${index}`,
+                id: stoppedId(run, index),
+                style: { ...MUTED, margin: '2px 0 6px' },
+              },
+              stoppedText(run.identifier, run.stopped ?? 'worker')
+            )
+          );
+        }
+      });
     }
     if (project.queue !== null) {
       body.push(h('div', { key: 'cap-next', style: CAPTION }, 'Up next'));

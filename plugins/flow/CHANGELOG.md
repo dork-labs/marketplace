@@ -4,7 +4,7 @@ Installs of this plugin are pinned to a commit SHA, so a fix here does not reach
 you until you **reinstall it** (Marketplace → flow → reinstall, or re-run your
 `--plugin-dir` checkout's `git pull`). Each entry below says whether that matters.
 
-## 0.68.0
+## 0.69.0
 
 **Flow's parts in the DorkOS app now need DorkOS 0.116.0 or newer. Update DorkOS first, then reinstall flow to get it.**
 
@@ -12,6 +12,16 @@ you until you **reinstall it** (Marketplace → flow → reinstall, or re-run yo
 - On an older DorkOS, DorkOS doesn't load flow's extension, so the Flow tab, Flow home and the run chip don't show. `/flow` in a chat works as before.
 - Flow no longer has notes for a DorkOS too old for it: "Update DorkOS to choose how flow uses your accounts", "Update DorkOS to change flow's settings here", "Pause from a chat in this project" and the read-only settings page are gone.
 - Under the hood, flow's 15 app routes are now served by a Hono fetch handler instead of the Express router DorkOS is retiring. Answers and who may call each route are unchanged. Two small differences: paths now match case-sensitively (`/PAUSE` no longer reaches `/pause`; the Flow tab only sends lower case), and a path flow doesn't serve answers a JSON 404.
+
+## 0.68.0
+
+**In the DorkOS app, the Flow tab now says when a drain run stopped because a DorkOS chat it needs is gone (DOR-2490). Before, the run showed as Building forever. Reinstall to get it.**
+
+- When `flow drain` runs work in DorkOS chats and one of those chats is deleted, the drain waits on it forever. The Flow tab now marks that run **Stopped** and says why in one sentence under it, such as "Its chat is gone, so nothing is working on it. Run flow release DOR-1 to put it back in the queue." When it's the reviewer's chat that's gone, the sentence says the review is stuck.
+- It says so only when the DorkOS that started the chat answers that the chat no longer exists, in two answers at least 5 minutes apart. A DorkOS that is down, restarting, too old to say, or a different DorkOS on the same computer is never read as a gone chat.
+- It says so only while the drain is really waiting on that chat. That means the worker while it builds or fixes with nothing new to review, or the reviewer while it reviews the latest push with no verdict yet. A run the drain can carry on without that chat (a push to review, a verdict to route, a PR to watch) is left alone, as is a limited or parked run.
+- Flow now records which DorkOS started each chat, so this works for drain runs started after you reinstall. Older runs are never marked Stopped.
+- `flow status` lists such a run under **Ended, not cleared**, with `reason` set to `session-gone` and `chat` set to `worker` or `reviewer` in its JSON, plus a `session-gone` drift line. It reports what DorkOS answered on that one read. The stopped run still holds its drain slot until `flow release` clears it, as the drain counts it.
 
 ## 0.67.1
 

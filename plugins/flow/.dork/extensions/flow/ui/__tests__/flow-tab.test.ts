@@ -20,6 +20,7 @@ import {
   NOT_SET_UP_TEXT,
   SCHEDULES_OFF_TEXT,
   schedulesWaitingText,
+  stoppedText,
 } from '../project-lens.ts';
 import { FlowStore } from '../store.ts';
 import {
@@ -243,6 +244,50 @@ describe('the project lens', () => {
     await act(async () => {});
     expect(screen.getByText(SCHEDULES_OFF_TEXT)).toBeTruthy();
     expect(SCHEDULES_OFF_TEXT).toMatch(/in Schedules\.$/);
+  });
+
+  it('says in one plain sentence when a run stopped because a chat it needs is gone (DOR-2490)', async () => {
+    const api = host(DORKOS);
+    await renderTab(
+      flowModel([
+        flowProject('dorkos', {
+          runs: [
+            runRow('DOR-2490', {
+              title: 'Worker gone',
+              sessionId: 's-1',
+              state: 'stopped',
+              stopped: 'worker',
+            }),
+            runRow('DOR-2492', {
+              title: 'Reviewer gone',
+              sessionId: 's-3',
+              state: 'stopped',
+              stopped: 'reviewer',
+            }),
+            runRow('DOR-2491', { sessionId: 's-2' }),
+          ],
+        }),
+      ]),
+      api
+    );
+    expect(screen.getAllByText('Stopped')).toHaveLength(2);
+    expect(stoppedText('DOR-2490', 'worker')).toBe(
+      'Its chat is gone, so nothing is working on it. Run flow release DOR-2490 to put it back in the queue.'
+    );
+    expect(stoppedText('DOR-2492', 'reviewer')).toBe(
+      "Its reviewer's chat is gone, so its review is stuck. Run flow release DOR-2492 to put it back in the queue."
+    );
+    expect(screen.getByText(stoppedText('DOR-2490', 'worker'))).toBeTruthy();
+    // The worker's chat is gone: nothing to open.
+    expect(screen.queryByRole('button', { name: /DOR-2490 Worker gone/ })).toBeNull();
+    // The reviewer's is gone: the worker's chat still opens, and says why it stopped.
+    const reviewer = screen.getByRole('button', { name: /DOR-2492 Reviewer gone/ });
+    expect(reviewer.getAttribute('aria-describedby')).toBeTruthy();
+    expect(document.getElementById(reviewer.getAttribute('aria-describedby')!)?.textContent).toBe(
+      stoppedText('DOR-2492', 'reviewer')
+    );
+    // Only the stopped runs say it.
+    expect(screen.queryByText(/DOR-2491 to put it back/)).toBeNull();
   });
 
   it('names the account of a run with no chat for screen readers', async () => {

@@ -167,6 +167,12 @@ export interface SessionHandle {
    * messages route; DorkOS may still have rebound it).
    */
   launchPath?: 'mcp' | 'route';
+  /**
+   * dorkos: the DorkOS that started the session (its base URL). Only that
+   * DorkOS may say the session is gone; absent on handles written before it
+   * existed (DOR-2490).
+   */
+  dorkosUrl?: string;
 }
 
 /**
@@ -176,14 +182,16 @@ export interface SessionHandle {
  * - `idle`: alive and waiting for input.
  * - `exited`: the process is gone; `code` is its exit code when known.
  * - `limited`: the session hit a rate limit; `window` and `resetsAt` when known.
- * - `unknown`: the host cannot say; `reason` is a plain sentence.
+ * - `unknown`: the host cannot say; `reason` is a plain sentence. `gone` is
+ *   set only when the host itself answered that it no longer has the session
+ *   (DorkOS's 404), never when it did not answer (DOR-2490).
  */
 export type SessionState =
   | { kind: 'busy' }
   | { kind: 'idle' }
   | { kind: 'exited'; code: number | null }
   | { kind: 'limited'; window: string | null; resetsAt: string | null }
-  | { kind: 'unknown'; reason: string };
+  | { kind: 'unknown'; reason: string; gone?: true };
 
 /** A probe's answer: the host can start a session now, or why not. */
 export type ProbeResult = { ok: true } | { ok: false; reason: string };

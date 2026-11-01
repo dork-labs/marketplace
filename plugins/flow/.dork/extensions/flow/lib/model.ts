@@ -41,10 +41,16 @@ import { RouteError } from './fleet.ts';
 import type { DecisionActions } from './host-types.ts';
 import type { FlowProjectEntry } from './projects.ts';
 import { GIT_TIMEOUT_MS } from './run-store.ts';
-import { isClosedRun, type ClosedRun, type TrackerRead } from './tracker-reads.ts';
+import { isClosedRun, type ClosedRun, type GoneRun, type TrackerRead } from './tracker-reads.ts';
 
-/** A run's state pill. `done` is only for the run chip (a run completed in the last day). */
-export type RunPill = 'building' | 'needs-you' | 'in-review' | 'handing-off' | 'parked' | 'done';
+/**
+ * A run's state pill. `done` is only for the run chip (a run completed in the
+ * last day). `stopped` is a DorkOS-hosted drain run whose chat is gone
+ * (`TrackerReader.goneRuns`, DOR-2490): nothing works on it until `flow
+ * release` clears it.
+ */
+export type RunPill =
+  'building' | 'needs-you' | 'in-review' | 'handing-off' | 'parked' | 'stopped' | 'done';
 
 /** One item of "Up next". */
 export interface QueueItem {
@@ -74,6 +80,8 @@ export interface FlowRunRow {
   state: RunPill;
   /** The newest timestamp on the record, or `null` (§6.2). */
   updatedAt: string | null;
+  /** For a `stopped` run: whose DorkOS chat is gone, the worker's or the reviewer's. */
+  stopped?: 'worker' | 'reviewer';
 }
 
 /**
@@ -548,6 +556,8 @@ export function projectRuns(input: {
   now: Date;
   /** Runs whose item closed (`TrackerReader.closedRuns`): waiting at no gate. */
   closedRuns?: readonly ClosedRun[];
+  /** Drain runs whose DorkOS chat is gone (`TrackerReader.goneRuns`): shown stopped. */
+  goneRuns?: readonly GoneRun[];
 }): FlowRunRow[] {
   const active: FlowRunRow[] = [];
   const done: FlowRunRow[] = [];
@@ -566,6 +576,8 @@ export function projectRuns(input: {
     } else {
       continue;
     }
+    const gone =
+      into === active ? (input.goneRuns ?? []).find((g) => isClosedRun(run, [g])) : undefined;
     const runtime = text(run.runtime) ?? undefined;
     const key = runAccountKey(input.registry, runtime, text(run.account));
     const look = input.accounts.get(key);
@@ -581,8 +593,9 @@ export function projectRuns(input: {
         label: look?.label ?? key.slice(key.indexOf(':') + 1),
         color: look?.color ?? UNKNOWN_ACCOUNT_COLOR,
       },
-      state: runState(run),
+      state: gone === undefined ? runState(run) : 'stopped',
       updatedAt: lastUpdateOf(run),
+      ...(gone === undefined ? {} : { stopped: gone.chat }),
     });
   }
   return [...active, ...done];
@@ -692,6 +705,8 @@ export function buildProject(input: {
   extras?: ProjectExtras;
   /** Runs whose item the tracker says closed (`TrackerReader.closedRuns`). */
   closedRuns?: readonly ClosedRun[];
+  /** Drain runs whose DorkOS chat is gone (`TrackerReader.goneRuns`). */
+  goneRuns?: readonly GoneRun[];
 }): FlowProject {
   const { entry, read, now } = input;
   const extras = input.extras ?? {};
@@ -706,6 +721,7 @@ export function buildProject(input: {
     pidAlive,
     now,
     closedRuns,
+    goneRuns: input.goneRuns ?? [],
   });
   let busy = 0;
   for (const run of Object.values(store)) {
