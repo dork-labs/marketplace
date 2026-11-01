@@ -93,7 +93,14 @@ describe('FlowStore', () => {
 
     FakeEventSource.instances[0].emit('open');
     await settle();
-    expect(fetch.calls.filter((call) => call.method === 'GET')).toHaveLength(2);
+    expect(fetch.calls.map((call) => `${call.method} ${call.url}`)).toEqual([
+      'POST /api/ext/flow/folders',
+      'GET /api/ext/flow/model?cwd=%2Fwork%2Fdorkos',
+    ]);
+    // A reopen may follow a server restart, so flow is told the folder again.
+    FakeEventSource.instances[0].emit('open');
+    await settle();
+    expect(fetch.calls.at(-1)).toMatchObject({ method: 'POST', url: '/api/ext/flow/folders' });
 
     store.stop();
     expect(FakeEventSource.instances[0].closed).toBe(true);
@@ -114,13 +121,50 @@ describe('FlowStore', () => {
     stream.emit('error');
     await vi.advanceTimersByTimeAsync(FALLBACK_POLL_MS);
     expect(fetch.calls).toHaveLength(2);
+    expect(fetch.calls.map((call) => `${call.method} ${call.url}`)).toEqual([
+      'POST /api/ext/flow/folders',
+      'GET /api/ext/flow/model?cwd=%2Fa',
+    ]);
     api.move({ currentCwd: '/b', currentProject: null });
     await vi.advanceTimersByTimeAsync(0);
-    expect(fetch.calls.at(-1)?.url).toBe('/api/ext/flow/model?cwd=%2Fb');
+    expect(fetch.calls.at(-1)).toMatchObject({
+      method: 'POST',
+      url: '/api/ext/flow/folders',
+      body: { cwd: '/b' },
+    });
     stream.emit('open');
     await vi.advanceTimersByTimeAsync(FALLBACK_POLL_MS * 2);
     // Polling stopped once the stream opened: one read for the open, none after.
     expect(fetch.calls).toHaveLength(4);
+    store.stop();
+  });
+
+  it("tells flow about a chat's folder as the person, then only reads, and reads anyway when refused (DOR-3581)", async () => {
+    FakeEventSource.instances = [];
+    vi.stubGlobal('EventSource', FakeEventSource);
+    const model = flowModel([flowProject('dorkos')]);
+    let refuse = true;
+    const fetch = routeFetch((method) =>
+      method === 'POST' && refuse ? { status: 403, body: {} } : { status: 200, body: model }
+    );
+    const store = new FlowStore(host({ currentCwd: '/work/dorkos', currentProject: null }));
+    store.start();
+    await settle();
+    // Refused: the tab still shows the model from a plain read.
+    expect(store.get()).toMatchObject({ phase: 'ready', model });
+    expect(fetch.calls.map((call) => `${call.method} ${call.url}`)).toEqual([
+      'POST /api/ext/flow/folders',
+      'GET /api/ext/flow/model?cwd=%2Fwork%2Fdorkos',
+    ]);
+    expect(fetch.calls[0].body).toEqual({ cwd: '/work/dorkos' });
+    // It asks again on the next read, and once it is through, only reads.
+    refuse = false;
+    await store.refresh();
+    await store.refresh();
+    expect(fetch.calls.slice(2).map((call) => `${call.method} ${call.url}`)).toEqual([
+      'POST /api/ext/flow/folders',
+      'GET /api/ext/flow/model?cwd=%2Fwork%2Fdorkos',
+    ]);
     store.stop();
   });
 

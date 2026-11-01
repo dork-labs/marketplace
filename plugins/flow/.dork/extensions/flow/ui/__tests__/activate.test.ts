@@ -291,8 +291,8 @@ describe('activate', () => {
 
   it('keeps an error inside the dialog clickable, and shows one pause dialog at a time', async () => {
     const { commands, cleanup, opener } = await openableHost();
-    routeFetch((method) =>
-      method === 'POST'
+    routeFetch((method, url) =>
+      method === 'POST' && !url.endsWith('/folders')
         ? { status: 500, body: { error: 'Flow could not pause it.' } }
         : { status: 200, body: flowModel([flowProject('dorkos')]) }
     );
@@ -319,8 +319,10 @@ describe('activate', () => {
   it('resumes the chat’s project from the palette at once, and says so', async () => {
     const paused = flowModel([flowProject('dorkos', { pause: { since: null, until: null } })]);
     const resumed = flowModel([flowProject('dorkos')]);
-    const fetch = routeFetch((method) =>
-      method === 'POST' ? { status: 200, body: resumed } : { status: 200, body: paused }
+    const fetch = routeFetch((method, url) =>
+      method === 'POST' && !url.endsWith('/folders')
+        ? { status: 200, body: resumed }
+        : { status: 200, body: paused }
     );
     const { api, commands } = fullHost({
       currentCwd: '/work/dorkos',
@@ -351,8 +353,8 @@ describe('activate', () => {
       flowProject('blintz', { pause: { since: null, until: null } }),
       flowProject('quiet'),
     ]);
-    const fetch = routeFetch((method) =>
-      method === 'POST'
+    const fetch = routeFetch((method, url) =>
+      method === 'POST' && !url.endsWith('/folders')
         ? { status: 200, body: flowModel([flowProject('dorkos'), flowProject('blintz')]) }
         : { status: 200, body: paused }
     );
@@ -376,8 +378,8 @@ describe('activate', () => {
   it('sends one pause from the dialog however often it is clicked, and follows the store', async () => {
     let answer: (value: unknown) => void = () => {};
     const quiet = flowModel([flowProject('dorkos')]);
-    const fetch = routeFetch((method) =>
-      method === 'POST'
+    const fetch = routeFetch((method, url) =>
+      method === 'POST' && !url.endsWith('/folders')
         ? new Promise((resolve) => {
             answer = () => resolve({ status: 200, body: quiet });
           })
@@ -396,7 +398,9 @@ describe('activate', () => {
     const item = screen.getByRole('menuitem', { name: 'For 1 hour' });
     fireEvent.click(item);
     fireEvent.click(item);
-    expect(fetch.calls.filter((call) => call.method === 'POST')).toHaveLength(1);
+    expect(
+      fetch.calls.filter((call) => call.method === 'POST' && !call.url.endsWith('/folders'))
+    ).toHaveLength(1);
     await act(async () => {
       answer(null);
     });

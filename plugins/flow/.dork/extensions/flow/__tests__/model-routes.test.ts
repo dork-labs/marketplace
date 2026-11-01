@@ -102,15 +102,26 @@ function setup(
   return { app: ext.app, host, ext };
 }
 
-/** `GET /model`'s body. */
+/**
+ * The model a person's Flow tab gets: beside a chat, its first read for the
+ * chat's folder is `POST /folders`, which looks for a project there from now
+ * on; without a folder it is `GET /model`.
+ */
 async function model(
   app: ReturnType<typeof setup>['app'],
   cwd: string | null = world.worktree
 ): Promise<FlowModel> {
-  const query = cwd === null ? '' : `?cwd=${encodeURIComponent(cwd)}`;
-  const sent = await send(app, 'GET', `/model${query}`);
+  const sent =
+    cwd === null
+      ? await send(app, 'GET', '/model')
+      : await send(app, 'POST', '/folders', { body: { cwd } });
   expect(sent.status).toBe(200);
   return sent.body as FlowModel;
+}
+
+/** `GET /model?cwd=`'s answer, for an agent or a person. */
+async function read(app: ReturnType<typeof setup>['app'], cwd: string, agent = true) {
+  return send(app, 'GET', `/model?cwd=${encodeURIComponent(cwd)}`, { agent });
 }
 
 /**
@@ -185,7 +196,12 @@ describe('GET /model', () => {
     const body = await model(app);
     expect(body.projects.map((p) => p.name)).toEqual(['app~acme']);
     expect(body.cwdProject).toBe('app~acme');
-    expect(core.api.resolve).toHaveBeenCalledWith(world.worktree);
+    // A worktree's project is found by flow's own git lookup, which records nothing.
+    const read = (
+      await send(app, 'GET', `/model?cwd=${encodeURIComponent(world.worktree)}`, { agent: true })
+    ).body as FlowModel;
+    expect(read.cwdProject).toBe('app~acme');
+    expect(core.api.resolve).not.toHaveBeenCalled();
     // A change in core's list sends a new model without waiting for the poll
     // (after the first pass, which runs at start).
     await vi.waitFor(() => expect(host.emit).toHaveBeenCalled());
@@ -197,6 +213,72 @@ describe('GET /model', () => {
   });
 });
 
+describe('reading never registers a folder (DOR-3581)', () => {
+  it("answers an agent's GET /model?cwd= with the model, and remembers and reports nothing", async () => {
+    configure(world.main);
+    const other = otherProject();
+    const core = fakeProjects();
+    const { app, host } = setup({ projects: core.api });
+    await model(app);
+    core.api.report.mockClear();
+    core.api.resolve.mockClear();
+    const sent = await read(app, other);
+    expect(sent.status).toBe(200);
+    const body = sent.body as FlowModel;
+    expect(body.projects.map((p) => p.root)).toEqual([world.main]);
+    expect(body.cwdProject).toBeNull();
+    // Nothing was kept: a later read, and the next poll, still do not see it.
+    await host.scheduled[0]?.();
+    expect(
+      ((await send(app, 'GET', '/model')).body as FlowModel).projects.map((p) => p.root)
+    ).toEqual([world.main]);
+    expect(core.api.report).not.toHaveBeenCalled();
+    // Core's resolve() records a folder it has not seen, against flow's
+    // allowance of reported roots, so a read never asks it either.
+    expect(core.api.resolve).not.toHaveBeenCalled();
+    expect(JSON.stringify(host.store.data ?? null)).not.toContain(other);
+  });
+
+  it("does not register a folder for a person's plain read either", async () => {
+    const other = otherProject();
+    const core = fakeProjects();
+    const { app } = setup({ projects: core.api });
+    await read(app, other, false);
+    expect(core.api.report).not.toHaveBeenCalledWith(other);
+    expect(((await send(app, 'GET', '/model')).body as FlowModel).projects).toEqual([]);
+  });
+
+  it("registers the folder on a person's POST /folders, and answers with its model", async () => {
+    const other = otherProject();
+    const core = fakeProjects();
+    const { app } = setup({ projects: core.api });
+    const body = await model(app, other);
+    expect(core.api.report).toHaveBeenCalledWith(other);
+    expect(body.cwdProject).toBe('other~reported');
+    expect(body.projects.map((p) => p.root)).toEqual([other]);
+    // From then on a plain read sees it.
+    const later = (await read(app, other)).body as FlowModel;
+    expect(later.projects.map((p) => p.root)).toEqual([other]);
+    expect(later.cwdProject).toBe('other~reported');
+  });
+
+  it('refuses an agent, and a body with no folder, without registering anything', async () => {
+    const other = otherProject();
+    const core = fakeProjects();
+    const { app } = setup({ projects: core.api });
+    expect(await send(app, 'POST', '/folders', { agent: true, body: { cwd: other } })).toEqual(
+      REFUSED_AGENT
+    );
+    for (const body of [undefined, {}, { cwd: '' }, { cwd: 42 }, { cwd: [other] }]) {
+      const sent = await send(app, 'POST', '/folders', { body });
+      expect(sent.status, JSON.stringify(body)).toBe(400);
+      expect(sent.body).toMatchObject({ refusedBy: 'flow' });
+    }
+    expect(core.api.report).not.toHaveBeenCalledWith(other);
+    expect(((await send(app, 'GET', '/model')).body as FlowModel).projects).toEqual([]);
+  });
+});
+
 describe('the person bar', () => {
   it('stands in front of every route that changes something, and answers an agent with its verdict', async () => {
     configure(world.main);
@@ -205,9 +287,9 @@ describe('the person bar', () => {
     await model(app);
     const served = [...new Set(app.routes.map((route) => `${route.method} ${route.path}`))];
     // Every GET route, listed: a new one fails here until someone decides it
-    // only reads, or puts it behind the bar. GET /model?cwd= also remembers
-    // the folder and reports it to DorkOS's project registry with no bar; that
-    // is a known gap, to be closed in its own ticket.
+    // only reads, or puts it behind the bar. GET /model?cwd= only reads:
+    // remembering a folder and reporting it to DorkOS's project registry is
+    // POST /folders, behind the bar (DOR-3581).
     expect(served.filter((route) => route.startsWith('GET ')).sort()).toEqual([
       'GET /capacity',
       'GET /fleet',
@@ -223,6 +305,7 @@ describe('the person bar', () => {
     expect(writes.sort()).toEqual(
       expect.arrayContaining([
         'POST /decisions/:key',
+        'POST /folders',
         'POST /pause',
         'POST /projects/:name/allow-adapter',
         'POST /resume',

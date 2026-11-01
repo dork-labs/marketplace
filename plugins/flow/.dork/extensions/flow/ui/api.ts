@@ -156,14 +156,27 @@ export function putCrossRuntime(
 
 /**
  * Read the Flow tab's model. The folder of the chat the tab sits beside is
- * passed along, so flow looks for a project there too and says which project
- * it is (for a DorkOS that does not say so itself).
+ * passed along, so flow says which project it is (for a DorkOS that does not
+ * say so itself). Reading never makes flow look in a new folder; `addFolder`
+ * does.
  *
  * @param cwd - The chat's folder, or `null`.
  * @returns The `GET /model` body.
  */
 export function getModel(cwd: string | null): Promise<FlowModel> {
   return call<FlowModel>('GET', cwd ? `/model?cwd=${encodeURIComponent(cwd)}` : '/model');
+}
+
+/**
+ * Tell flow, as the person, to look for a project in the chat's folder from
+ * now on, and report it to DorkOS so "Set up flow here" can start work there.
+ * Only a person can (DOR-3581).
+ *
+ * @param cwd - The chat's folder.
+ * @returns The `GET /model?cwd=` body for that folder.
+ */
+export function addFolder(cwd: string): Promise<FlowModel> {
+  return call<FlowModel>('POST', '/folders', { cwd });
 }
 
 /** Which projects a pause or resume acts on: one, by name, or every set-up one. */

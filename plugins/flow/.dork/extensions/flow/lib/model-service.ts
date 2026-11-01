@@ -10,6 +10,7 @@
  * @module @dorkos/flow/extension/model-service
  */
 
+import { realpath } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import {
@@ -228,6 +229,9 @@ export function parseRestoreList(stored: unknown): Record<string, string[]> {
   return list;
 }
 
+/** What `POST /folders` answers when its body names no folder. */
+export const FOLDER_MESSAGE = 'Flow needs the folder to look in.';
+
 /** The waits after each failed attempt to end a pause on time, in ms; the last repeats. */
 export const SWEEP_RETRY_MS = [60_000, 5 * 60_000, 15 * 60_000, 60 * 60_000] as const;
 
@@ -320,12 +324,25 @@ export class ModelService {
   }
 
   /**
-   * Look for projects in a chat's folder from now on.
+   * `POST /folders`, behind the person bar: look for projects in a chat's
+   * folder from now on, and answer with the model for it. Only this remembers
+   * a folder or reports it to DorkOS's project registry; `GET /model` only
+   * reads (DOR-3581).
    *
-   * @param cwd - The folder the Flow tab was opened beside.
+   * @param body - `{ cwd }`, the folder the Flow tab was opened beside.
+   * @returns The `GET /model?cwd=` body for that folder.
+   * @throws {RouteError} 400 when the body names no folder.
    */
-  noteCwd(cwd: unknown): void {
-    if (typeof cwd !== 'string' || cwd === '' || this.cwds.includes(cwd)) return;
+  async addFolder(body: unknown): Promise<FlowModel> {
+    const cwd = typeof body === 'object' && body !== null ? (body as { cwd?: unknown }).cwd : null;
+    if (typeof cwd !== 'string' || cwd === '') throw new RouteError(400, FOLDER_MESSAGE);
+    this.noteCwd(cwd);
+    return this.model(cwd);
+  }
+
+  /** Look for projects in a chat's folder from now on, and report it to DorkOS. */
+  private noteCwd(cwd: string): void {
+    if (this.cwds.includes(cwd)) return;
     this.cwds.push(cwd);
     if (this.cwds.length > REMEMBERED_CWDS) this.cwds.shift();
     // "Set up flow here" starts work in this folder's project, which DorkOS
@@ -340,17 +357,17 @@ export class ModelService {
     );
   }
 
-  /** The project a folder belongs to: core's answer, else the main checkout of it. */
-  private async rootOf(cwd: string): Promise<string | null> {
-    if (this.deps.projects !== undefined) {
-      try {
-        const ref = await this.deps.projects.resolve(cwd);
-        if (ref !== null) return ref.root;
-      } catch {
-        // Fall back to flow's own resolver below.
-      }
-    }
-    return await this.resolver.of(cwd);
+  /**
+   * The roots a folder may be listed under: its main checkout, as git says
+   * and with symlinks resolved (core lists that form). Never core's
+   * `resolve()`, which records a folder it has not seen against flow's
+   * allowance of reported roots, so a read would register it (DOR-3581).
+   */
+  private async rootsOf(cwd: string): Promise<string[]> {
+    const root = await this.resolver.of(cwd);
+    if (root === null) return [];
+    const real = await realpath(root).catch(() => root);
+    return real === root ? [root] : [root, real];
   }
 
   /** What to call each account a run may bill, and its dot's color. */
@@ -431,8 +448,8 @@ export class ModelService {
     ]);
     let cwdProject: string | null = null;
     if (typeof cwd === 'string' && cwd !== '') {
-      const root = await this.rootOf(cwd);
-      const entry = entries.find((candidate) => candidate.root === root);
+      const roots = await this.rootsOf(cwd);
+      const entry = entries.find((candidate) => roots.includes(candidate.root));
       if (entry !== undefined) {
         cwdProject = entry.name;
         this.reader.view(entry.root);

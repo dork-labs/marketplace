@@ -4,6 +4,14 @@ Installs of this plugin are pinned to a commit SHA, so a fix here does not reach
 you until you **reinstall it** (Marketplace → flow → reinstall, or re-run your
 `--plugin-dir` checkout's `git pull`). Each entry below says whether that matters.
 
+## 0.70.0
+
+**In the DorkOS app, only a person can make flow look for a project in a new folder now. Before, an agent reading the Flow tab's data could make flow treat any folder as a project and tell DorkOS about it (DOR-3581). Reinstall to get it.**
+
+- Opening the Flow tab beside a chat works as before: flow looks for a project in the chat's folder, and "Set up flow here" still starts work in a folder without flow.
+- Reading the Flow tab's data no longer adds a folder anywhere. An agent can still read it, but can't make flow remember a folder or add one to DorkOS's project list, so it can't use up the 200 folders flow may add there.
+- If DorkOS can't tell that you opened the tab, the tab still shows everything flow already knows, and asks again on its next read.
+
 ## 0.69.0
 
 **Flow's parts in the DorkOS app now need DorkOS 0.116.0 or newer. Update DorkOS first, then reinstall flow to get it.**

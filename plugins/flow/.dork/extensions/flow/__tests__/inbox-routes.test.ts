@@ -137,7 +137,7 @@ function setup(extra: NonNullable<Parameters<typeof fakeCtx>[1]>['extra'] = {}) 
     pidAlive: () => true,
   });
   // A Flow tab beside a chat in the project tells flow where to look.
-  const seen = send(ext.app, 'GET', `/model?cwd=${encodeURIComponent(world.worktree)}`);
+  const seen = send(ext.app, 'POST', '/folders', { body: { cwd: world.worktree } });
   /** Run the model's 5-second poll once. */
   const poll = async () => {
     await seen;

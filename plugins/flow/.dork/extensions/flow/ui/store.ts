@@ -4,9 +4,11 @@
  * their dialog read it, so there is one event stream however many Flow tabs
  * are open.
  *
- * - It reads `GET /model` (with the chat's folder, so flow looks there too and
- *   says which project it is on a DorkOS that does not), then follows the
- *   server's `ext:flow:model` event on DorkOS's `/api/events` stream.
+ * - Its first read for a chat's folder is `POST /folders`, as the person, so
+ *   flow looks for a project there too (DOR-3581); after that it reads
+ *   `GET /model` with the folder, so flow says which project it is on a
+ *   DorkOS that does not. It follows the server's `ext:flow:model` event on
+ *   DorkOS's `/api/events` stream.
  * - While that stream is not open it re-reads every 30 s, and it reads once
  *   each time the stream opens (events sent while it was down are lost).
  * - It reads again when the chat's folder changes.
@@ -19,7 +21,7 @@
 
 import type { FlowModel, FlowProject } from '../lib/model.ts';
 import type { ClientApi, ProjectRef, ReadableState } from '../lib/host-types.ts';
-import { getModel, resolveApiBaseUrl, schedulesRestored } from './api.ts';
+import { addFolder, getModel, resolveApiBaseUrl, schedulesRestored } from './api.ts';
 import { enableSchedule, type EnableResult } from './core-api.ts';
 import { useEffect, useState } from './react.ts';
 
@@ -99,6 +101,10 @@ export class FlowStore {
   private stopState: (() => void) | null = null;
   private started = false;
   private loading: Promise<void> | null = null;
+  /** The folder flow was last told to look in, so later reads only read. */
+  private told: string | null = null;
+  /** Whether the stream has opened before, so a later open is a reconnect. */
+  private opened = false;
   /** Schedule ids already being switched back on, so no two tries overlap. */
   private readonly restoring = new Set<string>();
   /**
@@ -166,7 +172,7 @@ export class FlowStore {
    * @returns When it is done; it never rejects.
    */
   refresh(): Promise<void> {
-    this.loading ??= getModel(this.snapshot.cwd)
+    this.loading ??= this.read()
       .then(
         (model) => this.apply(model),
         () => {
@@ -181,6 +187,23 @@ export class FlowStore {
         this.loading = null;
       });
     return this.loading;
+  }
+
+  /**
+   * The model. The first read for a chat's folder tells flow, as the person,
+   * to look there (only a person can, DOR-3581); when that is refused it
+   * still reads, and tells flow on the next read.
+   */
+  private read(): Promise<FlowModel> {
+    const cwd = this.snapshot.cwd;
+    if (cwd === null || cwd === this.told) return getModel(cwd);
+    return addFolder(cwd).then(
+      (model) => {
+        this.told = cwd;
+        return model;
+      },
+      () => getModel(cwd)
+    );
   }
 
   /** Try the first load again after it failed. */
@@ -232,6 +255,10 @@ export class FlowStore {
     });
     stream.addEventListener('open', () => {
       stopPolling();
+      // On a reopen the server may have restarted while the stream was down,
+      // and forgotten the folder.
+      if (this.opened) this.told = null;
+      this.opened = true;
       this.set({ live: true });
       void this.refresh();
     });

@@ -357,7 +357,7 @@ describe('GET /capacity', () => {
       },
       pidAlive: () => true,
     });
-    await send(ext.app, 'GET', `/model?cwd=${encodeURIComponent(world.worktree)}`);
+    await send(ext.app, 'POST', '/folders', { body: { cwd: world.worktree } });
     const since = new Date(Date.now() - 24 * 3_600_000).toISOString();
     const sent = await send(ext.app, 'GET', `/capacity?since=${encodeURIComponent(since)}`);
     expect(sent.status).toBe(200);

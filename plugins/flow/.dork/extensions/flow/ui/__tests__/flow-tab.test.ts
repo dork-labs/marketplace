@@ -79,7 +79,12 @@ describe('which lens', () => {
       host(undefined, '/work/blintz/wt')
     );
     expect(screen.getByText('blintz')).toBeTruthy();
-    expect(fetch.calls[0].url).toBe('/api/ext/flow/model?cwd=%2Fwork%2Fblintz%2Fwt');
+    // The first read tells flow, as the person, to look in the chat's folder.
+    expect(fetch.calls[0]).toMatchObject({
+      method: 'POST',
+      url: '/api/ext/flow/folders',
+      body: { cwd: '/work/blintz/wt' },
+    });
   });
 
   it('says so when it could not load, and tries again', async () => {
@@ -304,8 +309,10 @@ describe('pausing from the lens', () => {
     const paused = flowModel([
       flowProject('dorkos', { pause: { since: null, until: tomorrow.toISOString() } }),
     ]);
-    const fetch = routeFetch((method) =>
-      method === 'POST' ? { status: 200, body: paused } : { status: 200, body: quiet }
+    const fetch = routeFetch((method, url) =>
+      method === 'POST' && !url.endsWith('/folders')
+        ? { status: 200, body: paused }
+        : { status: 200, body: quiet }
     );
     const api = host(DORKOS);
     const store = new FlowStore(api);
@@ -318,7 +325,9 @@ describe('pausing from the lens', () => {
     await act(async () => {
       fireEvent.click(screen.getByRole('menuitem', { name: 'Until tomorrow 9am' }));
     });
-    const post = fetch.calls.find((call) => call.method === 'POST');
+    const post = fetch.calls.find(
+      (call) => call.method === 'POST' && !call.url.endsWith('/folders')
+    );
     expect(post?.url).toBe('/api/ext/flow/pause');
     const body = post?.body as { project: string; until: string };
     expect(body.project).toBe('dorkos');
@@ -336,8 +345,10 @@ describe('pausing from the lens', () => {
 
   it("shows DorkOS's refusal in plain words", async () => {
     const quiet = flowModel([flowProject('dorkos')]);
-    routeFetch((method) =>
-      method === 'POST' ? { status: 403, body: { error: 'nope' } } : { status: 200, body: quiet }
+    routeFetch((method, url) =>
+      method === 'POST' && !url.endsWith('/folders')
+        ? { status: 403, body: { error: 'nope' } }
+        : { status: 200, body: quiet }
     );
     const api = host(DORKOS);
     const store = new FlowStore(api);
