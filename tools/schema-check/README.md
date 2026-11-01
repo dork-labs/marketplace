@@ -150,8 +150,10 @@ and anything else is refused.
   file that a tool runs later without asking: no dot-file or dot-folder at all
   (`.husky`, `.githooks`, `.github`, `.vscode`, `.devcontainer`, `.envrc`,
   `.mcp.json`, `.npmrc`, `.dork`, `.git`, `.claude`), and no `package.json`,
-  `Makefile`, `GNUmakefile`, `justfile`, `lefthook.yml` or `mise.toml`, at any
-  depth and in any case. An exact rule to one of those goes in
+  `Makefile`, `GNUmakefile`, `justfile`, `Taskfile.yml`, lefthook's configs
+  (`lefthook.yml`, `lefthook-local.yml`, `.json`, `.toml`) or mise's
+  (`mise.toml`, `mise.local.toml`, a `mise/` folder), at any depth and in any
+  case. An exact rule to one of those goes in
   `REVIEWED_COMMANDS`; flow's `.dork/flow/tmp/**` and `.dork/flow/auto-run.json`
   are there. `Edit(./**)` is allowed only for the files listed in
   `PROJECT_WRITERS`, and adding one is a security decision that gets its own
@@ -179,10 +181,15 @@ and anything else is refused.
 - `WebFetch` only as `WebFetch(domain:<one literal host>)` with a real
   top-level domain: no IP addresses (`169.254.169.254`), and no `.local`,
   `.internal` or `.localhost`. A bare `WebFetch` can send anything anywhere.
-- `SlashCommand(/<package>:<command>)`, optionally with `:*`, only for a
-  command the package ships in `commands/`. A slash command runs with its own
-  `allowed-tools`, so a grant to someone else's can reach whatever that one
-  allows. A bare `SlashCommand` needs a `REVIEWED_COMMANDS` entry; flow has one.
+- `SlashCommand(/<package>:<command>)` and `Skill(<package>:<name>)`,
+  optionally with `:*`, only for a command (or, for `Skill`, a skill) the
+  package ships. Either runs it with its own `allowed-tools`, and Claude Code
+  runs commands through the Skill tool too, so a grant to someone else's can
+  reach whatever that one allows. A bare `SlashCommand` or `Skill` needs a
+  `REVIEWED_COMMANDS` entry; flow has both.
+- A package's own MCP servers and commands count only when its folder,
+  plugin.json's `name` and its marketplace entry's `name` all agree, so no
+  package can name itself after another and claim that one's tools.
 - `<Tool>(<spec>)` for any other known tool, with no nested parentheses.
 
 A bare `Read`, `Grep`, `Glob`, `LS` or `NotebookRead` is refused: in plain
@@ -195,7 +202,8 @@ secret file inside that folder, such as `config/.env`, because `*` matches
 dot-files. The floor keeps reads off the project's root secrets (`.env`,
 `.git`, `.claude`, `.dork`) and off named secrets anywhere in the path; it
 can't see what a folder happens to hold. Writes have the same limit:
-`Edit(specs/**)` can still write `specs/.envrc` or `specs/package.json`, which
+`Edit(specs/**)` or `Edit(src/*.json)` can still write `specs/.envrc` or
+`src/package.json`, which
 matters where direnv or an npm workspace picks them up. The floor keeps writes
 off the root files that run on their own (hooks, CI, editor tasks, `.mcp.json`,
 the root `package.json`).

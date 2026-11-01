@@ -35,10 +35,29 @@ export function pluginJson(repoRoot: string, pkgDir: string): Record<string, unk
   return isRecord(value) ? value : undefined;
 }
 
-/** The name Claude Code knows the package by: plugin.json's `name`, else its folder. */
-export function packageName(repoRoot: string, pkgDir: string): string {
-  const name = pluginJson(repoRoot, pkgDir)?.name;
-  return typeof name === 'string' ? name : path.posix.basename(pkgDir);
+/**
+ * The name Claude Code knows the package by, or null when its folder,
+ * plugin.json's `name` and every marketplace entry pointing at it don't all
+ * agree. A package that names itself after another one could otherwise claim
+ * that one's MCP tools and commands as its own.
+ *
+ * @param repoRoot - Absolute path to the repository root.
+ * @param pkgDir - Repo-relative package folder, e.g. `plugins/flow`.
+ */
+export function packageName(repoRoot: string, pkgDir: string): string | null {
+  const folder = path.posix.basename(pkgDir);
+  const names = new Set<unknown>([folder]);
+  const manifest = pluginJson(repoRoot, pkgDir);
+  if (manifest && 'name' in manifest) names.add(manifest.name);
+  const marketplace = readJson(path.join(repoRoot, '.claude-plugin/marketplace.json'));
+  const entries =
+    isRecord(marketplace) && Array.isArray(marketplace.plugins) ? marketplace.plugins : [];
+  for (const entry of entries) {
+    if (!isRecord(entry) || typeof entry.source !== 'string') continue;
+    const source = /^(?:\.\/)?(plugins\/[\w-][\w.-]*)\/?$/.exec(entry.source)?.[1];
+    if (source === pkgDir) names.add(entry.name);
+  }
+  return names.size === 1 ? folder : null;
 }
 
 /** One declaration, read: its repo-relative file and value, or why it can't be read. */
@@ -136,7 +155,7 @@ export function hookDeclarations(repoRoot: string, pkgDir: string): Declaration[
 export function ownServerPrefixes(repoRoot: string, pkgDir: string): string[] {
   if (pkgDir === '') return [];
   const plugin = packageName(repoRoot, pkgDir);
-  if (!/^[A-Za-z0-9-]+$/.test(plugin)) return [];
+  if (plugin === null || !/^[A-Za-z0-9-]+$/.test(plugin)) return [];
   const prefixes: string[] = [];
   for (const declaration of serverDeclarations(repoRoot, pkgDir)) {
     if (!('value' in declaration)) continue;

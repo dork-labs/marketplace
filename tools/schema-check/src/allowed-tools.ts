@@ -161,12 +161,14 @@ const isGlob = (segment: string): boolean => /[*?[\]{}!]/.test(segment);
 
 /**
  * Files without a leading dot that a tool runs later on its own: npm and
- * workspace scripts, make, git-hook managers, and mise, which runs its hooks
- * when a shell enters the folder (DOR-3311). Dot-files and dot-folders
+ * workspace scripts, make, just and Task, lefthook's git hooks, and mise
+ * (its `mise.*.toml` files and `mise/` folder), which runs its hooks when a
+ * shell enters the folder (DOR-3311). Dot-files and dot-folders
  * (`.husky`, `.githooks`, `.github`, `.vscode`, `.devcontainer`, `.envrc`,
  * `.mcp.json`, `.npmrc`, `.pnpmfile.cjs`, `.dork`) are refused as a class.
  */
-const RUNS_LATER = /^(package\.json|makefile|gnumakefile|justfile|lefthook\.ya?ml|mise\.toml)$/i;
+const RUNS_LATER =
+  /^(package\.json|makefile|gnumakefile|justfile|taskfile(\.dist)?\.ya?ml|lefthook(-local)?\.(ya?ml|json|toml)|mise(\.[\w-]+)?\.toml|mise)$/i;
 
 /**
  * Why an `Edit(...)` path is too broad, or null when it holds. The path has to
@@ -280,10 +282,14 @@ export const REVIEWED_COMMANDS: ReadonlyMap<string, ReadonlySet<string>> = new M
       'Edit(.dork/flow/auto-run.json)',
       // DorkOS's schedule tools, for flow's own schedules: /flow:status lists
       // them, and /flow:pause and /flow:resume turn them off and on (DOR-3311).
+      // tasks_update can also rewrite any schedule's prompt, so a changed
+      // person-made schedule may not ask again; reviewed knowing that.
       'mcp__dorkos__tasks_list',
       'mcp__dorkos__tasks_update',
-      // /flow and /flow:resume hand off to the next stage's command.
+      // /flow and /flow:resume hand off to the next stage's command, and
+      // triage, capture, status, init and groom load flow's own skills.
       'SlashCommand',
+      'Skill',
       // Bare reads, until flow moves to folder-scoped reads (follow-up). In plain
       // Claude Code a bare Read allow reads ~/.ssh with no prompt.
       'Read',
@@ -385,23 +391,32 @@ function readBreach(target: string): string | null {
 }
 
 /**
- * Why a `SlashCommand(<spec>)` rule is too broad, or null when it names one of
- * the package's own commands. A slash command runs with its own
- * `allowed-tools`, so a grant to another package's, or a person's own, can
- * reach whatever that command allows.
+ * Why a `SlashCommand(<spec>)` or `Skill(<spec>)` rule is too broad, or null
+ * when it names one of the package's own commands or skills. Either runs it
+ * with its own `allowed-tools` (Claude Code runs commands through the Skill
+ * tool too), so a grant to another package's, or a person's own, can reach
+ * whatever that one allows.
  */
-function slashCommandBreach(body: string, pkgDir: string, repoRoot: string): string | null {
-  const spec = /^\/([A-Za-z0-9-]+):([\w-]+)(?::\*)?$/.exec(body);
+function ownCommandBreach(
+  tool: string,
+  body: string,
+  pkgDir: string,
+  repoRoot: string
+): string | null {
+  const lead = tool === 'SlashCommand' ? '/' : '';
+  const spec = new RegExp(`^${lead}([A-Za-z0-9-]+):([\\w-]+)(?::\\*)?$`).exec(body);
   if (!spec || pkgDir === '' || spec[1] !== packageName(repoRoot, pkgDir)) {
-    return "SlashCommand may only name the package's own commands, as SlashCommand(/<package>:<command>)";
+    return `${tool} may only name the package's own skills and commands, as ${tool}(${lead}<package>:<name>)`;
   }
-  const command = `${pkgDir}/commands/${spec[2]}.md`;
-  try {
-    if (lstatSync(path.join(repoRoot, command)).isFile()) return null;
-  } catch {
-    // Missing: refused below.
+  const shipped = [`${pkgDir}/commands/${spec[2]}.md`, `${pkgDir}/skills/${spec[2]}/SKILL.md`];
+  for (const file of tool === 'Skill' ? shipped : shipped.slice(0, 1)) {
+    try {
+      if (lstatSync(path.join(repoRoot, file)).isFile()) return null;
+    } catch {
+      // Missing: try the next, then refuse.
+    }
   }
-  return `SlashCommand names ${command}, which the package doesn't ship`;
+  return `${tool} names ${spec[2]}, which the package doesn't ship`;
 }
 
 /**
@@ -426,8 +441,11 @@ export function breach(
     if (rule === 'WebFetch') {
       return 'a bare WebFetch can send anything anywhere; use WebFetch(domain:<host>)';
     }
-    if (rule === 'SlashCommand' && !REVIEWED_COMMANDS.get(pkgDir)?.has(rule)) {
-      return "a bare SlashCommand runs any slash command, each with its own allowed-tools; name the package's own, as SlashCommand(/<package>:<command>)";
+    if (
+      (rule === 'SlashCommand' || rule === 'Skill') &&
+      !REVIEWED_COMMANDS.get(pkgDir)?.has(rule)
+    ) {
+      return `a bare ${rule} runs any skill or slash command, each with its own allowed-tools; name the package's own, as ${rule}(${rule === 'Skill' ? '' : '/'}<package>:<name>)`;
     }
     return KNOWN_TOOLS.has(rule)
       ? null
@@ -462,7 +480,9 @@ export function breach(
   if (tool === 'Edit') {
     return REVIEWED_COMMANDS.get(pkgDir)?.has(rule) ? null : editBreach(rule, body, file);
   }
-  if (tool === 'SlashCommand') return slashCommandBreach(body, pkgDir, repoRoot);
+  if (tool === 'SlashCommand' || tool === 'Skill') {
+    return ownCommandBreach(tool, body, pkgDir, repoRoot);
+  }
   if (READERS.has(tool)) return readBreach(body);
   if (tool === 'WebFetch') {
     const host = /^domain:((?:[a-z0-9-]+\.)+([a-z]{2,63}))$/i.exec(body);
