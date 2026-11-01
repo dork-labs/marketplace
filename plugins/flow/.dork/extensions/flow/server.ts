@@ -158,7 +158,7 @@ function fail(c: Context<FlowEnv>, error: unknown): Response {
  * @param c - The request's context.
  * @returns The parsed body, or `undefined`.
  */
-async function jsonBody(c: Context<FlowEnv>): Promise<unknown> {
+export async function jsonBody(c: Context<FlowEnv>): Promise<unknown> {
   const type = c.req.header('content-type')?.split(';')[0].trim().toLowerCase();
   if (type !== 'application/json') return undefined;
   const text = await c.req.text();
@@ -173,7 +173,7 @@ async function jsonBody(c: Context<FlowEnv>): Promise<unknown> {
  * @param name - The parameter.
  * @returns Its value or values, or `undefined`.
  */
-function queryValue(c: Context<FlowEnv>, name: string): string | string[] | undefined {
+export function queryValue(c: Context<FlowEnv>, name: string): string | string[] | undefined {
   const values = c.req.queries(name);
   if (values === undefined || values.length === 0) return undefined;
   return values.length === 1 ? values[0] : values;

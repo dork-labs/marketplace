@@ -11,7 +11,7 @@ you until you **reinstall it** (Marketplace → flow → reinstall, or re-run yo
 - On DorkOS 0.116.0 or newer, the Flow tab, Flow home, pausing and the settings pages work as before. Only a person, never an agent, can pause a project or change a setting, as before.
 - On an older DorkOS, DorkOS doesn't load flow's extension, so the Flow tab, Flow home and the run chip don't show. `/flow` in a chat works as before.
 - Flow no longer has notes for a DorkOS too old for it: "Update DorkOS to choose how flow uses your accounts", "Update DorkOS to change flow's settings here", "Pause from a chat in this project" and the read-only settings page are gone.
-- Under the hood, flow's 15 app routes are now served by a Hono fetch handler instead of the Express router DorkOS is retiring. Paths, answers and who may call each route are unchanged; a path flow doesn't serve now answers a JSON 404.
+- Under the hood, flow's 15 app routes are now served by a Hono fetch handler instead of the Express router DorkOS is retiring. Answers and who may call each route are unchanged. Two small differences: paths now match case-sensitively (`/PAUSE` no longer reaches `/pause`; the Flow tab only sends lower case), and a path flow doesn't serve answers a JSON 404.
 
 ## 0.67.1
 
