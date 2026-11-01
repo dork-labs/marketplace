@@ -288,4 +288,52 @@ describe('checkPackagePrograms', () => {
       'plugins/e/.claude-plugin/plugin.json',
     ]);
   });
+
+  it('refuses a declaration spelled in other capitals, which a case-blind disk still opens', () => {
+    const r = fixtureRepo({
+      'plugins/a/.MCP.json': JSON.stringify({ x: { command: 'id' } }),
+      'plugins/b/Hooks/Hooks.json': hooksFile('id'),
+      'plugins/c/BIN/git': '',
+      'plugins/d/.claude-plugin/Plugin.json': JSON.stringify({ name: 'd' }),
+      'plugins/e/Skills/s/SKILL.md': '---\nname: s\ndescription: x\n---\n',
+    });
+    expect(checkPackagePrograms(r).map((f) => f.file)).toEqual([
+      'plugins/a/.MCP.json',
+      'plugins/b/Hooks',
+      'plugins/c/BIN',
+      'plugins/d/.claude-plugin/Plugin.json',
+      'plugins/e/Skills',
+    ]);
+  });
+
+  it("refuses a component path into the package's node_modules, which the walk skips", () => {
+    const r = fixtureRepo({
+      'plugins/demo/.claude-plugin/plugin.json': JSON.stringify({
+        name: 'demo',
+        skills: './node_modules/s',
+        commands: ['./commands', './Node_Modules/c'],
+      }),
+      '.claude-plugin/marketplace.json': JSON.stringify({
+        plugins: [{ name: 'demo', source: './plugins/demo', agents: 'node_modules/a' }],
+      }),
+    });
+    const found = checkPackagePrograms(r);
+    expect(found.map((f) => f.file)).toEqual([
+      'plugins/demo/.claude-plugin/plugin.json',
+      'plugins/demo/.claude-plugin/plugin.json',
+      '.claude-plugin/marketplace.json',
+    ]);
+    expect(found.every((f) => /node_modules/.test(f.message))).toBe(true);
+  });
+
+  it('allows a description beside hooks, as the Claude Code docs show', () => {
+    const r = fixtureRepo({
+      ...scripts,
+      'plugins/demo/hooks/hooks.json': JSON.stringify({
+        description: 'Guards',
+        hooks: JSON.parse(hooksFile('node "${CLAUDE_PLUGIN_ROOT}/hooks/guard.mjs"')).hooks,
+      }),
+    });
+    expect(checkPackagePrograms(r)).toEqual([]);
+  });
 });

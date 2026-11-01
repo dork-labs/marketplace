@@ -41,7 +41,7 @@ import {
 } from './declarations.ts';
 import { PLUGINS_DIR, pluginDirs } from './versions.ts';
 import type { Finding } from './validate.ts';
-import { existsSync, readFileSync } from 'node:fs';
+import { existsSync, readFileSync, readdirSync } from 'node:fs';
 
 /**
  * The only folder changes a hook may make before its script: to the project
@@ -156,7 +156,11 @@ function checkHooks(raw: unknown, file: string, pkgDir: string, repoRoot: string
   // Never both at once: in frontmatter and inline plugin.json, Claude Code
   // reads the outer keys as events and ignores `hooks`, so unwrapping would
   // skip the events that run (DOR-3311 review).
-  if (isRecord(raw) && 'hooks' in raw && Object.keys(raw).length > 1) {
+  // A `description` beside `hooks` is what Claude Code's own docs show.
+  const others = isRecord(raw)
+    ? Object.keys(raw).filter((k) => k !== 'hooks' && k !== 'description')
+    : [];
+  if (isRecord(raw) && 'hooks' in raw && others.length > 0) {
     unreadable('A declaration with a hooks key beside other events');
     return findings;
   }
@@ -235,6 +239,102 @@ function checkAll(
 }
 
 /**
+ * The files and folders Claude Code finds a package's parts by. Each is opened
+ * by exact name here, and CI runs on Linux, where `.MCP.json` is a different
+ * file; on a Mac's case-blind disk Claude Code opens it as `.mcp.json`.
+ */
+const KNOWN_PATHS: ReadonlySet<string> = new Set([
+  '.claude-plugin',
+  '.claude-plugin/plugin.json',
+  '.mcp.json',
+  '.lsp.json',
+  'hooks',
+  'hooks/hooks.json',
+  'monitors',
+  'monitors/monitors.json',
+  'bin',
+  'skills',
+  'commands',
+  'agents',
+  'output-styles',
+]);
+
+/** Fold a name the way a case-blind disk compares it. */
+const fold = (name: string): string => name.normalize('NFKC').toLowerCase();
+
+/**
+ * Findings for any of {@link KNOWN_PATHS} spelled in other capitals, and for
+ * two names in one folder that a case-blind disk can't tell apart. Either
+ * means CI checks one file while a Mac runs another (DOR-3311 review).
+ */
+function caseVariants(repoRoot: string, pkgDir: string): Finding[] {
+  const findings: Finding[] = [];
+  const walk = (rel: string, depth: number): void => {
+    let names: string[];
+    try {
+      names = readdirSync(path.join(repoRoot, pkgDir, rel)).sort();
+    } catch {
+      return;
+    }
+    const seen = new Map<string, string>();
+    for (const name of names) {
+      const child = rel === '' ? name : `${rel}/${name}`;
+      const twin = seen.get(fold(name));
+      seen.set(fold(name), name);
+      if (twin !== undefined) {
+        findings.push({
+          file: `${pkgDir}/${child}`,
+          message: `It differs from ${twin} only in capitals, so a case-blind disk sees one file where CI checks two.`,
+        });
+        continue;
+      }
+      if (KNOWN_PATHS.has(fold(child)) && child !== fold(child)) {
+        findings.push({
+          file: `${pkgDir}/${child}`,
+          message: `Claude Code on a case-blind disk opens it as ${fold(child)}, which this check reads by that exact name; spell it ${fold(child)}.`,
+        });
+        continue;
+      }
+      if (depth < 1 && KNOWN_PATHS.has(fold(child))) walk(child, depth + 1);
+    }
+  };
+  walk('', 0);
+  return findings;
+}
+
+/** Plugin.json and marketplace-entry fields that name where a package's parts live. */
+const COMPONENT_FIELDS = [
+  'commands',
+  'agents',
+  'skills',
+  'outputStyles',
+  'hooks',
+  'mcpServers',
+  'lspServers',
+];
+
+/**
+ * Findings for component paths into the package root's `node_modules`, which
+ * the walk skips as npm's: a skill there would load unchecked.
+ */
+function nodeModulesPaths(fields: Record<string, unknown>, file: string, where: string): Finding[] {
+  const findings: Finding[] = [];
+  for (const field of COMPONENT_FIELDS) {
+    for (const item of [fields[field]].flat()) {
+      if (typeof item !== 'string') continue;
+      const first = path.posix.normalize(item.replace(/^\.\//, '')).split('/')[0];
+      if (fold(first) === 'node_modules') {
+        findings.push({
+          file,
+          message: `${where}${field} names ${JSON.stringify(item)}, inside node_modules, which this check never reads.`,
+        });
+      }
+    }
+  }
+  return findings;
+}
+
+/**
  * Findings for the programs Claude Code starts that this check has no shape
  * for yet: language servers, monitors, and programs in `bin/`, which go on the
  * Bash tool's PATH and can shadow a command the agent runs.
@@ -271,6 +371,17 @@ export function checkPackagePrograms(repoRoot: string): Finding[] {
   const findings: Finding[] = [];
   for (const name of pluginDirs(repoRoot)) {
     const pkgDir = path.posix.join(PLUGINS_DIR, name);
+    // Until its parts are spelled as Claude Code expects, what the rest of
+    // this reads differs between a Mac and CI, so stop at that.
+    const variants = caseVariants(repoRoot, pkgDir);
+    if (variants.length > 0) {
+      findings.push(...variants);
+      continue;
+    }
+    const manifest = pluginJson(repoRoot, pkgDir);
+    if (manifest) {
+      findings.push(...nodeModulesPaths(manifest, `${pkgDir}/.claude-plugin/plugin.json`, ''));
+    }
     findings.push(...unreviewedPrograms(repoRoot, pkgDir));
     findings.push(
       ...checkAll(serverDeclarations(repoRoot, pkgDir), (raw, file) =>
@@ -291,6 +402,7 @@ export function checkPackagePrograms(repoRoot: string): Finding[] {
     if (!isRecord(entry)) continue;
     const source = typeof entry.source === 'string' ? entry.source : '';
     const pkgDir = /^(?:\.\/)?(plugins\/[\w-][\w.-]*)\/?$/.exec(source)?.[1] ?? '';
+    findings.push(...nodeModulesPaths(entry, marketplaceFile, `plugins[${String(entry.name)}].`));
     for (const [field, check] of [
       ['mcpServers', checkServers],
       ['hooks', checkHooks],

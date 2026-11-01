@@ -173,7 +173,9 @@ const isGlob = (segment: string): boolean => /[*?[\]{}!]/.test(segment);
  * configs husky runs on commit, CI pipelines that run with the repo's
  * secrets, and mise (its `mise.*.toml` files and `mise/` folder), which runs
  * its hooks when a shell enters the folder (DOR-3311). Not every such file:
- * a reviewer still reads each Edit rule. Dot-files and dot-folders
+ * a reviewer still reads each Edit rule. A root-level name never reaches
+ * this list, since a one-segment path is refused first; it catches nested
+ * ones, like a workspace's `apps/web/package.json`. Dot-files and dot-folders
  * (`.husky`, `.githooks`, `.github`, `.vscode`, `.devcontainer`, `.envrc`,
  * `.mcp.json`, `.npmrc`, `.pnpmfile.cjs`, `.dork`) are refused as a class.
  */
