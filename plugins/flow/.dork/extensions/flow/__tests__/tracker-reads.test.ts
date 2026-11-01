@@ -284,6 +284,85 @@ describe('TrackerReader', () => {
     }
   });
 
+  it('keeps a hosted drain run whose chat is gone only once two answers 5 minutes apart say so (DOR-2490)', async () => {
+    // Purpose: never call a possibly live run dead. One answer could catch
+    // DorkOS mid-restart, so the Flow tab says a run stopped only when an
+    // answer at least a read interval later still names the same run gone.
+    // A read a person's look starts a minute later is not enough. The answer
+    // is saved like the closed runs, and a gone run never counts as closed.
+    const root = mkdtempSync(path.join(tmpdir(), 'flow-reads-root-'));
+    try {
+      mkdirSync(path.join(root, '.dork', 'flow'), { recursive: true });
+      writeFileSync(
+        path.join(root, '.dork', 'flow', 'flow-state.json'),
+        JSON.stringify({ a: { identifier: 'DOR-9', status: 'running' } })
+      );
+      const goneAnswer = {
+        code: 0,
+        stdout: JSON.stringify({
+          v: 1,
+          ok: true,
+          ended: [
+            { identifier: 'DOR-9', sessionId: 's-9', reason: 'session-gone', chat: 'reviewer' },
+          ],
+        }),
+      };
+      let statusAnswer: Answer = goneAnswer;
+      const fake = fakeExec((verb) =>
+        verb === 'next' ? { code: 0, stdout: NEXT } : verb === 'status' ? statusAnswer : { code: 0 }
+      );
+      const clock = { now: T0 };
+      const { instance } = reader(fake.exec, clock);
+      const gone = [{ identifier: 'DOR-9', sessionId: 's-9', chat: 'reviewer' }];
+
+      instance.tick([project(root)]);
+      await settle();
+      expect(fake.calls.map((call) => call.verb)).toEqual(['snapshot', 'next', 'status']);
+      expect(instance.goneRuns(root)).toEqual([]);
+      expect(instance.closedRuns(root)).toEqual([]);
+
+      // A look a minute later reads again: too soon to confirm.
+      clock.now += STALE_ON_VIEW_MS + 1;
+      instance.view(root);
+      instance.tick([project(root)]);
+      await settle();
+      expect(fake.calls.map((call) => call.verb).slice(3)).toEqual(['snapshot', 'next', 'status']);
+      expect(instance.goneRuns(root)).toEqual([]);
+      // A restart soon after: still not confirmed.
+      expect(reader(fakeExec(() => ({ code: 4 })).exec, clock).instance.goneRuns(root)).toEqual([]);
+
+      // The next read on the timer, over 5 minutes after the first answer.
+      clock.now += READ_INTERVAL_MS;
+      instance.tick([project(root)]);
+      await settle();
+      expect(instance.goneRuns(root)).toEqual(gone);
+      expect(instance.closedRuns(root)).toEqual([]);
+      // Saved: a restart still says it stopped.
+      const restarted = reader(fakeExec(() => ({ code: 4 })).exec, clock).instance;
+      expect(restarted.goneRuns(root)).toEqual(gone);
+
+      // The chat is back (or the answer no longer names it): not stopped.
+      statusAnswer = { code: 0, stdout: JSON.stringify({ v: 1, ok: true, ended: [] }) };
+      clock.now += READ_INTERVAL_MS;
+      instance.tick([project(root)]);
+      await settle();
+      expect(instance.goneRuns(root)).toEqual([]);
+
+      // Gone again: it starts over.
+      statusAnswer = goneAnswer;
+      clock.now += READ_INTERVAL_MS;
+      instance.tick([project(root)]);
+      await settle();
+      expect(instance.goneRuns(root)).toEqual([]);
+      clock.now += READ_INTERVAL_MS;
+      instance.tick([project(root)]);
+      await settle();
+      expect(instance.goneRuns(root)).toEqual(gone);
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
   it('never reads over mcp, or with the project’s own adapter', async () => {
     const fake = fakeExec(() => ({ code: 0, stdout: NEXT }));
     const { instance } = reader(fake.exec, { now: T0 });

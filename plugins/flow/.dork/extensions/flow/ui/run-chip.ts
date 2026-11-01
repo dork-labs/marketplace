@@ -43,6 +43,7 @@ export const QUIET_AFTER_MS = 60 * 60_000;
 /** The states from most to least urgent: the chip names the first one present. */
 export const URGENCY: readonly RunPill[] = [
   'needs-you',
+  'stopped',
   'handing-off',
   'parked',
   'building',
@@ -55,6 +56,7 @@ const COUNTED: Readonly<Record<RunPill, string>> = {
   'needs-you': 'needs you',
   'handing-off': 'handing off',
   parked: 'parked',
+  stopped: 'stopped',
   building: 'building',
   'in-review': 'in review',
   done: 'done',

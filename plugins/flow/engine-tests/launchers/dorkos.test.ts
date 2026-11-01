@@ -706,6 +706,45 @@ describe('dorkos launcher: the session it records', () => {
     });
   });
 
+  // DOR-2490: a session DorkOS answers 404 for is gone, said apart from a
+  // DorkOS that did not answer, which is only unknown. Only the DorkOS that
+  // started the session may say it is gone: another one on this machine (a dev
+  // server beside the app) never knew it.
+  it('state says gone only when the DorkOS that started it answers that it has no such session', async () => {
+    await withFake({}, async (h) => {
+      const handle = await h.launcher.start(requestFor(h));
+      expect(handle.dorkosUrl).toBe(h.baseUrl);
+      const missing = { ...handle, sessionId: '0f6c1f1e-5b7a-4c39-9a51-3d2f8e7b6a10' };
+      expect(await h.launcher.state(missing)).toEqual({
+        kind: 'unknown',
+        reason: 'DorkOS no longer knows this session',
+        gone: true,
+      });
+      // Started by another DorkOS, or by a flow that did not record which.
+      const { dorkosUrl: _recorded, ...unrecorded } = missing;
+      for (const other of [{ ...missing, dorkosUrl: 'http://localhost:4243' }, unrecorded]) {
+        const state = await h.launcher.state(other);
+        expect(state.kind).toBe('unknown');
+        expect(state).not.toHaveProperty('gone');
+      }
+    });
+    await withFake({}, async (h) => {
+      const handle = await h.launcher.start(requestFor(h));
+      const down = createDorkosLauncher({
+        env: { DORKOS_URL: 'http://localhost:4242' },
+        osHome: os.tmpdir(),
+        fetch: async () => {
+          throw new Error('connect ECONNREFUSED');
+        },
+        now: () => 0,
+        sleep: async () => undefined,
+      });
+      const state = await down.state(handle);
+      expect(state.kind).toBe('unknown');
+      expect(state).not.toHaveProperty('gone');
+    });
+  });
+
   // A session id DorkOS cannot route is refused before anything is sent.
   it('a session id that is not a UUID is a bad request', async () => {
     await withFake({}, async (h) => {

@@ -331,6 +331,76 @@ describe('flow status', () => {
     );
   });
 
+  it('lists a DorkOS drain run whose chat is gone as ended, and leaves one that may be live (DOR-2490)', async () => {
+    // Purpose: the drain waits forever on a worker whose DorkOS chat was
+    // deleted (its state is only ever "unknown"). Status says so, but only
+    // when DorkOS itself answered that it has no such session, and only while
+    // the drain waits on that session.
+    const launcher = (host: 'cli' | 'cmux' | 'dorkos') => ({
+      host,
+      supports: () => ({ ok: true as const }),
+      probe: async () => ({ ok: true as const }),
+      start: async () => {
+        throw new Error('status never starts a session');
+      },
+      send: async () => {
+        throw new Error('status never sends');
+      },
+      state: async (handle: { sessionId: string }) =>
+        handle.sessionId === 'down'
+          ? { kind: 'unknown' as const, reason: 'DorkOS is not answering' }
+          : {
+              kind: 'unknown' as const,
+              reason: 'DorkOS no longer knows this session',
+              gone: true as const,
+            },
+      stop: async () => 'left-idle' as const,
+    });
+    const drain = (phase: string, sessionId: string) =>
+      ({
+        v: 1,
+        rev: 2,
+        phase,
+        worker: { host: 'dorkos', sessionId, account: null, cwd: '/work' },
+        reviewer: null,
+        pushedSha: null,
+        reviewedSha: null,
+        verdict: null,
+        reviewRound: 0,
+        pr: null,
+        rearmedFor: null,
+        nudges: 0,
+        wakeAfter: null,
+        handoffs: [],
+        parkedReason: null,
+      }) as unknown as FlowRun['drain'];
+    writeRuns([
+      runRecord('FAKE-1', { workerPid: -1, host: 'dorkos', drain: drain('working', 'w-1') }),
+      runRecord('FAKE-2', { workerPid: -1, host: 'dorkos', drain: drain('watching', 'w-2') }),
+      runRecord('FAKE-3', { workerPid: -1, host: 'dorkos', drain: drain('working', 'down') }),
+    ]);
+    const backlog = { items: [item('FAKE-1'), item('FAKE-2'), item('FAKE-3')] };
+    const out = (await status(['--json'], backlog, launcher)).json();
+    expect(out.inFlight.map((f: { identifier: string }) => f.identifier)).toEqual([
+      'FAKE-2',
+      'FAKE-3',
+    ]);
+    expect(out.ended).toMatchObject([
+      {
+        identifier: 'FAKE-1',
+        sessionId: 'session-FAKE-1',
+        reason: 'session-gone',
+        chat: 'worker',
+        drain: { worker: 'gone' },
+      },
+    ]);
+    expect(kinds(out)).toEqual(['FAKE-1 session-gone']);
+    const text = await status([], backlog, launcher);
+    expect(text.stdout).toContain(
+      'FAKE-1 - Title of FAKE-1: DorkOS answered that the chat its drain waits on is gone; if that stays true, flow release FAKE-1 clears it and returns the item to the ready queue.'
+    );
+  });
+
   it('flags every STATE-n breach on an in-flight item', async () => {
     // Purpose: drift kind 4, straight from work-state.ts (not GRM-15): a started
     // claimed item that still carries a stage label and agent/ready.

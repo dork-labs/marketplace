@@ -17,7 +17,9 @@
  *   A non-default codex or opencode account must still be reported back on the
  *   session (`account`), and fails closed as `wrong-account` until DorkOS does.
  * - **send:** `POST /api/sessions/<id>/messages` (DorkOS queues while a turn runs).
- * - **state:** the session's `status` (DorkOS with account-fleet support), else `unknown`.
+ * - **state:** the session's `status` (DorkOS with account-fleet support), else
+ *   `unknown`; a session the DorkOS that started it (`dorkosUrl` on the
+ *   handle) answers 404 for is `unknown` with `gone`.
  * - **stop:** nothing; the session stays in DorkOS for the person (`left-idle`).
  *
  * The `/mcp` endpoint is DorkOS's stateless Streamable HTTP transport: one
@@ -550,6 +552,7 @@ export function createDorkosLauncher(deps: DorkosLauncherDeps): Launcher {
             account: req.account?.id ?? null,
             cwd: req.cwd,
             launchPath,
+            dorkosUrl: base,
           };
         }
       }
@@ -609,7 +612,13 @@ export function createDorkosLauncher(deps: DorkosLauncherDeps): Launcher {
     } catch (error) {
       return { kind: 'unknown', reason: (error as Error).message };
     }
-    if (session === null) return { kind: 'unknown', reason: 'DorkOS no longer knows this session' };
+    if (session === null) {
+      const reason = 'DorkOS no longer knows this session';
+      // Only the DorkOS that started it can say so: another one never knew it.
+      return h.dorkosUrl === base
+        ? { kind: 'unknown', reason, gone: true }
+        : { kind: 'unknown', reason };
+    }
     const status = session.status;
     if (!isObject(status)) return { kind: 'unknown', reason: NO_STATUS_REASON };
     if (isObject(status.limit)) {
