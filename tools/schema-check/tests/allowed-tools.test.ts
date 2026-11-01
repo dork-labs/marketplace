@@ -456,8 +456,18 @@ describe('breach', () => {
       'Edit(mise.local.toml)',
       'Edit(mise/config.toml)',
       'Edit(Taskfile.yml)',
+      'Edit(mise.dev.local.toml)',
+      'Edit(ci/azure-pipelines.yml)',
+      'Edit(ci/Jenkinsfile)',
+      'Edit(ci/bitbucket-pipelines.yml)',
+      'Edit(app/package.yaml)',
+      'Edit(app/package.json5)',
+      'Edit(app/lint-staged.config.js)',
+      'Edit(app/commitlint.config.cjs)',
     ]) {
-      expect(breach(rule, file, pkg, r), rule).toMatch(/runs later|dot-file or dot-folder/);
+      expect(breach(rule, file, pkg, r), rule).toMatch(
+        /runs later|dot-file or dot-folder|every folder/
+      );
     }
     for (const rule of ['Edit(specs/**)', 'Edit(src/app.ts)', 'Edit(docs/package-notes.md)']) {
       expect(breach(rule, file, pkg, r), rule).toBeNull();
@@ -468,6 +478,25 @@ describe('breach', () => {
     expect(breach('Edit(.dork/flow/tmp/**)', pause, 'plugins/flow', r)).toBeNull();
     expect(breach('Edit(.dork/flow/**)', pause, 'plugins/flow', r)).not.toBeNull();
     expect(breach('Edit(.dork/flow/auto-run.json)', file, pkg, r)).not.toBeNull();
+  });
+
+  it('refuses a one-segment Edit or read path, which matches that name in every folder', () => {
+    const r = root();
+    // Claude Code matches a rule with no / the way .gitignore does: at any
+    // depth. Edit(ci.yml) wrote .github/workflows/ci.yml (Claude Code 2.1.309).
+    for (const rule of [
+      'Edit(ci.yml)',
+      'Edit(workflows)',
+      'Edit(./ci.yml)',
+      'Edit(notes.md)',
+      'Read(config)',
+      'Grep(./config)',
+      'Glob(id)',
+    ]) {
+      expect(breach(rule, file, pkg, r), rule).toMatch(/every folder/);
+    }
+    expect(breach('Edit(docs/notes.md)', file, pkg, r)).toBeNull();
+    expect(breach('Read(docs/**)', file, pkg, r)).toBeNull();
   });
 
   it("refuses MCP tools on servers the package doesn't ship, unless reviewed (DOR-3311 S3)", () => {
@@ -602,6 +631,16 @@ describe('checkAllowedTools', () => {
     expect(checkAllowedTools(r).map((f) => f.file)).toEqual([
       'plugins/demo/.claude/commands/c.md',
       'plugins/demo/skills/s/SKILL.md',
+    ]);
+  });
+
+  it('walks a node_modules folder anywhere but the package root', () => {
+    const r = fixtureRepo({
+      'plugins/demo/skills/node_modules/SKILL.md': command('Bash'),
+      'plugins/demo/node_modules/dep/README.md': command('Bash'),
+    });
+    expect(checkAllowedTools(r).map((f) => f.file)).toEqual([
+      'plugins/demo/skills/node_modules/SKILL.md',
     ]);
   });
 

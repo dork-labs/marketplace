@@ -21,8 +21,8 @@
  * Every declaration that can't be read is an error, never skipped: "declares
  * something this check can't read" must not look like "declares nothing".
  *
- * Not covered here: language servers (`.lsp.json`), monitors and `bin/`
- * programs. No package ships one yet.
+ * - **Language servers, monitors and `bin/` programs** are refused outright
+ *   until someone reviews what shape is safe (no package ships one yet).
  *
  * @module package-programs
  */
@@ -33,6 +33,7 @@ import {
   declarations,
   hookDeclarations,
   isRecord,
+  pluginJson,
   readJson,
   serverDeclarations,
   serverMap,
@@ -40,7 +41,7 @@ import {
 } from './declarations.ts';
 import { PLUGINS_DIR, pluginDirs } from './versions.ts';
 import type { Finding } from './validate.ts';
-import { readFileSync } from 'node:fs';
+import { existsSync, readFileSync } from 'node:fs';
 
 /**
  * The only folder changes a hook may make before its script: to the project
@@ -152,6 +153,13 @@ function checkHooks(raw: unknown, file: string, pkgDir: string, repoRoot: string
     });
   };
   // Both `{ hooks: {…} }` (settings-style) and a bare `{ Event: […] }` object.
+  // Never both at once: in frontmatter and inline plugin.json, Claude Code
+  // reads the outer keys as events and ignores `hooks`, so unwrapping would
+  // skip the events that run (DOR-3311 review).
+  if (isRecord(raw) && 'hooks' in raw && Object.keys(raw).length > 1) {
+    unreadable('A declaration with a hooks key beside other events');
+    return findings;
+  }
   const events = isRecord(raw) && 'hooks' in raw ? raw.hooks : raw;
   if (!isRecord(events)) {
     unreadable('The declaration');
@@ -227,6 +235,33 @@ function checkAll(
 }
 
 /**
+ * Findings for the programs Claude Code starts that this check has no shape
+ * for yet: language servers, monitors, and programs in `bin/`, which go on the
+ * Bash tool's PATH and can shadow a command the agent runs.
+ */
+function unreviewedPrograms(repoRoot: string, pkgDir: string): Finding[] {
+  const findings: Finding[] = [];
+  const exists = (rel: string): boolean => existsSync(path.join(repoRoot, pkgDir, rel));
+  const refuse = (file: string, what: string): void => {
+    findings.push({
+      file,
+      message: `It declares ${what}, which Claude Code starts with no permission check; this check refuses them until one is reviewed.`,
+    });
+  };
+  const manifest = pluginJson(repoRoot, pkgDir);
+  const manifestFile = `${pkgDir}/.claude-plugin/plugin.json`;
+  if (exists('.lsp.json')) refuse(`${pkgDir}/.lsp.json`, 'language servers');
+  if (manifest?.lspServers !== undefined) refuse(manifestFile, 'language servers (lspServers)');
+  const experimental = isRecord(manifest?.experimental) ? manifest.experimental : {};
+  if (manifest?.monitors !== undefined || experimental.monitors !== undefined) {
+    refuse(manifestFile, 'monitors');
+  }
+  if (exists('monitors/monitors.json')) refuse(`${pkgDir}/monitors/monitors.json`, 'monitors');
+  if (exists('bin')) refuse(`${pkgDir}/bin`, 'programs in bin/, which go on the PATH');
+  return findings;
+}
+
+/**
  * Check every hook and MCP server every package declares.
  *
  * @param repoRoot - Absolute path to the repository root.
@@ -236,6 +271,7 @@ export function checkPackagePrograms(repoRoot: string): Finding[] {
   const findings: Finding[] = [];
   for (const name of pluginDirs(repoRoot)) {
     const pkgDir = path.posix.join(PLUGINS_DIR, name);
+    findings.push(...unreviewedPrograms(repoRoot, pkgDir));
     findings.push(
       ...checkAll(serverDeclarations(repoRoot, pkgDir), (raw, file) =>
         checkServers(raw, file, pkgDir, repoRoot)

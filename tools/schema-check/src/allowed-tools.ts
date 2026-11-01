@@ -156,19 +156,29 @@ export function splitRules(value: unknown): string[] {
   return [...new Set([...splitByDepth(text), ...splitByFlag(text)])];
 }
 
+/**
+ * Claude Code matches a path rule the way .gitignore does, so one with no
+ * folder matches that name at any depth: `Edit(ci.yml)` wrote
+ * `.github/workflows/ci.yml` on Claude Code 2.1.309 (DOR-3311 review).
+ */
+const ANY_DEPTH =
+  'a path with no folder matches that name in every folder, .github/workflows included; start it with a literal folder, like docs/notes.md';
+
 /** True when a path segment is a glob, not a literal name. */
 const isGlob = (segment: string): boolean => /[*?[\]{}!]/.test(segment);
 
 /**
  * Files without a leading dot that a tool runs later on its own: npm and
- * workspace scripts, make, just and Task, lefthook's git hooks, and mise
- * (its `mise.*.toml` files and `mise/` folder), which runs its hooks when a
- * shell enters the folder (DOR-3311). Dot-files and dot-folders
+ * workspace scripts, make, just and Task, lefthook's git hooks and the
+ * configs husky runs on commit, CI pipelines that run with the repo's
+ * secrets, and mise (its `mise.*.toml` files and `mise/` folder), which runs
+ * its hooks when a shell enters the folder (DOR-3311). Not every such file:
+ * a reviewer still reads each Edit rule. Dot-files and dot-folders
  * (`.husky`, `.githooks`, `.github`, `.vscode`, `.devcontainer`, `.envrc`,
  * `.mcp.json`, `.npmrc`, `.pnpmfile.cjs`, `.dork`) are refused as a class.
  */
 const RUNS_LATER =
-  /^(package\.json|makefile|gnumakefile|justfile|taskfile(\.dist)?\.ya?ml|lefthook(-local)?\.(ya?ml|json|toml)|mise(\.[\w-]+)?\.toml|mise)$/i;
+  /^(package\.(json|json5|ya?ml)|makefile|gnumakefile|justfile|taskfile(\.dist)?\.ya?ml|lefthook(-local)?\.(ya?ml|json|toml)|mise(\.[\w-]+)*\.toml|mise|jenkinsfile|azure-pipelines\.ya?ml|bitbucket-pipelines\.ya?ml|(lint-staged|commitlint)\.config\.[cm]?[jt]s)$/i;
 
 /**
  * Why an `Edit(...)` path is too broad, or null when it holds. The path has to
@@ -189,6 +199,7 @@ function editBreach(rule: string, target: string, file: string): string | null {
   if (segments.some((segment) => segment === '.' || segment === '')) {
     return 'the path has an empty or . segment';
   }
+  if (segments.length < 2) return ANY_DEPTH;
   if (isGlob(segments[0])) {
     return 'the path has to start with a literal folder, like specs/**';
   }
@@ -408,8 +419,7 @@ function ownCommandBreach(
   if (!spec || pkgDir === '' || spec[1] !== packageName(repoRoot, pkgDir)) {
     return `${tool} may only name the package's own skills and commands, as ${tool}(${lead}<package>:<name>)`;
   }
-  const shipped = [`${pkgDir}/commands/${spec[2]}.md`, `${pkgDir}/skills/${spec[2]}/SKILL.md`];
-  for (const file of tool === 'Skill' ? shipped : shipped.slice(0, 1)) {
+  for (const file of [`${pkgDir}/commands/${spec[2]}.md`, `${pkgDir}/skills/${spec[2]}/SKILL.md`]) {
     try {
       if (lstatSync(path.join(repoRoot, file)).isFile()) return null;
     } catch {
@@ -483,7 +493,9 @@ export function breach(
   if (tool === 'SlashCommand' || tool === 'Skill') {
     return ownCommandBreach(tool, body, pkgDir, repoRoot);
   }
-  if (READERS.has(tool)) return readBreach(body);
+  if (READERS.has(tool)) {
+    return body.replace(/^\.\//, '').includes('/') ? readBreach(body) : ANY_DEPTH;
+  }
   if (tool === 'WebFetch') {
     const host = /^domain:((?:[a-z0-9-]+\.)+([a-z]{2,63}))$/i.exec(body);
     if (!host) {
@@ -574,7 +586,10 @@ export function walkPlugins(repoRoot: string): {
       return;
     }
     for (const entry of entries) {
-      if (entry.name === 'node_modules' || entry.name === '.git') continue;
+      // Only the package root's node_modules is npm's; one anywhere else (a
+      // skill folder named node_modules) is loaded by Claude Code like any other.
+      const pkgRoot = relDir.split('/').length === 2;
+      if ((entry.name === 'node_modules' && pkgRoot) || entry.name === '.git') continue;
       const rel = path.posix.join(relDir, entry.name);
       if (entry.isSymbolicLink()) symlinks.push(rel);
       else if (entry.isDirectory()) walk(rel);

@@ -150,10 +150,18 @@ and anything else is refused.
   file that a tool runs later without asking: no dot-file or dot-folder at all
   (`.husky`, `.githooks`, `.github`, `.vscode`, `.devcontainer`, `.envrc`,
   `.mcp.json`, `.npmrc`, `.dork`, `.git`, `.claude`), and no `package.json`,
-  `Makefile`, `GNUmakefile`, `justfile`, `Taskfile.yml`, lefthook's configs
-  (`lefthook.yml`, `lefthook-local.yml`, `.json`, `.toml`) or mise's
-  (`mise.toml`, `mise.local.toml`, a `mise/` folder), at any depth and in any
-  case. An exact rule to one of those goes in
+  `package.yaml` or `package.json5`, `Makefile`, `GNUmakefile`, `justfile`,
+  `Taskfile.yml`, lefthook's configs (`lefthook.yml`, `lefthook-local.yml`,
+  `.json`, `.toml`), `lint-staged.config.js` or `commitlint.config.js`, CI
+  pipelines (`Jenkinsfile`, `azure-pipelines.yml`, `bitbucket-pipelines.yml`)
+  or mise's configs (`mise.toml`, `mise.dev.local.toml`, a `mise/` folder), at
+  any depth and in any case. The list isn't every such file, so a reviewer
+  still reads each `Edit` rule.
+- An `Edit` or read path needs a folder: `Edit(docs/notes.md)`, never
+  `Edit(notes.md)`. Claude Code matches a path rule the way `.gitignore` does,
+  so a rule with no `/` matches that name at any depth: `Edit(ci.yml)` wrote
+  `.github/workflows/ci.yml` on Claude Code 2.1.309, and `Read(config)` would
+  match `.git/config`. An exact rule to one of those goes in
   `REVIEWED_COMMANDS`; flow's `.dork/flow/tmp/**` and `.dork/flow/auto-run.json`
   are there. `Edit(./**)` is allowed only for the files listed in
   `PROJECT_WRITERS`, and adding one is a security decision that gets its own
@@ -182,8 +190,7 @@ and anything else is refused.
   top-level domain: no IP addresses (`169.254.169.254`), and no `.local`,
   `.internal` or `.localhost`. A bare `WebFetch` can send anything anywhere.
 - `SlashCommand(/<package>:<command>)` and `Skill(<package>:<name>)`,
-  optionally with `:*`, only for a command (or, for `Skill`, a skill) the
-  package ships. Either runs it with its own `allowed-tools`, and Claude Code
+  optionally with `:*`, only for a command or skill the package ships. Either runs it with its own `allowed-tools`, and Claude Code
   runs commands through the Skill tool too, so a grant to someone else's can
   reach whatever that one allows. A bare `SlashCommand` or `Skill` needs a
   `REVIEWED_COMMANDS` entry; flow has both.
@@ -213,6 +220,9 @@ So a read scoped to a folder that often holds secrets (`config`, `secrets`,
 but prints a warning, which CI turns into an annotation on the pull request.
 The reviewer confirms nothing secret lives there. It never fails the check.
 
+Only a package root's `node_modules` is skipped; a folder by that name
+anywhere else (say `skills/node_modules/`) is walked, since Claude Code loads it.
+
 It reads grants the way Claude Code does, as well as the way DorkOS does, and
 both readings have to pass. Claude Code strips a BOM, ends frontmatter at the
 first `---` anywhere, retries YAML with tabs as spaces, and splits rules with an
@@ -241,17 +251,22 @@ or it is refused.
   by fixed lowercase words or flags. The script has to be a plain file in the
   package. The one thing allowed before the script is a change to the project
   root, as one of the two exact `cd ... && ` prefixes in `PROJECT_CD`. `http`,
-  `prompt`, `agent` and `mcp_tool` hooks are refused.
+  `prompt`, `agent` and `mcp_tool` hooks are refused. So is an object with a
+  `hooks` key next to other events: Claude Code runs those events and ignores
+  `hooks`, so unwrapping it would skip what runs.
 - **MCP servers** are read from `.mcp.json`, plugin.json's `mcpServers` and a
   marketplace entry's `mcpServers`. A server passes only as a local one that runs
   `node "${CLAUDE_PLUGIN_ROOT}/<script>"`, or runs a script by
   `${CLAUDE_PLUGIN_ROOT}` directly, followed by plain words or flags. Remote
   servers (`http`, `sse`), and any `env`, `cwd`, headers or helper, are refused.
 
-A declaration this check can't read is an error, never a skip. Language
-servers (`.lsp.json`), monitors and `bin/` programs aren't checked yet; no
-package ships one. Anything outside these shapes needs a change to this check,
-reviewed as its own diff.
+- **Language servers, monitors and `bin/` programs** (`.lsp.json`,
+  `lspServers`, `monitors/monitors.json`, `monitors`, `experimental.monitors`,
+  a `bin/` folder) are refused outright until someone reviews a safe shape. No
+  package ships one.
+
+A declaration this check can't read is an error, never a skip. Anything
+outside these shapes needs a change to this check, reviewed as its own diff.
 
 ## Reading a SKILL.md safely
 
