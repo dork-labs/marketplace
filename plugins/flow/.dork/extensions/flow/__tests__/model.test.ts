@@ -34,7 +34,7 @@ import {
 } from '../lib/model.ts';
 import type { FlowProjectEntry } from '../lib/projects.ts';
 import type { TrackerRead } from '../lib/tracker-reads.ts';
-import { git, makeWorld, runRecord, type World } from './fixtures.ts';
+import { git, makeWorld, runRecord, writeRuns, type World } from './fixtures.ts';
 
 const NOW = new Date('2026-09-28T12:00:00.000Z');
 
@@ -411,6 +411,47 @@ describe('buildProject', () => {
     const reclaimed = build([{ identifier: 'ACME-1', sessionId: 'an-earlier-session' }]);
     expect(reclaimed.runs.map((run) => run.identifier)).toEqual(['ACME-1', 'ACME-2']);
     expect(reclaimed.capacity.busy).toBe(1);
+  });
+
+  it('marks a hosted drain run whose chat is gone as stopped, still holding its slot (DOR-2490)', () => {
+    // Purpose: the drain waits on that chat forever, so the run is not
+    // building; it still holds the drain's slot until `flow release` clears it.
+    writeRuns(world, {
+      a: runRecord(world, { workerPid: -1, drain: { v: 1, rev: 3, phase: 'working' } }),
+      b: runRecord(world, {
+        issueId: 'b',
+        identifier: 'ACME-2',
+        sessionId: 's-2',
+        workerPid: -1,
+        drain: { v: 1, rev: 1, phase: 'working' },
+      }),
+    });
+    const build = (
+      goneRuns: { identifier: string; sessionId: string | null; chat: 'worker' | 'reviewer' }[]
+    ) =>
+      buildProject({
+        entry: entry(),
+        read: read(),
+        goneRuns,
+        accounts: new Map(),
+        registry: [],
+        pidAlive: () => true,
+        now: NOW,
+      });
+    expect(build([]).runs.map((run) => [run.identifier, run.state])).toEqual([
+      ['ACME-1', 'building'],
+      ['ACME-2', 'building'],
+    ]);
+    const gone = build([{ identifier: 'ACME-1', sessionId: 's-old', chat: 'reviewer' }]);
+    expect(gone.runs.map((run) => [run.identifier, run.state, run.stopped])).toEqual([
+      ['ACME-1', 'stopped', 'reviewer'],
+      ['ACME-2', 'building', undefined],
+    ]);
+    expect(gone.capacity.busy).toBe(2);
+    // A later run of the same item is a new session: not stopped.
+    expect(
+      build([{ identifier: 'ACME-1', sessionId: 'earlier', chat: 'worker' }]).runs[0]?.state
+    ).toBe('building');
   });
 
   it('says how Up next is reached for each kind of tracker', () => {

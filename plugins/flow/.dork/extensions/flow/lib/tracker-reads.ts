@@ -21,6 +21,11 @@
  *    tracker that does not answer never raises those runs' asks again, and is
  *    emptied once the project has no active run. Each entry names the run's
  *    session too: a closed item reopened and claimed again is a new run.
+ *    The same answer names a DorkOS-hosted drain run whose chat is gone
+ *    (reason `session-gone`, DOR-2490). That one counts only once an answer at
+ *    least {@link GONE_CONFIRMED_AFTER_MS} after the first still names the same
+ *    run gone, so a DorkOS caught mid-restart never makes a live run look
+ *    stopped; when an answer stops naming it, it starts over.
  *
  * Rules:
  *
@@ -104,7 +109,26 @@ export interface ClosedRun {
   sessionId: string | null;
 }
 
-/** Whether a stored run is one of the closed runs. */
+/** A drain run whose DorkOS chat is gone: which chat, the worker's or the reviewer's. */
+export interface GoneRun extends ClosedRun {
+  chat: 'worker' | 'reviewer';
+}
+
+/** How long a run must stay gone, answer to answer, before the Flow tab says it stopped, in ms. */
+export const GONE_CONFIRMED_AFTER_MS = 5 * 60_000;
+
+/** One `ended` entry kept from `flow status`, as saved. */
+interface EndedRun extends ClosedRun {
+  reason: 'item-closed' | 'session-gone';
+  /** For `session-gone`: which chat is gone. */
+  chat?: 'worker' | 'reviewer';
+  /** For `session-gone`: when an answer first named it (ISO). */
+  firstSeenAt?: string;
+  /** For `session-gone`: a later answer, long enough after, still named it. */
+  confirmed?: boolean;
+}
+
+/** Whether a stored run is one of these runs (by item and session). */
 export function isClosedRun(run: Record<string, unknown>, closed: readonly ClosedRun[]): boolean {
   const sessionId = typeof run.sessionId === 'string' ? run.sessionId : null;
   return closed.some((c) => c.identifier === run.identifier && c.sessionId === sessionId);
@@ -163,19 +187,58 @@ function hasActiveRun(root: string): boolean {
   );
 }
 
-/** The runs `flow status --json` lists as ended because their item closed. */
-function closedRunsOf(body: unknown): ClosedRun[] {
+/** The runs `flow status --json` lists as ended because their item closed or their chat is gone. */
+function endedRunsOf(body: unknown): EndedRun[] {
   const ended = isObject(body) && Array.isArray(body.ended) ? body.ended : [];
-  return ended.flatMap((entry) =>
-    isObject(entry) && entry.reason === 'item-closed' && typeof entry.identifier === 'string'
+  return ended.flatMap((entry): EndedRun[] =>
+    isObject(entry) &&
+    (entry.reason === 'item-closed' || entry.reason === 'session-gone') &&
+    typeof entry.identifier === 'string'
       ? [
           {
             identifier: entry.identifier,
             sessionId: typeof entry.sessionId === 'string' ? entry.sessionId : null,
+            reason: entry.reason,
+            ...(entry.reason === 'session-gone'
+              ? { chat: entry.chat === 'reviewer' ? ('reviewer' as const) : ('worker' as const) }
+              : {}),
+            ...(typeof entry.firstSeenAt === 'string' ? { firstSeenAt: entry.firstSeenAt } : {}),
+            ...(entry.confirmed === true ? { confirmed: true } : {}),
           },
         ]
       : []
   );
+}
+
+/**
+ * A new answer's runs. A gone chat keeps when the last answer first named the
+ * same run's same chat gone, and is confirmed once that is at least
+ * {@link GONE_CONFIRMED_AFTER_MS} ago.
+ */
+function confirmAgainst(next: EndedRun[], last: readonly EndedRun[], now: Date): EndedRun[] {
+  return next.map((run) => {
+    if (run.reason !== 'session-gone') return run;
+    const was = last.find(
+      (old) =>
+        old.reason === 'session-gone' &&
+        old.identifier === run.identifier &&
+        old.sessionId === run.sessionId &&
+        old.chat === run.chat
+    );
+    const first = was?.firstSeenAt;
+    const since = Date.parse(first ?? '');
+    if (first === undefined || !Number.isFinite(since)) {
+      return { ...run, firstSeenAt: now.toISOString() };
+    }
+    const confirmed = was?.confirmed === true || now.getTime() - since >= GONE_CONFIRMED_AFTER_MS;
+    // Written like a saved entry reads back: `confirmed` only when true.
+    return { ...run, firstSeenAt: first, ...(confirmed ? { confirmed: true } : {}) };
+  });
+}
+
+/** The item and session of each run, for {@link isClosedRun}. */
+function refsOf(runs: readonly EndedRun[]): ClosedRun[] {
+  return runs.map(({ identifier, sessionId }) => ({ identifier, sessionId }));
 }
 
 /** Per-project read state. */
@@ -212,7 +275,7 @@ export interface TrackerReaderDeps {
 export class TrackerReader {
   private readonly states = new Map<string, ReadState>();
   private readonly wanted = new Set<string>();
-  private readonly closed = new Map<string, ClosedRun[]>();
+  private readonly closed = new Map<string, EndedRun[]>();
   private readonly closedChanged = new Set<string>();
   /** Projects whose closed runs changed but could not be saved. */
   private readonly unsaved = new Set<string>();
@@ -291,14 +354,35 @@ export class TrackerReader {
    * @returns The closed runs; empty before any answer.
    */
   closedRuns(root: string): readonly ClosedRun[] {
+    return refsOf(this.endedRuns(root).filter((run) => run.reason === 'item-closed'));
+  }
+
+  /**
+   * The DorkOS-hosted drain runs of a project whose chat is gone, from
+   * `flow status` answers at least {@link GONE_CONFIRMED_AFTER_MS} apart,
+   * saved across restarts (DOR-2490).
+   *
+   * @param root - The project's main checkout.
+   * @returns The runs; empty before a second answer confirms one.
+   */
+  goneRuns(root: string): readonly GoneRun[] {
+    return this.endedRuns(root).flatMap((run) =>
+      run.reason === 'session-gone' && run.confirmed === true
+        ? [{ identifier: run.identifier, sessionId: run.sessionId, chat: run.chat ?? 'worker' }]
+        : []
+    );
+  }
+
+  /** Every ended run kept for a project, read from disk the first time. */
+  private endedRuns(root: string): readonly EndedRun[] {
     let closed = this.closed.get(root);
     if (closed === undefined) {
       closed = [];
       try {
         const saved: unknown = JSON.parse(readFileSync(this.closedFile(root), 'utf8'));
-        closed = closedRunsOf({ ended: Array.isArray(saved) ? saved : [] });
+        closed = endedRunsOf({ ended: Array.isArray(saved) ? saved : [] });
       } catch {
-        // Nothing saved yet, or unreadable: no run is known closed.
+        // Nothing saved yet, or unreadable: no run is known ended.
       }
       this.closed.set(root, closed);
     }
@@ -310,9 +394,10 @@ export class TrackerReader {
     return path.join(this.deps.dorkHome, 'flow', 'cache', projectIdOf(root), 'closed-runs.json');
   }
 
-  /** Keep and save a project's closed runs, when they changed. */
-  private saveClosed(root: string, closed: ClosedRun[]): void {
-    const same = JSON.stringify(this.closedRuns(root)) === JSON.stringify(closed);
+  /** Keep and save a project's ended runs, when they changed. */
+  private saveClosed(root: string, answer: EndedRun[]): void {
+    const closed = confirmAgainst(answer, this.endedRuns(root), this.deps.now());
+    const same = JSON.stringify(this.endedRuns(root)) === JSON.stringify(closed);
     if (same && !this.unsaved.has(root)) return;
     // Kept even when the save fails; the save is retried on the next answer.
     if (!same) this.closedChanged.add(root);
@@ -321,7 +406,7 @@ export class TrackerReader {
       mkdirSync(path.dirname(file), { recursive: true });
       // Written whole, then renamed over the old one: a crash never leaves half a file.
       const temp = `${file}.${process.pid}.tmp`;
-      writeFileSync(temp, JSON.stringify(closed.map((c) => ({ ...c, reason: 'item-closed' }))));
+      writeFileSync(temp, JSON.stringify(closed));
       renameSync(temp, file);
       this.closed.set(root, closed);
     } catch (error) {
@@ -427,7 +512,7 @@ export class TrackerReader {
         ]);
         const body = status.code === 0 ? lastJson(status.stdout) : null;
         if (isObject(body) && Array.isArray(body.ended)) {
-          this.saveClosed(entry.root, closedRunsOf(body));
+          this.saveClosed(entry.root, endedRunsOf(body));
         } else {
           this.deps.log(
             `[flow] could not tell which runs of ${entry.name} closed (exit ${String(status.code)}); trying again later`

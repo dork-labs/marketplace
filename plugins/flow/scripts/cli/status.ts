@@ -22,8 +22,9 @@
  * `STATE-n` breach (`work-state.ts`) on an in-flight item. `--strict` exits 1
  * on any drift.
  *
- * A run that outlived its work (`run-ended.ts`: its item closed, or its worker
- * is gone) is listed under `ended`, not in flight (DOR-2924, DOR-2706); its
+ * A run that outlived its work (`run-ended.ts`: its item closed, its worker
+ * is gone, or the DorkOS chat its drain waits on is gone) is listed under
+ * `ended`, not in flight (DOR-2924, DOR-2706, DOR-2490); its
  * record stays until `flow release` clears it. A run whose item the backlog
  * leaves out (a real tracker's snapshot holds only open items) is checked
  * with one `getItem` through the adapter, only when a close would end it; a
@@ -47,7 +48,7 @@ import { limitLine } from '../drain/handoff-exec.ts';
 import type { DrainWorkerHandle } from '../drain/state.ts';
 import { realLauncher } from '../launchers/real.ts';
 import { handleRuntime, HOST_NAMES } from '../launchers/types.ts';
-import { runEnded, type RunEndReason } from '../run-ended.ts';
+import { runEnded, waitedOnSession, type RunEndReason } from '../run-ended.ts';
 import { requireCapabilities } from '../tracker/load.ts';
 import type { CodeAdapter, ItemComment, WorkItem } from '../tracker/types.ts';
 import { AGENT_CLAIMED, stateCoherence } from '../work-state.ts';
@@ -105,7 +106,8 @@ export interface InFlightEntry {
   claimed: boolean;
   /**
    * For a `flow drain` run: its phase, and what each session's launcher says it
-   * is doing (`busy`, `idle`, `exited`, `limited`, `unknown`, `starting`), or
+   * is doing (`busy`, `idle`, `exited`, `limited`, `unknown`, `starting`, or
+   * `gone` when its host answered that it no longer has it), or
    * `null` for no session. `null` for any other run.
    */
   drain: {
@@ -120,8 +122,10 @@ export interface InFlightEntry {
 
 /** A run that outlived its work: not in flight, its record kept until `flow release`. */
 export interface EndedEntry extends InFlightEntry {
-  /** Its item closed, or its worker is gone. */
+  /** Its item closed, its worker is gone, or its drain's DorkOS chat is gone. */
   reason: RunEndReason;
+  /** For `session-gone`: whose chat is gone, the worker's or the reviewer's. */
+  chat?: 'worker' | 'reviewer';
 }
 
 /** One parked item. */
@@ -134,7 +138,12 @@ export interface ParkedEntry {
 
 /** The kinds of drift status reports. */
 export type DriftKind =
-  'run-not-started' | 'claimed-no-run' | 'worker-gone' | 'item-closed' | 'state-breach';
+  | 'run-not-started'
+  | 'claimed-no-run'
+  | 'worker-gone'
+  | 'item-closed'
+  | 'session-gone'
+  | 'state-breach';
 
 /** One drift line. */
 export interface DriftEntry {
@@ -180,6 +189,18 @@ function lazyItemReader(ctx: VerbContext): (identifier: string) => Promise<WorkI
       return undefined;
     }
   };
+}
+
+/** The drift line for a run that ended. */
+function endedDetail(run: FlowRun, reason: RunEndReason, item: WorkItem | undefined): string {
+  const back = `flow release ${run.identifier} clears the run and returns the item to the ready queue`;
+  if (reason === 'item-closed') {
+    return `has a run, but its item is ${String(item?.stateCategory)}; flow release ${run.identifier} clears the run`;
+  }
+  if (reason === 'session-gone') {
+    return `has a drain run, but DorkOS answered that it no longer has the chat the drain waits on; if that stays true, ${back}`;
+  }
+  return `has a running run, but its worker (pid ${run.workerPid}) is gone; ${back}`;
 }
 
 /** Read the drain sentinel from the first checkout that has one. */
@@ -301,23 +322,17 @@ export async function run(ctx: VerbContext): Promise<VerbResult> {
     const closedState =
       item ??
       (runEnded(run, CLOSED, pidAlive) === null ? undefined : await outside(run.identifier));
-    const reason = runEnded(run, closedState, pidAlive);
-    const row = entry(run.identifier, item ?? closedState, run, await drainSessions(ctx, run));
+    const sessions = await drainSessions(ctx, run);
+    const reason = runEnded(run, closedState, pidAlive, sessions ?? undefined);
+    const row = entry(run.identifier, item ?? closedState, run, sessions);
     if (reason !== null) {
-      ended.push({ ...row, reason });
-      drift.push(
-        reason === 'item-closed'
-          ? {
-              identifier: run.identifier,
-              kind: 'item-closed',
-              detail: `has a run, but its item is ${String(closedState?.stateCategory)}; flow release ${run.identifier} clears the run`,
-            }
-          : {
-              identifier: run.identifier,
-              kind: 'worker-gone',
-              detail: `has a running run, but its worker (pid ${run.workerPid}) is gone; flow release ${run.identifier} clears the run and returns the item to the ready queue`,
-            }
-      );
+      const chat = reason === 'session-gone' ? waitedOnSession({ ...run.drain }) : null;
+      ended.push({ ...row, reason, ...(chat === null ? {} : { chat }) });
+      drift.push({
+        identifier: run.identifier,
+        kind: reason,
+        detail: endedDetail(run, reason, closedState),
+      });
       continue;
     }
     inFlight.push(row);
@@ -457,7 +472,9 @@ async function sessionState(
     const launcher =
       ctx.createLauncher?.(handle.host) ?? realLauncher(handle.host, ctx.env, ctx.io.osHome);
     const { pending: _pending, pendingSince: _since, ...rest } = handle;
-    return (await launcher.state({ ...rest, runtime: handleRuntime(handle) })).kind;
+    const state = await launcher.state({ ...rest, runtime: handleRuntime(handle) });
+    // DorkOS answered that it has no such chat: said apart from not answering.
+    return state.kind === 'unknown' && state.gone === true ? 'gone' : state.kind;
   } catch {
     return 'unknown';
   }
@@ -537,12 +554,15 @@ function render(
       const why =
         e.reason === 'item-closed'
           ? `its item is ${e.stateCategory ?? 'closed'}`
-          : `its worker (pid ${e.workerPid ?? '?'}) is gone`;
+          : e.reason === 'session-gone'
+            ? 'DorkOS answered that the chat its drain waits on is gone'
+            : `its worker (pid ${e.workerPid ?? '?'}) is gone`;
       const release =
         e.reason === 'item-closed'
           ? 'clears it'
           : 'clears it and returns the item to the ready queue';
-      return `  ${e.identifier} - ${e.title ?? '(not in the backlog)'}: ${why}; flow release ${e.identifier} ${release}.`;
+      const when = e.reason === 'session-gone' ? 'if that stays true, ' : '';
+      return `  ${e.identifier} - ${e.title ?? '(not in the backlog)'}: ${why}; ${when}flow release ${e.identifier} ${release}.`;
     });
     sections.push(`Ended, not cleared:\n${lines.join('\n')}`);
   }

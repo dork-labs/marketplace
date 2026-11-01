@@ -14,6 +14,7 @@ export const PILL_TEXT: Readonly<Record<RunPill, string>> = {
   'in-review': 'In review',
   'handing-off': 'Handing off',
   parked: 'Parked',
+  stopped: 'Stopped',
   done: 'Done',
 };
 
