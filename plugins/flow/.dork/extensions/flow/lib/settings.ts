@@ -246,12 +246,12 @@ export async function pauseDefaults(
  * Read a project's settings, leniently.
  *
  * @param entry - The project.
- * @param opts - Its pause default and whether a person can save here.
+ * @param opts - Its pause default.
  * @returns The page's view.
  */
 export function readProjectSettings(
   entry: FlowProjectEntry,
-  opts: { pauseDefault: PauseDefault; canChange: boolean }
+  opts: { pauseDefault: PauseDefault }
 ): ProjectSettingsView {
   const paths = settingsFiles(entry.root);
   const files = {
@@ -280,7 +280,6 @@ export function readProjectSettings(
       parallel: field('parallel', files, behaviour),
     },
     pauseDefault: opts.pauseDefault,
-    canChange: opts.canChange,
   };
 }
 

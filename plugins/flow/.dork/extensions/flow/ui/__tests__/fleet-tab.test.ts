@@ -65,13 +65,6 @@ describe('FleetTab: groups and rows', () => {
     expect(screen.getByText('Add Claude accounts in Settings → Runtimes first.')).toBeTruthy();
     expect(screen.queryByRole('radiogroup')).toBeNull();
   });
-
-  it('asks for a newer DorkOS on 501 host-too-old', async () => {
-    stubFetch({ status: 501, body: { reason: 'host-too-old' } });
-    await renderTab();
-    expect(screen.getByText('Update DorkOS to choose how flow uses your accounts.')).toBeTruthy();
-    expect(screen.queryByText('Which accounts flow may use')).toBeNull();
-  });
 });
 
 describe('FleetTab: the role radio group', () => {

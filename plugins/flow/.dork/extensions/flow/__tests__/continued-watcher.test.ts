@@ -7,7 +7,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { REPORT_ATTEMPTS } from '../lib/continued-watcher.ts';
 import { createFlowExtension } from '../server.ts';
-import { fakeCtx, fakeRouter, makeWorld, runRecord, writeRuns, type World } from './fixtures.ts';
+import { fakeCtx, makeWorld, runRecord, writeRuns, type World } from './fixtures.ts';
 
 let world: World;
 let session: { sessionId: string; cwd: string; runtime: string; accountId: string };
@@ -29,11 +29,11 @@ afterEach(() => {
 function setup(storage: { data: unknown }) {
   const host = fakeCtx(world, { storage });
   const log = vi.fn();
-  const ext = createFlowExtension(fakeRouter(), host.ctx, {
+  const ext = createFlowExtension(host.ctx, {
     originOf: () => null,
     log,
   });
-  return { host, ext, log, advisor: ext.advisor!, watcher: ext.watcher! };
+  return { host, ext, log, advisor: ext.advisor, watcher: ext.watcher };
 }
 
 /** Flow's supervisor moves both runs to new sessions. */

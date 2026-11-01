@@ -36,7 +36,7 @@ import { ANSWERED_IN_FLOW_NOTE, type AnswerApi } from '../answers.ts';
 import { FlowIcon } from '../flow-icon.ts';
 import { SHARED_FILE, SHARED_NOTE } from '../project-settings.ts';
 import { FlowStore } from '../store.ts';
-import { flowModel, flowProject, routeFetch, runRow, settingsView } from './helpers.ts';
+import { clientApi, flowModel, flowProject, routeFetch, runRow, settingsView } from './helpers.ts';
 
 afterEach(() => {
   vi.unstubAllGlobals();
@@ -226,9 +226,9 @@ async function renderPage(
     api?: Partial<AnswerApi>;
   } = {}
 ) {
-  const store = new FlowStore({});
+  const store = new FlowStore(clientApi());
   store.start();
-  const api = { navigate: vi.fn(), ...opts.api };
+  const api = { ...clientApi(), ...opts.api };
   const Page = createPages(api, store)[page];
   const address = { search: { ...(opts.search ?? {}) } as Record<string, string> };
   const writes: Record<string, string | null>[] = [];
@@ -499,16 +499,12 @@ describe('a project’s settings page', () => {
 describe('registerPages', () => {
   it('registers home in the menu and the two project pages outside it', () => {
     const registerPage = vi.fn((_path: string, _page: unknown, _options: unknown) => () => {});
-    registerPages({ navigate: vi.fn(), registerPage }, new FlowStore({}));
+    registerPages({ ...clientApi(), registerPage }, new FlowStore(clientApi()));
     expect(registerPage.mock.calls.map((call) => [call[0], call[2]])).toEqual([
       ['', { title: 'Flow', icon: FlowIcon }],
       ['p/:name', { title: 'Flow project', icon: FlowIcon, menu: false }],
       ['p/:name/settings', { title: 'Flow settings', icon: FlowIcon, menu: false }],
     ]);
-  });
-
-  it('registers nothing on a DorkOS without pages', () => {
-    expect(() => registerPages({ navigate: vi.fn() }, new FlowStore({}))()).not.toThrow();
   });
 });
 

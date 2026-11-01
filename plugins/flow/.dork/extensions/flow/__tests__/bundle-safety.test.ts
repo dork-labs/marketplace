@@ -2,8 +2,10 @@
  * The Flow extension's server half is bundled by DorkOS with esbuild into
  * CommonJS, from the installed plugin, where no package is guaranteed to be
  * installed. So everything `server.ts` loads at run time must be node
- * builtins and relative files, never `zod` or any other package, and nothing
- * may read `import.meta` (it is empty in a CommonJS bundle).
+ * builtins, relative files and `hono` (which DorkOS builds into a server
+ * bundle itself), never `zod` or any other package, and nothing may read
+ * `import.meta` (it is empty in a CommonJS bundle). The client half gets no
+ * such exception.
  *
  * This walks the value imports from `server.ts` and `index.ts` the way a
  * bundler would, and fails naming the file that brings in a package.
@@ -23,6 +25,17 @@ import ts from 'typescript';
 import { describe, expect, it } from 'vitest';
 
 const EXTENSION_DIR = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
+
+/** Packages DorkOS bundles into an entry itself, so they need not be installed. */
+const HOST_PROVIDED: Record<string, readonly string[]> = {
+  'server.ts': ['hono'],
+  'index.ts': [],
+};
+
+/** Whether `name` is one of `allowed`, or one of their subpaths (`hono/utils/...`). */
+function hostProvided(name: string, allowed: readonly string[]): boolean {
+  return allowed.some((pkg) => name === pkg || name.startsWith(`${pkg}/`));
+}
 
 /** The value imports of a file: `import type` and `export type` are erased and skipped. */
 function valueImports(source: string): string[] {
@@ -56,7 +69,7 @@ function walk(entry: string): { files: string[]; packages: { file: string; name:
 describe('the bundle DorkOS builds', () => {
   it.each(['server.ts', 'index.ts'])('%s loads no package and never reads import.meta', (entry) => {
     const { files, packages } = walk(path.join(EXTENSION_DIR, entry));
-    expect(packages).toEqual([]);
+    expect(packages.filter((found) => !hostProvided(found.name, HOST_PROVIDED[entry]))).toEqual([]);
     const withMeta = files.filter((file) => readFileSync(file, 'utf8').includes('import.meta'));
     expect(withMeta.map((file) => path.relative(EXTENSION_DIR, file))).toEqual([]);
     const unparsable = files.flatMap((file) => {
@@ -90,10 +103,11 @@ describe('the bundle DorkOS builds', () => {
     });
     expect(esbuildRefuses).toEqual([]);
     if (entry === 'server.ts') {
-      // It does reach flow's own modules, so the walk is real.
+      // It does reach flow's own modules and hono, so the walk is real.
       expect(
         files.some((file) => file.endsWith(path.join('scripts', 'fleet', 'accounts.ts')))
       ).toBe(true);
+      expect(packages.map((found) => found.name)).toContain('hono');
     }
   });
 });

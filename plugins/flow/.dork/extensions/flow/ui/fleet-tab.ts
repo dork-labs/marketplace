@@ -14,7 +14,6 @@
 import type { FleetAccount, FleetView } from '../lib/fleet.ts';
 import {
   FleetRequestError,
-  HostTooOldError,
   UNREACHABLE_MESSAGE,
   getFleet,
   putAccount,
@@ -43,9 +42,6 @@ import {
   ROW_LABEL,
   rangeStyle,
 } from './styles.ts';
-
-/** Shown on a DorkOS without what the Flow tab needs. */
-export const HOST_TOO_OLD_TEXT = 'Update DorkOS to choose how flow uses your accounts.';
 
 /** Shown when the tab could not read flow's settings and flow gave no reason. */
 export const LOAD_FAILED_TEXT = "Couldn't load Flow's settings. Try again in a moment.";
@@ -426,10 +422,7 @@ export function CrossRuntimeRow(props: {
 
 /** The tab's loading state. */
 type Phase =
-  | { kind: 'loading' }
-  | { kind: 'too-old' }
-  | { kind: 'failed'; message: string; failures: number }
-  | { kind: 'ready' };
+  { kind: 'loading' } | { kind: 'failed'; message: string; failures: number } | { kind: 'ready' };
 
 /** What {@link FleetTab} takes. */
 export interface FleetTabProps {
@@ -478,18 +471,16 @@ export function FleetTab(props: FleetTabProps): Node {
         setRetrying(false);
         setPhase({ kind: 'ready' });
       },
-      (error: unknown) => {
+      () => {
         if (!live) return;
         setRetrying(false);
-        if (error instanceof HostTooOldError) setPhase({ kind: 'too-old' });
         // Counts failures that landed, so the alert below remounts (and is
         // announced again) only when a retry has actually failed too.
-        else
-          setPhase((current) => ({
-            kind: 'failed',
-            message: LOAD_FAILED_TEXT,
-            failures: current.kind === 'failed' ? current.failures + 1 : 1,
-          }));
+        setPhase((current) => ({
+          kind: 'failed',
+          message: LOAD_FAILED_TEXT,
+          failures: current.kind === 'failed' ? current.failures + 1 : 1,
+        }));
       }
     );
     return () => {
@@ -528,7 +519,6 @@ export function FleetTab(props: FleetTabProps): Node {
       ...children
     );
 
-  if (phase.kind === 'too-old') return root(h('p', { style: MUTED }, HOST_TOO_OLD_TEXT));
   if (phase.kind === 'failed') {
     return root(
       h('p', { key: `load-failed-${phase.failures}`, role: 'alert', style: ALERT }, phase.message),

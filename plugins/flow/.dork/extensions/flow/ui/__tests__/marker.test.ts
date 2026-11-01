@@ -10,7 +10,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { FlowDecision } from '../../lib/model.ts';
 import { PANEL_TAB_ID, followMarker, markerFor } from '../marker.ts';
 import { FlowStore } from '../store.ts';
-import { flowModel, flowProject, routeFetch } from './helpers.ts';
+import { clientApi, flowModel, flowProject, routeFetch } from './helpers.ts';
 
 afterEach(() => {
   vi.unstubAllGlobals();
@@ -86,7 +86,7 @@ describe('followMarker', () => {
   it('sets the dot when something needs you, clears it after, and sends only changes', async () => {
     const quiet = flowModel([flowProject('dorkos')]);
     routeFetch(() => ({ status: 200, body: quiet }));
-    const store = new FlowStore({});
+    const store = new FlowStore(clientApi());
     const setTabMarker = vi.fn();
     const stop = followMarker({ setTabMarker }, store);
     store.apply(quiet);
@@ -103,7 +103,7 @@ describe('followMarker', () => {
   });
 
   it('does nothing on a DorkOS without tab markers', () => {
-    const store = new FlowStore({});
+    const store = new FlowStore(clientApi());
     const stop = followMarker({}, store);
     expect(() =>
       store.apply(flowModel([flowProject('dorkos')], { decisions: [decision('dorkos')] }))

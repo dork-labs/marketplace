@@ -2,13 +2,18 @@
  * The drift guard (spec `flow-multiproject` §10.1): flow's mirror of the host
  * types (`lib/host-types.ts`) against core's seam contract, vendored whole into
  * `lib/__contract__/` from dork-labs/dorkos
- * `packages/extension-api/src/__fixtures__/seam-contract/` (1.2.0, at
- * 5b683d964bb8). Core checks the same file against its real types in both
+ * `packages/extension-api/src/__fixtures__/seam-contract/` (1.4.0). The
+ * fetch-handler types are not in that contract; they are checked against
+ * `lib/__contract__/fetch-handler.contract.ts`, copied from core's released
+ * `server-entry.ts` (DorkOS 0.116.0).
+ * Core checks the same file against its real types in both
  * directions, so a seam core renames or reshapes fails here as soon as the
  * fixture is refreshed, never at run time on someone's machine.
  *
  * The rule is one-way on this side: every seam flow mirrors must be assignable
  * from the contract's (flow may mirror a subset, never a different shape).
+ * Where flow hands a value back to core (an answer, a raised decision, the
+ * fetch handler), the other direction is checked too.
  * Refresh by copying both files over the vendored ones; never edit them by hand.
  */
 
@@ -17,8 +22,19 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { describe, expect, expectTypeOf, it } from 'vitest';
 import type * as Contract from '../lib/__contract__/seams.contract.ts';
+import type * as FetchContract from '../lib/__contract__/fetch-handler.contract.ts';
 import type {
   DataProviderContext,
+  ExtensionCaller,
+  ExtensionDialogControls,
+  ExtensionDialogProps,
+  ExtensionFetchHandler,
+  PersonCheck,
+  PersonRefusal,
+  ServerExtensionHandlers,
+  SessionsApi,
+  StartWorkErrorCode,
+  StartWorkInput,
   DecisionActionEvent,
   DecisionActionResult,
   DecisionActions,
@@ -46,6 +62,8 @@ import type {
   TrackerItemRef,
 } from '../lib/host-types.ts';
 import type { FlowExtensionApi } from '../index.ts';
+import type { FlowEnv } from '../lib/person.ts';
+import type register from '../server.ts';
 
 const CONTRACT_DIR = path.resolve(
   path.dirname(fileURLToPath(import.meta.url)),
@@ -73,9 +91,36 @@ describe('lib/host-types.ts against the contract', () => {
     >();
   });
 
-  it('takes core’s person guard as route middleware', () => {
-    expectTypeOf<Contract.DataProviderContextSeams['requirePerson']>().toExtend<
-      NonNullable<DataProviderContext['requirePerson']>
+  it('reads the person bar’s verdict exactly as core hands it to a fetch handler', () => {
+    expectTypeOf<FetchContract.PersonRefusal>().toExtend<PersonRefusal>();
+    expectTypeOf<PersonRefusal>().toExtend<FetchContract.PersonRefusal>();
+    expectTypeOf<FetchContract.PersonCheck>().toExtend<PersonCheck>();
+    expectTypeOf<PersonCheck>().toExtend<FetchContract.PersonCheck>();
+    expectTypeOf<FetchContract.ExtensionCaller>().toExtend<ExtensionCaller>();
+    expectTypeOf<ExtensionCaller>().toExtend<FetchContract.ExtensionCaller>();
+    // flow's Hono app reads the caller as `c.env`.
+    expectTypeOf<FetchContract.ExtensionCaller>().toExtend<FlowEnv['Bindings']>();
+  });
+
+  it('serves its routes with a fetch handler core takes', () => {
+    expectTypeOf<ExtensionFetchHandler>().toExtend<FetchContract.ExtensionFetchHandler>();
+    expectTypeOf<FetchContract.ExtensionFetchHandler>().toExtend<ExtensionFetchHandler>();
+    expectTypeOf<ServerExtensionHandlers>().toExtend<FetchContract.ServerExtensionHandlers>();
+    expectTypeOf<FetchContract.ServerExtensionHandlers>().toExtend<ServerExtensionHandlers>();
+    // What flow's register() returns is what core serves.
+    expectTypeOf<ReturnType<typeof register>>().toExtend<FetchContract.ServerExtensionHandlers>();
+  });
+
+  it('starts work in a new chat as core ships it', () => {
+    expectTypeOf<Contract.StartWorkInput>().toExtend<StartWorkInput>();
+    expectTypeOf<StartWorkInput>().toExtend<Contract.StartWorkInput>();
+    expectTypeOf<Contract.StartWorkError['code']>().toEqualTypeOf<StartWorkErrorCode>();
+    expectTypeOf<Contract.SessionsApi>().toExtend<SessionsApi>();
+    expectTypeOf<Contract.DataProviderContextSeams['sessions']>().toExtend<
+      NonNullable<DataProviderContext['sessions']>
+    >();
+    expectTypeOf<Contract.ExtensionAPISeams['startWork']>().toExtend<
+      NonNullable<FlowExtensionApi['startWork']>
     >();
   });
 
@@ -110,6 +155,15 @@ describe('lib/host-types.ts against the contract', () => {
     >();
     expectTypeOf<Contract.ExtensionAPISeams['setTabMarker']>().toExtend<
       NonNullable<FlowExtensionApi['setTabMarker']>
+    >();
+  });
+
+  it('registers its dialogs as core takes them, mounted only while open', () => {
+    expectTypeOf<Contract.ExtensionDialogProps>().toExtend<ExtensionDialogProps>();
+    expectTypeOf<ExtensionDialogProps>().toExtend<Contract.ExtensionDialogProps>();
+    expectTypeOf<Contract.ExtensionDialogControls>().toExtend<ExtensionDialogControls>();
+    expectTypeOf<Contract.ExtensionAPISeams['registerDialog']>().toExtend<
+      FlowExtensionApi['registerDialog']
     >();
   });
 

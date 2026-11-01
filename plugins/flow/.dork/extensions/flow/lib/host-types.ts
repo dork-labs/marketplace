@@ -235,48 +235,37 @@ export interface AccountsApi {
   registerAdvisor(advisor: AccountAdvisor): () => void;
 }
 
-/** The request fields the Flow routes read (a subset of Express's `Request`). */
-export interface RouteRequest {
-  /** Route parameters, decoded. */
-  params: Record<string, string>;
-  /** The parsed JSON body; `undefined` on an empty body (Express 5). */
-  body?: unknown;
-  /** The query string, parsed. */
-  query?: Record<string, unknown>;
+/** What DorkOS answers a caller who is not a person with (DorkOS `PersonRefusal`). */
+export interface PersonRefusal {
+  /** Not a person. */
+  readonly ok: false;
+  /** The HTTP status to answer with. */
+  readonly status: number;
+  /** The JSON body to answer with. */
+  readonly body: { readonly error: string; readonly code: string; readonly message: string };
 }
 
-/** The response calls the Flow routes make (a subset of Express's `Response`). */
-export interface RouteResponse {
-  /** Set the status code. */
-  status(code: number): RouteResponse;
-  /** Send a JSON body. */
-  json(body: unknown): unknown;
+/** Whether the caller passed the person bar (DorkOS `PersonCheck`). */
+export type PersonCheck = { readonly ok: true } | PersonRefusal;
+
+/** Who sent a request: the fetch handler's second argument, a Hono app's `c.env`. */
+export interface ExtensionCaller {
+  /** Whether the caller is a person. */
+  readonly person: PersonCheck;
 }
 
-/** A route handler. */
-export type RouteHandler = (req: RouteRequest, res: RouteResponse) => void | Promise<void>;
+/** A web-standard request handler, given the path below `/api/ext/flow`. */
+export type ExtensionFetchHandler = (
+  request: Request,
+  caller: ExtensionCaller
+) => Response | Promise<Response>;
 
-/**
- * Method syntax keeps a middleware's parameters bivariant, so Express's own
- * `RequestHandler` fits {@link RouteMiddleware}. The request is any object:
- * flow never reads it in a middleware, and Express's `params` (which may hold
- * arrays) is wider than {@link RouteRequest}'s.
- */
-interface RouteMiddlewareShape {
-  run(req: object, res: RouteResponse, next: (error?: unknown) => void): unknown;
-}
-
-/** Express middleware, such as the host's `requirePerson`: it answers, or calls `next`. */
-export type RouteMiddleware = RouteMiddlewareShape['run'];
-
-/** The scoped router DorkOS mounts at `/api/ext/<id>/` (a subset of Express's `Router`). */
-export interface ExtensionRouter {
-  /** Register a GET route. */
-  get(path: string, ...handlers: (RouteHandler | RouteMiddleware)[]): unknown;
-  /** Register a PUT route. */
-  put(path: string, ...handlers: (RouteHandler | RouteMiddleware)[]): unknown;
-  /** Register a POST route. */
-  post(path: string, ...handlers: (RouteHandler | RouteMiddleware)[]): unknown;
+/** What `register()` returns to serve its API with a fetch handler (DorkOS `ServerExtensionHandlers`). */
+export interface ServerExtensionHandlers {
+  /** Answers every request under `/api/ext/flow/`. */
+  fetch?: ExtensionFetchHandler;
+  /** Called when the extension stops. */
+  cleanup?: () => void | Promise<void>;
 }
 
 /** A project as core knows it: a git main checkout (DorkOS `ProjectRef`). */
@@ -322,9 +311,10 @@ export interface ReadableState {
 }
 
 /**
- * The server context DorkOS injects (DorkOS `DataProviderContext`), as an
- * older host may deliver it: `dorkHome` and `accounts` arrived with DorkOS
- * 0.88.0, so both are optional here and checked before use.
+ * The server context DorkOS injects (DorkOS `DataProviderContext`). Flow's
+ * `minHostVersion` (DorkOS 0.116.0, the first to serve a fetch handler with
+ * its caller) guarantees `dorkHome` and `accounts`; the seams marked optional
+ * below are still probed before use.
  */
 export interface DataProviderContext {
   /** Scoped persistent storage for extension data. */
@@ -340,20 +330,14 @@ export interface DataProviderContext {
   readonly extensionId: string;
   /** Absolute path of this extension's folder. */
   readonly extensionDir: string;
-  /** The resolved DorkOS data folder. Missing on hosts older than 0.88.0. */
-  readonly dorkHome?: string;
+  /** The resolved DorkOS data folder. */
+  readonly dorkHome: string;
   /** The one folder this extension writes files to: `<dorkHome>/extension-data/<id>/files`. */
   readonly filesDir?: string;
-  /** The accounts API. Missing on hosts older than 0.88.0. */
-  readonly accounts?: Partial<AccountsApi>;
+  /** The agent accounts DorkOS knows, their usage, and the account advisor seam. */
+  readonly accounts: AccountsApi;
   /** Core's project registry. Missing on a DorkOS from before it; probe before use. */
   readonly projects?: ProjectsApi;
-  /**
-   * Middleware that admits only a person (a person's browser, not an agent or
-   * a relay message). Missing on a DorkOS from before it: then no route that
-   * changes something is registered at all (spec `flow-multiproject` §10).
-   */
-  readonly requirePerson?: RouteMiddleware;
   /** Core's inbox. Missing on a DorkOS from before it: then flow raises nothing (§7.6). */
   readonly inbox?: InboxApi;
   /** flow's per-project settings, read-only. Missing on a DorkOS from before them. */
@@ -366,7 +350,7 @@ export interface DataProviderContext {
   readonly sessions?: SessionsApi;
   /**
    * Binds the handlers for the tools `extension.json` declares, only while
-   * `register()` runs. Missing on a DorkOS before 0.98.0.
+   * `register()` runs. Probed before use.
    */
   readonly tools?: {
     handle(
@@ -556,8 +540,7 @@ export interface ProjectSettingsReader {
 
 /**
  * What starting work in a new chat takes (DorkOS `StartWorkInput`, contract
- * 1.3.0). The vendored fixture is 1.2.0, so this mirror is checked when the
- * fixture is refreshed; until then flow probes for the seam at run time.
+ * 1.3.0).
  */
 export interface StartWorkInput {
   /** Any path inside a known project. */
@@ -641,18 +624,34 @@ export interface StatusBarItemOptions {
   urgent?(ctx: StatusBarSlotContext): boolean;
 }
 
+/** Props a registered dialog receives; it is mounted only while open (DorkOS `ExtensionDialogProps`). */
+export interface ExtensionDialogProps {
+  /** Whether the dialog is open. Always true while mounted. */
+  readonly open: boolean;
+  /** Report a change; `false` closes and unmounts it. Never throws. */
+  readonly onOpenChange: (open: boolean) => void;
+}
+
+/** Controls `registerDialog` returns (DorkOS `ExtensionDialogControls`). */
+export interface ExtensionDialogControls {
+  /** Show the dialog. */
+  open(): void;
+  /** Hide and unmount the dialog. */
+  close(): void;
+}
+
 /**
- * The part of DorkOS's client `ExtensionAPI` this extension uses. The methods
- * a DorkOS from before 0.88.0 may lack are optional, and each is probed
- * before use (spec `flow-multiproject` §10).
+ * The part of DorkOS's client `ExtensionAPI` this extension uses. Flow's
+ * `minHostVersion` guarantees the methods that are not optional; each optional
+ * one is probed before use (spec `flow-multiproject` §10).
  */
 export interface ClientApi {
   /** Go to a client route. */
   navigate(path: string): void;
   /** A snapshot of the host's state. */
-  getState?(): ReadableState;
+  getState(): ReadableState;
   /** Call `callback` when the selected part of the state changes; returns a function that stops. */
-  subscribe?(
+  subscribe(
     selector: (state: ReadableState) => unknown,
     callback: (value: unknown) => void
   ): () => void;
@@ -684,17 +683,19 @@ export interface ClientApi {
    * @returns A function that removes it.
    */
   registerCommand?(id: string, label: string, callback: () => void): () => void;
-  /** Add a dialog; returns its controls. */
-  registerDialog?(id: string, component: ComponentType): { open: () => void; close: () => void };
+  /** Add a dialog, closed until opened; the host keeps its open state. */
+  registerDialog(
+    id: string,
+    component: ComponentType<ExtensionDialogProps>
+  ): ExtensionDialogControls;
   /** Show a toast. */
   notify?(message: string, options?: { type?: 'info' | 'success' | 'error' }): void;
   /**
-   * Mount a full page at `/x/flow/<path>`. Missing on a DorkOS from before
-   * extension pages: then flow has no home, lens page or settings page.
+   * Mount a full page at `/x/flow/<path>`.
    *
    * @returns A function that removes it.
    */
-  registerPage?(
+  registerPage(
     path: string,
     component: ComponentType<ExtensionPageProps>,
     options: ExtensionPageOptions
@@ -722,11 +723,8 @@ export interface ClientApi {
   listDecisions?(): Promise<ExtensionDecisionView[]>;
   /** Answer one of this extension's decisions from its own page. */
   answerDecision?(decisionId: string, answer: DecisionAnswer): Promise<DecisionAnswerResult>;
-  /**
-   * Start work in a NEW chat, as the person (contract 1.3.0). Missing on a
-   * DorkOS from before it: then a button says what to type instead (§7.9).
-   */
-  startWork?(input: StartWorkInput): Promise<{ sessionId: string }>;
+  /** Start work in a NEW chat, as the person (contract 1.3.0). */
+  startWork(input: StartWorkInput): Promise<{ sessionId: string }>;
   /**
    * flow's per-project settings in DorkOS (§7.7): the dial lives here. `set`
    * is the only writer anywhere, behind DorkOS's person bar. Missing on a

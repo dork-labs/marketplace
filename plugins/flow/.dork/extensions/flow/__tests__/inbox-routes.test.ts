@@ -3,9 +3,8 @@
  * §7, §10, §11): flow registers its answer handler with core's inbox and
  * raises a review gate on the poll; `POST /decisions/:key` answers only on a
  * DorkOS without the inbox (410 elsewhere); `POST /projects/:name/allow-adapter`
- * lets flow run a project's own adapter; every changing route sits behind the
- * person guard and is missing without it; the dial's copy follows core's
- * per-project settings.
+ * lets flow run a project's own adapter, behind the person bar; the dial's
+ * copy follows core's per-project settings.
  *
  * Every command of flow's CLI is faked.
  */
@@ -32,11 +31,11 @@ import {
   hostSupportsStartWork,
 } from '../server.ts';
 import {
-  NOT_A_PERSON,
+  REFUSED_AGENT,
   fakeCtx,
-  fakeRouter,
   makeWorld,
   runRecord,
+  send,
   writeRuns,
   type World,
 } from './fixtures.ts';
@@ -127,14 +126,10 @@ function fakeInbox() {
 }
 
 /** Build the extension, with the seams given. */
-function setup(
-  extra: NonNullable<Parameters<typeof fakeCtx>[1]>['extra'] = {},
-  opts: { personGuard?: boolean } = {}
-) {
-  const router = fakeRouter();
+function setup(extra: NonNullable<Parameters<typeof fakeCtx>[1]>['extra'] = {}) {
   const cli = fakeCli();
-  const host = fakeCtx(world, { extensionDir: EXTENSION_DIR, extra, ...opts });
-  const ext = createFlowExtension(router, host.ctx, {
+  const host = fakeCtx(world, { extensionDir: EXTENSION_DIR, extra });
+  const ext = createFlowExtension(host.ctx, {
     now: () => NOW,
     originOf: () => null,
     log: () => {},
@@ -142,13 +137,13 @@ function setup(
     pidAlive: () => true,
   });
   // A Flow tab beside a chat in the project tells flow where to look.
-  const seen = router.call('get', '/model', { query: { cwd: world.worktree } });
+  const seen = send(ext.app, 'GET', `/model?cwd=${encodeURIComponent(world.worktree)}`);
   /** Run the model's 5-second poll once. */
   const poll = async () => {
     await seen;
     await host.scheduled[0]();
   };
-  return { router, host, ext, cli, poll, seen };
+  return { app: ext.app, host, ext, cli, poll, seen };
 }
 
 describe('the host probes', () => {
@@ -171,12 +166,12 @@ describe('the host probes', () => {
 describe('with the inbox', () => {
   it('registers the answer handler, raises the review gate on the poll, and shows it in the model', async () => {
     const inbox = fakeInbox();
-    const { router, poll } = setup({ inbox: inbox.inbox });
+    const { app, poll } = setup({ inbox: inbox.inbox });
     await vi.waitFor(() => expect(inbox.inbox.onAction).toHaveBeenCalled());
     await poll();
     expect(inbox.raised.map((r) => r.title)).toEqual(['Ship Faster sidebar?']);
     expect(inbox.raised[0].link).toBe('/x/flow/p/main');
-    const sent = await router.call('get', '/model');
+    const sent = await send(app, 'GET', '/model');
     expect((sent.body as FlowModel).decisions).toEqual([
       expect.objectContaining({ kind: 'review', project: 'main', identifier: 'ACME-7' }),
     ]);
@@ -215,10 +210,9 @@ describe('with the inbox', () => {
   });
 
   it('answers 410 on flow’s own answer route: the inbox is the path', async () => {
-    const { router, seen } = setup({ inbox: fakeInbox().inbox });
+    const { app, seen } = setup({ inbox: fakeInbox().inbox });
     await seen;
-    const sent = await router.call('post', '/decisions/:key', {
-      params: { key: 'review:x:ACME-7' },
+    const sent = await send(app, 'POST', `/decisions/${encodeURIComponent('review:x:ACME-7')}`, {
       body: { action: 'approve' },
     });
     expect(sent).toEqual({ status: 410, body: { error: ANSWER_IN_INBOX, refusedBy: 'flow' } });
@@ -227,27 +221,24 @@ describe('with the inbox', () => {
 
 describe('without the inbox', () => {
   it('raises nothing, and answers from flow’s pages through its own person-only route', async () => {
-    const { router, cli, poll } = setup();
+    const { app, cli, poll } = setup();
     await poll();
-    const model = (await router.call('get', '/model')).body as FlowModel;
+    const model = (await send(app, 'GET', '/model')).body as FlowModel;
     const [decision] = model.decisions;
     expect(decision.kind).toBe('review');
-    const refused = await router.call('post', '/decisions/:key', {
-      params: { key: decision.key },
+    const refused = await send(app, 'POST', `/decisions/${encodeURIComponent(decision.key)}`, {
       body: { action: 'approve' },
       agent: true,
     });
-    expect(refused).toEqual({ status: 403, body: { error: NOT_A_PERSON } });
+    expect(refused).toEqual(REFUSED_AGENT);
     expect(cli.calls.some((args) => args[0] === 'review')).toBe(false);
-    const sent = await router.call('post', '/decisions/:key', {
-      params: { key: decision.key },
+    const sent = await send(app, 'POST', `/decisions/${encodeURIComponent(decision.key)}`, {
       body: { action: 'approve', shown: decision.shown },
     });
     expect(sent.status).toBe(200);
     expect(sent.body).toMatchObject({ resolved: true, message: null, watch: null });
     expect(cli.calls.find((args) => args[0] === 'review')).toContain('--approve');
-    const bad = await router.call('post', '/decisions/:key', {
-      params: { key: decision.key },
+    const bad = await send(app, 'POST', `/decisions/${encodeURIComponent(decision.key)}`, {
       body: { action: 'maybe' },
     });
     expect(bad.status).toBe(400);
@@ -260,19 +251,14 @@ describe("a project's own adapter", () => {
     mkdirSync(own, { recursive: true });
     writeFileSync(path.join(own, 'SKILL.md'), '# own');
     writeFileSync(path.join(own, 'adapter.ts'), 'export {};\n');
-    const { router, cli, seen } = setup();
+    const { app, cli, seen } = setup();
     await seen;
-    const before = (await router.call('get', '/model')).body as FlowModel;
+    const before = (await send(app, 'GET', '/model')).body as FlowModel;
     expect(before.projects[0].upNext).toBe('own-code');
     expect(cli.calls.filter((args) => args[0] === 'snapshot')).toEqual([]);
-    const refused = await router.call('post', '/projects/:name/allow-adapter', {
-      params: { name: 'main' },
-      agent: true,
-    });
+    const refused = await send(app, 'POST', '/projects/main/allow-adapter', { agent: true });
     expect(refused.status).toBe(403);
-    const sent = await router.call('post', '/projects/:name/allow-adapter', {
-      params: { name: 'main' },
-    });
+    const sent = await send(app, 'POST', '/projects/main/allow-adapter');
     expect(sent.status).toBe(200);
     expect((sent.body as FlowModel).projects[0].upNext).toBe('read');
     await vi.waitFor(() =>
@@ -281,34 +267,13 @@ describe("a project's own adapter", () => {
   });
 
   it('refuses a project that has no adapter of its own', async () => {
-    const { router, seen } = setup();
+    const { app, seen } = setup();
     await seen;
-    const sent = await router.call('post', '/projects/:name/allow-adapter', {
-      params: { name: 'main' },
-    });
+    const sent = await send(app, 'POST', '/projects/main/allow-adapter');
     expect(sent).toEqual({
       status: 400,
       body: { error: "main doesn't use an adapter of its own.", refusedBy: 'flow' },
     });
-  });
-});
-
-describe('the person guard and older hosts', () => {
-  it('registers neither changing route on a DorkOS that cannot tell a person from an agent', () => {
-    const { router } = setup({}, { personGuard: false });
-    expect(router.has('post', '/decisions/:key')).toBe(false);
-    expect(router.has('post', '/projects/:name/allow-adapter')).toBe(false);
-  });
-
-  it('answers 501 host-too-old for the new routes on a DorkOS before 0.88.0', async () => {
-    const router = fakeRouter();
-    createFlowExtension(router, fakeCtx(world, { dorkHome: false }).ctx);
-    for (const route of ['/decisions/:key', '/projects/:name/allow-adapter']) {
-      expect(await router.call('post', route)).toEqual({
-        status: 501,
-        body: { reason: 'host-too-old' },
-      });
-    }
   });
 });
 
@@ -325,14 +290,14 @@ describe('the dial', () => {
         return () => {};
       },
     };
-    const { poll, router } = setup({ projectSettings: settings });
+    const { poll, app } = setup({ projectSettings: settings });
     await poll();
     const file = autonomyCopyPath(world.dorkHome, world.main);
     expect(JSON.parse(readFileSync(file, 'utf8'))).toMatchObject({
       dial: 'ask',
       kinds: { ship: 'tell' },
     });
-    const model = (await router.call('get', '/model')).body as FlowModel;
+    const model = (await send(app, 'GET', '/model')).body as FlowModel;
     expect(model.projects[0].autonomy).toMatchObject({
       chosen: true,
       stops: { ship: 'tell', sort: 'ask' },

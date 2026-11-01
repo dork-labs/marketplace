@@ -1,25 +1,27 @@
 /**
  * Test fixtures for the Flow extension: a temp DorkOS home, a fake host
- * context and router, a temp git project with a linked worktree, and writers
- * for flow's ledger, fleet and run store files.
+ * context, a way to call flow's routes as a person or an agent, a temp git
+ * project with a linked worktree, and writers for flow's ledger, fleet and run
+ * store files.
  */
 
 import { execFileSync } from 'node:child_process';
 import { mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
+import type { Hono } from 'hono';
 import { vi } from 'vitest';
 import type {
   AccountAdvisor,
   AccountSummary,
   AccountUsage,
   DataProviderContext,
-  ExtensionRouter,
+  ExtensionCaller,
+  PersonRefusal,
   ProjectInfo,
   ProjectsApi,
-  RouteHandler,
-  RouteMiddleware,
 } from '../lib/host-types.ts';
+import type { FlowEnv } from '../lib/person.ts';
 
 /** The repo every fixture project's origin names. */
 export const REPO = 'acme/app';
@@ -143,98 +145,62 @@ export function readStore(world: World): Record<string, Record<string, unknown>>
   return JSON.parse(readFileSync(storePath(world), 'utf8'));
 }
 
-/** A fake response that records what a handler sent. */
+/** What a route answered. */
 export interface Sent {
   status: number;
   body: unknown;
 }
 
-/** A router that records handlers and can call them. */
-export interface FakeRouter extends ExtensionRouter {
-  call(
-    method: 'get' | 'put' | 'post',
-    route: string,
-    req?: {
-      params?: Record<string, string>;
-      body?: unknown;
-      query?: Record<string, unknown>;
-      /** Send it as an agent would: the fake person guard refuses it. */
-      agent?: boolean;
-    }
-  ): Promise<Sent>;
-  /** Whether a route is registered. */
-  has(method: 'get' | 'put' | 'post', route: string): boolean;
-  /** The handlers registered for a route, middleware first. */
-  chain(method: 'get' | 'put' | 'post', route: string): (RouteHandler | RouteMiddleware)[];
-}
+/** The words DorkOS's person bar refuses an agent with, for an extension named Flow. */
+export const NOT_A_PERSON = "Only a person can change Flow's settings.";
 
-/** Make a fake router. Middleware runs in order and may answer instead of calling `next`. */
-export function fakeRouter(): FakeRouter {
-  const handlers = new Map<string, (RouteHandler | RouteMiddleware)[]>();
-  const add =
-    (method: string) =>
-    (route: string, ...chain: (RouteHandler | RouteMiddleware)[]) => {
-      handlers.set(`${method} ${route}`, chain);
-    };
-  return {
-    get: add('get'),
-    put: add('put'),
-    post: add('post'),
-    has: (method, route) => handlers.has(`${method} ${route}`),
-    chain: (method, route) => handlers.get(`${method} ${route}`) ?? [],
-    async call(method, route, req = {}) {
-      const chain = handlers.get(`${method} ${route}`);
-      if (chain === undefined) throw new Error(`no ${method} ${route}`);
-      const sent: Sent = { status: 200, body: undefined };
-      const res = {
-        status(code: number) {
-          sent.status = code;
-          return res;
-        },
-        json(body: unknown) {
-          sent.body = body;
-          return res;
-        },
-      };
-      const request = {
-        params: req.params ?? {},
-        body: req.body,
-        query: req.query ?? {},
-        agent: req.agent === true,
-      };
-      for (const handler of chain) {
-        let next = false;
-        await (handler as RouteMiddleware)(request, res, () => {
-          next = true;
-        });
-        if (!next) break;
-      }
-      return sent;
-    },
-  };
-}
+/** A caller DorkOS found to be a person. */
+export const PERSON: ExtensionCaller = { person: { ok: true } };
 
-/** The words the fake person guard refuses with. */
-export const NOT_A_PERSON = 'Only a person can change this.';
+/** DorkOS's verdict on an agent, worded for an extension named Flow. */
+export const AGENT_REFUSAL: PersonRefusal = {
+  ok: false,
+  status: 403,
+  body: {
+    error: NOT_A_PERSON,
+    code: 'extension_person_required',
+    message: `DorkOS changed nothing. ${NOT_A_PERSON} Ask them to do it in DorkOS.`,
+  },
+};
+
+/** A caller DorkOS refused: an agent. */
+export const AGENT: ExtensionCaller = { person: AGENT_REFUSAL };
+
+/** What a route answers an agent with: the verdict's status and body. */
+export const REFUSED_AGENT: Sent = { status: AGENT_REFUSAL.status, body: AGENT_REFUSAL.body };
 
 /**
- * A fake `ctx.requirePerson`: it refuses a request the fake router sent as an
- * agent, and lets everything else through.
+ * Call one of flow's routes the way DorkOS's fetch handler does: the path
+ * below the mount, a JSON body when one is given, and the caller as `c.env`.
+ *
+ * @param app - flow's routes.
+ * @param method - The HTTP method.
+ * @param route - The path below `/api/ext/flow`, with its query.
+ * @param opts - The body, and who is asking (a person unless `agent`).
+ * @returns The status and the parsed JSON body (`undefined` when empty).
  */
-export function fakePersonGuard() {
-  return vi.fn(
-    (
-      req: object,
-      res: { status(code: number): { json(body: unknown): unknown } },
-      next: () => void
-    ) => {
-      if ((req as { agent?: boolean }).agent === true) {
-        res.status(403).json({ error: NOT_A_PERSON });
-        return;
-      }
-      next();
-    }
+export async function send(
+  app: Hono<FlowEnv>,
+  method: 'GET' | 'PUT' | 'POST',
+  route: string,
+  opts: { body?: unknown; agent?: boolean } = {}
+): Promise<Sent> {
+  const res = await app.request(
+    route,
+    {
+      method,
+      headers: opts.body === undefined ? undefined : { 'content-type': 'application/json' },
+      body: opts.body === undefined ? undefined : JSON.stringify(opts.body),
+    },
+    opts.agent === true ? AGENT : PERSON
   );
+  const text = await res.text();
+  return { status: res.status, body: text === '' ? undefined : JSON.parse(text) };
 }
 
 /** A fake `ctx.projects` over a list the test can change. */
@@ -274,19 +240,14 @@ export function fakeCtx(
   opts: {
     summaries?: AccountSummary[];
     storage?: { data: unknown };
-    accounts?: 'full' | 'none' | 'no-mark-continued';
-    dorkHome?: boolean;
     usage?: AccountUsage[];
     extensionDir?: string;
     /** Core's project registry (default: none, as on a DorkOS from before it). */
     projects?: ProjectsApi;
-    /** Whether the host has the person guard (default: it does). */
-    personGuard?: boolean;
     /** More seams: the inbox, per-project settings, starting work. */
     extra?: Pick<DataProviderContext, 'inbox' | 'projectSettings' | 'sessions'>;
   } = {}
 ) {
-  const requirePerson = fakePersonGuard();
   const store = opts.storage ?? { data: null };
   const registered: AccountAdvisor[] = [];
   const unregister = vi.fn();
@@ -309,13 +270,6 @@ export function fakeCtx(
       return unregister;
     }),
   };
-  const mode = opts.accounts ?? 'full';
-  const ctxAccounts =
-    mode === 'none'
-      ? undefined
-      : mode === 'no-mark-continued'
-        ? { ...accounts, markContinued: undefined }
-        : accounts;
   const ctx: DataProviderContext = {
     storage: {
       loadData: async <T>() => store.data as T | null,
@@ -331,15 +285,13 @@ export function fakeCtx(
     extensionId: 'flow',
     extensionDir:
       opts.extensionDir ?? path.join(world.root, 'plugins', 'flow', '.dork', 'extensions', 'flow'),
-    ...(opts.dorkHome === false ? {} : { dorkHome: world.dorkHome }),
-    ...(ctxAccounts === undefined ? {} : { accounts: ctxAccounts }),
+    dorkHome: world.dorkHome,
+    accounts,
     ...(opts.projects === undefined ? {} : { projects: opts.projects }),
-    ...(opts.personGuard === false ? {} : { requirePerson }),
     ...opts.extra,
   };
   return {
     ctx,
-    requirePerson,
     accounts,
     registered,
     unregister,

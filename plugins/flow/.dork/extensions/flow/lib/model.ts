@@ -205,12 +205,6 @@ export interface FlowModel {
   decisions: FlowDecision[];
   /** The project name for `?cwd=`, for hosts without `currentProject` (§10). */
   cwdProject: string | null;
-  /**
-   * Whether pausing and resuming work from the Flow tab: false on a DorkOS
-   * with no way to tell a person from an agent, where those routes are not
-   * registered (§10).
-   */
-  canChange: boolean;
 }
 
 /** Whether `value` is a non-null, non-array object. */

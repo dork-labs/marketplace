@@ -1,6 +1,5 @@
 /**
- * Where flow's pages live (spec `flow-multiproject` §4.1, N8), and where a
- * link goes on a DorkOS without pages (§10).
+ * Where flow's pages live (spec `flow-multiproject` §4.1, N8).
  *
  * DorkOS mounts an extension's pages at `/x/<extension id>/<path>`: Flow home
  * at `/x/flow`, a project's lens at `/x/flow/p/<name>`, its settings at
@@ -10,16 +9,11 @@
  * @module @dorkos/flow/extension/ui/links
  */
 
-import type { ClientApi } from '../lib/host-types.ts';
-
 /** Flow home. */
 export const HOME_PATH = '/x/flow';
 
 /** The page paths flow registers, relative to {@link HOME_PATH}. */
 export const PAGE_PATHS = { home: '', project: 'p/:name', settings: 'p/:name/settings' } as const;
-
-/** Settings → Flow, on a DorkOS without pages (the Settings tab is `flow:fleet`). */
-export const SETTINGS_TAB_LINK = '?settings=flow:fleet';
 
 /**
  * The link that opens DorkOS's Inbox on one of flow's asks, or on nothing in
@@ -33,16 +27,6 @@ export const SETTINGS_TAB_LINK = '?settings=flow:fleet';
  */
 export function inboxLink(id?: string): string {
   return `/activity?inbox=${id === undefined ? 'open' : encodeURIComponent(id)}`;
-}
-
-/**
- * Whether this DorkOS can show flow's pages.
- *
- * @param api - The host API.
- * @returns True when it has `registerPage`.
- */
-export function hasPages(api: Pick<ClientApi, 'registerPage'>): boolean {
-  return typeof api.registerPage === 'function';
 }
 
 /**

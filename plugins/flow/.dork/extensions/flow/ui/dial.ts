@@ -178,7 +178,7 @@ export function AutonomyDial(props: AutonomyDialProps): Node {
     };
   }, [project.root, settings]);
 
-  const requireLogin = api.getState?.().requireLogin;
+  const requireLogin = api.getState().requireLogin;
   const loginNote =
     requireLogin === false
       ? h('p', { style: { ...MUTED, marginTop: '4px' } }, REQUIRE_LOGIN_TEXT)

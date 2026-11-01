@@ -9,9 +9,8 @@
  * commands that pause and resume.
  *
  * One live store (`ui/store.ts`) feeds all of them: it starts here and stops
- * in the cleanup. Each surface that needs a newer DorkOS (pages, the status
- * bar, the tab's dot) is added only where the host has it, and skipped
- * cleanly where it does not.
+ * in the cleanup. The status bar's run chip and the tab's dot are added only
+ * where the host has them, and skipped cleanly where it does not.
  *
  * DorkOS bundles this file with `react`, `react-dom` and
  * `@dorkos/extension-api` as externals and hands `activate` its extension API.

@@ -18,13 +18,19 @@ import { LOAD_FAILED_TEXT, createFlowTab } from '../flow-tab.ts';
 import {
   NOTHING_RUNNING_TEXT,
   NOT_SET_UP_TEXT,
-  PAUSE_FROM_CHAT_TEXT,
   SCHEDULES_OFF_TEXT,
   schedulesWaitingText,
   stoppedText,
 } from '../project-lens.ts';
 import { FlowStore } from '../store.ts';
-import { flowModel, flowProject, routeFetch, runRow } from './helpers.ts';
+import {
+  clientApi,
+  flowModel,
+  flowProject,
+  routeFetch,
+  runRow,
+  type StubAnswer,
+} from './helpers.ts';
 
 afterEach(() => {
   vi.unstubAllGlobals();
@@ -35,7 +41,7 @@ afterEach(() => {
 function host(project: ProjectRef | null | undefined, cwd: string | null = '/work/dorkos') {
   const state: ReadableState =
     project === undefined ? { currentCwd: cwd } : { currentCwd: cwd, currentProject: project };
-  return { navigate: vi.fn(), getState: () => state };
+  return clientApi(state);
 }
 
 /** Render the tab over a store serving `model` for every read. */
@@ -154,6 +160,12 @@ describe('the project lens', () => {
               escalated: false,
               detail: {},
             },
+            {
+              kind: 'settings-problem',
+              since: '2026-09-28T09:14:00.000Z',
+              escalated: false,
+              detail: {},
+            },
             { kind: 'sign-in', since: '2026-09-28T09:14:00.000Z', escalated: false, detail: {} },
           ],
         }),
@@ -165,8 +177,10 @@ describe('the project lens', () => {
     ).toBeTruthy();
     const signIn = screen.getByText(/Sign in to Linear again\./);
     expect(signIn.textContent).not.toContain('/flow');
+    // A fix flow can start has its button; one it can't has the way behind ⓘ.
+    expect(screen.getByRole('button', { name: 'Sign in' })).toBeTruthy();
     fireEvent.click(screen.getByRole('button', { name: 'How to do this' }));
-    expect(screen.getByText(/type \/flow:init and ask it to reconnect Linear/)).toBeTruthy();
+    expect(screen.getByText(/type \/flow:status to see what is wrong/)).toBeTruthy();
   });
 
   it('shows only the setup line for a project flow is installed in but not set up', async () => {
@@ -199,10 +213,13 @@ describe('the project lens', () => {
   });
 
   it('says while a finished pause’s schedules are still off, and to switch them on when DorkOS would not', async () => {
-    // The PATCH is refused, so the schedule stays on the list.
+    // The PATCH waits, then is refused, so the schedule stays on the list.
+    let refuse: (answer: StubAnswer) => void = () => {};
     routeFetch((method) =>
       method === 'PATCH'
-        ? { status: 403, body: {} }
+        ? new Promise<StubAnswer>((resolve) => {
+            refuse = resolve;
+          })
         : { status: 200, body: flowModel([flowProject('dorkos', { restoreSchedules: ['s-1'] })]) }
     );
     const api = host(DORKOS);
@@ -211,12 +228,14 @@ describe('the project lens', () => {
     await act(async () => {
       store.apply(
         flowModel([flowProject('dorkos', { restoreSchedules: ['s-1'] }), flowProject('blintz')], {
-          canChange: false,
           cwdProject: 'dorkos',
         })
       );
     });
     expect(screen.getByText(schedulesWaitingText('dorkos'))).toBeTruthy();
+    await act(async () => {
+      refuse({ status: 403, body: {} });
+    });
     await act(async () => {
       store.apply(
         flowModel([flowProject('dorkos', { restoreSchedules: ['s-1'] })], { cwdProject: 'dorkos' })
@@ -331,13 +350,6 @@ describe('pausing from the lens', () => {
     });
     expect(screen.getByRole('alert').textContent).toBe(PERSON_ONLY_MESSAGE);
   });
-
-  it('offers no Pause button where DorkOS cannot tell a person from an agent', async () => {
-    await renderTab(flowModel([flowProject('dorkos')], { canChange: false }), host(DORKOS));
-    expect(screen.queryByRole('button', { name: 'Pause' })).toBeNull();
-    const words = screen.getByText(PAUSE_FROM_CHAT_TEXT);
-    expect(words.textContent).not.toMatch(/\/flow:pause.*\/flow:pause/);
-  });
 });
 
 describe('the all-projects lens', () => {
@@ -369,8 +381,12 @@ describe('the all-projects lens', () => {
     const api = host({ root: '/work/new-repo', name: 'new-repo' });
     await renderTab(flowModel([flowProject('dorkos')]), api);
     expect(screen.getByText(new RegExp(SET_UP_HERE_TEXT))).toBeTruthy();
-    fireEvent.click(screen.getByRole('button', { name: 'Set up flow here' }));
-    expect(api.navigate).toHaveBeenCalledWith('/marketplace');
+    await act(async () => {
+      fireEvent.click(screen.getByRole('button', { name: 'Set up flow here' }));
+    });
+    expect(api.startWork).toHaveBeenCalledWith(
+      expect.objectContaining({ project: '/work/new-repo' })
+    );
   });
 
   it('offers nothing outside a repo, and says when no project has flow', async () => {
@@ -383,9 +399,7 @@ describe('the all-projects lens', () => {
 describe('schedules a finished pause left off', () => {
   it('shows the project in the all-projects lens until they are back on', async () => {
     await renderTab(
-      flowModel([flowProject('dorkos', { restoreSchedules: ['s-1'] }), flowProject('quiet')], {
-        canChange: false,
-      }),
+      flowModel([flowProject('dorkos', { restoreSchedules: ['s-1'] }), flowProject('quiet')]),
       host(null)
     );
     const line = screen.getByText(/^· Schedules stay off/).parentElement?.textContent;
@@ -436,14 +450,9 @@ describe('the pause menu in the lens', () => {
   });
 });
 
-describe('with flow’s pages', () => {
-  /** A host with pages, whose chat is in `project`. */
-  function pagesHost(project: ProjectRef | null) {
-    return { ...host(project), registerPage: vi.fn(() => () => {}) };
-  }
-
+describe('links to flow’s pages', () => {
   it('opens each all-projects line on its project’s page, and Flow home from the bottom', async () => {
-    const api = pagesHost(null);
+    const api = host(null);
     await renderTab(
       flowModel([
         flowProject('blintz', {
@@ -463,7 +472,7 @@ describe('with flow’s pages', () => {
   });
 
   it('opens the project’s settings page from ⚙, and Flow home from “need you elsewhere”', async () => {
-    const api = pagesHost(DORKOS);
+    const api = host(DORKOS);
     await renderTab(
       flowModel([flowProject('dorkos'), flowProject('blintz')], {
         decisions: [
@@ -495,29 +504,6 @@ describe('with flow’s pages', () => {
     expect(api.navigate).toHaveBeenLastCalledWith('/x/flow/p/dorkos/settings');
     fireEvent.click(screen.getByRole('button', { name: '1 needs you elsewhere →' }));
     expect(api.navigate).toHaveBeenLastCalledWith('/x/flow');
-  });
-
-  it('without pages, keeps lines plain, sends ⚙ to Settings → Flow, and has no Flow home link', async () => {
-    const api = host(null);
-    await renderTab(
-      flowModel([
-        flowProject('blintz', {
-          pause: { since: null, until: null },
-          conditions: [
-            { kind: 'paused', since: '2026-09-28T08:00:00.000Z', escalated: false, detail: {} },
-          ],
-        }),
-      ]),
-      api
-    );
-    expect(screen.getByText('blintz')).toBeTruthy();
-    expect(screen.queryByRole('button', { name: /blintz/ })).toBeNull();
-    expect(screen.queryByRole('button', { name: OPEN_HOME_TEXT })).toBeNull();
-    document.body.innerHTML = '';
-    const inProject = host(DORKOS);
-    await renderTab(flowModel([flowProject('dorkos')]), inProject);
-    fireEvent.click(screen.getByRole('button', { name: 'Flow settings for dorkos' }));
-    expect(inProject.navigate).toHaveBeenLastCalledWith('?settings=flow:fleet');
   });
 });
 

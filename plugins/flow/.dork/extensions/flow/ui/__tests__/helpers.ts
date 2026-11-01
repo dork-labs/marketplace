@@ -1,9 +1,10 @@
 /**
- * Fixtures for the Flow tab's tests: `GET /fleet` and `GET /model` bodies, and
- * stubbed fetches that answer flow's routes.
+ * Fixtures for the Flow tab's tests: `GET /fleet` and `GET /model` bodies,
+ * stubbed fetches that answer flow's routes, and a stub host API.
  */
 
 import { vi } from 'vitest';
+import type { ReadableState } from '../../lib/host-types.ts';
 import type { FleetAccount, FleetGroup, FleetView } from '../../lib/fleet.ts';
 import type { FlowModel, FlowProject, FlowRunRow } from '../../lib/model.ts';
 import type { ProjectSettingsView } from '../../lib/settings-shape.ts';
@@ -180,7 +181,6 @@ export function flowModel(projects: FlowProject[], extra: Partial<FlowModel> = {
     projects,
     decisions: [],
     cwdProject: null,
-    canChange: true,
     ...extra,
   };
 }
@@ -215,7 +215,7 @@ export function routeFetch(
   return { calls, fetchMock };
 }
 
-/** A `GET /settings/:name` body: every field at its default, a person able to save. */
+/** A `GET /settings/:name` body: every field at its default. */
 export function settingsView(extra: Partial<ProjectSettingsView> = {}): ProjectSettingsView {
   const field = <T>(value: T) => ({ value, source: 'default' as const, locked: null });
   return {
@@ -235,7 +235,26 @@ export function settingsView(extra: Partial<ProjectSettingsView> = {}): ProjectS
       parallel: field(1),
     },
     pauseDefault: 'tomorrow',
-    canChange: true,
     ...extra,
+  };
+}
+
+/**
+ * A stub of DorkOS's client API with every method flow's `minHostVersion`
+ * guarantees: the chat is nowhere, and nothing registered or started does
+ * anything. Spread it under a test's own fields.
+ *
+ * @param state - What `getState` answers.
+ */
+export function clientApi(state: ReadableState = { currentCwd: null }) {
+  return {
+    navigate: vi.fn(),
+    getState: () => state,
+    subscribe: vi.fn(() => () => {}),
+    registerSettingsTab: vi.fn(() => () => {}),
+    registerComponent: vi.fn(() => () => {}),
+    registerDialog: vi.fn(() => ({ open: vi.fn(), close: vi.fn() })),
+    registerPage: vi.fn(() => () => {}),
+    startWork: vi.fn(async () => ({ sessionId: 'started' })),
   };
 }

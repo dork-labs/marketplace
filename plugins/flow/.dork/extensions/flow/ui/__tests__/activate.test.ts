@@ -1,7 +1,9 @@
 /**
  * `activate` (spec `flow-multiproject` §3.5, §5.4, §10): it starts the one
- * store, registers the Settings tab, the Flow tab and the palette commands,
- * skips each palette piece a host lacks, and its cleanup removes them all.
+ * store, registers the Settings tab, the Flow tab, the pages and the palette
+ * commands, skips each optional piece a host lacks, and its cleanup removes
+ * them all. The pause dialogs are drawn the way DorkOS draws a registered
+ * dialog: mounted only while open, one extension dialog at a time.
  */
 
 import * as React from 'react';
@@ -9,27 +11,44 @@ import { act, fireEvent, render, screen } from '@testing-library/react';
 import type { ComponentType } from 'react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { activate } from '../../index.ts';
+import type { ExtensionDialogProps } from '../../lib/host-types.ts';
 import { FlowIcon } from '../flow-icon.ts';
 import { PANEL_TAB_ID } from '../marker.ts';
 import { COMMANDS, NOT_IN_PROJECT_TEXT } from '../palette.ts';
 import { CHIP_LABEL, chipUrgent, chipWhen } from '../run-chip.ts';
-import { flowModel, flowProject, routeFetch } from './helpers.ts';
+import { clientApi, flowModel, flowProject, routeFetch } from './helpers.ts';
 
 afterEach(() => {
   vi.unstubAllGlobals();
 });
+
+/** One registered dialog, and whether DorkOS has it open. */
+interface HostDialog {
+  component: ComponentType<ExtensionDialogProps>;
+  open: boolean;
+}
 
 /** A full host, recording what the extension registers. */
 function fullHost(
   state: { currentCwd: string | null; currentProject?: unknown } = { currentCwd: null }
 ) {
   const commands = new Map<string, () => void>();
-  const dialogs = new Map<string, { component: ComponentType; open: ReturnType<typeof vi.fn> }>();
+  const dialogs = new Map<string, HostDialog>();
+  const listeners = new Set<() => void>();
+  const changed = () => {
+    for (const listener of listeners) listener();
+  };
+  /** DorkOS's open state: opening one extension dialog closes every other. */
+  const setOpen = (id: string, open: boolean) => {
+    for (const [other, dialog] of dialogs) {
+      if (open && other !== id) dialog.open = false;
+    }
+    dialogs.get(id)!.open = open;
+    changed();
+  };
   const removed: string[] = [];
   const api = {
-    navigate: vi.fn(),
-    getState: () => state as never,
-    subscribe: vi.fn(() => () => {}),
+    ...clientApi(state as never),
     notify: vi.fn(),
     registerSettingsTab: vi.fn(() => () => removed.push('settings')),
     registerComponent: vi.fn(() => () => removed.push('panel')),
@@ -37,13 +56,36 @@ function fullHost(
       commands.set(id, callback);
       return () => removed.push(`command:${id}`);
     }),
-    registerDialog: vi.fn((id: string, component: ComponentType) => {
-      const entry = { component, open: vi.fn(), close: vi.fn() };
-      dialogs.set(id, entry);
-      return entry;
+    registerDialog: vi.fn((id: string, component: ComponentType<ExtensionDialogProps>) => {
+      dialogs.set(id, { component, open: false });
+      return { open: () => setOpen(id, true), close: () => setOpen(id, false) };
     }),
   };
-  return { api, commands, dialogs, removed };
+  /** DorkOS's dialog host: each open dialog, mounted with its props. */
+  function Dialogs() {
+    const [, redraw] = React.useState(0);
+    React.useEffect(() => {
+      const listener = () => redraw((n) => n + 1);
+      listeners.add(listener);
+      return () => {
+        listeners.delete(listener);
+      };
+    }, []);
+    return React.createElement(
+      React.Fragment,
+      null,
+      ...[...dialogs]
+        .filter(([, dialog]) => dialog.open)
+        .map(([id, dialog]) =>
+          React.createElement(dialog.component, {
+            key: id,
+            open: true,
+            onOpenChange: (open: boolean) => setOpen(id, open),
+          })
+        )
+    );
+  }
+  return { api, commands, dialogs, removed, Dialogs };
 }
 
 describe('activate', () => {
@@ -88,50 +130,27 @@ describe('activate', () => {
     );
   });
 
-  it('skips the palette on a host without commands, and the pause dialogs without dialogs', () => {
+  it('skips the palette on a host without commands', () => {
     routeFetch(() => ({ status: 200, body: flowModel([]) }));
-    const bare = {
-      navigate: vi.fn(),
-      registerSettingsTab: vi.fn(() => () => {}),
-      registerComponent: vi.fn(() => () => {}),
-    };
-    activate(bare)();
-    const { api } = fullHost();
-    const noDialogs = { ...api, registerDialog: undefined };
-    activate(noDialogs)();
-    expect(api.registerCommand.mock.calls.map((call) => call[1])).toEqual([
-      COMMANDS.resumeProject,
-      COMMANDS.resumeAll,
-    ]);
+    const bare = clientApi();
+    expect(() => activate(bare)()).not.toThrow();
+    expect(bare.registerDialog).not.toHaveBeenCalled();
   });
 
   it('opens the pause dialog from the palette, which offers Pause all outside a flow project', async () => {
     routeFetch(() => ({ status: 200, body: flowModel([flowProject('dorkos')]) }));
-    const { api, commands, dialogs } = fullHost({ currentCwd: '/x', currentProject: null });
+    const { api, commands, Dialogs } = fullHost({ currentCwd: '/x', currentProject: null });
     const cleanup = activate(api);
     await act(async () => {});
-    const dialog = dialogs.get('pause-project')!;
-    // DorkOS draws every registered dialog all the time, closed.
-    render(React.createElement(dialog.component, { open: false } as never));
+    render(React.createElement(Dialogs));
     expect(screen.queryByText(NOT_IN_PROJECT_TEXT)).toBeNull();
     act(() => commands.get('pause-project')?.());
-    expect(dialog.open).toHaveBeenCalledTimes(1);
     expect(screen.getByRole('dialog', { name: COMMANDS.pauseProject })).toBeTruthy();
     expect(screen.getByText(NOT_IN_PROJECT_TEXT)).toBeTruthy();
     fireEvent.click(screen.getByRole('button', { name: 'Pause all projects instead' }));
     expect(screen.getByRole('menu', { name: 'Pause all projects' })).toBeTruthy();
     cleanup();
   });
-
-  /** DorkOS 0.92's DialogHost: `open` from a store key flow's dialog never has, and a setter that throws. */
-  function coreDialogProps() {
-    return {
-      open: false,
-      onOpenChange: vi.fn(() => {
-        throw new TypeError('setStoreOpen is not a function');
-      }),
-    };
-  }
 
   /** A host with a model, the chat in dorkos, and both pause dialogs drawn as DorkOS draws them. */
   async function openableHost(model = flowModel([flowProject('dorkos')])) {
@@ -142,24 +161,16 @@ describe('activate', () => {
     });
     const cleanup = activate(host.api);
     await act(async () => {});
-    const props = coreDialogProps();
     const opener = document.createElement('button');
     opener.textContent = 'palette';
     document.body.append(opener);
     opener.focus();
-    const view = render(
-      React.createElement(
-        React.Fragment,
-        null,
-        React.createElement(host.dialogs.get('pause-project')!.component, props as never),
-        React.createElement(host.dialogs.get('pause-all')!.component, props as never)
-      )
-    );
-    return { ...host, cleanup, props, opener, view };
+    const view = render(React.createElement(host.Dialogs));
+    return { ...host, cleanup, opener, view };
   }
 
   it('draws nothing until opened, and closes on Escape or outside it (DOR-2533 live check)', async () => {
-    const { commands, cleanup, view, props, opener } = await openableHost();
+    const { commands, cleanup, view, dialogs, opener } = await openableHost();
     const errors: unknown[] = [];
     const onError = (event: ErrorEvent) => errors.push(event.error);
     window.addEventListener('error', onError);
@@ -171,36 +182,12 @@ describe('activate', () => {
     act(() => commands.get('pause-all')?.());
     fireEvent.click(screen.getByRole('dialog').parentElement!);
     expect(view.container.innerHTML).toBe('');
-    // DorkOS did not open it, so its setter (which throws) is never called.
-    expect(props.onOpenChange).not.toHaveBeenCalled();
+    // Closing told DorkOS, which keeps the open state.
+    expect(dialogs.get('pause-all')!.open).toBe(false);
     expect(errors).toEqual([]);
     expect(document.activeElement).toBe(opener);
     window.removeEventListener('error', onError);
     opener.remove();
-    cleanup();
-  });
-
-  it('never lets DorkOS’s close setter break closing, when DorkOS did open it', async () => {
-    routeFetch(() => ({ status: 200, body: flowModel([flowProject('dorkos')]) }));
-    const { api, dialogs } = fullHost();
-    const cleanup = activate(api);
-    await act(async () => {});
-    const onOpenChange = vi.fn(() => {
-      throw new TypeError('setStoreOpen is not a function');
-    });
-    const errors: unknown[] = [];
-    const onError = (event: ErrorEvent) => errors.push(event.error);
-    window.addEventListener('error', onError);
-    render(
-      React.createElement(dialogs.get('pause-all')!.component, {
-        open: true,
-        onOpenChange,
-      } as never)
-    );
-    fireEvent.keyDown(window, { key: 'Escape' });
-    expect(onOpenChange).toHaveBeenCalledWith(false);
-    expect(errors).toEqual([]);
-    window.removeEventListener('error', onError);
     cleanup();
   });
 
@@ -213,14 +200,12 @@ describe('activate', () => {
           answer = () => resolve({ status: 200, body: flowModel([flowProject('dorkos')]) });
         })
     );
-    const { api, commands, dialogs } = fullHost({ currentCwd: '/x', currentProject: null });
+    const { api, commands, Dialogs } = fullHost({ currentCwd: '/x', currentProject: null });
     const cleanup = activate(api);
     const opener = document.createElement('button');
     document.body.append(opener);
     opener.focus();
-    render(
-      React.createElement(dialogs.get('pause-project')!.component, coreDialogProps() as never)
-    );
+    render(React.createElement(Dialogs));
     act(() => commands.get('pause-project')?.());
     const dialog = screen.getByRole('dialog');
     expect(screen.getByText('Loading…')).toBeTruthy();
@@ -282,29 +267,21 @@ describe('activate', () => {
     cleanup();
   });
 
-  it('puts the hidden dialog back as it was, and tells DorkOS it closed, when the other replaces it', async () => {
-    const { api, commands, dialogs } = fullHost({ currentCwd: '/x', currentProject: null });
+  it('opens each time from its first state, after the other pause dialog replaced it', async () => {
+    const { api, commands, dialogs, Dialogs } = fullHost({
+      currentCwd: '/x',
+      currentProject: null,
+    });
     routeFetch(() => ({ status: 200, body: flowModel([flowProject('dorkos')]) }));
     const cleanup = activate(api);
     await act(async () => {});
-    const props = coreDialogProps();
-    render(
-      React.createElement(
-        React.Fragment,
-        null,
-        React.createElement(dialogs.get('pause-project')!.component, props as never),
-        React.createElement(dialogs.get('pause-all')!.component, props as never)
-      )
-    );
-    const project = dialogs.get('pause-project')! as unknown as { close: ReturnType<typeof vi.fn> };
-    project.close.mockImplementation(() => {
-      throw new TypeError('not yet');
-    });
+    render(React.createElement(Dialogs));
     act(() => commands.get('pause-project')?.());
     fireEvent.click(screen.getByRole('button', { name: 'Pause all projects instead' }));
     expect(screen.getByRole('menu', { name: 'Pause all projects' })).toBeTruthy();
     act(() => commands.get('pause-all')?.());
-    expect(project.close).toHaveBeenCalledTimes(1);
+    expect(dialogs.get('pause-project')!.open).toBe(false);
+    expect(screen.getAllByRole('dialog')).toHaveLength(1);
     fireEvent.keyDown(window, { key: 'Escape' });
     act(() => commands.get('pause-project')?.());
     // Back to its own first state: this chat is in no flow project.
@@ -412,7 +389,7 @@ describe('activate', () => {
     });
     const cleanup = activate(api);
     const dialog = dialogs.get('pause-project')!;
-    render(React.createElement(dialog.component, { open: true } as never));
+    render(React.createElement(dialog.component, { open: true, onOpenChange: vi.fn() }));
     expect(screen.getByText('Loading…')).toBeTruthy();
     await act(async () => {});
     // The model arrived after the dialog opened, and the dialog followed it.
@@ -471,10 +448,10 @@ describe('activate', () => {
     );
   });
 
-  it('skips each newer surface cleanly on a DorkOS without its seam', async () => {
+  it('skips each optional surface cleanly on a DorkOS without its seam', async () => {
     routeFetch(() => ({ status: 200, body: flowModel([flowProject('dorkos')]) }));
     const { api } = fullHost();
-    for (const missing of ['registerPage', 'registerStatusBarItem', 'setTabMarker'] as const) {
+    for (const missing of ['registerStatusBarItem', 'setTabMarker'] as const) {
       const host = {
         ...api,
         registerPage: vi.fn(() => () => {}),
@@ -491,7 +468,7 @@ describe('activate', () => {
         expect.any(Function),
         expect.anything()
       );
-      if (missing !== 'registerPage') expect(host.registerPage).toHaveBeenCalledTimes(3);
+      expect(host.registerPage).toHaveBeenCalledTimes(3);
       if (missing !== 'registerStatusBarItem') {
         expect(host.registerStatusBarItem).toHaveBeenCalledTimes(1);
       }

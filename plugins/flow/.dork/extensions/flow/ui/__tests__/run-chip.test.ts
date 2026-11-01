@@ -28,7 +28,7 @@ import {
   type ChipClock,
 } from '../run-chip.ts';
 import { FlowStore, STALE_STORE_MS } from '../store.ts';
-import { flowModel, flowProject, runRow } from './helpers.ts';
+import { clientApi, flowModel, flowProject, runRow } from './helpers.ts';
 
 afterEach(() => {
   vi.unstubAllGlobals();
@@ -223,7 +223,7 @@ describe('the words', () => {
 describe('the chip', () => {
   /** A store holding `model`, heard from just now. */
   function storeWith(model: FlowModel) {
-    const store = new FlowStore({}, () => NOW);
+    const store = new FlowStore(clientApi(), () => NOW);
     store.apply(model);
     return store;
   }
@@ -243,7 +243,7 @@ describe('the chip', () => {
         ],
       }),
     ]);
-    const api = { navigate: vi.fn(), registerPage: vi.fn() };
+    const api = { navigate: vi.fn() };
     const Chip = createRunChip(api, storeWith(model), () => NOW);
     render(
       React.createElement(
@@ -277,7 +277,6 @@ describe('the chip', () => {
     const chip = screen.getByRole('button', { name: /^DOR-1, Building/ });
     fireEvent.click(chip);
     const list = screen.getByRole('dialog');
-    expect(screen.queryByRole('button', { name: /in Flow/ })).toBeNull();
     fireEvent.keyDown(list, { key: 'Escape' });
     expect(screen.queryByRole('dialog')).toBeNull();
     expect(document.activeElement).toBe(chip);
@@ -293,7 +292,7 @@ describe('the chip', () => {
 describe('registerRunChip', () => {
   it('adds one status-bar item with pure when and urgent', () => {
     const registerStatusBarItem = vi.fn(() => () => {});
-    registerRunChip({ navigate: vi.fn(), registerStatusBarItem }, new FlowStore({}));
+    registerRunChip({ navigate: vi.fn(), registerStatusBarItem }, new FlowStore(clientApi()));
     expect(registerStatusBarItem).toHaveBeenCalledWith('run', expect.any(Function), {
       label: CHIP_LABEL,
       priority: CHIP_PRIORITY,
@@ -303,14 +302,16 @@ describe('registerRunChip', () => {
   });
 
   it('adds nothing on a DorkOS without a status bar for extensions', () => {
-    expect(() => registerRunChip({ navigate: vi.fn() }, new FlowStore({}))()).not.toThrow();
+    expect(() =>
+      registerRunChip({ navigate: vi.fn() }, new FlowStore(clientApi()))()
+    ).not.toThrow();
   });
 });
 
 describe('review fixes', () => {
   /** A store holding `model`. */
   function storeOf(model: FlowModel) {
-    const store = new FlowStore({}, () => NOW);
+    const store = new FlowStore(clientApi(), () => NOW);
     store.apply(model);
     return store;
   }

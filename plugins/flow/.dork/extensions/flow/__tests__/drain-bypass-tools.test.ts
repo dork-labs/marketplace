@@ -138,6 +138,6 @@ describe('the declared tools', () => {
     expect(set?.inputSchema.additionalProperties).toBe(false);
     const get = manifest.tools.find((t) => t.name === 'get_drain_bypass');
     expect(get?.tier).toBe('observe');
-    expect(manifest.minHostVersion).toBe('0.98.0');
+    expect(manifest.minHostVersion).toBe('0.116.0');
   });
 });

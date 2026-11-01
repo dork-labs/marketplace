@@ -3,8 +3,7 @@
  * settings as each project's own page, with a project switcher on top, then
  * "This computer", the accounts flow may use, as before.
  *
- * - The switcher starts on the project ⚙ asked for (on a DorkOS without flow's
- *   pages), else the chat's project, else the first by name. The heading
+ * - The switcher starts on the chat's project, else the first by name. The heading
  *   always names the project being edited ("Editing dorkos"), so a change is
  *   never made to the wrong one by mistake.
  * - Where DorkOS keeps accounts to projects itself, an account whose "Only
@@ -63,20 +62,16 @@ export const MIGRATION_DEPS: MigrationDeps = {
 };
 
 /**
- * Which project the switcher starts on: the one ⚙ asked for, else the chat's,
- * else the first by name.
+ * Which project the switcher starts on: the chat's, else the first by name.
  *
  * @param projects - Every flow project.
- * @param asked - The project ⚙ asked for, or `null`.
  * @param current - The chat's project root, or `null`.
  * @returns The project's name, or `null` with no projects.
  */
 export function startingProject(
   projects: readonly FlowProject[],
-  asked: string | null,
   current: string | null
 ): string | null {
-  if (asked !== null && projects.some((project) => project.name === asked)) return asked;
   const here = projects.find((project) => project.root === current);
   if (here !== undefined) return here.name;
   return [...projects].sort((a, b) => a.name.localeCompare(b.name))[0]?.name ?? null;
@@ -113,14 +108,6 @@ export function createSettingsTab(
     const [reloadKey, setReloadKey] = useState(0);
     const [seen, setSeen] = useState(0);
     const switcherId = useId();
-
-    // ⚙ picks a project for this visit only.
-    useEffect(
-      () => () => {
-        store.settingsProject = null;
-      },
-      []
-    );
 
     // Opening the tab only reads: what could move, and DorkOS's rules. Nothing is written.
     useEffect(() => {
@@ -192,7 +179,7 @@ export function createSettingsTab(
       snapshot.currentProject?.root ??
       projects.find((project) => project.name === snapshot.model?.cwdProject)?.root ??
       null;
-    const name = picked ?? startingProject(projects, store.settingsProject, current);
+    const name = picked ?? startingProject(projects, current);
     const project = projects.find((candidate) => candidate.name === name) ?? null;
 
     return h(
