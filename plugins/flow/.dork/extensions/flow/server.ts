@@ -298,15 +298,11 @@ export function createFlowExtension(
   const storage = new SharedStorage(ctx.storage);
   // A person's grant for unattended bypass (DOR-3062). DorkOS runs
   // set_drain_bypass only after a person grants its approval card (it is
-  // destructive in extension.json); hosts before 0.98.0 have no tools.
+  // destructive in extension.json).
   // The grants live in the extension's own files folder, which no DorkOS route
   // writes; never in ctx.storage, whose blob a person-less HTTP route can write.
-  const filesDir =
-    ctx.filesDir ??
-    (ctx.dorkHome !== undefined
-      ? path.join(ctx.dorkHome, 'extension-data', ctx.extensionId, 'files')
-      : undefined);
-  if (ctx.tools !== undefined && filesDir !== undefined) {
+  const filesDir = ctx.filesDir ?? path.join(dorkHome, 'extension-data', ctx.extensionId, 'files');
+  if (ctx.tools !== undefined) {
     const grants = new GrantStore(filesDir);
     ctx.tools.handle('set_drain_bypass', (input) => setDrainBypass(grants, input, new Date(now())));
     ctx.tools.handle('get_drain_bypass', (input) => getDrainBypass(grants, input, new Date(now())));

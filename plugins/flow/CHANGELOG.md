@@ -4,6 +4,15 @@ Installs of this plugin are pinned to a commit SHA, so a fix here does not reach
 you until you **reinstall it** (Marketplace → flow → reinstall, or re-run your
 `--plugin-dir` checkout's `git pull`). Each entry below says whether that matters.
 
+## 0.68.0
+
+**Flow's parts in the DorkOS app now need DorkOS 0.116.0 or newer. Update DorkOS first, then reinstall flow to get it.**
+
+- On DorkOS 0.116.0 or newer, the Flow tab, Flow home, pausing and the settings pages work as before. Only a person, never an agent, can pause a project or change a setting, as before.
+- On an older DorkOS, DorkOS doesn't load flow's extension, so the Flow tab, Flow home and the run chip don't show. `/flow` in a chat works as before.
+- Flow no longer has notes for a DorkOS too old for it: "Update DorkOS to choose how flow uses your accounts", "Update DorkOS to change flow's settings here", "Pause from a chat in this project" and the read-only settings page are gone.
+- Under the hood, flow's 15 app routes are now served by a Hono fetch handler instead of the Express router DorkOS is retiring. Paths, answers and who may call each route are unchanged; a path flow doesn't serve now answers a JSON 404.
+
 ## 0.67.1
 
 **Fix: flow installs again. On current DorkOS, installing 0.66.1 or 0.67.0 failed with "Extension 'flow' failed to compile: Compilation failed for flow" (the detail says an import "resolves to …, outside this plugin's folder") and rolled back. Install 0.67.1.**

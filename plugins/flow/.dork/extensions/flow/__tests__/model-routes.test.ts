@@ -24,6 +24,7 @@ import {
   parseUntil,
 } from '../lib/model-service.ts';
 import { pauseFlagPath } from '../lib/model.ts';
+import { UNKNOWN_CALLER } from '../lib/person.ts';
 import register, { createFlowExtension } from '../server.ts';
 import {
   AGENT,
@@ -242,6 +243,26 @@ describe('the person bar', () => {
     for (const route of ['/model', '/fleet', '/capacity', '/settings/main', '/fleet/migration']) {
       expect((await send(app, 'GET', route, { agent: true })).status).toBe(200);
     }
+    // No verdict, or one flow cannot read, fails closed on every write.
+    for (const caller of [undefined, {}, { person: { ok: 'yes' } }, { person: { ok: false } }]) {
+      for (const write of writes) {
+        const [method, pattern] = write.split(' ') as ['PUT' | 'POST', string];
+        const route = pattern.replace(/:name/g, 'main').replace(/:key/g, 'claude-code%3Awork');
+        const res = await app.request(
+          route,
+          {
+            method,
+            headers: { 'content-type': 'application/json' },
+            body: JSON.stringify({ all: true, handoff: 'ask', role: 'main' }),
+          },
+          caller as never
+        );
+        expect(res.status, write).toBe(403);
+        expect(await res.json(), write).toEqual(UNKNOWN_CALLER.body);
+      }
+    }
+    expect(flag(world.main)).toBeNull();
+    expect(readFleet(world.dorkHome)).toEqual({ v: 1, handoff: 'auto' });
   });
 });
 

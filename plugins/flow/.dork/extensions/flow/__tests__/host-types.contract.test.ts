@@ -2,7 +2,10 @@
  * The drift guard (spec `flow-multiproject` §10.1): flow's mirror of the host
  * types (`lib/host-types.ts`) against core's seam contract, vendored whole into
  * `lib/__contract__/` from dork-labs/dorkos
- * `packages/extension-api/src/__fixtures__/seam-contract/` (1.5.0, DOR-2856).
+ * `packages/extension-api/src/__fixtures__/seam-contract/` (1.4.0). The
+ * fetch-handler types are not in that contract; they are checked against
+ * `lib/__contract__/fetch-handler.contract.ts`, copied from core's released
+ * `server-entry.ts` (DorkOS 0.116.0).
  * Core checks the same file against its real types in both
  * directions, so a seam core renames or reshapes fails here as soon as the
  * fixture is refreshed, never at run time on someone's machine.
@@ -19,6 +22,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { describe, expect, expectTypeOf, it } from 'vitest';
 import type * as Contract from '../lib/__contract__/seams.contract.ts';
+import type * as FetchContract from '../lib/__contract__/fetch-handler.contract.ts';
 import type {
   DataProviderContext,
   ExtensionCaller,
@@ -88,23 +92,23 @@ describe('lib/host-types.ts against the contract', () => {
   });
 
   it('reads the person bar’s verdict exactly as core hands it to a fetch handler', () => {
-    expectTypeOf<Contract.PersonRefusal>().toExtend<PersonRefusal>();
-    expectTypeOf<PersonRefusal>().toExtend<Contract.PersonRefusal>();
-    expectTypeOf<Contract.PersonCheck>().toExtend<PersonCheck>();
-    expectTypeOf<PersonCheck>().toExtend<Contract.PersonCheck>();
-    expectTypeOf<Contract.ExtensionCaller>().toExtend<ExtensionCaller>();
-    expectTypeOf<ExtensionCaller>().toExtend<Contract.ExtensionCaller>();
+    expectTypeOf<FetchContract.PersonRefusal>().toExtend<PersonRefusal>();
+    expectTypeOf<PersonRefusal>().toExtend<FetchContract.PersonRefusal>();
+    expectTypeOf<FetchContract.PersonCheck>().toExtend<PersonCheck>();
+    expectTypeOf<PersonCheck>().toExtend<FetchContract.PersonCheck>();
+    expectTypeOf<FetchContract.ExtensionCaller>().toExtend<ExtensionCaller>();
+    expectTypeOf<ExtensionCaller>().toExtend<FetchContract.ExtensionCaller>();
     // flow's Hono app reads the caller as `c.env`.
-    expectTypeOf<Contract.ExtensionCaller>().toExtend<FlowEnv['Bindings']>();
+    expectTypeOf<FetchContract.ExtensionCaller>().toExtend<FlowEnv['Bindings']>();
   });
 
   it('serves its routes with a fetch handler core takes', () => {
-    expectTypeOf<ExtensionFetchHandler>().toExtend<Contract.ExtensionFetchHandler>();
-    expectTypeOf<Contract.ExtensionFetchHandler>().toExtend<ExtensionFetchHandler>();
-    expectTypeOf<ServerExtensionHandlers>().toExtend<Contract.ServerExtensionHandlers>();
-    expectTypeOf<Contract.ServerExtensionHandlers>().toExtend<ServerExtensionHandlers>();
+    expectTypeOf<ExtensionFetchHandler>().toExtend<FetchContract.ExtensionFetchHandler>();
+    expectTypeOf<FetchContract.ExtensionFetchHandler>().toExtend<ExtensionFetchHandler>();
+    expectTypeOf<ServerExtensionHandlers>().toExtend<FetchContract.ServerExtensionHandlers>();
+    expectTypeOf<FetchContract.ServerExtensionHandlers>().toExtend<ServerExtensionHandlers>();
     // What flow's register() returns is what core serves.
-    expectTypeOf<ReturnType<typeof register>>().toExtend<Contract.ServerExtensionHandlers>();
+    expectTypeOf<ReturnType<typeof register>>().toExtend<FetchContract.ServerExtensionHandlers>();
   });
 
   it('starts work in a new chat as core ships it', () => {

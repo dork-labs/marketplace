@@ -1,7 +1,7 @@
 {
   "schemaVersion": 1,
   "name": "flow",
-  "version": "0.67.1",
+  "version": "0.68.0",
   "type": "plugin",
   "description": "The /flow workflow engine: a PM-agnostic, dual-mode (manual and autonomous) system that carries product work across the full stage spine (capture, triage, ideate, specify, decompose, execute, verify, review, done). Ships the stage commands, the stage skills, the runnable-TypeScript engine oracles, the tracker adapter contract, and a schedulable autonomy tick.",
   "displayName": "Flow",
@@ -23,6 +23,7 @@
     "project-management"
   ],
   "icon": "🌊",
+  "minDorkosVersion": "0.116.0",
   "layers": [
     "commands",
     "skills",

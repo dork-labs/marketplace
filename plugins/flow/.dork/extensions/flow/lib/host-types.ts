@@ -312,8 +312,9 @@ export interface ReadableState {
 
 /**
  * The server context DorkOS injects (DorkOS `DataProviderContext`). Flow's
- * `minHostVersion` guarantees `dorkHome` and `accounts` (DorkOS 0.88.0); the
- * seams marked optional below are still probed before use.
+ * `minHostVersion` (DorkOS 0.116.0, the first to serve a fetch handler with
+ * its caller) guarantees `dorkHome` and `accounts`; the seams marked optional
+ * below are still probed before use.
  */
 export interface DataProviderContext {
   /** Scoped persistent storage for extension data. */
@@ -349,7 +350,7 @@ export interface DataProviderContext {
   readonly sessions?: SessionsApi;
   /**
    * Binds the handlers for the tools `extension.json` declares, only while
-   * `register()` runs. Missing on a DorkOS before 0.98.0.
+   * `register()` runs. Probed before use.
    */
   readonly tools?: {
     handle(
