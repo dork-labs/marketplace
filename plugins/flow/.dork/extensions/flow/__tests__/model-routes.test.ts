@@ -203,15 +203,23 @@ describe('the person bar', () => {
     writeFleet(world.dorkHome, { handoff: 'auto' });
     const { app } = setup();
     await model(app);
-    // Every route the app serves that is not a read, so a write route added
-    // later is held to the same bar without anyone listing it here.
-    const writes = [
-      ...new Set(
-        app.routes
-          .filter((route) => !['GET', 'HEAD', 'ALL'].includes(route.method))
-          .map((route) => `${route.method} ${route.path}`)
-      ),
-    ];
+    const served = [...new Set(app.routes.map((route) => `${route.method} ${route.path}`))];
+    // Every GET route, listed: a new one fails here until someone decides it
+    // only reads, or puts it behind the bar. GET /model?cwd= also remembers
+    // the folder and reports it to DorkOS's project registry with no bar; that
+    // is a known gap, to be closed in its own ticket.
+    expect(served.filter((route) => route.startsWith('GET ')).sort()).toEqual([
+      'GET /capacity',
+      'GET /fleet',
+      'GET /fleet/migration',
+      'GET /model',
+      'GET /settings/:name',
+    ]);
+    // Every other route (any method, `app.all` included), so a write route
+    // added later is held to the same bar without anyone listing it here.
+    const writes = served.filter(
+      (route) => !route.startsWith('GET ') && !route.startsWith('HEAD ')
+    );
     expect(writes.sort()).toEqual(
       expect.arrayContaining([
         'POST /decisions/:key',
@@ -227,14 +235,20 @@ describe('the person bar', () => {
       ])
     );
     for (const write of writes) {
-      const [method, pattern] = write.split(' ') as ['PUT' | 'POST', string];
+      const [declared, pattern] = write.split(' ') as [string, string];
       // A real value for each parameter: the project, or an account's key.
       const route = pattern.replace(/:name/g, 'main').replace(/:key/g, 'claude-code%3Awork');
-      const sent = await send(app, method, route, {
-        agent: true,
-        body: { all: true, handoff: 'ask', role: 'main' },
-      });
-      expect(sent, write).toEqual(REFUSED_AGENT);
+      // An `app.all` route answers every method, so it is tried as a read too.
+      const methods = (declared === 'ALL' ? ['GET', 'POST', 'PUT'] : [declared]) as (
+        'GET' | 'PUT' | 'POST'
+      )[];
+      for (const method of methods) {
+        const sent = await send(app, method, route, {
+          agent: true,
+          body: method === 'GET' ? undefined : { all: true, handoff: 'ask', role: 'main' },
+        });
+        expect(sent, `${method} via ${write}`).toEqual(REFUSED_AGENT);
+      }
     }
     // The routes never ran: nothing was paused or written.
     expect(flag(world.main)).toBeNull();
@@ -253,7 +267,8 @@ describe('the person bar', () => {
     // No verdict, or one flow cannot read, fails closed on every write.
     for (const caller of [undefined, {}, { person: { ok: 'yes' } }, { person: { ok: false } }]) {
       for (const write of writes) {
-        const [method, pattern] = write.split(' ') as ['PUT' | 'POST', string];
+        const [declared, pattern] = write.split(' ') as [string, string];
+        const method = declared === 'ALL' ? 'POST' : declared;
         const route = pattern.replace(/:name/g, 'main').replace(/:key/g, 'claude-code%3Awork');
         const res = await app.request(
           route,
