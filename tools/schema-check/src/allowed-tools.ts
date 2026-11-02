@@ -16,11 +16,14 @@
  *
  * - A bare tool name (`Read`, `Grep`), except the ones that are a whole shell
  *   or every file write: {@link UNSCOPED}.
- * - One MCP tool, `mcp__<server>__<tool>`. A bare server, or any `*`, is every
- *   tool on it.
+ * - One MCP tool, `mcp__<server>__<tool>`, on a server the package ships. A
+ *   bare server, or any `*`, is every tool on it; a tool on another server
+ *   needs a {@link REVIEWED_COMMANDS} entry (DOR-3311).
  * - `Edit(<path>)`, which also governs `Write`, on a path that starts with a
- *   literal folder and never names `.git` or `.claude` (see `editBreach`).
+ *   literal folder and never names a dot-file, a dot-folder or another file a
+ *   tool runs later (see `editBreach`, DOR-3311).
  *   `Edit(./**)` only for the files in {@link PROJECT_WRITERS}.
+ * - `SlashCommand(/<package>:<command>)` for the package's own commands only.
  * - `Bash(<exact command>)`, or a `:*` prefix on one of the package's own
  *   scripts by `${CLAUDE_PLUGIN_ROOT}`, so its arguments reach that script and
  *   never an interpreter. The script has to be a real file in the package.
@@ -56,6 +59,7 @@ import path from 'node:path';
 import yaml from 'js-yaml';
 import { parseFrontmatter } from '@dorkos/skills/frontmatter';
 import { PLUGINS_DIR, pluginDirs } from './versions.ts';
+import { ownServerPrefixes, packageName, readJson, sourceDir } from './declarations.ts';
 import type { Finding } from './validate.ts';
 
 /**
@@ -152,8 +156,31 @@ export function splitRules(value: unknown): string[] {
   return [...new Set([...splitByDepth(text), ...splitByFlag(text)])];
 }
 
+/**
+ * Claude Code matches a path rule the way .gitignore does, so one with no
+ * folder matches that name at any depth: `Edit(ci.yml)` wrote
+ * `.github/workflows/ci.yml` on Claude Code 2.1.309 (DOR-3311 review).
+ */
+const ANY_DEPTH =
+  'a path with no folder matches that name in every folder, .github/workflows included; start it with a literal folder, like docs/notes.md';
+
 /** True when a path segment is a glob, not a literal name. */
 const isGlob = (segment: string): boolean => /[*?[\]{}!]/.test(segment);
+
+/**
+ * Files without a leading dot that a tool runs later on its own: npm and
+ * workspace scripts, make, just and Task, lefthook's git hooks and the
+ * configs husky runs on commit, CI pipelines that run with the repo's
+ * secrets, and mise (its `mise.*.toml` files and `mise/` folder), which runs
+ * its hooks when a shell enters the folder (DOR-3311). Not every such file:
+ * a reviewer still reads each Edit rule. A root-level name never reaches
+ * this list, since a one-segment path is refused first; it catches nested
+ * ones, like a workspace's `apps/web/package.json`. Dot-files and dot-folders
+ * (`.husky`, `.githooks`, `.github`, `.vscode`, `.devcontainer`, `.envrc`,
+ * `.mcp.json`, `.npmrc`, `.pnpmfile.cjs`, `.dork`) are refused as a class.
+ */
+const RUNS_LATER =
+  /^(package\.(json|json5|ya?ml)|makefile|gnumakefile|justfile|taskfile(\.dist)?\.ya?ml|lefthook(-local)?\.(ya?ml|json|toml)|mise(\.[\w-]+)*\.toml|mise|jenkinsfile|azure-pipelines\.ya?ml|bitbucket-pipelines\.ya?ml|(lint-staged|commitlint)\.config\.[cm]?[jt]s)$/i;
 
 /**
  * Why an `Edit(...)` path is too broad, or null when it holds. The path has to
@@ -174,6 +201,7 @@ function editBreach(rule: string, target: string, file: string): string | null {
   if (segments.some((segment) => segment === '.' || segment === '')) {
     return 'the path has an empty or . segment';
   }
+  if (segments.length < 2) return ANY_DEPTH;
   if (isGlob(segments[0])) {
     return 'the path has to start with a literal folder, like specs/**';
   }
@@ -181,6 +209,17 @@ function editBreach(rule: string, target: string, file: string): string | null {
     if (!segment.startsWith('.')) continue;
     if (isGlob(segment)) return 'a dot-folder in the path has to be spelled out, with no wildcard';
     if (/^\.(git|claude)$/i.test(segment)) return 'it writes into .git or .claude';
+  }
+  // Files that a tool runs later without asking (DOR-3311): any dot-file or
+  // dot-folder (.husky, .github, .vscode, .envrc, .mcp.json, .dork), and the
+  // RUNS_LATER names. A reviewed exact rule is the only way to one.
+  for (const segment of segments) {
+    if (segment.startsWith('.')) {
+      return `it writes ${segment}, a dot-file or dot-folder where tools find hooks, settings and scripts they run later; add the exact rule to REVIEWED_COMMANDS for review`;
+    }
+    if (RUNS_LATER.test(segment)) {
+      return `it writes ${segment}, which a tool runs later without asking; add the exact rule to REVIEWED_COMMANDS for review`;
+    }
   }
   return null;
 }
@@ -224,7 +263,9 @@ export const SAFE_COMMANDS: ReadonlySet<string> = new Set([
 
 /**
  * Rules a package may hold that the floor otherwise refuses: exact commands
- * whose first word isn't on {@link SAFE_COMMANDS}, and bare reads. Each is reviewed
+ * whose first word isn't on {@link SAFE_COMMANDS}, bare reads, `Edit` paths to
+ * files that run later, MCP tools on servers the package doesn't ship, and a
+ * bare `SlashCommand`. Each is reviewed
  * for what it reaches. Package folder → rules.
  * Adding one is a security decision, like {@link PROJECT_WRITERS}.
  *
@@ -248,6 +289,20 @@ export const REVIEWED_COMMANDS: ReadonlyMap<string, ReadonlySet<string>> = new M
       'Bash(git diff --stat origin/HEAD...HEAD)',
       'Bash(node --version)',
       'Bash(npm install --omit=dev --prefix "${CLAUDE_PLUGIN_ROOT}")',
+      // Flow's own working files under .dork/flow (DOR-3311): its scratch
+      // folder, and the drain switch that /flow:pause turns off.
+      'Edit(.dork/flow/tmp/**)',
+      'Edit(.dork/flow/auto-run.json)',
+      // DorkOS's schedule tools, for flow's own schedules: /flow:status lists
+      // them, and /flow:pause and /flow:resume turn them off and on (DOR-3311).
+      // tasks_update can also rewrite any schedule's prompt, so a changed
+      // person-made schedule may not ask again; reviewed knowing that.
+      'mcp__dorkos__tasks_list',
+      'mcp__dorkos__tasks_update',
+      // /flow and /flow:resume hand off to the next stage's command, and
+      // triage, capture, status, init and groom load flow's own skills.
+      'SlashCommand',
+      'Skill',
       // Bare reads, until flow moves to folder-scoped reads (follow-up). In plain
       // Claude Code a bare Read allow reads ~/.ssh with no prompt.
       'Read',
@@ -308,7 +363,7 @@ const SCRIPT_EXACT =
   /^(?:node --experimental-strip-types "\$\{CLAUDE_PLUGIN_ROOT\}\/((?:[\w-]+\/)*[\w-]+\.ts)"|"\$\{CLAUDE_PLUGIN_ROOT\}\/((?:[\w-]+\/)*[\w-]+\.sh)"|\$\{CLAUDE_PLUGIN_ROOT\}\/((?:[\w-]+\/)*[\w-]+\.sh))(?: [a-z-]+)*$/;
 
 /** Why a script path inside the package is unusable, or null when it is a plain file. */
-function scriptBreach(pkgDir: string, rel: string, repoRoot: string): string | null {
+export function scriptBreach(pkgDir: string, rel: string, repoRoot: string): string | null {
   const scriptPath = path.posix.join(pkgDir, rel);
   try {
     return lstatSync(path.join(repoRoot, scriptPath)).isFile()
@@ -349,6 +404,34 @@ function readBreach(target: string): string | null {
 }
 
 /**
+ * Why a `SlashCommand(<spec>)` or `Skill(<spec>)` rule is too broad, or null
+ * when it names one of the package's own commands or skills. Either runs it
+ * with its own `allowed-tools` (Claude Code runs commands through the Skill
+ * tool too), so a grant to another package's, or a person's own, can reach
+ * whatever that one allows.
+ */
+function ownCommandBreach(
+  tool: string,
+  body: string,
+  pkgDir: string,
+  repoRoot: string
+): string | null {
+  const lead = tool === 'SlashCommand' ? '/' : '';
+  const spec = new RegExp(`^${lead}([A-Za-z0-9-]+):([\\w-]+)(?::\\*)?$`).exec(body);
+  if (!spec || pkgDir === '' || spec[1] !== packageName(repoRoot, pkgDir)) {
+    return `${tool} may only name the package's own skills and commands, as ${tool}(${lead}<package>:<name>)`;
+  }
+  for (const file of [`${pkgDir}/commands/${spec[2]}.md`, `${pkgDir}/skills/${spec[2]}/SKILL.md`]) {
+    try {
+      if (lstatSync(path.join(repoRoot, file)).isFile()) return null;
+    } catch {
+      // Missing: try the next, then refuse.
+    }
+  }
+  return `${tool} names ${spec[2]}, which the package doesn't ship`;
+}
+
+/**
  * Why a rule breaks the floor, or null when it holds.
  *
  * @param rule - One rule, e.g. `Bash(git status)`.
@@ -370,14 +453,28 @@ export function breach(
     if (rule === 'WebFetch') {
       return 'a bare WebFetch can send anything anywhere; use WebFetch(domain:<host>)';
     }
+    if (
+      (rule === 'SlashCommand' || rule === 'Skill') &&
+      !REVIEWED_COMMANDS.get(pkgDir)?.has(rule)
+    ) {
+      return `a bare ${rule} runs any skill or slash command, each with its own allowed-tools; name the package's own, as ${rule}(${rule === 'Skill' ? '' : '/'}<package>:<name>)`;
+    }
     return KNOWN_TOOLS.has(rule)
       ? null
       : `${rule} is not on KNOWN_TOOLS; a tool is reviewed before a package may grant it`;
   }
   if (rule.startsWith('mcp__')) {
-    return /^mcp__[A-Za-z0-9-]+(?:_[A-Za-z0-9-]+)*__[A-Za-z0-9_-]*[A-Za-z0-9-]$/.test(rule)
+    if (!/^mcp__[A-Za-z0-9-]+(?:_[A-Za-z0-9-]+)*__[A-Za-z0-9_-]*[A-Za-z0-9-]$/.test(rule)) {
+      return 'it names a whole MCP server or a wildcard; name each tool, as mcp__<server>__<tool>';
+    }
+    // A tool on another server can do anything that server does
+    // (mcp__dorkos__mcp_add_server, mcp__playwright__browser_run_code_unsafe),
+    // so only the package's own servers pass unreviewed (DOR-3311).
+    if (REVIEWED_COMMANDS.get(pkgDir)?.has(rule)) return null;
+    const own = ownServerPrefixes(repoRoot, pkgDir).find((prefix) => rule.startsWith(prefix));
+    return own && !rule.slice(own.length).includes('__')
       ? null
-      : 'it names a whole MCP server or a wildcard; name each tool, as mcp__<server>__<tool>';
+      : 'its server is not one the package ships in .mcp.json or plugin.json; add the exact tool to REVIEWED_COMMANDS for review';
   }
 
   const call = /^([A-Z][A-Za-z]*)\(([^()]*)\)$/s.exec(rule);
@@ -392,8 +489,15 @@ export function breach(
   if (!KNOWN_TOOLS.has(tool)) {
     return `${tool} is not on KNOWN_TOOLS; a tool is reviewed before a package may grant it`;
   }
-  if (tool === 'Edit') return editBreach(rule, body, file);
-  if (READERS.has(tool)) return readBreach(body);
+  if (tool === 'Edit') {
+    return REVIEWED_COMMANDS.get(pkgDir)?.has(rule) ? null : editBreach(rule, body, file);
+  }
+  if (tool === 'SlashCommand' || tool === 'Skill') {
+    return ownCommandBreach(tool, body, pkgDir, repoRoot);
+  }
+  if (READERS.has(tool)) {
+    return body.replace(/^\.\//, '').includes('/') ? readBreach(body) : ANY_DEPTH;
+  }
   if (tool === 'WebFetch') {
     const host = /^domain:((?:[a-z0-9-]+\.)+([a-z]{2,63}))$/i.exec(body);
     if (!host) {
@@ -466,7 +570,7 @@ export function breach(
 }
 
 /** Every `.md` file under `plugins/` (any case), plus every symlink there. */
-function walkPlugins(repoRoot: string): {
+export function walkPlugins(repoRoot: string): {
   markdown: string[];
   symlinks: string[];
   unreadable: string[];
@@ -484,50 +588,75 @@ function walkPlugins(repoRoot: string): {
       return;
     }
     for (const entry of entries) {
-      if (entry.name === 'node_modules' || entry.name === '.git') continue;
+      // Only the package root's node_modules is npm's; one anywhere else (a
+      // skill folder named node_modules) is loaded by Claude Code like any other.
+      const pkgRoot = relDir.split('/').length === 2;
       const rel = path.posix.join(relDir, entry.name);
       if (entry.isSymbolicLink()) symlinks.push(rel);
+      else if ((entry.name === 'node_modules' && pkgRoot) || entry.name === '.git') continue;
       else if (entry.isDirectory()) walk(rel);
       else if (entry.isFile() && /\.md$/i.test(entry.name)) markdown.push(rel);
     }
   };
-  walk(PLUGINS_DIR);
+  // plugins/ itself as a link would point every check at files elsewhere.
+  let linked = false;
+  try {
+    linked = lstatSync(path.join(repoRoot, PLUGINS_DIR)).isSymbolicLink();
+  } catch {
+    // No plugins/ at all: nothing to walk.
+  }
+  if (linked) symlinks.push(PLUGINS_DIR);
+  else walk(PLUGINS_DIR);
   return { markdown: markdown.sort(), symlinks: symlinks.sort(), unreadable: unreadable.sort() };
 }
 
 /** What a file's frontmatter says under `allowed-tools`, read one way. */
 type Reading = { found: true; value: unknown } | { found: false } | { error: string };
 
-/** Pick `allowed-tools` out of a parsed frontmatter value. */
-function pick(data: unknown): Reading {
+/** Pick one key (`allowed-tools` by default) out of a parsed frontmatter value. */
+function pick(data: unknown, key: string): Reading {
   if (data === null || typeof data !== 'object' || Array.isArray(data)) return { found: false };
-  return 'allowed-tools' in data
-    ? { found: true, value: (data as Record<string, unknown>)['allowed-tools'] }
+  return key in data
+    ? { found: true, value: (data as Record<string, unknown>)[key] }
     : { found: false };
 }
 
 /** DorkOS's reader: frontmatter ends at a line that starts with `---`. */
-function readAsDorkOS(text: string): Reading {
+function readAsDorkOS(text: string, key = 'allowed-tools'): Reading {
   try {
-    return pick(parseFrontmatter(text).data);
+    return pick(parseFrontmatter(text).data, key);
   } catch (cause) {
     return { error: (cause as Error).message };
   }
 }
 
 /** Claude Code's reader: strip a BOM, cut at the first `---`, YAML, then YAML with tabs as spaces. */
-function readAsClaudeCode(text: string): Reading {
+function readAsClaudeCode(text: string, key = 'allowed-tools'): Reading {
   const block = CC_FRONTMATTER.exec(text.replace(/^﻿/, ''));
   if (!block) return { found: false };
   const detabbed = block[1].replace(/^\t+/gm, (tabs) => '  '.repeat(tabs.length));
   for (const source of [block[1], detabbed]) {
     try {
-      return pick(yaml.load(source));
+      return pick(yaml.load(source), key);
     } catch {
       // Try the next form.
     }
   }
   return { error: 'it is not valid YAML' };
+}
+
+/**
+ * What a file's frontmatter holds under `key`, read both the way DorkOS reads
+ * it and the way Claude Code does; one value per reading that finds the key.
+ * Frontmatter neither can read is reported by {@link collectGrants}.
+ *
+ * @param text - The file's contents.
+ * @param key - The frontmatter key, e.g. `hooks`.
+ */
+export function frontmatterValues(text: string, key: string): unknown[] {
+  return [readAsDorkOS(text, key), readAsClaudeCode(text, key)].flatMap((r) =>
+    'found' in r && r.found ? [r.value] : []
+  );
 }
 
 /** One place that grants tools, and every rule it can mean. */
@@ -592,22 +721,6 @@ function manifestGrants(
     }
   }
   return { grants, findings };
-}
-
-/** Read a JSON file, or undefined when it is missing or unreadable (other checks report that). */
-function readJson(abs: string): unknown {
-  try {
-    return JSON.parse(readFileSync(abs, 'utf8'));
-  } catch {
-    return undefined;
-  }
-}
-
-/** The package folder a marketplace entry's `source` points at, or ''. */
-function sourceDir(source: unknown): string {
-  if (typeof source !== 'string') return '';
-  const match = /^(?:\.\/)?(plugins\/[\w-][\w.-]*)\/?$/.exec(source);
-  return match ? match[1] : '';
 }
 
 /**

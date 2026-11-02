@@ -19,6 +19,9 @@
  * The fourth, {@link checkAllowedTools} (in `allowed-tools.ts`), holds every
  * command's and skill's `allowed-tools` to a permission floor: no unscoped
  * Bash or file writes, and wildcards only on the package's own scripts.
+ * The fifth, {@link checkPackagePrograms} (in `package-programs.ts`), holds
+ * every hook and MCP server a package runs on its own to the same stance:
+ * only the package's own scripts.
  *
  * **A passing zod parse is not the bar.** DorkOS frontmatter is built to absorb
  * bad input rather than reject it: unknown keys are dropped, most optional
@@ -57,6 +60,7 @@ import {
 } from '@dorkos/skills/frontmatter';
 import { SCHEDULED_SKILLS } from './scheduled-skills.ts';
 import { checkAllowedTools } from './allowed-tools.ts';
+import { checkPackagePrograms } from './package-programs.ts';
 import { PLUGINS_DIR, checkVersionAgreement, pluginDirs } from './versions.ts';
 
 /** One thing that is wrong, in terms of the file it is wrong in. */
@@ -538,5 +542,6 @@ export function validateRepo(repoRoot: string): Finding[] {
     ...validateManifests(repoRoot),
     ...checkVersionAgreement(repoRoot),
     ...checkAllowedTools(repoRoot),
+    ...checkPackagePrograms(repoRoot),
   ];
 }

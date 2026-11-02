@@ -113,8 +113,11 @@ leaves the PR waiting forever. Keep it that way, or un-require the check first.
   has none; and when a package's files changed without its declared version going up
   (`npm run check:bump`). A package that declares no version is exempt; declaring one opts in.
   And it fails on a broad `allowed-tools` rule in any package: a bare `Bash`, `Write` or
-  `Edit`, an MCP wildcard, an `Edit` path outside the project or into `.git`/`.claude`, or a
-  `Bash` wildcard on anything but the package's own script (README, "Allow rules").
+  `Edit`, an MCP wildcard or a tool on a server the package doesn't ship, an `Edit` path
+  outside the project or to a file that runs later (a dot-file, `package.json`), or a
+  `Bash` wildcard on anything but the package's own script (README, "Allow rules"). It
+  also fails on a hook or MCP server that runs anything but the package's own script
+  (README, "Hooks and MCP servers").
 - `scripts-test.yml`, check **`script fixtures`** (required). Runs the fixture suites for
   the auto-merge arming gate, the three `.claude/hooks` guards (git, process, admin merge),
   the wrapper that makes those guards refuse rather than skip when node is missing, and the
