@@ -1361,7 +1361,6 @@ export async function runPass(deps: PassDeps): Promise<PassReport> {
     }
   };
 
-  /** One run's whole pass: settle, gather, decide, record, act. */
   /** Remove a finished run's worker worktree, or keep it and say why, once (DOR-2469). */
   const cleanUp = async (run: DrainRun): Promise<void> => {
     const plan = await planWorkerWorktree(deps, run);
@@ -1385,6 +1384,8 @@ export async function runPass(deps: PassDeps): Promise<PassReport> {
       if (!out.removed) [status, reason] = ['kept', out.reason];
     } else if (plan.action === 'keep') {
       [status, reason] = ['kept', plan.reason];
+    } else {
+      reason = 'already gone';
     }
     await supervisorWrite(run.issueId, (r) =>
       r.drain.cleanup?.status === 'pending'
@@ -1408,6 +1409,7 @@ export async function runPass(deps: PassDeps): Promise<PassReport> {
     );
   };
 
+  /** One run's whole pass: settle, gather, decide, record, act. */
   const passRun = async (initial: DrainRun): Promise<void> => {
     await settleReviewerIntent(initial);
     const fresh = current(initial.issueId);

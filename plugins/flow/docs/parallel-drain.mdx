@@ -24,11 +24,11 @@ Allow each account flow may spend with `flow accounts set <id> --role rotation`.
 - `moved to <account>`: an account ran out, so the work moved.
 - `restarted on <account>`: its session went away.
 - `parked: <reason>`: a person is needed.
-- `removed its worktree`: the item finished.
+- `removed`/`kept its worktree`: the item finished.
 
 ## What happens at a limit
 
-Near a limit, the worker finishes its step, checkpoints, stops. If the account resets within `drain.waitIfResetWithinMinutes`, the run waits. If only one model ran out, it goes on with the next in `drain.modelFallback`. Otherwise another account's session continues from `HANDOFF.md`.
+Near a limit, the worker finishes its step, checkpoints and stops. If the account resets within `drain.waitIfResetWithinMinutes`, the run waits. If only one model ran out, it goes on with the next in `drain.modelFallback`. Otherwise another account's session continues from `HANDOFF.md`.
 
 ## Ask or auto
 

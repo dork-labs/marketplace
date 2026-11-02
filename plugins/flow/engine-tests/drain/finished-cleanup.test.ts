@@ -154,7 +154,10 @@ describe('planWorkerWorktree', () => {
 
   it('counts a DorkOS worker the drain left idle, or one DorkOS forgot, as stopped', async () => {
     // DorkOS's stop leaves a session idle; it never reads exited.
-    expect((await planWorkerWorktree(deps({ kind: 'idle' }).d, finished())).action).toBe('remove');
+    const dorkos = finished({
+      cleanup: { status: 'pending', worker: { ...WORKER, host: 'dorkos', cwd: target } },
+    });
+    expect((await planWorkerWorktree(deps({ kind: 'idle' }).d, dorkos)).action).toBe('remove');
     const gone: SessionState = { kind: 'unknown', reason: 'r', gone: true };
     expect((await planWorkerWorktree(deps(gone).d, finished())).action).toBe('remove');
   });
@@ -171,6 +174,16 @@ describe('planWorkerWorktree', () => {
     expect(existsSync(target)).toBe(true);
   });
 
+  it.each(['cli', 'cmux'] as const)(
+    'waits on an idle %s worker: its stop ends the process, so idle means it failed',
+    async (host) => {
+      const run = finished({
+        cleanup: { status: 'pending', worker: { ...WORKER, host, cwd: target } },
+      });
+      expect((await planWorkerWorktree(deps({ kind: 'idle' }).d, run)).action).toBe('wait');
+    }
+  );
+
   it('waits on a worker whose start was never confirmed', async () => {
     const run = finished({
       cleanup: { status: 'pending', worker: { ...WORKER, cwd: target, pending: true } },
@@ -179,7 +192,8 @@ describe('planWorkerWorktree', () => {
   });
 
   it('waits on a VERIFY reviewer started in the same folder until it exited (idle is not enough)', async () => {
-    const run = finished({}, {
+    const dorkosWorker: DrainWorkerHandle = { ...WORKER, host: 'dorkos', cwd: target };
+    const run = finished({ cleanup: { status: 'pending', worker: dorkosWorker } }, {
       review: {
         tokenHash: 'x',
         sha: head,

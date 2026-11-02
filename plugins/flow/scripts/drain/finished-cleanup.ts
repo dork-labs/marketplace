@@ -7,8 +7,9 @@
  *    `<workspaces>/<repo>/<branch>`, listed by git as a worktree of this
  *    checkout, on the run's branch. Anything else is kept.
  * 2. Only once no session may still run in it. The worker the drain stopped
- *    counts as stopped when its host says it exited, is gone, or is idle
- *    (DorkOS's stop leaves a session idle, and this worker already ran DONE).
+ *    counts as stopped when its host says it exited or is gone, or, on DorkOS
+ *    only, is idle (DorkOS's stop leaves a session idle, and this worker
+ *    already ran DONE).
  *    A VERIFY reviewer started in the same folder must have exited or be gone,
  *    the rule `flow release` uses. Until then it waits for a later pass.
  * 3. Only with no uncommitted change, untracked files included.
@@ -17,7 +18,8 @@
  *    branch), or every commit in it is on a remote.
  *
  * It is never forced, so git refuses a change that lands after the plan. The
- * branch stays; only the folder goes.
+ * branch stays. Ignored files go with the folder, the cli launcher's session
+ * logs among them.
  *
  * @module @dorkos/flow/drain/finished-cleanup
  */
@@ -116,10 +118,12 @@ export async function planWorkerWorktree(
   const worker = run.drain.cleanup?.worker ?? null;
   if (worker !== null) {
     const state = await folderSessionState(deps.launcher, worker);
+    // Idle counts only on DorkOS, whose stop leaves a session idle; elsewhere
+    // the stop ends the process, so idle means the stop failed.
     const stopped =
       state !== null &&
       (state.kind === 'exited' ||
-        state.kind === 'idle' ||
+        (state.kind === 'idle' && worker.host === 'dorkos') ||
         (state.kind === 'unknown' && state.gone === true));
     if (!stopped) return { action: 'wait', path: target, reason: MAY_RUN };
   }
