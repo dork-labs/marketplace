@@ -8,7 +8,9 @@
  * reply on an `agent/needs-input` item is the answer, but only from an author
  * the adapter marked a team member (DOR-3669). Only comments
  * newer than the park count; for a record from before parks were timed, only
- * comments after the agent's own latest one.
+ * comments after the agent's own latest one. Only a comment from the agent's
+ * own account anchors that search: anyone can type the marker, so a marked
+ * comment from anyone else is ignored but cannot hide an answer (DOR-3677).
  *
  * Pure: no I/O. Needs `zod` only through the config type's module, so it is
  * reached from the verb.
@@ -71,6 +73,9 @@ export function findAnswer(
       { item, ownership: ctx.ownership, identity: ctx.identity },
       ctx.comments
     );
+  // The agent's own comment by account, not by marker text alone (DOR-3677).
+  const isOwn = (comment: ItemComment) =>
+    comment.author !== '' && comment.author === ctx.identity.agent;
   const parkedAt = since === null ? Number.NaN : Date.parse(since);
   let candidates = [...comments];
   if (Number.isFinite(parkedAt)) {
@@ -85,9 +90,7 @@ export function findAnswer(
         index,
         distance: Math.abs(Date.parse(comment.createdAt) - parkedAt),
       }))
-      .filter(
-        ({ comment, distance }) => decide(comment).rule === 1 && distance <= PARK_ANCHOR_WINDOW_MS
-      )
+      .filter(({ comment, distance }) => isOwn(comment) && distance <= PARK_ANCHOR_WINDOW_MS)
       .sort((x, y) => x.distance - y.distance || y.index - x.index)[0];
     candidates =
       parkComment !== undefined
@@ -99,10 +102,7 @@ export function findAnswer(
         : candidates.filter((comment) => Date.parse(comment.createdAt) > parkedAt - CLOCK_SKEW_MS);
   } else {
     // No park time: only what came after the agent's own latest comment (its question).
-    const lastOwn = candidates
-      .map(decide)
-      .map((d) => d.rule === 1)
-      .lastIndexOf(true);
+    const lastOwn = candidates.map(isOwn).lastIndexOf(true);
     candidates = candidates.slice(lastOwn + 1);
   }
   for (const comment of candidates.reverse()) {
@@ -137,7 +137,8 @@ export function untrustedReplyWarning(comment: ItemComment, identifier: string):
   const who =
     comment.author === '' ? 'a comment with no author' : `the comment by ${comment.author}`;
   return (
-    `${identifier} stays parked: ${who} at ${comment.createdAt} is not from a member of the ` +
-    "workspace or team, so it can't resume the work. A member can post the answer instead."
+    `${identifier} stays parked: ${who} at ${comment.createdAt} is not a team member's own ` +
+    "comment (a guest, an integration, another team, or posted through an app), so it can't " +
+    'resume the work. A team member can answer in the tracker itself, or from DorkOS.'
   );
 }

@@ -160,16 +160,19 @@ export const ITEM_QUERY = `query FlowItem($id: String!) {
 }`;
 
 /**
- * The account fields a comment's trust is read from (contract 3.0.0): Linear's
- * own record of whether the author is active, a guest, or an app.
+ * The fields a comment's trust is read from (contract 3.0.0): Linear's own
+ * record of whether the author is active, a guest, or an app; whether they
+ * belong to the configured team, not only the workspace (DOR-3677); and
+ * whether an app wrote the comment for them (`botActor`). Needs `$teamId`.
  */
-export const COMMENT_USER_FIELDS = 'user { id active guest app }';
+export const COMMENT_TRUST_FIELDS =
+  'user { id active guest app teams(filter: { id: { eq: $teamId } }) { nodes { id } } } botActor { type }';
 
 /** One issue with its latest comments (Linear returns them newest first). */
-export const ITEM_WITH_COMMENTS_QUERY = `query FlowItemComments($id: String!, $comments: Int!) {
+export const ITEM_WITH_COMMENTS_QUERY = `query FlowItemComments($id: String!, $comments: Int!, $teamId: ID!) {
   issue(id: $id) {
     ${ITEM_FIELDS}
-    comments(first: $comments, orderBy: createdAt) { nodes { id body createdAt ${COMMENT_USER_FIELDS} } }
+    comments(first: $comments, orderBy: createdAt) { nodes { id body createdAt ${COMMENT_TRUST_FIELDS} } }
   }
 }`;
 
@@ -191,7 +194,7 @@ export const INBOX_QUERY = `query FlowInbox($teamId: ID!, $since: DateTimeOrDura
   comments(first: $first, after: $after, orderBy: createdAt, filter: { createdAt: { gt: $since }, issue: { team: { id: { eq: $teamId } } } }) {
     pageInfo { hasNextPage endCursor }
     nodes {
-      id body createdAt ${COMMENT_USER_FIELDS}
+      id body createdAt ${COMMENT_TRUST_FIELDS}
       issue {
         ${ISSUE_FIELDS}
         team { id key }
@@ -362,7 +365,9 @@ interface RawComment {
     active?: boolean | null;
     guest?: boolean | null;
     app?: boolean | null;
+    teams?: { nodes?: ({ id?: string | null } | null)[] | null } | null;
   } | null;
+  botActor?: { type?: string | null } | null;
 }
 
 /**
@@ -381,6 +386,26 @@ export function isMemberUser(user: RawComment['user']): boolean {
     user.active === true &&
     user.guest === false &&
     user.app === false
+  );
+}
+
+/**
+ * Whether a comment's author is trusted (contract 3.0.0): a workspace member
+ * by {@link isMemberUser} who is also on the configured team (DOR-3677), and
+ * who wrote it themselves. A comment an app posted for a member carries a
+ * `botActor`, so it is not trusted; a member's own API key leaves no such
+ * mark and reads as the member (see `adapters/SPEC.md`). A `botActor` field
+ * Linear left out reads as not trusted.
+ *
+ * @param node - The comment node, read with {@link COMMENT_TRUST_FIELDS}.
+ * @param teamId - The configured team's Linear id.
+ * @returns `true` only for a team member's own comment.
+ */
+export function isTrustedComment(node: RawComment, teamId: string): boolean {
+  return (
+    isMemberUser(node.user) &&
+    (node.user?.teams?.nodes ?? []).some((team) => team?.id === teamId) &&
+    node.botActor === null
   );
 }
 
@@ -892,7 +917,9 @@ export function createAdapter(ctx: AdapterContext): CodeAdapter {
     const { id: teamId, key } = await team();
     const data = await readOne<{ issue?: RawIssue | null }>(
       comments !== undefined && comments > 0 ? ITEM_WITH_COMMENTS_QUERY : ITEM_QUERY,
-      comments !== undefined && comments > 0 ? { id: identifier, comments } : { id: identifier },
+      comments !== undefined && comments > 0
+        ? { id: identifier, comments, teamId }
+        : { id: identifier },
       identifier
     );
     return ownIssue(data.issue, identifier, { id: teamId, key });
@@ -1010,10 +1037,11 @@ export function createAdapter(ctx: AdapterContext): CodeAdapter {
         );
       }
       if (opts.comments !== undefined && opts.comments > 0) {
+        const { id: teamId } = await team();
         const comments: ItemComment[] = (issue.comments?.nodes ?? []).map((node) => ({
           id: node.id,
           author: node.user?.id ?? '',
-          authorIsTrusted: isMemberUser(node.user),
+          authorIsTrusted: isTrustedComment(node, teamId),
           body: node.body ?? '',
           createdAt: node.createdAt ?? '',
         }));
@@ -1079,7 +1107,7 @@ export function createAdapter(ctx: AdapterContext): CodeAdapter {
             id: node.id,
             author: node.user?.id ?? '',
             // Parsed here from Linear's own account record, never relayed.
-            authorIsTrusted: isMemberUser(node.user),
+            authorIsTrusted: isTrustedComment(node, teamId),
             mentions: [],
             body: node.body ?? '',
           },

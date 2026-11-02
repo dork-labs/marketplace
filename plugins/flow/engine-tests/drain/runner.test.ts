@@ -1204,7 +1204,7 @@ describe('flow drain: parked runs', () => {
     expect(outsiders.stderr).toContain('the comment by guest-1');
     expect(outsiders.stderr).toContain('the comment by integration-bot');
     expect(outsiders.stderr).toContain('a comment with no author');
-    expect(outsiders.stderr).toContain('A member can post the answer instead');
+    expect(outsiders.stderr).toContain('A team member can answer in the tracker itself');
 
     // A person replies: the next pass lifts needs-input and resumes the run.
     say('answer', 'dorian', 'Use CSV.', at(3));

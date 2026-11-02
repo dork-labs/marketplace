@@ -235,8 +235,8 @@ export function render<K extends MessageKind>(kind: K, ctx: MessageContexts[K]):
         return compose(
           [
             c.answer
-              ? `A person answered the question ${id} was parked on: ${c.answer}. Read it through the adapter first.`
-              : `A person answered the question ${id} was parked on. Read the newest comments on ${id} through the adapter first.`,
+              ? `A person answered the question ${id} was parked on: ${c.answer}. Read it first with \`${command(ctx, 'show', id, '--json')}\`.`
+              : `A person answered the question ${id} was parked on. Read its newest comments first with \`${command(ctx, 'show', id, '--json')}\`.`,
             'Then continue from `.dork/flow/HANDOFF.md`. ' + pushSteps(ctx, 'task'),
           ],
           reportPushed
@@ -290,7 +290,7 @@ export function render<K extends MessageKind>(kind: K, ctx: MessageContexts[K]):
           : ['Failing checks:', ...c.failing.map((f) => `- ${f.name}: ${f.url}`)].join('\n');
       const answered = c.answer
         ? [
-            `A person answered before you fix them: ${c.answer}. Read it through the adapter first and follow it.`,
+            `A person answered before you fix them: ${c.answer}. Read it first with \`${command(ctx, 'show', id, '--json')}\` and follow it.`,
           ]
         : [];
       return compose(

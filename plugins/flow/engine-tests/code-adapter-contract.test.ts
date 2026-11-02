@@ -566,13 +566,19 @@ describe('the Linear simulator follows the recordings', () => {
   };
 
   it('answers the query the adapter sends today, apart from the trust fields', () => {
-    // Contract 3.0.0 added the author's account flags to the comment read. The
-    // recording predates them and checks ordering and limits only, which those
-    // fields do not change; it still needs a fresh read-only recording.
-    expect(linear.COMMENT_USER_FIELDS).toBe('user { id active guest app }');
-    expect(linear.ITEM_WITH_COMMENTS_QUERY.replace(linear.COMMENT_USER_FIELDS, 'user { id }')).toBe(
-      recorded.query
+    // Contract 3.0.0 added the author's account flags to the comment read, and
+    // DOR-3677 the team check and botActor. The recording predates them and
+    // checks ordering and limits only, which those fields do not change; it
+    // still needs a fresh read-only recording.
+    expect(linear.COMMENT_TRUST_FIELDS).toBe(
+      'user { id active guest app teams(filter: { id: { eq: $teamId } }) { nodes { id } } } botActor { type }'
     );
+    expect(
+      linear.ITEM_WITH_COMMENTS_QUERY.replace(linear.COMMENT_TRUST_FIELDS, 'user { id }').replace(
+        ', $teamId: ID!',
+        ''
+      )
+    ).toBe(recorded.query);
   });
 
   it('orders and limits comments as the recording shows: the latest N, newest first', async () => {
