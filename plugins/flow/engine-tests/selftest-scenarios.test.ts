@@ -104,7 +104,31 @@ describe('the scenarios tier', { timeout: SCENARIOS_TIMEOUT }, () => {
       }))
     );
     expect(check.status).toBe('fail');
-    expect(check.detail).toMatch(/a parked item on the next tick: expected .*parked-on-human/);
+    // The escalate step parks an item too, so it is the first to notice.
+    expect(check.detail).toMatch(/on the next tick: expected .*parked-on-human/);
+  });
+
+  it('recovery-ladder fails on a tracker whose release keeps the claim', async () => {
+    // Purpose: onExhausted "abandon" lets the item go; a tracker that keeps
+    // agent/claimed on release would leave it looking owned by a dead run.
+    const check = await runOne(
+      'recovery-ladder',
+      patched((inner, tracker) => ({
+        applyWorkState: async (item, change) => {
+          await inner.applyWorkState(item, change);
+          const stored = tracker.backlog.items.find((i) => i.identifier === item.identifier);
+          if (change.agentLabel === null && stored && !stored.labels.includes('agent/claimed')) {
+            stored.labels.push('agent/claimed');
+          }
+        },
+      }))
+    );
+    expect(check.status).toBe('fail');
+    // flow release reads the item back and refuses first; the scenario's own
+    // label check is the second line of defence.
+    expect(check.detail).toMatch(
+      /flow release FAKE-4 --to none .*exited 4|onExhausted abandon: FAKE-4 still carries/
+    );
   });
 
   it("inbox-rules fails on a tracker that reports every comment as the agent's own", async () => {

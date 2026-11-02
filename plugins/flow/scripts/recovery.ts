@@ -3,7 +3,10 @@
  * next-tick recovery ladder. Reads the orphan signal, the durable {@link FlowRun}
  * record (or `null`), the probe context, and the resolved recovery config from
  * stdin (or `--input <path>`), then emits the {@link RecoveryAction} the runtime
- * should take (skip / resume / restart-clean / escalate / re-derive).
+ * should take (skip / resume / restart-clean / block / escalate / abandon /
+ * re-derive). Once retries run out, `recovery.onExhausted` picks among `block`,
+ * `escalate` and `abandon`; an absent value is the schema default, `block`, and
+ * any other value is invalid input (exit 1).
  *
  * A run with `drain` set (a `flow drain` run) is always `skip` with reason
  * `drain-run`: its supervisor is its only recovery.
@@ -19,6 +22,16 @@
 import { recoverOrphan } from './flow-run.ts';
 import type { FlowRun, OrphanSignal, RecoveryConfig, RecoveryContext } from './flow-run.ts';
 import { invokedDirectly, isPlainObject, parseArgs, readRawInput } from './_shared.ts';
+
+/**
+ * The `recovery.onExhausted` values, mirroring `OnExhaustedSchema` in
+ * `config-schema.ts` (kept as a literal: this CLI must not load zod).
+ */
+export const ON_EXHAUSTED: readonly RecoveryConfig['onExhausted'][] = [
+  'block',
+  'escalate',
+  'abandon',
+];
 
 /** The stdin/`--input` payload shape for the recovery script. */
 interface RecoveryInput {
@@ -43,11 +56,19 @@ Reads JSON from stdin (or --input <path>):
   }
 
 Writes the RecoveryAction as JSON to stdout (discriminated union over "kind"):
-  { "kind": "skip"|"resume"|"restart-clean"|"escalate"|"re-derive", … }
+  { "kind": "skip"|"resume"|"restart-clean"|"block"|"escalate"|"abandon"|"re-derive", … }
+Once retries run out, "recovery.onExhausted" picks the kind:
+  "block" (default)  { "kind": "block", "label": "agent/blocked", "reason" }
+                     apply the label, comment, nudge; nothing retries it.
+  "escalate"         { "kind": "escalate", "label": "agent/needs-input", "reason", "question" }
+                     the adapter's needsInput(item, question), not flow ask;
+                     a person's reply resumes it.
+  "abandon"          { "kind": "abandon", "releaseTo": "none", "reason" }
+                     flow release <id> --to none --reason <reason>.
 A run with "drain" set is always { "kind": "skip", "reason": "drain-run" }:
   flow drain's supervisor is its only recovery.
 
-Exit codes: 0 ok | 1 invalid input | 2 oracle invariant violation
+Exit codes: 0 ok | 1 invalid input (incl. an unknown onExhausted) | 2 oracle invariant violation
   (a "claimed-no-worker"/"needs-input" signal with run: null trips the invariant -> exit 2).
 `;
 
@@ -86,7 +107,19 @@ export function main(argv: readonly string[]): number {
     return 1;
   }
 
-  const { signal, run, ctx, recovery } = parsed as unknown as RecoveryInput;
+  const onExhausted = parsed.recovery.onExhausted ?? 'block';
+  if (!ON_EXHAUSTED.includes(onExhausted as RecoveryConfig['onExhausted'])) {
+    process.stderr.write(
+      `recovery: invalid input — recovery.onExhausted must be one of ${ON_EXHAUSTED.join(', ')}, got ${JSON.stringify(onExhausted)}\n`
+    );
+    return 1;
+  }
+
+  const { signal, run, ctx } = parsed as unknown as RecoveryInput;
+  const recovery = {
+    ...(parsed.recovery as unknown as RecoveryConfig),
+    onExhausted: onExhausted as RecoveryConfig['onExhausted'],
+  };
 
   try {
     const action = recoverOrphan(signal, run ?? null, ctx, recovery);

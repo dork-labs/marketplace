@@ -62,15 +62,15 @@ The adapter is the only thing that touches the tracker, at both ends: it produce
 
 The engine's decision logic is already typed code in the `@dorkos/flow` package. Each oracle is a pure function: `(config, inputs) → decision`. No oracle performs I/O, opens a file, or names a tracker. That purity is the point: the same functions that run in the v1 harness graduate into the P5 server **unchanged**, because there is nothing environment-specific to rewrite.
 
-| Oracle                    | Module                | Decides                                                                        |
-| ------------------------- | --------------------- | ------------------------------------------------------------------------------ |
-| `selectDispatch`          | `dispatch.ts`         | Which ready item to claim next (eligibility filter + 7-tier ranking).          |
-| `classifyDispatchOutcome` | `dispatch.ts`         | Whether an empty queue means **done** or **starved** (G3).                     |
-| `resolveInvolvement`      | `calibration.ts`      | Proceed silently, proceed-with-trail, or stop-and-ask (the 5-row ladder).      |
-| `recoverOrphan`           | `flow-run.ts`         | What to do with an orphaned claim: resume, restart-clean, escalate, re-derive. |
-| `shouldRespondToComment`  | `comment-response.ts` | Respond, resume, or ignore an inbound comment (the five rules).                |
-| `resolveCommsChannel`     | `comms.ts`            | Which channel a parked question routes on, given the identity mode.            |
-| `evaluateAutoMerge`       | `gates.ts`            | At the review gate: merge, bounce, or re-request approval.                     |
+| Oracle                    | Module                | Decides                                                                             |
+| ------------------------- | --------------------- | ----------------------------------------------------------------------------------- |
+| `selectDispatch`          | `dispatch.ts`         | Which ready item to claim next (eligibility filter + 7-tier ranking).               |
+| `classifyDispatchOutcome` | `dispatch.ts`         | Whether an empty queue means **done** or **starved** (G3).                          |
+| `resolveInvolvement`      | `calibration.ts`      | Proceed silently, proceed-with-trail, or stop-and-ask (the 5-row ladder).           |
+| `recoverOrphan`           | `flow-run.ts`         | What to do with an orphaned claim: resume, restart-clean, re-derive, `onExhausted`. |
+| `shouldRespondToComment`  | `comment-response.ts` | Respond, resume, or ignore an inbound comment (the five rules).                     |
+| `resolveCommsChannel`     | `comms.ts`            | Which channel a parked question routes on, given the identity mode.                 |
+| `evaluateAutoMerge`       | `gates.ts`            | At the review gate: merge, bounce, or re-request approval.                          |
 
 Two of these are the load-bearing additions from spec #262.
 
@@ -291,9 +291,9 @@ In v1 the adapter is realized as a documented **prose contract** (the skill owns
 
 <Callout type="info">
   This is why the agnosticism is testable rather than aspirational. The generic layer is
-  mechanically prevented from knowing which tracker it is talking to, so swapping in a second tracker is
-  implementing one adapter, not editing the engine. The one seam is the single audit surface for
-  every tracker side effect.
+  mechanically prevented from knowing which tracker it is talking to, so swapping in a second
+  tracker is implementing one adapter, not editing the engine. The one seam is the single audit
+  surface for every tracker side effect.
 </Callout>
 
 ## v1 is typed plus prose-driven; the server promotes it unchanged

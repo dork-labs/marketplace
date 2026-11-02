@@ -489,15 +489,24 @@ export interface RecoveryContext {
   sessionLogIntact: boolean;
 }
 
-/** Tracker label applied when recovery exhausts its retries and escalates (§12). */
+/** Tracker label applied when recovery exhausts its retries and `onExhausted` is `block` (§12). */
 export const RECOVERY_BLOCKED_LABEL = 'agent/blocked';
+
+/**
+ * Tracker label applied when recovery exhausts its retries and `onExhausted` is
+ * `escalate`: the item is parked as a question, the same `agent/needs-input`
+ * state the stall sweep never reclaims and a person's reply resumes (§12).
+ */
+export const RECOVERY_NEEDS_INPUT_LABEL = 'agent/needs-input';
 
 /**
  * The kinds the next-tick recovery ladder (§12) can produce. A discriminated
  * union (over {@link RecoveryAction.kind}) rather than boolean flags, so every
- * branch is exhaustively handled at the call site.
+ * branch is exhaustively handled at the call site. `block`, `escalate` and
+ * `abandon` are the three `recovery.onExhausted` values, one kind each.
  */
-export type RecoveryActionKind = 'skip' | 'resume' | 'restart-clean' | 'escalate' | 're-derive';
+export type RecoveryActionKind =
+  'skip' | 'resume' | 'restart-clean' | 'block' | 'escalate' | 'abandon' | 're-derive';
 
 /**
  * The resolved outcome of the next-tick recovery ladder (§12) — a discriminated
@@ -512,8 +521,19 @@ export type RecoveryActionKind = 'skip' | 'resume' | 'restart-clean' | 'escalate
  * - `restart-clean` — the checkpoint is gone (no worktree, or a corrupt session
  *   log) but retries remain: discard and restart cleanly. Carries the
  *   incremented `attemptCount`.
- * - `escalate` — retries are exhausted (`attemptCount >= recovery.maxRetries`):
- *   apply `agent/blocked`, comment, and nudge; the loop blocks on the human.
+ * - `block` — retries are exhausted (`attemptCount >= recovery.maxRetries`) and
+ *   `onExhausted` is `block` (the default): apply `agent/blocked`, comment, and
+ *   nudge. The claim stays; nothing retries it until a person clears the label.
+ * - `escalate` — retries are exhausted and `onExhausted` is `escalate`: ask a
+ *   person. Park the item with the adapter's `needsInput` and the action's
+ *   `question` (comment + `agent/needs-input` + assign to the person) and stop.
+ *   Not `flow ask`: there are no choices to offer, and the "Agent questions"
+ *   dial does not apply to a retry that ran out. The sweep never reclaims a
+ *   parked item; the person's reply resumes it, and a later crash asks again.
+ * - `abandon` — retries are exhausted and `onExhausted` is `abandon`: let the
+ *   item go. `flow release --to none --reason <reason>` drops the claim and the
+ *   run record and leaves the item unstarted with no `agent/*` label, so
+ *   dispatch never picks it again on its own; nobody is asked or nudged.
  * - `re-derive` — no local run record (claimed on another machine): rebuild the
  *   run from tracker + workspace (tracker-as-truth), then adopt it. The tracker
  *   no longer carries the stage of a started item (no `stage/*` label while
@@ -545,10 +565,26 @@ export type RecoveryAction =
       attemptCount: number;
     }
   | {
-      kind: 'escalate';
-      /** `agent/blocked` — the durable escalation label. */
+      kind: 'block';
+      /** `agent/blocked` — the durable block label. */
       label: typeof RECOVERY_BLOCKED_LABEL;
-      /** Human-readable reason retries were exhausted, for the escalation comment. */
+      /** Human-readable reason retries were exhausted, for the comment. */
+      reason: string;
+    }
+  | {
+      kind: 'escalate';
+      /** `agent/needs-input` — the item is parked as a question to a person. */
+      label: typeof RECOVERY_NEEDS_INPUT_LABEL;
+      /** Human-readable reason retries were exhausted, for logs. */
+      reason: string;
+      /** The question to park, in plain words: what `needsInput` posts. */
+      question: string;
+    }
+  | {
+      kind: 'abandon';
+      /** Where `flow release` sends the item: unowned, never back to ready. */
+      releaseTo: 'none';
+      /** Human-readable reason retries were exhausted, for `--reason`. */
       reason: string;
     }
   | {
@@ -588,9 +624,11 @@ function checkpointResumable(ctx: RecoveryContext): boolean {
  * 2. **`no-local-record` ⇒ `re-derive`.** In-Progress on the tracker with no
  *    local {@link FlowRun} (claimed on another machine): reconstruct from tracker
  *    + workspace (tracker-as-truth). `run` is absent for this signal.
- * 3. **Retries exhausted ⇒ `escalate`.** When `run.attemptCount >=
- *    recovery.maxRetries` there is no reclaim left: apply
- *    {@link RECOVERY_BLOCKED_LABEL}, comment, and nudge.
+ * 3. **Retries exhausted ⇒ `recovery.onExhausted`.** When `run.attemptCount >=
+ *    recovery.maxRetries` there is no reclaim left, whatever the checkpoint:
+ *    `block` ({@link RECOVERY_BLOCKED_LABEL}), `escalate`
+ *    ({@link RECOVERY_NEEDS_INPUT_LABEL}, a question to a person) or `abandon`
+ *    (release the item unowned). See {@link RecoveryAction}.
  * 4. **Checkpoint survives ⇒ `resume`** (re-attach worktree at HEAD, `resume`
  *    the session); **else ⇒ `restart-clean`.** Either way `attemptCount` is
  *    incremented by exactly one and returned for the runtime to persist.
@@ -603,7 +641,7 @@ function checkpointResumable(ctx: RecoveryContext): boolean {
  * @param run - The durable run record, or `null`/`undefined` for the
  *   `no-local-record` signal (there is, by definition, no local record).
  * @param ctx - The probe facts (`worktreeExists`, `sessionLogIntact`).
- * @param recovery - The resolved recovery config (`maxRetries`, …).
+ * @param recovery - The resolved recovery config (`maxRetries`, `onExhausted`, …).
  * @returns The action the runtime should take.
  * @throws If `signal` is `claimed-no-worker` or `needs-input` but `run` is
  *   absent — those signals are defined only for an item with a local record.
@@ -639,13 +677,25 @@ export function recoverOrphan(
     );
   }
 
-  // 3. Retries exhausted — escalate (apply agent/blocked + comment + nudge).
+  // 3. Retries exhausted — do what recovery.onExhausted says.
   if (run.attemptCount >= recovery.maxRetries) {
-    return {
-      kind: 'escalate',
-      label: RECOVERY_BLOCKED_LABEL,
-      reason: `recovery retries exhausted (attemptCount ${run.attemptCount} >= maxRetries ${recovery.maxRetries})`,
-    };
+    const reason = `recovery retries exhausted (attemptCount ${run.attemptCount} >= maxRetries ${recovery.maxRetries})`;
+    switch (recovery.onExhausted) {
+      case 'escalate':
+        return {
+          kind: 'escalate',
+          label: RECOVERY_NEEDS_INPUT_LABEL,
+          reason,
+          question: `The agent working on ${run.identifier} stopped unexpectedly, and flow has used up its automatic retries. Reply here to have it pick the work back up, or take it from here yourself.`,
+        };
+      case 'abandon':
+        return { kind: 'abandon', releaseTo: 'none', reason };
+      // An absent value (a caller that skipped the schema) is the default,
+      // `block`: never fall through to another reclaim.
+      case 'block':
+      default:
+        return { kind: 'block', label: RECOVERY_BLOCKED_LABEL, reason };
+    }
   }
 
   // 4. Reclaim — every reclaim counts as one attempt.

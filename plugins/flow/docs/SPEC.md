@@ -276,8 +276,8 @@ consumers** that drives both dispatch eligibility and comment-handling. Types:
 
 `recoverOrphan(context) → RecoveryAction` runs the next-tick recovery ladder
 keyed by `OrphanSignal` (`needs-input` → skip; `claimed-no-worker` → resume /
-restart-clean / escalate per `attemptCount` vs `maxRetries`; `no-local-record` →
-re-derive). Types: `FlowRun`, `RecoveryConfig`, `RecoveryContext`, `OrphanSignal`,
+restart-clean, then `onExhausted` (block/escalate/abandon) past `maxRetries`;
+`no-local-record` → re-derive). Types: `FlowRun`, `RecoveryConfig`, `RecoveryContext`, `OrphanSignal`,
 `RecoveryAction`.
 
 ### Evidence selection — `evidence.ts` (§13)

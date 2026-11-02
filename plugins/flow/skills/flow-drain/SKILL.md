@@ -50,7 +50,7 @@ approved on DorkOS's Schedules page.
    For each `agent/claimed`, started, not `agent/needs-input` item, probe its worker and
    worktree and run `node --experimental-strip-types "<flow-root>/scripts/recovery.ts"`.
    `resume`: re-attach the worktree at HEAD and resume its `sessionId`. Otherwise act on
-   `restart-clean`, `escalate` (`agent/blocked`) or `re-derive`. Skip runs with `drain`
+   its `kind` per `--help`. Skip runs with `drain`
    set: `flow drain` recovers its own.
 2a. **Ships waiting on checks.** For each run with `shipWait` set:
    `flow review <id> --approve --by reviewer-agent --json`, never `--wait`. `"verdict":

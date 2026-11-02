@@ -3,6 +3,7 @@ import { RecoverySchema } from '../scripts/config-schema.ts';
 import {
   recoverOrphan,
   RECOVERY_BLOCKED_LABEL,
+  RECOVERY_NEEDS_INPUT_LABEL,
   type FlowRun,
   type RecoveryConfig,
   type RecoveryContext,
@@ -40,7 +41,7 @@ describe('recoverOrphan — the next-tick recovery ladder (§12)', () => {
       expect(action).toEqual({ kind: 'skip', reason: 'parked-on-human' });
     });
 
-    it('skips even when retries are exhausted (never escalates a parked item)', () => {
+    it('skips even when retries are exhausted (never blocks or releases a parked item)', () => {
       const exhausted = flowRun({ attemptCount: DEFAULT_RECOVERY.maxRetries });
       const action = recoverOrphan('needs-input', exhausted, intactContext(), DEFAULT_RECOVERY);
       expect(action.kind).toBe('skip');
@@ -122,8 +123,8 @@ describe('recoverOrphan — the next-tick recovery ladder (§12)', () => {
     });
   });
 
-  describe('over maxRetries — escalate to agent/blocked', () => {
-    it('escalates when attemptCount has reached maxRetries (no reclaim left)', () => {
+  describe('over maxRetries — onExhausted "block" (the default): agent/blocked', () => {
+    it('blocks when attemptCount has reached maxRetries (no reclaim left)', () => {
       const exhausted = flowRun({ attemptCount: DEFAULT_RECOVERY.maxRetries });
       const action = recoverOrphan(
         'claimed-no-worker',
@@ -131,18 +132,19 @@ describe('recoverOrphan — the next-tick recovery ladder (§12)', () => {
         intactContext(),
         DEFAULT_RECOVERY
       );
-      expect(action.kind).toBe('escalate');
-      expect(action.kind === 'escalate' && action.label).toBe(RECOVERY_BLOCKED_LABEL);
-      expect(action.kind === 'escalate' && action.label).toBe('agent/blocked');
+      expect(DEFAULT_RECOVERY.onExhausted).toBe('block');
+      expect(action.kind).toBe('block');
+      expect(action.kind === 'block' && action.label).toBe(RECOVERY_BLOCKED_LABEL);
+      expect(action.kind === 'block' && action.label).toBe('agent/blocked');
     });
 
-    it('escalates when attemptCount exceeds maxRetries', () => {
+    it('blocks when attemptCount exceeds maxRetries', () => {
       const over = flowRun({ attemptCount: DEFAULT_RECOVERY.maxRetries + 5 });
       const action = recoverOrphan('claimed-no-worker', over, intactContext(), DEFAULT_RECOVERY);
-      expect(action.kind).toBe('escalate');
+      expect(action.kind).toBe('block');
     });
 
-    it('does not escalate while one attempt remains (maxRetries - 1 still resumes)', () => {
+    it('does not give up while one attempt remains (maxRetries - 1 still resumes)', () => {
       const lastAttempt = flowRun({ attemptCount: DEFAULT_RECOVERY.maxRetries - 1 });
       const action = recoverOrphan(
         'claimed-no-worker',
@@ -154,7 +156,7 @@ describe('recoverOrphan — the next-tick recovery ladder (§12)', () => {
       expect(action.kind === 'resume' && action.attemptCount).toBe(DEFAULT_RECOVERY.maxRetries);
     });
 
-    it('carries a human-readable reason for the escalation comment', () => {
+    it('carries a human-readable reason for the comment', () => {
       const exhausted = flowRun({ attemptCount: DEFAULT_RECOVERY.maxRetries });
       const action = recoverOrphan(
         'claimed-no-worker',
@@ -162,7 +164,64 @@ describe('recoverOrphan — the next-tick recovery ladder (§12)', () => {
         intactContext(),
         DEFAULT_RECOVERY
       );
-      expect(action.kind === 'escalate' && action.reason).toMatch(/exhausted/i);
+      expect(action.kind === 'block' && action.reason).toMatch(/exhausted/i);
+    });
+  });
+
+  describe('over maxRetries — onExhausted "escalate": ask a person (agent/needs-input)', () => {
+    const escalate: RecoveryConfig = RecoverySchema.parse({ onExhausted: 'escalate' });
+
+    it('parks the item as a question with agent/needs-input, never agent/blocked', () => {
+      const exhausted = flowRun({ attemptCount: escalate.maxRetries });
+      const action = recoverOrphan('claimed-no-worker', exhausted, intactContext(), escalate);
+      expect(action).toEqual({
+        kind: 'escalate',
+        label: RECOVERY_NEEDS_INPUT_LABEL,
+        reason: expect.stringMatching(/exhausted/i),
+        question: expect.stringContaining('DOR-123'),
+      });
+      // The question is for a person: plain words, no counters.
+      expect(action.kind === 'escalate' && action.question).not.toMatch(/attemptCount|>=/);
+      expect(action.kind === 'escalate' && action.question).toMatch(/reply/i);
+      expect(RECOVERY_NEEDS_INPUT_LABEL).toBe('agent/needs-input');
+    });
+
+    it('still resumes while retries remain: the setting only applies once they run out', () => {
+      const action = recoverOrphan('claimed-no-worker', flowRun(), intactContext(), escalate);
+      expect(action.kind).toBe('resume');
+    });
+
+    it('once parked, the next tick skips it (the parked state is never reclaimed)', () => {
+      const exhausted = flowRun({ attemptCount: escalate.maxRetries });
+      expect(recoverOrphan('needs-input', exhausted, intactContext(), escalate)).toEqual({
+        kind: 'skip',
+        reason: 'parked-on-human',
+      });
+    });
+  });
+
+  describe('over maxRetries — onExhausted "abandon": let the item go', () => {
+    const abandon: RecoveryConfig = RecoverySchema.parse({ onExhausted: 'abandon' });
+
+    it('releases the item unowned, carrying no label and no attempt count', () => {
+      const exhausted = flowRun({ attemptCount: abandon.maxRetries });
+      const action = recoverOrphan('claimed-no-worker', exhausted, intactContext(), abandon);
+      expect(action).toEqual({
+        kind: 'abandon',
+        releaseTo: 'none',
+        reason: expect.stringMatching(/exhausted/i),
+      });
+    });
+
+    it('abandons even with no checkpoint left (the setting wins over restart-clean)', () => {
+      const exhausted = flowRun({ attemptCount: abandon.maxRetries });
+      const action = recoverOrphan(
+        'claimed-no-worker',
+        exhausted,
+        intactContext({ worktreeExists: false }),
+        abandon
+      );
+      expect(action.kind).toBe('abandon');
     });
   });
 
@@ -187,14 +246,14 @@ describe('recoverOrphan — the next-tick recovery ladder (§12)', () => {
 
     it('honors a custom maxRetries from config', () => {
       const strict: RecoveryConfig = RecoverySchema.parse({ maxRetries: 0 });
-      // With maxRetries 0, a fresh (attemptCount 0) claimed orphan escalates immediately.
+      // With maxRetries 0, a fresh (attemptCount 0) claimed orphan blocks immediately.
       const action = recoverOrphan(
         'claimed-no-worker',
         flowRun({ attemptCount: 0 }),
         intactContext(),
         strict
       );
-      expect(action.kind).toBe('escalate');
+      expect(action.kind).toBe('block');
     });
   });
 });

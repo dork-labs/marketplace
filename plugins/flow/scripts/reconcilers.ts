@@ -293,12 +293,26 @@ function recoveryResult(itemId: string, action: RecoveryAction): ReconcileResult
         itemId,
         summary: `restart-clean ${itemId} (${action.reason}, attempt ${action.attemptCount})`,
       };
+    case 'block':
+      return {
+        id: 'recovery',
+        acted: true,
+        itemId,
+        summary: `block ${itemId} → ${action.label} (${action.reason})`,
+      };
     case 'escalate':
       return {
         id: 'recovery',
         acted: true,
         itemId,
-        summary: `escalate ${itemId} → ${action.label} (${action.reason})`,
+        summary: `escalate ${itemId} → ${action.label}, ask a person (${action.reason})`,
+      };
+    case 'abandon':
+      return {
+        id: 'recovery',
+        acted: true,
+        itemId,
+        summary: `abandon ${itemId} → release --to ${action.releaseTo} (${action.reason})`,
       };
     case 're-derive':
       return {
