@@ -1,7 +1,8 @@
 /**
  * The project's drain settings: the two the advisor ranks with, so a move it
  * accepts is one `flow handoff` would make (`drain.warnMarginPct`,
- * `drain.maxLivePerAccount`), and the Flow panel's slot count (`drain.parallel`),
+ * `drain.maxLivePerAccount`), the Flow panel's slot count (`drain.parallel`)
+ * and how long its lanes may go unwatched (`drain.stallAfterMinutes`),
  * from `<main checkout>/.agents/flow/config.json` with `config.local.json` over
  * it, as flow's config loader merges them.
  *
@@ -21,7 +22,12 @@ import {
 } from '../../../../scripts/config-names.ts';
 
 /** The schema's defaults (`config-schema.ts`, `drain`). */
-export const DRAIN_DEFAULTS = { warnMarginPct: 10, maxLivePerAccount: 2, parallel: 0 } as const;
+export const DRAIN_DEFAULTS = {
+  warnMarginPct: 10,
+  maxLivePerAccount: 2,
+  parallel: 0,
+  stallAfterMinutes: 60,
+} as const;
 
 /** The drain settings the extension reads. */
 export interface DrainSettings {
@@ -31,6 +37,8 @@ export interface DrainSettings {
   maxLivePerAccount: number;
   /** Drain workers at once; `0` is flow's sequential default. */
   parallel: number;
+  /** Minutes a lane may go without progress, or its drain without a pass (10 or more). */
+  stallAfterMinutes: number;
 }
 
 /** Whether `value` is a non-null, non-array object. */
@@ -59,6 +67,7 @@ export function readDrainSettings(mainCheckout: string): DrainSettings {
   const warn = merged.warnMarginPct;
   const live = merged.maxLivePerAccount;
   const parallel = merged.parallel;
+  const stall = merged.stallAfterMinutes;
   return {
     warnMarginPct:
       typeof warn === 'number' && warn >= 0 && warn <= 50 ? warn : DRAIN_DEFAULTS.warnMarginPct,
@@ -70,5 +79,9 @@ export function readDrainSettings(mainCheckout: string): DrainSettings {
       typeof parallel === 'number' && Number.isInteger(parallel) && parallel >= 0
         ? parallel
         : DRAIN_DEFAULTS.parallel,
+    stallAfterMinutes:
+      typeof stall === 'number' && Number.isInteger(stall) && stall >= 10
+        ? stall
+        : DRAIN_DEFAULTS.stallAfterMinutes,
   };
 }

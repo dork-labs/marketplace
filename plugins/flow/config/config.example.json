@@ -125,6 +125,7 @@
     "maxReviewRounds": 5,
     "warnMarginPct": 10,
     "windDownGraceMinutes": 20,
+    "stallAfterMinutes": 60,
     "pollSeconds": 60,
     "armAutoMerge": false
   },

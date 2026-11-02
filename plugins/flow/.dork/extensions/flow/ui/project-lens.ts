@@ -134,6 +134,14 @@ export function conditionLine(
         hint: `In a chat in ${project.name}, type /flow:triage to sort them.`,
         start: { kind: 'sort', label: 'Sort them', count: condition.detail.untriaged ?? null },
       };
+    case 'unsupervised': {
+      const lanes = condition.detail.lanes ?? 0;
+      const which = lanes === 1 ? 'A lane' : `${lanes} lanes`;
+      return {
+        text: `${which} in ${project.name} ${lanes === 1 ? 'has' : 'have'} had no supervisor since ${clockTime(new Date(condition.since), locale)}. If ${lanes === 1 ? 'it goes' : 'they go'} quiet, nothing notices until flow drain runs again.`,
+        hint: `In a chat in ${project.name}, run flow drain, or check that its drain schedule is on.`,
+      };
+    }
     default:
       return null;
   }

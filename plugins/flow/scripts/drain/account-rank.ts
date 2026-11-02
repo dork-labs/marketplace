@@ -9,9 +9,10 @@
  * - {@link rankAccounts} drops the accounts that may not take the item and
  *   orders the rest: accounts of the item's runtime first ({@link itemRuntime}),
  *   and within one runtime the warm-cache affinity account, then every other
- *   account by weekly headroom per hour left before its reset (spend what expires
- *   soonest), and a `main` account last unless it is inside its spend-down
- *   window. Another runtime's accounts are candidates only with
+ *   account with a fresh reading by its live sessions (fewest first, so lanes
+ *   spread) and weekly headroom per hour left before its reset (spend what
+ *   expires soonest), and a `main` account last unless it is inside its
+ *   spend-down window. A stale reading keeps an account out. Another runtime's accounts are candidates only with
  *   `crossRuntimeFallback: on`, after every account of the item's runtime, in
  *   `fleet.runtimes` order.
  * - {@link chooseAccount} turns a rank into the account to launch on. Every
@@ -102,7 +103,8 @@ export type IneligibleReason =
   | 'not-allowed-here'
   | 'limited'
   | 'near-limit'
-  | 'at-capacity';
+  | 'at-capacity'
+  | 'stale-usage';
 
 /** One (runtime, account) pair offered to {@link rankAccounts}. */
 export interface RankableAccount {
@@ -179,7 +181,7 @@ export interface RankedAccount {
   runtime: RuntimeSlug;
   /** The registry id. */
   id: string;
-  /** 0: warm-cache affinity. 1: by headroom per hour. 2: a main outside its spend-down window. */
+  /** 0: warm-cache affinity. 1: by live lanes, then headroom per hour. 2: a main outside its spend-down window. */
   tier: 0 | 1 | 2;
   /** Weekly headroom (points) per hour until the weekly reset. Higher goes first within a tier. */
   score: number;
@@ -493,6 +495,23 @@ function headroomScore(account: RankableAccount, now: Instant): number {
   return remaining / hours;
 }
 
+/** How old a weekly reading may be, before its reset, and still be trusted (DOR-3263). */
+export const STALE_USAGE_MS = 24 * HOUR_MS;
+
+/**
+ * Whether the account's weekly reading is too old to trust: its week has not
+ * reset, but it was read more than {@link STALE_USAGE_MS} ago, so the account
+ * may have reached its limit since (other apps share the allowance). Use or
+ * `flow usage probe` refreshes it, and the reset clears it. A reading S1
+ * drops as stale (no reset time, past its window) is not this: for those a
+ * lapse means the limit cleared. An account never read is only `unknown`.
+ */
+function staleUsage(account: RankableAccount, now: Instant): boolean {
+  const reading = readWindow(entryOf(account.windows, 'seven_day'), now, 'seven_day');
+  if (reading === null || reading.expired || reading.resetsAt === null) return false;
+  return instantMs(now) - Date.parse(reading.observedAt) > STALE_USAGE_MS;
+}
+
 /** The 5-hour window's used share for tie-breaks; no reading counts as 0. */
 function fiveHourUsed(account: RankableAccount, now: Instant): number {
   return readWindow(entryOf(account.windows, 'five_hour'), now, 'five_hour')?.usedPct ?? 0;
@@ -520,14 +539,17 @@ function runtimeGroup(
  *   only with `crossRuntimeFallback: on` (while it is off they are left out
  *   entirely, not listed as ineligible).
  * - Ineligible accounts are listed with every reason that applies; an `unknown`
- *   signal is eligible. `out-of-scope` is flow's own role (kept out of this
+ *   signal is eligible, but a stale one (`stale-usage`, a stored reading that
+ *   lapsed) is not. `out-of-scope` is flow's own role (kept out of this
  *   repo); `not-allowed-here` is DorkOS's rule for the project (`input.project`,
  *   fleet contract 4.2.0), which flow obeys as DorkOS does. A model's buckets are checked only on the item's own
  *   runtime (model fallback stays within a runtime).
  * - Order: the item's runtime first, then other runtimes by
  *   {@link runtimeGroup}; within one runtime by tier (affinity, then
- *   rotation-and-spending-down accounts, then a held-back `main`), then score
- *   descending, then the lower 5-hour usage, then id ascending.
+ *   rotation-and-spending-down accounts, then a held-back `main`), then an
+ *   `ok` signal before an `unknown` one, then fewer live sessions (so lanes
+ *   spread across accounts rather than fill one), then score descending, then
+ *   the lower 5-hour usage, then id ascending.
  *
  * @param input - The clock, repo, accounts, runtimes, model, affinity, exclusions, live counts and settings.
  * @returns The pick, the ranked eligible accounts and the ineligible ones.
@@ -535,7 +557,7 @@ function runtimeGroup(
 export function rankAccounts(input: RankAccountsInput): AccountRank {
   const { now, repo, model, affinity, opts, runtime: own } = input;
   const excluded = new Set(input.exclude);
-  const ranked: (RankedAccount & { group: number; fiveHour: number })[] = [];
+  const ranked: (RankedAccount & { group: number; fiveHour: number; live: number })[] = [];
   const ineligible: IneligibleAccount[] = [];
 
   for (const account of input.accounts) {
@@ -557,7 +579,9 @@ export function rankAccounts(input: RankAccountsInput): AccountRank {
     if (!projectAllows(account.policy, input.project)) reasons.push('not-allowed-here');
     if (signal.level === 'exhausted') reasons.push('limited');
     if (signal.level === 'warning') reasons.push('near-limit');
-    if ((input.liveByAccount[key] ?? 0) >= opts.maxLivePerAccount) reasons.push('at-capacity');
+    const live = input.liveByAccount[key] ?? 0;
+    if (live >= opts.maxLivePerAccount) reasons.push('at-capacity');
+    if (staleUsage(account, now)) reasons.push('stale-usage');
     if (reasons.length > 0) {
       ineligible.push({ runtime: account.runtime, id: account.id, reasons });
       continue;
@@ -571,6 +595,7 @@ export function rankAccounts(input: RankAccountsInput): AccountRank {
       signal,
       group: runtimeGroup(account.runtime, own, input.runtimes),
       fiveHour: fiveHourUsed(account, now),
+      live,
     });
   }
 
@@ -578,6 +603,8 @@ export function rankAccounts(input: RankAccountsInput): AccountRank {
     (a, b) =>
       a.group - b.group ||
       a.tier - b.tier ||
+      Number(a.signal.level !== 'ok') - Number(b.signal.level !== 'ok') ||
+      a.live - b.live ||
       b.score - a.score ||
       a.fiveHour - b.fiveHour ||
       (a.id < b.id ? -1 : a.id > b.id ? 1 : 0)

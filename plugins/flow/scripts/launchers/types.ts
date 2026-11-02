@@ -178,20 +178,24 @@ export interface SessionHandle {
 /**
  * What a session is doing, as its host reports it.
  *
- * - `busy`: a turn is running.
+ * - `busy`: a turn is running. `waiting: 'person'` when the turn is stopped
+ *   on a person (a permission prompt or a question, DorkOS's `blocked`);
+ *   `activityAt` is when the session last wrote, when the host can say.
  * - `idle`: alive and waiting for input.
  * - `exited`: the process is gone; `code` is its exit code when known.
  * - `limited`: the session hit a rate limit; `window` and `resetsAt` when known.
  * - `unknown`: the host cannot say; `reason` is a plain sentence. `gone` is
  *   set only when the host itself answered that it no longer has the session
- *   (DorkOS's 404), never when it did not answer (DOR-2490).
+ *   (DorkOS's 404), never when it did not answer (DOR-2490). `cannotTell` is
+ *   set when the host answered but can never say for this session (no status
+ *   reported, another DorkOS, no log): not a passing outage (DOR-3263).
  */
 export type SessionState =
-  | { kind: 'busy' }
+  | { kind: 'busy'; waiting?: 'person'; activityAt?: string }
   | { kind: 'idle' }
   | { kind: 'exited'; code: number | null }
   | { kind: 'limited'; window: string | null; resetsAt: string | null }
-  | { kind: 'unknown'; reason: string; gone?: true };
+  | { kind: 'unknown'; reason: string; gone?: true; cannotTell?: true };
 
 /** A probe's answer: the host can start a session now, or why not. */
 export type ProbeResult = { ok: true } | { ok: false; reason: string };

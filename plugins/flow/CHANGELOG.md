@@ -4,6 +4,16 @@ Installs of this plugin are pinned to a commit SHA, so a fix here does not reach
 you until you **reinstall it** (Marketplace → flow → reinstall, or re-run your
 `--plugin-dir` checkout's `git pull`). Each entry below says whether that matters.
 
+## 0.77.0
+
+**`flow drain` now notices an item whose session has gone quiet, and spreads its sessions across your accounts instead of stacking them on one (DOR-3263). Before, a session that vanished or stalled overnight sat there until someone looked. Reinstall to get it.**
+
+- After `drain.stallAfterMinutes` (new, default 60, at least 10) with no progress on an item, flow acts. A session that went away (DorkOS says it no longer has the chat) restarts once from the item's `HANDOFF.md`, on the account the ranking picks, so never one at its limit. If it goes away again, or no account has room, the item parks and says why. A session that is still busy but has written nothing for that long parks too (a single silent command that long counts, so raise the setting if you run those), and so does one flow can't reach, since it may still be running. Flow judges a busy session only where it can see it write: a cli session's log, or a Claude Code chat in DorkOS. A reviewer that went away restarts once, then the item parks; a quiet reviewer parks rather than starting a second one, and once you answer, flow watches that same reviewer again. A parked session DorkOS may still be running keeps its place in its account's count until it stops or you answer, so no new session crowds that account.
+- A session waiting on you (a permission prompt or a question in its DorkOS chat) is never restarted or parked for it. Past the stall time, `flow status` shows "waiting on a person since…", and the Flow panel shows the item as Needs you.
+- When no `flow drain` is running and no scheduled pass ran within twice the stall time, `flow status` lists those items under "No supervisor" and counts them as drift, so `--strict` fails. The Flow panel says the same for the project. Neither says it while flow is paused. Each pass now writes `.dork/flow/drain-last-pass.json`, which is how flow can tell.
+- New work goes to the account with the fewest sessions first, then to the one whose weekly allowance runs out soonest. Before, one account filled up to `drain.maxLivePerAccount` before the next got any. An account flow has never measured now comes after every account with a fresh reading.
+- An account whose weekly usage reading is more than a day old, with its week not yet reset, is never given work: it's listed as `stale-usage` (in DorkOS: "Its usage reading is out of date"), since other apps may have spent it since. Using the account, `flow usage probe <id>`, or the weekly reset clears it. If that leaves no account, nothing starts.
+
 ## 0.76.0
 
 **Flow now arms a pull request only into your repository's default branch, whatever it's called, and only when the merge will squash (DOR-3256). Before, flow assumed a branch named `main` and never checked the merge method. Reinstall to get it.**

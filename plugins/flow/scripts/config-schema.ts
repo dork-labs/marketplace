@@ -923,6 +923,12 @@ export const DrainSchema = z
     maxReviewRounds: z.number().int().min(1).default(5),
     /** How close to a usage ceiling, in percent, counts as a warning. */
     warnMarginPct: z.number().min(0).max(50).default(10),
+    /**
+     * Minutes a lane may go without progress before flow acts (DOR-3263): a
+     * session that went away restarts once, a quiet or unreachable one parks,
+     * and one waiting on a person is listed as waiting. At least 10.
+     */
+    stallAfterMinutes: z.number().int().min(10).default(60),
     /** Minutes a warned worker has to write its checkpoint before flow writes one for it. */
     windDownGraceMinutes: z.number().int().min(1).default(20),
     /** Seconds between passes when `flow drain` runs without `--tick`. */

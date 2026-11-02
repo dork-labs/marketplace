@@ -617,10 +617,10 @@ export function createDorkosLauncher(deps: DorkosLauncherDeps): Launcher {
       // Only the DorkOS that started it can say so: another one never knew it.
       return h.dorkosUrl === base
         ? { kind: 'unknown', reason, gone: true }
-        : { kind: 'unknown', reason };
+        : { kind: 'unknown', reason, cannotTell: true };
     }
     const status = session.status;
-    if (!isObject(status)) return { kind: 'unknown', reason: NO_STATUS_REASON };
+    if (!isObject(status)) return { kind: 'unknown', reason: NO_STATUS_REASON, cannotTell: true };
     if (isObject(status.limit)) {
       return {
         kind: 'limited',
@@ -629,7 +629,20 @@ export function createDorkosLauncher(deps: DorkosLauncherDeps): Launcher {
       };
     }
     if (typeof status.lifecycle === 'string' && BUSY_LIFECYCLES.has(status.lifecycle)) {
-      return { kind: 'busy' };
+      // For Claude Code, `updatedAt` is the transcript's mtime, so it moves
+      // whenever the agent writes: the lane supervisor's sign of progress
+      // (DOR-3263). Codex and OpenCode move it only when a message is sent, so
+      // they report none rather than look stalled. `blocked` waits on a person.
+      const runtime = typeof session.runtime === 'string' ? session.runtime : h.runtime;
+      const activityAt =
+        runtime === 'claude-code' && typeof session.updatedAt === 'string'
+          ? session.updatedAt
+          : undefined;
+      return {
+        kind: 'busy',
+        ...(status.lifecycle === 'blocked' ? { waiting: 'person' as const } : {}),
+        ...(activityAt === undefined ? {} : { activityAt }),
+      };
     }
     return { kind: 'idle' };
   }

@@ -154,6 +154,29 @@ describe('the project lens', () => {
     expect(screen.getByText('Up next is shown when flow can reach Linear from here.')).toBeTruthy();
   });
 
+  it('says when drain lanes have no supervisor (DOR-3263)', async () => {
+    await renderTab(
+      flowModel([
+        flowProject('dorkos', {
+          conditions: [
+            {
+              kind: 'unsupervised',
+              since: '2026-09-28T09:14:00.000Z',
+              escalated: false,
+              detail: { lanes: 2 },
+            },
+          ],
+        }),
+      ]),
+      host(DORKOS)
+    );
+    expect(
+      screen.getByText(
+        /2 lanes in dorkos have had no supervisor since .*\. If they go quiet, nothing notices until flow drain runs again\./
+      )
+    ).toBeTruthy();
+  });
+
   it('shows what is wrong in plain words, with the way to fix it behind ⓘ', async () => {
     await renderTab(
       flowModel([

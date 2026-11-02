@@ -27,6 +27,7 @@ import { existsSync, mkdirSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 
 import { chooseAccount, rankAccounts } from '../drain/account-rank.ts';
+import { writeLastPass } from '../drain/last-pass.ts';
 import { answerPointer, findAnswer, untrustedReplyWarning } from '../drain/answer.ts';
 import type { RunQuestion } from '../flow-run.ts';
 import { belongsToPark, checkBrief, parkedAnswer, personOnly, pickComment } from '../question.ts';
@@ -90,9 +91,10 @@ import {
 } from './squash-check.ts';
 import {
   gatherAssignmentInput,
-  liveByAccount,
+  liveCounts,
   noAccountMessage,
   planNext,
+  restartRank,
   type NextConfig,
 } from './next.ts';
 import { signBody, unsignedBody } from './provenance.ts';
@@ -541,6 +543,7 @@ export async function drain(ctx: VerbContext, options: DrainOptions = {}): Promi
       // "Retry and fix problems" at Ask me first: park on red checks (autonomy.ts).
       fixFailingChecks: !asksBeforeFixing(project.loaded.autonomy),
       startTimeoutMs: DEFAULT_START_TIMEOUT_MS,
+      stallAfterMs: config.drain.stallAfterMinutes * 60_000,
       permissionMode,
       workerModel: model('implementation'),
       reviewerModel: model('review'),
@@ -682,6 +685,8 @@ export async function drain(ctx: VerbContext, options: DrainOptions = {}): Promi
     },
     async reviewerAccount(runtime, exclude = []) {
       const input = await gatherAssignmentInput(ctx, config);
+      // An aliased `default` is its registered row, for the count and the exclusion alike.
+      const { canonical, live } = liveCounts(input);
       const rank = rankAccounts({
         now: input.now,
         repo: input.repo,
@@ -692,10 +697,18 @@ export async function drain(ctx: VerbContext, options: DrainOptions = {}): Promi
         crossRuntimeFallback: input.crossRuntimeFallback,
         model: model('review'),
         affinity: null,
-        exclude,
-        liveByAccount: liveByAccount(input.runs),
+        exclude: exclude.map(canonical),
+        liveByAccount: live,
         opts: input.opts,
       });
+      const choice = chooseAccount({ accounts: input.accounts, rank });
+      return choice.account === 'none' ? null : plannedAccount(input.accounts, choice.account);
+    },
+    // A restarted worker is ranked as a new one is, its own account first
+    // while that one still has room (DOR-3263).
+    async restartAccount(run) {
+      const input = await gatherAssignmentInput(ctx, config);
+      const rank = restartRank(input, run, model('implementation'));
       const choice = chooseAccount({ accounts: input.accounts, rank });
       return choice.account === 'none' ? null : plannedAccount(input.accounts, choice.account);
     },
@@ -780,6 +793,8 @@ export async function drain(ctx: VerbContext, options: DrainOptions = {}): Promi
       // pass advances runs and fills slots with new work.
       const sweepLines = await drainSweep(ctx, config, sweeps);
       const report = await runPass(deps);
+      // What says a scheduled drain still watches its lanes (DOR-3263).
+      if (!ctx.dryRun) writeLastPass(mainCheckout, ctx.now());
       events.push(...report.events);
       const passLines = [...sweepLines, ...report.events.map(line), ...planNotes.splice(0)];
       if (report.held === 'machine-busy') {

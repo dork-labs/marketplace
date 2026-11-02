@@ -5,7 +5,7 @@ description: flow drain carries several ready items at once, each on its own acc
 
 # Draining in parallel
 
-`flow drain --parallel 3` carries three ready items at once, each in its own worktree on the account with the most room. A separate reviewer reads every push; `flow pr` opens the PR only after a clean review at the branch head.
+`flow drain --parallel 3` carries three ready items at once, each in its own worktree on the account with the most room. A separate reviewer reads every push; `flow pr` opens a PR only after a clean review of the head.
 
 ## Before you start
 
@@ -22,6 +22,7 @@ Allow each account flow may spend with `flow accounts set <id> --role rotation`.
 - `sent review-findings`: the worker got the findings.
 - `sent open-pr`: the review came back clean.
 - `moved to <account>`: an account ran out, so the work moved.
+- `restarted on <account>`: its session went away.
 - `parked: <reason>`: a person is needed.
 
 ## What happens at a limit
@@ -32,17 +33,21 @@ Near a limit, the worker finishes its step, checkpoints and stops. If the accoun
 
 `handoff` in `fleet.json` decides: `auto` moves the run at once; `ask` posts one comment with the `flow handoff <id> --to <account>` command and waits for the reset. `flow handoff <id> --wait` keeps a run where it is.
 
+## When a session goes quiet
+
+After `drain.stallAfterMinutes` (default 60) without progress, a session that went away restarts once from `HANDOFF.md` on an account with room; otherwise the run parks. One waiting on you is only listed, by `flow status`.
+
 ## Caps
 
-New sessions wait while load per CPU reaches `drain.maxLoadPerCpu` or an account has `drain.maxLivePerAccount` sessions. After `drain.maxReviewRounds` rounds the run parks.
+New sessions wait while load per CPU reaches `drain.maxLoadPerCpu` or an account has `drain.maxLivePerAccount` sessions. Accounts with fewer sessions go first; one with a stale usage reading gets none. After `drain.maxReviewRounds` rounds the run parks.
 
 ## Terminal or schedule
 
-In a terminal, `flow drain` repeats every `drain.pollSeconds` until done or Ctrl-C. A schedule runs `flow drain --tick`.
+In a terminal, `flow drain` repeats every `drain.pollSeconds` until done or Ctrl-C. A schedule runs `flow drain --tick`. With no pass for twice `drain.stallAfterMinutes`, `flow status` says so.
 
 ## Permissions
 
-Workers start in `drain.permissionMode`, default `acceptEdits`, which runs only what your repo's settings allow. `bypassPermissions` also needs a person to approve Flow's **Allow unattended bypass** card in DorkOS, for 30 days or until your flow settings change, and flow must be installed globally, not per agent; without it, workers start in `acceptEdits`. The drain won't start on uncommitted settings or adapter code. Your guard hooks still run.
+Workers start in `drain.permissionMode`, default `acceptEdits`, which runs only what your repo's settings allow. `bypassPermissions` also needs a person to approve Flow's **Allow unattended bypass** card in DorkOS, for 30 days or until your flow settings change, and flow must be installed globally, not per agent; without it, workers start in `acceptEdits`. It won't start on uncommitted settings or adapter code. Guard hooks still run.
 
 ## Parts
 

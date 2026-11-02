@@ -69,6 +69,7 @@ export function projectLine(
     'sign-in': 1,
     'settings-problem': 2,
     'tracker-unreachable': 3,
+    unsupervised: 3.5,
     'nothing-ready': 4,
     paused: 5,
   };

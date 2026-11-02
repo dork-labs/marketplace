@@ -19,7 +19,13 @@ import { execFile } from 'node:child_process';
 import { existsSync, readFileSync, readdirSync } from 'node:fs';
 import path from 'node:path';
 import { PAUSE_FILE, PROJECT_CONFIG_DIR } from '../../../../scripts/config-names.ts';
+import {
+  readLastPass,
+  unsupervisedLanes,
+  type Unsupervised,
+} from '../../../../scripts/drain/last-pass.ts';
 import { liveKey } from '../../../../scripts/drain/live-count.ts';
+import { liveDrainPid } from '../../../../scripts/drain/lock.ts';
 import {
   IMPLICIT_ACCOUNT_ID,
   resolveAccountRef,
@@ -82,6 +88,8 @@ export interface FlowRunRow {
   updatedAt: string | null;
   /** For a `stopped` run: whose DorkOS chat is gone, the worker's or the reviewer's. */
   stopped?: 'worker' | 'reviewer';
+  /** Since when its session has waited on a person (`drain.waitingSince`, DOR-3263), when it does. */
+  waitingSince?: string;
 }
 
 /**
@@ -91,13 +99,19 @@ export interface FlowRunRow {
  */
 export interface FlowCondition {
   /** What is wrong. */
-  kind: 'paused' | 'tracker-unreachable' | 'sign-in' | 'settings-problem' | 'nothing-ready';
+  kind:
+    | 'paused'
+    | 'tracker-unreachable'
+    | 'sign-in'
+    | 'settings-problem'
+    | 'nothing-ready'
+    | 'unsupervised';
   /** When it began. */
   since: string;
   /** Whether an ask in the inbox is live for it. */
   escalated: boolean;
-  /** For nothing-ready: items waiting to be sorted. */
-  detail: { untriaged?: number };
+  /** For nothing-ready: items waiting to be sorted. For unsupervised: the lanes nothing watches. */
+  detail: { untriaged?: number; lanes?: number };
 }
 
 /**
@@ -229,7 +243,8 @@ export const DONE_SHOWN_MS = 24 * 60 * 60_000;
  * 2. **needs you**: `limit.state` is `pending-approval` (ask mode wants the
  *    operator's move); or a person's hold (`limit.heldBy: 'person'`) that will
  *    not resume by itself (`resumeOnReset: false`); or the drain parked it for
- *    a person (`drain.phase: 'parked'`, `drain.parkedFor: 'person'`).
+ *    a person (`drain.phase: 'parked'`, `drain.parkedFor: 'person'`); or its
+ *    session has waited on a person past the stall time (`drain.waitingSince`).
  * 3. **parked**: the drain parked it for any other reason; or `limit.state` is
  *    `waiting-reset` or `awaiting-handoff`; or any other `limit.heldBy` hold.
  * 4. **in review**: `drain.phase` is `reviewing`, `pr-ready` or `watching`; or,
@@ -254,6 +269,7 @@ export function runState(run: unknown): RunPill {
   if (limit?.state === 'pending-approval') return 'needs-you';
   if (limit?.heldBy === 'person' && limit.resumeOnReset === false) return 'needs-you';
   if (parked && drain.parkedFor === 'person') return 'needs-you';
+  if (!parked && typeof drain?.waitingSince === 'string') return 'needs-you';
   if (parked) return 'parked';
   if (typeof limit?.state === 'string' && WAITING_LIMIT_STATES.has(limit.state)) return 'parked';
   if (limit !== null && limit.heldBy !== undefined && limit.heldBy !== null) return 'parked';
@@ -596,6 +612,9 @@ export function projectRuns(input: {
       state: gone === undefined ? runState(run) : 'stopped',
       updatedAt: lastUpdateOf(run),
       ...(gone === undefined ? {} : { stopped: gone.chat }),
+      ...(isObject(run.drain) && typeof run.drain.waitingSince === 'string'
+        ? { waitingSince: run.drain.waitingSince }
+        : {}),
     });
   }
   return [...active, ...done];
@@ -620,6 +639,8 @@ export function conditionsOf(
   extra: {
     ideas?: { waiting: number | null; idleSince: string | null; due: boolean };
     escalated?: ReadonlySet<FlowCondition['kind']>;
+    /** Drain lanes nothing watches (`unsupervisedLanes`), or `null`. */
+    unsupervised?: Unsupervised | null;
   } = {}
 ): FlowCondition[] {
   const conditions: FlowCondition[] = [];
@@ -650,6 +671,15 @@ export function conditionsOf(
       since: ideas.idleSince,
       escalated: escalated('nothing-ready'),
       detail: { untriaged: ideas.waiting },
+    });
+  }
+  const unsupervised = extra.unsupervised;
+  if (unsupervised) {
+    conditions.push({
+      kind: 'unsupervised',
+      since: unsupervised.lastPassAt ?? now.toISOString(),
+      escalated: false,
+      detail: { lanes: unsupervised.identifiers.length },
     });
   }
   return conditions;
@@ -738,7 +768,8 @@ export function buildProject(input: {
   }
   const flag = readPauseFlag(pauseFlagPath(entry.root), now);
   const pause = flag?.pauses ? { since: flag.since, until: flag.until } : null;
-  const slots = slotsOf(readDrainSettings(entry.root).parallel);
+  const drainSettings = readDrainSettings(entry.root);
+  const slots = slotsOf(drainSettings.parallel);
   const waiting = ideasWaiting(read);
   const idleSince = extras.idleSince ?? null;
   const autonomy = extras.autonomy ?? null;
@@ -768,6 +799,17 @@ export function buildProject(input: {
     conditions: conditionsOf(pause, read, now, {
       ideas: { waiting, idleSince, due },
       escalated: extras.escalated,
+      // A pause stops the drain's passes on purpose: its header says so.
+      unsupervised:
+        pause !== null
+          ? null
+          : unsupervisedLanes({
+              runs: store,
+              livePid: liveDrainPid(entry.root, pidAlive),
+              lastPassAt: readLastPass(entry.root),
+              now,
+              stallAfterMs: drainSettings.stallAfterMinutes * 60_000,
+            }),
     }),
     version: entry.version,
     autonomy,

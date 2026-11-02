@@ -295,10 +295,11 @@ default, so a config that never mentions it keeps the one-item tick.
 | ---------------------- | ---------------------------------------------------------------- | ------------------------------------------------------------------------------ |
 | `parallel`             | whole number ≥ 0, `0`                                            | Workers at once. `0`: the scheduled tick carries one item itself.              |
 | `maxLoadPerCpu`        | number > 0, `1.5`                                                | No new session starts while the 1-minute load per CPU is at or above this.     |
-| `maxLivePerAccount`    | whole number ≥ 1, `2`                                            | Sessions (worker or reviewer) on one account at once.                          |
+| `maxLivePerAccount`    | whole number ≥ 1, `2`                                            | Sessions (worker or reviewer) on one account at once. Accounts with fewer get new work first. |
 | `maxReviewRounds`      | whole number ≥ 1, `5`                                            | Review verdicts before an item parks for a person.                             |
 | `warnMarginPct`        | number 0–50, `10`                                                | How close to a usage ceiling, in percent, counts as a warning.                 |
 | `windDownGraceMinutes` | whole number ≥ 1, `20`                                           | How long a warned worker has to checkpoint before flow writes one for it.      |
+| `stallAfterMinutes`    | whole number ≥ 10, `60`                                          | How long an item's session may show no progress before flow acts: a session that went away restarts once, a quiet one parks, and one waiting on you is listed as waiting. A single command that runs that long in silence (a long test suite) counts as quiet, so raise it if your work has those. Twice this long without a drain pass, `flow status` says nothing is watching the items. |
 | `pollSeconds`          | whole number ≥ 10, `60`                                          | Seconds between passes when `flow drain` runs on its own.                      |
 | `waitIfResetWithinMinutes` | whole number ≥ 0, `60`                                       | When an account's limit resets this soon, wait for it instead of moving the item. `0` never waits. |
 | `modelFallback`        | `{ runtime: [model, ...] }`, `{}`                                | When only one model's allowance runs out, the models to continue on, in order (names from `models.bindings` or model ids). Empty: off. |
