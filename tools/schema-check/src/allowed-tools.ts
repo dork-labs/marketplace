@@ -261,12 +261,17 @@ export const SAFE_COMMANDS: ReadonlySet<string> = new Set([
   'sw_vers',
 ]);
 
+/** A {@link REVIEWED_COMMANDS} rule any file in its package may hold. */
+export const ANY_FILE = 'any file';
+
 /**
  * Rules a package may hold that the floor otherwise refuses: exact commands
  * whose first word isn't on {@link SAFE_COMMANDS}, bare reads, `Edit` paths to
- * files that run later, MCP tools on servers the package doesn't ship, and a
- * bare `SlashCommand`. Each is reviewed
- * for what it reaches. Package folder → rules.
+ * files that run later, and MCP tools on servers the package doesn't ship.
+ * Each is reviewed for what it reaches, and for the files that hold it:
+ * package folder → rule → the repo-relative files that may grant it. A new
+ * file taking a reviewed rule is a new line here, so it gets the same review
+ * (Security's S3 on #138, DOR-3659). Only the bare reads are {@link ANY_FILE}.
  * Adding one is a security decision, like {@link PROJECT_WRITERS}.
  *
  * Flow's: read-only git plumbing its verify and execute steps need (they run
@@ -274,43 +279,60 @@ export const SAFE_COMMANDS: ReadonlySet<string> = new Set([
  * `node --version` for init's check, and init's one dependency install, which
  * is exact, `--omit=dev`, and into flow's own folder.
  */
-export const REVIEWED_COMMANDS: ReadonlyMap<string, ReadonlySet<string>> = new Map([
+export const REVIEWED_COMMANDS: ReadonlyMap<
+  string,
+  ReadonlyMap<string, readonly string[] | typeof ANY_FILE>
+> = new Map([
   [
     'plugins/flow',
-    new Set([
-      'Bash(git rev-parse --show-toplevel)',
-      'Bash(git rev-parse --git-dir --git-common-dir)',
-      'Bash(git rev-parse HEAD)',
-      'Bash(git status --porcelain)',
-      'Bash(git merge-base HEAD origin/HEAD)',
-      'Bash(git log --oneline origin/HEAD..HEAD)',
-      'Bash(git diff)',
-      'Bash(git diff origin/HEAD...HEAD)',
-      'Bash(git diff --stat origin/HEAD...HEAD)',
-      'Bash(node --version)',
-      'Bash(npm install --omit=dev --prefix "${CLAUDE_PLUGIN_ROOT}")',
+    new Map<string, readonly string[] | typeof ANY_FILE>([
+      ['Bash(git rev-parse --show-toplevel)', flowCommands('ideate', 'init', 'specify')],
+      ['Bash(git rev-parse --git-dir --git-common-dir)', flowCommands('done', 'execute')],
+      ['Bash(git rev-parse HEAD)', flowCommands('verify')],
+      ['Bash(git status --porcelain)', flowCommands('done', 'verify')],
+      ['Bash(git merge-base HEAD origin/HEAD)', flowCommands('verify')],
+      ['Bash(git log --oneline origin/HEAD..HEAD)', flowCommands('verify')],
+      ['Bash(git diff)', flowCommands('verify')],
+      ['Bash(git diff origin/HEAD...HEAD)', flowCommands('verify')],
+      ['Bash(git diff --stat origin/HEAD...HEAD)', flowCommands('verify')],
+      ['Bash(node --version)', flowCommands('init')],
+      ['Bash(npm install --omit=dev --prefix "${CLAUDE_PLUGIN_ROOT}")', flowCommands('init')],
       // Flow's own working files under .dork/flow (DOR-3311): its scratch
       // folder, and the drain switch that /flow:pause turns off.
-      'Edit(.dork/flow/tmp/**)',
-      'Edit(.dork/flow/auto-run.json)',
+      [
+        'Edit(.dork/flow/tmp/**)',
+        flowCommands('capture', 'decompose', 'done', 'groom', 'specify', 'triage'),
+      ],
+      ['Edit(.dork/flow/auto-run.json)', flowCommands('pause')],
       // DorkOS's schedule tools, for flow's own schedules: /flow:status lists
       // them, and /flow:pause and /flow:resume turn them off and on (DOR-3311).
       // tasks_update can also rewrite any schedule's prompt, so a changed
-      // person-made schedule may not ask again; reviewed knowing that.
-      'mcp__dorkos__tasks_list',
-      'mcp__dorkos__tasks_update',
-      // /flow and /flow:resume hand off to the next stage's command, and
-      // triage, capture, status, init and groom load flow's own skills.
-      'SlashCommand',
-      'Skill',
+      // person-made schedule may not ask again; reviewed knowing that, for
+      // these two commands only.
+      ['mcp__dorkos__tasks_list', flowCommands('pause', 'status')],
+      ['mcp__dorkos__tasks_update', flowCommands('pause', 'resume')],
       // Bare reads, until flow moves to folder-scoped reads (follow-up). In plain
       // Claude Code a bare Read allow reads ~/.ssh with no prompt.
-      'Read',
-      'Grep',
-      'Glob',
+      ['Read', ANY_FILE],
+      ['Grep', ANY_FILE],
+      ['Glob', ANY_FILE],
     ]),
   ],
 ]);
+
+/** Flow's command files, by name. */
+function flowCommands(...names: string[]): string[] {
+  return names.map((name) => `plugins/flow/commands/${name}.md`);
+}
+
+/**
+ * Whether `file` in `pkgDir` may hold `rule` because it was reviewed: the
+ * rule is on {@link REVIEWED_COMMANDS} for that package, and for that file.
+ */
+export function isReviewed(pkgDir: string, rule: string, file: string): boolean {
+  const files = REVIEWED_COMMANDS.get(pkgDir)?.get(rule);
+  return files === ANY_FILE || (files?.includes(file) ?? false);
+}
 
 /**
  * Every tool name a rule may use. Anything else, including a tool Claude Code
@@ -447,16 +469,13 @@ export function breach(
 ): string | null {
   if (/^[A-Z][A-Za-z]*$/.test(rule)) {
     if (UNSCOPED.has(rule)) return 'it is unscoped, so it allows any command or any file write';
-    if (READERS.has(rule) && !REVIEWED_COMMANDS.get(pkgDir)?.has(rule)) {
+    if (READERS.has(rule) && !isReviewed(pkgDir, rule, file)) {
       return `a bare ${rule} reads any file, ~/.ssh included; scope it to a folder, as ${rule}(specs/**)`;
     }
     if (rule === 'WebFetch') {
       return 'a bare WebFetch can send anything anywhere; use WebFetch(domain:<host>)';
     }
-    if (
-      (rule === 'SlashCommand' || rule === 'Skill') &&
-      !REVIEWED_COMMANDS.get(pkgDir)?.has(rule)
-    ) {
+    if (rule === 'SlashCommand' || rule === 'Skill') {
       return `a bare ${rule} runs any skill or slash command, each with its own allowed-tools; name the package's own, as ${rule}(${rule === 'Skill' ? '' : '/'}<package>:<name>)`;
     }
     return KNOWN_TOOLS.has(rule)
@@ -470,7 +489,7 @@ export function breach(
     // A tool on another server can do anything that server does
     // (mcp__dorkos__mcp_add_server, mcp__playwright__browser_run_code_unsafe),
     // so only the package's own servers pass unreviewed (DOR-3311).
-    if (REVIEWED_COMMANDS.get(pkgDir)?.has(rule)) return null;
+    if (isReviewed(pkgDir, rule, file)) return null;
     const own = ownServerPrefixes(repoRoot, pkgDir).find((prefix) => rule.startsWith(prefix));
     return own && !rule.slice(own.length).includes('__')
       ? null
@@ -490,7 +509,7 @@ export function breach(
     return `${tool} is not on KNOWN_TOOLS; a tool is reviewed before a package may grant it`;
   }
   if (tool === 'Edit') {
-    return REVIEWED_COMMANDS.get(pkgDir)?.has(rule) ? null : editBreach(rule, body, file);
+    return isReviewed(pkgDir, rule, file) ? null : editBreach(rule, body, file);
   }
   if (tool === 'SlashCommand' || tool === 'Skill') {
     return ownCommandBreach(tool, body, pkgDir, repoRoot);
@@ -523,7 +542,7 @@ export function breach(
   if (script && pkgDir !== '') {
     return scriptBreach(pkgDir, script[1] ?? script[2] ?? script[3], repoRoot);
   }
-  if (REVIEWED_COMMANDS.get(pkgDir)?.has(rule)) return null;
+  if (isReviewed(pkgDir, rule, file)) return null;
   if (/[;&|<>`$\n\r\\]/.test(body)) {
     return 'it chains, pipes, redirects or substitutes, so it is more than one command';
   }

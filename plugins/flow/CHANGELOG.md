@@ -4,6 +4,13 @@ Installs of this plugin are pinned to a commit SHA, so a fix here does not reach
 you until you **reinstall it** (Marketplace → flow → reinstall, or re-run your
 `--plugin-dir` checkout's `git pull`). Each entry below says whether that matters.
 
+## 0.74.0
+
+**Flow's commands now name the flow commands and skills they may run, instead of allowing any. Reinstall to get it; nothing else changes.**
+
+- `/flow` may run only flow's own stage commands, `/flow:init`, `/flow:status`, `/flow:pause` and `/flow:resume` without asking. `/flow:resume` may run only `/flow:flow`, and now names it that way. Capture, triage, groom and init may load only their own flow skills, and `/flow:status` loads none.
+- Before, these commands allowed any skill or slash command, so a prompt could steer one into running another plugin's command with that command's permissions. Anything outside the list now asks you first.
+
 ## 0.73.0
 
 **Only members of your tracker workspace can now start or resume flow's work from a tracker comment. Before, anyone who could comment on an item (a guest, an integration, a comment synced in from chat or email with no author) could @mention flow, type `/flow`, or answer a parked question, and flow acted on it with its tools (DOR-3669). Reinstall to get it.**

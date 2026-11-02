@@ -178,8 +178,8 @@ and anything else is refused.
   gets the same checks as a read path, short-flag values included
   (`-fcredentials`). No long options at all, since a value like
   `--files0-from=` names a file of file names. `grep` takes no `-r`, `-R` or
-  `-d`. Anything else goes in `REVIEWED_COMMANDS`, per package,
-  as its own reviewed diff, or becomes the package's own script.
+  `-d`. Anything else goes in `REVIEWED_COMMANDS` as its own reviewed diff,
+  or becomes the package's own script.
 - `Read`/`Grep`/`Glob`/`LS`/`NotebookRead(<path>)` stay inside the project and
   start with a literal folder (a leading `*` or `**` reaches dot-files). No `/`,
   `//`, `~`, `$`, `%`, `\`, `..` or whitespace, and no secret file or folder:
@@ -192,8 +192,8 @@ and anything else is refused.
 - `SlashCommand(/<package>:<command>)` and `Skill(<package>:<name>)`,
   optionally with `:*`, only for a command or skill the package ships. Either runs it with its own `allowed-tools`, and Claude Code
   runs commands through the Skill tool too, so a grant to someone else's can
-  reach whatever that one allows. A bare `SlashCommand` or `Skill` needs a
-  `REVIEWED_COMMANDS` entry; flow has both.
+  reach whatever that one allows. A bare `SlashCommand` or `Skill` is always
+  refused; flow names its own (DOR-3659).
 - A package's own MCP servers and commands count only when its folder,
   plugin.json's `name` and its marketplace entry's `name` all agree, so no
   package can name itself after another and claim that one's tools.
@@ -203,6 +203,15 @@ A bare `Read`, `Grep`, `Glob`, `LS` or `NotebookRead` is refused: in plain
 Claude Code a bare read allow reads `~/.ssh` with no prompt. Scope it to a
 folder, as `Read(specs/**)`. Flow's bare reads sit in `REVIEWED_COMMANDS`
 until flow moves to folder-scoped reads (DOR-3310). `Agent`/`Task` pass bare.
+
+`REVIEWED_COMMANDS` is keyed by package, then by rule, then by the exact files
+that may hold that rule (DOR-3659). A reviewed rule in a file not on its list
+is refused, so a new command can't pick up `mcp__dorkos__tasks_update` or
+init's `npm install` without a diff here. Only the bare reads hold for any file
+in their package (`ANY_FILE`). The limit: a file that may run one of its
+package's own commands (`SlashCommand(/flow:resume:*)`) reaches what that
+command holds, as that command's own instructions direct it, so read a new
+own-command grant as a grant to what that command can do.
 
 The known limit: a folder-scoped read like `Read(config/**)` still reads a
 secret file inside that folder, such as `config/.env`, because `*` matches
@@ -266,6 +275,20 @@ or it is refused.
   `monitors`, `experimental.monitors`, a `bin/` folder, a plugin `settings.json` or plugin.json `settings`, which can
   set a `subagentStatusLine` command) are refused outright until someone reviews a safe shape. No
   package ships one.
+- **Marketplace entries** may only use the keys in `ENTRY_KEYS`: the
+  descriptive ones, `strict`, and the `commands`, `agents`, `hooks` and
+  `mcpServers` this check reads. Anything else (`monitors`, `experimental`,
+  `settings`, `lspServers`, a key Claude Code adds later) is refused, without
+  relying on the strict upstream schema, which a pin bump could loosen
+  (DOR-3659).
+- **No gitlinks.** A submodule anywhere under `plugins/` ships another repo's
+  code that no walk reads, so it is refused: git's mode `160000` in a checkout,
+  a `.git` file or folder inside `plugins/` anywhere else (DOR-3659).
+- **Dependencies stay in this marketplace.** `requires` in `.dork/manifest.json`
+  and `dependencies` in plugin.json may only name packages that
+  `marketplace.json` lists from this repo, as `./plugins/<name>` (`<name>` or
+  `<name>@<this marketplace>` in plugin.json), so a dependency can't pull in a package nobody here reviewed.
+  Any other shape is refused (DOR-3659).
 
 - **Spelling.** CI runs on Linux, where `.MCP.json` and `.mcp.json` are two
   files, while Claude Code on a Mac's case-blind disk opens either for the
