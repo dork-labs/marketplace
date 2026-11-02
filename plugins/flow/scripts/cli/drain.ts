@@ -91,9 +91,8 @@ import {
 } from './squash-check.ts';
 import {
   gatherAssignmentInput,
-  liveByAccount,
-  noAccountMessage,
   liveCounts,
+  noAccountMessage,
   planNext,
   restartRank,
   type NextConfig,
@@ -686,6 +685,8 @@ export async function drain(ctx: VerbContext, options: DrainOptions = {}): Promi
     },
     async reviewerAccount(runtime, exclude = []) {
       const input = await gatherAssignmentInput(ctx, config);
+      // An aliased `default` is its registered row, for the count and the exclusion alike.
+      const { canonical, live } = liveCounts(input);
       const rank = rankAccounts({
         now: input.now,
         repo: input.repo,
@@ -696,8 +697,8 @@ export async function drain(ctx: VerbContext, options: DrainOptions = {}): Promi
         crossRuntimeFallback: input.crossRuntimeFallback,
         model: model('review'),
         affinity: null,
-        exclude,
-        liveByAccount: liveCounts(input).live,
+        exclude: exclude.map(canonical),
+        liveByAccount: live,
         opts: input.opts,
       });
       const choice = chooseAccount({ accounts: input.accounts, rank });

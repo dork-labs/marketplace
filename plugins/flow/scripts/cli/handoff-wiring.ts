@@ -172,6 +172,8 @@ export function handoffWiring(wiring: HandoffWiringInput): HandoffWiring {
   /** Rank the accounts a run could move to (§5.2: its own excluded, no affinity). */
   const rankFor = (view: FleetView, run: FlowRun): AccountRank => {
     const runtime = handleRuntime({ runtime: run.runtime as RuntimeName | undefined });
+    // An aliased `default` is its registered row, for the count and the exclusion alike.
+    const { canonical, live } = liveCounts(view.input);
     return rankAccounts({
       now: view.input.now,
       repo: view.input.repo,
@@ -182,8 +184,8 @@ export function handoffWiring(wiring: HandoffWiringInput): HandoffWiring {
       crossRuntimeFallback: view.input.crossRuntimeFallback,
       model: workerModelOf(run, config),
       affinity: null,
-      exclude: [accountKeyOf(run.runtime, run.account)],
-      liveByAccount: liveCounts(view.input).live,
+      exclude: [canonical(accountKeyOf(run.runtime, run.account))],
+      liveByAccount: live,
       opts: view.input.opts,
     });
   };
