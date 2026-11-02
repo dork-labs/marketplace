@@ -437,11 +437,12 @@ describe('checkPackagePrograms', () => {
         '.claude-plugin/marketplace.json': listed,
         '.claude-plugin/dorkos.json': JSON.stringify({
           schemaVersion: 1,
-          plugins: { a: { type: 'plugin' }, b: value },
+          plugins: { b: value, a: { type: 'plugin', requires: ['plugin:far'] } },
         }),
       })
     ).toEqual([
       ".claude-plugin/dorkos.json: plugins[b] is not an object this check can read, so what it declares can't be checked.",
+      '.claude-plugin/dorkos.json: plugins[a].requires names "plugin:far", which is not a package this marketplace lists; a dependency may only name one of its own packages, so it can\'t pull in one nobody here reviewed.',
     ]);
   });
 
@@ -480,11 +481,12 @@ describe('checkPackagePrograms', () => {
       shapeFindings({
         '.claude-plugin/marketplace.json': JSON.stringify({
           name: 'mine',
-          plugins: [{ name: 'a', source: './plugins/a' }, value],
+          plugins: [value, { name: 'a', source: './plugins/a', monitors: [] }],
         }),
       })
     ).toEqual([
-      ".claude-plugin/marketplace.json: plugins[1] is not an object this check can read, so what it declares can't be checked.",
+      ".claude-plugin/marketplace.json: plugins[0] is not an object this check can read, so what it declares can't be checked.",
+      ".claude-plugin/marketplace.json: plugins[a].monitors is not a marketplace entry field this check has reviewed (monitors and settings can run a command with no permission check); declare it in the package's own files, or add it to ENTRY_KEYS in review.",
     ]);
   });
 

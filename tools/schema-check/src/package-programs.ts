@@ -156,7 +156,9 @@ export function serverBreach(
  * reads. Skipping it would let "declares something this check can't read"
  * look like "declares nothing".
  *
+ * @param file - Repo-relative file the finding is about.
  * @param what - `It` for the whole file, or the field's name.
+ * @param shape - The shape this check reads there.
  */
 function wrongShape(file: string, what: string, shape: 'an object' | 'a list'): Finding {
   return {
