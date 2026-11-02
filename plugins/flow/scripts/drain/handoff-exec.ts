@@ -14,7 +14,7 @@
  *    move. The loser of a race starts nothing.
  * 1. A checkpoint newer than the episode, synthesized when there is none.
  * 2. The old worker stops (cli and cmux; DorkOS leaves it idle), so one writer
- *    holds the worktree.
+ *    holds the worktree. A session its host says is gone counts as stopped.
  * 3. The run's own host must support and probe ok for the target runtime; if
  *    not, the run parks with the reason (switching hosts would be a guess).
  * 4. A new worker starts on the target account in the same worktree, its first
@@ -221,6 +221,7 @@ function movedLine(
   from: string,
   reason: HandoffReason
 ): string {
+  if (reason === 'stalled') return `restarted on ${to} (its session on ${from} went away)`;
   if (reason === 'manual' || limit === undefined || limit.window === null) {
     return `moved to ${to} (${reason === 'manual' ? 'moved by hand' : 'usage limit'} from ${from})`;
   }
@@ -234,7 +235,7 @@ function movedLine(
  * @param deps - The world a handoff touches.
  * @param read - The run as the mover read it (its `sessionId` is the compare-and-set's condition).
  * @param to - The target (runtime, account).
- * @param reason - Why: `warning`, `rejected`, `reset` or `manual`.
+ * @param reason - Why: `warning`, `rejected`, `reset`, `manual`, or `stalled` (its session went away).
  * @param note - Why, in words, for a synthesized checkpoint (default from `reason`).
  * @returns How it ended, with a line for the report.
  */
@@ -326,12 +327,16 @@ export async function executeHandoff(
     let still: string | null = null;
     try {
       await oldLauncher.stop(launchHandle(old));
-      const state = (await oldLauncher.state(launchHandle(old))).kind;
-      // The same bar as the reducer's stopped(): an `unknown` state is not proof.
+      const seen = await oldLauncher.state(launchHandle(old));
+      const state = seen.kind;
+      // The same bar as the reducer's stopped(): an `unknown` state is not
+      // proof, unless the host itself said it no longer has the session.
+      const gone = seen.kind === 'unknown' && seen.gone === true;
       const ok =
-        old.host === 'dorkos'
+        gone ||
+        (old.host === 'dorkos'
           ? state === 'idle' || state === 'limited'
-          : state === 'exited' || state === 'idle' || state === 'limited';
+          : state === 'exited' || state === 'idle' || state === 'limited');
       if (!ok) still = `the old session is still ${state}`;
     } catch (error) {
       still = `the old session could not be stopped (${(error as Error).message})`;

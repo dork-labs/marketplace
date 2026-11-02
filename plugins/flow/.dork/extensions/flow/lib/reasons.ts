@@ -84,5 +84,6 @@ export function ineligibleReason(
   if (reasons.includes('out-of-scope')) return 'Kept out of this repo';
   if (reasons.includes('not-allowed-here')) return 'Not allowed in this project';
   if (reasons.includes('excluded')) return 'The account that ran out';
+  if (reasons.includes('stale-usage')) return 'Its usage reading is out of date';
   return 'Busy with other work';
 }

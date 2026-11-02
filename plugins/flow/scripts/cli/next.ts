@@ -300,9 +300,10 @@ export function noAccountMessage(repo: string | null, account: ItemAccount): str
   const onlyDorkOS =
     account.ineligible.length > 0 &&
     account.ineligible.every((entry) => entry.reasons.includes('not-allowed-here'));
+  const stale = account.ineligible.some((entry) => entry.reasons.includes('stale-usage'));
   const remedy = onlyDorkOS
     ? "Choose which accounts this project may use in the project's Flow settings in DorkOS."
-    : 'Run `flow accounts set <id> --role rotation` to allow one.';
+    : `Run \`flow accounts set <id> --role rotation\` to allow one.${stale ? ' `flow usage probe <id>` refreshes a stale-usage reading.' : ''}`;
   return `No account may take work for ${repo ?? 'this checkout (no origin repo)'}: ${reasons || 'no account of this runtime'}. ${remedy}`;
 }
 

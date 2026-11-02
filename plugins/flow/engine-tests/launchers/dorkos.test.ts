@@ -99,11 +99,14 @@ interface FakeSession {
   lifecycle: string;
   limit: { window: string; resetsAt: string | null } | null;
   visible: boolean;
+  updatedAt?: string;
 }
 
 /** The DorkOS harness plus the handles DorkOS-only cases need. */
 interface DorkosHarness extends LauncherHarness {
   requests(): readonly SeenRequest[];
+  /** Put a started session in a DorkOS lifecycle, and stamp when it last wrote. */
+  setLifecycle(handle: SessionHandle, lifecycle: string, updatedAt?: string): void;
   toolCalls(): readonly { name: string; args: Record<string, unknown> }[];
   baseUrl: string;
   stdout: string[];
@@ -332,7 +335,7 @@ async function makeDorkosHarness(options: FakeOptions = {}): Promise<DorkosHarne
         id: session.id,
         title: 'Session',
         createdAt: '2026-09-26T18:00:00.000Z',
-        updatedAt: '2026-09-26T18:00:00.000Z',
+        updatedAt: session.updatedAt ?? '2026-09-26T18:00:00.000Z',
         runtime: session.runtime,
         ...(session.account === undefined ? {} : { account: session.account }),
         ...(reportsStatus
@@ -415,6 +418,11 @@ async function makeDorkosHarness(options: FakeOptions = {}): Promise<DorkosHarne
         session.lifecycle = 'error';
         session.limit = { window: signal.window, resetsAt: signal.resetsAt };
       }
+    },
+    setLifecycle(handle: SessionHandle, lifecycle: string, updatedAt?: string) {
+      const session = byHandle(handle);
+      session.lifecycle = lifecycle;
+      if (updatedAt !== undefined) session.updatedAt = updatedAt;
     },
     async makeForeign() {
       // DorkOS sessions have no pid.
@@ -702,6 +710,7 @@ describe('dorkos launcher: the session it records', () => {
       expect(await h.launcher.state(handle)).toEqual({
         kind: 'unknown',
         reason: 'this DorkOS does not report session status',
+        cannotTell: true,
       });
     });
   });
@@ -726,6 +735,7 @@ describe('dorkos launcher: the session it records', () => {
         const state = await h.launcher.state(other);
         expect(state.kind).toBe('unknown');
         expect(state).not.toHaveProperty('gone');
+        expect(state).toHaveProperty('cannotTell', true);
       }
     });
     await withFake({}, async (h) => {
@@ -742,7 +752,37 @@ describe('dorkos launcher: the session it records', () => {
       const state = await down.state(handle);
       expect(state.kind).toBe('unknown');
       expect(state).not.toHaveProperty('gone');
+      // Not answering is an outage, not a session it can never describe.
+      expect(state).not.toHaveProperty('cannotTell');
     });
+  });
+
+  // DOR-3263: the lane supervisor tells a session working from one waiting on
+  // a person, and needs to know when it last wrote.
+  it('state is busy with when the session last wrote, and waiting on a person while blocked', async () => {
+    await withFake({}, async (h) => {
+      const handle = await h.launcher.start(requestFor(h));
+      h.setLifecycle(handle, 'streaming', '2026-09-26T18:05:00.000Z');
+      expect(await h.launcher.state(handle)).toEqual({
+        kind: 'busy',
+        activityAt: '2026-09-26T18:05:00.000Z',
+      });
+      h.setLifecycle(handle, 'blocked', '2026-09-26T18:06:00.000Z');
+      expect(await h.launcher.state(handle)).toEqual({
+        kind: 'busy',
+        waiting: 'person',
+        activityAt: '2026-09-26T18:06:00.000Z',
+      });
+    });
+    // Codex and OpenCode sessions move `updatedAt` only when a message is
+    // sent, so a long turn would look stalled: they report no activity.
+    for (const runtime of ['codex', 'opencode'] as const) {
+      await withFake({ runtime }, async (h) => {
+        const handle = await h.launcher.start(requestFor(h));
+        h.setLifecycle(handle, 'streaming', '2026-09-26T18:05:00.000Z');
+        expect(await h.launcher.state(handle), runtime).toEqual({ kind: 'busy' });
+      });
+    }
   });
 
   // A session id DorkOS cannot route is refused before anything is sent.

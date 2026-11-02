@@ -84,6 +84,12 @@ describe('runState', () => {
     ],
     ['parked for a person', { drain: { phase: 'parked', parkedFor: 'person' } }, 'needs-you'],
     ['parked for another reason', { drain: { phase: 'parked', parkedFor: 'other' } }, 'parked'],
+    // DOR-3263: a lane whose session waits on a person past the stall time.
+    [
+      'a lane waiting on a person',
+      { drain: { phase: 'working', waitingSince: '2026-09-28T09:00:00.000Z' } },
+      'needs-you',
+    ],
     ['waiting for the reset', { limit: { state: 'waiting-reset' } }, 'parked'],
     ['awaiting a handoff', { limit: { state: 'awaiting-handoff' } }, 'parked'],
     [
@@ -452,6 +458,37 @@ describe('buildProject', () => {
     expect(
       build([{ identifier: 'ACME-1', sessionId: 'earlier', chat: 'worker' }]).runs[0]?.state
     ).toBe('building');
+  });
+
+  // DOR-3263: drain lanes that no flow drain watches, and a lane waiting on a person.
+  it('says when drain lanes have no supervisor, and which lane waits on a person', () => {
+    const since = '2026-09-28T09:00:00.000Z';
+    writeRuns(world, {
+      a: runRecord(world, {
+        workerPid: -1,
+        drain: { v: 1, rev: 3, phase: 'working', waitingSince: since },
+      }),
+    });
+    const build = () =>
+      buildProject({
+        entry: entry(),
+        read: read(),
+        accounts: new Map(),
+        registry: [],
+        pidAlive: () => true,
+        now: NOW,
+      });
+    const unwatched = build();
+    expect(unwatched.conditions).toEqual([
+      { kind: 'unsupervised', since: NOW.toISOString(), escalated: false, detail: { lanes: 1 } },
+    ]);
+    expect(unwatched.runs[0]).toMatchObject({ state: 'needs-you', waitingSince: since });
+    // A pass a minute ago: the drain still watches it.
+    writeFileSync(
+      path.join(world.main, '.dork', 'flow', 'drain-last-pass.json'),
+      JSON.stringify({ at: new Date(NOW.getTime() - 60_000).toISOString() })
+    );
+    expect(build().conditions).toEqual([]);
   });
 
   it('says how Up next is reached for each kind of tracker', () => {

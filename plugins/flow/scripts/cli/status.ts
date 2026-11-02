@@ -45,6 +45,8 @@ import { PreconditionError } from '../errors.ts';
 import type { FlowRun } from '../flow-run.ts';
 import { openFlowStateFile } from '../flow-state-file.ts';
 import { limitLine } from '../drain/handoff-exec.ts';
+import { readLastPass, unsupervisedLanes, type Unsupervised } from '../drain/last-pass.ts';
+import { liveDrainPid } from '../drain/lock.ts';
 import type { DrainWorkerHandle } from '../drain/state.ts';
 import { realLauncher } from '../launchers/real.ts';
 import { handleRuntime, HOST_NAMES } from '../launchers/types.ts';
@@ -117,6 +119,8 @@ export interface InFlightEntry {
     parkedReason: string | null;
     /** The run's usage-limit line (§5.5), e.g. "limited until Thu 09:00, waiting for approval to move to claude4"; `null` when not limited. */
     limit: string | null;
+    /** Since when its session has waited on a person, once past the stall time (DOR-3263); `null` otherwise. */
+    waitingSince: string | null;
   } | null;
 }
 
@@ -143,6 +147,7 @@ export type DriftKind =
   | 'worker-gone'
   | 'item-closed'
   | 'session-gone'
+  | 'unsupervised'
   | 'state-breach';
 
 /** One drift line. */
@@ -401,6 +406,30 @@ export async function run(ctx: VerbContext): Promise<VerbResult> {
     }
   }
 
+  // Drain lanes nothing watches (DOR-3263): no live drain, no recent pass.
+  // A pause stops the drain's passes on purpose, and the pane says so.
+  const unsupervised =
+    pause !== null
+      ? null
+      : unsupervisedLanes({
+          runs: Object.fromEntries(
+            runs
+              .filter((r) => !ended.some((e) => e.identifier === r.identifier))
+              .map((r) => [r.issueId, r])
+          ),
+          livePid: liveDrainPid(mainCheckout, (pid) => pidAlive(pid) !== false),
+          lastPassAt: readLastPass(mainCheckout),
+          now,
+          stallAfterMs: stallAfterMs(ctx, roots),
+        });
+  for (const identifier of unsupervised?.identifiers ?? []) {
+    drift.push({
+      identifier,
+      kind: 'unsupervised',
+      detail: 'is a drain lane, but no flow drain has looked at it lately; flow drain picks it up',
+    });
+  }
+
   const parked: ParkedEntry[] = items
     .filter((item) => labels(item).includes(AGENT_NEEDS_INPUT))
     .map((item) => ({
@@ -422,11 +451,20 @@ export async function run(ctx: VerbContext): Promise<VerbResult> {
     ctx,
     {
       exitCode: failed ? 1 : 0,
-      json: { ok: !failed, paused, drain, inFlight, ended, parked, drift, health },
-      text: render({ paused, drain, inFlight, ended, parked, drift, health }, now),
+      json: { ok: !failed, paused, drain, inFlight, ended, parked, drift, health, unsupervised },
+      text: render({ paused, drain, inFlight, ended, parked, drift, health, unsupervised }, now),
     },
     roots
   );
+}
+
+/** `drain.stallAfterMinutes` in ms; the default when the config cannot be read. */
+function stallAfterMs(ctx: VerbContext, roots: ReturnType<typeof findConfigRoots>): number {
+  try {
+    return loadConfig(roots, ctx.env).config.drain.stallAfterMinutes * 60_000;
+  } catch {
+    return 60 * 60_000;
+  }
 }
 
 /**
@@ -517,6 +555,7 @@ async function drainSessions(ctx: VerbContext, run: FlowRun): Promise<InFlightEn
     reviewer: await sessionState(ctx, drain.reviewer ?? null),
     parkedReason: drain.parkedReason ?? null,
     limit: limitLine(run.limit, drain.wakeAfter ?? null),
+    waitingSince: drain.waitingSince ?? null,
   };
 }
 
@@ -540,6 +579,7 @@ function render(
     parked: ParkedEntry[];
     drift: DriftEntry[];
     health: Health | null;
+    unsupervised: Unsupervised | null;
   },
   now: Date
 ): string {
@@ -566,7 +606,7 @@ function render(
       f.title ?? '(not in the backlog)',
       f.stage ?? '-',
       f.drain !== null
-        ? `drain ${f.drain.phase}${f.drain.worker ? `, worker ${f.drain.worker}` : ''}${f.drain.reviewer ? `, reviewer ${f.drain.reviewer}` : ''}${f.drain.limit ? `; ${f.drain.limit}` : ''}`
+        ? `drain ${f.drain.phase}${f.drain.worker ? `, worker ${f.drain.worker}` : ''}${f.drain.reviewer ? `, reviewer ${f.drain.reviewer}` : ''}${f.drain.limit ? `; ${f.drain.limit}` : ''}${f.drain.waitingSince ? `; waiting on a person since ${ago(f.drain.waitingSince, now)}` : ''}`
         : (f.status ?? (f.claimed ? 'claimed, no run' : '-')),
       f.account ?? '-',
       f.host ?? '-',
@@ -574,6 +614,16 @@ function render(
     ]);
     sections.push(
       `In flight:\n${formatColumns([['  ITEM', 'TITLE', 'STAGE', 'STATUS', 'ACCOUNT', 'HOST', 'WORKTREE @ BRANCH'], ...rows])}`
+    );
+  }
+  if (pane.unsupervised !== null) {
+    const { identifiers, lastPassAt } = pane.unsupervised;
+    const last =
+      lastPassAt === null
+        ? 'no flow drain pass is on record'
+        : `the last flow drain pass ran ${ago(lastPassAt, now)}`;
+    sections.push(
+      `No supervisor: ${identifiers.join(', ')} ${identifiers.length === 1 ? 'is a drain lane' : 'are drain lanes'} with no flow drain watching, and ${last}. Nothing notices if ${identifiers.length === 1 ? 'it goes' : 'they go'} quiet; run flow drain (or check its schedule) to pick ${identifiers.length === 1 ? 'it' : 'them'} up.`
     );
   }
   if (pane.ended.length > 0) {

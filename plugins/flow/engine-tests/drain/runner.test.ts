@@ -2122,4 +2122,109 @@ describe('flow drain: handoff on a limit (§5)', () => {
     expect(workers()).toHaveLength(2);
     expect(runOf('ACME-1').account).toBe(to);
   });
+
+  describe('the lane supervisor (DOR-3263)', () => {
+    const GONE: SessionState = {
+      kind: 'unknown',
+      reason: 'DorkOS no longer knows this session',
+      gone: true,
+    };
+
+    /** A Claude Code account whose weekly reading, before its reset, is two days old. */
+    function stale(id: string): void {
+      const file = path.join(dorkHome, 'runtimes', 'claude-code', 'usage', `${id}.json`);
+      const observedAt = new Date(clock - 2 * 24 * 60 * 60_000).toISOString();
+      const resetsAt = new Date(clock + 3 * 24 * 60 * 60_000).toISOString();
+      const entry = { usedPct: 5, status: 'allowed', resetsAt, observedAt, source: 'statusline' };
+      mkdirSync(path.dirname(file), { recursive: true });
+      writeFileSync(
+        file,
+        JSON.stringify({
+          v: 1,
+          runtime: 'claude-code',
+          accountId: id,
+          updatedAt: observedAt,
+          windows: {
+            five_hour: { ...entry, resetsAt: at(200), observedAt: at(0) },
+            seven_day: entry,
+          },
+        })
+      );
+    }
+
+    /** The worker's session goes away; a pass sees it, then one past the stall time. */
+    async function goneForAnHour(old: string) {
+      world.script.states.set(old, GONE);
+      clock += 60_000;
+      const seen = await tick();
+      expect(seen.code, seen.stderr).toBe(0);
+      expect(workers()).toHaveLength(1);
+      clock += 61 * 60_000;
+      return tick();
+    }
+
+    it('a session that went away restarts once from the checkpoint, on an account with room', async () => {
+      const { from, old, wt } = await started();
+      const pass = await goneForAnHour(old);
+      expect(pass.code, pass.stderr).toBe(0);
+      expect(workers()).toHaveLength(2);
+      const next = workers().at(-1);
+      expect(next?.req).toMatchObject({ role: 'worker', cwd: wt });
+      expect(readFileSync(next?.req.promptFile as string, 'utf8')).toContain(
+        '.dork/flow/HANDOFF.md'
+      );
+      const restarted = runOf('ACME-1');
+      expect(restarted.sessionId).toBe(next?.handle.sessionId);
+      expect(restarted.limit).toBeUndefined();
+      expect(restarted.drain?.restarts).toBe(1);
+      expect(restarted.drain?.handoffs.at(-1)).toMatchObject({ from, reason: 'stalled' });
+      expect(restarted.drain?.phase).toBe('working');
+      expect(pass.stdout).toContain('restarted on');
+    });
+
+    it('the restart never lands on an account whose reading went stale', async () => {
+      const { from, to, old } = await started();
+      stale(from);
+      const pass = await goneForAnHour(old);
+      expect(pass.code, pass.stderr).toBe(0);
+      expect(workers()).toHaveLength(2);
+      expect(workers().at(-1)?.req.account?.id).toBe(to);
+      expect(runOf('ACME-1').account).toBe(to);
+    });
+
+    it('with no account left but stale or limited ones, the run parks and says so', async () => {
+      const { from, to, old } = await started();
+      stale(from);
+      stale('default');
+      rejected(to);
+      const pass = await goneForAnHour(old);
+      expect(pass.code, pass.stderr).toBe(0);
+      expect(workers().map((w) => w.req.account?.id ?? null)).toEqual([from]);
+      const parked = runOf('ACME-1');
+      expect(parked.drain?.phase).toBe('parked');
+      expect(parked.drain?.parkedReason).toBe(
+        "the worker's session went away and no account has room to restart it"
+      );
+      expect(parked.limit).toBeUndefined();
+      expect(comments().length).toBeGreaterThan(0);
+    });
+
+    it('a session waiting on a person is listed as waiting, never restarted', async () => {
+      const { old } = await started();
+      world.script.states.set(old, {
+        kind: 'busy',
+        waiting: 'person',
+        activityAt: new Date(clock).toISOString(),
+      });
+      clock += 60_000;
+      await tick();
+      clock += 61 * 60_000;
+      const pass = await tick();
+      expect(pass.code, pass.stderr).toBe(0);
+      expect(workers()).toHaveLength(1);
+      expect(runOf('ACME-1').drain?.phase).toBe('working');
+      expect(runOf('ACME-1').drain?.waitingSince).toBeTruthy();
+      expect(pass.stdout).toContain('waiting on a person');
+    });
+  });
 });

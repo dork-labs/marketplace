@@ -77,6 +77,7 @@ import { renderBrief } from './briefs.ts';
 import { ensureCheckpointExcludes, WORKER_BRIEF_PATH } from './checkpoint.ts';
 import {
   drainStep,
+  PARK_REASONS,
   type DrainAction,
   type DrainFacts,
   type DrainStepConfig,
@@ -88,6 +89,7 @@ import {
   adoptOrRevertHandoff,
   executeHandoff,
   limitLine,
+  localTime,
   writeMessage,
   type HandoffExecDeps,
 } from './handoff-exec.ts';
@@ -240,6 +242,8 @@ export interface PassSettings {
   fixFailingChecks?: boolean;
   /** How long a claim or intent may wait before adopt-or-release (ms). */
   startTimeoutMs: number;
+  /** How long a lane may show no progress before the lane supervisor acts (ms); absent: off. */
+  stallAfterMs?: number;
   /** The permission mode sessions start in. */
   permissionMode: LaunchPermissionMode;
   /** The model a worker runs (`models.bindings[models.tiers.implementation]`), or `null`. */
@@ -314,6 +318,13 @@ export interface PassDeps {
     runtime: RuntimeName,
     exclude?: readonly string[]
   ): Promise<PlannedAccount | null>;
+  /**
+   * The account a worker restarted after its session went away bills
+   * (DOR-3263): ranked as a new worker's is, with the run's own account as
+   * the warm-cache affinity, so it is never one at its limit, at capacity or
+   * with a stale reading. `null` when none may take it; absent: the run parks.
+   */
+  restartAccount?(run: FlowRun): Promise<PlannedAccount | null>;
   /** Claim an item with `status: "queued"`. Throws a `PreconditionError` when it cannot. */
   claim(input: DrainClaim): Promise<void>;
   /** Release a claim to ready at its resume stage, deleting the run. */
@@ -472,6 +483,8 @@ function describe(action: DrainAction, reviewerAccount: string | null): string {
       return `parked: ${action.reason}`;
     case 'adopt-or-release':
       return 'checked a start that never confirmed';
+    case 'restart-worker':
+      return `restart the worker (${action.reason})`;
     default:
       return (action as { kind: string }).kind;
   }
@@ -597,6 +610,9 @@ export async function runPass(deps: PassDeps): Promise<PassReport> {
     ...(deps.settings.fixFailingChecks === undefined
       ? {}
       : { fixFailingChecks: deps.settings.fixFailingChecks }),
+    ...(deps.settings.stallAfterMs === undefined
+      ? {}
+      : { stallAfterMs: deps.settings.stallAfterMs }),
   };
 
   /** Record one line for a run. */
@@ -772,6 +788,12 @@ export async function runPass(deps: PassDeps): Promise<PassReport> {
           }
         : undefined
     );
+    // A cli session's stream log growing is its sign of progress (DOR-3263).
+    const logActivity = (which: 'worker' | 'reviewer'): string | null => {
+      const handle = drain[which];
+      if (handle === null || handle.logFile === undefined) return null;
+      return `log:${offsets[which] ?? handle.logOffset ?? 0}`;
+    };
     const pendingSince = Date.parse(drain.worker?.pendingSince ?? run.startedAt);
     const unstarted =
       (run.status === 'queued' && drain.worker === null) || drain.worker?.pending === true;
@@ -794,6 +816,7 @@ export async function runPass(deps: PassDeps): Promise<PassReport> {
         ejection,
         item,
         runComplete: run.status === 'complete',
+        activity: { worker: logActivity('worker'), reviewer: logActivity('reviewer') },
       },
       offsets,
     };
@@ -984,6 +1007,73 @@ export async function runPass(deps: PassDeps): Promise<PassReport> {
           warn: deps.warn,
         };
 
+  /** Park a run now, outside a decision (the tracker half too); a phrase for the report. */
+  const parkNow = async (run: DrainRun, reason: string, clearLimit: boolean): Promise<string> => {
+    await supervisorWrite(run.issueId, (r) => {
+      const next: DrainRun = {
+        ...r,
+        drain: {
+          ...r.drain,
+          phase: 'parked',
+          parkedReason: reason,
+          parkedFrom: r.drain.phase === 'parked' ? (r.drain.parkedFrom ?? null) : r.drain.phase,
+          parkedAt: now.toISOString(),
+          parkedFor: 'other',
+        },
+      };
+      if (clearLimit) delete next.limit;
+      return next;
+    });
+    await deps.park(run.identifier, reason);
+    return `parked: ${reason}`;
+  };
+
+  /**
+   * Restart a worker whose session went away (DOR-3263): a fresh session from
+   * the checkpoint, through the handoff mover (one writer per worktree), on
+   * the account {@link PassDeps.restartAccount} ranks first. No account with
+   * room, or a start that fails, parks the run instead of waiting.
+   */
+  const restartWorker = async (run: DrainRun, reason: string): Promise<string> => {
+    const latest = current(run.issueId);
+    if (!writable(latest)) return 'not restarted: the run is gone';
+    // The mover records a limit for the move; a restart leaves none behind.
+    const clearLimit = latest.limit === undefined;
+    const account = deps.restartAccount ? await deps.restartAccount(latest) : null;
+    if (account !== null) considered.add(`${account.runtime}:${account.id}`);
+    if (account === null || execDeps === null) {
+      return parkNow(latest, PARK_REASONS.noRoomToRestart, clearLimit);
+    }
+    const outcome = await executeHandoff(
+      execDeps,
+      latest,
+      { runtime: account.runtime, id: account.id },
+      'stalled',
+      reason
+    );
+    if (outcome.status === 'moved' || outcome.status === 'lost') return outcome.line;
+    const after = current(run.issueId);
+    if (!writable(after)) return outcome.line;
+    if (outcome.status === 'parked') {
+      if (clearLimit && after.limit !== undefined) {
+        await supervisorWrite(run.issueId, (r) => {
+          const next: DrainRun = { ...r };
+          delete next.limit;
+          return next;
+        });
+      }
+      return outcome.line;
+    }
+    const why = outcome.line
+      .replace(/^not moved: /, '')
+      .replace(/; the next pass tries again$/, '');
+    return parkNow(
+      after,
+      `${PARK_REASONS.workerGone}, and restarting it failed: ${why}`,
+      clearLimit
+    );
+  };
+
   /** The handoff machine's own actions (§5.2, §5.3); a phrase for the report. */
   const applyHandoff = async (
     run: DrainRun,
@@ -1075,6 +1165,8 @@ export async function runPass(deps: PassDeps): Promise<PassReport> {
       case 'notify':
       case 'adopt-or-revert-handoff':
         return applyHandoff(run, action);
+      case 'restart-worker':
+        return restartWorker(run, action.reason);
       case 'restart-reviewer': {
         await apply(run, { kind: 'stop', which: 'reviewer', handle: action.handle }, null);
         return `the reviewer hit a usage limit; a fresh one starts on another account`;
@@ -1386,6 +1478,9 @@ export async function runPass(deps: PassDeps): Promise<PassReport> {
     }
 
     const phrases: string[] = [];
+    if (decided.waitingSince && !run.drain.waitingSince) {
+      phrases.push(`waiting on a person in its session since ${localTime(decided.waitingSince)}`);
+    }
     for (const action of actions) {
       try {
         phrases.push(await apply(run, action, intent));

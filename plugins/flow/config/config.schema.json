@@ -1152,6 +1152,12 @@
           "minimum": 0,
           "maximum": 50
         },
+        "stallAfterMinutes": {
+          "default": 60,
+          "type": "integer",
+          "minimum": 10,
+          "maximum": 9007199254740991
+        },
         "windDownGraceMinutes": {
           "default": 20,
           "type": "integer",

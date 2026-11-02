@@ -73,11 +73,21 @@ function runRecord(identifier: string, overrides: Partial<FlowRun> = {}): FlowRu
   };
 }
 
-function writeRuns(runs: FlowRun[]): void {
+/**
+ * Write the run store. A scheduled drain's pass is stamped a minute before
+ * {@link NOW} unless `lastPass` says otherwise (`null`: no pass on record), so
+ * drain runs are watched by default (DOR-3263).
+ */
+function writeRuns(runs: FlowRun[], opts: { lastPass?: string | null } = {}): void {
   const dir = path.join(project, '.dork', 'flow');
   mkdirSync(dir, { recursive: true });
   const state = Object.fromEntries(runs.map((run) => [run.issueId, run]));
   writeFileSync(path.join(dir, 'flow-state.json'), JSON.stringify(state, null, 2));
+  const lastPass =
+    opts.lastPass === undefined ? new Date(NOW.getTime() - 60_000).toISOString() : opts.lastPass;
+  if (lastPass !== null) {
+    writeFileSync(path.join(dir, 'drain-last-pass.json'), JSON.stringify({ at: lastPass }));
+  }
 }
 
 function writeSentinel(value: unknown): void {
@@ -329,6 +339,83 @@ describe('flow status', () => {
     expect(text.stdout).toMatch(
       /FAKE-3 .*drain reviewing, worker idle, reviewer starting .*spare .*cli/
     );
+  });
+
+  describe('the lane supervisor (DOR-3263)', () => {
+    const idleLauncher = (host: 'cli' | 'cmux' | 'dorkos') => ({
+      host,
+      supports: () => ({ ok: true as const }),
+      probe: async () => ({ ok: true as const }),
+      start: async () => {
+        throw new Error('status never starts a session');
+      },
+      send: async () => {
+        throw new Error('status never sends');
+      },
+      state: async () => ({ kind: 'busy' as const }),
+      stop: async () => 'not-running' as const,
+    });
+    const lane = (over: Record<string, unknown> = {}) =>
+      ({
+        v: 1,
+        rev: 1,
+        phase: 'working',
+        worker: { host: 'cli', sessionId: 'w-1', account: 'spare', cwd: '/work/FAKE-4' },
+        reviewer: null,
+        pushedSha: null,
+        reviewedSha: null,
+        verdict: null,
+        reviewRound: 0,
+        pr: null,
+        rearmedFor: null,
+        nudges: 0,
+        wakeAfter: null,
+        handoffs: [],
+        parkedReason: null,
+        ...over,
+      }) as unknown as FlowRun['drain'];
+
+    it('lists drain lanes no flow drain has looked at within the stall time', async () => {
+      writeRuns([runRecord('FAKE-4', { workerPid: -1, drain: lane() })], {
+        lastPass: new Date(NOW.getTime() - 3 * 60 * 60_000).toISOString(),
+      });
+      const result = await status(
+        ['--json', '--strict'],
+        { items: [item('FAKE-4')] },
+        idleLauncher
+      );
+      expect(result.code).toBe(1);
+      const out = result.json();
+      expect(kinds(out)).toEqual(['FAKE-4 unsupervised']);
+      expect(out.unsupervised).toEqual({
+        identifiers: ['FAKE-4'],
+        lastPassAt: new Date(NOW.getTime() - 3 * 60 * 60_000).toISOString(),
+      });
+      const text = await status([], { items: [item('FAKE-4')] }, idleLauncher);
+      expect(text.stdout).toContain(
+        'No supervisor: FAKE-4 is a drain lane with no flow drain watching, and the last flow drain pass ran 3 h ago.'
+      );
+    });
+
+    it('a lane with no pass on record is unsupervised; a recent pass watches it', async () => {
+      writeRuns([runRecord('FAKE-4', { workerPid: -1, drain: lane() })], { lastPass: null });
+      const none = await status([], { items: [item('FAKE-4')] }, idleLauncher);
+      expect(none.stdout).toContain('no flow drain pass is on record');
+      writeRuns([runRecord('FAKE-4', { workerPid: -1, drain: lane() })]);
+      const watched = await status(['--json'], { items: [item('FAKE-4')] }, idleLauncher);
+      expect(watched.json().unsupervised).toBeNull();
+    });
+
+    it('shows a lane waiting on a person, and since when', async () => {
+      const since = new Date(NOW.getTime() - 2 * 60 * 60_000).toISOString();
+      writeRuns([runRecord('FAKE-4', { workerPid: -1, drain: lane({ waitingSince: since }) })]);
+      const result = await status(['--json'], { items: [item('FAKE-4')] }, idleLauncher);
+      expect(result.json().inFlight[0].drain).toMatchObject({ waitingSince: since });
+      const text = await status([], { items: [item('FAKE-4')] }, idleLauncher);
+      expect(text.stdout).toMatch(
+        /FAKE-4 .*drain working, worker busy; waiting on a person since 2 h ago/
+      );
+    });
   });
 
   it('lists a DorkOS drain run whose chat is gone as ended, and leaves one that may be live (DOR-2490)', async () => {

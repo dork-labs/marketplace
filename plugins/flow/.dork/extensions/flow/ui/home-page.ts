@@ -114,6 +114,7 @@ const CONDITION_ORDER: Readonly<Record<string, number>> = {
   'sign-in': 0,
   'settings-problem': 1,
   'tracker-unreachable': 2,
+  unsupervised: 2.5,
   'nothing-ready': 3,
   paused: 4,
 };

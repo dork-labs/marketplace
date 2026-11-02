@@ -2255,7 +2255,7 @@
       }
     },
     {
-      "name": "-n spreading: one live session under maxLivePerAccount stays eligible, and live counts cap but never reorder",
+      "name": "-n spreading: an account with fewer live sessions goes first, before headroom; live counts also cap",
       "input": {
         "now": "2026-09-26T16:00:00.000Z",
         "accounts": [
@@ -2325,6 +2325,95 @@
       "expected": {
         "pick": {
           "runtime": "claude-code",
+          "id": "b"
+        },
+        "ranked": [
+          {
+            "runtime": "claude-code",
+            "id": "b",
+            "tier": 1
+          },
+          {
+            "runtime": "claude-code",
+            "id": "a",
+            "tier": 1
+          }
+        ],
+        "ineligible": []
+      }
+    },
+    {
+      "name": "-n spreading: equal live counts keep the headroom order (spend what expires soonest)",
+      "input": {
+        "now": "2026-09-26T16:00:00.000Z",
+        "accounts": [
+          {
+            "runtime": "claude-code",
+            "id": "a",
+            "routable": true,
+            "policy": {
+              "role": "rotation",
+              "reservePct": 0,
+              "spendDownWindowHours": 24,
+              "scope": {
+                "repos": []
+              }
+            },
+            "windows": {
+              "five_hour": {
+                "usedPct": 10,
+                "resetsAt": "2026-09-26T19:00:00.000Z",
+                "status": null,
+                "observedAt": "2026-09-26T15:59:00.000Z",
+                "source": "statusline"
+              },
+              "seven_day": {
+                "usedPct": 60,
+                "resetsAt": "2026-09-27T16:00:00.000Z",
+                "status": null,
+                "observedAt": "2026-09-26T15:59:00.000Z",
+                "source": "statusline"
+              }
+            }
+          },
+          {
+            "runtime": "claude-code",
+            "id": "b",
+            "routable": true,
+            "policy": {
+              "role": "rotation",
+              "reservePct": 0,
+              "spendDownWindowHours": 24,
+              "scope": {
+                "repos": []
+              }
+            },
+            "windows": {
+              "five_hour": {
+                "usedPct": 10,
+                "resetsAt": "2026-09-26T19:00:00.000Z",
+                "status": null,
+                "observedAt": "2026-09-26T15:59:00.000Z",
+                "source": "statusline"
+              },
+              "seven_day": {
+                "usedPct": 40,
+                "resetsAt": "2026-10-02T16:00:00.000Z",
+                "status": null,
+                "observedAt": "2026-09-26T15:59:00.000Z",
+                "source": "statusline"
+              }
+            }
+          }
+        ],
+        "liveByAccount": {
+          "claude-code:a": 1,
+          "claude-code:b": 1
+        }
+      },
+      "expected": {
+        "pick": {
+          "runtime": "claude-code",
           "id": "a"
         },
         "ranked": [
@@ -2374,6 +2463,335 @@
             "id": "new",
             "tier": 1,
             "score": 0.6,
+            "signal": "unknown"
+          }
+        ],
+        "ineligible": []
+      }
+    },
+    {
+      "name": "stale usage: an account whose weekly reading is over a day old, before its reset, never takes work while one with a fresh reading has room",
+      "input": {
+        "now": "2026-09-26T16:00:00.000Z",
+        "accounts": [
+          {
+            "runtime": "claude-code",
+            "id": "old",
+            "routable": true,
+            "policy": {
+              "role": "rotation",
+              "reservePct": 0,
+              "spendDownWindowHours": 24,
+              "scope": {
+                "repos": []
+              }
+            },
+            "windows": {
+              "seven_day": {
+                "usedPct": 5,
+                "resetsAt": "2026-10-01T16:00:00.000Z",
+                "status": null,
+                "observedAt": "2026-09-24T16:00:00.000Z",
+                "source": "statusline"
+              }
+            }
+          },
+          {
+            "runtime": "claude-code",
+            "id": "fresh",
+            "routable": true,
+            "policy": {
+              "role": "rotation",
+              "reservePct": 0,
+              "spendDownWindowHours": 24,
+              "scope": {
+                "repos": []
+              }
+            },
+            "windows": {
+              "five_hour": {
+                "usedPct": 10,
+                "resetsAt": "2026-09-26T19:00:00.000Z",
+                "status": null,
+                "observedAt": "2026-09-26T15:59:00.000Z",
+                "source": "statusline"
+              },
+              "seven_day": {
+                "usedPct": 60,
+                "resetsAt": "2026-10-02T16:00:00.000Z",
+                "status": null,
+                "observedAt": "2026-09-26T15:59:00.000Z",
+                "source": "statusline"
+              }
+            }
+          }
+        ]
+      },
+      "expected": {
+        "pick": {
+          "runtime": "claude-code",
+          "id": "fresh"
+        },
+        "ranked": [
+          {
+            "runtime": "claude-code",
+            "id": "fresh",
+            "tier": 1,
+            "signal": "ok"
+          }
+        ],
+        "ineligible": [
+          {
+            "runtime": "claude-code",
+            "id": "old",
+            "reasons": ["stale-usage"]
+          }
+        ]
+      }
+    },
+    {
+      "name": "stale usage: the only account left has a stale reading, so nothing may take the item",
+      "input": {
+        "now": "2026-09-26T16:00:00.000Z",
+        "accounts": [
+          {
+            "runtime": "claude-code",
+            "id": "old",
+            "routable": true,
+            "policy": {
+              "role": "rotation",
+              "reservePct": 0,
+              "spendDownWindowHours": 24,
+              "scope": {
+                "repos": []
+              }
+            },
+            "windows": {
+              "seven_day": {
+                "usedPct": 5,
+                "resetsAt": "2026-10-01T16:00:00.000Z",
+                "status": null,
+                "observedAt": "2026-09-24T16:00:00.000Z",
+                "source": "statusline"
+              }
+            }
+          },
+          {
+            "runtime": "claude-code",
+            "id": "full",
+            "routable": true,
+            "policy": {
+              "role": "rotation",
+              "reservePct": 0,
+              "spendDownWindowHours": 24,
+              "scope": {
+                "repos": []
+              }
+            },
+            "windows": {
+              "five_hour": {
+                "usedPct": 10,
+                "resetsAt": "2026-09-26T19:00:00.000Z",
+                "status": null,
+                "observedAt": "2026-09-26T15:59:00.000Z",
+                "source": "statusline"
+              },
+              "seven_day": {
+                "usedPct": 100,
+                "resetsAt": "2026-10-02T16:00:00.000Z",
+                "status": null,
+                "observedAt": "2026-09-26T15:59:00.000Z",
+                "source": "statusline"
+              }
+            }
+          }
+        ]
+      },
+      "expected": {
+        "pick": null,
+        "ranked": [],
+        "ineligible": [
+          {
+            "runtime": "claude-code",
+            "id": "old",
+            "reasons": ["stale-usage"]
+          },
+          {
+            "runtime": "claude-code",
+            "id": "full",
+            "reasons": ["limited"]
+          }
+        ]
+      }
+    },
+    {
+      "name": "stale usage: a lapsed reading S1 drops (an hour-old rate limit, an idle 5-hour window) means the limit cleared, not stale",
+      "input": {
+        "now": "2026-09-26T16:00:00.000Z",
+        "accounts": [
+          {
+            "runtime": "claude-code",
+            "id": "rested",
+            "routable": true,
+            "policy": {
+              "role": "rotation",
+              "reservePct": 0,
+              "spendDownWindowHours": 24,
+              "scope": {
+                "repos": []
+              }
+            },
+            "windows": {
+              "five_hour": {
+                "usedPct": 50,
+                "resetsAt": null,
+                "status": null,
+                "observedAt": "2026-09-20T16:00:00.000Z",
+                "source": "statusline"
+              },
+              "seven_day": {
+                "usedPct": 40,
+                "resetsAt": "2026-10-02T16:00:00.000Z",
+                "status": null,
+                "observedAt": "2026-09-26T15:59:00.000Z",
+                "source": "statusline"
+              },
+              "rate_limit:anthropic": {
+                "usedPct": null,
+                "resetsAt": null,
+                "status": "rejected",
+                "observedAt": "2026-09-26T13:00:00.000Z",
+                "source": "opencode"
+              }
+            }
+          }
+        ]
+      },
+      "expected": {
+        "pick": {
+          "runtime": "claude-code",
+          "id": "rested"
+        },
+        "ranked": [
+          {
+            "runtime": "claude-code",
+            "id": "rested",
+            "tier": 1
+          }
+        ],
+        "ineligible": []
+      }
+    },
+    {
+      "name": "stale usage: an old weekly reading whose week already reset is a fresh allowance",
+      "input": {
+        "now": "2026-09-26T16:00:00.000Z",
+        "accounts": [
+          {
+            "runtime": "claude-code",
+            "id": "reset",
+            "routable": true,
+            "policy": {
+              "role": "rotation",
+              "reservePct": 0,
+              "spendDownWindowHours": 24,
+              "scope": {
+                "repos": []
+              }
+            },
+            "windows": {
+              "seven_day": {
+                "usedPct": 95,
+                "resetsAt": "2026-09-25T16:00:00.000Z",
+                "status": null,
+                "observedAt": "2026-09-19T16:00:00.000Z",
+                "source": "statusline"
+              }
+            }
+          }
+        ]
+      },
+      "expected": {
+        "pick": {
+          "runtime": "claude-code",
+          "id": "reset"
+        },
+        "ranked": [
+          {
+            "runtime": "claude-code",
+            "id": "reset",
+            "tier": 1
+          }
+        ],
+        "ineligible": []
+      }
+    },
+    {
+      "name": "unknown usage: an account never read ranks after one with a fresh reading, whatever its score",
+      "input": {
+        "now": "2026-09-26T16:00:00.000Z",
+        "accounts": [
+          {
+            "runtime": "claude-code",
+            "id": "new",
+            "routable": true,
+            "policy": {
+              "role": "rotation",
+              "reservePct": 0,
+              "spendDownWindowHours": 24,
+              "scope": {
+                "repos": []
+              }
+            },
+            "windows": null
+          },
+          {
+            "runtime": "claude-code",
+            "id": "seen",
+            "routable": true,
+            "policy": {
+              "role": "rotation",
+              "reservePct": 0,
+              "spendDownWindowHours": 24,
+              "scope": {
+                "repos": []
+              }
+            },
+            "windows": {
+              "five_hour": {
+                "usedPct": 10,
+                "resetsAt": "2026-09-26T19:00:00.000Z",
+                "status": null,
+                "observedAt": "2026-09-26T15:59:00.000Z",
+                "source": "statusline"
+              },
+              "seven_day": {
+                "usedPct": 60,
+                "resetsAt": "2026-10-02T16:00:00.000Z",
+                "status": null,
+                "observedAt": "2026-09-26T15:59:00.000Z",
+                "source": "statusline"
+              }
+            }
+          }
+        ]
+      },
+      "expected": {
+        "pick": {
+          "runtime": "claude-code",
+          "id": "seen"
+        },
+        "ranked": [
+          {
+            "runtime": "claude-code",
+            "id": "seen",
+            "tier": 1,
+            "signal": "ok"
+          },
+          {
+            "runtime": "claude-code",
+            "id": "new",
+            "tier": 1,
             "signal": "unknown"
           }
         ],

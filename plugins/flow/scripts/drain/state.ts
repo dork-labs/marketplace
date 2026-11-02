@@ -102,8 +102,8 @@ export interface DrainHandoff {
   to: string | null;
   /** When (ISO). */
   at: string;
-  /** Why: a warning, a rejected request, the operator, or a window reset. */
-  reason: 'warning' | 'rejected' | 'manual' | 'reset';
+  /** Why: a warning, a rejected request, the operator, a window reset, or a session that went away (`stalled`). */
+  reason: 'warning' | 'rejected' | 'manual' | 'reset' | 'stalled';
 }
 
 /** A drain run's state (§4.3), stored at `FlowRun.drain`. */
@@ -156,6 +156,23 @@ export interface DrainState {
    * field existed, which a reader treats as unknown.
    */
   parkedFor?: 'person' | 'other' | null;
+  /**
+   * The lane supervisor (DOR-3263): when the session the phase waits on (the
+   * worker, or the reviewer while `reviewing`) last showed progress (ISO),
+   * and what it looked like then (`progressMark`, flow's own fingerprint).
+   * Absent until a pass first looked.
+   */
+  progressAt?: string | null;
+  /** See {@link DrainState.progressAt}. */
+  progressMark?: string | null;
+  /** Workers restarted after their session went away; one restart, then the run parks. */
+  restarts?: number;
+  /**
+   * Since when the session has been waiting on a person (a permission prompt
+   * or a question in its chat), once that wait passed the stall time; `null`
+   * or absent otherwise. Such a session is never restarted or parked for it.
+   */
+  waitingSince?: string | null;
 }
 
 /** A run's account limit episode (§5.1), stored at `FlowRun.limit`. */
@@ -317,6 +334,10 @@ const DrainStateV1Schema = z.looseObject({
   parkedFrom: vocabulary<DrainPhase>().nullable().optional(),
   parkedAt: nullableString.optional(),
   parkedFor: vocabulary<'person' | 'other'>().nullable().optional(),
+  progressAt: nullableString.optional(),
+  progressMark: nullableString.optional(),
+  restarts: count.optional(),
+  waitingSince: nullableString.optional(),
 });
 
 /**

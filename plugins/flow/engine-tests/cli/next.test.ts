@@ -525,6 +525,18 @@ describe('flow next: the account each pick runs on (flow-handoff-dispatch §3.5)
     ]);
   });
 
+  it('-n spreads picks over accounts before stacking a second lane on one (DOR-3263)', async () => {
+    // Purpose: with room for two lanes per account, the second pick still goes
+    // to the other account, because fewer live lanes ranks first.
+    temp = tempProject(config({ autonomy: { wipCap: { global: 10, perProject: 10 } } }));
+    fleet({ a: { role: 'rotation' }, b: { role: 'rotation' } });
+    weekly('claude-code', 'a', 10, '2026-09-27T12:00:00.000Z');
+    weekly('claude-code', 'b', 10, '2026-10-02T12:00:00.000Z');
+    const { json } = await next(['--json', '-n', '3']);
+    const picks = json.picked.map((p: { account: { pick: { id: string } } }) => p.account.pick.id);
+    expect(picks).toEqual(['a', 'b', 'a']);
+  });
+
   it('counts running and queued runs and their drain reviewers as live, by <runtime>:<id>', async () => {
     // Purpose: work already running on an account fills it; a reviewer bills too.
     temp = tempProject(config({ drain: { maxLivePerAccount: 1 } }));

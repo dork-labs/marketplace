@@ -113,6 +113,12 @@ export interface DrainFacts {
   };
   /** The run's `status` is `complete` (`flow done` ran). */
   runComplete: boolean;
+  /**
+   * Signs of progress a session's state does not carry, per session: a cli
+   * session's stream-log offset, as a string. `null` or absent: none. The
+   * lane supervisor reads a state's own `activityAt` first.
+   */
+  activity?: { worker: string | null; reviewer: string | null };
 }
 
 /** The drain settings the reducer reads. */
@@ -129,6 +135,11 @@ export interface DrainStepConfig {
    * is Ask me first (`autonomy.ts`): the run parks for a person instead.
    */
   fixFailingChecks?: boolean;
+  /**
+   * How long a lane may show no progress before the supervisor acts (ms,
+   * `drain.stallAfterMinutes`, DOR-3263). Absent: the lane supervisor is off.
+   */
+  stallAfterMs?: number;
 }
 
 /** A pull request an action is about. */
@@ -161,6 +172,9 @@ export type SendAction = {
  *   anything else, and the runner re-checks it under the lock first.
  * - `adopt-or-release`: a start never confirmed; adopt the minted session if it
  *   exists, else release the claim (§4.3).
+ * - `restart-worker`: the worker's session went away (DOR-3263); start a
+ *   fresh one from the checkpoint on an account the ranking picks, or park
+ *   when none has room. `reason` is what the checkpoint and report say.
  * - `park`: apply the park; `trackerWrite: false` when the item was taken away,
  *   so the runner writes nothing to the tracker.
  * - `squash-check`: the PR merged; check its squash commit against the head
@@ -177,6 +191,7 @@ export type DrainAction =
   | { kind: 'disarm'; pr: PrRef }
   | { kind: 'squash-check'; pr: PrRef; reviewed: string | null; final: boolean }
   | { kind: 'adopt-or-release' }
+  | { kind: 'restart-worker'; reason: string }
   | { kind: 'park'; reason: string; trackerWrite: boolean };
 
 /** What {@link drainStep} returns. */
@@ -199,6 +214,13 @@ export const PARK_REASONS = {
   rounds: (n: number) => `the review did not come back clean after ${n} rounds`,
   checksFailed:
     "the PR's checks failed, and this project's settings ask you before flow fixes failing checks",
+  workerQuiet: (minutes: number) =>
+    `the worker showed no activity for ${minutes} minutes while it was meant to be working`,
+  unreachable: (which: 'worker' | 'reviewer', minutes: number, why: string) =>
+    `flow could not reach the ${which}'s session for ${minutes} minutes (${why}), so it may still be running and was not restarted`,
+  workerGone: "the worker's session went away",
+  workerGoneAgain: "the worker's session went away again after flow restarted it once",
+  noRoomToRestart: "the worker's session went away and no account has room to restart it",
 } as const;
 
 /** The phases where the worker writes code before a clean review. */
@@ -519,6 +541,126 @@ function watching(step: Step, run: FlowRun, facts: DrainFacts, cfg: DrainStepCon
   return rearmIfReviewed(step, facts);
 }
 
+/** How often a lane's progress is written while it keeps moving (ms). */
+const PROGRESS_WRITE_MS = 60_000;
+
+/** The phases where the worker is meant to be working; `reviewing` waits on the reviewer. */
+const WORKER_PHASES = new Set<DrainState['phase']>(['working', 'fixing', 'fixing-ci', 'pr-ready']);
+
+/** Which session the phase waits on, or `null` when it waits on neither (CI, a park). */
+function activeSession(phase: DrainState['phase']): 'worker' | 'reviewer' | null {
+  if (phase === 'reviewing') return 'reviewer';
+  return WORKER_PHASES.has(phase) ? 'worker' : null;
+}
+
+/** The step with its progress recorded as seen `now`, and no person waited on. */
+function progressed(step: Step, mark: string, now: Date): Step {
+  return {
+    ...step,
+    drain: { ...step.drain, progressAt: now.toISOString(), progressMark: mark, waitingSince: null },
+  };
+}
+
+/**
+ * The lane supervisor (DOR-3263), after the phase table. It watches the
+ * session the phase waits on: a fingerprint of what it and the run look like
+ * ({@link DrainState.progressMark}) and when that last changed. Any action of
+ * the phase table, or a new fingerprint, counts as progress (written at most
+ * once a minute). After `stallAfterMs` with the same fingerprint:
+ *
+ * - waiting on a person: never restarted or parked; `waitingSince` lists it;
+ * - a session the host cannot reach: a park, since it may still be running
+ *   and a restart could leave two at work;
+ * - a busy session whose host reports no activity, or one it can never
+ *   describe (`cannotTell`): never judged;
+ * - the reviewer, gone or quiet: restarted at the same commit once, then the
+ *   run parks (the same rule as a reviewer that stopped);
+ * - a worker that went away (`gone`): one `restart-worker`, then a park;
+ * - a busy worker that wrote nothing: a park.
+ *
+ * Idle and exited sessions are the nudge rule's, and a limited run the
+ * handoff machine's.
+ */
+function supervise(
+  step: Step,
+  run: FlowRun,
+  facts: DrainFacts,
+  cfg: DrainStepConfig,
+  now: Date
+): Step {
+  const stallAfterMs = cfg.stallAfterMs;
+  if (stallAfterMs === undefined || run.limit) return step;
+  const drain = step.drain;
+  const which = activeSession(drain.phase);
+  const handle = which === null ? null : drain[which];
+  const state = which === null ? null : facts[which];
+  if (which === null || handle === null || handle.pending || state === null) {
+    return drain.waitingSince ? { ...step, drain: { ...drain, waitingSince: null } } : step;
+  }
+  const activity =
+    (state.kind === 'busy' ? state.activityAt : undefined) ?? facts.activity?.[which] ?? null;
+  const waiting = state.kind === 'busy' && state.waiting === 'person';
+  const mark = JSON.stringify([
+    drain.phase,
+    drain.pushedSha,
+    drain.reviewedSha,
+    drain.verdict,
+    drain.reviewRound,
+    drain.pr?.number ?? null,
+    which,
+    handle.sessionId,
+    state.kind,
+    waiting,
+    activity,
+  ]);
+  if (step.actions.length > 0) return progressed(step, mark, now);
+  const since = drain.progressAt ? Date.parse(drain.progressAt) : NaN;
+  if (mark !== drain.progressMark || !Number.isFinite(since)) {
+    // Moving: record it, but not more than once a minute.
+    if (Number.isFinite(since) && now.getTime() - since < PROGRESS_WRITE_MS) return step;
+    return progressed(step, mark, now);
+  }
+  if (now.getTime() - since < stallAfterMs) return step;
+  const minutes = Math.round(stallAfterMs / 60_000);
+
+  if (waiting) {
+    return drain.waitingSince === drain.progressAt
+      ? step
+      : { ...step, drain: { ...drain, waitingSince: drain.progressAt ?? null } };
+  }
+  const gone = state.kind === 'unknown' && state.gone === true;
+  // A host that can never describe this session is not an outage: never judged.
+  if (state.kind === 'unknown' && state.cannotTell === true) return step;
+  // Not proof it stopped: restarting could leave two sessions at work.
+  if (state.kind === 'unknown' && !gone) {
+    return park(step, PARK_REASONS.unreachable(which, minutes, state.reason));
+  }
+  // A host that reports no activity for a busy session is never judged.
+  if (state.kind === 'busy' && activity === null) return step;
+  if (which === 'reviewer') {
+    if (drain.nudges >= 1) return park(step, PARK_REASONS.reviewerStopped);
+    const sha = (handle as DrainState['reviewer'] & object).sha;
+    const restarted = startReviewer(step, sha, facts);
+    return progressed(
+      { ...restarted, drain: { ...restarted.drain, nudges: drain.nudges + 1 } },
+      mark,
+      now
+    );
+  }
+  if (gone) {
+    if ((drain.restarts ?? 0) >= 1) return park(step, PARK_REASONS.workerGoneAgain);
+    return progressed(
+      {
+        drain: { ...drain, restarts: (drain.restarts ?? 0) + 1 },
+        actions: [...step.actions, { kind: 'restart-worker', reason: PARK_REASONS.workerGone }],
+      },
+      mark,
+      now
+    );
+  }
+  return state.kind === 'busy' ? park(step, PARK_REASONS.workerQuiet(minutes)) : step;
+}
+
 /** The phase table for a run that is live, claimed and past its start. */
 function phaseStep(step: Step, run: FlowRun, facts: DrainFacts, cfg: DrainStepConfig): Step {
   const drain = step.drain;
@@ -580,12 +722,14 @@ function readopt(
 ): DrainStepResult {
   const item = facts.item;
   if (item.closed || !item.claimed || item.needsInput || run.limit) return { run, actions: [] };
+  // A person's answer also gives a lane that went away its one restart back.
   const cleared = {
     parkedReason: null,
     parkedFrom: null,
     parkedAt: null,
     parkedFor: null,
     nudges: 0,
+    restarts: 0,
   };
   // A park on failing checks that a person answered: the answer is the go-ahead
   // to fix them (spec flow-multiproject §7.7, retry at Ask me first). Back to
@@ -625,6 +769,7 @@ function readopt(
         parkedAt: null,
         parkedFor: null,
         nudges: 0,
+        restarts: 0,
       },
     },
     actions: [
@@ -796,5 +941,5 @@ function drainStepCore(
 
   const step = phaseStep(idle, run, facts, cfg);
   if (run.limit && step.actions.some((a) => a.kind === 'send')) return done(idle);
-  return done(step);
+  return done(supervise(step, run, facts, cfg, now));
 }

@@ -704,7 +704,7 @@ export function createCliLauncher(deps: CliLauncherDeps): Launcher {
   async function state(h: SessionHandle): Promise<SessionState> {
     if (h.pid !== undefined && deps.isAlive(h.pid)) return { kind: 'busy' };
     if (h.logFile === undefined) {
-      return { kind: 'unknown', reason: 'this handle has no stream log to read' };
+      return { kind: 'unknown', reason: 'this handle has no stream log to read', cannotTell: true };
     }
     const limited =
       h.runtime === 'codex'
