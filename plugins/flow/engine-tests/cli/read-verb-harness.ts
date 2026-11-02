@@ -7,6 +7,7 @@
  * tests that import it.
  */
 
+import type { StreamRunner } from '../../scripts/cli/host-io.ts';
 import { mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -70,6 +71,8 @@ export interface RunOptions {
   runProcess?: CliDeps['runProcess'];
   /** Builds the forge (open-PR reads). Default: the GitHub one over `runProcess`. */
   createForge?: CliDeps['createForge'];
+  /** Runs streaming children (a usage probe turn). Default: the real runner. */
+  spawnStream?: StreamRunner;
 }
 
 /**
@@ -112,6 +115,7 @@ export async function runFlow(
       fetch: async () => {
         throw new Error('no DorkOS in this test');
       },
+      ...(options.spawnStream === undefined ? {} : { spawnStream: options.spawnStream }),
     },
     verbs: VERBS,
   });

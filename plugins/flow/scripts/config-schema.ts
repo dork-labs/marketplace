@@ -929,6 +929,13 @@ export const DrainSchema = z
      * and one waiting on a person is listed as waiting. At least 10.
      */
     stallAfterMinutes: z.number().int().min(10).default(60),
+    /**
+     * Before ranking, refresh a Claude Code account whose weekly reading is
+     * stale with one short probe turn, at most once an hour per account
+     * (DOR-3704), never the main account. Each costs a little of that account's 5-hour window. Off: a
+     * stale account stays out until it is used or probed by hand.
+     */
+    refreshStaleUsage: z.boolean().default(true),
     /** Minutes a warned worker has to write its checkpoint before flow writes one for it. */
     windDownGraceMinutes: z.number().int().min(1).default(20),
     /** Seconds between passes when `flow drain` runs without `--tick`. */

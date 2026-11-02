@@ -60,6 +60,7 @@ import {
   gatherAssignmentInput,
   liveCounts,
   type AssignmentInput,
+  type AssignmentRefresh,
   type NextConfig,
 } from './next.ts';
 import { signBody } from './provenance.ts';
@@ -80,6 +81,8 @@ export interface HandoffWiringInput {
   flow: string;
   /** Post a signed comment on an item (the ask-mode notice); absent for the verb. */
   comment?: (identifier: string, body: string) => Promise<void>;
+  /** The drain's stale-reading refresh (DOR-3704); absent: none. */
+  refresh?: AssignmentRefresh;
 }
 
 /** The fleet as one pass sees it: S1's assignment input plus the handoff mode. */
@@ -140,7 +143,7 @@ export function handoffWiring(wiring: HandoffWiringInput): HandoffWiring {
       cached = {
         at,
         view: (async () => {
-          const input = await gatherAssignmentInput(ctx, config);
+          const input = await gatherAssignmentInput(ctx, config, wiring.refresh);
           const policy = loadFleetPolicy(
             dorkHome,
             loadAccounts(dorkHome, { home: ctx.io.osHome }).accounts

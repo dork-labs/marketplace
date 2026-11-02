@@ -373,7 +373,7 @@ export const VERBS: readonly VerbDefinition[] = [
     name: 'release',
     summary: 'Let go of an item: back to the ready queue, or unowned.',
     description:
-      'Let go of an item. --to ready (the default) makes it unstarted with agent/ready and a stage/* label to resume at; --to none leaves it unowned. Deletes the run record. Posts a signed comment only with --reason. A closed item that still has a run: deletes the run record and leaves the item as it is.',
+      "Let go of an item. --to ready (the default) makes it unstarted with agent/ready and a stage/* label to resume at; --to none leaves it unowned. Deletes the run record. Posts a signed comment only with --reason. A closed item that still has a run: deletes the run record and leaves the item as it is. A review folder the drain kept for the item is removed once its reviewer's session has stopped, and only when it has no uncommitted changes unless you pass --discard-review-changes; while that session may still run, or the folder has changes, nothing is released.",
     common: ['project', 'dry-run', 'session'],
     positionals: [{ name: 'identifier', required: true, description: 'The item, e.g. DOR-123.' }],
     flags: [
@@ -394,6 +394,11 @@ export const VERBS: readonly VerbDefinition[] = [
         kind: 'string',
         value: 'text',
         description: 'Post this as a signed comment.',
+      },
+      {
+        name: 'discard-review-changes',
+        kind: 'boolean',
+        description: "Remove the item's review folder even with uncommitted changes in it.",
       },
     ],
     load: () => import('./cli/release.ts'),

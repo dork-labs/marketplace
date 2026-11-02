@@ -458,6 +458,8 @@ export interface PlanRequest {
   items?: readonly string[];
   /** Whether to assign each pick its account (`--no-account` turns it off). */
   accounts: boolean;
+  /** The drain's stale-reading refresh (DOR-3704), run before accounts are assigned; absent: none. */
+  refresh?: AssignmentRefresh;
 }
 
 /** What {@link planNext} found. */
@@ -572,7 +574,7 @@ export async function planNext(
   let accounts: ItemAccount[] | undefined;
   let assignment: AssignmentInput | undefined;
   if (request.accounts && picked.length > 0) {
-    assignment = await gatherAssignmentInput(ctx, config);
+    assignment = await gatherAssignmentInput(ctx, config, request.refresh);
     accounts = assignAccounts(picked, assignment);
   }
   return {
@@ -682,6 +684,9 @@ function jsonAccount(account: ItemAccount): Omit<ItemAccount, 'label'> {
 /** The project config `flow next` reads. */
 export type NextConfig = ReturnType<typeof loadProjectConfig>['loaded']['config'];
 
+/** A step from gathered input to the input to rank from (the drain's stale-reading refresh). */
+export type AssignmentRefresh = (input: AssignmentInput) => Promise<AssignmentInput>;
+
 /**
  * Read what account assignment needs: the registry, `fleet.json` and each
  * account's ledger under `<dorkHome>` (warnings go to stderr), the checkout's
@@ -690,11 +695,13 @@ export type NextConfig = ReturnType<typeof loadProjectConfig>['loaded']['config'
  *
  * @param ctx - The verb's context.
  * @param config - The project config.
+ * @param refresh - Run on the gathered input before it is returned; absent: none.
  * @returns The assignment input.
  */
 export async function gatherAssignmentInput(
   ctx: VerbContext,
-  config: NextConfig
+  config: NextConfig,
+  refresh?: AssignmentRefresh
 ): Promise<AssignmentInput> {
   const dorkHome = resolveDorkHome({ ...ctx.env }, ctx.io.osHome);
   const registry = loadAccounts(dorkHome, { home: ctx.io.osHome });
@@ -737,7 +744,7 @@ export async function gatherAssignmentInput(
     if (!(error instanceof ConfigError)) throw error;
   }
   const model = config.models.bindings[config.models.tiers.implementation] ?? null;
-  return {
+  const input: AssignmentInput = {
     now: ctx.now(),
     repo: origin.code === 0 ? parseOriginRepo(origin.stdout) : null,
     project,
@@ -751,4 +758,5 @@ export async function gatherAssignmentInput(
       maxLivePerAccount: config.drain.maxLivePerAccount,
     },
   };
+  return refresh === undefined ? input : refresh(input);
 }

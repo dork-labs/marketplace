@@ -101,6 +101,7 @@ import { signBody, unsignedBody } from './provenance.ts';
 import { renderSweep, sweepOpenPrs, type SweepResult } from './sweep.ts';
 import { releaseItem } from './release.ts';
 import { journalUsage } from './usage-journal.ts';
+import { staleUsageRefresher } from './usage-refresh.ts';
 import { stopInForce, type AutonomyRead } from '../autonomy.ts';
 import { retireChecker } from './checker.ts';
 import { runtimeSession } from './session-id.ts';
@@ -409,11 +410,15 @@ export async function drain(ctx: VerbContext, options: DrainOptions = {}): Promi
         };
   };
 
+  // One refresh for every ranking this run does (DOR-3704); `null` when it is off.
+  const refresh = staleUsageRefresher(ctx, config, mainCheckout) ?? undefined;
+
   const handoff = handoffWiring({
     ctx,
     config,
     dorkHome,
     flow: flowCommand,
+    ...(refresh === undefined ? {} : { refresh }),
     async comment(identifier, body) {
       const item = await adapter.getItem(identifier, { comments: RECENT_COMMENTS });
       // A retry of the same notice (the same words are the latest comment) posts nothing.
@@ -652,7 +657,12 @@ export async function drain(ctx: VerbContext, options: DrainOptions = {}): Promi
       return { ...facts, claimed: true, needsInput: false, answer };
     },
     async plan(slots) {
-      const plan = await planNext(ctx, project, { count: slots, items, accounts: true });
+      const plan = await planNext(ctx, project, {
+        count: slots,
+        items,
+        accounts: true,
+        ...(refresh === undefined ? {} : { refresh }),
+      });
       // Merging before starting (DOR-3341): say which PR to land, and when the
       // open-PR cap holds new work back.
       if (plan.land !== null) {
@@ -684,7 +694,7 @@ export async function drain(ctx: VerbContext, options: DrainOptions = {}): Promi
       };
     },
     async reviewerAccount(runtime, exclude = []) {
-      const input = await gatherAssignmentInput(ctx, config);
+      const input = await gatherAssignmentInput(ctx, config, refresh);
       // An aliased `default` is its registered row, for the count and the exclusion alike.
       const { canonical, live } = liveCounts(input);
       const rank = rankAccounts({
@@ -707,7 +717,7 @@ export async function drain(ctx: VerbContext, options: DrainOptions = {}): Promi
     // A restarted worker is ranked as a new one is, its own account first
     // while that one still has room (DOR-3263).
     async restartAccount(run) {
-      const input = await gatherAssignmentInput(ctx, config);
+      const input = await gatherAssignmentInput(ctx, config, refresh);
       const rank = restartRank(input, run, model('implementation'));
       const choice = chooseAccount({ accounts: input.accounts, rank });
       return choice.account === 'none' ? null : plannedAccount(input.accounts, choice.account);

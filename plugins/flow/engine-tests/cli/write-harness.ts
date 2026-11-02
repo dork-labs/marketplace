@@ -159,6 +159,8 @@ export interface RunOptions {
   env?: Record<string, string | undefined>;
   /** Replaces the process runner (default: fake `ps`, real `git`). */
   runProcess?: ProcessRunner;
+  /** A fake launcher factory, for verbs that ask a host about a session. */
+  createLauncher?: MainDeps['createLauncher'];
 }
 
 /** The default runner: `ps` answers {@link FAKE_PPID}; everything else runs for real. */
@@ -197,6 +199,7 @@ export async function runFlow(
     stderr,
     createAdapter: async () => tracker.adapter,
     runProcess: options.runProcess ?? defaultRunner,
+    ...(options.createLauncher === undefined ? {} : { createLauncher: options.createLauncher }),
   };
   const code = await main([...argv, '--json'], deps);
   return {

@@ -1158,6 +1158,10 @@
           "minimum": 10,
           "maximum": 9007199254740991
         },
+        "refreshStaleUsage": {
+          "default": true,
+          "type": "boolean"
+        },
         "windDownGraceMinutes": {
           "default": 20,
           "type": "integer",

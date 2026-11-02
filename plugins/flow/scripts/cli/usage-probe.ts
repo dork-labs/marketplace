@@ -142,14 +142,19 @@ function isRunnable(file: string): boolean {
 }
 
 /**
- * Find the `claude` binary: `--claude`, else `FLOW_CLAUDE_BIN`, else `claude`
- * on `PATH`. The first one given is the only one tried.
+ * Find the `claude` binary: `flag` (`--claude`), else `FLOW_CLAUDE_BIN`, else
+ * `claude` on `PATH`. The first one given is the only one tried.
  *
+ * @param flag - The `--claude` value, when one was given.
+ * @param env - The environment (`FLOW_CLAUDE_BIN`, `PATH`).
+ * @returns The binary (absolute).
  * @throws {ConfigError} When it is not there, naming what was tried.
  */
-function resolveClaude(ctx: VerbContext): string {
-  const flag = ctx.args.flags.claude;
-  const fromEnv = ctx.env.FLOW_CLAUDE_BIN;
+export function resolveClaude(
+  flag: unknown,
+  env: Readonly<Record<string, string | undefined>>
+): string {
+  const fromEnv = env.FLOW_CLAUDE_BIN;
   if (typeof flag === 'string' && flag !== '') {
     const file = path.resolve(flag);
     if (isRunnable(file)) return file;
@@ -160,7 +165,7 @@ function resolveClaude(ctx: VerbContext): string {
     if (isRunnable(file)) return file;
     throw new ConfigError(`no runnable claude at ${file} (from FLOW_CLAUDE_BIN)`);
   }
-  for (const dir of (ctx.env.PATH ?? '').split(path.delimiter)) {
+  for (const dir of (env.PATH ?? '').split(path.delimiter)) {
     if (dir === '') continue;
     const file = path.join(dir, 'claude');
     if (isRunnable(file)) return file;
@@ -198,45 +203,29 @@ function renderObservation(observation: UsageObservation): string {
 }
 
 /**
- * Run `flow usage probe <id>`.
+ * Run one probe turn on a Claude Code account and save its readings to the
+ * account's ledger. Shared by `flow usage probe` and the drain's stale-reading
+ * refresh (DOR-3704), so both read usage the same way. The cost note and the
+ * journal line are the caller's.
  *
- * @param ctx - The verb context.
- * @returns The note (and, with `--yes`, one line per recorded window), and the
- *   account, model, observations, whether the ledger changed and the turn's
- *   `apiKeySource` for `--json`.
- * @throws {UsageError} For a bad `--timeout`.
- * @throws {PreconditionError} For an unknown account, a turn that answered on an
- *   API key, a timeout, or a turn that reported no usage (exit 5).
- * @throws {ConfigError} When the binary is not found or cannot start (exit 3).
+ * @param ctx - The verb context (its stream runner, environment, clock, warnings).
+ * @param opts - The binary, DorkOS home, account, model and timeout.
+ * @returns The readings saved, the turn's `apiKeySource`, and whether the ledger changed.
+ * @throws {PreconditionError} For a turn that answered on an API key, a timeout,
+ *   a turn that reported no usage, or a ledger that stayed locked.
+ * @throws {ConfigError} When the binary cannot start.
  */
-export async function run(ctx: VerbContext): Promise<VerbResult> {
-  const id = ctx.args.positionals[1];
-  const modelFlag = ctx.args.flags.model;
-  const model = typeof modelFlag === 'string' && modelFlag !== '' ? modelFlag : DEFAULT_PROBE_MODEL;
-  const timeoutMs = readTimeoutMs(ctx);
-  const dorkHome = resolveDorkHome(ctx.env, ctx.io.osHome);
-  // `default` resolves to the account it names (rev 6d): the row it aliases, or
-  // this computer's own sign-in, which then records to default.json.
-  const { accounts } = loadAccounts(dorkHome, { home: ctx.io.osHome });
-  const found = id === undefined ? null : resolveAccountRef(accounts, 'claude-code', id);
-  if (found === null || !found.routable || found.path === null) {
-    throw new PreconditionError(
-      `no Claude Code account "${id}" with a valid id; "flow fleet" lists the accounts`
-    );
+export async function probeAccount(
+  ctx: VerbContext,
+  opts: {
+    claude: string;
+    dorkHome: string;
+    account: { id: string; path: string };
+    model: string;
+    timeoutMs: number;
   }
-  const account = { ...found, path: found.path };
-
-  // The note comes first. Under --json stdout carries only the JSON, so it goes to stderr.
-  const note = costNote(account, model);
-  if (ctx.json) ctx.warn(note);
-  if (ctx.args.flags.yes !== true) {
-    return {
-      json: { account: account.id, model, ran: false },
-      text: `${note}\nRun again with --yes to go ahead.`,
-    };
-  }
-
-  const claude = resolveClaude(ctx);
+): Promise<{ observations: UsageObservation[]; apiKeySource: string | null; changed: boolean }> {
+  const { claude, dorkHome, account, model, timeoutMs } = opts;
   const observations: UsageObservation[] = [];
   let apiKeySource: string | null = null;
   const cwd = mkdtempSync(path.join(os.tmpdir(), 'flow-probe-'));
@@ -296,6 +285,56 @@ export async function run(ctx: VerbContext): Promise<VerbResult> {
       'the probe read the usage but could not save it (the usage file stayed locked); try again'
     );
   }
+  return { observations, apiKeySource, changed: result.status === 'written' };
+}
+
+/**
+ * Run `flow usage probe <id>`.
+ *
+ * @param ctx - The verb context.
+ * @returns The note (and, with `--yes`, one line per recorded window), and the
+ *   account, model, observations, whether the ledger changed and the turn's
+ *   `apiKeySource` for `--json`.
+ * @throws {UsageError} For a bad `--timeout`.
+ * @throws {PreconditionError} For an unknown account, a turn that answered on an
+ *   API key, a timeout, or a turn that reported no usage (exit 5).
+ * @throws {ConfigError} When the binary is not found or cannot start (exit 3).
+ */
+export async function run(ctx: VerbContext): Promise<VerbResult> {
+  const id = ctx.args.positionals[1];
+  const modelFlag = ctx.args.flags.model;
+  const model = typeof modelFlag === 'string' && modelFlag !== '' ? modelFlag : DEFAULT_PROBE_MODEL;
+  const timeoutMs = readTimeoutMs(ctx);
+  const dorkHome = resolveDorkHome(ctx.env, ctx.io.osHome);
+  // `default` resolves to the account it names (rev 6d): the row it aliases, or
+  // this computer's own sign-in, which then records to default.json.
+  const { accounts } = loadAccounts(dorkHome, { home: ctx.io.osHome });
+  const found = id === undefined ? null : resolveAccountRef(accounts, 'claude-code', id);
+  if (found === null || !found.routable || found.path === null) {
+    throw new PreconditionError(
+      `no Claude Code account "${id}" with a valid id; "flow fleet" lists the accounts`
+    );
+  }
+  const account = { ...found, path: found.path };
+
+  // The note comes first. Under --json stdout carries only the JSON, so it goes to stderr.
+  const note = costNote(account, model);
+  if (ctx.json) ctx.warn(note);
+  if (ctx.args.flags.yes !== true) {
+    return {
+      json: { account: account.id, model, ran: false },
+      text: `${note}\nRun again with --yes to go ahead.`,
+    };
+  }
+
+  const claude = resolveClaude(ctx.args.flags.claude, ctx.env);
+  const { observations, apiKeySource, changed } = await probeAccount(ctx, {
+    claude,
+    dorkHome,
+    account,
+    model,
+    timeoutMs,
+  });
   journalUsage(ctx, dorkHome, [{ runtime: 'claude-code', id: account.id }]);
 
   return {
@@ -303,7 +342,7 @@ export async function run(ctx: VerbContext): Promise<VerbResult> {
       account: account.id,
       model,
       observations,
-      changed: result.status === 'written',
+      changed,
       apiKeySource,
     },
     text: [note, ...observations.map(renderObservation)].join('\n'),
