@@ -1,7 +1,7 @@
 /**
  * Scenario `recovery-ladder`: an orphaned run is resumed, then restarted, then
- * escalated; a parked item is never reclaimed (spec
- * `specs/flow-self-improvement` §1).
+ * handled as `recovery.onExhausted` says once its retries run out; a parked
+ * item is never reclaimed (spec `specs/flow-self-improvement` §1).
  *
  * There is no recovery verb yet: the next-tick ladder is the pure oracle
  * `recoverOrphan` (`scripts/flow-run.ts`, the same one `scripts/recovery.ts`
@@ -11,12 +11,12 @@
  * facts read from the fake, the run store and the disk, and persists the
  * attempt count it returns, as the runtime would.
  *
- * Not covered: `recovery.onExhausted` values other than `block`. The oracle
- * does not read the setting, so every exhausted run escalates with
- * `agent/blocked` (what `block` means), and `escalate` and `abandon` have no
- * documented behavior to test against yet. The scenario sets `block`, the
- * default, and pins that; the other two are a follow-up to define and build
- * (DOR-2403).
+ * All three `onExhausted` values are driven (DOR-2403): `block` returns
+ * `agent/blocked`; `escalate` returns `agent/needs-input`, which the scenario
+ * applies through the adapter's `needsInput` (as the runtime would) and then
+ * checks the next tick leaves alone; `abandon` runs `flow release --to none`
+ * and checks the item is unstarted, unowned, has no run record, and is neither
+ * an orphan nor offered by `flow next`.
  *
  * @module @dorkos/flow/selftest/scenarios/recovery-ladder
  */
@@ -26,6 +26,7 @@ import path from 'node:path';
 
 import {
   RECOVERY_BLOCKED_LABEL,
+  RECOVERY_NEEDS_INPUT_LABEL,
   recoverOrphan,
   type FlowRun,
   type OrphanSignal,
@@ -98,7 +99,7 @@ async function tick(ctx: ScenarioContext, identifier: string): Promise<RecoveryA
  */
 export async function recoveryLadder(options: ScenarioOptions): Promise<void> {
   await withScenario(options, async (ctx) => {
-    ctx.seed({ items: [ready('FAKE-1'), ready('FAKE-2')] });
+    ctx.seed({ items: [ready('FAKE-1'), ready('FAKE-2'), ready('FAKE-3'), ready('FAKE-4')] });
     ctx.config({ ...BASE_CONFIG, recovery: { maxRetries: 2, onExhausted: 'block' } });
     const env = { FLOW_SESSION_ID: 'session-recovery' };
 
@@ -123,12 +124,96 @@ export async function recoveryLadder(options: ScenarioOptions): Promise<void> {
       'dead worker, worktree missing'
     );
 
-    // Retries used up (2 of maxRetries 2): escalate with agent/blocked.
+    // Retries used up (2 of maxRetries 2), onExhausted block: agent/blocked.
     const exhausted = await tick(ctx, 'FAKE-1');
     check(
-      exhausted?.kind === 'escalate' && exhausted.label === RECOVERY_BLOCKED_LABEL,
-      `retries past maxRetries: expected escalate with ${RECOVERY_BLOCKED_LABEL}, got ${JSON.stringify(exhausted)}`
+      exhausted?.kind === 'block' && exhausted.label === RECOVERY_BLOCKED_LABEL,
+      `onExhausted block: expected block with ${RECOVERY_BLOCKED_LABEL}, got ${JSON.stringify(exhausted)}`
     );
+
+    // onExhausted escalate (no retries, as the autonomy dial's Ask me first
+    // reads it): ask a person. The runtime parks it with the adapter's
+    // needsInput (a comment plus agent/needs-input, written here through the
+    // code adapter); the next tick must leave it alone.
+    ctx.config({ ...BASE_CONFIG, recovery: { maxRetries: 0, onExhausted: 'escalate' } });
+    await ctx.flowOk(
+      [
+        'claim',
+        'FAKE-3',
+        '--pid',
+        String(DEAD_PID),
+        '--worktree',
+        ctx.projectDir,
+        '--branch',
+        'work',
+      ],
+      env
+    );
+    const asked = await tick(ctx, 'FAKE-3');
+    check(
+      asked?.kind === 'escalate' && asked.label === RECOVERY_NEEDS_INPUT_LABEL,
+      `onExhausted escalate: expected escalate with ${RECOVERY_NEEDS_INPUT_LABEL}, got ${JSON.stringify(asked)}`
+    );
+    if (asked?.kind === 'escalate') {
+      const item = await ctx.tracker.adapter.getItem('FAKE-3');
+      await ctx.tracker.adapter.comment(item, asked.reason);
+      await ctx.tracker.adapter.applyWorkState(item, { agentLabel: asked.label });
+    }
+    checkEqual(
+      await tick(ctx, 'FAKE-3'),
+      { kind: 'skip', reason: 'parked-on-human' },
+      'onExhausted escalate: the asked item on the next tick'
+    );
+
+    // onExhausted abandon: let the item go with flow release --to none.
+    ctx.config({ ...BASE_CONFIG, recovery: { maxRetries: 0, onExhausted: 'abandon' } });
+    await ctx.flowOk(
+      [
+        'claim',
+        'FAKE-4',
+        '--pid',
+        String(DEAD_PID),
+        '--worktree',
+        ctx.projectDir,
+        '--branch',
+        'work',
+      ],
+      env
+    );
+    const dropped = await tick(ctx, 'FAKE-4');
+    check(
+      dropped?.kind === 'abandon' && dropped.releaseTo === 'none',
+      `onExhausted abandon: expected abandon releasing to none, got ${JSON.stringify(dropped)}`
+    );
+    if (dropped?.kind === 'abandon') {
+      await ctx.flowOk(
+        ['release', 'FAKE-4', '--to', dropped.releaseTo, '--reason', dropped.reason],
+        env
+      );
+    }
+    const released = await ctx.tracker.adapter.getItem('FAKE-4');
+    const agentLabels = released.labels.filter((l) => l.startsWith('agent/'));
+    check(
+      agentLabels.length === 0,
+      `onExhausted abandon: FAKE-4 still carries ${agentLabels.join(', ')}`
+    );
+    checkEqual(released.stateCategory, 'unstarted', 'onExhausted abandon: FAKE-4 state');
+    check(
+      ctx.runs()[released.id] === undefined,
+      'onExhausted abandon: FAKE-4 still has a run record'
+    );
+    checkEqual(
+      await tick(ctx, 'FAKE-4'),
+      undefined,
+      'onExhausted abandon: FAKE-4 on the next tick'
+    );
+    const offered =
+      ((await ctx.flowOk(['next', '-n', '5'])).json.picked as { identifier: string }[]) ?? [];
+    check(
+      !offered.some((p) => p.identifier === 'FAKE-4'),
+      'onExhausted abandon: flow next offers the abandoned FAKE-4'
+    );
+    ctx.config({ ...BASE_CONFIG, recovery: { maxRetries: 2, onExhausted: 'block' } });
 
     // A parked item (agent/needs-input) is never reclaimed. The park is written
     // through the adapter: no verb parks an item yet.

@@ -4,6 +4,15 @@ Installs of this plugin are pinned to a commit SHA, so a fix here does not reach
 you until you **reinstall it** (Marketplace → flow → reinstall, or re-run your
 `--plugin-dir` checkout's `git pull`). Each entry below says whether that matters.
 
+## 0.71.0
+
+**Flow now does what your `recovery.onExhausted` setting says when a crashed run has used up its retries. Before, it always added `agent/blocked`, whatever you chose (DOR-2403). Reinstall to get it.**
+
+- `block`, the default, works as before: flow adds `agent/blocked` and a comment, and leaves the item for you.
+- `escalate` now asks you. Flow parks the item as a question, marked `agent/needs-input`, and picks it back up when you reply. This is also what "Retry and fix problems" set to Ask me first gets.
+- `abandon` now lets the item go. Flow drops its claim and its run record, comments why, and leaves the item unstarted with no `agent/` label, so it isn't picked up again until someone marks it ready.
+- If you never set `onExhausted` and "Retry and fix problems" isn't at Ask me first, nothing changes for you.
+
 ## 0.70.0
 
 **In the DorkOS app, only a person can make flow look for a project in a new folder now. Before, an agent reading the Flow tab's data could make flow treat any folder as a project and tell DorkOS about it (DOR-3581). Reinstall to get it.**

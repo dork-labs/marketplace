@@ -171,7 +171,7 @@ export { classifyOwnership, resolveIdentityMode, SHARED_MODE_CLAIM_LABEL } from 
 export type { Identity, IdentityMode, IdentityConfig, OwnershipScope } from './identity.ts';
 
 // Crash & stall recovery (§12) — the durable FlowRun record + next-tick recovery ladder.
-export { recoverOrphan, RECOVERY_BLOCKED_LABEL } from './flow-run.ts';
+export { recoverOrphan, RECOVERY_BLOCKED_LABEL, RECOVERY_NEEDS_INPUT_LABEL } from './flow-run.ts';
 export type {
   FlowRun,
   FlowRunStatus,
