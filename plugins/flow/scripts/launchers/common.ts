@@ -18,6 +18,7 @@ import path from 'node:path';
 
 import type { ProcessRunner } from '../cli/context.ts';
 import { ambientAccountPath, type RuntimeAccount } from '../fleet/accounts.ts';
+import { childRuntimeEnv } from '../runtime-detect.ts';
 import {
   DEFAULT_ACCOUNT_ID,
   LaunchError,
@@ -339,7 +340,9 @@ export function claudeConfigDirValue(
 }
 
 /**
- * The child's environment: the supervisor's, minus the runtime's
+ * The child's environment: the supervisor's, named for the child with
+ * {@link childRuntimeEnv} so a host's `FLOW_RUNTIME` and `FLOW_HARNESS` do not
+ * label the child as its parent, minus the runtime's
  * {@link RUNTIME_CREDENTIAL_ENV_VARS}, with the runtime's home variable
  * ({@link RUNTIME_HOME_ENV_VAR}) set explicitly to `home`, except that Claude
  * Code's is removed where {@link claudeConfigDirValue} says unset.
@@ -360,9 +363,8 @@ export function childEnv(
   const homeVar = RUNTIME_HOME_ENV_VAR[runtime];
   const drop = new Set<string>(RUNTIME_CREDENTIAL_ENV_VARS[runtime]);
   if (homeVar !== null) drop.add(homeVar);
-  for (const [key, value] of Object.entries(env)) {
-    if (value === undefined || drop.has(key)) continue;
-    out[key] = value;
+  for (const [key, value] of Object.entries(childRuntimeEnv(env, runtime))) {
+    if (!drop.has(key)) out[key] = value;
   }
   if (homeVar === null || home === null) return out;
   const value = runtime === 'claude-code' ? claudeConfigDirValue(home, env, osHome) : home;
