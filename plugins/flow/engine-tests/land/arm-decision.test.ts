@@ -18,6 +18,7 @@ import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
 
 import {
+  armMergeFor,
   BUILTIN_SECURITY_GLOBS,
   decideArm,
   formatDecision,
@@ -110,6 +111,8 @@ describe.skipIf(variants === null)('security path spellings (shared with dork-la
     headRefOid: '1'.repeat(40),
     reviewedSha: '1'.repeat(40),
     baseRefName: 'main',
+    defaultBranch: 'main',
+    mergeSettings: { queueMethod: 'SQUASH', squashAllowed: true, allowedMethods: null },
     isCrossRepository: false,
     requiredChecks: [],
     files: [file],
@@ -151,7 +154,11 @@ describe.skipIf(!runnable)(
     // The rows the agreed design names one by one (DOR-3262).
     it.each([
       ['head moved after the review', 'REFUSE head-moved'],
-      ['base is not main', 'REFUSE base-not-main'],
+      ['base is not main', 'REFUSE base-not-default'],
+      ['stacked PR into its parent branch', 'REFUSE base-not-default'],
+      ['default branch is not main', 'ARM'],
+      ['merge queue merges', 'REFUSE not-squash'],
+      ['no merge queue, squash turned off', 'REFUSE not-squash'],
       ['security path without the label', 'REFUSE security-path-unlabelled'],
       ['package manifest without the label', 'REFUSE security-path-unlabelled'],
       ['root lockfile without the label', 'REFUSE security-path-unlabelled'],
@@ -354,3 +361,41 @@ describe.skipIf(!runnable)(
     });
   }
 );
+
+// DOR-3256: how flow arms follows the base's merge settings. A queue sets the
+// method itself, so flow passes no flag there; without one it passes --squash.
+describe('armMergeFor', () => {
+  it('a queue that squashes arms with no method flag', () => {
+    expect(
+      armMergeFor({ queueMethod: 'SQUASH', squashAllowed: false, allowedMethods: ['merge'] })
+    ).toEqual({ ok: true, merge: 'queue' });
+  });
+
+  it('no queue and squash allowed arms with --squash', () => {
+    expect(armMergeFor({ queueMethod: null, squashAllowed: true, allowedMethods: null })).toEqual({
+      ok: true,
+      merge: 'squash',
+    });
+  });
+
+  it('anything unread or malformed refuses', () => {
+    for (const value of [
+      undefined,
+      null,
+      'SQUASH',
+      [],
+      {},
+      { queueMethod: 42, squashAllowed: true, allowedMethods: null },
+      { queueMethod: null, squashAllowed: 'yes', allowedMethods: null },
+      { queueMethod: null, squashAllowed: true, allowedMethods: 'squash' },
+      { queueMethod: null, squashAllowed: true, allowedMethods: [7] },
+    ]) {
+      expect(armMergeFor(value).ok).toBe(false);
+    }
+  });
+
+  it('names the method a queue uses', () => {
+    const out = armMergeFor({ queueMethod: 'merge', squashAllowed: true, allowedMethods: null });
+    expect(out.ok === false && out.detail).toContain('MERGE');
+  });
+});

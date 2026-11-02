@@ -1,6 +1,6 @@
 /**
  * The post-merge squash check (DOR-3262): once a PR has merged, did the
- * squash commit on `main` land exactly what was reviewed?
+ * squash commit on the default branch land exactly what was reviewed?
  *
  * The reviewed head is always the commit recorded at review (the one the
  * security label was applied to), never the PR's head when it merged.
@@ -171,7 +171,7 @@ async function patchId(git: GitRunner, patch: GitResult): Promise<string | null>
  * false alarm, never a false pass.
  *
  * @param git - Runs git in a checkout holding both commits.
- * @param input - The squash commit on `main` and the reviewed head, both full SHAs.
+ * @param input - The squash commit on the default branch and the reviewed head, both full SHAs.
  * @returns Pass, fail with both trees and the files that differ, or unverified.
  */
 export async function verifySquash(

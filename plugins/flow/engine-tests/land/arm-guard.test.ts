@@ -26,6 +26,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { realProcessRunner, type ProcessRunner } from '../../scripts/cli/context.ts';
 import type { ArmFacts, Forge, WorkflowRun } from '../../scripts/forge/types.ts';
+import type { MergeSettings } from '../../scripts/land/arm-decision.ts';
 import { guardArm, refusalSticksToCommit } from '../../scripts/land/arm-guard.ts';
 import { readBaseLand } from '../../scripts/land/base-config.ts';
 import { setFreeze } from '../../scripts/land/freeze.ts';
@@ -94,7 +95,17 @@ interface ForgeOptions {
   labelledAt?: string | null | 'throw';
   /** What `headPushedAt` answers; `'throw'` fails the read, `'absent'` drops the method. */
   headPushedAt?: string | null | 'throw' | 'absent';
+  /** What `defaultBranch` answers (default `main`); `'throw'` fails the read, `'absent'` drops the method. */
+  defaultBranch?: string | 'throw' | 'absent';
+  /** What `mergeSettings` answers per call (default a squashing queue); `'throw'` fails, `'absent'` drops it. */
+  mergeSettings?: ((call: number) => MergeSettings) | 'throw' | 'absent';
 }
+
+const SQUASH_QUEUE: MergeSettings = {
+  queueMethod: 'SQUASH',
+  squashAllowed: true,
+  allowedMethods: null,
+};
 
 const ARRIVED = '2026-10-01T00:00:00Z';
 const LABELLED = '2026-10-02T00:00:00Z';
@@ -104,6 +115,7 @@ function fakeForge(opts: ForgeOptions = {}) {
   const calls: { method: string; args: unknown[] }[] = [];
   let runsCall = 0;
   let headCall = 0;
+  let mergeCall = 0;
   const forge: Forge = {
     repo: 'acme/app',
     async branchHead(...args) {
@@ -133,7 +145,8 @@ function fakeForge(opts: ForgeOptions = {}) {
     async recentGroupFailures() {
       return [];
     },
-    async requiredChecks() {
+    async requiredChecks(...args) {
+      calls.push({ method: 'requiredChecks', args });
       return opts.required === undefined ? ['flow plugin'] : opts.required;
     },
     async armFacts(...args) {
@@ -175,8 +188,25 @@ function fakeForge(opts: ForgeOptions = {}) {
       runsCall += 1;
       return opts.runs ? opts.runs(runsCall) : [];
     },
+    async defaultBranch() {
+      calls.push({ method: 'defaultBranch', args: [] });
+      if (opts.defaultBranch === 'throw') throw new Error('HTTP 502');
+      return opts.defaultBranch === undefined || opts.defaultBranch === 'absent'
+        ? 'main'
+        : opts.defaultBranch;
+    },
+    async mergeSettings(...args) {
+      calls.push({ method: 'mergeSettings', args });
+      mergeCall += 1;
+      if (opts.mergeSettings === 'throw') throw new Error('HTTP 502');
+      return typeof opts.mergeSettings === 'function'
+        ? opts.mergeSettings(mergeCall)
+        : SQUASH_QUEUE;
+    },
   };
   if (opts.headPushedAt === 'absent') delete forge.headPushedAt;
+  if (opts.defaultBranch === 'absent') delete forge.defaultBranch;
+  if (opts.mergeSettings === 'absent') delete forge.mergeSettings;
   return { forge, calls };
 }
 
@@ -293,7 +323,7 @@ describe('the land config the guard obeys', () => {
     git(other, 'add', '.');
     git(other, 'commit', '-q', '-m', 'config on the remote');
     git(other, 'push', '-q', 'origin', 'main');
-    const base = await readBaseLand(realProcessRunner, repo);
+    const base = await readBaseLand(realProcessRunner, repo, 'main');
     expect(base.ok && base.land.preArm).toEqual([
       { paths: ['src/**'], run: 'remote-check', timeout: 30 },
     ]);
@@ -311,7 +341,7 @@ describe('the land config the guard obeys', () => {
   });
 
   it('a main with no committed config means no checks', async () => {
-    const base = await readBaseLand(realProcessRunner, repo);
+    const base = await readBaseLand(realProcessRunner, repo, 'main');
     expect(base).toMatchObject({ ok: true, committed: false, land: { preArm: [] } });
   });
 
@@ -452,6 +482,9 @@ describe('the guard only refuses', () => {
                 'workflowRuns',
                 'labelledAt',
                 'headPushedAt',
+                'defaultBranch',
+                'requiredChecks',
+                'mergeSettings',
               ].includes(m)
           )
       ).toEqual([]);
@@ -529,6 +562,110 @@ describe('the guard only refuses', () => {
   });
 });
 
+// DOR-3256: land safety for every team. The base is the repository's default
+// branch as the forge names it, and the merge must squash.
+describe('the default branch and the squash route', () => {
+  /** Give origin a `trunk` default branch carrying `land`, and point the PR at it. */
+  function trunkLand(land: unknown): void {
+    git(repo, 'checkout', '-q', '-b', 'trunk', 'main');
+    commitFile('.agents/flow/config.json', JSON.stringify({ land }, null, 2), 'trunk config');
+    git(repo, 'push', '-q', 'origin', 'trunk');
+    git(repo, 'checkout', '-q', 'feature');
+  }
+
+  it("arms into a default branch that is not main, reading that branch's config and checks", async () => {
+    trunkLand({ preArm: [{ paths: ['src/**'], run: 'check-trunk' }] });
+    const { runner, ran } = recordingRunner();
+    const { forge, calls } = fakeForge({ defaultBranch: 'trunk', facts: { baseRefName: 'trunk' } });
+    expect(await guard(forge, runner)).toMatchObject({ ok: true, merge: 'queue' });
+    expect(ran.map((r) => r.cmd)).toEqual(['check-trunk']);
+    expect(calls.find((c) => c.method === 'requiredChecks')?.args).toEqual(['trunk']);
+    expect(calls.find((c) => c.method === 'mergeSettings')?.args).toEqual(['trunk']);
+  });
+
+  // Not sticky: retargeting a stacked PR (or GitHub doing it when the parent
+  // lands) changes the base without a new commit, so it is asked again.
+  it('refuses a stacked PR whose base is its parent branch, and asks again', async () => {
+    const result = await guard(fakeForge({ facts: { baseRefName: 'feature/parent' } }).forge);
+    expect(result).toMatchObject({ ok: false, reason: 'base-not-default' });
+    expect(!result.ok && result.detail).toContain('"feature/parent"');
+    expect(!result.ok && refusalSticksToCommit(result)).toBe(false);
+  });
+
+  it('refuses main when the default branch is another', async () => {
+    trunkLand({});
+    expect(await guard(fakeForge({ defaultBranch: 'trunk' }).forge)).toMatchObject({
+      ok: false,
+      reason: 'base-not-default',
+    });
+  });
+
+  it('fails closed when the forge cannot say which branch is the default, and asks again', async () => {
+    for (const defaultBranch of ['throw', 'absent'] as const) {
+      const { forge, calls } = fakeForge({ defaultBranch });
+      const result = await guard(forge);
+      expect(result).toMatchObject({ ok: false, reason: 'forge-unreadable' });
+      expect(!result.ok && refusalSticksToCommit(result)).toBe(false);
+      expect(calls.some((c) => c.method === 'armFacts')).toBe(false);
+    }
+  });
+
+  it('fetches no branch name git could read as anything else', async () => {
+    expect(await guard(fakeForge({ defaultBranch: '-upload-pack=x' }).forge)).toMatchObject({
+      ok: false,
+      reason: 'config-unreadable',
+    });
+  });
+
+  it('routes a base with no queue and squash allowed to --squash', async () => {
+    const mergeSettings = () => ({ queueMethod: null, squashAllowed: true, allowedMethods: null });
+    expect(await guard(fakeForge({ mergeSettings }).forge)).toMatchObject({
+      ok: true,
+      merge: 'squash',
+    });
+  });
+
+  it('refuses a merge that would not squash, and asks again next time', async () => {
+    for (const mergeSettings of [
+      () => ({ queueMethod: 'MERGE', squashAllowed: true, allowedMethods: null }),
+      () => ({ queueMethod: null, squashAllowed: false, allowedMethods: null }),
+      () => ({ queueMethod: null, squashAllowed: true, allowedMethods: ['rebase'] }),
+      'throw' as const,
+      'absent' as const,
+    ]) {
+      const result = await guard(fakeForge({ mergeSettings }).forge);
+      expect(result).toMatchObject({ ok: false, reason: 'not-squash' });
+      expect(!result.ok && refusalSticksToCommit(result)).toBe(false);
+    }
+  });
+
+  it('reads the merge settings again after its pre-arm checks: a queue switched to MERGE refuses', async () => {
+    baseLand({ preArm: [{ paths: ['src/**'], run: 'slow-suite' }] });
+    const mergeSettings = (call: number) => ({
+      queueMethod: call === 1 ? 'SQUASH' : 'MERGE',
+      squashAllowed: true,
+      allowedMethods: null,
+    });
+    const { runner, ran } = recordingRunner();
+    const result = await guard(fakeForge({ mergeSettings }).forge, runner);
+    expect(ran).toHaveLength(1);
+    expect(result).toMatchObject({ ok: false, reason: 'not-squash', ranPreArm: false });
+  });
+
+  it('the route on a pass after its pre-arm checks is the one read last', async () => {
+    baseLand({ preArm: [{ paths: ['src/**'], run: 'slow-suite' }] });
+    const mergeSettings = (call: number) => ({
+      queueMethod: call === 1 ? 'SQUASH' : null,
+      squashAllowed: true,
+      allowedMethods: null,
+    });
+    expect(await guard(fakeForge({ mergeSettings }).forge)).toMatchObject({
+      ok: true,
+      merge: 'squash',
+    });
+  });
+});
+
 describe('preArm: defer (flow pr, flow review)', () => {
   async function deferred(forge: Forge, runner: ProcessRunner = recordingRunner().runner) {
     const time = virtualTime();
@@ -567,7 +704,8 @@ describe('which refusals stick to the commit', () => {
   it.each([
     ['pre-arm-failed', true, true],
     ['fork', false, true],
-    ['base-not-main', false, true],
+    ['base-not-default', false, false],
+    ['not-squash', false, false],
     ['freeze', false, false],
     ['security-path-unlabelled', false, false],
     ['failing-checks', false, false],
@@ -582,7 +720,11 @@ describe('which refusals stick to the commit', () => {
 describe('land.preArm run entries', () => {
   it('no entries: nothing runs and it arms as before', async () => {
     const { runner, ran } = recordingRunner();
-    expect(await guard(fakeForge().forge, runner)).toEqual({ ok: true, preArm: [] });
+    expect(await guard(fakeForge().forge, runner)).toEqual({
+      ok: true,
+      preArm: [],
+      merge: 'queue',
+    });
     expect(ran).toEqual([]);
   });
 
@@ -632,6 +774,7 @@ describe('land.preArm run entries', () => {
     expect(result).toEqual({
       ok: true,
       preArm: [{ entry: 'run "browser-tests"', result: 'skipped' }],
+      merge: 'queue',
     });
     expect(ran).toEqual([]);
   });

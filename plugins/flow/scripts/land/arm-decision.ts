@@ -17,7 +17,8 @@
  * | `draft` | the PR is a draft |
  * | `held-by-label` | it carries `hold`, `do-not-merge`, `wip` or `blocked` |
  * | `fork` | it comes from a fork, or the forge did not say |
- * | `base-not-main` | it merges into anything but `main` |
+ * | `base-not-default` | it merges into anything but the repository's default branch, or the forge did not say which that is |
+ * | `not-squash` | the merge would not squash: the merge queue uses another method, or with no queue the repository or a ruleset does not allow squash, or the forge could not say |
  * | `unreviewed` | no full reviewed SHA was recorded |
  * | `head-moved` | the head is not the reviewed SHA |
  * | `freeze` | a release freeze is on |
@@ -145,8 +146,26 @@ export const HOLD_LABELS: readonly string[] = [
   'blocked',
 ];
 
-/** The only base the guard arms into. */
-export const ARM_BASE = 'main';
+/**
+ * How flow arms a PR that may squash (DOR-3256): `queue` when the base has a
+ * merge queue that squashes (the queue sets the method, so flow passes no
+ * method flag), `squash` when it has none and squash merges are allowed
+ * (flow passes `--squash`).
+ */
+export type ArmMerge = 'queue' | 'squash';
+
+/**
+ * How the base merges, as the forge reads it (`Forge.mergeSettings`). Squash
+ * is the only method flow arms: its post-merge squash check needs one.
+ */
+export interface MergeSettings {
+  /** The merge queue's method (`SQUASH`, `MERGE`, `REBASE`), `null` when the base has no queue. */
+  queueMethod: string | null;
+  /** Whether the repository allows squash merges, `null` when the forge did not say. */
+  squashAllowed: boolean | null;
+  /** The merge methods the base's rulesets allow (lower case), `null` when no ruleset limits them. */
+  allowedMethods: string[] | null;
+}
 
 /** The repository's security-path list and label (from `land.securityPaths`). */
 export interface ArmPolicy {
@@ -164,7 +183,8 @@ export type RefusalSlug =
   | 'draft'
   | 'held-by-label'
   | 'fork'
-  | 'base-not-main'
+  | 'base-not-default'
+  | 'not-squash'
   | 'unreviewed'
   | 'head-moved'
   | 'freeze'
@@ -272,12 +292,67 @@ export function securityPathsTouched(files: readonly string[], policy: ArmPolicy
 }
 
 /**
+ * How flow arms a PR into a base with these merge settings, or why it may not:
+ * with a merge queue, only one that squashes (armed with no method flag);
+ * without one, only when the repository allows squash and no ruleset rules it
+ * out (armed with `--squash`). Anything unread or malformed refuses.
+ *
+ * @param input - The settings, in {@link MergeSettings}' shape; anything else refuses.
+ * @returns The way to arm, or a refusal sentence.
+ */
+export function armMergeFor(
+  input: unknown
+): { ok: true; merge: ArmMerge } | { ok: false; detail: string } {
+  const settings = record(input);
+  if (settings === undefined || !('queueMethod' in settings)) {
+    return { ok: false, detail: 'the forge did not say how the base branch merges' };
+  }
+  const queue = settings.queueMethod;
+  if (queue !== null) {
+    const method = str(queue)?.toUpperCase();
+    if (method === 'SQUASH') return { ok: true, merge: 'queue' };
+    return {
+      ok: false,
+      detail:
+        method === undefined || method === ''
+          ? "the base branch's merge queue did not say how it merges"
+          : `the base branch's merge queue merges with ${method}, not SQUASH; flow arms only a squash`,
+    };
+  }
+  if (settings.squashAllowed !== true) {
+    return {
+      ok: false,
+      detail:
+        settings.squashAllowed === false
+          ? 'the repository does not allow squash merges; flow arms only a squash'
+          : 'the forge did not say whether the repository allows squash merges',
+    };
+  }
+  const allowed = settings.allowedMethods;
+  if (allowed !== null && allowed !== undefined) {
+    const methods = Array.isArray(allowed)
+      ? allowed.filter((m): m is string => typeof m === 'string').map((m) => m.toLowerCase())
+      : null;
+    if (methods === null || !methods.includes('squash')) {
+      return {
+        ok: false,
+        detail:
+          'a ruleset on the base branch does not allow squash merges; flow arms only a squash',
+      };
+    }
+  }
+  return { ok: true, merge: 'squash' };
+}
+
+/**
  * Decide whether flow may arm auto-merge on a pull request.
  *
  * @param input - The facts, in the shape of `scripts/fixtures/arm-decisions.json`'s
  *   `green` payload: the PR as `gh` reports it (state, isDraft, labels,
  *   reviewDecision, checks with `bucket`s, headRefOid, baseRefName,
- *   isCrossRepository), plus `requiredChecks` (`null`: unknown), `files` (every
+ *   isCrossRepository), plus `defaultBranch` (the repository's default
+ *   branch, as the forge says), `mergeSettings` ({@link MergeSettings}),
+ *   `requiredChecks` (`null`: unknown), `files` (every
  *   path the PR touches, both names of a rename; `null`: the list is
  *   incomplete), `reviewedSha` (the commit the review covered) and `freeze`
  *   (`null`, or the freeze marker), and, for a PR with the security label,
@@ -307,13 +382,23 @@ export function decideArm(input: unknown, policy: ArmPolicy): ArmDecision {
         : 'the forge did not say whether the pull request comes from a fork'
     );
   }
-  const base = str(facts.baseRefName);
-  if (base !== ARM_BASE) {
+  // Exact: a branch name's case is part of it.
+  const defaultBranch = str(facts.defaultBranch);
+  if (defaultBranch === undefined || defaultBranch === '') {
     return refuse(
-      'base-not-main',
-      `the pull request merges into ${base === undefined || base === '' ? 'an unknown branch' : `"${base}"`}, not ${ARM_BASE}`
+      'base-not-default',
+      "the forge did not say which branch is the repository's default, so flow cannot tell whether the pull request merges into it"
     );
   }
+  const base = str(facts.baseRefName);
+  if (base !== defaultBranch) {
+    return refuse(
+      'base-not-default',
+      `the pull request merges into ${base === undefined || base === '' ? 'an unknown branch' : `"${base}"`}, not the default branch "${defaultBranch}"; retarget it, or land the branch it stacks on first`
+    );
+  }
+  const merge = armMergeFor(facts.mergeSettings);
+  if (!merge.ok) return refuse('not-squash', merge.detail);
   const reviewed = str(facts.reviewedSha);
   if (reviewed === undefined || !FULL_SHA.test(reviewed)) {
     return refuse(

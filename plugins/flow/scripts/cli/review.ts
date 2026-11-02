@@ -55,6 +55,7 @@ import { ConfigError, PreconditionError, UsageError } from '../errors.ts';
 import type { FlowRun, RunShipWait } from '../flow-run.ts';
 import { openFlowStateFile, type FlowStateFile } from '../flow-state-file.ts';
 import { ForgeError, type Forge, type ReviewOutcome } from '../forge/types.ts';
+import type { ArmMerge } from '../land/arm-decision.ts';
 import { reviewFindingsPath } from '../drain/messages.ts';
 import { MAX_ANSWER_LENGTH } from '../question.ts';
 import { projectionFor } from '../work-state.ts';
@@ -520,6 +521,8 @@ async function review(ctx: VerbContext): Promise<VerbResult> {
     // approves its reviewed commit; any other run, the head the person names
     // with --head. A PR whose head moved since is refused before anything is posted.
     let armAt: string | null = null;
+    // The merge route the guard checked (DOR-3256); nothing arms without one.
+    let armMerge: ArmMerge | null = null;
     let armRefused: { reason: string; detail: string } | null = null;
     let handToDrain = false;
     const willArm = pr !== null && target.forge !== null && config.gates.review.mergeOnApproval;
@@ -557,7 +560,9 @@ async function review(ctx: VerbContext): Promise<VerbResult> {
             worktree: existing.worktreePath,
             preArm: 'defer',
           });
-          if (!guard.ok) {
+          if (guard.ok) {
+            armMerge = guard.merge;
+          } else {
             armAt = null;
             // A drain run approved at its reviewed commit: the drain runs the
             // checks and arms it once they pass. That is a hand-off, not a
@@ -617,8 +622,8 @@ async function review(ctx: VerbContext): Promise<VerbResult> {
             body: 'Shipped from DorkOS.',
           });
         }
-        if (armAt !== null) {
-          await target.forge.arm(pr.number, armAt);
+        if (armAt !== null && armMerge !== null) {
+          await target.forge.arm(pr.number, armAt, armMerge);
           armed = true;
         } else if (handToDrain && isWritableDrain(existing)) {
           await writeDrain(

@@ -1,7 +1,7 @@
 /**
  * `land.preArm` (DOR-3262): the checks flow runs before it arms auto-merge,
  * each only when the PR touches one of its paths. Every entry comes from the
- * committed config on `origin/main` ({@link readBaseLand}); nothing here takes
+ * committed config on the default branch ({@link readBaseLand}); nothing here takes
  * a command, a workflow name or an argument from the PR or from a model.
  *
  * Two forms:
@@ -313,7 +313,7 @@ export async function runWorkflow(
  * Run every `land.preArm` entry the PR's files send, in order, stopping at the
  * first refusal. No entries, or none touched, lets it arm unchanged.
  *
- * @param entries - The entries from the committed config on `origin/main`.
+ * @param entries - The entries from the committed config on the default branch.
  * @param target - The PR.
  * @param io - The world.
  * @returns Each entry's outcome and whether arming may go on.

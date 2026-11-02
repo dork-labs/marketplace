@@ -23,7 +23,11 @@ export interface RecordingGuard {
  * @returns The guard and its requests.
  */
 export function recordingGuard(
-  answer: (request: ArmGuardRequest) => GuardResult = () => ({ ok: true, preArm: [] })
+  answer: (request: ArmGuardRequest) => GuardResult = () => ({
+    ok: true,
+    preArm: [],
+    merge: 'queue',
+  })
 ): RecordingGuard {
   const requests: ArmGuardRequest[] = [];
   return {

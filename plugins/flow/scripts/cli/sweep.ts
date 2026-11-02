@@ -22,7 +22,6 @@
 import { PausedError } from '../errors.ts';
 import type { OpenPr } from '../forge/open-prs.ts';
 import { ForgeError, type Forge } from '../forge/types.ts';
-import { ARM_BASE } from '../land/arm-decision.ts';
 import { policyFor } from '../land/arm-guard.ts';
 import { reviewRoute, type ReviewRoute } from '../land/review-route.ts';
 import { clearance, type ReviewLabels } from '../land/sweep.ts';
@@ -130,7 +129,7 @@ async function sweepOne(
         detail: guard.detail,
       };
     }
-    await forge.arm(pr.number, head);
+    await forge.arm(pr.number, head, guard.merge);
     return { ...base, head, route, outcome: 'armed' };
   } catch (error) {
     // One PR that cannot be read or armed is reported, never the end of the sweep.
@@ -224,7 +223,11 @@ export async function sweepOpenPrs(
   const { forge, prs } = open;
   let requiredChecks: string[] | null = null;
   try {
-    requiredChecks = (await forge.requiredChecks?.(ARM_BASE)) ?? null;
+    // The default branch's checks; unknown counts every check (the guard
+    // then refuses whatever base it cannot confirm).
+    const defaultBranch = await forge.defaultBranch?.();
+    requiredChecks =
+      defaultBranch === undefined ? null : ((await forge.requiredChecks?.(defaultBranch)) ?? null);
   } catch {
     requiredChecks = null;
   }
