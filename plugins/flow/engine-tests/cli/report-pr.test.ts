@@ -561,6 +561,7 @@ describe('flow report blocked', () => {
     tracker.backlog.comments!['ACME-12']!.push({
       id: 'reply',
       author: 'dorian',
+      authorIsTrusted: false,
       body: 'CSV.',
       createdAt: '2026-09-26T12:01:00.000Z',
     });

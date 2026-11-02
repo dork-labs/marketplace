@@ -235,9 +235,13 @@ describe('the fast tier checks', () => {
     expect(conformanceProblem(bad, bad)).toMatch(/good fixture fails INV-3/);
   });
 
+  it('adapter conformance: a good fixture with no comments fails INV-6 (DOR-3669)', () => {
+    expect(conformanceProblem(good.items, bad)).toMatch(/good fixture fails INV-6/);
+  });
+
   it("adapter conformance: the fake tracker's fixture must conform too", () => {
-    expect(fakeFixtureProblem(good)).toBeNull();
-    expect(fakeFixtureProblem(bad)).toMatch(/fake tracker's fixture fails INV-3/);
+    expect(fakeFixtureProblem(good.items)).toBeNull();
+    expect(fakeFixtureProblem(bad.items)).toMatch(/fake tracker's fixture fails INV-3/);
   });
 
   it('schema freshness compares parsed JSON, so formatting never matters but content does', () => {

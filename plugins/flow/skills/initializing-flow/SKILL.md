@@ -81,8 +81,8 @@ node --experimental-strip-types "<flow-root>/scripts/validate-adapter.ts" --fixt
 ```
 
 Exit `0` with `{ "ok": true }` passes; otherwise fix the mapping behind the named
-invariant (`INV-1 .. INV-5`). **Never go to Step 4 until it is green.** On Node before
-22.6, run the scripts with `tsx`. An existing adapter: re-validate first, regenerate
+invariant (`INV-1 .. INV-6`; the fixture is `{ items, comments }`). **Never go to Step 4
+until it is green.** An existing adapter: re-validate first, regenerate
 only if it fails. A shipped adapter (`adapter.origin: "shipped"`): validate it and move on.
 
 ## Step 4 — Write the settings and the rubric

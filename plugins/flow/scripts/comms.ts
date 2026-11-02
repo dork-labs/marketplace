@@ -24,7 +24,7 @@
  *   `agent/needs-input`), but the assignment notifies no one (assigning to
  *   yourself), so the out-of-band nudge (Relay / Telegram / chat) is **promoted to
  *   the primary attention channel** — see {@link CommsRoute.nudgePrimary}. It
- *   resumes the same way, on a non-agent reply disambiguated by the marker.
+ *   resumes the same way, on a team member's reply disambiguated by the marker.
  *
  * ## Trigger source ⟂ execution mode (the §2 orthogonality)
  *

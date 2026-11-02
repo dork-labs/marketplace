@@ -54,6 +54,7 @@ import type {
   ClosedItem,
   CodeAdapter,
   CreatedItem,
+  InboxRead,
   ItemComment,
   ItemWithComments,
   StateCategory,
@@ -65,7 +66,7 @@ import type {
 import { labelsAfterChange } from '../../scripts/work-state.ts';
 
 /** The adapter contract version this code targets. */
-export const CONTRACT_VERSION = '2.2.0';
+export const CONTRACT_VERSION = '3.0.0';
 
 /** The Composio slug every read and write goes through. */
 export const GRAPHQL_SLUG = 'LINEAR_RUN_QUERY_OR_MUTATION';
@@ -158,11 +159,45 @@ export const ITEM_QUERY = `query FlowItem($id: String!) {
   issue(id: $id) { ${ITEM_FIELDS} }
 }`;
 
+/**
+ * The account fields a comment's trust is read from (contract 3.0.0): Linear's
+ * own record of whether the author is active, a guest, or an app.
+ */
+export const COMMENT_USER_FIELDS = 'user { id active guest app }';
+
 /** One issue with its latest comments (Linear returns them newest first). */
 export const ITEM_WITH_COMMENTS_QUERY = `query FlowItemComments($id: String!, $comments: Int!) {
   issue(id: $id) {
     ${ITEM_FIELDS}
-    comments(first: $comments, orderBy: createdAt) { nodes { id body createdAt user { id } } }
+    comments(first: $comments, orderBy: createdAt) { nodes { id body createdAt ${COMMENT_USER_FIELDS} } }
+  }
+}`;
+
+/** How many comments one inbox page reads, and how many pages one read may take. */
+export const INBOX_PAGE_SIZE = 50;
+export const INBOX_MAX_PAGES = 20;
+
+/** The window a first inbox read covers, with no watermark (an ISO-8601 duration). */
+export const INBOX_COLD_START = '-P1D';
+
+/**
+ * The team's comments made after `$since`, with the author's account flags and
+ * the issue each is on. One filtered connection, paged, so no comment in the
+ * window is skipped. No relation graph: the inbox decides on labels and
+ * assignee only. Linear gives no mention list here, so `mentions` is `[]`: on
+ * Linear, a comment addresses flow with a `/flow` or `@flow` token.
+ */
+export const INBOX_QUERY = `query FlowInbox($teamId: ID!, $since: DateTimeOrDuration!, $first: Int!, $after: String) {
+  comments(first: $first, after: $after, orderBy: createdAt, filter: { createdAt: { gt: $since }, issue: { team: { id: { eq: $teamId } } } }) {
+    pageInfo { hasNextPage endCursor }
+    nodes {
+      id body createdAt ${COMMENT_USER_FIELDS}
+      issue {
+        ${ISSUE_FIELDS}
+        team { id key }
+        project { id name state status { type } lead { id } }
+      }
+    }
   }
 }`;
 
@@ -322,7 +357,31 @@ interface RawComment {
   id: string;
   body?: string | null;
   createdAt?: string | null;
-  user?: { id?: string | null } | null;
+  user?: {
+    id?: string | null;
+    active?: boolean | null;
+    guest?: boolean | null;
+    app?: boolean | null;
+  } | null;
+}
+
+/**
+ * Whether Linear's own account record says a comment's author is a member of
+ * the workspace: a user that is active, not a guest and not an app. A comment
+ * with no user (an integration's, or one synced in from Slack or email) and
+ * any field Linear left out read as not trusted.
+ *
+ * @param user - The comment's `user` node.
+ * @returns `true` only for an active, non-guest, non-app user with an id.
+ */
+export function isMemberUser(user: RawComment['user']): boolean {
+  return (
+    typeof user?.id === 'string' &&
+    user.id !== '' &&
+    user.active === true &&
+    user.guest === false &&
+    user.app === false
+  );
 }
 
 /** A page of a connection. */
@@ -847,6 +906,7 @@ export function createAdapter(ctx: AdapterContext): CodeAdapter {
       'applyWorkState',
       'comment',
       'createItem',
+      'getInbox',
     ],
 
     async getCurrentUser() {
@@ -953,6 +1013,7 @@ export function createAdapter(ctx: AdapterContext): CodeAdapter {
         const comments: ItemComment[] = (issue.comments?.nodes ?? []).map((node) => ({
           id: node.id,
           author: node.user?.id ?? '',
+          authorIsTrusted: isMemberUser(node.user),
           body: node.body ?? '',
           createdAt: node.createdAt ?? '',
         }));
@@ -960,6 +1021,71 @@ export function createAdapter(ctx: AdapterContext): CodeAdapter {
         return { ...item, comments };
       }
       return item;
+    },
+
+    async getInbox(opts = {}): Promise<InboxRead[]> {
+      const { id: teamId, key } = await team();
+      const since = opts.since ?? INBOX_COLD_START;
+      const nodes: (RawComment & { issue?: RawIssue | null })[] = [];
+      let after: string | null = null;
+      for (let page = 0; ; page += 1) {
+        if (page === INBOX_MAX_PAGES) {
+          throw new TrackerError(
+            `more than ${INBOX_MAX_PAGES * INBOX_PAGE_SIZE} new comments since ${since}; flow read none rather than lose some. Run flow inbox --skip-to <a time> to move past the ones you will not act on`
+          );
+        }
+        const data: {
+          comments?: RawPage<RawComment & { issue?: RawIssue | null }> | null;
+        } = await graphql(INBOX_QUERY, { teamId, since, first: INBOX_PAGE_SIZE, after });
+        const connection = data.comments;
+        if (connection === undefined || connection === null) {
+          throw new TrackerError('Linear returned no comments connection');
+        }
+        nodes.push(...(connection.nodes ?? []));
+        if (connection.pageInfo?.hasNextPage !== true) break;
+        after = connection.pageInfo.endCursor ?? null;
+        if (after === null) {
+          throw new TrackerError('Linear said there was another page but gave no cursor');
+        }
+      }
+      const reads: InboxRead[] = [];
+      const items = new Map<string, WorkItem | null>();
+      const onTeam = inTeam(
+        nodes.flatMap((node) =>
+          node.issue ? [{ identifier: node.issue.identifier, node, issue: node.issue }] : []
+        ),
+        key,
+        'comments on items'
+      );
+      for (const { node, issue } of onTeam) {
+        if (issue.team?.id !== teamId) continue;
+        if (!items.has(issue.identifier)) {
+          items.set(
+            issue.identifier,
+            normalizeIssue(
+              issue,
+              undefined,
+              issue.project?.id ? normalizeProject(issue.project) : undefined
+            )
+          );
+        }
+        const item = items.get(issue.identifier);
+        if (item === null || item === undefined) continue;
+        reads.push({
+          item,
+          itemId: item.identifier,
+          occurredAt: node.createdAt ?? '',
+          comment: {
+            id: node.id,
+            author: node.user?.id ?? '',
+            // Parsed here from Linear's own account record, never relayed.
+            authorIsTrusted: isMemberUser(node.user),
+            mentions: [],
+            body: node.body ?? '',
+          },
+        });
+      }
+      return reads.sort((a, b) => a.occurredAt.localeCompare(b.occurredAt));
     },
 
     async applyWorkState(item: WorkItem, change: WorkStateChange) {

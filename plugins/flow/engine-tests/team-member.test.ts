@@ -72,7 +72,13 @@ function makeItem(overrides: Partial<WorkItem> = {}): WorkItem {
 
 /** Build an inbox comment with overridable author / mentions / body. */
 function makeComment(overrides: Partial<InboxComment> = {}): InboxComment {
-  return { author: TEAMMATE, mentions: [], body: 'a plain comment', ...overrides };
+  return {
+    author: TEAMMATE,
+    authorIsTrusted: true,
+    mentions: [],
+    body: 'a plain comment',
+    ...overrides,
+  };
 }
 
 /**

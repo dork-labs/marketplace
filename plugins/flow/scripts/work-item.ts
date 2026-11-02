@@ -259,6 +259,15 @@ export interface InboxComment {
    */
   author: string;
   /**
+   * Whether the tracker's own membership data says {@link author} is a member
+   * of the team: not a guest, not an integration or app, not deactivated
+   * (adapter contract 3.0.0, DOR-3669). Only the adapter sets it, from the
+   * tracker's account records, never from the comment's text, a display name
+   * or an email domain. When the adapter cannot tell, it is `false`. Read it
+   * only through {@link isTrustedAuthor}.
+   */
+  authorIsTrusted: boolean;
+  /**
    * Account ids @mentioned in the comment. An @mention of the agent account is a
    * "directly addressed" signal (rule 2).
    */
@@ -317,4 +326,25 @@ export function bodyOf(comment: InboxComment | null | undefined): string {
  */
 export function authorOf(comment: InboxComment | null | undefined): string {
   return typeof comment?.author === 'string' ? comment.author : '';
+}
+
+/**
+ * Whether a comment's author is someone flow lets start or continue a turn: a
+ * named author the adapter marked `authorIsTrusted: true` (DOR-3669).
+ *
+ * The one trust check. Every path from a tracker comment to a turn (the
+ * drain's answer search, `flow inbox`, the inbox transport and reconciler)
+ * goes through the comment-response rules, and the rules ask this once, after
+ * any rule that would act, so no rule can skip it. A model session reads the
+ * inbox only through `flow inbox`, which hands over no untrusted comment's
+ * text. Anything short of a literal
+ * `true` with a non-empty author is untrusted: a missing or non-boolean flag
+ * (an adapter older than contract 3.0.0), and a comment with no author, which
+ * no tracker can vouch for.
+ *
+ * @param comment - The inbound comment; `null` or `undefined` is untrusted.
+ * @returns `true` only for a named author the adapter vouched for.
+ */
+export function isTrustedAuthor(comment: InboxComment | null | undefined): boolean {
+  return authorOf(comment).length > 0 && comment?.authorIsTrusted === true;
 }

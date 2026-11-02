@@ -67,7 +67,16 @@ export interface SimIssue {
   /** Namespaced label names; each must be a recorded team label. */
   labels: string[];
   /** Comments, oldest first. */
-  comments: { id: string; body: string; createdAt: string; userId: string }[];
+  comments: {
+    id: string;
+    body: string;
+    createdAt: string;
+    userId: string;
+    /** Linear's account flags for the author; default an active member. */
+    active?: boolean;
+    guest?: boolean;
+    app?: boolean;
+  }[];
   /** The body, when set. */
   description?: string;
   /** Linear priority 0-4, when set. */
@@ -256,7 +265,12 @@ export function simulateLinear(issues: SimIssue[]): LinearSimulation {
               id: c.id,
               body: c.body,
               createdAt: c.createdAt,
-              user: { id: c.userId },
+              user: {
+                id: c.userId,
+                active: c.active ?? true,
+                guest: c.guest ?? false,
+                app: c.app ?? false,
+              },
             })),
           };
         }

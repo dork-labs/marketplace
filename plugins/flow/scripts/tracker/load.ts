@@ -6,8 +6,8 @@
  *   `config-files.ts` resolves (a project adapter under
  *   `.agents/flow/adapters/<tracker>/`, or a shipped one under
  *   `<flow-root>/skills/<tracker>-adapter/`). Nothing else decides where it is.
- * - It must export `CONTRACT_VERSION` (a version string) and
- *   `createAdapter(ctx)`.
+ * - It must export `CONTRACT_VERSION` (a version string, major
+ *   {@link MIN_CONTRACT_MAJOR} or later) and `createAdapter(ctx)`.
  * - `connection.transport` picks the transport. Only `cli` can serve the CLI;
  *   `mcp` exists only inside an agent session and is refused (Decision D3).
  * - The adapter is wrapped so that anything it throws that is not already a
@@ -38,6 +38,12 @@ import {
   type CodeAdapterModule,
   type TrackerTransport,
 } from './types.ts';
+
+/**
+ * The oldest contract major adapter code may target. 3.0.0 made every comment
+ * carry `authorIsTrusted` (DOR-3669); older code cannot, so it never loads.
+ */
+export const MIN_CONTRACT_MAJOR = 3;
 
 /** The file an adapter's code lives in, beside its `SKILL.md`. */
 export const ADAPTER_CODE_FILE = 'adapter.ts';
@@ -134,7 +140,15 @@ export async function loadCodeAdapter(options: LoadCodeAdapterOptions): Promise<
     !/^\d+\.\d+\.\d+/.test(module.CONTRACT_VERSION)
   ) {
     throw new ConfigError(
-      `the ${tracker} adapter code at ${file} must export CONTRACT_VERSION, the adapter contract version it targets (for example "2.2.0")`
+      `the ${tracker} adapter code at ${file} must export CONTRACT_VERSION, the adapter contract version it targets (for example "3.0.0")`
+    );
+  }
+  const major = Number(module.CONTRACT_VERSION.split('.')[0]);
+  if (major < MIN_CONTRACT_MAJOR) {
+    throw new ConfigError(
+      `the ${tracker} adapter code at ${file} targets adapter contract ${module.CONTRACT_VERSION}, ` +
+        `which cannot say whether a comment's author is a team member (authorIsTrusted, contract ` +
+        `${MIN_CONTRACT_MAJOR}.0.0); regenerate it with the building-adapters skill`
     );
   }
   if (typeof module.createAdapter !== 'function') {
@@ -200,8 +214,9 @@ function guardAdapter(adapter: CodeAdapter, tracker: string): CodeAdapter {
   for (const capability of adapter.capabilities) {
     const method = adapter[capability] as (...args: unknown[]) => Promise<unknown>;
     guarded[capability] = async (...args: unknown[]) => {
+      let result: unknown;
       try {
-        return await method.apply(adapter, args);
+        result = await method.apply(adapter, args);
       } catch (error) {
         if (error instanceof FlowError) throw error;
         const message = error instanceof Error ? error.message : String(error);
@@ -209,9 +224,43 @@ function guardAdapter(adapter: CodeAdapter, tracker: string): CodeAdapter {
           `the ${tracker} adapter could not complete ${capability}: ${message}`
         );
       }
+      if (capability === 'getInbox' && Array.isArray(result)) {
+        result.forEach((read) => checkTrust((read as { comment?: unknown })?.comment, tracker));
+      }
+      if (capability === 'getItem') {
+        const comments = (result as { comments?: unknown } | null)?.comments;
+        if (Array.isArray(comments)) comments.forEach((comment) => checkTrust(comment, tracker));
+      }
+      return result;
     };
   }
   return guarded as unknown as CodeAdapter;
+}
+
+/**
+ * Refuse a comment whose `authorIsTrusted` is not a boolean, or is `true` with
+ * no author (contract 3.0.0, DOR-3669). Such an adapter is broken; flow stops
+ * rather than pass the comment to the rules.
+ *
+ * @param comment - One comment the adapter returned.
+ * @param tracker - The tracker, for the message.
+ * @throws {ConfigError} Naming what is wrong.
+ */
+function checkTrust(comment: unknown, tracker: string): void {
+  const { author, authorIsTrusted } = (comment ?? {}) as {
+    author?: unknown;
+    authorIsTrusted?: unknown;
+  };
+  if (typeof authorIsTrusted !== 'boolean') {
+    throw new ConfigError(
+      `the ${tracker} adapter returned a comment without a boolean authorIsTrusted (contract 3.0.0); regenerate it with the building-adapters skill`
+    );
+  }
+  if (authorIsTrusted && (typeof author !== 'string' || author === '')) {
+    throw new ConfigError(
+      `the ${tracker} adapter marked a comment with no author as trusted (authorIsTrusted); a comment with no author is never trusted`
+    );
+  }
 }
 
 /**

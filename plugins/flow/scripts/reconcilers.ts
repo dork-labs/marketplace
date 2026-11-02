@@ -248,7 +248,7 @@ function firstReclaimable(
 
 /**
  * The first inbox candidate whose comment-response decision is `resume` (rule 3 —
- * a non-agent reply on a parked `agent/needs-input` item) and whose item no
+ * a team member's reply on a parked `agent/needs-input` item) and whose item no
  * higher-priority reconciler already claimed this tick. The {@link shouldRespondToComment}
  * oracle owns the decision: rule 1 (the agent's own marker-bearing comment) yields
  * `ignore` and is skipped here, so a self-authored reply never resumes (no
@@ -367,7 +367,7 @@ export const recoveryReconciler: Reconciler<FlowReconcileInput> = {
  * before any fresh claim. Consumes the `comment.added` {@link TrackerEvent}s the
  * tick polled from the injected {@link InboundTransport} ({@link PollingTransport},
  * task 4.2) and runs the {@link shouldRespondToComment} oracle over each: a
- * non-agent reply on a parked `agent/needs-input` item is rule 3 → **resume**, and
+ * team member's reply on a parked `agent/needs-input` item is rule 3 → **resume**, and
  * the action carries the {@link FlowRun.sessionId} so the runtime re-attaches the
  * worktree at HEAD and resumes via `--resume <sessionId>` (or thread-replay when
  * there is no local run). It is **identity-mode-agnostic by construction**: in
@@ -402,7 +402,10 @@ export const inboxReconciler: Reconciler<FlowReconcileInput> = {
     const next = firstResumable(slice, ctx.claimedItemIds);
     if (next === undefined) {
       return Promise.resolve(
-        noOp('inbox', 'no resumable reply (self-authored, unrelated, or claimed)')
+        noOp(
+          'inbox',
+          'no resumable reply (self-authored, unrelated, claimed, or not from a team member)'
+        )
       );
     }
     // Resume the parked run: re-attach the worktree at HEAD and resume the captured

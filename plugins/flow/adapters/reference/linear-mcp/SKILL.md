@@ -7,7 +7,7 @@ description: Reference tracker adapter for /flow - Linear reached over an in-ses
 
 > **What this is.** A **reference tracker adapter** for the `/flow` engine: a
 > concrete realization of the neutral contract in [`../../SPEC.md`](../../SPEC.md)
-> (contract version `2.0.0`) over **one transport - the in-session Linear MCP
+> (contract version `3.0.0`) over **one transport - the in-session Linear MCP
 > server**. It owns every Linear call and normalizes Linear into the generic
 > `WorkItem` shape so the dispatch policy and the stage skills run unchanged.
 >
@@ -227,13 +227,18 @@ progress }`: `children` are the project's issues normalized, `umbrella` is the
 
 #### `getInbox(): InboxEntry[]`
 
-- **Call.** `list_issues` (assignee = the acting agent) +
-  `mcp__plugin_linear_linear__list_comments` for items touched since the last
-  tick.
-- **Normalize.** Return `InboxEntry[]` = the items the agent must look at this
-  tick (assigned-to-the-agent + @mentions of the agent + new comments since the
-  last tick), each carrying its `WorkItem` and the triggering comment
-  `{ author, mentions[], body }` (see the entry shape below).
+- **Never run by hand (contract 3.0.0).** A model does not read the inbox
+  through these calls: it would read every comment's text, and nothing it says
+  about who is a member is trusted. The inbox is `flow inbox --json`, which
+  only the `cli` transport serves (the shipped code adapter's `getInbox`).
+- **`authorIsTrusted` (contract 3.0.0): always `false` on this transport.**
+  The comment and user tools this recipe uses return an author's id and name,
+  not Linear's `guest`, `app` and `active` flags, so this transport cannot tell
+  a member from a guest or an integration, and a name or email never stands in
+  for them, and a model relaying who is a member is never trusted either. The
+  result: on `mcp`, `flow inbox` exits 3 and no tracker comment starts or
+  resumes a turn. Answer a parked question with `flow answer` from DorkOS, or
+  use the `cli` transport, whose code reads the flags.
 - **Durability + degradation.** Read-only. Missing mention data degrades to "not
   mentioned" (the quiet-by-default bias keeps this safe); an unreachable tracker
   throws.
@@ -312,7 +317,7 @@ The elicitation primitive - **four atomic effects, in order**:
 2. `save_issue` making `agent/needs-input` the one `agent/*` label, leaving the
    state alone.
 3. `assignToHuman(item)` (above).
-4. **Stop** - the loop parks here; it resumes only on a non-agent reply surfaced
+4. **Stop** - the loop parks here; it resumes only on a team member's reply surfaced
    by `getInbox`.
 
 - **Durability + degradation.** **Durable park, idempotent.** Order the effects
@@ -380,6 +385,7 @@ InboxEntry {
   item,                       // the WorkItem the comment is on
   comment: {
     author,                   // who wrote it (compared against identity.agent / marker)
+    authorIsTrusted,          // a team member, from Linear's account record (contract 3.0.0)
     mentions[],               // @mentioned accounts (drives "directly addressed")
     body,                     // the comment text (may carry an explicit /flow token)
   }
@@ -389,7 +395,7 @@ InboxEntry {
 The comment-response rules consume this (never answer its own comments; always
 respond when directly addressed; resume an `agent/needs-input` item on a
 non-agent comment; stay out of `other`-owned threads unless mentioned; soft zone
-leans quiet). This adapter supplies the raw `assignee` and the triggering
+leans quiet), and acts only on a comment whose `authorIsTrusted` is `true`. This adapter supplies the raw `assignee` and the triggering
 comment; it does not itself classify ownership.
 
 ---
@@ -437,10 +443,12 @@ resolution by `identifier`, and optionals left absent rather than fabricated. It
 satisfies the SPEC section 4 invariants: **INV-1** (five categories only; Triage
 -> `backlog`), **INV-2** (required fields present and typed; optionals absent or
 typed), **INV-3** (relation references in human-key form, resolving in-set or
-provably closed), **INV-4** (labels re-namespaced into the generic families), and
-**INV-5** (the readiness gate is the literal `agent/ready` label, and
+provably closed), **INV-4** (labels re-namespaced into the generic families),
+**INV-6** (each comment's `authorIsTrusted` is a boolean, here never `true`; since
+these reads never trust anyone, the trusted example INV-6's fixture needs comes
+from a `cli` read), and **INV-5** (the readiness gate is the literal `agent/ready` label, and
 `getEligibleWork` / `getProjectWork` return the broader candidate set, never
-pre-filtered). It targets contract version `2.0.0`, and **declares
+pre-filtered). It targets contract version `3.0.0`, and **declares
 `completeProject` supported with its binding unverified** (SPEC section 3,
 _Optional verbs_) — confirm the project-write tool on first use, per that verb's
 entry.

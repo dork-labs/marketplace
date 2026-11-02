@@ -140,7 +140,14 @@ describe('finding the adapter code', () => {
     linkFakeAdapter(path.join(project, '.agents/flow/adapters/fake'));
     const { adapter } = await load();
     expect([...adapter.capabilities].sort()).toEqual(
-      ['applyWorkState', 'comment', 'getBacklogSnapshot', 'getCurrentUser', 'getItem'].sort()
+      [
+        'applyWorkState',
+        'comment',
+        'getBacklogSnapshot',
+        'getCurrentUser',
+        'getInbox',
+        'getItem',
+      ].sort()
     );
     expect(await adapter.getCurrentUser()).toEqual({ id: 'agent-1', name: 'Fake agent' });
   });
@@ -161,7 +168,7 @@ describe('finding the adapter code', () => {
     write(path.join(project, '.agents/flow/adapters/fake/SKILL.md'), '# spy adapter\n');
     write(
       path.join(project, '.agents/flow/adapters/fake/adapter.ts'),
-      `export const CONTRACT_VERSION = '1.4.0';
+      `export const CONTRACT_VERSION = '3.0.0';
 export function createAdapter(ctx) {
   return {
     capabilities: ['getCurrentUser'],
@@ -226,8 +233,65 @@ describe('refusals (exit 3)', () => {
     };
     adapterCode('noversion', 'export function createAdapter() { return { capabilities: [] }; }\n');
     expect(((await rejection(load())) as Error).message).toMatch(/must export CONTRACT_VERSION/);
-    adapterCode('nofactory', "export const CONTRACT_VERSION = '1.4.0';\n");
+    adapterCode('nofactory', "export const CONTRACT_VERSION = '3.0.0';\n");
     expect(((await rejection(load())) as Error).message).toMatch(/must export createAdapter/);
+  });
+
+  it('refuses adapter code older than contract 3.0.0 (DOR-3669)', async () => {
+    // Purpose: 3.0.0 made each comment say whether its author is a team member.
+    // Code written for an older contract cannot say, so it never loads, rather
+    // than run with every comment silently untrusted or, worse, trusted.
+    // (One tracker per version, because Node caches a module by its path.)
+    for (const version of ['2.2.0', '1.4.0', '0.9.0']) {
+      const tracker = `old${version.replaceAll('.', '')}`;
+      writeConfig({ tracker });
+      proseOnlyAdapter(tracker);
+      write(
+        path.join(project, '.agents/flow/adapters', tracker, 'adapter.ts'),
+        `export const CONTRACT_VERSION = '${version}';\nexport function createAdapter() { return { capabilities: [] }; }\n`
+      );
+      const error = await rejection(load());
+      expect(error).toBeInstanceOf(ConfigError);
+      expect((error as Error).message).toContain(`targets adapter contract ${version}`);
+      expect((error as Error).message).toContain('authorIsTrusted');
+    }
+  });
+
+  it('refuses a comment whose trust is not a boolean, or is true with no author (DOR-3669)', async () => {
+    // Purpose: an adapter that says a comment is trusted without saying who
+    // wrote it, or answers anything but true or false, is broken; flow stops
+    // rather than guess, so no such comment ever reaches the rules.
+    const cases: [string, string][] = [
+      ['strtrust', "{ id: 'c', author: 'kai', authorIsTrusted: 'true', mentions: [], body: 'x' }"],
+      ['notrust', "{ id: 'c', author: 'kai', mentions: [], body: 'x' }"],
+      ['anontrust', "{ id: 'c', author: '', authorIsTrusted: true, mentions: [], body: 'x' }"],
+    ];
+    for (const [tracker, comment] of cases) {
+      writeConfig({ tracker });
+      proseOnlyAdapter(tracker);
+      write(
+        path.join(project, '.agents/flow/adapters', tracker, 'adapter.ts'),
+        `export const CONTRACT_VERSION = '3.0.0';
+const item = { id: 'i', identifier: 'X-1', title: 't', labels: [] };
+export function createAdapter() {
+  return {
+    capabilities: ['getInbox', 'getItem'],
+    async getInbox() { return [{ item, itemId: 'X-1', occurredAt: '2026-09-26T00:00:00Z', comment: ${comment} }]; },
+    async getItem() { return { ...item, comments: [{ ...${comment}, createdAt: '2026-09-26T00:00:00Z' }] }; },
+  };
+}
+`
+      );
+      const { adapter } = await load();
+      for (const read of [
+        () => adapter.getInbox!(),
+        () => adapter.getItem('X-1', { comments: 1 }),
+      ]) {
+        const error = await rejection(read());
+        expect(error, tracker).toBeInstanceOf(ConfigError);
+        expect((error as Error).message).toMatch(/authorIsTrusted/);
+      }
+    }
   });
 
   it('refuses a declared capability the adapter does not implement', async () => {
@@ -237,7 +301,7 @@ describe('refusals (exit 3)', () => {
     proseOnlyAdapter('fake');
     write(
       path.join(project, '.agents/flow/adapters/fake/adapter.ts'),
-      "export const CONTRACT_VERSION = '1.4.0';\nexport function createAdapter() { return { capabilities: ['getItem'] }; }\n"
+      "export const CONTRACT_VERSION = '3.0.0';\nexport function createAdapter() { return { capabilities: ['getItem'] }; }\n"
     );
     const error = await rejection(load());
     expect(error).toBeInstanceOf(ConfigError);
@@ -295,7 +359,7 @@ describe('tracker failures (exit 4)', () => {
       runProcess: realProcessRunner,
       verbs: [probe],
     });
-    expect(code).toBe(EXIT.tracker);
+    expect(code, out).toBe(EXIT.tracker);
     expect(JSON.parse(out)).toMatchObject({
       ok: false,
       error: { code: EXIT.tracker, message: expect.stringMatching(/connection reset/) },

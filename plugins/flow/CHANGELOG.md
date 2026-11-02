@@ -4,6 +4,18 @@ Installs of this plugin are pinned to a commit SHA, so a fix here does not reach
 you until you **reinstall it** (Marketplace → flow → reinstall, or re-run your
 `--plugin-dir` checkout's `git pull`). Each entry below says whether that matters.
 
+## 0.73.0
+
+**Only members of your tracker workspace can now start or resume flow's work from a tracker comment. Before, anyone who could comment on an item (a guest, an integration, a comment synced in from chat or email with no author) could @mention flow, type `/flow`, or answer a parked question, and flow acted on it with its tools (DOR-3669). Reinstall to get it.**
+
+- A comment counts only when the tracker's own account records say its author is a member: on Linear, an active user who is not a guest and not an app. Flow never decides this from the comment's text, a display name or an email address.
+- Anyone else's comment is ignored, and flow says so in a warning that names the item and the author. A parked question stays parked until a member answers it.
+- **This deliberately reverses an earlier rule (0.10.2, DOR-638).** Until now, a reply with no author (one synced in from Slack, chat or email) could answer a parked question on its text alone. It no longer can, because no tracker can say who wrote it. If you relied on synced answers, post the answer again as a workspace member in the tracker, or answer from DorkOS with `flow answer`.
+- New `flow inbox`: the only way flow's agent sessions read new tracker comments now (the `tending-tracker` skill, and step 3 of the `flow-drain` skill). Code reads the comments, checks membership from the tracker's own response, and applies the rules. A comment's text comes back only when a member's comment calls for action; anyone else's comes back as the item, the author and the time, with no text, so a guest's words never reach an agent. It keeps its place in `.dork/flow/inbox-watermark.json` and hands each comment over once. On Linear, address flow with `/flow` or `@flow` in the comment: flow doesn't read Linear's @mention list.
+- An adapter with no code that can read the inbox treats every comment as untrusted: `flow inbox` refuses it, and nothing read that way starts or resumes work. That covers a hand-written prose adapter and the Linear `mcp` connection.
+- On the Linear `mcp` connection, flow can't read whether an author is a guest or an app, so no tracker comment starts or resumes work there. Use the `cli` connection, or answer from DorkOS.
+- If you built your own tracker adapter, regenerate it: the adapter contract is now 3.0.0. Every comment carries `authorIsTrusted`, read from the tracker's membership data and `false` when the adapter can't tell. Flow refuses to load adapter code written for an older contract, and `validate-adapter.ts` now needs a fixture with comments (`{ "items": [...], "comments": [...] }`) and checks them (INV-6). Add `getInbox` to its `adapter.ts` so `flow inbox` can read through it.
+
 ## 0.72.0
 
 **A worker flow starts on the `cli` host now records its own runtime and session, even when a chat in DorkOS started it. Reinstall to get it, before updating to a DorkOS that names its chats to flow.**

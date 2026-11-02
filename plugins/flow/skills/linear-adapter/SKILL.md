@@ -9,7 +9,7 @@ description: The /flow engine's tracker adapter — the single skill that owns E
 
 > **Flow root:** the folder two levels above this skill's real path (`realpath` a `.claude/skills/flow__*` or `.agents/skills/flow__*` link first). `<flow-root>/...` paths start there. `flow <verb>` means `node --experimental-strip-types "<flow-root>/scripts/flow.ts" <verb>`.
 
-Contract: [`../../adapters/SPEC.md`](../../adapters/SPEC.md) 2.2.0. `adapter.ts` beside this file is the code `flow` runs.
+Contract: [`../../adapters/SPEC.md`](../../adapters/SPEC.md) 3.0.0. `adapter.ts` beside this file is the code `flow` runs.
 
 ## The one rule
 
@@ -35,13 +35,13 @@ SPEC section 3's 16 required verbs, the groom-only `getBacklogSnapshot`, and the
 | **`getEligibleWork()`**, **`getProjectWork(projectId)`**                  | `flow next --json` (`--for-project`). Returns candidates; the policy applies the `agent/ready` gate.                                                                                                                                                                                                  |
 | **`getProjects()`**, **`resolveProject(nameOrId)`**, **`getProject(id)`** | GraphQL `projects` / `team { issues(filter: { project }) }`. `resolveProject` returns every case-insensitive match; an umbrella identifier resolves to its project.                                                                                                                                   |
 | **`getRelations(item)`**                                                  | GraphQL only, see below.                                                                                                                                                                                                                                                                              |
-| **`getInbox(agent)`**                                                     | Assigned-to-me, @mentions and new comments since the last tick (`InboxEntry` below).                                                                                                                                                                                                                  |
+| **`getInbox(agent)`**                                                     | `flow inbox --json` only: code reads it and decides trust (`InboxEntry` below).                                                                                                                                                                                                                       |
 | **`claim(item)`**                                                         | `flow claim <id> --session <session id> --json`. Swaps `agent/ready` for `agent/claimed` (one exclusive `agent/*` group), drops every `stage/*`, moves to started.                                                                                                                                    |
 | **`transition(item, stage)`**                                             | `flow stage <id> <stage> --json`. Release is `flow release`; finishing is `flow done`.                                                                                                                                                                                                                |
 | **`comment(item, body)`**                                                 | GraphQL `commentCreate`. Ends with `identity.marker` and the `agent:provenance` line.                                                                                                                                                                                                                 |
 | **`assignToHuman(item)`**                                                 | `issueUpdate` `assigneeId` = the reviewer (review gate, handoff).                                                                                                                                                                                                                                     |
 | **`attachEvidence(item, evidence)`**                                      | Link the proof (recording, test summary, PR) per `evidence.attachTo`.                                                                                                                                                                                                                                 |
-| **`needsInput(item, question)`**                                          | Post the question (multiple choice when possible; marker and `agent:provenance` line), apply `agent/needs-input` leaving the state alone, `assignToHuman`, **stop**. `flow triage <id> --park` does the first two. Resume only on a non-agent reply.                                                  |
+| **`needsInput(item, question)`**                                          | Post the question (multiple choice when possible; marker and `agent:provenance` line), apply `agent/needs-input` leaving the state alone, `assignToHuman`, **stop**. `flow triage <id> --park` does the first two. Resume only on a member's reply.                                                   |
 | **`link(a, b, type)`**                                                    | A typed relation (`blocks`, `related`, `duplicate`). Never in description prose.                                                                                                                                                                                                                      |
 | **`createSubIssue(parent, spec)`**                                        | `flow create --parent <id> --key <key>`. Only when `sizeOrdinal(size) >= sizeOrdinal(decomposition.subIssueThreshold)`. Record it in the task's `issue` field in `03-tasks.json`. Description ends with the `agent:provenance` line; a rewrite replaces it.                                           |
 | **`completeProject(project, outcome)`**                                   | `projectUpdate` to `completed` or `canceled`. List its issues live first; any open: **refuse**, naming it (dispatch drops a closed project's issues). Read its state from GraphQL `projects`; unreadable: refuse; already there: no-op. On `mcp`, `save_project` or `update_project`; neither: `cli`. |
@@ -54,7 +54,7 @@ SPEC section 3's 16 required verbs, the groom-only `getBacklogSnapshot`, and the
 - `searchIssues(term:, includeArchived: false)` is cross-team too: post-filter by identifier prefix.
 - Relations: read `relations` and `inverseRelations` through the team node. Any other path's answer (the get slug returns `null`) means unknown, never "no blockers". Read cross-team edges; never write their far end.
 - A large answer spills to `outputFilePath`: read it with `jq`. Paginate with `first`/`after` only.
-- Read one issue's comments as `issue(id:) { comments { nodes { id body } } }`.
+- Read one issue's comments as `issue(id:){comments{nodes{id,body,user{id,active,guest,app}}}}`.
 - "Entity not found" on a comment to an id that reads fine: the issue is archived; check `archivedAt`.
 
 **Bulk writes** (the groom):
@@ -107,7 +107,7 @@ The canonical spec is [`../../docs/provenance.md`](../../docs/provenance.md); do
 ## `InboxEntry`
 
 ```
-InboxEntry { item, occurredAt /* ISO-8601 Z */, comment: { author, mentions[], body } }
+InboxEntry { item, occurredAt /* ISO-8601 Z */, comment: { author, authorIsTrusted, mentions[], body } }
 ```
 
-The comment-response rules that read it live in `<flow-root>/skills/tending-tracker/SKILL.md`.
+`authorIsTrusted`: parsed only by `adapter.ts`, `true` only for `user{active:true,guest:false,app:false}`; never by hand, never on `mcp`. Rules: `<flow-root>/skills/tending-tracker/SKILL.md`.

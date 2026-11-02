@@ -33,6 +33,7 @@ import type {
   Capability,
   ClosedItem,
   CodeAdapter,
+  InboxRead,
   ItemComment,
   ItemWithComments,
   TrackerAccount,
@@ -43,7 +44,7 @@ import type {
 import { labelsAfterChange } from '../../../../scripts/work-state.ts';
 
 /** The contract version this fake targets. */
-export const CONTRACT_VERSION = '2.0.0';
+export const CONTRACT_VERSION = '3.0.0';
 
 /** The environment variable naming the backlog file a spawned run reads and writes. */
 export const FAKE_BACKLOG_ENV = 'FLOW_FAKE_BACKLOG';
@@ -66,6 +67,8 @@ export interface FakeBacklog {
   projects?: WorkItemProject[];
   /** Comments per item identifier, oldest first. */
   comments?: Record<string, ItemComment[]>;
+  /** Account ids the tracker lists as team members; a comment's `authorIsTrusted` is read from this. */
+  members?: string[];
   /** When set, every read throws a plain `Error` with this message. */
   failReads?: string;
   /** When true, `applyWorkState` records the call but changes nothing. */
@@ -98,6 +101,7 @@ const ALL: Capability[] = [
   'getItem',
   'applyWorkState',
   'comment',
+  'getInbox',
 ];
 
 /**
@@ -143,13 +147,45 @@ export function createFakeAdapter(
         projects: structuredClone(backlog.projects ?? []),
       };
     },
+    async getInbox(options = {}): Promise<InboxRead[]> {
+      read();
+      const members = backlog.members ?? [];
+      const since =
+        options.since === undefined ? Number.NEGATIVE_INFINITY : Date.parse(options.since);
+      const entries: InboxRead[] = [];
+      for (const [identifier, comments] of Object.entries(backlog.comments ?? {})) {
+        const current = backlog.items.find((candidate) => candidate.identifier === identifier);
+        if (current === undefined) continue;
+        for (const comment of comments) {
+          if (!(Date.parse(comment.createdAt) > since)) continue;
+          entries.push({
+            item: structuredClone(current),
+            itemId: identifier,
+            occurredAt: comment.createdAt,
+            comment: {
+              id: comment.id,
+              author: comment.author,
+              // Read from the membership list, never from the stored comment.
+              authorIsTrusted: comment.author !== '' && members.includes(comment.author),
+              mentions: [...comment.body.matchAll(/@([\w.-]+)/g)].map((m) => m[1]),
+              body: comment.body,
+            },
+          });
+        }
+      }
+      return entries.sort((a, b) => a.occurredAt.localeCompare(b.occurredAt));
+    },
     async getItem(identifier, options = {}): Promise<ItemWithComments> {
       read();
       const item: ItemWithComments = structuredClone(find(identifier));
       if (options.comments !== undefined && options.comments > 0) {
+        const members = backlog.members ?? [];
         item.comments = structuredClone(
           (backlog.comments?.[identifier] ?? []).slice(-options.comments)
-        );
+        ).map((comment) => ({
+          ...comment,
+          authorIsTrusted: comment.author !== '' && members.includes(comment.author),
+        }));
       }
       return item;
     },
@@ -171,6 +207,7 @@ export function createFakeAdapter(
       list.push({
         id: `comment-${list.length + 1}`,
         author: (backlog.user ?? { id: 'agent-1' }).id,
+        authorIsTrusted: false,
         body,
         createdAt: now().toISOString(),
       });
@@ -209,5 +246,6 @@ export function createAdapter(_ctx: AdapterContext): CodeAdapter {
     },
     applyWorkState: (item, change) => fresh().applyWorkState(item, change),
     comment: (item, body) => fresh().comment(item, body),
+    getInbox: (options) => fresh().getInbox!(options),
   };
 }

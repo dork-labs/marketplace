@@ -5,7 +5,8 @@
  *
  * The rules are the comment-response rules every flow inbox uses
  * (`shouldRespondToComment`): the agent's own comments never count, and a
- * non-empty reply on an `agent/needs-input` item is the answer. Only comments
+ * reply on an `agent/needs-input` item is the answer, but only from an author
+ * the adapter marked a team member (DOR-3669). Only comments
  * newer than the park count; for a record from before parks were timed, only
  * comments after the agent's own latest one.
  *
@@ -31,6 +32,11 @@ export interface AnswerContext {
   ownership: OwnershipClass;
   /** The `comments` config. */
   comments: CommentsConfig;
+  /**
+   * Told about each reply passed over only because its author is not a trusted
+   * member (a guest, an integration, no author), so the caller can warn.
+   */
+  onUntrusted?: (comment: ItemComment) => void;
 }
 
 /** How far from `parkedAt` the park comment may be stamped by the tracker's clock. */
@@ -56,7 +62,12 @@ export function findAnswer(
 ): ItemComment | null {
   const decide = (comment: ItemComment) =>
     shouldRespondToComment(
-      { author: comment.author, mentions: [], body: comment.body },
+      {
+        author: comment.author,
+        authorIsTrusted: comment.authorIsTrusted,
+        mentions: [],
+        body: comment.body,
+      },
       { item, ownership: ctx.ownership, identity: ctx.identity },
       ctx.comments
     );
@@ -95,7 +106,9 @@ export function findAnswer(
     candidates = candidates.slice(lastOwn + 1);
   }
   for (const comment of candidates.reverse()) {
-    if (decide(comment).action !== 'ignore') return comment;
+    const decision = decide(comment);
+    if (decision.action !== 'ignore') return comment;
+    if (decision.untrusted === true) ctx.onUntrusted?.(comment);
   }
   return null;
 }
@@ -110,4 +123,21 @@ export function findAnswer(
 export function answerPointer(comment: ItemComment, identifier: string): string {
   const who = comment.author === '' ? 'a person' : comment.author;
   return `the comment by ${who} on ${identifier} at ${comment.createdAt}`;
+}
+
+/**
+ * The warning for a reply passed over because its author is not a trusted
+ * member (DOR-3669). The item stays parked until a member answers.
+ *
+ * @param comment - The reply left alone.
+ * @param identifier - The item.
+ * @returns One line a person can act on.
+ */
+export function untrustedReplyWarning(comment: ItemComment, identifier: string): string {
+  const who =
+    comment.author === '' ? 'a comment with no author' : `the comment by ${comment.author}`;
+  return (
+    `${identifier} stays parked: ${who} at ${comment.createdAt} is not from a member of the ` +
+    "workspace or team, so it can't resume the work. A member can post the answer instead."
+  );
 }

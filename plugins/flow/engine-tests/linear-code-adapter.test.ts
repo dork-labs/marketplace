@@ -140,10 +140,10 @@ const DOCUMENTS = new Set(
 );
 
 describe('the module', () => {
-  it('declares contract 2.2.0 and all six capabilities', () => {
+  it('declares contract 3.0.0 and all seven capabilities', () => {
     // Purpose: the loader requires CONTRACT_VERSION and the capability list;
     // the shipped adapter serves every verb, createItem included.
-    expect(linear.CONTRACT_VERSION).toBe('2.2.0');
+    expect(linear.CONTRACT_VERSION).toBe('3.0.0');
     const { adapter } = build(snapshotRoute);
     expect([...adapter.capabilities].sort()).toEqual(
       [
@@ -152,6 +152,7 @@ describe('the module', () => {
         'createItem',
         'getBacklogSnapshot',
         'getCurrentUser',
+        'getInbox',
         'getItem',
       ].sort()
     );
@@ -458,6 +459,115 @@ describe('failures', () => {
   });
 });
 
+describe('getInbox (contract 3.0.0, DOR-3669)', () => {
+  const member = { id: 'u-m', active: true, guest: false, app: false };
+  const ownIssue = {
+    ...issueNode('DOR-101', { labels: { nodes: [LABEL.typeTask] } }),
+    team: TEAM,
+  };
+  const comment = (
+    id: string,
+    minute: number,
+    user: Record<string, unknown> | null,
+    issue: Record<string, unknown> = ownIssue
+  ) => ({
+    id,
+    body: `says ${id}`,
+    createdAt: `2026-09-26T11:${String(minute).padStart(2, '0')}:00.000Z`,
+    user,
+    issue,
+  });
+
+  it("reads the team's new comments, with trust parsed from Linear's account flags", async () => {
+    // Purpose: flow inbox decides who may be heard from this read, so trust must
+    // come from Linear's response, parsed here, and only the team's items may
+    // reach it. Fails if an unflagged or flagless author reads as trusted, if
+    // another team's issue gets through, or if the order is not oldest first.
+    const { adapter, calls, warnings } = build(() =>
+      okEnvelope({
+        comments: {
+          pageInfo: { hasNextPage: false, endCursor: null },
+          nodes: [
+            comment('late', 9, member),
+            comment('guest', 5, { id: 'u-g', active: true, guest: true, app: false }),
+            comment('app', 6, { id: 'u-a', active: true, guest: false, app: true }),
+            comment('none', 7, null),
+            comment('flagless', 8, { id: 'u-f' }),
+            comment('foreign', 1, member, {
+              ...issueNode('FB-7'),
+              team: { id: 'other-team', key: 'FB' },
+            }),
+          ],
+        },
+      })
+    );
+    const reads = await adapter.getInbox!({ since: '2026-09-26T11:00:00.000Z' });
+    expect(calls[0]).toMatchObject({
+      operation: 'FlowInbox',
+      variables: { teamId: TEAM.id, since: '2026-09-26T11:00:00.000Z' },
+    });
+    expect(reads.map((r) => [r.comment.id, r.comment.authorIsTrusted])).toEqual([
+      ['guest', false],
+      ['app', false],
+      ['none', false],
+      ['flagless', false],
+      ['late', true],
+    ]);
+    expect(reads[4]).toMatchObject({
+      itemId: 'DOR-101',
+      occurredAt: '2026-09-26T11:09:00.000Z',
+      item: { identifier: 'DOR-101', labels: ['type/task'] },
+      comment: { author: 'u-m', mentions: [], body: 'says late' },
+    });
+    expect(warnings.join('\n')).toMatch(/outside team/);
+    expect(linear.INBOX_QUERY).toContain(linear.COMMENT_USER_FIELDS);
+    expect(linear.INBOX_QUERY).toMatch(/issue: \{ team: \{ id: \{ eq: \$teamId \} \} \}/);
+  });
+
+  it('reads every page, so a busy window loses no comment', async () => {
+    // Purpose: the watermark moves to the newest comment read, so a comment
+    // left on an unread page would never come back. Fails if a page is skipped.
+    const { adapter, calls } = build((call) =>
+      okEnvelope({
+        comments:
+          call.variables.after === 'page-2'
+            ? { pageInfo: { hasNextPage: false }, nodes: [comment('old', 1, member)] }
+            : {
+                pageInfo: { hasNextPage: true, endCursor: 'page-2' },
+                nodes: [comment('new', 2, member)],
+              },
+      })
+    );
+    const reads = await adapter.getInbox!({ since: '2026-09-26T11:00:00.000Z' });
+    expect(reads.map((r) => r.comment.id)).toEqual(['old', 'new']);
+    expect(calls).toHaveLength(2);
+  });
+
+  it('refuses a window larger than it will read, rather than drop comments', async () => {
+    // Purpose: a capped read that moved the watermark would lose the rest for good.
+    const { adapter } = build((call) =>
+      okEnvelope({
+        comments: {
+          pageInfo: { hasNextPage: true, endCursor: `${String(call.variables.after)}+` },
+          nodes: [comment(`c${String(call.variables.after)}`, 1, member)],
+        },
+      })
+    );
+    const error = await rejection(adapter.getInbox!({ since: '2026-09-26T11:00:00.000Z' }));
+    expect(error).toBeInstanceOf(TrackerError);
+    expect((error as Error).message).toMatch(/--skip-to/);
+  });
+
+  it('reads a recent window when there is no watermark', async () => {
+    // Purpose: a first pass is bounded, not the whole history of the team.
+    const { adapter, calls } = build(() =>
+      okEnvelope({ comments: { pageInfo: { hasNextPage: false }, nodes: [] } })
+    );
+    expect(await adapter.getInbox!()).toEqual([]);
+    expect(calls[0].variables.since).toBe('-P1D');
+  });
+});
+
 describe('getCurrentUser and getItem', () => {
   it('reads the viewer', async () => {
     // Purpose: identity "auto" resolves to this account.
@@ -490,7 +600,7 @@ describe('getCurrentUser and getItem', () => {
                 id: 'c2',
                 body: 'second',
                 createdAt: '2026-09-21T10:00:00.000Z',
-                user: { id: 'user-a' },
+                user: { id: 'user-a', active: true, guest: false, app: false },
               },
               { id: 'c1', body: 'first', createdAt: '2026-09-20T10:00:00.000Z', user: null },
             ],
@@ -511,9 +621,57 @@ describe('getCurrentUser and getItem', () => {
       project: { id: 'proj-1', stateCategory: 'started' },
     });
     expect(item.comments).toEqual([
-      { id: 'c1', author: '', body: 'first', createdAt: '2026-09-20T10:00:00.000Z' },
-      { id: 'c2', author: 'user-a', body: 'second', createdAt: '2026-09-21T10:00:00.000Z' },
+      {
+        id: 'c1',
+        author: '',
+        authorIsTrusted: false,
+        body: 'first',
+        createdAt: '2026-09-20T10:00:00.000Z',
+      },
+      {
+        id: 'c2',
+        author: 'user-a',
+        authorIsTrusted: true,
+        body: 'second',
+        createdAt: '2026-09-21T10:00:00.000Z',
+      },
     ]);
+  });
+
+  it("reads a comment's trust only from Linear's account flags (DOR-3669)", async () => {
+    // Purpose: a guest, an app (an integration), a deactivated account, a
+    // comment with no user, and a user Linear sent without the flags are each
+    // untrusted; only an active, non-guest, non-app user is a member. Fails if
+    // any field flow can't confirm defaults to trusted.
+    const users: [string, Record<string, unknown> | null, boolean][] = [
+      ['member', { id: 'u-m', active: true, guest: false, app: false }, true],
+      ['guest', { id: 'u-g', active: true, guest: true, app: false }, false],
+      ['app', { id: 'u-a', active: true, guest: false, app: true }, false],
+      ['deactivated', { id: 'u-d', active: false, guest: false, app: false }, false],
+      ['no flags', { id: 'u-n' }, false],
+      ['no user', null, false],
+    ];
+    const { adapter } = build(() =>
+      okEnvelope({
+        issue: {
+          ...issueNode('DOR-101'),
+          team: TEAM,
+          relations: { nodes: [] },
+          comments: {
+            nodes: users.map(([name, user], i) => ({
+              id: name,
+              body: name,
+              createdAt: `2026-09-2${i}T10:00:00.000Z`,
+              user,
+            })),
+          },
+        },
+      })
+    );
+    const item = await adapter.getItem('DOR-101', { comments: users.length });
+    expect(Object.fromEntries((item.comments ?? []).map((c) => [c.id, c.authorIsTrusted]))).toEqual(
+      Object.fromEntries(users.map(([name, , trusted]) => [name, trusted]))
+    );
   });
 
   it("reports a missing item and another team's item as precondition failures", async () => {

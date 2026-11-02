@@ -15,3 +15,7 @@ To point a project at it: link this folder to `.agents/flow/adapters/fake/`
 `connection.transport` to `cli`, and set `FLOW_FAKE_BACKLOG`. Every tracker
 read and write then goes through the `flow` command; this adapter has no other
 verbs.
+
+A comment's `authorIsTrusted` (contract 3.0.0) comes only from the file's
+`members` list, the fake's membership data: an author on it is a team member,
+anyone else (a guest, an integration, no author) is not.
