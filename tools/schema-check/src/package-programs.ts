@@ -24,9 +24,11 @@
  * - **Language servers, monitors, `bin/` programs and plugin settings** (which
  *   can set a `subagentStatusLine` command) are refused outright
  *   until someone reviews what shape is safe (no package ships one yet). A
- *   marketplace entry may only use the keys on {@link ENTRY_KEYS}.
+ *   marketplace entry may only use the keys on {@link ENTRY_KEYS}, and a
+ *   plugin.json only the keys on {@link PLUGIN_KEYS} (DOR-3688).
  * - **Gitlinks** anywhere under `plugins/`, and **dependencies** on a package
- *   this marketplace doesn't list, are refused (DOR-3659).
+ *   this marketplace doesn't list, are refused (DOR-3659), in the sidecar's
+ *   `requires` too (DOR-3689).
  *
  * @module package-programs
  */
@@ -498,6 +500,53 @@ const ENTRY_KEYS: ReadonlySet<string> = new Set([
   'mcpServers',
 ]);
 
+/**
+ * The plugin.json keys this check knows, an allow-list like {@link ENTRY_KEYS}
+ * (DOR-3688). Claude Code strips a top-level key it doesn't know and loads the
+ * rest, so a key it learns later would load unreviewed; anything not here is
+ * refused instead.
+ *
+ * - Metadata Claude Code shows or ignores: `$schema` through `keywords`,
+ *   `metadata`, and the directory-listing fields (`icon` and four URLs).
+ * - Parts this check reads: `commands`, `agents`, `skills` and `outputStyles`
+ *   name Markdown, which the walk checks anywhere under `plugins/` (a path
+ *   outside the package isn't checked here; Claude Code refuses one at load).
+ *   `commands` map entries pass `manifestGrants` too. `hooks` and `mcpServers`
+ *   pass {@link hookBreach} and {@link serverBreach}; `dependencies` only
+ *   names this marketplace's own packages.
+ *
+ * Refused until reviewed: `lspServers`, `monitors`, `experimental` (monitors,
+ * themes, evals), `settings` (a `subagentStatusLine` command), `workflows`
+ * (scripts that start agents), `userConfig` and `channels` (values written to
+ * the person's settings, and messages into the session), `types` (mods),
+ * `defaultEnabled`, and the top-level `themes`.
+ */
+const PLUGIN_KEYS: ReadonlySet<string> = new Set([
+  '$schema',
+  'name',
+  'displayName',
+  'version',
+  'description',
+  'author',
+  'homepage',
+  'repository',
+  'license',
+  'keywords',
+  'metadata',
+  'icon',
+  'documentationUrl',
+  'supportUrl',
+  'privacyPolicyUrl',
+  'termsOfServiceUrl',
+  'commands',
+  'agents',
+  'skills',
+  'outputStyles',
+  'hooks',
+  'mcpServers',
+  'dependencies',
+]);
+
 /** Plugin.json and marketplace-entry fields that name where a package's parts live. */
 const COMPONENT_FIELDS = [
   'commands',
@@ -553,31 +602,47 @@ function unreviewedPrograms(repoRoot: string, pkgDir: string): Finding[] {
       message: `It declares ${what}, which can run a command with no permission check; this check refuses them until one is reviewed.`,
     });
   };
-  const manifest = pluginJson(repoRoot, pkgDir);
   const manifestFile = `${pkgDir}/.claude-plugin/plugin.json`;
-  if (exists('.lsp.json')) refuse(`${pkgDir}/.lsp.json`, 'language servers');
-  if (manifest?.lspServers !== undefined) refuse(manifestFile, 'language servers (lspServers)');
-  const experimental = isRecord(manifest?.experimental) ? manifest.experimental : {};
-  if (manifest?.monitors !== undefined || experimental.monitors !== undefined) {
-    refuse(manifestFile, 'monitors');
+  const raw = readJson(path.join(repoRoot, manifestFile));
+  if (raw !== undefined && !isRecord(raw)) {
+    findings.push({
+      file: manifestFile,
+      message: "It is not an object this check can read, so what it declares can't be checked.",
+    });
   }
+  if (exists('.lsp.json')) refuse(`${pkgDir}/.lsp.json`, 'language servers');
   if (exists('monitors/monitors.json')) refuse(`${pkgDir}/monitors/monitors.json`, 'monitors');
   if (exists('bin')) refuse(`${pkgDir}/bin`, 'programs in bin/, which go on the PATH');
   // Plugin settings can set subagentStatusLine, a command Claude Code runs
   // for the agent panel with no permission check (Claude Code 2.1.309).
   if (exists('settings.json')) refuse(`${pkgDir}/settings.json`, 'plugin settings');
-  if (manifest?.settings !== undefined) refuse(manifestFile, 'plugin settings (settings)');
+  const manifest = isRecord(raw) ? raw : {};
+  for (const key of Object.keys(manifest).filter((k) => !PLUGIN_KEYS.has(k))) {
+    const value = manifest[key];
+    if (key === 'lspServers') refuse(manifestFile, 'language servers (lspServers)');
+    else if (key === 'monitors') refuse(manifestFile, 'monitors');
+    else if (key === 'experimental' && isRecord(value) && value.monitors !== undefined) {
+      refuse(manifestFile, 'monitors (experimental.monitors)');
+    } else if (key === 'settings') refuse(manifestFile, 'plugin settings (settings)');
+    else {
+      findings.push({
+        file: manifestFile,
+        message: `${key} is not a plugin.json field this check has reviewed (monitors, settings and workflows can run a command with no permission check); add it to PLUGIN_KEYS in review.`,
+      });
+    }
+  }
   return findings;
 }
 
 /**
  * Findings for a package that depends on one this marketplace doesn't list
- * (DOR-3659, item 5). DorkOS resolves a `requires` entry by name against
+ * (DOR-3659, item 5; the sidecar, DOR-3689). DorkOS resolves a `requires` entry by name against
  * whatever is installed, and Claude Code installs a plugin.json dependency
  * from the marketplace it names, so a dependency outside this list pulls in
  * a package nobody here reviewed. Only names marketplace.json lists with a
  * local `./plugins/<name>` source pass:
- * `<type>:<name>[@<version>]` in `.dork/manifest.json`'s `requires`, and a
+ * `<type>:<name>[@<version>]` in `.dork/manifest.json`'s `requires` and in
+ * each `.claude-plugin/dorkos.json` entry's `requires`, and a
  * bare `<name>` or `<name>@<this marketplace>` in plugin.json's
  * `dependencies`. Any other shape is refused, so a format this check doesn't
  * know can't slip past it.
@@ -629,15 +694,7 @@ function dependencies(repoRoot: string): Finding[] {
     const manifestFile = `${pkgDir}/.dork/manifest.json`;
     const manifest = readJson(path.join(repoRoot, manifestFile));
     if (isRecord(manifest)) {
-      check(
-        manifestFile,
-        'requires',
-        manifest.requires,
-        (d) =>
-          /^(?:adapter|plugin|skill-pack|agent|shape):([a-z][a-z0-9-]*)(?:@[\w.~^>=<!*-]+)?$/.exec(
-            d
-          )?.[1] ?? null
-      );
+      check(manifestFile, 'requires', manifest.requires, requiredName);
     }
     const plugin = pluginJson(repoRoot, pkgDir);
     check(`${pkgDir}/.claude-plugin/plugin.json`, 'dependencies', plugin?.dependencies, (d) => {
@@ -645,7 +702,27 @@ function dependencies(repoRoot: string): Finding[] {
       return m && (m[2] === undefined || m[2] === own) ? m[1] : null;
     });
   }
+  // The sidecar's `requires` is the same declaration DorkOS resolves the same
+  // way (DOR-3689), one list per entry.
+  const sidecarFile = '.claude-plugin/dorkos.json';
+  const sidecar = readJson(path.join(repoRoot, sidecarFile));
+  if (isRecord(sidecar) && isRecord(sidecar.plugins)) {
+    for (const [name, entry] of Object.entries(sidecar.plugins)) {
+      if (isRecord(entry)) {
+        check(sidecarFile, `plugins[${name}].requires`, entry.requires, requiredName);
+      }
+    }
+  }
   return findings;
+}
+
+/** The package a `<type>:<name>[@<version>]` declaration names, or null for any other shape. */
+function requiredName(declaration: string): string | null {
+  return (
+    /^(?:adapter|plugin|skill-pack|agent|shape):([a-z][a-z0-9-]*)(?:@[\w.~^>=<!*-]+)?$/.exec(
+      declaration
+    )?.[1] ?? null
+  );
 }
 
 /**

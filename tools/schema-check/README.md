@@ -281,11 +281,26 @@ or it is refused.
   `settings`, `lspServers`, a key Claude Code adds later) is refused, without
   relying on the strict upstream schema, which a pin bump could loosen
   (DOR-3659).
+- **plugin.json** may only use the keys in `PLUGIN_KEYS` (DOR-3688). Claude
+  Code strips a top-level key it doesn't know and loads the rest, so a key it
+  learns later would load with no review here. Approved: the metadata
+  (`$schema`, `name`, `displayName`, `version`, `description`, `author`,
+  `homepage`, `repository`, `license`, `keywords`), `metadata` and the
+  directory-listing fields (`icon`, `documentationUrl`, `supportUrl`,
+  `privacyPolicyUrl`, `termsOfServiceUrl`), the Markdown parts the walk reads
+  anywhere under `plugins/` (`commands`, `agents`, `skills`, `outputStyles`; a
+  path outside the package isn't checked here, and Claude Code refuses one), and the
+  `hooks`, `mcpServers` and `dependencies` this check reads. Refused:
+  `lspServers`, `monitors`, `experimental`, `settings`, `workflows`,
+  `userConfig`, `channels`, `types`, `defaultEnabled`, the top-level `themes`,
+  and any key Claude Code adds later. A plugin.json that parses but isn't an
+  object is refused too.
 - **No gitlinks.** A submodule anywhere under `plugins/` ships another repo's
   code that no walk reads, so it is refused: git's mode `160000` in a checkout,
   a `.git` file or folder inside `plugins/` anywhere else (DOR-3659).
 - **Dependencies stay in this marketplace.** `requires` in `.dork/manifest.json`
-  and `dependencies` in plugin.json may only name packages that
+  and in each `.claude-plugin/dorkos.json` entry (DOR-3689), and
+  `dependencies` in plugin.json, may only name packages that
   `marketplace.json` lists from this repo, as `./plugins/<name>` (`<name>` or
   `<name>@<this marketplace>` in plugin.json), so a dependency can't pull in a package nobody here reviewed.
   Any other shape is refused (DOR-3659).
