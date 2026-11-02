@@ -304,6 +304,12 @@ or it is refused.
   `marketplace.json` lists from this repo, as `./plugins/<name>` (`<name>` or
   `<name>@<this marketplace>` in plugin.json), so a dependency can't pull in a package nobody here reviewed.
   Any other shape is refused (DOR-3659).
+- **Containers in the wrong shape are refused, not skipped.** A
+  `marketplace.json`, `.claude-plugin/dorkos.json` or `.dork/manifest.json`
+  that parses but isn't an object, a `marketplace.json` `plugins` that isn't a
+  list or an entry in it that isn't an object, and a sidecar `plugins` that
+  isn't an object or an entry in it that isn't an object, would otherwise hide
+  what they declare from the checks above. A missing file or key is fine.
 
 - **Spelling.** CI runs on Linux, where `.MCP.json` and `.mcp.json` are two
   files, while Claude Code on a Mac's case-blind disk opens either for the

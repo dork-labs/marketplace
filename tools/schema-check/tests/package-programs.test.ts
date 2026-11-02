@@ -395,6 +395,110 @@ describe('checkPackagePrograms', () => {
     ]);
   });
 
+  // A container in the wrong shape used to be skipped, so what it declared was
+  // never checked; each is refused now (Security's follow-up to #144).
+  const wrongShapes: [string, unknown][] = [
+    ['a list', []],
+    ['a string', 'x'],
+    ['null', null],
+    ['a number', 7],
+  ];
+  const listed = JSON.stringify({ name: 'mine', plugins: [{ name: 'a', source: './plugins/a' }] });
+  const shapeFindings = (files: Record<string, string>): string[] =>
+    checkPackagePrograms(fixtureRepo({ 'plugins/a/README.md': '# a\n', ...files })).map(
+      (f) => `${f.file}: ${f.message}`
+    );
+
+  it.each(wrongShapes)('refuses a sidecar that is %s', (_, value) => {
+    expect(
+      shapeFindings({
+        '.claude-plugin/marketplace.json': listed,
+        '.claude-plugin/dorkos.json': JSON.stringify(value),
+      })
+    ).toEqual([
+      ".claude-plugin/dorkos.json: It is not an object this check can read, so what it declares can't be checked.",
+    ]);
+  });
+
+  it.each(wrongShapes)('refuses a sidecar whose plugins is %s', (_, value) => {
+    expect(
+      shapeFindings({
+        '.claude-plugin/marketplace.json': listed,
+        '.claude-plugin/dorkos.json': JSON.stringify({ schemaVersion: 1, plugins: value }),
+      })
+    ).toEqual([
+      ".claude-plugin/dorkos.json: plugins is not an object this check can read, so what it declares can't be checked.",
+    ]);
+  });
+
+  it.each(wrongShapes)('refuses a sidecar entry that is %s', (_, value) => {
+    expect(
+      shapeFindings({
+        '.claude-plugin/marketplace.json': listed,
+        '.claude-plugin/dorkos.json': JSON.stringify({
+          schemaVersion: 1,
+          plugins: { a: { type: 'plugin' }, b: value },
+        }),
+      })
+    ).toEqual([
+      ".claude-plugin/dorkos.json: plugins[b] is not an object this check can read, so what it declares can't be checked.",
+    ]);
+  });
+
+  it.each(wrongShapes)('refuses a .dork/manifest.json that is %s', (_, value) => {
+    expect(
+      shapeFindings({
+        '.claude-plugin/marketplace.json': listed,
+        'plugins/a/.dork/manifest.json': JSON.stringify(value),
+      })
+    ).toEqual([
+      "plugins/a/.dork/manifest.json: It is not an object this check can read, so what it declares can't be checked.",
+    ]);
+  });
+
+  it.each(wrongShapes)('refuses a marketplace.json that is %s', (_, value) => {
+    expect(shapeFindings({ '.claude-plugin/marketplace.json': JSON.stringify(value) })).toEqual([
+      ".claude-plugin/marketplace.json: It is not an object this check can read, so what it declares can't be checked.",
+    ]);
+  });
+
+  it.each([['an object', {}], ...wrongShapes.filter(([what]) => what !== 'a list')])(
+    'refuses marketplace.json plugins that is %s',
+    (_, value) => {
+      expect(
+        shapeFindings({
+          '.claude-plugin/marketplace.json': JSON.stringify({ name: 'mine', plugins: value }),
+        })
+      ).toEqual([
+        ".claude-plugin/marketplace.json: plugins is not a list this check can read, so what it declares can't be checked.",
+      ]);
+    }
+  );
+
+  it.each(wrongShapes)('refuses a marketplace entry that is %s', (_, value) => {
+    expect(
+      shapeFindings({
+        '.claude-plugin/marketplace.json': JSON.stringify({
+          name: 'mine',
+          plugins: [{ name: 'a', source: './plugins/a' }, value],
+        }),
+      })
+    ).toEqual([
+      ".claude-plugin/marketplace.json: plugins[1] is not an object this check can read, so what it declares can't be checked.",
+    ]);
+  });
+
+  it('passes the same files when they are absent or empty', () => {
+    expect(shapeFindings({})).toEqual([]);
+    expect(
+      shapeFindings({
+        '.claude-plugin/marketplace.json': JSON.stringify({ name: 'mine' }),
+        '.claude-plugin/dorkos.json': JSON.stringify({ schemaVersion: 1 }),
+        'plugins/a/.dork/manifest.json': '{}',
+      })
+    ).toEqual([]);
+  });
+
   it('passes every plugin.json key it has reviewed (DOR-3688)', () => {
     const r = fixtureRepo({
       ...scripts,
