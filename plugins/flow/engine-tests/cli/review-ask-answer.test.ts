@@ -336,7 +336,7 @@ describe('flow review --approve by a person', () => {
     const guard = recordingGuard(() => {
       // Nothing posted yet when the guard is asked.
       expect(comments(tracker)).toEqual([]);
-      return { ok: true, preArm: [] };
+      return { ok: true, preArm: [], merge: 'queue' };
     });
     const result = await flow(['review', 'ACME-12', '--approve', '--head', 'abc1234'], {
       tracker,

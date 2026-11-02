@@ -4,6 +4,16 @@ Installs of this plugin are pinned to a commit SHA, so a fix here does not reach
 you until you **reinstall it** (Marketplace → flow → reinstall, or re-run your
 `--plugin-dir` checkout's `git pull`). Each entry below says whether that matters.
 
+## 0.76.0
+
+**Flow now arms a pull request only into your repository's default branch, whatever it's called, and only when the merge will squash (DOR-3256). Before, flow assumed a branch named `main` and never checked the merge method. Reinstall to get it.**
+
+- The default branch comes from GitHub, not from a name flow assumes. A repo whose default is `trunk` or `master` can now be armed; before, every PR there was refused. A PR into any other branch is refused, including a stacked PR aimed at the branch it builds on: retarget it, or land its parent first. If flow can't read which branch is the default, it doesn't arm, and tries again later.
+- Flow reads `land.preArm` and `land.securityPaths` from the committed config on that default branch, not from `main`. `flow pr` names a reviewer from the list on the branch the PR targets.
+- Squash is the only method flow arms, and there's no setting to change it, because the check after the merge needs a squash. With a merge queue on the default branch, the queue's method must be squash, and flow arms with no method flag, since the queue sets the method. With no queue, the repository and any ruleset on the branch must allow squash, and flow arms with `--squash`. Before, flow passed no method there, so the arm could fail. Flow reads the queue from both rulesets and classic branch protection. Anything else, or settings flow can't read, is refused with the new reason `not-squash`, and asked again next time. That includes a GitHub Enterprise Server too old for rulesets or merge queues, which flow could arm before: merge those PRs yourself.
+- Flow refuses to arm at anything but a full commit SHA, even if a caller asks it to.
+- The refusal reason `base-not-main` is now `base-not-default`, and it's asked again on later passes, so a PR retargeted to the default branch without a new commit still gets armed. If a script of yours reads `armRefused.reason`, update it.
+
 ## 0.75.0
 
 **Flow's check of who may start or resume its work from a tracker comment is tighter: on Linear the author must be on your configured team, not only in the workspace, and a guest can no longer hide a member's answer to a parked question (DOR-3677). Reinstall to get it.**

@@ -18,7 +18,7 @@
  *    `drain.pr`, and reports its review route (`land/review-route.ts`);
  * 6. names the PR's reviewer in a comment of its own (DOR-3262):
  *    `land.securityPaths.reviewer` when the PR touches a security path (by the
- *    list on `origin/main`), else `land.reviewer`. Both are handles, so they
+ *    list on the default branch), else `land.reviewer`. Both are handles, so they
  *    come from this machine's settings (`config.local.json`);
  * 7. on `--arm` or `drain.armAutoMerge`, records the PR waiting to arm and
  *    arms it at once when the arm guard allows (`land/arm-guard.ts`). The
@@ -127,7 +127,7 @@ interface Reviewers {
  * The reviewer handles from the project's settings (`config.local.json` over
  * `config.json`). Handles are account handles, which this repo keeps out of
  * committed config, so unlike the guard's checks they are not read from
- * `origin/main`; a wrong one only misnames the reviewer.
+ * the default branch; a wrong one only misnames the reviewer.
  */
 function reviewersFor(ctx: VerbContext): Reviewers | string {
   try {
@@ -140,7 +140,7 @@ function reviewersFor(ctx: VerbContext): Reviewers | string {
 
 /**
  * Name the new PR's reviewer in a comment: the security reviewer when the PR
- * touches a security path (by the list on `origin/main`; also when flow cannot
+ * touches a security path (by the list on the default branch; also when flow cannot
  * tell), else the default reviewer; nothing when neither is set. A failure is
  * reported, never thrown: the PR is open either way.
  */
@@ -279,11 +279,11 @@ export async function run(ctx: VerbContext): Promise<VerbResult> {
 
   const base = await defaultBranch(ctx, worktree);
   const reviewers = reviewersFor(ctx);
-  // Which paths count as security paths comes from main, like the guard's
+  // Which paths count as security paths comes from the base branch, like the guard's
   // checks; read only when there is a security reviewer to route to.
   const baseLand =
     typeof reviewers !== 'string' && reviewers.security !== null
-      ? await readBaseLand(ctx.runProcess, worktree)
+      ? await readBaseLand(ctx.runProcess, worktree, base)
       : null;
   const created = await forge.createPr({
     head: branch,
@@ -323,7 +323,7 @@ export async function run(ctx: VerbContext): Promise<VerbResult> {
       preArm: 'defer',
     });
     if (guard.ok) {
-      await forge.arm(created.number, head);
+      await forge.arm(created.number, head, guard.merge);
       await recordPr(ctx, drainRun, forge, created, true);
       armed = true;
     } else {
@@ -362,7 +362,7 @@ export async function run(ctx: VerbContext): Promise<VerbResult> {
 /**
  * The new PR's review route (DOR-3341): Security always, QA unless it is
  * `light`, design when it touches `review.designPaths`. The security paths are
- * `origin/main`'s when they were read, else this checkout's. A file list the
+ * the default branch's when they were read, else this checkout's. A file list the
  * forge cannot give routes as standard, with every configured step.
  */
 async function routeFor(

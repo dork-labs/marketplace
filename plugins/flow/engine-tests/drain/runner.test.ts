@@ -716,7 +716,9 @@ describe('flow drain: the arm guard on a re-arm (DOR-3262)', () => {
     writeFileSync(bodyFile, 'What changes.\n');
     // The guard leaves preArm to whoever runs it; the drain's pass runs it.
     armGuard = recordingGuard((request) =>
-      request.preArm === 'defer' ? refusal('pre-arm-deferred') : { ok: true, preArm: [] }
+      request.preArm === 'defer'
+        ? refusal('pre-arm-deferred')
+        : { ok: true, preArm: [], merge: 'queue' }
     );
     const pr = await flow(
       ['pr', 'ACME-1', '--title', 'Title of ACME-1', '--body-file', bodyFile, '--arm'],

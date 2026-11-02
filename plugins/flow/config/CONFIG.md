@@ -314,9 +314,10 @@ by itself when one runs out, is not here: that is `handoff` in the machine's
 
 `land` says what flow checks before it arms auto-merge on a pull request, and
 whom it names on a PR it opens. Flow reads the checks (`preArm` and
-`securityPaths`) **only from the committed `config.json` on `origin/main`**,
-never from the PR's branch, your working tree or `config.local.json`. A PR that
-changes them is still held to `main`'s version; its own takes effect once it
+`securityPaths`) **only from the committed `config.json` on the repository's
+default branch**, as GitHub names it, fetched fresh from `origin`; never from the
+PR's branch, your working tree or `config.local.json`. A PR that changes them is
+still held to the default branch's version; its own takes effect once it
 merges. The two reviewer handles are account handles, so they go in
 `config.local.json` like every other handle; flow reads them from this
 machine's settings (`config.local.json` over `config.json`).
@@ -350,7 +351,7 @@ and in `config.local.json`:
 | `preArm[].timeout` | minutes 1–360, `30` | How long the check may take before flow refuses. |
 | `securityPaths.globs`, `.pattern` | globs, `[]`; a regular expression, `null` | This repo's security paths, matched as written and also in any case like the built-ins (the pattern with the `i` and `u` flags, or just `i`; write it in plain ASCII). Package manifests, lockfiles and `.agents/flow/config.json` always count, in any case, and `.github/workflows/**` and `.github/actions/**` do too while any `wait: workflow` entry exists. |
 | `securityPaths.label` | label, `security-reviewed` | The label that says Security has looked. Flow only reads it, and never adds or removes it. It counts only when it was added after the PR's head arrived, so after a push Security adds it again. |
-| `securityPaths.reviewer` | handle, `null` | Who flow names on a new PR that touches a security path (by `main`'s list), or when it cannot tell. Set it in `config.local.json`. |
+| `securityPaths.reviewer` | handle, `null` | Who flow names on a new PR that touches a security path (by the default branch's list), or when it cannot tell. Set it in `config.local.json`. |
 | `reviewer` | handle, `null` | Who flow names on any other new PR. Set it in `config.local.json`. A handle is `user`, `@user` or `org/team`. |
 
 Before every arm (`flow pr --arm`, `flow review --approve` with
@@ -360,22 +361,29 @@ Before every arm (`flow pr --arm`, `flow review --approve` with
    GitHub waits for it;
 2. the PR's head is not the commit that was reviewed, or no full commit SHA was
    recorded;
-3. the PR does not merge into `main`;
-4. it touches a security path and has no `securityPaths.label`;
-5. a release freeze is on (`flow freeze on`);
-6. it comes from a fork;
-7. it changes a dependency file (any built-in security path but flow's config)
-   while another such PR into `main`
+3. the PR does not merge into the repository's default branch (`main`,
+   `trunk`, whatever GitHub says it is), or flow can't read which that is. A
+   stacked PR that targets its parent branch is refused until it targets the
+   default;
+4. the merge would not squash. With a merge queue on the default branch, its
+   method must be squash, and flow arms with no method flag because the queue
+   sets it. With no queue, the repository and its rulesets must allow squash,
+   and flow arms with `--squash`. Settings it can't read refuse;
+5. it touches a security path and has no `securityPaths.label`;
+6. a release freeze is on (`flow freeze on`);
+7. it comes from a fork;
+8. it changes a dependency file (any built-in security path but flow's config)
+   while another such PR into the default branch
    is in the merge queue or armed, or flow cannot read the queue to tell. A
    queued or armed PR with more than 100 changed files counts as one, and two
    arms at the same moment can still both see an empty queue. A queue flow can't
-   read in full (over 100 entries, over 500 open PRs into `main`, or a GitHub
+   read in full (over 100 entries, over 500 open PRs into the default branch, or a GitHub
    Enterprise Server too old to know merge queues) refuses every dependency PR;
 
 and also when it is closed, a draft, labelled `hold`, `do-not-merge`, `wip` or
 `blocked`, or a reviewer asked for changes. Then it runs the `preArm` entries
 the PR touches, and refuses if one fails, then reads the PR and the freeze again
-before it arms. Only the drain runs `preArm` entries: `flow pr --arm` and
+before it arms, and the merge settings with them. Only the drain runs `preArm` entries: `flow pr --arm` and
 `flow review --approve` leave the arm to the drain when one applies. These are a guard rail for flow's own arms. The rules that hold for everyone belong on GitHub, in required checks and
 rulesets.
 

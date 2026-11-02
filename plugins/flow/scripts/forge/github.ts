@@ -25,6 +25,7 @@ import os from 'node:os';
 import path from 'node:path';
 
 import type { ProcessRunner } from '../cli/context.ts';
+import type { MergeSettings } from '../land/arm-decision.ts';
 import { isBranchName, isFullSha, isNonce, isWorkflowName } from '../land/validate.ts';
 import { openPrListArgs, parseOpenPrs } from './open-prs.ts';
 import {
@@ -200,6 +201,87 @@ export function parseRequiredChecks(rules: unknown, branch: unknown): string[] |
     }
   }
   return [...names].sort();
+}
+
+/**
+ * How a base branch merges (DOR-3256), from its rules (`GET
+ * repos/{repo}/rules/branches/{branch}`, one rule per entry) and the
+ * repository (`GET repos/{repo}`):
+ *
+ * - `queueMethod`: the `merge_queue` rule's `merge_method`, upper-cased; `''`
+ *   when a queue rule names none or two queue rules disagree (both refuse);
+ *   `null` when there is no queue rule.
+ * - `squashAllowed`: the repository's `allow_squash_merge`, `null` when absent
+ *   (GitHub omits it for an account without push access).
+ * - `allowedMethods`: what every `pull_request` rule's `allowed_merge_methods`
+ *   leaves, lower-cased; `null` when no rule limits them.
+ *
+ * @param rules - The parsed rules answer.
+ * @param repo - The parsed repository answer.
+ * @returns The settings, or `null` when either answer is not in a shape it knows.
+ */
+export function parseMergeSettings(rules: unknown, repo: unknown): MergeSettings | null {
+  const repoView = record(repo);
+  if (!Array.isArray(rules) || repoView === undefined) return null;
+  let queueMethod: string | null = null;
+  let allowedMethods: string[] | null = null;
+  for (const entry of rules) {
+    const rule = record(entry);
+    if (rule === undefined) return null;
+    if (rule.type === 'merge_queue') {
+      const method = str(record(rule.parameters)?.merge_method)?.toUpperCase() ?? '';
+      queueMethod = queueMethod === null || queueMethod === method ? method : '';
+    } else if (rule.type === 'pull_request') {
+      const allowed = record(rule.parameters)?.allowed_merge_methods;
+      if (allowed === undefined) continue;
+      if (!Array.isArray(allowed)) return null;
+      const methods = allowed
+        .filter((m): m is string => typeof m === 'string')
+        .map((m) => m.toLowerCase());
+      allowedMethods =
+        allowedMethods === null ? methods : allowedMethods.filter((m) => methods.includes(m));
+    }
+  }
+  const squash = repoView.allow_squash_merge;
+  return {
+    queueMethod,
+    squashAllowed: typeof squash === 'boolean' ? squash : null,
+    allowedMethods,
+  };
+}
+
+/**
+ * The base's merge queue from GraphQL (`repository.mergeQueue(branch)`), which
+ * sees a queue set in rulesets or in classic branch protection: its method
+ * upper-cased, `''` for a queue with no readable method, `null` for no queue,
+ * or `undefined` when the answer is not in a shape it knows (or has errors).
+ *
+ * @param raw - The parsed GraphQL answer.
+ * @returns The queue's method.
+ */
+export function parseMergeQueue(raw: unknown): string | null | undefined {
+  const answer = record(raw);
+  if (answer === undefined || answer.errors !== undefined) return undefined;
+  const repository = record(record(answer.data)?.repository);
+  if (repository === undefined || !('mergeQueue' in repository)) return undefined;
+  if (repository.mergeQueue === null) return null;
+  const queue = record(repository.mergeQueue);
+  if (queue === undefined) return undefined;
+  return str(record(queue.configuration)?.mergeMethod)?.toUpperCase() ?? '';
+}
+
+/**
+ * One queue method from the two reads: either one seeing a queue means there
+ * is one, and two that disagree read as `''` (refused).
+ *
+ * @param rules - The rules endpoint's answer.
+ * @param graphql - GraphQL's answer.
+ * @returns The method, `''`, or `null` when neither sees a queue.
+ */
+export function combineQueueMethods(rules: string | null, graphql: string | null): string | null {
+  if (rules === null) return graphql;
+  if (graphql === null || graphql === rules) return rules;
+  return '';
 }
 
 /**
@@ -746,6 +828,39 @@ export function createGithubForge(options: GithubForgeOptions): Forge {
     return pull?.isInMergeQueue === true;
   }
 
+  /**
+   * Every rule on `base`, from every ruleset. 30 to a page by default: one page
+   * could miss a rule and read as "none". --paginate with --jq '.[]' prints
+   * each rule of every page on a line of its own.
+   */
+  async function branchRules(base: string, what: string): Promise<unknown[]> {
+    const ref = base.split('/').map(encodeURIComponent).join('/');
+    const lines = (
+      await gh(
+        [
+          'api',
+          ...hostArgs,
+          '--paginate',
+          '--jq',
+          '.[]',
+          `repos/${target.repo}/rules/branches/${ref}?per_page=100`,
+        ],
+        what
+      )
+    )
+      .split('\n')
+      .filter((line) => line.trim() !== '');
+    const rules: unknown[] = [];
+    for (const line of lines) {
+      const rule = safeJson(line);
+      if (record(rule) === undefined) {
+        throw new ForgeError(`${what}: gh printed something other than one rule per line`);
+      }
+      rules.push(rule);
+    }
+    return rules;
+  }
+
   return {
     repo: target.repo,
 
@@ -849,11 +964,80 @@ export function createGithubForge(options: GithubForgeOptions): Forge {
       return status.state === 'open' ? { ...status, queued: await inMergeQueue(pr) } : status;
     },
 
-    async arm(pr, headSha) {
+    async arm(pr, headSha, merge) {
+      // Fails closed before gh runs: only a whole commit pins the arm, and
+      // only a merge the guard read the settings for (DOR-3256).
+      if (!/^[0-9a-f]{40}$/i.test(headSha)) {
+        throw new ForgeError(
+          `arming ${target.repo}#${pr}: "${headSha}" is not a full commit SHA, so nothing was armed`
+        );
+      }
+      if (merge !== 'queue' && merge !== 'squash') {
+        throw new ForgeError(
+          `arming ${target.repo}#${pr}: no squash route given, so nothing was armed`
+        );
+      }
+      // A merge queue sets the method itself, so flow passes none; without
+      // one, gh needs --squash to arm at all.
       await gh(
-        ['pr', 'merge', String(pr), '-R', repoArg, '--auto', '--match-head-commit', headSha],
+        [
+          'pr',
+          'merge',
+          String(pr),
+          '-R',
+          repoArg,
+          '--auto',
+          ...(merge === 'squash' ? ['--squash'] : []),
+          '--match-head-commit',
+          headSha,
+        ],
         `arming ${target.repo}#${pr} at ${headSha.slice(0, 7)}`
       );
+    },
+
+    async defaultBranch() {
+      const what = `reading the default branch of ${target.repo}`;
+      const branch = str(
+        record(await ghJson(['api', ...hostArgs, `repos/${target.repo}`], what))?.default_branch
+      );
+      if (!isBranchName(branch)) {
+        throw new ForgeError(`${what}: GitHub gave no usable branch name`);
+      }
+      return branch;
+    },
+
+    async mergeSettings(base) {
+      const what = `reading how ${target.repo} ${base} merges`;
+      const settings = parseMergeSettings(
+        await branchRules(base, what),
+        await ghJson(['api', ...hostArgs, `repos/${target.repo}`], what)
+      );
+      // The rules endpoint sees only rulesets; a queue set in classic branch
+      // protection shows up only here, so both are read (fails closed).
+      const query =
+        'query($owner:String!,$name:String!,$branch:String!){repository(owner:$owner,name:$name){mergeQueue(branch:$branch){configuration{mergeMethod}}}}';
+      const queue = parseMergeQueue(
+        await ghJson(
+          [
+            'api',
+            'graphql',
+            ...hostArgs,
+            '-f',
+            `query=${query}`,
+            '-f',
+            `owner=${owner}`,
+            '-f',
+            `name=${name}`,
+            '-f',
+            `branch=${base}`,
+          ],
+          what
+        )
+      );
+      if (settings === null || queue === undefined) {
+        throw new ForgeError(`${what}: GitHub's answer was not in a shape flow knows`);
+      }
+      return { ...settings, queueMethod: combineQueueMethods(settings.queueMethod, queue) };
     },
 
     async disarm(pr) {
@@ -1158,33 +1342,7 @@ export function createGithubForge(options: GithubForgeOptions): Forge {
 
     async requiredChecks(base) {
       const ref = base.split('/').map(encodeURIComponent).join('/');
-      // Every ruleset's rules, 30 to a page by default: one page could miss the
-      // required-checks rule and read as "requires none". --paginate with
-      // --jq '.[]' prints each rule of every page on a line of its own.
-      const rulesWhat = `reading the rules for ${target.repo} ${base}`;
-      const lines = (
-        await gh(
-          [
-            'api',
-            ...hostArgs,
-            '--paginate',
-            '--jq',
-            '.[]',
-            `repos/${target.repo}/rules/branches/${ref}?per_page=100`,
-          ],
-          rulesWhat
-        )
-      )
-        .split('\n')
-        .filter((line) => line.trim() !== '');
-      const rules: unknown[] = [];
-      for (const line of lines) {
-        const rule = safeJson(line);
-        if (record(rule) === undefined) {
-          throw new ForgeError(`${rulesWhat}: gh printed something other than one rule per line`);
-        }
-        rules.push(rule);
-      }
+      const rules = await branchRules(base, `reading the rules for ${target.repo} ${base}`);
       const branch = await ghJson(
         ['api', ...hostArgs, `repos/${target.repo}/branches/${ref}`],
         `reading the protection of ${target.repo} ${base}`

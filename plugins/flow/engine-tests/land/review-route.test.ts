@@ -32,6 +32,8 @@ function armFacts(files: string[], labels: string[] = []): Record<string, unknow
     checks: [{ name: 'ci', bucket: 'pass' }],
     headRefOid: SHA,
     baseRefName: 'main',
+    defaultBranch: 'main',
+    mergeSettings: { queueMethod: 'SQUASH', squashAllowed: true, allowedMethods: null },
     isCrossRepository: false,
     requiredChecks: ['ci'],
     files,

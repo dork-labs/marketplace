@@ -5,7 +5,7 @@ description: The checks flow runs before it turns on auto-merge, the land settin
 
 # Before flow arms a PR
 
-Flow can turn on auto-merge for a pull request: `flow pr --arm`, `flow review --approve` when `gates.review.mergeOnApproval` is on, and the drain when it re-arms after a review. Every one of those asks flow's arm guard first. The guard only ever says no. It never arms anything itself, and never sets a status or a label.
+Flow turns on auto-merge with `flow pr --arm`, `flow review --approve` (when `gates.review.mergeOnApproval` is on) and the drain's re-arm. Each asks flow's arm guard first. The guard only ever says no. It never arms anything itself, and never sets a status or a label.
 
 ## What it refuses
 
@@ -13,7 +13,8 @@ Flow doesn't arm a PR when:
 
 - a required check failed or was cancelled (one still running is fine: GitHub waits);
 - the head isn't the reviewed commit, or none was recorded;
-- it doesn't target `main`;
+- it doesn't target the default branch GitHub names (a stacked PR aimed at its parent doesn't);
+- it wouldn't squash, the only method, as the post-merge check needs it: a merge queue must squash (flow passes no method flag), or with none the repo must allow it (flow passes `--squash`);
 - it touches a security path and has no `security-reviewed` label, or one older than the head;
 - a release freeze is on;
 - it comes from a fork;
@@ -26,7 +27,7 @@ A refused `flow pr --arm` still opens the PR, unarmed, and the drain asks again 
 
 ## Your own checks: `land.preArm`
 
-`land.preArm` lists checks to run before arming, each only when the PR touches one of its paths. An entry either dispatches a GitHub workflow and waits for that one run, or runs a command. Prefer the workflow wherever your repo has CI. A command is the fallback for a repo without it. It runs in a fresh, clean checkout of the reviewed commit, made so nothing in your own checkout or git settings can change it. It has no installed dependencies, so point it at a committed script that installs them (and list that script as a security path). Its environment holds a fixed system PATH, the locale, TMPDIR, TZ, TERM, `CI=true` and an empty scratch HOME, never your tokens:
+`land.preArm` lists checks to run before arming, each only when the PR touches one of its paths. An entry either dispatches a GitHub workflow and waits for that one run, or runs a command. Prefer the workflow; a command is for a repo without CI. It runs in a fresh, clean checkout of the reviewed commit, made so nothing in your own checkout or git settings can change it. It has no installed dependencies, so point it at a committed script that installs them (and list that script as a security path). Its environment holds a fixed system PATH, the locale, TMPDIR, TZ, TERM, `CI=true` and an empty scratch HOME, never your tokens:
 
 ```json
 "land": {
@@ -37,9 +38,9 @@ A refused `flow pr --arm` still opens the PR, unarmed, and the drain asks again 
 }
 ```
 
-These checks run only in the drain, because `flow pr` and `flow review` are stopped long before a browser suite finishes. When one applies, those commands leave the arm to the drain, which runs the checks and arms the PR once they pass. Outside the drain, you merge it yourself.
+Only the drain runs these checks: `flow pr` and `flow review` are stopped long before a browser suite finishes, so when one applies they leave the arm to the drain. Outside the drain, you merge it yourself.
 
-Flow reads `land.preArm` and `land.securityPaths` only from the committed config on `main`. A PR that changes them is still held to `main`'s version. Commands run with no shell. A workflow must take `sha` and `nonce` inputs, put the nonce in its `run-name`, and fail unless it checked out `sha`. `config/CONFIG.md` in the plugin has every field.
+Flow reads `land.preArm` and `land.securityPaths` only from the committed config on the default branch. A PR that changes them is still held to that branch's version. Commands run with no shell. A workflow must take `sha` and `nonce` inputs, put the nonce in its `run-name`, and fail unless it checked out `sha`. `config/CONFIG.md` in the plugin has every field.
 
 ## The release freeze
 
@@ -49,12 +50,12 @@ flow freeze off                         # ...the release is out
 flow freeze                             # is a freeze on?
 ```
 
-Have your release process turn it on before a release, then off. The freeze is kept on this computer, never committed.
+Have your release process turn it on, then off. It's kept on this computer, never committed.
 
 ## After the merge: the squash check
 
-Once a PR has merged, flow checks that the squash commit on `main` is what a clean review saw. It passes only when merging the reviewed commit into the squash's parent gives exactly the squash's tree, which also covers `main` moving lines nearby. A matching patch-id is noted but never enough: it ignores whitespace and where a change sits. A conflict, any other difference, or a merge with no clean review fails. Flow then comments on the PR, naming its author and `land.securityPaths.reviewer`, with both trees and the files that differ. A check that couldn't run (a commit missing, say) is retried, then reported too. A shallow clone can't be squash-checked, and every merge there says so; `git fetch --unshallow` fixes it. With git older than 2.44 it can't run, and says so; that's never a pass. Flow reverts nothing. The drain runs the check by itself. Outside the drain, run `flow squash-check <id>`.
+Once a PR has merged, flow checks that the squash commit on the default branch is what a clean review saw. It passes only when merging the reviewed commit into the squash's parent gives exactly the squash's tree, which also covers the branch moving lines nearby. A matching patch-id is noted but never enough: it ignores whitespace and where a change sits. A conflict, any other difference, or a merge with no clean review fails. Flow then comments on the PR, naming its author and `land.securityPaths.reviewer`, with both trees and the files that differ. A check that couldn't run (a commit missing, say) is retried, then reported. A shallow clone or git older than 2.44 can't run it, and every merge says so, never a pass; `git fetch --unshallow` fixes the first. Flow reverts nothing. The drain runs the check by itself. Outside the drain, run `flow squash-check <id>`.
 
 ## What this is not
 
-The guard is a rail for flow's own arms. Flow runs inside the agent, so the rules that hold for everyone belong on GitHub, as required checks and rulesets. The `security-reviewed` label must postdate the head's arrival. A per-commit security approval belongs on GitHub too.
+The guard is a rail for flow's own arms. Flow runs inside the agent, so the rules that hold for everyone belong on GitHub, as required checks and rulesets. A per-commit security approval belongs there too.

@@ -10,13 +10,18 @@
  *
  * In order, stopping at the first refusal:
  *
- * 1. Read `land` from the committed config on `origin/main` (`base-config.ts`).
- * 2. Read the PR (`Forge.armFacts`), the checks `main` requires, and the
- *    release freeze (`freeze.ts`); for a PR with the security label, also when
+ * 1. Read the repository's default branch from the forge (`Forge.defaultBranch`),
+ *    then `land` from the committed config on it (`base-config.ts`).
+ * 2. Read the PR (`Forge.armFacts`), the checks the default branch requires,
+ *    how it merges (`Forge.mergeSettings`), and the release freeze
+ *    (`freeze.ts`); for a PR with the security label, also when
  *    the label was added and when the head arrived (`Forge.labelledAt`,
  *    `Forge.headPushedAt`), so a label from an older head never counts.
  * 3. Decide (`arm-decision.ts`, pinned by `scripts/fixtures/arm-decisions.json`).
  * 4. Run the `land.preArm` entries the PR's files send (`pre-arm.ts`).
+ *
+ * A pass carries the merge route the decision checked (`queue` or `squash`),
+ * which the caller hands to `Forge.arm`, so an arm never assumes a method.
  *
  * When the base config has a `wait: workflow` entry, `.github/workflows/` and
  * `.github/actions/` count as security paths too: `gh workflow run --ref
@@ -29,7 +34,14 @@
 import type { ProcessRunner } from '../cli/context.ts';
 import type { LandConfig } from '../config-schema.ts';
 import type { ArmFacts, Forge } from '../forge/types.ts';
-import { ARM_BASE, decideArm, type ArmPolicy, type RefusalSlug } from './arm-decision.ts';
+import {
+  armMergeFor,
+  decideArm,
+  type ArmMerge,
+  type ArmPolicy,
+  type MergeSettings,
+  type RefusalSlug,
+} from './arm-decision.ts';
 import { readBaseLand } from './base-config.ts';
 import { dependencyConflict, touchesDependency } from './dependency-queue.ts';
 import { readFreeze } from './freeze.ts';
@@ -53,7 +65,12 @@ export type GuardRefusal =
 
 /** The guard's answer. */
 export type GuardResult =
-  | { ok: true; preArm: PreArmOutcome[] }
+  | {
+      ok: true;
+      preArm: PreArmOutcome[];
+      /** How to arm: with no method flag into a squashing queue, or with `--squash`. */
+      merge: ArmMerge;
+    }
   | {
       ok: false;
       /** A stable, machine-readable reason. */
@@ -108,7 +125,7 @@ export interface GuardIo {
  * plus `.github/workflows/` and `.github/actions/` while a `wait: workflow`
  * entry exists. The guard and `flow pr`'s reviewer route both use it.
  *
- * @param land - The `land` block from `origin/main`.
+ * @param land - The `land` block from the default branch on `origin`.
  * @returns The policy.
  */
 export function policyFor(land: LandConfig): ArmPolicy {
@@ -150,6 +167,22 @@ async function labelTimes(
   };
 }
 
+/** How the base merges, or `undefined` (the decision refuses) when the forge cannot say. */
+async function mergeSettingsOf(forge: Forge, base: string): Promise<MergeSettings | undefined> {
+  try {
+    return await forge.mergeSettings?.(base);
+  } catch {
+    return undefined;
+  }
+}
+
+/** The route a passed decision checked; the decision refused anything else. */
+function routeOf(settings: MergeSettings | undefined): ArmMerge {
+  const route = armMergeFor(settings);
+  if (!route.ok) throw new Error(`the arm guard passed a merge it cannot route: ${route.detail}`);
+  return route.merge;
+}
+
 /** A refusal before any `land.preArm` entry ran. */
 function early(reason: GuardRefusal, detail: string): GuardResult {
   return { ok: false, reason, detail, ranPreArm: false, preArm: [] };
@@ -163,7 +196,24 @@ function early(reason: GuardRefusal, detail: string): GuardResult {
  * @returns `ok`, or a refusal with its reason and detail.
  */
 export async function guardArm(input: GuardInput, io: GuardIo): Promise<GuardResult> {
-  const base = await readBaseLand(io.runProcess, input.worktree);
+  // The default branch comes from the forge, never a local origin/HEAD that
+  // may be stale; unknown refuses (and is asked again: it may be a blip).
+  let defaultBranch: string | undefined;
+  try {
+    defaultBranch = await input.forge.defaultBranch?.();
+  } catch (error) {
+    return early(
+      'forge-unreadable',
+      `could not read the default branch of ${input.forge.repo}: ${(error as Error).message}`
+    );
+  }
+  if (defaultBranch === undefined) {
+    return early(
+      'forge-unreadable',
+      `the forge cannot say which branch of ${input.forge.repo} is the default`
+    );
+  }
+  const base = await readBaseLand(io.runProcess, input.worktree, defaultBranch);
   if (!base.ok) return early('config-unreadable', base.detail);
   const { land } = base;
 
@@ -175,15 +225,18 @@ export async function guardArm(input: GuardInput, io: GuardIo): Promise<GuardRes
   }
   let requiredChecks: string[] | null = null;
   try {
-    requiredChecks = (await input.forge.requiredChecks?.(ARM_BASE)) ?? null;
+    requiredChecks = (await input.forge.requiredChecks?.(defaultBranch)) ?? null;
   } catch {
     requiredChecks = null;
   }
   const reviewedSha = input.reviewedSha?.toLowerCase() ?? null;
   const policy = policyFor(land);
+  let mergeSettings = await mergeSettingsOf(input.forge, defaultBranch);
   const decision = decideArm(
     {
       ...facts,
+      defaultBranch,
+      mergeSettings,
       ...(await labelTimes(input.forge, input.pr, facts, policy.securityLabel)),
       requiredChecks,
       reviewedSha,
@@ -198,7 +251,7 @@ export async function guardArm(input: GuardInput, io: GuardIo): Promise<GuardRes
   if (touchesDependency(facts.files)) {
     let queue = null;
     try {
-      queue = (await input.forge.dependencyQueue?.(ARM_BASE)) ?? null;
+      queue = (await input.forge.dependencyQueue?.(defaultBranch)) ?? null;
     } catch {
       queue = null;
     }
@@ -212,6 +265,7 @@ export async function guardArm(input: GuardInput, io: GuardIo): Promise<GuardRes
     return {
       ok: true,
       preArm: land.preArm.map((entry) => ({ entry: describeEntry(entry), result: 'skipped' })),
+      merge: routeOf(mergeSettings),
     };
   }
   if (input.preArm === 'defer') {
@@ -256,9 +310,13 @@ export async function guardArm(input: GuardInput, io: GuardIo): Promise<GuardRes
       preArm: pre.outcomes,
     };
   }
+  // The merge settings too: a queue switched to MERGE meanwhile refuses.
+  mergeSettings = await mergeSettingsOf(input.forge, defaultBranch);
   const again = decideArm(
     {
       ...after,
+      defaultBranch,
+      mergeSettings,
       ...(await labelTimes(input.forge, input.pr, after, policy.securityLabel)),
       requiredChecks,
       reviewedSha,
@@ -279,7 +337,7 @@ export async function guardArm(input: GuardInput, io: GuardIo): Promise<GuardRes
   if (touchesDependency(after.files)) {
     let queue = null;
     try {
-      queue = (await input.forge.dependencyQueue?.(ARM_BASE)) ?? null;
+      queue = (await input.forge.dependencyQueue?.(defaultBranch)) ?? null;
     } catch {
       queue = null;
     }
@@ -294,19 +352,20 @@ export async function guardArm(input: GuardInput, io: GuardIo): Promise<GuardRes
       };
     }
   }
-  return { ok: true, preArm: pre.outcomes };
+  return { ok: true, preArm: pre.outcomes, merge: routeOf(mergeSettings) };
 }
 
 /**
  * Whether a refusal holds for the commit it was about, so a caller that
  * retries asks again only for a new reviewed commit: a failed `land.preArm`
- * check (expensive to repeat), a fork, or a base other than `main` (neither
- * changes while the commit does not). Every other refusal can clear on its own
- * (a freeze lifts, a label is added, a check reruns) and is asked again.
+ * check (expensive to repeat), or a fork (which never changes while the commit
+ * does not). Every other refusal can clear on its own (a freeze lifts, a label
+ * is added, a check reruns, a stacked PR is retargeted to the default branch
+ * with the same head) and is asked again.
  *
  * @param result - A refusal.
  * @returns `true` when it sticks to the commit.
  */
 export function refusalSticksToCommit(result: Extract<GuardResult, { ok: false }>): boolean {
-  return result.ranPreArm || result.reason === 'fork' || result.reason === 'base-not-main';
+  return result.ranPreArm || result.reason === 'fork';
 }

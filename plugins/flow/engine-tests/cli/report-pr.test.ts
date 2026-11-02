@@ -747,7 +747,7 @@ describe('flow pr', () => {
     let seen: unknown;
     armGuard = recordingGuard(() => {
       seen = stored().pr;
-      return { ok: true, preArm: [] };
+      return { ok: true, preArm: [], merge: 'queue' };
     });
     await flow([...args, '--arm']);
     expect(seen).toMatchObject({ armed: false, disarmedForReview: true });
@@ -783,15 +783,15 @@ describe('flow pr', () => {
     });
   });
 
-  // With no guard injected, the real one runs. This origin has no main, so it
-  // cannot read the base config and refuses: the default is never "allow".
+  // With no guard injected, the real one runs. This fake forge cannot name the
+  // default branch, so the guard refuses: the default is never "allow".
   it('runs the real guard by default, which refuses what it cannot read', async () => {
     writeRun(drain({ pushedSha: head, reviewedSha: head, verdict: 'clean' }), head);
     armGuard = null;
     const r = await flow([...args, '--arm']);
     expect(r.code).toBe(0);
     expect(r.forge.calls.some((c) => c.method === 'arm')).toBe(false);
-    expect(r.json.armRefused).toMatchObject({ reason: 'config-unreadable' });
+    expect(r.json.armRefused).toMatchObject({ reason: 'forge-unreadable' });
   });
 
   describe('naming the reviewer', () => {
@@ -821,6 +821,14 @@ describe('flow pr', () => {
       run('commit', '-q', '-m', 'main config');
       run('push', '-q', 'origin', 'main');
       rmSync(clone, { recursive: true, force: true });
+      // main is the default branch here, so the PR targets it and its list is
+      // the one read (DOR-3256: the base's list, not a literal main's).
+      execFileSync('git', ['--git-dir', origin, 'symbolic-ref', 'HEAD', 'refs/heads/main']);
+      execFileSync('git', ['fetch', '-q', 'origin', 'main'], { cwd: project.dir, stdio: 'ignore' });
+      execFileSync('git', ['remote', 'set-head', 'origin', 'main'], {
+        cwd: project.dir,
+        stdio: 'ignore',
+      });
     }
 
     function mentions(calls: { method: string; arg?: unknown }[]): string[] {

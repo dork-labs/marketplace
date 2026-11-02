@@ -56,6 +56,7 @@ import type { FlowStateFile } from '../flow-state-file.ts';
 import { judgeEjection } from '../forge/ejection.ts';
 import type { Forge } from '../forge/types.ts';
 import type { ArmGuard } from '../cli/context.ts';
+import type { ArmMerge } from '../land/arm-decision.ts';
 import { refusalSticksToCommit } from '../land/arm-guard.ts';
 import { launchAccountFor } from '../launchers/common.ts';
 import { findTranscript } from '../launchers/prove-account.ts';
@@ -1134,13 +1135,15 @@ export async function runPass(deps: PassDeps): Promise<PassReport> {
         // too once the head is any other commit (--match-head-commit).
         const n = action.pr.number;
         const status = await deps.forge.prStatus(n);
+        // The merge route the guard checked (DOR-3256); nothing arms without one.
+        let merge: ArmMerge | null = null;
         if (status.state === 'open' && status.headSha === action.sha) {
           // The arm guard (DOR-3262), with its land.preArm checks: the drain is
           // the one place that runs them (flow pr and flow review leave them
           // here). Any refusal records the PR unarmed and waiting to re-arm, so
           // the next pass asks again (a freeze lifts, a red check reruns), never
           // an ejection's "fix CI". A refusal that sticks to the commit (a
-          // failed check, a fork, a base other than main) also records it, so
+          // failed check, a fork) also records it, so
           // only a new reviewed commit is asked about again.
           const guard = await deps.armGuard({
             forge: deps.forge,
@@ -1169,6 +1172,7 @@ export async function runPass(deps: PassDeps): Promise<PassReport> {
             );
             return `did not arm #${n} at ${short(action.sha)} (${guard.reason}): ${guard.detail}`;
           }
+          merge = guard.merge;
         }
         let reserved = false;
         if (status.state === 'open' && status.headSha === action.sha) {
@@ -1192,11 +1196,11 @@ export async function runPass(deps: PassDeps): Promise<PassReport> {
               : undefined
           );
         }
-        if (!reserved) {
+        if (!reserved || merge === null) {
           return `did not arm #${n}: ${short(action.sha)} is no longer the reviewed head`;
         }
         try {
-          await deps.forge.arm(n, action.sha);
+          await deps.forge.arm(n, action.sha, merge);
         } catch (error) {
           await supervisorWrite(run.issueId, (r) =>
             r.drain.pr?.number === n

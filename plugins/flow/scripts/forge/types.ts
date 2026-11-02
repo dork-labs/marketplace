@@ -13,6 +13,7 @@
  */
 
 import { ConfigError, EXIT, FlowError } from '../errors.ts';
+import type { ArmMerge, MergeSettings } from '../land/arm-decision.ts';
 import type { OpenPr } from './open-prs.ts';
 
 /** An open pull request found or created on a branch. */
@@ -201,9 +202,22 @@ export interface Forge {
   /**
    * Arm auto-merge for the reviewed commit only: the forge refuses when the
    * PR's head is not `headSha` (GitHub: `--match-head-commit`), so a push that
-   * lands after the review can never merge through this arm.
+   * lands after the review can never merge through this arm. `headSha` must be
+   * a full SHA; anything else throws before the forge is asked. `merge` is the
+   * route the arm guard read (DOR-3256): `queue` passes no method flag (the
+   * queue sets it), `squash` passes `--squash`.
    */
-  arm(pr: number, headSha: string): Promise<void>;
+  arm(pr: number, headSha: string, merge: ArmMerge): Promise<void>;
+  /**
+   * The repository's default branch, from the forge. Optional: a forge without
+   * it reads as unknown, and the arm guard refuses.
+   */
+  defaultBranch?(): Promise<string>;
+  /**
+   * How a merge into `base` would go (DOR-3256). Optional: a forge without it
+   * reads as unknown, and the arm guard refuses.
+   */
+  mergeSettings?(base: string): Promise<MergeSettings>;
   /** Disarm auto-merge. */
   disarm(pr: number): Promise<void>;
   /**

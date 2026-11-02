@@ -58,7 +58,7 @@ export interface ClearanceFacts {
   queued: boolean;
   /** The arm guard's facts: head, checks and labels. */
   facts: ArmFacts;
-  /** The checks `main` requires, or `null` when the forge cannot tell (every check counts). */
+  /** The checks the default branch requires, or `null` when the forge cannot tell (every check counts). */
   requiredChecks: string[] | null;
   /** When the head last arrived as the PR's head, or `null` when unknown. */
   headSeenAt: string | null;

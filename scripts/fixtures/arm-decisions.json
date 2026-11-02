@@ -2,7 +2,7 @@
   "about": [
     "The decision cases for the two things in this repo that decide whether a pull request may be armed to merge by itself: scripts/should-arm-automerge.sh (the repo gate, a future merge-tail bot) and flow's arm guard (plugins/flow/scripts/land/arm-decision.ts, run by flow before it arms).",
     "Both suites run every row: scripts/test-should-arm-automerge.sh checks `gate`, plugins/flow/engine-tests/land/arm-decision.test.ts checks `guard`. A row with only one of them fails both suites, so a change to either rule has to say what the other does with the same pull request.",
-    "Each case is the `green` payload bent by one jq `mutation`, so a failure names the field. The two answers differ on purpose where the guard is not a bot: GitHub's auto-merge waits for pending checks and for mergeability on its own, so the guard lets those through, and it refuses things the repo gate never looks at (a moved head, a fork, a base other than main, a release freeze, a security path without its label, or with a label added before the head arrived: `securityLabelledAt` against `headArrivedAt`). `why` says why the row exists."
+    "Each case is the `green` payload bent by one jq `mutation`, so a failure names the field. The two answers differ on purpose where the guard is not a bot: GitHub's auto-merge waits for pending checks and for mergeability on its own, so the guard lets those through, and it refuses things the repo gate never looks at (a moved head, a fork, a base other than the repository's default branch, a merge that would not squash, a release freeze, a security path without its label, or with a label added before the head arrived: `securityLabelledAt` against `headArrivedAt`). `why` says why the row exists."
   ],
   "green": {
     "number": 1,
@@ -22,10 +22,12 @@
     "headRefOid": "1111111111111111111111111111111111111111",
     "reviewedSha": "1111111111111111111111111111111111111111",
     "baseRefName": "main",
+    "defaultBranch": "main",
     "isCrossRepository": false,
     "requiredChecks": ["flow plugin", "skills and manifests", "script fixtures"],
     "files": ["plugins/flow/README.md"],
     "freeze": null,
+    "mergeSettings": { "queueMethod": "SQUASH", "squashAllowed": true, "allowedMethods": null },
     "headArrivedAt": "2026-10-01T00:00:00Z",
     "securityLabelledAt": null
   },
@@ -176,10 +178,66 @@
       "name": "base is not main",
       "mutation": ".baseRefName = \"release\"",
       "gate": "ARM",
-      "guard": "REFUSE base-not-main",
-      "why": "Security condition 3."
+      "guard": "REFUSE base-not-default",
+      "why": "Security condition 3: a PR merges only into the repository's default branch."
     },
-    { "name": "base unreadable", "mutation": "del(.baseRefName)", "gate": "ARM", "guard": "REFUSE base-not-main" },
+    { "name": "base unreadable", "mutation": "del(.baseRefName)", "gate": "ARM", "guard": "REFUSE base-not-default" },
+    {
+      "name": "stacked PR into its parent branch",
+      "mutation": ".baseRefName = \"feature/parent-layer\"",
+      "gate": "ARM",
+      "guard": "REFUSE base-not-default",
+      "why": "A stacked layer armed against its parent merges into the parent, not the default branch, and the parent can then land without it (DOR-3256)."
+    },
+    {
+      "name": "default branch is not main",
+      "mutation": ".baseRefName = \"trunk\" | .defaultBranch = \"trunk\"",
+      "gate": "ARM",
+      "guard": "ARM",
+      "why": "Every team: the base that arms is the repository's default branch, whatever it is called."
+    },
+    { "name": "main when the default branch is another", "mutation": ".defaultBranch = \"trunk\"", "gate": "ARM", "guard": "REFUSE base-not-default" },
+    { "name": "default branch unreadable", "mutation": "del(.defaultBranch)", "gate": "ARM", "guard": "REFUSE base-not-default" },
+    { "name": "default branch empty", "mutation": ".defaultBranch = \"\" | .baseRefName = \"\"", "gate": "ARM", "guard": "REFUSE base-not-default" },
+    { "name": "base differs from the default only in case", "mutation": ".baseRefName = \"Main\"", "gate": "ARM", "guard": "REFUSE base-not-default" },
+
+    {
+      "name": "no merge queue, squash allowed",
+      "mutation": ".mergeSettings.queueMethod = null",
+      "gate": "ARM",
+      "guard": "ARM",
+      "why": "Without a queue flow arms with --squash, which the repository allows."
+    },
+    {
+      "name": "merge queue merges",
+      "mutation": ".mergeSettings.queueMethod = \"MERGE\"",
+      "gate": "ARM",
+      "guard": "REFUSE not-squash",
+      "why": "The queue sets the method, and the post-merge squash check needs a squash (DOR-3256)."
+    },
+    { "name": "merge queue rebases", "mutation": ".mergeSettings.queueMethod = \"REBASE\"", "gate": "ARM", "guard": "REFUSE not-squash" },
+    { "name": "merge queue method in lower case", "mutation": ".mergeSettings.queueMethod = \"squash\"", "gate": "ARM", "guard": "ARM" },
+    { "name": "merge queue method unreadable", "mutation": "del(.mergeSettings.queueMethod)", "gate": "ARM", "guard": "REFUSE not-squash" },
+    { "name": "merge queue method empty", "mutation": ".mergeSettings.queueMethod = \"\"", "gate": "ARM", "guard": "REFUSE not-squash" },
+    {
+      "name": "no merge queue, squash turned off",
+      "mutation": ".mergeSettings.queueMethod = null | .mergeSettings.squashAllowed = false",
+      "gate": "ARM",
+      "guard": "REFUSE not-squash",
+      "why": "The repository refuses squash merges, so --squash would never land."
+    },
+    { "name": "no merge queue, squash setting unreadable", "mutation": ".mergeSettings.queueMethod = null | .mergeSettings.squashAllowed = null", "gate": "ARM", "guard": "REFUSE not-squash" },
+    {
+      "name": "no merge queue, a ruleset forbids squash",
+      "mutation": ".mergeSettings.queueMethod = null | .mergeSettings.allowedMethods = [\"merge\", \"rebase\"]",
+      "gate": "ARM",
+      "guard": "REFUSE not-squash",
+      "why": "A ruleset's allowed merge methods hold over the repository setting."
+    },
+    { "name": "no merge queue, a ruleset allows squash", "mutation": ".mergeSettings.queueMethod = null | .mergeSettings.allowedMethods = [\"squash\"]", "gate": "ARM", "guard": "ARM" },
+    { "name": "no merge queue, a ruleset allows nothing", "mutation": ".mergeSettings.queueMethod = null | .mergeSettings.allowedMethods = []", "gate": "ARM", "guard": "REFUSE not-squash" },
+    { "name": "merge settings unreadable", "mutation": "del(.mergeSettings)", "gate": "ARM", "guard": "REFUSE not-squash" },
+    { "name": "merge settings not an object", "mutation": ".mergeSettings = \"SQUASH\"", "gate": "ARM", "guard": "REFUSE not-squash" },
 
     {
       "name": "security path without the label",

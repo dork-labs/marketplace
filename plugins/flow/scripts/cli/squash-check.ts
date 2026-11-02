@@ -1,6 +1,6 @@
 /**
  * `flow squash-check <identifier> [--pr <n>]` (DOR-3262): after a run's PR
- * merged, check that the squash commit on `main` is what was reviewed
+ * merged, check that the squash commit on the default branch is what was reviewed
  * (`land/squash-verify.ts`). The drain runs the same check by itself when it
  * sees the PR merge; this verb is for runs outside the drain, and for a person.
  *

@@ -22,6 +22,9 @@ import {
   failingChecks,
   parsePrView,
   checkNames,
+  combineQueueMethods,
+  parseMergeQueue,
+  parseMergeSettings,
   parseRequiredChecks,
   pendingChecks,
   reportedChecks,
@@ -267,10 +270,22 @@ describe('the other gh calls', () => {
 
   // arm and disarm are gh pr merge --auto / --disable-auto; arm is tied to the
   // reviewed commit with --match-head-commit, so a later push cannot merge.
-  it('arm and disarm', async () => {
+  // DOR-3256: a merge queue sets the method and refuses a method flag, so the
+  // queue route passes none; with no queue, gh needs --squash to arm at all.
+  const SHA = 'abc123'.padEnd(40, '0');
+  it('arm into a merge queue passes no method flag, and disarm', async () => {
     const { gh, forge } = forgeWith({ 'pr merge': ok('') });
-    await forge.arm(5, 'abc123');
+    await forge.arm(5, SHA, 'queue');
     await forge.disarm(5);
+    expect(gh.calls.map((c) => c.args)).toEqual([
+      ['pr', 'merge', '5', '-R', 'dork-labs/marketplace', '--auto', '--match-head-commit', SHA],
+      ['pr', 'merge', '5', '-R', 'dork-labs/marketplace', '--disable-auto'],
+    ]);
+  });
+
+  it('arm with no merge queue passes --squash', async () => {
+    const { gh, forge } = forgeWith({ 'pr merge': ok('') });
+    await forge.arm(5, SHA, 'squash');
     expect(gh.calls.map((c) => c.args)).toEqual([
       [
         'pr',
@@ -279,11 +294,96 @@ describe('the other gh calls', () => {
         '-R',
         'dork-labs/marketplace',
         '--auto',
+        '--squash',
         '--match-head-commit',
-        'abc123',
+        SHA,
       ],
-      ['pr', 'merge', '5', '-R', 'dork-labs/marketplace', '--disable-auto'],
     ]);
+  });
+
+  it('arm refuses a short or missing SHA, or no squash route, before gh runs', async () => {
+    const { gh, forge } = forgeWith({ 'pr merge': ok('') });
+    await expect(forge.arm(5, 'abc123', 'queue')).rejects.toThrow(ForgeError);
+    await expect(forge.arm(5, '', 'squash')).rejects.toThrow('not a full commit SHA');
+    await expect(forge.arm(5, `${SHA} --admin`, 'squash')).rejects.toThrow(ForgeError);
+    await expect(forge.arm(5, SHA, 'merge' as never)).rejects.toThrow('no squash route');
+    expect(gh.calls).toEqual([]);
+  });
+
+  it('defaultBranch reads the repository, and refuses a name it would not fetch', async () => {
+    const { gh, forge } = forgeWith({
+      'api repos/dork-labs/marketplace': ok({ default_branch: 'trunk' }),
+    });
+    expect(await forge.defaultBranch?.()).toBe('trunk');
+    expect(gh.calls[0].args).toEqual(['api', 'repos/dork-labs/marketplace']);
+    for (const answer of [
+      {},
+      { default_branch: '' },
+      { default_branch: '-x' },
+      { default_branch: 'a..b' },
+    ]) {
+      const bad = forgeWith({ 'api repos/dork-labs/marketplace': ok(answer) });
+      await expect(bad.forge.defaultBranch?.()).rejects.toThrow(ForgeError);
+    }
+  });
+
+  /** GraphQL's answer for the base's merge queue: its method, or no queue. */
+  const queueAnswer = (method: string | null) =>
+    ok({
+      data: {
+        repository: {
+          mergeQueue: method === null ? null : { configuration: { mergeMethod: method } },
+        },
+      },
+    });
+
+  it('mergeSettings reads the branch rules, the repository and the queue', async () => {
+    const rules = [
+      { type: 'merge_queue', parameters: { merge_method: 'SQUASH' } },
+      { type: 'deletion' },
+    ];
+    const { gh, forge } = forgeWith({
+      'api graphql': queueAnswer('SQUASH'),
+      'api --paginate': {
+        code: 0,
+        stdout: rules.map((r) => JSON.stringify(r)).join('\n'),
+        stderr: '',
+      },
+      'api repos/dork-labs/marketplace': ok({ allow_squash_merge: true }),
+    });
+    expect(await forge.mergeSettings?.('main')).toEqual({
+      queueMethod: 'SQUASH',
+      squashAllowed: true,
+      allowedMethods: null,
+    });
+    expect(gh.calls.map((c) => c.args.at(-1))).toEqual([
+      'repos/dork-labs/marketplace/rules/branches/main?per_page=100',
+      'repos/dork-labs/marketplace',
+      'branch=main',
+    ]);
+    const bad = forgeWith({
+      'api graphql': queueAnswer(null),
+      'api --paginate': ok([]),
+      'api repos/dork-labs/marketplace': ok([]),
+    });
+    await expect(bad.forge.mergeSettings?.('main')).rejects.toThrow(ForgeError);
+  });
+
+  // Review finding: a queue set in classic branch protection has no ruleset
+  // rule, so only GraphQL sees it. Missed, flow would arm with --squash and
+  // the queue would merge by its own method.
+  it('mergeSettings sees a queue the rules endpoint cannot, and fails closed on GraphQL', async () => {
+    const replies = (graphql: ReturnType<typeof ok>) => ({
+      'api graphql': graphql,
+      'api --paginate': { code: 0, stdout: '', stderr: '' },
+      'api repos/dork-labs/marketplace': ok({ allow_squash_merge: true }),
+    });
+    const classic = forgeWith(replies(queueAnswer('MERGE')));
+    expect((await classic.forge.mergeSettings?.('main'))?.queueMethod).toBe('MERGE');
+    const none = forgeWith(replies(queueAnswer(null)));
+    expect((await none.forge.mergeSettings?.('main'))?.queueMethod).toBeNull();
+    const errors = forgeWith(replies(ok({ errors: [{ message: 'no mergeQueue field' }] })));
+    await expect(errors.forge.mergeSettings?.('main')).rejects.toThrow(ForgeError);
   });
 
   // Spec flow-multiproject §7.5: a person's verdict at the review gate lands on
@@ -582,5 +682,78 @@ describe('required checks and reported checks', () => {
     expect(
       failingChecks([...rollup, { name: 'running', conclusion: null }]).map((c) => c.name)
     ).toEqual(['c4', 'c5', 'c6']);
+  });
+});
+
+// DOR-3256: how a base merges, from its rules and the repository.
+describe('parseMergeSettings', () => {
+  const repo = { allow_squash_merge: true };
+
+  it('reads a squashing queue, upper-cased', () => {
+    expect(
+      parseMergeSettings([{ type: 'merge_queue', parameters: { merge_method: 'squash' } }], repo)
+    ).toEqual({ queueMethod: 'SQUASH', squashAllowed: true, allowedMethods: null });
+  });
+
+  it('reads no queue as null, and what the pull_request rules leave', () => {
+    expect(
+      parseMergeSettings(
+        [
+          { type: 'pull_request', parameters: { allowed_merge_methods: ['merge', 'squash'] } },
+          { type: 'pull_request', parameters: { allowed_merge_methods: ['Squash', 'rebase'] } },
+          { type: 'pull_request', parameters: {} },
+        ],
+        { allow_squash_merge: false }
+      )
+    ).toEqual({ queueMethod: null, squashAllowed: false, allowedMethods: ['squash'] });
+  });
+
+  it('a queue with no method, or two that disagree, reads as an empty method', () => {
+    expect(parseMergeSettings([{ type: 'merge_queue' }], repo)?.queueMethod).toBe('');
+    expect(
+      parseMergeSettings(
+        [
+          { type: 'merge_queue', parameters: { merge_method: 'SQUASH' } },
+          { type: 'merge_queue', parameters: { merge_method: 'MERGE' } },
+        ],
+        repo
+      )?.queueMethod
+    ).toBe('');
+  });
+
+  it('a repository that does not say reads squash as unknown', () => {
+    expect(parseMergeSettings([], {})?.squashAllowed).toBeNull();
+  });
+
+  it('an answer it does not know is null', () => {
+    expect(parseMergeSettings({ message: 'Not Found' }, repo)).toBeNull();
+    expect(parseMergeSettings([], [])).toBeNull();
+    expect(parseMergeSettings(['x'], repo)).toBeNull();
+    expect(
+      parseMergeSettings(
+        [{ type: 'pull_request', parameters: { allowed_merge_methods: 'squash' } }],
+        repo
+      )
+    ).toBeNull();
+  });
+});
+
+describe('the merge queue from GraphQL', () => {
+  it('reads a method, no queue, a queue with no method, and refuses what it does not know', () => {
+    const answer = (mergeQueue: unknown) => ({ data: { repository: { mergeQueue } } });
+    expect(parseMergeQueue(answer({ configuration: { mergeMethod: 'squash' } }))).toBe('SQUASH');
+    expect(parseMergeQueue(answer(null))).toBeNull();
+    expect(parseMergeQueue(answer({ configuration: null }))).toBe('');
+    expect(parseMergeQueue({ data: { repository: {} } })).toBeUndefined();
+    expect(parseMergeQueue({ data: null, errors: [{}] })).toBeUndefined();
+    expect(parseMergeQueue('x')).toBeUndefined();
+  });
+
+  it('combines with the rules: either seeing a queue counts, and a disagreement refuses', () => {
+    expect(combineQueueMethods(null, null)).toBeNull();
+    expect(combineQueueMethods(null, 'MERGE')).toBe('MERGE');
+    expect(combineQueueMethods('SQUASH', null)).toBe('SQUASH');
+    expect(combineQueueMethods('SQUASH', 'SQUASH')).toBe('SQUASH');
+    expect(combineQueueMethods('SQUASH', 'MERGE')).toBe('');
   });
 });
