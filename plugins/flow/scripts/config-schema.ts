@@ -932,7 +932,7 @@ export const DrainSchema = z
     /**
      * Before ranking, refresh a Claude Code account whose weekly reading is
      * stale with one short probe turn, at most once an hour per account
-     * (DOR-3704). Each costs a little of that account's 5-hour window. Off: a
+     * (DOR-3704), never the main account. Each costs a little of that account's 5-hour window. Off: a
      * stale account stays out until it is used or probed by hand.
      */
     refreshStaleUsage: z.boolean().default(true),

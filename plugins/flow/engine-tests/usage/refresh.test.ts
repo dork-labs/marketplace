@@ -205,6 +205,22 @@ describe('refreshStaleUsage', () => {
     expect(out.accounts[0]?.windows).toEqual(STALE);
   });
 
+  it.each([
+    ['role main', { policy: { ...POLICY, role: 'main' } as unknown as Account['policy'] }],
+    ['the account `default` names', { isDefault: true }],
+    ['the implicit default id', { id: 'default' }],
+    ["this computer's own sign-in", { implicit: true }],
+  ])('never probes the main account (%s): it stays out while stale', async (_name, over) => {
+    // Security's Must on #148: a probe would spend the owner's own sign-in unasked.
+    const main = account('mine', STALE, over as Partial<Account>);
+    const d = deps({ mine: FRESH, default: FRESH });
+    const out = await refreshStaleUsage(input([main]), d);
+    expect(d.probed).toEqual([]);
+    expect(d.saved).toEqual([]);
+    expect(out.accounts[0]?.windows).toEqual(STALE);
+    expect(eligible(out)).toEqual([]);
+  });
+
   it('never probes an account with no folder', async () => {
     const d = deps({ old: FRESH });
     await refreshStaleUsage(input([account('old', STALE, { path: null })]), d);

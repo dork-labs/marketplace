@@ -2,7 +2,7 @@
  * The drain's stale-reading refresh (DOR-3704). An account whose weekly reading
  * is over a day old is kept out of ranking (`stale-usage`, DOR-3263). Before
  * ranking, `flow drain` gives each Claude Code account kept out for that reason
- * alone one probe turn, the same turn `flow usage probe` runs, and ranks it on
+ * alone, other than the owner's main sign-in, one probe turn, the same turn `flow usage probe` runs, and ranks it on
  * what the probe saved.
  *
  * - At most one try per account per {@link REFRESH_INTERVAL_MS}, recorded in
@@ -28,7 +28,7 @@ import {
   writeUsageSampleState,
   type UsageSampleState,
 } from '../drain/usage-sample.ts';
-import { loadAccounts, resolveDorkHome } from '../fleet/accounts.ts';
+import { IMPLICIT_ACCOUNT_ID, loadAccounts, resolveDorkHome } from '../fleet/accounts.ts';
 import { readLedger } from '../fleet/usage-ledger.ts';
 import type { VerbContext } from './context.ts';
 import { liveCounts, type AssignmentInput, type NextConfig } from './next.ts';
@@ -65,6 +65,21 @@ export interface RefreshDeps {
 }
 
 /**
+ * Whether the account is the owner's own sign-in, which flow never probes
+ * unasked: role `main`, the account `default` names, the `default` id, or this
+ * computer's implicit sign-in. A stale one stays out until it is used or
+ * probed by hand.
+ */
+function isMainAccount(account: Account): boolean {
+  return (
+    account.policy.role === 'main' ||
+    account.isDefault === true ||
+    account.id === IMPLICIT_ACCOUNT_ID ||
+    account.implicit
+  );
+}
+
+/**
  * Refresh the accounts kept out only by a stale reading, and return the input
  * with their windows as the ledger reads after the probe. Never throws.
  *
@@ -97,7 +112,11 @@ export async function refreshStaleUsage(
       .map((entry) => `${entry.runtime}:${entry.id}`)
   );
   const candidates = input.accounts.filter(
-    (a) => a.runtime === 'claude-code' && a.path !== null && staleOnly.has(`${a.runtime}:${a.id}`)
+    (a) =>
+      a.runtime === 'claude-code' &&
+      a.path !== null &&
+      !isMainAccount(a) &&
+      staleOnly.has(`${a.runtime}:${a.id}`)
   );
   if (candidates.length === 0) return input;
 
