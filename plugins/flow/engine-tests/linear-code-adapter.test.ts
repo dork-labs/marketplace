@@ -460,7 +460,13 @@ describe('failures', () => {
 });
 
 describe('getInbox (contract 3.0.0, DOR-3669)', () => {
-  const member = { id: 'u-m', active: true, guest: false, app: false };
+  const member = {
+    id: 'u-m',
+    active: true,
+    guest: false,
+    app: false,
+    teams: { nodes: [{ id: TEAM.id }] },
+  };
   const ownIssue = {
     ...issueNode('DOR-101', { labels: { nodes: [LABEL.typeTask] } }),
     team: TEAM,
@@ -475,6 +481,7 @@ describe('getInbox (contract 3.0.0, DOR-3669)', () => {
     body: `says ${id}`,
     createdAt: `2026-09-26T11:${String(minute).padStart(2, '0')}:00.000Z`,
     user,
+    botActor: null,
     issue,
   });
 
@@ -489,8 +496,20 @@ describe('getInbox (contract 3.0.0, DOR-3669)', () => {
           pageInfo: { hasNextPage: false, endCursor: null },
           nodes: [
             comment('late', 9, member),
-            comment('guest', 5, { id: 'u-g', active: true, guest: true, app: false }),
-            comment('app', 6, { id: 'u-a', active: true, guest: false, app: true }),
+            comment('guest', 5, {
+              id: 'u-g',
+              active: true,
+              guest: true,
+              app: false,
+              teams: { nodes: [{ id: TEAM.id }] },
+            }),
+            comment('app', 6, {
+              id: 'u-a',
+              active: true,
+              guest: false,
+              app: true,
+              teams: { nodes: [{ id: TEAM.id }] },
+            }),
             comment('none', 7, null),
             comment('flagless', 8, { id: 'u-f' }),
             comment('foreign', 1, member, {
@@ -520,7 +539,7 @@ describe('getInbox (contract 3.0.0, DOR-3669)', () => {
       comment: { author: 'u-m', mentions: [], body: 'says late' },
     });
     expect(warnings.join('\n')).toMatch(/outside team/);
-    expect(linear.INBOX_QUERY).toContain(linear.COMMENT_USER_FIELDS);
+    expect(linear.INBOX_QUERY).toContain(linear.COMMENT_TRUST_FIELDS);
     expect(linear.INBOX_QUERY).toMatch(/issue: \{ team: \{ id: \{ eq: \$teamId \} \} \}/);
   });
 
@@ -600,9 +619,22 @@ describe('getCurrentUser and getItem', () => {
                 id: 'c2',
                 body: 'second',
                 createdAt: '2026-09-21T10:00:00.000Z',
-                user: { id: 'user-a', active: true, guest: false, app: false },
+                user: {
+                  id: 'user-a',
+                  active: true,
+                  guest: false,
+                  app: false,
+                  teams: { nodes: [{ id: TEAM.id }] },
+                },
+                botActor: null,
               },
-              { id: 'c1', body: 'first', createdAt: '2026-09-20T10:00:00.000Z', user: null },
+              {
+                id: 'c1',
+                body: 'first',
+                createdAt: '2026-09-20T10:00:00.000Z',
+                user: null,
+                botActor: null,
+              },
             ],
           },
         },
@@ -611,7 +643,7 @@ describe('getCurrentUser and getItem', () => {
     const item = await adapter.getItem('DOR-101', { comments: 2 });
     expect(calls[0]).toMatchObject({
       operation: 'FlowItemComments',
-      variables: { id: 'DOR-101', comments: 2 },
+      variables: { id: 'DOR-101', comments: 2, teamId: TEAM.id },
     });
     expect(item).toMatchObject({
       identifier: 'DOR-101',
@@ -638,18 +670,31 @@ describe('getCurrentUser and getItem', () => {
     ]);
   });
 
-  it("reads a comment's trust only from Linear's account flags (DOR-3669)", async () => {
+  it("reads a comment's trust only from Linear's own records (DOR-3669, DOR-3677)", async () => {
     // Purpose: a guest, an app (an integration), a deactivated account, a
     // comment with no user, and a user Linear sent without the flags are each
-    // untrusted; only an active, non-guest, non-app user is a member. Fails if
-    // any field flow can't confirm defaults to trusted.
-    const users: [string, Record<string, unknown> | null, boolean][] = [
-      ['member', { id: 'u-m', active: true, guest: false, app: false }, true],
-      ['guest', { id: 'u-g', active: true, guest: true, app: false }, false],
-      ['app', { id: 'u-a', active: true, guest: false, app: true }, false],
-      ['deactivated', { id: 'u-d', active: false, guest: false, app: false }, false],
+    // untrusted; only an active, non-guest, non-app user is a member. A member
+    // of the workspace but not of the configured team is untrusted (Security's
+    // S3), and so is a member's comment an app wrote for them (botActor, S4).
+    // Fails if any field flow can't confirm defaults to trusted.
+    const member = {
+      id: 'u-m',
+      active: true,
+      guest: false,
+      app: false,
+      teams: { nodes: [{ id: TEAM.id }] },
+    };
+    const users: [string, Record<string, unknown> | null, boolean, unknown?][] = [
+      ['member', member, true],
+      ['guest', { ...member, id: 'u-g', guest: true }, false],
+      ['app', { ...member, id: 'u-a', app: true }, false],
+      ['deactivated', { ...member, id: 'u-d', active: false }, false],
       ['no flags', { id: 'u-n' }, false],
       ['no user', null, false],
+      ['other team', { ...member, id: 'u-o', teams: { nodes: [{ id: 'other-team' }] } }, false],
+      ['no teams', { ...member, id: 'u-t', teams: undefined }, false],
+      ['via an app', member, false, { type: 'oauthClient' }],
+      ['no botActor field', member, false, undefined],
     ];
     const { adapter } = build(() =>
       okEnvelope({
@@ -658,11 +703,12 @@ describe('getCurrentUser and getItem', () => {
           team: TEAM,
           relations: { nodes: [] },
           comments: {
-            nodes: users.map(([name, user], i) => ({
+            nodes: users.map(([name, user, , botActor], i) => ({
               id: name,
               body: name,
-              createdAt: `2026-09-2${i}T10:00:00.000Z`,
+              createdAt: `2026-09-${10 + i}T10:00:00.000Z`,
               user,
+              ...(name === 'no botActor field' ? {} : { botActor: botActor ?? null }),
             })),
           },
         },
@@ -672,6 +718,11 @@ describe('getCurrentUser and getItem', () => {
     expect(Object.fromEntries((item.comments ?? []).map((c) => [c.id, c.authorIsTrusted]))).toEqual(
       Object.fromEntries(users.map(([name, , trusted]) => [name, trusted]))
     );
+    // Membership is asked of the configured team, by id, in both reads.
+    for (const query of [linear.ITEM_WITH_COMMENTS_QUERY, linear.INBOX_QUERY]) {
+      expect(query).toContain('teams(filter: { id: { eq: $teamId } })');
+      expect(query).toContain('botActor { type }');
+    }
   });
 
   it("reports a missing item and another team's item as precondition failures", async () => {

@@ -140,6 +140,12 @@ const FLOW_ADDRESS_TOKENS = ['/flow', '@flow'];
  * Whether the comment is the agent's own (rule 1): authored by the agent account,
  * or — in shared-account mode — carrying the `identity.marker`. The marker check
  * is the only signal when multiple agents share one tracker account.
+ *
+ * Anyone can type the marker, so here it only ever silences a comment, which
+ * is safe. It must never grant anything: the drain's answer search anchors on
+ * the agent's account, not the marker (DOR-3677). Keep the marker from other
+ * accounts here, too: it holds `/flow`, so another flow agent's comment would
+ * otherwise read as directly addressed (rule 2).
  */
 function isAgentsOwnComment(comment: InboxComment, identity: CommentIdentity): boolean {
   // An unknown author (`''`) is never the agent, even if `identity.agent` is

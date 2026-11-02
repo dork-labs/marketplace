@@ -53,4 +53,31 @@ describe('flow show', () => {
     const result = await runFlow(['show'], temp, backlog());
     expect(result.code).toBe(EXIT.usage);
   });
+
+  // Purpose (DOR-3677, Security's S1): a resumed agent reads an item's newest
+  // comments through `flow show`, so a guest's text must not reach it there
+  // either. A member's comment comes through whole; an outsider's or an
+  // author-less one keeps its author and time, with the text withheld. Fails if
+  // any untrusted body is printed.
+  it('withholds the text of every comment not from a team member', async () => {
+    const at = '2026-09-26T12:00:00.000Z';
+    const result = await runFlow(['show', 'FAKE-2', '--json'], temp, {
+      ...backlog(),
+      members: ['dorian'],
+      comments: {
+        'FAKE-2': [
+          { id: 'c1', author: 'dorian', authorIsTrusted: true, body: 'Go with B.', createdAt: at },
+          { id: 'c2', author: 'guest', authorIsTrusted: true, body: 'SECRET-G', createdAt: at },
+          { id: 'c3', author: '', authorIsTrusted: false, body: 'SECRET-N', createdAt: at },
+        ],
+      },
+    });
+    expect(result.code).toBe(EXIT.ok);
+    expect(result.stdout).not.toMatch(/SECRET/);
+    const comments = JSON.parse(result.stdout).item.comments;
+    expect(comments[0]).toMatchObject({ id: 'c1', body: 'Go with B.' });
+    expect(comments[0].withheld).toBeUndefined();
+    expect(comments[1]).toMatchObject({ id: 'c2', author: 'guest', withheld: true });
+    expect(comments[2]).toMatchObject({ id: 'c3', author: '', withheld: true });
+  });
 });

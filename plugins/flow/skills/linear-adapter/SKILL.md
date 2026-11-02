@@ -54,7 +54,7 @@ SPEC section 3's 16 required verbs, the groom-only `getBacklogSnapshot`, and the
 - `searchIssues(term:, includeArchived: false)` is cross-team too: post-filter by identifier prefix.
 - Relations: read `relations` and `inverseRelations` through the team node. Any other path's answer (the get slug returns `null`) means unknown, never "no blockers". Read cross-team edges; never write their far end.
 - A large answer spills to `outputFilePath`: read it with `jq`. Paginate with `first`/`after` only.
-- Read one issue's comments as `issue(id:){comments{nodes{id,body,user{id,active,guest,app}}}}`.
+- Read one issue's comments as `issue(id:){comments{nodes{id,body,user{id}}}}`.
 - "Entity not found" on a comment to an id that reads fine: the issue is archived; check `archivedAt`.
 
 **Bulk writes** (the groom):
@@ -110,4 +110,4 @@ The canonical spec is [`../../docs/provenance.md`](../../docs/provenance.md); do
 InboxEntry { item, occurredAt /* ISO-8601 Z */, comment: { author, authorIsTrusted, mentions[], body } }
 ```
 
-`authorIsTrusted`: parsed only by `adapter.ts`, `true` only for `user{active:true,guest:false,app:false}`; never by hand, never on `mcp`. Rules: `<flow-root>/skills/tending-tracker/SKILL.md`.
+`authorIsTrusted`: parsed only by `adapter.ts`, `true` only per `isTrustedComment`; never by hand, never on `mcp`. Rules: `<flow-root>/skills/tending-tracker/SKILL.md`.

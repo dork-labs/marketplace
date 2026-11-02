@@ -201,7 +201,7 @@ function untrustedReason(comment: InboxComment): string | null {
   if (typeof comment.authorIsTrusted !== 'boolean') {
     return `by ${JSON.stringify(author)} carries no authorIsTrusted from the adapter (contract 3.0.0)`;
   }
-  return `by ${JSON.stringify(author)} is not a member of the workspace or team`;
+  return `by ${JSON.stringify(author)} is not a team member's own comment (a guest, an integration, another team, or posted through an app)`;
 }
 
 /**

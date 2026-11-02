@@ -54,7 +54,7 @@ Optionally, `adapter.ts` beside it, so `flow claim|stage|done|create|snapshot|in
 
 ### 4. Verify (the gate)
 
-Build a fixture of the normalized `WorkItem`s your reads return: at least one item per state category, a ready and a not-ready item, one relation that resolves in the set and one that is closed or outside it. Add `comments`: one by a member, one by a guest, integration or no author. Then:
+Build a fixture of the normalized `WorkItem`s your reads return: at least one item per state category, a ready and a not-ready item, one relation that resolves in the set and one that is closed or outside it. Add `comments`: one by a member, one by a named guest or integration. Then:
 
 ```bash
 node --experimental-strip-types "<flow-root>/scripts/validate-adapter.ts" --fixture <fixture.json>

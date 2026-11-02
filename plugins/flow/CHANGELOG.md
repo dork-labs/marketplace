@@ -4,6 +4,16 @@ Installs of this plugin are pinned to a commit SHA, so a fix here does not reach
 you until you **reinstall it** (Marketplace → flow → reinstall, or re-run your
 `--plugin-dir` checkout's `git pull`). Each entry below says whether that matters.
 
+## 0.75.0
+
+**Flow's check of who may start or resume its work from a tracker comment is tighter: on Linear the author must be on your configured team, not only in the workspace, and a guest can no longer hide a member's answer to a parked question (DOR-3677). Reinstall to get it.**
+
+- On Linear, a comment counts only when its author is on the team flow works in. A member of another team in your workspace is now treated like a guest: flow ignores the comment and says so.
+- A comment an app posted for a member no longer counts. **That includes replying from Slack or through GitHub sync**: answer a parked question in Linear itself, or from DorkOS. A comment made with a member's own API key still reads as that member, so keep those keys as safe as the member's login.
+- Typing flow's marker (`— 🤖 /flow`) into a comment no longer moves where flow looks for the answer to a parked question. Before, a guest could post it after a member's answer and flow would miss the answer. Likewise, `flow status` shows a parked question only from flow's own account, never a copy someone else posted.
+- `flow show` now withholds the text of any comment not from a team member, keeping its author and time. When a parked question is answered, flow tells the agent to read the answer with `flow show`.
+- If you built your own adapter, nothing breaks: the adapter contract is 3.0.1, a wording change. It now says a trusted author is on the configured team where the tracker has teams.
+
 ## 0.74.0
 
 **Flow's commands now name the flow commands and skills they may run, instead of allowing any. Reinstall to get it; nothing else changes.**

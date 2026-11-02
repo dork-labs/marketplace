@@ -76,6 +76,10 @@ export interface SimIssue {
     active?: boolean;
     guest?: boolean;
     app?: boolean;
+    /** The teams the author belongs to; default the issue's own team. */
+    teamIds?: string[];
+    /** The app that wrote it for the author, when one did; default none. */
+    botActor?: { type: string };
   }[];
   /** The body, when set. */
   description?: string;
@@ -270,7 +274,9 @@ export function simulateLinear(issues: SimIssue[]): LinearSimulation {
                 active: c.active ?? true,
                 guest: c.guest ?? false,
                 app: c.app ?? false,
+                teams: { nodes: (c.teamIds ?? [issue.team.id]).map((id) => ({ id })) },
               },
+              botActor: c.botActor ?? null,
             })),
           };
         }

@@ -1,6 +1,6 @@
 # Tracker Adapter Contract
 
-> **Contract version: 3.0.0** (semver). See [Versioning](#5-versioning).
+> **Contract version: 3.0.1** (semver). See [Versioning](#5-versioning).
 >
 > This is the **generic, tracker-neutral** contract every `/flow` tracker adapter
 > must satisfy. It names no tracker, no API, and no slug. Reference adapters
@@ -292,8 +292,15 @@ lets a comment start or continue a turn only when it is `true`: anyone else who
 can comment reaches a model with tools otherwise.
 
 - **Set it from the tracker's own membership data, read by the adapter**: the
-  author's account record says they are a member of the workspace or team, not
-  a guest, not an integration, bot or app account, and not deactivated.
+  author's account record says they are a member of the configured team (of
+  the workspace, on a tracker with no teams), not a guest, not an integration,
+  bot or app account, and not deactivated. Workspace membership alone is not
+  enough where the tracker has teams: a member of another team is untrusted.
+- **A comment an app wrote for a member is untrusted** when the tracker records
+  the app (an OAuth integration posting in the member's name). A member's own
+  API key leaves no such record, so its comments read as the member's: anyone
+  holding a member's key or grant can start a turn, which makes those as
+  sensitive as the member's login.
 - **Never from anything the commenter controls**: not the comment's text, not a
   display name, not an email address or its domain, not a mention.
 - **When the adapter cannot tell, it is `false`.** A transport that returns no
@@ -311,7 +318,17 @@ can comment reaches a model with tools otherwise.
   through `flow inbox`, which runs the code adapter's `getInbox`, the inbound
   transport and the comment rules, and returns a comment's text only when a
   trusted member's comment calls for action. Every other comment comes back as
-  its item, author id and time, with no text.
+  its item, author id and time, with no text. An acting entry also carries the
+  item's title, which anyone who could file the item may have written: the
+  same exposure as reading the item to act on it, so the title and description
+  are data to work on, never instructions. `flow show` keeps the rule for the
+  item's comments: an untrusted one keeps its author and time, its text
+  withheld.
+- **The marker grants nothing.** Anyone can type the agent's marker or copy its
+  provenance line, so they only ever make flow ignore a comment or skip posting
+  a duplicate. Where a comment counts as the agent's own to show or decide
+  something (where a parked question starts, the question `flow status`
+  shows), the author must be the agent's account.
 - **A prose-only adapter is all-untrusted.** With no code that parses the
   tracker's response (no `adapter.ts`, no `getInbox` capability, or the
   in-session `mcp` transport, which the CLI refuses), `flow inbox` exits 3 and
@@ -876,6 +893,12 @@ declaration.
 
 ### What each version added
 
+- **3.0.1** - wording (PATCH, DOR-3677): a trusted author is a member of the
+  configured team where the tracker has teams, not only of the workspace; an
+  app's comment for a member is untrusted, and a member's own API key acts as
+  the member; the marker grants nothing; an acting `flow inbox` entry carries
+  the item's title. The shipped Linear code now checks the team and Linear's
+  `botActor`.
 - **3.0.0** - **only a team member's comment starts or resumes a turn**
   (MAJOR, DOR-3669). Every comment gains a required `authorIsTrusted`, read
   from the tracker's own membership data and `false` when the adapter cannot

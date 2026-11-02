@@ -52,7 +52,7 @@ import { runEnded, waitedOnSession, type RunEndReason } from '../run-ended.ts';
 import { requireCapabilities } from '../tracker/load.ts';
 import type { CodeAdapter, ItemComment, WorkItem } from '../tracker/types.ts';
 import { AGENT_CLAIMED, stateCoherence } from '../work-state.ts';
-import { readSnapshotFile } from './backlog.ts';
+import { loadProjectConfig, readSnapshotFile } from './backlog.ts';
 import { formatColumns } from './output.ts';
 import type { VerbContext, VerbResult } from './context.ts';
 import { readHealth, renderHealth, type Health } from './health-read.ts';
@@ -250,15 +250,41 @@ function readDrain(checkouts: readonly string[], now: Date): DrainStatus | null 
   return null;
 }
 
-/** The last comment the agent posted (it carries a provenance line), or `null`. */
-function lastQuestion(comments: readonly ItemComment[] | undefined): ParkedEntry['question'] {
-  const signed = (comments ?? []).filter((comment) =>
-    /<!--\s*(agent|flow):provenance/.test(comment.body)
+/**
+ * The last comment the agent posted (from its account, with a provenance
+ * line), or `null`. Anyone can copy the line, so the author is checked too:
+ * a guest's signed comment is never shown as the agent's question (DOR-3677).
+ */
+function lastQuestion(
+  comments: readonly ItemComment[] | undefined,
+  agentId: string
+): ParkedEntry['question'] {
+  const signed = (comments ?? []).filter(
+    (comment) =>
+      comment.author !== '' &&
+      comment.author === agentId &&
+      /<!--\s*(agent|flow):provenance/.test(comment.body)
   );
   const last = signed.at(-1);
   if (last === undefined) return null;
   const body = last.body.replace(/\n?<!--\s*(agent|flow):provenance[\s\S]*?-->\s*$/, '').trim();
   return { body, askedAt: last.createdAt };
+}
+
+/**
+ * The agent's tracker account: `identity.agent` when the config names one,
+ * else the adapter's signed-in account. `''` (no question shown, rather than a
+ * guess) when neither can be read.
+ */
+async function agentAccount(ctx: VerbContext, adapter: CodeAdapter): Promise<string> {
+  try {
+    const configured = loadProjectConfig(ctx).loaded.config.identity.agent;
+    if (configured !== 'auto') return configured;
+  } catch {
+    // No readable config: fall back to the signed-in account, as `"auto"` does.
+  }
+  if (!adapter.capabilities.includes('getCurrentUser') || !adapter.getCurrentUser) return '';
+  return (await adapter.getCurrentUser().catch(() => ({ id: '' }))).id;
 }
 
 /**
@@ -288,7 +314,8 @@ export async function run(ctx: VerbContext): Promise<VerbResult> {
     const adapter = await ctx.adapter();
     requireCapabilities(adapter, ['getItem']);
     const item = await adapter.getItem(focus, { comments: QUESTION_COMMENTS });
-    question = lastQuestion(item.comments);
+    const agentId = await agentAccount(ctx, adapter);
+    question = lastQuestion(item.comments, agentId);
     items = [item];
   } else {
     const adapter = await ctx.adapter();

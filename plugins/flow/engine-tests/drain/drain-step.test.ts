@@ -886,6 +886,12 @@ describe('drainStep: parked runs', () => {
       { kind: 'send', message: 'continue', ctx: { ...BASE, answered: true, answer } },
     ]);
     expect(render('continue', { ...BASE, answered: true, answer })).toContain(answer);
+    // It reads the answer through `flow show`, which withholds a guest's text (DOR-3677).
+    for (const ctx of [{ answer }, {}]) {
+      expect(render('continue', { ...BASE, answered: true, ...ctx })).toContain(
+        `${FLOW} show ABC-1 --json`
+      );
+    }
     // With no recorded phase it resumes as working.
     const bare = step(drain('parked', { parkedReason: 'q' }));
     expect(bare.drain.phase).toBe('working');

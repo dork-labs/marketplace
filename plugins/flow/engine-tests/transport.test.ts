@@ -451,8 +451,12 @@ describe('PollingTransport — a comment from outside the team is kept, with a w
   // plainly that it starts nothing: the comment rules ignore it.
   it.each([
     ['no author', { author: '', authorIsTrusted: false }, 'no author'],
-    ['a guest', { author: 'guest-1', authorIsTrusted: false }, 'not a member'],
-    ['an integration', { author: 'bot-1', authorIsTrusted: false }, 'not a member'],
+    ['a guest', { author: 'guest-1', authorIsTrusted: false }, "not a team member's own comment"],
+    [
+      'an integration',
+      { author: 'bot-1', authorIsTrusted: false },
+      "not a team member's own comment",
+    ],
     ['no trust signal', { author: 'someone' }, 'adapter'],
   ])('passes on a comment with %s and warns it cannot start a turn', async (_w, from, says) => {
     const { transport, warn } = quietTransport(async () => [
