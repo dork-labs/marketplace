@@ -586,6 +586,31 @@ describe('drainStep: the phase table', () => {
     expect(out.actions).toEqual([STOP_WORKER]);
   });
 
+  // DOR-2469: the pass that stops a finished worker marks its worktree for the
+  // drain's cleanup, keeping the stopped handle so its host can still be asked.
+  it('closing + runComplete -> the worker worktree is marked for cleanup, with the stopped worker', () => {
+    const out = step(watchingDrain({ phase: 'closing' }), { runComplete: true });
+    expect(out.drain.cleanup).toEqual({ status: 'pending', worker: WORKER });
+  });
+
+  it('closing + runComplete with no worker left -> marked for cleanup with no worker', () => {
+    const out = step(watchingDrain({ phase: 'closing', worker: null, reviewer: reviewer(S) }), {
+      runComplete: true,
+    });
+    expect(out.drain.cleanup).toEqual({ status: 'pending', worker: null });
+  });
+
+  it('closing before runComplete -> nothing marked for cleanup', () => {
+    const out = step(watchingDrain({ phase: 'closing' }));
+    expect(out.drain.cleanup).toBeUndefined();
+  });
+
+  it('closing + runComplete never overwrites a cleanup already recorded', () => {
+    const kept = { status: 'kept' as const, worker: WORKER, reason: 'r', at: 'a' };
+    const out = step(watchingDrain({ phase: 'closing', cleanup: kept }), { runComplete: true });
+    expect(out.drain.cleanup).toEqual(kept);
+  });
+
   // closing + the worker closed the item itself: that is not "taken away".
   it('closing + item closed before runComplete -> no park, no action', () => {
     const out = step(watchingDrain({ phase: 'closing' }), {

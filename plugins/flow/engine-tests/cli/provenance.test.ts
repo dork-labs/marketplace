@@ -27,7 +27,7 @@ describe('buildProvenance', () => {
       v: 1,
       harness: 'claude-code',
       sessionId: 's-1',
-      account: '.claude-alt',
+      account: 'claude-alt',
       host: 'box',
       surface: 'bare-cli',
     });
@@ -42,6 +42,20 @@ describe('buildProvenance', () => {
       host: 'h',
       surface: 'ci',
     });
+  });
+
+  it('signs the account handle without its leading dot (DOR-2469)', () => {
+    // Purpose: `~/.claude-alt` signs as `claude-alt`, and an explicit `~/.claude`
+    // as `claude`, the same handle an unset CLAUDE_CONFIG_DIR signs with.
+    const account = (dir: string) =>
+      buildProvenance({ env: { CLAUDECODE: '1', CLAUDE_CONFIG_DIR: dir }, hostname: 'h' }).account;
+    expect(account('/Users/x/.claude-work')).toBe('claude-work');
+    expect(account('/Users/x/.claude')).toBe('claude');
+    expect(account('/Users/x/work')).toBe('work');
+    // Only one dot goes; a folder that is nothing but a dot signs no account.
+    expect(account('/Users/x/..alt')).toBe('.alt');
+    expect(account('/Users/x/.')).toBe('x');
+    expect(account('/.')).toBeUndefined();
   });
 
   it('never carries an email in account', () => {

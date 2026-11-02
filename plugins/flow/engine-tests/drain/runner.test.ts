@@ -633,12 +633,111 @@ describe('flow drain: one item from pick to closing', () => {
       runOf('ACME-1').worktreePath
     );
     expect(done.code, done.stderr).toBe(0);
-    await tick();
+    // The worker's PR body was its only file git did not track (DOR-2469).
+    rmSync(bodyFile);
+    const worktree = runOf('ACME-1').worktreePath;
+    const closed = await tick();
     expect(world.log.stops.map((h) => h.sessionId)).toContain(worker.handle.sessionId);
+    // The stopped worker's worktree goes in the same pass; its branch stays.
+    expect(existsSync(worktree)).toBe(false);
+    expect(git(project.dir, 'branch', '--list', runOf('ACME-1').branch)).not.toBe('');
+    expect(drainOf('ACME-1').cleanup).toMatchObject({ status: 'removed' });
+    expect(JSON.stringify(closed.json)).toContain(`removed its worktree ${worktree}`);
 
     expect(world.forge.violations).toEqual([]);
     expect(world.log.starts.filter((s) => s.req.role === 'worker')).toHaveLength(1);
   }, 120_000);
+});
+
+describe("flow drain: a finished run's worker worktree (DOR-2469)", () => {
+  /** A complete drain run for ACME-1 whose worker the drain stopped, in a real worktree. */
+  function finishedRun(): { worktree: string } {
+    const branch = 'ACME-1-title-of-acme-1';
+    const worktree = path.join(dorkHome, 'workspaces', 'app', branch);
+    mkdirSync(path.dirname(worktree), { recursive: true });
+    git(project.dir, 'worktree', 'add', '-q', '-b', branch, worktree, 'origin/work');
+    const head = git(worktree, 'rev-parse', 'HEAD');
+    const worker = {
+      host: 'cli',
+      runtime: 'claude-code',
+      sessionId: 'w-1',
+      account: null,
+      cwd: worktree,
+    };
+    world.script.states.set('w-1', { kind: 'exited', code: 0 });
+    project.writeRuns({
+      'id-ACME-1': {
+        issueId: 'id-ACME-1',
+        identifier: 'ACME-1',
+        sessionId: 'w-1',
+        worktreePath: worktree,
+        branch,
+        stage: 'done',
+        status: 'complete',
+        attemptCount: 0,
+        workerPid: -1,
+        startedAt: '2026-09-26T00:00:00.000Z',
+        host: 'cli',
+        runtime: 'claude-code',
+        drain: {
+          v: 1,
+          rev: 4,
+          phase: 'closing',
+          worker: null,
+          reviewer: null,
+          pushedSha: head,
+          reviewedSha: head,
+          verdict: 'clean',
+          reviewRound: 1,
+          pr: { repo: 'acme/app', number: 7, url: 'u/7', armed: true, disarmedForReview: false },
+          rearmedFor: null,
+          nudges: 0,
+          wakeAfter: null,
+          handoffs: [],
+          parkedReason: null,
+          cleanup: { status: 'pending', worker },
+        },
+      } as FlowRun,
+    });
+    world.tracker = createFakeAdapter({ user: { id: 'agent-1' }, items: [] });
+    return { worktree };
+  }
+
+  it('keeps one with uncommitted work, says why once, and never asks again', async () => {
+    const { worktree } = finishedRun();
+    writeFileSync(path.join(worktree, 'notes.txt'), 'unsaved\n');
+    const first = await tick();
+    expect(first.code, first.stderr).toBe(0);
+    expect(existsSync(path.join(worktree, 'notes.txt'))).toBe(true);
+    expect(drainOf('ACME-1').cleanup).toMatchObject({
+      status: 'kept',
+      reason: 'it has 1 uncommitted change',
+    });
+    expect(JSON.stringify(first.json)).toContain('kept its worktree');
+    const second = await tick();
+    expect(JSON.stringify(second.json)).not.toContain('worktree');
+  }, 60_000);
+
+  it('with --dry-run says what it would do and changes nothing', async () => {
+    const { worktree } = finishedRun();
+    const pass = await tick('--dry-run');
+    expect(pass.code, pass.stderr).toBe(0);
+    expect(JSON.stringify(pass.json)).toContain(`would remove its worktree ${worktree}`);
+    expect(existsSync(worktree)).toBe(true);
+    expect(drainOf('ACME-1').cleanup).toMatchObject({ status: 'pending' });
+  }, 60_000);
+
+  it('waits while its worker may still run, then removes it', async () => {
+    const { worktree } = finishedRun();
+    world.script.states.set('w-1', { kind: 'busy' });
+    await tick();
+    expect(existsSync(worktree)).toBe(true);
+    expect(drainOf('ACME-1').cleanup).toMatchObject({ status: 'pending' });
+    world.script.states.set('w-1', { kind: 'exited', code: 0 });
+    await tick();
+    expect(existsSync(worktree)).toBe(false);
+    expect(drainOf('ACME-1').cleanup).toMatchObject({ status: 'removed' });
+  }, 60_000);
 });
 
 describe('flow drain: the arm guard on a re-arm (DOR-3262)', () => {

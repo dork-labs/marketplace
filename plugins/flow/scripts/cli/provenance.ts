@@ -67,7 +67,8 @@ function harnessFrom(env: ProvenanceInput['env']): string | undefined {
 
 /**
  * The harness account handle (`docs/provenance.md` §7): for Claude Code, the
- * basename of `CLAUDE_CONFIG_DIR`, `claude` when it is unset. A value holding
+ * basename of `CLAUDE_CONFIG_DIR` without its leading dot (`~/.claude-work`
+ * signs `claude-work`, DOR-2469), `claude` when it is unset. A value holding
  * an `@` is dropped whole, never cleaned up.
  *
  * @param harness - The harness, from {@link harnessFrom}.
@@ -77,7 +78,10 @@ function harnessFrom(env: ProvenanceInput['env']): string | undefined {
 function accountFrom(harness: string | undefined, env: ProvenanceInput['env']): string | undefined {
   if (harness !== 'claude-code') return undefined;
   const dir = env.CLAUDE_CONFIG_DIR;
-  const handle = dir === undefined || dir === '' ? 'claude' : path.basename(path.resolve(dir));
+  const handle =
+    dir === undefined || dir === ''
+      ? 'claude'
+      : path.basename(path.resolve(dir)).replace(/^\./, '');
   return handle === '' || handle.includes('@') ? undefined : handle;
 }
 

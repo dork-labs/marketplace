@@ -76,7 +76,7 @@ export const RECORDED: Readonly<Record<RuntimeShape, Recorded>> = {
     journalHarness: 'claude-code',
     harness: 'claude-code',
     sessionId: 'claude-session-1',
-    account: '.claude-work',
+    account: 'claude-work',
   },
   codex: {
     runtime: 'codex',

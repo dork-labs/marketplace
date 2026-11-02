@@ -24,10 +24,11 @@ Allow each account flow may spend with `flow accounts set <id> --role rotation`.
 - `moved to <account>`: an account ran out, so the work moved.
 - `restarted on <account>`: its session went away.
 - `parked: <reason>`: a person is needed.
+- `removed its worktree`: the item finished.
 
 ## What happens at a limit
 
-Near a limit, the worker finishes its step, checkpoints and stops. If the account resets within `drain.waitIfResetWithinMinutes`, the run waits. If only one model ran out, it goes on with the next in `drain.modelFallback`. Otherwise another account's session continues from `HANDOFF.md`.
+Near a limit, the worker finishes its step, checkpoints, stops. If the account resets within `drain.waitIfResetWithinMinutes`, the run waits. If only one model ran out, it goes on with the next in `drain.modelFallback`. Otherwise another account's session continues from `HANDOFF.md`.
 
 ## Ask or auto
 
@@ -39,11 +40,11 @@ After `drain.stallAfterMinutes` (default 60) without progress, a session that we
 
 ## Caps
 
-New sessions wait while load per CPU reaches `drain.maxLoadPerCpu` or an account has `drain.maxLivePerAccount` sessions. Accounts with fewer sessions go first; one with a stale usage reading gets none unless flow's hourly probe refreshes it. After `drain.maxReviewRounds` rounds the run parks.
+New sessions wait while load per CPU reaches `drain.maxLoadPerCpu` or an account has `drain.maxLivePerAccount` sessions. Accounts with fewer sessions go first; a stale usage reading gets none until the hourly probe refreshes it. After `drain.maxReviewRounds` rounds the run parks.
 
 ## Terminal or schedule
 
-In a terminal, `flow drain` repeats every `drain.pollSeconds` until done or Ctrl-C. A schedule runs `flow drain --tick`. With no pass for twice `drain.stallAfterMinutes`, `flow status` says so.
+`flow drain` repeats every `drain.pollSeconds` until done or Ctrl-C. A schedule runs `flow drain --tick`. With no pass for twice `drain.stallAfterMinutes`, `flow status` says so.
 
 ## Permissions
 

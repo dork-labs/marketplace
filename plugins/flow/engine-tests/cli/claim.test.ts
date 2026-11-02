@@ -67,7 +67,7 @@ describe('flow claim writes the claim projection and records the run', () => {
           v: 1,
           harness: 'claude-code',
           sessionId: 'session-abc',
-          account: '.claude-work',
+          account: 'claude-work',
           host: os.hostname(),
           surface: 'dorkos',
           worktree: project.dir,
