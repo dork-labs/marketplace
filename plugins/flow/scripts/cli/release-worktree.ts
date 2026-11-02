@@ -8,10 +8,11 @@
  *   `reviewWorktreePath` for the item and the reviewed commit, listed by git as
  *   a worktree of this checkout, detached at that commit. Anything else is kept,
  *   and the release goes on.
- * - Only once the reviewer's session is confirmed done: its host says it exited,
- *   is idle (no turn running), or is gone (DorkOS's 404, the rule DOR-3263
- *   restarts on). Busy, limited or unknown refuses the release, so the run
- *   record survives for the next try.
+ * - Only once every session recorded in it (the drain's reviewer, and a VERIFY
+ *   reviewer started at the same path) is confirmed done: its host says it
+ *   exited or is gone (DorkOS's 404, the rule DOR-3263 restarts on). Idle,
+ *   busy, limited, unknown or a start not yet confirmed refuses the release,
+ *   so the run record survives for the next try.
  * - Only clean, unless `--discard-review-changes`: uncommitted changes refuse
  *   the release too.
  *
@@ -86,22 +87,43 @@ async function listed(
   return null;
 }
 
-/** Whether the reviewer's host confirms its session no longer runs. */
-async function sessionDone(ctx: VerbContext, run: FlowRun): Promise<boolean> {
-  const handle = run.drain?.reviewer;
-  if (!handle || !(HOST_NAMES as readonly string[]).includes(handle.host)) return false;
-  const host = handle.host as HostName;
+/** A recorded session that may work in a folder. */
+interface FolderSession {
+  host: string;
+  runtime?: string;
+  sessionId: string;
+  cwd: string;
+  pending?: boolean;
+}
+
+/**
+ * Every recorded session that may work in `target`: the drain's reviewer, and
+ * a VERIFY reviewer `flow report review-launch` started at the same path.
+ */
+function sessionsIn(run: FlowRun, target: string): FolderSession[] {
+  const out: FolderSession[] = [];
+  if (run.drain?.reviewer) out.push(run.drain.reviewer);
+  const verify = run.review?.reviewer;
+  if (verify !== undefined && real(verify.cwd) === real(target)) out.push(verify);
+  return out;
+}
+
+/**
+ * Whether the host confirms the session no longer runs: it exited, or it is
+ * gone (DorkOS's 404, the rule DOR-3263 restarts on). Idle, busy, limited or
+ * unknown may still run; so may a start not yet confirmed (`pending`).
+ */
+async function sessionDone(ctx: VerbContext, session: FolderSession): Promise<boolean> {
+  if (session.pending === true) return false;
+  if (!(HOST_NAMES as readonly string[]).includes(session.host)) return false;
+  const host = session.host as HostName;
   try {
     const launcher = ctx.createLauncher?.(host) ?? realLauncher(host, ctx.env, ctx.io.osHome);
     const state = await launcher.state({
-      ...handle,
-      runtime: handleRuntime(handle),
+      ...session,
+      runtime: handleRuntime(session as { runtime?: SessionHandle['runtime'] }),
     } as SessionHandle);
-    return (
-      state.kind === 'exited' ||
-      state.kind === 'idle' ||
-      (state.kind === 'unknown' && state.gone === true)
-    );
+    return state.kind === 'exited' || (state.kind === 'unknown' && state.gone === true);
   } catch {
     return false;
   }
@@ -139,8 +161,10 @@ export async function planReviewWorktree(
   if (!entry.detached || entry.head !== handle.sha) {
     return { action: 'keep', path: target, reason: 'no longer at the reviewed commit' };
   }
-  if (!(await sessionDone(ctx, run))) {
-    return { action: 'refuse', path: target, reason: REVIEWER_MAY_RUN };
+  for (const session of sessionsIn(run, target)) {
+    if (!(await sessionDone(ctx, session))) {
+      return { action: 'refuse', path: target, reason: REVIEWER_MAY_RUN };
+    }
   }
   const status = await ctx.runProcess('git', ['status', '--porcelain'], { cwd: target });
   if (status.code !== 0) {

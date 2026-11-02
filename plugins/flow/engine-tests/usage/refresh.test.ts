@@ -211,6 +211,27 @@ describe('refreshStaleUsage', () => {
     expect(d.probed).toEqual([]);
   });
 
+  it('probes nothing when the try cannot be recorded (the hourly limit could not hold)', async () => {
+    const d = deps({ old: FRESH });
+    d.saveTried = () => {
+      throw new Error('disk full');
+    };
+    const out = await refreshStaleUsage(input([account('old', STALE)]), d);
+    expect(d.probed).toEqual([]);
+    expect(eligible(out)).toEqual([]);
+    expect(d.lines.join('\n')).toMatch(/could not record.*disk full/);
+  });
+
+  it('keeps an account out when its ledger cannot be read after the probe', async () => {
+    const d = deps({ old: FRESH });
+    d.reread = () => {
+      throw new Error('EACCES');
+    };
+    const out = await refreshStaleUsage(input([account('old', STALE)]), d);
+    expect(eligible(out)).toEqual([]);
+    expect(d.lines.join('\n')).toMatch(/could not read old.*EACCES/);
+  });
+
   it('leaves the other accounts exactly as they were', async () => {
     const d = deps({ old: FRESH });
     const fresh = account('fresh', FRESH);

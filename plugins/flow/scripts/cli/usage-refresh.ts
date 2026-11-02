@@ -108,7 +108,15 @@ export async function refreshStaleUsage(
     REFRESH_INTERVAL_MS
   );
   if (due.length === 0) return input;
-  deps.saveTried(next);
+  try {
+    deps.saveTried(next);
+  } catch (error) {
+    // Without a record of the try, the hourly limit cannot hold: probe nothing.
+    deps.report(
+      `could not record the usage refresh, so nothing was probed: ${(error as Error).message}`
+    );
+    return input;
+  }
 
   const refreshed = new Map<string, Account['windows']>();
   for (const account of candidates) {
@@ -123,7 +131,15 @@ export async function refreshStaleUsage(
       );
       continue;
     }
-    const windows = deps.reread(account);
+    let windows: Account['windows'];
+    try {
+      windows = deps.reread(account);
+    } catch (error) {
+      deps.report(
+        `could not read ${name}'s usage after the probe, so it stays out: ${(error as Error).message}`
+      );
+      continue;
+    }
     if (isStaleUsage({ ...account, windows }, input.now)) {
       deps.report(`probed ${name}, but its usage reading is still out of date, so it stays out`);
       continue;

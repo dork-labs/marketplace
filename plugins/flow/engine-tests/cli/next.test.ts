@@ -7,11 +7,12 @@
  */
 
 import { execFileSync, spawnSync } from 'node:child_process';
-import { mkdirSync, writeFileSync } from 'node:fs';
+import { chmodSync, mkdirSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { afterEach, describe, expect, it } from 'vitest';
 
+import type { StreamRunner } from '../../scripts/cli/host-io.ts';
 import { findConfigRoots } from '../../scripts/config-files.ts';
 import { loadConfig } from '../../scripts/config-load.ts';
 import { liveByAccount, restartRank, type AssignmentInput } from '../../scripts/cli/next.ts';
@@ -448,6 +449,46 @@ describe('flow next: the account each pick runs on (flow-handoff-dispatch §3.5)
     const result = await runFlow(['next', ...argv], temp!, backlog(), options);
     return { ...result, json: argv.includes('--json') ? JSON.parse(result.stdout) : null };
   }
+
+  it('never runs a usage probe for a stale account: only flow drain refreshes (DOR-3704)', async () => {
+    // Purpose: a probe spends the account's 5-hour window, so a read verb must
+    // never start one. A runnable `claude` is on hand, so a wired refresh would run.
+    temp = tempProject(config());
+    fleet({ old: { role: 'rotation' } });
+    put('runtimes/claude-code/usage/old.json', {
+      v: 1,
+      runtime: 'claude-code',
+      accountId: 'old',
+      updatedAt: '2026-09-24T12:00:00.000Z',
+      windows: {
+        seven_day: {
+          usedPct: 5,
+          resetsAt: '2026-10-01T12:00:00.000Z',
+          status: 'allowed',
+          observedAt: '2026-09-24T12:00:00.000Z',
+          source: 'statusline',
+        },
+      },
+    });
+    const claude = path.join(temp.dorkHome, 'bin', 'claude');
+    mkdirSync(path.dirname(claude), { recursive: true });
+    writeFileSync(claude, '');
+    chmodSync(claude, 0o755);
+    const turns: string[] = [];
+    const spawnStream: StreamRunner = async (cmd) => {
+      turns.push(cmd);
+      return { code: 0, stopped: false, timedOut: false };
+    };
+    for (const argv of [
+      ['next', '--json'],
+      ['accounts', 'pick', '--json'],
+    ]) {
+      await runFlow(argv, temp, backlog(), { spawnStream }, { FLOW_CLAUDE_BIN: claude });
+    }
+    expect(turns).toEqual([]);
+    const { json } = await next(['--json'], { spawnStream });
+    expect(JSON.stringify(json)).toContain('stale-usage');
+  });
 
   it("with no registry, picks the runtime's default: this computer's own sign-in", async () => {
     // Purpose: a one-account user needs no fleet setup. `default` is

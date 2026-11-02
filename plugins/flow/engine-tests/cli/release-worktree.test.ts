@@ -142,18 +142,16 @@ describe('flow release: the kept reviewer worktree', () => {
     expect(project.runs()).toEqual({});
   });
 
-  it.each([
-    ['exited', { kind: 'exited', code: 0 } as SessionState],
-    ['idle (no turn running)', { kind: 'idle' } as SessionState],
-  ])('removes it when the session is %s', async (_name, state) => {
+  it('removes it when the session exited', async () => {
     project.writeRuns(parkedRun());
-    const result = await release(state);
+    const result = await release({ kind: 'exited', code: 0 });
     expect(result.code).toBe(EXIT.ok);
     expect(existsSync(target)).toBe(false);
   });
 
   it.each([
     ['busy', { kind: 'busy', activityAt: '2026-09-26T11:00:00.000Z' } as SessionState],
+    ['idle (alive, no turn running)', { kind: 'idle' } as SessionState],
     ['unreachable', { kind: 'unknown', reason: 'connect ECONNREFUSED' } as SessionState],
     [
       'one the host cannot describe',
@@ -168,6 +166,47 @@ describe('flow release: the kept reviewer worktree', () => {
     expect(existsSync(target)).toBe(true);
     expect(result.tracker.calls).toEqual([]);
     expect(Object.keys(project.runs())).toEqual(['id-FAKE-1']);
+  });
+
+  it('refuses while a start of the reviewer is not yet confirmed (pending)', async () => {
+    const runs = parkedRun();
+    runs['id-FAKE-1']!.drain!.reviewer!.pending = true;
+    project.writeRuns(runs);
+    const result = await release(GONE);
+    expect(result.code).toBe(EXIT.precondition);
+    expect(existsSync(target)).toBe(true);
+  });
+
+  it('refuses while a VERIFY reviewer in the same folder may still run', async () => {
+    const runs = parkedRun();
+    runs['id-FAKE-1']!.review = {
+      tokenHash: 'sha256:y',
+      sha,
+      verdict: null,
+      reviewedSha: null,
+      reviewer: { host: 'dorkos', runtime: 'claude-code', sessionId: 'v-1', cwd: target },
+    };
+    project.writeRuns(runs);
+    const states: Record<string, SessionState> = { 'r-1': GONE, 'v-1': { kind: 'busy' } };
+    const result = await runFlow(
+      project,
+      {
+        items: [
+          item('FAKE-1', { stateCategory: 'started', labels: ['type/task', 'agent/claimed'] }),
+        ],
+      },
+      ['release', 'FAKE-1'],
+      {
+        env: ENV(),
+        createLauncher: () =>
+          ({
+            state: async (h: { sessionId: string }) => states[h.sessionId] ?? GONE,
+          }) as unknown as Launcher,
+      }
+    );
+    expect(result.code).toBe(EXIT.precondition);
+    expect(String((result.json.error as { message: string }).message)).toContain(REVIEWER_MAY_RUN);
+    expect(existsSync(target)).toBe(true);
   });
 
   it('refuses a folder with uncommitted changes, writing nothing', async () => {
