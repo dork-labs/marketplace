@@ -4,6 +4,13 @@ Installs of this plugin are pinned to a commit SHA, so a fix here does not reach
 you until you **reinstall it** (Marketplace → flow → reinstall, or re-run your
 `--plugin-dir` checkout's `git pull`). Each entry below says whether that matters.
 
+## 0.72.0
+
+**A worker flow starts on the `cli` host now records its own runtime and session, even when a chat in DorkOS started it. Reinstall to get it, before updating to a DorkOS that names its chats to flow.**
+
+- Without this, once DorkOS tells flow what each chat is, a Codex worker started from a Claude Code chat would be recorded as Claude Code with the chat's session id. A later resume could use the wrong one.
+- Workers started through DorkOS or cmux are not affected.
+
 ## 0.71.0
 
 **Flow now does what your `recovery.onExhausted` setting says when a crashed run has used up its retries. Before, it always added `agent/blocked`, whatever you chose (DOR-2403). Reinstall to get it.**
