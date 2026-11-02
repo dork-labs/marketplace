@@ -161,6 +161,11 @@ export async function planReviewWorktree(
   if (!entry.detached || entry.head !== handle.sha) {
     return { action: 'keep', path: target, reason: 'no longer at the reviewed commit' };
   }
+  // A VERIFY review of this commit started but not yet recorded may be starting here.
+  const verify = run.review;
+  if (verify?.sha === handle.sha && verify.reviewer === undefined && verify.verdict === null) {
+    return { action: 'refuse', path: target, reason: REVIEWER_MAY_RUN };
+  }
   for (const session of sessionsIn(run, target)) {
     if (!(await sessionDone(ctx, session))) {
       return { action: 'refuse', path: target, reason: REVIEWER_MAY_RUN };

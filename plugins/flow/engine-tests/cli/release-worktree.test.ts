@@ -177,6 +177,15 @@ describe('flow release: the kept reviewer worktree', () => {
     expect(existsSync(target)).toBe(true);
   });
 
+  it('refuses while a VERIFY review of this commit is starting (no session recorded yet)', async () => {
+    const runs = parkedRun();
+    runs['id-FAKE-1']!.review = { tokenHash: 'sha256:y', sha, verdict: null, reviewedSha: null };
+    project.writeRuns(runs);
+    const result = await release(GONE);
+    expect(result.code).toBe(EXIT.precondition);
+    expect(existsSync(target)).toBe(true);
+  });
+
   it('refuses while a VERIFY reviewer in the same folder may still run', async () => {
     const runs = parkedRun();
     runs['id-FAKE-1']!.review = {
