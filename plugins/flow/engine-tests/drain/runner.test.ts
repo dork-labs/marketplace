@@ -1179,16 +1179,35 @@ describe('flow drain: parked runs', () => {
     // Neither a comment from before the park nor one by the agent itself is an answer.
     const comments = ((world.tracker.backlog.comments ??= {})['ACME-1'] ??= []);
     const at = (minutes: number) => new Date(T0 + minutes * 60_000).toISOString();
-    comments.push({ id: 'old', author: 'dorian', body: 'Earlier note.', createdAt: at(-5) });
-    comments.push({ id: 'own', author: 'agent-1', body: 'Still waiting.', createdAt: at(1) });
+    world.tracker.backlog.members = ['dorian'];
+    const say = (id: string, author: string, body: string, createdAt: string) =>
+      comments.push({ id, author, authorIsTrusted: false, body, createdAt });
+    say('old', 'dorian', 'Earlier note.', at(-5));
+    say('own', 'agent-1', 'Still waiting.', at(1));
     clock = T0 + 2 * 60_000;
     await tick();
     expect(drainOf('ACME-1').phase).toBe('parked');
     const acme1 = () => world.tracker.backlog.items.find((i) => i.identifier === 'ACME-1')!;
     expect(acme1().labels).toContain('agent/needs-input');
 
+    // DOR-3669: a guest, an integration and a comment with no author are not
+    // the team's answer. The run stays parked and the pass says why. The fake
+    // reads trust from its member list, so the stored flag cannot vouch.
+    say('guest', 'guest-1', 'Use XML.', at(1.5));
+    say('bot', 'integration-bot', 'Use XML.', at(1.6));
+    say('synced', '', 'Use XML.', at(1.7));
+    comments.at(-1)!.authorIsTrusted = true;
+    clock = T0 + 3 * 60_000;
+    const outsiders = await tick();
+    expect(drainOf('ACME-1').phase).toBe('parked');
+    expect(acme1().labels).toContain('agent/needs-input');
+    expect(outsiders.stderr).toContain('the comment by guest-1');
+    expect(outsiders.stderr).toContain('the comment by integration-bot');
+    expect(outsiders.stderr).toContain('a comment with no author');
+    expect(outsiders.stderr).toContain('A member can post the answer instead');
+
     // A person replies: the next pass lifts needs-input and resumes the run.
-    comments.push({ id: 'answer', author: 'dorian', body: 'Use CSV.', createdAt: at(3) });
+    say('answer', 'dorian', 'Use CSV.', at(3));
     clock = T0 + 4 * 60_000;
     await tick();
     expect(drainOf('ACME-1')).toMatchObject({ phase: 'working', parkedReason: null });

@@ -1,10 +1,10 @@
 /*
  * validate-adapter.ts - the /flow tracker-adapter conformance harness.
  *
- * Asserts the five conformance invariants from <flow-root>/adapters/SPEC.md
- * section 4 (INV-1 .. INV-5) against a fixture of NORMALIZED WorkItems - the
- * output an adapter's read verbs produce. The fixture is tracker-neutral: it
- * holds only normalized WorkItems, never a tracker API string.
+ * Asserts the six conformance invariants from <flow-root>/adapters/SPEC.md
+ * section 4 (INV-1 .. INV-6) against a fixture of NORMALIZED WorkItems and
+ * comments - the output an adapter's read verbs produce. The fixture is
+ * tracker-neutral: it holds only normalized output, never a tracker API string.
  *
  * This script is dependency-free by design (no zod, no imports beyond node:fs /
  * node:url) and runs directly under `node --experimental-strip-types`. The
@@ -60,7 +60,7 @@ const OPTIONAL_FIELDS: string[] = [
 
 /** A single breached invariant in the verdict. */
 interface Failure {
-  /** The invariant identifier (`INV-1` .. `INV-5`, or `INPUT` for malformed input). */
+  /** The invariant identifier (`INV-1` .. `INV-6`, or `INPUT` for malformed input). */
   invariant: string;
   /** The aggregated human-readable breach detail(s). */
   detail: string;
@@ -84,16 +84,19 @@ interface HarnessArgs {
 
 const HELP = `validate-adapter - the /flow tracker-adapter conformance harness.
 
-Asserts the five conformance invariants in <flow-root>/adapters/SPEC.md section 4
-against a fixture of NORMALIZED WorkItems (an adapter's read-verb output). The
-fixture is tracker-neutral: normalized WorkItems only, no tracker API strings.
+Asserts the six conformance invariants in <flow-root>/adapters/SPEC.md section 4
+against a fixture of NORMALIZED WorkItems and comments (an adapter's read-verb
+output). The fixture is tracker-neutral: normalized output only, no tracker API
+strings.
 
 Usage:
   node --experimental-strip-types scripts/validate-adapter.ts --fixture <path>
   node --experimental-strip-types scripts/validate-adapter.ts        reads stdin
   node --experimental-strip-types scripts/validate-adapter.ts --help
 
-Fixture: a JSON array of WorkItems, or { "items": [ ...WorkItems ] }.
+Fixture: { "items": [ ...WorkItems ], "comments": [ ...comments ] }. The comments
+are what getInbox and getItem return ({ author, authorIsTrusted, body, ... }).
+A bare array of WorkItems still reads, but fails INV-6 for having no comments.
 
 Verdict (stdout): { "ok": boolean, "failures": [{ "invariant": "INV-N", "detail": "..." }] }
   ok:       false when any invariant failed.
@@ -114,6 +117,9 @@ Invariants:
          bare leaf or a separate field. The candidate set deliberately includes
          not-ready shapeable items (so starvation is detectable); those do NOT
          fail - the engine's eligibility pass, not the adapter, drops them.
+  INV-6  Every comment carries a boolean authorIsTrusted, read from the tracker's
+         membership data; a comment with no author is never trusted; and the
+         fixture shows a trusted author and a named untrusted one (a guest).
 `;
 
 /** True for a non-array, non-null object. */
@@ -408,13 +414,69 @@ function checkInv5(items: readonly unknown[]): string[] {
 }
 
 /**
- * Run all five invariant checks over the normalized WorkItems and assemble the
- * verdict. One failures[] entry per breached invariant (details aggregated).
+ * INV-6 (contract 3.0.0, DOR-3669): every comment says, from the tracker's own
+ * membership data, whether its author is a team member. Flow lets only a
+ * trusted author start or resume a turn, so an adapter that leaves the flag
+ * out, or trusts a comment with no author, would either silence every reply or
+ * let anyone in. A fixture with no comments fails, as does one that never shows
+ * both a member and an outsider: either would pass an adapter that never reads
+ * membership at all.
+ *
+ * @param comments - The normalized comments, or `null` when the fixture has none.
+ * @returns An array of breach detail strings (empty = pass).
+ */
+function checkInv6(comments: readonly unknown[] | null): string[] {
+  if (comments === null || comments.length === 0) {
+    return [
+      'the fixture has no comments; since contract 3.0.0 it must be { "items": [...], "comments": [...] } with what getInbox and getItem return, so authorIsTrusted can be checked',
+    ];
+  }
+  const details: string[] = [];
+  let trusted = 0;
+  let untrustedNamed = 0;
+  comments.forEach((comment, index) => {
+    const label = `comment[${index}]`;
+    if (!isPlainObject(comment)) {
+      details.push(`${label} is not an object`);
+      return;
+    }
+    if (typeof comment.authorIsTrusted !== 'boolean') {
+      details.push(
+        `${label} has no boolean authorIsTrusted; set it from the tracker's membership data, false when the adapter cannot tell`
+      );
+      return;
+    }
+    if (comment.authorIsTrusted && !isNonEmptyString(comment.author)) {
+      details.push(
+        `${label} has no author but is marked trusted; a comment with no author is never trusted`
+      );
+      return;
+    }
+    if (comment.authorIsTrusted) trusted += 1;
+    else if (isNonEmptyString(comment.author)) untrustedNamed += 1;
+  });
+  // A comment with no author is untrusted by rule, so it proves nothing about
+  // membership: `authorIsTrusted = author !== ''` would pass on it alone. The
+  // untrusted example must name its author (a guest or an integration).
+  if (details.length === 0 && (trusted === 0 || untrustedNamed === 0)) {
+    details.push(
+      `the fixture needs at least one trusted author and one untrusted author who is named (a guest or an integration); it has ${trusted} and ${untrustedNamed}`
+    );
+  }
+  return details;
+}
+
+/**
+ * Run the invariant checks and assemble the verdict. One failures[] entry per
+ * breached invariant (details aggregated). INV-6 runs only when `comments` is
+ * given: the CLI always gives it (`null` when the fixture has none), while
+ * in-process callers checking a backlog of WorkItems alone leave it out.
  *
  * @param items - The normalized WorkItems under test.
+ * @param comments - The normalized comments; `null` fails INV-6, `undefined` skips it.
  * @returns The conformance verdict.
  */
-function validate(items: readonly unknown[]): Verdict {
+function validate(items: readonly unknown[], comments?: readonly unknown[] | null): Verdict {
   const checks: Array<[string, (items: readonly unknown[]) => string[]]> = [
     ['INV-1', checkInv1],
     ['INV-2', checkInv2],
@@ -426,6 +488,10 @@ function validate(items: readonly unknown[]): Verdict {
   for (const [invariant, check] of checks) {
     const details = check(items);
     if (details.length > 0) failures.push({ invariant, detail: details.join('; ') });
+  }
+  if (comments !== undefined) {
+    const details = checkInv6(comments);
+    if (details.length > 0) failures.push({ invariant: 'INV-6', detail: details.join('; ') });
   }
   return { ok: failures.length === 0, failures };
 }
@@ -464,16 +530,23 @@ function readRawInput(fixturePath?: string): string {
 }
 
 /**
- * Coerce a parsed fixture (array, or `{ items: [...] }`) into a WorkItem array,
- * or throw.
+ * Split a parsed fixture (`{ items, comments }`, or a bare WorkItem array) into
+ * its items and comments, or throw.
  *
  * @param parsed - The parsed-JSON fixture value.
- * @returns The extracted item array.
+ * @returns The items, and the comments or `null` when the fixture has none.
  */
-function extractItems(parsed: unknown): unknown[] {
-  if (Array.isArray(parsed)) return parsed;
-  if (isPlainObject(parsed) && Array.isArray(parsed.items)) return parsed.items;
-  throw new Error('fixture must be a JSON array of WorkItems, or an object { "items": [ ... ] }');
+function fixtureParts(parsed: unknown): { items: unknown[]; comments: unknown[] | null } {
+  if (Array.isArray(parsed)) return { items: parsed, comments: null };
+  if (isPlainObject(parsed) && Array.isArray(parsed.items)) {
+    return {
+      items: parsed.items,
+      comments: Array.isArray(parsed.comments) ? parsed.comments : null,
+    };
+  }
+  throw new Error(
+    'fixture must be an object { "items": [ ... ], "comments": [ ... ] }, or a JSON array of WorkItems'
+  );
 }
 
 /**
@@ -517,9 +590,9 @@ function main(argv: readonly string[]): number {
     return 2;
   }
 
-  let items: unknown[];
+  let parts: ReturnType<typeof fixtureParts>;
   try {
-    items = extractItems(parsed);
+    parts = fixtureParts(parsed);
   } catch (err) {
     const detail = `invalid input - ${(err as Error).message}`;
     process.stderr.write(`validate-adapter: ${detail}\n`);
@@ -529,7 +602,7 @@ function main(argv: readonly string[]): number {
     return 2;
   }
 
-  const verdict = validate(items);
+  const verdict = validate(parts.items, parts.comments);
   process.stdout.write(`${JSON.stringify(verdict, null, 2)}\n`);
   if (!verdict.ok) {
     process.stderr.write(
@@ -545,4 +618,4 @@ if (invokedDirectly(import.meta.url)) {
   process.exit(main(process.argv.slice(2)));
 }
 
-export { main, validate };
+export { fixtureParts, main, validate };

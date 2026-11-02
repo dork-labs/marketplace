@@ -38,7 +38,7 @@ import {
   type MentionEvent,
   type TrackerEvent,
 } from './events.ts';
-import { authorOf, bodyOf, mentionsOf } from './work-item.ts';
+import { authorOf, bodyOf, isTrustedAuthor, mentionsOf } from './work-item.ts';
 import type { InboxComment } from './work-item.ts';
 
 /**
@@ -188,6 +188,20 @@ function describeValue(value: unknown): string {
   if (value === null) return 'null';
   if (Array.isArray(value)) return 'an array';
   return typeof value === 'object' ? 'an object' : `${typeof value} ${String(value)}`;
+}
+
+/**
+ * Why a comment cannot start or resume a turn, or `null` when its author is a
+ * trusted member ({@link isTrustedAuthor}, the check the comment rules use).
+ */
+function untrustedReason(comment: InboxComment): string | null {
+  if (isTrustedAuthor(comment)) return null;
+  const author = authorOf(comment);
+  if (author.length === 0) return 'has no author';
+  if (typeof comment.authorIsTrusted !== 'boolean') {
+    return `by ${JSON.stringify(author)} carries no authorIsTrusted from the adapter (contract 3.0.0)`;
+  }
+  return `by ${JSON.stringify(author)} is not a member of the workspace or team`;
 }
 
 /**
@@ -356,12 +370,14 @@ export class PollingTransport implements InboundTransport {
         continue;
       }
       if (sinceAt === undefined || at > sinceAt) {
-        // Kept, but said out loud: with no author, only the comment's text can
-        // wake a parked question (rule 3), and the reply cannot be attributed.
-        if (authorOf(comment as InboxComment).length === 0) {
+        // Kept, so the watermark moves past it, but said out loud: the comment
+        // rules ignore a comment that is not from a trusted member (DOR-3669),
+        // so nothing it says starts or resumes a turn.
+        const untrusted = untrustedReason(comment as InboxComment);
+        if (untrusted !== null) {
           report(
-            `flow inbox: the comment on ${on} has no author. It is still read, and ` +
-              'its text alone can resume a question parked for a reply.'
+            `flow inbox: the comment on ${on} ${untrusted}, so it can't start or resume ` +
+              'a turn. If it was meant for flow, a member can post it again.'
           );
         }
         fresh.push({ entry, at });

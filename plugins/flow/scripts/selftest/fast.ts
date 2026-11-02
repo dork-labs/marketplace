@@ -23,7 +23,7 @@ import path from 'node:path';
 import { isDeepStrictEqual } from 'node:util';
 
 import { findConfigRoots, resolveConfigFiles } from '../config-files.ts';
-import { validate as validateAdapter } from '../validate-adapter.ts';
+import { fixtureParts, validate as validateAdapter } from '../validate-adapter.ts';
 import { validateConfig } from '../validate-config.ts';
 import {
   DOC_LINT_RULES,
@@ -127,19 +127,20 @@ export function engineTests(options: FastOptions): Check {
  * pass, and the bad one must fail with exactly the invariants it is built to
  * break. A harness that passes the bad fixture is broken.
  *
- * @param good - The good fixture's items.
- * @param bad - The bad fixture's items.
+ * @param good - The good fixture, parsed (`{ items, comments }`).
+ * @param bad - The bad fixture, parsed.
  * @returns `null` when both verdicts are right, else what is wrong.
  */
-export function conformanceProblem(
-  good: readonly unknown[],
-  bad: readonly unknown[]
-): string | null {
-  const goodVerdict = validateAdapter(good);
+export function conformanceProblem(good: unknown, bad: unknown): string | null {
+  const verdict = (fixture: unknown) => {
+    const { items, comments } = fixtureParts(fixture);
+    return validateAdapter(items, comments);
+  };
+  const goodVerdict = verdict(good);
   if (!goodVerdict.ok) {
     return `the good fixture fails ${goodVerdict.failures.map((f) => f.invariant).join(', ')}`;
   }
-  const caught = validateAdapter(bad).failures.map((f) => f.invariant);
+  const caught = verdict(bad).failures.map((f) => f.invariant);
   if (!isDeepStrictEqual(caught, [...BAD_FIXTURE_INVARIANTS])) {
     return `the bad fixture should fail ${BAD_FIXTURE_INVARIANTS.join(', ')} and failed [${caught.join(', ')}]`;
   }
@@ -170,8 +171,7 @@ export function fakeFixtureProblem(items: readonly unknown[]): string | null {
 export function adapterConformance(options: FastOptions): Check {
   return timed('adapter-conformance', () => {
     const dir = path.join(options.flowRoot, 'adapters', 'reference', 'fixtures');
-    const read = (name: string): unknown[] =>
-      JSON.parse(readFileSync(path.join(dir, name), 'utf8')) as unknown[];
+    const read = (name: string): unknown => JSON.parse(readFileSync(path.join(dir, name), 'utf8'));
     const fake = JSON.parse(
       readFileSync(
         path.join(options.flowRoot, 'adapters', 'reference', 'fake', 'fixture.json'),

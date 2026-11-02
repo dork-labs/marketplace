@@ -122,6 +122,12 @@ export interface ItemComment {
   id: string;
   /** Account id of the author, or `''` when the tracker gives none (never a guess). */
   author: string;
+  /**
+   * Whether the tracker's own membership data says the author is a member of
+   * the team: not a guest, an integration or a deactivated account (contract
+   * 3.0.0). `false` when the adapter cannot tell, and always with no author.
+   */
+  authorIsTrusted: boolean;
   /** The comment text. */
   body: string;
   /** When it was made, ISO-8601 with an explicit zone. */

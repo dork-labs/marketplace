@@ -9,9 +9,7 @@ description: Guided procedure for generating and verifying a concrete /flow trac
 
 Produce one tracker adapter: the only tracker-aware part of flow. **Generate, then verify.** An adapter is done when `validate-adapter.ts` returns green on a representative fixture, not when it looks right.
 
-**The contract is [`<flow-root>/adapters/SPEC.md`](../../adapters/SPEC.md).** Read it first and keep it open; where this skill and the SPEC disagree, the SPEC wins. It defines the `WorkItem` model (section 2), the 16 required verbs and the optional ones (section 3), the code realization (section 3, "The code realization"), the invariants `INV-1 .. INV-5` (section 4) and versioning (section 5).
-
-Use this to build an adapter that does not exist yet. To operate an existing one, read that adapter instead.
+**The contract is [`<flow-root>/adapters/SPEC.md`](../../adapters/SPEC.md).** Read it first and keep it open; where this skill and the SPEC disagree, the SPEC wins. It defines the `WorkItem` model (section 2), the 16 required verbs and the optional ones (section 3), the code realization (section 3, "The code realization"), the invariants `INV-1 .. INV-6` (section 4) and versioning (section 5).
 
 ## The procedure
 
@@ -22,8 +20,6 @@ Use this to build an adapter that does not exist yet. To operate an existing one
 4 VERIFY with validate-adapter.ts --> ok? done
       ^------ fix the failed invariant ---'
 ```
-
-Expect to loop between 3 and 4.
 
 ### 1. Read the SPEC, pick a starting point
 
@@ -40,6 +36,7 @@ Fill in [`references/mapping-worksheet.md`](references/mapping-worksheet.md). Th
 - Re-namespace every label into `agent/*`, `stage/*`, `type/*` (or another `family/leaf`). A bare `ready` silently fails to match.
 - `priority` and `size` are native fields, never labels. A missing optional is `undefined`, never a made-up value.
 - Relations come from the typed graph only, never from prose.
+- Every comment's `authorIsTrusted` comes from the tracker's membership data (SPEC "Trusted authors"); unknown is `false`.
 
 ### 3. Generate the adapter
 
@@ -57,7 +54,7 @@ Optionally, `adapter.ts` beside it, so `flow claim|stage|done|create|snapshot` r
 
 ### 4. Verify (the gate)
 
-Build a fixture of the normalized `WorkItem`s your reads return: at least one item per state category, a ready and a not-ready item, one relation that resolves in the set and one that is closed or outside it. Then:
+Build a fixture of the normalized `WorkItem`s your reads return: at least one item per state category, a ready and a not-ready item, one relation that resolves in the set and one that is closed or outside it. Add `comments`: one by a member, one by a guest, integration or no author. Then:
 
 ```bash
 node --experimental-strip-types "<flow-root>/scripts/validate-adapter.ts" --fixture <fixture.json>
@@ -80,5 +77,5 @@ node --experimental-strip-types "<flow-root>/scripts/validate-adapter.ts" --fixt
 - [ ] **Outward writes are signed.** `comment`, the `needsInput` question and the description `createSubIssue` writes end with the `agent:provenance` line ([`<flow-root>/docs/provenance.md`](../../docs/provenance.md)) beside the identity marker. The adapter says whether its tracker preserves HTML comments byte-for-byte; if not, it posts unsigned rather than a mangled line.
 - [ ] Every optional verb declared.
 - [ ] No tracker API string outside the adapter.
-- [ ] Contract version declared: a new adapter the SPEC's current one; an existing one may keep the version it passed.
+- [ ] Contract version declared: the SPEC's current one; code below 3.0.0 never loads.
 - [ ] `validate-adapter.ts --fixture <fixture>` returns `ok: true`, exit `0`.

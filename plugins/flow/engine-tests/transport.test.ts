@@ -48,7 +48,7 @@ function entry(overrides: Partial<InboxEntry> = {}): InboxEntry {
   return {
     itemId: 'DOR-1',
     occurredAt: '2026-06-25T00:00:00.000Z',
-    comment: { author: 'human', mentions: [], body: 'go with option B' },
+    comment: { author: 'human', authorIsTrusted: true, mentions: [], body: 'go with option B' },
     actor: 'human',
     raw: { native: true },
     ...overrides,
@@ -123,7 +123,9 @@ describe('PollingTransport — maps inbox entries to events + advances the water
 
   it('maps a bare @mention (empty body, non-empty mentions) to a mention event', async () => {
     const transport = new PollingTransport(async () => [
-      entry({ comment: { author: 'human', mentions: ['acct-agent'], body: '' } }),
+      entry({
+        comment: { author: 'human', authorIsTrusted: true, mentions: ['acct-agent'], body: '' },
+      }),
     ]);
     const { events } = await transport.poll();
     expect(events).toHaveLength(1);
@@ -169,8 +171,10 @@ describe('PollingTransport — non-conformance sweep (InboxComment fields)', () 
   const COMMENT_FIELDS = Object.keys(entry().comment) as (keyof InboxEntry['comment'])[];
 
   it('derives its field list from the fixture, and the fixture is complete', () => {
-    expect(COMMENT_FIELDS).toHaveLength(3);
-    expect(COMMENT_FIELDS).toEqual(expect.arrayContaining(['author', 'mentions', 'body']));
+    expect(COMMENT_FIELDS).toHaveLength(4);
+    expect(COMMENT_FIELDS).toEqual(
+      expect.arrayContaining(['author', 'authorIsTrusted', 'mentions', 'body'])
+    );
   });
 
   const cases = COMMENT_FIELDS.flatMap((field) =>
@@ -188,7 +192,13 @@ describe('PollingTransport — non-conformance sweep (InboxComment fields)', () 
       // short-circuiting past it. The `body` case below then overrides this
       // forced-empty default with its own hostile value.
       const hostileEntry = entry({
-        comment: { author: 'human', mentions: ['acct-agent'], body: '', [field]: value },
+        comment: {
+          author: 'human',
+          authorIsTrusted: true,
+          mentions: ['acct-agent'],
+          body: '',
+          [field]: value,
+        },
       });
       const transport = new PollingTransport(async () => [hostileEntry]);
 
@@ -216,7 +226,12 @@ describe('PollingTransport — non-conformance sweep (InboxComment fields)', () 
     // normal `comment.added` event instead.
     const transport = new PollingTransport(async () => [
       entry({
-        comment: { author: 'human', mentions: '@agent' as unknown as string[], body: '' },
+        comment: {
+          author: 'human',
+          authorIsTrusted: true,
+          mentions: '@agent' as unknown as string[],
+          body: '',
+        },
       }),
     ]);
     const { events } = await transport.poll();
@@ -430,24 +445,33 @@ describe('PollingTransport — an entry with no comment is handled, not thrown (
   });
 });
 
-describe('PollingTransport — an author-less comment is kept, with a warning (DOR-638)', () => {
-  it('passes the comment on and says it has no author', async () => {
+describe('PollingTransport — a comment from outside the team is kept, with a warning (DOR-3669)', () => {
+  // DOR-638 kept an author-less comment and let its text resume a parked
+  // question. DOR-3669 keeps it (the watermark still moves past it) but says
+  // plainly that it starts nothing: the comment rules ignore it.
+  it.each([
+    ['no author', { author: '', authorIsTrusted: false }, 'no author'],
+    ['a guest', { author: 'guest-1', authorIsTrusted: false }, 'not a member'],
+    ['an integration', { author: 'bot-1', authorIsTrusted: false }, 'not a member'],
+    ['no trust signal', { author: 'someone' }, 'adapter'],
+  ])('passes on a comment with %s and warns it cannot start a turn', async (_w, from, says) => {
     const { transport, warn } = quietTransport(async () => [
       entry({
-        itemId: 'DOR-synced',
-        comment: { author: '', mentions: [], body: 'from Slack: go with B' },
+        itemId: 'DOR-out',
+        comment: { mentions: [], body: 'go with B', ...from } as InboxEntry['comment'],
         actor: undefined,
       }),
     ]);
     const { events, warnings } = await transport.poll();
-    expect(events.map((e) => e.itemId)).toEqual(['DOR-synced']);
+    expect(events.map((e) => e.itemId)).toEqual(['DOR-out']);
     expect(warnings).toHaveLength(1);
-    expect(warnings?.[0]).toContain('DOR-synced');
-    expect(warnings?.[0]).toContain('no author');
+    expect(warnings?.[0]).toContain('DOR-out');
+    expect(warnings?.[0]).toContain(says);
+    expect(warnings?.[0]).toContain("can't start or resume");
     expect(warn).toHaveBeenCalledTimes(1);
   });
 
-  it('says nothing about a comment that names its author', async () => {
+  it('says nothing about a comment from a team member', async () => {
     const { transport, warn } = quietTransport(async () => [entry()]);
     const { warnings } = await transport.poll();
     expect(warnings).toEqual([]);
@@ -534,7 +558,7 @@ function canonicalEvents(via: ReceivedVia): TrackerEvent[] {
     receivedVia: via,
     dedupeKey: trackerEventDedupeKey('comment.added', itemId, occurredAt),
     raw: null,
-    comment: { author: 'human', mentions: [], body },
+    comment: { author: 'human', authorIsTrusted: true, mentions: [], body },
   });
   return [
     mk('DOR-1', '2026-06-25T00:00:01.000Z', 'go with option B'),

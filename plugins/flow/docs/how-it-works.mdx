@@ -68,7 +68,7 @@ The engine's decision logic is already typed code in the `@dorkos/flow` package.
 | `classifyDispatchOutcome` | `dispatch.ts`         | Whether an empty queue means **done** or **starved** (G3).                          |
 | `resolveInvolvement`      | `calibration.ts`      | Proceed silently, proceed-with-trail, or stop-and-ask (the 5-row ladder).           |
 | `recoverOrphan`           | `flow-run.ts`         | What to do with an orphaned claim: resume, restart-clean, re-derive, `onExhausted`. |
-| `shouldRespondToComment`  | `comment-response.ts` | Respond, resume, or ignore an inbound comment (the five rules).                     |
+| `shouldRespondToComment`  | `comment-response.ts` | Respond, resume or ignore a comment (five rules; members only).                     |
 | `resolveCommsChannel`     | `comms.ts`            | Which channel a parked question routes on, given the identity mode.                 |
 | `evaluateAutoMerge`       | `gates.ts`            | At the review gate: merge, bounce, or re-request approval.                          |
 

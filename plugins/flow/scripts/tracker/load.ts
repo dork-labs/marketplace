@@ -6,8 +6,8 @@
  *   `config-files.ts` resolves (a project adapter under
  *   `.agents/flow/adapters/<tracker>/`, or a shipped one under
  *   `<flow-root>/skills/<tracker>-adapter/`). Nothing else decides where it is.
- * - It must export `CONTRACT_VERSION` (a version string) and
- *   `createAdapter(ctx)`.
+ * - It must export `CONTRACT_VERSION` (a version string, major
+ *   {@link MIN_CONTRACT_MAJOR} or later) and `createAdapter(ctx)`.
  * - `connection.transport` picks the transport. Only `cli` can serve the CLI;
  *   `mcp` exists only inside an agent session and is refused (Decision D3).
  * - The adapter is wrapped so that anything it throws that is not already a
@@ -38,6 +38,12 @@ import {
   type CodeAdapterModule,
   type TrackerTransport,
 } from './types.ts';
+
+/**
+ * The oldest contract major adapter code may target. 3.0.0 made every comment
+ * carry `authorIsTrusted` (DOR-3669); older code cannot, so it never loads.
+ */
+export const MIN_CONTRACT_MAJOR = 3;
 
 /** The file an adapter's code lives in, beside its `SKILL.md`. */
 export const ADAPTER_CODE_FILE = 'adapter.ts';
@@ -134,7 +140,15 @@ export async function loadCodeAdapter(options: LoadCodeAdapterOptions): Promise<
     !/^\d+\.\d+\.\d+/.test(module.CONTRACT_VERSION)
   ) {
     throw new ConfigError(
-      `the ${tracker} adapter code at ${file} must export CONTRACT_VERSION, the adapter contract version it targets (for example "2.2.0")`
+      `the ${tracker} adapter code at ${file} must export CONTRACT_VERSION, the adapter contract version it targets (for example "3.0.0")`
+    );
+  }
+  const major = Number(module.CONTRACT_VERSION.split('.')[0]);
+  if (major < MIN_CONTRACT_MAJOR) {
+    throw new ConfigError(
+      `the ${tracker} adapter code at ${file} targets adapter contract ${module.CONTRACT_VERSION}, ` +
+        `which cannot say whether a comment's author is a team member (authorIsTrusted, contract ` +
+        `${MIN_CONTRACT_MAJOR}.0.0); regenerate it with the building-adapters skill`
     );
   }
   if (typeof module.createAdapter !== 'function') {

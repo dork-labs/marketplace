@@ -65,7 +65,7 @@ import type {
 import { labelsAfterChange } from '../../scripts/work-state.ts';
 
 /** The adapter contract version this code targets. */
-export const CONTRACT_VERSION = '2.2.0';
+export const CONTRACT_VERSION = '3.0.0';
 
 /** The Composio slug every read and write goes through. */
 export const GRAPHQL_SLUG = 'LINEAR_RUN_QUERY_OR_MUTATION';
@@ -158,11 +158,17 @@ export const ITEM_QUERY = `query FlowItem($id: String!) {
   issue(id: $id) { ${ITEM_FIELDS} }
 }`;
 
+/**
+ * The account fields a comment's trust is read from (contract 3.0.0): Linear's
+ * own record of whether the author is active, a guest, or an app.
+ */
+export const COMMENT_USER_FIELDS = 'user { id active guest app }';
+
 /** One issue with its latest comments (Linear returns them newest first). */
 export const ITEM_WITH_COMMENTS_QUERY = `query FlowItemComments($id: String!, $comments: Int!) {
   issue(id: $id) {
     ${ITEM_FIELDS}
-    comments(first: $comments, orderBy: createdAt) { nodes { id body createdAt user { id } } }
+    comments(first: $comments, orderBy: createdAt) { nodes { id body createdAt ${COMMENT_USER_FIELDS} } }
   }
 }`;
 
@@ -322,7 +328,31 @@ interface RawComment {
   id: string;
   body?: string | null;
   createdAt?: string | null;
-  user?: { id?: string | null } | null;
+  user?: {
+    id?: string | null;
+    active?: boolean | null;
+    guest?: boolean | null;
+    app?: boolean | null;
+  } | null;
+}
+
+/**
+ * Whether Linear's own account record says a comment's author is a member of
+ * the workspace: a user that is active, not a guest and not an app. A comment
+ * with no user (an integration's, or one synced in from Slack or email) and
+ * any field Linear left out read as not trusted.
+ *
+ * @param user - The comment's `user` node.
+ * @returns `true` only for an active, non-guest, non-app user with an id.
+ */
+export function isMemberUser(user: RawComment['user']): boolean {
+  return (
+    typeof user?.id === 'string' &&
+    user.id !== '' &&
+    user.active === true &&
+    user.guest === false &&
+    user.app === false
+  );
 }
 
 /** A page of a connection. */
@@ -953,6 +983,7 @@ export function createAdapter(ctx: AdapterContext): CodeAdapter {
         const comments: ItemComment[] = (issue.comments?.nodes ?? []).map((node) => ({
           id: node.id,
           author: node.user?.id ?? '',
+          authorIsTrusted: isMemberUser(node.user),
           body: node.body ?? '',
           createdAt: node.createdAt ?? '',
         }));

@@ -28,9 +28,13 @@ const CTX: AnswerContext = {
   comments: { respondWhen: 'addressed', ambiguousBias: 'quiet' } as AnswerContext['comments'],
 };
 
+/** Authors the fake tracker would not vouch for: a guest and an integration. */
+const OUTSIDERS = new Set(['guest', 'integration']);
+
 const c = (id: string, author: string, minute: number, body = `says ${id}`): ItemComment => ({
   id,
   author,
+  authorIsTrusted: author !== '' && !OUTSIDERS.has(author),
   body,
   createdAt: new Date(Date.UTC(2026, 8, 26, 12, minute)).toISOString(),
 });
@@ -88,5 +92,32 @@ describe('findAnswer', () => {
     expect(answerPointer(comments[2], 'A-1')).toBe(
       `the comment by dorian on A-1 at ${comments[2].createdAt}`
     );
+  });
+
+  // Purpose (DOR-3669): only a team member's reply resumes a parked run. A
+  // guest, an integration and a comment with no author are each left alone,
+  // the run stays parked, and each one is reported so a person can see why.
+  // Fails if any of them is taken as the answer.
+  it.each([
+    ['a guest', 'guest'],
+    ['an integration', 'integration'],
+    ['a comment with no author', ''],
+  ])('never takes %s as the answer, and reports it', (_who, author) => {
+    const since = c('x', 'x', 10).createdAt;
+    const skipped: string[] = [];
+    const ctx = { ...CTX, onUntrusted: (comment: ItemComment) => skipped.push(comment.id) };
+    const comments = [c('park', 'bot', 10), c('outsider', author, 12, 'go with B')];
+    expect(findAnswer(ITEM, comments, since, ctx)).toBeNull();
+    expect(skipped).toEqual(['outsider']);
+    // A member's earlier reply still counts past an outsider's later one.
+    const both = [c('park', 'bot', 10), c('member', 'dorian', 11), comments[1]];
+    expect(findAnswer(ITEM, both, since, ctx)?.id).toBe('member');
+  });
+
+  // Purpose: an adapter older than contract 3.0.0 sends no signal; that is untrusted.
+  it('treats a comment with no authorIsTrusted as untrusted', () => {
+    const since = c('x', 'x', 10).createdAt;
+    const { authorIsTrusted: _drop, ...bare } = c('old', 'dorian', 12);
+    expect(findAnswer(ITEM, [bare as ItemComment], since, CTX)).toBeNull();
   });
 });

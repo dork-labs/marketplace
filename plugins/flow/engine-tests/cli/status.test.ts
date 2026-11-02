@@ -506,18 +506,21 @@ describe('flow status', () => {
           {
             id: 'c1',
             author: 'agent-1',
+            authorIsTrusted: false,
             body: 'Old question\n<!-- agent:provenance {"v":1} -->',
             createdAt: '2026-09-26T09:00:00.000Z',
           },
           {
             id: 'c2',
             author: 'agent-1',
+            authorIsTrusted: false,
             body: 'Which database?\n<!-- agent:provenance {"v":1} -->',
             createdAt: '2026-09-26T10:00:00.000Z',
           },
           {
             id: 'c3',
             author: 'person',
+            authorIsTrusted: false,
             body: 'thinking...',
             createdAt: '2026-09-26T11:00:00.000Z',
           },

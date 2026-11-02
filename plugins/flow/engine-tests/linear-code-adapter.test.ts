@@ -140,10 +140,10 @@ const DOCUMENTS = new Set(
 );
 
 describe('the module', () => {
-  it('declares contract 2.2.0 and all six capabilities', () => {
+  it('declares contract 3.0.0 and all six capabilities', () => {
     // Purpose: the loader requires CONTRACT_VERSION and the capability list;
     // the shipped adapter serves every verb, createItem included.
-    expect(linear.CONTRACT_VERSION).toBe('2.2.0');
+    expect(linear.CONTRACT_VERSION).toBe('3.0.0');
     const { adapter } = build(snapshotRoute);
     expect([...adapter.capabilities].sort()).toEqual(
       [
@@ -490,7 +490,7 @@ describe('getCurrentUser and getItem', () => {
                 id: 'c2',
                 body: 'second',
                 createdAt: '2026-09-21T10:00:00.000Z',
-                user: { id: 'user-a' },
+                user: { id: 'user-a', active: true, guest: false, app: false },
               },
               { id: 'c1', body: 'first', createdAt: '2026-09-20T10:00:00.000Z', user: null },
             ],
@@ -511,9 +511,57 @@ describe('getCurrentUser and getItem', () => {
       project: { id: 'proj-1', stateCategory: 'started' },
     });
     expect(item.comments).toEqual([
-      { id: 'c1', author: '', body: 'first', createdAt: '2026-09-20T10:00:00.000Z' },
-      { id: 'c2', author: 'user-a', body: 'second', createdAt: '2026-09-21T10:00:00.000Z' },
+      {
+        id: 'c1',
+        author: '',
+        authorIsTrusted: false,
+        body: 'first',
+        createdAt: '2026-09-20T10:00:00.000Z',
+      },
+      {
+        id: 'c2',
+        author: 'user-a',
+        authorIsTrusted: true,
+        body: 'second',
+        createdAt: '2026-09-21T10:00:00.000Z',
+      },
     ]);
+  });
+
+  it("reads a comment's trust only from Linear's account flags (DOR-3669)", async () => {
+    // Purpose: a guest, an app (an integration), a deactivated account, a
+    // comment with no user, and a user Linear sent without the flags are each
+    // untrusted; only an active, non-guest, non-app user is a member. Fails if
+    // any field flow can't confirm defaults to trusted.
+    const users: [string, Record<string, unknown> | null, boolean][] = [
+      ['member', { id: 'u-m', active: true, guest: false, app: false }, true],
+      ['guest', { id: 'u-g', active: true, guest: true, app: false }, false],
+      ['app', { id: 'u-a', active: true, guest: false, app: true }, false],
+      ['deactivated', { id: 'u-d', active: false, guest: false, app: false }, false],
+      ['no flags', { id: 'u-n' }, false],
+      ['no user', null, false],
+    ];
+    const { adapter } = build(() =>
+      okEnvelope({
+        issue: {
+          ...issueNode('DOR-101'),
+          team: TEAM,
+          relations: { nodes: [] },
+          comments: {
+            nodes: users.map(([name, user], i) => ({
+              id: name,
+              body: name,
+              createdAt: `2026-09-2${i}T10:00:00.000Z`,
+              user,
+            })),
+          },
+        },
+      })
+    );
+    const item = await adapter.getItem('DOR-101', { comments: users.length });
+    expect(Object.fromEntries((item.comments ?? []).map((c) => [c.id, c.authorIsTrusted]))).toEqual(
+      Object.fromEntries(users.map(([name, , trusted]) => [name, trusted]))
+    );
   });
 
   it("reports a missing item and another team's item as precondition failures", async () => {

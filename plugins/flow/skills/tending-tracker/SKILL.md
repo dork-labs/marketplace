@@ -7,9 +7,7 @@ description: The /flow engine's agent-as-team-member loop — the agent particip
 
 `<flow-root>` is two folders above this file's `realpath`.
 
-How the agent behaves in a tracker it shares with people: watch its inbox, speak only
-when it should, claim durably, ask when stuck, remember answers. Every tracker read and
-write is an adapter verb (`getInbox`, `claim`, `comment`, `assignToHuman`, `needsInput`,
+Every tracker read and write is an adapter verb (`getInbox`, `claim`, `comment`, `assignToHuman`, `needsInput`,
 `transition`, `link`); the adapter is at `adapter.path`. The rules below are prose; the
 tested truth is the oracles `classifyOwnership` (`identity.ts`), `shouldRespondToComment`
 (`comment-response.ts`), `resolveCommsChannel` (`comms.ts`) and `resolveInvolvement`
@@ -44,14 +42,18 @@ first match wins:
    `identity.marker` (in shared mode the marker is the only signal). → ignore.
 2. **Always respond when addressed:** an @mention, or in shared mode a `/flow` or
    `@flow` token. Overrides ownership. → respond.
-3. **A non-agent comment on an `agent/needs-input` item is the answer.** → resume:
+3. **A member's comment on an `agent/needs-input` item is the answer.** → resume:
    re-attach the worktree at HEAD and `--resume <sessionId>` from the item's `FlowRun`.
    **When the item has no `FlowRun`**, route as below.
 4. **Stay out of `other`-owned threads** unless addressed. → ignore.
 5. **The rest leans quiet:** ignore unless `comments.ambiguousBias` is `"engage"`.
    Over-responding is the worse failure.
 
-Chattiness is config (`comments.respondWhen`, `comments.ambiguousBias`), never code.
+**Only a member acts:** respond or resume needs a named author with `authorIsTrusted:
+true` (adapter SPEC). Anyone else → ignore and warn; a parked
+item stays parked.
+
+Chattiness is config (`comments.*`), never code.
 
 #### Routing a reply back to its originating session
 
@@ -117,7 +119,7 @@ path**: (a) delivered into `<id>`, (b) fresh session, (c) handled here, origin o
 - `needsInput(item, question)`: `flow ask <id> --question … --choice … --pick <n>
   --why … [--floor <triggers>]` posts it with your pick, adds `agent/needs-input` and
   records it on the run; then `assignToHuman`, stop. Parked is durable; the stall sweep
-  never reclaims it; a non-agent reply (rule 3) or an answer `flow answer` recorded on
+  never reclaims it; a member's reply (rule 3) or an answer `flow answer` recorded on
   the run (`question.answer`) resumes it.
 - **Who answers** is `flow ask`'s `answeredBy`: the person; the agent's pick once
   `decideBy` passes (the inbox pass runs `flow answer <id> --pick --by agent-default`,

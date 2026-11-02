@@ -27,7 +27,7 @@ import { existsSync, mkdirSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 
 import { chooseAccount, rankAccounts } from '../drain/account-rank.ts';
-import { answerPointer, findAnswer } from '../drain/answer.ts';
+import { answerPointer, findAnswer, untrustedReplyWarning } from '../drain/answer.ts';
 import type { RunQuestion } from '../flow-run.ts';
 import { belongsToPark, checkBrief, parkedAnswer, personOnly, pickComment } from '../question.ts';
 import {
@@ -594,6 +594,7 @@ export async function drain(ctx: VerbContext, options: DrainOptions = {}): Promi
           scope
         ),
         comments: config.comments,
+        onUntrusted: (comment) => ctx.warn(untrustedReplyWarning(comment, identifier)),
       });
       // Only the question asked for this park counts (a later park, for review
       // rounds or failing checks, is nobody's answer), spec flow-multiproject §7.5.

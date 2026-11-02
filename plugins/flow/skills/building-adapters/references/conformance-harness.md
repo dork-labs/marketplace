@@ -8,7 +8,7 @@ Step 4 in detail. What each invariant asserts is [`<flow-root>/adapters/SPEC.md`
 node --experimental-strip-types "<flow-root>/scripts/validate-adapter.ts" --fixture <fixture.json>
 ```
 
-- In: a JSON file of the normalized `WorkItem`s your read verbs return.
+- In: `{ "items": [...], "comments": [...] }`, what your read verbs return.
 - Out: `{ "ok": boolean, "failures": [ { "invariant": "INV-n", "detail": "..." } ] }` on stdout.
 - Exit `0` is pass, nonzero is fail. Gate on the exit code; read `failures` to fix.
 
@@ -23,6 +23,7 @@ Serialize what your adapter's read verbs actually return from a real or recorded
 | A `blockedBy` that resolves in the fixture, and one pointing at a closed or out-of-set item | `INV-3`   |
 | Labels from `agent/*`, `stage/*` and `type/*`                                               | `INV-4`   |
 | A dispatchable item with `agent/ready` and one without                                      | `INV-5`   |
+| Comments by a member and by a guest, integration or no one                                  | `INV-6`   |
 
 ## Prove it bites
 
@@ -32,12 +33,13 @@ Before trusting green, run a throwaway fixture of broken items; each must fail a
 - `priority: 0` on an item with no native priority: `INV-2`.
 - A native id in `blockedBy` instead of an `identifier`: `INV-3`.
 - A made-up sixth `stateCategory`: `INV-1`.
+- Every named author trusted: `INV-6`.
 
 None fail: your fixture or invocation is wrong. Fix that first.
 
 ## The loop
 
-Run, read each failure, fix the **mapping** that produced it, re-run. Never edit the fixture to pass: it is the adapter's output, so that hides a real bug. The only fixture edit allowed adds a missing case. Done means `ok: true`, exit `0`.
+Run, read each failure, fix the **mapping** that produced it, re-run. Never edit the fixture to pass: it is the adapter's output, so that hides a real bug; only add missing cases. Done means `ok: true`, exit `0`.
 
 | Failure | Usual cause                                                                                                     | Fix                                                                                                        |
 | ------- | --------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------- |
@@ -49,4 +51,4 @@ Run, read each failure, fix the **mapping** that produced it, re-run. Never edit
 
 ## Versioning
 
-The harness reads output, so it cannot check your declared contract version; keeping it honest is yours. On a contract bump, re-run the harness (the bump rules are SPEC section 5). Pin the version you generated against so drift shows at validation, not at runtime.
+The harness reads output, so it cannot check your declared contract version; `flow` refuses code below 3.0.0. On a bump, re-run the harness (rules: SPEC section 5).

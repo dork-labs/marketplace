@@ -47,7 +47,7 @@ beforeEach(() => {
   adapter = path.join(adapterDir, 'SKILL.md');
   write(config, '{}\n');
   write(adapter, '# acme\n');
-  write(path.join(adapterDir, 'adapter.ts'), 'export const CONTRACT_VERSION = "2.2.0";\n');
+  write(path.join(adapterDir, 'adapter.ts'), 'export const CONTRACT_VERSION = "3.0.0";\n');
   git('add', '-A');
   git('commit', '-q', '-m', 'flow');
 });

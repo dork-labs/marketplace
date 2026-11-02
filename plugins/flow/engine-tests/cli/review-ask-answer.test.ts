@@ -752,7 +752,7 @@ describe('flow answer', () => {
     expect(body).not.toContain(MARKER);
     const config = FlowConfigSchema.parse({});
     const decision = shouldRespondToComment(
-      { author: 'dorian', mentions: [], body },
+      { author: 'dorian', authorIsTrusted: true, mentions: [], body },
       {
         item: parked(),
         ownership: 'unassigned',

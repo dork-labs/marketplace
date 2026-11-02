@@ -145,12 +145,69 @@ describe('validate-adapter', () => {
     });
   });
 
+  describe('INV-6: every comment says whether its author is a member (DOR-3669)', () => {
+    /** The good fixture with its `comments` replaced (or removed, for `undefined`). */
+    function withComments(comments: unknown): string {
+      const fixture = JSON.parse(readFileSync(GOOD_FIXTURE, 'utf8')) as Record<string, unknown>;
+      if (comments === undefined) delete fixture.comments;
+      else fixture.comments = comments;
+      return JSON.stringify(fixture);
+    }
+    const member = { author: 'acct_human', authorIsTrusted: true, body: 'go' };
+    const guest = { author: 'acct_guest', authorIsTrusted: false, body: 'go' };
+
+    /** The INV-6 detail for a fixture, or `undefined` when INV-6 passed. */
+    function inv6(stdin: string): string | undefined {
+      const verdict = JSON.parse(runHarness({ stdin }).stdout) as Verdict;
+      return verdict.failures.find((f) => f.invariant === 'INV-6')?.detail;
+    }
+
+    it('passes a member and an outsider, each marked', () => {
+      expect(inv6(withComments([member, guest]))).toBeUndefined();
+    });
+
+    it('fails a fixture with no comments, so a generated adapter cannot skip the signal', () => {
+      expect(inv6(withComments(undefined))).toMatch(/no comments/);
+      expect(inv6(JSON.stringify(JSON.parse(readFileSync(GOOD_FIXTURE, 'utf8')).items))).toMatch(
+        /no comments/
+      );
+    });
+
+    it.each([
+      ['missing', undefined],
+      ['a string', 'true'],
+      ['null', null],
+      ['a number', 1],
+    ])('fails a comment whose authorIsTrusted is %s', (_label, value) => {
+      const { authorIsTrusted: _drop, ...bare } = member;
+      const comment = value === undefined ? bare : { ...bare, authorIsTrusted: value };
+      expect(inv6(withComments([comment, guest]))).toMatch(/authorIsTrusted/);
+    });
+
+    it('fails a comment with no author that is marked trusted', () => {
+      expect(inv6(withComments([member, guest, { ...member, author: '' }]))).toMatch(/no author/);
+    });
+
+    it('fails a fixture that never shows an outsider, or never a member', () => {
+      expect(inv6(withComments([member]))).toMatch(/at least one/);
+      expect(inv6(withComments([guest]))).toMatch(/at least one/);
+    });
+
+    it('fails an adapter that trusts every named author (author !== "")', () => {
+      // The author-less comment is untrusted by rule, so it cannot stand in for
+      // the outsider: a guest marked trusted must be caught.
+      const lax = [member, { ...guest, authorIsTrusted: true }, { ...guest, author: '' }];
+      expect(inv6(withComments(lax))).toMatch(/named/);
+    });
+  });
+
   describe('--help', () => {
     it('prints the contract and exits 0', () => {
       const { status, stdout } = runHarness({ args: ['--help'] });
       expect(status).toBe(0);
       expect(stdout).toContain('INV-1');
       expect(stdout).toContain('INV-5');
+      expect(stdout).toContain('INV-6');
       expect(stdout).toContain('--fixture');
     });
   });

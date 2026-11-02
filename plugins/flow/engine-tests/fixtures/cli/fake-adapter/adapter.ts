@@ -43,7 +43,7 @@ import type {
 import { labelsAfterChange } from '../../../../scripts/work-state.ts';
 
 /** The contract version this fake targets. */
-export const CONTRACT_VERSION = '2.0.0';
+export const CONTRACT_VERSION = '3.0.0';
 
 /** The environment variable naming the backlog file a spawned run reads and writes. */
 export const FAKE_BACKLOG_ENV = 'FLOW_FAKE_BACKLOG';
@@ -66,6 +66,8 @@ export interface FakeBacklog {
   projects?: WorkItemProject[];
   /** Comments per item identifier, oldest first. */
   comments?: Record<string, ItemComment[]>;
+  /** Account ids the tracker lists as team members; a comment's `authorIsTrusted` is read from this. */
+  members?: string[];
   /** When set, every read throws a plain `Error` with this message. */
   failReads?: string;
   /** When true, `applyWorkState` records the call but changes nothing. */
@@ -147,9 +149,13 @@ export function createFakeAdapter(
       read();
       const item: ItemWithComments = structuredClone(find(identifier));
       if (options.comments !== undefined && options.comments > 0) {
+        const members = backlog.members ?? [];
         item.comments = structuredClone(
           (backlog.comments?.[identifier] ?? []).slice(-options.comments)
-        );
+        ).map((comment) => ({
+          ...comment,
+          authorIsTrusted: comment.author !== '' && members.includes(comment.author),
+        }));
       }
       return item;
     },
@@ -171,6 +177,7 @@ export function createFakeAdapter(
       list.push({
         id: `comment-${list.length + 1}`,
         author: (backlog.user ?? { id: 'agent-1' }).id,
+        authorIsTrusted: false,
         body,
         createdAt: now().toISOString(),
       });

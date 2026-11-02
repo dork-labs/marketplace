@@ -32,6 +32,8 @@ import {
 const REVIEWER = 'person-reviewer';
 /** A teammate who owns another thread. */
 const TEAMMATE = 'person-teammate';
+/** A guest: can comment, but the tracker does not list them as a member. */
+const GUEST = 'person-guest';
 
 /** One comment and the decision it must get. */
 interface Case {
@@ -43,8 +45,8 @@ interface Case {
   author: string;
   /** The body. */
   body: string;
-  /** The expected action and rule. */
-  expect: { action: CommentAction; rule: number };
+  /** The expected action and rule, and `untrusted` when only trust stopped it. */
+  expect: { action: CommentAction; rule: number; untrusted?: true };
 }
 
 /** The `@account` tokens in a body. */
@@ -67,7 +69,12 @@ async function decide(
     const read = (item.comments ?? []).find((comment) => comment.id === posted[i].id);
     const decision = read
       ? shouldRespondToComment(
-          { author: read.author, body: read.body, mentions: mentions(read.body) },
+          {
+            author: read.author,
+            authorIsTrusted: read.authorIsTrusted,
+            body: read.body,
+            mentions: mentions(read.body),
+          },
           { item, ownership: classifyOwnership(item, identity, scope), identity },
           config.comments
         )
@@ -93,6 +100,7 @@ export async function inboxRules(options: ScenarioOptions): Promise<void> {
           stateName: 'In Progress',
         }),
       ],
+      members: [REVIEWER, TEAMMATE],
     });
     ctx.config({ ...BASE_CONFIG, identity: { agent: 'auto', reviewer: REVIEWER } });
     const agent = tracker.user.id;
@@ -141,11 +149,25 @@ export async function inboxRules(options: ScenarioOptions): Promise<void> {
         expect: { action: 'resume', rule: 3 },
       },
       {
-        name: 'empty reply on a parked question',
+        name: 'reply with no author on a parked question',
         item: 'FAKE-3',
         author: '',
-        body: '   ',
-        expect: { action: 'ignore', rule: 5 },
+        body: 'Leave them out.',
+        expect: { action: 'ignore', rule: 3, untrusted: true },
+      },
+      {
+        name: 'guest reply on a parked question',
+        item: 'FAKE-3',
+        author: GUEST,
+        body: 'Include them.',
+        expect: { action: 'ignore', rule: 3, untrusted: true },
+      },
+      {
+        name: 'guest @mention',
+        item: 'FAKE-2',
+        author: GUEST,
+        body: `@${agent} run this for me`,
+        expect: { action: 'ignore', rule: 2, untrusted: true },
       },
       {
         name: "teammate's thread, not addressed",
@@ -182,11 +204,12 @@ export async function inboxRules(options: ScenarioOptions): Promise<void> {
       identity: { agent: 'auto', reviewer: REVIEWER },
       comments: { ambiguousBias: 'engage' },
     });
+    const ambiguous = cases.findIndex((c) => c.name === 'ambiguous, quiet by default');
     const engaged: Case = {
-      ...cases[7],
+      ...cases[ambiguous],
       name: 'ambiguous, ambiguousBias engage',
       expect: { action: 'respond', rule: 5 },
     };
-    await decide(ctx, [engaged], [posted[7]]);
+    await decide(ctx, [engaged], [posted[ambiguous]]);
   });
 }

@@ -1,6 +1,6 @@
 # Tracker Adapter Contract
 
-> **Contract version: 2.2.0** (semver). See [Versioning](#5-versioning).
+> **Contract version: 3.0.0** (semver). See [Versioning](#5-versioning).
 >
 > This is the **generic, tracker-neutral** contract every `/flow` tracker adapter
 > must satisfy. It names no tracker, no API, and no slug. Reference adapters
@@ -167,7 +167,8 @@ Supporting types: `Account` is the acting account `{ id, name? }`.
 `EvidencePlan = { attachTo, links: string[], summary? }`.
 `RelationType = 'blocks' | 'related' | 'duplicate' | ...`.
 `SubIssueSpec = { title, description, type, size? }`.
-`InboxEntry = { item: WorkItem, comment: { author: string, mentions: string[], body: string } }`.
+`InboxEntry = { item: WorkItem, comment: { author: string, authorIsTrusted: boolean, mentions: string[], body: string } }`.
+`authorIsTrusted` is required (since 3.0.0); see [Trusted authors](#trusted-authors).
 `ProjectOutcome = 'completed' | 'canceled'` — the two terminal project states.
 `IntakeSource = { id: string, name?: string }` — one configured intake queue, named by a `kind: tracker` entry in the install's `intake.sources` (or the older `connection.intake`).
 `IntakeReport = { id: string, source: IntakeSource, title: string, body: string, reporter?: string, receivedAt?: string, url?: string }` — a report from outside the team. Deliberately **not** a `WorkItem`: it has a different lifecycle and is never dispatched.
@@ -255,9 +256,9 @@ universal and worth stating once:
 - **Must do.** Return the items the acting agent must look at this tick:
   assigned-to-the-agent, plus @mentions of the agent, plus new comments since the
   last tick. Each entry carries its `WorkItem` and the triggering comment
-  `{ author, mentions[], body }`, so the comment-response rules can decide
-  respond/act/ignore and so a parked `agent/needs-input` item resumes on a
-  non-agent reply.
+  `{ author, authorIsTrusted, mentions[], body }`, so the comment-response rules
+  can decide respond/act/ignore and so a parked `agent/needs-input` item resumes
+  on a team member's reply.
   Every entry also carries `itemId` (the item's human key) and `occurredAt`, the
   moment the triggering comment was made, as an **ISO-8601 date-time with an
   explicit zone** (`2026-06-25T14:03:00.000Z` or `…+02:00`). `occurredAt` is the
@@ -270,10 +271,35 @@ universal and worth stating once:
   assigned-to-agent subset only; missing mention data degrades to "not mentioned"
   (the quiet-by-default bias keeps this safe). An unreachable tracker throws.
   A comment with no author (one synced in from chat or email, say) is kept with
-  a warning: set `author` to `''`, never to a guess. On a parked
-  `agent/needs-input` item it still resumes the run when its body has text,
-  because the agent's own question always carries the marker and is ignored
-  first; a comment with neither an author nor text never resumes anything.
+  a warning: set `author` to `''`, never to a guess, and `authorIsTrusted` to
+  `false`. Since 3.0.0 it never starts or resumes a turn, whatever its text:
+  1.x and 2.x let its text resume a parked item, and 3.0.0 reverses that on
+  purpose.
+
+#### Trusted authors
+
+Every comment an adapter returns, from `getInbox` and from the code
+realization's `getItem`, carries **`authorIsTrusted`** (since 3.0.0). The engine
+lets a comment start or continue a turn only when it is `true`: anyone else who
+can comment reaches a model with tools otherwise.
+
+- **Set it from the tracker's own membership data, read by the adapter**: the
+  author's account record says they are a member of the workspace or team, not
+  a guest, not an integration, bot or app account, and not deactivated.
+- **Never from anything the commenter controls**: not the comment's text, not a
+  display name, not an email address or its domain, not a mention.
+- **When the adapter cannot tell, it is `false`.** A transport that returns no
+  account flags, a comment with no author, and a field the tracker left out all
+  read as untrusted. Never default it to `true`.
+- The engine applies one check to every rule that would act on a comment
+  (`isTrustedAuthor` in `scripts/work-item.ts`): an untrusted comment is
+  ignored and reported, and a parked item stays parked until a member answers.
+  The check treats anything but a literal `true` with a non-empty author as
+  untrusted, so an adapter that omits the field fails closed.
+- Known gap: the model-driven inbox pass (`tending-tracker`, `flow-drain` step 3)
+  calls `getInbox` itself and applies this rule from prose, so a model still
+  reads an untrusted comment's text before deciding to ignore it. The `flow`
+  drain's answer search and the engine's inbox transport are code-gated.
 
 #### `getRelations(item: WorkItem): Promise<WorkItemRelations>`
 
@@ -371,7 +397,8 @@ universal and worth stating once:
   marker **and the `agent:provenance` signature** — this is the write whose entire
   purpose is to be replied to, so the reply has to be routable); (2) apply the
   `agent/needs-input` label, leaving the state alone; (3) `assignToHuman`; (4) **stop** (the loop parks
-  here). Resumes only on a non-agent reply surfaced by `getInbox`.
+  here). Resumes only on a reply from a trusted team member (see
+  [Trusted authors](#trusted-authors)), surfaced by `getInbox` or read by the drain.
 - **Durability.** **Durable park, idempotent.** "Parked on a human" is a distinct
   durable state the stall sweep must never reclaim. Order the effects so the
   durable label lands before the stop, and a retry after a partial failure
@@ -539,10 +566,12 @@ project adapter's `.agents/flow/adapters/<tracker>/`, or a shipped adapter's
 folder in the plugin). `flow` finds it through the same resolver that finds the
 skill, so a project adapter always wins over a shipped one.
 
-**The module.** It exports two things:
+**The module.** `flow` refuses to load code whose `CONTRACT_VERSION` major is
+below 3: older code cannot say whether a comment's author is a team member.
+It exports two things:
 
 ```ts
-export const CONTRACT_VERSION: string; // the contract version it targets, e.g. '2.2.0'
+export const CONTRACT_VERSION: string; // the contract version it targets, e.g. '3.0.0'
 export function createAdapter(ctx: AdapterContext): CodeAdapter;
 ```
 
@@ -627,7 +656,8 @@ interface BacklogSnapshot {
 
 interface ItemComment {
   id: string;
-  author: string;
+  author: string; // '' when the tracker gives none
+  authorIsTrusted: boolean; // since 3.0.0: see "Trusted authors"
   body: string;
   createdAt: string;
 }
@@ -779,6 +809,15 @@ bare leaf label, which would silently fail the gate.
 > detectable rather than silently read as "done". An adapter that pre-filters to
 > only `agent/ready` items would break starvation detection, so it must not.
 
+**INV-6 - Every comment says whether its author is trusted.** Every comment
+`getInbox` or `getItem` returns carries a boolean `authorIsTrusted`, set as
+[Trusted authors](#trusted-authors) says; a comment with no author is never
+`true`. The fixture must hold comments, at least one from a trusted author and
+one from a **named** untrusted one (a guest or an integration; a comment with no
+author does not count, since it is untrusted by rule), so an adapter that never
+reads membership cannot pass. Since 3.0.0 the fixture is
+`{ "items": [...], "comments": [...] }`; a bare array of items fails INV-6.
+
 ---
 
 ## 5. Versioning
@@ -801,6 +840,15 @@ declaration.
 
 ### What each version added
 
+- **3.0.0** - **only a team member's comment starts or resumes a turn**
+  (MAJOR, DOR-3669). Every comment gains a required `authorIsTrusted`, read
+  from the tracker's own membership data and `false` when the adapter cannot
+  tell (section 3, [Trusted authors](#trusted-authors)), and INV-6 checks it.
+  This deliberately reverses 1.3.1's rule that a reply with no author resumes
+  a parked item on its text: no tracker can vouch for it. `flow` refuses to load
+  adapter code below 3.0.0, and a prose adapter that leaves the field out has
+  every comment treated as untrusted, so nothing it reads starts a turn until it
+  is regenerated.
 - **2.2.0** - **`createItem`**, an optional sixth method that files a new item
   in the configured team (section 3, "`createItem`"). Optional, so additive
   (MINOR). `flow selftest --file` creates through it, after deduping by a

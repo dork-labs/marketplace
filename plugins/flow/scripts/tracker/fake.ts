@@ -47,7 +47,7 @@ import type {
 import { ALL_CAPABILITIES } from './types.ts';
 
 /** The adapter contract version the fake implements. */
-export const FAKE_CONTRACT_VERSION = '2.2.0';
+export const FAKE_CONTRACT_VERSION = '3.0.0';
 
 /** The environment variable naming the JSON file a spawned run's fake tracker reads and writes. */
 export const FAKE_BACKLOG_ENV = 'FLOW_FAKE_BACKLOG';
@@ -125,6 +125,13 @@ export interface FakeBacklog {
   projects?: WorkItemProject[];
   /** Comments per item identifier, oldest first. */
   comments?: Record<string, ItemComment[]>;
+  /**
+   * The fake tracker's membership data: the account ids that are full members
+   * of the team. A comment's `authorIsTrusted` is read from this list and
+   * nothing else (contract 3.0.0), so a guest or an integration is simply an
+   * author not on it. Absent: nobody is a member.
+   */
+  members?: string[];
   /** The team's labels beyond {@link FAKE_TEAM_LABELS}. */
   labels?: string[];
   /** Idempotency keys `createItem` has seen (as `<team id>:<key>`), and the item each one made. */
@@ -255,6 +262,16 @@ export class FakeTracker {
   }
 
   /**
+   * Whether the fake's membership data lists an account as a team member.
+   *
+   * @param account - The account id; `''` (no author) is never a member.
+   * @returns `true` only for an account on {@link FakeBacklog.members}.
+   */
+  isMember(account: string): boolean {
+    return account !== '' && (this.backlog.members ?? []).includes(account);
+  }
+
+  /**
    * A person comments on an item (the adapter's own comments go through
    * `adapter.comment`).
    *
@@ -269,6 +286,7 @@ export class FakeTracker {
     const comment: ItemComment = {
       id: `comment-${identifier}-${list.length + 1}`,
       author,
+      authorIsTrusted: this.isMember(author),
       body,
       createdAt: this.now().toISOString(),
     };
@@ -375,9 +393,11 @@ export class FakeTracker {
         this.read();
         const item: ItemWithComments = view(this.find(identifier));
         if (opts.comments !== undefined && opts.comments > 0) {
+          // Trust is read from the membership list at read time, as a real
+          // tracker reads its account records, never from the stored comment.
           item.comments = structuredClone(
             (this.backlog.comments?.[identifier] ?? []).slice(-opts.comments)
-          );
+          ).map((comment) => ({ ...comment, authorIsTrusted: this.isMember(comment.author) }));
         }
         return item;
       },

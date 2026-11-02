@@ -258,11 +258,11 @@ Types: `ProjectPulse`, `ProjectCompletionOutcome`, `ProjectCompletionDisposition
 ### Comms routing + comment-response — `comms.ts`, `comment-response.ts` (§5)
 
 `resolveCommsChannel(trigger, involvement) → CommsRoute` (`interactive` vs
-`comment-and-assign`, inferred from the trigger). `shouldRespondToComment(comment,
+`comment-and-assign`). `shouldRespondToComment(comment,
 context) → CommentDecision` enforces the hard rules then the conservative soft
 zone (never answer its own comments; always respond when addressed; resume on a
-non-agent reply to a `needs-input` item; stay out of `other`-owned threads; lean
-quiet). Types: `CommsRoute`, `CommsChannel`, `InboxComment`, `CommentDecision`.
+member's reply to a `needs-input` item; stay out of `other`-owned threads; lean
+quiet; members only). Types: `CommsRoute`, `CommsChannel`, `InboxComment`, `CommentDecision`.
 
 ### Identity & ownership — `identity.ts` (§7)
 

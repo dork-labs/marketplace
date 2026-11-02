@@ -104,6 +104,7 @@ function commentEvent(
     itemId: string;
     occurredAt: string;
     author: string;
+    authorIsTrusted: boolean;
     mentions: string[];
     body: string;
   }> = {}
@@ -120,6 +121,7 @@ function commentEvent(
     raw: null,
     comment: {
       author: overrides.author ?? REVIEWER,
+      authorIsTrusted: overrides.authorIsTrusted ?? true,
       mentions: overrides.mentions ?? [],
       body: overrides.body ?? 'go with option B',
     },
@@ -191,6 +193,33 @@ describe('inboxReconciler — resume on a parked answer (rule 3)', () => {
     const ctx = inboxCtx([candidate()]);
     const result = await inboxReconciler.run(ctx);
     expect(result.summary).toContain('comment.added:DOR-1:2026-06-25T01:00:00.000Z');
+  });
+});
+
+describe('inboxReconciler — only a team member resumes a parked item (DOR-3669)', () => {
+  // Purpose: the inbox reaches anyone who can comment. A guest, an integration
+  // and a comment with no author each leave the item parked, with nothing
+  // claimed, and the summary says why. Fails if any of them resumes the run.
+  it.each([
+    ['a guest', { author: 'guest-1', authorIsTrusted: false }],
+    ['an integration', { author: 'integration-bot', authorIsTrusted: false }],
+    ['a comment with no author', { author: '', authorIsTrusted: false }],
+  ])('%s cannot resume a parked item', async (_who, from) => {
+    const ctx = inboxCtx([candidate({ event: commentEvent({ ...from, body: 'go with B' }) })]);
+    expect(inboxReconciler.isDue(ctx)).toBe(false);
+    const result = await inboxReconciler.run(ctx);
+    expect(result.acted).toBe(false);
+    expect(result.itemId).toBeUndefined();
+    expect(result.summary).toContain('not from a team member');
+  });
+
+  it('a member after an outsider still resumes', async () => {
+    const outsider = candidate({
+      event: commentEvent({ author: 'guest-1', authorIsTrusted: false }),
+    });
+    const ctx = inboxCtx([outsider, candidate()]);
+    expect(inboxReconciler.isDue(ctx)).toBe(true);
+    expect((await inboxReconciler.run(ctx)).acted).toBe(true);
   });
 });
 
