@@ -25,7 +25,7 @@ import { invokedDirectly, isPlainObject, parseArgs, readRawInput } from './_shar
 
 /**
  * The `recovery.onExhausted` values, mirroring `OnExhaustedSchema` in
- * `config-schema.ts` (kept as a literal: this CLI imports no runtime code).
+ * `config-schema.ts` (kept as a literal: this CLI must not load zod).
  */
 export const ON_EXHAUSTED: readonly RecoveryConfig['onExhausted'][] = [
   'block',
@@ -60,8 +60,9 @@ Writes the RecoveryAction as JSON to stdout (discriminated union over "kind"):
 Once retries run out, "recovery.onExhausted" picks the kind:
   "block" (default)  { "kind": "block", "label": "agent/blocked", "reason" }
                      apply the label, comment, nudge; nothing retries it.
-  "escalate"         { "kind": "escalate", "label": "agent/needs-input", "reason" }
-                     park it as a question to a person; their reply resumes it.
+  "escalate"         { "kind": "escalate", "label": "agent/needs-input", "reason", "question" }
+                     the adapter's needsInput(item, question), not flow ask;
+                     a person's reply resumes it.
   "abandon"          { "kind": "abandon", "releaseTo": "none", "reason" }
                      flow release <id> --to none --reason <reason>.
 A run with "drain" set is always { "kind": "skip", "reason": "drain-run" }:

@@ -346,7 +346,7 @@ describe('recovery', () => {
 
     it.each([
       ['block', 'block', { label: 'agent/blocked' }],
-      ['escalate', 'escalate', { label: 'agent/needs-input' }],
+      ['escalate', 'escalate', { label: 'agent/needs-input', question: expect.any(String) }],
       ['abandon', 'abandon', { releaseTo: 'none' }],
     ] as const)('onExhausted %s → kind %s', (onExhausted, kind, extra) => {
       const { status, stdout } = exhaust({ maxRetries: 2, onExhausted, staleAfter: '5m' });

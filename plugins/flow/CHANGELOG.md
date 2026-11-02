@@ -9,9 +9,9 @@ you until you **reinstall it** (Marketplace → flow → reinstall, or re-run yo
 **Flow now does what your `recovery.onExhausted` setting says when a crashed run has used up its retries. Before, it always added `agent/blocked`, whatever you chose (DOR-2403). Reinstall to get it.**
 
 - `block`, the default, works as before: flow adds `agent/blocked` and a comment, and leaves the item for you.
-- `escalate` now asks you. Flow parks the item as a question, marked `agent/needs-input`, and picks it back up when you reply. This is also what "Retry and fix problems" set to Ask me first gets.
+- `escalate` now asks you. Flow parks the item as a question, marked `agent/needs-input`, and picks it back up when you reply.
 - `abandon` now lets the item go. Flow drops its claim and its run record, comments why, and leaves the item unstarted with no `agent/` label, so it isn't picked up again until someone marks it ready.
-- If you never set `onExhausted` and "Retry and fix problems" isn't at Ask me first, nothing changes for you.
+- If you never set `onExhausted`, nothing changes for you.
 
 ## 0.70.0
 

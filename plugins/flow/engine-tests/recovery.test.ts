@@ -178,7 +178,11 @@ describe('recoverOrphan — the next-tick recovery ladder (§12)', () => {
         kind: 'escalate',
         label: RECOVERY_NEEDS_INPUT_LABEL,
         reason: expect.stringMatching(/exhausted/i),
+        question: expect.stringContaining('DOR-123'),
       });
+      // The question is for a person: plain words, no counters.
+      expect(action.kind === 'escalate' && action.question).not.toMatch(/attemptCount|>=/);
+      expect(action.kind === 'escalate' && action.question).toMatch(/reply/i);
       expect(RECOVERY_NEEDS_INPUT_LABEL).toBe('agent/needs-input');
     });
 

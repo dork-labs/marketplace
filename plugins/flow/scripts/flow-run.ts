@@ -58,7 +58,7 @@ import type { DrainState, RunLimit } from './drain/state.ts';
  * - `running` — a worker is (or was) actively driving the run.
  * - `waiting_for_review` — work is done and parked at the human review gate.
  * - `complete` — merged/closed; terminal.
- * - `failed` — blocked, escalated or abandoned after exhausting recovery; terminal.
+ * - `failed` — escalated/abandoned after exhausting recovery; terminal.
  */
 export type FlowRunStatus = 'queued' | 'running' | 'waiting_for_review' | 'complete' | 'failed';
 
@@ -525,9 +525,11 @@ export type RecoveryActionKind =
  *   `onExhausted` is `block` (the default): apply `agent/blocked`, comment, and
  *   nudge. The claim stays; nothing retries it until a person clears the label.
  * - `escalate` — retries are exhausted and `onExhausted` is `escalate`: ask a
- *   person. Park the item as a question (`needsInput`: comment +
- *   `agent/needs-input` + assign to the person, on the comms route) and stop.
- *   The sweep never reclaims a parked item; the person's reply resumes it.
+ *   person. Park the item with the adapter's `needsInput` and the action's
+ *   `question` (comment + `agent/needs-input` + assign to the person) and stop.
+ *   Not `flow ask`: there are no choices to offer, and the "Agent questions"
+ *   dial does not apply to a retry that ran out. The sweep never reclaims a
+ *   parked item; the person's reply resumes it, and a later crash asks again.
  * - `abandon` — retries are exhausted and `onExhausted` is `abandon`: let the
  *   item go. `flow release --to none --reason <reason>` drops the claim and the
  *   run record and leaves the item unstarted with no `agent/*` label, so
@@ -573,8 +575,10 @@ export type RecoveryAction =
       kind: 'escalate';
       /** `agent/needs-input` — the item is parked as a question to a person. */
       label: typeof RECOVERY_NEEDS_INPUT_LABEL;
-      /** Human-readable reason retries were exhausted: the question's text. */
+      /** Human-readable reason retries were exhausted, for logs. */
       reason: string;
+      /** The question to park, in plain words: what `needsInput` posts. */
+      question: string;
     }
   | {
       kind: 'abandon';
@@ -678,7 +682,12 @@ export function recoverOrphan(
     const reason = `recovery retries exhausted (attemptCount ${run.attemptCount} >= maxRetries ${recovery.maxRetries})`;
     switch (recovery.onExhausted) {
       case 'escalate':
-        return { kind: 'escalate', label: RECOVERY_NEEDS_INPUT_LABEL, reason };
+        return {
+          kind: 'escalate',
+          label: RECOVERY_NEEDS_INPUT_LABEL,
+          reason,
+          question: `The agent working on ${run.identifier} stopped unexpectedly, and flow has used up its automatic retries. Reply here to have it pick the work back up, or take it from here yourself.`,
+        };
       case 'abandon':
         return { kind: 'abandon', releaseTo: 'none', reason };
       // An absent value (a caller that skipped the schema) is the default,

@@ -156,7 +156,7 @@ export async function recoveryLadder(options: ScenarioOptions): Promise<void> {
     );
     if (asked?.kind === 'escalate') {
       const item = await ctx.tracker.adapter.getItem('FAKE-3');
-      await ctx.tracker.adapter.comment(item, asked.reason);
+      await ctx.tracker.adapter.comment(item, asked.question);
       await ctx.tracker.adapter.applyWorkState(item, { agentLabel: asked.label });
     }
     checkEqual(
