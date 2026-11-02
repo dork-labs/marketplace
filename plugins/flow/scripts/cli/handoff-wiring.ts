@@ -58,7 +58,7 @@ import { writeCheckpoint } from './checkpoint.ts';
 import type { VerbContext } from './context.ts';
 import {
   gatherAssignmentInput,
-  liveByAccount,
+  liveCounts,
   type AssignmentInput,
   type NextConfig,
 } from './next.ts';
@@ -183,7 +183,7 @@ export function handoffWiring(wiring: HandoffWiringInput): HandoffWiring {
       model: workerModelOf(run, config),
       affinity: null,
       exclude: [accountKeyOf(run.runtime, run.account)],
-      liveByAccount: liveByAccount(view.input.runs),
+      liveByAccount: liveCounts(view.input).live,
       opts: view.input.opts,
     });
   };

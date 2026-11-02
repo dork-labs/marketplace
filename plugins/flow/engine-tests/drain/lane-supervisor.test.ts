@@ -346,6 +346,18 @@ describe('lane supervisor: the reviewer', () => {
     expect(out.drain.parkedReason).toBe(PARK_REASONS.reviewerQuiet(60));
     expect(out.drain.heldSlot).toBe('claude-code:claude4');
     expect(out.actions.some((a) => a.kind === 'start-reviewer')).toBe(false);
+    // Kept, worktree and all: a reviewer stop would remove the worktree under it.
+    expect(out.drain.reviewer).toEqual(REVIEWER);
+    expect(out.actions).not.toContainEqual({ kind: 'stop', which: 'reviewer', handle: REVIEWER });
+  });
+
+  it('after an answer, flow watches the same reviewer again rather than starting another', () => {
+    const quiet = reviewerFacts(busy('2026-09-26T11:59:00.000Z'));
+    const parked = quietFor(reviewing, quiet, 61).drain;
+    const out = drainStep(run(parked), quiet(parked), CFG, at(120));
+    expect(out.run.drain?.phase).toBe('reviewing');
+    expect(out.run.drain?.reviewer).toEqual(REVIEWER);
+    expect(out.actions.some((a) => a.kind === 'start-reviewer')).toBe(false);
   });
 
   it('a reviewer that went away is restarted at the same commit, once', () => {
@@ -414,6 +426,24 @@ describe('lane supervisor: the slot a parked session holds', () => {
   it('a quiet DorkOS worker it parks keeps its account slot, since DorkOS does not stop it', () => {
     const out = quietFor(drain('working'), quiet, 61, { account: 'claude3' });
     expect(out.drain.heldSlot).toBe('claude-code:claude3');
+  });
+
+  it('frees the slot once the parked session stops, before anyone answers', () => {
+    const parked = quietFor(drain('working'), quiet, 61, { account: 'claude3' }).drain;
+    const closed = (d: DrainState) => ({
+      ...facts(d, { kind: 'idle' }),
+      item: { closed: false, claimed: true, needsInput: true, title: 'Export the report as CSV' },
+    });
+    const still = drainStep(
+      run(parked),
+      { ...closed(parked), worker: quiet(parked).worker },
+      CFG,
+      at(70)
+    );
+    expect(still.run.drain?.heldSlot).toBe('claude-code:claude3');
+    const out = drainStep(run(parked), closed(parked), CFG, at(70));
+    expect(out.run.drain?.phase).toBe('parked');
+    expect(out.run.drain?.heldSlot).toBeNull();
   });
 
   it('a cli worker it parks holds nothing: its stop ends the process', () => {

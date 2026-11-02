@@ -221,7 +221,7 @@ export interface AssignmentInput {
  * @param input - The accounts and runs.
  * @returns The canonical key of a `<runtime>:<id>`, and the counts by it.
  */
-function liveCounts(input: AssignmentInput): {
+export function liveCounts(input: AssignmentInput): {
   canonical: (key: string) => string;
   live: Record<string, number>;
 } {

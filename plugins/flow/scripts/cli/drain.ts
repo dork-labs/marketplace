@@ -93,6 +93,7 @@ import {
   gatherAssignmentInput,
   liveByAccount,
   noAccountMessage,
+  liveCounts,
   planNext,
   restartRank,
   type NextConfig,
@@ -696,7 +697,7 @@ export async function drain(ctx: VerbContext, options: DrainOptions = {}): Promi
         model: model('review'),
         affinity: null,
         exclude,
-        liveByAccount: liveByAccount(input.runs),
+        liveByAccount: liveCounts(input).live,
         opts: input.opts,
       });
       const choice = chooseAccount({ accounts: input.accounts, rank });

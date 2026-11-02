@@ -564,12 +564,34 @@ function unclocked(step: Step): Step {
 }
 
 /**
- * A park that keeps the parked session's slot when its host's stop may leave
- * it running: every host but the plain cli (DorkOS never stops a session, and
- * cmux stops only a process flow itself started).
+ * A park of a session that may still run. On every host but the plain cli
+ * (DorkOS never stops a session, and cmux stops only a process flow itself
+ * started) it keeps the session's slot ({@link DrainState.heldSlot}) until
+ * the session stops or a person answers.
  */
-function holdSlot(step: Step, host: string, slot: string): Step {
-  return host === 'cli' ? step : { ...step, drain: { ...step.drain, heldSlot: slot } };
+function parkLive(
+  step: Step,
+  reason: string,
+  which: 'worker' | 'reviewer',
+  host: string,
+  slot: string
+): Step {
+  const parked = park(step, reason);
+  if (host === 'cli') return parked;
+  if (which === 'worker') return { ...parked, drain: { ...parked.drain, heldSlot: slot } };
+  // Stopping a reviewer removes its worktree; one that may still run keeps
+  // both, so an answer watches it again rather than starting a second one.
+  return {
+    drain: { ...parked.drain, reviewer: step.drain.reviewer, heldSlot: slot },
+    actions: parked.actions.filter((a) => !(a.kind === 'stop' && a.which === 'reviewer')),
+  };
+}
+
+/** Whether a session may still be running: busy, or a host that could not say it is gone. */
+function mayRun(state: SessionState | null): boolean {
+  return (
+    state !== null && (state.kind === 'busy' || (state.kind === 'unknown' && state.gone !== true))
+  );
 }
 
 /** The step with its progress recorded as seen `now`, and no person waited on. */
@@ -661,8 +683,10 @@ function supervise(
   if (state.kind === 'unknown' && state.cannotTell === true) return step;
   // Not proof it stopped: restarting could leave two sessions at work.
   if (state.kind === 'unknown' && !gone) {
-    return holdSlot(
-      park(step, PARK_REASONS.unreachable(which, minutes, state.reason)),
+    return parkLive(
+      step,
+      PARK_REASONS.unreachable(which, minutes, state.reason),
+      which,
       handle.host,
       slot
     );
@@ -670,7 +694,7 @@ function supervise(
   // A host that reports no activity for a busy session is never judged.
   if (state.kind === 'busy' && activity === null) return step;
   if (which === 'reviewer') {
-    if (!gone) return holdSlot(park(step, PARK_REASONS.reviewerQuiet(minutes)), handle.host, slot);
+    if (!gone) return parkLive(step, PARK_REASONS.reviewerQuiet(minutes), which, handle.host, slot);
     if (drain.nudges >= 1) return park(step, PARK_REASONS.reviewerStopped);
     const sha = (handle as DrainState['reviewer'] & object).sha;
     const restarted = startReviewer(step, sha, facts);
@@ -692,7 +716,7 @@ function supervise(
     );
   }
   return state.kind === 'busy'
-    ? holdSlot(park(step, PARK_REASONS.workerQuiet(minutes)), handle.host, slot)
+    ? parkLive(step, PARK_REASONS.workerQuiet(minutes), which, handle.host, slot)
     : step;
 }
 
@@ -929,7 +953,14 @@ function drainStepCore(
     );
     return { run: { ...run, drain: step.drain }, actions: step.actions };
   }
-  if (current.phase === 'parked') return readopt(run, current, facts, cfg);
+  if (current.phase === 'parked') {
+    // A held slot is freed once neither session may still be running.
+    if (current.heldSlot && !mayRun(facts.worker) && !mayRun(facts.reviewer)) {
+      const freed = { ...current, heldSlot: null };
+      return readopt({ ...run, drain: freed }, freed, facts, cfg);
+    }
+    return readopt(run, current, facts, cfg);
+  }
 
   // Record the reports first: they are facts whatever else happens.
   const recorded: DrainState = { ...current, ...facts.reports };
@@ -984,6 +1015,6 @@ function drainStepCore(
   }
 
   const step = phaseStep(idle, run, facts, cfg);
-  if (run.limit && step.actions.some((a) => a.kind === 'send')) return done(idle);
+  if (run.limit && step.actions.some((a) => a.kind === 'send')) return done(unclocked(idle));
   return done(supervise(step, run, facts, cfg, now));
 }
