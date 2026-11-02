@@ -506,7 +506,7 @@ export const STALE_USAGE_MS = 24 * HOUR_MS;
  * drops as stale (no reset time, past its window) is not this: for those a
  * lapse means the limit cleared. An account never read is only `unknown`.
  */
-function staleUsage(account: RankableAccount, now: Instant): boolean {
+export function isStaleUsage(account: RankableAccount, now: Instant): boolean {
   const reading = readWindow(entryOf(account.windows, 'seven_day'), now, 'seven_day');
   if (reading === null || reading.expired || reading.resetsAt === null) return false;
   return instantMs(now) - Date.parse(reading.observedAt) > STALE_USAGE_MS;
@@ -581,7 +581,7 @@ export function rankAccounts(input: RankAccountsInput): AccountRank {
     if (signal.level === 'warning') reasons.push('near-limit');
     const live = input.liveByAccount[key] ?? 0;
     if (live >= opts.maxLivePerAccount) reasons.push('at-capacity');
-    if (staleUsage(account, now)) reasons.push('stale-usage');
+    if (isStaleUsage(account, now)) reasons.push('stale-usage');
     if (reasons.length > 0) {
       ineligible.push({ runtime: account.runtime, id: account.id, reasons });
       continue;

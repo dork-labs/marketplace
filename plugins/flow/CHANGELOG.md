@@ -4,6 +4,13 @@ Installs of this plugin are pinned to a commit SHA, so a fix here does not reach
 you until you **reinstall it** (Marketplace → flow → reinstall, or re-run your
 `--plugin-dir` checkout's `git pull`). Each entry below says whether that matters.
 
+## 0.78.0
+
+**`flow drain` now refreshes an account's out-of-date usage reading itself, and `flow release` cleans up the review folder a parked reviewer leaves behind (DOR-3704). Before, a stale account sat unused until you probed it by hand, and the folder stayed until you removed it. Reinstall to get it.**
+
+- Before giving out work, `flow drain` runs one probe turn (the same one `flow usage probe` runs) on each Claude Code account kept out only because its weekly reading is more than a day old, at most once an hour per account. Each probe spends a little of that account's 5-hour window. If the reading comes back fresh, the account can take work this pass; if the probe fails or the reading is still old, it stays out, and the drain says why. `drain.refreshStaleUsage: false` turns this off. `flow next` and `flow accounts pick` never probe. Codex and OpenCode accounts are not probed, so a stale one stays out as before.
+- `flow release` now removes the review folder flow kept for the item, but only the one flow made for that review (the right path, listed by git, still at the reviewed commit), and only once the reviewer's session has stopped, is idle or is gone. While that session may still be running, or the folder has uncommitted changes, nothing is released: stop the session (or pass `--discard-review-changes`), then run `flow release` again. Release never stops a session itself. It says what it removed or kept, and `--dry-run` says what it would remove.
+
 ## 0.77.0
 
 **`flow drain` now notices an item whose session has gone quiet, and spreads its sessions across your accounts instead of stacking them on one (DOR-3263). Before, a session that vanished or stalled overnight sat there until someone looked. Reinstall to get it.**

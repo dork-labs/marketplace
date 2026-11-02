@@ -61,13 +61,15 @@ export function dueForSnapshot(
  * Read the state file; missing or unreadable reads as empty.
  *
  * @param mainCheckout - The main checkout.
+ * @param file - The file, relative to it (default {@link USAGE_SAMPLE_FILE}).
  * @returns The state.
  */
-export function readUsageSampleState(mainCheckout: string): UsageSampleState {
+export function readUsageSampleState(
+  mainCheckout: string,
+  file: string = USAGE_SAMPLE_FILE
+): UsageSampleState {
   try {
-    const parsed: unknown = JSON.parse(
-      readFileSync(path.join(mainCheckout, USAGE_SAMPLE_FILE), 'utf8')
-    );
+    const parsed: unknown = JSON.parse(readFileSync(path.join(mainCheckout, file), 'utf8'));
     if (typeof parsed !== 'object' || parsed === null || Array.isArray(parsed)) return {};
     return Object.fromEntries(
       Object.entries(parsed).filter(
@@ -84,11 +86,16 @@ export function readUsageSampleState(mainCheckout: string): UsageSampleState {
  *
  * @param mainCheckout - The main checkout.
  * @param state - The state.
+ * @param file - The file, relative to it (default {@link USAGE_SAMPLE_FILE}).
  */
-export function writeUsageSampleState(mainCheckout: string, state: UsageSampleState): void {
-  const file = path.join(mainCheckout, USAGE_SAMPLE_FILE);
-  mkdirSync(path.dirname(file), { recursive: true });
-  const tmp = `${file}.${process.pid}.tmp`;
+export function writeUsageSampleState(
+  mainCheckout: string,
+  state: UsageSampleState,
+  file: string = USAGE_SAMPLE_FILE
+): void {
+  const target = path.join(mainCheckout, file);
+  mkdirSync(path.dirname(target), { recursive: true });
+  const tmp = `${target}.${process.pid}.tmp`;
   writeFileSync(tmp, `${JSON.stringify(state, null, 2)}\n`);
-  renameSync(tmp, file);
+  renameSync(tmp, target);
 }

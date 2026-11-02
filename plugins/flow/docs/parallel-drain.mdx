@@ -5,7 +5,7 @@ description: flow drain carries several ready items at once, each on its own acc
 
 # Draining in parallel
 
-`flow drain --parallel 3` carries three ready items at once, each in its own worktree on the account with the most room. A separate reviewer reads every push; `flow pr` opens a PR only after a clean review of the head.
+`flow drain --parallel 3` carries three ready items at once, each in its own worktree, spread across your accounts. A separate reviewer reads every push; `flow pr` opens a PR only after a clean review of the head.
 
 ## Before you start
 
@@ -27,11 +27,11 @@ Allow each account flow may spend with `flow accounts set <id> --role rotation`.
 
 ## What happens at a limit
 
-Near a limit, the worker finishes its step, checkpoints and stops. If the account resets within `drain.waitIfResetWithinMinutes`, the run waits. If only one model ran out, it goes on with the next in `drain.modelFallback`. Otherwise a session on another account continues from `HANDOFF.md`.
+Near a limit, the worker finishes its step, checkpoints and stops. If the account resets within `drain.waitIfResetWithinMinutes`, the run waits. If only one model ran out, it goes on with the next in `drain.modelFallback`. Otherwise another account's session continues from `HANDOFF.md`.
 
 ## Ask or auto
 
-`handoff` in `fleet.json` decides: `auto` moves the run at once; `ask` posts one comment with the `flow handoff <id> --to <account>` command and waits for the reset. `flow handoff <id> --wait` keeps a run where it is.
+`handoff` in `fleet.json` decides: `auto` moves the run at once; `ask` comments the `flow handoff <id> --to <account>` command and waits for the reset. `flow handoff <id> --wait` keeps a run where it is.
 
 ## When a session goes quiet
 
@@ -39,7 +39,7 @@ After `drain.stallAfterMinutes` (default 60) without progress, a session that we
 
 ## Caps
 
-New sessions wait while load per CPU reaches `drain.maxLoadPerCpu` or an account has `drain.maxLivePerAccount` sessions. Accounts with fewer sessions go first; one with a stale usage reading gets none. After `drain.maxReviewRounds` rounds the run parks.
+New sessions wait while load per CPU reaches `drain.maxLoadPerCpu` or an account has `drain.maxLivePerAccount` sessions. Accounts with fewer sessions go first; one with a stale usage reading gets none unless flow's hourly probe refreshes it. After `drain.maxReviewRounds` rounds the run parks.
 
 ## Terminal or schedule
 

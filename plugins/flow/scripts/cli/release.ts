@@ -16,13 +16,21 @@
  * @module @dorkos/flow/cli/release
  */
 
+import path from 'node:path';
+
 import { PreconditionError, UsageError } from '../errors.ts';
+import { parseOriginRepo, resolveDorkHome } from '../fleet/accounts.ts';
 import { isClosedItem } from '../run-ended.ts';
 import { projectionFor, type WorkStateChange } from '../work-state.ts';
 import { resolveMainCheckout } from '../main-checkout.ts';
 import { retireChecker } from './checker.ts';
 import type { VerbContext, VerbResult } from './context.ts';
 import { recordEvent } from './auto-journal.ts';
+import {
+  applyReviewWorktree,
+  planReviewWorktree,
+  type ReviewWorktreeOutcome,
+} from './release-worktree.ts';
 import { signBody } from './provenance.ts';
 import {
   applyAndVerify,
@@ -122,13 +130,43 @@ export async function run(ctx: VerbContext): Promise<VerbResult> {
       : (['getItem', 'applyWorkState'] as const);
 
   const setup = await setupWrite(ctx, needed);
+  // The review folder the drain kept (DOR-3704): decided before anything is
+  // written, so a refusal leaves the run record for the next try.
+  const mainCheckout = resolveMainCheckout(ctx.projectDir);
+  const run = Object.values(setup.store.read()).find((r) => r.identifier === identifier);
+  const origin = await ctx.runProcess('git', ['remote', 'get-url', 'origin'], {
+    cwd: mainCheckout,
+  });
+  const repo = origin.code === 0 ? parseOriginRepo(origin.stdout) : null;
+  const plan =
+    run === undefined
+      ? null
+      : await planReviewWorktree(ctx, run, {
+          dorkHome: resolveDorkHome({ ...ctx.env }, ctx.io.osHome),
+          repoName: repo?.split('/').pop() ?? path.basename(mainCheckout),
+          mainCheckout,
+          discard: ctx.args.flags['discard-review-changes'] === true,
+        });
+  if (plan?.action === 'refuse') {
+    throw new PreconditionError(
+      `${identifier} was not released, and its review folder ${plan.path} stays: ${plan.reason}`
+    );
+  }
   const { change, runRemoved, commented } = await releaseItem(ctx, setup, {
     identifier,
     to,
     stage: typeof stageFlag === 'string' ? stageFlag : undefined,
     reason: typeof reason === 'string' ? reason : undefined,
   });
+  const reviewWorktree: ReviewWorktreeOutcome | null =
+    plan === null ? null : await applyReviewWorktree(ctx, mainCheckout, plan);
   if (!ctx.dryRun) recordEvent(ctx, { kind: 'claim', phase: 'release', item: identifier });
+  const folder =
+    reviewWorktree === null
+      ? ''
+      : reviewWorktree.removed
+        ? ` Removed its review folder ${reviewWorktree.path}.`
+        : ` Its review folder ${reviewWorktree.path}: ${reviewWorktree.reason}.`;
   return {
     json: {
       ok: true,
@@ -137,10 +175,12 @@ export async function run(ctx: VerbContext): Promise<VerbResult> {
       change,
       runRemoved,
       commented,
+      reviewWorktree,
     },
     text:
-      change === null
+      (change === null
         ? `${ctx.dryRun ? 'Would clear' : 'Cleared'} the run of ${identifier}, which is closed; the item is unchanged.`
-        : `${ctx.dryRun ? 'Would release' : 'Released'} ${identifier} ${to === 'ready' ? `to the ready queue at ${change.stageLabel}` : 'with no owner'}.`,
+        : `${ctx.dryRun ? 'Would release' : 'Released'} ${identifier} ${to === 'ready' ? `to the ready queue at ${change.stageLabel}` : 'with no owner'}.`) +
+      folder,
   };
 }
