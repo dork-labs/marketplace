@@ -133,6 +133,8 @@ const READ_EXACT = [
   // mark file. The repos come from config, never from an argument.
   'intake --json',
   'intake done --json',
+  // DOR-3669: reads the inbox and writes only flow's own watermark file.
+  'inbox --json',
 ];
 
 /**

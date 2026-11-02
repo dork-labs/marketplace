@@ -214,8 +214,9 @@ function guardAdapter(adapter: CodeAdapter, tracker: string): CodeAdapter {
   for (const capability of adapter.capabilities) {
     const method = adapter[capability] as (...args: unknown[]) => Promise<unknown>;
     guarded[capability] = async (...args: unknown[]) => {
+      let result: unknown;
       try {
-        return await method.apply(adapter, args);
+        result = await method.apply(adapter, args);
       } catch (error) {
         if (error instanceof FlowError) throw error;
         const message = error instanceof Error ? error.message : String(error);
@@ -223,9 +224,43 @@ function guardAdapter(adapter: CodeAdapter, tracker: string): CodeAdapter {
           `the ${tracker} adapter could not complete ${capability}: ${message}`
         );
       }
+      if (capability === 'getInbox' && Array.isArray(result)) {
+        result.forEach((read) => checkTrust((read as { comment?: unknown })?.comment, tracker));
+      }
+      if (capability === 'getItem') {
+        const comments = (result as { comments?: unknown } | null)?.comments;
+        if (Array.isArray(comments)) comments.forEach((comment) => checkTrust(comment, tracker));
+      }
+      return result;
     };
   }
   return guarded as unknown as CodeAdapter;
+}
+
+/**
+ * Refuse a comment whose `authorIsTrusted` is not a boolean, or is `true` with
+ * no author (contract 3.0.0, DOR-3669). Such an adapter is broken; flow stops
+ * rather than pass the comment to the rules.
+ *
+ * @param comment - One comment the adapter returned.
+ * @param tracker - The tracker, for the message.
+ * @throws {ConfigError} Naming what is wrong.
+ */
+function checkTrust(comment: unknown, tracker: string): void {
+  const { author, authorIsTrusted } = (comment ?? {}) as {
+    author?: unknown;
+    authorIsTrusted?: unknown;
+  };
+  if (typeof authorIsTrusted !== 'boolean') {
+    throw new ConfigError(
+      `the ${tracker} adapter returned a comment without a boolean authorIsTrusted (contract 3.0.0); regenerate it with the building-adapters skill`
+    );
+  }
+  if (authorIsTrusted && (typeof author !== 'string' || author === '')) {
+    throw new ConfigError(
+      `the ${tracker} adapter marked a comment with no author as trusted (authorIsTrusted); a comment with no author is never trusted`
+    );
+  }
 }
 
 /**

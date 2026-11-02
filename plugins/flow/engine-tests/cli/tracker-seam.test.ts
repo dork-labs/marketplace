@@ -140,7 +140,14 @@ describe('finding the adapter code', () => {
     linkFakeAdapter(path.join(project, '.agents/flow/adapters/fake'));
     const { adapter } = await load();
     expect([...adapter.capabilities].sort()).toEqual(
-      ['applyWorkState', 'comment', 'getBacklogSnapshot', 'getCurrentUser', 'getItem'].sort()
+      [
+        'applyWorkState',
+        'comment',
+        'getBacklogSnapshot',
+        'getCurrentUser',
+        'getInbox',
+        'getItem',
+      ].sort()
     );
     expect(await adapter.getCurrentUser()).toEqual({ id: 'agent-1', name: 'Fake agent' });
   });
@@ -250,6 +257,43 @@ describe('refusals (exit 3)', () => {
     }
   });
 
+  it('refuses a comment whose trust is not a boolean, or is true with no author (DOR-3669)', async () => {
+    // Purpose: an adapter that says a comment is trusted without saying who
+    // wrote it, or answers anything but true or false, is broken; flow stops
+    // rather than guess, so no such comment ever reaches the rules.
+    const cases: [string, string][] = [
+      ['strtrust', "{ id: 'c', author: 'kai', authorIsTrusted: 'true', mentions: [], body: 'x' }"],
+      ['notrust', "{ id: 'c', author: 'kai', mentions: [], body: 'x' }"],
+      ['anontrust', "{ id: 'c', author: '', authorIsTrusted: true, mentions: [], body: 'x' }"],
+    ];
+    for (const [tracker, comment] of cases) {
+      writeConfig({ tracker });
+      proseOnlyAdapter(tracker);
+      write(
+        path.join(project, '.agents/flow/adapters', tracker, 'adapter.ts'),
+        `export const CONTRACT_VERSION = '3.0.0';
+const item = { id: 'i', identifier: 'X-1', title: 't', labels: [] };
+export function createAdapter() {
+  return {
+    capabilities: ['getInbox', 'getItem'],
+    async getInbox() { return [{ item, itemId: 'X-1', occurredAt: '2026-09-26T00:00:00Z', comment: ${comment} }]; },
+    async getItem() { return { ...item, comments: [{ ...${comment}, createdAt: '2026-09-26T00:00:00Z' }] }; },
+  };
+}
+`
+      );
+      const { adapter } = await load();
+      for (const read of [
+        () => adapter.getInbox!(),
+        () => adapter.getItem('X-1', { comments: 1 }),
+      ]) {
+        const error = await rejection(read());
+        expect(error, tracker).toBeInstanceOf(ConfigError);
+        expect((error as Error).message).toMatch(/authorIsTrusted/);
+      }
+    }
+  });
+
   it('refuses a declared capability the adapter does not implement', async () => {
     // Purpose: a capability list that lies would turn a verb's first call into
     // a crash; the loader checks it up front.
@@ -315,7 +359,7 @@ describe('tracker failures (exit 4)', () => {
       runProcess: realProcessRunner,
       verbs: [probe],
     });
-    expect(code).toBe(EXIT.tracker);
+    expect(code, out).toBe(EXIT.tracker);
     expect(JSON.parse(out)).toMatchObject({
       ok: false,
       error: { code: EXIT.tracker, message: expect.stringMatching(/connection reset/) },

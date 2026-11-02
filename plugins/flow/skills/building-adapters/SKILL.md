@@ -50,7 +50,7 @@ Write it into the project, never the plugin: `<committedDir>/adapters/<tracker>/
 6. A line per optional verb: **supported** or **not supported**. Silence reads as an oversight.
 7. The contract version it targets (`CONTRACT_VERSION`, or a manifest field).
 
-Optionally, `adapter.ts` beside it, so `flow claim|stage|done|create|snapshot` run as code (SPEC "The code realization"). Without it those verbs exit 3 and the skill still works.
+Optionally, `adapter.ts` beside it, so `flow claim|stage|done|create|snapshot|inbox` run as code (SPEC "The code realization"). Without it those verbs exit 3 and the skill still works.
 
 ### 4. Verify (the gate)
 
@@ -73,7 +73,7 @@ node --experimental-strip-types "<flow-root>/scripts/validate-adapter.ts" --fixt
 - [ ] State table complete: five categories only, holding state `backlog`.
 - [ ] Label map complete: no bare leaves.
 - [ ] Native fields mapped; missing optionals `undefined`.
-- [ ] Every required verb implemented, with durability and degradation; reads throw when unreachable, writes never fake success.
+- [ ] Every required verb implemented (`getInbox` as code), with durability and degradation; reads throw when unreachable, writes never fake success.
 - [ ] **Outward writes are signed.** `comment`, the `needsInput` question and the description `createSubIssue` writes end with the `agent:provenance` line ([`<flow-root>/docs/provenance.md`](../../docs/provenance.md)) beside the identity marker. The adapter says whether its tracker preserves HTML comments byte-for-byte; if not, it posts unsigned rather than a mangled line.
 - [ ] Every optional verb declared.
 - [ ] No tracker API string outside the adapter.

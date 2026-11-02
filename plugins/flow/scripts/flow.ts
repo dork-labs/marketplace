@@ -73,6 +73,30 @@ export const VERBS: readonly VerbDefinition[] = [
     load: () => import('./cli/snapshot.ts'),
   },
   {
+    name: 'inbox',
+    summary: "Read the tracker's new comments, with text only from members who call for action.",
+    description:
+      "Read the configured team's comments since the last pass through the adapter's code, run them through the comment rules, and list each one with the action it calls for (respond, resume or ignore). A comment's text is included only when its author is a member the tracker's own records vouch for and the comment calls for action; every other comment is listed by item, author and time, with no text. Keeps a watermark in .dork/flow/inbox-watermark.json; --dry-run leaves it where it is. Exits 3 when the adapter has no code that reads the inbox.",
+    common: ['project', 'dry-run'],
+    flags: [
+      {
+        name: 'since',
+        kind: 'string',
+        value: 'ISO time',
+        description:
+          'Read comments after this time instead of the saved watermark; the watermark stays where it is.',
+      },
+      {
+        name: 'skip-to',
+        kind: 'string',
+        value: 'ISO time',
+        description:
+          'Move the saved watermark to this time and read nothing, skipping every comment before it. For a window too large to read.',
+      },
+    ],
+    load: () => import('./cli/inbox.ts'),
+  },
+  {
     name: 'audit',
     summary: 'Check the backlog against the groom invariants.',
     description:

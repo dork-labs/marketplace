@@ -253,6 +253,12 @@ universal and worth stating once:
 
 #### `getInbox(): Promise<InboxEntry[]>`
 
+- **Code only (since 3.0.0).** This verb is realized by the code adapter's
+  `getInbox` (see [The code realization](#the-code-realization)) and reached
+  only through `flow inbox`. A model never runs it by hand: it would read every
+  comment's text and could be talked into calling a guest a member. An adapter
+  with no `getInbox` code has no inbox, and every comment through it is
+  untrusted.
 - **Must do.** Return the items the acting agent must look at this tick:
   assigned-to-the-agent, plus @mentions of the agent, plus new comments since the
   last tick. Each entry carries its `WorkItem` and the triggering comment
@@ -269,7 +275,9 @@ universal and worth stating once:
 - **Durability.** Read-only.
 - **Degradation.** A tracker without a comment or mention surface returns the
   assigned-to-agent subset only; missing mention data degrades to "not mentioned"
-  (the quiet-by-default bias keeps this safe). An unreachable tracker throws.
+  (the quiet-by-default bias keeps this safe). The shipped Linear code reads no
+  mention list, so on Linear only a `/flow` or `@flow` token addresses the agent.
+  An unreachable tracker throws.
   A comment with no author (one synced in from chat or email, say) is kept with
   a warning: set `author` to `''`, never to a guess, and `authorIsTrusted` to
   `false`. Since 3.0.0 it never starts or resumes a turn, whatever its text:
@@ -296,10 +304,28 @@ can comment reaches a model with tools otherwise.
   ignored and reported, and a parked item stays parked until a member answers.
   The check treats anything but a literal `true` with a non-empty author as
   untrusted, so an adapter that omits the field fails closed.
-- Known gap: the model-driven inbox pass (`tending-tracker`, `flow-drain` step 3)
-  calls `getInbox` itself and applies this rule from prose, so a model still
-  reads an untrusted comment's text before deciding to ignore it. The `flow`
-  drain's answer search and the engine's inbox transport are code-gated.
+- **Code parses it; a model never relays it.** Membership comes from the
+  tracker's API response, read by the adapter's code (`adapter.ts`), never
+  from a model that read the comments and says who is a member: a guest's
+  comment could talk it into "member". A model session reads the inbox only
+  through `flow inbox`, which runs the code adapter's `getInbox`, the inbound
+  transport and the comment rules, and returns a comment's text only when a
+  trusted member's comment calls for action. Every other comment comes back as
+  its item, author id and time, with no text.
+- **A prose-only adapter is all-untrusted.** With no code that parses the
+  tracker's response (no `adapter.ts`, no `getInbox` capability, or the
+  in-session `mcp` transport, which the CLI refuses), `flow inbox` exits 3 and
+  nothing read that way starts or resumes a turn. Parked items stay parked;
+  `flow answer` from DorkOS still resumes them.
+- The loader refuses an adapter that returns a comment whose `authorIsTrusted`
+  is not a boolean, or is `true` with no author.
+- `flow inbox` hands each comment over at most once: it moves its watermark
+  (`.dork/flow/inbox-watermark.json`, under a lock, so two passes never get the
+  same comment) when it returns, before anyone acts. A pass that crashes after
+  that does not see those comments again; `--since` reads them again without
+  moving the watermark. An adapter refuses a window too large to read whole
+  rather than drop comments; `flow inbox --skip-to <time>` moves the watermark
+  past it on purpose.
 
 #### `getRelations(item: WorkItem): Promise<WorkItemRelations>`
 
@@ -608,7 +634,7 @@ interface TrackerTransport {
   call it and cannot pin the acting identity, so `flow` refuses it (exit 3).
 - Secrets never reach stdout, stderr or a file the adapter writes.
 
-**The six methods.** The adapter lists the ones it implements in
+**The seven methods.** The adapter lists the ones it implements in
 `capabilities`; a `flow` command that needs one the adapter lacks exits 3
 naming it.
 
@@ -619,7 +645,8 @@ type Capability =
   | 'getItem'
   | 'applyWorkState'
   | 'comment'
-  | 'createItem';
+  | 'createItem'
+  | 'getInbox';
 
 interface CodeAdapter {
   capabilities: readonly Capability[];
@@ -632,6 +659,14 @@ interface CodeAdapter {
   applyWorkState(item: WorkItem, change: WorkStateChange): Promise<void>;
   comment(item: WorkItem, body: string): Promise<void>;
   createItem?(item: NewItem): Promise<{ id: string; identifier: string; url: string }>; // since 2.2.0
+  getInbox?(opts?: { since?: string }): Promise<InboxRead[]>; // since 3.0.0
+}
+
+interface InboxRead {
+  item: WorkItem; // the item, normalized, as it is now
+  itemId: string;
+  occurredAt: string; // ISO-8601 with a zone: the comment's own creation time
+  comment: { id: string; author: string; authorIsTrusted: boolean; mentions: string[]; body: string };
 }
 
 interface NewItem {
@@ -677,6 +712,7 @@ interface WorkStateChange {
 | `applyWorkState`     | `claim` and `transition`                    | `flow claim`, `release`, `done`, `stage`            |
 | `comment`            | `comment`                                   | `flow release --reason`, `flow done`                |
 | `createItem`         | creating an item (capture, follow-ups)      | `flow selftest --file`                              |
+| `getInbox`           | `getInbox` (since 3.0.0)                    | `flow inbox`, the only inbox read a model may use   |
 
 **The two optional reads.**
 
@@ -845,7 +881,10 @@ declaration.
   from the tracker's own membership data and `false` when the adapter cannot
   tell (section 3, [Trusted authors](#trusted-authors)), and INV-6 checks it.
   This deliberately reverses 1.3.1's rule that a reply with no author resumes
-  a parked item on its text: no tracker can vouch for it. `flow` refuses to load
+  a parked item on its text: no tracker can vouch for it. The code realization
+  gains `getInbox`, and a model session reads the inbox only through
+  `flow inbox`, so membership is parsed by code and an untrusted comment's text
+  never reaches a model. `flow` refuses to load
   adapter code below 3.0.0, and a prose adapter that leaves the field out has
   every comment treated as untrusted, so nothing it reads starts a turn until it
   is regenerated.

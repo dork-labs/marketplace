@@ -33,6 +33,7 @@ import type {
   Capability,
   ClosedItem,
   CodeAdapter,
+  InboxRead,
   ItemComment,
   ItemWithComments,
   TrackerAccount,
@@ -100,6 +101,7 @@ const ALL: Capability[] = [
   'getItem',
   'applyWorkState',
   'comment',
+  'getInbox',
 ];
 
 /**
@@ -144,6 +146,34 @@ export function createFakeAdapter(
         closed: options.includeClosed ? structuredClone(backlog.closed ?? []) : [],
         projects: structuredClone(backlog.projects ?? []),
       };
+    },
+    async getInbox(options = {}): Promise<InboxRead[]> {
+      read();
+      const members = backlog.members ?? [];
+      const since =
+        options.since === undefined ? Number.NEGATIVE_INFINITY : Date.parse(options.since);
+      const entries: InboxRead[] = [];
+      for (const [identifier, comments] of Object.entries(backlog.comments ?? {})) {
+        const current = backlog.items.find((candidate) => candidate.identifier === identifier);
+        if (current === undefined) continue;
+        for (const comment of comments) {
+          if (!(Date.parse(comment.createdAt) > since)) continue;
+          entries.push({
+            item: structuredClone(current),
+            itemId: identifier,
+            occurredAt: comment.createdAt,
+            comment: {
+              id: comment.id,
+              author: comment.author,
+              // Read from the membership list, never from the stored comment.
+              authorIsTrusted: comment.author !== '' && members.includes(comment.author),
+              mentions: [...comment.body.matchAll(/@([\w.-]+)/g)].map((m) => m[1]),
+              body: comment.body,
+            },
+          });
+        }
+      }
+      return entries.sort((a, b) => a.occurredAt.localeCompare(b.occurredAt));
     },
     async getItem(identifier, options = {}): Promise<ItemWithComments> {
       read();
@@ -216,5 +246,6 @@ export function createAdapter(_ctx: AdapterContext): CodeAdapter {
     },
     applyWorkState: (item, change) => fresh().applyWorkState(item, change),
     comment: (item, body) => fresh().comment(item, body),
+    getInbox: (options) => fresh().getInbox!(options),
   };
 }

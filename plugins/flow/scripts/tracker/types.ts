@@ -134,9 +134,15 @@ export interface ItemComment {
   createdAt: string;
 }
 
-/** The six {@link CodeAdapter} methods. A verb checks the ones it needs before it runs. */
+/** The seven {@link CodeAdapter} methods. A verb checks the ones it needs before it runs. */
 export type Capability =
-  'getCurrentUser' | 'getBacklogSnapshot' | 'getItem' | 'applyWorkState' | 'comment' | 'createItem';
+  | 'getCurrentUser'
+  | 'getBacklogSnapshot'
+  | 'getItem'
+  | 'applyWorkState'
+  | 'comment'
+  | 'createItem'
+  | 'getInbox';
 
 /** Every {@link Capability}, in declaration order. */
 export const ALL_CAPABILITIES: readonly Capability[] = [
@@ -146,6 +152,7 @@ export const ALL_CAPABILITIES: readonly Capability[] = [
   'applyWorkState',
   'comment',
   'createItem',
+  'getInbox',
 ];
 
 /** What `createItem` makes (contract 2.2.0). */
@@ -191,6 +198,33 @@ export interface TrackerAccount {
   id: string;
   /** Display name, when the tracker gives one. */
   name?: string;
+}
+
+/**
+ * One comment the code adapter's `getInbox` read (contract 3.0.0). The adapter
+ * parses `authorIsTrusted` from the tracker's API response in code; a model
+ * never supplies it.
+ */
+export interface InboxRead {
+  /** The item the comment is on, normalized, as it is now. */
+  item: WorkItem;
+  /** The item's human key. */
+  itemId: string;
+  /** When the comment was made, ISO-8601 with an explicit zone. */
+  occurredAt: string;
+  /** The comment. */
+  comment: {
+    /** Tracker-native comment id. */
+    id: string;
+    /** Account id of the author, or `''` when the tracker gives none. */
+    author: string;
+    /** Whether the tracker's membership data says the author is a member. */
+    authorIsTrusted: boolean;
+    /** Account ids @mentioned, when the tracker says; `[]` otherwise. */
+    mentions: string[];
+    /** The comment text. */
+    body: string;
+  };
 }
 
 /** A work item read on its own, optionally with its latest comments. */
@@ -240,6 +274,13 @@ export interface CodeAdapter {
    * create returns the first item instead of making another.
    */
   createItem?(item: NewItem): Promise<CreatedItem>;
+  /**
+   * The configured team's comments made after `since` (contract 3.0.0), oldest
+   * first, each with its item. With no `since`, a recent window the adapter
+   * chooses. Read-only; throws when the tracker cannot be reached. Only
+   * `flow inbox` calls it, and it hands no untrusted comment's text onward.
+   */
+  getInbox?(opts?: { since?: string }): Promise<InboxRead[]>;
 }
 
 /** What an adapter's `adapter.ts` module exports. */

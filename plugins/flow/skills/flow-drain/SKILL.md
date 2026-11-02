@@ -16,6 +16,7 @@ metadata:
     - 'Bash(node --experimental-strip-types "${CLAUDE_PLUGIN_ROOT}/scripts/flow.ts" note --kind friction:*)'
     - 'Bash(node --experimental-strip-types "${CLAUDE_PLUGIN_ROOT}/scripts/flow.ts" next:*)'
     - 'Bash(node --experimental-strip-types "${CLAUDE_PLUGIN_ROOT}/scripts/flow.ts" prs:*)'
+    - 'Bash(node --experimental-strip-types "${CLAUDE_PLUGIN_ROOT}/scripts/flow.ts" inbox --json)'
     - 'Bash(node --experimental-strip-types "${CLAUDE_PLUGIN_ROOT}/scripts/recovery.ts":*)'
     - 'Bash(node --experimental-strip-types "${CLAUDE_PLUGIN_ROOT}/scripts/involvement.ts":*)'
     - 'Bash(node --experimental-strip-types "${CLAUDE_PLUGIN_ROOT}/scripts/flow.ts" autonomy:*)'
@@ -57,9 +58,8 @@ approved on DorkOS's Schedules page.
    "pending"` or exit 4 (forge/tracker down): next tick. Other refusals or
    `armRefused`: `assignToHuman(item)`.
 3. **Inbox.** Before claiming anything new, un-park answered `agent/needs-input` items:
-   poll the adapter's `getInbox`, apply the comment-response rules in
-   `<flow-root>/skills/tending-tracker/SKILL.md`, resume with `--resume <sessionId>`.
-   Skip runs with `drain` set.
+   `flow inbox --json` only (never `getInbox`), acting as
+   `<flow-root>/skills/tending-tracker/SKILL.md` says: resume with `--resume <sessionId>`.
 3a. **Sweep.** `flow sweep --json`; report each unarmed PR's `detail`.
 3b. **Land first.** `flow next --json`'s `land`: rebase, re-gate, answer review, push;
    skip it while it waits on a person.

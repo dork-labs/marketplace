@@ -37,6 +37,7 @@ import type {
   CodeAdapter,
   CreatedItem,
   ItemComment,
+  InboxRead,
   ItemWithComments,
   TrackerAccount,
   NewItem,
@@ -400,6 +401,31 @@ export class FakeTracker {
           ).map((comment) => ({ ...comment, authorIsTrusted: this.isMember(comment.author) }));
         }
         return item;
+      },
+      getInbox: async (opts = {}) => {
+        this.read();
+        const since = opts.since === undefined ? Number.NEGATIVE_INFINITY : Date.parse(opts.since);
+        const reads: InboxRead[] = [];
+        for (const [identifier, comments] of Object.entries(this.backlog.comments ?? {})) {
+          const stored = this.backlog.items.find((item) => item.identifier === identifier);
+          if (stored === undefined) continue;
+          for (const comment of comments) {
+            if (!(Date.parse(comment.createdAt) > since)) continue;
+            reads.push({
+              item: view(stored),
+              itemId: identifier,
+              occurredAt: comment.createdAt,
+              comment: {
+                id: comment.id,
+                author: comment.author,
+                authorIsTrusted: this.isMember(comment.author),
+                mentions: [...comment.body.matchAll(/@([\w.-]+)/g)].map((match) => match[1]),
+                body: comment.body,
+              },
+            });
+          }
+        }
+        return reads.sort((a, b) => a.occurredAt.localeCompare(b.occurredAt));
       },
       applyWorkState: async (item, change) => this.applyWorkState(item, change),
       comment: async (item, body) => {

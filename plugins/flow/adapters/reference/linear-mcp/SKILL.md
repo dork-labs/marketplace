@@ -227,20 +227,18 @@ progress }`: `children` are the project's issues normalized, `umbrella` is the
 
 #### `getInbox(): InboxEntry[]`
 
-- **Call.** `list_issues` (assignee = the acting agent) +
-  `mcp__plugin_linear_linear__list_comments` for items touched since the last
-  tick.
-- **Normalize.** Return `InboxEntry[]` = the items the agent must look at this
-  tick (assigned-to-the-agent + @mentions of the agent + new comments since the
-  last tick), each carrying its `WorkItem` and the triggering comment
-  `{ author, authorIsTrusted, mentions[], body }` (see the entry shape below).
+- **Never run by hand (contract 3.0.0).** A model does not read the inbox
+  through these calls: it would read every comment's text, and nothing it says
+  about who is a member is trusted. The inbox is `flow inbox --json`, which
+  only the `cli` transport serves (the shipped code adapter's `getInbox`).
 - **`authorIsTrusted` (contract 3.0.0): always `false` on this transport.**
   The comment and user tools this recipe uses return an author's id and name,
   not Linear's `guest`, `app` and `active` flags, so this transport cannot tell
   a member from a guest or an integration, and a name or email never stands in
-  for them. The result: on `mcp`, no tracker comment starts or resumes a turn.
-  Answer a parked question with `flow answer` from DorkOS, or use the `cli`
-  transport, which reads the flags (see `../linear-composio/SKILL.md`).
+  for them, and a model relaying who is a member is never trusted either. The
+  result: on `mcp`, `flow inbox` exits 3 and no tracker comment starts or
+  resumes a turn. Answer a parked question with `flow answer` from DorkOS, or
+  use the `cli` transport, whose code reads the flags.
 - **Durability + degradation.** Read-only. Missing mention data degrades to "not
   mentioned" (the quiet-by-default bias keeps this safe); an unreachable tracker
   throws.
