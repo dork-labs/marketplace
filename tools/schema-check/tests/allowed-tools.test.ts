@@ -4,7 +4,9 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { afterEach, describe, expect, it } from 'vitest';
 import {
+  ANY_FILE,
   PROJECT_WRITERS,
+  REVIEWED_COMMANDS,
   breach,
   allowedToolsWarnings,
   checkAllowedTools,
@@ -475,7 +477,11 @@ describe('breach', () => {
     // A reviewed exact rule passes in its own package only.
     const pause = 'plugins/flow/commands/pause.md';
     expect(breach('Edit(.dork/flow/auto-run.json)', pause, 'plugins/flow', r)).toBeNull();
-    expect(breach('Edit(.dork/flow/tmp/**)', pause, 'plugins/flow', r)).toBeNull();
+    // Reviewed per file (DOR-3659 S3): pause holds the drain switch, not the scratch folder.
+    expect(breach('Edit(.dork/flow/tmp/**)', pause, 'plugins/flow', r)).not.toBeNull();
+    expect(
+      breach('Edit(.dork/flow/tmp/**)', 'plugins/flow/commands/capture.md', 'plugins/flow', r)
+    ).toBeNull();
     expect(breach('Edit(.dork/flow/**)', pause, 'plugins/flow', r)).not.toBeNull();
     expect(breach('Edit(.dork/flow/auto-run.json)', file, pkg, r)).not.toBeNull();
   });
@@ -531,6 +537,31 @@ describe('breach', () => {
     const status = 'plugins/flow/commands/status.md';
     expect(breach('mcp__dorkos__tasks_list', status, 'plugins/flow', r)).toBeNull();
     expect(breach('mcp__dorkos__mcp_add_server', status, 'plugins/flow', r)).not.toBeNull();
+    // Keyed by file (DOR-3659 S3): a new flow command can't take tasks_update unreviewed.
+    expect(breach('mcp__dorkos__tasks_update', status, 'plugins/flow', r)).not.toBeNull();
+    for (const ok of ['pause', 'resume']) {
+      const file = `plugins/flow/commands/${ok}.md`;
+      expect(breach('mcp__dorkos__tasks_update', file, 'plugins/flow', r), ok).toBeNull();
+    }
+    for (const other of [
+      'commands/next.md',
+      'skills/flow-drain/SKILL.md',
+      '.claude-plugin/plugin.json',
+    ]) {
+      const file = `plugins/flow/${other}`;
+      expect(breach('mcp__dorkos__tasks_update', file, 'plugins/flow', r), other).not.toBeNull();
+      expect(
+        breach(
+          'Bash(npm install --omit=dev --prefix "${CLAUDE_PLUGIN_ROOT}")',
+          file,
+          'plugins/flow',
+          r
+        ),
+        other
+      ).not.toBeNull();
+    }
+    // The bare reads stay package-wide until flow scopes them.
+    expect(breach('Read', 'plugins/flow/commands/next.md', 'plugins/flow', r)).toBeNull();
   });
 
   it("limits SlashCommand to the package's own commands (Security, #123)", () => {
@@ -547,7 +578,10 @@ describe('breach', () => {
     }
     expect(breach('SlashCommand(/demo:run)', file, pkg, r)).toBeNull();
     expect(breach('SlashCommand(/demo:run:*)', file, pkg, r)).toBeNull();
-    expect(breach('SlashCommand', 'plugins/flow/commands/flow.md', 'plugins/flow', r)).toBeNull();
+    // Flow names its own too now (DOR-3659 S2), so no package holds a bare one.
+    expect(breach('SlashCommand', 'plugins/flow/commands/flow.md', 'plugins/flow', r)).toMatch(
+      /bare SlashCommand/
+    );
   });
 
   it("limits Skill to the package's own skills and commands, since it runs commands too", () => {
@@ -568,7 +602,9 @@ describe('breach', () => {
     for (const rule of ['Skill(demo:run)', 'Skill(demo:writer)', 'Skill(demo:writer:*)']) {
       expect(breach(rule, file, pkg, r), rule).toBeNull();
     }
-    expect(breach('Skill', 'plugins/flow/commands/triage.md', 'plugins/flow', r)).toBeNull();
+    expect(breach('Skill', 'plugins/flow/commands/triage.md', 'plugins/flow', r)).toMatch(
+      /bare Skill/
+    );
   });
 
   it("gives no package another's name: plugin.json, folder and marketplace entry must agree", () => {
@@ -818,5 +854,22 @@ describe('checkAllowedTools', () => {
     const found = checkAllowedTools(r);
     expect(found).toHaveLength(1);
     expect(found[0].message).toMatch(/cannot be read/);
+  });
+});
+
+describe('REVIEWED_COMMANDS', () => {
+  it('lists only files that still hold each rule, so a stale entry cannot take it back later (DOR-3659)', () => {
+    const { grants } = collectGrants(repoRoot);
+    for (const [pkgDir, rules] of REVIEWED_COMMANDS) {
+      for (const [rule, files] of rules) {
+        if (files === ANY_FILE) continue;
+        for (const file of files) {
+          const held = grants.some(
+            (g) => g.file === file && g.pkgDir === pkgDir && g.rules.includes(rule)
+          );
+          expect(held, `${file} no longer holds ${rule}`).toBe(true);
+        }
+      }
+    }
   });
 });

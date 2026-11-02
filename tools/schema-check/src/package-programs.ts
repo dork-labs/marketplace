@@ -23,7 +23,10 @@
  *
  * - **Language servers, monitors, `bin/` programs and plugin settings** (which
  *   can set a `subagentStatusLine` command) are refused outright
- *   until someone reviews what shape is safe (no package ships one yet).
+ *   until someone reviews what shape is safe (no package ships one yet). A
+ *   marketplace entry may only use the keys on {@link ENTRY_KEYS}.
+ * - **Gitlinks** anywhere under `plugins/`, and **dependencies** on a package
+ *   this marketplace doesn't list, are refused (DOR-3659).
  *
  * @module package-programs
  */
@@ -372,6 +375,52 @@ const ROOT_NAMES: ReadonlySet<string> = new Set([PLUGINS_DIR, '.claude-plugin'])
 const ROOT_MANIFESTS: ReadonlySet<string> = new Set(['marketplace.json', 'dorkos.json']);
 
 /**
+ * Findings for gitlinks (submodules) anywhere under `plugins/` (Security's S4
+ * on #138, DOR-3659). A gitlink is a pointer to another repo's commit, so what
+ * a package ships there is code no walk here ever reads. In a git checkout
+ * that is git's mode 160000; anywhere else, a `.git` file or folder inside a
+ * package, which is what a checked-out submodule leaves.
+ */
+function gitlinks(repoRoot: string): Finding[] {
+  const message =
+    'It is a gitlink (a submodule), which ships another repo this check never reads; packages ship their own files.';
+  if (existsSync(path.join(repoRoot, '.git'))) {
+    const staged = execFileSync(
+      'git',
+      ['-C', repoRoot, 'ls-files', '-s', '-z', '--', PLUGINS_DIR],
+      {
+        encoding: 'utf8',
+      }
+    );
+    return (
+      staged
+        .split('\0')
+        .filter((line) => line.startsWith('160000 '))
+        .map((line) => line.slice(line.indexOf('\t') + 1))
+        // A package's root node_modules is committedNodeModules's to report.
+        .filter((file) => file.split('/')[2] !== 'node_modules')
+        .map((file) => ({ file, message }))
+    );
+  }
+  const found: Finding[] = [];
+  const walk = (rel: string): void => {
+    let names: string[];
+    try {
+      if (!lstatSync(path.join(repoRoot, rel)).isDirectory()) return;
+      names = readdirSync(path.join(repoRoot, rel));
+    } catch {
+      return;
+    }
+    for (const name of names.sort()) {
+      if (name === '.git') found.push({ file: rel, message });
+      else if (!(rel.split('/').length === 2 && name === 'node_modules')) walk(`${rel}/${name}`);
+    }
+  };
+  walk(PLUGINS_DIR);
+  return found;
+}
+
+/**
  * Findings for files a package ships in its root `node_modules`, the one
  * folder the walk skips as npm's. Claude Code loads skills and commands from
  * there when plugin.json points at it, by any spelling of the path. Only what
@@ -421,6 +470,33 @@ function committedNodeModules(repoRoot: string): Finding[] {
       'The package ships files in node_modules, which this check never reads; packages install their dependencies instead.',
   }));
 }
+
+/**
+ * The marketplace-entry fields this check knows, an allow-list (Security's S1
+ * on #138, DOR-3659). An entry can declare what plugin.json can, and Claude
+ * Code may honour `monitors`, `experimental` or `settings` (a
+ * `subagentStatusLine` command) there too, so any other key is refused rather
+ * than trusted to the strict upstream schema, which a pin bump could loosen.
+ * Hooks and MCP servers are checked below; `lspServers` is refused.
+ */
+const ENTRY_KEYS: ReadonlySet<string> = new Set([
+  'name',
+  'source',
+  'description',
+  'version',
+  'author',
+  'homepage',
+  'repository',
+  'license',
+  'keywords',
+  'category',
+  'tags',
+  'strict',
+  'commands',
+  'agents',
+  'hooks',
+  'mcpServers',
+]);
 
 /** Plugin.json and marketplace-entry fields that name where a package's parts live. */
 const COMPONENT_FIELDS = [
@@ -495,6 +571,84 @@ function unreviewedPrograms(repoRoot: string, pkgDir: string): Finding[] {
 }
 
 /**
+ * Findings for a package that depends on one this marketplace doesn't list
+ * (DOR-3659, item 5). DorkOS resolves a `requires` entry by name against
+ * whatever is installed, and Claude Code installs a plugin.json dependency
+ * from the marketplace it names, so a dependency outside this list pulls in
+ * a package nobody here reviewed. Only names marketplace.json lists with a
+ * local `./plugins/<name>` source pass:
+ * `<type>:<name>[@<version>]` in `.dork/manifest.json`'s `requires`, and a
+ * bare `<name>` or `<name>@<this marketplace>` in plugin.json's
+ * `dependencies`. Any other shape is refused, so a format this check doesn't
+ * know can't slip past it.
+ */
+function dependencies(repoRoot: string): Finding[] {
+  const marketplace = readJson(path.join(repoRoot, '.claude-plugin/marketplace.json'));
+  const own =
+    isRecord(marketplace) && typeof marketplace.name === 'string' ? marketplace.name : null;
+  // Only packages shipped from this repo: a remote source is never checked here.
+  const listed = new Set(
+    isRecord(marketplace) && Array.isArray(marketplace.plugins)
+      ? marketplace.plugins.flatMap((e) =>
+          isRecord(e) &&
+          typeof e.name === 'string' &&
+          typeof e.source === 'string' &&
+          sourceDir(e.source) !== ''
+            ? [e.name]
+            : []
+        )
+      : []
+  );
+  const findings: Finding[] = [];
+  const check = (
+    file: string,
+    field: string,
+    value: unknown,
+    name: (d: string) => string | null
+  ): void => {
+    if (value === undefined) return;
+    if (!Array.isArray(value)) {
+      findings.push({
+        file,
+        message: `${field} is not a list this check can read, so what it pulls in can't be checked.`,
+      });
+      return;
+    }
+    for (const dep of value) {
+      const target = typeof dep === 'string' ? name(dep) : null;
+      if (target === null || !listed.has(target)) {
+        findings.push({
+          file,
+          message: `${field} names ${JSON.stringify(dep)}, which is not a package this marketplace lists; a dependency may only name one of its own packages, so it can't pull in one nobody here reviewed.`,
+        });
+      }
+    }
+  };
+  for (const dir of pluginDirs(repoRoot)) {
+    const pkgDir = path.posix.join(PLUGINS_DIR, dir);
+    const manifestFile = `${pkgDir}/.dork/manifest.json`;
+    const manifest = readJson(path.join(repoRoot, manifestFile));
+    if (isRecord(manifest)) {
+      check(
+        manifestFile,
+        'requires',
+        manifest.requires,
+        (d) =>
+          /^(?:adapter|plugin|skill-pack|agent|shape):([a-z][a-z0-9-]*)(?:@[\w.~^>=<!*-]+)?$/.exec(
+            d
+          )?.[1] ?? null
+      );
+    }
+    const plugin = pluginJson(repoRoot, pkgDir);
+    check(`${pkgDir}/.claude-plugin/plugin.json`, 'dependencies', plugin?.dependencies, (d) => {
+      const m = /^([a-z0-9][a-z0-9-]*)(?:@([a-z0-9][a-z0-9-]*))?$/.exec(d);
+      return m && (m[2] === undefined || m[2] === own) ? m[1] : null;
+    });
+  }
+  return findings;
+}
+
+/**
  * Check every hook and MCP server every package declares.
  *
  * @param repoRoot - Absolute path to the repository root.
@@ -533,7 +687,12 @@ export function checkPackagePrograms(repoRoot: string): Finding[] {
   // Until a package's names are the same on a Mac and on CI, what the rest of
   // this reads for it differs between them, so its findings stop there.
   const variants = caseVariants(listDir(repoRoot));
-  const findings: Finding[] = [...variants, ...committedNodeModules(repoRoot)];
+  const findings: Finding[] = [
+    ...variants,
+    ...committedNodeModules(repoRoot),
+    ...gitlinks(repoRoot),
+    ...dependencies(repoRoot),
+  ];
   for (const name of pluginDirs(repoRoot)) {
     const pkgDir = path.posix.join(PLUGINS_DIR, name);
     if (variants.some((v) => v.file === pkgDir || v.file.startsWith(`${pkgDir}/`))) continue;
@@ -562,10 +721,13 @@ export function checkPackagePrograms(repoRoot: string): Finding[] {
     const source = typeof entry.source === 'string' ? entry.source : '';
     const pkgDir = sourceDir(source);
     findings.push(...nodeModulesPaths(entry, marketplaceFile, `plugins[${String(entry.name)}].`));
-    if (entry.lspServers !== undefined) {
+    for (const key of Object.keys(entry).filter((k) => !ENTRY_KEYS.has(k))) {
       findings.push({
         file: marketplaceFile,
-        message: `plugins[${String(entry.name)}].lspServers declares language servers, which Claude Code starts with no permission check; this check refuses them until one is reviewed.`,
+        message:
+          key === 'lspServers'
+            ? `plugins[${String(entry.name)}].lspServers declares language servers, which Claude Code starts with no permission check; this check refuses them until one is reviewed.`
+            : `plugins[${String(entry.name)}].${key} is not a marketplace entry field this check has reviewed (monitors and settings can run a command with no permission check); declare it in the package's own files, or add it to ENTRY_KEYS in review.`,
       });
     }
     for (const [field, check] of [
