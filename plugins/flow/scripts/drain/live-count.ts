@@ -25,7 +25,7 @@ export function liveKey(runtime: string | undefined, account: string | null | un
 /**
  * Live sessions per `<runtime>:<id>`: every `running` or `queued` run by its
  * account, plus its drain reviewer's handle by the reviewer's account. A parked
- * drain run counts for nothing. A run or
+ * drain run counts only the slot it holds (`heldSlot`), if any. A run or
  * handle with no account bills its runtime's `default` (`assignAccounts` in `cli/next.ts`
  * folds `<runtime>:default` into the row it aliases).
  *
@@ -39,8 +39,12 @@ export function liveByAccount(runs: Readonly<Record<string, FlowRun>>): Record<s
   };
   for (const run of Object.values(runs)) {
     if (run.status !== 'running' && run.status !== 'queued') continue;
-    // A parked drain run holds no live session (parking stops them).
-    if (run.drain?.phase === 'parked') continue;
+    // A parked drain run holds no live session (parking stops them), unless
+    // the lane supervisor parked one that may still run (DOR-3263).
+    if (run.drain?.phase === 'parked') {
+      if (run.drain.heldSlot) add(run.drain.heldSlot);
+      continue;
+    }
     add(liveKey(run.runtime, run.account));
     const reviewer = run.drain?.reviewer;
     if (reviewer) add(liveKey(handleRuntime(reviewer), reviewer.account));

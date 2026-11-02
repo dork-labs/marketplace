@@ -36,6 +36,7 @@ import {
   type MessageContexts,
   type MessageKind,
 } from './messages.ts';
+import { liveKey } from './live-count.ts';
 import type { DrainPullRequest, DrainState, DrainWorkerHandle } from './state.ts';
 
 /** An open pull request found on the run's branch (the forge's `prForBranch`). */
@@ -218,6 +219,8 @@ export const PARK_REASONS = {
     `the worker showed no activity for ${minutes} minutes while it was meant to be working`,
   unreachable: (which: 'worker' | 'reviewer', minutes: number, why: string) =>
     `flow could not reach the ${which}'s session for ${minutes} minutes (${why}), so it may still be running and was not restarted`,
+  reviewerQuiet: (minutes: number) =>
+    `the reviewer showed no activity for ${minutes} minutes, and flow could not be sure it stopped, so it did not start a second one`,
   workerGone: "the worker's session went away",
   workerGoneAgain: "the worker's session went away again after flow restarted it once",
   noRoomToRestart: "the worker's session went away and no account has room to restart it",
@@ -553,6 +556,22 @@ function activeSession(phase: DrainState['phase']): 'worker' | 'reviewer' | null
   return WORKER_PHASES.has(phase) ? 'worker' : null;
 }
 
+/** The step with the supervisor's clock cleared, so it starts over when it next looks. */
+function unclocked(step: Step): Step {
+  const d = step.drain;
+  if (!d.progressAt && !d.progressMark && !d.waitingSince) return step;
+  return { ...step, drain: { ...d, progressAt: null, progressMark: null, waitingSince: null } };
+}
+
+/**
+ * A park that keeps the parked session's slot when its host's stop may leave
+ * it running: every host but the plain cli (DorkOS never stops a session, and
+ * cmux stops only a process flow itself started).
+ */
+function holdSlot(step: Step, host: string, slot: string): Step {
+  return host === 'cli' ? step : { ...step, drain: { ...step.drain, heldSlot: slot } };
+}
+
 /** The step with its progress recorded as seen `now`, and no person waited on. */
 function progressed(step: Step, mark: string, now: Date): Step {
   return {
@@ -573,13 +592,17 @@ function progressed(step: Step, mark: string, now: Date): Step {
  *   and a restart could leave two at work;
  * - a busy session whose host reports no activity, or one it can never
  *   describe (`cannotTell`): never judged;
- * - the reviewer, gone or quiet: restarted at the same commit once, then the
- *   run parks (the same rule as a reviewer that stopped);
+ * - a reviewer that went away (`gone`): restarted at the same commit once,
+ *   then the run parks (the same rule as a reviewer that stopped);
+ * - a busy reviewer that wrote nothing: a park, never a second reviewer,
+ *   since a host may not stop the first (DorkOS leaves it running);
  * - a worker that went away (`gone`): one `restart-worker`, then a park;
  * - a busy worker that wrote nothing: a park.
  *
+ * A park of a session that may still run (busy, or unreachable) on a host
+ * whose stop can leave it running keeps its slot ({@link DrainState.heldSlot}).
  * Idle and exited sessions are the nudge rule's, and a limited run the
- * handoff machine's.
+ * handoff machine's; while either holds the run, the clock starts over.
  */
 function supervise(
   step: Step,
@@ -589,7 +612,7 @@ function supervise(
   now: Date
 ): Step {
   const stallAfterMs = cfg.stallAfterMs;
-  if (stallAfterMs === undefined || run.limit) return step;
+  if (stallAfterMs === undefined || run.limit) return unclocked(step);
   const drain = step.drain;
   const which = activeSession(drain.phase);
   const handle = which === null ? null : drain[which];
@@ -597,6 +620,11 @@ function supervise(
   if (which === null || handle === null || handle.pending || state === null) {
     return drain.waitingSince ? { ...step, drain: { ...drain, waitingSince: null } } : step;
   }
+  // The slot this session holds, as `liveByAccount` counts it.
+  const slot =
+    which === 'worker'
+      ? liveKey(run.runtime, run.account)
+      : liveKey(handleRuntime(handle), handle.account);
   const activity =
     (state.kind === 'busy' ? state.activityAt : undefined) ?? facts.activity?.[which] ?? null;
   const waiting = state.kind === 'busy' && state.waiting === 'person';
@@ -633,11 +661,16 @@ function supervise(
   if (state.kind === 'unknown' && state.cannotTell === true) return step;
   // Not proof it stopped: restarting could leave two sessions at work.
   if (state.kind === 'unknown' && !gone) {
-    return park(step, PARK_REASONS.unreachable(which, minutes, state.reason));
+    return holdSlot(
+      park(step, PARK_REASONS.unreachable(which, minutes, state.reason)),
+      handle.host,
+      slot
+    );
   }
   // A host that reports no activity for a busy session is never judged.
   if (state.kind === 'busy' && activity === null) return step;
   if (which === 'reviewer') {
+    if (!gone) return holdSlot(park(step, PARK_REASONS.reviewerQuiet(minutes)), handle.host, slot);
     if (drain.nudges >= 1) return park(step, PARK_REASONS.reviewerStopped);
     const sha = (handle as DrainState['reviewer'] & object).sha;
     const restarted = startReviewer(step, sha, facts);
@@ -658,7 +691,9 @@ function supervise(
       now
     );
   }
-  return state.kind === 'busy' ? park(step, PARK_REASONS.workerQuiet(minutes)) : step;
+  return state.kind === 'busy'
+    ? holdSlot(park(step, PARK_REASONS.workerQuiet(minutes)), handle.host, slot)
+    : step;
 }
 
 /** The phase table for a run that is live, claimed and past its start. */
@@ -730,6 +765,11 @@ function readopt(
     parkedFor: null,
     nudges: 0,
     restarts: 0,
+    // The stall clock starts over from the answer, and a held slot is freed.
+    progressAt: null,
+    progressMark: null,
+    waitingSince: null,
+    heldSlot: null,
   };
   // A park on failing checks that a person answered: the answer is the go-ahead
   // to fix them (spec flow-multiproject §7.7, retry at Ask me first). Back to
@@ -770,6 +810,10 @@ function readopt(
         parkedFor: null,
         nudges: 0,
         restarts: 0,
+        progressAt: null,
+        progressMark: null,
+        waitingSince: null,
+        heldSlot: null,
       },
     },
     actions: [
@@ -923,7 +967,7 @@ function drainStepCore(
   }
 
   if (recorded.wakeAfter !== null && now.getTime() < Date.parse(recorded.wakeAfter)) {
-    return done(idle);
+    return done(unclocked(idle));
   }
 
   if (

@@ -26,9 +26,8 @@ import { randomBytes, randomUUID } from 'node:crypto';
 import { existsSync, mkdirSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 
-import { chooseAccount, itemRuntime, rankAccounts } from '../drain/account-rank.ts';
+import { chooseAccount, rankAccounts } from '../drain/account-rank.ts';
 import { writeLastPass } from '../drain/last-pass.ts';
-import { liveKey } from '../drain/live-count.ts';
 import { answerPointer, findAnswer, untrustedReplyWarning } from '../drain/answer.ts';
 import type { RunQuestion } from '../flow-run.ts';
 import { belongsToPark, checkBrief, parkedAnswer, personOnly, pickComment } from '../question.ts';
@@ -95,6 +94,7 @@ import {
   liveByAccount,
   noAccountMessage,
   planNext,
+  restartRank,
   type NextConfig,
 } from './next.ts';
 import { signBody, unsignedBody } from './provenance.ts';
@@ -706,24 +706,7 @@ export async function drain(ctx: VerbContext, options: DrainOptions = {}): Promi
     // while that one still has room (DOR-3263).
     async restartAccount(run) {
       const input = await gatherAssignmentInput(ctx, config);
-      const runtime = itemRuntime(run.runtime, input.runtimes);
-      // The run's own session no longer runs, so it holds no slot.
-      const own = liveKey(run.runtime, run.account);
-      const live = liveByAccount(input.runs);
-      if ((live[own] ?? 0) > 0) live[own] -= 1;
-      const rank = rankAccounts({
-        now: input.now,
-        repo: input.repo,
-        accounts: input.accounts,
-        runtime,
-        runtimes: input.runtimes,
-        crossRuntimeFallback: input.crossRuntimeFallback,
-        model: model('implementation'),
-        affinity: own,
-        exclude: [],
-        liveByAccount: live,
-        opts: input.opts,
-      });
+      const rank = restartRank(input, run, model('implementation'));
       const choice = chooseAccount({ accounts: input.accounts, rank });
       return choice.account === 'none' ? null : plannedAccount(input.accounts, choice.account);
     },

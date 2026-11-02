@@ -338,8 +338,18 @@ describe('lane supervisor: the reviewer', () => {
   const reviewerFacts = (state: SessionState) => (d: DrainState) =>
     facts(d, { kind: 'idle' }, { reviewer: state });
 
-  it('a quiet reviewer is restarted at the same commit, like one that stopped', () => {
+  // A host may not stop a busy reviewer (DorkOS leaves it running), so a
+  // second one would share its worktree: the run parks, holding the slot.
+  it('a quiet reviewer parks rather than starting a second one, and keeps its slot', () => {
     const out = quietFor(reviewing, reviewerFacts(busy('2026-09-26T11:59:00.000Z')), 61);
+    expect(out.drain.phase).toBe('parked');
+    expect(out.drain.parkedReason).toBe(PARK_REASONS.reviewerQuiet(60));
+    expect(out.drain.heldSlot).toBe('claude-code:claude4');
+    expect(out.actions.some((a) => a.kind === 'start-reviewer')).toBe(false);
+  });
+
+  it('a reviewer that went away is restarted at the same commit, once', () => {
+    const out = quietFor(reviewing, reviewerFacts(GONE), 61);
     expect(out.drain.phase).toBe('reviewing');
     expect(out.drain.nudges).toBe(1);
     expect(out.actions).toEqual([
@@ -381,5 +391,48 @@ describe('lane supervisor: after a person answers', () => {
     const out = drainStep(run(parked), facts(parked, GONE), CFG, at(62));
     expect(out.run.drain?.phase).toBe('working');
     expect(out.run.drain?.restarts).toBe(0);
+  });
+
+  // The stall clock starts over from the answer: a session that is still
+  // busy with the answer queued behind its turn is not parked again at once.
+  it('the stall clock starts over, so the next pass does not park it again', () => {
+    const quiet = (d: DrainState) => facts(d, busy('2026-09-26T11:59:00.000Z'));
+    const parked = quietFor(drain('working'), quiet, 61).drain;
+    const readopted = drainStep(run(parked), quiet(parked), CFG, at(120)).run.drain!;
+    expect(readopted.phase).toBe('working');
+    expect(readopted.progressAt).toBeNull();
+    expect(readopted.heldSlot).toBeNull();
+    const next = drainStep(run(readopted), quiet(readopted), CFG, at(121));
+    expect(next.run.drain?.phase).toBe('working');
+    expect(next.actions.some((a) => a.kind === 'park')).toBe(false);
+  });
+});
+
+describe('lane supervisor: the slot a parked session holds', () => {
+  const quiet = (d: DrainState) => facts(d, busy('2026-09-26T11:59:00.000Z'));
+
+  it('a quiet DorkOS worker it parks keeps its account slot, since DorkOS does not stop it', () => {
+    const out = quietFor(drain('working'), quiet, 61, { account: 'claude3' });
+    expect(out.drain.heldSlot).toBe('claude-code:claude3');
+  });
+
+  it('a cli worker it parks holds nothing: its stop ends the process', () => {
+    const cli = drain('working', { worker: { ...WORKER, host: 'cli' } });
+    const out = quietFor(cli, quiet, 61, { account: 'claude3' });
+    expect(out.drain.phase).toBe('parked');
+    expect(out.drain.heldSlot ?? null).toBeNull();
+  });
+
+  it('a limit pauses the supervisor and clears its clock, so it starts over after', () => {
+    const seen = drainStep(run(drain('working')), quiet(drain('working')), CFG, T0).run.drain!;
+    expect(seen.progressAt).toBe(T0.toISOString());
+    const limit = {
+      state: 'waiting',
+      window: 'five_hour',
+      resetsAt: null,
+      since: T0.toISOString(),
+    } as unknown as FlowRun['limit'];
+    const out = drainStep(run(seen, { limit }), quiet(seen), CFG, at(30));
+    expect(out.run.drain?.progressAt ?? null).toBeNull();
   });
 });

@@ -14,7 +14,8 @@ import { afterEach, describe, expect, it } from 'vitest';
 
 import { findConfigRoots } from '../../scripts/config-files.ts';
 import { loadConfig } from '../../scripts/config-load.ts';
-import { liveByAccount } from '../../scripts/cli/next.ts';
+import { liveByAccount, restartRank, type AssignmentInput } from '../../scripts/cli/next.ts';
+import { readProjectEligibilityRules } from '../../scripts/fleet/project-eligibility.ts';
 import type { DrainState } from '../../scripts/drain/state.ts';
 import { EXIT } from '../../scripts/errors.ts';
 import type { FlowRun } from '../../scripts/flow-run.ts';
@@ -776,5 +777,123 @@ describe('liveByAccount', () => {
       three: { ...base, issueId: 'three' },
     };
     expect(liveByAccount(runs)).toEqual({ 'claude-code:a': 2 });
+  });
+
+  // Purpose: a run the lane supervisor parked while its session may still run
+  // keeps that slot, so a new lane does not crowd the account (DOR-3263).
+  it('counts the slot a parked run still holds', () => {
+    const runs: Record<string, FlowRun> = {
+      one: {
+        issueId: 'one',
+        identifier: 'X',
+        sessionId: 's',
+        worktreePath: '/w',
+        branch: 'b',
+        stage: 'execute',
+        status: 'running',
+        attemptCount: 0,
+        workerPid: -1,
+        startedAt: '2026-09-26T00:00:00.000Z',
+        account: 'a',
+        drain: {
+          v: 1,
+          rev: 1,
+          phase: 'parked',
+          worker: null,
+          reviewer: null,
+          heldSlot: 'claude-code:b',
+        } as unknown as DrainState,
+      },
+    };
+    expect(liveByAccount(runs)).toEqual({ 'claude-code:b': 1 });
+  });
+});
+
+describe('restartRank (DOR-3263)', () => {
+  const window = (usedPct: number, resetsAt: string) => ({
+    usedPct,
+    resetsAt,
+    status: null,
+    observedAt: '2026-09-26T15:59:00.000Z',
+    source: 'statusline' as const,
+  });
+  const account = (id: string) => ({
+    runtime: 'claude-code' as const,
+    id,
+    routable: true,
+    label: null,
+    policy: {
+      runtime: 'claude-code',
+      id,
+      role: 'rotation',
+      reservePct: 0,
+      spendDownWindowHours: 24,
+      scope: { repos: [] },
+    },
+    windows: {
+      five_hour: window(10, '2026-09-26T19:00:00.000Z'),
+      seven_day: window(20, '2026-10-02T16:00:00.000Z'),
+    },
+  });
+  const run = {
+    issueId: 'one',
+    identifier: 'X-1',
+    sessionId: 's',
+    worktreePath: '/w',
+    branch: 'b',
+    stage: 'execute',
+    status: 'running',
+    attemptCount: 0,
+    workerPid: -1,
+    startedAt: '2026-09-26T00:00:00.000Z',
+    account: 'work',
+  } as unknown as FlowRun;
+  const input = (extra: Partial<AssignmentInput> = {}): AssignmentInput =>
+    ({
+      now: new Date('2026-09-26T16:00:00.000Z'),
+      repo: 'acme/app',
+      model: null,
+      accounts: [account('work'), account('home')],
+      runtimes: ['claude-code'],
+      crossRuntimeFallback: 'off',
+      runs: { one: run },
+      opts: { warnMarginPct: 5, maxLivePerAccount: 1 },
+      ...extra,
+    }) as unknown as AssignmentInput;
+
+  // Purpose: the run's own account comes first again, since its old session
+  // no longer holds the slot it was counted in.
+  it('keeps the run on its own account, not counting its old session', () => {
+    const rank = restartRank(input(), run, null);
+    expect(rank.ranked[0]).toMatchObject({ id: 'work', tier: 0 });
+    expect(rank.ineligible).toEqual([]);
+  });
+
+  // Purpose: a restart obeys DorkOS's project rule as a new worker does
+  // (fleet contract 4.2.0); the reviewer caught it skipping the rule.
+  it('never restarts on an account DorkOS keeps to another project', () => {
+    const rank = restartRank(
+      input({
+        project: {
+          root: '/work/app',
+          rules: readProjectEligibilityRules(
+            {
+              runtimes: {
+                claudeCode: {
+                  accounts: [{ id: 'work', path: '/accounts/work', onlyProjects: ['/work/other'] }],
+                },
+              },
+            },
+            (folder) => folder
+          ),
+        },
+      }),
+      run,
+      null
+    );
+    expect(rank.ranked.map((a) => a.id)).toEqual(['home']);
+    expect(rank.ineligible).toEqual([
+      { runtime: 'claude-code', id: 'work', reasons: ['not-allowed-here'] },
+    ]);
   });
 });

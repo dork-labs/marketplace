@@ -214,17 +214,17 @@ export interface AssignmentInput {
 }
 
 /**
- * Assign each pick its account, in pick order (§3.5). Each assignment adds one
- * to its account's live count, so later picks see it and `-n` spreads work.
- * Pure.
+ * Live sessions per account, and the key an account is counted under. A run
+ * or handle with no account (or `default`) bills `default`; when that is an
+ * alias, it is its registered row's session (rev 6d), counted under the row.
  *
- * @param picked - The picks, in order.
- * @param input - The accounts, runs, repo, model, policy and settings.
- * @returns One assignment per pick.
+ * @param input - The accounts and runs.
+ * @returns The canonical key of a `<runtime>:<id>`, and the counts by it.
  */
-export function assignAccounts(picked: readonly WorkItem[], input: AssignmentInput): ItemAccount[] {
-  // A run or handle with no account (or `default`) bills `default`; when that is
-  // an alias, it is its registered row's session (rev 6d), counted under the row.
+function liveCounts(input: AssignmentInput): {
+  canonical: (key: string) => string;
+  live: Record<string, number>;
+} {
   const aliasOf = new Map(
     input.accounts
       .filter((a) => a.isDefault === true && !a.implicit)
@@ -235,6 +235,55 @@ export function assignAccounts(picked: readonly WorkItem[], input: AssignmentInp
   for (const [key, count] of Object.entries(liveByAccount(input.runs))) {
     live[canonical(key)] = (live[canonical(key)] ?? 0) + count;
   }
+  return { canonical, live };
+}
+
+/**
+ * The rank for a worker restarted after its session went away (DOR-3263):
+ * judged as a new worker is, under the same project rule, with the run's own
+ * account as the warm-cache affinity. Its old session no longer runs, so it
+ * holds no slot. Pure.
+ *
+ * @param input - The accounts, runs, repo, project rule and settings.
+ * @param run - The run whose worker restarts.
+ * @param model - The implementation model, or `null`.
+ * @returns The rank to choose from.
+ */
+export function restartRank(
+  input: AssignmentInput,
+  run: FlowRun,
+  model: string | null
+): ReturnType<typeof rankAccounts> {
+  const { canonical, live } = liveCounts(input);
+  const own = canonical(liveKey(run.runtime, run.account));
+  if ((live[own] ?? 0) > 0) live[own] -= 1;
+  return rankAccounts({
+    now: input.now,
+    repo: input.repo,
+    ...(input.project === undefined ? {} : { project: input.project }),
+    accounts: input.accounts,
+    runtime: itemRuntime(run.runtime, input.runtimes),
+    runtimes: input.runtimes,
+    crossRuntimeFallback: input.crossRuntimeFallback,
+    model,
+    affinity: own,
+    exclude: [],
+    liveByAccount: live,
+    opts: input.opts,
+  });
+}
+
+/**
+ * Assign each pick its account, in pick order (§3.5). Each assignment adds one
+ * to its account's live count, so later picks see it and `-n` spreads work.
+ * Pure.
+ *
+ * @param picked - The picks, in order.
+ * @param input - The accounts, runs, repo, model, policy and settings.
+ * @returns One assignment per pick.
+ */
+export function assignAccounts(picked: readonly WorkItem[], input: AssignmentInput): ItemAccount[] {
+  const { canonical, live } = liveCounts(input);
   const runByItem = new Map(Object.values(input.runs).map((run) => [run.issueId, run]));
   return picked.map((item): ItemAccount => {
     const run = runByItem.get(item.id);

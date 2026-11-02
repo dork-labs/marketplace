@@ -173,6 +173,13 @@ export interface DrainState {
    * or absent otherwise. Such a session is never restarted or parked for it.
    */
   waitingSince?: string | null;
+  /**
+   * The live slot (`<runtime>:<id>`) a parked run still holds: the lane
+   * supervisor parked a session that may still be running, on a host whose
+   * stop can leave it so. `liveByAccount` counts it until a person's answer
+   * clears it. `null` or absent: none.
+   */
+  heldSlot?: string | null;
 }
 
 /** A run's account limit episode (§5.1), stored at `FlowRun.limit`. */
@@ -338,6 +345,7 @@ const DrainStateV1Schema = z.looseObject({
   progressMark: nullableString.optional(),
   restarts: count.optional(),
   waitingSince: nullableString.optional(),
+  heldSlot: nullableString.optional(),
 });
 
 /**
