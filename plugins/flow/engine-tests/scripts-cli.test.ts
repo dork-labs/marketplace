@@ -27,6 +27,7 @@ import {
   CircuitBreakerSchema,
   DispatchSchema,
   GatesSchema,
+  OnExhaustedSchema,
   OwnershipSchema,
   RecoverySchema,
   WipCapSchema,
@@ -40,6 +41,7 @@ import {
 } from '../scripts/gates-policy.ts';
 import type { MergeState, UnitUsage } from '../scripts/gates-policy.ts';
 import { recoverOrphan, type RecoveryContext } from '../scripts/flow-run.ts';
+import { ON_EXHAUSTED } from '../scripts/recovery.ts';
 import type { WorkItem } from '../scripts/work-item.ts';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
@@ -317,6 +319,56 @@ describe('recovery', () => {
       stdin: JSON.stringify({ signal: 'claimed-no-worker', run: plain, ctx, recovery }),
     });
     expect(JSON.parse(resumed.stdout).kind).toBe('resume');
+  });
+
+  describe('retries exhausted: the script honors recovery.onExhausted', () => {
+    const exhausted = {
+      issueId: 'id-ACME-13',
+      identifier: 'ACME-13',
+      sessionId: 'session-13',
+      worktreePath: '/tmp/wt-13',
+      branch: 'ACME-13-x',
+      stage: 'execute',
+      status: 'running',
+      attemptCount: 2,
+      workerPid: 999_999_999,
+      startedAt: '2026-11-01T00:00:00.000Z',
+    };
+    const exhaust = (recoveryIn: unknown) =>
+      runScript('recovery', {
+        stdin: JSON.stringify({
+          signal: 'claimed-no-worker',
+          run: exhausted,
+          ctx,
+          recovery: recoveryIn,
+        }),
+      });
+
+    it.each([
+      ['block', 'block', { label: 'agent/blocked' }],
+      ['escalate', 'escalate', { label: 'agent/needs-input', question: expect.any(String) }],
+      ['abandon', 'abandon', { releaseTo: 'none' }],
+    ] as const)('onExhausted %s → kind %s', (onExhausted, kind, extra) => {
+      const { status, stdout } = exhaust({ maxRetries: 2, onExhausted, staleAfter: '5m' });
+      expect(status).toBe(0);
+      expect(JSON.parse(stdout)).toMatchObject({ kind, ...extra });
+    });
+
+    it('a recovery object with no onExhausted reads as the default, block', () => {
+      const { status, stdout } = exhaust({ maxRetries: 2 });
+      expect(status).toBe(0);
+      expect(JSON.parse(stdout)).toMatchObject({ kind: 'block', label: 'agent/blocked' });
+    });
+
+    it('knows exactly the values the config schema allows', () => {
+      expect([...ON_EXHAUSTED]).toEqual(OnExhaustedSchema.options);
+    });
+
+    it('refuses an onExhausted value it does not know (exit 1), never guessing', () => {
+      const { status, stderr } = exhaust({ maxRetries: 2, onExhausted: 'retry-forever' });
+      expect(status).toBe(1);
+      expect(stderr).toContain('onExhausted');
+    });
   });
 
   it('exits 2 on an oracle invariant violation (claimed-no-worker with run: null)', () => {

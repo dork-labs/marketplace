@@ -5,7 +5,8 @@
  * The invariants pinned here (§6):
  *   - intact checkpoint + dead worker → `resume` (re-attach at HEAD);
  *   - no worktree → `restart-clean` (reason `no-worktree`);
- *   - retries exhausted → `escalate` to `agent/blocked`;
+ *   - retries exhausted → the `recovery.onExhausted` action: `block` (`agent/blocked`),
+ *     `escalate` (`agent/needs-input`) or `abandon` (released unowned);
  *   - a parked `agent/needs-input` candidate is NOT in the `isDue` set — parked is
  *     never reclaimed (the single most important invariant);
  *   - contention: recovery(10) + dispatch(30) on the SAME item → recovery acts and
@@ -78,18 +79,19 @@ function candidate(overrides: Partial<RecoveryCandidate> = {}): RecoveryCandidat
 /** A recovery-only context with the given candidates + the default policy. */
 function recoveryCtx(
   candidates: RecoveryCandidate[],
-  claimed?: Set<string>
+  claimed?: Set<string>,
+  recovery: RecoveryConfig = DEFAULT_RECOVERY
 ): ReconcileContext<FlowReconcileInput> {
   return {
     now: 0,
     claimedItemIds: claimed,
-    input: { recovery: { candidates, recovery: DEFAULT_RECOVERY } },
+    input: { recovery: { candidates, recovery } },
   };
 }
 
 // ─── the recovery action ladder, surfaced through the reconciler ──────────────
 
-describe('recoveryReconciler — resume / restart-clean / escalate', () => {
+describe('recoveryReconciler — resume / restart-clean / onExhausted', () => {
   it('(a) intact checkpoint + dead worker → resume (attemptCount + 1)', async () => {
     const ctx = recoveryCtx([candidate({ run: flowRun({ attemptCount: 0 }) })]);
     expect(recoveryReconciler.isDue(ctx)).toBe(true);
@@ -109,14 +111,41 @@ describe('recoveryReconciler — resume / restart-clean / escalate', () => {
     expect(result.summary).toMatch(/no-worktree/);
   });
 
-  it('(c) retries exhausted → escalate to agent/blocked', async () => {
+  it('(c) retries exhausted, onExhausted block (default) → agent/blocked', async () => {
     const ctx = recoveryCtx([
       candidate({ run: flowRun({ attemptCount: DEFAULT_RECOVERY.maxRetries }) }),
     ]);
     const result = await recoveryReconciler.run(ctx);
     expect(result.acted).toBe(true);
-    expect(result.summary).toMatch(/escalate/);
+    expect(result.summary).toMatch(/^block DOR-1/);
     expect(result.summary).toMatch(/agent\/blocked/);
+  });
+
+  it('(c) retries exhausted, onExhausted escalate → ask a person (agent/needs-input)', async () => {
+    const recovery = RecoverySchema.parse({ onExhausted: 'escalate' });
+    const ctx = recoveryCtx(
+      [candidate({ run: flowRun({ attemptCount: recovery.maxRetries }) })],
+      undefined,
+      recovery
+    );
+    const result = await recoveryReconciler.run(ctx);
+    expect(result.acted).toBe(true);
+    expect(result.summary).toMatch(/^escalate DOR-1/);
+    expect(result.summary).toMatch(/agent\/needs-input/);
+    expect(result.summary).not.toMatch(/agent\/blocked/);
+  });
+
+  it('(c) retries exhausted, onExhausted abandon → release unowned', async () => {
+    const recovery = RecoverySchema.parse({ onExhausted: 'abandon' });
+    const ctx = recoveryCtx(
+      [candidate({ run: flowRun({ attemptCount: recovery.maxRetries }) })],
+      undefined,
+      recovery
+    );
+    const result = await recoveryReconciler.run(ctx);
+    expect(result.acted).toBe(true);
+    expect(result.summary).toMatch(/^abandon DOR-1/);
+    expect(result.summary).toMatch(/release --to none/);
   });
 
   it('re-derives when there is no local record (claimed on another machine)', async () => {

@@ -235,8 +235,8 @@ agent session per run — so there is no scheduler to build.
 - **Crash/stall recovery** is driven by the durable `FlowRun` record + the
   next-tick recovery ladder (spec §12): a `needs-input` item is never reclaimed;
   an orphaned `agent/claimed` item is adopted + resumed (re-attach the worktree at
-  HEAD, resume the session) or restarted clean, with `attemptCount` guarding
-  against runaway retries.
+  HEAD, resume the session) or restarted clean, then
+  `onExhausted` blocks, asks or abandons it.
 
 A `claude -p`-per-issue **watcher** seat for non-DorkOS repos is designed but not
 built, so `autonomy.seat` accepts only `pulse` today.
