@@ -518,6 +518,8 @@ function checkSourcePaths(repoRoot: string, file: string, value: unknown): Findi
   const plugins = (value as { plugins?: unknown }).plugins;
   if (!Array.isArray(plugins)) return findings;
   for (const entry of plugins) {
+    // A `null` or scalar entry failed the schema above, and the same read would throw.
+    if (typeof entry !== 'object' || entry === null) continue;
     const source = (entry as { source?: unknown }).source;
     const name = (entry as { name?: unknown }).name;
     if (typeof source !== 'string' || !source.startsWith('.')) continue;

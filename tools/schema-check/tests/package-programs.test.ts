@@ -395,6 +395,112 @@ describe('checkPackagePrograms', () => {
     ]);
   });
 
+  // A container in the wrong shape used to be skipped, so what it declared was
+  // never checked; each is refused now (Security's follow-up to #144).
+  const wrongShapes: [string, unknown][] = [
+    ['a list', []],
+    ['a string', 'x'],
+    ['null', null],
+    ['a number', 7],
+  ];
+  const listed = JSON.stringify({ name: 'mine', plugins: [{ name: 'a', source: './plugins/a' }] });
+  const shapeFindings = (files: Record<string, string>): string[] =>
+    checkPackagePrograms(fixtureRepo({ 'plugins/a/README.md': '# a\n', ...files })).map(
+      (f) => `${f.file}: ${f.message}`
+    );
+
+  it.each(wrongShapes)('refuses a sidecar that is %s', (_, value) => {
+    expect(
+      shapeFindings({
+        '.claude-plugin/marketplace.json': listed,
+        '.claude-plugin/dorkos.json': JSON.stringify(value),
+      })
+    ).toEqual([
+      ".claude-plugin/dorkos.json: It is not an object this check can read, so what it declares can't be checked.",
+    ]);
+  });
+
+  it.each(wrongShapes)('refuses a sidecar whose plugins is %s', (_, value) => {
+    expect(
+      shapeFindings({
+        '.claude-plugin/marketplace.json': listed,
+        '.claude-plugin/dorkos.json': JSON.stringify({ schemaVersion: 1, plugins: value }),
+      })
+    ).toEqual([
+      ".claude-plugin/dorkos.json: plugins is not an object this check can read, so what it declares can't be checked.",
+    ]);
+  });
+
+  it.each(wrongShapes)('refuses a sidecar entry that is %s', (_, value) => {
+    expect(
+      shapeFindings({
+        '.claude-plugin/marketplace.json': listed,
+        '.claude-plugin/dorkos.json': JSON.stringify({
+          schemaVersion: 1,
+          plugins: { b: value, a: { type: 'plugin', requires: ['plugin:far'] } },
+        }),
+      })
+    ).toEqual([
+      ".claude-plugin/dorkos.json: plugins[b] is not an object this check can read, so what it declares can't be checked.",
+      '.claude-plugin/dorkos.json: plugins[a].requires names "plugin:far", which is not a package this marketplace lists; a dependency may only name one of its own packages, so it can\'t pull in one nobody here reviewed.',
+    ]);
+  });
+
+  it.each(wrongShapes)('refuses a .dork/manifest.json that is %s', (_, value) => {
+    expect(
+      shapeFindings({
+        '.claude-plugin/marketplace.json': listed,
+        'plugins/a/.dork/manifest.json': JSON.stringify(value),
+      })
+    ).toEqual([
+      "plugins/a/.dork/manifest.json: It is not an object this check can read, so what it declares can't be checked.",
+    ]);
+  });
+
+  it.each(wrongShapes)('refuses a marketplace.json that is %s', (_, value) => {
+    expect(shapeFindings({ '.claude-plugin/marketplace.json': JSON.stringify(value) })).toEqual([
+      ".claude-plugin/marketplace.json: It is not an object this check can read, so what it declares can't be checked.",
+    ]);
+  });
+
+  it.each([['an object', {}], ...wrongShapes.filter(([what]) => what !== 'a list')])(
+    'refuses marketplace.json plugins that is %s',
+    (_, value) => {
+      expect(
+        shapeFindings({
+          '.claude-plugin/marketplace.json': JSON.stringify({ name: 'mine', plugins: value }),
+        })
+      ).toEqual([
+        ".claude-plugin/marketplace.json: plugins is not a list this check can read, so what it declares can't be checked.",
+      ]);
+    }
+  );
+
+  it.each(wrongShapes)('refuses a marketplace entry that is %s', (_, value) => {
+    expect(
+      shapeFindings({
+        '.claude-plugin/marketplace.json': JSON.stringify({
+          name: 'mine',
+          plugins: [value, { name: 'a', source: './plugins/a', monitors: [] }],
+        }),
+      })
+    ).toEqual([
+      ".claude-plugin/marketplace.json: plugins[0] is not an object this check can read, so what it declares can't be checked.",
+      ".claude-plugin/marketplace.json: plugins[a].monitors is not a marketplace entry field this check has reviewed (monitors and settings can run a command with no permission check); declare it in the package's own files, or add it to ENTRY_KEYS in review.",
+    ]);
+  });
+
+  it('passes the same files when they are absent or empty', () => {
+    expect(shapeFindings({})).toEqual([]);
+    expect(
+      shapeFindings({
+        '.claude-plugin/marketplace.json': JSON.stringify({ name: 'mine' }),
+        '.claude-plugin/dorkos.json': JSON.stringify({ schemaVersion: 1 }),
+        'plugins/a/.dork/manifest.json': '{}',
+      })
+    ).toEqual([]);
+  });
+
   it('passes every plugin.json key it has reviewed (DOR-3688)', () => {
     const r = fixtureRepo({
       ...scripts,

@@ -151,6 +151,22 @@ export function serverBreach(
   return scriptBreach(pkgDir, script, repoRoot);
 }
 
+/**
+ * A finding for a file or field that is there but not the shape this check
+ * reads. Skipping it would let "declares something this check can't read"
+ * look like "declares nothing".
+ *
+ * @param file - Repo-relative file the finding is about.
+ * @param what - `It` for the whole file, or the field's name.
+ * @param shape - The shape this check reads there.
+ */
+function wrongShape(file: string, what: string, shape: 'an object' | 'a list'): Finding {
+  return {
+    file,
+    message: `${what} is not ${shape} this check can read, so what it declares can't be checked.`,
+  };
+}
+
 /** Findings for every hook in one parsed declaration. */
 function checkHooks(raw: unknown, file: string, pkgDir: string, repoRoot: string): Finding[] {
   const findings: Finding[] = [];
@@ -604,12 +620,8 @@ function unreviewedPrograms(repoRoot: string, pkgDir: string): Finding[] {
   };
   const manifestFile = `${pkgDir}/.claude-plugin/plugin.json`;
   const raw = readJson(path.join(repoRoot, manifestFile));
-  if (raw !== undefined && !isRecord(raw)) {
-    findings.push({
-      file: manifestFile,
-      message: "It is not an object this check can read, so what it declares can't be checked.",
-    });
-  }
+  if (raw !== undefined && !isRecord(raw))
+    findings.push(wrongShape(manifestFile, 'It', 'an object'));
   if (exists('.lsp.json')) refuse(`${pkgDir}/.lsp.json`, 'language servers');
   if (exists('monitors/monitors.json')) refuse(`${pkgDir}/monitors/monitors.json`, 'monitors');
   if (exists('bin')) refuse(`${pkgDir}/bin`, 'programs in bin/, which go on the PATH');
@@ -695,6 +707,8 @@ function dependencies(repoRoot: string): Finding[] {
     const manifest = readJson(path.join(repoRoot, manifestFile));
     if (isRecord(manifest)) {
       check(manifestFile, 'requires', manifest.requires, requiredName);
+    } else if (manifest !== undefined) {
+      findings.push(wrongShape(manifestFile, 'It', 'an object'));
     }
     const plugin = pluginJson(repoRoot, pkgDir);
     check(`${pkgDir}/.claude-plugin/plugin.json`, 'dependencies', plugin?.dependencies, (d) => {
@@ -706,10 +720,16 @@ function dependencies(repoRoot: string): Finding[] {
   // way (DOR-3689), one list per entry.
   const sidecarFile = '.claude-plugin/dorkos.json';
   const sidecar = readJson(path.join(repoRoot, sidecarFile));
-  if (isRecord(sidecar) && isRecord(sidecar.plugins)) {
+  if (sidecar !== undefined && !isRecord(sidecar)) {
+    findings.push(wrongShape(sidecarFile, 'It', 'an object'));
+  } else if (isRecord(sidecar) && sidecar.plugins !== undefined && !isRecord(sidecar.plugins)) {
+    findings.push(wrongShape(sidecarFile, 'plugins', 'an object'));
+  } else if (isRecord(sidecar) && isRecord(sidecar.plugins)) {
     for (const [name, entry] of Object.entries(sidecar.plugins)) {
       if (isRecord(entry)) {
         check(sidecarFile, `plugins[${name}].requires`, entry.requires, requiredName);
+      } else {
+        findings.push(wrongShape(sidecarFile, `plugins[${name}]`, 'an object'));
       }
     }
   }
@@ -791,10 +811,22 @@ export function checkPackagePrograms(repoRoot: string): Finding[] {
   // A marketplace entry can declare both inline, or by a path in its package.
   const marketplaceFile = '.claude-plugin/marketplace.json';
   const marketplace = readJson(path.join(repoRoot, marketplaceFile));
+  if (marketplace !== undefined && !isRecord(marketplace)) {
+    findings.push(wrongShape(marketplaceFile, 'It', 'an object'));
+  } else if (
+    isRecord(marketplace) &&
+    marketplace.plugins !== undefined &&
+    !Array.isArray(marketplace.plugins)
+  ) {
+    findings.push(wrongShape(marketplaceFile, 'plugins', 'a list'));
+  }
   const entries =
     isRecord(marketplace) && Array.isArray(marketplace.plugins) ? marketplace.plugins : [];
-  for (const entry of entries) {
-    if (!isRecord(entry)) continue;
+  for (const [i, entry] of entries.entries()) {
+    if (!isRecord(entry)) {
+      findings.push(wrongShape(marketplaceFile, `plugins[${i}]`, 'an object'));
+      continue;
+    }
     const source = typeof entry.source === 'string' ? entry.source : '';
     const pkgDir = sourceDir(source);
     findings.push(...nodeModulesPaths(entry, marketplaceFile, `plugins[${String(entry.name)}].`));

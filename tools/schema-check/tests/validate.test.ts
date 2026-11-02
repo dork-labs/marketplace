@@ -312,6 +312,26 @@ describe('manifests', () => {
     expect(findings[0].file).toBe('plugins/demo/.dork/manifest.json');
   });
 
+  it('reports a marketplace entry that is not an object, rather than crashing on it', () => {
+    for (const entry of [null, 'x', 7]) {
+      const root = manifestRepo({
+        '.claude-plugin/marketplace.json': {
+          name: 'demo-marketplace',
+          owner: { name: 'Dork Labs' },
+          plugins: [
+            entry,
+            { name: 'demo', source: './plugins/demo', description: 'A demo plugin' },
+          ],
+        },
+      });
+      expect(() => validateManifests(root), String(entry)).not.toThrow();
+      expect(
+        validateManifests(root).some((f) => f.file === '.claude-plugin/marketplace.json'),
+        String(entry)
+      ).toBe(true);
+    }
+  });
+
   it('rejects a marketplace entry pointing at a directory that is not there', () => {
     const findings = validateManifests(
       manifestRepo({
