@@ -93,6 +93,7 @@ import {
   writeMessage,
   type HandoffExecDeps,
 } from './handoff-exec.ts';
+import { planWorkerWorktree, removeWorkerWorktree } from './finished-cleanup.ts';
 import { render as renderMessage } from './messages.ts';
 import type { DrainReviewerHandle, DrainState, DrainWorkerHandle } from './state.ts';
 import { dueForSnapshot, readUsageSampleState, writeUsageSampleState } from './usage-sample.ts';
@@ -1360,6 +1361,54 @@ export async function runPass(deps: PassDeps): Promise<PassReport> {
     }
   };
 
+  /** Remove a finished run's worker worktree, or keep it and say why, once (DOR-2469). */
+  const cleanUp = async (run: DrainRun): Promise<void> => {
+    const plan = await planWorkerWorktree(deps, run);
+    if (plan.action === 'wait') return;
+    if (deps.dryRun) {
+      note(
+        run,
+        run.identifier,
+        plan.action === 'remove'
+          ? `would remove its worktree ${plan.path}`
+          : plan.action === 'keep'
+            ? `would keep its worktree ${plan.path}: ${plan.reason}`
+            : `would record its worktree ${plan.path} as already gone`
+      );
+      return;
+    }
+    let status: 'removed' | 'kept' = 'removed';
+    let reason: string | null = null;
+    if (plan.action === 'remove') {
+      const out = await removeWorkerWorktree(deps, plan);
+      if (!out.removed) [status, reason] = ['kept', out.reason];
+    } else if (plan.action === 'keep') {
+      [status, reason] = ['kept', plan.reason];
+    } else {
+      reason = 'already gone';
+    }
+    await supervisorWrite(run.issueId, (r) =>
+      r.drain.cleanup?.status === 'pending'
+        ? {
+            ...r,
+            drain: {
+              ...r.drain,
+              cleanup: { ...r.drain.cleanup, status, reason, at: now.toISOString() },
+            },
+          }
+        : undefined
+    );
+    note(
+      current(run.issueId),
+      run.identifier,
+      plan.action === 'gone'
+        ? `its worktree ${plan.path} was already gone`
+        : status === 'removed'
+          ? `removed its worktree ${plan.path}`
+          : `kept its worktree ${plan.path}: ${reason}`
+    );
+  };
+
   /** One run's whole pass: settle, gather, decide, record, act. */
   const passRun = async (initial: DrainRun): Promise<void> => {
     await settleReviewerIntent(initial);
@@ -1498,6 +1547,18 @@ export async function runPass(deps: PassDeps): Promise<PassReport> {
       await passRun(run);
     } catch (error) {
       deps.warn(`${run.identifier}: this pass skipped it: ${(error as Error).message}`);
+    }
+  }
+
+  // A finished run's worker worktree (DOR-2469), once nothing may run in it.
+  for (const run of Object.values(deps.store.read())) {
+    if (!writable(run) || run.status !== 'complete' || run.drain.cleanup?.status !== 'pending') {
+      continue;
+    }
+    try {
+      await cleanUp(run);
+    } catch (error) {
+      deps.warn(`${run.identifier}: its worktree was not cleaned up: ${(error as Error).message}`);
     }
   }
 

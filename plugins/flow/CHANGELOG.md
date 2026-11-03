@@ -4,6 +4,14 @@ Installs of this plugin are pinned to a commit SHA, so a fix here does not reach
 you until you **reinstall it** (Marketplace → flow → reinstall, or re-run your
 `--plugin-dir` checkout's `git pull`). Each entry below says whether that matters.
 
+## 0.79.0
+
+**`flow drain` now removes a finished item's worktree, and flow signs the account as `claude-work` rather than `.claude-work` (DOR-2469). Before, every worktree the drain made stayed on disk after its PR merged. Reinstall to get it.**
+
+- Once an item's PR merges and DONE runs, `flow drain` removes the worker's worktree (the folder under your DorkOS home's `workspaces`), usually in the pass that stops the worker. The branch stays. It removes only the folder the drain made for that item, still on the item's branch, with no uncommitted changes (untracked files count), and only when no commit would be lost: its head is the one the worker reported pushed, or every commit in it is on a remote. Otherwise it keeps the folder, and the pass says `kept its worktree <path>: <why>`, once. It never forces the removal. Files git ignores go with the folder, including the drain's own session logs for that worker.
+- While the worker may still be running, the drain waits and tries again on its next pass. If the drain ends first (nothing left to do), the next `flow drain` or scheduled tick removes it. A DorkOS worker left idle after the drain stopped it counts as stopped, since DorkOS never ends a chat; on cmux or the CLI, idle means the stop failed, so it waits. A reviewer flow started in the same folder must have stopped or be gone. `--dry-run` says what it would remove. Items that finished before this version keep their folders; remove them yourself.
+- The account in flow's hidden signature line is now the name of the Claude Code config folder without its leading dot, so `~/.claude-work` signs `claude-work`, and an explicit `~/.claude` signs `claude`, the same as none set. Comments posted before this version keep the old spelling.
+
 ## 0.78.0
 
 **`flow drain` now refreshes an account's out-of-date usage reading itself, and `flow release` cleans up the review folder a parked reviewer leaves behind (DOR-3704). Before, a stale account sat unused until you probed it by hand, and the folder stayed until you removed it. Reinstall to get it.**

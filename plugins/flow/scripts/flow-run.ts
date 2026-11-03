@@ -137,8 +137,8 @@ export interface FlowRunProvenance {
   /**
    * A short, NON-PII handle for the harness account the run authenticated as —
    * enough to tell "same machine, different account" from "same session". For
-   * `claude-code` it is derived from the `CLAUDE_CONFIG_DIR` basename (default
-   * `claude`). **Never an email address, and never a person's name**: this block is
+   * `claude-code` it is the `CLAUDE_CONFIG_DIR` basename less its leading dot
+   * (default `claude`). **Never an email address, and never a person's name**: this block is
    * serialized onto tracker comments and PR bodies, which can be world-readable and
    * permanent.
    */

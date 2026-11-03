@@ -148,7 +148,7 @@ describe('flow create', () => {
     const t = tracker();
     await flow(CAPTURE, t);
     expect(t.fake.backlog.items[0].description).toMatch(
-      /^People want the monthly report as a CSV file\.\n\n— 🤖 \/flow\n<!-- agent:provenance \{"v":1,"harness":"claude-code","sessionId":"session-abc","account":"\.claude-work",.*\} -->$/
+      /^People want the monthly report as a CSV file\.\n\n— 🤖 \/flow\n<!-- agent:provenance \{"v":1,"harness":"claude-code","sessionId":"session-abc","account":"claude-work",.*\} -->$/
     );
   });
 

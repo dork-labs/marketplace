@@ -973,6 +973,14 @@ function drainStepCore(
   if (recorded.phase === 'closing') {
     if (!facts.runComplete) return done(idle);
     let step = stopReviewer(idle);
+    // Mark the worker's worktree for the drain's cleanup (DOR-2469), keeping
+    // the stopped handle: the cleanup asks its host whether it still runs.
+    if (step.drain.cleanup == null) {
+      step = {
+        ...step,
+        drain: { ...step.drain, cleanup: { status: 'pending', worker: step.drain.worker } },
+      };
+    }
     if (step.drain.worker) {
       step = {
         drain: { ...step.drain, worker: null },

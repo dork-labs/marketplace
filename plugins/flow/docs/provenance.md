@@ -101,8 +101,8 @@ one is usually a real person.
 
 Derive it, never guess:
 
-- **claude-code** — the basename of `CLAUDE_CONFIG_DIR`, defaulting to `claude`
-  when the variable is unset.
+- **claude-code** — the basename of `CLAUDE_CONFIG_DIR`, less its leading dot
+  (`claude-work`); `claude` when unset.
 - **codex**, **opencode** — the same idea applied to the profile or home directory
   that harness resolves for itself.
 - **Anything else** — if you cannot derive it, **omit it**.

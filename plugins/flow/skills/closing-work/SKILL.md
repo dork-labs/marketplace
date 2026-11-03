@@ -73,10 +73,10 @@ with open items never closes; if the adapter refuses, do not route around it.
 
 For a dedicated worktree (in `04-implementation.md`, or `git rev-parse --git-dir
 --git-common-dir` differ): remove it without asking only when its branch is merged, it
-has no uncommitted or untracked files, and no commit is missing from the remote.
-Otherwise leave it and say which condition failed. Leave the worktree before removing
+has no uncommitted or untracked files, and nothing is unpushed.
+Otherwise leave it and say which condition failed. Leave it before removing
 it; prefer the harness's cleanup command. Unmerged: never promise to clean it "once it
-merges"; say once that a start-of-session sweep removes merged worktrees.
+merges"; say once that a start-of-session sweep removes merged worktrees. A drain worker skips this.
 
 ### 7. Report
 

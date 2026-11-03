@@ -180,6 +180,24 @@ export interface DrainState {
    * clears it. `null` or absent: none.
    */
   heldSlot?: string | null;
+  /**
+   * The finished run's worker worktree (DOR-2469): set when the pass that
+   * stops the worker at `closing` marks it, then removed or kept by a later
+   * part of a pass. Absent on runs that finished before it shipped.
+   */
+  cleanup?: DrainCleanup | null;
+}
+
+/** What the drain did with a finished run's worker worktree (DOR-2469). */
+export interface DrainCleanup {
+  /** `pending` until it is removed, or kept for {@link DrainCleanup.reason}. */
+  status: 'pending' | 'removed' | 'kept';
+  /** The worker the drain stopped, so its host can be asked whether it still runs; `null`: none was left. */
+  worker: DrainWorkerHandle | null;
+  /** Why it was kept. */
+  reason?: string | null;
+  /** When it was removed or kept (ISO). */
+  at?: string | null;
 }
 
 /** A run's account limit episode (§5.1), stored at `FlowRun.limit`. */
@@ -346,6 +364,15 @@ const DrainStateV1Schema = z.looseObject({
   restarts: count.optional(),
   waitingSince: nullableString.optional(),
   heldSlot: nullableString.optional(),
+  cleanup: z
+    .looseObject({
+      status: vocabulary<DrainCleanup['status']>(),
+      worker: DrainWorkerHandleSchema.nullable(),
+      reason: nullableString.optional(),
+      at: nullableString.optional(),
+    })
+    .nullable()
+    .optional(),
 });
 
 /**
