@@ -41,6 +41,7 @@ import {
   UsageError,
   type ExitCode,
   type TrackerErrorKind,
+  PersonGateError,
 } from './errors.ts';
 import { assertProjectInRunCheckout } from './project-boundary.ts';
 import type { Runtime } from './runtime-detect.ts';
@@ -76,7 +77,7 @@ export const VERBS: readonly VerbDefinition[] = [
     name: 'inbox',
     summary: "Read the tracker's new comments, with text only from members who call for action.",
     description:
-      "Read the configured team's comments since the last pass through the adapter's code, run them through the comment rules, and list each one with the action it calls for (respond, resume or ignore). A comment's text is included only when its author is a member the tracker's own records vouch for and the comment calls for action; every other comment is listed by item, author and time, with no text. Keeps a watermark in .dork/flow/inbox-watermark.json; --dry-run leaves it where it is. Exits 3 when the adapter has no code that reads the inbox.",
+      "A plain pass also hands over each recorded answer once, under answers. Read the configured team's comments since the last pass through the adapter's code, run them through the comment rules, and list each one with the action it calls for (respond, resume or ignore). A comment's text is included only when its author is a member the tracker's own records vouch for and the comment calls for action; every other comment is listed by item, author and time, with no text. Keeps a watermark in .dork/flow/inbox-watermark.json; --dry-run leaves it where it is. Exits 3 when the adapter has no code that reads the inbox.",
     common: ['project', 'dry-run'],
     flags: [
       {
@@ -84,7 +85,7 @@ export const VERBS: readonly VerbDefinition[] = [
         kind: 'string',
         value: 'ISO time',
         description:
-          'Read comments after this time instead of the saved watermark; the watermark stays where it is.',
+          'Read comments after this time instead of the saved watermark; the watermark stays where it is, and no recorded answer is handed over.',
       },
       {
         name: 'skip-to',
@@ -732,7 +733,7 @@ export const VERBS: readonly VerbDefinition[] = [
         name: 'note-file',
         kind: 'string',
         value: 'file',
-        description: 'Read what should change from this file.',
+        description: 'Read what should change from this file (- for standard input).',
       },
     ],
     load: () => import('./cli/review.ts'),
@@ -789,7 +790,7 @@ export const VERBS: readonly VerbDefinition[] = [
     summary: "Answer an agent's parked question.",
     description: [
       'Post an answer on an item that carries agent/needs-input, and record it on the run so the work resumes. Exits 5 when the question was already answered.',
-      '  --text <text> | --text-file <file>   A person\'s answer (at most 2,000 characters), posted with "Answered in DorkOS." as its last line. Refused from inside an agent and from the session that asked: a person answers from DorkOS or a plain terminal.',
+      '  --text <text> | --text-file <file>   A person\'s answer (at most 2,000 characters), posted with "Answered in DorkOS." as its last line. --text-file - reads it from standard input. Refused from inside an agent and from the session that asked: a person answers from DorkOS or a plain terminal.',
       "  --pick --by agent-default            The question's deadline passed: the agent's pick stands. Refused for a floor question.",
       "  --pick --by reviewer-agent --token <t>  The reviewer agent checked a floor question's pick and agrees.",
     ].join('\n'),
@@ -1216,7 +1217,7 @@ export interface ClassifiedError {
    * did not answer (`unreachable`). The JSON envelope carries it, so a caller
    * (the Flow extension) can tell a blip from something only a person can fix.
    */
-  kind?: TrackerErrorKind;
+  kind?: TrackerErrorKind | 'person-gate';
 }
 
 /**
@@ -1245,6 +1246,9 @@ export function classifyError(error: unknown, flowRoot: string): ClassifiedError
     return { code: EXIT.dependency, message: `run "npm install --omit=dev" in ${flowRoot}` };
   }
   if (error instanceof TrackerError) {
+    return { code: error.exitCode, message: error.message, kind: error.kind };
+  }
+  if (error instanceof PersonGateError) {
     return { code: error.exitCode, message: error.message, kind: error.kind };
   }
   if (error instanceof FlowError) return { code: error.exitCode, message: error.message };

@@ -108,6 +108,15 @@ export class PreconditionError extends FlowError {
   }
 }
 
+/**
+ * The person gate refused an agent (exit 5). A kind of its own, so DorkOS can
+ * tell a refused click from a question someone else already answered.
+ */
+export class PersonGateError extends PreconditionError {
+  /** How `--json` names this refusal. */
+  readonly kind = 'person-gate';
+}
+
 /** flow is paused and the verb was not run with `--manual` (exit 7). */
 export class PausedError extends FlowError {
   /** @param message - Since when flow is paused and how to resume. */

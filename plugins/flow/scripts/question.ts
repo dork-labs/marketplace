@@ -208,6 +208,53 @@ export function personOnly(question: RunQuestion): boolean {
 }
 
 /**
+ * Whether a recorded answer may resume its question. For a question only a
+ * person answers, that needs `by: 'person'`. The CLI records nothing else for
+ * one, so anything else was written by hand and is dropped. This reads a field
+ * in a file any agent can write, so an answer written by hand as `by: 'person'`
+ * passes: it stops a mislabelled answer, and cannot prove a person wrote it.
+ *
+ * @param question - The question, with its recorded answer.
+ * @returns `false` when the answer must be dropped.
+ */
+export function recordedAnswerStands(question: RunQuestion): boolean {
+  return (
+    question.answer !== undefined && (!personOnly(question) || question.answer.by === 'person')
+  );
+}
+
+/**
+ * What a resumed session is told about a recorded answer.
+ *
+ * @param question - The answered question.
+ * @param identifier - The item.
+ * @returns The pointer, with the answer's words.
+ */
+export function recordedAnswerPointer(question: RunQuestion, identifier: string): string {
+  const answer = question.answer;
+  if (answer === undefined) return `the latest comment on ${identifier}`;
+  const who =
+    answer.by === 'person'
+      ? 'a person'
+      : answer.by === 'reviewer-agent'
+        ? 'the reviewer agent'
+        : 'your own pick, at the deadline';
+  return `the answer recorded on ${identifier} at ${answer.at} by ${who}: "${answer.text}"`;
+}
+
+/**
+ * The warning when {@link recordedAnswerStands} drops an answer: it tells an
+ * agent reading it to ask the person, never how to get past the check.
+ *
+ * @param identifier - The item.
+ * @param by - Who the record says answered.
+ * @returns The warning.
+ */
+export function droppedAnswerWarning(identifier: string, by: unknown): string {
+  return `${identifier} stays parked: its question is about secrets or spending, so only a person answers it: ask the person to answer it in DorkOS. The ${typeof by === 'string' && by !== '' ? by : 'other'} answer on the run was dropped.`;
+}
+
+/**
  * Whether a question belongs to the park that began at `since`: it was asked
  * at or after the park began. A question left on the run from an earlier park
  * (a later park for review rounds or failing checks) belongs to no park.

@@ -279,6 +279,8 @@ const runner: ProcessRunner = async (cmd, args, opts) => {
     return { code: 0, stdout: 'git@github.com:acme/app.git\n', stderr: '' };
   }
   if (cmd === 'ps') return { code: 0, stdout: '  4242\n', stderr: '' };
+  // The person gate's ancestry read: tests run under anything, so never the real chain.
+  if (cmd === '/bin/ps') return { code: 1, stdout: '', stderr: '' };
   return realProcessRunner(cmd, args, opts);
 };
 

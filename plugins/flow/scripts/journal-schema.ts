@@ -98,6 +98,14 @@ export const JournalLineSchema = z.discriminatedUnion('kind', [
       .regex(/^[0-9a-f]{7}$/, 'sha7 is the first 7 hex characters of a commit')
       .optional(),
   }),
+  // Where a person's answer or review came from (DOR-3718): the terminal and the
+  // parent's program name, never its arguments or the person's words.
+  line('person.act', {
+    verb: z.enum(['answer', 'review']),
+    tty: Name,
+    parent: Name,
+    ppid: z.number().int().positive().optional(),
+  }),
   line('ci', {
     pr: z.number().int().positive(),
     event: z.enum(['red', 'ejected', 'merged']),

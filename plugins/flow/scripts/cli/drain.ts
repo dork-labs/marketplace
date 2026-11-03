@@ -30,7 +30,16 @@ import { chooseAccount, rankAccounts } from '../drain/account-rank.ts';
 import { writeLastPass } from '../drain/last-pass.ts';
 import { answerPointer, findAnswer, untrustedReplyWarning } from '../drain/answer.ts';
 import type { RunQuestion } from '../flow-run.ts';
-import { belongsToPark, checkBrief, parkedAnswer, personOnly, pickComment } from '../question.ts';
+import {
+  belongsToPark,
+  checkBrief,
+  droppedAnswerWarning,
+  parkedAnswer,
+  personOnly,
+  pickComment,
+  recordedAnswerPointer,
+  recordedAnswerStands,
+} from '../question.ts';
 import {
   claimAnswer,
   claimCheck,
@@ -157,26 +166,6 @@ async function addDetachedWorktree(
     if (result.code === 0) return;
   }
   throw new PreconditionError(`could not add a worktree at ${target} for the pick check`);
-}
-
-/**
- * A pointer to an answer `flow answer` recorded on the run, for the worker's
- * `continue` message.
- *
- * @param question - The answered question.
- * @param identifier - The item.
- * @returns The pointer, with the answer's words.
- */
-export function recordedAnswerPointer(question: RunQuestion, identifier: string): string {
-  const answer = question.answer;
-  if (answer === undefined) return `the latest comment on ${identifier}`;
-  const who =
-    answer.by === 'person'
-      ? 'a person'
-      : answer.by === 'reviewer-agent'
-        ? 'the reviewer agent'
-        : 'your own pick, at the deadline';
-  return `the answer recorded on ${identifier} at ${answer.at} by ${who}: "${answer.text}"`;
 }
 
 /**
@@ -614,17 +603,16 @@ export async function drain(ctx: VerbContext, options: DrainOptions = {}): Promi
       let answer: string | null = reply === null ? null : answerPointer(reply, identifier);
       const fromQuestion = answer === null ? parkedAnswer(question, ctx.now(), parked.since) : null;
       if (fromQuestion === 'recorded' && question !== undefined) {
-        // Only a person answers a secrets-or-spend question (DOR-3712). The CLI
-        // records no other answer for one, so another was written by hand (an
-        // agent can write flow-state.json): drop it, keep the run parked, and
-        // say so once.
+        // A secrets-or-spend question resumes only on an answer recorded as a
+        // person's (DOR-3712, `recordedAnswerStands`). Anything else was written
+        // by hand, so drop it, keep the run parked, and say so once. An answer
+        // written by hand as a person's still passes: `by` is a claim in a file
+        // any agent can write, and this reads no more than that.
         const recorded = question.answer;
-        if (recorded !== undefined && personOnly(question) && recorded.by !== 'person') {
+        if (recorded !== undefined && !recordedAnswerStands(question)) {
           if (ctx.dryRun) return facts;
           await releaseAnswer(store, item.id, question.askedAt, recorded);
-          ctx.warn(
-            `${identifier} stays parked: its question is about secrets or spending, so only a person answers it: ask the person to answer it in DorkOS. The ${typeof recorded.by === 'string' && recorded.by !== '' ? recorded.by : 'other'} answer on the run was dropped.`
-          );
+          ctx.warn(droppedAnswerWarning(identifier, recorded.by));
           return facts;
         }
         // `flow answer` recorded it (from DorkOS, or the pick at a deadline).

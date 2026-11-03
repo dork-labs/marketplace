@@ -10,6 +10,9 @@
  * 2. {@link PollingTransport} drops malformed entries, applies the watermark
  *    and warns about each comment from outside the team.
  * 3. {@link shouldRespondToComment} decides respond, resume or ignore.
+ * 4. {@link settleRecordedAnswers} drops a recorded answer that may not resume
+ *    its question and hands over the rest, so the spend rule is not left to a
+ *    model reading `flow-state.json` (DOR-3718).
  *
  * Then the output carries a comment's text only when the comment calls for
  * action, which the trust check already limits to members. Every other
@@ -29,11 +32,15 @@ import path from 'node:path';
 import { shouldRespondToComment, type CommentDecision } from '../comment-response.ts';
 import { withHeldLock } from '../atomic-json.ts';
 import { PreconditionError, UsageError } from '../errors.ts';
+import { droppedAnswerWarning, recordedAnswerPointer, recordedAnswerStands } from '../question.ts';
+import { AGENT_NEEDS_INPUT } from '../work-state.ts';
+import { markAnswerHandedOver, releaseAnswer } from './question-write.ts';
+import { isOpenItem } from './work-write.ts';
 import type { FlowRun } from '../flow-run.ts';
-import { openFlowStateFile } from '../flow-state-file.ts';
+import { openFlowStateFile, type FlowStateFile } from '../flow-state-file.ts';
 import { classifyOwnership } from '../identity.ts';
 import { requireCapabilities } from '../tracker/load.ts';
-import type { InboxRead } from '../tracker/types.ts';
+import type { CodeAdapter, InboxRead } from '../tracker/types.ts';
 import type { CommentsConfig } from '../comment-response.ts';
 import type { Identity, OwnershipScope } from '../identity.ts';
 import { PollingTransport, type InboxEntry } from '../transport.ts';
@@ -69,6 +76,20 @@ export interface InboxLine {
   sessionId?: string;
   /** Set when `flow drain` owns the run, so the inbox pass leaves it alone. */
   drain?: true;
+}
+
+/** A recorded answer the pass may resume its item on. */
+export interface InboxAnswer {
+  /** The item's human key. */
+  itemId: string;
+  /** Who the record says answered. */
+  by: string;
+  /** When it was recorded. */
+  at: string;
+  /** What to tell the resumed session, with the answer's words. */
+  answer: string;
+  /** The parked run's session, for the resume. */
+  sessionId?: string;
 }
 
 /** An ISO-8601 date-time with an explicit zone: the only watermark flow keeps or sends. */
@@ -147,8 +168,83 @@ function lineFor(read: InboxRead, judge: Judge): InboxLine {
   return line;
 }
 
+/**
+ * The recorded answers on runs the drain does not own. One that may not resume
+ * its question is dropped here, and said so once. One that may is handed over
+ * at most once, marked on the run as it goes, while the run is live and its
+ * item open and waiting. The answer stays on the run, so `flow answer` still
+ * refuses a second one; if the resume then fails, a member's reply or a new
+ * `flow ask` moves the item. A run the drain owns is the drain's (`drain.ts`), and it applies
+ * the same rule. A read that fails costs that run this pass, never the team's
+ * comments.
+ *
+ * @param ctx - The verb's context.
+ * @param adapter - The tracker adapter.
+ * @param store - The run store.
+ * @param runs - The runs on record.
+ * @returns The answers the pass may resume on.
+ */
+async function settleRecordedAnswers(
+  ctx: VerbContext,
+  adapter: Pick<CodeAdapter, 'getItem'>,
+  store: FlowStateFile,
+  runs: Record<string, FlowRun>
+): Promise<InboxAnswer[]> {
+  const answers: InboxAnswer[] = [];
+  for (const run of Object.values(runs)) {
+    const question = run.question;
+    const answer = question?.answer;
+    if (question === undefined || answer === undefined || run.drain !== undefined) continue;
+    if (!recordedAnswerStands(question)) {
+      if (ctx.dryRun) continue;
+      await releaseAnswer(store, run.issueId, question.askedAt, answer);
+      ctx.warn(droppedAnswerWarning(run.identifier, answer.by));
+      continue;
+    }
+    if (question.answerHandedOverAt !== undefined) continue;
+    if (run.status === 'complete' || run.status === 'failed') continue;
+    // Written by hand if so: `flow answer` always records a real time.
+    if (!(Date.parse(answer.at) >= Date.parse(question.askedAt))) continue;
+    let waiting: boolean;
+    try {
+      const item = await adapter.getItem(run.identifier);
+      waiting = isOpenItem(item) && item.labels.includes(AGENT_NEEDS_INPUT);
+    } catch {
+      ctx.warn(
+        `flow inbox: could not read ${run.identifier}, so its recorded answer waits for the next pass.`
+      );
+      continue;
+    }
+    if (!waiting) continue;
+    if (!ctx.dryRun) {
+      // A busy lock costs this run this pass: throwing here would lose the
+      // answers already marked, since their list is never returned.
+      try {
+        const marked = await markAnswerHandedOver(
+          store,
+          run.issueId,
+          question.askedAt,
+          ctx.now().toISOString()
+        );
+        if (!marked) continue;
+      } catch {
+        ctx.warn(`flow inbox: ${run.identifier}'s recorded answer waits for the next pass.`);
+        continue;
+      }
+    }
+    answers.push({
+      itemId: run.identifier,
+      by: answer.by,
+      at: answer.at,
+      answer: recordedAnswerPointer(question, run.identifier),
+      ...(run.sessionId === '' ? {} : { sessionId: run.sessionId }),
+    });
+  }
+  return answers;
+}
+
 /** The human summary: one line per comment, text only where the entry carries it. */
-function renderText(entries: readonly InboxLine[]): string {
+function renderText(entries: readonly InboxLine[], answers: readonly InboxAnswer[]): string {
   const acting = entries.filter((entry) => entry.action !== 'ignore').length;
   return [
     entries.length === 0
@@ -159,6 +255,7 @@ function renderText(entries: readonly InboxLine[]): string {
       const head = `${entry.itemId} ${entry.occurredAt} ${who}: ${entry.action} (rule ${entry.rule}${entry.sharedAccount ? ', the shared account flow posts as' : entry.untrusted ? ', not a member' : ''})`;
       return entry.body === undefined ? head : `${head}\n  ${entry.body.replaceAll('\n', '\n  ')}`;
     }),
+    ...answers.map((entry) => `${entry.itemId} ${entry.at}: resume on ${entry.answer}`),
   ].join('\n');
 }
 
@@ -215,10 +312,11 @@ export async function run(ctx: VerbContext): Promise<VerbResult> {
       `flow inbox: skipped every comment up to ${skipTo}; none of them will be handed over.`
     );
     return {
-      json: { ok: true, dryRun: ctx.dryRun, skippedTo: skipTo, entries: [] },
+      json: { ok: true, dryRun: ctx.dryRun, skippedTo: skipTo, entries: [], answers: [] },
       text: `${ctx.dryRun ? 'Would skip' : 'Skipped'} every comment up to ${skipTo}.`,
     };
   }
+  requireCapabilities(adapter, ['getItem']);
   const locked = await withHeldLock(`${watermarkFile}.lock`, async () => {
     const since = typeof sinceFlag === 'string' ? sinceFlag : readWatermark(watermarkFile);
     const reads = await adapter.getInbox!(since === undefined ? {} : { since });
@@ -245,6 +343,9 @@ export async function run(ctx: VerbContext): Promise<VerbResult> {
       runs: readRuns(ctx.projectDir),
     };
     const entries = polled.events.map((event) => lineFor(event.raw as InboxRead, judge));
+    // A --since pass looks back: it hands over no answers, as it moves no watermark.
+    const answers =
+      sinceFlag === undefined ? await settleRecordedAnswers(ctx, adapter, store, judge.runs) : [];
     // A --since pass looks back without moving the saved place.
     if (
       !ctx.dryRun &&
@@ -254,16 +355,16 @@ export async function run(ctx: VerbContext): Promise<VerbResult> {
     ) {
       writeWatermark(watermarkFile, polled.watermark);
     }
-    return { since, watermark: polled.watermark, entries };
+    return { since, watermark: polled.watermark, entries, answers };
   });
   if (!locked.held) {
     throw new PreconditionError(
       'another flow inbox pass is reading the inbox now; try again on the next tick'
     );
   }
-  const { since, watermark, entries } = locked.value;
+  const { since, watermark, entries, answers } = locked.value;
   return {
-    json: { ok: true, dryRun: ctx.dryRun, since: since ?? null, watermark, entries },
-    text: renderText(entries),
+    json: { ok: true, dryRun: ctx.dryRun, since: since ?? null, watermark, entries, answers },
+    text: renderText(entries, answers),
   };
 }

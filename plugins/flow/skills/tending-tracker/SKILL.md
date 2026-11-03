@@ -29,7 +29,7 @@ tested truth is the oracles `classifyOwnership` (`identity.ts`), `shouldRespondT
    **two-account**. Detected, never configured.
 1. **Poll** `flow inbox --json`.
 2. **Decide:** each entry's `action` is the decision (rules below). Act only on
-   `respond` or `resume`; skip `drain: true`.
+   `respond` or `resume`; skip `drain: true`. Resume each `answers` entry.
 3. **Act** on what you own (claim, advance through the stage skills, resume).
 4. **When stuck, ask** (soft-escalation, below).
 5. **Remember the answer** (below).
@@ -120,11 +120,10 @@ path**: (a) delivered into `<id>`, (b) fresh session, (c) handled here, origin o
 - `needsInput(item, question)`: `flow ask <id> --question … --choice … --pick <n>
 --why … [--floor <triggers>]` posts it with your pick, adds `agent/needs-input` and
   records it on the run; then `assignToHuman`, stop. Parked is durable; the stall sweep
-  never reclaims it; a member's reply (rule 3) or a recorded `question.answer` resumes
-  it (`secrets-or-spend`: only `by: person`).
+  never reclaims it; a member's reply (rule 3) or an `answers` entry resumes it.
 - **Who answers** is `flow ask`'s `answeredBy`: the person; the agent's pick once
   `decideBy` passes (the inbox pass runs `flow answer <id> --pick --by agent-default`,
-  then resumes); or, for a floor question once `checkAfter` passes, the reviewer agent
+  then `answers` resumes); or, for a floor question once `checkAfter` passes, the reviewer agent
   (`flow ask <id> --check-pick` from a session other than the asker's, handed to an
   independent reviewer with its brief). A
   question about secrets or spending always waits for a person.

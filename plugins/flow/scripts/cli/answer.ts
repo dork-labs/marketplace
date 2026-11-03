@@ -2,8 +2,8 @@
  * `flow answer <identifier>` (spec `flow-multiproject` §7.5): answer an agent's
  * parked question.
  *
- * - `--text <text>` or `--text-file <file>`: a person's answer, from DorkOS. It
- *   is posted on the item without the agent's marker, as the tracker account
+ * - `--text <text>` or `--text-file <file>`: a person's answer, from DorkOS,
+ *   which gives it on standard input (`--text-file -`). It is posted on the item without the agent's marker, as the tracker account
  *   flow uses, with "Answered in DorkOS." as its last line, and recorded on the
  *   run. The recorded answer is what resumes it: the comment is flow's record,
  *   which the comment rules (`shouldRespondToComment`) stay quiet on, as flow's
@@ -23,9 +23,6 @@
  * @module @dorkos/flow/cli/answer
  */
 
-import { readFileSync } from 'node:fs';
-import path from 'node:path';
-
 import { ANSWERED_IN_DORKOS } from '../comment-response.ts';
 import { PreconditionError, UsageError } from '../errors.ts';
 import type { FlowRun } from '../flow-run.ts';
@@ -37,7 +34,14 @@ import {
   type QuestionSettler,
 } from '../question.ts';
 import { requireOtherSession } from './caller.ts';
-import { refuseSessions, requirePersonShell, sessionsThatWorked } from './person-gate.ts';
+import {
+  readWords,
+  recordPersonAct,
+  refuseSessions,
+  requirePersonShell,
+  sessionsThatWorked,
+  type PersonCaller,
+} from './person-gate.ts';
 import { claimAnswer, releaseAnswer } from './question-write.ts';
 import { AGENT_NEEDS_INPUT } from '../work-state.ts';
 import type { VerbContext, VerbResult } from './context.ts';
@@ -54,17 +58,17 @@ function flag(ctx: VerbContext, name: string): string | undefined {
   return typeof value === 'string' ? value : undefined;
 }
 
-/** The person's answer from `--text` or `--text-file`. */
-function answerText(ctx: VerbContext): string {
+/**
+ * The person's answer from `--text` or `--text-file` (`-` is standard input).
+ * Called after the gate, so flow never waits on an agent's stream.
+ */
+async function answerText(ctx: VerbContext): Promise<string> {
   const text = flag(ctx, 'text');
   const file = flag(ctx, 'text-file');
-  if ((text === undefined) === (file === undefined)) {
-    throw new UsageError('give the answer with exactly one of --text or --text-file');
-  }
   let value = text;
   if (file !== undefined) {
     try {
-      value = readFileSync(path.resolve(ctx.cwd, file), 'utf8');
+      value = await readWords(ctx, file);
     } catch {
       throw new UsageError(`cannot read --text-file ${file}`);
     }
@@ -113,14 +117,17 @@ export async function run(ctx: VerbContext): Promise<VerbResult> {
   if (flag(ctx, 'token') !== undefined && by !== 'reviewer-agent') {
     throw new UsageError('--token goes with --pick --by reviewer-agent');
   }
-  const text = pick ? null : answerText(ctx);
-  if (text !== null) {
-    requirePersonShell(
-      ctx,
-      (agent) =>
-        `flow answer --text takes a person's answer, and this runs inside an agent (${agent}), so nothing was posted or recorded. ${STOP_AND_ASK}`
-    );
+  if (!pick && (flag(ctx, 'text') === undefined) === (flag(ctx, 'text-file') === undefined)) {
+    throw new UsageError('give the answer with exactly one of --text or --text-file');
   }
+  const caller: PersonCaller | null = pick
+    ? null
+    : await requirePersonShell(
+        ctx,
+        (agent) =>
+          `flow answer --text takes a person's answer, and this runs inside an agent (${agent}), so nothing was posted or recorded. ${STOP_AND_ASK}`
+      );
+  const text = pick ? null : await answerText(ctx);
 
   const { loaded, adapter, store } = await setupWrite(ctx, ['getItem', 'comment']);
   const item = await adapter.getItem(identifier);
@@ -208,6 +215,7 @@ export async function run(ctx: VerbContext): Promise<VerbResult> {
       }
       throw error;
     }
+    if (caller !== null) recordPersonAct(ctx, 'answer', identifier, caller);
   }
   const who =
     by === 'person'
