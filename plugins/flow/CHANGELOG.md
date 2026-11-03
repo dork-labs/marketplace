@@ -4,6 +4,16 @@ Installs of this plugin are pinned to a commit SHA, so a fix here does not reach
 you until you **reinstall it** (Marketplace → flow → reinstall, or re-run your
 `--plugin-dir` checkout's `git pull`). Each entry below says whether that matters.
 
+## 0.88.0
+
+**A drain run no longer stops to "fix CI" because Security hasn't looked yet (DOR-3756), and flow now reads `security-deep-reviewed` on `review:deep` PRs (DOR-3766). The one way this arms sooner is that an old red run of a Security check no longer holds the drain's arm once a later run succeeded; the arm guard still decides, and everything else here only makes flow wait longer. Reinstall to get it.**
+
+- A red `security-review`, `security-gate` or `security-review-initialize` run used to wake the worker to fix it, or park the run under Ask me first. A label, a hold or a rerun clears those, and no commit does. Now the worker isn't told, and the drain doesn't arm while one is red. Flow goes by those names, so a check of yours with one of them is treated the same.
+- An old red run of those checks at the same head stops counting once a later run succeeded and no run of it is unfinished. The drain then asks the arm guard as usual.
+- Every other red check still goes to the worker, required or not. A PR the merge queue dropped still reports every red check.
+- A PR labelled `review:deep` now needs `security-deep-reviewed` too, on every arm, your own `flow review --approve` included. It counts by the same rules as `security-reviewed`: a person added it after the head arrived.
+- A `review:deep` PR with a missing, old or unreadable deep label refuses as `security-label-missing`, `security-label-stale` or `security-label-unverified`, and the sentence names the label.
+
 ## 0.87.0
 
 **The checks that keep agents from acting as you are harder to get past by accident, and the words around them now say what they actually prove (DOR-3718). An answer or a note you give in DorkOS is no longer written to a temporary file. Reinstall to get it.**

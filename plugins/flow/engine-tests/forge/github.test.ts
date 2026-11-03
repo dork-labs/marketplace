@@ -148,6 +148,7 @@ describe('prStatus parses recorded gh pr view output', () => {
       {
         name: 'flow plugin',
         url: 'https://github.com/dork-labs/marketplace/actions/runs/36256800779/job/108445005479',
+        workflow: 'flow',
       },
     ]);
   });
@@ -755,5 +756,82 @@ describe('the merge queue from GraphQL', () => {
     expect(combineQueueMethods('SQUASH', null)).toBe('SQUASH');
     expect(combineQueueMethods('SQUASH', 'SQUASH')).toBe('SQUASH');
     expect(combineQueueMethods('SQUASH', 'MERGE')).toBe('');
+  });
+});
+
+// DOR-3756: every run at a head stays in the rollup. The shape of a real PR's:
+// label changes left cancelled and failed runs behind a later green one.
+describe('failingChecks marks old runs', () => {
+  const gate = (conclusion: string, startedAt: string | null) => ({
+    __typename: 'CheckRun',
+    name: 'security-gate',
+    workflowName: 'security-gate',
+    status: 'COMPLETED',
+    conclusion,
+    startedAt,
+  });
+  const marks = (rollup: unknown[]) => failingChecks(rollup).map((c) => c.superseded === true);
+
+  it('marks every red before a later pass, and not one after it', () => {
+    expect(
+      marks([
+        gate('CANCELLED', '2026-10-01T00:00:01Z'),
+        gate('FAILURE', '2026-10-01T00:00:04Z'),
+        gate('SUCCESS', '2026-10-01T00:00:10Z'),
+        gate('FAILURE', '2026-10-01T00:00:20Z'),
+      ])
+    ).toEqual([true, true, false]);
+  });
+
+  it('leaves a red standing with no later pass, a running one, a tie or no time', () => {
+    expect(marks([gate('FAILURE', '2026-10-01T00:00:01Z')])).toEqual([false]);
+    const running = {
+      ...gate('', '2026-10-01T00:00:09Z'),
+      status: 'IN_PROGRESS',
+      conclusion: null,
+    };
+    expect(marks([gate('FAILURE', '2026-10-01T00:00:01Z'), running])).toEqual([false]);
+    expect(
+      marks([gate('FAILURE', '2026-10-01T00:00:01Z'), gate('SUCCESS', '2026-10-01T00:00:01Z')])
+    ).toEqual([false]);
+    expect(marks([gate('FAILURE', null), gate('SUCCESS', '2026-10-01T00:00:09Z')])).toEqual([
+      false,
+    ]);
+    expect(marks([gate('FAILURE', '2026-10-01T00:00:01Z'), gate('SUCCESS', null)])).toEqual([
+      false,
+    ]);
+  });
+
+  it('leaves every red standing while any run of the check is unfinished', () => {
+    const running = {
+      ...gate('', '2026-10-01T00:00:09Z'),
+      status: 'IN_PROGRESS',
+      conclusion: null,
+    };
+    expect(
+      marks([
+        gate('FAILURE', '2026-10-01T00:00:01Z'),
+        gate('SUCCESS', '2026-10-01T00:00:05Z'),
+        running,
+      ])
+    ).toEqual([false]);
+  });
+
+  it.each(['SKIPPED', 'NEUTRAL', ''])('a later %s run does not count as a pass', (conclusion) => {
+    expect(
+      marks([gate('FAILURE', '2026-10-01T00:00:01Z'), gate(conclusion, '2026-10-01T00:00:09Z')])
+    ).toEqual([false]);
+  });
+
+  it('a pass of the same name in another workflow does not count', () => {
+    const other = { ...gate('SUCCESS', '2026-10-01T00:00:09Z'), workflowName: 'other' };
+    expect(marks([gate('FAILURE', '2026-10-01T00:00:01Z'), other])).toEqual([false]);
+  });
+
+  it('says which workflow ran it, and a commit status is never old news', () => {
+    const [run] = failingChecks([gate('FAILURE', '2026-10-01T00:00:01Z')]);
+    expect(run?.workflow).toBe('security-gate');
+    const [status] = failingChecks([{ context: 'security-review', state: 'FAILURE' }]);
+    expect(status).toEqual({ name: 'security-review', url: null });
   });
 });

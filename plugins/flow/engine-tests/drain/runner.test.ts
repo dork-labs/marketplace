@@ -854,6 +854,179 @@ describe('flow drain: the arm guard on a re-arm (DOR-3262)', () => {
     expect(new Set(asked)).toEqual(new Set([undefined]));
   }, 120_000);
 
+  // DOR-3756: a red security-review or security-gate is Security's turn, not a
+  // red build. The run waits, the guard says why, and nothing arms while it is red.
+  describe('a red check on a PR waiting to re-arm', () => {
+    const red = (name: string) => ({ name, url: `https://ci/${name}` });
+    const sentCiRed = (from: number) =>
+      world.log.sends.slice(from).some((s) => s.text.includes('Checks are failing'));
+
+    /** A run in `watching` with the PR unarmed: the guard refused its re-arm, waiting for the label. */
+    async function toWatching() {
+      const s2 = await toReArm();
+      armGuard = recordingGuard(() => refusal('security-label-missing'));
+      await tick();
+      expect(drainOf('ACME-1').phase).toBe('watching');
+      expect(drainOf('ACME-1').pr).toMatchObject({ armed: false, disarmedForReview: true });
+      return s2;
+    }
+
+    it('waits at the guard on a red security-review, and arms only once it clears', async () => {
+      const s2 = await toWatching();
+      const before = arms().length;
+      const sends = world.log.sends.length;
+      armGuard = recordingGuard(() => refusal('security-label-missing'));
+      world.forge.status.failing = [red('security-review')];
+
+      const pass = await tick();
+      expect(drainOf('ACME-1').phase).toBe('watching');
+      expect(sentCiRed(sends)).toBe(false);
+      expect(armGuard.requests.map((r) => r.reviewedSha)).toEqual([s2]);
+      expect(JSON.stringify(pass.json)).toContain('security-label-missing');
+
+      // The label is on, and the guard passes, but the status hasn't turned yet.
+      armGuard = recordingGuard();
+      const lagging = await tick();
+      expect(arms()).toHaveLength(before);
+      expect(JSON.stringify(lagging.json)).toContain('security-check-red');
+      expect(drainOf('ACME-1').pr).toMatchObject({ armed: false, disarmedForReview: true });
+
+      world.forge.status.failing = [];
+      await tick();
+      expect(arms().at(-1)).toEqual({ method: 'arm', arg: [7, s2] });
+    }, 120_000);
+
+    it('a red security-gate from a hold label waits at the guard, and the guard says why', async () => {
+      await toWatching();
+      const before = arms().length;
+      const sends = world.log.sends.length;
+      armGuard = recordingGuard(() => refusal('held-by-label'));
+      world.forge.status.failing = [red('security-gate'), red('security-review')];
+
+      const pass = await tick();
+      expect(drainOf('ACME-1').phase).toBe('watching');
+      expect(sentCiRed(sends)).toBe(false);
+      expect(JSON.stringify(pass.json)).toContain('held-by-label');
+      expect(arms()).toHaveLength(before);
+    }, 120_000);
+
+    it('runs no land.preArm check while a Security check is red, and names the check', async () => {
+      await toWatching();
+      armGuard = recordingGuard(() => refusal('pre-arm-deferred'));
+      world.forge.status.failing = [red('security-review')];
+      const pass = await tick();
+      expect(armGuard.requests.at(-1)).toMatchObject({ preArm: 'defer' });
+      expect(JSON.stringify(pass.json)).toContain('security-check-red');
+
+      world.forge.status.failing = [];
+      armGuard = recordingGuard();
+      await tick();
+      expect(armGuard.requests.at(-1)?.preArm).toBeUndefined();
+    }, 120_000);
+
+    it('any other red check still goes to fix CI, required or not, naming only those', async () => {
+      await toWatching();
+      const before = arms().length;
+      const sends = world.log.sends.length;
+      world.forge.forge.requiredChecks = async () => ['flow plugin'];
+      world.forge.status.failing = [red('security-review'), red('some-optional-job')];
+
+      await tick();
+      expect(drainOf('ACME-1').phase).toBe('fixing-ci');
+      const sent = world.log.sends.slice(sends).at(-1)?.text ?? '';
+      expect(sent).toContain('some-optional-job');
+      expect(sent).not.toContain('security-review');
+      expect(arms()).toHaveLength(before);
+    }, 120_000);
+
+    it('a run set to ask first parks on a red build, never on a Security check', async () => {
+      await toWatching();
+      const hash = createHash('sha256')
+        .update(realpathSync(project.dir))
+        .digest('hex')
+        .slice(0, 12);
+      const file = path.join(dorkHome, 'flow', 'autonomy', `${hash}.json`);
+      mkdirSync(path.dirname(file), { recursive: true });
+      writeFileSync(file, JSON.stringify({ dial: 'ask' }));
+      armGuard = recordingGuard(() => refusal('security-label-missing'));
+      world.forge.status.failing = [red('security-review')];
+      await tick();
+      expect(drainOf('ACME-1').phase).toBe('watching');
+
+      world.forge.status.failing = [red('flow plugin')];
+      await tick();
+      expect(drainOf('ACME-1').phase).toBe('parked');
+    }, 120_000);
+
+    it('an old red run of a Security check neither blocks the arm nor reaches the worker', async () => {
+      const s2 = await toWatching();
+      const sends = world.log.sends.length;
+      armGuard = recordingGuard();
+      world.forge.status.failing = [
+        { ...red('security-gate'), superseded: true },
+        { ...red('initialize'), workflow: 'security-review-initialize', superseded: true },
+      ];
+      await tick();
+      expect(sentCiRed(sends)).toBe(false);
+      expect(arms().at(-1)).toEqual({ method: 'arm', arg: [7, s2] });
+      expect(armGuard.requests.at(-1)?.preArm).toBeUndefined();
+    }, 120_000);
+
+    it('the verdict workflow failing waits too, naming one check once', async () => {
+      await toWatching();
+      const before = arms().length;
+      const sends = world.log.sends.length;
+      armGuard = recordingGuard();
+      world.forge.status.failing = [
+        { ...red('initialize'), workflow: 'security-review-initialize' },
+        { ...red('security-gate'), superseded: true },
+        red('security-gate'),
+        red('security-gate'),
+      ];
+      const pass = await tick();
+      expect(sentCiRed(sends)).toBe(false);
+      expect(arms()).toHaveLength(before);
+      const said = JSON.stringify(pass.json);
+      expect(said).toContain('initialize, security-gate is still red');
+    }, 120_000);
+
+    it('an innocent queue drop with a red Security check skips the arm, then asks again', async () => {
+      const s2 = await toReArm();
+      await tick();
+      expect(drainOf('ACME-1').pr).toMatchObject({ armed: true });
+      const before = arms().length;
+      const sends = world.log.sends.length;
+      await world.forge.forge.disarm(7);
+      world.forge.forge.recentGroupFailures = async () => [
+        { prs: [99], failing: ['security-gate'] } as never,
+      ];
+      world.forge.status.failing = [red('security-gate')];
+
+      const dropped = await tick();
+      expect(sentCiRed(sends)).toBe(false);
+      expect(arms()).toHaveLength(before);
+      expect(JSON.stringify(dropped.json)).toContain('security-check-red');
+      expect(drainOf('ACME-1').pr).toMatchObject({ armed: false, disarmedForReview: true });
+
+      world.forge.status.failing = [];
+      await tick();
+      expect(arms().at(-1)).toEqual({ method: 'arm', arg: [7, s2] });
+    }, 120_000);
+
+    it('a PR the queue dropped still reports every red check', async () => {
+      await toReArm();
+      await tick();
+      expect(drainOf('ACME-1').pr).toMatchObject({ armed: true });
+      const sends = world.log.sends.length;
+      await world.forge.forge.disarm(7);
+      world.forge.status.failing = [red('security-gate')];
+
+      await tick();
+      expect(drainOf('ACME-1').phase).toBe('fixing-ci');
+      expect(world.log.sends.slice(sends).at(-1)?.text).toContain('security-gate');
+    }, 120_000);
+  });
+
   it('a PR flow pr could not arm (a freeze) is armed by the drain once the freeze lifts', async () => {
     world.tracker = new FakeTracker({
       team: ACME_TEAM,

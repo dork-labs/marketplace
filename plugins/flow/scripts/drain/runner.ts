@@ -56,7 +56,7 @@ import type { FlowStateFile } from '../flow-state-file.ts';
 import { judgeEjection } from '../forge/ejection.ts';
 import type { Forge } from '../forge/types.ts';
 import type { ArmGuard } from '../cli/context.ts';
-import type { ArmMerge } from '../land/arm-decision.ts';
+import { isSecurityCheck, type ArmMerge } from '../land/arm-decision.ts';
 import { refusalSticksToCommit } from '../land/arm-guard.ts';
 import { launchAccountFor } from '../launchers/common.ts';
 import { findTranscript } from '../launchers/prove-account.ts';
@@ -772,6 +772,15 @@ export async function runPass(deps: PassDeps): Promise<PassReport> {
           pr: drain.pr.number,
         });
       }
+      // Security's checks are not CI being red (DOR-3756): a label, a hold or a
+      // rerun clears them, and no commit does, so the worker isn't told.
+      // The arm below still waits for them. A PR the queue dropped keeps every
+      // red check, for the worker to read.
+      if (ejection === null) {
+        pr.failing = status.failing
+          .filter((check) => !isSecurityCheck(check))
+          .map((check) => ({ name: check.name, url: check.url ?? '' }));
+      }
     } else {
       const open = await deps.forge.prForBranch(run.branch);
       prForBranch =
@@ -1238,13 +1247,24 @@ export async function runPass(deps: PassDeps): Promise<PassReport> {
           // an ejection's "fix CI". A refusal that sticks to the commit (a
           // failed check, a fork) also records it, so
           // only a new reviewed commit is asked about again.
+          // While a Security check's newest run is red nothing arms, so a
+          // land.preArm suite isn't worth running yet (defer); the guard still
+          // says what it waits on.
+          const securityRed = [
+            ...new Set(
+              status.failing
+                .filter((check) => isSecurityCheck(check) && check.superseded !== true)
+                .map((check) => check.name)
+            ),
+          ];
           const guard = await deps.armGuard({
             forge: deps.forge,
             pr: n,
             reviewedSha: action.sha,
             worktree: run.worktreePath,
+            ...(securityRed.length > 0 ? { preArm: 'defer' as const } : {}),
           });
-          if (!guard.ok) {
+          if (!guard.ok || securityRed.length > 0) {
             await supervisorWrite(run.issueId, (r) =>
               r.drain.pr?.number === n
                 ? {
@@ -1255,15 +1275,19 @@ export async function runPass(deps: PassDeps): Promise<PassReport> {
                         ...r.drain.pr,
                         armed: false,
                         disarmedForReview: true,
-                        armRefusedAt: refusalSticksToCommit(guard)
-                          ? action.sha
-                          : (r.drain.pr.armRefusedAt ?? null),
+                        armRefusedAt:
+                          !guard.ok && refusalSticksToCommit(guard)
+                            ? action.sha
+                            : (r.drain.pr.armRefusedAt ?? null),
                       },
                     },
                   }
                 : undefined
             );
-            return `did not arm #${n} at ${short(action.sha)} (${guard.reason}): ${guard.detail}`;
+            // A deferred land.preArm is only why it would wait next; the red check is why now.
+            return !guard.ok && (guard.reason !== 'pre-arm-deferred' || securityRed.length === 0)
+              ? `did not arm #${n} at ${short(action.sha)} (${guard.reason}): ${guard.detail}`
+              : `did not arm #${n} at ${short(action.sha)} (security-check-red): ${securityRed.join(', ')} is still red`;
           }
           merge = guard.merge;
         }

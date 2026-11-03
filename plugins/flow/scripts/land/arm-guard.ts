@@ -8,6 +8,8 @@
  * on any PR (DOR-3724): `--arm` and `drain.armAutoMerge` are an agent's to set,
  * so they prove no review. The one exception is `labelRule: 'security-paths'`,
  * which only a person's `flow review --approve` passes, after the person gate.
+ * On a `review:deep` PR, every arm also needs `security-deep-reviewed` by the same
+ * rules (DOR-3766).
  *
  * A guard rail, not the gate: flow runs inside the agent, and the gate that
  * holds is on GitHub (the required security status and the ruleset). The guard
@@ -20,7 +22,7 @@
  *    then `land` from the committed config on it (`base-config.ts`).
  * 2. Read the PR (`Forge.armFacts`), the checks the default branch requires,
  *    how it merges (`Forge.mergeSettings`), and the release freeze
- *    (`freeze.ts`); for a PR with the security label, also when
+ *    (`freeze.ts`); for a PR with the security label or a deep review, also when
  *    the label was added and when the head arrived (`Forge.labelledAt`,
  *    `Forge.headPushedAt`), so a label from an older head never counts.
  * 3. Decide (`arm-decision.ts`, pinned by `scripts/fixtures/arm-decisions.json`).
@@ -43,6 +45,8 @@ import type { ArmFacts, Forge } from '../forge/types.ts';
 import {
   armMergeFor,
   decideArm,
+  DEEP_REVIEW_LABEL,
+  SECURITY_DEEP_LABEL,
   type ArmMerge,
   type ArmPolicy,
   type MergeSettings,
@@ -153,19 +157,25 @@ export function policyFor(land: LandConfig): ArmPolicy {
 }
 
 /**
- * When the security label was last added and when the head arrived, read only
- * when the label is on the PR (the decision reads them only then). A forge
- * without the reads, or a read that fails, gives `null`, and the decision
- * refuses a PR that needs the label on it.
+ * When the labels this PR's decision reads were last added, and when the head
+ * arrived: read only for a label on the PR, and the deep label only on a
+ * `review:deep` PR. A forge without the reads, or a read that fails, gives
+ * `null`, and the decision refuses a PR that needs the label on it.
  */
 async function labelTimes(
   forge: Forge,
   pr: number,
   facts: ArmFacts,
   label: string
-): Promise<{ securityLabelledAt: string | null; headArrivedAt: string | null }> {
-  const on = facts.labels.some((l) => l.name.toLowerCase() === label.toLowerCase());
-  if (!on) return { securityLabelledAt: null, headArrivedAt: null };
+): Promise<{
+  securityLabelledAt: string | null;
+  deepLabelledAt: string | null;
+  headArrivedAt: string | null;
+}> {
+  const has = (name: string) =>
+    facts.labels.some((l) => l.name.toLowerCase() === name.toLowerCase());
+  const security = has(label);
+  const deep = has(DEEP_REVIEW_LABEL) && has(SECURITY_DEEP_LABEL);
   const read = async (fn: () => Promise<string | null> | undefined): Promise<string | null> => {
     try {
       return (await fn()) ?? null;
@@ -174,8 +184,12 @@ async function labelTimes(
     }
   };
   return {
-    securityLabelledAt: await read(() => forge.labelledAt?.(pr, label)),
-    headArrivedAt: await read(() => forge.headPushedAt?.(pr, facts.headRefOid, facts.headRefName)),
+    securityLabelledAt: security ? await read(() => forge.labelledAt?.(pr, label)) : null,
+    deepLabelledAt: deep ? await read(() => forge.labelledAt?.(pr, SECURITY_DEEP_LABEL)) : null,
+    headArrivedAt:
+      security || deep
+        ? await read(() => forge.headPushedAt?.(pr, facts.headRefOid, facts.headRefName))
+        : null,
   };
 }
 

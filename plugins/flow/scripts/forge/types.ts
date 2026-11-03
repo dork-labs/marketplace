@@ -32,6 +32,10 @@ export interface FailingCheck {
   name: string;
   /** Where to read it, when the forge gave a link. */
   url: string | null;
+  /** The workflow that ran it, when the forge said. */
+  workflow?: string;
+  /** A later run of the same check at this head passed, so this run is old news. */
+  superseded?: boolean;
 }
 
 /** A pull request as the forge sees it now. */

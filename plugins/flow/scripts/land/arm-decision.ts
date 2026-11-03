@@ -24,11 +24,11 @@
  * | `freeze` | a release freeze is on |
  * | `changes-requested` | a reviewer asked for changes |
  * | `failing-checks` | a required check failed or was cancelled |
- * | `security-label-missing` | `securityLabelOnEveryPr` is set and it has no security label |
+ * | `security-label-missing` | `securityLabelOnEveryPr` is set and it has no security label, or it is `review:deep` with no deep label |
  * | `files-unreadable` | the file list is incomplete, and the PR has no security label |
  * | `security-path-unlabelled` | it touches a security path without the security label |
- * | `security-label-unverified` | it needs the security label, and flow cannot tell when the label was added or when the head arrived |
- * | `security-label-stale` | it needs the security label, and the label was added before the head arrived |
+ * | `security-label-unverified` | it needs the security or deep label, and flow cannot tell when the label was added or when the head arrived |
+ * | `security-label-stale` | it needs the security or deep label, and the label was added before the head arrived |
  *
  * The security label counts only when it was added after the current head
  * arrived (`securityLabelledAt` against `headArrivedAt`, server times a
@@ -36,6 +36,11 @@
  * A label on a PR that needs none is never read. `securityLabelOnEveryPr`
  * (DOR-3724) makes every PR need it, whatever it touches: the guard sets it on
  * every arm but a person's approval.
+ *
+ * A PR labelled `review:deep` also needs `security-deep-reviewed`, on any arm, by
+ * the same rules (`deepLabelledAt`, DOR-3766). It adds to the security label and
+ * never stands in for it. The gate never reads `review:deep`: it goes by its own
+ * path list, and only the gate holds.
  *
  * A pending check passes (GitHub's auto-merge waits for it; a check stuck
  * pending is the watcher's job). Which checks are required comes from the
@@ -148,6 +153,31 @@ export const HOLD_LABELS: readonly string[] = [
   'wip',
   'blocked',
 ];
+
+/**
+ * The checks that report Security's verdict (`.github/SECURITY-GATE.md`), and the
+ * workflow that writes it. A label, a hold or a rerun clears these; no commit does.
+ * The drain sends no worker for them and doesn't arm while one is red. `decideArm`
+ * doesn't read them.
+ */
+const SECURITY_CHECKS: readonly string[] = ['security-review', 'security-gate'];
+const SECURITY_VERDICT_WORKFLOW = 'security-review-initialize';
+
+/**
+ * Whether a check reports Security's verdict rather than the code's.
+ *
+ * @param check - The check's name, and its workflow when the forge said.
+ * @returns `true` for {@link SECURITY_CHECKS} and anything in the verdict workflow.
+ */
+export function isSecurityCheck(check: { name: string; workflow?: string }): boolean {
+  return SECURITY_CHECKS.includes(check.name) || check.workflow === SECURITY_VERDICT_WORKFLOW;
+}
+
+/** The label that asks for a deep review, in the spelling this team uses. */
+export const DEEP_REVIEW_LABEL = 'review:deep';
+
+/** The label that says the deep review was done: `.github/SECURITY-GATE.md`'s spelling. */
+export const SECURITY_DEEP_LABEL = 'security-deep-reviewed';
 
 /**
  * How flow arms a PR that may squash (DOR-3256): `queue` when the base has a
@@ -362,7 +392,8 @@ export function armMergeFor(
  *   (`null`, or the freeze marker), and, for a PR with the security label,
  *   `securityLabelledAt` (when it was last added) and `headArrivedAt` (when
  *   the head arrived), ISO-8601 or `null` when unknown; and
- *   `securityLabelOnEveryPr` (`true`: this arm needs the label on any PR).
+ *   `securityLabelOnEveryPr` (`true`: this arm needs the label on any PR); and,
+ *   on a `review:deep` PR, `deepLabelledAt` (when {@link SECURITY_DEEP_LABEL} was last added).
  * @param policy - The repository's security paths and label.
  * @returns `ARM`, or a refusal with its reason.
  */
@@ -435,6 +466,24 @@ export function decideArm(input: unknown, policy: ArmPolicy): ArmDecision {
   if (red.length > 0) {
     return refuse('failing-checks', `required checks are red: ${red.join(', ')}`);
   }
+  const security = decideSecurityLabel(facts, labels, policy, reviewed);
+  if (security.verdict === 'REFUSE' || !labels.includes(DEEP_REVIEW_LABEL)) return security;
+  if (!labels.includes(SECURITY_DEEP_LABEL)) {
+    return refuse(
+      'security-label-missing',
+      `it is labelled "${DEEP_REVIEW_LABEL}" and has no "${SECURITY_DEEP_LABEL}" label; flow arms it only after Security's deep review of its head`
+    );
+  }
+  return labelFresh(facts, 'deepLabelledAt', SECURITY_DEEP_LABEL, reviewed);
+}
+
+/** The security label's rule: on every PR, or on what touches a security path. */
+function decideSecurityLabel(
+  facts: Record<string, unknown>,
+  labels: readonly string[],
+  policy: ArmPolicy,
+  reviewed: string
+): ArmDecision {
   const labelled = labels.includes(policy.securityLabel.toLowerCase());
   if (facts.securityLabelOnEveryPr === true) {
     if (!labelled) {
@@ -443,7 +492,7 @@ export function decideArm(input: unknown, policy: ArmPolicy): ArmDecision {
         `it has no "${policy.securityLabel}" label; flow arms this PR only after Security reviews its head`
       );
     }
-    return labelFresh(facts, policy.securityLabel, reviewed);
+    return labelFresh(facts, 'securityLabelledAt', policy.securityLabel, reviewed);
   }
   const files = Array.isArray(facts.files)
     ? facts.files.filter((f): f is string => typeof f === 'string')
@@ -455,7 +504,7 @@ export function decideArm(input: unknown, policy: ArmPolicy): ArmDecision {
         `the forge did not give the full list of changed files, so flow cannot rule out a security path; it needs the "${policy.securityLabel}" label`
       );
     }
-    return labelFresh(facts, policy.securityLabel, reviewed);
+    return labelFresh(facts, 'securityLabelledAt', policy.securityLabel, reviewed);
   }
   const hits = securityHits(files, policy);
   if (hits === null) {
@@ -465,7 +514,7 @@ export function decideArm(input: unknown, policy: ArmPolicy): ArmDecision {
         `land.securityPaths.pattern is not a valid regular expression, so flow cannot rule out a security path; it needs the "${policy.securityLabel}" label`
       );
     }
-    return labelFresh(facts, policy.securityLabel, reviewed);
+    return labelFresh(facts, 'securityLabelledAt', policy.securityLabel, reviewed);
   }
   if (hits.length === 0) return { verdict: 'ARM' };
   if (!labelled) {
@@ -474,16 +523,21 @@ export function decideArm(input: unknown, policy: ArmPolicy): ArmDecision {
       `it touches security paths (${hits.join(', ')}) and has no "${policy.securityLabel}" label; Security reviews it first`
     );
   }
-  return labelFresh(facts, policy.securityLabel, reviewed);
+  return labelFresh(facts, 'securityLabelledAt', policy.securityLabel, reviewed);
 }
 
 /**
- * Whether the security label on a PR that needs it was added after the head
- * arrived. An unknown or unreadable time on either side refuses, and so does a
- * tie: the label has to come after the head, not with it.
+ * Whether a label a PR needs was added after the head arrived. An unknown or
+ * unreadable time on either side refuses, and so does a tie: the label has to
+ * come after the head, not with it.
  */
-function labelFresh(facts: Record<string, unknown>, label: string, head: string): ArmDecision {
-  const labelledAt = Date.parse(str(facts.securityLabelledAt) ?? '');
+function labelFresh(
+  facts: Record<string, unknown>,
+  timeField: 'securityLabelledAt' | 'deepLabelledAt',
+  label: string,
+  head: string
+): ArmDecision {
+  const labelledAt = Date.parse(str(facts[timeField]) ?? '');
   const arrivedAt = Date.parse(str(facts.headArrivedAt) ?? '');
   if (Number.isNaN(arrivedAt)) {
     return refuse(
