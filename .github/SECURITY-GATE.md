@@ -58,7 +58,7 @@ every symlink under `plugins/`. It's what keeps a package inside its own folder,
 list no longer reads manifests, so have Security read any loosening of it.
 
 **When you review a plugin PR,** refuse any pointer from a plugin to files outside
-`plugins/`: a manifest or script that references a path outside its own plugin folder.
+`plugins/`: a manifest or script that references a path outside `plugins/`.
 
 ## How approval works
 
