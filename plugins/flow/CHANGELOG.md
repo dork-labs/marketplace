@@ -6,11 +6,11 @@ you until you **reinstall it** (Marketplace → flow → reinstall, or re-run yo
 
 ## 0.80.0
 
-**Flow now stays quiet on its own comment even when your tracker garbles the visible `— 🤖 /flow` marker, and never takes the hidden signature line as proof of who wrote a comment (DOR-2351). Before, with flow and a person sharing one tracker account, a garbled marker could let flow answer its own comment. Reinstall to get it.**
+**Flow never takes its hidden signature line as proof of who wrote a comment (DOR-2351), and the drain docs say more about what removing a finished worktree does. Nothing changes in how flow behaves; reinstall only if you want the updated docs and the tests that pin this.**
 
-- When a comment's last line is flow's hidden `agent:provenance` signature, and it parses, flow treats the comment as its own and doesn't answer it, the same as when the marker is there. A signature anywhere else in the comment, or one that doesn't parse, doesn't count.
-- That signature, like the marker, only ever makes flow stay quiet. Anyone can paste it, so it never proves a comment is flow's: the reply flow resumes on and the question `flow status` shows are still matched on flow's own account. If a person's answer ends with a pasted signature, flow ignores it and the item stays parked; post the answer again without that line.
-- The drain docs now say that removing a finished item's worktree also deletes the files git ignores in it, and that a DorkOS worker left idle after the drain stops it counts as stopped (both from 0.79.0).
+- Only the account a comment comes from shows it's flow's own. The visible `— 🤖 /flow` marker only makes flow stay quiet on a comment, and the hidden `agent:provenance` line counts for nothing at all, since anyone can paste it and other agents sign their own comments with it. So another agent's comment that ends in that line and addresses flow still gets an answer, and a person's answer with the line pasted in still un-parks the item. This was already how flow behaved since 0.75.0; now tests pin it and the docs say it.
+- If flow and you share one tracker account, flow already recognizes its own comments by that account, so a tracker that garbles the marker doesn't make flow answer itself.
+- The drain docs now say that removing a finished item's worktree also deletes the files git ignores in it, and that a DorkOS worker left idle after the drain stops it counts as stopped (both since 0.79.0).
 
 ## 0.79.0
 

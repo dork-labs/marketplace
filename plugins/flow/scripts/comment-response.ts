@@ -24,11 +24,13 @@
  * ## The rules, in precedence order
  *
  * 1. **Never answer its own comments** — `author == identity.agent`, OR the body
- *    is signed like the agent's: it carries `identity.marker`, or its last line
- *    is a valid `agent:provenance` line (so a tracker that mangles the marker
- *    cannot start a self-reply loop in shared-account mode, DOR-2351). Only the
- *    account proves authorship; a signature only silences. Highest precedence:
- *    it breaks self-reply loops before any other rule can fire. → `ignore`.
+ *    carries `identity.marker`. Only the account proves authorship; the marker
+ *    only ever silences. The hidden `agent:provenance` line is not read here at
+ *    all (DOR-2351): anyone can paste it, and other agents sign with it. In
+ *    shared-account mode `identity.agent` is the shared account, so the account
+ *    check alone catches the agent's own comment even when a tracker garbles
+ *    the marker. Highest precedence: it breaks self-reply loops before any
+ *    other rule can fire. → `ignore`.
  * 2. **Always respond when directly addressed** — an @mention of the agent
  *    account, or an explicit `/flow` / `@flow` token in the body. **Overrides
  *    ownership** — even on a teammate's (`other`-owned) thread. → `respond`.
@@ -55,7 +57,6 @@
 
 import type { z } from 'zod';
 import type { CommentsSchema } from './config-schema.ts';
-import { endsWithSignature } from './cli/provenance.ts';
 import { authorOf, bodyOf, hasLabel, isTrustedAuthor, mentionsOf } from './work-item.ts';
 import type { InboxComment, OwnershipClass, WorkItem } from './work-item.ts';
 
@@ -81,8 +82,8 @@ export interface CommentIdentity {
   agent: string;
   /**
    * The authorship marker the agent appends to every tracker write
-   * (`identity.marker`, default `"— 🤖 /flow"`). In shared-account mode this is
-   * the *only* signal that a comment is the agent's own (rule 1).
+   * (`identity.marker`, default `"— 🤖 /flow"`). Rule 1 ignores a comment that
+   * carries it, from any account; it never proves authorship.
    */
   marker: string;
 }
@@ -153,21 +154,20 @@ function authoredByAgent(comment: InboxComment, identity: CommentIdentity): bool
 }
 
 /**
- * Whether the comment is signed like the agent's: it carries `identity.marker`,
- * or its last line is a valid `agent:provenance` line. In shared-account mode
- * this is the only sign of the agent's own comment, and the hidden line covers
- * a tracker that mangles the visible marker (DOR-2351).
+ * Whether the comment carries `identity.marker`, from any account.
  *
- * Anyone can type the marker or paste the line, so a signature only ever
- * silences a comment, which is safe. It must never grant anything: the
- * drain's answer search anchors on the agent's account, not the signature
- * (DOR-3677). Keep signed comments from other accounts here, too: the marker
- * holds `/flow`, so another flow agent's comment would otherwise read as
- * directly addressed (rule 2).
+ * Anyone can type the marker, so it only ever silences a comment, which is
+ * safe. It must never grant anything: the drain's answer search anchors on the
+ * agent's account, not the marker (DOR-3677). Keep the marker from other
+ * accounts here, too: it holds `/flow`, so another flow agent's comment would
+ * otherwise read as directly addressed (rule 2).
+ *
+ * The hidden `agent:provenance` line counts for nothing (DOR-2351): any
+ * harness signs with it, so reading it here would silence another agent that
+ * addresses this one, and it would add nothing the account check lacks.
  */
 function signedAsAgent(comment: InboxComment, identity: CommentIdentity): boolean {
-  const body = bodyOf(comment);
-  return (identity.marker.length > 0 && body.includes(identity.marker)) || endsWithSignature(body);
+  return identity.marker.length > 0 && bodyOf(comment).includes(identity.marker);
 }
 
 /**
@@ -192,7 +192,7 @@ function isDirectlyAddressed(comment: InboxComment, identity: CommentIdentity): 
  * task 3.1 `classifyOwnership` seam — so this module never classifies.
  *
  * Precedence (first match wins):
- * 1. own comment (author, marker or provenance line) → `ignore` — breaks self-reply loops first;
+ * 1. own comment (author or marker) → `ignore` — breaks self-reply loops first;
  * 2. directly addressed (@mention or `/flow` token) → `respond` — overrides ownership;
  * 3. `agent/needs-input` item + non-agent comment → `resume` — the parked answer;
  * 4. `other`-owned thread (and not addressed) → `ignore` — stay out;

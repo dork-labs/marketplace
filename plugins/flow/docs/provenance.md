@@ -171,9 +171,9 @@ machine. Strip the marker and self-recognition breaks; strip the line and routin
 breaks.
 
 Neither proves authorship, since anyone can type or paste them; only the author's
-account does. Either one makes the comment-response rules **stay quiet** (rule 1
-also reads a valid last-line provenance line, for a tracker that mangles the
-marker); neither ever **grants** anything.
+account does. The marker makes the comment-response rules **stay quiet**; the line
+is never read for authorship, since every harness signs with it. Neither
+ever **grants** anything.
 
 ## 11. Reading it back
 
@@ -192,8 +192,8 @@ Three reader rules:
   authoritative and the thread signature is the fallback for items with no record.
 - **Absence is normal, not evidence.** An unsigned thread, a human-authored
   comment, or a signature a person removed while editing in a rich-text editor all
-  read the same way: no signature. A missing line means "route as unsigned", never
-  "that session is dead".
+  read the same way: no signature (rich-text editors strip HTML comments). A missing
+  line means "route as unsigned", never "that session is dead".
 
 What to _do_ with a parsed signature — deliver into that session, start a fresh
 one, or handle it here and say so — is the router's decision, specified in the

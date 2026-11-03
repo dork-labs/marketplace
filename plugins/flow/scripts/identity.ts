@@ -22,8 +22,8 @@
  *   a self-assignment is still {@link OwnershipClass | `mine`} (the agent's
  *   account is the assignee), but the **claim** must additionally carry the
  *   `agent/claimed` label — see {@link SHARED_MODE_CLAIM_LABEL}. The agent
- *   recognizes its own comments by {@link Identity.marker} and hands off by
- *   label + nudge. Mode detection: see {@link resolveIdentityMode}.
+ *   knows its own comments by the account and stays quiet on any carrying
+ *   {@link Identity.marker}; it hands off by label + nudge. Mode detection: see {@link resolveIdentityMode}.
  *
  * ## Identity resolution (the `"auto"` contract)
  *
@@ -75,9 +75,9 @@ export interface Identity {
   reviewer: string | null;
   /**
    * The durable authorship marker (`identity.marker`, default `"— 🤖 /flow"`)
-   * the agent appends to tracker writes. In shared-account mode it is the only
-   * signal that a comment is the agent's own; carried here so the resolved
-   * identity is self-contained for both consumers.
+   * the agent appends to tracker writes. The comment-response rules stay quiet
+   * on a comment carrying it; only the account proves authorship. Carried here
+   * so the resolved identity is self-contained for both consumers.
    */
   marker: string;
 }

@@ -5,7 +5,7 @@ description: flow drain carries several ready items at once, each on its own acc
 
 # Draining in parallel
 
-`flow drain --parallel 3` carries three ready items at once, each in its own worktree and on its own account. A separate reviewer reads every push; a PR opens only after a clean review of the head.
+`flow drain --parallel 3` carries three ready items at once, each in its own worktree, spread across your accounts. A separate reviewer reads every push; a PR opens only after a clean review of the head.
 
 ## Before you start
 
@@ -24,7 +24,7 @@ Allow each account flow may spend with `flow accounts set <id> --role rotation`.
 - `moved to <account>`: its account ran out.
 - `restarted on <account>`: its session went away.
 - `parked: <reason>`: a person is needed.
-- `removed`/`kept its worktree`: the item finished. Ignored files go too; an idle DorkOS worker counts as stopped.
+- `removed`/`kept its worktree`: the item finished. Its git-ignored files go too; an idle DorkOS worker counts as stopped.
 
 ## What happens at a limit
 

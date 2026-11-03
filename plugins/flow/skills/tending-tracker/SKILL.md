@@ -42,8 +42,8 @@ self-assignment is still `mine`. Then,
 first match wins:
 
 1. **Never answer your own comment:** author is `identity.agent`, or the body carries
-   `identity.marker` or ends in a valid provenance line. Only the account proves
-   authorship; a signature only silences. → ignore.
+   `identity.marker`. Only the account proves authorship: the marker only silences, the
+   hidden provenance line counts for nothing. → ignore.
 2. **Always respond when addressed:** an @mention, or in shared mode a `/flow` or
    `@flow` token. Overrides ownership. → respond.
 3. **A member's comment on an `agent/needs-input` item is the answer.** → resume:
