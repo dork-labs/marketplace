@@ -63,6 +63,7 @@ import { projectionFor } from '../work-state.ts';
 import { recordEvent } from './auto-journal.ts';
 import type { VerbContext, VerbResult } from './context.ts';
 import { isWritableDrain, originForge, short, writeDrain } from './drain-run.ts';
+import { refuseSessions, requirePersonShell, sessionsThatWorked } from './person-gate.ts';
 import { signBody } from './provenance.ts';
 import {
   applyAndVerify,
@@ -444,6 +445,17 @@ async function review(ctx: VerbContext): Promise<VerbResult> {
     throw new UsageError('--note and --note-file go with --changes');
   }
   const note = changes ? noteOf(ctx) : null;
+  // Only a person ships or sends back as the person (DOR-3716): refused
+  // inside an agent before any tracker or forge read. `--by reviewer-agent`
+  // has its own checks (the stop, a token-bound clean verdict, the checks).
+  const stopAndAsk = `Stop: an agent never ${approve ? 'ships' : 'sends back'} work for a person. Do not run this again any other way; ask the person to ${approve ? 'approve it' : 'send it back'} in DorkOS.`;
+  if (by === 'person') {
+    requirePersonShell(
+      ctx,
+      (agent) =>
+        `flow review ${approve ? '--approve' : '--changes'} acts as the person, and this runs inside an agent (${agent}), so nothing was posted, approved or armed. ${stopAndAsk}`
+    );
+  }
 
   const setup = await setupWrite(ctx, ['getItem', 'applyWorkState', 'comment']);
   const { loaded, stages, adapter, store } = setup;
@@ -454,6 +466,17 @@ async function review(ctx: VerbContext): Promise<VerbResult> {
   if (existing === undefined || !atReviewGate(existing)) {
     throw new PreconditionError(
       `${identifier} is not waiting at the review gate${existing === undefined ? ' (it has no run on this machine)' : ` (it is at ${existing.stage})`}, so there is nothing to ship or send back`
+    );
+  }
+  // The second guard: never a session that worked the item (the run's own,
+  // its drain worker and reviewer, its VERIFY reviewer, the session that
+  // asked its question and that question's checker), before the forge or the
+  // arm guard.
+  if (by === 'person') {
+    refuseSessions(
+      ctx,
+      sessionsThatWorked(existing),
+      `a session that worked ${identifier} cannot review it as the person, so nothing was posted, approved or armed. ${stopAndAsk}`
     );
   }
 
