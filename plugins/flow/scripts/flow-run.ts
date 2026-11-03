@@ -280,6 +280,11 @@ export interface RunQuestion {
    */
   checkTokenHash?: string;
   /**
+   * When `flow inbox` handed the recorded answer over to resume the item. The
+   * answer stays on the run, so a second answer is still refused.
+   */
+  answerHandedOverAt?: string;
+  /**
    * The reviewer session the drain started to check the pick, and its own
    * worktree, so the drain can stop it and remove the worktree once the
    * question is settled. Absent when no drain started one.

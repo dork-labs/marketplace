@@ -65,6 +65,7 @@ export const JOURNAL_KINDS = [
   'operator.wait',
   'review',
   'review.approved',
+  'person.act',
   'ci',
   'handoff',
   'note',

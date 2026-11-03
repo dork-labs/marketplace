@@ -7,11 +7,14 @@
  * words never reach a model that holds tools.
  */
 
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
+import { realProcessRunner } from '../../scripts/cli/context.ts';
+import { releaseAnswer } from '../../scripts/cli/question-write.ts';
 import { EXIT } from '../../scripts/errors.ts';
+import { openFlowStateFile } from '../../scripts/flow-state-file.ts';
 import type { FakeBacklog } from '../../scripts/tracker/fake.ts';
 import { item, makeProject, runFlow, type WriteProject } from './write-harness.ts';
 
@@ -132,6 +135,209 @@ describe('flow inbox', () => {
     expect(entries).toEqual([expect.objectContaining({ action: 'ignore', rule: 4 })]);
     expect(entries[0]).not.toHaveProperty('body');
     expect(entries[0]).not.toHaveProperty('untrusted');
+  });
+
+  // Purpose (DOR-3718, Security's Should): the inbox pass enforced "only a person
+  // answers a secrets-or-spend question" in skill prose alone, so a model reading
+  // flow-state.json decided. Now code decides: it drops any other recorded answer,
+  // and `answers` is the only list of recorded answers the pass acts on.
+  describe('recorded answers', () => {
+    const parkedRun = (
+      answer: Record<string, unknown>,
+      floor: string[] = ['secrets-or-spend']
+    ) => ({
+      'id-FAKE-1': {
+        issueId: 'id-FAKE-1',
+        identifier: 'FAKE-1',
+        sessionId: 'session-1',
+        worktreePath: project.dir,
+        branch: 'work',
+        stage: 'execute',
+        status: 'running',
+        attemptCount: 0,
+        workerPid: 1,
+        startedAt: '2026-09-26T10:00:00.000Z',
+        question: {
+          text: 'Spend $500?',
+          choices: [
+            { id: 'c1', label: 'Yes' },
+            { id: 'c2', label: 'No' },
+          ],
+          pick: 'c2',
+          why: 'Cheaper.',
+          askedAt: '2026-09-26T11:00:00.000Z',
+          decideBy: null,
+          floor,
+          answeredBy: 'person',
+          checkAfter: null,
+          answer,
+        },
+      },
+    });
+    const at = '2026-09-26T11:30:00.000Z';
+    const answers = (json: Record<string, unknown>) => json.answers as Record<string, unknown>[];
+
+    it.each(['agent-default', 'reviewer-agent', 'someone-else'])(
+      'drops a %s answer to a question about secrets or spending, and says so',
+      async (by) => {
+        project.writeRuns(parkedRun({ text: 'Yes', at, by }) as never);
+        const result = await runFlow(project, backlog(), ['inbox']);
+        expect(result.code).toBe(EXIT.ok);
+        expect(answers(result.json)).toEqual([]);
+        expect(project.runs()['id-FAKE-1'].question?.answer).toBeUndefined();
+        expect(result.stderr).toContain('FAKE-1 stays parked');
+        expect(result.stderr).toContain('ask the person to answer it in DorkOS');
+      }
+    );
+
+    it('changes nothing on a dry run', async () => {
+      project.writeRuns(parkedRun({ text: 'Yes', at, by: 'agent-default' }) as never);
+      const result = await runFlow(project, backlog(), ['inbox', '--dry-run']);
+      expect(answers(result.json)).toEqual([]);
+      expect(project.runs()['id-FAKE-1'].question?.answer).toBeDefined();
+    });
+
+    it("hands over a person's answer to one, with the session to resume", async () => {
+      project.writeRuns(parkedRun({ text: 'No', at, by: 'person' }) as never);
+      const result = await runFlow(project, backlog(), ['inbox']);
+      expect(answers(result.json)).toEqual([
+        {
+          itemId: 'FAKE-1',
+          by: 'person',
+          at,
+          answer: `the answer recorded on FAKE-1 at ${at} by a person: "No"`,
+          sessionId: 'session-1',
+        },
+      ]);
+    });
+
+    it('hands over a pick that settled an ordinary question', async () => {
+      project.writeRuns(parkedRun({ text: 'Pick', at, by: 'agent-default' }, []) as never);
+      const result = await runFlow(project, backlog(), ['inbox']);
+      expect(answers(result.json)).toEqual([
+        expect.objectContaining({ itemId: 'FAKE-1', by: 'agent-default' }),
+      ]);
+    });
+
+    it('hands an answer over once, and keeps it so a second answer is still refused', async () => {
+      project.writeRuns(parkedRun({ text: 'No', at, by: 'person' }) as never);
+      expect(answers((await runFlow(project, backlog(), ['inbox'])).json)).toHaveLength(1);
+      const question = project.runs()['id-FAKE-1'].question;
+      expect(question?.answer?.text).toBe('No');
+      expect(question?.answerHandedOverAt).toBeDefined();
+      expect(answers((await runFlow(project, backlog(), ['inbox'])).json)).toEqual([]);
+      const again = await runFlow(project, backlog(), ['answer', 'FAKE-1', '--text', 'Yes'], {
+        env: {},
+        // The person gate's read: tests run under anything, so never the real chain.
+        runProcess: async (cmd, args, opts) =>
+          cmd === '/bin/ps'
+            ? { code: 1, stdout: '', stderr: '' }
+            : realProcessRunner(cmd, args, opts),
+      });
+      expect(again.code).toBe(EXIT.precondition);
+      expect(again.stderr).toContain('already answered');
+    });
+
+    // `flow answer` claims, then posts; a pass can mark in that gap. A failed post
+    // gives the answer back, and the person's retry must still resume.
+    it('forgets the handover when the answer is given back', async () => {
+      project.writeRuns(parkedRun({ text: 'No', at, by: 'person' }) as never);
+      await runFlow(project, backlog(), ['inbox']);
+      const store = openFlowStateFile(project.dir);
+      await releaseAnswer(store, 'id-FAKE-1', '2026-09-26T11:00:00.000Z', {
+        text: 'No',
+        at,
+        by: 'person',
+      });
+      const question = project.runs()['id-FAKE-1'].question;
+      expect(question?.answer).toBeUndefined();
+      expect(question?.answerHandedOverAt).toBeUndefined();
+    });
+
+    // Purpose: a mark that fails must not lose the answers already marked, nor
+    // the team's comments.
+    it('a busy store costs that answer this pass, and no one else anything', async () => {
+      project.writeRuns(parkedRun({ text: 'No', at, by: 'person' }) as never);
+      const lock = `${openFlowStateFile(project.dir).path}.lock`;
+      writeFileSync(lock, JSON.stringify({ pid: process.pid, at: Date.now() }));
+      const result = await runFlow(
+        project,
+        backlog({ 'FAKE-1': [said('c1', 'dorian', 'Use CSV.', 1)] }),
+        ['inbox']
+      );
+      rmSync(lock, { force: true });
+      expect(result.code).toBe(EXIT.ok);
+      expect(answers(result.json)).toEqual([]);
+      expect(result.stderr).toContain('waits for the next pass');
+      expect((result.json.entries as Entry[]).map((entry) => entry.body)).toEqual(['Use CSV.']);
+      expect(answers((await runFlow(project, backlog(), ['inbox'])).json)).toHaveLength(1);
+    });
+
+    it('marks nothing on a dry run, so the real pass still hands it over', async () => {
+      project.writeRuns(parkedRun({ text: 'No', at, by: 'person' }) as never);
+      expect(
+        answers((await runFlow(project, backlog(), ['inbox', '--dry-run'])).json)
+      ).toHaveLength(1);
+      expect(project.runs()['id-FAKE-1'].question?.answerHandedOverAt).toBeUndefined();
+      expect(answers((await runFlow(project, backlog(), ['inbox'])).json)).toHaveLength(1);
+    });
+
+    it('a --since pass looks back without using an answer up or dropping one', async () => {
+      project.writeRuns(parkedRun({ text: 'Yes', at, by: 'agent-default' }) as never);
+      const result = await runFlow(project, backlog(), ['inbox', '--since', at]);
+      expect(answers(result.json)).toEqual([]);
+      expect(project.runs()['id-FAKE-1'].question?.answer).toBeDefined();
+    });
+
+    it('hands over nothing when the item no longer waits', async () => {
+      project.writeRuns(parkedRun({ text: 'No', at, by: 'person' }) as never);
+      const tracker = backlog();
+      tracker.items![0].labels = ['type/task'];
+      expect(answers((await runFlow(project, tracker, ['inbox'])).json)).toEqual([]);
+    });
+
+    it('hands over nothing for a closed item, or a run that ended', async () => {
+      project.writeRuns(parkedRun({ text: 'No', at, by: 'person' }) as never);
+      const closed = backlog();
+      closed.items![0].stateCategory = 'canceled';
+      expect(answers((await runFlow(project, closed, ['inbox'])).json)).toEqual([]);
+      const runs = parkedRun({ text: 'No', at, by: 'person' });
+      project.writeRuns({ 'id-FAKE-1': { ...runs['id-FAKE-1'], status: 'failed' } } as never);
+      expect(answers((await runFlow(project, backlog(), ['inbox'])).json)).toEqual([]);
+    });
+
+    // Purpose: one bad run must not stop the team's comments from arriving.
+    it('still hands over comments when an answered item cannot be read', async () => {
+      const runs = parkedRun({ text: 'No', at, by: 'person' });
+      project.writeRuns({
+        'id-GONE-9': { ...runs['id-FAKE-1'], issueId: 'id-GONE-9', identifier: 'GONE-9' },
+      } as never);
+      const result = await runFlow(
+        project,
+        backlog({ 'FAKE-1': [said('c1', 'dorian', 'Use CSV.', 1)] }),
+        ['inbox']
+      );
+      expect(result.code).toBe(EXIT.ok);
+      expect((result.json.entries as Entry[]).map((entry) => entry.body)).toEqual(['Use CSV.']);
+      expect(answers(result.json)).toEqual([]);
+      expect(result.stderr).toContain('could not read GONE-9');
+      expect(project.runs()['id-GONE-9'].question?.answer).toBeDefined();
+    });
+
+    it('never hands over an answer whose time cannot be read', async () => {
+      project.writeRuns(parkedRun({ text: 'No', at: 'garbage', by: 'person' }) as never);
+      expect(answers((await runFlow(project, backlog(), ['inbox'])).json)).toEqual([]);
+    });
+
+    it('leaves a run the drain owns to the drain', async () => {
+      const runs = parkedRun({ text: 'Yes', at, by: 'agent-default' });
+      project.writeRuns({
+        'id-FAKE-1': { ...runs['id-FAKE-1'], drain: { v: 1, rev: 1, phase: 'parked' } },
+      } as never);
+      const result = await runFlow(project, backlog(), ['inbox']);
+      expect(answers(result.json)).toEqual([]);
+      expect(project.runs()['id-FAKE-1'].question?.answer).toBeDefined();
+    });
   });
 
   it('keeps a watermark, so a comment is handed over once', async () => {

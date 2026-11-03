@@ -188,13 +188,40 @@ function fakeLauncher(host: HostName, starts: { req: LaunchRequest }[], fail?: E
   } as Launcher;
 }
 
+/**
+ * `ps`'s two reads for a chain from this process upward, for the person gate.
+ * Tests run under anything (an agent, CI), so the real chain is never read.
+ */
+function psFor(...exes: string[]): ProcessRunner {
+  const chain = [process.pid, ...exes.map((_, i) => 900000 + i)];
+  const rows = ['node', ...exes].map((exe, i) => ({
+    pid: chain[i],
+    ppid: chain[i + 1] ?? 1,
+    exe,
+  }));
+  return async (_cmd, args) => ({
+    code: 0,
+    stdout: rows
+      .map((row) =>
+        args.join(' ').includes('comm=')
+          ? `${row.pid} ${row.ppid} ttys007 ${row.exe}\n`
+          : `${row.pid} ${row.exe} --a-secret-argument\n`
+      )
+      .join(''),
+    stderr: '',
+  });
+}
+
 /** Real git, except `remote get-url origin` answers a GitHub address. */
-const runner: ProcessRunner = async (cmd, args, opts) => {
-  if (cmd === 'git' && args.join(' ') === 'remote get-url origin') {
-    return { code: 0, stdout: 'git@github.com:acme/app.git\n', stderr: '' };
-  }
-  return realProcessRunner(cmd, args, opts);
-};
+function runnerWith(ps: ProcessRunner): ProcessRunner {
+  return async (cmd, args, opts) => {
+    if (cmd === 'git' && args.join(' ') === 'remote get-url origin') {
+      return { code: 0, stdout: 'git@github.com:acme/app.git\n', stderr: '' };
+    }
+    if (cmd === '/bin/ps') return ps(cmd, args, opts);
+    return realProcessRunner(cmd, args, opts);
+  };
+}
 
 /** Run `flow <argv> --json` in the project. */
 async function flow(
@@ -209,6 +236,10 @@ async function flow(
     sleep?: (ms: number) => Promise<void>;
     guard?: RecordingGuard;
     env?: Record<string, string>;
+    /** What `ps` answers. Default: a person's terminal. */
+    ps?: ProcessRunner;
+    /** What standard input holds, for `--text-file -`. */
+    stdin?: string;
   } = {}
 ) {
   const forge = options.forge ?? fakeForge();
@@ -231,11 +262,20 @@ async function flow(
     stdout: { write: (c: string) => (out += c) },
     stderr: { write: (c: string) => (err += c) },
     createAdapter: async () => tracker.adapter,
-    runProcess: runner,
+    runProcess: runnerWith(options.ps ?? psFor('-zsh', 'login', 'Terminal')),
     createForge: forge.factory,
     armGuard: (options.guard ?? armGuard).guard,
     // --wait polls with the host's sleep; a test never waits for real.
-    io: { sleep: options.sleep ?? (async () => undefined) },
+    io: {
+      sleep: options.sleep ?? (async () => undefined),
+      stdin: {
+        isTTY: false,
+        read: async () => {
+          if (options.stdin === undefined) throw new Error('nothing should read standard input');
+          return options.stdin;
+        },
+      },
+    },
     ...(options.launcher === undefined ? {} : { createLauncher: options.launcher }),
   });
   return { code, json: JSON.parse(out) as Record<string, unknown>, stderr: err, forge, tracker };
@@ -257,6 +297,21 @@ function expectStopAndAsk(stderr: string): void {
 
 /** A person's shell, as DorkOS runs `flow answer`: no agent runtime, no session (DOR-3712). */
 const person = (): Record<string, string> => ({ DORK_HOME: dorkHome });
+
+/** The project's journal, as text; empty when nothing was written. */
+function journalText(): string {
+  const file = path.join(project.dir, '.dork', 'flow', 'journal.jsonl');
+  return existsSync(file) ? readFileSync(file, 'utf8') : '';
+}
+
+/** The journal's lines about a person acting (DOR-3718). */
+function personLines(): Record<string, unknown>[] {
+  return journalText()
+    .split('\n')
+    .filter((line) => line !== '')
+    .map((line) => JSON.parse(line) as Record<string, unknown>)
+    .filter((line) => line.kind === 'person.act');
+}
 
 /** The ACME-12 run, at `stage`, with extra fields. */
 function writeRun(fields: Partial<FlowRun> = {}): void {
@@ -571,6 +626,53 @@ describe('flow review: only a person approves or sends back (DOR-3716)', () => {
     expect(comments(tracker)).toEqual([]);
     expect(tracker.writes.filter((c) => c.method === 'applyWorkState')).toEqual([]);
     expect(stored()).toEqual(before);
+  });
+
+  // Purpose (DOR-3718): the same process-ancestry check as flow answer.
+  it.each<[string, string[]]>([
+    ['--approve', ['--approve', '--by', 'person']],
+    ['--changes', ['--changes', '--note', 'Not this.']],
+  ])('refuses %s with no markers when an agent is in the process chain', async (_name, flags) => {
+    writeRun();
+    const forge = fakeForge({ head: 'feedface' });
+    const tracker = new FakeTracker({ team: ACME_TEAM, items: [started()] });
+    const result = await flow(['review', 'ACME-12', ...flags], {
+      forge,
+      tracker,
+      ps: psFor('/bin/zsh', '/opt/homebrew/bin/opencode'),
+    });
+    expect(result.code).toBe(EXIT.precondition);
+    expect(result.stderr).toContain('opencode');
+    expect(comments(tracker)).toEqual([]);
+    expect(forge.calls).toEqual([]);
+  });
+
+  it('refuses an agent before reading the note from standard input', async () => {
+    writeRun();
+    const tracker = new FakeTracker({ team: ACME_TEAM, items: [started()] });
+    const result = await flow(['review', 'ACME-12', '--changes', '--note-file', '-'], {
+      forge: fakeForge({ head: 'feedface' }),
+      tracker,
+      env: { ...person(), CLAUDECODE: '1' },
+    });
+    expect(result.code).toBe(EXIT.precondition);
+    expect(result.json.error).toMatchObject({ kind: 'person-gate' });
+  });
+
+  it("reads a person's note from standard input with --note-file -", async () => {
+    writeRun();
+    const tracker = new FakeTracker({ team: ACME_TEAM, items: [started()] });
+    const result = await flow(['review', 'ACME-12', '--changes', '--note-file', '-'], {
+      forge: fakeForge({ head: 'feedface' }),
+      tracker,
+      stdin: 'Make the banner smaller.\n',
+    });
+    expect(result.code).toBe(EXIT.ok);
+    expect(comments(tracker)[0]).toContain('Make the banner smaller.');
+    expect(personLines()).toEqual([
+      expect.objectContaining({ kind: 'person.act', verb: 'review', item: 'ACME-12' }),
+    ]);
+    expect(journalText()).not.toContain('Make the banner smaller.');
   });
 
   it("still ships from a person's shell, arming the approved commit", async () => {
@@ -971,6 +1073,134 @@ describe('flow answer', () => {
     expectStopAndAsk(result.stderr);
     expect(comments(tracker)).toEqual([]);
     expect(stored().question?.answer).toBeUndefined();
+  });
+
+  // Purpose (DOR-3718): `env -i` empties the environment and leaves the parent
+  // chain, so an agent's shell with no markers at all is still refused. The
+  // refusal is the same one: stop and ask, never how to get past it.
+  it("refuses --text with no markers when an agent is in the caller's process chain", async () => {
+    writeRun({ stage: 'execute', status: 'running', question: question() });
+    const tracker = new FakeTracker({ team: ACME_TEAM, items: [parked()] });
+    const result = await flow(['answer', 'ACME-12', '--text', 'Drop it.'], {
+      tracker,
+      env: person(),
+      ps: psFor('/usr/bin/env', '/bin/zsh', '/opt/x/claude', 'DorkOS Helper'),
+    });
+    expect(result.code).toBe(EXIT.precondition);
+    expectStopAndAsk(result.stderr);
+    expect(result.stderr).toContain('claude-code');
+    expect(result.json.error).toMatchObject({ kind: 'person-gate' });
+    expect(comments(tracker)).toEqual([]);
+    expect(stored().question?.answer).toBeUndefined();
+  });
+
+  // Purpose (DOR-3718): the check never refuses a person because it could not
+  // look. It says so in the record instead.
+  it.each<[string, ProcessRunner]>([
+    ['exits non-zero', async () => ({ code: 1, stdout: '', stderr: 'no' })],
+    [
+      'cannot start',
+      async () => {
+        throw new Error('ENOENT');
+      },
+    ],
+  ])("still takes a person's answer when ps %s", async (_name, ps) => {
+    writeRun({ stage: 'execute', status: 'running', question: question() });
+    const tracker = new FakeTracker({ team: ACME_TEAM, items: [parked()] });
+    const result = await flow(['answer', 'ACME-12', '--text', 'Drop it.'], {
+      tracker,
+      env: person(),
+      ps,
+    });
+    expect(result.code).toBe(EXIT.ok);
+    expect(personLines()).toEqual([
+      expect.objectContaining({ verb: 'answer', tty: 'unknown', parent: 'unknown' }),
+    ]);
+  });
+
+  // Purpose (DOR-3718, Security's Should): an answer's text no longer needs a
+  // file on disk. Its words reach flow on standard input.
+  it('reads the answer from standard input with --text-file -', async () => {
+    writeRun({ stage: 'execute', status: 'running', question: question() });
+    const tracker = new FakeTracker({ team: ACME_TEAM, items: [parked()] });
+    const result = await flow(['answer', 'ACME-12', '--text-file', '-'], {
+      tracker,
+      env: person(),
+      stdin: '  Drop it.\n',
+    });
+    expect(result.code).toBe(EXIT.ok);
+    expect(stored().question?.answer?.text).toBe('Drop it.');
+  });
+
+  it('refuses an empty standard input as an empty answer', async () => {
+    writeRun({ stage: 'execute', status: 'running', question: question() });
+    const tracker = new FakeTracker({ team: ACME_TEAM, items: [parked()] });
+    const result = await flow(['answer', 'ACME-12', '--text-file', '-'], {
+      tracker,
+      env: person(),
+      stdin: ' \n',
+    });
+    expect(result.code).toBe(EXIT.usage);
+    expect(result.stderr).toContain('the answer is empty');
+  });
+
+  // The gate comes first: an agent is refused without flow waiting on a stream
+  // it may never close. The default `flow` harness throws if stdin is read.
+  it('refuses an agent before reading standard input', async () => {
+    writeRun({ stage: 'execute', status: 'running', question: question() });
+    const tracker = new FakeTracker({ team: ACME_TEAM, items: [parked()] });
+    const result = await flow(['answer', 'ACME-12', '--text-file', '-'], {
+      tracker,
+      env: { ...person(), CLAUDECODE: '1' },
+    });
+    expect(result.code).toBe(EXIT.precondition);
+    expectStopAndAsk(result.stderr);
+  });
+
+  // Purpose (DOR-3718, Security's Should): each person's answer leaves a local
+  // record of the terminal and parent it came from, and never the answer's
+  // words or the parent's arguments.
+  it("records the caller's tty and parent, with no answer text and no arguments", async () => {
+    writeRun({ stage: 'execute', status: 'running', question: question() });
+    const tracker = new FakeTracker({ team: ACME_TEAM, items: [parked()] });
+    const result = await flow(['answer', 'ACME-12', '--text', 'A very private answer.'], {
+      tracker,
+      env: person(),
+      ps: psFor('/bin/-zsh', 'login'),
+    });
+    expect(result.code).toBe(EXIT.ok);
+    expect(personLines()).toEqual([
+      expect.objectContaining({
+        kind: 'person.act',
+        verb: 'answer',
+        item: 'ACME-12',
+        tty: 'ttys007',
+        parent: '-zsh',
+      }),
+    ]);
+    expect(journalText()).not.toContain('A very private answer.');
+    expect(journalText()).not.toContain('--a-secret-argument');
+  });
+
+  it('records nothing for a pick, or a dry run', async () => {
+    writeRun({
+      stage: 'execute',
+      status: 'running',
+      question: question({ decideBy: '2026-09-26T11:30:00.000Z', answeredBy: 'agent-default' }),
+    });
+    const tracker = new FakeTracker({ team: ACME_TEAM, items: [parked()] });
+    expect(
+      (
+        await flow(['answer', 'ACME-12', '--text', 'Drop it.', '--dry-run'], {
+          tracker,
+          env: person(),
+        })
+      ).code
+    ).toBe(EXIT.ok);
+    expect(
+      (await flow(['answer', 'ACME-12', '--pick', '--by', 'agent-default'], { tracker })).code
+    ).toBe(EXIT.ok);
+    expect(personLines()).toEqual([]);
   });
 
   it.each<[string, Record<string, string>]>([

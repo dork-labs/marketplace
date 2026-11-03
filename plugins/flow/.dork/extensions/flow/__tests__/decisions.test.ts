@@ -126,9 +126,8 @@ function fakeCli(
   const calls: Call[] = [];
   const execFile: ExecFileLike = (_file, args, opts, callback) => {
     const rest = args.slice(2);
-    const fileFlag = rest.findIndex((arg) => arg === '--note-file' || arg === '--text-file');
-    const file = fileFlag === -1 ? null : readFileSync(rest[fileFlag + 1], 'utf8');
-    calls.push({ args: rest, file, cwd: opts.cwd, env: opts.env });
+    const call: Call = { args: rest, file: null, cwd: opts.cwd, env: opts.env };
+    calls.push(call);
     const reply = answer(rest);
     const done = () => {
       const stdout = reply.json === undefined ? '{"ok":true}' : JSON.stringify(reply.json);
@@ -137,7 +136,23 @@ function fakeCli(
     };
     if (reply.delayMs === undefined) queueMicrotask(done);
     else setTimeout(done, reply.delayMs);
-    return undefined;
+    // What the verb reads with `-`: the answer's words, on standard input.
+    // An isolated extension's host drops what arrives before the program has
+    // started, so an `end` before `spawn` is lost here too.
+    let started = false;
+    return {
+      once: (_event: string, listener: () => void) =>
+        queueMicrotask(() => {
+          started = true;
+          listener();
+        }),
+      stdin: {
+        on: () => undefined,
+        end: (text?: string) => {
+          if (started) call.file = text ?? null;
+        },
+      },
+    };
   };
   return { calls, execFile };
 }
@@ -282,7 +297,6 @@ function setup(
     sessions: opts.sessions as never,
     storage: memory(opts.storage),
     flowRoot: '/flow',
-    dorkHome: dir,
     execFile: cli.execFile,
     now: () => NOW,
     log,
@@ -727,14 +741,56 @@ describe('answering', () => {
     expect(
       await coordinator.handle(event(key, { action: 'reject', note: 'Make the banner smaller.' }))
     ).toEqual({ resolve: 'rejected' });
-    expect(cli.calls[0].args.slice(0, 4)).toEqual([
+    expect(cli.calls[0].args.slice(0, 5)).toEqual([
       'review',
       'DOR-2387',
       '--changes',
       '--note-file',
+      '-',
     ]);
     expect(cli.calls[0].file).toBe('Make the banner smaller.');
     expect(cli.calls[0].args).not.toContain('Make the banner smaller.');
+  });
+
+  it('says the click failed when the gate refuses after the wait', async () => {
+    vi.useFakeTimers();
+    const { coordinator, inbox } = setup({
+      cli: fakeCli(() => ({
+        code: 5,
+        delayMs: 3_000,
+        json: { ok: false, error: { code: 5, kind: 'person-gate', message: 'Stop' } },
+      })),
+      answerWaitMs: 1_000,
+    });
+    await coordinator.sync([plan({ a: gateRun() })]);
+    const raised = inbox?.raised.length ?? 0;
+    const answer = coordinator.handle(event(key));
+    await vi.advanceTimersByTimeAsync(1_000);
+    expect(await answer).toEqual({ keepOpen: true, message: SENDING_TEXT });
+    await vi.advanceTimersByTimeAsync(2_500);
+    expect(inbox?.raised.length).toBe(raised + 1);
+  });
+
+  // DOR-3718: a refusal is not "someone else answered". Nothing was recorded, so
+  // the row stays, and the person isn't told their answer was a duplicate.
+  it.each<[string, string, object]>([
+    ['question', 'question:3f2a00000000:DOR-2401', { action: 'choice', choiceId: 'c2' }],
+    ['review', 'review:3f2a00000000:DOR-2387', { action: 'approve' }],
+  ])('keeps a %s open when the person gate refuses the click', async (kind, key, action) => {
+    const { coordinator } = setup({
+      stops: { questions: 'tell' },
+      cli: fakeCli(() => ({
+        code: 5,
+        json: { ok: false, error: { code: 5, kind: 'person-gate', message: 'Stop: an agent' } },
+      })),
+    });
+    await coordinator.sync([plan({ a: kind === 'question' ? questionRun() : gateRun() })]);
+    const result = await coordinator.handle(event(key, action as never));
+    expect(result).toEqual({
+      keepOpen: true,
+      message: expect.stringContaining('started from inside an agent'),
+    });
+    expect(JSON.stringify(result)).not.toContain('already answered');
   });
 
   it('keeps the row open with a plain message when the command fails', async () => {
@@ -767,14 +823,15 @@ describe('answering', () => {
     });
   });
 
-  it('posts a chip or a reply as the answer, through a file', async () => {
+  // DOR-3718: the words go on standard input, so no file ever holds them.
+  it('posts a chip or a reply as the answer, on standard input', async () => {
     const { coordinator, cli } = setup({ stops: { questions: 'tell' } });
     await coordinator.sync([plan({ a: questionRun() })]);
     const qkey = 'question:3f2a00000000:DOR-2401';
     expect(await coordinator.handle(event(qkey, { action: 'choice', choiceId: 'c2' }))).toEqual({
       resolve: 'answered',
     });
-    expect(cli.calls[0].args.slice(0, 3)).toEqual(['answer', 'DOR-2401', '--text-file']);
+    expect(cli.calls[0].args.slice(0, 4)).toEqual(['answer', 'DOR-2401', '--text-file', '-']);
     expect(cli.calls[0].file).toBe('Remove it');
   });
 

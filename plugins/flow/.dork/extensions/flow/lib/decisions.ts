@@ -40,8 +40,7 @@
  * @module @dorkos/flow/extension/decisions
  */
 
-import { randomUUID } from 'node:crypto';
-import { mkdirSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs';
+import { readFileSync, statSync } from 'node:fs';
 import path from 'node:path';
 import type { AutonomyKind, AutonomyStop } from '../../../../scripts/autonomy.ts';
 import { JOURNAL_FILE, RUN_FILES_DIR } from '../../../../scripts/config-names.ts';
@@ -190,8 +189,6 @@ export interface DecisionDeps {
   storage: SharedStorage;
   /** This extension's flow folder. */
   flowRoot: string;
-  /** The DorkOS home, for answers' temporary files. */
-  dorkHome: string;
   /** Runs a command with no shell. */
   execFile: ExecFileLike;
   /** The clock. */
@@ -1041,10 +1038,10 @@ export class DecisionCoordinator {
     ask: Ask,
     event: DecisionActionEvent,
     args: string[],
-    file: string | null,
+    input: string | null,
     outcome: 'approved' | 'rejected' | 'answered'
   ): Promise<DecisionActionResult> {
-    const run = this.verb(ask.project.root, args, file);
+    const run = this.verb(ask.project.root, args, input);
     // Without the inbox (flow's own route) nothing bounds the answer: wait for it.
     if (this.deps.inbox === undefined) return this.finish(ask, event, await run, outcome);
     const wait = this.deps.answerWaitMs ?? ANSWER_WAIT_MS;
@@ -1073,6 +1070,7 @@ export class DecisionCoordinator {
         } else if (
           'keepOpen' in answer &&
           (answer.message === SEND_FAILED_TEXT ||
+            answer.message === PERSON_GATE_REFUSED_TEXT ||
             answer.message?.startsWith("Flow didn't ship") === true)
         ) {
           await this.sayFailed(inbox, ask);
@@ -1144,6 +1142,12 @@ export class DecisionCoordinator {
       return offer === undefined
         ? { resolve: outcome, ...said }
         : { resolve: outcome, offer, ...said };
+    }
+    if (obj(result.json?.error).kind === 'person-gate') {
+      // The gate saw an agent above this DorkOS (DOR-3718). Nothing was recorded,
+      // so the row stays and the person's answer is not called a duplicate.
+      this.deps.log(`[flow] the person gate refused ${ask.key}`);
+      return { keepOpen: true, message: PERSON_GATE_REFUSED_TEXT };
     }
     if (result.code === EXIT_PRECONDITION && ask.kind === 'question') {
       // Already settled: the engine's deadline pass or a tracker reply got there first.
@@ -1220,23 +1224,16 @@ export class DecisionCoordinator {
   }
 
   /**
-   * Run one command of flow's CLI against a project, with an answer's text in
-   * a temporary file (never on the command line), deleted after.
+   * Run one command of flow's CLI against a project, with an answer's text on
+   * standard input (`-` after its flag): never on the command line, and never
+   * in a file.
    */
-  private verb(root: string, args: string[], file: string | null): Promise<VerbResult> {
+  private verb(root: string, args: string[], input: string | null): Promise<VerbResult> {
     const script = path.join(this.deps.flowRoot, 'scripts', 'flow.ts');
-    let temp: string | null = null;
-    const full = [...args];
-    if (file !== null) {
-      const dir = path.join(this.deps.dorkHome, 'flow', 'tmp');
-      mkdirSync(dir, { recursive: true, mode: 0o700 });
-      temp = path.join(dir, `answer-${randomUUID()}.txt`);
-      writeFileSync(temp, file, { mode: 0o600 });
-      full.push(temp);
-    }
+    const full = input === null ? [...args] : [...args, '-'];
     full.push('--json', '--project', root);
     return new Promise((resolve) => {
-      this.deps.execFile(
+      const child = this.deps.execFile(
         'node',
         ['--experimental-strip-types', script, ...full],
         {
@@ -1252,7 +1249,6 @@ export class DecisionCoordinator {
           env: withoutAgent(process.env),
         },
         (error: ExecError | null, stdout: string) => {
-          if (temp !== null) rmSync(temp, { force: true });
           let json: Record<string, unknown> | null = null;
           try {
             const parsed: unknown = JSON.parse(stdout.trim().split('\n').pop() ?? '');
@@ -1263,9 +1259,25 @@ export class DecisionCoordinator {
           if (error === null) resolve({ code: 0, json });
           else resolve({ code: typeof error.code === 'number' ? error.code : null, json });
         }
-      );
+      ) as ChildWithStdin | undefined;
+      // A verb that exits before reading (a refusal) closes the pipe; its exit
+      // code is what counts, so the write's error is not worth reporting.
+      child?.stdin?.on('error', () => undefined);
+      // On `spawn`: an isolated extension's host drops what arrives before the
+      // program has started, the words and the end of input alike.
+      child?.once('spawn', () => child.stdin?.end(input ?? undefined));
     });
   }
+}
+
+/** What a person reads when the gate refuses their click: only DorkOS starting inside an agent does that. */
+const PERSON_GATE_REFUSED_TEXT =
+  "Flow didn't record this, because this DorkOS was started from inside an agent's session. Start DorkOS on its own, then answer again.";
+
+/** The part of `execFile`'s child that {@link DecisionCoordinator} writes to. */
+interface ChildWithStdin {
+  once(event: 'spawn', listener: () => void): unknown;
+  stdin?: { on(event: 'error', listener: () => void): unknown; end(text?: string): unknown } | null;
 }
 
 /** One journal line, read leniently. */

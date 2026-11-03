@@ -297,7 +297,6 @@ export class ModelService {
       sessions: deps.sessions,
       storage: deps.storage,
       flowRoot: deps.flowRoot,
-      dorkHome: deps.dorkHome,
       execFile: deps.execFile,
       now: deps.now,
       log: deps.log,

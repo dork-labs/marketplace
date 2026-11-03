@@ -15,7 +15,7 @@
  *    (`land/arm-guard.ts`, run before anything is posted). A refusal still
  *    ships the approval and says why in `armRefused` (exit 0); a person merges it. Otherwise
  *    a person merges it.
- * 4. Journals `operator.wait` end (a person) or `review.approved` (the reviewer
+ * 4. Journals `person.act` and `operator.wait` end (a person) or `review.approved` (the reviewer
  *    agent).
  *
  * `--by reviewer-agent` is refused unless the project's "Ship finished work"
@@ -63,7 +63,14 @@ import { projectionFor } from '../work-state.ts';
 import { recordEvent } from './auto-journal.ts';
 import type { VerbContext, VerbResult } from './context.ts';
 import { isWritableDrain, originForge, short, writeDrain } from './drain-run.ts';
-import { refuseSessions, requirePersonShell, sessionsThatWorked } from './person-gate.ts';
+import {
+  readWords,
+  recordPersonAct,
+  refuseSessions,
+  requirePersonShell,
+  sessionsThatWorked,
+  type PersonCaller,
+} from './person-gate.ts';
 import { signBody } from './provenance.ts';
 import {
   applyAndVerify,
@@ -129,16 +136,13 @@ export function cleanVerdictSha(run: FlowRun): string | null {
 }
 
 /** The note from `--note` or `--note-file`. */
-function noteOf(ctx: VerbContext): string {
+async function noteOf(ctx: VerbContext): Promise<string> {
   const note = flag(ctx, 'note');
   const file = flag(ctx, 'note-file');
-  if ((note === undefined) === (file === undefined)) {
-    throw new UsageError('say what should change with exactly one of --note or --note-file');
-  }
   let value = note;
   if (file !== undefined) {
     try {
-      value = readFileSync(path.resolve(ctx.cwd, file), 'utf8');
+      value = await readWords(ctx, file);
     } catch {
       throw new UsageError(`cannot read --note-file ${file}`);
     }
@@ -444,18 +448,23 @@ async function review(ctx: VerbContext): Promise<VerbResult> {
   if (approve && (flag(ctx, 'note') !== undefined || flag(ctx, 'note-file') !== undefined)) {
     throw new UsageError('--note and --note-file go with --changes');
   }
-  const note = changes ? noteOf(ctx) : null;
+  if (changes && (flag(ctx, 'note') === undefined) === (flag(ctx, 'note-file') === undefined)) {
+    throw new UsageError('say what should change with exactly one of --note or --note-file');
+  }
   // Only a person ships or sends back as the person (DOR-3716): refused
   // inside an agent before any tracker or forge read. `--by reviewer-agent`
   // has its own checks (the stop, a token-bound clean verdict, the checks).
   const stopAndAsk = `Stop: an agent never ${approve ? 'ships' : 'sends back'} work for a person. Do not run this again any other way; ask the person to ${approve ? 'approve it' : 'send it back'} in DorkOS.`;
+  let caller: PersonCaller | null = null;
   if (by === 'person') {
-    requirePersonShell(
+    caller = await requirePersonShell(
       ctx,
       (agent) =>
         `flow review ${approve ? '--approve' : '--changes'} acts as the person, and this runs inside an agent (${agent}), so nothing was posted, approved or armed. ${stopAndAsk}`
     );
   }
+  // After the gate, so flow never waits on an agent's stream.
+  const note = changes ? await noteOf(ctx) : null;
 
   const setup = await setupWrite(ctx, ['getItem', 'applyWorkState', 'comment']);
   const { loaded, stages, adapter, store } = setup;
@@ -700,6 +709,7 @@ async function review(ctx: VerbContext): Promise<VerbResult> {
               item: identifier,
             }
       );
+      if (caller !== null) recordPersonAct(ctx, 'review', identifier, caller);
     }
     const checksText = noChecksNote === null ? '' : ` ${noChecksNote}`;
     const armText = armed
@@ -789,6 +799,7 @@ async function review(ctx: VerbContext): Promise<VerbResult> {
       requireStored(written.status, store.path, `run "flow stage ${identifier} execute"`);
     }
   }
+  if (!ctx.dryRun && caller !== null) recordPersonAct(ctx, 'review', identifier, caller);
   return {
     json: {
       ok: true,

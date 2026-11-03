@@ -334,7 +334,7 @@ can comment reaches a model with tools otherwise.
   tracker's response (no `adapter.ts`, no `getInbox` capability, or the
   in-session `mcp` transport, which the CLI refuses), `flow inbox` exits 3 and
   nothing read that way starts or resumes a turn. Parked items stay parked;
-  `flow answer` from DorkOS still resumes them.
+  `flow answer` from DorkOS still resumes a run the drain owns.
 - The loader refuses an adapter that returns a comment whose `authorIsTrusted`
   is not a boolean, or is `true` with no author.
 - `flow inbox` hands each comment over at most once: it moves its watermark

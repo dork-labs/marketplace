@@ -86,7 +86,7 @@ export async function releaseAnswer(
     if (!same(q, askedAt) || q.answer?.at !== answer.at || q.answer.by !== answer.by) {
       return current;
     }
-    const { answer: _dropped, ...rest } = q;
+    const { answer: _dropped, answerHandedOverAt: _handedOver, ...rest } = q;
     return { ...current, question: rest };
   });
 }
@@ -138,6 +138,35 @@ export async function clearQuestion(
     const { question: _done, ...rest } = current;
     return rest;
   });
+}
+
+/**
+ * Mark a recorded answer handed over, once, under the lock, so two passes never
+ * resume on one answer. The question and its answer stay, so `flow answer` still
+ * refuses a second answer.
+ *
+ * @param store - The run store.
+ * @param issueId - The run's key.
+ * @param askedAt - The question's `askedAt`.
+ * @param at - The time now.
+ * @returns `true` when this call marked it.
+ * @throws {PreconditionError} When the lock stayed busy.
+ */
+export async function markAnswerHandedOver(
+  store: FlowStateFile,
+  issueId: string,
+  askedAt: string,
+  at: string
+): Promise<boolean> {
+  let won = false;
+  const result = await store.updateRun(issueId, (current) => {
+    const q = current.question;
+    won = same(q, askedAt) && q.answer !== undefined && q.answerHandedOverAt === undefined;
+    if (!won || q === undefined) return current;
+    return { ...current, question: { ...q, answerHandedOverAt: at } };
+  });
+  requireWritten(result.status, store.path);
+  return won;
 }
 
 /**

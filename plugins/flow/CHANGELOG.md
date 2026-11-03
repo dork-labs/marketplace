@@ -4,6 +4,17 @@ Installs of this plugin are pinned to a commit SHA, so a fix here does not reach
 you until you **reinstall it** (Marketplace → flow → reinstall, or re-run your
 `--plugin-dir` checkout's `git pull`). Each entry below says whether that matters.
 
+## 0.87.0
+
+**The checks that keep agents from acting as you are harder to get past by accident, and the words around them now say what they actually prove (DOR-3718). An answer or a note you give in DorkOS is no longer written to a temporary file. Reinstall to get it.**
+
+- `flow answer --text`, `flow review --approve` and `flow review --changes` also look at the programs that started them. If they recognize Claude Code, Codex or OpenCode among them, they refuse, whatever the environment says. This also helps with OpenCode, which carries no session id. DorkOS's Inbox and Flow panel, your own terminal, an editor's terminal and DorkOS's terminal work as before.
+- It doesn't cover a DorkOS Doe agent, whose commands look the same as your click in DorkOS. It's a guard against habit, not a boundary: a determined agent on your computer can still get past it. It's also untested inside Codex's sandbox, where flow may not be able to read the process list. If DorkOS's own terminal runs under a dev server an agent started, flow can refuse you there; a click still works. If a click is ever refused, the row stays open and says why. If flow can't read the process list, it lets the action through and records `unknown`, so it never refuses you for that.
+- Each answer and review you give leaves a line in this project's local journal (`.dork/flow/journal.jsonl`) with the terminal and the name of the program that started it. Never your words or that program's arguments. With the journal off, there's no line.
+- `flow inbox` now applies the secrets-or-spending rule in code, not only in the skill's instructions. It drops any recorded answer not marked as yours and warns. A plain pass hands each other answer over at most once, under `answers`, while its item is open and waiting. If the resume then fails, the item stays parked until a teammate replies on the tracker or the agent asks again. An adapter that can't read the inbox can only resume on an answer through the drain.
+- DorkOS passes your answer or note to flow on standard input. `--text-file -` and `--note-file -` read from there, and you can use them yourself.
+- Corrected the headlines of 0.84.0 and 0.85.0, below, which said "only a person". The checks stop an agent using its usual tools; they can't prove a person acted. An answer written by hand into flow's state file and marked as yours still counts, and the code comment that suggested otherwise is fixed too.
+
 ## 0.86.0
 
 **`flow pr --arm`, `drain.armAutoMerge` and the drain's re-arm now arm a PR only with a `security-reviewed` label a person added after its head arrived, on every PR, whatever it touches (DOR-3724). Before, these only needed the label on a security path, and `--arm` is an agent's to pass, so an agent could arm its own PR with no review. `flow sweep` already asked for the label, but its arm guard didn't check it was still on; now it does. Reinstall to get it.**
@@ -16,7 +27,7 @@ you until you **reinstall it** (Marketplace → flow → reinstall, or re-run yo
 
 ## 0.85.0
 
-**Only a person can approve or send back work at the review gate now (DOR-3716). Before, any agent could run `flow review --approve` from its own shell, which posted "Shipped from DorkOS.", approved the PR and, with `gates.review.mergeOnApproval` on, armed it to merge. Reinstall to get it.**
+**An agent using its usual tools can no longer approve or send back work at the review gate as you (DOR-3716). Before, any agent could run `flow review --approve` from its own shell, which posted "Shipped from DorkOS.", approved the PR and, with `gates.review.mergeOnApproval` on, armed it to merge. Reinstall to get it.**
 
 - `flow review --approve` (as the person) and `flow review --changes` refuse a shell inside an agent (Claude Code, Codex or OpenCode, any runtime `FLOW_RUNTIME` names, or a DorkOS agent turn), and a session that worked the item: its own, its drain worker or reviewer, its VERIFY reviewer, or the session that asked its question or checked its pick. They post, approve and arm nothing, and the refusal tells the agent to stop and ask you to approve in DorkOS.
 - DorkOS's 👍 and 👎 work as before: DorkOS runs them without any agent's markers, since you're the one clicking. You can also review from a plain terminal.
@@ -26,7 +37,7 @@ you until you **reinstall it** (Marketplace → flow → reinstall, or re-run yo
 
 ## 0.84.0
 
-**Only a person can answer a parked question with `flow answer --text` now, and a question about secrets or spending resumes only on a person's answer (DOR-3712). Before, any agent could run `flow answer --text`, including the one that asked, and its words were recorded as yours. Reinstall to get it.**
+**An agent using its usual tools can no longer answer a parked question with `flow answer --text`, and a question about secrets or spending resumes only on an answer recorded as a person's (DOR-3712). Before, any agent could run `flow answer --text`, including the one that asked, and its words were recorded as yours. Reinstall to get it.**
 
 - `flow answer --text` and `--text-file` refuse a shell inside an agent (Claude Code, Codex or OpenCode, any runtime `FLOW_RUNTIME` names, or a DorkOS agent turn) and the session that asked the question or works the item, and post and record nothing. The refusal tells the agent to stop and ask you to answer in DorkOS, never how to get past it. You can also answer from a plain terminal; if yours has Claude Code's environment exported, open a plain one.
 - DorkOS's Inbox and Flow panel answer the same way as before: DorkOS runs `flow answer` without any agent's markers, since you're the one clicking.
