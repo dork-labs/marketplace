@@ -515,6 +515,40 @@ describe('flow triage --park with an old question on the run', () => {
     expect(project.runs()['id-FAKE-1'].question).toBeUndefined();
   });
 
+  it("leaves one line for the person when the answer was a person's, without the words", async () => {
+    const runs = run();
+    project.writeRuns({
+      'id-FAKE-1': {
+        ...runs['id-FAKE-1'],
+        question: {
+          ...runs['id-FAKE-1'].question,
+          answer: { text: 'Private words.', at: '2026-09-26T11:30:00.000Z', by: 'person' },
+        },
+      },
+    } as never);
+    await runFlow(project, { items: [untriaged()] }, park);
+    expect(ofKind('answer.dropped')).toEqual([
+      expect.objectContaining({ kind: 'answer.dropped', item: 'FAKE-1' }),
+    ]);
+    expect(JSON.stringify(journal())).not.toContain('Private words.');
+  });
+
+  it("leaves no line when the answer was an agent's", async () => {
+    const runs = run();
+    project.writeRuns({
+      'id-FAKE-1': {
+        ...runs['id-FAKE-1'],
+        question: {
+          ...runs['id-FAKE-1'].question,
+          answer: { text: 'Pick', at: '2026-09-26T11:30:00.000Z', by: 'agent-default' },
+        },
+      },
+    } as never);
+    await runFlow(project, { items: [untriaged()] }, park);
+    expect(project.runs()['id-FAKE-1'].question).toBeUndefined();
+    expect(ofKind('answer.dropped')).toEqual([]);
+  });
+
   // A question nobody answered may still have a row a person is about to use.
   it('leaves a question with no answer, so an answer to it is still recorded', async () => {
     const runs = run();

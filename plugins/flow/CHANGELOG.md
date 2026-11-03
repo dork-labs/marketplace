@@ -13,6 +13,8 @@ you until you **reinstall it** (Marketplace → flow → reinstall, or re-run yo
 - `flow review` never cleared a row this way. If it meets the same busy moment, the row now says to try again instead of "Flow didn't ship it" with a file path. If your note or approval was already posted, trying again posts it a second time.
 - `--json` names these refusals with `kind`: `busy`, `settled` when someone answered, and `not-waiting` for the others. The exit code is still 5.
 - If an item stops waiting while a recorded answer hasn't been handed over, `flow inbox` now drops the answer and warns, so a later `agent/needs-input` doesn't resume on old words. `flow triage --park` drops such an answer too. Flow notices this only when a pass sees the item not waiting.
+- When an answer dropped that way, replaced by a new `flow ask`, or lost to `flow claim` or `flow release`, was a person's and nothing had used it, DorkOS now shows them a "Your answer wasn't used" row, unread in Activity, without their words. It needs flow's journal, which is on unless you turned it off. An agent's pick gets no row.
+- On Linear, reading one item now fails if Linear leaves out its labels or returns a full page of 100, so a recorded answer waits instead of dropping and an answer row stays. Flow can't work an item with 100 or more labels until some come off. The adapter contract says the same from 3.0.2.
 - `flow answer --text` on a run the drain doesn't own, with no open question, now refuses and posts nothing. It used to post your words and say the work goes on, though nothing would resume on them. Reply on the item instead.
 
 ## 0.88.0

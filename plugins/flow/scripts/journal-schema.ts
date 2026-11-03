@@ -106,6 +106,9 @@ export const JournalLineSchema = z.discriminatedUnion('kind', [
     parent: Name,
     ppid: z.number().int().positive().optional(),
   }),
+  // A person's recorded answer flow dropped unused. DorkOS tells them from this
+  // line, which names the item and never carries their words.
+  line('answer.dropped', {}),
   line('ci', {
     pr: z.number().int().positive(),
     event: z.enum(['red', 'ejected', 'merged']),

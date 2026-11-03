@@ -14,6 +14,8 @@
 import { BusyError } from '../errors.ts';
 import type { RunQuestion } from '../flow-run.ts';
 import type { FlowStateFile } from '../flow-state-file.ts';
+import { recordEvent } from './auto-journal.ts';
+import type { VerbContext } from './context.ts';
 
 /** An answer to record. */
 export interface RecordedAnswer {
@@ -148,27 +150,58 @@ export async function clearQuestion(
  * @param store - The run store.
  * @param issueId - The run's key.
  * @param askedAt - The question's `askedAt`, as the caller read it.
- * @returns `true` when this call dropped it; `false` when it was replaced, gone,
- *   given back or handed over since the caller read it.
+ * @returns Who the dropped answer was recorded as, read under the lock; `null`
+ *   when it was replaced, gone, given back or handed over since the caller read it.
  * @throws {BusyError} When the lock stayed busy.
  */
 export async function dropEndedQuestion(
   store: FlowStateFile,
   issueId: string,
   askedAt: string
-): Promise<boolean> {
-  let won = false;
+): Promise<string | null> {
+  let by: string | null = null;
   const result = await store.updateRun(issueId, (current) => {
-    won =
-      same(current.question, askedAt) &&
-      current.question.answer !== undefined &&
-      current.question.answerHandedOverAt === undefined;
-    if (!won) return current;
+    by = null;
+    if (
+      !same(current.question, askedAt) ||
+      current.question.answer === undefined ||
+      current.question.answerHandedOverAt !== undefined
+    ) {
+      return current;
+    }
+    by = current.question.answer.by;
     const { question: _ended, ...rest } = current;
     return rest;
   });
   requireWritten(result.status, store.path);
-  return won;
+  return by;
+}
+
+/**
+ * Who a question's answer was recorded as, while nothing has used it yet.
+ *
+ * @param question - The question, if any.
+ * @returns The answer's `by`, or `undefined` with no answer or one handed over.
+ */
+export function unusedAnswerBy(question: RunQuestion | undefined): string | undefined {
+  return question?.answerHandedOverAt === undefined ? question?.answer?.by : undefined;
+}
+
+/**
+ * Leave the journal line DorkOS tells a person from when their recorded answer
+ * went unused: the row had already resolved as answered, so nothing else would
+ * tell them. Only a person's: an agent's pick has nobody to tell. No words.
+ *
+ * @param ctx - The verb's context.
+ * @param identifier - The item.
+ * @param by - Who the dropped answer was recorded as, or `null` for nothing dropped.
+ */
+export function noteDroppedAnswer(
+  ctx: VerbContext,
+  identifier: string,
+  by: string | null | undefined
+): void {
+  if (by === 'person') recordEvent(ctx, { kind: 'answer.dropped', item: identifier });
 }
 
 /**

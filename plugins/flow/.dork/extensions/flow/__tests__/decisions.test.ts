@@ -1047,6 +1047,32 @@ describe('answering', () => {
       expect(log).toHaveBeenCalledWith(expect.stringContaining('the store stayed locked'));
     });
 
+    // A spend has no deadline to retry at: a deadline call after a person's busy
+    // click runs no pick and marks nothing answered.
+    it("takes no pick on a spend at a deadline call after a person's busy click", async () => {
+      const cli = fakeCli(() => refusal('busy', 'the store stayed locked'));
+      const { coordinator, inbox } = setup({ stops: { questions: 'tell' }, cli });
+      await coordinator.sync([
+        plan({
+          a: questionRun({
+            floor: ['secrets-or-spend'],
+            decideBy: '2026-09-28T17:00:00.000Z',
+          }),
+        }),
+      ]);
+      expect(await coordinator.handle(event(qkey, choice))).toEqual({
+        keepOpen: true,
+        message: BUSY_ANSWER_TEXT,
+      });
+      const deadline = event(qkey, { action: 'choice', decidedBy: 'deadline' });
+      expect(await coordinator.handle(deadline)).toEqual({ keepOpen: true });
+      expect(await coordinator.handle(deadline)).toEqual({ keepOpen: true });
+      expect(cli.calls).toHaveLength(1);
+      expect(JSON.stringify(cli.calls)).not.toContain('--pick');
+      expect(inbox?.resolved).toEqual([]);
+      expect(inbox?.open.has(qkey)).toBe(true);
+    });
+
     // A slow answer already said "Sending…", so the row itself has to say it.
     it('says on the row that a slow answer met a busy store', async () => {
       vi.useFakeTimers();
@@ -1604,6 +1630,38 @@ describe('"While you were away"', () => {
         choiceLabel: 'Shipped',
         tell: true,
         outcome: 'approved',
+      }),
+    ]);
+  });
+
+  it('tells the person once when flow dropped their answer, whatever the stops, and never old history', async () => {
+    const line = (ts: string, item: string) => ({ v: 1, ts, kind: 'answer.dropped', item });
+    const old = line('2026-09-27T00:00:00.000Z', 'DOR-1');
+    const root = projectWithJournal([old]);
+    const { coordinator, inbox } = setup({ stops: { ship: 'ask' } });
+    const store = { a: { identifier: 'DOR-9', title: 'New sidebar', status: 'running' } };
+    await coordinator.sync([plan(store, { root })]);
+    expect(inbox?.recorded).toEqual([]);
+    writeFileSync(
+      path.join(root, '.dork', 'flow', 'journal.jsonl'),
+      [
+        old,
+        line('2026-09-28T11:00:00.000Z', 'DOR-9'),
+        { ...line('2026-09-28T11:01:00.000Z', 'x'), item: undefined },
+      ]
+        .map((entry) => JSON.stringify(entry))
+        .join('\n')
+    );
+    await coordinator.sync([plan(store, { root })]);
+    await coordinator.sync([plan(store, { root })]);
+    expect(inbox?.recorded).toEqual([
+      expect.objectContaining({
+        title: "Your answer on New sidebar wasn't used",
+        by: { kind: 'rule', label: 'Flow' },
+        choiceLabel: 'Not used',
+        detail: 'DOR-9',
+        tell: true,
+        outcome: 'answered',
       }),
     ]);
   });

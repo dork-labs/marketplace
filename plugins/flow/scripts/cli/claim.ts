@@ -51,6 +51,7 @@ import {
   stageForLabel,
   type WriteSetup,
 } from './work-write.ts';
+import { noteDroppedAnswer, unusedAnswerBy } from './question-write.ts';
 
 /**
  * The item's ownership class under the configured scopes: the issue's assignee
@@ -236,6 +237,8 @@ export async function claimItem(
           store.path,
           `run "flow release ${identifier} --to ready" and claim it again`
         );
+        // The new record has no question, so an answer nothing used goes with the old one.
+        noteDroppedAnswer(ctx, item.identifier, unusedAnswerBy(previous?.question));
       }
       return { change, record };
     },

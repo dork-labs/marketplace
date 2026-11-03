@@ -62,6 +62,7 @@ import {
   retryAsk,
   retryRecord,
   reviewAsk,
+  droppedAnswerRecord,
   shipRecord,
   signInAsk,
   type Ask,
@@ -701,8 +702,8 @@ export class DecisionCoordinator {
 
   /**
    * Leave "While you were away" rows (§7.10) for what flow settled without
-   * asking: work the reviewer agent shipped, and failing checks flow went
-   * back to fix. Each event is recorded once.
+   * asking: work the reviewer agent shipped, failing checks flow went back to
+   * fix, and a person's answer flow dropped. Each event is recorded once.
    */
   private async recordAway(inbox: InboxApi, plans: readonly PlanProject[]): Promise<void> {
     const recorded = obj(await this.deps.storage.get(RECORDED_KEY));
@@ -736,6 +737,26 @@ export class DecisionCoordinator {
               identifier,
               title: titles.get(identifier) ?? null,
               stop: shipStop,
+            }),
+            marker,
+            newMarkers
+          );
+        }
+      }
+      // A person's answer flow dropped unused: said at every stop, as nothing else
+      // tells them. The line names the item and carries none of their words.
+      if (since !== null) {
+        for (const line of lines) {
+          if (line.kind !== 'answer.dropped') continue;
+          const identifier = text(line.item);
+          if (identifier === null) continue;
+          const marker = `dropped:${root}:${identifier}:${String(line.ts)}`;
+          if (recorded[marker] !== undefined) continue;
+          await this.record(
+            inbox,
+            droppedAnswerRecord(plan.ask, {
+              identifier,
+              title: titles.get(identifier) ?? null,
             }),
             marker,
             newMarkers

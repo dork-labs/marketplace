@@ -42,6 +42,7 @@ import {
   setupWrite,
   type WriteSetup,
 } from './work-write.ts';
+import { noteDroppedAnswer, unusedAnswerBy } from './question-write.ts';
 
 /** What {@link releaseItem} lets go of, and how. */
 export interface ReleaseInput {
@@ -104,6 +105,7 @@ export async function releaseItem(
       await retireChecker(ctx, store, resolveMainCheckout(ctx.projectDir), item.id);
       const removed = await store.removeRun(item.id);
       requireStored(removed.status, store.path, `run "flow release ${input.identifier}" again`);
+      noteDroppedAnswer(ctx, item.identifier, unusedAnswerBy(existing.question));
     }
     if (body !== undefined) await adapter.comment(item, body);
   }

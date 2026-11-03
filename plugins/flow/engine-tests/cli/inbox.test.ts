@@ -295,6 +295,45 @@ describe('flow inbox', () => {
         expect(answers((await runFlow(project, backlog(), ['inbox'])).json)).toEqual([]);
       });
 
+      describe('the line the person hears about it from', () => {
+        const dropped = () => {
+          const file = path.join(project.dir, '.dork', 'flow', 'journal.jsonl');
+          return existsSync(file)
+            ? readFileSync(file, 'utf8')
+                .split('\n')
+                .filter((line) => line.includes('"answer.dropped"'))
+            : [];
+        };
+
+        it("is written once for a person's answer, without the words", async () => {
+          project.writeRuns(parkedRun({ text: 'Private words.', at, by: 'person' }) as never);
+          await runFlow(project, moved(), ['inbox']);
+          await runFlow(project, moved(), ['inbox']);
+          expect(dropped()).toHaveLength(1);
+          expect(JSON.parse(dropped()[0])).toMatchObject({ item: 'FAKE-1' });
+          expect(dropped()[0]).not.toContain('Private words.');
+        });
+
+        it("is not written for an agent's pick", async () => {
+          project.writeRuns(parkedRun({ text: 'Pick', at, by: 'agent-default' }, []) as never);
+          await runFlow(project, moved(), ['inbox']);
+          expect(project.runs()['id-FAKE-1'].question).toBeUndefined();
+          expect(dropped()).toEqual([]);
+        });
+
+        it('is not written on a dry run', async () => {
+          project.writeRuns(parkedRun({ text: 'No', at, by: 'person' }) as never);
+          await runFlow(project, moved(), ['inbox', '--dry-run']);
+          expect(dropped()).toEqual([]);
+        });
+
+        it('is not written for an answer that was never dropped', async () => {
+          project.writeRuns(parkedRun({ text: 'No', at, by: 'person' }) as never);
+          await runFlow(project, backlog(), ['inbox']);
+          expect(dropped()).toEqual([]);
+        });
+      });
+
       it('drops it when the item closed', async () => {
         project.writeRuns(parkedRun({ text: 'No', at, by: 'person' }) as never);
         const closed = relabelled(['type/task', 'agent/needs-input'], {

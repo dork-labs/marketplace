@@ -53,7 +53,7 @@ import {
   setupWrite,
   runFor,
 } from './work-write.ts';
-import { dropEndedQuestion } from './question-write.ts';
+import { dropEndedQuestion, noteDroppedAnswer } from './question-write.ts';
 
 /** How many of the latest comments are read to spot a retried question. */
 const RECENT_COMMENTS = 10;
@@ -108,7 +108,8 @@ export async function run(ctx: VerbContext): Promise<VerbResult> {
   if (!ready && !ctx.dryRun && !item.labels.includes(AGENT_NEEDS_INPUT)) {
     const left = runFor(store, item);
     if (left?.question?.answer !== undefined && left.drain === undefined) {
-      await dropEndedQuestion(store, left.issueId, left.question.askedAt);
+      const by = await dropEndedQuestion(store, left.issueId, left.question.askedAt);
+      noteDroppedAnswer(ctx, left.identifier, by);
     }
   }
 

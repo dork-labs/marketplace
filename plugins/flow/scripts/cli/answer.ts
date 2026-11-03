@@ -159,7 +159,7 @@ export async function run(ctx: VerbContext): Promise<VerbResult> {
     // this path. This kind of run only resumes on a recorded answer.
     if (existing !== undefined && question === undefined && existing.drain === undefined) {
       throw new PreconditionError(
-        `${identifier} has no open question on its run, so nothing was posted; reply on the item instead`
+        `${identifier} has no open question on its run, so nothing was posted. Stop; ask the person to reply on the item.`
       );
     }
   }

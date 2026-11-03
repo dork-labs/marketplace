@@ -43,7 +43,7 @@ import {
   questionProblem,
 } from '../question.ts';
 import { requireOtherSession, callerSessions } from './caller.ts';
-import { claimCheck } from './question-write.ts';
+import { claimCheck, noteDroppedAnswer, unusedAnswerBy } from './question-write.ts';
 import { retireChecker } from './checker.ts';
 import { resolveMainCheckout } from '../main-checkout.ts';
 import { AGENT_NEEDS_INPUT, projectionFor } from '../work-state.ts';
@@ -256,7 +256,9 @@ export async function run(ctx: VerbContext): Promise<VerbResult> {
     if (existing !== undefined) {
       // The new question replaces the old one: a checker of the old one stops.
       await retireChecker(ctx, store, resolveMainCheckout(ctx.projectDir), existing.issueId);
+      let replaced: string | undefined;
       const written = await store.updateRun(existing.issueId, (current) => {
+        replaced = unusedAnswerBy(current.question);
         const next: FlowRun = { ...current, question };
         if (!isWritableDrain(current)) return next;
         const drain = current.drain;
@@ -278,6 +280,7 @@ export async function run(ctx: VerbContext): Promise<VerbResult> {
         store.path,
         `run the same "flow ask ${identifier}" again (the question is posted, so it will not be posted twice)`
       );
+      noteDroppedAnswer(ctx, existing.identifier, replaced);
     } else {
       ctx.warn(
         `${identifier} has no run on this machine, so the question is on the tracker only; DorkOS shows it once a run records it`

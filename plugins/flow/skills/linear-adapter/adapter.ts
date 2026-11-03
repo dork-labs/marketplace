@@ -99,10 +99,13 @@ const DISPOSITIONS = ['ready', 'claimed', 'completed', 'needs-input'] as const;
 // The GraphQL documents. Constant text only: every value is a variable.
 // ---------------------------------------------------------------------------
 
+/** How many labels one read of an issue asks for. A full page may not be all of them. */
+const LABEL_PAGE = 100;
+
 /** The fields every normalized issue needs, except its project and relations. */
 const ISSUE_FIELDS = `id identifier title description priority estimate createdAt
   state { name type } assignee { id } parent { identifier }
-  labels(first: 100) { nodes { id name parent { name } } }`;
+  labels(first: ${LABEL_PAGE}) { nodes { id name parent { name } } }`;
 
 /** The typed relation graph of one issue. */
 const RELATION_FIELDS = `relations { nodes { type relatedIssue { identifier } } }
@@ -1026,6 +1029,13 @@ export function createAdapter(ctx: AdapterContext): CodeAdapter {
 
     async getItem(identifier, opts = {}): Promise<ItemWithComments> {
       const issue = await readIssue(identifier, opts.comments);
+      // A verb decides from this one item whether it still waits, and that can
+      // drop a person's answer, so labels it was not told are a failed read, not
+      // "no labels". The snapshot stays lenient: it drops nothing.
+      const labelNodes = issue.labels?.nodes;
+      if (!Array.isArray(labelNodes) || labelNodes.length >= LABEL_PAGE) {
+        throw new TrackerError(`Linear did not give all of ${issue.identifier}'s labels`);
+      }
       const item = normalizeIssue(
         issue,
         issue,

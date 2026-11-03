@@ -1678,11 +1678,14 @@ describe('review fixes (DOR-2528 FIX-FIRST)', () => {
     });
     expect(result.code).toBe(EXIT.precondition);
     expect(result.json.error).not.toHaveProperty('kind');
-    expect(result.stderr).toContain('nothing was posted');
+    expect(result.stderr).toContain(
+      'nothing was posted. Stop; ask the person to reply on the item.'
+    );
     expect(comments(tracker)).toEqual([]);
   });
 
-  it("still takes a person's words on a parked drain run, which reads replies", async () => {
+  // Only that the words are posted: whether they resume the run isn't shown here.
+  it("still posts a person's words on a parked drain run with no question", async () => {
     writeRun({ stage: 'execute', status: 'running', drain: drain({ phase: 'parked' }) });
     const tracker = new FakeTracker({ team: ACME_TEAM, items: [parkedItem()] });
     const result = await flow(['answer', 'ACME-12', '--text', 'Fix it.'], {
@@ -1739,6 +1742,101 @@ describe('review fixes (DOR-2528 FIX-FIRST)', () => {
     expect(retry.code).toBe(EXIT.ok);
     expect(stored().question?.answer?.text).toBe('Hold it.');
     expect(comments(tracker)).toHaveLength(1);
+  });
+
+  // The retry DOR-3775 added only runs the verb again, so a spend's pick must meet
+  // the same refusal on every try: never "busy", and never recorded.
+  it("refuses a spend's pick while the store is busy and on every retry after", async () => {
+    writeRun({
+      stage: 'execute',
+      status: 'running',
+      question: floorQuestion({
+        floor: ['secrets-or-spend'],
+        checkAfter: null,
+        decideBy: '2026-09-26T11:30:00.000Z',
+      }),
+    });
+    const tracker = new FakeTracker({ team: ACME_TEAM, items: [parkedItem()] });
+    const pick = ['answer', 'ACME-12', '--pick', '--by', 'agent-default'];
+    const release = holdStoreLock();
+    const busy = await flow(['answer', 'ACME-12', '--text', 'Hold it.'], {
+      tracker,
+      env: person(),
+    });
+    expect(busy.json.error).toMatchObject({ kind: 'busy' });
+    const whileBusy = await flow(pick, { tracker });
+    release();
+    const retry = await flow(pick, { tracker });
+    for (const refused of [whileBusy, retry]) {
+      expect(refused.code).toBe(EXIT.precondition);
+      expect(refused.json.error).not.toHaveProperty('kind');
+      expect(refused.stderr).toContain('only a person answers it');
+    }
+    expect(stored().question?.answer).toBeUndefined();
+    expect(comments(tracker)).toEqual([]);
+  });
+
+  // A new question takes the old one's place, and any answer still on it.
+  describe("flow ask over a person's answer nothing has used", () => {
+    const dropped = () =>
+      journalText()
+        .split('\n')
+        .filter((line) => line.includes('"answer.dropped"'));
+    const overAnswer = async (
+      answer: Record<string, unknown>,
+      fields: object = {},
+      during: () => () => void = () => () => {}
+    ) => {
+      writeRun({
+        stage: 'execute',
+        status: 'running',
+        question: floorQuestion({ floor: [], checkAfter: null, answer, ...fields }),
+      });
+      const tracker = new FakeTracker({ team: ACME_TEAM, items: [parkedItem()] });
+      const release = during();
+      const result = await flow(
+        [
+          'ask',
+          'ACME-12',
+          '--question',
+          'Which one?',
+          '--choice',
+          'A',
+          '--choice',
+          'B',
+          '--pick',
+          '1',
+          '--why',
+          'Safer.',
+        ],
+        { tracker }
+      );
+      release();
+      return result;
+    };
+    const at = '2026-09-26T11:40:00.000Z';
+
+    it('leaves one line for the person, without the words', async () => {
+      const result = await overAnswer({ text: 'Private words.', at, by: 'person' });
+      expect(result.code).toBe(EXIT.ok);
+      expect(stored().question?.answer).toBeUndefined();
+      expect(dropped()).toHaveLength(1);
+      expect(JSON.parse(dropped()[0])).toMatchObject({ item: 'ACME-12' });
+      expect(journalText()).not.toContain('Private words.');
+    });
+
+    it('leaves none when the store was busy, as nothing was dropped', async () => {
+      const result = await overAnswer({ text: 'No', at, by: 'person' }, {}, holdStoreLock);
+      expect(result.code).not.toBe(EXIT.ok);
+      expect(stored().question?.answer?.text).toBe('No');
+      expect(dropped()).toEqual([]);
+    });
+
+    it("leaves none for an agent's pick, or an answer already handed over", async () => {
+      await overAnswer({ text: 'Pick', at, by: 'agent-default' });
+      await overAnswer({ text: 'No', at, by: 'person' }, { answerHandedOverAt: at });
+      expect(dropped()).toEqual([]);
+    });
   });
 
   // Finding 10: the floor the deadline was promised on is the one the pick is

@@ -34,7 +34,12 @@ import { withHeldLock } from '../atomic-json.ts';
 import { PreconditionError, UsageError } from '../errors.ts';
 import { droppedAnswerWarning, recordedAnswerPointer, recordedAnswerStands } from '../question.ts';
 import { AGENT_NEEDS_INPUT } from '../work-state.ts';
-import { dropEndedQuestion, markAnswerHandedOver, releaseAnswer } from './question-write.ts';
+import {
+  dropEndedQuestion,
+  markAnswerHandedOver,
+  noteDroppedAnswer,
+  releaseAnswer,
+} from './question-write.ts';
 import { isOpenItem } from './work-write.ts';
 import type { FlowRun } from '../flow-run.ts';
 import { openFlowStateFile, type FlowStateFile } from '../flow-state-file.ts';
@@ -180,7 +185,8 @@ function lineFor(read: InboxRead, judge: Judge): InboxLine {
  * refuses a second one; if the resume then fails, a member's reply or a new
  * `flow ask` moves the item. A run the drain owns is the drain's (`drain.ts`), and it applies
  * the same rule. A read that fails costs that run this pass, never the team's
- * comments.
+ * comments, and so does an item whose labels the adapter could not all read: it
+ * throws rather than answer with a short list.
  *
  * @param ctx - The verb's context.
  * @param adapter - The tracker adapter.
@@ -225,7 +231,9 @@ async function settleRecordedAnswers(
       // would resume on these old words. A busy lock tries again next pass.
       if (ctx.dryRun) continue;
       try {
-        if (await dropEndedQuestion(store, run.issueId, question.askedAt)) {
+        const by = await dropEndedQuestion(store, run.issueId, question.askedAt);
+        if (by !== null) {
+          noteDroppedAnswer(ctx, run.identifier, by);
           ctx.warn(
             `flow inbox: ${run.identifier}'s recorded answer was not used: the item stopped waiting on it, so it was dropped.`
           );
