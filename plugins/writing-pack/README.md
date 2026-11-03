@@ -22,3 +22,5 @@ tuned over months of agents writing changelogs, docs and decision records. This
 pack is the general version, with the DorkOS-only rules taken out.
 
 MIT licensed.
+
+<!-- security-gate proof B, throwaway, never merged. -->
