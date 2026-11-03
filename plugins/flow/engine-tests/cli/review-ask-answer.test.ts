@@ -456,6 +456,16 @@ describe('flow review: only a person approves or sends back (DOR-3716)', () => {
     ["the drain's reviewer", { FLOW_SESSION_ID: 'drain-reviewer-1' }],
     ['the session that asked its question', { FLOW_SESSION_ID: 'asker-1' }],
     ["its question's checker", { FLOW_SESSION_ID: 'checker-1' }],
+    // Security's probe on DOR-3716: an agent that drops its runtime markers but
+    // keeps its own session id. Every session variable present counts.
+    [
+      "the run's Claude Code session id, its markers dropped",
+      { CLAUDE_CODE_SESSION_ID: 'session-abcdef123456' },
+    ],
+    [
+      "the drain worker's Claude Code session id, its markers dropped",
+      { CLAUDE_CODE_SESSION_ID: 'worker-1' },
+    ],
   ];
 
   /** A run at the review gate whose drain worker and VERIFY reviewer have sessions. */
@@ -959,19 +969,64 @@ describe('flow answer', () => {
     expect(stored().question?.answer).toBeUndefined();
   });
 
-  it.each([
-    ['the session that asked', 'worker-session'],
-    ["the run's worker", 'session-abcdef123456'],
+  it.each<[string, Record<string, string>]>([
+    ['the session that asked', { FLOW_SESSION_ID: 'worker-session' }],
+    ["the run's worker", { FLOW_SESSION_ID: 'session-abcdef123456' }],
+    // The same sessions as flow review refuses (person-gate.ts).
+    ["the drain's worker", { FLOW_SESSION_ID: 'drain-worker-1' }],
+    ["the drain's reviewer", { FLOW_SESSION_ID: 'drain-reviewer-1' }],
+    ['the VERIFY reviewer', { FLOW_SESSION_ID: 'verify-reviewer-1' }],
+    ["the question's checker", { FLOW_SESSION_ID: 'checker-1' }],
+    // Security's probe: markers dropped, the runtime's own session id kept.
+    [
+      "the asker's Claude Code session id, its markers dropped",
+      { CLAUDE_CODE_SESSION_ID: 'worker-session' },
+    ],
   ])('refuses --text from %s, even with no runtime markers', async (_name, session) => {
     writeRun({
       stage: 'execute',
       status: 'running',
-      question: question({ askedBy: 'worker-session' }),
-    });
+      question: question({
+        askedBy: 'worker-session',
+        checker: { host: 'cli', runtime: 'claude-code', sessionId: 'checker-1', cwd: '/c' },
+      }),
+      drain: drain({
+        phase: 'parked',
+        worker: {
+          host: 'cli',
+          runtime: 'claude-code',
+          sessionId: 'drain-worker-1',
+          account: null,
+          cwd: '/w',
+        },
+        reviewer: {
+          host: 'cli',
+          runtime: 'claude-code',
+          sessionId: 'drain-reviewer-1',
+          account: null,
+          cwd: '/dr',
+          sha: 'abc1234def',
+          worktree: '/dr',
+          tokenHash: 'y',
+        },
+      }),
+      review: {
+        tokenHash: 'x',
+        sha: 'abc1234def',
+        verdict: null,
+        reviewedSha: null,
+        reviewer: {
+          host: 'cli',
+          runtime: 'claude-code',
+          sessionId: 'verify-reviewer-1',
+          cwd: '/r',
+        },
+      },
+    } as Partial<FlowRun>);
     const tracker = new FakeTracker({ team: ACME_TEAM, items: [parked()] });
     const result = await flow(['answer', 'ACME-12', '--text', 'Drop it.'], {
       tracker,
-      env: { ...person(), FLOW_SESSION_ID: session },
+      env: { ...person(), ...session },
     });
     expect(result.code).toBe(EXIT.precondition);
     expectStopAndAsk(result.stderr);

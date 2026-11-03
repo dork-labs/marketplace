@@ -37,7 +37,7 @@ import {
   type QuestionSettler,
 } from '../question.ts';
 import { requireOtherSession } from './caller.ts';
-import { refuseSessions, requirePersonShell } from './person-gate.ts';
+import { refuseSessions, requirePersonShell, sessionsThatWorked } from './person-gate.ts';
 import { claimAnswer, releaseAnswer } from './question-write.ts';
 import { AGENT_NEEDS_INPUT } from '../work-state.ts';
 import type { VerbContext, VerbResult } from './context.ts';
@@ -134,8 +134,8 @@ export async function run(ctx: VerbContext): Promise<VerbResult> {
   if (text !== null) {
     refuseSessions(
       ctx,
-      [question?.askedBy, existing?.sessionId],
-      `the session that asked, or the run's worker, cannot answer its own question, so nothing was posted or recorded. ${STOP_AND_ASK}`
+      sessionsThatWorked(existing),
+      `a session that worked ${identifier} cannot answer its question, so nothing was posted or recorded. ${STOP_AND_ASK}`
     );
   }
 

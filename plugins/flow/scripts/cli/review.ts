@@ -63,7 +63,7 @@ import { projectionFor } from '../work-state.ts';
 import { recordEvent } from './auto-journal.ts';
 import type { VerbContext, VerbResult } from './context.ts';
 import { isWritableDrain, originForge, short, writeDrain } from './drain-run.ts';
-import { refuseSessions, requirePersonShell } from './person-gate.ts';
+import { refuseSessions, requirePersonShell, sessionsThatWorked } from './person-gate.ts';
 import { signBody } from './provenance.ts';
 import {
   applyAndVerify,
@@ -475,14 +475,7 @@ async function review(ctx: VerbContext): Promise<VerbResult> {
   if (by === 'person') {
     refuseSessions(
       ctx,
-      [
-        existing.sessionId,
-        existing.drain?.worker?.sessionId,
-        existing.drain?.reviewer?.sessionId,
-        existing.review?.reviewer?.sessionId,
-        existing.question?.askedBy,
-        existing.question?.checker?.sessionId,
-      ],
+      sessionsThatWorked(existing),
       `a session that worked ${identifier} cannot review it as the person, so nothing was posted, approved or armed. ${stopAndAsk}`
     );
   }

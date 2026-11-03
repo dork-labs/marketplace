@@ -10,6 +10,7 @@ you until you **reinstall it** (Marketplace → flow → reinstall, or re-run yo
 
 - `flow review --approve` (as the person) and `flow review --changes` refuse a shell inside an agent (Claude Code, Codex or OpenCode, any runtime `FLOW_RUNTIME` names, or a DorkOS agent turn), and a session that worked the item: its own, its drain worker or reviewer, its VERIFY reviewer, or the session that asked its question or checked its pick. They post, approve and arm nothing, and the refusal tells the agent to stop and ask you to approve in DorkOS.
 - DorkOS's 👍 and 👎 work as before: DorkOS runs them without any agent's markers, since you're the one clicking. You can also review from a plain terminal.
+- Both checks, and `flow answer --text`'s, now read every session id the shell carries (Claude Code's, Codex's, `FLOW_SESSION_ID`), not only the one whose agent marker is set, so an agent that drops its markers but keeps its session id is still refused. `flow answer --text` now refuses the same sessions as `flow review`.
 - `flow review --approve --by reviewer-agent` is unchanged: it still needs a clean review recorded with the reviewer's token at the head, and your Ship finished work setting past Ask me first.
 - As with `flow answer`, this stops an agent acting through its usual tools, not one set on forging your approval on your own computer.
 
