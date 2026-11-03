@@ -8,7 +8,8 @@
  * its route needs was added (`land/sweep.ts`). A cleared PR goes to the arm
  * guard with its current head as the reviewed commit, and is armed only when
  * the guard allows, at exactly that head (`--match-head-commit`). The guard
- * refuses on a moved head, red checks, a hold label, a freeze and the rest; its
+ * refuses on a moved head, red checks, a hold label, a draft, a security label
+ * that is not on or older than the head, a freeze and the rest; its
  * `land.preArm` checks are left to the drain (`pre-arm-deferred`).
  *
  * It arms only when `drain.armAutoMerge` is on or `--arm` is passed, like

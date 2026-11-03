@@ -112,6 +112,8 @@ export interface ArmGuardRequest {
   worktree: string;
   /** Run the `land.preArm` checks (`run`, default) or leave them to the drain (`defer`). */
   preArm?: 'run' | 'defer';
+  /** `security-paths` is only for a person's approval; see `GuardInput.labelRule`. */
+  labelRule?: 'every-pr' | 'security-paths';
 }
 
 /**

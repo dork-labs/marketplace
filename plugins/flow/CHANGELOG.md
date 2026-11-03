@@ -4,6 +4,16 @@ Installs of this plugin are pinned to a commit SHA, so a fix here does not reach
 you until you **reinstall it** (Marketplace → flow → reinstall, or re-run your
 `--plugin-dir` checkout's `git pull`). Each entry below says whether that matters.
 
+## 0.86.0
+
+**`flow pr --arm`, `drain.armAutoMerge` and the drain's re-arm now arm a PR only with a `security-reviewed` label a person added after its head arrived, on every PR, whatever it touches (DOR-3724). Before, these only needed the label on a security path, and `--arm` is an agent's to pass, so an agent could arm its own PR with no review. `flow sweep` already asked for the label, but its arm guard didn't check it was still on; now it does. Reinstall to get it.**
+
+- A new PR can't have that label yet, so `flow pr --arm` normally opens the PR unarmed, says why in `armRefused` (`security-label-missing`), and names `land.securityPaths.reviewer` even when the PR touches no security path. The drain arms it on a later pass once the label is on, as long as no red check has sent the run to fix CI first: the drain counts every red check there, required or not, and a security gate's status stays red until the label arrives.
+- A label older than the head still refuses. Draft PRs and the `hold`, `do-not-merge`, `wip` and `blocked` labels still refuse first. Arming still pins the head with `--match-head-commit`.
+- A label counts only if a person added it: the newest add by a bot or a GitHub Action counts as no label, the same as the security gate. This goes for `review.qaLabel` and `review.designLabel` in `flow sweep` too, so a workflow that adds those needs a person to add them instead.
+- `flow review --approve --by reviewer-agent` needs the label on every PR too. Your own `flow review --approve` still needs the label only on a security path. If it hands the arm to the drain (`land.preArm`), the drain's re-arm needs the label on every PR, and flow tells you so when you approve.
+- If nobody adds `security-reviewed` on your project, flow won't arm anything by itself any more. Add the label, or merge by hand.
+
 ## 0.85.0
 
 **Only a person can approve or send back work at the review gate now (DOR-3716). Before, any agent could run `flow review --approve` from its own shell, which posted "Shipped from DorkOS.", approved the PR and, with `gates.review.mergeOnApproval` on, armed it to merge. Reinstall to get it.**

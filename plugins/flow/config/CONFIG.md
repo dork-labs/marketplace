@@ -304,7 +304,7 @@ default, so a config that never mentions it keeps the one-item tick.
 | `pollSeconds`          | whole number ≥ 10, `60`                                          | Seconds between passes when `flow drain` runs on its own.                      |
 | `waitIfResetWithinMinutes` | whole number ≥ 0, `60`                                       | When an account's limit resets this soon, wait for it instead of moving the item. `0` never waits. |
 | `modelFallback`        | `{ runtime: [model, ...] }`, `{}`                                | When only one model's allowance runs out, the models to continue on, in order (names from `models.bindings` or model ids). Empty: off. |
-| `armAutoMerge`         | boolean, `false`                                                 | Whether the PRs the drain opens are set to merge once checks pass.             |
+| `armAutoMerge`         | boolean, `false`                                                 | Whether flow arms the PRs the drain opens, once each has the security label.   |
 | `host`                 | `auto` \| `cli` \| `cmux` \| `dorkos`, `auto`                    | Where sessions start. About this machine: set it in `config.local.json`.       |
 | `permissionMode`       | `default` \| `acceptEdits` \| `bypassPermissions`, `acceptEdits` | The mode sessions start in. About this machine: set it in `config.local.json`. `bypassPermissions` also needs a person's approval in DorkOS (Flow's **Allow unattended bypass**), for 30 days or until the settings change; without it, sessions start in `acceptEdits`. |
 
@@ -352,11 +352,11 @@ and in `config.local.json`:
 | `preArm[].wait`, `.workflow` | `"workflow"`, a workflow file name | Dispatches `gh workflow run <workflow> --ref <pr-branch> -f sha=<reviewed commit> -f nonce=<random>` and waits for that one run. The workflow must take `sha` and `nonce` inputs, put the nonce in its `run-name`, and fail unless it checked out `sha`. |
 | `preArm[].timeout` | minutes 1–360, `30` | How long the check may take before flow refuses. |
 | `securityPaths.globs`, `.pattern` | globs, `[]`; a regular expression, `null` | This repo's security paths, matched as written and also in any case like the built-ins (the pattern with the `i` and `u` flags, or just `i`; write it in plain ASCII). Package manifests, lockfiles and `.agents/flow/config.json` always count, in any case, and `.github/workflows/**` and `.github/actions/**` do too while any `wait: workflow` entry exists. |
-| `securityPaths.label` | label, `security-reviewed` | The label that says Security has looked. Flow only reads it, and never adds or removes it. It counts only when it was added after the PR's head arrived, so after a push Security adds it again. |
-| `securityPaths.reviewer` | handle, `null` | Who flow names on a new PR that touches a security path (by the default branch's list), or when it cannot tell. Set it in `config.local.json`. |
+| `securityPaths.label` | label, `security-reviewed` | The label that says Security has looked. Flow only reads it, and never adds or removes it. It counts only when a person added it after the PR's head arrived, so after a push Security adds it again. |
+| `securityPaths.reviewer` | handle, `null` | Who flow names on a new PR that touches a security path (by the default branch's list), that flow means to arm, or when it cannot tell. Set it in `config.local.json`. |
 | `reviewer` | handle, `null` | Who flow names on any other new PR. Set it in `config.local.json`. A handle is `user`, `@user` or `org/team`. |
 
-Before every arm (`flow pr --arm`, `flow review --approve` with
+Before every arm (`flow pr --arm`, `flow sweep`, `flow review --approve` with
 `gates.review.mergeOnApproval`, and the drain's re-arm), flow refuses when:
 
 1. a required check failed or was cancelled. A check still running is fine:
@@ -371,7 +371,7 @@ Before every arm (`flow pr --arm`, `flow review --approve` with
    method must be squash, and flow arms with no method flag because the queue
    sets it. With no queue, the repository and its rulesets must allow squash,
    and flow arms with `--squash`. Settings it can't read refuse;
-5. it touches a security path and has no `securityPaths.label`;
+5. it has no `securityPaths.label`, or the newest add wasn't a person's, or it was added before the head arrived. This holds for every PR, whatever it touches, because `--arm` and `drain.armAutoMerge` prove no review. The one exception is a person's `flow review --approve`, which needs the label only on a security path, unless it hands the arm to the drain, whose re-arm needs it on every PR;
 6. a release freeze is on (`flow freeze on`);
 7. it comes from a fork;
 8. it changes a dependency file (any built-in security path but flow's config)

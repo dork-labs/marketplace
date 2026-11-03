@@ -20,6 +20,7 @@ import { FIX_IT_ANSWER, type AskProject } from '../lib/asks.ts';
 import type { AutonomyStore } from '../lib/autonomy-store.ts';
 import {
   ANSWER_IN_INBOX_TEXT,
+  armMessage,
   CHANGED_TEXT,
   CHECKS_FAILED_REASON,
   DID_NOT_GO_THROUGH,
@@ -618,6 +619,12 @@ describe('answering', () => {
     // Not raised again for the same commit.
     await coordinator.sync([plan({ a: gateRun() })]);
     expect(coordinator.decisions()).toEqual([]);
+  });
+
+  it('says what a handed-off arm still waits for', () => {
+    expect(armMessage({ armHandedToDrain: true, armRefused: { detail: 'it has no label' } })).toBe(
+      'Shipped. Flow turns on auto-merge once this is settled: it has no label.'
+    );
   });
 
   // DOR-3262: an approval that shipped but armed nothing resolves, and says so.

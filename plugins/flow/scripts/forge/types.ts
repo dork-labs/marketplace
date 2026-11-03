@@ -249,8 +249,9 @@ export interface Forge {
   /** How many commits `sha` is behind `base`. Optional; absent reads as unknown. */
   behindBy?(base: string, sha: string): Promise<number>;
   /**
-   * When `label` was last added to the PR, ISO-8601, or `null` when it is not
-   * on the PR by its event history (never added, or removed since).
+   * When a person last added `label` to the PR, ISO-8601, or `null` when it is
+   * not on the PR by its event history (never added, or removed since) or the
+   * newest add was not a person's.
    * Optional; absent reads as never.
    */
   labelledAt?(pr: number, label: string): Promise<string | null>;

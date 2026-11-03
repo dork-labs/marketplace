@@ -264,7 +264,9 @@ async function guard(
 ) {
   const time = virtualTime();
   return guardArm(
-    { forge, pr: 7, reviewedSha, worktree: repo, mainCheckout: repo },
+    // The rest of this file is about everything but the label on every PR, so
+    // it asks as a person's approval does; that rule has its own describe.
+    { forge, pr: 7, reviewedSha, worktree: repo, mainCheckout: repo, labelRule: 'security-paths' },
     { runProcess: runner, now: time.now, sleep: time.sleep, nonce: () => NONCE }
   );
 }
@@ -286,6 +288,74 @@ beforeEach(() => {
 
 afterEach(() => {
   rmSync(root, { recursive: true, force: true });
+});
+
+// DOR-3724: an arm no person asked for stands on Security's label, not on what
+// the PR touches. Asked with no labelRule, as flow pr, flow sweep, the drain and
+// a reviewer agent's approval all ask.
+describe('the security label on every PR', () => {
+  async function ask(forge: Forge) {
+    const time = virtualTime();
+    return guardArm(
+      { forge, pr: 7, reviewedSha: head, worktree: repo, mainCheckout: repo },
+      { runProcess: recordingRunner().runner, now: time.now, sleep: time.sleep, nonce: () => NONCE }
+    );
+  }
+  const labelled = { labels: [{ name: 'security-reviewed' }] };
+
+  it('refuses a PR that touches no security path and has no label', async () => {
+    const { forge, calls } = fakeForge();
+    expect(await ask(forge)).toMatchObject({ ok: false, reason: 'security-label-missing' });
+    expect(calls.some((c) => c.method === 'arm')).toBe(false);
+  });
+
+  it('allows a label added after the head arrived, with the merge route', async () => {
+    const { forge } = fakeForge({ facts: labelled });
+    expect(await ask(forge)).toMatchObject({ ok: true, merge: 'queue' });
+  });
+
+  it('refuses a label older than the head', async () => {
+    const { forge } = fakeForge({ facts: labelled, labelledAt: '2026-09-30T00:00:00Z' });
+    expect(await ask(forge)).toMatchObject({ ok: false, reason: 'security-label-stale' });
+  });
+
+  it('refuses when the label time cannot be read, or the newest add was no person', async () => {
+    const { forge } = fakeForge({ facts: labelled, labelledAt: null });
+    expect(await ask(forge)).toMatchObject({ ok: false, reason: 'security-label-unverified' });
+  });
+
+  it('refuses a draft and a hold label even with a fresh label', async () => {
+    const draft = fakeForge({ facts: { ...labelled, isDraft: true } });
+    expect(await ask(draft.forge)).toMatchObject({ ok: false, reason: 'draft' });
+    const held = fakeForge({ facts: { labels: [...labelled.labels, { name: 'do-not-merge' }] } });
+    expect(await ask(held.forge)).toMatchObject({ ok: false, reason: 'held-by-label' });
+  });
+
+  it('reads the label again after its pre-arm checks: one removed by then refuses', async () => {
+    baseLand({ preArm: [{ paths: ['src/**'], run: 'slow-suite' }] });
+    let removed = false;
+    const { forge } = fakeForge({ facts: labelled });
+    const plain = forge.armFacts.bind(forge);
+    forge.armFacts = async (pr) => ({
+      ...(await plain(pr)),
+      labels: removed ? [] : labelled.labels,
+    });
+    const { runner } = recordingRunner(() => {
+      removed = true;
+      return { code: 0 };
+    });
+    const time = virtualTime();
+    const result = await guardArm(
+      { forge, pr: 7, reviewedSha: head, worktree: repo, mainCheckout: repo },
+      { runProcess: runner, now: time.now, sleep: time.sleep, nonce: () => NONCE }
+    );
+    expect(result).toMatchObject({ ok: false, reason: 'security-label-missing' });
+  });
+
+  it("a person's approval keeps the security-path rule", async () => {
+    const { forge } = fakeForge();
+    expect(await guard(forge)).toMatchObject({ ok: true });
+  });
 });
 
 describe('the land config the guard obeys', () => {
@@ -670,7 +740,15 @@ describe('preArm: defer (flow pr, flow review)', () => {
   async function deferred(forge: Forge, runner: ProcessRunner = recordingRunner().runner) {
     const time = virtualTime();
     return guardArm(
-      { forge, pr: 7, reviewedSha: head, worktree: repo, mainCheckout: repo, preArm: 'defer' },
+      {
+        forge,
+        pr: 7,
+        reviewedSha: head,
+        worktree: repo,
+        mainCheckout: repo,
+        preArm: 'defer',
+        labelRule: 'security-paths',
+      },
       { runProcess: runner, now: time.now, sleep: time.sleep, nonce: () => NONCE }
     );
   }

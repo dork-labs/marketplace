@@ -1068,8 +1068,8 @@ export const LandSchema = z
     /** The repository's security paths and label. */
     securityPaths: SecurityPathsSchema,
     /**
-     * Who flow mentions on a new PR (unless a security path routes it to
-     * `securityPaths.reviewer`). A handle: set it in `config.local.json`. Read
+     * Who flow mentions on a new PR (unless a security path or an arm routes it
+     * to `securityPaths.reviewer`). A handle: set it in `config.local.json`. Read
      * from this machine's settings, not from the default branch on `origin`.
      */
     reviewer: ReviewerHandleSchema,

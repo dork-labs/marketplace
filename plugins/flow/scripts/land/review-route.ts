@@ -3,8 +3,9 @@
  * needs, from the paths it touches. Pure.
  *
  * - **Security** is on every route. Nothing here ever takes it off: a `light`
- *   PR still gets Security's read, and one that touches a security path still
- *   needs the security label before the arm guard arms it (`arm-decision.ts`).
+ *   PR still gets Security's read, and the arm guard wants the security label
+ *   before any arm but a person's approval (`arm-guard.ts`), which needs it
+ *   only on a security path.
  * - **QA** is on unless the PR is `light`: every path it touches is a
  *   dependency manifest or lockfile, docs or copy, a test, or CI. Agent prose
  *   (`SKILL.md`, commands, `.claude/`) is behaviour, so it is never light.
@@ -98,8 +99,9 @@ export interface ReviewRoute {
   /** The steps the PR needs. `security` is always `true`. */
   steps: { security: true; qa: boolean; design: boolean };
   /**
-   * Whether the arm guard will want the security label: the PR touches a
-   * security path, or its file list is unknown.
+   * Whether even a person's approval needs the security label to arm: the PR
+   * touches a security path, or its file list is unknown. Every other arm
+   * needs it regardless.
    */
   securityLabelRequired: boolean;
   /** The security paths it touches; empty when the list is unknown (`securityLabelRequired` is then `true`). */
@@ -178,5 +180,5 @@ export function describeRoute(route: ReviewRoute): string {
     ...(route.steps.qa ? ['QA'] : []),
     ...(route.steps.design ? ['design'] : []),
   ];
-  return `${route.class}: ${steps.join(', ')}${route.steps.qa ? '' : ' (no QA)'}${route.securityLabelRequired ? '; needs the security label to arm' : ''}`;
+  return `${route.class}: ${steps.join(', ')}${route.steps.qa ? '' : ' (no QA)'}${route.securityLabelRequired ? "; needs the security label to arm, even on a person's approval" : '; needs the security label for flow to arm it by itself'}`;
 }

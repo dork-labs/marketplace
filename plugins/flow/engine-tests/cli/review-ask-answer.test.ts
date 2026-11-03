@@ -373,6 +373,8 @@ describe('flow review --approve by a person', () => {
     expect(result.code).toBe(EXIT.ok);
     // The person named 7 characters; the guard is held to that, not to the head
     // it prefix-matched (the real guard refuses a short SHA).
+    // A person's approval is the one arm that keeps the security-path rule.
+    expect(guard.requests[0].labelRule).toBe('security-paths');
     expect(guard.requests.map((r) => [r.pr, r.reviewedSha, r.worktree])).toEqual([
       [7, 'abc1234', project.dir],
     ]);
@@ -668,8 +670,10 @@ describe('flow review --approve --by reviewer-agent', () => {
     expect(body).toContain(MARKER);
     expect(result.forge.calls.some((call) => call.method === 'review')).toBe(false);
     expect(result.forge.calls).toContainEqual({ method: 'arm', arg: [7, 'abc1234def'] });
-    // The arm guard was asked about the head the reviewer agent checked.
+    // The arm guard was asked about the head the reviewer agent checked, under
+    // the every-PR label rule: a reviewer agent is not a person (DOR-3724).
     expect(armGuard.requests.map((r) => r.reviewedSha)).toEqual(['abc1234def']);
+    expect(armGuard.requests[0].labelRule).toBeUndefined();
   });
 
   // Purpose: each missing condition refuses, and nothing is posted.
@@ -1440,6 +1444,7 @@ describe('review fixes (DOR-2528 FIX-FIRST)', () => {
     expect(String(result.json.note)).toMatch(
       /The drain arms PR #7 as soon as flow's arm guard allows it/
     );
+    expect(guard.requests.map((r) => r.labelRule)).toEqual(['security-paths', undefined]);
     // A fresh request: a pre-arm refusal recorded before is cleared.
     expect(stored().drain?.pr).toMatchObject({
       number: 7,
@@ -1448,6 +1453,47 @@ describe('review fixes (DOR-2528 FIX-FIRST)', () => {
       armRefusedAt: null,
     });
   });
+
+  // DOR-3724: the drain's re-arm needs the label on every PR, and the run file
+  // proves no person's approval, so the person hears that now, not silence.
+  it.each(['security-label-missing', 'security-label-stale', 'security-label-unverified'] as const)(
+    'says at approval when the drain will wait for the label: %s',
+    async (slug) => {
+      writeRun({
+        stage: 'verify',
+        drain: drain({
+          phase: 'watching',
+          pushedSha: 'abc1234def',
+          verdict: 'clean',
+          reviewedSha: 'abc1234def',
+          pr: {
+            repo: 'acme/app',
+            number: 7,
+            url: 'https://github.com/acme/app/pull/7',
+            armed: false,
+            disarmedForReview: false,
+          },
+        }),
+      });
+      const tracker = new FakeTracker({ team: ACME_TEAM, items: [started()] });
+      const guard = recordingGuard((request) =>
+        refusal(request.labelRule === 'security-paths' ? 'pre-arm-deferred' : slug)
+      );
+      const result = await flow(['review', 'ACME-12', '--approve'], {
+        tracker,
+        forge: fakeForge({ head: 'abc1234def' }),
+        guard,
+      });
+      expect(result.code).toBe(EXIT.ok);
+      expect(result.json).toMatchObject({
+        armed: false,
+        armHandedToDrain: true,
+        armRefused: { reason: slug },
+      });
+      expect(String(result.json.note)).toMatch(/The drain arms PR #7 once this is settled/);
+      expect(stored().drain?.pr).toMatchObject({ armed: false, disarmedForReview: true });
+    }
+  );
 
   it('hands a drain run blocked by another dependency PR to the drain, not to a person', async () => {
     writeRun({

@@ -248,10 +248,12 @@ export function waitsAtGate(run: Record<string, unknown>): boolean {
  */
 export function armMessage(json: unknown): string | undefined {
   const answer = obj(json);
-  if (answer.armHandedToDrain === true) {
-    return 'Shipped. Flow turns on auto-merge as soon as its checks allow.';
-  }
   const detail = obj(answer.armRefused).detail;
+  if (answer.armHandedToDrain === true) {
+    return typeof detail === 'string' && detail !== ''
+      ? `Shipped. Flow turns on auto-merge once this is settled: ${detail}.`
+      : 'Shipped. Flow turns on auto-merge as soon as its checks allow.';
+  }
   return typeof detail === 'string' && detail !== ''
     ? `Shipped, but flow didn't turn on auto-merge: ${detail}. Merge it yourself.`
     : undefined;
