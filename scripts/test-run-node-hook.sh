@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+# Throwaway proof comment for the security gate. Never merged.
 # Fixture suite for .claude/hooks/run-node-hook.sh, the wrapper the three
 # PreToolUse guards in .claude/settings.json run through. Ported from
 # dork-labs/dorkos with the wrapper, minus the `--warn-only` rows.
