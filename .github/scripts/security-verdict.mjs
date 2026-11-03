@@ -240,6 +240,32 @@ export function trustedLists() {
   };
 }
 
+/**
+ * One run of the verdict. Lists that can't be read are a refusal on the head or
+ * group being judged, never an older `success` left standing.
+ *
+ * @param {object} api The GitHub client.
+ * @param {object} event The event payload.
+ * @param {string} eventName `pull_request_target` or `merge_group`.
+ * @returns {Promise<string>} What it wrote, for the log.
+ */
+export async function runVerdict(api, event, eventName) {
+  if (eventName !== 'pull_request_target' && eventName !== 'merge_group')
+    throw new Error('The verdict runs only on pull_request_target and merge_group');
+  const pullRequest = eventName === 'pull_request_target';
+  let lists;
+  try {
+    lists = trustedLists();
+  } catch (error) {
+    const sha = pullRequest ? event.pull_request.head.sha : event.merge_group.head_sha;
+    await api.setStatus(sha, 'failure', `verdict errored: ${error.message}`.slice(0, 140));
+    throw error;
+  }
+  return pullRequest
+    ? verdictForPullRequest(api, event, lists)
+    : verdictForMergeGroup(api, event, lists);
+}
+
 if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
   try {
     const event = JSON.parse(readFileSync(process.env.GITHUB_EVENT_PATH, 'utf8'));
@@ -248,14 +274,7 @@ if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) 
       process.env.GH_TOKEN,
       process.env.GITHUB_API_URL
     );
-    const lists = trustedLists();
-    if (process.env.GITHUB_EVENT_NAME === 'pull_request_target') {
-      console.log(await verdictForPullRequest(api, event, lists));
-    } else if (process.env.GITHUB_EVENT_NAME === 'merge_group') {
-      console.log(await verdictForMergeGroup(api, event, lists));
-    } else {
-      throw new Error('The verdict runs only on pull_request_target and merge_group');
-    }
+    console.log(await runVerdict(api, event, process.env.GITHUB_EVENT_NAME));
   } catch (error) {
     console.error(error.message);
     process.exitCode = 1;

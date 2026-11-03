@@ -15,7 +15,7 @@ import {
   touchesSecurity,
 } from './security-gate.mjs';
 import { approvalMode } from './security-label-at-head.mjs';
-import { trustedLists, verdictForPullRequest } from './security-verdict.mjs';
+import { runVerdict, trustedLists, verdictForPullRequest } from './security-verdict.mjs';
 
 const pattern = securityPathPattern();
 const deepPattern = securityDeepPathPattern();
@@ -33,9 +33,9 @@ const group = {
   merge_group: { base_ref: 'refs/heads/main', base_sha: 'base', head_sha: 'group1' },
 };
 
-const labelled = (at) => ({
+const labelled = (at, name = 'security-reviewed') => ({
   event: 'labeled',
-  label: { name: 'security-reviewed' },
+  label: { name },
   created_at: at,
   actor: { login: 'someone', type: 'User' },
 });
@@ -174,9 +174,90 @@ describe('label-at-head on this repo’s lists', () => {
 });
 
 describe('what this repo adds to dorkos’s code', () => {
-  test('the P0 list matches nothing until Security names one', () => {
-    for (const filename of [SENSITIVE, DOCS, '.github/workflows/security-gate.yml', ''])
+  test('the P0 list names the gate’s own files, each of them a security path too', () => {
+    for (const filename of [
+      '.github/workflows/security-gate.yml',
+      '.github/workflows/security-review-initialize.yml',
+      '.github/workflows/lint.yml',
+      '.github/workflows/nested/x.yml',
+      '.github/scripts/security-gate.mjs',
+      '.github/scripts/security-new.mjs',
+      'scripts/security-new.sh',
+      '.GitHub/Workflows/lint.yml',
+    ]) {
+      assert.ok(touchesSecurity([{ filename }], deepPattern), filename);
+      assert.ok(touchesSecurity([{ filename }], pattern), `not a security path: ${filename}`);
+      assert.ok(
+        touchesSecurity([{ filename: 'specs/moved.md', previous_filename: filename }], deepPattern),
+        `rename: ${filename}`
+      );
+    }
+    for (const filename of [
+      SENSITIVE,
+      DOCS,
+      '',
+      '.github/SECURITY-GATE.md',
+      '.github/workflows-old/lint.yml',
+      '.github/scripts/other.mjs',
+      'scripts/securityish.sh',
+      'scripts/should-arm-automerge.sh',
+      'plugins/flow/scripts/security-x.sh',
+      'specs/.github/workflows/lint.yml',
+    ]) {
       assert.equal(touchesSecurity([{ filename }], deepPattern), false, filename);
+    }
+  });
+
+  test('the gate’s own check asks for the deep label on a P0 path, not just the status', async () => {
+    for (const file of [
+      '.github/workflows/lint.yml',
+      '.github/scripts/security-gate.mjs',
+      'scripts/security-new.sh',
+    ]) {
+      // No security-review status at all: only the P0 list can ask for the label here.
+      const reviewed = {
+        files: [file],
+        labels: ['security-reviewed'],
+        timeline: [labelled(LATE)],
+        activity: [push(EARLY)],
+      };
+      assert.match(
+        await verifier(fakeGitHub(reviewed).api),
+        /^Waiting for Security: no security-deep-reviewed label yet/,
+        file
+      );
+      await assert.rejects(queued(fakeGitHub(reviewed).api), /no security-deep-reviewed label/, file);
+
+      const both = {
+        ...reviewed,
+        labels: ['security-reviewed', 'security-deep-reviewed'],
+        timeline: [labelled(LATE), labelled(LATE, 'security-deep-reviewed')],
+      };
+      assert.equal(await verifier(fakeGitHub(both).api), 'Security status verified', file);
+      assert.match(await queued(fakeGitHub(both).api), /Security status verified/, file);
+    }
+  });
+
+  test('a forged success on a P0 path does not stand in for the deep label', async () => {
+    const gh = fakeGitHub({
+      files: ['.github/workflows/lint.yml'],
+      labels: ['security-reviewed'],
+      timeline: [labelled(LATE)],
+      activity: [push(EARLY)],
+    });
+    await gh.api.setStatus(SHA, 'success', 'Security label covers this SHA');
+    await assert.rejects(queued(gh.api), /no security-deep-reviewed label/);
+  });
+
+  test('a security path outside the P0 list still needs only security-reviewed', async () => {
+    const proof = {
+      files: ['specs/x/AGENTS.md'],
+      labels: ['security-reviewed'],
+      timeline: [labelled(LATE)],
+      activity: [push(EARLY)],
+    };
+    assert.equal(await verifier(fakeGitHub(proof).api), 'Security status verified');
+    assert.match(await queued(fakeGitHub(proof).api), /Security status verified/);
   });
 
   test('main’s verdict takes the manifest rule, so a pointed-at test folder is no free pass', async () => {
@@ -200,6 +281,44 @@ describe('what this repo adds to dorkos’s code', () => {
       process.chdir(cwd);
       rmSync(dir, { recursive: true, force: true });
     }
+  });
+
+  test('an engine test is no free pass: flow’s shipped self-test runs that folder', async () => {
+    const edit = { files: ['plugins/flow/engine-tests/gate.test.ts'], activity: [push(EARLY)] };
+    const status = await verdict(fakeGitHub(edit));
+    assert.equal(status.state, 'failure');
+    assert.match(status.description, /no security-reviewed label/);
+    await assert.rejects(queued(fakeGitHub(edit).api), /no security-reviewed label/);
+    assert.match(await verifier(fakeGitHub(edit).api), /^Waiting for Security: no security-reviewed/);
+  });
+
+  test('main’s verdict refuses when its lists won’t load, over an older success', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'security-verdict-'));
+    const cwd = process.cwd();
+    try {
+      mkdirSync(join(dir, 'plugins/a'), { recursive: true });
+      writeFileSync(join(dir, 'plugins/a/.mcp.json'), '{ not json');
+      process.chdir(dir);
+      for (const [name, payload] of [
+        ['pull_request_target', event],
+        ['merge_group', group],
+      ]) {
+        const gh = fakeGitHub();
+        await gh.api.setStatus(SHA, 'success', 'Security label covers this SHA');
+        await assert.rejects(runVerdict(gh.api, payload, name));
+        assert.equal(gh.statuses[0].state, 'failure', name);
+        assert.match(gh.statuses[0].description, /^verdict errored: /, name);
+      }
+    } finally {
+      process.chdir(cwd);
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  test('an event the verdict doesn’t judge writes nothing', async () => {
+    const gh = fakeGitHub();
+    await assert.rejects(runVerdict(gh.api, event, 'push'), /runs only on/);
+    assert.deepEqual(gh.statuses, []);
   });
 
   test('a manifest that does not parse refuses, rather than shrinking the list', () => {

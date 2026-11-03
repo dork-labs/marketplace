@@ -11,8 +11,9 @@ skills, extensions and scripts agents run. A change to any of them needs
 DorkOS Security's approval for that exact commit. The gate is ported from
 dork-labs/dorkos at `dc0d70b316`, with Security's path list for this repo.
 `security-gate.mjs` and `security-label-at-head.mjs` are verbatim, and
-`security-review-initialize.yml` is too. `security-verdict.mjs` differs in one
-function, which adds the manifest rule below. `security-gate.test.mjs` swaps
+`security-review-initialize.yml` is too. `security-verdict.mjs` differs in two
+places: one function adds the manifest rule below, and `runVerdict` fails closed when
+that rule can't load this repo's lists. `security-gate.test.mjs` swaps
 dorkos's path-list tests for this repo's, and `security-marketplace.test.mjs` is
 this repo's own. Take later changes from dorkos rather than forking them here.
 
@@ -21,36 +22,43 @@ this repo's own. Take later changes from dorkos rather than forking them here.
 `SECURITY_PATH_PATTERN` in `workflows/security-gate.yml` is the only list. In
 short: everything inside `plugins/<name>/` (including docs and templates, which
 agents read at run time, and any folder merely named `docs`, `tests` or
-`fixtures`), except a plugin's root `tests/` and `engine-tests/`, a skill's own
-`tests/`, and a plugin's root README.md, CHANGELOG.md, LICENSE and NOTICE.
-Also: the catalog files; every `SKILL.md`; `.github`, `.claude`, `.agents`,
-`.dork`, `scripts`, `tools`; the root `CLAUDE.md`, `AGENTS.md`, `REVIEW.md`
-and `.mcp.json`; and `package.json`, lockfiles and npm config anywhere. A path
-with a `.`, `..` or empty segment always counts. Both sides of a rename count.
+`fixtures`), except a plugin's root `tests/`, a skill's own `tests/`, and a plugin's root README.md, CHANGELOG.md, LICENSE and NOTICE.
+Also: the catalog files; every `SKILL.md`; `.github`, `.agents`,
+`.dork`, `scripts`, `tools`; the root `REVIEW.md` and `.mcp.json`; and
+`package.json`, lockfiles and npm config anywhere. Agent config counts at any
+depth, inside `specs/` and past the test-folder exemptions too: `.claude`,
+`.codex` and `.opencode` (as a folder, or a symlink with that name), `opencode.json`,
+`CLAUDE.md`, `AGENTS.md` and `GEMINI.md`. Only the whole name matches, so
+`MY-AGENTS.md` and `.claude-plugin/` under `specs/` don't. A path with a `.`, `..`
+or empty segment always counts. Both sides of a rename count.
 
-A plugin whose manifests mention a test folder loses its test-folder
+A plugin that names a test folder anywhere in what it ships loses its test-folder
 exemptions: if any string in its `.claude-plugin/plugin.json`,
 `hooks/hooks.json`, `.mcp.json`, `.lsp.json`, `.dork/manifest.json`, its entry in
-`.claude-plugin/marketplace.json`, or any JSON file those name, contains `tests`
-or `engine-tests` as a path segment, all of that plugin's test folders count
-(`.github/scripts/security-manifest-paths.mjs`, run by the verifier and by main's verdict;
-it fails the check if a manifest doesn't parse). A plugin that mentions one and
-also leaves its own folder, with `..` or a path through `plugins/`, in any of those
-strings, counts for every plugin. So does any catalog entry whose `source` isn't a
-plugin folder here, mention or not.
+`.claude-plugin/marketplace.json`, or any JSON file those name, or any other file in
+the plugin read as plain text, contains `tests` or `engine-tests` as a whole word,
+all of that plugin's test folders count (`.github/scripts/security-manifest-paths.mjs`,
+run by the verifier and by main's verdict; it fails the check if a manifest doesn't
+parse or a file can't be read). The scan skips a test folder's own files, `node_modules`
+and the plugin's root README, CHANGELOG, LICENSE and NOTICE. A word in prose counts,
+so today **flow and visual-companion, the only plugins with test folders, have no
+exemption left**, and an edit to their tests needs the label. A plugin that mentions
+one and also leaves its own folder, with `..` or a path through `plugins/`, counts for
+every plugin: anywhere in those strings, or on the same line in any other file. So does
+any catalog entry whose `source` isn't a plugin folder here, mention or not.
 
-**Accepted residual risk.** Test folders are exempt because they change too
-often to gate, but two of them can run on a machine: `/flow:self-test` runs
-flow's `engine-tests/` through vitest when dev dependencies are installed (and
-reads its fixtures), and visual-companion's `npm test` runs its skill's
-`tests/`. A test folder a manifest mentions is covered (above). One reached
-another way (a `package.json` script, `hooks:` in a skill's or command's
-frontmatter, a `!` line in a command) needs that file changed first, and it is
-a security path, so the pointer itself gets reviewed. Two more: a name built at
-run time (`te*/x.sh`) isn't a mention, though the manifest's reviewer sees it, and a
-pointer queued together with a test edit is judged from the same base list, so
-the edit stays exempt for that one merge. A flag glued to the name (`-rtests/x.js`)
-isn't a mention either.
+**Why `engine-tests/` isn't exempt.** `/flow:self-test` runs it through vitest when
+dev dependencies are installed, and a self-test scenario reads its fixtures, so an
+edit there is code that runs on a machine (Security, 2026-11-03).
+
+**Accepted residual risk.** A test folder nothing in its plugin names stays exempt,
+and it runs only if something starts naming it, in a file that is a security path, so
+the pointer itself gets reviewed. These still aren't seen: a name built at run time
+(`te*/x.sh`), though the file's reviewer sees it; a flag glued to the name
+(`-rtests/x.js`); a climb split across two lines of a non-JSON file, which counts for
+its own plugin only; and a symlink, which the scan doesn't follow. A pointer queued
+together with a test edit is judged from the same base list, so the edit stays exempt
+for that one merge.
 
 **What backs this rule up.** The `skills and manifests` check refuses a hook or MCP
 server beyond the package's own scripts and any local `source` other than
@@ -89,12 +97,14 @@ So a green `security-gate` on an open PR doesn't mean reviewed. Read
 
 **`security-deep-reviewed`** is the second label dorkos's code asks for, added
 the same way. A PR that adds, changes, renames or removes any workflow file, or
-edits the gate's own files, needs it for a `success` from `security-review`: a
-workflow with `statuses: write` can post that status itself, and in the queue the
-workflow file comes from the merge commit. `SECURITY_DEEP_PATH_PATTERN` is this
-repo's P0 list. **It matches nothing today**, because Security hasn't named one
-here. **The label doesn't exist in this repo yet**, so those PRs can't get a
-`success` until Security creates it.
+edits the gate's own files, needs it: a workflow with `statuses: write` can post
+`security-review` itself, and in the queue the workflow file comes from the merge
+commit. `SECURITY_DEEP_PATH_PATTERN` is this repo's P0 list (Security, 2026-11-03):
+`.github/workflows/`, `.github/scripts/security-*` and `scripts/security-*`. So both
+checks ask for the label: `security-review` won't say `success` without it, and
+`security-gate` waits for it on an open PR and refuses without it in the queue,
+whatever that status says. **The label doesn't exist in this repo yet**, so those
+PRs can't pass until Security creates it.
 
 **Known gaps:**
 
@@ -102,16 +112,19 @@ here. **The label doesn't exist in this repo yet**, so those PRs can't get a
   `statuses: write`, and every agent here acts through one GitHub account, so a
   person-only label says who clicked, not who reviewed. Only the Security App
   closes this. **Never make `security-review` a required check while its source
-  is GitHub Actions.**
-- The deep label rests on that forgeable status. With an empty P0 list, the
-  verifier asks for `security-reviewed` only, and a workflow PR fails it just
-  because main's verdict said `failure`. A PR that adds a workflow with
-  `statuses: write` can overwrite that with `success`.
+  is GitHub Actions.** The check to require, after the live proof below, is
+  `security-gate`.
+- The P0 list is only as firm as the YAML it lives in. Until the ruleset below pins
+  the workflow to main, a PR can edit its own copy of the list and so drop out of
+  the deep label in the queue, as with every other list here.
 - `security-gate` can read `security-review` just before main's verdict writes
   it, and fail a PR Security has just labelled, until someone reruns it. dorkos
   tracks this as DOR-3710, and the fix isn't in this copy yet.
 
 ## Turning it on (Dorian)
+
+This makes `security-gate` required, not `security-review`: anyone with write access
+can forge that status.
 
 1. Create `security-deep-reviewed` in this repo (Security). Only Security adds it.
 2. Confirm the organization can use the ruleset rule **Require workflows to pass

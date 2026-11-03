@@ -240,6 +240,9 @@ test('workflow path list covers Security’s marketplace list and both sides of 
     'plugins/x/agents/fixtures/a.md',
     'plugins/x/CLAUDE.md',
     'plugins/x/AGENTS.md',
+    // Flow's shipped self-test runs this folder (Security, 2026-11-03).
+    'plugins/flow/engine-tests/config-schema.test.ts',
+    'plugins/flow/engine-tests/fixtures/backlog.bad.json',
     // CI, agent config, guard scripts and tools.
     '.github/workflows/security-gate.yml',
     '.github/scripts/security-gate.mjs',
@@ -286,9 +289,59 @@ test('workflow path list covers Security’s marketplace list and both sides of 
     'plugins/visual-companion/LICENSE',
     'plugins/visual-companion/NOTICE',
     'specs/drain.md',
-    'plugins/flow/engine-tests/config-schema.test.ts',
     'plugins/visual-companion/tests/install-smoke.sh',
     'plugins/visual-companion/skills/visual-companion/tests/18-host.test.cjs',
+  ]) {
+    assert.equal(touchesSecurity([{ filename }], pattern), false, filename);
+  }
+});
+
+test('agent config counts at any depth; a lookalike name does not', () => {
+  for (const filename of [
+    '.codex/config.toml',
+    '.opencode/agent/x.md',
+    'opencode.json',
+    'GEMINI.md',
+    'specs/x/.codex/config.toml',
+    'specs/x/.opencode/agent/x.md',
+    'specs/x/opencode.json',
+    'specs/x/GEMINI.md',
+    'specs/x/AGENTS.md',
+    'specs/x/CLAUDE.md',
+    'specs/x/.claude/settings.json',
+    'docs/AGENTS.md',
+    // Past the exemptions: a test folder is still a folder an agent can start in.
+    'plugins/x/tests/CLAUDE.md',
+    'plugins/x/tests/fixtures/.claude/settings.json',
+    // A symlink carries the folder's name with no slash after it.
+    '.codex',
+    '.opencode',
+    'specs/x/.claude',
+    // Case-insensitive disks.
+    'specs/x/agents.md',
+    'specs/x/.CLAUDE/settings.json',
+    'specs/x/OpenCode.JSON',
+  ]) {
+    assert.ok(touchesSecurity([{ filename }], pattern), filename);
+    assert.ok(
+      touchesSecurity([{ filename: 'specs/moved.md', previous_filename: filename }], pattern),
+      `rename: ${filename}`
+    );
+  }
+  for (const filename of [
+    'specs/x/MY-AGENTS.md',
+    'specs/x/AGENTS.md.bak',
+    'specs/x/CLAUDE.mdx',
+    'specs/x/GEMINI-notes.md',
+    'specs/x/opencode.json.md',
+    'specs/x/not-opencode.json',
+    'specs/x/.claudette/a.md',
+    'specs/x/.claude-plugin/a.md',
+    'specs/x/not.claude/a.md',
+    'specs/x/.codex-notes/a.md',
+    'specs/x/.opencode.md',
+    'specs/x/claude/a.md',
+    'plugins/x/tests/AGENTS.md.txt',
   ]) {
     assert.equal(touchesSecurity([{ filename }], pattern), false, filename);
   }
@@ -867,7 +920,7 @@ test('a plugin whose manifests mention a test folder loses its test exemptions',
     for (const filename of [
       'plugins/a/tests/a.sh',
       'plugins/a/tests/other.sh',
-      'plugins/b/engine-tests/serve.ps1',
+      'plugins/b/tests/serve.ps1',
       'plugins/c/tests/x.sh',
       'plugins/d/skills/s/tests/lsp.mjs',
       'plugins/f/tests/run.sh',
@@ -949,6 +1002,73 @@ test('a catalog entry’s hooks count, by the plugin its source names', () => {
     assert.throws(() => pluginsPointingAtTests(dir));
   } finally {
     rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+/** A throwaway checkout, and a writer for it. */
+function withCheckout(run) {
+  const dir = mkdtempSync(join(tmpdir(), 'security-manifest-'));
+  const write = (rel, text) => {
+    mkdirSync(join(dir, rel, '..'), { recursive: true });
+    writeFileSync(join(dir, rel), text);
+  };
+  try {
+    run(dir, write);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+}
+
+test('any other file a plugin ships counts as a mention, not just its manifests', () => {
+  withCheckout((dir, write) => {
+    write('plugins/a/package.json', JSON.stringify({ scripts: { test: 'vitest run tests' } }));
+    write('plugins/b/vitest.config.ts', "export default { include: ['engine-tests/**'] };\n");
+    write('plugins/c/skills/s/SKILL.md', '---\nhooks: bash ./tests/x.sh\n---\n');
+    write('plugins/d/commands/c.md', '!`cd tests && sh x.sh`\n');
+    write('plugins/e/keep.txt', 'nothing here\n');
+    assert.deepEqual(pluginsPointingAtTests(dir), ['a', 'b', 'c', 'd']);
+    const list = withManifestPaths(pattern, ['a']);
+    assert.ok(touchesSecurity([{ filename: 'plugins/a/tests/x.sh' }], list));
+    assert.equal(touchesSecurity([{ filename: 'plugins/e/tests/x.sh' }], list), false);
+  });
+});
+
+test('the wider scan skips what runs nothing, and matches whole words only', () => {
+  withCheckout((dir, write) => {
+    write('plugins/a/README.md', 'bash tests/x.sh\n');
+    write('plugins/a/CHANGELOG.md', 'bash tests/x.sh\n');
+    write('plugins/a/tests/x.sh', 'bash tests/y.sh\n');
+    write('plugins/a/engine-tests/x.ts', '// engine-tests -> plugins/a\n');
+    write('plugins/a/skills/s/tests/x.sh', 'bash tests/y.sh\n');
+    write('plugins/a/node_modules/dep/index.js', "require('./tests/x');\n");
+    write('plugins/a/scripts/x.ts', "// attests contests tests-old/ my-tests\nimport '../y.ts';\n");
+    assert.deepEqual(pluginsPointingAtTests(dir), []);
+  });
+});
+
+test('a file naming a test folder on a line that leaves its plugin counts for every plugin', () => {
+  withCheckout((dir, write) => {
+    write('plugins/a/keep.txt', 'nothing here\n');
+    write('plugins/b/bin/run.sh', 'bash ../a/tests/x.sh\n');
+    assert.deepEqual(pluginsPointingAtTests(dir), ['a', 'b']);
+    write('plugins/b/bin/run.sh', 'bash plugins/a/tests/x.sh\n');
+    assert.deepEqual(pluginsPointingAtTests(dir), ['a', 'b']);
+    // A relative import elsewhere in the file isn't leaving: every script has one.
+    write('plugins/b/bin/run.sh', "import '../lib.ts';\nconst folder = 'tests';\n");
+    assert.deepEqual(pluginsPointingAtTests(dir), ['b']);
+  });
+});
+
+test('this repo’s plugins with test folders both lose their exemptions', () => {
+  const plugins = pluginsPointingAtTests(new URL('../..', import.meta.url).pathname);
+  for (const name of ['flow', 'visual-companion']) assert.ok(plugins.includes(name), name);
+  const list = withManifestPaths(pattern, plugins);
+  for (const filename of [
+    'plugins/visual-companion/tests/install-smoke.sh',
+    'plugins/visual-companion/skills/visual-companion/tests/18-host.test.cjs',
+  ]) {
+    assert.equal(touchesSecurity([{ filename }], pattern), false, filename);
+    assert.ok(touchesSecurity([{ filename }], list), filename);
   }
 });
 

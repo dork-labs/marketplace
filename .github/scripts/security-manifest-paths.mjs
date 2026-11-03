@@ -8,6 +8,12 @@
 // misses forms like `${CLAUDE_PLUGIN_ROOT:-.}/tests` or `\tests\`. A name built at
 // run time (`te*/x.sh`) is no mention, but the reviewer of that manifest sees it.
 //
+// Any other file the plugin ships counts the same way (Security, 2026-11-03): a
+// `package.json` script, a config file, a skill's frontmatter or a script can run
+// a test folder as well as a manifest can. It is read as plain text, so a word in
+// prose costs that plugin its exemptions too. A test folder's own files and a
+// plugin's root README, CHANGELOG, LICENSE and NOTICE run nothing, so they aren't read.
+//
 // The verifier and main's verdict both run this from a trusted checkout, so the
 // manifests are the base commit's. A pointer and a test edit queued together are
 // both judged from the base list. Its output is the workflow's SECURITY_PATH_PATTERN
@@ -34,6 +40,10 @@ const MENTIONS_TESTS = /(^|[^\w-])(engine-)?te[sſ]ts(?![\w-])/iu;
  * or `...`), or a path through a `plugins` folder (`plugins/w/…`).
  */
 const CLIMBS = /(?<!\.)\.\.(?![\w.-])|(?:^|[/\\\s"'=])plugins[/\\]/;
+
+/** Inside a plugin: the files that can't point at a test folder, so the scan skips them. */
+const NOT_SCANNED =
+  /^(?:(?:engine-)?tests\/|skills\/[^/]+\/tests\/|(?:README|CHANGELOG)\.md$|LICENSE$|NOTICE$)|(?:^|\/)node_modules\//;
 
 /** The catalog, whose entries can declare hooks and servers of their own. */
 const CATALOG = '.claude-plugin/marketplace.json';
@@ -64,6 +74,35 @@ function namedJson(text, plugin) {
 }
 
 /**
+ * Whether a plugin's other files mention a test folder, and whether one of them
+ * does so on a line that also leaves the plugin's folder. Per line, because any
+ * relative import is a `..`, so a climb split across two lines isn't seen.
+ * A file it can't read throws, like a manifest that doesn't parse.
+ *
+ * @param {string} root - The checkout (the base commit).
+ * @param {string} plugin - The plugin's folder, relative to the checkout.
+ * @returns {{mentions: boolean, leaves: boolean}} What the scan found.
+ */
+function scanPluginFiles(root, plugin) {
+  const found = { mentions: false, leaves: false };
+  const walk = (folder) => {
+    for (const entry of readdirSync(join(root, plugin, folder), { withFileTypes: true })) {
+      const rel = posix.join(folder, entry.name);
+      if (NOT_SCANNED.test(entry.isDirectory() ? `${rel}/` : rel)) continue;
+      if (entry.isDirectory()) walk(rel);
+      if (!entry.isFile()) continue;
+      const text = readFileSync(join(root, plugin, rel), 'utf8');
+      if (!MENTIONS_TESTS.test(text)) continue;
+      found.mentions = true;
+      if (text.split('\n').some((line) => MENTIONS_TESTS.test(line) && CLIMBS.test(line)))
+        found.leaves = true;
+    }
+  };
+  walk('');
+  return found;
+}
+
+/**
  * Each catalog entry's strings, by the plugin folder its `source` names, and whether
  * every entry could be pinned to a plugin folder that exists.
  */
@@ -84,7 +123,7 @@ function catalogStrings(root, names) {
 }
 
 /**
- * Plugins whose base-commit manifests or catalog entries mention a test folder.
+ * Plugins whose base-commit manifests, catalog entries or other files mention a test folder.
  *
  * @param {string} root - The checkout (the base commit).
  * @returns {string[]} Plugin folder names, sorted. A plugin that mentions a test
@@ -118,8 +157,9 @@ export function pluginsPointingAtTests(root) {
       texts.push(...found);
       queue.push(...found.flatMap((text) => namedJson(text, plugin)));
     }
-    if (texts.some((text) => MENTIONS_TESTS.test(text))) {
-      if (texts.some((text) => CLIMBS.test(text))) return names.sort();
+    const scan = scanPluginFiles(root, plugin);
+    if (scan.mentions || texts.some((text) => MENTIONS_TESTS.test(text))) {
+      if (scan.leaves || texts.some((text) => CLIMBS.test(text))) return names.sort();
       hit.add(name);
     }
   }
