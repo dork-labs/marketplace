@@ -5,17 +5,17 @@ description: The checks flow runs before it turns on auto-merge, the land settin
 
 # Before flow arms a PR
 
-Flow turns on auto-merge with `flow pr --arm`, `flow sweep`, `flow review --approve` (with `gates.review.mergeOnApproval`) and the drain's re-arm. Each asks flow's arm guard first. The guard only says no: it never arms, sets a status or sets a label.
+Flow turns on auto-merge with `flow pr --arm`, `flow sweep`, `flow review --approve` (with `gates.review.mergeOnApproval`) and the drain's re-arm. Each asks flow's arm guard first. The guard only says no: it never arms or sets a status or label.
 
 ## What it refuses
 
 Flow doesn't arm a PR when:
 
-- a required check failed or was cancelled (one still running is fine: GitHub waits);
+- a required check failed or was cancelled (GitHub waits for one still running);
 - the head isn't the reviewed commit, or none was recorded;
 - it doesn't target the default branch GitHub names (a stacked PR aimed at its parent doesn't);
-- it wouldn't squash, the only method, as the post-merge check needs it: a merge queue must squash (flow passes no method flag), or with none the repo must allow it (flow passes `--squash`);
-- it has no `security-reviewed` label a person added after the head arrived (your own approval needs it only on a security path, unless the drain arms it);
+- it wouldn't squash, which the post-merge check needs: a merge queue must squash (flow passes no method flag), or with none the repo must allow it (flow passes `--squash`);
+- it has no `security-reviewed` label a person added after the head arrived (your own approval needs it only on a security path, unless the drain arms it), or no such `security-deep-reviewed` on a `review:deep` PR;
 - a release freeze is on;
 - it comes from a fork;
 - it changes dependencies while another such PR is queued or armed;
@@ -27,7 +27,7 @@ A new PR has no label yet, so `flow pr --arm` opens it unarmed, and the drain as
 
 ## Your own checks: `land.preArm`
 
-`land.preArm` lists checks to run before arming, each only when the PR touches one of its paths. An entry either dispatches a GitHub workflow and waits for that one run, or runs a command. Prefer the workflow; a command is for a repo without CI. It runs in a fresh, clean checkout of the reviewed commit, made so nothing in your own checkout or git settings can change it. It has no installed dependencies, so point it at a committed script that installs them (and list that script as a security path). Its environment holds a fixed system PATH, the locale, TMPDIR, TZ, TERM, `CI=true` and an empty scratch HOME, never your tokens:
+`land.preArm` lists checks to run before arming, each only when the PR touches one of its paths. An entry either dispatches a GitHub workflow and waits for that one run, or runs a command. Prefer the workflow; a command is for a repo without CI. It runs in a clean checkout of the reviewed commit, so nothing in your checkout or git settings can change it. It has no installed dependencies, so point it at a committed script that installs them (and list that script as a security path). Its environment holds a fixed system PATH, the locale, TMPDIR, TZ, TERM, `CI=true` and an empty scratch HOME, never your tokens:
 
 ```json
 "land": {

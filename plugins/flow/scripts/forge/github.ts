@@ -94,12 +94,37 @@ export function failingChecks(rollup: unknown): FailingCheck[] {
     if (check === undefined) continue;
     const state = (str(check.state) ?? '').toUpperCase();
     if (!concludedFailing(check.conclusion) && !FAILING_STATES.has(state)) continue;
+    const workflow = str(check.workflowName);
     failing.push({
       name: str(check.name) ?? str(check.context) ?? '(unnamed check)',
       url: str(check.detailsUrl) ?? str(check.targetUrl) ?? null,
+      ...(workflow ? { workflow } : {}),
+      ...(passedLater(check, rollup) ? { superseded: true } : {}),
     });
   }
   return failing;
+}
+
+/**
+ * Whether a later run of this check run succeeded, with no run of it unfinished:
+ * every run at a head stays in the rollup, so each label change leaves its old
+ * reds behind. A time that can't be read, or a tie, counts as not later, so the
+ * red stands.
+ */
+function passedLater(check: Record<string, unknown>, rollup: unknown[]): boolean {
+  const name = str(check.name);
+  if (name === undefined) return false;
+  const runs = rollup
+    .map(record)
+    .filter((run) => run !== undefined)
+    .filter((run) => str(run.name) === name && str(run.workflowName) === str(check.workflowName));
+  if (runs.some((run) => str(run.status)?.toUpperCase() !== 'COMPLETED')) return false;
+  const started = Date.parse(str(check.startedAt) ?? '');
+  return runs.some(
+    (run) =>
+      str(run.conclusion)?.toUpperCase() === 'SUCCESS' &&
+      Date.parse(str(run.startedAt) ?? '') > started
+  );
 }
 
 /**

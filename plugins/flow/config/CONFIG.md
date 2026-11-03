@@ -371,7 +371,7 @@ Before every arm (`flow pr --arm`, `flow sweep`, `flow review --approve` with
    method must be squash, and flow arms with no method flag because the queue
    sets it. With no queue, the repository and its rulesets must allow squash,
    and flow arms with `--squash`. Settings it can't read refuse;
-5. it has no `securityPaths.label`, or the newest add wasn't a person's, or it was added before the head arrived. This holds for every PR, whatever it touches, because `--arm` and `drain.armAutoMerge` prove no review. The one exception is a person's `flow review --approve`, which needs the label only on a security path, unless it hands the arm to the drain, whose re-arm needs it on every PR;
+5. it has no `securityPaths.label`, or the newest add wasn't a person's, or it was added before the head arrived. This holds for every PR, whatever it touches, because `--arm` and `drain.armAutoMerge` prove no review. The one exception is a person's `flow review --approve`, which needs the label only on a security path, unless it hands the arm to the drain, whose re-arm needs it on every PR. A PR labelled `review:deep` needs `security-deep-reviewed` under the same rules on any arm;
 6. a release freeze is on (`flow freeze on`);
 7. it comes from a fork;
 8. it changes a dependency file (any built-in security path but flow's config)
@@ -386,7 +386,7 @@ and also when it is closed, a draft, labelled `hold`, `do-not-merge`, `wip` or
 `blocked`, or a reviewer asked for changes. Then it runs the `preArm` entries
 the PR touches, and refuses if one fails, then reads the PR and the freeze again
 before it arms, and the merge settings with them. Only the drain runs `preArm` entries: `flow pr --arm` and
-`flow review --approve` leave the arm to the drain when one applies. These are a guard rail for flow's own arms. The rules that hold for everyone belong on GitHub, in required checks and
+`flow review --approve` leave the arm to the drain when one applies. A red `security-review`, `security-gate` or `security-review-initialize` run sends no drain worker to fix it, and the drain doesn't arm while one is red, unless a later run of it succeeded. These are a guard rail for flow's own arms. The rules that hold for everyone belong on GitHub, in required checks and
 rulesets.
 
 ## The `pr` block: the open-PR cap and stuck PRs

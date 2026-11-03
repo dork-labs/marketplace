@@ -104,6 +104,10 @@ checks ask for the label: `security-review` won't say `success` without it, and
 `security-gate` waits for it on an open PR and refuses without it in the queue,
 whatever that status says. Only Security adds it.
 
+Flow's arm guard reads this label only on a PR someone labelled `review:deep`. This gate
+never reads `review:deep` and goes by the paths above, so flow can still arm a P0 PR that
+has no `review:deep`, and this gate then refuses it.
+
 **Known gaps:**
 
 - Anyone with push can forge `security-review` from a workflow with

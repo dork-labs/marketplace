@@ -2,7 +2,7 @@
   "about": [
     "The decision cases for the two things in this repo that decide whether a pull request may be armed to merge by itself: scripts/should-arm-automerge.sh (the repo gate, a future merge-tail bot) and flow's arm guard (plugins/flow/scripts/land/arm-decision.ts, run by flow before it arms).",
     "Both suites run every row: scripts/test-should-arm-automerge.sh checks `gate`, plugins/flow/engine-tests/land/arm-decision.test.ts checks `guard`. A row with only one of them fails both suites, so a change to either rule has to say what the other does with the same pull request.",
-    "Each case is the `green` payload bent by one jq `mutation`, so a failure names the field. The two answers differ on purpose where the guard is not a bot: GitHub's auto-merge waits for pending checks and for mergeability on its own, so the guard lets those through, and it refuses things the repo gate never looks at (a moved head, a fork, a base other than the repository's default branch, a merge that would not squash, a release freeze, a security path without its label, or with a label added before the head arrived: `securityLabelledAt` against `headArrivedAt`). `securityLabelOnEveryPr` is what the guard sets on every arm but a person's approval: then every PR needs that label, security path or not. `why` says why the row exists."
+    "Each case is the `green` payload bent by one jq `mutation`, so a failure names the field. The two answers differ on purpose where the guard is not a bot: GitHub's auto-merge waits for pending checks and for mergeability on its own, so the guard lets those through, and it refuses things the repo gate never looks at (a moved head, a fork, a base other than the repository's default branch, a merge that would not squash, a release freeze, a security path without its label, or with a label added before the head arrived: `securityLabelledAt` against `headArrivedAt`; or a `review:deep` PR without a fresh `security-deep-reviewed`: `deepLabelledAt`). `securityLabelOnEveryPr` is what the guard sets on every arm but a person's approval: then every PR needs that label, security path or not. `why` says why the row exists."
   ],
   "green": {
     "number": 1,
@@ -289,6 +289,95 @@
       "mutation": ".securityLabelOnEveryPr = true | .files = null",
       "gate": "ARM",
       "guard": "REFUSE security-label-missing"
+    },
+    {
+      "name": "review:deep, no deep label",
+      "mutation": ".securityLabelOnEveryPr = true | .securityLabelledAt = \"2026-10-02T00:00:00Z\" | .labels = [{\"name\": \"security-reviewed\"}, {\"name\": \"review:deep\"}]",
+      "gate": "ARM",
+      "guard": "REFUSE security-label-missing",
+      "why": "DOR-3766: review:deep asks for Security's deep review, so the arm waits for its label. The gate itself goes by paths."
+    },
+    {
+      "name": "review:deep, fresh deep label",
+      "mutation": ".securityLabelOnEveryPr = true | .securityLabelledAt = \"2026-10-02T00:00:00Z\" | .labels = [{\"name\": \"security-reviewed\"}, {\"name\": \"review:deep\"}, {\"name\": \"security-deep-reviewed\"}] | .deepLabelledAt = \"2026-10-02T00:00:00Z\"",
+      "gate": "ARM",
+      "guard": "ARM"
+    },
+    {
+      "name": "review:deep, deep label older than the head",
+      "mutation": ".securityLabelOnEveryPr = true | .securityLabelledAt = \"2026-10-02T00:00:00Z\" | .labels = [{\"name\": \"security-reviewed\"}, {\"name\": \"review:deep\"}, {\"name\": \"security-deep-reviewed\"}] | .deepLabelledAt = \"2026-09-30T00:00:00Z\"",
+      "gate": "ARM",
+      "guard": "REFUSE security-label-stale"
+    },
+    {
+      "name": "review:deep, deep label added as the head arrived",
+      "mutation": ".securityLabelOnEveryPr = true | .securityLabelledAt = \"2026-10-02T00:00:00Z\" | .labels = [{\"name\": \"security-reviewed\"}, {\"name\": \"review:deep\"}, {\"name\": \"security-deep-reviewed\"}] | .deepLabelledAt = .headArrivedAt",
+      "gate": "ARM",
+      "guard": "REFUSE security-label-stale"
+    },
+    {
+      "name": "review:deep, deep label time unknown",
+      "mutation": ".securityLabelOnEveryPr = true | .securityLabelledAt = \"2026-10-02T00:00:00Z\" | .labels = [{\"name\": \"security-reviewed\"}, {\"name\": \"review:deep\"}, {\"name\": \"security-deep-reviewed\"}] | .deepLabelledAt = null",
+      "gate": "ARM",
+      "guard": "REFUSE security-label-unverified",
+      "why": "The read found no person's add: a bot's add, or a failed read."
+    },
+    {
+      "name": "review:deep, head arrival unknown",
+      "mutation": ".securityLabelOnEveryPr = true | .securityLabelledAt = \"2026-10-02T00:00:00Z\" | .labels = [{\"name\": \"security-reviewed\"}, {\"name\": \"review:deep\"}, {\"name\": \"security-deep-reviewed\"}] | .deepLabelledAt = \"2026-10-02T00:00:00Z\" | .headArrivedAt = null",
+      "gate": "ARM",
+      "guard": "REFUSE security-label-unverified"
+    },
+    {
+      "name": "review:deep, security label stale, deep label fresh",
+      "mutation": ".securityLabelOnEveryPr = true | .securityLabelledAt = \"2026-09-30T00:00:00Z\" | .labels = [{\"name\": \"security-reviewed\"}, {\"name\": \"review:deep\"}, {\"name\": \"security-deep-reviewed\"}] | .deepLabelledAt = \"2026-10-02T00:00:00Z\"",
+      "gate": "ARM",
+      "guard": "REFUSE security-label-stale",
+      "why": "The deep label adds to the security label and never stands in for it."
+    },
+    {
+      "name": "deep label alone, no security label",
+      "mutation": ".securityLabelOnEveryPr = true | .labels = [{\"name\": \"review:deep\"}, {\"name\": \"security-deep-reviewed\"}] | .deepLabelledAt = \"2026-10-02T00:00:00Z\"",
+      "gate": "ARM",
+      "guard": "REFUSE security-label-missing"
+    },
+    {
+      "name": "review:deep in another case, as a string",
+      "mutation": ".securityLabelOnEveryPr = true | .securityLabelledAt = \"2026-10-02T00:00:00Z\" | .labels = [\"security-reviewed\", \"Review:Deep\"]",
+      "gate": "ARM",
+      "guard": "REFUSE security-label-missing"
+    },
+    {
+      "name": "a person's rule, no security path, review:deep, no deep label",
+      "mutation": ".labels = [{\"name\": \"review:deep\"}]",
+      "gate": "ARM",
+      "guard": "REFUSE security-label-missing",
+      "why": "A person's approval needs the security label only on a security path, but review:deep asks for a deep review on any arm."
+    },
+    {
+      "name": "a person's rule, no security path, review:deep, fresh deep label",
+      "mutation": ".labels = [{\"name\": \"review:deep\"}, {\"name\": \"security-deep-reviewed\"}] | .deepLabelledAt = \"2026-10-02T00:00:00Z\"",
+      "gate": "ARM",
+      "guard": "ARM"
+    },
+    {
+      "name": "a person's rule, no security path, review:deep, stale deep label",
+      "mutation": ".labels = [{\"name\": \"review:deep\"}, {\"name\": \"security-deep-reviewed\"}] | .deepLabelledAt = \"2026-09-30T00:00:00Z\"",
+      "gate": "ARM",
+      "guard": "REFUSE security-label-stale"
+    },
+    {
+      "name": "a deep label without review:deep is never read",
+      "mutation": ".securityLabelOnEveryPr = true | .securityLabelledAt = \"2026-10-02T00:00:00Z\" | .labels = [{\"name\": \"security-reviewed\"}, {\"name\": \"security-deep-reviewed\"}] | .deepLabelledAt = \"2026-09-30T00:00:00Z\"",
+      "gate": "ARM",
+      "guard": "ARM",
+      "why": "The gate decides a P0 path by its own list; flow reads the deep label only on a review:deep PR."
+    },
+    {
+      "name": "hold outranks review:deep",
+      "mutation": ".labels = [{\"name\": \"hold\"}, {\"name\": \"review:deep\"}]",
+      "gate": "SKIP held-by-label",
+      "guard": "REFUSE held-by-label"
     },
     {
       "name": "every-PR rule: a draft with a fresh label",

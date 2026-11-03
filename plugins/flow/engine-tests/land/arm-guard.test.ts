@@ -290,6 +290,98 @@ afterEach(() => {
   rmSync(root, { recursive: true, force: true });
 });
 
+// DOR-3766: on a review:deep PR flow reads security-deep-reviewed under the same
+// rules as the security label, so it does not arm what the gate would refuse.
+describe('the deep label on a review:deep PR', () => {
+  const SECURITY = { name: 'security-reviewed' };
+  const TRIGGER = { name: 'review:deep' };
+  const DEEP = { name: 'security-deep-reviewed' };
+
+  /** A forge whose label times differ by label. */
+  function deepForge(labels: { name: string }[], times: Record<string, string | null | 'throw'>) {
+    const made = fakeForge({ facts: { labels } });
+    made.forge.labelledAt = async (pr, label) => {
+      made.calls.push({ method: 'labelledAt', args: [pr, label] });
+      const at = times[label];
+      if (at === 'throw') throw new Error('HTTP 502');
+      return at ?? null;
+    };
+    return made;
+  }
+
+  async function ask(forge: Forge, labelRule?: 'security-paths') {
+    const time = virtualTime();
+    return guardArm(
+      {
+        forge,
+        pr: 7,
+        reviewedSha: head,
+        worktree: repo,
+        mainCheckout: repo,
+        ...(labelRule === undefined ? {} : { labelRule }),
+      },
+      { runProcess: recordingRunner().runner, now: time.now, sleep: time.sleep, nonce: () => NONCE }
+    );
+  }
+  const fresh = { 'security-reviewed': LABELLED, 'security-deep-reviewed': LABELLED };
+
+  it('arms with both labels fresh, reading each by its own name', async () => {
+    const { forge, calls } = deepForge([SECURITY, TRIGGER, DEEP], fresh);
+    expect(await ask(forge)).toMatchObject({ ok: true });
+    const read = calls.filter((c) => c.method === 'labelledAt').map((c) => c.args?.[1]);
+    expect(read).toEqual(expect.arrayContaining(['security-reviewed', 'security-deep-reviewed']));
+  });
+
+  it('refuses with no deep label, naming it', async () => {
+    const result = await ask(deepForge([SECURITY, TRIGGER], fresh).forge);
+    expect(result).toMatchObject({ ok: false, reason: 'security-label-missing' });
+    expect(!result.ok && result.detail).toContain('security-deep-reviewed');
+  });
+
+  it.each([
+    ['older than the head', '2026-09-30T00:00:00Z', 'security-label-stale'],
+    ['a bot added last, which reads as none', null, 'security-label-unverified'],
+    ['unreadable', 'throw', 'security-label-unverified'],
+  ] as const)('refuses a deep label that is %s, naming it', async (_, at, reason) => {
+    const times = { ...fresh, 'security-deep-reviewed': at };
+    const result = await ask(deepForge([SECURITY, TRIGGER, DEEP], times).forge);
+    expect(result).toMatchObject({ ok: false, reason });
+    expect(!result.ok && result.detail).toContain('security-deep-reviewed');
+  });
+
+  it("asks it of a person's approval too, on a PR that touches no security path", async () => {
+    const missing = await ask(deepForge([TRIGGER], fresh).forge, 'security-paths');
+    expect(missing).toMatchObject({ ok: false, reason: 'security-label-missing' });
+    const times = { 'security-deep-reviewed': '2026-09-30T00:00:00Z' };
+    const stale = await ask(deepForge([TRIGGER, DEEP], times).forge, 'security-paths');
+    expect(stale).toMatchObject({ ok: false, reason: 'security-label-stale' });
+    expect((await ask(deepForge([TRIGGER, DEEP], fresh).forge, 'security-paths')).ok).toBe(true);
+  });
+
+  it('decides again after its pre-arm checks: a deep label that went stale refuses', async () => {
+    baseLand({ preArm: [{ paths: ['src/**'], run: 'slow-suite' }] });
+    const times: Record<string, string | null> = { ...fresh };
+    const { forge } = deepForge([SECURITY, TRIGGER, DEEP], times);
+    const { runner } = recordingRunner(() => {
+      times['security-deep-reviewed'] = null;
+      return { code: 0 };
+    });
+    const result = await guard(forge, runner);
+    expect(result).toMatchObject({ ok: false, reason: 'security-label-unverified' });
+    expect(!result.ok && result.detail).toMatch(/after its pre-arm checks passed/);
+  });
+
+  it('reads no deep label on a PR without review:deep', async () => {
+    const { forge, calls } = deepForge([SECURITY, DEEP], {
+      'security-reviewed': LABELLED,
+      'security-deep-reviewed': '2026-09-30T00:00:00Z',
+    });
+    expect((await ask(forge)).ok).toBe(true);
+    const read = calls.filter((c) => c.method === 'labelledAt').map((c) => c.args?.[1]);
+    expect(read).toEqual(['security-reviewed']);
+  });
+});
+
 // DOR-3724: an arm no person asked for stands on Security's label, not on what
 // the PR touches. Asked with no labelRule, as flow pr, flow sweep, the drain and
 // a reviewer agent's approval all ask.
