@@ -5,7 +5,7 @@ description: flow drain carries several ready items at once, each on its own acc
 
 # Draining in parallel
 
-`flow drain --parallel 3` carries three ready items at once, each in its own worktree, spread across your accounts. A separate reviewer reads every push; `flow pr` opens a PR only after a clean review of the head.
+`flow drain --parallel 3` carries three ready items at once, each in its own worktree, spread across your accounts. A separate reviewer reads every push; a PR opens only after a clean review of the head.
 
 ## Before you start
 
@@ -21,10 +21,10 @@ Allow each account flow may spend with `flow accounts set <id> --role rotation`.
 - `reviewer started at 4be1c2d`: a push is under review.
 - `sent review-findings`: the worker got the findings.
 - `sent open-pr`: the review came back clean.
-- `moved to <account>`: an account ran out, so the work moved.
+- `moved to <account>`: its account ran out.
 - `restarted on <account>`: its session went away.
 - `parked: <reason>`: a person is needed.
-- `removed`/`kept its worktree`: the item finished.
+- `removed`/`kept its worktree`: the item finished. Its git-ignored files go too; an idle DorkOS worker counts as stopped.
 
 ## What happens at a limit
 
@@ -40,7 +40,7 @@ After `drain.stallAfterMinutes` (default 60) without progress, a session that we
 
 ## Caps
 
-New sessions wait while load per CPU reaches `drain.maxLoadPerCpu` or an account has `drain.maxLivePerAccount` sessions. Accounts with fewer sessions go first; a stale usage reading gets none until the hourly probe refreshes it. After `drain.maxReviewRounds` rounds the run parks.
+New sessions wait while load per CPU reaches `drain.maxLoadPerCpu` or an account has `drain.maxLivePerAccount` sessions. Fewer-session accounts go first; a stale usage reading gets none until the hourly probe refreshes it. After `drain.maxReviewRounds` rounds the run parks.
 
 ## Terminal or schedule
 
@@ -48,7 +48,7 @@ New sessions wait while load per CPU reaches `drain.maxLoadPerCpu` or an account
 
 ## Permissions
 
-Workers start in `drain.permissionMode`, default `acceptEdits`, which runs only what your repo's settings allow. `bypassPermissions` also needs a person to approve Flow's **Allow unattended bypass** card in DorkOS, for 30 days or until your flow settings change, and flow must be installed globally, not per agent; without it, workers start in `acceptEdits`. It won't start on uncommitted settings or adapter code. Guard hooks still run.
+Workers start in `drain.permissionMode`, default `acceptEdits`, which runs only what your repo's settings allow. `bypassPermissions` also needs a person to approve Flow's **Allow unattended bypass** card in DorkOS, for 30 days or until your flow settings change, and flow must be installed globally, not per agent; otherwise `acceptEdits`. It won't start on uncommitted settings or adapter code. Guard hooks still run.
 
 ## Parts
 

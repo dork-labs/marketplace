@@ -52,16 +52,16 @@ comment unsigned.
 
 ## 4. Fields
 
-| Field        | What it is                                                                                                                                                                                                              |
-| ------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| `v`          | Signature schema version. `1` today. A reader that does not know a higher version reads the fields it recognizes and ignores the rest.                                                                                  |
-| `harness`    | The agent harness, as one of `claude-code` \| `codex` \| `opencode` \| `other:<name>`. The `other:` form keeps the vocabulary open without letting a new harness masquerade as a known one.                              |
-| `sessionId`  | The harness's own session id — the handle a later reader resumes with. Derive it (some harnesses expose it; on others the transcript path encodes it); never guess.                                                     |
-| `account`    | A short, **non-PII** handle for the harness account the run authenticated as, so a reader can tell "same machine, different account" from "same session". **NEVER an email address** (section 7).                        |
-| `host`       | This machine's hostname. Load-bearing: a retained transcript is only reachable from the machine holding it, so a host mismatch is what rules local resume out.                                                           |
+| Field        | What it is                                                                                                                                                                                                                               |
+| ------------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `v`          | Signature schema version. `1` today. A reader that does not know a higher version reads the fields it recognizes and ignores the rest.                                                                                                   |
+| `harness`    | The agent harness, as one of `claude-code` \| `codex` \| `opencode` \| `other:<name>`. The `other:` form keeps the vocabulary open without letting a new harness masquerade as a known one.                                              |
+| `sessionId`  | The harness's own session id — the handle a later reader resumes with. Derive it (some harnesses expose it; on others the transcript path encodes it); never guess.                                                                      |
+| `account`    | A short, **non-PII** handle for the harness account the run authenticated as, so a reader can tell "same machine, different account" from "same session". **NEVER an email address** (section 7).                                        |
+| `host`       | This machine's hostname. Load-bearing: a retained transcript is only reachable from the machine holding it, so a host mismatch is what rules local resume out.                                                                           |
 | `surface`    | Where the run was driven from: `dorkos` \| `bare-cli` \| `ci`. **Always emitted when determinable**, on every surface — it is what selects the resume _mechanism_, and the `bare-cli` path needs it exactly as much as the `dorkos` one. |
-| `instanceId` | The DorkOS install's UUID, when the run is under DorkOS. **Omit it outside DorkOS** — it is what tells a reader "this session lives in the install I am talking to" rather than an identically-named one elsewhere.      |
-| `resumeUrl`  | A URL that actually opens the session, when one exists **and the session is meaningfully resumable**. A link that resolves to nothing is worse than no link — omit it instead. Omitted in public repositories (section 8). |
+| `instanceId` | The DorkOS install's UUID, when the run is under DorkOS. **Omit it outside DorkOS** — it is what tells a reader "this session lives in the install I am talking to" rather than an identically-named one elsewhere.                      |
+| `resumeUrl`  | A URL that actually opens the session, when one exists **and the session is meaningfully resumable**. A link that resolves to nothing is worse than no link — omit it instead. Omitted in public repositories (section 8).               |
 
 **These eight fields are the whole wire format.** A run records more about itself
 locally — the worktree path, the branch, the delegated worker id — and those stay
@@ -143,17 +143,17 @@ toward "private" is a permanent leak.
 
 ## 9. Which writes carry it
 
-| Write                                                        | Carries the line                                                                                     |
-| ------------------------------------------------------------ | ----------------------------------------------------------------------------------------------------- |
-| `comment(item, body)`                                        | **Yes** — every agent-authored comment, beside the identity marker.                                   |
-| `needsInput(item, question)` (its comment)                   | **Yes** — the write whose entire purpose is to be replied to.                                         |
-| `createSubIssue(parent, spec)` (the description it writes)   | **Yes** — appended as the last line of the description it authors.                                    |
-| Any **item description the agent authors or rewrites**       | **Yes** — including a backlog sweep's description rewrite. See the replace rule below.                |
-| A **PR body**                                                | **Yes** — the once-per-run stamp VERIFY writes.                                                       |
-| A **PR comment**                                             | **Yes**.                                                                                              |
-| `claim`, `transition`, `assignToHuman`, `link`               | **No** — a label, state, or assignee write has no body to sign.                                       |
-| `attachEvidence`                                             | **No** — it writes links, not prose. The PR body it links to is signed.                               |
-| A human's text the agent relays **verbatim** on their behalf | **No** — signing someone else's words as the agent's own is a lie.                                    |
+| Write                                                        | Carries the line                                                                       |
+| ------------------------------------------------------------ | -------------------------------------------------------------------------------------- |
+| `comment(item, body)`                                        | **Yes** — every agent-authored comment, beside the identity marker.                    |
+| `needsInput(item, question)` (its comment)                   | **Yes** — the write whose entire purpose is to be replied to.                          |
+| `createSubIssue(parent, spec)` (the description it writes)   | **Yes** — appended as the last line of the description it authors.                     |
+| Any **item description the agent authors or rewrites**       | **Yes** — including a backlog sweep's description rewrite. See the replace rule below. |
+| A **PR body**                                                | **Yes** — the once-per-run stamp VERIFY writes.                                        |
+| A **PR comment**                                             | **Yes**.                                                                               |
+| `claim`, `transition`, `assignToHuman`, `link`               | **No** — a label, state, or assignee write has no body to sign.                        |
+| `attachEvidence`                                             | **No** — it writes links, not prose. The PR body it links to is signed.                |
+| A human's text the agent relays **verbatim** on their behalf | **No** — signing someone else's words as the agent's own is a lie.                     |
 
 **A description write REPLACES any signature already in that description; it never
 appends a second one.** A comment thread is ordered, so "newest signature" is
@@ -164,16 +164,16 @@ carries, then append yours.
 
 ## 10. Provenance and the identity marker are different things
 
-They coexist on the same comment and neither replaces the other:
+Write both; neither replaces the other. **The identity marker** (`identity.marker`,
+e.g. `— 🤖 /flow`) is visible and human- and self-facing. **`agent:provenance`** is
+invisible and machine-facing: it routes, naming the runtime, session, account and
+machine. Strip the marker and self-recognition breaks; strip the line and routing
+breaks.
 
-- **The identity marker** (`identity.marker`, e.g. `— 🤖 /flow`) is **human- and
-  self-facing**: it is visible, and it is how the comment-response rules recognize
-  the agent's own writes in shared-account mode.
-- **`agent:provenance`** is **machine-facing**: invisible, structured, and about
-  _routing_ — which runtime, which session, which account, which machine.
-
-A comment stripped of its marker breaks self-recognition; a comment stripped of
-its provenance breaks routing. Write both.
+Neither proves authorship, since anyone can type or paste them; only the author's
+account does. The marker makes the comment-response rules **stay quiet**; the line
+is never read for authorship, since every harness signs with it. Neither
+ever **grants** anything.
 
 ## 11. Reading it back
 
@@ -192,9 +192,8 @@ Three reader rules:
   authoritative and the thread signature is the fallback for items with no record.
 - **Absence is normal, not evidence.** An unsigned thread, a human-authored
   comment, or a signature a person removed while editing in a rich-text editor all
-  read the same way: no signature. Trackers with rich-text editors do sometimes
-  strip HTML comments a human edits around, so a missing line means "route as
-  unsigned", never "that session is dead".
+  read the same way: no signature (rich-text editors strip HTML comments). A missing
+  line means "route as unsigned", never "that session is dead".
 
 What to _do_ with a parsed signature — deliver into that session, start a fresh
 one, or handle it here and say so — is the router's decision, specified in the

@@ -24,9 +24,13 @@
  * ## The rules, in precedence order
  *
  * 1. **Never answer its own comments** — `author == identity.agent`, OR the body
- *    carries `identity.marker`. In shared-account mode the marker is the *only*
- *    signal. Highest precedence: it breaks self-reply loops before any other
- *    rule can fire. → `ignore`.
+ *    carries `identity.marker`. Only the account proves authorship; the marker
+ *    only ever silences. The hidden `agent:provenance` line is not read here at
+ *    all (DOR-2351): anyone can paste it, and other agents sign with it. In
+ *    shared-account mode `identity.agent` is the shared account, so the account
+ *    check alone catches the agent's own comment even when a tracker garbles
+ *    the marker. Highest precedence: it breaks self-reply loops before any
+ *    other rule can fire. → `ignore`.
  * 2. **Always respond when directly addressed** — an @mention of the agent
  *    account, or an explicit `/flow` / `@flow` token in the body. **Overrides
  *    ownership** — even on a teammate's (`other`-owned) thread. → `respond`.
@@ -78,8 +82,8 @@ export interface CommentIdentity {
   agent: string;
   /**
    * The authorship marker the agent appends to every tracker write
-   * (`identity.marker`, default `"— 🤖 /flow"`). In shared-account mode this is
-   * the *only* signal that a comment is the agent's own (rule 1).
+   * (`identity.marker`, default `"— 🤖 /flow"`). Rule 1 ignores a comment that
+   * carries it, from any account; it never proves authorship.
    */
   marker: string;
 }
@@ -137,24 +141,32 @@ const NEEDS_INPUT_LABEL = 'agent/needs-input';
 const FLOW_ADDRESS_TOKENS = ['/flow', '@flow'];
 
 /**
- * Whether the comment is the agent's own (rule 1): authored by the agent account,
- * or — in shared-account mode — carrying the `identity.marker`. The marker check
- * is the only signal when multiple agents share one tracker account.
- *
- * Anyone can type the marker, so here it only ever silences a comment, which
- * is safe. It must never grant anything: the drain's answer search anchors on
- * the agent's account, not the marker (DOR-3677). Keep the marker from other
- * accounts here, too: it holds `/flow`, so another flow agent's comment would
- * otherwise read as directly addressed (rule 2).
+ * Whether the agent's account wrote the comment: the only proof of
+ * authorship. Anything that grants (an answer's anchor, the agent's question)
+ * must use this, never {@link signedAsAgent}.
  */
-function isAgentsOwnComment(comment: InboxComment, identity: CommentIdentity): boolean {
+function authoredByAgent(comment: InboxComment, identity: CommentIdentity): boolean {
   // An unknown author (`''`) is never the agent, even if `identity.agent` is
   // somehow empty too: silence on a missing author must come from the rules
   // below, not from mistaking nobody for the agent.
   const author = authorOf(comment);
-  if (author.length > 0 && author === identity.agent) return true;
-  // Shared-account mode: the marker is the only authorship signal. A non-empty
-  // marker present in the body means the agent wrote it.
+  return author.length > 0 && author === identity.agent;
+}
+
+/**
+ * Whether the comment carries `identity.marker`, from any account.
+ *
+ * Anyone can type the marker, so it only ever silences a comment, which is
+ * safe. It must never grant anything: the drain's answer search anchors on the
+ * agent's account, not the marker (DOR-3677). Keep the marker from other
+ * accounts here, too: it holds `/flow`, so another flow agent's comment would
+ * otherwise read as directly addressed (rule 2).
+ *
+ * The hidden `agent:provenance` line counts for nothing (DOR-2351): any
+ * harness signs with it, so reading it here would silence another agent that
+ * addresses this one, and it would add nothing the account check lacks.
+ */
+function signedAsAgent(comment: InboxComment, identity: CommentIdentity): boolean {
   return identity.marker.length > 0 && bodyOf(comment).includes(identity.marker);
 }
 
@@ -218,7 +230,7 @@ function applyRules(
   // Rule 1 — never answer its own comments. Highest precedence: it must fire
   // before "directly addressed" so an agent that @mentions itself or echoes the
   // marker can never trigger a self-reply loop.
-  if (isAgentsOwnComment(comment, ctx.identity)) {
+  if (authoredByAgent(comment, ctx.identity) || signedAsAgent(comment, ctx.identity)) {
     return { action: 'ignore', rule: 1 };
   }
 

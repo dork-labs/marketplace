@@ -93,6 +93,48 @@ describe('shouldRespondToComment — rule 1: never answer its own comments', () 
   });
 });
 
+describe('shouldRespondToComment — rule 1 and the hidden provenance line (DOR-2351)', () => {
+  // Only the account proves authorship. The hidden line is never read here:
+  // anyone can paste it, and other agents sign their own comments with it.
+  const LINE = '<!-- agent:provenance {"v":1,"harness":"claude-code","sessionId":"s-1"} -->';
+
+  it("silences the agent's own comment by account alone, when the tracker garbled its marker", () => {
+    // Shared-account mode: identity.agent is the shared account, so the account catches it.
+    const c = comment({ author: 'agent-account', body: `Assumption logged\n\n— /flow\n${LINE}` });
+    expect(shouldRespondToComment(c, ctx('mine'), DEFAULT_COMMENTS)).toEqual({
+      action: 'ignore',
+      rule: 1,
+    });
+  });
+
+  it.each([
+    ['ending in the line', `/flow please pick this up\n${LINE}`],
+    [
+      'ending in the legacy line',
+      '/flow please pick this up\n<!-- flow:provenance {"sessionId":"s-1"} -->',
+    ],
+    ['with a garbled marker and the line', `/flow please pick this up\n\n— /flow\n${LINE}`],
+  ])(
+    "answers another account's comment %s that addresses flow: a signature is not authorship",
+    (_name, body) => {
+      const c = comment({ author: 'other-agent', body });
+      expect(shouldRespondToComment(c, ctx('mine'), DEFAULT_COMMENTS)).toEqual({
+        action: 'respond',
+        rule: 2,
+      });
+    }
+  );
+
+  it("resumes a parked item on a member's answer with a pasted line", () => {
+    const parked = makeItem({ identifier: 'DOR-9', labels: ['agent/needs-input'] });
+    const c = comment({ author: 'human-account', body: `Use Postgres.\n${LINE}` });
+    expect(shouldRespondToComment(c, ctx('mine', parked), DEFAULT_COMMENTS)).toEqual({
+      action: 'resume',
+      rule: 3,
+    });
+  });
+});
+
 describe('shouldRespondToComment — rule 2: always respond when directly addressed', () => {
   it('responds on an @mention of the agent account', () => {
     const c = comment({ mentions: ['agent-account'], body: 'can you take this?' });
