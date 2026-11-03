@@ -2,8 +2,19 @@ name: security-gate
 
 on:
   pull_request:
-    types: [opened, synchronize, reopened, edited]
+    # labeled/unlabeled: in label-at-head mode, adding the label or `hold` changes the verdict.
+    types: [opened, synchronize, reopened, edited, labeled, unlabeled]
   merge_group:
+
+concurrency:
+  # A push to a pull request makes its older runs here worthless, so they cancel.
+  # Only `pull_request` and `pull_request_target` runs share a group (one per
+  # workflow and pull request). Every other event, `merge_group` included, is
+  # keyed on its own run id, so nothing can cancel it or replace it while it is
+  # pending. The newest run in a group is never the cancelled one, so the
+  # newest head always reports.
+  group: ${{ github.workflow }}-${{ (github.event_name == 'pull_request' || github.event_name == 'pull_request_target') && format('pr-{0}', github.event.pull_request.number) || format('run-{0}', github.run_id) }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' || github.event_name == 'pull_request_target' }}
 
 permissions:
   contents: read
@@ -12,7 +23,8 @@ permissions:
 
 env:
   FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
-  # PLACEHOLDER: Dorian must create/install the App, then pin its numeric bot user ID here.
+  # '0' means no App is set, so the gate runs label-at-head. A real numeric bot user ID
+  # means App mode. Anything else refuses.
   SECURITY_APPROVAL_BOT_USER_ID: '0'
   # Security's list for the marketplace (security-auditor research,
   # marketplace-security-gate-scope.md, 2026-10-30): everything a package ships
@@ -22,6 +34,13 @@ env:
   # tests/, and a plugin's root README, CHANGELOG, LICENSE and NOTICE. The workflow
   # and its implementation are covered by .github/. Match both sides of renames.
   SECURITY_PATH_PATTERN: '^\.claude-plugin/|^(CLAUDE|AGENTS|REVIEW)\.md$|^\.mcp\.json$|^\.github/|^\.claude/|^\.agents/|^\.dork/|^scripts/|^tools/|^plugins/[^/]+/(?!(?:tests|engine-tests)/)(?!skills/[^/]+/tests/)(?!(?:README|CHANGELOG)\.md$)(?!LICENSE$)(?!NOTICE$)|^plugins/.*SKILL\.md$|(^|/)\.\.?(/|$)|//|(^|/)[pP][aA][cC][kK][aA][gG][eE]\.[jJ][sS][oO][nN]$|(^|/)package-lock\.json$|(^|/)npm-shrinkwrap\.json$|(^|/)pnpm-lock\.yaml$|(^|/)pnpm-workspace\.yaml$|(^|/)yarn\.lock$|(^|/)bun\.lockb?$|(^|/)\.npmrc$|(^|/)\.yarnrc(\.yml)?$|(^|/)\.nvmrc$|(^|/)\.node-version$|(^|/)patches/|(^|/)\.pnpmfile\.cjs$|(^|/)codeowners$'
+
+  # The P0 list, where a diff also needs security-deep-reviewed newer than its last
+  # push. Dorkos's code needs a list, and Security has not named one for this repo,
+  # so this one matches nothing. Every path added here must also match
+  # SECURITY_PATH_PATTERN. Workflow files and the gate's own files need the deep label
+  # regardless (security-verdict.mjs).
+  SECURITY_DEEP_PATH_PATTERN: '(?!)'
 
 jobs:
   security-gate:

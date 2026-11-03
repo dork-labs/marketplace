@@ -1,13 +1,17 @@
 # Security gate
 
-Status: **not enforced.** The check runs on every pull request and merge-queue
-run, but nothing requires it until the steps below are done.
+Status: **not enforced.** The checks run on every pull request and merge-queue
+run, but nothing requires them until the steps below are done.
 
 Packages in this repo install into every user's DorkOS: hooks, commands,
 skills, extensions and scripts agents run. A change to any of them needs
 DorkOS Security's approval for that exact commit. The gate is ported from
-dork-labs/dorkos (`.github/workflows/security-gate.yml` there), with
-Security's path list for this repo.
+dork-labs/dorkos at `dc0d70b316`, with Security's path list for this repo.
+`security-gate.mjs` and `security-label-at-head.mjs` are verbatim, and
+`security-review-initialize.yml` is too. `security-verdict.mjs` differs in one
+function, which adds the manifest rule below. `security-gate.test.mjs` swaps
+dorkos's path-list tests for this repo's, and `security-marketplace.test.mjs` is
+this repo's own. Take later changes from dorkos rather than forking them here.
 
 ## What counts as a security path
 
@@ -38,45 +42,72 @@ another way (a `package.json` script, `hooks:` in a skill's or command's
 frontmatter, a `!` line in a command) needs that file changed first, and it is
 a security path, so the pointer itself gets reviewed.
 
-**Known mismatch.** The initializer reads only the workflow's list, not the
-manifest rule, so for a PR that edits only a manifest-mentioned test file it
-posts "no security paths" while the verifier refuses the PR. That fails
-closed: an automatic success never counts for a security-path diff. Security
-will still need to look at the PR.
-
 ## How approval works
 
-- `security-review-initialize.yml` (`pull_request_target`, runs code from the
-  base commit only) sets the `security-review` status on each PR head:
-  `success` with "no security paths", or `pending`.
-- Security approves by setting `security-review` to `success` on the exact head
-  **through the Security GitHub App**. A new push needs a new approval.
-- `security-gate.yml` (read-only, base-commit code) passes only when that
-  status came from the App, whose bot user id is
-  `SECURITY_APPROVAL_BOT_USER_ID`. The `security-reviewed` label is a human
-  signal only: every agent here acts through one GitHub account, so anyone
-  could add it.
-- In the merge queue, every queued PR that touches a security path needs that
-  approval on its exact head, and its queued diff is compared on its own.
+**While `SECURITY_APPROVAL_BOT_USER_ID` is `'0'` the gate runs label-at-head**
+(Security and the PM, 2026-10-30). No App exists for this repo yet. Security
+approves a head by adding `security-reviewed`. It counts only if a person added
+it after the last push; a new push voids it, and so does a `hold` label. Any
+other id switches to App mode, where only a `security-review` status from that
+bot passes. Garbage refuses. The job summary names the mode.
+
+Two checks read that, and they are not the same:
+
+- **`security-review`, a commit status, is the verdict.**
+  `security-review-initialize.yml` (`pull_request_target`, checks out
+  `refs/heads/main`, runs no PR code) writes it from main's lists on every push
+  and label change: `success` for no security paths or a label that covers the
+  head, `failure` otherwise, naming why. It also posts one on each merge group.
+  A PR into any branch but main gets `failure`.
+- **`security-gate`, a workflow check, is what the queue enforces.** It runs from
+  the base commit and never writes. On an open PR with nothing wrong except a
+  label not yet added it **waits**: the check is green and the log says "Waiting
+  for Security". A stale label, a bot's label, `hold` or a refusal from main's
+  verdict still fail it. In the merge queue it never waits, and every queued PR
+  needs its label at its exact head.
+
+So a green `security-gate` on an open PR doesn't mean reviewed. Read
+`security-review`.
+
+**`security-deep-reviewed`** is the second label dorkos's code asks for, added
+the same way. A PR that adds, changes, renames or removes any workflow file, or
+edits the gate's own files, needs it for a `success` from `security-review`: a
+workflow with `statuses: write` can post that status itself, and in the queue the
+workflow file comes from the merge commit. `SECURITY_DEEP_PATH_PATTERN` is this
+repo's P0 list. **It matches nothing today**, because Security hasn't named one
+here. **The label doesn't exist in this repo yet**, so those PRs can't get a
+`success` until Security creates it.
+
+**Known gaps:**
+
+- Anyone with push can forge `security-review` from a workflow with
+  `statuses: write`, and every agent here acts through one GitHub account, so a
+  person-only label says who clicked, not who reviewed. Only the Security App
+  closes this. **Never make `security-review` a required check while its source
+  is GitHub Actions.**
+- `security-gate` can read `security-review` just before main's verdict writes
+  it, and fail a PR Security has just labelled, until someone reruns it. dorkos
+  tracks this as DOR-3710, and the fix isn't in this copy yet.
 
 ## Turning it on (Dorian)
 
-1. Install the Security App on this repo (the one dorkos uses, or a new one),
-   and put its numeric bot user id in `SECURITY_APPROVAL_BOT_USER_ID`. While it
-   is `'0'`, no security-path PR can pass. **Blocked today:** dorkos's approval
-   helper (`tools/security-approve/` there) is hard-wired to dork-labs/dorkos
-   and its path list, so nothing can post a marketplace approval yet. It needs a
-   reviewed change to take the repository and pattern, or a tool of its own.
+1. Create `security-deep-reviewed` in this repo (Security). Only Security adds it.
 2. Add an organization ruleset rule **Require workflows to pass before
    merging** for this repo's `main`: source `dork-labs/marketplace`, path
    `.github/workflows/security-gate.yml`, ref `refs/heads/main`. Not a named
    status check: a PR could edit its own YAML to emit a passing job with that
    name. Start in Evaluate mode, then Active.
 3. Remove any bypass from the `main` ruleset.
+4. **Later, for App mode:** install the Security App on this repo and put its
+   numeric bot user id in `SECURITY_APPROVAL_BOT_USER_ID`. dorkos's approval
+   helper (`tools/security-approve/` there) is hard-wired to dork-labs/dorkos and
+   its path list, so it needs a reviewed change first, or a tool of its own.
 
 ## Bootstrap
 
-The PR that adds the gate fails its own `security-gate` run: its base commit
-has no gate script yet, so the verifier fails closed. That is expected. Its
-fixtures run on the PR head in `script fixtures`. Don't add a head-source
-fallback to clear it.
+The PR that adds the gate fails its own `security-gate` run, and a label can't
+clear it: its base commit has no gate script yet, so the verifier fails closed.
+`security-review-initialize.yml` doesn't run on it either, because
+`pull_request_target` reads the workflow from the base, so it gets no
+`security-review` status. That is expected. Its fixtures run on the PR head in
+`script fixtures`. Don't add a head-source fallback to clear it.

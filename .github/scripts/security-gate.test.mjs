@@ -22,11 +22,13 @@ const initializerWorkflow = readFileSync(
   'utf8'
 );
 const pattern = /^ {2}SECURITY_PATH_PATTERN: '(.*)'$/m.exec(workflow)[1];
+const deepPattern = /^ {2}SECURITY_DEEP_PATH_PATTERN: '(.*)'$/m.exec(workflow)[1];
 const appSlug = 'dorkos-security-review';
 const botUserId = 424242;
 const checkPullRequest = (api, event, pattern, options = {}) =>
-  runPullRequest(api, event, pattern, { botUserId, ...options });
-const checkMergeGroup = (api, event, pattern) => runMergeGroup(api, event, pattern, botUserId);
+  runPullRequest(api, event, pattern, { botUserId, deepPattern, ...options });
+const checkMergeGroup = (api, event, pattern) =>
+  runMergeGroup(api, event, pattern, botUserId, deepPattern);
 const approved = {
   context: 'security-review',
   state: 'success',
@@ -60,6 +62,8 @@ function fixture({ files = ['plugins/flow/hooks/gate.sh'], statuses = {} } = {})
       changed_files: files.length,
       labels: [{ name: 'security-reviewed' }],
     }),
+    timeline: async () => [],
+    activity: async () => [],
     files: async () => files.map((filename) => ({ filename })),
     compare: async (base) => ({
       base_commit: { sha: base },
@@ -147,6 +151,30 @@ test('merge_group with all exact heads approved passes', async () => {
   const f = fixture({ statuses: { head1: [approved], head2: [approved] } });
   await checkMergeGroup(f.api, groupEvent, pattern);
   assert.deepEqual(f.writes, []);
+});
+
+// Under a HEADGREEN merge queue an earlier entry merges on the LAST entry's
+// build, so its own security-gate run may never be awaited. The last entry's
+// run has to catch it: groupMembers walks from that head back to the base.
+test('merge_group judged on its last entry still fails closed on an earlier unapproved entry', async () => {
+  const f = fixture({ statuses: { head2: [approved], head3: [approved] } });
+  f.heads[3] = 'head3';
+  const three = [
+    ...entries,
+    {
+      baseCommit: { oid: 'group2' },
+      headCommit: { oid: 'group3' },
+      pullRequest: { number: 3, headRefOid: 'head3' },
+    },
+  ];
+  f.api.queue = async () => structuredClone(three);
+  const lastEntry = { merge_group: { ...groupEvent.merge_group, head_sha: 'group3' } };
+  await assert.rejects(
+    checkMergeGroup(f.api, lastEntry, pattern),
+    /PR #1: no security-review success on head1/
+  );
+  f.statuses.head1 = [approved];
+  await checkMergeGroup(f.api, lastEntry, pattern);
 });
 
 test('a push while reading a status fails', async () => {
@@ -373,15 +401,15 @@ test('fork verifier passes docs-only status written by trusted initializer', asy
   assert.equal(f.comments.length, 1);
 });
 
-test('privileged fork initializer is confined to the base SHA, never the fork head', () => {
+test('privileged initializer is confined to main, never the fork head or a base branch', () => {
   const initializer = initializerWorkflow;
   assert.match(initializer, /^ {2}pull_request_target:/m);
   assert.doesNotMatch(workflow, /^ {2}pull_request_target:/m);
-  assert.match(initializer, /ref: \$\{\{ github.event.pull_request.base.sha \}\}/);
+  assert.match(initializer, /ref: refs\/heads\/main$/m);
   assert.doesNotMatch(initializer, /pull_request.head|npm|pnpm/);
   assert.match(
     initializer,
-    /pull_request_target:\n {4}types: \[opened, synchronize, reopened, edited\]/
+    /pull_request_target:\n {4}types: \[opened, synchronize, reopened, edited, labeled, unlabeled\]/
   );
 });
 
@@ -461,6 +489,10 @@ test('pinned-main fixture blocks a branch whose workflow and script both exit 0'
   const script = '.github/scripts/security-gate.mjs';
   const workflowPath = '.github/workflows/security-gate.yml';
   writeFileSync(join(dir, script), readFileSync(new URL('./security-gate.mjs', import.meta.url)));
+  writeFileSync(
+    join(dir, '.github/scripts/security-label-at-head.mjs'),
+    readFileSync(new URL('./security-label-at-head.mjs', import.meta.url))
+  );
   writeFileSync(join(dir, workflowPath), workflow);
   git('add', '.');
   git('commit', '-qm', 'trusted main gate');
@@ -537,6 +569,7 @@ test('pinned-main fixture blocks a branch whose workflow and script both exit 0'
         SECURITY_APPROVAL_BOT_USER_ID: String(botUserId),
         GITHUB_EVENT_PATH: eventPath,
         SECURITY_PATH_PATTERN: pattern,
+        SECURITY_DEEP_PATH_PATTERN: deepPattern,
       },
     });
     let output = '';
@@ -659,15 +692,26 @@ test('queue comparison refuses API errors, missing lists, wrong base and the com
   await assert.rejects(checkMergeGroup(f.api, groupEvent, pattern), /Compare API failed/);
 });
 
-test('computed PR clearance refuses same-head base retarget during files read', async () => {
+test('a same-head base retarget during the files read re-runs on the new base (DOR-3680)', async () => {
   const f = fixture({ files: ['docs/a.md'] });
   const original = f.api.pr;
+  const listed = f.api.files;
   let reads = 0;
+  let fileReads = 0;
+  f.api.files = async (n) => {
+    fileReads += 1;
+    return listed(n);
+  };
   f.api.pr = async (n) => ({
     ...(await original(n)),
     base: { ref: ++reads === 1 ? 'main' : 'other' },
   });
-  await assert.rejects(checkPullRequest(f.api, prEvent, pattern), /base moved/);
+  assert.equal(await checkPullRequest(f.api, prEvent, pattern), 'no security paths (computed)');
+  // The old base's file list is never the one judged.
+  assert.equal(fileReads, 2);
+  // A head that moves is still refused.
+  f.api.pr = async (n) => ({ ...(await original(n)), head: { sha: 'head9' } });
+  await assert.rejects(checkPullRequest(f.api, prEvent, pattern), /head moved/);
 });
 
 test('GitHub compare requests pin both SHA inputs and return page-one files', async (t) => {

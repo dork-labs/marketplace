@@ -124,9 +124,11 @@ leaves the PR waiting forever. Keep it that way, or un-require the check first.
   PR watcher, plus the security gate's own fixtures.
 - `security-gate.yml`, check **`security-gate`** (not required yet). A change to a
   security path (anything a package installs or runs, CI, agent config, dependencies)
-  needs DorkOS Security's approval on that exact commit, through the Security App; a
-  label is not enough. `.github/SECURITY-GATE.md` has the path list, how approval
-  works, and the steps to make it required.
+  needs DorkOS Security's `security-reviewed` label, added after the PR's last push, with
+  no `hold`. On an open PR it only waits, so green doesn't mean reviewed: read the
+  `security-review` status, which main's copy of the gate writes. The queue never waits.
+  `.github/SECURITY-GATE.md` has the path list, how approval works, and the steps to make
+  it required.
 
 ## Landing changes
 
