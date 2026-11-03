@@ -208,6 +208,7 @@ async function flow(
     cwd?: string;
     sleep?: (ms: number) => Promise<void>;
     guard?: RecordingGuard;
+    env?: Record<string, string>;
   } = {}
 ) {
   const forge = options.forge ?? fakeForge();
@@ -216,7 +217,11 @@ async function flow(
   let out = '';
   let err = '';
   const code = await main([...argv, '--json'], {
-    env: { FLOW_SESSION_ID: 'session-abcdef123456', CLAUDECODE: '1', DORK_HOME: dorkHome },
+    env: options.env ?? {
+      FLOW_SESSION_ID: 'session-abcdef123456',
+      CLAUDECODE: '1',
+      DORK_HOME: dorkHome,
+    },
     cwd: options.cwd ?? project.dir,
     now: options.clock ?? (() => new Date(options.now ?? NOW)),
     stdout: { write: (c: string) => (out += c) },
@@ -231,6 +236,23 @@ async function flow(
   });
   return { code, json: JSON.parse(out) as Record<string, unknown>, stderr: err, forge, tracker };
 }
+
+/**
+ * Security M1 on DOR-3712: the refusal is read by the agent it stops, so it
+ * says to stop and ask the person in DorkOS, and never names the retry that
+ * works (another shell, a changed environment). The advice for people lives
+ * in the docs and `--help` only.
+ */
+function expectStopAndAsk(stderr: string): void {
+  expect(stderr).toContain('Stop');
+  expect(stderr).toContain('ask the person to answer it in DorkOS');
+  for (const hint of ['plain terminal', 'terminal', 'environment', 'shell without', 'unset']) {
+    expect(stderr.toLowerCase()).not.toContain(hint);
+  }
+}
+
+/** A person's shell, as DorkOS runs `flow answer`: no agent runtime, no session (DOR-3712). */
+const person = (): Record<string, string> => ({ DORK_HOME: dorkHome });
 
 /** The ACME-12 run, at `stage`, with extra fields. */
 function writeRun(fields: Partial<FlowRun> = {}): void {
@@ -755,7 +777,10 @@ describe('flow answer', () => {
   it("posts a person's answer the comment rules count as the reply", async () => {
     writeRun({ stage: 'execute', status: 'running', question: question() });
     const tracker = new FakeTracker({ team: ACME_TEAM, items: [parked()], user: { id: 'dorian' } });
-    const result = await flow(['answer', 'ACME-12', '--text', 'Drop it.'], { tracker });
+    const result = await flow(['answer', 'ACME-12', '--text', 'Drop it.'], {
+      tracker,
+      env: person(),
+    });
     expect(result.code).toBe(EXIT.ok);
     const [body] = comments(tracker);
     expect(body).toBe('Drop it.\n\nAnswered in DorkOS.');
@@ -774,11 +799,71 @@ describe('flow answer', () => {
     expect(stored().question?.answer).toEqual({ text: 'Drop it.', at: NOW, by: 'person' });
   });
 
+  // Purpose (DOR-3712): only a person answers with --text. An agent's shell
+  // carries its runtime's markers, so flow refuses it before reading the
+  // tracker, records nothing and posts nothing. Fails if the gate is dropped.
+  it.each<[string, Record<string, string>]>([
+    ['Claude Code', { CLAUDECODE: '1' }],
+    ['Claude Code by its entry point', { CLAUDE_CODE_ENTRYPOINT: 'cli' }],
+    ['Codex', { CODEX_THREAD_ID: 'thread-1' }],
+    ['OpenCode', { OPENCODE: '1' }],
+    ['a runtime named by FLOW_RUNTIME', { FLOW_RUNTIME: 'codex' }],
+    ['a runtime FLOW_RUNTIME names that flow does not know', { FLOW_RUNTIME: 'doe' }],
+    ['a DorkOS agent turn (its agent token)', { DORKOS_AGENT_TOKEN: 'tok' }],
+  ])('refuses --text from inside %s, saying how a person answers', async (_name, markers) => {
+    writeRun({ stage: 'execute', status: 'running', question: question() });
+    const tracker = new FakeTracker({ team: ACME_TEAM, items: [parked()] });
+    const result = await flow(['answer', 'ACME-12', '--text', 'Drop it.'], {
+      tracker,
+      env: { ...person(), ...markers },
+    });
+    expect(result.code).toBe(EXIT.precondition);
+    expectStopAndAsk(result.stderr);
+    expect(comments(tracker)).toEqual([]);
+    expect(stored().question?.answer).toBeUndefined();
+  });
+
+  it.each([
+    ['the session that asked', 'worker-session'],
+    ["the run's worker", 'session-abcdef123456'],
+  ])('refuses --text from %s, even with no runtime markers', async (_name, session) => {
+    writeRun({
+      stage: 'execute',
+      status: 'running',
+      question: question({ askedBy: 'worker-session' }),
+    });
+    const tracker = new FakeTracker({ team: ACME_TEAM, items: [parked()] });
+    const result = await flow(['answer', 'ACME-12', '--text', 'Drop it.'], {
+      tracker,
+      env: { ...person(), FLOW_SESSION_ID: session },
+    });
+    expect(result.code).toBe(EXIT.precondition);
+    expectStopAndAsk(result.stderr);
+    expect(comments(tracker)).toEqual([]);
+    expect(stored().question?.answer).toBeUndefined();
+  });
+
+  it('takes --text-file from a person too, and refuses it from an agent', async () => {
+    writeRun({ stage: 'execute', status: 'running', question: question() });
+    const file = path.join(project.dir, 'answer.txt');
+    writeFileSync(file, 'Drop it.\n');
+    const tracker = new FakeTracker({ team: ACME_TEAM, items: [parked()] });
+    const agent = await flow(['answer', 'ACME-12', '--text-file', file], { tracker });
+    expect(agent.code).toBe(EXIT.precondition);
+    expect(comments(tracker)).toEqual([]);
+    const ok = await flow(['answer', 'ACME-12', '--text-file', file], { tracker, env: person() });
+    expect(ok.code).toBe(EXIT.ok);
+    expect(stored().question?.answer?.by).toBe('person');
+  });
+
   // Purpose: whoever answers first wins; the second finds it settled (exit 5).
   it('refuses an item that no longer waits for an answer', async () => {
     writeRun({ stage: 'execute', status: 'running', question: question() });
     const tracker = new FakeTracker({ team: ACME_TEAM, items: [started()] });
-    const result = await flow(['answer', 'ACME-12', '--text', 'Drop it.'], { tracker });
+    const result = await flow(['answer', 'ACME-12', '--text', 'Drop it.'], {
+      tracker,
+      env: person(),
+    });
     expect(result.code).toBe(EXIT.precondition);
     expect(comments(tracker)).toEqual([]);
   });
@@ -1045,7 +1130,11 @@ describe('review fixes (DOR-2528 FIX-FIRST)', () => {
       }
       return new Date(NOW);
     };
-    const result = await flow(['answer', 'ACME-12', '--text', 'Hold it.'], { tracker, clock });
+    const result = await flow(['answer', 'ACME-12', '--text', 'Hold it.'], {
+      tracker,
+      clock,
+      env: person(),
+    });
     expect(result.code).toBe(EXIT.precondition);
     // Re-review nit: the loser says it lost the race, not that nothing waited.
     expect(result.stderr).toContain('got there first');

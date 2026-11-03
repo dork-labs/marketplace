@@ -46,6 +46,7 @@ import path from 'node:path';
 import type { AutonomyKind, AutonomyStop } from '../../../../scripts/autonomy.ts';
 import { JOURNAL_FILE, RUN_FILES_DIR } from '../../../../scripts/config-names.ts';
 import { ACTIVE_RUN_STATUSES } from '../../../../scripts/fleet/sessions.ts';
+import { withoutAgent } from '../../../../scripts/runtime-detect.ts';
 import type { ExecError, ExecFileLike } from './advisor.ts';
 import {
   ASK_AUTONOMY,
@@ -1243,6 +1244,10 @@ export class DecisionCoordinator {
           maxBuffer: 4 * 1024 * 1024,
           // flow refuses a --project outside the checkout it runs in (DOR-3377).
           cwd: root,
+          // The person who clicked is the one acting, so no agent's markers or
+          // session reach the verb: `flow answer --text` refuses an agent's
+          // shell (DOR-3712).
+          env: withoutAgent(process.env),
         },
         (error: ExecError | null, stdout: string) => {
           if (temp !== null) rmSync(temp, { force: true });

@@ -109,6 +109,7 @@ interface Call {
   args: string[];
   file: string | null;
   cwd?: string;
+  env?: Record<string, string | undefined>;
 }
 
 /**
@@ -126,7 +127,7 @@ function fakeCli(
     const rest = args.slice(2);
     const fileFlag = rest.findIndex((arg) => arg === '--note-file' || arg === '--text-file');
     const file = fileFlag === -1 ? null : readFileSync(rest[fileFlag + 1], 'utf8');
-    calls.push({ args: rest, file, cwd: opts.cwd });
+    calls.push({ args: rest, file, cwd: opts.cwd, env: opts.env });
     const reply = answer(rest);
     const done = () => {
       const stdout = reply.json === undefined ? '{"ok":true}' : JSON.stringify(reply.json);
@@ -737,6 +738,39 @@ describe('answering', () => {
     });
     expect(cli.calls[0].args.slice(0, 3)).toEqual(['answer', 'DOR-2401', '--text-file']);
     expect(cli.calls[0].file).toBe('Remove it');
+  });
+
+  // Purpose (DOR-3712): `flow answer --text` refuses a shell inside an agent.
+  // The person who clicked is the one answering, so the verb runs without the
+  // agent markers or a session id DorkOS's own process may carry (a DorkOS
+  // started from inside a Claude session). Fails if they reach the verb.
+  it("runs the person's answer without any agent's markers or session", async () => {
+    const markers = {
+      CLAUDECODE: '1',
+      CLAUDE_CODE_ENTRYPOINT: 'cli',
+      CLAUDE_CODE_SESSION_ID: 's-1',
+      CODEX_THREAD_ID: 't-1',
+      CODEX_SANDBOX: 'seatbelt',
+      CODEX_SANDBOX_NETWORK_DISABLED: '1',
+      OPENCODE: '1',
+      FLOW_RUNTIME: 'claude-code',
+      FLOW_SESSION_ID: 'agent-session',
+      DORKOS_AGENT_TOKEN: 'tok',
+    };
+    for (const [name, value] of Object.entries(markers)) vi.stubEnv(name, value);
+    try {
+      const { coordinator, cli } = setup({ stops: { questions: 'tell' } });
+      await coordinator.sync([plan({ a: questionRun() })]);
+      const qkey = 'question:3f2a00000000:DOR-2401';
+      await coordinator.handle(event(qkey, { action: 'choice', choiceId: 'c2' }));
+      const env = cli.calls[0].env;
+      expect(env).toBeDefined();
+      for (const name of Object.keys(markers)) expect(env).not.toHaveProperty(name);
+      // Everything else the verb needs still reaches it.
+      expect(env?.PATH).toBe(process.env.PATH);
+    } finally {
+      vi.unstubAllEnvs();
+    }
   });
 
   it("takes the agent's pick at the deadline off the floor, and never settles a floor question on it", async () => {

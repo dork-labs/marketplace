@@ -4,6 +4,15 @@ Installs of this plugin are pinned to a commit SHA, so a fix here does not reach
 you until you **reinstall it** (Marketplace → flow → reinstall, or re-run your
 `--plugin-dir` checkout's `git pull`). Each entry below says whether that matters.
 
+## 0.84.0
+
+**Only a person can answer a parked question with `flow answer --text` now, and a question about secrets or spending resumes only on a person's answer (DOR-3712). Before, any agent could run `flow answer --text`, including the one that asked, and its words were recorded as yours. Reinstall to get it.**
+
+- `flow answer --text` and `--text-file` refuse a shell inside an agent (Claude Code, Codex or OpenCode, any runtime `FLOW_RUNTIME` names, or a DorkOS agent turn) and the session that asked the question or works the item, and post and record nothing. The refusal tells the agent to stop and ask you to answer in DorkOS, never how to get past it. You can also answer from a plain terminal; if yours has Claude Code's environment exported, open a plain one.
+- DorkOS's Inbox and Flow panel answer the same way as before: DorkOS runs `flow answer` without any agent's markers, since you're the one clicking.
+- `flow drain` and the inbox pass resume a question about secrets or spending only on your answer from DorkOS or `flow answer`, or a teammate's reply on their own tracker account. Any other answer found on the run is dropped, and the item stays parked with a warning. Flow never writes one, so it could only have been put there by hand.
+- This stops an agent answering through its usual tools. It can't stop one set on forging an answer on your own computer, since any program you run can change those settings or flow's files. A DorkOS Doe agent's shell carries no agent marker yet, so it isn't stopped until DorkOS adds one. `flow review --approve` has no such check yet either.
+
 ## 0.83.0
 
 **On a shared tracker account (the default, with `identity.reviewer` left empty), flow now tells its own comments from everything else on that account, and it never acts on a comment it can't prove is a person's (DOR-3707). Every agent posts as that account, so an unsigned comment from it could be an agent answering its own question. To answer a question flow parked on, use DorkOS or `flow answer`. Reinstall to get it.**

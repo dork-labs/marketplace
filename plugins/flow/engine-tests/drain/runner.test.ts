@@ -295,7 +295,7 @@ let world: World;
 let armGuard: RecordingGuard;
 
 /** Run `flow <argv> --json` with the fakes; `drain` gets the test's options. */
-async function flow(argv: string[], cwd = project.dir) {
+async function flow(argv: string[], cwd = project.dir, env?: Record<string, string>) {
   let out = '';
   let err = '';
   const verbs = VERBS.map((verb) =>
@@ -309,7 +309,7 @@ async function flow(argv: string[], cwd = project.dir) {
       : verb
   );
   const code = await main([...argv, '--json'], {
-    env: {
+    env: env ?? {
       FLOW_SESSION_ID: 'supervisor-session',
       CLAUDECODE: '1',
       DORK_HOME: dorkHome,
@@ -1466,7 +1466,10 @@ describe('flow drain: questions with a pick (spec flow-multiproject §7.5)', () 
     await tick();
     expect(drainOf('ACME-1').phase).toBe('parked');
     world.tracker.backlog.members = ['agent-1'];
-    const answered = await flow(['answer', 'ACME-1', '--text', 'Use CSV.']);
+    // A person's shell, as DorkOS runs it: no agent runtime, no session (DOR-3712).
+    const answered = await flow(['answer', 'ACME-1', '--text', 'Use CSV.'], project.dir, {
+      DORK_HOME: dorkHome,
+    });
     expect(answered.code, answered.stderr).toBe(0);
     const pass = await tick();
     expect(drainOf('ACME-1').phase).toBe('working');
@@ -1682,6 +1685,62 @@ describe('flow drain: questions with a pick (spec flow-multiproject §7.5)', () 
     await tick();
     expect(world.log.starts.some((s) => s.req.title === 'ACME-1 question check')).toBe(false);
     expect(drainOf('ACME-1').phase).toBe('parked');
+  }, 120_000);
+
+  // Purpose (DOR-3712): only a person answers a secrets-or-spend question. The
+  // CLI refuses any other answer, so one on the run was written by hand (an
+  // agent can write flow-state.json); the drain must not resume on it. Fails if
+  // the drain's reply path stops checking personOnly.
+  it.each(['agent-default', 'reviewer-agent'] as const)(
+    'keeps a secrets-or-spend question parked on a recorded %s answer, and says why',
+    async (by) => {
+      world.tracker = new FakeTracker({
+        team: ACME_TEAM,
+        user: { id: 'agent-1' },
+        items: [item('ACME-1')],
+      });
+      await tick();
+      await workerAsks('secrets-or-spend');
+      await tick();
+      expect(drainOf('ACME-1').phase).toBe('parked');
+      const run = runOf('ACME-1');
+      const at = new Date(clock).toISOString();
+      project.writeRuns({
+        [run.issueId]: {
+          ...run,
+          question: { ...run.question!, answer: { text: 'Keep it', at, by } },
+        },
+      });
+      clock += 60_000;
+      const pass = await tick();
+      expect(drainOf('ACME-1').phase).toBe('parked');
+      expect(acme1().labels).toContain('agent/needs-input');
+      expect(pass.stderr).toContain('only a person answers it');
+      // Security M1: the warning sends the agent to the person, never to a retry.
+      expect(pass.stderr).toContain('ask the person to answer it in DorkOS');
+      expect(pass.stderr).not.toContain('plain terminal');
+      // Said once, not on every pass.
+      clock += 60_000;
+      expect((await tick()).stderr).not.toContain('only a person answers it');
+    },
+    120_000
+  );
+
+  it("resumes a secrets-or-spend question on a person's answer from DorkOS", async () => {
+    world.tracker = new FakeTracker({
+      team: ACME_TEAM,
+      user: { id: 'agent-1' },
+      items: [item('ACME-1')],
+    });
+    await tick();
+    await workerAsks('secrets-or-spend');
+    await tick();
+    const answered = await flow(['answer', 'ACME-1', '--text', 'Keep it.'], project.dir, {
+      DORK_HOME: dorkHome,
+    });
+    expect(answered.code, answered.stderr).toBe(0);
+    await tick();
+    expect(drainOf('ACME-1').phase).toBe('working');
   }, 120_000);
 });
 
