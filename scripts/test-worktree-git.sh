@@ -129,3 +129,4 @@ check "the branch is gone" 1 "$(run tip done-work)"
 printf 'worktree-git fixtures: %d passed, %d failed\n' "$pass" "$fail"
 [ "$fail" -eq 0 ]
 # security-gate proof A, throwaway, never merged.
+# security-gate proof A, second push.
