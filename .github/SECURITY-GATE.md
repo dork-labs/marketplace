@@ -10,8 +10,10 @@ Packages in this repo install into every user's DorkOS: hooks, commands,
 skills, extensions and scripts agents run. A change to any of them needs
 DorkOS Security's approval for that exact commit. The gate is ported from
 dork-labs/dorkos at `dc0d70b316`, with Security's path list for this repo.
-`security-gate.mjs` and `security-label-at-head.mjs` are verbatim, and
-`security-review-initialize.yml` is too. `security-verdict.mjs` differs in one
+`security-gate.mjs` and its `security-label-at-head.test.mjs` are verbatim from dorkos at
+`53f91d4827` (DOR-3710's wait, #3464, and its poll log, #3466, which hadn't merged there
+when this was ported, so re-pin to its merge commit once it does). `security-label-at-head.mjs`
+and `security-review-initialize.yml` are verbatim too. `security-verdict.mjs` differs in one
 function, `runVerdict`, which fails closed when its lists won't load. `security-gate.test.mjs` swaps
 dorkos's path-list tests for this repo's, and `security-marketplace.test.mjs` is
 this repo's own. Take later changes from dorkos rather than forking them here.
@@ -79,9 +81,13 @@ Two checks read that, and they are not the same:
   mode, comes from the merge commit until the ruleset below pins it to main. On an
   open PR with nothing wrong except a
   label not yet added it **waits**: the check is green and the log says "Waiting
-  for Security". A stale label, a bot's label, `hold` or a refusal from main's
-  verdict still fail it. In the merge queue it never waits, and every queued PR
-  needs its label at its exact head.
+  for Security". A stale label, a bot's label or `hold` fail it at once. Once the labels
+  it can see cover the head, a PR into main waits up to 90 seconds for a finished
+  `security-review` on that head, newer than the last change to `security-reviewed`,
+  `security-deep-reviewed` or `hold`, the last push, force push or base change, and the
+  event that started this run. A fresh `success` passes, a fresh refusal fails, and if time runs out it
+  fails and asks for a rerun. Each read during that wait logs a `security-review poll <n>:` line. In the
+  merge queue it never waits, and every queued PR needs its label at its exact head.
 
 So a green `security-gate` on an open PR doesn't mean reviewed. Read
 `security-review`.
@@ -107,9 +113,10 @@ whatever that status says. Only Security adds it.
 - The P0 list is only as firm as the YAML it lives in. Until the ruleset below pins
   the workflow to main, a PR can edit its own copy of the list and so drop out of
   the deep label in the queue, as with every other list here.
-- `security-gate` can read `security-review` just before main's verdict writes
-  it, and fail a PR Security has just labelled, until someone reruns it. dorkos
-  tracks this as DOR-3710, and the fix isn't in this copy yet.
+- A burst of label changes can still turn `security-gate` red until someone reruns it.
+  A verdict run that started before the last label change can write its status just after
+  that change, so it reads as fresh though it saw the old labels. It fails closed, and the
+  window is a few seconds. The fix belongs in dorkos first.
 
 ## Turning it on (Dorian)
 

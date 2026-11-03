@@ -1,4 +1,4 @@
-/* global URL, process */
+/* global URL, console, process */
 // Marketplace only. The label-at-head, verdict and gate suites beside this are
 // dorkos's; these run its code against this repo's real lists and paths, and pin
 // what this repo adds to it.
@@ -26,8 +26,14 @@ const SHA = 'head1';
 const REF = 'security-gate';
 const EARLY = '2026-11-03T10:00:00Z';
 const LATE = '2026-11-03T11:00:00Z';
+const VERDICT = '2026-11-03T11:00:05Z';
 const event = {
-  pull_request: { number: 1, head: { sha: SHA }, base: { ref: 'main', sha: 'base' } },
+  pull_request: {
+    number: 1,
+    head: { sha: SHA },
+    base: { ref: 'main', sha: 'base' },
+    updated_at: LATE,
+  },
 };
 const group = {
   merge_group: { base_ref: 'refs/heads/main', base_sha: 'base', head_sha: 'group1' },
@@ -59,6 +65,7 @@ function fakeGitHub({ files = [SENSITIVE], labels = [], timeline = [], activity 
         context: 'security-review',
         state,
         description,
+        created_at: VERDICT,
         creator: { login: 'github-actions[bot]' },
       };
       statuses.unshift(status);
@@ -84,12 +91,32 @@ function fakeGitHub({ files = [SENSITIVE], labels = [], timeline = [], activity 
   return { api, statuses };
 }
 
-const verifier = (api) => checkPullRequest(api, event, pattern, { botUserId: '0', deepPattern });
+/** No real waiting in tests: a fake clock that each sleep moves on, and `onSleep` runs on each. */
+const fastPoll = (onSleep = () => {}) => {
+  const poll = {
+    intervalMs: 5000,
+    timeoutMs: 90_000,
+    slept: 0,
+    now: () => poll.slept,
+    sleep: async (ms) => {
+      poll.slept += ms;
+      onSleep();
+    },
+  };
+  return poll;
+};
+const verifier = (api, poll = fastPoll()) =>
+  checkPullRequest(api, event, pattern, { botUserId: '0', deepPattern, poll });
 const queued = (api) => checkMergeGroup(api, group, pattern, '0', deepPattern);
 /** Main's verdict on the head, then the status it left. */
 async function verdict(gh) {
   await verdictForPullRequest(gh.api, event, lists);
   return gh.statuses[0];
+}
+/** Main's verdict has written its status on this head, then the PR's gate reads it. */
+async function verifiedAfterVerdict(gh) {
+  await verdict(gh);
+  return verifier(gh.api);
 }
 
 describe('label-at-head on this repo’s lists', () => {
@@ -104,7 +131,7 @@ describe('label-at-head on this repo’s lists', () => {
       activity: [push(EARLY)],
     };
     assert.equal((await verdict(fakeGitHub(proof))).state, 'success');
-    assert.equal(await verifier(fakeGitHub(proof).api), 'Security status verified');
+    assert.equal(await verifiedAfterVerdict(fakeGitHub(proof)), 'Security status verified');
     assert.match(await queued(fakeGitHub(proof).api), /Security status verified/);
   });
 
@@ -173,6 +200,58 @@ describe('label-at-head on this repo’s lists', () => {
   });
 });
 
+describe('the PR’s gate waits for main’s fresh verdict, on this repo’s lists (DOR-3710)', () => {
+  const approved = {
+    labels: ['security-reviewed'],
+    timeline: [labelled(LATE)],
+    activity: [push(EARLY)],
+  };
+  /** The status main's verdict left before this label. */
+  const stale = (gh) => {
+    gh.statuses.unshift({ context: 'security-review', state: 'failure', created_at: EARLY });
+    return gh;
+  };
+
+  test('the first run after a label waits out the old failure, logs each read, and passes', async (t) => {
+    const log = t.mock.method(console, 'log', () => {});
+    const gh = stale(fakeGitHub(approved));
+    const poll = fastPoll(() => gh.api.setStatus(SHA, 'success', 'Security label covers this SHA'));
+    assert.equal(await verifier(gh.api, poll), 'Security status verified');
+    assert.equal(poll.slept, 5000);
+    const lines = log.mock.calls
+      .map((call) => String(call.arguments[0]))
+      .filter((line) => line.startsWith('security-review poll'));
+    assert.equal(lines.length, 2);
+    assert.match(lines[0], new RegExp(`^security-review poll 1: failure at ${EARLY}; `));
+    assert.match(lines[1], new RegExp(`^security-review poll 2: success at ${VERDICT}; `));
+  });
+
+  test('no verdict in time fails closed, naming the rerun', async () => {
+    const poll = fastPoll();
+    await assert.rejects(
+      verifier(stale(fakeGitHub(approved)).api, poll),
+      /verdict not yet written for this head.*rerun security-gate/
+    );
+    assert.equal(poll.slept, 90_000);
+  });
+
+  test('a fresh refusal from main fails, and hold fails without waiting', async () => {
+    const refused = fakeGitHub(approved);
+    await refused.api.setStatus(SHA, 'failure', 'verdict errored');
+    await assert.rejects(verifier(refused.api), /security-review is failure/);
+    const poll = fastPoll();
+    await assert.rejects(
+      verifier(fakeGitHub({ ...approved, labels: ['security-reviewed', 'hold'] }).api, poll),
+      /hold label is on/
+    );
+    assert.equal(poll.slept, 0);
+  });
+
+  test('the merge queue doesn’t wait: it judges the labels as before', async () => {
+    assert.match(await queued(fakeGitHub(approved).api), /Security status verified/);
+  });
+});
+
 describe('what this repo adds to dorkos’s code', () => {
   test('the P0 list names the gate’s own files, each of them a security path too', () => {
     for (const filename of [
@@ -233,7 +312,7 @@ describe('what this repo adds to dorkos’s code', () => {
         labels: ['security-reviewed', 'security-deep-reviewed'],
         timeline: [labelled(LATE), labelled(LATE, 'security-deep-reviewed')],
       };
-      assert.equal(await verifier(fakeGitHub(both).api), 'Security status verified', file);
+      assert.equal(await verifiedAfterVerdict(fakeGitHub(both)), 'Security status verified', file);
       assert.match(await queued(fakeGitHub(both).api), /Security status verified/, file);
     }
   });
@@ -256,7 +335,7 @@ describe('what this repo adds to dorkos’s code', () => {
       timeline: [labelled(LATE)],
       activity: [push(EARLY)],
     };
-    assert.equal(await verifier(fakeGitHub(proof).api), 'Security status verified');
+    assert.equal(await verifiedAfterVerdict(fakeGitHub(proof)), 'Security status verified');
     assert.match(await queued(fakeGitHub(proof).api), /Security status verified/);
   });
 
@@ -345,7 +424,7 @@ describe('what this repo adds to dorkos’s code', () => {
 
       const proof = { ...none, labels: ['security-reviewed'], timeline: [labelled(LATE)] };
       assert.equal((await verdict(fakeGitHub(proof))).state, 'success', file);
-      assert.equal(await verifier(fakeGitHub(proof).api), 'Security status verified', file);
+      assert.equal(await verifiedAfterVerdict(fakeGitHub(proof)), 'Security status verified', file);
       assert.match(await queued(fakeGitHub(proof).api), /Security status verified/, file);
     }
   });
