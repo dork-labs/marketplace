@@ -3,7 +3,7 @@
 // dorkos's; these run its code against this repo's real lists and paths, and pin
 // what this repo adds to it.
 import assert from 'node:assert/strict';
-import { mkdtempSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdtempSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import test, { describe } from 'node:test';
@@ -157,7 +157,7 @@ describe('label-at-head on this repo’s lists', () => {
     for (const file of [
       '.github/workflows/lint.yml',
       '.github/workflows/security-gate.yml',
-      '.github/scripts/security-manifest-paths.mjs',
+      '.github/scripts/security-verdict.mjs',
     ]) {
       const status = await verdict(
         fakeGitHub({
@@ -260,29 +260,6 @@ describe('what this repo adds to dorkos’s code', () => {
     assert.match(await queued(fakeGitHub(proof).api), /Security status verified/);
   });
 
-  test('main’s verdict takes the manifest rule, so a pointed-at test folder is no free pass', async () => {
-    const dir = mkdtempSync(join(tmpdir(), 'security-verdict-'));
-    const cwd = process.cwd();
-    try {
-      mkdirSync(join(dir, 'plugins/a/hooks'), { recursive: true });
-      writeFileSync(
-        join(dir, 'plugins/a/hooks/hooks.json'),
-        JSON.stringify({ hooks: { Stop: [{ hooks: [{ command: 'sh tests/run.sh' }] }] } })
-      );
-      process.chdir(dir);
-      const trusted = trustedLists();
-      const files = [{ filename: 'plugins/a/tests/run.sh' }];
-      assert.equal(touchesSecurity(files, pattern), false);
-      assert.equal(touchesSecurity(files, trusted.pattern), true);
-      const gh = fakeGitHub({ files: ['plugins/a/tests/run.sh'], activity: [push(EARLY)] });
-      await verdictForPullRequest(gh.api, event, trusted);
-      assert.equal(gh.statuses[0].state, 'failure');
-    } finally {
-      process.chdir(cwd);
-      rmSync(dir, { recursive: true, force: true });
-    }
-  });
-
   test('an engine test is no free pass: flow’s shipped self-test runs that folder', async () => {
     const edit = { files: ['plugins/flow/engine-tests/gate.test.ts'], activity: [push(EARLY)] };
     const status = await verdict(fakeGitHub(edit));
@@ -293,26 +270,26 @@ describe('what this repo adds to dorkos’s code', () => {
   });
 
   test('main’s verdict refuses when its lists won’t load, over an older success', async () => {
-    const dir = mkdtempSync(join(tmpdir(), 'security-verdict-'));
-    const cwd = process.cwd();
-    try {
-      mkdirSync(join(dir, 'plugins/a'), { recursive: true });
-      writeFileSync(join(dir, 'plugins/a/.mcp.json'), '{ not json');
-      process.chdir(dir);
-      for (const [name, payload] of [
-        ['pull_request_target', event],
-        ['merge_group', group],
-      ]) {
-        const gh = fakeGitHub();
-        await gh.api.setStatus(SHA, 'success', 'Security label covers this SHA');
-        await assert.rejects(runVerdict(gh.api, payload, name));
-        assert.equal(gh.statuses[0].state, 'failure', name);
-        assert.match(gh.statuses[0].description, /^verdict errored: /, name);
-      }
-    } finally {
-      process.chdir(cwd);
-      rmSync(dir, { recursive: true, force: true });
+    const loadLists = () => {
+      throw new Error('Security path list missing');
+    };
+    for (const [name, payload] of [
+      ['pull_request_target', event],
+      ['merge_group', group],
+    ]) {
+      const gh = fakeGitHub();
+      await gh.api.setStatus(SHA, 'success', 'Security label covers this SHA');
+      await assert.rejects(runVerdict(gh.api, payload, name, loadLists), /list missing/);
+      assert.equal(gh.statuses[0].state, 'failure', name);
+      assert.match(gh.statuses[0].description, /^verdict errored: /, name);
     }
+  });
+
+  test('with no loader named, main’s verdict judges from the workflow’s own lists', async () => {
+    const gh = fakeGitHub({ files: ['plugins/x/README.md'], activity: [push(EARLY)] });
+    await runVerdict(gh.api, event, 'pull_request_target');
+    assert.equal(gh.statuses[0].state, 'failure');
+    assert.match(gh.statuses[0].description, /no security-reviewed label/);
   });
 
   test('an event the verdict doesn’t judge writes nothing', async () => {
@@ -321,29 +298,55 @@ describe('what this repo adds to dorkos’s code', () => {
     assert.deepEqual(gh.statuses, []);
   });
 
-  test('a manifest that does not parse refuses, rather than shrinking the list', () => {
+  // Every plugin PR already bumps plugin.json, a security path, so nothing here reads a
+  // plugin's files to decide what counts. A manifest that doesn't parse used to wedge the gate.
+  test('the list is the workflow’s alone, and nothing in a checkout can change or break it', () => {
+    const workflow = readFileSync(
+      new URL('../workflows/security-gate.yml', import.meta.url),
+      'utf8'
+    );
+    assert.doesNotMatch(workflow, /security-manifest-paths/);
+    assert.match(workflow, /^ {8}run: node \.github\/scripts\/security-gate\.mjs$/m);
+    assert.match(workflow, /ref: \$\{\{ env\.SECURITY_BASE_SHA \}\}/);
+    assert.equal(existsSync(new URL('./security-manifest-paths.mjs', import.meta.url)), false);
     const dir = mkdtempSync(join(tmpdir(), 'security-verdict-'));
     const cwd = process.cwd();
     try {
       mkdirSync(join(dir, 'plugins/a'), { recursive: true });
       writeFileSync(join(dir, 'plugins/a/.mcp.json'), '{ not json');
+      writeFileSync(join(dir, 'plugins/a/run.sh'), 'bash ../w/tests/x.sh\n');
       process.chdir(dir);
-      assert.throws(() => trustedLists());
+      assert.equal(trustedLists().pattern, pattern);
     } finally {
       process.chdir(cwd);
       rmSync(dir, { recursive: true, force: true });
     }
   });
 
-  test('the verifier keeps its marketplace step, on the base commit', () => {
-    const workflow = readFileSync(
-      new URL('../workflows/security-gate.yml', import.meta.url),
-      'utf8'
-    );
-    assert.match(workflow, /ref: \$\{\{ env\.SECURITY_BASE_SHA \}\}/);
-    assert.match(
-      workflow,
-      /^ {10}SECURITY_PATH_PATTERN="\$\(node \.github\/scripts\/security-manifest-paths\.mjs\)"$/m
-    );
+  test('a plugin PR of only a test or only a doc needs the label, like any other', async () => {
+    for (const file of [
+      'plugins/flow/engine-tests/gate.test.ts',
+      'plugins/visual-companion/tests/install-smoke.sh',
+      'plugins/x/skills/s/tests/a.cjs',
+      'plugins/x/README.md',
+      'plugins/x/CHANGELOG.md',
+      'plugins/x/LICENSE',
+    ]) {
+      const none = { files: [file], activity: [push(EARLY)] };
+      const status = await verdict(fakeGitHub(none));
+      assert.equal(status.state, 'failure', file);
+      assert.match(status.description, /no security-reviewed label/, file);
+      await assert.rejects(queued(fakeGitHub(none).api), /no security-reviewed label/, file);
+      assert.match(
+        await verifier(fakeGitHub(none).api),
+        /^Waiting for Security: no security-reviewed/,
+        file
+      );
+
+      const proof = { ...none, labels: ['security-reviewed'], timeline: [labelled(LATE)] };
+      assert.equal((await verdict(fakeGitHub(proof))).state, 'success', file);
+      assert.equal(await verifier(fakeGitHub(proof).api), 'Security status verified', file);
+      assert.match(await queued(fakeGitHub(proof).api), /Security status verified/, file);
+    }
   });
 });

@@ -331,8 +331,7 @@ describe('main decides, never the PR', () => {
       'utf8'
     );
     const listed = trustedLists();
-    // Marketplace only: the manifest rule extends the workflow's list, never replaces it.
-    assert.ok(listed.pattern.startsWith(/^ {2}SECURITY_PATH_PATTERN: '(.+)'$/m.exec(workflow)[1]));
+    assert.equal(listed.pattern, /^ {2}SECURITY_PATH_PATTERN: '(.+)'$/m.exec(workflow)[1]);
     assert.equal(listed.deepPattern, /^ {2}SECURITY_DEEP_PATH_PATTERN: '(.+)'$/m.exec(workflow)[1]);
     assert.equal(
       listed.botUserId,
