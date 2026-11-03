@@ -844,6 +844,21 @@ describe('flow pr', () => {
       );
     }
 
+    // DOR-3724: flow arms this PR only with the security label, so an arm names
+    // Security even when the PR touches no security path, or nobody ever labels it.
+    it('names the security reviewer on --arm when the PR touches no security path', async () => {
+      mainConfig({ securityPaths: { globs: ['docs-only/**'] } });
+      reviewers({ reviewer: 'octocat', securityPaths: { reviewer: 'acme-security' } });
+      writeRun(drain({ pushedSha: head, reviewedSha: head, verdict: 'clean' }), head);
+      const forge = fakeForge();
+      forge.forge.armFacts = async () => facts(['src/app.ts']);
+      const r = await flow([...args, '--arm'], forge);
+      expect(mentions(r.forge.calls)[0]).toMatch(
+        /^@acme-security: flow arms this PR only with your "security-reviewed" label/
+      );
+      expect(r.json.mention).toMatchObject({ reviewer: '@acme-security', route: 'security' });
+    });
+
     it('mentions land.reviewer on the new PR', async () => {
       reviewers({ reviewer: 'octocat' });
       writeRun(drain({ pushedSha: head, reviewedSha: head, verdict: 'clean' }), head);

@@ -18,10 +18,12 @@
  *    `drain.pr`, and reports its review route (`land/review-route.ts`);
  * 6. names the PR's reviewer in a comment of its own (DOR-3262):
  *    `land.securityPaths.reviewer` when the PR touches a security path (by the
- *    list on the default branch), else `land.reviewer`. Both are handles, so they
+ *    list on the default branch) or flow means to arm it, else `land.reviewer`. Both are handles, so they
  *    come from this machine's settings (`config.local.json`);
  * 7. on `--arm` or `drain.armAutoMerge`, records the PR waiting to arm and
- *    arms it at once when the arm guard allows (`land/arm-guard.ts`). The
+ *    arms it at once when the arm guard allows (`land/arm-guard.ts`). A new PR
+ *    has no security label newer than its head, so that wait is the usual case
+ *    (DOR-3724): the drain arms it once Security has labelled the head. The
  *    guard's `land.preArm` checks are left to the drain, which arms it after
  *    they pass. A refusal leaves the PR open and unarmed and says why in
  *    `armRefused`; the drain asks the guard again. The verb still exits 0.
@@ -107,7 +109,7 @@ function wantsArm(ctx: VerbContext): boolean {
 interface Mention {
   /** Who was named. */
   reviewer: string;
-  /** Why them: the PR touches a security path, or the default reviewer. */
+  /** Why them: the PR touches a security path or flow means to arm it, or the default reviewer. */
   route: 'security' | 'default';
   /** Whether the comment was posted. */
   posted: boolean;
@@ -119,7 +121,7 @@ interface Mention {
 interface Reviewers {
   /** The default reviewer (`land.reviewer`). */
   reviewer: string | null;
-  /** Who a PR touching a security path goes to (`land.securityPaths.reviewer`). */
+  /** Who a PR touching a security path, or being armed, goes to (`land.securityPaths.reviewer`). */
   security: string | null;
 }
 
@@ -141,7 +143,7 @@ function reviewersFor(ctx: VerbContext): Reviewers | string {
 /**
  * Name the new PR's reviewer in a comment: the security reviewer when the PR
  * touches a security path (by the list on the default branch; also when flow cannot
- * tell), else the default reviewer; nothing when neither is set. A failure is
+ * tell) or flow means to arm it, since an arm needs that reviewer's label, else the default reviewer; nothing when neither is set. A failure is
  * reported, never thrown: the PR is open either way.
  */
 async function mentionReviewer(
@@ -151,7 +153,8 @@ async function mentionReviewer(
   reviewers: Reviewers,
   land: LandConfig | null,
   head: string,
-  launcher: string | undefined
+  launcher: string | undefined,
+  arming: boolean
 ): Promise<Mention | null> {
   let security = true;
   if (reviewers.security !== null && land !== null) {
@@ -163,13 +166,15 @@ async function mentionReviewer(
       security = true;
     }
   }
-  const route = reviewers.security !== null && security ? 'security' : 'default';
+  const route = reviewers.security !== null && (security || arming) ? 'security' : 'default';
   const handle = route === 'security' ? reviewers.security : reviewers.reviewer;
   if (handle === null) return null;
   const reviewer = handle.startsWith('@') ? handle : `@${handle}`;
   const body =
     route === 'security'
-      ? `${reviewer}: this PR touches security paths. Please review it at ${short(head)}.`
+      ? security
+        ? `${reviewer}: this PR touches security paths. Please review it at ${short(head)}.`
+        : `${reviewer}: flow arms this PR only with your "${land?.securityPaths.label}" label. Please review it at ${short(head)}.`
       : `${reviewer}: this PR is ready for your review at ${short(head)}.`;
   try {
     await forge.comment(pr.number, signedPrBody(ctx, body, launcher));
@@ -304,7 +309,8 @@ export async function run(ctx: VerbContext): Promise<VerbResult> {
       reviewers,
       baseLand?.ok ? baseLand.land : null,
       head,
-      drainRun.host
+      drainRun.host,
+      arm
     );
   }
   let armed = false;

@@ -62,7 +62,7 @@ export interface ClearanceFacts {
   requiredChecks: string[] | null;
   /** When the head last arrived as the PR's head, or `null` when unknown. */
   headSeenAt: string | null;
-  /** When each review label was last added, by label name (lower case); `null` when it is not on. */
+  /** When a person last added each review label, by label name (lower case); `null` when it is not on or the newest add was not a person's. */
   labelledAt: Readonly<Record<string, string | null>>;
   /** The route. */
   route: ReviewRoute;
@@ -126,7 +126,7 @@ export function clearance(input: ClearanceFacts, labels: ReviewLabels): Clearanc
     if (!on) continue;
     const at = input.labelledAt[label.toLowerCase()] ?? null;
     if (at === null) {
-      return no(`${step}-label-missing`, `it has no "${label}" label`);
+      return no(`${step}-label-missing`, `it has no "${label}" label a person added`);
     }
     if (input.headSeenAt === null) {
       return no(

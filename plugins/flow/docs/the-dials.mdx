@@ -205,9 +205,9 @@ The checkpoints between stages, under `gates`:
 | `projectCompletion`                  | Whether DONE closes a finished project itself or recommends it.     | `"advisory"` | `"auto"` also needs an adapter supporting the optional `completeProject` verb.  |
 
 <Callout type="info">
-  The **review gate** (after VERIFY) is always checked and is not a dial: no field disables it.
+  The **review gate** (after VERIFY) is always checked: no field disables it.
   Who checks it is [How much it does on its own](#how-much-it-does-on-its-own). With
-  `review.mergeOnApproval` on, an approval arms the approved commit to merge once checks pass.
+  `review.mergeOnApproval` on, an approval arms the approved commit; a reviewer agent's needs the security label.
 </Callout>
 
 With `review.mergeOnApproval` off, the reviewer agent ships only once every check passed; while

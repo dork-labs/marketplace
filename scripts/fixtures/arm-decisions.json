@@ -2,7 +2,7 @@
   "about": [
     "The decision cases for the two things in this repo that decide whether a pull request may be armed to merge by itself: scripts/should-arm-automerge.sh (the repo gate, a future merge-tail bot) and flow's arm guard (plugins/flow/scripts/land/arm-decision.ts, run by flow before it arms).",
     "Both suites run every row: scripts/test-should-arm-automerge.sh checks `gate`, plugins/flow/engine-tests/land/arm-decision.test.ts checks `guard`. A row with only one of them fails both suites, so a change to either rule has to say what the other does with the same pull request.",
-    "Each case is the `green` payload bent by one jq `mutation`, so a failure names the field. The two answers differ on purpose where the guard is not a bot: GitHub's auto-merge waits for pending checks and for mergeability on its own, so the guard lets those through, and it refuses things the repo gate never looks at (a moved head, a fork, a base other than the repository's default branch, a merge that would not squash, a release freeze, a security path without its label, or with a label added before the head arrived: `securityLabelledAt` against `headArrivedAt`). `why` says why the row exists."
+    "Each case is the `green` payload bent by one jq `mutation`, so a failure names the field. The two answers differ on purpose where the guard is not a bot: GitHub's auto-merge waits for pending checks and for mergeability on its own, so the guard lets those through, and it refuses things the repo gate never looks at (a moved head, a fork, a base other than the repository's default branch, a merge that would not squash, a release freeze, a security path without its label, or with a label added before the head arrived: `securityLabelledAt` against `headArrivedAt`). `securityLabelOnEveryPr` is what the guard sets on every arm but a person's approval: then every PR needs that label, security path or not. `why` says why the row exists."
   ],
   "green": {
     "number": 1,
@@ -245,6 +245,62 @@
       "gate": "ARM",
       "guard": "REFUSE security-path-unlabelled",
       "why": "Security condition 4, from the repo's own list (guardPolicy.securityGlobs here)."
+    },
+    {
+      "name": "every-PR rule: no security path, no label",
+      "mutation": ".securityLabelOnEveryPr = true",
+      "gate": "ARM",
+      "guard": "REFUSE security-label-missing",
+      "why": "An agent's arm (flow pr --arm, flow sweep, the drain's re-arm, a reviewer agent's approval) needs Security's label on every PR, whatever it touches (DOR-3724). The gate never reads the label; the security gate's status does."
+    },
+    {
+      "name": "every-PR rule: label added after the head arrived",
+      "mutation": ".securityLabelOnEveryPr = true | .labels = [{\"name\": \"security-reviewed\"}] | .securityLabelledAt = \"2026-10-02T00:00:00Z\"",
+      "gate": "ARM",
+      "guard": "ARM"
+    },
+    {
+      "name": "every-PR rule: label older than the head",
+      "mutation": ".securityLabelOnEveryPr = true | .labels = [{\"name\": \"security-reviewed\"}] | .securityLabelledAt = \"2026-09-30T00:00:00Z\"",
+      "gate": "ARM",
+      "guard": "REFUSE security-label-stale"
+    },
+    {
+      "name": "every-PR rule: label added as the head arrived",
+      "mutation": ".securityLabelOnEveryPr = true | .labels = [{\"name\": \"security-reviewed\"}] | .securityLabelledAt = .headArrivedAt",
+      "gate": "ARM",
+      "guard": "REFUSE security-label-stale"
+    },
+    {
+      "name": "every-PR rule: label time unknown",
+      "mutation": ".securityLabelOnEveryPr = true | .labels = [{\"name\": \"security-reviewed\"}] | .securityLabelledAt = null",
+      "gate": "ARM",
+      "guard": "REFUSE security-label-unverified",
+      "why": "No time is also what flow reads when the newest add was not a person's."
+    },
+    {
+      "name": "every-PR rule: head arrival unknown",
+      "mutation": ".securityLabelOnEveryPr = true | .labels = [{\"name\": \"security-reviewed\"}] | .securityLabelledAt = \"2026-10-02T00:00:00Z\" | .headArrivedAt = null",
+      "gate": "ARM",
+      "guard": "REFUSE security-label-unverified"
+    },
+    {
+      "name": "every-PR rule: file list unknown, no label",
+      "mutation": ".securityLabelOnEveryPr = true | .files = null",
+      "gate": "ARM",
+      "guard": "REFUSE security-label-missing"
+    },
+    {
+      "name": "every-PR rule: a draft with a fresh label",
+      "mutation": ".securityLabelOnEveryPr = true | .isDraft = true | .labels = [{\"name\": \"security-reviewed\"}] | .securityLabelledAt = \"2026-10-02T00:00:00Z\"",
+      "gate": "SKIP draft",
+      "guard": "REFUSE draft"
+    },
+    {
+      "name": "every-PR rule: held with a fresh label",
+      "mutation": ".securityLabelOnEveryPr = true | .labels = [{\"name\": \"security-reviewed\"}, {\"name\": \"wip\"}] | .securityLabelledAt = \"2026-10-02T00:00:00Z\"",
+      "gate": "SKIP held-by-label",
+      "guard": "REFUSE held-by-label"
     },
     {
       "name": "security path with the label",

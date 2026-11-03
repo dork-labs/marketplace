@@ -47,6 +47,7 @@ import {
   type SessionState,
 } from '../../scripts/launchers/types.ts';
 import { FakeTracker } from '../../scripts/tracker/fake.ts';
+import { guardArm } from '../../scripts/land/arm-guard.ts';
 import { recordingGuard, refusal, type RecordingGuard } from '../fixtures/land/recording-guard.ts';
 import { ACME_TEAM, item, makeProject, type WriteProject } from '../cli/write-harness.ts';
 
@@ -787,6 +788,68 @@ describe('flow drain: the arm guard on a re-arm (DOR-3262)', () => {
     await tick();
     expect(arms().at(-1)).toEqual({ method: 'arm', arg: [7, s2] });
     expect(armGuard.requests.map((r) => r.reviewedSha)).toEqual([s2]);
+  }, 120_000);
+
+  // DOR-3724: the drain's re-arm goes through the real guard with the every-PR
+  // rule, so a PR that touches no security path still waits for the label.
+  it('the re-arm is refused without the security label at the head, then arms', async () => {
+    const s2 = await toReArm();
+    const before = arms().length;
+    let labels: { name: string }[] = [];
+    let labelledAt: string | null = null;
+    const forge = world.forge.forge;
+    forge.armFacts = async () => ({
+      state: 'OPEN',
+      isDraft: false,
+      labels,
+      reviewDecision: '',
+      checks: [],
+      headRefOid: world.forge.head(),
+      headRefName: runOf('ACME-1').branch,
+      baseRefName: 'work',
+      isCrossRepository: false,
+      files: ['src/not-a-security-path.ts'],
+    });
+    forge.defaultBranch = async () => 'work';
+    forge.requiredChecks = async () => [];
+    forge.mergeSettings = async () => ({
+      queueMethod: 'SQUASH',
+      squashAllowed: true,
+      allowedMethods: null,
+    });
+    forge.labelledAt = async () => labelledAt;
+    forge.headPushedAt = async () => '2026-10-02T00:00:00Z';
+    const asked: (string | undefined)[] = [];
+    armGuard = {
+      requests: [],
+      guard: (request) => {
+        asked.push(request.labelRule);
+        return guardArm(
+          { ...request, mainCheckout: project.dir },
+          { runProcess: runner, now: () => new Date(clock), sleep: async () => undefined }
+        );
+      },
+    };
+
+    // No label at all.
+    const none = await tick();
+    expect(arms()).toHaveLength(before);
+    expect(JSON.stringify(none.json)).toContain('did not arm #7');
+    expect(JSON.stringify(none.json)).toContain('security-label-missing');
+    expect(drainOf('ACME-1').pr).toMatchObject({ armed: false, disarmedForReview: true });
+
+    // A label from before the head arrived.
+    labels = [{ name: 'security-reviewed' }];
+    labelledAt = '2026-10-01T00:00:00Z';
+    const stale = await tick();
+    expect(arms()).toHaveLength(before);
+    expect(JSON.stringify(stale.json)).toContain('security-label-stale');
+
+    // Added after the head arrived: the drain arms the reviewed commit.
+    labelledAt = '2026-10-03T00:00:00Z';
+    await tick();
+    expect(arms().at(-1)).toEqual({ method: 'arm', arg: [7, s2] });
+    expect(new Set(asked)).toEqual(new Set([undefined]));
   }, 120_000);
 
   it('a PR flow pr could not arm (a freeze) is armed by the drain once the freeze lifts', async () => {

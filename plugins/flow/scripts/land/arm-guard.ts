@@ -1,7 +1,13 @@
 /**
  * The arm guard (DOR-3262), run by every flow path that arms auto-merge
- * (`flow pr --arm`, `flow review --approve` with `mergeOnApproval`, and the
- * drain's re-arm) just before it calls the forge's `arm`.
+ * (`flow pr --arm`, `flow sweep`, `flow review --approve` with
+ * `mergeOnApproval`, and the drain's re-arm) just before it calls the forge's
+ * `arm`.
+ *
+ * Every arm needs the security label, added by a person after the head arrived,
+ * on any PR (DOR-3724): `--arm` and `drain.armAutoMerge` are an agent's to set,
+ * so they prove no review. The one exception is `labelRule: 'security-paths'`,
+ * which only a person's `flow review --approve` passes, after the person gate.
  *
  * A guard rail, not the gate: flow runs inside the agent, and the gate that
  * holds is on GitHub (the required security status and the ruleset). The guard
@@ -106,6 +112,12 @@ export interface GuardInput {
    * only the drain, which keeps running, runs them.
    */
   preArm?: 'run' | 'defer';
+  /**
+   * `every-pr` (default): the PR needs the security label whatever it touches.
+   * `security-paths`: only when it touches a security path. Only a person's
+   * approval, which passed the person gate (`cli/person-gate.ts`), asks for it.
+   */
+  labelRule?: 'every-pr' | 'security-paths';
 }
 
 /** What the guard needs from the world. */
@@ -231,6 +243,7 @@ export async function guardArm(input: GuardInput, io: GuardIo): Promise<GuardRes
   }
   const reviewedSha = input.reviewedSha?.toLowerCase() ?? null;
   const policy = policyFor(land);
+  const securityLabelOnEveryPr = input.labelRule !== 'security-paths';
   let mergeSettings = await mergeSettingsOf(input.forge, defaultBranch);
   const decision = decideArm(
     {
@@ -240,6 +253,7 @@ export async function guardArm(input: GuardInput, io: GuardIo): Promise<GuardRes
       ...(await labelTimes(input.forge, input.pr, facts, policy.securityLabel)),
       requiredChecks,
       reviewedSha,
+      securityLabelOnEveryPr,
       freeze: readFreeze(input.mainCheckout),
     },
     policy
@@ -320,6 +334,7 @@ export async function guardArm(input: GuardInput, io: GuardIo): Promise<GuardRes
       ...(await labelTimes(input.forge, input.pr, after, policy.securityLabel)),
       requiredChecks,
       reviewedSha,
+      securityLabelOnEveryPr,
       freeze: readFreeze(input.mainCheckout),
     },
     policy

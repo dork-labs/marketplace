@@ -291,9 +291,9 @@ Deferred to the P5 server build:
 
 - **The always-on running scheduler** that executes the reconciler registry continuously and
   unattended. v1 invokes the reconciler model from prose, per tick.
-- **Approval detection outside DorkOS.** In DorkOS, approving from the inbox (or the reviewer
-  agent's approval) arms the approved commit when `gates.review.mergeOnApproval` is on. Without
-  DorkOS you merge the approved PR and run `/flow:done`.
+- **Approval detection outside DorkOS.** In DorkOS, approving from the inbox (or, with the security label, the
+  reviewer) arms the approved commit with `gates.review.mergeOnApproval` on. Without
+  DorkOS you merge the PR and run `/flow:done`.
 - **Atomic concurrency and fencing** (heartbeats, atomic multi-claim, a stall detector). v1 stays
   `sequential`, WIP-1.
 - **The webhook transport.** v1 ships `PollingTransport` and the seam; the webhook producer is the

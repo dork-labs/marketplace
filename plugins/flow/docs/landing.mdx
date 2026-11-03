@@ -5,7 +5,7 @@ description: The checks flow runs before it turns on auto-merge, the land settin
 
 # Before flow arms a PR
 
-Flow turns on auto-merge with `flow pr --arm`, `flow review --approve` (when `gates.review.mergeOnApproval` is on) and the drain's re-arm. Each asks flow's arm guard first. The guard only ever says no. It never arms anything itself, and never sets a status or a label.
+Flow turns on auto-merge with `flow pr --arm`, `flow sweep`, `flow review --approve` (with `gates.review.mergeOnApproval`) and the drain's re-arm. Each asks flow's arm guard first. The guard only says no: it never arms, sets a status or sets a label.
 
 ## What it refuses
 
@@ -15,7 +15,7 @@ Flow doesn't arm a PR when:
 - the head isn't the reviewed commit, or none was recorded;
 - it doesn't target the default branch GitHub names (a stacked PR aimed at its parent doesn't);
 - it wouldn't squash, the only method, as the post-merge check needs it: a merge queue must squash (flow passes no method flag), or with none the repo must allow it (flow passes `--squash`);
-- it touches a security path and has no `security-reviewed` label, or one older than the head;
+- it has no `security-reviewed` label a person added after the head arrived (your own approval needs it only on a security path, unless the drain arms it);
 - a release freeze is on;
 - it comes from a fork;
 - it changes dependencies while another such PR is queued or armed;
@@ -23,7 +23,7 @@ Flow doesn't arm a PR when:
 
 Manifests, lockfiles, build wrappers (`gradlew`, `mvnw`), toolchains (`.cargo/config`, `rust-toolchain`), patches (any `patches/`) and `.agents/flow/config.json` count as security paths, any case, as does your own list in `land.securityPaths`.
 
-A refused `flow pr --arm` still opens the PR, unarmed, and the drain asks again on later passes. A refused `flow review --approve` still posts your approval, and you merge the PR yourself. Both say why in `armRefused`. Name the whole commit in `--head`: a short SHA ships but arms nothing.
+A new PR has no label yet, so `flow pr --arm` opens it unarmed, and the drain asks again. A refused `flow review --approve` still posts your approval. Both say why in `armRefused`. Name the whole commit in `--head`: a short SHA ships but arms nothing.
 
 ## Your own checks: `land.preArm`
 

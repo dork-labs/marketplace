@@ -635,16 +635,21 @@ export function foldGroups(
 
 /**
  * When `label` was last added, from the label events of an issue's event list
- * (one `{event, created_at, name}` JSON object per line, oldest first, as
- * GitHub lists them): the latest `labeled` with no `unlabeled` after it.
+ * (one `{event, created_at, name, actor}` JSON object per line, oldest first,
+ * as GitHub lists them): the latest `labeled` with no `unlabeled` after it, when
+ * a person added it. As in the security gate (`security-label-at-head.mjs`), a
+ * newest add by anything else, or with no actor, counts as none, so a bot cannot
+ * revive a label a person removed.
  *
  * @param out - The lines.
  * @param label - The label, in any case.
- * @returns The time, or `null` when the label is not on by its history.
+ * @returns The time, or `null` when the label is not on by its history or the
+ *   newest add was not a person's.
  * @throws {ForgeError} On a line that is not such an object.
  */
 export function parseLabelledAt(out: string, label: string): string | null {
   let at: string | null = null;
+  let lastNotAPerson: string | null = null;
   for (const line of out.split('\n')) {
     if (line.trim() === '') continue;
     const event = record(safeJson(line));
@@ -653,7 +658,14 @@ export function parseLabelledAt(out: string, label: string): string | null {
       throw new ForgeError('gh returned a label event flow cannot read');
     }
     if ((str(event.name) ?? '').toLowerCase() !== label.toLowerCase()) continue;
-    at = event.event === 'labeled' ? time : null;
+    if (event.event !== 'labeled') {
+      at = null;
+    } else if (str(event.actor) === 'User') {
+      at = lastNotAPerson === time ? null : time;
+    } else {
+      at = null;
+      lastNotAPerson = time;
+    }
   }
   return at;
 }
@@ -1169,7 +1181,7 @@ export function createGithubForge(options: GithubForgeOptions): Forge {
           ...hostArgs,
           '--paginate',
           '--jq',
-          '.[] | select(.event == "labeled" or .event == "unlabeled") | {event, created_at, name: .label.name}',
+          '.[] | select(.event == "labeled" or .event == "unlabeled") | {event, created_at, name: .label.name, actor: .actor.type}',
           `repos/${target.repo}/issues/${pr}/events?per_page=100`,
         ],
         `reading the label history of ${target.repo}#${pr}`

@@ -158,6 +158,8 @@ describe('flow sweep', () => {
     expect(r.code, r.stderr).toBe(0);
     expect(r.json.results).toMatchObject([{ number: 1, outcome: 'armed', head: HEAD }]);
     expect(guard.requests).toMatchObject([{ pr: 1, reviewedSha: HEAD, preArm: 'defer' }]);
+    // The sweep never asks for the person's rule: every PR needs the label.
+    expect(guard.requests[0].labelRule).toBeUndefined();
     expect(armed).toEqual([[1, HEAD]]);
   });
 

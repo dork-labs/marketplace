@@ -173,8 +173,8 @@ spec §5). The hard gates:
    state → stop. The project's "Ship finished work" setting in DorkOS decides who
    answers: you, or the reviewer agent when it recorded a clean review of the
    latest commit (`flow autonomy`, `flow review`). With
-   `gates.review.mergeOnApproval` on, an approval arms that commit and it merges
-   once checks pass; a drain run then closes the item, otherwise run
+   `gates.review.mergeOnApproval` on, an approval arms that commit (the reviewer
+   needs the security label); a drain run then closes the item, otherwise run
    `/flow:done <issue>`.
 4. **Circuit breaker** — stop + escalate if a unit exceeds `estimate × N`
    wall-clock or the token budget.

@@ -24,6 +24,7 @@
  * | `freeze` | a release freeze is on |
  * | `changes-requested` | a reviewer asked for changes |
  * | `failing-checks` | a required check failed or was cancelled |
+ * | `security-label-missing` | `securityLabelOnEveryPr` is set and it has no security label |
  * | `files-unreadable` | the file list is incomplete, and the PR has no security label |
  * | `security-path-unlabelled` | it touches a security path without the security label |
  * | `security-label-unverified` | it needs the security label, and flow cannot tell when the label was added or when the head arrived |
@@ -32,7 +33,9 @@
  * The security label counts only when it was added after the current head
  * arrived (`securityLabelledAt` against `headArrivedAt`, server times a
  * commit's own dates cannot move: `Forge.labelledAt` and `Forge.headPushedAt`).
- * A label on a PR that needs none is never read.
+ * A label on a PR that needs none is never read. `securityLabelOnEveryPr`
+ * (DOR-3724) makes every PR need it, whatever it touches: the guard sets it on
+ * every arm but a person's approval.
  *
  * A pending check passes (GitHub's auto-merge waits for it; a check stuck
  * pending is the watcher's job). Which checks are required comes from the
@@ -190,6 +193,7 @@ export type RefusalSlug =
   | 'freeze'
   | 'changes-requested'
   | 'failing-checks'
+  | 'security-label-missing'
   | 'files-unreadable'
   | 'security-path-unlabelled'
   | 'security-label-unverified'
@@ -357,7 +361,8 @@ export function armMergeFor(
  *   incomplete), `reviewedSha` (the commit the review covered) and `freeze`
  *   (`null`, or the freeze marker), and, for a PR with the security label,
  *   `securityLabelledAt` (when it was last added) and `headArrivedAt` (when
- *   the head arrived), ISO-8601 or `null` when unknown.
+ *   the head arrived), ISO-8601 or `null` when unknown; and
+ *   `securityLabelOnEveryPr` (`true`: this arm needs the label on any PR).
  * @param policy - The repository's security paths and label.
  * @returns `ARM`, or a refusal with its reason.
  */
@@ -431,6 +436,15 @@ export function decideArm(input: unknown, policy: ArmPolicy): ArmDecision {
     return refuse('failing-checks', `required checks are red: ${red.join(', ')}`);
   }
   const labelled = labels.includes(policy.securityLabel.toLowerCase());
+  if (facts.securityLabelOnEveryPr === true) {
+    if (!labelled) {
+      return refuse(
+        'security-label-missing',
+        `it has no "${policy.securityLabel}" label; flow arms this PR only after Security reviews its head`
+      );
+    }
+    return labelFresh(facts, policy.securityLabel, reviewed);
+  }
   const files = Array.isArray(facts.files)
     ? facts.files.filter((f): f is string => typeof f === 'string')
     : null;
@@ -480,7 +494,7 @@ function labelFresh(facts: Record<string, unknown>, label: string, head: string)
   if (Number.isNaN(labelledAt)) {
     return refuse(
       'security-label-unverified',
-      `flow cannot tell when "${label}" was added, so it cannot tell whether it covers ${short(head)}`
+      `flow cannot tell when a person added "${label}", so it cannot tell whether it covers ${short(head)}`
     );
   }
   if (labelledAt <= arrivedAt) {

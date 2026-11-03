@@ -168,8 +168,8 @@ const SHA_A = 'a'.repeat(40);
 const SHA_B = 'b'.repeat(40);
 
 describe('label history and when the head arrived', () => {
-  const line = (event: string, created_at: string, name: string) =>
-    JSON.stringify({ event, created_at, name });
+  const line = (event: string, created_at: string, name: string, actor = 'User') =>
+    JSON.stringify({ event, created_at, name, actor });
 
   it('the label is on since its latest add, and off after a removal', () => {
     const out = [
@@ -184,6 +184,46 @@ describe('label history and when the head arrived', () => {
     ).toBeNull();
     expect(parseLabelledAt('', 'qa-go')).toBeNull();
     expect(() => parseLabelledAt('{"event":"labeled"}', 'qa-go')).toThrow(ForgeError);
+  });
+
+  // SECURITY-GATE.md: a label counts only if a person added it, and only the
+  // newest add counts, so a bot cannot revive a label a person removed.
+  it('reads no time when the newest add is not a person', () => {
+    const person = line('labeled', '2026-09-01T00:00:00Z', 'security-reviewed');
+    const bot = line('labeled', '2026-09-02T00:00:00Z', 'security-reviewed', 'Bot');
+    const off = line('unlabeled', '2026-09-01T12:00:00Z', 'security-reviewed');
+    expect(parseLabelledAt(bot, 'security-reviewed')).toBeNull();
+    expect(parseLabelledAt([person, off, bot].join('\n'), 'security-reviewed')).toBeNull();
+    expect(parseLabelledAt([person, bot].join('\n'), 'security-reviewed')).toBeNull();
+    expect(
+      parseLabelledAt(
+        '{"event":"labeled","created_at":"2026-09-01T00:00:00Z","name":"security-reviewed"}',
+        'security-reviewed'
+      )
+    ).toBeNull();
+  });
+
+  it('the GitHub forge asks for the actor, or no label would ever count', async () => {
+    const seen: string[][] = [];
+    const forge = createGithubForge({
+      target: { host: 'github.com', repo: 'acme/app' },
+      now: () => new Date(),
+      runProcess: async (_cmd, args) => {
+        seen.push([...args]);
+        return { code: 0, stdout: line('labeled', '2026-09-01T00:00:00Z', 'qa-go'), stderr: '' };
+      },
+    });
+    expect(await forge.labelledAt?.(7, 'qa-go')).toBe('2026-09-01T00:00:00Z');
+    expect(seen[0].join(' ')).toContain('actor: .actor.type');
+  });
+
+  it('a bot and a person in the same second read as no person', () => {
+    const at = '2026-09-02T00:00:00Z';
+    const out = [
+      line('labeled', at, 'security-reviewed', 'Bot'),
+      line('labeled', at, 'security-reviewed'),
+    ].join('\n');
+    expect(parseLabelledAt(out, 'security-reviewed')).toBeNull();
   });
 
   it('a suite a labeled workflow makes after the label does not move the arrival', () => {

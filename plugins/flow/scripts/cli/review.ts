@@ -583,6 +583,9 @@ async function review(ctx: VerbContext): Promise<VerbResult> {
             reviewedSha: approved,
             worktree: existing.worktreePath,
             preArm: 'defer',
+            // Past the person gate above, this is a person's arm. A reviewer
+            // agent's is any other agent's: it needs the label on every PR.
+            ...(by === 'person' ? { labelRule: 'security-paths' as const } : {}),
           });
           if (guard.ok) {
             armMerge = guard.merge;
@@ -590,7 +593,7 @@ async function review(ctx: VerbContext): Promise<VerbResult> {
             armAt = null;
             // A drain run approved at its reviewed commit: the drain runs the
             // checks and arms it once they pass. That is a hand-off, not a
-            // refusal, so armRefused stays null for it.
+            // refusal, so armRefused stays null unless the drain waits for a label.
             handToDrain =
               // Refusals the drain clears by itself: its pre-arm checks, and
               // another dependency PR ahead in the queue.
@@ -600,7 +603,22 @@ async function review(ctx: VerbContext): Promise<VerbResult> {
               isWritableDrain(existing) &&
               existing.drain.pr?.number === pr.number &&
               existing.drain.reviewedSha?.toLowerCase() === approved.toLowerCase();
-            if (!handToDrain) armRefused = { reason: guard.reason, detail: guard.detail };
+            if (!handToDrain) {
+              armRefused = { reason: guard.reason, detail: guard.detail };
+            } else if (by === 'person') {
+              // The drain asks with the every-PR rule (the run file proves no
+              // person's approval), so say now if it will wait for the label.
+              const drainAsks = await ctx.armGuard({
+                forge: target.forge,
+                pr: pr.number,
+                reviewedSha: approved,
+                worktree: existing.worktreePath,
+                preArm: 'defer',
+              });
+              if (!drainAsks.ok && drainAsks.reason.startsWith('security-label-')) {
+                armRefused = { reason: drainAsks.reason, detail: drainAsks.detail };
+              }
+            }
           }
         }
       }
@@ -686,15 +704,17 @@ async function review(ctx: VerbContext): Promise<VerbResult> {
     const checksText = noChecksNote === null ? '' : ` ${noChecksNote}`;
     const armText = armed
       ? ` Armed PR #${pr?.number} to merge when its checks pass.`
-      : handToDrain
-        ? ` Approved. The drain arms PR #${pr?.number} as soon as flow's arm guard allows it.`
-        : armRefused !== null
-          ? ` Approved, but flow did not arm PR #${pr?.number} (${armRefused.reason}): ${armRefused.detail}. Merge it yourself once that is settled.`
-          : pr !== null && !config.gates.review.mergeOnApproval
-            ? ` PR #${pr.number} waits for a person to merge it.`
-            : willArm
-              ? " Approved. Merge it yourself; flow didn't turn on auto-merge because it couldn't tell which commit you approved."
-              : '';
+      : handToDrain && armRefused !== null
+        ? ` Approved. The drain arms PR #${pr?.number} once this is settled (${armRefused.reason}): ${armRefused.detail}.`
+        : handToDrain
+          ? ` Approved. The drain arms PR #${pr?.number} as soon as flow's arm guard allows it.`
+          : armRefused !== null
+            ? ` Approved, but flow did not arm PR #${pr?.number} (${armRefused.reason}): ${armRefused.detail}. Merge it yourself once that is settled.`
+            : pr !== null && !config.gates.review.mergeOnApproval
+              ? ` PR #${pr.number} waits for a person to merge it.`
+              : willArm
+                ? " Approved. Merge it yourself; flow didn't turn on auto-merge because it couldn't tell which commit you approved."
+                : '';
     // A refused arm is not a failed approval: it shipped, and armRefused says
     // why nothing was armed. Exit 5 here would read as "did not ship".
     return {

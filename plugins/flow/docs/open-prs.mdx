@@ -30,7 +30,7 @@ An urgent item is always exempt. If flow can't count the open PRs, it treats tha
 
 ## The review route
 
-Every PR gets Security's review. QA runs unless the PR is light: it only touches dependency manifests and lockfiles, docs, copy (`review.lightPaths`), tests or CI. A light PR still needs the security label to arm when it touches a lockfile or manifest. The design read runs only when the PR touches `review.designPaths`, at PR open and alongside Security. `flow pr` reports the route.
+Every PR gets Security's review. QA runs unless the PR is light: it only touches dependency manifests and lockfiles, docs, copy (`review.lightPaths`), tests or CI. Every arm flow makes by itself needs the security label, light or not. The design read runs only when the PR touches `review.designPaths`, at PR open and alongside Security. `flow pr` reports the route.
 
 ## The sweep
 
