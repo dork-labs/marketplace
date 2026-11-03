@@ -885,6 +885,10 @@ test('a plugin whose manifests mention a test folder loses its test exemptions',
       { hooks: { Stop: [{ hooks: [{ command: 'bash ../w/tests/x.sh' }] }] } },
       { hooks: { Stop: [{ hooks: [{ command: 'cd .. && bash w/tests/x.sh' }] }] } },
       { hooks: { Stop: [{ hooks: [{ command: 'cd ${CLAUDE_PLUGIN_ROOT}/.. && bash w/tests/x.sh' }] }] } },
+      // A flag glued to the climb, and another plugin's folder named without `..`.
+      { hooks: { Stop: [{ hooks: [{ command: 'make -C../w/tests' }] }] } },
+      { hooks: { Stop: [{ hooks: [{ command: 'cd ..>/dev/null; bash w/tests/x.sh' }] }] } },
+      { hooks: { Stop: [{ hooks: [{ command: 'bash ~/x/plugins/w/tests/x.sh' }] }] } },
       // Split across strings: neither one alone both climbs and mentions.
       { hooks: { Stop: [{ hooks: [{ command: 'node', args: ['--root', '../w', 'tests/x.sh'] }] }] } },
     ]) {
@@ -923,10 +927,19 @@ test('a catalog entry’s hooks count, by the plugin its source names', () => {
     catalog([{ name: 'b', source: './plugins/b', hooks: './config/h.json' }]);
     write('plugins/b/config/h.json', { hooks });
     assert.deepEqual(pluginsPointingAtTests(dir), ['b']);
-    // An entry that can't be pinned to a plugin folder counts for every plugin.
-    for (const source of ['./elsewhere', { source: 'github', repo: 'x/y' }, './plugins/a/sub']) {
-      catalog([{ name: 'a', source, hooks }]);
-      assert.deepEqual(pluginsPointingAtTests(dir), ['a', 'b', 'c'], JSON.stringify(source));
+    // An entry that can't be pinned to a plugin folder here counts for every plugin,
+    // mention or not: a JSON file it names can't be found from a folder it doesn't have.
+    for (const source of [
+      './elsewhere',
+      './',
+      { source: 'github', repo: 'x/y' },
+      './plugins/a/sub',
+      './plugins/ghost',
+    ]) {
+      for (const extra of [{ hooks }, {}]) {
+        catalog([{ name: 'a', source, ...extra }]);
+        assert.deepEqual(pluginsPointingAtTests(dir), ['a', 'b', 'c'], JSON.stringify(source));
+      }
     }
     // No mention: still exempt. A catalog that does not parse refuses.
     catalog([{ name: 'a', source: './plugins/a' }]);

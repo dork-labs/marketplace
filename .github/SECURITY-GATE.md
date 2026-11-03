@@ -1,9 +1,10 @@
 # Security gate
 
 Status: **not enforced.** The checks run on every pull request and merge-queue
-run, but no ruleset requires them until the steps below are done. Arming still
-notices: a failed `security-review` counts as a failing check, so an unlabelled
-security-path PR isn't armed.
+run, but no ruleset requires them until the steps below are done. The arming rule
+(`scripts/should-arm-automerge.sh`) reads a failed `security-review` as a failing
+check, but nothing enforces that yet: `gh pr merge --auto` consults nothing, and
+flow's arm guard ignores a red check that isn't required.
 
 Packages in this repo install into every user's DorkOS: hooks, commands,
 skills, extensions and scripts agents run. A change to any of them needs
@@ -34,8 +35,9 @@ exemptions: if any string in its `.claude-plugin/plugin.json`,
 or `engine-tests` as a path segment, all of that plugin's test folders count
 (`.github/scripts/security-manifest-paths.mjs`, run by the verifier and by main's verdict;
 it fails the check if a manifest doesn't parse). A plugin that mentions one and
-also climbs out with `..`, in any of those strings, counts for every plugin. So
-does a mention in a catalog entry whose `source` isn't a plugin folder here.
+also leaves its own folder, with `..` or a path through `plugins/`, in any of those
+strings, counts for every plugin. So does any catalog entry whose `source` isn't a
+plugin folder here, mention or not.
 
 **Accepted residual risk.** Test folders are exempt because they change too
 often to gate, but two of them can run on a machine: `/flow:self-test` runs
@@ -47,7 +49,13 @@ frontmatter, a `!` line in a command) needs that file changed first, and it is
 a security path, so the pointer itself gets reviewed. Two more: a name built at
 run time (`te*/x.sh`) isn't a mention, though the manifest's reviewer sees it, and a
 pointer queued together with a test edit is judged from the same base list, so
-the edit stays exempt for that one merge.
+the edit stays exempt for that one merge. A flag glued to the name (`-rtests/x.js`)
+isn't a mention either.
+
+**What backs this rule up.** The `skills and manifests` check refuses a hook or MCP
+server beyond the package's own scripts and any local `source` other than
+`./plugins/<name>`, which stops most of those spellings before they land. Loosening
+that check reopens them, so have Security read any such change.
 
 ## How approval works
 
@@ -65,8 +73,8 @@ Two checks read that, and they are not the same:
   `refs/heads/main`, runs no PR code) writes it from main's lists on every push
   and label change: `success` for no security paths or a label that covers the
   head, `failure` otherwise, naming why. It also posts one on each merge group.
-  A PR into any branch but main isn't judged: the workflow doesn't run, so it has
-  no status at all.
+  A PR into any branch but main isn't judged: the workflow doesn't run, so it gets
+  no new status. One retargeted from main keeps its old one.
 - **`security-gate`, a workflow check, is what the queue enforces.** Its scripts
   come from the base commit and it never writes. Its YAML, with the lists and the
   mode, comes from the merge commit until the ruleset below pins it to main. On an
@@ -111,12 +119,18 @@ here. **The label doesn't exist in this repo yet**, so those PRs can't get a
    both `pull_request` and `merge_group`: source `dork-labs/marketplace`, path
    `.github/workflows/security-gate.yml`, ref `refs/heads/main`. Not a named
    status check: a PR could edit its own YAML to emit a passing job with that
-   name. Start in Evaluate mode, then Active.
+   name. Start in Evaluate mode.
 3. Remove any bypass from the `main` ruleset.
-4. Prove it on GitHub (Security): a throwaway PR whose YAML and script both
-   `exit 0` must still fail, and a real merge group with more than one entry must
-   be judged entry by entry. The queue's commit chain is unproven until then.
-5. **Later, for App mode:** install the Security App on this repo and put its
+4. Prove it on GitHub (Security), in Evaluate mode:
+   - one real security-path PR passes and one refuses, which shows the read-only
+     token can read the timeline and the activity feed;
+   - a throwaway PR whose YAML and script both `exit 0` still fails;
+   - a real merge group with more than one entry is judged entry by entry.
+
+   Dorkos's promotion doc also lists binding approvals to the original queued
+   source SHA as unproven, and treats that as blocking. Carry that over.
+5. Switch the rule to Active.
+6. **Later, for App mode:** install the Security App on this repo and put its
    numeric bot user id in `SECURITY_APPROVAL_BOT_USER_ID`. dorkos's approval
    helper (`tools/security-approve/` there) is hard-wired to dork-labs/dorkos and
    its path list, so it needs a reviewed change first, or a tool of its own.

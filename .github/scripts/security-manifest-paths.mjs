@@ -29,8 +29,11 @@ const MANIFESTS = [
 /** `tests` or `engine-tests` as a whole word: a path segment, `cd …/tests && …`, or prose. */
 const MENTIONS_TESTS = /(^|[^\w-])(engine-)?te[sſ]ts(?![\w-])/iu;
 
-/** `..` as a path step: `../w`, `cd ..`, `${ROOT}/..`, not `a..b` or `...`. */
-const CLIMBS = /(?<![\w.-])\.\.(?![\w.-])/;
+/**
+ * Leaves its own folder: `..` as a path step (`../w`, `cd ..`, `-C../w`, not `a..b`
+ * or `...`), or a path through a `plugins` folder (`plugins/w/…`).
+ */
+const CLIMBS = /(?<!\.)\.\.(?![\w.-])|(?:^|[/\\\s"'=])plugins[/\\]/;
 
 /** The catalog, whose entries can declare hooks and servers of their own. */
 const CATALOG = '.claude-plugin/marketplace.json';
@@ -61,21 +64,23 @@ function namedJson(text, plugin) {
 }
 
 /**
- * Each catalog entry's strings, by the plugin folder its `source` names. An entry
- * whose source is not a plugin folder here cannot be pinned to one: `unpinned`.
+ * Each catalog entry's strings, by the plugin folder its `source` names, and whether
+ * every entry could be pinned to a plugin folder that exists.
  */
-function catalogStrings(root) {
+function catalogStrings(root, names) {
   const file = join(root, CATALOG);
   const byPlugin = new Map();
-  const unpinned = [];
-  if (!existsSync(file)) return { byPlugin, unpinned };
+  let pinned = true;
+  if (!existsSync(file)) return { byPlugin, pinned };
   for (const entry of JSON.parse(readFileSync(file, 'utf8')).plugins ?? []) {
     const source = typeof entry?.source === 'string' ? posix.normalize(entry.source) : '';
     const name = /^plugins\/([^/]+)\/?$/.exec(source)?.[1];
-    if (name) byPlugin.set(name, [...(byPlugin.get(name) ?? []), ...strings(entry)]);
-    else unpinned.push(...strings(entry));
+    // Its `source` always names plugins/, which is not the entry leaving its folder.
+    const { source: _, ...rest } = entry ?? {};
+    if (names.includes(name)) byPlugin.set(name, [...(byPlugin.get(name) ?? []), ...strings(rest)]);
+    else pinned = false;
   }
-  return { byPlugin, unpinned };
+  return { byPlugin, pinned };
 }
 
 /**
@@ -83,16 +88,16 @@ function catalogStrings(root) {
  *
  * @param {string} root - The checkout (the base commit).
  * @returns {string[]} Plugin folder names, sorted. A plugin that mentions a test
- *   folder and also climbs out of its folder (`..`), in any of its strings, cannot
- *   be pinned to itself, so it counts for every plugin. So does a mention in a
- *   catalog entry whose source is not a plugin folder.
+ *   folder and also leaves its own folder, in any of its strings, cannot be pinned
+ *   to itself, so it counts for every plugin. So does any catalog entry whose source
+ *   is not a plugin folder here, mention or not.
  */
 export function pluginsPointingAtTests(root) {
   const pluginsDir = join(root, 'plugins');
   if (!existsSync(pluginsDir)) return [];
   const names = readdirSync(pluginsDir).filter((n) => statSync(join(pluginsDir, n)).isDirectory());
-  const { byPlugin, unpinned } = catalogStrings(root);
-  if (unpinned.some((text) => MENTIONS_TESTS.test(text))) return names.sort();
+  const { byPlugin, pinned } = catalogStrings(root, names);
+  if (!pinned) return names.sort();
   const hit = new Set();
   for (const name of names) {
     const plugin = posix.join('plugins', name);
