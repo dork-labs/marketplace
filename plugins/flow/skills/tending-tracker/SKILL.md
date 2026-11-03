@@ -38,11 +38,12 @@ tested truth is the oracles `classifyOwnership` (`identity.ts`), `shouldRespondT
 
 Classify ownership first: `mine` / `reviewer` / `other` / `unassigned`, from the item's
 assignee (a project's lead) against the resolved identity. In shared mode a
-self-assignment is still `mine`; own authorship is known by `identity.marker`. Then,
+self-assignment is still `mine`. Then,
 first match wins:
 
 1. **Never answer your own comment:** author is `identity.agent`, or the body carries
-   `identity.marker` (in shared mode the marker is the only signal). → ignore.
+   `identity.marker` or ends in a valid provenance line. Only the account proves
+   authorship; a signature only silences. → ignore.
 2. **Always respond when addressed:** an @mention, or in shared mode a `/flow` or
    `@flow` token. Overrides ownership. → respond.
 3. **A member's comment on an `agent/needs-input` item is the answer.** → resume:
@@ -106,7 +107,6 @@ path**: (a) delivered into `<id>`, (b) fresh session, (c) handled here, origin o
 > **One product-specific name, deliberately.** `POST /api/sessions/<id>/messages` is
 > DorkOS's; it is not a tracker string.
 
-
 ## Claiming
 
 - `claim(item)` writes `agent/claimed` and a `started`-category state, so it survives a
@@ -120,7 +120,7 @@ path**: (a) delivered into `<id>`, (b) fresh session, (c) handled here, origin o
 - Every `comment` carries `identity.marker` (so rule 1 sees it) and will always carry
   the provenance signature, never an email address. Both, every reply.
 - `needsInput(item, question)`: `flow ask <id> --question … --choice … --pick <n>
-  --why … [--floor <triggers>]` posts it with your pick, adds `agent/needs-input` and
+--why … [--floor <triggers>]` posts it with your pick, adds `agent/needs-input` and
   records it on the run; then `assignToHuman`, stop. Parked is durable; the stall sweep
   never reclaims it; a member's reply (rule 3) or an answer `flow answer` recorded on
   the run (`question.answer`) resumes it.

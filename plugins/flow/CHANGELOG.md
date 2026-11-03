@@ -4,6 +4,14 @@ Installs of this plugin are pinned to a commit SHA, so a fix here does not reach
 you until you **reinstall it** (Marketplace → flow → reinstall, or re-run your
 `--plugin-dir` checkout's `git pull`). Each entry below says whether that matters.
 
+## 0.80.0
+
+**Flow now stays quiet on its own comment even when your tracker garbles the visible `— 🤖 /flow` marker, and never takes the hidden signature line as proof of who wrote a comment (DOR-2351). Before, with flow and a person sharing one tracker account, a garbled marker could let flow answer its own comment. Reinstall to get it.**
+
+- When a comment's last line is flow's hidden `agent:provenance` signature, and it parses, flow treats the comment as its own and doesn't answer it, the same as when the marker is there. A signature anywhere else in the comment, or one that doesn't parse, doesn't count.
+- That signature, like the marker, only ever makes flow stay quiet. Anyone can paste it, so it never proves a comment is flow's: the reply flow resumes on and the question `flow status` shows are still matched on flow's own account. If a person's answer ends with a pasted signature, flow ignores it and the item stays parked; post the answer again without that line.
+- The drain docs now say that removing a finished item's worktree also deletes the files git ignores in it, and that a DorkOS worker left idle after the drain stops it counts as stopped (both from 0.79.0).
+
 ## 0.79.0
 
 **`flow drain` now removes a finished item's worktree, and flow signs the account as `claude-work` rather than `.claude-work` (DOR-2469). Before, every worktree the drain made stayed on disk after its PR merged. Reinstall to get it.**

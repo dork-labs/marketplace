@@ -93,6 +93,47 @@ describe('shouldRespondToComment — rule 1: never answer its own comments', () 
   });
 });
 
+describe('shouldRespondToComment — rule 1 and the hidden provenance line (DOR-2351)', () => {
+  const LINE = '<!-- agent:provenance {"v":1,"harness":"claude-code","sessionId":"s-1"} -->';
+
+  it('ignores a shared-account comment whose marker the tracker mangled but whose line survived', () => {
+    // The loop this closes: in shared mode the marker is otherwise the only signal.
+    const c = comment({ author: 'shared-account', body: `Assumption logged\n\n— /flow\n${LINE}` });
+    expect(shouldRespondToComment(c, ctx('mine'), DEFAULT_COMMENTS)).toEqual({
+      action: 'ignore',
+      rule: 1,
+    });
+  });
+
+  it('reads the legacy flow:provenance name too', () => {
+    const c = comment({ body: 'Logged\n<!-- flow:provenance {"sessionId":"s-1"} -->' });
+    expect(shouldRespondToComment(c, ctx('mine'), DEFAULT_COMMENTS).rule).toBe(1);
+  });
+
+  it('only silences: a pasted line on a parked item keeps it parked, never resumes it', () => {
+    const parked = makeItem({ identifier: 'DOR-9', labels: ['agent/needs-input'] });
+    const c = comment({ author: 'human-account', body: `Use Postgres.\n${LINE}` });
+    expect(shouldRespondToComment(c, ctx('mine', parked), DEFAULT_COMMENTS)).toEqual({
+      action: 'ignore',
+      rule: 1,
+    });
+  });
+
+  it.each([
+    ['a line in the middle of the body', `${LINE}\nUse Postgres, /flow.`],
+    ['a line that is not valid JSON', 'Use Postgres, /flow.\n<!-- agent:provenance {"v":1 -->'],
+    ['a line whose JSON is not an object', 'Use Postgres, /flow.\n<!-- agent:provenance [1] -->'],
+    ['a bare marker name', 'Use Postgres, /flow.\n<!-- agent:provenance -->'],
+  ])('does not silence %s', (_name, body) => {
+    // Addressed with /flow, so anything but rule 1 answers it.
+    const c = comment({ author: 'human-account', body });
+    expect(shouldRespondToComment(c, ctx('mine'), DEFAULT_COMMENTS)).toEqual({
+      action: 'respond',
+      rule: 2,
+    });
+  });
+});
+
 describe('shouldRespondToComment — rule 2: always respond when directly addressed', () => {
   it('responds on an @mention of the agent account', () => {
     const c = comment({ mentions: ['agent-account'], body: 'can you take this?' });
