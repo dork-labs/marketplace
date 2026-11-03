@@ -62,6 +62,7 @@ import {
   retryAsk,
   retryRecord,
   reviewAsk,
+  droppedAnswerRecord,
   shipRecord,
   signInAsk,
   type Ask,
@@ -107,11 +108,30 @@ export const OFFER_EVERY_MS = 30 * 24 * 60 * 60_000;
 /** The behaviour level a project's flow needs to honour a dial (F0's engine). */
 export const DIAL_BEHAVIOUR = 1;
 
-/** flow's exit code for "someone got there first" (`EXIT.precondition`). */
+/** flow's exit code for a refusal (`EXIT.precondition`): its `kind` says which. */
 const EXIT_PRECONDITION = 5;
 
 /** What a failed answer says. */
 export const SEND_FAILED_TEXT = "Flow couldn't send that. Try again.";
+
+/** What an answer that met a busy run store says: `flow answer` recorded nothing. */
+export const BUSY_ANSWER_TEXT = "Flow was busy, so your answer wasn't recorded. Try again.";
+
+/** What a review that met a busy run store says: it may have posted before the store refused. */
+export const BUSY_REVIEW_TEXT = "Flow was busy and didn't finish this. Try again.";
+
+/** What an answer says when the question needed none by the time it arrived. */
+export const SETTLED_TEXT = "This was already settled, so your answer wasn't recorded.";
+
+/**
+ * Thrown so core counts the call as failed: it tries a deadline again, where one
+ * answered "keep open" never fires again, and tells a person to try again with
+ * the deadline still standing.
+ */
+class TryAgainLaterError extends Error {}
+
+/** What a question's other refusals start with. */
+const NOT_RECORDED_PREFIX = "Flow didn't record this";
 
 /** What the row says while a slow answer is sent. */
 export const SENDING_TEXT = 'Sending…';
@@ -434,6 +454,8 @@ export class DecisionCoordinator {
   private started = false;
   /** Asks whose answer is still being sent: held open until it finishes. */
   private readonly inFlight = new Set<string>();
+  /** The asks in {@link inFlight} because their deadline is taking the agent's pick. */
+  private readonly deadlineInFlight = new Set<string>();
   private markReady: () => void = () => {};
   /** Settles after the first pass, so no answer meets an empty list of asks. */
   private readonly firstPass = new Promise<void>((resolve) => {
@@ -680,8 +702,8 @@ export class DecisionCoordinator {
 
   /**
    * Leave "While you were away" rows (§7.10) for what flow settled without
-   * asking: work the reviewer agent shipped, and failing checks flow went
-   * back to fix. Each event is recorded once.
+   * asking: work the reviewer agent shipped, failing checks flow went back to
+   * fix, and a person's answer flow dropped. Each event is recorded once.
    */
   private async recordAway(inbox: InboxApi, plans: readonly PlanProject[]): Promise<void> {
     const recorded = obj(await this.deps.storage.get(RECORDED_KEY));
@@ -715,6 +737,26 @@ export class DecisionCoordinator {
               identifier,
               title: titles.get(identifier) ?? null,
               stop: shipStop,
+            }),
+            marker,
+            newMarkers
+          );
+        }
+      }
+      // A person's answer flow dropped unused: said at every stop, as nothing else
+      // tells them. The line names the item and carries none of their words.
+      if (since !== null) {
+        for (const line of lines) {
+          if (line.kind !== 'answer.dropped') continue;
+          const identifier = text(line.item);
+          if (identifier === null) continue;
+          const marker = `dropped:${root}:${identifier}:${String(line.ts)}`;
+          if (recorded[marker] !== undefined) continue;
+          await this.record(
+            inbox,
+            droppedAnswerRecord(plan.ask, {
+              identifier,
+              title: titles.get(identifier) ?? null,
             }),
             marker,
             newMarkers
@@ -835,7 +877,13 @@ export class DecisionCoordinator {
       await this.deps.inbox?.resolve(event.key, { outcome: 'cleared' }).catch(() => false);
       return { keepOpen: true, message: 'This was already settled.' };
     }
-    if (this.inFlight.has(ask.key)) return { keepOpen: true, message: SENDING_TEXT };
+    if (this.inFlight.has(ask.key)) {
+      // "Sending…" would be untrue of a person's words while the pick is what's running.
+      if (event.decidedBy === 'deadline' || this.deadlineInFlight.has(ask.key)) {
+        throw new TryAgainLaterError(ask.key);
+      }
+      return { keepOpen: true, message: SENDING_TEXT };
+    }
     // Shipping, and a floor question, are settled only by a person's own
     // answer, which core credits to them: never by one given on flow's page.
     if (
@@ -1032,7 +1080,8 @@ export class DecisionCoordinator {
   /**
    * Run an answer's command within core's bound: done in time, the row
    * settles now; slower, the row says "Sending…" and settles when it finishes,
-   * crediting the person who answered.
+   * crediting the person who answered. A person who meets a busy store on a
+   * question with a deadline fails the call instead, so the deadline stands.
    */
   private async runAnswer(
     ask: Ask,
@@ -1051,9 +1100,17 @@ export class DecisionCoordinator {
     });
     const first = await Promise.race([run, timeout]);
     if (timer !== undefined) clearTimeout(timer);
-    if (first !== 'slow') return this.finish(ask, event, first, outcome);
+    if (first !== 'slow') {
+      const answer = await this.finish(ask, event, first, outcome);
+      // A kept-open answer would spend the deadline, and nobody answered.
+      if (ask.deadline !== null && 'keepOpen' in answer && answer.message === BUSY_ANSWER_TEXT) {
+        throw new TryAgainLaterError(ask.key);
+      }
+      return answer;
+    }
     // Held open until it finishes: no pass clears or rewrites the row meanwhile.
     this.inFlight.add(ask.key);
+    if (event.decidedBy === 'deadline') this.deadlineInFlight.add(ask.key);
     void run
       .then(async (result) => {
         const answer = await this.finish(ask, event, result, outcome);
@@ -1062,6 +1119,7 @@ export class DecisionCoordinator {
         if ('resolve' in answer) {
           await inbox.resolve(ask.key, {
             outcome: answer.resolve,
+            ...(event.decidedBy === 'deadline' ? { by: { kind: 'deadline' as const } } : {}),
             ...(event.pendingActionId === null ? {} : { answering: event.pendingActionId }),
             ...(answer.offer === undefined || event.pendingActionId === null
               ? {}
@@ -1070,7 +1128,9 @@ export class DecisionCoordinator {
         } else if (
           'keepOpen' in answer &&
           (answer.message === SEND_FAILED_TEXT ||
-            answer.message === PERSON_GATE_REFUSED_TEXT ||
+            answer.message === BUSY_ANSWER_TEXT ||
+            answer.message === BUSY_REVIEW_TEXT ||
+            answer.message?.startsWith(NOT_RECORDED_PREFIX) === true ||
             answer.message?.startsWith("Flow didn't ship") === true)
         ) {
           await this.sayFailed(inbox, ask);
@@ -1081,7 +1141,9 @@ export class DecisionCoordinator {
       })
       .finally(() => {
         this.inFlight.delete(ask.key);
+        this.deadlineInFlight.delete(ask.key);
       });
+    if (event.decidedBy === 'deadline') throw new TryAgainLaterError(ask.key);
     return { keepOpen: true, message: SENDING_TEXT };
   }
 
@@ -1119,6 +1181,7 @@ export class DecisionCoordinator {
     try {
       return await this.finishOrThrow(ask, event, result, outcome);
     } catch (error) {
+      if (error instanceof TryAgainLaterError) throw error;
       this.deps.log(`[flow] could not finish answering ${ask.key}: ${String(error)}`);
       return { keepOpen: true, message: SEND_FAILED_TEXT };
     }
@@ -1149,17 +1212,45 @@ export class DecisionCoordinator {
       this.deps.log(`[flow] the person gate refused ${ask.key}`);
       return { keepOpen: true, message: PERSON_GATE_REFUSED_TEXT };
     }
-    if (result.code === EXIT_PRECONDITION && ask.kind === 'question') {
-      // Already settled: the engine's deadline pass or a tracker reply got there first.
+    const refusal = obj(result.json?.error);
+    if (refusal.kind === 'busy') {
+      // Another flow command held the run store. The row stays: nobody answered.
+      const why = typeof refusal.message === 'string' ? refusal.message : '';
+      this.deps.log(`[flow] answering ${ask.key} met a busy run store: ${why}`);
+      if (event.decidedBy === 'deadline') throw new TryAgainLaterError(ask.key);
+      return {
+        keepOpen: true,
+        message: ask.kind === 'review' ? BUSY_REVIEW_TEXT : BUSY_ANSWER_TEXT,
+      };
+    }
+    if ((refusal.kind === 'settled' || refusal.kind === 'not-waiting') && ask.kind === 'question') {
+      // No answer is needed now: the engine's deadline pass or a tracker reply got
+      // there first, or the item stopped waiting or is gone.
       await this.settle(ask);
       if (event.decidedBy === 'deadline') {
         await this.deps.inbox
-          ?.resolve(ask.key, { outcome: 'answered', by: { kind: 'deadline' } })
+          ?.resolve(
+            ask.key,
+            refusal.kind === 'settled'
+              ? { outcome: 'answered', by: { kind: 'deadline' } }
+              : { outcome: 'cleared' }
+          )
           .catch(() => false);
         return { settled: true };
       }
       await this.deps.inbox?.resolve(ask.key, { outcome: 'cleared' }).catch(() => false);
-      return { keepOpen: true, message: 'This was already answered on the tracker.' };
+      return { keepOpen: true, message: SETTLED_TEXT };
+    }
+    if (result.code === EXIT_PRECONDITION && ask.kind === 'question') {
+      // Refused, and not because anyone answered: only a refusal that says so
+      // may clear a row, so an answer that wasn't recorded never looks recorded.
+      const why = typeof refusal.message === 'string' ? refusal.message : '';
+      this.deps.log(`[flow] answering ${ask.key} was refused: ${why}`);
+      if (event.decidedBy === 'deadline') return { keepOpen: true };
+      return {
+        keepOpen: true,
+        message: why === '' ? SEND_FAILED_TEXT : `${NOT_RECORDED_PREFIX}: ${why}`,
+      };
     }
     if (result.code === EXIT_PRECONDITION && ask.kind === 'review') {
       const message = obj(result.json?.error).message;

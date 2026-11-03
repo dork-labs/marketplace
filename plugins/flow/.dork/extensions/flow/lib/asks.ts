@@ -681,6 +681,31 @@ export function retryRecord(
   });
 }
 
+/**
+ * The row for a person's recorded answer flow dropped unused: it had already
+ * resolved as answered, so this is how they hear. It never carries their words.
+ *
+ * @param project - The project.
+ * @param facts - The item and its title.
+ * @returns The record.
+ */
+export function droppedAnswerRecord(
+  project: AskProject,
+  facts: { identifier: string; title: string | null }
+): RecordedDecisionInput {
+  const named = itemTitle(facts.title, MAX_TITLE - 27);
+  return recordBase(project, {
+    key: `dropped-answer:${project.id}:${keyPart(facts.identifier)}`,
+    title: named === null ? "Your answer wasn't used" : `Your answer on ${named} wasn't used`,
+    why: 'Flow dropped your answer before anything used it: the work on the item moved on, or a new question replaced it. Reply on the item if it still matters.',
+    detail: facts.identifier,
+    outcome: 'answered',
+    by: { kind: 'rule', label: 'Flow' },
+    choiceLabel: 'Not used',
+    tell: true,
+  });
+}
+
 /** The fields every record carries. */
 function recordBase(
   project: AskProject,

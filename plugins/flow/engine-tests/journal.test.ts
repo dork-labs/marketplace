@@ -134,6 +134,7 @@ const SAMPLES: JournalEvent[] = [
   },
   { kind: 'review.approved', by: 'reviewer-agent', sha7: 'abc1234' },
   { kind: 'person.act', verb: 'answer', tty: 'ttys003', parent: 'zsh', ppid: 42 },
+  { kind: 'answer.dropped', item: 'ACME-12' },
   { kind: 'ci', pr: 58, event: 'red', class: 'flake' },
   { kind: 'handoff', from: 'personal', to: 'work', reason: 'limit' },
   { kind: 'note', noteKind: 'workaround', text: 'wrote a PR watcher by hand', skill: 'flow-drain' },

@@ -1,6 +1,6 @@
 # Tracker Adapter Contract
 
-> **Contract version: 3.0.1** (semver). See [Versioning](#5-versioning).
+> **Contract version: 3.0.2** (semver). See [Versioning](#5-versioning).
 >
 > This is the **generic, tracker-neutral** contract every `/flow` tracker adapter
 > must satisfy. It names no tracker, no API, and no slug. Reference adapters
@@ -744,7 +744,8 @@ interface WorkStateChange {
 - `getItem(identifier, opts)` returns one item, normalized the same way, with its
   latest `opts.comments` comments oldest first when asked. An item that does not
   exist, or belongs to another team, is a precondition failure (exit 5), not an
-  empty result.
+  empty result. Labels it cannot read in full **throw**: a short list can read as
+  an item no longer waiting, and that drops a person's recorded answer.
 - Like every read, both **throw** when the tracker cannot be reached.
 
 **`createItem` (since 2.2.0) files a new item in the configured team.**
@@ -894,6 +895,8 @@ declaration.
 
 ### What each version added
 
+- **3.0.2** - wording (PATCH, DOR-3777): `getItem` throws when it cannot read an
+  item's labels in full. The shipped Linear code now does.
 - **3.0.1** - wording (PATCH, DOR-3677): a trusted author is a member of the
   configured team where the tracker has teams, not only of the workspace; an
   app's comment for a member is untrusted, and a member's own API key acts as

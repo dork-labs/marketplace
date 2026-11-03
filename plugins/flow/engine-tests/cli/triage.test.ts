@@ -4,7 +4,7 @@
  * `agent/needs-input`. Every refusal comes before any tracker write.
  */
 
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
@@ -469,5 +469,163 @@ describe('flow triage --question-file', () => {
     // The same file on an accepted run does add the line.
     await runFlow(project, { items: [untriaged()] }, ['triage', 'FAKE-1', '--question-file', file]);
     expect(excluded()).toContain('.dork/flow/tmp/');
+  });
+});
+
+// DOR-3777: the one flow path that adds agent/needs-input to a run's item with no
+// new question. What it parks on is its own question, so the run's old one, and
+// any answer to it, belongs to no park.
+describe('flow triage --park with an old question on the run', () => {
+  const run = (fields: Record<string, unknown> = {}) => ({
+    'id-FAKE-1': {
+      issueId: 'id-FAKE-1',
+      identifier: 'FAKE-1',
+      sessionId: 'session-1',
+      worktreePath: project.dir,
+      branch: 'work',
+      stage: 'execute',
+      status: 'running',
+      attemptCount: 0,
+      workerPid: 1,
+      startedAt: '2026-09-26T10:00:00.000Z',
+      question: {
+        text: 'Keep the old API?',
+        choices: [
+          { id: 'c1', label: 'Yes' },
+          { id: 'c2', label: 'No' },
+        ],
+        pick: 'c2',
+        why: 'Cheaper.',
+        askedAt: '2026-09-26T11:00:00.000Z',
+        decideBy: null,
+        floor: [],
+        answeredBy: 'person',
+        checkAfter: null,
+        answer: { text: 'No', at: '2026-09-26T11:30:00.000Z', by: 'person' },
+      },
+      ...fields,
+    },
+  });
+  const park = ['triage', 'FAKE-1', '--park', 'Which one?'];
+
+  it('drops it, so the inbox pass cannot resume this park on its answer', async () => {
+    project.writeRuns(run() as never);
+    const result = await runFlow(project, { items: [untriaged()] }, park);
+    expect(result.code).toBe(EXIT.ok);
+    expect(project.runs()['id-FAKE-1'].question).toBeUndefined();
+  });
+
+  it("leaves one line for the person when the answer was a person's, without the words", async () => {
+    const runs = run();
+    project.writeRuns({
+      'id-FAKE-1': {
+        ...runs['id-FAKE-1'],
+        question: {
+          ...runs['id-FAKE-1'].question,
+          answer: { text: 'Private words.', at: '2026-09-26T11:30:00.000Z', by: 'person' },
+        },
+      },
+    } as never);
+    await runFlow(project, { items: [untriaged()] }, park);
+    expect(ofKind('answer.dropped')).toEqual([
+      expect.objectContaining({ kind: 'answer.dropped', item: 'FAKE-1' }),
+    ]);
+    expect(JSON.stringify(journal())).not.toContain('Private words.');
+  });
+
+  it("leaves no line when the answer was an agent's", async () => {
+    const runs = run();
+    project.writeRuns({
+      'id-FAKE-1': {
+        ...runs['id-FAKE-1'],
+        question: {
+          ...runs['id-FAKE-1'].question,
+          answer: { text: 'Pick', at: '2026-09-26T11:30:00.000Z', by: 'agent-default' },
+        },
+      },
+    } as never);
+    await runFlow(project, { items: [untriaged()] }, park);
+    expect(project.runs()['id-FAKE-1'].question).toBeUndefined();
+    expect(ofKind('answer.dropped')).toEqual([]);
+  });
+
+  // A question nobody answered may still have a row a person is about to use.
+  it('leaves a question with no answer, so an answer to it is still recorded', async () => {
+    const runs = run();
+    const { answer: _none, ...question } = runs['id-FAKE-1'].question;
+    project.writeRuns({ 'id-FAKE-1': { ...runs['id-FAKE-1'], question } } as never);
+    await runFlow(project, { items: [untriaged()] }, park);
+    expect(project.runs()['id-FAKE-1'].question?.text).toBe('Keep the old API?');
+  });
+
+  it('leaves an answer already handed over', async () => {
+    const runs = run();
+    project.writeRuns({
+      'id-FAKE-1': {
+        ...runs['id-FAKE-1'],
+        question: { ...runs['id-FAKE-1'].question, answerHandedOverAt: '2026-09-26T11:40:00.000Z' },
+      },
+    } as never);
+    await runFlow(project, { items: [untriaged()] }, park);
+    expect(project.runs()['id-FAKE-1'].question?.answer?.text).toBe('No');
+  });
+
+  it('leaves it on a dry run, and for --ready', async () => {
+    project.writeRuns(run() as never);
+    await runFlow(project, { items: [untriaged()] }, [...park, '--dry-run']);
+    await runFlow(project, { items: [untriaged()] }, [
+      'triage',
+      'FAKE-1',
+      '--ready',
+      '--stage',
+      'execute',
+    ]);
+    expect(project.runs()['id-FAKE-1'].question?.answer?.text).toBe('No');
+  });
+
+  it('leaves it when the item already waits: this is not a new park', async () => {
+    project.writeRuns(run() as never);
+    const waiting = { ...untriaged(), labels: ['type/idea', 'agent/needs-input'] };
+    await runFlow(project, { items: [waiting] }, park);
+    expect(project.runs()['id-FAKE-1'].question?.answer?.text).toBe('No');
+  });
+
+  it("leaves a drain run's to the drain", async () => {
+    project.writeRuns(
+      run({
+        drain: {
+          v: 1,
+          rev: 1,
+          phase: 'parked',
+          worker: null,
+          reviewer: null,
+          pushedSha: null,
+          reviewedSha: null,
+          verdict: null,
+          reviewRound: 1,
+          pr: null,
+          rearmedFor: null,
+          nudges: 0,
+          wakeAfter: null,
+          handoffs: [],
+          parkedReason: 'x',
+        },
+      }) as never
+    );
+    const result = await runFlow(project, { items: [untriaged()] }, park);
+    expect(result.code).toBe(EXIT.ok);
+    expect(project.runs()['id-FAKE-1'].question?.answer?.text).toBe('No');
+  });
+
+  it('writes nothing to the tracker when the store stays locked', async () => {
+    project.writeRuns(run() as never);
+    const lock = path.join(project.dir, '.dork', 'flow', 'flow-state.json.lock');
+    writeFileSync(lock, JSON.stringify({ pid: process.pid, at: Date.now() }));
+    const result = await runFlow(project, { items: [untriaged()] }, park);
+    rmSync(lock, { force: true });
+    expect(result.code).toBe(EXIT.precondition);
+    expect(result.json.error).toMatchObject({ kind: 'busy' });
+    expect(writes(result)).toEqual([]);
+    expect(project.runs()['id-FAKE-1'].question?.answer?.text).toBe('No');
   });
 });

@@ -331,6 +331,13 @@ function writeRun(fields: Partial<FlowRun> = {}): void {
   project.writeRuns({ 'id-ACME-12': run });
 }
 
+/** Hold the run store's lock, as another flow command would; returns the release. */
+function holdStoreLock(): () => void {
+  const lock = path.join(project.dir, '.dork', 'flow', 'flow-state.json.lock');
+  writeFileSync(lock, JSON.stringify({ pid: process.pid, at: Date.now() }));
+  return () => rmSync(lock, { force: true });
+}
+
 function stored(): FlowRun {
   return project.runs()['id-ACME-12'];
 }
@@ -688,6 +695,20 @@ describe('flow review: only a person approves or sends back (DOR-3716)', () => {
   });
 });
 
+describe('flow review on a busy store (DOR-3775)', () => {
+  it('posts nothing for an approval it could not start, and says busy', async () => {
+    writeRun({ shipWait: { sha: 'abc1234', since: NOW, checkedAt: NOW } });
+    const tracker = new FakeTracker({ team: ACME_TEAM, items: [started()] });
+    const release = holdStoreLock();
+    const result = await flow(['review', 'ACME-12', '--approve', '--by', 'person'], { tracker });
+    release();
+    expect(result.code).toBe(EXIT.precondition);
+    expect(result.json.error).toMatchObject({ kind: 'busy' });
+    expect(comments(tracker)).toEqual([]);
+    expect(stored().shipWait).toBeDefined();
+  });
+});
+
 describe('flow review --changes', () => {
   // Purpose: 👎 sends the work back with the note: a comment as the person, a
   // request for changes on the PR, and the run back at execute with its
@@ -712,6 +733,30 @@ describe('flow review --changes', () => {
     const writes = tracker.writes.filter((call) => call.method === 'applyWorkState');
     expect(writes).toHaveLength(1);
     expect(JSON.stringify(writes)).not.toMatch(/completed|canceled|agent\/completed/);
+  });
+
+  // DOR-3775: the note is posted before the run is written, so a busy store is
+  // "busy", not a refusal of the note; the row stays and the person sends again.
+  it.each<[string, () => void]>([
+    ['a run', () => writeRun()],
+    [
+      'a drain run',
+      () =>
+        writeRun({
+          stage: 'verify',
+          drain: drain({ pushedSha: 'abc1234def', verdict: 'clean', reviewedSha: 'abc1234def' }),
+        }),
+    ],
+  ])('says busy when the store is locked after sending back %s', async (_name, write) => {
+    write();
+    const tracker = new FakeTracker({ team: ACME_TEAM, items: [started()] });
+    const release = holdStoreLock();
+    const result = await flow(['review', 'ACME-12', '--changes', '--note', 'Redo it.'], {
+      tracker,
+    });
+    release();
+    expect(result.code).toBe(EXIT.precondition);
+    expect(result.json.error).toMatchObject({ kind: 'busy' });
   });
 
   // Purpose: a drain run goes back through the drain's own transition: a
@@ -1563,8 +1608,235 @@ describe('review fixes (DOR-2528 FIX-FIRST)', () => {
     expect(result.code).toBe(EXIT.precondition);
     // Re-review nit: the loser says it lost the race, not that nothing waited.
     expect(result.stderr).toContain('got there first');
+    expect(result.json.error).toMatchObject({ kind: 'settled' });
     expect(comments(tracker)).toEqual([]);
     expect(stored().question?.answer?.by).toBe('agent-default');
+  });
+
+  // DOR-3775: DorkOS clears a row only on a refusal that says someone answered.
+  it.each<[string, string[], Record<string, unknown>, string]>([
+    ['not-waiting when the label is gone', ['type/task', 'agent/claimed'], {}, 'not-waiting'],
+    [
+      'settled when the question has an answer',
+      ['type/task', 'agent/claimed', 'agent/needs-input'],
+      { answer: { text: 'Keep it', at: NOW, by: 'person' } },
+      'settled',
+    ],
+    [
+      'settled when it has an answer and the label is gone too',
+      ['type/task', 'agent/claimed'],
+      { answer: { text: 'Keep it', at: NOW, by: 'person' } },
+      'settled',
+    ],
+  ])('calls the question %s', async (_name, labels, extra, kind) => {
+    writeRun({
+      stage: 'execute',
+      status: 'running',
+      question: floorQuestion({ floor: [], checkAfter: null, ...extra }),
+    });
+    const tracker = new FakeTracker({ team: ACME_TEAM, items: [started(labels)] });
+    const result = await flow(['answer', 'ACME-12', '--text', 'Hold it.'], {
+      tracker,
+      env: person(),
+    });
+    expect(result.code).toBe(EXIT.precondition);
+    expect(result.json.error).toMatchObject({ kind });
+  });
+
+  it('says not-waiting when the item is gone, and not on a tracker outage', async () => {
+    writeRun({
+      stage: 'execute',
+      status: 'running',
+      question: floorQuestion({ floor: [], checkAfter: null }),
+    });
+    const gone = await flow(['answer', 'ACME-12', '--text', 'Hold it.'], {
+      tracker: new FakeTracker({ team: ACME_TEAM, items: [] }),
+      env: person(),
+    });
+    expect(gone.code).toBe(EXIT.precondition);
+    expect(gone.json.error).toMatchObject({ kind: 'not-waiting' });
+    const tracker = new FakeTracker({ team: ACME_TEAM, items: [parkedItem()] });
+    tracker.adapter.getItem = async () => {
+      throw new TrackerError('the tracker did not answer', { kind: 'unreachable' });
+    };
+    const down = await flow(['answer', 'ACME-12', '--text', 'Hold it.'], {
+      tracker,
+      env: person(),
+    });
+    expect(down.code).toBe(EXIT.tracker);
+    expect(down.json.error).not.toMatchObject({ kind: 'not-waiting' });
+  });
+
+  // DOR-3777's drop leaves a run with no question. A person's words there would
+  // resume nothing, so flow must not post them and say the work goes on.
+  it("refuses a person's words on a run with no open question, posting nothing", async () => {
+    writeRun({ stage: 'execute', status: 'running' });
+    const tracker = new FakeTracker({ team: ACME_TEAM, items: [parkedItem()] });
+    const result = await flow(['answer', 'ACME-12', '--text', 'Hold it.'], {
+      tracker,
+      env: person(),
+    });
+    expect(result.code).toBe(EXIT.precondition);
+    expect(result.json.error).not.toHaveProperty('kind');
+    expect(result.stderr).toContain(
+      'nothing was posted. Stop; ask the person to reply on the item.'
+    );
+    expect(comments(tracker)).toEqual([]);
+  });
+
+  // Only that the words are posted: whether they resume the run isn't shown here.
+  it("still posts a person's words on a parked drain run with no question", async () => {
+    writeRun({ stage: 'execute', status: 'running', drain: drain({ phase: 'parked' }) });
+    const tracker = new FakeTracker({ team: ACME_TEAM, items: [parkedItem()] });
+    const result = await flow(['answer', 'ACME-12', '--text', 'Fix it.'], {
+      tracker,
+      env: person(),
+    });
+    expect(result.code).toBe(EXIT.ok);
+    expect(comments(tracker)).toHaveLength(1);
+  });
+
+  it('does not call a pick that may not stand yet settled', async () => {
+    writeRun({
+      stage: 'execute',
+      status: 'running',
+      question: floorQuestion({
+        floor: [],
+        checkAfter: null,
+        decideBy: '2099-09-26T15:00:00.000Z',
+      }),
+    });
+    const tracker = new FakeTracker({ team: ACME_TEAM, items: [parkedItem()] });
+    const result = await flow(['answer', 'ACME-12', '--pick', '--by', 'agent-default'], {
+      tracker,
+    });
+    expect(result.code).toBe(EXIT.precondition);
+    expect(result.json.error).not.toHaveProperty('kind');
+  });
+
+  // DOR-3775: a person's answer that met a busy lock wasn't recorded, and flow
+  // says so in a way DorkOS can tell from "someone else answered".
+  it('records and posts nothing on a busy store, and the retry goes through', async () => {
+    writeRun({
+      stage: 'execute',
+      status: 'running',
+      question: floorQuestion({ floor: [], checkAfter: null }),
+    });
+    const tracker = new FakeTracker({ team: ACME_TEAM, items: [parkedItem()] });
+    const release = holdStoreLock();
+    const busy = await flow(['answer', 'ACME-12', '--text', 'Hold it.'], {
+      tracker,
+      env: person(),
+    });
+    release();
+    expect(busy.code).toBe(EXIT.precondition);
+    expect(busy.json.error).toMatchObject({ kind: 'busy' });
+    expect(comments(tracker)).toEqual([]);
+    expect(stored().question?.answer).toBeUndefined();
+    expect(personLines()).toEqual([]);
+
+    const retry = await flow(['answer', 'ACME-12', '--text', 'Hold it.'], {
+      tracker,
+      env: person(),
+    });
+    expect(retry.code).toBe(EXIT.ok);
+    expect(stored().question?.answer?.text).toBe('Hold it.');
+    expect(comments(tracker)).toHaveLength(1);
+  });
+
+  // The retry DOR-3775 added only runs the verb again, so a spend's pick must meet
+  // the same refusal on every try: never "busy", and never recorded.
+  it("refuses a spend's pick while the store is busy and on every retry after", async () => {
+    writeRun({
+      stage: 'execute',
+      status: 'running',
+      question: floorQuestion({
+        floor: ['secrets-or-spend'],
+        checkAfter: null,
+        decideBy: '2026-09-26T11:30:00.000Z',
+      }),
+    });
+    const tracker = new FakeTracker({ team: ACME_TEAM, items: [parkedItem()] });
+    const pick = ['answer', 'ACME-12', '--pick', '--by', 'agent-default'];
+    const release = holdStoreLock();
+    const busy = await flow(['answer', 'ACME-12', '--text', 'Hold it.'], {
+      tracker,
+      env: person(),
+    });
+    expect(busy.json.error).toMatchObject({ kind: 'busy' });
+    const whileBusy = await flow(pick, { tracker });
+    release();
+    const retry = await flow(pick, { tracker });
+    for (const refused of [whileBusy, retry]) {
+      expect(refused.code).toBe(EXIT.precondition);
+      expect(refused.json.error).not.toHaveProperty('kind');
+      expect(refused.stderr).toContain('only a person answers it');
+    }
+    expect(stored().question?.answer).toBeUndefined();
+    expect(comments(tracker)).toEqual([]);
+  });
+
+  // A new question takes the old one's place, and any answer still on it.
+  describe("flow ask over a person's answer nothing has used", () => {
+    const dropped = () =>
+      journalText()
+        .split('\n')
+        .filter((line) => line.includes('"answer.dropped"'));
+    const overAnswer = async (
+      answer: Record<string, unknown>,
+      fields: object = {},
+      during: () => () => void = () => () => {}
+    ) => {
+      writeRun({
+        stage: 'execute',
+        status: 'running',
+        question: floorQuestion({ floor: [], checkAfter: null, answer, ...fields }),
+      });
+      const tracker = new FakeTracker({ team: ACME_TEAM, items: [parkedItem()] });
+      const release = during();
+      const result = await flow(
+        [
+          'ask',
+          'ACME-12',
+          '--question',
+          'Which one?',
+          '--choice',
+          'A',
+          '--choice',
+          'B',
+          '--pick',
+          '1',
+          '--why',
+          'Safer.',
+        ],
+        { tracker }
+      );
+      release();
+      return result;
+    };
+    const at = '2026-09-26T11:40:00.000Z';
+
+    it('leaves one line for the person, without the words', async () => {
+      const result = await overAnswer({ text: 'Private words.', at, by: 'person' });
+      expect(result.code).toBe(EXIT.ok);
+      expect(stored().question?.answer).toBeUndefined();
+      expect(dropped()).toHaveLength(1);
+      expect(JSON.parse(dropped()[0])).toMatchObject({ item: 'ACME-12' });
+      expect(journalText()).not.toContain('Private words.');
+    });
+
+    it('leaves none when the store was busy, as nothing was dropped', async () => {
+      const result = await overAnswer({ text: 'No', at, by: 'person' }, {}, holdStoreLock);
+      expect(result.code).not.toBe(EXIT.ok);
+      expect(stored().question?.answer?.text).toBe('No');
+      expect(dropped()).toEqual([]);
+    });
+
+    it("leaves none for an agent's pick, or an answer already handed over", async () => {
+      await overAnswer({ text: 'Pick', at, by: 'agent-default' });
+      await overAnswer({ text: 'No', at, by: 'person' }, { answerHandedOverAt: at });
+      expect(dropped()).toEqual([]);
+    });
   });
 
   // Finding 10: the floor the deadline was promised on is the one the pick is

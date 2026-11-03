@@ -587,6 +587,42 @@ describe('getInbox (contract 3.0.0, DOR-3669)', () => {
   });
 });
 
+describe('getItem when the labels are not all there', () => {
+  /** A read of DOR-101 whose issue carries `labels`, or no labels field at all. */
+  const reading = (labels: unknown) =>
+    build(() => {
+      const node: Record<string, unknown> = { ...issueNode('DOR-101'), team: TEAM, labels };
+      if (labels === undefined) delete node.labels;
+      return okEnvelope({ issue: node });
+    }).adapter;
+  const many = (count: number) =>
+    Array.from({ length: count }, (_, i) => ({ id: `l${i}`, name: `label-${i}`, parent: null }));
+
+  // Purpose: an item with no agent/needs-input can cost a person's recorded answer,
+  // so "not told" must be a failed read, which every caller already waits on.
+  it.each<[string, unknown]>([
+    ['no labels field', undefined],
+    ['null labels', null],
+    ['null label nodes', { nodes: null }],
+    ['a full page, which may not be all of them', { nodes: many(100) }],
+  ])('throws on %s', async (_name, labels) => {
+    const error = await rejection(reading(labels).getItem('DOR-101'));
+    expect(error).toBeInstanceOf(TrackerError);
+    expect((error as Error).message).toMatch(/DOR-101/);
+  });
+
+  it('still reads an item with no labels, or a page that is not full', async () => {
+    expect((await reading({ nodes: [] }).getItem('DOR-101')).labels).toEqual([]);
+    expect((await reading({ nodes: many(99) }).getItem('DOR-101')).labels).toHaveLength(99);
+  });
+
+  // Purpose: the snapshot drops no answers, and one odd issue must not fail a whole backlog.
+  it('leaves normalizeIssue reading missing labels as a list, for the snapshot', () => {
+    const { labels: _none, ...node } = issueNode('DOR-101');
+    expect(linear.normalizeIssue(node as never, undefined, undefined)?.labels).toEqual([]);
+  });
+});
+
 describe('getCurrentUser and getItem', () => {
   it('reads the viewer', async () => {
     // Purpose: identity "auto" resolves to this account.

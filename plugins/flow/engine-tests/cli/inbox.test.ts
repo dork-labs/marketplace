@@ -15,7 +15,7 @@ import { realProcessRunner } from '../../scripts/cli/context.ts';
 import { releaseAnswer } from '../../scripts/cli/question-write.ts';
 import { EXIT } from '../../scripts/errors.ts';
 import { openFlowStateFile } from '../../scripts/flow-state-file.ts';
-import type { FakeBacklog } from '../../scripts/tracker/fake.ts';
+import { FakeTracker, type FakeBacklog } from '../../scripts/tracker/fake.ts';
 import { item, makeProject, runFlow, type WriteProject } from './write-harness.ts';
 
 let project: WriteProject;
@@ -271,6 +271,201 @@ describe('flow inbox', () => {
       expect(result.stderr).toContain('waits for the next pass');
       expect((result.json.entries as Entry[]).map((entry) => entry.body)).toEqual(['Use CSV.']);
       expect(answers((await runFlow(project, backlog(), ['inbox'])).json)).toHaveLength(1);
+    });
+
+    // DOR-3777: an answer belongs to the park it answered. Once the item has left
+    // that park, a later agent/needs-input is a new wait, and the old words are
+    // nobody's answer to it.
+    describe('an answer whose park ended', () => {
+      /** The parked backlog with FAKE-1's labels replaced. */
+      const relabelled = (labels: string[], fields: Record<string, unknown> = {}): FakeBacklog => {
+        const items = backlog().items.map((entry) =>
+          entry.identifier === 'FAKE-1' ? { ...entry, labels, ...fields } : entry
+        );
+        return { ...backlog(), items };
+      };
+      const moved = () => relabelled(['type/task', 'agent/claimed']);
+
+      it('drops it when the label is gone, so a later label resumes on nothing', async () => {
+        project.writeRuns(parkedRun({ text: 'No', at, by: 'person' }) as never);
+        const pass = await runFlow(project, moved(), ['inbox']);
+        expect(answers(pass.json)).toEqual([]);
+        expect(project.runs()['id-FAKE-1'].question).toBeUndefined();
+        expect(pass.stderr).toContain("FAKE-1's recorded answer was not used");
+        expect(answers((await runFlow(project, backlog(), ['inbox'])).json)).toEqual([]);
+      });
+
+      describe('the line the person hears about it from', () => {
+        const dropped = () => {
+          const file = path.join(project.dir, '.dork', 'flow', 'journal.jsonl');
+          return existsSync(file)
+            ? readFileSync(file, 'utf8')
+                .split('\n')
+                .filter((line) => line.includes('"answer.dropped"'))
+            : [];
+        };
+
+        it("is written once for a person's answer, without the words", async () => {
+          project.writeRuns(parkedRun({ text: 'Private words.', at, by: 'person' }) as never);
+          await runFlow(project, moved(), ['inbox']);
+          await runFlow(project, moved(), ['inbox']);
+          expect(dropped()).toHaveLength(1);
+          expect(JSON.parse(dropped()[0])).toMatchObject({ item: 'FAKE-1' });
+          expect(dropped()[0]).not.toContain('Private words.');
+        });
+
+        it("is not written for an agent's pick", async () => {
+          project.writeRuns(parkedRun({ text: 'Pick', at, by: 'agent-default' }, []) as never);
+          await runFlow(project, moved(), ['inbox']);
+          expect(project.runs()['id-FAKE-1'].question).toBeUndefined();
+          expect(dropped()).toEqual([]);
+        });
+
+        it('is not written on a dry run', async () => {
+          project.writeRuns(parkedRun({ text: 'No', at, by: 'person' }) as never);
+          await runFlow(project, moved(), ['inbox', '--dry-run']);
+          expect(dropped()).toEqual([]);
+        });
+
+        it('is not written for an answer that was never dropped', async () => {
+          project.writeRuns(parkedRun({ text: 'No', at, by: 'person' }) as never);
+          await runFlow(project, backlog(), ['inbox']);
+          expect(dropped()).toEqual([]);
+        });
+      });
+
+      it('drops it when the item closed', async () => {
+        project.writeRuns(parkedRun({ text: 'No', at, by: 'person' }) as never);
+        const closed = relabelled(['type/task', 'agent/needs-input'], {
+          stateCategory: 'completed',
+        });
+        await runFlow(project, closed, ['inbox']);
+        expect(project.runs()['id-FAKE-1'].question).toBeUndefined();
+      });
+
+      it('leaves a question another park asked since this pass read it', async () => {
+        project.writeRuns(parkedRun({ text: 'No', at, by: 'person' }) as never);
+        const tracker = new FakeTracker(moved());
+        const getItem = tracker.adapter.getItem.bind(tracker.adapter);
+        const fresh = '2026-09-26T11:45:00.000Z';
+        tracker.adapter.getItem = async (...args: Parameters<typeof getItem>) => {
+          const run = project.runs()['id-FAKE-1'];
+          project.writeRuns({
+            'id-FAKE-1': { ...run, question: { ...run.question!, askedAt: fresh } },
+          });
+          return getItem(...args);
+        };
+        const pass = await runFlow(project, tracker, ['inbox']);
+        expect(project.runs()['id-FAKE-1'].question?.askedAt).toBe(fresh);
+        expect(pass.stderr).not.toContain('was not used');
+      });
+
+      it('leaves a question whose answer was given back since this pass read it', async () => {
+        project.writeRuns(parkedRun({ text: 'No', at, by: 'person' }) as never);
+        const tracker = new FakeTracker(moved());
+        const getItem = tracker.adapter.getItem.bind(tracker.adapter);
+        tracker.adapter.getItem = async (...args: Parameters<typeof getItem>) => {
+          const run = project.runs()['id-FAKE-1'];
+          const { answer: _old, ...question } = run.question!;
+          project.writeRuns({ 'id-FAKE-1': { ...run, question } });
+          return getItem(...args);
+        };
+        const pass = await runFlow(project, tracker, ['inbox']);
+        expect(project.runs()['id-FAKE-1'].question).toBeDefined();
+        expect(pass.stderr).not.toContain('was not used');
+      });
+
+      it('changes nothing on a dry run or a --since pass', async () => {
+        project.writeRuns(parkedRun({ text: 'No', at, by: 'person' }) as never);
+        await runFlow(project, moved(), ['inbox', '--dry-run']);
+        await runFlow(project, moved(), ['inbox', '--since', at]);
+        expect(project.runs()['id-FAKE-1'].question?.answer?.text).toBe('No');
+      });
+
+      it('keeps it when the item could not be read', async () => {
+        project.writeRuns(parkedRun({ text: 'No', at, by: 'person' }) as never);
+        const tracker = new FakeTracker(moved());
+        tracker.adapter.getItem = async () => {
+          throw new Error('offline');
+        };
+        const pass = await runFlow(project, tracker, ['inbox']);
+        expect(project.runs()['id-FAKE-1'].question?.answer?.text).toBe('No');
+        expect(pass.stderr).toContain('could not read FAKE-1');
+      });
+
+      it('says nothing it did not do on a busy store, and tries again next pass', async () => {
+        project.writeRuns(parkedRun({ text: 'No', at, by: 'person' }) as never);
+        const lock = `${openFlowStateFile(project.dir).path}.lock`;
+        writeFileSync(lock, JSON.stringify({ pid: process.pid, at: Date.now() }));
+        const pass = await runFlow(project, moved(), ['inbox']);
+        rmSync(lock, { force: true });
+        expect(pass.code).toBe(EXIT.ok);
+        expect(pass.stderr).not.toContain('was not used');
+        expect(project.runs()['id-FAKE-1'].question?.answer?.text).toBe('No');
+        await runFlow(project, moved(), ['inbox']);
+        expect(project.runs()['id-FAKE-1'].question).toBeUndefined();
+      });
+
+      // The person rule goes first: a dropped answer says so, as it always did.
+      it('still drops a non-person answer to a spend question with its own warning', async () => {
+        project.writeRuns(parkedRun({ text: 'Yes', at, by: 'agent-default' }) as never);
+        const pass = await runFlow(project, moved(), ['inbox']);
+        expect(pass.stderr).toContain('FAKE-1 stays parked');
+        expect(pass.stderr).not.toContain('was not used');
+        expect(answers(pass.json)).toEqual([]);
+      });
+
+      it('leaves an answer another pass handed over since this one read it', async () => {
+        project.writeRuns(parkedRun({ text: 'No', at, by: 'person' }) as never);
+        const tracker = new FakeTracker(moved());
+        const getItem = tracker.adapter.getItem.bind(tracker.adapter);
+        tracker.adapter.getItem = async (...args: Parameters<typeof getItem>) => {
+          const run = project.runs()['id-FAKE-1'];
+          project.writeRuns({
+            'id-FAKE-1': { ...run, question: { ...run.question!, answerHandedOverAt: at } },
+          });
+          return getItem(...args);
+        };
+        const pass = await runFlow(project, tracker, ['inbox']);
+        expect(project.runs()['id-FAKE-1'].question?.answer?.text).toBe('No');
+        expect(pass.stderr).not.toContain('was not used');
+      });
+
+      it('leaves an answer already handed over, so a second one is still refused', async () => {
+        project.writeRuns(parkedRun({ text: 'No', at, by: 'person' }) as never);
+        await runFlow(project, backlog(), ['inbox']);
+        await runFlow(project, moved(), ['inbox']);
+        expect(project.runs()['id-FAKE-1'].question?.answer?.text).toBe('No');
+      });
+
+      it('leaves a run the drain owns to the drain', async () => {
+        const runs = parkedRun({ text: 'No', at, by: 'person' });
+        project.writeRuns({
+          'id-FAKE-1': {
+            ...runs['id-FAKE-1'],
+            drain: {
+              v: 1,
+              rev: 1,
+              phase: 'parked',
+              worker: null,
+              reviewer: null,
+              pushedSha: null,
+              reviewedSha: null,
+              verdict: null,
+              reviewRound: 1,
+              pr: null,
+              rearmedFor: null,
+              nudges: 0,
+              wakeAfter: null,
+              handoffs: [],
+              parkedReason: 'x',
+            },
+          },
+        } as never);
+        const pass = await runFlow(project, moved(), ['inbox']);
+        expect(pass.code).toBe(EXIT.ok);
+        expect(project.runs()['id-FAKE-1'].question?.answer?.text).toBe('No');
+      });
     });
 
     it('marks nothing on a dry run, so the real pass still hands it over', async () => {

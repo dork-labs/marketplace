@@ -66,6 +66,7 @@ export const JOURNAL_KINDS = [
   'review',
   'review.approved',
   'person.act',
+  'answer.dropped',
   'ci',
   'handoff',
   'note',

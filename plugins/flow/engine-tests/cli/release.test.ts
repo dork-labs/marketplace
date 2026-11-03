@@ -3,6 +3,9 @@
  * goes, where it resumes, and what happens to its run record and the thread.
  */
 
+import { existsSync, readFileSync } from 'node:fs';
+import path from 'node:path';
+
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
 import { EXIT } from '../../scripts/errors.ts';
@@ -82,6 +85,50 @@ describe('flow release --to ready', () => {
       'specify',
     ]);
     expect(result.tracker.writes[0]).toMatchObject({ change: { stageLabel: 'stage/specify' } });
+  });
+});
+
+describe('flow release over an answer nothing has used', () => {
+  const withAnswer = (answer: object, fields: object = {}) => ({
+    'id-FAKE-1': {
+      ...runAt('execute')['id-FAKE-1'],
+      question: {
+        text: 'Keep it?',
+        choices: [{ id: 'c1', label: 'Yes' }],
+        pick: 'c1',
+        why: 'Cheaper.',
+        askedAt: '2026-09-26T11:00:00.000Z',
+        decideBy: null,
+        floor: [],
+        answeredBy: 'person',
+        checkAfter: null,
+        answer: { text: 'Private words.', at: '2026-09-26T11:30:00.000Z', ...answer },
+        ...fields,
+      },
+    },
+  });
+  const journal = () => {
+    const file = path.join(project.dir, '.dork', 'flow', 'journal.jsonl');
+    return existsSync(file) ? readFileSync(file, 'utf8') : '';
+  };
+
+  it("leaves one line for a person's, without the words", async () => {
+    project.writeRuns(withAnswer({ by: 'person' }) as never);
+    await runFlow(project, { items: [claimed()] }, ['release', 'FAKE-1']);
+    expect(journal()).toContain('"answer.dropped"');
+    expect(journal()).not.toContain('Private words.');
+  });
+
+  it("leaves none for an agent's pick, one handed over, or a dry run", async () => {
+    project.writeRuns(withAnswer({ by: 'agent-default' }) as never);
+    await runFlow(project, { items: [claimed()] }, ['release', 'FAKE-1']);
+    project.writeRuns(
+      withAnswer({ by: 'person' }, { answerHandedOverAt: '2026-09-26T11:40:00.000Z' }) as never
+    );
+    await runFlow(project, { items: [claimed()] }, ['release', 'FAKE-1']);
+    project.writeRuns(withAnswer({ by: 'person' }) as never);
+    await runFlow(project, { items: [claimed()] }, ['release', 'FAKE-1', '--dry-run']);
+    expect(journal()).not.toContain('"answer.dropped"');
   });
 });
 

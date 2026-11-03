@@ -51,7 +51,9 @@ import {
   requireOpen,
   sessionProvenance,
   setupWrite,
+  runFor,
 } from './work-write.ts';
+import { dropEndedQuestion, noteDroppedAnswer } from './question-write.ts';
 
 /** How many of the latest comments are read to spot a retried question. */
 const RECENT_COMMENTS = 10;
@@ -85,7 +87,7 @@ export async function run(ctx: VerbContext): Promise<VerbResult> {
   const park = question?.text.trim();
   if (park === '') throw new UsageError('the question to park on is empty');
 
-  const { loaded, stages, adapter } = await setupWrite(
+  const { loaded, stages, adapter, store } = await setupWrite(
     ctx,
     ready ? ['getItem', 'applyWorkState'] : ['getItem', 'applyWorkState', 'comment']
   );
@@ -101,6 +103,15 @@ export async function run(ctx: VerbContext): Promise<VerbResult> {
     : projectionFor({ type: 'needs-input' }, { stages });
   // Before the question is posted, so a refused park writes nothing at all.
   requireNotFromOutside(item, change);
+  // A new park on its own question: an answer left on the run belongs to no park,
+  // and must not resume this one (DOR-3777). The drain keeps its own.
+  if (!ready && !ctx.dryRun && !item.labels.includes(AGENT_NEEDS_INPUT)) {
+    const left = runFor(store, item);
+    if (left?.question?.answer !== undefined && left.drain === undefined) {
+      const by = await dropEndedQuestion(store, left.issueId, left.question.askedAt);
+      noteDroppedAnswer(ctx, left.identifier, by);
+    }
+  }
 
   let commented = false;
   if (park !== undefined) {

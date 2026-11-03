@@ -19,7 +19,7 @@ import os from 'node:os';
 
 import { findConfigRoots } from '../config-files.ts';
 import { loadConfig, type LoadedConfig } from '../config-load.ts';
-import { ConfigError, PreconditionError } from '../errors.ts';
+import { BusyError, ConfigError, PreconditionError } from '../errors.ts';
 import type { FlowRun, FlowRunProvenance, FlowStage } from '../flow-run.ts';
 import { openFlowStateFile, type FlowStateFile } from '../flow-state-file.ts';
 import { FlowStateSchema } from '../flow-state.ts';
@@ -253,7 +253,7 @@ export function requireOpen(item: WorkItem, verb: string): void {
  */
 export function requireStored(status: string, file: string, recovery: string): void {
   if (status === 'dropped') {
-    throw new PreconditionError(
+    throw new BusyError(
       `the tracker was updated, but ${file} stayed locked by another flow command, so the run record was not saved; ${recovery}`
     );
   }

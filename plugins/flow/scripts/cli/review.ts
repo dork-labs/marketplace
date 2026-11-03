@@ -51,7 +51,7 @@ import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 
 import { stopInForce } from '../autonomy.ts';
-import { ConfigError, PreconditionError, UsageError } from '../errors.ts';
+import { BusyError, ConfigError, PreconditionError, UsageError } from '../errors.ts';
 import type { FlowRun, RunShipWait } from '../flow-run.ts';
 import { openFlowStateFile, type FlowStateFile } from '../flow-state-file.ts';
 import { ForgeError, type Forge, type ReviewOutcome } from '../forge/types.ts';
@@ -649,7 +649,7 @@ async function review(ctx: VerbContext): Promise<VerbResult> {
       if (savedWait !== undefined && !(await setShipWait(store, existing.issueId, undefined))) {
         const why = `${store.path} stayed locked by another flow command`;
         if (by === 'person') {
-          throw new PreconditionError(`${why}, so nothing was posted; run the same command again`);
+          throw new BusyError(`${why}, so nothing was posted; run the same command again`);
         }
         return pendingResult(ctx, identifier, pr, {
           kind: 'pending',

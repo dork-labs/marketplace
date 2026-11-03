@@ -4,6 +4,19 @@ Installs of this plugin are pinned to a commit SHA, so a fix here does not reach
 you until you **reinstall it** (Marketplace → flow → reinstall, or re-run your
 `--plugin-dir` checkout's `git pull`). Each entry below says whether that matters.
 
+## 0.89.0
+
+**An answer you give in DorkOS that flow couldn't record no longer looks recorded (DOR-3775), and flow's inbox pass is less likely to resume an item on an answer left over from an earlier wait (DOR-3777). Nothing here lets an agent's answer through. Reinstall to get it.**
+
+- If another flow command was writing at the moment you answered, the row used to clear and say "This was already answered on the tracker", though nothing was recorded. Now the row stays and says to try again, and trying again records it, and a deadline on the question still stands unless the answer took long enough to show "Sending…". At a question's deadline, the row stays and DorkOS tries the agent's pick again a little later.
+- A row now clears only when flow says the question needs no answer now: someone answered, the item stopped waiting, or the item is gone or moved to another team. Any other refusal keeps the row and says why, and DorkOS then no longer takes the agent's pick at that row's deadline. A deadline whose pick flow refuses no longer marks the question answered.
+- `flow review` never cleared a row this way. If it meets the same busy moment, the row now says to try again instead of "Flow didn't ship it" with a file path. If your note or approval was already posted, trying again posts it a second time.
+- `--json` names these refusals with `kind`: `busy`, `settled` when someone answered, and `not-waiting` for the others. The exit code is still 5.
+- If an item stops waiting while a recorded answer hasn't been handed over, `flow inbox` now drops the answer and warns, so a later `agent/needs-input` doesn't resume on old words. `flow triage --park` drops such an answer too. Flow notices this only when a pass sees the item not waiting.
+- When an answer dropped that way, replaced by a new `flow ask`, or lost to `flow claim` or `flow release`, was a person's and nothing had used it, DorkOS now shows them a "Your answer wasn't used" row, unread in Activity, without their words. It needs flow's journal, which is on unless you turned it off. An agent's pick gets no row.
+- On Linear, reading one item now fails if Linear leaves out its labels or returns a full page of 100, so a recorded answer waits instead of dropping and an answer row stays. Flow can't work an item with 100 or more labels until some come off. The adapter contract says the same from 3.0.2.
+- `flow answer --text` on a run the drain doesn't own, with no open question, now refuses and posts nothing. It used to post your words and say the work goes on, though nothing would resume on them. Reply on the item instead.
+
 ## 0.88.0
 
 **A drain run no longer stops to "fix CI" because Security hasn't looked yet (DOR-3756), and flow now reads `security-deep-reviewed` on `review:deep` PRs (DOR-3766). The one way this arms sooner is that an old red run of a Security check no longer holds the drain's arm once a later run succeeded; the arm guard still decides, and everything else here only makes flow wait longer. Reinstall to get it.**

@@ -6,7 +6,7 @@
  * fake adapter, and asserts the exact `applyWorkState` calls.
  */
 
-import { writeFileSync } from 'node:fs';
+import { existsSync, readFileSync, writeFileSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
@@ -272,6 +272,59 @@ describe('flow claim writes the claim projection and records the run', () => {
     });
     expect(code).toBe(EXIT.ok);
     expect(out).toBe(`Claimed FAKE-1 at stage execute (worker ${FAKE_PPID}, work).\n`);
+  });
+});
+
+describe('flow claim over an answer nothing has used', () => {
+  const left = (answer: object, fields: object = {}) => ({
+    'id-FAKE-1': {
+      issueId: 'id-FAKE-1',
+      identifier: 'FAKE-1',
+      sessionId: 'session-old',
+      worktreePath: project.dir,
+      branch: 'work',
+      stage: 'execute',
+      status: 'running',
+      attemptCount: 0,
+      workerPid: 1,
+      startedAt: '2026-09-26T10:00:00.000Z',
+      question: {
+        text: 'Keep it?',
+        choices: [{ id: 'c1', label: 'Yes' }],
+        pick: 'c1',
+        why: 'Cheaper.',
+        askedAt: '2026-09-26T11:00:00.000Z',
+        decideBy: null,
+        floor: [],
+        answeredBy: 'person',
+        checkAfter: null,
+        answer: { text: 'Private words.', at: '2026-09-26T11:30:00.000Z', ...answer },
+        ...fields,
+      },
+    },
+  });
+  const journal = () => {
+    const file = path.join(project.dir, '.dork', 'flow', 'journal.jsonl');
+    return existsSync(file) ? readFileSync(file, 'utf8') : '';
+  };
+  const claim = () => runFlow(project, { items: [item('FAKE-1')] }, ['claim', 'FAKE-1']);
+
+  it("leaves one line for a person's, without the words", async () => {
+    project.writeRuns(left({ by: 'person' }) as never);
+    expect((await claim()).code).toBe(EXIT.ok);
+    expect(project.runs()['id-FAKE-1'].question).toBeUndefined();
+    expect(journal()).toContain('"answer.dropped"');
+    expect(journal()).not.toContain('Private words.');
+  });
+
+  it("leaves none for an agent's pick, or one handed over", async () => {
+    project.writeRuns(left({ by: 'agent-default' }) as never);
+    await claim();
+    project.writeRuns(
+      left({ by: 'person' }, { answerHandedOverAt: '2026-09-26T11:40:00.000Z' }) as never
+    );
+    await claim();
+    expect(journal()).not.toContain('"answer.dropped"');
   });
 });
 

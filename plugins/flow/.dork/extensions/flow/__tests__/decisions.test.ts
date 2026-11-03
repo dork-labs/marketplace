@@ -14,12 +14,23 @@ import os from 'node:os';
 import path from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { AutonomyKind, AutonomyStop } from '../../../../scripts/autonomy.ts';
+import { realProcessRunner } from '../../../../scripts/cli/context.ts';
 import { PARK_REASONS } from '../../../../scripts/drain/drain-step.ts';
+import { main } from '../../../../scripts/flow.ts';
+import { FakeTracker } from '../../../../scripts/tracker/fake.ts';
+import {
+  AGENT_USER,
+  item,
+  makeProject,
+  type WriteProject,
+} from '../../../../engine-tests/cli/write-harness.ts';
 import type { ExecFileLike } from '../lib/advisor.ts';
 import { FIX_IT_ANSWER, type AskProject } from '../lib/asks.ts';
 import type { AutonomyStore } from '../lib/autonomy-store.ts';
 import {
   ANSWER_IN_INBOX_TEXT,
+  BUSY_ANSWER_TEXT,
+  BUSY_REVIEW_TEXT,
   armMessage,
   CHANGED_TEXT,
   CHECKS_FAILED_REASON,
@@ -27,6 +38,7 @@ import {
   DecisionCoordinator,
   SENDING_TEXT,
   SEND_FAILED_TEXT,
+  SETTLED_TEXT,
   SORT_QUIET_MS,
   type PlanProject,
 } from '../lib/decisions.ts';
@@ -918,7 +930,11 @@ describe('answering', () => {
 
   it('settles quietly when the question was answered elsewhere first', async () => {
     const qkey = 'question:3f2a00000000:DOR-2401';
-    const deadline = setup({ stops: { questions: 'tell' }, cli: fakeCli(() => ({ code: 5 })) });
+    const settled = () => ({
+      code: 5,
+      json: { ok: false, error: { code: 5, kind: 'settled', message: 'already answered' } },
+    });
+    const deadline = setup({ stops: { questions: 'tell' }, cli: fakeCli(settled) });
     await deadline.coordinator.sync([plan({ a: questionRun() })]);
     expect(
       await deadline.coordinator.handle(event(qkey, { action: 'choice', decidedBy: 'deadline' }))
@@ -929,15 +945,514 @@ describe('answering', () => {
       key: qkey,
       opts: { outcome: 'answered', by: { kind: 'deadline' } },
     });
-    const person = setup({ stops: { questions: 'tell' }, cli: fakeCli(() => ({ code: 5 })) });
+    const person = setup({ stops: { questions: 'tell' }, cli: fakeCli(settled) });
     await person.coordinator.sync([plan({ a: questionRun() })]);
     expect(
       await person.coordinator.handle(event(qkey, { action: 'choice', choiceId: 'c1' }))
     ).toEqual({
       keepOpen: true,
-      message: 'This was already answered on the tracker.',
+      message: SETTLED_TEXT,
     });
     expect(person.inbox?.resolved.at(-1)).toEqual({ key: qkey, opts: { outcome: 'cleared' } });
+  });
+
+  // DOR-3775: only a refusal that says someone answered may clear the row. Any
+  // other, or none that can be read, keeps it: a person's answer that wasn't
+  // recorded must not look recorded.
+  describe('a refusal that does not say someone answered', () => {
+    const qkey = 'question:3f2a00000000:DOR-2401';
+    const choice = { action: 'choice', choiceId: 'c1' } as const;
+    const refusal = (kind?: string, message = 'DOR-2401 has no open question') => ({
+      code: 5,
+      json: { ok: false, error: { code: 5, ...(kind === undefined ? {} : { kind }), message } },
+    });
+
+    it("keeps a person's row and says why", async () => {
+      const { coordinator, inbox } = setup({
+        stops: { questions: 'tell' },
+        cli: fakeCli(() => refusal()),
+      });
+      await coordinator.sync([plan({ a: questionRun() })]);
+      expect(await coordinator.handle(event(qkey, choice))).toEqual({
+        keepOpen: true,
+        message: "Flow didn't record this: DOR-2401 has no open question",
+      });
+      expect(inbox?.resolved).toEqual([]);
+      expect(inbox?.open.has(qkey)).toBe(true);
+    });
+
+    it('keeps the row when the output cannot be read', async () => {
+      const { coordinator, inbox } = setup({
+        stops: { questions: 'tell' },
+        cli: fakeCli(() => ({ code: 5 })),
+      });
+      await coordinator.sync([plan({ a: questionRun() })]);
+      expect(await coordinator.handle(event(qkey, choice))).toEqual({
+        keepOpen: true,
+        message: SEND_FAILED_TEXT,
+      });
+      expect(inbox?.resolved).toEqual([]);
+    });
+
+    it('keeps the row at a deadline, without calling it answered', async () => {
+      const { coordinator, inbox } = setup({
+        stops: { questions: 'tell' },
+        cli: fakeCli(() => refusal(undefined, 'its pick cannot stand yet')),
+      });
+      await coordinator.sync([plan({ a: questionRun() })]);
+      expect(
+        await coordinator.handle(event(qkey, { action: 'choice', decidedBy: 'deadline' }))
+      ).toEqual({ keepOpen: true });
+      expect(inbox?.resolved).toEqual([]);
+      expect(inbox?.open.has(qkey)).toBe(true);
+    });
+
+    it.each<[string, string, Record<string, unknown>, object, string]>([
+      ['question', qkey, questionRun({ decideBy: null }), choice, BUSY_ANSWER_TEXT],
+      [
+        'review',
+        'review:3f2a00000000:DOR-2387',
+        gateRun(),
+        { action: 'approve' },
+        BUSY_REVIEW_TEXT,
+      ],
+    ])(
+      'says to try again when the store is busy on a %s',
+      async (_kind, key, run, action, text) => {
+        const { coordinator, inbox } = setup({
+          stops: { questions: 'tell' },
+          cli: fakeCli(() => refusal('busy', '/secret/path stayed locked')),
+        });
+        await coordinator.sync([plan({ a: run })]);
+        const result = await coordinator.handle(event(key, action as never));
+        expect(result).toEqual({ keepOpen: true, message: text });
+        expect(text).toContain('Try again');
+        expect(JSON.stringify(result)).not.toContain('/secret/path');
+        expect(inbox?.resolved).toEqual([]);
+        expect(inbox?.open.has(key)).toBe(true);
+      }
+    );
+
+    // Core marks a deadline answered on any answer that returns, keep-open included,
+    // so only a failed call leaves it standing; core then says to try again.
+    it('fails the call when a person meets a busy store on a question with a deadline', async () => {
+      const { coordinator, inbox, log } = setup({
+        stops: { questions: 'tell' },
+        cli: fakeCli(() => refusal('busy', 'the store stayed locked')),
+      });
+      await coordinator.sync([plan({ a: questionRun() })]);
+      await expect(coordinator.handle(event(qkey, choice))).rejects.toThrow(qkey);
+      expect(inbox?.resolved).toEqual([]);
+      expect(inbox?.open.has(qkey)).toBe(true);
+      expect(log).toHaveBeenCalledWith(expect.stringContaining('the store stayed locked'));
+    });
+
+    // A spend has no deadline to retry at: a deadline call after a person's busy
+    // click runs no pick and marks nothing answered.
+    it("takes no pick on a spend at a deadline call after a person's busy click", async () => {
+      const cli = fakeCli(() => refusal('busy', 'the store stayed locked'));
+      const { coordinator, inbox } = setup({ stops: { questions: 'tell' }, cli });
+      await coordinator.sync([
+        plan({
+          a: questionRun({
+            floor: ['secrets-or-spend'],
+            decideBy: '2026-09-28T17:00:00.000Z',
+          }),
+        }),
+      ]);
+      expect(await coordinator.handle(event(qkey, choice))).toEqual({
+        keepOpen: true,
+        message: BUSY_ANSWER_TEXT,
+      });
+      const deadline = event(qkey, { action: 'choice', decidedBy: 'deadline' });
+      expect(await coordinator.handle(deadline)).toEqual({ keepOpen: true });
+      expect(await coordinator.handle(deadline)).toEqual({ keepOpen: true });
+      expect(cli.calls).toHaveLength(1);
+      expect(JSON.stringify(cli.calls)).not.toContain('--pick');
+      expect(inbox?.resolved).toEqual([]);
+      expect(inbox?.open.has(qkey)).toBe(true);
+    });
+
+    // A slow answer already said "Sending…", so the row itself has to say it.
+    it('says on the row that a slow answer met a busy store', async () => {
+      vi.useFakeTimers();
+      const { coordinator, inbox } = setup({
+        stops: { questions: 'tell' },
+        cli: fakeCli(() => ({ ...refusal('busy'), delayMs: 3_000 })),
+        answerWaitMs: 1_000,
+      });
+      await coordinator.sync([plan({ a: questionRun() })]);
+      const raised = inbox?.raised.length ?? 0;
+      const answer = coordinator.handle(event(qkey, choice));
+      await vi.advanceTimersByTimeAsync(1_000);
+      expect(await answer).toEqual({ keepOpen: true, message: SENDING_TEXT });
+      await vi.advanceTimersByTimeAsync(2_500);
+      expect(inbox?.raised.length).toBe(raised + 1);
+      expect(inbox?.resolved).toEqual([]);
+    });
+
+    it('says on the row that a slow review met a busy store', async () => {
+      vi.useFakeTimers();
+      const { coordinator, inbox } = setup({
+        cli: fakeCli(() => ({ ...refusal('busy'), delayMs: 3_000 })),
+        answerWaitMs: 1_000,
+      });
+      await coordinator.sync([plan({ a: gateRun() })]);
+      const raised = inbox?.raised.length ?? 0;
+      const answer = coordinator.handle(event('review:3f2a00000000:DOR-2387'));
+      await vi.advanceTimersByTimeAsync(1_000);
+      await answer;
+      await vi.advanceTimersByTimeAsync(2_500);
+      expect(inbox?.raised.length).toBe(raised + 1);
+    });
+
+    // Past the wait the verb may yet meet the lock, and core keeps no deadline it
+    // was told to keep open, so the call fails and core asks again.
+    it('fails a slow deadline call, leaves the row alone, and answers the next call', async () => {
+      vi.useFakeTimers();
+      const cli = fakeCli(() => ({ ...refusal('busy'), delayMs: 3_000 }));
+      const { coordinator, inbox } = setup({
+        stops: { questions: 'tell' },
+        cli,
+        answerWaitMs: 1_000,
+      });
+      await coordinator.sync([plan({ a: questionRun() })]);
+      const raised = inbox?.raised.length ?? 0;
+      const deadline = event(qkey, { action: 'choice', decidedBy: 'deadline' });
+      const first = coordinator.handle(deadline);
+      const failed = expect(first).rejects.toThrow();
+      await vi.advanceTimersByTimeAsync(1_000);
+      await failed;
+      // Still running: a second call neither starts another nor keeps the row open.
+      await expect(coordinator.handle(deadline)).rejects.toThrow();
+      expect(cli.calls).toHaveLength(1);
+      await vi.advanceTimersByTimeAsync(2_500);
+      expect(inbox?.raised.length).toBe(raised);
+      expect(inbox?.resolved).toEqual([]);
+      const third = coordinator.handle(deadline);
+      const refused = expect(third).rejects.toThrow();
+      await vi.advanceTimersByTimeAsync(1_000);
+      await refused;
+      expect(cli.calls).toHaveLength(2);
+    });
+
+    // The pick is running, so "Sending…" would be untrue of the person's words.
+    it("fails a person's answer while a slow deadline call is running", async () => {
+      vi.useFakeTimers();
+      const { coordinator } = setup({
+        stops: { questions: 'tell' },
+        cli: fakeCli(() => ({ code: 0, delayMs: 3_000 })),
+        answerWaitMs: 1_000,
+      });
+      await coordinator.sync([plan({ a: questionRun() })]);
+      const first = coordinator.handle(event(qkey, { action: 'choice', decidedBy: 'deadline' }));
+      const failed = expect(first).rejects.toThrow();
+      await vi.advanceTimersByTimeAsync(1_000);
+      await failed;
+      await expect(coordinator.handle(event(qkey, choice))).rejects.toThrow();
+      await vi.advanceTimersByTimeAsync(2_500);
+    });
+
+    it("still says Sending to a person's second click on their own slow answer", async () => {
+      vi.useFakeTimers();
+      const { coordinator } = setup({
+        stops: { questions: 'tell' },
+        cli: fakeCli(() => ({ code: 0, delayMs: 3_000 })),
+        answerWaitMs: 1_000,
+      });
+      await coordinator.sync([plan({ a: questionRun() })]);
+      const first = coordinator.handle(event(qkey, choice));
+      await vi.advanceTimersByTimeAsync(1_000);
+      expect(await first).toEqual({ keepOpen: true, message: SENDING_TEXT });
+      expect(await coordinator.handle(event(qkey, choice))).toEqual({
+        keepOpen: true,
+        message: SENDING_TEXT,
+      });
+      await vi.advanceTimersByTimeAsync(2_500);
+    });
+
+    it("fails a deadline call while a person's slow answer is running", async () => {
+      vi.useFakeTimers();
+      const { coordinator } = setup({
+        stops: { questions: 'tell' },
+        cli: fakeCli(() => ({ code: 0, delayMs: 3_000 })),
+        answerWaitMs: 1_000,
+      });
+      await coordinator.sync([plan({ a: questionRun() })]);
+      const first = coordinator.handle(event(qkey, choice));
+      await vi.advanceTimersByTimeAsync(1_000);
+      await first;
+      await expect(
+        coordinator.handle(event(qkey, { action: 'choice', decidedBy: 'deadline' }))
+      ).rejects.toThrow();
+      await vi.advanceTimersByTimeAsync(2_500);
+    });
+
+    it('credits a slow pick that stood to the deadline', async () => {
+      vi.useFakeTimers();
+      const { coordinator, inbox } = setup({
+        stops: { questions: 'tell' },
+        cli: fakeCli(() => ({ code: 0, delayMs: 3_000 })),
+        answerWaitMs: 1_000,
+      });
+      await coordinator.sync([plan({ a: questionRun() })]);
+      const first = coordinator.handle(
+        event(qkey, { action: 'choice', decidedBy: 'deadline', pendingActionId: null })
+      );
+      const failed = expect(first).rejects.toThrow();
+      await vi.advanceTimersByTimeAsync(1_000);
+      await failed;
+      await vi.advanceTimersByTimeAsync(2_500);
+      expect(inbox?.resolved.at(-1)).toEqual({
+        key: qkey,
+        opts: { outcome: 'answered', by: { kind: 'deadline' } },
+      });
+    });
+
+    it('clears a row at a deadline without calling it answered when nobody answered', async () => {
+      const { coordinator, inbox } = setup({
+        stops: { questions: 'tell' },
+        cli: fakeCli(() => refusal('not-waiting', 'DOR-2401 was not found')),
+      });
+      await coordinator.sync([plan({ a: questionRun() })]);
+      expect(
+        await coordinator.handle(event(qkey, { action: 'choice', decidedBy: 'deadline' }))
+      ).toEqual({ settled: true });
+      expect(inbox?.resolved.at(-1)).toEqual({ key: qkey, opts: { outcome: 'cleared' } });
+    });
+
+    it("clears a person's row when the item stopped waiting, saying it wasn't recorded", async () => {
+      const { coordinator, inbox } = setup({
+        stops: { questions: 'tell' },
+        cli: fakeCli(() => refusal('not-waiting', 'DOR-2401 was not found')),
+      });
+      await coordinator.sync([plan({ a: questionRun() })]);
+      expect(await coordinator.handle(event(qkey, choice))).toEqual({
+        keepOpen: true,
+        message: SETTLED_TEXT,
+      });
+      expect(inbox?.resolved.at(-1)).toEqual({ key: qkey, opts: { outcome: 'cleared' } });
+    });
+
+    it("keeps a retry row: 'settled' clears only a question", async () => {
+      const retry = {
+        identifier: 'DOR-2410',
+        status: 'running',
+        drain: { v: 1, phase: 'parked', parkedReason: CHECKS_FAILED_REASON, parkedAt: 'p1' },
+      };
+      const { coordinator, inbox } = setup({
+        stops: { retry: 'ask' },
+        cli: fakeCli(() => refusal('settled', 'already answered')),
+      });
+      await coordinator.sync([plan({ a: retry })]);
+      expect(await coordinator.handle(event('retry:3f2a00000000:DOR-2410'))).toEqual({
+        keepOpen: true,
+        message: SEND_FAILED_TEXT,
+      });
+      expect(inbox?.resolved).toEqual([]);
+    });
+
+    it('says on the row that a slow answer was refused for another reason', async () => {
+      vi.useFakeTimers();
+      const { coordinator, inbox } = setup({
+        stops: { questions: 'tell' },
+        cli: fakeCli(() => ({ ...refusal(), delayMs: 3_000 })),
+        answerWaitMs: 1_000,
+      });
+      await coordinator.sync([plan({ a: questionRun() })]);
+      const raised = inbox?.raised.length ?? 0;
+      const answer = coordinator.handle(event(qkey, choice));
+      await vi.advanceTimersByTimeAsync(1_000);
+      await answer;
+      await vi.advanceTimersByTimeAsync(2_500);
+      expect(inbox?.raised.length).toBe(raised + 1);
+    });
+  });
+
+  // DOR-3775, from the click to the row through the real `flow answer`, with the
+  // real store's lock held as another flow command holds it.
+  describe('a held lock, through the real verb', () => {
+    let project: WriteProject;
+    const lockFile = () => path.join(project.dir, '.dork', 'flow', 'flow-state.json.lock');
+    const hold = () =>
+      writeFileSync(lockFile(), JSON.stringify({ pid: process.pid, at: Date.now() }));
+    const release = () => rmSync(lockFile(), { force: true });
+    const ASKED = '2026-09-28T09:00:00.000Z';
+    const question = {
+      text: 'Should the old API keep working?',
+      choices: [
+        { id: 'c1', label: 'Keep it' },
+        { id: 'c2', label: 'Remove it' },
+      ],
+      pick: 'c1',
+      why: "It's changing how sessions load.",
+      askedAt: ASKED,
+      decideBy: '2026-09-28T17:00:00.000Z',
+      floor: [] as string[],
+      answeredBy: 'person',
+      checkAfter: null,
+    };
+    let tracker: FakeTracker;
+
+    /** A runner that gives flow's real `main` what `verb()` gives the real process. */
+    function realVerb(): ExecFileLike {
+      return (_file, args, opts, callback) => {
+        const stdout: string[] = [];
+        let write: (text: string) => void = () => undefined;
+        const words = new Promise<string>((resolve) => {
+          write = resolve;
+        });
+        const running = main(args.slice(2), {
+          env: opts.env as Record<string, string>,
+          cwd: opts.cwd as string,
+          now: () => new Date('2026-09-28T18:00:00.000Z'),
+          stdout: { write: (chunk: string) => stdout.push(chunk) },
+          stderr: { write: () => undefined },
+          createAdapter: async () => tracker.adapter,
+          // The gate's read of the process list: never this test's real chain.
+          runProcess: async (cmd, rest, runOpts) =>
+            cmd === '/bin/ps'
+              ? { code: 1, stdout: '', stderr: '' }
+              : realProcessRunner(cmd, rest, runOpts),
+          io: { sleep: async () => undefined, stdin: { isTTY: false, read: () => words } },
+        });
+        void running.then((code) => {
+          const out = stdout.join('');
+          if (code === 0) callback(null, out, '');
+          else callback(Object.assign(new Error('exit'), { code }), out, '');
+        });
+        return {
+          once: (_event: string, listener: () => void) => queueMicrotask(listener),
+          stdin: { on: () => undefined, end: (text?: string) => write(text ?? '') },
+        };
+      };
+    }
+
+    const comments = () => tracker.writes.filter((call) => call.method === 'comment');
+    const key = () => 'question:b1b1b1b1b1b1:FAKE-1';
+    const realSetup = async (answerWaitMs: number) => {
+      const made = setup({
+        stops: { questions: 'tell' },
+        cli: { calls: [], execFile: realVerb() },
+        answerWaitMs,
+      });
+      await made.coordinator.sync([
+        plan(
+          {
+            'id-FAKE-1': {
+              identifier: 'FAKE-1',
+              title: 'Old API',
+              status: 'running',
+              stage: 'execute',
+              question,
+            },
+          },
+          { root: project.dir }
+        ),
+      ]);
+      return made;
+    };
+
+    beforeEach(() => {
+      project = makeProject();
+      tracker = new FakeTracker({
+        user: AGENT_USER,
+        items: [
+          item('FAKE-1', {
+            stateCategory: 'started',
+            labels: ['type/task', 'agent/claimed', 'agent/needs-input'],
+            agentDisposition: 'needs-input',
+          }),
+        ],
+      });
+      project.writeRuns({
+        'id-FAKE-1': {
+          issueId: 'id-FAKE-1',
+          identifier: 'FAKE-1',
+          sessionId: 'session-1',
+          worktreePath: project.dir,
+          branch: 'work',
+          stage: 'execute',
+          status: 'running',
+          attemptCount: 0,
+          workerPid: 1,
+          startedAt: '2026-09-28T08:00:00.000Z',
+          question,
+        },
+      });
+    });
+
+    afterEach(() => {
+      release();
+      project.cleanup();
+    });
+
+    it('keeps the row and its deadline, records nothing, and the retry records it', async () => {
+      const { coordinator, inbox } = await realSetup(10_000);
+      hold();
+      await expect(
+        coordinator.handle(event(key(), { action: 'choice', choiceId: 'c2' }))
+      ).rejects.toThrow(key());
+      expect(inbox?.resolved).toEqual([]);
+      expect(inbox?.open.has(key())).toBe(true);
+      expect(project.runs()['id-FAKE-1'].question?.answer).toBeUndefined();
+      expect(comments()).toEqual([]);
+
+      release();
+      const retry = await coordinator.handle(event(key(), { action: 'choice', choiceId: 'c2' }));
+      expect(retry).toMatchObject({ resolve: 'answered' });
+      expect(project.runs()['id-FAKE-1'].question?.answer).toMatchObject({
+        text: 'Remove it',
+        by: 'person',
+      });
+      expect(comments()).toHaveLength(1);
+    });
+
+    it('keeps the row past the wait too, when "Sending…" was already shown', async () => {
+      const { coordinator, inbox } = await realSetup(50);
+      hold();
+      const raised = inbox?.raised.length ?? 0;
+      expect(await coordinator.handle(event(key(), { action: 'choice', choiceId: 'c2' }))).toEqual({
+        keepOpen: true,
+        message: SENDING_TEXT,
+      });
+      await vi.waitFor(() => expect(inbox?.raised.length).toBe(raised + 1), { timeout: 8_000 });
+      expect(inbox?.resolved).toEqual([]);
+      expect(inbox?.open.has(key())).toBe(true);
+      expect(project.runs()['id-FAKE-1'].question?.answer).toBeUndefined();
+    });
+
+    // Core tries again only after a call that failed: a kept-open row never
+    // fires its deadline again, and this lock is about to free.
+    it('fails the deadline call so core tries again, and the retry takes the pick', async () => {
+      const { coordinator, inbox } = await realSetup(10_000);
+      const deadline = event(key(), { action: 'choice', decidedBy: 'deadline' });
+      hold();
+      await expect(coordinator.handle(deadline)).rejects.toThrow();
+      expect(inbox?.resolved).toEqual([]);
+      expect(inbox?.open.has(key())).toBe(true);
+      expect(project.runs()['id-FAKE-1'].question?.answer).toBeUndefined();
+
+      release();
+      expect(await coordinator.handle(deadline)).toMatchObject({ resolve: 'answered' });
+      expect(project.runs()['id-FAKE-1'].question?.answer?.by).toBe('agent-default');
+    });
+
+    it('still clears the row when someone really did answer first', async () => {
+      const { coordinator, inbox } = await realSetup(10_000);
+      project.writeRuns({
+        'id-FAKE-1': {
+          ...project.runs()['id-FAKE-1'],
+          question: { ...question, answer: { text: 'Keep it', at: ASKED, by: 'person' } },
+        },
+      });
+      expect(await coordinator.handle(event(key(), { action: 'choice', choiceId: 'c2' }))).toEqual({
+        keepOpen: true,
+        message: SETTLED_TEXT,
+      });
+      expect(inbox?.resolved.at(-1)).toEqual({ key: key(), opts: { outcome: 'cleared' } });
+      expect(comments()).toEqual([]);
+    });
   });
 
   it('posts the go-ahead for "Fix it", and leaves the run parked for "Leave it"', async () => {
@@ -1115,6 +1630,38 @@ describe('"While you were away"', () => {
         choiceLabel: 'Shipped',
         tell: true,
         outcome: 'approved',
+      }),
+    ]);
+  });
+
+  it('tells the person once when flow dropped their answer, whatever the stops, and never old history', async () => {
+    const line = (ts: string, item: string) => ({ v: 1, ts, kind: 'answer.dropped', item });
+    const old = line('2026-09-27T00:00:00.000Z', 'DOR-1');
+    const root = projectWithJournal([old]);
+    const { coordinator, inbox } = setup({ stops: { ship: 'ask' } });
+    const store = { a: { identifier: 'DOR-9', title: 'New sidebar', status: 'running' } };
+    await coordinator.sync([plan(store, { root })]);
+    expect(inbox?.recorded).toEqual([]);
+    writeFileSync(
+      path.join(root, '.dork', 'flow', 'journal.jsonl'),
+      [
+        old,
+        line('2026-09-28T11:00:00.000Z', 'DOR-9'),
+        { ...line('2026-09-28T11:01:00.000Z', 'x'), item: undefined },
+      ]
+        .map((entry) => JSON.stringify(entry))
+        .join('\n')
+    );
+    await coordinator.sync([plan(store, { root })]);
+    await coordinator.sync([plan(store, { root })]);
+    expect(inbox?.recorded).toEqual([
+      expect.objectContaining({
+        title: "Your answer on New sidebar wasn't used",
+        by: { kind: 'rule', label: 'Flow' },
+        choiceLabel: 'Not used',
+        detail: 'DOR-9',
+        tell: true,
+        outcome: 'answered',
       }),
     ]);
   });
