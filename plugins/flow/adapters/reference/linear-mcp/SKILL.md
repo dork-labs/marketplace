@@ -283,7 +283,7 @@ duplicateOf? }`, every entry in the **human-key `identifier`** form (for
 #### `comment(item, body): void`
 
 - **Call.** `mcp__plugin_linear_linear__save_comment` with `{ issueId, body }`,
-  the body carrying the agent identity marker (for example `- 🤖 /flow`) **and,
+  the body carrying the agent identity marker (`identity.marker`, by default `— 🤖 /flow`) **and,
   as its last line, the `agent:provenance` signature**
   ([`../../../docs/provenance.md`](../../../docs/provenance.md)). Linear preserves
   HTML comments byte-for-byte in comment bodies, so no degradation applies here.
@@ -305,7 +305,7 @@ duplicateOf? }`, every entry in the **human-key `identifier`** form (for
 - **Call.** `save_issue` attaching `evidence.links` as issue links / attachments
   per `evidence.attachTo`.
 - **Durability + degradation.** Durable; idempotent (re-attaching the same URL
-  deduplicates). Fall back to posting the evidence as a comment when attachments
+  deduplicates). Fall back to posting the evidence as a signed comment when attachments
   are unavailable. A failed attach surfaces loudly.
 
 #### `needsInput(item, question): void`

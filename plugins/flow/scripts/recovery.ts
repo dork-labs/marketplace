@@ -59,7 +59,7 @@ Writes the RecoveryAction as JSON to stdout (discriminated union over "kind"):
   { "kind": "skip"|"resume"|"restart-clean"|"block"|"escalate"|"abandon"|"re-derive", … }
 Once retries run out, "recovery.onExhausted" picks the kind:
   "block" (default)  { "kind": "block", "label": "agent/blocked", "reason" }
-                     apply the label, comment, nudge; nothing retries it.
+                     apply the label, flow comment, nudge; nothing retries it.
   "escalate"         { "kind": "escalate", "label": "agent/needs-input", "reason", "question" }
                      the adapter's needsInput(item, question), not flow ask;
                      a person's reply resumes it.

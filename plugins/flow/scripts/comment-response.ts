@@ -23,14 +23,21 @@
  *
  * ## The rules, in precedence order
  *
- * 1. **Never answer its own comments** — `author == identity.agent`, OR the body
- *    carries `identity.marker`. Only the account proves authorship; the marker
- *    only ever silences. The hidden `agent:provenance` line is not read here at
- *    all (DOR-2351): anyone can paste it, and other agents sign with it. In
- *    shared-account mode `identity.agent` is the shared account, so the account
- *    check alone catches the agent's own comment even when a tracker garbles
- *    the marker. Highest precedence: it breaks self-reply loops before any
- *    other rule can fire. → `ignore`.
+ * 1. **Never answer its own comments** — the agent's own comment (see
+ *    {@link authoredByAgent}), OR any comment carrying `identity.marker`. Only
+ *    the account proves authorship; the marker alone only ever silences. In
+ *    two-account mode the agent's account is enough. In shared-account mode the
+ *    person posts as that same account, so the account alone would silence
+ *    every comment they write: there the agent's own comment is the shared
+ *    account plus its marker, its last-line `agent:provenance` signature (a
+ *    tracker may garble the marker, DOR-2351), or `flow review`'s two records
+ *    of what the person did. Another account's signature line
+ *    counts for nothing. That split only decides what flow stays quiet on: every
+ *    agent here posts as the shared account too, so a comment from it that is
+ *    not the agent's own still never grants. The trust check below turns any
+ *    acting decision on it into an ignore (Security M1 on #152); the person
+ *    answers from DorkOS or with `flow answer`. Highest precedence: it breaks
+ *    self-reply loops before any other rule can fire. → `ignore`.
  * 2. **Always respond when directly addressed** — an @mention of the agent
  *    account, or an explicit `/flow` / `@flow` token in the body. **Overrides
  *    ownership** — even on a teammate's (`other`-owned) thread. → `respond`.
@@ -57,6 +64,7 @@
 
 import type { z } from 'zod';
 import type { CommentsSchema } from './config-schema.ts';
+import { endsWithSignature } from './signature-line.ts';
 import { authorOf, bodyOf, hasLabel, isTrustedAuthor, mentionsOf } from './work-item.ts';
 import type { InboxComment, OwnershipClass, WorkItem } from './work-item.ts';
 
@@ -81,9 +89,15 @@ export interface CommentIdentity {
   /** The resolved agent account id (`identity.agent`, post-`"auto"` resolution). */
   agent: string;
   /**
+   * The reviewer account (`identity.reviewer`). `null`, or the agent's own
+   * account, means shared-account mode: the person, and every agent, posts as
+   * {@link agent} too.
+   */
+  reviewer: string | null;
+  /**
    * The authorship marker the agent appends to every tracker write
    * (`identity.marker`, default `"— 🤖 /flow"`). Rule 1 ignores a comment that
-   * carries it, from any account; it never proves authorship.
+   * carries it, from any account; alone it never proves authorship.
    */
   marker: string;
 }
@@ -133,24 +147,93 @@ export interface CommentDecision {
    * left alone; an ordinary ignore never carries it.
    */
   untrusted?: true;
+  /**
+   * Set with {@link untrusted} when the author is the shared account and the
+   * comment is not the agent's own (Security M1 on #152): every agent posts
+   * as that account, so its comment may be an agent's, never the person's for
+   * sure. The person answers from DorkOS or with `flow answer` instead.
+   */
+  sharedAccount?: true;
 }
 
 /** The durable label that marks an item parked on a human reply (rule 3). */
 const NEEDS_INPUT_LABEL = 'agent/needs-input';
-/** Explicit in-body tokens that directly address the engine (rule 2, shared mode). */
-const FLOW_ADDRESS_TOKENS = ['/flow', '@flow'];
+/**
+ * An explicit in-body `/flow` or `@flow` that directly addresses the engine
+ * (rule 2): a whole word, so `/flow:verify` and `**@flow**` count, and a path
+ * like `plugins/flow/x`, a URL, `/flows`, `/flow.ts` or `@flow.ai` does not.
+ */
+const FLOW_ADDRESS_TOKEN = /(?<![\w/.@~-])[/@]flow(?![\w/-]|\.\w)/;
+
+/** `flow review --approve`'s comment for a person: flow's record, not a new comment. */
+export const SHIPPED_RECORD = 'Shipped from DorkOS.';
+/** How `flow review --changes` starts its comment for a person; flow's record too. */
+export const SENT_BACK_PREFIX = 'Sent back: ';
+/** The last line `flow answer --text` posts under a person's answer; flow's record too. */
+export const ANSWERED_IN_DORKOS = 'Answered in DorkOS.';
 
 /**
- * Whether the agent's account wrote the comment: the only proof of
- * authorship. Anything that grants (an answer's anchor, the agent's question)
- * must use this, never {@link signedAsAgent}.
+ * A marker's characters a tracker keeps: its letters, digits and punctuation,
+ * minus `?`, with every run of dashes (and the minus sign) as one `-`, since a
+ * tracker may turn `—` into `-`, `--` or `–`.
  */
-function authoredByAgent(comment: InboxComment, identity: CommentIdentity): boolean {
+function markerCore(text: string): string {
+  return text.replace(/[\p{Pd}\u2212]+/gu, '-').replace(/[^\p{L}\p{N}\p{P}]|\?/gu, '');
+}
+
+/**
+ * Whether the last line is the marker with its emoji lost or replaced. Without
+ * this, a tracker that garbles the emoji and drops the hidden line leaves
+ * `— /flow`, which reads as addressing flow, so flow would answer itself on
+ * every tick. Only a whole line matches, so the person's own `/flow` still
+ * reaches flow.
+ */
+function endsWithGarbledMarker(body: string, marker: string): boolean {
+  const last = body.trimEnd().split('\n').at(-1) ?? '';
+  return markerCore(last).length > 0 && markerCore(last) === markerCore(marker);
+}
+
+/** Whether the person shares the agent's account (`reviewer` unset or the agent). */
+function sharedAccount(identity: CommentIdentity): boolean {
+  return identity.reviewer === null || identity.reviewer === identity.agent;
+}
+
+/**
+ * Whether the agent wrote the comment: the only proof of authorship. Anything
+ * that grants (an answer's anchor, the agent's question) must use this, never
+ * the marker alone.
+ *
+ * In two-account mode, the agent's account. In shared-account mode the person
+ * posts as that account too, so it is the account plus the agent's signature:
+ * its marker, its marker's garbled form as the last line, a valid last-line
+ * `agent:provenance` line, or a `flow review` or `flow answer` record, which is
+ * flow's note of what the person already did. A guest cannot forge any of them:
+ * the account comes from the tracker. Any agent posting as the shared account
+ * could, but that only silences its own comment: a shared-account comment never
+ * grants (see {@link shouldRespondToComment}). With `identity.marker` set to
+ * nothing, flow may post with no signature at all, so the account alone stays
+ * the answer: a comment wrongly silenced beats flow answering itself.
+ *
+ * @param comment - The comment.
+ * @param identity - The resolved agent identity.
+ * @returns `true` only for the agent's own comment.
+ */
+export function authoredByAgent(comment: InboxComment, identity: CommentIdentity): boolean {
   // An unknown author (`''`) is never the agent, even if `identity.agent` is
   // somehow empty too: silence on a missing author must come from the rules
   // below, not from mistaking nobody for the agent.
   const author = authorOf(comment);
-  return author.length > 0 && author === identity.agent;
+  if (author.length === 0 || author !== identity.agent) return false;
+  if (!sharedAccount(identity) || identity.marker.length === 0) return true;
+  const body = bodyOf(comment);
+  return (
+    signedAsAgent(comment, identity) ||
+    endsWithSignature(body) ||
+    endsWithGarbledMarker(body, identity.marker) ||
+    body.trim() === SHIPPED_RECORD ||
+    body.startsWith(SENT_BACK_PREFIX) ||
+    body.trimEnd().split('\n').at(-1)?.trim() === ANSWERED_IN_DORKOS
+  );
 }
 
 /**
@@ -162,9 +245,10 @@ function authoredByAgent(comment: InboxComment, identity: CommentIdentity): bool
  * accounts here, too: it holds `/flow`, so another flow agent's comment would
  * otherwise read as directly addressed (rule 2).
  *
- * The hidden `agent:provenance` line counts for nothing (DOR-2351): any
- * harness signs with it, so reading it here would silence another agent that
- * addresses this one, and it would add nothing the account check lacks.
+ * The hidden `agent:provenance` line counts here for nothing (DOR-2351): any
+ * harness signs with it, so reading it from any account would silence another
+ * agent that addresses this one. It counts only on the agent's own shared
+ * account ({@link authoredByAgent}).
  */
 function signedAsAgent(comment: InboxComment, identity: CommentIdentity): boolean {
   return identity.marker.length > 0 && bodyOf(comment).includes(identity.marker);
@@ -177,8 +261,7 @@ function signedAsAgent(comment: InboxComment, identity: CommentIdentity): boolea
  */
 function isDirectlyAddressed(comment: InboxComment, identity: CommentIdentity): boolean {
   if (mentionsOf(comment).includes(identity.agent)) return true;
-  const body = bodyOf(comment);
-  return FLOW_ADDRESS_TOKENS.some((token) => body.includes(token));
+  return FLOW_ADDRESS_TOKEN.test(bodyOf(comment));
 }
 
 /**
@@ -192,14 +275,15 @@ function isDirectlyAddressed(comment: InboxComment, identity: CommentIdentity): 
  * task 3.1 `classifyOwnership` seam — so this module never classifies.
  *
  * Precedence (first match wins):
- * 1. own comment (author or marker) → `ignore` — breaks self-reply loops first;
+ * 1. own comment ({@link authoredByAgent}, or the marker) → `ignore` — breaks self-reply loops first;
  * 2. directly addressed (@mention or `/flow` token) → `respond` — overrides ownership;
  * 3. `agent/needs-input` item + non-agent comment → `resume` — the parked answer;
  * 4. `other`-owned thread (and not addressed) → `ignore` — stay out;
  * 5. soft zone → `respond` if `ambiguousBias: "engage"`, else `ignore`.
  *
  * Then the trust check: an acting decision for an author who is not a trusted
- * member becomes `ignore` with `untrusted: true` (DOR-3669).
+ * member becomes `ignore` with `untrusted: true` (DOR-3669), and so does one
+ * for the shared account in shared mode, with `sharedAccount: true`.
  *
  * @param comment - The inbound comment (the adapter's `getInbox` shape).
  * @param ctx - The item, its injected ownership class, and the agent identity.
@@ -217,6 +301,17 @@ export function shouldRespondToComment(
   // skip it.
   if (decision.action !== 'ignore' && !isTrustedAuthor(comment)) {
     return { action: 'ignore', rule: decision.rule, untrusted: true };
+  }
+  // In shared mode every agent posts as the shared account, so a comment from
+  // it that rule 1 did not take for the agent's own may still be an agent's: a
+  // worker answering its own question, or a prompt-injected one starting a
+  // turn. It is silenced well, but it never grants (Security M1 on #152).
+  if (
+    decision.action !== 'ignore' &&
+    sharedAccount(ctx.identity) &&
+    authorOf(comment) === ctx.identity.agent
+  ) {
+    return { action: 'ignore', rule: decision.rule, untrusted: true, sharedAccount: true };
   }
   return decision;
 }

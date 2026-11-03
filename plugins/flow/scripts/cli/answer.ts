@@ -4,10 +4,10 @@
  *
  * - `--text <text>` or `--text-file <file>`: a person's answer, from DorkOS. It
  *   is posted on the item without the agent's marker, as the tracker account
- *   flow uses, with "Answered in DorkOS." as its last line, so the comment rules
- *   (`shouldRespondToComment`) count it as the reply. It is also recorded on the
- *   run, so the drain resumes on it even when flow posts through the agent's
- *   own tracker account (then the comment reads as the agent's, not a reply).
+ *   flow uses, with "Answered in DorkOS." as its last line, and recorded on the
+ *   run. The recorded answer is what resumes it: the comment is flow's record,
+ *   which the comment rules (`shouldRespondToComment`) stay quiet on, as flow's
+ *   own on its own account and as a record on a shared one.
  * - `--pick --by agent-default`: the question's deadline passed with no answer,
  *   so the agent's own pick stands. Posted as the agent ("No answer by …, so
  *   going with …"). Refused for a floor question: a deadline alone never
@@ -26,6 +26,7 @@
 import { readFileSync } from 'node:fs';
 import path from 'node:path';
 
+import { ANSWERED_IN_DORKOS } from '../comment-response.ts';
 import { PreconditionError, UsageError } from '../errors.ts';
 import type { FlowRun } from '../flow-run.ts';
 import {
@@ -43,8 +44,8 @@ import { signBody } from './provenance.ts';
 import { tokenHash } from './report.ts';
 import { runFor, sessionProvenance, setupWrite } from './work-write.ts';
 
-/** The last line of a person's answer posted from DorkOS. */
-export const ANSWERED_IN_DORKOS = 'Answered in DorkOS.';
+/** The last line of a person's answer posted from DorkOS (defined beside the comment rules). */
+export { ANSWERED_IN_DORKOS };
 
 /** A string flag's value, if given. */
 function flag(ctx: VerbContext, name: string): string | undefined {

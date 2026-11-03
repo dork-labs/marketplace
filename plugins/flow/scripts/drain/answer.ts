@@ -8,9 +8,10 @@
  * reply on an `agent/needs-input` item is the answer, but only from an author
  * the adapter marked a team member (DOR-3669). Only comments
  * newer than the park count; for a record from before parks were timed, only
- * comments after the agent's own latest one. Only a comment from the agent's
- * own account anchors that search: anyone can type the marker, so a marked
- * comment from anyone else is ignored but cannot hide an answer (DOR-3677).
+ * comments after the agent's own latest one. Only the agent's own comment
+ * ({@link authoredByAgent}) anchors that search: anyone can type the marker, so
+ * a marked comment from anyone else is ignored but cannot hide an answer
+ * (DOR-3677).
  *
  * Pure: no I/O. Needs `zod` only through the config type's module, so it is
  * reached from the verb.
@@ -19,7 +20,9 @@
  */
 
 import {
+  authoredByAgent,
   shouldRespondToComment,
+  type CommentDecision,
   type CommentIdentity,
   type CommentsConfig,
 } from '../comment-response.ts';
@@ -36,9 +39,10 @@ export interface AnswerContext {
   comments: CommentsConfig;
   /**
    * Told about each reply passed over only because its author is not a trusted
-   * member (a guest, an integration, no author), so the caller can warn.
+   * member (a guest, an integration, no author) or is the shared account flow
+   * posts as, so the caller can warn.
    */
-  onUntrusted?: (comment: ItemComment) => void;
+  onUntrusted?: (comment: ItemComment, decision: CommentDecision) => void;
 }
 
 /** How far from `parkedAt` the park comment may be stamped by the tracker's clock. */
@@ -73,9 +77,10 @@ export function findAnswer(
       { item, ownership: ctx.ownership, identity: ctx.identity },
       ctx.comments
     );
-  // The agent's own comment by account, not by marker text alone (DOR-3677).
+  // The agent's own comment by account, not by marker text alone (DOR-3677);
+  // on a shared account, the account plus the agent's signature.
   const isOwn = (comment: ItemComment) =>
-    comment.author !== '' && comment.author === ctx.identity.agent;
+    authoredByAgent({ ...comment, mentions: [] }, ctx.identity);
   const parkedAt = since === null ? Number.NaN : Date.parse(since);
   let candidates = [...comments];
   if (Number.isFinite(parkedAt)) {
@@ -108,7 +113,7 @@ export function findAnswer(
   for (const comment of candidates.reverse()) {
     const decision = decide(comment);
     if (decision.action !== 'ignore') return comment;
-    if (decision.untrusted === true) ctx.onUntrusted?.(comment);
+    if (decision.untrusted === true) ctx.onUntrusted?.(comment, decision);
   }
   return null;
 }
@@ -131,14 +136,26 @@ export function answerPointer(comment: ItemComment, identifier: string): string 
  *
  * @param comment - The reply left alone.
  * @param identifier - The item.
+ * @param decision - The decision that passed it over, when known.
  * @returns One line a person can act on.
  */
-export function untrustedReplyWarning(comment: ItemComment, identifier: string): string {
+export function untrustedReplyWarning(
+  comment: ItemComment,
+  identifier: string,
+  decision?: CommentDecision
+): string {
   const who =
     comment.author === '' ? 'a comment with no author' : `the comment by ${comment.author}`;
+  if (decision?.sharedAccount === true) {
+    return (
+      `${identifier} stays parked: ${who} at ${comment.createdAt} comes from the account flow posts as, ` +
+      "so it may be an agent's, and it can't resume the work. Answer from DorkOS, or with " +
+      '`flow answer`.'
+    );
+  }
   return (
     `${identifier} stays parked: ${who} at ${comment.createdAt} is not a team member's own ` +
     "comment (a guest, an integration, another team, or posted through an app), so it can't " +
-    'resume the work. A team member can answer in the tracker itself, or from DorkOS.'
+    'resume the work. A team member can answer from DorkOS, or in the tracker from an account of their own.'
   );
 }

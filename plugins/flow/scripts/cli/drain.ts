@@ -592,17 +592,18 @@ export async function drain(ctx: VerbContext, options: DrainOptions = {}): Promi
       await reapChecker(item.id, facts, parked === undefined ? undefined : parked.since);
       if (parked === undefined || !facts.needsInput || facts.closed) return facts;
       // The inbox pass leaves drain runs alone, so the drain notices the reply itself.
-      const identity = { agent: await agentId(), marker: config.identity.marker };
+      const identity = {
+        agent: await agentId(),
+        reviewer: config.identity.reviewer,
+        marker: config.identity.marker,
+      };
       const scope = config.ownership.scope.includes('issues') ? 'issues' : 'projects';
       const reply = findAnswer(item, item.comments ?? [], parked.since, {
         identity,
-        ownership: classifyOwnership(
-          item,
-          { ...identity, reviewer: config.identity.reviewer },
-          scope
-        ),
+        ownership: classifyOwnership(item, identity, scope),
         comments: config.comments,
-        onUntrusted: (comment) => ctx.warn(untrustedReplyWarning(comment, identifier)),
+        onUntrusted: (comment, decision) =>
+          ctx.warn(untrustedReplyWarning(comment, identifier, decision)),
       });
       // Only the question asked for this park counts (a later park, for review
       // rounds or failing checks, is nobody's answer), spec flow-multiproject §7.5.

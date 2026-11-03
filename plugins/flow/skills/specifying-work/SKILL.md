@@ -46,7 +46,7 @@ background-agent API.
 
 - On entry: `flow stage <id> specify --checkpoint-file <f>` (Done, Next, Open questions,
   Next command).
-- On completion: a breadcrumb `comment` (spec created at `specs/<slug>/02-specification.md`,
+- On completion: breadcrumb `flow comment` (spec created at `specs/<slug>/02-specification.md`,
   next DECOMPOSE). Untracked or no adapter: skip.
 
 Next: `/flow:decompose`.

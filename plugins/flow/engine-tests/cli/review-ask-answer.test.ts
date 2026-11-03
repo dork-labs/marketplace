@@ -766,7 +766,7 @@ describe('flow answer', () => {
       {
         item: parked(),
         ownership: 'unassigned',
-        identity: { agent: 'agent-1', marker: config.identity.marker },
+        identity: { agent: 'agent-1', reviewer: 'dorian', marker: config.identity.marker },
       },
       config.comments
     );

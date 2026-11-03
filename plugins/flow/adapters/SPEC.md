@@ -328,7 +328,8 @@ can comment reaches a model with tools otherwise.
   provenance line, so they only ever make flow ignore a comment or skip posting
   a duplicate. Where a comment counts as the agent's own to show or decide
   something (where a parked question starts, the question `flow status`
-  shows), the author must be the agent's account.
+  shows), the author must be the agent's account; on a shared account, whose
+  person posts as that account too, that account plus the agent's signature.
 - **A prose-only adapter is all-untrusted.** With no code that parses the
   tracker's response (no `adapter.ts`, no `getInbox` capability, or the
   in-session `mcp` transport, which the CLI refuses), `flow inbox` exits 3 and
@@ -420,7 +421,7 @@ can comment reaches a model with tools otherwise.
   triggering the tracker's notification. Used at the review gate and in handoff.
 - **Durability.** **Durable and idempotent.** Re-assigning to the same human is a
   no-op.
-- **Degradation.** A tracker without assignment falls back to a comment that
+- **Degradation.** A tracker without assignment falls back to a signed comment that
   @mentions the human (so the handoff still reaches them). If neither is possible,
   throw.
 
@@ -431,7 +432,7 @@ can comment reaches a model with tools otherwise.
 - **Durability.** Durable; idempotent (re-attaching the same evidence reference
   deduplicates by URL).
 - **Degradation.** A tracker without attachments falls back to posting the
-  evidence as a comment (durable and visible). A failed attach surfaces loudly.
+  evidence as a signed comment (durable and visible). A failed attach surfaces loudly.
 
 #### `needsInput(item: WorkItem, question: string): Promise<void>`
 

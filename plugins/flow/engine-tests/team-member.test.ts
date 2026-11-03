@@ -98,7 +98,7 @@ function decideOnComment(
   const ctx: CommentDecisionContext = {
     item,
     ownership,
-    identity: { agent: identity.agent, marker: identity.marker },
+    identity: { agent: identity.agent, reviewer: identity.reviewer, marker: identity.marker },
   };
   return shouldRespondToComment(comment, ctx, comments).action;
 }

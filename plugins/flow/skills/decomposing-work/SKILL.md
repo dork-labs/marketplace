@@ -77,7 +77,7 @@ The Task API is a live display of `03-tasks.json`, not a second source of truth.
 - `flow stage <id> decompose --checkpoint-file <f>`.
 - Mirror the **active phase** as a plan checklist generated from `03-tasks.json`; never
   hand-edit it, regenerate it.
-- Optionally a breadcrumb `comment`.
+- Optional breadcrumb: `flow comment`.
 - **Hand it on** (and promoted sub-issues) at `stage/execute`, where the next session
   starts. In a drain run: `flow stage <id> execute` and go on. Otherwise
   `flow release <id> --stage execute` if this session claimed it, else

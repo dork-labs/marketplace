@@ -61,6 +61,8 @@ export interface InboxLine {
   rule: CommentDecision['rule'];
   /** Set when only the author's trust stopped it from acting. */
   untrusted?: true;
+  /** Set with `untrusted` when the author is the shared account flow posts as. */
+  sharedAccount?: true;
   /** The text: present only when `action` is `respond` or `resume`. */
   body?: string;
   /** The parked run's session, for a resume. */
@@ -135,6 +137,7 @@ function lineFor(read: InboxRead, judge: Judge): InboxLine {
     rule: decision.rule,
   };
   if (decision.untrusted === true) line.untrusted = true;
+  if (decision.sharedAccount === true) line.sharedAccount = true;
   if (decision.action === 'ignore') return line;
   const run = Object.hasOwn(judge.runs, read.item.id) ? judge.runs[read.item.id] : undefined;
   line.title = read.item.title;
@@ -153,7 +156,7 @@ function renderText(entries: readonly InboxLine[]): string {
       : `${entries.length} new comment${entries.length === 1 ? '' : 's'}, ${acting} calling for action.`,
     ...entries.map((entry) => {
       const who = entry.author === '' ? 'no author' : entry.author;
-      const head = `${entry.itemId} ${entry.occurredAt} ${who}: ${entry.action} (rule ${entry.rule}${entry.untrusted ? ', not a member' : ''})`;
+      const head = `${entry.itemId} ${entry.occurredAt} ${who}: ${entry.action} (rule ${entry.rule}${entry.sharedAccount ? ', the shared account flow posts as' : entry.untrusted ? ', not a member' : ''})`;
       return entry.body === undefined ? head : `${head}\n  ${entry.body.replaceAll('\n', '\n  ')}`;
     }),
   ].join('\n');

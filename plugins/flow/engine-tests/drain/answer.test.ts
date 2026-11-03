@@ -5,6 +5,7 @@
 
 import { describe, expect, it } from 'vitest';
 
+import { SENT_BACK_PREFIX, SHIPPED_RECORD } from '../../scripts/comment-response.ts';
 import { answerPointer, findAnswer, type AnswerContext } from '../../scripts/drain/answer.ts';
 import type { ItemComment, WorkItem } from '../../scripts/tracker/types.ts';
 
@@ -23,7 +24,7 @@ const ITEM = {
 } as unknown as WorkItem;
 
 const CTX: AnswerContext = {
-  identity: { agent: 'bot', marker: '— 🤖 /flow' },
+  identity: { agent: 'bot', reviewer: 'dorian', marker: '— 🤖 /flow' },
   ownership: 'mine',
   comments: { respondWhen: 'addressed', ambiguousBias: 'quiet' } as AnswerContext['comments'],
 };
@@ -145,5 +146,38 @@ describe('findAnswer', () => {
     const comments = [c('park', 'bot', 10), c('answer', 'dorian', 11), forged];
     expect(findAnswer(ITEM, comments, c('x', 'x', 12).createdAt, CTX)?.id).toBe('answer');
     expect(findAnswer(ITEM, comments, null, CTX)?.id).toBe('answer');
+  });
+
+  // Purpose (Security M1 on #152): every agent posts as the shared account, so
+  // an unsigned reply from it may be a worker answering its own question. It
+  // never un-parks; the caller is told, so the person answers from DorkOS.
+  it('shared account: an unsigned reply from the shared account is never the answer', () => {
+    const passed: string[] = [];
+    const shared: AnswerContext = {
+      ...CTX,
+      identity: { ...CTX.identity, reviewer: null },
+      onUntrusted: (comment, decision) => {
+        if (decision.sharedAccount === true) passed.push(comment.id);
+      },
+    };
+    const park = c('park', 'bot', 10, 'Include archived rows?\n\n— 🤖 /flow');
+    const reply = c('reply', 'bot', 11, 'Leave them out.');
+    expect(findAnswer(ITEM, [park, reply], reply.createdAt, shared)).toBeNull();
+    expect(findAnswer(ITEM, [park, reply], null, shared)).toBeNull();
+    expect(passed).toEqual(['reply', 'reply']);
+    // A member on an account of their own still answers.
+    const member = c('member', 'dorian', 12, 'Leave them out.');
+    expect(findAnswer(ITEM, [park, reply, member], null, shared)?.id).toBe('member');
+  });
+
+  // Purpose: flow's record of a review verdict is posted bare, and must not read
+  // as the person answering a parked item. Fails if the record stops counting.
+  it("shared account: flow's record of a review verdict is not an answer", () => {
+    const shared: AnswerContext = { ...CTX, identity: { ...CTX.identity, reviewer: null } };
+    const park = c('park', 'bot', 10, 'Include archived rows?\n\n— 🤖 /flow');
+    const shipped = c('shipped', 'bot', 11, SHIPPED_RECORD);
+    const sentBack = c('sent', 'bot', 12, `${SENT_BACK_PREFIX}use sqlite`);
+    expect(findAnswer(ITEM, [park, shipped, sentBack], null, shared)).toBeNull();
+    expect(findAnswer(ITEM, [park, shipped, sentBack], sentBack.createdAt, shared)).toBeNull();
   });
 });
