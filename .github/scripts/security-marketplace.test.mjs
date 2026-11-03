@@ -1,4 +1,4 @@
-/* global URL, console, process */
+/* global URL, process */
 // Marketplace only. The label-at-head, verdict and gate suites beside this are
 // dorkos's; these run its code against this repo's real lists and paths, and pin
 // what this repo adds to it.
@@ -213,7 +213,7 @@ describe('the PR’s gate waits for main’s fresh verdict, on this repo’s lis
   };
 
   test('the first run after a label waits out the old failure, logs each read, and passes', async (t) => {
-    const log = t.mock.method(console, 'log', () => {});
+    const log = t.mock.method(globalThis.console, 'log', () => {});
     const gh = stale(fakeGitHub(approved));
     const poll = fastPoll(() => gh.api.setStatus(SHA, 'success', 'Security label covers this SHA'));
     assert.equal(await verifier(gh.api, poll), 'Security status verified');
@@ -230,7 +230,7 @@ describe('the PR’s gate waits for main’s fresh verdict, on this repo’s lis
     const poll = fastPoll();
     await assert.rejects(
       verifier(stale(fakeGitHub(approved)).api, poll),
-      /verdict not yet written for this head.*rerun security-gate/
+      /verdict not yet written for this head.*rerun security-review-initialize, then security-gate/
     );
     assert.equal(poll.slept, 90_000);
   });

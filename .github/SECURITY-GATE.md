@@ -11,8 +11,7 @@ skills, extensions and scripts agents run. A change to any of them needs
 DorkOS Security's approval for that exact commit. The gate is ported from
 dork-labs/dorkos at `dc0d70b316`, with Security's path list for this repo.
 `security-gate.mjs` and its `security-label-at-head.test.mjs` are verbatim from dorkos at
-`53f91d4827` (DOR-3710's wait, #3464, and its poll log, #3466, which hadn't merged there
-when this was ported, so re-pin to its merge commit once it does). `security-label-at-head.mjs`
+`231e9798f4` (DOR-3710's wait, #3464, and its poll log, #3466). `security-label-at-head.mjs`
 and `security-review-initialize.yml` are verbatim too. `security-verdict.mjs` differs in one
 function, `runVerdict`, which fails closed when its lists won't load. `security-gate.test.mjs` swaps
 dorkos's path-list tests for this repo's, and `security-marketplace.test.mjs` is
@@ -58,6 +57,9 @@ beyond the package's own scripts, any local `source` other than `./plugins/<name
 every symlink under `plugins/`. It's what keeps a package inside its own folder, and this
 list no longer reads manifests, so have Security read any loosening of it.
 
+**When you review a plugin PR,** refuse any pointer from a plugin to files outside
+`plugins/`: a manifest or script that references a path outside its own plugin folder.
+
 ## How approval works
 
 **While `SECURITY_APPROVAL_BOT_USER_ID` is `'0'` the gate runs label-at-head**
@@ -86,7 +88,7 @@ Two checks read that, and they are not the same:
   `security-review` on that head, newer than the last change to `security-reviewed`,
   `security-deep-reviewed` or `hold`, the last push, force push or base change, and the
   event that started this run. A fresh `success` passes, a fresh refusal fails, and if time runs out it
-  fails and asks for a rerun. Each read during that wait logs a `security-review poll <n>:` line. In the
+  fails and asks for a rerun of `security-review-initialize`, then `security-gate`. Each read during that wait logs a `security-review poll <n>:` line. In the
   merge queue it never waits, and every queued PR needs its label at its exact head.
 
 So a green `security-gate` on an open PR doesn't mean reviewed. Read
@@ -124,8 +126,9 @@ This makes `security-gate` required, not `security-review`: anyone with write ac
 can forge that status.
 
 1. Confirm the organization can use the ruleset rule **Require workflows to pass
-   before merging**, and stop here if it can't. Add it for this repo's `main`, on
-   both `pull_request` and `merge_group`: source `dork-labs/marketplace`, path
+   before merging**, and stop here if it can't. Add it as an **org** ruleset for this
+   repo's `main` ("When the gate wedges" says why), on both `pull_request` and
+   `merge_group`: source `dork-labs/marketplace`, path
    `.github/workflows/security-gate.yml`, ref `refs/heads/main`. Not a named
    status check: a PR could edit its own YAML to emit a passing job with that
    name. Start in Evaluate mode.
@@ -143,6 +146,29 @@ can forge that status.
    numeric bot user id in `SECURITY_APPROVAL_BOT_USER_ID`. dorkos's approval
    helper (`tools/security-approve/` there) is hard-wired to dork-labs/dorkos and
    its path list, so it needs a reviewed change first, or a tool of its own.
+
+## When the gate wedges
+
+What to do if a bad gate refuses every PR (Security, 2026-11-03).
+
+**Today, while the gate isn't required:** a gate that refuses everything blocks nothing.
+The fix queues normally.
+
+**Once it's required, only Dorian can unstick it:**
+
+1. Set the **org** rule requiring `security-gate` to Evaluate. This is an owner setting,
+   adds no bypass, and is one click to undo.
+2. The fix merges through the queue with its labels and a read from Security or the deputy.
+3. Set the rule back to Active. Security confirms it on one PR.
+
+**Not the way out:** `gh pr merge --admin`, or any file or label that turns the gate off.
+
+**After an incident:** a post in #dorkos naming the commit and who did what, a list of
+everything that merged while the gate was bad, and Security re-reading those PRs.
+
+**Why an org ruleset:** requiring `security-gate` must be an org rule. A repo ruleset can be
+flipped by any agent's token, which holds the repo admin role through `repo`. An org rule
+needs `admin:org`, which the agents' token on this Mac doesn't have (checked 2026-11-03).
 
 ## Bootstrap
 
