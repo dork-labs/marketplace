@@ -237,6 +237,20 @@ async function flow(
   return { code, json: JSON.parse(out) as Record<string, unknown>, stderr: err, forge, tracker };
 }
 
+/**
+ * Security M1 on DOR-3712: the refusal is read by the agent it stops, so it
+ * says to stop and ask the person in DorkOS, and never names the retry that
+ * works (another shell, a changed environment). The advice for people lives
+ * in the docs and `--help` only.
+ */
+function expectStopAndAsk(stderr: string): void {
+  expect(stderr).toContain('Stop');
+  expect(stderr).toContain('ask the person to answer it in DorkOS');
+  for (const hint of ['plain terminal', 'terminal', 'environment', 'shell without', 'unset']) {
+    expect(stderr.toLowerCase()).not.toContain(hint);
+  }
+}
+
 /** A person's shell, as DorkOS runs `flow answer`: no agent runtime, no session (DOR-3712). */
 const person = (): Record<string, string> => ({ DORK_HOME: dorkHome });
 
@@ -804,7 +818,7 @@ describe('flow answer', () => {
       env: { ...person(), ...markers },
     });
     expect(result.code).toBe(EXIT.precondition);
-    expect(result.stderr).toContain('from DorkOS, or from a plain terminal');
+    expectStopAndAsk(result.stderr);
     expect(comments(tracker)).toEqual([]);
     expect(stored().question?.answer).toBeUndefined();
   });
@@ -824,6 +838,7 @@ describe('flow answer', () => {
       env: { ...person(), FLOW_SESSION_ID: session },
     });
     expect(result.code).toBe(EXIT.precondition);
+    expectStopAndAsk(result.stderr);
     expect(comments(tracker)).toEqual([]);
     expect(stored().question?.answer).toBeUndefined();
   });

@@ -77,9 +77,15 @@ function answerText(ctx: VerbContext): string {
   return trimmed;
 }
 
-/** How a person answers, for the refusals below. */
-const HOW_A_PERSON_ANSWERS =
-  "a person answers from DorkOS, or from a plain terminal without an agent's environment";
+/**
+ * What the refusals below tell whoever hit them. An agent reads them, so they
+ * say to stop and hand the question to the person, never how to get past the
+ * check (Security M1 on DOR-3712: naming another shell is the retry that
+ * works). How a person answers from their own terminal is in the docs and
+ * `--help` only.
+ */
+const STOP_AND_ASK =
+  "Stop: an agent never answers a person's question. Do not run this again any other way; ask the person to answer it in DorkOS.";
 
 /**
  * Refuse `--text` from inside an agent runtime (DOR-3712): an agent's shell
@@ -107,7 +113,7 @@ function requirePersonShell(ctx: VerbContext): void {
       ? detected.runtime
       : (detected.markers[0] ?? (dorkosTurn ? 'a DorkOS agent' : 'an agent runtime'));
   throw new PreconditionError(
-    `flow answer --text takes a person's answer, and this shell is inside an agent (${runtime}), so nothing was posted or recorded; ${HOW_A_PERSON_ANSWERS}`
+    `flow answer --text takes a person's answer, and this runs inside an agent (${runtime}), so nothing was posted or recorded. ${STOP_AND_ASK}`
   );
 }
 
@@ -126,7 +132,7 @@ function requireNotTheAsker(ctx: VerbContext, sessions: readonly (string | undef
   );
   if (callerSessions(ctx).some((id) => barred.has(id))) {
     throw new PreconditionError(
-      `the session that asked, or the run's worker, cannot answer its own question, so nothing was posted or recorded; ${HOW_A_PERSON_ANSWERS}`
+      `the session that asked, or the run's worker, cannot answer its own question, so nothing was posted or recorded. ${STOP_AND_ASK}`
     );
   }
 }

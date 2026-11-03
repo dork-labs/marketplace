@@ -1716,6 +1716,9 @@ describe('flow drain: questions with a pick (spec flow-multiproject §7.5)', () 
       expect(drainOf('ACME-1').phase).toBe('parked');
       expect(acme1().labels).toContain('agent/needs-input');
       expect(pass.stderr).toContain('only a person answers it');
+      // Security M1: the warning sends the agent to the person, never to a retry.
+      expect(pass.stderr).toContain('ask the person to answer it in DorkOS');
+      expect(pass.stderr).not.toContain('plain terminal');
       // Said once, not on every pass.
       clock += 60_000;
       expect((await tick()).stderr).not.toContain('only a person answers it');

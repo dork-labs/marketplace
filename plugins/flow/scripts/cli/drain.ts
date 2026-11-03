@@ -623,7 +623,7 @@ export async function drain(ctx: VerbContext, options: DrainOptions = {}): Promi
           if (ctx.dryRun) return facts;
           await releaseAnswer(store, item.id, question.askedAt, recorded);
           ctx.warn(
-            `${identifier} stays parked: its question is about secrets or spending, so only a person answers it, from DorkOS or with \`flow answer\` in a plain terminal. The ${typeof recorded.by === 'string' && recorded.by !== '' ? recorded.by : 'other'} answer on the run was dropped.`
+            `${identifier} stays parked: its question is about secrets or spending, so only a person answers it: ask the person to answer it in DorkOS. The ${typeof recorded.by === 'string' && recorded.by !== '' ? recorded.by : 'other'} answer on the run was dropped.`
           );
           return facts;
         }
