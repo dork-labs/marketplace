@@ -42,16 +42,20 @@ describe('flow stage', () => {
     // Purpose: contract 2.0.0 — a started stage lives on the run record, never
     // on the tracker, so the write clears stage/* and the run carries "verify".
     project.writeRuns({ 'id-FAKE-1': run });
-    const started = item('FAKE-1', { stateCategory: 'started', labels: ['agent/claimed'] });
+    const started = item('FAKE-1', {
+      stateCategory: 'started',
+      labels: ['agent/claimed', 'stage/execute'],
+    });
     const result = await runFlow(project, { items: [started] }, ['stage', 'FAKE-1', 'verify']);
     expect(result.code).toBe(EXIT.ok);
-    expect(result.tracker.calls).toEqual([
+    expect(result.tracker.writes).toEqual([
       {
         method: 'applyWorkState',
         identifier: 'FAKE-1',
         change: { stateCategory: 'started', stageLabel: null },
       },
     ]);
+    expect(result.tracker.backlog.items[0].labels).toEqual(['agent/claimed']);
     expect(project.runs()['id-FAKE-1'].stage).toBe('verify');
   });
 
@@ -63,7 +67,7 @@ describe('flow stage', () => {
       'specify',
     ]);
     expect(result.code).toBe(EXIT.ok);
-    expect(result.tracker.calls).toEqual([
+    expect(result.tracker.writes).toEqual([
       { method: 'applyWorkState', identifier: 'FAKE-1', change: { stageLabel: 'stage/specify' } },
     ]);
     expect(result.tracker.backlog.items[0].labels).toEqual([
@@ -82,7 +86,7 @@ describe('flow stage', () => {
       'shipping',
     ]);
     expect(result.code).toBe(EXIT.precondition);
-    expect(result.tracker.calls).toEqual([]);
+    expect(result.tracker.writes).toEqual([]);
   });
 
   it('exits 4 and keeps the run stage when the tracker drops the write', async () => {
@@ -107,7 +111,7 @@ describe('flow stage', () => {
       '--dry-run',
     ]);
     expect(result.code).toBe(EXIT.ok);
-    expect(result.tracker.calls).toEqual([]);
+    expect(result.tracker.writes).toEqual([]);
     expect(project.runs()['id-FAKE-1'].stage).toBe('execute');
     expect(result.json).toMatchObject({ dryRun: true, run: { stage: 'verify' } });
   });
@@ -153,7 +157,12 @@ describe('flow stage --checkpoint-file', () => {
     handoffs: [],
     parkedReason: null,
   };
-  const started = item('FAKE-1', { stateCategory: 'started', labels: ['agent/claimed'] });
+  // A new one each time: the tracker changes the items it holds.
+  const started = () =>
+    item('FAKE-1', {
+      stateCategory: 'started',
+      labels: ['agent/claimed', 'stage/execute'],
+    });
   const handoff = () => path.join(project.dir, '.dork', 'flow', 'HANDOFF.md');
 
   it('writes the checkpoint for the new stage, then moves the item', async () => {
@@ -161,7 +170,7 @@ describe('flow stage --checkpoint-file', () => {
     // with trigger "stage", and the run records the checkpoint.
     project.writeRuns({ 'id-FAKE-1': { ...run, worktreePath: project.dir } });
     writeFileSync(path.join(project.dir, 'body.md'), BODY);
-    const result = await runFlow(project, { items: [started] }, [
+    const result = await runFlow(project, { items: [started()] }, [
       'stage',
       'FAKE-1',
       'verify',
@@ -177,7 +186,7 @@ describe('flow stage --checkpoint-file', () => {
       trigger: 'stage',
     });
     expect(result.json.checkpoint).toMatchObject({ header: { stage: 'verify' } });
-    expect(result.tracker.calls).toHaveLength(1);
+    expect(result.tracker.writes).toHaveLength(1);
     const stored = project.runs()['id-FAKE-1'];
     expect(stored.stage).toBe('verify');
     expect(stored.checkpointSha).toBe(parsed.header.headSha);
@@ -188,19 +197,19 @@ describe('flow stage --checkpoint-file', () => {
     // Purpose: a drain hands sessions between accounts; a stage boundary with
     // no checkpoint would leave the next session nothing to resume from.
     project.writeRuns({ 'id-FAKE-1': { ...run, drain } });
-    const result = await runFlow(project, { items: [started] }, ['stage', 'FAKE-1', 'verify']);
+    const result = await runFlow(project, { items: [started()] }, ['stage', 'FAKE-1', 'verify']);
     expect(result.code).toBe(EXIT.precondition);
     expect(JSON.stringify(result.json)).toContain(
       'a drain run writes a checkpoint at every stage boundary: pass --checkpoint-file'
     );
-    expect(result.tracker.calls).toEqual([]);
+    expect(result.tracker.writes).toEqual([]);
     expect(project.runs()['id-FAKE-1'].stage).toBe('execute');
   });
 
   it('outside a drain, moves without it and warns on stderr', async () => {
     // Purpose: a person driving flow by hand is nudged, not blocked.
     project.writeRuns({ 'id-FAKE-1': run });
-    const result = await runFlow(project, { items: [started] }, ['stage', 'FAKE-1', 'verify']);
+    const result = await runFlow(project, { items: [started()] }, ['stage', 'FAKE-1', 'verify']);
     expect(result.code).toBe(EXIT.ok);
     expect(result.stderr).toContain('no checkpoint written for FAKE-1: pass --checkpoint-file');
     expect(existsSync(handoff())).toBe(false);
@@ -212,7 +221,7 @@ describe('flow stage --checkpoint-file', () => {
     // item moved with no checkpoint behind it.
     project.writeRuns({ 'id-FAKE-1': { ...run, drain } });
     writeFileSync(path.join(project.dir, 'body.md'), '## Done\n\nOnly this.\n');
-    const result = await runFlow(project, { items: [started] }, [
+    const result = await runFlow(project, { items: [started()] }, [
       'stage',
       'FAKE-1',
       'verify',
@@ -220,7 +229,7 @@ describe('flow stage --checkpoint-file', () => {
       'body.md',
     ]);
     expect(result.code).toBe(EXIT.precondition);
-    expect(result.tracker.calls).toEqual([]);
+    expect(result.tracker.writes).toEqual([]);
     expect(project.runs()['id-FAKE-1'].stage).toBe('execute');
   });
 });

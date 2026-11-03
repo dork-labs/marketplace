@@ -42,9 +42,9 @@ import {
   type ReviewInput,
 } from '../../scripts/forge/types.ts';
 import { canonicalProjectRoot } from '../../scripts/main-checkout.ts';
-import { createFakeAdapter, type FakeTracker } from '../fixtures/cli/fake-adapter/adapter.ts';
+import { FakeTracker } from '../../scripts/tracker/fake.ts';
 import { recordingGuard, refusal, type RecordingGuard } from '../fixtures/land/recording-guard.ts';
-import { item, makeProject, type WriteProject } from './write-harness.ts';
+import { ACME_TEAM, AGENT_USER, item, makeProject, type WriteProject } from './write-harness.ts';
 
 const MARKER = '— 🤖 /flow';
 const NOW = '2026-09-26T12:00:00.000Z';
@@ -211,7 +211,8 @@ async function flow(
   } = {}
 ) {
   const forge = options.forge ?? fakeForge();
-  const tracker = options.tracker ?? createFakeAdapter({ items: [] });
+  const tracker = options.tracker ?? new FakeTracker({ team: ACME_TEAM, items: [] });
+  tracker.backlog.user ??= AGENT_USER;
   let out = '';
   let err = '';
   const code = await main([...argv, '--json'], {
@@ -285,7 +286,7 @@ function drain(overrides: Partial<DrainState> = {}): DrainState {
 
 /** Comments the tracker received, in order. */
 function comments(tracker: FakeTracker): string[] {
-  return tracker.calls.flatMap((call) =>
+  return tracker.writes.flatMap((call) =>
     call.method === 'comment' ? [(call as { body: string }).body] : []
   );
 }
@@ -312,14 +313,14 @@ describe('flow review --approve by a person', () => {
   // default). Nothing is closed or moved.
   it('comments, approves the PR and arms it, and closes nothing', async () => {
     writeRun();
-    const tracker = createFakeAdapter({ items: [started()] });
+    const tracker = new FakeTracker({ team: ACME_TEAM, items: [started()] });
     const result = await flow(['review', 'ACME-12', '--approve', '--head', 'abc1234def'], {
       tracker,
       forge: fakeForge({ head: 'abc1234def' }),
     });
     expect(result.code).toBe(EXIT.ok);
     expect(comments(tracker)).toEqual(['Shipped from DorkOS.']);
-    expect(tracker.calls.some((call) => call.method === 'applyWorkState')).toBe(false);
+    expect(tracker.writes.some((call) => call.method === 'applyWorkState')).toBe(false);
     expect(result.forge.calls).toContainEqual({
       method: 'review',
       arg: [7, { event: 'approve', body: 'Shipped from DorkOS.' }],
@@ -332,7 +333,7 @@ describe('flow review --approve by a person', () => {
   // before anything is posted.
   it('asks the arm guard about the approved commit before posting anything', async () => {
     writeRun();
-    const tracker = createFakeAdapter({ items: [started()] });
+    const tracker = new FakeTracker({ team: ACME_TEAM, items: [started()] });
     const guard = recordingGuard(() => {
       // Nothing posted yet when the guard is asked.
       expect(comments(tracker)).toEqual([]);
@@ -356,7 +357,7 @@ describe('flow review --approve by a person', () => {
   // DorkOS inbox reads exit 5 on a review as "did not ship" and would offer 👍 again.
   it('approves but does not arm when the guard refuses', async () => {
     writeRun();
-    const tracker = createFakeAdapter({ items: [started()] });
+    const tracker = new FakeTracker({ team: ACME_TEAM, items: [started()] });
     const result = await flow(['review', 'ACME-12', '--approve', '--head', 'abc1234def'], {
       tracker,
       forge: fakeForge({ head: 'abc1234def' }),
@@ -383,7 +384,7 @@ describe('flow review --approve by a person', () => {
     writeRun();
     const guard = recordingGuard();
     await flow(['review', 'ACME-12', '--approve', '--head', 'abc1234def'], {
-      tracker: createFakeAdapter({ items: [started()] }),
+      tracker: new FakeTracker({ team: ACME_TEAM, items: [started()] }),
       forge: fakeForge({ head: 'abc1234def' }),
       guard,
     });
@@ -399,7 +400,7 @@ describe('flow review --approve by a person', () => {
     });
     writeRun();
     const result = await flow(['review', 'ACME-12', '--approve'], {
-      tracker: createFakeAdapter({ items: [started()] }),
+      tracker: new FakeTracker({ team: ACME_TEAM, items: [started()] }),
     });
     expect(result.code).toBe(EXIT.ok);
     expect(result.forge.calls.some((call) => call.method === 'arm')).toBe(false);
@@ -408,7 +409,7 @@ describe('flow review --approve by a person', () => {
   // Purpose: the gate is only answered at the gate.
   it('refuses an item that is not at the review gate (exit 5)', async () => {
     writeRun({ stage: 'execute', status: 'running' });
-    const tracker = createFakeAdapter({ items: [started()] });
+    const tracker = new FakeTracker({ team: ACME_TEAM, items: [started()] });
     const result = await flow(['review', 'ACME-12', '--approve'], { tracker });
     expect(result.code).toBe(EXIT.precondition);
     expect(comments(tracker)).toEqual([]);
@@ -421,7 +422,10 @@ describe('flow review --changes', () => {
   // session. Nothing is closed, released or reassigned.
   it('comments the note, requests changes and moves a run back to execute', async () => {
     writeRun();
-    const tracker = createFakeAdapter({ items: [started()] });
+    const tracker = new FakeTracker({
+      team: ACME_TEAM,
+      items: [started(['type/task', 'agent/claimed', 'stage/verify'])],
+    });
     const result = await flow(
       ['review', 'ACME-12', '--changes', '--note', 'Use the new banner copy.'],
       { tracker }
@@ -433,7 +437,7 @@ describe('flow review --changes', () => {
       arg: [7, { event: 'request-changes', body: 'Use the new banner copy.' }],
     });
     expect(stored()).toMatchObject({ stage: 'execute', sessionId: 'session-abcdef123456' });
-    const writes = tracker.calls.filter((call) => call.method === 'applyWorkState');
+    const writes = tracker.writes.filter((call) => call.method === 'applyWorkState');
     expect(writes).toHaveLength(1);
     expect(JSON.stringify(writes)).not.toMatch(/completed|canceled|agent\/completed/);
   });
@@ -446,7 +450,7 @@ describe('flow review --changes', () => {
       stage: 'verify',
       drain: drain({ pushedSha: 'abc1234def', verdict: 'clean', reviewedSha: 'abc1234def' }),
     });
-    const tracker = createFakeAdapter({ items: [started()] });
+    const tracker = new FakeTracker({ team: ACME_TEAM, items: [started()] });
     const result = await flow(['review', 'ACME-12', '--changes', '--note', 'Rename the flag.'], {
       tracker,
     });
@@ -465,7 +469,7 @@ describe('flow review --changes', () => {
   it('refuses a note over 2,000 characters (exit 2)', async () => {
     writeRun();
     const result = await flow(['review', 'ACME-12', '--changes', '--note', 'x'.repeat(2001)], {
-      tracker: createFakeAdapter({ items: [started()] }),
+      tracker: new FakeTracker({ team: ACME_TEAM, items: [started()] }),
     });
     expect(result.code).toBe(EXIT.usage);
   });
@@ -485,7 +489,7 @@ describe('flow review --approve --by reviewer-agent', () => {
   it('ships with a clean review at the head, signed, without a forge approval', async () => {
     dial({ dial: 'tell' });
     writeRun({ review: clean });
-    const tracker = createFakeAdapter({ items: [started()] });
+    const tracker = new FakeTracker({ team: ACME_TEAM, items: [started()] });
     const result = await flow(['review', 'ACME-12', '--approve', '--by', 'reviewer-agent'], {
       tracker,
       forge: fakeForge({ head: 'abc1234def' }),
@@ -515,7 +519,7 @@ describe('flow review --approve --by reviewer-agent', () => {
   ])('refuses %s (exit 5)', async (_name, setup, review, head) => {
     setup();
     writeRun(review === undefined ? {} : { review });
-    const tracker = createFakeAdapter({ items: [started()] });
+    const tracker = new FakeTracker({ team: ACME_TEAM, items: [started()] });
     const result = await flow(['review', 'ACME-12', '--approve', '--by', 'reviewer-agent'], {
       tracker,
       forge: fakeForge({ head }),
@@ -536,7 +540,7 @@ describe('flow review --approve --by reviewer-agent', () => {
     dial({ dial: 'auto' });
     writeRun({ review: clean });
     const result = await flow(['review', 'ACME-12', '--approve', '--by', 'reviewer-agent'], {
-      tracker: createFakeAdapter({ items: [started()] }),
+      tracker: new FakeTracker({ team: ACME_TEAM, items: [started()] }),
       forge: fakeForge({ head: 'abc1234def' }),
     });
     expect(result.code).toBe(EXIT.precondition);
@@ -546,7 +550,7 @@ describe('flow review --approve --by reviewer-agent', () => {
     dial({ dial: 'auto' });
     writeRun({ review: clean });
     const result = await flow(['review', 'ACME-12', '--approve', '--by', 'reviewer-agent'], {
-      tracker: createFakeAdapter({ items: [started()] }),
+      tracker: new FakeTracker({ team: ACME_TEAM, items: [started()] }),
       forge: fakeForge({ head: 'abc1234def', failing: ['test'] }),
     });
     expect(result.code).toBe(EXIT.precondition);
@@ -632,7 +636,7 @@ describe('flow ask', () => {
   // person: no deadline, the pick marked, needs-input on the item.
   it('parks a question for a person with no deadline at Ask me first', async () => {
     writeRun({ stage: 'execute', status: 'running' });
-    const tracker = createFakeAdapter({ items: [started()] });
+    const tracker = new FakeTracker({ team: ACME_TEAM, items: [started()] });
     const result = await flow(ASK, { tracker });
     expect(result.code).toBe(EXIT.ok);
     expect(result.json).toMatchObject({ answeredBy: 'person', answeredByAtDeadline: null });
@@ -656,7 +660,9 @@ describe('flow ask', () => {
   it('sets the deadline from the dial at Tell me after', async () => {
     dial({ dial: 'tell', questionDeadlineMinutes: 60 });
     writeRun({ stage: 'execute', status: 'running' });
-    const result = await flow(ASK, { tracker: createFakeAdapter({ items: [started()] }) });
+    const result = await flow(ASK, {
+      tracker: new FakeTracker({ team: ACME_TEAM, items: [started()] }),
+    });
     expect(result.code).toBe(EXIT.ok);
     expect(stored().question?.decideBy).toBe('2026-09-26T13:00:00.000Z');
     expect(result.json.answeredByAtDeadline).toBe('agent-default');
@@ -670,12 +676,12 @@ describe('flow ask', () => {
     const refused = await flow(
       [...ASK, '--floor', 'outward-facing', '--decide-by', '2026-09-26T15:00:00Z'],
       {
-        tracker: createFakeAdapter({ items: [started()] }),
+        tracker: new FakeTracker({ team: ACME_TEAM, items: [started()] }),
       }
     );
     expect(refused.code).toBe(EXIT.usage);
     const result = await flow([...ASK, '--floor', 'outward-facing'], {
-      tracker: createFakeAdapter({ items: [started()] }),
+      tracker: new FakeTracker({ team: ACME_TEAM, items: [started()] }),
     });
     expect(result.code).toBe(EXIT.ok);
     expect(stored().question).toMatchObject({
@@ -690,10 +696,12 @@ describe('flow ask', () => {
   it('refuses a question off the floor at Just do it, but not a spend', async () => {
     dial({ dial: 'auto' });
     writeRun({ stage: 'execute', status: 'running' });
-    const refused = await flow(ASK, { tracker: createFakeAdapter({ items: [started()] }) });
+    const refused = await flow(ASK, {
+      tracker: new FakeTracker({ team: ACME_TEAM, items: [started()] }),
+    });
     expect(refused.code).toBe(EXIT.precondition);
     const spend = await flow([...ASK, '--floor', 'secrets-or-spend'], {
-      tracker: createFakeAdapter({ items: [started()] }),
+      tracker: new FakeTracker({ team: ACME_TEAM, items: [started()] }),
     });
     expect(spend.code).toBe(EXIT.ok);
     expect(spend.json).toMatchObject({ answeredBy: 'person', answeredByAtDeadline: null });
@@ -702,7 +710,9 @@ describe('flow ask', () => {
   // Purpose: a drain run parks for a person, like `flow report blocked`.
   it('parks a drain run until someone answers', async () => {
     writeRun({ stage: 'execute', status: 'running', drain: drain({ phase: 'working' }) });
-    const result = await flow(ASK, { tracker: createFakeAdapter({ items: [started()] }) });
+    const result = await flow(ASK, {
+      tracker: new FakeTracker({ team: ACME_TEAM, items: [started()] }),
+    });
     expect(result.code).toBe(EXIT.ok);
     expect(stored().drain).toMatchObject({
       phase: 'parked',
@@ -716,9 +726,9 @@ describe('flow ask', () => {
     writeRun({ stage: 'execute', status: 'running' });
     const long = [...ASK];
     long[5] = 'A choice that is far too long to fit on one button';
-    expect((await flow(long, { tracker: createFakeAdapter({ items: [started()] }) })).code).toBe(
-      EXIT.usage
-    );
+    expect(
+      (await flow(long, { tracker: new FakeTracker({ team: ACME_TEAM, items: [started()] }) })).code
+    ).toBe(EXIT.usage);
   });
 });
 
@@ -744,7 +754,7 @@ describe('flow answer', () => {
   // so the comment rules count it as the reply, and recorded on the run.
   it("posts a person's answer the comment rules count as the reply", async () => {
     writeRun({ stage: 'execute', status: 'running', question: question() });
-    const tracker = createFakeAdapter({ items: [parked()], user: { id: 'dorian' } });
+    const tracker = new FakeTracker({ team: ACME_TEAM, items: [parked()], user: { id: 'dorian' } });
     const result = await flow(['answer', 'ACME-12', '--text', 'Drop it.'], { tracker });
     expect(result.code).toBe(EXIT.ok);
     const [body] = comments(tracker);
@@ -767,7 +777,7 @@ describe('flow answer', () => {
   // Purpose: whoever answers first wins; the second finds it settled (exit 5).
   it('refuses an item that no longer waits for an answer', async () => {
     writeRun({ stage: 'execute', status: 'running', question: question() });
-    const tracker = createFakeAdapter({ items: [started()] });
+    const tracker = new FakeTracker({ team: ACME_TEAM, items: [started()] });
     const result = await flow(['answer', 'ACME-12', '--text', 'Drop it.'], { tracker });
     expect(result.code).toBe(EXIT.precondition);
     expect(comments(tracker)).toEqual([]);
@@ -776,7 +786,7 @@ describe('flow answer', () => {
   // Purpose: the pick stands only after the deadline, once, posted as the agent.
   it('takes the pick at the deadline, and only once', async () => {
     writeRun({ stage: 'execute', status: 'running', question: question() });
-    const tracker = createFakeAdapter({ items: [parked()] });
+    const tracker = new FakeTracker({ team: ACME_TEAM, items: [parked()] });
     const early = await flow(['answer', 'ACME-12', '--pick', '--by', 'agent-default'], { tracker });
     expect(early.code).toBe(EXIT.precondition);
     const due = await flow(['answer', 'ACME-12', '--pick', '--by', 'agent-default'], {
@@ -809,7 +819,7 @@ describe('flow answer', () => {
         checkAfter: '2026-09-26T13:00:00.000Z',
       }),
     });
-    const tracker = createFakeAdapter({ items: [parked()] });
+    const tracker = new FakeTracker({ team: ACME_TEAM, items: [parked()] });
     const late = '2026-09-27T00:00:00.000Z';
     expect(
       (await flow(['answer', 'ACME-12', '--pick', '--by', 'agent-default'], { tracker, now: late }))
@@ -935,7 +945,7 @@ describe('review fixes (DOR-2528 FIX-FIRST)', () => {
         checkTokenHash: createHash('sha256').update(TOKEN).digest('hex'),
       }),
     });
-    const tracker = createFakeAdapter({ items: [parkedItem()] });
+    const tracker = new FakeTracker({ team: ACME_TEAM, items: [parkedItem()] });
     const as = ['--session', 'reviewer-1'];
     expect((await flow(['ask', 'ACME-12', '--check-pick', ...as], { tracker })).code).toBe(
       EXIT.precondition
@@ -959,7 +969,7 @@ describe('review fixes (DOR-2528 FIX-FIRST)', () => {
   // pick to the reviewer agent, nor answer as the reviewer agent.
   it('refuses a check or a reviewer answer from the asking session', async () => {
     writeRun({ stage: 'execute', status: 'running', question: floorQuestion() });
-    const tracker = createFakeAdapter({ items: [parkedItem()] });
+    const tracker = new FakeTracker({ team: ACME_TEAM, items: [parkedItem()] });
     expect(
       (await flow(['ask', 'ACME-12', '--check-pick', '--session', 'worker-session'], { tracker }))
         .code
@@ -1011,7 +1021,7 @@ describe('review fixes (DOR-2528 FIX-FIRST)', () => {
         decideBy: '2026-09-26T15:00:00.000Z',
       }),
     });
-    const tracker = createFakeAdapter({ items: [parkedItem()] });
+    const tracker = new FakeTracker({ team: ACME_TEAM, items: [parkedItem()] });
     let read = false;
     const getItem = tracker.adapter.getItem.bind(tracker.adapter);
     tracker.adapter.getItem = async (...args: Parameters<typeof getItem>) => {
@@ -1054,7 +1064,7 @@ describe('review fixes (DOR-2528 FIX-FIRST)', () => {
     });
     dial({ dial: 'tell', questionDeadlineMinutes: 60 });
     writeRun({ stage: 'execute', status: 'running' });
-    const tracker = createFakeAdapter({ items: [started()] });
+    const tracker = new FakeTracker({ team: ACME_TEAM, items: [started()] });
     const ask = await flow(
       [
         'ask',
@@ -1087,7 +1097,7 @@ describe('review fixes (DOR-2528 FIX-FIRST)', () => {
   // and a deadline without its zone is refused.
   it('promises no deadline without a run, and wants a zone on --decide-by', async () => {
     dial({ dial: 'tell' });
-    const tracker = createFakeAdapter({ items: [started()] });
+    const tracker = new FakeTracker({ team: ACME_TEAM, items: [started()] });
     const ask = [
       'ask',
       'ACME-12',
@@ -1108,7 +1118,7 @@ describe('review fixes (DOR-2528 FIX-FIRST)', () => {
     expect(comments(tracker)[0]).toContain("I won't go ahead until you answer.");
     writeRun({ stage: 'execute', status: 'running' });
     const noZone = await flow([...ask, '--decide-by', '2026-09-26T15:00:00'], {
-      tracker: createFakeAdapter({ items: [started()] }),
+      tracker: new FakeTracker({ team: ACME_TEAM, items: [started()] }),
     });
     expect(noZone.code).toBe(EXIT.usage);
   });
@@ -1135,7 +1145,7 @@ describe('review fixes (DOR-2528 FIX-FIRST)', () => {
         pr,
       }),
     });
-    const tracker = createFakeAdapter({ items: [started()] });
+    const tracker = new FakeTracker({ team: ACME_TEAM, items: [started()] });
     const guard = recordingGuard(() => refusal('pre-arm-deferred'));
     const result = await flow(['review', 'ACME-12', '--approve'], {
       tracker,
@@ -1177,7 +1187,7 @@ describe('review fixes (DOR-2528 FIX-FIRST)', () => {
       }),
     });
     const result = await flow(['review', 'ACME-12', '--approve'], {
-      tracker: createFakeAdapter({ items: [started()] }),
+      tracker: new FakeTracker({ team: ACME_TEAM, items: [started()] }),
       forge: fakeForge({ head: 'abc1234def' }),
       guard: recordingGuard(() => refusal('dependency-queue-busy')),
     });
@@ -1189,7 +1199,7 @@ describe('review fixes (DOR-2528 FIX-FIRST)', () => {
   it('a run outside the drain whose pre-arm checks apply is left for a person to merge', async () => {
     writeRun();
     const result = await flow(['review', 'ACME-12', '--approve', '--head', 'abc1234def'], {
-      tracker: createFakeAdapter({ items: [started()] }),
+      tracker: new FakeTracker({ team: ACME_TEAM, items: [started()] }),
       forge: fakeForge({ head: 'abc1234def' }),
       guard: recordingGuard(() => refusal('pre-arm-deferred')),
     });
@@ -1216,13 +1226,13 @@ describe('review fixes (DOR-2528 FIX-FIRST)', () => {
       }),
     });
     const drained = await flow(['review', 'ACME-12', '--approve'], {
-      tracker: createFakeAdapter({ items: [started()] }),
+      tracker: new FakeTracker({ team: ACME_TEAM, items: [started()] }),
       forge: fakeForge({ head: 'abc1234def' }),
     });
     expect(drained.code).toBe(EXIT.ok);
     expect(drained.forge.calls).toContainEqual({ method: 'arm', arg: [7, 'abc1234def'] });
     const drainMoved = await flow(['review', 'ACME-12', '--approve'], {
-      tracker: createFakeAdapter({ items: [started()] }),
+      tracker: new FakeTracker({ team: ACME_TEAM, items: [started()] }),
       forge: fakeForge({ head: 'feed999' }),
     });
     expect(drainMoved.code).toBe(EXIT.precondition);
@@ -1230,14 +1240,14 @@ describe('review fixes (DOR-2528 FIX-FIRST)', () => {
 
     writeRun();
     const moved = await flow(['review', 'ACME-12', '--approve', '--head', 'abc1234def'], {
-      tracker: createFakeAdapter({ items: [started()] }),
+      tracker: new FakeTracker({ team: ACME_TEAM, items: [started()] }),
       forge: fakeForge({ head: 'feed999' }),
     });
     expect(moved.code).toBe(EXIT.precondition);
     expect(moved.forge.calls.some((call) => call.method === 'arm')).toBe(false);
 
     const unknown = await flow(['review', 'ACME-12', '--approve'], {
-      tracker: createFakeAdapter({ items: [started()] }),
+      tracker: new FakeTracker({ team: ACME_TEAM, items: [started()] }),
       forge: fakeForge({ head: 'feed999' }),
     });
     expect(unknown.code).toBe(EXIT.ok);
@@ -1262,12 +1272,12 @@ describe('review fixes (DOR-2528 FIX-FIRST)', () => {
     };
     writeRun({ review: clean });
     const pending = await flow(['review', 'ACME-12', '--approve', '--by', 'reviewer-agent'], {
-      tracker: createFakeAdapter({ items: [started()] }),
+      tracker: new FakeTracker({ team: ACME_TEAM, items: [started()] }),
       forge: fakeForge({ head: 'abc1234def', pending: 1 }),
     });
     expect(pending.code).toBe(EXIT.precondition);
     const noPr = await flow(['review', 'ACME-12', '--approve', '--by', 'reviewer-agent'], {
-      tracker: createFakeAdapter({ items: [started()] }),
+      tracker: new FakeTracker({ team: ACME_TEAM, items: [started()] }),
       forge: fakeForge({ head: 'abc1234def', pr: false }),
     });
     expect(noPr.code).toBe(EXIT.precondition);
@@ -1280,7 +1290,7 @@ describe('review fixes (DOR-2528 FIX-FIRST)', () => {
       review: { tokenHash: 'h', sha: 'abc1234def', verdict: 'clean', reviewedSha: 'abc1234def' },
     });
     const result = await flow(['review', 'ACME-12', '--approve', '--by', 'reviewer-agent'], {
-      tracker: createFakeAdapter({ items: [started()] }),
+      tracker: new FakeTracker({ team: ACME_TEAM, items: [started()] }),
       forge: fakeForge({ head: 'abc1234def' }),
     });
     expect(result.code).toBe(EXIT.ok);
@@ -1312,7 +1322,7 @@ describe('re-review fixes (DOR-2528)', () => {
   it("arms the run's clean reviewed commit when no --head is given", async () => {
     writeRun({ review: clean });
     const result = await flow(['review', 'ACME-12', '--approve'], {
-      tracker: createFakeAdapter({ items: [started()] }),
+      tracker: new FakeTracker({ team: ACME_TEAM, items: [started()] }),
       forge: fakeForge({ head: 'abc1234def' }),
     });
     expect(result.code).toBe(EXIT.ok);
@@ -1325,7 +1335,7 @@ describe('re-review fixes (DOR-2528)', () => {
   it('arms the commit the ask showed, passed with --head', async () => {
     writeRun();
     const result = await flow(['review', 'ACME-12', '--approve', '--head', 'abc1234def'], {
-      tracker: createFakeAdapter({ items: [started()] }),
+      tracker: new FakeTracker({ team: ACME_TEAM, items: [started()] }),
       forge: fakeForge({ head: 'abc1234def' }),
     });
     expect(result.code).toBe(EXIT.ok);
@@ -1336,7 +1346,7 @@ describe('re-review fixes (DOR-2528)', () => {
     writeRun();
     let text = '';
     const result = await flow(['review', 'ACME-12', '--approve'], {
-      tracker: createFakeAdapter({ items: [started()] }),
+      tracker: new FakeTracker({ team: ACME_TEAM, items: [started()] }),
       forge: fakeForge({ head: 'abc1234def' }),
     });
     expect(result.code).toBe(EXIT.ok);
@@ -1355,7 +1365,7 @@ describe('re-review fixes (DOR-2528)', () => {
     dial({ dial: 'auto' });
     writeRun({ review: clean });
     const result = await flow(['review', 'ACME-12', '--approve', '--by', 'reviewer-agent'], {
-      tracker: createFakeAdapter({ items: [started()] }),
+      tracker: new FakeTracker({ team: ACME_TEAM, items: [started()] }),
       forge: fakeForge({ head: 'abc1234def', pending: 2 }),
     });
     expect(result.code).toBe(EXIT.ok);
@@ -1375,7 +1385,7 @@ describe('re-review fixes (DOR-2528)', () => {
     const result = await flow(
       ['review', 'ACME-12', '--approve', '--by', 'reviewer-agent', '--wait'],
       {
-        tracker: createFakeAdapter({ items: [started()] }),
+        tracker: new FakeTracker({ team: ACME_TEAM, items: [started()] }),
         forge: fakeForge({ head: 'abc1234def', pending: [2, 1, 0] }),
       }
     );
@@ -1484,7 +1494,7 @@ describe('the reviewer agent ships with auto-merge off (DOR-2535)', () => {
     setUp();
     let slept = 0;
     const result = await flow(ship, {
-      tracker: createFakeAdapter({ items: [started()] }),
+      tracker: new FakeTracker({ team: ACME_TEAM, items: [started()] }),
       forge: fakeForge({ head: HEAD, pending: 2 }),
       sleep: async () => {
         slept += 1;
@@ -1508,11 +1518,11 @@ describe('the reviewer agent ships with auto-merge off (DOR-2535)', () => {
   it('ships on a later check once the checks passed, and clears the retry point', async () => {
     setUp();
     await flow(ship, {
-      tracker: createFakeAdapter({ items: [started()] }),
+      tracker: new FakeTracker({ team: ACME_TEAM, items: [started()] }),
       forge: fakeForge({ head: HEAD, pending: 1 }),
     });
     expect(stored().shipWait).toBeDefined();
-    const tracker = createFakeAdapter({ items: [started()] });
+    const tracker = new FakeTracker({ team: ACME_TEAM, items: [started()] });
     const result = await flow(ship, {
       tracker,
       forge: fakeForge({ head: HEAD, pending: 0 }),
@@ -1530,11 +1540,11 @@ describe('the reviewer agent ships with auto-merge off (DOR-2535)', () => {
   it('refuses a failing check and clears the retry point', async () => {
     setUp();
     await flow(ship, {
-      tracker: createFakeAdapter({ items: [started()] }),
+      tracker: new FakeTracker({ team: ACME_TEAM, items: [started()] }),
       forge: fakeForge({ head: HEAD, pending: 1 }),
     });
     const result = await flow(ship, {
-      tracker: createFakeAdapter({ items: [started()] }),
+      tracker: new FakeTracker({ team: ACME_TEAM, items: [started()] }),
       forge: fakeForge({ head: HEAD, failing: ['test'] }),
     });
     expect(result.code).toBe(EXIT.precondition);
@@ -1550,7 +1560,7 @@ describe('the reviewer agent ships with auto-merge off (DOR-2535)', () => {
   it('counts no checks as passed after the grace when none are required, and says so', async () => {
     setUp();
     const first = await flow(ship, {
-      tracker: createFakeAdapter({ items: [started()] }),
+      tracker: new FakeTracker({ team: ACME_TEAM, items: [started()] }),
       forge: fakeForge({ head: HEAD, pending: 1, reported: 0 }),
     });
     expect(first.code).toBe(EXIT.precondition);
@@ -1558,13 +1568,13 @@ describe('the reviewer agent ships with auto-merge off (DOR-2535)', () => {
       'none are required, so flow counts that as passed in about 10 minutes'
     );
     const early = await flow(ship, {
-      tracker: createFakeAdapter({ items: [started()] }),
+      tracker: new FakeTracker({ team: ACME_TEAM, items: [started()] }),
       forge: fakeForge({ head: HEAD, pending: 1, reported: 0 }),
       now: later(9),
     });
     expect(early.code).toBe(EXIT.precondition);
     expect(stored().shipWait?.since).toBe(NOW);
-    const tracker = createFakeAdapter({ items: [started()] });
+    const tracker = new FakeTracker({ team: ACME_TEAM, items: [started()] });
     const result = await flow(ship, {
       tracker,
       forge: fakeForge({ head: HEAD, pending: 1, reported: 0 }),
@@ -1588,7 +1598,7 @@ describe('the reviewer agent ships with auto-merge off (DOR-2535)', () => {
       shipWait: { sha: '0ld0ld0', since: later(-60), checkedAt: later(-50) },
     });
     const result = await flow(ship, {
-      tracker: createFakeAdapter({ items: [started()] }),
+      tracker: new FakeTracker({ team: ACME_TEAM, items: [started()] }),
       forge: fakeForge({ head: HEAD, pending: 1, reported: 0 }),
     });
     expect(result.code).toBe(EXIT.precondition);
@@ -1611,7 +1621,7 @@ describe('the reviewer agent ships with auto-merge off (DOR-2535)', () => {
     setUp(review);
     writeRun({ review: clean, shipWait: { sha: HEAD, since: later(-120), checkedAt: later(-1) } });
     const result = await flow(ship, {
-      tracker: createFakeAdapter({ items: [started()] }),
+      tracker: new FakeTracker({ team: ACME_TEAM, items: [started()] }),
       forge: fakeForge({ head: HEAD, pending: 1, reported: 0, ...forgeOpts }),
     });
     expect(result.code).toBe(EXIT.precondition);
@@ -1625,7 +1635,7 @@ describe('the reviewer agent ships with auto-merge off (DOR-2535)', () => {
     setUp();
     let slept = 0;
     const result = await flow([...ship, '--wait-minutes', '15'], {
-      tracker: createFakeAdapter({ items: [started()] }),
+      tracker: new FakeTracker({ team: ACME_TEAM, items: [started()] }),
       forge: fakeForge({ head: HEAD, pending: 1, reported: 0 }),
       sleep: async () => {
         slept += 1;
@@ -1641,7 +1651,7 @@ describe('the reviewer agent ships with auto-merge off (DOR-2535)', () => {
   it('--wait that runs out leaves the retry point', async () => {
     setUp();
     const result = await flow([...ship, '--wait-minutes', '2'], {
-      tracker: createFakeAdapter({ items: [started()] }),
+      tracker: new FakeTracker({ team: ACME_TEAM, items: [started()] }),
       forge: fakeForge({ head: HEAD, pending: 3 }),
     });
     expect(result.code).toBe(EXIT.precondition);
@@ -1653,7 +1663,7 @@ describe('the reviewer agent ships with auto-merge off (DOR-2535)', () => {
   it('saves nothing on a dry run', async () => {
     setUp();
     const result = await flow([...ship, '--dry-run'], {
-      tracker: createFakeAdapter({ items: [started()] }),
+      tracker: new FakeTracker({ team: ACME_TEAM, items: [started()] }),
       forge: fakeForge({ head: HEAD, pending: 1 }),
     });
     expect(result.json).toMatchObject({ verdict: 'pending', retryRecorded: false });
@@ -1666,7 +1676,7 @@ describe('the reviewer agent ships with auto-merge off (DOR-2535)', () => {
     setUp();
     writeRun({ review: clean, shipWait: { sha: HEAD, since: NOW, checkedAt: NOW } });
     const result = await flow(['review', 'ACME-12', '--approve'], {
-      tracker: createFakeAdapter({ items: [started()] }),
+      tracker: new FakeTracker({ team: ACME_TEAM, items: [started()] }),
       forge: fakeForge({ head: HEAD }),
     });
     expect(result.code, result.stderr).toBe(EXIT.ok);
@@ -1678,14 +1688,14 @@ describe('the reviewer agent ships with auto-merge off (DOR-2535)', () => {
   it('refuses when the PR moves to another commit, mid-wait or between ticks', async () => {
     setUp();
     const midWait = await flow([...ship, '--wait-minutes', '5'], {
-      tracker: createFakeAdapter({ items: [started()] }),
+      tracker: new FakeTracker({ team: ACME_TEAM, items: [started()] }),
       forge: fakeForge({ head: HEAD, pending: 1, prHead: [HEAD, 'beef0001'] }),
     });
     expect(midWait.code).toBe(EXIT.precondition);
     expect(midWait.stderr + JSON.stringify(midWait.json)).toContain('moved to beef000');
     expect(stored().shipWait).toBeUndefined();
     writeRun({ review: clean, shipWait: { sha: HEAD, since: later(-60), checkedAt: later(-1) } });
-    const tracker = createFakeAdapter({ items: [started()] });
+    const tracker = new FakeTracker({ team: ACME_TEAM, items: [started()] });
     const later_ = await flow(ship, {
       tracker,
       forge: fakeForge({ head: HEAD, pending: 1, reported: 0, prHead: 'beef0001' }),
@@ -1705,14 +1715,15 @@ describe('the reviewer agent ships with auto-merge off (DOR-2535)', () => {
       shipWait: { sha: HEAD, since: NOW, checkedAt: NOW },
     });
     const left = await flow(ship, {
-      tracker: createFakeAdapter({ items: [started()] }),
+      tracker: new FakeTracker({ team: ACME_TEAM, items: [started()] }),
       forge: fakeForge({ head: HEAD }),
     });
     expect(left.code).toBe(EXIT.precondition);
     expect(stored().shipWait).toBeUndefined();
     writeRun({ review: clean, shipWait: { sha: HEAD, since: NOW, checkedAt: NOW } });
     const closed = await flow(ship, {
-      tracker: createFakeAdapter({
+      tracker: new FakeTracker({
+        team: ACME_TEAM,
         items: [item('ACME-12', { stateCategory: 'completed', stateName: 'Done' })],
       }),
       forge: fakeForge({ head: HEAD }),
@@ -1731,7 +1742,7 @@ describe('the reviewer agent ships with auto-merge off (DOR-2535)', () => {
       shipWait: { sha: HEAD, since: NOW, checkedAt: NOW },
     });
     const result = await flow(['review', 'acme-12', '--approve', '--by', 'reviewer-agent'], {
-      tracker: createFakeAdapter({ items: [started()] }),
+      tracker: new FakeTracker({ team: ACME_TEAM, items: [started()] }),
       forge: fakeForge({ head: HEAD }),
     });
     expect(result.code).toBe(EXIT.precondition);
@@ -1752,7 +1763,7 @@ describe('the reviewer agent ships with auto-merge off (DOR-2535)', () => {
     chmodSync(dir, 0o555);
     try {
       const result = await flow(ship, {
-        tracker: createFakeAdapter({ items: [started()] }),
+        tracker: new FakeTracker({ team: ACME_TEAM, items: [started()] }),
         forge: fakeForge({ head: HEAD }),
       });
       expect(result.code, result.stderr).toBe(EXIT.precondition);
@@ -1769,7 +1780,7 @@ describe('the reviewer agent ships with auto-merge off (DOR-2535)', () => {
     setUp();
     writeRun({ review: clean, shipWait: { sha: HEAD, since: NOW, checkedAt: NOW } });
     const result = await flow(ship, {
-      tracker: createFakeAdapter({ items: [started()] }),
+      tracker: new FakeTracker({ team: ACME_TEAM, items: [started()] }),
       forge: fakeForge({ head: HEAD, statusError: 'gh: HTTP 502' }),
     });
     expect(result.code).toBe(EXIT.tracker);
@@ -1781,7 +1792,7 @@ describe('the reviewer agent ships with auto-merge off (DOR-2535)', () => {
   it('ends the wait before posting, and restores it when posting fails', async () => {
     setUp();
     writeRun({ review: clean, shipWait: { sha: HEAD, since: NOW, checkedAt: NOW } });
-    const tracker = createFakeAdapter({ items: [started()] });
+    const tracker = new FakeTracker({ team: ACME_TEAM, items: [started()] });
     const post = tracker.adapter.comment.bind(tracker.adapter);
     let waitAtPost: unknown = 'unread';
     tracker.adapter.comment = async (...args: Parameters<typeof post>) => {
@@ -1793,7 +1804,7 @@ describe('the reviewer agent ships with auto-merge off (DOR-2535)', () => {
     expect(waitAtPost).toBeUndefined();
 
     writeRun({ review: clean, shipWait: { sha: HEAD, since: NOW, checkedAt: NOW } });
-    const down = createFakeAdapter({ items: [started()] });
+    const down = new FakeTracker({ team: ACME_TEAM, items: [started()] });
     down.adapter.comment = async () => {
       throw new TrackerError('tracker unreachable');
     };
@@ -1810,7 +1821,7 @@ describe('the reviewer agent ships with auto-merge off (DOR-2535)', () => {
   it('waits for a required check that never reported, even when others passed', async () => {
     setUp();
     const missing = await flow(ship, {
-      tracker: createFakeAdapter({ items: [started()] }),
+      tracker: new FakeTracker({ team: ACME_TEAM, items: [started()] }),
       forge: fakeForge({
         head: HEAD,
         pending: 0,
@@ -1822,7 +1833,7 @@ describe('the reviewer agent ships with auto-merge off (DOR-2535)', () => {
     expect(missing.code).toBe(EXIT.precondition);
     expect((missing.json.checks as { why: string }).why).toContain('not started on PR #7 (build)');
     const present = await flow(ship, {
-      tracker: createFakeAdapter({ items: [started()] }),
+      tracker: new FakeTracker({ team: ACME_TEAM, items: [started()] }),
       forge: fakeForge({
         head: HEAD,
         pending: 0,
@@ -1840,7 +1851,7 @@ describe('the reviewer agent ships with auto-merge off (DOR-2535)', () => {
     dial({ dial: 'auto' });
     writeRun({ review: clean });
     const result = await flow(ship, {
-      tracker: createFakeAdapter({ items: [started()] }),
+      tracker: new FakeTracker({ team: ACME_TEAM, items: [started()] }),
       forge: fakeForge({ head: HEAD, pending: 1, reported: 0 }),
     });
     expect(result.code, result.stderr).toBe(EXIT.ok);

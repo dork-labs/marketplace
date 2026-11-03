@@ -12,7 +12,7 @@ import path from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
 import { main, type MainDeps } from '../../scripts/flow.ts';
-import { createFakeAdapter } from '../fixtures/cli/fake-adapter/adapter.ts';
+import { FakeTracker } from '../../scripts/tracker/fake.ts';
 
 const NOW = new Date('2026-10-29T12:00:00.000Z');
 const HOUR = 3_600_000;
@@ -74,7 +74,7 @@ async function status(fetchImpl: typeof fetch, env: Record<string, string> = {})
     now: () => NOW,
     stdout: { write: (chunk: string) => (stdout += chunk) },
     stderr: { write: () => undefined },
-    createAdapter: async () => createFakeAdapter({ items: [] }).adapter,
+    createAdapter: async () => new FakeTracker({ items: [] }).adapter,
     runProcess: async () => ({ code: 0, stdout: '', stderr: '' }),
     io: { osHome: path.join(project, 'home'), fetch: fetchImpl },
   };

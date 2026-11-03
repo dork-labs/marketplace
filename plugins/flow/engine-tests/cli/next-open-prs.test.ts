@@ -10,7 +10,16 @@ import { afterEach, describe, expect, it } from 'vitest';
 import type { CliDeps } from '../../scripts/cli/context.ts';
 import type { OpenPr } from '../../scripts/forge/open-prs.ts';
 import type { Forge } from '../../scripts/forge/types.ts';
-import { readyItem, runFlow, tempProject, type TempProject } from './read-verb-harness.ts';
+import {
+  readyItem,
+  runFlow as runFlowIn,
+  tempProject,
+  type TempProject,
+} from './read-verb-harness.ts';
+
+/** These items carry assorted prefixes (`A-1`, `B-1`), so the tracker scopes no team. */
+const runFlow: typeof runFlowIn = (argv, temp, backlog, ...rest) =>
+  runFlowIn(argv, temp, { team: { key: null, id: 'team-1' }, ...backlog }, ...rest);
 
 const AGENT = 'flow-bot';
 

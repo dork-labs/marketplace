@@ -4,15 +4,16 @@
  *
  * The tracker lives in the JSON file {@link FAKE_BACKLOG_ENV} names, and every
  * write is saved back to it, so a test or a self-test run can seed it before a
- * `flow` command and read it afterwards. The behavior is `FakeTracker`'s
- * (`scripts/tracker/fake.ts`).
+ * `flow` command and read it afterwards. Every call re-reads the file, so two
+ * processes see each other's writes, as with a real tracker. The behavior is
+ * `FakeTracker`'s (`scripts/tracker/fake.ts`).
  *
  * A project uses it by LINKING this folder to `.agents/flow/adapters/fake/`
  * (a copy would break the relative import below) and setting `tracker` to
  * `fake`. It reaches no real tracker.
  */
 
-import { readFileSync, writeFileSync } from 'node:fs';
+import { readFileSync, renameSync, writeFileSync } from 'node:fs';
 
 import { ConfigError } from '../../../scripts/errors.ts';
 import {
@@ -41,16 +42,64 @@ export function createAdapter(_ctx: AdapterContext): CodeAdapter {
       `the fake tracker reads its backlog from a JSON file; set ${FAKE_BACKLOG_ENV} to its path`
     );
   }
-  let backlog: FakeBacklog;
-  try {
-    backlog = JSON.parse(readFileSync(file, 'utf8')) as FakeBacklog;
-  } catch (error) {
-    throw new ConfigError(
-      `the fake tracker could not read its backlog file ${file}: ${(error as Error).message}`
-    );
-  }
-  const tracker = new FakeTracker(backlog, {
-    persist: (state) => writeFileSync(file, `${JSON.stringify(state, null, 2)}\n`),
+  const load = (): FakeBacklog => {
+    try {
+      return JSON.parse(readFileSync(file, 'utf8')) as FakeBacklog;
+    } catch (error) {
+      throw new ConfigError(
+        `the fake tracker could not read its backlog file ${file}: ${(error as Error).message}`
+      );
+    }
+  };
+  const tracker = new FakeTracker(load(), {
+    // Renamed into place, so another process's read never sees half a file.
+    persist: (state) => {
+      const temp = `${file}.${process.pid}.tmp`;
+      writeFileSync(temp, `${JSON.stringify(state, null, 2)}\n`);
+      renameSync(temp, file);
+    },
   });
-  return tracker.adapter;
+  // In place: the tracker holds this object, and keeps its own state across calls.
+  const refresh = (): FakeBacklog => {
+    const fresh = load();
+    const live = tracker.backlog as unknown as Record<string, unknown>;
+    for (const key of Object.keys(live)) delete live[key];
+    Object.assign(live, fresh);
+    return fresh;
+  };
+  const { adapter } = tracker;
+  return {
+    capabilities: adapter.capabilities,
+    getCurrentUser: async () => {
+      refresh();
+      return adapter.getCurrentUser();
+    },
+    getBacklogSnapshot: async (options) => {
+      refresh();
+      return adapter.getBacklogSnapshot(options);
+    },
+    getItem: async (identifier, options) => {
+      const wait = refresh().getItemDelayMs;
+      const item = await adapter.getItem(identifier, options);
+      const delay = typeof wait === 'number' ? wait : (wait?.[identifier] ?? 0);
+      if (delay > 0) await new Promise((resolve) => setTimeout(resolve, delay));
+      return item;
+    },
+    getInbox: async (options) => {
+      refresh();
+      return adapter.getInbox!(options);
+    },
+    applyWorkState: async (item, change) => {
+      refresh();
+      return adapter.applyWorkState(item, change);
+    },
+    comment: async (item, body) => {
+      refresh();
+      return adapter.comment(item, body);
+    },
+    createItem: async (spec) => {
+      refresh();
+      return adapter.createItem!(spec);
+    },
+  };
 }

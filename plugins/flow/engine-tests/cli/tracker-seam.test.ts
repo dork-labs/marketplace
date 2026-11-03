@@ -5,7 +5,7 @@
  *
  * The loader cases run against real temporary projects and plugin folders,
  * because the loader resolves the same files `config-files.ts` does. The
- * adapter they load is the file-based fake in `fixtures/cli/fake-adapter/`,
+ * adapter they load is the shipped file-based fake in `adapters/reference/fake/`,
  * linked into place so its own relative imports still resolve.
  *
  * @see specs/flow-cli-core/02-specification.md §4
@@ -41,14 +41,10 @@ import {
 import type { WorkItem } from '../../scripts/tracker/types.ts';
 import { verifyWrite, writeDisagreements } from '../../scripts/tracker/verify-write.ts';
 import { labelsAfterChange } from '../../scripts/work-state.ts';
-import {
-  createFakeAdapter,
-  FAKE_BACKLOG_ENV,
-  type FakeBacklog,
-} from '../fixtures/cli/fake-adapter/adapter.ts';
+import { FakeTracker, FAKE_BACKLOG_ENV, type FakeBacklog } from '../../scripts/tracker/fake.ts';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
-const FAKE_ADAPTER_DIR = path.resolve(here, '..', 'fixtures', 'cli', 'fake-adapter');
+const FAKE_ADAPTER_DIR = path.resolve(here, '..', '..', 'adapters', 'reference', 'fake');
 
 let base: string;
 let project: string;
@@ -105,6 +101,13 @@ async function load(transport?: Parameters<typeof loadCodeAdapter>[0]['transport
   return { adapter, warnings };
 }
 
+/** Seed the backlog file the shipped fake adapter reads. */
+function seedBacklog(backlog: FakeBacklog = { items: [] }): void {
+  const backlogFile = path.join(base, 'backlog.json');
+  write(backlogFile, backlog);
+  vi.stubEnv(FAKE_BACKLOG_ENV, backlogFile);
+}
+
 async function rejection(promise: Promise<unknown>): Promise<unknown> {
   try {
     await promise;
@@ -138,11 +141,13 @@ describe('finding the adapter code', () => {
     // generated adapter lives, so the loader must find adapter.ts there.
     writeConfig({ tracker: 'fake' });
     linkFakeAdapter(path.join(project, '.agents/flow/adapters/fake'));
+    seedBacklog({ items: [], user: { id: 'agent-1', name: 'Fake agent' } });
     const { adapter } = await load();
     expect([...adapter.capabilities].sort()).toEqual(
       [
         'applyWorkState',
         'comment',
+        'createItem',
         'getBacklogSnapshot',
         'getCurrentUser',
         'getInbox',
@@ -157,6 +162,7 @@ describe('finding the adapter code', () => {
     // and the loader reaches it through the same resolver.
     writeConfig({ tracker: 'linear' });
     linkFakeAdapter(path.join(plugin, 'skills', 'linear-adapter'));
+    seedBacklog();
     const { adapter } = await load();
     expect((await adapter.getBacklogSnapshot()).tracker).toBe('fake');
   });
@@ -311,7 +317,7 @@ export function createAdapter() {
   it('requireCapabilities names the missing capability', () => {
     // Purpose: a verb checks what it needs before it runs, and the refusal
     // names the method so the adapter author knows what to add.
-    const { adapter } = createFakeAdapter({ items: [], capabilities: ['getCurrentUser'] });
+    const { adapter } = new FakeTracker({ items: [], capabilities: ['getCurrentUser'] });
     expect(() => requireCapabilities(adapter, ['getCurrentUser'])).not.toThrow();
     let error: unknown;
     try {
@@ -406,6 +412,7 @@ describe('tracker failures (exit 4)', () => {
     execFileSync('git', ['init', '-q'], { cwd: other });
     writeConfig({ tracker: 'fake' });
     linkFakeAdapter(path.join(project, '.agents/flow/adapters/fake'));
+    seedBacklog();
     const from = (runDir: string) =>
       loadCodeAdapter({
         roots: roots(),
@@ -461,6 +468,7 @@ describe('tracker failures (exit 4)', () => {
     // found" (exit 5) must not be flattened to exit 4.
     writeConfig({ tracker: 'fake' });
     linkFakeAdapter(path.join(project, '.agents/flow/adapters/fake'));
+    seedBacklog();
     const { adapter } = await load();
     const error = await rejection(adapter.getItem('NOPE-1'));
     expect((error as { exitCode?: number }).exitCode).toBe(EXIT.precondition);
@@ -470,7 +478,7 @@ describe('tracker failures (exit 4)', () => {
 describe('verifyWrite', () => {
   it('passes when the tracker kept the change', async () => {
     // Purpose: the common path; the re-read agrees and is returned.
-    const fake = createFakeAdapter({ items: [item('FAKE-1')] });
+    const fake = new FakeTracker({ items: [item('FAKE-1')] });
     const change = {
       stateCategory: 'started',
       agentLabel: 'agent/claimed',
@@ -484,7 +492,7 @@ describe('verifyWrite', () => {
   it('raises a TrackerError when the read-back disagrees', async () => {
     // Purpose: a write the tracker reported as done but did not keep is the one
     // failure the labels cannot recover from, so the CLI must exit 4.
-    const fake = createFakeAdapter({ items: [item('FAKE-1')], dropWrites: true });
+    const fake = new FakeTracker({ items: [item('FAKE-1')], dropWrites: true });
     const change = {
       stateCategory: 'started',
       agentLabel: 'agent/claimed',

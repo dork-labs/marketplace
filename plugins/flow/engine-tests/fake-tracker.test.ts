@@ -10,6 +10,7 @@ import {
   mkdirSync,
   mkdtempSync,
   readFileSync,
+  readdirSync,
   realpathSync,
   rmSync,
   symlinkSync,
@@ -106,6 +107,51 @@ describe('the shipped fake tracker', () => {
     const again = await load();
     expect((await again.getItem('FAKE-2')).agentDisposition).toBe('claimed');
   });
+
+  it('re-reads the file on every call, so two processes taking turns see each other', async () => {
+    // Purpose: flow's race tests run two `flow` processes against one tracker.
+    // A copy held from load time would answer stale and overwrite the other's write.
+    vi.stubEnv(FAKE_BACKLOG_ENV, backlogFile);
+    const first = await load();
+    const second = await load();
+    const claim = { stateCategory: 'started', agentLabel: 'agent/claimed' } as const;
+    await first.applyWorkState(await first.getItem('FAKE-2'), claim);
+    expect((await second.getItem('FAKE-2')).stateCategory).toBe('started');
+    await second.comment(await second.getItem('FAKE-3'), 'Seen.');
+    const saved = JSON.parse(readFileSync(backlogFile, 'utf8')) as FakeBacklog;
+    expect(saved.items.find((i) => i.identifier === 'FAKE-2')?.stateCategory).toBe('started');
+    expect(saved.comments?.['FAKE-3']?.at(-1)?.body).toBe('Seen.');
+  });
+
+  it('never leaves its temp file behind, and never reuses a number when writes are dropped', async () => {
+    // Purpose: a save renames into place, and re-reading the file keeps the
+    // tracker's own count, so two dropped creates still get two numbers.
+    vi.stubEnv(FAKE_BACKLOG_ENV, backlogFile);
+    const adapter = await load();
+    await adapter.comment(await adapter.getItem('FAKE-2'), 'Saved.');
+    expect(readdirSync(path.dirname(backlogFile)).filter((n) => n.endsWith('.tmp'))).toEqual([]);
+    const saved = JSON.parse(readFileSync(backlogFile, 'utf8')) as FakeBacklog;
+    writeFileSync(backlogFile, JSON.stringify({ ...saved, dropWrites: true }));
+    const spec = { title: 'New', description: '', labels: [] };
+    const one = await adapter.createItem!(spec);
+    const two = await adapter.createItem!(spec);
+    expect(one.identifier).not.toBe(two.identifier);
+  });
+
+  it('holds getItem back by getItemDelayMs, per item when it is a record', async () => {
+    // Purpose: the switch the race tests lean on must really widen the window.
+    const saved = JSON.parse(readFileSync(backlogFile, 'utf8')) as FakeBacklog;
+    writeFileSync(backlogFile, JSON.stringify({ ...saved, getItemDelayMs: { 'FAKE-2': 3000 } }));
+    vi.stubEnv(FAKE_BACKLOG_ENV, backlogFile);
+    const adapter = await load();
+    const timed = async (identifier: string) => {
+      const started = Date.now();
+      await adapter.getItem(identifier);
+      return Date.now() - started;
+    };
+    expect(await timed('FAKE-3')).toBeLessThan(3000);
+    expect(await timed('FAKE-2')).toBeGreaterThanOrEqual(2900);
+  }, 30_000);
 
   it('refuses to run without a backlog file rather than read as an empty tracker', async () => {
     vi.stubEnv(FAKE_BACKLOG_ENV, '');

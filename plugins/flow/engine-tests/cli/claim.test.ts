@@ -32,7 +32,7 @@ describe('flow claim writes the claim projection and records the run', () => {
     // confirmed, so the item ends with agent/claimed and no stage/* label (contract 2.0.0).
     const result = await runFlow(project, { items: [item('FAKE-1')] }, ['claim', 'FAKE-1']);
     expect(result.code).toBe(EXIT.ok);
-    expect(result.tracker.calls).toEqual([
+    expect(result.tracker.writes).toEqual([
       { method: 'applyWorkState', identifier: 'FAKE-1', change: CLAIM_CHANGE },
     ]);
     const after = result.tracker.backlog.items[0];
@@ -158,7 +158,7 @@ describe('flow claim writes the claim projection and records the run', () => {
       'CODEX_THREAD_ID',
     ])
       expect(message).toContain(name);
-    expect(result.tracker.calls).toEqual([]);
+    expect(result.tracker.writes).toEqual([]);
     expect(project.hasRunStore()).toBe(false);
   });
 
@@ -252,13 +252,13 @@ describe('flow claim writes the claim projection and records the run', () => {
   it('posts no comment', async () => {
     // Purpose: the label is the signal (agent etiquette: mostly quiet).
     const result = await runFlow(project, { items: [item('FAKE-1')] }, ['claim', 'FAKE-1']);
-    expect(result.tracker.calls.filter((call) => call.method === 'comment')).toEqual([]);
+    expect(result.tracker.writes.filter((call) => call.method === 'comment')).toEqual([]);
   });
 
   it('prints one plain line in human mode', async () => {
     // Purpose: a person driving by hand gets a readable confirmation.
     const { main } = await import('../../scripts/flow.ts');
-    const { createFakeAdapter } = await import('../fixtures/cli/fake-adapter/adapter.ts');
+    const { FakeTracker } = await import('../../scripts/tracker/fake.ts');
     const { defaultRunner } = await import('./write-harness.ts');
     let out = '';
     const code = await main(['claim', 'FAKE-1'], {
@@ -267,7 +267,7 @@ describe('flow claim writes the claim projection and records the run', () => {
       now: () => new Date('2026-09-26T12:00:00.000Z'),
       stdout: { write: (chunk: string) => (out += chunk) },
       stderr: { write: () => true },
-      createAdapter: async () => createFakeAdapter({ items: [item('FAKE-1')] }).adapter,
+      createAdapter: async () => new FakeTracker({ items: [item('FAKE-1')] }).adapter,
       runProcess: defaultRunner,
     });
     expect(code).toBe(EXIT.ok);
@@ -292,7 +292,7 @@ describe('flow claim refuses what it must not claim (exit 5)', () => {
       expect(result.code).toBe(EXIT.precondition);
       expect(result.json.error).toMatchObject({ code: EXIT.precondition });
       expect(String((result.json.error as { message: string }).message)).toMatch(message);
-      expect(result.tracker.calls).toEqual([]);
+      expect(result.tracker.writes).toEqual([]);
       expect(project.hasRunStore()).toBe(false);
     });
   }
@@ -319,7 +319,7 @@ describe('flow claim refuses what it must not claim (exit 5)', () => {
     });
     expect(result.code).toBe(EXIT.precondition);
     expect(String((result.json.error as { message: string }).message)).toMatch(/--pid/);
-    expect(result.tracker.calls).toEqual([]);
+    expect(result.tracker.writes).toEqual([]);
   });
 
   it('rejects an unknown --host as a usage error', async () => {
@@ -340,7 +340,7 @@ describe('flow claim and the pause', () => {
     project.pause();
     const result = await runFlow(project, { items: [item('FAKE-1')] }, ['claim', 'FAKE-1']);
     expect(result.code).toBe(EXIT.paused);
-    expect(result.tracker.calls).toEqual([]);
+    expect(result.tracker.writes).toEqual([]);
   });
 
   it('claims again once a timed pause has ended, without --manual', async () => {
@@ -392,7 +392,7 @@ describe('flow claim failure and dry run', () => {
       '--dry-run',
     ]);
     expect(result.code).toBe(EXIT.ok);
-    expect(result.tracker.calls).toEqual([]);
+    expect(result.tracker.writes).toEqual([]);
     expect(project.hasRunStore()).toBe(false);
     expect(result.json).toMatchObject({
       dryRun: true,
@@ -407,6 +407,6 @@ describe('flow claim failure and dry run', () => {
     project.writeRuns('{ not json');
     const result = await runFlow(project, { items: [item('FAKE-1')] }, ['claim', 'FAKE-1']);
     expect(result.code).toBe(EXIT.config);
-    expect(result.tracker.calls).toEqual([]);
+    expect(result.tracker.writes).toEqual([]);
   });
 });

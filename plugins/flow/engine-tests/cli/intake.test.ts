@@ -28,7 +28,7 @@ import {
   type IntakeIssue,
 } from '../../scripts/intake.ts';
 import { FlowConfigSchema } from '../../scripts/config-schema.ts';
-import { createFakeAdapter } from '../fixtures/cli/fake-adapter/adapter.ts';
+import { FakeTracker } from '../../scripts/tracker/fake.ts';
 
 const T0 = '2026-10-29T12:00:00.000Z';
 const T1 = '2026-10-30T12:00:00.000Z';
@@ -97,7 +97,7 @@ async function flow(argv: string[], at: string, answer: Answer = { code: 0, stdo
     stdout: { write: (chunk: string) => (stdout += chunk) },
     stderr: { write: () => undefined },
     createAdapter: async () =>
-      createFakeAdapter({ team: { key: 'FAKE', id: 'team-1' }, items: [] }).adapter,
+      new FakeTracker({ team: { key: 'FAKE', id: 'team-1' }, items: [] }).adapter,
     runProcess: async (cmd, args) => {
       calls.push({ cmd, args });
       return { stdout: '', stderr: '', ...answer };

@@ -19,9 +19,9 @@ import type { FlowRun } from '../../scripts/flow-run.ts';
 import { main } from '../../scripts/flow.ts';
 import type { OpenPr } from '../../scripts/forge/open-prs.ts';
 import type { CreatePrInput, Forge, ForgePr, ForgeTarget } from '../../scripts/forge/types.ts';
-import { createFakeAdapter, type FakeTracker } from '../fixtures/cli/fake-adapter/adapter.ts';
+import { FakeTracker } from '../../scripts/tracker/fake.ts';
 import { recordingGuard, refusal, type RecordingGuard } from '../fixtures/land/recording-guard.ts';
-import { item, makeProject, type WriteProject } from './write-harness.ts';
+import { ACME_TEAM, AGENT_USER, item, makeProject, type WriteProject } from './write-harness.ts';
 
 const TOKEN = '0123456789abcdef0123456789abcdef';
 const TOKEN_HASH = createHash('sha256').update(TOKEN).digest('hex');
@@ -163,8 +163,9 @@ const runner: ProcessRunner = async (cmd, args, opts) => {
 async function flow(
   argv: string[],
   forge = fakeForge(),
-  tracker: FakeTracker = createFakeAdapter({ items: [claimedItem()] })
+  tracker: FakeTracker = new FakeTracker({ team: ACME_TEAM, items: [claimedItem()] })
 ) {
+  tracker.backlog.user ??= AGENT_USER;
   let out = '';
   let err = '';
   const code = await main([...argv, '--json'], {
@@ -515,8 +516,8 @@ describe('flow report blocked', () => {
     writeFileSync(path.join(project.dir, 'q.md'), 'Which export format?\n\nCSV or TSV.\n');
     const r = await flow(['report', 'ACME-12', 'blocked', '--question-file', 'q.md']);
     expect(r.code).toBe(0);
-    expect(r.tracker.calls.map((c) => c.method)).toEqual(['comment', 'applyWorkState']);
-    const [comment, write] = r.tracker.calls as unknown as [{ body: string }, { change: object }];
+    expect(r.tracker.writes.map((c) => c.method)).toEqual(['comment', 'applyWorkState']);
+    const [comment, write] = r.tracker.writes as unknown as [{ body: string }, { change: object }];
     expect(comment.body).toMatch(/^Which export format\?[\s\S]*<!-- agent:provenance \{.*\} -->$/);
     // It says plainly how the run resumes.
     expect(comment.body).toContain('Reply to this comment to resume');
@@ -545,7 +546,7 @@ describe('flow report blocked', () => {
   it('re-asks the same question after a reply, and skips only an exact retry', async () => {
     writeRun(drain());
     writeFileSync(path.join(project.dir, 'q.md'), 'Which export format?\n');
-    const tracker = createFakeAdapter({ items: [claimedItem()] });
+    const tracker = new FakeTracker({ team: ACME_TEAM, items: [claimedItem()] });
     const first = await flow(
       ['report', 'ACME-12', 'blocked', '--question-file', 'q.md'],
       undefined,
@@ -653,7 +654,7 @@ describe('flow pr', () => {
 
   it('an urgent (P0) item opens its PR at the cap', async () => {
     writeRun(drain({ pushedSha: head, reviewedSha: head, verdict: 'clean' }), head);
-    const urgent = createFakeAdapter({ items: [{ ...claimedItem(), priority: 1 }] });
+    const urgent = new FakeTracker({ team: ACME_TEAM, items: [{ ...claimedItem(), priority: 1 }] });
     const r = await flow(args, fakeForge({ openPrs: openPrs(8) }), urgent);
     expect(r.code, r.stderr).toBe(0);
     expect(r.forge.calls.some((c) => c.method === 'createPr')).toBe(true);

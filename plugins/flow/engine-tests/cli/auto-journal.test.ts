@@ -18,12 +18,14 @@ import type { VerbDefinition } from '../../scripts/cli/context.ts';
 import { EXIT } from '../../scripts/errors.ts';
 import { main, VERBS, type MainDeps } from '../../scripts/flow.ts';
 import { JournalLineSchema } from '../../scripts/journal-schema.ts';
+import { FakeTracker, type FakeBacklog } from '../../scripts/tracker/fake.ts';
 import {
-  createFakeAdapter,
-  type FakeBacklog,
-  type FakeTracker,
-} from '../fixtures/cli/fake-adapter/adapter.ts';
-import { defaultRunner, item, makeProject, type WriteProject } from './write-harness.ts';
+  AGENT_USER,
+  defaultRunner,
+  item,
+  makeProject,
+  type WriteProject,
+} from './write-harness.ts';
 
 const NOW = '2026-09-26T12:00:00.000Z';
 const FLOW_ROOT = path.resolve(path.dirname(new URL(import.meta.url).pathname), '..', '..');
@@ -85,7 +87,8 @@ async function flow(
     verbs?: VerbDefinition[];
   } = {}
 ) {
-  const tracker = options.tracker ?? createFakeAdapter(options.backlog ?? { items: [] });
+  const tracker = options.tracker ?? new FakeTracker(options.backlog ?? { items: [] });
+  tracker.backlog.user ??= AGENT_USER;
   let stdout = '';
   let stderr = '';
   let tick = 0;
@@ -217,7 +220,7 @@ describe('the write verbs journal what they did, and every run gets a verb line'
   it('a repeated done (the recovery path) writes no second stage end line', async () => {
     // Purpose: done is safe to re-run; the journal must not count the item twice.
     const project = newProject();
-    const tracker = createFakeAdapter({ items: [item('FAKE-1')] });
+    const tracker = new FakeTracker({ items: [item('FAKE-1')] });
     const claimRun = await flow(project, ['claim', 'FAKE-1'], { tracker });
     expect(claimRun.code, claimRun.stderr).toBe(EXIT.ok);
     for (let i = 0; i < 2; i += 1) {
@@ -237,7 +240,7 @@ describe('the write verbs journal what they did, and every run gets a verb line'
     // Purpose: an item closed from another machine has no FlowRun here; the
     // posted summary alone marks the re-run.
     const project = newProject();
-    const tracker = createFakeAdapter({ items: [claimed('FAKE-1')] });
+    const tracker = new FakeTracker({ items: [claimed('FAKE-1')] });
     for (let i = 0; i < 2; i += 1) {
       const done = await flow(project, ['done', 'FAKE-1', '--summary', 'Shipped.'], { tracker });
       expect(done.code, done.stderr).toBe(EXIT.ok);

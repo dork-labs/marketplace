@@ -27,7 +27,7 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { EXIT } from '../../scripts/errors.ts';
 import { main, type MainDeps } from '../../scripts/flow.ts';
 import { JournalLineSchema } from '../../scripts/journal-schema.ts';
-import { createFakeAdapter } from '../fixtures/cli/fake-adapter/adapter.ts';
+import { FakeTracker } from '../../scripts/tracker/fake.ts';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const FLOW_ROOT = path.resolve(here, '..', '..');
@@ -64,7 +64,7 @@ async function flow(argv: string[], env: Record<string, string> = {}) {
     now: () => NOW,
     stdout: { write: (chunk: string) => (stdout += chunk) },
     stderr: { write: (chunk: string) => (stderr += chunk) },
-    createAdapter: async () => createFakeAdapter({ items: [] }).adapter,
+    createAdapter: async () => new FakeTracker({ items: [] }).adapter,
     runProcess: async () => ({ code: 0, stdout: '', stderr: '' }),
     flowRoot: FLOW_ROOT,
   };

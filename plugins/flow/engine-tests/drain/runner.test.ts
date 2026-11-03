@@ -46,9 +46,9 @@ import {
   type SessionHandle,
   type SessionState,
 } from '../../scripts/launchers/types.ts';
-import { createFakeAdapter, type FakeTracker } from '../fixtures/cli/fake-adapter/adapter.ts';
+import { FakeTracker } from '../../scripts/tracker/fake.ts';
 import { recordingGuard, refusal, type RecordingGuard } from '../fixtures/land/recording-guard.ts';
-import { item, makeProject, type WriteProject } from '../cli/write-harness.ts';
+import { ACME_TEAM, item, makeProject, type WriteProject } from '../cli/write-harness.ts';
 
 // Every case drives real git and several CLI runs; a loaded machine needs the room.
 vi.setConfig({ testTimeout: 60_000 });
@@ -497,7 +497,8 @@ beforeEach(() => {
   supervisorEnv = {};
   configure();
   world = {
-    tracker: createFakeAdapter({
+    tracker: new FakeTracker({
+      team: ACME_TEAM,
       user: { id: 'agent-1' },
       items: [item('ACME-1'), item('ACME-2')],
     }),
@@ -519,7 +520,11 @@ describe('flow drain: one item from pick to closing', () => {
     // Purpose: the whole loop the drain exists for, with the forge fake
     // checking at every createPr and arm that a clean verdict covers the branch
     // head. A drain that opened or armed a PR early fails here.
-    world.tracker = createFakeAdapter({ user: { id: 'agent-1' }, items: [item('ACME-1')] });
+    world.tracker = new FakeTracker({
+      team: ACME_TEAM,
+      user: { id: 'agent-1' },
+      items: [item('ACME-1')],
+    });
     let queuedAtStart: FlowRun | undefined;
     world.script.onStart = (req) => {
       if (req.role === 'worker') queuedAtStart = runOf('ACME-1');
@@ -699,7 +704,7 @@ describe("flow drain: a finished run's worker worktree (DOR-2469)", () => {
         },
       } as FlowRun,
     });
-    world.tracker = createFakeAdapter({ user: { id: 'agent-1' }, items: [] });
+    world.tracker = new FakeTracker({ team: ACME_TEAM, user: { id: 'agent-1' }, items: [] });
     return { worktree };
   }
 
@@ -743,7 +748,11 @@ describe("flow drain: a finished run's worker worktree (DOR-2469)", () => {
 describe('flow drain: the arm guard on a re-arm (DOR-3262)', () => {
   /** Carry ACME-1 to an armed PR at s1, then a reviewed fix push s2 waiting to re-arm. */
   async function toReArm() {
-    world.tracker = createFakeAdapter({ user: { id: 'agent-1' }, items: [item('ACME-1')] });
+    world.tracker = new FakeTracker({
+      team: ACME_TEAM,
+      user: { id: 'agent-1' },
+      items: [item('ACME-1')],
+    });
     await tick();
     const s1 = await workerPushes('ACME-1', 'one');
     await tick();
@@ -781,7 +790,11 @@ describe('flow drain: the arm guard on a re-arm (DOR-3262)', () => {
   }, 120_000);
 
   it('a PR flow pr could not arm (a freeze) is armed by the drain once the freeze lifts', async () => {
-    world.tracker = createFakeAdapter({ user: { id: 'agent-1' }, items: [item('ACME-1')] });
+    world.tracker = new FakeTracker({
+      team: ACME_TEAM,
+      user: { id: 'agent-1' },
+      items: [item('ACME-1')],
+    });
     await tick();
     const s1 = await workerPushes('ACME-1', 'one');
     await tick();
@@ -805,7 +818,11 @@ describe('flow drain: the arm guard on a re-arm (DOR-3262)', () => {
   }, 120_000);
 
   it('runs the land.preArm checks flow pr left to it, then arms', async () => {
-    world.tracker = createFakeAdapter({ user: { id: 'agent-1' }, items: [item('ACME-1')] });
+    world.tracker = new FakeTracker({
+      team: ACME_TEAM,
+      user: { id: 'agent-1' },
+      items: [item('ACME-1')],
+    });
     await tick();
     const s1 = await workerPushes('ACME-1', 'one');
     await tick();
@@ -885,13 +902,17 @@ describe('flow drain: filling slots', () => {
     expect(pass.code, pass.stderr).toBe(0);
     expect(world.log.starts).toEqual([]);
     expect(project.runs()).toEqual({});
-    expect(world.tracker.calls.filter((c) => c.method === 'applyWorkState')).toEqual([]);
+    expect(world.tracker.writes.filter((c) => c.method === 'applyWorkState')).toEqual([]);
   });
 
   it('releases the claim when the worker does not start', async () => {
     // Purpose: no run record may name a session that never started; the item
     // goes back to the ready queue at its stage.
-    world.tracker = createFakeAdapter({ user: { id: 'agent-1' }, items: [item('ACME-1')] });
+    world.tracker = new FakeTracker({
+      team: ACME_TEAM,
+      user: { id: 'agent-1' },
+      items: [item('ACME-1')],
+    });
     world.script.failNext = new LaunchError('unavailable', 'the claude binary is not on PATH');
     const pass = await tick();
     expect(pass.code, pass.stderr).toBe(0);
@@ -1007,7 +1028,7 @@ describe('flow drain: filling slots', () => {
     expect(JSON.stringify(pass.json)).toContain('would claim');
     expect(project.hasRunStore()).toBe(false);
     expect(world.log.starts).toEqual([]);
-    expect(world.tracker.calls).toEqual([]);
+    expect(world.tracker.writes).toEqual([]);
     expect(existsSync(path.join(dorkHome, 'workspaces'))).toBe(false);
     expect(existsSync(path.join(project.dir, '.dork', 'flow', 'drain.lock'))).toBe(false);
   });
@@ -1025,7 +1046,11 @@ describe('flow drain: adopt before releasing', () => {
     // Purpose: a pass that dies between start and recording leaves a queued run
     // with a pending intent; the next pass after the start timeout must find
     // and adopt that session, never release it or start another writer.
-    world.tracker = createFakeAdapter({ user: { id: 'agent-1' }, items: [item('ACME-1')] });
+    world.tracker = new FakeTracker({
+      team: ACME_TEAM,
+      user: { id: 'agent-1' },
+      items: [item('ACME-1')],
+    });
     world.script.crashNext = true;
     world.options.findSession = async (probe) =>
       world.log.starts.find((s) => s.req.sessionId === probe.sessionId)?.handle ?? null;
@@ -1054,7 +1079,11 @@ describe('flow drain: adopt before releasing', () => {
     // Purpose: not found proves the worker never started on this machine, so
     // the claim goes back; on DorkOS session_start may have minted another id,
     // so not found proves nothing and the run parks with instructions.
-    world.tracker = createFakeAdapter({ user: { id: 'agent-1' }, items: [item('ACME-1')] });
+    world.tracker = new FakeTracker({
+      team: ACME_TEAM,
+      user: { id: 'agent-1' },
+      items: [item('ACME-1')],
+    });
     world.script.crashNext = true;
     world.options.findSession = async () => null;
     await tick();
@@ -1079,7 +1108,7 @@ describe('flow drain: adopt before releasing', () => {
     expect(labels).toContain('agent/needs-input');
     expect(world.log.starts).toHaveLength(2);
     // The park comment says how the run resumes.
-    const park = world.tracker.calls.filter((c) => c.method === 'comment').at(-1) as unknown as {
+    const park = world.tracker.writes.filter((c) => c.method === 'comment').at(-1) as unknown as {
       body: string;
     };
     expect(park.body).toContain('Reply to this comment to resume');
@@ -1089,7 +1118,11 @@ describe('flow drain: adopt before releasing', () => {
 describe('flow drain: compare-and-set', () => {
   /** Start ACME-1 and report one push, ready for a reviewer. */
   async function pushedOnce(): Promise<string> {
-    world.tracker = createFakeAdapter({ user: { id: 'agent-1' }, items: [item('ACME-1')] });
+    world.tracker = new FakeTracker({
+      team: ACME_TEAM,
+      user: { id: 'agent-1' },
+      items: [item('ACME-1')],
+    });
     await tick();
     return workerPushes('ACME-1', 'one');
   }
@@ -1157,7 +1190,11 @@ describe('flow drain: arming only the reviewed commit', () => {
       // Purpose: the race behind the review gate. A pass decides to re-arm at the
       // reviewed S2; before the arm lands the worker pushes S3. The runner must
       // refuse to arm, and every arm names its commit.
-      world.tracker = createFakeAdapter({ user: { id: 'agent-1' }, items: [item('ACME-1')] });
+      world.tracker = new FakeTracker({
+        team: ACME_TEAM,
+        user: { id: 'agent-1' },
+        items: [item('ACME-1')],
+      });
       await tick();
       const s1 = await workerPushes('ACME-1', 'one');
       await tick();
@@ -1214,7 +1251,11 @@ describe('flow drain: arming only the reviewed commit', () => {
   it('disarms a push nobody reported on an armed PR', async () => {
     // Purpose: a worker that pushes without reporting must never leave an armed
     // PR merging a commit nobody reviewed.
-    world.tracker = createFakeAdapter({ user: { id: 'agent-1' }, items: [item('ACME-1')] });
+    world.tracker = new FakeTracker({
+      team: ACME_TEAM,
+      user: { id: 'agent-1' },
+      items: [item('ACME-1')],
+    });
     await tick();
     const s1 = await workerPushes('ACME-1', 'one');
     await tick();
@@ -1243,7 +1284,11 @@ describe('flow drain: parked runs', () => {
   it('a park the drain decides is timed, and stops the worker', async () => {
     // Purpose: only a reply after the park answers it, so the pass that parks
     // records when; and a parked run holds no live session.
-    world.tracker = createFakeAdapter({ user: { id: 'agent-1' }, items: [item('ACME-1')] });
+    world.tracker = new FakeTracker({
+      team: ACME_TEAM,
+      user: { id: 'agent-1' },
+      items: [item('ACME-1')],
+    });
     await tick();
     const worker = runOf('ACME-1').sessionId;
     world.script.states.set(worker, { kind: 'idle' });
@@ -1361,7 +1406,11 @@ describe('flow drain: questions with a pick (spec flow-multiproject §7.5)', () 
   // DorkOS can show the run in that chat too (fleet contract 4.1.0).
   it('records the launching chat as dispatchedBy', async () => {
     supervisorEnv = { CLAUDE_CODE_SESSION_ID: 'launching-chat' };
-    world.tracker = createFakeAdapter({ user: { id: 'agent-1' }, items: [item('ACME-1')] });
+    world.tracker = new FakeTracker({
+      team: ACME_TEAM,
+      user: { id: 'agent-1' },
+      items: [item('ACME-1')],
+    });
     await tick();
     expect(runOf('ACME-1').dispatchedBy).toBe('launching-chat');
   });
@@ -1371,7 +1420,11 @@ describe('flow drain: questions with a pick (spec flow-multiproject §7.5)', () 
   // the question so no later park reads it as its own.
   it('takes the pick at the deadline end to end, then clears the question', async () => {
     dial({ dial: 'tell', questionDeadlineMinutes: 60 });
-    world.tracker = createFakeAdapter({ user: { id: 'agent-1' }, items: [item('ACME-1')] });
+    world.tracker = new FakeTracker({
+      team: ACME_TEAM,
+      user: { id: 'agent-1' },
+      items: [item('ACME-1')],
+    });
     await tick();
     await workerAsks();
     expect(runOf('ACME-1').question?.decideBy).toBe(new Date(T0 + 60 * 60_000).toISOString());
@@ -1390,7 +1443,11 @@ describe('flow drain: questions with a pick (spec flow-multiproject §7.5)', () 
   // Review finding 1 (blocker): an old, answered question must never release a
   // later park (review rounds, failing checks, a stopped worker).
   it('keeps a later park parked when an old question was answered', async () => {
-    world.tracker = createFakeAdapter({ user: { id: 'agent-1' }, items: [item('ACME-1')] });
+    world.tracker = new FakeTracker({
+      team: ACME_TEAM,
+      user: { id: 'agent-1' },
+      items: [item('ACME-1')],
+    });
     await tick();
     const at = (minutes: number) => new Date(T0 + minutes * 60_000).toISOString();
     const run = runOf('ACME-1');
@@ -1434,7 +1491,11 @@ describe('flow drain: questions with a pick (spec flow-multiproject §7.5)', () 
   // once; its approval (with the token from its brief) resumes the work.
   it('hands a floor question to the reviewer agent after the wait, once', async () => {
     dial({ dial: 'tell', questionDeadlineMinutes: 60 });
-    world.tracker = createFakeAdapter({ user: { id: 'agent-1' }, items: [item('ACME-1')] });
+    world.tracker = new FakeTracker({
+      team: ACME_TEAM,
+      user: { id: 'agent-1' },
+      items: [item('ACME-1')],
+    });
     await tick();
     await workerAsks('outward-facing');
     expect(runOf('ACME-1').question).toMatchObject({ decideBy: null, floor: ['outward-facing'] });
@@ -1490,7 +1551,11 @@ describe('flow drain: questions with a pick (spec flow-multiproject §7.5)', () 
   // question forever: the claim is given back and the next pass tries again.
   it('gives a check back when its reviewer does not start, and tries again', async () => {
     dial({ dial: 'tell', questionDeadlineMinutes: 60 });
-    world.tracker = createFakeAdapter({ user: { id: 'agent-1' }, items: [item('ACME-1')] });
+    world.tracker = new FakeTracker({
+      team: ACME_TEAM,
+      user: { id: 'agent-1' },
+      items: [item('ACME-1')],
+    });
     await tick();
     await workerAsks('outward-facing');
     clock = T0 + 61 * 60_000;
@@ -1509,7 +1574,11 @@ describe('flow drain: questions with a pick (spec flow-multiproject §7.5)', () 
   /** Park a floor question, let its wait pass, and let the drain start its checker. */
   async function checkerStarted() {
     dial({ dial: 'tell', questionDeadlineMinutes: 60 });
-    world.tracker = createFakeAdapter({ user: { id: 'agent-1' }, items: [item('ACME-1')] });
+    world.tracker = new FakeTracker({
+      team: ACME_TEAM,
+      user: { id: 'agent-1' },
+      items: [item('ACME-1')],
+    });
     await tick();
     await workerAsks('outward-facing');
     clock = T0 + 61 * 60_000;
@@ -1569,7 +1638,11 @@ describe('flow drain: questions with a pick (spec flow-multiproject §7.5)', () 
   // Never for secrets or spending: that question waits for a person.
   it('never hands a spend to the reviewer agent', async () => {
     dial({ dial: 'auto' });
-    world.tracker = createFakeAdapter({ user: { id: 'agent-1' }, items: [item('ACME-1')] });
+    world.tracker = new FakeTracker({
+      team: ACME_TEAM,
+      user: { id: 'agent-1' },
+      items: [item('ACME-1')],
+    });
     await tick();
     await workerAsks('secrets-or-spend');
     clock = T0 + 24 * 60 * 60_000;
@@ -1584,20 +1657,24 @@ describe('flow drain: a PR from flow pr is not an early one', () => {
     // Purpose: flow pr opens the PR, then records it. A pass that gathers in
     // between sees a PR on the branch with none recorded; at the clean reviewed
     // head that is flow pr's own PR and must be left alone.
-    world.tracker = createFakeAdapter({ user: { id: 'agent-1' }, items: [item('ACME-1')] });
+    world.tracker = new FakeTracker({
+      team: ACME_TEAM,
+      user: { id: 'agent-1' },
+      items: [item('ACME-1')],
+    });
     await tick();
     const s1 = await workerPushes('ACME-1', 'one');
     await tick();
     await reviewerSays('ACME-1', s1, 'clean');
     await tick();
     expect(drainOf('ACME-1').phase).toBe('pr-ready');
-    const commentsBefore = world.tracker.calls.filter((c) => c.method === 'comment').length;
+    const commentsBefore = world.tracker.writes.filter((c) => c.method === 'comment').length;
 
     world.forge.openPr();
     await tick();
     expect(drainOf('ACME-1')).toMatchObject({ phase: 'pr-ready', pr: null });
     expect(world.forge.calls.some((c) => c.method === 'disarm')).toBe(false);
-    expect(world.tracker.calls.filter((c) => c.method === 'comment')).toHaveLength(commentsBefore);
+    expect(world.tracker.writes.filter((c) => c.method === 'comment')).toHaveLength(commentsBefore);
 
     // flow pr, retried, records the PR it opened; the drain watches it.
     const wt = runOf('ACME-1').worktreePath;
@@ -1612,7 +1689,11 @@ describe('flow drain: the handoff seam', () => {
   it('runs the handoff reducer before drainStep, which acts on its result', async () => {
     // Purpose: the handoff phase plugs in here; drainStep must see the run the
     // handoff reducer returned (here, told to sleep), not the one gathered.
-    world.tracker = createFakeAdapter({ user: { id: 'agent-1' }, items: [item('ACME-1')] });
+    world.tracker = new FakeTracker({
+      team: ACME_TEAM,
+      user: { id: 'agent-1' },
+      items: [item('ACME-1')],
+    });
     await tick();
     await workerPushes('ACME-1', 'one');
     const seen: string[] = [];
@@ -1828,7 +1909,11 @@ describe('flow drain: handoff on a limit (§5)', () => {
     fleet({ claude3: { role: 'rotation' }, claude4: { role: 'rotation' } }, extra);
     healthy('claude3');
     healthy('claude4');
-    world.tracker = createFakeAdapter({ user: { id: 'agent-1' }, items: [item('ACME-1')] });
+    world.tracker = new FakeTracker({
+      team: ACME_TEAM,
+      user: { id: 'agent-1' },
+      items: [item('ACME-1')],
+    });
     const pass = await tick();
     expect(pass.code, pass.stderr).toBe(0);
     const from = runOf('ACME-1').account as string;
@@ -1853,7 +1938,7 @@ describe('flow drain: handoff on a limit (§5)', () => {
   const workers = () => world.log.starts.filter((s) => s.req.role === 'worker');
 
   /** The comments the fake tracker got. */
-  const comments = () => world.tracker.calls.filter((c) => c.method === 'comment');
+  const comments = () => world.tracker.writes.filter((c) => c.method === 'comment');
 
   it('auto: a rejected account hands off with no operator call, but only once the worker stopped', async () => {
     // Purpose: DOR-2374's criterion. While the worker is still busy (the ledger
@@ -1912,7 +1997,7 @@ describe('flow drain: handoff on a limit (§5)', () => {
     expect(body).toContain(`handoff ACME-1 --to claude-code:${to}`);
     expect(runOf('ACME-1').limit).toMatchObject({ state: 'pending-approval' });
     // No label change: the agent still owns the item.
-    expect(world.tracker.calls.filter((c) => c.method === 'applyWorkState')).toHaveLength(1);
+    expect(world.tracker.writes.filter((c) => c.method === 'applyWorkState')).toHaveLength(1);
 
     clock += 60_000;
     pass = await tick();
@@ -2115,7 +2200,11 @@ describe('flow drain: handoff on a limit (§5)', () => {
     for (const setting of ['off', 'on'] as const) {
       fleet({ claude3: { role: 'rotation' } }, { crossRuntimeFallback: setting });
       healthy('claude3');
-      world.tracker = createFakeAdapter({ user: { id: 'agent-1' }, items: [item('ACME-1')] });
+      world.tracker = new FakeTracker({
+        team: ACME_TEAM,
+        user: { id: 'agent-1' },
+        items: [item('ACME-1')],
+      });
       world.log.starts.length = 0;
       await tick();
       expect(runOf('ACME-1').account).toBe('claude3');

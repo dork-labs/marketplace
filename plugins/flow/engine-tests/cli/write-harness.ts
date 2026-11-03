@@ -25,14 +25,16 @@ import { realProcessRunner, type ProcessRunner } from '../../scripts/cli/context
 import type { FlowRun } from '../../scripts/flow-run.ts';
 import { main, type MainDeps } from '../../scripts/flow.ts';
 import type { WorkItem } from '../../scripts/tracker/types.ts';
-import {
-  createFakeAdapter,
-  type FakeBacklog,
-  type FakeTracker,
-} from '../fixtures/cli/fake-adapter/adapter.ts';
+import { FakeTracker, type FakeBacklog } from '../../scripts/tracker/fake.ts';
 
 /** The worker pid the fake `ps` reports. */
 export const FAKE_PPID = 4242;
+
+/** The team for tests whose items are `ACME-*`: the fake refuses another team's items. */
+export const ACME_TEAM = { key: 'ACME', id: 'team-acme' };
+
+/** The account the tests' config names, so a comment the adapter posts is the agent's own. */
+export const AGENT_USER = { id: 'agent-1', name: 'Fake agent' };
 
 /** One temporary project. */
 export interface WriteProject {
@@ -184,7 +186,8 @@ export async function runFlow(
   argv: string[],
   options: RunOptions = {}
 ): Promise<RunResult> {
-  const tracker = 'adapter' in backlog ? backlog : createFakeAdapter(backlog);
+  const tracker = 'adapter' in backlog ? backlog : new FakeTracker(backlog);
+  tracker.backlog.user ??= AGENT_USER;
   const stdout = sink();
   const stderr = sink();
   const deps: MainDeps = {

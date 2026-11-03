@@ -14,7 +14,8 @@ import { main, VERBS } from '../../scripts/flow.ts';
 import type { OpenPr } from '../../scripts/forge/open-prs.ts';
 import type { ArmFacts, Forge } from '../../scripts/forge/types.ts';
 import type { WorkItem } from '../../scripts/tracker/types.ts';
-import { createFakeAdapter } from '../fixtures/cli/fake-adapter/adapter.ts';
+import { FakeTracker } from '../../scripts/tracker/fake.ts';
+import { ACME_TEAM } from './write-harness.ts';
 import { recordingGuard, refusal, type RecordingGuard } from '../fixtures/land/recording-guard.ts';
 import { readyItem, tempProject, type TempProject } from './read-verb-harness.ts';
 
@@ -133,7 +134,8 @@ async function flow(
     now: () => new Date('2026-09-30T12:00:00Z'),
     stdout: { write: (c: string) => (out += c) },
     stderr: { write: (c: string) => (err += c) },
-    createAdapter: async () => createFakeAdapter({ items: opts.items ?? [] }).adapter,
+    createAdapter: async () =>
+      new FakeTracker({ team: ACME_TEAM, items: opts.items ?? [] }).adapter,
     runProcess: github,
     createForge: () => forge,
     ...(opts.guard === undefined ? {} : { armGuard: opts.guard.guard as ArmGuard }),

@@ -4,6 +4,12 @@ Installs of this plugin are pinned to a commit SHA, so a fix here does not reach
 you until you **reinstall it** (Marketplace → flow → reinstall, or re-run your
 `--plugin-dir` checkout's `git pull`). Each entry below says whether that matters.
 
+## 0.82.0
+
+**Flow's own tests now run against the fake tracker it ships, not a second, looser copy (DOR-2398). Nothing changes when you use flow, so there's no need to reinstall for this.**
+
+- The shipped fake tracker re-reads its backlog file on every call and saves by renaming a finished file into place, so two `flow` processes see each other's writes and never read half a file. A new test-only switch, `getItemDelayMs`, makes it slow to answer. If you point a project at the fake, that's the only difference you'd see.
+
 ## 0.80.0
 
 **Flow never takes its hidden signature line as proof of who wrote a comment (DOR-2351), and the drain docs say more about what removing a finished worktree does. Nothing changes in how flow behaves; reinstall only if you want the updated docs and the tests that pin this.**
