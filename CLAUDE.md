@@ -123,7 +123,8 @@ leaves the PR waiting forever. Keep it that way, or un-require the check first.
   the wrapper that makes those guards refuse rather than skip when node is missing, and the
   PR watcher, plus the security gate's own fixtures.
 - `security-gate.yml`, check **`security-gate`** (not required yet). A change to a
-  security path (anything a package installs or runs, CI, agent config, dependencies)
+  security path (anything under `plugins/`, docs and tests included; CI, agent config,
+  dependencies)
   needs DorkOS Security's `security-reviewed` label, added after the PR's last push, with
   no `hold`. On an open PR it only waits, so green doesn't mean reviewed: read the
   `security-review` status, which main's copy of the gate writes. The queue never waits.

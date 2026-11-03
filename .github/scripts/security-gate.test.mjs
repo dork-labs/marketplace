@@ -14,7 +14,6 @@ import {
   latestReview,
   githubApi,
 } from './security-gate.mjs';
-import { pluginsPointingAtTests, withManifestPaths } from './security-manifest-paths.mjs';
 
 const workflow = readFileSync(new URL('../workflows/security-gate.yml', import.meta.url), 'utf8');
 const initializerWorkflow = readFileSync(
@@ -226,7 +225,7 @@ test('workflow path list covers Security’s marketplace list and both sides of 
     'plugins/flow/templates/review.md',
     'plugins/flow/behaviour.json',
     'plugins/new-package/anything/new.js',
-    // Docs and templates agents read at run time, and folders whose names only look exempt.
+    // Docs and templates agents read at run time, and folders merely named tests or docs.
     'plugins/flow/docs/intake.mdx',
     'plugins/flow/docs/provenance.md',
     'plugins/flow/templates/docs/spec.md',
@@ -265,7 +264,7 @@ test('workflow path list covers Security’s marketplace list and both sides of 
     'yarn.lock',
     '.npmrc',
     'plugins/flow/.npmrc',
-    // A dot, dot-dot or empty segment never earns an exemption.
+    // A dot, dot-dot or empty segment always counts.
     'plugins/flow/docs/../hooks/a.sh',
     'plugins/flow/tests/../scripts/a.ts',
     'plugins/flow/./docs/a.md',
@@ -280,18 +279,8 @@ test('workflow path list covers Security’s marketplace list and both sides of 
       `rename: ${filename}`
     );
   }
-  // Docs and tests: no label needed.
-  for (const filename of [
-    'README.md',
-    'specs/security-gate/01-ideation.md',
-    'plugins/flow/README.md',
-    'plugins/flow/CHANGELOG.md',
-    'plugins/visual-companion/LICENSE',
-    'plugins/visual-companion/NOTICE',
-    'specs/drain.md',
-    'plugins/visual-companion/tests/install-smoke.sh',
-    'plugins/visual-companion/skills/visual-companion/tests/18-host.test.cjs',
-  ]) {
+  // The repo's own docs: no label needed.
+  for (const filename of ['README.md', 'specs/security-gate/01-ideation.md', 'specs/drain.md']) {
     assert.equal(touchesSecurity([{ filename }], pattern), false, filename);
   }
 });
@@ -310,9 +299,6 @@ test('agent config counts at any depth; a lookalike name does not', () => {
     'specs/x/CLAUDE.md',
     'specs/x/.claude/settings.json',
     'docs/AGENTS.md',
-    // Past the exemptions: a test folder is still a folder an agent can start in.
-    'plugins/x/tests/CLAUDE.md',
-    'plugins/x/tests/fixtures/.claude/settings.json',
     // A symlink carries the folder's name with no slash after it.
     '.codex',
     '.opencode',
@@ -341,7 +327,6 @@ test('agent config counts at any depth; a lookalike name does not', () => {
     'specs/x/.codex-notes/a.md',
     'specs/x/.opencode.md',
     'specs/x/claude/a.md',
-    'plugins/x/tests/AGENTS.md.txt',
   ]) {
     assert.equal(touchesSecurity([{ filename }], pattern), false, filename);
   }
@@ -857,7 +842,6 @@ test('only the newest exact-head App success authorizes a sensitive diff', async
 test('the gate covers its own files: a PR touching only the gate script needs approval', async () => {
   for (const file of [
     '.github/scripts/security-gate.mjs',
-    '.github/scripts/security-manifest-paths.mjs',
     '.github/workflows/security-gate.yml',
     '.github/workflows/security-review-initialize.yml',
   ]) {
@@ -873,209 +857,43 @@ test('the base commit’s list decides: a PR that edits the list and a covered f
   const f = fixture({ files: ['.github/workflows/security-gate.yml', 'plugins/flow/hooks/a.sh'] });
   await assert.rejects(checkPullRequest(f.api, prEvent, pattern), /security-review pending/);
   assert.match(workflow, /ref: \$\{\{ env\.SECURITY_BASE_SHA \}\}/);
-  assert.match(workflow, /node \.github\/scripts\/security-manifest-paths\.mjs/);
+  assert.match(workflow, /run: node \.github\/scripts\/security-gate\.mjs$/m);
 });
 
-test('exemptions match whole folder names only', () => {
+test('anything under plugins/ counts: code, a test folder, a doc, or the folder itself', () => {
   for (const filename of [
-    'plugins/flow/docs-runner.js',
-    'plugins/x/tests.js',
-    'plugins/x/tests',
-    'plugins/x/testsuite/a.sh',
-    'plugins/x/engine-tests.ts',
-    'plugins/x/skills/s/tests.md',
-    'plugins/x/skills/s/testing/a.sh',
-    'plugins/x/README.md.sh',
-    'plugins/x/agents/reviewer.md',
-    'plugins/x/LICENSE.sh',
+    'plugins',
+    'plugins/x',
+    'plugins/flow/hooks/gate.sh',
+    'plugins/flow/tests/a.sh',
+    'plugins/flow/engine-tests/a.test.ts',
+    'plugins/flow/engine-tests/fixtures/a.json',
+    'plugins/x/skills/s/tests/a.cjs',
+    'plugins/x/README.md',
+    'plugins/x/CHANGELOG.md',
+    'plugins/x/LICENSE',
+    'plugins/x/NOTICE',
+    'plugins/x/docs/a.md',
+    'plugins/x/commands/node_modules/c.md',
+    // Case-insensitive disks.
+    'Plugins/Flow/Tests/a.sh',
+    'PLUGINS/x/README.md',
+    'pluginſ/x/README.md',
   ]) {
     assert.ok(touchesSecurity([{ filename }], pattern), filename);
+    assert.ok(
+      touchesSecurity([{ filename: 'specs/moved.md', previous_filename: filename }], pattern),
+      `moved out: ${filename}`
+    );
   }
-});
-
-test('a plugin whose manifests mention a test folder loses its test exemptions', () => {
-  const dir = mkdtempSync(join(tmpdir(), 'security-manifests-'));
-  try {
-    const write = (path, json) => {
-      mkdirSync(join(dir, path, '..'), { recursive: true });
-      writeFileSync(join(dir, path), typeof json === 'string' ? json : JSON.stringify(json));
-    };
-    // Forms a shell-parsing scan would miss.
-    write('plugins/a/hooks/hooks.json', {
-      hooks: { PreToolUse: [{ hooks: [{ type: 'command', command: 'sh ${CLAUDE_PLUGIN_ROOT:-.}/tests/a.sh' }] }] },
-    });
-    write('plugins/b/.mcp.json', { mcpServers: { s: { command: 'pwsh', args: ['${CLAUDE_PLUGIN_ROOT}\\engine-tests\\serve.ps1'] } } });
-    // A manifest that names another JSON file, which names the script.
-    write('plugins/c/.claude-plugin/plugin.json', { name: 'c', hooks: './config/more-hooks.json' });
-    write('plugins/c/config/more-hooks.json', { hooks: { Stop: [{ hooks: [{ command: 'bash tests/x.sh' }] }] } });
-    write('plugins/f/hooks/hooks.json', {
-      hooks: { Stop: [{ hooks: [{ command: 'cd ${CLAUDE_PLUGIN_ROOT}/tests && bash run.sh' }] }] },
-    });
-    write('plugins/g/.mcp.json', { mcpServers: { s: { command: 'node', args: ['--dir=./tests', '--x'] } } });
-    write('plugins/d/.lsp.json', { s: { command: 'node', args: ['skills/s/tests/lsp.mjs'] } });
-    // No mention: stays exempt. A word like "attests" is not a mention.
-    write('plugins/e/.claude-plugin/plugin.json', { name: 'e', description: 'attests to contests', dirs: ['tests-old/', 'my-tests/'] });
-    assert.deepEqual(pluginsPointingAtTests(dir), ['a', 'b', 'c', 'd', 'f', 'g']);
-    const extended = withManifestPaths(pattern, pluginsPointingAtTests(dir));
-    for (const filename of [
-      'plugins/a/tests/a.sh',
-      'plugins/a/tests/other.sh',
-      'plugins/b/tests/serve.ps1',
-      'plugins/c/tests/x.sh',
-      'plugins/d/skills/s/tests/lsp.mjs',
-      'plugins/f/tests/run.sh',
-      'plugins/g/tests/a.mjs',
-    ]) {
-      assert.equal(touchesSecurity([{ filename }], pattern), false, `exempt without the manifest: ${filename}`);
-      assert.ok(touchesSecurity([{ filename }], extended), filename);
-    }
-    assert.equal(touchesSecurity([{ filename: 'plugins/e/tests/a.sh' }], extended), false);
-    // A mention that climbs out of its plugin can't be pinned down: every plugin
-    // loses it, including `w`, which no manifest of its own points at.
-    write('plugins/w/.claude-plugin/plugin.json', { name: 'w' });
-    assert.ok(!pluginsPointingAtTests(dir).includes('w'));
-    for (const climb of [
-      { hooks: { Stop: [{ hooks: [{ command: 'bash ../w/tests/x.sh' }] }] } },
-      { hooks: { Stop: [{ hooks: [{ command: 'cd .. && bash w/tests/x.sh' }] }] } },
-      { hooks: { Stop: [{ hooks: [{ command: 'cd ${CLAUDE_PLUGIN_ROOT}/.. && bash w/tests/x.sh' }] }] } },
-      // A flag glued to the climb, and another plugin's folder named without `..`.
-      { hooks: { Stop: [{ hooks: [{ command: 'make -C../w/tests' }] }] } },
-      { hooks: { Stop: [{ hooks: [{ command: 'cd ..>/dev/null; bash w/tests/x.sh' }] }] } },
-      { hooks: { Stop: [{ hooks: [{ command: 'bash ~/x/plugins/w/tests/x.sh' }] }] } },
-      // Split across strings: neither one alone both climbs and mentions.
-      { hooks: { Stop: [{ hooks: [{ command: 'node', args: ['--root', '../w', 'tests/x.sh'] }] }] } },
-    ]) {
-      write('plugins/e/hooks/hooks.json', climb);
-      assert.deepEqual(
-        pluginsPointingAtTests(dir),
-        ['a', 'b', 'c', 'd', 'e', 'f', 'g', 'w'],
-        JSON.stringify(climb)
-      );
-    }
-    // `..` inside a name is no climb.
-    write('plugins/e/hooks/hooks.json', { hooks: { Stop: [{ hooks: [{ command: 'bash tests/a..b.sh' }] }] } });
-    assert.ok(!pluginsPointingAtTests(dir).includes('w'));
-    // A manifest that does not parse fails the run rather than shrinking the list.
-    write('plugins/b/.mcp.json', '{ not json');
-    assert.throws(() => pluginsPointingAtTests(dir));
-  } finally {
-    rmSync(dir, { recursive: true, force: true });
-  }
-});
-
-test('a catalog entry’s hooks count, by the plugin its source names', () => {
-  const dir = mkdtempSync(join(tmpdir(), 'security-catalog-'));
-  try {
-    const write = (path, json) => {
-      mkdirSync(join(dir, path, '..'), { recursive: true });
-      writeFileSync(join(dir, path), typeof json === 'string' ? json : JSON.stringify(json));
-    };
-    const catalog = (plugins) => write('.claude-plugin/marketplace.json', { plugins });
-    for (const name of ['a', 'b', 'c']) mkdirSync(join(dir, 'plugins', name), { recursive: true });
-    const hooks = { Stop: [{ hooks: [{ command: 'bash ${CLAUDE_PLUGIN_ROOT}/tests/x.sh' }] }] };
-    // By the source folder, not the entry's name.
-    catalog([{ name: 'b', source: './plugins/a', hooks }, { name: 'c', source: './plugins/c' }]);
-    assert.deepEqual(pluginsPointingAtTests(dir), ['a']);
-    // A JSON file the entry names is read too.
-    catalog([{ name: 'b', source: './plugins/b', hooks: './config/h.json' }]);
-    write('plugins/b/config/h.json', { hooks });
-    assert.deepEqual(pluginsPointingAtTests(dir), ['b']);
-    // An entry that can't be pinned to a plugin folder here counts for every plugin,
-    // mention or not: a JSON file it names can't be found from a folder it doesn't have.
-    for (const source of [
-      './elsewhere',
-      './',
-      { source: 'github', repo: 'x/y' },
-      './plugins/a/sub',
-      './plugins/ghost',
-    ]) {
-      for (const extra of [{ hooks }, {}]) {
-        catalog([{ name: 'a', source, ...extra }]);
-        assert.deepEqual(pluginsPointingAtTests(dir), ['a', 'b', 'c'], JSON.stringify(source));
-      }
-    }
-    // No mention: still exempt. A catalog that does not parse refuses.
-    catalog([{ name: 'a', source: './plugins/a' }]);
-    rmSync(join(dir, 'plugins/b/config/h.json'));
-    assert.deepEqual(pluginsPointingAtTests(dir), []);
-    write('.claude-plugin/marketplace.json', '{ not json');
-    assert.throws(() => pluginsPointingAtTests(dir));
-  } finally {
-    rmSync(dir, { recursive: true, force: true });
-  }
-});
-
-/** A throwaway checkout, and a writer for it. */
-function withCheckout(run) {
-  const dir = mkdtempSync(join(tmpdir(), 'security-manifest-'));
-  const write = (rel, text) => {
-    mkdirSync(join(dir, rel, '..'), { recursive: true });
-    writeFileSync(join(dir, rel), text);
-  };
-  try {
-    run(dir, write);
-  } finally {
-    rmSync(dir, { recursive: true, force: true });
-  }
-}
-
-test('any other file a plugin ships counts as a mention, not just its manifests', () => {
-  withCheckout((dir, write) => {
-    write('plugins/a/package.json', JSON.stringify({ scripts: { test: 'vitest run tests' } }));
-    write('plugins/b/vitest.config.ts', "export default { include: ['engine-tests/**'] };\n");
-    write('plugins/c/skills/s/SKILL.md', '---\nhooks: bash ./tests/x.sh\n---\n');
-    write('plugins/d/commands/c.md', '!`cd tests && sh x.sh`\n');
-    write('plugins/e/keep.txt', 'nothing here\n');
-    assert.deepEqual(pluginsPointingAtTests(dir), ['a', 'b', 'c', 'd']);
-    const list = withManifestPaths(pattern, ['a']);
-    assert.ok(touchesSecurity([{ filename: 'plugins/a/tests/x.sh' }], list));
-    assert.equal(touchesSecurity([{ filename: 'plugins/e/tests/x.sh' }], list), false);
-  });
-});
-
-test('the wider scan skips what runs nothing, and matches whole words only', () => {
-  withCheckout((dir, write) => {
-    write('plugins/a/README.md', 'bash tests/x.sh\n');
-    write('plugins/a/CHANGELOG.md', 'bash tests/x.sh\n');
-    write('plugins/a/tests/x.sh', 'bash tests/y.sh\n');
-    write('plugins/a/engine-tests/x.ts', '// engine-tests -> plugins/a\n');
-    write('plugins/a/skills/s/tests/x.sh', 'bash tests/y.sh\n');
-    write('plugins/a/node_modules/dep/index.js', "require('./tests/x');\n");
-    write('plugins/a/scripts/x.ts', "// attests contests tests-old/ my-tests\nimport '../y.ts';\n");
-    assert.deepEqual(pluginsPointingAtTests(dir), []);
-  });
-});
-
-test('a file naming a test folder on a line that leaves its plugin counts for every plugin', () => {
-  withCheckout((dir, write) => {
-    write('plugins/a/keep.txt', 'nothing here\n');
-    write('plugins/b/bin/run.sh', 'bash ../a/tests/x.sh\n');
-    assert.deepEqual(pluginsPointingAtTests(dir), ['a', 'b']);
-    write('plugins/b/bin/run.sh', 'bash plugins/a/tests/x.sh\n');
-    assert.deepEqual(pluginsPointingAtTests(dir), ['a', 'b']);
-    // A relative import elsewhere in the file isn't leaving: every script has one.
-    write('plugins/b/bin/run.sh', "import '../lib.ts';\nconst folder = 'tests';\n");
-    assert.deepEqual(pluginsPointingAtTests(dir), ['b']);
-  });
-});
-
-test('this repo’s plugins with test folders both lose their exemptions', () => {
-  const plugins = pluginsPointingAtTests(new URL('../..', import.meta.url).pathname);
-  for (const name of ['flow', 'visual-companion']) assert.ok(plugins.includes(name), name);
-  const list = withManifestPaths(pattern, plugins);
   for (const filename of [
-    'plugins/visual-companion/tests/install-smoke.sh',
-    'plugins/visual-companion/skills/visual-companion/tests/18-host.test.cjs',
+    'plugins-old/x.md',
+    'pluginsx',
+    'plugins.md',
+    'specs/plugins/x.md',
+    'docs/plugins',
+    'my-plugins/x/README.md',
   ]) {
     assert.equal(touchesSecurity([{ filename }], pattern), false, filename);
-    assert.ok(touchesSecurity([{ filename }], list), filename);
   }
-});
-
-test('this repo’s manifests extend the list to one line, and the verifier fails with the script', () => {
-  const plugins = pluginsPointingAtTests(new URL('../..', import.meta.url).pathname);
-  assert.doesNotMatch(withManifestPaths(pattern, plugins), /[\r\n]/);
-  // Assigned on its own line under bash -e, so a non-zero exit fails the step.
-  assert.match(workflow, /^ {10}SECURITY_PATH_PATTERN="\$\(node \.github\/scripts\/security-manifest-paths\.mjs\)"$/m);
-  assert.doesNotMatch(workflow, />> *"?\$GITHUB_ENV/);
 });

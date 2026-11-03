@@ -56,7 +56,6 @@ import {
   trustedBotUserId,
 } from './security-gate.mjs';
 import { approvalMode, labelAtHead, labelNewerThanHead } from './security-label-at-head.mjs';
-import { pluginsPointingAtTests, withManifestPaths } from './security-manifest-paths.mjs';
 
 /** The one branch this gate judges PRs into. */
 const MAIN = 'main';
@@ -227,14 +226,10 @@ export async function verdictForMergeGroup(api, event, lists) {
   return `merge group ${group.head_sha}: security-review ${state} (${description})`;
 }
 
-/**
- * Main's lists and mode, read from the checked-out base commit, never the event or env.
- * Marketplace only: the path list also takes the manifest rule, so this verdict and
- * the verifier agree on what a security path is.
- */
+/** Main's lists and mode, read from the checked-out base commit, never the event or env. */
 export function trustedLists() {
   return {
-    pattern: withManifestPaths(securityPathPattern(), pluginsPointingAtTests(process.cwd())),
+    pattern: securityPathPattern(),
     deepPattern: securityDeepPathPattern(),
     botUserId: trustedBotUserId(),
   };
@@ -247,15 +242,16 @@ export function trustedLists() {
  * @param {object} api The GitHub client.
  * @param {object} event The event payload.
  * @param {string} eventName `pull_request_target` or `merge_group`.
+ * @param {() => object} [loadLists] Where the lists come from.
  * @returns {Promise<string>} What it wrote, for the log.
  */
-export async function runVerdict(api, event, eventName) {
+export async function runVerdict(api, event, eventName, loadLists = trustedLists) {
   if (eventName !== 'pull_request_target' && eventName !== 'merge_group')
     throw new Error('The verdict runs only on pull_request_target and merge_group');
   const pullRequest = eventName === 'pull_request_target';
   let lists;
   try {
-    lists = trustedLists();
+    lists = loadLists();
   } catch (error) {
     const sha = pullRequest ? event.pull_request.head.sha : event.merge_group.head_sha;
     await api.setStatus(sha, 'failure', `verdict errored: ${error.message}`.slice(0, 140));

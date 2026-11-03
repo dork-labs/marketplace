@@ -11,59 +11,50 @@ skills, extensions and scripts agents run. A change to any of them needs
 DorkOS Security's approval for that exact commit. The gate is ported from
 dork-labs/dorkos at `dc0d70b316`, with Security's path list for this repo.
 `security-gate.mjs` and `security-label-at-head.mjs` are verbatim, and
-`security-review-initialize.yml` is too. `security-verdict.mjs` differs in two
-places: one function adds the manifest rule below, and `runVerdict` fails closed when
-that rule can't load this repo's lists. `security-gate.test.mjs` swaps
+`security-review-initialize.yml` is too. `security-verdict.mjs` differs in one
+function, `runVerdict`, which fails closed when its lists won't load. `security-gate.test.mjs` swaps
 dorkos's path-list tests for this repo's, and `security-marketplace.test.mjs` is
 this repo's own. Take later changes from dorkos rather than forking them here.
 
 ## What counts as a security path
 
 `SECURITY_PATH_PATTERN` in `workflows/security-gate.yml` is the only list. In
-short: everything inside `plugins/<name>/` (including docs and templates, which
-agents read at run time, and any folder merely named `docs`, `tests` or
-`fixtures`), except a plugin's root `tests/`, a skill's own `tests/`, and a plugin's root README.md, CHANGELOG.md, LICENSE and NOTICE.
-Also: the catalog files; every `SKILL.md`; `.github`, `.agents`,
-`.dork`, `scripts`, `tools`; the root `REVIEW.md` and `.mcp.json`; and
-`package.json`, lockfiles and npm config anywhere. Agent config counts at any
-depth, inside `specs/` and past the test-folder exemptions too: `.claude`,
-`.codex` and `.opencode` (as a folder, or a symlink with that name), `opencode.json`,
-`CLAUDE.md`, `AGENTS.md` and `GEMINI.md`. Only the whole name matches, so
-`MY-AGENTS.md` and `.claude-plugin/` under `specs/` don't. A path with a `.`, `..`
-or empty segment always counts. Both sides of a rename count.
+short: **everything under `plugins/`, with no exemptions**: code, test folders, docs,
+a plugin's README, CHANGELOG, LICENSE and NOTICE, and a file or symlink directly under
+`plugins/`. A plugin PR that changes only a doc needs the label too.
+Also: the catalog files; `.github`, `.agents`, `.dork`, `scripts`, `tools`; the root
+`REVIEW.md` and `.mcp.json`; and `package.json`, lockfiles and npm config anywhere.
+Agent config counts at any depth, inside `specs/` too: `.claude`, `.codex` and
+`.opencode` (as a folder, or a symlink with that name), `opencode.json`, `CLAUDE.md`,
+`AGENTS.md` and `GEMINI.md`. Only the whole name matches, so `MY-AGENTS.md` and
+`.claude-plugin/` under `specs/` don't. A path with a `.`, `..` or empty segment always
+counts. Both sides of a rename count.
 
-A plugin that names a test folder anywhere in what it ships loses its test-folder
-exemptions: if any string in its `.claude-plugin/plugin.json`,
-`hooks/hooks.json`, `.mcp.json`, `.lsp.json`, `.dork/manifest.json`, its entry in
-`.claude-plugin/marketplace.json`, or any JSON file those name, or any other file in
-the plugin read as plain text, contains `tests` or `engine-tests` as a whole word,
-all of that plugin's test folders count (`.github/scripts/security-manifest-paths.mjs`,
-run by the verifier and by main's verdict; it fails the check if a manifest doesn't
-parse or a file can't be read). The scan skips a test folder's own files, `node_modules`
-and the plugin's root README, CHANGELOG, LICENSE and NOTICE. A word in prose counts,
-so today **flow and visual-companion, the only plugins with test folders, have no
-exemption left**, and an edit to their tests needs the label. A plugin that mentions
-one and also leaves its own folder, with `..` or a path through `plugins/`, counts for
-every plugin: anywhere in those strings, or on the same line in any other file. So does
-any catalog entry whose `source` isn't a plugin folder here, mention or not.
+**Don't bring back the test-folder exemption or the scan that guarded it.** This list
+used to exempt test folders and root docs, and `security-manifest-paths.mjs` read each
+plugin's files to take the exemption away from any test folder something pointed at.
+Security's review of DOR-3713 (2026-11-03) replaced both, for three reasons:
 
-**Why `engine-tests/` isn't exempt.** `/flow:self-test` runs it through vitest when
-dev dependencies are installed, and a self-test scenario reads its fixtures, so an
-edit there is code that runs on a machine (Security, 2026-11-03).
+- **It saved no labels.** `skills and manifests` makes every change to a package that
+  already declares a version raise it in `plugin.json`, which is a security path, so a
+  plugin PR needed the label anyway. All seven packages here declare one, and none of the
+  last 60 commits touching `plugins/` changed exempt paths alone. A brand-new package skips
+  the bump, so one that adds only exempt files is the case that now costs a label.
+- **It needed new spellings at every review.** Each adversarial pass found another way to
+  reach a test folder or a root doc: symlinks, `${ROOT%/*}`, `dirname`, `"commands": "./"`,
+  `;plugins/w`, a nested `node_modules`, a name that starts like another plugin's. The list
+  of what it couldn't see kept growing.
+- **It could wedge the gate.** It parsed any JSON a manifest named, from the base commit.
+  A merged manifest that names a commented `tsconfig.json` would make it refuse every later
+  PR, including the one that fixes it. That never happened on main, but nothing stopped it.
 
-**Accepted residual risk.** A test folder nothing in its plugin names stays exempt,
-and it runs only if something starts naming it, in a file that is a security path, so
-the pointer itself gets reviewed. These still aren't seen: a name built at run time
-(`te*/x.sh`), though the file's reviewer sees it; a flag glued to the name
-(`-rtests/x.js`); a climb split across two lines of a non-JSON file, which counts for
-its own plugin only; and a symlink, which the scan doesn't follow. A pointer queued
-together with a test edit is judged from the same base list, so the edit stays exempt
-for that one merge.
+`/flow:self-test` also runs flow's `engine-tests/` through vitest when dev dependencies are
+installed, so those were never only tests.
 
-**What backs this rule up.** The `skills and manifests` check refuses a hook or MCP
-server beyond the package's own scripts and any local `source` other than
-`./plugins/<name>`, which stops most of those spellings before they land. Loosening
-that check reopens them, so have Security read any such change.
+**What backs this up.** The `skills and manifests` check refuses a hook or MCP server
+beyond the package's own scripts, any local `source` other than `./plugins/<name>`, and
+every symlink under `plugins/`. It's what keeps a package inside its own folder, and this
+list no longer reads manifests, so have Security read any loosening of it.
 
 ## How approval works
 
@@ -103,8 +94,7 @@ commit. `SECURITY_DEEP_PATH_PATTERN` is this repo's P0 list (Security, 2026-11-0
 `.github/workflows/`, `.github/scripts/security-*` and `scripts/security-*`. So both
 checks ask for the label: `security-review` won't say `success` without it, and
 `security-gate` waits for it on an open PR and refuses without it in the queue,
-whatever that status says. **The label doesn't exist in this repo yet**, so those
-PRs can't pass until Security creates it.
+whatever that status says. Only Security adds it.
 
 **Known gaps:**
 
@@ -126,15 +116,14 @@ PRs can't pass until Security creates it.
 This makes `security-gate` required, not `security-review`: anyone with write access
 can forge that status.
 
-1. Create `security-deep-reviewed` in this repo (Security). Only Security adds it.
-2. Confirm the organization can use the ruleset rule **Require workflows to pass
+1. Confirm the organization can use the ruleset rule **Require workflows to pass
    before merging**, and stop here if it can't. Add it for this repo's `main`, on
    both `pull_request` and `merge_group`: source `dork-labs/marketplace`, path
    `.github/workflows/security-gate.yml`, ref `refs/heads/main`. Not a named
    status check: a PR could edit its own YAML to emit a passing job with that
    name. Start in Evaluate mode.
-3. Remove any bypass from the `main` ruleset.
-4. Prove it on GitHub (Security), in Evaluate mode:
+2. Remove any bypass from the `main` ruleset.
+3. Prove it on GitHub (Security), in Evaluate mode:
    - one real security-path PR passes and one refuses, which shows the read-only
      token can read the timeline and the activity feed;
    - a throwaway PR whose YAML and script both `exit 0` still fails;
@@ -142,8 +131,8 @@ can forge that status.
 
    Dorkos's promotion doc also lists binding approvals to the original queued
    source SHA as unproven, and treats that as blocking. Carry that over.
-5. Switch the rule to Active.
-6. **Later, for App mode:** install the Security App on this repo and put its
+4. Switch the rule to Active.
+5. **Later, for App mode:** install the Security App on this repo and put its
    numeric bot user id in `SECURITY_APPROVAL_BOT_USER_ID`. dorkos's approval
    helper (`tools/security-approve/` there) is hard-wired to dork-labs/dorkos and
    its path list, so it needs a reviewed change first, or a tool of its own.
