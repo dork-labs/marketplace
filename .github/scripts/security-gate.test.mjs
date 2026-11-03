@@ -877,11 +877,62 @@ test('a plugin whose manifests mention a test folder loses its test exemptions',
       assert.ok(touchesSecurity([{ filename }], extended), filename);
     }
     assert.equal(touchesSecurity([{ filename: 'plugins/e/tests/a.sh' }], extended), false);
-    // A mention that climbs out of its plugin can't be pinned down: every plugin loses it.
-    write('plugins/e/hooks/hooks.json', { hooks: { Stop: [{ hooks: [{ command: 'bash ../w/tests/x.sh' }] }] } });
-    assert.deepEqual(pluginsPointingAtTests(dir), ['a', 'b', 'c', 'd', 'e', 'f', 'g']);
+    // A mention that climbs out of its plugin can't be pinned down: every plugin
+    // loses it, including `w`, which no manifest of its own points at.
+    write('plugins/w/.claude-plugin/plugin.json', { name: 'w' });
+    assert.ok(!pluginsPointingAtTests(dir).includes('w'));
+    for (const climb of [
+      { hooks: { Stop: [{ hooks: [{ command: 'bash ../w/tests/x.sh' }] }] } },
+      { hooks: { Stop: [{ hooks: [{ command: 'cd .. && bash w/tests/x.sh' }] }] } },
+      { hooks: { Stop: [{ hooks: [{ command: 'cd ${CLAUDE_PLUGIN_ROOT}/.. && bash w/tests/x.sh' }] }] } },
+      // Split across strings: neither one alone both climbs and mentions.
+      { hooks: { Stop: [{ hooks: [{ command: 'node', args: ['--root', '../w', 'tests/x.sh'] }] }] } },
+    ]) {
+      write('plugins/e/hooks/hooks.json', climb);
+      assert.deepEqual(
+        pluginsPointingAtTests(dir),
+        ['a', 'b', 'c', 'd', 'e', 'f', 'g', 'w'],
+        JSON.stringify(climb)
+      );
+    }
+    // `..` inside a name is no climb.
+    write('plugins/e/hooks/hooks.json', { hooks: { Stop: [{ hooks: [{ command: 'bash tests/a..b.sh' }] }] } });
+    assert.ok(!pluginsPointingAtTests(dir).includes('w'));
     // A manifest that does not parse fails the run rather than shrinking the list.
     write('plugins/b/.mcp.json', '{ not json');
+    assert.throws(() => pluginsPointingAtTests(dir));
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('a catalog entry’s hooks count, by the plugin its source names', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'security-catalog-'));
+  try {
+    const write = (path, json) => {
+      mkdirSync(join(dir, path, '..'), { recursive: true });
+      writeFileSync(join(dir, path), typeof json === 'string' ? json : JSON.stringify(json));
+    };
+    const catalog = (plugins) => write('.claude-plugin/marketplace.json', { plugins });
+    for (const name of ['a', 'b', 'c']) mkdirSync(join(dir, 'plugins', name), { recursive: true });
+    const hooks = { Stop: [{ hooks: [{ command: 'bash ${CLAUDE_PLUGIN_ROOT}/tests/x.sh' }] }] };
+    // By the source folder, not the entry's name.
+    catalog([{ name: 'b', source: './plugins/a', hooks }, { name: 'c', source: './plugins/c' }]);
+    assert.deepEqual(pluginsPointingAtTests(dir), ['a']);
+    // A JSON file the entry names is read too.
+    catalog([{ name: 'b', source: './plugins/b', hooks: './config/h.json' }]);
+    write('plugins/b/config/h.json', { hooks });
+    assert.deepEqual(pluginsPointingAtTests(dir), ['b']);
+    // An entry that can't be pinned to a plugin folder counts for every plugin.
+    for (const source of ['./elsewhere', { source: 'github', repo: 'x/y' }, './plugins/a/sub']) {
+      catalog([{ name: 'a', source, hooks }]);
+      assert.deepEqual(pluginsPointingAtTests(dir), ['a', 'b', 'c'], JSON.stringify(source));
+    }
+    // No mention: still exempt. A catalog that does not parse refuses.
+    catalog([{ name: 'a', source: './plugins/a' }]);
+    rmSync(join(dir, 'plugins/b/config/h.json'));
+    assert.deepEqual(pluginsPointingAtTests(dir), []);
+    write('.claude-plugin/marketplace.json', '{ not json');
     assert.throws(() => pluginsPointingAtTests(dir));
   } finally {
     rmSync(dir, { recursive: true, force: true });

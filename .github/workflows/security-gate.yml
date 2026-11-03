@@ -26,8 +26,7 @@ env:
   # '0' means no App is set, so the gate runs label-at-head. A real numeric bot user ID
   # means App mode. Anything else refuses.
   SECURITY_APPROVAL_BOT_USER_ID: '0'
-  # Security's list for the marketplace (security-auditor research,
-  # marketplace-security-gate-scope.md, 2026-10-30): everything a package ships
+  # Security's list for the marketplace (2026-10-30): everything a package ships
   # into users' DorkOS (catalog, manifests, hooks, extensions, commands, skills,
   # scripts, config, and docs agents read at run time), plus CI, agent config and
   # dependencies. Exempt: a plugin's root tests/ and engine-tests/, a skill's own

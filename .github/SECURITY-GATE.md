@@ -1,7 +1,9 @@
 # Security gate
 
 Status: **not enforced.** The checks run on every pull request and merge-queue
-run, but nothing requires them until the steps below are done.
+run, but no ruleset requires them until the steps below are done. Arming still
+notices: a failed `security-review` counts as a failing check, so an unlabelled
+security-path PR isn't armed.
 
 Packages in this repo install into every user's DorkOS: hooks, commands,
 skills, extensions and scripts agents run. A change to any of them needs
@@ -27,11 +29,13 @@ with a `.`, `..` or empty segment always counts. Both sides of a rename count.
 
 A plugin whose manifests mention a test folder loses its test-folder
 exemptions: if any string in its `.claude-plugin/plugin.json`,
-`hooks/hooks.json`, `.mcp.json`, `.lsp.json`, `.dork/manifest.json`, or any
-JSON file those name, contains `tests` or `engine-tests` as a path segment, all
-of that plugin's test folders count (`scripts/security-manifest-paths.mjs`,
-run by the verifier from the base commit; it fails the check if a manifest
-doesn't parse). A mention that climbs out with `..` counts for every plugin.
+`hooks/hooks.json`, `.mcp.json`, `.lsp.json`, `.dork/manifest.json`, its entry in
+`.claude-plugin/marketplace.json`, or any JSON file those name, contains `tests`
+or `engine-tests` as a path segment, all of that plugin's test folders count
+(`.github/scripts/security-manifest-paths.mjs`, run by the verifier and by main's verdict;
+it fails the check if a manifest doesn't parse). A plugin that mentions one and
+also climbs out with `..`, in any of those strings, counts for every plugin. So
+does a mention in a catalog entry whose `source` isn't a plugin folder here.
 
 **Accepted residual risk.** Test folders are exempt because they change too
 often to gate, but two of them can run on a machine: `/flow:self-test` runs
@@ -40,7 +44,10 @@ reads its fixtures), and visual-companion's `npm test` runs its skill's
 `tests/`. A test folder a manifest mentions is covered (above). One reached
 another way (a `package.json` script, `hooks:` in a skill's or command's
 frontmatter, a `!` line in a command) needs that file changed first, and it is
-a security path, so the pointer itself gets reviewed.
+a security path, so the pointer itself gets reviewed. Two more: a name built at
+run time (`te*/x.sh`) isn't a mention, though the manifest's reviewer sees it, and a
+pointer queued together with a test edit is judged from the same base list, so
+the edit stays exempt for that one merge.
 
 ## How approval works
 
@@ -58,9 +65,12 @@ Two checks read that, and they are not the same:
   `refs/heads/main`, runs no PR code) writes it from main's lists on every push
   and label change: `success` for no security paths or a label that covers the
   head, `failure` otherwise, naming why. It also posts one on each merge group.
-  A PR into any branch but main gets `failure`.
-- **`security-gate`, a workflow check, is what the queue enforces.** It runs from
-  the base commit and never writes. On an open PR with nothing wrong except a
+  A PR into any branch but main isn't judged: the workflow doesn't run, so it has
+  no status at all.
+- **`security-gate`, a workflow check, is what the queue enforces.** Its scripts
+  come from the base commit and it never writes. Its YAML, with the lists and the
+  mode, comes from the merge commit until the ruleset below pins it to main. On an
+  open PR with nothing wrong except a
   label not yet added it **waits**: the check is green and the log says "Waiting
   for Security". A stale label, a bot's label, `hold` or a refusal from main's
   verdict still fail it. In the merge queue it never waits, and every queued PR
@@ -85,6 +95,10 @@ here. **The label doesn't exist in this repo yet**, so those PRs can't get a
   person-only label says who clicked, not who reviewed. Only the Security App
   closes this. **Never make `security-review` a required check while its source
   is GitHub Actions.**
+- The deep label rests on that forgeable status. With an empty P0 list, the
+  verifier asks for `security-reviewed` only, and a workflow PR fails it just
+  because main's verdict said `failure`. A PR that adds a workflow with
+  `statuses: write` can overwrite that with `success`.
 - `security-gate` can read `security-review` just before main's verdict writes
   it, and fail a PR Security has just labelled, until someone reruns it. dorkos
   tracks this as DOR-3710, and the fix isn't in this copy yet.
@@ -92,13 +106,17 @@ here. **The label doesn't exist in this repo yet**, so those PRs can't get a
 ## Turning it on (Dorian)
 
 1. Create `security-deep-reviewed` in this repo (Security). Only Security adds it.
-2. Add an organization ruleset rule **Require workflows to pass before
-   merging** for this repo's `main`: source `dork-labs/marketplace`, path
+2. Confirm the organization can use the ruleset rule **Require workflows to pass
+   before merging**, and stop here if it can't. Add it for this repo's `main`, on
+   both `pull_request` and `merge_group`: source `dork-labs/marketplace`, path
    `.github/workflows/security-gate.yml`, ref `refs/heads/main`. Not a named
    status check: a PR could edit its own YAML to emit a passing job with that
    name. Start in Evaluate mode, then Active.
 3. Remove any bypass from the `main` ruleset.
-4. **Later, for App mode:** install the Security App on this repo and put its
+4. Prove it on GitHub (Security): a throwaway PR whose YAML and script both
+   `exit 0` must still fail, and a real merge group with more than one entry must
+   be judged entry by entry. The queue's commit chain is unproven until then.
+5. **Later, for App mode:** install the Security App on this repo and put its
    numeric bot user id in `SECURITY_APPROVAL_BOT_USER_ID`. dorkos's approval
    helper (`tools/security-approve/` there) is hard-wired to dork-labs/dorkos and
    its path list, so it needs a reviewed change first, or a tool of its own.
