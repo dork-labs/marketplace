@@ -155,8 +155,8 @@ export async function run(ctx: VerbContext): Promise<VerbResult> {
       sessionsThatWorked(existing),
       `a session that worked ${identifier} cannot answer its question, so nothing was posted or recorded. ${STOP_AND_ASK}`
     );
-    // A drain run reads replies, so a person's words reach it with no question on
-    // record. This kind of run only resumes on a recorded answer.
+    // A parked drain run's rows send words with no question on record, so it keeps
+    // this path. This kind of run only resumes on a recorded answer.
     if (existing !== undefined && question === undefined && existing.drain === undefined) {
       throw new PreconditionError(
         `${identifier} has no open question on its run, so nothing was posted; reply on the item instead`

@@ -311,14 +311,28 @@ describe('flow inbox', () => {
         const fresh = '2026-09-26T11:45:00.000Z';
         tracker.adapter.getItem = async (...args: Parameters<typeof getItem>) => {
           const run = project.runs()['id-FAKE-1'];
-          const { answer: _old, ...question } = run.question!;
           project.writeRuns({
-            'id-FAKE-1': { ...run, question: { ...question, askedAt: fresh } },
+            'id-FAKE-1': { ...run, question: { ...run.question!, askedAt: fresh } },
           });
           return getItem(...args);
         };
         const pass = await runFlow(project, tracker, ['inbox']);
         expect(project.runs()['id-FAKE-1'].question?.askedAt).toBe(fresh);
+        expect(pass.stderr).not.toContain('was not used');
+      });
+
+      it('leaves a question whose answer was given back since this pass read it', async () => {
+        project.writeRuns(parkedRun({ text: 'No', at, by: 'person' }) as never);
+        const tracker = new FakeTracker(moved());
+        const getItem = tracker.adapter.getItem.bind(tracker.adapter);
+        tracker.adapter.getItem = async (...args: Parameters<typeof getItem>) => {
+          const run = project.runs()['id-FAKE-1'];
+          const { answer: _old, ...question } = run.question!;
+          project.writeRuns({ 'id-FAKE-1': { ...run, question } });
+          return getItem(...args);
+        };
+        const pass = await runFlow(project, tracker, ['inbox']);
+        expect(project.runs()['id-FAKE-1'].question).toBeDefined();
         expect(pass.stderr).not.toContain('was not used');
       });
 

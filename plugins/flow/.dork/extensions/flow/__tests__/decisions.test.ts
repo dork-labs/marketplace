@@ -1008,7 +1008,7 @@ describe('answering', () => {
     });
 
     it.each<[string, string, Record<string, unknown>, object, string]>([
-      ['question', qkey, questionRun(), choice, BUSY_ANSWER_TEXT],
+      ['question', qkey, questionRun({ decideBy: null }), choice, BUSY_ANSWER_TEXT],
       [
         'review',
         'review:3f2a00000000:DOR-2387',
@@ -1032,6 +1032,20 @@ describe('answering', () => {
         expect(inbox?.open.has(key)).toBe(true);
       }
     );
+
+    // Core marks a deadline answered on any answer that returns, keep-open included,
+    // so only a failed call leaves it standing; core then says to try again.
+    it('fails the call when a person meets a busy store on a question with a deadline', async () => {
+      const { coordinator, inbox, log } = setup({
+        stops: { questions: 'tell' },
+        cli: fakeCli(() => refusal('busy', 'the store stayed locked')),
+      });
+      await coordinator.sync([plan({ a: questionRun() })]);
+      await expect(coordinator.handle(event(qkey, choice))).rejects.toThrow(qkey);
+      expect(inbox?.resolved).toEqual([]);
+      expect(inbox?.open.has(qkey)).toBe(true);
+      expect(log).toHaveBeenCalledWith(expect.stringContaining('the store stayed locked'));
+    });
 
     // A slow answer already said "Sending…", so the row itself has to say it.
     it('says on the row that a slow answer met a busy store', async () => {
@@ -1347,11 +1361,12 @@ describe('answering', () => {
       project.cleanup();
     });
 
-    it('keeps the row, records nothing, says to try again, and the retry records it', async () => {
+    it('keeps the row and its deadline, records nothing, and the retry records it', async () => {
       const { coordinator, inbox } = await realSetup(10_000);
       hold();
-      const busy = await coordinator.handle(event(key(), { action: 'choice', choiceId: 'c2' }));
-      expect(busy).toEqual({ keepOpen: true, message: BUSY_ANSWER_TEXT });
+      await expect(
+        coordinator.handle(event(key(), { action: 'choice', choiceId: 'c2' }))
+      ).rejects.toThrow(key());
       expect(inbox?.resolved).toEqual([]);
       expect(inbox?.open.has(key())).toBe(true);
       expect(project.runs()['id-FAKE-1'].question?.answer).toBeUndefined();

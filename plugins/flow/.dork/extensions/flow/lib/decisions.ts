@@ -1059,7 +1059,8 @@ export class DecisionCoordinator {
   /**
    * Run an answer's command within core's bound: done in time, the row
    * settles now; slower, the row says "Sending…" and settles when it finishes,
-   * crediting the person who answered.
+   * crediting the person who answered. A person who meets a busy store on a
+   * question with a deadline fails the call instead, so the deadline stands.
    */
   private async runAnswer(
     ask: Ask,
@@ -1078,7 +1079,14 @@ export class DecisionCoordinator {
     });
     const first = await Promise.race([run, timeout]);
     if (timer !== undefined) clearTimeout(timer);
-    if (first !== 'slow') return this.finish(ask, event, first, outcome);
+    if (first !== 'slow') {
+      const answer = await this.finish(ask, event, first, outcome);
+      // A kept-open answer would spend the deadline, and nobody answered.
+      if (ask.deadline !== null && 'keepOpen' in answer && answer.message === BUSY_ANSWER_TEXT) {
+        throw new TryAgainLaterError(ask.key);
+      }
+      return answer;
+    }
     // Held open until it finishes: no pass clears or rewrites the row meanwhile.
     this.inFlight.add(ask.key);
     if (event.decidedBy === 'deadline') this.deadlineInFlight.add(ask.key);
@@ -1186,7 +1194,8 @@ export class DecisionCoordinator {
     const refusal = obj(result.json?.error);
     if (refusal.kind === 'busy') {
       // Another flow command held the run store. The row stays: nobody answered.
-      this.deps.log(`[flow] answering ${ask.key} met a busy run store`);
+      const why = typeof refusal.message === 'string' ? refusal.message : '';
+      this.deps.log(`[flow] answering ${ask.key} met a busy run store: ${why}`);
       if (event.decidedBy === 'deadline') throw new TryAgainLaterError(ask.key);
       return {
         keepOpen: true,

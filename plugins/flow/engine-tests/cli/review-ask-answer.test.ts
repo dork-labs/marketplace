@@ -1622,6 +1622,12 @@ describe('review fixes (DOR-2528 FIX-FIRST)', () => {
       { answer: { text: 'Keep it', at: NOW, by: 'person' } },
       'settled',
     ],
+    [
+      'settled when it has an answer and the label is gone too',
+      ['type/task', 'agent/claimed'],
+      { answer: { text: 'Keep it', at: NOW, by: 'person' } },
+      'settled',
+    ],
   ])('calls the question %s', async (_name, labels, extra, kind) => {
     writeRun({
       stage: 'execute',

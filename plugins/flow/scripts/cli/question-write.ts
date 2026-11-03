@@ -148,8 +148,8 @@ export async function clearQuestion(
  * @param store - The run store.
  * @param issueId - The run's key.
  * @param askedAt - The question's `askedAt`, as the caller read it.
- * @returns `true` when this call dropped it; `false` when it was replaced, gone
- *   or handed over since the caller read it.
+ * @returns `true` when this call dropped it; `false` when it was replaced, gone,
+ *   given back or handed over since the caller read it.
  * @throws {BusyError} When the lock stayed busy.
  */
 export async function dropEndedQuestion(
@@ -159,7 +159,10 @@ export async function dropEndedQuestion(
 ): Promise<boolean> {
   let won = false;
   const result = await store.updateRun(issueId, (current) => {
-    won = same(current.question, askedAt) && current.question.answerHandedOverAt === undefined;
+    won =
+      same(current.question, askedAt) &&
+      current.question.answer !== undefined &&
+      current.question.answerHandedOverAt === undefined;
     if (!won) return current;
     const { question: _ended, ...rest } = current;
     return rest;
