@@ -49,7 +49,7 @@ describe('flow release --to ready', () => {
     project.writeRuns(runAt('verify'));
     const result = await runFlow(project, { items: [claimed()] }, ['release', 'FAKE-1']);
     expect(result.code).toBe(EXIT.ok);
-    expect(result.tracker.calls).toEqual([
+    expect(result.tracker.writes).toEqual([
       {
         method: 'applyWorkState',
         identifier: 'FAKE-1',
@@ -69,7 +69,7 @@ describe('flow release --to ready', () => {
     const result = await runFlow(project, { items: [claimed()] }, ['release', 'FAKE-1']);
     expect(result.code).toBe(EXIT.precondition);
     expect(String((result.json.error as { message: string }).message)).toMatch(/--stage/);
-    expect(result.tracker.calls).toEqual([]);
+    expect(result.tracker.writes).toEqual([]);
   });
 
   it('uses --stage over the run record', async () => {
@@ -81,7 +81,7 @@ describe('flow release --to ready', () => {
       '--stage',
       'specify',
     ]);
-    expect(result.tracker.calls[0]).toMatchObject({ change: { stageLabel: 'stage/specify' } });
+    expect(result.tracker.writes[0]).toMatchObject({ change: { stageLabel: 'stage/specify' } });
   });
 });
 
@@ -95,7 +95,7 @@ describe('flow release --to none', () => {
       'none',
     ]);
     expect(result.code).toBe(EXIT.ok);
-    expect(result.tracker.calls).toEqual([
+    expect(result.tracker.writes).toEqual([
       {
         method: 'applyWorkState',
         identifier: 'FAKE-1',
@@ -117,7 +117,7 @@ describe('flow release --reason', () => {
       'Blocked on the API key.',
     ]);
     expect(result.code).toBe(EXIT.ok);
-    const comments = result.tracker.calls.filter((call) => call.method === 'comment');
+    const comments = result.tracker.writes.filter((call) => call.method === 'comment');
     expect(comments).toHaveLength(1);
     const body = (comments[0] as { body: string }).body;
     expect(body.startsWith('Blocked on the API key.\n\n— 🤖 /flow\n<!-- agent:provenance ')).toBe(
@@ -136,7 +136,7 @@ describe('flow release refusals, failure and dry run', () => {
       ['release', 'FAKE-1', '--stage', 'execute']
     );
     expect(result.code).toBe(EXIT.precondition);
-    expect(result.tracker.calls).toEqual([]);
+    expect(result.tracker.writes).toEqual([]);
   });
 
   it("clears a closed item's run without touching the tracker (DOR-2706)", async () => {
@@ -150,7 +150,7 @@ describe('flow release refusals, failure and dry run', () => {
       ['release', 'FAKE-1']
     );
     expect(result.code).toBe(EXIT.ok);
-    expect(result.tracker.calls).toEqual([]);
+    expect(result.tracker.writes).toEqual([]);
     expect(project.runs()).toEqual({});
     expect(result.json).toMatchObject({ runRemoved: true, commented: false, change: null });
   });
@@ -164,7 +164,7 @@ describe('flow release refusals, failure and dry run', () => {
       ['release', 'FAKE-1', '--reason', 'Closed by hand.']
     );
     expect(result.code).toBe(EXIT.ok);
-    expect(result.tracker.calls.map((call) => call.method)).toEqual(['comment']);
+    expect(result.tracker.writes.map((call) => call.method)).toEqual(['comment']);
     expect(project.runs()).toEqual({});
   });
 
@@ -203,7 +203,7 @@ describe('flow release refusals, failure and dry run', () => {
       '--dry-run',
     ]);
     expect(result.code).toBe(EXIT.ok);
-    expect(result.tracker.calls).toEqual([]);
+    expect(result.tracker.writes).toEqual([]);
     expect(Object.keys(project.runs())).toEqual(['id-FAKE-1']);
     expect(result.json).toMatchObject({ dryRun: true, change: { stageLabel: 'stage/verify' } });
   });

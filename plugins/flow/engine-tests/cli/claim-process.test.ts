@@ -27,12 +27,12 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
 import { EXIT } from '../../scripts/errors.ts';
 import type { FlowRun } from '../../scripts/flow-run.ts';
-import { FAKE_BACKLOG_ENV, type FakeBacklog } from '../fixtures/cli/fake-adapter/adapter.ts';
+import { FAKE_BACKLOG_ENV, type FakeBacklog } from '../../scripts/tracker/fake.ts';
 import { item } from './write-harness.ts';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const FLOW_ROOT = path.resolve(here, '..', '..');
-const FAKE_ADAPTER_DIR = path.join(FLOW_ROOT, 'engine-tests', 'fixtures', 'cli', 'fake-adapter');
+const FAKE_ADAPTER_DIR = path.join(FLOW_ROOT, 'adapters', 'reference', 'fake');
 
 let dir: string;
 let backlogFile: string;

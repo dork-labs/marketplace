@@ -53,8 +53,8 @@ describe('flow done', () => {
       'https://example.test/pr/1',
     ]);
     expect(result.code).toBe(EXIT.ok);
-    expect(result.tracker.calls.map((call) => call.method)).toEqual(['comment', 'applyWorkState']);
-    const [comment, write] = result.tracker.calls;
+    expect(result.tracker.writes.map((call) => call.method)).toEqual(['comment', 'applyWorkState']);
+    const [comment, write] = result.tracker.writes;
     expect((comment as { body: string }).body).toMatch(
       /^Shipped the fix\.\n\nPR: https:\/\/example\.test\/pr\/1\n\n— 🤖 \/flow\n<!-- agent:provenance \{"v":1,"harness":"claude-code","sessionId":"session-abc",.*\} -->$/
     );
@@ -90,7 +90,7 @@ describe('flow done', () => {
       ['done', 'FAKE-1', '--summary', 'Shipped the fix.']
     );
     expect(result.code).toBe(EXIT.ok);
-    expect(result.tracker.calls).toEqual([
+    expect(result.tracker.writes).toEqual([
       { method: 'applyWorkState', identifier: 'FAKE-1', change: DONE_CHANGE },
     ]);
     expect(result.json.commented).toBe(false);
@@ -124,7 +124,7 @@ describe('flow done', () => {
       'done.md',
     ]);
     expect(result.code).toBe(EXIT.ok);
-    expect((result.tracker.calls[0] as { body: string }).body.startsWith('From a file.\n\n')).toBe(
+    expect((result.tracker.writes[0] as { body: string }).body.startsWith('From a file.\n\n')).toBe(
       true
     );
   });
@@ -142,7 +142,7 @@ describe('flow done', () => {
       'b',
     ]);
     expect(both.code).toBe(EXIT.usage);
-    expect(both.tracker.calls).toEqual([]);
+    expect(both.tracker.writes).toEqual([]);
   });
 
   it('exits 4 and leaves the run open when the tracker drops the write', async () => {
@@ -169,7 +169,7 @@ describe('flow done', () => {
       '--dry-run',
     ]);
     expect(result.code).toBe(EXIT.ok);
-    expect(result.tracker.calls).toEqual([]);
+    expect(result.tracker.writes).toEqual([]);
     expect(project.runs()['id-FAKE-1'].status).toBe('waiting_for_review');
     expect(result.json).toMatchObject({
       dryRun: true,

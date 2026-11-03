@@ -33,7 +33,7 @@ const untriaged = () =>
   });
 
 /** The writes a run made (reads are not recorded). */
-const writes = (result: Awaited<ReturnType<typeof runFlow>>) => result.tracker.calls;
+const writes = (result: Awaited<ReturnType<typeof runFlow>>) => result.tracker.writes;
 
 describe('flow triage --ready', () => {
   it('makes the item unstarted with agent/ready and the stage label, and posts nothing', async () => {
@@ -155,7 +155,7 @@ describe('flow triage --park', () => {
     ]);
     expect(retry.code).toBe(EXIT.ok);
     expect(retry.json).toMatchObject({ commented: false });
-    expect(retry.tracker.calls.filter((call) => call.method === 'comment')).toHaveLength(1);
+    expect(retry.tracker.writes.filter((call) => call.method === 'comment')).toHaveLength(1);
     expect(retry.tracker.backlog.items[0].labels).toEqual([
       'type/idea',
       'stage/execute',
@@ -183,8 +183,8 @@ describe('flow triage --park', () => {
 
   it('prints one plain line without --json', async () => {
     const { main } = await import('../../scripts/flow.ts');
-    const { createFakeAdapter } = await import('../fixtures/cli/fake-adapter/adapter.ts');
-    const tracker = createFakeAdapter({ items: [untriaged()] });
+    const { FakeTracker } = await import('../../scripts/tracker/fake.ts');
+    const tracker = new FakeTracker({ items: [untriaged()] });
     let out = '';
     const code = await main(['triage', 'FAKE-1', '--park', 'Which report?'], {
       env: { FLOW_SESSION_ID: 'session-abc', CLAUDECODE: '1' },
@@ -388,7 +388,7 @@ describe('flow triage --question-file', () => {
       file,
     ]);
     expect(result.code).toBe(EXIT.ok);
-    const comment = result.tracker.calls.find((call) => call.method === 'comment') as {
+    const comment = result.tracker.writes.find((call) => call.method === 'comment') as {
       body: string;
     };
     expect(comment.body.startsWith(`${QUESTION.trim()}\n\nReply to this comment to go on.`)).toBe(
@@ -415,7 +415,7 @@ describe('flow triage --question-file', () => {
       scratch,
       '--dry-run',
     ]);
-    expect(dry.tracker.calls).toEqual([]);
+    expect(dry.tracker.writes).toEqual([]);
     expect(existsSync(path.join(project.dir, scratch))).toBe(true);
   });
 
@@ -440,7 +440,7 @@ describe('flow triage --question-file', () => {
     ]) {
       const result = await runFlow(project, { items: [untriaged()] }, argv);
       expect(result.code, argv.join(' ')).toBe(EXIT.usage);
-      expect(result.tracker.calls).toEqual([]);
+      expect(result.tracker.writes).toEqual([]);
     }
     expect(existsSync(path.join(project.dir, file))).toBe(true);
   });

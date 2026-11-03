@@ -12,7 +12,7 @@ import path from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
 import { EXIT } from '../../scripts/errors.ts';
-import type { FakeBacklog } from '../fixtures/cli/fake-adapter/adapter.ts';
+import type { FakeBacklog } from '../../scripts/tracker/fake.ts';
 import { item, makeProject, runFlow, type WriteProject } from './write-harness.ts';
 
 let project: WriteProject;
@@ -90,7 +90,7 @@ describe('flow inbox', () => {
     }
     expect(entries.map((e) => e.rule)).toEqual([3, 2]);
     expect(result.tracker.backlog.items[0].labels).toContain('agent/needs-input');
-    expect(result.tracker.calls).toEqual([]);
+    expect(result.tracker.writes).toEqual([]);
   });
 
   it("returns a member's answer with its text, for resuming the parked item", async () => {

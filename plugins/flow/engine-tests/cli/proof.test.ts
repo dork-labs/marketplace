@@ -55,7 +55,14 @@ function proofArgs(tests = 'tests/paths.test.ts', ...extra: string[]): string[] 
   ];
 }
 
-const bug = item('FAKE-1', { type: 'signal', stateCategory: 'started', labels: ['agent/claimed'] });
+// With a stage label, so moving it is a real write the gate has to come before.
+// A new one each time: the tracker changes the items it holds.
+const bug = () =>
+  item('FAKE-1', {
+    type: 'signal',
+    stateCategory: 'started',
+    labels: ['agent/claimed', 'stage/execute'],
+  });
 
 beforeEach(() => {
   project = makeProject();
@@ -74,7 +81,7 @@ afterEach(() => {
 describe('flow proof', () => {
   it('records the proof at HEAD with the merge base, and keeps it out of git', async () => {
     // Purpose: the record is what the review gate and the reviewer read.
-    const result = await runFlow(project, { items: [bug] }, proofArgs());
+    const result = await runFlow(project, { items: [bug()] }, proofArgs());
     expect(result.code).toBe(EXIT.ok);
     const record = JSON.parse(
       readFileSync(proofPath(project.dir, 'FAKE-1'), 'utf8')
@@ -93,7 +100,7 @@ describe('flow proof', () => {
   it('refuses a test the branch does not change (exit 5), writing nothing', async () => {
     // Purpose: a test that already passed before the fix proves nothing.
     git('update-ref', 'refs/remotes/origin/main', 'HEAD');
-    const result = await runFlow(project, { items: [bug] }, proofArgs());
+    const result = await runFlow(project, { items: [bug()] }, proofArgs());
     expect(result.code).toBe(EXIT.precondition);
     expect(JSON.stringify(result.json)).toContain('not added or changed on this branch');
     expect(existsSync(proofPath(project.dir, 'FAKE-1'))).toBe(false);
@@ -102,7 +109,7 @@ describe('flow proof', () => {
   it('refuses a test that is only in the working tree, not committed', async () => {
     // Purpose: the proof is pinned to a commit; an uncommitted file is not in it.
     writeFileSync(path.join(project.dir, 'tests', 'other.test.ts'), 'x\n');
-    const result = await runFlow(project, { items: [bug] }, proofArgs('tests/other.test.ts'));
+    const result = await runFlow(project, { items: [bug()] }, proofArgs('tests/other.test.ts'));
     expect(result.code).toBe(EXIT.precondition);
     expect(JSON.stringify(result.json)).toContain('not added or changed on this branch');
   });
@@ -112,26 +119,26 @@ describe('flow proof', () => {
     git('update-ref', 'refs/remotes/origin/main', 'HEAD');
     git('rm', '-q', 'tests/paths.test.ts');
     git('-c', 'user.email=t@example.test', '-c', 'user.name=t', 'commit', '-q', '-m', 'rm');
-    const result = await runFlow(project, { items: [bug] }, proofArgs());
+    const result = await runFlow(project, { items: [bug()] }, proofArgs());
     expect(result.code).toBe(EXIT.precondition);
     expect(JSON.stringify(result.json)).toContain('not added or changed on this branch');
   });
 
   it('takes ./ and backslash forms of a test path as git names it', async () => {
     // Purpose: a correct path in another spelling must not read as "not changed".
-    const result = await runFlow(project, { items: [bug] }, proofArgs('./tests/paths.test.ts'));
+    const result = await runFlow(project, { items: [bug()] }, proofArgs('./tests/paths.test.ts'));
     expect(result.code).toBe(EXIT.ok);
     expect(result.json).toMatchObject({ record: { tests: ['tests/paths.test.ts'] } });
-    const back = await runFlow(project, { items: [bug] }, proofArgs('tests\\paths.test.ts'));
+    const back = await runFlow(project, { items: [bug()] }, proofArgs('tests\\paths.test.ts'));
     expect(back.code).toBe(EXIT.ok);
   });
 
   it('refuses identical red and green output, and empty output', async () => {
     // Purpose: one run saved twice is not a before-and-after.
     writeRuns('PASS', 'PASS');
-    expect((await runFlow(project, { items: [bug] }, proofArgs())).code).toBe(EXIT.precondition);
+    expect((await runFlow(project, { items: [bug()] }, proofArgs())).code).toBe(EXIT.precondition);
     writeRuns('  \n', 'PASS');
-    expect((await runFlow(project, { items: [bug] }, proofArgs())).code).toBe(EXIT.precondition);
+    expect((await runFlow(project, { items: [bug()] }, proofArgs())).code).toBe(EXIT.precondition);
   });
 
   it('refuses a missing flag (exit 2) and an identifier that could leave the folder', async () => {
@@ -139,10 +146,10 @@ describe('flow proof', () => {
     const noClass = proofArgs().filter(
       (_, i, all) => all[i] !== '--class' && all[i - 1] !== '--class'
     );
-    expect((await runFlow(project, { items: [bug] }, noClass)).code).toBe(EXIT.usage);
+    expect((await runFlow(project, { items: [bug()] }, noClass)).code).toBe(EXIT.usage);
     const escape = proofArgs();
     escape[1] = '../x';
-    expect((await runFlow(project, { items: [bug] }, escape)).code).toBe(EXIT.usage);
+    expect((await runFlow(project, { items: [bug()] }, escape)).code).toBe(EXIT.usage);
   });
 });
 
@@ -150,7 +157,7 @@ describe('flow stage <bug> review', () => {
   it('refuses a bug with no proof (exit 5), before any write, dry runs included', async () => {
     // Purpose: DOR-3261 — VERIFY refuses to hand off a bug fix without its proof test.
     for (const extra of [[], ['--dry-run']]) {
-      const result = await runFlow(project, { items: [bug] }, [
+      const result = await runFlow(project, { items: [bug()] }, [
         'stage',
         'FAKE-1',
         'review',
@@ -160,34 +167,34 @@ describe('flow stage <bug> review', () => {
       expect(JSON.stringify(result.json)).toContain('is a bug fix with no proof test');
       // The refusal names the way through, so the gate never dead-ends an agent.
       expect(JSON.stringify(result.json)).toContain('--waive');
-      expect(result.tracker.calls).toEqual([]);
+      expect(result.tracker.writes).toEqual([]);
     }
   });
 
   it('lets a bug with a proof at the head into review', async () => {
-    expect((await runFlow(project, { items: [bug] }, proofArgs())).code).toBe(EXIT.ok);
-    const result = await runFlow(project, { items: [bug] }, ['stage', 'FAKE-1', 'review']);
+    expect((await runFlow(project, { items: [bug()] }, proofArgs())).code).toBe(EXIT.ok);
+    const result = await runFlow(project, { items: [bug()] }, ['stage', 'FAKE-1', 'review']);
     expect(result.code).toBe(EXIT.ok);
-    expect(result.tracker.calls).toHaveLength(1);
+    expect(result.tracker.writes).toHaveLength(1);
   });
 
   it('refuses a proof recorded before the head moved', async () => {
     // Purpose: a review fix changes the code; the proof must be run again on it.
-    expect((await runFlow(project, { items: [bug] }, proofArgs())).code).toBe(EXIT.ok);
+    expect((await runFlow(project, { items: [bug()] }, proofArgs())).code).toBe(EXIT.ok);
     commit('src/paths.ts', 'export const fixed = 2;\n');
-    const result = await runFlow(project, { items: [bug] }, ['stage', 'FAKE-1', 'review']);
+    const result = await runFlow(project, { items: [bug()] }, ['stage', 'FAKE-1', 'review']);
     expect(result.code).toBe(EXIT.precondition);
     expect(JSON.stringify(result.json)).toContain(
       'run the proof test at the head and record it again'
     );
-    expect(result.tracker.calls).toEqual([]);
+    expect(result.tracker.writes).toEqual([]);
   });
 
   it('refuses a hand-edited or broken record', async () => {
     // Purpose: the gate reads only a record flow would have written.
-    expect((await runFlow(project, { items: [bug] }, proofArgs())).code).toBe(EXIT.ok);
+    expect((await runFlow(project, { items: [bug()] }, proofArgs())).code).toBe(EXIT.ok);
     writeFileSync(proofPath(project.dir, 'FAKE-1'), '{"v":1}');
-    const broken = await runFlow(project, { items: [bug] }, ['stage', 'FAKE-1', 'review']);
+    const broken = await runFlow(project, { items: [bug()] }, ['stage', 'FAKE-1', 'review']);
     expect(broken.code).toBe(EXIT.precondition);
     expect(JSON.stringify(broken.json)).toContain('is not valid');
   });
@@ -198,7 +205,7 @@ describe('flow stage <bug> review', () => {
     expect((await runFlow(project, { items: [task] }, ['stage', 'FAKE-1', 'review'])).code).toBe(
       EXIT.ok
     );
-    expect((await runFlow(project, { items: [bug] }, ['stage', 'FAKE-1', 'verify'])).code).toBe(
+    expect((await runFlow(project, { items: [bug()] }, ['stage', 'FAKE-1', 'verify'])).code).toBe(
       EXIT.ok
     );
   });
@@ -217,7 +224,7 @@ describe('flow proof --waive', () => {
     // Purpose: PM ruling — the gate must never dead-end an agent.
     const waived = await runFlow(
       project,
-      { items: [bug] },
+      { items: [bug()] },
       waive('  no harness drives the GPU path  ')
     );
     expect(waived.code).toBe(EXIT.ok);
@@ -228,7 +235,7 @@ describe('flow proof --waive', () => {
       headSha: git('rev-parse', 'HEAD'),
       reason: 'no harness drives the GPU path',
     });
-    const result = await runFlow(project, { items: [bug] }, ['stage', 'FAKE-1', 'review']);
+    const result = await runFlow(project, { items: [bug()] }, ['stage', 'FAKE-1', 'review']);
     expect(result.code).toBe(EXIT.ok);
     // The hand-off says it was waived, and why.
     expect(result.json).toMatchObject({
@@ -239,7 +246,7 @@ describe('flow proof --waive', () => {
 
   it('refuses an empty or whitespace-only reason (exit 2), writing nothing', async () => {
     for (const reason of ['', '   ', '\t\n']) {
-      const result = await runFlow(project, { items: [bug] }, waive(reason));
+      const result = await runFlow(project, { items: [bug()] }, waive(reason));
       expect(result.code).toBe(EXIT.usage);
       expect(existsSync(proofPath(project.dir, 'FAKE-1'))).toBe(false);
     }
@@ -249,7 +256,7 @@ describe('flow proof --waive', () => {
     // Purpose: a record is one or the other; a half-proof must not ride on a waiver.
     const result = await runFlow(
       project,
-      { items: [bug] },
+      { items: [bug()] },
       waive('no harness', '--tests', 'tests/paths.test.ts')
     );
     expect(result.code).toBe(EXIT.usage);
@@ -257,20 +264,20 @@ describe('flow proof --waive', () => {
 
   it('does not count a waiver recorded at an older commit', async () => {
     // Purpose: like a proof, a waiver holds only at the commit it names.
-    expect((await runFlow(project, { items: [bug] }, waive('no harness'))).code).toBe(EXIT.ok);
+    expect((await runFlow(project, { items: [bug()] }, waive('no harness'))).code).toBe(EXIT.ok);
     commit('src/paths.ts', 'export const fixed = 3;\n');
-    const result = await runFlow(project, { items: [bug] }, ['stage', 'FAKE-1', 'review']);
+    const result = await runFlow(project, { items: [bug()] }, ['stage', 'FAKE-1', 'review']);
     expect(result.code).toBe(EXIT.precondition);
     expect(JSON.stringify(result.json)).toContain('the waiver for FAKE-1 was recorded at');
-    expect(result.tracker.calls).toEqual([]);
+    expect(result.tracker.writes).toEqual([]);
   });
 
   it('refuses a waiver file with a blank reason written by hand', async () => {
-    expect((await runFlow(project, { items: [bug] }, waive('no harness'))).code).toBe(EXIT.ok);
+    expect((await runFlow(project, { items: [bug()] }, waive('no harness'))).code).toBe(EXIT.ok);
     const file = proofPath(project.dir, 'FAKE-1');
     const record = JSON.parse(readFileSync(file, 'utf8'));
     writeFileSync(file, JSON.stringify({ ...record, reason: '  ' }));
-    const result = await runFlow(project, { items: [bug] }, ['stage', 'FAKE-1', 'review']);
+    const result = await runFlow(project, { items: [bug()] }, ['stage', 'FAKE-1', 'review']);
     expect(result.code).toBe(EXIT.precondition);
   });
 });

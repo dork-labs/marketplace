@@ -164,7 +164,7 @@ describe('flow release: the kept reviewer worktree', () => {
     expect(result.code).toBe(EXIT.precondition);
     expect(String((result.json.error as { message: string }).message)).toContain(REVIEWER_MAY_RUN);
     expect(existsSync(target)).toBe(true);
-    expect(result.tracker.calls).toEqual([]);
+    expect(result.tracker.writes).toEqual([]);
     expect(Object.keys(project.runs())).toEqual(['id-FAKE-1']);
   });
 

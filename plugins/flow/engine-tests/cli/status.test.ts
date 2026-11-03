@@ -20,7 +20,7 @@ import type { FlowRun } from '../../scripts/flow-run.ts';
 import { formatWhen } from '../../scripts/question.ts';
 import { main, type MainDeps } from '../../scripts/flow.ts';
 import type { WorkItem } from '../../scripts/tracker/types.ts';
-import { createFakeAdapter, type FakeBacklog } from '../fixtures/cli/fake-adapter/adapter.ts';
+import { FakeTracker, type FakeBacklog } from '../../scripts/tracker/fake.ts';
 
 const NOW = new Date('2026-09-26T12:00:00.000Z');
 
@@ -101,7 +101,7 @@ async function status(
   backlog: FakeBacklog = { items: [] },
   createLauncher?: MainDeps['createLauncher']
 ) {
-  const fake = createFakeAdapter(backlog);
+  const fake = new FakeTracker({ user: { id: 'agent-1', name: 'Fake agent' }, ...backlog });
   let stdout = '';
   let stderr = '';
   const deps: MainDeps = {
@@ -123,7 +123,7 @@ async function status(
     },
   };
   const code = await main(['status', ...argv], deps);
-  return { code, stdout, stderr, json: () => JSON.parse(stdout), calls: fake.calls };
+  return { code, stdout, stderr, json: () => JSON.parse(stdout), calls: fake.writes };
 }
 
 const kinds = (out: { drift: { identifier: string; kind: string; check?: string }[] }) =>

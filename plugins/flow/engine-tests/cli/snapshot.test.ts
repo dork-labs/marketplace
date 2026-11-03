@@ -9,7 +9,7 @@ import path from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
 import { EXIT } from '../../scripts/errors.ts';
-import type { FakeBacklog } from '../fixtures/cli/fake-adapter/adapter.ts';
+import type { FakeBacklog } from '../../scripts/tracker/fake.ts';
 import { readyItem, runFlow, tempProject, type TempProject } from './read-verb-harness.ts';
 
 let temp: TempProject;

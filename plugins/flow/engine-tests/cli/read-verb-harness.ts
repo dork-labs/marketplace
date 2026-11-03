@@ -15,7 +15,7 @@ import path from 'node:path';
 import type { CliDeps } from '../../scripts/cli/context.ts';
 import { main, VERBS } from '../../scripts/flow.ts';
 import type { WorkItem } from '../../scripts/tracker/types.ts';
-import { createFakeAdapter, type FakeBacklog } from '../fixtures/cli/fake-adapter/adapter.ts';
+import { FakeTracker, type FakeBacklog } from '../../scripts/tracker/fake.ts';
 
 /** A temp project folder and plugin folder, removed by `cleanup`. */
 export interface TempProject {
@@ -104,7 +104,7 @@ export async function runFlow(
     stderr: { write: (chunk: string) => (stderr += chunk) },
     createAdapter: async () => {
       adapterBuilds += 1;
-      return createFakeAdapter(backlog).adapter;
+      return new FakeTracker(backlog).adapter;
     },
     runProcess: options.runProcess ?? (async () => ({ code: 0, stdout: '', stderr: '' })),
     ...(options.createForge === undefined ? {} : { createForge: options.createForge }),

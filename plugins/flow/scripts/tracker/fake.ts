@@ -102,11 +102,7 @@ export const FAKE_TEAM_LABELS: readonly string[] = [
   'origin/from-signal',
 ];
 
-/**
- * The fake tracker's whole state, as a JSON file holds it. The shape is a
- * superset of the CLI tests' fixture fake, so a backlog file written for that
- * fake reads here. (Not the reverse: this one keeps closed items in `items`.)
- */
+/** The fake tracker's whole state, as a JSON file holds it. */
 export interface FakeBacklog {
   /** The tracker slug the snapshot reports. Default `fake`. */
   tracker?: string;
@@ -146,6 +142,12 @@ export interface FakeBacklog {
   failReads?: string;
   /** When true, writes report success and change nothing (a tracker that drops writes). */
   dropWrites?: boolean;
+  /**
+   * A slow tracker, through the file-backed adapter only: `getItem` answers this
+   * many ms after it read; a record gives the wait per identifier (others answer
+   * at once). It widens the window a race between two processes needs.
+   */
+  getItemDelayMs?: number | Record<string, number>;
 }
 
 /** One write the tracker accepted, in order. */

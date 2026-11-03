@@ -11,7 +11,7 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { EXIT } from '../../scripts/errors.ts';
 import { applyAndVerify, fromOutsideChange } from '../../scripts/cli/work-write.ts';
 import { AGENT_FROM_OUTSIDE, projectionFor } from '../../scripts/work-state.ts';
-import { createFakeAdapter } from '../fixtures/cli/fake-adapter/adapter.ts';
+import { FakeTracker } from '../../scripts/tracker/fake.ts';
 import { item, makeProject, runFlow, type WriteProject } from './write-harness.ts';
 
 let project: WriteProject;
@@ -52,7 +52,7 @@ describe('agent/from-outside', () => {
   ])('no flow write may %s: refused before any tracker write', async (_what, argv) => {
     const result = await runFlow(project, { items: [captured()] }, argv);
     expect(result.code).toBe(EXIT.precondition);
-    expect(result.tracker.calls).toEqual([]);
+    expect(result.tracker.writes).toEqual([]);
     expect(result.tracker.backlog.items[0].labels).toEqual(['type/idea', AGENT_FROM_OUTSIDE]);
   });
 
@@ -97,7 +97,7 @@ describe('agent/from-outside', () => {
   });
 
   it('closing it is allowed, and leaves the label on so a reopened item is never triage-able', async () => {
-    const tracker = createFakeAdapter({ items: [captured()] });
+    const tracker = new FakeTracker({ items: [captured()] });
     const done = projectionFor({ type: 'done' }, { stages: {} } as never);
     expect(fromOutsideChange(captured(), done)).not.toHaveProperty('agentLabel');
     await applyAndVerify(tracker.adapter, captured(), done);

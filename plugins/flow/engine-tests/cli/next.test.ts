@@ -22,8 +22,17 @@ import { EXIT } from '../../scripts/errors.ts';
 import type { FlowRun } from '../../scripts/flow-run.ts';
 import type { WorkItem } from '../../scripts/tracker/types.ts';
 import type { OwnershipClass } from '../../scripts/work-item.ts';
-import type { FakeBacklog } from '../fixtures/cli/fake-adapter/adapter.ts';
-import { readyItem, runFlow, tempProject, type TempProject } from './read-verb-harness.ts';
+import type { FakeBacklog } from '../../scripts/tracker/fake.ts';
+import {
+  readyItem,
+  runFlow as runFlowIn,
+  tempProject,
+  type TempProject,
+} from './read-verb-harness.ts';
+
+/** These items carry assorted prefixes (`P-1`, `W-1`), so the tracker scopes no team. */
+const runFlow: typeof runFlowIn = (argv, temp, backlog, ...rest) =>
+  runFlowIn(argv, temp, { team: { key: null, id: 'team-1' }, ...backlog }, ...rest);
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const DISPATCH_SCRIPT = path.resolve(here, '..', '..', 'scripts', 'dispatch.ts');

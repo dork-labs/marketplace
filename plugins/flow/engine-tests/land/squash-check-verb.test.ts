@@ -16,7 +16,7 @@ import { EXIT } from '../../scripts/errors.ts';
 import type { FlowRun } from '../../scripts/flow-run.ts';
 import { main } from '../../scripts/flow.ts';
 import type { Forge, MergeInfo } from '../../scripts/forge/types.ts';
-import { createFakeAdapter } from '../fixtures/cli/fake-adapter/adapter.ts';
+import { FakeTracker } from '../../scripts/tracker/fake.ts';
 import { makeProject, type WriteProject } from '../cli/write-harness.ts';
 import { squashSettled } from '../../scripts/cli/squash-check.ts';
 import type { SquashVerdict } from '../../scripts/land/squash-verify.ts';
@@ -94,7 +94,7 @@ async function flow(argv: string[], forge: Forge) {
     now: () => new Date('2026-10-24T12:00:00.000Z'),
     stdout: { write: (c: string) => (out += c) },
     stderr: { write: (c: string) => (err += c) },
-    createAdapter: async () => createFakeAdapter({ items: [] }).adapter,
+    createAdapter: async () => new FakeTracker({ items: [] }).adapter,
     runProcess: runner,
     createForge: () => forge,
   });
