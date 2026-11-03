@@ -197,6 +197,8 @@ It joins the merge queue and merges as soon as the required checks pass there. T
 
 **Never an admin merge.** `gh pr merge` with the admin flag, a REST `PUT .../pulls/<n>/merge` and the `mergePullRequest` mutation each land a change without the queue's checks, and every agent on this machine runs as an admin. In Claude Code the PreToolUse guard `.claude/hooks/merge-guard.mjs` refuses them; other harnesses may not run it, so there treat this sentence as the whole rule. If the queue itself is broken, say so and leave the PR alone.
 
+**A red `security-review` usually means Security hasn't labelled this head yet.** On a security path it needs `security-reviewed` added after your last push, with no `hold` (`.github/SECURITY-GATE.md`). A green `security-gate` on an open PR doesn't mean reviewed: it only waits. Read `security-review`.
+
 Arm only when every signal is good; `scripts/should-arm-automerge.sh` (pinned by `scripts/test-should-arm-automerge.sh`) is the rule, so never a draft, a conflicting PR, a PR with changes requested or an unresolved thread, or one with a check failing, cancelled or still running. **A PR labelled `hold`, `do-not-merge`, `wip` or `blocked` is not armed**; the labels mean the same in dork-labs/dorkos. Nothing arms PRs automatically yet: a scheduled `merge-tail` workflow that runs that rule over every open PR arrives once the `dorkos-merge-tail` GitHub App is set up here (DOR-2270). A label does not disarm a PR that is already armed: `gh pr merge --disable-auto <number>` does.
 
 GitHub deletes the head branch when the PR merges. Remove your worktree afterwards:
