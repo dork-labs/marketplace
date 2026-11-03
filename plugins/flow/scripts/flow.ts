@@ -788,7 +788,7 @@ export const VERBS: readonly VerbDefinition[] = [
     summary: "Answer an agent's parked question.",
     description: [
       'Post an answer on an item that carries agent/needs-input, and record it on the run so the work resumes. Exits 5 when the question was already answered.',
-      '  --text <text> | --text-file <file>   A person\'s answer (at most 2,000 characters), posted with "Answered in DorkOS." as its last line.',
+      '  --text <text> | --text-file <file>   A person\'s answer (at most 2,000 characters), posted with "Answered in DorkOS." as its last line. Refused from inside an agent and from the session that asked: a person answers from DorkOS or a plain terminal.',
       "  --pick --by agent-default            The question's deadline passed: the agent's pick stands. Refused for a floor question.",
       "  --pick --by reviewer-agent --token <t>  The reviewer agent checked a floor question's pick and agrees.",
     ].join('\n'),

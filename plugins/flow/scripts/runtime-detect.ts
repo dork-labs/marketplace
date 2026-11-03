@@ -103,6 +103,41 @@ function markersIn(env: Readonly<Record<string, string | undefined>>): DetectedR
 }
 
 /**
+ * Every variable that says a process runs inside an agent: the markers
+ * {@link markersIn} reads, `FLOW_RUNTIME`, the session ids an agent's shell
+ * carries (`CLAUDE_CODE_SESSION_ID`, `FLOW_SESSION_ID`), and the identity
+ * token DorkOS gives an agent's turn (`DORKOS_AGENT_TOKEN`).
+ */
+export const AGENT_ENV_NAMES = [
+  'CODEX_THREAD_ID',
+  'CODEX_SANDBOX',
+  'CODEX_SANDBOX_NETWORK_DISABLED',
+  'OPENCODE',
+  'CLAUDECODE',
+  'CLAUDE_CODE_ENTRYPOINT',
+  'CLAUDE_CODE_SESSION_ID',
+  'FLOW_RUNTIME',
+  'FLOW_SESSION_ID',
+  'DORKOS_AGENT_TOKEN',
+] as const;
+
+/**
+ * `env` without {@link AGENT_ENV_NAMES}: how DorkOS runs a verb a person
+ * clicked (`flow answer`), so an agent's markers on DorkOS's own process never
+ * reach it (DOR-3712).
+ *
+ * @param env - The environment to copy.
+ * @returns A copy without any agent's markers or session ids.
+ */
+export function withoutAgent(
+  env: Readonly<Record<string, string | undefined>>
+): Record<string, string | undefined> {
+  const out = { ...env };
+  for (const name of AGENT_ENV_NAMES) delete out[name];
+  return out;
+}
+
+/**
  * Detect the agent runtime and harness from the environment.
  *
  * @param env - The environment to read (default: this process's).

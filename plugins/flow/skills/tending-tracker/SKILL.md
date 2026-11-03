@@ -120,8 +120,8 @@ path**: (a) delivered into `<id>`, (b) fresh session, (c) handled here, origin o
 - `needsInput(item, question)`: `flow ask <id> --question … --choice … --pick <n>
 --why … [--floor <triggers>]` posts it with your pick, adds `agent/needs-input` and
   records it on the run; then `assignToHuman`, stop. Parked is durable; the stall sweep
-  never reclaims it; a member's reply (rule 3) or an answer `flow answer` recorded on
-  the run (`question.answer`) resumes it.
+  never reclaims it; a member's reply (rule 3) or a recorded `question.answer` resumes
+  it (`secrets-or-spend`: only `by: person`).
 - **Who answers** is `flow ask`'s `answeredBy`: the person; the agent's pick once
   `decideBy` passes (the inbox pass runs `flow answer <id> --pick --by agent-default`,
   then resumes); or, for a floor question once `checkAfter` passes, the reviewer agent

@@ -172,7 +172,7 @@ export function recordedAnswerPointer(question: RunQuestion, identifier: string)
   if (answer === undefined) return `the latest comment on ${identifier}`;
   const who =
     answer.by === 'person'
-      ? 'a person, from DorkOS'
+      ? 'a person'
       : answer.by === 'reviewer-agent'
         ? 'the reviewer agent'
         : 'your own pick, at the deadline';
@@ -614,6 +614,19 @@ export async function drain(ctx: VerbContext, options: DrainOptions = {}): Promi
       let answer: string | null = reply === null ? null : answerPointer(reply, identifier);
       const fromQuestion = answer === null ? parkedAnswer(question, ctx.now(), parked.since) : null;
       if (fromQuestion === 'recorded' && question !== undefined) {
+        // Only a person answers a secrets-or-spend question (DOR-3712). The CLI
+        // records no other answer for one, so another was written by hand (an
+        // agent can write flow-state.json): drop it, keep the run parked, and
+        // say so once.
+        const recorded = question.answer;
+        if (recorded !== undefined && personOnly(question) && recorded.by !== 'person') {
+          if (ctx.dryRun) return facts;
+          await releaseAnswer(store, item.id, question.askedAt, recorded);
+          ctx.warn(
+            `${identifier} stays parked: its question is about secrets or spending, so only a person answers it, from DorkOS or with \`flow answer\` in a plain terminal. The ${typeof recorded.by === 'string' && recorded.by !== '' ? recorded.by : 'other'} answer on the run was dropped.`
+          );
+          return facts;
+        }
         // `flow answer` recorded it (from DorkOS, or the pick at a deadline).
         answer = recordedAnswerPointer(question, identifier);
       }
