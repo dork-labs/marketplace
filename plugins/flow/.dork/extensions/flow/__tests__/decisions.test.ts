@@ -675,6 +675,37 @@ describe('answering', () => {
     expect(await old.coordinator.handle(event(key))).toEqual({ resolve: 'approved' });
   });
 
+  // Purpose (DOR-3716): `flow review --approve`/`--changes` as the person refuse
+  // an agent's shell, so DorkOS's 👍 and 👎 run them with no agent's markers,
+  // session or token, even when DorkOS's own process carries them.
+  it.each([
+    ['👍', {}],
+    ['👎', { action: 'reject', note: 'Make the banner smaller.' }],
+  ] as const)('runs %s without any agent markers or session', async (_name, action) => {
+    const markers = {
+      CLAUDECODE: '1',
+      CLAUDE_CODE_ENTRYPOINT: 'cli',
+      CLAUDE_CODE_SESSION_ID: 's-1',
+      CODEX_THREAD_ID: 't-1',
+      OPENCODE: '1',
+      FLOW_RUNTIME: 'claude-code',
+      FLOW_SESSION_ID: 'agent-session',
+      DORKOS_AGENT_TOKEN: 'tok',
+    };
+    for (const [name, value] of Object.entries(markers)) vi.stubEnv(name, value);
+    try {
+      const { coordinator, cli } = setup();
+      await coordinator.sync([plan({ a: gateRun() })]);
+      await coordinator.handle(event(key, action));
+      expect(cli.calls[0].args[0]).toBe('review');
+      const env = cli.calls[0].env;
+      expect(env).toBeDefined();
+      for (const name of Object.keys(markers)) expect(env).not.toHaveProperty(name);
+    } finally {
+      vi.unstubAllEnvs();
+    }
+  });
+
   it('sends work back only with a note, through a file, and offers nothing', async () => {
     const { coordinator, cli } = setup();
     await coordinator.sync([plan({ a: gateRun() })]);

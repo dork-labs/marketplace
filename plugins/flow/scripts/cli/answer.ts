@@ -36,8 +36,8 @@ import {
   pickIsDue,
   type QuestionSettler,
 } from '../question.ts';
-import { detectRuntime } from '../runtime-detect.ts';
-import { callerSessions, requireOtherSession } from './caller.ts';
+import { requireOtherSession } from './caller.ts';
+import { refuseSessions, requirePersonShell } from './person-gate.ts';
 import { claimAnswer, releaseAnswer } from './question-write.ts';
 import { AGENT_NEEDS_INPUT } from '../work-state.ts';
 import type { VerbContext, VerbResult } from './context.ts';
@@ -78,64 +78,11 @@ function answerText(ctx: VerbContext): string {
 }
 
 /**
- * What the refusals below tell whoever hit them. An agent reads them, so they
- * say to stop and hand the question to the person, never how to get past the
- * check (Security M1 on DOR-3712: naming another shell is the retry that
- * works). How a person answers from their own terminal is in the docs and
- * `--help` only.
+ * What the refusals tell whoever hit them: stop and hand the question to the
+ * person, never how to get past the check (`person-gate.ts`).
  */
 const STOP_AND_ASK =
   "Stop: an agent never answers a person's question. Do not run this again any other way; ask the person to answer it in DorkOS.";
-
-/**
- * Refuse `--text` from inside an agent runtime (DOR-3712): an agent's shell
- * carries its runtime's markers, so this is where an agent answering its own
- * question, or another's, is stopped. A person whose terminal has Claude
- * Code's environment exported is refused too; DorkOS runs this verb without
- * those markers. Any `FLOW_RUNTIME`, known or not, and DorkOS's agent token
- * count as an agent too. A guard, not a boundary: any process can unset them (see
- * `caller.ts`).
- *
- * @param ctx - The verb's context.
- * @throws {PreconditionError} When the shell is an agent's.
- */
-function requirePersonShell(ctx: VerbContext): void {
-  const detected = detectRuntime(ctx.env);
-  const named = (ctx.env.FLOW_RUNTIME ?? '').trim() !== '';
-  const dorkosTurn = (ctx.env.DORKOS_AGENT_TOKEN ?? '') !== '';
-  if (detected.runtime === 'unknown' && detected.markers.length === 0 && !named && !dorkosTurn) {
-    return;
-  }
-  // A FLOW_RUNTIME flow does not know (a launcher naming itself) still says an
-  // agent runs here, and so does DorkOS's agent token.
-  const runtime =
-    detected.runtime !== 'unknown'
-      ? detected.runtime
-      : (detected.markers[0] ?? (dorkosTurn ? 'a DorkOS agent' : 'an agent runtime'));
-  throw new PreconditionError(
-    `flow answer --text takes a person's answer, and this runs inside an agent (${runtime}), so nothing was posted or recorded. ${STOP_AND_ASK}`
-  );
-}
-
-/**
- * The second guard: refuse `--text` from the session that asked, or the run's
- * worker, when the caller names a session (`--session`, `FLOW_SESSION_ID`)
- * without any agent's markers (DOR-3712).
- *
- * @param ctx - The verb's context.
- * @param sessions - The asker's and the worker's session ids.
- * @throws {PreconditionError} When the caller is one of them.
- */
-function requireNotTheAsker(ctx: VerbContext, sessions: readonly (string | undefined)[]): void {
-  const barred = new Set(
-    sessions.filter((id): id is string => typeof id === 'string' && id !== '')
-  );
-  if (callerSessions(ctx).some((id) => barred.has(id))) {
-    throw new PreconditionError(
-      `the session that asked, or the run's worker, cannot answer its own question, so nothing was posted or recorded. ${STOP_AND_ASK}`
-    );
-  }
-}
 
 /**
  * Run `flow answer`.
@@ -167,7 +114,13 @@ export async function run(ctx: VerbContext): Promise<VerbResult> {
     throw new UsageError('--token goes with --pick --by reviewer-agent');
   }
   const text = pick ? null : answerText(ctx);
-  if (text !== null) requirePersonShell(ctx);
+  if (text !== null) {
+    requirePersonShell(
+      ctx,
+      (agent) =>
+        `flow answer --text takes a person's answer, and this runs inside an agent (${agent}), so nothing was posted or recorded. ${STOP_AND_ASK}`
+    );
+  }
 
   const { loaded, adapter, store } = await setupWrite(ctx, ['getItem', 'comment']);
   const item = await adapter.getItem(identifier);
@@ -178,7 +131,13 @@ export async function run(ctx: VerbContext): Promise<VerbResult> {
       `${identifier}'s question was already answered (it no longer carries ${AGENT_NEEDS_INPUT}), so nothing was posted`
     );
   if (!item.labels.includes(AGENT_NEEDS_INPUT) || question?.answer !== undefined) throw settled();
-  if (text !== null) requireNotTheAsker(ctx, [question?.askedBy, existing?.sessionId]);
+  if (text !== null) {
+    refuseSessions(
+      ctx,
+      [question?.askedBy, existing?.sessionId],
+      `the session that asked, or the run's worker, cannot answer its own question, so nothing was posted or recorded. ${STOP_AND_ASK}`
+    );
+  }
 
   let body: string;
   let answer: string;

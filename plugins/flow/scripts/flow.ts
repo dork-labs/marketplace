@@ -694,6 +694,7 @@ export const VERBS: readonly VerbDefinition[] = [
       '      With mergeOnApproval off every check must have passed. Checks still running: ships nothing, exits 5 with verdict "pending", and records the retry the drain re-checks. A PR no check reports on counts as passed after gates.review.noChecksPassAfterMinutes, when the base requires none.',
       '  --changes (--note <text> | --note-file <file>)',
       '      Comment "Sent back: <note>", request changes on the PR, and send the work back: a drain run gets the note as review findings; any other run returns to execute.',
+      'As the person (--approve without --by reviewer-agent, and --changes) it is refused from inside an agent and from a session that worked the item: a person reviews from DorkOS or a plain terminal.',
       'Exits 5 when the item is not at the review gate.',
     ].join('\n'),
     common: ['project', 'session', 'dry-run'],

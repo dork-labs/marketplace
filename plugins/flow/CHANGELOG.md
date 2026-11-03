@@ -4,6 +4,15 @@ Installs of this plugin are pinned to a commit SHA, so a fix here does not reach
 you until you **reinstall it** (Marketplace → flow → reinstall, or re-run your
 `--plugin-dir` checkout's `git pull`). Each entry below says whether that matters.
 
+## 0.85.0
+
+**Only a person can approve or send back work at the review gate now (DOR-3716). Before, any agent could run `flow review --approve` from its own shell, which posted "Shipped from DorkOS.", approved the PR and, with `gates.review.mergeOnApproval` on, armed it to merge. Reinstall to get it.**
+
+- `flow review --approve` (as the person) and `flow review --changes` refuse a shell inside an agent (Claude Code, Codex or OpenCode, any runtime `FLOW_RUNTIME` names, or a DorkOS agent turn), and a session that worked the item: its own, its drain worker or reviewer, its VERIFY reviewer, or the session that asked its question or checked its pick. They post, approve and arm nothing, and the refusal tells the agent to stop and ask you to approve in DorkOS.
+- DorkOS's 👍 and 👎 work as before: DorkOS runs them without any agent's markers, since you're the one clicking. You can also review from a plain terminal.
+- `flow review --approve --by reviewer-agent` is unchanged: it still needs a clean review recorded with the reviewer's token at the head, and your Ship finished work setting past Ask me first.
+- As with `flow answer`, this stops an agent acting through its usual tools, not one set on forging your approval on your own computer.
+
 ## 0.84.0
 
 **Only a person can answer a parked question with `flow answer --text` now, and a question about secrets or spending resumes only on a person's answer (DOR-3712). Before, any agent could run `flow answer --text`, including the one that asked, and its words were recorded as yours. Reinstall to get it.**

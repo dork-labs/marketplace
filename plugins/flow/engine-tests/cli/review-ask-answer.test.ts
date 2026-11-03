@@ -216,12 +216,16 @@ async function flow(
   tracker.backlog.user ??= AGENT_USER;
   let out = '';
   let err = '';
+  // A person's review (`--approve`/`--changes` without `--by reviewer-agent`)
+  // runs from a person's shell, as DorkOS runs it (DOR-3716); the gate's own
+  // tests pass `env` to run it from an agent's.
+  const personReview = argv[0] === 'review' && !argv.some((a) => a.includes('reviewer-agent'));
   const code = await main([...argv, '--json'], {
-    env: options.env ?? {
-      FLOW_SESSION_ID: 'session-abcdef123456',
-      CLAUDECODE: '1',
-      DORK_HOME: dorkHome,
-    },
+    env:
+      options.env ??
+      (personReview
+        ? person()
+        : { FLOW_SESSION_ID: 'session-abcdef123456', CLAUDECODE: '1', DORK_HOME: dorkHome }),
     cwd: options.cwd ?? project.dir,
     now: options.clock ?? (() => new Date(options.now ?? NOW)),
     stdout: { write: (c: string) => (out += c) },
@@ -435,6 +439,138 @@ describe('flow review --approve by a person', () => {
     const result = await flow(['review', 'ACME-12', '--approve'], { tracker });
     expect(result.code).toBe(EXIT.precondition);
     expect(comments(tracker)).toEqual([]);
+  });
+});
+
+describe('flow review: only a person approves or sends back (DOR-3716)', () => {
+  /** The agent shells and sessions a person's review refuses. */
+  const AGENTS: [string, Record<string, string>][] = [
+    ['Claude Code', { CLAUDECODE: '1' }],
+    ['Codex', { CODEX_THREAD_ID: 'thread-1' }],
+    ['OpenCode', { OPENCODE: '1' }],
+    ['a runtime FLOW_RUNTIME names that flow does not know', { FLOW_RUNTIME: 'doe' }],
+    ['a DorkOS agent turn (its agent token)', { DORKOS_AGENT_TOKEN: 'tok' }],
+    ["the run's session", { FLOW_SESSION_ID: 'session-abcdef123456' }],
+    ["the drain's worker", { FLOW_SESSION_ID: 'worker-1' }],
+    ['the VERIFY reviewer', { FLOW_SESSION_ID: 'reviewer-1' }],
+    ["the drain's reviewer", { FLOW_SESSION_ID: 'drain-reviewer-1' }],
+    ['the session that asked its question', { FLOW_SESSION_ID: 'asker-1' }],
+    ["its question's checker", { FLOW_SESSION_ID: 'checker-1' }],
+  ];
+
+  /** A run at the review gate whose drain worker and VERIFY reviewer have sessions. */
+  function gatedRun(): void {
+    writeRun({
+      drain: drain({
+        worker: {
+          host: 'cli',
+          runtime: 'claude-code',
+          sessionId: 'worker-1',
+          account: null,
+          cwd: '/w',
+        },
+        reviewer: {
+          host: 'cli',
+          runtime: 'claude-code',
+          sessionId: 'drain-reviewer-1',
+          account: null,
+          cwd: '/dr',
+          sha: 'abc1234def',
+          worktree: '/dr',
+          tokenHash: 'y',
+        },
+      }),
+      question: {
+        text: 'Keep the old API?',
+        choices: [
+          { id: 'c1', label: 'Keep it' },
+          { id: 'c2', label: 'Drop it' },
+        ],
+        pick: 'c1',
+        why: 'Safer.',
+        askedAt: '2026-09-26T11:00:00.000Z',
+        decideBy: null,
+        floor: [],
+        answeredBy: 'person',
+        checkAfter: null,
+        askedBy: 'asker-1',
+        checker: { host: 'cli', runtime: 'claude-code', sessionId: 'checker-1', cwd: '/c' },
+      },
+      review: {
+        tokenHash: 'x',
+        sha: 'abc1234def',
+        verdict: null,
+        reviewedSha: null,
+        reviewer: { host: 'cli', runtime: 'claude-code', sessionId: 'reviewer-1', cwd: '/r' },
+      },
+    } as Partial<FlowRun>);
+  }
+
+  /** Security M1 on DOR-3712, again: stop and ask the person, never how to retry. */
+  function expectStopAndAsk(stderr: string, what: string): void {
+    expect(stderr).toContain('Stop');
+    expect(stderr).toContain(`ask the person to ${what} in DorkOS`);
+    for (const hint of ['terminal', 'environment', 'shell without', 'unset']) {
+      expect(stderr.toLowerCase()).not.toContain(hint);
+    }
+  }
+
+  // Purpose: an agent never ships as the person. With mergeOnApproval on and an
+  // open PR, a refused approve posts nothing, approves nothing, never asks the
+  // arm guard and never arms. Fails if either gate is dropped or moved after
+  // the arm.
+  it.each(AGENTS)('refuses --approve from %s, and never arms', async (_name, env) => {
+    gatedRun();
+    const before = stored();
+    const tracker = new FakeTracker({ team: ACME_TEAM, items: [started()] });
+    const guard = recordingGuard();
+    const result = await flow(['review', 'ACME-12', '--approve', '--head', 'abc1234def'], {
+      tracker,
+      forge: fakeForge({ head: 'abc1234def' }),
+      guard,
+      env: { DORK_HOME: dorkHome, ...env },
+    });
+    expect(result.code).toBe(EXIT.precondition);
+    expectStopAndAsk(result.stderr, 'approve it');
+    expect(result.forge.calls.filter((c) => c.method === 'arm' || c.method === 'review')).toEqual(
+      []
+    );
+    expect(guard.requests).toEqual([]);
+    expect(comments(tracker)).toEqual([]);
+    expect(stored()).toEqual(before);
+  });
+
+  it.each(AGENTS)('refuses --changes from %s', async (_name, env) => {
+    gatedRun();
+    const before = stored();
+    const tracker = new FakeTracker({
+      team: ACME_TEAM,
+      items: [started(['type/task', 'agent/claimed', 'stage/verify'])],
+    });
+    const result = await flow(['review', 'ACME-12', '--changes', '--note', 'Redo it.'], {
+      tracker,
+      env: { DORK_HOME: dorkHome, ...env },
+    });
+    expect(result.code).toBe(EXIT.precondition);
+    expectStopAndAsk(result.stderr, 'send it back');
+    expect(
+      result.forge.calls.filter((c) => ['review', 'disarm', 'comment'].includes(c.method))
+    ).toEqual([]);
+    expect(comments(tracker)).toEqual([]);
+    expect(tracker.writes.filter((c) => c.method === 'applyWorkState')).toEqual([]);
+    expect(stored()).toEqual(before);
+  });
+
+  it("still ships from a person's shell, arming the approved commit", async () => {
+    gatedRun();
+    const tracker = new FakeTracker({ team: ACME_TEAM, items: [started()] });
+    const result = await flow(['review', 'ACME-12', '--approve', '--head', 'abc1234def'], {
+      tracker,
+      forge: fakeForge({ head: 'abc1234def' }),
+      env: person(),
+    });
+    expect(result.code).toBe(EXIT.ok);
+    expect(result.forge.calls).toContainEqual({ method: 'arm', arg: [7, 'abc1234def'] });
   });
 });
 
