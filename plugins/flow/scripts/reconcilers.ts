@@ -192,7 +192,7 @@ export interface InboxCandidate {
 export interface InboxReconcileInput {
   /** The polled `comment.added` candidates, each resolved to its current state. */
   candidates: readonly InboxCandidate[];
-  /** The resolved agent identity (`agent` + `marker`) — recognizes self-authored writes (rule 1). */
+  /** The resolved agent identity (`agent`, `reviewer`, `marker`) — recognizes self-authored writes (rule 1). */
   identity: CommentIdentity;
   /** The resolved `comments` config (`respondWhen` / `ambiguousBias`). */
   comments: CommentsConfig;

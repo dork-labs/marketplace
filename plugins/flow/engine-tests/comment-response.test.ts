@@ -13,7 +13,11 @@ import type { OwnershipClass, WorkItem } from '../scripts/work-item.ts';
 const DEFAULT_COMMENTS: CommentsConfig = CommentsSchema.parse({});
 
 /** The resolved agent identity used across the suite. */
-const IDENTITY: CommentIdentity = { agent: 'agent-account', marker: '— 🤖 /flow' };
+const IDENTITY: CommentIdentity = {
+  agent: 'agent-account',
+  reviewer: 'human-account',
+  marker: '— 🤖 /flow',
+};
 
 /**
  * Build a WorkItem with overridable fields (mirrors dispatch.test's factory).
@@ -98,10 +102,10 @@ describe('shouldRespondToComment — rule 1 and the hidden provenance line (DOR-
   // anyone can paste it, and other agents sign their own comments with it.
   const LINE = '<!-- agent:provenance {"v":1,"harness":"claude-code","sessionId":"s-1"} -->';
 
-  it("silences the agent's own comment by account alone, when the tracker garbled its marker", () => {
-    // Shared-account mode: identity.agent is the shared account, so the account catches it.
-    const c = comment({ author: 'agent-account', body: `Assumption logged\n\n— /flow\n${LINE}` });
-    expect(shouldRespondToComment(c, ctx('mine'), DEFAULT_COMMENTS)).toEqual({
+  it("two-account mode: the agent's account alone silences its comment, garbled marker or not", () => {
+    const c = comment({ author: 'agent-account', body: 'Assumption logged\n\n— /flow' });
+    const twoAccount = { ...ctx('mine'), identity: { ...IDENTITY, reviewer: 'human-account' } };
+    expect(shouldRespondToComment(c, twoAccount, DEFAULT_COMMENTS)).toEqual({
       action: 'ignore',
       rule: 1,
     });
@@ -135,7 +139,175 @@ describe('shouldRespondToComment — rule 1 and the hidden provenance line (DOR-
   });
 });
 
+describe('shouldRespondToComment — shared-account mode: the person shares the agent account', () => {
+  // `identity.agent: "auto"` resolves to the signed-in account, which in shared
+  // mode is the person's own. The account alone cannot tell them apart, so
+  // only the agent's signature on that account makes a comment its own.
+  const LINE = '<!-- agent:provenance {"v":1,"harness":"claude-code","sessionId":"s-1"} -->';
+  const shared = (reviewer: string | null, item?: WorkItem): CommentDecisionContext => ({
+    ...ctx('mine', item),
+    identity: { ...IDENTITY, reviewer },
+  });
+
+  it.each([
+    ['no reviewer', null],
+    ['the reviewer is the agent account', 'agent-account'],
+  ])('hears the person on the shared account (%s)', (_name, reviewer) => {
+    const c = comment({ author: 'agent-account', body: 'Could /flow pick this up?' });
+    expect(shouldRespondToComment(c, shared(reviewer), DEFAULT_COMMENTS)).toEqual({
+      action: 'respond',
+      rule: 2,
+    });
+  });
+
+  it("resumes a parked item on the person's answer from the shared account", () => {
+    const parked = makeItem({ identifier: 'DOR-9', labels: ['agent/needs-input'] });
+    const c = comment({ author: 'agent-account', body: 'Leave archived rows out.' });
+    expect(shouldRespondToComment(c, shared(null, parked), DEFAULT_COMMENTS)).toEqual({
+      action: 'resume',
+      rule: 3,
+    });
+  });
+
+  it("silences the agent's own comment: the shared account with its marker", () => {
+    const c = comment({ author: 'agent-account', body: 'Picked this up.\n\n— 🤖 /flow' });
+    expect(shouldRespondToComment(c, shared(null), DEFAULT_COMMENTS)).toEqual({
+      action: 'ignore',
+      rule: 1,
+    });
+  });
+
+  it("silences the agent's own comment whose marker the tracker garbled, by its signature line", () => {
+    const c = comment({ author: 'agent-account', body: `Picked this up.\n\n— /flow\n${LINE}` });
+    expect(shouldRespondToComment(c, shared(null), DEFAULT_COMMENTS)).toEqual({
+      action: 'ignore',
+      rule: 1,
+    });
+  });
+
+  it.each([['Shipped from DorkOS.'], ['Sent back: rerun /flow verify with the fixture']])(
+    "takes flow's record of a review for flow's own, signed or not: %s",
+    (body) => {
+      const parked = makeItem({ identifier: 'DOR-9', labels: ['agent/needs-input'] });
+      const c = comment({ author: 'agent-account', body });
+      expect(shouldRespondToComment(c, shared(null, parked), DEFAULT_COMMENTS)).toEqual({
+        action: 'ignore',
+        rule: 1,
+      });
+    }
+  );
+
+  it.each([
+    ['the emoji dropped', 'Picked this up.\n\n— /flow'],
+    ['the emoji replaced by ?', 'Picked this up.\n\n— ?? /flow'],
+    ['the emoji replaced by a box', 'Picked this up.\n\n— \uFFFD /flow'],
+  ])('silences its own comment whose marker lost its emoji and hidden line: %s', (_name, body) => {
+    const c = comment({ author: 'agent-account', body });
+    expect(shouldRespondToComment(c, shared(null), DEFAULT_COMMENTS)).toEqual({
+      action: 'ignore',
+      rule: 1,
+    });
+  });
+
+  it.each([
+    ['a /flow request on its own line', 'Please take this.\n/flow'],
+    ['the dashed form mid-body', '— /flow\nPlease take this.'],
+    ['@flow on its last line', 'Please take this.\n@flow'],
+  ])('still hears the person: %s', (_name, body) => {
+    const c = comment({ author: 'agent-account', body });
+    expect(shouldRespondToComment(c, shared(null), DEFAULT_COMMENTS)).toEqual({
+      action: 'respond',
+      rule: 2,
+    });
+  });
+
+  it('with no marker set, the account alone is the agent, so flow never answers itself', () => {
+    const c = comment({ author: 'agent-account', body: 'Could /flow pick this up?' });
+    const noMarker = shared(null);
+    noMarker.identity = { ...noMarker.identity, marker: '' };
+    expect(shouldRespondToComment(c, noMarker, DEFAULT_COMMENTS)).toEqual({
+      action: 'ignore',
+      rule: 1,
+    });
+  });
+
+  it.each([
+    ['a guest, with the marker', '— 🤖 /flow', false, 1],
+    ['a guest, with a valid signature line', `Could /flow help?\n${LINE}`, false, 2],
+    ['an app on another account, no signature', 'Could /flow help?', false, 2],
+  ])('never takes %s for the person or the agent', (_name, body, trusted, rule) => {
+    const c = comment({ author: 'guest-account', authorIsTrusted: trusted, body });
+    const decision = shouldRespondToComment(c, shared(null), DEFAULT_COMMENTS);
+    expect(decision.action).toBe('ignore');
+    expect(decision.rule).toBe(rule);
+  });
+
+  it('never resumes a parked item on a comment an app posted through the shared account', () => {
+    const parked = makeItem({ identifier: 'DOR-9', labels: ['agent/needs-input'] });
+    const c = comment({ author: 'agent-account', authorIsTrusted: false, body: 'Ship it.' });
+    expect(shouldRespondToComment(c, shared(null, parked), DEFAULT_COMMENTS)).toEqual({
+      action: 'ignore',
+      rule: 3,
+      untrusted: true,
+    });
+  });
+
+  it.each([
+    ['in the middle of the body', `${LINE}\nCould /flow pick this up?`],
+    ['that is not valid JSON', 'Could /flow pick this up?\n<!-- agent:provenance {"v":1 -->'],
+    ['whose JSON is not an object', 'Could /flow pick this up?\n<!-- agent:provenance [1] -->'],
+  ])('does not take a signature line %s as the agent', (_name, body) => {
+    const c = comment({ author: 'agent-account', body });
+    expect(shouldRespondToComment(c, shared(null), DEFAULT_COMMENTS)).toEqual({
+      action: 'respond',
+      rule: 2,
+    });
+  });
+
+  it("never reads another account's signature line as the agent's", () => {
+    const c = comment({ author: 'other-agent', body: `Could /flow pick this up?\n${LINE}` });
+    expect(shouldRespondToComment(c, shared(null), DEFAULT_COMMENTS)).toEqual({
+      action: 'respond',
+      rule: 2,
+    });
+  });
+});
+
 describe('shouldRespondToComment — rule 2: always respond when directly addressed', () => {
+  it.each([
+    ['a sentence', 'Could /flow pick this up?'],
+    ['the start of a line', '/flow take this'],
+    ['a stage command', '/flow:verify please'],
+    ['@flow', 'thanks @flow.'],
+    ['brackets', 'hand it over (/flow)'],
+    ['bold', '**/flow** go'],
+    ['a bold @flow', '**@flow** go'],
+    ['an angle-bracket mention', '<@flow> hi'],
+    ['a dash after it', '@flow—go'],
+    ['a label before it', 'cc:@flow'],
+  ])('hears /flow as a whole word: %s', (_name, body) => {
+    expect(shouldRespondToComment(comment({ body }), ctx('other'), DEFAULT_COMMENTS)).toEqual({
+      action: 'respond',
+      rule: 2,
+    });
+  });
+
+  it.each([
+    ['a path', 'Look at plugins/flow/scripts/inbox.ts first.'],
+    ['a URL', 'See https://example.com/docs/flow/x'],
+    ['a longer word', 'the /flows page is off'],
+    ['an address', 'mail me@flow.example'],
+    ['a file', 'see /flow.ts'],
+    ['a domain', 'try @flow.ai'],
+    ['a home path', 'in ~/flow now'],
+    ['a sub-path', 'under /flow/x'],
+  ])('does not take %s for addressing flow', (_name, body) => {
+    expect(shouldRespondToComment(comment({ body }), ctx('other'), DEFAULT_COMMENTS)).toEqual({
+      action: 'ignore',
+      rule: 4,
+    });
+  });
+
   it('responds on an @mention of the agent account', () => {
     const c = comment({ mentions: ['agent-account'], body: 'can you take this?' });
     const decision = shouldRespondToComment(c, ctx('mine'), DEFAULT_COMMENTS);

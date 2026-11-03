@@ -117,7 +117,7 @@ Promote and Attach need no gate of their own.
 
 ## Provenance and report
 
-After any action, post a comment (the adapter adds the marker and signature):
+After any action, post with `flow comment <id> --text-file <f>` (it signs):
 
 ```
 **Agent Action** — [YYYY-MM-DD]

@@ -57,6 +57,7 @@ import { openFlowStateFile, type FlowStateFile } from '../flow-state-file.ts';
 import { ForgeError, type Forge, type ReviewOutcome } from '../forge/types.ts';
 import type { ArmMerge } from '../land/arm-decision.ts';
 import { reviewFindingsPath } from '../drain/messages.ts';
+import { SENT_BACK_PREFIX, SHIPPED_RECORD } from '../comment-response.ts';
 import { MAX_ANSWER_LENGTH } from '../question.ts';
 import { projectionFor } from '../work-state.ts';
 import { recordEvent } from './auto-journal.ts';
@@ -584,7 +585,7 @@ async function review(ctx: VerbContext): Promise<VerbResult> {
 
     const body =
       by === 'person'
-        ? 'Shipped from DorkOS.'
+        ? SHIPPED_RECORD
         : signBody(
             `Shipped: the reviewer agent approved it (clean review at ${short(sha)}).`,
             marker,
@@ -619,7 +620,7 @@ async function review(ctx: VerbContext): Promise<VerbResult> {
         if (by === 'person') {
           forgeReview = await target.forge.review(pr.number, {
             event: 'approve',
-            body: 'Shipped from DorkOS.',
+            body: SHIPPED_RECORD,
           });
         }
         if (armAt !== null && armMerge !== null) {
@@ -703,7 +704,7 @@ async function review(ctx: VerbContext): Promise<VerbResult> {
     );
   }
   if (!ctx.dryRun) {
-    await adapter.comment(item, `Sent back: ${text}`);
+    await adapter.comment(item, `${SENT_BACK_PREFIX}${text}`);
     if (existing.shipWait !== undefined) await setShipWait(store, existing.issueId, undefined);
     if (pr !== null && target.forge !== null) {
       forgeReview = await target.forge.review(pr.number, { event: 'request-changes', body: text });

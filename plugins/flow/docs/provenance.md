@@ -170,10 +170,10 @@ invisible and machine-facing: it routes, naming the runtime, session, account an
 machine. Strip the marker and self-recognition breaks; strip the line and routing
 breaks.
 
-Neither proves authorship, since anyone can type or paste them; only the author's
-account does. The marker makes the comment-response rules **stay quiet**; the line
-is never read for authorship, since every harness signs with it. Neither
-ever **grants** anything.
+Neither proves authorship alone, since anyone can type or paste them; the account
+does. On a shared account, where the person posts as the agent, the agent's own
+comment is that account plus its signature (`authoredByAgent`). Any marker also
+silences.
 
 ## 11. Reading it back
 

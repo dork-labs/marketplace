@@ -65,7 +65,7 @@ Fan out subagents by kind, `analysis` class with the model named (Delegation Pol
 - **Junk and limbo:** test tickets cancel; items in unmappable states move to real ones.
   A "duplicate" that is live unfinished work reopens.
 
-Every closure carries a comment with its evidence. Ambiguity stays open and is flagged.
+Every closure carries a `flow comment` with evidence. Ambiguity stays open and is flagged.
 
 ### Phase 4 — Fan-out triage sweep
 

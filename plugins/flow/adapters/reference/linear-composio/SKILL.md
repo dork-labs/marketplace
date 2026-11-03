@@ -359,7 +359,7 @@ duplicateOf? }`, every entry in the **human-key `identifier`** form (for
 #### `comment(item, body): void`
 
 - **Call.** `LINEAR_CREATE_LINEAR_COMMENT` with the issue id and body, the body
-  carrying the agent identity marker (for example `- 🤖 /flow`) **and, as its last
+  carrying the agent identity marker (`identity.marker`, by default `— 🤖 /flow`) **and, as its last
   line, the `agent:provenance` signature**
   ([`../../../docs/provenance.md`](../../../docs/provenance.md)). Linear preserves
   HTML comments byte-for-byte in comment bodies, so no degradation applies here.
@@ -375,7 +375,7 @@ duplicateOf? }`, every entry in the **human-key `identifier`** form (for
 - **Call.** `LINEAR_UPDATE_ISSUE` setting `assignee_id` to the reviewer /
   authenticated human (triggers a Linear notification).
 - **Durability + degradation.** **Durable and idempotent.** Re-assigning to the
-  same human is a no-op. If assignment is unavailable, fall back to a comment that
+  same human is a no-op. If assignment is unavailable, fall back to a signed comment that
   @mentions the human; if neither is possible, throw.
 
 #### `attachEvidence(item, evidence): void`
@@ -383,7 +383,7 @@ duplicateOf? }`, every entry in the **human-key `identifier`** form (for
 - **Call.** `LINEAR_UPDATE_ISSUE` attaching `evidence.links` per
   `evidence.attachTo`.
 - **Durability + degradation.** Durable; idempotent (re-attaching the same URL
-  deduplicates). Fall back to posting the evidence as a `LINEAR_CREATE_LINEAR_COMMENT`
+  deduplicates). Fall back to posting the evidence as a signed `LINEAR_CREATE_LINEAR_COMMENT`
   when attachments are unavailable. A failed attach surfaces loudly.
 
 #### `needsInput(item, question): void`

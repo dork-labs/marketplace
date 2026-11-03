@@ -8,9 +8,10 @@
  * reply on an `agent/needs-input` item is the answer, but only from an author
  * the adapter marked a team member (DOR-3669). Only comments
  * newer than the park count; for a record from before parks were timed, only
- * comments after the agent's own latest one. Only a comment from the agent's
- * own account anchors that search: anyone can type the marker, so a marked
- * comment from anyone else is ignored but cannot hide an answer (DOR-3677).
+ * comments after the agent's own latest one. Only the agent's own comment
+ * ({@link authoredByAgent}) anchors that search: anyone can type the marker, so
+ * a marked comment from anyone else is ignored but cannot hide an answer
+ * (DOR-3677).
  *
  * Pure: no I/O. Needs `zod` only through the config type's module, so it is
  * reached from the verb.
@@ -19,6 +20,7 @@
  */
 
 import {
+  authoredByAgent,
   shouldRespondToComment,
   type CommentIdentity,
   type CommentsConfig,
@@ -73,9 +75,10 @@ export function findAnswer(
       { item, ownership: ctx.ownership, identity: ctx.identity },
       ctx.comments
     );
-  // The agent's own comment by account, not by marker text alone (DOR-3677).
+  // The agent's own comment by account, not by marker text alone (DOR-3677);
+  // on a shared account, the account plus the agent's signature.
   const isOwn = (comment: ItemComment) =>
-    comment.author !== '' && comment.author === ctx.identity.agent;
+    authoredByAgent({ ...comment, mentions: [] }, ctx.identity);
   const parkedAt = since === null ? Number.NaN : Date.parse(since);
   let candidates = [...comments];
   if (Number.isFinite(parkedAt)) {

@@ -56,7 +56,7 @@ const MARKER = '— 🤖 /flow';
 /** The §9 default comments config (respondWhen addressed, ambiguousBias quiet). */
 const DEFAULT_COMMENTS: CommentsConfig = CommentsSchema.parse({});
 /** The resolved agent identity the rules compare against. */
-const IDENTITY: CommentIdentity = { agent: AGENT, marker: MARKER };
+const IDENTITY: CommentIdentity = { agent: AGENT, reviewer: 'human', marker: MARKER };
 
 /** A WorkItem with overridable assignee / labels (parked by default). */
 function makeItem(overrides: Partial<WorkItem> = {}): WorkItem {

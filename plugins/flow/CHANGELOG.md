@@ -4,6 +4,18 @@ Installs of this plugin are pinned to a commit SHA, so a fix here does not reach
 you until you **reinstall it** (Marketplace → flow → reinstall, or re-run your
 `--plugin-dir` checkout's `git pull`). Each entry below says whether that matters.
 
+## 0.83.0
+
+**If flow posts to your tracker as your own account (shared-account mode, the default, with `identity.reviewer` left empty), flow now hears your comments there (DOR-3707). Before, it ignored every comment from that account, yours included, so a `/flow` request went unanswered, and an answer to a parked question never un-parked the item. Reinstall to get it.**
+
+- In shared mode, a comment from the shared account counts as flow's own only when it carries flow's `— 🤖 /flow` marker, ends in that marker with its emoji garbled, ends in flow's hidden signature line, or is flow's record of a review ("Shipped from DorkOS.", "Sent back: …"). Anything else you write from that account is yours, and flow answers it or resumes on it as it would for a teammate. A reply that quotes flow's marker still stays quiet, as it always has.
+- `flow drain` now finds your answer to a parked question in shared mode. Before, it could take your reply for flow's own comment and miss it.
+- New: `flow comment <id> --text-file <file>` posts an agent's comment, signed. The skills now use it, because a bare comment from an agent reads as you on a shared account.
+- `/flow` and `@flow` only address flow as whole words, on any account. `/flow:verify` counts; a path like `plugins/flow/x`, a URL, `/flows` or `/flow.ts` no longer starts a turn.
+- If you set `identity.marker` to nothing, flow can't tell its comments from yours, so on a shared account it stays quiet on all of them, as before.
+- With two accounts, flow's account alone still marks its own comments. The marker from any account still makes flow stay quiet, and another account's signature line still counts for nothing.
+- This is about being heard, not security: only the holder of that account can post as it, and a guest's comment, or one an app posts as an app, still does nothing. A tool using your personal API key leaves no such mark, so its unsigned comment on a shared account now counts as yours.
+
 ## 0.82.0
 
 **Flow's own tests now run against the fake tracker it ships, not a second, looser copy (DOR-2398). Nothing changes when you use flow, so there's no need to reinstall for this.**

@@ -21,9 +21,10 @@
  *   `agent === reviewer`, so the assignee alone can no longer separate the two:
  *   a self-assignment is still {@link OwnershipClass | `mine`} (the agent's
  *   account is the assignee), but the **claim** must additionally carry the
- *   `agent/claimed` label — see {@link SHARED_MODE_CLAIM_LABEL}. The agent
- *   knows its own comments by the account and stays quiet on any carrying
- *   {@link Identity.marker}; it hands off by label + nudge. Mode detection: see {@link resolveIdentityMode}.
+ *   `agent/claimed` label — see {@link SHARED_MODE_CLAIM_LABEL}. The account
+ *   alone no longer tells the agent's comments from the person's: its own are
+ *   that account plus {@link Identity.marker} or its signature line
+ *   (`authoredByAgent` in `comment-response.ts`). It hands off by label + nudge. Mode detection: see {@link resolveIdentityMode}.
  *
  * ## Identity resolution (the `"auto"` contract)
  *

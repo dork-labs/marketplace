@@ -195,6 +195,24 @@ describe('flow inbox', () => {
     ]);
   });
 
+  it('on a shared account, hears the person and stays quiet on its own signed comment', async () => {
+    // Purpose: the wiring of DOR-3707. The default config leaves identity.reviewer
+    // empty, so the person posts as the agent's account. Fails if the inbox stops
+    // passing the reviewer (every comment here would be flow's) or rule 1 stops
+    // reading the signature (flow would answer itself).
+    const person = 'Leave archived rows out.';
+    const own = 'Picked this up.\n\n— 🤖 /flow';
+    const tracker = backlog({
+      'FAKE-1': [said('c1', 'agent-1', own, 1), said('c2', 'agent-1', person, 2)],
+    });
+    tracker.members = ['agent-1'];
+    const result = await runFlow(project, tracker, ['inbox']);
+    expect(result.json.entries).toEqual([
+      expect.objectContaining({ commentId: 'c1', action: 'ignore', rule: 1 }),
+      expect.objectContaining({ commentId: 'c2', action: 'resume', rule: 3, body: person }),
+    ]);
+  });
+
   it('reads after --since without moving the saved watermark', async () => {
     // Purpose: --since is a look back, not a reset; a pass with it must not
     // skip or replay comments for the next ordinary pass.

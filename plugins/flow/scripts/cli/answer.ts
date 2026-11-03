@@ -6,8 +6,9 @@
  *   is posted on the item without the agent's marker, as the tracker account
  *   flow uses, with "Answered in DorkOS." as its last line, so the comment rules
  *   (`shouldRespondToComment`) count it as the reply. It is also recorded on the
- *   run, so the drain resumes on it even when flow posts through the agent's
- *   own tracker account (then the comment reads as the agent's, not a reply).
+ *   run, so the drain resumes on it even when flow posts through an agent
+ *   account of its own (then the comment reads as the agent's, not a reply).
+ *   On a shared account the unsigned comment reads as the person's reply too.
  * - `--pick --by agent-default`: the question's deadline passed with no answer,
  *   so the agent's own pick stands. Posted as the agent ("No answer by …, so
  *   going with …"). Refused for a floor question: a deadline alone never

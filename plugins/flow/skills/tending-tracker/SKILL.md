@@ -41,9 +41,9 @@ assignee (a project's lead) against the resolved identity. In shared mode a
 self-assignment is still `mine`. Then,
 first match wins:
 
-1. **Never answer your own comment:** author is `identity.agent`, or the body carries
-   `identity.marker`. Only the account proves authorship: the marker only silences, the
-   hidden provenance line counts for nothing. → ignore.
+1. **Never answer your own comment:** yours is your account, plus in shared mode your
+   marker or a last-line provenance line (the person shares it). Any marker
+   also silences. → ignore.
 2. **Always respond when addressed:** an @mention, or in shared mode a `/flow` or
    `@flow` token. Overrides ownership. → respond.
 3. **A member's comment on an `agent/needs-input` item is the answer.** → resume:
@@ -117,8 +117,8 @@ path**: (a) delivered into `<id>`, (b) fresh session, (c) handled here, origin o
 
 ## Writing and escalating
 
-- Every `comment` carries `identity.marker` (so rule 1 sees it) and will always carry
-  the provenance signature, never an email address. Both, every reply.
+- Post with `flow comment`: replies carry `identity.marker` (so rule 1 sees it) and
+  always carry the provenance signature, never an email address.
 - `needsInput(item, question)`: `flow ask <id> --question … --choice … --pick <n>
 --why … [--floor <triggers>]` posts it with your pick, adds `agent/needs-input` and
   records it on the run; then `assignToHuman`, stop. Parked is durable; the stall sweep

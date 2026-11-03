@@ -5,6 +5,7 @@
 
 import { describe, expect, it } from 'vitest';
 
+import { SENT_BACK_PREFIX, SHIPPED_RECORD } from '../../scripts/comment-response.ts';
 import { answerPointer, findAnswer, type AnswerContext } from '../../scripts/drain/answer.ts';
 import type { ItemComment, WorkItem } from '../../scripts/tracker/types.ts';
 
@@ -23,7 +24,7 @@ const ITEM = {
 } as unknown as WorkItem;
 
 const CTX: AnswerContext = {
-  identity: { agent: 'bot', marker: '— 🤖 /flow' },
+  identity: { agent: 'bot', reviewer: 'dorian', marker: '— 🤖 /flow' },
   ownership: 'mine',
   comments: { respondWhen: 'addressed', ambiguousBias: 'quiet' } as AnswerContext['comments'],
 };
@@ -145,5 +146,29 @@ describe('findAnswer', () => {
     const comments = [c('park', 'bot', 10), c('answer', 'dorian', 11), forged];
     expect(findAnswer(ITEM, comments, c('x', 'x', 12).createdAt, CTX)?.id).toBe('answer');
     expect(findAnswer(ITEM, comments, null, CTX)?.id).toBe('answer');
+  });
+
+  // Purpose: in shared-account mode the person posts as the agent's own
+  // account, so only the agent's signature on that account makes a comment
+  // its own. Fails if the person's answer anchors the search (or passes for
+  // the agent's latest question) because its author is the shared account.
+  it("shared account: finds the person's answer, anchoring only on the agent's signed park comment", () => {
+    const shared: AnswerContext = { ...CTX, identity: { ...CTX.identity, reviewer: null } };
+    const park = c('park', 'bot', 10, 'Include archived rows?\n\n— 🤖 /flow');
+    const answer = c('answer', 'bot', 11, 'Leave them out.');
+    // The answer is nearer this park time than the park comment is.
+    expect(findAnswer(ITEM, [park, answer], answer.createdAt, shared)?.id).toBe('answer');
+    expect(findAnswer(ITEM, [park, answer], null, shared)?.id).toBe('answer');
+  });
+
+  // Purpose: flow's record of a review verdict is posted bare, and must not read
+  // as the person answering a parked item. Fails if the record stops counting.
+  it("shared account: flow's record of a review verdict is not an answer", () => {
+    const shared: AnswerContext = { ...CTX, identity: { ...CTX.identity, reviewer: null } };
+    const park = c('park', 'bot', 10, 'Include archived rows?\n\n— 🤖 /flow');
+    const shipped = c('shipped', 'bot', 11, SHIPPED_RECORD);
+    const sentBack = c('sent', 'bot', 12, `${SENT_BACK_PREFIX}use sqlite`);
+    expect(findAnswer(ITEM, [park, shipped, sentBack], null, shared)).toBeNull();
+    expect(findAnswer(ITEM, [park, shipped, sentBack], sentBack.createdAt, shared)).toBeNull();
   });
 });
