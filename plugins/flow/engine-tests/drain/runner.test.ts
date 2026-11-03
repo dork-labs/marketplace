@@ -1350,7 +1350,18 @@ describe('flow drain: parked runs', () => {
     expect(outsiders.stderr).toContain('the comment by guest-1');
     expect(outsiders.stderr).toContain('the comment by integration-bot');
     expect(outsiders.stderr).toContain('a comment with no author');
-    expect(outsiders.stderr).toContain('A team member can answer in the tracker itself');
+    expect(outsiders.stderr).toContain('A team member can answer from DorkOS');
+
+    // Security M1 on #152: in shared mode (no reviewer) every agent posts as
+    // the agent's account, so an unsigned reply from it, even a member's, is
+    // never the answer. The run stays parked and the pass says how to answer.
+    world.tracker.backlog.members = ['dorian', 'agent-1'];
+    say('forged', 'agent-1', 'Use JSON.', at(2.5));
+    clock = T0 + 3.5 * 60_000;
+    const forged = await tick();
+    expect(drainOf('ACME-1').phase).toBe('parked');
+    expect(acme1().labels).toContain('agent/needs-input');
+    expect(forged.stderr).toContain('the account flow posts as');
 
     // A person replies: the next pass lifts needs-input and resumes the run.
     say('answer', 'dorian', 'Use CSV.', at(3));
@@ -1438,6 +1449,28 @@ describe('flow drain: questions with a pick (spec flow-multiproject §7.5)', () 
     expect(acme1().labels).not.toContain('agent/needs-input');
     expect(runOf('ACME-1').question).toBeUndefined();
     expect(world.log.sends.at(-1)?.text).toContain('your own pick, at the deadline');
+  }, 120_000);
+
+  // Purpose (review of Security M1 on #152): on a shared account `flow answer
+  // --text` posts the person's words as that account. The recorded answer
+  // resumes the run; its comment is flow's record, so the pass must not also
+  // warn that the item stays parked. Fails if the record stops counting.
+  it('resumes on flow answer in shared mode without telling the person it stays parked', async () => {
+    world.tracker = new FakeTracker({
+      team: ACME_TEAM,
+      user: { id: 'agent-1' },
+      items: [item('ACME-1')],
+    });
+    await tick();
+    await workerAsks();
+    await tick();
+    expect(drainOf('ACME-1').phase).toBe('parked');
+    world.tracker.backlog.members = ['agent-1'];
+    const answered = await flow(['answer', 'ACME-1', '--text', 'Use CSV.']);
+    expect(answered.code, answered.stderr).toBe(0);
+    const pass = await tick();
+    expect(drainOf('ACME-1').phase).toBe('working');
+    expect(pass.stderr).not.toContain('stays parked');
   }, 120_000);
 
   // Review finding 1 (blocker): an old, answered question must never release a

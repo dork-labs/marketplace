@@ -373,7 +373,7 @@ export const VERBS: readonly VerbDefinition[] = [
     name: 'comment',
     summary: "Post an agent's comment on an item, signed.",
     description:
-      "Post a comment on an item with the identity marker and the hidden provenance line. Every comment an agent writes goes through this: on a shared tracker account they are all that tells it from the person's. A retry of the same words as the item's latest comment posts nothing. A file under .dork/flow/tmp/ is removed once posted.",
+      "Post a comment on an item with the identity marker and the hidden provenance line. Every comment an agent writes goes through this: on a shared tracker account they are all that tells it for flow's own. A retry of the same words as the item's latest comment posts nothing. A file under .dork/flow/tmp/ is removed once posted.",
     common: ['project', 'dry-run', 'session'],
     positionals: [{ name: 'identifier', required: true, description: 'The item, e.g. DOR-123.' }],
     flags: [

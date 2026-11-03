@@ -45,8 +45,8 @@ function posted(result: Awaited<ReturnType<typeof runFlow>>): string[] {
 }
 
 describe('flow comment', () => {
-  // Purpose: a bare agent comment on a shared account reads as the person, and
-  // flow acts on it. Fails if the verb posts without the marker or the line.
+  // Purpose: on a shared account only the marker or the line tells an agent's
+  // comment for flow's own. Fails if the verb posts without the marker or the line.
   it('posts the text with the marker and the hidden line last', async () => {
     const result = await runFlow(project, backlog(), [
       'comment',

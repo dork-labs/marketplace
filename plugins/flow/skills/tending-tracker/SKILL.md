@@ -37,13 +37,11 @@ tested truth is the oracles `classifyOwnership` (`identity.ts`), `shouldRespondT
 ## The comment-response rules
 
 Classify ownership first: `mine` / `reviewer` / `other` / `unassigned`, from the item's
-assignee (a project's lead) against the resolved identity. In shared mode a
-self-assignment is still `mine`. Then,
-first match wins:
+assignee (a project's lead) against the resolved identity. Shared mode keeps a
+self-assignment `mine`. Then, first match wins:
 
 1. **Never answer your own comment:** yours is your account, plus in shared mode your
-   marker or a last-line provenance line (the person shares it). Any marker
-   also silences. → ignore.
+   marker or a last-line provenance line. Any marker also silences. → ignore.
 2. **Always respond when addressed:** an @mention, or in shared mode a `/flow` or
    `@flow` token. Overrides ownership. → respond.
 3. **A member's comment on an `agent/needs-input` item is the answer.** → resume:
@@ -54,7 +52,7 @@ first match wins:
    Over-responding is the worse failure.
 
 **Only a member acts:** anyone else's entry is `ignore`, with no `body`; a parked item
-stays parked.
+stays parked. An unsigned shared-account comment never acts either.
 
 Chattiness is config (`comments.*`), never code.
 

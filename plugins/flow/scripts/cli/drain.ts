@@ -602,7 +602,8 @@ export async function drain(ctx: VerbContext, options: DrainOptions = {}): Promi
         identity,
         ownership: classifyOwnership(item, identity, scope),
         comments: config.comments,
-        onUntrusted: (comment) => ctx.warn(untrustedReplyWarning(comment, identifier)),
+        onUntrusted: (comment, decision) =>
+          ctx.warn(untrustedReplyWarning(comment, identifier, decision)),
       });
       // Only the question asked for this park counts (a later park, for review
       // rounds or failing checks, is nobody's answer), spec flow-multiproject §7.5.

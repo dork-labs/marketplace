@@ -2,7 +2,8 @@
  * `flow comment <identifier> (--text <text> | --text-file <file>)`: post an
  * agent's comment on an item, signed. An agent's comment must carry the marker
  * and the hidden line: on a shared tracker account they are all that tells it
- * from the person's, so a bare one reads as the person and flow acts on it.
+ * for flow's own, so flow stays quiet on it. A bare one reads as nobody's for
+ * sure, so flow never acts on it either, but warns about it.
  *
  * A retry of the same words as the item's latest comment posts nothing. A file
  * under `.dork/flow/tmp/` is removed once posted (`scratch-file.ts`).

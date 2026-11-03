@@ -148,17 +148,26 @@ describe('findAnswer', () => {
     expect(findAnswer(ITEM, comments, null, CTX)?.id).toBe('answer');
   });
 
-  // Purpose: in shared-account mode the person posts as the agent's own
-  // account, so only the agent's signature on that account makes a comment
-  // its own. Fails if the person's answer anchors the search (or passes for
-  // the agent's latest question) because its author is the shared account.
-  it("shared account: finds the person's answer, anchoring only on the agent's signed park comment", () => {
-    const shared: AnswerContext = { ...CTX, identity: { ...CTX.identity, reviewer: null } };
+  // Purpose (Security M1 on #152): every agent posts as the shared account, so
+  // an unsigned reply from it may be a worker answering its own question. It
+  // never un-parks; the caller is told, so the person answers from DorkOS.
+  it('shared account: an unsigned reply from the shared account is never the answer', () => {
+    const passed: string[] = [];
+    const shared: AnswerContext = {
+      ...CTX,
+      identity: { ...CTX.identity, reviewer: null },
+      onUntrusted: (comment, decision) => {
+        if (decision.sharedAccount === true) passed.push(comment.id);
+      },
+    };
     const park = c('park', 'bot', 10, 'Include archived rows?\n\n— 🤖 /flow');
-    const answer = c('answer', 'bot', 11, 'Leave them out.');
-    // The answer is nearer this park time than the park comment is.
-    expect(findAnswer(ITEM, [park, answer], answer.createdAt, shared)?.id).toBe('answer');
-    expect(findAnswer(ITEM, [park, answer], null, shared)?.id).toBe('answer');
+    const reply = c('reply', 'bot', 11, 'Leave them out.');
+    expect(findAnswer(ITEM, [park, reply], reply.createdAt, shared)).toBeNull();
+    expect(findAnswer(ITEM, [park, reply], null, shared)).toBeNull();
+    expect(passed).toEqual(['reply', 'reply']);
+    // A member on an account of their own still answers.
+    const member = c('member', 'dorian', 12, 'Leave them out.');
+    expect(findAnswer(ITEM, [park, reply, member], null, shared)?.id).toBe('member');
   });
 
   // Purpose: flow's record of a review verdict is posted bare, and must not read

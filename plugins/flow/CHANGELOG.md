@@ -6,15 +6,15 @@ you until you **reinstall it** (Marketplace → flow → reinstall, or re-run yo
 
 ## 0.83.0
 
-**If flow posts to your tracker as your own account (shared-account mode, the default, with `identity.reviewer` left empty), flow now hears your comments there (DOR-3707). Before, it ignored every comment from that account, yours included, so a `/flow` request went unanswered, and an answer to a parked question never un-parked the item. Reinstall to get it.**
+**On a shared tracker account (the default, with `identity.reviewer` left empty), flow now tells its own comments from everything else on that account, and it never acts on a comment it can't prove is a person's (DOR-3707). Every agent posts as that account, so an unsigned comment from it could be an agent answering its own question. To answer a question flow parked on, use DorkOS or `flow answer`. Reinstall to get it.**
 
-- In shared mode, a comment from the shared account counts as flow's own only when it carries flow's `— 🤖 /flow` marker, ends in that marker with its emoji garbled, ends in flow's hidden signature line, or is flow's record of a review ("Shipped from DorkOS.", "Sent back: …"). Anything else you write from that account is yours, and flow answers it or resumes on it as it would for a teammate. A reply that quotes flow's marker still stays quiet, as it always has.
-- `flow drain` now finds your answer to a parked question in shared mode. Before, it could take your reply for flow's own comment and miss it.
-- New: `flow comment <id> --text-file <file>` posts an agent's comment, signed. The skills now use it, because a bare comment from an agent reads as you on a shared account.
+- In shared mode, a comment from the shared account is flow's own when it carries flow's `— 🤖 /flow` marker, ends in that marker with its emoji or dash garbled (`— /flow`, `- /flow`, `– /flow`), ends in flow's hidden signature line, or is flow's record of a review or an answer ("Shipped from DorkOS.", "Sent back: …", "Answered in DorkOS."). Flow stays quiet on those.
+- Any other comment from the shared account never starts a turn, never answers a parked question and never un-parks an item, even when it says `/flow`. `flow inbox` lists it as "the shared account flow posts as", and `flow drain` says the item stays parked and how to answer it. Before, flow ignored every comment from that account without saying so.
+- `flow drain` anchors its search for an answer on flow's own signed question, so an unsigned reply from the shared account can't hide a teammate's answer.
+- New: `flow comment <id> --text-file <file>` posts an agent's comment, signed. The skills now use it, so flow can tell an agent's comment from the person's account.
 - `/flow` and `@flow` only address flow as whole words, on any account. `/flow:verify` counts; a path like `plugins/flow/x`, a URL, `/flows` or `/flow.ts` no longer starts a turn.
-- If you set `identity.marker` to nothing, flow can't tell its comments from yours, so on a shared account it stays quiet on all of them, as before.
-- With two accounts, flow's account alone still marks its own comments. The marker from any account still makes flow stay quiet, and another account's signature line still counts for nothing.
-- This is about being heard, not security: only the holder of that account can post as it, and a guest's comment, or one an app posts as an app, still does nothing. A tool using your personal API key leaves no such mark, so its unsigned comment on a shared account now counts as yours.
+- If you set `identity.marker` to nothing, flow can't tell its comments from anyone's on a shared account, so it stays quiet on all of them, as before.
+- With two accounts, nothing changes: flow's account alone marks its own comments, and a teammate on their own account is heard. The marker from any account still makes flow stay quiet, and another account's signature line still counts for nothing.
 
 ## 0.82.0
 

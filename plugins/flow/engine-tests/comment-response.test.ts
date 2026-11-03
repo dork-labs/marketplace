@@ -152,20 +152,50 @@ describe('shouldRespondToComment — shared-account mode: the person shares the 
   it.each([
     ['no reviewer', null],
     ['the reviewer is the agent account', 'agent-account'],
-  ])('hears the person on the shared account (%s)', (_name, reviewer) => {
-    const c = comment({ author: 'agent-account', body: 'Could /flow pick this up?' });
-    expect(shouldRespondToComment(c, shared(reviewer), DEFAULT_COMMENTS)).toEqual({
-      action: 'respond',
-      rule: 2,
-    });
-  });
+  ])(
+    'never starts a turn on an unsigned comment from the shared account (%s): any agent posts as it',
+    (_name, reviewer) => {
+      // Security M1 on #152: every agent here posts as the shared account, so an
+      // unsigned comment from it may be the person or an agent. It never grants.
+      const c = comment({ author: 'agent-account', body: 'Could /flow pick this up?' });
+      expect(shouldRespondToComment(c, shared(reviewer), DEFAULT_COMMENTS)).toEqual({
+        action: 'ignore',
+        rule: 2,
+        untrusted: true,
+        sharedAccount: true,
+      });
+    }
+  );
 
-  it("resumes a parked item on the person's answer from the shared account", () => {
+  it('never resumes a parked item on an unsigned answer from the shared account', () => {
+    // A worker could otherwise answer its own question as the person.
     const parked = makeItem({ identifier: 'DOR-9', labels: ['agent/needs-input'] });
     const c = comment({ author: 'agent-account', body: 'Leave archived rows out.' });
     expect(shouldRespondToComment(c, shared(null, parked), DEFAULT_COMMENTS)).toEqual({
-      action: 'resume',
+      action: 'ignore',
       rule: 3,
+      untrusted: true,
+      sharedAccount: true,
+    });
+  });
+
+  it('never engages the soft zone on an unsigned comment from the shared account', () => {
+    const c = comment({ author: 'agent-account', body: 'Hm, interesting.' });
+    const engage: CommentsConfig = { ...DEFAULT_COMMENTS, ambiguousBias: 'engage' };
+    expect(shouldRespondToComment(c, shared(null), engage)).toEqual({
+      action: 'ignore',
+      rule: 5,
+      untrusted: true,
+      sharedAccount: true,
+    });
+  });
+
+  it('two-account mode still hears a member on their own account', () => {
+    const c = comment({ author: 'human-account', body: 'Could /flow pick this up?' });
+    const twoAccount = { ...ctx('mine'), identity: { ...IDENTITY, reviewer: 'human-account' } };
+    expect(shouldRespondToComment(c, twoAccount, DEFAULT_COMMENTS)).toEqual({
+      action: 'respond',
+      rule: 2,
     });
   });
 
@@ -213,11 +243,26 @@ describe('shouldRespondToComment — shared-account mode: the person shares the 
     ['a /flow request on its own line', 'Please take this.\n/flow'],
     ['the dashed form mid-body', '— /flow\nPlease take this.'],
     ['@flow on its last line', 'Please take this.\n@flow'],
-  ])('still hears the person: %s', (_name, body) => {
+  ])('does not take %s for its own garbled marker (rule 2, not rule 1)', (_name, body) => {
     const c = comment({ author: 'agent-account', body });
     expect(shouldRespondToComment(c, shared(null), DEFAULT_COMMENTS)).toEqual({
-      action: 'respond',
+      action: 'ignore',
       rule: 2,
+      untrusted: true,
+      sharedAccount: true,
+    });
+  });
+
+  it.each([
+    ['a hyphen', 'Picked this up.\n\n- /flow'],
+    ['an en dash', 'Picked this up.\n\n– /flow'],
+    ['a minus sign', 'Picked this up.\n\n− /flow'],
+    ['two hyphens', 'Picked this up.\n\n-- /flow'],
+  ])('silences its own comment whose marker dash became %s', (_name, body) => {
+    const c = comment({ author: 'agent-account', body });
+    expect(shouldRespondToComment(c, shared(null), DEFAULT_COMMENTS)).toEqual({
+      action: 'ignore',
+      rule: 1,
     });
   });
 
@@ -259,8 +304,10 @@ describe('shouldRespondToComment — shared-account mode: the person shares the 
   ])('does not take a signature line %s as the agent', (_name, body) => {
     const c = comment({ author: 'agent-account', body });
     expect(shouldRespondToComment(c, shared(null), DEFAULT_COMMENTS)).toEqual({
-      action: 'respond',
+      action: 'ignore',
       rule: 2,
+      untrusted: true,
+      sharedAccount: true,
     });
   });
 
