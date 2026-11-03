@@ -11,7 +11,7 @@
  */
 
 import type { DrainState } from '../drain/state.ts';
-import { PreconditionError } from '../errors.ts';
+import { BusyError, PreconditionError } from '../errors.ts';
 import type { FlowRun } from '../flow-run.ts';
 import type { FlowStateFile } from '../flow-state-file.ts';
 import { forgeTargetFor, type Forge } from '../forge/types.ts';
@@ -175,7 +175,7 @@ export async function writeDrain(
     return { ...current, drain: { ...next, rev: current.drain.rev + 1 } };
   });
   if (result.status === 'dropped') {
-    throw new PreconditionError(
+    throw new BusyError(
       `${store.path} stayed locked by another flow command, so nothing was recorded; ${retry}`
     );
   }

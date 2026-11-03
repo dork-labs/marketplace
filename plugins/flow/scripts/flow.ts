@@ -42,6 +42,9 @@ import {
   type ExitCode,
   type TrackerErrorKind,
   PersonGateError,
+  BusyError,
+  SettledError,
+  NotWaitingError,
 } from './errors.ts';
 import { assertProjectInRunCheckout } from './project-boundary.ts';
 import type { Runtime } from './runtime-detect.ts';
@@ -1214,10 +1217,11 @@ export interface ClassifiedError {
   message: string;
   /**
    * For a tracker error: whether the sign-in is gone (`auth`) or the tracker
-   * did not answer (`unreachable`). The JSON envelope carries it, so a caller
-   * (the Flow extension) can tell a blip from something only a person can fix.
+   * did not answer (`unreachable`). For a refusal: `person-gate`, `settled`,
+   * `not-waiting` or `busy` (`errors.ts`). The JSON envelope carries it, so a caller (the Flow
+   * extension) can tell a blip from something only a person can fix.
    */
-  kind?: TrackerErrorKind | 'person-gate';
+  kind?: TrackerErrorKind | 'person-gate' | 'settled' | 'not-waiting' | 'busy';
 }
 
 /**
@@ -1248,7 +1252,12 @@ export function classifyError(error: unknown, flowRoot: string): ClassifiedError
   if (error instanceof TrackerError) {
     return { code: error.exitCode, message: error.message, kind: error.kind };
   }
-  if (error instanceof PersonGateError) {
+  if (
+    error instanceof PersonGateError ||
+    error instanceof SettledError ||
+    error instanceof NotWaitingError ||
+    error instanceof BusyError
+  ) {
     return { code: error.exitCode, message: error.message, kind: error.kind };
   }
   if (error instanceof FlowError) return { code: error.exitCode, message: error.message };

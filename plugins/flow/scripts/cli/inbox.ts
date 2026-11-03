@@ -34,7 +34,7 @@ import { withHeldLock } from '../atomic-json.ts';
 import { PreconditionError, UsageError } from '../errors.ts';
 import { droppedAnswerWarning, recordedAnswerPointer, recordedAnswerStands } from '../question.ts';
 import { AGENT_NEEDS_INPUT } from '../work-state.ts';
-import { markAnswerHandedOver, releaseAnswer } from './question-write.ts';
+import { dropEndedQuestion, markAnswerHandedOver, releaseAnswer } from './question-write.ts';
 import { isOpenItem } from './work-write.ts';
 import type { FlowRun } from '../flow-run.ts';
 import { openFlowStateFile, type FlowStateFile } from '../flow-state-file.ts';
@@ -172,7 +172,11 @@ function lineFor(read: InboxRead, judge: Judge): InboxLine {
  * The recorded answers on runs the drain does not own. One that may not resume
  * its question is dropped here, and said so once. One that may is handed over
  * at most once, marked on the run as it goes, while the run is live and its
- * item open and waiting. The answer stays on the run, so `flow answer` still
+ * item open and waiting. One whose item stopped waiting belongs to no park now,
+ * so it goes with its question: that is how this pass ties an answer to its park,
+ * as the drain does with `belongsToPark`. Only a pass that sees the item not
+ * waiting can tell: no tracker read gives a label's time, so two passes that
+ * both see it waiting see one park. The answer stays on the run, so `flow answer` still
  * refuses a second one; if the resume then fails, a member's reply or a new
  * `flow ask` moves the item. A run the drain owns is the drain's (`drain.ts`), and it applies
  * the same rule. A read that fails costs that run this pass, never the team's
@@ -215,7 +219,22 @@ async function settleRecordedAnswers(
       );
       continue;
     }
-    if (!waiting) continue;
+    if (!waiting) {
+      // Every answer is recorded while the item waits, so its park is over:
+      // something else moved the item. Drop it now, or a later agent/needs-input
+      // would resume on these old words. A busy lock tries again next pass.
+      if (ctx.dryRun) continue;
+      try {
+        if (await dropEndedQuestion(store, run.issueId, question.askedAt)) {
+          ctx.warn(
+            `flow inbox: ${run.identifier}'s recorded answer was not used: the item stopped waiting on it, so it was dropped.`
+          );
+        }
+      } catch {
+        ctx.warn(`flow inbox: could not update ${run.identifier}; the next pass tries again.`);
+      }
+      continue;
+    }
     if (!ctx.dryRun) {
       // A busy lock costs this run this pass: throwing here would lose the
       // answers already marked, since their list is never returned.

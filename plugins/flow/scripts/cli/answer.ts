@@ -17,14 +17,17 @@
  *
  * It refuses (exit 5) an item that no longer carries `agent/needs-input`, or
  * whose question was already answered: whoever got there first wins, and the
- * second does nothing. It never lifts `agent/needs-input` itself: the drain and
+ * second does nothing. A busy run store is another refusal (exit 5, kind `busy`):
+ * nothing was recorded or posted, so the same answer can be given again. A
+ * person's words for a run with no open question are refused too, since nothing
+ * would resume on them. It never lifts `agent/needs-input` itself: the drain and
  * the inbox pass see the answer and resume the work, as they do for any reply.
  *
  * @module @dorkos/flow/cli/answer
  */
 
 import { ANSWERED_IN_DORKOS } from '../comment-response.ts';
-import { PreconditionError, UsageError } from '../errors.ts';
+import { NotWaitingError, PreconditionError, SettledError, UsageError } from '../errors.ts';
 import type { FlowRun } from '../flow-run.ts';
 import {
   MAX_ANSWER_LENGTH,
@@ -94,8 +97,10 @@ const STOP_AND_ASK =
  * @param ctx - The verb's context.
  * @returns What was posted and recorded.
  * @throws {UsageError} On a missing or empty answer, or wrong flags (exit 2).
- * @throws {PreconditionError} When the question was already answered, or the
- *   pick may not stand yet (exit 5).
+ * @throws {SettledError} When the question was already answered (exit 5).
+ * @throws {NotWaitingError} When the item stopped waiting, or is gone (exit 5).
+ * @throws {BusyError} When the run store stayed locked (exit 5).
+ * @throws {PreconditionError} When the pick may not stand yet (exit 5).
  */
 export async function run(ctx: VerbContext): Promise<VerbResult> {
   const [identifier] = ctx.args.positionals;
@@ -130,20 +135,33 @@ export async function run(ctx: VerbContext): Promise<VerbResult> {
   const text = pick ? null : await answerText(ctx);
 
   const { loaded, adapter, store } = await setupWrite(ctx, ['getItem', 'comment']);
-  const item = await adapter.getItem(identifier);
+  // An item that is gone needs no answer. A tracker outage is not this: it stays exit 4.
+  const item = await adapter.getItem(identifier).catch((error: unknown) => {
+    throw error instanceof PreconditionError ? new NotWaitingError(error.message) : error;
+  });
   const existing: FlowRun | undefined = runFor(store, item);
   const question = existing?.question;
-  const settled = () =>
-    new PreconditionError(
-      `${identifier}'s question was already answered (it no longer carries ${AGENT_NEEDS_INPUT}), so nothing was posted`
+  if (question?.answer !== undefined) {
+    throw new SettledError(`${identifier}'s question was already answered, so nothing was posted`);
+  }
+  if (!item.labels.includes(AGENT_NEEDS_INPUT)) {
+    throw new NotWaitingError(
+      `${identifier} no longer waits for an answer (it no longer carries ${AGENT_NEEDS_INPUT}), so nothing was posted`
     );
-  if (!item.labels.includes(AGENT_NEEDS_INPUT) || question?.answer !== undefined) throw settled();
+  }
   if (text !== null) {
     refuseSessions(
       ctx,
       sessionsThatWorked(existing),
       `a session that worked ${identifier} cannot answer its question, so nothing was posted or recorded. ${STOP_AND_ASK}`
     );
+    // A drain run reads replies, so a person's words reach it with no question on
+    // record. This kind of run only resumes on a recorded answer.
+    if (existing !== undefined && question === undefined && existing.drain === undefined) {
+      throw new PreconditionError(
+        `${identifier} has no open question on its run, so nothing was posted; reply on the item instead`
+      );
+    }
   }
 
   let body: string;
@@ -203,7 +221,7 @@ export async function run(ctx: VerbContext): Promise<VerbResult> {
         ? await claimAnswer(store, existing.issueId, question.askedAt, recorded)
         : null;
     if (claimed === false) {
-      throw new PreconditionError(
+      throw new SettledError(
         `another answer to ${identifier}'s question got there first (a person, the deadline or the reviewer agent), so nothing was posted`
       );
     }

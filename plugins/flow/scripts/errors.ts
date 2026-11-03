@@ -117,6 +117,34 @@ export class PersonGateError extends PreconditionError {
   readonly kind = 'person-gate';
 }
 
+/**
+ * Someone else answered first (exit 5). A kind of its own, so DorkOS clears a row
+ * only on this or {@link NotWaitingError}, and never on a refusal that left a
+ * person's answer unrecorded with the question still open.
+ */
+export class SettledError extends PreconditionError {
+  /** How `--json` names this refusal. */
+  readonly kind = 'settled';
+}
+
+/**
+ * The item stopped waiting for an answer, or is gone, and nobody answered (exit 5).
+ * Apart from {@link SettledError} so a deadline never records an answer here.
+ */
+export class NotWaitingError extends PreconditionError {
+  /** How `--json` names this refusal. */
+  readonly kind = 'not-waiting';
+}
+
+/**
+ * The run store stayed locked by another flow command, so the write was given up
+ * (exit 5). Nobody refused anything: the same command can simply run again.
+ */
+export class BusyError extends PreconditionError {
+  /** How `--json` names this refusal. */
+  readonly kind = 'busy';
+}
+
 /** flow is paused and the verb was not run with `--manual` (exit 7). */
 export class PausedError extends FlowError {
   /** @param message - Since when flow is paused and how to resume. */

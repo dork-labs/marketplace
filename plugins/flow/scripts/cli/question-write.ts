@@ -11,7 +11,7 @@
  * @module @dorkos/flow/cli/question-write
  */
 
-import { PreconditionError } from '../errors.ts';
+import { BusyError } from '../errors.ts';
 import type { RunQuestion } from '../flow-run.ts';
 import type { FlowStateFile } from '../flow-state-file.ts';
 
@@ -33,7 +33,7 @@ function same(current: RunQuestion | undefined, askedAt: string): current is Run
 /** Refuse a write the lock dropped. */
 function requireWritten(status: string, file: string): void {
   if (status === 'dropped') {
-    throw new PreconditionError(
+    throw new BusyError(
       `${file} stayed locked by another flow command, so nothing was recorded; run the same command again`
     );
   }
@@ -138,6 +138,34 @@ export async function clearQuestion(
     const { question: _done, ...rest } = current;
     return rest;
   });
+}
+
+/**
+ * Drop a question whose park is over, so a later park never takes its answer
+ * for its own (DOR-3777). Unlike {@link clearQuestion}, nothing else will clear
+ * it if this write is lost, so a busy lock is the caller's to hear about.
+ *
+ * @param store - The run store.
+ * @param issueId - The run's key.
+ * @param askedAt - The question's `askedAt`, as the caller read it.
+ * @returns `true` when this call dropped it; `false` when it was replaced, gone
+ *   or handed over since the caller read it.
+ * @throws {BusyError} When the lock stayed busy.
+ */
+export async function dropEndedQuestion(
+  store: FlowStateFile,
+  issueId: string,
+  askedAt: string
+): Promise<boolean> {
+  let won = false;
+  const result = await store.updateRun(issueId, (current) => {
+    won = same(current.question, askedAt) && current.question.answerHandedOverAt === undefined;
+    if (!won) return current;
+    const { question: _ended, ...rest } = current;
+    return rest;
+  });
+  requireWritten(result.status, store.path);
+  return won;
 }
 
 /**
