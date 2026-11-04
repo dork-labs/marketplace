@@ -64,7 +64,14 @@ function line<K extends (typeof JOURNAL_KINDS)[number], S extends z.ZodRawShape>
 
 /** One journal line. See the kind table in spec §2. */
 export const JournalLineSchema = z.discriminatedUnion('kind', [
-  line('verb', { verb: Name, ms: Count, exit: z.number().int().min(0).max(255) }),
+  line('verb', {
+    verb: Name,
+    ms: Count,
+    exit: z.number().int().min(0).max(255),
+    reason: z
+      .enum(['auth', 'unreachable', 'rate-limited', 'read-limit', 'timeout', 'killed'])
+      .optional(),
+  }),
   line('oracle.error', {
     oracle: Name,
     exit: z.number().int(),

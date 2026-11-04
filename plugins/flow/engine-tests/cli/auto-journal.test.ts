@@ -15,7 +15,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { recordsVerbRun } from '../../scripts/cli/auto-journal.ts';
 import type { VerbDefinition } from '../../scripts/cli/context.ts';
-import { EXIT } from '../../scripts/errors.ts';
+import { TrackerError, EXIT } from '../../scripts/errors.ts';
 import { main, VERBS, type MainDeps } from '../../scripts/flow.ts';
 import { JournalLineSchema } from '../../scripts/journal-schema.ts';
 import { FakeTracker, type FakeBacklog } from '../../scripts/tracker/fake.ts';
@@ -508,4 +508,28 @@ describe('an unwritable journal changes nothing a caller sees', () => {
     expect(result.stderr).toBe('');
     expect(project.runs()['id-FAKE-1']).toBeDefined();
   });
+});
+
+it('journals only the fixed tracker reason and preserves its reset in CLI JSON', async () => {
+  const project = newProject();
+  const retryAt = '2027-01-01T00:00:00.000Z';
+  const result = await flow(project, ['synthetic', '--json'], {
+    verbs: [
+      {
+        name: 'synthetic',
+        summary: 'Synthetic test',
+        load: async () => ({
+          run: async () => {
+            throw new TrackerError('private ticket credential', { kind: 'rate-limited', retryAt });
+          },
+        }),
+      },
+    ],
+  });
+  expect(JSON.parse(result.stdout).error).toMatchObject({ kind: 'rate-limited', retryAt });
+  const events = lines(project);
+  expect(events).toHaveLength(1);
+  expect(events[0]).toMatchObject({ kind: 'verb', exit: 4, reason: 'rate-limited' });
+  expect(JSON.stringify(events)).not.toMatch(/private|credential/);
+  expect(JournalLineSchema.safeParse(events[0]).success).toBe(true);
 });

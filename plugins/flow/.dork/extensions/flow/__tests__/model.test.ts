@@ -559,3 +559,18 @@ describe('runPauseCommand', () => {
     ).rejects.toThrow("Flow couldn't pause dorkos. Try again.");
   });
 });
+
+it('shows rate limiting immediately, preserving the retry time for the panel', () => {
+  const since = NOW.toISOString();
+  const retryAt = new Date(NOW.getTime() + 900_000).toISOString();
+  expect(
+    conditionsOf(null, read({ failure: { kind: 'rate-limited', since, retryAt } }), NOW)
+  ).toEqual([
+    {
+      kind: 'tracker-unreachable',
+      since,
+      escalated: false,
+      detail: { reason: 'rate-limited', retryAt },
+    },
+  ]);
+});

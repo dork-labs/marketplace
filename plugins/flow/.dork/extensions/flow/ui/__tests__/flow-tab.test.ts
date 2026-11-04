@@ -554,3 +554,25 @@ describe('tracker links', () => {
     expect(screen.queryByRole('link')).toBeNull();
   });
 });
+
+it('shows the rate-limit cause and stale-list warning in the project panel', async () => {
+  await renderTab(
+    flowModel([
+      flowProject('dorkos', {
+        conditions: [
+          {
+            kind: 'tracker-unreachable',
+            since: '2026-01-01T00:00:00.000Z',
+            escalated: false,
+            detail: { reason: 'rate-limited' },
+          },
+        ],
+      }),
+    ]),
+    host(DORKOS)
+  );
+  expect(
+    screen.getByText(/Linear is rate limited.*Flow is waiting.*list may be out of date/)
+  ).toBeTruthy();
+  expect(screen.queryByText(/hasn't answered since/)).toBeNull();
+});

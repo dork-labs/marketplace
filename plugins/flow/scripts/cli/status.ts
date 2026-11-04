@@ -41,7 +41,7 @@ import { loadConfig } from '../config-load.ts';
 import { isTeamSource, readIntakeMarks, resolveIntakeSources, sourceKey } from '../intake.ts';
 import { formatWhen } from '../question.ts';
 import { withSetupNudge } from './setup-nudge.ts';
-import { PreconditionError } from '../errors.ts';
+import { TrackerError, PreconditionError } from '../errors.ts';
 import { currentArmRefusal, type FlowRun } from '../flow-run.ts';
 import { openFlowStateFile } from '../flow-state-file.ts';
 import { limitLine } from '../drain/handoff-exec.ts';
@@ -183,6 +183,8 @@ const CLOSED = { stateCategory: 'completed' } as const;
  */
 function lazyItemReader(ctx: VerbContext): (identifier: string) => Promise<WorkItem | undefined> {
   let adapter: Promise<CodeAdapter | null> | undefined;
+  let reads = 0;
+  const cache = ctx.args.flags['panel-cache'];
   return async (identifier) => {
     adapter ??= ctx.adapter().then(
       (loaded) => (loaded.capabilities.includes('getItem') ? loaded : null),
@@ -191,8 +193,13 @@ function lazyItemReader(ctx: VerbContext): (identifier: string) => Promise<WorkI
     const loaded = await adapter;
     if (loaded === null) return undefined;
     try {
+      if (typeof cache === 'string') {
+        if (!loaded.getPanelItem || reads++ >= 10) return undefined;
+        return await loaded.getPanelItem(path.resolve(ctx.cwd, cache), identifier);
+      }
       return await loaded.getItem(identifier);
-    } catch {
+    } catch (error) {
+      if (typeof cache === 'string' && error instanceof TrackerError) throw error;
       return undefined;
     }
   };
@@ -315,7 +322,7 @@ export async function run(ctx: VerbContext): Promise<VerbResult> {
   let items: WorkItem[];
   let question: ParkedEntry['question'] = null;
   if (ctx.snapshotPath !== undefined) {
-    items = readSnapshotFile(ctx.snapshotPath).items;
+    items = readSnapshotFile(ctx.snapshotPath, true).items;
     if (focus !== undefined) items = items.filter((item) => item.identifier === focus);
   } else if (focus !== undefined) {
     const adapter = await ctx.adapter();

@@ -63,6 +63,7 @@ import type {
   WorkItemProject,
   WorkStateChange,
 } from '../../scripts/tracker/types.ts';
+import { panelSnapshot } from '../../scripts/tracker/panel-cache.ts';
 import { labelsAfterChange } from '../../scripts/work-state.ts';
 
 /** The adapter contract version this code targets. */
@@ -134,6 +135,19 @@ export const SNAPSHOT_RELATIONS_QUERY = `query FlowSnapshotRelations($teamId: St
     }
   }
 }`;
+
+/** Panel deltas include closed and archived issues so they can leave the open list. */
+export const PANEL_CHANGES_QUERY = `query FlowPanelChanges($teamId: String!, $since: DateTimeOrDuration!, $first: Int!, $after: String) {
+  team(id: $teamId) {
+    issues(first: $first, after: $after, includeArchived: true, filter: { updatedAt: { gte: $since } }) {
+      pageInfo { hasNextPage endCursor }
+      nodes { ${ISSUE_FIELDS} ${RELATION_FIELDS} archivedAt url project { id name } }
+    }
+  }
+}`;
+export const PANEL_CHANGE_PAGE_SIZE = 10;
+export const PANEL_CHANGE_MAX_PAGES = 10;
+export const PANEL_BASELINE_MAX_PAGES = 40;
 
 /** Snapshot pull 3: closed issues as titles, paged at {@link CLOSED_PAGE_SIZE}. */
 export const SNAPSHOT_CLOSED_QUERY = `query FlowSnapshotClosed($teamId: String!, $first: Int!, $after: String) {
@@ -339,6 +353,7 @@ interface RawIssue {
   comments?: { nodes?: RawComment[] | null } | null;
   /** The issue's web address (snapshot pull 1 only), which names the workspace. */
   url?: string | null;
+  archivedAt?: string | null;
 }
 
 /** An issue node's relation graph. */
@@ -644,7 +659,89 @@ const AUTH_FAILURE =
  * @returns The kind.
  */
 export function trackerErrorKind(detail: string): TrackerErrorKind {
+  if (/RATELIMITED|RATE_LIMIT|rate[ -]?limit|\b429\b/i.test(detail)) return 'rate-limited';
   return AUTH_FAILURE.test(detail) ? 'auth' : 'unreachable';
+}
+
+/** Reset times from known response fields and headers, converted without retaining the response. */
+export function retryAtOf(value: unknown, now = Date.now(), depth = 0): string | undefined {
+  if (depth > 8) return undefined;
+  if (value === null || typeof value !== 'object') return undefined;
+  const body = value as Record<string, unknown>;
+  const headers = Object.fromEntries(
+    Object.entries(
+      body.headers && typeof body.headers === 'object'
+        ? (body.headers as Record<string, unknown>)
+        : {}
+    ).map(([key, value]) => [key.toLowerCase(), value])
+  );
+  const times: number[] = [];
+  for (const key of [
+    'resetAt',
+    'retryAt',
+    'reset',
+    'x-ratelimit-requests-reset',
+    'x-ratelimit-complexity-reset',
+    'x-ratelimit-endpoint-requests-reset',
+  ]) {
+    const raw = body[key] ?? headers[key];
+    const numeric =
+      typeof raw === 'number' || (typeof raw === 'string' && /^\d+(?:\.\d+)?$/.test(raw))
+        ? Number(raw)
+        : NaN;
+    const parsed = Number.isFinite(numeric)
+      ? numeric < 1e12
+        ? numeric * 1000
+        : numeric
+      : typeof raw === 'string'
+        ? Date.parse(raw)
+        : NaN;
+    if (Number.isFinite(parsed)) times.push(parsed);
+  }
+  const retry = body.retryAfter ?? headers['retry-after'] ?? headers['Retry-After'];
+  if (typeof retry === 'number' || (typeof retry === 'string' && /^\d+(?:\.\d+)?$/.test(retry)))
+    times.push(now + Number(retry) * 1000);
+  else if (typeof retry === 'string' && Number.isFinite(Date.parse(retry)))
+    times.push(Date.parse(retry));
+  for (const key of ['error', 'response', 'extensions', 'data']) {
+    if (body[key] && typeof body[key] === 'object' && body[key] !== value) {
+      const nested = retryAtOf(body[key], now, depth + 1);
+      if (nested) times.push(Date.parse(nested));
+    }
+  }
+  if (Array.isArray(body.errors))
+    for (const error of body.errors.slice(0, 100)) {
+      const nested = retryAtOf(error, now, depth + 1);
+      if (nested) times.push(Date.parse(nested));
+    }
+  const future = times.filter((n) => n > now && n <= 8.64e15);
+  return future.length ? new Date(Math.max(...future)).toISOString() : undefined;
+}
+
+/** Only shipped constant queries may use the read route. Never infer permission from arbitrary text. */
+export function readDocument(query: string): string {
+  const reads = [
+    SNAPSHOT_CORE_QUERY,
+    SNAPSHOT_RELATIONS_QUERY,
+    SNAPSHOT_CLOSED_QUERY,
+    PANEL_CHANGES_QUERY,
+    PROJECTS_QUERY,
+    ITEM_QUERY,
+    ITEM_WITH_COMMENTS_QUERY,
+    INBOX_QUERY,
+    WRITE_READ_QUERY,
+    COMMENT_TARGET_QUERY,
+    CREATE_READ_QUERY,
+    CREATE_PROJECT_QUERY,
+    CREATE_PROJECT_BY_ID_QUERY,
+    CREATED_READ_QUERY,
+    VIEWER_QUERY,
+    TEAM_BY_KEY_QUERY,
+    TEAM_BY_ID_QUERY,
+  ];
+  if (!reads.includes(query) || !/^query\s/.test(query))
+    throw new ConfigError('The tracker read route accepts only shipped queries.');
+  return query;
 }
 
 /**
@@ -704,22 +801,29 @@ export function createAdapter(ctx: AdapterContext): CodeAdapter {
   }
   const { transport, warn } = ctx;
   const configuredTeam = ctx.config.connection.team;
+  let panelDeadline = 0;
+  let responseRetryAt: string | undefined;
 
   /** Run one Composio slug and return its (possibly spilled) envelope's `data`. */
   async function execute(slug: string, input: Record<string, unknown>): Promise<unknown> {
-    const result = await transport.run('composio', [
-      'execute',
-      slug,
-      '--account',
-      account as string,
-      '-d',
-      JSON.stringify(input),
-    ]);
+    if (panelDeadline > 0 && Date.now() >= panelDeadline)
+      throw new TrackerError('Panel read reached its time budget.', { kind: 'read-limit' });
+    const result = await transport.run(
+      'composio',
+      ['execute', slug, '--account', account as string, '-d', JSON.stringify(input)],
+      panelDeadline > 0 ? { timeoutMs: 15_000 } : undefined
+    );
     if (result.code !== 0) {
+      let metadata: unknown;
+      try {
+        metadata = JSON.parse(result.stdout);
+      } catch {
+        /* Some transports return only stderr. */
+      }
       const detail = result.stderr || result.stdout;
       throw new TrackerError(
         `composio ${slug} failed (exit ${result.code}): ${cleanMessage(detail, [account as string])}`,
-        { kind: trackerErrorKind(detail) }
+        { kind: trackerErrorKind(detail), retryAt: retryAtOf(metadata) }
       );
     }
     let envelope: Record<string, unknown>;
@@ -741,11 +845,13 @@ export function createAdapter(ctx: AdapterContext): CodeAdapter {
         );
       }
     }
+    responseRetryAt = retryAtOf(envelope);
     if (envelope.successful !== true) {
-      const detail = typeof envelope.error === 'string' ? envelope.error : 'no detail given';
+      const detail =
+        typeof envelope.error === 'string' ? envelope.error : JSON.stringify(envelope.error ?? {});
       throw new TrackerError(
         `Linear refused the request: ${cleanMessage(detail, [account as string])}`,
-        { kind: trackerErrorKind(detail) }
+        { kind: trackerErrorKind(detail), retryAt: retryAtOf(envelope) }
       );
     }
     return envelope.data;
@@ -756,18 +862,34 @@ export function createAdapter(ctx: AdapterContext): CodeAdapter {
    * the caller as the shape its document selects (every field optional, since
    * Linear may leave any of them null).
    */
-  async function graphql<T>(query: string, variables: Record<string, unknown>): Promise<T> {
+  async function graphql<T>(
+    query: string,
+    variables: Record<string, unknown>,
+    mutation = false
+  ): Promise<T> {
+    if (!mutation) readDocument(query);
+    else if (![ISSUE_UPDATE_MUTATION, COMMENT_MUTATION, CREATE_ITEM_MUTATION].includes(query))
+      throw new ConfigError('Unknown tracker mutation.');
     const data = (await execute(GRAPHQL_SLUG, { query_or_mutation: query, variables })) as {
       data?: unknown;
       errors?: unknown;
     } | null;
     if (Array.isArray(data?.errors) && data.errors.length > 0) {
-      const first = data.errors[0] as { message?: unknown; extensions?: { code?: unknown } };
+      const first = data.errors[0] as {
+        message?: unknown;
+        extensions?: { code?: unknown; [key: string]: unknown };
+      };
       const message = String(first?.message ?? 'unknown');
-      const code = typeof first?.extensions?.code === 'string' ? first.extensions.code : '';
+      const code = data.errors.map((error) => JSON.stringify(error)).join(' ');
+      const resetTimes = [responseRetryAt, ...data.errors.map((error) => retryAtOf(error))].filter(
+        (v): v is string => typeof v === 'string'
+      );
+      const retryAt = resetTimes.length
+        ? new Date(Math.max(...resetTimes.map(Date.parse))).toISOString()
+        : undefined;
       throw new TrackerError(
         `Linear returned an error: ${cleanMessage(message, [account as string])}`,
-        { kind: trackerErrorKind(`${code} ${message}`) }
+        { kind: trackerErrorKind(`${code} ${message}`), retryAt }
       );
     }
     if (
@@ -848,10 +970,15 @@ export function createAdapter(ctx: AdapterContext): CodeAdapter {
   }
 
   /** Pull every page of a team-scoped issue connection. */
-  async function paginate<T>(query: string, teamId: string, first: number): Promise<T[]> {
+  async function paginate<T>(
+    query: string,
+    teamId: string,
+    first: number,
+    maxPages = MAX_PAGES
+  ): Promise<T[]> {
     const nodes: T[] = [];
     let after: string | null = null;
-    for (let page = 0; page < MAX_PAGES; page += 1) {
+    for (let page = 0; page < maxPages; page += 1) {
       const data: { team?: { issues?: RawPage<T> | null } | null } = await graphql(query, {
         teamId,
         first,
@@ -861,13 +988,24 @@ export function createAdapter(ctx: AdapterContext): CodeAdapter {
       if (connection === undefined || connection === null) {
         throw new TrackerError('Linear returned no team; check connection.team.id');
       }
+      if (
+        maxPages !== MAX_PAGES &&
+        (!Array.isArray(connection.nodes) ||
+          connection.nodes.length > first ||
+          typeof connection.pageInfo?.hasNextPage !== 'boolean')
+      )
+        throw new TrackerError('Incomplete panel baseline page.');
       nodes.push(...(connection.nodes ?? []));
       if (connection.pageInfo?.hasNextPage !== true) return nodes;
       after = connection.pageInfo.endCursor ?? null;
       if (after === null)
         throw new TrackerError('Linear said there was another page but gave no cursor');
     }
-    throw new TrackerError(`the backlog is larger than ${MAX_PAGES} pages; flow stopped reading`);
+    if (maxPages === MAX_PAGES)
+      throw new TrackerError(`the backlog is larger than ${MAX_PAGES} pages; flow stopped reading`);
+    throw new TrackerError('The panel read reached its page limit; keeping the previous list.', {
+      kind: 'read-limit',
+    });
   }
 
   /** Drop every node whose identifier is not the team's, warning once. */
@@ -928,6 +1066,126 @@ export function createAdapter(ctx: AdapterContext): CodeAdapter {
     return ownIssue(data.issue, identifier, { id: teamId, key });
   }
 
+  async function backlogSnapshot(
+    opts: { includeClosed?: boolean } = {},
+    maxPages = MAX_PAGES
+  ): Promise<BacklogSnapshot> {
+    const { id: teamId, key } = await team();
+    const core = inTeam(
+      await paginate<RawIssue>(SNAPSHOT_CORE_QUERY, teamId, CORE_PAGE_SIZE, maxPages),
+      key,
+      'open items'
+    );
+    const graph = new Map(
+      (
+        await paginate<RawRelations>(SNAPSHOT_RELATIONS_QUERY, teamId, RELATION_PAGE_SIZE, maxPages)
+      ).map((node) => [node.identifier, node])
+    );
+
+    const unrepresentable = core.filter((node) => stateCategoryOf(node.state?.type) === null);
+    if (unrepresentable.length > 0) {
+      warn(
+        `${unrepresentable.map((node) => node.identifier).join(', ')} ${unrepresentable.length === 1 ? 'is' : 'are'} in a Linear state flow cannot represent (${[...new Set(unrepresentable.map((node) => node.state?.type))].join(', ')}); a groom should move ${unrepresentable.length === 1 ? 'it' : 'them'} to a canceled or open state`
+      );
+    }
+    const open = core.filter((node) => stateCategoryOf(node.state?.type) !== null);
+    const projectIds = [
+      ...new Set(open.flatMap((node) => (node.project?.id ? [node.project.id] : []))),
+    ];
+    if (maxPages !== MAX_PAGES && projectIds.length > 1000)
+      throw new TrackerError('Too many projects for a panel read.', { kind: 'read-limit' });
+    const projectMap = await projects(projectIds);
+
+    const items = open.flatMap((node) => {
+      const project = node.project?.id
+        ? (projectMap.get(node.project.id) ?? {
+            id: node.project.id,
+            name: node.project.name ?? '',
+          })
+        : undefined;
+      const item = normalizeIssue(node, graph.get(node.identifier), project);
+      return item === null ? [] : [item];
+    });
+
+    let closed: ClosedItem[] = [];
+    if (opts.includeClosed) {
+      const nodes = inTeam(
+        await paginate<{
+          identifier: string;
+          title?: string;
+          state?: { type?: string };
+          completedAt?: string | null;
+          canceledAt?: string | null;
+        }>(SNAPSHOT_CLOSED_QUERY, teamId, CLOSED_PAGE_SIZE),
+        key,
+        'closed items'
+      );
+      closed = nodes.flatMap((node) => {
+        const category = node.state?.type;
+        if (category !== 'completed' && category !== 'canceled') return [];
+        const closedAt = category === 'completed' ? node.completedAt : node.canceledAt;
+        return [
+          {
+            identifier: node.identifier,
+            title: node.title ?? '',
+            stateCategory: category,
+            ...(typeof closedAt === 'string' && closedAt !== '' ? { closedAt } : {}),
+          },
+        ];
+      });
+    }
+
+    return {
+      v: 1,
+      tracker: ctx.config.tracker,
+      team: { key, id: teamId, url: teamUrl(core, key) },
+      fetchedAt: new Date().toISOString(),
+      items,
+      closed,
+      projects: projectIds.flatMap((id) => {
+        const project = projectMap.get(id);
+        return project === undefined ? [] : [project];
+      }),
+    };
+  }
+
+  async function getItem(
+    identifier: string,
+    opts: { comments?: number } = {}
+  ): Promise<ItemWithComments> {
+    const issue = await readIssue(identifier, opts.comments);
+    // A verb decides from this one item whether it still waits, and that can
+    // drop a person's answer, so labels it was not told are a failed read, not
+    // "no labels". The snapshot stays lenient: it drops nothing.
+    const labelNodes = issue.labels?.nodes;
+    if (!Array.isArray(labelNodes) || labelNodes.length >= LABEL_PAGE) {
+      throw new TrackerError(`Linear did not give all of ${issue.identifier}'s labels`);
+    }
+    const item = normalizeIssue(
+      issue,
+      issue,
+      issue.project?.id ? normalizeProject(issue.project) : undefined
+    );
+    if (item === null) {
+      throw new PreconditionError(
+        `${issue.identifier} is in Linear's ${issue.state?.type ?? 'unknown'} state, which flow cannot represent; move it to a canceled or open state`
+      );
+    }
+    if (opts.comments !== undefined && opts.comments > 0) {
+      const { id: teamId } = await team();
+      const comments: ItemComment[] = (issue.comments?.nodes ?? []).map((node) => ({
+        id: node.id,
+        author: node.user?.id ?? '',
+        authorIsTrusted: isTrustedComment(node, teamId),
+        body: node.body ?? '',
+        createdAt: node.createdAt ?? '',
+      }));
+      comments.sort((a, b) => a.createdAt.localeCompare(b.createdAt));
+      return { ...item, comments };
+    }
+    return item;
+  }
+
   return {
     capabilities: [
       'getCurrentUser',
@@ -949,116 +1207,138 @@ export function createAdapter(ctx: AdapterContext): CodeAdapter {
       return viewer.name ? { id: viewer.id, name: viewer.name } : { id: viewer.id };
     },
 
-    async getBacklogSnapshot(opts = {}): Promise<BacklogSnapshot> {
-      const { id: teamId, key } = await team();
-      const core = inTeam(
-        await paginate<RawIssue>(SNAPSHOT_CORE_QUERY, teamId, CORE_PAGE_SIZE),
-        key,
-        'open items'
-      );
-      const graph = new Map(
-        (await paginate<RawRelations>(SNAPSHOT_RELATIONS_QUERY, teamId, RELATION_PAGE_SIZE)).map(
-          (node) => [node.identifier, node]
-        )
-      );
-
-      const unrepresentable = core.filter((node) => stateCategoryOf(node.state?.type) === null);
-      if (unrepresentable.length > 0) {
-        warn(
-          `${unrepresentable.map((node) => node.identifier).join(', ')} ${unrepresentable.length === 1 ? 'is' : 'are'} in a Linear state flow cannot represent (${[...new Set(unrepresentable.map((node) => node.state?.type))].join(', ')}); a groom should move ${unrepresentable.length === 1 ? 'it' : 'them'} to a canceled or open state`
-        );
-      }
-      const open = core.filter((node) => stateCategoryOf(node.state?.type) !== null);
-      const projectIds = [
-        ...new Set(open.flatMap((node) => (node.project?.id ? [node.project.id] : []))),
-      ];
-      const projectMap = await projects(projectIds);
-
-      const items = open.flatMap((node) => {
-        const project = node.project?.id
-          ? (projectMap.get(node.project.id) ?? {
-              id: node.project.id,
-              name: node.project.name ?? '',
-            })
-          : undefined;
-        const item = normalizeIssue(node, graph.get(node.identifier), project);
-        return item === null ? [] : [item];
-      });
-
-      let closed: ClosedItem[] = [];
-      if (opts.includeClosed) {
-        const nodes = inTeam(
-          await paginate<{
-            identifier: string;
-            title?: string;
-            state?: { type?: string };
-            completedAt?: string | null;
-            canceledAt?: string | null;
-          }>(SNAPSHOT_CLOSED_QUERY, teamId, CLOSED_PAGE_SIZE),
-          key,
-          'closed items'
-        );
-        closed = nodes.flatMap((node) => {
-          const category = node.state?.type;
-          if (category !== 'completed' && category !== 'canceled') return [];
-          const closedAt = category === 'completed' ? node.completedAt : node.canceledAt;
-          return [
-            {
-              identifier: node.identifier,
-              title: node.title ?? '',
-              stateCategory: category,
-              ...(typeof closedAt === 'string' && closedAt !== '' ? { closedAt } : {}),
-            },
-          ];
+    getBacklogSnapshot: backlogSnapshot,
+    async getPanelSnapshot(cacheDir: string): Promise<BacklogSnapshot> {
+      panelDeadline = Date.now() + 150_000;
+      let own: Team;
+      try {
+        return await panelSnapshot({
+          dir: cacheDir,
+          account: account as string,
+          team: JSON.stringify(configuredTeam),
+          resolveTeam: async () => {
+            own = await team();
+            return own.id;
+          },
+          now: Date.now,
+          refresh: async (previous, since) => {
+            own =
+              previous?.team.id && previous.team.key
+                ? { id: previous.team.id, key: previous.team.key }
+                : await team();
+            if (previous === null || since === null) {
+              const baseline = await backlogSnapshot({}, PANEL_BASELINE_MAX_PAGES);
+              const viewer = await graphql<{ viewer?: { id?: string } }>(VIEWER_QUERY, {});
+              if (!viewer.viewer?.id)
+                throw new TrackerError('No account identity for panel ranking.');
+              return { ...baseline, panelAgentId: viewer.viewer.id };
+            }
+            const changes: (RawIssue & RawRelations)[] = [];
+            let after: string | null = null;
+            for (let page = 0; ; page++) {
+              if (page === PANEL_CHANGE_MAX_PAGES)
+                throw new TrackerError(
+                  'Too many changed items for a panel read; keeping the previous list.',
+                  { kind: 'read-limit' }
+                );
+              const data: { team?: { issues?: RawPage<RawIssue & RawRelations> | null } | null } =
+                await graphql(PANEL_CHANGES_QUERY, {
+                  teamId: own.id,
+                  since,
+                  first: PANEL_CHANGE_PAGE_SIZE,
+                  after,
+                });
+              const connection = data.team?.issues;
+              if (
+                !connection ||
+                !Array.isArray(connection.nodes) ||
+                connection.nodes.length > PANEL_CHANGE_PAGE_SIZE ||
+                typeof connection.pageInfo?.hasNextPage !== 'boolean'
+              )
+                throw new TrackerError('Incomplete panel change page.');
+              changes.push(...inTeam(connection.nodes, own.key, 'changed items'));
+              if (!connection.pageInfo.hasNextPage) break;
+              const cursor: string | null = connection.pageInfo.endCursor ?? null;
+              if (!cursor || cursor === after)
+                throw new TrackerError('Invalid panel change cursor.');
+              after = cursor;
+            }
+            const items = new Map(previous.items.map((item) => [item.identifier, item]));
+            for (const node of changes) {
+              if (
+                !node.state?.type ||
+                !Array.isArray(node.labels?.nodes) ||
+                node.labels.nodes.length >= LABEL_PAGE
+              )
+                throw new TrackerError('Incomplete panel item.');
+              if (node.archivedAt || ['completed', 'canceled'].includes(node.state.type))
+                items.delete(node.identifier);
+              else {
+                const item = normalizeIssue(
+                  node,
+                  node,
+                  node.project?.id ? normalizeProject(node.project) : undefined
+                );
+                if (item) items.set(item.identifier, item);
+                else items.delete(node.identifier);
+              }
+            }
+            const ids = [
+              ...new Set(
+                [...items.values()].flatMap((item) => (item.project ? [item.project.id] : []))
+              ),
+            ];
+            if (ids.length > 1000)
+              throw new TrackerError('Too many projects for a panel read.', { kind: 'read-limit' });
+            const projectMap = await projects(ids);
+            for (const [id, item] of items)
+              if (item.project && projectMap.has(item.project.id))
+                items.set(id, { ...item, project: projectMap.get(item.project.id) });
+            return {
+              ...previous,
+              fetchedAt: new Date().toISOString(),
+              items: [...items.values()],
+              projects: [...projectMap.values()],
+              closed: [],
+            };
+          },
         });
+      } finally {
+        panelDeadline = 0;
       }
-
-      return {
-        v: 1,
-        tracker: ctx.config.tracker,
-        team: { key, id: teamId, url: teamUrl(core, key) },
-        fetchedAt: new Date().toISOString(),
-        items,
-        closed,
-        projects: projectIds.flatMap((id) => {
-          const project = projectMap.get(id);
-          return project === undefined ? [] : [project];
-        }),
-      };
     },
 
-    async getItem(identifier, opts = {}): Promise<ItemWithComments> {
-      const issue = await readIssue(identifier, opts.comments);
-      // A verb decides from this one item whether it still waits, and that can
-      // drop a person's answer, so labels it was not told are a failed read, not
-      // "no labels". The snapshot stays lenient: it drops nothing.
-      const labelNodes = issue.labels?.nodes;
-      if (!Array.isArray(labelNodes) || labelNodes.length >= LABEL_PAGE) {
-        throw new TrackerError(`Linear did not give all of ${issue.identifier}'s labels`);
+    getItem,
+    async getPanelItem(cacheDir, identifier) {
+      panelDeadline = Date.now() + 150_000;
+      try {
+        const snapshot = await panelSnapshot({
+          dir: cacheDir,
+          account: account as string,
+          team: `${JSON.stringify(configuredTeam)}:item:${identifier}`,
+          resolveTeam: async () => `${(await team()).id}:item:${identifier}`,
+          now: Date.now,
+          refresh: async () => ({
+            v: 1,
+            tracker: ctx.config.tracker,
+            team: await team(),
+            fetchedAt: new Date().toISOString(),
+            items: await (async () => {
+              try {
+                return [await getItem(identifier)];
+              } catch (error) {
+                if (error instanceof PreconditionError) return [];
+                throw error;
+              }
+            })(),
+            closed: [],
+            projects: [],
+          }),
+        });
+        return snapshot.items[0];
+      } finally {
+        panelDeadline = 0;
       }
-      const item = normalizeIssue(
-        issue,
-        issue,
-        issue.project?.id ? normalizeProject(issue.project) : undefined
-      );
-      if (item === null) {
-        throw new PreconditionError(
-          `${issue.identifier} is in Linear's ${issue.state?.type ?? 'unknown'} state, which flow cannot represent; move it to a canceled or open state`
-        );
-      }
-      if (opts.comments !== undefined && opts.comments > 0) {
-        const { id: teamId } = await team();
-        const comments: ItemComment[] = (issue.comments?.nodes ?? []).map((node) => ({
-          id: node.id,
-          author: node.user?.id ?? '',
-          authorIsTrusted: isTrustedComment(node, teamId),
-          body: node.body ?? '',
-          createdAt: node.createdAt ?? '',
-        }));
-        comments.sort((a, b) => a.createdAt.localeCompare(b.createdAt));
-        return { ...item, comments };
-      }
-      return item;
     },
 
     async getInbox(opts = {}): Promise<InboxRead[]> {
@@ -1188,7 +1468,8 @@ export function createAdapter(ctx: AdapterContext): CodeAdapter {
 
       const result = await graphql<{ issueUpdate?: { success?: boolean } | null }>(
         ISSUE_UPDATE_MUTATION,
-        { id: issue.id, input }
+        { id: issue.id, input },
+        true
       );
       if (result.issueUpdate?.success !== true) {
         throw new TrackerError(`Linear did not confirm the update to ${issue.identifier}`);
@@ -1204,7 +1485,8 @@ export function createAdapter(ctx: AdapterContext): CodeAdapter {
       const issue = ownIssue(target.issue, item.identifier, await team());
       const result = await graphql<{ commentCreate?: { success?: boolean } | null }>(
         COMMENT_MUTATION,
-        { issueId: issue.id, body }
+        { issueId: issue.id, body },
+        true
       );
       if (result.commentCreate?.success !== true) {
         throw new TrackerError(`Linear did not confirm the comment on ${item.identifier}`);
@@ -1299,7 +1581,7 @@ export function createAdapter(ctx: AdapterContext): CodeAdapter {
       for (let step = 0; result === null; step += 1) {
         const id = createIdFor(chain, teamId);
         try {
-          result = await graphql(CREATE_ITEM_MUTATION, { input: { ...input, id } });
+          result = await graphql(CREATE_ITEM_MUTATION, { input: { ...input, id } }, true);
         } catch (error) {
           let landed: (CreatedItem & { open: boolean }) | null;
           try {

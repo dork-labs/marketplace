@@ -501,9 +501,16 @@ export async function planNext(
   request: PlanRequest
 ): Promise<NextPlan> {
   const { config } = project.loaded;
-  const snapshot = await readBacklog(ctx, project.adapter);
+  const snapshot = await readBacklog(ctx, project.adapter, {
+    allowPanel: ctx.args.flags['no-account'] === true && ctx.args.flags.manual === true,
+  });
   const identity: Identity = {
-    agent: await resolveAgentId(project),
+    agent:
+      snapshot.panelOnly && config.identity.agent !== 'auto'
+        ? config.identity.agent
+        : snapshot.panelOnly && snapshot.panelAgentId
+          ? snapshot.panelAgentId
+          : await resolveAgentId(project),
     reviewer: config.identity.reviewer,
     marker: config.identity.marker,
   };

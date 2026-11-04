@@ -4,6 +4,12 @@ Installs of this plugin are pinned to a commit SHA, so a fix here does not reach
 you until you **reinstall it** (Marketplace → flow → reinstall, or re-run your
 `--plugin-dir` checkout's `git pull`). Each entry below says whether that matters.
 
+## 0.93.0
+
+- Share panel reads across projects on the same tracker account and team. Cache answers for five minutes, rebuild the baseline daily, and bound incremental changes to one hundred items. Panel snapshots are approximate and refused by write paths.
+- Respect account-wide rate-limit cooldowns and reset times, including when a project is viewed. Show the reason in the panel (draft wording for design review).
+- Journal fixed tracker failure reasons and parent-observed killed reads without upstream text. Restrict the read route to shipped GraphQL queries.
+
 ## 0.92.0
 
 **Flow refuses to arm when it cannot read a PR's labels. Reinstall to get it.**

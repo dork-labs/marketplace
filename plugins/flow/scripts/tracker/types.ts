@@ -96,6 +96,10 @@ export interface ClosedItem {
  * audit` and `flow status`, and what `flow snapshot --json` prints.
  */
 export interface BacklogSnapshot {
+  /** Approximate, incremental panel data: never input to a write decision. */
+  panelOnly?: true;
+  /** Cached identity for display-only ranking, avoiding per-project account reads. */
+  panelAgentId?: string;
   /** Shape version. */
   v: 1;
   /** The configured tracker (the adapter slug). */
@@ -247,10 +251,11 @@ export interface CodeAdapter {
   capabilities: readonly Capability[];
   /** The account the adapter acts as. */
   getCurrentUser(): Promise<TrackerAccount>;
-  /**
-   * One pull of the configured team's backlog: every open item, fully
-   * normalized, plus closed titles when `includeClosed` is set.
-   */
+  /** Optional bounded, shared display cache. Unsupported adapters refuse timer snapshots. */
+  getPanelSnapshot?(cacheDir: string): Promise<BacklogSnapshot>;
+  /** Shared, rate-aware status fallback for an omitted item. */
+  getPanelItem?(cacheDir: string, identifier: string): Promise<WorkItem | undefined>;
+  /** Every open item, fully normalized; includeClosed also asks for closed titles. */
   getBacklogSnapshot(opts?: { includeClosed?: boolean }): Promise<BacklogSnapshot>;
   /**
    * One item by its human key, with its latest `comments` when asked. Throws a

@@ -7,10 +7,11 @@
  * read is over a minute old.
  */
 
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { readFileSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { makeProject } from '../../../../engine-tests/cli/write-harness.ts';
 import type { ExecError, ExecFileLike } from '../lib/advisor.ts';
 import type { FlowProjectEntry } from '../lib/projects.ts';
 import {
@@ -159,6 +160,8 @@ describe('TrackerReader', () => {
         '--json',
         '--out',
         file,
+        '--panel-cache',
+        path.join(dorkHome, 'flow', 'tracker-cache'),
         '--project',
         '/p',
       ],
@@ -249,9 +252,28 @@ describe('TrackerReader', () => {
       await settle();
       const file = path.join(dorkHome, 'flow', 'cache', projectIdOf(root), 'snapshot.json');
       expect(fake.calls.slice(2).map((call) => call.args.slice(2))).toEqual([
-        ['snapshot', '--json', '--out', file, '--project', root],
+        [
+          'snapshot',
+          '--json',
+          '--out',
+          file,
+          '--panel-cache',
+          path.join(dorkHome, 'flow', 'tracker-cache'),
+          '--project',
+          root,
+        ],
         expect.arrayContaining(['next']),
-        ['status', '--json', '--no-health', '--snapshot', file, '--project', root],
+        [
+          'status',
+          '--json',
+          '--no-health',
+          '--panel-cache',
+          path.join(dorkHome, 'flow', 'tracker-cache'),
+          '--snapshot',
+          file,
+          '--project',
+          root,
+        ],
       ]);
       expect(instance.closedRuns(root)).toEqual([{ identifier: 'DOR-7', sessionId: 's-7' }]);
       expect(instance.latest(root)?.failure).toBeNull();
@@ -517,4 +539,72 @@ describe('TrackerReader', () => {
     await settle();
     expect(fake.calls).toEqual([]);
   });
+});
+
+describe('failure cooldowns', () => {
+  it('viewing does not bypass the second failed read cooldown', async () => {
+    const fake = fakeExec(() => ({
+      code: 4,
+      stdout: JSON.stringify({ error: { kind: 'unreachable' } }),
+    }));
+    const clock = { now: T0 };
+    const { instance } = reader(fake.exec, clock);
+    instance.tick([project('/p')]);
+    await settle();
+    clock.now += 60_000;
+    instance.tick([project('/p')]);
+    await settle();
+    clock.now += 61_000;
+    instance.view('/p');
+    instance.tick([project('/p')]);
+    await settle();
+    expect(fake.calls).toHaveLength(2);
+  });
+  it('reports a rate limit immediately and honours its reset even when viewed', async () => {
+    const retryAt = new Date(T0 + 3_600_000).toISOString();
+    const fake = fakeExec(() => ({
+      code: 4,
+      stdout: JSON.stringify({ error: { kind: 'rate-limited', retryAt } }),
+    }));
+    const clock = { now: T0 };
+    const { instance } = reader(fake.exec, clock);
+    instance.tick([project('/p')]);
+    await settle();
+    expect(instance.latest('/p')?.failure).toMatchObject({ kind: 'rate-limited', retryAt });
+    clock.now += 20 * 60_000;
+    instance.view('/p');
+    instance.tick([project('/p')]);
+    await settle();
+    expect(fake.calls).toHaveLength(1);
+  });
+});
+
+it('a killed read leaves a fixed timeout reason in the project journal', async () => {
+  const p = makeProject();
+  try {
+    const exec: ExecFileLike = (_file, _args, _opts, callback) => {
+      queueMicrotask(() =>
+        callback(
+          Object.assign(new Error('private response with credential'), { killed: true }),
+          'private ticket text',
+          'secret'
+        )
+      );
+    };
+    const clock = { now: T0 };
+    const { instance } = reader(exec, clock);
+    instance.tick([project(p.dir)]);
+    await settle();
+    const text = readFileSync(path.join(p.dir, '.dork', 'flow', 'journal.jsonl'), 'utf8');
+    expect(text).not.toMatch(/private|credential|secret/);
+    expect(JSON.parse(text.trim())).toMatchObject({
+      kind: 'verb',
+      verb: 'snapshot',
+      exit: 4,
+      reason: 'timeout',
+    });
+    expect(instance.latest(p.dir)?.failure?.kind).toBe('unreachable');
+  } finally {
+    rmSync(p.dir, { recursive: true, force: true });
+  }
 });

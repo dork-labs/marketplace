@@ -80,7 +80,7 @@ export class ConfigError extends FlowError {
  * - `unreachable`: anything else (a network error, a timeout, a 5xx). Retrying
  *   on its own fixes it, so nobody needs to be asked.
  */
-export type TrackerErrorKind = 'auth' | 'unreachable';
+export type TrackerErrorKind = 'auth' | 'unreachable' | 'rate-limited' | 'read-limit';
 
 /** The tracker could not be read or a write was not confirmed (exit 4). */
 export class TrackerError extends FlowError {
@@ -89,14 +89,17 @@ export class TrackerError extends FlowError {
    * everything else, and an adapter that says nothing, reads as `unreachable`.
    */
   readonly kind: TrackerErrorKind;
+  /** Earliest retry time supplied by the tracker, ISO UTC. */
+  readonly retryAt?: string;
 
   /**
    * @param message - What failed.
    * @param options - `kind`: why it failed (default `unreachable`).
    */
-  constructor(message: string, options: { kind?: TrackerErrorKind } = {}) {
+  constructor(message: string, options: { kind?: TrackerErrorKind; retryAt?: string } = {}) {
     super(message, EXIT.tracker);
     this.kind = options.kind ?? 'unreachable';
+    if (Number.isFinite(Date.parse(options.retryAt ?? ''))) this.retryAt = options.retryAt;
   }
 }
 

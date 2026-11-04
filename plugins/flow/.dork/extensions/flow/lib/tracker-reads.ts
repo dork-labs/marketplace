@@ -7,7 +7,7 @@
  * the project, as pausing does:
  *
  * 1. `flow snapshot --json --out <dorkHome>/flow/cache/<projectId>/snapshot.json`
- *    pulls the backlog once;
+ *    uses a shared, bounded panel cache;
  * 2. `flow next --count 3 --json --no-account --manual --snapshot <file>` ranks
  *    it. `--manual` only lets the read run while the project is paused; `next`
  *    writes nothing.
@@ -34,10 +34,10 @@
  *   runs only after a person allows it; until then nothing is read.
  * - Every 5 minutes per project, at most two reads at once, never two for one
  *   project, and at once when a Flow tab looks at a project whose last read is
- *   over a minute old.
+ *   over a minute old, respecting every failure cooldown.
  * - The exit code decides health: 0 answered; 4 did not (a refused sign-in,
- *   twice in a row, is `auth`, anything else `unreachable`, retried after 1, 2,
- *   then 5 minutes); 3 is a settings problem; anything else is logged and
+ *   twice in a row, is `auth`; rate limits keep their reset and a minimum
+ *   fifteen-minute wait; other failures retry after 1, 2, then 5 minutes); 3 is a settings problem; anything else is logged and
  *   changes nothing.
  *
  * The model only ever takes the last read ({@link TrackerReader.latest}), so a
@@ -46,6 +46,7 @@
  * @module @dorkos/flow/extension/tracker-reads
  */
 
+import { recordEvent } from '../../../../scripts/cli/auto-journal.ts';
 import { createHash } from 'node:crypto';
 import { mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
@@ -70,7 +71,7 @@ export const MAX_READS_AT_ONCE = 2;
 export const UP_NEXT_COUNT = 3;
 
 /** How long one read command may take, in ms. */
-const READ_TIMEOUT_MS = 60_000;
+export const READ_TIMEOUT_MS = 180_000;
 
 /** A backlog can be large: the snapshot's JSON is printed whole. */
 const READ_MAX_BUFFER = 64 * 1024 * 1024;
@@ -95,7 +96,11 @@ export interface TrackerRead {
     atWipCap: boolean;
   } | null;
   /** Why the tracker does not answer now, and since when; `null` when it does. */
-  failure: { kind: 'unreachable' | 'auth' | 'settings'; since: string } | null;
+  failure: {
+    kind: 'unreachable' | 'auth' | 'settings' | 'rate-limited' | 'read-limit';
+    since: string;
+    retryAt?: string;
+  } | null;
 }
 
 /**
@@ -333,6 +338,7 @@ export class TrackerReader {
       const state = this.stateOf(entry.root);
       if (state.inFlight) continue;
       const viewed =
+        state.read.failure === null &&
         this.wanted.has(entry.root) &&
         (state.startedAt === null || now - state.startedAt > STALE_ON_VIEW_MS);
       if (viewed) due.push({ entry, order: -Infinity });
@@ -446,6 +452,7 @@ export class TrackerReader {
    */
   private run(root: string, args: readonly string[]): Promise<CommandResult> {
     const script = path.join(this.deps.flowRoot, 'scripts', 'flow.ts');
+    const commandStarted = this.deps.now().getTime();
     return new Promise((resolve) => {
       this.deps.execFile(
         'node',
@@ -458,6 +465,28 @@ export class TrackerReader {
           cwd: root,
         },
         (error: ExecError | null, stdout: string) => {
+          if (error !== null && (error.killed || typeof error.code !== 'number')) {
+            recordEvent(
+              {
+                projectDir: root,
+                flowRoot: this.deps.flowRoot,
+                env: process.env,
+                sessionId: undefined,
+                now: this.deps.now,
+              },
+              {
+                kind: 'verb',
+                verb: args[0],
+                ms: Math.max(0, this.deps.now().getTime() - commandStarted),
+                exit: 4,
+                reason: error.killed
+                  ? 'timeout'
+                  : error.code === 'ENOENT'
+                    ? 'unreachable'
+                    : 'killed',
+              }
+            );
+          }
           if (error === null) resolve({ code: 0, stdout });
           else resolve({ code: typeof error.code === 'number' ? error.code : null, stdout });
         }
@@ -481,7 +510,14 @@ export class TrackerReader {
         projectIdOf(entry.root),
         'snapshot.json'
       );
-      const snapshot = await this.run(entry.root, ['snapshot', '--json', '--out', file]);
+      const snapshot = await this.run(entry.root, [
+        'snapshot',
+        '--json',
+        '--out',
+        file,
+        '--panel-cache',
+        path.join(this.deps.dorkHome, 'flow', 'tracker-cache'),
+      ]);
       if (snapshot.code !== 0) {
         this.failed(entry, state, snapshot, started);
         return;
@@ -507,6 +543,8 @@ export class TrackerReader {
           'status',
           '--json',
           '--no-health',
+          '--panel-cache',
+          path.join(this.deps.dorkHome, 'flow', 'tracker-cache'),
           '--snapshot',
           file,
         ]);
@@ -514,6 +552,8 @@ export class TrackerReader {
         if (isObject(body) && Array.isArray(body.ended)) {
           this.saveClosed(entry.root, endedRunsOf(body));
         } else {
+          if (status.code === EXIT_TRACKER || status.code === null)
+            this.failed(entry, state, status, started);
           this.deps.log(
             `[flow] could not tell which runs of ${entry.name} closed (exit ${String(status.code)}); trying again later`
           );
@@ -553,15 +593,22 @@ export class TrackerReader {
     const flag = (key: string) => isObject(body) && body[key] === true;
     const eligibleCount = count('eligibleCount');
     let teamUrl: string | null = null;
+    let answeredAt = started.toISOString();
     try {
       const snapshot: unknown = JSON.parse(readFileSync(file, 'utf8'));
+      if (
+        isObject(snapshot) &&
+        typeof snapshot.fetchedAt === 'string' &&
+        Number.isFinite(Date.parse(snapshot.fetchedAt))
+      )
+        answeredAt = snapshot.fetchedAt;
       const url = isObject(snapshot) && isObject(snapshot.team) ? snapshot.team.url : null;
       teamUrl = typeof url === 'string' && /^https?:\/\//.test(url) ? url : null;
     } catch {
       // The file is the snapshot just written; without it, the link is hidden.
     }
     state.read = {
-      at: started.toISOString(),
+      at: answeredAt,
       queue: { next: picked, more: Math.max(0, eligibleCount - picked.length) },
       teamUrl,
       facts: {
@@ -590,11 +637,27 @@ export class TrackerReader {
       const error = isObject(body) && isObject(body.error) ? body.error : {};
       state.refusals = error.kind === 'auth' ? state.refusals + 1 : 0;
       // One refusal can be a token mid-refresh; two in a row is a sign-in that is gone.
-      const kind = state.refusals >= 2 ? 'auth' : 'unreachable';
-      state.read = { ...state.read, failure: { kind, since } };
+      const kind =
+        error.kind === 'rate-limited' || error.kind === 'read-limit'
+          ? error.kind
+          : state.refusals >= 2
+            ? 'auth'
+            : 'unreachable';
+      const reset = typeof error.retryAt === 'string' ? Date.parse(error.retryAt) : NaN;
+      const retryAt =
+        kind === 'rate-limited'
+          ? new Date(
+              Math.max(this.deps.now().getTime() + 15 * 60_000, Number.isFinite(reset) ? reset : 0)
+            ).toISOString()
+          : Number.isFinite(reset) && reset > this.deps.now().getTime()
+            ? new Date(reset).toISOString()
+            : undefined;
+      state.read = { ...state.read, failure: { kind, since, ...(retryAt ? { retryAt } : {}) } };
       state.failures += 1;
       const wait = RETRY_AFTER_MS[Math.min(state.failures, RETRY_AFTER_MS.length) - 1];
-      state.dueAt = started.getTime() + wait;
+      state.dueAt = Math.max(this.deps.now().getTime() + wait, Date.parse(retryAt ?? '') || 0);
+      if (kind === 'read-limit')
+        state.dueAt = Math.max(state.dueAt, this.deps.now().getTime() + READ_INTERVAL_MS);
       return;
     }
     if (result.code === EXIT_CONFIG) {
@@ -603,6 +666,8 @@ export class TrackerReader {
       state.dueAt = started.getTime() + READ_INTERVAL_MS;
       return;
     }
+    if (result.code === null)
+      state.read = { ...state.read, failure: { kind: 'unreachable', since } };
     this.deps.log(
       `[flow] could not read the tracker of ${entry.name} (exit ${String(result.code)}); trying again later`
     );

@@ -68,7 +68,7 @@ export function loadProjectConfig(ctx: VerbContext): ProjectConfig {
  * @returns The snapshot, with `closed` and `projects` defaulted to empty.
  * @throws {UsageError} When the file cannot be read or is not a flow snapshot.
  */
-export function readSnapshotFile(file: string): BacklogSnapshot {
+export function readSnapshotFile(file: string, allowPanel = false): BacklogSnapshot {
   let parsed: unknown;
   try {
     parsed = JSON.parse(readFileSync(file, 'utf8'));
@@ -80,6 +80,8 @@ export function readSnapshotFile(file: string): BacklogSnapshot {
       `--snapshot ${file} is not the output of "flow snapshot --json" (it needs "v": 1 and an "items" list)`
     );
   }
+  if (parsed.panelOnly === true && !allowPanel)
+    throw new UsageError('Panel snapshots are approximate and cannot be used for this command.');
   const snapshot = parsed as unknown as BacklogSnapshot;
   return {
     ...snapshot,
@@ -100,9 +102,9 @@ export function readSnapshotFile(file: string): BacklogSnapshot {
 export async function readBacklog(
   ctx: VerbContext,
   adapter: () => Promise<CodeAdapter>,
-  opts: { includeClosed?: boolean } = {}
+  opts: { includeClosed?: boolean; allowPanel?: boolean } = {}
 ): Promise<BacklogSnapshot> {
-  if (ctx.snapshotPath !== undefined) return readSnapshotFile(ctx.snapshotPath);
+  if (ctx.snapshotPath !== undefined) return readSnapshotFile(ctx.snapshotPath, opts.allowPanel);
   const tracker = await adapter();
   requireCapabilities(tracker, ['getBacklogSnapshot']);
   return tracker.getBacklogSnapshot(opts);

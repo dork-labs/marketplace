@@ -111,7 +111,7 @@ export interface FlowCondition {
   /** Whether an ask in the inbox is live for it. */
   escalated: boolean;
   /** For nothing-ready: items waiting to be sorted. For unsupervised: the lanes nothing watches. */
-  detail: { untriaged?: number; lanes?: number };
+  detail: { untriaged?: number; lanes?: number; reason?: string; retryAt?: string };
 }
 
 /**
@@ -660,8 +660,20 @@ export function conditionsOf(
       conditions.push({ kind: 'sign-in', since, escalated: escalated('sign-in'), detail: {} });
     } else if (kind === 'settings') {
       conditions.push({ kind: 'settings-problem', since, escalated: false, detail: {} });
-    } else if (age >= UNREACHABLE_SHOWN_AFTER_MS) {
-      conditions.push({ kind: 'tracker-unreachable', since, escalated: false, detail: {} });
+    } else if (
+      kind === 'rate-limited' ||
+      kind === 'read-limit' ||
+      age >= UNREACHABLE_SHOWN_AFTER_MS
+    ) {
+      conditions.push({
+        kind: 'tracker-unreachable',
+        since,
+        escalated: false,
+        detail:
+          kind === 'rate-limited' || kind === 'read-limit'
+            ? { reason: kind, retryAt: read.failure.retryAt }
+            : {},
+      });
     }
   }
   const ideas = extra.ideas;

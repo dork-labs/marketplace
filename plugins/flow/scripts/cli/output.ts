@@ -79,11 +79,15 @@ export class Output {
    * @param message - A plain sentence naming the problem and the fix.
    * @param kind - For a tracker error, why it failed (`auth` or `unreachable`).
    */
-  error(code: number, message: string, kind?: string): void {
+  error(code: number, message: string, kind?: string, retryAt?: string): void {
     this.stderr.write(`flow: ${message}\n`);
     if (this.json) {
       const error = kind === undefined ? { code, message } : { code, message, kind };
-      this.writeJson({ v: JSON_VERSION, ok: false, error });
+      this.writeJson({
+        v: JSON_VERSION,
+        ok: false,
+        error: { ...error, ...(retryAt ? { retryAt } : {}) },
+      });
     }
   }
 

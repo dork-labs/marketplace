@@ -114,7 +114,13 @@ export function conditionLine(
   switch (condition.kind) {
     case 'tracker-unreachable':
       return {
-        text: `${tracker} hasn't answered since ${clockTime(new Date(condition.since), locale)}. Flow keeps trying. Nothing is lost.`,
+        // Draft wording for designer review: report the cause immediately.
+        text:
+          condition.detail.reason === 'rate-limited'
+            ? `${tracker} is rate limited. Flow is waiting before reading again. The list may be out of date.`
+            : condition.detail.reason === 'read-limit'
+              ? `Too much changed for a panel read. Flow kept the last list; it may be out of date.`
+              : `${tracker} hasn't answered since ${clockTime(new Date(condition.since), locale)}. Flow keeps trying. Nothing is lost.`,
         hint: null,
       };
     case 'sign-in':
@@ -485,6 +491,13 @@ export function ProjectLens(props: {
     }
     if (project.queue !== null) {
       body.push(h('div', { key: 'cap-next', style: CAPTION }, 'Up next'));
+      body.push(
+        h(
+          'p',
+          { key: 'cache-freshness', style: MUTED },
+          'Approximate: uses a shared five-minute cache. Relationships reconcile daily.'
+        )
+      );
       if (project.queue.next.length === 0) {
         body.push(h('p', { key: 'next-none', style: MUTED }, 'Nothing ready to work on.'));
       }

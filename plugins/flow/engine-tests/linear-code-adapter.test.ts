@@ -12,7 +12,7 @@ import { mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSy
 import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { loadConfig } from '../scripts/config-load.ts';
 import { FlowConfigSchema } from '../scripts/config-schema.ts';
@@ -1496,5 +1496,138 @@ describe('the team page', () => {
     );
     const snapshot = await adapter.getBacklogSnapshot();
     expect(snapshot.team.url).toBe('https://linear.app/dorkos/team/DOR');
+  });
+});
+
+describe('bounded panel reads', () => {
+  it('pins reads as queries and writes as mutations', async () => {
+    const { adapter, calls } = build(snapshotRoute);
+    await adapter.getBacklogSnapshot();
+    for (const call of calls) expect(linear.readDocument(call.query)).toBe(call.query);
+    expect(() => linear.readDocument(linear.ISSUE_UPDATE_MUTATION)).toThrow(/only shipped queries/);
+    expect(() =>
+      linear.readDocument(
+        'query Synthetic { viewer { id } } mutation Evil { issueDelete(id: "made-up") { success } }'
+      )
+    ).toThrow();
+  });
+  it('recognizes throttling before auth and preserves a reset from GraphQL extensions', async () => {
+    const reset = '2027-01-01T00:00:00.000Z';
+    const { adapter } = build(() => ({
+      successful: true,
+      data: {
+        errors: [
+          {
+            message: '429 forbidden by rate limit',
+            extensions: { code: 'RATELIMITED', resetAt: reset },
+          },
+        ],
+      },
+    }));
+    await expect(adapter.getBacklogSnapshot()).rejects.toMatchObject({
+      kind: 'rate-limited',
+      retryAt: reset,
+    });
+  });
+  it('shares the baseline and incrementally refreshes changed issues without a full pull', async () => {
+    const { adapter, calls } = build((call) =>
+      call.operation === 'FlowPanelChanges'
+        ? okEnvelope({ team: { issues: { nodes: [], pageInfo: { hasNextPage: false } } } })
+        : snapshotRoute(call)
+    );
+    await adapter.getPanelSnapshot!(base);
+    const baselineCalls = calls.length;
+    await adapter.getPanelSnapshot!(base);
+    expect(calls).toHaveLength(baselineCalls);
+  });
+});
+
+describe('panel delta safety', () => {
+  afterEach(() => vi.restoreAllMocks());
+  it('removes closed/archived items, replaces reopened items, and never pulls a full graph on a warm read', async () => {
+    let now = Date.parse('2026-01-01T00:00:00Z');
+    vi.spyOn(Date, 'now').mockImplementation(() => now);
+    const { adapter, calls } = build((call) =>
+      call.operation === 'FlowPanelChanges'
+        ? okEnvelope({
+            team: {
+              issues: {
+                nodes: [
+                  issueNode('DOR-101', { state: { type: 'completed' } }),
+                  issueNode('DOR-102', { archivedAt: '2026-01-01T00:00:00Z' }),
+                  issueNode('DOR-900', { title: 'Synthetic reopened item', project: null }),
+                ],
+                pageInfo: { hasNextPage: false },
+              },
+            },
+          })
+        : snapshotRoute(call)
+    );
+    await adapter.getPanelSnapshot!(base);
+    const first = calls.length;
+    now += 300_000;
+    const next = await adapter.getPanelSnapshot!(base);
+    expect(next.items.some((i) => i.identifier === 'DOR-101' || i.identifier === 'DOR-102')).toBe(
+      false
+    );
+    expect(next.items.find((i) => i.identifier === 'DOR-900')?.title).toBe(
+      'Synthetic reopened item'
+    );
+    expect(calls.slice(first).map((c) => c.operation)).toEqual([
+      'FlowPanelChanges',
+      'FlowProjects',
+    ]);
+    expect(calls[first].variables).toMatchObject({ first: 10, since: '2025-12-31T23:59:00.000Z' });
+  });
+  it('caps a large delta and keeps the complete prior file, never publishing a partial result', async () => {
+    let now = Date.parse('2026-01-01T00:00:00Z');
+    vi.spyOn(Date, 'now').mockImplementation(() => now);
+    let pages = 0;
+    const { adapter } = build((call) =>
+      call.operation === 'FlowPanelChanges'
+        ? okEnvelope({
+            team: {
+              issues: {
+                nodes: [issueNode('DOR-901')],
+                pageInfo: { hasNextPage: true, endCursor: `cursor-${++pages}` },
+              },
+            },
+          })
+        : snapshotRoute(call)
+    );
+    const first = await adapter.getPanelSnapshot!(base);
+    now += 300_000;
+    await expect(adapter.getPanelSnapshot!(base)).rejects.toMatchObject({ kind: 'read-limit' });
+    expect(pages).toBe(10);
+    const files = (await import('node:fs'))
+      .readdirSync(
+        path.join(
+          base,
+          (await import('node:crypto')).createHash('sha256').update('flow-bot').digest('hex')
+        )
+      )
+      .filter((n) => n !== 'cooldown.json' && n !== 'teams.json');
+    const saved = JSON.parse(
+      readFileSync(
+        path.join(
+          base,
+          (await import('node:crypto')).createHash('sha256').update('flow-bot').digest('hex'),
+          files[0]
+        ),
+        'utf8'
+      )
+    );
+    expect(saved.snapshot).toEqual(first);
+  });
+  it('uses the shared cooldown for status fallback item reads too', async () => {
+    const { adapter, calls } = build(() => ({
+      successful: true,
+      data: { errors: [{ message: 'rate limited', extensions: { code: 'RATELIMITED' } }] },
+    }));
+    await expect(adapter.getPanelSnapshot!(base)).rejects.toMatchObject({ kind: 'rate-limited' });
+    await expect(adapter.getPanelItem!(base, 'DOR-901')).rejects.toMatchObject({
+      kind: 'rate-limited',
+    });
+    expect(calls).toHaveLength(1);
   });
 });
