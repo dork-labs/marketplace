@@ -7,8 +7,7 @@
 This README is **the manual**. [`SPEC.md`](./docs/SPEC.md) is the contract,
 [`CHARTER.md`](./docs/CHARTER.md) the 15 goals flow is audited against,
 [`provenance.md`](./docs/provenance.md) the signature every outward write carries,
-and the [guide series](./docs/) the user-facing reference. All of them ship with the
-package (charter G15).
+and the [guide series](./docs/) the user-facing reference. See [project hooks](./docs/project-hooks.mdx) for early stops and retrying Decline.
 
 > [!IMPORTANT]
 > **Autonomous mode depends on a running DorkOS server (Pulse). Manual mode does

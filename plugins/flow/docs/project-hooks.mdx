@@ -1,0 +1,51 @@
+# When project hooks are off
+
+You can still run Flow one stage at a time when DorkOS leaves its project hooks off.
+Hooks are small commands that Claude Code runs between tools or when a session tries to stop.
+
+Below Full, leave Flow's two project hooks off until DorkOS can show their full approval card.
+If a card offers only **Decline**, leave the card alone, including Decline.
+A refusal lasts; it is not a way to dismiss the card for now.
+
+The card may say: "This request can't be shown in full, so it can't be allowed yet."
+That message does not mean Flow is broken.
+The card's wording and buttons depend on your DorkOS version.
+This guide does not announce a DorkOS card update.
+
+## What changes
+
+- **Terminal queue:** `/flow auto` can stop before the queue is finished.
+  The Stop hook normally keeps its owning session working while ready work remains.
+- **Usage warnings:** Claude Code loses Flow's between-tool usage warnings.
+  The PostToolUse hook normally checks usage after each tool call.
+- **Other work:** manual stages and the scheduled tick still work.
+  The scheduled tick needs its usual DorkOS setup and an enabled schedule.
+
+Flow's `status`, `/flow:self-test`, and panel do not report whether DorkOS withheld these hooks.
+A passing self-test does not prove they are enabled.
+
+## After Decline
+
+DorkOS remembers your refusal for that project's hook commands.
+It will not ask again for the same commands, even if the scripts they run change.
+Changing the commands makes a different request.
+
+When your DorkOS version supports the full card, you can clear the saved decision:
+
+```bash
+dorkos harness hooks --revoke flow
+```
+
+This forgets all saved hook approvals and refusals for Flow, across projects on this computer.
+It does not enable hooks or grant permission.
+DorkOS asks again the next time Flow is installed.
+A sync alone holds undecided hooks back; it does not ask you.
+If the card still offers only Decline, keep the hooks off and wait for the full card.
+
+Use `dorkos harness hooks --list` to see saved decisions.
+That list records decisions, not proof that a running session loaded the hooks.
+
+## Reference
+
+For contributors checking the commands: `hooks/hooks.json` declares Stop as `flow-loop.mjs`.
+It declares PostToolUse as `flow.ts limit-check --hook`.

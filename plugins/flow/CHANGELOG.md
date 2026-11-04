@@ -4,6 +4,10 @@ Installs of this plugin are pinned to a commit SHA, so a fix here does not reach
 you until you **reinstall it** (Marketplace → flow → reinstall, or re-run your
 `--plugin-dir` checkout's `git pull`). Each entry below says whether that matters.
 
+## 0.90.0
+
+- Explain what still works with project hooks off and why to leave a Decline-only card untouched. See the [project hooks guide](./docs/project-hooks.mdx) for recovery after an earlier refusal. This documentation update does not enable hooks.
+
 ## 0.89.0
 
 **An answer you give in DorkOS that flow couldn't record no longer looks recorded (DOR-3775), and flow's inbox pass is less likely to resume an item on an answer left over from an earlier wait (DOR-3777). Nothing here lets an agent's answer through. Reinstall to get it.**
