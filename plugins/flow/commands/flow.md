@@ -1,5 +1,5 @@
 ---
-description: The /flow engine: route to a stage, advance work or drain the ready queue.
+description: The /flow engine — route to a stage, advance work or drain the ready queue.
 category: flow
 allowed-tools: Read, Glob, Grep, SlashCommand(/flow:capture:*), SlashCommand(/flow:triage:*), SlashCommand(/flow:ideate:*), SlashCommand(/flow:specify:*), SlashCommand(/flow:decompose:*), SlashCommand(/flow:execute:*), SlashCommand(/flow:verify:*), SlashCommand(/flow:done:*), SlashCommand(/flow:init:*), SlashCommand(/flow:status:*), SlashCommand(/flow:pause:*), SlashCommand(/flow:resume:*), Task, TaskList, TaskGet, AskUserQuestion
 argument-hint: '[stage | work-item | project | continue | auto]'
