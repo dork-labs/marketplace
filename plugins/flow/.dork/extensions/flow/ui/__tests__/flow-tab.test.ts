@@ -572,7 +572,64 @@ it('shows the rate-limit cause and stale-list warning in the project panel', asy
     host(DORKOS)
   );
   expect(
-    screen.getByText(/Linear is rate limited.*Flow is waiting.*list may be out of date/)
+    screen.getByText(/Linear is limiting reads.*Flow is waiting.*list may be out of date/)
   ).toBeTruthy();
   expect(screen.queryByText(/hasn't answered since/)).toBeNull();
+});
+
+it.each([true, false])(
+  'keeps the saved-list state explicit during limiting reads (saved=%s)',
+  async (saved) => {
+    const lastReadAt = new Date(Date.now() - 12 * 60_000).toISOString();
+    await renderTab(
+      flowModel([
+        flowProject('synthetic', {
+          lastReadAt: saved ? lastReadAt : null,
+          queue: saved
+            ? { next: [{ identifier: 'SYN-1', title: 'Sketch a sample screen' }], more: 0 }
+            : null,
+          conditions: [
+            {
+              kind: 'tracker-unreachable',
+              since: lastReadAt,
+              escalated: false,
+              detail: { reason: 'rate-limited' },
+            },
+          ],
+        }),
+      ]),
+      host({ name: 'synthetic', root: '/work/synthetic' } as ProjectRef)
+    );
+    const line = 'Linear is limiting reads, so Flow is waiting. This list may be out of date.';
+    expect(screen.getByText(line)).toBeTruthy();
+    expect(line.split(/\s+/).length).toBeLessThanOrEqual(16);
+    if (saved) {
+      expect(screen.getByText('SYN-1 Sketch a sample screen')).toBeTruthy();
+      expect(screen.getByText('Last read 12 minutes ago.')).toBeTruthy();
+      expect(screen.getByText(line).nextElementSibling?.textContent).toBe(
+        'Last read 12 minutes ago.'
+      );
+    } else {
+      expect(screen.getByText('No saved list yet.')).toBeTruthy();
+      expect(screen.queryByText('Nothing ready to work on.')).toBeNull();
+      expect(screen.queryByText(/^Last read /)).toBeNull();
+    }
+  }
+);
+
+it('shows only the age notice for a healthy approximate list', async () => {
+  const at = new Date(Date.now() - 12 * 60_000).toISOString();
+  await renderTab(
+    flowModel([
+      flowProject('synthetic', {
+        lastReadAt: at,
+        queue: { next: [{ identifier: 'SYN-1', title: 'A sample task' }], more: 0 },
+      }),
+    ]),
+    host({ root: '/work/synthetic', name: 'synthetic' })
+  );
+  expect(screen.getByText('Last read 12 minutes ago.')).toBeTruthy();
+  expect(
+    screen.queryByText(/limiting reads|may be out of date|Saved list;|Relationships reconcile/)
+  ).toBeNull();
 });

@@ -172,6 +172,8 @@ export interface FlowProject {
   runs: FlowRunRow[];
   /** "Up next", or `null` when flow cannot read it from here (or has not yet). */
   queue: { next: QueueItem[]; more: number } | null;
+  /** The saved snapshot's fetch time, including when the current read fails. */
+  lastReadAt?: string | null;
   /**
    * Whether flow reads "Up next" on its own: `read` (the adapter flow ships,
    * over `cli`), `agent-only` (the `mcp` transport works only inside an
@@ -806,6 +808,7 @@ export function buildProject(input: {
     pause,
     runs,
     queue: read?.queue ?? null,
+    lastReadAt: read?.at ?? null,
     upNext: upNextOf(entry, extras.ownAdapterAllowed === true),
     capacity: { busy, slots },
     conditions: conditionsOf(pause, read, now, {

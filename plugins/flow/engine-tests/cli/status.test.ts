@@ -752,3 +752,27 @@ describe('flow status', () => {
     expect((await status(['FAKE-404'])).code).toBe(5);
   });
 });
+
+it('names the saved read time in approximate status JSON and human output', async () => {
+  const file = path.join(project, 'panel.json');
+  const at = '2026-09-26T11:48:00.000Z';
+  writeFileSync(
+    file,
+    JSON.stringify({
+      v: 1,
+      tracker: 'fake',
+      panelOnly: true,
+      fetchedAt: at,
+      team: { id: null, key: null },
+      items: [],
+      closed: [],
+      projects: [],
+    })
+  );
+  const args = ['--snapshot', file, '--no-health'];
+  const json = await status([...args, '--json'], { items: [], failReads: 'must stay offline' });
+  expect(json.code, json.stderr).toBe(0);
+  expect(json.json()).toMatchObject({ approximate: true, lastReadAt: at });
+  const human = await status(args, { items: [], failReads: 'must stay offline' });
+  expect(human.stdout).toContain('List last read 12 minutes ago. It may be out of date.');
+});

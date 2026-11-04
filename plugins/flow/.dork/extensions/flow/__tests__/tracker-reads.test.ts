@@ -11,6 +11,7 @@ import { readFileSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'nod
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { ideasWaiting } from '../lib/conditions.ts';
 import { recordPanelFailure } from '../../../../scripts/panel-read-failure.ts';
 import { makeProject } from '../../../../engine-tests/cli/write-harness.ts';
 import type { ExecError, ExecFileLike } from '../lib/advisor.ts';
@@ -57,7 +58,10 @@ interface Answer {
  * A fake `execFile` that answers `snapshot` and `next` from the script, holds
  * each call until `release`, and writes the snapshot file a real snapshot would.
  */
-function fakeExec(script: (verb: string, root: string) => Answer, opts: { hold?: boolean } = {}) {
+function fakeExec(
+  script: (verb: string, root: string) => Answer,
+  opts: { hold?: boolean; panelOnly?: boolean } = {}
+) {
   const calls: { verb: string; root: string; args: string[]; cwd?: string }[] = [];
   const held: (() => void)[] = [];
   const exec: ExecFileLike = (_file, args, execOpts, callback) => {
@@ -71,7 +75,11 @@ function fakeExec(script: (verb: string, root: string) => Answer, opts: { hold?:
         mkdirSync(path.dirname(out), { recursive: true });
         writeFileSync(
           out,
-          JSON.stringify({ team: { key: 'DOR', url: 'https://linear.app/t/DOR' } })
+          JSON.stringify({
+            fetchedAt: new Date(T0).toISOString(),
+            ...(opts.panelOnly ? { panelOnly: true } : {}),
+            team: { key: 'DOR', url: 'https://linear.app/t/DOR' },
+          })
         );
       }
       const error =
@@ -613,4 +621,41 @@ it('a killed read leaves a fixed timeout reason in the project journal', async (
   } finally {
     rmSync(p.dir, { recursive: true, force: true });
   }
+});
+
+it('keeps the saved list and its actual fetch time across a restart followed by rate limiting', async () => {
+  const clock = { now: T0 };
+  const first = reader(
+    fakeExec((verb) => (verb === 'next' ? { code: 0, stdout: NEXT } : { code: 0 })).exec,
+    clock
+  ).instance;
+  first.tick([project('/p')]);
+  await settle();
+  const saved = first.latest('/p');
+  expect(saved?.queue?.next).toHaveLength(3);
+  clock.now += 3_600_000;
+  const restart = reader(
+    fakeExec(() => ({ code: 4, stdout: JSON.stringify({ error: { kind: 'rate-limited' } }) })).exec,
+    clock
+  ).instance;
+  restart.tick([project('/p')]);
+  await settle();
+  expect(restart.latest('/p')).toMatchObject({
+    at: saved!.at,
+    queue: saved!.queue,
+    failure: { kind: 'rate-limited' },
+  });
+});
+
+it('does not let approximate queue counts drive sorting decisions', async () => {
+  const fake = fakeExec((verb) => (verb === 'next' ? { code: 0, stdout: NEXT } : { code: 0 }), {
+    panelOnly: true,
+  });
+  const { instance } = reader(fake.exec, { now: T0 });
+  instance.tick([project('/p')]);
+  await settle();
+  const read = instance.latest('/p');
+  expect(read?.queue?.next).toHaveLength(3);
+  expect(read?.facts).toBeNull();
+  expect(ideasWaiting(read)).toBeNull();
 });

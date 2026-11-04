@@ -947,3 +947,31 @@ describe('restartRank (DOR-3263)', () => {
     ]);
   });
 });
+
+it('exposes the saved fetch time in approximate next JSON and human output', async () => {
+  temp = tempProject(config());
+  const saved = path.join(temp.project, 'panel.json');
+  const at = '2026-09-26T11:48:00.000Z';
+  writeFileSync(
+    saved,
+    JSON.stringify({
+      v: 1,
+      tracker: 'fake',
+      panelOnly: true,
+      fetchedAt: at,
+      team: { id: 'team-1', key: null },
+      items: [readyItem('SYN-1')],
+      closed: [],
+      projects: [],
+    })
+  );
+  const args = ['next', '--manual', '--no-account', '--snapshot', saved];
+  const json = await runFlow([...args, '--json'], temp, {
+    items: [],
+    failReads: 'must stay offline',
+  });
+  expect(json.code, json.stderr).toBe(0);
+  expect(JSON.parse(json.stdout)).toMatchObject({ approximate: true, lastReadAt: at });
+  const human = await runFlow(args, temp, { items: [], failReads: 'must stay offline' });
+  expect(human.stdout).toContain('List last read 12 minutes ago. It may be out of date.');
+});

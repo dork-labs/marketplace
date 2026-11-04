@@ -6,6 +6,7 @@
  * @module @dorkos/flow/extension/ui/project-lens
  */
 
+import { lastReadLine } from '../../../../scripts/read-age.ts';
 import type { FlowCondition, FlowModel, FlowProject, FlowRunRow } from '../lib/model.ts';
 import type { StartKind } from '../lib/start-words.ts';
 import { UNREACHABLE_MESSAGE, allowAdapter, pauseFlow, resumeFlow } from './api.ts';
@@ -114,10 +115,9 @@ export function conditionLine(
   switch (condition.kind) {
     case 'tracker-unreachable':
       return {
-        // Draft wording for designer review: report the cause immediately.
         text:
           condition.detail.reason === 'rate-limited'
-            ? `${tracker} is rate limited. Flow is waiting before reading again. The list may be out of date.`
+            ? `${tracker} is limiting reads, so Flow is waiting. This list may be out of date.`
             : condition.detail.reason === 'read-limit'
               ? `Too much changed for a panel read. Flow kept the last list; it may be out of date.`
               : `${tracker} hasn't answered since ${clockTime(new Date(condition.since), locale)}. Flow keeps trying. Nothing is lost.`,
@@ -167,7 +167,7 @@ export function upNextNote(project: FlowProject): string | null {
   if (project.upNext === 'own-code') {
     return `Read ${trackerName(project)} with this project's own adapter? It runs code from this repo.`;
   }
-  return null;
+  return 'No saved list yet.';
 }
 
 /**
@@ -245,6 +245,8 @@ export function ProjectLens(props: {
   }, [focusHeader, busy]);
   const [error, setError] = useState<string | null>(null);
   const now = new Date();
+  const readAge = lastReadLine(project.lastReadAt, now);
+  let ageShown = false;
   const target = { project: project.name };
 
   const act = (write: () => Promise<FlowModel>) => {
@@ -444,6 +446,15 @@ export function ProjectLens(props: {
               : h(Hint, { text: line.hint })
         )
       );
+      if (
+        condition.kind === 'tracker-unreachable' &&
+        condition.detail.reason === 'rate-limited' &&
+        project.queue !== null &&
+        readAge
+      ) {
+        body.push(h('p', { key: 'last-read', style: MUTED }, readAge));
+        ageShown = true;
+      }
     }
     if (project.sortWaits) {
       body.push(h('p', { key: 'sort-waits', style: CONDITION }, SORT_WAITS_TEXT));
@@ -491,13 +502,8 @@ export function ProjectLens(props: {
     }
     if (project.queue !== null) {
       body.push(h('div', { key: 'cap-next', style: CAPTION }, 'Up next'));
-      body.push(
-        h(
-          'p',
-          { key: 'cache-freshness', style: MUTED },
-          'Approximate: uses a shared five-minute cache. Relationships reconcile daily.'
-        )
-      );
+      const age = ageShown ? null : readAge;
+      if (age) body.push(h('p', { key: 'last-read', style: MUTED }, age));
       if (project.queue.next.length === 0) {
         body.push(h('p', { key: 'next-none', style: MUTED }, 'Nothing ready to work on.'));
       }

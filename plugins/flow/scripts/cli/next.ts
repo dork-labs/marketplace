@@ -38,6 +38,7 @@
  * @module @dorkos/flow/cli/next
  */
 
+import { lastReadLine, savedReadAt } from '../read-age.ts';
 import { classifyDispatchOutcome } from '../dispatch-policy.ts';
 import {
   chooseAccount,
@@ -464,6 +465,9 @@ export interface PlanRequest {
 
 /** What {@link planNext} found. */
 export interface NextPlan {
+  /** Display-only snapshot metadata; never permission to claim or land. */
+  approximate?: true;
+  lastReadAt?: string | null;
   /** The picks, in order. */
   picked: WorkItem[];
   /** Each pick's account, in pick order; absent when accounts were not asked for or nothing was picked. */
@@ -502,7 +506,11 @@ export async function planNext(
 ): Promise<NextPlan> {
   const { config } = project.loaded;
   const snapshot = await readBacklog(ctx, project.adapter, {
-    allowPanel: ctx.args.flags['no-account'] === true && ctx.args.flags.manual === true,
+    allowPanel:
+      ctx.args.verb === 'next' &&
+      !request.accounts &&
+      ctx.args.flags['no-account'] === true &&
+      ctx.args.flags.manual === true,
   });
   const identity: Identity = {
     agent:
@@ -568,7 +576,9 @@ export async function planNext(
     { ownershipOf, inProgressByProject: wip.byProject, inProgressTotal: wip.total }
   );
   const atWipCap = outcome.eligibleCount === 0 && uncapped.eligibleCount > 0;
-  const land = landTarget(open, snapshot.items, (item) => classifyOwnership(item, identity, scope));
+  const land = snapshot.panelOnly
+    ? null
+    : landTarget(open, snapshot.items, (item) => classifyOwnership(item, identity, scope));
 
   const order = request.items;
   const ranked =
@@ -585,6 +595,9 @@ export async function planNext(
     accounts = assignAccounts(picked, assignment);
   }
   return {
+    ...(snapshot.panelOnly
+      ? { approximate: true as const, lastReadAt: savedReadAt(snapshot.fetchedAt) }
+      : {}),
     picked,
     accounts,
     outcome,
@@ -656,6 +669,7 @@ export async function run(ctx: VerbContext): Promise<VerbResult> {
   if (blocked !== undefined) ctx.warn(noAccountMessage(plan.repo, blocked));
   return withSetupNudge(ctx, {
     json: {
+      ...(plan.approximate ? { approximate: true, lastReadAt: plan.lastReadAt } : {}),
       picked:
         accounts === undefined
           ? picked
@@ -669,16 +683,21 @@ export async function run(ctx: VerbContext): Promise<VerbResult> {
       prCap: cap,
       land,
     },
-    text: renderNext({
-      ...outcome,
-      picked,
-      accounts,
-      atWipCap,
-      wip,
-      wipCap: config.autonomy.wipCap,
-      prCap: cap,
-      land,
-    }),
+    text: [
+      plan.approximate ? lastReadLine(plan.lastReadAt, ctx.now(), 'cli') : null,
+      renderNext({
+        ...outcome,
+        picked,
+        accounts,
+        atWipCap,
+        wip,
+        wipCap: config.autonomy.wipCap,
+        prCap: cap,
+        land,
+      }),
+    ]
+      .filter(Boolean)
+      .join('\n'),
   });
 }
 

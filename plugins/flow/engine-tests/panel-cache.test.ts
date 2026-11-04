@@ -162,3 +162,15 @@ it('reserves a cooldown before a refresh, so an interrupted child cannot immedia
   ).rejects.toMatchObject({ kind: 'unreachable' });
   expect(calls).toBe(0);
 });
+
+it('formats saved read ages for the panel and CLI without inventing an unknown time', async () => {
+  const { lastReadLine } = await import('../scripts/read-age.ts');
+  const at = '2026-01-02T10:15:00.000Z';
+  const now = new Date('2026-01-02T10:27:00.000Z');
+  expect(lastReadLine(at, now)).toBe('Last read 12 minutes ago.');
+  expect(lastReadLine(at, now, 'cli')).toBe(
+    'List last read 12 minutes ago. It may be out of date.'
+  );
+  expect(lastReadLine(null, now)).toBeNull();
+  expect(lastReadLine('unknown', now, 'cli')).toBeNull();
+});

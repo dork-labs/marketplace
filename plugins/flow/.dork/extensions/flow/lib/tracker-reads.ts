@@ -46,6 +46,7 @@
  * @module @dorkos/flow/extension/tracker-reads
  */
 
+import { savedReadAt } from '../../../../scripts/read-age.ts';
 import { createHash } from 'node:crypto';
 import { mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
@@ -300,7 +301,9 @@ export class TrackerReader {
   latest(root: string): TrackerRead | null {
     const state = this.states.get(root);
     if (state === undefined) return null;
-    return state.read.at === null && state.read.failure === null ? null : state.read;
+    return state.read.at === null && state.read.failure === null && state.read.queue === null
+      ? null
+      : state.read;
   }
 
   /**
@@ -428,12 +431,67 @@ export class TrackerReader {
     this.disposed = true;
   }
 
-  /** A project's state, created empty and due now. */
+  /** Persist only successful display data; a restart must not turn a saved list into an empty queue. */
+  private readFile(root: string): string {
+    return path.join(this.deps.dorkHome, 'flow', 'cache', projectIdOf(root), 'read.json');
+  }
+
+  private savedRead(root: string): TrackerRead {
+    const empty: TrackerRead = { at: null, queue: null, teamUrl: null, facts: null, failure: null };
+    try {
+      const value: unknown = JSON.parse(readFileSync(this.readFile(root), 'utf8'));
+      if (
+        !isObject(value) ||
+        (value.at !== null && savedReadAt(value.at) === null) ||
+        !isObject(value.queue) ||
+        !Array.isArray(value.queue.next) ||
+        !value.queue.next.every(
+          (item) =>
+            isObject(item) && typeof item.identifier === 'string' && typeof item.title === 'string'
+        )
+      )
+        return empty;
+      const more = value.queue.more;
+      return {
+        at: savedReadAt(value.at),
+        queue: {
+          next: value.queue.next.slice(0, UP_NEXT_COUNT) as QueueItem[],
+          more: typeof more === 'number' && Number.isSafeInteger(more) && more >= 0 ? more : 0,
+        },
+        teamUrl:
+          typeof value.teamUrl === 'string' && /^https?:\/\//.test(value.teamUrl)
+            ? value.teamUrl
+            : null,
+        facts: null,
+        failure: null,
+      };
+    } catch {
+      return empty;
+    }
+  }
+
+  private saveRead(root: string, read: TrackerRead): void {
+    try {
+      const file = this.readFile(root);
+      mkdirSync(path.dirname(file), { recursive: true, mode: 0o700 });
+      const temp = `${file}.${process.pid}.tmp`;
+      writeFileSync(
+        temp,
+        JSON.stringify({ at: read.at, queue: read.queue, teamUrl: read.teamUrl }),
+        { mode: 0o600 }
+      );
+      renameSync(temp, file);
+    } catch {
+      this.deps.log('[flow] could not save the panel list');
+    }
+  }
+
+  /** A project's state, restored from its saved list and due now. */
   private stateOf(root: string): ReadState {
     let state = this.states.get(root);
     if (state === undefined) {
       state = {
-        read: { at: null, queue: null, teamUrl: null, facts: null, failure: null },
+        read: this.savedRead(root),
         inFlight: false,
         dueAt: 0,
         startedAt: null,
@@ -558,6 +616,7 @@ export class TrackerReader {
         return;
       }
       this.answered(state, next.stdout, file, started);
+      this.saveRead(entry.root, state.read);
       if (!hasActiveRun(entry.root)) this.saveClosed(entry.root, []);
       else {
         const status = await this.run(entry.root, [
@@ -614,7 +673,8 @@ export class TrackerReader {
     const flag = (key: string) => isObject(body) && body[key] === true;
     const eligibleCount = count('eligibleCount');
     let teamUrl: string | null = null;
-    let answeredAt = started.toISOString();
+    let answeredAt: string | null = null;
+    let displayOnly = true;
     try {
       const snapshot: unknown = JSON.parse(readFileSync(file, 'utf8'));
       if (
@@ -623,6 +683,7 @@ export class TrackerReader {
         Number.isFinite(Date.parse(snapshot.fetchedAt))
       )
         answeredAt = snapshot.fetchedAt;
+      if (isObject(snapshot)) displayOnly = snapshot.panelOnly === true;
       const url = isObject(snapshot) && isObject(snapshot.team) ? snapshot.team.url : null;
       teamUrl = typeof url === 'string' && /^https?:\/\//.test(url) ? url : null;
     } catch {
@@ -632,12 +693,14 @@ export class TrackerReader {
       at: answeredAt,
       queue: { next: picked, more: Math.max(0, eligibleCount - picked.length) },
       teamUrl,
-      facts: {
-        eligibleCount,
-        shapeableCount: count('shapeableCount'),
-        starved: flag('starved'),
-        atWipCap: flag('atWipCap'),
-      },
+      facts: displayOnly
+        ? null
+        : {
+            eligibleCount,
+            shapeableCount: count('shapeableCount'),
+            starved: flag('starved'),
+            atWipCap: flag('atWipCap'),
+          },
       failure: null,
     };
     state.failures = 0;

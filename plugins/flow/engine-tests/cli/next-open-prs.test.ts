@@ -182,3 +182,57 @@ describe('flow next: land first', () => {
     expect(out.land).toBeNull();
   });
 });
+
+it('never recommends arming/landing or assigns work from an approximate list', async () => {
+  temp = tempProject(config());
+  const { writeFileSync } = await import('node:fs');
+  const path = await import('node:path');
+  const saved = path.join(temp.project, 'panel.json');
+  const items = [readyItem('SYN-1', { assignee: AGENT })];
+  writeFileSync(
+    saved,
+    JSON.stringify({
+      v: 1,
+      tracker: 'fake',
+      panelOnly: true,
+      fetchedAt: '2026-01-02T10:15:00.000Z',
+      team: { id: 'team-1', key: null },
+      items,
+      closed: [],
+      projects: [],
+    })
+  );
+  let arms = 0;
+  const forge = forgeWith([pr(1, 'work/SYN-1')]);
+  const createForge: CliDeps['createForge'] = (target) => ({
+    ...forge!(target),
+    arm: async () => {
+      arms++;
+    },
+  });
+  const result = await runFlow(
+    ['next', '--json', '--manual', '--no-account', '--snapshot', saved],
+    temp,
+    { items: [], failReads: 'must stay offline' },
+    { runProcess: github, createForge }
+  );
+  expect(result.code, result.stderr).toBe(0);
+  expect(JSON.parse(result.stdout).land).toBeNull();
+  expect(arms).toBe(0);
+  for (const command of [
+    ['next', '--json', '--snapshot', saved],
+    ['drain', '--tick', '--json', '--snapshot', saved],
+    ['pr', '--arm', '--snapshot', saved],
+    ['review', 'SYN-1', '--approve', '--snapshot', saved],
+    ['sweep', '--snapshot', saved],
+  ]) {
+    const refused = await runFlow(
+      command,
+      temp,
+      { items: [], failReads: 'must stay offline' },
+      { runProcess: github, createForge }
+    );
+    expect(refused.code).not.toBe(0);
+    expect(arms).toBe(0);
+  }
+});

@@ -33,6 +33,7 @@
  * @module @dorkos/flow/cli/status
  */
 
+import { lastReadLine, savedReadAt } from '../read-age.ts';
 import { readFileSync } from 'node:fs';
 import path from 'node:path';
 
@@ -320,9 +321,13 @@ export async function run(ctx: VerbContext): Promise<VerbResult> {
 
   let runs: FlowRun[] = Object.values(store.read());
   let items: WorkItem[];
+  let display: { approximate: true; lastReadAt: string | null } | undefined;
   let question: ParkedEntry['question'] = null;
   if (ctx.snapshotPath !== undefined) {
-    items = readSnapshotFile(ctx.snapshotPath, true).items;
+    const snapshot = readSnapshotFile(ctx.snapshotPath, true);
+    if (snapshot.panelOnly)
+      display = { approximate: true, lastReadAt: savedReadAt(snapshot.fetchedAt) };
+    items = snapshot.items;
     if (focus !== undefined) items = items.filter((item) => item.identifier === focus);
   } else if (focus !== undefined) {
     const adapter = await ctx.adapter();
@@ -460,8 +465,24 @@ export async function run(ctx: VerbContext): Promise<VerbResult> {
     ctx,
     {
       exitCode: failed ? 1 : 0,
-      json: { ok: !failed, paused, drain, inFlight, ended, parked, drift, health, unsupervised },
-      text: render({ paused, drain, inFlight, ended, parked, drift, health, unsupervised }, now),
+      json: {
+        ...display,
+        ok: !failed,
+        paused,
+        drain,
+        inFlight,
+        ended,
+        parked,
+        drift,
+        health,
+        unsupervised,
+      },
+      text: [
+        display ? lastReadLine(display.lastReadAt, now, 'cli') : null,
+        render({ paused, drain, inFlight, ended, parked, drift, health, unsupervised }, now),
+      ]
+        .filter(Boolean)
+        .join('\n'),
     },
     roots
   );

@@ -463,3 +463,43 @@ describe('flow claim failure and dry run', () => {
     expect(result.tracker.writes).toEqual([]);
   });
 });
+
+describe('approximate picks still require a fresh claim', () => {
+  for (const taken of [false, true])
+    it(`refuses a saved pick that is now ${taken ? 'taken' : 'deleted'} before any write`, async () => {
+      const saved = path.join(project.dir, 'panel.json');
+      writeFileSync(
+        saved,
+        JSON.stringify({
+          v: 1,
+          tracker: 'fake',
+          panelOnly: true,
+          fetchedAt: '2026-01-02T10:15:00.000Z',
+          team: { id: null, key: null },
+          items: [item('FAKE-1')],
+          closed: [],
+          projects: [],
+        })
+      );
+      const current = {
+        items: taken
+          ? [item('FAKE-1', { labels: ['type/task', 'agent/claimed'], assignee: 'another-agent' })]
+          : [],
+      };
+      const picked = await runFlow(project, current, [
+        'next',
+        '--manual',
+        '--no-account',
+        '--snapshot',
+        saved,
+      ]);
+      expect(picked.code, picked.stderr).toBe(0);
+      expect((picked.json.picked as { identifier: string }[])[0].identifier).toBe('FAKE-1');
+      expect(picked.tracker.writes).toEqual([]);
+      const claim = await runFlow(project, current, ['claim', 'FAKE-1']);
+      expect(claim.code).toBe(EXIT.precondition);
+      expect(claim.stderr).toMatch(taken ? /already claimed/ : /not found/);
+      expect(claim.tracker.writes).toEqual([]);
+      expect(project.runs()).toEqual({});
+    });
+});
