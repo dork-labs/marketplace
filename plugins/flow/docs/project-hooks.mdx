@@ -36,11 +36,11 @@ When your DorkOS version supports the full card, you can clear the saved decisio
 dorkos harness hooks --revoke flow
 ```
 
-This forgets all saved hook approvals and refusals for Flow, across projects on this computer.
-It does not enable hooks or grant permission.
-DorkOS asks again the next time Flow is installed.
-A sync alone holds undecided hooks back; it does not ask you.
-If the card still offers only Decline, keep the hooks off and wait for the full card.
+This clears Flow's saved hook approvals and refusals across projects on this computer.
+It grants nothing.
+DorkOS can ask again when you install Flow or click **Sync now**.
+Running `dorkos harness sync --fix` alone holds undecided hooks back without asking.
+If **Sync now** raises a Decline-only card, leave it untouched until the full card is available.
 
 Use `dorkos harness hooks --list` to see saved decisions.
 That list records decisions, not proof that a running session loaded the hooks.
