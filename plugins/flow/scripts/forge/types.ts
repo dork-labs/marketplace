@@ -132,8 +132,8 @@ export interface ArmFacts {
   state: string;
   /** Whether it is a draft. */
   isDraft: boolean;
-  /** Its labels. */
-  labels: { name: string }[];
+  /** Its complete labels, or `null` when the forge could not read them. An empty array means none. */
+  labels: { name: string }[] | null;
   /** `APPROVED`, `CHANGES_REQUESTED`, `REVIEW_REQUIRED` or empty. */
   reviewDecision: string;
   /** Every check on the head, by `gh pr checks` bucket: pass, fail, pending, skipping or cancel. */

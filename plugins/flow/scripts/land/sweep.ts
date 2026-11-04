@@ -113,6 +113,12 @@ export function clearance(input: ClearanceFacts, labels: ReviewLabels): Clearanc
   });
   if (input.armed) return no('armed', 'auto-merge is already armed');
   if (input.queued) return no('queued', 'it is already in the merge queue');
+  if (input.facts.labels === null) {
+    return no(
+      'unreadable',
+      'the forge could not read the pull request labels; flow cannot rule out a hold'
+    );
+  }
   const red = notGreen(input.facts, input.requiredChecks);
   if (red.length > 0)
     return no('checks-not-green', `required checks are not green: ${red.join(', ')}`);

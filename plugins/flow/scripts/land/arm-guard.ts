@@ -173,7 +173,7 @@ async function labelTimes(
   headArrivedAt: string | null;
 }> {
   const has = (name: string) =>
-    facts.labels.some((l) => l.name.toLowerCase() === name.toLowerCase());
+    facts.labels?.some((l) => l.name.toLowerCase() === name.toLowerCase()) ?? false;
   const security = has(label);
   const deep = has(DEEP_REVIEW_LABEL) && has(SECURITY_DEEP_LABEL);
   const read = async (fn: () => Promise<string | null> | undefined): Promise<string | null> => {

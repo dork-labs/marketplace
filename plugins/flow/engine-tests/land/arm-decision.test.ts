@@ -171,6 +171,26 @@ describe.skipIf(!runnable)(
       expect(fixtures.cases.find((c) => c.name === name)?.guard).toBe(verdict);
     });
 
+    it.each([
+      undefined,
+      null,
+      {},
+      'hold',
+      [null],
+      [{}],
+      [{ name: 'security-reviewed' }, {}],
+      [{ name: 42 }],
+      [{ name: '' }],
+    ])('refuses unreadable labels %j even on a non-security path', (labels) => {
+      const decision = decideArm({ ...fixtures.green, labels }, policy);
+      expect(decision).toMatchObject({ verdict: 'REFUSE', reason: 'labels-unreadable' });
+      expect(decision.verdict === 'REFUSE' && decision.detail).toMatch(/could not read.*labels/i);
+    });
+
+    it('an actual empty labels array can still arm on the security-path rule', () => {
+      expect(decideArm({ ...fixtures.green, labels: [] }, policy)).toEqual({ verdict: 'ARM' });
+    });
+
     it('an empty object is not an open pull request', () => {
       expect(formatDecision(decideArm({}, policy))).toBe('REFUSE not-open');
     });

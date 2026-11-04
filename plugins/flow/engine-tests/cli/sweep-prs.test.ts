@@ -167,6 +167,22 @@ describe('flow sweep', () => {
     expect(armed).toEqual([[1, HEAD]]);
   });
 
+  it('unreadable labels are not cleared even when label history is fresh', async () => {
+    const { forge, armed } = forgeFor([open(1)], {
+      1: { files: ['src/a.ts'], labelledAt: allLabels },
+    });
+    const plain = forge.armFacts.bind(forge);
+    forge.armFacts = async (pr) => ({ ...(await plain(pr)), labels: null });
+    const guard = recordingGuard();
+    const r = await flow(['sweep', '--arm'], forge, { guard });
+    expect(r.json.results).toMatchObject([
+      { number: 1, outcome: 'not-cleared', reason: 'unreadable' },
+    ]);
+    expect(r.json.results[0].detail).toMatch(/could not read.*labels/i);
+    expect(guard.requests).toEqual([]);
+    expect(armed).toEqual([]);
+  });
+
   // DOR-3768: a sweep's arm clears the run's refusal, so flow status and the
   // panel don't say "not armed" about an armed PR.
   it('clears the refusal of the run on the PR it arms', async () => {

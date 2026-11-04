@@ -29,7 +29,7 @@ import type { ArmFacts, Forge, WorkflowRun } from '../../scripts/forge/types.ts'
 import type { MergeSettings } from '../../scripts/land/arm-decision.ts';
 import { guardArm, refusalSticksToCommit } from '../../scripts/land/arm-guard.ts';
 import { readBaseLand } from '../../scripts/land/base-config.ts';
-import { createGithubForge } from '../../scripts/forge/github.ts';
+import { createGithubForge, parseArmFacts } from '../../scripts/forge/github.ts';
 import { setFreeze } from '../../scripts/land/freeze.ts';
 import {
   entryTouched,
@@ -380,6 +380,43 @@ describe('the deep label on a review:deep PR', () => {
     expect((await ask(forge)).ok).toBe(true);
     const read = calls.filter((c) => c.method === 'labelledAt').map((c) => c.args?.[1]);
     expect(read).toEqual(['security-reviewed']);
+  });
+});
+
+describe('unreadable arm labels', () => {
+  function unknownFacts() {
+    return parseArmFacts({ state: 'OPEN', headRefOid: head }, null, 'acme/app#7');
+  }
+
+  it('refuses unknown labels without running pre-arm checks or label history reads', async () => {
+    baseLand({ preArm: [{ paths: ['src/**'], run: 'slow-suite' }] });
+    const { forge, calls } = fakeForge({ facts: { labels: unknownFacts().labels } });
+    const { runner, ran } = recordingRunner();
+    const result = await guard(forge, runner);
+    expect(result).toMatchObject({ ok: false, reason: 'labels-unreadable', ranPreArm: false });
+    expect(!result.ok && result.detail).toMatch(/could not read.*labels/i);
+    expect(ran).toEqual([]);
+    expect(calls.some((c) => ['arm', 'labelledAt', 'headPushedAt'].includes(c.method))).toBe(false);
+  });
+
+  it('refuses labels that become unreadable after pre-arm checks', async () => {
+    baseLand({ preArm: [{ paths: ['src/**'], run: 'slow-suite' }] });
+    const { forge } = fakeForge();
+    const plain = forge.armFacts.bind(forge);
+    let unreadable = false;
+    forge.armFacts = async (pr) => ({
+      ...(await plain(pr)),
+      labels: unreadable ? unknownFacts().labels : [],
+    });
+    const { runner, ran } = recordingRunner(() => {
+      unreadable = true;
+      return { code: 0 };
+    });
+    const result = await guard(forge, runner);
+    expect(ran).toHaveLength(1);
+    expect(result).toMatchObject({ ok: false, reason: 'labels-unreadable', ranPreArm: false });
+    expect(!result.ok && result.detail).toMatch(/after its pre-arm checks passed/);
+    expect(!result.ok && refusalSticksToCommit(result)).toBe(false);
   });
 });
 

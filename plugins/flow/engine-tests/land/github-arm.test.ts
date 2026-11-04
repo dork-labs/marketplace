@@ -104,6 +104,25 @@ describe('parseArmFacts', () => {
     });
   });
 
+  it.each([
+    ['absent', undefined],
+    ['null', null],
+    ['object', {}],
+    ['string', 'hold'],
+    ['nameless entry', [{ name: 'security-reviewed' }, {}]],
+    ['null entry', [null]],
+    ['non-string name', [{ name: 42 }]],
+    ['empty name', [{ name: '' }]],
+  ])('%s labels are unknown, never empty or partial', (_name, labels) => {
+    const raw: Record<string, unknown> = { ...VIEW, labels };
+    if (labels === undefined) delete raw.labels;
+    expect(parseArmFacts(raw, files, 'acme/app#7').labels).toBeNull();
+  });
+
+  it('a real empty label array means no labels', () => {
+    expect(parseArmFacts({ ...VIEW, labels: [] }, files, 'acme/app#7').labels).toEqual([]);
+  });
+
   it('a file list shorter than changedFiles is unknown, not partial', () => {
     expect(parseArmFacts({ ...VIEW, changedFiles: 3000 }, files, 'x').files).toBeNull();
     expect(parseArmFacts({ ...VIEW, changedFiles: undefined }, files, 'x').files).toBeNull();

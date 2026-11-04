@@ -214,6 +214,7 @@ export interface ArmPolicy {
 export type RefusalSlug =
   | 'not-open'
   | 'draft'
+  | 'labels-unreadable'
   | 'held-by-label'
   | 'fork'
   | 'base-not-default'
@@ -259,12 +260,16 @@ function short(sha: string | undefined): string {
   return sha === undefined ? 'nothing' : sha.slice(0, 7);
 }
 
-/** The PR's label names, lower-cased, from objects or bare strings. */
-function labelNames(facts: Record<string, unknown>): string[] {
-  const labels = Array.isArray(facts.labels) ? facts.labels : [];
-  return labels.map((label) =>
-    (record(label) !== undefined ? (str(record(label)?.name) ?? '') : String(label)).toLowerCase()
-  );
+/** The PR's complete label names, lower-cased, or `null` when any are unreadable. */
+function labelNames(facts: Record<string, unknown>): string[] | null {
+  if (!Array.isArray(facts.labels)) return null;
+  const names: string[] = [];
+  for (const label of facts.labels) {
+    const name = typeof label === 'string' ? label : str(record(label)?.name);
+    if (name === undefined || name.trim() === '') return null;
+    names.push(name.toLowerCase());
+  }
+  return names;
 }
 
 /**
@@ -419,6 +424,12 @@ export function decideArm(input: unknown, policy: ArmPolicy): ArmDecision {
     return refuse('draft', 'the pull request is a draft; mark it ready for review first');
   }
   const labels = labelNames(facts);
+  if (labels === null) {
+    return refuse(
+      'labels-unreadable',
+      'the forge could not read the pull request labels; flow cannot rule out a hold, so it will not arm it'
+    );
+  }
   const hold = HOLD_LABELS.find((h) => labels.includes(h));
   if (hold !== undefined) {
     return refuse('held-by-label', `the pull request is labelled "${hold}"; a person lifts that`);

@@ -377,7 +377,8 @@ export function checkBucket(entry: Record<string, unknown>): string {
  * @param raw - The parsed `gh pr view` JSON.
  * @param files - Every file entry from the files endpoint, or `null` when it could not be read.
  * @param where - `owner/name#n`, for the error.
- * @returns The facts; `files` is `null` unless the list is whole (its length equals `changedFiles`).
+ * @returns The facts; `labels` is `null` unless every name is readable, and
+ *   `files` is `null` unless the list is whole (its length equals `changedFiles`).
  * @throws {ForgeError} When the answer has no state or head.
  */
 export function parseArmFacts(raw: unknown, files: unknown[] | null, where: string): ArmFacts {
@@ -398,10 +399,20 @@ export function parseArmFacts(raw: unknown, files: unknown[] | null, where: stri
       },
     ];
   });
-  const labels = (Array.isArray(view.labels) ? view.labels : []).flatMap((label) => {
-    const name = str(record(label)?.name);
-    return name === undefined ? [] : [{ name }];
-  });
+  // Never drop an unreadable entry: it could be a hold label. Only a real,
+  // wholly readable array (including []) establishes which labels are on.
+  let labels: ArmFacts['labels'] = null;
+  if (Array.isArray(view.labels)) {
+    labels = [];
+    for (const label of view.labels) {
+      const name = str(record(label)?.name);
+      if (name === undefined || name.trim() === '') {
+        labels = null;
+        break;
+      }
+      labels.push({ name });
+    }
+  }
   let paths: string[] | null = null;
   // A count of 0 is what GitHub reports while it is still working out a new
   // PR's diff, so it never stands for "touches nothing".
