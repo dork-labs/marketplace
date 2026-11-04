@@ -10,7 +10,7 @@
  * extension folder. The server half is compiled later, against the whole
  * plugin folder, and may still use `scripts/`.
  *
- * The two engine modules the page half needs are kept as exact copies in
+ * The engine modules the page half needs are kept as exact copies in
  * `shared/`, not moved: `scripts/` stays whole on its own (a copy of it runs
  * without the rest of the plugin), so the copies must never drift.
  */
@@ -76,7 +76,7 @@ describe('the install-time build of the page half', () => {
 });
 
 describe('the engine modules the page half keeps its own copies of', () => {
-  it.each(['autonomy-dial.ts', 'config-names.ts'])(
+  it.each(['autonomy-dial.ts', 'config-names.ts', 'read-age.ts'])(
     'shared/$0 is byte for byte scripts/$0',
     (name) => {
       const plugin = path.resolve(EXTENSION_DIR, '..', '..', '..');

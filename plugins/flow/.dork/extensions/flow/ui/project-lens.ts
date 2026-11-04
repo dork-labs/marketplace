@@ -6,7 +6,7 @@
  * @module @dorkos/flow/extension/ui/project-lens
  */
 
-import { lastReadLine } from '../../../../scripts/read-age.ts';
+import { lastReadLine } from '../shared/read-age.ts';
 import type { FlowCondition, FlowModel, FlowProject, FlowRunRow } from '../lib/model.ts';
 import type { StartKind } from '../lib/start-words.ts';
 import { UNREACHABLE_MESSAGE, allowAdapter, pauseFlow, resumeFlow } from './api.ts';

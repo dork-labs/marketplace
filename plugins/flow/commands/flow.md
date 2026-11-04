@@ -1,5 +1,5 @@
 ---
-description: The /flow engine — one PM-agnostic workflow from capture to done. Routes to a stage, advances a work item or project, or drains the ready queue.
+description: The /flow engine: route to a stage, advance work or drain the ready queue.
 category: flow
 allowed-tools: Read, Glob, Grep, SlashCommand(/flow:capture:*), SlashCommand(/flow:triage:*), SlashCommand(/flow:ideate:*), SlashCommand(/flow:specify:*), SlashCommand(/flow:decompose:*), SlashCommand(/flow:execute:*), SlashCommand(/flow:verify:*), SlashCommand(/flow:done:*), SlashCommand(/flow:init:*), SlashCommand(/flow:status:*), SlashCommand(/flow:pause:*), SlashCommand(/flow:resume:*), Task, TaskList, TaskGet, AskUserQuestion
 argument-hint: '[stage | work-item | project | continue | auto]'
@@ -29,7 +29,7 @@ Resolve and route: $ARGUMENTS
 `/flow:status`, `/flow:pause` and `/flow:resume` observe or steer; they never advance a stage.
 
 - Show items to people by the adapter's display convention.
-- Approximate picks are display-only. Before acting, rerun `flow next --json` without `--snapshot`; claim it before work.
+- Approximate picks are display-only. Before acting, rerun `flow next --json` without `--snapshot`; claim before work.
 - Uncertainty, not the stage, pulls a person in.
 - Hit friction, a workaround or a confusion in flow itself: `flow note --kind friction|workaround|confusion "<one sentence>"`. No secrets, no pasted output.
 
@@ -48,9 +48,9 @@ Then run `cf`:
 - `config.local.json` overrides `config.json`; a field in neither takes its `default` from `config/config.schema.json`.
 - Read the tracker adapter from `adapter.path` only; `<flow-root>` inside it means `flowRoot`.
 
-**The pause.** If `paused` is non-null, stop `continue`, `auto`, scheduled and tracker ticks.
-Say "flow is paused (since `<pausedAt>`); `/flow:resume` lifts it". Other commands run:
-a pause stops the loop, never the operator.
+**The pause.** When `paused` is not `null`, never
+start `continue` or `auto`, and never run a scheduled tick or a tracker tick: say "flow is paused (since `<pausedAt>`); `/flow:resume` lifts it" and stop. Everything else runs: a pause stops the loop, never
+the operator. With a valid config present, route as below.
 
 ## Routing
 
@@ -79,7 +79,7 @@ Several matches: ask with `AskUserQuestion`. A bare stage name is the stage; nam
 
 ## Queue modes
 
-Both follow `${CLAUDE_PLUGIN_ROOT}/skills/flow-drain/SKILL.md`, which holds the tick.
+Both follow `${CLAUDE_PLUGIN_ROOT}/skills/flow-drain/SKILL.md`.
 
 - **`continue`**: one tick, no sentinel, then stop.
 - **`auto`**: that skill's **Auto** section: tick after tick in this terminal. No server needed.
