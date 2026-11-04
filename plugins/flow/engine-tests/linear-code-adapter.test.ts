@@ -1631,3 +1631,38 @@ describe('panel delta safety', () => {
     expect(calls).toHaveLength(1);
   });
 });
+
+describe('panel transport limits and reset headers', () => {
+  afterEach(() => vi.restoreAllMocks());
+  it('keeps a later mixed-case response header reset even when throttling is a later GraphQL error', async () => {
+    const reset = Date.parse('2027-01-01T00:00:00.000Z');
+    const { adapter } = build(() => ({
+      successful: true,
+      headers: { 'X-RateLimit-Complexity-Reset': String(reset) },
+      data: {
+        errors: [
+          { message: 'forbidden', extensions: { code: 'OTHER' } },
+          { message: 'rate limited', extensions: { code: 'RATELIMITED' } },
+        ],
+      },
+    }));
+    await expect(adapter.getBacklogSnapshot()).rejects.toMatchObject({
+      kind: 'rate-limited',
+      retryAt: new Date(reset).toISOString(),
+    });
+  });
+  it('stops the baseline at its total time budget and clears that budget for a later manual call', async () => {
+    let now = Date.parse('2026-01-01T00:00:00Z');
+    vi.spyOn(Date, 'now').mockImplementation(() => now);
+    const { adapter, calls } = build((call) => {
+      if (call.operation === 'FlowSnapshotCore') {
+        now += 151_000;
+        return okEnvelope(CORE_PAGE_1);
+      }
+      return snapshotRoute(call);
+    });
+    await expect(adapter.getPanelSnapshot!(base)).rejects.toMatchObject({ kind: 'read-limit' });
+    expect(calls).toHaveLength(1);
+    await expect(adapter.getCurrentUser()).resolves.toMatchObject({ id: VIEWER.viewer.id });
+  });
+});

@@ -11,6 +11,7 @@ import { readFileSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'nod
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { recordPanelFailure } from '../../../../scripts/panel-read-failure.ts';
 import { makeProject } from '../../../../engine-tests/cli/write-harness.ts';
 import type { ExecError, ExecFileLike } from '../lib/advisor.ts';
 import type { FlowProjectEntry } from '../lib/projects.ts';
@@ -582,7 +583,12 @@ describe('failure cooldowns', () => {
 it('a killed read leaves a fixed timeout reason in the project journal', async () => {
   const p = makeProject();
   try {
-    const exec: ExecFileLike = (_file, _args, _opts, callback) => {
+    const exec: ExecFileLike = (_file, args, _opts, callback) => {
+      if (args[1].endsWith('panel-read-failure.ts')) {
+        expect(recordPanelFailure(args.slice(2), p.dir, () => new Date(T0))).toBe(true);
+        callback(null, '', '');
+        return;
+      }
       queueMicrotask(() =>
         callback(
           Object.assign(new Error('private response with credential'), { killed: true }),

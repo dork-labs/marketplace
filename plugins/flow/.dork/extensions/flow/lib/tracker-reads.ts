@@ -46,7 +46,6 @@
  * @module @dorkos/flow/extension/tracker-reads
  */
 
-import { recordEvent } from '../../../../scripts/cli/auto-journal.ts';
 import { createHash } from 'node:crypto';
 import { mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
@@ -465,32 +464,54 @@ export class TrackerReader {
           cwd: root,
         },
         (error: ExecError | null, stdout: string) => {
+          const result = {
+            code: error === null ? 0 : typeof error.code === 'number' ? error.code : null,
+            stdout,
+          };
           if (error !== null && (error.killed || typeof error.code !== 'number')) {
-            recordEvent(
-              {
-                projectDir: root,
-                flowRoot: this.deps.flowRoot,
-                env: process.env,
-                sessionId: undefined,
-                now: this.deps.now,
-              },
-              {
-                kind: 'verb',
-                verb: args[0],
-                ms: Math.max(0, this.deps.now().getTime() - commandStarted),
-                exit: 4,
-                reason: error.killed
-                  ? 'timeout'
-                  : error.code === 'ENOENT'
-                    ? 'unreachable'
-                    : 'killed',
-              }
-            );
-          }
-          if (error === null) resolve({ code: 0, stdout });
-          else resolve({ code: typeof error.code === 'number' ? error.code : null, stdout });
+            const reason = error.killed
+              ? 'timeout'
+              : error.code === 'ENOENT'
+                ? 'unreachable'
+                : 'killed';
+            void this.journalFailure(
+              root,
+              args[0],
+              reason,
+              Math.max(0, this.deps.now().getTime() - commandStarted)
+            ).then(() => resolve(result));
+          } else resolve(result);
         }
       );
+    });
+  }
+
+  /** Keep the journal writer out of the extension bundle; this child never loads an adapter. */
+  private journalFailure(root: string, verb: string, reason: string, ms: number): Promise<void> {
+    return new Promise((resolve) => {
+      const failed = () => this.deps.log('[flow] could not journal a stopped panel read');
+      try {
+        this.deps.execFile(
+          'node',
+          [
+            '--experimental-strip-types',
+            path.join(this.deps.flowRoot, 'scripts', 'panel-read-failure.ts'),
+            root,
+            this.deps.flowRoot,
+            verb,
+            reason,
+            String(ms),
+          ],
+          { timeout: 15_000, shell: false, encoding: 'utf8', maxBuffer: 1024 * 1024, cwd: root },
+          (error) => {
+            if (error) failed();
+            resolve();
+          }
+        );
+      } catch {
+        failed();
+        resolve();
+      }
     });
   }
 
