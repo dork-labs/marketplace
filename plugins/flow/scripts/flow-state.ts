@@ -230,6 +230,10 @@ export const FlowRunSchema = z.looseObject({
   question: RunQuestionSchema.optional(),
   // The reviewer agent's ship waiting on checks (spec flow-multiproject §7.5).
   shipWait: z.looseObject({ sha: z.string(), since: z.string(), checkedAt: z.string() }).optional(),
+  // Why the last arm was refused (DOR-3768).
+  armRefusal: z
+    .looseObject({ sha: z.string(), reason: z.string(), detail: z.string(), at: z.string() })
+    .optional(),
 });
 
 /**

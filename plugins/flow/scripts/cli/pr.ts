@@ -23,7 +23,7 @@
  * 7. on `--arm` or `drain.armAutoMerge`, records the PR waiting to arm and
  *    arms it at once when the arm guard allows (`land/arm-guard.ts`). A new PR
  *    has no security label newer than its head, so that wait is the usual case
- *    (DOR-3724): the drain arms it once Security has labelled the head. The
+ *    (DOR-3724): the drain arms it once a person has labelled the head. The
  *    guard's `land.preArm` checks are left to the drain, which arms it after
  *    they pass. A refusal leaves the PR open and unarmed and says why in
  *    `armRefused`; the drain asks the guard again. The verb still exits 0.
@@ -42,6 +42,7 @@ import { securityPathsTouched } from '../land/arm-decision.ts';
 import { policyFor, refusalSticksToCommit } from '../land/arm-guard.ts';
 import { readBaseLand } from '../land/base-config.ts';
 import { describeRoute, reviewRoute, type ReviewRoute } from '../land/review-route.ts';
+import { armRefusalFor, withArmRefusal } from '../flow-run.ts';
 import { openFlowStateFile } from '../flow-state-file.ts';
 import type { Forge, ForgePr } from '../forge/types.ts';
 import type { VerbContext, VerbResult } from './context.ts';
@@ -334,6 +335,10 @@ export async function run(ctx: VerbContext): Promise<VerbResult> {
       armed = true;
     } else {
       armRefused = { reason: guard.reason, detail: guard.detail };
+      await openFlowStateFile(ctx.projectDir, { now: ctx.now }).updateRun(
+        drainRun.issueId,
+        (current) => withArmRefusal(current, armRefusalFor(head, guard, ctx.now()))
+      );
       if (refusalSticksToCommit(guard)) {
         await recordPr(ctx, drainRun, forge, created, false, { waiting: true, refusedAt: head });
       }

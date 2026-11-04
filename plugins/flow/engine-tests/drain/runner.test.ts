@@ -785,10 +785,17 @@ describe('flow drain: the arm guard on a re-arm (DOR-3262)', () => {
     expect(arms()).toHaveLength(1);
     expect(JSON.stringify(pass.json)).toContain('did not arm #7');
     expect(drainOf('ACME-1').pr).toMatchObject({ armed: false, disarmedForReview: true });
+    // DOR-3768: the refusal is kept, so flow status and the panel can say why.
+    expect(runOf('ACME-1').armRefusal).toMatchObject({
+      sha: s2,
+      reason: 'freeze',
+      detail: 'refused for the test (freeze)',
+    });
     // The freeze lifts: the next pass asks again and arms the reviewed commit.
     armGuard = recordingGuard();
     await tick();
     expect(arms().at(-1)).toEqual({ method: 'arm', arg: [7, s2] });
+    expect(runOf('ACME-1').armRefusal).toBeUndefined();
     expect(armGuard.requests.map((r) => r.reviewedSha)).toEqual([s2]);
   }, 120_000);
 

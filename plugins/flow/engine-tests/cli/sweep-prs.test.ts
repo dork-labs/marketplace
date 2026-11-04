@@ -7,6 +7,10 @@
  * the owner, and `--for` refuses at the cap unless the item is P0.
  */
 
+import { execFileSync } from 'node:child_process';
+import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import path from 'node:path';
+
 import { afterEach, describe, expect, it } from 'vitest';
 
 import type { ArmGuard, CliDeps } from '../../scripts/cli/context.ts';
@@ -161,6 +165,37 @@ describe('flow sweep', () => {
     // The sweep never asks for the person's rule: every PR needs the label.
     expect(guard.requests[0].labelRule).toBeUndefined();
     expect(armed).toEqual([[1, HEAD]]);
+  });
+
+  // DOR-3768: a sweep's arm clears the run's refusal, so flow status and the
+  // panel don't say "not armed" about an armed PR.
+  it('clears the refusal of the run on the PR it arms', async () => {
+    temp = tempProject({ tracker: 'fake', identity: { agent: 'flow-bot', reviewer: 'kai' } });
+    const project = temp.project;
+    execFileSync('git', ['init', '-q'], { cwd: project });
+    const dir = path.join(project, '.dork', 'flow');
+    mkdirSync(dir, { recursive: true });
+    const run = (issueId: string, branch: string) => ({
+      issueId,
+      identifier: issueId,
+      sessionId: 's',
+      worktreePath: project,
+      branch,
+      stage: 'review',
+      status: 'waiting_for_review',
+      attemptCount: 0,
+      workerPid: 1,
+      startedAt: '2026-09-25T09:00:00.000Z',
+      armRefusal: { sha: HEAD, reason: 'security-label-missing', detail: 'x', at: BEFORE },
+    });
+    const file = path.join(dir, 'flow-state.json');
+    writeFileSync(file, JSON.stringify({ a: run('a', 'b-1'), b: run('b', 'another') }));
+    const { forge } = forgeFor([open(1)], { 1: { files: ['src/a.ts'], labelledAt: allLabels } });
+    const r = await flow(['sweep', '--arm'], forge, { guard: recordingGuard() });
+    expect(r.json.results).toMatchObject([{ outcome: 'armed' }]);
+    const after = JSON.parse(readFileSync(file, 'utf8'));
+    expect(after.a.armRefusal).toBeUndefined();
+    expect(after.b.armRefusal).toMatchObject({ reason: 'security-label-missing' });
   });
 
   it('a moved head is not armed: the labels predate it, and the reason says so', async () => {

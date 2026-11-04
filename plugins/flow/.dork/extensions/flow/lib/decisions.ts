@@ -266,6 +266,20 @@ export function waitsAtGate(run: Record<string, unknown>): boolean {
 export function armMessage(json: unknown): string | undefined {
   const answer = obj(json);
   const detail = obj(answer.armRefused).detail;
+  // The guard's words here speak to whoever reads them, agents too. This is
+  // the person, so it says what they can do.
+  const reason = String(obj(answer.armRefused).reason);
+  if (PERSON_REFUSALS.has(reason)) {
+    const step =
+      reason === 'security-label-unverified'
+        ? "It can't tell if the security label covers this commit. Merge it yourself."
+        : reason === 'security-label-stale'
+          ? 'Read the new commits, then take the label off and add it back, or merge it yourself.'
+          : 'Read it and add the security label, or merge it yourself.';
+    return answer.armHandedToDrain === true
+      ? `Shipped. Flow turns on auto-merge once this is settled. ${step}`
+      : `Shipped, but flow didn't turn on auto-merge. ${step}`;
+  }
   if (answer.armHandedToDrain === true) {
     return typeof detail === 'string' && detail !== ''
       ? `Shipped. Flow turns on auto-merge once this is settled: ${detail}.`
@@ -274,6 +288,29 @@ export function armMessage(json: unknown): string | undefined {
   return typeof detail === 'string' && detail !== ''
     ? `Shipped, but flow didn't turn on auto-merge: ${detail}. Merge it yourself.`
     : undefined;
+}
+
+/** The refusals only a person can clear: the drain asking again changes nothing. */
+const PERSON_REFUSALS: ReadonlySet<string> = new Set([
+  'security-label-missing',
+  'security-label-stale',
+  'security-label-unverified',
+  'security-path-unlabelled',
+  'files-unreadable',
+]);
+
+/**
+ * The refusal a run's Ship row should say (DOR-3768): one only a person can
+ * clear, about the commit the row shows.
+ */
+function personRefusal(run: Record<string, unknown>): string | null {
+  const refusal = obj(run.armRefusal);
+  const reason = text(refusal.reason);
+  const sha = text(refusal.sha);
+  const head = gateHead(run);
+  if (reason === null || sha === null || head === null) return null;
+  if (!PERSON_REFUSALS.has(reason) || sha.toLowerCase() !== head.toLowerCase()) return null;
+  return reason;
 }
 
 /** The commit a review gate shows: the reviewed one, else none. */
@@ -348,7 +385,8 @@ export function planProject(input: {
     const identifier = run.identifier;
     const title = text(run.title);
     const drain = obj(run.drain);
-    if (waitsAtGate(run) && stop('ship') === 'ask') {
+    const refused = personRefusal(run);
+    if (waitsAtGate(run) && (stop('ship') === 'ask' || refused !== null)) {
       asks.push(
         reviewAsk(plan.ask, {
           identifier,
@@ -357,6 +395,7 @@ export function planProject(input: {
           pr: isObject(drain.pr) && typeof drain.pr.number === 'number' ? drain.pr.number : null,
           review: reviewFacts(run),
           checks: null,
+          refused,
           actionable: plan.actionable,
         })
       );

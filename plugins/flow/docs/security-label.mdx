@@ -1,0 +1,36 @@
+---
+title: The security-reviewed label
+description: Adding the label yourself, what catches people out, and what it does and doesn't prove on a repo with one login.
+---
+
+# The `security-reviewed` label
+
+Flow turns on auto-merge by itself only after a person reads a PR and adds this label. Without it, the PR waits for your 👍 in DorkOS or for you to merge it by hand. You don't need a security team. On a solo project, that person is you.
+
+## Add it yourself
+
+Flow only reads the label, and never creates it. Create it once in each repo:
+
+```bash
+gh label create security-reviewed
+```
+
+After the PR's last push, read the PR, then add it here or on the PR's page:
+
+```bash
+gh pr edit 123 --add-label security-reviewed
+```
+
+If a drain is watching the PR with `drain.armAutoMerge` on, its next pass sees the label and arms it. Otherwise, use 👍 or merge by hand.
+
+## What catches people out
+
+- **A new push.** The label stays on the PR but stops counting. Adding it again does nothing, because GitHub records no new event for a label that's already on. Take it off, then add it back.
+- **No required checks.** GitHub has nothing to wait for, so as soon as flow arms the PR, it merges. Your 👍 does the same. Merge by hand if you want one last look.
+- **A private repo on GitHub Free.** GitHub won't show flow the branch's rules there, so flow arms nothing (`not-squash`), whatever the label says. Merge by hand.
+- **`security-label-unverified`.** GitHub couldn't date the head or report a user account's latest add. The repo's activity feed normally dates the head, and it can lag a new push by a moment. If this doesn't clear, merge by hand.
+- **Security paths and deep reviews.** A 👍 doesn't arm a PR that touches a security path, or one with a `land.preArm` check to run, until the label is on. A `review:deep` PR also needs `security-deep-reviewed`, the same way, and you create that one too.
+
+## What it proves
+
+Flow can't tell who added this label. On your own repo, it's a promise you keep. GitHub reports a user account and a time after the head arrived; an agent signed in as you is that same account. Flow's refusals tell agents to leave it alone, and that's all they can do. To stop a change for real, use a ruleset on GitHub.

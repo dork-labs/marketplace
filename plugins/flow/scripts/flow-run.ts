@@ -307,6 +307,70 @@ export interface RunQuestion {
   answer?: { text: string; at: string; by: string };
 }
 
+/** The longest refusal a run keeps. */
+const MAX_ARM_REFUSAL = 600;
+
+/** Why flow would not arm a run's PR at one commit. */
+export interface RunArmRefusal {
+  /** The commit the guard was asked about. */
+  sha: string;
+  /** The guard's reason (`GuardRefusal`). */
+  reason: string;
+  /** The guard's words, on one line and clipped: a file name can be anything. */
+  detail: string;
+  /** When (ISO). */
+  at: string;
+}
+
+/**
+ * A refusal to keep on a run.
+ *
+ * @param sha - The commit the guard was asked about.
+ * @param refused - The guard's reason and words.
+ * @param now - The clock.
+ * @returns The record.
+ */
+export function armRefusalFor(
+  sha: string,
+  refused: { reason: string; detail: string },
+  now: Date
+): RunArmRefusal {
+  return {
+    sha,
+    reason: refused.reason,
+    detail: refused.detail
+      .replace(/[\u0000-\u001f\u007f-\u009f\u200e\u200f\u2028-\u202e\u2066-\u2069]+/g, ' ')
+      .slice(0, MAX_ARM_REFUSAL),
+    at: now.toISOString(),
+  };
+}
+
+/**
+ * A run with its refusal replaced, or removed for `undefined`.
+ *
+ * @param run - The run.
+ * @param refusal - The refusal, or `undefined` to clear it.
+ * @returns The run.
+ */
+export function withArmRefusal(run: FlowRun, refusal: RunArmRefusal | undefined): FlowRun {
+  if (refusal !== undefined) return { ...run, armRefusal: refusal };
+  const { armRefusal: _cleared, ...rest } = run;
+  return rest;
+}
+
+/**
+ * The refusal a run still stands on: only one about the commit that would merge.
+ *
+ * @param run - The run.
+ * @returns The refusal, or `null`.
+ */
+export function currentArmRefusal(run: FlowRun): RunArmRefusal | null {
+  const refusal = run.armRefusal;
+  if (refusal === undefined || run.drain?.pr?.armed === true) return null;
+  const head = run.drain?.reviewedSha ?? run.review?.reviewedSha ?? null;
+  return head !== null && head.toLowerCase() === refusal.sha.toLowerCase() ? refusal : null;
+}
+
 /**
  * The **durable run record** (§12) — the session↔issue association, keyed by
  * issue, written to `flow-state.json` (v1, disk) → server SQLite (v2). Follows
@@ -453,6 +517,12 @@ export interface FlowRun {
   review?: RunReview;
   /** The reviewer agent's ship, waiting on checks. See {@link RunShipWait}. */
   shipWait?: RunShipWait;
+  /**
+   * Why the last try to arm this run's PR was refused (DOR-3768), for
+   * `flow status` and the panel's Ship row. Good only for the commit it names;
+   * a later arm clears it.
+   */
+  armRefusal?: RunArmRefusal;
   /** The question the run is parked on, while one is open. See {@link RunQuestion}. */
   question?: RunQuestion;
 }

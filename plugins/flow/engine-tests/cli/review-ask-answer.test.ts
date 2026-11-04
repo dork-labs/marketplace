@@ -823,6 +823,49 @@ describe('flow review --approve --by reviewer-agent', () => {
     expect(armGuard.requests[0].labelRule).toBeUndefined();
   });
 
+  // DOR-3768: the reviewer agent's arm needs the label; a person's 👍 does not
+  // (off a security path). The refusal is kept for flow status and the panel,
+  // and 👍 still ships and arms after the agent's approval.
+  it("keeps the agent's refusal, and a person's approval still arms after it", async () => {
+    dial({ dial: 'tell' });
+    writeRun({ review: clean });
+    const tracker = new FakeTracker({ team: ACME_TEAM, items: [started()] });
+    const agent = await flow(['review', 'ACME-12', '--approve', '--by', 'reviewer-agent'], {
+      tracker,
+      forge: fakeForge({ head: 'abc1234def' }),
+      guard: recordingGuard(() => refusal('security-label-missing')),
+    });
+    expect(agent.code).toBe(EXIT.ok);
+    expect(agent.forge.calls.some((call) => call.method === 'arm')).toBe(false);
+    expect(stored().armRefusal).toMatchObject({
+      sha: 'abc1234def',
+      reason: 'security-label-missing',
+      detail: 'refused for the test (security-label-missing)',
+    });
+    const guard = recordingGuard();
+    const person = await flow(['review', 'ACME-12', '--approve', '--head', 'abc1234def'], {
+      tracker,
+      forge: fakeForge({ head: 'abc1234def' }),
+      guard,
+    });
+    expect(person.code).toBe(EXIT.ok);
+    expect(guard.requests[0].labelRule).toBe('security-paths');
+    expect(person.forge.calls).toContainEqual({ method: 'arm', arg: [7, 'abc1234def'] });
+    expect(stored().armRefusal).toBeUndefined();
+  });
+
+  it('keeps a person refused on a security path too', async () => {
+    writeRun({ review: clean });
+    const tracker = new FakeTracker({ team: ACME_TEAM, items: [started()] });
+    const person = await flow(['review', 'ACME-12', '--approve', '--head', 'abc1234def'], {
+      tracker,
+      forge: fakeForge({ head: 'abc1234def' }),
+      guard: recordingGuard(() => refusal('security-path-unlabelled')),
+    });
+    expect(person.code).toBe(EXIT.ok);
+    expect(stored().armRefusal).toMatchObject({ reason: 'security-path-unlabelled' });
+  });
+
   // Purpose: each missing condition refuses, and nothing is posted.
   it.each([
     ['at Ask me first', () => dial({ dial: 'ask' }), clean, 'abc1234def'],
