@@ -8,6 +8,8 @@ import { describe, expect, it } from 'vitest';
 import {
   createGithubForge,
   headArrival,
+  arrivalFromChange,
+  FORCE_PUSHES_QUERY,
   parseForcePushes,
   parseLabelledAt,
 } from '../../scripts/forge/github.ts';
@@ -265,12 +267,12 @@ describe('label history and when the head arrived', () => {
     expect(
       headArrival([{ createdAt: '2026-09-06T00:00:00Z', headBranch: 'b' }], null, SHA_A, 'b')
     ).toBeNull();
-    const page = (totalCount: number) => ({
+    const page = (filteredCount: number) => ({
       data: {
         repository: {
           pullRequest: {
             timelineItems: {
-              totalCount,
+              filteredCount,
               nodes: [{ createdAt: '2026-09-03T00:00:00Z', afterCommit: { oid: SHA_B } }],
             },
           },
@@ -284,7 +286,26 @@ describe('label history and when the head arrived', () => {
     expect(parseForcePushes({})).toBeNull();
   });
 
-  it('the GitHub forge reads the suites and the force-pushes, and judges from them', async () => {
+  it('counts force-pushes by filteredCount: totalCount counts the whole timeline', () => {
+    // GitHub's answer for a labelled PR that was never force-pushed (DOR-3793).
+    const never = {
+      data: {
+        repository: {
+          pullRequest: { timelineItems: { totalCount: 2, filteredCount: 0, nodes: [] } },
+        },
+      },
+    };
+    expect(parseForcePushes(never)).toEqual([]);
+    expect(FORCE_PUSHES_QUERY).toContain('filteredCount');
+    // An answer without the count is unknown, never "none".
+    expect(
+      parseForcePushes({
+        data: { repository: { pullRequest: { timelineItems: { totalCount: 0, nodes: [] } } } },
+      })
+    ).toBeNull();
+  });
+
+  it('the GitHub forge reads the suites, the force-pushes and the feed, and judges from them', async () => {
     const forge = createGithubForge({
       target: { host: 'github.com', repo: 'acme/app' },
       now: () => new Date(),
@@ -294,9 +315,25 @@ describe('label history and when the head arrived', () => {
             code: 0,
             stdout: JSON.stringify({
               data: {
-                repository: { pullRequest: { timelineItems: { totalCount: 0, nodes: [] } } },
+                repository: {
+                  pullRequest: { timelineItems: { totalCount: 3, filteredCount: 0, nodes: [] } },
+                },
               },
             }),
+            stderr: '',
+          };
+        }
+        if (args.some((a) => a.includes('/activity?'))) {
+          return {
+            code: 0,
+            stdout: JSON.stringify([
+              {
+                activity_type: 'push',
+                ref: 'refs/heads/acme-1-fix',
+                after: SHA_A,
+                timestamp: '2026-09-05T09:59:59Z',
+              },
+            ]),
             stderr: '',
           };
         }
@@ -314,23 +351,181 @@ describe('label history and when the head arrived', () => {
     expect(await forge.headPushedAt?.(7, SHA_A, 'acme-1-fix')).toBe('2026-09-05T10:00:00Z');
   });
 
-  it('a head no check suite ran on is unknown, never old', async () => {
-    const forge = createGithubForge({
-      target: { host: 'github.com', repo: 'acme/app' },
-      now: () => new Date(),
-      runProcess: async (_cmd, args) =>
-        args.includes('graphql')
-          ? {
-              code: 0,
-              stdout: JSON.stringify({
-                data: {
-                  repository: { pullRequest: { timelineItems: { totalCount: 0, nodes: [] } } },
-                },
-              }),
-              stderr: '',
-            }
-          : { code: 0, stdout: '', stderr: '' },
+  describe('the branch activity feed dates every head', () => {
+    const graphql = {
+      code: 0,
+      stdout: JSON.stringify({
+        data: {
+          repository: {
+            pullRequest: { timelineItems: { totalCount: 3, filteredCount: 0, nodes: [] } },
+          },
+        },
+      }),
+      stderr: '',
+    };
+    const entry = (over: Record<string, unknown> = {}) => ({
+      activity_type: 'push',
+      ref: 'refs/heads/acme-1-fix',
+      after: SHA_A,
+      timestamp: '2026-09-05T10:00:00Z',
+      ...over,
     });
-    expect(await forge.headPushedAt?.(7, SHA_A, 'acme-1-fix')).toBeNull();
+    const forgeWith = (activity: unknown, suites = '') => {
+      const asked: string[][] = [];
+      const forge = createGithubForge({
+        target: { host: 'github.com', repo: 'acme/app' },
+        now: () => new Date(),
+        runProcess: async (_cmd, args) => {
+          asked.push([...args]);
+          if (args.includes('graphql')) return graphql;
+          if (args.some((a) => a.includes('/activity?'))) {
+            return activity === 'fail'
+              ? { code: 1, stdout: '', stderr: 'HTTP 404' }
+              : { code: 0, stdout: JSON.stringify(activity), stderr: '' };
+          }
+          return { code: 0, stdout: suites, stderr: '' };
+        },
+      });
+      return { forge, asked };
+    };
+
+    it('takes the time of the newest change to the branch when it left this head', async () => {
+      const { forge, asked } = forgeWith([entry()]);
+      expect(await forge.headPushedAt?.(7, SHA_A, 'acme-1-fix')).toBe('2026-09-05T10:00:00Z');
+      const url = asked.flat().find((a) => a.includes('/activity?')) as string;
+      expect(url).toContain('repos/acme/app/activity?');
+      expect(url).toContain(`ref=${encodeURIComponent('refs/heads/acme-1-fix')}`);
+      expect(url).toContain('direction=desc');
+    });
+
+    it('counts a new branch and a force-push as arriving', async () => {
+      for (const activity_type of ['branch_creation', 'force_push']) {
+        const { forge } = forgeWith([entry({ activity_type })]);
+        expect(await forge.headPushedAt?.(7, SHA_A, 'acme-1-fix')).toBe('2026-09-05T10:00:00Z');
+      }
+    });
+
+    it('is unknown when the newest change left another commit', async () => {
+      const { forge } = forgeWith([entry({ after: SHA_B })]);
+      expect(await forge.headPushedAt?.(7, SHA_A, 'acme-1-fix')).toBeNull();
+    });
+
+    it('is unknown when the feed answers about another branch', async () => {
+      const { forge } = forgeWith([entry({ ref: 'refs/heads/other' })]);
+      expect(await forge.headPushedAt?.(7, SHA_A, 'acme-1-fix')).toBeNull();
+    });
+
+    it('is unknown when the newest change is not a push to the branch', async () => {
+      for (const activity_type of ['branch_deletion', 'pr_merge', 'merge_queue_merge', undefined]) {
+        const { forge } = forgeWith([entry({ activity_type })]);
+        expect(await forge.headPushedAt?.(7, SHA_A, 'acme-1-fix')).toBeNull();
+      }
+    });
+
+    it('is unknown on an empty feed, a bad time, or an answer in another shape', async () => {
+      for (const activity of [
+        [],
+        [entry({ timestamp: 'soon' })],
+        [entry({ timestamp: undefined })],
+        {},
+        [null],
+      ]) {
+        const { forge } = forgeWith(activity);
+        expect(await forge.headPushedAt?.(7, SHA_A, 'acme-1-fix')).toBeNull();
+      }
+    });
+
+    it('a feed that cannot be read throws, and the guard reads that as unknown', async () => {
+      const { forge } = forgeWith('fail');
+      await expect(forge.headPushedAt?.(7, SHA_A, 'acme-1-fix')).rejects.toThrow(/404/);
+    });
+
+    // Seen live on a throwaway repo: push S0 and S1, force back to S0 before any
+    // PR exists (no timeline event), open the PR, a person labels S0, then
+    // fast-forward to S1. S1's old suite predates the label; its push doesn't.
+    it('a commit that came back after the label is dated by that push, not its old suite', async () => {
+      const suites = JSON.stringify({
+        created_at: '2026-09-05T09:00:00Z',
+        head_branch: 'acme-1-fix',
+      });
+      const { forge } = forgeWith([entry({ timestamp: '2026-09-05T12:00:00Z' })], suites);
+      expect(await forge.headPushedAt?.(7, SHA_A, 'acme-1-fix')).toBe('2026-09-05T12:00:00Z');
+    });
+
+    it('keeps the suite when it is the later time', async () => {
+      const suites = JSON.stringify({
+        created_at: '2026-09-05T10:00:01Z',
+        head_branch: 'acme-1-fix',
+      });
+      const { forge } = forgeWith([entry()], suites);
+      expect(await forge.headPushedAt?.(7, SHA_A, 'acme-1-fix')).toBe('2026-09-05T10:00:01Z');
+    });
+
+    it('a suite on this branch never stands in for a feed that disagrees or cannot be read', async () => {
+      const suites = JSON.stringify({
+        created_at: '2026-09-05T09:00:00Z',
+        head_branch: 'acme-1-fix',
+      });
+      expect(
+        await forgeWith([entry({ after: SHA_B })], suites).forge.headPushedAt?.(
+          7,
+          SHA_A,
+          'acme-1-fix'
+        )
+      ).toBeNull();
+      expect(await forgeWith([], suites).forge.headPushedAt?.(7, SHA_A, 'acme-1-fix')).toBeNull();
+      await expect(
+        forgeWith('fail', suites).forge.headPushedAt?.(7, SHA_A, 'acme-1-fix')
+      ).rejects.toThrow(/404/);
+    });
+
+    it('a suite made only by a push to another branch does not stop the feed being asked', async () => {
+      const suites = JSON.stringify({ created_at: '2026-09-05T09:00:00Z', head_branch: 'other' });
+      const { forge } = forgeWith([entry()], suites);
+      expect(await forge.headPushedAt?.(7, SHA_A, 'acme-1-fix')).toBe('2026-09-05T10:00:00Z');
+    });
+
+    it('never asks the feed when the force-pushes could not be read in full', async () => {
+      const asked: string[][] = [];
+      const forge = createGithubForge({
+        target: { host: 'github.com', repo: 'acme/app' },
+        now: () => new Date(),
+        runProcess: async (_cmd, args) => {
+          asked.push([...args]);
+          return args.includes('graphql')
+            ? { code: 0, stdout: '{}', stderr: '' }
+            : { code: 0, stdout: '', stderr: '' };
+        },
+      });
+      expect(await forge.headPushedAt?.(7, SHA_A, 'acme-1-fix')).toBeNull();
+      expect(asked.flat().some((a) => a.includes('/activity?'))).toBe(false);
+    });
+
+    it('is unknown when the change is no later than the last force-push', () => {
+      const pushes = [{ createdAt: '2026-09-05T10:00:00Z', after: SHA_B }];
+      const change = {
+        type: 'push',
+        ref: 'refs/heads/b',
+        after: SHA_A,
+        at: '2026-09-05T10:00:00Z',
+      };
+      expect(arrivalFromChange(change, pushes, SHA_A, 'b')).toBeNull();
+      expect(arrivalFromChange({ ...change, at: '2026-09-05T10:00:01Z' }, pushes, SHA_A, 'b')).toBe(
+        '2026-09-05T10:00:01Z'
+      );
+      expect(arrivalFromChange(null, pushes, SHA_A, 'b')).toBeNull();
+    });
+
+    it('a force-push that left this head does not count against its own feed entry', () => {
+      // The feed and the timeline stamped one force-push a second apart, live.
+      const pushes = [{ createdAt: '2026-09-05T10:00:01Z', after: SHA_A }];
+      const change = {
+        type: 'force_push',
+        ref: 'refs/heads/b',
+        after: SHA_A,
+        at: '2026-09-05T10:00:00Z',
+      };
+      expect(arrivalFromChange(change, pushes, SHA_A, 'b')).toBe('2026-09-05T10:00:00Z');
+    });
   });
 });

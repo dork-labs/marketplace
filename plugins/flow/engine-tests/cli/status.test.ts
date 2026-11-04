@@ -17,6 +17,7 @@ import path from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
 import type { FlowRun } from '../../scripts/flow-run.ts';
+import { FlowRunSchema } from '../../scripts/flow-state.ts';
 import { formatWhen } from '../../scripts/question.ts';
 import { main, type MainDeps } from '../../scripts/flow.ts';
 import type { WorkItem } from '../../scripts/tracker/types.ts';
@@ -151,6 +152,72 @@ describe('flow status', () => {
       }),
     ]);
     expect(result.calls).toEqual([]);
+  });
+
+  // DOR-3768: a refusal to arm is why a PR sits, so the pane says it.
+  describe('a refusal to arm', () => {
+    const SHA = 'abc1234def'.padEnd(40, '0');
+    const refused = {
+      sha: SHA,
+      reason: 'security-label-missing',
+      detail: 'it has no "security-reviewed" label',
+      at: '2026-09-26T10:00:00.000Z',
+    };
+    const atGate = (reviewedSha: string): FlowRun =>
+      runRecord('FAKE-1', {
+        stage: 'review',
+        status: 'waiting_for_review',
+        armRefusal: refused,
+        review: { tokenHash: 'h', sha: reviewedSha, verdict: 'clean', reviewedSha },
+      });
+
+    it('prints and returns the reason at the reviewed commit', async () => {
+      writeRuns([atGate(SHA)]);
+      const backlog = { items: [item('FAKE-1')] };
+      expect((await status([], backlog)).stdout).toContain(
+        '; not armed: it has no "security-reviewed" label'
+      );
+      expect((await status(['--json'], backlog)).json().inFlight[0].armRefused).toEqual({
+        reason: 'security-label-missing',
+        detail: 'it has no "security-reviewed" label',
+      });
+    });
+
+    it('drops a refusal once the PR is armed', async () => {
+      const run = atGate(SHA);
+      const armed: FlowRun = {
+        ...run,
+        drain: {
+          v: 1,
+          rev: 0,
+          phase: 'watching',
+          worker: null,
+          reviewer: null,
+          pushedSha: SHA,
+          reviewedSha: SHA,
+          verdict: 'clean',
+          reviewRound: 1,
+          pr: { repo: 'acme/app', number: 7, url: 'u', armed: true, disarmedForReview: false },
+          rearmedFor: null,
+          nudges: 0,
+          wakeAfter: null,
+          handoffs: [],
+          parkedReason: null,
+        },
+      };
+      expect(FlowRunSchema.safeParse(armed).success).toBe(true);
+      writeRuns([armed]);
+      const out = (await status(['--json'], { items: [item('FAKE-1')] })).json();
+      expect(out.inFlight[0]).toMatchObject({ stage: 'review', drain: { phase: 'watching' } });
+      expect(out.inFlight[0].armRefused).toBeNull();
+    });
+
+    it('drops a refusal about an older commit', async () => {
+      writeRuns([atGate('f'.repeat(40))]);
+      const backlog = { items: [item('FAKE-1')] };
+      expect((await status([], backlog)).stdout).not.toContain('not armed');
+      expect((await status(['--json'], backlog)).json().inFlight[0].armRefused).toBeNull();
+    });
   });
 
   it('flags a running run whose item is not started', async () => {

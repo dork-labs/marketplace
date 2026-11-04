@@ -221,12 +221,25 @@ export interface ReviewFacts {
   review: { verdict: 'clean' | 'changes' | null; rounds: number } | null;
   /** The checks, when flow knows them. */
   checks: 'passed' | 'running' | null;
+  /** The guard's reason when only a person can clear its refusal to arm at `head`. */
+  refused?: string | null;
   /**
    * Whether flow can act on it from here (the `cli` transport, and an adapter
    * it may run). Otherwise the row opens the project's page, which links to
    * the tracker.
    */
   actionable: boolean;
+}
+
+/** The Ship row's line when flow refused to arm: this text is for the person, so it says how. */
+function refusedWhy(reason: string): string {
+  const promise = "Flow can't tell who added the label. On a solo repo, it's your promise.";
+  if (reason === 'security-path-unlabelled' || reason === 'files-unreadable') {
+    return `Flow won't merge this by itself: a security path may be involved. Read it and add the label, or merge it by hand. ${promise}`;
+  }
+  const label =
+    reason === 'security-label-stale' ? ' Read new commits, then take it off and add it back.' : '';
+  return `Flow won't merge this by itself.${label} Ship it to merge it; a security path, deep review or pre-arm check still needs the label or a merge by hand. ${promise}`;
 }
 
 /**
@@ -241,7 +254,9 @@ export function reviewAsk(project: AskProject, facts: ReviewFacts): Ask {
   const title = named === null ? 'Ship this change?' : `Ship ${named}?`;
   const built = facts.checks === 'passed' ? "It's built, tests pass" : "It's built";
   let why: string;
-  if (facts.checks === 'running') {
+  if (facts.refused != null) {
+    why = refusedWhy(facts.refused);
+  } else if (facts.checks === 'running') {
     why = "It's built; tests are still running. Shipping merges it once they pass.";
   } else if (facts.review?.verdict === 'clean' && facts.review.rounds > 1) {
     why = `${built}. The reviewer agent raised points and they were fixed. Shipping merges it into the app.`;

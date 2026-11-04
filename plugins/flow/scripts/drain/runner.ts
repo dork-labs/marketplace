@@ -51,7 +51,7 @@ import path from 'node:path';
 
 import type { ProcessRunner } from '../cli/context.ts';
 import { FlowError } from '../errors.ts';
-import type { FlowRun, RunQuestion } from '../flow-run.ts';
+import { armRefusalFor, withArmRefusal, type FlowRun, type RunQuestion } from '../flow-run.ts';
 import type { FlowStateFile } from '../flow-state-file.ts';
 import { judgeEjection } from '../forge/ejection.ts';
 import type { Forge } from '../forge/types.ts';
@@ -1269,6 +1269,9 @@ export async function runPass(deps: PassDeps): Promise<PassReport> {
               r.drain.pr?.number === n
                 ? {
                     ...r,
+                    ...(!guard.ok
+                      ? { armRefusal: armRefusalFor(action.sha, guard, deps.now()) }
+                      : {}),
                     drain: {
                       ...r.drain,
                       pr: {
@@ -1299,7 +1302,7 @@ export async function runPass(deps: PassDeps): Promise<PassReport> {
             r.drain.reviewedSha === action.sha &&
             r.drain.pushedSha === action.sha
               ? {
-                  ...r,
+                  ...withArmRefusal(r, undefined),
                   drain: {
                     ...r.drain,
                     pr: {

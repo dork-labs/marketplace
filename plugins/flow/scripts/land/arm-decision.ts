@@ -206,7 +206,7 @@ export interface ArmPolicy {
   securityGlobs: readonly string[];
   /** A regular expression tested against each path, or `null`. */
   securityPattern: string | null;
-  /** The label that says Security has looked. */
+  /** The label that says a person has looked. */
   securityLabel: string;
 }
 
@@ -236,7 +236,7 @@ export type ArmDecision =
       verdict: 'REFUSE';
       /** A stable, machine-readable reason. */
       reason: RefusalSlug;
-      /** One sentence for a person: what is wrong and what to do. */
+      /** For a person and the agent working for them: what is wrong, and who can act. */
       detail: string;
     };
 
@@ -266,6 +266,16 @@ function labelNames(facts: Record<string, unknown>): string[] {
     (record(label) !== undefined ? (str(record(label)?.name) ?? '') : String(label)).toLowerCase()
   );
 }
+
+/**
+ * What every refusal a person can clear with the label ends with (DOR-3768).
+ * An agent reads these too, so it says who acts and never how: how-to steps live
+ * in text aimed at people (`docs/security-label.mdx`, the panel's Ship row).
+ */
+const ASK_A_PERSON = 'Ask them to, or to merge it by hand. An agent must not add it';
+
+/** How many paths a refusal names. */
+const MAX_PATHS_SHOWN = 5;
 
 /** The refusal shape. */
 function refuse(reason: RefusalSlug, detail: string): ArmDecision {
@@ -339,7 +349,10 @@ export function armMergeFor(
 ): { ok: true; merge: ArmMerge } | { ok: false; detail: string } {
   const settings = record(input);
   if (settings === undefined || !('queueMethod' in settings)) {
-    return { ok: false, detail: 'the forge did not say how the base branch merges' };
+    return {
+      ok: false,
+      detail: 'the forge did not say how the base branch merges. Ask a person to merge it by hand',
+    };
   }
   const queue = settings.queueMethod;
   if (queue !== null) {
@@ -471,10 +484,20 @@ export function decideArm(input: unknown, policy: ArmPolicy): ArmDecision {
   if (!labels.includes(SECURITY_DEEP_LABEL)) {
     return refuse(
       'security-label-missing',
-      `it is labelled "${DEEP_REVIEW_LABEL}" and has no "${SECURITY_DEEP_LABEL}" label; flow arms it only after Security's deep review of its head`
+      `it is labelled "${DEEP_REVIEW_LABEL}" and has no "${SECURITY_DEEP_LABEL}" label; flow arms it only after a person reviews its head in depth and adds that label. ${ASK_A_PERSON}`
     );
   }
   return labelFresh(facts, 'deepLabelledAt', SECURITY_DEEP_LABEL, reviewed);
+}
+
+/**
+ * Paths for a sentence an agent reads. A PR's author picks them, so they are
+ * quoted and few, and they can't push the sentence's end out of a clipped copy.
+ */
+function listPaths(paths: readonly string[]): string {
+  const shown = paths.slice(0, MAX_PATHS_SHOWN).map((p) => JSON.stringify(p.slice(0, 60)));
+  const more = paths.length - shown.length;
+  return `${shown.join(', ')}${more > 0 ? ` and ${more} more` : ''}`;
 }
 
 /** The security label's rule: on every PR, or on what touches a security path. */
@@ -489,7 +512,7 @@ function decideSecurityLabel(
     if (!labelled) {
       return refuse(
         'security-label-missing',
-        `it has no "${policy.securityLabel}" label; flow arms this PR only after Security reviews its head`
+        `it has no "${policy.securityLabel}" label; flow arms this PR only after a person reads it and adds the label. ${ASK_A_PERSON}`
       );
     }
     return labelFresh(facts, 'securityLabelledAt', policy.securityLabel, reviewed);
@@ -501,7 +524,7 @@ function decideSecurityLabel(
     if (!labelled) {
       return refuse(
         'files-unreadable',
-        `the forge did not give the full list of changed files, so flow cannot rule out a security path; it needs the "${policy.securityLabel}" label`
+        `the forge did not give the full list of changed files, so flow cannot rule out a security path; flow arms this PR only after a person reads it and adds the "${policy.securityLabel}" label. ${ASK_A_PERSON}`
       );
     }
     return labelFresh(facts, 'securityLabelledAt', policy.securityLabel, reviewed);
@@ -511,7 +534,7 @@ function decideSecurityLabel(
     if (!labelled) {
       return refuse(
         'files-unreadable',
-        `land.securityPaths.pattern is not a valid regular expression, so flow cannot rule out a security path; it needs the "${policy.securityLabel}" label`
+        `land.securityPaths.pattern is not a valid regular expression, so flow cannot rule out a security path; flow arms this PR only after a person reads it and adds the "${policy.securityLabel}" label. ${ASK_A_PERSON}`
       );
     }
     return labelFresh(facts, 'securityLabelledAt', policy.securityLabel, reviewed);
@@ -520,7 +543,7 @@ function decideSecurityLabel(
   if (!labelled) {
     return refuse(
       'security-path-unlabelled',
-      `it touches security paths (${hits.join(', ')}) and has no "${policy.securityLabel}" label; Security reviews it first`
+      `it touches security paths (${listPaths(hits)}) and has no "${policy.securityLabel}" label; flow arms this PR only after a person reads it and adds the label. ${ASK_A_PERSON}`
     );
   }
   return labelFresh(facts, 'securityLabelledAt', policy.securityLabel, reviewed);
@@ -542,19 +565,19 @@ function labelFresh(
   if (Number.isNaN(arrivedAt)) {
     return refuse(
       'security-label-unverified',
-      `flow cannot tell when ${short(head)} arrived as the head (flow found no force-push or push-made check suite it could date it by), so it cannot tell whether "${label}" covers it`
+      `flow cannot tell when ${short(head)} arrived as the head (GitHub gave no force-push, check suite or push it could date it by), so it cannot tell whether "${label}" covers it. Ask a person to merge it by hand`
     );
   }
   if (Number.isNaN(labelledAt)) {
     return refuse(
       'security-label-unverified',
-      `flow cannot tell when a person added "${label}", so it cannot tell whether it covers ${short(head)}`
+      `flow cannot tell when a person added "${label}", so it cannot tell whether it covers ${short(head)}; flow arms this PR only after a person reads it and adds the label. ${ASK_A_PERSON}`
     );
   }
   if (labelledAt <= arrivedAt) {
     return refuse(
       'security-label-stale',
-      `"${label}" predates the head: it was added before ${short(head)} arrived, so Security looks at the new commits and adds it again`
+      `"${label}" predates the head: it was added before ${short(head)} arrived, so flow arms this PR only after a person reads the new commits and adds the label again. ${ASK_A_PERSON}`
     );
   }
   return { verdict: 'ARM' };

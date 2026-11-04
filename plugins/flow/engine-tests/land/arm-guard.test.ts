@@ -29,6 +29,7 @@ import type { ArmFacts, Forge, WorkflowRun } from '../../scripts/forge/types.ts'
 import type { MergeSettings } from '../../scripts/land/arm-decision.ts';
 import { guardArm, refusalSticksToCommit } from '../../scripts/land/arm-guard.ts';
 import { readBaseLand } from '../../scripts/land/base-config.ts';
+import { createGithubForge } from '../../scripts/forge/github.ts';
 import { setFreeze } from '../../scripts/land/freeze.ts';
 import {
   entryTouched,
@@ -1435,5 +1436,139 @@ describe('whole-string validation', () => {
       'x.',
     ])
       expect(isBranchName(bad), bad).toBe(false);
+  });
+});
+
+// Security's feed cases: the transport supplies synthetic GitHub responses,
+// while the real forge timestamps and real guard decide. Git/config reads use
+// the real temporary origin above; no hosted repo is changed or armed.
+describe('activity feed proof through the real guard', () => {
+  const cases = [
+    {
+      name: 'no feed entry',
+      feed: 'empty',
+      force: 'none',
+      arrival: null,
+      reason: 'security-label-unverified',
+    },
+    {
+      name: 'cut-off feed: newest available entry left another head',
+      feed: 'other',
+      force: 'none',
+      arrival: null,
+      reason: 'security-label-unverified',
+    },
+    {
+      name: 'cut-off force-push timeline',
+      feed: 'current',
+      force: 'cut-off',
+      arrival: null,
+      reason: 'security-label-unverified',
+    },
+    {
+      name: 'force push away: feed has not caught up',
+      feed: 'current',
+      force: 'away',
+      arrival: null,
+      reason: 'security-label-unverified',
+    },
+    {
+      name: 'force push to this head before the label: dates it and allows',
+      feed: 'force',
+      force: 'current',
+      arrival: ARRIVED,
+      reason: null,
+    },
+    {
+      name: 'force push to this head after the label: stale and refuses',
+      feed: 'late-force',
+      force: 'late-current',
+      arrival: '2026-10-03T00:00:00Z',
+      reason: 'security-label-stale',
+    },
+    {
+      name: 'old suite cannot hide a head returning after the label',
+      feed: 'late',
+      force: 'none',
+      arrival: '2026-10-03T00:00:00Z',
+      reason: 'security-label-stale',
+    },
+    {
+      name: 'feed unavailable on a forge: cannot arm on a label',
+      feed: 'unavailable',
+      force: 'none',
+      arrival: null,
+      reason: 'security-label-unverified',
+    },
+  ];
+
+  it.each(cases)('$name', async (c) => {
+    const other = 'f'.repeat(40);
+    const late = c.feed.startsWith('late');
+    const at = late ? '2026-10-03T00:00:00Z' : ARRIVED;
+    const nodes =
+      c.force === 'none'
+        ? []
+        : [
+            {
+              createdAt: c.force === 'away' ? LABELLED : at,
+              afterCommit: { oid: c.force === 'away' ? other : head },
+            },
+          ];
+    const feed =
+      c.feed === 'empty'
+        ? []
+        : [
+            {
+              activity_type: c.feed.includes('force') ? 'force_push' : 'push',
+              ref: 'refs/heads/feature',
+              after: c.feed === 'other' ? other : head,
+              timestamp: at,
+            },
+          ];
+    const real = createGithubForge({
+      target: { host: 'github.com', repo: 'acme/app' },
+      now: () => new Date(LABELLED),
+      runProcess: async (_cmd, args) => {
+        if (args.includes('graphql'))
+          return {
+            code: 0,
+            stderr: '',
+            stdout: JSON.stringify({
+              data: {
+                repository: {
+                  pullRequest: {
+                    timelineItems: {
+                      filteredCount: c.force === 'cut-off' ? 101 : nodes.length,
+                      nodes,
+                    },
+                  },
+                },
+              },
+            }),
+          };
+        if (args.some((a) => a.includes('/activity?')))
+          return c.feed === 'unavailable'
+            ? { code: 1, stdout: '', stderr: 'HTTP 404' }
+            : { code: 0, stdout: JSON.stringify(feed), stderr: '' };
+        return {
+          code: 0,
+          stderr: '',
+          stdout: JSON.stringify({ created_at: ARRIVED, head_branch: 'feature' }),
+        };
+      },
+    });
+    const readArrival = () => real.headPushedAt!(7, head, 'feature');
+    if (c.feed === 'unavailable') await expect(readArrival()).rejects.toThrow(/404/);
+    else expect(await readArrival()).toBe(c.arrival);
+    const { forge, calls } = fakeForge({ facts: { labels: [{ name: 'security-reviewed' }] } });
+    forge.headPushedAt = real.headPushedAt;
+    const result = await guardArm(
+      { forge, pr: 7, reviewedSha: head, worktree: repo, mainCheckout: repo },
+      { runProcess: realProcessRunner, ...virtualTime() }
+    );
+    if (c.reason === null) expect(result).toMatchObject({ ok: true });
+    else expect(result).toMatchObject({ ok: false, reason: c.reason });
+    expect(calls.some((call) => call.method === 'arm')).toBe(false);
   });
 });

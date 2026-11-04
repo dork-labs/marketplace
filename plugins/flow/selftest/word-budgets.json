@@ -99,6 +99,10 @@
     "baseline": 785,
     "target": 785
   },
+  "docs/security-label.mdx": {
+    "baseline": 427,
+    "target": 427
+  },
   "docs/open-prs.mdx": {
     "baseline": 486,
     "target": 486
