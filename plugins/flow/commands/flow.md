@@ -29,6 +29,7 @@ Resolve and route: $ARGUMENTS
 `/flow:status`, `/flow:pause` and `/flow:resume` observe or steer; they never advance a stage.
 
 - Show items to people by the adapter's display convention.
+- Approximate picks are display-only. Before acting, rerun `flow next --json` without `--snapshot`; claim it before work.
 - Uncertainty, not the stage, pulls a person in.
 - Hit friction, a workaround or a confusion in flow itself: `flow note --kind friction|workaround|confusion "<one sentence>"`. No secrets, no pasted output.
 
@@ -47,9 +48,9 @@ Then run `cf`:
 - `config.local.json` overrides `config.json`; a field in neither takes its `default` from `config/config.schema.json`.
 - Read the tracker adapter from `adapter.path` only; `<flow-root>` inside it means `flowRoot`.
 
-**The pause.** When `paused` is not `null`, never
-start `continue` or `auto`, and never run a scheduled tick or a tracker tick: say "flow is paused (since `<pausedAt>`); `/flow:resume` lifts it" and stop. Everything else runs: a pause stops the loop, never
-the operator. With a valid config present, route as below.
+**The pause.** If `paused` is non-null, stop `continue`, `auto`, scheduled and tracker ticks.
+Say "flow is paused (since `<pausedAt>`); `/flow:resume` lifts it". Other commands run:
+a pause stops the loop, never the operator.
 
 ## Routing
 

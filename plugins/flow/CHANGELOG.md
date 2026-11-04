@@ -6,8 +6,10 @@ you until you **reinstall it** (Marketplace → flow → reinstall, or re-run yo
 
 ## 0.93.0
 
+- Keep a saved panel list visible through failures and restarts, with its saved read time. Status and manual approximate next output also name that time. Approximate picks cannot recommend landing, assign accounts, drive sorting, or bypass a fresh claim.
+
 - Share panel reads across projects on the same tracker account and team. Cache answers for five minutes, rebuild the baseline daily, and bound incremental changes to one hundred items. Panel snapshots are approximate and refused by write paths.
-- Respect account-wide rate-limit cooldowns and reset times, including when a project is viewed. Show the reason in the panel (draft wording for design review).
+- Respect account-wide rate-limit cooldowns and reset times, including when a project is viewed. Show the reason in the panel using the reviewed limiting-reads wording.
 - Journal fixed tracker failure reasons and parent-observed killed reads without upstream text. Restrict the read route to shipped GraphQL queries.
 
 ## 0.92.0
