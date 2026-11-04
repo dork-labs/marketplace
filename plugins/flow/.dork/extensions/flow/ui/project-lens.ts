@@ -117,7 +117,7 @@ export function conditionLine(
       return {
         text:
           condition.detail.reason === 'rate-limited'
-            ? `${tracker} is limiting reads, so Flow is waiting. This list may be out of date.`
+            ? `${tracker} is limiting reads, so Flow is waiting.${project.queue === null ? '' : ' This list may be out of date.'}`
             : condition.detail.reason === 'read-limit'
               ? `Too much changed for a panel read. Flow kept the last list; it may be out of date.`
               : `${tracker} hasn't answered since ${clockTime(new Date(condition.since), locale)}. Flow keeps trying. Nothing is lost.`,
@@ -539,6 +539,21 @@ export function ProjectLens(props: {
               )
             : null;
         body.push(h('p', { key: 'next-note', style: { ...MUTED, marginTop: '8px' } }, note, allow));
+        if (
+          note === 'No saved list yet.' &&
+          project.conditions.some(
+            (condition) =>
+              condition.kind === 'tracker-unreachable' && condition.detail.reason === 'rate-limited'
+          )
+        ) {
+          body.push(
+            h(
+              'p',
+              { key: 'next-waits', style: MUTED },
+              `It'll show when ${trackerName(project)} answers.`
+            )
+          );
+        }
       }
     }
   }

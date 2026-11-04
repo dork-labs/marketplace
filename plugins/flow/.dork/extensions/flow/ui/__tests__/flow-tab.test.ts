@@ -559,6 +559,7 @@ it('shows the rate-limit cause and stale-list warning in the project panel', asy
   await renderTab(
     flowModel([
       flowProject('dorkos', {
+        queue: { next: [{ identifier: 'SYN-1', title: 'A sample task' }], more: 0 },
         conditions: [
           {
             kind: 'tracker-unreachable',
@@ -600,7 +601,9 @@ it.each([true, false])(
       ]),
       host({ name: 'synthetic', root: '/work/synthetic' } as ProjectRef)
     );
-    const line = 'Linear is limiting reads, so Flow is waiting. This list may be out of date.';
+    const line = saved
+      ? 'Linear is limiting reads, so Flow is waiting. This list may be out of date.'
+      : 'Linear is limiting reads, so Flow is waiting.';
     expect(screen.getByText(line)).toBeTruthy();
     expect(line.split(/\s+/).length).toBeLessThanOrEqual(16);
     if (saved) {
@@ -611,6 +614,8 @@ it.each([true, false])(
       );
     } else {
       expect(screen.getByText('No saved list yet.')).toBeTruthy();
+      expect(screen.getByText("It'll show when Linear answers.")).toBeTruthy();
+      expect(screen.queryByText(/This list may be out of date/)).toBeNull();
       expect(screen.queryByText('Nothing ready to work on.')).toBeNull();
       expect(screen.queryByText(/^Last read /)).toBeNull();
     }
