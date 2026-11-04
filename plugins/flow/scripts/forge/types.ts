@@ -261,10 +261,11 @@ export interface Forge {
   labelledAt?(pr: number, label: string): Promise<string | null>;
   /**
    * When `sha` arrived as the head of PR `pr` (head branch `branch`),
-   * ISO-8601, from server times a commit's own dates cannot move: the PR's
-   * last force-push when it left `sha`, else the first check suite a push to
-   * `branch` made for `sha` after that (`github.ts`, `headArrival`). `null`
-   * when that cannot be told. Optional; absent reads as unknown.
+   * ISO-8601, from server times a commit's own dates cannot move: the later of
+   * the branch's newest push, which must have left `sha` (`github.ts`,
+   * `arrivalFromChange`), and, when a push to `branch` made a check suite, what
+   * `headArrival` reads from the suites and the PR's force-pushes. `null` when
+   * that cannot be told. Optional; absent reads as unknown.
    */
   headPushedAt?(pr: number, sha: string, branch: string): Promise<string | null>;
   /** Post a plain comment on a PR as the signed-in account. */

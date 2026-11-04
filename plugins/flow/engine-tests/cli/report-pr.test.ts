@@ -859,6 +859,18 @@ describe('flow pr', () => {
       expect(r.json.mention).toMatchObject({ reviewer: '@acme-security', route: 'security' });
     });
 
+    // DOR-3768: a refused --arm is kept for flow status and the panel.
+    it('keeps a refused --arm on the run', async () => {
+      writeRun(drain({ pushedSha: head, reviewedSha: head, verdict: 'clean' }), head);
+      armGuard = recordingGuard(() => refusal('security-label-missing'));
+      const r = await flow([...args, '--arm'], fakeForge());
+      expect(r.json.armRefused).toMatchObject({ reason: 'security-label-missing' });
+      expect(Object.values(project.runs())[0].armRefusal).toMatchObject({
+        sha: head,
+        reason: 'security-label-missing',
+      });
+    });
+
     it('mentions land.reviewer on the new PR', async () => {
       reviewers({ reviewer: 'octocat' });
       writeRun(drain({ pushedSha: head, reviewedSha: head, verdict: 'clean' }), head);

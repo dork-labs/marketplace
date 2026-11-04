@@ -1041,7 +1041,7 @@ export const SecurityPathsSchema = z
     globs: z.array(PathGlobSchema).default([]),
     /** A regular expression tested against each changed path, or `null`. */
     pattern: z.string().min(1).nullable().default(null),
-    /** The label that says Security has looked. Flow only reads it. */
+    /** The label that says a person has looked. Flow only reads it. */
     label: BareLabelSchema.default('security-reviewed'),
     /**
      * Who flow mentions on a new PR that touches a security path. A handle:

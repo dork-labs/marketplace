@@ -4,6 +4,18 @@ Installs of this plugin are pinned to a commit SHA, so a fix here does not reach
 you until you **reinstall it** (Marketplace → flow → reinstall, or re-run your
 `--plugin-dir` checkout's `git pull`). Each entry below says whether that matters.
 
+## 0.90.0
+
+**If you work alone, flow now tells you what to do when it won't arm a PR, instead of telling you to wait for a team you don't have (DOR-3768). It also fixes a bug, there since 0.61.0, that made flow refuse every `security-reviewed` label it had to check, on every repo. Since 0.86.0 that has meant every label (DOR-3793). Reinstall to get it.**
+
+- A refusal now names a person: flow arms the PR only after a person reads it and adds the label, so ask them to, or to merge it by hand. It adds that an agent must not add the label, and it never says how. That covers a missing label, one older than the head, a security path and a deep review. How-to steps are only in text for people: `docs/security-label.mdx` and the panel.
+- `flow status` keeps the last refusal and prints `not armed:` and the reason, for the commit that would merge.
+- The Flow panel raises its Ship row at any dial when only a person can clear the refusal, and says what to do. 👍 still works after the reviewer agent's approval, unless the PR touches a security path, needs a deep review or has a `land.preArm` check that applies: those still need the label or a merge by hand. A refusal that clears by itself, like a freeze, raises nothing.
+- Setup, `docs/landing.mdx` and the new `docs/security-label.mdx` explain the label and how to create it. Flow still never creates it.
+- **The bug:** flow reads a PR's force-pushes to date its head, and it read the count of the whole timeline, not of the force-pushes. A labelled PR always has something on its timeline, so flow could never date the head, and every label refused as `security-label-unverified`. Now it counts the force-pushes. A count that doesn't match still reads as unknown, and still refuses.
+- **A repo with no check suites can now use the label.** Flow now also reads the branch's newest entry in GitHub's activity feed, using GitHub's time for that push, which a commit's own dates can't change. The label must come after that push and any check suite. If the feed's newest entry is anything else, or flow can't read the feed, it still refuses, so a GitHub Enterprise Server without this feed can't arm on a label.
+- What we saw on real repos, and now say in the docs: adding the label again while it's on does nothing, so after a new push take it off and add it back. With no required checks, an arm merges at once. On a private repo on GitHub Free, flow can't read the branch's rules and arms nothing, so merge by hand.
+
 ## 0.89.0
 
 **An answer you give in DorkOS that flow couldn't record no longer looks recorded (DOR-3775), and flow's inbox pass is less likely to resume an item on an answer left over from an earlier wait (DOR-3777). Nothing here lets an agent's answer through. Reinstall to get it.**

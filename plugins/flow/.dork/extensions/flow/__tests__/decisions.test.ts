@@ -647,6 +647,109 @@ describe('answering', () => {
     expect(coordinator.decisions()).toEqual([]);
   });
 
+  // DOR-3768: when only a person can clear flow's refusal, the row is raised at
+  // any dial; a refusal that clears by itself raises nothing.
+  describe('a refusal only a person can clear', () => {
+    const refusedRun = (reason: string, sha = 'abc1234def') =>
+      gateRun({ armRefusal: { sha, reason, detail: 'x', at: '2026-09-26T10:00:00.000Z' } });
+    const whyOf = (coordinator: DecisionCoordinator) =>
+      (coordinator.decisions()[0] as unknown as { input?: { why: string }; why?: string }).input
+        ?.why ?? (coordinator.decisions()[0] as unknown as { why: string }).why;
+
+    it.each(['tell', 'auto'] as const)('raises the Ship row at %s', async (stop) => {
+      const { coordinator } = setup({ stops: { ship: stop } });
+      await coordinator.sync([plan({ a: refusedRun('security-label-missing') })]);
+      expect(coordinator.decisions()).toHaveLength(1);
+      expect(whyOf(coordinator)).toMatch(/won't merge this by itself/);
+      expect(whyOf(coordinator)).toMatch(/Ship it to merge it/);
+      expect(whyOf(coordinator)).toMatch(/pre-arm check/);
+    });
+
+    it.each([
+      'security-label-missing',
+      'security-label-stale',
+      'security-label-unverified',
+      'security-path-unlabelled',
+      'files-unreadable',
+    ])('raises it for %s', async (reason) => {
+      const { coordinator } = setup({ stops: { ship: 'auto' } });
+      await coordinator.sync([plan({ a: refusedRun(reason) })]);
+      expect(coordinator.decisions()).toHaveLength(1);
+      expect(whyOf(coordinator).length).toBeLessThanOrEqual(300);
+      expect(whyOf(coordinator)).toMatch(/can't tell who added the label/i);
+      expect(whyOf(coordinator)).toMatch(/solo repo.*promise/i);
+    });
+
+    it('says the label has to come off and go back on after new commits', async () => {
+      const { coordinator } = setup({ stops: { ship: 'auto' } });
+      await coordinator.sync([plan({ a: refusedRun('security-label-stale') })]);
+      expect(whyOf(coordinator)).toMatch(/take it off and add it back/);
+    });
+
+    it('says shipping is not enough on a security path', async () => {
+      const { coordinator } = setup({ stops: { ship: 'auto' } });
+      await coordinator.sync([plan({ a: refusedRun('security-path-unlabelled') })]);
+      expect(whyOf(coordinator)).toMatch(/security path/);
+      expect(whyOf(coordinator)).toMatch(/by hand/);
+      expect(whyOf(coordinator)).not.toMatch(/Ship it to merge it/);
+    });
+
+    it.each(['freeze', 'pre-arm-deferred', 'failing-checks', 'not-squash'])(
+      'raises nothing for %s',
+      async (reason) => {
+        const { coordinator } = setup({ stops: { ship: 'auto' } });
+        await coordinator.sync([plan({ a: refusedRun(reason) })]);
+        expect(coordinator.decisions()).toEqual([]);
+      }
+    );
+
+    it('raises nothing for a refusal about an older commit', async () => {
+      const { coordinator } = setup({ stops: { ship: 'auto' } });
+      await coordinator.sync([plan({ a: refusedRun('security-label-missing', 'f'.repeat(40)) })]);
+      expect(coordinator.decisions()).toEqual([]);
+    });
+
+    it('raises nothing once the PR is armed', async () => {
+      const { coordinator } = setup({ stops: { ship: 'auto' } });
+      const run = refusedRun('security-label-missing');
+      await coordinator.sync([
+        plan({ a: { ...run, drain: { ...run.drain, pr: { number: 2303, armed: true } } } }),
+      ]);
+      expect(coordinator.decisions()).toEqual([]);
+    });
+
+    it("words the panel's answer for a person, with no line about agents", () => {
+      for (const reason of ['security-label-missing', 'security-path-unlabelled']) {
+        const said = armMessage({
+          armRefused: {
+            reason,
+            detail: 'flow arms this PR only after a person adds it. An agent must not add it',
+          },
+        });
+        expect(said).toMatch(/^Shipped, but flow didn't turn on auto-merge/);
+        expect(said).not.toMatch(/agent/i);
+        expect(said).toMatch(/merge it yourself/i);
+      }
+      // The label is already on: adding it again does nothing.
+      expect(armMessage({ armRefused: { reason: 'security-label-stale', detail: 'x' } })).toMatch(
+        /take the label off and add it back/
+      );
+      // The label can't help when flow can't date the head.
+      expect(
+        armMessage({ armRefused: { reason: 'security-label-unverified', detail: 'x' } })
+      ).toMatch(/Merge it yourself/);
+      expect(
+        armMessage({ armRefused: { reason: 'security-label-unverified', detail: 'x' } })
+      ).not.toMatch(/add the/);
+      expect(
+        armMessage({
+          armHandedToDrain: true,
+          armRefused: { reason: 'security-label-stale', detail: 'An agent must not add it' },
+        })
+      ).not.toMatch(/agent/i);
+    });
+  });
+
   it('says what a handed-off arm still waits for', () => {
     expect(armMessage({ armHandedToDrain: true, armRefused: { detail: 'it has no label' } })).toBe(
       'Shipped. Flow turns on auto-merge once this is settled: it has no label.'

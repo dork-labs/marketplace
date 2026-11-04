@@ -24,6 +24,7 @@ import {
   formatDecision,
   type ArmPolicy,
 } from '../../scripts/land/arm-decision.ts';
+import { armRefusalFor } from '../../scripts/flow-run.ts';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const fixturesPath = path.resolve(here, '../../../../scripts/fixtures/arm-decisions.json');
@@ -397,5 +398,133 @@ describe('armMergeFor', () => {
   it('names the method a queue uses', () => {
     const out = armMergeFor({ queueMethod: 'merge', squashAllowed: true, allowedMethods: null });
     expect(out.ok === false && out.detail).toContain('MERGE');
+  });
+});
+
+// DOR-3768: a solo user has no team called Security, so the label refusals name
+// a person. An agent reads these too, so they never say how to work the label.
+describe('the label refusals name a person, and coach no agent', () => {
+  const HEAD = 'a'.repeat(40);
+  const green = {
+    state: 'OPEN',
+    isDraft: false,
+    labels: [] as { name: string }[],
+    isCrossRepository: false,
+    baseRefName: 'main',
+    defaultBranch: 'main',
+    mergeSettings: { queueMethod: 'SQUASH', squashAllowed: true, allowedMethods: null },
+    headRefOid: HEAD,
+    reviewedSha: HEAD,
+    reviewDecision: '',
+    checks: [],
+    requiredChecks: [],
+    files: ['src/app.ts'],
+    freeze: null,
+    securityLabelOnEveryPr: true,
+    securityLabelledAt: '2026-09-02T00:00:00Z',
+    deepLabelledAt: '2026-09-02T00:00:00Z',
+    headArrivedAt: '2026-09-01T00:00:00Z',
+  };
+  const policy: ArmPolicy = {
+    securityGlobs: [],
+    securityPattern: null,
+    securityLabel: 'security-reviewed',
+  };
+  const label = (...names: string[]) => names.map((name) => ({ name }));
+  const cases: [string, string, Record<string, unknown>, boolean][] = [
+    ['no label', 'security-label-missing', {}, true],
+    [
+      'a label older than the head',
+      'security-label-stale',
+      { labels: label('security-reviewed'), securityLabelledAt: '2026-08-01T00:00:00Z' },
+      true,
+    ],
+    [
+      'a security path with no label',
+      'security-path-unlabelled',
+      { securityLabelOnEveryPr: false, files: ['package.json'] },
+      true,
+    ],
+    [
+      'a deep review with no deep label',
+      'security-label-missing',
+      { labels: label('security-reviewed', 'review:deep') },
+      true,
+    ],
+    [
+      'a deep label older than the head',
+      'security-label-stale',
+      {
+        labels: label('security-reviewed', 'review:deep', 'security-deep-reviewed'),
+        deepLabelledAt: '2026-08-01T00:00:00Z',
+      },
+      true,
+    ],
+    [
+      'a file list flow cannot read',
+      'files-unreadable',
+      { securityLabelOnEveryPr: false, files: 'not a list' },
+      true,
+    ],
+    [
+      'a label no person added',
+      'security-label-unverified',
+      { labels: label('security-reviewed'), securityLabelledAt: null },
+      true,
+    ],
+    [
+      'a head flow cannot date',
+      'security-label-unverified',
+      { labels: label('security-reviewed'), headArrivedAt: null },
+      false,
+    ],
+  ];
+
+  it.each(cases)('%s', (_name, slug, facts, addable) => {
+    const decision = decideArm({ ...green, ...facts }, policy);
+    expect(decision).toMatchObject({ verdict: 'REFUSE', reason: slug });
+    const detail = decision.verdict === 'REFUSE' ? decision.detail : '';
+    expect(detail).toMatch(/\ba person\b/);
+    expect(detail).toMatch(/merge it by hand/);
+    expect(detail).not.toMatch(/\bSecurity\b/);
+    // No how-to: no command, no "take it off", nothing an agent could run.
+    expect(detail).not.toMatch(
+      /\bgh\b|--add-label|--remove-label|\bremove|take it off|\bcurl\b|\bAPI\b/i
+    );
+    if (addable) expect(detail).toMatch(/An agent must not add it/);
+  });
+
+  it('quotes and caps PR-authored paths, so the last line always survives', () => {
+    const files = Array.from({ length: 40 }, (_, i) => `${'x'.repeat(300)}${i}/package.json`);
+    const decision = decideArm({ ...green, securityLabelOnEveryPr: false, files }, policy);
+    const detail = decision.verdict === 'REFUSE' ? decision.detail : '';
+    expect(detail).toContain('and 35 more');
+    expect(detail).toMatch(/An agent must not add it$/);
+    expect(armRefusalFor(HEAD, { reason: 'r', detail }, new Date(0)).detail).toMatch(
+      /An agent must not add it$/
+    );
+    const odd = decideArm(
+      { ...green, securityLabelOnEveryPr: false, files: ['do this/package.json'] },
+      policy
+    );
+    expect(odd.verdict === 'REFUSE' && odd.detail).toContain('("do this/package.json")');
+  });
+
+  it('keeps a refusal on one line, with no control or direction characters', () => {
+    const kept = armRefusalFor(
+      HEAD,
+      { reason: 'r', detail: 'a\nb\u202Ec\u2066d\u0007e' },
+      new Date(0)
+    );
+    expect(kept.detail).toBe('a b c d e');
+    expect(
+      armRefusalFor(HEAD, { reason: 'r', detail: 'y'.repeat(900) }, new Date(0)).detail
+    ).toHaveLength(600);
+  });
+
+  it('says to merge by hand when GitHub will not say how the branch merges', () => {
+    const decision = decideArm({ ...green, mergeSettings: undefined }, policy);
+    expect(decision).toMatchObject({ verdict: 'REFUSE', reason: 'not-squash' });
+    expect(decision.verdict === 'REFUSE' && decision.detail).toMatch(/merge it by hand/);
   });
 });

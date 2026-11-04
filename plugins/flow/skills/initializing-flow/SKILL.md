@@ -9,9 +9,7 @@ description: First-run setup for the /flow engine in a new repo - detect or reco
 `node --experimental-strip-types "<flow-root>/scripts/config-files.ts"`; `flow <verb>` means
 `node --experimental-strip-types "<flow-root>/scripts/flow.ts" <verb>`.
 
-Setup makes `/flow` runnable in a repo: pick a tracker, generate and verify its adapter,
-write the settings, confirm the install. It stays tracker-neutral: the only
-tracker-aware thing it makes is the adapter, at `.agents/flow/adapters/<tracker>/SKILL.md`
+Setup makes `/flow` runnable in a repo. The only tracker-aware thing it makes is the adapter, at `.agents/flow/adapters/<tracker>/SKILL.md`
 in the project (committed; never in the plugin folder, which an update replaces).
 `<flow-root>/skills/building-adapters/SKILL.md` owns how to generate one; the settings
 and their precedence are in `<flow-root>/config/CONFIG.md`.
@@ -113,8 +111,6 @@ assume); apply with `--yes`. Headless: skip.
 
 ## Step 5 — Confirm
 
-Two checks answering different questions; report each by name.
-
 - **5a Connectivity**, the only tracker call: through the adapter, `getCurrentUser()`
   (show the account flow will act as) and the team and workspace lookup. Any error or
   empty team: name the file to fix (`config.local.json` for credentials and coordinates,
@@ -126,8 +122,9 @@ Two checks answering different questions; report each by name.
 Only after 5a passes, report ready: the tracker, the account 5a resolved, the identity
 mode, the routing scope, the intake sources, the review posture and rubric path, each tier's model (or
 unbound), the entry points, a reminder to commit a generated adapter, and every headless
-assumption.
+assumption. Say too that flow merges by itself only after a person adds the
+`security-reviewed` label. Explain: a solo login hides whether an agent added it; the
+person keeps that promise. Point them to `<flow-root>/docs/security-label.mdx` for steps.
 
 **Honest failure.** A missing toolchain, a red adapter gate or a failed read stops setup
-with what is wrong and which file to fix. Credentials live only in `config.local.json`
-or a `FLOW_`-prefixed environment variable.
+with what is wrong and which file to fix.
