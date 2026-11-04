@@ -113,7 +113,7 @@ Dispatch only ever claims an item that is genuinely ready. That gate is the `age
   </Step>
   <Step>**DECOMPOSE** applies `agent/ready` to the execute-ready tasks it emits.</Step>
   <Step>
-    **Dispatch** filters to ready items only, then ranks them. An empty queue with
+    **Dispatch in `/flow auto`** filters ready items, then ranks them. An empty queue with
     shapeable-but-not-ready work behind it reports "0 ready, N shapeable: run a triage pass?" rather
     than stopping silently.
   </Step>
@@ -161,7 +161,7 @@ each kind of ask, so flow can run on its own without anything going unchecked.
 <Callout type="warn">
   **Where it starts depends on the project.** A **new** project (one DorkOS first sees with no flow
   history) starts at **Tell me after**: the reviewer agent can ship work it reviewed clean, agent
-  questions get a deadline, and new ideas are sorted and failing checks fixed on their own. A
+  questions get a deadline, and failing checks are fixed automatically. A
   project flow **already worked in** stays at **Ask me first** until you choose, and so does any
   project flow runs without DorkOS; there, failing checks are still fixed on their own as they
   always were. Look at a new project's setting before you leave it running.
@@ -171,8 +171,10 @@ each kind of ask, so flow can run on its own without anything going unchecked.
 | ---------------------- | ------------- | ------------------------------------------------ | --------------------------------------- |
 | Ship finished work     | asks you      | the reviewer agent approves, and you're told     | the reviewer agent approves             |
 | Agent questions        | waits for you | the agent goes with its pick at the deadline     | the agent picks and writes down why     |
-| Sort new ideas         | asks you      | every morning, and you're told                   | every morning                           |
+| Sort new ideas         | `/flow:triage` | `/flow:triage`                                    | `/flow:triage`                           |
 | Retry and fix problems | asks you      | on its own, and you're told                      | on its own                              |
+
+The panel's daily sorting and empty-queue asks are off under every dial. Use `/flow:triage`.
 
 Whatever you pick, someone checks: you, the reviewer agent, or, for an ordinary question at Tell
 me after, the agent's own pick once the wait is over (1 hour, 4 hours or end of day; 4 hours

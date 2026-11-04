@@ -638,3 +638,28 @@ it('shows only the age notice for a healthy approximate list', async () => {
     screen.queryByText(/limiting reads|may be out of date|Saved list;|Relationships reconcile/)
   ).toBeNull();
 });
+
+it.each([true, false])(
+  'shows the designer notice below Running without warning colour (saved=%s)',
+  async (saved) => {
+    await renderTab(
+      flowModel([
+        flowProject('synthetic', {
+          queue: saved
+            ? { next: [{ identifier: 'SYN-1', title: 'A sample task' }], more: 0 }
+            : null,
+        }),
+      ]),
+      host({ name: 'synthetic', root: '/work/synthetic' } as ProjectRef)
+    );
+    const notice = screen.getByText(
+      "Daily sorting is off for now. Flow won't ask when nothing's ready."
+    );
+    const running = screen.getByText(NOTHING_RUNNING_TEXT);
+    expect(running.nextElementSibling).toBe(notice);
+    expect(notice.tagName).toBe('P');
+    expect(notice.style.color).toBe(running.style.color);
+    expect(notice.getAttribute('role')).not.toBe('alert');
+    expect(notice.nextElementSibling?.textContent).toBe(saved ? 'Up next' : 'No saved list yet.');
+  }
+);

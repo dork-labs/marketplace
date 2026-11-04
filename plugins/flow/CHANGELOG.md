@@ -6,6 +6,8 @@ you until you **reinstall it** (Marketplace → flow → reinstall, or re-run yo
 
 ## 0.93.0
 
+- Explain that the panel timer's daily sorting and empty-queue prompts are off. Point the guides to manual triage and keep terminal-drain starvation reporting distinct.
+
 - Keep a saved panel list visible through failures and restarts, with its saved read time. Status and manual approximate next output also name that time. Approximate picks cannot recommend landing, assign accounts, drive sorting, or bypass a fresh claim.
 
 - Share panel reads across projects on the same tracker account and team. Cache answers for five minutes, rebuild the baseline daily, and bound incremental changes to one hundred items. Panel snapshots are approximate and refused by write paths.

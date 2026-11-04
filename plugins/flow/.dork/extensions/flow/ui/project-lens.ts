@@ -23,6 +23,10 @@ import { ALERT, hostColor } from './styles.ts';
 /** Shown under "Running" when the project runs nothing. */
 export const NOTHING_RUNNING_TEXT = 'Nothing is running.';
 
+/** Plain notice while the panel timer's two sorting triggers are disabled. */
+export const TIMER_SORTING_NOTICE =
+  "Daily sorting is off for now. Flow won't ask when nothing's ready.";
+
 /** Shown after a resume when DorkOS would not switch flow's schedules back on. */
 export const SCHEDULES_OFF_TEXT =
   "DorkOS didn't let flow switch its schedules back on after the pause, so they are still off. Turn them on in Schedules.";
@@ -500,6 +504,7 @@ export function ProjectLens(props: {
         }
       });
     }
+    body.push(h('p', { key: 'timer-sorting-notice', style: MUTED }, TIMER_SORTING_NOTICE));
     if (project.queue !== null) {
       body.push(h('div', { key: 'cap-next', style: CAPTION }, 'Up next'));
       const age = ageShown ? null : readAge;

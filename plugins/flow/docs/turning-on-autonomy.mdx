@@ -234,14 +234,14 @@ In DorkOS, each project has one dial in its Flow settings: **Ask me first**, **T
 **Just do it**. It decides who answers each kind of ask, and whatever you pick, someone checks.
 
 - **Ask me first.** Flow asks you in the Activity inbox before it ships finished work, and an
-  agent's question waits for you. New ideas wait until you press **Sort them**, and failing checks
-  until you press **Fix it**.
+  agent's question waits for you. Failing checks wait until you press **Fix it**.
 - **Tell me after.** The reviewer agent ships work it reviewed clean. An agent's question shows its
   own pick and a deadline, and if you haven't answered by then, the agent goes with its pick. Flow
-  sorts new ideas each morning and fixes failing checks by itself. Each of these leaves an unread
-  note in Activity.
+  fixes failing checks by itself. These actions leave unread notes in Activity.
 - **Just do it.** The same, with quiet notes, and agents go with their own pick without asking,
   writing down why.
+
+Sort ideas with `/flow:triage`: the panel's sorting and idle-queue prompts are off.
 
 **Where it starts:** a new project starts at **Tell me after**, so its reviewer agent can ship
 without asking you. A project flow already worked in stays at **Ask me first** until you choose,

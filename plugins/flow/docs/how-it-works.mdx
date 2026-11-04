@@ -85,7 +85,7 @@ interface DispatchOutcome {
 }
 ```
 
-`starved` is the G3 contract in one boolean: the loop now surfaces "0 ready, N shapeable: run a triage pass?" instead of stopping silently.
+`starved` is the G3 contract in one boolean: the terminal loop surfaces "0 ready, N shapeable: run a triage pass?" instead of stopping silently.
 
 **`resolveCommsChannel`** gained an `identityMode` input and a third channel. A parked question routes by where the agent is and who it is: a live session asks interactively; an unattended two-account agent uses `comment-and-assign`; an unattended **shared-account** agent uses `comment-and-nudge`: a durable `agent/needs-input` comment plus an out-of-band nudge promoted to the primary attention channel (Relay / Telegram / chat), because in shared mode an assignment to yourself is invisible.
 
