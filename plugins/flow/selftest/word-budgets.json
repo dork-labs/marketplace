@@ -242,5 +242,9 @@
   "skills/verifying-work/SKILL.md": {
     "baseline": 1255,
     "target": 1255
+  },
+  "docs/project-hooks.mdx": {
+    "baseline": 377,
+    "target": 377
   }
 }
