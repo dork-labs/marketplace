@@ -701,7 +701,7 @@ export function parseLabelledAt(out: string, label: string): string | null {
  */
 export const FORCE_PUSHES_QUERY =
   'query($owner:String!,$name:String!,$number:Int!){repository(owner:$owner,name:$name){pullRequest(number:$number){' +
-  'timelineItems(last:100,itemTypes:[HEAD_REF_FORCE_PUSHED_EVENT]){totalCount nodes{... on HeadRefForcePushedEvent{createdAt afterCommit{oid}}}}}}}';
+  'timelineItems(last:100,itemTypes:[HEAD_REF_FORCE_PUSHED_EVENT]){filteredCount nodes{... on HeadRefForcePushedEvent{createdAt afterCommit{oid}}}}}}}';
 
 /** One check suite on a commit: when it was made, and for which branch. */
 export interface SuiteSeen {
@@ -752,7 +752,11 @@ export function parseForcePushes(raw: unknown): ForcePush[] | null {
     record(record(record(record(raw)?.data)?.repository)?.pullRequest)?.timelineItems
   );
   if (items === undefined || !Array.isArray(items.nodes)) return null;
-  if (typeof items.totalCount !== 'number' || items.totalCount !== items.nodes.length) return null;
+  // filteredCount, not totalCount: totalCount counts the PR's whole timeline
+  // whatever `itemTypes` asks for, so it never matches on a PR with a label.
+  if (typeof items.filteredCount !== 'number' || items.filteredCount !== items.nodes.length) {
+    return null;
+  }
   const pushes: ForcePush[] = [];
   for (const node of items.nodes) {
     const createdAt = str(record(node)?.createdAt);
@@ -801,6 +805,74 @@ export function headArrival(
   if (first === undefined) return null;
   if (last !== undefined && Date.parse(first) <= Date.parse(last.createdAt)) return null;
   return first;
+}
+
+/** The newest change to a branch, from GitHub's repository activity feed. */
+export interface BranchChange {
+  /** What happened: `push`, `force_push`, `branch_creation` and others. */
+  type: string;
+  /** The ref it happened to. */
+  ref: string;
+  /** The commit it left, or `null`. */
+  after: string | null;
+  /** When GitHub recorded it. */
+  at: string;
+}
+
+/** The feed's changes that leave a commit as the head by a push to the branch. */
+const PUSH_CHANGES: ReadonlySet<string> = new Set(['push', 'force_push', 'branch_creation']);
+
+/**
+ * Parse `repos/{repo}/activity?ref=…&direction=desc&per_page=1`'s answer.
+ *
+ * @param raw - The parsed JSON.
+ * @returns The newest change, or `null` when there is none or it is not in the
+ *   shape asked for: unknown, never "no change".
+ */
+export function parseBranchChange(raw: unknown): BranchChange | null {
+  if (!Array.isArray(raw)) return null;
+  const entry = record(raw[0]);
+  const type = str(entry?.activity_type);
+  const ref = str(entry?.ref);
+  const at = str(entry?.timestamp);
+  if (type === undefined || ref === undefined || at === undefined) return null;
+  if (!Number.isFinite(Date.parse(at))) return null;
+  return { type, ref, after: str(entry?.after)?.toLowerCase() ?? null, at };
+}
+
+/**
+ * When `sha` last arrived as the head of `branch`, from the branch's activity
+ * feed. GitHub stamps the feed when it takes the push, so a commit's own dates
+ * cannot move it. Only the branch's newest change counts: it must be a push to
+ * this branch that left `sha`, after any force-push that left another commit. A
+ * feed behind a new push shows another commit, which is unknown. A later
+ * force-push that left `sha` moves the arrival to its own time, so a feed that
+ * missed it cannot make the head look older.
+ *
+ * @param change - The branch's newest change, or `null` when unknown.
+ * @param forcePushes - The PR's force-pushes, read in full.
+ * @param sha - The head.
+ * @param branch - The PR's head branch.
+ * @returns The arrival time, or `null`.
+ */
+export function arrivalFromChange(
+  change: BranchChange | null,
+  forcePushes: readonly ForcePush[],
+  sha: string,
+  branch: string
+): string | null {
+  if (change === null || !PUSH_CHANGES.has(change.type)) return null;
+  if (change.ref !== `refs/heads/${branch}` || change.after !== sha.toLowerCase()) return null;
+  const arrived = Date.parse(change.at);
+  const moved = forcePushes.filter((push) => push.after !== sha.toLowerCase());
+  if (moved.some((push) => Date.parse(push.createdAt) >= arrived)) return null;
+  let latest = change.at;
+  for (const push of forcePushes) {
+    if (push.after === sha.toLowerCase() && Date.parse(push.createdAt) > Date.parse(latest)) {
+      latest = push.createdAt;
+    }
+  }
+  return latest;
 }
 
 /**
@@ -1243,7 +1315,28 @@ export function createGithubForge(options: GithubForgeOptions): Forge {
         ],
         `reading the force-pushes of ${target.repo}#${pr}`
       );
-      return headArrival(parseSuites(suitesOut), parseForcePushes(raw), sha, branch);
+      const suites = parseSuites(suitesOut);
+      const forcePushes = parseForcePushes(raw);
+      if (forcePushes === null) return null;
+      const ref = encodeURIComponent(`refs/heads/${branch}`);
+      const change = parseBranchChange(
+        await ghJson(
+          [
+            'api',
+            ...hostArgs,
+            `repos/${target.repo}/activity?ref=${ref}&direction=desc&per_page=1`,
+          ],
+          `reading the pushes to ${target.repo} ${branch}`
+        )
+      );
+      const pushed = arrivalFromChange(change, forcePushes, sha, branch);
+      if (pushed === null || !suites.some((suite) => suite.headBranch === branch)) return pushed;
+      // A suite says when a commit first came, the feed when it last did, so a
+      // commit force-pushed away before the PR opened can't come back behind an
+      // old suite. Whichever is later: the label has to come after both.
+      const seen = headArrival(suites, forcePushes, sha, branch);
+      if (seen === null) return null;
+      return Date.parse(seen) > Date.parse(pushed) ? seen : pushed;
     },
 
     async mergeInfo(pr) {

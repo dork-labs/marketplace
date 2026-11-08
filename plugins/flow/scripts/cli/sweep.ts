@@ -20,6 +20,8 @@
  * @module @dorkos/flow/cli/sweep
  */
 
+import { withArmRefusal } from '../flow-run.ts';
+import { openFlowStateFile } from '../flow-state-file.ts';
 import { PausedError } from '../errors.ts';
 import type { OpenPr } from '../forge/open-prs.ts';
 import { ForgeError, type Forge } from '../forge/types.ts';
@@ -57,6 +59,19 @@ export interface SweepResult {
  * @param shared - The required checks, labels, route policy and whether to arm.
  * @returns What happened.
  */
+/** An armed PR's run no longer stands on a refusal (DOR-3768). The arm has already happened. */
+async function clearRefusal(ctx: VerbContext, branch: string): Promise<void> {
+  try {
+    const store = openFlowStateFile(ctx.projectDir, { now: ctx.now });
+    for (const run of Object.values(store.read())) {
+      if (run.branch !== branch || run.armRefusal === undefined) continue;
+      await store.updateRun(run.issueId, (current) => withArmRefusal(current, undefined));
+    }
+  } catch {
+    // Only flow status's words stay old; the PR is armed all the same.
+  }
+}
+
 async function sweepOne(
   ctx: VerbContext,
   forge: Forge,
@@ -131,6 +146,7 @@ async function sweepOne(
       };
     }
     await forge.arm(pr.number, head, guard.merge);
+    await clearRefusal(ctx, facts.headRefName);
     return { ...base, head, route, outcome: 'armed' };
   } catch (error) {
     // One PR that cannot be read or armed is reported, never the end of the sweep.

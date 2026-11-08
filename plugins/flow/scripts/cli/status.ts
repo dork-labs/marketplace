@@ -42,7 +42,7 @@ import { isTeamSource, readIntakeMarks, resolveIntakeSources, sourceKey } from '
 import { formatWhen } from '../question.ts';
 import { withSetupNudge } from './setup-nudge.ts';
 import { PreconditionError } from '../errors.ts';
-import type { FlowRun } from '../flow-run.ts';
+import { currentArmRefusal, type FlowRun } from '../flow-run.ts';
 import { openFlowStateFile } from '../flow-state-file.ts';
 import { limitLine } from '../drain/handoff-exec.ts';
 import { readLastPass, unsupervisedLanes, type Unsupervised } from '../drain/last-pass.ts';
@@ -106,6 +106,8 @@ export interface InFlightEntry {
   workerPid: number | null;
   /** Whether the tracker item carries `agent/claimed`. */
   claimed: boolean;
+  /** Why flow won't arm its PR at the commit that would merge, or `null`. */
+  armRefused: { reason: string; detail: string } | null;
   /**
    * For a `flow drain` run: its phase, and what each session's launcher says it
    * is doing (`busy`, `idle`, `exited`, `limited`, `unknown`, `starting`, or
@@ -508,6 +510,7 @@ function entry(
   run: FlowRun | undefined,
   drain: InFlightEntry['drain']
 ): InFlightEntry {
+  const refused = run === undefined ? null : currentArmRefusal(run);
   return {
     identifier,
     title: item?.title ?? null,
@@ -521,6 +524,7 @@ function entry(
     sessionId: run?.sessionId ?? null,
     workerPid: run?.workerPid ?? null,
     claimed: Array.isArray(item?.labels) && item.labels.includes(AGENT_CLAIMED),
+    armRefused: refused === null ? null : { reason: refused.reason, detail: refused.detail },
     drain,
   };
 }
@@ -605,9 +609,11 @@ function render(
       `  ${f.identifier}`,
       f.title ?? '(not in the backlog)',
       f.stage ?? '-',
-      f.drain !== null
-        ? `drain ${f.drain.phase}${f.drain.worker ? `, worker ${f.drain.worker}` : ''}${f.drain.reviewer ? `, reviewer ${f.drain.reviewer}` : ''}${f.drain.limit ? `; ${f.drain.limit}` : ''}${f.drain.waitingSince ? `; waiting on a person since ${ago(f.drain.waitingSince, now)}` : ''}`
-        : (f.status ?? (f.claimed ? 'claimed, no run' : '-')),
+      `${
+        f.drain !== null
+          ? `drain ${f.drain.phase}${f.drain.worker ? `, worker ${f.drain.worker}` : ''}${f.drain.reviewer ? `, reviewer ${f.drain.reviewer}` : ''}${f.drain.limit ? `; ${f.drain.limit}` : ''}${f.drain.waitingSince ? `; waiting on a person since ${ago(f.drain.waitingSince, now)}` : ''}`
+          : (f.status ?? (f.claimed ? 'claimed, no run' : '-'))
+      }${f.armRefused !== null ? `; not armed: ${f.armRefused.detail}` : ''}`,
       f.account ?? '-',
       f.host ?? '-',
       [f.worktree, f.branch].filter(Boolean).join(' @ ') || '-',

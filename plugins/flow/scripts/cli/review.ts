@@ -52,7 +52,7 @@ import path from 'node:path';
 
 import { stopInForce } from '../autonomy.ts';
 import { BusyError, ConfigError, PreconditionError, UsageError } from '../errors.ts';
-import type { FlowRun, RunShipWait } from '../flow-run.ts';
+import { armRefusalFor, withArmRefusal, type FlowRun, type RunShipWait } from '../flow-run.ts';
 import { openFlowStateFile, type FlowStateFile } from '../flow-state-file.ts';
 import { ForgeError, type Forge, type ReviewOutcome } from '../forge/types.ts';
 import type { ArmMerge } from '../land/arm-decision.ts';
@@ -557,6 +557,8 @@ async function review(ctx: VerbContext): Promise<VerbResult> {
     // The merge route the guard checked (DOR-3256); nothing arms without one.
     let armMerge: ArmMerge | null = null;
     let armRefused: { reason: string; detail: string } | null = null;
+    /** The commit a refusal is about. */
+    let refusedAt: string | null = null;
     let handToDrain = false;
     const willArm = pr !== null && target.forge !== null && config.gates.review.mergeOnApproval;
     if (willArm && pr !== null && target.forge !== null) {
@@ -599,6 +601,7 @@ async function review(ctx: VerbContext): Promise<VerbResult> {
           if (guard.ok) {
             armMerge = guard.merge;
           } else {
+            refusedAt = armAt;
             armAt = null;
             // A drain run approved at its reviewed commit: the drain runs the
             // checks and arms it once they pass. That is a hand-off, not a
@@ -697,6 +700,18 @@ async function review(ctx: VerbContext): Promise<VerbResult> {
             `the approval is posted, but flow could not record that the drain should arm PR #${pr.number}; arm it yourself`
           );
         }
+      }
+      // Kept for flow status and the panel's Ship row (DOR-3768).
+      if (armRefused !== null || existing.armRefusal !== undefined) {
+        const refused = armRefused;
+        await store.updateRun(existing.issueId, (current) =>
+          withArmRefusal(
+            current,
+            refused !== null && refusedAt !== null
+              ? armRefusalFor(refusedAt, refused, ctx.now())
+              : undefined
+          )
+        );
       }
       recordEvent(
         ctx,
