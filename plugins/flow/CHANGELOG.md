@@ -4,6 +4,13 @@ Installs of this plugin are pinned to a commit SHA, so a fix here does not reach
 you until you **reinstall it** (Marketplace → flow → reinstall, or re-run your
 `--plugin-dir` checkout's `git pull`). Each entry below says whether that matters.
 
+## 0.92.0
+
+**Flow refuses to arm when it cannot read a PR's labels. Reinstall to get it.**
+
+- Missing, null or non-array label data, or an entry without a readable name, now means unknown. It used to look like no labels, or a partial list, so a hold could go unseen. The arm guard refuses as `labels-unreadable`, saying it could not read the labels and cannot rule out a hold. It checks again after pre-arm checks. The sweep also leaves unreadable labels uncleared.
+- A real empty label array still means no labels; the existing review and security-label rules still apply.
+
 ## 0.91.0
 
 **If you work alone, flow now tells you what to do when it won't arm a PR, instead of telling you to wait for a team you don't have (DOR-3768). It also fixes a bug, there since 0.61.0, that made flow refuse every `security-reviewed` label it had to check, on every repo. Since 0.86.0 that has meant every label (DOR-3793). Reinstall to get it.**

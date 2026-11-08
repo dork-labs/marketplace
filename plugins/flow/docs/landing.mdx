@@ -13,12 +13,13 @@ Flow doesn't arm a PR when:
 
 - a required check failed or was cancelled (GitHub waits for one still running);
 - the head isn't the reviewed commit, or none was recorded;
-- it doesn't target the default branch GitHub names (a stacked PR aimed at its parent doesn't);
-- it wouldn't squash, which the post-merge check needs: a merge queue must squash (flow passes no method flag), or with none the repo must allow it (flow passes `--squash`);
+- it targets a branch other than GitHub's default;
+- it wouldn't squash: a queue must squash (flow passes no method flag); without a queue, the repo must allow `--squash`;
 - it has no `security-reviewed` label a person added after the head arrived (your own approval needs it only on a security path, unless the drain arms it), or no such `security-deep-reviewed` on a `review:deep` PR. Read [the label guide](./security-label.mdx);
 - a release freeze is on;
 - it comes from a fork;
 - it changes dependencies while another such PR is queued or armed;
+- its labels are unreadable (`labels-unreadable`); an empty array means none;
 - it's closed, a draft, held (`hold`, `do-not-merge`, `wip`, `blocked`), or a reviewer asked for changes.
 
 Manifests, lockfiles, build wrappers (`gradlew`, `mvnw`), toolchains (`.cargo/config`, `rust-toolchain`), patches (any `patches/`) and `.agents/flow/config.json` count as security paths, any case, as does your own list in `land.securityPaths`.
