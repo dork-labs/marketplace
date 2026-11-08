@@ -23,7 +23,7 @@ It is **PM-agnostic**: the engine speaks a generic work model and generic verbs,
 
 `/flow` is a **self-feeding, self-unblocking loop**. Five properties define it:
 
-- **Self-feeding.** Every shaping stage produces the readiness signal the next stage needs, so the dispatch queue refills itself. When the queue does empty with shapeable work behind it, the engine **says so** (`0 ready, N shapeable: run a triage pass?`) instead of stopping silently.
+- **Self-feeding.** Every shaping stage produces the readiness signal the next stage needs, so the dispatch queue refills itself. During `/flow auto`, an empty queue with shapeable work is reported (`0 ready, N shapeable: run a triage pass?`) rather than silently stopping.
 - **Self-unblocking.** When the engine genuinely needs you, it parks a durable question on the right channel, pings you out of band, and **resumes by polling** when you reply. No babysitting, and the same question is never asked twice.
 - **Autonomous by default.** The engine can run the full spine on its own. No human is required to _start_ any stage.
 - **Uncertainty-gated, not stage-gated.** A human is pulled in by genuine uncertainty (and by a small, fixed safety floor), never by which stage the work is in. This is why IDEATE asks freely while EXECUTE asks rarely: it is one rule, not a per-stage policy.

@@ -14,7 +14,7 @@
 import { lstatSync, mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 
-import { UsageError } from '../errors.ts';
+import { ConfigError, UsageError } from '../errors.ts';
 import { ensureIgnored } from '../git-exclude.ts';
 import { sourceKey, updateIntakeMarks } from '../intake.ts';
 import { resolveMainCheckout } from '../main-checkout.ts';
@@ -188,10 +188,18 @@ export async function run(ctx: VerbContext): Promise<VerbResult> {
 
   const adapter = await ctx.adapter();
   requireCapabilities(adapter, ['getBacklogSnapshot']);
-  const snapshot = await adapter.getBacklogSnapshot({ includeClosed });
+  const panelCache = ctx.args.flags['panel-cache'];
+  if (typeof panelCache === 'string' && includeClosed)
+    throw new UsageError('--panel-cache cannot include closed titles.');
+  if (typeof panelCache === 'string' && !adapter.getPanelSnapshot)
+    throw new ConfigError('This adapter does not support bounded panel reads.');
+  const snapshot =
+    typeof panelCache === 'string'
+      ? await adapter.getPanelSnapshot!(path.resolve(ctx.cwd, panelCache))
+      : await adapter.getBacklogSnapshot({ includeClosed });
 
   // `v` first, the same order `--json` prints, so the file equals the output.
-  await markTeamRead(ctx, snapshot);
+  if (!snapshot.panelOnly) await markTeamRead(ctx, snapshot);
 
   const { v, ...rest } = snapshot;
   const json = { v, ...rest };

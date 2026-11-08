@@ -63,6 +63,12 @@ export const VERBS: readonly VerbDefinition[] = [
     common: ['project'],
     flags: [
       {
+        name: 'panel-cache',
+        kind: 'string',
+        value: 'directory',
+        description: 'Shared bounded display cache; never use for writes.',
+      },
+      {
         name: 'include-closed',
         kind: 'boolean',
         description: 'Also pull closed items, as titles.',
@@ -307,6 +313,12 @@ export const VERBS: readonly VerbDefinition[] = [
     flags: [
       { name: 'strict', kind: 'boolean', description: 'Exit 1 when there is drift.' },
       { name: 'no-health', kind: 'boolean', description: 'Skip the Health block.' },
+      {
+        name: 'panel-cache',
+        kind: 'string',
+        value: 'directory',
+        description: 'Shared bounded display cache for missing-item checks.',
+      },
     ],
     load: () => import('./cli/status.ts'),
   },
@@ -1221,6 +1233,7 @@ export interface ClassifiedError {
    * `not-waiting` or `busy` (`errors.ts`). The JSON envelope carries it, so a caller (the Flow
    * extension) can tell a blip from something only a person can fix.
    */
+  retryAt?: string;
   kind?: TrackerErrorKind | 'person-gate' | 'settled' | 'not-waiting' | 'busy';
 }
 
@@ -1250,7 +1263,12 @@ export function classifyError(error: unknown, flowRoot: string): ClassifiedError
     return { code: EXIT.dependency, message: `run "npm install --omit=dev" in ${flowRoot}` };
   }
   if (error instanceof TrackerError) {
-    return { code: error.exitCode, message: error.message, kind: error.kind };
+    return {
+      code: error.exitCode,
+      message: error.message,
+      kind: error.kind,
+      retryAt: error.retryAt,
+    };
   }
   if (
     error instanceof PersonGateError ||
@@ -1315,8 +1333,8 @@ export async function main(argv: readonly string[], deps: MainDeps): Promise<num
     journalRun(run, elapsed, code, { runtime: result.runtime, item: result.item });
     return code;
   } catch (error) {
-    const { code, message, kind } = classifyError(error, flowRoot);
-    output.error(code, message, kind);
+    const { code, message, kind, retryAt } = classifyError(error, flowRoot);
+    output.error(code, message, kind, retryAt);
     if (run !== undefined) journalRun(run, elapsed, code, { error });
     return code;
   }
@@ -1360,7 +1378,18 @@ function journalRun(
     const item = identifier === undefined ? {} : { item: identifier };
     const ms = Math.max(0, Math.round(elapsed() - run.startedMs));
     if (recordsVerbRun(verb.name, ctx.args.positionals, code)) {
-      recordEvent(ctx, { kind: 'verb', verb: verb.name, ms, exit: code, ...item }, runtime);
+      recordEvent(
+        ctx,
+        {
+          kind: 'verb',
+          verb: verb.name,
+          ms,
+          exit: code,
+          ...item,
+          ...(error instanceof TrackerError ? { reason: error.kind } : {}),
+        },
+        runtime
+      );
     }
     if (code === EXIT.internal) {
       const message = error instanceof Error ? error.message : String(error);

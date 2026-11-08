@@ -111,7 +111,7 @@ export interface FlowCondition {
   /** Whether an ask in the inbox is live for it. */
   escalated: boolean;
   /** For nothing-ready: items waiting to be sorted. For unsupervised: the lanes nothing watches. */
-  detail: { untriaged?: number; lanes?: number };
+  detail: { untriaged?: number; lanes?: number; reason?: string; retryAt?: string };
 }
 
 /**
@@ -172,6 +172,8 @@ export interface FlowProject {
   runs: FlowRunRow[];
   /** "Up next", or `null` when flow cannot read it from here (or has not yet). */
   queue: { next: QueueItem[]; more: number } | null;
+  /** The saved snapshot's fetch time, including when the current read fails. */
+  lastReadAt?: string | null;
   /**
    * Whether flow reads "Up next" on its own: `read` (the adapter flow ships,
    * over `cli`), `agent-only` (the `mcp` transport works only inside an
@@ -660,8 +662,20 @@ export function conditionsOf(
       conditions.push({ kind: 'sign-in', since, escalated: escalated('sign-in'), detail: {} });
     } else if (kind === 'settings') {
       conditions.push({ kind: 'settings-problem', since, escalated: false, detail: {} });
-    } else if (age >= UNREACHABLE_SHOWN_AFTER_MS) {
-      conditions.push({ kind: 'tracker-unreachable', since, escalated: false, detail: {} });
+    } else if (
+      kind === 'rate-limited' ||
+      kind === 'read-limit' ||
+      age >= UNREACHABLE_SHOWN_AFTER_MS
+    ) {
+      conditions.push({
+        kind: 'tracker-unreachable',
+        since,
+        escalated: false,
+        detail:
+          kind === 'rate-limited' || kind === 'read-limit'
+            ? { reason: kind, retryAt: read.failure.retryAt }
+            : {},
+      });
     }
   }
   const ideas = extra.ideas;
@@ -794,6 +808,7 @@ export function buildProject(input: {
     pause,
     runs,
     queue: read?.queue ?? null,
+    lastReadAt: read?.at ?? null,
     upNext: upNextOf(entry, extras.ownAdapterAllowed === true),
     capacity: { busy, slots },
     conditions: conditionsOf(pause, read, now, {

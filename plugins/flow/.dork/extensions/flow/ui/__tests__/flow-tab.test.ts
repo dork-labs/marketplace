@@ -554,3 +554,132 @@ describe('tracker links', () => {
     expect(screen.queryByRole('link')).toBeNull();
   });
 });
+
+it('shows the rate-limit cause and stale-list warning in the project panel', async () => {
+  await renderTab(
+    flowModel([
+      flowProject('dorkos', {
+        queue: { next: [{ identifier: 'SYN-1', title: 'A sample task' }], more: 0 },
+        conditions: [
+          {
+            kind: 'tracker-unreachable',
+            since: '2026-01-01T00:00:00.000Z',
+            escalated: false,
+            detail: { reason: 'rate-limited' },
+          },
+        ],
+      }),
+    ]),
+    host(DORKOS)
+  );
+  expect(
+    screen.getByText(/Linear is limiting reads.*Flow is waiting.*list may be out of date/)
+  ).toBeTruthy();
+  expect(screen.queryByText(/hasn't answered since/)).toBeNull();
+});
+
+it.each([true, false])(
+  'keeps the saved-list state explicit during limiting reads (saved=%s)',
+  async (saved) => {
+    const lastReadAt = new Date(Date.now() - 12 * 60_000).toISOString();
+    await renderTab(
+      flowModel([
+        flowProject('synthetic', {
+          lastReadAt: saved ? lastReadAt : null,
+          queue: saved
+            ? { next: [{ identifier: 'SYN-1', title: 'Sketch a sample screen' }], more: 0 }
+            : null,
+          conditions: [
+            {
+              kind: 'tracker-unreachable',
+              since: lastReadAt,
+              escalated: false,
+              detail: { reason: 'rate-limited' },
+            },
+          ],
+        }),
+      ]),
+      host({ name: 'synthetic', root: '/work/synthetic' } as ProjectRef)
+    );
+    const line = saved
+      ? 'Linear is limiting reads, so Flow is waiting. This list may be out of date.'
+      : 'Linear is limiting reads, so Flow is waiting.';
+    expect(screen.getByText(line)).toBeTruthy();
+    expect(line.split(/\s+/).length).toBeLessThanOrEqual(16);
+    if (saved) {
+      expect(screen.getByText('SYN-1 Sketch a sample screen')).toBeTruthy();
+      expect(screen.getByText('Last read 12 minutes ago.')).toBeTruthy();
+      expect(screen.getByText(line).nextElementSibling?.textContent).toBe(
+        'Last read 12 minutes ago.'
+      );
+    } else {
+      expect(screen.getByText('No saved list yet.')).toBeTruthy();
+      expect(screen.getByText("It'll show when Linear answers.")).toBeTruthy();
+      expect(screen.queryByText(/This list may be out of date/)).toBeNull();
+      expect(screen.queryByText('Nothing ready to work on.')).toBeNull();
+      expect(screen.queryByText(/^Last read /)).toBeNull();
+    }
+  }
+);
+
+it.each([
+  ['tracker-unreachable', /Linear hasn't answered since/],
+  ['settings-problem', /Flow's settings in synthetic have a problem/],
+] as const)('keeps the saved list and its age while reads fail (%s)', async (kind, cause) => {
+  const lastReadAt = new Date(Date.now() - 12 * 60_000).toISOString();
+  await renderTab(
+    flowModel([
+      flowProject('synthetic', {
+        lastReadAt,
+        queue: { next: [{ identifier: 'SYN-1', title: 'Sketch a sample screen' }], more: 0 },
+        conditions: [{ kind, since: lastReadAt, escalated: false, detail: {} }],
+      }),
+    ]),
+    host({ name: 'synthetic', root: '/work/synthetic' } as ProjectRef)
+  );
+  expect(screen.getByText(cause)).toBeTruthy();
+  expect(screen.getByText('SYN-1 Sketch a sample screen')).toBeTruthy();
+  expect(screen.getByText('Last read 12 minutes ago.')).toBeTruthy();
+});
+
+it('shows only the age notice for a healthy approximate list', async () => {
+  const at = new Date(Date.now() - 12 * 60_000).toISOString();
+  await renderTab(
+    flowModel([
+      flowProject('synthetic', {
+        lastReadAt: at,
+        queue: { next: [{ identifier: 'SYN-1', title: 'A sample task' }], more: 0 },
+      }),
+    ]),
+    host({ root: '/work/synthetic', name: 'synthetic' })
+  );
+  expect(screen.getByText('Last read 12 minutes ago.')).toBeTruthy();
+  expect(
+    screen.queryByText(/limiting reads|may be out of date|Saved list;|Relationships reconcile/)
+  ).toBeNull();
+});
+
+it.each([true, false])(
+  'shows the designer notice below Running without warning colour (saved=%s)',
+  async (saved) => {
+    await renderTab(
+      flowModel([
+        flowProject('synthetic', {
+          queue: saved
+            ? { next: [{ identifier: 'SYN-1', title: 'A sample task' }], more: 0 }
+            : null,
+        }),
+      ]),
+      host({ name: 'synthetic', root: '/work/synthetic' } as ProjectRef)
+    );
+    const notice = screen.getByText(
+      "Daily sorting is off for now. Flow won't ask when nothing's ready."
+    );
+    const running = screen.getByText(NOTHING_RUNNING_TEXT);
+    expect(running.nextElementSibling).toBe(notice);
+    expect(notice.tagName).toBe('P');
+    expect(notice.style.color).toBe(running.style.color);
+    expect(notice.getAttribute('role')).not.toBe('alert');
+    expect(notice.nextElementSibling?.textContent).toBe(saved ? 'Up next' : 'No saved list yet.');
+  }
+);

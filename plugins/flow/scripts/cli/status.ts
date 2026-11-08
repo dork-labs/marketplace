@@ -33,6 +33,7 @@
  * @module @dorkos/flow/cli/status
  */
 
+import { lastReadLine, savedReadAt } from '../read-age.ts';
 import { readFileSync } from 'node:fs';
 import path from 'node:path';
 
@@ -41,7 +42,7 @@ import { loadConfig } from '../config-load.ts';
 import { isTeamSource, readIntakeMarks, resolveIntakeSources, sourceKey } from '../intake.ts';
 import { formatWhen } from '../question.ts';
 import { withSetupNudge } from './setup-nudge.ts';
-import { PreconditionError } from '../errors.ts';
+import { TrackerError, PreconditionError } from '../errors.ts';
 import { currentArmRefusal, type FlowRun } from '../flow-run.ts';
 import { openFlowStateFile } from '../flow-state-file.ts';
 import { limitLine } from '../drain/handoff-exec.ts';
@@ -183,6 +184,8 @@ const CLOSED = { stateCategory: 'completed' } as const;
  */
 function lazyItemReader(ctx: VerbContext): (identifier: string) => Promise<WorkItem | undefined> {
   let adapter: Promise<CodeAdapter | null> | undefined;
+  let reads = 0;
+  const cache = ctx.args.flags['panel-cache'];
   return async (identifier) => {
     adapter ??= ctx.adapter().then(
       (loaded) => (loaded.capabilities.includes('getItem') ? loaded : null),
@@ -191,8 +194,13 @@ function lazyItemReader(ctx: VerbContext): (identifier: string) => Promise<WorkI
     const loaded = await adapter;
     if (loaded === null) return undefined;
     try {
+      if (typeof cache === 'string') {
+        if (!loaded.getPanelItem || reads++ >= 10) return undefined;
+        return await loaded.getPanelItem(path.resolve(ctx.cwd, cache), identifier);
+      }
       return await loaded.getItem(identifier);
-    } catch {
+    } catch (error) {
+      if (typeof cache === 'string' && error instanceof TrackerError) throw error;
       return undefined;
     }
   };
@@ -313,9 +321,13 @@ export async function run(ctx: VerbContext): Promise<VerbResult> {
 
   let runs: FlowRun[] = Object.values(store.read());
   let items: WorkItem[];
+  let display: { approximate: true; lastReadAt: string | null } | undefined;
   let question: ParkedEntry['question'] = null;
   if (ctx.snapshotPath !== undefined) {
-    items = readSnapshotFile(ctx.snapshotPath).items;
+    const snapshot = readSnapshotFile(ctx.snapshotPath, true);
+    if (snapshot.panelOnly)
+      display = { approximate: true, lastReadAt: savedReadAt(snapshot.fetchedAt) };
+    items = snapshot.items;
     if (focus !== undefined) items = items.filter((item) => item.identifier === focus);
   } else if (focus !== undefined) {
     const adapter = await ctx.adapter();
@@ -453,8 +465,24 @@ export async function run(ctx: VerbContext): Promise<VerbResult> {
     ctx,
     {
       exitCode: failed ? 1 : 0,
-      json: { ok: !failed, paused, drain, inFlight, ended, parked, drift, health, unsupervised },
-      text: render({ paused, drain, inFlight, ended, parked, drift, health, unsupervised }, now),
+      json: {
+        ...display,
+        ok: !failed,
+        paused,
+        drain,
+        inFlight,
+        ended,
+        parked,
+        drift,
+        health,
+        unsupervised,
+      },
+      text: [
+        display ? lastReadLine(display.lastReadAt, now, 'cli') : null,
+        render({ paused, drain, inFlight, ended, parked, drift, health, unsupervised }, now),
+      ]
+        .filter(Boolean)
+        .join('\n'),
     },
     roots
   );

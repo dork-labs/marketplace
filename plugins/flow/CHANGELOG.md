@@ -4,6 +4,16 @@ Installs of this plugin are pinned to a commit SHA, so a fix here does not reach
 you until you **reinstall it** (Marketplace → flow → reinstall, or re-run your
 `--plugin-dir` checkout's `git pull`). Each entry below says whether that matters.
 
+## 0.93.0
+
+- Explain that the panel timer's daily sorting and empty-queue prompts are off. Point the guides to manual triage and keep terminal-drain starvation reporting distinct.
+
+- Keep a saved panel list visible through failures and restarts, with its saved read time. Status and manual approximate next output also name that time. Approximate picks cannot recommend landing, assign accounts, drive sorting, or bypass a fresh claim.
+
+- Share panel reads across projects on the same tracker account and team. Cache answers for five minutes, rebuild the baseline daily, and bound incremental changes to one hundred items. Panel snapshots are approximate and refused by write paths.
+- Respect account-wide rate-limit cooldowns and reset times, including when a project is viewed. Show the reason in the panel using the reviewed limiting-reads wording.
+- Journal fixed tracker failure reasons and parent-observed killed reads without upstream text. Restrict the read route to shipped GraphQL queries.
+
 ## 0.92.0
 
 **Flow refuses to arm when it cannot read a PR's labels. Reinstall to get it.**

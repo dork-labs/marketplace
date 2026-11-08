@@ -7,10 +7,13 @@
  * read is over a minute old.
  */
 
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { readFileSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { ideasWaiting } from '../lib/conditions.ts';
+import { recordPanelFailure } from '../../../../scripts/panel-read-failure.ts';
+import { makeProject } from '../../../../engine-tests/cli/write-harness.ts';
 import type { ExecError, ExecFileLike } from '../lib/advisor.ts';
 import type { FlowProjectEntry } from '../lib/projects.ts';
 import {
@@ -55,7 +58,10 @@ interface Answer {
  * A fake `execFile` that answers `snapshot` and `next` from the script, holds
  * each call until `release`, and writes the snapshot file a real snapshot would.
  */
-function fakeExec(script: (verb: string, root: string) => Answer, opts: { hold?: boolean } = {}) {
+function fakeExec(
+  script: (verb: string, root: string) => Answer,
+  opts: { hold?: boolean; panelOnly?: boolean } = {}
+) {
   const calls: { verb: string; root: string; args: string[]; cwd?: string }[] = [];
   const held: (() => void)[] = [];
   const exec: ExecFileLike = (_file, args, execOpts, callback) => {
@@ -69,7 +75,11 @@ function fakeExec(script: (verb: string, root: string) => Answer, opts: { hold?:
         mkdirSync(path.dirname(out), { recursive: true });
         writeFileSync(
           out,
-          JSON.stringify({ team: { key: 'DOR', url: 'https://linear.app/t/DOR' } })
+          JSON.stringify({
+            fetchedAt: new Date(T0).toISOString(),
+            ...(opts.panelOnly ? { panelOnly: true } : {}),
+            team: { key: 'DOR', url: 'https://linear.app/t/DOR' },
+          })
         );
       }
       const error =
@@ -159,6 +169,8 @@ describe('TrackerReader', () => {
         '--json',
         '--out',
         file,
+        '--panel-cache',
+        path.join(dorkHome, 'flow', 'tracker-cache'),
         '--project',
         '/p',
       ],
@@ -249,9 +261,28 @@ describe('TrackerReader', () => {
       await settle();
       const file = path.join(dorkHome, 'flow', 'cache', projectIdOf(root), 'snapshot.json');
       expect(fake.calls.slice(2).map((call) => call.args.slice(2))).toEqual([
-        ['snapshot', '--json', '--out', file, '--project', root],
+        [
+          'snapshot',
+          '--json',
+          '--out',
+          file,
+          '--panel-cache',
+          path.join(dorkHome, 'flow', 'tracker-cache'),
+          '--project',
+          root,
+        ],
         expect.arrayContaining(['next']),
-        ['status', '--json', '--no-health', '--snapshot', file, '--project', root],
+        [
+          'status',
+          '--json',
+          '--no-health',
+          '--panel-cache',
+          path.join(dorkHome, 'flow', 'tracker-cache'),
+          '--snapshot',
+          file,
+          '--project',
+          root,
+        ],
       ]);
       expect(instance.closedRuns(root)).toEqual([{ identifier: 'DOR-7', sessionId: 's-7' }]);
       expect(instance.latest(root)?.failure).toBeNull();
@@ -517,4 +548,154 @@ describe('TrackerReader', () => {
     await settle();
     expect(fake.calls).toEqual([]);
   });
+});
+
+describe('failure cooldowns', () => {
+  it('viewing does not bypass the second failed read cooldown', async () => {
+    const fake = fakeExec(() => ({
+      code: 4,
+      stdout: JSON.stringify({ error: { kind: 'unreachable' } }),
+    }));
+    const clock = { now: T0 };
+    const { instance } = reader(fake.exec, clock);
+    instance.tick([project('/p')]);
+    await settle();
+    clock.now += 60_000;
+    instance.tick([project('/p')]);
+    await settle();
+    clock.now += 61_000;
+    instance.view('/p');
+    instance.tick([project('/p')]);
+    await settle();
+    expect(fake.calls).toHaveLength(2);
+  });
+  it('reports a rate limit immediately and honours its reset even when viewed', async () => {
+    const retryAt = new Date(T0 + 3_600_000).toISOString();
+    const fake = fakeExec(() => ({
+      code: 4,
+      stdout: JSON.stringify({ error: { kind: 'rate-limited', retryAt } }),
+    }));
+    const clock = { now: T0 };
+    const { instance } = reader(fake.exec, clock);
+    instance.tick([project('/p')]);
+    await settle();
+    expect(instance.latest('/p')?.failure).toMatchObject({ kind: 'rate-limited', retryAt });
+    clock.now += 20 * 60_000;
+    instance.view('/p');
+    instance.tick([project('/p')]);
+    await settle();
+    expect(fake.calls).toHaveLength(1);
+  });
+});
+
+it('a killed read leaves a fixed timeout reason in the project journal', async () => {
+  const p = makeProject();
+  try {
+    const exec: ExecFileLike = (_file, args, _opts, callback) => {
+      if (args[1].endsWith('panel-read-failure.ts')) {
+        expect(recordPanelFailure(args.slice(2), p.dir, () => new Date(T0))).toBe(true);
+        callback(null, '', '');
+        return;
+      }
+      queueMicrotask(() =>
+        callback(
+          Object.assign(new Error('private response with credential'), { killed: true }),
+          'private ticket text',
+          'secret'
+        )
+      );
+    };
+    const clock = { now: T0 };
+    const { instance } = reader(exec, clock);
+    instance.tick([project(p.dir)]);
+    await settle();
+    const text = readFileSync(path.join(p.dir, '.dork', 'flow', 'journal.jsonl'), 'utf8');
+    expect(text).not.toMatch(/private|credential|secret/);
+    expect(JSON.parse(text.trim())).toMatchObject({
+      kind: 'verb',
+      verb: 'snapshot',
+      exit: 4,
+      reason: 'timeout',
+    });
+    expect(instance.latest(p.dir)?.failure?.kind).toBe('unreachable');
+  } finally {
+    rmSync(p.dir, { recursive: true, force: true });
+  }
+});
+
+it('keeps the saved list and its actual fetch time across a restart followed by rate limiting', async () => {
+  const clock = { now: T0 };
+  const first = reader(
+    fakeExec((verb) => (verb === 'next' ? { code: 0, stdout: NEXT } : { code: 0 })).exec,
+    clock
+  ).instance;
+  first.tick([project('/p')]);
+  await settle();
+  const saved = first.latest('/p');
+  expect(saved?.queue?.next).toHaveLength(3);
+  clock.now += 3_600_000;
+  const restart = reader(
+    fakeExec(() => ({ code: 4, stdout: JSON.stringify({ error: { kind: 'rate-limited' } }) })).exec,
+    clock
+  ).instance;
+  restart.tick([project('/p')]);
+  await settle();
+  expect(restart.latest('/p')).toMatchObject({
+    at: saved!.at,
+    queue: saved!.queue,
+    failure: { kind: 'rate-limited' },
+  });
+});
+
+it.each([
+  [
+    'the tracker is unreachable',
+    { code: 4, stdout: JSON.stringify({ error: { kind: 'unreachable' } }) },
+    'unreachable',
+  ],
+  ['the read is killed', null, 'unreachable'],
+  ['the settings are broken', { code: 3 }, 'settings'],
+] as const)(
+  'keeps the saved list and its actual fetch time across a restart when %s',
+  async (_case, answer, kind) => {
+    const clock = { now: T0 };
+    const first = reader(
+      fakeExec((verb) => (verb === 'next' ? { code: 0, stdout: NEXT } : { code: 0 })).exec,
+      clock
+    ).instance;
+    first.tick([project('/p')]);
+    await settle();
+    const saved = first.latest('/p');
+    expect(saved?.queue?.next).toHaveLength(3);
+    clock.now += 3_600_000;
+    const exec: ExecFileLike =
+      answer === null
+        ? (_file, _args, _opts, callback) => {
+            queueMicrotask(() =>
+              callback(Object.assign(new Error('killed'), { killed: true }), '', '')
+            );
+          }
+        : fakeExec(() => answer).exec;
+    const restart = reader(exec, clock).instance;
+    restart.tick([project('/p')]);
+    await settle();
+    expect(restart.latest('/p')).toMatchObject({
+      at: saved!.at,
+      queue: saved!.queue,
+      failure: { kind },
+    });
+  }
+);
+
+it('does not let approximate queue counts drive sorting decisions', async () => {
+  const fake = fakeExec((verb) => (verb === 'next' ? { code: 0, stdout: NEXT } : { code: 0 }), {
+    panelOnly: true,
+  });
+  const { instance } = reader(fake.exec, { now: T0 });
+  instance.tick([project('/p')]);
+  await settle();
+  const read = instance.latest('/p');
+  expect(read?.queue?.next).toHaveLength(3);
+  expect(read?.facts).toBeNull();
+  expect(ideasWaiting(read)).toBeNull();
 });
