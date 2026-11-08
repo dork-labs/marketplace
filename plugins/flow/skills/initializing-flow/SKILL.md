@@ -122,8 +122,8 @@ assume); apply with `--yes`. Headless: skip.
 Only after 5a passes, report ready: the tracker, the account 5a resolved, the identity
 mode, the routing scope, the intake sources, the review posture and rubric path, each tier's model (or
 unbound), the entry points, a reminder to commit a generated adapter, and every headless
-assumption. Say too that flow merges by itself only after a person adds the
-`security-reviewed` label. Explain: a solo login hides whether an agent added it; the
+assumption. Say that flow merges by itself only after a person adds the
+`security-reviewed` label; an agent must not add it. A solo login hides who added it; the
 person keeps that promise. Point them to `<flow-root>/docs/security-label.mdx` for steps.
 
 **Honest failure.** A missing toolchain, a red adapter gate or a failed read stops setup
