@@ -516,7 +516,7 @@ describe('label history and when the head arrived', () => {
       expect(arrivalFromChange(null, pushes, SHA_A, 'b')).toBeNull();
     });
 
-    it('a force-push that left this head does not count against its own feed entry', () => {
+    it('a force-push that left this head never refuses it, and the later time wins', () => {
       // The feed and the timeline stamped one force-push a second apart, live.
       const pushes = [{ createdAt: '2026-09-05T10:00:01Z', after: SHA_A }];
       const change = {
@@ -525,7 +525,28 @@ describe('label history and when the head arrived', () => {
         after: SHA_A,
         at: '2026-09-05T10:00:00Z',
       };
-      expect(arrivalFromChange(change, pushes, SHA_A, 'b')).toBe('2026-09-05T10:00:00Z');
+      expect(arrivalFromChange(change, pushes, SHA_A, 'b')).toBe('2026-09-05T10:00:01Z');
+      expect(arrivalFromChange({ ...change, at: '2026-09-05T10:00:02Z' }, pushes, SHA_A, 'b')).toBe(
+        '2026-09-05T10:00:02Z'
+      );
+    });
+
+    it('a force-push back to this head that the feed missed still dates it', () => {
+      // A labelled, then a push to B and a force-push back to A, with the feed
+      // missing both: the arrival is the force-push, not the old feed entry.
+      const pushes = [
+        { createdAt: '2026-09-05T11:00:00Z', after: SHA_B },
+        { createdAt: '2026-09-05T12:00:00Z', after: SHA_A },
+      ];
+      const change = {
+        type: 'push',
+        ref: 'refs/heads/b',
+        after: SHA_A,
+        at: '2026-09-05T13:00:00Z',
+      };
+      expect(arrivalFromChange(change, pushes, SHA_A, 'b')).toBe('2026-09-05T13:00:00Z');
+      const stale = { ...change, at: '2026-09-05T10:00:00Z' };
+      expect(arrivalFromChange(stale, [pushes[1]], SHA_A, 'b')).toBe('2026-09-05T12:00:00Z');
     });
   });
 });

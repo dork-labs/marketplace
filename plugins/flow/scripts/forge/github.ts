@@ -845,7 +845,9 @@ export function parseBranchChange(raw: unknown): BranchChange | null {
  * feed. GitHub stamps the feed when it takes the push, so a commit's own dates
  * cannot move it. Only the branch's newest change counts: it must be a push to
  * this branch that left `sha`, after any force-push that left another commit. A
- * feed behind a new push shows another commit, which is unknown.
+ * feed behind a new push shows another commit, which is unknown. A later
+ * force-push that left `sha` moves the arrival to its own time, so a feed that
+ * missed it cannot make the head look older.
  *
  * @param change - The branch's newest change, or `null` when unknown.
  * @param forcePushes - The PR's force-pushes, read in full.
@@ -864,7 +866,13 @@ export function arrivalFromChange(
   const arrived = Date.parse(change.at);
   const moved = forcePushes.filter((push) => push.after !== sha.toLowerCase());
   if (moved.some((push) => Date.parse(push.createdAt) >= arrived)) return null;
-  return change.at;
+  let latest = change.at;
+  for (const push of forcePushes) {
+    if (push.after === sha.toLowerCase() && Date.parse(push.createdAt) > Date.parse(latest)) {
+      latest = push.createdAt;
+    }
+  }
+  return latest;
 }
 
 /**
