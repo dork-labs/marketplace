@@ -647,6 +647,46 @@ it('keeps the saved list and its actual fetch time across a restart followed by 
   });
 });
 
+it.each([
+  [
+    'the tracker is unreachable',
+    { code: 4, stdout: JSON.stringify({ error: { kind: 'unreachable' } }) },
+    'unreachable',
+  ],
+  ['the read is killed', null, 'unreachable'],
+  ['the settings are broken', { code: 3 }, 'settings'],
+] as const)(
+  'keeps the saved list and its actual fetch time across a restart when %s',
+  async (_case, answer, kind) => {
+    const clock = { now: T0 };
+    const first = reader(
+      fakeExec((verb) => (verb === 'next' ? { code: 0, stdout: NEXT } : { code: 0 })).exec,
+      clock
+    ).instance;
+    first.tick([project('/p')]);
+    await settle();
+    const saved = first.latest('/p');
+    expect(saved?.queue?.next).toHaveLength(3);
+    clock.now += 3_600_000;
+    const exec: ExecFileLike =
+      answer === null
+        ? (_file, _args, _opts, callback) => {
+            queueMicrotask(() =>
+              callback(Object.assign(new Error('killed'), { killed: true }), '', '')
+            );
+          }
+        : fakeExec(() => answer).exec;
+    const restart = reader(exec, clock).instance;
+    restart.tick([project('/p')]);
+    await settle();
+    expect(restart.latest('/p')).toMatchObject({
+      at: saved!.at,
+      queue: saved!.queue,
+      failure: { kind },
+    });
+  }
+);
+
 it('does not let approximate queue counts drive sorting decisions', async () => {
   const fake = fakeExec((verb) => (verb === 'next' ? { code: 0, stdout: NEXT } : { code: 0 }), {
     panelOnly: true,

@@ -622,6 +622,26 @@ it.each([true, false])(
   }
 );
 
+it.each([
+  ['tracker-unreachable', /Linear hasn't answered since/],
+  ['settings-problem', /Flow's settings in synthetic have a problem/],
+] as const)('keeps the saved list and its age while reads fail (%s)', async (kind, cause) => {
+  const lastReadAt = new Date(Date.now() - 12 * 60_000).toISOString();
+  await renderTab(
+    flowModel([
+      flowProject('synthetic', {
+        lastReadAt,
+        queue: { next: [{ identifier: 'SYN-1', title: 'Sketch a sample screen' }], more: 0 },
+        conditions: [{ kind, since: lastReadAt, escalated: false, detail: {} }],
+      }),
+    ]),
+    host({ name: 'synthetic', root: '/work/synthetic' } as ProjectRef)
+  );
+  expect(screen.getByText(cause)).toBeTruthy();
+  expect(screen.getByText('SYN-1 Sketch a sample screen')).toBeTruthy();
+  expect(screen.getByText('Last read 12 minutes ago.')).toBeTruthy();
+});
+
 it('shows only the age notice for a healthy approximate list', async () => {
   const at = new Date(Date.now() - 12 * 60_000).toISOString();
   await renderTab(
