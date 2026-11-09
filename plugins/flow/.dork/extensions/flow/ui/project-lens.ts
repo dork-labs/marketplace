@@ -152,10 +152,18 @@ export function conditionLine(
         hint: `In a chat in ${project.name}, run flow drain, or check that its drain schedule is on.`,
       };
     }
+    case 'agents-merge':
+      return {
+        text: `${project.name}: ${condition.detail.notice ?? `${AGENTS_MERGE_SHORT}.`}`,
+        hint: `To need your label on every PR again, set land.securityPaths.labelOn to "every-pr" in .agents/flow/config.json on the default branch.`,
+      };
     default:
       return null;
   }
 }
+
+/** The short form, shown beside another condition on the home and all-projects pages. */
+export const AGENTS_MERGE_SHORT = 'Agents may merge their own PRs here';
 
 /**
  * Why "Up next" is not shown, or `null` when it is (or simply not read yet).

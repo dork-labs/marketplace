@@ -29,7 +29,13 @@ describe('land config', () => {
   it('defaults to no checks, the built-in security paths only, and no reviewer', () => {
     expect(FlowConfigSchema.parse({}).land).toEqual({
       preArm: [],
-      securityPaths: { globs: [], pattern: null, label: 'security-reviewed', reviewer: null },
+      securityPaths: {
+        globs: [],
+        pattern: null,
+        label: 'security-reviewed',
+        reviewer: null,
+        labelOn: 'every-pr',
+      },
       reviewer: null,
     });
   });

@@ -100,7 +100,8 @@ function writeSentinel(value: unknown): void {
 async function status(
   argv: string[],
   backlog: FakeBacklog = { items: [] },
-  createLauncher?: MainDeps['createLauncher']
+  createLauncher?: MainDeps['createLauncher'],
+  runProcess: MainDeps['runProcess'] = async () => ({ code: 0, stdout: '', stderr: '' })
 ) {
   const fake = new FakeTracker({ user: { id: 'agent-1', name: 'Fake agent' }, ...backlog });
   let stdout = '';
@@ -112,7 +113,7 @@ async function status(
     stdout: { write: (chunk: string) => (stdout += chunk) },
     stderr: { write: (chunk: string) => (stderr += chunk) },
     createAdapter: async () => fake.adapter,
-    runProcess: async () => ({ code: 0, stdout: '', stderr: '' }),
+    runProcess,
     createLauncher,
     // A private OS home: the setup nudge looks for account folders there.
     // No DorkOS: Health's reads fail as unreachable, never the real one here.
@@ -745,6 +746,76 @@ describe('flow status', () => {
     const result = await status(['--no-health']);
     expect(result.code).toBe(0);
     expect(result.stdout.trim()).toBe('Nothing is in flight and no drain is live.');
+  });
+
+  // DOR-3768 condition 5: while agents may merge their own PRs, the pane says so first.
+  describe('land.securityPaths.labelOn', () => {
+    function writeConfig(file: string, labelOn: string): void {
+      const dir = path.join(project, '.agents', 'flow');
+      mkdirSync(dir, { recursive: true });
+      writeFileSync(
+        path.join(dir, file),
+        JSON.stringify({ land: { securityPaths: { labelOn } } }, null, 2)
+      );
+    }
+
+    it('says plainly, first, that agents may merge their own PRs, and why that is no boundary', async () => {
+      writeConfig('config.json', 'security-paths');
+      const text = await status(['--no-health']);
+      const [first] = text.stdout.split('\n\n');
+      expect(first).toMatch(/^Agents may merge their own PRs here/);
+      expect(first).toMatch(/A misled agent can merge a bad change that passes the checks/);
+      expect(first).toMatch(/Only a GitHub ruleset is a real boundary\.$/);
+      expect(first).not.toMatch(/\bsafe/i);
+      const json = await status(['--no-health', '--json']);
+      expect(json.json().labelOn).toBe('security-paths');
+    });
+
+    it('reads origin/HEAD too, so a setting that merged but was never pulled still shows', async () => {
+      const asked: string[][] = [];
+      const runProcess: MainDeps['runProcess'] = async (cmd, args) => {
+        asked.push([cmd, ...args]);
+        return cmd === 'git' && args[0] === 'show'
+          ? {
+              code: 0,
+              stdout: JSON.stringify({ land: { securityPaths: { labelOn: 'security-paths' } } }),
+              stderr: '',
+            }
+          : { code: 0, stdout: '', stderr: '' };
+      };
+      const result = await status(['--no-health'], { items: [] }, undefined, runProcess);
+      expect(result.stdout).toMatch(/^Agents may merge their own PRs here/);
+      expect(asked).toContainEqual([
+        'git',
+        'show',
+        'refs/remotes/origin/HEAD:.agents/flow/config.json',
+      ]);
+      expect(asked.some((a) => a.includes('fetch'))).toBe(false);
+    });
+
+    it('falls back to origin/main when origin/HEAD was never set', async () => {
+      const runProcess: MainDeps['runProcess'] = async (cmd, args) =>
+        cmd === 'git' &&
+        args[0] === 'show' &&
+        String(args[1]).startsWith('refs/remotes/origin/main:')
+          ? {
+              code: 0,
+              stdout: JSON.stringify({ land: { securityPaths: { labelOn: 'security-paths' } } }),
+              stderr: '',
+            }
+          : { code: 128, stdout: '', stderr: 'fatal: invalid object name' };
+      const result = await status(['--no-health'], { items: [] }, undefined, runProcess);
+      expect(result.stdout).toMatch(/^Agents may merge their own PRs here/);
+    });
+
+    it('says nothing by default, or when only config.local.json sets it (the guard ignores it)', async () => {
+      const plain = await status(['--no-health', '--json']);
+      expect(plain.json().labelOn).toBe('every-pr');
+      writeConfig('config.local.json', 'security-paths');
+      const local = await status(['--no-health']);
+      expect(local.stdout).not.toMatch(/Agents may merge/);
+      expect((await status(['--no-health', '--json'])).json().labelOn).toBe('every-pr');
+    });
   });
 
   it('exits 5 for an identifier that is neither in the backlog nor in a run', async () => {

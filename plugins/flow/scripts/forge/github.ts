@@ -707,6 +707,30 @@ export function parseLabelledAt(out: string, label: string): string | null {
 }
 
 /**
+ * Whether `label` was ever added, from the same label history
+ * {@link parseLabelledAt} reads: any `labeled` event for it, by anyone, even one
+ * removed since.
+ *
+ * @param out - The lines.
+ * @param label - The label, in any case.
+ * @returns `true` when any add is on record.
+ * @throws {ForgeError} On a line that is not such an object.
+ */
+export function parseLabelEverAdded(out: string, label: string): boolean {
+  let added = false;
+  for (const line of out.split('\n')) {
+    if (line.trim() === '') continue;
+    const event = record(safeJson(line));
+    if (event === undefined || str(event.created_at) === undefined) {
+      throw new ForgeError('gh returned a label event flow cannot read');
+    }
+    if ((str(event.name) ?? '').toLowerCase() !== label.toLowerCase()) continue;
+    if (event.event === 'labeled') added = true;
+  }
+  return added;
+}
+
+/**
  * The read-only GraphQL query for a PR's force-pushes: when each happened and
  * the commit it left as the head. A fixed string; only the variables change.
  */
@@ -1295,6 +1319,21 @@ export function createGithubForge(options: GithubForgeOptions): Forge {
         `reading the label history of ${target.repo}#${pr}`
       );
       return parseLabelledAt(out, label);
+    },
+
+    async labelEverAdded(pr, label) {
+      const out = await gh(
+        [
+          'api',
+          ...hostArgs,
+          '--paginate',
+          '--jq',
+          '.[] | select(.event == "labeled" or .event == "unlabeled") | {event, created_at, name: .label.name, actor: .actor.type}',
+          `repos/${target.repo}/issues/${pr}/events?per_page=100`,
+        ],
+        `reading the label history of ${target.repo}#${pr}`
+      );
+      return parseLabelEverAdded(out, label);
     },
 
     async headPushedAt(pr, sha, branch) {

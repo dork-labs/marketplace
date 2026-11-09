@@ -1314,6 +1314,11 @@
                   "type": "null"
                 }
               ]
+            },
+            "labelOn": {
+              "default": "every-pr",
+              "type": "string",
+              "enum": ["every-pr", "security-paths"]
             }
           },
           "additionalProperties": false

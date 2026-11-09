@@ -11,6 +11,12 @@
  * On a `review:deep` PR, every arm also needs `security-deep-reviewed` by the same
  * rules (DOR-3766).
  *
+ * `land.securityPaths.labelOn: security-paths` on the default branch lets an
+ * agent's arm skip the label on a PR that touches no security path (DOR-3768,
+ * `label-on.ts`). It counts more paths as security paths, refuses
+ * (`no-required-checks`) unless the default branch requires a check, and still
+ * wants both labels on a `review:deep` PR.
+ *
  * A guard rail, not the gate: flow runs inside the agent, and the gate that
  * holds is on GitHub (the required security status and the ruleset). The guard
  * only refuses. It never sets that status, never adds or removes the security
@@ -46,13 +52,15 @@ import {
   armMergeFor,
   decideArm,
   DEEP_REVIEW_LABEL,
+  isSecurityCheck,
   SECURITY_DEEP_LABEL,
   type ArmMerge,
   type ArmPolicy,
   type MergeSettings,
   type RefusalSlug,
 } from './arm-decision.ts';
-import { readBaseLand } from './base-config.ts';
+import { readBaseGitlinks, readBaseLand } from './base-config.ts';
+import { LABEL_ON_SECURITY_GLOBS, rubricGlob } from './label-on.ts';
 import { dependencyConflict, touchesDependency } from './dependency-queue.ts';
 import { readFreeze } from './freeze.ts';
 import { describeEntry, entryTouched, runPreArm, type PreArmOutcome } from './pre-arm.ts';
@@ -68,6 +76,7 @@ export type GuardRefusal =
   | RefusalSlug
   | 'config-unreadable'
   | 'forge-unreadable'
+  | 'no-required-checks'
   | 'pre-arm-failed'
   | 'pre-arm-deferred'
   | 'dependency-queue-busy'
@@ -139,17 +148,31 @@ export interface GuardIo {
 /**
  * The security-path policy `land` sets: the repository's globs and pattern,
  * plus `.github/workflows/` and `.github/actions/` while a `wait: workflow`
- * entry exists. The guard and `flow pr`'s reviewer route both use it.
+ * entry exists, and {@link LABEL_ON_SECURITY_GLOBS}, the review rubric and
+ * every submodule while `labelOn` is `security-paths`. The guard and
+ * `flow pr`'s reviewer route both use it.
  *
  * @param land - The `land` block from the default branch on `origin`.
+ * @param rubric - `review.rubric` from the same config, or `null` for the default.
+ * @param gitlinks - The default branch's submodule paths (`readBaseGitlinks`).
  * @returns The policy.
  */
-export function policyFor(land: LandConfig): ArmPolicy {
+export function policyFor(
+  land: LandConfig,
+  rubric: string | null = null,
+  gitlinks: readonly string[] = []
+): ArmPolicy {
   const waitsOnWorkflow = land.preArm.some((entry) => 'workflow' in entry);
+  const labelOnPaths = land.securityPaths.labelOn === 'security-paths';
+  const rubricPath = labelOnPaths ? rubricGlob(rubric) : null;
   return {
     securityGlobs: [
       ...land.securityPaths.globs,
       ...(waitsOnWorkflow ? WORKFLOW_SECURITY_GLOBS : []),
+      ...(labelOnPaths ? LABEL_ON_SECURITY_GLOBS : []),
+      ...(rubricPath === null ? [] : [rubricPath]),
+      // A submodule bump shows only as its path; the commit it points at runs in CI.
+      ...(labelOnPaths ? gitlinks.flatMap((link) => [link, `${link}/**`]) : []),
     ],
     securityPattern: land.securityPaths.pattern,
     securityLabel: land.securityPaths.label,
@@ -191,6 +214,40 @@ async function labelTimes(
         ? await read(() => forge.headPushedAt?.(pr, facts.headRefOid, facts.headRefName))
         : null,
   };
+}
+
+/**
+ * The label rule for this arm, and the facts the decision reads. A person's
+ * approval needs the security label only on a security path. An agent's needs
+ * it on every PR, unless the default branch sets `labelOn` to
+ * `security-paths`. Even then a PR that is `review:deep`, or whose labels can't
+ * be read, needs it; and so does one that ever was `review:deep` (an agent
+ * could take the trigger off), or whose label history can't be read, which is
+ * decided as though the trigger were still on, so it needs the deep label too.
+ */
+async function labelRuleFor(
+  input: GuardInput,
+  land: LandConfig,
+  facts: ArmFacts
+): Promise<{ facts: ArmFacts; everyPr: boolean }> {
+  if (input.labelRule === 'security-paths') return { facts, everyPr: false };
+  if (land.securityPaths.labelOn !== 'security-paths') return { facts, everyPr: true };
+  const labels = facts.labels;
+  if (!Array.isArray(labels)) return { facts, everyPr: true };
+  if (
+    labels.some((l) => typeof l?.name !== 'string' || l.name.toLowerCase() === DEEP_REVIEW_LABEL)
+  ) {
+    return { facts, everyPr: true };
+  }
+  let ever = true;
+  try {
+    ever = (await input.forge.labelEverAdded?.(input.pr, DEEP_REVIEW_LABEL)) ?? true;
+  } catch {
+    ever = true;
+  }
+  return ever
+    ? { facts: { ...facts, labels: [...labels, { name: DEEP_REVIEW_LABEL }] }, everyPr: true }
+    : { facts, everyPr: false };
 }
 
 /** How the base merges, or `undefined` (the decision refuses) when the forge cannot say. */
@@ -242,6 +299,9 @@ export async function guardArm(input: GuardInput, io: GuardIo): Promise<GuardRes
   const base = await readBaseLand(io.runProcess, input.worktree, defaultBranch);
   if (!base.ok) return early('config-unreadable', base.detail);
   const { land } = base;
+  // An agent's arm with no label rests on the checks GitHub waits for.
+  const unattended =
+    input.labelRule !== 'security-paths' && land.securityPaths.labelOn === 'security-paths';
 
   let facts;
   try {
@@ -255,19 +315,39 @@ export async function guardArm(input: GuardInput, io: GuardIo): Promise<GuardRes
   } catch {
     requiredChecks = null;
   }
+  // Security's verdict checks pass on a PR that touches no security path, so
+  // they test nothing here: at least one other required check must.
+  const testing = requiredChecks?.filter((name) => !isSecurityCheck({ name })) ?? [];
+  if (unattended && testing.length === 0) {
+    return early(
+      'no-required-checks',
+      `land.securityPaths.labelOn is "security-paths" on ${defaultBranch}, and ${requiredChecks === null ? 'flow could not read which checks it requires' : `${defaultBranch} requires no check that tests the code`}. Ask a person to merge it by hand`
+    );
+  }
+  let gitlinks: string[] = [];
+  if (land.securityPaths.labelOn === 'security-paths') {
+    const links = await readBaseGitlinks(io.runProcess, input.worktree, base.baseSha);
+    if (links === null) {
+      return early(
+        'config-unreadable',
+        `could not list the submodules on ${defaultBranch} (${base.baseSha.slice(0, 7)})`
+      );
+    }
+    gitlinks = links;
+  }
   const reviewedSha = input.reviewedSha?.toLowerCase() ?? null;
-  const policy = policyFor(land);
-  const securityLabelOnEveryPr = input.labelRule !== 'security-paths';
+  const policy = policyFor(land, base.rubric, gitlinks);
   let mergeSettings = await mergeSettingsOf(input.forge, defaultBranch);
+  const rule = await labelRuleFor(input, land, facts);
   const decision = decideArm(
     {
-      ...facts,
+      ...rule.facts,
       defaultBranch,
       mergeSettings,
-      ...(await labelTimes(input.forge, input.pr, facts, policy.securityLabel)),
+      ...(await labelTimes(input.forge, input.pr, rule.facts, policy.securityLabel)),
       requiredChecks,
       reviewedSha,
-      securityLabelOnEveryPr,
+      securityLabelOnEveryPr: rule.everyPr,
       freeze: readFreeze(input.mainCheckout),
     },
     policy
@@ -340,15 +420,16 @@ export async function guardArm(input: GuardInput, io: GuardIo): Promise<GuardRes
   }
   // The merge settings too: a queue switched to MERGE meanwhile refuses.
   mergeSettings = await mergeSettingsOf(input.forge, defaultBranch);
+  const ruleAfter = await labelRuleFor(input, land, after);
   const again = decideArm(
     {
-      ...after,
+      ...ruleAfter.facts,
       defaultBranch,
       mergeSettings,
-      ...(await labelTimes(input.forge, input.pr, after, policy.securityLabel)),
+      ...(await labelTimes(input.forge, input.pr, ruleAfter.facts, policy.securityLabel)),
       requiredChecks,
       reviewedSha,
-      securityLabelOnEveryPr,
+      securityLabelOnEveryPr: ruleAfter.everyPr,
       freeze: readFreeze(input.mainCheckout),
     },
     policy

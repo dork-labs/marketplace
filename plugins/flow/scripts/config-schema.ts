@@ -21,6 +21,7 @@
 import { z } from 'zod';
 
 import { WORKFLOW_NAME_PATTERN } from './land/validate.ts';
+import { LABEL_ON_VALUES } from './land/label-on.ts';
 
 /**
  * The active project tracker, as an **adapter slug** (§3).
@@ -1049,6 +1050,16 @@ export const SecurityPathsSchema = z
      * from this machine's settings, not from the default branch on `origin`.
      */
     reviewer: ReviewerHandleSchema,
+    /**
+     * Which PRs need the label before an agent may arm them (DOR-3768).
+     * `every-pr`: all of them. `security-paths`: only those that touch a
+     * security path, so an agent arms the rest on a clean review and green
+     * required checks, with more paths counted as security paths and the
+     * default branch required to require a check (`land/label-on.ts`). A misled
+     * agent can then merge a bad change that passes the checks and stays off
+     * the path list; only a GitHub ruleset is a real boundary.
+     */
+    labelOn: z.enum(LABEL_ON_VALUES).default('every-pr'),
   })
   .strict()
   .prefault({});

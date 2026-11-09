@@ -98,6 +98,8 @@ interface ForgeOptions {
   headPushedAt?: string | null | 'throw' | 'absent';
   /** What `defaultBranch` answers (default `main`); `'throw'` fails the read, `'absent'` drops the method. */
   defaultBranch?: string | 'throw' | 'absent';
+  /** What `labelEverAdded` answers for review:deep (default never); `'throw'` fails, `'absent'` drops it. */
+  everDeep?: boolean | 'throw' | 'absent';
   /** What `mergeSettings` answers per call (default a squashing queue); `'throw'` fails, `'absent'` drops it. */
   mergeSettings?: ((call: number) => MergeSettings) | 'throw' | 'absent';
 }
@@ -171,6 +173,11 @@ function fakeForge(opts: ForgeOptions = {}) {
       if (opts.labelledAt === 'throw') throw new Error('HTTP 502');
       return opts.labelledAt === undefined ? LABELLED : opts.labelledAt;
     },
+    async labelEverAdded(...args) {
+      calls.push({ method: 'labelEverAdded', args });
+      if (opts.everDeep === 'throw') throw new Error('HTTP 502');
+      return opts.everDeep === true;
+    },
     async headPushedAt(...args) {
       calls.push({ method: 'headPushedAt', args });
       if (opts.headPushedAt === 'throw') throw new Error('HTTP 502');
@@ -208,6 +215,7 @@ function fakeForge(opts: ForgeOptions = {}) {
   if (opts.headPushedAt === 'absent') delete forge.headPushedAt;
   if (opts.defaultBranch === 'absent') delete forge.defaultBranch;
   if (opts.mergeSettings === 'absent') delete forge.mergeSettings;
+  if (opts.everDeep === 'absent') delete forge.labelEverAdded;
   return { forge, calls };
 }
 
@@ -485,6 +493,347 @@ describe('the security label on every PR', () => {
   it("a person's approval keeps the security-path rule", async () => {
     const { forge } = fakeForge();
     expect(await guard(forge)).toMatchObject({ ok: true });
+  });
+});
+
+// DOR-3768: land.securityPaths.labelOn "security-paths" lets an agent arm a PR
+// that touches no security path with no person's label, under Security's
+// conditions. Asked with no labelRule, as flow pr, flow sweep and the drain ask.
+describe('labelOn: security-paths', () => {
+  async function ask(forge: Forge, runner: ProcessRunner = recordingRunner().runner) {
+    const time = virtualTime();
+    return guardArm(
+      { forge, pr: 7, reviewedSha: head, worktree: repo, mainCheckout: repo },
+      { runProcess: runner, now: time.now, sleep: time.sleep, nonce: () => NONCE }
+    );
+  }
+  /** Commit a whole flow config on main, push it, and rebase the PR on it. */
+  function baseConfig(config: unknown): void {
+    git(repo, 'checkout', '-q', 'main');
+    commitFile('.agents/flow/config.json', JSON.stringify(config, null, 2), 'main config');
+    git(repo, 'push', '-q', 'origin', 'main');
+    git(repo, 'checkout', '-q', 'feature');
+    git(repo, 'rebase', '-q', 'main');
+    head = git(repo, 'rev-parse', 'HEAD');
+    git(repo, 'push', '-q', '-f', 'origin', 'feature');
+  }
+  const ON = { securityPaths: { labelOn: 'security-paths' } };
+
+  it('arms a clean PR that touches no security path with no label, reading no label time', async () => {
+    baseLand(ON);
+    const { forge, calls } = fakeForge();
+    expect(await ask(forge)).toMatchObject({ ok: true, merge: 'queue' });
+    expect(calls.some((c) => c.method === 'labelledAt' || c.method === 'headPushedAt')).toBe(false);
+  });
+
+  it('still refuses a red required check, a moved head and a hold', async () => {
+    baseLand(ON);
+    const red = fakeForge({ facts: { checks: [{ name: 'flow plugin', bucket: 'fail' }] } });
+    expect(await ask(red.forge)).toMatchObject({ ok: false, reason: 'failing-checks' });
+    const held = fakeForge({ facts: { labels: [{ name: 'hold' }] } });
+    expect(await ask(held.forge)).toMatchObject({ ok: false, reason: 'held-by-label' });
+    const moved = fakeForge({ facts: { headRefOid: 'f'.repeat(40) } });
+    expect(await ask(moved.forge)).toMatchObject({ ok: false, reason: 'head-moved' });
+  });
+
+  describe('condition 1: read only from the default branch on origin', () => {
+    it("ignores a PR's own tree that turns it on, even when the file list missed the change", async () => {
+      commitFile('.agents/flow/config.json', JSON.stringify({ land: ON }), 'PR turns labelOn on');
+      head = git(repo, 'rev-parse', 'HEAD');
+      git(repo, 'push', '-q', '-f', 'origin', 'feature');
+      const { forge } = fakeForge({ facts: { files: ['src/app.ts'] } });
+      expect(await ask(forge)).toMatchObject({ ok: false, reason: 'security-label-missing' });
+    });
+
+    it('ignores config.local.json and the working tree', async () => {
+      mkdirSync(path.join(repo, '.agents', 'flow'), { recursive: true });
+      writeFileSync(
+        path.join(repo, '.agents', 'flow', 'config.local.json'),
+        JSON.stringify({ land: ON })
+      );
+      writeFileSync(
+        path.join(repo, '.agents', 'flow', 'config.json'),
+        JSON.stringify({ land: ON })
+      );
+      expect(await ask(fakeForge().forge)).toMatchObject({
+        ok: false,
+        reason: 'security-label-missing',
+      });
+    });
+
+    it('a PR that changes labelOn touches a security path, so it needs the label', async () => {
+      baseLand(ON);
+      commitFile(
+        '.agents/flow/config.json',
+        JSON.stringify({ land: { securityPaths: { labelOn: 'every-pr' } } }),
+        'PR changes labelOn'
+      );
+      head = git(repo, 'rev-parse', 'HEAD');
+      const { forge } = fakeForge({ facts: { files: ['.agents/flow/config.json'] } });
+      expect(await ask(forge)).toMatchObject({ ok: false, reason: 'security-path-unlabelled' });
+    });
+
+    it('is fetched fresh: main turned it off on the remote, so a stale local main does not count', async () => {
+      baseLand(ON);
+      const other = path.join(root, 'other');
+      execFileSync('git', ['clone', '-q', origin, other]);
+      writeFileSync(
+        path.join(other, '.agents', 'flow', 'config.json'),
+        JSON.stringify({ land: { securityPaths: { labelOn: 'every-pr' } } })
+      );
+      git(other, 'add', '.');
+      git(other, 'commit', '-q', '-m', 'turn it off');
+      git(other, 'push', '-q', 'origin', 'main');
+      expect(await ask(fakeForge().forge)).toMatchObject({
+        ok: false,
+        reason: 'security-label-missing',
+      });
+    });
+  });
+
+  describe('condition 2: the default branch must require a check', () => {
+    it.each([
+      ['requires none', [] as string[]],
+      ['cannot say which', null],
+    ])('refuses when it %s, even with a fresh label', async (_name, required) => {
+      baseLand(ON);
+      const bare = fakeForge({ required });
+      const result = await ask(bare.forge);
+      expect(result).toMatchObject({ ok: false, reason: 'no-required-checks', ranPreArm: false });
+      expect(bare.calls.some((c) => c.method === 'arm')).toBe(false);
+      const labelled = fakeForge({ required, facts: { labels: [{ name: 'security-reviewed' }] } });
+      expect(await ask(labelled.forge)).toMatchObject({ ok: false, reason: 'no-required-checks' });
+    });
+
+    it("refuses when the only required checks are Security's verdict checks", async () => {
+      baseLand(ON);
+      const { forge } = fakeForge({ required: ['security-gate', 'security-review'] });
+      expect(await ask(forge)).toMatchObject({ ok: false, reason: 'no-required-checks' });
+      const mixed = fakeForge({ required: ['security-gate', 'flow plugin'] });
+      expect(await ask(mixed.forge)).toMatchObject({ ok: true });
+    });
+
+    it('refuses when the required checks cannot be read', async () => {
+      baseLand(ON);
+      const { forge } = fakeForge();
+      forge.requiredChecks = async () => {
+        throw new Error('HTTP 502');
+      };
+      expect(await ask(forge)).toMatchObject({ ok: false, reason: 'no-required-checks' });
+    });
+
+    it("a person's approval, which needs no unattended route, is not held to it", async () => {
+      baseLand(ON);
+      expect(await guard(fakeForge({ required: [] }).forge)).toMatchObject({ ok: true });
+    });
+
+    it('says who can act, and never how to get past it', async () => {
+      baseLand(ON);
+      const result = await ask(fakeForge({ required: [] }).forge);
+      const detail = !result.ok ? result.detail : '';
+      expect(detail).toMatch(
+        /requires no check that tests the code\. Ask a person to merge it by hand$/
+      );
+      expect(detail).not.toMatch(/\bsafe/i);
+      expect(detail).not.toMatch(/every-pr|gh |add (?:a|the) (?:label|check)|set |ruleset/i);
+    });
+  });
+
+  describe('condition 3: paths that always count while it is on', () => {
+    it.each([
+      '.github/CODEOWNERS',
+      '.github/workflows/ci.yml',
+      '.claude/settings.json',
+      'tools/.claude/hooks/guard.mjs',
+      '.agents/skills/x/SKILL.md',
+      '.dork/agent.json',
+      'AGENTS.md',
+      'docs/agents.md',
+      'CLAUDE.md',
+      'apps/web/CLAUDE.md',
+      'REVIEW.md',
+      'scripts/release.sh',
+      'Dockerfile',
+      'apps/api/Dockerfile.dev',
+      '.husky/pre-commit',
+      '.githooks/pre-push',
+      'lefthook.yml',
+      '.pre-commit-config.yaml',
+      'package.json',
+      'pnpm-lock.yaml',
+      '.agents/flow/config.json',
+      '.gitattributes',
+      'src/.gitattributes',
+      '.mcp.json',
+      '.vscode/tasks.json',
+      '.devcontainer/devcontainer.json',
+      '.cursor/rules/x.mdc',
+      'GEMINI.md',
+      'CLAUDE.local.md',
+      '.envrc',
+      'packages/x/scripts/postinstall.js',
+      'packages/x/.husky/pre-commit',
+      'Makefile',
+      'tools/build.mk',
+      'justfile',
+      'Taskfile.yml',
+      'tsconfig.json',
+      'packages/x/tsconfig.build.json',
+      'vitest.config.ts',
+      'eslint.config.mjs',
+      '.prettierignore',
+      'turbo.json',
+      'patches/lib+1.0.0.patch',
+      'vite.config.ts',
+      'tests/conftest.py',
+      'crates/x/build.rs',
+    ])('%s needs the label', async (file) => {
+      baseLand({ securityPaths: { labelOn: 'security-paths', globs: [], pattern: null } });
+      const { forge } = fakeForge({ facts: { files: ['src/app.ts', file] } });
+      const result = await ask(forge);
+      expect(result).toMatchObject({ ok: false, reason: 'security-path-unlabelled' });
+    });
+
+    it("counts the default branch's configured review rubric", async () => {
+      baseConfig({ land: ON, review: { rubric: './docs/review-rubric.md' } });
+      const { forge } = fakeForge({ facts: { files: ['docs/review-rubric.md'] } });
+      expect(await ask(forge)).toMatchObject({ ok: false, reason: 'security-path-unlabelled' });
+    });
+
+    it("adds the repository's own globs to them", async () => {
+      baseLand({ securityPaths: { labelOn: 'security-paths', globs: ['src/auth/**'] } });
+      const { forge } = fakeForge({ facts: { files: ['src/auth/login.ts'] } });
+      expect(await ask(forge)).toMatchObject({ ok: false, reason: 'security-path-unlabelled' });
+    });
+
+    it('arms one of them with a fresh label', async () => {
+      baseLand(ON);
+      const { forge } = fakeForge({
+        facts: { files: ['.claude/settings.json'], labels: [{ name: 'security-reviewed' }] },
+      });
+      expect(await ask(forge)).toMatchObject({ ok: true });
+    });
+
+    it('counts a submodule on the default branch: a pointer bump shows only as its path', async () => {
+      git(repo, 'checkout', '-q', 'main');
+      const sub = git(repo, 'rev-parse', 'HEAD');
+      git(repo, 'update-index', '--add', '--cacheinfo', `160000,${sub},vendor/lib`);
+      git(repo, 'commit', '-q', '-m', 'add a submodule');
+      git(repo, 'push', '-q', 'origin', 'main');
+      git(repo, 'checkout', '-q', 'feature');
+      baseLand(ON);
+      const { forge } = fakeForge({ facts: { files: ['vendor/lib'] } });
+      expect(await ask(forge)).toMatchObject({ ok: false, reason: 'security-path-unlabelled' });
+      const inside = fakeForge({ facts: { files: ['vendor/lib/src/x.ts'] } });
+      expect(await ask(inside.forge)).toMatchObject({
+        ok: false,
+        reason: 'security-path-unlabelled',
+      });
+    });
+
+    it('refuses an incomplete file list without the label', async () => {
+      baseLand(ON);
+      const { forge } = fakeForge({ facts: { files: null } });
+      expect(await ask(forge)).toMatchObject({ ok: false, reason: 'files-unreadable' });
+    });
+  });
+
+  describe('condition 4: review:deep and unreadable labels', () => {
+    const fresh = { 'security-reviewed': LABELLED, 'security-deep-reviewed': LABELLED };
+    function deepForge(labels: { name: string }[]) {
+      const made = fakeForge({ facts: { labels } });
+      made.forge.labelledAt = async (_pr, label) => fresh[label as keyof typeof fresh] ?? null;
+      return made;
+    }
+
+    it('a review:deep PR with only the deep label still needs the security label', async () => {
+      baseLand(ON);
+      const { forge } = deepForge([{ name: 'review:deep' }, { name: 'security-deep-reviewed' }]);
+      expect(await ask(forge)).toMatchObject({ ok: false, reason: 'security-label-missing' });
+    });
+
+    it('in any case of the trigger label', async () => {
+      baseLand(ON);
+      const { forge } = deepForge([{ name: 'Review:Deep' }, { name: 'security-deep-reviewed' }]);
+      expect(await ask(forge)).toMatchObject({ ok: false, reason: 'security-label-missing' });
+    });
+
+    it('a review:deep PR with only the security label still needs the deep label', async () => {
+      baseLand(ON);
+      const { forge } = deepForge([{ name: 'review:deep' }, { name: 'security-reviewed' }]);
+      expect(await ask(forge)).toMatchObject({ ok: false, reason: 'security-label-missing' });
+    });
+
+    it('arms a review:deep PR with both labels fresh', async () => {
+      baseLand(ON);
+      const { forge } = deepForge([
+        { name: 'review:deep' },
+        { name: 'security-reviewed' },
+        { name: 'security-deep-reviewed' },
+      ]);
+      expect(await ask(forge)).toMatchObject({ ok: true });
+    });
+
+    it('a PR that was ever review:deep still needs the label after the trigger came off', async () => {
+      baseLand(ON);
+      const { forge, calls } = fakeForge({ everDeep: true });
+      expect(await ask(forge)).toMatchObject({ ok: false, reason: 'security-label-missing' });
+      expect(calls.find((c) => c.method === 'labelEverAdded')?.args).toEqual([7, 'review:deep']);
+    });
+
+    it('a PR that ever was review:deep still needs the deep label too, not just the security label', async () => {
+      baseLand(ON);
+      const fresh = { 'security-reviewed': LABELLED, 'security-deep-reviewed': LABELLED };
+      const only = fakeForge({
+        everDeep: true,
+        facts: { labels: [{ name: 'security-reviewed' }] },
+      });
+      only.forge.labelledAt = async (_pr, label) => fresh[label as keyof typeof fresh] ?? null;
+      expect(await ask(only.forge)).toMatchObject({ ok: false, reason: 'security-label-missing' });
+      const both = fakeForge({
+        everDeep: true,
+        facts: { labels: [{ name: 'security-reviewed' }, { name: 'security-deep-reviewed' }] },
+      });
+      both.forge.labelledAt = async (_pr, label) => fresh[label as keyof typeof fresh] ?? null;
+      expect(await ask(both.forge)).toMatchObject({ ok: true });
+    });
+
+    it.each([
+      ['cannot be read', 'throw' as const],
+      ['cannot be asked for', 'absent' as const],
+    ])('a label history that %s counts as review:deep', async (_name, everDeep) => {
+      baseLand(ON);
+      const { forge } = fakeForge({ everDeep });
+      expect(await ask(forge)).toMatchObject({ ok: false, reason: 'security-label-missing' });
+    });
+
+    it('a review:deep added while the pre-arm checks ran refuses on the second read', async () => {
+      baseLand({ ...ON, preArm: [{ paths: ['src/**'], run: 'slow-suite' }] });
+      let deep = false;
+      const { forge } = fakeForge();
+      const plain = forge.armFacts.bind(forge);
+      forge.armFacts = async (pr) => ({
+        ...(await plain(pr)),
+        labels: deep ? [{ name: 'review:deep' }] : [],
+      });
+      const { runner, ran } = recordingRunner(() => {
+        deep = true;
+        return { code: 0 };
+      });
+      const result = await ask(forge, runner);
+      expect(ran).toHaveLength(1);
+      expect(result).toMatchObject({ ok: false, reason: 'security-label-missing' });
+      expect(!result.ok && result.detail).toMatch(/after its pre-arm checks passed/);
+    });
+
+    it('missing or unreadable labels still refuse', async () => {
+      baseLand(ON);
+      const unknown = parseArmFacts({ state: 'OPEN', headRefOid: head }, null, 'acme/app#7');
+      const { forge } = fakeForge({ facts: { labels: unknown.labels } });
+      expect(await ask(forge)).toMatchObject({ ok: false, reason: 'labels-unreadable' });
+      const blank = fakeForge({ facts: { labels: [{ name: '' }] } });
+      expect(await ask(blank.forge)).toMatchObject({ ok: false, reason: 'labels-unreadable' });
+    });
   });
 });
 

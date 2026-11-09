@@ -14,6 +14,9 @@
  *   when each intake source was last read (`cli/health-read.ts`, which reads
  *   the schedules' run record from the DorkOS on this machine). Whatever it
  *   cannot read shows as unknown with why. `--no-health` skips it.
+ * - `land.securityPaths.labelOn` (DOR-3768), from origin's default branch as last fetched
+ *   and the main checkout's `config.json`: while either has it `security-paths`,
+ *   the pane says first that agents may merge their own PRs here.
  *
  * Drift is where these disagree: a running run whose item is not started, a
  * claimed item with no run, a running run whose worker is gone (for a
@@ -37,7 +40,16 @@ import { lastReadLine, savedReadAt } from '../read-age.ts';
 import { readFileSync } from 'node:fs';
 import path from 'node:path';
 
+import { readJsonFile } from '../atomic-json.ts';
 import { findConfigRoots, pauseState } from '../config-files.ts';
+import { CONFIG_FILE, PROJECT_CONFIG_DIR } from '../config-names.ts';
+import {
+  LABEL_ON_NOTICE,
+  labelOnShown,
+  ORIGIN_CONFIG_REFS,
+  parseOrUndefined,
+  type LabelOn,
+} from '../land/label-on.ts';
 import { loadConfig } from '../config-load.ts';
 import { isTeamSource, readIntakeMarks, resolveIntakeSources, sourceKey } from '../intake.ts';
 import { formatWhen } from '../question.ts';
@@ -318,6 +330,7 @@ export async function run(ctx: VerbContext): Promise<VerbResult> {
   const store = openFlowStateFile(ctx.projectDir);
   const mainCheckout = path.dirname(path.dirname(path.dirname(store.path)));
   const drain = readDrain([...new Set([roots.checkout, mainCheckout])], now);
+  const labelOn = await labelOnHere(ctx, roots.mainCheckout ?? roots.checkout);
 
   let runs: FlowRun[] = Object.values(store.read());
   let items: WorkItem[];
@@ -468,6 +481,7 @@ export async function run(ctx: VerbContext): Promise<VerbResult> {
       json: {
         ...display,
         ok: !failed,
+        labelOn,
         paused,
         drain,
         inFlight,
@@ -479,12 +493,33 @@ export async function run(ctx: VerbContext): Promise<VerbResult> {
       },
       text: [
         display ? lastReadLine(display.lastReadAt, now, 'cli') : null,
-        render({ paused, drain, inFlight, ended, parked, drift, health, unsupervised }, now),
+        render(
+          { labelOn, paused, drain, inFlight, ended, parked, drift, health, unsupervised },
+          now
+        ),
       ]
         .filter(Boolean)
         .join('\n'),
     },
     roots
+  );
+}
+
+/** `land.securityPaths.labelOn` as `label-on.ts`'s `labelOnShown` reads it; no fetch. */
+async function labelOnHere(ctx: VerbContext, checkout: string): Promise<LabelOn> {
+  let atOrigin: unknown;
+  for (const ref of ORIGIN_CONFIG_REFS) {
+    const shown = await ctx
+      .runProcess('git', ['show', ref], { cwd: checkout, timeoutMs: 10_000 })
+      .catch(() => null);
+    if (shown?.code === 0) {
+      atOrigin = parseOrUndefined(shown.stdout);
+      break;
+    }
+  }
+  return labelOnShown(
+    readJsonFile(path.join(checkout, PROJECT_CONFIG_DIR, CONFIG_FILE)).value,
+    atOrigin
   );
 }
 
@@ -604,6 +639,7 @@ function ago(iso: string, now: Date): string {
 /** The human pane. */
 function render(
   pane: {
+    labelOn: LabelOn;
     paused: { since: string | null; until: string | null } | null;
     drain: DrainStatus | null;
     inFlight: InFlightEntry[];
@@ -616,6 +652,7 @@ function render(
   now: Date
 ): string {
   const sections: string[] = [];
+  if (pane.labelOn === 'security-paths') sections.push(LABEL_ON_NOTICE);
   if (pane.paused !== null) {
     const { since, until } = pane.paused;
     sections.push(

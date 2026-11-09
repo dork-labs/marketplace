@@ -12,7 +12,14 @@ import { act, fireEvent, render, screen } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { FlowModel } from '../../lib/model.ts';
 import type { ProjectRef, ReadableState } from '../../lib/host-types.ts';
-import { NO_PROJECTS_TEXT, OPEN_HOME_TEXT, SET_UP_HERE_TEXT } from '../all-projects.ts';
+import { LABEL_ON_NOTICE } from '../../../../../scripts/land/label-on.ts';
+import { homeBands } from '../home-page.ts';
+import {
+  NO_PROJECTS_TEXT,
+  OPEN_HOME_TEXT,
+  SET_UP_HERE_TEXT,
+  projectLine,
+} from '../all-projects.ts';
 import { PERSON_ONLY_MESSAGE } from '../api.ts';
 import { LOAD_FAILED_TEXT, createFlowTab } from '../flow-tab.ts';
 import {
@@ -175,6 +182,49 @@ describe('the project lens', () => {
         /2 lanes in dorkos have had no supervisor since .*\. If they go quiet, nothing notices until flow drain runs again\./
       )
     ).toBeTruthy();
+  });
+
+  it('says plainly that agents may merge their own PRs, and never that it is safe (DOR-3768)', async () => {
+    await renderTab(
+      flowModel([
+        flowProject('dorkos', {
+          conditions: [
+            {
+              kind: 'agents-merge',
+              since: '2026-09-28T09:14:00.000Z',
+              escalated: false,
+              detail: { notice: LABEL_ON_NOTICE },
+            },
+          ],
+        }),
+      ]),
+      host(DORKOS)
+    );
+    const line = screen.getByText(/^dorkos: Agents may merge their own PRs here/);
+    expect(line.textContent).toMatch(
+      /A misled agent can merge a bad change that passes the checks and stays off the path list\. Only a GitHub ruleset is a real boundary\./
+    );
+    expect(line.textContent).not.toMatch(/\bsafe/i);
+  });
+
+  it('keeps saying agents may merge beside a more urgent condition (DOR-3768)', async () => {
+    const project = flowProject('dorkos', {
+      conditions: [
+        { kind: 'sign-in', since: '2026-09-28T09:14:00.000Z', escalated: false, detail: {} },
+        {
+          kind: 'agents-merge',
+          since: '2026-09-28T09:14:00.000Z',
+          escalated: false,
+          detail: { notice: LABEL_ON_NOTICE },
+        },
+      ],
+    });
+    const model = flowModel([project]);
+    expect(projectLine(project, model, new Date('2026-09-28T10:00:00.000Z'))?.text).toBe(
+      'Sign in to Linear again · Agents may merge their own PRs here'
+    );
+    const homeLine = homeBands(model, null, new Date('2026-09-28T10:00:00.000Z')).off[0]?.text;
+    expect(homeLine).toMatch(/ · Agents may merge their own PRs here$/);
   });
 
   it('shows what is wrong in plain words, with the way to fix it behind ⓘ', async () => {

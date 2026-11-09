@@ -15,7 +15,7 @@ Flow doesn't arm a PR when:
 - the head isn't the reviewed commit, or none was recorded;
 - it targets a branch other than GitHub's default;
 - it wouldn't squash: a queue must squash (flow passes no method flag); without a queue, the repo must allow `--squash`;
-- it has no `security-reviewed` label a person added after the head arrived (your own approval needs it only on a security path, unless the drain arms it), or no such `security-deep-reviewed` on a `review:deep` PR. Read [the label guide](./security-label.mdx);
+- it has no `security-reviewed` label a person added after the head arrived (your own approval needs it only on a security path, unless the drain arms it; so does every arm when `labelOn` is `security-paths`), or no such `security-deep-reviewed` on a `review:deep` PR. Read [the label guide](./security-label.mdx);
 - a release freeze is on;
 - it comes from a fork;
 - it changes dependencies while another such PR is queued or armed;

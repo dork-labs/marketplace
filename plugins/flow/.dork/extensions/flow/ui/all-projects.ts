@@ -13,7 +13,7 @@ import { HOME_PATH, projectPath } from './links.ts';
 import { pausedText } from './panel-format.ts';
 import { CONDITION, GROW, LINK, MUTED, ROW } from './parts.ts';
 import { StartButton } from './answers.ts';
-import { conditionLine } from './project-lens.ts';
+import { AGENTS_MERGE_SHORT, conditionLine } from './project-lens.ts';
 import { h, type Node } from './react.ts';
 
 /** Shown when no project on this computer has flow. */
@@ -52,6 +52,22 @@ export function projectLine(
   now: Date,
   locale?: string
 ): ProjectLine | null {
+  const line = urgentLine(project, model, now, locale);
+  // While agents may merge their own PRs it always shows, beside anything more urgent.
+  const merging = project.conditions.some((c) => c.kind === 'agents-merge');
+  if (!merging) return line;
+  if (line === null) return { project, text: AGENTS_MERGE_SHORT, rank: 6 };
+  if (line.text.includes(AGENTS_MERGE_SHORT)) return line;
+  return { ...line, text: `${line.text} · ${AGENTS_MERGE_SHORT}` };
+}
+
+/** The project's most urgent line, before the standing agents-merge note. */
+function urgentLine(
+  project: FlowProject,
+  model: FlowModel,
+  now: Date,
+  locale?: string
+): ProjectLine | null {
   const decisions = model.decisions.filter((decision) => decision.project === project.name);
   if (decisions.length > 0) {
     return {
@@ -72,6 +88,7 @@ export function projectLine(
     unsupervised: 3.5,
     'nothing-ready': 4,
     paused: 5,
+    'agents-merge': 6,
   };
   const worst = [...project.conditions].sort((a, b) => order[a.kind] - order[b.kind])[0];
   if (worst === undefined) {
