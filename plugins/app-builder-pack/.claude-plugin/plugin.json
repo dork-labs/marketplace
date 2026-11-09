@@ -1,0 +1,8 @@
+{
+  "name": "app-builder-pack",
+  "version": "1.0.0",
+  "description": "One skill for building a small DorkOS app (an extension) from a person's request: scaffold, test, check it really started, and tell the person what it can reach, with least privilege and the person's approval at every step",
+  "author": {
+    "name": "Dork Labs"
+  }
+}
