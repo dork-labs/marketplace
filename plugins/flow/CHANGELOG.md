@@ -4,6 +4,10 @@ Installs of this plugin are pinned to a commit SHA, so a fix here does not reach
 you until you **reinstall it** (Marketplace → flow → reinstall, or re-run your
 `--plugin-dir` checkout's `git pull`). Each entry below says whether that matters.
 
+## 0.94.0
+
+- Update the project hooks guide for DorkOS 0.133.0, where the hook card shows each command in full and can allow it. Say when a Decline-only card still appears, that declining it is not a lasting refusal there, and that the Inbox can ask again. Docs only: no need to reinstall.
+
 ## 0.93.0
 
 - Explain that the panel timer's daily sorting and empty-queue prompts are off. Point the guides to manual triage and keep terminal-drain starvation reporting distinct.

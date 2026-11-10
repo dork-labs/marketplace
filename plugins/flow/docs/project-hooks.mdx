@@ -3,14 +3,13 @@
 You can still run Flow one stage at a time when DorkOS leaves its project hooks off.
 Hooks are small commands that Claude Code runs between tools or when a session tries to stop.
 
-Below Full, leave Flow's two project hooks off until DorkOS can show their full approval card.
-If a card offers only **Decline**, leave the card alone, including Decline.
-A refusal lasts; it is not a way to dismiss the card for now.
+Below Full, DorkOS asks you before it turns Flow's two project hooks on.
+From DorkOS 0.133.0, its card shows each hook command in full, with a button to allow them and **Decline**.
 
-The card may say: "This request can't be shown in full, so it can't be allowed yet."
+A card can still offer only **Decline**, with: "This request can't be shown in full, so it can't be allowed yet."
 That message does not mean Flow is broken.
-The card's wording and buttons depend on your DorkOS version.
-This guide does not announce a DorkOS card update.
+On 0.133.0 or later, declining that card is not saved as a lasting refusal.
+On an older DorkOS, leave that card alone, including Decline: there a refusal lasts.
 
 ## What changes
 
@@ -27,10 +26,13 @@ A passing self-test does not prove they are enabled.
 ## After Decline
 
 DorkOS remembers your refusal for that project's hook commands.
-It will not ask again for the same commands, even if the scripts they run change.
+It will not ask again on its own, even if the scripts they run change.
 Changing the commands makes a different request.
 
-When your DorkOS version supports the full card, you can clear the saved decision:
+From 0.133.0, the Inbox lists packages whose hooks you declined, with **Ask again**.
+Your refusal stays in place until you answer the new card.
+
+You can also clear Flow's saved decision:
 
 ```bash
 dorkos harness hooks --revoke flow
@@ -40,7 +42,6 @@ This clears Flow's saved hook approvals and refusals across projects on this com
 It grants nothing.
 DorkOS can ask again when you install Flow or click **Sync now**.
 Running `dorkos harness sync --fix` alone holds undecided hooks back without asking.
-If **Sync now** raises a Decline-only card, leave it untouched until the full card is available.
 
 Use `dorkos harness hooks --list` to see saved decisions.
 That list records decisions, not proof that a running session loaded the hooks.
