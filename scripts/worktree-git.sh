@@ -75,7 +75,7 @@ branch() {
 worktree() {
   oneline "$1"
   case $1 in -*|'') refuse "not a worktree: '$1'" ;; esac
-  g worktree list --porcelain | grep -qxF "worktree $1" || refuse "not a worktree: '$1'"
+  g worktree list --porcelain | grep -xF "worktree $1" >/dev/null || refuse "not a worktree: '$1'"
 }
 
 # The first worktree git lists is the main checkout.

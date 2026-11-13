@@ -108,7 +108,7 @@ if command -v zsh >/dev/null 2>&1; then diff_shells+=("$(command -v zsh)"); fi
 differential() {
   local command=$1 actual=$2 shell
   case "$command" in *git*) ;; *) return ;; esac
-  if printf '%s' "$command" | grep -Eq '(^|[^[:alnum:]_])(kill|sudo)([^[:alnum:]_]|$)'; then
+  if grep <<<"$command" -Eq '(^|[^[:alnum:]_])(kill|sudo)([^[:alnum:]_]|$)'; then
     return
   fi
   for shell in "${diff_shells[@]}"; do
