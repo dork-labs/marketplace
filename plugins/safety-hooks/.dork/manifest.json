@@ -1,7 +1,7 @@
 {
   "schemaVersion": 1,
   "name": "safety-hooks",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "type": "plugin",
   "description": "Three guards that stop an agent's shell commands from destroying work: no stash or discarding checkout, no killing processes by name, and no reading or writing files your settings deny",
   "author": "Dork Labs",
