@@ -4,6 +4,12 @@ Installs of this plugin are pinned to a commit SHA, so a fix here does not reach
 you until you **reinstall it** (Marketplace → flow → reinstall, or re-run your
 `--plugin-dir` checkout's `git pull`). Each entry below says whether that matters.
 
+## 0.94.2
+
+**The "Allow unattended bypass" card now always names the real project folder. Reinstall to get it.**
+
+- `set_drain_bypass` and `get_drain_bypass` refuse a project path that isn't already the folder's real path, such as a symlink or a path with `..` in it, and say which real path to use. Before, a card could show a symlink's path while the grant was written for the folder it pointed to, so a person could approve a path they didn't recognise. A refused request writes no grant.
+
 ## 0.94.1
 
 - Raise the `hono` dev dependency to 4.13.16 or later (4.13.18 is locked), past the GHSA-h7mg-cq63-vhpq advisories. Flow's tests use it; at run time the extension uses DorkOS's own copy. No need to reinstall.
