@@ -45,7 +45,8 @@ interface ProjectInput {
  * The project's canonical root, refusing anything but the exact root folder,
  * so the approval card always names the folder the grant is for.
  *
- * @throws {Error} For a relative path, a missing folder, a subfolder or a worktree.
+ * @throws {Error} For a relative path, a missing folder, a symlink or other path
+ *   that is not already the real path, a subfolder or a worktree.
  */
 export function exactRoot(project: string): string {
   if (!path.isAbsolute(project)) {
@@ -56,6 +57,12 @@ export function exactRoot(project: string): string {
     real = realpathSync(project);
   } catch {
     throw new Error(`no folder at ${project}`);
+  }
+  // A symlink would put one path on the card and the grant on another.
+  if (real !== project) {
+    throw new Error(
+      `${project} is not the project's real path; use the project's real path, ${real}`
+    );
   }
   const root = canonicalProjectRoot(real, { timeoutMs: 10_000 });
   if (root !== real) {

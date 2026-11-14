@@ -6,7 +6,16 @@
  */
 
 import { execFileSync } from 'node:child_process';
-import { mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
+import {
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  realpathSync,
+  rmSync,
+  symlinkSync,
+  writeFileSync,
+} from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
@@ -118,6 +127,27 @@ describe('set_drain_bypass and get_drain_bypass', () => {
   ])('refuses %s, so the card always names the exact project', async (_name, project) => {
     const view = store();
     await expect(setDrainBypass(view, { project: project(), allow: true }, NOW)).rejects.toThrow();
+  });
+
+  it('refuses a symlink to the project and writes no grant, so the card names the real folder', async () => {
+    const link = path.join(base, 'link');
+    symlinkSync(root, link);
+    const view = store();
+    await expect(setDrainBypass(view, { project: link, allow: true }, NOW)).rejects.toThrow(
+      /use the project's real path/
+    );
+    await expect(getDrainBypass(view, { project: link }, NOW)).rejects.toThrow(
+      /use the project's real path/
+    );
+    expect(existsSync(grantFile(dorkHome))).toBe(false);
+  });
+
+  it('refuses a path that resolves to the project but is not spelled as its real path', async () => {
+    const view = store();
+    await expect(
+      setDrainBypass(view, { project: `${root}/.agents/..`, allow: true }, NOW)
+    ).rejects.toThrow(/use the project's real path/);
+    expect(existsSync(grantFile(dorkHome))).toBe(false);
   });
 
   it('refuses a linked worktree: the grant belongs to the main checkout', async () => {
