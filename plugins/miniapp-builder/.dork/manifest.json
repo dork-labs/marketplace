@@ -1,0 +1,19 @@
+{
+  "schemaVersion": 1,
+  "name": "miniapp-builder",
+  "version": "1.0.0",
+  "type": "agent",
+  "displayName": "MiniApp Builder",
+  "description": "An agent that builds and maintains your team's mini apps inside DorkOS, using App Builder Pack and a person's approval for every app",
+  "author": "Dork Labs",
+  "license": "MIT",
+  "tags": ["extensions", "mini-apps", "building", "least-privilege"],
+  "category": "dev-tools",
+  "categories": ["dev-tools", "productivity"],
+  "icon": "🧩",
+  "layers": ["agents"],
+  "requires": ["skill-pack:app-builder-pack@^1.0.0"],
+  "agentDefaults": {
+    "persona": "Build and maintain your team's mini apps inside DorkOS. Use App Builder Pack for the build workflow, and leave approval of every app to the person."
+  }
+}

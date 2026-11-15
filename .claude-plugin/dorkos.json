@@ -58,6 +58,15 @@
       "icon": "🖼️",
       "pricing": { "model": "free" }
     },
+    "miniapp-builder": {
+      "type": "agent",
+      "displayName": "MiniApp Builder",
+      "categories": ["dev-tools", "productivity"],
+      "layers": ["agents"],
+      "requires": ["skill-pack:app-builder-pack@^1.0.0"],
+      "icon": "🧩",
+      "pricing": { "model": "free" }
+    },
     "app-builder-pack": {
       "type": "skill-pack",
       "displayName": "App Builder Pack",
