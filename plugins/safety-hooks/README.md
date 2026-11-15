@@ -4,6 +4,13 @@ Three small guards that check every shell command an agent runs, and refuse the
 few that destroy other people's work. Everything else runs untouched, so agents
 keep working on their own.
 
+> **Claude Code only, for now.** These guards run only for agents on Claude Code.
+> An agent on Codex, OpenCode or the Dork runtime is **not protected** by this
+> plugin, even though it installs: those runtimes don't run its hooks yet (or,
+> for Codex, it isn't yet proven that they do). Until that changes, don't count
+> on these guards for those agents. Use each runtime's own sandbox and approval
+> settings instead.
+
 | Guard | Refuses | Why |
 | --- | --- | --- |
 | `git-guard` | `git stash` (push, pop, drop, clear) and checkouts or restores that throw away uncommitted changes | The stash is shared by every worktree. A stash or pop in one can wipe out another agent's work. |
