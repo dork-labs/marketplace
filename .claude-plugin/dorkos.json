@@ -22,6 +22,7 @@
       "type": "shape",
       "categories": ["project-management"],
       "layers": ["extensions", "agents", "tasks"],
+      "requires": ["plugin:flow@^0.95.0"],
       "icon": "📋",
       "featured": true,
       "pricing": { "model": "free" }
