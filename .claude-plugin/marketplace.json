@@ -25,7 +25,7 @@
     {
       "name": "flow",
       "source": "./plugins/flow",
-      "description": "The /flow workflow engine: a PM-agnostic, dual-mode (manual and autonomous) system that carries product work from capture to done across one stage spine, with a runnable-TypeScript engine and a pluggable tracker adapter.",
+      "description": "The /flow workflow engine: a PM-agnostic, dual-mode (manual and autonomous) system that carries product work from capture to done across one stage spine, with a runnable-TypeScript engine and a pluggable tracker adapter. Headless OpenCode runs, including schedules, can't read Flow's files when it's installed outside the project.",
       "author": { "name": "Dork Labs" },
       "license": "MIT",
       "category": "agent-ops",
