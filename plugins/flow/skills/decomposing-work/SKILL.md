@@ -1,9 +1,11 @@
 ---
 name: decomposing-work
-description: The /flow engine's DECOMPOSE stage — break a validated specification into actionable tasks in 03-tasks.json, mirror the active phase into the tracker as a plan checklist, project the stage/decompose label, then hand the item on at stage/execute. Use when running /flow:decompose or advancing a work item into the DECOMPOSE stage.
+description: Break a validated Flow spec into canonical tasks, mirror its active phase to the tracker, and hand it on to EXECUTE. Use for /flow:decompose.
 ---
 
 # Decomposing Work — the DECOMPOSE stage
+
+Read [runtime fallbacks](../runtime-guide.md) before proceeding.
 
 `<flow-root>` is two folders above this file's `realpath`. `flow <verb>` means
 `node --experimental-strip-types "<flow-root>/scripts/flow.ts" <verb>`.
@@ -46,6 +48,7 @@ A background worker (model named, per the Delegation Policy in
       "subject": "[<SLUG>] [P1] Imperative task title",
       "description": "FULL self-contained implementation detail",
       "activeForm": "Present-continuous spinner form",
+      "status": "pending",
       "size": "small | medium | large | xl",
       "priority": "high | medium | low",
       "dependencies": ["1.0"],
@@ -63,7 +66,7 @@ specification", "as described above", or "implement according to spec".
 
 ### 4. Load the Task API (main context)
 
-The Task API is a live display of `03-tasks.json`, not a second source of truth.
+If Task tools are absent, use the JSON fallback in runtime guidance; skip API projection.
 
 1. Read `03-tasks.json` (malformed: parse `03-tasks.md` headers
    `^### Task (\d+)\.(\d+): (.+)$`, or redo step 3).

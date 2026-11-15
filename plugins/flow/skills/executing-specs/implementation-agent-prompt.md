@@ -13,7 +13,7 @@ You are implementing a task from a specification.
 
 ## Current Task
 
-Use `TaskGet({ taskId: "[TASK_ID]" })` to get the full task details.
+Use `TaskGet` if available; otherwise read `[TASK_ID]` from `03-tasks.json`.
 
 The task description contains ALL implementation details including:
 
@@ -26,7 +26,7 @@ The task description contains ALL implementation details including:
 
 ### Step 1: Understand the Task
 
-- Read the full task description from TaskGet
+- Read the full task description
 - Identify files to create/modify
 - Note any dependencies on other components
 

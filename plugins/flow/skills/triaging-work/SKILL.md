@@ -1,9 +1,11 @@
 ---
 name: triaging-work
-description: The /flow engine's TRIAGE stage — classify and route incoming work. Classifies a freeform brief/idea/bug/question into the right work-item type, or evaluates an already-captured item (accept/reject/needs-research/needs-refinement) and routes it simple-vs-complex (stay-in-tracker task vs escalate to the spec workflow). Use when the goal is to evaluate and route work, not just capture it. Generalizes the legacy /pm triage/intake path; PM-agnostic.
+description: Classify and route incoming Flow work for readiness. Use for /flow:triage.
 ---
 
 # Triaging Work — the TRIAGE stage
+
+Read [runtime fallbacks](../runtime-guide.md) before proceeding.
 
 `<flow-root>` is two folders above this file's `realpath`. `flow <verb>` means
 `node --experimental-strip-types "<flow-root>/scripts/flow.ts" <verb>`.

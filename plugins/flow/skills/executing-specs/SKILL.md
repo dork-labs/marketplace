@@ -1,22 +1,24 @@
 ---
 name: executing-specs
-description: Orchestrates parallel implementation of decomposed specifications with incremental progress tracking. Use when running the /flow:execute stage (the EXECUTE stage of the /flow engine).
+description: Implement a decomposed Flow specification in dependency order, with persisted task progress and independent review. Use for /flow:execute.
 disable-model-invocation: true
 ---
 
 # Executing Specifications
 
+Read [runtime fallbacks](../runtime-guide.md) before proceeding.
+
 `<flow-root>` is two folders above this file's `realpath`. `flow <verb>` means
 `node --experimental-strip-types "<flow-root>/scripts/flow.ts" <verb>`.
 
-The EXECUTE stage: implement a spec with background workers across dependency-ordered
-batches, persisting progress so a compaction or a new session loses nothing. Tracker
+Implement a spec across dependency-ordered batches, persisting progress across
+compaction and sessions. Tracker
 breadcrumbs go through the adapter at `adapter.path`. Read the prompt files beside this
 skill only when their phase starts.
 
 ## Delegation Policy
 
-The one home for these two rules; other skills point here.
+Shared delegation rules:
 
 ### Which model a worker runs on
 
@@ -82,7 +84,8 @@ or a loud stop, never a silent 2; `"never"` starts at 2. With `context.perIssue`
 
 - Slug is the spec path's second segment; `TASKS_JSON = specs/<SLUG>/03-tasks.json`,
   `IMPL_FILE = specs/<SLUG>/04-implementation.md`.
-- No `[<slug>]` tasks in `TaskList()`: say "run `/flow:decompose` first" and stop.
+- No slug tasks in `03-tasks.json`: request `/flow:decompose` and stop.
+- Task tools absent: use JSON statuses per runtime guidance.
 - Scaffold `IMPL_FILE` **now**, before any worker: new → fill
   `implementation-summary-template.md` (`[FEATURE_NAME]`, `[DATE]`, `[SLUG]`,
   `[TOTAL]`); existing → append `### Session <N+1> - <DATE>` with an empty **Workers**
@@ -114,7 +117,7 @@ Show the plan, then run every batch without asking, unless the arguments carry
 5. **Append to `IMPL_FILE` after each batch**, not at the end: each task as
    `- Task #<ID>: <subject> — worker: <id or "unknown">` (never an invented id), files
    touched, known issues, the completed count, the session's Workers line.
-6. `TaskUpdate` each success to `completed`, then after its commit
+6. Persist each success as `completed` in JSON (also `TaskUpdate` when available); after its commit
    `flow checkpoint <id> --trigger task --task <task id> --body-file <f>` (Done, Next,
    Open questions, Next command).
 

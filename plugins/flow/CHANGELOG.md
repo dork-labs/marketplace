@@ -4,6 +4,13 @@ Installs of this plugin are pinned to a commit SHA, so a fix here does not reach
 you until you **reinstall it** (Marketplace → flow → reinstall, or re-run your
 `--plugin-dir` checkout's `git pull`). Each entry below says whether that matters.
 
+## 0.97.0
+
+- Add skill entry points for all 15 Flow commands, retaining Claude Code commands.
+  Codex, OpenCode and Dork can follow the same command bodies with explicit
+  task-file, question and worktree fallbacks. Hook delivery and OpenCode skill
+  discovery still depend on the host; use single ticks where hooks are absent or unproved.
+
 ## 0.95.0
 
 **A new setting lets an agent merge its own ordinary PRs without your label (DOR-3768). It is off unless you turn it on. Reinstall only if you want it.**
