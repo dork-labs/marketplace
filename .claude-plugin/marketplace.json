@@ -61,7 +61,7 @@
     {
       "name": "safety-hooks",
       "source": "./plugins/safety-hooks",
-      "description": "Three guards that stop an agent's shell commands from destroying work: no stash or discarding checkout, no killing processes by name, and no reading or writing files your settings deny",
+      "description": "Three guards that stop a Claude Code agent's shell commands from destroying work: no stash or discarding checkout, no killing processes by name, and no reading or writing files your settings deny. Claude Code only for now; agents on Codex, OpenCode or the Dork runtime aren't protected",
       "author": { "name": "Dork Labs" },
       "license": "MIT",
       "category": "agent-ops",
