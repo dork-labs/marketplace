@@ -32,6 +32,6 @@ You can also ask an agent to do this switch for you, if you'd rather not do it y
 Linear Ops does not add new code. It bundles pieces DorkOS already has:
 
 - The built-in Linear issues view (the dashboard board and the sidebar tab).
-- A template for the Linear Keeper agent, built on the `/flow` tending and Linear skills.
+- A template for the Linear Keeper agent, built on the `/flow` tending and Linear skills. Those skills come from the Flow plugin (0.95 or later), so install Flow first. DorkOS doesn't install it for you: the install screen lists it under Dependencies and warns when it's missing. Flow brings its own hooks and commands.
 - The every-15-minutes inbox check, off until you approve it.
 - A request for your Linear API key.
