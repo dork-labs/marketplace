@@ -28,6 +28,7 @@ import { CapacityTab } from './capacity-view.ts';
 import { FlowIcon } from './flow-icon.ts';
 import { HOME_PATH, PAGE_PATHS, projectPath } from './links.ts';
 import {
+  AGENTS_MERGE_SHORT,
   MARKETPLACE_ROUTE,
   ProjectLens,
   conditionLine,
@@ -117,6 +118,7 @@ const CONDITION_ORDER: Readonly<Record<string, number>> = {
   unsupervised: 2.5,
   'nothing-ready': 3,
   paused: 4,
+  'agents-merge': 5,
 };
 
 /**
@@ -194,6 +196,13 @@ export function homeBands(
     }
     if (pauseWords !== null && worst !== undefined && worst.kind !== 'paused') {
       text = `${text} · ${pauseWords}`;
+    }
+    // While agents may merge their own PRs it always shows, beside anything more urgent.
+    if (
+      project.conditions.some((c) => c.kind === 'agents-merge') &&
+      !text.includes(AGENTS_MERGE_SHORT)
+    ) {
+      text = `${text} · ${AGENTS_MERGE_SHORT}`;
     }
     off.push({ project, text, paused, hint });
   }

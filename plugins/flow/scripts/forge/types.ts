@@ -260,6 +260,12 @@ export interface Forge {
    */
   labelledAt?(pr: number, label: string): Promise<string | null>;
   /**
+   * Whether `label` was ever added to the PR, by anyone, even if it was removed
+   * since (DOR-3768: a `review:deep` an agent took off still counts). Optional;
+   * absent reads as unknown, and the guard counts unknown as yes.
+   */
+  labelEverAdded?(pr: number, label: string): Promise<boolean>;
+  /**
    * When `sha` arrived as the head of PR `pr` (head branch `branch`),
    * ISO-8601, from server times a commit's own dates cannot move: the later of
    * the branch's newest push, which must have left `sha` (`github.ts`,

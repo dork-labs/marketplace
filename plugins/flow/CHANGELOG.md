@@ -4,6 +4,16 @@ Installs of this plugin are pinned to a commit SHA, so a fix here does not reach
 you until you **reinstall it** (Marketplace → flow → reinstall, or re-run your
 `--plugin-dir` checkout's `git pull`). Each entry below says whether that matters.
 
+## 0.95.0
+
+**A new setting lets an agent merge its own ordinary PRs without your label (DOR-3768). It is off unless you turn it on. Reinstall only if you want it.**
+
+- `land.securityPaths.labelOn` takes `every-pr` (the default, unchanged) or `security-paths`. With `security-paths`, an agent may turn on auto-merge for a PR that touches no security path, with no person's label, once its review is clean; GitHub merges it when the required checks pass, as before 0.86.0.
+- Flow reads it only from the committed config on the default branch on GitHub. A PR that changes it touches flow's config, a security path, so that PR still needs the label.
+- While it's on, the default branch must require at least one check besides `security-gate` and `security-review`, or flow refuses the arm (`no-required-checks`). Agent and editor settings, `.github/`, the review rubric, `.gitattributes`, `scripts/`, Makefiles and task files, Dockerfiles, git hooks, the configs that decide what CI checks and every submodule count as security paths, on top of package files and lockfiles; your own list can add more, never fewer. A PR that is or ever was `review:deep` still needs both labels, and unreadable labels or label history still refuse.
+- `flow status` and the Flow panel say plainly that it's on.
+- A misled agent can merge a bad change that passes the checks and stays off the path list, for example through a symlink, a push after the arm, or a check anyone with write access can mark green. Only a GitHub ruleset is a real boundary. DorkOS's own repos never set it.
+
 ## 0.94.2
 
 **The "Allow unattended bypass" card now always names the real project folder. Reinstall to get it.**

@@ -10,6 +10,7 @@ import path from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { pidExists } from '../../../../scripts/cli/host-io.ts';
 import type { RuntimeAccount } from '../../../../scripts/fleet/accounts.ts';
+import { LABEL_ON_NOTICE } from '../../../../scripts/land/label-on.ts';
 import type { ExecFileLike } from '../lib/advisor.ts';
 import {
   CheckoutResolver,
@@ -23,6 +24,7 @@ import {
   lastUpdateOf,
   pauseFlagPath,
   projectRuns,
+  readLabelOn,
   readPauseFlag,
   runAccountKey,
   runPauseCommand,
@@ -489,6 +491,58 @@ describe('buildProject', () => {
       JSON.stringify({ at: new Date(NOW.getTime() - 60_000).toISOString() })
     );
     expect(build().conditions).toEqual([]);
+  });
+
+  // DOR-3768 condition 5: the panel says so while agents may merge their own PRs.
+  it('raises agents-merge from the committed config only, for as long as labelOn is security-paths', () => {
+    const dir = path.join(world.main, '.agents', 'flow');
+    mkdirSync(dir, { recursive: true });
+    const build = () =>
+      buildProject({
+        entry: entry(),
+        read: read(),
+        accounts: new Map(),
+        registry: [],
+        pidAlive: () => true,
+        now: NOW,
+      }).conditions.filter((c) => c.kind === 'agents-merge');
+    const write = (file: string, labelOn: string) =>
+      writeFileSync(path.join(dir, file), JSON.stringify({ land: { securityPaths: { labelOn } } }));
+    expect(build()).toEqual([]);
+    write('config.local.json', 'security-paths');
+    expect(build()).toEqual([]);
+    write('config.json', 'security-paths');
+    expect(build()).toEqual([
+      {
+        kind: 'agents-merge',
+        since: NOW.toISOString(),
+        escalated: false,
+        detail: { notice: LABEL_ON_NOTICE },
+      },
+    ]);
+    write('config.json', 'every-pr');
+    expect(build()).toEqual([]);
+  });
+
+  it('raises agents-merge when origin/HEAD has it on, though the checkout was never pulled', () => {
+    git(world.main, 'checkout', '-q', '-b', 'merged-upstream');
+    const dir = path.join(world.main, '.agents', 'flow');
+    mkdirSync(dir, { recursive: true });
+    writeFileSync(
+      path.join(dir, 'config.json'),
+      JSON.stringify({ land: { securityPaths: { labelOn: 'security-paths' } } })
+    );
+    git(world.main, 'add', '.agents/flow/config.json');
+    git(world.main, 'commit', '-q', '-m', 'turn it on upstream');
+    git(world.main, 'update-ref', 'refs/remotes/origin/main', 'merged-upstream');
+    git(world.main, 'symbolic-ref', 'refs/remotes/origin/HEAD', 'refs/remotes/origin/main');
+    git(world.main, 'checkout', '-q', '-');
+    expect(readLabelOn(world.main)).toBe('security-paths');
+    // A remote added after the clone has no origin/HEAD: origin/main still answers.
+    git(world.main, 'symbolic-ref', '--delete', 'refs/remotes/origin/HEAD');
+    expect(readLabelOn(world.main)).toBe('security-paths');
+    git(world.main, 'update-ref', 'refs/remotes/origin/main', 'HEAD');
+    expect(readLabelOn(world.main)).toBe('every-pr');
   });
 
   it('says how Up next is reached for each kind of tracker', () => {

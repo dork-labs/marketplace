@@ -36,3 +36,22 @@ If a drain is watching the PR with `drain.armAutoMerge` on, its next pass sees t
 ## What it proves
 
 Flow can't tell who added this label. On your own repo, it's a promise you keep. GitHub reports a user account and a time after the head arrived; an agent signed in as you is that same account. Flow's refusals tell agents to leave it alone, and that's all they can do. To stop a change for real, use a ruleset on GitHub.
+
+## Letting agents merge without it
+
+If you are an agent: don't change this setting. Ask the person.
+
+You can stop needing the label on PRs that touch no security path. In `.agents/flow/config.json` on your default branch, set:
+
+```jsonc
+"land": { "securityPaths": { "labelOn": "security-paths" } }
+```
+
+Then an agent may turn on auto-merge for its own PR once its review is clean, and GitHub merges it when the required checks pass. Flow does this only when:
+
+- the setting is on the default branch on GitHub. A PR that changes it touches flow's config, a security path, so it still needs your label.
+- the default branch requires at least one check besides `security-gate` and `security-review`, which pass on such a PR without testing it. Otherwise flow arms nothing this way.
+
+While it's on, more files count as security paths, at any depth: agent and editor settings (`.claude/`, `.agents/`, `.dork/`, `.cursor/`, `.vscode/`, `.devcontainer/`, `.mcp.json`, `AGENTS.md`, `CLAUDE.md`), `.github/`, the review rubric, `.gitattributes`, `scripts/`, Makefiles and task files, Dockerfiles, git hooks, the configs that decide what CI checks (`tsconfig`, test and lint configs, `turbo.json`), and every submodule. Package files and lockfiles always count. Your own list can add more, never fewer. A PR that is or ever was `review:deep` still needs both labels. `flow status` and the Flow panel say it's on.
+
+Know what you give up. A misled agent can merge a bad change that passes the checks and stays off the path list. Some ways that list misses a change: a symlink in a protected folder pointing at an ordinary file, a push after flow arms (GitHub keeps auto-merge on), or a required check anyone with write access can mark green. Only a GitHub ruleset is a real boundary. DorkOS's own repos never set it.

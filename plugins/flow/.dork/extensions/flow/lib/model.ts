@@ -15,10 +15,18 @@
  * @module @dorkos/flow/extension/model
  */
 
-import { execFile } from 'node:child_process';
+import { execFile, execFileSync } from 'node:child_process';
 import { existsSync, readFileSync, readdirSync } from 'node:fs';
 import path from 'node:path';
-import { PAUSE_FILE, PROJECT_CONFIG_DIR } from '../../../../scripts/config-names.ts';
+import { readJsonFile } from '../../../../scripts/atomic-json.ts';
+import { CONFIG_FILE, PAUSE_FILE, PROJECT_CONFIG_DIR } from '../../../../scripts/config-names.ts';
+import {
+  LABEL_ON_NOTICE,
+  labelOnShown,
+  ORIGIN_CONFIG_REFS,
+  parseOrUndefined,
+  type LabelOn,
+} from '../../../../scripts/land/label-on.ts';
 import {
   readLastPass,
   unsupervisedLanes,
@@ -105,13 +113,23 @@ export interface FlowCondition {
     | 'sign-in'
     | 'settings-problem'
     | 'nothing-ready'
-    | 'unsupervised';
+    | 'unsupervised'
+    | 'agents-merge';
   /** When it began. */
   since: string;
   /** Whether an ask in the inbox is live for it. */
   escalated: boolean;
-  /** For nothing-ready: items waiting to be sorted. For unsupervised: the lanes nothing watches. */
-  detail: { untriaged?: number; lanes?: number; reason?: string; retryAt?: string };
+  /**
+   * For nothing-ready: items waiting to be sorted. For unsupervised: the lanes
+   * nothing watches. For agents-merge: the words to show (`label-on.ts`).
+   */
+  detail: {
+    untriaged?: number;
+    lanes?: number;
+    reason?: string;
+    retryAt?: string;
+    notice?: string;
+  };
 }
 
 /**
@@ -622,6 +640,36 @@ export function projectRuns(input: {
   return [...active, ...done];
 }
 
+/**
+ * `land.securityPaths.labelOn` for the panel (DOR-3768): on when origin's
+ * default branch as last fetched (`ORIGIN_CONFIG_REFS`), or the main checkout's `config.json`, has it on. No fetch.
+ *
+ * @param root - The project's main checkout.
+ * @returns The setting.
+ */
+export function readLabelOn(root: string): LabelOn {
+  let atOrigin: unknown;
+  for (const ref of ORIGIN_CONFIG_REFS) {
+    try {
+      atOrigin = parseOrUndefined(
+        execFileSync('git', ['show', ref], {
+          cwd: root,
+          encoding: 'utf8',
+          stdio: ['ignore', 'pipe', 'ignore'],
+          timeout: 5_000,
+        })
+      );
+      break;
+    } catch {
+      atOrigin = undefined;
+    }
+  }
+  return labelOnShown(
+    readJsonFile(path.join(root, PROJECT_CONFIG_DIR, CONFIG_FILE)).value,
+    atOrigin
+  );
+}
+
 /** How long a tracker that does not answer stays quiet before the lens says so, in ms (§7.1). */
 export const UNREACHABLE_SHOWN_AFTER_MS = 15 * 60_000;
 
@@ -643,6 +691,8 @@ export function conditionsOf(
     escalated?: ReadonlySet<FlowCondition['kind']>;
     /** Drain lanes nothing watches (`unsupervisedLanes`), or `null`. */
     unsupervised?: Unsupervised | null;
+    /** `land.securityPaths.labelOn` from the committed config (DOR-3768). */
+    labelOn?: LabelOn;
   } = {}
 ): FlowCondition[] {
   const conditions: FlowCondition[] = [];
@@ -694,6 +744,15 @@ export function conditionsOf(
       since: unsupervised.lastPassAt ?? now.toISOString(),
       escalated: false,
       detail: { lanes: unsupervised.identifiers.length },
+    });
+  }
+  // Not a fault, a standing risk a person chose: shown for as long as it is on.
+  if (extra.labelOn === 'security-paths') {
+    conditions.push({
+      kind: 'agents-merge',
+      since: now.toISOString(),
+      escalated: false,
+      detail: { notice: LABEL_ON_NOTICE },
     });
   }
   return conditions;
@@ -825,6 +884,7 @@ export function buildProject(input: {
               now,
               stallAfterMs: drainSettings.stallAfterMinutes * 60_000,
             }),
+      labelOn: readLabelOn(entry.root),
     }),
     version: entry.version,
     autonomy,

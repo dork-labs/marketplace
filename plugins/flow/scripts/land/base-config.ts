@@ -24,7 +24,14 @@ export const COMMITTED_CONFIG_PATH = `${PROJECT_CONFIG_DIR}/${CONFIG_FILE}`;
 
 /** What {@link readBaseLand} found. */
 export type BaseLand =
-  | { ok: true; land: LandConfig; baseSha: string; committed: boolean }
+  | {
+      ok: true;
+      land: LandConfig;
+      baseSha: string;
+      committed: boolean;
+      /** `review.rubric` as the default branch has it, or `null` when it sets none. */
+      rubric: string | null;
+    }
   | { ok: false; detail: string };
 
 /**
@@ -82,7 +89,7 @@ export async function readBaseLand(
     };
   }
   if (listed.stdout.trim() === '') {
-    return { ok: true, land: LandSchema.parse({}), baseSha, committed: false };
+    return { ok: true, land: LandSchema.parse({}), baseSha, committed: false, rubric: null };
   }
   const shown = await git(['show', `${baseSha}:${COMMITTED_CONFIG_PATH}`]);
   if (shown.code !== 0) {
@@ -100,9 +107,15 @@ export async function readBaseLand(
       detail: `${COMMITTED_CONFIG_PATH} on ${base} (${baseSha.slice(0, 7)}) is not valid JSON`,
     };
   }
-  const block =
+  const config =
     typeof raw === 'object' && raw !== null && !Array.isArray(raw)
-      ? (raw as Record<string, unknown>).land
+      ? (raw as Record<string, unknown>)
+      : undefined;
+  const block = config?.land;
+  const review = config?.review;
+  const rubric =
+    typeof review === 'object' && review !== null && !Array.isArray(review)
+      ? (review as Record<string, unknown>).rubric
       : undefined;
   const parsed = LandSchema.safeParse(block ?? {});
   if (!parsed.success) {
@@ -112,5 +125,40 @@ export async function readBaseLand(
       detail: `land in ${COMMITTED_CONFIG_PATH} on ${base} (${baseSha.slice(0, 7)}) is invalid: ${issue ? `${['land', ...issue.path].join('.')}: ${issue.message}` : 'unknown error'}`,
     };
   }
-  return { ok: true, land: parsed.data, baseSha, committed: true };
+  return {
+    ok: true,
+    land: parsed.data,
+    baseSha,
+    committed: true,
+    rubric: typeof rubric === 'string' ? rubric : null,
+  };
+}
+
+/**
+ * The submodule paths (gitlinks) in the tree of `baseSha`, which
+ * {@link readBaseLand} fetched and returned.
+ *
+ * @param runProcess - Runs git with no shell.
+ * @param worktree - A checkout of the repository.
+ * @param baseSha - The default branch's commit.
+ * @returns The paths, or `null` when git could not list the tree.
+ */
+export async function readBaseGitlinks(
+  runProcess: ProcessRunner,
+  worktree: string,
+  baseSha: string
+): Promise<string[] | null> {
+  if (!isFullSha(baseSha)) return null;
+  const listed = await runProcess(
+    'git',
+    ['--no-replace-objects', 'ls-tree', '-r', '-z', '--full-tree', baseSha],
+    { cwd: worktree, timeoutMs: GIT_TIMEOUT_MS }
+  ).catch(() => null);
+  if (listed === null || listed.code !== 0) return null;
+  const links: string[] = [];
+  for (const entry of listed.stdout.split('\0')) {
+    const tab = entry.indexOf('\t');
+    if (tab > 0 && entry.startsWith('160000 commit ')) links.push(entry.slice(tab + 1));
+  }
+  return links;
 }
