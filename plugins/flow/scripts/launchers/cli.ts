@@ -419,7 +419,7 @@ type Confirmation =
  * @returns The launcher.
  */
 export function createCliLauncher(deps: CliLauncherDeps): Launcher {
-  const bins: Record<RuntimeName, string> = {
+  const bins: Record<Exclude<RuntimeName, 'doe'>, string> = {
     'claude-code': deps.claudeBin ?? 'claude',
     codex: deps.codexBin ?? 'codex',
     opencode: deps.opencodeBin ?? 'opencode',
@@ -449,6 +449,8 @@ export function createCliLauncher(deps: CliLauncherDeps): Launcher {
     home: string | null,
     logFile: string
   ): DetachedChild {
+    requireSupported('cli', runtime);
+    if (runtime === 'doe') throw new LaunchError('unsupported', 'Dork requires the DorkOS host.');
     mkdirSync(path.dirname(logFile), { recursive: true });
     rmSync(exitFile(logFile), { force: true });
     let child: DetachedChild;
@@ -470,6 +472,9 @@ export function createCliLauncher(deps: CliLauncherDeps): Launcher {
   }
 
   async function probe(runtime: RuntimeName = 'claude-code'): Promise<ProbeResult> {
+    const supported = supportFor('cli', runtime);
+    if (!supported.ok) return supported;
+    if (runtime === 'doe') return { ok: false, reason: 'Dork requires the DorkOS host.' };
     const reason = cliUnavailableReason(runtime);
     try {
       const result = await deps.run(bins[runtime], ['--version'], { timeoutMs: 15_000 });
@@ -561,6 +566,8 @@ export function createCliLauncher(deps: CliLauncherDeps): Launcher {
 
   async function start(req: LaunchRequest): Promise<SessionHandle> {
     requireSupported('cli', req.runtime);
+    if (req.runtime === 'doe')
+      throw new LaunchError('unsupported', 'Dork requires the DorkOS host.');
     validateLaunchRequest(req);
     const probed = await probe(req.runtime);
     if (!probed.ok) throw new LaunchError('unavailable', probed.reason);
@@ -637,6 +644,9 @@ export function createCliLauncher(deps: CliLauncherDeps): Launcher {
     messageFile: string,
     opts: SendOptions = {}
   ): Promise<SendResult> {
+    requireSupported('cli', given.runtime);
+    if (given.runtime === 'doe')
+      throw new LaunchError('unsupported', 'Dork requires the DorkOS host.');
     validateMessageFile(messageFile);
     // A model switch rides the next resume (`--model` / `-m`); the handle keeps
     // it, so every later resume stays on it too.

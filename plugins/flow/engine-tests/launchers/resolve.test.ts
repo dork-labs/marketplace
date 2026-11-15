@@ -144,16 +144,21 @@ describe('resolveHost with a runtime', () => {
 
 describe('supportMatrix', () => {
   // The matrix is the one table every launcher and resolution reads: cmux runs
-  // claude-code only, with the reason; cli and dorkos run all three.
+  // claude-code only; Dork is hosted only by DorkOS.
   it('lists every host × runtime pair with its support and reason', () => {
     const rows = supportMatrix();
-    expect(rows).toHaveLength(9);
+    expect(rows).toHaveLength(12);
     const unsupported = rows.filter((r) => !r.ok);
     expect(unsupported.map((r) => `${r.host}:${r.runtime}`)).toEqual([
       'cmux:codex',
       'cmux:opencode',
+      'cmux:doe',
+      'cli:doe',
     ]);
-    for (const row of unsupported) expect(row.reason).toBe(CMUX_CLAUDE_ONLY_REASON);
+    for (const row of unsupported) {
+      if (row.runtime === 'doe') expect(row.reason).toMatch(/DorkOS only/);
+      else expect(row.reason).toBe(CMUX_CLAUDE_ONLY_REASON);
+    }
     expect(supportFor('cli', 'opencode')).toEqual({ ok: true });
   });
 });

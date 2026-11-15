@@ -18,17 +18,25 @@ import type { HostName, RuntimeName, SupportResult } from './types.ts';
 export const CMUX_CLAUDE_ONLY_REASON =
   'cmux starts interactive Claude Code sessions only today; use --host cli for codex/opencode';
 
+export const DOE_DORKOS_ONLY_REASON = 'Dork (doe) runs inside DorkOS only; use --host dorkos';
+
 const OK: SupportResult = { ok: true };
 
 /** The table: every host × every runtime. */
 const SUPPORT: Readonly<Record<HostName, Readonly<Record<RuntimeName, SupportResult>>>> = {
-  cli: { 'claude-code': OK, codex: OK, opencode: OK },
+  cli: {
+    'claude-code': OK,
+    codex: OK,
+    opencode: OK,
+    doe: { ok: false, reason: DOE_DORKOS_ONLY_REASON },
+  },
   cmux: {
     'claude-code': OK,
     codex: { ok: false, reason: CMUX_CLAUDE_ONLY_REASON },
     opencode: { ok: false, reason: CMUX_CLAUDE_ONLY_REASON },
+    doe: { ok: false, reason: DOE_DORKOS_ONLY_REASON },
   },
-  dorkos: { 'claude-code': OK, codex: OK, opencode: OK },
+  dorkos: { 'claude-code': OK, codex: OK, opencode: OK, doe: OK },
 };
 
 /** One row of {@link supportMatrix}. */
@@ -92,7 +100,7 @@ export function requireSupported(host: HostName, runtime: unknown): asserts runt
   if (typeof runtime !== 'string' || !(RUNTIME_NAMES as readonly string[]).includes(runtime)) {
     throw new LaunchError(
       'bad-request',
-      `runtime must be claude-code, codex or opencode, not ${JSON.stringify(runtime)}.`
+      `runtime must be claude-code, codex, opencode or doe, not ${JSON.stringify(runtime)}.`
     );
   }
   const result = supportFor(host, runtime as RuntimeName);

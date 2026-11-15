@@ -1,9 +1,11 @@
 ---
 name: initializing-flow
-description: First-run setup for the /flow engine in a new repo - detect or reconfigure an existing install, gather setup choices (tracker + connection, identity mode, project routing, adversarial review, model tiers) via the calibration ladder, generate and verify the concrete tracker adapter, scaffold the committed config.json plus the gitignored config.local.json and a review rubric, and confirm the install with a real adapter read plus a policy self-check. Use when running /flow:init, configuring flow for the first time, adopting a new tracker, or reconfiguring an existing flow install.
+description: Set up or reconfigure Flow in a project, generate its tracker adapter, and verify settings. Use for /flow:init.
 ---
 
 # Initializing Flow
+
+Read [runtime fallbacks](../runtime-guide.md) before proceeding.
 
 `<flow-root>` is two folders above this file's `realpath`. `cf` means
 `node --experimental-strip-types "<flow-root>/scripts/config-files.ts"`; `flow <verb>` means

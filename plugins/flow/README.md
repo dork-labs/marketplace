@@ -29,8 +29,8 @@ it; to do it yourself, from this directory:
 npm install --omit=dev
 ```
 
-Say `--omit=dev`: under `NODE_ENV=production` a bare `npm install` installs
-nothing. Contributors want `--include=dev` for the tests and tools.
+Codex, OpenCode and Dork: invoke `flow-command-init`, then `flow-command-<stage>`.
+The [runtime guide](./skills/runtime-guide.md) covers tools, permissions and hook limits.
 
 ## The flow CLI
 

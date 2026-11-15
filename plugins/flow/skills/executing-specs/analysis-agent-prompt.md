@@ -19,12 +19,8 @@ You are analyzing a specification execution to build an optimized execution plan
 
 ### 1. Load All Tasks
 
-Use `TaskList()` to get all tasks for this feature:
-
-```
-tasks = TaskList()
-feature_tasks = tasks.filter(t => t.subject.includes("[<slug>]"))
-```
+Read `03-tasks.json`; reconcile TaskList by canonical id when available.
+Otherwise use JSON `status` (missing: pending) and `dependencies` as `blockedBy`.
 
 Categorize by status:
 

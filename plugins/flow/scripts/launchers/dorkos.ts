@@ -9,7 +9,11 @@
  *   `POST /api/sessions/<id>/messages`. Either way, `GET /api/sessions/<id>`
  *   then proves the session exists, names its canonical id, runs on the
  *   requested runtime (else `wrong-runtime`), and shows the account it bills.
- * - **runtimes:** all three. `runtime` rides to `session_start` and the route
+ * - **runtimes:** claude-code, codex, opencode and doe. Dork (doe) requires
+ *   session_start over MCP with an explicitly requested bypassPermissions mode,
+ *   and host-managed billing (no named account). Never use the messages route
+ *   to start Dork: it cannot carry the launch permission mode.
+ *   Vendor runtimes: `runtime` rides to `session_start` and the route
  *   body. DorkOS supports accounts for claude-code only today, so for codex and
  *   opencode an account is sent only when it is a registered, non-default one;
  *   the `default` account is omitted and DorkOS runs its own default login
@@ -493,6 +497,12 @@ export function createDorkosLauncher(deps: DorkosLauncherDeps): Launcher {
   async function start(req: LaunchRequest): Promise<SessionHandle> {
     requireSupported('dorkos', req.runtime);
     validateLaunchRequest(req);
+    if (req.runtime === 'doe' && req.permissionMode !== 'bypassPermissions') {
+      throw new LaunchError(
+        'unsupported',
+        'Dork (doe) shell steps require an explicitly requested bypassPermissions mode; flow will not raise autonomy.'
+      );
+    }
     if (!UUID_PATTERN.test(req.sessionId)) {
       throw new LaunchError(
         'bad-request',
@@ -504,6 +514,12 @@ export function createDorkosLauncher(deps: DorkosLauncherDeps): Launcher {
 
     const token = readToken();
     const viaMcp = await startOverMcp(req, token);
+    if (req.runtime === 'doe' && viaMcp.kind !== 'started') {
+      throw new LaunchError(
+        'unsupported',
+        'Dork (doe) requires the session_start MCP tool and authorized MCP access to preserve its requested permission mode; no route fallback was used.'
+      );
+    }
     const launchPath = viaMcp.kind === 'started' ? 'mcp' : 'route';
     const startedId = viaMcp.kind === 'started' ? viaMcp.sessionId : await startOverRoute(req);
 
@@ -537,6 +553,12 @@ export function createDorkosLauncher(deps: DorkosLauncherDeps): Launcher {
             `DorkOS started session ${startedId} on ${runtime} instead of ${req.runtime}; flow left it idle in DorkOS.`
           );
         }
+        if (req.runtime === 'doe' && session.permissionMode !== req.permissionMode) {
+          throw new LaunchError(
+            'refused',
+            'DorkOS did not confirm the requested Dork shell permission mode; flow left the session alone without changing it.'
+          );
+        }
         const reported = typeof session.account === 'string' ? session.account : null;
         if (expected === null || reported !== null) {
           if (expected !== null && !sameAccount(reported ?? '', expected)) {
@@ -553,6 +575,12 @@ export function createDorkosLauncher(deps: DorkosLauncherDeps): Launcher {
             cwd: req.cwd,
             launchPath,
             dorkosUrl: base,
+            ...(req.runtime === 'doe'
+              ? {
+                  permissionMode: req.permissionMode,
+                  ...(req.model === undefined ? {} : { model: req.model }),
+                }
+              : {}),
           };
         }
       }
@@ -577,6 +605,19 @@ export function createDorkosLauncher(deps: DorkosLauncherDeps): Launcher {
     opts: SendOptions = {}
   ): Promise<SendResult> {
     validateMessageFile(messageFile);
+    if (h.runtime === 'doe') {
+      const session = await getSession(h.sessionId);
+      if (
+        h.permissionMode !== 'bypassPermissions' ||
+        session?.runtime !== 'doe' ||
+        session.permissionMode !== h.permissionMode
+      ) {
+        throw new LaunchError(
+          'refused',
+          'DorkOS no longer confirms this Dork session at its requested shell permission mode; no follow-up was sent and autonomy was not changed.'
+        );
+      }
+    }
     if (opts.model !== undefined) {
       // The session's model setting, written before the message so the turn
       // runs on it. DorkOS refusing it means this session cannot switch.

@@ -250,5 +250,69 @@
   "docs/project-hooks.mdx": {
     "baseline": 377,
     "target": 377
+  },
+  "skills/flow-command-capture/SKILL.md": {
+    "baseline": 39,
+    "target": 39
+  },
+  "skills/flow-command-decompose/SKILL.md": {
+    "baseline": 44,
+    "target": 44
+  },
+  "skills/flow-command-done/SKILL.md": {
+    "baseline": 42,
+    "target": 42
+  },
+  "skills/flow-command-execute/SKILL.md": {
+    "baseline": 40,
+    "target": 40
+  },
+  "skills/flow-command-flow/SKILL.md": {
+    "baseline": 40,
+    "target": 40
+  },
+  "skills/flow-command-groom/SKILL.md": {
+    "baseline": 45,
+    "target": 45
+  },
+  "skills/flow-command-ideate/SKILL.md": {
+    "baseline": 39,
+    "target": 39
+  },
+  "skills/flow-command-init/SKILL.md": {
+    "baseline": 45,
+    "target": 45
+  },
+  "skills/flow-command-pause/SKILL.md": {
+    "baseline": 40,
+    "target": 40
+  },
+  "skills/flow-command-resume/SKILL.md": {
+    "baseline": 34,
+    "target": 34
+  },
+  "skills/flow-command-self-test/SKILL.md": {
+    "baseline": 43,
+    "target": 43
+  },
+  "skills/flow-command-specify/SKILL.md": {
+    "baseline": 39,
+    "target": 39
+  },
+  "skills/flow-command-status/SKILL.md": {
+    "baseline": 44,
+    "target": 44
+  },
+  "skills/flow-command-triage/SKILL.md": {
+    "baseline": 37,
+    "target": 37
+  },
+  "skills/flow-command-verify/SKILL.md": {
+    "baseline": 44,
+    "target": 44
+  },
+  "skills/runtime-guide.md": {
+    "baseline": 515,
+    "target": 515
   }
 }

@@ -1,7 +1,7 @@
 ---
 name: flow-drain
 display-name: /flow drain ready queue
-description: Claim the top-ranked eligible issue and carry it to its review gate.
+description: Claim eligible Flow work and carry it to review; scheduled tick or terminal drain.
 schedule:
   cron: "0 * * * *"
   timezone: America/Los_Angeles
@@ -29,9 +29,9 @@ metadata:
 `<flow-root>` is two folders above this file's `realpath`. `flow <verb>` means
 `node --experimental-strip-types "<flow-root>/scripts/flow.ts" <verb>`.
 
-This file holds one tick of the `/flow` loop. A scheduled firing, and
-`/flow continue`, run one tick and stop; `/flow auto` runs **Auto** below. Off until
-approved on DorkOS's Schedules page.
+Read [runtime fallbacks](../runtime-guide.md) first.
+Scheduled runs and `/flow continue` stop after one tick; `/flow auto` uses **Auto**.
+Schedules remain off until approved.
 
 ## One tick
 

@@ -175,6 +175,7 @@ export function handoffWiring(wiring: HandoffWiringInput): HandoffWiring {
   /** Rank the accounts a run could move to (§5.2: its own excluded, no affinity). */
   const rankFor = (view: FleetView, run: FlowRun): AccountRank => {
     const runtime = handleRuntime({ runtime: run.runtime as RuntimeName | undefined });
+    if (runtime === 'doe') return { pick: null, ranked: [], ineligible: [] };
     // An aliased `default` is its registered row, for the count and the exclusion alike.
     const { canonical, live } = liveCounts(view.input);
     return rankAccounts({
@@ -258,7 +259,7 @@ export function handoffWiring(wiring: HandoffWiringInput): HandoffWiring {
     const own = run.account ? accountOf(view, runtime, run.account) : undefined;
     const host = (run.host ?? drain.worker?.host ?? 'cli') as HostName;
     const modelFallback =
-      own === undefined
+      own === undefined || runtime === 'doe'
         ? null
         : pickFallbackModel({
             runtime: runtime as RuntimeSlug,
@@ -325,7 +326,7 @@ export function handoffWiring(wiring: HandoffWiringInput): HandoffWiring {
 
   const transcriptFor: HandoffIo['transcriptFor'] = (handle: SessionHandle) => {
     const runtime = handleRuntime(handle);
-    if (runtime === 'opencode') return null;
+    if (runtime === 'opencode' || runtime === 'doe') return null;
     // The account's folder from the shared resolver (a handle with no account
     // bills the machine-wide `default`), never the supervisor's own environment.
     const { accounts } = loadAccounts(dorkHome, { home: ctx.io.osHome });
